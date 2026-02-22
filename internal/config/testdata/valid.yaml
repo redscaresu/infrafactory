@@ -1,0 +1,5 @@
+version: "1.0"
+agent:
+  type: claude-code
+mockway:
+  url: http://localhost:8080

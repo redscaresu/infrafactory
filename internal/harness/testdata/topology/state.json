@@ -1,0 +1,9 @@
+{
+  "connectivity": {
+    "public_internet->database:5432": false,
+    "compute->database:5432": true
+  },
+  "http_probe": {
+    "load_balancer:80": true
+  }
+}

@@ -1,0 +1,12 @@
+scenario: web-app-paris
+version: "1.0"
+cloud: scaleway
+description: valid scenario fixture
+resources:
+  compute:
+    purpose: web-server
+    size: small
+acceptance_criteria:
+  - type: policy
+    check: encryption_at_rest
+    expect: pass

@@ -2,46 +2,21 @@
 
 Scenario-driven infrastructure generation and validation for Scaleway using OpenTofu.
 
-## Why this exists
+## What It Does
 
-InfraFactory treats infrastructure like a software factory:
-- You describe behavior in a scenario file.
-- A generator produces OpenTofu.
-- A deterministic harness validates behavior and policy.
+InfraFactory is building an infrastructure factory loop:
+1. Validate scenario + config contracts.
+2. Generate OpenTofu from scenario intent.
+3. Validate through static and mock-deploy layers.
+4. Persist run artifacts and iterate from structured feedback.
 
-The design intent and tradeoffs are documented, not hidden:
-- Architecture: `docs/architecture.md`
-- Mockway dependency contract: `docs/mockway-contract.md`
-- Decision records: `docs/decisions/`
-- Detailed design log: `CONCEPT.md`
-- Fresh-agent start guide: `SESSION_START.md`
-- Ticket execution template: `docs/process/TICKET_TEMPLATE.md`
-- Reusable execution prompt: `docs/process/EXECUTION_PROMPT.md`
-- Rolling execution status: `STATUS.md`
-- Ticket backlog: `BACKLOG.md`
-- Session execution stub: `CURRENT_TICKET.md`
-- Contributor workflow: `CONTRIBUTING.md`
-- AI-agent workflow (optional): `AGENTS.md`
-- Implementation roadmap: `ROADMAP.md`
+## Status
 
-PRs run a doc-hygiene guardrail (`.github/workflows/doc-hygiene.yml`) to enforce `STATUS.md`/ADR synchronization.
-Local pre-PR check:
-`bash scripts/check_all.sh`
+Core internal packages are implemented and tested (`internal/config`, `internal/scenario`, `internal/generator`, `internal/harness`, `internal/feedback`, `internal/runstore`).
 
-## Current status
+CLI commands are wired (`init`, `generate`, `validate`, `test`, `run`, `mock start`), with end-to-end command orchestration still in progress.
 
-Early implementation. Core planning docs and initial CLI bootstrap are in place; full slice implementation is in progress.
-
-## Repo structure
-
-- `cmd/infrafactory/`: CLI entrypoint
-- `internal/`: core packages (CLI, config, scenario, generator, harness, feedback, runstore)
-- `prompts/`: generator prompt templates
-- `scenarios/`: scenario fixtures
-- `policies/`: OPA policies
-- `scenario.schema.json`: scenario contract
-
-## Quick start
+## Quick Start
 
 ```bash
 go mod tidy
@@ -49,17 +24,22 @@ go test ./...
 go run ./cmd/infrafactory --help
 ```
 
-## How To Start Agent Execution
+Run local quality checks:
 
-In a fresh session, send this exact message:
-
-```text
-Use docs/process/EXECUTION_PROMPT.md exactly. Start now.
+```bash
+bash scripts/check_all.sh
 ```
 
-## Open collaboration model
+## Docs
 
-This project is intentionally open about architecture and decision history so contributors can understand *why* things are designed this way, not only *what* code exists today.
+- Architecture: `docs/architecture.md`
+- Decisions (ADRs): `docs/decisions/`
+- Concept log: `CONCEPT.md`
+- Backlog: `BACKLOG.md`
+- Status: `STATUS.md`
+- Contributor guide: `CONTRIBUTING.md`
+
+Detailed developer README: `README.dev.md`.
 
 ## License
 

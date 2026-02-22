@@ -1,0 +1,4 @@
+agent:
+  max_iterations: 9
+mockway:
+  auto_reset: false

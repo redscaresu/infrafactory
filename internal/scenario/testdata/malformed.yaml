@@ -1,0 +1,13 @@
+scenario: malformed
+version: "1.0"
+cloud: scaleway
+description: malformed yaml
+resources:
+  compute:
+    purpose: web-server
+    size: small
+acceptance_criteria:
+  - type: policy
+    check: encryption_at_rest
+    expect: pass
+  bad_entry: [

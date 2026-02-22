@@ -1,0 +1,8 @@
+# File: main.tf
+```hcl
+terraform {}
+```
+# File: variables.tf
+```hcl
+variable "region" {}
+```

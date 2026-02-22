@@ -3,6 +3,7 @@
 ## Before you start
 Read:
 - `README.md`
+- `README.dev.md` (detailed engineering overview)
 - `SESSION_START.md`
 - `docs/process/TICKET_TEMPLATE.md`
 - `docs/architecture.md`
