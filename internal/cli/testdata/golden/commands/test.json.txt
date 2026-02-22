@@ -1,0 +1,21 @@
+{
+  "schema": "infrafactory.output.v1",
+  "result": {
+    "command": "test",
+    "scenario": "example-scenario",
+    "status": "success",
+    "stages": [
+      {
+        "layer": "destruction",
+        "stage": "disabled",
+        "status": "skip"
+      },
+      {
+        "layer": "mock_deploy",
+        "stage": "disabled",
+        "status": "skip"
+      }
+    ],
+    "failures": []
+  }
+}

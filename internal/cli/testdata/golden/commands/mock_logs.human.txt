@@ -1,0 +1,8 @@
+Command: mock logs
+Scenario: n/a
+Status: success
+
+Stages:
+- mock/logs: pass (line1
+line2)
+- mock/preflight: pass

@@ -1,0 +1,7 @@
+Command: mock status
+Scenario: n/a
+Status: success
+
+Stages:
+- mock/preflight: pass
+- mock/status: pass (Up 1 minute)

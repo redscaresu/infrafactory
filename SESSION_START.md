@@ -21,11 +21,11 @@
 ## Fresh Context Briefing (Current)
 
 Before writing code, confirm these facts are still true in `STATUS.md`/`BACKLOG.md`:
-1. `S9-T8` (sandbox/live deploy, real Scaleway) remains intentionally blocked for cost/credentials policy reasons.
+1. `S9-T8` (sandbox/live deploy, real Scaleway) remains permanently blocked by governance policy (ADR-0003).
 2. Output and logs must explicitly surface: `(real deployment skipped for cost reasons for now)` for sandbox/live-blocked behavior.
 3. Slice 10 is the active unblocked lane; start from `S10-T2` and `S10-T3`, then proceed to `S10-T6`, then `S10-T1`.
 4. `run` is criteria-aware and includes criteria-only holdout completion checks; do not regress to coarse stage-only convergence behavior.
-5. `dns_resolution` remains deferred while sandbox/live deploy is blocked and must remain deterministic unsupported-criteria output.
+5. `dns_resolution` remains unsupported while sandbox/live deploy is blocked and must remain deterministic unsupported-criteria output.
 
 Minimal startup verification commands:
 ```bash
@@ -51,13 +51,13 @@ If either command fails, restore the repo to a green baseline before starting a 
 - Canonical order:
   `S9-T1 -> S9-T10 -> S9-T2 -> S9-T11 -> S9-T3 -> S9-T4 -> S9-T5 -> S9-T6 -> S9-T7`
 - Blocked lane:
-  `S9-T8` (sandbox/live deploy) is intentionally blocked due cost and credentials-governance implications; do not implement unless explicitly unblocked by policy/ADR.
+  `S9-T8` (sandbox/live deploy) is permanently blocked by ADR-0003; do not implement unless ADR-0003 is superseded.
 - Documentation-only lane:
   `S9-T9` is already done and must remain explicit in docs.
 - Critical implementation prerequisite:
   expand `internal/scenario.Scenario` runtime model before criteria orchestration wiring (`S9-T10` before `S9-T2+`).
 - Criteria support/defer matrix:
-  `connectivity`, `http_probe`, `policy`, and `destruction` are wired for scenario-driven execution; `dns_resolution` remains deferred while sandbox is blocked.
+  `connectivity`, `http_probe`, `policy`, and `destruction` are wired for scenario-driven execution; `dns_resolution` remains unsupported while sandbox is blocked.
 - Runtime state reality:
   `test` executes criteria-driven mock deploy + destroy lifecycle checks; `run` is criteria-aware orchestration with holdout completion checks.
 - Canonical validation scenario:

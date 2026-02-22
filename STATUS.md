@@ -4,19 +4,19 @@ Last updated: 2026-02-22
 
 ## Current phase
 - Active milestone: Slice 10 reliability and contract hardening (planning-ready)
-- Next gate: complete `S10-T1` output golden freeze
-- Current ticket: S10-T1 (in progress)
-- Next ticket: S10-T4
+- Next gate: no unblocked implementation tickets remain
+- Current ticket: none
+- Next ticket: none
 
 ## In progress
-- `S10-T1` output contract freeze with golden snapshots
+- none
 
 ## Known blockers
-- `S9-T8` sandbox/live deploy layer remains blocked intentionally due current cost implications.
+- `S9-T8` sandbox/live deploy layer is permanently blocked by governance policy (ADR-0003).
 
 ## Next actions
-1. Reassess `S9-T8` only after explicit cost/credentials policy approval.
-2. Complete `S10-T1`, then continue `S10-T4` and `S10-T5`.
+1. Keep `S9-T8` blocked unless ADR-0003 is explicitly superseded.
+2. Start a new slice only for scope beyond current roadmap tickets.
 
 ## Update policy
 - Update at end of each meaningful coding session.
@@ -26,6 +26,10 @@ Last updated: 2026-02-22
 - Keep startup/read-order instructions only in `SESSION_START.md` to avoid duplication.
 
 ## Recent updates
+- Completed `S10-T7`: accepted ADR-0003 and synchronized governance docs to codify permanent sandbox/live deploy block policy.
+- Completed `S10-T5`: added hermetic benchmark baselines (`internal/cli`, `internal/runstore`), env-gated regression script (`scripts/check_benchmarks.sh`), and `make bench-check` workflow.
+- Completed `S10-T4`: added idempotency/retry safety integration coverage for repeated command execution and retry-after-failure flows across `generate`/`validate`/`test`/`run`/`mock` command paths.
+- Completed `S10-T1`: added deterministic command-level golden snapshot coverage for `init/generate/validate/test/run/mock start|stop|status|logs` in `human` and `json` modes.
 - Started `S10-T1`: added deterministic golden snapshot tests/fixtures for output-contract rendering (`human` + `json`) across core command result shapes with explicit fixture refresh path (`UPDATE_GOLDEN=1`).
 - Completed `S10-T6`: added deterministic criteria/policy explainability summaries in output contract for both human and JSON output modes with focused tests.
 - Completed `S10-T3`: versioned run artifacts with explicit schema fields in `run.json` and per-iteration artifacts, plus backward-compatible legacy run metadata reads.

@@ -1,0 +1,22 @@
+{
+  "schema": "infrafactory.output.v1",
+  "result": {
+    "command": "mock status",
+    "scenario": "n/a",
+    "status": "success",
+    "stages": [
+      {
+        "layer": "mock",
+        "stage": "preflight",
+        "status": "pass"
+      },
+      {
+        "layer": "mock",
+        "stage": "status",
+        "status": "pass",
+        "detail": "Up 1 minute"
+      }
+    ],
+    "failures": []
+  }
+}

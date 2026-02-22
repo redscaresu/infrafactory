@@ -1,0 +1,5 @@
+Created scenario scaffold: <WORKSPACE>/scenarios/training/golden-init.yaml
+Next steps:
+1. Edit <WORKSPACE>/scenarios/training/golden-init.yaml and replace placeholder values.
+2. infrafactory generate <WORKSPACE>/scenarios/training/golden-init.yaml --config ./infrafactory.yaml
+3. infrafactory run <WORKSPACE>/scenarios/training/golden-init.yaml --config ./infrafactory.yaml

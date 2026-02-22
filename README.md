@@ -129,26 +129,26 @@ Feature status snapshot:
 | `test` mock deploy + destroy | implemented | Runs mock reset/apply/state checks and destruction verification flow. |
 | `run` orchestration | implemented | Criteria-aware convergence and criteria-only holdout completion checks are wired. |
 | `mock` command lifecycle | implemented | `mock start`/`stop`/`status`/`logs` are wired with deterministic output/error behavior. |
-| sandbox/live deploy | intentionally deferred | Blocked due cost/credentials policy. |
+| sandbox/live deploy | permanently blocked | Governed as a permanent non-goal (ADR-0003). |
 
 Notes on current runtime prerequisites:
 - `generate` and `run` now resolve a concrete default `SeedGenerator` from runtime (`internal/cli/runtime.go`) when no test/injected generator is provided.
 - Runtime wiring path: `buildRuntime(...)` sets `deps.Generator = generator.NewDefaultSeedGenerator(cfg.Agent.Type)` when `deps.Generator == nil`.
 - Current default behavior (`internal/generator/default.go`): `Generate(...)` returns a deterministic typed generator transport error (`generator.ErrTransportFailed`) indicating the default generator for the configured `agent.type` is not implemented yet.
 - `validate`/`test`/`run` expect generated OpenTofu files and tool/runtime dependencies (`tofu`, Mockway, and for `mock start`, Docker).
-- Sandbox/live deploy layer (real Scaleway) remains intentionally disabled pending explicit cost/credentials policy approval.
+- Sandbox/live deploy layer (real Scaleway) is permanently disabled by governance policy (see `docs/decisions/0003-permanent-sandbox-live-deploy-block.md`).
 
-### Intentionally Deferred and In-Progress Areas
+### Deferred and Non-Goals
 
-The following are known gaps and are intentionally not complete yet:
-- Sandbox/live deploy (real Scaleway) is deliberately deferred and blocked for now due cost implications; it is out-of-scope until an explicit approval policy exists.
+The following are known non-goals and are intentionally not complete:
+- Sandbox/live deploy (real Scaleway) is permanently blocked and out-of-scope under ADR-0003.
 
-Criteria support/deferment status (current slices):
+Criteria support/deferment status:
 - `connectivity`: criteria-driven topology checks are wired and propagated through `test` and `run` convergence.
 - `http_probe`: criteria-driven topology checks are wired and propagated through `test` and `run` convergence.
 - `policy`: criteria-driven state-policy checks are wired and propagated through `test` and `run` convergence.
 - `destruction`: supported as lifecycle stage and holdout-completion gating behavior in `run`.
-- `dns_resolution`: sandbox/live-only behavior; intentionally deferred while sandbox deploy is blocked for cost reasons, and currently surfaced as deterministic unsupported-criteria failures (`criteria/support_matrix`) in command output.
+- `dns_resolution`: sandbox/live-only behavior; permanently unsupported while sandbox deploy remains governed as blocked, and currently surfaced as deterministic unsupported-criteria failures (`criteria/support_matrix`) in command output.
   Output includes explicit stub messaging: `(real deployment skipped for cost reasons for now)`.
 
 ## Repository Layout
@@ -177,7 +177,7 @@ Package ownership guide:
 
 ## Requirements
 
-- Go `1.24+`
+- Go `1.24.6+`
 - OpenTofu (`tofu`) available in `PATH`
 - Docker + Docker Compose plugin (`docker compose`)
 - `make`
@@ -253,7 +253,7 @@ Error contract:
 | `agent.phase_delay_seconds` | no | `0` | Delay between generator phases (rate-limit mitigation). |
 | `mockway.url` | yes | none | Mockway base URL used by deploy/destroy layers. |
 | `mockway.auto_reset` | no | `true` | Whether mock reset is expected before deploy checks. |
-| `validation.layers.*.enabled` | no | varies | Enables/disables layer execution paths (`sandbox_deploy` remains intentionally blocked). |
+| `validation.layers.*.enabled` | no | varies | Enables/disables layer execution paths (`sandbox_deploy` remains permanently blocked by governance). |
 | `paths.output` | no | `./output` | Generated IaC output root. |
 | `paths.policies` | no | `./policies` | Policy root used by harness validation. |
 
@@ -274,8 +274,8 @@ Holdout-only routing fields:
 - `type: holdout`
 - `references: <training-scenario-path>`
 
-Current deferment:
-- `dns_resolution` is sandbox/live-only and intentionally deferred while sandbox deploy remains blocked.
+Current unsupported criteria:
+- `dns_resolution` is sandbox/live-only and intentionally unsupported while sandbox deploy remains permanently blocked.
 
 ### Basic setup and verification
 
@@ -302,6 +302,7 @@ Testing:
 ```bash
 make test-unit
 make test-all
+make bench-check
 ```
 
 Real-tool smoke (opt-in):
@@ -320,6 +321,7 @@ Notes:
 - `smoke-mockway-local` runs the same smoke test against a locally installed `mockway` binary and auto-stops it after the test.
 - `smoke-mockway-manual` runs the explicit fallback sequence (`docker run` + healthcheck + smoke test).
 - Default test paths remain hermetic; smoke tests require external tools/services.
+- Benchmark regression checks are env-gated and optional by default (`INFRAFACTORY_ENABLE_BENCHMARKS=1`).
 
 Smoke test path options:
 - Compose-managed dependency path: `make smoke-mockway`
@@ -341,13 +343,24 @@ Troubleshooting:
 | Full local quality gate | `bash scripts/check_all.sh` | none |
 | Unit-focused internal work | `make test-unit` | none |
 | Repo-wide checks | `make test-all` | none |
+| Benchmark guardrails (opt-in) | `make bench-check` | none |
 | Real-tool static smoke | `make smoke-validate` | `tofu` |
 | Real-tool mock deploy smoke | `make smoke-mockway` | `tofu`, Docker/Mockway |
 | Real-tool mock smoke (local bin) | `make smoke-mockway-local MOCKWAY_BIN=/path/to/mockway` | `tofu`, local `mockway` |
 
 Output contract regression guardrail:
-- Golden snapshots for human/json command output are stored in `internal/cli/testdata/golden/output_contract/`.
+- Golden snapshots for human/json output rendering are stored in:
+  - `internal/cli/testdata/golden/output_contract/`
+  - `internal/cli/testdata/golden/commands/`
 - Refresh snapshots intentionally with `UPDATE_GOLDEN=1 go test ./internal/cli -run TestOutputContractGoldenSnapshots`.
+- Refresh command-level snapshots with `UPDATE_GOLDEN=1 go test ./internal/cli -run TestCommandOutputGoldenSnapshots`.
+
+Benchmark regression guardrail:
+- Run `make bench-check` to execute benchmark thresholds in `scripts/check_benchmarks.sh`.
+- Override thresholds with env vars:
+  - `INFRAFACTORY_BENCH_MAX_NS_OUTPUT_JSON`
+  - `INFRAFACTORY_BENCH_MAX_NS_OUTPUT_HUMAN`
+  - `INFRAFACTORY_BENCH_MAX_NS_RUNSTORE_RW`
 
 ### Practical example 1: Inspect available CLI commands and flags
 
@@ -411,7 +424,7 @@ go test ./internal/runstore
 
 ```bash
 INFRAFACTORY_ENABLE_INTEGRATION=1 \
-INFRAFACTORY_MOCKWAY_URL=http://localhost:8080 \
+INFRAFACTORY_MOCKWAY_URL=http://127.0.0.1:8080 \
 go test ./internal/harness -run TestLayer2IntegrationSmoke
 ```
 

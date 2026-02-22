@@ -1,0 +1,7 @@
+Command: mock stop
+Scenario: n/a
+Status: success
+
+Stages:
+- mock/preflight: pass
+- mock/stop: pass

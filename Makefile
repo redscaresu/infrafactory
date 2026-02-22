@@ -7,7 +7,7 @@ MOCKWAY_IMAGE ?= ghcr.io/redscaresu/mockway
 MOCKWAY_CONTAINER ?= infrafactory-mockway
 MOCKWAY_BIN ?= mockway
 
-.PHONY: help deps-up deps-down deps-ps deps-logs deps-pull deps-recreate deps-clean test-unit test-all smoke-validate smoke-mockway smoke-mockway-manual smoke-mockway-local smoke check
+.PHONY: help deps-up deps-down deps-ps deps-logs deps-pull deps-recreate deps-clean test-unit test-all bench-check smoke-validate smoke-mockway smoke-mockway-manual smoke-mockway-local smoke check
 
 help:
 	@echo "Targets:"
@@ -20,6 +20,7 @@ help:
 	@echo "  deps-clean      Stop and remove dependency containers + volumes."
 	@echo "  test-unit       Run hermetic package tests."
 	@echo "  test-all        Run full local checks (go test + doc hygiene)."
+	@echo "  bench-check     Run env-gated benchmark regression checks."
 	@echo "  smoke-validate  Run opt-in real-tool validate smoke test."
 	@echo "  smoke-mockway   Run opt-in real-tool test smoke against Mockway."
 	@echo "  smoke-mockway-manual  Run manual docker+curl+smoke sequence."
@@ -54,6 +55,9 @@ test-unit:
 
 test-all:
 	bash scripts/check_all.sh
+
+bench-check:
+	INFRAFACTORY_ENABLE_BENCHMARKS=1 bash scripts/check_benchmarks.sh
 
 smoke-validate:
 	INFRAFACTORY_ENABLE_REALTOOL_SMOKE=1 $(GO) test ./internal/cli -run TestValidateCommandRealToolSmoke

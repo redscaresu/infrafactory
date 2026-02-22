@@ -56,13 +56,13 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 | S9-T7 | Slice 9 | Expand `mock` command lifecycle (`start/stop/status/logs`) with parity tests | P1 | done | S9-T4 | codex |
 | S9-T8 | Slice 9 | Sandbox/live deploy layer wiring (real Scaleway) | P2 | blocked | - | codex |
 | S9-T9 | Slice 9 | Document sandbox deploy deferment due cost implications | P0 | done | S8-T3 | codex |
-| S10-T1 | Slice 10 | Freeze output contract with golden snapshots for all commands/modes | P0 | in_progress | S10-T2,S10-T3,S10-T6 | codex |
+| S10-T1 | Slice 10 | Freeze output contract with golden snapshots for all commands/modes | P0 | done | S10-T2,S10-T3,S10-T6 | codex |
 | S10-T2 | Slice 10 | Normalize CLI error taxonomy/messages across command paths | P0 | done | S9-T7 | codex |
 | S10-T3 | Slice 10 | Version run artifact schema and add backward-compatible readers | P0 | done | S9-T7 | codex |
-| S10-T4 | Slice 10 | Add idempotency/retry safety checks for repeated command execution | P1 | todo | S10-T1,S10-T2,S10-T3 | codex |
-| S10-T5 | Slice 10 | Add performance baseline benchmarks and regression guardrails | P1 | todo | S10-T3 | codex |
+| S10-T4 | Slice 10 | Add idempotency/retry safety checks for repeated command execution | P1 | done | S10-T1,S10-T2,S10-T3 | codex |
+| S10-T5 | Slice 10 | Add performance baseline benchmarks and regression guardrails | P1 | done | S10-T3 | codex |
 | S10-T6 | Slice 10 | Add criteria/policy failure explainability summaries | P1 | done | S10-T2,S10-T3 | codex |
-| S10-T7 | Slice 10 | Finalize permanent sandbox-block governance docs + ADR | P0 | todo | S9-T7,S10-T1 | codex |
+| S10-T7 | Slice 10 | Finalize permanent sandbox-block governance docs + ADR | P0 | done | S9-T7,S10-T1 | codex |
 
 ## Ticket details
 
@@ -116,7 +116,7 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 | S9-T5 | `internal/cli/run_command.go`, `internal/feedback`, `internal/runstore` | runstore backend redesign | `run` performs criteria-aware iteration decisions (not just stage pass-through) and preserves convergence semantics (success/max/stuck) | run command tests for criteria-driven success/failure, max-iteration stop, and stuck-detection stop |
 | S9-T6 | `internal/cli/run_command.go`, `internal/scenario/holdout.go` | holdout schema redesign | criteria-only holdouts auto-run after training convergence and block without feeding holdout failures into generator context | holdout discovery/execution tests for pass/block/no-feedback behavior |
 | S9-T7 | `internal/cli/root.go`, `internal/cli/mock_*`, `Makefile` (if needed) | external image publishing strategy | `mock` command supports `start`, `stop`, `status`, and `logs` with deterministic output and errors | command tests for stop/status/logs happy-path + missing-runtime/dependency failures |
-| S9-T8 | `internal/harness`, `internal/cli`, docs | mock deploy layer and hermetic defaults | sandbox/live deploy stays blocked and intentionally out-of-scope until cost/credentials policy is explicitly approved and documented | n/a while blocked; unblock requires approved policy + ADR + credentials model |
+| S9-T8 | `internal/harness`, `internal/cli`, docs | mock deploy layer and hermetic defaults | sandbox/live deploy stays permanently blocked and out-of-scope under governance policy (ADR-0003) | n/a (permanently blocked governance path) |
 | S9-T9 | `README.md`, `STATUS.md`, `ROADMAP.md` | runtime behavior changes | docs explicitly state sandbox/live deploy deferment due cost implications | doc assertion checklist |
 | S10-T1 | `internal/cli/output_contract*`, command tests, fixtures/goldens | command business logic changes | final human/json outputs for all commands are frozen via golden snapshots with deterministic ordering and schema assertions after Slice 10 contract-shaping tickets land | golden tests for `init/generate/validate/test/run/mock *` in human+json modes and deterministic fixture update guardrails |
 | S10-T2 | `internal/cli/runtime.go`, command adapters, error helpers | schema/provider behavior changes | CLI errors use consistent codes, operation names, and actionable detail shapes across config/scenario/runtime/dependency failures | table-driven error-shape tests for representative failure classes per command |

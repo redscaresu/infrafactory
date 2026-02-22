@@ -3,37 +3,43 @@
 Use this file as the per-session execution stub.
 
 ## Ticket
-- id: S10-T1
-- title: Freeze output contract with golden snapshots for all commands/modes
-- status: in_progress
-- classification: implementation-only
+- id: S10-T7
+- title: Finalize permanent sandbox-block governance docs + ADR
+- status: done
+- classification: decision-impacting
 
 ## 1) Problem Statement
 - What is broken or missing?
-  We do not yet have end-to-end golden snapshots that lock final command output shapes across human/json modes.
+  Sandbox/live deploy governance required explicit durable codification as permanent policy.
 - Why does it matter now?
-  Slice 10 contract hardening depends on freezing this output contract before remaining reliability work.
+  This removes ambiguity from backlog/docs and closes Slice 10 governance hardening.
 
 ## 2) Scope
 - In scope:
-  deterministic golden snapshots for command outputs and schema assertions in command/output tests.
+  ADR + docs synchronization for permanent sandbox/live block policy.
 - Out of scope:
-  behavior redesign unrelated to output contract stabilization.
+  sandbox/live deploy implementation.
 
 ## 3) Acceptance Criteria
-1. Command outputs are covered by deterministic golden fixtures in both human and JSON modes where applicable.
-2. Snapshot tests fail on output regressions and are straightforward to update intentionally.
-3. Existing contract tests continue to validate output schema/version semantics.
+1. ADR records permanent sandbox/live deploy block decision and rationale.
+2. Decision index references the ADR.
+3. Governance docs consistently state permanent block policy and non-goals.
 
 ## 4) Impacted Areas
-- Packages/files expected to change:
-  `internal/cli/*_test.go`, snapshot fixtures under `internal/cli/testdata` as needed.
+- Packages/files changed:
+  `docs/decisions/0003-permanent-sandbox-live-deploy-block.md`,
+  `docs/decisions/README.md`,
+  `README.md`,
+  `ROADMAP.md`,
+  `STATUS.md`,
+  `SESSION_START.md`,
+  `BACKLOG.md`.
 - External contracts affected (CLI/schema/policy):
-  no (contract freeze and regression guardrails only).
+  yes (durable workflow governance).
 
 ## 5) Test Plan
 - Unit tests:
-  focused command/output snapshot tests.
+  n/a (docs/ADR ticket).
 - Integration checks:
   `go test ./...`
 - Manual verification:
@@ -41,12 +47,12 @@ Use this file as the per-session execution stub.
 
 ## 6) Risks and Rollback
 - Primary risks:
-  brittle snapshots or accidental normalization drift.
+  inconsistent governance language across files.
 - Rollback approach:
-  revert fixture/test changes and regenerate intentionally.
+  revert ADR/doc synchronization changes.
 
 ## 7) Done Definition
-- Code and tests complete.
+- ADR and docs synchronized.
 - Required docs updated (`STATUS.md`, `BACKLOG.md`, `CURRENT_TICKET.md`).
 - Remaining follow-up captured explicitly.
 
@@ -55,10 +61,14 @@ Use this file as the per-session execution stub.
 - `bash scripts/check_all.sh`
 
 ## Progress notes
-- Completed `S10-T2`: normalized CLI error taxonomy with explicit code constants (`usage`, `config_invalid`, `scenario_malformed`, `scenario_invalid`, `dependency_unavailable`, `command_failed`) and representative command-path tests.
-- Completed `S10-T3`: versioned run artifacts (`run.json` + `iteration.json`) and added backward-compatible run metadata reader behavior for legacy pre-schema artifacts.
-- Completed `S10-T6`: added deterministic explainability summaries for criteria/policy-related failures in human and JSON output contracts.
-- Started `S10-T1`: added file-based golden snapshot tests and fixtures for output-contract rendering in both human and JSON modes across core command result shapes (`generate`, `validate`, `test`, `run`, `mock start`) with `UPDATE_GOLDEN=1` refresh guardrail.
+- Completed `S10-T1`: command/output golden snapshots for all command paths/modes.
+- Completed `S10-T2`: normalized CLI error taxonomy/messages.
+- Completed `S10-T3`: versioned run artifacts + backward-compatible run metadata readers.
+- Completed `S10-T4`: idempotency/retry safety checks for repeated command execution.
+- Completed `S10-T5`: benchmark baselines + env-gated benchmark regression guard script/target.
+- Completed `S10-T6`: criteria/policy explainability summaries in output contract.
+- Completed `S10-T7`: accepted ADR-0003 and synchronized docs to codify permanent sandbox/live deploy block governance.
+- User policy input applied: `S9-T8` is permanently blocked.
 
 ## Blocker (if any)
 - blocker: none.

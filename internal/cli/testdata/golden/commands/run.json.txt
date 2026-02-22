@@ -1,0 +1,43 @@
+{
+  "schema": "infrafactory.output.v1",
+  "result": {
+    "command": "run",
+    "scenario": "example-scenario",
+    "status": "failed",
+    "stages": [
+      {
+        "layer": "sandbox_deploy",
+        "stage": "blocked",
+        "status": "skip",
+        "detail": "layer enabled but implementation is deferred (real deployment skipped for cost reasons for now)"
+      }
+    ],
+    "failures": [
+      {
+        "layer": "sandbox_deploy",
+        "stage": "blocked",
+        "check": "sandbox_deploy",
+        "command": "layer gate",
+        "detail": "sandbox/live deploy layer is intentionally deferred due cost/credentials policy (real deployment skipped for cost reasons for now)"
+      }
+    ],
+    "explainability": [
+      {
+        "layer": "sandbox_deploy",
+        "stage": "blocked",
+        "check": "sandbox_deploy",
+        "summary": "sandbox deploy execution is intentionally blocked by governance policy",
+        "action": "keep sandbox_deploy disabled until explicit cost and credentials approval is documented"
+      }
+    ]
+  }
+}
+Usage:
+  run <scenario> [flags]
+
+Flags:
+      --config string         (default "./infrafactory.yaml")
+  -h, --help                 help for run
+      --max-iterations int   
+      --output string         (default "human")
+

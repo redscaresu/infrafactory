@@ -57,7 +57,7 @@ This file is intentionally high-level and mostly stable; day-to-day execution tr
 - Define and enforce criteria support/defer matrix for unsupported sandbox-only checks in current slices.
 - Honor validation layer enable/disable flags consistently in CLI orchestration.
 - Expand mock command lifecycle operations.
-- Keep sandbox/live deploy layer deferred (blocked) due current cost implications.
+- Keep sandbox/live deploy layer permanently blocked under governance policy.
 
 10. Slice 10: Reliability and contract hardening
 - Freeze command/output contracts via golden snapshots and schema assertions.

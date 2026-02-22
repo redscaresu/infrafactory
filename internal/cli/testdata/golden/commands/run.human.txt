@@ -1,0 +1,21 @@
+Command: run
+Scenario: example-scenario
+Status: failed
+
+Stages:
+- sandbox_deploy/blocked: skip (layer enabled but implementation is deferred (real deployment skipped for cost reasons for now))
+
+Failures:
+- sandbox_deploy/blocked check=sandbox_deploy command="layer gate" detail="sandbox/live deploy layer is intentionally deferred due cost/credentials policy (real deployment skipped for cost reasons for now)"
+
+Explainability:
+- sandbox_deploy/blocked check=sandbox_deploy summary="sandbox deploy execution is intentionally blocked by governance policy" action="keep sandbox_deploy disabled until explicit cost and credentials approval is documented"
+Usage:
+  run <scenario> [flags]
+
+Flags:
+      --config string         (default "./infrafactory.yaml")
+  -h, --help                 help for run
+      --max-iterations int   
+      --output string         (default "human")
+

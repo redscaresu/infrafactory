@@ -1,0 +1,7 @@
+Command: generate
+Scenario: example-scenario
+Status: success
+
+Stages:
+- generate/seed: pass
+- generate/write_files: pass (1 files)

@@ -1,0 +1,10 @@
+Command: validate
+Scenario: example-scenario
+Status: success
+
+Stages:
+- static/init: pass
+- static/opa: pass
+- static/plan: pass
+- static/show: pass
+- static/validate: pass

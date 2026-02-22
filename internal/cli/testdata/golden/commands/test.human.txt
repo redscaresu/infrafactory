@@ -1,0 +1,7 @@
+Command: test
+Scenario: example-scenario
+Status: success
+
+Stages:
+- destruction/disabled: skip
+- mock_deploy/disabled: skip
