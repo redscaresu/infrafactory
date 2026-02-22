@@ -28,6 +28,8 @@ Last updated: 2026-02-22
 - Keep startup/read-order instructions only in `SESSION_START.md` to avoid duplication.
 
 ## Recent updates
+- Completed maintenance ticket `M10`: follow-up README optimization pass fixed portability wording and reached two consecutive no-change review passes.
+- Completed maintenance ticket `M9`: added a dedicated README `Happy Path (Claude Code)` section with explicit end-to-end commands, artifact paths, and cleanup steps.
 - Completed maintenance ticket `M8`: re-reviewed README, added transport adapter smoke-test runbook guidance, and finished with two consecutive no-change review passes.
 - Completed `S11-T6`: synced README and session-start docs with concrete claude/openrouter transport setup, required credentials/config fields, and updated troubleshooting guidance.
 - Completed `S11-T7`: added deterministic secret redaction guardrails for transport errors (prompt/API-key/token masking) with focused adapter tests.

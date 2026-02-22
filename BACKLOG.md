@@ -6,6 +6,8 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 
 | id | slice | title | priority | status | deps | owner |
 |---|---|---|---|---|---|---|
+| M10 | Maintenance | Re-review README and optimize until two consecutive no-change passes (follow-up) | P1 | done | - | codex |
+| M9 | Maintenance | Add explicit README happy-path section for Claude Code end-to-end run | P1 | done | - | codex |
 | M8 | Maintenance | Re-review README and optimize until two consecutive no-change passes | P1 | done | - | codex |
 | M7 | Maintenance | Add fresh-context repo-state preflight guidance and verify consecutive no-change passes | P1 | done | - | codex |
 | M6 | Maintenance | Refresh fresh-context startup guidance and verify with consecutive no-change passes | P1 | done | - | codex |

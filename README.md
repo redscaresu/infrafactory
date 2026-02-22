@@ -256,6 +256,44 @@ Important:
 - For `agent.type=claude-code`, ensure `agent.claude.command` is installed and available in `PATH` (default: `claude`).
 - For `agent.type=openrouter`, set `OPENROUTER_API_KEY` and configure `agent.openrouter.model`.
 
+## Happy Path (Claude Code)
+
+Run these commands from this repository root.
+
+1. Start dependencies (Mockway).
+```bash
+make deps-up
+```
+
+2. Verify prerequisites.
+```bash
+tofu version
+go run ./cmd/infrafactory --help
+claude --version
+```
+
+3. Configure `infrafactory.yaml` for Claude transport:
+- `agent.type: claude-code`
+- `agent.claude.command: claude` (or full binary path)
+- ensure the `claude` CLI is authenticated in your shell session
+
+4. Run the full flow:
+```bash
+go run ./cmd/infrafactory generate scenarios/training/web-app-paris.yaml --config infrafactory.yaml --output human
+go run ./cmd/infrafactory validate scenarios/training/web-app-paris.yaml --config infrafactory.yaml --output human
+go run ./cmd/infrafactory test scenarios/training/web-app-paris.yaml --config infrafactory.yaml --output human
+go run ./cmd/infrafactory run scenarios/training/web-app-paris.yaml --config infrafactory.yaml --max-iterations 3 --output human
+```
+
+5. Confirm artifacts:
+- generated Terraform: `output/web-app-paris/`
+- run artifacts: `.infrafactory/runs/web-app-paris/<run-id>/`
+
+6. Cleanup:
+```bash
+make deps-down
+```
+
 ## End-to-End Walkthrough
 
 This is the shortest realistic path for a new contributor:
@@ -385,7 +423,7 @@ Real-tool smoke (opt-in):
 make smoke-validate
 MOCKWAY_URL=http://127.0.0.1:8080 make smoke-mockway
 make smoke
-make smoke-mockway-local MOCKWAY_BIN=/Users/ehsanashouri/go/bin/mockway
+make smoke-mockway-local MOCKWAY_BIN=/path/to/mockway
 make smoke-mockway-manual
 ```
 
