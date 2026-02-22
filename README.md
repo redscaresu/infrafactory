@@ -47,6 +47,31 @@ High-level flow:
 5. Run destroy and orphan verification.
 6. Persist run artifacts and iterate based on structured feedback.
 
+## Validation Layers
+
+1. Layer 1: Static
+- Purpose: catch invalid IaC and policy violations early, before any deploy action.
+- Runs `tofu init`, `tofu validate`, `tofu plan -out=tfplan`, `tofu show -json tfplan`
+- Evaluates OPA policy checks on plan JSON (`deny`)
+
+2. Layer 2: Mock Deploy (Mockway-backed)
+- Purpose: verify deploy-time behavior and topology/policy expectations in a deterministic, low-cost environment.
+- Resets mock state via mock client (`POST /mock/reset`)
+- Runs `tofu apply -auto-approve`
+- Pulls mock state snapshot (`GET /mock/state`)
+- Runs topology checks on mock state
+- Evaluates OPA state policies on mock state (`deny_state`)
+
+3. Layer 3: Destroy Verification
+- Purpose: ensure cleanup behavior is correct and no resources are left behind.
+- Runs `tofu destroy -auto-approve`
+- Pulls mock state snapshot and verifies no orphan resources remain
+
+Supporting control loop:
+- Feedback loop with max-iteration control
+- Stuck detection via failure-signature subset logic
+- Run/iteration artifact persistence under `.infrafactory/runs/...`
+
 ## Current State
 
 Core internal slices are implemented and tested:

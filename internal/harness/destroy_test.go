@@ -98,3 +98,54 @@ func TestDestroyHarnessRunFailures(t *testing.T) {
 		})
 	}
 }
+
+func TestCountOrphansIgnoresNonResourceArrays(t *testing.T) {
+	t.Parallel()
+
+	state := []byte(`{
+  "metadata": {
+    "messages": ["ok", "note"]
+  },
+  "instance": {
+    "servers": [],
+    "events": [{"id":"e-1"}],
+    "servers_meta": {
+      "history": ["a", "b"]
+    }
+  }
+}`)
+
+	count, err := countOrphans(state)
+	if err != nil {
+		t.Fatalf("count orphans: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected 0 orphans, got %d", count)
+	}
+}
+
+func TestCountOrphansCountsKnownCollectionsOnly(t *testing.T) {
+	t.Parallel()
+
+	state := []byte(`{
+  "instance": {
+    "servers": [{"id":"srv-1"}, {"id":"srv-2"}],
+    "events": [{"id":"e-1"}]
+  },
+  "lb": {
+    "lbs": [{"id":"lb-1"}],
+    "metrics": [{"id":"m-1"}]
+  },
+  "rdb": {
+    "instances": [{"id":"db-1"}]
+  }
+}`)
+
+	count, err := countOrphans(state)
+	if err != nil {
+		t.Fatalf("count orphans: %v", err)
+	}
+	if count != 4 {
+		t.Fatalf("expected 4 orphans from known collections, got %d", count)
+	}
+}

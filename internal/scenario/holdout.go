@@ -36,23 +36,31 @@ func DiscoverCriteriaOnlyHoldouts(holdoutDir string, trainingScenarioPath string
 			return fmt.Errorf("read holdout %q: %w", path, err)
 		}
 
-		var doc struct {
-			Scenario   string         `yaml:"scenario"`
-			Type       string         `yaml:"type"`
-			References string         `yaml:"references"`
-			Resources  map[string]any `yaml:"resources"`
-		}
-		if err := yaml.Unmarshal(payload, &doc); err != nil {
+		var docNode yaml.Node
+		if err := yaml.Unmarshal(payload, &docNode); err != nil {
 			return fmt.Errorf("parse holdout %q: %w", path, err)
+		}
+		if len(docNode.Content) == 0 {
+			return nil
+		}
+		rootNode := docNode.Content[0]
+
+		var doc struct {
+			Scenario   string `yaml:"scenario"`
+			Type       string `yaml:"type"`
+			References string `yaml:"references"`
+		}
+		if err := rootNode.Decode(&doc); err != nil {
+			return fmt.Errorf("decode holdout %q: %w", path, err)
 		}
 
 		if doc.Type != "holdout" {
 			return nil
 		}
-		if doc.References != trainingScenarioPath {
+		if filepath.Clean(doc.References) != filepath.Clean(trainingScenarioPath) {
 			return nil
 		}
-		if len(doc.Resources) > 0 {
+		if hasMappingKey(rootNode, "resources") {
 			return nil
 		}
 
@@ -73,4 +81,18 @@ func DiscoverCriteriaOnlyHoldouts(holdoutDir string, trainingScenarioPath string
 	})
 
 	return holdouts, nil
+}
+
+func hasMappingKey(node *yaml.Node, key string) bool {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return false
+	}
+
+	for i := 0; i < len(node.Content)-1; i += 2 {
+		if node.Content[i].Value == key {
+			return true
+		}
+	}
+
+	return false
 }

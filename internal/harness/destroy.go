@@ -106,29 +106,38 @@ func (h *DestroyHarness) Run(ctx context.Context, workDir string, env map[string
 }
 
 func countOrphans(stateJSON []byte) (int, error) {
-	var state any
+	var state map[string]any
 	if err := json.Unmarshal(stateJSON, &state); err != nil {
 		return 0, fmt.Errorf("decode state snapshot: %w", err)
 	}
 
-	return countOrphanNodes(state), nil
-}
-
-func countOrphanNodes(node any) int {
-	switch typed := node.(type) {
-	case []any:
-		count := len(typed)
-		for _, item := range typed {
-			count += countOrphanNodes(item)
-		}
-		return count
-	case map[string]any:
-		count := 0
-		for _, value := range typed {
-			count += countOrphanNodes(value)
-		}
-		return count
-	default:
-		return 0
+	resourceCollections := map[string][]string{
+		"instance":    {"servers", "ips", "security_groups", "private_nics", "volumes"},
+		"vpc":         {"vpcs", "private_networks"},
+		"lb":          {"lbs", "frontends", "backends"},
+		"k8s":         {"clusters", "pools", "node_pools"},
+		"rdb":         {"instances"},
+		"iam":         {"applications", "api_keys", "policies", "ssh_keys"},
+		"marketplace": {"local_images", "images"},
+		"account":     {"ssh_keys"},
 	}
+
+	count := 0
+	for root, collections := range resourceCollections {
+		rootNode, ok := state[root]
+		if !ok {
+			continue
+		}
+		rootMap, ok := rootNode.(map[string]any)
+		if !ok {
+			continue
+		}
+		for _, collection := range collections {
+			if items, ok := rootMap[collection].([]any); ok {
+				count += len(items)
+			}
+		}
+	}
+
+	return count, nil
 }
