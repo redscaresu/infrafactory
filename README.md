@@ -60,3 +60,7 @@ Use docs/process/EXECUTION_PROMPT.md exactly. Start now.
 ## Open collaboration model
 
 This project is intentionally open about architecture and decision history so contributors can understand *why* things are designed this way, not only *what* code exists today.
+
+## License
+
+Apache License 2.0. See `LICENSE`.

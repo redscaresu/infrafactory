@@ -37,3 +37,4 @@ Last updated: 2026-02-22
 - Added `scripts/check_all.sh` to run tests + doc hygiene in one command.
 - Updated startup/contributor flow to use backlog + current-ticket files.
 - Set `BACKLOG.md` active work state: `S1-T1` is `in_progress` (single active ticket).
+- Added Apache-2.0 `LICENSE` and linked license section in `README.md`.
