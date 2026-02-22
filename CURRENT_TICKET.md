@@ -3,27 +3,29 @@
 Use this file as the per-session execution stub.
 
 ## Ticket
-- id: M20
-- title: Plan Slice 13 full app-logic logging/observability backlog before implementation
+- id: M22
+- title: Refine unfinished slices (`S12`..`S14`) for higher-signal model-guided repair and convergence clarity
 - status: done
 - classification: decision-impacting
 
 ## 1) Problem Statement
 - What is broken or missing?
-  There was no dedicated slice for full application-logic logging, making observability work under-scoped and mixed with unrelated iteration-contract migration tasks.
+  Unfinished slice definitions still left ambiguity around retry-signal quality (especially coarse validate failures), failure-type classification, and terminal stop signaling semantics.
 - Why does it matter now?
-  A standalone logging slice is needed so instrumentation can be delivered coherently with contract-first guarantees, regression coverage, and operator runbooks.
+  These slices drive upcoming implementation work; unclear contracts risk low-signal feedback to the model and noisy/duplicative run-stop behavior.
 
 ## 2) Scope
 - In scope:
-  Define/refine a new Slice 13 ticket set for full app logging/observability, and wire it into roadmap/status/fresh-context guidance.
+  Refine all unfinished slice definitions (`S12`..`S14`) to tighten acceptance criteria, sequencing, and tests for high-fidelity retry feedback.
+  Record iterative refinement outcomes until two consecutive no-change passes are reached.
+  Add fresh-context protocol note for future planning refinements.
 - Out of scope:
-  Any logging implementation changes.
+  Runtime code implementation of these slice behaviors.
 
 ## 3) Acceptance Criteria
-1. Backlog contains explicit Slice 13 tickets (`S13-T1`..`S13-T6`) for logging contract, implementation, tests, and docs.
-2. Roadmap includes Slice 13 milestone and execution sequencing after Slice 12.
-3. Status and session-start guidance include Slice 13 fresh-context requirements.
+1. Unfinished slice entries in `BACKLOG.md` are refined with stronger contracts where needed (failure-class tagging, terminal-stop de-dup semantics, and CLI precedence/warning clarity).
+2. `ROADMAP.md`, `STATUS.md`, and `SESSION_START.md` reflect the refined direction and fresh-context continuity requirements.
+3. Refinement log records one improvement pass and two consecutive no-change passes.
 
 ## 4) Impacted Areas
 - Packages/files changed:
@@ -33,7 +35,7 @@ Use this file as the per-session execution stub.
   `SESSION_START.md`,
   `CURRENT_TICKET.md`.
 - External contracts affected (CLI/schema/policy):
-  yes (planned CLI/config contract migration; implementation pending).
+  yes (planned run feedback, logging observability semantics, and iteration-contract migration behavior; implementation pending).
 
 ## 5) Test Plan
 - Unit tests:
@@ -41,27 +43,31 @@ Use this file as the per-session execution stub.
 - Integration checks:
   `bash scripts/check_all.sh`
 - Manual verification:
-  confirm Slice 13 execution order and ticket dependencies are explicit and implementation-ready.
+  review unfinished-slice entries and ensure refinement protocol is explicitly documented for fresh contexts.
 
 ## 6) Risks and Rollback
 - Primary risks:
-  logging scope could sprawl unless contract-first boundaries are explicit in `S13-T1`.
+  overlap between Slice 13 logging semantics and Slice 14 feedback semantics if boundaries are not explicit.
 - Rollback approach:
-  revert planning entries and keep prior milestone ordering.
+  revert planning/doc refinements and restore prior unfinished-slice definitions.
 
 ## 7) Done Definition
-- Slice 13 app-logging plan documented and tracked.
-- Tracking docs updated.
+- Unfinished-slice planning definitions are refined and documented.
+- Two consecutive no-change refinement passes recorded.
+- Fresh-context note added for future refinement loops.
 
 ## Test plan
 - `bash scripts/check_all.sh`
 
 ## Progress notes
-- Added planning ticket `M20` and Slice 13 execution tickets `S13-T1`..`S13-T6` in `BACKLOG.md`.
-- Updated `ROADMAP.md` with dedicated Slice 13 milestone and near-term sequencing.
-- Updated `STATUS.md` next-actions to queue Slice 13 immediately after Slice 12 closure.
-- Updated `SESSION_START.md` fresh-context notes for Slice 13 logging contract-first and redaction/correlation requirements.
-- Refinement pass added explicit Slice 13 sink expectations (`stderr` + run-scoped log artifact path) and required fresh-context log-inspection command guidance.
+- Updated `BACKLOG.md` unfinished slice entries (`S12`..`S14`) with stricter acceptance criteria around:
+  - failure-class tagging (`iac_validation`, `transport_runtime`, `orchestration_control`),
+  - deterministic non-duplicative terminal stop signaling,
+  - explicit `--iterations`/`--max-iterations` precedence and warning semantics.
+- Updated `ROADMAP.md` Slice 12/13/14 milestone text to include non-duplicative terminal-stop and failure-class clarity.
+- Updated `STATUS.md` next-actions and recent-updates log for this refinement cycle.
+- Updated `SESSION_START.md` with a global fresh-context rule requiring two consecutive no-change passes for planning refinement over unfinished slices.
+- Refinement pass 1 improvements applied: no further structural changes required after contract tightening above.
 - Refinement pass 2: no additional improvements identified.
 - Refinement pass 3: no additional improvements identified (second consecutive no-change pass).
 

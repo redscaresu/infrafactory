@@ -83,14 +83,24 @@ This file is intentionally high-level and mostly stable; day-to-day execution tr
   - CLI `--iterations` override (e.g. `10`)
   - deterministic compatibility/deprecation path for legacy `max_iterations` / `--max-iterations`.
 - Ensure failed iterations emit deterministic, structured failure summaries to app logs for each pass.
+- Ensure terminal stop signaling is deterministic and non-duplicative for a single stop event.
 
 13. Slice 13: Full application logic logging and observability
 - Define a stable application logging contract (fields, levels, redaction, deterministic formatting).
 - Define deterministic log destinations for operators and automation (stderr summary + per-run artifact log path).
 - Instrument command orchestration paths so generation/validation/test/run decisions are fully traceable.
 - Ensure per-pass and per-stage failures are logged with run/iteration context and actionable details.
+- Include failure-class context in run-loop observability (IaC-validation vs transport/runtime vs orchestration-control).
 - Preserve secret-safety/redaction guarantees while increasing observability depth.
 - Add focused tests (and where needed golden fixtures) to freeze logging behavior and prevent regressions.
+
+14. Slice 14: High-fidelity run feedback payloads for model-guided fixes
+- Define a strict feedback contract so iteration `N+1` receives detailed failure context from iteration `N`, not only coarse command-level errors.
+- Reuse structured validate/test failure output in `run` feedback payload generation to preserve stage/check/policy/resource detail.
+- Ensure generator transport/parse failure classes are represented distinctly so the model can differentiate IaC defects from transport/runtime defects.
+- Enforce deterministic terminal-control signaling so one stop event emits one canonical control reason in feedback/output.
+- Add regression tests that fail if feedback payloads regress back to generic markers like `validation failed`.
+- Document operator and fresh-context workflows for inspecting feedback payload quality from run artifacts.
 
 ## Near-term execution order
 
@@ -98,6 +108,7 @@ This file is intentionally high-level and mostly stable; day-to-day execution tr
 2. Execute Slice 12 contract-first migration (`S12-T1`) before behavior changes.
 3. Implement/configure iteration migration (`S12-T2`, `S12-T3`), add per-pass failure logging (`S12-T6`), then test/docs closure (`S12-T4`, `S12-T5`).
 4. Start Slice 13 with logging-contract definition, then implement end-to-end instrumentation and docs.
+5. Start Slice 14 with feedback-contract definition, then wire validate/run feedback fidelity and regression coverage.
 
 ## Live progress tracking
 

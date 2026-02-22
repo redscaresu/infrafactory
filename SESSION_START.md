@@ -37,6 +37,7 @@ Before writing code, confirm these facts are still true in `STATUS.md`/`BACKLOG.
 5. `dns_resolution` remains auto-pass informational output while sandbox/live deploy is blocked; do not treat it as a hard-fail criterion.
 6. Default runtime now uses concrete generator transports; `claude-code` requires `agent.claude.command` in `PATH` and `openrouter` requires `OPENROUTER_API_KEY` plus `agent.openrouter.model`.
 7. Slice 13 (queued after Slice 12) is dedicated to full app-logic logging/observability; instrumentation should follow a contract-first approach (`S13-T1`) before broad command-path changes.
+8. Slice 14 (queued after Slice 13) is dedicated to run-loop feedback fidelity for model-guided regeneration; avoid regressing to coarse retry payloads such as generic `validation failed` when structured validate/test/generate failures are available.
 
 Minimal startup verification commands:
 ```bash
@@ -59,6 +60,12 @@ If either command fails, restore the repo to a green baseline before starting a 
   preserve secret redaction guarantees while increasing observability depth; logs must remain deterministic and correlation-friendly (`run_id`, `iteration`, `stage`, `check`).
   require explicit sink definitions so operators can always inspect full app logic flow from terminal output and run artifacts.
   include deterministic inspection commands in docs (for example, `tail`/`rg` against run-scoped log artifacts).
+- For upcoming Slice 14 feedback-fidelity work:
+  prefer `run` feedback payload enrichment over prompt-only wording tweaks; preserve structured failure fields (`layer`, `stage`, `check`, `command`, `detail`, optional `policy`/`resource`) into `FeedbackJSON`.
+  classify retry guidance by failure type (IaC validation/policy defects vs transport/timeout defects) so model retries are actionable.
+  for planning/refinement tickets in this area, perform refinement passes until two consecutive passes yield no improvements, and record each pass outcome in `CURRENT_TICKET.md` and `STATUS.md`.
+- For any future planning refinement over unfinished slices (`todo`/`blocked` backlog work):
+  require the same refinement protocol: continue until two consecutive no-change passes, and explicitly record pass outcomes in both `CURRENT_TICKET.md` and `STATUS.md` for fresh-context continuity.
 
 ### Slice 7 default execution constraints
 - Canonical order:

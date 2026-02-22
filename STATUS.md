@@ -19,8 +19,9 @@ Last updated: 2026-02-22
 2. Execute `S12-T1` first: lock iteration contract (`agent.iterations`, `--iterations`) and compatibility/deprecation behavior.
 3. Implement Slice 12 migration in order (`S12-T2` -> `S12-T3` -> `S12-T6` -> `S12-T4` -> `S12-T5`) once contract is approved.
 4. Start Slice 13 logging-contract work (`S13-T1`) immediately after Slice 12 closure, then execute instrumentation/logging test/doc tickets in order (`S13-T2` includes deterministic sink wiring).
-5. Maintain model-guided correction direction and avoid adding new heuristic normalization rules in `generate`.
-6. Maintain hermetic default CI posture with transport smoke tests opt-in only.
+5. Start Slice 14 feedback-fidelity work (`S14-T1`) after Slice 13 closure; ensure `run` feedback preserves detailed validate/test/generate failure context with failure-class tagging for iteration retries.
+6. Maintain model-guided correction direction and avoid adding new heuristic normalization rules in `generate`.
+7. Maintain hermetic default CI posture with transport smoke tests opt-in only.
 
 ## Update policy
 - Update at end of each meaningful coding session.
@@ -30,6 +31,13 @@ Last updated: 2026-02-22
 - Keep startup/read-order instructions only in `SESSION_START.md` to avoid duplication.
 
 ## Recent updates
+- Completed maintenance ticket `M22`: refined all unfinished slice definitions (`S12`..`S14`) to increase model-correction signal quality and tighten stop/control semantics.
+- Refinement pass 1 improvements applied across unfinished slices: added failure-class tagging requirements, explicit `--iterations`/`--max-iterations` precedence+warning contract, and non-duplicative terminal stop signaling constraints.
+- Refinement pass 2: no additional improvements identified.
+- Refinement pass 3: no additional improvements identified (second consecutive no-change pass).
+- Completed maintenance ticket `M21`: planned Slice 14 backlog (`S14-T1`..`S14-T5`) to ensure run-loop `FeedbackJSON` carries high-fidelity validate/test/generate failure detail into subsequent generation attempts.
+- Refined Slice 14 planning scope to require explicit fresh-context guidance for two consecutive no-change refinement passes on planning updates and deterministic run-artifact feedback inspection workflow.
+- Completed Slice 14 planning refinement loop with two consecutive no-change passes after dependency/order and acceptance-criteria tightening.
 - Refined Slice 13 planning scope after review: added explicit deterministic log-sink expectations (`stderr` + run-scoped artifact path) and fresh-context requirements for concrete log-inspection commands.
 - Completed Slice 13 planning refinement loop with two consecutive no-change passes after sink/fresh-context improvements.
 - Completed maintenance ticket `M20`: created dedicated Slice 13 backlog for full application logic logging/observability (`S13-T1`..`S13-T6`) and integrated it into roadmap sequencing.
