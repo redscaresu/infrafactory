@@ -64,8 +64,8 @@ Use this file as the per-session execution stub.
   - `push` on `main`: run tests, then build binary artifact.
 - Added `build-binary` job gated on successful `test` and `push` to `main`.
 - Binary build output:
-  - `dist/infrafactory-linux-amd64` (Linux amd64, `CGO_ENABLED=0`).
-  - Uploaded as workflow artifact `infrafactory-linux-amd64`.
+  - `dist/infrafactory-linux-amd64` and `dist/infrafactory-linux-arm64` (`CGO_ENABLED=0`).
+  - Uploaded as workflow artifacts `infrafactory-linux-amd64` and `infrafactory-linux-arm64`.
 
 ## Blocker (if any)
 - blocker: none.
