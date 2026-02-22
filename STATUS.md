@@ -4,19 +4,19 @@ Last updated: 2026-02-22
 
 ## Current phase
 - Active milestone: Slice 10 reliability and contract hardening (planning-ready)
-- Next gate: start `S10-T2`/`S10-T3` while `S9-T8` remains intentionally blocked
-- Current ticket: S9-T8 (blocked)
-- Next ticket: S10-T2 (or S10-T3 in parallel planning)
+- Next gate: complete `S10-T1` output golden freeze
+- Current ticket: S10-T1 (in progress)
+- Next ticket: S10-T4
 
 ## In progress
-- none (Slice 10 is planned and ready; no active implementation ticket yet)
+- `S10-T1` output contract freeze with golden snapshots
 
 ## Known blockers
 - `S9-T8` sandbox/live deploy layer remains blocked intentionally due current cost implications.
 
 ## Next actions
 1. Reassess `S9-T8` only after explicit cost/credentials policy approval.
-2. Slice 10 backlog is drafted and ready to start on `S10-T2` and `S10-T3` while `S9-T8` remains blocked.
+2. Complete `S10-T1`, then continue `S10-T4` and `S10-T5`.
 
 ## Update policy
 - Update at end of each meaningful coding session.
@@ -26,6 +26,10 @@ Last updated: 2026-02-22
 - Keep startup/read-order instructions only in `SESSION_START.md` to avoid duplication.
 
 ## Recent updates
+- Completed `S10-T6`: added deterministic criteria/policy explainability summaries in output contract for both human and JSON output modes with focused tests.
+- Completed `S10-T3`: versioned run artifacts with explicit schema fields in `run.json` and per-iteration artifacts, plus backward-compatible legacy run metadata reads.
+- Completed `S10-T2`: normalized CLI error taxonomy across command paths with explicit error-code constants and representative failure-class tests.
+- Verified local checks after `S10-T2`/`S10-T3`/`S10-T6`: `go test ./...` and `bash scripts/check_all.sh` both pass.
 - Refined fresh-context documentation in `SESSION_START.md` until two consecutive no-change passes; no further additions/improvements identified after final sweeps.
 - Updated `SESSION_START.md` with a dedicated fresh-context briefing (active/blocked lanes, guardrails, startup verification commands, and Slice 10 execution order), and corrected stale runtime wording to reflect current criteria-aware `run` behavior.
 - Refined Slice 10 ticket set through iterative dependency/acceptance checks; completed two consecutive no-change passes with no further additions or improvements identified.

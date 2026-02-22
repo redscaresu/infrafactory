@@ -138,20 +138,20 @@ func executeTestWithScenario(runtime *CommandRuntime, sc scenario.Scenario, outp
 		return OutputResult{
 				Command:  "test",
 				Scenario: sc.Name,
-			Status:   CommandStatusFailed,
-			Stages: []StageSummary{
-				{Layer: "sandbox_deploy", Stage: "blocked", Status: StageStatusSkip, Detail: sandboxBlockedStageDetail()},
-			},
-			Failures: []FailureSummary{
-				{
-					Layer:   "sandbox_deploy",
-					Stage:   "blocked",
-					Check:   "sandbox_deploy",
-					Command: "layer gate",
-					Detail:  sandboxDeferredDetail(),
+				Status:   CommandStatusFailed,
+				Stages: []StageSummary{
+					{Layer: "sandbox_deploy", Stage: "blocked", Status: StageStatusSkip, Detail: sandboxBlockedStageDetail()},
 				},
-			},
-		}, &CLIError{
+				Failures: []FailureSummary{
+					{
+						Layer:   "sandbox_deploy",
+						Stage:   "blocked",
+						Check:   "sandbox_deploy",
+						Command: "layer gate",
+						Detail:  sandboxDeferredDetail(),
+					},
+				},
+			}, &CLIError{
 				Op:   "test",
 				Code: errorCodeCommandFailed,
 				Err:  errors.New("sandbox deploy layer is blocked"),
@@ -229,16 +229,16 @@ func evaluateSupportedCriteria(sc scenario.Scenario, runtime *CommandRuntime, de
 	specs, err := sc.ExecutableChecks()
 	if err != nil {
 		return []StageSummary{
-			{Layer: "criteria", Stage: "parse", Status: StageStatusFail},
-		}, []FailureSummary{
-			{
-				Layer:   "criteria",
-				Stage:   "parse",
-				Check:   "criteria_parse",
-				Command: "criteria mapper",
-				Detail:  err.Error(),
-			},
-		}
+				{Layer: "criteria", Stage: "parse", Status: StageStatusFail},
+			}, []FailureSummary{
+				{
+					Layer:   "criteria",
+					Stage:   "parse",
+					Check:   "criteria_parse",
+					Command: "criteria mapper",
+					Detail:  err.Error(),
+				},
+			}
 	}
 
 	topologyChecks := make([]harness.TopologyCheck, 0)

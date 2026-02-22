@@ -70,6 +70,8 @@ func TestRenderHumanSummaryIsDeterministic(t *testing.T) {
 		"- static/policy: fail (deny rules)",
 		"Failures:",
 		"- static/policy policy=no_public_database detail=\"database is public\"",
+		"Explainability:",
+		"- static/policy policy=no_public_database summary=\"policy check failed for mapped constraint\"",
 	}
 	for _, part := range expectedParts {
 		if !strings.Contains(summary, part) {
@@ -117,5 +119,36 @@ func TestRenderMachineJSONIncludesSchemaAndNormalizedCollections(t *testing.T) {
 	}
 	if firstIdx >= secondIdx {
 		t.Fatalf("expected normalized stage ordering (mock before static), got:\n%s", output)
+	}
+}
+
+func TestRenderMachineJSONIncludesExplainabilityForCriteriaAndPolicyFailures(t *testing.T) {
+	t.Parallel()
+
+	jsonBytes, err := RenderMachineJSON(OutputResult{
+		Command:  "test",
+		Scenario: "web-app",
+		Status:   CommandStatusFailed,
+		Failures: []FailureSummary{
+			{Layer: "mock_deploy", Stage: "topology", Check: "connectivity", Detail: "compute cannot reach database"},
+			{Layer: "mock_deploy", Stage: "state_policy", Check: "policy", Policy: "encryption_at_rest", Detail: "public endpoint enabled"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("render machine json: %v", err)
+	}
+
+	output := string(jsonBytes)
+	checks := []string{
+		"\"explainability\": [",
+		"\"check\": \"connectivity\"",
+		"\"policy\": \"encryption_at_rest\"",
+		"\"summary\": \"criteria check failed for network reachability expectations\"",
+		"\"summary\": \"policy check failed for mapped constraint\"",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected machine json to contain %q, got:\n%s", check, output)
+		}
 	}
 }

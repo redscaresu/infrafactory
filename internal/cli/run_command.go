@@ -122,6 +122,7 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 	}
 
 	if err := store.WriteRunMetadata(runstore.RunMetadata{
+		Schema:    runstore.RunMetadataSchemaVersion,
 		Scenario:  sc.Name,
 		RunID:     runID,
 		Status:    string(status),
@@ -165,10 +166,12 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 
 func persistRunIteration(store *runstore.FilesystemStore, scenario string, runID string, iteration int, stages []StageSummary, failures []FailureSummary) error {
 	payload, err := json.MarshalIndent(struct {
+		Schema    string           `json:"schema"`
 		Iteration int              `json:"iteration"`
 		Stages    []StageSummary   `json:"stages"`
 		Failures  []FailureSummary `json:"failures"`
 	}{
+		Schema:    runstore.RunIterationSchemaVersion,
 		Iteration: iteration,
 		Stages:    stages,
 		Failures:  failures,

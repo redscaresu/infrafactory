@@ -56,12 +56,12 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 | S9-T7 | Slice 9 | Expand `mock` command lifecycle (`start/stop/status/logs`) with parity tests | P1 | done | S9-T4 | codex |
 | S9-T8 | Slice 9 | Sandbox/live deploy layer wiring (real Scaleway) | P2 | blocked | - | codex |
 | S9-T9 | Slice 9 | Document sandbox deploy deferment due cost implications | P0 | done | S8-T3 | codex |
-| S10-T1 | Slice 10 | Freeze output contract with golden snapshots for all commands/modes | P0 | todo | S10-T2,S10-T3,S10-T6 | codex |
-| S10-T2 | Slice 10 | Normalize CLI error taxonomy/messages across command paths | P0 | todo | S9-T7 | codex |
-| S10-T3 | Slice 10 | Version run artifact schema and add backward-compatible readers | P0 | todo | S9-T7 | codex |
+| S10-T1 | Slice 10 | Freeze output contract with golden snapshots for all commands/modes | P0 | in_progress | S10-T2,S10-T3,S10-T6 | codex |
+| S10-T2 | Slice 10 | Normalize CLI error taxonomy/messages across command paths | P0 | done | S9-T7 | codex |
+| S10-T3 | Slice 10 | Version run artifact schema and add backward-compatible readers | P0 | done | S9-T7 | codex |
 | S10-T4 | Slice 10 | Add idempotency/retry safety checks for repeated command execution | P1 | todo | S10-T1,S10-T2,S10-T3 | codex |
 | S10-T5 | Slice 10 | Add performance baseline benchmarks and regression guardrails | P1 | todo | S10-T3 | codex |
-| S10-T6 | Slice 10 | Add criteria/policy failure explainability summaries | P1 | todo | S10-T2,S10-T3 | codex |
+| S10-T6 | Slice 10 | Add criteria/policy failure explainability summaries | P1 | done | S10-T2,S10-T3 | codex |
 | S10-T7 | Slice 10 | Finalize permanent sandbox-block governance docs + ADR | P0 | todo | S9-T7,S10-T1 | codex |
 
 ## Ticket details

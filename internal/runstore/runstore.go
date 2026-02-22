@@ -12,7 +12,14 @@ import (
 
 const DefaultRoot = ".infrafactory/runs"
 
+const (
+	RunMetadataSchemaVersion  = "infrafactory.run.metadata.v1"
+	RunMetadataSchemaLegacy   = "infrafactory.run.metadata.legacy"
+	RunIterationSchemaVersion = "infrafactory.run.iteration.v1"
+)
+
 type RunMetadata struct {
+	Schema    string    `json:"schema,omitempty"`
 	Scenario  string    `json:"scenario"`
 	RunID     string    `json:"run_id"`
 	Status    string    `json:"status"`
@@ -33,6 +40,9 @@ func NewFilesystemStore(root string) *FilesystemStore {
 func (s *FilesystemStore) WriteRunMetadata(meta RunMetadata) error {
 	if meta.Scenario == "" || meta.RunID == "" {
 		return fmt.Errorf("scenario and run_id are required")
+	}
+	if meta.Schema == "" {
+		meta.Schema = RunMetadataSchemaVersion
 	}
 
 	runDir := s.runDir(meta.Scenario, meta.RunID)
@@ -61,6 +71,9 @@ func (s *FilesystemStore) ReadRunMetadata(scenario, runID string) (RunMetadata, 
 	var meta RunMetadata
 	if err := json.Unmarshal(payload, &meta); err != nil {
 		return RunMetadata{}, fmt.Errorf("decode run metadata: %w", err)
+	}
+	if meta.Schema == "" {
+		meta.Schema = RunMetadataSchemaLegacy
 	}
 
 	return meta, nil

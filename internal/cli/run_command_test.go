@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -66,6 +67,34 @@ func TestRunCommandConvergesOnFirstIteration(t *testing.T) {
 	iterationPath := filepath.Join(runstoreRoot, "example-scenario", runs[0].RunID, "iterations", "1", "iteration.json")
 	if _, err := os.Stat(iterationPath); err != nil {
 		t.Fatalf("expected iteration artifact: %v", err)
+	}
+	iterationPayload, err := os.ReadFile(iterationPath)
+	if err != nil {
+		t.Fatalf("read iteration artifact: %v", err)
+	}
+	var iteration struct {
+		Schema string `json:"schema"`
+	}
+	if err := json.Unmarshal(iterationPayload, &iteration); err != nil {
+		t.Fatalf("decode iteration artifact: %v", err)
+	}
+	if iteration.Schema != runstore.RunIterationSchemaVersion {
+		t.Fatalf("expected iteration schema %q, got %q", runstore.RunIterationSchemaVersion, iteration.Schema)
+	}
+
+	runPath := filepath.Join(runstoreRoot, "example-scenario", runs[0].RunID, "run.json")
+	runPayload, err := os.ReadFile(runPath)
+	if err != nil {
+		t.Fatalf("read run metadata artifact: %v", err)
+	}
+	var runMeta struct {
+		Schema string `json:"schema"`
+	}
+	if err := json.Unmarshal(runPayload, &runMeta); err != nil {
+		t.Fatalf("decode run metadata artifact: %v", err)
+	}
+	if runMeta.Schema != runstore.RunMetadataSchemaVersion {
+		t.Fatalf("expected run metadata schema %q, got %q", runstore.RunMetadataSchemaVersion, runMeta.Schema)
 	}
 }
 
