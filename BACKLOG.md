@@ -6,6 +6,7 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 
 | id | slice | title | priority | status | deps | owner |
 |---|---|---|---|---|---|---|
+| M6 | Maintenance | Refresh fresh-context startup guidance and verify with consecutive no-change passes | P1 | done | - | codex |
 | M5 | Maintenance | Refine Slice 11 plan iteratively until two consecutive no-change passes | P1 | done | - | codex |
 | M4 | Maintenance | Optimize README clarity and consistency via iterative review passes | P1 | done | - | codex |
 | M3 | Maintenance | Plan Slice 11 for concrete generator transport integration (`claude -p`, OpenRouter) | P1 | done | - | codex |

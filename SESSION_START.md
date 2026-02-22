@@ -23,9 +23,10 @@
 Before writing code, confirm these facts are still true in `STATUS.md`/`BACKLOG.md`:
 1. `S9-T8` (sandbox/live deploy, real Scaleway) remains permanently blocked by governance policy (ADR-0003).
 2. Output and logs must explicitly surface: `(real deployment skipped for cost reasons for now)` for sandbox/live-blocked behavior.
-3. Slice 10 is the active unblocked lane; start from `S10-T2` and `S10-T3`, then proceed to `S10-T6`, then `S10-T1`.
+3. Slice 11 is the active unblocked lane; start from `S11-T1` and follow the current dependency graph in `BACKLOG.md`.
 4. `run` is criteria-aware and includes criteria-only holdout completion checks; do not regress to coarse stage-only convergence behavior.
 5. `dns_resolution` remains auto-pass informational output while sandbox/live deploy is blocked; do not treat it as a hard-fail criterion.
+6. Generator transport integration is not complete in default runtime paths; until Slice 11 implementation lands, `generate`/`run` may return typed transport-not-implemented errors.
 
 Minimal startup verification commands:
 ```bash
@@ -79,6 +80,18 @@ If either command fails, restore the repo to a green baseline before starting a 
   run artifact readers must remain compatible with pre-versioned records.
 - Hermetic default rule:
   new performance/idempotency checks must run without mandatory network/external cloud dependencies.
+
+### Slice 11 default execution constraints
+- Canonical order:
+  `S11-T1 -> (S11-T2 || S11-T3) -> S11-T4 -> (S11-T5 || S11-T7) -> S11-T6`
+- Parallelization rule:
+  `S11-T2` and `S11-T3` are parallel after `S11-T1`; `S11-T5` and `S11-T7` are parallel after adapter implementation.
+- Contract rule:
+  preserve existing CLI/output error taxonomy while replacing default transport stubs with concrete adapters.
+- Safety rule:
+  transport adapters must not leak raw secrets (`API keys`, tokens, prompt bodies) in surfaced errors/logs.
+- CI rule:
+  hermetic tests remain default; real transport smoke coverage stays opt-in.
 
 ## 3) Execute
 - Implement + test.
