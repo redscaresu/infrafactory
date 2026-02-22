@@ -1,4 +1,4 @@
-module github.com/redscaresu/scaleway_infra_factory
+module github.com/redscaresu/infrafactory
 
 go 1.24
 

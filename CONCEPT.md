@@ -459,7 +459,7 @@ Optional fields on all types: `description` (human-readable), `port` (connectivi
 Mockway lives in a **separate repo** ([`mockway`](https://github.com/redscaresu/mockway)).
 
 ```
-scaleway_infra_factory/
+infrafactory/
 ├── cmd/
 │   └── infrafactory/             # CLI entrypoint
 │       └── main.go
@@ -1575,7 +1575,7 @@ Requires (future): state tracking via ContextStore (CXDB), scheduled `tofu plan`
 | GitHub Releases | Compiled Go binaries (linux/darwin, amd64/arm64) | GoReleaser on tag push |
 | Docker (GHCR) | `ghcr.io/redscaresu/mockway` (mock), `ghcr.io/redscaresu/infrafactory` (CLI) | GoReleaser |
 | Homebrew | `brew install redscaresu/tap/infrafactory`, `brew install redscaresu/tap/mockway` | GoReleaser → tap repo |
-| `go install` | `go install github.com/redscaresu/scaleway_infra_factory/cmd/infrafactory@latest` | Standard Go |
+| `go install` | `go install github.com/redscaresu/infrafactory/cmd/infrafactory@latest` | Standard Go |
 
 ---
 

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/redscaresu/scaleway_infra_factory/scenario.schema.json",
+  "$id": "https://github.com/redscaresu/infrafactory/scenario.schema.json",
   "title": "InfraFactory Scenario",
   "description": "Schema for InfraFactory scenario YAML files. Validated at parse time by the Go loader via santhosh-tekuri/jsonschema.",
   "type": "object",

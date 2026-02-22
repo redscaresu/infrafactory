@@ -16,7 +16,7 @@ brews:
     repository:
       owner: redscaresu
       name: homebrew-tap
-    homepage: https://github.com/redscaresu/scaleway_infra_factory
+    homepage: https://github.com/redscaresu/infrafactory
     description: Scenario-driven infrastructure factory for Scaleway
 
 dockers:

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/redscaresu/scaleway_infra_factory/internal/cli"
+	"github.com/redscaresu/infrafactory/internal/cli"
 )
 
 func main() {
