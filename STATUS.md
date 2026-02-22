@@ -3,21 +3,21 @@
 Last updated: 2026-02-22
 
 ## Current phase
-- Active milestone: Slice 6 complete
-- Next gate: CLI orchestration integration and end-to-end wiring
-- Current ticket: none
-- Next ticket: none
+- Active milestone: Slice 7 CLI orchestration
+- Next gate: end-to-end command wiring across generate/validate/test/run
+- Current ticket: S7-T1
+- Next ticket: S7-T2
 
 ## In progress
-- None.
+- `init` command scaffold generation + next-step output (`S7-T1`)
 
 ## Known blockers
 - None currently.
 
 ## Next actions
-1. Integrate completed internal packages into CLI command flows.
-2. Add end-to-end orchestration tests across generator/harness/runstore loops.
-3. Prepare release-oriented documentation updates.
+1. Complete `S7-T1` (`init` scaffold + deterministic next-step output).
+2. Complete `S7-T2` plus `S7-T12`/`S7-T16`/`S7-T13` (command+output contract freeze + shared test harness) before wiring core commands.
+3. Wire `S7-T3`/`S7-T4`/`S7-T5`, run early smoke checks (`S7-T6`), then complete `run` split tickets (`S7-T7`..`S7-T9`), hermetic integration (`S7-T11`), doc sync (`S7-T15`), and optional real-tool smoke (`S7-T14`).
 
 ## Update policy
 - Update at end of each meaningful coding session.
@@ -27,9 +27,19 @@ Last updated: 2026-02-22
 - Keep startup/read-order instructions only in `SESSION_START.md` to avoid duplication.
 
 ## Recent updates
+- Optimized Slice 7 dependency graph: removed `P1` test-harness ticket from `P0` critical-path smoke/integration dependencies.
+- Simplified Slice 7 with transitive-dependency cleanup (removed redundant direct deps where upstream gates already enforce order).
+- Optimized Slice 7 execution path: decoupled `mock start` from output-contract gating and decoupled docs sync from optional real-tool smoke.
+- Rebalanced Slice 7 priorities to keep critical command wiring as `P0` and supporting utilities/docs as `P1`.
+- Optimized Slice 7 again: added explicit CLI output contract ticket (`S7-T16`) to lock human/machine output schema before command wiring.
+- Optimized Slice 7 again: added CLI contract-freeze ticket (`S7-T12`), shared command-test harness ticket (`S7-T13`), hermetic vs real-tool integration split (`S7-T11`/`S7-T14`), and final doc-sync gate (`S7-T15`).
+- Optimized Slice 7 further: split `run` into skeleton/convergence/persistence tickets and added early orchestration smoke tests.
+- Optimized Slice 7 plan: added shared runtime ticket (`S7-T2`) and reduced unnecessary serial dependencies.
+- Reordered Slice 7 so `generate`/`validate`/`test` can proceed after shared runtime and converge at `run`.
+- Planned Slice 7 orchestration backlog (`S7-T1`..`S7-T16`) for full CLI command wiring.
+- Set active work to `S7-T1` as the first unblocked orchestration ticket.
 - Completed `S6-T3`: added criteria-only holdout discovery by training-scenario reference and feedback-blocking behavior.
 - Completed Slice 6 milestone (`S6-T1` through `S6-T3`) with passing local checks.
-- All tickets currently listed in `BACKLOG.md` are marked `done`.
 - Completed `S6-T2`: added deterministic failure-signature extraction and subset-based stuck detection.
 - Added focused tests for subset/equal/non-subset stuck detection behavior.
 - Verified local checks: `go test ./...` and `bash scripts/check_all.sh` both pass.
