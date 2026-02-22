@@ -1,0 +1,18 @@
+# Generated output
+output/
+
+# Runtime data
+.infrafactory/
+
+# OpenTofu
+.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfplan
+tfplan
+
+# Go
+/infrafactory
+
+# OS
+.DS_Store

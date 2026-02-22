@@ -1,0 +1,44 @@
+version: "1.0"
+
+agent:
+  type: claude-code          # claude-code | openrouter
+  max_iterations: 5
+  phase_delay_seconds: 0     # delay between claude -p calls (increase if rate limited)
+  phases:
+    - plan_architecture
+    - generate_hcl
+    - self_review
+
+mockway:
+  url: http://localhost:8080
+  auto_reset: true
+
+scaleway:
+  credentials_source: env    # env | config-file
+  sandbox_project_id: ""
+
+validation:
+  layers:
+    static:
+      enabled: true
+      policy_paths: [./policies/common, ./policies/scaleway]
+    mock_deploy:
+      enabled: true
+    sandbox_deploy:
+      enabled: false
+    destruction:
+      enabled: true
+
+constraint_policies:
+  no_public_database: scaleway/no_public_database.rego
+  encryption_at_rest: scaleway/encryption_at_rest.rego
+  no_public_endpoints: scaleway/no_public_endpoints.rego
+  region: scaleway/region_restriction.rego
+  zone: scaleway/region_restriction.rego
+
+paths:
+  scenarios: ./scenarios
+  mappings: ./mappings.yaml
+  output: ./output
+  policies: ./policies
+  prompts: ./prompts

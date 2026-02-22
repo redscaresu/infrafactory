@@ -1,0 +1,16 @@
+services:
+  mockway:
+    image: ghcr.io/redscaresu/mockway:latest
+    # Or build from local clone:
+    # build: ../mockway
+    ports:
+      - "8080:8080"   # Scaleway API mock
+
+  # Future: add CXDB when continuous reconciliation is needed
+  # cxdb:
+  #   image: cxdb/cxdb:latest
+  #   ports:
+  #     - "9009:9009"
+  #     - "9010:9010"
+  #   volumes:
+  #     - cxdb-data:/data

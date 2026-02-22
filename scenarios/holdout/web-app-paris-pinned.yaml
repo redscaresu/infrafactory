@@ -1,0 +1,54 @@
+scenario: web-app-paris-pinned
+version: "1.0"
+cloud: scaleway
+description: >
+  Same as web-app-paris but with exact Scaleway resource
+  types pinned for cost control.
+
+resources:
+  compute:
+    purpose: web-server
+    size: small
+    count: 2
+    override:
+      offer: DEV1-S
+      image: ubuntu_jammy
+  networking:
+    vpc: true
+    private_network: true
+    load_balancer:
+      exposure: public
+      backends:
+        - port: 80
+          protocol: http
+  database:
+    engine: postgresql
+    size: small
+    high_availability: false
+    override:
+      node_type: DB-DEV-S
+      engine_version: "15"
+
+constraints:
+  region: fr-par
+  zone: fr-par-1
+  no_public_database: true
+  encryption_at_rest: true
+
+acceptance_criteria:
+  - type: http_probe
+    target: load_balancer
+    port: 80
+    expect: reachable
+  - type: connectivity
+    from: public_internet
+    to: database
+    port: 5432
+    expect: blocked
+  - type: connectivity
+    from: compute
+    to: database
+    port: 5432
+    expect: success
+  - type: destruction
+    expect: no_orphans

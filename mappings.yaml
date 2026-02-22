@@ -1,0 +1,40 @@
+scaleway:
+  compute:
+    small:
+      offer: DEV1-S
+      vcpus: 2
+      ram_gb: 2
+    medium:
+      offer: DEV1-M
+      vcpus: 3
+      ram_gb: 4
+    large:
+      offer: GP1-S
+      vcpus: 8
+      ram_gb: 32
+    xlarge:
+      offer: GP1-M
+      vcpus: 16
+      ram_gb: 64
+  database:
+    small:
+      node_type: DB-DEV-S
+    medium:
+      node_type: DB-DEV-M
+    large:
+      node_type: DB-GP-XS
+    xlarge:
+      node_type: DB-GP-S
+  kubernetes:
+    small:
+      node_type: DEV1-M
+      node_count: 1
+    medium:
+      node_type: GP1-XS
+      node_count: 3
+    large:
+      node_type: GP1-S
+      node_count: 5
+    xlarge:
+      node_type: GP1-M
+      node_count: 7

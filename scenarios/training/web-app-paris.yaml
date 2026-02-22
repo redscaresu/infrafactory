@@ -1,0 +1,65 @@
+scenario: web-app-paris
+version: "1.0"
+cloud: scaleway
+description: >
+  A web application with a managed PostgreSQL database
+  in Paris, accessible via load balancer, with private
+  networking between app and database.
+
+resources:
+  compute:
+    purpose: web-server
+    size: small
+    count: 2
+  networking:
+    vpc: true
+    private_network: true
+    load_balancer:
+      exposure: public
+      backends:
+        - port: 80
+          protocol: http
+  database:
+    engine: postgresql
+    size: small
+    high_availability: false
+
+constraints:
+  region: fr-par
+  no_public_database: true
+  encryption_at_rest: true
+
+acceptance_criteria:
+  - type: http_probe
+    target: load_balancer
+    port: 80
+    expect: reachable
+  - type: connectivity
+    from: public_internet
+    to: compute
+    expect: blocked
+    description: "Instances must not be directly reachable from the internet"
+  - type: connectivity
+    from: public_internet
+    to: database
+    port: 5432
+    expect: blocked
+  - type: connectivity
+    from: compute
+    to: database
+    port: 5432
+    expect: success
+    description: "App servers must reach the database via private network"
+  - type: policy
+    check: encryption_at_rest
+    expect: pass
+  - type: policy
+    check: no_public_endpoints
+    target: database
+    expect: pass
+  - type: dns_resolution
+    domain: "{{scenario_name}}.example.com"
+    expect: resolves
+  - type: destruction
+    expect: no_orphans
+

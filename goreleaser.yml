@@ -1,0 +1,25 @@
+version: 2
+
+builds:
+  - id: infrafactory
+    main: ./cmd/infrafactory
+    binary: infrafactory
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+
+brews:
+  - name: infrafactory
+    repository:
+      owner: redscaresu
+      name: homebrew-tap
+    homepage: https://github.com/redscaresu/scaleway_infra_factory
+    description: Scenario-driven infrastructure factory for Scaleway
+
+dockers:
+  - image_templates:
+      - "ghcr.io/redscaresu/infrafactory:{{ .Tag }}"
+      - "ghcr.io/redscaresu/infrafactory:latest"

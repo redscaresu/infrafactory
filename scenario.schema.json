@@ -1,0 +1,355 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/redscaresu/scaleway_infra_factory/scenario.schema.json",
+  "title": "InfraFactory Scenario",
+  "description": "Schema for InfraFactory scenario YAML files. Validated at parse time by the Go loader via santhosh-tekuri/jsonschema.",
+  "type": "object",
+  "required": ["scenario", "version", "cloud", "description", "acceptance_criteria"],
+  "properties": {
+    "scenario": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*[a-z0-9]$",
+      "description": "Unique scenario identifier. Used for output directory naming (output/{scenario}/)."
+    },
+    "version": {
+      "type": "string",
+      "enum": ["1.0"],
+      "description": "Schema version."
+    },
+    "cloud": {
+      "type": "string",
+      "enum": ["scaleway"],
+      "description": "Target cloud provider. Only 'scaleway' in v1."
+    },
+    "description": {
+      "type": "string",
+      "description": "Human-readable description of the scenario's intent. Passed to the agent in all 3 phases."
+    },
+    "type": {
+      "type": "string",
+      "enum": ["holdout"],
+      "description": "Scenario type. Omit for training/regression scenarios. Set to 'holdout' for holdout scenarios."
+    },
+    "references": {
+      "type": "string",
+      "description": "Path to the training scenario this criteria-only holdout validates against (e.g., 'scenarios/training/web-app-paris.yaml'). Only valid when type=holdout."
+    },
+    "resources": {
+      "type": "object",
+      "description": "Infrastructure resources to provision. Required for training, regression, and full holdout scenarios. Omitted for criteria-only holdouts.",
+      "properties": {
+        "compute": { "$ref": "#/$defs/compute_resource" },
+        "networking": { "$ref": "#/$defs/networking_resource" },
+        "database": { "$ref": "#/$defs/database_resource" },
+        "kubernetes": { "$ref": "#/$defs/kubernetes_resource" }
+      },
+      "additionalProperties": false
+    },
+    "constraints": {
+      "type": "object",
+      "description": "Constraints applied to generated infrastructure. Boolean constraints map to OPA policies via constraint_policies in infrafactory.yaml.",
+      "properties": {
+        "region": {
+          "type": "string",
+          "description": "Required Scaleway region (e.g., fr-par, nl-ams, pl-waw)."
+        },
+        "zone": {
+          "type": "string",
+          "description": "Required Scaleway zone (e.g., fr-par-1, fr-par-2)."
+        },
+        "no_public_database": { "type": "boolean" },
+        "encryption_at_rest": { "type": "boolean" },
+        "no_public_endpoints": { "type": "boolean" }
+      },
+      "additionalProperties": {
+        "type": ["boolean", "string"]
+      }
+    },
+    "acceptance_criteria": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Acceptance criteria checked by the validation harness. All must pass for convergence.",
+      "items": { "$ref": "#/$defs/acceptance_criterion" }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "not": {
+          "properties": { "type": { "const": "holdout" } },
+          "required": ["type", "references"]
+        }
+      },
+      "then": {
+        "required": ["resources"]
+      }
+    },
+    {
+      "if": {
+        "required": ["references"],
+        "not": { "required": ["type"] }
+      },
+      "then": false
+    }
+  ],
+  "$defs": {
+    "compute_resource": {
+      "type": "object",
+      "required": ["purpose", "size"],
+      "properties": {
+        "purpose": {
+          "type": "string",
+          "description": "Logical purpose (e.g., web-server, api-server, worker). Passed to agent for naming."
+        },
+        "size": {
+          "type": "string",
+          "enum": ["small", "medium", "large", "xlarge"],
+          "description": "T-shirt size resolved to Scaleway offering via mappings.yaml."
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 1,
+          "description": "Number of compute instances to provision."
+        },
+        "override": {
+          "type": "object",
+          "description": "Prescriptive overrides. Take priority over size mappings.",
+          "properties": {
+            "offer": {
+              "type": "string",
+              "description": "Exact Scaleway commercial type (e.g., DEV1-S, GP1-M)."
+            },
+            "image": {
+              "type": "string",
+              "description": "Image label (e.g., ubuntu_jammy) or UUID."
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "networking_resource": {
+      "type": "object",
+      "properties": {
+        "vpc": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether to create a VPC."
+        },
+        "private_network": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether to create a private network within the VPC."
+        },
+        "load_balancer": {
+          "type": "object",
+          "required": ["exposure", "backends"],
+          "properties": {
+            "exposure": {
+              "type": "string",
+              "enum": ["public", "private"],
+              "description": "Whether the load balancer has a public IP."
+            },
+            "backends": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": ["port", "protocol"],
+                "properties": {
+                  "port": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 65535
+                  },
+                  "protocol": {
+                    "type": "string",
+                    "enum": ["http", "https", "tcp"]
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "database_resource": {
+      "type": "object",
+      "required": ["engine", "size"],
+      "properties": {
+        "engine": {
+          "type": "string",
+          "enum": ["postgresql", "mysql"],
+          "description": "Database engine."
+        },
+        "size": {
+          "type": "string",
+          "enum": ["small", "medium", "large", "xlarge"],
+          "description": "T-shirt size resolved to Scaleway node type via mappings.yaml."
+        },
+        "high_availability": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether to enable HA (standby node)."
+        },
+        "override": {
+          "type": "object",
+          "description": "Prescriptive overrides. Take priority over size mappings.",
+          "properties": {
+            "node_type": {
+              "type": "string",
+              "description": "Exact Scaleway node type (e.g., DB-DEV-S, DB-GP-XS)."
+            },
+            "engine_version": {
+              "type": "string",
+              "description": "Engine version string (e.g., '15' for PostgreSQL 15)."
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "kubernetes_resource": {
+      "type": "object",
+      "required": ["size"],
+      "properties": {
+        "size": {
+          "type": "string",
+          "enum": ["small", "medium", "large", "xlarge"],
+          "description": "T-shirt size resolved to Scaleway node type + count via mappings.yaml."
+        },
+        "override": {
+          "type": "object",
+          "description": "Prescriptive overrides. Take priority over size mappings.",
+          "properties": {
+            "node_type": {
+              "type": "string",
+              "description": "Exact Scaleway node type for pool nodes."
+            },
+            "node_count": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Exact number of nodes in the default pool."
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "acceptance_criterion": {
+      "type": "object",
+      "required": ["type", "expect"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["connectivity", "http_probe", "destruction", "policy", "dns_resolution"]
+        },
+        "expect": { "type": "string" },
+        "description": { "type": "string" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "connectivity" } }, "required": ["type"] },
+          "then": {
+            "required": ["from", "to"],
+            "properties": {
+              "type": true,
+              "expect": { "enum": ["success", "blocked"] },
+              "description": true,
+              "from": {
+                "type": "string",
+                "description": "Source: 'public_internet' or a resource category from the scenario (e.g., 'compute')."
+              },
+              "to": {
+                "type": "string",
+                "description": "Target: a resource category from the scenario (e.g., 'database', 'compute')."
+              },
+              "port": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535,
+                "description": "Optional port to check connectivity on."
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "http_probe" } }, "required": ["type"] },
+          "then": {
+            "required": ["target", "port"],
+            "properties": {
+              "type": true,
+              "expect": { "enum": ["reachable", "unreachable"] },
+              "description": true,
+              "target": {
+                "type": "string",
+                "description": "Resource to probe (e.g., 'load_balancer')."
+              },
+              "port": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "destruction" } }, "required": ["type"] },
+          "then": {
+            "properties": {
+              "type": true,
+              "expect": { "enum": ["no_orphans"] },
+              "description": true
+            },
+            "additionalProperties": false
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "policy" } }, "required": ["type"] },
+          "then": {
+            "required": ["check"],
+            "properties": {
+              "type": true,
+              "expect": { "enum": ["pass", "fail"] },
+              "description": true,
+              "check": {
+                "type": "string",
+                "description": "Policy name matching a key in constraint_policies (e.g., 'encryption_at_rest')."
+              },
+              "target": {
+                "type": "string",
+                "description": "Optional resource type to scope the policy check (e.g., 'database'). Passed to OPA as input.target."
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "dns_resolution" } }, "required": ["type"] },
+          "then": {
+            "required": ["domain"],
+            "properties": {
+              "type": true,
+              "expect": { "enum": ["resolves", "not_resolves"] },
+              "description": true,
+              "domain": {
+                "type": "string",
+                "description": "Domain to resolve. Supports {{scenario_name}} template variable."
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      ]
+    }
+  }
+}
