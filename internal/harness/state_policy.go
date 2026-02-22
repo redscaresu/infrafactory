@@ -11,13 +11,38 @@ import (
 )
 
 func EvaluateStatePolicies(ctx context.Context, stateJSON []byte, policyPaths []string) ([]feedback.Failure, error) {
+	return EvaluateStatePoliciesWithInput(ctx, stateJSON, nil, policyPaths)
+}
+
+func EvaluateStatePoliciesWithInput(ctx context.Context, stateJSON []byte, extraInput map[string]any, policyPaths []string) ([]feedback.Failure, error) {
 	if len(policyPaths) == 0 {
 		return nil, nil
 	}
 
-	var input any
-	if err := json.Unmarshal(stateJSON, &input); err != nil {
+	var decoded any
+	if err := json.Unmarshal(stateJSON, &decoded); err != nil {
 		return nil, fmt.Errorf("decode state json: %w", err)
+	}
+	input := decoded
+	if len(extraInput) > 0 {
+		if stateMap, ok := decoded.(map[string]any); ok {
+			envelope := make(map[string]any, len(stateMap)+len(extraInput)+1)
+			for key, value := range stateMap {
+				envelope[key] = value
+			}
+			envelope["state"] = stateMap
+			for key, value := range extraInput {
+				envelope[key] = value
+			}
+			input = envelope
+		} else {
+			envelope := make(map[string]any, len(extraInput)+1)
+			envelope["state"] = decoded
+			for key, value := range extraInput {
+				envelope[key] = value
+			}
+			input = envelope
+		}
 	}
 
 	packages, err := discoverPolicyPackages(policyPaths)

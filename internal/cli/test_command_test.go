@@ -11,6 +11,7 @@ import (
 
 	"github.com/redscaresu/infrafactory/internal/config"
 	"github.com/redscaresu/infrafactory/internal/harness"
+	"github.com/redscaresu/infrafactory/internal/scenario"
 	"github.com/spf13/cobra"
 )
 
@@ -18,10 +19,12 @@ type fakeMockDeployHarness struct {
 	result *harness.MockDeployResult
 	err    error
 	calls  int
+	dirs   []string
 }
 
-func (f *fakeMockDeployHarness) Run(context.Context, string, map[string]string) (*harness.MockDeployResult, error) {
+func (f *fakeMockDeployHarness) Run(_ context.Context, workDir string, _ map[string]string) (*harness.MockDeployResult, error) {
 	f.calls++
+	f.dirs = append(f.dirs, workDir)
 	return f.result, f.err
 }
 
@@ -422,6 +425,114 @@ func TestTestCommandSkipsWhenMockLayerDisabled(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "- destruction/blocked: skip") {
 		t.Fatalf("expected destruction blocked stage, got:\n%s", stdout.String())
+	}
+}
+
+func TestEvaluateStatePolicyCriteriaResolvesConstraintPolicyPathAndPassesTarget(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	policiesDir := filepath.Join(root, "policies")
+	if err := os.MkdirAll(filepath.Join(policiesDir, "scaleway"), 0o755); err != nil {
+		t.Fatalf("mkdir policies dir: %v", err)
+	}
+	policyPath := filepath.Join(policiesDir, "scaleway", "target.rego")
+	policy := `package scaleway.target
+
+import rego.v1
+
+deny_state contains msg if {
+	input.target != "database"
+	msg := "target mismatch"
+}
+`
+	if err := os.WriteFile(policyPath, []byte(policy), 0o644); err != nil {
+		t.Fatalf("write policy fixture: %v", err)
+	}
+
+	runtime := &CommandRuntime{
+		Config: config.Config{
+			Paths: config.PathsConfig{Policies: policiesDir},
+			ConstraintPolicies: map[string]string{
+				"target_policy": filepath.Join("scaleway", "target.rego"),
+			},
+		},
+	}
+
+	specs := []scenario.ExecutableCheckSpec{
+		{
+			Type:   "policy",
+			Expect: "pass",
+			Policy: &scenario.PolicyCheckSpec{
+				Check:  "target_policy",
+				Target: "database",
+			},
+		},
+	}
+
+	failures := evaluateStatePolicyCriteria(runtime, []byte(`{"rdb":{"instances":[]}}`), specs)
+	if len(failures) != 0 {
+		t.Fatalf("expected no failures, got %+v", failures)
+	}
+}
+
+func TestAppendDestroyResultAvoidsConflictingPassFailStages(t *testing.T) {
+	t.Parallel()
+
+	stages, failures := appendDestroyResult(
+		nil,
+		nil,
+		&harness.DestroyResult{Destroy: harness.StageResult{Stage: "destroy"}},
+		&harness.DestroyError{Stage: "state", Err: errors.New("state fetch failed")},
+	)
+	if len(failures) != 1 {
+		t.Fatalf("expected one failure, got %d", len(failures))
+	}
+
+	passStateStages := 0
+	failStateStages := 0
+	for _, stage := range stages {
+		if stage.Layer == "destruction" && stage.Stage == "state" {
+			if stage.Status == StageStatusPass {
+				passStateStages++
+			}
+			if stage.Status == StageStatusFail {
+				failStateStages++
+			}
+		}
+	}
+	if passStateStages != 0 || failStateStages != 1 {
+		t.Fatalf("expected only one destruction/state fail stage, got stages=%+v", stages)
+	}
+}
+
+func TestAppendMockDeployResultAvoidsConflictingPassFailStages(t *testing.T) {
+	t.Parallel()
+
+	stages, failures := appendMockDeployResult(
+		nil,
+		nil,
+		&harness.MockDeployResult{Apply: harness.StageResult{Stage: "apply"}},
+		&harness.MockDeployError{Stage: "state", Err: errors.New("state fetch failed")},
+	)
+	if len(failures) != 1 {
+		t.Fatalf("expected one failure, got %d", len(failures))
+	}
+
+	passStateStages := 0
+	failStateStages := 0
+	for _, stage := range stages {
+		if stage.Layer == "mock_deploy" && stage.Stage == "state" {
+			if stage.Status == StageStatusPass {
+				passStateStages++
+			}
+			if stage.Status == StageStatusFail {
+				failStateStages++
+			}
+		}
+	}
+	if passStateStages != 0 || failStateStages != 1 {
+		t.Fatalf("expected only one mock_deploy/state fail stage, got stages=%+v", stages)
 	}
 }
 

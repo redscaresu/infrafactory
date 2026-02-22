@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/redscaresu/infrafactory/internal/harness"
 	"github.com/redscaresu/infrafactory/internal/scenario"
@@ -31,11 +33,10 @@ func testCommandEnv(runtime *CommandRuntime) map[string]string {
 }
 
 func appendMockDeployResult(stages []StageSummary, failures []FailureSummary, result *harness.MockDeployResult, runErr error) ([]StageSummary, []FailureSummary) {
-	if result != nil && result.Apply.Stage != "" {
-		stages = append(stages, StageSummary{Layer: "mock_deploy", Stage: "apply", Status: StageStatusPass})
-	}
-
 	if runErr == nil {
+		if result != nil && result.Apply.Stage != "" {
+			stages = append(stages, StageSummary{Layer: "mock_deploy", Stage: "apply", Status: StageStatusPass})
+		}
 		stages = append(stages, StageSummary{Layer: "mock_deploy", Stage: "state", Status: StageStatusPass})
 		return stages, failures
 	}
@@ -71,13 +72,12 @@ func appendMockDeployResult(stages []StageSummary, failures []FailureSummary, re
 }
 
 func appendDestroyResult(stages []StageSummary, failures []FailureSummary, result *harness.DestroyResult, runErr error) ([]StageSummary, []FailureSummary) {
-	if result != nil && result.Destroy.Stage != "" {
-		stages = append(stages, StageSummary{Layer: "destruction", Stage: "destroy", Status: StageStatusPass})
+	if runErr == nil {
+		if result != nil && result.Destroy.Stage != "" {
+			stages = append(stages, StageSummary{Layer: "destruction", Stage: "destroy", Status: StageStatusPass})
+		}
 		stages = append(stages, StageSummary{Layer: "destruction", Stage: "state", Status: StageStatusPass})
 		stages = append(stages, StageSummary{Layer: "destruction", Stage: "orphan_check", Status: StageStatusPass})
-	}
-
-	if runErr == nil {
 		return stages, failures
 	}
 
@@ -336,8 +336,14 @@ func evaluateStatePolicyCriteria(runtime *CommandRuntime, stateSnapshot []byte, 
 			})
 			continue
 		}
+		policyPath = resolveConstraintPolicyPath(runtime.Config.Paths.Policies, policyPath)
 
-		evaluatedFailures, err := harness.EvaluateStatePolicies(context.Background(), stateSnapshot, []string{policyPath})
+		extraInput := map[string]any{}
+		if spec.Policy.Target != "" {
+			extraInput["target"] = spec.Policy.Target
+		}
+
+		evaluatedFailures, err := harness.EvaluateStatePoliciesWithInput(context.Background(), stateSnapshot, extraInput, []string{policyPath})
 		if err != nil {
 			failures = append(failures, FailureSummary{
 				Layer:   "mock_deploy",
@@ -381,4 +387,17 @@ func evaluateStatePolicyCriteria(runtime *CommandRuntime, stateSnapshot []byte, 
 	}
 
 	return failures
+}
+
+func resolveConstraintPolicyPath(baseDir, policyPath string) string {
+	if policyPath == "" || filepath.IsAbs(policyPath) {
+		return policyPath
+	}
+	if _, err := os.Stat(policyPath); err == nil {
+		return policyPath
+	}
+	if baseDir == "" {
+		return policyPath
+	}
+	return filepath.Join(baseDir, policyPath)
 }

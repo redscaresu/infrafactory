@@ -16,3 +16,7 @@ tfplan
 
 # OS
 .DS_Store
+
+# Local review notes
+ISSUES.md
+issues.md

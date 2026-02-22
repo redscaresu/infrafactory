@@ -2,6 +2,7 @@ package harness
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -58,6 +59,133 @@ func TestEvaluatePlanPolicies(t *testing.T) {
 				if failures[0].Stage != "opa" || failures[0].Command != "opa eval" || failures[0].Status != "fail" {
 					t.Fatalf("unexpected failure shape: %+v", failures[0])
 				}
+			}
+		})
+	}
+}
+
+func TestEvaluatePlanPoliciesWithConstraints(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	policyPath := filepath.Join(tmp, "region.rego")
+	policy := `package test.region
+
+import rego.v1
+
+deny contains msg if {
+	allowed := input.constraints.region
+	resource := input.planned_values.root_module.resources[_]
+	region := resource.values.region
+	region != allowed
+	msg := sprintf("%s region %s not allowed", [resource.address, region])
+}
+`
+	if err := os.WriteFile(policyPath, []byte(policy), 0o644); err != nil {
+		t.Fatalf("write policy fixture: %v", err)
+	}
+
+	planJSON := []byte(`{
+  "planned_values": {
+    "root_module": {
+      "resources": [
+        {"address": "scaleway_instance_server.web", "values": {"region": "nl-ams"}}
+      ]
+    }
+  }
+}`)
+
+	failures, err := EvaluatePlanPoliciesWithConstraints(
+		context.Background(),
+		planJSON,
+		map[string]any{"region": "fr-par"},
+		[]string{policyPath},
+	)
+	if err != nil {
+		t.Fatalf("evaluate policies: %v", err)
+	}
+	if len(failures) != 1 {
+		t.Fatalf("expected one failure, got %d (%+v)", len(failures), failures)
+	}
+	expected := "scaleway_instance_server.web region nl-ams not allowed"
+	if failures[0].Detail != expected {
+		t.Fatalf("expected detail %q, got %q", expected, failures[0].Detail)
+	}
+}
+
+func TestScalewayPoliciesPlanEvaluation(t *testing.T) {
+	t.Parallel()
+
+	policiesRoot := filepath.Join("..", "..", "policies", "scaleway")
+	cases := []struct {
+		name          string
+		policy        string
+		planJSON      string
+		constraints   map[string]any
+		expectedCount int
+	}{
+		{
+			name:   "region restriction triggers with constraints",
+			policy: filepath.Join(policiesRoot, "region_restriction.rego"),
+			planJSON: `{
+  "planned_values": {"root_module": {"resources": [
+    {"address":"scaleway_instance_server.web","values":{"region":"nl-ams"}}
+  ]}}
+}`,
+			constraints:   map[string]any{"region": "fr-par"},
+			expectedCount: 1,
+		},
+		{
+			name:   "vpc required passes when private nic references server",
+			policy: filepath.Join(policiesRoot, "vpc_required.rego"),
+			planJSON: `{
+  "planned_values": {"root_module": {"resources": [
+    {"address":"scaleway_instance_server.web","type":"scaleway_instance_server","values":{}}
+  ]}},
+  "configuration": {"root_module": {"resources": [
+    {"type":"scaleway_instance_private_nic","expressions":{"server_id":{"references":["scaleway_instance_server.web.id"]}}}
+  ]}}
+}`,
+			expectedCount: 0,
+		},
+		{
+			name:   "vpc required fails without private nic references",
+			policy: filepath.Join(policiesRoot, "vpc_required.rego"),
+			planJSON: `{
+  "planned_values": {"root_module": {"resources": [
+    {"address":"scaleway_instance_server.web","type":"scaleway_instance_server","values":{}}
+  ]}},
+  "configuration": {"root_module": {"resources": []}}
+}`,
+			expectedCount: 1,
+		},
+		{
+			name:   "no public endpoints checks server attribute",
+			policy: filepath.Join(policiesRoot, "no_public_endpoints.rego"),
+			planJSON: `{
+  "planned_values": {"root_module": {"resources": [
+    {"address":"scaleway_instance_ip.public","type":"scaleway_instance_ip","values":{"server":"srv-id"}}
+  ]}}
+}`,
+			expectedCount: 1,
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			failures, err := EvaluatePlanPoliciesWithConstraints(
+				context.Background(),
+				[]byte(tc.planJSON),
+				tc.constraints,
+				[]string{tc.policy},
+			)
+			if err != nil {
+				t.Fatalf("evaluate policy: %v", err)
+			}
+			if got := len(failures); got != tc.expectedCount {
+				t.Fatalf("expected %d failures, got %d (%s)", tc.expectedCount, got, fmt.Sprintf("%+v", failures))
 			}
 		})
 	}

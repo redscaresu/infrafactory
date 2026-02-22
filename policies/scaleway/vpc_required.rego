@@ -13,7 +13,8 @@ deny contains msg if {
 }
 
 has_private_nic(server_address) if {
-	nic := input.planned_values.root_module.resources[_]
+	nic := input.configuration.root_module.resources[_]
 	nic.type == "scaleway_instance_private_nic"
-	contains(nic.values.server_id, server_address)
+	refs := nic.expressions.server_id.references
+	refs[_] == sprintf("%s.id", [server_address])
 }

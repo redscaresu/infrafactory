@@ -111,29 +111,29 @@ func countOrphans(stateJSON []byte) (int, error) {
 		return 0, fmt.Errorf("decode state snapshot: %w", err)
 	}
 
-	resourceCollections := map[string][]string{
-		"instance":    {"servers", "ips", "security_groups", "private_nics", "volumes"},
-		"vpc":         {"vpcs", "private_networks"},
-		"lb":          {"lbs", "frontends", "backends"},
-		"k8s":         {"clusters", "pools", "node_pools"},
-		"rdb":         {"instances"},
-		"iam":         {"applications", "api_keys", "policies", "ssh_keys"},
-		"marketplace": {"local_images", "images"},
-		"account":     {"ssh_keys"},
+	ignoredRoots := map[string]struct{}{
+		"metadata": {},
+	}
+	ignoredCollections := map[string]struct{}{
+		"events":   {},
+		"metrics":  {},
+		"messages": {},
 	}
 
 	count := 0
-	for root, collections := range resourceCollections {
-		rootNode, ok := state[root]
-		if !ok {
+	for root, rootNode := range state {
+		if _, ignored := ignoredRoots[root]; ignored {
 			continue
 		}
 		rootMap, ok := rootNode.(map[string]any)
 		if !ok {
 			continue
 		}
-		for _, collection := range collections {
-			if items, ok := rootMap[collection].([]any); ok {
+		for collection, value := range rootMap {
+			if _, ignored := ignoredCollections[collection]; ignored {
+				continue
+			}
+			if items, ok := value.([]any); ok {
 				count += len(items)
 			}
 		}

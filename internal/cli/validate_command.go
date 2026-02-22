@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 
 	"github.com/redscaresu/infrafactory/internal/feedback"
@@ -73,8 +74,8 @@ func runValidateCommand(cmd *cobra.Command, args []string, runtime *CommandRunti
 	}
 
 	if staticErr == nil {
-		policyPaths := resolvePolicyPaths(runtime.Config.Validation.Layers.Static.PolicyPaths)
-		policyFailures, err := harness.EvaluatePlanPolicies(context.Background(), staticResult.PlanJSON, policyPaths)
+		policyPaths := resolvePolicyPaths(runtime.Config.Paths.Policies, runtime.Config.Validation.Layers.Static.PolicyPaths)
+		policyFailures, err := harness.EvaluatePlanPoliciesWithConstraints(context.Background(), staticResult.PlanJSON, sc.Constraints, policyPaths)
 		if err != nil {
 			return fmt.Errorf("evaluate static policies: %w", err)
 		}
@@ -127,15 +128,29 @@ func runValidateCommand(cmd *cobra.Command, args []string, runtime *CommandRunti
 
 func validateCommandEnv(runtime *CommandRuntime) map[string]string {
 	return map[string]string{
-		"SCW_API_URL": runtime.Config.Mockway.URL,
+		"SCW_API_URL":            runtime.Config.Mockway.URL,
+		"SCW_ACCESS_KEY":         "mock-access-key",
+		"SCW_SECRET_KEY":         "mock-secret-key",
+		"SCW_DEFAULT_PROJECT_ID": "mock-project-id",
 	}
 }
 
-func resolvePolicyPaths(policyPaths []string) []string {
+func resolvePolicyPaths(baseDir string, policyPaths []string) []string {
 	resolved := make([]string, 0, len(policyPaths))
 	for _, policyPath := range policyPaths {
+		if policyPath == "" {
+			continue
+		}
 		if filepath.IsAbs(policyPath) {
 			resolved = append(resolved, policyPath)
+			continue
+		}
+		if _, err := os.Stat(policyPath); err == nil {
+			resolved = append(resolved, policyPath)
+			continue
+		}
+		if baseDir != "" {
+			resolved = append(resolved, filepath.Join(baseDir, policyPath))
 			continue
 		}
 		resolved = append(resolved, policyPath)

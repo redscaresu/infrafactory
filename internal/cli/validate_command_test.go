@@ -79,6 +79,15 @@ func TestValidateCommandStaticSuccess(t *testing.T) {
 	if static.lastEnv["SCW_API_URL"] != "http://localhost:8080" {
 		t.Fatalf("unexpected SCW_API_URL: %q", static.lastEnv["SCW_API_URL"])
 	}
+	if static.lastEnv["SCW_ACCESS_KEY"] != "mock-access-key" {
+		t.Fatalf("unexpected SCW_ACCESS_KEY: %q", static.lastEnv["SCW_ACCESS_KEY"])
+	}
+	if static.lastEnv["SCW_SECRET_KEY"] != "mock-secret-key" {
+		t.Fatalf("unexpected SCW_SECRET_KEY: %q", static.lastEnv["SCW_SECRET_KEY"])
+	}
+	if static.lastEnv["SCW_DEFAULT_PROJECT_ID"] != "mock-project-id" {
+		t.Fatalf("unexpected SCW_DEFAULT_PROJECT_ID: %q", static.lastEnv["SCW_DEFAULT_PROJECT_ID"])
+	}
 
 	output := stdout.String()
 	checks := []string{
@@ -280,4 +289,44 @@ func newValidateCommandForTest(opts runtimeOptions) *cobra.Command {
 	cmd.Flags().String("config", config.DefaultPath, "")
 	cmd.Flags().String("output", string(OutputModeHuman), "")
 	return cmd
+}
+
+func TestResolvePolicyPathsResolvesRelativeToPoliciesDir(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	policiesDir := filepath.Join(root, "policies")
+	if err := os.MkdirAll(policiesDir, 0o755); err != nil {
+		t.Fatalf("mkdir policies dir: %v", err)
+	}
+
+	absPolicy := filepath.Join(root, "abs.rego")
+	if err := os.WriteFile(absPolicy, []byte("package test.abs"), 0o644); err != nil {
+		t.Fatalf("write abs policy: %v", err)
+	}
+
+	relativeExisting := filepath.Join(policiesDir, "existing.rego")
+	if err := os.WriteFile(relativeExisting, []byte("package test.existing"), 0o644); err != nil {
+		t.Fatalf("write existing policy: %v", err)
+	}
+
+	resolved := resolvePolicyPaths(policiesDir, []string{
+		absPolicy,
+		relativeExisting,
+		"scaleway/region_restriction.rego",
+		"",
+	})
+	if len(resolved) != 3 {
+		t.Fatalf("expected 3 resolved paths, got %d: %#v", len(resolved), resolved)
+	}
+	if resolved[0] != absPolicy {
+		t.Fatalf("expected absolute path passthrough, got %q", resolved[0])
+	}
+	if resolved[1] != relativeExisting {
+		t.Fatalf("expected existing relative path passthrough, got %q", resolved[1])
+	}
+	expectedJoined := filepath.Join(policiesDir, "scaleway/region_restriction.rego")
+	if resolved[2] != expectedJoined {
+		t.Fatalf("expected joined path %q, got %q", expectedJoined, resolved[2])
+	}
 }

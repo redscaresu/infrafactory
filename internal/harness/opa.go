@@ -11,13 +11,33 @@ import (
 )
 
 func EvaluatePlanPolicies(ctx context.Context, planJSON []byte, policyPaths []string) ([]feedback.Failure, error) {
+	return EvaluatePlanPoliciesWithConstraints(ctx, planJSON, nil, policyPaths)
+}
+
+func EvaluatePlanPoliciesWithConstraints(ctx context.Context, planJSON []byte, constraints map[string]any, policyPaths []string) ([]feedback.Failure, error) {
 	if len(policyPaths) == 0 {
 		return nil, nil
 	}
 
-	var input any
-	if err := json.Unmarshal(planJSON, &input); err != nil {
+	var decoded any
+	if err := json.Unmarshal(planJSON, &decoded); err != nil {
 		return nil, fmt.Errorf("decode plan json: %w", err)
+	}
+	input := decoded
+	if len(constraints) > 0 {
+		if planMap, ok := decoded.(map[string]any); ok {
+			envelope := make(map[string]any, len(planMap)+1)
+			for key, value := range planMap {
+				envelope[key] = value
+			}
+			envelope["constraints"] = constraints
+			input = envelope
+		} else {
+			input = map[string]any{
+				"plan":        decoded,
+				"constraints": constraints,
+			}
+		}
 	}
 
 	packages, err := discoverPolicyPackages(policyPaths)

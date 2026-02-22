@@ -26,6 +26,8 @@ Last updated: 2026-02-22
 - Keep startup/read-order instructions only in `SESSION_START.md` to avoid duplication.
 
 ## Recent updates
+- Completed follow-up `ISSUES.md` remediation: fixed criteria-only holdout execution to reuse training output dir, removed unused `internal/feedback.RunLoop`, simplified `runIteration` step wiring to eliminate dead runner field, and made orphan counting resilient to new resource collections with regression tests.
+- Completed maintenance hardening sweep from `ISSUES.md`: fixed OPA constraint/state input wiring regressions, policy-path resolution, mock credential parity, Mockway HTTP timeout, stage-status duplication fragility, and Scaleway policy mismatches; added regression tests and ignored local `ISSUES.md`.
 - Completed `S10-T7`: accepted ADR-0003 and synchronized governance docs to codify permanent sandbox/live deploy block policy.
 - Completed `S10-T5`: added hermetic benchmark baselines (`internal/cli`, `internal/runstore`), env-gated regression script (`scripts/check_benchmarks.sh`), and `make bench-check` workflow.
 - Completed `S10-T4`: added idempotency/retry safety integration coverage for repeated command execution and retry-after-failure flows across `generate`/`validate`/`test`/`run`/`mock` command paths.

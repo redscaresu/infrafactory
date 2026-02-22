@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 )
 
 type mockwayStateClient struct {
@@ -16,7 +17,7 @@ type mockwayStateClient struct {
 func newMockwayStateClient(baseURL string) *mockwayStateClient {
 	return &mockwayStateClient{
 		baseURL: strings.TrimRight(baseURL, "/"),
-		client:  &http.Client{},
+		client:  &http.Client{Timeout: 30 * time.Second},
 	}
 }
 

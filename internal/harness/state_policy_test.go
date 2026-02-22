@@ -53,3 +53,60 @@ func TestEvaluateStatePolicies(t *testing.T) {
 		})
 	}
 }
+
+func TestEvaluateStatePoliciesWithInputIncludesExtraFields(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	policyPath := filepath.Join(tmp, "target.rego")
+	policy := `package test.target
+
+import rego.v1
+
+deny_state contains msg if {
+	input.target != "database"
+	msg := "unexpected target"
+}
+`
+	if err := os.WriteFile(policyPath, []byte(policy), 0o644); err != nil {
+		t.Fatalf("write policy fixture: %v", err)
+	}
+
+	stateJSON := []byte(`{"rdb":{"instances":[]}}`)
+	failures, err := EvaluateStatePoliciesWithInput(
+		context.Background(),
+		stateJSON,
+		map[string]any{"target": "database"},
+		[]string{policyPath},
+	)
+	if err != nil {
+		t.Fatalf("evaluate state policy: %v", err)
+	}
+	if len(failures) != 0 {
+		t.Fatalf("expected no failures, got %+v", failures)
+	}
+}
+
+func TestNoPublicDatabaseStatePolicyReadsTopLevelRDB(t *testing.T) {
+	t.Parallel()
+
+	policyPath := filepath.Join("..", "..", "policies", "scaleway", "no_public_database.rego")
+	stateJSON := []byte(`{
+  "rdb": {
+    "instances": [
+      {
+        "id": "db-1",
+        "endpoints": [{"private_network": false}]
+      }
+    ]
+  }
+}`)
+
+	failures, err := EvaluateStatePolicies(context.Background(), stateJSON, []string{policyPath})
+	if err != nil {
+		t.Fatalf("evaluate state policy: %v", err)
+	}
+	if len(failures) != 1 {
+		t.Fatalf("expected one failure, got %d (%+v)", len(failures), failures)
+	}
+}

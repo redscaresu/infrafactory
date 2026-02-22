@@ -149,3 +149,25 @@ func TestCountOrphansCountsKnownCollectionsOnly(t *testing.T) {
 		t.Fatalf("expected 4 orphans from known collections, got %d", count)
 	}
 }
+
+func TestCountOrphansCountsPreviouslyUnknownCollections(t *testing.T) {
+	t.Parallel()
+
+	state := []byte(`{
+  "instance": {
+    "servers": [{"id":"srv-1"}],
+    "placement_groups": [{"id":"pg-1"}]
+  },
+  "new_service": {
+    "widgets": [{"id":"w-1"}, {"id":"w-2"}]
+  }
+}`)
+
+	count, err := countOrphans(state)
+	if err != nil {
+		t.Fatalf("count orphans: %v", err)
+	}
+	if count != 4 {
+		t.Fatalf("expected 4 orphans including unknown collections, got %d", count)
+	}
+}

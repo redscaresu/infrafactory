@@ -15,7 +15,7 @@ deny contains msg if {
 
 # Layer 2: check against ScalewayMock state
 deny_state contains msg if {
-	instance := input.state.rdb.instances[_]
+	instance := input.rdb.instances[_]
 	endpoint := instance.endpoints[_]
 	not endpoint.private_network
 	msg := sprintf(

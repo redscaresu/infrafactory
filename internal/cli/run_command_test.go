@@ -434,6 +434,59 @@ func TestRunCommandExecutesCriteriaOnlyHoldoutsAfterConvergence(t *testing.T) {
 	}
 }
 
+func TestRunCommandCriteriaOnlyHoldoutsReuseTrainingOutputDir(t *testing.T) {
+	h := newCommandTestHarness(t)
+	runstoreRoot := filepath.Join(h.WorkspaceDir, ".infrafactory", "runs")
+	t.Setenv("INFRAFACTORY_RUNSTORE_ROOT", runstoreRoot)
+	writeCriteriaOnlyHoldout(t, filepath.Join(h.WorkspaceDir, "scenarios", "holdout", "holdout-pass.yaml"), h.ScenarioPath, `  - type: destruction
+    expect: no_orphans
+`, "holdout-pass")
+
+	mockDeploy := &fakeMockDeployHarness{
+		result: &harness.MockDeployResult{
+			Apply:         harness.StageResult{Stage: "apply"},
+			StateSnapshot: []byte(`{}`),
+		},
+	}
+	opts := runtimeOptions{
+		configLoader: func(path string) (config.Config, error) {
+			cfg, err := config.Load(path)
+			if err != nil {
+				return config.Config{}, err
+			}
+			cfg.Paths.Scenarios = filepath.Join(h.WorkspaceDir, "scenarios")
+			cfg.Validation.Layers.Static.Enabled = false
+			cfg.Validation.Layers.MockDeploy.Enabled = true
+			cfg.Validation.Layers.Destruction.Enabled = false
+			return cfg, nil
+		},
+		scenarioLoader: defaultScenarioLoader,
+		deps: RuntimeDependencies{
+			Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
+				return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte("terraform {}\n")}}, nil
+			}),
+			MockDeploy: mockDeploy,
+			Destroy:    &fakeDestroyHarness{},
+		},
+	}
+
+	cmd := newRunCommandForTest(opts)
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{h.ScenarioPath, "--config", h.ConfigPath, "--max-iterations", "1"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected run success, got: %v", err)
+	}
+	if len(mockDeploy.dirs) != 2 {
+		t.Fatalf("expected two mock deploy calls (training + holdout), got %d", len(mockDeploy.dirs))
+	}
+	expected := filepath.Join("output", "example-scenario")
+	if mockDeploy.dirs[0] != expected || mockDeploy.dirs[1] != expected {
+		t.Fatalf("expected both mock deploy calls to use %q, got %#v", expected, mockDeploy.dirs)
+	}
+}
+
 func TestRunCommandAutoPassesDeferredDNSHoldoutWithoutFeedbackInjection(t *testing.T) {
 	h := newCommandTestHarness(t)
 	runstoreRoot := filepath.Join(h.WorkspaceDir, ".infrafactory", "runs")

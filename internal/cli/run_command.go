@@ -200,12 +200,11 @@ func runIteration(iteration int, scenarioPath string, cmd *cobra.Command, runtim
 
 	steps := []struct {
 		name    string
-		runner  runtimeHandler
 		command string
 	}{
-		{name: "generate", runner: runGenerateCommand, command: "generate"},
-		{name: "validate", runner: runValidateCommand, command: "validate"},
-		{name: "test", runner: runTestCommand, command: "test"},
+		{name: "generate", command: "generate"},
+		{name: "validate", command: "validate"},
+		{name: "test", command: "test"},
 	}
 
 	for _, step := range steps {
@@ -218,7 +217,14 @@ func runIteration(iteration int, scenarioPath string, cmd *cobra.Command, runtim
 			testResult, err = executeTest(runtime, scenarioPath)
 		} else {
 			internalCmd := newInternalRunStepCommand(step.command, cmd)
-			err = step.runner(internalCmd, []string{scenarioPath}, runtime)
+			switch step.name {
+			case "generate":
+				err = runGenerateCommand(internalCmd, []string{scenarioPath}, runtime)
+			case "validate":
+				err = runValidateCommand(internalCmd, []string{scenarioPath}, runtime)
+			default:
+				err = fmt.Errorf("unsupported run step %q", step.name)
+			}
 		}
 		if err != nil {
 			stages = append(stages, StageSummary{Layer: "run", Stage: stageName, Status: StageStatusFail})
@@ -284,8 +290,9 @@ func runCriteriaOnlyHoldouts(runtime *CommandRuntime, trainingScenarioPath strin
 			continue
 		}
 
-		outputDir := filepath.Join(runtime.Config.Paths.Output, sc.Name)
-		result, err := executeTestWithScenario(runtime, sc, outputDir)
+		// Criteria-only holdouts validate against the generated code of the
+		// already-converged training scenario, not their own output path.
+		result, err := executeTestWithScenario(runtime, sc, runtime.OutputDir())
 		if err != nil {
 			stages = append(stages, StageSummary{Layer: "holdout", Stage: holdout.ScenarioName, Status: StageStatusFail})
 			if len(result.Failures) == 0 {

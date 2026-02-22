@@ -17,6 +17,17 @@ deny contains msg if {
 deny contains msg if {
 	resource := input.planned_values.root_module.resources[_]
 	resource.type == "scaleway_instance_ip"
+	server := resource.values.server
+	server != null
+	msg := sprintf(
+		"%s assigns a public IP to a server — violates no_public_endpoints",
+		[resource.address],
+	)
+}
+
+deny contains msg if {
+	resource := input.planned_values.root_module.resources[_]
+	resource.type == "scaleway_instance_ip"
 	server := resource.values.server_id
 	server != null
 	msg := sprintf(
