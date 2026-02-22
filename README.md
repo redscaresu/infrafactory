@@ -2,13 +2,50 @@
 
 Scenario-driven infrastructure generation and validation for Scaleway with OpenTofu.
 
-## Overview
+## Problem It Solves
 
-InfraFactory follows a software-factory model for infrastructure:
-1. Parse and validate scenario and config contracts.
+Teams often face the same infrastructure pain points:
+- Infrastructure intent is documented in prose, but implementation is in hand-written IaC.
+- Validation is inconsistent and manual (or only static linting).
+- Failed iterations are hard to diagnose and repeat.
+
+InfraFactory addresses this by making infrastructure delivery scenario-driven and deterministic:
+1. Define intent in scenario YAML.
+2. Validate contracts up front (config + schema).
+3. Generate and validate infrastructure through layered checks.
+4. Persist artifacts and structured failures for repeatable iteration.
+
+## Architecture
+
+```mermaid
+flowchart TD
+    U[User / CI] --> CLI[cmd/infrafactory<br/>internal/cli]
+
+    CLI --> CFG[internal/config<br/>infrafactory.yaml loader + defaults + validation]
+    CLI --> SCN[internal/scenario<br/>scenario.yaml + scenario.schema.json validation]
+
+    CFG --> GEN[internal/generator<br/>contracts + prompt rendering + file parser]
+    SCN --> GEN
+
+    GEN --> H1[internal/harness static layer<br/>tofu init/validate/plan/show]
+    H1 --> H2[internal/harness mock deploy layer<br/>apply + topology + state policy]
+    H2 --> H3[internal/harness destroy layer<br/>destroy + orphan verification]
+
+    H1 --> FB[internal/feedback<br/>structured failures + loop + stuck detection]
+    H2 --> FB
+    H3 --> FB
+
+    FB --> RS[internal/runstore<br/>.infrafactory/runs artifacts]
+    RS --> CLI
+```
+
+High-level flow:
+1. Validate config and scenario contracts.
 2. Generate OpenTofu files from scenario intent.
-3. Run deterministic static and deploy-layer validation.
-4. Persist run artifacts and iterate with structured feedback.
+3. Run static checks (`tofu init/validate/plan/show`).
+4. Run deploy-layer checks (apply, topology, state policy).
+5. Run destroy and orphan verification.
+6. Persist run artifacts and iterate based on structured feedback.
 
 ## Current State
 
@@ -53,13 +90,21 @@ go run ./cmd/infrafactory --help
 
 ## Usage
 
-### Validate CLI wiring
+### Basic setup and verification
+
+```bash
+go mod tidy
+go test ./...
+bash scripts/check_all.sh
+```
+
+### Practical example 1: Inspect available CLI commands
 
 ```bash
 go run ./cmd/infrafactory --help
 ```
 
-Current command tree:
+Command tree currently exposed:
 - `init`
 - `generate`
 - `validate`
@@ -67,14 +112,15 @@ Current command tree:
 - `run`
 - `mock start`
 
-### Contracts and examples
+### Practical example 2: Work with scenario and config contracts
 
-- Runtime config contract: `infrafactory.yaml`
-- Scenario schema contract: `scenario.schema.json`
-- Example training scenario: `scenarios/training/web-app-paris.yaml`
-- Example holdout scenario: `scenarios/holdout/web-app-paris-pinned.yaml`
+Use these files as your canonical inputs:
+- Runtime config: `infrafactory.yaml`
+- Scenario schema: `scenario.schema.json`
+- Training scenario example: `scenarios/training/web-app-paris.yaml`
+- Holdout scenario example: `scenarios/holdout/web-app-paris-pinned.yaml`
 
-### Package-level test commands
+### Practical example 3: Run package-focused checks while developing
 
 ```bash
 go test ./internal/config
@@ -85,7 +131,7 @@ go test ./internal/feedback
 go test ./internal/runstore
 ```
 
-### Optional layer-2 integration smoke test
+### Practical example 4: Run optional layer-2 integration smoke test
 
 ```bash
 INFRAFACTORY_ENABLE_INTEGRATION=1 \
@@ -93,11 +139,13 @@ INFRAFACTORY_MOCKWAY_URL=http://localhost:8080 \
 go test ./internal/harness -run TestLayer2IntegrationSmoke
 ```
 
-### Run artifacts location
+### Practical example 5: Inspect persisted run artifacts
 
 ```text
 .infrafactory/runs/<scenario>/<run-id>/
 ```
+
+You will find run metadata and per-iteration artifacts in that directory tree.
 
 ## Local Quality Checks
 
