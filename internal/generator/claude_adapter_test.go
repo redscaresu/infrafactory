@@ -1,6 +1,7 @@
 package generator
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -16,6 +17,13 @@ type fakeClaudeRunner struct {
 	outputs []string
 	errAt   int
 	errText string
+}
+
+type blockingClaudeRunner struct{}
+
+func (blockingClaudeRunner) Run(ctx context.Context, _ ClaudeCommandRequest) ([]byte, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
 }
 
 func (f *fakeClaudeRunner) Run(_ context.Context, req ClaudeCommandRequest) ([]byte, error) {
@@ -257,6 +265,104 @@ func TestClaudeSeedGeneratorPhaseDelayBetweenCalls(t *testing.T) {
 		if delay != 2*time.Second {
 			t.Fatalf("expected delay 2s, got %v", delay)
 		}
+	}
+}
+
+func TestClaudeSeedGeneratorPhaseTimeout(t *testing.T) {
+	t.Parallel()
+
+	promptsDir := writeClaudePromptFixtures(t)
+	gen, err := NewClaudeSeedGenerator(ClaudeTransportConfig{
+		Command:      "claude",
+		PromptsDir:   promptsDir,
+		Phases:       []string{PhasePlanArchitecture},
+		PhaseTimeout: 20 * time.Millisecond,
+	}, blockingClaudeRunner{})
+	if err != nil {
+		t.Fatalf("new generator: %v", err)
+	}
+
+	_, err = gen.Generate(context.Background(), Request{ScenarioYAML: []byte("scenario: smoke")})
+	if err == nil {
+		t.Fatal("expected timeout error")
+	}
+	if !errors.Is(err, ErrTransportFailed) {
+		t.Fatalf("expected transport failure, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "phase timed out") {
+		t.Fatalf("expected timeout detail in error, got %v", err)
+	}
+}
+
+func TestClaudeSeedGeneratorProgressLogging(t *testing.T) {
+	t.Parallel()
+
+	promptsDir := writeClaudePromptFixtures(t)
+	runner := &fakeClaudeRunner{
+		outputs: []string{
+			`{"region":"fr-par"}`,
+			"# File: main.tf\nterraform {}",
+		},
+	}
+	var progress bytes.Buffer
+	gen, err := NewClaudeSeedGenerator(ClaudeTransportConfig{
+		Command:        "claude",
+		PromptsDir:     promptsDir,
+		Phases:         []string{PhasePlanArchitecture, PhaseGenerateHCL},
+		ProgressWriter: &progress,
+	}, runner)
+	if err != nil {
+		t.Fatalf("new generator: %v", err)
+	}
+
+	_, err = gen.Generate(context.Background(), Request{ScenarioYAML: []byte("scenario: smoke")})
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	text := progress.String()
+	for _, expected := range []string{
+		`generator/claude: phase "plan_architecture" start`,
+		`generator/claude: phase "plan_architecture" complete`,
+		`generator/claude: phase "generate_hcl" start`,
+		`generator/claude: phase "generate_hcl" complete`,
+	} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("expected progress log to contain %q, got:\n%s", expected, text)
+		}
+	}
+}
+
+func TestClaudeSeedGeneratorSelfReviewNoFileBlocksFallsBackToPhase2Files(t *testing.T) {
+	t.Parallel()
+
+	promptsDir := writeClaudePromptFixtures(t)
+	runner := &fakeClaudeRunner{
+		outputs: []string{
+			`{"region":"fr-par"}`,
+			"# File: main.tf\nterraform {}",
+			"Review notes only; no file blocks",
+		},
+	}
+	var progress bytes.Buffer
+	gen, err := NewClaudeSeedGenerator(ClaudeTransportConfig{
+		Command:        "claude",
+		PromptsDir:     promptsDir,
+		Phases:         []string{PhasePlanArchitecture, PhaseGenerateHCL, PhaseSelfReview},
+		ProgressWriter: &progress,
+	}, runner)
+	if err != nil {
+		t.Fatalf("new generator: %v", err)
+	}
+
+	out, err := gen.Generate(context.Background(), Request{ScenarioYAML: []byte("scenario: smoke")})
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	if string(out.Files["main.tf"]) != "terraform {}" {
+		t.Fatalf("expected phase2 files to be retained, got %q", string(out.Files["main.tf"]))
+	}
+	if !strings.Contains(progress.String(), `fallback: no file blocks; retaining prior files`) {
+		t.Fatalf("expected fallback progress log, got:\n%s", progress.String())
 	}
 }
 

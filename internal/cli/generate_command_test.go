@@ -146,7 +146,9 @@ func TestGenerateCommandSupportsJSONOutputMode(t *testing.T) {
 		scenarioLoader: defaultScenarioLoader,
 		deps: RuntimeDependencies{
 			Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
-				return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte("terraform {}\n")}}, nil
+				return &generator.GeneratedCode{Files: map[string][]byte{
+					"main.tf": []byte("terraform {}\n"),
+				}}, nil
 			}),
 		},
 	}
@@ -162,6 +164,60 @@ func TestGenerateCommandSupportsJSONOutputMode(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "\"schema\": \""+OutputSchemaVersion+"\"") {
 		t.Fatalf("expected machine json schema in output, got:\n%s", stdout.String())
+	}
+}
+
+func TestGenerateCommandAutoAddsScalewayProviderWiringWhenMissing(t *testing.T) {
+	t.Parallel()
+
+	h := newCommandTestHarness(t)
+	outputRoot := filepath.Join(h.WorkspaceDir, "output")
+
+	opts := runtimeOptions{
+		configLoader: func(path string) (config.Config, error) {
+			cfg, err := config.Load(path)
+			if err != nil {
+				return config.Config{}, err
+			}
+			cfg.Paths.Output = outputRoot
+			return cfg, nil
+		},
+		scenarioLoader: defaultScenarioLoader,
+		deps: RuntimeDependencies{
+			Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
+				return &generator.GeneratedCode{
+					Files: map[string][]byte{
+						"compute.tf": []byte(`resource "scaleway_instance_server" "web_1" { name = "web-1" }`),
+					},
+				}, nil
+			}),
+		},
+	}
+
+	cmd := newGenerateCommandForTest(opts)
+	stdout := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{h.ScenarioPath, "--config", h.ConfigPath})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute generate: %v", err)
+	}
+
+	providersPath := filepath.Join(outputRoot, "example-scenario", "providers.tf")
+	providers, err := os.ReadFile(providersPath)
+	if err != nil {
+		t.Fatalf("expected generated provider file %q: %v", providersPath, err)
+	}
+	providersContent := string(providers)
+	if !strings.Contains(providersContent, "required_providers") || !strings.Contains(providersContent, "scaleway/scaleway") {
+		t.Fatalf("expected required_providers.scaleway wiring, got:\n%s", providersContent)
+	}
+	if !strings.Contains(providersContent, `provider "scaleway"`) {
+		t.Fatalf("expected provider block wiring, got:\n%s", providersContent)
+	}
+	if !strings.Contains(stdout.String(), "Status: success") {
+		t.Fatalf("expected success output, got:\n%s", stdout.String())
 	}
 }
 

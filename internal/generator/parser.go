@@ -66,14 +66,53 @@ func stripCodeFence(content string) string {
 
 	lines := strings.Split(trimmed, "\n")
 	if len(lines) < 2 {
-		return trimmed
+		return sanitizeBodyLines(lines)
 	}
-	if !strings.HasPrefix(strings.TrimSpace(lines[0]), "```") {
-		return trimmed
+	if strings.HasPrefix(strings.TrimSpace(lines[0]), "```") {
+		// Prefer the first fenced payload block and ignore any trailing prose.
+		body := make([]string, 0, len(lines)-1)
+		for _, line := range lines[1:] {
+			trimmedLine := strings.TrimSpace(line)
+			if trimmedLine == "```" {
+				break
+			}
+			if isLikelyMarkdownArtifact(trimmedLine) {
+				break
+			}
+			body = append(body, line)
+		}
+		return sanitizeBodyLines(body)
 	}
-	if strings.TrimSpace(lines[len(lines)-1]) != "```" {
-		return trimmed
-	}
+	return sanitizeBodyLines(lines)
+}
 
-	return strings.Join(lines[1:len(lines)-1], "\n")
+func isLikelyMarkdownArtifact(line string) bool {
+	if line == "" {
+		return false
+	}
+	// Markdown tables and headers are common contamination from review prose.
+	if strings.HasPrefix(line, "|") {
+		return true
+	}
+	if strings.HasPrefix(line, "##") || strings.HasPrefix(line, "###") {
+		return true
+	}
+	return false
+}
+
+func sanitizeBodyLines(lines []string) string {
+	body := make([]string, 0, len(lines))
+	for _, line := range lines {
+		trimmedLine := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmedLine, "```") {
+			// Drop markdown fence markers leaking from model output.
+			continue
+		}
+		if isLikelyMarkdownArtifact(trimmedLine) {
+			// Stop once the model starts emitting markdown review prose.
+			break
+		}
+		body = append(body, line)
+	}
+	return strings.TrimSpace(strings.Join(body, "\n"))
 }

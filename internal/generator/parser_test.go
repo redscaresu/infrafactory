@@ -53,6 +53,20 @@ resource "x" "new" {}`,
 			},
 		},
 		{
+			name:  "fenced content drops trailing markdown artifacts",
+			input: "# File: outputs.tf\n```hcl\noutput \"x\" {\n  value = \"ok\"\n}\n```\n|---|---|\n| a | b |",
+			expected: map[string]string{
+				"outputs.tf": "output \"x\" {\n  value = \"ok\"\n}",
+			},
+		},
+		{
+			name:  "unfenced content strips fence markers and trailing markdown prose",
+			input: "# File: compute.tf\nresource \"x\" \"y\" {}\n```\n\n```hcl\n## Summary\n| a | b |",
+			expected: map[string]string{
+				"compute.tf": "resource \"x\" \"y\" {}",
+			},
+		},
+		{
 			name:        "missing headers",
 			input:       `resource "x" "y" {}`,
 			expectedErr: ErrParseFailed,

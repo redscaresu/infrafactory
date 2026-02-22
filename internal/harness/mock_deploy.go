@@ -26,12 +26,14 @@ func NewMockDeployHarness(runner CommandRunner, mock MockStateClient) *MockDeplo
 }
 
 type MockDeployResult struct {
+	Init          StageResult
 	Apply         StageResult
 	StateSnapshot []byte
 }
 
 type MockDeployError struct {
 	Stage string
+	Init  StageResult
 	Apply StageResult
 	Err   error
 }
@@ -55,11 +57,32 @@ func (e *MockDeployError) Is(target error) bool {
 }
 
 func (h *MockDeployHarness) Run(ctx context.Context, workDir string, env map[string]string) (*MockDeployResult, error) {
-	// Deploy flow is intentionally sequenced as reset -> apply -> state snapshot
+	// Deploy flow is intentionally sequenced as reset -> init -> apply -> state snapshot
 	// so checks always run against a fresh mock environment.
 	if err := h.mock.Reset(ctx); err != nil {
 		return nil, &MockDeployError{
 			Stage: "reset",
+			Err:   err,
+		}
+	}
+
+	initCmd := Command{
+		Name: "tofu",
+		Args: []string{"init"},
+		Dir:  workDir,
+		Env:  env,
+	}
+	initResult, err := h.runner.Run(ctx, initCmd)
+	initStage := StageResult{
+		Stage:  "init",
+		Cmd:    []string{"tofu", "init"},
+		Stdout: string(initResult.Stdout),
+		Stderr: string(initResult.Stderr),
+	}
+	if err != nil {
+		return nil, &MockDeployError{
+			Stage: "init",
+			Init:  initStage,
 			Err:   err,
 		}
 	}
@@ -80,6 +103,7 @@ func (h *MockDeployHarness) Run(ctx context.Context, workDir string, env map[str
 	if err != nil {
 		return nil, &MockDeployError{
 			Stage: "apply",
+			Init:  initStage,
 			Apply: stage,
 			Err:   err,
 		}
@@ -89,12 +113,14 @@ func (h *MockDeployHarness) Run(ctx context.Context, workDir string, env map[str
 	if err != nil {
 		return nil, &MockDeployError{
 			Stage: "state",
+			Init:  initStage,
 			Apply: stage,
 			Err:   err,
 		}
 	}
 
 	return &MockDeployResult{
+		Init:          initStage,
 		Apply:         stage,
 		StateSnapshot: stateSnapshot,
 	}, nil

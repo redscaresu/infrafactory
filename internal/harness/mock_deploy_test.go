@@ -11,6 +11,7 @@ func TestMockDeployHarnessRunSuccess(t *testing.T) {
 
 	runner := &fakeRunner{
 		responses: []runnerResponse{
+			{result: CommandResult{Stdout: []byte("init complete")}},
 			{result: CommandResult{Stdout: []byte("apply complete")}},
 		},
 	}
@@ -27,14 +28,21 @@ func TestMockDeployHarnessRunSuccess(t *testing.T) {
 	if !mockClient.resetCalled {
 		t.Fatal("expected reset to be called")
 	}
-	if len(runner.calls) != 1 {
-		t.Fatalf("expected one apply command call, got %d", len(runner.calls))
+	if len(runner.calls) != 2 {
+		t.Fatalf("expected init+apply command calls, got %d", len(runner.calls))
 	}
-	got := append([]string{runner.calls[0].Name}, runner.calls[0].Args...)
-	expected := []string{"tofu", "apply", "-auto-approve"}
-	for i := range expected {
-		if got[i] != expected[i] {
-			t.Fatalf("unexpected apply command: got %v want %v", got, expected)
+	gotInit := append([]string{runner.calls[0].Name}, runner.calls[0].Args...)
+	expectedInit := []string{"tofu", "init"}
+	for i := range expectedInit {
+		if gotInit[i] != expectedInit[i] {
+			t.Fatalf("unexpected init command: got %v want %v", gotInit, expectedInit)
+		}
+	}
+	gotApply := append([]string{runner.calls[1].Name}, runner.calls[1].Args...)
+	expectedApply := []string{"tofu", "apply", "-auto-approve"}
+	for i := range expectedApply {
+		if gotApply[i] != expectedApply[i] {
+			t.Fatalf("unexpected apply command: got %v want %v", gotApply, expectedApply)
 		}
 	}
 	if string(out.StateSnapshot) != `{"state":"ok"}` {
@@ -49,6 +57,7 @@ func TestMockDeployHarnessRunFailures(t *testing.T) {
 		name          string
 		mockErrReset  error
 		mockErrState  error
+		initErr       error
 		runnerErr     error
 		expectedStage string
 	}{
@@ -56,6 +65,11 @@ func TestMockDeployHarnessRunFailures(t *testing.T) {
 			name:          "reset failure",
 			mockErrReset:  errors.New("reset failed"),
 			expectedStage: "reset",
+		},
+		{
+			name:          "init failure",
+			initErr:       errors.New("init failed"),
+			expectedStage: "init",
 		},
 		{
 			name:          "apply failure",
@@ -76,6 +90,10 @@ func TestMockDeployHarnessRunFailures(t *testing.T) {
 
 			runner := &fakeRunner{
 				responses: []runnerResponse{
+					{
+						result: CommandResult{Stdout: []byte("init"), Stderr: []byte("init stderr")},
+						err:    tc.initErr,
+					},
 					{
 						result: CommandResult{Stdout: []byte("apply"), Stderr: []byte("stderr")},
 						err:    tc.runnerErr,

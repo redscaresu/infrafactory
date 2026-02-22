@@ -6,6 +6,11 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 
 | id | slice | title | priority | status | deps | owner |
 |---|---|---|---|---|---|---|
+| M15 | Maintenance | Auto-inject missing Scaleway provider wiring during generate | P1 | done | M14 | codex |
+| M14 | Maintenance | Fail generate early when Scaleway resources are missing provider wiring | P1 | done | M13 | codex |
+| M13 | Maintenance | Make mock deploy test path self-contained by running tofu init before apply | P1 | done | M12 | codex |
+| M12 | Maintenance | Harden parser/self-review fallback and surface tofu/mock stderr in CLI failures | P1 | done | M11 | codex |
+| M11 | Maintenance | Add Claude phase timeout and progress logging to prevent silent generate hangs | P1 | done | - | codex |
 | M10 | Maintenance | Re-review README and optimize until two consecutive no-change passes (follow-up) | P1 | done | - | codex |
 | M9 | Maintenance | Add explicit README happy-path section for Claude Code end-to-end run | P1 | done | - | codex |
 | M8 | Maintenance | Re-review README and optimize until two consecutive no-change passes | P1 | done | - | codex |

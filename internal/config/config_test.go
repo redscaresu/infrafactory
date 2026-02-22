@@ -28,6 +28,9 @@ func TestLoadValidConfigAppliesDefaults(t *testing.T) {
 	if cfg.Agent.Claude.Command != "claude" {
 		t.Fatalf("expected default agent.claude.command claude, got %q", cfg.Agent.Claude.Command)
 	}
+	if cfg.Agent.Claude.PhaseTimeoutSeconds != 300 {
+		t.Fatalf("expected default agent.claude.phase_timeout_seconds 300, got %d", cfg.Agent.Claude.PhaseTimeoutSeconds)
+	}
 	if len(cfg.Agent.Phases) != 3 {
 		t.Fatalf("expected default phases length 3, got %d", len(cfg.Agent.Phases))
 	}
@@ -100,6 +103,19 @@ mockway:
   url: http://localhost:8080
 `,
 			expectedFieldSet: []string{"agent.claude.command"},
+		},
+		{
+			name: "claude phase timeout invalid",
+			yaml: `version: "1.0"
+agent:
+  type: claude-code
+  claude:
+    command: claude
+    phase_timeout_seconds: 0
+mockway:
+  url: http://localhost:8080
+`,
+			expectedFieldSet: []string{"agent.claude.phase_timeout_seconds"},
 		},
 	}
 

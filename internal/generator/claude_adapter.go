@@ -3,7 +3,9 @@ package generator
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os/exec"
 	"path/filepath"
 	"sort"
@@ -16,6 +18,8 @@ type ClaudeTransportConfig struct {
 	PromptsDir       string
 	Phases           []string
 	PhaseDelay       time.Duration
+	PhaseTimeout     time.Duration
+	ProgressWriter   io.Writer
 	Environment      map[string]string
 	Constraints      string
 	ResolvedMappings string
@@ -52,6 +56,9 @@ func NewClaudeSeedGenerator(cfg ClaudeTransportConfig, runner ClaudeCommandRunne
 	if cfg.PhaseDelay < 0 {
 		return nil, NewGenerateError(ErrTransportFailed, "config", fmt.Errorf("phase delay must be >= 0"))
 	}
+	if cfg.PhaseTimeout < 0 {
+		return nil, NewGenerateError(ErrTransportFailed, "config", fmt.Errorf("phase timeout must be >= 0"))
+	}
 	for _, phase := range cfg.Phases {
 		if _, err := phaseTemplateFile(phase); err != nil {
 			return nil, err
@@ -78,18 +85,30 @@ func (g *ClaudeSeedGenerator) Generate(ctx context.Context, req Request) (*Gener
 	lastFiles := map[string][]byte{}
 
 	for i, phase := range g.cfg.Phases {
+		g.logProgress("phase %q start\n", phase)
+
 		prompt, err := g.renderPhasePrompt(phase, req, phaseOutput, lastFiles)
 		if err != nil {
 			return nil, err
 		}
 
-		out, err := g.runner.Run(ctx, ClaudeCommandRequest{
+		phaseCtx := ctx
+		cancel := func() {}
+		if g.cfg.PhaseTimeout > 0 {
+			phaseCtx, cancel = context.WithTimeout(ctx, g.cfg.PhaseTimeout)
+		}
+		out, err := g.runner.Run(phaseCtx, ClaudeCommandRequest{
 			Command: g.cfg.Command,
 			Args:    []string{"-p", prompt},
 			Env:     g.cfg.Environment,
 		})
+		cancel()
 		if err != nil {
 			detail := redactTransportDetail(err.Error(), prompt, g.cfg.Environment)
+			if errors.Is(err, context.DeadlineExceeded) || errors.Is(phaseCtx.Err(), context.DeadlineExceeded) {
+				detail = fmt.Sprintf("phase timed out after %s: %s", g.cfg.PhaseTimeout, detail)
+			}
+			g.logProgress("phase %q failed\n", phase)
 			return nil, NewGenerateError(ErrTransportFailed, phase, fmt.Errorf("run %q: %s", g.cfg.Command, detail))
 		}
 		phaseText := string(out)
@@ -98,6 +117,7 @@ func (g *ClaudeSeedGenerator) Generate(ctx context.Context, req Request) (*Gener
 			Name:   phase,
 			Output: out,
 		})
+		g.logProgress("phase %q complete\n", phase)
 
 		switch phase {
 		case PhaseGenerateHCL:
@@ -113,6 +133,10 @@ func (g *ClaudeSeedGenerator) Generate(ctx context.Context, req Request) (*Gener
 			}
 			files, parseErr := ParseFileBlocks(phaseText)
 			if parseErr != nil {
+				if strings.Contains(parseErr.Error(), "no '# File:' blocks found") {
+					g.logProgress("phase %q fallback: no file blocks; retaining prior files\n", phase)
+					break
+				}
 				return nil, NewGenerateError(ErrParseFailed, phase, parseErr)
 			}
 			lastFiles = files
@@ -135,6 +159,13 @@ func (g *ClaudeSeedGenerator) Generate(ctx context.Context, req Request) (*Gener
 	}
 
 	return result, nil
+}
+
+func (g *ClaudeSeedGenerator) logProgress(format string, args ...any) {
+	if g.cfg.ProgressWriter == nil {
+		return
+	}
+	_, _ = fmt.Fprintf(g.cfg.ProgressWriter, "generator/claude: "+format, args...)
 }
 
 func (g *ClaudeSeedGenerator) renderPhasePrompt(phase string, req Request, outputs map[string]string, files map[string][]byte) (string, error) {

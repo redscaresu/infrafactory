@@ -235,6 +235,8 @@ func buildDefaultSeedGenerator(cfg config.Config) (generator.SeedGenerator, erro
 			PromptsDir:       cfg.Paths.Prompts,
 			Phases:           cfg.Agent.Phases,
 			PhaseDelay:       phaseDelay,
+			PhaseTimeout:     time.Duration(cfg.Agent.Claude.PhaseTimeoutSeconds) * time.Second,
+			ProgressWriter:   os.Stderr,
 			Constraints:      "",
 			ResolvedMappings: "",
 			Overrides:        "",

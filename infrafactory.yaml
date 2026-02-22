@@ -10,6 +10,7 @@ agent:
     - self_review
   claude:
     command: claude          # command used for claude-code transport
+    phase_timeout_seconds: 300  # hard timeout per claude phase call
   openrouter:
     model: ""                # required when type=openrouter
     base_url: https://openrouter.ai/api/v1

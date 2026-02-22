@@ -28,6 +28,11 @@ Last updated: 2026-02-22
 - Keep startup/read-order instructions only in `SESSION_START.md` to avoid duplication.
 
 ## Recent updates
+- Completed maintenance ticket `M15`: generate now auto-injects missing Scaleway provider wiring (`required_providers` + `provider "scaleway"`) when Scaleway resources are emitted, with focused command test coverage.
+- Completed maintenance ticket `M14`: added fail-fast generate validation for missing Scaleway provider wiring when Scaleway resources are present, with focused command test coverage.
+- Completed maintenance ticket `M13`: made mock deploy path self-contained by running `tofu init` before `tofu apply`, with `mock_deploy/init` stage reporting and focused harness/CLI test coverage.
+- Completed maintenance ticket `M12`: hardened generator parsing against markdown contamination, added Claude self-review fallback when no `# File:` blocks are returned, and surfaced trimmed stderr details directly in `validate`/`test` failure output.
+- Completed maintenance ticket `M11`: added Claude per-phase timeout and progress logging to prevent silent generate hangs; wired config default (`agent.claude.phase_timeout_seconds`) and added focused timeout/progress tests.
 - Completed maintenance ticket `M10`: follow-up README optimization pass fixed portability wording and reached two consecutive no-change review passes.
 - Completed maintenance ticket `M9`: added a dedicated README `Happy Path (Claude Code)` section with explicit end-to-end commands, artifact paths, and cleanup steps.
 - Completed maintenance ticket `M8`: re-reviewed README, added transport adapter smoke-test runbook guidance, and finished with two consecutive no-change review passes.

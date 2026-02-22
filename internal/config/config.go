@@ -40,7 +40,8 @@ type AgentConfig struct {
 }
 
 type ClaudeConfig struct {
-	Command string `yaml:"command"`
+	Command             string `yaml:"command"`
+	PhaseTimeoutSeconds int    `yaml:"phase_timeout_seconds"`
 }
 
 type OpenRouterConfig struct {
@@ -125,7 +126,8 @@ func Default() Config {
 				generator.PhaseSelfReview,
 			},
 			Claude: ClaudeConfig{
-				Command: "claude",
+				Command:             "claude",
+				PhaseTimeoutSeconds: 300,
 			},
 			OpenRouter: OpenRouterConfig{
 				BaseURL:        "https://openrouter.ai/api/v1",
@@ -265,6 +267,9 @@ func validate(cfg Config) error {
 	case generator.AgentTypeClaudeCode:
 		if cfg.Agent.Claude.Command == "" {
 			fields = append(fields, FieldError{Field: "agent.claude.command", Err: "is required when agent.type=claude-code"})
+		}
+		if cfg.Agent.Claude.PhaseTimeoutSeconds <= 0 {
+			fields = append(fields, FieldError{Field: "agent.claude.phase_timeout_seconds", Err: "must be greater than 0"})
 		}
 	case generator.AgentTypeOpenRouter:
 		if cfg.Agent.OpenRouter.Model == "" {

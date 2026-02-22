@@ -39,6 +39,10 @@ func runGenerateCommand(cmd *cobra.Command, args []string, runtime *CommandRunti
 	if err := generated.Validate(); err != nil {
 		return fmt.Errorf("validate generated files: %w", err)
 	}
+	ensureScalewayProviderWiring(generated.Files)
+	if err := validateScalewayProviderWiring(generated.Files); err != nil {
+		return fmt.Errorf("validate generated files: %w", err)
+	}
 
 	writtenFiles, err := writeGeneratedFiles(runtime.OutputDir(), generated.Files)
 	if err != nil {
@@ -60,6 +64,73 @@ func runGenerateCommand(cmd *cobra.Command, args []string, runtime *CommandRunti
 	}
 
 	return nil
+}
+
+func ensureScalewayProviderWiring(files map[string][]byte) {
+	hasScalewayResource, hasRequiredProviders, hasProviderBlock := detectScalewayProviderWiring(files)
+	if !hasScalewayResource {
+		return
+	}
+	missingRequiredProviders := !hasRequiredProviders
+	missingProviderBlock := !hasProviderBlock
+	if !missingRequiredProviders && !missingProviderBlock {
+		return
+	}
+
+	sections := make([]string, 0, 2)
+	if missingRequiredProviders {
+		sections = append(sections, `terraform {
+  required_providers {
+    scaleway = {
+      source = "scaleway/scaleway"
+    }
+  }
+}`)
+	}
+	if missingProviderBlock {
+		sections = append(sections, `provider "scaleway" {}`)
+	}
+	injected := strings.Join(sections, "\n\n")
+	if existing, ok := files["providers.tf"]; ok && strings.TrimSpace(string(existing)) != "" {
+		files["providers.tf"] = []byte(strings.TrimSpace(string(existing)) + "\n\n" + injected + "\n")
+		return
+	}
+	files["providers.tf"] = []byte(injected + "\n")
+}
+
+func validateScalewayProviderWiring(files map[string][]byte) error {
+	hasScalewayResource, hasRequiredProviders, hasProviderBlock := detectScalewayProviderWiring(files)
+
+	if !hasScalewayResource {
+		return nil
+	}
+	if !hasRequiredProviders {
+		return fmt.Errorf("scaleway resources detected but required_providers.scaleway is missing")
+	}
+	if !hasProviderBlock {
+		return fmt.Errorf("scaleway resources detected but provider \"scaleway\" block is missing")
+	}
+	return nil
+}
+
+func detectScalewayProviderWiring(files map[string][]byte) (bool, bool, bool) {
+	hasScalewayResource := false
+	hasRequiredProviders := false
+	hasProviderBlock := false
+
+	for _, content := range files {
+		text := strings.ToLower(string(content))
+		if strings.Contains(text, "scaleway_") {
+			hasScalewayResource = true
+		}
+		if strings.Contains(text, "required_providers") && strings.Contains(text, "scaleway") {
+			hasRequiredProviders = true
+		}
+		if strings.Contains(text, `provider "scaleway"`) {
+			hasProviderBlock = true
+		}
+	}
+	return hasScalewayResource, hasRequiredProviders, hasProviderBlock
 }
 
 func writeGeneratedFiles(outputDir string, files map[string][]byte) (int, error) {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/redscaresu/infrafactory/internal/harness"
 	"github.com/redscaresu/infrafactory/internal/scenario"
@@ -34,6 +35,9 @@ func testCommandEnv(runtime *CommandRuntime) map[string]string {
 
 func appendMockDeployResult(stages []StageSummary, failures []FailureSummary, result *harness.MockDeployResult, runErr error) ([]StageSummary, []FailureSummary) {
 	if runErr == nil {
+		if result != nil && result.Init.Stage != "" {
+			stages = append(stages, StageSummary{Layer: "mock_deploy", Stage: "init", Status: StageStatusPass})
+		}
 		if result != nil && result.Apply.Stage != "" {
 			stages = append(stages, StageSummary{Layer: "mock_deploy", Stage: "apply", Status: StageStatusPass})
 		}
@@ -50,6 +54,8 @@ func appendMockDeployResult(stages []StageSummary, failures []FailureSummary, re
 	switch mockErr.Stage {
 	case "reset":
 		stages = append(stages, StageSummary{Layer: "mock_deploy", Stage: "reset", Status: StageStatusFail})
+	case "init":
+		stages = append(stages, StageSummary{Layer: "mock_deploy", Stage: "init", Status: StageStatusFail})
 	case "apply":
 		if len(stages) == 0 || stages[len(stages)-1].Stage != "apply" {
 			stages = append(stages, StageSummary{Layer: "mock_deploy", Stage: "apply", Status: StageStatusFail})
@@ -65,10 +71,34 @@ func appendMockDeployResult(stages []StageSummary, failures []FailureSummary, re
 		Stage:   mockErr.Stage,
 		Check:   mockErr.Stage,
 		Command: "mock deploy harness",
-		Detail:  mockErr.Err.Error(),
+		Detail:  mockDeployFailureDetail(mockErr),
 	})
 
 	return stages, failures
+}
+
+func mockDeployFailureDetail(err *harness.MockDeployError) string {
+	if err == nil {
+		return ""
+	}
+	detail := err.Err.Error()
+	var stderr string
+	switch err.Stage {
+	case "init":
+		stderr = err.Init.Stderr
+	case "apply":
+		stderr = err.Apply.Stderr
+	}
+	if stderr != "" {
+		trimmedStderr := strings.TrimSpace(stderr)
+		if trimmedStderr != "" {
+			if len(trimmedStderr) > 600 {
+				trimmedStderr = trimmedStderr[:600] + "..."
+			}
+			detail = fmt.Sprintf("%s | stderr: %s", detail, trimmedStderr)
+		}
+	}
+	return detail
 }
 
 func appendDestroyResult(stages []StageSummary, failures []FailureSummary, result *harness.DestroyResult, runErr error) ([]StageSummary, []FailureSummary) {
