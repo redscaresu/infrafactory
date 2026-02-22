@@ -6,6 +6,9 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 
 | id | slice | title | priority | status | deps | owner |
 |---|---|---|---|---|---|---|
+| M26 | Maintenance | Refine unfinished-slice governance again (`S9-T8`, `S12`-`S15`) and record two consecutive no-change passes | P1 | done | M25 | codex |
+| M25 | Maintenance | Optimize and embed post-slice review-improve prompt across unfinished slices | P1 | done | M24 | codex |
+| M24 | Maintenance | Refine all unfinished slices (`S12`-`S15` plus blocked `S9-T8`) and record two consecutive no-change passes | P1 | done | M23 | codex |
 | M23 | Maintenance | Plan Slice 15 adaptive retry and transport-resilience policy | P1 | done | M22 | codex |
 | M22 | Maintenance | Refine all unfinished slices (`S12`-`S14`) for higher-signal model-guided repair and run two consecutive no-change passes | P1 | done | M21 | codex |
 | M21 | Maintenance | Plan Slice 14 high-fidelity run feedback payload wiring for model-guided fixes | P1 | done | M20 | codex |
@@ -168,7 +171,7 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 | S9-T5 | `internal/cli/run_command.go`, `internal/feedback`, `internal/runstore` | runstore backend redesign | `run` performs criteria-aware iteration decisions (not just stage pass-through) and preserves convergence semantics (success/max/stuck) | run command tests for criteria-driven success/failure, max-iteration stop, and stuck-detection stop |
 | S9-T6 | `internal/cli/run_command.go`, `internal/scenario/holdout.go` | holdout schema redesign | criteria-only holdouts auto-run after training convergence and block without feeding holdout failures into generator context | holdout discovery/execution tests for pass/block/no-feedback behavior |
 | S9-T7 | `internal/cli/root.go`, `internal/cli/mock_*`, `Makefile` (if needed) | external image publishing strategy | `mock` command supports `start`, `stop`, `status`, and `logs` with deterministic output and errors | command tests for stop/status/logs happy-path + missing-runtime/dependency failures |
-| S9-T8 | `internal/harness`, `internal/cli`, docs | mock deploy layer and hermetic defaults | sandbox/live deploy stays permanently blocked and out-of-scope under governance policy (ADR-0003) | n/a (permanently blocked governance path) |
+| S9-T8 | `internal/harness`, `internal/cli`, docs | mock deploy layer and hermetic defaults | sandbox/live deploy stays permanently blocked and out-of-scope under governance policy (ADR-0003); unfinished-slice refinements may only update governance/docs unless ADR-0003 is superseded | doc/governance checklist only (no implementation path while blocked) |
 | S9-T9 | `README.md`, `STATUS.md`, `ROADMAP.md` | runtime behavior changes | docs explicitly state sandbox/live deploy deferment due cost implications | doc assertion checklist |
 | S10-T1 | `internal/cli/output_contract*`, command tests, fixtures/goldens | command business logic changes | final human/json outputs for all commands are frozen via golden snapshots with deterministic ordering and schema assertions after Slice 10 contract-shaping tickets land | golden tests for `init/generate/validate/test/run/mock *` in human+json modes and deterministic fixture update guardrails |
 | S10-T2 | `internal/cli/runtime.go`, command adapters, error helpers | schema/provider behavior changes | CLI errors use consistent codes, operation names, and actionable detail shapes across config/scenario/runtime/dependency failures | table-driven error-shape tests for representative failure classes per command |
@@ -212,3 +215,5 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 - Update `status` and dependencies as work evolves.
 - Keep exactly one `in_progress` ticket at a time.
 - Use `CURRENT_TICKET.md` for session-level execution details.
+- Post-slice review-improve protocol (for unfinished slices): after each slice implementation, run a review pass, apply improvements, and repeat until two consecutive passes report no further improvements; log each pass in `STATUS.md` and `CURRENT_TICKET.md`.
+- Blocked-slice refinement protocol: for blocked tickets (for example `S9-T8`), refinement scope is governance/docs/risk communication only; do not implement blocked runtime behavior unless blocking ADR/policy is explicitly superseded.

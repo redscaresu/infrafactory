@@ -32,6 +32,18 @@ Last updated: 2026-02-22
 - Keep startup/read-order instructions only in `SESSION_START.md` to avoid duplication.
 
 ## Recent updates
+- Completed maintenance ticket `M26`: refined unfinished-slice governance again (`S9-T8`, `S12`..`S15`) and completed refinement loop with two consecutive no-change passes.
+- Refinement pass 1 improvements applied: clarified blocked-slice (`S9-T8`) refinement scope as governance/docs-only unless ADR-0003 is superseded; added matching fresh-context instruction.
+- Refinement pass 2: no additional improvements identified.
+- Refinement pass 3: no additional improvements identified (second consecutive no-change pass).
+- Completed maintenance ticket `M25`: optimized and embedded a reusable post-slice review-improve prompt across unfinished-slice governance docs.
+- Refinement pass 1 improvements applied: added explicit slice-closure protocol text to `ROADMAP.md` slice milestones (12-15), `BACKLOG.md` operating notes, and `SESSION_START.md` fresh-context addenda.
+- Refinement pass 2: no additional improvements identified.
+- Refinement pass 3: no additional improvements identified (second consecutive no-change pass).
+- Completed maintenance ticket `M24`: refined unfinished-slice execution guidance (`S12`..`S15` plus blocked-lane awareness for `S9-T8`) and recorded refinement passes to two consecutive no-change.
+- Refinement pass 1 improvements applied: added explicit canonical execution constraints and guardrail rules for slices 12-15 in `SESSION_START.md` (ordering, compatibility, stop-signal, classification, adaptive-retry diagnostics).
+- Refinement pass 2: no additional improvements identified.
+- Refinement pass 3: no additional improvements identified (second consecutive no-change pass).
 - Completed maintenance ticket `M23`: planned Slice 15 adaptive retry and transport-resilience milestone to close the gap between high-fidelity feedback and practical transport-failure convergence behavior.
 - Completed maintenance ticket `M22`: refined all unfinished slice definitions (`S12`..`S14`) to increase model-correction signal quality and tighten stop/control semantics.
 - Refinement pass 1 improvements applied across unfinished slices: added failure-class tagging requirements, explicit `--iterations`/`--max-iterations` precedence+warning contract, and non-duplicative terminal stop signaling constraints.

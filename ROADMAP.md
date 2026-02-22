@@ -9,6 +9,8 @@ This file is intentionally high-level and mostly stable; day-to-day execution tr
 - Build in vertical slices.
 - Add focused tests with each behavioral change.
 - Prefer deterministic behavior and explicit contracts.
+- Slice closure review protocol (optimized prompt):
+  After each slice is implemented, run a dedicated review-improve pass over code, tests, docs, and artifacts; apply any improvements that increase correctness, determinism, observability, and operator clarity; repeat until two consecutive passes find no further improvements; record each pass outcome in `STATUS.md` and `CURRENT_TICKET.md`.
 
 ## Milestones
 
@@ -84,6 +86,7 @@ This file is intentionally high-level and mostly stable; day-to-day execution tr
   - deterministic compatibility/deprecation path for legacy `max_iterations` / `--max-iterations`.
 - Ensure failed iterations emit deterministic, structured failure summaries to app logs for each pass.
 - Ensure terminal stop signaling is deterministic and non-duplicative for a single stop event.
+- Apply slice-closure review protocol before marking Slice 12 complete.
 
 13. Slice 13: Full application logic logging and observability
 - Define a stable application logging contract (fields, levels, redaction, deterministic formatting).
@@ -93,6 +96,7 @@ This file is intentionally high-level and mostly stable; day-to-day execution tr
 - Include failure-class context in run-loop observability (IaC-validation vs transport/runtime vs orchestration-control).
 - Preserve secret-safety/redaction guarantees while increasing observability depth.
 - Add focused tests (and where needed golden fixtures) to freeze logging behavior and prevent regressions.
+- Apply slice-closure review protocol before marking Slice 13 complete.
 
 14. Slice 14: High-fidelity run feedback payloads for model-guided fixes
 - Define a strict feedback contract so iteration `N+1` receives detailed failure context from iteration `N`, not only coarse command-level errors.
@@ -101,6 +105,7 @@ This file is intentionally high-level and mostly stable; day-to-day execution tr
 - Enforce deterministic terminal-control signaling so one stop event emits one canonical control reason in feedback/output.
 - Add regression tests that fail if feedback payloads regress back to generic markers like `validation failed`.
 - Document operator and fresh-context workflows for inspecting feedback payload quality from run artifacts.
+- Apply slice-closure review protocol before marking Slice 14 complete.
 
 15. Slice 15: Adaptive retry and transport-resilience policy
 - Define retry-governance rules that distinguish model-correctable IaC failures from non-correctable transport/runtime failures.
@@ -109,6 +114,7 @@ This file is intentionally high-level and mostly stable; day-to-day execution tr
 - Persist richer transport diagnostics (phase, timeout, exit signal, stderr summary, duration) in run artifacts for post-mortem and prompt tuning.
 - Surface operator-facing remediation guidance (for example timeout tuning vs scenario/code changes) in deterministic output and runbook docs.
 - Add focused tests proving transport-dominated runs stop with actionable reasons rather than generic max-iteration churn.
+- Apply slice-closure review protocol before marking Slice 15 complete.
 
 ## Near-term execution order
 

@@ -70,6 +70,9 @@ If either command fails, restore the repo to a green baseline before starting a 
   persist per-iteration transport diagnostics in run artifacts so operators can separate IaC defects from runtime/dependency constraints.
 - For any future planning refinement over unfinished slices (`todo`/`blocked` backlog work):
   require the same refinement protocol: continue until two consecutive no-change passes, and explicitly record pass outcomes in both `CURRENT_TICKET.md` and `STATUS.md` for fresh-context continuity.
+  when refining blocked slices (for example `S9-T8`), constrain work to governance/docs/risk messaging only unless the blocking ADR/policy is explicitly superseded.
+- Optimized post-slice review prompt (apply to each unfinished slice after implementation):
+  "After completing this slice, run a dedicated review-improve pass over code, tests, docs, and artifacts. Apply any improvements that increase correctness, determinism, observability, and operator clarity. Repeat review-improve passes until two consecutive passes find no further improvements. Record each pass outcome in `STATUS.md` and `CURRENT_TICKET.md`."
 
 ### Slice 7 default execution constraints
 - Canonical order:
@@ -129,6 +132,40 @@ If either command fails, restore the repo to a green baseline before starting a 
   transport adapters must not leak raw secrets (`API keys`, tokens, prompt bodies) in surfaced errors/logs.
 - CI rule:
   hermetic tests remain default; real transport smoke coverage stays opt-in.
+
+### Slice 12 default execution constraints
+- Canonical order:
+  `S12-T1 -> (S12-T2 || S12-T3) -> S12-T6 -> S12-T4 -> S12-T5`
+- Contract-first rule:
+  do not implement config/CLI migration work before `S12-T1` freezes naming/default/compatibility semantics.
+- Compatibility rule:
+  when both `--iterations` and legacy `--max-iterations` are present, enforce deterministic precedence and warning behavior per contract tests.
+- Stop-signal rule:
+  emit one canonical terminal stop reason for a single stop event; avoid dual stuck/max markers in output/logs/artifacts.
+
+### Slice 13 default execution constraints
+- Canonical order:
+  `S13-T1 -> S13-T2 -> (S13-T3 || S13-T4) -> S13-T5 -> S13-T6`
+- Contract rule:
+  freeze logging field/level/redaction contract before broad instrumentation rollout.
+- Sink rule:
+  preserve deterministic sink behavior (`stderr` + run-scoped artifact path) and stable correlation fields (`run_id`, `iteration`, `stage`, `check`).
+
+### Slice 14 default execution constraints
+- Canonical order:
+  `S14-T1 -> S14-T2 -> S14-T3 -> S14-T4 -> S14-T5`
+- Feedback-signal rule:
+  prioritize structured failure payload fidelity over prompt phrasing tweaks; avoid coarse-only retry payloads when structured failures exist.
+- Classification rule:
+  preserve failure-class tagging (`iac_validation`, `transport_runtime`, `orchestration_control`) in `FeedbackJSON`.
+
+### Slice 15 default execution constraints
+- Canonical order:
+  `S15-T1 -> (S15-T2 || S15-T3) -> S15-T4 -> S15-T5 -> S15-T6`
+- Adaptive-retry rule:
+  transport-dominated failure runs should terminate with deterministic actionable reasons rather than exhausting iteration budget.
+- Diagnostics rule:
+  run artifacts must include stable transport diagnostics (phase/timeout/signal/stderr summary/duration) with backward-compatible reads.
 
 ## 3) Execute
 - Implement + test.
