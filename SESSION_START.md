@@ -18,6 +18,18 @@
 - Pick next uncompleted ticket from `BACKLOG.md`.
 - Fill `CURRENT_TICKET.md` for session execution.
 
+### Slice 7 default execution constraints
+- Canonical order:
+  `S7-T1 -> S7-T2 -> S7-T12 -> S7-T16 -> S7-T3/S7-T4/S7-T5 -> S7-T6 -> S7-T7 -> S7-T8 -> S7-T9 -> S7-T11 -> S7-T15`
+- Parallel lane:
+  `S7-T10` can proceed after `S7-T12`.
+- Supporting/optional lane:
+  `S7-T13` is supporting infrastructure; `S7-T14` remains opt-in real-tool smoke.
+- Output contract defaults:
+  deterministic human summary + deterministic JSON schema/output ordering.
+- Test policy:
+  hermetic tests by default, real-tool smoke opt-in only.
+
 ## 3) Execute
 - Implement + test.
 - Run `go test ./...` (or explain why not).
