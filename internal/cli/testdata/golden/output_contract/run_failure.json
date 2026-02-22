@@ -1,0 +1,52 @@
+{
+  "schema": "infrafactory.output.v1",
+  "result": {
+    "command": "run",
+    "scenario": "web-app",
+    "status": "failed",
+    "stages": [
+      {
+        "layer": "run",
+        "stage": "iteration_1_generate",
+        "status": "pass"
+      },
+      {
+        "layer": "run",
+        "stage": "iteration_1_validate",
+        "status": "fail"
+      }
+    ],
+    "failures": [
+      {
+        "layer": "run",
+        "stage": "iteration_1",
+        "check": "stuck",
+        "command": "run loop",
+        "detail": "stopped due to stuck detection"
+      },
+      {
+        "layer": "run",
+        "stage": "iteration_1_validate",
+        "check": "validate",
+        "command": "validate",
+        "detail": "validation failed"
+      }
+    ],
+    "explainability": [
+      {
+        "layer": "run",
+        "stage": "iteration_1",
+        "check": "stuck",
+        "summary": "criteria check failed and requires scenario/harness inspection",
+        "action": "review failure detail and criteria definition for this check"
+      },
+      {
+        "layer": "run",
+        "stage": "iteration_1_validate",
+        "check": "validate",
+        "summary": "criteria check failed and requires scenario/harness inspection",
+        "action": "review failure detail and criteria definition for this check"
+      }
+    ]
+  }
+}

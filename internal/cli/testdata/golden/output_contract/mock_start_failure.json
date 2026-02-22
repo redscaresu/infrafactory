@@ -1,0 +1,33 @@
+{
+  "schema": "infrafactory.output.v1",
+  "result": {
+    "command": "mock start",
+    "scenario": "n/a",
+    "status": "failed",
+    "stages": [
+      {
+        "layer": "mock",
+        "stage": "preflight",
+        "status": "fail"
+      }
+    ],
+    "failures": [
+      {
+        "layer": "mock",
+        "stage": "preflight",
+        "check": "start",
+        "command": "mock start",
+        "detail": "docker unavailable"
+      }
+    ],
+    "explainability": [
+      {
+        "layer": "mock",
+        "stage": "preflight",
+        "check": "start",
+        "summary": "criteria check failed and requires scenario/harness inspection",
+        "action": "review failure detail and criteria definition for this check"
+      }
+    ]
+  }
+}

@@ -1,0 +1,12 @@
+Command: mock start
+Scenario: n/a
+Status: failed
+
+Stages:
+- mock/preflight: fail
+
+Failures:
+- mock/preflight check=start command="mock start" detail="docker unavailable"
+
+Explainability:
+- mock/preflight check=start summary="criteria check failed and requires scenario/harness inspection" action="review failure detail and criteria definition for this check"

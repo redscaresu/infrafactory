@@ -1,0 +1,22 @@
+{
+  "schema": "infrafactory.output.v1",
+  "result": {
+    "command": "generate",
+    "scenario": "web-app",
+    "status": "success",
+    "stages": [
+      {
+        "layer": "generate",
+        "stage": "seed",
+        "status": "pass"
+      },
+      {
+        "layer": "generate",
+        "stage": "write_files",
+        "status": "pass",
+        "detail": "3 files"
+      }
+    ],
+    "failures": []
+  }
+}

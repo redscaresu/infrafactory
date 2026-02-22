@@ -1,0 +1,33 @@
+{
+  "schema": "infrafactory.output.v1",
+  "result": {
+    "command": "generate",
+    "scenario": "web-app",
+    "status": "failed",
+    "stages": [
+      {
+        "layer": "generate",
+        "stage": "seed",
+        "status": "fail"
+      }
+    ],
+    "failures": [
+      {
+        "layer": "generate",
+        "stage": "seed",
+        "check": "seed",
+        "command": "generator",
+        "detail": "transport unavailable"
+      }
+    ],
+    "explainability": [
+      {
+        "layer": "generate",
+        "stage": "seed",
+        "check": "seed",
+        "summary": "criteria check failed and requires scenario/harness inspection",
+        "action": "review failure detail and criteria definition for this check"
+      }
+    ]
+  }
+}

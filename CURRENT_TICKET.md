@@ -58,6 +58,7 @@ Use this file as the per-session execution stub.
 - Completed `S10-T2`: normalized CLI error taxonomy with explicit code constants (`usage`, `config_invalid`, `scenario_malformed`, `scenario_invalid`, `dependency_unavailable`, `command_failed`) and representative command-path tests.
 - Completed `S10-T3`: versioned run artifacts (`run.json` + `iteration.json`) and added backward-compatible run metadata reader behavior for legacy pre-schema artifacts.
 - Completed `S10-T6`: added deterministic explainability summaries for criteria/policy-related failures in human and JSON output contracts.
+- Started `S10-T1`: added file-based golden snapshot tests and fixtures for output-contract rendering in both human and JSON modes across core command result shapes (`generate`, `validate`, `test`, `run`, `mock start`) with `UPDATE_GOLDEN=1` refresh guardrail.
 
 ## Blocker (if any)
 - blocker: none.

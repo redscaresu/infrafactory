@@ -1,0 +1,13 @@
+Command: test
+Scenario: web-app
+Status: failed
+
+Stages:
+- mock_deploy/apply: pass
+- mock_deploy/topology: fail (1 topology failures)
+
+Failures:
+- mock_deploy/topology check=connectivity resource=database detail="connectivity expectation not met"
+
+Explainability:
+- mock_deploy/topology check=connectivity summary="criteria check failed for network reachability expectations" action="validate topology targets/ports and inspect generated infrastructure connectivity"

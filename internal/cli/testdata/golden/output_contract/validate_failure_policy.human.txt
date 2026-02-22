@@ -1,0 +1,16 @@
+Command: validate
+Scenario: web-app
+Status: failed
+
+Stages:
+- static/init: pass
+- static/opa: fail (1 policy failures)
+- static/plan: pass
+- static/show: pass
+- static/validate: pass
+
+Failures:
+- static/opa check=policy policy=no_public_database detail="database endpoint is public"
+
+Explainability:
+- static/opa check=policy policy=no_public_database summary="policy check failed for mapped constraint" action="verify constraint policy mapping and inspect plan/state inputs for the named policy"

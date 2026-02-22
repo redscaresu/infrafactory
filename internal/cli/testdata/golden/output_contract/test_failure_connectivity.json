@@ -1,0 +1,39 @@
+{
+  "schema": "infrafactory.output.v1",
+  "result": {
+    "command": "test",
+    "scenario": "web-app",
+    "status": "failed",
+    "stages": [
+      {
+        "layer": "mock_deploy",
+        "stage": "apply",
+        "status": "pass"
+      },
+      {
+        "layer": "mock_deploy",
+        "stage": "topology",
+        "status": "fail",
+        "detail": "1 topology failures"
+      }
+    ],
+    "failures": [
+      {
+        "layer": "mock_deploy",
+        "stage": "topology",
+        "check": "connectivity",
+        "resource": "database",
+        "detail": "connectivity expectation not met"
+      }
+    ],
+    "explainability": [
+      {
+        "layer": "mock_deploy",
+        "stage": "topology",
+        "check": "connectivity",
+        "summary": "criteria check failed for network reachability expectations",
+        "action": "validate topology targets/ports and inspect generated infrastructure connectivity"
+      }
+    ]
+  }
+}

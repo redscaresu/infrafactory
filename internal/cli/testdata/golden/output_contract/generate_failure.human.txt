@@ -1,0 +1,12 @@
+Command: generate
+Scenario: web-app
+Status: failed
+
+Stages:
+- generate/seed: fail
+
+Failures:
+- generate/seed check=seed command="generator" detail="transport unavailable"
+
+Explainability:
+- generate/seed check=seed summary="criteria check failed and requires scenario/harness inspection" action="review failure detail and criteria definition for this check"

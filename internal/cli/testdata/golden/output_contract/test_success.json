@@ -1,0 +1,41 @@
+{
+  "schema": "infrafactory.output.v1",
+  "result": {
+    "command": "test",
+    "scenario": "web-app",
+    "status": "success",
+    "stages": [
+      {
+        "layer": "destruction",
+        "stage": "destroy",
+        "status": "pass"
+      },
+      {
+        "layer": "destruction",
+        "stage": "orphan_check",
+        "status": "pass"
+      },
+      {
+        "layer": "destruction",
+        "stage": "state",
+        "status": "pass"
+      },
+      {
+        "layer": "mock_deploy",
+        "stage": "apply",
+        "status": "pass"
+      },
+      {
+        "layer": "mock_deploy",
+        "stage": "state_policy",
+        "status": "pass"
+      },
+      {
+        "layer": "mock_deploy",
+        "stage": "topology",
+        "status": "pass"
+      }
+    ],
+    "failures": []
+  }
+}

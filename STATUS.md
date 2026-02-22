@@ -26,10 +26,11 @@ Last updated: 2026-02-22
 - Keep startup/read-order instructions only in `SESSION_START.md` to avoid duplication.
 
 ## Recent updates
+- Started `S10-T1`: added deterministic golden snapshot tests/fixtures for output-contract rendering (`human` + `json`) across core command result shapes with explicit fixture refresh path (`UPDATE_GOLDEN=1`).
 - Completed `S10-T6`: added deterministic criteria/policy explainability summaries in output contract for both human and JSON output modes with focused tests.
 - Completed `S10-T3`: versioned run artifacts with explicit schema fields in `run.json` and per-iteration artifacts, plus backward-compatible legacy run metadata reads.
 - Completed `S10-T2`: normalized CLI error taxonomy across command paths with explicit error-code constants and representative failure-class tests.
-- Verified local checks after `S10-T2`/`S10-T3`/`S10-T6`: `go test ./...` and `bash scripts/check_all.sh` both pass.
+- Verified local checks after `S10-T2`/`S10-T3`/`S10-T6` and current `S10-T1` slice: `go test ./...` and `bash scripts/check_all.sh` both pass.
 - Refined fresh-context documentation in `SESSION_START.md` until two consecutive no-change passes; no further additions/improvements identified after final sweeps.
 - Updated `SESSION_START.md` with a dedicated fresh-context briefing (active/blocked lanes, guardrails, startup verification commands, and Slice 10 execution order), and corrected stale runtime wording to reflect current criteria-aware `run` behavior.
 - Refined Slice 10 ticket set through iterative dependency/acceptance checks; completed two consecutive no-change passes with no further additions or improvements identified.

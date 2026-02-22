@@ -1,0 +1,7 @@
+Command: generate
+Scenario: web-app
+Status: success
+
+Stages:
+- generate/seed: pass
+- generate/write_files: pass (3 files)

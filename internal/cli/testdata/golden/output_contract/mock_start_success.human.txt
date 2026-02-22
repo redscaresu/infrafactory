@@ -1,0 +1,7 @@
+Command: mock start
+Scenario: n/a
+Status: success
+
+Stages:
+- mock/preflight: pass
+- mock/start: pass

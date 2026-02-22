@@ -1,0 +1,9 @@
+Command: run
+Scenario: web-app
+Status: success
+
+Stages:
+- run/iteration_1_generate: pass
+- run/iteration_1_test: pass
+- run/iteration_1_validate: pass
+- run/metadata: pass (run_id=20260222T120000Z+0000)

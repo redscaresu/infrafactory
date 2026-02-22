@@ -1,0 +1,32 @@
+{
+  "schema": "infrafactory.output.v1",
+  "result": {
+    "command": "run",
+    "scenario": "web-app",
+    "status": "success",
+    "stages": [
+      {
+        "layer": "run",
+        "stage": "iteration_1_generate",
+        "status": "pass"
+      },
+      {
+        "layer": "run",
+        "stage": "iteration_1_test",
+        "status": "pass"
+      },
+      {
+        "layer": "run",
+        "stage": "iteration_1_validate",
+        "status": "pass"
+      },
+      {
+        "layer": "run",
+        "stage": "metadata",
+        "status": "pass",
+        "detail": "run_id=20260222T120000Z+0000"
+      }
+    ],
+    "failures": []
+  }
+}

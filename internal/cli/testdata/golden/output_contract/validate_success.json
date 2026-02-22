@@ -1,0 +1,36 @@
+{
+  "schema": "infrafactory.output.v1",
+  "result": {
+    "command": "validate",
+    "scenario": "web-app",
+    "status": "success",
+    "stages": [
+      {
+        "layer": "static",
+        "stage": "init",
+        "status": "pass"
+      },
+      {
+        "layer": "static",
+        "stage": "opa",
+        "status": "pass"
+      },
+      {
+        "layer": "static",
+        "stage": "plan",
+        "status": "pass"
+      },
+      {
+        "layer": "static",
+        "stage": "show",
+        "status": "pass"
+      },
+      {
+        "layer": "static",
+        "stage": "validate",
+        "status": "pass"
+      }
+    ],
+    "failures": []
+  }
+}

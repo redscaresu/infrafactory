@@ -1,0 +1,55 @@
+{
+  "schema": "infrafactory.output.v1",
+  "result": {
+    "command": "validate",
+    "scenario": "web-app",
+    "status": "failed",
+    "stages": [
+      {
+        "layer": "static",
+        "stage": "init",
+        "status": "pass"
+      },
+      {
+        "layer": "static",
+        "stage": "opa",
+        "status": "fail",
+        "detail": "1 policy failures"
+      },
+      {
+        "layer": "static",
+        "stage": "plan",
+        "status": "pass"
+      },
+      {
+        "layer": "static",
+        "stage": "show",
+        "status": "pass"
+      },
+      {
+        "layer": "static",
+        "stage": "validate",
+        "status": "pass"
+      }
+    ],
+    "failures": [
+      {
+        "layer": "static",
+        "stage": "opa",
+        "check": "policy",
+        "policy": "no_public_database",
+        "detail": "database endpoint is public"
+      }
+    ],
+    "explainability": [
+      {
+        "layer": "static",
+        "stage": "opa",
+        "check": "policy",
+        "policy": "no_public_database",
+        "summary": "policy check failed for mapped constraint",
+        "action": "verify constraint policy mapping and inspect plan/state inputs for the named policy"
+      }
+    ]
+  }
+}

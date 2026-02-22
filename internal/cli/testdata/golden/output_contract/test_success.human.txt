@@ -1,0 +1,11 @@
+Command: test
+Scenario: web-app
+Status: success
+
+Stages:
+- destruction/destroy: pass
+- destruction/orphan_check: pass
+- destruction/state: pass
+- mock_deploy/apply: pass
+- mock_deploy/state_policy: pass
+- mock_deploy/topology: pass
