@@ -6,6 +6,7 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 
 | id | slice | title | priority | status | deps | owner |
 |---|---|---|---|---|---|---|
+| M8 | Maintenance | Re-review README and optimize until two consecutive no-change passes | P1 | done | - | codex |
 | M7 | Maintenance | Add fresh-context repo-state preflight guidance and verify consecutive no-change passes | P1 | done | - | codex |
 | M6 | Maintenance | Refresh fresh-context startup guidance and verify with consecutive no-change passes | P1 | done | - | codex |
 | M5 | Maintenance | Refine Slice 11 plan iteratively until two consecutive no-change passes | P1 | done | - | codex |
@@ -70,13 +71,13 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 | S10-T5 | Slice 10 | Add performance baseline benchmarks and regression guardrails | P1 | done | S10-T3 | codex |
 | S10-T6 | Slice 10 | Add criteria/policy failure explainability summaries | P1 | done | S10-T2,S10-T3 | codex |
 | S10-T7 | Slice 10 | Finalize permanent sandbox-block governance docs + ADR | P0 | done | S9-T7,S10-T1 | codex |
-| S11-T1 | Slice 11 | Define generator transport contract + config mapping for `claude -p` and OpenRouter | P0 | todo | - | codex |
-| S11-T2 | Slice 11 | Implement `claude -p` transport adapter with deterministic prompt/phase execution | P0 | todo | S11-T1 | codex |
-| S11-T3 | Slice 11 | Implement OpenRouter HTTP transport adapter with deterministic retries/timeouts/errors | P0 | todo | S11-T1 | codex |
-| S11-T4 | Slice 11 | Runtime wiring + selection for concrete transports (replace default transport stub path) | P0 | todo | S11-T2,S11-T3 | codex |
-| S11-T5 | Slice 11 | Add hermetic adapter tests + opt-in smoke tests for real transport paths | P1 | todo | S11-T2,S11-T3 | codex |
-| S11-T7 | Slice 11 | Add transport credential safety/redaction guardrails for errors and logs | P1 | todo | S11-T2,S11-T3 | codex |
-| S11-T6 | Slice 11 | Sync docs and examples for transport configuration/usage and failure modes | P1 | todo | S11-T4,S11-T5,S11-T7 | codex |
+| S11-T1 | Slice 11 | Define generator transport contract + config mapping for `claude -p` and OpenRouter | P0 | done | - | codex |
+| S11-T2 | Slice 11 | Implement `claude -p` transport adapter with deterministic prompt/phase execution | P0 | done | S11-T1 | codex |
+| S11-T3 | Slice 11 | Implement OpenRouter HTTP transport adapter with deterministic retries/timeouts/errors | P0 | done | S11-T1 | codex |
+| S11-T4 | Slice 11 | Runtime wiring + selection for concrete transports (replace default transport stub path) | P0 | done | S11-T2,S11-T3 | codex |
+| S11-T5 | Slice 11 | Add hermetic adapter tests + opt-in smoke tests for real transport paths | P1 | done | S11-T2,S11-T3 | codex |
+| S11-T7 | Slice 11 | Add transport credential safety/redaction guardrails for errors and logs | P1 | done | S11-T2,S11-T3 | codex |
+| S11-T6 | Slice 11 | Sync docs and examples for transport configuration/usage and failure modes | P1 | done | S11-T4,S11-T5,S11-T7 | codex |
 
 ## Ticket details
 

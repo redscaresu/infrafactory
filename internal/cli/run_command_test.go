@@ -235,8 +235,11 @@ func TestRunCommandDefaultRuntimeUsesConcreteGeneratorDependency(t *testing.T) {
 	if strings.Contains(stdout.String(), "generator dependency unavailable") {
 		t.Fatalf("expected concrete generator failure path, got:\n%s", stdout.String())
 	}
-	if !strings.Contains(stdout.String(), "default seed generator for agent type") {
-		t.Fatalf("expected default generator failure detail, got:\n%s", stdout.String())
+	if strings.Contains(stdout.String(), "default seed generator for agent type") {
+		t.Fatalf("expected concrete adapter path (not stub), got:\n%s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "prompt render failed") {
+		t.Fatalf("expected concrete adapter failure detail, got:\n%s", stdout.String())
 	}
 }
 

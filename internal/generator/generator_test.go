@@ -138,3 +138,62 @@ func TestDefaultSeedGeneratorReturnsTypedTransportError(t *testing.T) {
 		t.Fatalf("expected generate failed error, got: %v", err)
 	}
 }
+
+func TestContractForAgentType(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name                string
+		agentType           string
+		expectedEnvCount    int
+		expectedConfigCount int
+		expectErr           error
+	}{
+		{
+			name:                "claude code",
+			agentType:           AgentTypeClaudeCode,
+			expectedEnvCount:    0,
+			expectedConfigCount: 4,
+		},
+		{
+			name:                "openrouter",
+			agentType:           AgentTypeOpenRouter,
+			expectedEnvCount:    1,
+			expectedConfigCount: 7,
+		},
+		{
+			name:      "unknown",
+			agentType: "unknown",
+			expectErr: ErrUnknownTransport,
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			contract, err := ContractForAgentType(tc.agentType)
+			if !errors.Is(err, tc.expectErr) {
+				t.Fatalf("expected error %v, got %v", tc.expectErr, err)
+			}
+			if tc.expectErr != nil {
+				return
+			}
+
+			if contract.AgentType != tc.agentType {
+				t.Fatalf("expected agent type %q, got %q", tc.agentType, contract.AgentType)
+			}
+			if len(contract.RequiredEnv) != tc.expectedEnvCount {
+				t.Fatalf("expected %d required env vars, got %d", tc.expectedEnvCount, len(contract.RequiredEnv))
+			}
+			if len(contract.RequiredConfigPaths) != tc.expectedConfigCount {
+				t.Fatalf(
+					"expected %d required config paths, got %d",
+					tc.expectedConfigCount,
+					len(contract.RequiredConfigPaths),
+				)
+			}
+		})
+	}
+}

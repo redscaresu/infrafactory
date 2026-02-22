@@ -3,31 +3,31 @@
 Use this file as the per-session execution stub.
 
 ## Ticket
-- id: M7
-- title: Add fresh-context repo-state preflight guidance and verify consecutive no-change passes
+- id: M8
+- title: Re-review README and optimize until two consecutive no-change passes
 - status: done
 - classification: implementation-only
 
 ## 1) Problem Statement
 - What is broken or missing?
-  `SESSION_START.md` still lacked explicit repo-state preflight commands and ticket-discipline reminders that reduce fresh-context execution mistakes.
+  README transport guidance and smoke-test runbook needed another optimization sweep after Slice 11 completion.
 - Why does it matter now?
-  Fresh sessions often fail early due to unnoticed dirty worktrees or ambiguous active-ticket state.
+  Contributors need clear current-state documentation without stale assumptions.
 
 ## 2) Scope
 - In scope:
-  Add startup preflight checks and ticket-discipline reminders, then validate via iterative no-change review passes.
+  Review README iteratively, apply clarity improvements, and continue review passes until two consecutive no-change passes.
 - Out of scope:
-  Implementing generator transport features themselves.
+  Runtime/feature code changes.
 
 ## 3) Acceptance Criteria
-1. `SESSION_START.md` includes repo-state preflight commands and explicit unexpected-change halt reminder.
-2. `SESSION_START.md` includes explicit single-`in_progress` ticket discipline reminder.
-3. Review loop reached two consecutive no-change passes.
+1. README transport configuration and troubleshooting guidance is reviewed and optimized where needed.
+2. Review loop records two consecutive passes with no further changes.
+3. Required tracking docs updated.
 
 ## 4) Impacted Areas
 - Packages/files changed:
-  `SESSION_START.md`,
+  `README.md`,
   `BACKLOG.md`,
   `STATUS.md`,
   `CURRENT_TICKET.md`.
@@ -36,34 +36,30 @@ Use this file as the per-session execution stub.
 
 ## 5) Test Plan
 - Unit tests:
-  n/a (docs-only ticket).
+  n/a (docs-only ticket)
 - Integration checks:
-  n/a
+  `bash scripts/check_all.sh`
 - Manual verification:
-  startup-guidance pass-by-pass review with explicit consecutive no-change confirmation.
+  README review passes with explicit no-change confirmation.
 
 ## 6) Risks and Rollback
 - Primary risks:
-  startup doc drift as workflows evolve.
+  documentation drift over time.
 - Rollback approach:
-  revert startup doc synchronization changes.
+  revert README maintenance edits.
 
 ## 7) Done Definition
-- Fresh-context startup guidance improved and validated through consecutive no-change passes.
-- Required docs updated (`STATUS.md`, `BACKLOG.md`, `CURRENT_TICKET.md`).
-- Remaining follow-up captured explicitly.
+- README optimized with concrete additions where needed.
+- Two consecutive no-change review passes completed.
+- `STATUS.md`, `BACKLOG.md`, and `CURRENT_TICKET.md` updated.
 
 ## Test plan
-- `go test ./...`
 - `bash scripts/check_all.sh`
 
 ## Progress notes
-- Pass 1: added startup preflight guidance in `SESSION_START.md`:
-  - `git status --short`, `git branch --show-current`, `git log -1 --oneline`
-  - explicit reminder to stop and ask on unexpected local changes
-  - explicit reminder to keep exactly one `in_progress` ticket in `BACKLOG.md`
-- Pass 2: no further improvements identified.
-- Pass 3: no further improvements identified (second consecutive no-change pass; review complete).
+- Pass 1: added transport adapter smoke-test commands and provider-prerequisite troubleshooting notes to README.
+- Pass 2: no further README changes identified.
+- Pass 3: no further README changes identified (second consecutive no-change pass).
 
 ## Blocker (if any)
 - blocker: none.

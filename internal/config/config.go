@@ -6,7 +6,9 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strings"
 
+	"github.com/redscaresu/infrafactory/internal/generator"
 	"gopkg.in/yaml.v3"
 )
 
@@ -29,10 +31,23 @@ type Config struct {
 }
 
 type AgentConfig struct {
-	Type              string   `yaml:"type"`
-	MaxIterations     int      `yaml:"max_iterations"`
-	PhaseDelaySeconds int      `yaml:"phase_delay_seconds"`
-	Phases            []string `yaml:"phases"`
+	Type              string           `yaml:"type"`
+	MaxIterations     int              `yaml:"max_iterations"`
+	PhaseDelaySeconds int              `yaml:"phase_delay_seconds"`
+	Phases            []string         `yaml:"phases"`
+	Claude            ClaudeConfig     `yaml:"claude"`
+	OpenRouter        OpenRouterConfig `yaml:"openrouter"`
+}
+
+type ClaudeConfig struct {
+	Command string `yaml:"command"`
+}
+
+type OpenRouterConfig struct {
+	Model          string `yaml:"model"`
+	BaseURL        string `yaml:"base_url"`
+	TimeoutSeconds int    `yaml:"timeout_seconds"`
+	MaxRetries     int    `yaml:"max_retries"`
 }
 
 type MockwayConfig struct {
@@ -105,9 +120,17 @@ func Default() Config {
 			MaxIterations:     5,
 			PhaseDelaySeconds: 0,
 			Phases: []string{
-				"plan_architecture",
-				"generate_hcl",
-				"self_review",
+				generator.PhasePlanArchitecture,
+				generator.PhaseGenerateHCL,
+				generator.PhaseSelfReview,
+			},
+			Claude: ClaudeConfig{
+				Command: "claude",
+			},
+			OpenRouter: OpenRouterConfig{
+				BaseURL:        "https://openrouter.ai/api/v1",
+				TimeoutSeconds: 60,
+				MaxRetries:     2,
 			},
 		},
 		Mockway: MockwayConfig{
@@ -190,8 +213,72 @@ func validate(cfg Config) error {
 	if cfg.Agent.Type == "" {
 		fields = append(fields, FieldError{Field: "agent.type", Err: "is required"})
 	}
-	if cfg.Agent.Type != "" && cfg.Agent.Type != "claude-code" && cfg.Agent.Type != "openrouter" {
+	if cfg.Agent.Type != "" && cfg.Agent.Type != generator.AgentTypeClaudeCode && cfg.Agent.Type != generator.AgentTypeOpenRouter {
 		fields = append(fields, FieldError{Field: "agent.type", Err: "must be one of: claude-code, openrouter"})
+	}
+	if cfg.Agent.PhaseDelaySeconds < 0 {
+		fields = append(fields, FieldError{Field: "agent.phase_delay_seconds", Err: "must be greater than or equal to 0"})
+	}
+	if len(cfg.Agent.Phases) == 0 {
+		fields = append(fields, FieldError{Field: "agent.phases", Err: "must include at least one phase"})
+	} else {
+		seen := map[string]struct{}{}
+		validPhases := map[string]struct{}{}
+		for _, phase := range generator.SupportedPhases {
+			validPhases[phase] = struct{}{}
+		}
+
+		for i, phase := range cfg.Agent.Phases {
+			field := fmt.Sprintf("agent.phases[%d]", i)
+			if phase == "" {
+				fields = append(fields, FieldError{Field: field, Err: "must not be empty"})
+				continue
+			}
+			if _, ok := validPhases[phase]; !ok {
+				fields = append(fields, FieldError{Field: field, Err: "is not supported"})
+			}
+			if _, exists := seen[phase]; exists {
+				fields = append(fields, FieldError{Field: field, Err: "must not contain duplicates"})
+			}
+			seen[phase] = struct{}{}
+		}
+
+		if len(cfg.Agent.Phases) != len(generator.SupportedPhases) {
+			fields = append(fields, FieldError{
+				Field: "agent.phases",
+				Err:   fmt.Sprintf("must contain exactly: %s", strings.Join(generator.SupportedPhases, ", ")),
+			})
+		} else {
+			for i := range generator.SupportedPhases {
+				if cfg.Agent.Phases[i] != generator.SupportedPhases[i] {
+					fields = append(fields, FieldError{
+						Field: "agent.phases",
+						Err:   fmt.Sprintf("must preserve phase order: %s", strings.Join(generator.SupportedPhases, ", ")),
+					})
+					break
+				}
+			}
+		}
+	}
+
+	switch cfg.Agent.Type {
+	case generator.AgentTypeClaudeCode:
+		if cfg.Agent.Claude.Command == "" {
+			fields = append(fields, FieldError{Field: "agent.claude.command", Err: "is required when agent.type=claude-code"})
+		}
+	case generator.AgentTypeOpenRouter:
+		if cfg.Agent.OpenRouter.Model == "" {
+			fields = append(fields, FieldError{Field: "agent.openrouter.model", Err: "is required when agent.type=openrouter"})
+		}
+		if cfg.Agent.OpenRouter.BaseURL == "" {
+			fields = append(fields, FieldError{Field: "agent.openrouter.base_url", Err: "is required when agent.type=openrouter"})
+		}
+		if cfg.Agent.OpenRouter.TimeoutSeconds <= 0 {
+			fields = append(fields, FieldError{Field: "agent.openrouter.timeout_seconds", Err: "must be greater than 0"})
+		}
+		if cfg.Agent.OpenRouter.MaxRetries < 0 {
+			fields = append(fields, FieldError{Field: "agent.openrouter.max_retries", Err: "must be greater than or equal to 0"})
+		}
 	}
 
 	if cfg.Mockway.URL == "" {

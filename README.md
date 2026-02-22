@@ -184,7 +184,7 @@ Feature status snapshot:
 | Area | Status | Notes |
 |---|---|---|
 | `init` scaffold | implemented | Writes deterministic schema-valid starter file. |
-| `generate` runtime path | implemented with default transport stub | Runtime injects default generator; current default returns typed transport-not-implemented error. |
+| `generate` runtime path | implemented with concrete transports | Runtime selects `claude-code` or `openrouter` adapters from config. |
 | `validate` static layer | implemented | Runs `tofu init/validate/plan/show` + plan policy evaluation. |
 | `test` mock deploy + destroy | implemented | Runs mock reset/apply/state checks and destruction verification flow. |
 | `run` orchestration | implemented | Criteria-aware convergence and criteria-only holdout completion checks are wired. |
@@ -192,10 +192,9 @@ Feature status snapshot:
 | sandbox/live deploy | permanently blocked | Governed as a permanent non-goal (ADR-0003). |
 
 Notes on current runtime prerequisites:
-- `generate` and `run` now resolve a concrete default `SeedGenerator` from runtime (`internal/cli/runtime.go`) when no test/injected generator is provided.
-- Runtime wiring path: `buildRuntime(...)` sets `deps.Generator = generator.NewDefaultSeedGenerator(cfg.Agent.Type)` when `deps.Generator == nil`.
-- Current default behavior (`internal/generator/default.go`): `Generate(...)` returns a deterministic typed generator transport error (`generator.ErrTransportFailed`) indicating the default generator for the configured `agent.type` is not implemented yet.
-- Planned next milestone: Slice 11 adds concrete generator transport adapters for `claude -p` and OpenRouter.
+- `generate` and `run` resolve a concrete transport-backed `SeedGenerator` from runtime (`internal/cli/runtime.go`) when no test/injected generator is provided.
+- Runtime wiring path: `buildRuntime(...)` selects `NewClaudeSeedGenerator(...)` for `agent.type=claude-code` and `NewOpenRouterSeedGenerator(...)` for `agent.type=openrouter`.
+- `openrouter` runtime path requires `OPENROUTER_API_KEY` at execution time; missing key surfaces deterministic `dependency_unavailable` failure output.
 - `validate`/`test`/`run` expect generated OpenTofu files and tool/runtime dependencies (`tofu`, Mockway, and Docker for `mock` lifecycle commands).
 - Sandbox/live deploy layer (real Scaleway) is permanently disabled by governance policy (see `docs/decisions/0003-permanent-sandbox-live-deploy-block.md`).
 
@@ -254,8 +253,8 @@ go run ./cmd/infrafactory --help
 ```
 
 Important:
-- `generate`/`run` currently require a concrete generator transport to produce Terraform files.
-- Default runtime generator wiring still returns a typed transport-not-implemented error until Slice 11 transport adapters land.
+- For `agent.type=claude-code`, ensure `agent.claude.command` is installed and available in `PATH` (default: `claude`).
+- For `agent.type=openrouter`, set `OPENROUTER_API_KEY` and configure `agent.openrouter.model`.
 
 ## End-to-End Walkthrough
 
@@ -315,7 +314,13 @@ Error contract:
 | `version` | yes | none | Config schema version (`"1.0"`). |
 | `agent.type` | yes | none | Generator backend type (`claude-code` or `openrouter`). |
 | `agent.max_iterations` | no | `5` | Max iterations for `run` convergence loop. |
+| `agent.phases` | no | `[plan_architecture, generate_hcl, self_review]` | Ordered generation phases (canonical sequence). |
 | `agent.phase_delay_seconds` | no | `0` | Delay between generator phases (rate-limit mitigation). |
+| `agent.claude.command` | no | `claude` | Executable used for `claude-code` transport. |
+| `agent.openrouter.model` | conditional | none | Required when `agent.type=openrouter`. |
+| `agent.openrouter.base_url` | no | `https://openrouter.ai/api/v1` | OpenRouter API base URL. |
+| `agent.openrouter.timeout_seconds` | no | `60` | OpenRouter request timeout per phase. |
+| `agent.openrouter.max_retries` | no | `2` | OpenRouter retry count for transient failures. |
 | `mockway.url` | yes | none | Mockway base URL used by deploy/destroy layers. |
 | `mockway.auto_reset` | no | `true` | Whether mock reset is expected before deploy checks. |
 | `validation.layers.*.enabled` | no | varies | Enables/disables layer execution paths (`sandbox_deploy` remains permanently blocked by governance). |
@@ -384,6 +389,18 @@ make smoke-mockway-local MOCKWAY_BIN=/Users/ehsanashouri/go/bin/mockway
 make smoke-mockway-manual
 ```
 
+Transport adapter smoke tests (opt-in):
+
+```bash
+INFRAFACTORY_ENABLE_CLAUDE_TRANSPORT_SMOKE=1 \
+go test ./internal/generator -run TestClaudeSeedGeneratorRealCommandSmoke
+
+INFRAFACTORY_ENABLE_OPENROUTER_TRANSPORT_SMOKE=1 \
+OPENROUTER_API_KEY=... \
+OPENROUTER_MODEL=anthropic/claude-3.5-sonnet \
+go test ./internal/generator -run TestOpenRouterSeedGeneratorRealHTTPOptInSmoke
+```
+
 Notes:
 - `smoke-validate` runs `TestValidateCommandRealToolSmoke` with `INFRAFACTORY_ENABLE_REALTOOL_SMOKE=1`.
 - `smoke-mockway` starts dependencies (`make deps-up`), waits for Mockway readiness, then runs `TestTestCommandRealToolMockwaySmoke` with `INFRAFACTORY_ENABLE_REALTOOL_MOCKWAY=1`.
@@ -402,7 +419,11 @@ Troubleshooting:
 - If you see `connection refused` to `localhost:8080`, use `127.0.0.1` explicitly and ensure Mockway is healthy:
   `curl -sSf http://127.0.0.1:8080/mock/state >/dev/null`.
 - `smoke-mockway-local` may print one or more "waiting for mockway binary..." lines during startup; that is expected.
-- If `generate` or `run` fails with `generator transport failed` and mentions `default seed generator`, that is expected with current default runtime wiring until a transport-backed generator is configured/implemented.
+- If `generate` or `run` fails with `prompt render failed`, ensure `paths.prompts` points to a directory containing `phase1_plan_architecture.md`, `phase2_generate_hcl.md`, and `phase3_self_review.md`.
+- If `agent.type=openrouter` fails with `dependency_unavailable`, export `OPENROUTER_API_KEY` in the execution environment.
+- If transport smoke tests fail, verify provider prerequisites:
+  - claude transport smoke: `claude` command is installed and authenticated.
+  - openrouter transport smoke: `OPENROUTER_API_KEY` and `OPENROUTER_MODEL` are set.
 
 ### Testing Matrix
 

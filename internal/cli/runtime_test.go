@@ -34,6 +34,7 @@ func TestWithRuntimeLoadsConfigAndInjectsDependencies(t *testing.T) {
 				t.Fatalf("unexpected config path: %s", path)
 			}
 			cfg := config.Default()
+			cfg.Agent.Type = generator.AgentTypeClaudeCode
 			cfg.Paths.Output = "./generated-output"
 			return cfg, nil
 		},
@@ -57,6 +58,9 @@ func TestWithRuntimeLoadsConfigAndInjectsDependencies(t *testing.T) {
 		if runtime.Config.Paths.Output != "./generated-output" {
 			t.Fatalf("unexpected runtime output root: %s", runtime.Config.Paths.Output)
 		}
+		if runtime.TransportContract.AgentType != generator.AgentTypeClaudeCode {
+			t.Fatalf("expected claude transport contract, got %q", runtime.TransportContract.AgentType)
+		}
 		if runtime.Deps.Generator == nil {
 			t.Fatal("expected default generator dependency to be injected")
 		}
@@ -74,6 +78,93 @@ func TestWithRuntimeLoadsConfigAndInjectsDependencies(t *testing.T) {
 	}
 }
 
+func TestBuildRuntimeMapsOpenRouterTransportContract(t *testing.T) {
+	t.Setenv("OPENROUTER_API_KEY", "test-key")
+
+	opts := runtimeOptions{
+		configLoader: func(string) (config.Config, error) {
+			cfg := config.Default()
+			cfg.Agent.Type = generator.AgentTypeOpenRouter
+			cfg.Agent.OpenRouter.Model = "anthropic/claude-3.5-sonnet"
+			return cfg, nil
+		},
+		scenarioLoader: defaultScenarioLoader,
+	}
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("config", "", "")
+	if err := cmd.Flags().Set("config", "test-config.yaml"); err != nil {
+		t.Fatalf("set config flag: %v", err)
+	}
+
+	runtime, err := buildRuntime(cmd, opts)
+	if err != nil {
+		t.Fatalf("build runtime: %v", err)
+	}
+
+	if runtime.TransportContract.AgentType != generator.AgentTypeOpenRouter {
+		t.Fatalf("expected openrouter transport contract, got %q", runtime.TransportContract.AgentType)
+	}
+	if len(runtime.TransportContract.RequiredEnv) != 1 || runtime.TransportContract.RequiredEnv[0] != "OPENROUTER_API_KEY" {
+		t.Fatalf("unexpected required env vars: %+v", runtime.TransportContract.RequiredEnv)
+	}
+}
+
+func TestBuildRuntimeOpenRouterWithoutAPIKeyFails(t *testing.T) {
+	t.Setenv("OPENROUTER_API_KEY", "")
+
+	opts := runtimeOptions{
+		configLoader: func(string) (config.Config, error) {
+			cfg := config.Default()
+			cfg.Agent.Type = generator.AgentTypeOpenRouter
+			cfg.Agent.OpenRouter.Model = "anthropic/claude-3.5-sonnet"
+			return cfg, nil
+		},
+		scenarioLoader: defaultScenarioLoader,
+	}
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("config", "", "")
+	if err := cmd.Flags().Set("config", "test-config.yaml"); err != nil {
+		t.Fatalf("set config flag: %v", err)
+	}
+
+	_, err := buildRuntime(cmd, opts)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !errors.Is(err, ErrDependencyUnavailable) {
+		t.Fatalf("expected dependency unavailable error, got %v", err)
+	}
+}
+
+func TestBuildRuntimeUnknownTransportContractFails(t *testing.T) {
+	t.Parallel()
+
+	opts := runtimeOptions{
+		configLoader: func(string) (config.Config, error) {
+			cfg := config.Default()
+			cfg.Agent.Type = "unknown-transport"
+			return cfg, nil
+		},
+		scenarioLoader: defaultScenarioLoader,
+	}
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("config", "", "")
+	if err := cmd.Flags().Set("config", "test-config.yaml"); err != nil {
+		t.Fatalf("set config flag: %v", err)
+	}
+
+	_, err := buildRuntime(cmd, opts)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !errors.Is(err, generator.ErrUnknownTransport) {
+		t.Fatalf("expected unknown transport error, got %v", err)
+	}
+}
+
 func TestBuildRuntimeRespectsInjectedGeneratorDependency(t *testing.T) {
 	t.Parallel()
 
@@ -85,7 +176,9 @@ func TestBuildRuntimeRespectsInjectedGeneratorDependency(t *testing.T) {
 
 	opts := runtimeOptions{
 		configLoader: func(string) (config.Config, error) {
-			return config.Default(), nil
+			cfg := config.Default()
+			cfg.Agent.Type = generator.AgentTypeClaudeCode
+			return cfg, nil
 		},
 		scenarioLoader: defaultScenarioLoader,
 		deps: RuntimeDependencies{
@@ -120,6 +213,7 @@ func TestCommandRuntimeLoadScenarioCachesResultAndOutputDir(t *testing.T) {
 	opts := runtimeOptions{
 		configLoader: func(string) (config.Config, error) {
 			cfg := config.Default()
+			cfg.Agent.Type = generator.AgentTypeClaudeCode
 			cfg.Paths.Output = "/tmp/out"
 			return cfg, nil
 		},

@@ -32,10 +32,10 @@ git log -1 --oneline
 Before writing code, confirm these facts are still true in `STATUS.md`/`BACKLOG.md`:
 1. `S9-T8` (sandbox/live deploy, real Scaleway) remains permanently blocked by governance policy (ADR-0003).
 2. Output and logs must explicitly surface: `(real deployment skipped for cost reasons for now)` for sandbox/live-blocked behavior.
-3. Slice 11 is the active unblocked lane; start from `S11-T1` and follow the current dependency graph in `BACKLOG.md`.
+3. Slice 11 transport lane (`S11-T1`..`S11-T7`) is complete; choose the next unblocked lane from `BACKLOG.md` after confirming status/roadmap priorities.
 4. `run` is criteria-aware and includes criteria-only holdout completion checks; do not regress to coarse stage-only convergence behavior.
 5. `dns_resolution` remains auto-pass informational output while sandbox/live deploy is blocked; do not treat it as a hard-fail criterion.
-6. Generator transport integration is not complete in default runtime paths; until Slice 11 implementation lands, `generate`/`run` may return typed transport-not-implemented errors.
+6. Default runtime now uses concrete generator transports; `claude-code` requires `agent.claude.command` in `PATH` and `openrouter` requires `OPENROUTER_API_KEY` plus `agent.openrouter.model`.
 
 Minimal startup verification commands:
 ```bash
@@ -95,6 +95,8 @@ If either command fails, restore the repo to a green baseline before starting a 
   `S11-T1 -> (S11-T2 || S11-T3) -> S11-T4 -> (S11-T5 || S11-T7) -> S11-T6`
 - Parallelization rule:
   `S11-T2` and `S11-T3` are parallel after `S11-T1`; `S11-T5` and `S11-T7` are parallel after adapter implementation.
+- Current state:
+  `S11-T1`..`S11-T4` are done; remaining closure is `S11-T5`, `S11-T7`, then `S11-T6`.
 - Contract rule:
   preserve existing CLI/output error taxonomy while replacing default transport stubs with concrete adapters.
 - Safety rule:

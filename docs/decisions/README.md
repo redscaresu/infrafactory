@@ -9,6 +9,7 @@ Use ADRs for decisions that affect long-term behavior, interfaces, or contributo
 - `0001-foundations.md`: base stack and execution model.
 - `0002-cli-command-contract.md`: frozen Slice 7 CLI args/flags/exit-code contract.
 - `0003-permanent-sandbox-live-deploy-block.md`: permanent governance policy to keep real sandbox/live deploy out-of-scope.
+- `0004-generator-transport-contract.md`: Slice 11 transport/config contract for claude/openrouter selection and phase semantics.
 - `DECISION_RUBRIC.md`: yes/no gate for deciding when ADR is required.
 - `ADR_TEMPLATE.md`: copy/paste template for new ADRs.
 

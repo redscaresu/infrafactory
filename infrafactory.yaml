@@ -8,6 +8,13 @@ agent:
     - plan_architecture
     - generate_hcl
     - self_review
+  claude:
+    command: claude          # command used for claude-code transport
+  openrouter:
+    model: ""                # required when type=openrouter
+    base_url: https://openrouter.ai/api/v1
+    timeout_seconds: 60
+    max_retries: 2
 
 mockway:
   url: http://localhost:8080

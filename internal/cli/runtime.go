@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/redscaresu/infrafactory/internal/config"
 	"github.com/redscaresu/infrafactory/internal/generator"
@@ -55,9 +56,10 @@ type RuntimeDependencies struct {
 }
 
 type CommandRuntime struct {
-	ConfigPath string
-	Config     config.Config
-	Deps       RuntimeDependencies
+	ConfigPath        string
+	Config            config.Config
+	TransportContract generator.TransportContract
+	Deps              RuntimeDependencies
 
 	scenarioLoader func(string) (scenario.Scenario, error)
 	loadedScenario *scenario.Scenario
@@ -174,12 +176,20 @@ func buildRuntime(cmd *cobra.Command, opts runtimeOptions) (*CommandRuntime, err
 	if err != nil {
 		return nil, err
 	}
+	transportContract, err := generator.ContractForAgentType(cfg.Agent.Type)
+	if err != nil {
+		return nil, fmt.Errorf("resolve generator transport contract: %w", err)
+	}
 
 	// Runtime defaults keep command dependencies concrete in production paths,
 	// while tests can still override any dependency explicitly through opts.deps.
 	deps := opts.deps
 	if deps.Generator == nil {
-		deps.Generator = generator.NewDefaultSeedGenerator(cfg.Agent.Type)
+		defaultGenerator, err := buildDefaultSeedGenerator(cfg)
+		if err != nil {
+			return nil, err
+		}
+		deps.Generator = defaultGenerator
 	}
 	if deps.MockState == nil {
 		deps.MockState = newMockwayStateClient(cfg.Mockway.URL)
@@ -207,11 +217,60 @@ func buildRuntime(cmd *cobra.Command, opts runtimeOptions) (*CommandRuntime, err
 	}
 
 	return &CommandRuntime{
-		ConfigPath:     configPath,
-		Config:         cfg,
-		Deps:           deps,
-		scenarioLoader: opts.scenarioLoader,
+		ConfigPath:        configPath,
+		Config:            cfg,
+		TransportContract: transportContract,
+		Deps:              deps,
+		scenarioLoader:    opts.scenarioLoader,
 	}, nil
+}
+
+func buildDefaultSeedGenerator(cfg config.Config) (generator.SeedGenerator, error) {
+	phaseDelay := time.Duration(cfg.Agent.PhaseDelaySeconds) * time.Second
+
+	switch cfg.Agent.Type {
+	case generator.AgentTypeClaudeCode:
+		seed, err := generator.NewClaudeSeedGenerator(generator.ClaudeTransportConfig{
+			Command:          cfg.Agent.Claude.Command,
+			PromptsDir:       cfg.Paths.Prompts,
+			Phases:           cfg.Agent.Phases,
+			PhaseDelay:       phaseDelay,
+			Constraints:      "",
+			ResolvedMappings: "",
+			Overrides:        "",
+			Acceptance:       "",
+		}, nil)
+		if err != nil {
+			return nil, fmt.Errorf("configure claude transport: %w", err)
+		}
+		return seed, nil
+	case generator.AgentTypeOpenRouter:
+		apiKey := os.Getenv("OPENROUTER_API_KEY")
+		if apiKey == "" {
+			return nil, fmt.Errorf("openrouter requires OPENROUTER_API_KEY: %w", ErrDependencyUnavailable)
+		}
+		seed, err := generator.NewOpenRouterSeedGenerator(generator.OpenRouterTransportConfig{
+			APIKey:           apiKey,
+			Model:            cfg.Agent.OpenRouter.Model,
+			BaseURL:          cfg.Agent.OpenRouter.BaseURL,
+			Timeout:          time.Duration(cfg.Agent.OpenRouter.TimeoutSeconds) * time.Second,
+			MaxRetries:       cfg.Agent.OpenRouter.MaxRetries,
+			RetryDelay:       time.Second,
+			PhaseDelay:       phaseDelay,
+			PromptsDir:       cfg.Paths.Prompts,
+			Phases:           cfg.Agent.Phases,
+			Constraints:      "",
+			ResolvedMappings: "",
+			Overrides:        "",
+			Acceptance:       "",
+		}, nil)
+		if err != nil {
+			return nil, fmt.Errorf("configure openrouter transport: %w", err)
+		}
+		return seed, nil
+	default:
+		return nil, fmt.Errorf("unsupported generator agent type %q: %w", cfg.Agent.Type, ErrDependencyUnavailable)
+	}
 }
 
 func notImplementedRuntime(command string) runtimeHandler {

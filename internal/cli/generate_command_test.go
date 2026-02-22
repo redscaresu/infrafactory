@@ -187,8 +187,45 @@ func TestGenerateCommandDefaultRuntimeUsesConcreteGeneratorDependency(t *testing
 	if errors.Is(err, ErrNotImplemented) {
 		t.Fatalf("expected concrete generator failure, got not implemented: %v", err)
 	}
-	if !strings.Contains(err.Error(), "default seed generator for agent type") {
-		t.Fatalf("expected default generator failure detail, got: %v", err)
+	if strings.Contains(err.Error(), "default seed generator for agent type") {
+		t.Fatalf("expected concrete adapter path (not stub), got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "prompt render failed") {
+		t.Fatalf("expected concrete adapter failure detail, got: %v", err)
+	}
+}
+
+func TestGenerateCommandOpenRouterMissingAPIKeyReturnsDependencyUnavailable(t *testing.T) {
+	t.Setenv("OPENROUTER_API_KEY", "")
+
+	h := newCommandTestHarness(t)
+
+	opts := runtimeOptions{
+		configLoader: func(_ string) (config.Config, error) {
+			cfg := config.Default()
+			cfg.Agent.Type = generator.AgentTypeOpenRouter
+			cfg.Agent.OpenRouter.Model = "anthropic/claude-3.5-sonnet"
+			return cfg, nil
+		},
+		scenarioLoader: defaultScenarioLoader,
+	}
+
+	cmd := newGenerateCommandForTest(opts)
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{h.ScenarioPath, "--config", h.ConfigPath})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error")
+	}
+
+	var cliErr *CLIError
+	if !errors.As(err, &cliErr) {
+		t.Fatalf("expected CLIError, got %T (%v)", err, err)
+	}
+	if cliErr.Code != errorCodeDependencyUnavailable {
+		t.Fatalf("expected dependency_unavailable code, got %q (%v)", cliErr.Code, err)
 	}
 }
 

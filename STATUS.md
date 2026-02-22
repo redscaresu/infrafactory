@@ -3,10 +3,10 @@
 Last updated: 2026-02-22
 
 ## Current phase
-- Active milestone: Slice 11 generator transport integration (planning-ready)
-- Next gate: start concrete transport implementation wiring in runtime/generator
+- Active milestone: Slice 11 generator transport integration (complete)
+- Next gate: re-plan post-Slice-11 backlog priorities
 - Current ticket: none
-- Next ticket: S11-T1
+- Next ticket: none
 
 ## In progress
 - none
@@ -16,9 +16,9 @@ Last updated: 2026-02-22
 
 ## Next actions
 1. Keep `S9-T8` blocked unless ADR-0003 is explicitly superseded.
-2. Execute `S11-T1` to lock transport/config contract (including phase-delay semantics).
-3. Parallelize `S11-T2` and `S11-T3` after `S11-T1`; then complete `S11-T4` runtime wiring.
-4. Execute `S11-T7` credential redaction guardrails before final Slice 11 docs sync (`S11-T6`).
+2. Re-evaluate next milestone now that `S11-T1`..`S11-T7` and `S11-T6` are complete.
+3. Prepare backlog sequencing for the next slice before starting new implementation tickets.
+4. Maintain hermetic default CI posture with transport smoke tests opt-in only.
 
 ## Update policy
 - Update at end of each meaningful coding session.
@@ -28,6 +28,14 @@ Last updated: 2026-02-22
 - Keep startup/read-order instructions only in `SESSION_START.md` to avoid duplication.
 
 ## Recent updates
+- Completed maintenance ticket `M8`: re-reviewed README, added transport adapter smoke-test runbook guidance, and finished with two consecutive no-change review passes.
+- Completed `S11-T6`: synced README and session-start docs with concrete claude/openrouter transport setup, required credentials/config fields, and updated troubleshooting guidance.
+- Completed `S11-T7`: added deterministic secret redaction guardrails for transport errors (prompt/API-key/token masking) with focused adapter tests.
+- Completed `S11-T5`: expanded hermetic adapter coverage and added opt-in smoke tests for both claude and openrouter transport paths.
+- Completed `S11-T4`: runtime now selects concrete claude/openrouter adapters by `agent.type` and surfaces deterministic `dependency_unavailable` failures for missing OpenRouter API key instead of default stub errors.
+- Completed `S11-T3`: implemented deterministic OpenRouter HTTP adapter with retries/timeouts/error mapping, parser integration, hermetic fake-server tests, and opt-in smoke coverage.
+- Completed `S11-T2`: implemented deterministic `claude -p` adapter with prompt-phase execution, parser integration, hermetic runner tests, and opt-in smoke coverage.
+- Completed `S11-T1`: defined generator transport contract metadata for `claude-code` and `openrouter`, enforced deterministic phase/delay and provider-specific config validation, mapped transport contract in runtime, and accepted ADR-0004.
 - Added repo-state preflight guidance to `SESSION_START.md` (`git status/branch/head`, unexpected-change halt reminder, single-`in_progress` ticket discipline), then completed two consecutive no-change review passes.
 - Refreshed `SESSION_START.md` fresh-context briefing for active Slice 11 execution and transport-state reality, then completed a follow-up review loop with two consecutive no-change passes.
 - Completed Slice 11 refinement sweep with explicit dependency optimization and hardening scope (`S11-T7` credential redaction), finishing with two consecutive no-change passes.
