@@ -8,16 +8,16 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func runMockStartCommand(cmd *cobra.Command, _ []string, runtime *CommandRuntime) error {
-	if runtime.Deps.MockStart == nil {
-		return fmt.Errorf("mock starter dependency unavailable: %w", ErrDependencyUnavailable)
+func runMockStopCommand(cmd *cobra.Command, _ []string, runtime *CommandRuntime) error {
+	if runtime.Deps.MockStop == nil {
+		return fmt.Errorf("mock stopper dependency unavailable: %w", ErrDependencyUnavailable)
 	}
 
-	err := runtime.Deps.MockStart.Start(context.Background(), runtime.Config.Mockway)
+	err := runtime.Deps.MockStop.Stop(context.Background(), runtime.Config.Mockway)
 	status := CommandStatusSuccess
 	stages := []StageSummary{
 		{Layer: "mock", Stage: "preflight", Status: StageStatusPass},
-		{Layer: "mock", Stage: "start", Status: StageStatusPass},
+		{Layer: "mock", Stage: "stop", Status: StageStatusPass},
 	}
 	failures := []FailureSummary{}
 	if err != nil {
@@ -28,14 +28,14 @@ func runMockStartCommand(cmd *cobra.Command, _ []string, runtime *CommandRuntime
 		failures = append(failures, FailureSummary{
 			Layer:   "mock",
 			Stage:   "preflight",
-			Check:   "start",
-			Command: "mock start",
+			Check:   "stop",
+			Command: "mock stop",
 			Detail:  err.Error(),
 		})
 	}
 
 	result := OutputResult{
-		Command:  "mock start",
+		Command:  "mock stop",
 		Scenario: "n/a",
 		Status:   status,
 		Stages:   stages,
@@ -46,7 +46,7 @@ func runMockStartCommand(cmd *cobra.Command, _ []string, runtime *CommandRuntime
 	}
 
 	if status == CommandStatusFailed {
-		return &CLIError{Op: "mock start", Code: errorCodeCommandFailed, Err: errors.New("mock start failed")}
+		return &CLIError{Op: "mock stop", Code: errorCodeCommandFailed, Err: errors.New("mock stop failed")}
 	}
 
 	return nil

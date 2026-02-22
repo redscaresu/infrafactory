@@ -24,8 +24,10 @@ func TestNewRootCmdHasExpectedCommands(t *testing.T) {
 		}
 	}
 
-	if _, _, err := root.Find([]string{"mock", "start"}); err != nil {
-		t.Fatalf("expected command %q to be wired: %v", "mock start", err)
+	for _, sub := range []string{"start", "stop", "status", "logs"} {
+		if _, _, err := root.Find([]string{"mock", sub}); err != nil {
+			t.Fatalf("expected command %q to be wired: %v", "mock "+sub, err)
+		}
 	}
 }
 
@@ -229,6 +231,61 @@ func TestRunCommandReturnsRuntimeErrorWhenSkeletonFails(t *testing.T) {
 	}
 	if ExitCodeForError(err) != ExitCodeRuntime {
 		t.Fatalf("expected runtime exit code, got %d", ExitCodeForError(err))
+	}
+}
+
+func TestGenerateCommandReturnsConfigInvalidCode(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "infrafactory.yaml")
+	if err := os.WriteFile(configPath, []byte("version: \"1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	root := NewRootCmd()
+	root.SetOut(&bytes.Buffer{})
+	root.SetErr(&bytes.Buffer{})
+	root.SetArgs([]string{"generate", filepath.Join("..", "..", "scenarios", "training", "web-app-paris.yaml"), "--config", configPath})
+
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	var cliErr *CLIError
+	if !errors.As(err, &cliErr) {
+		t.Fatalf("expected *CLIError, got %T (%v)", err, err)
+	}
+	if cliErr.Op != "generate" || cliErr.Code != errorCodeConfigInvalid {
+		t.Fatalf("expected generate/%s CLI error, got op=%q code=%q", errorCodeConfigInvalid, cliErr.Op, cliErr.Code)
+	}
+}
+
+func TestGenerateCommandReturnsScenarioMalformedCode(t *testing.T) {
+	t.Parallel()
+
+	configPath := writeConfigFixture(t)
+	tmpDir := t.TempDir()
+	scenarioPath := filepath.Join(tmpDir, "malformed.yaml")
+	if err := os.WriteFile(scenarioPath, []byte("scenario: [\n"), 0o644); err != nil {
+		t.Fatalf("write scenario: %v", err)
+	}
+
+	root := NewRootCmd()
+	root.SetOut(&bytes.Buffer{})
+	root.SetErr(&bytes.Buffer{})
+	root.SetArgs([]string{"generate", scenarioPath, "--config", configPath})
+
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	var cliErr *CLIError
+	if !errors.As(err, &cliErr) {
+		t.Fatalf("expected *CLIError, got %T (%v)", err, err)
+	}
+	if cliErr.Op != "generate" || cliErr.Code != errorCodeScenarioMalformed {
+		t.Fatalf("expected generate/%s CLI error, got op=%q code=%q", errorCodeScenarioMalformed, cliErr.Op, cliErr.Code)
 	}
 }
 

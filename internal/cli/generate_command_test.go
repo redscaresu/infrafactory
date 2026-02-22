@@ -119,6 +119,13 @@ func TestGenerateCommandReturnsGeneratorFailure(t *testing.T) {
 	if !errors.Is(err, genErr) {
 		t.Fatalf("expected wrapped generator error %v, got: %v", genErr, err)
 	}
+	var cliErr *CLIError
+	if !errors.As(err, &cliErr) {
+		t.Fatalf("expected *CLIError, got %T (%v)", err, err)
+	}
+	if cliErr.Op != "generate" || cliErr.Code != errorCodeCommandFailed {
+		t.Fatalf("expected generate/%s CLI error, got op=%q code=%q", errorCodeCommandFailed, cliErr.Op, cliErr.Code)
+	}
 }
 
 func TestGenerateCommandSupportsJSONOutputMode(t *testing.T) {

@@ -18,6 +18,23 @@
 - Pick next uncompleted ticket from `BACKLOG.md`.
 - Fill `CURRENT_TICKET.md` for session execution.
 
+## Fresh Context Briefing (Current)
+
+Before writing code, confirm these facts are still true in `STATUS.md`/`BACKLOG.md`:
+1. `S9-T8` (sandbox/live deploy, real Scaleway) remains intentionally blocked for cost/credentials policy reasons.
+2. Output and logs must explicitly surface: `(real deployment skipped for cost reasons for now)` for sandbox/live-blocked behavior.
+3. Slice 10 is the active unblocked lane; start from `S10-T2` and `S10-T3`, then proceed to `S10-T6`, then `S10-T1`.
+4. `run` is criteria-aware and includes criteria-only holdout completion checks; do not regress to coarse stage-only convergence behavior.
+5. `dns_resolution` remains deferred while sandbox/live deploy is blocked and must remain deterministic unsupported-criteria output.
+
+Minimal startup verification commands:
+```bash
+go test ./...
+bash scripts/check_all.sh
+```
+
+If either command fails, restore the repo to a green baseline before starting a new ticket.
+
 ### Slice 7 default execution constraints
 - Canonical order:
   `S7-T1 -> S7-T2 -> S7-T12 -> S7-T16 -> S7-T3/S7-T4/S7-T5 -> S7-T6 -> S7-T7 -> S7-T8 -> S7-T9 -> S7-T11 -> S7-T15`
@@ -40,9 +57,9 @@
 - Critical implementation prerequisite:
   expand `internal/scenario.Scenario` runtime model before criteria orchestration wiring (`S9-T10` before `S9-T2+`).
 - Criteria support/defer matrix:
-  `connectivity`, `http_probe`, `policy`, and `destruction` are in-progress for scenario-driven wiring; `dns_resolution` remains deferred while sandbox is blocked.
+  `connectivity`, `http_probe`, `policy`, and `destruction` are wired for scenario-driven execution; `dns_resolution` remains deferred while sandbox is blocked.
 - Runtime state reality:
-  `test` currently executes mock deploy + destroy lifecycle checks; `run` is criteria-incomplete skeleton orchestration.
+  `test` executes criteria-driven mock deploy + destroy lifecycle checks; `run` is criteria-aware orchestration with holdout completion checks.
 - Canonical validation scenario:
   use `scenarios/training/web-app-paris.yaml` for criteria wiring checks unless the ticket requires a narrower fixture.
 - Smoke/runtime caveats:
@@ -52,6 +69,16 @@
 - Halt protocol reminder (from execution prompt):
   halt only for missing mandatory input, sandbox/permission limits, or decision-impacting CLI/schema/architecture changes; blocker output must be exactly:
   `## Blocker`, `## What Was Tried`, `## Needed Input`.
+
+### Slice 10 default execution constraints
+- Canonical order:
+  `S10-T2/S10-T3 -> S10-T6 -> S10-T1 -> S10-T4/S10-T5 -> S10-T7`
+- Contract hardening rule:
+  do not freeze final goldens (`S10-T1`) before error-taxonomy (`S10-T2`), run-artifact versioning (`S10-T3`), and explainability fields (`S10-T6`) stabilize.
+- Backward compatibility rule:
+  run artifact readers must remain compatible with pre-versioned records.
+- Hermetic default rule:
+  new performance/idempotency checks must run without mandatory network/external cloud dependencies.
 
 ## 3) Execute
 - Implement + test.

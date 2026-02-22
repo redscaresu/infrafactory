@@ -125,6 +125,13 @@ func TestValidateCommandStageFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected validation error")
 	}
+	var cliErr *CLIError
+	if !errors.As(err, &cliErr) {
+		t.Fatalf("expected *CLIError, got %T (%v)", err, err)
+	}
+	if cliErr.Op != "validate" || cliErr.Code != errorCodeCommandFailed {
+		t.Fatalf("expected validate/%s CLI error, got op=%q code=%q", errorCodeCommandFailed, cliErr.Op, cliErr.Code)
+	}
 	if ExitCodeForError(err) != ExitCodeRuntime {
 		t.Fatalf("expected runtime exit code, got %d", ExitCodeForError(err))
 	}
@@ -176,11 +183,91 @@ func TestValidateCommandPolicyFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected validation failure")
 	}
+	var cliErr *CLIError
+	if !errors.As(err, &cliErr) {
+		t.Fatalf("expected *CLIError, got %T (%v)", err, err)
+	}
+	if cliErr.Op != "validate" || cliErr.Code != errorCodeCommandFailed {
+		t.Fatalf("expected validate/%s CLI error, got op=%q code=%q", errorCodeCommandFailed, cliErr.Op, cliErr.Code)
+	}
 	if !strings.Contains(stdout.String(), "policy=test.plan") {
 		t.Fatalf("expected policy failure in output, got:\n%s", stdout.String())
 	}
 	if !strings.Contains(stdout.String(), "- static/opa: fail") {
 		t.Fatalf("expected opa stage failure in output, got:\n%s", stdout.String())
+	}
+}
+
+func TestValidateCommandSkipsWhenStaticLayerDisabled(t *testing.T) {
+	t.Parallel()
+
+	h := newCommandTestHarness(t)
+	static := &fakeStaticHarness{}
+	opts := runtimeOptions{
+		configLoader: func(path string) (config.Config, error) {
+			cfg, err := config.Load(path)
+			if err != nil {
+				return config.Config{}, err
+			}
+			cfg.Validation.Layers.Static.Enabled = false
+			return cfg, nil
+		},
+		scenarioLoader: defaultScenarioLoader,
+		deps:           RuntimeDependencies{Static: static},
+	}
+
+	cmd := newValidateCommandForTest(opts)
+	stdout := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{h.ScenarioPath, "--config", h.ConfigPath})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected success, got: %v", err)
+	}
+	if static.calls != 0 {
+		t.Fatalf("expected static harness not to be called, got %d", static.calls)
+	}
+	if !strings.Contains(stdout.String(), "- static/disabled: skip") {
+		t.Fatalf("expected static disabled skip stage, got:\n%s", stdout.String())
+	}
+}
+
+func TestValidateCommandFailsWhenSandboxLayerEnabled(t *testing.T) {
+	t.Parallel()
+
+	h := newCommandTestHarness(t)
+	opts := runtimeOptions{
+		configLoader: func(path string) (config.Config, error) {
+			cfg, err := config.Load(path)
+			if err != nil {
+				return config.Config{}, err
+			}
+			cfg.Validation.Layers.SandboxDeploy.Enabled = true
+			return cfg, nil
+		},
+		scenarioLoader: defaultScenarioLoader,
+		deps:           RuntimeDependencies{Static: &fakeStaticHarness{}},
+	}
+
+	cmd := newValidateCommandForTest(opts)
+	stdout := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{h.ScenarioPath, "--config", h.ConfigPath})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected failure")
+	}
+	if !strings.Contains(stdout.String(), "- sandbox_deploy/blocked: skip") {
+		t.Fatalf("expected sandbox blocked stage, got:\n%s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "check=sandbox_deploy") {
+		t.Fatalf("expected sandbox failure detail, got:\n%s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), sandboxRealDeploySkippedMessage) {
+		t.Fatalf("expected cost-skip message in output, got:\n%s", stdout.String())
 	}
 }
 

@@ -157,11 +157,28 @@ func newMockCmd() *cobra.Command {
 		Short: "Manage mock service dependencies",
 	}
 
-	cmd.AddCommand(&cobra.Command{
-		Use:   "start",
-		Short: "Start Mockway dependency",
-		RunE:  withRuntime("mock start", runMockStartCommand),
-	})
+	cmd.AddCommand(
+		&cobra.Command{
+			Use:   "start",
+			Short: "Start Mockway dependency",
+			RunE:  withRuntime("mock start", runMockStartCommand),
+		},
+		&cobra.Command{
+			Use:   "stop",
+			Short: "Stop Mockway dependency",
+			RunE:  withRuntime("mock stop", runMockStopCommand),
+		},
+		&cobra.Command{
+			Use:   "status",
+			Short: "Show Mockway dependency status",
+			RunE:  withRuntime("mock status", runMockStatusCommand),
+		},
+		&cobra.Command{
+			Use:   "logs",
+			Short: "Show Mockway dependency logs",
+			RunE:  withRuntime("mock logs", runMockLogsCommand),
+		},
+	)
 
 	return cmd
 }

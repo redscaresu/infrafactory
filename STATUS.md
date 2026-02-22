@@ -3,22 +3,20 @@
 Last updated: 2026-02-22
 
 ## Current phase
-- Active milestone: Slice 9 criteria-complete orchestration
-- Next gate: close remaining orchestration gaps for scenario criteria execution
-- Current ticket: S9-T10
-- Next ticket: S9-T2
+- Active milestone: Slice 10 reliability and contract hardening (planning-ready)
+- Next gate: start `S10-T2`/`S10-T3` while `S9-T8` remains intentionally blocked
+- Current ticket: S9-T8 (blocked)
+- Next ticket: S10-T2 (or S10-T3 in parallel planning)
 
 ## In progress
-- Typed scenario model expansion for criteria/layer-routing fields (`S9-T10`)
+- none (Slice 10 is planned and ready; no active implementation ticket yet)
 
 ## Known blockers
 - `S9-T8` sandbox/live deploy layer remains blocked intentionally due current cost implications.
 
 ## Next actions
-1. Complete `S9-T1` and `S9-T10` to close default runtime + scenario model prerequisites.
-2. Complete `S9-T2`/`S9-T11`/`S9-T3`/`S9-T4`/`S9-T5` criteria and layer orchestration path.
-3. Complete `S9-T6`/`S9-T7` follow-on holdout and mock lifecycle command coverage.
-4. Reassess `S9-T8` only after explicit cost/credentials policy approval.
+1. Reassess `S9-T8` only after explicit cost/credentials policy approval.
+2. Slice 10 backlog is drafted and ready to start on `S10-T2` and `S10-T3` while `S9-T8` remains blocked.
 
 ## Update policy
 - Update at end of each meaningful coding session.
@@ -28,6 +26,28 @@ Last updated: 2026-02-22
 - Keep startup/read-order instructions only in `SESSION_START.md` to avoid duplication.
 
 ## Recent updates
+- Refined fresh-context documentation in `SESSION_START.md` until two consecutive no-change passes; no further additions/improvements identified after final sweeps.
+- Updated `SESSION_START.md` with a dedicated fresh-context briefing (active/blocked lanes, guardrails, startup verification commands, and Slice 10 execution order), and corrected stale runtime wording to reflect current criteria-aware `run` behavior.
+- Refined Slice 10 ticket set through iterative dependency/acceptance checks; completed two consecutive no-change passes with no further additions or improvements identified.
+- Drafted Slice 10 backlog tickets (`S10-T1`..`S10-T7`) for reliability/contract hardening, artifact versioning, and permanent sandbox-block governance documentation.
+- Updated blocked sandbox/live deploy behavior (`S9-T8`) to emit explicit stub messaging in command outputs: `(real deployment skipped for cost reasons for now)` across `validate`/`test`/`run` and deferred criteria messaging.
+- Verified local checks after sandbox stub messaging update: `go test ./...` and `bash scripts/check_all.sh` both pass.
+- Completed `S9-T7`: expanded `mock` lifecycle parity with `start`/`stop`/`status`/`logs` command wiring, runtime default handlers, and focused parity tests for success/failure behavior.
+- Verified local checks after `S9-T7`: `go test ./...` and `bash scripts/check_all.sh` both pass.
+- Completed `S9-T6`: wired criteria-only holdout discovery/execution into run completion; holdout failures now block final run status without feeding holdout failures into training-loop feedback convergence decisions.
+- Verified local checks after `S9-T6`: `go test ./...` and `bash scripts/check_all.sh` both pass.
+- Completed `S9-T5`: upgraded `run` convergence to propagate criteria-level failures from `test` (not just coarse stage failures), preserving deterministic max/stuck stop semantics with criteria-aware signals.
+- Verified local checks after `S9-T5`: `go test ./...` and `bash scripts/check_all.sh` both pass.
+- Completed `S9-T4`: `validate`/`test`/`run` now honor validation-layer enable flags (`static`, `mock_deploy`, `destruction`) and surface deterministic blocked output when `sandbox_deploy.enabled=true`.
+- Verified local checks after `S9-T4`: `go test ./...` and `bash scripts/check_all.sh` both pass.
+- Completed `S9-T3`: `test` now executes criteria-driven topology and state-policy evaluators from scenario criteria specs, including expectation handling (`pass`/`fail`) and deterministic stage/failure output mapping.
+- Verified local checks after `S9-T3`: `go test ./...` and `bash scripts/check_all.sh` both pass.
+- Completed `S9-T11`: defined deterministic criteria support matrix behavior; unsupported criteria (notably `dns_resolution`) now fail closed with explicit `criteria/support_matrix` skip stage plus structured failure details in both human and JSON outputs.
+- Verified local checks after `S9-T11`: `go test ./...` and `bash scripts/check_all.sh` both pass.
+- Completed `S9-T2`: added deterministic acceptance-criteria mapping to typed executable check specs (`connectivity`, `http_probe`, `policy`, `destruction`, `dns_resolution`) with explicit typed parse errors for malformed criteria and focused scenario mapping tests.
+- Verified local checks after `S9-T2`: `go test ./...` and `bash scripts/check_all.sh` both pass.
+- Completed `S9-T10`: expanded typed scenario model coverage with focused loader tests for holdout routing fields (`type`/`references`), constraints decode, and acceptance criteria field mapping while preserving existing fixture compatibility.
+- Verified local checks after `S9-T10`: `go test ./...` and `bash scripts/check_all.sh` both pass.
 - Completed `S9-T1`: runtime now injects a concrete default `SeedGenerator` for `generate`/`run`, replacing missing-dependency `ErrNotImplemented` failures with deterministic typed generator transport failures; added focused runtime/command/generator tests.
 - Verified local checks after `S9-T1`: `go test ./...` and `bash scripts/check_all.sh` both pass.
 - Expanded `SESSION_START.md` Slice 9 section with operational implementation notes (canonical scenario path, `127.0.0.1` Mockway caveat, real-tool smoke preconditions, and blocker-output protocol) to remove remaining fresh-context ambiguity.

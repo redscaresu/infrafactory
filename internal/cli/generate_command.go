@@ -25,7 +25,7 @@ func runGenerateCommand(cmd *cobra.Command, args []string, runtime *CommandRunti
 	}
 
 	if runtime.Deps.Generator == nil {
-		return fmt.Errorf("generator dependency unavailable: %w", ErrNotImplemented)
+		return fmt.Errorf("generator dependency unavailable: %w", ErrDependencyUnavailable)
 	}
 
 	generated, err := runtime.Deps.Generator.Generate(context.Background(), generator.Request{

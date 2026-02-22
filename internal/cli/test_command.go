@@ -6,55 +6,19 @@ import (
 	"fmt"
 
 	"github.com/redscaresu/infrafactory/internal/harness"
+	"github.com/redscaresu/infrafactory/internal/scenario"
 	"github.com/spf13/cobra"
 )
 
 func runTestCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) error {
-	scenarioPath := args[0]
-	sc, err := runtime.LoadScenario(scenarioPath)
+	result, err := executeTest(runtime, args[0])
 	if err != nil {
-		return fmt.Errorf("load scenario %q: %w", scenarioPath, err)
-	}
-	if runtime.Deps.MockDeploy == nil || runtime.Deps.Destroy == nil {
-		return fmt.Errorf("mock deploy/destroy dependencies unavailable: %w", ErrNotImplemented)
-	}
-
-	stages := make([]StageSummary, 0)
-	failures := make([]FailureSummary, 0)
-	env := testCommandEnv(runtime)
-
-	deployResult, deployErr := runtime.Deps.MockDeploy.Run(context.Background(), runtime.OutputDir(), env)
-	stages, failures = appendMockDeployResult(stages, failures, deployResult, deployErr)
-	if deployErr == nil {
-		destroyResult, destroyErr := runtime.Deps.Destroy.Run(context.Background(), runtime.OutputDir(), env)
-		stages, failures = appendDestroyResult(stages, failures, destroyResult, destroyErr)
-	}
-
-	status := CommandStatusSuccess
-	if len(failures) > 0 {
-		status = CommandStatusFailed
-	}
-
-	result := OutputResult{
-		Command:  "test",
-		Scenario: sc.Name,
-		Status:   status,
-		Stages:   stages,
-		Failures: failures,
-	}
-	if err := writeCommandOutput(cmd, result); err != nil {
+		if writeErr := writeCommandOutput(cmd, result); writeErr != nil {
+			return writeErr
+		}
 		return err
 	}
-
-	if status == CommandStatusFailed {
-		return &CLIError{
-			Op:   "test",
-			Code: "command_failed",
-			Err:  errors.New("test checks failed"),
-		}
-	}
-
-	return nil
+	return writeCommandOutput(cmd, result)
 }
 
 func testCommandEnv(runtime *CommandRuntime) map[string]string {
@@ -141,4 +105,280 @@ func appendDestroyResult(stages []StageSummary, failures []FailureSummary, resul
 	})
 
 	return stages, failures
+}
+
+func executeTest(runtime *CommandRuntime, scenarioPath string) (OutputResult, error) {
+	sc, err := runtime.LoadScenario(scenarioPath)
+	if err != nil {
+		return OutputResult{}, fmt.Errorf("load scenario %q: %w", scenarioPath, err)
+	}
+	return executeTestWithScenario(runtime, sc, runtime.OutputDir())
+}
+
+func executeTestWithScenario(runtime *CommandRuntime, sc scenario.Scenario, outputDir string) (OutputResult, error) {
+	unsupportedStages, unsupportedFailures, err := unsupportedCriteriaResult(sc)
+	if err != nil {
+		return OutputResult{}, err
+	}
+	if len(unsupportedFailures) > 0 {
+		return OutputResult{
+				Command:  "test",
+				Scenario: sc.Name,
+				Status:   CommandStatusFailed,
+				Stages:   unsupportedStages,
+				Failures: unsupportedFailures,
+			}, &CLIError{
+				Op:   "test",
+				Code: errorCodeCommandFailed,
+				Err:  errors.New("unsupported acceptance criteria present"),
+			}
+	}
+
+	if runtime.Config.Validation.Layers.SandboxDeploy.Enabled {
+		return OutputResult{
+				Command:  "test",
+				Scenario: sc.Name,
+			Status:   CommandStatusFailed,
+			Stages: []StageSummary{
+				{Layer: "sandbox_deploy", Stage: "blocked", Status: StageStatusSkip, Detail: sandboxBlockedStageDetail()},
+			},
+			Failures: []FailureSummary{
+				{
+					Layer:   "sandbox_deploy",
+					Stage:   "blocked",
+					Check:   "sandbox_deploy",
+					Command: "layer gate",
+					Detail:  sandboxDeferredDetail(),
+				},
+			},
+		}, &CLIError{
+				Op:   "test",
+				Code: errorCodeCommandFailed,
+				Err:  errors.New("sandbox deploy layer is blocked"),
+			}
+	}
+
+	if runtime.Deps.MockDeploy == nil || runtime.Deps.Destroy == nil {
+		return OutputResult{}, fmt.Errorf("mock deploy/destroy dependencies unavailable: %w", ErrDependencyUnavailable)
+	}
+
+	stages := make([]StageSummary, 0)
+	failures := make([]FailureSummary, 0)
+	env := testCommandEnv(runtime)
+
+	if !runtime.Config.Validation.Layers.MockDeploy.Enabled {
+		stages = append(stages, StageSummary{Layer: "mock_deploy", Stage: "disabled", Status: StageStatusSkip})
+		if runtime.Config.Validation.Layers.Destruction.Enabled {
+			stages = append(stages, StageSummary{Layer: "destruction", Stage: "blocked", Status: StageStatusSkip, Detail: "requires mock_deploy.enabled"})
+		} else {
+			stages = append(stages, StageSummary{Layer: "destruction", Stage: "disabled", Status: StageStatusSkip})
+		}
+
+		return OutputResult{
+			Command:  "test",
+			Scenario: sc.Name,
+			Status:   CommandStatusSuccess,
+			Stages:   stages,
+		}, nil
+	}
+
+	deployResult, deployErr := runtime.Deps.MockDeploy.Run(context.Background(), outputDir, env)
+	stages, failures = appendMockDeployResult(stages, failures, deployResult, deployErr)
+	if deployErr == nil && runtime.Config.Validation.Layers.Destruction.Enabled {
+		criteriaStages, criteriaFailures := evaluateSupportedCriteria(sc, runtime, deployResult)
+		stages = append(stages, criteriaStages...)
+		failures = append(failures, criteriaFailures...)
+
+		destroyResult, destroyErr := runtime.Deps.Destroy.Run(context.Background(), outputDir, env)
+		stages, failures = appendDestroyResult(stages, failures, destroyResult, destroyErr)
+	} else if deployErr == nil {
+		criteriaStages, criteriaFailures := evaluateSupportedCriteria(sc, runtime, deployResult)
+		stages = append(stages, criteriaStages...)
+		failures = append(failures, criteriaFailures...)
+		stages = append(stages, StageSummary{Layer: "destruction", Stage: "disabled", Status: StageStatusSkip})
+	}
+
+	status := CommandStatusSuccess
+	if len(failures) > 0 {
+		status = CommandStatusFailed
+	}
+
+	result := OutputResult{
+		Command:  "test",
+		Scenario: sc.Name,
+		Status:   status,
+		Stages:   stages,
+		Failures: failures,
+	}
+	if status == CommandStatusFailed {
+		return result, &CLIError{
+			Op:   "test",
+			Code: errorCodeCommandFailed,
+			Err:  errors.New("test checks failed"),
+		}
+	}
+
+	return result, nil
+}
+
+func evaluateSupportedCriteria(sc scenario.Scenario, runtime *CommandRuntime, deployResult *harness.MockDeployResult) ([]StageSummary, []FailureSummary) {
+	if deployResult == nil {
+		return nil, nil
+	}
+
+	specs, err := sc.ExecutableChecks()
+	if err != nil {
+		return []StageSummary{
+			{Layer: "criteria", Stage: "parse", Status: StageStatusFail},
+		}, []FailureSummary{
+			{
+				Layer:   "criteria",
+				Stage:   "parse",
+				Check:   "criteria_parse",
+				Command: "criteria mapper",
+				Detail:  err.Error(),
+			},
+		}
+	}
+
+	topologyChecks := make([]harness.TopologyCheck, 0)
+	policySpecs := make([]scenario.ExecutableCheckSpec, 0)
+	for _, spec := range specs {
+		switch spec.Type {
+		case "connectivity":
+			if spec.Connectivity != nil {
+				topologyChecks = append(topologyChecks, harness.TopologyCheck{
+					Type:   spec.Type,
+					From:   spec.Connectivity.From,
+					To:     spec.Connectivity.To,
+					Port:   spec.Connectivity.Port,
+					Expect: spec.Expect,
+				})
+			}
+		case "http_probe":
+			if spec.HTTPProbe != nil {
+				topologyChecks = append(topologyChecks, harness.TopologyCheck{
+					Type:   spec.Type,
+					Target: spec.HTTPProbe.Target,
+					Port:   spec.HTTPProbe.Port,
+					Expect: spec.Expect,
+				})
+			}
+		case "policy":
+			policySpecs = append(policySpecs, spec)
+		}
+	}
+
+	stages := make([]StageSummary, 0, 2)
+	failures := make([]FailureSummary, 0)
+
+	if len(topologyChecks) > 0 {
+		topologyFailures, err := harness.EvaluateTopology(deployResult.StateSnapshot, topologyChecks)
+		if err != nil {
+			stages = append(stages, StageSummary{Layer: "mock_deploy", Stage: "topology", Status: StageStatusFail})
+			failures = append(failures, FailureSummary{
+				Layer:   "mock_deploy",
+				Stage:   "topology",
+				Check:   "topology",
+				Command: "topology evaluator",
+				Detail:  err.Error(),
+			})
+		} else if len(topologyFailures) > 0 {
+			stages = append(stages, StageSummary{
+				Layer:  "mock_deploy",
+				Stage:  "topology",
+				Status: StageStatusFail,
+				Detail: fmt.Sprintf("%d topology failures", len(topologyFailures)),
+			})
+			for _, failure := range topologyFailures {
+				failures = append(failures, toFailureSummary(failure))
+			}
+		} else {
+			stages = append(stages, StageSummary{Layer: "mock_deploy", Stage: "topology", Status: StageStatusPass})
+		}
+	}
+
+	if len(policySpecs) > 0 {
+		policyFailures := evaluateStatePolicyCriteria(runtime, deployResult.StateSnapshot, policySpecs)
+		if len(policyFailures) > 0 {
+			stages = append(stages, StageSummary{
+				Layer:  "mock_deploy",
+				Stage:  "state_policy",
+				Status: StageStatusFail,
+				Detail: fmt.Sprintf("%d policy failures", len(policyFailures)),
+			})
+			failures = append(failures, policyFailures...)
+		} else {
+			stages = append(stages, StageSummary{Layer: "mock_deploy", Stage: "state_policy", Status: StageStatusPass})
+		}
+	}
+
+	return stages, failures
+}
+
+func evaluateStatePolicyCriteria(runtime *CommandRuntime, stateSnapshot []byte, specs []scenario.ExecutableCheckSpec) []FailureSummary {
+	failures := make([]FailureSummary, 0)
+
+	for _, spec := range specs {
+		if spec.Policy == nil {
+			continue
+		}
+
+		policyPath, ok := runtime.Config.ConstraintPolicies[spec.Policy.Check]
+		if !ok || policyPath == "" {
+			failures = append(failures, FailureSummary{
+				Layer:   "mock_deploy",
+				Stage:   "state_policy",
+				Check:   "policy",
+				Policy:  spec.Policy.Check,
+				Command: "state policy evaluator",
+				Detail:  "no constraint_policies mapping found for criteria check",
+			})
+			continue
+		}
+
+		evaluatedFailures, err := harness.EvaluateStatePolicies(context.Background(), stateSnapshot, []string{policyPath})
+		if err != nil {
+			failures = append(failures, FailureSummary{
+				Layer:   "mock_deploy",
+				Stage:   "state_policy",
+				Check:   "policy",
+				Policy:  spec.Policy.Check,
+				Command: "state policy evaluator",
+				Detail:  err.Error(),
+			})
+			continue
+		}
+
+		switch spec.Expect {
+		case "pass":
+			for _, evaluated := range evaluatedFailures {
+				summary := toFailureSummary(evaluated)
+				summary.Policy = spec.Policy.Check
+				failures = append(failures, summary)
+			}
+		case "fail":
+			if len(evaluatedFailures) == 0 {
+				failures = append(failures, FailureSummary{
+					Layer:   "mock_deploy",
+					Stage:   "state_policy",
+					Check:   "policy",
+					Policy:  spec.Policy.Check,
+					Command: "state policy evaluator",
+					Detail:  "expected policy failure but evaluator returned pass",
+				})
+			}
+		default:
+			failures = append(failures, FailureSummary{
+				Layer:   "mock_deploy",
+				Stage:   "state_policy",
+				Check:   "policy",
+				Policy:  spec.Policy.Check,
+				Command: "state policy evaluator",
+				Detail:  fmt.Sprintf("unsupported policy expectation %q", spec.Expect),
+			})
+		}
+	}
+
+	return failures
 }

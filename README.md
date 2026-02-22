@@ -127,8 +127,8 @@ Feature status snapshot:
 | `generate` runtime path | implemented with placeholder generator | Runtime injects default generator; default returns typed transport-not-implemented error. |
 | `validate` static layer | implemented | Runs `tofu init/validate/plan/show` + plan policy evaluation. |
 | `test` mock deploy + destroy | implemented | Runs mock reset/apply/state checks and destruction verification flow. |
-| `run` orchestration | partially implemented | Multi-iteration loop + convergence controls exist; full criteria-aware orchestration is still in progress. |
-| `mock` command lifecycle | partially implemented | `mock start` exists; stop/status/logs are pending. |
+| `run` orchestration | implemented (slice 9 scope) | Criteria-aware convergence and criteria-only holdout completion checks are wired. |
+| `mock` command lifecycle | implemented (slice 9 scope) | `mock start`/`stop`/`status`/`logs` are wired with deterministic output/error behavior. |
 | sandbox/live deploy | intentionally deferred | Blocked due cost/credentials policy. |
 
 Notes on current runtime prerequisites:
@@ -141,20 +141,15 @@ Notes on current runtime prerequisites:
 ### Intentionally Deferred and In-Progress Areas
 
 The following are known gaps being tracked in Slice 9 and are intentionally not complete yet:
-- Scenario `acceptance_criteria` are not yet fully enforced end-to-end by CLI orchestration.
-- `test` command orchestration does not yet execute all criteria-derived topology/state-policy evaluators directly from scenario criteria.
-- `validation.layers.*.enabled` toggles are not yet fully honored across every CLI orchestration path.
-- `run` is still a convergence skeleton and not yet a full criteria-aware orchestration loop.
-- Holdout execution is implemented in internal packages but not yet fully wired as automatic CLI `run` completion behavior.
-- `mock` CLI is currently start-focused; stop/status/logs lifecycle parity is still in progress.
 - Sandbox/live deploy (real Scaleway) is deliberately deferred and blocked for now due cost implications; it is out-of-scope until an explicit approval policy exists.
 
 Criteria support/deferment status (current slices):
-- `connectivity`: supported by mock topology evaluator plumbing, but not yet fully wired from scenario criteria into CLI orchestration.
-- `http_probe`: supported by mock topology evaluator plumbing, but not yet fully wired from scenario criteria into CLI orchestration.
-- `policy`: supported in static (`deny`) and state (`deny_state`) evaluators, but criteria-targeted execution wiring is still in progress.
-- `destruction`: supported as a lifecycle stage, but not yet enforced as scenario-driven criteria semantics.
-- `dns_resolution`: sandbox/live-only behavior; intentionally deferred while sandbox deploy is blocked for cost reasons.
+- `connectivity`: criteria-driven topology checks are wired and propagated through `test` and `run` convergence.
+- `http_probe`: criteria-driven topology checks are wired and propagated through `test` and `run` convergence.
+- `policy`: criteria-driven state-policy checks are wired and propagated through `test` and `run` convergence.
+- `destruction`: supported as lifecycle stage and holdout-completion gating behavior in `run`.
+- `dns_resolution`: sandbox/live-only behavior; intentionally deferred while sandbox deploy is blocked for cost reasons, and currently surfaced as deterministic unsupported-criteria failures (`criteria/support_matrix`) in command output.
+  Output includes explicit stub messaging: `(real deployment skipped for cost reasons for now)`.
 
 ## Repository Layout
 
@@ -358,6 +353,9 @@ Command tree currently exposed:
 - `test <scenario-path>`
 - `run <scenario-path> [--max-iterations N]`
 - `mock start`
+- `mock stop`
+- `mock status`
+- `mock logs`
 
 Global flags:
 - `--config` (default `./infrafactory.yaml`)
@@ -384,6 +382,9 @@ go run ./cmd/infrafactory run scenarios/training/web-app-paris.yaml --config inf
 
 ```bash
 go run ./cmd/infrafactory mock start --config infrafactory.yaml
+go run ./cmd/infrafactory mock status --config infrafactory.yaml
+go run ./cmd/infrafactory mock logs --config infrafactory.yaml
+go run ./cmd/infrafactory mock stop --config infrafactory.yaml
 ```
 
 ### Practical example 5: Run package-focused checks while developing

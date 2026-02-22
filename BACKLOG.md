@@ -46,16 +46,23 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 | S8-T2 | Slice 8 | Add DX smoke runner targets for real-tool validation flows | P0 | done | S8-T1 | codex |
 | S8-T3 | Slice 8 | Sync README/usage docs for DX workflows (deps/tests/smoke/cleanup) | P1 | done | S8-T2 | codex |
 | S9-T1 | Slice 9 | Wire default runtime `SeedGenerator` implementation for `generate`/`run` | P0 | done | S8-T3 | codex |
-| S9-T10 | Slice 9 | Expand `internal/scenario.Scenario` model to include criteria/layer-routing fields | P0 | in_progress | S9-T1 | codex |
-| S9-T2 | Slice 9 | Parse scenario `acceptance_criteria` into typed executable check specs | P0 | todo | S9-T10 | codex |
-| S9-T11 | Slice 9 | Define criteria support matrix and deterministic unsupported-criteria behavior | P0 | todo | S9-T2 | codex |
-| S9-T3 | Slice 9 | Execute criteria-driven topology + state-policy checks in `test` | P0 | todo | S9-T11 | codex |
-| S9-T4 | Slice 9 | Honor `validation.layers.*.enabled` flags in `validate`/`test`/`run` orchestration | P0 | todo | S9-T3 | codex |
-| S9-T5 | Slice 9 | Upgrade `run` from skeleton to criteria-aware convergence orchestration | P0 | todo | S9-T3,S9-T4 | codex |
-| S9-T6 | Slice 9 | Wire criteria-only holdout evaluation into `run` completion path | P1 | todo | S9-T5 | codex |
-| S9-T7 | Slice 9 | Expand `mock` command lifecycle (`start/stop/status/logs`) with parity tests | P1 | todo | S9-T4 | codex |
+| S9-T10 | Slice 9 | Expand `internal/scenario.Scenario` model to include criteria/layer-routing fields | P0 | done | S9-T1 | codex |
+| S9-T2 | Slice 9 | Parse scenario `acceptance_criteria` into typed executable check specs | P0 | done | S9-T10 | codex |
+| S9-T11 | Slice 9 | Define criteria support matrix and deterministic unsupported-criteria behavior | P0 | done | S9-T2 | codex |
+| S9-T3 | Slice 9 | Execute criteria-driven topology + state-policy checks in `test` | P0 | done | S9-T11 | codex |
+| S9-T4 | Slice 9 | Honor `validation.layers.*.enabled` flags in `validate`/`test`/`run` orchestration | P0 | done | S9-T3 | codex |
+| S9-T5 | Slice 9 | Upgrade `run` from skeleton to criteria-aware convergence orchestration | P0 | done | S9-T3,S9-T4 | codex |
+| S9-T6 | Slice 9 | Wire criteria-only holdout evaluation into `run` completion path | P1 | done | S9-T5 | codex |
+| S9-T7 | Slice 9 | Expand `mock` command lifecycle (`start/stop/status/logs`) with parity tests | P1 | done | S9-T4 | codex |
 | S9-T8 | Slice 9 | Sandbox/live deploy layer wiring (real Scaleway) | P2 | blocked | - | codex |
 | S9-T9 | Slice 9 | Document sandbox deploy deferment due cost implications | P0 | done | S8-T3 | codex |
+| S10-T1 | Slice 10 | Freeze output contract with golden snapshots for all commands/modes | P0 | todo | S10-T2,S10-T3,S10-T6 | codex |
+| S10-T2 | Slice 10 | Normalize CLI error taxonomy/messages across command paths | P0 | todo | S9-T7 | codex |
+| S10-T3 | Slice 10 | Version run artifact schema and add backward-compatible readers | P0 | todo | S9-T7 | codex |
+| S10-T4 | Slice 10 | Add idempotency/retry safety checks for repeated command execution | P1 | todo | S10-T1,S10-T2,S10-T3 | codex |
+| S10-T5 | Slice 10 | Add performance baseline benchmarks and regression guardrails | P1 | todo | S10-T3 | codex |
+| S10-T6 | Slice 10 | Add criteria/policy failure explainability summaries | P1 | todo | S10-T2,S10-T3 | codex |
+| S10-T7 | Slice 10 | Finalize permanent sandbox-block governance docs + ADR | P0 | todo | S9-T7,S10-T1 | codex |
 
 ## Ticket details
 
@@ -111,6 +118,13 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 | S9-T7 | `internal/cli/root.go`, `internal/cli/mock_*`, `Makefile` (if needed) | external image publishing strategy | `mock` command supports `start`, `stop`, `status`, and `logs` with deterministic output and errors | command tests for stop/status/logs happy-path + missing-runtime/dependency failures |
 | S9-T8 | `internal/harness`, `internal/cli`, docs | mock deploy layer and hermetic defaults | sandbox/live deploy stays blocked and intentionally out-of-scope until cost/credentials policy is explicitly approved and documented | n/a while blocked; unblock requires approved policy + ADR + credentials model |
 | S9-T9 | `README.md`, `STATUS.md`, `ROADMAP.md` | runtime behavior changes | docs explicitly state sandbox/live deploy deferment due cost implications | doc assertion checklist |
+| S10-T1 | `internal/cli/output_contract*`, command tests, fixtures/goldens | command business logic changes | final human/json outputs for all commands are frozen via golden snapshots with deterministic ordering and schema assertions after Slice 10 contract-shaping tickets land | golden tests for `init/generate/validate/test/run/mock *` in human+json modes and deterministic fixture update guardrails |
+| S10-T2 | `internal/cli/runtime.go`, command adapters, error helpers | schema/provider behavior changes | CLI errors use consistent codes, operation names, and actionable detail shapes across config/scenario/runtime/dependency failures | table-driven error-shape tests for representative failure classes per command |
+| S10-T3 | `internal/runstore`, `internal/cli/run_command.go`, docs | new storage backend | run artifacts include explicit schema version; readers remain backward-compatible for pre-versioned artifacts | runstore read/write compatibility tests and run artifact schema assertions |
+| S10-T4 | `internal/cli/*_command.go`, `internal/cli/integration_*` | external orchestration redesign | repeated command execution in same workspace remains deterministic and safe under partial prior failures | idempotency integration tests for repeated `generate/validate/test/run/mock` flows |
+| S10-T5 | `internal/*` benchmarks, CI scripts/docs | feature behavior changes | baseline benchmark suite exists for key flows with documented thresholds and regression checks without requiring network/external services | benchmark tests + CI guard script assertions with env-guarded execution in default hermetic path |
+| S10-T6 | `internal/cli/output_contract.go`, failure mapping adapters, docs | policy authoring semantics | failure output includes concise explainability summaries linking criteria/policy checks to actionable context | output contract tests for explainability fields in human/json outputs |
+| S10-T7 | `docs/decisions/*`, `docs/decisions/README.md`, `README.md`, `ROADMAP.md`, `STATUS.md` | runtime deployment implementation | permanent sandbox/live block governance is codified in ADR and synchronized docs with unambiguous policy language | doc hygiene + ADR index/checklist assertions |
 
 ## Operating notes
 - Update `status` and dependencies as work evolves.

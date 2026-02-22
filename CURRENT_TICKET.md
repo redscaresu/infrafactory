@@ -3,52 +3,51 @@
 Use this file as the per-session execution stub.
 
 ## Ticket
-- id: S9-T10
-- title: Expand `internal/scenario.Scenario` model to include criteria/layer-routing fields
-- status: in_progress
-- classification: implementation-only
+- id: S9-T8
+- title: Sandbox/live deploy layer wiring (real Scaleway)
+- status: blocked
+- classification: decision-impacting
 
 ## 1) Problem Statement
 - What is broken or missing?
-  The runtime scenario model currently exposes only limited fields, which blocks criteria and layer-routing orchestration work in Slice 9.
+  Sandbox/live deploy layer wiring remains intentionally deferred and blocked due cost/credentials policy constraints.
 - Why does it matter now?
-  `S9-T2+` depends on typed access to criteria and routing metadata from loaded scenarios.
+  This is the final Slice 9 ticket, but it cannot proceed without explicit approval on cost/credentials governance.
 
 ## 2) Scope
 - In scope:
-  typed scenario model expansion and loader tests proving criteria/layer fields are available.
+  real Scaleway sandbox/live deploy orchestration model (`S9-T8`) once policy is approved.
 - Out of scope:
-  criteria execution semantics, support/defer matrix behavior, and sandbox/live deploy wiring.
+  any implementation while approval remains absent.
 
 ## 3) Acceptance Criteria
-1. `internal/scenario.Scenario` includes typed fields needed by orchestration (`type`, `references`, constraints, acceptance criteria).
-2. Scenario loading preserves existing valid fixture compatibility while populating typed fields.
-3. Focused tests assert typed decode behavior and backward compatibility.
+1. Explicit cost/credentials policy approval is provided.
+2. ADR/contract updates for sandbox deploy governance are accepted.
+3. Implementation and tests proceed only after (1) and (2).
 
 ## 4) Impacted Areas
 - Packages/files expected to change:
-  `internal/scenario/scenario.go` and `internal/scenario/scenario_test.go`.
+  blocked pending approval.
 - External contracts affected (CLI/schema/policy):
-  no.
+  yes (deploy governance and runtime behavior).
 
 ## 5) Test Plan
 - Unit tests:
-  scenario loader typed-model tests in `internal/scenario`.
+  blocked pending approval.
 - Integration checks:
-  none.
+  blocked pending approval.
 - Manual verification:
-  `go test ./...` and `bash scripts/check_all.sh`.
+  blocked pending approval.
 
 ## 6) Risks and Rollback
 - Primary risks:
-  breaking existing scenario decode paths or introducing nil/zero-value ambiguity for optional fields.
+  cost leakage, credential handling mistakes, and policy non-compliance.
 - Rollback approach:
-  revert scenario model additions and restore prior loader/tests.
+  n/a while blocked.
 
 ## 7) Done Definition
-- Code and focused tests completed for typed scenario model expansion.
-- `go test ./...` and `bash scripts/check_all.sh` pass.
-- `STATUS.md`, `BACKLOG.md`, and `CURRENT_TICKET.md` synchronized.
+- Blocker state documented and synchronized.
+- Implementation deferred until approval.
 
 ## Slice 9 Defaults (Fresh Context)
 - Focus:
@@ -86,13 +85,25 @@ Use this file as the per-session execution stub.
 - Completed `S8-T2`: added make-based opt-in smoke wrappers with Mockway readiness check and configurable URL.
 - Completed `S8-T3`: synced README developer workflow to canonical `make` commands.
 - Slice 8 backlog complete.
+- Completed `S9-T7`: expanded mock lifecycle command parity with focused tests for `start`/`stop`/`status`/`logs`.
+- Updated blocked `S9-T8` stub behavior to emit explicit output/log messaging: `(real deployment skipped for cost reasons for now)` for sandbox-deploy blocked paths and deferred criteria signaling.
+- Completed `S9-T6`: wired holdout completion checks into run with deterministic block behavior and explicit no-feedback-loop coupling.
+- Completed `S9-T5`: upgraded run convergence to use criteria-level failure propagation from test execution while preserving deterministic stop semantics.
+- Completed `S9-T4`: wired layer-enable orchestration behavior and blocked sandbox signaling for `validate`/`test`/`run`.
+- Completed `S9-T3`: wired criteria-driven topology/state-policy execution in `test` with deterministic pass/fail output behavior.
+- Completed `S9-T11`: added deterministic unsupported-criteria behavior contract with explicit support-matrix skip/failure output for deferred checks such as `dns_resolution`.
+- Completed `S9-T2`: added typed executable criteria mapping and focused parse-error coverage for malformed criteria specs.
+- Completed `S9-T10`: expanded typed scenario model decode for criteria/layer routing fields and added focused backward-compatibility + field-mapping loader tests.
 - Completed `S9-T1`: default runtime now injects a concrete `SeedGenerator`; `generate`/`run` no longer fail on missing generator dependency by default; added focused runtime/generator/command tests.
-- Planned Slice 9 (`S9-T1`..`S9-T9`) and started `S9-T10`.
+- Planned Slice 9 (`S9-T1`..`S9-T9`) and halted at `S9-T8` due explicit policy blocker.
 - Refined Slice 9 with two additional prerequisite tickets: `S9-T10` (typed scenario model expansion) and `S9-T11` (criteria support/deferment behavior contract).
 - Updated `SESSION_START.md` with Slice 9 startup guardrails so fresh contexts see the exact execution order, blocked sandbox scope, and criteria deferment matrix before implementation.
 - Expanded `SESSION_START.md` with runtime caveats (`127.0.0.1` Mockway), real-tool smoke preconditions, canonical scenario path, and blocker-output protocol for execution-prompt compliance.
+- Drafted and refined Slice 10 backlog tickets (`S10-T1`..`S10-T7`) for reliability/contract hardening; resolved dependency sequencing gaps and completed two consecutive no-change refinement passes.
+- Documented fresh-context startup requirements in `SESSION_START.md`, including current blocked/unblocked lanes, startup verification commands, Slice 10 order constraints, and corrected runtime-state notes for criteria-aware `run`.
+- Completed refinement loop for fresh-context docs with two consecutive no-change passes and no further suggested additions.
 
 ## Blocker (if any)
-- blocker: none
-- attempts: n/a
-- required input: none
+- blocker: `S9-T8` sandbox/live deploy wiring remains blocked by explicit cost/credentials policy requirement.
+- attempts: all unblocked Slice 9 tickets (`S9-T1`, `S9-T10`, `S9-T2`, `S9-T11`, `S9-T3`, `S9-T4`, `S9-T5`, `S9-T6`, `S9-T7`) completed with passing checks; blocked-path stub messaging has been wired and verified.
+- required input: explicit approval and governance direction for real (non-stub) sandbox/live deploy implementation scope.

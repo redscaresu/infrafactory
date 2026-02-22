@@ -15,7 +15,12 @@ const (
 )
 
 const (
-	errorCodeUsage = "usage"
+	errorCodeUsage                 = "usage"
+	errorCodeCommandFailed         = "command_failed"
+	errorCodeConfigInvalid         = "config_invalid"
+	errorCodeScenarioMalformed     = "scenario_malformed"
+	errorCodeScenarioInvalid       = "scenario_invalid"
+	errorCodeDependencyUnavailable = "dependency_unavailable"
 )
 
 const (

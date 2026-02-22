@@ -59,6 +59,13 @@ This file is intentionally high-level and mostly stable; day-to-day execution tr
 - Expand mock command lifecycle operations.
 - Keep sandbox/live deploy layer deferred (blocked) due current cost implications.
 
+10. Slice 10: Reliability and contract hardening
+- Freeze command/output contracts via golden snapshots and schema assertions.
+- Normalize CLI error taxonomy and deterministic failure messaging.
+- Version run artifact schema with backward-compatible readers.
+- Add idempotency/retry safety and performance regression guardrails.
+- Finalize permanent sandbox/live deploy block governance docs and ADR.
+
 ## Near-term execution order
 
 1. Complete Slice 1.

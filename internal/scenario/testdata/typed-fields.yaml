@@ -1,0 +1,26 @@
+scenario: holdout-routing
+version: "1.0"
+cloud: scaleway
+description: criteria-only holdout fixture with typed routing fields
+type: holdout
+references: scenarios/training/web-app-paris.yaml
+
+constraints:
+  region: fr-par
+  encryption_at_rest: true
+
+acceptance_criteria:
+  - type: connectivity
+    from: compute
+    to: database
+    port: 5432
+    expect: success
+  - type: policy
+    check: encryption_at_rest
+    target: database
+    expect: pass
+  - type: dns_resolution
+    domain: "{{scenario_name}}.example.com"
+    expect: resolves
+  - type: destruction
+    expect: no_orphans

@@ -182,25 +182,31 @@ func TestFormatCommandErrorClassifiesKnownErrorKinds(t *testing.T) {
 		{
 			name:         "config invalid",
 			err:          fmt.Errorf("load config: %w", &config.ValidationError{Fields: []config.FieldError{{Field: "version", Err: "is required"}}}),
-			expectedCode: "config_invalid",
+			expectedCode: errorCodeConfigInvalid,
 			expectedIs:   config.ErrInvalidConfig,
 		},
 		{
 			name:         "scenario malformed",
 			err:          fmt.Errorf("load scenario: %w", scenario.ErrMalformedScenario),
-			expectedCode: "scenario_malformed",
+			expectedCode: errorCodeScenarioMalformed,
 			expectedIs:   scenario.ErrMalformedScenario,
 		},
 		{
 			name:         "scenario invalid",
 			err:          fmt.Errorf("load scenario: %w", scenario.ErrInvalidScenario),
-			expectedCode: "scenario_invalid",
+			expectedCode: errorCodeScenarioInvalid,
 			expectedIs:   scenario.ErrInvalidScenario,
+		},
+		{
+			name:         "dependency unavailable",
+			err:          fmt.Errorf("run mock: %w", ErrDependencyUnavailable),
+			expectedCode: errorCodeDependencyUnavailable,
+			expectedIs:   ErrDependencyUnavailable,
 		},
 		{
 			name:         "fallback",
 			err:          errors.New("boom"),
-			expectedCode: "command_failed",
+			expectedCode: errorCodeCommandFailed,
 			expectedIs:   nil,
 		},
 	}
@@ -237,7 +243,7 @@ func TestFormatCommandErrorPassThroughPaths(t *testing.T) {
 		t.Fatalf("expected not implemented error to pass through unchanged")
 	}
 
-	existing := &CLIError{Op: "run", Code: "command_failed", Err: errors.New("existing")}
+	existing := &CLIError{Op: "run", Code: errorCodeCommandFailed, Err: errors.New("existing")}
 	formattedExisting := formatCommandError("run", existing)
 	if formattedExisting != existing {
 		t.Fatalf("expected existing CLI error to pass through unchanged")

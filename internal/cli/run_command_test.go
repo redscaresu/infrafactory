@@ -108,6 +108,13 @@ func TestRunCommandStopsAtMaxIterations(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected run failure")
 	}
+	var cliErr *CLIError
+	if !errors.As(err, &cliErr) {
+		t.Fatalf("expected *CLIError, got %T (%v)", err, err)
+	}
+	if cliErr.Op != "run" || cliErr.Code != errorCodeCommandFailed {
+		t.Fatalf("expected run/%s CLI error, got op=%q code=%q", errorCodeCommandFailed, cliErr.Op, cliErr.Code)
+	}
 	if !strings.Contains(stdout.String(), "check=max_iterations") {
 		t.Fatalf("expected max-iterations failure marker, got:\n%s", stdout.String())
 	}
@@ -156,6 +163,13 @@ func TestRunCommandStopsOnStuckDetection(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected run failure")
 	}
+	var cliErr *CLIError
+	if !errors.As(err, &cliErr) {
+		t.Fatalf("expected *CLIError, got %T (%v)", err, err)
+	}
+	if cliErr.Op != "run" || cliErr.Code != errorCodeCommandFailed {
+		t.Fatalf("expected run/%s CLI error, got op=%q code=%q", errorCodeCommandFailed, cliErr.Op, cliErr.Code)
+	}
 	if !strings.Contains(stdout.String(), "check=stuck") {
 		t.Fatalf("expected stuck-detection failure marker, got:\n%s", stdout.String())
 	}
@@ -197,6 +211,255 @@ func TestRunCommandDefaultRuntimeUsesConcreteGeneratorDependency(t *testing.T) {
 	}
 }
 
+func TestRunCommandFailsWhenSandboxLayerEnabled(t *testing.T) {
+	h := newCommandTestHarness(t)
+	runstoreRoot := filepath.Join(h.WorkspaceDir, ".infrafactory", "runs")
+	t.Setenv("INFRAFACTORY_RUNSTORE_ROOT", runstoreRoot)
+	opts := runtimeOptions{
+		configLoader: func(path string) (config.Config, error) {
+			cfg, err := config.Load(path)
+			if err != nil {
+				return config.Config{}, err
+			}
+			cfg.Validation.Layers.SandboxDeploy.Enabled = true
+			return cfg, nil
+		},
+		scenarioLoader: defaultScenarioLoader,
+		deps: RuntimeDependencies{
+			Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
+				return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte("terraform {}\n")}}, nil
+			}),
+		},
+	}
+
+	cmd := newRunCommandForTest(opts)
+	stdout := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{h.ScenarioPath, "--config", h.ConfigPath})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected run failure")
+	}
+	if !strings.Contains(stdout.String(), "- sandbox_deploy/blocked: skip") {
+		t.Fatalf("expected sandbox blocked stage, got:\n%s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), sandboxRealDeploySkippedMessage) {
+		t.Fatalf("expected cost-skip message in output, got:\n%s", stdout.String())
+	}
+}
+
+func TestRunCommandHonorsDisabledStaticMockAndDestructionLayers(t *testing.T) {
+	h := newCommandTestHarness(t)
+	runstoreRoot := filepath.Join(h.WorkspaceDir, ".infrafactory", "runs")
+	t.Setenv("INFRAFACTORY_RUNSTORE_ROOT", runstoreRoot)
+	opts := runtimeOptions{
+		configLoader: func(path string) (config.Config, error) {
+			cfg, err := config.Load(path)
+			if err != nil {
+				return config.Config{}, err
+			}
+			cfg.Validation.Layers.Static.Enabled = false
+			cfg.Validation.Layers.MockDeploy.Enabled = false
+			cfg.Validation.Layers.Destruction.Enabled = false
+			return cfg, nil
+		},
+		scenarioLoader: defaultScenarioLoader,
+		deps: RuntimeDependencies{
+			Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
+				return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte("terraform {}\n")}}, nil
+			}),
+		},
+	}
+
+	cmd := newRunCommandForTest(opts)
+	stdout := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{h.ScenarioPath, "--config", h.ConfigPath, "--max-iterations", "1"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected run success with disabled layers, got: %v", err)
+	}
+	for _, check := range []string{
+		"Status: success",
+		"- run/iteration_1_generate: pass",
+		"- run/iteration_1_validate: pass",
+		"- run/iteration_1_test: pass",
+	} {
+		if !strings.Contains(stdout.String(), check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, stdout.String())
+		}
+	}
+}
+
+func TestRunCommandPropagatesCriteriaFailuresForConvergence(t *testing.T) {
+	h := newCommandTestHarness(t)
+	runstoreRoot := filepath.Join(h.WorkspaceDir, ".infrafactory", "runs")
+	t.Setenv("INFRAFACTORY_RUNSTORE_ROOT", runstoreRoot)
+	scenarioPath := writeCriteriaScenario(t, h.WorkspaceDir, "success", "pass")
+
+	opts := runtimeOptions{
+		configLoader: func(path string) (config.Config, error) {
+			cfg, err := config.Load(path)
+			if err != nil {
+				return config.Config{}, err
+			}
+			cfg.Agent.MaxIterations = 3
+			cfg.Validation.Layers.Destruction.Enabled = false
+			cfg.ConstraintPolicies = map[string]string{
+				"encryption_at_rest": filepath.Join("..", "harness", "testdata", "state-policy", "policy.rego"),
+			}
+			return cfg, nil
+		},
+		scenarioLoader: defaultScenarioLoader,
+		deps: RuntimeDependencies{
+			Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
+				return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte("terraform {}\n")}}, nil
+			}),
+			Static: &fakeStaticHarness{
+				result: &harness.StaticResult{
+					Stages:   []harness.StageResult{{Stage: "init"}, {Stage: "validate"}, {Stage: "plan"}, {Stage: "show"}},
+					PlanJSON: []byte(`{"planned_values":{"root_module":{}}}`),
+				},
+			},
+			MockDeploy: &fakeMockDeployHarness{
+				result: &harness.MockDeployResult{
+					Apply: harness.StageResult{Stage: "apply"},
+					StateSnapshot: []byte(`{
+  "connectivity": {"compute->database:5432": false},
+  "http_probe": {"load_balancer:80": true},
+  "rdb": {"public_endpoint": false}
+}`),
+				},
+			},
+			Destroy: &fakeDestroyHarness{},
+		},
+	}
+
+	cmd := newRunCommandForTest(opts)
+	stdout := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{scenarioPath, "--config", h.ConfigPath})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected run failure")
+	}
+	if !strings.Contains(stdout.String(), "check=connectivity") {
+		t.Fatalf("expected criteria-level connectivity failure in run output, got:\n%s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "check=stuck") {
+		t.Fatalf("expected stuck detection marker in run output, got:\n%s", stdout.String())
+	}
+}
+
+func TestRunCommandExecutesCriteriaOnlyHoldoutsAfterConvergence(t *testing.T) {
+	h := newCommandTestHarness(t)
+	runstoreRoot := filepath.Join(h.WorkspaceDir, ".infrafactory", "runs")
+	t.Setenv("INFRAFACTORY_RUNSTORE_ROOT", runstoreRoot)
+	writeCriteriaOnlyHoldout(t, filepath.Join(h.WorkspaceDir, "scenarios", "holdout", "holdout-pass.yaml"), h.ScenarioPath, `  - type: destruction
+    expect: no_orphans
+`, "holdout-pass")
+
+	opts := runtimeOptions{
+		configLoader: func(path string) (config.Config, error) {
+			cfg, err := config.Load(path)
+			if err != nil {
+				return config.Config{}, err
+			}
+			cfg.Paths.Scenarios = filepath.Join(h.WorkspaceDir, "scenarios")
+			cfg.Validation.Layers.Static.Enabled = false
+			cfg.Validation.Layers.MockDeploy.Enabled = false
+			cfg.Validation.Layers.Destruction.Enabled = false
+			return cfg, nil
+		},
+		scenarioLoader: defaultScenarioLoader,
+		deps: RuntimeDependencies{
+			Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
+				return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte("terraform {}\n")}}, nil
+			}),
+			MockDeploy: &fakeMockDeployHarness{},
+			Destroy:    &fakeDestroyHarness{},
+		},
+	}
+
+	cmd := newRunCommandForTest(opts)
+	stdout := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{h.ScenarioPath, "--config", h.ConfigPath, "--max-iterations", "1"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected run success, got: %v", err)
+	}
+	for _, check := range []string{
+		"- holdout/discovery: pass (1 holdouts)",
+		"- holdout/holdout-pass: pass",
+	} {
+		if !strings.Contains(stdout.String(), check) {
+			t.Fatalf("expected holdout stage %q, got:\n%s", check, stdout.String())
+		}
+	}
+}
+
+func TestRunCommandBlocksOnCriteriaOnlyHoldoutFailureWithoutFeedbackInjection(t *testing.T) {
+	h := newCommandTestHarness(t)
+	runstoreRoot := filepath.Join(h.WorkspaceDir, ".infrafactory", "runs")
+	t.Setenv("INFRAFACTORY_RUNSTORE_ROOT", runstoreRoot)
+	writeCriteriaOnlyHoldout(t, filepath.Join(h.WorkspaceDir, "scenarios", "holdout", "holdout-block.yaml"), h.ScenarioPath, `  - type: dns_resolution
+    domain: "{{scenario_name}}.example.com"
+    expect: resolves
+`, "holdout-block")
+
+	genCalls := 0
+	opts := runtimeOptions{
+		configLoader: func(path string) (config.Config, error) {
+			cfg, err := config.Load(path)
+			if err != nil {
+				return config.Config{}, err
+			}
+			cfg.Paths.Scenarios = filepath.Join(h.WorkspaceDir, "scenarios")
+			cfg.Validation.Layers.Static.Enabled = false
+			cfg.Validation.Layers.MockDeploy.Enabled = false
+			cfg.Validation.Layers.Destruction.Enabled = false
+			cfg.Agent.MaxIterations = 3
+			return cfg, nil
+		},
+		scenarioLoader: defaultScenarioLoader,
+		deps: RuntimeDependencies{
+			Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
+				genCalls++
+				return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte("terraform {}\n")}}, nil
+			}),
+			MockDeploy: &fakeMockDeployHarness{},
+			Destroy:    &fakeDestroyHarness{},
+		},
+	}
+
+	cmd := newRunCommandForTest(opts)
+	stdout := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{h.ScenarioPath, "--config", h.ConfigPath})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected run failure")
+	}
+	if genCalls != 1 {
+		t.Fatalf("expected exactly one training iteration before holdout block, got %d generator calls", genCalls)
+	}
+	if !strings.Contains(stdout.String(), "check=dns_resolution") {
+		t.Fatalf("expected holdout dns_resolution failure, got:\n%s", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "check=max_iterations") || strings.Contains(stdout.String(), "check=stuck") {
+		t.Fatalf("expected holdout block without training-loop feedback stop markers, got:\n%s", stdout.String())
+	}
+}
+
 func newRunCommandForTest(opts runtimeOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:  "run <scenario>",
@@ -207,4 +470,23 @@ func newRunCommandForTest(opts runtimeOptions) *cobra.Command {
 	cmd.Flags().String("output", string(OutputModeHuman), "")
 	cmd.Flags().Int("max-iterations", 0, "")
 	return cmd
+}
+
+func writeCriteriaOnlyHoldout(t *testing.T, path string, trainingPath string, criteria string, scenarioName string) {
+	t.Helper()
+
+	content := `scenario: ` + scenarioName + `
+version: "1.0"
+cloud: scaleway
+description: criteria-only holdout fixture
+type: holdout
+references: ` + trainingPath + `
+acceptance_criteria:
+` + criteria
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir holdout dir: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write holdout fixture: %v", err)
+	}
 }

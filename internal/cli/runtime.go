@@ -30,6 +30,18 @@ type MockStarter interface {
 	Start(context.Context, config.MockwayConfig) error
 }
 
+type MockStopper interface {
+	Stop(context.Context, config.MockwayConfig) error
+}
+
+type MockStatuser interface {
+	Status(context.Context, config.MockwayConfig) (string, error)
+}
+
+type MockLogger interface {
+	Logs(context.Context, config.MockwayConfig) (string, error)
+}
+
 type RuntimeDependencies struct {
 	Generator  generator.SeedGenerator
 	Static     StaticHarnessRunner
@@ -37,6 +49,9 @@ type RuntimeDependencies struct {
 	Destroy    DestroyHarnessRunner
 	MockState  harness.MockStateClient
 	MockStart  MockStarter
+	MockStop   MockStopper
+	MockStatus MockStatuser
+	MockLogs   MockLogger
 }
 
 type CommandRuntime struct {
@@ -79,6 +94,8 @@ type CLIError struct {
 	Code string
 	Err  error
 }
+
+var ErrDependencyUnavailable = errors.New("dependency unavailable")
 
 func (e *CLIError) Error() string {
 	if e == nil {
@@ -179,6 +196,15 @@ func buildRuntime(cmd *cobra.Command, opts runtimeOptions) (*CommandRuntime, err
 	if deps.MockStart == nil {
 		deps.MockStart = &dockerMockStarter{}
 	}
+	if deps.MockStop == nil {
+		deps.MockStop = &dockerMockStarter{}
+	}
+	if deps.MockStatus == nil {
+		deps.MockStatus = &dockerMockStarter{}
+	}
+	if deps.MockLogs == nil {
+		deps.MockLogs = &dockerMockStarter{}
+	}
 
 	return &CommandRuntime{
 		ConfigPath:     configPath,
@@ -207,14 +233,16 @@ func formatCommandError(op string, err error) error {
 		return err
 	}
 
-	code := "command_failed"
+	code := errorCodeCommandFailed
 	switch {
 	case errors.Is(err, config.ErrInvalidConfig):
-		code = "config_invalid"
+		code = errorCodeConfigInvalid
 	case errors.Is(err, scenario.ErrMalformedScenario):
-		code = "scenario_malformed"
+		code = errorCodeScenarioMalformed
 	case errors.Is(err, scenario.ErrInvalidScenario):
-		code = "scenario_invalid"
+		code = errorCodeScenarioInvalid
+	case errors.Is(err, ErrDependencyUnavailable):
+		code = errorCodeDependencyUnavailable
 	}
 
 	return &CLIError{

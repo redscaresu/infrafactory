@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/redscaresu/infrafactory/internal/feedback"
 	"github.com/redscaresu/infrafactory/internal/runstore"
+	"github.com/redscaresu/infrafactory/internal/scenario"
 	"github.com/spf13/cobra"
 )
 
@@ -24,6 +26,33 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 	if err != nil {
 		return fmt.Errorf("load scenario %q: %w", scenarioPath, err)
 	}
+	if runtime.Config.Validation.Layers.SandboxDeploy.Enabled {
+		result := OutputResult{
+			Command:  "run",
+			Scenario: sc.Name,
+			Status:   CommandStatusFailed,
+			Stages: []StageSummary{
+				{Layer: "sandbox_deploy", Stage: "blocked", Status: StageStatusSkip, Detail: sandboxBlockedStageDetail()},
+			},
+			Failures: []FailureSummary{
+				{
+					Layer:   "sandbox_deploy",
+					Stage:   "blocked",
+					Check:   "sandbox_deploy",
+					Command: "layer gate",
+					Detail:  sandboxDeferredDetail(),
+				},
+			},
+		}
+		if err := writeCommandOutput(cmd, result); err != nil {
+			return err
+		}
+		return &CLIError{
+			Op:   "run",
+			Code: errorCodeCommandFailed,
+			Err:  fmt.Errorf("sandbox deploy layer is blocked"),
+		}
+	}
 
 	startedAt := time.Now().UTC()
 	runID := startedAt.Format("20060102T150405Z0700")
@@ -33,6 +62,7 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 	allFailures := make([]FailureSummary, 0)
 	var previousFailures []feedback.Failure
 	converged := false
+	holdoutBlocked := false
 	completed := 0
 
 	for iteration := 1; iteration <= maxIterations; iteration++ {
@@ -76,8 +106,18 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 		})
 	}
 
+	if converged {
+		holdoutStages, holdoutFailures, err := runCriteriaOnlyHoldouts(runtime, scenarioPath)
+		if err != nil {
+			return fmt.Errorf("run holdout checks: %w", err)
+		}
+		allStages = append(allStages, holdoutStages...)
+		allFailures = append(allFailures, holdoutFailures...)
+		holdoutBlocked = len(holdoutFailures) > 0
+	}
+
 	status := CommandStatusSuccess
-	if !converged {
+	if !converged || holdoutBlocked {
 		status = CommandStatusFailed
 	}
 
@@ -108,11 +148,15 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 		return err
 	}
 
-	if !converged {
+	if !converged || holdoutBlocked {
+		errDetail := fmt.Errorf("run did not converge after %d iteration(s)", completed)
+		if holdoutBlocked {
+			errDetail = fmt.Errorf("holdout checks failed after training convergence")
+		}
 		return &CLIError{
 			Op:   "run",
-			Code: "command_failed",
-			Err:  fmt.Errorf("run did not converge after %d iteration(s)", completed),
+			Code: errorCodeCommandFailed,
+			Err:  errDetail,
 		}
 	}
 
@@ -163,23 +207,112 @@ func runIteration(iteration int, scenarioPath string, cmd *cobra.Command, runtim
 
 	for _, step := range steps {
 		stageName := fmt.Sprintf("iteration_%d_%s", iteration, step.name)
-		internalCmd := newInternalRunStepCommand(step.command, cmd)
-		err := step.runner(internalCmd, []string{scenarioPath}, runtime)
+		var (
+			err        error
+			testResult OutputResult
+		)
+		if step.name == "test" {
+			testResult, err = executeTest(runtime, scenarioPath)
+		} else {
+			internalCmd := newInternalRunStepCommand(step.command, cmd)
+			err = step.runner(internalCmd, []string{scenarioPath}, runtime)
+		}
 		if err != nil {
 			stages = append(stages, StageSummary{Layer: "run", Stage: stageName, Status: StageStatusFail})
-			failures = append(failures, FailureSummary{
-				Layer:   "run",
-				Stage:   stageName,
-				Check:   step.name,
-				Command: step.command,
-				Detail:  err.Error(),
-			})
+			if step.name == "test" && len(testResult.Failures) > 0 {
+				for _, failure := range testResult.Failures {
+					failures = append(failures, FailureSummary{
+						Layer:    "run",
+						Stage:    stageName,
+						Check:    failure.Check,
+						Policy:   failure.Policy,
+						Command:  step.command,
+						Resource: failure.Resource,
+						Detail:   failure.Detail,
+					})
+				}
+			} else {
+				failures = append(failures, FailureSummary{
+					Layer:   "run",
+					Stage:   stageName,
+					Check:   step.name,
+					Command: step.command,
+					Detail:  err.Error(),
+				})
+			}
 			break
 		}
 		stages = append(stages, StageSummary{Layer: "run", Stage: stageName, Status: StageStatusPass})
 	}
 
 	return stages, failures
+}
+
+func runCriteriaOnlyHoldouts(runtime *CommandRuntime, trainingScenarioPath string) ([]StageSummary, []FailureSummary, error) {
+	holdoutDir := filepath.Join(runtime.Config.Paths.Scenarios, "holdout")
+	holdouts, err := scenario.DiscoverCriteriaOnlyHoldouts(holdoutDir, trainingScenarioPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []StageSummary{{Layer: "holdout", Stage: "discovery", Status: StageStatusPass, Detail: "0 holdouts"}}, nil, nil
+		}
+		return nil, nil, err
+	}
+
+	stages := []StageSummary{
+		{
+			Layer:  "holdout",
+			Stage:  "discovery",
+			Status: StageStatusPass,
+			Detail: fmt.Sprintf("%d holdouts", len(holdouts)),
+		},
+	}
+	failures := make([]FailureSummary, 0)
+	for _, holdout := range holdouts {
+		sc, err := runtime.scenarioLoader(holdout.Path)
+		if err != nil {
+			stages = append(stages, StageSummary{Layer: "holdout", Stage: holdout.ScenarioName, Status: StageStatusFail})
+			failures = append(failures, FailureSummary{
+				Layer:   "holdout",
+				Stage:   holdout.ScenarioName,
+				Check:   "load",
+				Command: "scenario loader",
+				Detail:  err.Error(),
+			})
+			continue
+		}
+
+		outputDir := filepath.Join(runtime.Config.Paths.Output, sc.Name)
+		result, err := executeTestWithScenario(runtime, sc, outputDir)
+		if err != nil {
+			stages = append(stages, StageSummary{Layer: "holdout", Stage: holdout.ScenarioName, Status: StageStatusFail})
+			if len(result.Failures) == 0 {
+				failures = append(failures, FailureSummary{
+					Layer:   "holdout",
+					Stage:   holdout.ScenarioName,
+					Check:   "test",
+					Command: "test",
+					Detail:  err.Error(),
+				})
+				continue
+			}
+			for _, failure := range result.Failures {
+				failures = append(failures, FailureSummary{
+					Layer:    "holdout",
+					Stage:    holdout.ScenarioName,
+					Check:    failure.Check,
+					Policy:   failure.Policy,
+					Command:  "test",
+					Resource: failure.Resource,
+					Detail:   failure.Detail,
+				})
+			}
+			continue
+		}
+
+		stages = append(stages, StageSummary{Layer: "holdout", Stage: holdout.ScenarioName, Status: StageStatusPass})
+	}
+
+	return stages, failures, nil
 }
 
 func resolveRunMaxIterations(cmd *cobra.Command, runtime *CommandRuntime) (int, error) {

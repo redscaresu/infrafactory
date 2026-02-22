@@ -79,6 +79,13 @@ func TestMockStartCommandPreflightFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected mock start failure")
 	}
+	var cliErr *CLIError
+	if !errors.As(err, &cliErr) {
+		t.Fatalf("expected *CLIError, got %T (%v)", err, err)
+	}
+	if cliErr.Op != "mock start" || cliErr.Code != errorCodeCommandFailed {
+		t.Fatalf("expected mock start/%s CLI error, got op=%q code=%q", errorCodeCommandFailed, cliErr.Op, cliErr.Code)
+	}
 	if ExitCodeForError(err) != ExitCodeRuntime {
 		t.Fatalf("expected runtime exit code, got %d", ExitCodeForError(err))
 	}
