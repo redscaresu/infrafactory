@@ -6,6 +6,8 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 
 | id | slice | title | priority | status | deps | owner |
 |---|---|---|---|---|---|---|
+| M18 | Maintenance | Strengthen fresh-context startup documentation with run-loop and Mockway operational guardrails | P1 | done | M17 | codex |
+| M17 | Maintenance | Wire run-loop failure feedback into iterative LLM generation (no heuristic normalization) | P1 | done | M15 | codex |
 | M15 | Maintenance | Auto-inject missing Scaleway provider wiring during generate | P1 | done | M14 | codex |
 | M14 | Maintenance | Fail generate early when Scaleway resources are missing provider wiring | P1 | done | M13 | codex |
 | M13 | Maintenance | Make mock deploy test path self-contained by running tofu init before apply | P1 | done | M12 | codex |

@@ -32,7 +32,7 @@ git log -1 --oneline
 Before writing code, confirm these facts are still true in `STATUS.md`/`BACKLOG.md`:
 1. `S9-T8` (sandbox/live deploy, real Scaleway) remains permanently blocked by governance policy (ADR-0003).
 2. Output and logs must explicitly surface: `(real deployment skipped for cost reasons for now)` for sandbox/live-blocked behavior.
-3. Slice 11 transport lane (`S11-T1`..`S11-T7`) is complete; choose the next unblocked lane from `BACKLOG.md` after confirming status/roadmap priorities.
+3. Slice 12 feedback-loop hardening is the active milestone direction; prefer tickets that improve model-guided correction signal over new heuristic post-processing.
 4. `run` is criteria-aware and includes criteria-only holdout completion checks; do not regress to coarse stage-only convergence behavior.
 5. `dns_resolution` remains auto-pass informational output while sandbox/live deploy is blocked; do not treat it as a hard-fail criterion.
 6. Default runtime now uses concrete generator transports; `claude-code` requires `agent.claude.command` in `PATH` and `openrouter` requires `OPENROUTER_API_KEY` plus `agent.openrouter.model`.
@@ -44,6 +44,16 @@ bash scripts/check_all.sh
 ```
 
 If either command fails, restore the repo to a green baseline before starting a new ticket.
+
+### Fresh Context Addenda (Operational)
+- Prefer `run` over manual `generate` + `test` when diagnosing/repairing generation failures; only `run` feeds prior iteration failures into LLM generation (`FeedbackJSON`).
+- Avoid introducing new provider-specific string normalization rules in `generate`; prioritize improving feedback quality so the model corrects output itself.
+- Mockway startup failures are commonly local port collisions (`0.0.0.0:8080` already allocated); resolve the conflicting container/process before retrying `mock start`.
+- Use `http://127.0.0.1:8080` for local Mockway checks in this repo context (more reliable than `localhost`).
+- Debug iterative behavior from run artifacts:
+  `.infrafactory/runs/<scenario>/<run-id>/iterations/<n>/iteration.json` records stage/failure snapshots per iteration.
+- Keep output semantics in mind:
+  `output/<scenario>/` is latest generated IaC and is overwritten each run; historical evidence lives under `.infrafactory/runs/`.
 
 ### Slice 7 default execution constraints
 - Canonical order:

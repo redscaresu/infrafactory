@@ -61,13 +61,14 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 	allStages := make([]StageSummary, 0)
 	allFailures := make([]FailureSummary, 0)
 	var previousFailures []feedback.Failure
+	var previousIterationFailures []FailureSummary
 	converged := false
 	holdoutBlocked := false
 	completed := 0
 
 	for iteration := 1; iteration <= maxIterations; iteration++ {
 		completed = iteration
-		stages, failures := runIteration(iteration, scenarioPath, cmd, runtime)
+		stages, failures := runIteration(iteration, scenarioPath, cmd, runtime, previousIterationFailures)
 		allStages = append(allStages, stages...)
 
 		if err := persistRunIteration(store, sc.Name, runID, iteration, stages, failures); err != nil {
@@ -94,6 +95,7 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 			break
 		}
 		previousFailures = currentFailures
+		previousIterationFailures = append(previousIterationFailures[:0], failures...)
 	}
 
 	if !converged && completed >= maxIterations {
@@ -194,7 +196,7 @@ func resolveRunStoreRoot() string {
 	return runstore.DefaultRoot
 }
 
-func runIteration(iteration int, scenarioPath string, cmd *cobra.Command, runtime *CommandRuntime) ([]StageSummary, []FailureSummary) {
+func runIteration(iteration int, scenarioPath string, cmd *cobra.Command, runtime *CommandRuntime, previousIterationFailures []FailureSummary) ([]StageSummary, []FailureSummary) {
 	stages := make([]StageSummary, 0, 3)
 	failures := make([]FailureSummary, 0)
 
@@ -219,7 +221,7 @@ func runIteration(iteration int, scenarioPath string, cmd *cobra.Command, runtim
 			internalCmd := newInternalRunStepCommand(step.command, cmd)
 			switch step.name {
 			case "generate":
-				err = runGenerateCommand(internalCmd, []string{scenarioPath}, runtime)
+				_, err = generateAndWriteFiles(runtime, scenarioPath, iteration, previousIterationFailures)
 			case "validate":
 				err = runValidateCommand(internalCmd, []string{scenarioPath}, runtime)
 			default:

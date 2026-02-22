@@ -3,33 +3,31 @@
 Use this file as the per-session execution stub.
 
 ## Ticket
-- id: M15
-- title: Auto-inject missing Scaleway provider wiring during generate
+- id: M18
+- title: Strengthen fresh-context startup documentation with run-loop and Mockway operational guardrails
 - status: done
 - classification: implementation-only
 
 ## 1) Problem Statement
 - What is broken or missing?
-  Claude generation could emit Scaleway resources without provider wiring, and fail-fast blocking in `generate` prevented progressing through the happy path.
+  Fresh sessions still required rediscovering several operational realities (prefer `run` loop, avoid heuristic normalization, Mockway port collision diagnosis, artifact locations).
 - Why does it matter now?
-  Users need deterministic successful bundles from `generate` even when model output omits boilerplate provider blocks.
+  This creates avoidable churn at session start and increases time-to-first-correct-change.
 
 ## 2) Scope
 - In scope:
-  Auto-inject missing Scaleway provider wiring in generated files and keep validation as a postcondition.
+  Update session-start docs with high-signal operational addenda for current workflow and troubleshooting.
 - Out of scope:
-  Broader Terraform semantic repair.
+  Runtime behavior changes.
 
 ## 3) Acceptance Criteria
-1. `generate` adds missing `required_providers.scaleway` when Scaleway resources are present.
-2. `generate` adds missing `provider "scaleway"` block when Scaleway resources are present.
-3. Regression test verifies successful generation with injected `providers.tf`.
+1. Fresh-context guidance explicitly calls out `run` as the iterative feedback path.
+2. Fresh-context guidance explicitly warns against new heuristic normalization patches.
+3. Fresh-context guidance includes concrete Mockway and artifact-inspection operational guardrails.
 
 ## 4) Impacted Areas
 - Packages/files changed:
-  `internal/cli/generate_command.go`,
-  `internal/cli/generate_command_test.go`,
-  `README.md`,
+  `SESSION_START.md`,
   `BACKLOG.md`,
   `STATUS.md`,
   `CURRENT_TICKET.md`.
@@ -38,30 +36,28 @@ Use this file as the per-session execution stub.
 
 ## 5) Test Plan
 - Unit tests:
-  `go test ./internal/cli`
+  n/a (docs-only change)
 - Integration checks:
   `bash scripts/check_all.sh`
 - Manual verification:
-  run `generate` on a scenario that emits Scaleway resources and confirm `providers.tf` is written with required provider wiring.
+  read startup guide and confirm key operational guardrails are available without additional repository spelunking.
 
 ## 6) Risks and Rollback
 - Primary risks:
-  injected provider defaults may need tuning if provider requirements change.
+  low; documentation drift if behavior changes and startup docs are not kept in sync.
 - Rollback approach:
-  remove the auto-injection helper and restore strict fail-fast behavior.
+  revert startup addenda section.
 
 ## 7) Done Definition
-- Generate-time provider-wiring auto-injection implemented and tested.
+- Fresh-context startup guardrails documented and tracked.
 - Tracking docs updated.
 
 ## Test plan
-- `go test ./internal/cli`
 - `bash scripts/check_all.sh`
 
 ## Progress notes
-- Added `ensureScalewayProviderWiring(...)` in generate command path before validation.
-- Injection writes missing Scaleway `required_providers` and/or `provider "scaleway"` blocks into `providers.tf`.
-- Added `TestGenerateCommandAutoAddsScalewayProviderWiringWhenMissing`.
+- Added `Fresh Context Addenda (Operational)` section to `SESSION_START.md`.
+- Documented canonical iterative path (`run`), anti-normalization direction, Mockway port-collision handling, and run artifact debug path.
 
 ## Blocker (if any)
 - blocker: none.

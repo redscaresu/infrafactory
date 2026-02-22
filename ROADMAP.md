@@ -73,11 +73,17 @@ This file is intentionally high-level and mostly stable; day-to-day execution tr
 - Add hermetic transport-adapter tests and opt-in smoke tests for real transports.
 - Preserve existing CLI/output contracts and failure taxonomy while replacing default transport stubs.
 
+12. Slice 12: Feedback-driven regeneration hardening
+- Ensure `run` iteration-N generation receives structured failures from iteration N-1.
+- Reduce heuristic post-processing in favor of model-corrected regeneration informed by concrete harness failures.
+- Strengthen run-loop convergence quality by improving failure payload fidelity and prompt integration.
+- Add focused regression tests proving feedback is injected and iteration metadata is preserved.
+
 ## Near-term execution order
 
-1. Execute Slice 11 transport contract/wiring (`S11-T1` -> `S11-T4`).
-2. Complete Slice 11 transport hardening/test/docs closure (`S11-T5`, `S11-T7`, `S11-T6`).
-3. Re-evaluate next milestone after concrete generator transport is production-ready.
+1. Keep Slice 11 closed and stable (transport adapters + secret-safety + smoke gates).
+2. Execute Slice 12 feedback-loop hardening work to prioritize model-driven correction over heuristic normalization.
+3. Re-evaluate milestone sequencing after feedback-loop quality metrics stabilize.
 
 ## Live progress tracking
 

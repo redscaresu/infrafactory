@@ -3,8 +3,8 @@
 Last updated: 2026-02-22
 
 ## Current phase
-- Active milestone: Slice 11 generator transport integration (complete)
-- Next gate: re-plan post-Slice-11 backlog priorities
+- Active milestone: Slice 12 feedback-driven regeneration hardening (in progress)
+- Next gate: define and sequence Slice 12 ticket set beyond `M17`
 - Current ticket: none
 - Next ticket: none
 
@@ -16,8 +16,8 @@ Last updated: 2026-02-22
 
 ## Next actions
 1. Keep `S9-T8` blocked unless ADR-0003 is explicitly superseded.
-2. Re-evaluate next milestone now that `S11-T1`..`S11-T7` and `S11-T6` are complete.
-3. Prepare backlog sequencing for the next slice before starting new implementation tickets.
+2. Define concrete Slice 12 follow-up tickets for stronger failure payload quality and feedback-prompt fidelity.
+3. Prioritize model-guided correction work over introducing new heuristic normalization rules in `generate`.
 4. Maintain hermetic default CI posture with transport smoke tests opt-in only.
 
 ## Update policy
@@ -28,6 +28,8 @@ Last updated: 2026-02-22
 - Keep startup/read-order instructions only in `SESSION_START.md` to avoid duplication.
 
 ## Recent updates
+- Completed maintenance ticket `M18`: enriched fresh-context startup guidance with operational guardrails for run-loop feedback usage, anti-normalization direction, Mockway port-collision diagnosis, and run-artifact inspection paths.
+- Completed maintenance ticket `M17`: wired run-loop feedback propagation so iteration-N generation receives prior iteration failures (`FeedbackJSON`) and accurate iteration indices, replacing heuristic normalization direction with LLM-guided correction.
 - Completed maintenance ticket `M15`: generate now auto-injects missing Scaleway provider wiring (`required_providers` + `provider "scaleway"`) when Scaleway resources are emitted, with focused command test coverage.
 - Completed maintenance ticket `M14`: added fail-fast generate validation for missing Scaleway provider wiring when Scaleway resources are present, with focused command test coverage.
 - Completed maintenance ticket `M13`: made mock deploy path self-contained by running `tofu init` before `tofu apply`, with `mock_deploy/init` stage reporting and focused harness/CLI test coverage.

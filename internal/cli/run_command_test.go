@@ -213,6 +213,66 @@ func TestRunCommandStopsOnStuckDetection(t *testing.T) {
 	}
 }
 
+func TestRunCommandPassesPreviousIterationFailuresAsGenerateFeedback(t *testing.T) {
+	h := newCommandTestHarness(t)
+	runstoreRoot := filepath.Join(h.WorkspaceDir, ".infrafactory", "runs")
+	t.Setenv("INFRAFACTORY_RUNSTORE_ROOT", runstoreRoot)
+
+	requests := make([]generator.Request, 0, 2)
+	opts := runtimeOptions{
+		configLoader: func(path string) (config.Config, error) {
+			cfg, err := config.Load(path)
+			if err != nil {
+				return config.Config{}, err
+			}
+			cfg.Agent.MaxIterations = 3
+			return cfg, nil
+		},
+		scenarioLoader: defaultScenarioLoader,
+		deps: RuntimeDependencies{
+			Generator: generator.SeedGeneratorFunc(func(_ context.Context, req generator.Request) (*generator.GeneratedCode, error) {
+				requests = append(requests, req)
+				return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte("terraform {}\n")}}, nil
+			}),
+			Static: &fakeStaticHarness{
+				err: &harness.StageError{
+					StageResult: harness.StageResult{Stage: "validate", Cmd: []string{"tofu", "validate"}},
+					Err:         errors.New("validate failed"),
+				},
+			},
+			MockDeploy: &fakeMockDeployHarness{},
+			Destroy:    &fakeDestroyHarness{},
+		},
+	}
+
+	cmd := newRunCommandForTest(opts)
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{h.ScenarioPath, "--config", h.ConfigPath})
+
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected run failure")
+	}
+	if len(requests) < 2 {
+		t.Fatalf("expected at least two generate calls, got %d", len(requests))
+	}
+	if requests[0].Iteration != 1 {
+		t.Fatalf("expected first iteration=1, got %d", requests[0].Iteration)
+	}
+	if len(requests[0].FeedbackJSON) != 0 {
+		t.Fatalf("expected no feedback on first iteration, got %s", string(requests[0].FeedbackJSON))
+	}
+	if requests[1].Iteration != 2 {
+		t.Fatalf("expected second iteration=2, got %d", requests[1].Iteration)
+	}
+	if len(requests[1].FeedbackJSON) == 0 {
+		t.Fatal("expected feedback payload on second iteration")
+	}
+	if !strings.Contains(string(requests[1].FeedbackJSON), `"check":"validate"`) {
+		t.Fatalf("expected validate failure in feedback payload, got %s", string(requests[1].FeedbackJSON))
+	}
+}
+
 func TestRunCommandDefaultRuntimeUsesConcreteGeneratorDependency(t *testing.T) {
 	h := newCommandTestHarness(t)
 	runstoreRoot := filepath.Join(h.WorkspaceDir, ".infrafactory", "runs")

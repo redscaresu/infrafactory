@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -19,32 +20,7 @@ func runGenerateCommand(cmd *cobra.Command, args []string, runtime *CommandRunti
 		return fmt.Errorf("load scenario %q: %w", scenarioPath, err)
 	}
 
-	scenarioPayload, err := os.ReadFile(scenarioPath)
-	if err != nil {
-		return fmt.Errorf("read scenario %q: %w", scenarioPath, err)
-	}
-
-	if runtime.Deps.Generator == nil {
-		return fmt.Errorf("generator dependency unavailable: %w", ErrDependencyUnavailable)
-	}
-
-	generated, err := runtime.Deps.Generator.Generate(context.Background(), generator.Request{
-		ScenarioPath: scenarioPath,
-		ScenarioYAML: scenarioPayload,
-		Iteration:    1,
-	})
-	if err != nil {
-		return fmt.Errorf("generate code: %w", err)
-	}
-	if err := generated.Validate(); err != nil {
-		return fmt.Errorf("validate generated files: %w", err)
-	}
-	ensureScalewayProviderWiring(generated.Files)
-	if err := validateScalewayProviderWiring(generated.Files); err != nil {
-		return fmt.Errorf("validate generated files: %w", err)
-	}
-
-	writtenFiles, err := writeGeneratedFiles(runtime.OutputDir(), generated.Files)
+	writtenFiles, err := generateAndWriteFiles(runtime, scenarioPath, 1, nil)
 	if err != nil {
 		return err
 	}
@@ -131,6 +107,46 @@ func detectScalewayProviderWiring(files map[string][]byte) (bool, bool, bool) {
 		}
 	}
 	return hasScalewayResource, hasRequiredProviders, hasProviderBlock
+}
+
+func generateAndWriteFiles(runtime *CommandRuntime, scenarioPath string, iteration int, feedbackFailures []FailureSummary) (int, error) {
+	scenarioPayload, err := os.ReadFile(scenarioPath)
+	if err != nil {
+		return 0, fmt.Errorf("read scenario %q: %w", scenarioPath, err)
+	}
+	if runtime.Deps.Generator == nil {
+		return 0, fmt.Errorf("generator dependency unavailable: %w", ErrDependencyUnavailable)
+	}
+
+	var feedbackPayload []byte
+	if len(feedbackFailures) > 0 {
+		feedbackPayload, err = json.Marshal(struct {
+			Failures []FailureSummary `json:"failures"`
+		}{
+			Failures: feedbackFailures,
+		})
+		if err != nil {
+			return 0, fmt.Errorf("encode generate feedback payload: %w", err)
+		}
+	}
+
+	generated, err := runtime.Deps.Generator.Generate(context.Background(), generator.Request{
+		ScenarioPath: scenarioPath,
+		ScenarioYAML: scenarioPayload,
+		FeedbackJSON: feedbackPayload,
+		Iteration:    iteration,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("generate code: %w", err)
+	}
+	if err := generated.Validate(); err != nil {
+		return 0, fmt.Errorf("validate generated files: %w", err)
+	}
+	ensureScalewayProviderWiring(generated.Files)
+	if err := validateScalewayProviderWiring(generated.Files); err != nil {
+		return 0, fmt.Errorf("validate generated files: %w", err)
+	}
+	return writeGeneratedFiles(runtime.OutputDir(), generated.Files)
 }
 
 func writeGeneratedFiles(outputDir string, files map[string][]byte) (int, error) {
