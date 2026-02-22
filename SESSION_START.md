@@ -38,6 +38,7 @@ Before writing code, confirm these facts are still true in `STATUS.md`/`BACKLOG.
 6. Default runtime now uses concrete generator transports; `claude-code` requires `agent.claude.command` in `PATH` and `openrouter` requires `OPENROUTER_API_KEY` plus `agent.openrouter.model`.
 7. Slice 13 (queued after Slice 12) is dedicated to full app-logic logging/observability; instrumentation should follow a contract-first approach (`S13-T1`) before broad command-path changes.
 8. Slice 14 (queued after Slice 13) is dedicated to run-loop feedback fidelity for model-guided regeneration; avoid regressing to coarse retry payloads such as generic `validation failed` when structured validate/test/generate failures are available.
+9. Slice 15 (queued after Slice 14) is dedicated to adaptive retry and transport resilience; transport-dominated failures should stop with deterministic actionable reasons instead of consuming full iteration budgets.
 
 Minimal startup verification commands:
 ```bash
@@ -64,6 +65,9 @@ If either command fails, restore the repo to a green baseline before starting a 
   prefer `run` feedback payload enrichment over prompt-only wording tweaks; preserve structured failure fields (`layer`, `stage`, `check`, `command`, `detail`, optional `policy`/`resource`) into `FeedbackJSON`.
   classify retry guidance by failure type (IaC validation/policy defects vs transport/timeout defects) so model retries are actionable.
   for planning/refinement tickets in this area, perform refinement passes until two consecutive passes yield no improvements, and record each pass outcome in `CURRENT_TICKET.md` and `STATUS.md`.
+- For upcoming Slice 15 adaptive-retry work:
+  codify deterministic continuation/stop behavior by failure class and avoid retry churn when failures are transport-dominated.
+  persist per-iteration transport diagnostics in run artifacts so operators can separate IaC defects from runtime/dependency constraints.
 - For any future planning refinement over unfinished slices (`todo`/`blocked` backlog work):
   require the same refinement protocol: continue until two consecutive no-change passes, and explicitly record pass outcomes in both `CURRENT_TICKET.md` and `STATUS.md` for fresh-context continuity.
 

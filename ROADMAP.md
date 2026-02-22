@@ -102,6 +102,14 @@ This file is intentionally high-level and mostly stable; day-to-day execution tr
 - Add regression tests that fail if feedback payloads regress back to generic markers like `validation failed`.
 - Document operator and fresh-context workflows for inspecting feedback payload quality from run artifacts.
 
+15. Slice 15: Adaptive retry and transport-resilience policy
+- Define retry-governance rules that distinguish model-correctable IaC failures from non-correctable transport/runtime failures.
+- Prevent unproductive regeneration loops when failures are dominated by transport issues (timeouts, killed subprocess, dependency outages).
+- Add deterministic retry controls per failure class (for example bounded transport retry budget/backoff and explicit stop reasons).
+- Persist richer transport diagnostics (phase, timeout, exit signal, stderr summary, duration) in run artifacts for post-mortem and prompt tuning.
+- Surface operator-facing remediation guidance (for example timeout tuning vs scenario/code changes) in deterministic output and runbook docs.
+- Add focused tests proving transport-dominated runs stop with actionable reasons rather than generic max-iteration churn.
+
 ## Near-term execution order
 
 1. Keep Slice 11 closed and stable (transport adapters + secret-safety + smoke gates).
@@ -109,6 +117,7 @@ This file is intentionally high-level and mostly stable; day-to-day execution tr
 3. Implement/configure iteration migration (`S12-T2`, `S12-T3`), add per-pass failure logging (`S12-T6`), then test/docs closure (`S12-T4`, `S12-T5`).
 4. Start Slice 13 with logging-contract definition, then implement end-to-end instrumentation and docs.
 5. Start Slice 14 with feedback-contract definition, then wire validate/run feedback fidelity and regression coverage.
+6. Start Slice 15 with retry-governance contract, then implement adaptive transport-resilience controls and diagnostics.
 
 ## Live progress tracking
 

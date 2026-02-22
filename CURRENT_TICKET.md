@@ -3,29 +3,27 @@
 Use this file as the per-session execution stub.
 
 ## Ticket
-- id: M22
-- title: Refine unfinished slices (`S12`..`S14`) for higher-signal model-guided repair and convergence clarity
+- id: M23
+- title: Plan Slice 15 adaptive retry and transport-resilience policy
 - status: done
 - classification: decision-impacting
 
 ## 1) Problem Statement
 - What is broken or missing?
-  Unfinished slice definitions still left ambiguity around retry-signal quality (especially coarse validate failures), failure-type classification, and terminal stop signaling semantics.
+  Current planning covers feedback fidelity (Slice 14) but does not yet dedicate a slice to adaptive retry behavior when failures are transport-dominated (timeouts, killed subprocess, dependency outages).
 - Why does it matter now?
-  These slices drive upcoming implementation work; unclear contracts risk low-signal feedback to the model and noisy/duplicative run-stop behavior.
+  Without explicit retry-governance policy, run loops can consume iteration budget on non-model-correctable failures and emit low-actionability terminal outcomes.
 
 ## 2) Scope
 - In scope:
-  Refine all unfinished slice definitions (`S12`..`S14`) to tighten acceptance criteria, sequencing, and tests for high-fidelity retry feedback.
-  Record iterative refinement outcomes until two consecutive no-change passes are reached.
-  Add fresh-context protocol note for future planning refinements.
+  Define/refine a new Slice 15 ticket set for adaptive retry and transport-resilience behavior and wire it into roadmap/status/fresh-context guidance.
 - Out of scope:
-  Runtime code implementation of these slice behaviors.
+  Runtime implementation changes for retry policy.
 
 ## 3) Acceptance Criteria
-1. Unfinished slice entries in `BACKLOG.md` are refined with stronger contracts where needed (failure-class tagging, terminal-stop de-dup semantics, and CLI precedence/warning clarity).
-2. `ROADMAP.md`, `STATUS.md`, and `SESSION_START.md` reflect the refined direction and fresh-context continuity requirements.
-3. Refinement log records one improvement pass and two consecutive no-change passes.
+1. Backlog contains explicit Slice 15 tickets (`S15-T1`..`S15-T6`) covering contract, implementation, tests, artifacts, and docs.
+2. Roadmap includes Slice 15 milestone and execution sequencing after Slice 14.
+3. Status and session-start guidance include Slice 15 fresh-context requirements.
 
 ## 4) Impacted Areas
 - Packages/files changed:
@@ -35,7 +33,7 @@ Use this file as the per-session execution stub.
   `SESSION_START.md`,
   `CURRENT_TICKET.md`.
 - External contracts affected (CLI/schema/policy):
-  yes (planned run feedback, logging observability semantics, and iteration-contract migration behavior; implementation pending).
+  yes (planned run retry-governance and transport diagnostics behavior; implementation pending).
 
 ## 5) Test Plan
 - Unit tests:
@@ -43,33 +41,26 @@ Use this file as the per-session execution stub.
 - Integration checks:
   `bash scripts/check_all.sh`
 - Manual verification:
-  review unfinished-slice entries and ensure refinement protocol is explicitly documented for fresh contexts.
+  confirm Slice 15 sequence, dependencies, and acceptance criteria are implementation-ready and aligned with existing Slice 12-14 direction.
 
 ## 6) Risks and Rollback
 - Primary risks:
-  overlap between Slice 13 logging semantics and Slice 14 feedback semantics if boundaries are not explicit.
+  retry-governance scope can overlap with Slice 14 unless boundaries remain explicit (`S14` = feedback fidelity, `S15` = adaptive retry policy).
 - Rollback approach:
-  revert planning/doc refinements and restore prior unfinished-slice definitions.
+  revert Slice 15 planning entries and preserve prior milestone ordering.
 
 ## 7) Done Definition
-- Unfinished-slice planning definitions are refined and documented.
-- Two consecutive no-change refinement passes recorded.
-- Fresh-context note added for future refinement loops.
+- Slice 15 adaptive-retry plan documented and tracked.
+- Tracking docs updated.
 
 ## Test plan
 - `bash scripts/check_all.sh`
 
 ## Progress notes
-- Updated `BACKLOG.md` unfinished slice entries (`S12`..`S14`) with stricter acceptance criteria around:
-  - failure-class tagging (`iac_validation`, `transport_runtime`, `orchestration_control`),
-  - deterministic non-duplicative terminal stop signaling,
-  - explicit `--iterations`/`--max-iterations` precedence and warning semantics.
-- Updated `ROADMAP.md` Slice 12/13/14 milestone text to include non-duplicative terminal-stop and failure-class clarity.
-- Updated `STATUS.md` next-actions and recent-updates log for this refinement cycle.
-- Updated `SESSION_START.md` with a global fresh-context rule requiring two consecutive no-change passes for planning refinement over unfinished slices.
-- Refinement pass 1 improvements applied: no further structural changes required after contract tightening above.
-- Refinement pass 2: no additional improvements identified.
-- Refinement pass 3: no additional improvements identified (second consecutive no-change pass).
+- Added planning ticket `M23` and Slice 15 execution tickets `S15-T1`..`S15-T6` in `BACKLOG.md`.
+- Updated `ROADMAP.md` with dedicated Slice 15 milestone and near-term sequencing after Slice 14.
+- Updated `STATUS.md` next-actions to queue Slice 15 adaptive retry/transport-resilience work after Slice 14 closure.
+- Updated `SESSION_START.md` fresh-context notes with Slice 15 adaptive retry and transport diagnostics guidance.
 
 ## Blocker (if any)
 - blocker: none.

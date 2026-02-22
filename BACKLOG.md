@@ -6,6 +6,7 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 
 | id | slice | title | priority | status | deps | owner |
 |---|---|---|---|---|---|---|
+| M23 | Maintenance | Plan Slice 15 adaptive retry and transport-resilience policy | P1 | done | M22 | codex |
 | M22 | Maintenance | Refine all unfinished slices (`S12`-`S14`) for higher-signal model-guided repair and run two consecutive no-change passes | P1 | done | M21 | codex |
 | M21 | Maintenance | Plan Slice 14 high-fidelity run feedback payload wiring for model-guided fixes | P1 | done | M20 | codex |
 | M20 | Maintenance | Plan Slice 13 full app-logic logging/observability backlog before implementation | P1 | done | M19 | codex |
@@ -108,6 +109,12 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 | S14-T3 | Slice 14 | Wire `runIteration` feedback aggregation to propagate detailed stage/check/policy/resource context into `FeedbackJSON` and suppress duplicate terminal control failures | P0 | todo | S14-T2 | codex |
 | S14-T4 | Slice 14 | Add focused regression tests for feedback payload fidelity across validate/test/generate failure paths | P0 | todo | S14-T3 | codex |
 | S14-T5 | Slice 14 | Sync docs/fresh-context runbook with feedback-inspection workflow and anti-regression guardrails | P1 | todo | S14-T4 | codex |
+| S15-T1 | Slice 15 | Define adaptive retry governance contract by failure class (`iac_validation` vs `transport_runtime` vs `orchestration_control`) | P0 | todo | S14-T5 | codex |
+| S15-T2 | Slice 15 | Implement transport-dominated early-stop policy with deterministic terminal reason mapping | P0 | todo | S15-T1 | codex |
+| S15-T3 | Slice 15 | Add bounded transport retry budget/backoff and timeout-aware guidance hooks | P0 | todo | S15-T1 | codex |
+| S15-T4 | Slice 15 | Persist transport diagnostics in run artifacts (phase/timeout/signal/stderr summary/duration) | P0 | todo | S15-T2,S15-T3 | codex |
+| S15-T5 | Slice 15 | Add regression coverage for adaptive retry behavior and transport-dominated failure outcomes | P0 | todo | S15-T4 | codex |
+| S15-T6 | Slice 15 | Sync docs and fresh-context runbook for adaptive retry troubleshooting and operator actions | P1 | todo | S15-T5 | codex |
 
 ## Ticket details
 
@@ -194,6 +201,12 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 | S14-T3 | `internal/cli/run_command.go`, `internal/cli/run_command_test.go` | prompt template redesign | `runIteration` feedback payload includes detailed validate/test/generate failure entries, preserves failure-class tagging, and omits synthetic coarse duplicates including duplicate terminal-stop markers | run command tests asserting feedback JSON detail fields and terminal-stop de-dup behavior |
 | S14-T4 | `internal/cli/run_command_test.go`, `internal/generator/*_test.go`, golden fixtures as needed | docs-only updates | regression suite prevents fallback to generic `validation failed` feedback when structured details exist; coverage includes transport timeout and parse-failure classes and verifies only one terminal control failure reason is emitted per stop event | focused unit tests + golden refresh if output contract changes |
 | S14-T5 | `README.md`, `SESSION_START.md`, `STATUS.md`, `CURRENT_TICKET.md` | runtime behavior changes | docs show how to inspect run artifacts to verify feedback quality and instruct fresh contexts to perform two consecutive no-change refinement passes on slice-planning updates | doc checklist assertions + hygiene checks |
+| S15-T1 | `internal/cli/run_command.go`, `internal/feedback`, docs/contract surfaces | transport adapter implementation details | retry governance contract explicitly defines which failure classes are model-correctable vs transport/runtime-limited and how each class affects iteration continuation/stop behavior | contract tests + doc checklist updates |
+| S15-T2 | `internal/cli/run_command.go`, `internal/cli/output_contract.go`, run command tests | prompt template content changes | transport-dominated runs stop early with deterministic terminal reason and do not consume full iteration budget unless contract allows | run command tests for transport-dominated early-stop paths and output reason assertions |
+| S15-T3 | `internal/generator/*`, `internal/cli/run_command.go`, config surfaces if needed | scenario schema redesign | transport retry budget/backoff behavior is deterministic and bounded; timeout-specific remediation hints are surfaced without leaking secrets | unit tests for retry counters/backoff + run output tests for remediation hint mapping |
+| S15-T4 | `internal/runstore`, `internal/cli/run_command.go`, generator metadata adapters | output-contract redesign unrelated to diagnostics | run artifacts persist normalized transport diagnostics per failed iteration with stable schema and backward-compatible reads | runstore/schema tests + iteration artifact assertions |
+| S15-T5 | `internal/cli/run_command_test.go`, `internal/generator/*_test.go`, golden fixtures as needed | docs-only updates | regression suite covers mixed failure-class runs and ensures adaptive retry policy avoids max-iteration churn when transport failures dominate | focused unit/integration tests + golden refresh where needed |
+| S15-T6 | `README.md`, `SESSION_START.md`, `STATUS.md`, `CURRENT_TICKET.md` | runtime behavior changes | docs provide deterministic troubleshooting split (scenario/IaC fixes vs transport/runtime tuning) and fresh-context notes for adaptive retry diagnostics workflow | doc checklist assertions + hygiene checks |
 
 ## Operating notes
 - Update `status` and dependencies as work evolves.
