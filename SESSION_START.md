@@ -18,6 +18,15 @@
 - Pick next uncompleted ticket from `BACKLOG.md`.
 - Fill `CURRENT_TICKET.md` for session execution.
 
+Quick repo-state preflight before selecting a ticket:
+```bash
+git status --short
+git branch --show-current
+git log -1 --oneline
+```
+- If you see unexpected local changes you did not make, stop and ask how to proceed.
+- Keep exactly one `in_progress` ticket in `BACKLOG.md` during execution.
+
 ## Fresh Context Briefing (Current)
 
 Before writing code, confirm these facts are still true in `STATUS.md`/`BACKLOG.md`:

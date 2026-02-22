@@ -60,7 +60,7 @@ flowchart TD
     H1 --> H2[internal/harness mock deploy layer<br/>apply + topology + state policy]
     H2 --> H3[internal/harness destroy layer<br/>destroy + orphan verification]
 
-    H1 --> FB[internal/feedback<br/>structured failures + loop + stuck detection]
+    H1 --> FB[internal/feedback<br/>structured failures + stuck detection]
     H2 --> FB
     H3 --> FB
 
@@ -141,7 +141,7 @@ flowchart TD
 - Pulls mock state snapshot and verifies no orphan resources remain
 
 Supporting control loop:
-- Feedback loop with max-iteration control
+- `run` command loop with max-iteration control
 - Stuck detection via failure-signature subset logic
 - Run/iteration artifact persistence under `.infrafactory/runs/...`
 
@@ -168,7 +168,7 @@ Core internal slices are implemented and tested:
 - Scenario parsing and JSON Schema validation (`internal/scenario`)
 - Generator contracts, prompt rendering, and `# File:` parsing (`internal/generator`)
 - Static, mock-deploy, and destroy harness primitives (`internal/harness`)
-- Feedback loop and stuck detection helpers (`internal/feedback`)
+- Failure-signature and stuck detection helpers (`internal/feedback`)
 - Filesystem run store (`internal/runstore`)
 
 CLI command orchestration is now wired for:
@@ -195,6 +195,7 @@ Notes on current runtime prerequisites:
 - `generate` and `run` now resolve a concrete default `SeedGenerator` from runtime (`internal/cli/runtime.go`) when no test/injected generator is provided.
 - Runtime wiring path: `buildRuntime(...)` sets `deps.Generator = generator.NewDefaultSeedGenerator(cfg.Agent.Type)` when `deps.Generator == nil`.
 - Current default behavior (`internal/generator/default.go`): `Generate(...)` returns a deterministic typed generator transport error (`generator.ErrTransportFailed`) indicating the default generator for the configured `agent.type` is not implemented yet.
+- Planned next milestone: Slice 11 adds concrete generator transport adapters for `claude -p` and OpenRouter.
 - `validate`/`test`/`run` expect generated OpenTofu files and tool/runtime dependencies (`tofu`, Mockway, and Docker for `mock` lifecycle commands).
 - Sandbox/live deploy layer (real Scaleway) is permanently disabled by governance policy (see `docs/decisions/0003-permanent-sandbox-live-deploy-block.md`).
 
@@ -219,7 +220,7 @@ Criteria support status:
 - `internal/scenario`: scenario parsing and schema validation
 - `internal/generator`: generator contracts, prompt rendering, output parser
 - `internal/harness`: static/deploy/destroy orchestration primitives
-- `internal/feedback`: failure models, loop control, stuck detection
+- `internal/feedback`: failure models and stuck-detection helpers
 - `internal/runstore`: `.infrafactory/runs` persistence implementation
 - `scenario.schema.json`: scenario contract
 - `infrafactory.yaml`: runtime config contract
@@ -232,7 +233,7 @@ Package ownership guide:
 - `internal/scenario`: scenario decode + schema validation + typed model.
 - `internal/generator`: generator interfaces/errors, prompt rendering, output parsing.
 - `internal/harness`: static/mock/destroy workflows and stage-level failures.
-- `internal/feedback`: convergence/stuck-detection logic over failure signatures.
+- `internal/feedback`: failure-signature modeling and stuck-detection utilities.
 - `internal/runstore`: persisted run metadata and iteration artifacts.
 
 ## Requirements
@@ -251,6 +252,10 @@ go mod tidy
 go test ./...
 go run ./cmd/infrafactory --help
 ```
+
+Important:
+- `generate`/`run` currently require a concrete generator transport to produce Terraform files.
+- Default runtime generator wiring still returns a typed transport-not-implemented error until Slice 11 transport adapters land.
 
 ## End-to-End Walkthrough
 
@@ -364,6 +369,10 @@ make test-unit
 make test-all
 make bench-check
 ```
+
+CI behavior:
+- Pull requests run `go test ./...`.
+- Pushes to `main` run `go test ./...` and build/upload Linux binaries for `amd64` and `arm64`.
 
 Real-tool smoke (opt-in):
 

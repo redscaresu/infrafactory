@@ -28,6 +28,7 @@ Last updated: 2026-02-22
 - Keep startup/read-order instructions only in `SESSION_START.md` to avoid duplication.
 
 ## Recent updates
+- Added repo-state preflight guidance to `SESSION_START.md` (`git status/branch/head`, unexpected-change halt reminder, single-`in_progress` ticket discipline), then completed two consecutive no-change review passes.
 - Refreshed `SESSION_START.md` fresh-context briefing for active Slice 11 execution and transport-state reality, then completed a follow-up review loop with two consecutive no-change passes.
 - Completed Slice 11 refinement sweep with explicit dependency optimization and hardening scope (`S11-T7` credential redaction), finishing with two consecutive no-change passes.
 - Completed README optimization sweep with iterative review until two consecutive no-change passes; aligned feedback package descriptions with current code, clarified generator transport readiness and Slice 11 direction, and documented CI test/build behavior in the README.
