@@ -26,6 +26,7 @@ Last updated: 2026-02-22
 - Keep startup/read-order instructions only in `SESSION_START.md` to avoid duplication.
 
 ## Recent updates
+- Completed CI automation slice: added `.github/workflows/ci.yml` to run `go test ./...` on pull requests and `main` pushes, and to build/upload a Linux amd64 binary artifact after successful `main` push tests.
 - Completed follow-up `ISSUES.md` remediation: fixed criteria-only holdout execution to reuse training output dir, removed unused `internal/feedback.RunLoop`, simplified `runIteration` step wiring to eliminate dead runner field, and made orphan counting resilient to new resource collections with regression tests.
 - Completed maintenance hardening sweep from `ISSUES.md`: fixed OPA constraint/state input wiring regressions, policy-path resolution, mock credential parity, Mockway HTTP timeout, stage-status duplication fragility, and Scaleway policy mismatches; added regression tests and ignored local `ISSUES.md`.
 - Completed `S10-T7`: accepted ADR-0003 and synchronized governance docs to codify permanent sandbox/live deploy block policy.

@@ -3,66 +3,53 @@
 Use this file as the per-session execution stub.
 
 ## Ticket
-- id: M1
-- title: Harden runtime/policy regressions captured in `ISSUES.md` + add regression tests
+- id: M2
+- title: Add CI workflow to run tests on PR/main and build binary artifact on successful main push
 - status: done
 - classification: implementation-only
 
 ## 1) Problem Statement
 - What is broken or missing?
-  `ISSUES.md` captured concrete runtime and policy mismatches causing false passes/failures and fragile stage reporting.
+  Repository lacked a dedicated CI workflow that enforces test execution on PR and main branch merges/pushes, and did not automatically produce a binary artifact after successful main builds.
 - Why does it matter now?
-  These regressions reduce trust in validation/test outcomes and can silently mask policy violations.
+  This enforces baseline quality gates in GitHub and provides a deterministic binary build artifact from mainline.
 
 ## 2) Scope
 - In scope:
-  Fix OPA plan/state input wiring gaps, policy path resolution, mock env parity, Mockway timeout, and policy rule mismatches; add regression tests and ignore local issues scratch file.
+  Add GitHub Actions workflow for CI test execution on PR/main and binary build/upload on successful main push.
 - Out of scope:
-  architectural redesign items from `ISSUES.md` that are explicitly low-priority design choices.
+  Release publishing/signing and multi-arch release matrix.
 
 ## 3) Acceptance Criteria
-1. Critical runtime/policy mismatches from `ISSUES.md` are fixed.
-2. Regression tests are added for each fixed behavior.
-3. `ISSUES.md` is ignored in git.
+1. CI workflow file is added and valid.
+2. PRs and main pushes execute `go test ./...`.
+3. Successful main push run emits a binary artifact.
 
 ## 4) Impacted Areas
 - Packages/files changed:
-  `internal/harness/opa.go`,
-  `internal/harness/state_policy.go`,
-  `internal/cli/validate_command.go`,
-  `internal/cli/test_command.go`,
-  `internal/cli/mockway_client.go`,
-  `policies/scaleway/no_public_database.rego`,
-  `policies/scaleway/no_public_endpoints.rego`,
-  `policies/scaleway/vpc_required.rego`,
-  `internal/harness/opa_test.go`,
-  `internal/harness/state_policy_test.go`,
-  `internal/cli/validate_command_test.go`,
-  `internal/cli/test_command_test.go`,
-  `internal/cli/mockway_client_test.go`,
-  `.gitignore`,
+  `.github/workflows/ci.yml`,
   `STATUS.md`,
   `BACKLOG.md`,
   `CURRENT_TICKET.md`.
 - External contracts affected (CLI/schema/policy):
-  yes (policy evaluation wiring and policy behavior).
+  no.
 
 ## 5) Test Plan
 - Unit tests:
   `go test ./...`
 - Integration checks:
-  `bash scripts/check_all.sh`
-- Manual verification:
   n/a
+- Manual verification:
+  workflow syntax and trigger rules reviewed.
 
 ## 6) Risks and Rollback
 - Primary risks:
-  policy behavior drift if provider plan schema evolves.
+  workflow runtime drift (Go/action versions) over time.
 - Rollback approach:
-  revert this maintenance patch set and re-run policy tests.
+  revert `.github/workflows/ci.yml`.
 
 ## 7) Done Definition
-- Runtime/policy regressions fixed with tests.
+- CI workflow present and validated locally where applicable.
 - Required docs updated (`STATUS.md`, `BACKLOG.md`, `CURRENT_TICKET.md`).
 - Remaining follow-up captured explicitly.
 
@@ -71,21 +58,14 @@ Use this file as the per-session execution stub.
 - `bash scripts/check_all.sh`
 
 ## Progress notes
-- Added `EvaluatePlanPoliciesWithConstraints` and wired validate path to pass scenario constraints into OPA.
-- Added `EvaluateStatePoliciesWithInput`, policy target propagation, and robust constraint-policy path resolution.
-- Fixed `validate` static env parity with test command (`SCW_ACCESS_KEY`, `SCW_SECRET_KEY`, `SCW_DEFAULT_PROJECT_ID`).
-- Hardened stage appenders to avoid conflicting pass/fail duplicates when future harness contracts evolve.
-- Set Mockway state client timeout to `30s`.
-- Fixed Scaleway policy mismatches:
-  - `no_public_database`: top-level `input.rdb` for deployed state.
-  - `no_public_endpoints`: support `server` attribute (plus `server_id` fallback).
-  - `vpc_required`: detect server linkage via configuration `server_id.references`.
-- Added focused regression tests in `internal/harness` and `internal/cli` for all above behavior.
-- Added `ISSUES.md`/`issues.md` to `.gitignore`.
-- Fixed criteria-only holdout execution path to reuse the converged training scenario output directory (`runCriteriaOnlyHoldouts`), with regression coverage to ensure holdout mock deploy runs against training output.
-- Removed unused `internal/feedback` loop implementation/tests (`RunLoop`) to eliminate dead code drift.
-- Simplified `runIteration` step model to remove the unused `runner` field for the `test` step while preserving current behavior.
-- Reworked orphan counting to tolerate new resource collections without code changes and added regression coverage for unknown collection keys.
+- Added `.github/workflows/ci.yml`.
+- Configured workflow triggers:
+  - `pull_request` (opened/synchronize/reopened/ready_for_review): run tests.
+  - `push` on `main`: run tests, then build binary artifact.
+- Added `build-binary` job gated on successful `test` and `push` to `main`.
+- Binary build output:
+  - `dist/infrafactory-linux-amd64` (Linux amd64, `CGO_ENABLED=0`).
+  - Uploaded as workflow artifact `infrafactory-linux-amd64`.
 
 ## Blocker (if any)
 - blocker: none.
