@@ -1,0 +1,13 @@
+{
+  "success": {
+    "generate": "success",
+    "validate": "success",
+    "test": "success",
+    "run": "success",
+    "mock start": "success"
+  },
+  "failure": {
+    "validate": "failed",
+    "run": "failed"
+  }
+}

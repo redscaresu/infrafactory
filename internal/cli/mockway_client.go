@@ -1,0 +1,64 @@
+package cli
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
+)
+
+type mockwayStateClient struct {
+	baseURL string
+	client  *http.Client
+}
+
+func newMockwayStateClient(baseURL string) *mockwayStateClient {
+	return &mockwayStateClient{
+		baseURL: strings.TrimRight(baseURL, "/"),
+		client:  &http.Client{},
+	}
+}
+
+func (c *mockwayStateClient) Reset(ctx context.Context) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/mock/reset", nil)
+	if err != nil {
+		return fmt.Errorf("build reset request: %w", err)
+	}
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("send reset request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		payload, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return fmt.Errorf("reset mock state: unexpected status %d: %s", resp.StatusCode, strings.TrimSpace(string(payload)))
+	}
+
+	return nil
+}
+
+func (c *mockwayStateClient) State(ctx context.Context) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/mock/state", nil)
+	if err != nil {
+		return nil, fmt.Errorf("build state request: %w", err)
+	}
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("send state request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	payload, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read state response: %w", err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("fetch mock state: unexpected status %d: %s", resp.StatusCode, strings.TrimSpace(string(payload)))
+	}
+
+	return payload, nil
+}

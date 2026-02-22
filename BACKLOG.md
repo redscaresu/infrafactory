@@ -26,22 +26,36 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 | S6-T1 | Slice 6 | Implement feedback loop + max-iteration control | P5 | done | S5-T3 | codex |
 | S6-T2 | Slice 6 | Implement stuck detection using failure-signature subset logic | P5 | done | S6-T1 | codex |
 | S6-T3 | Slice 6 | Implement criteria-only holdout flow | P5 | done | S6-T2 | codex |
-| S7-T1 | Slice 7 | Wire `init` command scaffold generation + next-step output | P0 | in_progress | S6-T3 | codex |
-| S7-T2 | Slice 7 | Add shared CLI runtime/context builder and command error formatter | P0 | todo | S7-T1 | codex |
-| S7-T12 | Slice 7 | Freeze CLI command contract (args/flags/exit codes/output modes) | P0 | todo | S7-T2 | codex |
-| S7-T16 | Slice 7 | Freeze CLI output contract (human summary + machine JSON schema) | P0 | todo | S7-T12 | codex |
-| S7-T13 | Slice 7 | Add shared CLI command test harness utility (workspace/setup/capture helpers) | P1 | todo | S7-T12 | codex |
-| S7-T3 | Slice 7 | Wire `generate` command to config/scenario/generator pipeline + file writes | P0 | todo | S7-T12,S7-T16 | codex |
-| S7-T4 | Slice 7 | Wire `validate` command to static layer execution + policy reporting | P0 | todo | S7-T12,S7-T16 | codex |
-| S7-T5 | Slice 7 | Wire `test` command to mock deploy + destroy verification flow | P0 | todo | S7-T12,S7-T16 | codex |
-| S7-T6 | Slice 7 | Add early CLI orchestration smoke tests (`generate`/`validate`/`test`) | P0 | todo | S7-T3,S7-T4,S7-T5 | codex |
-| S7-T7 | Slice 7 | Wire `run` command skeleton (single-iteration orchestration path) | P0 | todo | S7-T3,S7-T4,S7-T5 | codex |
-| S7-T8 | Slice 7 | Add `run` convergence controls (max-iteration + stuck detection integration) | P0 | todo | S7-T7 | codex |
-| S7-T9 | Slice 7 | Add `run` persistence/reporting integration with runstore | P0 | todo | S7-T8 | codex |
-| S7-T10 | Slice 7 | Wire `mock start` command to runtime start path + preflight checks | P1 | todo | S7-T12 | codex |
-| S7-T11 | Slice 7 | Add hermetic CLI orchestration integration tests and regression fixtures | P0 | todo | S7-T6,S7-T7,S7-T8,S7-T9,S7-T10 | codex |
-| S7-T14 | Slice 7 | Add opt-in real-tool orchestration smoke tests (`tofu` + optional Mockway) | P1 | todo | S7-T11 | codex |
-| S7-T15 | Slice 7 | Sync README/usage docs to final CLI behavior and examples | P1 | todo | S7-T9,S7-T11 | codex |
+| S7-T1 | Slice 7 | Wire `init` command scaffold generation + next-step output | P0 | done | S6-T3 | codex |
+| S7-T2 | Slice 7 | Add shared CLI runtime/context builder and command error formatter | P0 | done | S7-T1 | codex |
+| S7-T12 | Slice 7 | Freeze CLI command contract (args/flags/exit codes/output modes) | P0 | done | S7-T2 | codex |
+| S7-T16 | Slice 7 | Freeze CLI output contract (human summary + machine JSON schema) | P0 | done | S7-T12 | codex |
+| S7-T13 | Slice 7 | Add shared CLI command test harness utility (workspace/setup/capture helpers) | P1 | done | S7-T12 | codex |
+| S7-T3 | Slice 7 | Wire `generate` command to config/scenario/generator pipeline + file writes | P0 | done | S7-T12,S7-T16 | codex |
+| S7-T4 | Slice 7 | Wire `validate` command to static layer execution + policy reporting | P0 | done | S7-T12,S7-T16 | codex |
+| S7-T5 | Slice 7 | Wire `test` command to mock deploy + destroy verification flow | P0 | done | S7-T12,S7-T16 | codex |
+| S7-T6 | Slice 7 | Add early CLI orchestration smoke tests (`generate`/`validate`/`test`) | P0 | done | S7-T3,S7-T4,S7-T5 | codex |
+| S7-T7 | Slice 7 | Wire `run` command skeleton (single-iteration orchestration path) | P0 | done | S7-T3,S7-T4,S7-T5 | codex |
+| S7-T8 | Slice 7 | Add `run` convergence controls (max-iteration + stuck detection integration) | P0 | done | S7-T7 | codex |
+| S7-T9 | Slice 7 | Add `run` persistence/reporting integration with runstore | P0 | done | S7-T8 | codex |
+| S7-T10 | Slice 7 | Wire `mock start` command to runtime start path + preflight checks | P1 | done | S7-T12 | codex |
+| S7-T11 | Slice 7 | Add hermetic CLI orchestration integration tests and regression fixtures | P0 | done | S7-T6,S7-T7,S7-T8,S7-T9,S7-T10 | codex |
+| S7-T14 | Slice 7 | Add opt-in real-tool orchestration smoke tests (`tofu` + optional Mockway) | P1 | done | S7-T11 | codex |
+| S7-T15 | Slice 7 | Sync README/usage docs to final CLI behavior and examples | P1 | done | S7-T9,S7-T11 | codex |
+| S8-T1 | Slice 8 | Add developer-experience automation (`Makefile` + dependency lifecycle targets) | P0 | done | S7-T15 | codex |
+| S8-T2 | Slice 8 | Add DX smoke runner targets for real-tool validation flows | P0 | done | S8-T1 | codex |
+| S8-T3 | Slice 8 | Sync README/usage docs for DX workflows (deps/tests/smoke/cleanup) | P1 | done | S8-T2 | codex |
+| S9-T1 | Slice 9 | Wire default runtime `SeedGenerator` implementation for `generate`/`run` | P0 | done | S8-T3 | codex |
+| S9-T10 | Slice 9 | Expand `internal/scenario.Scenario` model to include criteria/layer-routing fields | P0 | in_progress | S9-T1 | codex |
+| S9-T2 | Slice 9 | Parse scenario `acceptance_criteria` into typed executable check specs | P0 | todo | S9-T10 | codex |
+| S9-T11 | Slice 9 | Define criteria support matrix and deterministic unsupported-criteria behavior | P0 | todo | S9-T2 | codex |
+| S9-T3 | Slice 9 | Execute criteria-driven topology + state-policy checks in `test` | P0 | todo | S9-T11 | codex |
+| S9-T4 | Slice 9 | Honor `validation.layers.*.enabled` flags in `validate`/`test`/`run` orchestration | P0 | todo | S9-T3 | codex |
+| S9-T5 | Slice 9 | Upgrade `run` from skeleton to criteria-aware convergence orchestration | P0 | todo | S9-T3,S9-T4 | codex |
+| S9-T6 | Slice 9 | Wire criteria-only holdout evaluation into `run` completion path | P1 | todo | S9-T5 | codex |
+| S9-T7 | Slice 9 | Expand `mock` command lifecycle (`start/stop/status/logs`) with parity tests | P1 | todo | S9-T4 | codex |
+| S9-T8 | Slice 9 | Sandbox/live deploy layer wiring (real Scaleway) | P2 | blocked | - | codex |
+| S9-T9 | Slice 9 | Document sandbox deploy deferment due cost implications | P0 | done | S8-T3 | codex |
 
 ## Ticket details
 
@@ -83,6 +97,20 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 | S7-T11 | cross-package hermetic CLI integration tests + fixtures | external tool/runtime behavior | orchestration command suite has hermetic regression coverage for happy and failure paths | integration tests for `generate/validate/test/run/mock start` flows with fake deps |
 | S7-T14 | opt-in orchestration smoke tests using real tools (`tofu`, optional Mockway) | hermetic CI default path | opt-in smoke validates command wiring with real external binaries/services | env-guarded smoke tests for `validate/test/run` critical paths |
 | S7-T15 | README/usage documentation synchronization to final CLI behavior | architecture or schema contract changes | user-facing docs and examples reflect actual command behavior/flags/output after wiring completes | doc assertion checklist + command example verification |
+| S8-T1 | `Makefile`, `docker-compose.yml` | CLI/runtime orchestration logic | make targets exist for dependency up/down/recreate/clean and hermetic test entrypoints | smoke-free make target dry-runs + command invocation checks |
+| S8-T2 | `Makefile`, real-tool smoke wiring | mandatory default hermetic path | make targets run opt-in real-tool smoke with explicit env guards and mockway readiness wait | env-guarded smoke target tests/manual verification |
+| S8-T3 | `README.md`, `STATUS.md` | architecture/schema contract changes | docs include canonical DX command set for tests/smoke/dependency lifecycle | doc assertion checklist |
+| S9-T1 | `internal/cli/runtime.go`, `internal/generator` | provider prompt/template redesign | runtime provides a non-nil default `SeedGenerator`; `generate`/`run` no longer fail with missing generator dependency when runtime defaults are used | `internal/cli/runtime_test.go` + command-path tests for default runtime behavior |
+| S9-T10 | `internal/scenario/scenario.go`, `internal/scenario/*_test.go` | schema file redesign | loaded scenario includes typed fields required by orchestration (`type`, `references`, constraints, acceptance criteria), not just scenario name | scenario loader tests asserting typed decode and backward compatibility of existing valid fixtures |
+| S9-T2 | `internal/scenario`, `internal/harness`, `internal/cli` adapters | policy authoring semantics | scenario `acceptance_criteria` entries are mapped deterministically into typed executable check specs (connectivity/http_probe/policy/destruction where supported) | parser/mapping tests for each supported criteria type |
+| S9-T11 | `internal/cli`, `internal/harness`, docs | schema semantic changes | unsupported criteria for current layers (notably `dns_resolution` and sandbox-only checks) produce deterministic skip/fail behavior with explicit messaging; behavior is documented | command tests for unsupported criteria behavior in human/json output + doc assertions |
+| S9-T3 | `internal/cli/test_command.go`, `internal/harness/topology.go`, `internal/harness/state_policy.go` | run-loop convergence internals | `test` executes topology/state-policy evaluators using criteria-derived inputs and reports failures through output contract | command tests for criteria pass/fail and evaluator invocation coverage |
+| S9-T4 | `internal/cli/validate_command.go`, `internal/cli/test_command.go`, `internal/cli/run_command.go` | schema contract changes | CLI orchestration consistently honors `validation.layers.static.enabled`, `validation.layers.mock_deploy.enabled`, and `validation.layers.destruction.enabled`; `sandbox_deploy.enabled` remains explicitly blocked with deterministic surfaced status | tests for enabled/disabled combinations and sandbox-enabled blocked-status output |
+| S9-T5 | `internal/cli/run_command.go`, `internal/feedback`, `internal/runstore` | runstore backend redesign | `run` performs criteria-aware iteration decisions (not just stage pass-through) and preserves convergence semantics (success/max/stuck) | run command tests for criteria-driven success/failure, max-iteration stop, and stuck-detection stop |
+| S9-T6 | `internal/cli/run_command.go`, `internal/scenario/holdout.go` | holdout schema redesign | criteria-only holdouts auto-run after training convergence and block without feeding holdout failures into generator context | holdout discovery/execution tests for pass/block/no-feedback behavior |
+| S9-T7 | `internal/cli/root.go`, `internal/cli/mock_*`, `Makefile` (if needed) | external image publishing strategy | `mock` command supports `start`, `stop`, `status`, and `logs` with deterministic output and errors | command tests for stop/status/logs happy-path + missing-runtime/dependency failures |
+| S9-T8 | `internal/harness`, `internal/cli`, docs | mock deploy layer and hermetic defaults | sandbox/live deploy stays blocked and intentionally out-of-scope until cost/credentials policy is explicitly approved and documented | n/a while blocked; unblock requires approved policy + ADR + credentials model |
+| S9-T9 | `README.md`, `STATUS.md`, `ROADMAP.md` | runtime behavior changes | docs explicitly state sandbox/live deploy deferment due cost implications | doc assertion checklist |
 
 ## Operating notes
 - Update `status` and dependencies as work evolves.

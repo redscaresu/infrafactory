@@ -1,6 +1,7 @@
 services:
   mockway:
     image: ghcr.io/redscaresu/mockway:latest
+    restart: unless-stopped
     # Or build from local clone:
     # build: ../mockway
     ports:

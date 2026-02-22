@@ -3,6 +3,8 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/redscaresu/infrafactory/internal/config"
 	"github.com/spf13/cobra"
@@ -10,14 +12,21 @@ import (
 
 var ErrNotImplemented = errors.New("not implemented")
 
+const defaultInitScenarioPath = "scenarios/training/example.yaml"
+
 func NewRootCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "infrafactory",
 		Short:         "Scenario-driven infrastructure generation and validation for Scaleway",
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
+			_, err := outputModeFromCommand(cmd)
+			return err
+		},
 	}
 	cmd.PersistentFlags().String("config", config.DefaultPath, "Path to infrafactory config file")
+	cmd.PersistentFlags().String("output", string(OutputModeHuman), "Output mode: human|json")
 
 	cmd.AddCommand(
 		newInitCmd(),
@@ -32,43 +41,114 @@ func NewRootCmd() *cobra.Command {
 }
 
 func newInitCmd() *cobra.Command {
-	return &cobra.Command{
+	var outputPath string
+
+	cmd := &cobra.Command{
 		Use:   "init",
 		Short: "Initialize an infrafactory scenario scaffold",
-		RunE:  notImplemented("init"),
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := writeInitScaffold(outputPath); err != nil {
+				return err
+			}
+
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Created scenario scaffold: %s\n", outputPath)
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Next steps:\n")
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "1. Edit %s and replace placeholder values.\n", outputPath)
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "2. infrafactory generate %s --config %s\n", outputPath, config.DefaultPath)
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "3. infrafactory run %s --config %s\n", outputPath, config.DefaultPath)
+
+			return nil
+		},
 	}
+
+	cmd.Flags().StringVar(&outputPath, "path", defaultInitScenarioPath, "Path to write the scenario scaffold")
+
+	return cmd
+}
+
+func writeInitScaffold(path string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("create scaffold directory for %q: %w", path, err)
+	}
+
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		return fmt.Errorf("create scenario scaffold %q: %w", path, err)
+	}
+	defer f.Close()
+
+	if _, err := f.WriteString(defaultScenarioScaffold()); err != nil {
+		return fmt.Errorf("write scenario scaffold %q: %w", path, err)
+	}
+
+	return nil
+}
+
+func defaultScenarioScaffold() string {
+	return `# Minimal training scenario scaffold.
+# Replace placeholder values before running generate/run.
+scenario: example-scenario
+version: "1.0"
+cloud: scaleway
+description: >
+  Replace this with a concise description of the infrastructure intent.
+
+resources:
+  compute:
+    # Example: web-server, api-server, worker.
+    purpose: web-server
+    # Size maps via mappings.yaml.
+    size: small
+
+constraints:
+  # Example region: fr-par, nl-ams, pl-waw.
+  region: fr-par
+
+acceptance_criteria:
+  # Keep at least one criterion. Add more as needed.
+  - type: destruction
+    expect: no_orphans
+`
 }
 
 func newGenerateCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "generate",
+		Use:   "generate <scenario>",
 		Short: "Generate OpenTofu files from a scenario",
-		RunE:  withConfig(notImplemented("generate")),
+		Args:  requireScenarioArg,
+		RunE:  withRuntime("generate", runGenerateCommand),
 	}
 }
 
 func newValidateCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "validate",
+		Use:   "validate <scenario>",
 		Short: "Validate generated infrastructure definitions",
-		RunE:  withConfig(notImplemented("validate")),
+		Args:  requireScenarioArg,
+		RunE:  withRuntime("validate", runValidateCommand),
 	}
 }
 
 func newTestCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "test",
+		Use:   "test <scenario>",
 		Short: "Run harness checks for a scenario",
-		RunE:  withConfig(notImplemented("test")),
+		Args:  requireScenarioArg,
+		RunE:  withRuntime("test", runTestCommand),
 	}
 }
 
 func newRunCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "run",
+	cmd := &cobra.Command{
+		Use:   "run <scenario>",
 		Short: "Run generation and validation loop",
-		RunE:  withConfig(notImplemented("run")),
+		Args:  requireScenarioArg,
+		RunE:  withRuntime("run", runRunCommand),
 	}
+
+	cmd.Flags().Int("max-iterations", 0, "Override max iterations for run convergence loop (0 uses config)")
+
+	return cmd
 }
 
 func newMockCmd() *cobra.Command {
@@ -80,28 +160,8 @@ func newMockCmd() *cobra.Command {
 	cmd.AddCommand(&cobra.Command{
 		Use:   "start",
 		Short: "Start Mockway dependency",
-		RunE:  withConfig(notImplemented("mock start")),
+		RunE:  withRuntime("mock start", runMockStartCommand),
 	})
 
 	return cmd
-}
-
-func notImplemented(command string) func(*cobra.Command, []string) error {
-	return func(_ *cobra.Command, _ []string) error {
-		return fmt.Errorf("%s: %w", command, ErrNotImplemented)
-	}
-}
-
-func withConfig(next func(*cobra.Command, []string) error) func(*cobra.Command, []string) error {
-	return func(cmd *cobra.Command, args []string) error {
-		configPath, err := cmd.Flags().GetString("config")
-		if err != nil {
-			return fmt.Errorf("read --config flag: %w", err)
-		}
-		if _, err := config.Load(configPath); err != nil {
-			return err
-		}
-
-		return next(cmd, args)
-	}
 }

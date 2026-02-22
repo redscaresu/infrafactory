@@ -69,6 +69,8 @@ func (e *StageError) Is(target error) bool {
 }
 
 func (h *StaticHarness) Run(ctx context.Context, workDir string, env map[string]string) (*StaticResult, error) {
+	// Stage order is fixed to keep outputs deterministic and to ensure each
+	// command consumes artifacts from the expected prior stage.
 	stages := []struct {
 		name string
 		cmd  Command

@@ -15,6 +15,35 @@ InfraFactory addresses this by making infrastructure delivery scenario-driven an
 3. Generate and validate infrastructure through layered checks.
 4. Persist artifacts and structured failures for repeatable iteration.
 
+## New Here
+
+If you are onboarding to this repo, use this order:
+1. Run `go run ./cmd/infrafactory --help` once to see the command contract.
+2. Read `internal/cli/root.go` to see command entrypoints.
+3. Read `internal/cli/runtime.go` to understand shared runtime setup and dependency injection.
+4. Read one command end-to-end (`internal/cli/generate_command.go`), then compare with `validate`, `test`, and `run`.
+5. Read package contracts in this order: `internal/config`, `internal/scenario`, `internal/generator`, `internal/harness`, `internal/feedback`, `internal/runstore`.
+
+First 10-minute code walk:
+1. `go test ./internal/cli -run TestGenerateCommandWritesFilesDeterministically`
+2. `go test ./internal/scenario -run TestLoadWithSchemaPaths`
+3. `go test ./internal/harness -run TestStaticHarness`
+
+This gives one quick pass across command orchestration, input contracts, and harness execution.
+
+## Mental Model
+
+Think in three layers:
+1. Contracts: config/scenario parsing and validation up front.
+2. Execution primitives: generator/harness packages return deterministic typed results.
+3. Orchestration: CLI commands compose primitives and map errors/output to a stable CLI contract.
+
+Single-command lifecycle (`generate`, simplified):
+1. `internal/cli` builds runtime (config + dependencies + loaders).
+2. Scenario is loaded and validated (`internal/scenario` + `scenario.schema.json`).
+3. Generator returns files as data (`internal/generator`), not filesystem side effects.
+4. CLI writes files deterministically and renders command output.
+
 ## Architecture
 
 ```mermaid
@@ -82,7 +111,50 @@ Core internal slices are implemented and tested:
 - Feedback loop and stuck detection helpers (`internal/feedback`)
 - Filesystem run store (`internal/runstore`)
 
-CLI commands are wired (`init`, `generate`, `validate`, `test`, `run`, `mock start`), while end-to-end command orchestration is still being integrated.
+CLI command orchestration is now wired for:
+- `init` scaffold generation
+- `generate` pipeline adapter (runtime + scenario + generator write path)
+- `validate` static harness + policy reporting
+- `test` mock deploy + destroy verification flow
+- `run` multi-iteration skeleton with convergence controls and runstore persistence
+- `mock start` runtime/preflight wrapper
+
+Feature status snapshot:
+
+| Area | Status | Notes |
+|---|---|---|
+| `init` scaffold | implemented | Writes deterministic schema-valid starter file. |
+| `generate` runtime path | implemented with placeholder generator | Runtime injects default generator; default returns typed transport-not-implemented error. |
+| `validate` static layer | implemented | Runs `tofu init/validate/plan/show` + plan policy evaluation. |
+| `test` mock deploy + destroy | implemented | Runs mock reset/apply/state checks and destruction verification flow. |
+| `run` orchestration | partially implemented | Multi-iteration loop + convergence controls exist; full criteria-aware orchestration is still in progress. |
+| `mock` command lifecycle | partially implemented | `mock start` exists; stop/status/logs are pending. |
+| sandbox/live deploy | intentionally deferred | Blocked due cost/credentials policy. |
+
+Notes on current runtime prerequisites:
+- `generate` and `run` now resolve a concrete default `SeedGenerator` from runtime (`internal/cli/runtime.go`) when no test/injected generator is provided.
+- Runtime wiring path: `buildRuntime(...)` sets `deps.Generator = generator.NewDefaultSeedGenerator(cfg.Agent.Type)` when `deps.Generator == nil`.
+- Current default behavior (`internal/generator/default.go`): `Generate(...)` returns a deterministic typed generator transport error (`generator.ErrTransportFailed`) indicating the default generator for the configured `agent.type` is not implemented yet.
+- `validate`/`test`/`run` expect generated OpenTofu files and tool/runtime dependencies (`tofu`, Mockway, and for `mock start`, Docker).
+- Sandbox/live deploy layer (real Scaleway) is intentionally deferred for now due cost implications and will remain disabled until an explicit cost/credentials policy is approved.
+
+### Intentionally Deferred and In-Progress Areas
+
+The following are known gaps being tracked in Slice 9 and are intentionally not complete yet:
+- Scenario `acceptance_criteria` are not yet fully enforced end-to-end by CLI orchestration.
+- `test` command orchestration does not yet execute all criteria-derived topology/state-policy evaluators directly from scenario criteria.
+- `validation.layers.*.enabled` toggles are not yet fully honored across every CLI orchestration path.
+- `run` is still a convergence skeleton and not yet a full criteria-aware orchestration loop.
+- Holdout execution is implemented in internal packages but not yet fully wired as automatic CLI `run` completion behavior.
+- `mock` CLI is currently start-focused; stop/status/logs lifecycle parity is still in progress.
+- Sandbox/live deploy (real Scaleway) is deliberately deferred and blocked for now due cost implications; it is out-of-scope until an explicit approval policy exists.
+
+Criteria support/deferment status (current slices):
+- `connectivity`: supported by mock topology evaluator plumbing, but not yet fully wired from scenario criteria into CLI orchestration.
+- `http_probe`: supported by mock topology evaluator plumbing, but not yet fully wired from scenario criteria into CLI orchestration.
+- `policy`: supported in static (`deny`) and state (`deny_state`) evaluators, but criteria-targeted execution wiring is still in progress.
+- `destruction`: supported as a lifecycle stage, but not yet enforced as scenario-driven criteria semantics.
+- `dns_resolution`: sandbox/live-only behavior; intentionally deferred while sandbox deploy is blocked for cost reasons.
 
 ## Repository Layout
 
@@ -99,10 +171,22 @@ CLI commands are wired (`init`, `generate`, `validate`, `test`, `run`, `mock sta
 - `policies/`: OPA policy files
 - `scenarios/`: training/holdout/regression fixtures
 
+Package ownership guide:
+- `internal/cli`: args/flags, runtime wiring, command orchestration, output contract.
+- `internal/config`: `infrafactory.yaml` defaults + typed validation errors.
+- `internal/scenario`: scenario decode + schema validation + typed model.
+- `internal/generator`: generator interfaces/errors, prompt rendering, output parsing.
+- `internal/harness`: static/mock/destroy workflows and stage-level failures.
+- `internal/feedback`: convergence/stuck-detection logic over failure signatures.
+- `internal/runstore`: persisted run metadata and iteration artifacts.
+
 ## Requirements
 
 - Go `1.24+`
 - OpenTofu (`tofu`) available in `PATH`
+- Docker + Docker Compose plugin (`docker compose`)
+- `make`
+- `curl` (used by smoke/dependency readiness helpers)
 - Optional for deploy-layer integration: Mockway running locally
 
 ## Quick Start
@@ -113,39 +197,196 @@ go test ./...
 go run ./cmd/infrafactory --help
 ```
 
+## End-to-End Walkthrough
+
+This is the shortest realistic path for a new contributor:
+
+1. Create a scenario scaffold.
+```bash
+go run ./cmd/infrafactory init --path scenarios/training/new-scenario.yaml
+```
+2. Edit `scenarios/training/new-scenario.yaml` with real resources/criteria.
+3. Generate files.
+```bash
+go run ./cmd/infrafactory generate scenarios/training/new-scenario.yaml --config infrafactory.yaml --output human
+```
+4. Validate static checks.
+```bash
+go run ./cmd/infrafactory validate scenarios/training/new-scenario.yaml --config infrafactory.yaml --output human
+```
+5. Run full orchestration loop.
+```bash
+go run ./cmd/infrafactory run scenarios/training/new-scenario.yaml --config infrafactory.yaml --max-iterations 3 --output json
+```
+6. Inspect run artifacts.
+```text
+.infrafactory/runs/<scenario>/<run-id>/
+```
+
+Expected artifacts:
+- `run.json` with run metadata/status.
+- `iterations/<n>/iteration.json` with stage/failure snapshots per iteration.
+- generated OpenTofu output under `output/<scenario>/`.
+
 ## Usage
+
+### Exit Codes and Error Contract
+
+CLI exit codes:
+- `0`: success (`cli.ExitCodeSuccess`)
+- `1`: runtime failure (`cli.ExitCodeRuntime`)
+- `2`: usage/argument/flag contract failure (`cli.ExitCodeUsage`)
+
+Error contract:
+- Usage errors are surfaced as `*cli.CLIError` with code `usage` and map to exit code `2`.
+- Runtime/config/scenario/harness/generator failures map to exit code `1`.
+- Output mode contract is strict: `--output` must be `human` or `json`.
+- Machine output schema version is `infrafactory.output.v1`.
+
+### `infrafactory.yaml` Quick Reference
+
+| Key | Required | Default | Purpose |
+|---|---|---|---|
+| `version` | yes | none | Config schema version (`"1.0"`). |
+| `agent.type` | yes | none | Generator backend type (`claude-code` or `openrouter`). |
+| `agent.max_iterations` | no | `5` | Max iterations for `run` convergence loop. |
+| `agent.phase_delay_seconds` | no | `0` | Delay between generator phases (rate-limit mitigation). |
+| `mockway.url` | yes | none | Mockway base URL used by deploy/destroy layers. |
+| `mockway.auto_reset` | no | `true` | Whether mock reset is expected before deploy checks. |
+| `validation.layers.*.enabled` | no | varies | Enables/disables layer execution paths (some still being fully wired). |
+| `paths.output` | no | `./output` | Generated IaC output root. |
+| `paths.policies` | no | `./policies` | Policy root used by harness validation. |
+
+Canonical config example: `infrafactory.yaml` in repo root.
+
+### Scenario Authoring Quick Reference
+
+Required top-level keys:
+- `scenario`, `version`, `cloud`, `description`, `acceptance_criteria`
+
+Common criteria patterns:
+- `policy`: `type: policy`, `check: <constraint_name>`, `expect: pass|fail`
+- `connectivity`: `from`, `to`, optional `port`, `expect: success|blocked`
+- `http_probe`: `target`, `port`, `expect: reachable|unreachable`
+- `destruction`: `expect: no_orphans`
+
+Holdout-only routing fields:
+- `type: holdout`
+- `references: <training-scenario-path>`
+
+Current deferment:
+- `dns_resolution` is sandbox/live-only and intentionally deferred while sandbox deploy remains blocked.
 
 ### Basic setup and verification
 
 ```bash
 go mod tidy
-go test ./...
-bash scripts/check_all.sh
+make test-all
 ```
 
-### Practical example 1: Inspect available CLI commands
+### Developer Experience commands (`Makefile`)
+
+Dependency lifecycle:
+
+```bash
+make deps-up
+make deps-ps
+make deps-logs
+make deps-down
+make deps-recreate
+make deps-clean
+```
+
+Testing:
+
+```bash
+make test-unit
+make test-all
+```
+
+Real-tool smoke (opt-in):
+
+```bash
+make smoke-validate
+MOCKWAY_URL=http://127.0.0.1:8080 make smoke-mockway
+make smoke
+make smoke-mockway-local MOCKWAY_BIN=/Users/ehsanashouri/go/bin/mockway
+make smoke-mockway-manual
+```
+
+Notes:
+- `smoke-validate` runs `TestValidateCommandRealToolSmoke` with `INFRAFACTORY_ENABLE_REALTOOL_SMOKE=1`.
+- `smoke-mockway` starts dependencies (`make deps-up`), waits for Mockway readiness, then runs `TestTestCommandRealToolMockwaySmoke` with `INFRAFACTORY_ENABLE_REALTOOL_MOCKWAY=1`.
+- `smoke-mockway-local` runs the same smoke test against a locally installed `mockway` binary and auto-stops it after the test.
+- `smoke-mockway-manual` runs the explicit fallback sequence (`docker run` + healthcheck + smoke test).
+- Default test paths remain hermetic; smoke tests require external tools/services.
+
+Smoke test path options:
+- Compose-managed dependency path: `make smoke-mockway`
+- Local binary path (no Docker image required): `make smoke-mockway-local MOCKWAY_BIN=/path/to/mockway`
+- Manual Docker fallback path: `make smoke-mockway-manual`
+
+Troubleshooting:
+- If Docker image pull fails with `denied`, use the local binary path (`smoke-mockway-local`) until image publishing is available.
+- If you see `connection refused` to `localhost:8080`, use `127.0.0.1` explicitly and ensure Mockway is healthy:
+  `curl -sSf http://127.0.0.1:8080/mock/state >/dev/null`.
+- `smoke-mockway-local` may print one or more "waiting for mockway binary..." lines during startup; that is expected.
+- If `generate` or `run` fails with `generator transport failed` and mentions `default seed generator`, that is expected with current default runtime wiring until a transport-backed generator is configured/implemented.
+
+### Testing Matrix
+
+| Goal | Command | External deps |
+|---|---|---|
+| Hermetic full test suite | `go test ./...` | none |
+| Full local quality gate | `bash scripts/check_all.sh` | none |
+| Unit-focused internal work | `make test-unit` | none |
+| Repo-wide checks | `make test-all` | none |
+| Real-tool static smoke | `make smoke-validate` | `tofu` |
+| Real-tool mock deploy smoke | `make smoke-mockway` | `tofu`, Docker/Mockway |
+| Real-tool mock smoke (local bin) | `make smoke-mockway-local MOCKWAY_BIN=/path/to/mockway` | `tofu`, local `mockway` |
+
+### Practical example 1: Inspect available CLI commands and flags
 
 ```bash
 go run ./cmd/infrafactory --help
 ```
 
 Command tree currently exposed:
-- `init`
-- `generate`
-- `validate`
-- `test`
-- `run`
+- `init [--path <scenario-path>]`
+- `generate <scenario-path>`
+- `validate <scenario-path>`
+- `test <scenario-path>`
+- `run <scenario-path> [--max-iterations N]`
 - `mock start`
 
-### Practical example 2: Work with scenario and config contracts
+Global flags:
+- `--config` (default `./infrafactory.yaml`)
+- `--output` (`human` or `json`)
 
-Use these files as your canonical inputs:
-- Runtime config: `infrafactory.yaml`
-- Scenario schema: `scenario.schema.json`
-- Training scenario example: `scenarios/training/web-app-paris.yaml`
-- Holdout scenario example: `scenarios/holdout/web-app-paris-pinned.yaml`
+### Practical example 2: Initialize a scenario scaffold
 
-### Practical example 3: Run package-focused checks while developing
+```bash
+go run ./cmd/infrafactory init --path scenarios/training/new-scenario.yaml
+```
+
+This writes a minimal schema-valid scaffold and prints deterministic next-step commands.
+
+### Practical example 3: Run command adapters with explicit scenario path
+
+```bash
+go run ./cmd/infrafactory generate scenarios/training/web-app-paris.yaml --config infrafactory.yaml --output human
+go run ./cmd/infrafactory validate scenarios/training/web-app-paris.yaml --config infrafactory.yaml --output json
+go run ./cmd/infrafactory test scenarios/training/web-app-paris.yaml --config infrafactory.yaml --output human
+go run ./cmd/infrafactory run scenarios/training/web-app-paris.yaml --config infrafactory.yaml --max-iterations 3 --output json
+```
+
+### Practical example 4: Start Mockway via CLI wrapper
+
+```bash
+go run ./cmd/infrafactory mock start --config infrafactory.yaml
+```
+
+### Practical example 5: Run package-focused checks while developing
 
 ```bash
 go test ./internal/config
@@ -156,7 +397,7 @@ go test ./internal/feedback
 go test ./internal/runstore
 ```
 
-### Practical example 4: Run optional layer-2 integration smoke test
+### Practical example 6: Run optional layer-2 integration smoke test
 
 ```bash
 INFRAFACTORY_ENABLE_INTEGRATION=1 \
@@ -164,13 +405,32 @@ INFRAFACTORY_MOCKWAY_URL=http://localhost:8080 \
 go test ./internal/harness -run TestLayer2IntegrationSmoke
 ```
 
-### Practical example 5: Inspect persisted run artifacts
+### Practical example 7: Run optional CLI real-tool smoke tests directly
+
+```bash
+INFRAFACTORY_ENABLE_REALTOOL_SMOKE=1 \
+go test ./internal/cli -run TestValidateCommandRealToolSmoke
+
+INFRAFACTORY_ENABLE_REALTOOL_MOCKWAY=1 \
+INFRAFACTORY_MOCKWAY_URL=http://127.0.0.1:8080 \
+go test ./internal/cli -run TestTestCommandRealToolMockwaySmoke
+```
+
+Manual fallback sequence (equivalent to `make smoke-mockway-manual`):
+
+```bash
+docker run --rm -d --name infrafactory-mockway -p 8080:8080 ghcr.io/redscaresu/mockway
+curl -sSf http://127.0.0.1:8080/mock/state >/dev/null
+INFRAFACTORY_ENABLE_REALTOOL_MOCKWAY=1 INFRAFACTORY_MOCKWAY_URL=http://127.0.0.1:8080 go test ./internal/cli -run TestTestCommandRealToolMockwaySmoke
+```
+
+### Practical example 8: Inspect persisted run artifacts
 
 ```text
 .infrafactory/runs/<scenario>/<run-id>/
 ```
 
-You will find run metadata and per-iteration artifacts in that directory tree.
+You will find `run.json` metadata and per-iteration artifacts (for example `iterations/1/iteration.json`) in that directory tree.
 
 ## Local Quality Checks
 

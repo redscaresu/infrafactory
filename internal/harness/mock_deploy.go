@@ -55,6 +55,8 @@ func (e *MockDeployError) Is(target error) bool {
 }
 
 func (h *MockDeployHarness) Run(ctx context.Context, workDir string, env map[string]string) (*MockDeployResult, error) {
+	// Deploy flow is intentionally sequenced as reset -> apply -> state snapshot
+	// so checks always run against a fresh mock environment.
 	if err := h.mock.Reset(ctx); err != nil {
 		return nil, &MockDeployError{
 			Stage: "reset",

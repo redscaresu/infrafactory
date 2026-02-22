@@ -20,7 +20,85 @@ var (
 )
 
 type Scenario struct {
-	Name string `json:"scenario"`
+	Name               string                 `json:"scenario"`
+	Version            string                 `json:"version"`
+	Cloud              string                 `json:"cloud"`
+	Description        string                 `json:"description"`
+	Type               string                 `json:"type,omitempty"`
+	References         string                 `json:"references,omitempty"`
+	Resources          Resources              `json:"resources"`
+	Constraints        map[string]any         `json:"constraints,omitempty"`
+	AcceptanceCriteria []AcceptanceCriterion  `json:"acceptance_criteria"`
+}
+
+type Resources struct {
+	Compute    *ComputeResource    `json:"compute,omitempty"`
+	Networking *NetworkingResource `json:"networking,omitempty"`
+	Database   *DatabaseResource   `json:"database,omitempty"`
+	Kubernetes *KubernetesResource `json:"kubernetes,omitempty"`
+}
+
+type ComputeResource struct {
+	Purpose  string          `json:"purpose"`
+	Size     string          `json:"size"`
+	Count    int             `json:"count,omitempty"`
+	Override ComputeOverride `json:"override,omitempty"`
+}
+
+type ComputeOverride struct {
+	Offer string `json:"offer,omitempty"`
+	Image string `json:"image,omitempty"`
+}
+
+type NetworkingResource struct {
+	VPC            bool          `json:"vpc,omitempty"`
+	PrivateNetwork bool          `json:"private_network,omitempty"`
+	LoadBalancer   *LoadBalancer `json:"load_balancer,omitempty"`
+}
+
+type LoadBalancer struct {
+	Exposure string       `json:"exposure"`
+	Backends []LBBackend  `json:"backends"`
+}
+
+type LBBackend struct {
+	Port     int    `json:"port"`
+	Protocol string `json:"protocol"`
+}
+
+type DatabaseResource struct {
+	Engine           string           `json:"engine"`
+	Size             string           `json:"size"`
+	HighAvailability bool             `json:"high_availability,omitempty"`
+	Override         DatabaseOverride `json:"override,omitempty"`
+}
+
+type DatabaseOverride struct {
+	NodeType      string `json:"node_type,omitempty"`
+	EngineVersion string `json:"engine_version,omitempty"`
+}
+
+type KubernetesResource struct {
+	Size     string             `json:"size"`
+	Override KubernetesOverride `json:"override,omitempty"`
+}
+
+type KubernetesOverride struct {
+	NodeType  string `json:"node_type,omitempty"`
+	NodeCount int    `json:"node_count,omitempty"`
+}
+
+type AcceptanceCriterion struct {
+	Type        string `json:"type"`
+	Expect      string `json:"expect"`
+	Description string `json:"description,omitempty"`
+
+	From   string `json:"from,omitempty"`
+	To     string `json:"to,omitempty"`
+	Port   *int   `json:"port,omitempty"`
+	Target string `json:"target,omitempty"`
+	Check  string `json:"check,omitempty"`
+	Domain string `json:"domain,omitempty"`
 }
 
 type Violation struct {
@@ -144,6 +222,8 @@ func formatPath(instanceLocation []string) string {
 }
 
 func normalizeYAML(value any) any {
+	// YAML decoders may produce map[any]any; convert recursively to map[string]any
+	// so JSON schema validation and json.Unmarshal operate deterministically.
 	switch typed := value.(type) {
 	case map[string]any:
 		out := make(map[string]any, len(typed))

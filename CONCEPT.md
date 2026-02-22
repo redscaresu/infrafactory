@@ -67,6 +67,7 @@ Rule: if a change alters architecture, interfaces, or long-term workflow, create
 | Validation chaining | Fail-fast with skip | Stop if hard dependency fails; run independent checks in parallel within a layer. |
 | Holdout scenarios | Criteria-only: block, no feedback. Full: normal run. | Criteria-only holdouts are adversarial checks — agent doesn't see failures, prevents gaming. Full holdouts are independent scenarios with stricter criteria — they get the normal feedback loop via `infrafactory run`. |
 | Cost checks | Deferred to post-v1 | No reliable Scaleway pricing data source. Remove `cost` acceptance criteria from v1. Add when Infracost supports Scaleway or when price table approach is needed. |
+| Sandbox/live deploy (Layer 3) | Deferred and blocked for current slices | Running real Scaleway sandbox applies incurs cloud cost and credentials governance overhead. Keep disabled until explicit policy approval and budget guardrails are in place. |
 | CLI scenario arg | File path, not name | `infrafactory run scenarios/training/web-app-paris.yaml` — explicit, no ambiguity, tab-completable. |
 | CLI init | Minimal scaffold | Creates skeleton YAML with required fields + comments. Prints "next steps" suggesting commands to run. No interactive wizard for v1. |
 | Holdout formats | Both criteria-only and full scenario | Criteria-only: references training scenario, adds adversarial acceptance criteria against same generated code. Full: independent scenario with stricter criteria. |

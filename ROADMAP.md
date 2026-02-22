@@ -40,6 +40,25 @@ This file is intentionally high-level and mostly stable; day-to-day execution tr
 - Implement feedback loop and stuck detection.
 - Add criteria-only holdout flow.
 
+7. Slice 7: CLI orchestration
+- Wire command adapters end-to-end across generate/validate/test/run/mock start.
+- Freeze command/output contracts.
+- Add hermetic and opt-in real-tool smoke coverage.
+
+8. Slice 8: Developer experience
+- Add make-based local workflow automation for dependencies/tests/smoke/cleanup.
+- Keep default paths hermetic and make real-tool smoke opt-in.
+- Document canonical developer commands.
+
+9. Slice 9: Criteria-complete orchestration
+- Wire default runtime generator behavior for `generate`/`run`.
+- Expand scenario runtime model so criteria and holdout routing data are available to CLI orchestration.
+- Execute scenario acceptance criteria in `test`/`run` (topology + state policy + holdout flow).
+- Define and enforce criteria support/defer matrix for unsupported sandbox-only checks in current slices.
+- Honor validation layer enable/disable flags consistently in CLI orchestration.
+- Expand mock command lifecycle operations.
+- Keep sandbox/live deploy layer deferred (blocked) due current cost implications.
+
 ## Near-term execution order
 
 1. Complete Slice 1.

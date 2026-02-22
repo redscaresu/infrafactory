@@ -121,3 +121,20 @@ func TestGenerateErrorWrapping(t *testing.T) {
 		t.Fatalf("expected phase generate_hcl, got %q", typed.Phase)
 	}
 }
+
+func TestDefaultSeedGeneratorReturnsTypedTransportError(t *testing.T) {
+	t.Parallel()
+
+	gen := NewDefaultSeedGenerator("claude-code")
+
+	_, err := gen.Generate(context.Background(), Request{Iteration: 1})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !errors.Is(err, ErrTransportFailed) {
+		t.Fatalf("expected transport error, got: %v", err)
+	}
+	if !errors.Is(err, ErrGenerateFailed) {
+		t.Fatalf("expected generate failed error, got: %v", err)
+	}
+}

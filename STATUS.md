@@ -3,21 +3,22 @@
 Last updated: 2026-02-22
 
 ## Current phase
-- Active milestone: Slice 7 CLI orchestration
-- Next gate: end-to-end command wiring across generate/validate/test/run
-- Current ticket: S7-T1
-- Next ticket: S7-T2
+- Active milestone: Slice 9 criteria-complete orchestration
+- Next gate: close remaining orchestration gaps for scenario criteria execution
+- Current ticket: S9-T10
+- Next ticket: S9-T2
 
 ## In progress
-- `init` command scaffold generation + next-step output (`S7-T1`)
+- Typed scenario model expansion for criteria/layer-routing fields (`S9-T10`)
 
 ## Known blockers
-- None currently.
+- `S9-T8` sandbox/live deploy layer remains blocked intentionally due current cost implications.
 
 ## Next actions
-1. Complete `S7-T1` (`init` scaffold + deterministic next-step output).
-2. Complete `S7-T2` plus `S7-T12`/`S7-T16`/`S7-T13` (command+output contract freeze + shared test harness) before wiring core commands.
-3. Wire `S7-T3`/`S7-T4`/`S7-T5`, run early smoke checks (`S7-T6`), then complete `run` split tickets (`S7-T7`..`S7-T9`), hermetic integration (`S7-T11`), doc sync (`S7-T15`), and optional real-tool smoke (`S7-T14`).
+1. Complete `S9-T1` and `S9-T10` to close default runtime + scenario model prerequisites.
+2. Complete `S9-T2`/`S9-T11`/`S9-T3`/`S9-T4`/`S9-T5` criteria and layer orchestration path.
+3. Complete `S9-T6`/`S9-T7` follow-on holdout and mock lifecycle command coverage.
+4. Reassess `S9-T8` only after explicit cost/credentials policy approval.
 
 ## Update policy
 - Update at end of each meaningful coding session.
@@ -27,6 +28,51 @@ Last updated: 2026-02-22
 - Keep startup/read-order instructions only in `SESSION_START.md` to avoid duplication.
 
 ## Recent updates
+- Completed `S9-T1`: runtime now injects a concrete default `SeedGenerator` for `generate`/`run`, replacing missing-dependency `ErrNotImplemented` failures with deterministic typed generator transport failures; added focused runtime/command/generator tests.
+- Verified local checks after `S9-T1`: `go test ./...` and `bash scripts/check_all.sh` both pass.
+- Expanded `SESSION_START.md` Slice 9 section with operational implementation notes (canonical scenario path, `127.0.0.1` Mockway caveat, real-tool smoke preconditions, and blocker-output protocol) to remove remaining fresh-context ambiguity.
+- Updated `SESSION_START.md` with explicit Slice 9 execution constraints (ticket order, blocked `S9-T8`, criteria support/defer matrix, and current runtime caveats) so fresh contexts start with complete implementation guardrails.
+- Performed two-pass refinement sweep (planning-contract + implementation-consistency) and captured additional missing prerequisites in Slice 9 (`S9-T10`, `S9-T11`).
+- Added explicit criteria support/deferment matrix in README, including `dns_resolution` deferment while sandbox deploy remains blocked for cost reasons.
+- Refined Slice 9 backlog definitions and acceptance criteria so each orchestration gap has explicit scope/tests and clearer execution order.
+- Expanded README with a dedicated "Intentionally Deferred and In-Progress Areas" section, including explicit sandbox/live deploy deferment due cost implications.
+- Planned Slice 9 (`S9-T1`..`S9-T9`) to close remaining CLI orchestration gaps and explicitly documented sandbox/live deploy deferment due cost implications.
+- Completed `S8-T3`: synced README with make-based DX workflow for dependencies/tests/smoke/cleanup and updated prerequisites.
+- Completed `S8-T2`: added DX smoke runner targets in `Makefile` with explicit env guards and Mockway readiness wait.
+- Completed `S8-T1`: added root `Makefile` dependency/test automation targets and improved dependency lifecycle defaults in `docker-compose.yml`.
+- Verified local checks after Slice 8 updates: `go test ./...` and `bash scripts/check_all.sh` both pass.
+- Completed `S7-T14`: added opt-in real-tool smoke tests (`INFRAFACTORY_ENABLE_REALTOOL_SMOKE=1` for `validate`; `INFRAFACTORY_ENABLE_REALTOOL_MOCKWAY=1` + `INFRAFACTORY_MOCKWAY_URL` for `test`).
+- Verified local checks after `S7-T14`: `go test ./...` and `bash scripts/check_all.sh` both pass.
+- Completed `S7-T15`: synced README command signatures/flags and usage examples to current wired CLI behavior and run artifact/output-mode notes.
+- Verified local checks after `S7-T15`: `go test ./...` and `bash scripts/check_all.sh` both pass.
+- Completed `S7-T11`: added hermetic orchestration integration tests and regression fixture assertions across `generate`/`validate`/`test`/`run`/`mock start`.
+- Verified local checks after `S7-T11`: `go test ./...` and `bash scripts/check_all.sh` both pass.
+- Completed `S7-T10`: wired `mock start` command to runtime start path with preflight dependency checks and deterministic success/failure output behavior.
+- Verified local checks after `S7-T10`: `go test ./...` and `bash scripts/check_all.sh` both pass.
+- Completed `S7-T9`: integrated runstore persistence/reporting into `run` (run metadata + per-iteration artifacts) with focused success/failure persistence assertions.
+- Verified local checks after `S7-T9`: `go test ./...` and `bash scripts/check_all.sh` both pass.
+- Completed `S7-T8`: integrated run convergence controls (config/flag max-iterations and stuck-detection stop semantics) with focused success/max/stuck tests.
+- Verified local checks after `S7-T8`: `go test ./...` and `bash scripts/check_all.sh` both pass.
+- Completed `S7-T7`: wired `run` skeleton for one-pass `generate -> validate -> test` orchestration with deterministic aggregated run-stage output and focused success/failure tests.
+- Verified local checks after `S7-T7`: `go test ./...` and `bash scripts/check_all.sh` both pass.
+- Completed `S7-T6`: added command-level smoke suites for `generate`/`validate`/`test` with representative success and failure paths on fake dependencies.
+- Verified local checks after `S7-T6`: `go test ./...` and `bash scripts/check_all.sh` both pass.
+- Completed `S7-T5`: wired `test` command to mock-deploy and destroy harness flow with deterministic stage/failure output mapping and focused deploy/destroy failure tests.
+- Verified local checks after `S7-T5`: `go test ./...` and `bash scripts/check_all.sh` both pass.
+- Completed `S7-T4`: wired `validate` command to static harness execution and OPA plan policy reporting with deterministic human/json output mapping and focused static/policy tests.
+- Verified local checks after `S7-T4`: `go test ./...` and `bash scripts/check_all.sh` both pass.
+- Completed `S7-T3`: wired `generate` command to runtime+scenario+generator pipeline with deterministic output-dir file writes, output-mode rendering, and focused success/failure tests using fake generator injection.
+- Verified local checks after `S7-T3`: `go test ./...` and `bash scripts/check_all.sh` both pass.
+- Completed `S7-T13`: added shared CLI command-test harness utility for deterministic workspace fixture setup + stdout/stderr/error capture, and adopted it in contract tests.
+- Verified local checks after `S7-T13`: `go test ./...` and `bash scripts/check_all.sh` both pass.
+- Completed `S7-T16`: froze CLI output contract with deterministic human summary + machine JSON schema (`infrafactory.output.v1`) and stable stage/failure ordering; updated ADR-0002.
+- Verified local checks after `S7-T16`: `go test ./...` and `bash scripts/check_all.sh` both pass.
+- Completed `S7-T12`: froze CLI contract for scenario args, global output mode, and exit-code semantics; added focused contract tests and ADR-0002 (`docs/decisions/0002-cli-command-contract.md`).
+- Verified local checks after `S7-T12`: `go test ./...` and `bash scripts/check_all.sh` both pass.
+- Completed `S7-T2`: added shared CLI runtime/context builder with scenario/output caching, injectable generator/harness/mock dependencies, and deterministic CLI error formatting helpers/tests.
+- Verified local checks after `S7-T2`: `go test ./...` and `bash scripts/check_all.sh` both pass.
+- Completed `S7-T1`: implemented `infrafactory init` scaffold generation with schema-valid defaults, comments/hints, deterministic next-step output, and focused command tests.
+- Verified local checks after `S7-T1`: `go test ./...` and `bash scripts/check_all.sh` both pass.
 - Optimized Slice 7 dependency graph: removed `P1` test-harness ticket from `P0` critical-path smoke/integration dependencies.
 - Simplified Slice 7 with transitive-dependency cleanup (removed redundant direct deps where upstream gates already enforce order).
 - Optimized Slice 7 execution path: decoupled `mock start` from output-contract gating and decoupled docs sync from optional real-tool smoke.
