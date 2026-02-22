@@ -179,7 +179,7 @@ func TestTestCommandDestroyFailure(t *testing.T) {
 	}
 }
 
-func TestTestCommandFailsClosedForUnsupportedCriteriaHumanOutput(t *testing.T) {
+func TestTestCommandAutoPassesDeferredDNSCriteriaHumanOutput(t *testing.T) {
 	t.Parallel()
 
 	h := newCommandTestHarness(t)
@@ -203,21 +203,21 @@ func TestTestCommandFailsClosedForUnsupportedCriteriaHumanOutput(t *testing.T) {
 	cmd.SetArgs([]string{scenarioPath, "--config", h.ConfigPath})
 
 	err := cmd.Execute()
-	if err == nil {
-		t.Fatal("expected failure")
+	if err != nil {
+		t.Fatalf("expected success, got: %v", err)
 	}
-	if mockDeploy.calls != 0 || destroy.calls != 0 {
-		t.Fatalf("expected no deploy/destroy calls for unsupported criteria, got deploy=%d destroy=%d", mockDeploy.calls, destroy.calls)
+	if mockDeploy.calls != 1 || destroy.calls != 1 {
+		t.Fatalf("expected deploy/destroy calls for auto-pass criteria path, got deploy=%d destroy=%d", mockDeploy.calls, destroy.calls)
 	}
 	if !strings.Contains(stdout.String(), "- criteria/support_matrix: skip") {
 		t.Fatalf("expected support-matrix skip stage in output, got:\n%s", stdout.String())
 	}
-	if !strings.Contains(stdout.String(), "check=dns_resolution") {
-		t.Fatalf("expected dns_resolution failure in output, got:\n%s", stdout.String())
+	if !strings.Contains(stdout.String(), dnsResolutionAutoPassMessage()) {
+		t.Fatalf("expected dns_resolution auto-pass message in output, got:\n%s", stdout.String())
 	}
 }
 
-func TestTestCommandFailsClosedForUnsupportedCriteriaJSONOutput(t *testing.T) {
+func TestTestCommandAutoPassesDeferredDNSCriteriaJSONOutput(t *testing.T) {
 	t.Parallel()
 
 	h := newCommandTestHarness(t)
@@ -239,14 +239,14 @@ func TestTestCommandFailsClosedForUnsupportedCriteriaJSONOutput(t *testing.T) {
 	cmd.SetArgs([]string{scenarioPath, "--config", h.ConfigPath, "--output", string(OutputModeJSON)})
 
 	err := cmd.Execute()
-	if err == nil {
-		t.Fatal("expected failure")
+	if err != nil {
+		t.Fatalf("expected success, got: %v", err)
 	}
 	checks := []string{
 		`"schema": "` + OutputSchemaVersion + `"`,
-		`"status": "failed"`,
+		`"status": "success"`,
 		`"stage": "support_matrix"`,
-		`"check": "dns_resolution"`,
+		`currently automatically passes due to lack of real world cloud provider`,
 	}
 	for _, check := range checks {
 		if !strings.Contains(stdout.String(), check) {

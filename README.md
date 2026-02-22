@@ -76,6 +76,50 @@ High-level flow:
 5. Run destroy and orphan verification.
 6. Persist run artifacts and iterate based on structured feedback.
 
+## Process Flows
+
+Note: static validation currently uses `tofu init/validate/plan/show` plus OPA policy checks; `tflint` is not part of the wired default pipeline.
+
+Happy path (training + holdouts):
+
+```mermaid
+flowchart TD
+    A[Scenario YAML<br/>training + holdout refs] --> B[Load + schema validation]
+    B --> C[Generate IaC files]
+    C --> D[Static layer<br/>tofu init -> validate -> plan -> show]
+    D --> E[OPA plan policy checks]
+    E --> F[Mock deploy layer<br/>reset -> tofu apply -> state snapshot]
+    F --> G[Criteria checks<br/>connectivity/http_probe/policy]
+    G --> H[Destroy layer<br/>tofu destroy + orphan verification]
+    H --> I[Training convergence]
+    I --> J[Run criteria-only holdouts]
+    J --> K[All holdouts pass]
+    K --> L[Final success]
+```
+
+Failure and retry loop path:
+
+```mermaid
+flowchart TD
+    A[Run iteration n] --> B[Generate]
+    B --> C[Validate static + policy]
+    C --> D[Test mock deploy criteria + destroy]
+    D --> E{Any failures?}
+    E -- no --> F{Training converged?}
+    F -- no --> A
+    F -- yes --> G[Run criteria-only holdouts]
+    G --> H{Holdout failures?}
+    H -- no --> I[Final success]
+    H -- yes --> J[Final failed: holdout block]
+
+    E -- yes --> K[Record structured failures + artifacts]
+    K --> L{Stop condition}
+    L -- stuck signature --> M[Final failed: stuck]
+    L -- max iterations --> N[Final failed: max iterations]
+    L -- otherwise --> O[Next iteration]
+    O --> A
+```
+
 ## Validation Layers
 
 1. Layer 1: Static
@@ -100,6 +144,22 @@ Supporting control loop:
 - Feedback loop with max-iteration control
 - Stuck detection via failure-signature subset logic
 - Run/iteration artifact persistence under `.infrafactory/runs/...`
+
+### OPA Plan Policy Checks (Static Layer)
+
+OPA plan checks run during static validation and are evaluated against `tofu show -json tfplan` output.
+These checks use Rego `deny` rules from configured policy paths and fail validation before deploy-layer execution when violations are found.
+
+Representative policy files:
+- `policies/scaleway/no_public_database.rego`
+- `policies/scaleway/no_public_endpoints.rego`
+- `policies/scaleway/vpc_required.rego`
+- `policies/scaleway/region_restriction.rego`
+- `policies/common/naming.rego`
+
+This is separate from holdouts:
+- OPA plan checks are part of the training/static validation stage within each run iteration.
+- Holdouts are criteria-only scenarios executed after training convergence as a final gating phase.
 
 ## Current State
 
@@ -135,7 +195,7 @@ Notes on current runtime prerequisites:
 - `generate` and `run` now resolve a concrete default `SeedGenerator` from runtime (`internal/cli/runtime.go`) when no test/injected generator is provided.
 - Runtime wiring path: `buildRuntime(...)` sets `deps.Generator = generator.NewDefaultSeedGenerator(cfg.Agent.Type)` when `deps.Generator == nil`.
 - Current default behavior (`internal/generator/default.go`): `Generate(...)` returns a deterministic typed generator transport error (`generator.ErrTransportFailed`) indicating the default generator for the configured `agent.type` is not implemented yet.
-- `validate`/`test`/`run` expect generated OpenTofu files and tool/runtime dependencies (`tofu`, Mockway, and for `mock start`, Docker).
+- `validate`/`test`/`run` expect generated OpenTofu files and tool/runtime dependencies (`tofu`, Mockway, and Docker for `mock` lifecycle commands).
 - Sandbox/live deploy layer (real Scaleway) is permanently disabled by governance policy (see `docs/decisions/0003-permanent-sandbox-live-deploy-block.md`).
 
 ### Deferred and Non-Goals
@@ -143,13 +203,13 @@ Notes on current runtime prerequisites:
 The following are known non-goals and are intentionally not complete:
 - Sandbox/live deploy (real Scaleway) is permanently blocked and out-of-scope under ADR-0003.
 
-Criteria support/deferment status:
+Criteria support status:
 - `connectivity`: criteria-driven topology checks are wired and propagated through `test` and `run` convergence.
 - `http_probe`: criteria-driven topology checks are wired and propagated through `test` and `run` convergence.
 - `policy`: criteria-driven state-policy checks are wired and propagated through `test` and `run` convergence.
 - `destruction`: supported as lifecycle stage and holdout-completion gating behavior in `run`.
-- `dns_resolution`: sandbox/live-only behavior; permanently unsupported while sandbox deploy remains governed as blocked, and currently surfaced as deterministic unsupported-criteria failures (`criteria/support_matrix`) in command output.
-  Output includes explicit stub messaging: `(real deployment skipped for cost reasons for now)`.
+- `dns_resolution`: sandbox/live-only behavior; currently auto-passes with explicit informational output in `criteria/support_matrix` because there is no real cloud-provider validation path.
+  Output includes explicit messaging: `currently automatically passes due to lack of real world cloud provider (real deployment skipped for cost reasons for now)`.
 
 ## Repository Layout
 
@@ -274,8 +334,8 @@ Holdout-only routing fields:
 - `type: holdout`
 - `references: <training-scenario-path>`
 
-Current unsupported criteria:
-- `dns_resolution` is sandbox/live-only and intentionally unsupported while sandbox deploy remains permanently blocked.
+Current auto-pass criteria:
+- `dns_resolution` is sandbox/live-only and currently auto-passes with explicit informational output while sandbox deploy remains permanently blocked.
 
 ### Basic setup and verification
 

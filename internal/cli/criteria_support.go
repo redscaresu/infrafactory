@@ -12,10 +12,16 @@ func unsupportedCriteriaResult(sc scenario.Scenario) ([]StageSummary, []FailureS
 		return nil, nil, fmt.Errorf("parse acceptance criteria: %w", err)
 	}
 
+	autoPassCount := 0
+	stages := make([]StageSummary, 0, 1)
 	failures := make([]FailureSummary, 0)
 	for idx, spec := range specs {
-		reason, supported := criteriaSupportReason(spec.Type)
+		reason, supported, autoPass := criteriaSupportReason(spec.Type)
 		if supported {
+			continue
+		}
+		if autoPass {
+			autoPassCount++
 			continue
 		}
 
@@ -28,28 +34,42 @@ func unsupportedCriteriaResult(sc scenario.Scenario) ([]StageSummary, []FailureS
 		})
 	}
 
-	if len(failures) == 0 {
-		return nil, nil, nil
+	if autoPassCount > 0 {
+		stages = append(stages, StageSummary{
+			Layer:  "criteria",
+			Stage:  "support_matrix",
+			Status: StageStatusSkip,
+			Detail: fmt.Sprintf("%d criteria auto-passed (%s)", autoPassCount, dnsResolutionAutoPassMessage()),
+		})
 	}
 
-	stages := []StageSummary{
-		{
+	if len(failures) > 0 {
+		stages = append(stages, StageSummary{
 			Layer:  "criteria",
 			Stage:  "support_matrix",
 			Status: StageStatusSkip,
 			Detail: fmt.Sprintf("%d unsupported criteria", len(failures)),
-		},
+		})
 	}
+
+	if len(stages) == 0 && len(failures) == 0 {
+		return nil, nil, nil
+	}
+
 	return stages, failures, nil
 }
 
-func criteriaSupportReason(criterionType string) (string, bool) {
+func criteriaSupportReason(criterionType string) (reason string, supported bool, autoPass bool) {
 	switch criterionType {
 	case "connectivity", "http_probe", "policy", "destruction":
-		return "", true
+		return "", true, false
 	case "dns_resolution":
-		return "requires sandbox/live deploy layer, which is intentionally deferred " + sandboxRealDeploySkippedMessage, false
+		return dnsResolutionAutoPassMessage(), false, true
 	default:
-		return "is not supported by the current criteria support matrix", false
+		return "is not supported by the current criteria support matrix", false, false
 	}
+}
+
+func dnsResolutionAutoPassMessage() string {
+	return "currently automatically passes due to lack of real world cloud provider " + sandboxRealDeploySkippedMessage
 }

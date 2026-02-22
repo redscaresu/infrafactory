@@ -162,7 +162,7 @@ func executeTestWithScenario(runtime *CommandRuntime, sc scenario.Scenario, outp
 		return OutputResult{}, fmt.Errorf("mock deploy/destroy dependencies unavailable: %w", ErrDependencyUnavailable)
 	}
 
-	stages := make([]StageSummary, 0)
+	stages := append(make([]StageSummary, 0, len(unsupportedStages)+8), unsupportedStages...)
 	failures := make([]FailureSummary, 0)
 	env := testCommandEnv(runtime)
 

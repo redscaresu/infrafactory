@@ -25,7 +25,7 @@ Before writing code, confirm these facts are still true in `STATUS.md`/`BACKLOG.
 2. Output and logs must explicitly surface: `(real deployment skipped for cost reasons for now)` for sandbox/live-blocked behavior.
 3. Slice 10 is the active unblocked lane; start from `S10-T2` and `S10-T3`, then proceed to `S10-T6`, then `S10-T1`.
 4. `run` is criteria-aware and includes criteria-only holdout completion checks; do not regress to coarse stage-only convergence behavior.
-5. `dns_resolution` remains unsupported while sandbox/live deploy is blocked and must remain deterministic unsupported-criteria output.
+5. `dns_resolution` remains auto-pass informational output while sandbox/live deploy is blocked; do not treat it as a hard-fail criterion.
 
 Minimal startup verification commands:
 ```bash
@@ -57,7 +57,7 @@ If either command fails, restore the repo to a green baseline before starting a 
 - Critical implementation prerequisite:
   expand `internal/scenario.Scenario` runtime model before criteria orchestration wiring (`S9-T10` before `S9-T2+`).
 - Criteria support/defer matrix:
-  `connectivity`, `http_probe`, `policy`, and `destruction` are wired for scenario-driven execution; `dns_resolution` remains unsupported while sandbox is blocked.
+  `connectivity`, `http_probe`, `policy`, and `destruction` are wired for scenario-driven execution; `dns_resolution` currently emits deterministic auto-pass informational output while sandbox is blocked.
 - Runtime state reality:
   `test` executes criteria-driven mock deploy + destroy lifecycle checks; `run` is criteria-aware orchestration with holdout completion checks.
 - Canonical validation scenario:

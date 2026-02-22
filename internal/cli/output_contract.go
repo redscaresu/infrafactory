@@ -254,8 +254,8 @@ func explainabilityFromFailure(failure FailureSummary) (ExplainabilitySummary, b
 		explanation.Summary = "criteria check failed for network reachability expectations"
 		explanation.Action = "validate topology targets/ports and inspect generated infrastructure connectivity"
 	case failure.Check == "dns_resolution":
-		explanation.Summary = "criteria is currently unsupported in the active support matrix"
-		explanation.Action = "replace or defer dns_resolution criteria until sandbox/live deploy support is approved"
+		explanation.Summary = "dns_resolution is auto-passed without live cloud verification"
+		explanation.Action = "treat this as informational until real sandbox/live deploy validation exists"
 	case failure.Check == "sandbox_deploy":
 		explanation.Summary = "sandbox deploy execution is intentionally blocked by governance policy"
 		explanation.Action = "keep sandbox_deploy disabled until explicit cost and credentials approval is documented"

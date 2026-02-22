@@ -312,7 +312,14 @@ func runCriteriaOnlyHoldouts(runtime *CommandRuntime, trainingScenarioPath strin
 			continue
 		}
 
-		stages = append(stages, StageSummary{Layer: "holdout", Stage: holdout.ScenarioName, Status: StageStatusPass})
+		stage := StageSummary{Layer: "holdout", Stage: holdout.ScenarioName, Status: StageStatusPass}
+		for _, testStage := range result.Stages {
+			if testStage.Layer == "criteria" && testStage.Stage == "support_matrix" && testStage.Detail != "" {
+				stage.Detail = testStage.Detail
+				break
+			}
+		}
+		stages = append(stages, stage)
 	}
 
 	return stages, failures, nil

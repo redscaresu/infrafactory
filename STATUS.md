@@ -51,7 +51,7 @@ Last updated: 2026-02-22
 - Verified local checks after `S9-T4`: `go test ./...` and `bash scripts/check_all.sh` both pass.
 - Completed `S9-T3`: `test` now executes criteria-driven topology and state-policy evaluators from scenario criteria specs, including expectation handling (`pass`/`fail`) and deterministic stage/failure output mapping.
 - Verified local checks after `S9-T3`: `go test ./...` and `bash scripts/check_all.sh` both pass.
-- Completed `S9-T11`: defined deterministic criteria support matrix behavior; unsupported criteria (notably `dns_resolution`) now fail closed with explicit `criteria/support_matrix` skip stage plus structured failure details in both human and JSON outputs.
+- Completed `S9-T11`: defined deterministic criteria support matrix behavior; deferred cloud-only criteria (notably `dns_resolution`) now emit explicit `criteria/support_matrix` auto-pass informational output.
 - Verified local checks after `S9-T11`: `go test ./...` and `bash scripts/check_all.sh` both pass.
 - Completed `S9-T2`: added deterministic acceptance-criteria mapping to typed executable check specs (`connectivity`, `http_probe`, `policy`, `destruction`, `dns_resolution`) with explicit typed parse errors for malformed criteria and focused scenario mapping tests.
 - Verified local checks after `S9-T2`: `go test ./...` and `bash scripts/check_all.sh` both pass.

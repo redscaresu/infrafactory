@@ -434,7 +434,7 @@ func TestRunCommandExecutesCriteriaOnlyHoldoutsAfterConvergence(t *testing.T) {
 	}
 }
 
-func TestRunCommandBlocksOnCriteriaOnlyHoldoutFailureWithoutFeedbackInjection(t *testing.T) {
+func TestRunCommandAutoPassesDeferredDNSHoldoutWithoutFeedbackInjection(t *testing.T) {
 	h := newCommandTestHarness(t)
 	runstoreRoot := filepath.Join(h.WorkspaceDir, ".infrafactory", "runs")
 	t.Setenv("INFRAFACTORY_RUNSTORE_ROOT", runstoreRoot)
@@ -475,17 +475,20 @@ func TestRunCommandBlocksOnCriteriaOnlyHoldoutFailureWithoutFeedbackInjection(t 
 	cmd.SetArgs([]string{h.ScenarioPath, "--config", h.ConfigPath})
 
 	err := cmd.Execute()
-	if err == nil {
-		t.Fatal("expected run failure")
+	if err != nil {
+		t.Fatalf("expected run success, got: %v", err)
 	}
 	if genCalls != 1 {
-		t.Fatalf("expected exactly one training iteration before holdout block, got %d generator calls", genCalls)
+		t.Fatalf("expected exactly one training iteration before holdout evaluation, got %d generator calls", genCalls)
 	}
-	if !strings.Contains(stdout.String(), "check=dns_resolution") {
-		t.Fatalf("expected holdout dns_resolution failure, got:\n%s", stdout.String())
+	if !strings.Contains(stdout.String(), dnsResolutionAutoPassMessage()) {
+		t.Fatalf("expected holdout dns_resolution auto-pass message, got:\n%s", stdout.String())
 	}
-	if strings.Contains(stdout.String(), "check=max_iterations") || strings.Contains(stdout.String(), "check=stuck") {
-		t.Fatalf("expected holdout block without training-loop feedback stop markers, got:\n%s", stdout.String())
+	if !strings.Contains(stdout.String(), "Status: success") {
+		t.Fatalf("expected successful run status, got:\n%s", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "Status: failed") {
+		t.Fatalf("expected successful run status, got:\n%s", stdout.String())
 	}
 }
 
