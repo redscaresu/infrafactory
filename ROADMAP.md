@@ -66,11 +66,18 @@ This file is intentionally high-level and mostly stable; day-to-day execution tr
 - Add idempotency/retry safety and performance regression guardrails.
 - Finalize permanent sandbox/live deploy block governance docs and ADR.
 
+11. Slice 11: Generator transport integration
+- Implement concrete generator transport wiring for `claude -p` and OpenRouter.
+- Keep generation deterministic via strict prompt/input/output contracts and parser reuse.
+- Add credential-safety guardrails so transport errors/logs do not leak secrets.
+- Add hermetic transport-adapter tests and opt-in smoke tests for real transports.
+- Preserve existing CLI/output contracts and failure taxonomy while replacing default transport stubs.
+
 ## Near-term execution order
 
-1. Complete Slice 1.
-2. Complete Slice 2.
-3. Stabilize with focused tests before Slice 3.
+1. Execute Slice 11 transport contract/wiring (`S11-T1` -> `S11-T4`).
+2. Complete Slice 11 transport hardening/test/docs closure (`S11-T5`, `S11-T7`, `S11-T6`).
+3. Re-evaluate next milestone after concrete generator transport is production-ready.
 
 ## Live progress tracking
 

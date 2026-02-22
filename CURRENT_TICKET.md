@@ -3,53 +3,53 @@
 Use this file as the per-session execution stub.
 
 ## Ticket
-- id: M2
-- title: Add CI workflow to run tests on PR/main and build binary artifact on successful main push
+- id: M5
+- title: Refine Slice 11 plan iteratively until two consecutive no-change passes
 - status: done
 - classification: implementation-only
 
 ## 1) Problem Statement
 - What is broken or missing?
-  Repository lacked a dedicated CI workflow that enforces test execution on PR and main branch merges/pushes, and did not automatically produce a binary artifact after successful main builds.
+  Slice 11 was planned, but dependency sequencing and hardening scope could be tightened for execution efficiency and delivery quality.
 - Why does it matter now?
-  This enforces baseline quality gates in GitHub and provides a deterministic binary build artifact from mainline.
+  Better ticket boundaries/dependencies reduce delivery risk and idle time once implementation starts.
 
 ## 2) Scope
 - In scope:
-  Add GitHub Actions workflow for CI test execution on PR/main and binary build/upload on successful main push.
+  Iteratively refine Slice 11 roadmap/backlog/status entries, continuing until two consecutive passes produce no further improvement suggestions.
 - Out of scope:
-  Release publishing/signing and multi-arch release matrix.
+  Implementing transport adapters themselves.
 
 ## 3) Acceptance Criteria
-1. CI workflow file is added and valid.
-2. PRs and main pushes execute `go test ./...`.
-3. Successful main push run emits a binary artifact.
+1. Slice 11 dependency graph is optimized for parallel execution where safe.
+2. Slice 11 acceptance criteria include credential redaction hardening.
+3. Review loop reached two consecutive no-change passes.
 
 ## 4) Impacted Areas
 - Packages/files changed:
-  `.github/workflows/ci.yml`,
-  `STATUS.md`,
+  `ROADMAP.md`,
   `BACKLOG.md`,
+  `STATUS.md`,
   `CURRENT_TICKET.md`.
 - External contracts affected (CLI/schema/policy):
   no.
 
 ## 5) Test Plan
 - Unit tests:
-  `go test ./...`
+  n/a (docs-only ticket).
 - Integration checks:
   n/a
 - Manual verification:
-  workflow syntax and trigger rules reviewed.
+  Slice-plan pass-by-pass review with explicit consecutive no-change confirmation.
 
 ## 6) Risks and Rollback
 - Primary risks:
-  workflow runtime drift (Go/action versions) over time.
+  overfitting the plan before implementation realities.
 - Rollback approach:
-  revert `.github/workflows/ci.yml`.
+  revert slice planning doc updates.
 
 ## 7) Done Definition
-- CI workflow present and validated locally where applicable.
+- Slice 11 plan refined and validated through consecutive no-change passes.
 - Required docs updated (`STATUS.md`, `BACKLOG.md`, `CURRENT_TICKET.md`).
 - Remaining follow-up captured explicitly.
 
@@ -58,14 +58,16 @@ Use this file as the per-session execution stub.
 - `bash scripts/check_all.sh`
 
 ## Progress notes
-- Added `.github/workflows/ci.yml`.
-- Configured workflow triggers:
-  - `pull_request` (opened/synchronize/reopened/ready_for_review): run tests.
-  - `push` on `main`: run tests, then build binary artifact.
-- Added `build-binary` job gated on successful `test` and `push` to `main`.
-- Binary build output:
-  - `dist/infrafactory-linux-amd64` and `dist/infrafactory-linux-arm64` (`CGO_ENABLED=0`).
-  - Uploaded as workflow artifacts `infrafactory-linux-amd64` and `infrafactory-linux-arm64`.
+- Pass 1: refined Slice 11 structure:
+  - removed unnecessary upstream dependency on `S10-T7` for `S11-T1`.
+  - optimized dependencies for parallel execution (`S11-T2`/`S11-T3`, test/doc sequencing).
+  - tightened acceptance criteria for phase-delay semantics and deterministic failure behavior.
+  - updated roadmap near-term execution order to current milestone reality.
+- Pass 2: added explicit Slice 11 credential safety ticket (`S11-T7`) and wired it into dependencies/docs closure.
+- Pass 3: fixed residual status consistency (`S11-T1`..`S11-T7` wording).
+- Pass 4: fixed roadmap sequencing to include `S11-T7` in closure step.
+- Pass 5: no further improvements identified.
+- Pass 6: no further improvements identified (second consecutive no-change pass; review complete).
 
 ## Blocker (if any)
 - blocker: none.

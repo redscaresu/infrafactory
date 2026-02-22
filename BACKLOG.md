@@ -6,6 +6,9 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 
 | id | slice | title | priority | status | deps | owner |
 |---|---|---|---|---|---|---|
+| M5 | Maintenance | Refine Slice 11 plan iteratively until two consecutive no-change passes | P1 | done | - | codex |
+| M4 | Maintenance | Optimize README clarity and consistency via iterative review passes | P1 | done | - | codex |
+| M3 | Maintenance | Plan Slice 11 for concrete generator transport integration (`claude -p`, OpenRouter) | P1 | done | - | codex |
 | M2 | Maintenance | Add CI workflow to run tests on PR/main and build binary artifact on successful main push | P1 | done | - | codex |
 | M1 | Maintenance | Harden runtime/policy regressions captured in `ISSUES.md` + add regression tests | P1 | done | - | codex |
 | S1-T1 | Slice 1 | Wire Cobra root and commands (`init`, `generate`, `validate`, `test`, `run`, `mock start`) | P0 | done | - | codex |
@@ -65,6 +68,13 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 | S10-T5 | Slice 10 | Add performance baseline benchmarks and regression guardrails | P1 | done | S10-T3 | codex |
 | S10-T6 | Slice 10 | Add criteria/policy failure explainability summaries | P1 | done | S10-T2,S10-T3 | codex |
 | S10-T7 | Slice 10 | Finalize permanent sandbox-block governance docs + ADR | P0 | done | S9-T7,S10-T1 | codex |
+| S11-T1 | Slice 11 | Define generator transport contract + config mapping for `claude -p` and OpenRouter | P0 | todo | - | codex |
+| S11-T2 | Slice 11 | Implement `claude -p` transport adapter with deterministic prompt/phase execution | P0 | todo | S11-T1 | codex |
+| S11-T3 | Slice 11 | Implement OpenRouter HTTP transport adapter with deterministic retries/timeouts/errors | P0 | todo | S11-T1 | codex |
+| S11-T4 | Slice 11 | Runtime wiring + selection for concrete transports (replace default transport stub path) | P0 | todo | S11-T2,S11-T3 | codex |
+| S11-T5 | Slice 11 | Add hermetic adapter tests + opt-in smoke tests for real transport paths | P1 | todo | S11-T2,S11-T3 | codex |
+| S11-T7 | Slice 11 | Add transport credential safety/redaction guardrails for errors and logs | P1 | todo | S11-T2,S11-T3 | codex |
+| S11-T6 | Slice 11 | Sync docs and examples for transport configuration/usage and failure modes | P1 | todo | S11-T4,S11-T5,S11-T7 | codex |
 
 ## Ticket details
 
@@ -127,6 +137,13 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 | S10-T5 | `internal/*` benchmarks, CI scripts/docs | feature behavior changes | baseline benchmark suite exists for key flows with documented thresholds and regression checks without requiring network/external services | benchmark tests + CI guard script assertions with env-guarded execution in default hermetic path |
 | S10-T6 | `internal/cli/output_contract.go`, failure mapping adapters, docs | policy authoring semantics | failure output includes concise explainability summaries linking criteria/policy checks to actionable context | output contract tests for explainability fields in human/json outputs |
 | S10-T7 | `docs/decisions/*`, `docs/decisions/README.md`, `README.md`, `ROADMAP.md`, `STATUS.md` | runtime deployment implementation | permanent sandbox/live block governance is codified in ADR and synchronized docs with unambiguous policy language | doc hygiene + ADR index/checklist assertions |
+| S11-T1 | `internal/generator`, `internal/config`, `internal/cli/runtime.go`, `infrafactory.yaml`, docs | transport implementation details | transport selection contract is explicit and stable (`agent.type`/required env+config), including phase sequencing and delay semantics (`agent.phases`, `agent.phase_delay_seconds`) for both providers | config/runtime contract tests for transport selection, phase config handling, and typed validation failures |
+| S11-T2 | `internal/generator` claude adapter package/files, prompt execution helpers | OpenRouter transport details | `claude -p` adapter executes configured phases via command-runner abstraction and returns parsed file map + metadata with typed transport errors | hermetic unit tests with fake command runner; parser integration tests; opt-in smoke test behind env flag |
+| S11-T3 | `internal/generator` openrouter adapter package/files | claude CLI transport details | OpenRouter adapter executes deterministic request flow (timeouts/retries/error mapping/model selection) and returns parsed file map + metadata | hermetic HTTP client tests with fake server; parser integration tests; opt-in smoke test behind env flag |
+| S11-T4 | `internal/cli/runtime.go`, `internal/generator/default.go`, `internal/cli/*_command_test.go` | schema contract changes outside generator/runtime | runtime injects concrete transport-backed generator for supported `agent.type`; unknown/misconfigured agent types fail with deterministic typed errors; stub-not-implemented path removed from normal configured flows | runtime wiring tests and command-path tests covering both agent types and deterministic failure shapes |
+| S11-T5 | `internal/generator/*_test.go`, `internal/cli/realtool_smoke_test.go`, CI/docs gating notes | mandatory non-hermetic CI path | adapter behavior is covered by hermetic tests and opt-in smoke runs for real external transport dependencies without affecting default hermetic CI path | table-driven unit tests + env-guarded smoke tests for both transports |
+| S11-T7 | `internal/generator`, output/error formatting helpers, tests | transport feature behavior unrelated to secret handling | transport adapters never leak raw API keys/tokens/prompts in surfaced errors/log metadata; redaction behavior is deterministic across provider failures | redaction unit tests for error wrapping and failure output mapping |
+| S11-T6 | `README.md`, `STATUS.md`, `SESSION_START.md` | architecture governance policy changes | docs include transport setup, required credentials/tools, invocation examples, and provider-specific troubleshooting/runbook notes | doc checklist assertions |
 
 ## Operating notes
 - Update `status` and dependencies as work evolves.

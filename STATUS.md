@@ -3,10 +3,10 @@
 Last updated: 2026-02-22
 
 ## Current phase
-- Active milestone: Slice 10 reliability and contract hardening (planning-ready)
-- Next gate: no unblocked implementation tickets remain
+- Active milestone: Slice 11 generator transport integration (planning-ready)
+- Next gate: start concrete transport implementation wiring in runtime/generator
 - Current ticket: none
-- Next ticket: none
+- Next ticket: S11-T1
 
 ## In progress
 - none
@@ -16,7 +16,9 @@ Last updated: 2026-02-22
 
 ## Next actions
 1. Keep `S9-T8` blocked unless ADR-0003 is explicitly superseded.
-2. Start a new slice only for scope beyond current roadmap tickets.
+2. Execute `S11-T1` to lock transport/config contract (including phase-delay semantics).
+3. Parallelize `S11-T2` and `S11-T3` after `S11-T1`; then complete `S11-T4` runtime wiring.
+4. Execute `S11-T7` credential redaction guardrails before final Slice 11 docs sync (`S11-T6`).
 
 ## Update policy
 - Update at end of each meaningful coding session.
@@ -26,6 +28,10 @@ Last updated: 2026-02-22
 - Keep startup/read-order instructions only in `SESSION_START.md` to avoid duplication.
 
 ## Recent updates
+- Completed Slice 11 refinement sweep with explicit dependency optimization and hardening scope (`S11-T7` credential redaction), finishing with two consecutive no-change passes.
+- Completed README optimization sweep with iterative review until two consecutive no-change passes; aligned feedback package descriptions with current code, clarified generator transport readiness and Slice 11 direction, and documented CI test/build behavior in the README.
+- Planned Slice 11 transport milestone (`S11-T1`..`S11-T7`) for concrete generator integration with `claude -p` and OpenRouter, including runtime wiring, hermetic tests, opt-in real transport smoke paths, and credential-redaction guardrails.
+- Refined Slice 11 with explicit credential safety ticket (`S11-T7`) to enforce deterministic secret redaction across transport error/log surfaces.
 - Expanded CI binary build to multi-arch artifacts on successful `main` push: Linux `amd64` and Linux `arm64`.
 - Completed CI automation slice: added `.github/workflows/ci.yml` to run `go test ./...` on pull requests and `main` pushes, and to build/upload a Linux amd64 binary artifact after successful `main` push tests.
 - Completed follow-up `ISSUES.md` remediation: fixed criteria-only holdout execution to reuse training output dir, removed unused `internal/feedback.RunLoop`, simplified `runIteration` step wiring to eliminate dead runner field, and made orphan counting resilient to new resource collections with regression tests.
