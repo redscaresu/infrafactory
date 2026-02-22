@@ -116,19 +116,19 @@ CLI command orchestration is now wired for:
 - `generate` pipeline adapter (runtime + scenario + generator write path)
 - `validate` static harness + policy reporting
 - `test` mock deploy + destroy verification flow
-- `run` multi-iteration skeleton with convergence controls and runstore persistence
-- `mock start` runtime/preflight wrapper
+- `run` criteria-aware multi-iteration orchestration with convergence controls, holdout gating, and runstore persistence
+- `mock` lifecycle wrappers (`start`/`stop`/`status`/`logs`)
 
 Feature status snapshot:
 
 | Area | Status | Notes |
 |---|---|---|
 | `init` scaffold | implemented | Writes deterministic schema-valid starter file. |
-| `generate` runtime path | implemented with placeholder generator | Runtime injects default generator; default returns typed transport-not-implemented error. |
+| `generate` runtime path | implemented with default transport stub | Runtime injects default generator; current default returns typed transport-not-implemented error. |
 | `validate` static layer | implemented | Runs `tofu init/validate/plan/show` + plan policy evaluation. |
 | `test` mock deploy + destroy | implemented | Runs mock reset/apply/state checks and destruction verification flow. |
-| `run` orchestration | implemented (slice 9 scope) | Criteria-aware convergence and criteria-only holdout completion checks are wired. |
-| `mock` command lifecycle | implemented (slice 9 scope) | `mock start`/`stop`/`status`/`logs` are wired with deterministic output/error behavior. |
+| `run` orchestration | implemented | Criteria-aware convergence and criteria-only holdout completion checks are wired. |
+| `mock` command lifecycle | implemented | `mock start`/`stop`/`status`/`logs` are wired with deterministic output/error behavior. |
 | sandbox/live deploy | intentionally deferred | Blocked due cost/credentials policy. |
 
 Notes on current runtime prerequisites:
@@ -136,11 +136,11 @@ Notes on current runtime prerequisites:
 - Runtime wiring path: `buildRuntime(...)` sets `deps.Generator = generator.NewDefaultSeedGenerator(cfg.Agent.Type)` when `deps.Generator == nil`.
 - Current default behavior (`internal/generator/default.go`): `Generate(...)` returns a deterministic typed generator transport error (`generator.ErrTransportFailed`) indicating the default generator for the configured `agent.type` is not implemented yet.
 - `validate`/`test`/`run` expect generated OpenTofu files and tool/runtime dependencies (`tofu`, Mockway, and for `mock start`, Docker).
-- Sandbox/live deploy layer (real Scaleway) is intentionally deferred for now due cost implications and will remain disabled until an explicit cost/credentials policy is approved.
+- Sandbox/live deploy layer (real Scaleway) remains intentionally disabled pending explicit cost/credentials policy approval.
 
 ### Intentionally Deferred and In-Progress Areas
 
-The following are known gaps being tracked in Slice 9 and are intentionally not complete yet:
+The following are known gaps and are intentionally not complete yet:
 - Sandbox/live deploy (real Scaleway) is deliberately deferred and blocked for now due cost implications; it is out-of-scope until an explicit approval policy exists.
 
 Criteria support/deferment status (current slices):
@@ -219,8 +219,8 @@ go run ./cmd/infrafactory run scenarios/training/new-scenario.yaml --config infr
 ```
 
 Expected artifacts:
-- `run.json` with run metadata/status.
-- `iterations/<n>/iteration.json` with stage/failure snapshots per iteration.
+- `run.json` with run metadata/status and schema field (`infrafactory.run.metadata.v1`).
+- `iterations/<n>/iteration.json` with stage/failure snapshots and schema field (`infrafactory.run.iteration.v1`).
 - generated OpenTofu output under `output/<scenario>/`.
 
 ## Usage
@@ -234,7 +234,12 @@ CLI exit codes:
 
 Error contract:
 - Usage errors are surfaced as `*cli.CLIError` with code `usage` and map to exit code `2`.
-- Runtime/config/scenario/harness/generator failures map to exit code `1`.
+- Runtime failures map to exit code `1`, with normalized error codes:
+  - `config_invalid`
+  - `scenario_malformed`
+  - `scenario_invalid`
+  - `dependency_unavailable`
+  - `command_failed`
 - Output mode contract is strict: `--output` must be `human` or `json`.
 - Machine output schema version is `infrafactory.output.v1`.
 
@@ -248,7 +253,7 @@ Error contract:
 | `agent.phase_delay_seconds` | no | `0` | Delay between generator phases (rate-limit mitigation). |
 | `mockway.url` | yes | none | Mockway base URL used by deploy/destroy layers. |
 | `mockway.auto_reset` | no | `true` | Whether mock reset is expected before deploy checks. |
-| `validation.layers.*.enabled` | no | varies | Enables/disables layer execution paths (some still being fully wired). |
+| `validation.layers.*.enabled` | no | varies | Enables/disables layer execution paths (`sandbox_deploy` remains intentionally blocked). |
 | `paths.output` | no | `./output` | Generated IaC output root. |
 | `paths.policies` | no | `./policies` | Policy root used by harness validation. |
 
@@ -339,6 +344,10 @@ Troubleshooting:
 | Real-tool static smoke | `make smoke-validate` | `tofu` |
 | Real-tool mock deploy smoke | `make smoke-mockway` | `tofu`, Docker/Mockway |
 | Real-tool mock smoke (local bin) | `make smoke-mockway-local MOCKWAY_BIN=/path/to/mockway` | `tofu`, local `mockway` |
+
+Output contract regression guardrail:
+- Golden snapshots for human/json command output are stored in `internal/cli/testdata/golden/output_contract/`.
+- Refresh snapshots intentionally with `UPDATE_GOLDEN=1 go test ./internal/cli -run TestOutputContractGoldenSnapshots`.
 
 ### Practical example 1: Inspect available CLI commands and flags
 
