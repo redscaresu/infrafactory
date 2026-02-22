@@ -36,6 +36,7 @@ Before writing code, confirm these facts are still true in `STATUS.md`/`BACKLOG.
 4. `run` is criteria-aware and includes criteria-only holdout completion checks; do not regress to coarse stage-only convergence behavior.
 5. `dns_resolution` remains auto-pass informational output while sandbox/live deploy is blocked; do not treat it as a hard-fail criterion.
 6. Default runtime now uses concrete generator transports; `claude-code` requires `agent.claude.command` in `PATH` and `openrouter` requires `OPENROUTER_API_KEY` plus `agent.openrouter.model`.
+7. Slice 13 (queued after Slice 12) is dedicated to full app-logic logging/observability; instrumentation should follow a contract-first approach (`S13-T1`) before broad command-path changes.
 
 Minimal startup verification commands:
 ```bash
@@ -54,6 +55,10 @@ If either command fails, restore the repo to a green baseline before starting a 
   `.infrafactory/runs/<scenario>/<run-id>/iterations/<n>/iteration.json` records stage/failure snapshots per iteration.
 - Keep output semantics in mind:
   `output/<scenario>/` is latest generated IaC and is overwritten each run; historical evidence lives under `.infrafactory/runs/`.
+- For upcoming Slice 13 logging work:
+  preserve secret redaction guarantees while increasing observability depth; logs must remain deterministic and correlation-friendly (`run_id`, `iteration`, `stage`, `check`).
+  require explicit sink definitions so operators can always inspect full app logic flow from terminal output and run artifacts.
+  include deterministic inspection commands in docs (for example, `tail`/`rg` against run-scoped log artifacts).
 
 ### Slice 7 default execution constraints
 - Canonical order:

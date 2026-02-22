@@ -4,9 +4,9 @@ Last updated: 2026-02-22
 
 ## Current phase
 - Active milestone: Slice 12 feedback-driven regeneration hardening (in progress)
-- Next gate: define and sequence Slice 12 ticket set beyond `M17`
+- Next gate: start `S12-T1` iteration contract definition and migration constraints
 - Current ticket: none
-- Next ticket: none
+- Next ticket: S12-T1
 
 ## In progress
 - none
@@ -16,9 +16,11 @@ Last updated: 2026-02-22
 
 ## Next actions
 1. Keep `S9-T8` blocked unless ADR-0003 is explicitly superseded.
-2. Define concrete Slice 12 follow-up tickets for stronger failure payload quality and feedback-prompt fidelity.
-3. Prioritize model-guided correction work over introducing new heuristic normalization rules in `generate`.
-4. Maintain hermetic default CI posture with transport smoke tests opt-in only.
+2. Execute `S12-T1` first: lock iteration contract (`agent.iterations`, `--iterations`) and compatibility/deprecation behavior.
+3. Implement Slice 12 migration in order (`S12-T2` -> `S12-T3` -> `S12-T6` -> `S12-T4` -> `S12-T5`) once contract is approved.
+4. Start Slice 13 logging-contract work (`S13-T1`) immediately after Slice 12 closure, then execute instrumentation/logging test/doc tickets in order (`S13-T2` includes deterministic sink wiring).
+5. Maintain model-guided correction direction and avoid adding new heuristic normalization rules in `generate`.
+6. Maintain hermetic default CI posture with transport smoke tests opt-in only.
 
 ## Update policy
 - Update at end of each meaningful coding session.
@@ -28,6 +30,10 @@ Last updated: 2026-02-22
 - Keep startup/read-order instructions only in `SESSION_START.md` to avoid duplication.
 
 ## Recent updates
+- Refined Slice 13 planning scope after review: added explicit deterministic log-sink expectations (`stderr` + run-scoped artifact path) and fresh-context requirements for concrete log-inspection commands.
+- Completed Slice 13 planning refinement loop with two consecutive no-change passes after sink/fresh-context improvements.
+- Completed maintenance ticket `M20`: created dedicated Slice 13 backlog for full application logic logging/observability (`S13-T1`..`S13-T6`) and integrated it into roadmap sequencing.
+- Completed maintenance ticket `M19`: planned Slice 12 iteration-contract migration tickets (`S12-T1`..`S12-T5`) without implementation, including default-to-3 and override contract coverage.
 - Completed maintenance ticket `M18`: enriched fresh-context startup guidance with operational guardrails for run-loop feedback usage, anti-normalization direction, Mockway port-collision diagnosis, and run-artifact inspection paths.
 - Completed maintenance ticket `M17`: wired run-loop feedback propagation so iteration-N generation receives prior iteration failures (`FeedbackJSON`) and accurate iteration indices, replacing heuristic normalization direction with LLM-guided correction.
 - Completed maintenance ticket `M15`: generate now auto-injects missing Scaleway provider wiring (`required_providers` + `provider "scaleway"`) when Scaleway resources are emitted, with focused command test coverage.

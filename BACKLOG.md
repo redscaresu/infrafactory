@@ -6,6 +6,8 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 
 | id | slice | title | priority | status | deps | owner |
 |---|---|---|---|---|---|---|
+| M20 | Maintenance | Plan Slice 13 full app-logic logging/observability backlog before implementation | P1 | done | M19 | codex |
+| M19 | Maintenance | Plan Slice 12 iteration contract migration (`max_iterations` -> `iterations`, default 3) before implementation | P1 | done | M18 | codex |
 | M18 | Maintenance | Strengthen fresh-context startup documentation with run-loop and Mockway operational guardrails | P1 | done | M17 | codex |
 | M17 | Maintenance | Wire run-loop failure feedback into iterative LLM generation (no heuristic normalization) | P1 | done | M15 | codex |
 | M15 | Maintenance | Auto-inject missing Scaleway provider wiring during generate | P1 | done | M14 | codex |
@@ -87,6 +89,18 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 | S11-T5 | Slice 11 | Add hermetic adapter tests + opt-in smoke tests for real transport paths | P1 | done | S11-T2,S11-T3 | codex |
 | S11-T7 | Slice 11 | Add transport credential safety/redaction guardrails for errors and logs | P1 | done | S11-T2,S11-T3 | codex |
 | S11-T6 | Slice 11 | Sync docs and examples for transport configuration/usage and failure modes | P1 | done | S11-T4,S11-T5,S11-T7 | codex |
+| S12-T1 | Slice 12 | Define run-iteration contract and migration strategy (`agent.iterations`, `--iterations`) with compatibility rules | P0 | todo | - | codex |
+| S12-T2 | Slice 12 | Implement config/runtime migration: default iterations=3, support deprecated `max_iterations` with deterministic warning/error semantics | P0 | todo | S12-T1 | codex |
+| S12-T3 | Slice 12 | Implement CLI contract migration: introduce `--iterations`, preserve controlled compatibility for `--max-iterations` | P0 | todo | S12-T1 | codex |
+| S12-T4 | Slice 12 | Refresh run/golden/unit tests for iteration contract, override behavior (e.g. 10), and failure signaling after exhausted iterations | P0 | todo | S12-T2,S12-T3 | codex |
+| S12-T6 | Slice 12 | Persist per-iteration failures to application logs with deterministic structure | P0 | todo | S12-T2,S12-T3 | codex |
+| S12-T5 | Slice 12 | Sync docs/templates/examples (`infrafactory.yaml`, README, SESSION_START) to iteration contract, logging behavior, and deprecation guidance | P1 | todo | S12-T4,S12-T6 | codex |
+| S13-T1 | Slice 13 | Define application logging contract (fields/levels/redaction/output format) and rollout rules | P0 | todo | S12-T5 | codex |
+| S13-T2 | Slice 13 | Add shared logger wiring/runtime integration for all command paths and deterministic log sinks | P0 | todo | S13-T1 | codex |
+| S13-T3 | Slice 13 | Instrument `run` loop decisions and stage transitions with full iteration/run context logs | P0 | todo | S13-T2 | codex |
+| S13-T4 | Slice 13 | Instrument `generate`/`validate`/`test`/`mock` command logic for deterministic traceability | P0 | todo | S13-T2 | codex |
+| S13-T5 | Slice 13 | Add logging regression tests/goldens and redaction assertions | P0 | todo | S13-T3,S13-T4 | codex |
+| S13-T6 | Slice 13 | Sync operator docs and fresh-context startup guidance for logging runbook | P1 | todo | S13-T5 | codex |
 
 ## Ticket details
 
@@ -156,6 +170,18 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 | S11-T5 | `internal/generator/*_test.go`, `internal/cli/realtool_smoke_test.go`, CI/docs gating notes | mandatory non-hermetic CI path | adapter behavior is covered by hermetic tests and opt-in smoke runs for real external transport dependencies without affecting default hermetic CI path | table-driven unit tests + env-guarded smoke tests for both transports |
 | S11-T7 | `internal/generator`, output/error formatting helpers, tests | transport feature behavior unrelated to secret handling | transport adapters never leak raw API keys/tokens/prompts in surfaced errors/log metadata; redaction behavior is deterministic across provider failures | redaction unit tests for error wrapping and failure output mapping |
 | S11-T6 | `README.md`, `STATUS.md`, `SESSION_START.md` | architecture governance policy changes | docs include transport setup, required credentials/tools, invocation examples, and provider-specific troubleshooting/runbook notes | doc checklist assertions |
+| S12-T1 | `internal/config`, `internal/cli/root.go`, ADR/docs planning surfaces | behavioral implementation | iteration contract is explicitly specified: config key naming, default value (`3`), CLI override name (`--iterations`), and deterministic compatibility/deprecation behavior for legacy fields/flags | contract tests and doc/ADR checklist updates |
+| S12-T2 | `internal/config/config.go`, config validation/defaulting/tests, `infrafactory.yaml` | CLI flag migration behavior | config supports new `agent.iterations` semantics with default `3`; legacy `max_iterations` behavior follows `S12-T1` contract deterministically | config load/default/validation tests (new key, legacy key, conflict cases) |
+| S12-T3 | `internal/cli/root.go`, `internal/cli/run_command.go`, command contract tests/goldens | config parser internals | `run` command exposes `--iterations`; legacy `--max-iterations` behavior follows compatibility contract; exhausted iterations surface deterministic failure output | run command parse/usage tests + output contract/golden updates |
+| S12-T4 | `internal/cli/run_command_test.go`, integration/orchestration tests, golden fixtures | docs-only updates | run loop behavior is validated for default 3, explicit overrides (for example 10), and failure behavior when iteration budget is exhausted | focused unit/integration tests + golden refresh where applicable |
+| S12-T6 | `internal/cli/run_command.go`, output/log helpers, command tests | run-loop convergence semantics | each failed iteration writes deterministic failure summaries to app logs (check/stage/detail) before retry/stop; logging remains stable and non-duplicative | unit tests asserting log emission on iteration failures and final exhausted-iterations path |
+| S12-T5 | `README.md`, `SESSION_START.md`, `STATUS.md`, `CURRENT_TICKET.md` | runtime logic changes | user/operator docs reflect `iterations` naming/defaults, per-iteration failure logging behavior, migration guidance, and deprecation timelines/messages | doc checklist assertions + hygiene checks |
+| S13-T1 | `internal/cli/output_contract.go`, logging helpers (new), docs/ADR surfaces | implementation of instrumentation breadth | logging contract is explicit and deterministic: mandatory fields (command/run_id/iteration/stage/check/status/event), log levels, redaction rules, and format expectations are documented and testable | contract tests + doc/ADR checklist updates |
+| S13-T2 | `internal/cli/runtime.go`, command bootstrap/helpers, logger package/files, run artifact path helpers | command-specific logic instrumentation | runtime provides shared logger plumbing for all commands with deterministic behavior across human/json output modes and stable sinks (`stderr` + run-scoped log artifact path) | runtime/logger wiring tests + command bootstrap tests |
+| S13-T3 | `internal/cli/run_command.go`, `internal/feedback`, runstore integration points | transport adapter internals | run loop emits structured logs for iteration start/end, failure signatures, stuck/max-iteration decisions, and convergence outcomes with run/iteration IDs | run command logging tests across success/stuck/max/failure paths |
+| S13-T4 | `internal/cli/generate_command.go`, `internal/cli/validate_command.go`, `internal/cli/test_command.go`, `internal/cli/mock_*` | run-loop algorithm changes | non-run commands emit deterministic decision-path logs (dependency checks, stage start/end, mapped failures) without leaking secrets | command logging tests for representative success/failure flows |
+| S13-T5 | logging fixture/golden files, `internal/cli/*_test.go`, redaction tests | docs-only updates | logging behavior is frozen with regression coverage and credential/prompt redaction assertions | golden snapshot tests + redaction-focused unit tests |
+| S13-T6 | `README.md`, `SESSION_START.md`, `STATUS.md`, `CURRENT_TICKET.md` | runtime behavior changes | operator docs include logging runbook (where logs are written, how to correlate run_id/iteration, troubleshooting workflow) and fresh-context startup includes logging guardrails and exact log-inspection commands | doc checklist assertions + hygiene checks |
 
 ## Operating notes
 - Update `status` and dependencies as work evolves.

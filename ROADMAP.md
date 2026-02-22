@@ -78,12 +78,26 @@ This file is intentionally high-level and mostly stable; day-to-day execution tr
 - Reduce heuristic post-processing in favor of model-corrected regeneration informed by concrete harness failures.
 - Strengthen run-loop convergence quality by improving failure payload fidelity and prompt integration.
 - Add focused regression tests proving feedback is injected and iteration metadata is preserved.
+- Migrate iteration contract to clearer naming and defaults:
+  - config `agent.iterations` (default `3`)
+  - CLI `--iterations` override (e.g. `10`)
+  - deterministic compatibility/deprecation path for legacy `max_iterations` / `--max-iterations`.
+- Ensure failed iterations emit deterministic, structured failure summaries to app logs for each pass.
+
+13. Slice 13: Full application logic logging and observability
+- Define a stable application logging contract (fields, levels, redaction, deterministic formatting).
+- Define deterministic log destinations for operators and automation (stderr summary + per-run artifact log path).
+- Instrument command orchestration paths so generation/validation/test/run decisions are fully traceable.
+- Ensure per-pass and per-stage failures are logged with run/iteration context and actionable details.
+- Preserve secret-safety/redaction guarantees while increasing observability depth.
+- Add focused tests (and where needed golden fixtures) to freeze logging behavior and prevent regressions.
 
 ## Near-term execution order
 
 1. Keep Slice 11 closed and stable (transport adapters + secret-safety + smoke gates).
-2. Execute Slice 12 feedback-loop hardening work to prioritize model-driven correction over heuristic normalization.
-3. Re-evaluate milestone sequencing after feedback-loop quality metrics stabilize.
+2. Execute Slice 12 contract-first migration (`S12-T1`) before behavior changes.
+3. Implement/configure iteration migration (`S12-T2`, `S12-T3`), add per-pass failure logging (`S12-T6`), then test/docs closure (`S12-T4`, `S12-T5`).
+4. Start Slice 13 with logging-contract definition, then implement end-to-end instrumentation and docs.
 
 ## Live progress tracking
 
