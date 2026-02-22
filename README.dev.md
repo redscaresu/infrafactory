@@ -61,6 +61,7 @@ bash scripts/check_all.sh
 
 ## Documentation Index
 
+- Usage guide: `docs/USAGE.md`
 - Architecture: `docs/architecture.md`
 - Full concept log: `CONCEPT.md`
 - Decisions (ADRs): `docs/decisions/`

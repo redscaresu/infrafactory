@@ -33,6 +33,7 @@ bash scripts/check_all.sh
 ## Docs
 
 - Architecture: `docs/architecture.md`
+- Usage guide: `docs/USAGE.md`
 - Decisions (ADRs): `docs/decisions/`
 - Concept log: `CONCEPT.md`
 - Backlog: `BACKLOG.md`
