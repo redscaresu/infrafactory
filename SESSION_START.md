@@ -32,13 +32,13 @@ git log -1 --oneline
 Before writing code, confirm these facts are still true in `STATUS.md`/`BACKLOG.md`:
 1. `S9-T8` (sandbox/live deploy, real Scaleway) remains permanently blocked by governance policy (ADR-0003).
 2. Output and logs must explicitly surface: `(real deployment skipped for cost reasons for now)` for sandbox/live-blocked behavior.
-3. Slice 12 feedback-loop hardening is the active milestone direction; prefer tickets that improve model-guided correction signal over new heuristic post-processing.
+3. Slice 16 issue-driven robustness hardening is the active milestone direction; prioritize unresolved `ISSUES.md` tickets (`S16-T1`..`S16-T8`) before new feature work.
 4. `run` is criteria-aware and includes criteria-only holdout completion checks; do not regress to coarse stage-only convergence behavior.
 5. `dns_resolution` remains auto-pass informational output while sandbox/live deploy is blocked; do not treat it as a hard-fail criterion.
 6. Default runtime now uses concrete generator transports; `claude-code` requires `agent.claude.command` in `PATH` and `openrouter` requires `OPENROUTER_API_KEY` plus `agent.openrouter.model`.
-7. Slice 13 (queued after Slice 12) is dedicated to full app-logic logging/observability; instrumentation should follow a contract-first approach (`S13-T1`) before broad command-path changes.
-8. Slice 14 (queued after Slice 13) is dedicated to run-loop feedback fidelity for model-guided regeneration; avoid regressing to coarse retry payloads such as generic `validation failed` when structured validate/test/generate failures are available.
-9. Slice 15 (queued after Slice 14) is dedicated to adaptive retry and transport resilience; transport-dominated failures should stop with deterministic actionable reasons instead of consuming full iteration budgets.
+7. Slices 13-15 are complete in MVP form; preserve logging contracts, feedback fidelity, and adaptive retry behavior while applying issue fixes.
+8. Slice 16 includes schema-validation hardening; scenario loads must not silently skip schema validation when schema paths are unavailable.
+9. For Slice 16 closures, record refinement pass outcomes and require two consecutive no-change passes in both `STATUS.md` and `CURRENT_TICKET.md`.
 
 Minimal startup verification commands:
 ```bash
@@ -57,17 +57,8 @@ If either command fails, restore the repo to a green baseline before starting a 
   `.infrafactory/runs/<scenario>/<run-id>/iterations/<n>/iteration.json` records stage/failure snapshots per iteration.
 - Keep output semantics in mind:
   `output/<scenario>/` is latest generated IaC and is overwritten each run; historical evidence lives under `.infrafactory/runs/`.
-- For upcoming Slice 13 logging work:
-  preserve secret redaction guarantees while increasing observability depth; logs must remain deterministic and correlation-friendly (`run_id`, `iteration`, `stage`, `check`).
-  require explicit sink definitions so operators can always inspect full app logic flow from terminal output and run artifacts.
-  include deterministic inspection commands in docs (for example, `tail`/`rg` against run-scoped log artifacts).
-- For upcoming Slice 14 feedback-fidelity work:
-  prefer `run` feedback payload enrichment over prompt-only wording tweaks; preserve structured failure fields (`layer`, `stage`, `check`, `command`, `detail`, optional `policy`/`resource`) into `FeedbackJSON`.
-  classify retry guidance by failure type (IaC validation/policy defects vs transport/timeout defects) so model retries are actionable.
-  for planning/refinement tickets in this area, perform refinement passes until two consecutive passes yield no improvements, and record each pass outcome in `CURRENT_TICKET.md` and `STATUS.md`.
-- For upcoming Slice 15 adaptive-retry work:
-  codify deterministic continuation/stop behavior by failure class and avoid retry churn when failures are transport-dominated.
-  persist per-iteration transport diagnostics in run artifacts so operators can separate IaC defects from runtime/dependency constraints.
+- Preserve Slice 13-15 guarantees while fixing Slice 16 issues:
+  keep deterministic JSON-line logging fields/redaction behavior, structured run feedback (`failure_class` and detailed failure context), and adaptive transport stop behavior with persisted diagnostics.
 - For any future planning refinement over unfinished slices (`todo`/`blocked` backlog work):
   require the same refinement protocol: continue until two consecutive no-change passes, and explicitly record pass outcomes in both `CURRENT_TICKET.md` and `STATUS.md` for fresh-context continuity.
   when refining blocked slices (for example `S9-T8`), constrain work to governance/docs/risk messaging only unless the blocking ADR/policy is explicitly superseded.
@@ -141,7 +132,7 @@ If either command fails, restore the repo to a green baseline before starting a 
 - Dual-control rule:
   keep failure-retry budget (`repair_iterations_max`) and fixed total pass target (`iterations_target`) semantically independent.
 - Stop-signal rule:
-  emit one canonical terminal stop reason for a single stop event; avoid dual control markers in output/logs/artifacts.
+  emit one canonical terminal stop reason for a single stop event (`target_reached`, `repair_budget_exhausted`, or `stuck`); avoid dual control markers in output/logs/artifacts.
 - README closure rule:
   after Slice 12 implementation closure (`S12-T5` done), run README optimization passes until two consecutive no-change outcomes are recorded.
 
@@ -168,6 +159,16 @@ If either command fails, restore the repo to a green baseline before starting a 
   transport-dominated failure runs should terminate with deterministic actionable reasons rather than exhausting iteration budget.
 - Diagnostics rule:
   run artifacts must include stable transport diagnostics (phase/timeout/signal/stderr summary/duration) with backward-compatible reads.
+
+### Slice 16 default execution constraints
+- Canonical order:
+  `S16-T1 -> (S16-T2 || S16-T3 || S16-T7) -> S16-T4 -> S16-T5 -> S16-T6 -> S16-T8`
+- Cancellation rule:
+  command adapters must use `cmd.Context()` for all runtime/harness/generator/mock operations; avoid `context.Background()` in command paths.
+- Safety rule:
+  bound external response reads and env injection behavior deterministically (no unbounded `ReadAll`, no duplicate override keys in subprocess env).
+- Validation rule:
+  scenario schema loading must fail deterministically (or use embedded schema) when schema files are unavailable; no silent schema-validation bypass.
 
 ## 3) Execute
 - Implement + test.

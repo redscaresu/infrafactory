@@ -109,6 +109,45 @@ func detectScalewayProviderWiring(files map[string][]byte) (bool, bool, bool) {
 	return hasScalewayResource, hasRequiredProviders, hasProviderBlock
 }
 
+type feedbackFailure struct {
+	Layer        string `json:"layer"`
+	Stage        string `json:"stage"`
+	Check        string `json:"check,omitempty"`
+	Policy       string `json:"policy,omitempty"`
+	Command      string `json:"command,omitempty"`
+	Resource     string `json:"resource,omitempty"`
+	Detail       string `json:"detail"`
+	FailureClass string `json:"failure_class"`
+}
+
+func feedbackFailureClassForSummary(f FailureSummary) string {
+	switch {
+	case f.Check == "stuck" || f.Check == "repair_budget_exhausted" || f.Check == "target_reached":
+		return "orchestration_control"
+	case strings.HasPrefix(f.Check, "transport_") || strings.Contains(f.Detail, "transport"):
+		return "transport_runtime"
+	default:
+		return "iac_validation"
+	}
+}
+
+func toFeedbackFailuresPayload(in []FailureSummary) []feedbackFailure {
+	out := make([]feedbackFailure, 0, len(in))
+	for _, f := range in {
+		out = append(out, feedbackFailure{
+			Layer:        f.Layer,
+			Stage:        f.Stage,
+			Check:        f.Check,
+			Policy:       f.Policy,
+			Command:      f.Command,
+			Resource:     f.Resource,
+			Detail:       f.Detail,
+			FailureClass: feedbackFailureClassForSummary(f),
+		})
+	}
+	return out
+}
+
 func generateAndWriteFiles(runtime *CommandRuntime, scenarioPath string, iteration int, feedbackFailures []FailureSummary) (int, error) {
 	scenarioPayload, err := os.ReadFile(scenarioPath)
 	if err != nil {
@@ -121,9 +160,9 @@ func generateAndWriteFiles(runtime *CommandRuntime, scenarioPath string, iterati
 	var feedbackPayload []byte
 	if len(feedbackFailures) > 0 {
 		feedbackPayload, err = json.Marshal(struct {
-			Failures []FailureSummary `json:"failures"`
+			Failures []feedbackFailure `json:"failures"`
 		}{
-			Failures: feedbackFailures,
+			Failures: toFeedbackFailuresPayload(feedbackFailures),
 		})
 		if err != nil {
 			return 0, fmt.Errorf("encode generate feedback payload: %w", err)

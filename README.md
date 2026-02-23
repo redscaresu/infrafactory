@@ -115,7 +115,7 @@ flowchart TD
     E -- yes --> K[Record structured failures + artifacts]
     K --> L{Stop condition}
     L -- stuck signature --> M[Final failed: stuck]
-    L -- max iterations --> N[Final failed: max iterations]
+    L -- repair budget exhausted --> N[Final failed: repair_budget_exhausted]
     L -- otherwise --> O[Next iteration]
     O --> A
 ```
@@ -141,7 +141,7 @@ flowchart TD
 - Pulls mock state snapshot and verifies no orphan resources remain
 
 Supporting control loop:
-- `run` command loop with max-iteration control
+- `run` command loop with dual controls (`repair_iterations_max`, `iterations_target`)
 - Stuck detection via failure-signature subset logic
 - Run/iteration artifact persistence under `.infrafactory/runs/...`
 
@@ -190,6 +190,10 @@ Feature status snapshot:
 | `run` orchestration | implemented | Criteria-aware convergence and criteria-only holdout completion checks are wired. |
 | `mock` command lifecycle | implemented | `mock start`/`stop`/`status`/`logs` are wired with deterministic output/error behavior. |
 | sandbox/live deploy | permanently blocked | Governed as a permanent non-goal (ADR-0003). |
+
+Next hardening slice:
+- Slice 16 is dedicated to remediating unresolved robustness issues tracked in `ISSUES.md` (context cancellation propagation, bounded external reads, deterministic env overrides, schema-validation availability guarantees, and policy correctness cleanups).
+- Ticket execution order is tracked in `BACKLOG.md` (`S16-T1`..`S16-T8`).
 
 Notes on current runtime prerequisites:
 - `generate` and `run` resolve a concrete transport-backed `SeedGenerator` from runtime (`internal/cli/runtime.go`) when no test/injected generator is provided.
@@ -282,7 +286,7 @@ claude --version
 go run ./cmd/infrafactory generate scenarios/training/web-app-paris.yaml --config infrafactory.yaml --output human
 go run ./cmd/infrafactory validate scenarios/training/web-app-paris.yaml --config infrafactory.yaml --output human
 go run ./cmd/infrafactory test scenarios/training/web-app-paris.yaml --config infrafactory.yaml --output human
-go run ./cmd/infrafactory run scenarios/training/web-app-paris.yaml --config infrafactory.yaml --max-iterations 3 --output human
+go run ./cmd/infrafactory run scenarios/training/web-app-paris.yaml --config infrafactory.yaml --repair-iterations-max 3 --iterations-target 3 --output human
 ```
 
 5. Confirm artifacts:
@@ -313,7 +317,7 @@ go run ./cmd/infrafactory validate scenarios/training/new-scenario.yaml --config
 ```
 5. Run full orchestration loop.
 ```bash
-go run ./cmd/infrafactory run scenarios/training/new-scenario.yaml --config infrafactory.yaml --max-iterations 3 --output json
+go run ./cmd/infrafactory run scenarios/training/new-scenario.yaml --config infrafactory.yaml --repair-iterations-max 3 --iterations-target 3 --output json
 ```
 6. Inspect run artifacts.
 ```text
@@ -322,8 +326,39 @@ go run ./cmd/infrafactory run scenarios/training/new-scenario.yaml --config infr
 
 Expected artifacts:
 - `run.json` with run metadata/status and schema field (`infrafactory.run.metadata.v1`).
-- `iterations/<n>/iteration.json` with stage/failure snapshots and schema field (`infrafactory.run.iteration.v1`).
+- `iterations/<n>/iteration.json` with stage/failure snapshots, deterministic `failure_summary` (when failures exist), and schema field (`infrafactory.run.iteration.v1`).
+- `app.log` run-scoped structured application logs (`stderr` mirror + file sink for `run`).
 - generated OpenTofu output under `output/<scenario>/`.
+
+Canonical run terminal reasons:
+- `target_reached`
+- `repair_budget_exhausted`
+- `stuck`
+
+Transport-dominated behavior (MVP):
+- consecutive transport-runtime failures are bounded and can stop early with `check=transport_runtime_dominated`.
+- per-iteration artifacts include `transport_diagnostics` when transport-runtime failures occur.
+
+### Logging
+
+Structured app logs are emitted as JSON lines with deterministic fields:
+- `level`, `command`, `event`
+- optional: `status`, `run_id`, `iteration`, `stage`, `check`, `detail`
+
+Current sinks:
+- `stderr` for all commands.
+- run-scoped artifact file for `run`: `.infrafactory/runs/<scenario>/<run-id>/app.log`.
+
+Secret-like detail tokens are redacted in log details (`token`, `api_key`, `secret`, `password`, `prompt`).
+
+### Run Feedback Payload (MVP)
+
+`run` passes structured failure feedback into next-iteration generation (`FeedbackJSON`) with:
+- `layer`, `stage`, `check`, `command`, `detail`
+- optional: `policy`, `resource`
+- `failure_class`: `iac_validation`, `transport_runtime`, or `orchestration_control`
+
+Terminal control markers are intentionally excluded from iterative repair feedback entries.
 
 ## Usage
 
@@ -351,7 +386,8 @@ Error contract:
 |---|---|---|---|
 | `version` | yes | none | Config schema version (`"1.0"`). |
 | `agent.type` | yes | none | Generator backend type (`claude-code` or `openrouter`). |
-| `agent.max_iterations` | no | `5` | Max iterations for `run` convergence loop. |
+| `agent.repair_iterations_max` | no | `5` | Maximum failure-triggered retries in `run`. |
+| `agent.iterations_target` | no | `1` | Total desired run passes, including passes after success. |
 | `agent.phases` | no | `[plan_architecture, generate_hcl, self_review]` | Ordered generation phases (canonical sequence). |
 | `agent.phase_delay_seconds` | no | `0` | Delay between generator phases (rate-limit mitigation). |
 | `agent.claude.command` | no | `claude` | Executable used for `claude-code` transport. |
@@ -507,7 +543,7 @@ Command tree currently exposed:
 - `generate <scenario-path>`
 - `validate <scenario-path>`
 - `test <scenario-path>`
-- `run <scenario-path> [--max-iterations N]`
+- `run <scenario-path> [--repair-iterations-max N] [--iterations-target N]`
 - `mock start`
 - `mock stop`
 - `mock status`
@@ -531,7 +567,7 @@ This writes a minimal schema-valid scaffold and prints deterministic next-step c
 go run ./cmd/infrafactory generate scenarios/training/web-app-paris.yaml --config infrafactory.yaml --output human
 go run ./cmd/infrafactory validate scenarios/training/web-app-paris.yaml --config infrafactory.yaml --output json
 go run ./cmd/infrafactory test scenarios/training/web-app-paris.yaml --config infrafactory.yaml --output human
-go run ./cmd/infrafactory run scenarios/training/web-app-paris.yaml --config infrafactory.yaml --max-iterations 3 --output json
+go run ./cmd/infrafactory run scenarios/training/web-app-paris.yaml --config infrafactory.yaml --repair-iterations-max 3 --iterations-target 3 --output json
 ```
 
 ### Practical example 4: Start Mockway via CLI wrapper
@@ -587,7 +623,7 @@ INFRAFACTORY_ENABLE_REALTOOL_MOCKWAY=1 INFRAFACTORY_MOCKWAY_URL=http://127.0.0.1
 .infrafactory/runs/<scenario>/<run-id>/
 ```
 
-You will find `run.json` metadata and per-iteration artifacts (for example `iterations/1/iteration.json`) in that directory tree.
+You will find `run.json` metadata, per-iteration artifacts (for example `iterations/1/iteration.json`), and `app.log` structured command/run logs in that directory tree.
 
 ## Local Quality Checks
 

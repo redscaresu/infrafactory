@@ -1,29 +1,24 @@
 # STATUS
 
-Last updated: 2026-02-22
+Last updated: 2026-02-23
 
 ## Current phase
-- Active milestone: Slice 12 feedback-driven regeneration hardening (in progress)
-- Next gate: start `S12-T2` dual-control config/runtime implementation after ADR contract freeze
-- Current ticket: none
-- Next ticket: S12-T2
+- Active milestone: Slice 16 issue-driven robustness hardening (planned)
+- Next gate: complete `S16-T1` and execute remaining Slice 16 tickets sequentially from `ISSUES.md`.
+- Current ticket: S16-T1
+- Next ticket: S16-T1
 
 ## In progress
-- none
+- `S16-T1` context propagation wiring in command/runtime paths
 
 ## Known blockers
 - `S9-T8` sandbox/live deploy layer is permanently blocked by governance policy (ADR-0003).
 
 ## Next actions
-1. Keep `S9-T8` blocked unless ADR-0003 is explicitly superseded.
-2. Execute Slice 12 implementation in order (`S12-T2` -> `S12-T3` -> `S12-T6` -> `S12-T4` -> `S12-T5`) against ADR-0005 dual-control contract.
-3. Keep failure-retry budget (`repair_iterations_max`) and fixed pass target (`iterations_target`) semantically independent in Slice 12 implementation/tests.
-4. After Slice 12 closure, run README optimization passes and stop only after two consecutive no-change outcomes.
-5. Start Slice 13 logging-contract work (`S13-T1`) immediately after Slice 12/README closure, then execute instrumentation/logging test/doc tickets in order (`S13-T2` includes deterministic sink wiring).
-6. Start Slice 14 feedback-fidelity work (`S14-T1`) after Slice 13 closure; ensure `run` feedback preserves detailed validate/test/generate failure context with failure-class tagging for iteration retries.
-7. Start Slice 15 adaptive retry/transport-resilience work (`S15-T1`) after Slice 14 closure; ensure transport-dominated runs stop with actionable deterministic reasons instead of max-iteration churn.
-8. Maintain model-guided correction direction and avoid adding new heuristic normalization rules in `generate`.
-9. Maintain hermetic default CI posture with transport smoke tests opt-in only.
+1. Start `S16-T1`: propagate `cmd.Context()` through command/runtime operations so cancellation and signals propagate correctly.
+2. Execute remaining `S16` remediation tickets (`S16-T2`..`S16-T8`) in order, with focused tests per ticket.
+3. Keep `S9-T8` blocked unless ADR-0003 is explicitly superseded.
+4. Keep regression baseline green after each ticket (`go test ./...`, `bash scripts/check_all.sh`).
 
 ## Update policy
 - Update at end of each meaningful coding session.
@@ -33,6 +28,39 @@ Last updated: 2026-02-22
 - Keep startup/read-order instructions only in `SESSION_START.md` to avoid duplication.
 
 ## Recent updates
+- Completed maintenance ticket `M28`: planned Slice 16 from `ISSUES.md` with explicit tickets `S16-T1`..`S16-T8`, acceptance criteria, and required tests.
+- Slice 16 refinement pass 1 improvements applied: clarified issue-to-ticket mapping, prioritized signal/cancellation and schema-validation hardening first, and synced roadmap/backlog sequencing.
+- Slice 16 refinement pass 2: no additional planning/doc improvements identified.
+- Slice 16 refinement pass 3: no additional planning/doc improvements identified (second consecutive no-change pass).
+- Completed `S15-T6`: synced docs/fresh-context runbook for adaptive retry troubleshooting and operator actions.
+- Completed `S15-T5`: added regression coverage for transport-dominated adaptive retry behavior and outcomes.
+- Completed `S15-T4`: persisted per-iteration `transport_diagnostics` in run artifacts for transport-runtime failures.
+- Completed `S15-T3`: implemented bounded transport-dominated retry behavior with deterministic stop guidance hooks.
+- Completed `S15-T2`: implemented transport-dominated early-stop marker (`transport_runtime_dominated`) with deterministic terminal mapping.
+- Completed `S15-T1`: defined and implemented MVP failure-class-driven retry governance in run-loop behavior.
+- Completed `S14-T5`: synced docs/fresh-context runbook for feedback payload inspection and anti-regression guidance.
+- Completed `S14-T4`: added focused feedback-fidelity regression checks across validate/generate and control-marker exclusion paths.
+- Completed `S14-T3`: wired run feedback aggregation to propagate structured stage/check/policy/resource detail into `FeedbackJSON` and preserve terminal-marker de-dup.
+- Completed `S14-T2`: refactored validate execution into reusable structured path for run-loop feedback reuse.
+- Completed `S14-T1`: defined and implemented MVP feedback contract with detailed failure payload + `failure_class` tagging.
+- Verified local checks after Slice 14/15 closure: `go test ./...` and `bash scripts/check_all.sh` both pass.
+- Completed `S13-T6`: synced README and SESSION_START with logging runbook (stderr sink + run-scoped `app.log`) and deterministic inspection commands.
+- Completed `S13-T5`: added logging regression coverage for JSON-line format, redaction behavior, file sink writes, and run log assertions.
+- Completed `S13-T4`: added deterministic command-path logging baseline via shared wrapper-level start/end events across command paths.
+- Completed `S13-T3`: instrumented `run` loop iteration and stage transitions with run/iteration context and terminal-reason logging.
+- Completed `S13-T2`: wired shared runtime logger with deterministic sinks (`stderr` for all commands, run-scoped `app.log` for `run`).
+- Completed `S13-T1`: defined and implemented a basic logging contract (`level`, `command`, `event`, optional `status`/`run_id`/`iteration`/`stage`/`check`/`detail`) with deterministic JSON-line output and secret-like detail redaction.
+- Verified local checks after Slice 13 closure: `go test ./...` and `bash scripts/check_all.sh` both pass.
+- Completed `S12-T5`: synchronized README and SESSION_START to dual-control run semantics, canonical terminal reasons, and updated CLI examples/flags.
+- Completed Slice 12 implementation (`S12-T2`..`S12-T6`): dual config controls, dual CLI overrides, canonical terminal signaling, per-iteration failure summaries, and refreshed regression coverage.
+- Verified local checks after Slice 12 closure: `go test ./...` and `bash scripts/check_all.sh` both pass.
+- Completed `S12-T3`: replaced legacy run flag with dual controls (`--repair-iterations-max`, `--iterations-target`) and added deterministic precedence coverage.
+- Completed `S12-T6`: run artifacts now persist per-iteration `failure_summary`; terminal control reason is singular and canonical (`target_reached|repair_budget_exhausted|stuck`).
+- Completed `S12-T4`: refreshed run-loop tests/goldens for repair-budget exhaustion and fixed-pass target execution behavior.
+- Verified local checks after `S12-T3`/`S12-T6`/`S12-T4`: `go test ./...` and `bash scripts/check_all.sh` both pass.
+- Completed `S12-T2`: migrated config/runtime controls to `agent.repair_iterations_max` and `agent.iterations_target` with deterministic defaults/validation and no legacy `agent.max_iterations` config path.
+- Updated `infrafactory.yaml` dual-control keys and rewired runtime references to `Agent.RepairIterationsMax`.
+- Verified local checks after `S12-T2`: `go test ./...` and `bash scripts/check_all.sh` both pass.
 - Completed maintenance ticket `M27`: re-baselined Slice 12 planning/docs to dual iteration controls and fresh-context startup needs.
 - Added ADR-0005 (`dual iteration controls`) and updated ADR index.
 - Refinement pass 1 improvements applied: synchronized `BACKLOG.md`, `ROADMAP.md`, `SESSION_START.md`, and execution notes to dual-control semantics and README-after-slice closure rule.

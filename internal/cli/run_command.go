@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -17,10 +16,12 @@ import (
 func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) error {
 	scenarioPath := args[0]
 
-	maxIterations, err := resolveRunMaxIterations(cmd, runtime)
+	controls, err := resolveRunControls(cmd, runtime)
 	if err != nil {
 		return err
 	}
+	repairIterationsMax := controls.RepairIterationsMax
+	iterationsTarget := controls.IterationsTarget
 
 	sc, err := runtime.LoadScenario(scenarioPath)
 	if err != nil {
@@ -57,18 +58,44 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 	startedAt := time.Now().UTC()
 	runID := startedAt.Format("20060102T150405Z0700")
 	store := runstore.NewFilesystemStore(resolveRunStoreRoot())
+	logPath := filepath.Join(resolveRunStoreRoot(), sc.Name, runID, "app.log")
+	closeRunLogSink, err := runtime.Logger.AddFileSink(logPath)
+	if err == nil {
+		defer func() {
+			_ = closeRunLogSink()
+		}()
+	}
+	runtime.Logger.Log(LogEntry{
+		Level:   logLevelInfo,
+		Command: "run",
+		Event:   "run_start",
+		Status:  "start",
+		RunID:   runID,
+		Detail:  fmt.Sprintf("repair_iterations_max=%d iterations_target=%d", repairIterationsMax, iterationsTarget),
+	})
 
 	allStages := make([]StageSummary, 0)
 	allFailures := make([]FailureSummary, 0)
 	var previousFailures []feedback.Failure
 	var previousIterationFailures []FailureSummary
-	converged := false
 	holdoutBlocked := false
 	completed := 0
+	terminalReason := ""
+	lastIterationFailed := false
+	failedIterations := 0
+	consecutiveTransportFailures := 0
 
-	for iteration := 1; iteration <= maxIterations; iteration++ {
+	for iteration := 1; iteration <= iterationsTarget; iteration++ {
+		runtime.Logger.Log(LogEntry{
+			Level:     logLevelInfo,
+			Command:   "run",
+			Event:     "iteration_start",
+			Status:    "start",
+			RunID:     runID,
+			Iteration: iteration,
+		})
 		completed = iteration
-		stages, failures := runIteration(iteration, scenarioPath, cmd, runtime, previousIterationFailures)
+		stages, failures := runIteration(runID, iteration, scenarioPath, cmd, runtime, previousIterationFailures)
 		allStages = append(allStages, stages...)
 
 		if err := persistRunIteration(store, sc.Name, runID, iteration, stages, failures); err != nil {
@@ -76,15 +103,54 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 		}
 
 		if len(failures) == 0 {
-			converged = true
-			break
+			lastIterationFailed = false
+			previousFailures = nil
+			previousIterationFailures = previousIterationFailures[:0]
+			runtime.Logger.Log(LogEntry{
+				Level:     logLevelInfo,
+				Command:   "run",
+				Event:     "iteration_end",
+				Status:    "success",
+				RunID:     runID,
+				Iteration: iteration,
+			})
+			continue
 		}
 
+		lastIterationFailed = true
+		failedIterations++
 		allFailures = append(allFailures, failures...)
+		transportDominated := failuresAreTransportDominated(failures)
+		if transportDominated {
+			consecutiveTransportFailures++
+		} else {
+			consecutiveTransportFailures = 0
+		}
+		runtime.Logger.Log(LogEntry{
+			Level:     logLevelError,
+			Command:   "run",
+			Event:     "iteration_end",
+			Status:    "failed",
+			RunID:     runID,
+			Iteration: iteration,
+			Detail:    fmt.Sprintf("%d failure(s)", len(failures)),
+		})
 		currentFailures := toFeedbackFailures(failures)
+		if consecutiveTransportFailures >= transportFailureRetryBudget {
+			terminalReason = "repair_budget_exhausted"
+			allFailures = append(allFailures, FailureSummary{
+				Layer:   "run",
+				Stage:   fmt.Sprintf("iteration_%d", iteration),
+				Check:   "transport_runtime_dominated",
+				Command: "run loop",
+				Detail:  fmt.Sprintf("stopped early after %d consecutive transport-runtime failures; consider adjusting agent timeouts/retries or fixing transport dependencies", consecutiveTransportFailures),
+			})
+			break
+		}
 		// Stop early when the failure signature is unchanged/subset-equivalent;
 		// further iterations are unlikely to produce new signal.
 		if feedback.IsStuck(previousFailures, currentFailures) {
+			terminalReason = "stuck"
 			allFailures = append(allFailures, FailureSummary{
 				Layer:   "run",
 				Stage:   fmt.Sprintf("iteration_%d", iteration),
@@ -96,19 +162,43 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 		}
 		previousFailures = currentFailures
 		previousIterationFailures = append(previousIterationFailures[:0], failures...)
+
+		if failedIterations > repairIterationsMax {
+			terminalReason = "repair_budget_exhausted"
+			allFailures = append(allFailures, FailureSummary{
+				Layer:   "run",
+				Stage:   fmt.Sprintf("iteration_%d", iteration),
+				Check:   "repair_budget_exhausted",
+				Command: "run loop",
+				Detail:  fmt.Sprintf("reached repair iterations max (%d)", repairIterationsMax),
+			})
+			break
+		}
 	}
 
-	if !converged && completed >= maxIterations {
+	if terminalReason == "" && lastIterationFailed {
+		terminalReason = "repair_budget_exhausted"
 		allFailures = append(allFailures, FailureSummary{
 			Layer:   "run",
 			Stage:   fmt.Sprintf("iteration_%d", completed),
-			Check:   "max_iterations",
+			Check:   "repair_budget_exhausted",
 			Command: "run loop",
-			Detail:  fmt.Sprintf("reached max iterations (%d)", maxIterations),
+			Detail:  fmt.Sprintf("reached iterations target (%d) with unresolved failures", iterationsTarget),
 		})
 	}
+	if terminalReason == "" && !lastIterationFailed {
+		terminalReason = "target_reached"
+	}
+	runtime.Logger.Log(LogEntry{
+		Level:   logLevelInfo,
+		Command: "run",
+		Event:   "terminal_reason",
+		Status:  terminalReason,
+		RunID:   runID,
+		Detail:  fmt.Sprintf("completed_iterations=%d", completed),
+	})
 
-	if converged {
+	if terminalReason == "target_reached" {
 		holdoutStages, holdoutFailures, err := runCriteriaOnlyHoldouts(runtime, scenarioPath)
 		if err != nil {
 			return fmt.Errorf("run holdout checks: %w", err)
@@ -119,7 +209,7 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 	}
 
 	status := CommandStatusSuccess
-	if !converged || holdoutBlocked {
+	if terminalReason != "target_reached" || holdoutBlocked {
 		status = CommandStatusFailed
 	}
 
@@ -139,6 +229,14 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 		Status: StageStatusPass,
 		Detail: fmt.Sprintf("run_id=%s", runID),
 	})
+	if terminalReason != "" {
+		allStages = append(allStages, StageSummary{
+			Layer:  "run",
+			Stage:  "terminal_reason",
+			Status: StageStatusPass,
+			Detail: terminalReason,
+		})
+	}
 
 	result := OutputResult{
 		Command:  "run",
@@ -151,8 +249,8 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 		return err
 	}
 
-	if !converged || holdoutBlocked {
-		errDetail := fmt.Errorf("run did not converge after %d iteration(s)", completed)
+	if terminalReason != "target_reached" || holdoutBlocked {
+		errDetail := fmt.Errorf("run stopped with terminal reason %q after %d iteration(s)", terminalReason, completed)
 		if holdoutBlocked {
 			errDetail = fmt.Errorf("holdout checks failed after training convergence")
 		}
@@ -167,16 +265,34 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 }
 
 func persistRunIteration(store *runstore.FilesystemStore, scenario string, runID string, iteration int, stages []StageSummary, failures []FailureSummary) error {
+	failureSummary := make([]string, 0, len(failures))
+	transportDiagnostics := make([]map[string]string, 0)
+	for _, failure := range failures {
+		failureSummary = append(failureSummary, fmt.Sprintf("%s/%s check=%s command=%s detail=%s", failure.Layer, failure.Stage, failure.Check, failure.Command, failure.Detail))
+		if feedbackFailureClassForSummary(failure) == "transport_runtime" {
+			transportDiagnostics = append(transportDiagnostics, map[string]string{
+				"stage":   failure.Stage,
+				"check":   failure.Check,
+				"command": failure.Command,
+				"detail":  failure.Detail,
+			})
+		}
+	}
+
 	payload, err := json.MarshalIndent(struct {
-		Schema    string           `json:"schema"`
-		Iteration int              `json:"iteration"`
-		Stages    []StageSummary   `json:"stages"`
-		Failures  []FailureSummary `json:"failures"`
+		Schema               string              `json:"schema"`
+		Iteration            int                 `json:"iteration"`
+		Stages               []StageSummary      `json:"stages"`
+		Failures             []FailureSummary    `json:"failures"`
+		FailureSummary       []string            `json:"failure_summary,omitempty"`
+		TransportDiagnostics []map[string]string `json:"transport_diagnostics,omitempty"`
 	}{
-		Schema:    runstore.RunIterationSchemaVersion,
-		Iteration: iteration,
-		Stages:    stages,
-		Failures:  failures,
+		Schema:               runstore.RunIterationSchemaVersion,
+		Iteration:            iteration,
+		Stages:               stages,
+		Failures:             failures,
+		FailureSummary:       failureSummary,
+		TransportDiagnostics: transportDiagnostics,
 	}, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode iteration artifact: %w", err)
@@ -196,7 +312,7 @@ func resolveRunStoreRoot() string {
 	return runstore.DefaultRoot
 }
 
-func runIteration(iteration int, scenarioPath string, cmd *cobra.Command, runtime *CommandRuntime, previousIterationFailures []FailureSummary) ([]StageSummary, []FailureSummary) {
+func runIteration(runID string, iteration int, scenarioPath string, cmd *cobra.Command, runtime *CommandRuntime, previousIterationFailures []FailureSummary) ([]StageSummary, []FailureSummary) {
 	stages := make([]StageSummary, 0, 3)
 	failures := make([]FailureSummary, 0)
 
@@ -211,6 +327,15 @@ func runIteration(iteration int, scenarioPath string, cmd *cobra.Command, runtim
 
 	for _, step := range steps {
 		stageName := fmt.Sprintf("iteration_%d_%s", iteration, step.name)
+		runtime.Logger.Log(LogEntry{
+			Level:     logLevelInfo,
+			Command:   "run",
+			Event:     "stage_start",
+			Status:    "start",
+			RunID:     runID,
+			Iteration: iteration,
+			Stage:     stageName,
+		})
 		var (
 			err        error
 			testResult OutputResult
@@ -218,19 +343,18 @@ func runIteration(iteration int, scenarioPath string, cmd *cobra.Command, runtim
 		if step.name == "test" {
 			testResult, err = executeTest(runtime, scenarioPath)
 		} else {
-			internalCmd := newInternalRunStepCommand(step.command, cmd)
 			switch step.name {
 			case "generate":
 				_, err = generateAndWriteFiles(runtime, scenarioPath, iteration, previousIterationFailures)
 			case "validate":
-				err = runValidateCommand(internalCmd, []string{scenarioPath}, runtime)
+				testResult, err = executeValidate(runtime, scenarioPath)
 			default:
 				err = fmt.Errorf("unsupported run step %q", step.name)
 			}
 		}
 		if err != nil {
 			stages = append(stages, StageSummary{Layer: "run", Stage: stageName, Status: StageStatusFail})
-			if step.name == "test" && len(testResult.Failures) > 0 {
+			if (step.name == "test" || step.name == "validate") && len(testResult.Failures) > 0 {
 				for _, failure := range testResult.Failures {
 					failures = append(failures, FailureSummary{
 						Layer:    "run",
@@ -251,9 +375,29 @@ func runIteration(iteration int, scenarioPath string, cmd *cobra.Command, runtim
 					Detail:  err.Error(),
 				})
 			}
+			runtime.Logger.Log(LogEntry{
+				Level:     logLevelError,
+				Command:   "run",
+				Event:     "stage_end",
+				Status:    "failed",
+				RunID:     runID,
+				Iteration: iteration,
+				Stage:     stageName,
+				Check:     step.name,
+				Detail:    err.Error(),
+			})
 			break
 		}
 		stages = append(stages, StageSummary{Layer: "run", Stage: stageName, Status: StageStatusPass})
+		runtime.Logger.Log(LogEntry{
+			Level:     logLevelInfo,
+			Command:   "run",
+			Event:     "stage_end",
+			Status:    "success",
+			RunID:     runID,
+			Iteration: iteration,
+			Stage:     stageName,
+		})
 	}
 
 	return stages, failures
@@ -334,18 +478,42 @@ func runCriteriaOnlyHoldouts(runtime *CommandRuntime, trainingScenarioPath strin
 	return stages, failures, nil
 }
 
-func resolveRunMaxIterations(cmd *cobra.Command, runtime *CommandRuntime) (int, error) {
-	override, err := cmd.Flags().GetInt("max-iterations")
+type runControls struct {
+	RepairIterationsMax int
+	IterationsTarget    int
+}
+
+const transportFailureRetryBudget = 2
+
+func resolveRunControls(cmd *cobra.Command, runtime *CommandRuntime) (runControls, error) {
+	repairMax, err := cmd.Flags().GetInt("repair-iterations-max")
 	if err != nil {
-		return 0, &CLIError{Op: "run", Code: errorCodeUsage, Err: fmt.Errorf("read --max-iterations flag: %w", err)}
+		return runControls{}, &CLIError{Op: "run", Code: errorCodeUsage, Err: fmt.Errorf("read --repair-iterations-max flag: %w", err)}
 	}
-	if override > 0 {
-		return override, nil
+
+	iterationsTarget, err := cmd.Flags().GetInt("iterations-target")
+	if err != nil {
+		return runControls{}, &CLIError{Op: "run", Code: errorCodeUsage, Err: fmt.Errorf("read --iterations-target flag: %w", err)}
 	}
-	if runtime.Config.Agent.MaxIterations < 1 {
-		return 0, &CLIError{Op: "run", Code: errorCodeUsage, Err: fmt.Errorf("max iterations must be >= 1")}
+
+	if repairMax == 0 {
+		repairMax = runtime.Config.Agent.RepairIterationsMax
 	}
-	return runtime.Config.Agent.MaxIterations, nil
+	if iterationsTarget == 0 {
+		iterationsTarget = runtime.Config.Agent.IterationsTarget
+	}
+
+	if repairMax < 1 {
+		return runControls{}, &CLIError{Op: "run", Code: errorCodeUsage, Err: fmt.Errorf("repair iterations max must be >= 1")}
+	}
+	if iterationsTarget < 1 {
+		return runControls{}, &CLIError{Op: "run", Code: errorCodeUsage, Err: fmt.Errorf("iterations target must be >= 1")}
+	}
+
+	return runControls{
+		RepairIterationsMax: repairMax,
+		IterationsTarget:    iterationsTarget,
+	}, nil
 }
 
 func toFeedbackFailures(failures []FailureSummary) []feedback.Failure {
@@ -359,15 +527,14 @@ func toFeedbackFailures(failures []FailureSummary) []feedback.Failure {
 	return out
 }
 
-func newInternalRunStepCommand(name string, parent *cobra.Command) *cobra.Command {
-	cmd := &cobra.Command{Use: name}
-	cmd.SetOut(&bytes.Buffer{})
-	cmd.SetErr(&bytes.Buffer{})
-	cmd.Flags().String("output", string(OutputModeHuman), "")
-
-	if value, err := parent.Flags().GetString("output"); err == nil {
-		_ = cmd.Flags().Set("output", value)
+func failuresAreTransportDominated(failures []FailureSummary) bool {
+	if len(failures) == 0 {
+		return false
 	}
-
-	return cmd
+	for _, failure := range failures {
+		if feedbackFailureClassForSummary(failure) != "transport_runtime" {
+			return false
+		}
+	}
+	return true
 }

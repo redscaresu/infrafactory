@@ -96,6 +96,66 @@ func TestRunCommandConvergesOnFirstIteration(t *testing.T) {
 	if runMeta.Schema != runstore.RunMetadataSchemaVersion {
 		t.Fatalf("expected run metadata schema %q, got %q", runstore.RunMetadataSchemaVersion, runMeta.Schema)
 	}
+
+	appLogPath := filepath.Join(runstoreRoot, "example-scenario", runs[0].RunID, "app.log")
+	appLog, err := os.ReadFile(appLogPath)
+	if err != nil {
+		t.Fatalf("read run app log: %v", err)
+	}
+	if !strings.Contains(string(appLog), `"event":"terminal_reason"`) {
+		t.Fatalf("expected terminal_reason log entry, got:\n%s", string(appLog))
+	}
+	if !strings.Contains(string(appLog), `"event":"stage_start"`) {
+		t.Fatalf("expected stage_start log entry, got:\n%s", string(appLog))
+	}
+}
+
+func TestRunCommandContinuesUntilIterationsTargetAfterSuccess(t *testing.T) {
+	h := newCommandTestHarness(t)
+	runstoreRoot := filepath.Join(h.WorkspaceDir, ".infrafactory", "runs")
+	t.Setenv("INFRAFACTORY_RUNSTORE_ROOT", runstoreRoot)
+
+	genCalls := 0
+	opts := runtimeOptions{
+		configLoader: func(path string) (config.Config, error) {
+			cfg, err := config.Load(path)
+			if err != nil {
+				return config.Config{}, err
+			}
+			cfg.Agent.RepairIterationsMax = 2
+			cfg.Agent.IterationsTarget = 3
+			return cfg, nil
+		},
+		scenarioLoader: defaultScenarioLoader,
+		deps: RuntimeDependencies{
+			Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
+				genCalls++
+				return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte("terraform {}\n")}}, nil
+			}),
+			Static:     &fakeStaticHarness{result: &harness.StaticResult{Stages: []harness.StageResult{{Stage: "init"}, {Stage: "validate"}, {Stage: "plan"}, {Stage: "show"}}, PlanJSON: []byte(`{"planned_values":{"root_module":{}}}`)}},
+			MockDeploy: &fakeMockDeployHarness{result: &harness.MockDeployResult{Apply: harness.StageResult{Stage: "apply"}, StateSnapshot: []byte(`{}`)}},
+			Destroy:    &fakeDestroyHarness{result: &harness.DestroyResult{Destroy: harness.StageResult{Stage: "destroy"}, OrphanCount: 0}},
+		},
+	}
+
+	cmd := newRunCommandForTest(opts)
+	stdout := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{h.ScenarioPath, "--config", h.ConfigPath})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute run command: %v", err)
+	}
+	if genCalls != 3 {
+		t.Fatalf("expected 3 generation passes (iterations_target), got %d", genCalls)
+	}
+	if !strings.Contains(stdout.String(), "- run/iteration_3_test: pass") {
+		t.Fatalf("expected third pass stage in output, got:\n%s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "- run/terminal_reason: pass (target_reached)") {
+		t.Fatalf("expected canonical target_reached terminal reason stage, got:\n%s", stdout.String())
+	}
 }
 
 func TestRunCommandStopsAtMaxIterations(t *testing.T) {
@@ -109,7 +169,8 @@ func TestRunCommandStopsAtMaxIterations(t *testing.T) {
 			if err != nil {
 				return config.Config{}, err
 			}
-			cfg.Agent.MaxIterations = 2
+			cfg.Agent.RepairIterationsMax = 2
+			cfg.Agent.IterationsTarget = 2
 			return cfg, nil
 		},
 		scenarioLoader: defaultScenarioLoader,
@@ -144,8 +205,8 @@ func TestRunCommandStopsAtMaxIterations(t *testing.T) {
 	if cliErr.Op != "run" || cliErr.Code != errorCodeCommandFailed {
 		t.Fatalf("expected run/%s CLI error, got op=%q code=%q", errorCodeCommandFailed, cliErr.Op, cliErr.Code)
 	}
-	if !strings.Contains(stdout.String(), "check=max_iterations") {
-		t.Fatalf("expected max-iterations failure marker, got:\n%s", stdout.String())
+	if !strings.Contains(stdout.String(), "check=repair_budget_exhausted") {
+		t.Fatalf("expected repair-budget-exhausted failure marker, got:\n%s", stdout.String())
 	}
 
 	store := runstore.NewFilesystemStore(runstoreRoot)
@@ -155,6 +216,21 @@ func TestRunCommandStopsAtMaxIterations(t *testing.T) {
 	}
 	if len(runs) != 1 || runs[0].Status != "failed" {
 		t.Fatalf("expected one failed run, got: %+v", runs)
+	}
+
+	iterationPath := filepath.Join(runstoreRoot, "example-scenario", runs[0].RunID, "iterations", "2", "iteration.json")
+	iterationPayload, err := os.ReadFile(iterationPath)
+	if err != nil {
+		t.Fatalf("read iteration artifact: %v", err)
+	}
+	var artifact struct {
+		FailureSummary []string `json:"failure_summary"`
+	}
+	if err := json.Unmarshal(iterationPayload, &artifact); err != nil {
+		t.Fatalf("decode iteration artifact: %v", err)
+	}
+	if len(artifact.FailureSummary) == 0 {
+		t.Fatalf("expected non-empty failure_summary in iteration artifact, got %+v", artifact)
 	}
 }
 
@@ -168,7 +244,8 @@ func TestRunCommandStopsOnStuckDetection(t *testing.T) {
 			if err != nil {
 				return config.Config{}, err
 			}
-			cfg.Agent.MaxIterations = 4
+			cfg.Agent.RepairIterationsMax = 4
+			cfg.Agent.IterationsTarget = 4
 			return cfg, nil
 		},
 		scenarioLoader: defaultScenarioLoader,
@@ -202,6 +279,9 @@ func TestRunCommandStopsOnStuckDetection(t *testing.T) {
 	if !strings.Contains(stdout.String(), "check=stuck") {
 		t.Fatalf("expected stuck-detection failure marker, got:\n%s", stdout.String())
 	}
+	if strings.Contains(stdout.String(), "check=repair_budget_exhausted") {
+		t.Fatalf("expected singular terminal reason for stuck stop, got:\n%s", stdout.String())
+	}
 
 	store := runstore.NewFilesystemStore(runstoreRoot)
 	runs, err := store.ListRuns("example-scenario")
@@ -225,7 +305,8 @@ func TestRunCommandPassesPreviousIterationFailuresAsGenerateFeedback(t *testing.
 			if err != nil {
 				return config.Config{}, err
 			}
-			cfg.Agent.MaxIterations = 3
+			cfg.Agent.RepairIterationsMax = 3
+			cfg.Agent.IterationsTarget = 3
 			return cfg, nil
 		},
 		scenarioLoader: defaultScenarioLoader,
@@ -271,6 +352,12 @@ func TestRunCommandPassesPreviousIterationFailuresAsGenerateFeedback(t *testing.
 	if !strings.Contains(string(requests[1].FeedbackJSON), `"check":"validate"`) {
 		t.Fatalf("expected validate failure in feedback payload, got %s", string(requests[1].FeedbackJSON))
 	}
+	if !strings.Contains(string(requests[1].FeedbackJSON), `"failure_class":"iac_validation"`) {
+		t.Fatalf("expected failure_class tag in feedback payload, got %s", string(requests[1].FeedbackJSON))
+	}
+	if strings.Contains(string(requests[1].FeedbackJSON), `"check":"stuck"`) {
+		t.Fatalf("expected terminal control failures to be excluded from iteration feedback payload, got %s", string(requests[1].FeedbackJSON))
+	}
 }
 
 func TestRunCommandDefaultRuntimeUsesConcreteGeneratorDependency(t *testing.T) {
@@ -286,7 +373,7 @@ func TestRunCommandDefaultRuntimeUsesConcreteGeneratorDependency(t *testing.T) {
 	stdout := &bytes.Buffer{}
 	cmd.SetOut(stdout)
 	cmd.SetErr(&bytes.Buffer{})
-	cmd.SetArgs([]string{h.ScenarioPath, "--config", h.ConfigPath, "--max-iterations", "1"})
+	cmd.SetArgs([]string{h.ScenarioPath, "--config", h.ConfigPath, "--repair-iterations-max", "1"})
 
 	err := cmd.Execute()
 	if err == nil {
@@ -300,6 +387,73 @@ func TestRunCommandDefaultRuntimeUsesConcreteGeneratorDependency(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "prompt render failed") {
 		t.Fatalf("expected concrete adapter failure detail, got:\n%s", stdout.String())
+	}
+}
+
+func TestRunCommandStopsEarlyOnTransportDominatedFailures(t *testing.T) {
+	h := newCommandTestHarness(t)
+	runstoreRoot := filepath.Join(h.WorkspaceDir, ".infrafactory", "runs")
+	t.Setenv("INFRAFACTORY_RUNSTORE_ROOT", runstoreRoot)
+
+	opts := runtimeOptions{
+		configLoader: func(path string) (config.Config, error) {
+			cfg, err := config.Load(path)
+			if err != nil {
+				return config.Config{}, err
+			}
+			cfg.Agent.RepairIterationsMax = 5
+			cfg.Agent.IterationsTarget = 5
+			return cfg, nil
+		},
+		scenarioLoader: defaultScenarioLoader,
+		deps: RuntimeDependencies{
+			Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
+				return nil, generator.NewGenerateError(generator.ErrTransportFailed, "generate_hcl", errors.New("transport timeout"))
+			}),
+			Static:     &fakeStaticHarness{},
+			MockDeploy: &fakeMockDeployHarness{},
+			Destroy:    &fakeDestroyHarness{},
+		},
+	}
+
+	cmd := newRunCommandForTest(opts)
+	stdout := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{h.ScenarioPath, "--config", h.ConfigPath})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected run failure")
+	}
+	if !strings.Contains(stdout.String(), "check=transport_runtime_dominated") {
+		t.Fatalf("expected transport dominated terminal marker, got:\n%s", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "iteration_5") {
+		t.Fatalf("expected early stop before full iterations_target, got:\n%s", stdout.String())
+	}
+
+	store := runstore.NewFilesystemStore(runstoreRoot)
+	runs, err := store.ListRuns("example-scenario")
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("expected one run, got %+v", runs)
+	}
+	iterationPath := filepath.Join(runstoreRoot, "example-scenario", runs[0].RunID, "iterations", "2", "iteration.json")
+	iterationPayload, err := os.ReadFile(iterationPath)
+	if err != nil {
+		t.Fatalf("read iteration artifact: %v", err)
+	}
+	var artifact struct {
+		TransportDiagnostics []map[string]string `json:"transport_diagnostics"`
+	}
+	if err := json.Unmarshal(iterationPayload, &artifact); err != nil {
+		t.Fatalf("decode iteration artifact: %v", err)
+	}
+	if len(artifact.TransportDiagnostics) == 0 {
+		t.Fatalf("expected transport diagnostics in artifact, got %+v", artifact)
 	}
 }
 
@@ -369,7 +523,7 @@ func TestRunCommandHonorsDisabledStaticMockAndDestructionLayers(t *testing.T) {
 	stdout := &bytes.Buffer{}
 	cmd.SetOut(stdout)
 	cmd.SetErr(&bytes.Buffer{})
-	cmd.SetArgs([]string{h.ScenarioPath, "--config", h.ConfigPath, "--max-iterations", "1"})
+	cmd.SetArgs([]string{h.ScenarioPath, "--config", h.ConfigPath, "--repair-iterations-max", "1"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("expected run success with disabled layers, got: %v", err)
@@ -398,7 +552,8 @@ func TestRunCommandPropagatesCriteriaFailuresForConvergence(t *testing.T) {
 			if err != nil {
 				return config.Config{}, err
 			}
-			cfg.Agent.MaxIterations = 3
+			cfg.Agent.RepairIterationsMax = 3
+			cfg.Agent.IterationsTarget = 3
 			cfg.Validation.Layers.Destruction.Enabled = false
 			cfg.ConstraintPolicies = map[string]string{
 				"encryption_at_rest": filepath.Join("..", "harness", "testdata", "state-policy", "policy.rego"),
@@ -482,7 +637,7 @@ func TestRunCommandExecutesCriteriaOnlyHoldoutsAfterConvergence(t *testing.T) {
 	stdout := &bytes.Buffer{}
 	cmd.SetOut(stdout)
 	cmd.SetErr(&bytes.Buffer{})
-	cmd.SetArgs([]string{h.ScenarioPath, "--config", h.ConfigPath, "--max-iterations", "1"})
+	cmd.SetArgs([]string{h.ScenarioPath, "--config", h.ConfigPath, "--repair-iterations-max", "1"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("expected run success, got: %v", err)
@@ -536,7 +691,7 @@ func TestRunCommandCriteriaOnlyHoldoutsReuseTrainingOutputDir(t *testing.T) {
 	cmd := newRunCommandForTest(opts)
 	cmd.SetOut(&bytes.Buffer{})
 	cmd.SetErr(&bytes.Buffer{})
-	cmd.SetArgs([]string{h.ScenarioPath, "--config", h.ConfigPath, "--max-iterations", "1"})
+	cmd.SetArgs([]string{h.ScenarioPath, "--config", h.ConfigPath, "--repair-iterations-max", "1"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("expected run success, got: %v", err)
@@ -570,7 +725,8 @@ func TestRunCommandAutoPassesDeferredDNSHoldoutWithoutFeedbackInjection(t *testi
 			cfg.Validation.Layers.Static.Enabled = false
 			cfg.Validation.Layers.MockDeploy.Enabled = false
 			cfg.Validation.Layers.Destruction.Enabled = false
-			cfg.Agent.MaxIterations = 3
+			cfg.Agent.RepairIterationsMax = 3
+			cfg.Agent.IterationsTarget = 3
 			return cfg, nil
 		},
 		scenarioLoader: defaultScenarioLoader,
@@ -594,8 +750,8 @@ func TestRunCommandAutoPassesDeferredDNSHoldoutWithoutFeedbackInjection(t *testi
 	if err != nil {
 		t.Fatalf("expected run success, got: %v", err)
 	}
-	if genCalls != 1 {
-		t.Fatalf("expected exactly one training iteration before holdout evaluation, got %d generator calls", genCalls)
+	if genCalls != 3 {
+		t.Fatalf("expected holdout evaluation after iterations_target passes, got %d generator calls", genCalls)
 	}
 	if !strings.Contains(stdout.String(), dnsResolutionAutoPassMessage()) {
 		t.Fatalf("expected holdout dns_resolution auto-pass message, got:\n%s", stdout.String())
@@ -608,6 +764,128 @@ func TestRunCommandAutoPassesDeferredDNSHoldoutWithoutFeedbackInjection(t *testi
 	}
 }
 
+func TestResolveRunControlsUsesConfigDefaultsWhenFlagsUnset(t *testing.T) {
+	t.Parallel()
+
+	cmd := &cobra.Command{Use: "run"}
+	cmd.Flags().Int("repair-iterations-max", 0, "")
+	cmd.Flags().Int("iterations-target", 0, "")
+
+	cfg := config.Default()
+	cfg.Agent.RepairIterationsMax = 7
+	cfg.Agent.IterationsTarget = 3
+
+	controls, err := resolveRunControls(cmd, &CommandRuntime{Config: cfg})
+	if err != nil {
+		t.Fatalf("resolve controls: %v", err)
+	}
+	if controls.RepairIterationsMax != 7 {
+		t.Fatalf("expected repair max 7, got %d", controls.RepairIterationsMax)
+	}
+	if controls.IterationsTarget != 3 {
+		t.Fatalf("expected iterations target 3, got %d", controls.IterationsTarget)
+	}
+}
+
+func TestResolveRunControlsUsesFlagOverridesWhenProvided(t *testing.T) {
+	t.Parallel()
+
+	cmd := &cobra.Command{Use: "run"}
+	cmd.Flags().Int("repair-iterations-max", 0, "")
+	cmd.Flags().Int("iterations-target", 0, "")
+	if err := cmd.Flags().Set("repair-iterations-max", "2"); err != nil {
+		t.Fatalf("set flag: %v", err)
+	}
+	if err := cmd.Flags().Set("iterations-target", "5"); err != nil {
+		t.Fatalf("set flag: %v", err)
+	}
+
+	cfg := config.Default()
+	cfg.Agent.RepairIterationsMax = 8
+	cfg.Agent.IterationsTarget = 1
+
+	controls, err := resolveRunControls(cmd, &CommandRuntime{Config: cfg})
+	if err != nil {
+		t.Fatalf("resolve controls: %v", err)
+	}
+	if controls.RepairIterationsMax != 2 {
+		t.Fatalf("expected repair max override 2, got %d", controls.RepairIterationsMax)
+	}
+	if controls.IterationsTarget != 5 {
+		t.Fatalf("expected iterations target override 5, got %d", controls.IterationsTarget)
+	}
+}
+
+func TestResolveRunControlsRejectsInvalidValues(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name         string
+		configureCmd func(*cobra.Command)
+		cfg          config.Config
+		expected     string
+	}{
+		{
+			name:         "invalid repair max from config",
+			configureCmd: func(_ *cobra.Command) {},
+			cfg: func() config.Config {
+				cfg := config.Default()
+				cfg.Agent.RepairIterationsMax = 0
+				cfg.Agent.IterationsTarget = 1
+				return cfg
+			}(),
+			expected: "repair iterations max must be >= 1",
+		},
+		{
+			name:         "invalid iterations target from config",
+			configureCmd: func(_ *cobra.Command) {},
+			cfg: func() config.Config {
+				cfg := config.Default()
+				cfg.Agent.RepairIterationsMax = 1
+				cfg.Agent.IterationsTarget = 0
+				return cfg
+			}(),
+			expected: "iterations target must be >= 1",
+		},
+		{
+			name: "invalid repair max from flag",
+			configureCmd: func(cmd *cobra.Command) {
+				_ = cmd.Flags().Set("repair-iterations-max", "-1")
+			},
+			cfg:      config.Default(),
+			expected: "repair iterations max must be >= 1",
+		},
+		{
+			name: "invalid iterations target from flag",
+			configureCmd: func(cmd *cobra.Command) {
+				_ = cmd.Flags().Set("iterations-target", "-1")
+			},
+			cfg:      config.Default(),
+			expected: "iterations target must be >= 1",
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			cmd := &cobra.Command{Use: "run"}
+			cmd.Flags().Int("repair-iterations-max", 0, "")
+			cmd.Flags().Int("iterations-target", 0, "")
+			tc.configureCmd(cmd)
+
+			_, err := resolveRunControls(cmd, &CommandRuntime{Config: tc.cfg})
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if !strings.Contains(err.Error(), tc.expected) {
+				t.Fatalf("expected error to contain %q, got %v", tc.expected, err)
+			}
+		})
+	}
+}
+
 func newRunCommandForTest(opts runtimeOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:  "run <scenario>",
@@ -616,7 +894,8 @@ func newRunCommandForTest(opts runtimeOptions) *cobra.Command {
 	}
 	cmd.Flags().String("config", config.DefaultPath, "")
 	cmd.Flags().String("output", string(OutputModeHuman), "")
-	cmd.Flags().Int("max-iterations", 0, "")
+	cmd.Flags().Int("repair-iterations-max", 0, "")
+	cmd.Flags().Int("iterations-target", 0, "")
 	return cmd
 }
 

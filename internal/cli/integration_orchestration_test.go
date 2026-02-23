@@ -33,7 +33,7 @@ func TestCLIOrchestrationIntegrationSuccess(t *testing.T) {
 				return config.Config{}, err
 			}
 			cfg.Paths.Output = filepath.Join(h.WorkspaceDir, "output")
-			cfg.Agent.MaxIterations = 2
+			cfg.Agent.RepairIterationsMax = 2
 			return cfg, nil
 		},
 		scenarioLoader: defaultScenarioLoader,
@@ -88,7 +88,7 @@ func TestCLIOrchestrationIntegrationFailureRegression(t *testing.T) {
 				return config.Config{}, err
 			}
 			cfg.Paths.Output = filepath.Join(h.WorkspaceDir, "output")
-			cfg.Agent.MaxIterations = 2
+			cfg.Agent.RepairIterationsMax = 2
 			return cfg, nil
 		},
 		scenarioLoader: defaultScenarioLoader,

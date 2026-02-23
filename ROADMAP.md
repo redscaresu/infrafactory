@@ -115,15 +115,19 @@ This file is intentionally high-level and mostly stable; day-to-day execution tr
 - Add focused tests proving transport-dominated runs stop with actionable reasons rather than generic max-iteration churn.
 - Apply slice-closure review protocol before marking Slice 15 complete.
 
+16. Slice 16: Issue-backlog remediation and robustness hardening
+- Remediate open issues in `ISSUES.md` (context propagation, bounded response reads, env override determinism, schema-loading guarantees, and policy correctness gaps).
+- Keep remediation incremental and ticketed so each issue class has clear acceptance tests and deterministic behavior.
+- Remove stale/dead code paths and no-op branches that reduce maintainability.
+- Align policy intent/messages with actual checks to avoid misleading compliance signaling.
+- Ensure fresh-context startup docs and operator guidance reflect post-remediation behavior.
+- Apply slice-closure review protocol before marking Slice 16 complete.
+
 ## Near-term execution order
 
-1. Keep Slice 11 closed and stable (transport adapters + secret-safety + smoke gates).
-2. Execute Slice 12 contract-first dual-control definition (`S12-T1`) before behavior changes.
-3. Implement/configure dual controls (`S12-T2`, `S12-T3`), add per-pass failure logging (`S12-T6`), then test/docs closure (`S12-T4`, `S12-T5`).
-4. After Slice 12 closure, run README optimization pass and repeat until two consecutive no-change passes.
-5. Start Slice 13 with logging-contract definition, then implement end-to-end instrumentation and docs.
-6. Start Slice 14 with feedback-contract definition, then wire validate/run feedback fidelity and regression coverage.
-7. Start Slice 15 with retry-governance contract, then implement adaptive transport-resilience controls and diagnostics.
+1. Keep completed slices (11-15) stable and regression-green while executing Slice 16.
+2. Execute Slice 16 in `BACKLOG.md` order (`S16-T1`..`S16-T8`) with focused tests and per-ticket docs sync.
+3. Keep `S9-T8` blocked under ADR-0003 unless governance policy is explicitly superseded.
 
 ## Live progress tracking
 

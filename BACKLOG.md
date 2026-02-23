@@ -6,6 +6,7 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 
 | id | slice | title | priority | status | deps | owner |
 |---|---|---|---|---|---|---|
+| M28 | Maintenance | Plan Slice 16 issue-driven remediation backlog and fresh-context startup guidance | P1 | done | M27 | codex |
 | M27 | Maintenance | Re-baseline Slice 12 planning/docs for dual iteration controls and fresh-context readiness | P1 | done | M26 | codex |
 | M26 | Maintenance | Refine unfinished-slice governance again (`S9-T8`, `S12`-`S15`) and record two consecutive no-change passes | P1 | done | M25 | codex |
 | M25 | Maintenance | Optimize and embed post-slice review-improve prompt across unfinished slices | P1 | done | M24 | codex |
@@ -97,28 +98,36 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 | S11-T7 | Slice 11 | Add transport credential safety/redaction guardrails for errors and logs | P1 | done | S11-T2,S11-T3 | codex |
 | S11-T6 | Slice 11 | Sync docs and examples for transport configuration/usage and failure modes | P1 | done | S11-T4,S11-T5,S11-T7 | codex |
 | S12-T1 | Slice 12 | Define dual-control run contract (`repair_iterations_max`, `iterations_target`) and deterministic stop reasons | P0 | done | - | codex |
-| S12-T2 | Slice 12 | Implement config/runtime controls: defaults/validation for `agent.repair_iterations_max` and `agent.iterations_target` | P0 | todo | S12-T1 | codex |
-| S12-T3 | Slice 12 | Implement CLI controls: `--repair-iterations-max` and `--iterations-target` with deterministic precedence | P0 | todo | S12-T1 | codex |
-| S12-T4 | Slice 12 | Refresh run/golden/unit tests for failure-repair budget and fixed-pass target behaviors | P0 | todo | S12-T2,S12-T3 | codex |
-| S12-T6 | Slice 12 | Persist per-iteration failure logs and one terminal control reason (`target_reached|repair_budget_exhausted|stuck`) | P0 | todo | S12-T2,S12-T3 | codex |
-| S12-T5 | Slice 12 | Sync docs/templates/examples (`infrafactory.yaml`, README, SESSION_START`) to dual controls after Slice 12 implementation closure | P1 | todo | S12-T4,S12-T6 | codex |
-| S13-T1 | Slice 13 | Define application logging contract (fields/levels/redaction/output format) and rollout rules | P0 | todo | S12-T5 | codex |
-| S13-T2 | Slice 13 | Add shared logger wiring/runtime integration for all command paths and deterministic log sinks | P0 | todo | S13-T1 | codex |
-| S13-T3 | Slice 13 | Instrument `run` loop decisions and stage transitions with full iteration/run context logs and failure-class context | P0 | todo | S13-T2 | codex |
-| S13-T4 | Slice 13 | Instrument `generate`/`validate`/`test`/`mock` command logic for deterministic traceability | P0 | todo | S13-T2 | codex |
-| S13-T5 | Slice 13 | Add logging regression tests/goldens and redaction assertions | P0 | todo | S13-T3,S13-T4 | codex |
-| S13-T6 | Slice 13 | Sync operator docs and fresh-context startup guidance for logging runbook | P1 | todo | S13-T5 | codex |
-| S14-T1 | Slice 14 | Define run feedback contract so iteration N+1 receives detailed validate/test/generate failures with failure-class tagging (not coarse command errors) | P0 | todo | S13-T6 | codex |
-| S14-T2 | Slice 14 | Refactor `validate` into reusable execution path returning structured failure output for `run` feedback reuse | P0 | todo | S14-T1 | codex |
-| S14-T3 | Slice 14 | Wire `runIteration` feedback aggregation to propagate detailed stage/check/policy/resource context into `FeedbackJSON` and suppress duplicate terminal control failures | P0 | todo | S14-T2 | codex |
-| S14-T4 | Slice 14 | Add focused regression tests for feedback payload fidelity across validate/test/generate failure paths | P0 | todo | S14-T3 | codex |
-| S14-T5 | Slice 14 | Sync docs/fresh-context runbook with feedback-inspection workflow and anti-regression guardrails | P1 | todo | S14-T4 | codex |
-| S15-T1 | Slice 15 | Define adaptive retry governance contract by failure class (`iac_validation` vs `transport_runtime` vs `orchestration_control`) | P0 | todo | S14-T5 | codex |
-| S15-T2 | Slice 15 | Implement transport-dominated early-stop policy with deterministic terminal reason mapping | P0 | todo | S15-T1 | codex |
-| S15-T3 | Slice 15 | Add bounded transport retry budget/backoff and timeout-aware guidance hooks | P0 | todo | S15-T1 | codex |
-| S15-T4 | Slice 15 | Persist transport diagnostics in run artifacts (phase/timeout/signal/stderr summary/duration) | P0 | todo | S15-T2,S15-T3 | codex |
-| S15-T5 | Slice 15 | Add regression coverage for adaptive retry behavior and transport-dominated failure outcomes | P0 | todo | S15-T4 | codex |
-| S15-T6 | Slice 15 | Sync docs and fresh-context runbook for adaptive retry troubleshooting and operator actions | P1 | todo | S15-T5 | codex |
+| S12-T2 | Slice 12 | Implement config/runtime controls: defaults/validation for `agent.repair_iterations_max` and `agent.iterations_target` | P0 | done | S12-T1 | codex |
+| S12-T3 | Slice 12 | Implement CLI controls: `--repair-iterations-max` and `--iterations-target` with deterministic precedence | P0 | done | S12-T1 | codex |
+| S12-T4 | Slice 12 | Refresh run/golden/unit tests for failure-repair budget and fixed-pass target behaviors | P0 | done | S12-T2,S12-T3 | codex |
+| S12-T6 | Slice 12 | Persist per-iteration failure logs and one terminal control reason (`target_reached|repair_budget_exhausted|stuck`) | P0 | done | S12-T2,S12-T3 | codex |
+| S12-T5 | Slice 12 | Sync docs/templates/examples (`infrafactory.yaml`, README, SESSION_START`) to dual controls after Slice 12 implementation closure | P1 | done | S12-T4,S12-T6 | codex |
+| S13-T1 | Slice 13 | Define application logging contract (fields/levels/redaction/output format) and rollout rules | P0 | done | S12-T5 | codex |
+| S13-T2 | Slice 13 | Add shared logger wiring/runtime integration for all command paths and deterministic log sinks | P0 | done | S13-T1 | codex |
+| S13-T3 | Slice 13 | Instrument `run` loop decisions and stage transitions with full iteration/run context logs and failure-class context | P0 | done | S13-T2 | codex |
+| S13-T4 | Slice 13 | Instrument `generate`/`validate`/`test`/`mock` command logic for deterministic traceability | P0 | done | S13-T2 | codex |
+| S13-T5 | Slice 13 | Add logging regression tests/goldens and redaction assertions | P0 | done | S13-T3,S13-T4 | codex |
+| S13-T6 | Slice 13 | Sync operator docs and fresh-context startup guidance for logging runbook | P1 | done | S13-T5 | codex |
+| S14-T1 | Slice 14 | Define run feedback contract so iteration N+1 receives detailed validate/test/generate failures with failure-class tagging (not coarse command errors) | P0 | done | S13-T6 | codex |
+| S14-T2 | Slice 14 | Refactor `validate` into reusable execution path returning structured failure output for `run` feedback reuse | P0 | done | S14-T1 | codex |
+| S14-T3 | Slice 14 | Wire `runIteration` feedback aggregation to propagate detailed stage/check/policy/resource context into `FeedbackJSON` and suppress duplicate terminal control failures | P0 | done | S14-T2 | codex |
+| S14-T4 | Slice 14 | Add focused regression tests for feedback payload fidelity across validate/test/generate failure paths | P0 | done | S14-T3 | codex |
+| S14-T5 | Slice 14 | Sync docs/fresh-context runbook with feedback-inspection workflow and anti-regression guardrails | P1 | done | S14-T4 | codex |
+| S15-T1 | Slice 15 | Define adaptive retry governance contract by failure class (`iac_validation` vs `transport_runtime` vs `orchestration_control`) | P0 | done | S14-T5 | codex |
+| S15-T2 | Slice 15 | Implement transport-dominated early-stop policy with deterministic terminal reason mapping | P0 | done | S15-T1 | codex |
+| S15-T3 | Slice 15 | Add bounded transport retry budget/backoff and timeout-aware guidance hooks | P0 | done | S15-T1 | codex |
+| S15-T4 | Slice 15 | Persist transport diagnostics in run artifacts (phase/timeout/signal/stderr summary/duration) | P0 | done | S15-T2,S15-T3 | codex |
+| S15-T5 | Slice 15 | Add regression coverage for adaptive retry behavior and transport-dominated failure outcomes | P0 | done | S15-T4 | codex |
+| S15-T6 | Slice 15 | Sync docs and fresh-context runbook for adaptive retry troubleshooting and operator actions | P1 | done | S15-T5 | codex |
+| S16-T1 | Slice 16 | Propagate `cmd.Context()` through all command handlers and runtime operations | P0 | in_progress | S15-T6 | codex |
+| S16-T2 | Slice 16 | Bound Mockway state response reads to prevent unbounded memory allocation | P0 | todo | S16-T1 | codex |
+| S16-T3 | Slice 16 | Make env override injection deterministic by de-duplicating overridden keys | P0 | todo | S16-T1 | codex |
+| S16-T4 | Slice 16 | Enforce scenario schema availability (no silent validation bypass when schema path missing) | P0 | todo | S16-T1 | codex |
+| S16-T5 | Slice 16 | Clean up config decode error handling and provide explicit empty-config failure message | P1 | todo | S16-T1 | codex |
+| S16-T6 | Slice 16 | Correct policy semantics and naming regex edge-case behavior from `ISSUES.md` | P0 | todo | S16-T4 | codex |
+| S16-T7 | Slice 16 | Remove dead runtime scaffolding and make destroy-run schema assignment explicit | P1 | todo | S16-T1 | codex |
+| S16-T8 | Slice 16 | Sync docs/fresh-context guidance for issue-remediation outcomes and run closure refinement passes | P1 | todo | S16-T2,S16-T3,S16-T4,S16-T5,S16-T6,S16-T7 | codex |
 
 ## Ticket details
 
@@ -211,6 +220,14 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 | S15-T4 | `internal/runstore`, `internal/cli/run_command.go`, generator metadata adapters | output-contract redesign unrelated to diagnostics | run artifacts persist normalized transport diagnostics per failed iteration with stable schema and backward-compatible reads | runstore/schema tests + iteration artifact assertions |
 | S15-T5 | `internal/cli/run_command_test.go`, `internal/generator/*_test.go`, golden fixtures as needed | docs-only updates | regression suite covers mixed failure-class runs and ensures adaptive retry policy avoids max-iteration churn when transport failures dominate | focused unit/integration tests + golden refresh where needed |
 | S15-T6 | `README.md`, `SESSION_START.md`, `STATUS.md`, `CURRENT_TICKET.md` | runtime behavior changes | docs provide deterministic troubleshooting split (scenario/IaC fixes vs transport/runtime tuning) and fresh-context notes for adaptive retry diagnostics workflow | doc checklist assertions + hygiene checks |
+| S16-T1 | `internal/cli/*_command.go`, `internal/cli/runtime.go`, command integration tests | policy/config semantics | all command/harness/generator/mock call sites use `cmd.Context()` (or derived context) rather than `context.Background()` so signal cancellation propagates deterministically | focused command tests asserting context propagation/cancellation behavior where feasible |
+| S16-T2 | `internal/cli/mockway_client.go`, mockway client tests | topology evaluator logic | `State()` reads response bodies with bounded `io.LimitReader` and surfaces deterministic over-limit/truncated-read errors | client tests for normal state read and bounded oversized payload handling |
+| S16-T3 | `internal/cli/exec_runner.go`, exec-runner tests | runtime config loading | env overrides are applied with deterministic key de-duplication so each overridden variable appears once in subprocess env | unit tests covering duplicate base keys, override precedence, and stable env output |
+| S16-T4 | `internal/cli/runtime.go`, `internal/scenario`, runtime tests/docs | scenario schema redesign | scenario loading does not silently bypass schema validation when schema file is missing; runtime returns deterministic actionable failure or uses guaranteed embedded schema path | runtime/scenario tests for missing-schema behavior and schema-enforced validation failures |
+| S16-T5 | `internal/config/config.go`, config tests/fixtures | config schema/field contract changes | empty config files produce explicit deterministic decode failures and no redundant `io.EOF` no-op branch remains | config loader tests for empty file and malformed YAML decode failures |
+| S16-T6 | `policies/scaleway/encryption_at_rest.rego`, `policies/common/naming.rego`, policy tests/docs | CLI runtime orchestration logic | policy checks/messages align with real semantics (no versioning-as-encryption confusion) and naming rule behavior matches intended minimum-length contract | policy regression tests for bucket encryption/versioning intent and single-character naming behavior/message |
+| S16-T7 | `internal/cli/runtime.go`, `internal/harness/run_record.go`, focused tests | broader run-loop behavior changes | remove unused `notImplementedRuntime` path and explicitly set run metadata schema in destroy persistence path for consistency/auditability | compile + focused tests covering destroy-run metadata schema field |
+| S16-T8 | `README.md`, `SESSION_START.md`, `STATUS.md`, `CURRENT_TICKET.md`, `ROADMAP.md`, `BACKLOG.md` | runtime logic changes | docs reflect Slice 16 outcomes; refinement loop records one improvement pass plus two consecutive no-change passes for closure | doc checklist assertions + `bash scripts/check_all.sh` |
 
 ## Operating notes
 - Update `status` and dependencies as work evolves.

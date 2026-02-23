@@ -1,4 +1,5 @@
 agent:
-  max_iterations: 9
+  repair_iterations_max: 3
+  iterations_target: 1
 mockway:
   auto_reset: false

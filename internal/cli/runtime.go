@@ -60,6 +60,7 @@ type CommandRuntime struct {
 	Config            config.Config
 	TransportContract generator.TransportContract
 	Deps              RuntimeDependencies
+	Logger            *AppLogger
 
 	scenarioLoader func(string) (scenario.Scenario, error)
 	loadedScenario *scenario.Scenario
@@ -156,11 +157,30 @@ func withRuntimeWithOptions(op string, opts runtimeOptions, next runtimeHandler)
 		if err != nil {
 			return formatCommandError(op, err)
 		}
+		runtime.Logger.Log(LogEntry{
+			Level:   logLevelInfo,
+			Command: op,
+			Event:   "command_start",
+			Status:  "start",
+		})
 
 		err = next(cmd, args, runtime)
 		if err != nil {
+			runtime.Logger.Log(LogEntry{
+				Level:   logLevelError,
+				Command: op,
+				Event:   "command_end",
+				Status:  "failed",
+				Detail:  err.Error(),
+			})
 			return formatCommandError(op, err)
 		}
+		runtime.Logger.Log(LogEntry{
+			Level:   logLevelInfo,
+			Command: op,
+			Event:   "command_end",
+			Status:  "success",
+		})
 
 		return nil
 	}
@@ -221,6 +241,7 @@ func buildRuntime(cmd *cobra.Command, opts runtimeOptions) (*CommandRuntime, err
 		Config:            cfg,
 		TransportContract: transportContract,
 		Deps:              deps,
+		Logger:            NewAppLogger(os.Stderr),
 		scenarioLoader:    opts.scenarioLoader,
 	}, nil
 }

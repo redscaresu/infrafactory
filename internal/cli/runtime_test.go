@@ -67,6 +67,9 @@ func TestWithRuntimeLoadsConfigAndInjectsDependencies(t *testing.T) {
 		if runtime.Deps.MockState == nil {
 			t.Fatal("expected mock state dependency to be injected")
 		}
+		if runtime.Logger == nil {
+			t.Fatal("expected runtime logger to be injected")
+		}
 		return nil
 	})
 
