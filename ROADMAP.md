@@ -80,12 +80,11 @@ This file is intentionally high-level and mostly stable; day-to-day execution tr
 - Reduce heuristic post-processing in favor of model-corrected regeneration informed by concrete harness failures.
 - Strengthen run-loop convergence quality by improving failure payload fidelity and prompt integration.
 - Add focused regression tests proving feedback is injected and iteration metadata is preserved.
-- Migrate iteration contract to clearer naming and defaults:
-  - config `agent.iterations` (default `3`)
-  - CLI `--iterations` override (e.g. `10`)
-  - deterministic compatibility/deprecation path for legacy `max_iterations` / `--max-iterations`.
+- Split iteration controls into two explicit contracts:
+  - `agent.repair_iterations_max` (+ CLI `--repair-iterations-max`) for failure-triggered retry budget with model feedback.
+  - `agent.iterations_target` (+ CLI `--iterations-target`) for fixed total pass count, including passes after success.
 - Ensure failed iterations emit deterministic, structured failure summaries to app logs for each pass.
-- Ensure terminal stop signaling is deterministic and non-duplicative for a single stop event.
+- Ensure terminal stop signaling is deterministic and non-duplicative with one canonical reason (`target_reached`, `repair_budget_exhausted`, `stuck`).
 - Apply slice-closure review protocol before marking Slice 12 complete.
 
 13. Slice 13: Full application logic logging and observability
@@ -119,11 +118,12 @@ This file is intentionally high-level and mostly stable; day-to-day execution tr
 ## Near-term execution order
 
 1. Keep Slice 11 closed and stable (transport adapters + secret-safety + smoke gates).
-2. Execute Slice 12 contract-first migration (`S12-T1`) before behavior changes.
-3. Implement/configure iteration migration (`S12-T2`, `S12-T3`), add per-pass failure logging (`S12-T6`), then test/docs closure (`S12-T4`, `S12-T5`).
-4. Start Slice 13 with logging-contract definition, then implement end-to-end instrumentation and docs.
-5. Start Slice 14 with feedback-contract definition, then wire validate/run feedback fidelity and regression coverage.
-6. Start Slice 15 with retry-governance contract, then implement adaptive transport-resilience controls and diagnostics.
+2. Execute Slice 12 contract-first dual-control definition (`S12-T1`) before behavior changes.
+3. Implement/configure dual controls (`S12-T2`, `S12-T3`), add per-pass failure logging (`S12-T6`), then test/docs closure (`S12-T4`, `S12-T5`).
+4. After Slice 12 closure, run README optimization pass and repeat until two consecutive no-change passes.
+5. Start Slice 13 with logging-contract definition, then implement end-to-end instrumentation and docs.
+6. Start Slice 14 with feedback-contract definition, then wire validate/run feedback fidelity and regression coverage.
+7. Start Slice 15 with retry-governance contract, then implement adaptive transport-resilience controls and diagnostics.
 
 ## Live progress tracking
 

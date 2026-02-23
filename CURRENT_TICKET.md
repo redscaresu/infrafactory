@@ -3,67 +3,73 @@
 Use this file as the per-session execution stub.
 
 ## Ticket
-- id: M26
-- title: Refine unfinished-slice governance again (`S9-T8`, `S12`-`S15`) and record two consecutive no-change passes
+- id: M27
+- title: Re-baseline Slice 12 planning/docs for dual iteration controls and fresh-context readiness
 - status: done
 - classification: decision-impacting
 
 ## 1) Problem Statement
 - What is broken or missing?
-  Refinement guidance for unfinished slices was strong, but blocked-slice handling (`S9-T8`) was not explicitly constrained inside the same protocol.
+  Slice 12 planning and fresh-context instructions still describe single-control iteration migration (`iterations` + legacy compatibility) and do not encode the requested dual-control behavior.
 - Why does it matter now?
-  Without explicit blocked-slice scope, fresh contexts may accidentally treat blocked runtime work as implementable during refinement cycles.
+  Fresh contexts need one unambiguous contract before implementation starts, and closure workflow must explicitly include README optimization after slice completion.
 
 ## 2) Scope
 - In scope:
-  Refine unfinished-slice governance docs to explicitly constrain blocked-slice refinement scope and run the same two-consecutive no-change pass loop.
+  Add ADR for dual controls, re-baseline Slice 12 planning docs (`BACKLOG.md`, `ROADMAP.md`, `SESSION_START.md`, `STATUS.md`), and run refinement passes until two consecutive no-change outcomes.
 - Out of scope:
-  Any implementation work for blocked/runtime behavior.
+  Code implementation of Slice 12 runtime/CLI behavior.
 
 ## 3) Acceptance Criteria
-1. Blocked-slice refinement scope is explicit in backlog/session-start governance text.
-2. Unfinished-slice two-consecutive no-change protocol remains explicit for fresh contexts.
-3. Refinement log records one improvement pass and two consecutive no-change passes.
+1. Dual-control ADR is added and indexed.
+2. Slice 12 planning/fresh-context docs align to `repair_iterations_max` + `iterations_target` semantics.
+3. Refinement loop records one improvement pass and two consecutive no-change passes.
 
 ## 4) Impacted Areas
 - Packages/files changed:
+  `docs/decisions/0005-dual-iteration-controls.md`,
+  `docs/decisions/README.md`,
   `BACKLOG.md`,
+  `ROADMAP.md`,
   `SESSION_START.md`,
   `STATUS.md`,
   `CURRENT_TICKET.md`.
 - External contracts affected (CLI/schema/policy):
-  yes (durable workflow governance for unfinished/blocked slices).
+  yes (public CLI/config behavior contract and workflow governance).
 
 ## 5) Test Plan
 - Unit tests:
-  n/a (planning/docs-only change)
+  n/a (docs/ADR-only change)
 - Integration checks:
   `bash scripts/check_all.sh`
 - Manual verification:
-  verify blocked-slice governance note exists and pass outcomes are recorded in both `STATUS.md` and `CURRENT_TICKET.md`.
+  confirm Slice 12 docs consistently reference dual controls and deterministic terminal reasons.
 
 ## 6) Risks and Rollback
 - Primary risks:
-  additional governance text could become repetitive if not kept concise.
+  stale references to old Slice 12 migration semantics may remain in historical sections.
 - Rollback approach:
-  revert this refinement pass and restore prior wording.
+  revert M27 docs and restore prior planning text.
 
 ## 7) Done Definition
-- Blocked-slice refinement scope clarified.
-- Two consecutive no-change passes recorded.
-- Tracking docs updated.
+- ADR and planning docs are synchronized.
+- Two consecutive no-change refinement passes are recorded.
+- Fresh context is ready to start `S12-T2`.
 
 ## Test plan
 - `bash scripts/check_all.sh`
 
 ## Progress notes
-- Added maintenance ticket `M26` in `BACKLOG.md`.
-- Updated `BACKLOG.md` `S9-T8` details to state blocked-slice refinements are governance/docs-only unless ADR-0003 is superseded.
-- Added blocked-slice refinement instruction to `SESSION_START.md` under unfinished-slice refinement protocol.
-- Updated `STATUS.md` with `M26` completion and refinement-pass outcomes.
+- Added ADR-0005: `docs/decisions/0005-dual-iteration-controls.md`.
+- Updated ADR index in `docs/decisions/README.md`.
+- Re-baselined Slice 12 tickets/criteria in `BACKLOG.md` to dual controls and canonical terminal reasons.
+- Updated `ROADMAP.md` Slice 12 milestone and near-term order, including README optimization after Slice 12 closure.
+- Updated `SESSION_START.md` Slice 12 execution constraints and README closure rule.
+- Updated `STATUS.md` next actions and recorded refinement outcomes.
 - Refinement pass 1 improvements applied.
-- Refinement pass 2: no additional improvements identified.
-- Refinement pass 3: no additional improvements identified (second consecutive no-change pass).
+- Refinement pass 2 improvements applied: corrected tracking-state consistency in `STATUS.md` (`Current ticket` reset to `none` after ticket closure).
+- Refinement pass 3: no additional improvements identified.
+- Refinement pass 4: no additional improvements identified (second consecutive no-change pass).
 
 ## Blocker (if any)
 - blocker: none.

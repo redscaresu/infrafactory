@@ -4,9 +4,9 @@ Last updated: 2026-02-22
 
 ## Current phase
 - Active milestone: Slice 12 feedback-driven regeneration hardening (in progress)
-- Next gate: start `S12-T1` iteration contract definition and migration constraints
+- Next gate: start `S12-T2` dual-control config/runtime implementation after ADR contract freeze
 - Current ticket: none
-- Next ticket: S12-T1
+- Next ticket: S12-T2
 
 ## In progress
 - none
@@ -16,13 +16,14 @@ Last updated: 2026-02-22
 
 ## Next actions
 1. Keep `S9-T8` blocked unless ADR-0003 is explicitly superseded.
-2. Execute `S12-T1` first: lock iteration contract (`agent.iterations`, `--iterations`) and compatibility/deprecation behavior.
-3. Implement Slice 12 migration in order (`S12-T2` -> `S12-T3` -> `S12-T6` -> `S12-T4` -> `S12-T5`) once contract is approved.
-4. Start Slice 13 logging-contract work (`S13-T1`) immediately after Slice 12 closure, then execute instrumentation/logging test/doc tickets in order (`S13-T2` includes deterministic sink wiring).
-5. Start Slice 14 feedback-fidelity work (`S14-T1`) after Slice 13 closure; ensure `run` feedback preserves detailed validate/test/generate failure context with failure-class tagging for iteration retries.
-6. Start Slice 15 adaptive retry/transport-resilience work (`S15-T1`) after Slice 14 closure; ensure transport-dominated runs stop with actionable deterministic reasons instead of max-iteration churn.
-7. Maintain model-guided correction direction and avoid adding new heuristic normalization rules in `generate`.
-8. Maintain hermetic default CI posture with transport smoke tests opt-in only.
+2. Execute Slice 12 implementation in order (`S12-T2` -> `S12-T3` -> `S12-T6` -> `S12-T4` -> `S12-T5`) against ADR-0005 dual-control contract.
+3. Keep failure-retry budget (`repair_iterations_max`) and fixed pass target (`iterations_target`) semantically independent in Slice 12 implementation/tests.
+4. After Slice 12 closure, run README optimization passes and stop only after two consecutive no-change outcomes.
+5. Start Slice 13 logging-contract work (`S13-T1`) immediately after Slice 12/README closure, then execute instrumentation/logging test/doc tickets in order (`S13-T2` includes deterministic sink wiring).
+6. Start Slice 14 feedback-fidelity work (`S14-T1`) after Slice 13 closure; ensure `run` feedback preserves detailed validate/test/generate failure context with failure-class tagging for iteration retries.
+7. Start Slice 15 adaptive retry/transport-resilience work (`S15-T1`) after Slice 14 closure; ensure transport-dominated runs stop with actionable deterministic reasons instead of max-iteration churn.
+8. Maintain model-guided correction direction and avoid adding new heuristic normalization rules in `generate`.
+9. Maintain hermetic default CI posture with transport smoke tests opt-in only.
 
 ## Update policy
 - Update at end of each meaningful coding session.
@@ -32,6 +33,12 @@ Last updated: 2026-02-22
 - Keep startup/read-order instructions only in `SESSION_START.md` to avoid duplication.
 
 ## Recent updates
+- Completed maintenance ticket `M27`: re-baselined Slice 12 planning/docs to dual iteration controls and fresh-context startup needs.
+- Added ADR-0005 (`dual iteration controls`) and updated ADR index.
+- Refinement pass 1 improvements applied: synchronized `BACKLOG.md`, `ROADMAP.md`, `SESSION_START.md`, and execution notes to dual-control semantics and README-after-slice closure rule.
+- Refinement pass 2 improvements applied: corrected tracking-state consistency (`Current ticket` set back to `none` after maintenance-ticket closure).
+- Refinement pass 3: no additional improvements identified.
+- Refinement pass 4: no additional improvements identified (second consecutive no-change pass).
 - Completed maintenance ticket `M26`: refined unfinished-slice governance again (`S9-T8`, `S12`..`S15`) and completed refinement loop with two consecutive no-change passes.
 - Refinement pass 1 improvements applied: clarified blocked-slice (`S9-T8`) refinement scope as governance/docs-only unless ADR-0003 is superseded; added matching fresh-context instruction.
 - Refinement pass 2: no additional improvements identified.

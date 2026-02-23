@@ -137,11 +137,13 @@ If either command fails, restore the repo to a green baseline before starting a 
 - Canonical order:
   `S12-T1 -> (S12-T2 || S12-T3) -> S12-T6 -> S12-T4 -> S12-T5`
 - Contract-first rule:
-  do not implement config/CLI migration work before `S12-T1` freezes naming/default/compatibility semantics.
-- Compatibility rule:
-  when both `--iterations` and legacy `--max-iterations` are present, enforce deterministic precedence and warning behavior per contract tests.
+  do not implement config/CLI iteration behavior before `S12-T1` freezes dual-control semantics.
+- Dual-control rule:
+  keep failure-retry budget (`repair_iterations_max`) and fixed total pass target (`iterations_target`) semantically independent.
 - Stop-signal rule:
-  emit one canonical terminal stop reason for a single stop event; avoid dual stuck/max markers in output/logs/artifacts.
+  emit one canonical terminal stop reason for a single stop event; avoid dual control markers in output/logs/artifacts.
+- README closure rule:
+  after Slice 12 implementation closure (`S12-T5` done), run README optimization passes until two consecutive no-change outcomes are recorded.
 
 ### Slice 13 default execution constraints
 - Canonical order:
