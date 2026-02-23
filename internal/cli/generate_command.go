@@ -149,12 +149,17 @@ func toFeedbackFailuresPayload(in []FailureSummary) []feedbackFailure {
 }
 
 func generateAndWriteFiles(ctx context.Context, runtime *CommandRuntime, scenarioPath string, iteration int, feedbackFailures []FailureSummary) (int, error) {
+	written, _, err := generateAndWriteFilesWithResult(ctx, runtime, scenarioPath, iteration, feedbackFailures)
+	return written, err
+}
+
+func generateAndWriteFilesWithResult(ctx context.Context, runtime *CommandRuntime, scenarioPath string, iteration int, feedbackFailures []FailureSummary) (int, *generator.GeneratedCode, error) {
 	scenarioPayload, err := os.ReadFile(scenarioPath)
 	if err != nil {
-		return 0, fmt.Errorf("read scenario %q: %w", scenarioPath, err)
+		return 0, nil, fmt.Errorf("read scenario %q: %w", scenarioPath, err)
 	}
 	if runtime.Deps.Generator == nil {
-		return 0, fmt.Errorf("generator dependency unavailable: %w", ErrDependencyUnavailable)
+		return 0, nil, fmt.Errorf("generator dependency unavailable: %w", ErrDependencyUnavailable)
 	}
 
 	var feedbackPayload []byte
@@ -165,7 +170,7 @@ func generateAndWriteFiles(ctx context.Context, runtime *CommandRuntime, scenari
 			Failures: toFeedbackFailuresPayload(feedbackFailures),
 		})
 		if err != nil {
-			return 0, fmt.Errorf("encode generate feedback payload: %w", err)
+			return 0, nil, fmt.Errorf("encode generate feedback payload: %w", err)
 		}
 	}
 
@@ -176,16 +181,20 @@ func generateAndWriteFiles(ctx context.Context, runtime *CommandRuntime, scenari
 		Iteration:    iteration,
 	})
 	if err != nil {
-		return 0, fmt.Errorf("generate code: %w", err)
+		return 0, nil, fmt.Errorf("generate code: %w", err)
 	}
 	if err := generated.Validate(); err != nil {
-		return 0, fmt.Errorf("validate generated files: %w", err)
+		return 0, nil, fmt.Errorf("validate generated files: %w", err)
 	}
 	ensureScalewayProviderWiring(generated.Files)
 	if err := validateScalewayProviderWiring(generated.Files); err != nil {
-		return 0, fmt.Errorf("validate generated files: %w", err)
+		return 0, nil, fmt.Errorf("validate generated files: %w", err)
 	}
-	return writeGeneratedFiles(runtime.OutputDir(), generated.Files)
+	written, err := writeGeneratedFiles(runtime.OutputDir(), generated.Files)
+	if err != nil {
+		return 0, nil, err
+	}
+	return written, generated, nil
 }
 
 func writeGeneratedFiles(outputDir string, files map[string][]byte) (int, error) {

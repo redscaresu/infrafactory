@@ -147,7 +147,6 @@ func newRunCmd() *cobra.Command {
 	}
 
 	cmd.Flags().Int("repair-iterations-max", 0, "Override failure-triggered retry budget for run loop (0 uses config)")
-	cmd.Flags().Int("iterations-target", 0, "Override total desired pass count for run loop (0 uses config)")
 
 	return cmd
 }

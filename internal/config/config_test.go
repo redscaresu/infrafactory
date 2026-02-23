@@ -25,9 +25,6 @@ func TestLoadValidConfigAppliesDefaults(t *testing.T) {
 	if cfg.Agent.RepairIterationsMax != 5 {
 		t.Fatalf("expected default repair_iterations_max 5, got %d", cfg.Agent.RepairIterationsMax)
 	}
-	if cfg.Agent.IterationsTarget != 1 {
-		t.Fatalf("expected default iterations_target 1, got %d", cfg.Agent.IterationsTarget)
-	}
 	if cfg.Agent.Claude.Command != "claude" {
 		t.Fatalf("expected default agent.claude.command claude, got %q", cfg.Agent.Claude.Command)
 	}
@@ -59,7 +56,6 @@ func TestLoadAgentTransportValidationFailures(t *testing.T) {
 agent:
   type: claude-code
   repair_iterations_max: 1
-  iterations_target: 1
   phase_delay_seconds: -1
 mockway:
   url: http://localhost:8080
@@ -72,7 +68,6 @@ mockway:
 agent:
   type: claude-code
   repair_iterations_max: 1
-  iterations_target: 1
   phases:
     - plan_architecture
     - bad_phase
@@ -88,7 +83,6 @@ mockway:
 agent:
   type: openrouter
   repair_iterations_max: 1
-  iterations_target: 1
   openrouter:
     timeout_seconds: 0
     max_retries: -1
@@ -107,7 +101,6 @@ mockway:
 agent:
   type: claude-code
   repair_iterations_max: 1
-  iterations_target: 1
   claude:
     command: ""
 mockway:
@@ -121,7 +114,6 @@ mockway:
 agent:
   type: claude-code
   repair_iterations_max: 1
-  iterations_target: 1
   claude:
     command: claude
     phase_timeout_seconds: 0
@@ -188,17 +180,6 @@ mockway:
 `,
 			expectedField: "agent.repair_iterations_max",
 		},
-		{
-			name: "iterations target invalid",
-			yaml: `version: "1.0"
-agent:
-  type: claude-code
-  iterations_target: 0
-mockway:
-  url: http://localhost:8080
-`,
-			expectedField: "agent.iterations_target",
-		},
 	}
 
 	for _, tc := range cases {
@@ -246,7 +227,6 @@ func TestLoadOpenRouterConfigDefaultsAndOverrides(t *testing.T) {
 		`agent:`,
 		`  type: openrouter`,
 		`  repair_iterations_max: 2`,
-		`  iterations_target: 2`,
 		`  openrouter:`,
 		`    model: anthropic/claude-3.5-sonnet`,
 		`mockway:`,

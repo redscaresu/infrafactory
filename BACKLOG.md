@@ -6,6 +6,9 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 
 | id | slice | title | priority | status | deps | owner |
 |---|---|---|---|---|---|---|
+| M32 | Maintenance | Harden self-review convergence and stuck-signature specificity for run-loop retries | P1 | done | M31 | codex |
+| M31 | Maintenance | Add run-loop feedback observability for model input and sanitize validation stderr signal | P1 | done | M30 | codex |
+| M30 | Maintenance | Hard cutover run loop to failure-only retries (remove `iterations_target`) | P1 | done | S17-T1 | codex |
 | M29 | Maintenance | Scope opt-in LLM raw stage-response capture ticket with redaction/size safeguards and closure-pass notes | P1 | done | M28 | codex |
 | M28 | Maintenance | Plan Slice 16 issue-driven remediation backlog and fresh-context startup guidance | P1 | done | M27 | codex |
 | M27 | Maintenance | Re-baseline Slice 12 planning/docs for dual iteration controls and fresh-context readiness | P1 | done | M26 | codex |
@@ -52,7 +55,7 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 | S5-T2 | Slice 5 | Implement run store persistence on disk | P4 | done | S5-T1 | codex |
 | S5-T3 | Slice 5 | Add destroy/run-store tests | P4 | done | S5-T2 | codex |
 | S6-T1 | Slice 6 | Implement feedback loop + max-iteration control | P5 | done | S5-T3 | codex |
-| S6-T2 | Slice 6 | Implement stuck detection using failure-signature subset logic | P5 | done | S6-T1 | codex |
+| S6-T2 | Slice 6 | Implement stuck detection using failure-signature subset logic (`check`+`resource`+`detail`) | P5 | done | S6-T1 | codex |
 | S6-T3 | Slice 6 | Implement criteria-only holdout flow | P5 | done | S6-T2 | codex |
 | S7-T1 | Slice 7 | Wire `init` command scaffold generation + next-step output | P0 | done | S6-T3 | codex |
 | S7-T2 | Slice 7 | Add shared CLI runtime/context builder and command error formatter | P0 | done | S7-T1 | codex |
@@ -129,7 +132,7 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 | S16-T6 | Slice 16 | Correct policy semantics and naming regex edge-case behavior from `ISSUES.md` | P0 | done | S16-T4 | codex |
 | S16-T7 | Slice 16 | Remove dead runtime scaffolding and make destroy-run schema assignment explicit | P1 | done | S16-T1 | codex |
 | S16-T8 | Slice 16 | Sync docs/fresh-context guidance for issue-remediation outcomes and run closure refinement passes | P1 | done | S16-T2,S16-T3,S16-T4,S16-T5,S16-T6,S16-T7 | codex |
-| S17-T1 | Slice 17 | Add opt-in per-iteration/per-phase LLM raw response capture artifacts with redaction and size caps | P1 | todo | M29 | codex |
+| S17-T1 | Slice 17 | Add opt-in per-iteration/per-phase LLM raw response capture artifacts with redaction and size caps | P1 | done | M29 | codex |
 
 ## Ticket details
 
@@ -153,7 +156,7 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 | S5-T2 | filesystem run-store implementation in `internal/runstore` | DB/CXDB backends | run metadata and iteration artifacts persist under `.infrafactory/runs/` with deterministic paths | runstore write/read/list tests with temp dirs |
 | S5-T3 | destroy/run-store combined tests | Slice 6 convergence logic | destruction results and run-store persistence integrate without hidden side effects | end-to-end unit tests for run record creation on success/failure |
 | S6-T1 | feedback loop orchestration + max iteration control in `internal/feedback`/`internal/harness` | holdout-specific logic | loop stops on success or max-iteration threshold; iteration outputs persisted | convergence success test; max-iteration stop test |
-| S6-T2 | stuck detection using failure signature subset comparison | holdout execution | loop aborts when failures are unchanged subset according to contract | failure-signature comparator tests with subset/non-subset cases |
+| S6-T2 | stuck detection using failure signature subset comparison (`check`+`resource`+`detail`) | holdout execution | loop aborts only when failures are unchanged/subset-equivalent by signature including detail context | failure-signature comparator tests with subset/non-subset and same-check-different-detail cases |
 | S6-T3 | criteria-only holdout discovery and execution flow | full holdout contract changes | criteria-only holdouts auto-discovered by reference and block without feedback injection | holdout discovery tests; block-without-feedback tests |
 | S7-T1 | `internal/cli`, `internal/scenario`, templates/scaffold helpers | generator/harness orchestration | `infrafactory init` writes minimal valid scaffold and prints deterministic next steps | scaffold file content tests; command output tests |
 | S7-T2 | `internal/cli` shared runtime/context builder + error formatter + dependency injection points | command-specific orchestration logic | shared command setup loads config/scenario/output context once, provides injectable command dependencies (generator/harness/mock clients), and returns standardized CLI-facing errors | runtime builder tests; dependency-injection tests; error-format tests |

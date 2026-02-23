@@ -1,7 +1,7 @@
 # ADR-0005: Dual Iteration Controls for Run Loop
 
 ## Status
-Accepted
+Superseded by ADR-0006
 
 ## Context
 

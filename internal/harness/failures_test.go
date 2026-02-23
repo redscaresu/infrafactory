@@ -3,6 +3,7 @@ package harness
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -72,5 +73,24 @@ func TestStaticFailureFromError(t *testing.T) {
 				t.Fatalf("expected command to be populated: %+v", failure)
 			}
 		})
+	}
+}
+
+func TestStageFailureDetailSanitizesANSIAndTruncates(t *testing.T) {
+	t.Parallel()
+
+	stderr := "\x1b[31mError:\x1b[0m invalid value"
+	detail := stageFailureDetail(errors.New("validate failed"), stderr)
+	if strings.Contains(detail, "\x1b[31m") {
+		t.Fatalf("expected ansi escapes removed, got %q", detail)
+	}
+	if !strings.Contains(detail, "Error: invalid value") {
+		t.Fatalf("expected normalized stderr text, got %q", detail)
+	}
+
+	long := strings.Repeat("a", failureStderrMaxChars+10)
+	detail = stageFailureDetail(errors.New("validate failed"), long)
+	if !strings.HasSuffix(detail, "...") {
+		t.Fatalf("expected truncated stderr suffix, got %q", detail)
 	}
 }

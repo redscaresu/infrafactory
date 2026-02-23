@@ -38,7 +38,6 @@ Usage:
 Flags:
       --config string                (default "./infrafactory.yaml")
   -h, --help                        help for run
-      --iterations-target int       
       --output string                (default "human")
       --repair-iterations-max int
 

@@ -67,6 +67,102 @@ resource "x" "new" {}`,
 			},
 		},
 		{
+			name:  "trailing bold prose is stripped",
+			input: "# File: outputs.tf\noutput \"id\" {\n  value = \"abc\"\n}\n\n**Key fixes from the previous iteration:** The validation errors...",
+			expected: map[string]string{
+				"outputs.tf": "output \"id\" {\n  value = \"abc\"\n}",
+			},
+		},
+		{
+			name:  "trailing horizontal rule and prose is stripped",
+			input: "# File: outputs.tf\noutput \"id\" {\n  value = \"abc\"\n}\n---\nSome explanation here.",
+			expected: map[string]string{
+				"outputs.tf": "output \"id\" {\n  value = \"abc\"\n}",
+			},
+		},
+		{
+			name:  "trailing bullet list is stripped",
+			input: "# File: main.tf\nresource \"x\" \"y\" {}\n\n- **All resources defined** in every file\n- Second bullet point",
+			expected: map[string]string{
+				"main.tf": "resource \"x\" \"y\" {}",
+			},
+		},
+		{
+			name:  "trailing blockquote is stripped",
+			input: "# File: main.tf\nresource \"x\" \"y\" {}\n\n> Note: this implementation...",
+			expected: map[string]string{
+				"main.tf": "resource \"x\" \"y\" {}",
+			},
+		},
+		{
+			name:  "fenced content with trailing bold prose after fence",
+			input: "# File: outputs.tf\n```hcl\noutput \"x\" {\n  value = \"ok\"\n}\n```\n\n**Key points about this implementation:**\n- All resources defined",
+			expected: map[string]string{
+				"outputs.tf": "output \"x\" {\n  value = \"ok\"\n}",
+			},
+		},
+		{
+			name: "heredoc with cloud-init YAML preserved",
+			input: `# File: compute.tf
+resource "scaleway_instance_server" "web" {
+  type  = "DEV1-S"
+  image = "ubuntu_focal"
+
+  user_data = <<-EOF
+---
+packages:
+  - nginx
+  - curl
+runcmd:
+  - systemctl start nginx
+EOF
+}`,
+			expected: map[string]string{
+				"compute.tf": "resource \"scaleway_instance_server\" \"web\" {\n  type  = \"DEV1-S\"\n  image = \"ubuntu_focal\"\n\n  user_data = <<-EOF\n---\npackages:\n  - nginx\n  - curl\nruncmd:\n  - systemctl start nginx\nEOF\n}",
+			},
+		},
+		{
+			name: "heredoc with bullet items preserved",
+			input: `# File: main.tf
+resource "null_resource" "readme" {
+  provisioner "local-exec" {
+    command = <<EOT
+cat > README.md <<'INNER'
+- first item
+- second item
+> blockquote
+**bold line**
+INNER
+EOT
+  }
+}`,
+			expected: map[string]string{
+				"main.tf": "resource \"null_resource\" \"readme\" {\n  provisioner \"local-exec\" {\n    command = <<EOT\ncat > README.md <<'INNER'\n- first item\n- second item\n> blockquote\n**bold line**\nINNER\nEOT\n  }\n}",
+			},
+		},
+		{
+			name: "heredoc preserved but trailing prose after HCL still stripped",
+			input: `# File: compute.tf
+resource "scaleway_instance_server" "web" {
+  user_data = <<-EOF
+---
+- name: install nginx
+EOF
+}
+
+**Key fixes from the previous iteration:** fixed resources`,
+			expected: map[string]string{
+				"compute.tf": "resource \"scaleway_instance_server\" \"web\" {\n  user_data = <<-EOF\n---\n- name: install nginx\nEOF\n}",
+			},
+		},
+		{
+			name:  "fenced heredoc content preserved",
+			input: "# File: compute.tf\n```hcl\nresource \"x\" \"y\" {\n  data = <<EOF\n---\n- item\nEOF\n}\n```\n\n**Explanation of changes:**",
+			expected: map[string]string{
+				"compute.tf": "resource \"x\" \"y\" {\n  data = <<EOF\n---\n- item\nEOF\n}",
+			},
+		},
+		{
 			name:        "missing headers",
 			input:       `resource "x" "y" {}`,
 			expectedErr: ErrParseFailed,

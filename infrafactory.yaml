@@ -3,7 +3,6 @@ version: "1.0"
 agent:
   type: claude-code          # claude-code | openrouter
   repair_iterations_max: 5   # failure-triggered retry budget in run loop
-  iterations_target: 1       # total desired passes, including passes after success
   phase_delay_seconds: 0     # delay between claude -p calls (increase if rate limited)
   phases:
     - plan_architecture

@@ -129,7 +129,7 @@ func TestClaudeSeedGeneratorSelfReviewOverridesFiles(t *testing.T) {
 	runner := &fakeClaudeRunner{
 		outputs: []string{
 			`{"region":"fr-par"}`,
-			"# File: main.tf\nterraform {}",
+			"# File: main.tf\nterraform {}\n# File: variables.tf\nvariable \"region\" {}",
 			"# File: main.tf\nterraform {\n  required_version = \">= 1.6\"\n}",
 		},
 	}
@@ -153,6 +153,9 @@ func TestClaudeSeedGeneratorSelfReviewOverridesFiles(t *testing.T) {
 	}
 	if !strings.Contains(string(out.Files["main.tf"]), "required_version") {
 		t.Fatalf("expected self-review override to be applied, got %q", string(out.Files["main.tf"]))
+	}
+	if string(out.Files["variables.tf"]) != `variable "region" {}` {
+		t.Fatalf("expected unmodified files from generate_hcl to be retained, got %q", string(out.Files["variables.tf"]))
 	}
 }
 
@@ -332,7 +335,7 @@ func TestClaudeSeedGeneratorProgressLogging(t *testing.T) {
 	}
 }
 
-func TestClaudeSeedGeneratorSelfReviewNoFileBlocksFallsBackToPhase2Files(t *testing.T) {
+func TestClaudeSeedGeneratorSelfReviewNoFileBlocksReturnsError(t *testing.T) {
 	t.Parallel()
 
 	promptsDir := writeClaudePromptFixtures(t)
@@ -343,26 +346,21 @@ func TestClaudeSeedGeneratorSelfReviewNoFileBlocksFallsBackToPhase2Files(t *test
 			"Review notes only; no file blocks",
 		},
 	}
-	var progress bytes.Buffer
 	gen, err := NewClaudeSeedGenerator(ClaudeTransportConfig{
-		Command:        "claude",
-		PromptsDir:     promptsDir,
-		Phases:         []string{PhasePlanArchitecture, PhaseGenerateHCL, PhaseSelfReview},
-		ProgressWriter: &progress,
+		Command:    "claude",
+		PromptsDir: promptsDir,
+		Phases:     []string{PhasePlanArchitecture, PhaseGenerateHCL, PhaseSelfReview},
 	}, runner)
 	if err != nil {
 		t.Fatalf("new generator: %v", err)
 	}
 
-	out, err := gen.Generate(context.Background(), Request{ScenarioYAML: []byte("scenario: smoke")})
-	if err != nil {
-		t.Fatalf("generate: %v", err)
+	_, err = gen.Generate(context.Background(), Request{ScenarioYAML: []byte("scenario: smoke")})
+	if err == nil {
+		t.Fatal("expected error when self_review has no file blocks")
 	}
-	if string(out.Files["main.tf"]) != "terraform {}" {
-		t.Fatalf("expected phase2 files to be retained, got %q", string(out.Files["main.tf"]))
-	}
-	if !strings.Contains(progress.String(), `fallback: no file blocks; retaining prior files`) {
-		t.Fatalf("expected fallback progress log, got:\n%s", progress.String())
+	if !errors.Is(err, ErrParseFailed) {
+		t.Fatalf("expected ErrParseFailed, got %v", err)
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/redscaresu/infrafactory/internal/feedback"
+	"github.com/redscaresu/infrafactory/internal/generator"
 	"github.com/redscaresu/infrafactory/internal/runstore"
 	"github.com/redscaresu/infrafactory/internal/scenario"
 	"github.com/spf13/cobra"
@@ -22,7 +23,6 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 		return err
 	}
 	repairIterationsMax := controls.RepairIterationsMax
-	iterationsTarget := controls.IterationsTarget
 
 	sc, err := runtime.LoadScenario(scenarioPath)
 	if err != nil {
@@ -72,7 +72,7 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 		Event:   "run_start",
 		Status:  "start",
 		RunID:   runID,
-		Detail:  fmt.Sprintf("repair_iterations_max=%d iterations_target=%d", repairIterationsMax, iterationsTarget),
+		Detail:  fmt.Sprintf("repair_iterations_max=%d", repairIterationsMax),
 	})
 
 	allStages := make([]StageSummary, 0)
@@ -85,8 +85,9 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 	lastIterationFailed := false
 	failedIterations := 0
 	consecutiveTransportFailures := 0
+	captureLLMRaw := llmRawCaptureEnabled()
 
-	for iteration := 1; iteration <= iterationsTarget; iteration++ {
+	for iteration := 1; ; iteration++ {
 		runtime.Logger.Log(LogEntry{
 			Level:     logLevelInfo,
 			Command:   "run",
@@ -96,7 +97,7 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 			Iteration: iteration,
 		})
 		completed = iteration
-		stages, failures := runIteration(cmd.Context(), runID, iteration, scenarioPath, cmd, runtime, previousIterationFailures)
+		stages, failures := runIteration(cmd.Context(), runID, iteration, sc.Name, scenarioPath, cmd, runtime, store, captureLLMRaw, previousIterationFailures)
 		allStages = append(allStages, stages...)
 
 		if err := persistRunIteration(store, sc.Name, runID, iteration, stages, failures); err != nil {
@@ -107,6 +108,7 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 			lastIterationFailed = false
 			previousFailures = nil
 			previousIterationFailures = previousIterationFailures[:0]
+			terminalReason = "target_reached"
 			runtime.Logger.Log(LogEntry{
 				Level:     logLevelInfo,
 				Command:   "run",
@@ -115,7 +117,7 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 				RunID:     runID,
 				Iteration: iteration,
 			})
-			continue
+			break
 		}
 
 		lastIterationFailed = true
@@ -177,16 +179,6 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 		}
 	}
 
-	if terminalReason == "" && lastIterationFailed {
-		terminalReason = "repair_budget_exhausted"
-		allFailures = append(allFailures, FailureSummary{
-			Layer:   "run",
-			Stage:   fmt.Sprintf("iteration_%d", completed),
-			Check:   "repair_budget_exhausted",
-			Command: "run loop",
-			Detail:  fmt.Sprintf("reached iterations target (%d) with unresolved failures", iterationsTarget),
-		})
-	}
 	if terminalReason == "" && !lastIterationFailed {
 		terminalReason = "target_reached"
 	}
@@ -313,7 +305,18 @@ func resolveRunStoreRoot() string {
 	return runstore.DefaultRoot
 }
 
-func runIteration(ctx context.Context, runID string, iteration int, scenarioPath string, cmd *cobra.Command, runtime *CommandRuntime, previousIterationFailures []FailureSummary) ([]StageSummary, []FailureSummary) {
+func runIteration(
+	ctx context.Context,
+	runID string,
+	iteration int,
+	scenarioName string,
+	scenarioPath string,
+	cmd *cobra.Command,
+	runtime *CommandRuntime,
+	store *runstore.FilesystemStore,
+	captureLLMRaw bool,
+	previousIterationFailures []FailureSummary,
+) ([]StageSummary, []FailureSummary) {
 	stages := make([]StageSummary, 0, 3)
 	failures := make([]FailureSummary, 0)
 
@@ -346,7 +349,11 @@ func runIteration(ctx context.Context, runID string, iteration int, scenarioPath
 		} else {
 			switch step.name {
 			case "generate":
-				_, err = generateAndWriteFiles(ctx, runtime, scenarioPath, iteration, previousIterationFailures)
+				var generated *generator.GeneratedCode
+				_, generated, err = generateAndWriteFilesWithResult(ctx, runtime, scenarioPath, iteration, previousIterationFailures)
+				if err == nil && captureLLMRaw {
+					err = persistLLMRawPhaseResponses(store, scenarioName, runID, iteration, generated.Metadata.Phases)
+				}
 			case "validate":
 				testResult, err = executeValidate(ctx, runtime, scenarioPath)
 			default:
@@ -481,7 +488,6 @@ func runCriteriaOnlyHoldouts(ctx context.Context, runtime *CommandRuntime, train
 
 type runControls struct {
 	RepairIterationsMax int
-	IterationsTarget    int
 }
 
 const transportFailureRetryBudget = 2
@@ -492,28 +498,16 @@ func resolveRunControls(cmd *cobra.Command, runtime *CommandRuntime) (runControl
 		return runControls{}, &CLIError{Op: "run", Code: errorCodeUsage, Err: fmt.Errorf("read --repair-iterations-max flag: %w", err)}
 	}
 
-	iterationsTarget, err := cmd.Flags().GetInt("iterations-target")
-	if err != nil {
-		return runControls{}, &CLIError{Op: "run", Code: errorCodeUsage, Err: fmt.Errorf("read --iterations-target flag: %w", err)}
-	}
-
 	if repairMax == 0 {
 		repairMax = runtime.Config.Agent.RepairIterationsMax
-	}
-	if iterationsTarget == 0 {
-		iterationsTarget = runtime.Config.Agent.IterationsTarget
 	}
 
 	if repairMax < 1 {
 		return runControls{}, &CLIError{Op: "run", Code: errorCodeUsage, Err: fmt.Errorf("repair iterations max must be >= 1")}
 	}
-	if iterationsTarget < 1 {
-		return runControls{}, &CLIError{Op: "run", Code: errorCodeUsage, Err: fmt.Errorf("iterations target must be >= 1")}
-	}
 
 	return runControls{
 		RepairIterationsMax: repairMax,
-		IterationsTarget:    iterationsTarget,
 	}, nil
 }
 
@@ -523,6 +517,7 @@ func toFeedbackFailures(failures []FailureSummary) []feedback.Failure {
 		out = append(out, feedback.Failure{
 			Check:    failure.Check,
 			Resource: failure.Resource,
+			Detail:   failure.Detail,
 		})
 	}
 	return out

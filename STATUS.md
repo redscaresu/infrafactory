@@ -3,10 +3,10 @@
 Last updated: 2026-02-23
 
 ## Current phase
-- Active milestone: post-Slice 16 targeted observability planning (ticketed)
-- Next gate: execute `S17-T1` scoped opt-in LLM raw response capture with redaction and size caps.
+- Active milestone: post-Slice 17 run-loop convergence hardening (completed)
+- Next gate: no unblocked backlog tickets remain (`S9-T8` is still blocked by ADR-0003 governance).
 - Current ticket: none
-- Next ticket: S17-T1
+- Next ticket: none (await new ticket or governance change)
 
 ## In progress
 - none
@@ -15,9 +15,9 @@ Last updated: 2026-02-23
 - `S9-T8` sandbox/live deploy layer is permanently blocked by governance policy (ADR-0003).
 
 ## Next actions
-1. Execute `S17-T1` (opt-in LLM raw stage-response capture artifacts with redaction + byte caps).
-2. Keep `S9-T8` blocked unless ADR-0003 is explicitly superseded.
-3. Keep regression baseline green (`go test ./...`, `bash scripts/check_all.sh`).
+1. Keep `S9-T8` blocked unless ADR-0003 is explicitly superseded.
+2. Keep regression baseline green (`go test ./...`, `bash scripts/check_all.sh`).
+3. Queue next unblocked backlog ticket when available.
 
 ## Update policy
 - Update at end of each meaningful coding session.
@@ -27,6 +27,27 @@ Last updated: 2026-02-23
 - Keep startup/read-order instructions only in `SESSION_START.md` to avoid duplication.
 
 ## Recent updates
+- Completed maintenance ticket `M32`: fixed generator convergence regressions by making self-review updates merge with prior generated files (no full-file-set replacement when self-review returns partial corrections).
+- `M32` run-loop signal-quality update: stuck detection now compares signatures with `check` + `resource` + `detail`, preventing false-positive `stuck` stops when only check/resource match but failure details evolve.
+- `M32` adapter consistency: removed Claude no-file-block fallback earlier and aligned both adapters on strict self-review parse failure semantics; added follow-up hardening for partial-file merge behavior.
+- Verification after `M32`: `go test ./internal/generator ./internal/cli ./internal/feedback` passed.
+- Completed maintenance ticket `M31`: added run-loop feedback observability by capturing per-phase prompt artifacts (`llm_prompt_<phase>.json`) alongside raw phase responses (`llm_raw_<phase>.json`) in opt-in capture mode.
+- `M31` signal-quality update: static validation failure stderr is now ANSI-sanitized and retains a larger actionable excerpt before entering run feedback payloads.
+- `M31` review pass 1: implemented prompt-capture + stderr-signal improvements.
+- `M31` review pass 2: no additional improvements identified.
+- `M31` review pass 3: no additional improvements identified (second consecutive no-change pass).
+- Verification after `M31`: `go test ./internal/cli ./internal/harness ./internal/generator` passed.
+- README review pass 1 (post-M30): added missing docs for failure-only retry semantics, raw LLM capture usage/artifact paths, and one-command `scripts/full_flow.sh` workflow.
+- README review pass 2: no additional improvements identified.
+- README review pass 3: no additional improvements identified (second consecutive no-change pass).
+- Completed maintenance ticket `M30`: hard cutover to failure-only run retries by removing `agent.iterations_target` and CLI flag `--iterations-target`.
+- `M30` runtime contract: `run` now stops on first successful iteration (`target_reached`) and retries only on failures under `repair_iterations_max` plus existing `stuck`/transport stop guards.
+- `M30` docs/contracts: added ADR-0006 and marked ADR-0005 as superseded; synced README/ROADMAP/SESSION_START and command help goldens.
+- Verification after `M30`: `go test ./internal/cli ./internal/config`, `go test ./...`, and `bash scripts/check_all.sh` all passed.
+- Completed `S17-T1`: added opt-in (`INFRAFACTORY_CAPTURE_LLM_RAW=1`) per-iteration/per-phase raw LLM response artifacts in runstore with deterministic naming (`llm_raw_<phase>.json`) and metadata envelope (`infrafactory.run.llm_raw.v1`).
+- `S17-T1` safeguards: deterministic secret-like redaction and hard byte caps with explicit truncation marker are now enforced before artifact persistence.
+- `S17-T1` tests: added focused coverage for disabled-by-default behavior, enabled artifact writes, redaction, truncation/size caps, and phase-name sanitization.
+- Verification after `S17-T1`: `go test ./internal/cli ./internal/generator`, `go test ./...`, and `bash scripts/check_all.sh` all pass.
 - Fresh-context approach pass 1: documented concrete `S17-T1` implementation playbook in `SESSION_START.md` (env-gated activation, artifact contract, redaction/size-cap rules, and focused test matrix).
 - Fresh-context approach pass 2: no additional improvements identified.
 - Completed maintenance ticket `M29`: scoped `S17-T1` for opt-in per-iteration/per-phase raw LLM response capture with explicit redaction and size-cap guardrails.

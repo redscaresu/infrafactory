@@ -43,6 +43,7 @@ type GenerationMetadata struct {
 
 type PhaseResult struct {
 	Name   string
+	Prompt []byte
 	Output []byte
 }
 

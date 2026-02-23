@@ -51,6 +51,26 @@ func TestIsStuck(t *testing.T) {
 			current:  []Failure{},
 			expected: false,
 		},
+		{
+			name: "same check and resource but different detail is not stuck",
+			previous: []Failure{
+				{Check: "validate", Detail: "Error: Reference to undeclared resource on compute.tf"},
+			},
+			current: []Failure{
+				{Check: "validate", Detail: "Error: Unsupported attribute on loadbalancer.tf"},
+			},
+			expected: false,
+		},
+		{
+			name: "same check resource and detail is stuck",
+			previous: []Failure{
+				{Check: "validate", Detail: "Error: Reference to undeclared resource on compute.tf"},
+			},
+			current: []Failure{
+				{Check: "validate", Detail: "Error: Reference to undeclared resource on compute.tf"},
+			},
+			expected: true,
+		},
 	}
 
 	for _, tc := range cases {

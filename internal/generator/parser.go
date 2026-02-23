@@ -8,6 +8,24 @@ import (
 )
 
 var fileHeaderPattern = regexp.MustCompile(`^#\s*File:\s*(.+)\s*$`)
+var heredocOpenPattern = regexp.MustCompile(`<<-?\s*(\w+)\s*$`)
+
+// updateHeredocState tracks whether the current line is inside an HCL
+// heredoc block. Returns true if the line is heredoc content and markdown
+// artifact detection should be skipped. The heredocEnd pointer holds the
+// expected closing identifier, or empty string when outside a heredoc.
+func updateHeredocState(line string, heredocEnd *string) bool {
+	if *heredocEnd != "" {
+		if strings.TrimSpace(line) == *heredocEnd {
+			*heredocEnd = ""
+		}
+		return true
+	}
+	if m := heredocOpenPattern.FindStringSubmatch(line); len(m) == 2 {
+		*heredocEnd = m[1]
+	}
+	return false
+}
 
 // ParseFileBlocks parses LLM output in `# File: path` blocks.
 // Duplicate files are resolved deterministically using "last block wins".
@@ -71,12 +89,14 @@ func stripCodeFence(content string) string {
 	if strings.HasPrefix(strings.TrimSpace(lines[0]), "```") {
 		// Prefer the first fenced payload block and ignore any trailing prose.
 		body := make([]string, 0, len(lines)-1)
+		var heredocEnd string
 		for _, line := range lines[1:] {
 			trimmedLine := strings.TrimSpace(line)
 			if trimmedLine == "```" {
 				break
 			}
-			if isLikelyMarkdownArtifact(trimmedLine) {
+			inHeredoc := updateHeredocState(line, &heredocEnd)
+			if !inHeredoc && isLikelyMarkdownArtifact(trimmedLine) {
 				break
 			}
 			body = append(body, line)
@@ -97,20 +117,39 @@ func isLikelyMarkdownArtifact(line string) bool {
 	if strings.HasPrefix(line, "##") || strings.HasPrefix(line, "###") {
 		return true
 	}
+	// Horizontal rules / YAML separators (never valid HCL).
+	if line == "---" || line == "***" || line == "___" {
+		return true
+	}
+	// Bold text, bullet points, blockquotes, numbered lists — all
+	// indicate the model started emitting explanatory prose.
+	if strings.HasPrefix(line, "**") {
+		return true
+	}
+	if strings.HasPrefix(line, "- ") || strings.HasPrefix(line, "* ") {
+		return true
+	}
+	if strings.HasPrefix(line, "> ") {
+		return true
+	}
 	return false
 }
 
 func sanitizeBodyLines(lines []string) string {
 	body := make([]string, 0, len(lines))
+	var heredocEnd string
 	for _, line := range lines {
 		trimmedLine := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmedLine, "```") {
-			// Drop markdown fence markers leaking from model output.
-			continue
-		}
-		if isLikelyMarkdownArtifact(trimmedLine) {
-			// Stop once the model starts emitting markdown review prose.
-			break
+		inHeredoc := updateHeredocState(line, &heredocEnd)
+		if !inHeredoc {
+			if strings.HasPrefix(trimmedLine, "```") {
+				// Drop markdown fence markers leaking from model output.
+				continue
+			}
+			if isLikelyMarkdownArtifact(trimmedLine) {
+				// Stop once the model starts emitting markdown review prose.
+				break
+			}
 		}
 		body = append(body, line)
 	}

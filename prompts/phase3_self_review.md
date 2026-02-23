@@ -52,5 +52,5 @@ The previous iteration's generated code failed validation. Pay special attention
 ## Instructions
 
 - If you find issues, output the COMPLETE corrected file(s) with the same `# File: filename.tf` header format.
-- If no issues are found, output "NO ISSUES FOUND" and the files unchanged.
-- Be specific about what you fixed and why.
+- If no issues are found, output ONLY the text "NO ISSUES FOUND".
+- **CRITICAL**: Output ONLY `# File:` headers followed by valid HCL code, or "NO ISSUES FOUND". Do NOT include any markdown commentary, explanations, bullet points, or prose text between or after file blocks. Any non-HCL text will cause validation to fail.

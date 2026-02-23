@@ -98,6 +98,7 @@ func (g *OpenRouterSeedGenerator) Generate(ctx context.Context, req Request) (*G
 		phaseOutput[phase] = text
 		phaseResults = append(phaseResults, PhaseResult{
 			Name:   phase,
+			Prompt: []byte(prompt),
 			Output: []byte(text),
 		})
 
@@ -117,7 +118,12 @@ func (g *OpenRouterSeedGenerator) Generate(ctx context.Context, req Request) (*G
 			if parseErr != nil {
 				return nil, NewGenerateError(ErrParseFailed, phase, parseErr)
 			}
-			lastFiles = files
+			if lastFiles == nil {
+				lastFiles = make(map[string][]byte, len(files))
+			}
+			for name, content := range files {
+				lastFiles[name] = content
+			}
 		}
 
 		if i < len(g.cfg.Phases)-1 && g.cfg.PhaseDelay > 0 {

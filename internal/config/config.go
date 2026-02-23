@@ -33,7 +33,6 @@ type Config struct {
 type AgentConfig struct {
 	Type                string           `yaml:"type"`
 	RepairIterationsMax int              `yaml:"repair_iterations_max"`
-	IterationsTarget    int              `yaml:"iterations_target"`
 	PhaseDelaySeconds   int              `yaml:"phase_delay_seconds"`
 	Phases              []string         `yaml:"phases"`
 	Claude              ClaudeConfig     `yaml:"claude"`
@@ -120,7 +119,6 @@ func Default() Config {
 	return Config{
 		Agent: AgentConfig{
 			RepairIterationsMax: 5,
-			IterationsTarget:    1,
 			PhaseDelaySeconds:   0,
 			Phases: []string{
 				generator.PhasePlanArchitecture,
@@ -219,9 +217,6 @@ func validate(cfg Config) error {
 	}
 	if cfg.Agent.RepairIterationsMax < 1 {
 		fields = append(fields, FieldError{Field: "agent.repair_iterations_max", Err: "must be greater than or equal to 1"})
-	}
-	if cfg.Agent.IterationsTarget < 1 {
-		fields = append(fields, FieldError{Field: "agent.iterations_target", Err: "must be greater than or equal to 1"})
 	}
 	if cfg.Agent.Type != "" && cfg.Agent.Type != generator.AgentTypeClaudeCode && cfg.Agent.Type != generator.AgentTypeOpenRouter {
 		fields = append(fields, FieldError{Field: "agent.type", Err: "must be one of: claude-code, openrouter"})

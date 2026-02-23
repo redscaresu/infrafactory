@@ -129,9 +129,9 @@ If either command fails, restore the repo to a green baseline before starting a 
 - Canonical order:
   `S12-T1 -> (S12-T2 || S12-T3) -> S12-T6 -> S12-T4 -> S12-T5`
 - Contract-first rule:
-  do not implement config/CLI iteration behavior before `S12-T1` freezes dual-control semantics.
-- Dual-control rule:
-  keep failure-retry budget (`repair_iterations_max`) and fixed total pass target (`iterations_target`) semantically independent.
+  do not implement config/CLI iteration behavior before `S12-T1` freezes run-loop control semantics.
+- Single-control rule:
+  use only failure-triggered retry budget (`repair_iterations_max`); stop on first successful iteration.
 - Stop-signal rule:
   emit one canonical terminal stop reason for a single stop event (`target_reached`, `repair_budget_exhausted`, or `stuck`); avoid dual control markers in output/logs/artifacts.
 - README closure rule:
@@ -173,15 +173,16 @@ If either command fails, restore the repo to a green baseline before starting a 
 
 ### S17-T1 fresh-context implementation approach
 - Implementation objective:
-  add opt-in-only capture of raw LLM stage responses per iteration/phase for `run` diagnostics, while keeping default behavior unchanged.
+  add opt-in-only capture of LLM stage responses and prompts per iteration/phase for `run` diagnostics, while keeping default behavior unchanged.
 - Activation contract:
   use an env-gated switch for first delivery (`INFRAFACTORY_CAPTURE_LLM_RAW=1`); when unset, no raw response artifacts are persisted.
 - Artifact contract:
-  write capture files under run artifacts (`.infrafactory/runs/<scenario>/<run-id>/iterations/<n>/`) with deterministic naming by phase/stage and stable JSON envelope metadata (phase, iteration, truncated flag, byte counts).
+  write capture files under run artifacts (`.infrafactory/runs/<scenario>/<run-id>/iterations/<n>/`) with deterministic naming by phase/stage and stable JSON envelope metadata (phase, iteration, truncated flag, byte counts):
+  `llm_raw_<phase>.json` and `llm_prompt_<phase>.json`.
 - Safety contract:
   always apply deterministic redaction before persisting (API keys/tokens/secret-like patterns); enforce hard byte caps with explicit truncation markers.
-- Scope guardrail:
-  capture raw model responses only in first ticket; prompt capture remains out-of-scope unless separately ticketed.
+- Feedback-debugging guardrail:
+  use paired prompt/response artifacts from the same iteration to confirm whether validation/test failures were actually present in model input before changing prompt wording.
 - Compatibility guardrail:
   do not change default output contract, terminal reasons, or existing run artifact readers for non-capture paths.
 - Recommended implementation order:

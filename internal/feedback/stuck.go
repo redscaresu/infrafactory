@@ -5,6 +5,7 @@ import "sort"
 type FailureSignature struct {
 	Check    string
 	Resource string
+	Detail   string
 }
 
 func FailureSignatures(failures []Failure) []FailureSignature {
@@ -13,6 +14,7 @@ func FailureSignatures(failures []Failure) []FailureSignature {
 		sig := FailureSignature{
 			Check:    failure.Check,
 			Resource: failure.Resource,
+			Detail:   failure.Detail,
 		}
 		seen[sig] = struct{}{}
 	}
@@ -22,10 +24,13 @@ func FailureSignatures(failures []Failure) []FailureSignature {
 		signatures = append(signatures, sig)
 	}
 	sort.Slice(signatures, func(i, j int) bool {
-		if signatures[i].Check == signatures[j].Check {
+		if signatures[i].Check != signatures[j].Check {
+			return signatures[i].Check < signatures[j].Check
+		}
+		if signatures[i].Resource != signatures[j].Resource {
 			return signatures[i].Resource < signatures[j].Resource
 		}
-		return signatures[i].Check < signatures[j].Check
+		return signatures[i].Detail < signatures[j].Detail
 	})
 
 	return signatures

@@ -63,3 +63,5 @@ terraform {
 ```
 
 Generate ALL files needed. Do not omit any resources from the architecture plan.
+
+**CRITICAL**: Output ONLY `# File:` headers followed by valid HCL code. Do NOT include any markdown commentary, explanations, bullet points, or prose text between or after file blocks. Any non-HCL text will cause validation to fail.

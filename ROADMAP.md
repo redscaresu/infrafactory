@@ -39,7 +39,7 @@ This file is intentionally high-level and mostly stable; day-to-day execution tr
 - Persist run/iteration data in run store.
 
 6. Slice 6: Convergence logic
-- Implement feedback loop and stuck detection.
+- Implement feedback loop and stuck detection with signature-level specificity.
 - Add criteria-only holdout flow.
 
 7. Slice 7: CLI orchestration
@@ -80,9 +80,8 @@ This file is intentionally high-level and mostly stable; day-to-day execution tr
 - Reduce heuristic post-processing in favor of model-corrected regeneration informed by concrete harness failures.
 - Strengthen run-loop convergence quality by improving failure payload fidelity and prompt integration.
 - Add focused regression tests proving feedback is injected and iteration metadata is preserved.
-- Split iteration controls into two explicit contracts:
+- Keep one explicit run control:
   - `agent.repair_iterations_max` (+ CLI `--repair-iterations-max`) for failure-triggered retry budget with model feedback.
-  - `agent.iterations_target` (+ CLI `--iterations-target`) for fixed total pass count, including passes after success.
 - Ensure failed iterations emit deterministic, structured failure summaries to app logs for each pass.
 - Ensure terminal stop signaling is deterministic and non-duplicative with one canonical reason (`target_reached`, `repair_budget_exhausted`, `stuck`).
 - Apply slice-closure review protocol before marking Slice 12 complete.
@@ -126,7 +125,7 @@ This file is intentionally high-level and mostly stable; day-to-day execution tr
 ## Near-term execution order
 
 1. Keep completed slices (11-16) stable and regression-green.
-2. Execute scoped follow-up ticket `S17-T1` for opt-in raw LLM stage-response capture artifacts (redaction + size caps, disabled by default).
+2. Keep Slice 17 hardening outcomes stable (`S17-T1`, `M31`, `M32`) and regression-green.
 3. Keep `S9-T8` blocked under ADR-0003 unless governance policy is explicitly superseded.
 
 ## Live progress tracking

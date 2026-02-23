@@ -115,6 +115,7 @@ func (g *ClaudeSeedGenerator) Generate(ctx context.Context, req Request) (*Gener
 		phaseOutput[phase] = phaseText
 		phaseResults = append(phaseResults, PhaseResult{
 			Name:   phase,
+			Prompt: []byte(prompt),
 			Output: out,
 		})
 		g.logProgress("phase %q complete\n", phase)
@@ -133,13 +134,14 @@ func (g *ClaudeSeedGenerator) Generate(ctx context.Context, req Request) (*Gener
 			}
 			files, parseErr := ParseFileBlocks(phaseText)
 			if parseErr != nil {
-				if strings.Contains(parseErr.Error(), "no '# File:' blocks found") {
-					g.logProgress("phase %q fallback: no file blocks; retaining prior files\n", phase)
-					break
-				}
 				return nil, NewGenerateError(ErrParseFailed, phase, parseErr)
 			}
-			lastFiles = files
+			if lastFiles == nil {
+				lastFiles = make(map[string][]byte, len(files))
+			}
+			for name, content := range files {
+				lastFiles[name] = content
+			}
 		}
 
 		if i < len(g.cfg.Phases)-1 && g.cfg.PhaseDelay > 0 {

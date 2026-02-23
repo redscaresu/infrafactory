@@ -105,9 +105,7 @@ flowchart TD
     B --> C[Validate static + policy]
     C --> D[Test mock deploy criteria + destroy]
     D --> E{Any failures?}
-    E -- no --> F{Training converged?}
-    F -- no --> A
-    F -- yes --> G[Run criteria-only holdouts]
+    E -- no --> G[Run criteria-only holdouts]
     G --> H{Holdout failures?}
     H -- no --> I[Final success]
     H -- yes --> J[Final failed: holdout block]
@@ -141,8 +139,9 @@ flowchart TD
 - Pulls mock state snapshot and verifies no orphan resources remain
 
 Supporting control loop:
-- `run` command loop with dual controls (`repair_iterations_max`, `iterations_target`)
-- Stuck detection via failure-signature subset logic
+- `run` command loop with failure-only retries (`repair_iterations_max`)
+- first successful iteration ends training (`target_reached`)
+- Stuck detection via failure-signature subset logic (`check`+`resource`+`detail`)
 - Run/iteration artifact persistence under `.infrafactory/runs/...`
 
 ### OPA Plan Policy Checks (Static Layer)
@@ -286,7 +285,12 @@ claude --version
 go run ./cmd/infrafactory generate scenarios/training/web-app-paris.yaml --config infrafactory.yaml --output human
 go run ./cmd/infrafactory validate scenarios/training/web-app-paris.yaml --config infrafactory.yaml --output human
 go run ./cmd/infrafactory test scenarios/training/web-app-paris.yaml --config infrafactory.yaml --output human
-go run ./cmd/infrafactory run scenarios/training/web-app-paris.yaml --config infrafactory.yaml --repair-iterations-max 3 --iterations-target 3 --output human
+go run ./cmd/infrafactory run scenarios/training/web-app-paris.yaml --config infrafactory.yaml --repair-iterations-max 3 --output human
+```
+
+Optional capture mode for run diagnostics:
+```bash
+INFRAFACTORY_CAPTURE_LLM_RAW=1 go run ./cmd/infrafactory run scenarios/training/web-app-paris.yaml --config infrafactory.yaml --repair-iterations-max 3 --output human
 ```
 
 5. Confirm artifacts:
@@ -317,7 +321,7 @@ go run ./cmd/infrafactory validate scenarios/training/new-scenario.yaml --config
 ```
 5. Run full orchestration loop.
 ```bash
-go run ./cmd/infrafactory run scenarios/training/new-scenario.yaml --config infrafactory.yaml --repair-iterations-max 3 --iterations-target 3 --output json
+go run ./cmd/infrafactory run scenarios/training/new-scenario.yaml --config infrafactory.yaml --repair-iterations-max 3 --output json
 ```
 6. Inspect run artifacts.
 ```text
@@ -329,6 +333,9 @@ Expected artifacts:
 - `iterations/<n>/iteration.json` with stage/failure snapshots, deterministic `failure_summary` (when failures exist), and schema field (`infrafactory.run.iteration.v1`).
 - `app.log` run-scoped structured application logs (`stderr` mirror + file sink for `run`).
 - generated OpenTofu output under `output/<scenario>/`.
+- optional LLM diagnostic artifacts when `INFRAFACTORY_CAPTURE_LLM_RAW=1`:
+  - `iterations/<n>/llm_raw_<phase>.json` (raw model response per phase)
+  - `iterations/<n>/llm_prompt_<phase>.json` (redacted/truncated prompt sent to model per phase)
 
 Canonical run terminal reasons:
 - `target_reached`
@@ -338,6 +345,10 @@ Canonical run terminal reasons:
 Transport-dominated behavior (MVP):
 - consecutive transport-runtime failures are bounded and can stop early with `check=transport_runtime_dominated`.
 - per-iteration artifacts include `transport_diagnostics` when transport-runtime failures occur.
+
+Retry semantics:
+- retries only occur after failed iterations.
+- successful iteration ends training immediately.
 
 ### Logging
 
@@ -387,7 +398,6 @@ Error contract:
 | `version` | yes | none | Config schema version (`"1.0"`). |
 | `agent.type` | yes | none | Generator backend type (`claude-code` or `openrouter`). |
 | `agent.repair_iterations_max` | no | `5` | Maximum failure-triggered retries in `run`. |
-| `agent.iterations_target` | no | `1` | Total desired run passes, including passes after success. |
 | `agent.phases` | no | `[plan_architecture, generate_hcl, self_review]` | Ordered generation phases (canonical sequence). |
 | `agent.phase_delay_seconds` | no | `0` | Delay between generator phases (rate-limit mitigation). |
 | `agent.claude.command` | no | `claude` | Executable used for `claude-code` transport. |
@@ -498,7 +508,10 @@ Troubleshooting:
 - If `generate` appears stuck on Claude transport, lower `agent.claude.phase_timeout_seconds` to fail faster and surface timeout errors while debugging.
 - If `validate` or `test` fails with a generic `exit status 1`, rerun and inspect the surfaced `stderr:` tail in the failure detail; command stderr is now included directly in stage failure output.
 - If you want iterative LLM correction from failures, use `run` (not just `generate` + `test`): `run` feeds prior iteration failures back into generation via `FeedbackJSON`.
+- If you need to verify what failure feedback the model actually received, run with `INFRAFACTORY_CAPTURE_LLM_RAW=1` and inspect both `llm_prompt_<phase>.json` and `llm_raw_<phase>.json` for the same iteration.
 - If generated `.tf` files contain markdown fences/tables, rerun `generate`; parser hardening strips fenced payloads and drops common markdown artifacts before file writes.
+- `self_review` now applies partial corrections by merging returned `# File:` blocks into the existing generated file set; files omitted in self-review output are retained.
+- If `run` stops with `stuck`, compare failure detail strings across iteration artifacts (`iterations/<n>/iteration.json`): stuck signatures now include `check`, `resource`, and `detail`.
 - If Claude output omits Scaleway provider wiring, `generate` now auto-injects `required_providers.scaleway` and `provider "scaleway"` into `providers.tf` before writing files.
 - If `agent.type=openrouter` fails with `dependency_unavailable`, export `OPENROUTER_API_KEY` in the execution environment.
 - If transport smoke tests fail, verify provider prerequisites:
@@ -543,7 +556,7 @@ Command tree currently exposed:
 - `generate <scenario-path>`
 - `validate <scenario-path>`
 - `test <scenario-path>`
-- `run <scenario-path> [--repair-iterations-max N] [--iterations-target N]`
+- `run <scenario-path> [--repair-iterations-max N]`
 - `mock start`
 - `mock stop`
 - `mock status`
@@ -567,7 +580,7 @@ This writes a minimal schema-valid scaffold and prints deterministic next-step c
 go run ./cmd/infrafactory generate scenarios/training/web-app-paris.yaml --config infrafactory.yaml --output human
 go run ./cmd/infrafactory validate scenarios/training/web-app-paris.yaml --config infrafactory.yaml --output json
 go run ./cmd/infrafactory test scenarios/training/web-app-paris.yaml --config infrafactory.yaml --output human
-go run ./cmd/infrafactory run scenarios/training/web-app-paris.yaml --config infrafactory.yaml --repair-iterations-max 3 --iterations-target 3 --output json
+go run ./cmd/infrafactory run scenarios/training/web-app-paris.yaml --config infrafactory.yaml --repair-iterations-max 3 --output json
 ```
 
 ### Practical example 4: Start Mockway via CLI wrapper
@@ -624,6 +637,19 @@ INFRAFACTORY_ENABLE_REALTOOL_MOCKWAY=1 INFRAFACTORY_MOCKWAY_URL=http://127.0.0.1
 ```
 
 You will find `run.json` metadata, per-iteration artifacts (for example `iterations/1/iteration.json`), and `app.log` structured command/run logs in that directory tree.
+
+### Practical example 9: One-command full flow helper
+
+```bash
+./scripts/full_flow.sh
+```
+
+Optional overrides:
+```bash
+CAPTURE_LLM_RAW=1 REPAIR_MAX=3 OUTPUT_MODE=human ./scripts/full_flow.sh
+```
+
+This helper starts mock, runs `run`, prints key artifact paths, and stops mock automatically.
 
 ## Local Quality Checks
 
