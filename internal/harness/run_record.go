@@ -22,6 +22,7 @@ func PersistDestroyRun(
 	}
 
 	if err := store.WriteRunMetadata(runstore.RunMetadata{
+		Schema:    runstore.RunMetadataSchemaVersion,
 		Scenario:  scenario,
 		RunID:     runID,
 		Status:    status,

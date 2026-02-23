@@ -6,6 +6,7 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 
 | id | slice | title | priority | status | deps | owner |
 |---|---|---|---|---|---|---|
+| M29 | Maintenance | Scope opt-in LLM raw stage-response capture ticket with redaction/size safeguards and closure-pass notes | P1 | done | M28 | codex |
 | M28 | Maintenance | Plan Slice 16 issue-driven remediation backlog and fresh-context startup guidance | P1 | done | M27 | codex |
 | M27 | Maintenance | Re-baseline Slice 12 planning/docs for dual iteration controls and fresh-context readiness | P1 | done | M26 | codex |
 | M26 | Maintenance | Refine unfinished-slice governance again (`S9-T8`, `S12`-`S15`) and record two consecutive no-change passes | P1 | done | M25 | codex |
@@ -120,14 +121,15 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 | S15-T4 | Slice 15 | Persist transport diagnostics in run artifacts (phase/timeout/signal/stderr summary/duration) | P0 | done | S15-T2,S15-T3 | codex |
 | S15-T5 | Slice 15 | Add regression coverage for adaptive retry behavior and transport-dominated failure outcomes | P0 | done | S15-T4 | codex |
 | S15-T6 | Slice 15 | Sync docs and fresh-context runbook for adaptive retry troubleshooting and operator actions | P1 | done | S15-T5 | codex |
-| S16-T1 | Slice 16 | Propagate `cmd.Context()` through all command handlers and runtime operations | P0 | in_progress | S15-T6 | codex |
-| S16-T2 | Slice 16 | Bound Mockway state response reads to prevent unbounded memory allocation | P0 | todo | S16-T1 | codex |
-| S16-T3 | Slice 16 | Make env override injection deterministic by de-duplicating overridden keys | P0 | todo | S16-T1 | codex |
-| S16-T4 | Slice 16 | Enforce scenario schema availability (no silent validation bypass when schema path missing) | P0 | todo | S16-T1 | codex |
-| S16-T5 | Slice 16 | Clean up config decode error handling and provide explicit empty-config failure message | P1 | todo | S16-T1 | codex |
-| S16-T6 | Slice 16 | Correct policy semantics and naming regex edge-case behavior from `ISSUES.md` | P0 | todo | S16-T4 | codex |
-| S16-T7 | Slice 16 | Remove dead runtime scaffolding and make destroy-run schema assignment explicit | P1 | todo | S16-T1 | codex |
-| S16-T8 | Slice 16 | Sync docs/fresh-context guidance for issue-remediation outcomes and run closure refinement passes | P1 | todo | S16-T2,S16-T3,S16-T4,S16-T5,S16-T6,S16-T7 | codex |
+| S16-T1 | Slice 16 | Propagate `cmd.Context()` through all command handlers and runtime operations | P0 | done | S15-T6 | codex |
+| S16-T2 | Slice 16 | Bound Mockway state response reads to prevent unbounded memory allocation | P0 | done | S16-T1 | codex |
+| S16-T3 | Slice 16 | Make env override injection deterministic by de-duplicating overridden keys | P0 | done | S16-T1 | codex |
+| S16-T4 | Slice 16 | Enforce scenario schema availability (no silent validation bypass when schema path missing) | P0 | done | S16-T1 | codex |
+| S16-T5 | Slice 16 | Clean up config decode error handling and provide explicit empty-config failure message | P1 | done | S16-T1 | codex |
+| S16-T6 | Slice 16 | Correct policy semantics and naming regex edge-case behavior from `ISSUES.md` | P0 | done | S16-T4 | codex |
+| S16-T7 | Slice 16 | Remove dead runtime scaffolding and make destroy-run schema assignment explicit | P1 | done | S16-T1 | codex |
+| S16-T8 | Slice 16 | Sync docs/fresh-context guidance for issue-remediation outcomes and run closure refinement passes | P1 | done | S16-T2,S16-T3,S16-T4,S16-T5,S16-T6,S16-T7 | codex |
+| S17-T1 | Slice 17 | Add opt-in per-iteration/per-phase LLM raw response capture artifacts with redaction and size caps | P1 | todo | M29 | codex |
 
 ## Ticket details
 
@@ -228,6 +230,7 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 | S16-T6 | `policies/scaleway/encryption_at_rest.rego`, `policies/common/naming.rego`, policy tests/docs | CLI runtime orchestration logic | policy checks/messages align with real semantics (no versioning-as-encryption confusion) and naming rule behavior matches intended minimum-length contract | policy regression tests for bucket encryption/versioning intent and single-character naming behavior/message |
 | S16-T7 | `internal/cli/runtime.go`, `internal/harness/run_record.go`, focused tests | broader run-loop behavior changes | remove unused `notImplementedRuntime` path and explicitly set run metadata schema in destroy persistence path for consistency/auditability | compile + focused tests covering destroy-run metadata schema field |
 | S16-T8 | `README.md`, `SESSION_START.md`, `STATUS.md`, `CURRENT_TICKET.md`, `ROADMAP.md`, `BACKLOG.md` | runtime logic changes | docs reflect Slice 16 outcomes; refinement loop records one improvement pass plus two consecutive no-change passes for closure | doc checklist assertions + `bash scripts/check_all.sh` |
+| S17-T1 | `internal/generator/*`, `internal/cli/run_command.go`, `internal/runstore`, `README.md`, `SESSION_START.md` | default logging contract changes outside capture mode | opt-in-only raw LLM stage responses are persisted per iteration/phase in run artifacts with deterministic redaction and byte caps; default behavior remains unchanged | focused generator/runtime tests for disabled-by-default behavior, enabled capture writes, redaction, and truncation/size-limit enforcement |
 
 ## Operating notes
 - Update `status` and dependencies as work evolves.

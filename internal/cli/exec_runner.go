@@ -34,14 +34,25 @@ func withEnvOverrides(base []string, overrides map[string]string) []string {
 		return base
 	}
 
+	overridden := make(map[string]struct{}, len(overrides))
 	pairs := make([]string, 0, len(overrides))
 	for key, value := range overrides {
+		overridden[key] = struct{}{}
 		pairs = append(pairs, key+"="+value)
 	}
 	sort.Strings(pairs)
 
 	out := make([]string, 0, len(base)+len(pairs))
-	out = append(out, base...)
+	for _, entry := range base {
+		key := entry
+		if idx := bytes.IndexByte([]byte(entry), '='); idx >= 0 {
+			key = entry[:idx]
+		}
+		if _, ok := overridden[key]; ok {
+			continue
+		}
+		out = append(out, entry)
+	}
 	out = append(out, pairs...)
 
 	return out

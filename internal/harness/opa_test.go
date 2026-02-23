@@ -190,3 +190,80 @@ func TestScalewayPoliciesPlanEvaluation(t *testing.T) {
 		})
 	}
 }
+
+func TestScalewayEncryptionPolicyMatchesEncryptionSemantics(t *testing.T) {
+	t.Parallel()
+
+	policy := filepath.Join("..", "..", "policies", "scaleway", "encryption_at_rest.rego")
+	cases := []struct {
+		name          string
+		planJSON      string
+		expectedCount int
+	}{
+		{
+			name: "rdb encryption disabled fails",
+			planJSON: `{
+  "planned_values": {"root_module": {"resources": [
+    {"address":"scaleway_rdb_instance.db","type":"scaleway_rdb_instance","values":{"encryption_at_rest": false}}
+  ]}}
+}`,
+			expectedCount: 1,
+		},
+		{
+			name: "bucket without versioning does not fail encryption policy",
+			planJSON: `{
+  "planned_values": {"root_module": {"resources": [
+    {"address":"scaleway_object_bucket.logs","type":"scaleway_object_bucket","values":{"versioning": false}}
+  ]}}
+}`,
+			expectedCount: 0,
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			failures, err := EvaluatePlanPoliciesWithConstraints(context.Background(), []byte(tc.planJSON), nil, []string{policy})
+			if err != nil {
+				t.Fatalf("evaluate policy: %v", err)
+			}
+			if got := len(failures); got != tc.expectedCount {
+				t.Fatalf("expected %d failures, got %d (%+v)", tc.expectedCount, got, failures)
+			}
+		})
+	}
+}
+
+func TestCommonNamingPolicyAllowsSingleCharacterNames(t *testing.T) {
+	t.Parallel()
+
+	policy := filepath.Join("..", "..", "policies", "common", "naming.rego")
+	cases := []struct {
+		name          string
+		resourceName  string
+		expectedCount int
+	}{
+		{name: "single character passes", resourceName: "a", expectedCount: 0},
+		{name: "trailing hyphen fails", resourceName: "a-", expectedCount: 1},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			planJSON := fmt.Sprintf(`{
+  "planned_values": {"root_module": {"resources": [
+    {"address":"scaleway_instance_server.web","type":"scaleway_instance_server","values":{"name":"%s"}}
+  ]}}
+}`, tc.resourceName)
+			failures, err := EvaluatePlanPoliciesWithConstraints(context.Background(), []byte(planJSON), nil, []string{policy})
+			if err != nil {
+				t.Fatalf("evaluate policy: %v", err)
+			}
+			if got := len(failures); got != tc.expectedCount {
+				t.Fatalf("expected %d failures, got %d (%+v)", tc.expectedCount, got, failures)
+			}
+		})
+	}
+}

@@ -13,14 +13,14 @@ import (
 )
 
 func runValidateCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) error {
-	result, err := executeValidate(runtime, args[0])
+	result, err := executeValidate(cmd.Context(), runtime, args[0])
 	if writeErr := writeCommandOutput(cmd, result); writeErr != nil {
 		return writeErr
 	}
 	return err
 }
 
-func executeValidate(runtime *CommandRuntime, scenarioPath string) (OutputResult, error) {
+func executeValidate(ctx context.Context, runtime *CommandRuntime, scenarioPath string) (OutputResult, error) {
 	sc, err := runtime.LoadScenario(scenarioPath)
 	if err != nil {
 		return OutputResult{}, fmt.Errorf("load scenario %q: %w", scenarioPath, err)
@@ -64,7 +64,7 @@ func executeValidate(runtime *CommandRuntime, scenarioPath string) (OutputResult
 		return OutputResult{}, fmt.Errorf("static harness dependency unavailable: %w", ErrDependencyUnavailable)
 	}
 
-	staticResult, staticErr := runtime.Deps.Static.Run(context.Background(), runtime.OutputDir(), validateCommandEnv(runtime))
+	staticResult, staticErr := runtime.Deps.Static.Run(ctx, runtime.OutputDir(), validateCommandEnv(runtime))
 	stages := toValidateStageSummaries(staticResult, staticErr)
 	failures := make([]FailureSummary, 0)
 
@@ -76,7 +76,7 @@ func executeValidate(runtime *CommandRuntime, scenarioPath string) (OutputResult
 
 	if staticErr == nil {
 		policyPaths := resolvePolicyPaths(runtime.Config.Paths.Policies, runtime.Config.Validation.Layers.Static.PolicyPaths)
-		policyFailures, err := harness.EvaluatePlanPoliciesWithConstraints(context.Background(), staticResult.PlanJSON, sc.Constraints, policyPaths)
+		policyFailures, err := harness.EvaluatePlanPoliciesWithConstraints(ctx, staticResult.PlanJSON, sc.Constraints, policyPaths)
 		if err != nil {
 			return OutputResult{}, fmt.Errorf("evaluate static policies: %w", err)
 		}

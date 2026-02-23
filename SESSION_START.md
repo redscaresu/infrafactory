@@ -32,13 +32,14 @@ git log -1 --oneline
 Before writing code, confirm these facts are still true in `STATUS.md`/`BACKLOG.md`:
 1. `S9-T8` (sandbox/live deploy, real Scaleway) remains permanently blocked by governance policy (ADR-0003).
 2. Output and logs must explicitly surface: `(real deployment skipped for cost reasons for now)` for sandbox/live-blocked behavior.
-3. Slice 16 issue-driven robustness hardening is the active milestone direction; prioritize unresolved `ISSUES.md` tickets (`S16-T1`..`S16-T8`) before new feature work.
-4. `run` is criteria-aware and includes criteria-only holdout completion checks; do not regress to coarse stage-only convergence behavior.
-5. `dns_resolution` remains auto-pass informational output while sandbox/live deploy is blocked; do not treat it as a hard-fail criterion.
-6. Default runtime now uses concrete generator transports; `claude-code` requires `agent.claude.command` in `PATH` and `openrouter` requires `OPENROUTER_API_KEY` plus `agent.openrouter.model`.
-7. Slices 13-15 are complete in MVP form; preserve logging contracts, feedback fidelity, and adaptive retry behavior while applying issue fixes.
-8. Slice 16 includes schema-validation hardening; scenario loads must not silently skip schema validation when schema paths are unavailable.
-9. For Slice 16 closures, record refinement pass outcomes and require two consecutive no-change passes in both `STATUS.md` and `CURRENT_TICKET.md`.
+3. Slice 16 issue-driven robustness hardening is complete; preserve its guarantees while keeping the remaining blocked lane (`S9-T8`) unchanged unless ADR-0003 is superseded.
+4. A scoped follow-up ticket `S17-T1` is queued: opt-in raw LLM stage-response capture artifacts must remain disabled by default and enforce redaction + byte caps.
+5. `run` is criteria-aware and includes criteria-only holdout completion checks; do not regress to coarse stage-only convergence behavior.
+6. `dns_resolution` remains auto-pass informational output while sandbox/live deploy is blocked; do not treat it as a hard-fail criterion.
+7. Default runtime now uses concrete generator transports; `claude-code` requires `agent.claude.command` in `PATH` and `openrouter` requires `OPENROUTER_API_KEY` plus `agent.openrouter.model`.
+8. Slices 13-15 are complete in MVP form; preserve logging contracts, feedback fidelity, and adaptive retry behavior while applying issue fixes.
+9. Slice 16 includes schema-validation hardening; scenario loads must not silently skip schema validation when schema paths are unavailable.
+10. For ticket-planning closures, record refinement pass outcomes and require at least one improvement pass plus a no-change verification pass in both `STATUS.md` and `CURRENT_TICKET.md`.
 
 Minimal startup verification commands:
 ```bash
@@ -160,7 +161,7 @@ If either command fails, restore the repo to a green baseline before starting a 
 - Diagnostics rule:
   run artifacts must include stable transport diagnostics (phase/timeout/signal/stderr summary/duration) with backward-compatible reads.
 
-### Slice 16 default execution constraints
+### Slice 16 default execution constraints (completed)
 - Canonical order:
   `S16-T1 -> (S16-T2 || S16-T3 || S16-T7) -> S16-T4 -> S16-T5 -> S16-T6 -> S16-T8`
 - Cancellation rule:
@@ -169,6 +170,31 @@ If either command fails, restore the repo to a green baseline before starting a 
   bound external response reads and env injection behavior deterministically (no unbounded `ReadAll`, no duplicate override keys in subprocess env).
 - Validation rule:
   scenario schema loading must fail deterministically (or use embedded schema) when schema files are unavailable; no silent schema-validation bypass.
+
+### S17-T1 fresh-context implementation approach
+- Implementation objective:
+  add opt-in-only capture of raw LLM stage responses per iteration/phase for `run` diagnostics, while keeping default behavior unchanged.
+- Activation contract:
+  use an env-gated switch for first delivery (`INFRAFACTORY_CAPTURE_LLM_RAW=1`); when unset, no raw response artifacts are persisted.
+- Artifact contract:
+  write capture files under run artifacts (`.infrafactory/runs/<scenario>/<run-id>/iterations/<n>/`) with deterministic naming by phase/stage and stable JSON envelope metadata (phase, iteration, truncated flag, byte counts).
+- Safety contract:
+  always apply deterministic redaction before persisting (API keys/tokens/secret-like patterns); enforce hard byte caps with explicit truncation markers.
+- Scope guardrail:
+  capture raw model responses only in first ticket; prompt capture remains out-of-scope unless separately ticketed.
+- Compatibility guardrail:
+  do not change default output contract, terminal reasons, or existing run artifact readers for non-capture paths.
+- Recommended implementation order:
+  1) define capture helper and redaction/cap utilities in generator/runtime path,
+  2) wire opt-in gating in `run` iteration flow,
+  3) persist artifacts in runstore path,
+  4) add focused tests.
+- Required focused tests:
+  disabled-by-default no-op behavior,
+  enabled capture artifact writes,
+  redaction determinism,
+  truncation/size-cap enforcement,
+  stable artifact naming/location.
 
 ## 3) Execute
 - Implement + test.

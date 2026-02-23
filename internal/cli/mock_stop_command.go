@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"context"
 	"errors"
 	"fmt"
 
@@ -13,7 +12,7 @@ func runMockStopCommand(cmd *cobra.Command, _ []string, runtime *CommandRuntime)
 		return fmt.Errorf("mock stopper dependency unavailable: %w", ErrDependencyUnavailable)
 	}
 
-	err := runtime.Deps.MockStop.Stop(context.Background(), runtime.Config.Mockway)
+	err := runtime.Deps.MockStop.Stop(cmd.Context(), runtime.Config.Mockway)
 	status := CommandStatusSuccess
 	stages := []StageSummary{
 		{Layer: "mock", Stage: "preflight", Status: StageStatusPass},

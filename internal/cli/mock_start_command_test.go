@@ -15,11 +15,13 @@ type fakeMockStarter struct {
 	err     error
 	calls   int
 	mockway config.MockwayConfig
+	lastCtx context.Context
 }
 
-func (f *fakeMockStarter) Start(_ context.Context, cfg config.MockwayConfig) error {
+func (f *fakeMockStarter) Start(ctx context.Context, cfg config.MockwayConfig) error {
 	f.calls++
 	f.mockway = cfg
+	f.lastCtx = ctx
 	return f.err
 }
 
@@ -91,6 +93,39 @@ func TestMockStartCommandPreflightFailure(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "- mock/preflight: fail") {
 		t.Fatalf("expected preflight failure stage in output, got:\n%s", stdout.String())
+	}
+}
+
+func TestMockStartCommandPropagatesContext(t *testing.T) {
+	t.Parallel()
+
+	type contextKey string
+	const key contextKey = "ctx-key"
+
+	h := newCommandTestHarness(t)
+	starter := &fakeMockStarter{}
+	opts := runtimeOptions{
+		configLoader:   config.Load,
+		scenarioLoader: defaultScenarioLoader,
+		deps: RuntimeDependencies{
+			MockStart: starter,
+		},
+	}
+
+	cmd := newMockStartCommandForTest(opts)
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{"--config", h.ConfigPath})
+
+	commandCtx := context.WithValue(context.Background(), key, "mock-start")
+	if err := cmd.ExecuteContext(commandCtx); err != nil {
+		t.Fatalf("execute mock start with context: %v", err)
+	}
+	if starter.lastCtx == nil {
+		t.Fatal("expected starter context capture")
+	}
+	if got := starter.lastCtx.Value(key); got != "mock-start" {
+		t.Fatalf("expected propagated context value %q, got %#v", "mock-start", got)
 	}
 }
 

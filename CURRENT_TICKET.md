@@ -3,64 +3,61 @@
 Use this file as the per-session execution stub.
 
 ## Ticket
-- id: S16-T1
-- title: Propagate `cmd.Context()` through all command handlers and runtime operations
-- status: in_progress
+- id: M29
+- title: Scope opt-in LLM raw stage-response capture ticket with redaction/size safeguards and closure-pass notes
+- status: done
 - classification: implementation-only
 
 ## 1) Problem Statement
 - What is broken or missing?
-  Multiple command handlers call runtime/harness/generator APIs using `context.Background()` instead of `cmd.Context()`.
+  There was no scoped backlog ticket for opt-in persistence of raw LLM stage responses for run debugging.
 - Why does it matter now?
-  Signal cancellation does not propagate cleanly to long-running subprocesses/HTTP calls, causing poor interrupt behavior during `run`, `validate`, `test`, and mock operations.
+  Operators need high-fidelity model-response artifacts to debug stage failures without weakening default secret-safety posture.
 
 ## 2) Scope
 - In scope:
-  Replace `context.Background()` command-path usage with `cmd.Context()` (or derived context) across command adapters and runtime call sites, plus focused tests where practical.
+  Define one implementation ticket that is opt-in, artifact-scoped, redaction-aware, and bounded by size limits; sync planning/state docs.
 - Out of scope:
-  Broader retry-policy or schema/policy semantics changes tracked in later Slice 16 tickets.
+  Runtime implementation changes.
 
 ## 3) Acceptance Criteria
-1. Command handlers in `ISSUES.md` item #16 no longer use `context.Background()` for runtime operations.
-2. Runtime/harness/generator/mock operations receive command context for cancellation propagation.
-3. Focused regression coverage is added/updated for context propagation behavior.
+1. A dedicated implementation ticket exists in `BACKLOG.md` with scope, acceptance criteria, and required tests.
+2. Tracking docs reflect the new planned work and next actionable ticket.
+3. Refinement loop is recorded for this planning turn.
 
 ## 4) Impacted Areas
 - Packages/files changed:
-  `internal/cli/validate_command.go`,
-  `internal/cli/test_command.go`,
-  `internal/cli/generate_command.go`,
-  `internal/cli/mock_start_command.go`,
-  `internal/cli/mock_stop_command.go`,
-  `internal/cli/mock_status_command.go`,
-  `internal/cli/mock_logs_command.go`,
-  related tests.
+  `BACKLOG.md`,
+  `STATUS.md`,
+  `CURRENT_TICKET.md`.
 - External contracts affected (CLI/schema/policy):
-  no (behavioral robustness only).
+  no.
 
 ## 5) Test Plan
 - Unit tests:
-  `go test ./internal/cli`
+  n/a (docs-only planning ticket).
 - Integration checks:
-  `go test ./...`
-  `bash scripts/check_all.sh`
+  optional docs hygiene check.
 - Manual verification:
-  run long-running command flow and confirm Ctrl+C cancellation propagates to in-flight operations.
+  review backlog row + ticket-details entry consistency.
 
 ## 6) Risks and Rollback
 - Primary risks:
-  incomplete call-site coverage causing mixed context behavior.
+  underspecified capture scope causing secret leakage or artifact bloat during implementation.
 - Rollback approach:
-  revert context-wiring changes and reapply with stricter call-site audit.
+  narrow ticket scope to response-only capture and enforce explicit redaction/cap checks in acceptance criteria.
 
 ## 7) Done Definition
-- Command-path context propagation is complete for scope listed in issue #16.
-- Focused tests and full checks pass.
+- `S17-T1` is scoped and ready for implementation.
+- Docs are synchronized to this planning outcome.
 
 ## Progress notes
-- Completed maintenance planning ticket `M28`: Slice 16 defined and ticketed (`S16-T1`..`S16-T8`) from `ISSUES.md`.
-- Fresh-context docs synced for Slice 16 startup and execution constraints.
-- Slice 16 planning refinement loop completed with two consecutive no-change passes.
+- Added `S17-T1` with explicit scope: opt-in raw response capture only, disabled by default, redaction required, byte caps required, and focused test requirements.
+- Updated tracking docs to set `S17-T1` as next unblocked work item.
+- Refinement pass 1: improved ticket wording to make redaction and truncation requirements explicit and testable.
+- Refinement pass 2: no additional improvements identified.
+- Fresh-context approach pass 1: added concrete `S17-T1` execution playbook (activation, artifact layout, safety caps/redaction, and ordered implementation/test steps) to `SESSION_START.md`.
+- Fresh-context approach pass 2: no additional improvements identified.
 
 ## Blocker (if any)
 - blocker: none.

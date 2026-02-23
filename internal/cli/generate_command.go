@@ -20,7 +20,7 @@ func runGenerateCommand(cmd *cobra.Command, args []string, runtime *CommandRunti
 		return fmt.Errorf("load scenario %q: %w", scenarioPath, err)
 	}
 
-	writtenFiles, err := generateAndWriteFiles(runtime, scenarioPath, 1, nil)
+	writtenFiles, err := generateAndWriteFiles(cmd.Context(), runtime, scenarioPath, 1, nil)
 	if err != nil {
 		return err
 	}
@@ -148,7 +148,7 @@ func toFeedbackFailuresPayload(in []FailureSummary) []feedbackFailure {
 	return out
 }
 
-func generateAndWriteFiles(runtime *CommandRuntime, scenarioPath string, iteration int, feedbackFailures []FailureSummary) (int, error) {
+func generateAndWriteFiles(ctx context.Context, runtime *CommandRuntime, scenarioPath string, iteration int, feedbackFailures []FailureSummary) (int, error) {
 	scenarioPayload, err := os.ReadFile(scenarioPath)
 	if err != nil {
 		return 0, fmt.Errorf("read scenario %q: %w", scenarioPath, err)
@@ -169,7 +169,7 @@ func generateAndWriteFiles(runtime *CommandRuntime, scenarioPath string, iterati
 		}
 	}
 
-	generated, err := runtime.Deps.Generator.Generate(context.Background(), generator.Request{
+	generated, err := runtime.Deps.Generator.Generate(ctx, generator.Request{
 		ScenarioPath: scenarioPath,
 		ScenarioYAML: scenarioPayload,
 		FeedbackJSON: feedbackPayload,

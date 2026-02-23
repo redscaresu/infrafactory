@@ -125,8 +125,8 @@ This file is intentionally high-level and mostly stable; day-to-day execution tr
 
 ## Near-term execution order
 
-1. Keep completed slices (11-15) stable and regression-green while executing Slice 16.
-2. Execute Slice 16 in `BACKLOG.md` order (`S16-T1`..`S16-T8`) with focused tests and per-ticket docs sync.
+1. Keep completed slices (11-16) stable and regression-green.
+2. Execute scoped follow-up ticket `S17-T1` for opt-in raw LLM stage-response capture artifacts (redaction + size caps, disabled by default).
 3. Keep `S9-T8` blocked under ADR-0003 unless governance policy is explicitly superseded.
 
 ## Live progress tracking

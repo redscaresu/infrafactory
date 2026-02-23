@@ -16,26 +16,30 @@ import (
 )
 
 type fakeMockDeployHarness struct {
-	result *harness.MockDeployResult
-	err    error
-	calls  int
-	dirs   []string
+	result  *harness.MockDeployResult
+	err     error
+	calls   int
+	dirs    []string
+	lastCtx context.Context
 }
 
-func (f *fakeMockDeployHarness) Run(_ context.Context, workDir string, _ map[string]string) (*harness.MockDeployResult, error) {
+func (f *fakeMockDeployHarness) Run(ctx context.Context, workDir string, _ map[string]string) (*harness.MockDeployResult, error) {
 	f.calls++
 	f.dirs = append(f.dirs, workDir)
+	f.lastCtx = ctx
 	return f.result, f.err
 }
 
 type fakeDestroyHarness struct {
-	result *harness.DestroyResult
-	err    error
-	calls  int
+	result  *harness.DestroyResult
+	err     error
+	calls   int
+	lastCtx context.Context
 }
 
-func (f *fakeDestroyHarness) Run(context.Context, string, map[string]string) (*harness.DestroyResult, error) {
+func (f *fakeDestroyHarness) Run(ctx context.Context, _ string, _ map[string]string) (*harness.DestroyResult, error) {
 	f.calls++
+	f.lastCtx = ctx
 	return f.result, f.err
 }
 
@@ -470,7 +474,7 @@ deny_state contains msg if {
 		},
 	}
 
-	failures := evaluateStatePolicyCriteria(runtime, []byte(`{"rdb":{"instances":[]}}`), specs)
+	failures := evaluateStatePolicyCriteria(context.Background(), runtime, []byte(`{"rdb":{"instances":[]}}`), specs)
 	if len(failures) != 0 {
 		t.Fatalf("expected no failures, got %+v", failures)
 	}
@@ -615,6 +619,58 @@ func TestTestCommandFailsWhenSandboxLayerEnabled(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), sandboxRealDeploySkippedMessage) {
 		t.Fatalf("expected cost-skip message in output, got:\n%s", stdout.String())
+	}
+}
+
+func TestTestCommandPropagatesCommandContext(t *testing.T) {
+	t.Parallel()
+
+	type contextKey string
+	const key contextKey = "ctx-key"
+
+	h := newCommandTestHarness(t)
+	mockDeploy := &fakeMockDeployHarness{
+		result: &harness.MockDeployResult{
+			Apply:         harness.StageResult{Stage: "apply"},
+			StateSnapshot: []byte(`{"mock":true}`),
+		},
+	}
+	destroy := &fakeDestroyHarness{
+		result: &harness.DestroyResult{
+			Destroy:       harness.StageResult{Stage: "destroy"},
+			StateSnapshot: []byte(`{"mock":true}`),
+			OrphanCount:   0,
+		},
+	}
+	opts := runtimeOptions{
+		configLoader:   config.Load,
+		scenarioLoader: defaultScenarioLoader,
+		deps: RuntimeDependencies{
+			MockDeploy: mockDeploy,
+			Destroy:    destroy,
+		},
+	}
+
+	cmd := newTestCommandForTest(opts)
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{h.ScenarioPath, "--config", h.ConfigPath})
+
+	commandCtx := context.WithValue(context.Background(), key, "test")
+	if err := cmd.ExecuteContext(commandCtx); err != nil {
+		t.Fatalf("execute test with context: %v", err)
+	}
+	if mockDeploy.lastCtx == nil {
+		t.Fatal("expected mock deploy context capture")
+	}
+	if got := mockDeploy.lastCtx.Value(key); got != "test" {
+		t.Fatalf("expected propagated context value %q on deploy, got %#v", "test", got)
+	}
+	if destroy.lastCtx == nil {
+		t.Fatal("expected destroy context capture")
+	}
+	if got := destroy.lastCtx.Value(key); got != "test" {
+		t.Fatalf("expected propagated context value %q on destroy, got %#v", "test", got)
 	}
 }
 

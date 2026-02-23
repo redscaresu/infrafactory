@@ -20,12 +20,14 @@ type fakeStaticHarness struct {
 	calls   int
 	lastDir string
 	lastEnv map[string]string
+	lastCtx context.Context
 }
 
-func (f *fakeStaticHarness) Run(_ context.Context, workDir string, env map[string]string) (*harness.StaticResult, error) {
+func (f *fakeStaticHarness) Run(ctx context.Context, workDir string, env map[string]string) (*harness.StaticResult, error) {
 	f.calls++
 	f.lastDir = workDir
 	f.lastEnv = env
+	f.lastCtx = ctx
 	return f.result, f.err
 }
 
@@ -277,6 +279,50 @@ func TestValidateCommandFailsWhenSandboxLayerEnabled(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), sandboxRealDeploySkippedMessage) {
 		t.Fatalf("expected cost-skip message in output, got:\n%s", stdout.String())
+	}
+}
+
+func TestValidateCommandPropagatesCommandContext(t *testing.T) {
+	t.Parallel()
+
+	type contextKey string
+	const key contextKey = "ctx-key"
+
+	h := newCommandTestHarness(t)
+	static := &fakeStaticHarness{
+		result: &harness.StaticResult{
+			Stages:   []harness.StageResult{{Stage: "init"}, {Stage: "validate"}, {Stage: "plan"}, {Stage: "show"}},
+			PlanJSON: []byte(`{"planned_values":{"root_module":{}}}`),
+		},
+	}
+
+	opts := runtimeOptions{
+		configLoader: func(path string) (config.Config, error) {
+			cfg, err := config.Load(path)
+			if err != nil {
+				return config.Config{}, err
+			}
+			cfg.Validation.Layers.Static.PolicyPaths = nil
+			return cfg, nil
+		},
+		scenarioLoader: defaultScenarioLoader,
+		deps:           RuntimeDependencies{Static: static},
+	}
+
+	cmd := newValidateCommandForTest(opts)
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{h.ScenarioPath, "--config", h.ConfigPath})
+
+	commandCtx := context.WithValue(context.Background(), key, "validate")
+	if err := cmd.ExecuteContext(commandCtx); err != nil {
+		t.Fatalf("execute validate with context: %v", err)
+	}
+	if static.lastCtx == nil {
+		t.Fatal("expected static harness context capture")
+	}
+	if got := static.lastCtx.Value(key); got != "validate" {
+		t.Fatalf("expected propagated context value %q, got %#v", "validate", got)
 	}
 }
 

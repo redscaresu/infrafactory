@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -264,6 +265,34 @@ func TestCommandRuntimeLoadScenarioCachesResultAndOutputDir(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "scenario already loaded") {
 		t.Fatalf("expected already-loaded scenario error, got: %v", err)
+	}
+}
+
+func TestDefaultScenarioLoaderFailsWhenSchemaUnavailable(t *testing.T) {
+	workspace := t.TempDir()
+	scenarioPath := filepath.Join(workspace, "scenario.yaml")
+	if err := os.WriteFile(scenarioPath, []byte(`scenario: web
+version: "1.0"
+cloud: scaleway
+description: example
+resources:
+  compute:
+    purpose: web
+    size: dev1-s
+acceptance_criteria: []
+`), 0o600); err != nil {
+		t.Fatalf("write scenario: %v", err)
+	}
+
+	_, err := loadScenarioWithSchemaCandidates(scenarioPath, []string{
+		filepath.Join(workspace, "missing-schema-a.json"),
+		filepath.Join(workspace, "missing-schema-b.json"),
+	})
+	if err == nil {
+		t.Fatal("expected schema resolution error")
+	}
+	if !strings.Contains(err.Error(), "locate scenario schema") {
+		t.Fatalf("expected schema availability error, got %v", err)
 	}
 }
 

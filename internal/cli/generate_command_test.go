@@ -167,6 +167,44 @@ func TestGenerateCommandSupportsJSONOutputMode(t *testing.T) {
 	}
 }
 
+func TestGenerateCommandPropagatesCommandContext(t *testing.T) {
+	t.Parallel()
+
+	type contextKey string
+	const key contextKey = "ctx-key"
+
+	h := newCommandTestHarness(t)
+	var received context.Context
+	opts := runtimeOptions{
+		configLoader:   config.Load,
+		scenarioLoader: defaultScenarioLoader,
+		deps: RuntimeDependencies{
+			Generator: generator.SeedGeneratorFunc(func(ctx context.Context, _ generator.Request) (*generator.GeneratedCode, error) {
+				received = ctx
+				return &generator.GeneratedCode{Files: map[string][]byte{
+					"main.tf": []byte("terraform {}\n"),
+				}}, nil
+			}),
+		},
+	}
+
+	cmd := newGenerateCommandForTest(opts)
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{h.ScenarioPath, "--config", h.ConfigPath})
+
+	commandCtx := context.WithValue(context.Background(), key, "generate")
+	if err := cmd.ExecuteContext(commandCtx); err != nil {
+		t.Fatalf("execute generate with context: %v", err)
+	}
+	if received == nil {
+		t.Fatal("expected generator context capture")
+	}
+	if got := received.Value(key); got != "generate" {
+		t.Fatalf("expected propagated context value %q, got %#v", "generate", got)
+	}
+}
+
 func TestGenerateCommandAutoAddsScalewayProviderWiringWhenMissing(t *testing.T) {
 	t.Parallel()
 

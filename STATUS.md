@@ -3,22 +3,21 @@
 Last updated: 2026-02-23
 
 ## Current phase
-- Active milestone: Slice 16 issue-driven robustness hardening (planned)
-- Next gate: complete `S16-T1` and execute remaining Slice 16 tickets sequentially from `ISSUES.md`.
-- Current ticket: S16-T1
-- Next ticket: S16-T1
+- Active milestone: post-Slice 16 targeted observability planning (ticketed)
+- Next gate: execute `S17-T1` scoped opt-in LLM raw response capture with redaction and size caps.
+- Current ticket: none
+- Next ticket: S17-T1
 
 ## In progress
-- `S16-T1` context propagation wiring in command/runtime paths
+- none
 
 ## Known blockers
 - `S9-T8` sandbox/live deploy layer is permanently blocked by governance policy (ADR-0003).
 
 ## Next actions
-1. Start `S16-T1`: propagate `cmd.Context()` through command/runtime operations so cancellation and signals propagate correctly.
-2. Execute remaining `S16` remediation tickets (`S16-T2`..`S16-T8`) in order, with focused tests per ticket.
-3. Keep `S9-T8` blocked unless ADR-0003 is explicitly superseded.
-4. Keep regression baseline green after each ticket (`go test ./...`, `bash scripts/check_all.sh`).
+1. Execute `S17-T1` (opt-in LLM raw stage-response capture artifacts with redaction + byte caps).
+2. Keep `S9-T8` blocked unless ADR-0003 is explicitly superseded.
+3. Keep regression baseline green (`go test ./...`, `bash scripts/check_all.sh`).
 
 ## Update policy
 - Update at end of each meaningful coding session.
@@ -28,6 +27,23 @@ Last updated: 2026-02-23
 - Keep startup/read-order instructions only in `SESSION_START.md` to avoid duplication.
 
 ## Recent updates
+- Fresh-context approach pass 1: documented concrete `S17-T1` implementation playbook in `SESSION_START.md` (env-gated activation, artifact contract, redaction/size-cap rules, and focused test matrix).
+- Fresh-context approach pass 2: no additional improvements identified.
+- Completed maintenance ticket `M29`: scoped `S17-T1` for opt-in per-iteration/per-phase raw LLM response capture with explicit redaction and size-cap guardrails.
+- Added `S17-T1` to `BACKLOG.md` with clear implementation boundaries and focused test requirements (disabled-by-default behavior, enabled artifact writes, redaction, truncation).
+- M29 refinement pass 1: tightened acceptance criteria to require deterministic redaction and byte-cap enforcement.
+- M29 refinement pass 2: no additional improvements identified.
+- Completed Slice 16 (`S16-T1`..`S16-T8`) end-to-end with focused tests and full checks.
+- `S16-T1`: command/runtime paths now propagate `cmd.Context()` through generate/validate/test/run/mock operations; added context propagation regression tests.
+- `S16-T2`: Mockway state reads are bounded with deterministic over-limit errors.
+- `S16-T3`: subprocess env override injection now de-duplicates overridden keys deterministically.
+- `S16-T4`: default scenario loader now fails deterministically when schema paths are unavailable (no schema-validation bypass fallback).
+- `S16-T5`: empty config files now return explicit decode failure (`empty config file`); decode branch cleanup complete.
+- `S16-T6`: policy semantics corrected (`encryption_at_rest` no longer conflates bucket versioning) and naming policy now allows single-character names while rejecting trailing hyphens.
+- `S16-T7`: removed dead runtime scaffold (`notImplementedRuntime`) and made destroy-run metadata schema assignment explicit.
+- Slice 16 closure refinement pass 1: synced roadmap/startup/ticket-status docs for post-remediation state.
+- Slice 16 closure refinement pass 2: no additional improvements identified.
+- Slice 16 closure refinement pass 3: no additional improvements identified (second consecutive no-change pass).
 - Completed maintenance ticket `M28`: planned Slice 16 from `ISSUES.md` with explicit tickets `S16-T1`..`S16-T8`, acceptance criteria, and required tests.
 - Slice 16 refinement pass 1 improvements applied: clarified issue-to-ticket mapping, prioritized signal/cancellation and schema-validation hardening first, and synced roadmap/backlog sequencing.
 - Slice 16 refinement pass 2: no additional planning/doc improvements identified.

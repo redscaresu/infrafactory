@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -95,7 +96,7 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 			Iteration: iteration,
 		})
 		completed = iteration
-		stages, failures := runIteration(runID, iteration, scenarioPath, cmd, runtime, previousIterationFailures)
+		stages, failures := runIteration(cmd.Context(), runID, iteration, scenarioPath, cmd, runtime, previousIterationFailures)
 		allStages = append(allStages, stages...)
 
 		if err := persistRunIteration(store, sc.Name, runID, iteration, stages, failures); err != nil {
@@ -199,7 +200,7 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 	})
 
 	if terminalReason == "target_reached" {
-		holdoutStages, holdoutFailures, err := runCriteriaOnlyHoldouts(runtime, scenarioPath)
+		holdoutStages, holdoutFailures, err := runCriteriaOnlyHoldouts(cmd.Context(), runtime, scenarioPath)
 		if err != nil {
 			return fmt.Errorf("run holdout checks: %w", err)
 		}
@@ -312,7 +313,7 @@ func resolveRunStoreRoot() string {
 	return runstore.DefaultRoot
 }
 
-func runIteration(runID string, iteration int, scenarioPath string, cmd *cobra.Command, runtime *CommandRuntime, previousIterationFailures []FailureSummary) ([]StageSummary, []FailureSummary) {
+func runIteration(ctx context.Context, runID string, iteration int, scenarioPath string, cmd *cobra.Command, runtime *CommandRuntime, previousIterationFailures []FailureSummary) ([]StageSummary, []FailureSummary) {
 	stages := make([]StageSummary, 0, 3)
 	failures := make([]FailureSummary, 0)
 
@@ -341,13 +342,13 @@ func runIteration(runID string, iteration int, scenarioPath string, cmd *cobra.C
 			testResult OutputResult
 		)
 		if step.name == "test" {
-			testResult, err = executeTest(runtime, scenarioPath)
+			testResult, err = executeTest(ctx, runtime, scenarioPath)
 		} else {
 			switch step.name {
 			case "generate":
-				_, err = generateAndWriteFiles(runtime, scenarioPath, iteration, previousIterationFailures)
+				_, err = generateAndWriteFiles(ctx, runtime, scenarioPath, iteration, previousIterationFailures)
 			case "validate":
-				testResult, err = executeValidate(runtime, scenarioPath)
+				testResult, err = executeValidate(ctx, runtime, scenarioPath)
 			default:
 				err = fmt.Errorf("unsupported run step %q", step.name)
 			}
@@ -403,7 +404,7 @@ func runIteration(runID string, iteration int, scenarioPath string, cmd *cobra.C
 	return stages, failures
 }
 
-func runCriteriaOnlyHoldouts(runtime *CommandRuntime, trainingScenarioPath string) ([]StageSummary, []FailureSummary, error) {
+func runCriteriaOnlyHoldouts(ctx context.Context, runtime *CommandRuntime, trainingScenarioPath string) ([]StageSummary, []FailureSummary, error) {
 	holdoutDir := filepath.Join(runtime.Config.Paths.Scenarios, "holdout")
 	holdouts, err := scenario.DiscoverCriteriaOnlyHoldouts(holdoutDir, trainingScenarioPath)
 	if err != nil {
@@ -438,7 +439,7 @@ func runCriteriaOnlyHoldouts(runtime *CommandRuntime, trainingScenarioPath strin
 
 		// Criteria-only holdouts validate against the generated code of the
 		// already-converged training scenario, not their own output path.
-		result, err := executeTestWithScenario(runtime, sc, runtime.OutputDir())
+		result, err := executeTestWithScenario(ctx, runtime, sc, runtime.OutputDir())
 		if err != nil {
 			stages = append(stages, StageSummary{Layer: "holdout", Stage: holdout.ScenarioName, Status: StageStatusFail})
 			if len(result.Failures) == 0 {

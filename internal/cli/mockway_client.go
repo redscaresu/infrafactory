@@ -9,6 +9,8 @@ import (
 	"time"
 )
 
+const maxMockwayStateResponseBytes = 8 * 1024 * 1024
+
 type mockwayStateClient struct {
 	baseURL string
 	client  *http.Client
@@ -53,9 +55,12 @@ func (c *mockwayStateClient) State(ctx context.Context) ([]byte, error) {
 	}
 	defer resp.Body.Close()
 
-	payload, err := io.ReadAll(resp.Body)
+	payload, err := io.ReadAll(io.LimitReader(resp.Body, maxMockwayStateResponseBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("read state response: %w", err)
+	}
+	if len(payload) > maxMockwayStateResponseBytes {
+		return nil, fmt.Errorf("read state response: payload exceeds %d bytes", maxMockwayStateResponseBytes)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("fetch mock state: unexpected status %d: %s", resp.StatusCode, strings.TrimSpace(string(payload)))

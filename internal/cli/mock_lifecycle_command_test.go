@@ -21,20 +21,26 @@ type fakeMockLifecycle struct {
 	stopCalls   int
 	statusCalls int
 	logsCalls   int
+	stopCtx     context.Context
+	statusCtx   context.Context
+	logsCtx     context.Context
 }
 
-func (f *fakeMockLifecycle) Stop(context.Context, config.MockwayConfig) error {
+func (f *fakeMockLifecycle) Stop(ctx context.Context, _ config.MockwayConfig) error {
 	f.stopCalls++
+	f.stopCtx = ctx
 	return f.stopErr
 }
 
-func (f *fakeMockLifecycle) Status(context.Context, config.MockwayConfig) (string, error) {
+func (f *fakeMockLifecycle) Status(ctx context.Context, _ config.MockwayConfig) (string, error) {
 	f.statusCalls++
+	f.statusCtx = ctx
 	return f.statusValue, f.statusErr
 }
 
-func (f *fakeMockLifecycle) Logs(context.Context, config.MockwayConfig) (string, error) {
+func (f *fakeMockLifecycle) Logs(ctx context.Context, _ config.MockwayConfig) (string, error) {
 	f.logsCalls++
+	f.logsCtx = ctx
 	return f.logsValue, f.logsErr
 }
 
@@ -181,6 +187,53 @@ func TestMockStatusCommandFailure(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "- mock/preflight: fail") {
 		t.Fatalf("expected preflight failure output, got:\n%s", stdout.String())
+	}
+}
+
+func TestMockLifecycleCommandsPropagateContext(t *testing.T) {
+	t.Parallel()
+
+	type contextKey string
+	const key contextKey = "ctx-key"
+
+	h := newCommandTestHarness(t)
+	lifecycle := &fakeMockLifecycle{
+		statusValue: "ok",
+		logsValue:   "ok",
+	}
+	opts := runtimeOptions{
+		configLoader:   config.Load,
+		scenarioLoader: defaultScenarioLoader,
+		deps: RuntimeDependencies{
+			MockStop:   lifecycle,
+			MockStatus: lifecycle,
+			MockLogs:   lifecycle,
+		},
+	}
+
+	commands := map[string]*cobra.Command{
+		"stop":   newMockStopCommandForTest(opts),
+		"status": newMockStatusCommandForTest(opts),
+		"logs":   newMockLogsCommandForTest(opts),
+	}
+	for name, cmd := range commands {
+		cmd.SetOut(&bytes.Buffer{})
+		cmd.SetErr(&bytes.Buffer{})
+		cmd.SetArgs([]string{"--config", h.ConfigPath})
+		commandCtx := context.WithValue(context.Background(), key, name)
+		if err := cmd.ExecuteContext(commandCtx); err != nil {
+			t.Fatalf("execute mock %s with context: %v", name, err)
+		}
+	}
+
+	if got := lifecycle.stopCtx.Value(key); got != "stop" {
+		t.Fatalf("expected stop context value %q, got %#v", "stop", got)
+	}
+	if got := lifecycle.statusCtx.Value(key); got != "status" {
+		t.Fatalf("expected status context value %q, got %#v", "status", got)
+	}
+	if got := lifecycle.logsCtx.Value(key); got != "logs" {
+		t.Fatalf("expected logs context value %q, got %#v", "logs", got)
 	}
 }
 

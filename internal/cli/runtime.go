@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/redscaresu/infrafactory/internal/config"
@@ -133,18 +134,23 @@ func defaultRuntimeOptions() runtimeOptions {
 }
 
 func defaultScenarioLoader(path string) (scenario.Scenario, error) {
-	candidates := []string{
+	return loadScenarioWithSchemaCandidates(path, []string{
 		scenario.DefaultSchemaPath,
 		filepath.Join("..", "..", scenario.DefaultSchemaPath),
-	}
+	})
+}
 
+func loadScenarioWithSchemaCandidates(path string, candidates []string) (scenario.Scenario, error) {
 	for _, schemaPath := range candidates {
 		if _, err := os.Stat(schemaPath); err == nil {
 			return scenario.LoadWithSchema(path, schemaPath)
 		}
 	}
 
-	return scenario.Load(path)
+	return scenario.Scenario{}, fmt.Errorf(
+		"locate scenario schema: none of the default schema paths exist (%s)",
+		strings.Join(candidates, ", "),
+	)
 }
 
 func withRuntime(op string, next runtimeHandler) func(*cobra.Command, []string) error {
@@ -293,12 +299,6 @@ func buildDefaultSeedGenerator(cfg config.Config) (generator.SeedGenerator, erro
 		return seed, nil
 	default:
 		return nil, fmt.Errorf("unsupported generator agent type %q: %w", cfg.Agent.Type, ErrDependencyUnavailable)
-	}
-}
-
-func notImplementedRuntime(command string) runtimeHandler {
-	return func(_ *cobra.Command, _ []string, _ *CommandRuntime) error {
-		return fmt.Errorf("%s: %w", command, ErrNotImplemented)
 	}
 }
 

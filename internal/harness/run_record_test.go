@@ -30,6 +30,9 @@ func TestPersistDestroyRunSuccessAndFailure(t *testing.T) {
 	if successMeta.Status != "success" {
 		t.Fatalf("expected success status, got %q", successMeta.Status)
 	}
+	if successMeta.Schema != runstore.RunMetadataSchemaVersion {
+		t.Fatalf("expected success schema %q, got %q", runstore.RunMetadataSchemaVersion, successMeta.Schema)
+	}
 	successStatePath := filepath.Join(store.Root, "web-app-paris", "run-success", "iterations", "1", "destroy_state.json")
 	if _, err := os.Stat(successStatePath); err != nil {
 		t.Fatalf("expected destroy state artifact for success run: %v", err)
@@ -46,6 +49,9 @@ func TestPersistDestroyRunSuccessAndFailure(t *testing.T) {
 	}
 	if failureMeta.Status != "failed" {
 		t.Fatalf("expected failed status, got %q", failureMeta.Status)
+	}
+	if failureMeta.Schema != runstore.RunMetadataSchemaVersion {
+		t.Fatalf("expected failure schema %q, got %q", runstore.RunMetadataSchemaVersion, failureMeta.Schema)
 	}
 
 	failureArtifactPath := filepath.Join(store.Root, "web-app-paris", "run-failed", "iterations", "1", "failures.json")

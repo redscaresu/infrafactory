@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -12,7 +11,7 @@ func runMockLogsCommand(cmd *cobra.Command, _ []string, runtime *CommandRuntime)
 		return fmt.Errorf("mock logs dependency unavailable: %w", ErrDependencyUnavailable)
 	}
 
-	logDetail, err := runtime.Deps.MockLogs.Logs(context.Background(), runtime.Config.Mockway)
+	logDetail, err := runtime.Deps.MockLogs.Logs(cmd.Context(), runtime.Config.Mockway)
 	status := CommandStatusSuccess
 	stages := []StageSummary{
 		{Layer: "mock", Stage: "preflight", Status: StageStatusPass},

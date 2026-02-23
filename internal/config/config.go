@@ -185,7 +185,7 @@ func Load(path string) (Config, error) {
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&cfg); err != nil {
 		if errors.Is(err, io.EOF) {
-			return Config{}, fmt.Errorf("decode config %q: %w", path, err)
+			return Config{}, fmt.Errorf("decode config %q: empty config file", path)
 		}
 		return Config{}, fmt.Errorf("decode config %q: %w", path, err)
 	}

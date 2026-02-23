@@ -14,7 +14,7 @@ import (
 )
 
 func runTestCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) error {
-	result, err := executeTest(runtime, args[0])
+	result, err := executeTest(cmd.Context(), runtime, args[0])
 	if err != nil {
 		if writeErr := writeCommandOutput(cmd, result); writeErr != nil {
 			return writeErr
@@ -137,15 +137,15 @@ func appendDestroyResult(stages []StageSummary, failures []FailureSummary, resul
 	return stages, failures
 }
 
-func executeTest(runtime *CommandRuntime, scenarioPath string) (OutputResult, error) {
+func executeTest(ctx context.Context, runtime *CommandRuntime, scenarioPath string) (OutputResult, error) {
 	sc, err := runtime.LoadScenario(scenarioPath)
 	if err != nil {
 		return OutputResult{}, fmt.Errorf("load scenario %q: %w", scenarioPath, err)
 	}
-	return executeTestWithScenario(runtime, sc, runtime.OutputDir())
+	return executeTestWithScenario(ctx, runtime, sc, runtime.OutputDir())
 }
 
-func executeTestWithScenario(runtime *CommandRuntime, sc scenario.Scenario, outputDir string) (OutputResult, error) {
+func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc scenario.Scenario, outputDir string) (OutputResult, error) {
 	unsupportedStages, unsupportedFailures, err := unsupportedCriteriaResult(sc)
 	if err != nil {
 		return OutputResult{}, err
@@ -212,17 +212,17 @@ func executeTestWithScenario(runtime *CommandRuntime, sc scenario.Scenario, outp
 		}, nil
 	}
 
-	deployResult, deployErr := runtime.Deps.MockDeploy.Run(context.Background(), outputDir, env)
+	deployResult, deployErr := runtime.Deps.MockDeploy.Run(ctx, outputDir, env)
 	stages, failures = appendMockDeployResult(stages, failures, deployResult, deployErr)
 	if deployErr == nil && runtime.Config.Validation.Layers.Destruction.Enabled {
-		criteriaStages, criteriaFailures := evaluateSupportedCriteria(sc, runtime, deployResult)
+		criteriaStages, criteriaFailures := evaluateSupportedCriteria(ctx, sc, runtime, deployResult)
 		stages = append(stages, criteriaStages...)
 		failures = append(failures, criteriaFailures...)
 
-		destroyResult, destroyErr := runtime.Deps.Destroy.Run(context.Background(), outputDir, env)
+		destroyResult, destroyErr := runtime.Deps.Destroy.Run(ctx, outputDir, env)
 		stages, failures = appendDestroyResult(stages, failures, destroyResult, destroyErr)
 	} else if deployErr == nil {
-		criteriaStages, criteriaFailures := evaluateSupportedCriteria(sc, runtime, deployResult)
+		criteriaStages, criteriaFailures := evaluateSupportedCriteria(ctx, sc, runtime, deployResult)
 		stages = append(stages, criteriaStages...)
 		failures = append(failures, criteriaFailures...)
 		stages = append(stages, StageSummary{Layer: "destruction", Stage: "disabled", Status: StageStatusSkip})
@@ -251,7 +251,7 @@ func executeTestWithScenario(runtime *CommandRuntime, sc scenario.Scenario, outp
 	return result, nil
 }
 
-func evaluateSupportedCriteria(sc scenario.Scenario, runtime *CommandRuntime, deployResult *harness.MockDeployResult) ([]StageSummary, []FailureSummary) {
+func evaluateSupportedCriteria(ctx context.Context, sc scenario.Scenario, runtime *CommandRuntime, deployResult *harness.MockDeployResult) ([]StageSummary, []FailureSummary) {
 	if deployResult == nil {
 		return nil, nil
 	}
@@ -329,7 +329,7 @@ func evaluateSupportedCriteria(sc scenario.Scenario, runtime *CommandRuntime, de
 	}
 
 	if len(policySpecs) > 0 {
-		policyFailures := evaluateStatePolicyCriteria(runtime, deployResult.StateSnapshot, policySpecs)
+		policyFailures := evaluateStatePolicyCriteria(ctx, runtime, deployResult.StateSnapshot, policySpecs)
 		if len(policyFailures) > 0 {
 			stages = append(stages, StageSummary{
 				Layer:  "mock_deploy",
@@ -346,7 +346,7 @@ func evaluateSupportedCriteria(sc scenario.Scenario, runtime *CommandRuntime, de
 	return stages, failures
 }
 
-func evaluateStatePolicyCriteria(runtime *CommandRuntime, stateSnapshot []byte, specs []scenario.ExecutableCheckSpec) []FailureSummary {
+func evaluateStatePolicyCriteria(ctx context.Context, runtime *CommandRuntime, stateSnapshot []byte, specs []scenario.ExecutableCheckSpec) []FailureSummary {
 	failures := make([]FailureSummary, 0)
 
 	for _, spec := range specs {
@@ -373,7 +373,7 @@ func evaluateStatePolicyCriteria(runtime *CommandRuntime, stateSnapshot []byte, 
 			extraInput["target"] = spec.Policy.Target
 		}
 
-		evaluatedFailures, err := harness.EvaluateStatePoliciesWithInput(context.Background(), stateSnapshot, extraInput, []string{policyPath})
+		evaluatedFailures, err := harness.EvaluateStatePoliciesWithInput(ctx, stateSnapshot, extraInput, []string{policyPath})
 		if err != nil {
 			failures = append(failures, FailureSummary{
 				Layer:   "mock_deploy",

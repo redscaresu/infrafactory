@@ -191,9 +191,9 @@ Feature status snapshot:
 | `mock` command lifecycle | implemented | `mock start`/`stop`/`status`/`logs` are wired with deterministic output/error behavior. |
 | sandbox/live deploy | permanently blocked | Governed as a permanent non-goal (ADR-0003). |
 
-Next hardening slice:
-- Slice 16 is dedicated to remediating unresolved robustness issues tracked in `ISSUES.md` (context cancellation propagation, bounded external reads, deterministic env overrides, schema-validation availability guarantees, and policy correctness cleanups).
-- Ticket execution order is tracked in `BACKLOG.md` (`S16-T1`..`S16-T8`).
+Latest hardening slice:
+- Slice 16 remediation is complete (`S16-T1`..`S16-T8`): command-context propagation, bounded Mockway reads, deterministic env overrides, schema-availability enforcement, explicit empty-config decode errors, policy semantics fixes, and runtime scaffolding cleanup.
+- Remaining non-completed backlog lane remains `S9-T8` and is intentionally blocked by governance (ADR-0003).
 
 Notes on current runtime prerequisites:
 - `generate` and `run` resolve a concrete transport-backed `SeedGenerator` from runtime (`internal/cli/runtime.go`) when no test/injected generator is provided.
