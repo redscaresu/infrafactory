@@ -8,6 +8,15 @@ import (
 )
 
 var fileHeaderPattern = regexp.MustCompile(`^#\s*File:\s*(.+)\s*$`)
+
+// SelfReviewIndicatesNoChanges returns true only when a self-review response
+// exactly matches the canonical "NO ISSUES FOUND" phrase (case-insensitive,
+// whitespace-trimmed). This strict check avoids false positives from fuzzy
+// substring matching — e.g. "looks good but the IP config is wrong" would
+// incorrectly suppress corrections if matched broadly.
+func SelfReviewIndicatesNoChanges(text string) bool {
+	return strings.EqualFold(strings.TrimSpace(text), "NO ISSUES FOUND")
+}
 var heredocOpenPattern = regexp.MustCompile(`<<-?\s*(\w+)\s*$`)
 
 // updateHeredocState tracks whether the current line is inside an HCL

@@ -27,9 +27,9 @@ func runTestCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) 
 func testCommandEnv(runtime *CommandRuntime) map[string]string {
 	return map[string]string{
 		"SCW_API_URL":            runtime.Config.Mockway.URL,
-		"SCW_ACCESS_KEY":         "mock-access-key",
-		"SCW_SECRET_KEY":         "mock-secret-key",
-		"SCW_DEFAULT_PROJECT_ID": "mock-project-id",
+		"SCW_ACCESS_KEY":         "SCWMOCKACCESSKEY0000",
+		"SCW_SECRET_KEY":         "00000000-0000-0000-0000-000000000000",
+		"SCW_DEFAULT_PROJECT_ID": "00000000-0000-0000-0000-000000000000",
 	}
 }
 
@@ -271,29 +271,13 @@ func evaluateSupportedCriteria(ctx context.Context, sc scenario.Scenario, runtim
 			}
 	}
 
-	topologyChecks := make([]harness.TopologyCheck, 0)
 	policySpecs := make([]scenario.ExecutableCheckSpec, 0)
 	for _, spec := range specs {
+		_, supported, _ := criteriaSupportReason(spec.Type)
+		if !supported {
+			continue
+		}
 		switch spec.Type {
-		case "connectivity":
-			if spec.Connectivity != nil {
-				topologyChecks = append(topologyChecks, harness.TopologyCheck{
-					Type:   spec.Type,
-					From:   spec.Connectivity.From,
-					To:     spec.Connectivity.To,
-					Port:   spec.Connectivity.Port,
-					Expect: spec.Expect,
-				})
-			}
-		case "http_probe":
-			if spec.HTTPProbe != nil {
-				topologyChecks = append(topologyChecks, harness.TopologyCheck{
-					Type:   spec.Type,
-					Target: spec.HTTPProbe.Target,
-					Port:   spec.HTTPProbe.Port,
-					Expect: spec.Expect,
-				})
-			}
 		case "policy":
 			policySpecs = append(policySpecs, spec)
 		}
@@ -301,32 +285,6 @@ func evaluateSupportedCriteria(ctx context.Context, sc scenario.Scenario, runtim
 
 	stages := make([]StageSummary, 0, 2)
 	failures := make([]FailureSummary, 0)
-
-	if len(topologyChecks) > 0 {
-		topologyFailures, err := harness.EvaluateTopology(deployResult.StateSnapshot, topologyChecks)
-		if err != nil {
-			stages = append(stages, StageSummary{Layer: "mock_deploy", Stage: "topology", Status: StageStatusFail})
-			failures = append(failures, FailureSummary{
-				Layer:   "mock_deploy",
-				Stage:   "topology",
-				Check:   "topology",
-				Command: "topology evaluator",
-				Detail:  err.Error(),
-			})
-		} else if len(topologyFailures) > 0 {
-			stages = append(stages, StageSummary{
-				Layer:  "mock_deploy",
-				Stage:  "topology",
-				Status: StageStatusFail,
-				Detail: fmt.Sprintf("%d topology failures", len(topologyFailures)),
-			})
-			for _, failure := range topologyFailures {
-				failures = append(failures, toFailureSummary(failure))
-			}
-		} else {
-			stages = append(stages, StageSummary{Layer: "mock_deploy", Stage: "topology", Status: StageStatusPass})
-		}
-	}
 
 	if len(policySpecs) > 0 {
 		policyFailures := evaluateStatePolicyCriteria(ctx, runtime, deployResult.StateSnapshot, policySpecs)

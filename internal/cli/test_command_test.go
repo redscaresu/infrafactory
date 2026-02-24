@@ -219,8 +219,8 @@ func TestTestCommandAutoPassesDeferredDNSCriteriaHumanOutput(t *testing.T) {
 	if !strings.Contains(stdout.String(), "- criteria/support_matrix: skip") {
 		t.Fatalf("expected support-matrix skip stage in output, got:\n%s", stdout.String())
 	}
-	if !strings.Contains(stdout.String(), dnsResolutionAutoPassMessage()) {
-		t.Fatalf("expected dns_resolution auto-pass message in output, got:\n%s", stdout.String())
+	if !strings.Contains(stdout.String(), sandboxRealDeploySkippedMessage) {
+		t.Fatalf("expected sandbox auto-pass message in output, got:\n%s", stdout.String())
 	}
 }
 
@@ -253,7 +253,7 @@ func TestTestCommandAutoPassesDeferredDNSCriteriaJSONOutput(t *testing.T) {
 		`"schema": "` + OutputSchemaVersion + `"`,
 		`"status": "success"`,
 		`"stage": "support_matrix"`,
-		`currently automatically passes due to lack of real world cloud provider`,
+		sandboxRealDeploySkippedMessage,
 	}
 	for _, check := range checks {
 		if !strings.Contains(stdout.String(), check) {
@@ -313,12 +313,15 @@ func TestTestCommandExecutesCriteriaDrivenTopologyAndPolicyChecks(t *testing.T) 
 		t.Fatalf("expected success, got: %v", err)
 	}
 	for _, check := range []string{
-		"- mock_deploy/topology: pass",
+		"- criteria/support_matrix: skip",
 		"- mock_deploy/state_policy: pass",
 	} {
 		if !strings.Contains(stdout.String(), check) {
 			t.Fatalf("expected output to contain %q, got:\n%s", check, stdout.String())
 		}
+	}
+	if strings.Contains(stdout.String(), "- mock_deploy/topology") {
+		t.Fatalf("topology stage should not appear when connectivity auto-passes, got:\n%s", stdout.String())
 	}
 }
 
@@ -373,19 +376,14 @@ func TestTestCommandReportsCriteriaDrivenTopologyAndPolicyFailures(t *testing.T)
 	if err == nil {
 		t.Fatal("expected failure")
 	}
-	if !strings.Contains(stdout.String(), "- mock_deploy/topology: fail") {
-		t.Fatalf("expected topology failure stage, got:\n%s", stdout.String())
-	}
 	if !strings.Contains(stdout.String(), "- mock_deploy/state_policy: fail") {
 		t.Fatalf("expected state_policy failure stage, got:\n%s", stdout.String())
 	}
-	for _, check := range []string{
-		"check=connectivity",
-		"policy=encryption_at_rest",
-	} {
-		if !strings.Contains(stdout.String(), check) {
-			t.Fatalf("expected output to contain %q, got:\n%s", check, stdout.String())
-		}
+	if !strings.Contains(stdout.String(), "policy=encryption_at_rest") {
+		t.Fatalf("expected policy failure in output, got:\n%s", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "- mock_deploy/topology") {
+		t.Fatalf("topology stage should not appear when connectivity auto-passes, got:\n%s", stdout.String())
 	}
 }
 

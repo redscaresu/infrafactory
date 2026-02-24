@@ -81,13 +81,13 @@ func TestValidateCommandStaticSuccess(t *testing.T) {
 	if static.lastEnv["SCW_API_URL"] != "http://localhost:8080" {
 		t.Fatalf("unexpected SCW_API_URL: %q", static.lastEnv["SCW_API_URL"])
 	}
-	if static.lastEnv["SCW_ACCESS_KEY"] != "mock-access-key" {
+	if static.lastEnv["SCW_ACCESS_KEY"] != "SCWMOCKACCESSKEY0000" {
 		t.Fatalf("unexpected SCW_ACCESS_KEY: %q", static.lastEnv["SCW_ACCESS_KEY"])
 	}
-	if static.lastEnv["SCW_SECRET_KEY"] != "mock-secret-key" {
+	if static.lastEnv["SCW_SECRET_KEY"] != "00000000-0000-0000-0000-000000000000" {
 		t.Fatalf("unexpected SCW_SECRET_KEY: %q", static.lastEnv["SCW_SECRET_KEY"])
 	}
-	if static.lastEnv["SCW_DEFAULT_PROJECT_ID"] != "mock-project-id" {
+	if static.lastEnv["SCW_DEFAULT_PROJECT_ID"] != "00000000-0000-0000-0000-000000000000" {
 		t.Fatalf("unexpected SCW_DEFAULT_PROJECT_ID: %q", static.lastEnv["SCW_DEFAULT_PROJECT_ID"])
 	}
 

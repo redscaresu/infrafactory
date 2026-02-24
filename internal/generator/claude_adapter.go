@@ -83,11 +83,12 @@ func (g *ClaudeSeedGenerator) Generate(ctx context.Context, req Request) (*Gener
 	phaseResults := make([]PhaseResult, 0, len(g.cfg.Phases))
 	phaseOutput := map[string]string{}
 	lastFiles := map[string][]byte{}
+	var filteredSchema string
 
 	for i, phase := range g.cfg.Phases {
 		g.logProgress("phase %q start\n", phase)
 
-		prompt, err := g.renderPhasePrompt(phase, req, phaseOutput, lastFiles)
+		prompt, err := g.renderPhasePrompt(phase, req, phaseOutput, lastFiles, filteredSchema)
 		if err != nil {
 			return nil, err
 		}
@@ -121,6 +122,20 @@ func (g *ClaudeSeedGenerator) Generate(ctx context.Context, req Request) (*Gener
 		g.logProgress("phase %q complete\n", phase)
 
 		switch phase {
+		case PhasePlanArchitecture:
+			if len(req.ProviderSchemaJSON) > 0 {
+				resourceTypes, extractErr := ExtractResourceTypesFromArchitecturePlan(phaseText)
+				if extractErr != nil {
+					g.logProgress("schema filter: failed to extract resource types: %v\n", extractErr)
+				} else if len(resourceTypes) > 0 {
+					schema, filterErr := FilterSchemaForResourceTypes(req.ProviderSchemaJSON, resourceTypes)
+					if filterErr != nil {
+						g.logProgress("schema filter: failed to filter schema: %v\n", filterErr)
+					} else {
+						filteredSchema = schema
+					}
+				}
+			}
 		case PhaseGenerateHCL:
 			files, parseErr := ParseFileBlocks(phaseText)
 			if parseErr != nil {
@@ -128,13 +143,18 @@ func (g *ClaudeSeedGenerator) Generate(ctx context.Context, req Request) (*Gener
 			}
 			lastFiles = files
 		case PhaseSelfReview:
-			trimmed := strings.TrimSpace(phaseText)
-			if strings.EqualFold(trimmed, "NO ISSUES FOUND") {
+			if SelfReviewIndicatesNoChanges(phaseText) {
+				g.logProgress("phase %q: no changes indicated\n", phase)
 				break
 			}
 			files, parseErr := ParseFileBlocks(phaseText)
 			if parseErr != nil {
-				return nil, NewGenerateError(ErrParseFailed, phase, parseErr)
+				// Self-review produced unparseable output (no file blocks and
+				// no affirmative "no issues" phrase). Treat as no-op rather
+				// than failing the entire generation — the phase 2 files are
+				// still valid and can proceed to validation.
+				g.logProgress("phase %q: skipping unparseable self-review output\n", phase)
+				break
 			}
 			if lastFiles == nil {
 				lastFiles = make(map[string][]byte, len(files))
@@ -170,7 +190,7 @@ func (g *ClaudeSeedGenerator) logProgress(format string, args ...any) {
 	_, _ = fmt.Fprintf(g.cfg.ProgressWriter, "generator/claude: "+format, args...)
 }
 
-func (g *ClaudeSeedGenerator) renderPhasePrompt(phase string, req Request, outputs map[string]string, files map[string][]byte) (string, error) {
+func (g *ClaudeSeedGenerator) renderPhasePrompt(phase string, req Request, outputs map[string]string, files map[string][]byte, filteredSchema string) (string, error) {
 	fileName, err := phaseTemplateFile(phase)
 	if err != nil {
 		return "", err
@@ -185,6 +205,7 @@ func (g *ClaudeSeedGenerator) renderPhasePrompt(phase string, req Request, outpu
 		AcceptanceCriteria: g.cfg.Acceptance,
 		GeneratedFiles:     renderGeneratedFiles(files),
 		FeedbackJSON:       string(req.FeedbackJSON),
+		ProviderSchema:     filteredSchema,
 	}
 
 	return RenderPromptFile(phase, templatePath, ctx)

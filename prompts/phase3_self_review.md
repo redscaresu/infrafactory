@@ -18,6 +18,16 @@ You are a senior infrastructure engineer reviewing OpenTofu code for Scaleway. R
 
 {{.AcceptanceCriteria}}
 
+{{if .ProviderSchema}}
+## Provider Resource Schemas (Authoritative Reference)
+
+The following are the EXACT resource schemas from the Scaleway OpenTofu provider. When reviewing attribute references in the generated code, verify every attribute and block type against this schema. If any code references an attribute not listed here, it MUST be corrected — that attribute does not exist and will cause a validation error.
+
+```json
+{{.ProviderSchema}}
+```
+{{end}}
+
 {{if .FeedbackJSON}}
 ## Previous Iteration Feedback
 
@@ -37,17 +47,19 @@ The previous iteration's generated code failed validation. Pay special attention
 5. **Dependencies**: Are resource references correct (no circular deps, no missing refs)?
 6. **Constraints compliance**:
    - Region/zone restrictions respected?
-   - Private networking where required?
+   - Private networking where required? Servers MUST have separate `scaleway_instance_private_nic` resources — the validation policy checks for these specifically. Do NOT remove them.
    - No public endpoints on databases if `no_public_database: true`?
    - Encryption at rest if required?
-7. **Acceptance criteria**: Will the generated infrastructure pass each criterion?
+7. **RDB private_network**: If `scaleway_rdb_instance` has a `private_network` block, verify it sets either `ip_net` (e.g. `"10.0.0.254/24"`) or `enable_ipam = true`. Omitting both causes: "at least one of 'ip_net' or 'enable_ipam' (set to true) must be set".
+   **LB flexible IP**: Do NOT set `assign_flexible_ip` when `ip_ids` is used on `scaleway_lb` — they conflict.
+8. **Acceptance criteria**: Will the generated infrastructure pass each criterion?
    - Connectivity checks: are security groups / private networks configured correctly?
    - HTTP probes: are load balancer frontends/backends set up?
    - Policy checks: do resources comply with OPA policies?
-8. **Best practices**:
+9. **Naming convention**: All `name` attributes MUST match `^[a-z](?:[a-z0-9-]*[a-z0-9])?$` — lowercase alphanumeric and hyphens only, no underscores. Fix any name that uses underscores (e.g. `webapp_user` → `webapp-user`).
+10. **Best practices**:
    - Are outputs defined for key resources?
    - Are variables used for configurable values?
-   - Is naming consistent?
 
 ## Instructions
 

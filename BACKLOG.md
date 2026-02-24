@@ -6,6 +6,8 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 
 | id | slice | title | priority | status | deps | owner |
 |---|---|---|---|---|---|---|
+| M34 | Maintenance | End-to-end pipeline stabilization: mockway endpoint fixes, self-review contract tightening, prompt pitfall updates | P1 | done | M33 | codex |
+| M33 | Maintenance | Document lazy provider-schema prompt injection and convergence hardening outcomes; close with two no-change review passes | P1 | done | M32 | codex |
 | M32 | Maintenance | Harden self-review convergence and stuck-signature specificity for run-loop retries | P1 | done | M31 | codex |
 | M31 | Maintenance | Add run-loop feedback observability for model input and sanitize validation stderr signal | P1 | done | M30 | codex |
 | M30 | Maintenance | Hard cutover run loop to failure-only retries (remove `iterations_target`) | P1 | done | S17-T1 | codex |

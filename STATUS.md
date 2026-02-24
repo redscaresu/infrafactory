@@ -1,11 +1,11 @@
 # STATUS
 
-Last updated: 2026-02-23
+Last updated: 2026-02-24
 
 ## Current phase
-- Active milestone: post-Slice 17 run-loop convergence hardening (completed)
+- Active milestone: post-Slice 17 convergence + end-to-end pipeline stabilization (completed)
 - Next gate: no unblocked backlog tickets remain (`S9-T8` is still blocked by ADR-0003 governance).
-- Current ticket: none
+- Current ticket: M34 (done)
 - Next ticket: none (await new ticket or governance change)
 
 ## In progress
@@ -27,6 +27,19 @@ Last updated: 2026-02-23
 - Keep startup/read-order instructions only in `SESSION_START.md` to avoid duplication.
 
 ## Recent updates
+- Completed maintenance ticket `M34`: end-to-end pipeline stabilization and self-review contract tightening.
+- `M34` mockway fixes: added Block Storage API routes (`/block/v1alpha1/`), RDB ACL DELETE handler, and deployed server terminate fix via Docker rebuild.
+- `M34` prompt improvements: updated `private_ips` pitfall to reference `scaleway_instance_private_nic` instead of server resource; added RDB `private_network` `ip_net`/`enable_ipam` pitfall.
+- `M34` self-review tightening: `SelfReviewIndicatesNoChanges` now matches only exact canonical `NO ISSUES FOUND` (case-insensitive, trimmed); removed all fuzzy substring matching to prevent false "no changes" classification.
+- `M34` test alignment: renamed and updated adapter tests to reflect strict canonical check vs unparseable-prose fallback semantics.
+- `M34` pipeline validation: 6/6 consecutive first-iteration passes after all fixes.
+- Completed maintenance ticket `M33`: synchronized docs/tracking for lazy provider-schema prompt injection (generate-only, cached, best-effort) and convergence hardening outcomes.
+- `M33` docs update: README now documents schema extraction timing/behavior, filtered schema injection into phase 2/3 prompts, and troubleshooting expectations when extraction is skipped.
+- `M33` startup guidance update: `SESSION_START.md` now reflects completed Slice 17 follow-ups and generate-path-only schema extraction guardrails.
+- `M33` review pass 1: applied docs/slice/tracking optimizations across README/SESSION_START/ROADMAP/BACKLOG/STATUS/CURRENT_TICKET.
+- `M33` review pass 2: no additional optimizations identified.
+- `M33` review pass 3: no additional optimizations identified (second consecutive no-change pass).
+- Verification after `M33`: `bash scripts/check_all.sh` passed.
 - Completed maintenance ticket `M32`: fixed generator convergence regressions by making self-review updates merge with prior generated files (no full-file-set replacement when self-review returns partial corrections).
 - `M32` run-loop signal-quality update: stuck detection now compares signatures with `check` + `resource` + `detail`, preventing false-positive `stuck` stops when only check/resource match but failure details evolve.
 - `M32` adapter consistency: removed Claude no-file-block fallback earlier and aligned both adapters on strict self-review parse failure semantics; added follow-up hardening for partial-file merge behavior.

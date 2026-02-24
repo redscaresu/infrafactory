@@ -318,6 +318,83 @@ func TestOpenRouterSeedGeneratorRealHTTPOptInSmoke(t *testing.T) {
 	}
 }
 
+func TestOpenRouterSeedGeneratorSchemaInjection(t *testing.T) {
+	t.Parallel()
+
+	fullSchema := `{"provider_schemas":{"scaleway/scaleway":{"resource_schemas":{` +
+		`"scaleway_instance_server":{"block":{"attributes":{"name":{}}}},` +
+		`"scaleway_vpc":{"block":{"attributes":{"name":{}}}},` +
+		`"scaleway_rdb_instance":{"block":{"attributes":{"name":{}}}}` +
+		`}}}}`
+
+	archPlan := `{"region":"fr-par","resources":[{"type":"scaleway_instance_server","name":"web"},{"type":"scaleway_vpc","name":"main"}]}`
+
+	var prompts []string
+	var callCount int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var reqBody struct {
+			Messages []struct {
+				Content string `json:"content"`
+			} `json:"messages"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&reqBody)
+		if len(reqBody.Messages) > 0 {
+			prompts = append(prompts, reqBody.Messages[0].Content)
+		}
+
+		count := atomic.AddInt32(&callCount, 1)
+		content := ""
+		switch count {
+		case 1:
+			content = archPlan
+		case 2:
+			content = "# File: main.tf\nterraform {}"
+		default:
+			content = "NO ISSUES FOUND"
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{"message": map[string]any{"content": content}}},
+		})
+	}))
+	defer server.Close()
+
+	gen := newOpenRouterGeneratorForTest(t, OpenRouterTransportConfig{
+		APIKey:     "test-key",
+		Model:      "test-model",
+		BaseURL:    server.URL,
+		Timeout:    5 * time.Second,
+		MaxRetries: 0,
+		PromptsDir: writeSchemaAwarePromptFixtures(t),
+		Phases:     []string{PhasePlanArchitecture, PhaseGenerateHCL, PhaseSelfReview},
+	})
+
+	_, err := gen.Generate(context.Background(), Request{
+		ScenarioYAML:       []byte("scenario: smoke"),
+		ProviderSchemaJSON: []byte(fullSchema),
+	})
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+
+	if len(prompts) < 3 {
+		t.Fatalf("expected 3 prompts, got %d", len(prompts))
+	}
+	// Phase 2 prompt should contain filtered schema.
+	if !strings.Contains(prompts[1], "scaleway_instance_server") {
+		t.Fatal("expected phase 2 prompt to contain scaleway_instance_server")
+	}
+	if !strings.Contains(prompts[1], "scaleway_vpc") {
+		t.Fatal("expected phase 2 prompt to contain scaleway_vpc")
+	}
+	if strings.Contains(prompts[1], "scaleway_rdb_instance") {
+		t.Fatal("expected phase 2 prompt to NOT contain scaleway_rdb_instance")
+	}
+	// Phase 3 prompt should also contain the filtered schema.
+	if !strings.Contains(prompts[2], "scaleway_instance_server") {
+		t.Fatal("expected phase 3 prompt to contain scaleway_instance_server")
+	}
+}
+
 func writeSinglePhasePromptFixture(t *testing.T) string {
 	t.Helper()
 

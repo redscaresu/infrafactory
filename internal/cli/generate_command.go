@@ -162,6 +162,8 @@ func generateAndWriteFilesWithResult(ctx context.Context, runtime *CommandRuntim
 		return 0, nil, fmt.Errorf("generator dependency unavailable: %w", ErrDependencyUnavailable)
 	}
 
+	runtime.EnsureProviderSchema(ctx)
+
 	var feedbackPayload []byte
 	if len(feedbackFailures) > 0 {
 		feedbackPayload, err = json.Marshal(struct {
@@ -175,10 +177,11 @@ func generateAndWriteFilesWithResult(ctx context.Context, runtime *CommandRuntim
 	}
 
 	generated, err := runtime.Deps.Generator.Generate(ctx, generator.Request{
-		ScenarioPath: scenarioPath,
-		ScenarioYAML: scenarioPayload,
-		FeedbackJSON: feedbackPayload,
-		Iteration:    iteration,
+		ScenarioPath:       scenarioPath,
+		ScenarioYAML:       scenarioPayload,
+		FeedbackJSON:       feedbackPayload,
+		Iteration:          iteration,
+		ProviderSchemaJSON: runtime.ProviderSchemaJSON,
 	})
 	if err != nil {
 		return 0, nil, fmt.Errorf("generate code: %w", err)

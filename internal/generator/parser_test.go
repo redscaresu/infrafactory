@@ -197,3 +197,35 @@ EOF
 		})
 	}
 }
+
+func TestSelfReviewIndicatesNoChanges(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		text string
+		want bool
+	}{
+		{name: "exact canonical phrase", text: "NO ISSUES FOUND", want: true},
+		{name: "canonical phrase with whitespace", text: "  NO ISSUES FOUND  \n", want: true},
+		{name: "canonical phrase case insensitive", text: "no issues found", want: true},
+		{name: "prose with no issues phrase", text: "After reviewing, no issues found in the code.", want: false},
+		{name: "everything looks correct", text: "Everything looks correct. No changes needed.", want: false},
+		{name: "looks good prose", text: "The generated code looks good and follows best practices.", want: false},
+		{name: "no changes needed", text: "I've reviewed all files. No changes needed.", want: false},
+		{name: "contains file blocks", text: "Looks good but\n# File: main.tf\nterraform {}", want: false},
+		{name: "ambiguous prose no pattern", text: "Here are some thoughts about the infrastructure.", want: false},
+		{name: "empty string", text: "", want: false},
+		{name: "code is correct", text: "The code is correct and implements the plan.", want: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := SelfReviewIndicatesNoChanges(tc.text)
+			if got != tc.want {
+				t.Fatalf("SelfReviewIndicatesNoChanges(%q) = %v, want %v", tc.text, got, tc.want)
+			}
+		})
+	}
+}

@@ -1,9 +1,7 @@
 services:
   mockway:
-    image: ghcr.io/redscaresu/mockway:latest
+    build: ../mockway
     restart: unless-stopped
-    # Or build from local clone:
-    # build: ../mockway
     ports:
       - "8080:8080"   # Scaleway API mock
 

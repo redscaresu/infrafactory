@@ -33,7 +33,7 @@ Before writing code, confirm these facts are still true in `STATUS.md`/`BACKLOG.
 1. `S9-T8` (sandbox/live deploy, real Scaleway) remains permanently blocked by governance policy (ADR-0003).
 2. Output and logs must explicitly surface: `(real deployment skipped for cost reasons for now)` for sandbox/live-blocked behavior.
 3. Slice 16 issue-driven robustness hardening is complete; preserve its guarantees while keeping the remaining blocked lane (`S9-T8`) unchanged unless ADR-0003 is superseded.
-4. A scoped follow-up ticket `S17-T1` is queued: opt-in raw LLM stage-response capture artifacts must remain disabled by default and enforce redaction + byte caps.
+4. Slice 17 hardening follow-ups are complete (`S17-T1`, `M31`, `M32`, `M33`, `M34`); preserve opt-in capture defaults, convergence fixes, self-review canonical-only matching, and docs alignment.
 5. `run` is criteria-aware and includes criteria-only holdout completion checks; do not regress to coarse stage-only convergence behavior.
 6. `dns_resolution` remains auto-pass informational output while sandbox/live deploy is blocked; do not treat it as a hard-fail criterion.
 7. Default runtime now uses concrete generator transports; `claude-code` requires `agent.claude.command` in `PATH` and `openrouter` requires `OPENROUTER_API_KEY` plus `agent.openrouter.model`.
@@ -58,6 +58,10 @@ If either command fails, restore the repo to a green baseline before starting a 
   `.infrafactory/runs/<scenario>/<run-id>/iterations/<n>/iteration.json` records stage/failure snapshots per iteration.
 - Keep output semantics in mind:
   `output/<scenario>/` is latest generated IaC and is overwritten each run; historical evidence lives under `.infrafactory/runs/`.
+- Provider schema extraction is lazy and generate-path-only:
+  first `generate`/`run` generation call attempts schema extraction once (cached in runtime); `validate`/`test`/`mock` should not pay that startup cost.
+- Schema extraction is best-effort:
+  if `tofu init/providers schema` fails, generation proceeds without schema-enriched prompts; inspect logs for `provider_schema` skip details before debugging prompt quality.
 - Preserve Slice 13-15 guarantees while fixing Slice 16 issues:
   keep deterministic JSON-line logging fields/redaction behavior, structured run feedback (`failure_class` and detailed failure context), and adaptive transport stop behavior with persisted diagnostics.
 - For any future planning refinement over unfinished slices (`todo`/`blocked` backlog work):
@@ -171,31 +175,18 @@ If either command fails, restore the repo to a green baseline before starting a 
 - Validation rule:
   scenario schema loading must fail deterministically (or use embedded schema) when schema files are unavailable; no silent schema-validation bypass.
 
-### S17-T1 fresh-context implementation approach
-- Implementation objective:
-  add opt-in-only capture of LLM stage responses and prompts per iteration/phase for `run` diagnostics, while keeping default behavior unchanged.
+### S17-T1 implementation reference (completed)
 - Activation contract:
-  use an env-gated switch for first delivery (`INFRAFACTORY_CAPTURE_LLM_RAW=1`); when unset, no raw response artifacts are persisted.
+  capture is env-gated (`INFRAFACTORY_CAPTURE_LLM_RAW=1`); default behavior persists no LLM prompt/raw artifacts.
 - Artifact contract:
-  write capture files under run artifacts (`.infrafactory/runs/<scenario>/<run-id>/iterations/<n>/`) with deterministic naming by phase/stage and stable JSON envelope metadata (phase, iteration, truncated flag, byte counts):
+  capture files are written under run artifacts (`.infrafactory/runs/<scenario>/<run-id>/iterations/<n>/`) with deterministic phase naming and stable metadata envelopes:
   `llm_raw_<phase>.json` and `llm_prompt_<phase>.json`.
 - Safety contract:
-  always apply deterministic redaction before persisting (API keys/tokens/secret-like patterns); enforce hard byte caps with explicit truncation markers.
+  deterministic secret-like redaction and hard byte caps with explicit truncation markers are applied before persistence.
 - Feedback-debugging guardrail:
-  use paired prompt/response artifacts from the same iteration to confirm whether validation/test failures were actually present in model input before changing prompt wording.
+  use paired prompt/response artifacts from the same iteration to verify whether failure feedback reached model input before changing prompt wording.
 - Compatibility guardrail:
-  do not change default output contract, terminal reasons, or existing run artifact readers for non-capture paths.
-- Recommended implementation order:
-  1) define capture helper and redaction/cap utilities in generator/runtime path,
-  2) wire opt-in gating in `run` iteration flow,
-  3) persist artifacts in runstore path,
-  4) add focused tests.
-- Required focused tests:
-  disabled-by-default no-op behavior,
-  enabled capture artifact writes,
-  redaction determinism,
-  truncation/size-cap enforcement,
-  stable artifact naming/location.
+  preserve default output contract, terminal reasons, and existing run artifact readers when capture is disabled.
 
 ## 3) Execute
 - Implement + test.

@@ -72,6 +72,7 @@ This file is intentionally high-level and mostly stable; day-to-day execution tr
 - Implement concrete generator transport wiring for `claude -p` and OpenRouter.
 - Keep generation deterministic via strict prompt/input/output contracts and parser reuse.
 - Add credential-safety guardrails so transport errors/logs do not leak secrets.
+- Use lazy provider-schema extraction (`tofu providers schema -json`) to enrich phase 2/3 prompts with authoritative resource attributes when available, without blocking non-generate commands.
 - Add hermetic transport-adapter tests and opt-in smoke tests for real transports.
 - Preserve existing CLI/output contracts and failure taxonomy while replacing default transport stubs.
 
@@ -124,9 +125,10 @@ This file is intentionally high-level and mostly stable; day-to-day execution tr
 
 ## Near-term execution order
 
-1. Keep completed slices (11-16) stable and regression-green.
-2. Keep Slice 17 hardening outcomes stable (`S17-T1`, `M31`, `M32`) and regression-green.
+1. Keep completed slices (11-17) stable and regression-green.
+2. Keep Slice 17 hardening outcomes stable (`S17-T1`, `M31`, `M32`, `M33`, `M34`) and regression-green.
 3. Keep `S9-T8` blocked under ADR-0003 unless governance policy is explicitly superseded.
+4. Pipeline consistently achieves first-iteration pass (6/6 as of M34); monitor for regressions.
 
 ## Live progress tracking
 

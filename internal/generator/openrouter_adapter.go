@@ -83,9 +83,10 @@ func (g *OpenRouterSeedGenerator) Generate(ctx context.Context, req Request) (*G
 	phaseResults := make([]PhaseResult, 0, len(g.cfg.Phases))
 	phaseOutput := map[string]string{}
 	lastFiles := map[string][]byte{}
+	var filteredSchema string
 
 	for i, phase := range g.cfg.Phases {
-		prompt, err := g.renderPhasePrompt(phase, req, phaseOutput, lastFiles)
+		prompt, err := g.renderPhasePrompt(phase, req, phaseOutput, lastFiles, filteredSchema)
 		if err != nil {
 			return nil, err
 		}
@@ -103,6 +104,16 @@ func (g *OpenRouterSeedGenerator) Generate(ctx context.Context, req Request) (*G
 		})
 
 		switch phase {
+		case PhasePlanArchitecture:
+			if len(req.ProviderSchemaJSON) > 0 {
+				resourceTypes, extractErr := ExtractResourceTypesFromArchitecturePlan(text)
+				if extractErr == nil && len(resourceTypes) > 0 {
+					schema, filterErr := FilterSchemaForResourceTypes(req.ProviderSchemaJSON, resourceTypes)
+					if filterErr == nil {
+						filteredSchema = schema
+					}
+				}
+			}
 		case PhaseGenerateHCL:
 			files, parseErr := ParseFileBlocks(text)
 			if parseErr != nil {
@@ -110,13 +121,13 @@ func (g *OpenRouterSeedGenerator) Generate(ctx context.Context, req Request) (*G
 			}
 			lastFiles = files
 		case PhaseSelfReview:
-			trimmed := strings.TrimSpace(text)
-			if strings.EqualFold(trimmed, "NO ISSUES FOUND") {
+			if SelfReviewIndicatesNoChanges(text) {
 				break
 			}
 			files, parseErr := ParseFileBlocks(text)
 			if parseErr != nil {
-				return nil, NewGenerateError(ErrParseFailed, phase, parseErr)
+				// Self-review produced unparseable output — treat as no-op.
+				break
 			}
 			if lastFiles == nil {
 				lastFiles = make(map[string][]byte, len(files))
@@ -144,7 +155,7 @@ func (g *OpenRouterSeedGenerator) Generate(ctx context.Context, req Request) (*G
 	return result, nil
 }
 
-func (g *OpenRouterSeedGenerator) renderPhasePrompt(phase string, req Request, outputs map[string]string, files map[string][]byte) (string, error) {
+func (g *OpenRouterSeedGenerator) renderPhasePrompt(phase string, req Request, outputs map[string]string, files map[string][]byte, filteredSchema string) (string, error) {
 	fileName, err := phaseTemplateFile(phase)
 	if err != nil {
 		return "", err
@@ -159,6 +170,7 @@ func (g *OpenRouterSeedGenerator) renderPhasePrompt(phase string, req Request, o
 		AcceptanceCriteria: g.cfg.Acceptance,
 		GeneratedFiles:     renderGeneratedFiles(files),
 		FeedbackJSON:       string(req.FeedbackJSON),
+		ProviderSchema:     filteredSchema,
 	}
 	return RenderPromptFile(phase, templatePath, ctx)
 }

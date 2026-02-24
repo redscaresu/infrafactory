@@ -126,9 +126,9 @@ func executeValidate(ctx context.Context, runtime *CommandRuntime, scenarioPath 
 func validateCommandEnv(runtime *CommandRuntime) map[string]string {
 	return map[string]string{
 		"SCW_API_URL":            runtime.Config.Mockway.URL,
-		"SCW_ACCESS_KEY":         "mock-access-key",
-		"SCW_SECRET_KEY":         "mock-secret-key",
-		"SCW_DEFAULT_PROJECT_ID": "mock-project-id",
+		"SCW_ACCESS_KEY":         "SCWMOCKACCESSKEY0000",
+		"SCW_SECRET_KEY":         "00000000-0000-0000-0000-000000000000",
+		"SCW_DEFAULT_PROJECT_ID": "00000000-0000-0000-0000-000000000000",
 	}
 }
 

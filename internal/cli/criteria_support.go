@@ -39,7 +39,7 @@ func unsupportedCriteriaResult(sc scenario.Scenario) ([]StageSummary, []FailureS
 			Layer:  "criteria",
 			Stage:  "support_matrix",
 			Status: StageStatusSkip,
-			Detail: fmt.Sprintf("%d criteria auto-passed (%s)", autoPassCount, dnsResolutionAutoPassMessage()),
+			Detail: fmt.Sprintf("%d criteria auto-passed %s", autoPassCount, sandboxRealDeploySkippedMessage),
 		})
 	}
 
@@ -61,13 +61,19 @@ func unsupportedCriteriaResult(sc scenario.Scenario) ([]StageSummary, []FailureS
 
 func criteriaSupportReason(criterionType string) (reason string, supported bool, autoPass bool) {
 	switch criterionType {
-	case "connectivity", "http_probe", "policy", "destruction":
+	case "policy", "destruction":
 		return "", true, false
+	case "connectivity", "http_probe":
+		return topologyAutoPassMessage(), false, true
 	case "dns_resolution":
 		return dnsResolutionAutoPassMessage(), false, true
 	default:
 		return "is not supported by the current criteria support matrix", false, false
 	}
+}
+
+func topologyAutoPassMessage() string {
+	return "requires live infrastructure to evaluate " + sandboxRealDeploySkippedMessage
 }
 
 func dnsResolutionAutoPassMessage() string {

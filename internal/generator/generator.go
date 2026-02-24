@@ -25,10 +25,11 @@ func (f SeedGeneratorFunc) Generate(ctx context.Context, req Request) (*Generate
 }
 
 type Request struct {
-	ScenarioPath string
-	ScenarioYAML []byte
-	FeedbackJSON []byte
-	Iteration    int
+	ScenarioPath       string
+	ScenarioYAML       []byte
+	FeedbackJSON       []byte
+	Iteration          int
+	ProviderSchemaJSON []byte
 }
 
 type GeneratedCode struct {

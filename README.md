@@ -192,6 +192,7 @@ Feature status snapshot:
 
 Latest hardening slice:
 - Slice 16 remediation is complete (`S16-T1`..`S16-T8`): command-context propagation, bounded Mockway reads, deterministic env overrides, schema-availability enforcement, explicit empty-config decode errors, policy semantics fixes, and runtime scaffolding cleanup.
+- Slice 17 and maintenance hardening are complete (`S17-T1`, `M31`, `M32`, `M33`, `M34`): opt-in prompt/raw capture artifacts, strict self-review parse behavior + partial-file merge convergence fixes, stuck-signature specificity (`check`+`resource`+`detail`), lazy provider-schema prompt injection, and end-to-end pipeline stabilization (mockway endpoint coverage, prompt pitfall hardening, self-review canonical-only matching).
 - Remaining non-completed backlog lane remains `S9-T8` and is intentionally blocked by governance (ADR-0003).
 
 Notes on current runtime prerequisites:
@@ -371,6 +372,14 @@ Secret-like detail tokens are redacted in log details (`token`, `api_key`, `secr
 
 Terminal control markers are intentionally excluded from iterative repair feedback entries.
 
+### Provider Schema Prompt Injection
+
+`generate` and `run` lazily attempt provider-schema extraction once per command runtime and cache the result:
+- extraction command path: `tofu init` + `tofu providers schema -json` in an isolated temp directory.
+- extraction timing: on first generate path call (not during generic runtime bootstrap), so non-generate commands avoid startup overhead.
+- prompt usage: phase 2/3 prompts receive a filtered schema subset containing only resource types referenced in phase 1 architecture output.
+- failure mode: extraction failures are non-fatal; generation proceeds without schema injection.
+
 ## Usage
 
 ### Exit Codes and Error Contract
@@ -511,7 +520,9 @@ Troubleshooting:
 - If you need to verify what failure feedback the model actually received, run with `INFRAFACTORY_CAPTURE_LLM_RAW=1` and inspect both `llm_prompt_<phase>.json` and `llm_raw_<phase>.json` for the same iteration.
 - If generated `.tf` files contain markdown fences/tables, rerun `generate`; parser hardening strips fenced payloads and drops common markdown artifacts before file writes.
 - `self_review` now applies partial corrections by merging returned `# File:` blocks into the existing generated file set; files omitted in self-review output are retained.
+- `self_review` "no changes" detection now requires the exact canonical phrase `NO ISSUES FOUND` (case-insensitive, trimmed). Fuzzy substring matching (e.g. "looks good", "code is correct") has been removed to prevent false suppression of corrections. Unparseable self-review prose (no file blocks, not canonical phrase) falls through as a no-op, retaining phase-2 files.
 - If `run` stops with `stuck`, compare failure detail strings across iteration artifacts (`iterations/<n>/iteration.json`): stuck signatures now include `check`, `resource`, and `detail`.
+- If you see a `provider_schema skipped` log entry, schema extraction failed and generation continued without schema injection; verify `tofu` availability/network access if you expected schema-enriched prompts.
 - If Claude output omits Scaleway provider wiring, `generate` now auto-injects `required_providers.scaleway` and `provider "scaleway"` into `providers.tf` before writing files.
 - If `agent.type=openrouter` fails with `dependency_unavailable`, export `OPENROUTER_API_KEY` in the execution environment.
 - If transport smoke tests fail, verify provider prerequisites:

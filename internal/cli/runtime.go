@@ -57,16 +57,19 @@ type RuntimeDependencies struct {
 }
 
 type CommandRuntime struct {
-	ConfigPath        string
-	Config            config.Config
-	TransportContract generator.TransportContract
-	Deps              RuntimeDependencies
-	Logger            *AppLogger
+	ConfigPath         string
+	Config             config.Config
+	TransportContract  generator.TransportContract
+	Deps               RuntimeDependencies
+	Logger             *AppLogger
+	ProviderSchemaJSON []byte
 
-	scenarioLoader func(string) (scenario.Scenario, error)
-	loadedScenario *scenario.Scenario
-	scenarioPath   string
-	outputDir      string
+	scenarioLoader  func(string) (scenario.Scenario, error)
+	loadedScenario  *scenario.Scenario
+	scenarioPath    string
+	outputDir       string
+	schemaRunner    harness.CommandRunner
+	schemaExtracted bool
 }
 
 func (r *CommandRuntime) LoadScenario(path string) (scenario.Scenario, error) {
@@ -91,6 +94,31 @@ func (r *CommandRuntime) LoadScenario(path string) (scenario.Scenario, error) {
 
 func (r *CommandRuntime) OutputDir() string {
 	return r.outputDir
+}
+
+// EnsureProviderSchema extracts the Scaleway provider schema once, caching
+// the result for subsequent calls. If extraction fails (no tofu binary,
+// network issues), it logs a warning and proceeds — ProviderSchemaJSON
+// stays nil and prompts work without the schema section.
+func (r *CommandRuntime) EnsureProviderSchema(ctx context.Context) {
+	if r.schemaExtracted || r.schemaRunner == nil {
+		return
+	}
+	r.schemaExtracted = true
+
+	schemaCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+	schema, err := harness.ExtractProviderSchema(schemaCtx, r.schemaRunner, nil)
+	if err != nil {
+		r.Logger.Log(LogEntry{
+			Level:  logLevelInfo,
+			Event:  "provider_schema",
+			Status: "skipped",
+			Detail: err.Error(),
+		})
+		return
+	}
+	r.ProviderSchemaJSON = schema
 }
 
 type CLIError struct {
@@ -243,12 +271,13 @@ func buildRuntime(cmd *cobra.Command, opts runtimeOptions) (*CommandRuntime, err
 	}
 
 	return &CommandRuntime{
-		ConfigPath:        configPath,
-		Config:            cfg,
+		ConfigPath:     configPath,
+		Config:         cfg,
 		TransportContract: transportContract,
-		Deps:              deps,
-		Logger:            NewAppLogger(os.Stderr),
-		scenarioLoader:    opts.scenarioLoader,
+		Deps:           deps,
+		Logger:         NewAppLogger(os.Stderr),
+		scenarioLoader: opts.scenarioLoader,
+		schemaRunner:   execCommandRunner{},
 	}, nil
 }
 

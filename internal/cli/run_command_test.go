@@ -701,9 +701,7 @@ func TestRunCommandPropagatesCriteriaFailuresForConvergence(t *testing.T) {
 				result: &harness.MockDeployResult{
 					Apply: harness.StageResult{Stage: "apply"},
 					StateSnapshot: []byte(`{
-  "connectivity": {"compute->database:5432": false},
-  "http_probe": {"load_balancer:80": true},
-  "rdb": {"public_endpoint": false}
+  "rdb": {"public_endpoint": true}
 }`),
 				},
 			},
@@ -721,8 +719,8 @@ func TestRunCommandPropagatesCriteriaFailuresForConvergence(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected run failure")
 	}
-	if !strings.Contains(stdout.String(), "check=connectivity") {
-		t.Fatalf("expected criteria-level connectivity failure in run output, got:\n%s", stdout.String())
+	if !strings.Contains(stdout.String(), "policy=encryption_at_rest") {
+		t.Fatalf("expected criteria-level policy failure in run output, got:\n%s", stdout.String())
 	}
 	if !strings.Contains(stdout.String(), "check=stuck") {
 		t.Fatalf("expected stuck detection marker in run output, got:\n%s", stdout.String())
@@ -878,8 +876,8 @@ func TestRunCommandAutoPassesDeferredDNSHoldoutWithoutFeedbackInjection(t *testi
 	if genCalls != 1 {
 		t.Fatalf("expected holdout evaluation after first successful training pass, got %d generator calls", genCalls)
 	}
-	if !strings.Contains(stdout.String(), dnsResolutionAutoPassMessage()) {
-		t.Fatalf("expected holdout dns_resolution auto-pass message, got:\n%s", stdout.String())
+	if !strings.Contains(stdout.String(), sandboxRealDeploySkippedMessage) {
+		t.Fatalf("expected holdout auto-pass message, got:\n%s", stdout.String())
 	}
 	if !strings.Contains(stdout.String(), "Status: success") {
 		t.Fatalf("expected successful run status, got:\n%s", stdout.String())

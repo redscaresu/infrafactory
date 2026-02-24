@@ -335,7 +335,7 @@ func TestClaudeSeedGeneratorProgressLogging(t *testing.T) {
 	}
 }
 
-func TestClaudeSeedGeneratorSelfReviewNoFileBlocksReturnsError(t *testing.T) {
+func TestClaudeSeedGeneratorSelfReviewCanonicalNoIssuesRetainsFiles(t *testing.T) {
 	t.Parallel()
 
 	promptsDir := writeClaudePromptFixtures(t)
@@ -343,7 +343,7 @@ func TestClaudeSeedGeneratorSelfReviewNoFileBlocksReturnsError(t *testing.T) {
 		outputs: []string{
 			`{"region":"fr-par"}`,
 			"# File: main.tf\nterraform {}",
-			"Review notes only; no file blocks",
+			"NO ISSUES FOUND",
 		},
 	}
 	gen, err := NewClaudeSeedGenerator(ClaudeTransportConfig{
@@ -355,12 +355,136 @@ func TestClaudeSeedGeneratorSelfReviewNoFileBlocksReturnsError(t *testing.T) {
 		t.Fatalf("new generator: %v", err)
 	}
 
-	_, err = gen.Generate(context.Background(), Request{ScenarioYAML: []byte("scenario: smoke")})
-	if err == nil {
-		t.Fatal("expected error when self_review has no file blocks")
+	out, err := gen.Generate(context.Background(), Request{ScenarioYAML: []byte("scenario: smoke")})
+	if err != nil {
+		t.Fatalf("expected no error for canonical NO ISSUES FOUND, got %v", err)
 	}
-	if !errors.Is(err, ErrParseFailed) {
-		t.Fatalf("expected ErrParseFailed, got %v", err)
+	if string(out.Files["main.tf"]) != "terraform {}" {
+		t.Fatalf("expected generate_hcl files to be retained, got %q", string(out.Files["main.tf"]))
+	}
+}
+
+func TestClaudeSeedGeneratorSelfReviewUnparseableProseRetainsFiles(t *testing.T) {
+	t.Parallel()
+
+	promptsDir := writeClaudePromptFixtures(t)
+	runner := &fakeClaudeRunner{
+		outputs: []string{
+			`{"region":"fr-par"}`,
+			"# File: main.tf\nterraform {}",
+			"Here are some thoughts about the code that I noticed during review.",
+		},
+	}
+	gen, err := NewClaudeSeedGenerator(ClaudeTransportConfig{
+		Command:    "claude",
+		PromptsDir: promptsDir,
+		Phases:     []string{PhasePlanArchitecture, PhaseGenerateHCL, PhaseSelfReview},
+	}, runner)
+	if err != nil {
+		t.Fatalf("new generator: %v", err)
+	}
+
+	// Unparseable self-review prose (no file blocks, not canonical phrase)
+	// should fall through as a no-op, retaining phase-2 files.
+	out, err := gen.Generate(context.Background(), Request{ScenarioYAML: []byte("scenario: smoke")})
+	if err != nil {
+		t.Fatalf("expected no error for unparseable self-review prose, got %v", err)
+	}
+	if string(out.Files["main.tf"]) != "terraform {}" {
+		t.Fatalf("expected generate_hcl files to be retained, got %q", string(out.Files["main.tf"]))
+	}
+}
+
+func TestClaudeSeedGeneratorSchemaInjection(t *testing.T) {
+	t.Parallel()
+
+	promptsDir := writeSchemaAwarePromptFixtures(t)
+
+	fullSchema := `{"provider_schemas":{"scaleway/scaleway":{"resource_schemas":{` +
+		`"scaleway_instance_server":{"block":{"attributes":{"name":{}}}},` +
+		`"scaleway_vpc":{"block":{"attributes":{"name":{}}}},` +
+		`"scaleway_rdb_instance":{"block":{"attributes":{"name":{}}}}` +
+		`}}}}`
+
+	archPlan := `{"region":"fr-par","resources":[{"type":"scaleway_instance_server","name":"web"},{"type":"scaleway_vpc","name":"main"}]}`
+
+	runner := &fakeClaudeRunner{
+		outputs: []string{
+			archPlan,
+			"# File: main.tf\nterraform {}",
+			"NO ISSUES FOUND",
+		},
+	}
+
+	gen, err := NewClaudeSeedGenerator(ClaudeTransportConfig{
+		Command:    "claude",
+		PromptsDir: promptsDir,
+		Phases:     []string{PhasePlanArchitecture, PhaseGenerateHCL, PhaseSelfReview},
+	}, runner)
+	if err != nil {
+		t.Fatalf("new generator: %v", err)
+	}
+
+	_, err = gen.Generate(context.Background(), Request{
+		ScenarioYAML:       []byte("scenario: smoke"),
+		ProviderSchemaJSON: []byte(fullSchema),
+	})
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+
+	// Phase 2 prompt should contain filtered schema with the two matching resource types.
+	phase2Prompt := runner.calls[1].Args[1]
+	if !strings.Contains(phase2Prompt, "scaleway_instance_server") {
+		t.Fatal("expected phase 2 prompt to contain scaleway_instance_server schema")
+	}
+	if !strings.Contains(phase2Prompt, "scaleway_vpc") {
+		t.Fatal("expected phase 2 prompt to contain scaleway_vpc schema")
+	}
+	// scaleway_rdb_instance should NOT appear because it's not in the architecture plan.
+	if strings.Contains(phase2Prompt, "scaleway_rdb_instance") {
+		t.Fatal("expected phase 2 prompt to NOT contain scaleway_rdb_instance schema")
+	}
+
+	// Phase 3 prompt should also contain the filtered schema.
+	phase3Prompt := runner.calls[2].Args[1]
+	if !strings.Contains(phase3Prompt, "scaleway_instance_server") {
+		t.Fatal("expected phase 3 prompt to contain scaleway_instance_server schema")
+	}
+}
+
+func TestClaudeSeedGeneratorNoSchemaWhenNotProvided(t *testing.T) {
+	t.Parallel()
+
+	promptsDir := writeSchemaAwarePromptFixtures(t)
+	runner := &fakeClaudeRunner{
+		outputs: []string{
+			`{"region":"fr-par","resources":[{"type":"scaleway_vpc","name":"main"}]}`,
+			"# File: main.tf\nterraform {}",
+			"NO ISSUES FOUND",
+		},
+	}
+
+	gen, err := NewClaudeSeedGenerator(ClaudeTransportConfig{
+		Command:    "claude",
+		PromptsDir: promptsDir,
+		Phases:     []string{PhasePlanArchitecture, PhaseGenerateHCL, PhaseSelfReview},
+	}, runner)
+	if err != nil {
+		t.Fatalf("new generator: %v", err)
+	}
+
+	_, err = gen.Generate(context.Background(), Request{
+		ScenarioYAML: []byte("scenario: smoke"),
+	})
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+
+	// Phase 2 prompt should NOT contain schema section marker.
+	phase2Prompt := runner.calls[1].Args[1]
+	if strings.Contains(phase2Prompt, "SCHEMA:") {
+		t.Fatal("expected phase 2 prompt to not contain schema when ProviderSchemaJSON is nil")
 	}
 }
 
@@ -379,5 +503,23 @@ func writeClaudePromptFixtures(t *testing.T) string {
 	mustWriteFile("phase1_plan_architecture.md", "S1\n{{.ScenarioYAML}}\n{{.FeedbackJSON}}\n")
 	mustWriteFile("phase2_generate_hcl.md", "S2\n{{.ArchitecturePlan}}\n{{.ScenarioYAML}}\n")
 	mustWriteFile("phase3_self_review.md", "S3\n{{.GeneratedFiles}}\n{{.ScenarioYAML}}\n")
+	return dir
+}
+
+func writeSchemaAwarePromptFixtures(t *testing.T) string {
+	t.Helper()
+
+	dir := t.TempDir()
+	mustWriteFile := func(name string, content string) {
+		t.Helper()
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+
+	mustWriteFile("phase1_plan_architecture.md", "S1\n{{.ScenarioYAML}}\n{{.FeedbackJSON}}\n")
+	mustWriteFile("phase2_generate_hcl.md", "S2\n{{.ArchitecturePlan}}\n{{.ScenarioYAML}}\n{{if .ProviderSchema}}SCHEMA:{{.ProviderSchema}}{{end}}\n")
+	mustWriteFile("phase3_self_review.md", "S3\n{{.GeneratedFiles}}\n{{.ScenarioYAML}}\n{{if .ProviderSchema}}SCHEMA:{{.ProviderSchema}}{{end}}\n")
 	return dir
 }
