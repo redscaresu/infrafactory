@@ -191,18 +191,24 @@ Key behaviors:
 
 ### OPA Plan Policy Checks (Static Layer)
 
-OPA plan checks run during static validation and are evaluated against `tofu show -json tfplan` output.
-These checks use Rego `deny` rules from configured policy paths and fail validation before deploy-layer execution when violations are found.
+OPA policies are evaluated at two points using a rule naming convention:
+- **`deny` rules**: evaluated against `tofu show -json tfplan` output during static validation (layer 1). Fires before any deploy action.
+- **`deny_state` rules**: evaluated against the mockway state snapshot (`GET /mock/state`) during mock deploy validation (layer 2). Fires after apply.
 
-Representative policy files:
-- `policies/scaleway/no_public_database.rego`
-- `policies/scaleway/no_public_endpoints.rego`
-- `policies/scaleway/vpc_required.rego`
-- `policies/scaleway/region_restriction.rego`
-- `policies/common/naming.rego`
+A single `.rego` file can contain both rule types. For example, `no_public_database.rego` has a `deny` rule that checks the plan for missing `private_network` blocks and a `deny_state` rule that checks deployed state for public endpoints.
+
+Bundled policy files:
+- `policies/scaleway/no_public_database.rego` (plan + state)
+- `policies/scaleway/no_public_endpoints.rego` (plan)
+- `policies/scaleway/vpc_required.rego` (plan)
+- `policies/scaleway/region_restriction.rego` (plan)
+- `policies/scaleway/encryption_at_rest.rego` (plan)
+- `policies/common/naming.rego` (plan)
+
+Custom policies can be added to `policies/custom/` — any `.rego` file under `paths.policies` is automatically picked up.
 
 This is separate from holdouts:
-- OPA plan checks are part of the training/static validation stage within each run iteration.
+- OPA checks are part of the training validation stages within each run iteration.
 - Holdouts are criteria-only scenarios executed after training convergence as a final gating phase.
 
 ## Current State
