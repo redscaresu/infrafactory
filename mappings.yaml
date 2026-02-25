@@ -38,3 +38,12 @@ scaleway:
     xlarge:
       node_type: GP1-M
       node_count: 7
+  redis:
+    small:
+      node_type: RED1-MICRO
+    medium:
+      node_type: RED1-S
+    large:
+      node_type: RED1-M
+    xlarge:
+      node_type: RED1-L

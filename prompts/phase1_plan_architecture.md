@@ -39,7 +39,7 @@ The previous iteration's generated code failed validation. Analyze these failure
 **IMPORTANT**: Do NOT use Terraform/OpenTofu `data` sources. Use hardcoded IDs and values from the mappings and overrides above. If a data source is needed (e.g., image lookup), use the literal value from mappings instead. The mock environment does not support data source queries.
 
 1. Analyse the scenario and identify all Scaleway resources needed.
-2. Map intent-driven sizes to concrete Scaleway offerings using the mappings above.
+2. Map intent-driven sizes to concrete Scaleway offerings using ONLY the exact values in the Size Mappings table above. Do NOT invent types — use the mappings verbatim (e.g., compute large → `GP1-S`, NOT `GP1-L`).
 3. Apply any prescriptive overrides — these take priority over size mappings.
 4. Identify dependencies between resources (e.g., private network before instances).
 5. Determine the correct Scaleway zones/regions based on constraints.

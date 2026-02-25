@@ -1,0 +1,13 @@
+scenario: iam-explicit-false
+version: "1.0"
+cloud: scaleway
+description: fixture testing explicit false IAM booleans are preserved
+resources:
+  iam:
+    purpose: read-only
+    application: false
+    api_key: false
+    policy: true
+acceptance_criteria:
+  - type: destruction
+    expect: no_orphans

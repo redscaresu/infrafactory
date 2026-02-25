@@ -1,0 +1,18 @@
+scenario: registry-paris
+version: "1.0"
+cloud: scaleway
+description: >
+  A private container registry namespace in Paris for storing
+  application Docker images.
+
+resources:
+  registry:
+    purpose: app-images
+    is_public: false
+
+constraints:
+  region: fr-par
+
+acceptance_criteria:
+  - type: destruction
+    expect: no_orphans

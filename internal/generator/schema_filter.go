@@ -97,6 +97,7 @@ type providerSchema struct {
 // they don't appear in the filtered schema.
 var companionResourceTypes = map[string][]string{
 	"scaleway_instance_server": {"scaleway_instance_private_nic"},
+	"scaleway_k8s_cluster":    {"scaleway_k8s_pool"},
 }
 
 // FilterSchemaForResourceTypes parses the full tofu providers schema JSON and

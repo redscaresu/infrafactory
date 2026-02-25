@@ -1,0 +1,36 @@
+scenario: compute-lb-multi-paris
+version: "1.0"
+cloud: scaleway
+description: >
+  A large compute cluster with a multi-backend load balancer
+  in Paris. Exercises large compute size, count=3, multiple
+  LB backends (HTTP on port 80 and TCP on port 443), and
+  private networking — parameter combinations not covered by
+  other training scenarios.
+
+resources:
+  compute:
+    purpose: api-server
+    size: large
+    count: 3
+  networking:
+    vpc: true
+    private_network: true
+    load_balancer:
+      exposure: public
+      backends:
+        - port: 80
+          protocol: http
+        - port: 443
+          protocol: tcp
+
+constraints:
+  region: fr-par
+
+acceptance_criteria:
+  - type: http_probe
+    target: load_balancer
+    port: 80
+    expect: reachable
+  - type: destruction
+    expect: no_orphans

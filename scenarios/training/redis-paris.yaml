@@ -1,0 +1,21 @@
+scenario: redis-paris
+version: "1.0"
+cloud: scaleway
+description: >
+  A managed Redis cluster in Paris for application caching,
+  deployed on a private network within a VPC.
+
+resources:
+  redis:
+    purpose: cache
+    size: small
+  networking:
+    vpc: true
+    private_network: true
+
+constraints:
+  region: fr-par
+
+acceptance_criteria:
+  - type: destruction
+    expect: no_orphans

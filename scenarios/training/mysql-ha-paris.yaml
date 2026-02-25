@@ -1,0 +1,49 @@
+scenario: mysql-ha-paris
+version: "1.0"
+cloud: scaleway
+description: >
+  A MySQL database with high availability in Paris, with
+  compute instances connected via a private network within
+  a VPC. Exercises mysql engine, medium database size, and
+  HA mode — parameter combinations not covered by other
+  training scenarios.
+
+resources:
+  compute:
+    purpose: app-server
+    size: small
+    count: 1
+  networking:
+    vpc: true
+    private_network: true
+  database:
+    engine: mysql
+    size: medium
+    high_availability: true
+
+constraints:
+  region: fr-par
+  no_public_database: true
+  encryption_at_rest: true
+
+acceptance_criteria:
+  - type: connectivity
+    from: compute
+    to: database
+    port: 3306
+    expect: success
+    description: "App servers must reach the MySQL database via private network"
+  - type: connectivity
+    from: public_internet
+    to: database
+    port: 3306
+    expect: blocked
+  - type: policy
+    check: encryption_at_rest
+    expect: pass
+  - type: policy
+    check: no_public_endpoints
+    target: database
+    expect: pass
+  - type: destruction
+    expect: no_orphans

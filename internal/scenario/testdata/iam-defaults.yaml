@@ -1,0 +1,10 @@
+scenario: iam-defaults
+version: "1.0"
+cloud: scaleway
+description: fixture testing IAM boolean defaults are applied when omitted
+resources:
+  iam:
+    purpose: service-account
+acceptance_criteria:
+  - type: destruction
+    expect: no_orphans

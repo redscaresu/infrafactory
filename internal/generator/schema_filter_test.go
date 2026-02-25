@@ -87,7 +87,9 @@ func TestFilterSchemaForResourceTypes(t *testing.T) {
 					"scaleway_instance_server": {"block":{"attributes":{"name":{}}}},
 					"scaleway_instance_private_nic": {"block":{"attributes":{"server_id":{}}}},
 					"scaleway_vpc": {"block":{"attributes":{"name":{}}}},
-					"scaleway_rdb_instance": {"block":{"attributes":{"name":{}}}}
+					"scaleway_rdb_instance": {"block":{"attributes":{"name":{}}}},
+					"scaleway_k8s_cluster": {"block":{"attributes":{"name":{}}}},
+					"scaleway_k8s_pool": {"block":{"attributes":{"cluster_id":{}}}}
 				}
 			}
 		}
@@ -112,6 +114,12 @@ func TestFilterSchemaForResourceTypes(t *testing.T) {
 			schema:   fullSchema,
 			types:    []string{"scaleway_instance_server"},
 			wantKeys: []string{"scaleway_instance_server", "scaleway_instance_private_nic"},
+		},
+		{
+			name:     "k8s companion type included automatically",
+			schema:   fullSchema,
+			types:    []string{"scaleway_k8s_cluster"},
+			wantKeys: []string{"scaleway_k8s_cluster", "scaleway_k8s_pool"},
 		},
 		{
 			name:      "no matches",

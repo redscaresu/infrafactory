@@ -1,23 +1,21 @@
 # STATUS
 
-Last updated: 2026-02-24
+Last updated: 2026-02-25
 
 ## Current phase
-- Active milestone: post-Slice 17 convergence + end-to-end pipeline stabilization (completed)
-- Next gate: no unblocked backlog tickets remain (`S9-T8` is still blocked by ADR-0003 governance).
-- Current ticket: M34 (done)
-- Next ticket: none (await new ticket or governance change)
+- Active milestone: Slice 20 — scenario combination expansion.
+- All 6 existing scenarios pass `infrafactory run` on first iteration.
+- All test suites green (`go test ./...`, mockway tests, `check_all.sh`).
 
 ## In progress
-- none
+- None. Slice 20 complete (S20-T1 through S20-T6, all 6 first-iteration pass).
 
 ## Known blockers
 - `S9-T8` sandbox/live deploy layer is permanently blocked by governance policy (ADR-0003).
 
 ## Next actions
-1. Keep `S9-T8` blocked unless ADR-0003 is explicitly superseded.
-2. Keep regression baseline green (`go test ./...`, `bash scripts/check_all.sh`).
-3. Queue next unblocked backlog ticket when available.
+1. Define next slice or maintenance work as needed.
+2. `S9-T8` (sandbox/live deploy) remains permanently blocked by ADR-0003.
 
 ## Update policy
 - Update at end of each meaningful coding session.
@@ -27,295 +25,27 @@ Last updated: 2026-02-24
 - Keep startup/read-order instructions only in `SESSION_START.md` to avoid duplication.
 
 ## Recent updates
-- Completed maintenance ticket `M34`: end-to-end pipeline stabilization and self-review contract tightening.
-- `M34` mockway fixes: added Block Storage API routes (`/block/v1alpha1/`), RDB ACL DELETE handler, and deployed server terminate fix via Docker rebuild.
-- `M34` prompt improvements: updated `private_ips` pitfall to reference `scaleway_instance_private_nic` instead of server resource; added RDB `private_network` `ip_net`/`enable_ipam` pitfall.
-- `M34` self-review tightening: `SelfReviewIndicatesNoChanges` now matches only exact canonical `NO ISSUES FOUND` (case-insensitive, trimmed); removed all fuzzy substring matching to prevent false "no changes" classification.
-- `M34` test alignment: renamed and updated adapter tests to reflect strict canonical check vs unparseable-prose fallback semantics.
-- `M34` pipeline validation: 6/6 consecutive first-iteration passes after all fixes.
-- Completed maintenance ticket `M33`: synchronized docs/tracking for lazy provider-schema prompt injection (generate-only, cached, best-effort) and convergence hardening outcomes.
-- `M33` docs update: README now documents schema extraction timing/behavior, filtered schema injection into phase 2/3 prompts, and troubleshooting expectations when extraction is skipped.
-- `M33` startup guidance update: `SESSION_START.md` now reflects completed Slice 17 follow-ups and generate-path-only schema extraction guardrails.
-- `M33` review pass 1: applied docs/slice/tracking optimizations across README/SESSION_START/ROADMAP/BACKLOG/STATUS/CURRENT_TICKET.
-- `M33` review pass 2: no additional optimizations identified.
-- `M33` review pass 3: no additional optimizations identified (second consecutive no-change pass).
-- Verification after `M33`: `bash scripts/check_all.sh` passed.
-- Completed maintenance ticket `M32`: fixed generator convergence regressions by making self-review updates merge with prior generated files (no full-file-set replacement when self-review returns partial corrections).
-- `M32` run-loop signal-quality update: stuck detection now compares signatures with `check` + `resource` + `detail`, preventing false-positive `stuck` stops when only check/resource match but failure details evolve.
-- `M32` adapter consistency: removed Claude no-file-block fallback earlier and aligned both adapters on strict self-review parse failure semantics; added follow-up hardening for partial-file merge behavior.
-- Verification after `M32`: `go test ./internal/generator ./internal/cli ./internal/feedback` passed.
-- Completed maintenance ticket `M31`: added run-loop feedback observability by capturing per-phase prompt artifacts (`llm_prompt_<phase>.json`) alongside raw phase responses (`llm_raw_<phase>.json`) in opt-in capture mode.
-- `M31` signal-quality update: static validation failure stderr is now ANSI-sanitized and retains a larger actionable excerpt before entering run feedback payloads.
-- `M31` review pass 1: implemented prompt-capture + stderr-signal improvements.
-- `M31` review pass 2: no additional improvements identified.
-- `M31` review pass 3: no additional improvements identified (second consecutive no-change pass).
-- Verification after `M31`: `go test ./internal/cli ./internal/harness ./internal/generator` passed.
-- README review pass 1 (post-M30): added missing docs for failure-only retry semantics, raw LLM capture usage/artifact paths, and one-command `scripts/full_flow.sh` workflow.
-- README review pass 2: no additional improvements identified.
-- README review pass 3: no additional improvements identified (second consecutive no-change pass).
-- Completed maintenance ticket `M30`: hard cutover to failure-only run retries by removing `agent.iterations_target` and CLI flag `--iterations-target`.
-- `M30` runtime contract: `run` now stops on first successful iteration (`target_reached`) and retries only on failures under `repair_iterations_max` plus existing `stuck`/transport stop guards.
-- `M30` docs/contracts: added ADR-0006 and marked ADR-0005 as superseded; synced README/ROADMAP/SESSION_START and command help goldens.
-- Verification after `M30`: `go test ./internal/cli ./internal/config`, `go test ./...`, and `bash scripts/check_all.sh` all passed.
-- Completed `S17-T1`: added opt-in (`INFRAFACTORY_CAPTURE_LLM_RAW=1`) per-iteration/per-phase raw LLM response artifacts in runstore with deterministic naming (`llm_raw_<phase>.json`) and metadata envelope (`infrafactory.run.llm_raw.v1`).
-- `S17-T1` safeguards: deterministic secret-like redaction and hard byte caps with explicit truncation marker are now enforced before artifact persistence.
-- `S17-T1` tests: added focused coverage for disabled-by-default behavior, enabled artifact writes, redaction, truncation/size caps, and phase-name sanitization.
-- Verification after `S17-T1`: `go test ./internal/cli ./internal/generator`, `go test ./...`, and `bash scripts/check_all.sh` all pass.
-- Fresh-context approach pass 1: documented concrete `S17-T1` implementation playbook in `SESSION_START.md` (env-gated activation, artifact contract, redaction/size-cap rules, and focused test matrix).
-- Fresh-context approach pass 2: no additional improvements identified.
-- Completed maintenance ticket `M29`: scoped `S17-T1` for opt-in per-iteration/per-phase raw LLM response capture with explicit redaction and size-cap guardrails.
-- Added `S17-T1` to `BACKLOG.md` with clear implementation boundaries and focused test requirements (disabled-by-default behavior, enabled artifact writes, redaction, truncation).
-- M29 refinement pass 1: tightened acceptance criteria to require deterministic redaction and byte-cap enforcement.
-- M29 refinement pass 2: no additional improvements identified.
-- Completed Slice 16 (`S16-T1`..`S16-T8`) end-to-end with focused tests and full checks.
-- `S16-T1`: command/runtime paths now propagate `cmd.Context()` through generate/validate/test/run/mock operations; added context propagation regression tests.
-- `S16-T2`: Mockway state reads are bounded with deterministic over-limit errors.
-- `S16-T3`: subprocess env override injection now de-duplicates overridden keys deterministically.
-- `S16-T4`: default scenario loader now fails deterministically when schema paths are unavailable (no schema-validation bypass fallback).
-- `S16-T5`: empty config files now return explicit decode failure (`empty config file`); decode branch cleanup complete.
-- `S16-T6`: policy semantics corrected (`encryption_at_rest` no longer conflates bucket versioning) and naming policy now allows single-character names while rejecting trailing hyphens.
-- `S16-T7`: removed dead runtime scaffold (`notImplementedRuntime`) and made destroy-run metadata schema assignment explicit.
-- Slice 16 closure refinement pass 1: synced roadmap/startup/ticket-status docs for post-remediation state.
-- Slice 16 closure refinement pass 2: no additional improvements identified.
-- Slice 16 closure refinement pass 3: no additional improvements identified (second consecutive no-change pass).
-- Completed maintenance ticket `M28`: planned Slice 16 from `ISSUES.md` with explicit tickets `S16-T1`..`S16-T8`, acceptance criteria, and required tests.
-- Slice 16 refinement pass 1 improvements applied: clarified issue-to-ticket mapping, prioritized signal/cancellation and schema-validation hardening first, and synced roadmap/backlog sequencing.
-- Slice 16 refinement pass 2: no additional planning/doc improvements identified.
-- Slice 16 refinement pass 3: no additional planning/doc improvements identified (second consecutive no-change pass).
-- Completed `S15-T6`: synced docs/fresh-context runbook for adaptive retry troubleshooting and operator actions.
-- Completed `S15-T5`: added regression coverage for transport-dominated adaptive retry behavior and outcomes.
-- Completed `S15-T4`: persisted per-iteration `transport_diagnostics` in run artifacts for transport-runtime failures.
-- Completed `S15-T3`: implemented bounded transport-dominated retry behavior with deterministic stop guidance hooks.
-- Completed `S15-T2`: implemented transport-dominated early-stop marker (`transport_runtime_dominated`) with deterministic terminal mapping.
-- Completed `S15-T1`: defined and implemented MVP failure-class-driven retry governance in run-loop behavior.
-- Completed `S14-T5`: synced docs/fresh-context runbook for feedback payload inspection and anti-regression guidance.
-- Completed `S14-T4`: added focused feedback-fidelity regression checks across validate/generate and control-marker exclusion paths.
-- Completed `S14-T3`: wired run feedback aggregation to propagate structured stage/check/policy/resource detail into `FeedbackJSON` and preserve terminal-marker de-dup.
-- Completed `S14-T2`: refactored validate execution into reusable structured path for run-loop feedback reuse.
-- Completed `S14-T1`: defined and implemented MVP feedback contract with detailed failure payload + `failure_class` tagging.
-- Verified local checks after Slice 14/15 closure: `go test ./...` and `bash scripts/check_all.sh` both pass.
-- Completed `S13-T6`: synced README and SESSION_START with logging runbook (stderr sink + run-scoped `app.log`) and deterministic inspection commands.
-- Completed `S13-T5`: added logging regression coverage for JSON-line format, redaction behavior, file sink writes, and run log assertions.
-- Completed `S13-T4`: added deterministic command-path logging baseline via shared wrapper-level start/end events across command paths.
-- Completed `S13-T3`: instrumented `run` loop iteration and stage transitions with run/iteration context and terminal-reason logging.
-- Completed `S13-T2`: wired shared runtime logger with deterministic sinks (`stderr` for all commands, run-scoped `app.log` for `run`).
-- Completed `S13-T1`: defined and implemented a basic logging contract (`level`, `command`, `event`, optional `status`/`run_id`/`iteration`/`stage`/`check`/`detail`) with deterministic JSON-line output and secret-like detail redaction.
-- Verified local checks after Slice 13 closure: `go test ./...` and `bash scripts/check_all.sh` both pass.
-- Completed `S12-T5`: synchronized README and SESSION_START to dual-control run semantics, canonical terminal reasons, and updated CLI examples/flags.
-- Completed Slice 12 implementation (`S12-T2`..`S12-T6`): dual config controls, dual CLI overrides, canonical terminal signaling, per-iteration failure summaries, and refreshed regression coverage.
-- Verified local checks after Slice 12 closure: `go test ./...` and `bash scripts/check_all.sh` both pass.
-- Completed `S12-T3`: replaced legacy run flag with dual controls (`--repair-iterations-max`, `--iterations-target`) and added deterministic precedence coverage.
-- Completed `S12-T6`: run artifacts now persist per-iteration `failure_summary`; terminal control reason is singular and canonical (`target_reached|repair_budget_exhausted|stuck`).
-- Completed `S12-T4`: refreshed run-loop tests/goldens for repair-budget exhaustion and fixed-pass target execution behavior.
-- Verified local checks after `S12-T3`/`S12-T6`/`S12-T4`: `go test ./...` and `bash scripts/check_all.sh` both pass.
-- Completed `S12-T2`: migrated config/runtime controls to `agent.repair_iterations_max` and `agent.iterations_target` with deterministic defaults/validation and no legacy `agent.max_iterations` config path.
-- Updated `infrafactory.yaml` dual-control keys and rewired runtime references to `Agent.RepairIterationsMax`.
-- Verified local checks after `S12-T2`: `go test ./...` and `bash scripts/check_all.sh` both pass.
-- Completed maintenance ticket `M27`: re-baselined Slice 12 planning/docs to dual iteration controls and fresh-context startup needs.
-- Added ADR-0005 (`dual iteration controls`) and updated ADR index.
-- Refinement pass 1 improvements applied: synchronized `BACKLOG.md`, `ROADMAP.md`, `SESSION_START.md`, and execution notes to dual-control semantics and README-after-slice closure rule.
-- Refinement pass 2 improvements applied: corrected tracking-state consistency (`Current ticket` set back to `none` after maintenance-ticket closure).
-- Refinement pass 3: no additional improvements identified.
-- Refinement pass 4: no additional improvements identified (second consecutive no-change pass).
-- Completed maintenance ticket `M26`: refined unfinished-slice governance again (`S9-T8`, `S12`..`S15`) and completed refinement loop with two consecutive no-change passes.
-- Refinement pass 1 improvements applied: clarified blocked-slice (`S9-T8`) refinement scope as governance/docs-only unless ADR-0003 is superseded; added matching fresh-context instruction.
-- Refinement pass 2: no additional improvements identified.
-- Refinement pass 3: no additional improvements identified (second consecutive no-change pass).
-- Completed maintenance ticket `M25`: optimized and embedded a reusable post-slice review-improve prompt across unfinished-slice governance docs.
-- Refinement pass 1 improvements applied: added explicit slice-closure protocol text to `ROADMAP.md` slice milestones (12-15), `BACKLOG.md` operating notes, and `SESSION_START.md` fresh-context addenda.
-- Refinement pass 2: no additional improvements identified.
-- Refinement pass 3: no additional improvements identified (second consecutive no-change pass).
-- Completed maintenance ticket `M24`: refined unfinished-slice execution guidance (`S12`..`S15` plus blocked-lane awareness for `S9-T8`) and recorded refinement passes to two consecutive no-change.
-- Refinement pass 1 improvements applied: added explicit canonical execution constraints and guardrail rules for slices 12-15 in `SESSION_START.md` (ordering, compatibility, stop-signal, classification, adaptive-retry diagnostics).
-- Refinement pass 2: no additional improvements identified.
-- Refinement pass 3: no additional improvements identified (second consecutive no-change pass).
-- Completed maintenance ticket `M23`: planned Slice 15 adaptive retry and transport-resilience milestone to close the gap between high-fidelity feedback and practical transport-failure convergence behavior.
-- Completed maintenance ticket `M22`: refined all unfinished slice definitions (`S12`..`S14`) to increase model-correction signal quality and tighten stop/control semantics.
-- Refinement pass 1 improvements applied across unfinished slices: added failure-class tagging requirements, explicit `--iterations`/`--max-iterations` precedence+warning contract, and non-duplicative terminal stop signaling constraints.
-- Refinement pass 2: no additional improvements identified.
-- Refinement pass 3: no additional improvements identified (second consecutive no-change pass).
-- Completed maintenance ticket `M21`: planned Slice 14 backlog (`S14-T1`..`S14-T5`) to ensure run-loop `FeedbackJSON` carries high-fidelity validate/test/generate failure detail into subsequent generation attempts.
-- Refined Slice 14 planning scope to require explicit fresh-context guidance for two consecutive no-change refinement passes on planning updates and deterministic run-artifact feedback inspection workflow.
-- Completed Slice 14 planning refinement loop with two consecutive no-change passes after dependency/order and acceptance-criteria tightening.
-- Refined Slice 13 planning scope after review: added explicit deterministic log-sink expectations (`stderr` + run-scoped artifact path) and fresh-context requirements for concrete log-inspection commands.
-- Completed Slice 13 planning refinement loop with two consecutive no-change passes after sink/fresh-context improvements.
-- Completed maintenance ticket `M20`: created dedicated Slice 13 backlog for full application logic logging/observability (`S13-T1`..`S13-T6`) and integrated it into roadmap sequencing.
-- Completed maintenance ticket `M19`: planned Slice 12 iteration-contract migration tickets (`S12-T1`..`S12-T5`) without implementation, including default-to-3 and override contract coverage.
-- Completed maintenance ticket `M18`: enriched fresh-context startup guidance with operational guardrails for run-loop feedback usage, anti-normalization direction, Mockway port-collision diagnosis, and run-artifact inspection paths.
-- Completed maintenance ticket `M17`: wired run-loop feedback propagation so iteration-N generation receives prior iteration failures (`FeedbackJSON`) and accurate iteration indices, replacing heuristic normalization direction with LLM-guided correction.
-- Completed maintenance ticket `M15`: generate now auto-injects missing Scaleway provider wiring (`required_providers` + `provider "scaleway"`) when Scaleway resources are emitted, with focused command test coverage.
-- Completed maintenance ticket `M14`: added fail-fast generate validation for missing Scaleway provider wiring when Scaleway resources are present, with focused command test coverage.
-- Completed maintenance ticket `M13`: made mock deploy path self-contained by running `tofu init` before `tofu apply`, with `mock_deploy/init` stage reporting and focused harness/CLI test coverage.
-- Completed maintenance ticket `M12`: hardened generator parsing against markdown contamination, added Claude self-review fallback when no `# File:` blocks are returned, and surfaced trimmed stderr details directly in `validate`/`test` failure output.
-- Completed maintenance ticket `M11`: added Claude per-phase timeout and progress logging to prevent silent generate hangs; wired config default (`agent.claude.phase_timeout_seconds`) and added focused timeout/progress tests.
-- Completed maintenance ticket `M10`: follow-up README optimization pass fixed portability wording and reached two consecutive no-change review passes.
-- Completed maintenance ticket `M9`: added a dedicated README `Happy Path (Claude Code)` section with explicit end-to-end commands, artifact paths, and cleanup steps.
-- Completed maintenance ticket `M8`: re-reviewed README, added transport adapter smoke-test runbook guidance, and finished with two consecutive no-change review passes.
-- Completed `S11-T6`: synced README and session-start docs with concrete claude/openrouter transport setup, required credentials/config fields, and updated troubleshooting guidance.
-- Completed `S11-T7`: added deterministic secret redaction guardrails for transport errors (prompt/API-key/token masking) with focused adapter tests.
-- Completed `S11-T5`: expanded hermetic adapter coverage and added opt-in smoke tests for both claude and openrouter transport paths.
-- Completed `S11-T4`: runtime now selects concrete claude/openrouter adapters by `agent.type` and surfaces deterministic `dependency_unavailable` failures for missing OpenRouter API key instead of default stub errors.
-- Completed `S11-T3`: implemented deterministic OpenRouter HTTP adapter with retries/timeouts/error mapping, parser integration, hermetic fake-server tests, and opt-in smoke coverage.
-- Completed `S11-T2`: implemented deterministic `claude -p` adapter with prompt-phase execution, parser integration, hermetic runner tests, and opt-in smoke coverage.
-- Completed `S11-T1`: defined generator transport contract metadata for `claude-code` and `openrouter`, enforced deterministic phase/delay and provider-specific config validation, mapped transport contract in runtime, and accepted ADR-0004.
-- Added repo-state preflight guidance to `SESSION_START.md` (`git status/branch/head`, unexpected-change halt reminder, single-`in_progress` ticket discipline), then completed two consecutive no-change review passes.
-- Refreshed `SESSION_START.md` fresh-context briefing for active Slice 11 execution and transport-state reality, then completed a follow-up review loop with two consecutive no-change passes.
-- Completed Slice 11 refinement sweep with explicit dependency optimization and hardening scope (`S11-T7` credential redaction), finishing with two consecutive no-change passes.
-- Completed README optimization sweep with iterative review until two consecutive no-change passes; aligned feedback package descriptions with current code, clarified generator transport readiness and Slice 11 direction, and documented CI test/build behavior in the README.
-- Planned Slice 11 transport milestone (`S11-T1`..`S11-T7`) for concrete generator integration with `claude -p` and OpenRouter, including runtime wiring, hermetic tests, opt-in real transport smoke paths, and credential-redaction guardrails.
-- Refined Slice 11 with explicit credential safety ticket (`S11-T7`) to enforce deterministic secret redaction across transport error/log surfaces.
-- Expanded CI binary build to multi-arch artifacts on successful `main` push: Linux `amd64` and Linux `arm64`.
-- Completed CI automation slice: added `.github/workflows/ci.yml` to run `go test ./...` on pull requests and `main` pushes, and to build/upload a Linux amd64 binary artifact after successful `main` push tests.
-- Completed follow-up `ISSUES.md` remediation: fixed criteria-only holdout execution to reuse training output dir, removed unused `internal/feedback.RunLoop`, simplified `runIteration` step wiring to eliminate dead runner field, and made orphan counting resilient to new resource collections with regression tests.
-- Completed maintenance hardening sweep from `ISSUES.md`: fixed OPA constraint/state input wiring regressions, policy-path resolution, mock credential parity, Mockway HTTP timeout, stage-status duplication fragility, and Scaleway policy mismatches; added regression tests and ignored local `ISSUES.md`.
-- Completed `S10-T7`: accepted ADR-0003 and synchronized governance docs to codify permanent sandbox/live deploy block policy.
-- Completed `S10-T5`: added hermetic benchmark baselines (`internal/cli`, `internal/runstore`), env-gated regression script (`scripts/check_benchmarks.sh`), and `make bench-check` workflow.
-- Completed `S10-T4`: added idempotency/retry safety integration coverage for repeated command execution and retry-after-failure flows across `generate`/`validate`/`test`/`run`/`mock` command paths.
-- Completed `S10-T1`: added deterministic command-level golden snapshot coverage for `init/generate/validate/test/run/mock start|stop|status|logs` in `human` and `json` modes.
-- Started `S10-T1`: added deterministic golden snapshot tests/fixtures for output-contract rendering (`human` + `json`) across core command result shapes with explicit fixture refresh path (`UPDATE_GOLDEN=1`).
-- Completed `S10-T6`: added deterministic criteria/policy explainability summaries in output contract for both human and JSON output modes with focused tests.
-- Completed `S10-T3`: versioned run artifacts with explicit schema fields in `run.json` and per-iteration artifacts, plus backward-compatible legacy run metadata reads.
-- Completed `S10-T2`: normalized CLI error taxonomy across command paths with explicit error-code constants and representative failure-class tests.
-- Verified local checks after `S10-T2`/`S10-T3`/`S10-T6` and current `S10-T1` slice: `go test ./...` and `bash scripts/check_all.sh` both pass.
-- Refined fresh-context documentation in `SESSION_START.md` until two consecutive no-change passes; no further additions/improvements identified after final sweeps.
-- Updated `SESSION_START.md` with a dedicated fresh-context briefing (active/blocked lanes, guardrails, startup verification commands, and Slice 10 execution order), and corrected stale runtime wording to reflect current criteria-aware `run` behavior.
-- Refined Slice 10 ticket set through iterative dependency/acceptance checks; completed two consecutive no-change passes with no further additions or improvements identified.
-- Drafted Slice 10 backlog tickets (`S10-T1`..`S10-T7`) for reliability/contract hardening, artifact versioning, and permanent sandbox-block governance documentation.
-- Updated blocked sandbox/live deploy behavior (`S9-T8`) to emit explicit stub messaging in command outputs: `(real deployment skipped for cost reasons for now)` across `validate`/`test`/`run` and deferred criteria messaging.
-- Verified local checks after sandbox stub messaging update: `go test ./...` and `bash scripts/check_all.sh` both pass.
-- Completed `S9-T7`: expanded `mock` lifecycle parity with `start`/`stop`/`status`/`logs` command wiring, runtime default handlers, and focused parity tests for success/failure behavior.
-- Verified local checks after `S9-T7`: `go test ./...` and `bash scripts/check_all.sh` both pass.
-- Completed `S9-T6`: wired criteria-only holdout discovery/execution into run completion; holdout failures now block final run status without feeding holdout failures into training-loop feedback convergence decisions.
-- Verified local checks after `S9-T6`: `go test ./...` and `bash scripts/check_all.sh` both pass.
-- Completed `S9-T5`: upgraded `run` convergence to propagate criteria-level failures from `test` (not just coarse stage failures), preserving deterministic max/stuck stop semantics with criteria-aware signals.
-- Verified local checks after `S9-T5`: `go test ./...` and `bash scripts/check_all.sh` both pass.
-- Completed `S9-T4`: `validate`/`test`/`run` now honor validation-layer enable flags (`static`, `mock_deploy`, `destruction`) and surface deterministic blocked output when `sandbox_deploy.enabled=true`.
-- Verified local checks after `S9-T4`: `go test ./...` and `bash scripts/check_all.sh` both pass.
-- Completed `S9-T3`: `test` now executes criteria-driven topology and state-policy evaluators from scenario criteria specs, including expectation handling (`pass`/`fail`) and deterministic stage/failure output mapping.
-- Verified local checks after `S9-T3`: `go test ./...` and `bash scripts/check_all.sh` both pass.
-- Completed `S9-T11`: defined deterministic criteria support matrix behavior; deferred cloud-only criteria (notably `dns_resolution`) now emit explicit `criteria/support_matrix` auto-pass informational output.
-- Verified local checks after `S9-T11`: `go test ./...` and `bash scripts/check_all.sh` both pass.
-- Completed `S9-T2`: added deterministic acceptance-criteria mapping to typed executable check specs (`connectivity`, `http_probe`, `policy`, `destruction`, `dns_resolution`) with explicit typed parse errors for malformed criteria and focused scenario mapping tests.
-- Verified local checks after `S9-T2`: `go test ./...` and `bash scripts/check_all.sh` both pass.
-- Completed `S9-T10`: expanded typed scenario model coverage with focused loader tests for holdout routing fields (`type`/`references`), constraints decode, and acceptance criteria field mapping while preserving existing fixture compatibility.
-- Verified local checks after `S9-T10`: `go test ./...` and `bash scripts/check_all.sh` both pass.
-- Completed `S9-T1`: runtime now injects a concrete default `SeedGenerator` for `generate`/`run`, replacing missing-dependency `ErrNotImplemented` failures with deterministic typed generator transport failures; added focused runtime/command/generator tests.
-- Verified local checks after `S9-T1`: `go test ./...` and `bash scripts/check_all.sh` both pass.
-- Expanded `SESSION_START.md` Slice 9 section with operational implementation notes (canonical scenario path, `127.0.0.1` Mockway caveat, real-tool smoke preconditions, and blocker-output protocol) to remove remaining fresh-context ambiguity.
-- Updated `SESSION_START.md` with explicit Slice 9 execution constraints (ticket order, blocked `S9-T8`, criteria support/defer matrix, and current runtime caveats) so fresh contexts start with complete implementation guardrails.
-- Performed two-pass refinement sweep (planning-contract + implementation-consistency) and captured additional missing prerequisites in Slice 9 (`S9-T10`, `S9-T11`).
-- Added explicit criteria support/deferment matrix in README, including `dns_resolution` deferment while sandbox deploy remains blocked for cost reasons.
-- Refined Slice 9 backlog definitions and acceptance criteria so each orchestration gap has explicit scope/tests and clearer execution order.
-- Expanded README with a dedicated "Intentionally Deferred and In-Progress Areas" section, including explicit sandbox/live deploy deferment due cost implications.
-- Planned Slice 9 (`S9-T1`..`S9-T9`) to close remaining CLI orchestration gaps and explicitly documented sandbox/live deploy deferment due cost implications.
-- Completed `S8-T3`: synced README with make-based DX workflow for dependencies/tests/smoke/cleanup and updated prerequisites.
-- Completed `S8-T2`: added DX smoke runner targets in `Makefile` with explicit env guards and Mockway readiness wait.
-- Completed `S8-T1`: added root `Makefile` dependency/test automation targets and improved dependency lifecycle defaults in `docker-compose.yml`.
-- Verified local checks after Slice 8 updates: `go test ./...` and `bash scripts/check_all.sh` both pass.
-- Completed `S7-T14`: added opt-in real-tool smoke tests (`INFRAFACTORY_ENABLE_REALTOOL_SMOKE=1` for `validate`; `INFRAFACTORY_ENABLE_REALTOOL_MOCKWAY=1` + `INFRAFACTORY_MOCKWAY_URL` for `test`).
-- Verified local checks after `S7-T14`: `go test ./...` and `bash scripts/check_all.sh` both pass.
-- Completed `S7-T15`: synced README command signatures/flags and usage examples to current wired CLI behavior and run artifact/output-mode notes.
-- Verified local checks after `S7-T15`: `go test ./...` and `bash scripts/check_all.sh` both pass.
-- Completed `S7-T11`: added hermetic orchestration integration tests and regression fixture assertions across `generate`/`validate`/`test`/`run`/`mock start`.
-- Verified local checks after `S7-T11`: `go test ./...` and `bash scripts/check_all.sh` both pass.
-- Completed `S7-T10`: wired `mock start` command to runtime start path with preflight dependency checks and deterministic success/failure output behavior.
-- Verified local checks after `S7-T10`: `go test ./...` and `bash scripts/check_all.sh` both pass.
-- Completed `S7-T9`: integrated runstore persistence/reporting into `run` (run metadata + per-iteration artifacts) with focused success/failure persistence assertions.
-- Verified local checks after `S7-T9`: `go test ./...` and `bash scripts/check_all.sh` both pass.
-- Completed `S7-T8`: integrated run convergence controls (config/flag max-iterations and stuck-detection stop semantics) with focused success/max/stuck tests.
-- Verified local checks after `S7-T8`: `go test ./...` and `bash scripts/check_all.sh` both pass.
-- Completed `S7-T7`: wired `run` skeleton for one-pass `generate -> validate -> test` orchestration with deterministic aggregated run-stage output and focused success/failure tests.
-- Verified local checks after `S7-T7`: `go test ./...` and `bash scripts/check_all.sh` both pass.
-- Completed `S7-T6`: added command-level smoke suites for `generate`/`validate`/`test` with representative success and failure paths on fake dependencies.
-- Verified local checks after `S7-T6`: `go test ./...` and `bash scripts/check_all.sh` both pass.
-- Completed `S7-T5`: wired `test` command to mock-deploy and destroy harness flow with deterministic stage/failure output mapping and focused deploy/destroy failure tests.
-- Verified local checks after `S7-T5`: `go test ./...` and `bash scripts/check_all.sh` both pass.
-- Completed `S7-T4`: wired `validate` command to static harness execution and OPA plan policy reporting with deterministic human/json output mapping and focused static/policy tests.
-- Verified local checks after `S7-T4`: `go test ./...` and `bash scripts/check_all.sh` both pass.
-- Completed `S7-T3`: wired `generate` command to runtime+scenario+generator pipeline with deterministic output-dir file writes, output-mode rendering, and focused success/failure tests using fake generator injection.
-- Verified local checks after `S7-T3`: `go test ./...` and `bash scripts/check_all.sh` both pass.
-- Completed `S7-T13`: added shared CLI command-test harness utility for deterministic workspace fixture setup + stdout/stderr/error capture, and adopted it in contract tests.
-- Verified local checks after `S7-T13`: `go test ./...` and `bash scripts/check_all.sh` both pass.
-- Completed `S7-T16`: froze CLI output contract with deterministic human summary + machine JSON schema (`infrafactory.output.v1`) and stable stage/failure ordering; updated ADR-0002.
-- Verified local checks after `S7-T16`: `go test ./...` and `bash scripts/check_all.sh` both pass.
-- Completed `S7-T12`: froze CLI contract for scenario args, global output mode, and exit-code semantics; added focused contract tests and ADR-0002 (`docs/decisions/0002-cli-command-contract.md`).
-- Verified local checks after `S7-T12`: `go test ./...` and `bash scripts/check_all.sh` both pass.
-- Completed `S7-T2`: added shared CLI runtime/context builder with scenario/output caching, injectable generator/harness/mock dependencies, and deterministic CLI error formatting helpers/tests.
-- Verified local checks after `S7-T2`: `go test ./...` and `bash scripts/check_all.sh` both pass.
-- Completed `S7-T1`: implemented `infrafactory init` scaffold generation with schema-valid defaults, comments/hints, deterministic next-step output, and focused command tests.
-- Verified local checks after `S7-T1`: `go test ./...` and `bash scripts/check_all.sh` both pass.
-- Optimized Slice 7 dependency graph: removed `P1` test-harness ticket from `P0` critical-path smoke/integration dependencies.
-- Simplified Slice 7 with transitive-dependency cleanup (removed redundant direct deps where upstream gates already enforce order).
-- Optimized Slice 7 execution path: decoupled `mock start` from output-contract gating and decoupled docs sync from optional real-tool smoke.
-- Rebalanced Slice 7 priorities to keep critical command wiring as `P0` and supporting utilities/docs as `P1`.
-- Optimized Slice 7 again: added explicit CLI output contract ticket (`S7-T16`) to lock human/machine output schema before command wiring.
-- Optimized Slice 7 again: added CLI contract-freeze ticket (`S7-T12`), shared command-test harness ticket (`S7-T13`), hermetic vs real-tool integration split (`S7-T11`/`S7-T14`), and final doc-sync gate (`S7-T15`).
-- Optimized Slice 7 further: split `run` into skeleton/convergence/persistence tickets and added early orchestration smoke tests.
-- Optimized Slice 7 plan: added shared runtime ticket (`S7-T2`) and reduced unnecessary serial dependencies.
-- Reordered Slice 7 so `generate`/`validate`/`test` can proceed after shared runtime and converge at `run`.
-- Planned Slice 7 orchestration backlog (`S7-T1`..`S7-T16`) for full CLI command wiring.
-- Set active work to `S7-T1` as the first unblocked orchestration ticket.
-- Completed `S6-T3`: added criteria-only holdout discovery by training-scenario reference and feedback-blocking behavior.
-- Completed Slice 6 milestone (`S6-T1` through `S6-T3`) with passing local checks.
-- Completed `S6-T2`: added deterministic failure-signature extraction and subset-based stuck detection.
-- Added focused tests for subset/equal/non-subset stuck detection behavior.
-- Verified local checks: `go test ./...` and `bash scripts/check_all.sh` both pass.
-- Completed `S6-T1`: added feedback loop with max-iteration control and per-iteration artifact persistence.
-- Added focused tests for early convergence and max-iteration stop behavior.
-- Verified local checks: `go test ./...` and `bash scripts/check_all.sh` both pass.
-- Completed `S5-T3`: added destroy/run-store integration persistence logic and focused success/failure tests.
-- Completed Slice 5 milestone (`S5-T1` through `S5-T3`) with passing local checks.
-- Completed `S5-T2`: added filesystem run-store implementation under `.infrafactory/runs/` with deterministic metadata/artifact paths.
-- Added focused run-store tests for write/read/list and iteration artifact persistence.
-- Verified local checks: `go test ./...` and `bash scripts/check_all.sh` both pass.
-- Completed `S5-T1`: added destroy orchestration with post-destroy orphan verification and typed stage errors.
-- Added tests for destroy success/failure and orphan detection paths.
-- Verified local checks: `go test ./...` and `bash scripts/check_all.sh` both pass.
-- Completed `S4-T3`: finalized layer-2 tests and added opt-in integration smoke guard (`INFRAFACTORY_ENABLE_INTEGRATION`).
-- Completed Slice 4 milestone (`S4-T1` through `S4-T3`) with passing local checks.
-- Completed `S4-T2`: added topology evaluator and OPA `deny_state` evaluation for mock-state checks.
-- Added focused tests for topology and state-policy pass/fail coverage.
-- Verified local checks: `go test ./...` and `bash scripts/check_all.sh` both pass.
-- Completed `S4-T1`: added mock deploy orchestration (`reset -> tofu apply -> state snapshot`) with typed stage errors.
-- Added fake client/runner tests covering success and reset/apply/state failure paths.
-- Verified local checks: `go test ./...` and `bash scripts/check_all.sh` both pass.
-- Completed `S3-T3`: added machine-readable static-layer failure conversion with stage/command/stdout/stderr detail.
-- Added focused tests for validate failure, plan/show failure shapes, and OPA failure shape consistency.
-- Completed Slice 3 milestone (`S3-T1` through `S3-T3`) with passing local checks.
-- Completed `S3-T2`: integrated OPA/Rego evaluation against plan JSON with structured policy failures via `internal/feedback`.
-- Added OPA fixture tests for policy pass/fail behavior in the static layer.
-- Verified local checks: `go test ./...` and `bash scripts/check_all.sh` both pass.
-- Completed `S3-T1`: added `internal/harness` static workflow with deterministic tofu stage order and structured stage results.
-- Added fake-runner tests for success and stage-specific failures, including invalid plan JSON.
-- Verified local checks: `go test ./...` and `bash scripts/check_all.sh` both pass.
-- Completed `S2-T4`: expanded generator/parser tests with fixture-based malformed output coverage.
-- Completed Slice 2 milestone (`S2-T1` through `S2-T4`) with passing local checks.
-- Completed `S2-T3`: added deterministic `# File:` parser with fence stripping and last-write-wins duplicate handling.
-- Added parser tests for single/multi-file, fenced content, duplicate resolution, and malformed output.
-- Completed `S2-T2`: added prompt rendering helpers with strict template execution and feedback JSON injection.
-- Added focused tests for prompt rendering with and without feedback context.
-- Verified local checks: `go test ./...` and `bash scripts/check_all.sh` both pass.
-- Completed `S2-T1`: added `internal/generator` contracts (`SeedGenerator`, request/response metadata, typed error wrappers, output validation helpers).
-- Added focused generator contract tests covering interface execution, output validation, and `errors.Is`/`errors.As` behavior.
-- Verified local checks: `go test ./...` and `bash scripts/check_all.sh` both pass.
-- Completed `S1-T4`: added focused table-driven tests covering config+scenario success chain and isolated failure paths.
-- Completed Slice 1 milestone (`S1-T1` through `S1-T4`) with passing `go test ./...` and `bash scripts/check_all.sh`.
-- Completed `S1-T3`: added `internal/scenario` loader with YAML parsing, JSON Schema validation, and typed path-aware validation errors.
-- Added focused scenario fixtures/tests for valid, schema-invalid, and malformed YAML inputs.
-- Verified local checks: `go test ./...` and `bash scripts/check_all.sh` both pass.
-- Completed `S1-T2`: added `internal/config` loader with defaults, deterministic parsing, and typed validation errors for required fields.
-- Wired non-`init` CLI commands to load `--config` before returning stub behavior.
-- Added focused config tests and fixtures for valid/defaulted config and missing required-field errors.
-- Completed `S1-T1`: wired Cobra root command with `init`, `generate`, `validate`, `test`, `run`, and `mock start`.
-- Added `internal/cli` focused tests for command tree discovery and explicit stub error behavior.
-- Ran `go mod tidy`; generated `go.sum` and cleared prior dependency-checksum blocker.
-- Verified local checks: `go test ./...` and `bash scripts/check_all.sh` both pass.
-- Added reusable prompt at `docs/process/EXECUTION_PROMPT.md`.
-- Linked reusable prompt from `README.md` and `SESSION_START.md`.
-- Added README kickoff instruction for fresh sessions.
-- Added `BACKLOG.md` as single ticket status source.
-- Added `CURRENT_TICKET.md` as session execution stub.
-- Added `scripts/check_all.sh` to run tests + doc hygiene in one command.
-- Updated startup/contributor flow to use backlog + current-ticket files.
-- Set `BACKLOG.md` active work state: `S1-T1` is `in_progress` (single active ticket).
-- Added Apache-2.0 `LICENSE` and linked license section in `README.md`.
+- **Slice 20 complete (S20-T1..S20-T6)**: 6 new scenarios exercising untested parameter combos:
+  - `mysql-ha-paris`: mysql engine, medium DB, HA=true, private networking.
+  - `compute-lb-multi-paris`: large compute (count=3), multi-backend LB (80/http + 443/tcp).
+  - `k8s-medium-override-paris`: medium K8s with node_type/node_count overrides.
+  - `private-lb-db-paris`: private LB, large PostgreSQL with node_type/engine_version overrides.
+  - `public-registry-iam-paris`: is_public=true registry, IAM with policy=false.
+  - `redis-xlarge-session-paris`: xlarge Redis with node_type override, xlarge compute.
+  - Prompt fixes: LB backend/frontend zone pitfall, compute type mapping enforcement, phase1 exact-mapping enforcement.
+  - Mockway fix: expanded server type catalog (GP1-L, GP1-XL, DEV1-L).
+  - All 12 scenarios (6 existing + 6 new) pass on first iteration.
+- **S19-T1 complete (round 4)**: Referential integrity and validation strictness:
+  - **Delete cascades removed** — `DeleteLB`, `DeleteCluster`, `DeleteRDBInstance` now return 409 Conflict when dependents exist (per AGENTS.md contract). Exception: `lb_private_networks` cascade since the Scaleway provider doesn't detach them before LB delete.
+  - **init_endpoints strict validation** — `BuildRDBEndpointsFromInit` rejects `private_network` with missing ID instead of silently falling back to public endpoint.
+  - All 6 scenarios still pass on first iteration.
+- **S19-T1 complete (round 2)**: Additional reliability fixes from extended review:
+  - **IAM defaults not applied** — JSON Schema declared `default: true` for application/api_key/policy but Go's json.Unmarshal doesn't apply schema defaults. Fixed with `applyIAMDefaults()` that checks the raw YAML for omitted fields.
+  - **LB/Frontend/Backend updates didn't persist** — same pattern as RDB update bug. Added `repo.UpdateLB()`, `repo.UpdateFrontend()`, `repo.UpdateBackend()` methods.
+  - **LB list routes leaked cross-LB data** — `ListFrontends`/`ListBackends` ignored `lb_id` URL param. Added `ListFrontendsByLB`/`ListBackendsByLB` repo methods.
+  - **RDB certificate endpoint didn't check instance existence** — returned 200 for nonexistent IDs. Now 404s.
+  - **K8s companion test coverage** — added `scaleway_k8s_pool` auto-include test.
+  - **Scenario test coverage** — added fixtures + tests for `iam`, `registry`, `redis`, `kubernetes` resource types and IAM default behavior.
+  - All 6 scenarios still pass on first iteration.
+- **S19-T1 complete (round 1)**: 3 bugs fixed (RDB update persistence, Redis missing fields).
+- Completed Slice 18 (`S18-T1`..`S18-T5`): all 5 new scenarios pass on first iteration.

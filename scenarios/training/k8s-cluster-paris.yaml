@@ -1,0 +1,20 @@
+scenario: k8s-cluster-paris
+version: "1.0"
+cloud: scaleway
+description: >
+  A standalone Kubernetes cluster in Paris with a single node pool,
+  deployed on a private network within a VPC.
+
+resources:
+  kubernetes:
+    size: small
+  networking:
+    vpc: true
+    private_network: true
+
+constraints:
+  region: fr-par
+
+acceptance_criteria:
+  - type: destruction
+    expect: no_orphans

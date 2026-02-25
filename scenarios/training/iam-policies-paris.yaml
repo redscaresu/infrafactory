@@ -1,0 +1,21 @@
+scenario: iam-policies-paris
+version: "1.0"
+cloud: scaleway
+description: >
+  IAM setup for a service account in Paris: an IAM application
+  with a scoped API key and a policy granting project-level
+  permissions.
+
+resources:
+  iam:
+    purpose: service-account
+    application: true
+    api_key: true
+    policy: true
+
+constraints:
+  region: fr-par
+
+acceptance_criteria:
+  - type: destruction
+    expect: no_orphans

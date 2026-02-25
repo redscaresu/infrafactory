@@ -1,0 +1,27 @@
+scenario: public-registry-iam-paris
+version: "1.0"
+cloud: scaleway
+description: >
+  A public container registry namespace with a selective IAM
+  setup in Paris. The registry is publicly accessible for
+  sharing container images, and the IAM application has an
+  API key but no policy attached. Exercises is_public=true
+  registry and IAM with policy=false — parameter combinations
+  not covered by other training scenarios.
+
+resources:
+  registry:
+    purpose: ci-artifacts
+    is_public: true
+  iam:
+    purpose: deploy-bot
+    application: true
+    api_key: true
+    policy: false
+
+constraints:
+  region: fr-par
+
+acceptance_criteria:
+  - type: destruction
+    expect: no_orphans

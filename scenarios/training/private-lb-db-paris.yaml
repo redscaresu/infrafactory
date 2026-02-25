@@ -1,0 +1,46 @@
+scenario: private-lb-db-paris
+version: "1.0"
+cloud: scaleway
+description: >
+  A private load balancer with a large PostgreSQL database
+  using prescriptive overrides in Paris. Compute instances
+  connect via private network. Exercises private LB exposure,
+  large database size, and database overrides (node_type +
+  engine_version) — parameter combinations not covered by
+  other training scenarios.
+
+resources:
+  compute:
+    purpose: backend-server
+    size: medium
+    count: 2
+  networking:
+    vpc: true
+    private_network: true
+    load_balancer:
+      exposure: private
+      backends:
+        - port: 80
+          protocol: http
+  database:
+    engine: postgresql
+    size: large
+    override:
+      node_type: DB-GP-XS
+      engine_version: "15"
+
+constraints:
+  region: fr-par
+  no_public_database: true
+  encryption_at_rest: true
+
+acceptance_criteria:
+  - type: policy
+    check: no_public_endpoints
+    target: database
+    expect: pass
+  - type: policy
+    check: encryption_at_rest
+    expect: pass
+  - type: destruction
+    expect: no_orphans

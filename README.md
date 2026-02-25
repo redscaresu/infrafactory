@@ -70,11 +70,35 @@ flowchart TD
 
 High-level flow:
 1. Validate config and scenario contracts.
-2. Generate OpenTofu files from scenario intent.
+2. Generate OpenTofu files via three-phase LLM pipeline (plan → generate → self-review).
 3. Run static checks (`tofu init/validate/plan/show`).
 4. Run deploy-layer checks (apply, topology, state policy).
 5. Run destroy and orphan verification.
 6. Persist run artifacts and iterate based on structured feedback.
+
+### Three-Phase Generation Pipeline
+
+Generation runs three sequential LLM phases, each with a specialized prompt template in `prompts/`:
+
+1. **Phase 1 — Plan Architecture** (`phase1_plan_architecture.md`):
+   - Input: scenario YAML, resolved size mappings from `mappings.yaml`, constraints, prescriptive overrides.
+   - Output: JSON architecture plan with concrete Scaleway resource types, dependency graph, and exact offerings.
+   - The prompt enforces that sizes map to exact Scaleway types from the mappings table (e.g. compute large → `GP1-S`, not invented types like `GP1-L`).
+   - Overrides from the scenario take priority over size mappings.
+
+2. **Phase 2 — Generate HCL** (`phase2_generate_hcl.md`):
+   - Input: architecture plan from phase 1, scenario YAML, constraints, acceptance criteria, provider resource schemas (when available), iteration feedback (when retrying).
+   - Output: complete OpenTofu HCL files in `# File: <name>` block format.
+   - Includes a **Scaleway Provider Pitfalls** section with 18 rules covering common LLM mistakes across K8s, Instance, Redis, LB, and RDB resources.
+   - Enforces naming conventions, data source prohibition, variable defaults, and provider credential separation.
+
+3. **Phase 3 — Self-Review** (`phase3_self_review.md`):
+   - Input: generated HCL files from phase 2, scenario YAML, constraints, acceptance criteria, provider schemas (when available), iteration feedback.
+   - Output: corrected `# File:` blocks for any files with issues, or `NO ISSUES FOUND` if clean.
+   - Runs a 10-point review checklist: data sources, syntax, provider config, resources, dependencies, constraints, RDB/LB specifics, criteria compliance, naming, and best practices.
+   - Corrected files are merged into the phase 2 output; uncorrected files are retained.
+
+All three phases receive iteration feedback (`FeedbackJSON`) from prior failed iterations when running under `run`, enabling the LLM to learn from concrete validation/deploy/destroy failures.
 
 ## Process Flows
 
@@ -144,6 +168,27 @@ Supporting control loop:
 - Stuck detection via failure-signature subset logic (`check`+`resource`+`detail`)
 - Run/iteration artifact persistence under `.infrafactory/runs/...`
 
+### Mockway API Coverage
+
+Mockway is a companion SQLite-backed mock server that simulates Scaleway APIs for deterministic, offline testing. It covers:
+
+| Service | Scaleway API | CRUD | Notes |
+|---|---|---|---|
+| Compute | Instance (servers, IPs, NICs, security groups, volumes) | Full | Server type catalog includes DEV1-S/M/L, GP1-XS/S/M/L/XL. Marketplace local images for ubuntu/debian/centos. |
+| Networking | VPC, Private Network, Public Gateway | Full | Zone/region scoping. |
+| Load Balancer | LB, Frontend, Backend, LB IP, LB Private Network | Full | Multi-backend support. Delete returns 409 when dependents exist (except LB private networks which cascade). |
+| Database | RDB Instance, User, Database, ACL, Privilege, Certificate, Endpoint | Full | PostgreSQL + MySQL engines. Private network endpoints with IPAM. Delete returns 409 when dependents exist. |
+| Kubernetes | K8s Cluster, Node Pool | Full | Cluster delete returns 409 when pools exist. DELETE returns resource with `"status": "deleting"` (required by SDK). |
+| IAM | Application, API Key, Policy, Rule | Full | Application defaults applied. |
+| Container Registry | Registry Namespace | Full | Public/private namespaces. |
+| Redis | Redis Cluster | Full | Password, ACL rules, endpoints, settings. Required default fields populated. |
+| Block Storage | Volume, Snapshot | Basic | Minimal CRUD. |
+
+Key behaviors:
+- Referential integrity: DELETE returns 409 Conflict when dependents exist (K8s pools, LB frontends/backends, RDB users/databases).
+- All handlers use UUID IDs and RFC3339 timestamps.
+- State inspection: `GET /mock/state` returns all resources; `POST /mock/reset` clears state.
+
 ### OPA Plan Policy Checks (Static Layer)
 
 OPA plan checks run during static validation and are evaluated against `tofu show -json tfplan` output.
@@ -190,9 +235,12 @@ Feature status snapshot:
 | `mock` command lifecycle | implemented | `mock start`/`stop`/`status`/`logs` are wired with deterministic output/error behavior. |
 | sandbox/live deploy | permanently blocked | Governed as a permanent non-goal (ADR-0003). |
 
-Latest hardening slice:
-- Slice 16 remediation is complete (`S16-T1`..`S16-T8`): command-context propagation, bounded Mockway reads, deterministic env overrides, schema-availability enforcement, explicit empty-config decode errors, policy semantics fixes, and runtime scaffolding cleanup.
-- Slice 17 and maintenance hardening are complete (`S17-T1`, `M31`, `M32`, `M33`, `M34`): opt-in prompt/raw capture artifacts, strict self-review parse behavior + partial-file merge convergence fixes, stuck-signature specificity (`check`+`resource`+`detail`), lazy provider-schema prompt injection, and end-to-end pipeline stabilization (mockway endpoint coverage, prompt pitfall hardening, self-review canonical-only matching).
+Completed slices:
+- Slices 1-17: core pipeline, CLI orchestration, generator transports, feedback-driven regeneration, logging, adaptive retry, issue remediation, and end-to-end pipeline stabilization.
+- Slice 18 (`S18-T1`..`S18-T5`): expanded mockway coverage to all targeted Scaleway APIs — K8s standalone, IAM standalone, Container Registry, Redis, and Composite multi-service scenario. Extended `scenario.schema.json` with `kubernetes`, `iam`, `registry`, `redis` resource types (ADR-0007).
+- Slice 19 (`S19-T1`): reliability review of all Slice 18 code — fixed referential integrity (delete returns 409 when dependents exist), LB/Frontend/Backend update persistence, IAM defaults, RDB certificate checks, and cross-LB data leaks.
+- Slice 20 (`S20-T1`..`S20-T6`): scenario combination expansion — 6 new training scenarios exercising untested parameter combinations: MySQL engine + HA, large/xlarge compute sizes, multi-backend LB with TCP, private LB exposure, K8s/Redis/database overrides, public registry, selective IAM flags. Added prompt pitfalls for LB zone arguments, compute type mapping, and `assign_flexible_ipv6` conflicts. Expanded mockway server type catalog (GP1-L, GP1-XL, DEV1-L).
+- All 12 training scenarios pass `infrafactory run` on first iteration.
 - Remaining non-completed backlog lane remains `S9-T8` and is intentionally blocked by governance (ADR-0003).
 
 Notes on current runtime prerequisites:
@@ -228,6 +276,9 @@ Criteria support status:
 - `scenario.schema.json`: scenario contract
 - `infrafactory.yaml`: runtime config contract
 - `policies/`: OPA policy files
+- `prompts/`: LLM phase prompt templates (plan_architecture, generate_hcl, self_review)
+- `mappings.yaml`: T-shirt size → Scaleway offering mappings (compute, database, kubernetes, redis)
+- `scripts/`: quality gate helpers (`check_all.sh`, `check_doc_hygiene.sh`, `check_benchmarks.sh`, `full_flow.sh`)
 - `scenarios/`: training/holdout/regression fixtures
 
 Package ownership guide:
@@ -374,11 +425,40 @@ Terminal control markers are intentionally excluded from iterative repair feedba
 
 ### Provider Schema Prompt Injection
 
-`generate` and `run` lazily attempt provider-schema extraction once per command runtime and cache the result:
-- extraction command path: `tofu init` + `tofu providers schema -json` in an isolated temp directory.
-- extraction timing: on first generate path call (not during generic runtime bootstrap), so non-generate commands avoid startup overhead.
-- prompt usage: phase 2/3 prompts receive a filtered schema subset containing only resource types referenced in phase 1 architecture output.
-- failure mode: extraction failures are non-fatal; generation proceeds without schema injection.
+`generate` and `run` lazily extract the Scaleway provider schema once per command runtime and inject it into phases 2 and 3:
+- **Extraction**: `tofu init` + `tofu providers schema -json` in an isolated temp directory; cached for the runtime lifetime.
+- **Timing**: on first generate call (not during generic runtime bootstrap), so `validate`/`test`/`mock` commands avoid the overhead.
+- **Filtering**: phase 1 output identifies which Scaleway resource types are needed; `schema_filter.go` extracts only those types (plus companion sub-resources like `scaleway_k8s_pool` for `scaleway_k8s_cluster`) from the full provider schema. This keeps prompt size bounded.
+- **Injection**: phases 2 and 3 both receive the filtered schema as an "Authoritative Reference" section. The prompt instructs the LLM to verify every attribute name and block type against the schema before using it.
+- **Failure mode**: extraction failures are non-fatal; generation proceeds without schema injection. Look for `provider_schema skipped` in logs.
+
+### Scaleway Provider Pitfalls
+
+Phase 2 includes a curated pitfalls section that prevents the most common LLM-generated HCL errors. These are derived from iterative scenario runs across all 12 training scenarios:
+
+| Resource | Pitfall |
+|---|---|
+| `scaleway_k8s_cluster` | Version/auto_upgrade consistency: patch version without auto_upgrade, minor version with auto_upgrade. Always set `delete_additional_resources = true`. |
+| `scaleway_instance_server` | Use exact types from architecture plan (not invented types). No `routed_ip_enabled`. No inline `private_network` blocks — use separate `scaleway_instance_private_nic`. Use `ip_id = null` + `enable_dynamic_ip = false` for no public IP. Reference NIC private IPs, not server `private_ips`. |
+| `scaleway_lb` | Use `ip_ids` list (not `ip_id`). No `assign_flexible_ip` or `assign_flexible_ipv6` when `ip_ids` is set. |
+| `scaleway_lb_backend` / `scaleway_lb_frontend` | No `zone` argument — causes "Unsupported argument" error. |
+| `scaleway_rdb_instance` | Valid `volume_type`: `lssd`, `sbs_5k`, `sbs_15k`. No `volume_size_in_gb` with `lssd`. Private network block needs `ip_net` or `enable_ipam = true`. |
+| `scaleway_redis_cluster` | `password` required — variable must have a `default` value. |
+
+Phase 1 also enforces exact size mapping usage to prevent the LLM from inventing Scaleway types that don't exist in the mock or real API.
+
+### Size Mappings and Overrides
+
+`mappings.yaml` maps T-shirt sizes to concrete Scaleway offerings:
+
+| Resource | Sizes | Example Mapping |
+|---|---|---|
+| Compute | small/medium/large/xlarge | small → `DEV1-S`, large → `GP1-S`, xlarge → `GP1-M` |
+| Database | small/medium/large/xlarge | small → `DB-DEV-S`, large → `DB-GP-XS` |
+| Kubernetes | small/medium/large/xlarge | small → `DEV1-M` (1 node), medium → `GP1-XS` (3 nodes) |
+| Redis | small/medium/large/xlarge | small → `RED1-MICRO`, xlarge → `RED1-L` |
+
+Scenario-level overrides (e.g. `override: { node_type: DB-GP-XS, engine_version: "15" }`) take priority over size mappings and are passed to phase 1 as prescriptive instructions.
 
 ## Usage
 
@@ -428,6 +508,15 @@ Canonical config example: `infrafactory.yaml` in repo root.
 Required top-level keys:
 - `scenario`, `version`, `cloud`, `description`, `acceptance_criteria`
 
+Available resource types (under `resources:`):
+- `compute`: `purpose`, `size` (small/medium/large/xlarge), `count`, optional `override` (offer, image)
+- `networking`: `vpc`, `private_network`, optional `load_balancer` (exposure: public/private, backends: port + protocol: http/https/tcp)
+- `database`: `engine` (postgresql/mysql), `size`, `high_availability`, optional `override` (node_type, engine_version)
+- `kubernetes`: `size`, optional `override` (node_type, node_count)
+- `redis`: `purpose`, `size`, optional `override` (node_type)
+- `registry`: `purpose`, `is_public`
+- `iam`: `purpose`, `application`, `api_key`, `policy` (all default to true when omitted)
+
 Common criteria patterns:
 - `policy`: `type: policy`, `check: <constraint_name>`, `expect: pass|fail`
 - `connectivity`: `from`, `to`, optional `port`, `expect: success|blocked`
@@ -440,6 +529,25 @@ Holdout-only routing fields:
 
 Current auto-pass criteria:
 - `dns_resolution` is sandbox/live-only and currently auto-passes with explicit informational output while sandbox deploy remains permanently blocked.
+
+### Training Scenarios
+
+12 training scenarios covering the full parameter space:
+
+| Scenario | Resources | Key Coverage |
+|---|---|---|
+| `web-app-paris` | compute, networking (LB), database | PostgreSQL, small, public LB, policy checks |
+| `k8s-cluster-paris` | kubernetes, networking | K8s small, VPC + private network |
+| `iam-policies-paris` | iam | IAM application + API key + policy |
+| `registry-paris` | registry | Private container registry |
+| `redis-paris` | redis, networking | Redis small cache |
+| `full-stack-paris` | all 7 resource types | Composite multi-service |
+| `mysql-ha-paris` | compute, networking, database | MySQL engine, medium DB, HA=true |
+| `compute-lb-multi-paris` | compute, networking (multi-backend LB) | Large compute (count=3), HTTP + TCP backends |
+| `k8s-medium-override-paris` | kubernetes, networking | Medium K8s, node_type/node_count overrides |
+| `private-lb-db-paris` | compute, networking (private LB), database | Private LB, large PostgreSQL with overrides |
+| `public-registry-iam-paris` | registry, iam | Public registry, IAM with policy=false |
+| `redis-xlarge-session-paris` | compute, redis, networking | XLarge Redis with node_type override, xlarge compute |
 
 ### Basic setup and verification
 
@@ -680,6 +788,27 @@ bash scripts/check_all.sh
 - Current execution stub: `CURRENT_TICKET.md`
 - Rolling status: `STATUS.md`
 - Execution prompt: `docs/process/EXECUTION_PROMPT.md`
+
+### Architecture Decision Records (ADRs)
+
+| ADR | Title | Status |
+|---|---|---|
+| 0001 | Foundations — base stack and execution model | Accepted |
+| 0002 | CLI Command Contract — frozen args/flags/exit-code contract | Accepted |
+| 0003 | Permanent Sandbox/Live Deploy Block — governance non-goal | Accepted |
+| 0004 | Generator Transport Contract — claude/openrouter selection and phase semantics | Accepted |
+| 0005 | Dual Iteration Controls | Superseded by ADR-0006 |
+| 0006 | Run Failure-Only Retry Control — single `repair_iterations_max` knob, stop on first success | Accepted |
+| 0007 | Scenario Schema Resource Expansion — kubernetes, iam, registry, redis resource definitions | Accepted |
+
+### Doc Hygiene Automation
+
+`bash scripts/check_doc_hygiene.sh --staged` runs automatically as part of `check_all.sh` and enforces contributor governance:
+- Code or config changes (`cmd/`, `internal/`, `prompts/`, `policies/`, `scenarios/`, `go.mod`, `scenario.schema.json`) require a `STATUS.md` update.
+- CLI contract or schema changes (`cmd/infrafactory/`, `internal/cli/`, `scenario.schema.json`, `infrafactory.yaml`) require an ADR update in `docs/decisions/`.
+- New ADR files require an update to `docs/decisions/README.md` index.
+
+This ensures documentation stays in sync with code changes without manual enforcement.
 
 ## Agent Kickoff
 

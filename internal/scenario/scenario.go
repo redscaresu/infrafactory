@@ -36,6 +36,9 @@ type Resources struct {
 	Networking *NetworkingResource `json:"networking,omitempty"`
 	Database   *DatabaseResource   `json:"database,omitempty"`
 	Kubernetes *KubernetesResource `json:"kubernetes,omitempty"`
+	IAM        *IAMResource        `json:"iam,omitempty"`
+	Registry   *RegistryResource   `json:"registry,omitempty"`
+	Redis      *RedisResource      `json:"redis,omitempty"`
 }
 
 type ComputeResource struct {
@@ -86,6 +89,28 @@ type KubernetesResource struct {
 type KubernetesOverride struct {
 	NodeType  string `json:"node_type,omitempty"`
 	NodeCount int    `json:"node_count,omitempty"`
+}
+
+type RedisResource struct {
+	Purpose  string        `json:"purpose"`
+	Size     string        `json:"size"`
+	Override RedisOverride `json:"override,omitempty"`
+}
+
+type RedisOverride struct {
+	NodeType string `json:"node_type,omitempty"`
+}
+
+type RegistryResource struct {
+	Purpose  string `json:"purpose"`
+	IsPublic bool   `json:"is_public,omitempty"`
+}
+
+type IAMResource struct {
+	Purpose     string `json:"purpose"`
+	Application bool   `json:"application,omitempty"`
+	APIKey      bool   `json:"api_key,omitempty"`
+	Policy      bool   `json:"policy,omitempty"`
 }
 
 type AcceptanceCriterion struct {
@@ -178,7 +203,40 @@ func LoadWithSchema(path, schemaPath string) (Scenario, error) {
 		return Scenario{}, fmt.Errorf("decode scenario %q: %w", path, err)
 	}
 
+	applyIAMDefaults(&result, normalized)
+
 	return result, nil
+}
+
+// applyIAMDefaults sets IAM boolean fields to their schema defaults (true)
+// when the user omitted them. Go's json.Unmarshal decodes missing bools as
+// false, but the JSON Schema declares default: true for application, api_key,
+// and policy.
+func applyIAMDefaults(sc *Scenario, normalized any) {
+	if sc.Resources.IAM == nil {
+		return
+	}
+	root, ok := normalized.(map[string]any)
+	if !ok {
+		return
+	}
+	resources, ok := root["resources"].(map[string]any)
+	if !ok {
+		return
+	}
+	iam, ok := resources["iam"].(map[string]any)
+	if !ok {
+		return
+	}
+	if _, present := iam["application"]; !present {
+		sc.Resources.IAM.Application = true
+	}
+	if _, present := iam["api_key"]; !present {
+		sc.Resources.IAM.APIKey = true
+	}
+	if _, present := iam["policy"]; !present {
+		sc.Resources.IAM.Policy = true
+	}
 }
 
 func compileSchema(schemaPath string) (*jsonschema.Schema, error) {

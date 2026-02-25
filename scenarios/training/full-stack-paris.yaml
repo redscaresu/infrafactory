@@ -1,0 +1,45 @@
+scenario: full-stack-paris
+version: "1.0"
+cloud: scaleway
+description: >
+  Full-stack infrastructure in Paris: a web application with
+  managed PostgreSQL database, Kubernetes cluster, Redis cache,
+  container registry, and IAM service account — all connected
+  via a private network within a VPC.
+
+resources:
+  compute:
+    purpose: web-server
+    size: small
+    count: 1
+  networking:
+    vpc: true
+    private_network: true
+  database:
+    engine: postgresql
+    size: small
+    high_availability: false
+  kubernetes:
+    size: small
+  redis:
+    purpose: cache
+    size: small
+  registry:
+    purpose: app-images
+    is_public: false
+  iam:
+    purpose: ci-cd
+    application: true
+    api_key: true
+    policy: true
+
+constraints:
+  region: fr-par
+  encryption_at_rest: true
+
+acceptance_criteria:
+  - type: policy
+    check: encryption_at_rest
+    expect: pass
+  - type: destruction
+    expect: no_orphans

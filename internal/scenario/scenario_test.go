@@ -86,6 +86,99 @@ func TestLoadWithSchemaPaths(t *testing.T) {
 			},
 		},
 		{
+			name:             "new resource types decode correctly",
+			scenarioPath:     filepath.Join("testdata", "new-resource-types.yaml"),
+			expectedScenario: "new-resources",
+			assert: func(t *testing.T, sc Scenario) {
+				t.Helper()
+				if sc.Resources.Kubernetes == nil {
+					t.Fatal("expected kubernetes resource")
+				}
+				if sc.Resources.Kubernetes.Size != "small" {
+					t.Fatalf("expected k8s size small, got %q", sc.Resources.Kubernetes.Size)
+				}
+				if sc.Resources.Kubernetes.Override.NodeType != "DEV1-M" {
+					t.Fatalf("expected k8s node_type DEV1-M, got %q", sc.Resources.Kubernetes.Override.NodeType)
+				}
+				if sc.Resources.Kubernetes.Override.NodeCount != 2 {
+					t.Fatalf("expected k8s node_count 2, got %d", sc.Resources.Kubernetes.Override.NodeCount)
+				}
+				if sc.Resources.IAM == nil {
+					t.Fatal("expected IAM resource")
+				}
+				if sc.Resources.IAM.Purpose != "ci-cd" {
+					t.Fatalf("expected IAM purpose ci-cd, got %q", sc.Resources.IAM.Purpose)
+				}
+				if !sc.Resources.IAM.Application {
+					t.Fatal("expected IAM application=true")
+				}
+				if !sc.Resources.IAM.APIKey {
+					t.Fatal("expected IAM api_key=true")
+				}
+				if sc.Resources.IAM.Policy {
+					t.Fatal("expected IAM policy=false when explicitly set")
+				}
+				if sc.Resources.Registry == nil {
+					t.Fatal("expected registry resource")
+				}
+				if sc.Resources.Registry.Purpose != "container-images" {
+					t.Fatalf("expected registry purpose container-images, got %q", sc.Resources.Registry.Purpose)
+				}
+				if !sc.Resources.Registry.IsPublic {
+					t.Fatal("expected registry is_public=true")
+				}
+				if sc.Resources.Redis == nil {
+					t.Fatal("expected redis resource")
+				}
+				if sc.Resources.Redis.Purpose != "cache" {
+					t.Fatalf("expected redis purpose cache, got %q", sc.Resources.Redis.Purpose)
+				}
+				if sc.Resources.Redis.Override.NodeType != "RED1-S" {
+					t.Fatalf("expected redis override node_type RED1-S, got %q", sc.Resources.Redis.Override.NodeType)
+				}
+			},
+		},
+		{
+			name:             "IAM defaults applied when omitted",
+			scenarioPath:     filepath.Join("testdata", "iam-defaults.yaml"),
+			expectedScenario: "iam-defaults",
+			assert: func(t *testing.T, sc Scenario) {
+				t.Helper()
+				if sc.Resources.IAM == nil {
+					t.Fatal("expected IAM resource")
+				}
+				if !sc.Resources.IAM.Application {
+					t.Fatal("expected IAM application to default to true")
+				}
+				if !sc.Resources.IAM.APIKey {
+					t.Fatal("expected IAM api_key to default to true")
+				}
+				if !sc.Resources.IAM.Policy {
+					t.Fatal("expected IAM policy to default to true")
+				}
+			},
+		},
+		{
+			name:             "IAM explicit false preserved",
+			scenarioPath:     filepath.Join("testdata", "iam-explicit-false.yaml"),
+			expectedScenario: "iam-explicit-false",
+			assert: func(t *testing.T, sc Scenario) {
+				t.Helper()
+				if sc.Resources.IAM == nil {
+					t.Fatal("expected IAM resource")
+				}
+				if sc.Resources.IAM.Application {
+					t.Fatal("expected IAM application=false when explicitly set")
+				}
+				if sc.Resources.IAM.APIKey {
+					t.Fatal("expected IAM api_key=false when explicitly set")
+				}
+				if !sc.Resources.IAM.Policy {
+					t.Fatal("expected IAM policy=true when explicitly set")
+				}
+			},
+		},
+		{
 			name:                "invalid scenario schema",
 			scenarioPath:        filepath.Join("testdata", "invalid-schema.yaml"),
 			expectedErr:         ErrInvalidScenario,

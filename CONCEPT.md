@@ -36,11 +36,11 @@ Rule: if a change alters architecture, interfaces, or long-term workflow, create
 | Language | Go (everything) | Matches Scaleway ecosystem (CLI, SDK, TF provider all Go). Single language. |
 | Mock server | [Mockway](https://github.com/redscaresu/mockway) — stateful Scaleway API mock | No LocalStack for Scaleway. Build our own, LocalStack-inspired. Separate repo, built first as standalone building block. |
 | Mock architecture | Standalone binary, single server with path routing, SQLite state | Single port simplifies OpenTofu provider config. SQLite for persistent, queryable state. |
-| Mock scope | 7 services + 1 legacy alias (Instance, VPC, LB, K8s, RDB, IAM, Marketplace + Account legacy) | Breadth over depth. 19 resource types, ~91 handler methods + 3 admin endpoints + 1 catch-all. S3 deferred to Mockway v2. |
+| Mock scope | 9 services + 1 legacy alias (Instance, VPC, LB, K8s, RDB, IAM, Marketplace, Container Registry, Redis + Account legacy) | Breadth over depth. 21+ resource types, ~100+ handler methods + 3 admin endpoints + 1 catch-all. S3 deferred to Mockway v2. |
 | Mock generation | Codegen-first (`oapi-codegen`) with hand-written fallback | Scaleway specs include custom `x-one-of`; pre-process to standard `oneOf` and use codegen when viable, otherwise hand-write types/routes from spec references. |
 | Mock HTTP router | chi | Lightweight, stdlib-compatible, path-parameter routing. No framework lock-in. |
 | Mock testing | Unit + integration in Mockway repo | Unit: SQLite store, FK validation, handler logic. Integration: HTTP tests against running server (create/read/delete/list, FK rejection). |
-| Mock state model | SQLite with FK constraints + referential integrity | On create: validate referenced resources exist (404 if not). On delete: reject if dependents exist (409), cascade or detach where Scaleway does (e.g. server delete detaches IPs, cascades NICs). Matches real Scaleway API behaviour. |
+| Mock state model | SQLite with FK constraints + referential integrity | On create: validate referenced resources exist (404 if not). On delete: reject if dependents exist (409). Exceptions: server delete detaches IPs (`SET NULL`) and cascades NICs; LB delete cascades private network attachments (provider expects API to handle PN detachment). Matches real Scaleway API behaviour. |
 | Mock admin API | Structured state schema, versioned contract | `GET /mock/state` returns full resource graph with relationships preserved. This schema is the interface between Mockway and InfraFactory. |
 | Topology evaluation | Harness-side, not Mockway | Mockway stores resources + relationships. The harness's TopologyEvaluator queries mock state and reasons about connectivity as graph queries. Clean separation: Mockway = realistic API mock, harness = domain logic. |
 | S3 mock | Deferred to Mockway v2 | Object Storage uses S3-compatible API (different auth). Separate port, Azurite-inspired. |
@@ -100,6 +100,8 @@ Rule: if a change alters architecture, interfaces, or long-term workflow, create
 | Databases | Managed PostgreSQL, MySQL | Regional: `/rdb/v1/regions/{region}/instances` |
 | IAM | Applications, API Keys, Policies, SSH Keys | Organisation-scoped: `/iam/v1alpha1/` |
 | Marketplace | Local Images (image label → UUID resolution) | `/marketplace/v2/` |
+| Container Registry | Namespaces | Regional: `/registry/v1/regions/{region}/namespaces` |
+| Redis | Clusters | Zoned: `/redis/v1/zones/{zone}/clusters` |
 | Account (legacy) | SSH Keys (alias → IAM ssh-keys state) | `/account/v2alpha1/` |
 | Storage | S3-compatible Object Storage (Mockway v2) | S3 API: `s3.{region}.scw.cloud` |
 
@@ -428,6 +430,30 @@ The scenario YAML is validated at parse time against `scenario.schema.json` (JSO
 | `size` | string | Yes | — | `small` \| `medium` \| `large` \| `xlarge`. Resolved via `mappings.yaml`. |
 | `override.node_type` | string | No | — | Exact Scaleway node type. |
 | `override.node_count` | integer | No | — | Exact node count. |
+
+**`resources.iam`**:
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `purpose` | string | Yes | — | Logical role (e.g., `deploy-bot`). |
+| `application` | boolean | No | `true` | Create an IAM application. |
+| `api_key` | boolean | No | `true` | Create an API key for the application. |
+| `policy` | boolean | No | `true` | Create a policy for the application. |
+
+**`resources.registry`**:
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `purpose` | string | Yes | — | Logical role (e.g., `ci-artifacts`). |
+| `is_public` | boolean | No | `false` | Whether the registry namespace is public. |
+
+**`resources.redis`**:
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `purpose` | string | Yes | — | Logical role (e.g., `session-store`). |
+| `size` | string | Yes | — | `small` \| `medium` \| `large` \| `xlarge`. Resolved via `mappings.yaml` (RED1-MICRO, RED1-S, RED1-M, RED1-L). |
+| `override.node_type` | string | No | — | Exact Redis node type. |
 
 **`constraints`** — extensible key-value map. Known keys:
 
@@ -1160,6 +1186,9 @@ type Resources struct {
     Networking *NetworkingResource `yaml:"networking,omitempty"`
     Database   *DatabaseResource   `yaml:"database,omitempty"`
     Kubernetes *KubernetesResource `yaml:"kubernetes,omitempty"`
+    IAM        *IAMResource        `yaml:"iam,omitempty"`
+    Registry   *RegistryResource   `yaml:"registry,omitempty"`
+    Redis      *RedisResource      `yaml:"redis,omitempty"`
 }
 
 type ComputeResource struct {
@@ -1193,6 +1222,24 @@ type DatabaseResource struct {
 }
 
 type KubernetesResource struct {
+    Size     string            `yaml:"size"`
+    Override map[string]string `yaml:"override,omitempty"`
+}
+
+type IAMResource struct {
+    Purpose     string `yaml:"purpose"`
+    Application *bool  `yaml:"application,omitempty"` // default true
+    APIKey      *bool  `yaml:"api_key,omitempty"`     // default true
+    Policy      *bool  `yaml:"policy,omitempty"`      // default true
+}
+
+type RegistryResource struct {
+    Purpose  string `yaml:"purpose"`
+    IsPublic bool   `yaml:"is_public,omitempty"`
+}
+
+type RedisResource struct {
+    Purpose  string            `yaml:"purpose"`
     Size     string            `yaml:"size"`
     Override map[string]string `yaml:"override,omitempty"`
 }
@@ -1266,18 +1313,20 @@ type FailureSignature struct {
 | Kubernetes | `/k8s/v1/regions/{region}/` | clusters, pools |
 | RDB | `/rdb/v1/regions/{region}/` | instances, databases, users |
 | IAM | `/iam/v1alpha1/` | applications, api-keys, policies, ssh-keys, rules |
+| Container Registry | `/registry/v1/regions/{region}/` | namespaces |
+| Redis | `/redis/v1/zones/{zone}/` | clusters |
 | Marketplace | `/marketplace/v2/` | local-images (image label → zone-specific UUID resolution) |
 | Account (legacy) | `/account/v2alpha1/` | ssh-keys (alias → IAM ssh-keys state) |
 
-**Scope**: 7 services + 1 legacy alias, 19 resource types, ~91 handler methods + 3 admin endpoints + 1 catch-all (UnimplementedHandler). Codegen-first (`oapi-codegen`) with hand-written fallback when spec quirks (for example `x-one-of`) block usable generation. No S3 in v1.
+**Scope**: 9 services + 1 legacy alias, 21+ resource types, ~100+ handler methods + 3 admin endpoints + 1 catch-all (UnimplementedHandler). Codegen-first (`oapi-codegen`) with hand-written fallback when spec quirks (for example `x-one-of`) block usable generation. No S3 in v1.
 
 ### Referential Integrity
 
 Mockway enforces the same referential integrity as the real Scaleway API:
 
 - **On create**: validate that referenced resources exist. Creating a `private_nic` with a non-existent `server_id` → 404 Not Found. Creating an RDB instance with a `private_network_id` that doesn't exist → 404 Not Found. Creating an IAM API key with a non-existent `application_id` → 404 Not Found.
-- **On delete**: reject if dependents still exist. Delete a VPC when private networks are still attached → 409 Conflict. Delete a private network when NICs are attached → 409 Conflict. Delete an IAM application with attached API keys or policies → 409 Conflict.
-- **On delete (cascade/detach)**: some FKs use `ON DELETE SET NULL` (server deletion detaches IPs and security group references) or `ON DELETE CASCADE` (server deletion cascades to private NICs). This matches the destroy ordering the Terraform provider expects.
+- **On delete**: reject if dependents still exist (409 Conflict). Delete a VPC when private networks are still attached → 409. Delete a private network when NICs are attached → 409. Delete an IAM application with attached API keys or policies → 409. Delete a K8s cluster when pools exist → 409. Delete an RDB instance when databases/users exist → 409. Delete an LB when frontends or backends exist → 409.
+- **On delete (cascade/detach exceptions)**: server deletion detaches IPs and security group references (`ON DELETE SET NULL`) and cascades private NICs (`ON DELETE CASCADE`). LB deletion cascades `lb_private_networks` attachment records because the Scaleway TF provider does not detach private networks before LB delete. These exceptions match the destroy ordering the Terraform provider expects.
 - **`POST /mock/reset`**: wipes all state. Disables FK checks (`PRAGMA foreign_keys = OFF`), deletes all rows, re-enables FKs.
 
 ### Key Resource Relationships
@@ -1310,6 +1359,10 @@ IAM Application
 
 IAM SSH Key (standalone — no parent dependency)
  └── Also accessible via Account legacy routes (same state)
+
+Container Registry Namespace (standalone — region-scoped)
+
+Redis Cluster (standalone — zone-scoped)
 ```
 
 ### SQLite Schema
@@ -1444,6 +1497,20 @@ CREATE TABLE iam_ssh_keys (
     id TEXT PRIMARY KEY,
     data JSON NOT NULL
 );
+
+-- Container Registry
+CREATE TABLE container_registry_namespaces (
+    id TEXT PRIMARY KEY,
+    region TEXT NOT NULL,
+    data JSON NOT NULL
+);
+
+-- Redis
+CREATE TABLE redis_clusters (
+    id TEXT PRIMARY KEY,
+    zone TEXT NOT NULL,
+    data JSON NOT NULL
+);
 ```
 
 SQLite enforces FKs natively (`PRAGMA foreign_keys = ON`). The JSON `data` column holds the full API response shape — flexible, no migrations when Scaleway adds optional fields.
@@ -1455,7 +1522,7 @@ The admin state schema is a **versioned contract** between Mockway and InfraFact
 **Endpoints**:
 - `POST /mock/reset` — wipe all state
 - `GET /mock/state` — full resource graph as JSON
-- `GET /mock/state/{service}` — single service state (valid: `instance`, `vpc`, `lb`, `k8s`, `rdb`, `iam`; unknown → 404)
+- `GET /mock/state/{service}` — single service state (valid: `instance`, `vpc`, `lb`, `k8s`, `rdb`, `iam`, `registry`, `redis`; unknown → 404)
 
 **Schema** (`GET /mock/state`):
 
@@ -1540,6 +1607,19 @@ The admin state schema is a **versioned contract** between Mockway and InfraFact
     "ssh_keys": [
       {"id": "uuid", "name": "my-laptop",
        "public_key": "ssh-ed25519 AAAA..."}
+    ]
+  },
+  "registry": {
+    "namespaces": [
+      {"id": "uuid", "region": "fr-par", "name": "my-registry",
+       "is_public": false, "organization_id": "org-uuid"}
+    ]
+  },
+  "redis": {
+    "clusters": [
+      {"id": "uuid", "zone": "fr-par-1", "name": "my-cache",
+       "version": "7.0.12", "node_type": "RED1-MICRO",
+       "cluster_size": 1}
     ]
   }
 }

@@ -41,7 +41,10 @@
         "compute": { "$ref": "#/$defs/compute_resource" },
         "networking": { "$ref": "#/$defs/networking_resource" },
         "database": { "$ref": "#/$defs/database_resource" },
-        "kubernetes": { "$ref": "#/$defs/kubernetes_resource" }
+        "kubernetes": { "$ref": "#/$defs/kubernetes_resource" },
+        "iam": { "$ref": "#/$defs/iam_resource" },
+        "registry": { "$ref": "#/$defs/registry_resource" },
+        "redis": { "$ref": "#/$defs/redis_resource" }
       },
       "additionalProperties": false
     },
@@ -239,6 +242,75 @@
             }
           },
           "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "redis_resource": {
+      "type": "object",
+      "required": ["purpose", "size"],
+      "properties": {
+        "purpose": {
+          "type": "string",
+          "description": "Purpose of the Redis cluster (e.g., cache, session-store). Passed to agent for naming."
+        },
+        "size": {
+          "type": "string",
+          "enum": ["small", "medium", "large", "xlarge"],
+          "description": "T-shirt size resolved to Scaleway Redis node type via mappings.yaml."
+        },
+        "override": {
+          "type": "object",
+          "description": "Prescriptive overrides. Take priority over size mappings.",
+          "properties": {
+            "node_type": {
+              "type": "string",
+              "description": "Exact Scaleway Redis node type (e.g., RED1-MICRO, RED1-S)."
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "registry_resource": {
+      "type": "object",
+      "required": ["purpose"],
+      "properties": {
+        "purpose": {
+          "type": "string",
+          "description": "Purpose of the container registry (e.g., app-images, ci-artifacts). Passed to agent for naming."
+        },
+        "is_public": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether the registry namespace is publicly accessible."
+        }
+      },
+      "additionalProperties": false
+    },
+    "iam_resource": {
+      "type": "object",
+      "required": ["purpose"],
+      "properties": {
+        "purpose": {
+          "type": "string",
+          "description": "Purpose of the IAM setup (e.g., service-account, ci-cd). Passed to agent for naming."
+        },
+        "application": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether to create an IAM application."
+        },
+        "api_key": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether to create an API key for the application."
+        },
+        "policy": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether to create a policy for the application."
         }
       },
       "additionalProperties": false

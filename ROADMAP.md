@@ -123,12 +123,39 @@ This file is intentionally high-level and mostly stable; day-to-day execution tr
 - Ensure fresh-context startup docs and operator guidance reflect post-remediation behavior.
 - Apply slice-closure review protocol before marking Slice 16 complete.
 
+17. Slice 18: Expand mockway coverage to remaining Scaleway API surfaces
+- Create standalone scenarios for each uncovered Scaleway API surface and run them through infrafactory to discover mockway gaps.
+- Fix mockway (add missing handlers/tables) and infrafactory (extend scenario schema, mappings, prompts) iteratively until each scenario passes on first iteration.
+- Split work by API surface: K8s standalone (Tier 1), IAM standalone (Tier 1), Container Registry (Tier 2), Redis (Tier 2), Composite (depends on all).
+- Tier 1 (`S18-T1`, `S18-T2`) exercises existing mockway handlers and can run in parallel.
+- Tier 2 (`S18-T3`, `S18-T4`) requires new mockway services and can run in parallel after Tier 1.
+- Composite (`S18-T5`) validates all services together after Tier 1+2 are green.
+- Schema extensions required: add `iam`, `registry`, `redis` to `scenario.schema.json` resources (currently `additionalProperties: false`); add corresponding Go struct fields in `scenario.go`; add redis size mappings to `mappings.yaml`.
+- Out of scope: Serverless/Containers, S3 (off-the-shelf mock follow-up).
+- Execution protocol: write scenario → `infrafactory run` → diagnose failures → fix mockway or infrafactory → write regression test → rebuild Docker → rerun until first-iteration pass. No confirmation prompts — proceed autonomously.
+- Apply slice-closure review protocol before marking Slice 18 complete.
+
+18. Slice 19: Reliability review and hardening of Slice 18
+- Review all Slice 18 code in both mockway and infrafactory for bugs, edge cases, error handling, and correctness issues.
+- Fix all identified issues with regression tests in both codebases.
+- Run all Slice 18 scenarios (standalone + composite) repeatedly until every one passes `infrafactory run` on first iteration with no regressions.
+- Execute autonomously without human interaction — diagnose, fix, test, rebuild Docker, rerun until green.
+- Apply slice-closure review protocol before marking Slice 19 complete.
+
+19. Slice 20: Scenario combination expansion
+- Create 6 new training scenarios that exercise untested parameter combinations across all schema parameters and mockway services.
+- Coverage targets: mysql engine, medium/large/xlarge sizes, high availability, private LB, multi-backend LB, tcp protocol, K8s/Redis/database overrides, public registry, selective IAM flags.
+- Execution protocol: write scenario → `infrafactory run` → diagnose failures → fix mockway or infrafactory → write regression test → rebuild Docker → rerun until first-iteration pass.
+- Tier 1 (independent): S20-T1, S20-T2, S20-T3, S20-T5.
+- Tier 2 (after any Tier 1): S20-T4, S20-T6.
+- Apply slice-closure review protocol before marking Slice 20 complete.
+
 ## Near-term execution order
 
-1. Keep completed slices (11-17) stable and regression-green.
-2. Keep Slice 17 hardening outcomes stable (`S17-T1`, `M31`, `M32`, `M33`, `M34`) and regression-green.
+1. Execute Slice 20 (scenario combination expansion): S20-T1 through S20-T6.
+2. Keep completed slices (1-19) stable and regression-green.
 3. Keep `S9-T8` blocked under ADR-0003 unless governance policy is explicitly superseded.
-4. Pipeline consistently achieves first-iteration pass (6/6 as of M34); monitor for regressions.
+4. Pipeline consistently achieves first-iteration pass (6/6 training scenarios); monitor for regressions and extend to 12/12 after Slice 20.
 
 ## Live progress tracking
 

@@ -3,69 +3,49 @@
 Use this file as the per-session execution stub.
 
 ## Ticket
-- id: M34
-- title: End-to-end pipeline stabilization and self-review contract tightening
-- status: done
-- classification: implementation + docs
+- id: none
+- title: No active ticket — Slices 1-20 complete
+- status: idle
+- classification: n/a
 
 ## 1) Problem Statement
 - What is broken or missing?
-  1. Mockway missing Block Storage API routes (`/block/v1alpha1/`) caused `tofu destroy` failures.
-  2. Mockway missing RDB ACL DELETE endpoint caused destroy-phase 501 errors.
-  3. Stale Docker container ran old code without server terminate fix.
-  4. `SelfReviewIndicatesNoChanges` used overly broad substring matching, risking false "no changes" classification.
-  5. Prompt pitfall for `private_ips` referenced wrong resource type.
-  6. Tests codified weakened self-review parse behavior.
+  Slice 20 scenario combination expansion is complete. 6 new scenarios created and all pass on first iteration.
 - Why does it matter now?
-  These issues caused intermittent destroy/orphan failures and could suppress legitimate self-review corrections.
+  Coverage expanded from 6 to 12 training scenarios covering all schema parameter combinations.
 
 ## 2) Scope
-- In scope:
-  Mockway endpoint fixes (block volumes, RDB ACL DELETE), prompt pitfall updates, self-review contract tightening, adapter test alignment, doc sync.
-- Out of scope:
-  New features, schema/CLI contract changes, transport redesign.
+- In scope: Slice 20 complete.
+- Out of scope: n/a.
 
 ## 3) Acceptance Criteria
-1. `tofu destroy` completes cleanly (no 501 errors from missing mockway endpoints).
-2. `SelfReviewIndicatesNoChanges` matches only exact canonical `NO ISSUES FOUND`.
-3. Adapter tests reflect strict self-review contract.
-4. Pipeline passes 5/5 first-iteration runs consistently.
-5. All docs synchronized.
-
-## 4) Impacted Areas
-- Files changed:
-  `internal/generator/parser.go`, `internal/generator/parser_test.go`,
-  `internal/generator/claude_adapter_test.go`,
-  `prompts/phase2_generate_hcl.md`,
-  `README.md`, `SESSION_START.md`, `ROADMAP.md`, `BACKLOG.md`, `STATUS.md`, `CURRENT_TICKET.md`.
-- Mockway files changed (separate repo):
-  `handlers/handlers.go` (block volume routes, RDB ACL DELETE route),
-  `handlers/rdb.go` (DeleteRDBACLs handler),
-  `handlers/handlers_test.go` (TestBlockVolumeEndpoints).
-- External contracts affected (CLI/schema/policy): no.
-
-## 5) Test Plan
-- `go test ./internal/generator/` — all pass
-- 6 consecutive `run` executions — all first-iteration passes
-- `bash scripts/check_all.sh`
-
-## 6) Risks and Rollback
-- Primary risks: None; tighter self-review check is a strict subset of prior behavior.
-- Rollback approach: Revert parser/test edits.
-
-## 7) Done Definition
-- Pipeline 5/5+ first-iteration pass rate.
-- Self-review contract strict and tested.
-- Docs synchronized.
-- Local checks pass.
+1. All 6 new scenarios pass `infrafactory run` on first iteration. DONE
+2. All 6 existing scenarios still pass (no regressions). DONE
+3. `go test ./...`, mockway tests, and `bash scripts/check_all.sh` all pass. DONE
 
 ## Progress notes
-- Fixed mockway: added block volume API routes, RDB ACL DELETE handler, server terminate deployment.
-- Updated `private_ips` prompt pitfall to reference NIC resource.
-- Tightened `SelfReviewIndicatesNoChanges` to exact canonical phrase only.
-- Updated adapter tests: renamed and aligned to strict/fallback semantics.
-- Pipeline results: 6/6 first-iteration passes (including post-tightening).
-- Review pass 1: docs sync applied (STATUS, ROADMAP, BACKLOG, README, SESSION_START, CURRENT_TICKET).
+
+### S20-T1 (complete)
+- `mysql-ha-paris.yaml`: first-iteration pass. MySQL engine, medium DB, HA=true, private networking.
+
+### S20-T2 (complete)
+- `compute-lb-multi-paris.yaml`: first-iteration pass after prompt fixes.
+- Added pitfalls: LB backend/frontend zone argument, assign_flexible_ipv6 conflict, compute type mapping.
+- Strengthened phase1 prompt to enforce exact size mappings from mappings.yaml.
+
+### S20-T3 (complete)
+- `k8s-medium-override-paris.yaml`: first-iteration pass. Medium K8s with node_type/node_count overrides.
+
+### S20-T4 (complete)
+- `private-lb-db-paris.yaml`: first-iteration pass. Private LB, large PostgreSQL with overrides.
+
+### S20-T5 (complete)
+- `public-registry-iam-paris.yaml`: first-iteration pass. Public registry, IAM with policy=false.
+
+### S20-T6 (complete)
+- `redis-xlarge-session-paris.yaml`: first-iteration pass after mockway server type catalog expansion.
+- Added GP1-L, GP1-XL, DEV1-L to mockway instance type catalog and marketplace compatible types.
+- Rebuilt Docker.
 
 ## Blocker (if any)
 - blocker: none.

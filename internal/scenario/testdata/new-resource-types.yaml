@@ -1,0 +1,26 @@
+scenario: new-resources
+version: "1.0"
+cloud: scaleway
+description: fixture testing new resource type decoding
+resources:
+  kubernetes:
+    size: small
+    override:
+      node_type: DEV1-M
+      node_count: 2
+  iam:
+    purpose: ci-cd
+    application: true
+    api_key: true
+    policy: false
+  registry:
+    purpose: container-images
+    is_public: true
+  redis:
+    purpose: cache
+    size: small
+    override:
+      node_type: RED1-S
+acceptance_criteria:
+  - type: destruction
+    expect: no_orphans
