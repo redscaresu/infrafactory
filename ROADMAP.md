@@ -150,12 +150,34 @@ This file is intentionally high-level and mostly stable; day-to-day execution tr
 - Tier 2 (after any Tier 1): S20-T4, S20-T6.
 - Apply slice-closure review protocol before marking Slice 20 complete.
 
+20. Slice 21: Web UI dashboard
+- Add a web dashboard (`infrafactory ui`) for browsing scenarios, watching runs in real time, viewing run history, editing scenario YAML, and viewing generated .tf files.
+- Tech stack: SvelteKit (adapter-static) frontend embedded in Go binary via `go:embed`; Go `net/http` backend reusing existing internal packages; WebSocket (`github.com/coder/websocket`) for real-time streaming.
+- New `internal/api/` package: HTTP server, REST handlers, WebSocket hub, SPA fallback, `WebSocketSink` plugging into existing `AppLogger.sinks`.
+- New `ui/` directory: SvelteKit SPA with scenario sidebar, pipeline visualization, iteration timeline, log stream, YAML editor, HCL viewer.
+- New `infrafactory ui --addr 127.0.0.1:4173` Cobra command via `NewRootCmd(opts ...RootOption)` functional options pattern.
+- Extract `executeRunLoop()` from `runRunCommand` to decouple run execution from Cobra for API reuse.
+- Add `ListScenarios()` to `runstore` for run history browsing.
+- Build integration: `Makefile` targets (`ui-install`, `ui-build`, `ui-dev`, `ui-clean`), `go:embed` with `noui` build tag fallback, GoReleaser `before.hooks`.
+- Implementation sub-slices:
+  - SUi-1: Skeleton server + static asset embed.
+  - SUi-2: Scenario browser + sidebar.
+  - SUi-3: Run history browser.
+  - SUi-4: Generated code viewer.
+  - SUi-5: WebSocket infrastructure + log streaming.
+  - SUi-6: Live run execution + pipeline visualization.
+  - SUi-7: Scenario YAML editor.
+  - SUi-8: Build pipeline + polish.
+- Security: path traversal validation on PUT, single concurrent run mutex, credential redaction, slow-client message dropping.
+- Testing: `httptest` unit tests for REST handlers, WebSocket hub tests, Playwright e2e for frontend, `go test -tags noui ./...` must not break existing CLI.
+- Apply slice-closure review protocol before marking Slice 21 complete.
+
 ## Near-term execution order
 
-1. Execute Slice 20 (scenario combination expansion): S20-T1 through S20-T6.
-2. Keep completed slices (1-19) stable and regression-green.
+1. Execute Slice 21 (Web UI dashboard): SUi-1 through SUi-8.
+2. Keep completed slices (1-20) stable and regression-green.
 3. Keep `S9-T8` blocked under ADR-0003 unless governance policy is explicitly superseded.
-4. Pipeline consistently achieves first-iteration pass (6/6 training scenarios); monitor for regressions and extend to 12/12 after Slice 20.
+4. Pipeline consistently achieves first-iteration pass (12/12 training scenarios); monitor for regressions.
 
 ## Live progress tracking
 

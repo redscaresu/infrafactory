@@ -1,20 +1,20 @@
 # STATUS
 
-Last updated: 2026-02-25
+Last updated: 2026-02-27
 
 ## Current phase
-- Active milestone: Slice 20 — scenario combination expansion.
-- All 6 existing scenarios pass `infrafactory run` on first iteration.
+- Active milestone: Slice 21 — Web UI dashboard.
+- Slices 1-20 complete. All 12 training scenarios pass `infrafactory run` on first iteration.
 - All test suites green (`go test ./...`, mockway tests, `check_all.sh`).
 
 ## In progress
-- None. Slice 20 complete (S20-T1 through S20-T6, all 6 first-iteration pass).
+- Slice 21 planned (SUi-1 through SUi-8). Implementation not yet started.
 
 ## Known blockers
 - `S9-T8` sandbox/live deploy layer is permanently blocked by governance policy (ADR-0003).
 
 ## Next actions
-1. Define next slice or maintenance work as needed.
+1. Begin Slice 21 implementation: SUi-1 (skeleton server + static asset embed). Full plan at `docs/plans/web-ui-plan.md`. Prerequisites: Node.js 18+, npm 9+.
 2. `S9-T8` (sandbox/live deploy) remains permanently blocked by ADR-0003.
 
 ## Update policy
@@ -25,6 +25,7 @@ Last updated: 2026-02-25
 - Keep startup/read-order instructions only in `SESSION_START.md` to avoid duplication.
 
 ## Recent updates
+- **Slice 21 planned**: Web UI dashboard (`infrafactory ui`) with SvelteKit frontend, Go REST/WebSocket backend, real-time pipeline visualization. 8 sub-slices (SUi-1..SUi-8). Full plan at `docs/plans/web-ui-plan.md`.
 - **Slice 20 complete (S20-T1..S20-T6)**: 6 new scenarios exercising untested parameter combos:
   - `mysql-ha-paris`: mysql engine, medium DB, HA=true, private networking.
   - `compute-lb-multi-paris`: large compute (count=3), multi-backend LB (80/http + 443/tcp).

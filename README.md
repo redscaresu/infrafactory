@@ -262,12 +262,11 @@ The following are known non-goals and are intentionally not complete:
 - Sandbox/live deploy (real Scaleway) is permanently blocked and out-of-scope under ADR-0003.
 
 Criteria support status:
-- `connectivity`: criteria-driven topology checks are wired and propagated through `test` and `run` convergence.
-- `http_probe`: criteria-driven topology checks are wired and propagated through `test` and `run` convergence.
-- `policy`: criteria-driven state-policy checks are wired and propagated through `test` and `run` convergence.
-- `destruction`: supported as lifecycle stage and holdout-completion gating behavior in `run`.
-- `dns_resolution`: sandbox/live-only behavior; currently auto-passes with explicit informational output in `criteria/support_matrix` because there is no real cloud-provider validation path.
-  Output includes explicit messaging: `currently automatically passes due to lack of real world cloud provider (real deployment skipped for cost reasons for now)`.
+- `connectivity`: verified by structural topology checks against mock state (e.g. "compute has a private NIC on the same private network as the database"). Does not test real network reachability — no live environment exists.
+- `http_probe`: verified by checking that the expected LB, frontend, and port exist in mock state. Does not send real HTTP requests.
+- `policy`: fully functional. Evaluates OPA rules against plan JSON (layer 1) and mock state (layer 2). No network required.
+- `destruction`: fully functional. Runs `tofu destroy` and verifies no orphan resources remain in mock state.
+- `dns_resolution`: cannot run. Auto-passes with explicit informational output because there is no real cloud environment to query.
 
 ## Repository Layout
 

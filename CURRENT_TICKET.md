@@ -3,49 +3,43 @@
 Use this file as the per-session execution stub.
 
 ## Ticket
-- id: none
-- title: No active ticket — Slices 1-20 complete
-- status: idle
-- classification: n/a
+- id: SUi-1
+- title: Slice 21 — Web UI dashboard (skeleton server + static asset embed)
+- status: todo
+- classification: feature
 
 ## 1) Problem Statement
 - What is broken or missing?
-  Slice 20 scenario combination expansion is complete. 6 new scenarios created and all pass on first iteration.
+  InfraFactory is CLI-only. No way to visually browse scenarios, watch runs in real time, or inspect run history/generated code from a browser.
 - Why does it matter now?
-  Coverage expanded from 6 to 12 training scenarios covering all schema parameter combinations.
+  Slices 1-20 complete with 12 passing scenarios. The pipeline is stable enough to build a visual layer on top.
+
+## Prerequisites
+- Node.js 18+ and npm 9+ installed (`node --version`, `npm --version`)
+- `go test -tags noui ./...` passes before starting
 
 ## 2) Scope
-- In scope: Slice 20 complete.
-- Out of scope: n/a.
+- In scope: SUi-1 (skeleton server + SvelteKit embed + `infrafactory ui` command). Full Slice 21 plan covers SUi-1 through SUi-8.
+- Out of scope: existing CLI behavior changes. All existing commands and tests must remain unaffected.
+- Plan reference: `docs/plans/web-ui-plan.md` — read Quick Reference, SUi-1 section, and Pitfalls #1-4, #11 before coding.
 
 ## 3) Acceptance Criteria
-1. All 6 new scenarios pass `infrafactory run` on first iteration. DONE
-2. All 6 existing scenarios still pass (no regressions). DONE
-3. `go test ./...`, mockway tests, and `bash scripts/check_all.sh` all pass. DONE
+1. `make build && ./bin/infrafactory ui` serves a placeholder SvelteKit page at `127.0.0.1:4173`.
+2. `go test -tags noui ./...` passes (no breakage to existing CLI tests).
+3. `NewRootCmd(opts ...RootOption)` functional options pattern implemented.
+4. SPA fallback handler serves `index.html` for unmatched routes when UI assets are embedded; returns 404 JSON with dev-mode message when assets=nil.
 
 ## Progress notes
 
-### S20-T1 (complete)
-- `mysql-ha-paris.yaml`: first-iteration pass. MySQL engine, medium DB, HA=true, private networking.
+### Planning (complete)
+- Full UI plan written: `docs/plans/web-ui-plan.md`.
+- 8 sub-slices defined (SUi-1..SUi-8).
+- Tech stack: SvelteKit (adapter-static), Go `net/http`, WebSocket (`github.com/coder/websocket`), `go:embed`.
+- Docs updated: ROADMAP, STATUS, BACKLOG, CURRENT_TICKET, SESSION_START.
 
-### S20-T2 (complete)
-- `compute-lb-multi-paris.yaml`: first-iteration pass after prompt fixes.
-- Added pitfalls: LB backend/frontend zone argument, assign_flexible_ipv6 conflict, compute type mapping.
-- Strengthened phase1 prompt to enforce exact size mappings from mappings.yaml.
-
-### S20-T3 (complete)
-- `k8s-medium-override-paris.yaml`: first-iteration pass. Medium K8s with node_type/node_count overrides.
-
-### S20-T4 (complete)
-- `private-lb-db-paris.yaml`: first-iteration pass. Private LB, large PostgreSQL with overrides.
-
-### S20-T5 (complete)
-- `public-registry-iam-paris.yaml`: first-iteration pass. Public registry, IAM with policy=false.
-
-### S20-T6 (complete)
-- `redis-xlarge-session-paris.yaml`: first-iteration pass after mockway server type catalog expansion.
-- Added GP1-L, GP1-XL, DEV1-L to mockway instance type catalog and marketplace compatible types.
-- Rebuilt Docker.
+## Operational Caveats
+- `ui/build/` does not exist yet. Use `-tags noui` for all Go builds until `npm run build` populates it.
+- The Makefile has no existing `build` target — SUi-1 creates it as a new target.
 
 ## Blocker (if any)
 - blocker: none.

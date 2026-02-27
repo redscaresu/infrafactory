@@ -14,6 +14,7 @@ Fresh-session checklist lives in `SESSION_START.md`.
 
 Additional references:
 - ADRs: `docs/decisions/*.md`
+- Plans: `docs/plans/*.md`
 - Prompts: `prompts/*.md`
 - Progress log: `STATUS.md`
 - Backlog source of truth: `BACKLOG.md`
@@ -52,7 +53,8 @@ Usually no ADR needed for prompt wording tweaks or internal refactors without co
 ## Engineering Rules
 - Keep command handlers thin; put logic in `internal/*` packages.
 - Keep packages cohesive:
-  - `internal/cli`, `internal/config`, `internal/scenario`, `internal/generator`, `internal/harness`, `internal/feedback`, `internal/runstore`
+  - `internal/cli`, `internal/config`, `internal/scenario`, `internal/generator`, `internal/harness`, `internal/feedback`, `internal/runstore`, `internal/api`
+  - `ui/` — SvelteKit frontend (adapter-static, embedded via `go:embed`). Build tag `noui` excludes embed and `ui` command — use `go test -tags noui ./...` when `ui/build/` does not exist.
 - Use explicit structs and typed errors.
 - Keep behavior deterministic and tests hermetic where possible.
 - Keep CLI runnable at all times.

@@ -41,12 +41,14 @@ Before writing code, confirm these facts are still true in `STATUS.md`/`BACKLOG.
 9. Slice 16 includes schema-validation hardening; scenario loads must not silently skip schema validation when schema paths are unavailable.
 10. For ticket-planning closures, record refinement pass outcomes and require at least one improvement pass plus a no-change verification pass in both `STATUS.md` and `CURRENT_TICKET.md`.
 11. **Slices 18-19 complete** — mockway covers all targeted Scaleway APIs (K8s, IAM, Container Registry, Redis, Composite). Reliability review (`S19-T1`) finished with all bugs fixed and regression-tested. All 6 scenarios pass on first iteration.
-12. **Next work undefined** — define next slice or maintenance work as needed. See `STATUS.md` for current state.
+12. **Slice 21 (Web UI) planned** — `infrafactory ui` command serving SvelteKit frontend embedded via `go:embed`. 8 sub-slices (SUi-1..SUi-8). Full plan at `docs/plans/web-ui-plan.md`. Key integration: `WebSocketSink` plugs into existing `AppLogger.sinks` for real-time streaming. `executeRunLoop` extraction from `runRunCommand` enables API reuse.
+13. **Slice 21 testing contract** — `go test -tags noui ./...` must pass at all times (no CLI breakage). New `internal/api/` tests use `httptest.NewServer`. WebSocket hub has dedicated unit tests. Frontend uses Playwright e2e for critical flows.
 
 Minimal startup verification commands:
 ```bash
-go test ./...
+go test -tags noui ./...    # Use -tags noui until ui/build/ exists
 bash scripts/check_all.sh
+node --version              # Must show v18+ (only for Slice 21 frontend work)
 ```
 
 If either command fails, restore the repo to a green baseline before starting a new ticket.
@@ -129,6 +131,24 @@ If either command fails, restore the repo to a green baseline before starting a 
   Do NOT ask the human for confirmation at any point during `S19-T1`. Diagnose, fix, test, rebuild, and rerun autonomously until all issues are resolved.
 - Review scope:
   all Slice 18 files — scenarios, mockway handlers/tables/tests, `scenario.schema.json`, `scenario.go`, `mappings.yaml`, `schema_filter.go`, prompt updates. Look for: missing error handling, incorrect API response shapes, missing cascade deletes, wrong status codes, schema validation gaps, edge cases in CRUD operations.
+
+### Slice 21 (Web UI) execution constraints
+- Goal:
+  Add `infrafactory ui` command serving SvelteKit frontend embedded via `go:embed`. 8 sub-slices (SUi-1..SUi-8).
+- Plan:
+  `docs/plans/web-ui-plan.md` — read Quick Reference, Prerequisites, your slice section, and Pitfalls before coding.
+- Build tag rule:
+  Until `ui/build/` exists (populated by `npm run build`), always use `-tags noui` for Go builds and tests. The `!noui` build (`embed.go`) requires `ui/build/` to exist — without it, `go build` fails with `pattern all:ui/build: no matching files found`.
+- Dev workflow:
+  Two terminals: (1) `go run -tags noui ./cmd/infrafactory ui --addr 127.0.0.1:4173` (API-only, non-API paths return 404 since assets=nil), (2) `cd ui && npm run dev` (Vite on :5173, proxies `/api` → `127.0.0.1:4173`).
+- Prerequisites:
+  Node.js 18+ and npm 9+ required for frontend work. Not needed for `go test -tags noui ./...`.
+- Test invariant:
+  `go test -tags noui ./...` must pass after every commit — this is the CI gate.
+- Single new Go dependency:
+  `github.com/coder/websocket` only. No external HTTP routers or logging frameworks.
+- Path safety:
+  All handlers serving files from disk must reject `..` segments. Test path traversal in every handler that reads from `cfg.Paths.*`.
 
 ### S17-T1 implementation reference (completed)
 - Activation contract:
