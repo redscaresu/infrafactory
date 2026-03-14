@@ -1,7 +1,7 @@
 # ADR-0003: Permanent Sandbox/Live Deploy Block
 
 ## Status
-Accepted
+Superseded by ADR-0010
 
 ## Context
 

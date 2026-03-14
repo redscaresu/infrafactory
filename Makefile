@@ -6,8 +6,21 @@ MOCKWAY_URL ?= http://127.0.0.1:8080
 MOCKWAY_IMAGE ?= ghcr.io/redscaresu/mockway
 MOCKWAY_CONTAINER ?= infrafactory-mockway
 MOCKWAY_BIN ?= mockway
+HOST_ARCH ?= $(shell uname -m)
 
-.PHONY: help deps-up deps-down deps-ps deps-logs deps-pull deps-recreate deps-clean test-unit test-all bench-check smoke-validate smoke-mockway smoke-mockway-manual smoke-mockway-local smoke check
+ifeq ($(HOST_ARCH),arm64)
+LINUX_GOARCH := arm64
+else ifeq ($(HOST_ARCH),aarch64)
+LINUX_GOARCH := arm64
+else ifeq ($(HOST_ARCH),x86_64)
+LINUX_GOARCH := amd64
+else
+LINUX_GOARCH := $(HOST_ARCH)
+endif
+
+.PHONY: help deps-up deps-down deps-ps deps-logs deps-pull deps-recreate deps-clean test-unit test-all \
+	bench-check smoke-validate smoke-mockway smoke-mockway-manual smoke-mockway-local smoke check \
+	ui-install ui-build ui-dev ui-clean ui-api-linux-build ui-stack-up ui-stack-logs ui-stack-down build
 
 help:
 	@echo "Targets:"
@@ -27,6 +40,14 @@ help:
 	@echo "  smoke-mockway-local   Run smoke test against local mockway binary."
 	@echo "  smoke           Run both real-tool smoke targets."
 	@echo "  check           Alias for test-all."
+	@echo "  ui-install      Install frontend dependencies."
+	@echo "  ui-dev          Run frontend dev server locally (:5173)."
+	@echo "  ui-build        Build frontend static assets."
+	@echo "  ui-clean        Remove frontend build/dependency artifacts."
+	@echo "  ui-api-linux-build  Build Linux UI binary for Docker dev stack."
+	@echo "  ui-stack-up     Start API + frontend dev stack in Docker Compose."
+	@echo "  ui-stack-logs   Tail API + frontend docker logs."
+	@echo "  ui-stack-down   Stop and remove API + frontend docker services."
 
 deps-up:
 	$(COMPOSE) up -d mockway
@@ -90,3 +111,34 @@ smoke-mockway-local:
 smoke: smoke-validate smoke-mockway
 
 check: test-all
+
+ui-install:
+	cd ui && npm install
+
+ui-build: ui-install
+	cd ui && npm run build
+	rm -rf cmd/infrafactory/ui/build
+	mkdir -p cmd/infrafactory/ui
+	cp -R ui/build cmd/infrafactory/ui/
+
+ui-dev:
+	cd ui && npm run dev -- --host 127.0.0.1 --port 5173
+
+ui-clean:
+	rm -rf ui/build ui/node_modules ui/.svelte-kit cmd/infrafactory/ui/build
+
+ui-api-linux-build:
+	CGO_ENABLED=0 GOOS=linux GOARCH=$(LINUX_GOARCH) $(GO) build -o bin/infrafactory-ui-linux-$(LINUX_GOARCH) ./cmd/infrafactory
+
+ui-stack-up: ui-build ui-api-linux-build
+	UI_API_BINARY=/workspace/bin/infrafactory-ui-linux-$(LINUX_GOARCH) $(COMPOSE) --profile ui up -d infrafactory-api infrafactory-ui
+
+ui-stack-logs:
+	$(COMPOSE) logs -f --tail=200 infrafactory-api infrafactory-ui
+
+ui-stack-down:
+	-$(COMPOSE) stop infrafactory-api infrafactory-ui
+	-$(COMPOSE) rm -f infrafactory-api infrafactory-ui
+
+build: ui-build
+	$(GO) build -o bin/infrafactory ./cmd/infrafactory

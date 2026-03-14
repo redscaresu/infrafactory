@@ -8,7 +8,7 @@ import (
 )
 
 func main() {
-	if err := cli.NewRootCmd().Execute(); err != nil {
+	if err := cli.NewRootCmd(cli.WithUIAssets(uiAssets)).Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(cli.ExitCodeForError(err))
 	}

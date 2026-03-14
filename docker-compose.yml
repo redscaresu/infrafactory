@@ -5,6 +5,37 @@ services:
     ports:
       - "8080:8080"   # Scaleway API mock
 
+  infrafactory-api:
+    image: debian:bookworm-slim
+    profiles: ["ui"]
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+    command:
+      - /bin/sh
+      - -lc
+      - |
+        "${UI_API_BINARY:-/workspace/bin/infrafactory-ui-linux-arm64}" ui --addr 0.0.0.0:4173
+    ports:
+      - "4173:4173"
+
+  infrafactory-ui:
+    image: node:24
+    profiles: ["ui"]
+    working_dir: /workspace/ui
+    volumes:
+      - .:/workspace
+      - infrafactory-ui-node-modules:/workspace/ui/node_modules
+    environment:
+      UI_API_PROXY_URL: http://infrafactory-api:4173
+    command: >
+      /bin/bash -lc
+      "npm install && npm run dev -- --host 0.0.0.0 --port 5173"
+    ports:
+      - "5173:5173"
+    depends_on:
+      - infrafactory-api
+
   # Future: add CXDB when continuous reconciliation is needed
   # cxdb:
   #   image: cxdb/cxdb:latest
@@ -13,3 +44,6 @@ services:
   #     - "9010:9010"
   #   volumes:
   #     - cxdb-data:/data
+
+volumes:
+  infrafactory-ui-node-modules:

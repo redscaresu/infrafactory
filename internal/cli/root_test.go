@@ -16,7 +16,7 @@ func TestNewRootCmdHasExpectedCommands(t *testing.T) {
 	t.Parallel()
 
 	root := NewRootCmd()
-	expected := []string{"init", "generate", "validate", "test", "run", "mock"}
+	expected := []string{"init", "generate", "validate", "test", "run", "mock", "ui"}
 
 	for _, name := range expected {
 		if _, _, err := root.Find([]string{name}); err != nil {
@@ -138,6 +138,7 @@ func TestConfigBackedCommandsReturnConfigLoadError(t *testing.T) {
 		{name: "test", args: []string{"test", filepath.Join("..", "..", "scenarios", "training", "web-app-paris.yaml")}},
 		{name: "run", args: []string{"run", filepath.Join("..", "..", "scenarios", "training", "web-app-paris.yaml")}},
 		{name: "mock start", args: []string{"mock", "start"}},
+		{name: "ui", args: []string{"ui"}},
 	}
 
 	for _, tc := range cases {

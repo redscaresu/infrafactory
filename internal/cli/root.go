@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 
@@ -14,7 +15,26 @@ var ErrNotImplemented = errors.New("not implemented")
 
 const defaultInitScenarioPath = "scenarios/training/example.yaml"
 
-func NewRootCmd() *cobra.Command {
+type RootOption func(*rootConfig)
+
+type rootConfig struct {
+	uiAssets fs.FS
+}
+
+func WithUIAssets(assets fs.FS) RootOption {
+	return func(cfg *rootConfig) {
+		cfg.uiAssets = assets
+	}
+}
+
+func NewRootCmd(opts ...RootOption) *cobra.Command {
+	cfg := &rootConfig{}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(cfg)
+		}
+	}
+
 	cmd := &cobra.Command{
 		Use:           "infrafactory",
 		Short:         "Scenario-driven infrastructure generation and validation for Scaleway",
@@ -35,6 +55,7 @@ func NewRootCmd() *cobra.Command {
 		newTestCmd(),
 		newRunCmd(),
 		newMockCmd(),
+		newUICmd(cfg.uiAssets),
 	)
 
 	return cmd

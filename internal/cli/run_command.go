@@ -15,6 +15,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+type runIDContextKey struct{}
+
 func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) error {
 	scenarioPath := args[0]
 
@@ -57,7 +59,10 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 	}
 
 	startedAt := time.Now().UTC()
-	runID := startedAt.Format("20060102T150405Z0700")
+	runID, _ := cmd.Context().Value(runIDContextKey{}).(string)
+	if runID == "" {
+		runID = startedAt.Format("20060102T150405Z0700")
+	}
 	store := runstore.NewFilesystemStore(resolveRunStoreRoot())
 	logPath := filepath.Join(resolveRunStoreRoot(), sc.Name, runID, "app.log")
 	closeRunLogSink, err := runtime.Logger.AddFileSink(logPath)
@@ -74,6 +79,15 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 		RunID:   runID,
 		Detail:  fmt.Sprintf("repair_iterations_max=%d", repairIterationsMax),
 	})
+	if err := store.WriteRunMetadata(runstore.RunMetadata{
+		Schema:    runstore.RunMetadataSchemaVersion,
+		Scenario:  sc.Name,
+		RunID:     runID,
+		Status:    "running",
+		StartedAt: startedAt,
+	}); err != nil {
+		return fmt.Errorf("write initial run metadata: %w", err)
+	}
 
 	allStages := make([]StageSummary, 0)
 	allFailures := make([]FailureSummary, 0)
@@ -97,7 +111,7 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 			Iteration: iteration,
 		})
 		completed = iteration
-		stages, failures := runIteration(cmd.Context(), runID, iteration, sc.Name, scenarioPath, cmd, runtime, store, captureLLMRaw, previousIterationFailures)
+		stages, failures := runIteration(cmd.Context(), runID, iteration, sc.Name, scenarioPath, runtime, store, captureLLMRaw, previousIterationFailures)
 		allStages = append(allStages, stages...)
 
 		if err := persistRunIteration(store, sc.Name, runID, iteration, stages, failures); err != nil {
@@ -207,11 +221,12 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 	}
 
 	if err := store.WriteRunMetadata(runstore.RunMetadata{
-		Schema:    runstore.RunMetadataSchemaVersion,
-		Scenario:  sc.Name,
-		RunID:     runID,
-		Status:    string(status),
-		StartedAt: startedAt,
+		Schema:         runstore.RunMetadataSchemaVersion,
+		Scenario:       sc.Name,
+		RunID:          runID,
+		Status:         string(status),
+		TerminalReason: terminalReason,
+		StartedAt:      startedAt,
 	}); err != nil {
 		return fmt.Errorf("write run metadata: %w", err)
 	}
@@ -311,7 +326,6 @@ func runIteration(
 	iteration int,
 	scenarioName string,
 	scenarioPath string,
-	cmd *cobra.Command,
 	runtime *CommandRuntime,
 	store *runstore.FilesystemStore,
 	captureLLMRaw bool,
@@ -351,6 +365,12 @@ func runIteration(
 			case "generate":
 				var generated *generator.GeneratedCode
 				_, generated, err = generateAndWriteFilesWithResult(ctx, runtime, scenarioPath, iteration, previousIterationFailures)
+				if err == nil {
+					err = store.WriteGeneratedFiles(scenarioName, runID, generated.Files)
+				}
+				if err == nil {
+					err = store.WriteIterationGeneratedFiles(scenarioName, runID, iteration, generated.Files)
+				}
 				if err == nil && captureLLMRaw {
 					err = persistLLMRawPhaseResponses(store, scenarioName, runID, iteration, generated.Metadata.Phases)
 				}

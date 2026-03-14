@@ -21,3 +21,9 @@ tfplan
 # Local review notes
 ISSUES.md
 issues.md
+
+# Web UI
+ui/node_modules/
+ui/build/
+ui/.svelte-kit/
+cmd/infrafactory/ui/build/

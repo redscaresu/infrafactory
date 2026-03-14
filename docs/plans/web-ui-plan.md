@@ -1,5 +1,7 @@
 # Plan: InfraFactory Web UI (Slice 21)
 
+Historical implementation plan. Slice 21 is shipped; when this plan disagrees with the current code, prefer `SESSION_START.md`, `README.md`, `CONCEPT.md`, and `STATUS.md`.
+
 ## Quick Reference
 
 | Key | Value |
@@ -11,7 +13,7 @@
 | Embed | `go:embed` with `noui` build tag fallback |
 | Auth | None (localhost-only by default) |
 | Default addr | `127.0.0.1:4173` |
-| Plan status | Approved, not started |
+| Plan status | Historical reference for shipped work |
 
 ## Prerequisites
 
@@ -97,7 +99,7 @@ The `ui` command is **always registered** regardless of build tag. When `uiAsset
 | `go test -tags noui ./...` | Every commit (CI gate) | Go only |
 | `go test ./...` | After `npm run build` populates `ui/build/` | Go + Node.js |
 | `cd ui && npm run build` | After any frontend change | Node.js |
-| `cd ui && npx playwright test` | After Playwright-tested slices | Node.js + browsers |
+| `cd ui && npm test` | Current frontend regression gate | Node.js |
 
 ---
 
@@ -113,6 +115,8 @@ The `ui` command is **always registered** regardless of build tag. When `uiAsset
 8. **Run result display**: Green/red/yellow banner with terminal reason + expandable failure detail cards.
 9. **Live page scope**: Auto-shows the active run (only one at a time via mutex). If no run active, shows "No active run" with prompt.
 10. **Run list detail**: Shows terminal_reason column (target_reached / repair_budget_exhausted / stuck) alongside status badge.
+11. **Live page source of truth**: `run.json` is written at run start with `status: running`; if websocket logs are absent, the UI falls back to synthesized console lines from polled run metadata and iteration artifacts.
+12. **Dev websocket path**: Vite proxies HTTP `/api`, but websocket logs connect directly to backend `/api/ws` in dev to avoid proxy `ECONNRESET` churn.
 
 ---
 
@@ -268,9 +272,12 @@ ui/
 | GET | `/api/runs/{scenario}` | `{runs: [{run_id, status, terminal_reason, started_at}]}` | 200 |
 | GET | `/api/runs/{scenario}/{runID}` | `RunMetadata` | 200, 404 |
 | GET | `/api/runs/{scenario}/{runID}/iterations/{n}` | Iteration JSON (stages, failures) | 200, 404 |
+| GET | `/api/runs/{scenario}/{runID}/files` | `{files: ["main.tf", ...]}` | 200, 404 |
+| GET | `/api/runs/{scenario}/{runID}/files/{path...}` | Raw file content (`text/plain`) | 200, 404, 403 |
 | GET | `/api/output/{scenario}` | `{files: ["main.tf", "providers.tf", ...]}` | 200, 404 |
 | GET | `/api/output/{scenario}/{file...}` | Raw file content (`text/plain`) | 200, 404 |
 | GET | `/api/config` | Config JSON (credentials redacted) | 200 |
+| GET | `/api/diagnostics` | `{agent_type, ready, summary, checks, limitations}` | 200 |
 | POST | `/api/runs/{scenario}/start` | `{run_id: "..."}` | 202, 409 (already running) |
 | GET | `/api/ws` | WebSocket upgrade | 101 |
 

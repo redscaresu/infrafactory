@@ -9,7 +9,7 @@ agent:
     - generate_hcl
     - self_review
   claude:
-    command: claude          # command used for claude-code transport
+    command: /opt/homebrew/bin/claude  # absolute command used for claude-code transport
     phase_timeout_seconds: 300  # hard timeout per claude phase call
   openrouter:
     model: ""                # required when type=openrouter

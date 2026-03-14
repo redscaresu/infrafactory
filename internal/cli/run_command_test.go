@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/redscaresu/infrafactory/internal/config"
 	"github.com/redscaresu/infrafactory/internal/generator"
@@ -107,6 +108,79 @@ func TestRunCommandConvergesOnFirstIteration(t *testing.T) {
 	}
 	if !strings.Contains(string(appLog), `"event":"stage_start"`) {
 		t.Fatalf("expected stage_start log entry, got:\n%s", string(appLog))
+	}
+
+	generatedPath := filepath.Join(runstoreRoot, "example-scenario", runs[0].RunID, "generated", "main.tf")
+	generatedPayload, err := os.ReadFile(generatedPath)
+	if err != nil {
+		t.Fatalf("read generated run file: %v", err)
+	}
+	if !strings.Contains(string(generatedPayload), "terraform {}") {
+		t.Fatalf("unexpected generated run file: %s", string(generatedPayload))
+	}
+
+	iterationGeneratedPath := filepath.Join(runstoreRoot, "example-scenario", runs[0].RunID, "iterations", "1", "generated", "main.tf")
+	iterationGeneratedPayload, err := os.ReadFile(iterationGeneratedPath)
+	if err != nil {
+		t.Fatalf("read iteration generated run file: %v", err)
+	}
+	if !strings.Contains(string(iterationGeneratedPayload), "terraform {}") {
+		t.Fatalf("unexpected iteration generated run file: %s", string(iterationGeneratedPayload))
+	}
+}
+
+func TestRunCommandPersistsRunningMetadataBeforeCompletion(t *testing.T) {
+	h := newCommandTestHarness(t)
+	runstoreRoot := filepath.Join(h.WorkspaceDir, ".infrafactory", "runs")
+	t.Setenv("INFRAFACTORY_RUNSTORE_ROOT", runstoreRoot)
+
+	block := make(chan struct{})
+	opts := runtimeOptions{
+		configLoader:   config.Load,
+		scenarioLoader: defaultScenarioLoader,
+		deps: RuntimeDependencies{
+			Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
+				<-block
+				return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte("terraform {}\n")}}, nil
+			}),
+			Static:     &fakeStaticHarness{result: &harness.StaticResult{Stages: []harness.StageResult{{Stage: "init"}, {Stage: "validate"}, {Stage: "plan"}, {Stage: "show"}}, PlanJSON: []byte(`{"planned_values":{"root_module":{}}}`)}},
+			MockDeploy: &fakeMockDeployHarness{result: &harness.MockDeployResult{Apply: harness.StageResult{Stage: "apply"}, StateSnapshot: []byte(`{}`)}},
+			Destroy:    &fakeDestroyHarness{result: &harness.DestroyResult{Destroy: harness.StageResult{Stage: "destroy"}, OrphanCount: 0}},
+		},
+	}
+
+	cmd := newRunCommandForTest(opts)
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{h.ScenarioPath, "--config", h.ConfigPath})
+
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.Execute()
+	}()
+
+	store := runstore.NewFilesystemStore(runstoreRoot)
+	var runningMeta runstore.RunMetadata
+	found := false
+	for i := 0; i < 100; i++ {
+		runs, err := store.ListRuns("example-scenario")
+		if err == nil && len(runs) == 1 {
+			runningMeta = runs[0]
+			found = true
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !found {
+		t.Fatal("expected running metadata to be persisted before completion")
+	}
+	if runningMeta.Status != "running" {
+		t.Fatalf("expected running status before completion, got %+v", runningMeta)
+	}
+
+	close(block)
+	if err := <-done; err != nil {
+		t.Fatalf("execute run command: %v", err)
 	}
 }
 

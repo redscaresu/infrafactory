@@ -1,4 +1,4 @@
-// Package runstore persists run metadata and per-iteration artifacts under the
-// InfraFactory run history directory.
+// Package runstore persists run metadata, per-iteration artifacts, and
+// immutable run-scoped generated IaC snapshots under the InfraFactory run
+// history directory.
 package runstore
-

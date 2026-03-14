@@ -239,7 +239,7 @@ Feature status snapshot:
 | `test` mock deploy + destroy | implemented | Runs mock reset/apply/state checks and destruction verification flow. |
 | `run` orchestration | implemented | Criteria-aware convergence and criteria-only holdout completion checks are wired. |
 | `mock` command lifecycle | implemented | `mock start`/`stop`/`status`/`logs` are wired with deterministic output/error behavior. |
-| sandbox/live deploy | permanently blocked | Governed as a permanent non-goal (ADR-0003). |
+| sandbox/live deploy | planned (Layer 3) | Optional real Scaleway deploy gated by Layer 2 (ADR-0010, supersedes ADR-0003). |
 
 Completed slices:
 - Slices 1-17: core pipeline, CLI orchestration, generator transports, feedback-driven regeneration, logging, adaptive retry, issue remediation, and end-to-end pipeline stabilization.
@@ -247,19 +247,72 @@ Completed slices:
 - Slice 19 (`S19-T1`): reliability review of all Slice 18 code — fixed referential integrity (delete returns 409 when dependents exist), LB/Frontend/Backend update persistence, IAM defaults, RDB certificate checks, and cross-LB data leaks.
 - Slice 20 (`S20-T1`..`S20-T6`): scenario combination expansion — 6 new training scenarios exercising untested parameter combinations: MySQL engine + HA, large/xlarge compute sizes, multi-backend LB with TCP, private LB exposure, K8s/Redis/database overrides, public registry, selective IAM flags. Added prompt pitfalls for LB zone arguments, compute type mapping, and `assign_flexible_ipv6` conflicts. Expanded mockway server type catalog (GP1-L, GP1-XL, DEV1-L).
 - All 12 training scenarios pass `infrafactory run` on first iteration.
-- Remaining non-completed backlog lane remains `S9-T8` and is intentionally blocked by governance (ADR-0003).
+- `S9-T8` (sandbox/live deploy) is unblocked by ADR-0010 and planned for Slices 26-29.
+
+### Web UI Runtime Notes
+
+- `infrafactory ui` serves the embedded frontend in normal builds and API-only mode under `-tags noui`.
+- Run history lives under `/runs`; per-run IaC history lives under `/runs/<scenario>/<run_id>`.
+- Each run should write `run.json` immediately with `status: running` so the Live page can poll active state before terminal completion.
+- Live logs use two sources:
+  - primary: websocket stream at `/api/ws`
+  - replay: per-run `app.log` from `GET /api/runs/{scenario}/{run_id}/log`
+  - final fallback: synthesized console lines from polled run metadata and iteration artifacts when neither websocket frames nor log replay are available
+- In Vite dev mode (`http://127.0.0.1:5173`), HTTP `/api` calls still proxy through Vite, but websocket logs connect directly to the backend origin (`ws://127.0.0.1:4173/api/ws` by default). Override with `VITE_UI_API_ORIGIN` if the backend runs on a different host/port.
+- The backend explicitly allows local dev websocket origins (`127.0.0.1:*`, `localhost:*`) so this cross-origin browser connection succeeds in development.
+- The backend websocket connection is long-lived after upgrade; it is no longer tied to the short-lived HTTP request context.
+- When `agent.type=claude-code`, the UI run path resolves `agent.claude.command` once during preflight and uses that absolute binary path for the async run. This avoids “works in shell, not in UI run” drift caused by later `PATH` differences.
+- The repo config currently pins `agent.claude.command` to `/opt/homebrew/bin/claude` on this machine to remove shell/PATH ambiguity during local UI runs.
+- Run history tolerates incomplete historical run directories that do not contain `run.json`; they are skipped rather than breaking `/runs`.
+
+### Web UI Dev Workflow
+
+Terminal 1:
+```bash
+go run -tags noui ./cmd/infrafactory ui --addr 127.0.0.1:4173
+```
+
+Terminal 2:
+```bash
+cd ui
+npm install
+npm run dev
+```
+
+Open:
+- UI dev server: `http://127.0.0.1:5173`
+- Backend/API: `http://127.0.0.1:4173`
+
+If the backend is not on `:4173`:
+```bash
+cd ui
+VITE_UI_API_ORIGIN=http://127.0.0.1:4180 npm run dev
+```
+
+Required checks after Web UI changes:
+```bash
+go test -tags noui ./...
+cd ui && npm test && npm run build
+bash scripts/check_all.sh
+```
+
+If websocket log streaming still appears idle after a code change, restart both processes:
+```bash
+go run -tags noui ./cmd/infrafactory ui --addr 127.0.0.1:4173
+cd ui && npm run dev
+```
 
 Notes on current runtime prerequisites:
 - `generate` and `run` resolve a concrete transport-backed `SeedGenerator` from runtime (`internal/cli/runtime.go`) when no test/injected generator is provided.
 - Runtime wiring path: `buildRuntime(...)` selects `NewClaudeSeedGenerator(...)` for `agent.type=claude-code` and `NewOpenRouterSeedGenerator(...)` for `agent.type=openrouter`.
 - `openrouter` runtime path requires `OPENROUTER_API_KEY` at execution time; missing key surfaces deterministic `dependency_unavailable` failure output.
 - `validate`/`test`/`run` expect generated OpenTofu files and tool/runtime dependencies (`tofu`, Mockway, and Docker for `mock` lifecycle commands).
-- Sandbox/live deploy layer (real Scaleway) is permanently disabled by governance policy (see `docs/decisions/0003-permanent-sandbox-live-deploy-block.md`).
+- Sandbox/live deploy layer (Layer 3, real Scaleway) is planned but not yet implemented (see `docs/decisions/0010-layer3-real-scaleway-deploy.md`). Layer 2 (mockway) gates Layer 3.
 
-### Deferred and Non-Goals
+### Deferred and Planned
 
-The following are known non-goals and are intentionally not complete:
-- Sandbox/live deploy (real Scaleway) is permanently blocked and out-of-scope under ADR-0003.
+The following are planned but not yet implemented:
+- Layer 3 real Scaleway deploy (ADR-0010, Slices 26-29) — optional, gated by Layer 2 mock validation passing first.
 
 Criteria support status:
 - `connectivity`: verified by structural topology checks against mock state (e.g. "compute has a private NIC on the same private network as the database"). Does not test real network reachability — no live environment exists.
@@ -312,9 +365,61 @@ go test ./...
 go run ./cmd/infrafactory --help
 ```
 
+## Web UI
+
+Serve the dashboard:
+
+```bash
+infrafactory ui --addr 127.0.0.1:4173
+```
+
+Build and run the single-binary UI bundle:
+
+```bash
+make build
+./bin/infrafactory ui
+```
+
+Two-terminal development workflow:
+
+```bash
+# Terminal 1 (Go API server, no embedded assets required)
+go run -tags noui ./cmd/infrafactory ui --addr 127.0.0.1:4173
+
+# Terminal 2 (frontend dev server)
+make ui-install
+make ui-dev
+```
+
+Docker Compose dev workflow (single command stack):
+
+```bash
+make ui-stack-up
+make ui-stack-logs
+# stop when done
+make ui-stack-down
+```
+
+Notes:
+- Frontend dev proxy target is configurable via `UI_API_PROXY_URL` (default `http://127.0.0.1:4173`).
+- `make ui-build` runs frontend build and syncs embedded assets into `cmd/infrafactory/ui/build` for Go `!noui` builds (`make build`).
+- `make ui-stack-up` also builds a Linux backend binary for your host architecture and mounts it into the API container.
+
 Important:
 - For `agent.type=claude-code`, ensure `agent.claude.command` is installed and available in `PATH` (default: `claude`).
 - For `agent.type=openrouter`, set `OPENROUTER_API_KEY` and configure `agent.openrouter.model`.
+
+Useful UI routes:
+- `/runs` shows global run history ordered by newest run first with filter controls.
+- `/runs/<scenario>/<run-id>` shows the per-run IaC viewer with per-iteration snapshot selection, diff view, richer syntax-highlighted code preview, and download actions.
+- `/live?scenario=<scenario>&run_id=<run-id>` shows live/log state for a specific run.
+- `/diagnostics` shows backend generator readiness checks (`claude-code` or `openrouter`).
+
+Per-run IaC history:
+- `output/<scenario>/` remains the mutable latest working output for a scenario.
+- `.infrafactory/runs/<scenario>/<run-id>/generated/` is the immutable IaC snapshot for that specific run.
+- `.infrafactory/runs/<scenario>/<run-id>/iterations/<n>/generated/` stores iteration-scoped IaC snapshots inside the run.
+- The UI run detail page reads both the final run-scoped snapshot and iteration-scoped snapshots, supports diffing between snapshots, and later runs do not overwrite historical IaC views.
 
 ## Happy Path (Claude Code)
 
@@ -353,6 +458,7 @@ INFRAFACTORY_CAPTURE_LLM_RAW=1 go run ./cmd/infrafactory run scenarios/training/
 5. Confirm artifacts:
 - generated Terraform: `output/web-app-paris/`
 - run artifacts: `.infrafactory/runs/web-app-paris/<run-id>/`
+- run-scoped IaC history: `.infrafactory/runs/web-app-paris/<run-id>/generated/`
 
 6. Cleanup:
 ```bash
@@ -388,8 +494,13 @@ go run ./cmd/infrafactory run scenarios/training/new-scenario.yaml --config infr
 Expected artifacts:
 - `run.json` with run metadata/status and schema field (`infrafactory.run.metadata.v1`).
 - `iterations/<n>/iteration.json` with stage/failure snapshots, deterministic `failure_summary` (when failures exist), and schema field (`infrafactory.run.iteration.v1`).
+- `iterations/<n>/generated/` with immutable IaC snapshots for that specific iteration.
 - `app.log` run-scoped structured application logs (`stderr` mirror + file sink for `run`).
-- generated OpenTofu output under `output/<scenario>/`.
+- generated OpenTofu output under `output/<scenario>/` (latest mutable scenario output).
+- generated OpenTofu history under `.infrafactory/runs/<scenario>/<run-id>/generated/` (immutable per-run snapshot used by the UI IaC viewer).
+- downloadable UI archives:
+  - `/api/runs/<scenario>/<run-id>/bundle.zip` for IaC-only history
+  - `/api/runs/<scenario>/<run-id>/artifacts.zip` for the full run artifact directory
 - optional LLM diagnostic artifacts when `INFRAFACTORY_CAPTURE_LLM_RAW=1`:
   - `iterations/<n>/llm_raw_<phase>.json` (raw model response per phase)
   - `iterations/<n>/llm_prompt_<phase>.json` (redacted/truncated prompt sent to model per phase)
@@ -502,7 +613,7 @@ Error contract:
 | `agent.openrouter.max_retries` | no | `2` | OpenRouter retry count for transient failures. |
 | `mockway.url` | yes | none | Mockway base URL used by deploy/destroy layers. |
 | `mockway.auto_reset` | no | `true` | Whether mock reset is expected before deploy checks. |
-| `validation.layers.*.enabled` | no | varies | Enables/disables layer execution paths (`sandbox_deploy` remains permanently blocked by governance). |
+| `validation.layers.*.enabled` | no | varies | Enables/disables layer execution paths. `sandbox_deploy` defaults to `false`; set to `true` for Layer 3 real Scaleway deploy (ADR-0010). |
 | `paths.output` | no | `./output` | Generated IaC output root. |
 | `paths.policies` | no | `./policies` | Policy root used by harness validation. |
 
@@ -533,7 +644,7 @@ Holdout-only routing fields:
 - `references: <training-scenario-path>`
 
 Current auto-pass criteria:
-- `dns_resolution` is sandbox/live-only and currently auto-passes with explicit informational output while sandbox deploy remains permanently blocked.
+- `dns_resolution` is Layer 3 only and currently auto-passes with informational output until Layer 3 real Scaleway deploy is implemented (Slice 27).
 
 ### Training Scenarios
 

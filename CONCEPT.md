@@ -40,7 +40,7 @@ Rule: if a change alters architecture, interfaces, or long-term workflow, create
 | Mock generation | Codegen-first (`oapi-codegen`) with hand-written fallback | Scaleway specs include custom `x-one-of`; pre-process to standard `oneOf` and use codegen when viable, otherwise hand-write types/routes from spec references. |
 | Mock HTTP router | chi | Lightweight, stdlib-compatible, path-parameter routing. No framework lock-in. |
 | Mock testing | Unit + integration in Mockway repo | Unit: SQLite store, FK validation, handler logic. Integration: HTTP tests against running server (create/read/delete/list, FK rejection). |
-| Mock state model | SQLite with FK constraints + referential integrity | On create: validate referenced resources exist (404 if not). On delete: reject if dependents exist (409). Exceptions: server delete detaches IPs (`SET NULL`) and cascades NICs; LB delete cascades private network attachments (provider expects API to handle PN detachment). Matches real Scaleway API behaviour. |
+| Mock state model | SQLite with FK constraints + referential integrity | On create: validate referenced resources exist (404 if not). On delete: reject if dependents exist (409). Exceptions: server delete detaches IPs (`SET NULL`) and cascades NICs; LB delete cascades private network attachments (provider expects API to handle PN detachment). See *Mock fidelity limitations* below. |
 | Mock admin API | Structured state schema, versioned contract | `GET /mock/state` returns full resource graph with relationships preserved. This schema is the interface between Mockway and InfraFactory. |
 | Topology evaluation | Harness-side, not Mockway | Mockway stores resources + relationships. The harness's TopologyEvaluator queries mock state and reasons about connectivity as graph queries. Clean separation: Mockway = realistic API mock, harness = domain logic. |
 | S3 mock | Deferred to Mockway v2 | Object Storage uses S3-compatible API (different auth). Separate port, Azurite-inspired. |
@@ -53,6 +53,9 @@ Rule: if a change alters architecture, interfaces, or long-term workflow, create
 | Scenario schema | Hand-written JSON Schema (`scenario.schema.json`) | Validates at parse time in Go loader. Enables VS Code autocompletion. Best error messages since it's crafted, not generated. |
 | Stuck detection | Subset check on failure signatures | Compare (check name, resource) pairs between iterations. If N's failures are a subset of N-1 (nothing resolved), agent is stuck — bail out. |
 | Run store | Flat files for v1, CXDB-ready interface | RunStore interface in Go (`internal/runstore/`). v1: filesystem. Future: CXDB for continuous reconciliation. |
+| Web UI live-state source | Poll-first correctness, websocket best-effort streaming | `run.json` must exist with `status: running` early in a run so the UI can always recover active state. Websocket logs improve immediacy but are not the only source of truth. |
+| Web UI live-log source | Replay-first with live append | `/live` replays persisted `app.log` for the run and appends websocket frames when available, so operators still see concrete run logs even if the browser missed the live stream start. |
+| Web UI claude execution path | Resolve once, execute absolute path | The `ui` command preflight resolves `agent.claude.command` to an absolute binary path and injects that into the async run runtime so UI-triggered runs do not depend on a later `PATH` lookup. |
 | Maintenance model | Model B target (continuous reconciliation) | v1: re-run factory (Model A). Architecture designed for Model B: state tracking, drift detection, self-healing. |
 | LLM-as-Judge | Deferred (not in v1) | Avoids API costs. Layers 1-4 catch concrete failures. Judge is nice-to-have. |
 | Prompt storage | Markdown files with Go template interpolation | `prompts/` directory. Easy to iterate without recompiling. |
@@ -67,25 +70,38 @@ Rule: if a change alters architecture, interfaces, or long-term workflow, create
 | Validation chaining | Fail-fast with skip | Stop if hard dependency fails; run independent checks in parallel within a layer. |
 | Holdout scenarios | Criteria-only: block, no feedback. Full: normal run. | Criteria-only holdouts are adversarial checks — agent doesn't see failures, prevents gaming. Full holdouts are independent scenarios with stricter criteria — they get the normal feedback loop via `infrafactory run`. |
 | Cost checks | Deferred to post-v1 | No reliable Scaleway pricing data source. Remove `cost` acceptance criteria from v1. Add when Infracost supports Scaleway or when price table approach is needed. |
-| Sandbox/live deploy (Layer 3) | Deferred and blocked for current slices | Running real Scaleway sandbox applies incurs cloud cost and credentials governance overhead. Keep disabled until explicit policy approval and budget guardrails are in place. |
+| Sandbox/live deploy (Layer 3) | Enabled, after Layer 2 pre-check (supersedes ADR-0003 via ADR-0010) | Layer 3 runs `tofu apply` against real Scaleway after Layer 2 (mockway) passes. Credentials via `SCW_ACCESS_KEY`/`SCW_SECRET_KEY` env vars. Project bootstrapped as part of the HCL. Destroy behavior: `--no-destroy` always keeps resources; without it, auto-destroy on failure, destroy-after-verification on success. See ADR-0010. |
+| Layer 3 validation order | Layer 2 (mockway) gates Layer 3 (real Scaleway) | Fail fast: structural errors caught in seconds against mock before spending real API calls. Layer 3 only runs if Layers 1+2 pass. Layer 3 failures feed back into the iteration loop (which re-runs Layer 2 first). |
+| Layer 3 destroy behavior | `--no-destroy` overrides all destruction | `--no-destroy`: keep real resources regardless of run outcome (convergence or failure). No `--no-destroy` + converges: `tofu destroy` after verification. No `--no-destroy` + fails: auto-destroy (clean up failed resources). Development environments assumed non-live. |
 | CLI scenario arg | File path, not name | `infrafactory run scenarios/training/web-app-paris.yaml` — explicit, no ambiguity, tab-completable. |
 | CLI init | Minimal scaffold | Creates skeleton YAML with required fields + comments. Prints "next steps" suggesting commands to run. No interactive wizard for v1. |
 | Holdout formats | Both criteria-only and full scenario | Criteria-only: references training scenario, adds adversarial acceptance criteria against same generated code. Full: independent scenario with stricter criteria. |
 | Provider URL injection | `SCW_API_URL` env var | Harness sets `SCW_API_URL=http://localhost:8080` before any `tofu` command. Agent generates normal provider blocks. Zero coupling. |
-| Iteration state | Clean slate each iteration | At iteration start (before Layer 1): `tofu destroy` (if state exists, uses old .tf files) → `mockway reset` → delete `.tfstate` (keep `.terraform/providers/` cached) → write new files → `tofu init`. Must precede `tofu plan` which needs init + clean state. |
+| Iteration state | Clean slate (clean mode) or snapshot/restore (incremental mode) | **Clean mode** (default when no prior state): `mockway reset` → delete `.tfstate` → write new files → `tofu init`. **Incremental mode** (auto-detected when prior state exists): `mockway restore` (to run-start baseline) → write new files → `tofu init`. See *Incremental Deployment Model* section. |
 | Generator interface | Returns files, doesn't write them | `SeedGenerator.Generate()` returns `GeneratedCode` with `map[string][]byte`. ClaudeCodeGenerator: captures stdout from `claude -p`, parses `# File:` blocks. OpenRouterGenerator: parses API response. Harness writes files. Uniform, testable. |
 | Mock start command | Docker wrapper | `infrafactory mock start` runs `docker run ghcr.io/redscaresu/mockway`. Consistent with docker-compose workflow. |
-| Output on re-run | Overwrite | Wipe `output/{scenario}/` and start fresh. Run store keeps iteration history separately. `.tf` files are always the latest. |
+| Output on re-run | Overwrite `.tf` files, preserve state | Regenerate `.tf` files in `output/{scenario}/` each run. In incremental mode, preserve `.tfstate` and `.terraform/` (only delete `.tf` files before writing new ones). In clean mode, wipe entire `output/{scenario}/`. Run store keeps iteration history separately. |
 | Regression scenarios | Promoted training scenarios | Once a training scenario converges reliably, promote to `scenarios/regression/`. CI runs all regression scenarios on every change (prompt updates, policy changes). |
 | Holdout discovery | Scan `scenarios/holdout/` for criteria-only | After convergence, scan holdout dir for criteria-only holdouts whose `references:` matches the training path. Full holdouts are explicit only (see below). |
 | Mock credentials | Fake env vars for provider init | Harness sets dummy `SCW_ACCESS_KEY`, `SCW_SECRET_KEY`, `SCW_DEFAULT_PROJECT_ID`. Mockway accepts any token. |
 | OPA in Layer 2 | `deny_state` runs after TopologyEvaluator | Layer 2 flow: `tofu apply` → TopologyEvaluator (connectivity) → OPA `deny_state` (policy against mock state). Sequential. |
 | Output dir naming | From YAML `scenario:` field | `scenario: web-app-paris` → `output/web-app-paris/`. Canonical, independent of filename. |
 | Full holdout trigger | Explicit only | Full holdouts run via `infrafactory run scenarios/holdout/file.yaml`. Only criteria-only holdouts auto-discover after training convergence. |
-| Run store location | `.infrafactory/runs/` | Separate from output dir. `output/{scenario}/` is purely .tf files (overwritten). `.infrafactory/runs/{scenario}/{run-id}/` keeps iteration history. |
+| Run store location | `.infrafactory/runs/` | Separate from output dir. `output/{scenario}/` is purely latest mutable .tf output (overwritten). `.infrafactory/runs/{scenario}/{run-id}/` keeps iteration history and immutable generated IaC snapshots under `generated/`. |
+| Run history enumeration | Skip incomplete run dirs | Historical/partial run directories without `run.json` are tolerated and excluded from `/api/runs` instead of failing the whole history view. |
+| Web UI dev websocket path | Direct backend websocket origin, not Vite proxy | In dev, HTTP `/api` still proxies via Vite, but the browser connects directly to backend `/api/ws` (`:4173` by default, overridable with `VITE_UI_API_ORIGIN`) to avoid proxy-reset churn. |
+| Web UI websocket origin policy | Explicit localhost allowlist | Because dev UI runs cross-origin (`:5173` → `:4173`), `/api/ws` must allow local browser origins (`127.0.0.1:*`, `localhost:*`) while remaining localhost-scoped by default. |
 | Policy `target` field | Passed to OPA as input | Harness passes `target` to OPA input. Policies can optionally filter by target resource type. Without target, checks all resources. |
 | Data sources | Prompt constraint: avoid | Prompts tell agent not to use `data` blocks — use hardcoded IDs from mappings. If agent uses them anyway, `tofu plan` fails and feedback loop corrects it. |
 | Max iterations | Configurable, default 5 | Most scenarios converge in 2-3. If not by 5, needs human attention. |
+| Incremental deployment model | Single evolving scenario, regenerate all HCL | Scenario YAML grows as the project grows (add database block, add redis block). Factory regenerates all HCL each run; OpenTofu diffs against existing state and only creates/modifies what changed. Mirrors real IaC workflow. |
+| Incremental mock state | Persist mockway state between runs (requires `--no-destroy`) | When using `--no-destroy`, mockway keeps its state between runs — resources from the previous apply persist, just like a real cloud account. Without `--no-destroy`, Layer 4 destruction wipes everything. `--clean` forces full reset regardless. |
+| Incremental detection | Auto-detect from existing state | If mockway has resources, `.tfstate` exists in output dir, and a previous successful run exists in run store → incremental. If any is missing → clean. `--clean` flag overrides to force fresh start. |
+| Feedback iteration baseline | Snapshot/restore mockway state per run | At run start, snapshot mockway's current state as baseline. Between feedback iterations within a run, restore to this baseline (not full reset). Tests incremental changes against realistic pre-existing infrastructure. |
+| Incremental failure handling | Treat all failures equally | No distinction between regressions (broke something existing) and new failures (new resource misconfigured). LLM regenerates all HCL, feedback loop catches everything. Simpler, avoids dual code paths. |
+| Incremental state scope | Single-scenario workflow, shared mockway instance | Incremental runs assume one scenario at a time against one mockway instance. Running different scenarios concurrently against the same mockway is not supported. Users work on one project/scenario at a time — consistent with the single evolving scenario model. |
+| Incremental destruction control | `--no-destroy` flag to preserve state | Default: Layer 4 runs `tofu destroy` after convergence (existing behavior). `--no-destroy`: skip Layer 4, preserve mockway state and `.tfstate` so the next run can auto-detect incremental. Without `--no-destroy`, destruction wipes everything and the next run starts clean. Iterative development requires `--no-destroy` to build infrastructure incrementally across runs. |
+| Incremental UI | Run flags on scenario page, mode badge + baseline + plan diff on Live page | Scenario page gets `--no-destroy` and `--clean` toggles plus auto-detected mode indicator. Live page shows run mode badge, collapsible baseline state panel, and raw `tofu plan` diff panel. Keeps incremental context visible without adding new pages. |
 
 ---
 
@@ -155,9 +171,10 @@ Rule: if a change alters architecture, interfaces, or long-term workflow, create
 │    TopologyEvaluator (connectivity graph queries)│
 │    OPA deny_state (policy against mock state)    │
 │                                                  │
-│  Layer 3: Sandbox Deploy (NOT IN V1 — stub only) │
-│    tofu apply → real Scaleway sandbox project    │
+│  Layer 3: Real Scaleway Deploy (after Layer 2)    │
+│    tofu apply → real Scaleway project            │
 │    Real network probes: connectivity, DNS        │
+│    Only runs if Layers 1+2 pass                  │
 │                                                  │
 │  Layer 4: Destruction Verification               │
 │    tofu destroy + mock state empty check         │
@@ -181,6 +198,532 @@ Rule: if a change alters architecture, interfaces, or long-term workflow, create
 │  Human decides: add constraint / update policy   │
 └─────────────────────────────────────────────────┘
 ```
+
+---
+
+## Mock Fidelity Limitations
+
+Mockway's referential integrity model (FK constraints, 404 on missing references, 409 on dependent deletes) was derived from the **Terraform/OpenTofu provider's behavior**, not from testing against Scaleway's real API. This means the mock is accurate to what the provider expects, but may diverge from what Scaleway actually does.
+
+### Known divergence risks
+
+1. **Provider-side cascades invisible to the mock** — the Scaleway provider may delete dependents (e.g., frontends) before calling the LB delete endpoint. Mockway enforces the 409 correctly, but this code path may never execute in practice because the provider handles it first. The mock is stricter than what the provider actually encounters.
+
+2. **Real API cascades the mock doesn't model** — Scaleway's API may silently cascade-delete resources that mockway rejects with 409. If a real `DELETE /lbs/{id}` auto-deletes frontends but mockway returns 409, the provider would work against real Scaleway but fail against the mock. The mock is stricter than the real API.
+
+3. **Implicit cross-service dependencies** — resources that share relationships outside the FK model (e.g., security group rules referencing other groups, DNS records pointing to LB IPs, or IAM policies scoped to specific resources) may produce 409s on the real API that mockway allows through. The mock is more permissive than the real API.
+
+4. **Eventual consistency** — Scaleway resources may have transient states (e.g., K8s cluster `provisioning`, RDB instance `configuring`) where operations are rejected. Mockway transitions resources to their final state immediately. The mock is simpler than the real API.
+
+### What this means in practice
+
+Mockway validates **structural correctness**: the generated HCL creates resources in the right order, with valid references, and tears down cleanly. It does not validate **behavioral correctness**: whether the real API accepts the exact sequence of operations the provider sends.
+
+Layer 3 (real Scaleway deploy, planned in Slices 26-29 per ADR-0010) is the only way to close this gap. Until Layer 3 is implemented, the mock is a best-effort approximation — sufficient for catching the majority of IaC defects (wrong resource types, missing dependencies, invalid configurations) but not a guarantee of real-world success.
+
+---
+
+## Incremental Deployment Model
+
+Infrastructure grows organically. A project starts with a web server, adds a database weeks later, then Redis months after that. The factory must support this iterative development pattern, not just single-shot generation.
+
+### How it works
+
+The user evolves a single scenario YAML over time:
+
+```
+Week 1: scenario has compute + networking
+        → infrafactory run --no-destroy scenarios/training/my-project.yaml
+        → factory generates HCL → tofu apply creates web server + VPC
+        → --no-destroy skips Layer 4, state persists
+
+Week 3: user adds database: block to same scenario
+        → infrafactory run --no-destroy scenarios/training/my-project.yaml
+        → auto-detects incremental (mockway has state, .tfstate exists)
+        → factory regenerates ALL HCL → tofu plan sees existing web server
+        → tofu apply only creates the database
+
+Week 6: user adds redis: block
+        → same pattern — factory regenerates everything, tofu diffs
+
+Final:  user wants to verify full teardown
+        → infrafactory run scenarios/training/my-project.yaml  (no --no-destroy)
+        → Layer 4 destroys everything, verifies clean teardown
+```
+
+The factory is stateless — it always regenerates the complete HCL from the full scenario. OpenTofu handles the incremental diff via its state file. This mirrors how real infrastructure-as-code works.
+
+### Mock state persistence
+
+For the mock validation to be realistic, mockway must reflect the real deployment state:
+
+1. **Between runs**: when using `--no-destroy`, mockway keeps its state. Resources from the previous `tofu apply` persist, just like a real cloud account. No `mockway reset` between runs. Without `--no-destroy`, Layer 4 destruction wipes everything and the next run starts clean.
+2. **Within a run (feedback iterations)**: at run start, the harness snapshots mockway's current state as a baseline. Between feedback iterations, it restores to this snapshot — not a full reset. This ensures each iteration tests "new HCL applied on top of existing infrastructure."
+3. **Fresh start**: `infrafactory run --clean scenarios/training/web-app-paris.yaml` forces a full `mockway reset` + delete `.tfstate`, reverting to the v1 clean-slate behavior.
+
+### Detection logic
+
+The run loop auto-detects whether to run incrementally:
+
+1. Check `--clean` flag → if set, always clean run (skip remaining checks)
+2. Query mockway state (`GET /mock/state`) — are there existing resources?
+3. Check for `.tfstate` in `output/{scenario}/` — does OpenTofu know about existing resources?
+4. Check run store for a previous successful run for this scenario
+5. If all three exist (mockway state + tfstate + previous run) → incremental run (snapshot baseline, skip reset)
+6. If any is missing → clean run (reset mockway, delete tfstate)
+
+### Feedback iteration flow (incremental)
+
+```
+Run start:
+  1. Detect mode (incremental vs clean)
+  2. If incremental: POST /mock/snapshot (save baseline)
+  3. If clean: POST /mock/reset + delete .tfstate
+
+Each iteration:
+  1. If incremental: POST /mock/restore (restore to baseline)
+     If clean: POST /mock/reset (empty state)
+  2. Generate all HCL (3-phase pipeline)
+  3. Write .tf files to output dir (incremental: delete only *.tf, preserve .tfstate + .terraform/;
+     clean: wipe entire output dir)
+  4. tofu init (if needed)
+  5. tofu plan → Layer 1 validation
+  6. tofu apply (mockway) → Layer 2 validation (topology + OPA)
+  7. If Layer 3 enabled and Layers 1+2 pass:
+       tofu apply (real Scaleway) → Layer 3 validation (real probes)
+  8. Collect failures → feed back to next iteration
+
+Convergence:
+  9. If --no-destroy: skip destruction, preserve state for next incremental run
+     If default + converges: Layer 4 destruction (tofu destroy against mock + real if Layer 3 enabled)
+     If default + fails: auto-destroy real resources (if Layer 3 enabled), reset mock
+  10. Holdout checks (if applicable, skipped when --no-destroy)
+  11. After destruction, state is empty — next run auto-detects as clean
+      After --no-destroy, state persists — next run auto-detects as incremental
+```
+
+> **Note**: mockway is a single shared instance. Incremental runs assume one scenario at a time. Running different scenarios concurrently against the same mockway is not supported.
+
+### Scenario evolution example
+
+```yaml
+# Week 1 — just a web server
+scenario: my-project
+version: "1.0"
+cloud: scaleway
+description: Web application in Paris
+resources:
+  compute:
+    purpose: web-server
+    size: small
+  networking:
+    vpc: true
+    private_network: true
+    load_balancer:
+      exposure: public
+      backends:
+        - port: 80
+          protocol: http
+constraints:
+  region: fr-par
+acceptance_criteria:
+  - type: http_probe
+    target: load_balancer
+    port: 80
+    expect: reachable
+  - type: destruction
+    expect: no_orphans
+```
+
+```yaml
+# Week 3 — add a database (same file, new block)
+scenario: my-project
+version: "1.0"
+cloud: scaleway
+description: Web application with PostgreSQL database in Paris
+resources:
+  compute:
+    purpose: web-server
+    size: small
+  networking:
+    vpc: true
+    private_network: true
+    load_balancer:
+      exposure: public
+      backends:
+        - port: 80
+          protocol: http
+  database:                          # ← added
+    engine: postgresql               # ← added
+    size: small                      # ← added
+constraints:
+  region: fr-par
+  no_public_database: true           # ← added
+acceptance_criteria:
+  - type: http_probe
+    target: load_balancer
+    port: 80
+    expect: reachable
+  - type: connectivity               # ← added
+    from: compute
+    to: database
+    port: 5432
+    expect: success
+  - type: connectivity               # ← added
+    from: public_internet
+    to: database
+    port: 5432
+    expect: blocked
+  - type: destruction
+    expect: no_orphans
+```
+
+```yaml
+# Week 6 — add Redis (same file, new block)
+scenario: my-project
+version: "1.0"
+cloud: scaleway
+description: Web application with PostgreSQL and Redis in Paris
+resources:
+  compute:
+    purpose: web-server
+    size: small
+  networking:
+    vpc: true
+    private_network: true
+    load_balancer:
+      exposure: public
+      backends:
+        - port: 80
+          protocol: http
+  database:
+    engine: postgresql
+    size: small
+  redis:                               # ← added
+    purpose: session-cache             # ← added
+    size: small                        # ← added
+constraints:
+  region: fr-par
+  no_public_database: true
+acceptance_criteria:
+  - type: http_probe
+    target: load_balancer
+    port: 80
+    expect: reachable
+  - type: connectivity
+    from: compute
+    to: database
+    port: 5432
+    expect: success
+  - type: connectivity
+    from: public_internet
+    to: database
+    port: 5432
+    expect: blocked
+  - type: connectivity               # ← added
+    from: compute                     # ← added
+    to: redis                         # ← added
+    port: 6379                        # ← added
+    expect: success                   # ← added
+  - type: destruction
+    expect: no_orphans
+```
+
+### Mockway snapshot/restore API
+
+New endpoints required in Mockway:
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/mock/snapshot` | POST | Snapshot current SQLite state. Returns snapshot ID. Only one active snapshot supported (v1). |
+| `/mock/restore` | POST | Restore SQLite state to the most recent snapshot. Fails if no snapshot exists. |
+| `/mock/reset` | POST | (Existing) Full reset — clears all state and any active snapshot. |
+
+Implementation: SQLite `VACUUM INTO` for snapshot (copy DB to temp file), file swap for restore.
+
+### What doesn't change
+
+- **Scenario schema**: no changes. The YAML format is the same.
+- **Generator interface**: still returns all files, harness writes them.
+- **Validation layers**: same 4 layers, same checks.
+- **Stuck detection**: same subset check on failure signatures.
+- **Run store**: same structure. Adds `incremental: true/false` and optional `previous_run_id` to `RunMetadata`.
+
+---
+
+## Real Scaleway Deploy (Layer 3)
+
+Layer 3 closes the gap between mockway's structural validation and real-world behavioral correctness (see *Mock Fidelity Limitations*). It runs `tofu apply` against a real Scaleway project after Layers 1+2 pass.
+
+### Supersedes ADR-0003
+
+ADR-0003 permanently blocked Layer 3 due to cost, credentials, and safety concerns. ADR-0010 supersedes it with the following governance:
+
+- **Cost**: no estimation (no reliable Scaleway pricing source). User controls cost through scenario scope. Development environments assumed non-live.
+- **Credentials**: user provides `SCW_ACCESS_KEY`/`SCW_SECRET_KEY` env vars with real permissions. Same mechanism as mock (dummy values), but with real keys.
+- **Safety**: Layer 2 (mockway) acts as a fast pre-check gate — structural errors caught in seconds before real API calls. Auto-destroy on failure prevents orphaned resources.
+
+### How it works
+
+Layer 3 is an optional layer controlled by `validation.layers.sandbox_deploy.enabled: true` in `infrafactory.yaml`.
+
+```
+Iteration flow with Layer 3 enabled:
+
+  1. Generate HCL (3-phase pipeline)
+  2. Layer 1: tofu validate + tofu plan + OPA (seconds)
+     → fail? → feedback loop, skip Layer 2+3
+  3. Layer 2: tofu apply against mockway + topology + OPA (seconds)
+     → fail? → feedback loop, skip Layer 3
+  4. Layer 3: tofu apply against real Scaleway (minutes)
+     → fail? → feedback loop (Layer 3 failures included in structured feedback)
+     → pass? → convergence
+
+On convergence:
+  --no-destroy: keep all resources (mock + real)
+  default: tofu destroy against both mock and real Scaleway
+
+On failure (max iterations exhausted):
+  --no-destroy: keep all resources
+  default: auto-destroy real resources, reset mock
+```
+
+### Dual-apply architecture
+
+The same generated HCL is applied to both mockway and real Scaleway in a single iteration. This means:
+
+- **Mockway apply** uses `SCW_API_URL=http://127.0.0.1:8080` (existing behavior)
+- **Real Scaleway apply** uses the real API endpoint (no `SCW_API_URL` override)
+- Both use the same `.tf` files but separate `.tfstate` files (`terraform.tfstate` for mock, `terraform-live.tfstate` for real)
+- The harness manages two state files in `output/{scenario}/`
+
+### Project bootstrap
+
+The generated HCL should include `scaleway_account_project` as a resource, so the factory creates and destroys the project as part of the normal IaC lifecycle. No pre-existing sandbox project needed.
+
+### What Layer 3 validates that Layer 2 cannot
+
+| Check | Layer 2 (mock) | Layer 3 (real) |
+|-------|---------------|----------------|
+| Resource creation order | FK constraints (structural) | Actual API sequencing + eventual consistency |
+| Network connectivity | Graph query (topological) | Real `nc`/`curl` probe |
+| DNS resolution | Not evaluatable | Real `dig`/`nslookup` |
+| API cascades / 409 behavior | Provider-derived FK model | Actual Scaleway API behavior |
+| Provider field requirements | Best-effort response mocking | Real API responses |
+| Resource provisioning time | Immediate | Real wait times (cluster creation, etc.) |
+
+### Acceptance criteria unlocked
+
+With Layer 3, the `dns_resolution` acceptance criteria type becomes evaluatable (previously deferred as sandbox-only). `connectivity` and `http_probe` criteria can run real probes instead of graph queries.
+
+---
+
+## Implementation Contracts (Slices 22-29)
+
+These contracts resolve ambiguities that a fresh-context implementer would otherwise have to guess. Each answer is a binding decision — implement exactly as stated.
+
+### 1. Scenario identifier
+
+The `scenario:` YAML field (e.g., `web-app-paris`) is the canonical identifier used in API paths, output directories, and run store. The CLI takes a file path; the API resolves the `scenario:` name from the YAML via `findScenarioPathByName()`. API consumers never use file paths.
+
+### 2. POST /api/runs/{scenario}/start request schema
+
+```json
+{
+  "clean": false,
+  "no_destroy": false,
+  "layer3_enabled": false
+}
+```
+
+All fields optional. Missing fields use defaults shown above. These are run-level overrides, not config overrides.
+
+**Conflict rule**: if `clean=true` and `no_destroy=true` are both set, reject with 422: `{"error": "clean and no_destroy are mutually exclusive"}`. Rationale: `--clean` wipes all state to start fresh; `--no-destroy` preserves state for the next run. These intents contradict — forcing the user to choose prevents silent surprises.
+
+### 3. Config vs API/UI flag precedence
+
+Config is authoritative for security-sensitive settings:
+
+- `validation.layers.sandbox_deploy.enabled` must be `true` in `infrafactory.yaml` for Layer 3 to work. The API `layer3_enabled` field is an additional per-run opt-in — **both** config AND flag must be `true` for Layer 3 to execute. Config is the gate, API flag is the per-run choice.
+- `clean` and `no_destroy` are purely run-level. No config equivalent. API/UI flags are the sole authority.
+
+### 4. "Mockway has resources" definition
+
+`GET /mock/state` returns a map of resource-type groups, each containing lists. "Has resources" means **at least one list across all groups contains at least one element**. An initialized but empty state (all lists empty) counts as "no resources."
+
+### 5. previous_run_id
+
+`previous_run_id` in `RunMetadata` is the `run_id` of the **latest run with `status: success`** for the scenario. Failed/stuck runs do not count for auto-detection. If no successful run exists, the field is empty and the auto-detection check fails (→ clean mode).
+
+### 6. Snapshot/restore behavior
+
+- **Snapshot** is called once at run start, before iteration 1. It is a prerequisite for incremental runs.
+- **Restore** is called before **every** iteration (including iteration 1). Iteration 1 restore is idempotent — the state hasn't changed since the snapshot. This keeps the flow uniform across all iterations.
+- **Snapshot failure**: fail the run hard with a clear error. Do not fall back to clean mode — the user explicitly chose (or auto-detected) incremental.
+- **Restore failure**: fail the iteration hard. Do **not** fall back to reset. Falling back to reset would silently destroy the baseline state, turning an incremental run into a corrupt clean run without the user knowing.
+
+### 7. Incremental file cleanup scope
+
+In incremental mode, delete `*.tf` and `*.tf.json` files in `output/{scenario}/` before writing new generated files. Preserve:
+- `terraform.tfstate` and `terraform.tfstate.backup`
+- `terraform-live.tfstate` and `terraform-live.tfstate.backup` (Layer 3)
+- `.terraform/` directory (provider plugins, module cache)
+
+Do **not** recursively delete module directories. The factory generates flat files (no nested modules in v1).
+
+In clean mode, wipe the entire `output/{scenario}/` directory.
+
+### 8. Artifact contracts
+
+| Artifact | Path | Scope |
+|----------|------|-------|
+| `plan.txt` | `.infrafactory/runs/{scenario}/{run_id}/iterations/{n}/plan.txt` | Per-iteration Layer 1 `tofu plan` stdout |
+| `plan-live.txt` | `.infrafactory/runs/{scenario}/{run_id}/iterations/{n}/plan-live.txt` | Per-iteration Layer 3 `tofu plan` stdout (only when Layer 3 enabled) |
+| `baseline_state.json` | `.infrafactory/runs/{scenario}/{run_id}/baseline_state.json` | Per-run — snapshot of mockway state taken at run start. **Incremental runs only.** Not persisted for clean runs (no baseline exists). API returns 404 for clean runs. |
+| `iteration.json` | `.infrafactory/runs/{scenario}/{run_id}/iterations/{n}/iteration.json` | Per-iteration stage/failure snapshots (existing) |
+| `generated/` | `.infrafactory/runs/{scenario}/{run_id}/iterations/{n}/generated/` | Per-iteration IaC snapshots (existing) |
+
+### 9. Missing artifact endpoint behavior
+
+Return **404** with `{"error": "..."}` JSON body. Examples:
+- `GET /api/runs/{scenario}/{run_id}/plan` when `plan.txt` doesn't exist → 404.
+- `GET /api/runs/{scenario}/{run_id}/baseline` when run was clean (no baseline) → 404.
+
+Do not return 200 with empty payload or structured null. 404 is standard REST and unambiguous.
+
+### 10. Holdout behavior with --no-destroy and Layer 3
+
+- **`--no-destroy`**: skip holdouts entirely. Holdouts are post-convergence adversarial checks. With `--no-destroy`, the user is still iterating incrementally — running holdouts mid-iteration gives false failures. Additionally, criteria-only holdouts execute `tofu destroy` internally, which conflicts with the intent of `--no-destroy`.
+- **Layer 3 enabled**: holdouts run against both mock and real state (same dual-apply pattern as the main convergence loop). Holdout destruction verification runs `tofu destroy` against both mock and real.
+
+### 11. Layer 3 credential contract
+
+Required env vars when Layer 3 is enabled: `SCW_ACCESS_KEY` and `SCW_SECRET_KEY`.
+
+Validation: at run start, before any generation or apply. If either is missing:
+- CLI: exit with error `"Layer 3 requires SCW_ACCESS_KEY and SCW_SECRET_KEY environment variables"`.
+- API: return 422 with `{"error": "Layer 3 enabled but credentials missing: SCW_ACCESS_KEY, SCW_SECRET_KEY"}`.
+
+### 12. Layer 3 project lifecycle
+
+Create per run. The generated HCL includes `scaleway_account_project` as a resource. In incremental mode with `--no-destroy`, the project persists between runs (it's in `terraform-live.tfstate`). On destruction, the project is destroyed along with everything else. On the next incremental run, the existing project is reused via state — consistent with how all other resources work in the incremental model.
+
+### 13. Real state file lifecycle
+
+`terraform-live.tfstate` lives in `output/{scenario}/` alongside `terraform.tfstate`. Same lifecycle rules:
+- **Incremental mode**: preserved between runs and between iterations (only `*.tf`/`*.tf.json` files deleted).
+- **Clean mode**: deleted along with everything else in the output directory.
+- **`--no-destroy`**: persists after run completes.
+- **Destruction (default, no `--no-destroy`)**: after `tofu destroy` runs against real Scaleway, the state file reflects the empty state.
+
+### 14. Destroy behavior matrix
+
+| Run outcome | `--no-destroy` set | Default (no flag) |
+|-------------|-------------------|-------------------|
+| **Converges** | Skip Layer 4. Mock + real state persist. Next run auto-detects incremental. | Layer 4: `tofu destroy` mock. If Layer 3 enabled: `tofu destroy` real. Next run auto-detects clean. |
+| **Fails** (budget exhausted / stuck) | Skip Layer 4. Mock + real state persist. Next run auto-detects incremental. | If Layer 3 enabled: auto-destroy real resources (prevent billing). Reset mock. Next run auto-detects clean. If Layer 3 disabled: reset mock only. |
+
+This matrix is testable: unit tests should verify each cell with mock/real state assertions.
+
+### 15. Real probe contract (Layer 3)
+
+| Probe | Pass criteria | Fail criteria |
+|-------|--------------|---------------|
+| `connectivity` | TCP connect to `{target_host}:{port}` succeeds within timeout | Timeout or connection refused |
+| `http_probe` | HTTP GET to `http://{target_host}:{port}/` returns 2xx or 3xx | Timeout, connection refused, or 4xx/5xx |
+| `dns_resolution` | DNS lookup returns at least one A or AAAA record | NXDOMAIN or timeout |
+
+Config keys (in `infrafactory.yaml`):
+
+```yaml
+probes:
+  timeout_seconds: 30       # Per-attempt timeout
+  retry_count: 3            # Number of attempts before declaring failure
+  retry_delay_seconds: 10   # Delay between retry attempts
+```
+
+**Layer 3 probe mode**: when Layer 3 is enabled, real probes **replace** graph queries for `connectivity` and `http_probe` — do not run both. Real probes are strictly more authoritative than graph queries. Layer 2 graph queries still run as part of Layer 2 validation (before Layer 3), so structural issues are caught first. Layer 3 probes validate behavioral correctness that graph queries cannot.
+
+**Fallback**: when Layer 3 is off, `connectivity` and `http_probe` use Layer 2 graph queries (existing behavior). `dns_resolution` remains auto-pass informational output.
+
+**`dns_resolution` stabilization**: DNS propagation is inherently asynchronous. There is no separate stabilization window — use the standard retry mechanism (`probes.retry_count` × `probes.retry_delay_seconds`). With defaults (3 retries × 10s delay), the probe has up to ~90s total (3 attempts × 30s timeout). If DNS hasn't propagated within this window, the probe fails. Operators can tune retry/delay config for environments with slower propagation.
+
+**Probe config scope**: config keys are global (apply to all probes equally). Per-criterion overrides are not supported in v1. If needed later, add optional `timeout_seconds`/`retry_count` fields to individual acceptance criteria entries.
+
+### 16. Opt-in gating for Layer 3 E2E tests (Slice 28)
+
+- **Build tag**: `go test -run TestLayer3IncrementalE2E -tags layer3 ./...` — tests are gated by build tag, not just env var.
+- **Env vars**: `INFRAFACTORY_LAYER3_E2E=1` must be set (double gate with build tag). Also requires `SCW_ACCESS_KEY` and `SCW_SECRET_KEY`.
+- **Cost guardrail**: test uses minimal resources (single small compute instance per stage).
+- **Cleanup verification**: after test, assert both `GET /mock/state` returns empty AND `tofu show -json` on `terraform-live.tfstate` shows no resources.
+
+### 17. UI readiness endpoint contracts
+
+**`GET /api/scenarios/{scenario}/run-mode`**:
+```json
+{
+  "mode": "incremental",
+  "reason": "Prior state detected: mockway has resources, .tfstate exists, previous successful run found"
+}
+```
+`mode`: enum `"incremental"` | `"clean"`. `reason`: human-readable string explaining the detection result.
+
+**`GET /api/scenarios/{scenario}/layer3-status`**:
+```json
+{
+  "enabled": true,
+  "ready": true,
+  "missing": []
+}
+```
+`enabled`: value of `validation.layers.sandbox_deploy.enabled` from config. `ready`: `enabled` AND all credentials present. `missing`: list of missing env var names (empty when ready or when disabled).
+
+### 18. Run-start when Layer 3 requested but not ready
+
+**Block hard.** If a run requests `layer3_enabled=true` but Layer 3 cannot execute, return 422 and do **not** silently degrade to mock-only. This avoids false confidence that real validation occurred.
+
+- If config gate is off: `{"error": "Layer 3 is disabled in config (validation.layers.sandbox_deploy.enabled=false)"}`
+- If config gate is on but credentials missing: `{"error": "Layer 3 enabled in config but credentials missing: SCW_ACCESS_KEY, SCW_SECRET_KEY"}`
+
+The `/layer3-status` endpoint lets the UI check readiness before offering the start button.
+
+### 19. RunMetadata versioning for new fields
+
+The existing `schema` field uses `"infrafactory.run.metadata.v1"`. Adding `incremental` and `previous_run_id` fields bumps the schema to `"infrafactory.run.metadata.v2"`. Backward-read rule: when reading a `v1` record that lacks these fields, treat `incremental` as `false` and `previous_run_id` as `""` (empty string). Never fail on missing fields — degrade gracefully. The `RunMetadataSchemaVersion` constant must be updated when these fields ship. `RunMetadataSchemaLegacy` (`"infrafactory.run.metadata.legacy"`) remains readable unchanged — the same backward-read defaults apply (missing fields → `false`/`""`).
+
+### 20. Failure taxonomy for new failure sources
+
+The existing `failure_class` tagging in `FeedbackJSON` must include entries for new failure sources:
+
+| `failure_class` | Source | Description |
+|-----------------|--------|-------------|
+| `snapshot_failed` | Slice 23 | Mockway `POST /mock/snapshot` returned an error |
+| `restore_failed` | Slice 23 | Mockway `POST /mock/restore` returned an error |
+| `layer3_apply_failed` | Slice 26 | `tofu apply` against real Scaleway failed |
+| `layer3_destroy_failed` | Slice 26 | `tofu destroy` against real Scaleway failed |
+| `layer3_credential_missing` | Slice 26 | Required env vars absent at run start |
+| `real_probe_failed` | Slice 27 | Real network probe (connectivity/http/dns) failed |
+
+These classes are terminal (snapshot/restore/credential) or feedbackable (apply/destroy/probe). Terminal classes stop the run immediately. Feedbackable classes are included in structured failure JSON for the next iteration, same as existing Layer 1/2 failures.
+
+### 21. Concurrency invariant
+
+**One active run per mockway instance** is the operational invariant. The existing `sync.Mutex` in `uiRunStarter` enforces single-run for API/UI-triggered runs (returns 409 if busy). Separate CLI processes are not globally lock-coordinated in v1; concurrent CLI runs against one mockway instance are unsupported and may corrupt shared incremental state.
+
+Testable contract: if `POST /api/runs/{scenario}/start` is called while another run is active, return `409 Conflict` with `{"error": "run already in progress"}` (defined as `ErrRunBusy` in `handlers_run_executor.go`, emitted by `startRunHandler` in `handlers_runs.go`). This applies regardless of whether the in-progress run is for the same or different scenario.
+
+### 22. Legacy run compatibility
+
+When reading `RunMetadata` from runs created before Slices 22-29:
+- Missing `incremental` field → treat as `false`.
+- Missing `previous_run_id` field → treat as `""`.
+- Missing `baseline_state.json` → API returns 404 (same as clean runs).
+- Missing `plan.txt` in iterations → API returns 404.
+- Missing `plan-live.txt` → API returns 404 (Layer 3 was not available).
+
+The UI must handle 404 responses for all new artifact endpoints gracefully — show "not available" or hide the panel, never crash or show a blank error.
+
+Missing new fields/artifacts must not change run ordering or filter behavior in `/api/runs`. Legacy runs without `incremental` or `previous_run_id` sort and filter identically to before — these fields are display-only metadata, not sort/filter keys.
 
 ---
 
@@ -564,6 +1107,7 @@ infrafactory/
 - `infrafactory validate <path>` — static validation only (Layer 1)
 - `infrafactory test <path>` — full validation harness (all layers) against existing OpenTofu
 - `infrafactory run <path>` — generate + validate loop until convergence, then run holdouts
+- `infrafactory ui` — serve the browser UI for scenarios, live runs, diagnostics, and per-run IaC history
 - `infrafactory mock start` — start Mockway via `docker run ghcr.io/redscaresu/mockway`
 
 `<path>` is always a scenario YAML file path (e.g. `scenarios/training/web-app-paris.yaml`), not a name lookup. The `validate` and `test` commands parse the scenario to derive the output dir (`output/{scenario}/`) and look for existing `.tf` files there. They require that `generate` or `run` has been executed first.
