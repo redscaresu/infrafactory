@@ -259,6 +259,49 @@ func TestGenerateCommandAutoAddsScalewayProviderWiringWhenMissing(t *testing.T) 
 	}
 }
 
+func TestWriteGeneratedFilesIncrementalPreservesTerraformState(t *testing.T) {
+	t.Parallel()
+
+	outputDir := filepath.Join(t.TempDir(), "output")
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		t.Fatalf("mkdir output dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(outputDir, "terraform.tfstate"), []byte(`{"version":4}`), 0o644); err != nil {
+		t.Fatalf("write tfstate: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(outputDir, "main.tf"), []byte("old"), 0o644); err != nil {
+		t.Fatalf("write old tf: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(outputDir, ".terraform"), 0o755); err != nil {
+		t.Fatalf("mkdir .terraform: %v", err)
+	}
+
+	_, err := writeGeneratedFiles(outputDir, map[string][]byte{
+		"main.tf": []byte("terraform {}\n"),
+	}, generatedFileWriteModeIncremental)
+	if err != nil {
+		t.Fatalf("write generated files: %v", err)
+	}
+
+	statePayload, err := os.ReadFile(filepath.Join(outputDir, "terraform.tfstate"))
+	if err != nil {
+		t.Fatalf("read tfstate: %v", err)
+	}
+	if string(statePayload) != `{"version":4}` {
+		t.Fatalf("expected tfstate preservation, got %s", string(statePayload))
+	}
+	if _, err := os.Stat(filepath.Join(outputDir, ".terraform")); err != nil {
+		t.Fatalf("expected .terraform preservation: %v", err)
+	}
+	mainPayload, err := os.ReadFile(filepath.Join(outputDir, "main.tf"))
+	if err != nil {
+		t.Fatalf("read rewritten main.tf: %v", err)
+	}
+	if string(mainPayload) != "terraform {}\n" {
+		t.Fatalf("unexpected main.tf contents: %s", string(mainPayload))
+	}
+}
+
 func TestGenerateCommandDefaultRuntimeUsesConcreteGeneratorDependency(t *testing.T) {
 	t.Parallel()
 

@@ -34,6 +34,12 @@ The previous iteration's generated code failed validation. Analyze these failure
 ```
 {{end}}
 
+{{if .Layer3Guidance}}
+## Layer 3 Guidance
+
+{{.Layer3Guidance}}
+{{end}}
+
 ## Instructions
 
 **IMPORTANT**: Do NOT use Terraform/OpenTofu `data` sources. Use hardcoded IDs and values from the mappings and overrides above. If a data source is needed (e.g., image lookup), use the literal value from mappings instead. The mock environment does not support data source queries.

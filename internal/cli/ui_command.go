@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -98,7 +99,7 @@ type uiRunStarter struct {
 	executeRunFunc func(context.Context, string, string) error
 }
 
-func (s *uiRunStarter) StartRun(ctx context.Context, scenarioName, scenarioPath string) (string, error) {
+func (s *uiRunStarter) StartRun(ctx context.Context, req api.StartRunRequest) (string, error) {
 	s.mu.Lock()
 	if s.busy {
 		s.mu.Unlock()
@@ -120,7 +121,7 @@ func (s *uiRunStarter) StartRun(ctx context.Context, scenarioName, scenarioPath 
 		}()
 
 		runCtx := context.WithValue(s.runContext(ctx), runIDContextKey{}, runID)
-		if err := s.executeRun(runCtx, scenarioPath, runID); err != nil {
+		if err := s.executeRun(runCtx, req, runID); err != nil {
 			s.hub.Broadcast([]byte(`{"type":"run_error","data":{"error":"` + escapeJSONString(err.Error()) + `"}}`))
 			return
 		}
@@ -154,9 +155,9 @@ func (s *uiRunStarter) preflight() error {
 	return nil
 }
 
-func (s *uiRunStarter) executeRun(ctx context.Context, scenarioPath, runID string) error {
+func (s *uiRunStarter) executeRun(ctx context.Context, req api.StartRunRequest, runID string) error {
 	if s.executeRunFunc != nil {
-		return s.executeRunFunc(ctx, scenarioPath, runID)
+		return s.executeRunFunc(ctx, req.ScenarioPath, runID)
 	}
 
 	runCmd := &cobra.Command{Use: "run"}
@@ -165,21 +166,32 @@ func (s *uiRunStarter) executeRun(ctx context.Context, scenarioPath, runID strin
 	runCmd.Flags().String("config", config.DefaultPath, "")
 	runCmd.Flags().String("output", string(OutputModeJSON), "")
 	runCmd.Flags().Int("repair-iterations-max", 0, "")
+	runCmd.Flags().Bool("clean", false, "")
+	runCmd.Flags().Bool("no-destroy", false, "")
 	_ = runCmd.Flags().Set("config", s.configPath)
 	_ = runCmd.Flags().Set("output", string(OutputModeJSON))
+	if req.Clean {
+		_ = runCmd.Flags().Set("clean", "true")
+	}
+	if req.NoDestroy {
+		_ = runCmd.Flags().Set("no-destroy", "true")
+	}
 	runCmd.SetContext(ctx)
 
 	opts := defaultRuntimeOptions()
-	if s.cfg.Agent.Type == generator.AgentTypeClaudeCode && strings.TrimSpace(s.resolvedClaude) != "" {
-		resolved := s.resolvedClaude
-		opts.configLoader = func(path string) (config.Config, error) {
-			cfg, err := config.Load(path)
-			if err != nil {
-				return config.Config{}, err
-			}
-			cfg.Agent.Claude.Command = resolved
-			return cfg, nil
+	resolved := strings.TrimSpace(s.resolvedClaude)
+	opts.configLoader = func(path string) (config.Config, error) {
+		cfg, err := config.Load(path)
+		if err != nil {
+			return config.Config{}, err
 		}
+		if s.cfg.Agent.Type == generator.AgentTypeClaudeCode && resolved != "" {
+			cfg.Agent.Claude.Command = resolved
+		}
+		if req.Layer3Enabled != nil {
+			cfg.Validation.Layers.SandboxDeploy.Enabled = *req.Layer3Enabled
+		}
+		return cfg, nil
 	}
 
 	runtime, err := buildRuntime(runCmd, opts)
@@ -188,7 +200,7 @@ func (s *uiRunStarter) executeRun(ctx context.Context, scenarioPath, runID strin
 	}
 	runtime.Logger = NewAppLogger(os.Stderr, api.NewWebSocketSink(s.hub))
 
-	targetPath := scenarioPath
+	targetPath := req.ScenarioPath
 	if filepath.Ext(targetPath) == "" {
 		targetPath += ".yaml"
 	}
@@ -207,8 +219,9 @@ func (s *uiRunStarter) runContext(requestCtx context.Context) context.Context {
 }
 
 func escapeJSONString(value string) string {
-	value = strings.ReplaceAll(value, `\`, `\\`)
-	value = strings.ReplaceAll(value, `"`, `\"`)
-	value = strings.ReplaceAll(value, "\n", " ")
-	return value
+	encoded, err := json.Marshal(value)
+	if err != nil || len(encoded) < 2 {
+		return "internal error"
+	}
+	return string(encoded[1 : len(encoded)-1])
 }

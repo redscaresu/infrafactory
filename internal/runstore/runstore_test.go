@@ -92,6 +92,29 @@ func TestFilesystemStoreListRunsSkipsIncompleteDirectories(t *testing.T) {
 	}
 }
 
+func TestFilesystemStoreLatestSuccessfulRunID(t *testing.T) {
+	t.Parallel()
+
+	store := NewFilesystemStore(filepath.Join(t.TempDir(), ".infrafactory", "runs"))
+	for _, meta := range []RunMetadata{
+		{Scenario: "web-app-paris", RunID: "run-001", Status: "failed", StartedAt: time.Now().UTC()},
+		{Scenario: "web-app-paris", RunID: "run-002", Status: "success", StartedAt: time.Now().UTC()},
+		{Scenario: "web-app-paris", RunID: "run-003", Status: "failed", StartedAt: time.Now().UTC()},
+	} {
+		if err := store.WriteRunMetadata(meta); err != nil {
+			t.Fatalf("write run metadata: %v", err)
+		}
+	}
+
+	runID, err := store.LatestSuccessfulRunID("web-app-paris")
+	if err != nil {
+		t.Fatalf("latest successful run id: %v", err)
+	}
+	if runID != "run-002" {
+		t.Fatalf("expected run-002, got %q", runID)
+	}
+}
+
 func TestFilesystemStoreWriteIterationArtifact(t *testing.T) {
 	t.Parallel()
 
@@ -108,6 +131,20 @@ func TestFilesystemStoreWriteIterationArtifact(t *testing.T) {
 	}
 	if string(content) != `{"count":1}` {
 		t.Fatalf("unexpected artifact content: %s", string(content))
+	}
+}
+
+func TestFilesystemStoreWriteIterationArtifactRejectsTraversal(t *testing.T) {
+	t.Parallel()
+
+	store := NewFilesystemStore(filepath.Join(t.TempDir(), ".infrafactory", "runs"))
+
+	err := store.WriteIterationArtifact("web-app-paris", "run-001", 2, "../failures.json", []byte(`{"count":1}`))
+	if err == nil {
+		t.Fatal("expected traversal error")
+	}
+	if !strings.Contains(err.Error(), "invalid generated file path") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -216,6 +253,36 @@ func TestFilesystemStoreReadRunLog(t *testing.T) {
 	}
 	if string(read) != string(payload) {
 		t.Fatalf("unexpected run log payload: %s", string(read))
+	}
+}
+
+func TestFilesystemStoreWriteReadRunArtifact(t *testing.T) {
+	t.Parallel()
+
+	store := NewFilesystemStore(filepath.Join(t.TempDir(), ".infrafactory", "runs"))
+	payload := []byte("Plan: 1 to add, 0 to change, 0 to destroy.\n")
+	if err := store.WriteRunArtifact("web-app-paris", "run-001", "plan.txt", payload); err != nil {
+		t.Fatalf("write run artifact: %v", err)
+	}
+
+	read, err := store.ReadRunArtifact("web-app-paris", "run-001", "plan.txt")
+	if err != nil {
+		t.Fatalf("read run artifact: %v", err)
+	}
+	if string(read) != string(payload) {
+		t.Fatalf("unexpected run artifact payload: %s", string(read))
+	}
+}
+
+func TestFilesystemStoreRunArtifactRejectsTraversal(t *testing.T) {
+	t.Parallel()
+
+	store := NewFilesystemStore(filepath.Join(t.TempDir(), ".infrafactory", "runs"))
+	if err := store.WriteRunArtifact("web-app-paris", "run-001", "../../etc/passwd", []byte("bad")); err == nil {
+		t.Fatal("expected traversal write error")
+	}
+	if _, err := store.ReadRunArtifact("web-app-paris", "run-001", "../../etc/passwd"); err == nil {
+		t.Fatal("expected traversal read error")
 	}
 }
 

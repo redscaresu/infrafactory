@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"net/http"
 	"os"
@@ -23,6 +24,7 @@ type ServerConfig struct {
 	Assets        fs.FS
 	Config        config.Config
 	Store         *runstore.FilesystemStore
+	MockState     MockStateReader
 	Formatter     IaCFormatter
 	Hub           *Hub
 	SchemaPath    string
@@ -30,8 +32,20 @@ type ServerConfig struct {
 	RuntimeErrors chan error
 }
 
+type StartRunRequest struct {
+	ScenarioName  string `json:"-"`
+	ScenarioPath  string `json:"-"`
+	Clean         bool   `json:"clean"`
+	NoDestroy     bool   `json:"no_destroy"`
+	Layer3Enabled *bool  `json:"layer3_enabled,omitempty"`
+}
+
 type RunStarter interface {
-	StartRun(ctx context.Context, scenarioName, scenarioPath string) (runID string, err error)
+	StartRun(ctx context.Context, req StartRunRequest) (runID string, err error)
+}
+
+type MockStateReader interface {
+	State(ctx context.Context) ([]byte, error)
 }
 
 type IaCFormatter interface {
@@ -47,6 +61,7 @@ func NewServer(cfg ServerConfig) *http.Server {
 	state := &serverState{
 		cfg:        cfg.Config,
 		store:      store,
+		mockState:  cfg.MockState,
 		formatter:  cfg.Formatter,
 		hub:        cfg.Hub,
 		schemaPath: cfg.SchemaPath,
@@ -56,6 +71,12 @@ func NewServer(cfg ServerConfig) *http.Server {
 	}
 	if state.hub == nil {
 		state.hub = NewHub()
+	}
+	if state.mockState == nil && strings.TrimSpace(cfg.Config.Mockway.URL) != "" {
+		state.mockState = &httpMockStateClient{
+			baseURL: strings.TrimRight(cfg.Config.Mockway.URL, "/"),
+			client:  &http.Client{Timeout: 5 * time.Second},
+		}
 	}
 	if state.formatter == nil {
 		state.formatter = NewExternalIaCFormatter()
@@ -90,12 +111,41 @@ func NewServer(cfg ServerConfig) *http.Server {
 type serverState struct {
 	cfg        config.Config
 	store      *runstore.FilesystemStore
+	mockState  MockStateReader
 	formatter  IaCFormatter
 	hub        *Hub
 	schemaPath string
 	runStarter RunStarter
-	sessionID string
-	startedAt time.Time
+	sessionID  string
+	startedAt  time.Time
+}
+
+type httpMockStateClient struct {
+	baseURL string
+	client  *http.Client
+}
+
+func (c *httpMockStateClient) State(ctx context.Context) ([]byte, error) {
+	if c == nil || c.baseURL == "" {
+		return nil, fmt.Errorf("mock state client is not configured")
+	}
+	client := c.client
+	if client == nil {
+		client = &http.Client{Timeout: 5 * time.Second}
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/mock/state", nil)
+	if err != nil {
+		return nil, fmt.Errorf("build mock state request: %w", err)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("fetch mock state: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("fetch mock state: unexpected status %d", resp.StatusCode)
+	}
+	return io.ReadAll(resp.Body)
 }
 
 func (s *serverState) scenarioSchemaPathCandidates() []string {

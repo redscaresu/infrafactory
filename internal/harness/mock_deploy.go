@@ -8,10 +8,22 @@ import (
 
 var ErrMockDeployFailed = errors.New("mock deploy failed")
 
+// MockStateClient manages mockway lifecycle state for harnesses.
+// Snapshot is captured by the CLI at run start for incremental baseline artifacts;
+// the deploy/destroy harnesses themselves only reset, restore, and read state.
 type MockStateClient interface {
 	Reset(context.Context) error
+	Snapshot(context.Context) error
+	Restore(context.Context) error
 	State(context.Context) ([]byte, error)
 }
+
+type MockDeployMode string
+
+const (
+	MockDeployModeClean       MockDeployMode = "clean"
+	MockDeployModeIncremental MockDeployMode = "incremental"
+)
 
 type MockDeployHarness struct {
 	runner CommandRunner
@@ -56,13 +68,22 @@ func (e *MockDeployError) Is(target error) bool {
 	return target == ErrMockDeployFailed
 }
 
-func (h *MockDeployHarness) Run(ctx context.Context, workDir string, env map[string]string) (*MockDeployResult, error) {
-	// Deploy flow is intentionally sequenced as reset -> init -> apply -> state snapshot
-	// so checks always run against a fresh mock environment.
-	if err := h.mock.Reset(ctx); err != nil {
-		return nil, &MockDeployError{
-			Stage: "reset",
-			Err:   err,
+func (h *MockDeployHarness) Run(ctx context.Context, workDir string, env map[string]string, mode MockDeployMode) (*MockDeployResult, error) {
+	switch mode {
+	case MockDeployModeIncremental:
+		if err := h.mock.Restore(ctx); err != nil {
+			return nil, &MockDeployError{
+				Stage: "restore",
+				Err:   err,
+			}
+		}
+	default:
+		// Clean deploy flow starts from an empty mock environment.
+		if err := h.mock.Reset(ctx); err != nil {
+			return nil, &MockDeployError{
+				Stage: "reset",
+				Err:   err,
+			}
 		}
 	}
 

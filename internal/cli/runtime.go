@@ -21,11 +21,23 @@ type StaticHarnessRunner interface {
 }
 
 type MockDeployHarnessRunner interface {
-	Run(context.Context, string, map[string]string) (*harness.MockDeployResult, error)
+	Run(context.Context, string, map[string]string, harness.MockDeployMode) (*harness.MockDeployResult, error)
 }
 
 type DestroyHarnessRunner interface {
 	Run(context.Context, string, map[string]string) (*harness.DestroyResult, error)
+}
+
+type SandboxDeployHarnessRunner interface {
+	Run(context.Context, string, map[string]string) (*harness.SandboxDeployResult, error)
+}
+
+type SandboxDestroyHarnessRunner interface {
+	Run(context.Context, string, map[string]string) (*harness.SandboxDestroyResult, error)
+}
+
+type RealProbeHarnessRunner interface {
+	Run(context.Context, string, string, []harness.ProbeCheck) (*harness.RealProbeResult, error)
 }
 
 type MockStarter interface {
@@ -45,15 +57,18 @@ type MockLogger interface {
 }
 
 type RuntimeDependencies struct {
-	Generator  generator.SeedGenerator
-	Static     StaticHarnessRunner
-	MockDeploy MockDeployHarnessRunner
-	Destroy    DestroyHarnessRunner
-	MockState  harness.MockStateClient
-	MockStart  MockStarter
-	MockStop   MockStopper
-	MockStatus MockStatuser
-	MockLogs   MockLogger
+	Generator      generator.SeedGenerator
+	Static         StaticHarnessRunner
+	MockDeploy     MockDeployHarnessRunner
+	Destroy        DestroyHarnessRunner
+	SandboxDeploy  SandboxDeployHarnessRunner
+	SandboxDestroy SandboxDestroyHarnessRunner
+	RealProbe      RealProbeHarnessRunner
+	MockState      harness.MockStateClient
+	MockStart      MockStarter
+	MockStop       MockStopper
+	MockStatus     MockStatuser
+	MockLogs       MockLogger
 }
 
 type CommandRuntime struct {
@@ -257,6 +272,19 @@ func buildRuntime(cmd *cobra.Command, opts runtimeOptions) (*CommandRuntime, err
 	if deps.Destroy == nil {
 		deps.Destroy = harness.NewDestroyHarness(execCommandRunner{}, deps.MockState)
 	}
+	if deps.SandboxDeploy == nil {
+		deps.SandboxDeploy = harness.NewSandboxDeployHarness(execCommandRunner{})
+	}
+	if deps.SandboxDestroy == nil {
+		deps.SandboxDestroy = harness.NewSandboxDestroyHarness(execCommandRunner{})
+	}
+	if deps.RealProbe == nil {
+		deps.RealProbe = harness.NewRealProbeHarness(harness.ProbeConfig{
+			Timeout:    time.Duration(cfg.Validation.RealProbes.TimeoutSeconds) * time.Second,
+			Retries:    cfg.Validation.RealProbes.Retries,
+			RetryDelay: time.Duration(cfg.Validation.RealProbes.RetryDelaySeconds) * time.Second,
+		})
+	}
 	if deps.MockStart == nil {
 		deps.MockStart = &dockerMockStarter{}
 	}
@@ -271,13 +299,13 @@ func buildRuntime(cmd *cobra.Command, opts runtimeOptions) (*CommandRuntime, err
 	}
 
 	return &CommandRuntime{
-		ConfigPath:     configPath,
-		Config:         cfg,
+		ConfigPath:        configPath,
+		Config:            cfg,
 		TransportContract: transportContract,
-		Deps:           deps,
-		Logger:         NewAppLogger(os.Stderr),
-		scenarioLoader: opts.scenarioLoader,
-		schemaRunner:   execCommandRunner{},
+		Deps:              deps,
+		Logger:            NewAppLogger(os.Stderr),
+		scenarioLoader:    opts.scenarioLoader,
+		schemaRunner:      execCommandRunner{},
 	}, nil
 }
 

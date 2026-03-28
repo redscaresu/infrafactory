@@ -20,7 +20,7 @@ func TestMockDeployHarnessRunSuccess(t *testing.T) {
 	}
 
 	h := NewMockDeployHarness(runner, mockClient)
-	out, err := h.Run(context.Background(), "/tmp/workdir", nil)
+	out, err := h.Run(context.Background(), "/tmp/workdir", nil, MockDeployModeClean)
 	if err != nil {
 		t.Fatalf("run mock deploy harness: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestMockDeployHarnessRunFailures(t *testing.T) {
 			}
 
 			h := NewMockDeployHarness(runner, mockClient)
-			_, err := h.Run(context.Background(), "/tmp/workdir", nil)
+			_, err := h.Run(context.Background(), "/tmp/workdir", nil, MockDeployModeClean)
 			if err == nil {
 				t.Fatal("expected deploy error")
 			}
@@ -125,17 +125,54 @@ func TestMockDeployHarnessRunFailures(t *testing.T) {
 	}
 }
 
+func TestMockDeployHarnessRunIncrementalUsesRestore(t *testing.T) {
+	t.Parallel()
+
+	runner := &fakeRunner{
+		responses: []runnerResponse{
+			{result: CommandResult{Stdout: []byte("init complete")}},
+			{result: CommandResult{Stdout: []byte("apply complete")}},
+		},
+	}
+	mockClient := &fakeMockStateClient{
+		statePayload: []byte(`{"state":"ok"}`),
+	}
+
+	h := NewMockDeployHarness(runner, mockClient)
+	_, err := h.Run(context.Background(), "/tmp/workdir", nil, MockDeployModeIncremental)
+	if err != nil {
+		t.Fatalf("run mock deploy harness: %v", err)
+	}
+	if !mockClient.restoreCalled {
+		t.Fatal("expected restore to be called")
+	}
+	if mockClient.resetCalled {
+		t.Fatal("did not expect reset to be called in incremental mode")
+	}
+}
+
 type fakeMockStateClient struct {
-	resetCalled  bool
-	stateCalled  bool
-	errReset     error
-	errState     error
-	statePayload []byte
+	resetCalled   bool
+	restoreCalled bool
+	stateCalled   bool
+	errReset      error
+	errRestore    error
+	errState      error
+	statePayload  []byte
 }
 
 func (f *fakeMockStateClient) Reset(_ context.Context) error {
 	f.resetCalled = true
 	return f.errReset
+}
+
+func (f *fakeMockStateClient) Snapshot(_ context.Context) error {
+	return nil
+}
+
+func (f *fakeMockStateClient) Restore(_ context.Context) error {
+	f.restoreCalled = true
+	return f.errRestore
 }
 
 func (f *fakeMockStateClient) State(_ context.Context) ([]byte, error) {

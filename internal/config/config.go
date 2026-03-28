@@ -62,7 +62,8 @@ type ScalewayConfig struct {
 }
 
 type ValidationConfig struct {
-	Layers ValidationLayers `yaml:"layers"`
+	Layers     ValidationLayers `yaml:"layers"`
+	RealProbes RealProbeConfig  `yaml:"real_probes"`
 }
 
 type ValidationLayers struct {
@@ -79,6 +80,12 @@ type StaticLayerConfig struct {
 
 type LayerConfig struct {
 	Enabled bool `yaml:"enabled"`
+}
+
+type RealProbeConfig struct {
+	TimeoutSeconds    int `yaml:"timeout_seconds"`
+	Retries           int `yaml:"retries"`
+	RetryDelaySeconds int `yaml:"retry_delay_seconds"`
 }
 
 type PathsConfig struct {
@@ -158,6 +165,11 @@ func Default() Config {
 					Enabled: true,
 				},
 			},
+			RealProbes: RealProbeConfig{
+				TimeoutSeconds:    5,
+				Retries:           6,
+				RetryDelaySeconds: 5,
+			},
 		},
 		ConstraintPolicies: map[string]string{},
 		Paths: PathsConfig{
@@ -217,6 +229,15 @@ func validate(cfg Config) error {
 	}
 	if cfg.Agent.RepairIterationsMax < 1 {
 		fields = append(fields, FieldError{Field: "agent.repair_iterations_max", Err: "must be greater than or equal to 1"})
+	}
+	if cfg.Validation.RealProbes.TimeoutSeconds < 1 {
+		fields = append(fields, FieldError{Field: "validation.real_probes.timeout_seconds", Err: "must be greater than or equal to 1"})
+	}
+	if cfg.Validation.RealProbes.Retries < 1 {
+		fields = append(fields, FieldError{Field: "validation.real_probes.retries", Err: "must be greater than or equal to 1"})
+	}
+	if cfg.Validation.RealProbes.RetryDelaySeconds < 0 {
+		fields = append(fields, FieldError{Field: "validation.real_probes.retry_delay_seconds", Err: "must be greater than or equal to 0"})
 	}
 	if cfg.Agent.Type != "" && cfg.Agent.Type != generator.AgentTypeClaudeCode && cfg.Agent.Type != generator.AgentTypeOpenRouter {
 		fields = append(fields, FieldError{Field: "agent.type", Err: "must be one of: claude-code, openrouter"})

@@ -3,19 +3,33 @@ Scenario: example-scenario
 Status: failed
 
 Stages:
-- sandbox_deploy/blocked: skip (layer enabled but implementation is deferred (real deployment skipped for cost reasons for now))
+- run/iteration_1_generate: pass
+- run/iteration_1_test: fail
+- run/iteration_1_validate: pass
+- run/iteration_2_generate: pass
+- run/iteration_2_test: fail
+- run/iteration_2_validate: pass
+- run/metadata: pass (run_id=<RUN_ID>)
+- run/mode: pass (clean (missing mockway state, terraform.tfstate, previous successful run))
+- run/terminal_reason: pass (stuck)
 
 Failures:
-- sandbox_deploy/blocked check=sandbox_deploy command="layer gate" detail="sandbox/live deploy layer is intentionally deferred due cost/credentials policy (real deployment skipped for cost reasons for now)"
+- run/iteration_1_test check=credentials command="test" detail="sandbox deploy requires SCW_ACCESS_KEY in the environment"
+- run/iteration_2 check=stuck command="run loop" detail="stopped due to stuck detection"
+- run/iteration_2_test check=credentials command="test" detail="sandbox deploy requires SCW_ACCESS_KEY in the environment"
 
 Explainability:
-- sandbox_deploy/blocked check=sandbox_deploy summary="sandbox deploy execution is intentionally blocked by governance policy" action="keep sandbox_deploy disabled until explicit cost and credentials approval is documented"
+- run/iteration_1_test check=credentials summary="Layer 3 real Scaleway deploy is enabled but credentials are unavailable" action="set SCW_ACCESS_KEY and SCW_SECRET_KEY before enabling sandbox_deploy"
+- run/iteration_2 check=stuck summary="criteria check failed and requires scenario/harness inspection" action="review failure detail and criteria definition for this check"
+- run/iteration_2_test check=credentials summary="Layer 3 real Scaleway deploy is enabled but credentials are unavailable" action="set SCW_ACCESS_KEY and SCW_SECRET_KEY before enabling sandbox_deploy"
 Usage:
   run <scenario> [flags]
 
 Flags:
+      --clean                       
       --config string                (default "./infrafactory.yaml")
   -h, --help                        help for run
+      --no-destroy                  
       --output string                (default "human")
       --repair-iterations-max int
 

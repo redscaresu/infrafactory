@@ -151,12 +151,16 @@ func newValidateCmd() *cobra.Command {
 }
 
 func newTestCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "test <scenario>",
 		Short: "Run harness checks for a scenario",
 		Args:  requireScenarioArg,
 		RunE:  withRuntime("test", runTestCommand),
 	}
+
+	cmd.Flags().Bool("no-destroy", false, "Skip destruction after a successful test run to preserve state for incremental follow-up runs")
+
+	return cmd
 }
 
 func newRunCmd() *cobra.Command {
@@ -168,6 +172,8 @@ func newRunCmd() *cobra.Command {
 	}
 
 	cmd.Flags().Int("repair-iterations-max", 0, "Override failure-triggered retry budget for run loop (0 uses config)")
+	cmd.Flags().Bool("clean", false, "Force a clean run by resetting mock state and discarding prior Terraform state")
+	cmd.Flags().Bool("no-destroy", false, "Skip destruction after a successful run to preserve state for incremental follow-up runs")
 
 	return cmd
 }

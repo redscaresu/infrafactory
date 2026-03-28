@@ -1,0 +1,27 @@
+scenario: incremental-project-paris
+version: "1.0"
+cloud: scaleway
+description: >
+  Incremental training scenario that starts with web and load balancing,
+  then grows to include PostgreSQL and Redis while preserving prior state.
+
+resources:
+  compute:
+    purpose: web-server
+    size: small
+    count: 2
+  networking:
+    vpc: true
+    private_network: true
+    load_balancer:
+      exposure: public
+      backends:
+        - port: 80
+          protocol: http
+
+constraints:
+  region: fr-par
+
+acceptance_criteria:
+  - type: destruction
+    expect: no_orphans

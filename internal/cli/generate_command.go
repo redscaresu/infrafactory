@@ -20,7 +20,7 @@ func runGenerateCommand(cmd *cobra.Command, args []string, runtime *CommandRunti
 		return fmt.Errorf("load scenario %q: %w", scenarioPath, err)
 	}
 
-	writtenFiles, err := generateAndWriteFiles(cmd.Context(), runtime, scenarioPath, 1, nil)
+	writtenFiles, err := generateAndWriteFiles(cmd.Context(), runtime, scenarioPath, 1, nil, generatedFileWriteModeClean)
 	if err != nil {
 		return err
 	}
@@ -148,12 +148,12 @@ func toFeedbackFailuresPayload(in []FailureSummary) []feedbackFailure {
 	return out
 }
 
-func generateAndWriteFiles(ctx context.Context, runtime *CommandRuntime, scenarioPath string, iteration int, feedbackFailures []FailureSummary) (int, error) {
-	written, _, err := generateAndWriteFilesWithResult(ctx, runtime, scenarioPath, iteration, feedbackFailures)
+func generateAndWriteFiles(ctx context.Context, runtime *CommandRuntime, scenarioPath string, iteration int, feedbackFailures []FailureSummary, writeMode generatedFileWriteMode) (int, error) {
+	written, _, err := generateAndWriteFilesWithResult(ctx, runtime, scenarioPath, iteration, feedbackFailures, writeMode)
 	return written, err
 }
 
-func generateAndWriteFilesWithResult(ctx context.Context, runtime *CommandRuntime, scenarioPath string, iteration int, feedbackFailures []FailureSummary) (int, *generator.GeneratedCode, error) {
+func generateAndWriteFilesWithResult(ctx context.Context, runtime *CommandRuntime, scenarioPath string, iteration int, feedbackFailures []FailureSummary, writeMode generatedFileWriteMode) (int, *generator.GeneratedCode, error) {
 	scenarioPayload, err := os.ReadFile(scenarioPath)
 	if err != nil {
 		return 0, nil, fmt.Errorf("read scenario %q: %w", scenarioPath, err)
@@ -182,6 +182,7 @@ func generateAndWriteFilesWithResult(ctx context.Context, runtime *CommandRuntim
 		FeedbackJSON:       feedbackPayload,
 		Iteration:          iteration,
 		ProviderSchemaJSON: runtime.ProviderSchemaJSON,
+		Layer3Enabled:      runtime.Config.Validation.Layers.SandboxDeploy.Enabled,
 	})
 	if err != nil {
 		return 0, nil, fmt.Errorf("generate code: %w", err)
@@ -193,16 +194,30 @@ func generateAndWriteFilesWithResult(ctx context.Context, runtime *CommandRuntim
 	if err := validateScalewayProviderWiring(generated.Files); err != nil {
 		return 0, nil, fmt.Errorf("validate generated files: %w", err)
 	}
-	written, err := writeGeneratedFiles(runtime.OutputDir(), generated.Files)
+	written, err := writeGeneratedFiles(runtime.OutputDir(), generated.Files, writeMode)
 	if err != nil {
 		return 0, nil, err
 	}
 	return written, generated, nil
 }
 
-func writeGeneratedFiles(outputDir string, files map[string][]byte) (int, error) {
-	if err := os.RemoveAll(outputDir); err != nil {
-		return 0, fmt.Errorf("reset output directory %q: %w", outputDir, err)
+type generatedFileWriteMode string
+
+const (
+	generatedFileWriteModeClean       generatedFileWriteMode = "clean"
+	generatedFileWriteModeIncremental generatedFileWriteMode = "incremental"
+)
+
+func writeGeneratedFiles(outputDir string, files map[string][]byte, mode generatedFileWriteMode) (int, error) {
+	switch mode {
+	case generatedFileWriteModeIncremental:
+		if err := resetGeneratedFilesIncremental(outputDir); err != nil {
+			return 0, err
+		}
+	default:
+		if err := os.RemoveAll(outputDir); err != nil {
+			return 0, fmt.Errorf("reset output directory %q: %w", outputDir, err)
+		}
 	}
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return 0, fmt.Errorf("create output directory %q: %w", outputDir, err)
@@ -232,6 +247,30 @@ func writeGeneratedFiles(outputDir string, files map[string][]byte) (int, error)
 	}
 
 	return len(names), nil
+}
+
+func resetGeneratedFilesIncremental(outputDir string) error {
+	entries, err := os.ReadDir(outputDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read output directory %q: %w", outputDir, err)
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if !strings.HasSuffix(name, ".tf") && !strings.HasSuffix(name, ".tf.json") {
+			continue
+		}
+		if err := os.Remove(filepath.Join(outputDir, name)); err != nil {
+			return fmt.Errorf("remove generated file %q: %w", filepath.Join(outputDir, name), err)
+		}
+	}
+	return nil
 }
 
 func writeCommandOutput(cmd *cobra.Command, result OutputResult) error {

@@ -509,6 +509,88 @@ func TestRunLogHandlerReturnsAppLog(t *testing.T) {
 	}
 }
 
+func TestRunPlanAndBaselineHandlersReturnArtifacts(t *testing.T) {
+	t.Parallel()
+
+	store := runstore.NewFilesystemStore(filepath.Join(t.TempDir(), ".infrafactory", "runs"))
+	if err := store.WriteRunMetadata(runstore.RunMetadata{
+		Scenario:  "web-app-paris",
+		RunID:     "run-1",
+		Status:    "success",
+		StartedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("write run metadata: %v", err)
+	}
+	if err := store.WriteRunArtifact("web-app-paris", "run-1", "plan.txt", []byte("Plan: 1 to add, 0 to change, 0 to destroy.\n")); err != nil {
+		t.Fatalf("write plan artifact: %v", err)
+	}
+	if err := store.WriteRunArtifact("web-app-paris", "run-1", "baseline_state.json", []byte(`{"instance":{"servers":[{"id":"srv-1"}]}}`)); err != nil {
+		t.Fatalf("write baseline artifact: %v", err)
+	}
+
+	srv := NewServer(ServerConfig{Config: config.Default(), Store: store})
+	ts := httptest.NewServer(srv.Handler)
+	defer ts.Close()
+
+	planResp, err := http.Get(ts.URL + "/api/runs/web-app-paris/run-1/plan")
+	if err != nil {
+		t.Fatalf("get plan: %v", err)
+	}
+	defer planResp.Body.Close()
+	if planResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 for plan, got %d", planResp.StatusCode)
+	}
+	planBody, _ := io.ReadAll(planResp.Body)
+	if string(planBody) != "Plan: 1 to add, 0 to change, 0 to destroy.\n" {
+		t.Fatalf("unexpected plan payload: %q", string(planBody))
+	}
+
+	baselineResp, err := http.Get(ts.URL + "/api/runs/web-app-paris/run-1/baseline")
+	if err != nil {
+		t.Fatalf("get baseline: %v", err)
+	}
+	defer baselineResp.Body.Close()
+	if baselineResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 for baseline, got %d", baselineResp.StatusCode)
+	}
+	baselineBody, _ := io.ReadAll(baselineResp.Body)
+	if string(baselineBody) != `{"instance":{"servers":[{"id":"srv-1"}]}}` {
+		t.Fatalf("unexpected baseline payload: %s", string(baselineBody))
+	}
+}
+
+func TestRunPlanAndBaselineHandlersReturn404WhenMissing(t *testing.T) {
+	t.Parallel()
+
+	store := runstore.NewFilesystemStore(filepath.Join(t.TempDir(), ".infrafactory", "runs"))
+	if err := store.WriteRunMetadata(runstore.RunMetadata{
+		Scenario:  "web-app-paris",
+		RunID:     "run-1",
+		Status:    "success",
+		StartedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("write run metadata: %v", err)
+	}
+
+	srv := NewServer(ServerConfig{Config: config.Default(), Store: store})
+	ts := httptest.NewServer(srv.Handler)
+	defer ts.Close()
+
+	for _, path := range []string{
+		"/api/runs/web-app-paris/run-1/plan",
+		"/api/runs/web-app-paris/run-1/baseline",
+	} {
+		resp, err := http.Get(ts.URL + path)
+		if err != nil {
+			t.Fatalf("get %s: %v", path, err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusNotFound {
+			t.Fatalf("expected 404 for %s, got %d", path, resp.StatusCode)
+		}
+	}
+}
+
 func TestRunsStartReturnsNotImplementedWithoutStarter(t *testing.T) {
 	t.Parallel()
 
@@ -576,6 +658,74 @@ func TestRunsStartReturnsAcceptedAndConflict(t *testing.T) {
 	}
 }
 
+func TestRunsStartPassesCleanAndNoDestroyFlags(t *testing.T) {
+	t.Parallel()
+
+	scenariosDir := filepath.Join(t.TempDir(), "scenarios")
+	if err := os.MkdirAll(filepath.Join(scenariosDir, "training"), 0o755); err != nil {
+		t.Fatalf("mkdir scenarios: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(scenariosDir, "training", "web.yaml"), []byte(validScenarioYAML("web-app-paris", "test")), 0o644); err != nil {
+		t.Fatalf("write scenario: %v", err)
+	}
+
+	cfg := config.Default()
+	cfg.Paths.Scenarios = scenariosDir
+	starter := &fakeStarter{}
+	srv := NewServer(ServerConfig{Config: cfg, RunStarter: starter})
+	ts := httptest.NewServer(srv.Handler)
+	defer ts.Close()
+
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/runs/web-app-paris/start", bytes.NewBufferString(`{"clean":true,"layer3_enabled":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("post start: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d", resp.StatusCode)
+	}
+	if !starter.lastReq.Clean || starter.lastReq.NoDestroy {
+		t.Fatalf("unexpected start request: %+v", starter.lastReq)
+	}
+	if starter.lastReq.Layer3Enabled == nil || !*starter.lastReq.Layer3Enabled {
+		t.Fatalf("expected layer3_enabled to be forwarded, got %+v", starter.lastReq)
+	}
+	if starter.lastReq.ScenarioName != "web-app-paris" || starter.lastReq.ScenarioPath != "training/web" {
+		t.Fatalf("unexpected scenario mapping: %+v", starter.lastReq)
+	}
+}
+
+func TestRunsStartRejectsMutuallyExclusiveFlags(t *testing.T) {
+	t.Parallel()
+
+	scenariosDir := filepath.Join(t.TempDir(), "scenarios")
+	if err := os.MkdirAll(filepath.Join(scenariosDir, "training"), 0o755); err != nil {
+		t.Fatalf("mkdir scenarios: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(scenariosDir, "training", "web.yaml"), []byte(validScenarioYAML("web-app-paris", "test")), 0o644); err != nil {
+		t.Fatalf("write scenario: %v", err)
+	}
+
+	cfg := config.Default()
+	cfg.Paths.Scenarios = scenariosDir
+	srv := NewServer(ServerConfig{Config: cfg, RunStarter: &fakeStarter{}})
+	ts := httptest.NewServer(srv.Handler)
+	defer ts.Close()
+
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/runs/web-app-paris/start", bytes.NewBufferString(`{"clean":true,"no_destroy":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("post start: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422, got %d", resp.StatusCode)
+	}
+}
+
 func TestRunsStartBroadcastsToWebSocketClient(t *testing.T) {
 	t.Parallel()
 
@@ -630,18 +780,20 @@ func TestRunsStartBroadcastsToWebSocketClient(t *testing.T) {
 }
 
 type fakeStarter struct {
-	mu   sync.Mutex
-	busy bool
-	hub  *Hub
+	mu      sync.Mutex
+	busy    bool
+	hub     *Hub
+	lastReq StartRunRequest
 }
 
-func (f *fakeStarter) StartRun(context.Context, string, string) (string, error) {
+func (f *fakeStarter) StartRun(_ context.Context, req StartRunRequest) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.busy {
 		return "", ErrRunBusy
 	}
 	f.busy = true
+	f.lastReq = req
 	if f.hub != nil {
 		go f.hub.Broadcast([]byte(`{"type":"log","data":{"event":"run_start"}}`))
 	}

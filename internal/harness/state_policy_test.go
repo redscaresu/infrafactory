@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -108,5 +109,37 @@ func TestNoPublicDatabaseStatePolicyReadsTopLevelRDB(t *testing.T) {
 	}
 	if len(failures) != 1 {
 		t.Fatalf("expected one failure, got %d (%+v)", len(failures), failures)
+	}
+}
+
+func TestEvaluateStatePoliciesWithInputRejectsTopLevelStateCollision(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	policyPath := filepath.Join(tmp, "target.rego")
+	policy := `package test.target
+
+import rego.v1
+
+deny_state contains msg if {
+	false
+	msg := "unused"
+}
+`
+	if err := os.WriteFile(policyPath, []byte(policy), 0o644); err != nil {
+		t.Fatalf("write policy fixture: %v", err)
+	}
+
+	_, err := EvaluateStatePoliciesWithInput(
+		context.Background(),
+		[]byte(`{"state":{"existing":true}}`),
+		map[string]any{"target": "database"},
+		[]string{policyPath},
+	)
+	if err == nil {
+		t.Fatal("expected collision error")
+	}
+	if !strings.Contains(err.Error(), `top-level "state" key`) {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }

@@ -36,6 +36,10 @@ validation:
       enabled: false
     destruction:
       enabled: true
+  real_probes:
+    timeout_seconds: 5
+    retries: 6
+    retry_delay_seconds: 5
 
 constraint_policies:
   no_public_database: scaleway/no_public_database.rego

@@ -14,7 +14,15 @@ import (
 )
 
 func runTestCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) error {
-	result, err := executeTest(cmd.Context(), runtime, args[0])
+	noDestroy, err := cmd.Flags().GetBool("no-destroy")
+	if err != nil {
+		return &CLIError{Op: "test", Code: errorCodeUsage, Err: fmt.Errorf("read --no-destroy flag: %w", err)}
+	}
+
+	result, err := executeTest(cmd.Context(), runtime, args[0], testExecutionOptions{
+		MockDeployMode: harness.MockDeployModeClean,
+		SkipDestroy:    noDestroy,
+	})
 	if err != nil {
 		if writeErr := writeCommandOutput(cmd, result); writeErr != nil {
 			return writeErr
@@ -131,22 +139,100 @@ func appendDestroyResult(stages []StageSummary, failures []FailureSummary, resul
 		Stage:   destroyErr.Stage,
 		Check:   destroyErr.Stage,
 		Command: "destroy harness",
-		Detail:  destroyErr.Err.Error(),
+		Detail:  destroyFailureDetail(destroyErr),
 	})
 
 	return stages, failures
 }
 
-func executeTest(ctx context.Context, runtime *CommandRuntime, scenarioPath string) (OutputResult, error) {
+func destroyFailureDetail(err *harness.DestroyError) string {
+	if err == nil {
+		return ""
+	}
+	detail := err.Err.Error()
+	trimmedStderr := strings.TrimSpace(err.Destroy.Stderr)
+	if trimmedStderr == "" {
+		return detail
+	}
+	if len(trimmedStderr) > 600 {
+		trimmedStderr = trimmedStderr[:600] + "..."
+	}
+	return fmt.Sprintf("%s | stderr: %s", detail, trimmedStderr)
+}
+
+func appendSandboxDeployResult(stages []StageSummary, failures []FailureSummary, result *harness.SandboxDeployResult, runErr error) ([]StageSummary, []FailureSummary) {
+	if runErr == nil {
+		if result != nil && result.Init.Stage != "" {
+			stages = append(stages, StageSummary{Layer: "sandbox_deploy", Stage: "init", Status: StageStatusPass})
+		}
+		if result != nil && result.Apply.Stage != "" {
+			stages = append(stages, StageSummary{Layer: "sandbox_deploy", Stage: "apply", Status: StageStatusPass})
+		}
+		return stages, failures
+	}
+
+	deployErr := &harness.SandboxDeployError{}
+	if !errors.As(runErr, &deployErr) {
+		failures = append(failures, FailureSummary{Layer: "sandbox_deploy", Stage: "run", Detail: runErr.Error()})
+		return stages, failures
+	}
+
+	switch deployErr.Stage {
+	case "init":
+		stages = append(stages, StageSummary{Layer: "sandbox_deploy", Stage: "init", Status: StageStatusFail})
+	case "apply":
+		stages = append(stages, StageSummary{Layer: "sandbox_deploy", Stage: "apply", Status: StageStatusFail})
+	}
+
+	failures = append(failures, FailureSummary{
+		Layer:   "sandbox_deploy",
+		Stage:   deployErr.Stage,
+		Check:   deployErr.Stage,
+		Command: "sandbox deploy harness",
+		Detail:  deployErr.Err.Error(),
+	})
+	return stages, failures
+}
+
+func appendSandboxDestroyResult(stages []StageSummary, failures []FailureSummary, result *harness.SandboxDestroyResult, runErr error) ([]StageSummary, []FailureSummary) {
+	if runErr == nil {
+		if result != nil && result.Destroy.Stage != "" {
+			stages = append(stages, StageSummary{Layer: "sandbox_deploy", Stage: "destroy", Status: StageStatusPass})
+		}
+		return stages, failures
+	}
+
+	destroyErr := &harness.SandboxDestroyError{}
+	if !errors.As(runErr, &destroyErr) {
+		failures = append(failures, FailureSummary{Layer: "sandbox_deploy", Stage: "destroy", Detail: runErr.Error()})
+		return stages, failures
+	}
+	stages = append(stages, StageSummary{Layer: "sandbox_deploy", Stage: "destroy", Status: StageStatusFail})
+	failures = append(failures, FailureSummary{
+		Layer:   "sandbox_deploy",
+		Stage:   destroyErr.Stage,
+		Check:   destroyErr.Stage,
+		Command: "sandbox destroy harness",
+		Detail:  destroyErr.Err.Error(),
+	})
+	return stages, failures
+}
+
+type testExecutionOptions struct {
+	MockDeployMode harness.MockDeployMode
+	SkipDestroy    bool
+}
+
+func executeTest(ctx context.Context, runtime *CommandRuntime, scenarioPath string, opts testExecutionOptions) (OutputResult, error) {
 	sc, err := runtime.LoadScenario(scenarioPath)
 	if err != nil {
 		return OutputResult{}, fmt.Errorf("load scenario %q: %w", scenarioPath, err)
 	}
-	return executeTestWithScenario(ctx, runtime, sc, runtime.OutputDir())
+	return executeTestWithScenario(ctx, runtime, sc, runtime.OutputDir(), opts)
 }
 
-func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc scenario.Scenario, outputDir string) (OutputResult, error) {
-	unsupportedStages, unsupportedFailures, err := unsupportedCriteriaResult(sc)
+func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc scenario.Scenario, outputDir string, opts testExecutionOptions) (OutputResult, error) {
+	unsupportedStages, unsupportedFailures, err := unsupportedCriteriaResult(sc, runtime.Config.Validation.Layers.SandboxDeploy.Enabled)
 	if err != nil {
 		return OutputResult{}, err
 	}
@@ -161,30 +247,6 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 				Op:   "test",
 				Code: errorCodeCommandFailed,
 				Err:  errors.New("unsupported acceptance criteria present"),
-			}
-	}
-
-	if runtime.Config.Validation.Layers.SandboxDeploy.Enabled {
-		return OutputResult{
-				Command:  "test",
-				Scenario: sc.Name,
-				Status:   CommandStatusFailed,
-				Stages: []StageSummary{
-					{Layer: "sandbox_deploy", Stage: "blocked", Status: StageStatusSkip, Detail: sandboxBlockedStageDetail()},
-				},
-				Failures: []FailureSummary{
-					{
-						Layer:   "sandbox_deploy",
-						Stage:   "blocked",
-						Check:   "sandbox_deploy",
-						Command: "layer gate",
-						Detail:  sandboxDeferredDetail(),
-					},
-				},
-			}, &CLIError{
-				Op:   "test",
-				Code: errorCodeCommandFailed,
-				Err:  errors.New("sandbox deploy layer is blocked"),
 			}
 	}
 
@@ -212,20 +274,64 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 		}, nil
 	}
 
-	deployResult, deployErr := runtime.Deps.MockDeploy.Run(ctx, outputDir, env)
+	deployMode := opts.MockDeployMode
+	if deployMode == "" {
+		deployMode = harness.MockDeployModeClean
+	}
+
+	deployResult, deployErr := runtime.Deps.MockDeploy.Run(ctx, outputDir, env, deployMode)
 	stages, failures = appendMockDeployResult(stages, failures, deployResult, deployErr)
-	if deployErr == nil && runtime.Config.Validation.Layers.Destruction.Enabled {
+	sandboxEnabled := runtime.Config.Validation.Layers.SandboxDeploy.Enabled
+	sandboxSucceeded := false
+	if deployErr == nil && sandboxEnabled {
+		sandboxEnv, sandboxEnvErr := sandboxCommandEnv(runtime)
+		if sandboxEnvErr != nil {
+			stages = append(stages, StageSummary{Layer: "sandbox_deploy", Stage: "preflight", Status: StageStatusFail})
+			failures = append(failures, FailureSummary{
+				Layer:   "sandbox_deploy",
+				Stage:   "preflight",
+				Check:   "credentials",
+				Command: "sandbox deploy preflight",
+				Detail:  sandboxEnvErr.Error(),
+			})
+		} else {
+			sandboxResult, sandboxErr := runtime.Deps.SandboxDeploy.Run(ctx, outputDir, sandboxEnv)
+			stages, failures = appendSandboxDeployResult(stages, failures, sandboxResult, sandboxErr)
+			sandboxSucceeded = sandboxErr == nil
+		}
+	}
+	if deployErr == nil && runtime.Config.Validation.Layers.Destruction.Enabled && !opts.SkipDestroy {
 		criteriaStages, criteriaFailures := evaluateSupportedCriteria(ctx, sc, runtime, deployResult)
 		stages = append(stages, criteriaStages...)
 		failures = append(failures, criteriaFailures...)
 
 		destroyResult, destroyErr := runtime.Deps.Destroy.Run(ctx, outputDir, env)
 		stages, failures = appendDestroyResult(stages, failures, destroyResult, destroyErr)
+		if sandboxEnabled && sandboxSucceeded {
+			sandboxEnv, sandboxEnvErr := sandboxCommandEnv(runtime)
+			if sandboxEnvErr != nil {
+				stages = append(stages, StageSummary{Layer: "sandbox_deploy", Stage: "destroy_preflight", Status: StageStatusFail})
+				failures = append(failures, FailureSummary{
+					Layer:   "sandbox_deploy",
+					Stage:   "destroy_preflight",
+					Check:   "credentials",
+					Command: "sandbox destroy preflight",
+					Detail:  sandboxEnvErr.Error(),
+				})
+			} else {
+				sandboxDestroyResult, sandboxDestroyErr := runtime.Deps.SandboxDestroy.Run(ctx, outputDir, sandboxEnv)
+				stages, failures = appendSandboxDestroyResult(stages, failures, sandboxDestroyResult, sandboxDestroyErr)
+			}
+		}
 	} else if deployErr == nil {
 		criteriaStages, criteriaFailures := evaluateSupportedCriteria(ctx, sc, runtime, deployResult)
 		stages = append(stages, criteriaStages...)
 		failures = append(failures, criteriaFailures...)
-		stages = append(stages, StageSummary{Layer: "destruction", Stage: "disabled", Status: StageStatusSkip})
+		detail := ""
+		if opts.SkipDestroy {
+			detail = "skipped by --no-destroy"
+		}
+		stages = append(stages, StageSummary{Layer: "destruction", Stage: "disabled", Status: StageStatusSkip, Detail: detail})
 	}
 
 	status := CommandStatusSuccess
@@ -251,6 +357,26 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 	return result, nil
 }
 
+func sandboxCommandEnv(runtime *CommandRuntime) (map[string]string, error) {
+	accessKey := strings.TrimSpace(os.Getenv("SCW_ACCESS_KEY"))
+	if accessKey == "" {
+		return nil, fmt.Errorf("sandbox deploy requires SCW_ACCESS_KEY in the environment")
+	}
+	secretKey := strings.TrimSpace(os.Getenv("SCW_SECRET_KEY"))
+	if secretKey == "" {
+		return nil, fmt.Errorf("sandbox deploy requires SCW_SECRET_KEY in the environment")
+	}
+
+	env := map[string]string{
+		"SCW_ACCESS_KEY": accessKey,
+		"SCW_SECRET_KEY": secretKey,
+	}
+	if projectID := strings.TrimSpace(runtime.Config.Scaleway.SandboxProjectID); projectID != "" {
+		env["SCW_DEFAULT_PROJECT_ID"] = projectID
+	}
+	return env, nil
+}
+
 func evaluateSupportedCriteria(ctx context.Context, sc scenario.Scenario, runtime *CommandRuntime, deployResult *harness.MockDeployResult) ([]StageSummary, []FailureSummary) {
 	if deployResult == nil {
 		return nil, nil
@@ -272,14 +398,60 @@ func evaluateSupportedCriteria(ctx context.Context, sc scenario.Scenario, runtim
 	}
 
 	policySpecs := make([]scenario.ExecutableCheckSpec, 0)
+	topologyChecks := make([]harness.TopologyCheck, 0)
+	realProbeChecks := make([]harness.ProbeCheck, 0)
+	sandboxEnabled := runtime.Config.Validation.Layers.SandboxDeploy.Enabled
 	for _, spec := range specs {
-		_, supported, _ := criteriaSupportReason(spec.Type)
+		_, supported, _ := criteriaSupportReason(spec.Type, sandboxEnabled)
 		if !supported {
 			continue
 		}
 		switch spec.Type {
 		case "policy":
 			policySpecs = append(policySpecs, spec)
+		case "connectivity":
+			if spec.Connectivity == nil {
+				continue
+			}
+			topologyChecks = append(topologyChecks, harness.TopologyCheck{
+				Type:   spec.Type,
+				From:   spec.Connectivity.From,
+				To:     spec.Connectivity.To,
+				Port:   spec.Connectivity.Port,
+				Expect: spec.Expect,
+			})
+			realProbeChecks = append(realProbeChecks, harness.ProbeCheck{
+				Type:   spec.Type,
+				Expect: spec.Expect,
+				From:   spec.Connectivity.From,
+				To:     spec.Connectivity.To,
+				Port:   spec.Connectivity.Port,
+			})
+		case "http_probe":
+			if spec.HTTPProbe == nil {
+				continue
+			}
+			topologyChecks = append(topologyChecks, harness.TopologyCheck{
+				Type:   spec.Type,
+				Target: spec.HTTPProbe.Target,
+				Port:   spec.HTTPProbe.Port,
+				Expect: spec.Expect,
+			})
+			realProbeChecks = append(realProbeChecks, harness.ProbeCheck{
+				Type:   spec.Type,
+				Expect: spec.Expect,
+				Target: spec.HTTPProbe.Target,
+				Port:   spec.HTTPProbe.Port,
+			})
+		case "dns_resolution":
+			if spec.DNSResolution == nil {
+				continue
+			}
+			realProbeChecks = append(realProbeChecks, harness.ProbeCheck{
+				Type:   spec.Type,
+				Expect: spec.Expect,
+				Domain: spec.DNSResolution.Domain,
+			})
 		}
 	}
 
@@ -298,6 +470,56 @@ func evaluateSupportedCriteria(ctx context.Context, sc scenario.Scenario, runtim
 			failures = append(failures, policyFailures...)
 		} else {
 			stages = append(stages, StageSummary{Layer: "mock_deploy", Stage: "state_policy", Status: StageStatusPass})
+		}
+	}
+
+	if sandboxEnabled && len(realProbeChecks) > 0 {
+		probeResult, err := runtime.Deps.RealProbe.Run(ctx, runtime.OutputDir(), sc.Name, realProbeChecks)
+		if err != nil {
+			stages = append(stages, StageSummary{Layer: "sandbox_deploy", Stage: "real_probe", Status: StageStatusFail})
+			failures = append(failures, FailureSummary{
+				Layer:   "sandbox_deploy",
+				Stage:   "real_probe",
+				Check:   "real_probe",
+				Command: "real probe harness",
+				Detail:  err.Error(),
+			})
+		} else if len(probeResult.Failures) > 0 {
+			stages = append(stages, StageSummary{
+				Layer:  "sandbox_deploy",
+				Stage:  "real_probe",
+				Status: StageStatusFail,
+				Detail: fmt.Sprintf("%d probe failures", len(probeResult.Failures)),
+			})
+			for _, failure := range probeResult.Failures {
+				failures = append(failures, toFailureSummary(failure))
+			}
+		} else {
+			stages = append(stages, StageSummary{Layer: "sandbox_deploy", Stage: "real_probe", Status: StageStatusPass})
+		}
+	} else if len(topologyChecks) > 0 {
+		topologyFailures, err := harness.EvaluateTopology(deployResult.StateSnapshot, topologyChecks)
+		if err != nil {
+			stages = append(stages, StageSummary{Layer: "mock_deploy", Stage: "topology", Status: StageStatusFail})
+			failures = append(failures, FailureSummary{
+				Layer:   "mock_deploy",
+				Stage:   "topology",
+				Check:   "topology",
+				Command: "topology evaluator",
+				Detail:  err.Error(),
+			})
+		} else if len(topologyFailures) > 0 {
+			stages = append(stages, StageSummary{
+				Layer:  "mock_deploy",
+				Stage:  "topology",
+				Status: StageStatusFail,
+				Detail: fmt.Sprintf("%d topology failures", len(topologyFailures)),
+			})
+			for _, failure := range topologyFailures {
+				failures = append(failures, toFailureSummary(failure))
+			}
+		} else {
+			stages = append(stages, StageSummary{Layer: "mock_deploy", Stage: "topology", Status: StageStatusPass})
 		}
 	}
 

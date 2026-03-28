@@ -3,6 +3,7 @@ package api
 import (
 	"archive/zip"
 	"bytes"
+	"encoding/json"
 	"errors"
 	"io"
 	"io/fs"
@@ -125,6 +126,24 @@ func runsByScenarioHandler(state *serverState) http.HandlerFunc {
 				return
 			}
 			handleRunLog(state, w, scenarioName, parts[1])
+			return
+		}
+
+		if len(parts) == 3 && parts[2] == "plan" {
+			if r.Method != http.MethodGet {
+				writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+				return
+			}
+			handleRunArtifact(state, w, scenarioName, parts[1], "plan.txt", "plan not found", "text/plain; charset=utf-8")
+			return
+		}
+
+		if len(parts) == 3 && parts[2] == "baseline" {
+			if r.Method != http.MethodGet {
+				writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+				return
+			}
+			handleRunArtifact(state, w, scenarioName, parts[1], "baseline_state.json", "baseline state not found", "application/json")
 			return
 		}
 
@@ -328,6 +347,25 @@ func handleRunLog(state *serverState, w http.ResponseWriter, scenarioName, runID
 	_, _ = w.Write(payload)
 }
 
+func handleRunArtifact(state *serverState, w http.ResponseWriter, scenarioName, runID, name, notFoundMessage, contentType string) {
+	payload, err := state.store.ReadRunArtifact(scenarioName, runID, name)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			writeJSONError(w, http.StatusNotFound, notFoundMessage)
+			return
+		}
+		if strings.Contains(err.Error(), "invalid generated file path") {
+			writeJSONError(w, http.StatusForbidden, "path traversal is not allowed")
+			return
+		}
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(payload)
+}
+
 func handleRunArtifactsArchive(state *serverState, w http.ResponseWriter, scenarioName, runID string) {
 	if _, err := state.store.ReadRunMetadata(scenarioName, runID); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -454,7 +492,27 @@ func startRunHandler(state *serverState, w http.ResponseWriter, r *http.Request,
 		return
 	}
 
-	runID, err := state.runStarter.StartRun(r.Context(), scenarioName, scenarioRelPath)
+	req := StartRunRequest{
+		ScenarioName: scenarioName,
+		ScenarioPath: scenarioRelPath,
+	}
+	if r.Body != nil {
+		defer r.Body.Close()
+		if r.ContentLength != 0 {
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				writeJSONError(w, http.StatusBadRequest, "invalid json body")
+				return
+			}
+		}
+	}
+	req.ScenarioName = scenarioName
+	req.ScenarioPath = scenarioRelPath
+	if req.Clean && req.NoDestroy {
+		writeJSONError(w, http.StatusUnprocessableEntity, "clean and no_destroy are mutually exclusive")
+		return
+	}
+
+	runID, err := state.runStarter.StartRun(r.Context(), req)
 	if err != nil {
 		if errors.Is(err, ErrRunBusy) {
 			writeJSONError(w, http.StatusConflict, "run already in progress")

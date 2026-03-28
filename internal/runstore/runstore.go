@@ -27,6 +27,9 @@ type RunMetadata struct {
 	RunID          string    `json:"run_id"`
 	Status         string    `json:"status"`
 	TerminalReason string    `json:"terminal_reason,omitempty"`
+	Incremental    bool      `json:"incremental,omitempty"`
+	Layer3Enabled  bool      `json:"layer3_enabled,omitempty"`
+	PreviousRunID  string    `json:"previous_run_id,omitempty"`
 	StartedAt      time.Time `json:"started_at"`
 }
 
@@ -123,6 +126,19 @@ func (s *FilesystemStore) ListRuns(scenario string) ([]RunMetadata, error) {
 	return metas, nil
 }
 
+func (s *FilesystemStore) LatestSuccessfulRunID(scenario string) (string, error) {
+	runs, err := s.ListRuns(scenario)
+	if err != nil {
+		return "", err
+	}
+	for _, run := range runs {
+		if run.Status == "success" {
+			return run.RunID, nil
+		}
+	}
+	return "", nil
+}
+
 func (s *FilesystemStore) ListScenarios() ([]string, error) {
 	entries, err := os.ReadDir(s.Root)
 	if err != nil {
@@ -149,11 +165,15 @@ func (s *FilesystemStore) WriteIterationArtifact(scenario, runID string, iterati
 	}
 
 	artifactDir := filepath.Join(s.runDir(scenario, runID), "iterations", strconv.Itoa(iteration))
-	if err := os.MkdirAll(artifactDir, 0o755); err != nil {
+	target, err := resolveGeneratedPath(artifactDir, name)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 		return fmt.Errorf("create artifact dir: %w", err)
 	}
 
-	if err := os.WriteFile(filepath.Join(artifactDir, name), payload, 0o644); err != nil {
+	if err := os.WriteFile(target, payload, 0o644); err != nil {
 		return fmt.Errorf("write artifact: %w", err)
 	}
 
@@ -170,6 +190,24 @@ func (s *FilesystemStore) WriteGeneratedFiles(scenario, runID string, files map[
 		return fmt.Errorf("reset generated files dir: %w", err)
 	}
 	return writeGeneratedFiles(root, files)
+}
+
+func (s *FilesystemStore) WriteRunArtifact(scenario, runID, name string, payload []byte) error {
+	if scenario == "" || runID == "" || name == "" {
+		return fmt.Errorf("scenario, run_id and name are required")
+	}
+
+	target, err := resolveGeneratedPath(s.runDir(scenario, runID), name)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return fmt.Errorf("create run artifact dir: %w", err)
+	}
+	if err := os.WriteFile(target, payload, 0o644); err != nil {
+		return fmt.Errorf("write run artifact: %w", err)
+	}
+	return nil
 }
 
 func (s *FilesystemStore) WriteIterationGeneratedFiles(scenario, runID string, iteration int, files map[string][]byte) error {
@@ -286,6 +324,22 @@ func (s *FilesystemStore) ReadRunLog(scenario, runID string) ([]byte, error) {
 		return nil, fmt.Errorf("read run log: %w", err)
 	}
 
+	return payload, nil
+}
+
+func (s *FilesystemStore) ReadRunArtifact(scenario, runID, name string) ([]byte, error) {
+	if scenario == "" || runID == "" || name == "" {
+		return nil, fmt.Errorf("scenario, run_id and name are required")
+	}
+
+	target, err := resolveGeneratedPath(s.runDir(scenario, runID), name)
+	if err != nil {
+		return nil, err
+	}
+	payload, err := os.ReadFile(target)
+	if err != nil {
+		return nil, fmt.Errorf("read run artifact: %w", err)
+	}
 	return payload, nil
 }
 

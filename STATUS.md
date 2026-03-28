@@ -3,24 +3,19 @@
 Last updated: 2026-03-14
 
 ## Current phase
-- Active milestone: Slices 22-29 — Incremental deployment model + Layer 3 real Scaleway deploy.
-- Slices 1-21 complete. All 12 training scenarios pass `infrafactory run` on first iteration.
-- All Go test suites green under `noui` gate (`go test -tags noui ./...`, `check_all.sh`).
-- ADRs 0009 (incremental deployment) and 0010 (Layer 3, supersedes ADR-0003) accepted. Documentation complete. Implementation next.
+- Slices 1-29 complete. All 12 training scenarios pass `infrafactory run` on first iteration.
+- ADRs 0009 (incremental deployment) and 0010 (Layer 3, supersedes ADR-0003) are implemented in code and docs.
+- 22 implementation contracts codified in CONCEPT.md § "Implementation Contracts (Slices 22-29)".
 
 ## In progress
-- No active unblocked implementation tickets.
+- No active implementation tickets.
 
 ## Known blockers
 - None. `S9-T8` (sandbox/live deploy) is unblocked — ADR-0010 supersedes ADR-0003.
 
 ## Next actions
-1. Slice 22: Mockway snapshot/restore API (`POST /mock/snapshot`, `POST /mock/restore`). No deps — start here.
-2. Slice 23: InfraFactory `--clean`/`--no-destroy` flags + incremental auto-detection. Depends on Slice 22.
-3. Slice 24: Incremental E2E (webserver → database → redis 3-stage test). Depends on Slice 23.
-4. Slice 25: Incremental UI (toggles, mode badge, baseline panel, plan diff). Depends on Slice 24.
-5. Slice 26: Layer 3 dual-apply harness. Can start after Slice 23. Parallel with Slice 24-25.
-6. Slices 27-29: Layer 3 probes, incremental E2E, UI. Sequential after Slice 26.
+1. Keep the Layer 3 path regression-green under `go test -tags noui ./...` and `bash scripts/check_all.sh`.
+2. Use the opt-in real-tool Layer 3 smoke/E2E tests when credentials and budget are available.
 
 ## Update policy
 - Update at end of each meaningful coding session.
@@ -30,6 +25,60 @@ Last updated: 2026-03-14
 - Keep startup/read-order instructions only in `SESSION_START.md` to avoid duplication.
 
 ## Recent updates
+- **M36 maintenance hardening complete**:
+  - Switched UI run-error WebSocket escaping to JSON-backed escaping so control characters cannot corrupt payloads.
+  - Made state-policy input flattening reject a top-level `state` collision instead of silently shadowing it.
+  - Reused runstore path validation for iteration artifacts to block traversal paths.
+  - Truncated large Mockway state error payloads before embedding them in returned errors.
+  - Added focused regression coverage for each fix.
+- **M35 review remediation complete**:
+  - Fixed `test --no-destroy` CLI exposure and added regression coverage for cleanup suppression.
+  - Restricted `baseline_state.json` persistence to incremental runs only and aligned the clean-run test.
+  - Updated CONCEPT.md real-probe config docs to match the shipped `validation.real_probes` contract.
+  - Changed `POST /api/runs/{scenario}/start` clean/no_destroy conflicts from `400` to `422`.
+  - Hardened real probes for invalid ports and defensive empty-DNS responses.
+  - Added destroy stderr propagation plus a regression proving Layer 3 cleanup still runs after probe failure.
+- **Slices 26-29 complete**:
+  - Added Layer 3 deploy/destroy harnesses with `terraform-live.tfstate`.
+  - Added Layer 3 credential checks, prompt guidance, real probes, and opt-in real-tool Layer 3 smoke/incremental E2E coverage.
+  - Added scenario-page Layer 3 toggle/readiness state and Live page Layer 3 progress/probe display.
+  - Updated run/test output contracts, command goldens, README config/runtime/UI guidance, and tracking docs.
+- **Slice 25 complete (S25-T1..S25-T5)**:
+  - Added scenario-page `Keep state` and `Force clean` controls mapped to `no_destroy` / `clean`.
+  - Added scenario-page run-mode detection using the backend `run-mode` endpoint.
+  - Added Live page run-mode display plus collapsible `Plan Diff` and `Baseline State` panels backed by run artifacts.
+  - Added frontend helper coverage for run-option normalization, run-mode summaries, plan/baseline URLs, and baseline JSON formatting.
+  - Updated README Web UI guidance for incremental UI workflow and artifact visibility.
+  - Verified with `cd ui && npm test && npm run build` and `bash scripts/check_all.sh`.
+- **Slice 25 backend complete (S25-T1, S25-T2)**:
+  - Persisted `plan.txt` and `baseline_state.json` as run-root artifacts in the runstore, with new runstore read/write helpers and regression coverage.
+  - Added `GET /api/runs/{scenario}/{run_id}/plan` and `GET /api/runs/{scenario}/{run_id}/baseline`.
+  - Extended `POST /api/runs/{scenario}/start` to accept `clean` and `no_destroy` JSON flags, with deterministic mutual-exclusion validation.
+  - Added `GET /api/scenarios/{path}/run-mode`, using the same detection contract as the CLI: mockway resources, `terraform.tfstate`, and previous successful run.
+  - Updated the UI run starter to pass through `clean` and `no_destroy` flags to the CLI run command.
+  - Verified with focused API/UI tests, `go test ./internal/api ./internal/cli ./internal/runstore`, and `bash scripts/check_all.sh`.
+- **Slice 24 complete (S24-T1, S24-T2)**:
+  - Added `scenarios/training/incremental-project-paris.yaml` as the canonical evolving scenario fixture for incremental work.
+  - Added `TestRunCommandRealToolIncrementalMockwayE2E`, an opt-in real-tool E2E that evolves one scenario through webserver → PostgreSQL → Redis while preserving state with `--no-destroy`.
+  - Extended the same E2E to cover forced `--clean`, reseeding after clean destroy, final destroy without `--no-destroy`, and post-destroy fallback to clean auto-detection.
+  - Patched the sibling `../mockway` repo so source-built mockway now supports the provider calls surfaced by the E2E: `POST /rdb/v1/regions/{region}/instances/{id}/upgrade` and `GET /redis/v1/zones/{zone}/clusters/{id}/certificate`.
+  - Updated README with an explicit incremental operator workflow.
+  - Verified with `cd ../mockway && go test ./...`, `INFRAFACTORY_ENABLE_REALTOOL_INCREMENTAL=1 go test ./internal/cli -run TestRunCommandRealToolIncrementalMockwayE2E -count=1`, and a final `bash scripts/check_all.sh`.
+- **Slice 23 complete (S23-T1, S23-T2, S23-T3)**:
+  - Added `run --clean` and `run --no-destroy` flags with mutual-exclusion validation.
+  - Added incremental auto-detection using mockway state, `output/<scenario>/terraform.tfstate`, and the latest successful run for the scenario.
+  - Added mockway snapshot-at-run-start and restore-per-iteration behavior for incremental runs; clean runs continue using reset.
+  - Skipped destruction and holdouts under `--no-destroy`, and surfaced run mode in CLI output plus structured logs.
+  - Extended `run.json` metadata with `incremental` and `previous_run_id`.
+  - Preserved `terraform.tfstate` and `.terraform/` during incremental generated-file writes.
+  - Updated README CLI/operator guidance and refreshed run command goldens.
+  - Verified with `go test ./internal/cli ./internal/harness ./internal/runstore`, `go test -tags noui ./...`, and `bash scripts/check_all.sh`.
+- **Slice 22 complete (S22-T1, S22-T2)**:
+  - Added Mockway snapshot/restore support in the sibling `../mockway` repo using SQLite-backed state copies and DB reopen-on-restore behavior.
+  - Added unauthenticated admin endpoints `POST /mock/snapshot` and `POST /mock/restore`.
+  - Updated `POST /mock/reset` to clear any stored snapshot baseline.
+  - Added focused repository and HTTP lifecycle tests covering snapshot success, restore success, restore-without-snapshot, and reset-clears-snapshot behavior.
+  - Verified with `cd ../mockway && GOCACHE=/tmp/mockway-gocache GOMODCACHE=/tmp/mockway-gomodcache go test ./...`, `GOCACHE=/tmp/mockway-gocache GOMODCACHE=/tmp/mockway-gomodcache go test -tags noui ./...`, and `bash scripts/check_all.sh`.
 - **Run viewer fallback and run-date follow-up**:
   - Diagnosed the blank IaC viewer against the real local runstore: the affected runs had no persisted `generated/` snapshot directories even though `output/<scenario>/` still contained IaC.
   - Added a run-viewer fallback so older runs without stored snapshots show the current scenario output with an explicit warning instead of an empty preview.

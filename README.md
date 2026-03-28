@@ -239,7 +239,7 @@ Feature status snapshot:
 | `test` mock deploy + destroy | implemented | Runs mock reset/apply/state checks and destruction verification flow. |
 | `run` orchestration | implemented | Criteria-aware convergence and criteria-only holdout completion checks are wired. |
 | `mock` command lifecycle | implemented | `mock start`/`stop`/`status`/`logs` are wired with deterministic output/error behavior. |
-| sandbox/live deploy | planned (Layer 3) | Optional real Scaleway deploy gated by Layer 2 (ADR-0010, supersedes ADR-0003). |
+| sandbox/live deploy | implemented (Layer 3) | Optional real Scaleway deploy gated by Layer 2, using `terraform-live.tfstate`, real probes, and UI/API controls. |
 
 Completed slices:
 - Slices 1-17: core pipeline, CLI orchestration, generator transports, feedback-driven regeneration, logging, adaptive retry, issue remediation, and end-to-end pipeline stabilization.
@@ -247,13 +247,15 @@ Completed slices:
 - Slice 19 (`S19-T1`): reliability review of all Slice 18 code — fixed referential integrity (delete returns 409 when dependents exist), LB/Frontend/Backend update persistence, IAM defaults, RDB certificate checks, and cross-LB data leaks.
 - Slice 20 (`S20-T1`..`S20-T6`): scenario combination expansion — 6 new training scenarios exercising untested parameter combinations: MySQL engine + HA, large/xlarge compute sizes, multi-backend LB with TCP, private LB exposure, K8s/Redis/database overrides, public registry, selective IAM flags. Added prompt pitfalls for LB zone arguments, compute type mapping, and `assign_flexible_ipv6` conflicts. Expanded mockway server type catalog (GP1-L, GP1-XL, DEV1-L).
 - All 12 training scenarios pass `infrafactory run` on first iteration.
-- `S9-T8` (sandbox/live deploy) is unblocked by ADR-0010 and planned for Slices 26-29.
+- `S9-T8` (sandbox/live deploy) is implemented through Slices 26-29 under ADR-0010.
 
 ### Web UI Runtime Notes
 
 - `infrafactory ui` serves the embedded frontend in normal builds and API-only mode under `-tags noui`.
 - Run history lives under `/runs`; per-run IaC history lives under `/runs/<scenario>/<run_id>`.
+- Scenario pages expose incremental controls (`--clean`, `--no-destroy`) plus a Layer 3 toggle with backend-reported credential readiness.
 - Each run should write `run.json` immediately with `status: running` so the Live page can poll active state before terminal completion.
+- Live pages show run mode, Layer 3 enablement, plan/baseline artifacts, Layer 3 stage progress, and real probe failures when present.
 - Live logs use two sources:
   - primary: websocket stream at `/api/ws`
   - replay: per-run `app.log` from `GET /api/runs/{scenario}/{run_id}/log`
@@ -307,19 +309,14 @@ Notes on current runtime prerequisites:
 - Runtime wiring path: `buildRuntime(...)` selects `NewClaudeSeedGenerator(...)` for `agent.type=claude-code` and `NewOpenRouterSeedGenerator(...)` for `agent.type=openrouter`.
 - `openrouter` runtime path requires `OPENROUTER_API_KEY` at execution time; missing key surfaces deterministic `dependency_unavailable` failure output.
 - `validate`/`test`/`run` expect generated OpenTofu files and tool/runtime dependencies (`tofu`, Mockway, and Docker for `mock` lifecycle commands).
-- Sandbox/live deploy layer (Layer 3, real Scaleway) is planned but not yet implemented (see `docs/decisions/0010-layer3-real-scaleway-deploy.md`). Layer 2 (mockway) gates Layer 3.
-
-### Deferred and Planned
-
-The following are planned but not yet implemented:
-- Layer 3 real Scaleway deploy (ADR-0010, Slices 26-29) — optional, gated by Layer 2 mock validation passing first.
+- Sandbox/live deploy layer (Layer 3, real Scaleway) is implemented (see `docs/decisions/0010-layer3-real-scaleway-deploy.md`). Layer 2 (mockway) gates Layer 3. When enabled, real TCP/HTTP/DNS probes replace mock topology checks. Incremental runs snapshot mockway state before the first iteration and restore before each subsequent iteration. `test --no-destroy` skips post-test destruction to preserve state for incremental follow-up runs.
 
 Criteria support status:
-- `connectivity`: verified by structural topology checks against mock state (e.g. "compute has a private NIC on the same private network as the database"). Does not test real network reachability — no live environment exists.
-- `http_probe`: verified by checking that the expected LB, frontend, and port exist in mock state. Does not send real HTTP requests.
+- `connectivity`: uses mock topology checks when Layer 3 is disabled, and real TCP probes when Layer 3 is enabled.
+- `http_probe`: uses mock topology checks when Layer 3 is disabled, and real HTTP requests when Layer 3 is enabled.
 - `policy`: fully functional. Evaluates OPA rules against plan JSON (layer 1) and mock state (layer 2). No network required.
 - `destruction`: fully functional. Runs `tofu destroy` and verifies no orphan resources remain in mock state.
-- `dns_resolution`: cannot run. Auto-passes with explicit informational output because there is no real cloud environment to query.
+- `dns_resolution`: runs real DNS lookups when Layer 3 is enabled; otherwise it auto-passes with explicit informational output.
 
 ## Repository Layout
 
@@ -410,16 +407,26 @@ Important:
 - For `agent.type=openrouter`, set `OPENROUTER_API_KEY` and configure `agent.openrouter.model`.
 
 Useful UI routes:
+- `/scenarios/<group>/<name>` shows the scenario editor, run-mode detection, and start-run controls.
 - `/runs` shows global run history ordered by newest run first with filter controls.
 - `/runs/<scenario>/<run-id>` shows the per-run IaC viewer with per-iteration snapshot selection, diff view, richer syntax-highlighted code preview, and download actions.
-- `/live?scenario=<scenario>&run_id=<run-id>` shows live/log state for a specific run.
+- `/live?scenario=<scenario>&run_id=<run-id>` shows live/log state for a specific run, including run mode, raw plan text, and baseline mock state when available.
 - `/diagnostics` shows backend generator readiness checks (`claude-code` or `openrouter`).
 
 Per-run IaC history:
 - `output/<scenario>/` remains the mutable latest working output for a scenario.
 - `.infrafactory/runs/<scenario>/<run-id>/generated/` is the immutable IaC snapshot for that specific run.
 - `.infrafactory/runs/<scenario>/<run-id>/iterations/<n>/generated/` stores iteration-scoped IaC snapshots inside the run.
+- `.infrafactory/runs/<scenario>/<run-id>/plan.txt` stores the static-layer plan text for that run.
+- `.infrafactory/runs/<scenario>/<run-id>/baseline_state.json` stores the mockway baseline state detected before the run started.
 - The UI run detail page reads both the final run-scoped snapshot and iteration-scoped snapshots, supports diffing between snapshots, and later runs do not overwrite historical IaC views.
+
+Incremental UI workflow:
+- The scenario page polls `GET /api/scenarios/<path>/run-mode` and shows whether the next run will be `clean` or `incremental`.
+- `Run` supports the same incremental controls as the CLI:
+  - `Keep state` sends `no_destroy: true`
+  - `Force clean` sends `clean: true`
+- The Live page shows the persisted run mode from `run.json` plus collapsible `Plan Diff` and `Baseline State` panels when those artifacts exist.
 
 ## Happy Path (Claude Code)
 
@@ -453,6 +460,12 @@ go run ./cmd/infrafactory run scenarios/training/web-app-paris.yaml --config inf
 Optional capture mode for run diagnostics:
 ```bash
 INFRAFACTORY_CAPTURE_LLM_RAW=1 go run ./cmd/infrafactory run scenarios/training/web-app-paris.yaml --config infrafactory.yaml --repair-iterations-max 3 --output human
+```
+
+Incremental workflow examples:
+```bash
+go run ./cmd/infrafactory run scenarios/training/web-app-paris.yaml --config infrafactory.yaml --repair-iterations-max 3 --no-destroy
+go run ./cmd/infrafactory run scenarios/training/web-app-paris.yaml --config infrafactory.yaml --repair-iterations-max 3 --clean
 ```
 
 5. Confirm artifacts:
@@ -535,7 +548,7 @@ Secret-like detail tokens are redacted in log details (`token`, `api_key`, `secr
 `run` passes structured failure feedback into next-iteration generation (`FeedbackJSON`) with:
 - `layer`, `stage`, `check`, `command`, `detail`
 - optional: `policy`, `resource`
-- `failure_class`: `iac_validation`, `transport_runtime`, or `orchestration_control`
+- `failure_class`: `iac_validation`, `transport_runtime`, `orchestration_control`, `snapshot_failed`, `restore_failed`, `layer3_apply_failed`, `layer3_destroy_failed`, `probe_failed`, or `layer3_preflight_failed`
 
 Terminal control markers are intentionally excluded from iterative repair feedback entries.
 
@@ -614,6 +627,10 @@ Error contract:
 | `mockway.url` | yes | none | Mockway base URL used by deploy/destroy layers. |
 | `mockway.auto_reset` | no | `true` | Whether mock reset is expected before deploy checks. |
 | `validation.layers.*.enabled` | no | varies | Enables/disables layer execution paths. `sandbox_deploy` defaults to `false`; set to `true` for Layer 3 real Scaleway deploy (ADR-0010). |
+| `validation.real_probes.timeout_seconds` | no | `5` | Per-attempt timeout for Layer 3 TCP/HTTP/DNS probes. |
+| `validation.real_probes.retries` | no | `6` | Retry budget for Layer 3 probes to tolerate startup and propagation delays. |
+| `validation.real_probes.retry_delay_seconds` | no | `5` | Delay between Layer 3 probe attempts. |
+| `scaleway.sandbox_project_id` | no | none | Scaleway project ID used for Layer 3 real deploy. Required when `sandbox_deploy.enabled=true`. |
 | `paths.output` | no | `./output` | Generated IaC output root. |
 | `paths.policies` | no | `./policies` | Policy root used by harness validation. |
 
@@ -643,8 +660,8 @@ Holdout-only routing fields:
 - `type: holdout`
 - `references: <training-scenario-path>`
 
-Current auto-pass criteria:
-- `dns_resolution` is Layer 3 only and currently auto-passes with informational output until Layer 3 real Scaleway deploy is implemented (Slice 27).
+Layer 3 note:
+- `dns_resolution` requires Layer 3 to be enabled. Without Layer 3, it auto-passes with an informational support-matrix stage.
 
 ### Training Scenarios
 
@@ -790,12 +807,13 @@ Command tree currently exposed:
 - `init [--path <scenario-path>]`
 - `generate <scenario-path>`
 - `validate <scenario-path>`
-- `test <scenario-path>`
-- `run <scenario-path> [--repair-iterations-max N]`
+- `test <scenario-path> [--no-destroy]`
+- `run <scenario-path> [--repair-iterations-max N] [--clean] [--no-destroy]`
 - `mock start`
 - `mock stop`
 - `mock status`
 - `mock logs`
+- `ui [--addr <host:port>]`
 
 Global flags:
 - `--config` (default `./infrafactory.yaml`)
@@ -817,6 +835,20 @@ go run ./cmd/infrafactory validate scenarios/training/web-app-paris.yaml --confi
 go run ./cmd/infrafactory test scenarios/training/web-app-paris.yaml --config infrafactory.yaml --output human
 go run ./cmd/infrafactory run scenarios/training/web-app-paris.yaml --config infrafactory.yaml --repair-iterations-max 3 --output json
 ```
+
+Incremental run behavior:
+- `--clean` forces a fresh run and ignores any prior state signals.
+- `--no-destroy` skips post-convergence destroy and holdout execution so mockway state and `terraform.tfstate` remain available for the next run.
+- Without either flag, `run` auto-detects incremental mode only when mockway already has resources, `output/<scenario>/terraform.tfstate` exists, and the run store contains a previous successful run for the same scenario.
+
+Incremental operator workflow:
+1. Start from a baseline scenario such as `scenarios/training/incremental-project-paris.yaml`.
+2. Run the first pass with `--no-destroy` so the mock account state and `terraform.tfstate` remain available:
+   `go run ./cmd/infrafactory run scenarios/training/incremental-project-paris.yaml --config infrafactory.yaml --repair-iterations-max 3 --no-destroy`
+3. Edit the same scenario file to add the next resource slice, then rerun with `--no-destroy`.
+4. InfraFactory will report `run/mode: pass (incremental ...)` once the prior successful run, state file, and mockway resources all exist.
+5. Use `--clean` when you want to discard the preserved baseline and force a fresh apply from the current scenario definition.
+6. A normal run without `--no-destroy` still performs the final destroy; the next run will fall back to clean mode because the preserved baseline is gone.
 
 ### Practical example 4: Start Mockway via CLI wrapper
 

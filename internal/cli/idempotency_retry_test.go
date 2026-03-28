@@ -158,7 +158,7 @@ func TestValidateAndTestRetryAfterFailure(t *testing.T) {
 		configLoader:   config.Load,
 		scenarioLoader: defaultScenarioLoader,
 		deps: RuntimeDependencies{
-			MockDeploy: MockDeployHarnessRunnerFunc(func(context.Context, string, map[string]string) (*harness.MockDeployResult, error) {
+			MockDeploy: MockDeployHarnessRunnerFunc(func(context.Context, string, map[string]string, harness.MockDeployMode) (*harness.MockDeployResult, error) {
 				mockCalls++
 				if mockCalls == 1 {
 					return nil, &harness.MockDeployError{
@@ -305,10 +305,10 @@ func (f StaticHarnessRunnerFunc) Run(ctx context.Context, workDir string, env ma
 	return f(ctx, workDir, env)
 }
 
-type MockDeployHarnessRunnerFunc func(context.Context, string, map[string]string) (*harness.MockDeployResult, error)
+type MockDeployHarnessRunnerFunc func(context.Context, string, map[string]string, harness.MockDeployMode) (*harness.MockDeployResult, error)
 
-func (f MockDeployHarnessRunnerFunc) Run(ctx context.Context, outputDir string, env map[string]string) (*harness.MockDeployResult, error) {
-	return f(ctx, outputDir, env)
+func (f MockDeployHarnessRunnerFunc) Run(ctx context.Context, outputDir string, env map[string]string, mode harness.MockDeployMode) (*harness.MockDeployResult, error) {
+	return f(ctx, outputDir, env, mode)
 }
 
 type MockStarterFunc func(context.Context, config.MockwayConfig) error

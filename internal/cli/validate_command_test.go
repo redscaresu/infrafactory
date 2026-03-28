@@ -244,10 +244,16 @@ func TestValidateCommandSkipsWhenStaticLayerDisabled(t *testing.T) {
 	}
 }
 
-func TestValidateCommandFailsWhenSandboxLayerEnabled(t *testing.T) {
+func TestValidateCommandStillRunsStaticWhenSandboxLayerEnabled(t *testing.T) {
 	t.Parallel()
 
 	h := newCommandTestHarness(t)
+	static := &fakeStaticHarness{
+		result: &harness.StaticResult{
+			Stages:   []harness.StageResult{{Stage: "init"}, {Stage: "validate"}, {Stage: "plan"}, {Stage: "show"}},
+			PlanJSON: []byte(`{"planned_values":{"root_module":{}}}`),
+		},
+	}
 	opts := runtimeOptions{
 		configLoader: func(path string) (config.Config, error) {
 			cfg, err := config.Load(path)
@@ -258,7 +264,7 @@ func TestValidateCommandFailsWhenSandboxLayerEnabled(t *testing.T) {
 			return cfg, nil
 		},
 		scenarioLoader: defaultScenarioLoader,
-		deps:           RuntimeDependencies{Static: &fakeStaticHarness{}},
+		deps:           RuntimeDependencies{Static: static},
 	}
 
 	cmd := newValidateCommandForTest(opts)
@@ -267,18 +273,14 @@ func TestValidateCommandFailsWhenSandboxLayerEnabled(t *testing.T) {
 	cmd.SetErr(&bytes.Buffer{})
 	cmd.SetArgs([]string{h.ScenarioPath, "--config", h.ConfigPath})
 
-	err := cmd.Execute()
-	if err == nil {
-		t.Fatal("expected failure")
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected success, got %v", err)
 	}
-	if !strings.Contains(stdout.String(), "- sandbox_deploy/blocked: skip") {
-		t.Fatalf("expected sandbox blocked stage, got:\n%s", stdout.String())
+	if static.calls != 1 {
+		t.Fatalf("expected static harness call, got %d", static.calls)
 	}
-	if !strings.Contains(stdout.String(), "check=sandbox_deploy") {
-		t.Fatalf("expected sandbox failure detail, got:\n%s", stdout.String())
-	}
-	if !strings.Contains(stdout.String(), sandboxRealDeploySkippedMessage) {
-		t.Fatalf("expected cost-skip message in output, got:\n%s", stdout.String())
+	if !strings.Contains(stdout.String(), "- static/init: pass") {
+		t.Fatalf("expected static stages in output, got:\n%s", stdout.String())
 	}
 }
 

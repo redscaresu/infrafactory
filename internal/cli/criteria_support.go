@@ -6,7 +6,7 @@ import (
 	"github.com/redscaresu/infrafactory/internal/scenario"
 )
 
-func unsupportedCriteriaResult(sc scenario.Scenario) ([]StageSummary, []FailureSummary, error) {
+func unsupportedCriteriaResult(sc scenario.Scenario, sandboxEnabled bool) ([]StageSummary, []FailureSummary, error) {
 	specs, err := sc.ExecutableChecks()
 	if err != nil {
 		return nil, nil, fmt.Errorf("parse acceptance criteria: %w", err)
@@ -16,7 +16,7 @@ func unsupportedCriteriaResult(sc scenario.Scenario) ([]StageSummary, []FailureS
 	stages := make([]StageSummary, 0, 1)
 	failures := make([]FailureSummary, 0)
 	for idx, spec := range specs {
-		reason, supported, autoPass := criteriaSupportReason(spec.Type)
+		reason, supported, autoPass := criteriaSupportReason(spec.Type, sandboxEnabled)
 		if supported {
 			continue
 		}
@@ -39,7 +39,7 @@ func unsupportedCriteriaResult(sc scenario.Scenario) ([]StageSummary, []FailureS
 			Layer:  "criteria",
 			Stage:  "support_matrix",
 			Status: StageStatusSkip,
-			Detail: fmt.Sprintf("%d criteria auto-passed %s", autoPassCount, sandboxRealDeploySkippedMessage),
+			Detail: fmt.Sprintf("%d criteria auto-passed because Layer 3 is disabled", autoPassCount),
 		})
 	}
 
@@ -59,23 +59,20 @@ func unsupportedCriteriaResult(sc scenario.Scenario) ([]StageSummary, []FailureS
 	return stages, failures, nil
 }
 
-func criteriaSupportReason(criterionType string) (reason string, supported bool, autoPass bool) {
+func criteriaSupportReason(criterionType string, sandboxEnabled bool) (reason string, supported bool, autoPass bool) {
 	switch criterionType {
-	case "policy", "destruction":
+	case "policy", "destruction", "connectivity", "http_probe":
 		return "", true, false
-	case "connectivity", "http_probe":
-		return topologyAutoPassMessage(), false, true
 	case "dns_resolution":
+		if sandboxEnabled {
+			return "", true, false
+		}
 		return dnsResolutionAutoPassMessage(), false, true
 	default:
 		return "is not supported by the current criteria support matrix", false, false
 	}
 }
 
-func topologyAutoPassMessage() string {
-	return "requires live infrastructure to evaluate " + sandboxRealDeploySkippedMessage
-}
-
 func dnsResolutionAutoPassMessage() string {
-	return "currently automatically passes due to lack of real world cloud provider " + sandboxRealDeploySkippedMessage
+	return "currently automatically passes because Layer 3 real probes are disabled"
 }

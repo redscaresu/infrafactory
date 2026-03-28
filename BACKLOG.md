@@ -6,24 +6,26 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 
 | id | slice | title | priority | status | deps | owner |
 |---|---|---|---|---|---|---|
-| S29-T1 | Slice 29 | UI: Layer 3 toggle on scenario page + credential status indicator | P1 | todo | S28-T1 | — |
-| S29-T2 | Slice 29 | UI: Layer 3 progress + real probe results on Live page; layer3-status endpoint; update README Web UI section | P1 | todo | S29-T1 | — |
-| S28-T1 | Slice 28 | Incremental E2E against real Scaleway (3-stage --no-destroy + final destroy, opt-in) | P1 | todo | S27-T1, S24-T2 | — |
-| S27-T1 | Slice 27 | Real network probes (connectivity, http_probe, dns_resolution) for Layer 3; update README probe config + criteria status | P1 | todo | S26-T2 | — |
-| S26-T1 | Slice 26 | Dual-apply harness: Layer 3 tofu apply with separate terraform-live.tfstate + destroy behavior | P1 | todo | S23-T1 | — |
-| S26-T2 | Slice 26 | Layer 3 config/credential validation, prompt updates for project bootstrap, unit + opt-in integration tests; update README Layer 3 docs | P1 | todo | S26-T1 | — |
-| S25-T1 | Slice 25 | Backend: persist plan.txt and baseline_state.json artifacts; add GET /api/.../plan and /api/.../baseline endpoints | P1 | todo | S24-T2 | — |
-| S25-T2 | Slice 25 | Backend: accept no_destroy and clean flags in POST /api/runs/{scenario}/start; add GET /api/scenarios/{scenario}/run-mode detection endpoint | P1 | todo | S25-T1 | — |
-| S25-T3 | Slice 25 | Frontend: add --no-destroy and --clean toggles + auto-detected mode indicator to scenario page start run controls | P1 | todo | S25-T2 | — |
-| S25-T4 | Slice 25 | Frontend: add run mode badge, collapsible baseline state panel, and raw plan diff panel to Live page | P1 | todo | S25-T3 | — |
-| S25-T5 | Slice 25 | Frontend + backend tests for plan/baseline persistence, flag pass-through, toggle state, and panel rendering; update README Web UI section | P1 | todo | S25-T4 | — |
-| S24-T1 | Slice 24 | Single-file multi-stage incremental E2E test: edit scenario, re-run, verify incremental apply (3 stages) | P1 | todo | S23-T3 | — |
-| S24-T2 | Slice 24 | `--clean` regression test, post-destruction clean auto-detect, and README incremental workflow docs | P1 | todo | S24-T1 | — |
-| S23-T1 | Slice 23 | Add `--clean` and `--no-destroy` flags + incremental auto-detection logic to run loop | P1 | todo | S22-T1 | — |
-| S23-T2 | Slice 23 | Update MockDeployHarness: snapshot at run start, restore between iterations (incremental) or reset (clean) | P1 | todo | S23-T1 | — |
-| S23-T3 | Slice 23 | Add `incremental` and `previous_run_id` to RunMetadata; preserve .tfstate in incremental mode; update README CLI/config reference | P1 | todo | S23-T2 | — |
-| S22-T1 | Slice 22 | Mockway: add `POST /mock/snapshot` and `POST /mock/restore` endpoints with SQLite state copy | P1 | todo | — | — |
-| S22-T2 | Slice 22 | Mockway: integration tests for snapshot/restore/reset lifecycle | P1 | todo | S22-T1 | — |
+| M36 | Maintenance | Apply second-pass post-slice 22-29 hardening fixes and regressions | P1 | done | M35 | codex |
+| M35 | Maintenance | Remediate post-slice 22-29 review findings and add regressions | P1 | done | S29-T2 | codex |
+| S29-T1 | Slice 29 | UI: Layer 3 toggle on scenario page + credential status indicator | P1 | done | S28-T1 | codex |
+| S29-T2 | Slice 29 | UI: Layer 3 progress + real probe results on Live page; layer3-status endpoint; update README Web UI section | P1 | done | S29-T1 | codex |
+| S28-T1 | Slice 28 | Incremental E2E against real Scaleway (3-stage --no-destroy + final destroy, opt-in) | P1 | done | S27-T1, S24-T2 | codex |
+| S27-T1 | Slice 27 | Real network probes (connectivity, http_probe, dns_resolution) for Layer 3; update README probe config + criteria status | P1 | done | S26-T2 | codex |
+| S26-T1 | Slice 26 | Dual-apply harness: Layer 3 tofu apply with separate terraform-live.tfstate + destroy behavior | P1 | done | S23-T1 | codex |
+| S26-T2 | Slice 26 | Layer 3 config/credential validation, prompt updates for project bootstrap, unit + opt-in integration tests; update README Layer 3 docs | P1 | done | S26-T1 | codex |
+| S25-T1 | Slice 25 | Backend: persist plan.txt and baseline_state.json artifacts; add GET /api/.../plan and /api/.../baseline endpoints | P1 | done | S24-T2 | codex |
+| S25-T2 | Slice 25 | Backend: accept no_destroy and clean flags in POST /api/runs/{scenario}/start; add GET /api/scenarios/{scenario}/run-mode detection endpoint | P1 | done | S25-T1 | codex |
+| S25-T3 | Slice 25 | Frontend: add --no-destroy and --clean toggles + auto-detected mode indicator to scenario page start run controls | P1 | done | S25-T2 | codex |
+| S25-T4 | Slice 25 | Frontend: add run mode badge, collapsible baseline state panel, and raw plan diff panel to Live page | P1 | done | S25-T3 | codex |
+| S25-T5 | Slice 25 | Frontend + backend tests for plan/baseline persistence, flag pass-through, toggle state, and panel rendering; update README Web UI section | P1 | done | S25-T4 | codex |
+| S24-T1 | Slice 24 | Single-file multi-stage incremental E2E test: edit scenario, re-run, verify incremental apply (3 stages) | P1 | done | S23-T3 | codex |
+| S24-T2 | Slice 24 | `--clean` regression test, post-destruction clean auto-detect, and README incremental workflow docs | P1 | done | S24-T1 | codex |
+| S23-T1 | Slice 23 | Add `--clean` and `--no-destroy` flags + incremental auto-detection logic to run loop | P1 | done | S22-T1 | codex |
+| S23-T2 | Slice 23 | Update MockDeployHarness: snapshot at run start, restore between iterations (incremental) or reset (clean) | P1 | done | S23-T1 | codex |
+| S23-T3 | Slice 23 | Add `incremental` and `previous_run_id` to RunMetadata; preserve .tfstate in incremental mode; update README CLI/config reference | P1 | done | S23-T2 | codex |
+| S22-T1 | Slice 22 | Mockway: add `POST /mock/snapshot` and `POST /mock/restore` endpoints with SQLite state copy | P1 | done | — | codex |
+| S22-T2 | Slice 22 | Mockway: integration tests for snapshot/restore/reset lifecycle | P1 | done | S22-T1 | codex |
 | M34 | Maintenance | End-to-end pipeline stabilization: mockway endpoint fixes, self-review contract tightening, prompt pitfall updates | P1 | done | M33 | codex |
 | M33 | Maintenance | Document lazy provider-schema prompt injection and convergence hardening outcomes; close with two no-change review passes | P1 | done | M32 | codex |
 | M32 | Maintenance | Harden self-review convergence and stuck-signature specificity for run-loop retries | P1 | done | M31 | codex |

@@ -40,6 +40,12 @@ The previous iteration's generated code failed validation. These failures indica
 ```
 {{end}}
 
+{{if .Layer3Guidance}}
+## Layer 3 Guidance
+
+{{.Layer3Guidance}}
+{{end}}
+
 ## Instructions
 
 **IMPORTANT**: Do NOT use `data` source blocks. Use hardcoded values from the architecture plan and constraints. The mock environment does not support data source queries — `tofu plan` will fail if data sources are present.

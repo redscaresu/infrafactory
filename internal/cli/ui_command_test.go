@@ -23,7 +23,7 @@ func TestUIRunStarterPreflightRejectsMissingClaudeCLI(t *testing.T) {
 	cfg.Agent.Claude.Command = "infrafactory-missing-claude-test-binary"
 
 	starter := &uiRunStarter{cfg: cfg}
-	_, err := starter.StartRun(context.Background(), "web-app-paris", "training/web-app-paris")
+	_, err := starter.StartRun(context.Background(), api.StartRunRequest{ScenarioName: "web-app-paris", ScenarioPath: "training/web-app-paris"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -39,7 +39,7 @@ func TestUIRunStarterPreflightRejectsMissingOpenRouterAPIKey(t *testing.T) {
 	cfg.Agent.Type = generator.AgentTypeOpenRouter
 
 	starter := &uiRunStarter{cfg: cfg}
-	_, err := starter.StartRun(context.Background(), "web-app-paris", "training/web-app-paris")
+	_, err := starter.StartRun(context.Background(), api.StartRunRequest{ScenarioName: "web-app-paris", ScenarioPath: "training/web-app-paris"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -65,17 +65,18 @@ func TestUIRunStarterClearsBusyAfterAsyncCompletion(t *testing.T) {
 		},
 	}
 
-	if _, err := starter.StartRun(context.Background(), "web-app-paris", "training/web-app-paris"); err != nil {
+	req := api.StartRunRequest{ScenarioName: "web-app-paris", ScenarioPath: "training/web-app-paris"}
+	if _, err := starter.StartRun(context.Background(), req); err != nil {
 		t.Fatalf("start run: %v", err)
 	}
-	if _, err := starter.StartRun(context.Background(), "web-app-paris", "training/web-app-paris"); !errors.Is(err, api.ErrRunBusy) {
+	if _, err := starter.StartRun(context.Background(), req); !errors.Is(err, api.ErrRunBusy) {
 		t.Fatalf("expected busy error, got %v", err)
 	}
 
 	close(done)
 	time.Sleep(20 * time.Millisecond)
 
-	if _, err := starter.StartRun(context.Background(), "web-app-paris", "training/web-app-paris"); err != nil {
+	if _, err := starter.StartRun(context.Background(), req); err != nil {
 		t.Fatalf("expected busy flag to clear, got %v", err)
 	}
 
@@ -142,5 +143,16 @@ func TestUIRunStarterPreflightResolvesClaudeToAbsolutePath(t *testing.T) {
 	}
 	if starter.resolvedClaude != claudePath {
 		t.Fatalf("expected resolved claude path %q, got %q", claudePath, starter.resolvedClaude)
+	}
+}
+
+func TestEscapeJSONStringEscapesControlCharacters(t *testing.T) {
+	t.Parallel()
+
+	escaped := escapeJSONString("bad\tline\r\nnext\b\f")
+	for _, want := range []string{`\t`, `\r`, `\n`, `\b`, `\f`} {
+		if !strings.Contains(escaped, want) {
+			t.Fatalf("expected %q in escaped string %q", want, escaped)
+		}
 	}
 }

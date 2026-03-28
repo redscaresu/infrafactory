@@ -17,6 +17,7 @@ type PromptContext struct {
 	GeneratedFiles     string
 	FeedbackJSON       string
 	ProviderSchema     string
+	Layer3Guidance     string
 }
 
 func RenderPromptTemplate(phase string, templateBody string, ctx PromptContext) (string, error) {

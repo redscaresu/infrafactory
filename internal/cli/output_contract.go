@@ -251,14 +251,22 @@ func explainabilityFromFailure(failure FailureSummary) (ExplainabilitySummary, b
 		explanation.Summary = "policy check failed for mapped constraint"
 		explanation.Action = "verify constraint policy mapping and inspect plan/state inputs for the named policy"
 	case failure.Check == "connectivity" || failure.Check == "http_probe":
-		explanation.Summary = "criteria check failed for network reachability expectations"
-		explanation.Action = "validate topology targets/ports and inspect generated infrastructure connectivity"
+		if failure.Layer == "sandbox_deploy" {
+			explanation.Summary = "real Layer 3 network probe failed"
+			explanation.Action = "inspect live endpoints, bootstrap project wiring, and service readiness for the probe target"
+		} else {
+			explanation.Summary = "criteria check failed for network reachability expectations"
+			explanation.Action = "validate topology targets/ports and inspect generated infrastructure connectivity"
+		}
 	case failure.Check == "dns_resolution":
-		explanation.Summary = "dns_resolution is auto-passed without live cloud verification"
-		explanation.Action = "treat this as informational until real sandbox/live deploy validation exists"
-	case failure.Check == "sandbox_deploy":
-		explanation.Summary = "sandbox deploy execution is intentionally blocked by governance policy"
-		explanation.Action = "keep sandbox_deploy disabled until explicit cost and credentials approval is documented"
+		explanation.Summary = "real Layer 3 DNS probe failed"
+		explanation.Action = "inspect DNS records, propagation timing, and the generated domain/output wiring"
+	case failure.Check == "credentials":
+		explanation.Summary = "Layer 3 real Scaleway deploy is enabled but credentials are unavailable"
+		explanation.Action = "set SCW_ACCESS_KEY and SCW_SECRET_KEY before enabling sandbox_deploy"
+	case failure.Check == "real_probe":
+		explanation.Summary = "real probe harness failed before probe evaluation completed"
+		explanation.Action = "inspect terraform-live.tfstate and probe target resolution for the requested criteria"
 	case failure.Check == "destruction" || failure.Check == "orphan_check":
 		explanation.Summary = "destruction criteria failed to prove clean teardown"
 		explanation.Action = "inspect destroy logs/state and ensure no orphaned resources remain"

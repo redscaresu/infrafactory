@@ -18,7 +18,9 @@ import (
 
 type stubMockStateClient struct{}
 
-func (stubMockStateClient) Reset(context.Context) error { return nil }
+func (stubMockStateClient) Reset(context.Context) error    { return nil }
+func (stubMockStateClient) Snapshot(context.Context) error { return nil }
+func (stubMockStateClient) Restore(context.Context) error  { return nil }
 func (stubMockStateClient) State(context.Context) ([]byte, error) {
 	return []byte("{}"), nil
 }

@@ -6,16 +6,32 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/redscaresu/infrafactory/internal/feedback"
 	"github.com/redscaresu/infrafactory/internal/generator"
+	"github.com/redscaresu/infrafactory/internal/harness"
 	"github.com/redscaresu/infrafactory/internal/runstore"
 	"github.com/redscaresu/infrafactory/internal/scenario"
 	"github.com/spf13/cobra"
 )
 
 type runIDContextKey struct{}
+
+type runMode string
+
+const (
+	runModeClean       runMode = "clean"
+	runModeIncremental runMode = "incremental"
+)
+
+type detectedRunMode struct {
+	Mode          runMode
+	Reason        string
+	PreviousRunID string
+	BaselineState []byte
+}
 
 func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) error {
 	scenarioPath := args[0]
@@ -30,33 +46,6 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 	if err != nil {
 		return fmt.Errorf("load scenario %q: %w", scenarioPath, err)
 	}
-	if runtime.Config.Validation.Layers.SandboxDeploy.Enabled {
-		result := OutputResult{
-			Command:  "run",
-			Scenario: sc.Name,
-			Status:   CommandStatusFailed,
-			Stages: []StageSummary{
-				{Layer: "sandbox_deploy", Stage: "blocked", Status: StageStatusSkip, Detail: sandboxBlockedStageDetail()},
-			},
-			Failures: []FailureSummary{
-				{
-					Layer:   "sandbox_deploy",
-					Stage:   "blocked",
-					Check:   "sandbox_deploy",
-					Command: "layer gate",
-					Detail:  sandboxDeferredDetail(),
-				},
-			},
-		}
-		if err := writeCommandOutput(cmd, result); err != nil {
-			return err
-		}
-		return &CLIError{
-			Op:   "run",
-			Code: errorCodeCommandFailed,
-			Err:  fmt.Errorf("sandbox deploy layer is blocked"),
-		}
-	}
 
 	startedAt := time.Now().UTC()
 	runID, _ := cmd.Context().Value(runIDContextKey{}).(string)
@@ -64,12 +53,35 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 		runID = startedAt.Format("20060102T150405Z0700")
 	}
 	store := runstore.NewFilesystemStore(resolveRunStoreRoot())
+	mode, err := detectRunMode(cmd.Context(), runtime, store, sc.Name, runtime.OutputDir(), controls)
+	if err != nil {
+		return err
+	}
+	if mode.Mode == runModeIncremental && len(mode.BaselineState) > 0 {
+		if err := store.WriteRunArtifact(sc.Name, runID, "baseline_state.json", mode.BaselineState); err != nil {
+			return fmt.Errorf("write baseline state artifact: %w", err)
+		}
+	}
+	if mode.Mode == runModeIncremental {
+		if err := runtime.Deps.MockState.Snapshot(cmd.Context()); err != nil {
+			return fmt.Errorf("snapshot mockway baseline: %w", err)
+		}
+	}
 	logPath := filepath.Join(resolveRunStoreRoot(), sc.Name, runID, "app.log")
 	closeRunLogSink, err := runtime.Logger.AddFileSink(logPath)
 	if err == nil {
 		defer func() {
 			_ = closeRunLogSink()
 		}()
+	} else {
+		runtime.Logger.Log(LogEntry{
+			Level:   logLevelError,
+			Command: "run",
+			Event:   "run_log_sink_unavailable",
+			Status:  "warn",
+			RunID:   runID,
+			Detail:  fmt.Sprintf("path=%s error=%v", logPath, err),
+		})
 	}
 	runtime.Logger.Log(LogEntry{
 		Level:   logLevelInfo,
@@ -77,19 +89,24 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 		Event:   "run_start",
 		Status:  "start",
 		RunID:   runID,
-		Detail:  fmt.Sprintf("repair_iterations_max=%d", repairIterationsMax),
+		Detail:  fmt.Sprintf("repair_iterations_max=%d run_mode=%s no_destroy=%t previous_run_id=%s", repairIterationsMax, mode.Mode, controls.NoDestroy, mode.PreviousRunID),
 	})
 	if err := store.WriteRunMetadata(runstore.RunMetadata{
-		Schema:    runstore.RunMetadataSchemaVersion,
-		Scenario:  sc.Name,
-		RunID:     runID,
-		Status:    "running",
-		StartedAt: startedAt,
+		Schema:        runstore.RunMetadataSchemaVersion,
+		Scenario:      sc.Name,
+		RunID:         runID,
+		Status:        "running",
+		Incremental:   mode.Mode == runModeIncremental,
+		Layer3Enabled: runtime.Config.Validation.Layers.SandboxDeploy.Enabled,
+		PreviousRunID: mode.PreviousRunID,
+		StartedAt:     startedAt,
 	}); err != nil {
 		return fmt.Errorf("write initial run metadata: %w", err)
 	}
 
-	allStages := make([]StageSummary, 0)
+	allStages := []StageSummary{
+		{Layer: "run", Stage: "mode", Status: StageStatusPass, Detail: fmt.Sprintf("%s (%s)", mode.Mode, mode.Reason)},
+	}
 	allFailures := make([]FailureSummary, 0)
 	var previousFailures []feedback.Failure
 	var previousIterationFailures []FailureSummary
@@ -111,7 +128,7 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 			Iteration: iteration,
 		})
 		completed = iteration
-		stages, failures := runIteration(cmd.Context(), runID, iteration, sc.Name, scenarioPath, runtime, store, captureLLMRaw, previousIterationFailures)
+		stages, failures := runIteration(cmd.Context(), runID, iteration, sc.Name, scenarioPath, runtime, store, captureLLMRaw, previousIterationFailures, mode.Mode, controls.NoDestroy)
 		allStages = append(allStages, stages...)
 
 		if err := persistRunIteration(store, sc.Name, runID, iteration, stages, failures); err != nil {
@@ -205,7 +222,7 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 		Detail:  fmt.Sprintf("completed_iterations=%d", completed),
 	})
 
-	if terminalReason == "target_reached" {
+	if terminalReason == "target_reached" && !controls.NoDestroy {
 		holdoutStages, holdoutFailures, err := runCriteriaOnlyHoldouts(cmd.Context(), runtime, scenarioPath)
 		if err != nil {
 			return fmt.Errorf("run holdout checks: %w", err)
@@ -213,6 +230,8 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 		allStages = append(allStages, holdoutStages...)
 		allFailures = append(allFailures, holdoutFailures...)
 		holdoutBlocked = len(holdoutFailures) > 0
+	} else if terminalReason == "target_reached" && controls.NoDestroy {
+		allStages = append(allStages, StageSummary{Layer: "holdout", Stage: "skipped", Status: StageStatusSkip, Detail: "skipped by --no-destroy"})
 	}
 
 	status := CommandStatusSuccess
@@ -226,6 +245,9 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 		RunID:          runID,
 		Status:         string(status),
 		TerminalReason: terminalReason,
+		Incremental:    mode.Mode == runModeIncremental,
+		Layer3Enabled:  runtime.Config.Validation.Layers.SandboxDeploy.Enabled,
+		PreviousRunID:  mode.PreviousRunID,
 		StartedAt:      startedAt,
 	}); err != nil {
 		return fmt.Errorf("write run metadata: %w", err)
@@ -330,6 +352,8 @@ func runIteration(
 	store *runstore.FilesystemStore,
 	captureLLMRaw bool,
 	previousIterationFailures []FailureSummary,
+	mode runMode,
+	noDestroy bool,
 ) ([]StageSummary, []FailureSummary) {
 	stages := make([]StageSummary, 0, 3)
 	failures := make([]FailureSummary, 0)
@@ -359,12 +383,15 @@ func runIteration(
 			testResult OutputResult
 		)
 		if step.name == "test" {
-			testResult, err = executeTest(ctx, runtime, scenarioPath)
+			testResult, err = executeTest(ctx, runtime, scenarioPath, testExecutionOptions{
+				MockDeployMode: mockDeployModeForRunMode(mode),
+				SkipDestroy:    noDestroy,
+			})
 		} else {
 			switch step.name {
 			case "generate":
 				var generated *generator.GeneratedCode
-				_, generated, err = generateAndWriteFilesWithResult(ctx, runtime, scenarioPath, iteration, previousIterationFailures)
+				_, generated, err = generateAndWriteFilesWithResult(ctx, runtime, scenarioPath, iteration, previousIterationFailures, generatedFileWriteModeForRunMode(mode))
 				if err == nil {
 					err = store.WriteGeneratedFiles(scenarioName, runID, generated.Files)
 				}
@@ -375,7 +402,14 @@ func runIteration(
 					err = persistLLMRawPhaseResponses(store, scenarioName, runID, iteration, generated.Metadata.Phases)
 				}
 			case "validate":
-				testResult, err = executeValidate(ctx, runtime, scenarioPath)
+				var artifacts validateArtifacts
+				testResult, artifacts, err = executeValidateWithArtifacts(ctx, runtime, scenarioPath)
+				if len(artifacts.PlanText) > 0 {
+					writeErr := store.WriteRunArtifact(scenarioName, runID, "plan.txt", artifacts.PlanText)
+					if writeErr != nil && err == nil {
+						err = writeErr
+					}
+				}
 			default:
 				err = fmt.Errorf("unsupported run step %q", step.name)
 			}
@@ -466,7 +500,7 @@ func runCriteriaOnlyHoldouts(ctx context.Context, runtime *CommandRuntime, train
 
 		// Criteria-only holdouts validate against the generated code of the
 		// already-converged training scenario, not their own output path.
-		result, err := executeTestWithScenario(ctx, runtime, sc, runtime.OutputDir())
+		result, err := executeTestWithScenario(ctx, runtime, sc, runtime.OutputDir(), testExecutionOptions{MockDeployMode: harness.MockDeployModeClean})
 		if err != nil {
 			stages = append(stages, StageSummary{Layer: "holdout", Stage: holdout.ScenarioName, Status: StageStatusFail})
 			if len(result.Failures) == 0 {
@@ -508,6 +542,8 @@ func runCriteriaOnlyHoldouts(ctx context.Context, runtime *CommandRuntime, train
 
 type runControls struct {
 	RepairIterationsMax int
+	Clean               bool
+	NoDestroy           bool
 }
 
 const transportFailureRetryBudget = 2
@@ -516,6 +552,17 @@ func resolveRunControls(cmd *cobra.Command, runtime *CommandRuntime) (runControl
 	repairMax, err := cmd.Flags().GetInt("repair-iterations-max")
 	if err != nil {
 		return runControls{}, &CLIError{Op: "run", Code: errorCodeUsage, Err: fmt.Errorf("read --repair-iterations-max flag: %w", err)}
+	}
+	clean, err := cmd.Flags().GetBool("clean")
+	if err != nil {
+		return runControls{}, &CLIError{Op: "run", Code: errorCodeUsage, Err: fmt.Errorf("read --clean flag: %w", err)}
+	}
+	noDestroy, err := cmd.Flags().GetBool("no-destroy")
+	if err != nil {
+		return runControls{}, &CLIError{Op: "run", Code: errorCodeUsage, Err: fmt.Errorf("read --no-destroy flag: %w", err)}
+	}
+	if clean && noDestroy {
+		return runControls{}, &CLIError{Op: "run", Code: errorCodeUsage, Err: fmt.Errorf("clean and no-destroy are mutually exclusive")}
 	}
 
 	if repairMax == 0 {
@@ -528,7 +575,97 @@ func resolveRunControls(cmd *cobra.Command, runtime *CommandRuntime) (runControl
 
 	return runControls{
 		RepairIterationsMax: repairMax,
+		Clean:               clean,
+		NoDestroy:           noDestroy,
 	}, nil
+}
+
+func detectRunMode(ctx context.Context, runtime *CommandRuntime, store *runstore.FilesystemStore, scenarioName, outputDir string, controls runControls) (detectedRunMode, error) {
+	if controls.Clean {
+		statePayload, err := runtime.Deps.MockState.State(ctx)
+		if err != nil {
+			return detectedRunMode{}, fmt.Errorf("capture baseline state for clean run: %w", err)
+		}
+		return detectedRunMode{Mode: runModeClean, Reason: "forced by --clean", BaselineState: statePayload}, nil
+	}
+
+	statePayload, err := runtime.Deps.MockState.State(ctx)
+	if err != nil {
+		return detectedRunMode{}, fmt.Errorf("detect run mode from mockway state: %w", err)
+	}
+	hasMockResources, err := mockStateHasResources(statePayload)
+	if err != nil {
+		return detectedRunMode{}, fmt.Errorf("decode mockway state for run mode detection: %w", err)
+	}
+	hasTFState := tfStateExists(outputDir)
+	previousRunID, err := store.LatestSuccessfulRunID(scenarioName)
+	if err != nil {
+		return detectedRunMode{}, fmt.Errorf("detect previous successful run: %w", err)
+	}
+
+	missing := make([]string, 0, 3)
+	if !hasMockResources {
+		missing = append(missing, "mockway state")
+	}
+	if !hasTFState {
+		missing = append(missing, "terraform.tfstate")
+	}
+	if previousRunID == "" {
+		missing = append(missing, "previous successful run")
+	}
+	if len(missing) == 0 {
+		return detectedRunMode{
+			Mode:          runModeIncremental,
+			Reason:        "auto-detected from mockway state, terraform.tfstate, and previous successful run",
+			PreviousRunID: previousRunID,
+			BaselineState: statePayload,
+		}, nil
+	}
+
+	return detectedRunMode{
+		Mode:          runModeClean,
+		Reason:        "missing " + strings.Join(missing, ", "),
+		BaselineState: statePayload,
+	}, nil
+}
+
+func mockStateHasResources(payload []byte) (bool, error) {
+	var state map[string]any
+	if err := json.Unmarshal(payload, &state); err != nil {
+		return false, err
+	}
+	for _, rootNode := range state {
+		rootMap, ok := rootNode.(map[string]any)
+		if !ok {
+			continue
+		}
+		for _, value := range rootMap {
+			items, ok := value.([]any)
+			if ok && len(items) > 0 {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
+func tfStateExists(outputDir string) bool {
+	_, err := os.Stat(filepath.Join(outputDir, "terraform.tfstate"))
+	return err == nil
+}
+
+func mockDeployModeForRunMode(mode runMode) harness.MockDeployMode {
+	if mode == runModeIncremental {
+		return harness.MockDeployModeIncremental
+	}
+	return harness.MockDeployModeClean
+}
+
+func generatedFileWriteModeForRunMode(mode runMode) generatedFileWriteMode {
+	if mode == runModeIncremental {
+		return generatedFileWriteModeIncremental
+	}
+	return generatedFileWriteModeClean
 }
 
 func toFeedbackFailures(failures []FailureSummary) []feedback.Failure {

@@ -21,33 +21,18 @@ func runValidateCommand(cmd *cobra.Command, args []string, runtime *CommandRunti
 }
 
 func executeValidate(ctx context.Context, runtime *CommandRuntime, scenarioPath string) (OutputResult, error) {
+	result, _, err := executeValidateWithArtifacts(ctx, runtime, scenarioPath)
+	return result, err
+}
+
+type validateArtifacts struct {
+	PlanText []byte
+}
+
+func executeValidateWithArtifacts(ctx context.Context, runtime *CommandRuntime, scenarioPath string) (OutputResult, validateArtifacts, error) {
 	sc, err := runtime.LoadScenario(scenarioPath)
 	if err != nil {
-		return OutputResult{}, fmt.Errorf("load scenario %q: %w", scenarioPath, err)
-	}
-	if runtime.Config.Validation.Layers.SandboxDeploy.Enabled {
-		result := OutputResult{
-			Command:  "validate",
-			Scenario: sc.Name,
-			Status:   CommandStatusFailed,
-			Stages: []StageSummary{
-				{Layer: "sandbox_deploy", Stage: "blocked", Status: StageStatusSkip, Detail: sandboxBlockedStageDetail()},
-			},
-			Failures: []FailureSummary{
-				{
-					Layer:   "sandbox_deploy",
-					Stage:   "blocked",
-					Check:   "sandbox_deploy",
-					Command: "layer gate",
-					Detail:  sandboxDeferredDetail(),
-				},
-			},
-		}
-		return result, &CLIError{
-			Op:   "validate",
-			Code: errorCodeCommandFailed,
-			Err:  errors.New("sandbox deploy layer is blocked"),
-		}
+		return OutputResult{}, validateArtifacts{}, fmt.Errorf("load scenario %q: %w", scenarioPath, err)
 	}
 	if !runtime.Config.Validation.Layers.Static.Enabled {
 		result := OutputResult{
@@ -58,27 +43,28 @@ func executeValidate(ctx context.Context, runtime *CommandRuntime, scenarioPath 
 				{Layer: "static", Stage: "disabled", Status: StageStatusSkip},
 			},
 		}
-		return result, nil
+		return result, validateArtifacts{}, nil
 	}
 	if runtime.Deps.Static == nil {
-		return OutputResult{}, fmt.Errorf("static harness dependency unavailable: %w", ErrDependencyUnavailable)
+		return OutputResult{}, validateArtifacts{}, fmt.Errorf("static harness dependency unavailable: %w", ErrDependencyUnavailable)
 	}
 
 	staticResult, staticErr := runtime.Deps.Static.Run(ctx, runtime.OutputDir(), validateCommandEnv(runtime))
 	stages := toValidateStageSummaries(staticResult, staticErr)
 	failures := make([]FailureSummary, 0)
+	artifacts := validateArtifacts{PlanText: extractPlanText(staticResult)}
 
 	if staticFailure, ok := harness.StaticFailureFromError(staticErr); ok {
 		failures = append(failures, toFailureSummary(*staticFailure))
 	} else if staticErr != nil {
-		return OutputResult{}, fmt.Errorf("run static harness: %w", staticErr)
+		return OutputResult{}, validateArtifacts{}, fmt.Errorf("run static harness: %w", staticErr)
 	}
 
 	if staticErr == nil {
 		policyPaths := resolvePolicyPaths(runtime.Config.Paths.Policies, runtime.Config.Validation.Layers.Static.PolicyPaths)
 		policyFailures, err := harness.EvaluatePlanPoliciesWithConstraints(ctx, staticResult.PlanJSON, sc.Constraints, policyPaths)
 		if err != nil {
-			return OutputResult{}, fmt.Errorf("evaluate static policies: %w", err)
+			return OutputResult{}, validateArtifacts{}, fmt.Errorf("evaluate static policies: %w", err)
 		}
 		if len(policyFailures) > 0 {
 			stages = append(stages, StageSummary{
@@ -113,14 +99,26 @@ func executeValidate(ctx context.Context, runtime *CommandRuntime, scenarioPath 
 		Failures: failures,
 	}
 	if status == CommandStatusFailed {
-		return result, &CLIError{
+		return result, artifacts, &CLIError{
 			Op:   "validate",
 			Code: errorCodeCommandFailed,
 			Err:  errors.New("validation failed"),
 		}
 	}
 
-	return result, nil
+	return result, artifacts, nil
+}
+
+func extractPlanText(result *harness.StaticResult) []byte {
+	if result == nil {
+		return nil
+	}
+	for _, stage := range result.Stages {
+		if stage.Stage == "plan" && stage.Stdout != "" {
+			return []byte(stage.Stdout)
+		}
+	}
+	return nil
 }
 
 func validateCommandEnv(runtime *CommandRuntime) map[string]string {

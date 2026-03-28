@@ -2,15 +2,26 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  buildRunBaselineURL,
+  buildRunPlanURL,
   compareRunIDs,
   deriveFailureHint,
   deriveLiveConsoleNotice,
   filterRuns,
+  formatBaselineState,
   formatRunDate,
   mergeConsoleLines,
   selectLatestRun,
   synthesizeLiveConsoleLines
 } from "../src/lib/run-view.js";
+
+test("buildRunPlanURL encodes scenario and run id", () => {
+  assert.equal(buildRunPlanURL("web app", "run/1"), "/api/runs/web%20app/run%2F1/plan");
+});
+
+test("buildRunBaselineURL encodes scenario and run id", () => {
+  assert.equal(buildRunBaselineURL("web app", "run/1"), "/api/runs/web%20app/run%2F1/baseline");
+});
 
 test("selectLatestRun prefers running run within a scenario", () => {
   const runs = [
@@ -100,4 +111,9 @@ test("mergeConsoleLines appends live lines after replay lines without duplicatio
   );
 
   assert.deepEqual(merged, ['{"event":"run_start"}', '{"event":"iteration_start"}', '{"event":"stage_start"}']);
+});
+
+test("formatBaselineState pretty prints valid json and preserves invalid text", () => {
+  assert.equal(formatBaselineState('{"instance":{"servers":[{"id":"srv-1"}]}}'), '{\n  "instance": {\n    "servers": [\n      {\n        "id": "srv-1"\n      }\n    ]\n  }\n}');
+  assert.equal(formatBaselineState("not-json"), "not-json");
 });

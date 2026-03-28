@@ -1,6 +1,8 @@
 package api
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -127,6 +129,16 @@ func scenarioByPathHandler(state *serverState) http.HandlerFunc {
 			writeJSONError(w, http.StatusNotFound, "scenario path not provided")
 			return
 		}
+		runModeRequest := false
+		layer3StatusRequest := false
+		if strings.HasSuffix(relPath, "/run-mode") {
+			runModeRequest = true
+			relPath = strings.TrimSuffix(relPath, "/run-mode")
+		} else if strings.HasSuffix(relPath, "/layer3-status") {
+			layer3StatusRequest = true
+			relPath = strings.TrimSuffix(relPath, "/layer3-status")
+		}
+
 		scenarioFile, err := resolveScenarioFile(state.cfg.Paths.Scenarios, relPath)
 		if err != nil {
 			writeJSONError(w, http.StatusForbidden, err.Error())
@@ -135,13 +147,60 @@ func scenarioByPathHandler(state *serverState) http.HandlerFunc {
 
 		switch r.Method {
 		case http.MethodGet:
+			if runModeRequest {
+				handleGetScenarioRunMode(w, r.Context(), state, relPath, scenarioFile)
+				return
+			}
+			if layer3StatusRequest {
+				handleGetScenarioLayer3Status(w, state, relPath, scenarioFile)
+				return
+			}
 			handleGetScenarioByPath(w, state, relPath, scenarioFile)
 		case http.MethodPut:
+			if runModeRequest || layer3StatusRequest {
+				writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+				return
+			}
 			handlePutScenarioByPath(w, r, state, scenarioFile)
 		default:
 			writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		}
 	}
+}
+
+func handleGetScenarioLayer3Status(w http.ResponseWriter, state *serverState, relPath, scenarioFile string) {
+	if _, _, err := loadScenarioFile(scenarioFile, state.scenarioSchemaPathCandidates()); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			writeJSONError(w, http.StatusNotFound, "scenario not found")
+			return
+		}
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	missing := make([]string, 0, 2)
+	if strings.TrimSpace(os.Getenv("SCW_ACCESS_KEY")) == "" {
+		missing = append(missing, "SCW_ACCESS_KEY")
+	}
+	if strings.TrimSpace(os.Getenv("SCW_SECRET_KEY")) == "" {
+		missing = append(missing, "SCW_SECRET_KEY")
+	}
+	ready := len(missing) == 0
+	detail := "Layer 3 credentials ready"
+	if !ready {
+		detail = "Missing " + strings.Join(missing, ", ")
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"name":                   filepath.Base(relPath),
+		"path":                   relPath,
+		"config_default_enabled": state.cfg.Validation.Layers.SandboxDeploy.Enabled,
+		"credentials_ready":      ready,
+		"missing_credentials":    missing,
+		"project_id_configured":  strings.TrimSpace(state.cfg.Scaleway.SandboxProjectID) != "",
+		"ready":                  ready,
+		"detail":                 detail,
+	})
 }
 
 func handleGetScenarioByPath(w http.ResponseWriter, state *serverState, relPath, scenarioFile string) {
@@ -220,6 +279,93 @@ func latestRunSummary(store *runstore.FilesystemStore, scenarioName string) *run
 		Status:         latest.Status,
 		TerminalReason: latest.TerminalReason,
 	}
+}
+
+func handleGetScenarioRunMode(w http.ResponseWriter, ctx context.Context, state *serverState, relPath, scenarioFile string) {
+	sc, _, err := loadScenarioFile(scenarioFile, state.scenarioSchemaPathCandidates())
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			writeJSONError(w, http.StatusNotFound, "scenario not found")
+			return
+		}
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if state.mockState == nil {
+		writeJSONError(w, http.StatusNotImplemented, "mock state detection is not configured")
+		return
+	}
+
+	statePayload, err := state.mockState.State(ctx)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	hasMockResources, err := apiMockStateHasResources(statePayload)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("decode mock state for run mode detection: %v", err))
+		return
+	}
+	hasTFState := apiTFStateExists(filepath.Join(state.cfg.Paths.Output, sc.Name))
+	previousRunID, err := state.store.LatestSuccessfulRunID(sc.Name)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	missing := make([]string, 0, 3)
+	if !hasMockResources {
+		missing = append(missing, "mockway state")
+	}
+	if !hasTFState {
+		missing = append(missing, "terraform.tfstate")
+	}
+	if previousRunID == "" {
+		missing = append(missing, "previous successful run")
+	}
+
+	mode := "incremental"
+	reason := "auto-detected from mockway state, terraform.tfstate, and previous successful run"
+	if len(missing) > 0 {
+		mode = "clean"
+		reason = "missing " + strings.Join(missing, ", ")
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"name":                        sc.Name,
+		"path":                        relPath,
+		"mode":                        mode,
+		"reason":                      reason,
+		"previous_run_id":             previousRunID,
+		"has_mock_resources":          hasMockResources,
+		"has_tfstate":                 hasTFState,
+		"has_previous_successful_run": previousRunID != "",
+	})
+}
+
+func apiMockStateHasResources(payload []byte) (bool, error) {
+	var state map[string]any
+	if err := json.Unmarshal(payload, &state); err != nil {
+		return false, err
+	}
+	for _, rootNode := range state {
+		rootMap, ok := rootNode.(map[string]any)
+		if !ok {
+			continue
+		}
+		for _, value := range rootMap {
+			items, ok := value.([]any)
+			if ok && len(items) > 0 {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
+func apiTFStateExists(outputDir string) bool {
+	_, err := os.Stat(filepath.Join(outputDir, "terraform.tfstate"))
+	return err == nil
 }
 
 func parseTailPath(fullPath, prefix string) (string, bool) {

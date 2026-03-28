@@ -38,6 +38,12 @@ The previous iteration's generated code failed validation. Pay special attention
 ```
 {{end}}
 
+{{if .Layer3Guidance}}
+## Layer 3 Guidance
+
+{{.Layer3Guidance}}
+{{end}}
+
 ## Review Checklist
 
 1. **No data sources**: Are there any `data` source blocks? Remove them — the mock environment does not support data source queries. Use hardcoded values from the architecture plan instead.

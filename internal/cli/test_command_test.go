@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/redscaresu/infrafactory/internal/config"
+	"github.com/redscaresu/infrafactory/internal/feedback"
 	"github.com/redscaresu/infrafactory/internal/harness"
 	"github.com/redscaresu/infrafactory/internal/scenario"
 	"github.com/spf13/cobra"
@@ -23,7 +24,7 @@ type fakeMockDeployHarness struct {
 	lastCtx context.Context
 }
 
-func (f *fakeMockDeployHarness) Run(ctx context.Context, workDir string, _ map[string]string) (*harness.MockDeployResult, error) {
+func (f *fakeMockDeployHarness) Run(ctx context.Context, workDir string, _ map[string]string, _ harness.MockDeployMode) (*harness.MockDeployResult, error) {
 	f.calls++
 	f.dirs = append(f.dirs, workDir)
 	f.lastCtx = ctx
@@ -40,6 +41,49 @@ type fakeDestroyHarness struct {
 func (f *fakeDestroyHarness) Run(ctx context.Context, _ string, _ map[string]string) (*harness.DestroyResult, error) {
 	f.calls++
 	f.lastCtx = ctx
+	return f.result, f.err
+}
+
+type fakeSandboxDeployHarness struct {
+	result  *harness.SandboxDeployResult
+	err     error
+	calls   int
+	lastCtx context.Context
+}
+
+func (f *fakeSandboxDeployHarness) Run(ctx context.Context, _ string, _ map[string]string) (*harness.SandboxDeployResult, error) {
+	f.calls++
+	f.lastCtx = ctx
+	return f.result, f.err
+}
+
+type fakeSandboxDestroyHarness struct {
+	result  *harness.SandboxDestroyResult
+	err     error
+	calls   int
+	lastCtx context.Context
+}
+
+func (f *fakeSandboxDestroyHarness) Run(ctx context.Context, _ string, _ map[string]string) (*harness.SandboxDestroyResult, error) {
+	f.calls++
+	f.lastCtx = ctx
+	return f.result, f.err
+}
+
+type fakeRealProbeHarness struct {
+	result   *harness.RealProbeResult
+	err      error
+	calls    int
+	lastCtx  context.Context
+	lastName string
+	lastDir  string
+}
+
+func (f *fakeRealProbeHarness) Run(ctx context.Context, workDir string, scenarioName string, _ []harness.ProbeCheck) (*harness.RealProbeResult, error) {
+	f.calls++
+	f.lastCtx = ctx
+	f.lastName = scenarioName
+	f.lastDir = workDir
 	return f.result, f.err
 }
 
@@ -84,6 +128,44 @@ func TestTestCommandSuccess(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "Status: success") {
 		t.Fatalf("expected success output, got:\n%s", stdout.String())
+	}
+}
+
+func TestTestCommandNoDestroySkipsCleanup(t *testing.T) {
+	t.Parallel()
+
+	h := newCommandTestHarness(t)
+	mockDeploy := &fakeMockDeployHarness{
+		result: &harness.MockDeployResult{
+			Apply:         harness.StageResult{Stage: "apply"},
+			StateSnapshot: []byte(`{"mock":true}`),
+		},
+	}
+	destroy := &fakeDestroyHarness{}
+
+	opts := runtimeOptions{
+		configLoader:   config.Load,
+		scenarioLoader: defaultScenarioLoader,
+		deps: RuntimeDependencies{
+			MockDeploy: mockDeploy,
+			Destroy:    destroy,
+		},
+	}
+
+	cmd := newTestCommandForTest(opts)
+	stdout := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{h.ScenarioPath, "--config", h.ConfigPath, "--no-destroy"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute test command: %v", err)
+	}
+	if mockDeploy.calls != 1 || destroy.calls != 0 {
+		t.Fatalf("expected one deploy and no destroy calls, got deploy=%d destroy=%d", mockDeploy.calls, destroy.calls)
+	}
+	if !strings.Contains(stdout.String(), "- destruction/disabled: skip (skipped by --no-destroy)") {
+		t.Fatalf("expected no-destroy skip output, got:\n%s", stdout.String())
 	}
 }
 
@@ -219,7 +301,7 @@ func TestTestCommandAutoPassesDeferredDNSCriteriaHumanOutput(t *testing.T) {
 	if !strings.Contains(stdout.String(), "- criteria/support_matrix: skip") {
 		t.Fatalf("expected support-matrix skip stage in output, got:\n%s", stdout.String())
 	}
-	if !strings.Contains(stdout.String(), sandboxRealDeploySkippedMessage) {
+	if !strings.Contains(stdout.String(), "Layer 3 is disabled") {
 		t.Fatalf("expected sandbox auto-pass message in output, got:\n%s", stdout.String())
 	}
 }
@@ -253,7 +335,7 @@ func TestTestCommandAutoPassesDeferredDNSCriteriaJSONOutput(t *testing.T) {
 		`"schema": "` + OutputSchemaVersion + `"`,
 		`"status": "success"`,
 		`"stage": "support_matrix"`,
-		sandboxRealDeploySkippedMessage,
+		`Layer 3 is disabled`,
 	}
 	for _, check := range checks {
 		if !strings.Contains(stdout.String(), check) {
@@ -313,15 +395,12 @@ func TestTestCommandExecutesCriteriaDrivenTopologyAndPolicyChecks(t *testing.T) 
 		t.Fatalf("expected success, got: %v", err)
 	}
 	for _, check := range []string{
-		"- criteria/support_matrix: skip",
+		"- mock_deploy/topology: pass",
 		"- mock_deploy/state_policy: pass",
 	} {
 		if !strings.Contains(stdout.String(), check) {
 			t.Fatalf("expected output to contain %q, got:\n%s", check, stdout.String())
 		}
-	}
-	if strings.Contains(stdout.String(), "- mock_deploy/topology") {
-		t.Fatalf("topology stage should not appear when connectivity auto-passes, got:\n%s", stdout.String())
 	}
 }
 
@@ -379,11 +458,11 @@ func TestTestCommandReportsCriteriaDrivenTopologyAndPolicyFailures(t *testing.T)
 	if !strings.Contains(stdout.String(), "- mock_deploy/state_policy: fail") {
 		t.Fatalf("expected state_policy failure stage, got:\n%s", stdout.String())
 	}
+	if !strings.Contains(stdout.String(), "- mock_deploy/topology: fail") {
+		t.Fatalf("expected topology failure stage, got:\n%s", stdout.String())
+	}
 	if !strings.Contains(stdout.String(), "policy=encryption_at_rest") {
 		t.Fatalf("expected policy failure in output, got:\n%s", stdout.String())
-	}
-	if strings.Contains(stdout.String(), "- mock_deploy/topology") {
-		t.Fatalf("topology stage should not appear when connectivity auto-passes, got:\n%s", stdout.String())
 	}
 }
 
@@ -508,6 +587,27 @@ func TestAppendDestroyResultAvoidsConflictingPassFailStages(t *testing.T) {
 	}
 }
 
+func TestAppendDestroyResultIncludesStderrInFailureDetail(t *testing.T) {
+	t.Parallel()
+
+	_, failures := appendDestroyResult(
+		nil,
+		nil,
+		nil,
+		&harness.DestroyError{
+			Stage:   "destroy",
+			Destroy: harness.StageResult{Stage: "destroy", Stderr: "permission denied\nextra detail"},
+			Err:     errors.New("destroy failed"),
+		},
+	)
+	if len(failures) != 1 {
+		t.Fatalf("expected one failure, got %d", len(failures))
+	}
+	if !strings.Contains(failures[0].Detail, "stderr: permission denied") {
+		t.Fatalf("expected stderr in failure detail, got %+v", failures[0])
+	}
+}
+
 func TestAppendMockDeployResultAvoidsConflictingPassFailStages(t *testing.T) {
 	t.Parallel()
 
@@ -582,10 +682,25 @@ func TestTestCommandSkipsDestructionWhenLayerDisabled(t *testing.T) {
 	}
 }
 
-func TestTestCommandFailsWhenSandboxLayerEnabled(t *testing.T) {
-	t.Parallel()
-
+func TestTestCommandRunsSandboxLayerWhenEnabled(t *testing.T) {
 	h := newCommandTestHarness(t)
+	scenarioPath := writeUnsupportedCriteriaScenario(t, h.WorkspaceDir)
+	t.Setenv("SCW_ACCESS_KEY", "real-access")
+	t.Setenv("SCW_SECRET_KEY", "real-secret")
+	sandboxDeploy := &fakeSandboxDeployHarness{
+		result: &harness.SandboxDeployResult{
+			Init:  harness.StageResult{Stage: "init"},
+			Apply: harness.StageResult{Stage: "apply"},
+		},
+	}
+	sandboxDestroy := &fakeSandboxDestroyHarness{
+		result: &harness.SandboxDestroyResult{
+			Destroy: harness.StageResult{Stage: "destroy"},
+		},
+	}
+	realProbe := &fakeRealProbeHarness{
+		result: &harness.RealProbeResult{},
+	}
 	opts := runtimeOptions{
 		configLoader: func(path string) (config.Config, error) {
 			cfg, err := config.Load(path)
@@ -597,8 +712,162 @@ func TestTestCommandFailsWhenSandboxLayerEnabled(t *testing.T) {
 		},
 		scenarioLoader: defaultScenarioLoader,
 		deps: RuntimeDependencies{
-			MockDeploy: &fakeMockDeployHarness{},
-			Destroy:    &fakeDestroyHarness{},
+			MockDeploy: &fakeMockDeployHarness{
+				result: &harness.MockDeployResult{
+					Apply:         harness.StageResult{Stage: "apply"},
+					StateSnapshot: []byte(`{}`),
+				},
+			},
+			Destroy: &fakeDestroyHarness{
+				result: &harness.DestroyResult{
+					Destroy:       harness.StageResult{Stage: "destroy"},
+					StateSnapshot: []byte(`{"instance":{"servers":[]}}`),
+					OrphanCount:   0,
+				},
+			},
+			SandboxDeploy:  sandboxDeploy,
+			SandboxDestroy: sandboxDestroy,
+			RealProbe:      realProbe,
+		},
+	}
+
+	cmd := newTestCommandForTest(opts)
+	stdout := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{scenarioPath, "--config", h.ConfigPath})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
+	if sandboxDeploy.calls != 1 || sandboxDestroy.calls != 1 {
+		t.Fatalf("expected sandbox apply+destroy once, got deploy=%d destroy=%d", sandboxDeploy.calls, sandboxDestroy.calls)
+	}
+	if realProbe.calls != 1 {
+		t.Fatalf("expected one real probe execution, got %d", realProbe.calls)
+	}
+	if !strings.Contains(stdout.String(), "- sandbox_deploy/apply: pass") {
+		t.Fatalf("expected sandbox apply stage, got:\n%s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "- sandbox_deploy/real_probe: pass") {
+		t.Fatalf("expected sandbox real probe stage, got:\n%s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "- sandbox_deploy/destroy: pass") {
+		t.Fatalf("expected sandbox destroy stage, got:\n%s", stdout.String())
+	}
+}
+
+func TestTestCommandAutoDestroysSandboxResourcesAfterProbeFailure(t *testing.T) {
+	h := newCommandTestHarness(t)
+	scenarioPath := writeCriteriaScenario(t, h.WorkspaceDir, "success", "pass")
+	t.Setenv("SCW_ACCESS_KEY", "real-access")
+	t.Setenv("SCW_SECRET_KEY", "real-secret")
+
+	sandboxDeploy := &fakeSandboxDeployHarness{
+		result: &harness.SandboxDeployResult{
+			Init:  harness.StageResult{Stage: "init"},
+			Apply: harness.StageResult{Stage: "apply"},
+		},
+	}
+	sandboxDestroy := &fakeSandboxDestroyHarness{
+		result: &harness.SandboxDestroyResult{
+			Destroy: harness.StageResult{Stage: "destroy"},
+		},
+	}
+	realProbe := &fakeRealProbeHarness{
+		result: &harness.RealProbeResult{
+			Failures: []feedback.Failure{
+				{
+					Layer:   "sandbox_deploy",
+					Stage:   "real_probe",
+					Status:  "fail",
+					Check:   "connectivity",
+					Command: "real probe harness",
+					Detail:  "connection refused",
+				},
+			},
+		},
+	}
+	policyPath := filepath.Join("..", "harness", "testdata", "state-policy", "policy.rego")
+	destroy := &fakeDestroyHarness{
+		result: &harness.DestroyResult{
+			Destroy:       harness.StageResult{Stage: "destroy"},
+			StateSnapshot: []byte(`{"instance":{"servers":[]}}`),
+			OrphanCount:   0,
+		},
+	}
+	opts := runtimeOptions{
+		configLoader: func(path string) (config.Config, error) {
+			cfg, err := config.Load(path)
+			if err != nil {
+				return config.Config{}, err
+			}
+			cfg.Validation.Layers.SandboxDeploy.Enabled = true
+			cfg.ConstraintPolicies = map[string]string{
+				"encryption_at_rest": policyPath,
+			}
+			return cfg, nil
+		},
+		scenarioLoader: defaultScenarioLoader,
+		deps: RuntimeDependencies{
+			MockDeploy: &fakeMockDeployHarness{
+				result: &harness.MockDeployResult{
+					Apply:         harness.StageResult{Stage: "apply"},
+					StateSnapshot: []byte(`{"rdb":{"public_endpoint":false}}`),
+				},
+			},
+			Destroy:        destroy,
+			SandboxDeploy:  sandboxDeploy,
+			SandboxDestroy: sandboxDestroy,
+			RealProbe:      realProbe,
+		},
+	}
+
+	cmd := newTestCommandForTest(opts)
+	stdout := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{scenarioPath, "--config", h.ConfigPath})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected probe failure")
+	}
+	if destroy.calls != 1 || sandboxDestroy.calls != 1 {
+		t.Fatalf("expected cleanup after probe failure, got destroy=%d sandbox_destroy=%d", destroy.calls, sandboxDestroy.calls)
+	}
+	if !strings.Contains(stdout.String(), "- sandbox_deploy/real_probe: fail") {
+		t.Fatalf("expected real probe failure stage, got:\n%s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "- sandbox_deploy/destroy: pass") {
+		t.Fatalf("expected sandbox destroy stage after failure, got:\n%s", stdout.String())
+	}
+}
+
+func TestTestCommandFailsSandboxPreflightWithoutCredentials(t *testing.T) {
+	h := newCommandTestHarness(t)
+	t.Setenv("SCW_ACCESS_KEY", "")
+	t.Setenv("SCW_SECRET_KEY", "")
+	opts := runtimeOptions{
+		configLoader: func(path string) (config.Config, error) {
+			cfg, err := config.Load(path)
+			if err != nil {
+				return config.Config{}, err
+			}
+			cfg.Validation.Layers.SandboxDeploy.Enabled = true
+			return cfg, nil
+		},
+		scenarioLoader: defaultScenarioLoader,
+		deps: RuntimeDependencies{
+			MockDeploy: &fakeMockDeployHarness{
+				result: &harness.MockDeployResult{
+					Apply:         harness.StageResult{Stage: "apply"},
+					StateSnapshot: []byte(`{}`),
+				},
+			},
+			Destroy:        &fakeDestroyHarness{},
+			SandboxDeploy:  &fakeSandboxDeployHarness{},
+			SandboxDestroy: &fakeSandboxDestroyHarness{},
 		},
 	}
 
@@ -612,11 +881,11 @@ func TestTestCommandFailsWhenSandboxLayerEnabled(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected failure")
 	}
-	if !strings.Contains(stdout.String(), "- sandbox_deploy/blocked: skip") {
-		t.Fatalf("expected sandbox blocked stage, got:\n%s", stdout.String())
+	if !strings.Contains(stdout.String(), "- sandbox_deploy/preflight: fail") {
+		t.Fatalf("expected sandbox preflight failure stage, got:\n%s", stdout.String())
 	}
-	if !strings.Contains(stdout.String(), sandboxRealDeploySkippedMessage) {
-		t.Fatalf("expected cost-skip message in output, got:\n%s", stdout.String())
+	if !strings.Contains(stdout.String(), "SCW_ACCESS_KEY") {
+		t.Fatalf("expected missing credential detail, got:\n%s", stdout.String())
 	}
 }
 
@@ -680,6 +949,7 @@ func newTestCommandForTest(opts runtimeOptions) *cobra.Command {
 	}
 	cmd.Flags().String("config", config.DefaultPath, "")
 	cmd.Flags().String("output", string(OutputModeHuman), "")
+	cmd.Flags().Bool("no-destroy", false, "")
 	return cmd
 }
 

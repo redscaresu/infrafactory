@@ -26,6 +26,9 @@ func EvaluateStatePoliciesWithInput(ctx context.Context, stateJSON []byte, extra
 	input := decoded
 	if len(extraInput) > 0 {
 		if stateMap, ok := decoded.(map[string]any); ok {
+			if _, exists := stateMap["state"]; exists {
+				return nil, fmt.Errorf(`state policy input cannot flatten top-level "state" key`)
+			}
 			envelope := make(map[string]any, len(stateMap)+len(extraInput)+1)
 			for key, value := range stateMap {
 				envelope[key] = value

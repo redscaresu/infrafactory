@@ -58,3 +58,26 @@ func TestMockwayStateClientStateFailsWhenPayloadExceedsBound(t *testing.T) {
 		t.Fatalf("expected %q error, got %v", expected, err)
 	}
 }
+
+func TestMockwayStateClientStateTruncatesErrorPayload(t *testing.T) {
+	t.Parallel()
+
+	oversized := strings.Repeat("x", maxMockwayErrorPayloadBytes+100)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte(oversized))
+	}))
+	defer server.Close()
+
+	client := newMockwayStateClient(server.URL)
+	_, err := client.State(context.Background())
+	if err == nil {
+		t.Fatal("expected status error")
+	}
+	if !strings.Contains(err.Error(), "...") {
+		t.Fatalf("expected truncated payload marker, got %v", err)
+	}
+	if strings.Contains(err.Error(), oversized) {
+		t.Fatalf("expected payload truncation, got %v", err)
+	}
+}

@@ -3,6 +3,14 @@ export function compareRunIDs(a, b) {
   return a < b ? 1 : -1;
 }
 
+export function buildRunPlanURL(scenario, runID) {
+  return `/api/runs/${encodeURIComponent(scenario)}/${encodeURIComponent(runID)}/plan`;
+}
+
+export function buildRunBaselineURL(scenario, runID) {
+  return `/api/runs/${encodeURIComponent(scenario)}/${encodeURIComponent(runID)}/baseline`;
+}
+
 export function selectLatestRun(runs, scenario = "") {
   const filtered = scenario ? runs.filter((run) => run.scenario === scenario) : [...runs];
   if (filtered.length === 0) {
@@ -107,4 +115,15 @@ export function mergeConsoleLines(historyLines, liveLines) {
     }
   }
   return merged;
+}
+
+export function formatBaselineState(payload) {
+  if (!payload) {
+    return "";
+  }
+  try {
+    return JSON.stringify(JSON.parse(payload), null, 2);
+  } catch {
+    return payload;
+  }
 }

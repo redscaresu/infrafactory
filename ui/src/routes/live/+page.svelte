@@ -1,10 +1,11 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { api } from "$lib/api";
-  import { deriveFailureHint, deriveLiveConsoleNotice, mergeConsoleLines, selectLatestRun, synthesizeLiveConsoleLines } from "$lib/run-view.js";
+  import { deriveFailureHint, deriveLiveConsoleNotice, formatBaselineState, mergeConsoleLines, selectLatestRun, synthesizeLiveConsoleLines } from "$lib/run-view.js";
   import { connectWS } from "$lib/ws";
 
   type RunFailure = {
+    layer?: string;
     stage?: string;
     check?: string;
     command?: string;
@@ -13,7 +14,7 @@
 
   type IterationArtifact = {
     iteration?: number;
-    statuses?: { layer?: string; stage?: string; status?: string }[];
+    stages?: { layer?: string; stage?: string; status?: string; detail?: string }[];
     failures?: RunFailure[];
     failure_summary?: string[];
   };
@@ -27,16 +28,30 @@
   let pollTimer: ReturnType<typeof setInterval> | null = null;
   let statusMessage = "";
   let failureHint = "";
+  let planText = "";
+  let baselineState = "";
+  let baselineOpen = false;
+  let planOpen = false;
 
   $: failureCards = iterations.flatMap((iteration) =>
     (iteration.failures || []).map((failure) => ({
       iteration: iteration.iteration || 0,
+      layer: failure.layer || "unknown",
       stage: failure.stage || "unknown",
       check: failure.check || "unknown",
       command: failure.command || "-",
       detail: failure.detail || "No detail provided"
     }))
   );
+  $: layer3Stages = iterations.flatMap((iteration) =>
+    (iteration.stages || []).filter((stage) => stage.layer === "sandbox_deploy").map((stage) => ({
+      iteration: iteration.iteration || 0,
+      stage: stage.stage || "unknown",
+      status: stage.status || "unknown",
+      detail: stage.detail || ""
+    }))
+  );
+  $: realProbeCards = failureCards.filter((failure) => failure.layer === "sandbox_deploy" && ["connectivity", "http_probe", "dns_resolution", "real_probe"].includes(failure.check));
 
   $: latestStatus = runMeta?.status || "starting";
   $: mergedLines = mergeConsoleLines(replayLines, lines);
@@ -87,6 +102,16 @@
         .filter((line) => line.length > 0);
     } catch {
       replayLines = [];
+    }
+    try {
+      planText = await api.getRunPlan(scenario, runID);
+    } catch {
+      planText = "";
+    }
+    try {
+      baselineState = formatBaselineState(await api.getRunBaseline(scenario, runID));
+    } catch {
+      baselineState = "";
     }
     const firstFailureDetail = loaded
       .flatMap((iteration) => iteration.failures || [])
@@ -147,6 +172,35 @@
     <div><span class="font-semibold">Run ID:</span> {runID}</div>
     <div><span class="font-semibold">Status:</span> {latestStatus}</div>
     <div><span class="font-semibold">Terminal reason:</span> {runMeta?.terminal_reason || "-"}</div>
+    <div><span class="font-semibold">Mode:</span> {runMeta?.incremental ? "incremental" : "clean"}</div>
+    <div><span class="font-semibold">Layer 3:</span> {runMeta?.layer3_enabled ? "enabled" : "disabled"}</div>
+  </div>
+{/if}
+
+{#if planText || baselineState}
+  <div class="mt-4 grid gap-4 lg:grid-cols-2">
+    <section class="rounded border border-slate-300 bg-white/70 p-4 text-sm text-slate-800">
+      <div class="flex items-center justify-between gap-3">
+        <h2 class="font-semibold">Plan Diff</h2>
+        <button class="rounded border border-slate-300 px-2 py-1 text-xs" on:click={() => (planOpen = !planOpen)}>
+          {planOpen ? "Hide" : "Show"}
+        </button>
+      </div>
+      {#if planOpen}
+        <pre class="mt-3 max-h-80 overflow-auto rounded bg-slate-950 p-3 text-xs text-slate-100">{planText || "No plan artifact recorded."}</pre>
+      {/if}
+    </section>
+    <section class="rounded border border-slate-300 bg-white/70 p-4 text-sm text-slate-800">
+      <div class="flex items-center justify-between gap-3">
+        <h2 class="font-semibold">Baseline State</h2>
+        <button class="rounded border border-slate-300 px-2 py-1 text-xs" on:click={() => (baselineOpen = !baselineOpen)}>
+          {baselineOpen ? "Hide" : "Show"}
+        </button>
+      </div>
+      {#if baselineOpen}
+        <pre class="mt-3 max-h-80 overflow-auto rounded bg-slate-950 p-3 text-xs text-slate-100">{baselineState || "No baseline artifact recorded."}</pre>
+      {/if}
+    </section>
   </div>
 {/if}
 
@@ -156,6 +210,30 @@
     <div class="mt-2">
       <a class="underline" href="/diagnostics">Open backend diagnostics</a>
     </div>
+  </div>
+{/if}
+
+{#if layer3Stages.length > 0}
+  <div class="mt-4 rounded border border-sky-200 bg-sky-50 p-4 text-sm text-sky-950">
+    <h2 class="font-semibold">Layer 3 Progress</h2>
+    <div class="mt-2 space-y-2">
+      {#each layer3Stages as stage}
+        <div>Iteration {stage.iteration}: {stage.stage} = {stage.status}{stage.detail ? ` (${stage.detail})` : ""}</div>
+      {/each}
+    </div>
+  </div>
+{/if}
+
+{#if realProbeCards.length > 0}
+  <div class="mt-4 space-y-3">
+    {#each realProbeCards as failure}
+      <section class="rounded border border-sky-200 bg-sky-50 p-4 text-sm text-sky-950">
+        <h2 class="font-semibold">Layer 3 Probe: iteration {failure.iteration}</h2>
+        <p class="mt-2"><span class="font-semibold">Check:</span> {failure.check}</p>
+        <p class="mt-1"><span class="font-semibold">Stage:</span> {failure.stage}</p>
+        <p class="mt-2 whitespace-pre-wrap break-words">{failure.detail}</p>
+      </section>
+    {/each}
   </div>
 {/if}
 
@@ -177,8 +255,8 @@
         <h2 class="font-semibold">Iteration {iteration.iteration}</h2>
         <p class="mt-2">
           <span class="font-semibold">Statuses:</span>
-          {#if iteration.statuses?.length}
-            {iteration.statuses.map((status) => `${status.stage || "unknown"}=${status.status || "unknown"}`).join(", ")}
+          {#if iteration.stages?.length}
+            {iteration.stages.map((status) => `${status.layer || "unknown"}/${status.stage || "unknown"}=${status.status || "unknown"}`).join(", ")}
           {:else}
             no status events recorded
           {/if}

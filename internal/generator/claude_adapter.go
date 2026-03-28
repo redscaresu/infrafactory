@@ -206,9 +206,21 @@ func (g *ClaudeSeedGenerator) renderPhasePrompt(phase string, req Request, outpu
 		GeneratedFiles:     renderGeneratedFiles(files),
 		FeedbackJSON:       string(req.FeedbackJSON),
 		ProviderSchema:     filteredSchema,
+		Layer3Guidance:     layer3Guidance(req.Layer3Enabled),
 	}
 
 	return RenderPromptFile(phase, templatePath, ctx)
+}
+
+func layer3Guidance(enabled bool) string {
+	if !enabled {
+		return ""
+	}
+	return strings.TrimSpace(`Layer 3 real Scaleway deploy is enabled for this run.
+
+- Include a dedicated ` + "`scaleway_account_project`" + ` resource so the stack can bootstrap and later destroy its own project lifecycle.
+- Ensure resources that require a project are wired to the bootstrapped project instead of assuming a pre-existing long-lived sandbox project.
+- Preserve useful outputs for externally reachable endpoints and service addresses so real connectivity, HTTP, and DNS probes can resolve the deployed infrastructure deterministically.`)
 }
 
 func phaseTemplateFile(phase string) (string, error) {

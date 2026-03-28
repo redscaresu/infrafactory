@@ -30,6 +30,7 @@ type Request struct {
 	FeedbackJSON       []byte
 	Iteration          int
 	ProviderSchemaJSON []byte
+	Layer3Enabled      bool
 }
 
 type GeneratedCode struct {

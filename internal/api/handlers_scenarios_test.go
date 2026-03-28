@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -128,6 +129,115 @@ func TestScenariosPutValidationAndTraversal(t *testing.T) {
 	}
 }
 
+func TestScenarioRunModeHandlerDetectsIncrementalAndClean(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	scenariosDir := filepath.Join(root, "scenarios")
+	outputDir := filepath.Join(root, "output")
+	mustWriteScenarioFile(t, filepath.Join(scenariosDir, "training", "web-app-paris.yaml"), validScenarioYAML("web-app-paris", "training web app"))
+	if err := os.MkdirAll(filepath.Join(outputDir, "web-app-paris"), 0o755); err != nil {
+		t.Fatalf("mkdir output dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(outputDir, "web-app-paris", "terraform.tfstate"), []byte("{}"), 0o644); err != nil {
+		t.Fatalf("write tfstate: %v", err)
+	}
+
+	store := runstore.NewFilesystemStore(filepath.Join(root, ".infrafactory", "runs"))
+	if err := store.WriteRunMetadata(runstore.RunMetadata{
+		Scenario:  "web-app-paris",
+		RunID:     "run-1",
+		Status:    "success",
+		StartedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("write run metadata: %v", err)
+	}
+
+	cfg := config.Default()
+	cfg.Paths.Scenarios = scenariosDir
+	cfg.Paths.Output = outputDir
+	srv := NewServer(ServerConfig{
+		Config:    cfg,
+		Store:     store,
+		MockState: staticMockStateReader{payload: []byte(`{"instance":{"servers":[{"id":"srv-1"}]}}`)},
+	})
+	ts := httptest.NewServer(srv.Handler)
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/api/scenarios/training/web-app-paris/run-mode")
+	if err != nil {
+		t.Fatalf("get run mode: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	var payload map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	if payload["mode"] != "incremental" {
+		t.Fatalf("expected incremental mode, got %+v", payload)
+	}
+
+	cleanSrv := NewServer(ServerConfig{
+		Config:    cfg,
+		Store:     runstore.NewFilesystemStore(filepath.Join(t.TempDir(), ".infrafactory", "runs")),
+		MockState: staticMockStateReader{payload: []byte(`{"instance":{"servers":[]}}`)},
+	})
+	cleanTS := httptest.NewServer(cleanSrv.Handler)
+	defer cleanTS.Close()
+
+	cleanResp, err := http.Get(cleanTS.URL + "/api/scenarios/training/web-app-paris/run-mode")
+	if err != nil {
+		t.Fatalf("get clean run mode: %v", err)
+	}
+	defer cleanResp.Body.Close()
+	if cleanResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", cleanResp.StatusCode)
+	}
+	if err := json.NewDecoder(cleanResp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode clean payload: %v", err)
+	}
+	if payload["mode"] != "clean" {
+		t.Fatalf("expected clean mode, got %+v", payload)
+	}
+}
+
+func TestScenarioLayer3StatusHandlerReportsReadiness(t *testing.T) {
+	root := t.TempDir()
+	scenariosDir := filepath.Join(root, "scenarios")
+	mustWriteScenarioFile(t, filepath.Join(scenariosDir, "training", "web-app-paris.yaml"), validScenarioYAML("web-app-paris", "training web app"))
+
+	cfg := config.Default()
+	cfg.Paths.Scenarios = scenariosDir
+	cfg.Validation.Layers.SandboxDeploy.Enabled = true
+	cfg.Scaleway.SandboxProjectID = "project-123"
+	t.Setenv("SCW_ACCESS_KEY", "access")
+	t.Setenv("SCW_SECRET_KEY", "secret")
+
+	srv := NewServer(ServerConfig{Config: cfg})
+	ts := httptest.NewServer(srv.Handler)
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/api/scenarios/training/web-app-paris/layer3-status")
+	if err != nil {
+		t.Fatalf("get layer3 status: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var payload map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode layer3 payload: %v", err)
+	}
+	if payload["ready"] != true || payload["config_default_enabled"] != true {
+		t.Fatalf("expected ready/config enabled payload, got %+v", payload)
+	}
+}
+
 func mustWriteScenarioFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -151,4 +261,12 @@ acceptance_criteria:
   - type: destruction
     expect: no_orphans
 `
+}
+
+type staticMockStateReader struct {
+	payload []byte
+}
+
+func (s staticMockStateReader) State(context.Context) ([]byte, error) {
+	return s.payload, nil
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"testing"
@@ -154,6 +155,24 @@ func TestCommandOutputGoldenSnapshots(t *testing.T) {
 						Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
 							return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte("terraform {}\n")}}, nil
 						}),
+						Static: &fakeStaticHarness{result: &harness.StaticResult{
+							Stages:   []harness.StageResult{{Stage: "init"}, {Stage: "validate"}, {Stage: "plan"}, {Stage: "show"}},
+							PlanJSON: []byte(`{"planned_values":{"root_module":{}}}`),
+						}},
+						MockDeploy: &fakeMockDeployHarness{
+							result: &harness.MockDeployResult{
+								Apply:         harness.StageResult{Stage: "apply"},
+								StateSnapshot: []byte(`{}`),
+							},
+						},
+						Destroy: &fakeDestroyHarness{
+							result: &harness.DestroyResult{
+								Destroy:       harness.StageResult{Stage: "destroy"},
+								StateSnapshot: []byte(`{}`),
+								OrphanCount:   0,
+							},
+						},
+						MockState: &fakeRunMockStateClient{statePayload: []byte(`{"instance":{"servers":[]}}`)},
 					},
 				}
 				cmd := newRunCommandForTest(opts)
@@ -164,6 +183,11 @@ func TestCommandOutputGoldenSnapshots(t *testing.T) {
 				return []string{h.ScenarioPath, "--config", h.ConfigPath, "--output", string(mode)}
 			},
 			expectErr: true,
+			normalize: func(h *CommandTestHarness, out string) string {
+				out = strings.ReplaceAll(out, h.WorkspaceDir, "<WORKSPACE>")
+				runIDPattern := regexp.MustCompile(`\b20\d{6}T\d{6}Z(?:[+-]\d{4})?\b`)
+				return runIDPattern.ReplaceAllString(out, "<RUN_ID>")
+			},
 		},
 		{
 			name: "mock_start",

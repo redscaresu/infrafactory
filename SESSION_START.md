@@ -53,7 +53,7 @@ Before writing code, confirm these facts are still true in `STATUS.md`/`BACKLOG.
 20. **Slices 22-25 planned** — incremental deployment model (ADR-0009). Single evolving scenario YAML, factory regenerates all HCL, OpenTofu handles incremental diffs. Key flags: `--no-destroy` (preserve state between runs), `--clean` (force fresh start). Mockway snapshot/restore for feedback iterations. Read CONCEPT.md *Incremental Deployment Model* section before starting.
 21. **Slices 26-29 planned** — Layer 3 real Scaleway deploy (ADR-0010, supersedes ADR-0003). Optional dual-apply: same HCL applied to both mockway and real Scaleway with separate `.tfstate` files. Layer 2 gates Layer 3. Read CONCEPT.md *Real Scaleway Deploy (Layer 3)* section before starting.
 22. **Primary incremental scenario** — webserver → database → Redis. This is the main use case the incremental model must support. See CONCEPT.md *Scenario evolution example* for the 3-stage YAML progression.
-23. **Implementation contracts** — CONCEPT.md *Implementation Contracts (Slices 22-29)* resolves 18 ambiguities: scenario identifier semantics, API request schemas, config vs flag precedence, auto-detection rules, snapshot/restore failure handling, artifact paths, destroy behavior matrix, probe contracts, Layer 3 credential/project/state lifecycle, UI endpoint response schemas, and more. **Read this section before implementing any Slice 22-29 ticket.** These are binding decisions, not suggestions.
+23. **Implementation contracts** — CONCEPT.md *Implementation Contracts (Slices 22-29)* contains 22 binding contracts covering: scenario identifier semantics, API request schemas, config vs flag precedence, auto-detection rules, snapshot/restore failure handling, artifact paths, destroy behavior matrix, probe contracts, Layer 3 credential/project/state lifecycle, UI endpoint response schemas, RunMetadata versioning, failure taxonomy, concurrency invariants, and legacy compatibility. **Read this section before modifying any Slice 22-29 code.** These are binding decisions, not suggestions.
 
 Minimal startup verification commands:
 ```bash
@@ -171,21 +171,19 @@ If either command fails, restore the repo to a green baseline before starting a 
 - **Slice 22 (Mockway snapshot/restore)**:
   - Code lives in the separate mockway repo at `../mockway/`. Changes require `docker compose up --build -d mockway` to take effect.
   - Implementation: SQLite `VACUUM INTO` for snapshot (atomic file copy), file swap + DB re-open for restore. Reference existing handler patterns in `../mockway/handlers/`.
-  - Note: `repository.Repository` currently stores `*sql.DB` but not the DB path. You'll need the path for `VACUUM INTO` — either store it in the struct or pass it through. The repo is created via `repository.New(path)` in `cmd/mockway/main.go`. The existing `Reset()` method in `repository.go` shows the table-deletion pattern.
+  - `repository.Repository` stores `*sql.DB`, `path` (DB file path for `VACUUM INTO`), and `snapshotPath` (active snapshot location). `Reset()` clears all tables and removes any active snapshot.
   - Routes are registered in `handlers/handlers.go` lines 23-25 (existing `/mock/reset`, `/mock/state` patterns). `Application` holds `*repository.Repository`.
   - Test pattern: use `testutil.NewTestServer(t)` from mockway test helpers.
   - Endpoints: `POST /mock/snapshot`, `POST /mock/restore`. Update `POST /mock/reset` to clear any active snapshot.
 - **Slice 23 (InfraFactory incremental run support)**:
-  - Run loop code: `internal/cli/run_command.go` — the `runRunCommand` function (main entry point, iteration loop at line 104) and `runIteration` helper (line 323, runs generate → validate → test per iteration).
-  - Harness code: `internal/harness/mock_deploy.go` — `MockDeployHarness` uses `MockStateClient` interface (currently `Reset` + `State`). Add `Snapshot(context.Context) error` and `Restore(context.Context) error` to this interface. `DestroyHarness` in `destroy.go` also uses the same interface.
-  - Key code location: `MockDeployHarness.Run()` calls `h.mock.Reset(ctx)` at line 62 before every deploy. In incremental mode, this should call `Restore` instead of `Reset`. The harness needs a mode flag or the `Run` method needs to accept incremental vs clean.
-  - Add `--clean` and `--no-destroy` flags to the `run` Cobra command (in `root.go` where the run command is registered).
-  - **Important**: destruction currently runs inside `test_command.go` line 222 (`runtime.Deps.Destroy.Run()`), called from the `test` step within `runIteration`. For `--no-destroy`, the destruction must be skipped. Options: pass a flag through to `executeTest`, or restructure the iteration to separate deploy from destroy.
-  - Add `Snapshot()` and `Restore()` methods to `mockwayStateClient` in `internal/cli/mockway_client.go` (existing client with `Reset()` and `State()`).
+  - Run loop code: `internal/cli/run_command.go` — `runRunCommand` (line 36, main entry point), iteration loop at line 112, `runIteration` helper (line 336).
+  - Harness code: `internal/harness/mock_deploy.go` — `MockStateClient` interface (line 11) has `Reset`, `Snapshot`, `Restore`, `State`. `MockDeployHarness.Run()` calls `h.mock.Restore(ctx)` (line 71, incremental) or `h.mock.Reset(ctx)` (line 79, clean) based on `MockDeployMode`.
+  - Destruction runs inside `test_command.go` line 285 (`runtime.Deps.Destroy.Run()`). `--no-destroy` skips this via `SkipDestroy` flag passed to `executeTest`.
+  - `mockwayStateClient` in `internal/cli/mockway_client.go` has `Reset()`, `Snapshot()`, `Restore()`, and `State()` methods.
   - Auto-detection logic: 3 checks — (1) `GET /mock/state` has resources, (2) `.tfstate` exists in `output/{scenario}/`, (3) run store has previous successful run. All three → incremental; any missing → clean.
   - **Critical**: `--no-destroy` must skip Layer 4 destruction AND preserve mockway state + `.tfstate`. Without this, the entire incremental model is non-functional because destruction wipes everything.
   - Output dir handling: in incremental mode, delete only `*.tf` files before writing new ones; preserve `.tfstate` and `.terraform/`. In clean mode, wipe entire `output/{scenario}/`.
-  - `RunMetadata`: add `incremental: bool` and `previous_run_id: string` fields to `internal/runstore/`.
+  - `RunMetadata` in `internal/runstore/` has `Incremental`, `PreviousRunID`, and `Layer3Enabled` fields (optional, `omitempty`, no schema version bump — see CONCEPT.md contract #19).
   - Existing training/regression scenarios must continue passing unchanged (they auto-detect as clean).
   - Update README with `--clean` and `--no-destroy` documentation.
 - **Slice 24 (Incremental E2E validation)**:
@@ -207,7 +205,7 @@ If either command fails, restore the repo to a green baseline before starting a 
 - **Dependency chain**: Slice 26 → 27 → 28 → 29. Must be implemented sequentially. Slice 26 can start after Slice 23 (needs `--no-destroy`). Slice 28 depends on both Slice 24 and 27.
 - **ADR-0010 already exists** — do not create a new ADR. Implement the decisions documented in `docs/decisions/0010-layer3-real-scaleway-deploy.md`.
 - **Slice 26 (Layer 3 harness)**:
-  - **Key code location**: `run_command.go` lines 33-58 currently BLOCK the run when `SandboxDeploy.Enabled` is true (returns error "sandbox deploy layer is blocked"). Replace this block with actual Layer 3 dual-apply logic.
+  - **Key code location**: `run_command.go` — `detectRunMode` (line 56) handles incremental vs clean detection including Layer 3 credential validation. Layer 3 dual-apply logic is in `test_command.go` (line 285+ for mock destroy, line 299+ for sandbox destroy).
   - Dual-apply: same `.tf` files applied to both mockway and real Scaleway. Two `.tfstate` files: `terraform.tfstate` (mock, existing) and `terraform-live.tfstate` (real).
   - Layer 3 only runs if `validation.layers.sandbox_deploy.enabled: true` AND Layers 1+2 pass.
   - Real Scaleway apply: run `tofu apply` without `SCW_API_URL` override (lets provider use real Scaleway API). Mock apply continues using `SCW_API_URL=http://127.0.0.1:8080`.

@@ -184,6 +184,65 @@ func TestRunCommandPersistsRunningMetadataBeforeCompletion(t *testing.T) {
 	}
 }
 
+func TestRunCommandPersistsPlanAndBaselineArtifacts(t *testing.T) {
+	h := newCommandTestHarness(t)
+	runstoreRoot := filepath.Join(h.WorkspaceDir, ".infrafactory", "runs")
+	t.Setenv("INFRAFACTORY_RUNSTORE_ROOT", runstoreRoot)
+
+	mockState := &fakeRunMockStateClient{statePayload: []byte(`{"instance":{"servers":[{"id":"srv-1"}]}}`)}
+	opts := runtimeOptions{
+		configLoader:   config.Load,
+		scenarioLoader: defaultScenarioLoader,
+		deps: RuntimeDependencies{
+			Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
+				return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte("terraform {}\n")}}, nil
+			}),
+			Static: &fakeStaticHarness{result: &harness.StaticResult{
+				Stages: []harness.StageResult{
+					{Stage: "init"},
+					{Stage: "validate"},
+					{Stage: "plan", Stdout: "Plan: 1 to add, 0 to change, 0 to destroy.\n"},
+					{Stage: "show"},
+				},
+				PlanJSON: []byte(`{"planned_values":{"root_module":{}}}`),
+			}},
+			MockState:  mockState,
+			MockDeploy: &fakeMockDeployHarness{result: &harness.MockDeployResult{Apply: harness.StageResult{Stage: "apply"}, StateSnapshot: []byte(`{}`)}},
+			Destroy:    &fakeDestroyHarness{result: &harness.DestroyResult{Destroy: harness.StageResult{Stage: "destroy"}, OrphanCount: 0}},
+		},
+	}
+
+	cmd := newRunCommandForTest(opts)
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{h.ScenarioPath, "--config", h.ConfigPath})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute run command: %v", err)
+	}
+
+	store := runstore.NewFilesystemStore(runstoreRoot)
+	runs, err := store.ListRuns("example-scenario")
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("expected one run, got %+v", runs)
+	}
+
+	planPayload, err := store.ReadRunArtifact("example-scenario", runs[0].RunID, "plan.txt")
+	if err != nil {
+		t.Fatalf("read plan artifact: %v", err)
+	}
+	if string(planPayload) != "Plan: 1 to add, 0 to change, 0 to destroy.\n" {
+		t.Fatalf("unexpected plan artifact: %q", string(planPayload))
+	}
+
+	if _, err := store.ReadRunArtifact("example-scenario", runs[0].RunID, "baseline_state.json"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected no baseline artifact for clean run, got err=%v", err)
+	}
+}
+
 func TestRunCommandLLMRawCaptureDisabledByDefault(t *testing.T) {
 	h := newCommandTestHarness(t)
 	runstoreRoot := filepath.Join(h.WorkspaceDir, ".infrafactory", "runs")
@@ -658,10 +717,27 @@ func TestRunCommandStopsEarlyOnTransportDominatedFailures(t *testing.T) {
 	}
 }
 
-func TestRunCommandFailsWhenSandboxLayerEnabled(t *testing.T) {
+func TestRunCommandUsesSandboxLayerWhenEnabled(t *testing.T) {
 	h := newCommandTestHarness(t)
+	scenarioPath := writeUnsupportedCriteriaScenario(t, h.WorkspaceDir)
 	runstoreRoot := filepath.Join(h.WorkspaceDir, ".infrafactory", "runs")
 	t.Setenv("INFRAFACTORY_RUNSTORE_ROOT", runstoreRoot)
+	t.Setenv("SCW_ACCESS_KEY", "real-access")
+	t.Setenv("SCW_SECRET_KEY", "real-secret")
+	sandboxDeploy := &fakeSandboxDeployHarness{
+		result: &harness.SandboxDeployResult{
+			Init:  harness.StageResult{Stage: "init"},
+			Apply: harness.StageResult{Stage: "apply"},
+		},
+	}
+	sandboxDestroy := &fakeSandboxDestroyHarness{
+		result: &harness.SandboxDestroyResult{
+			Destroy: harness.StageResult{Stage: "destroy"},
+		},
+	}
+	realProbe := &fakeRealProbeHarness{
+		result: &harness.RealProbeResult{},
+	}
 	opts := runtimeOptions{
 		configLoader: func(path string) (config.Config, error) {
 			cfg, err := config.Load(path)
@@ -676,6 +752,22 @@ func TestRunCommandFailsWhenSandboxLayerEnabled(t *testing.T) {
 			Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
 				return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte("terraform {}\n")}}, nil
 			}),
+			Static: &fakeStaticHarness{result: &harness.StaticResult{
+				Stages:   []harness.StageResult{{Stage: "init"}, {Stage: "validate"}, {Stage: "plan"}, {Stage: "show"}},
+				PlanJSON: []byte(`{"planned_values":{"root_module":{}}}`),
+			}},
+			MockDeploy: &fakeMockDeployHarness{result: &harness.MockDeployResult{
+				Apply:         harness.StageResult{Stage: "apply"},
+				StateSnapshot: []byte(`{}`),
+			}},
+			Destroy: &fakeDestroyHarness{result: &harness.DestroyResult{
+				Destroy:       harness.StageResult{Stage: "destroy"},
+				StateSnapshot: []byte(`{"instance":{"servers":[]}}`),
+				OrphanCount:   0,
+			}},
+			SandboxDeploy:  sandboxDeploy,
+			SandboxDestroy: sandboxDestroy,
+			RealProbe:      realProbe,
 		},
 	}
 
@@ -683,17 +775,19 @@ func TestRunCommandFailsWhenSandboxLayerEnabled(t *testing.T) {
 	stdout := &bytes.Buffer{}
 	cmd.SetOut(stdout)
 	cmd.SetErr(&bytes.Buffer{})
-	cmd.SetArgs([]string{h.ScenarioPath, "--config", h.ConfigPath})
+	cmd.SetArgs([]string{scenarioPath, "--config", h.ConfigPath})
 
-	err := cmd.Execute()
-	if err == nil {
-		t.Fatal("expected run failure")
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected run success, got %v", err)
 	}
-	if !strings.Contains(stdout.String(), "- sandbox_deploy/blocked: skip") {
-		t.Fatalf("expected sandbox blocked stage, got:\n%s", stdout.String())
+	if sandboxDeploy.calls != 1 || sandboxDestroy.calls != 1 {
+		t.Fatalf("expected sandbox apply+destroy once, got deploy=%d destroy=%d", sandboxDeploy.calls, sandboxDestroy.calls)
 	}
-	if !strings.Contains(stdout.String(), sandboxRealDeploySkippedMessage) {
-		t.Fatalf("expected cost-skip message in output, got:\n%s", stdout.String())
+	if realProbe.calls != 1 {
+		t.Fatalf("expected sandbox real probe once, got %d", realProbe.calls)
+	}
+	if !strings.Contains(stdout.String(), "- run/iteration_1_test: pass") {
+		t.Fatalf("expected test stage pass, got:\n%s", stdout.String())
 	}
 }
 
@@ -950,7 +1044,7 @@ func TestRunCommandAutoPassesDeferredDNSHoldoutWithoutFeedbackInjection(t *testi
 	if genCalls != 1 {
 		t.Fatalf("expected holdout evaluation after first successful training pass, got %d generator calls", genCalls)
 	}
-	if !strings.Contains(stdout.String(), sandboxRealDeploySkippedMessage) {
+	if !strings.Contains(stdout.String(), "Layer 3 is disabled") {
 		t.Fatalf("expected holdout auto-pass message, got:\n%s", stdout.String())
 	}
 	if !strings.Contains(stdout.String(), "Status: success") {
@@ -966,6 +1060,8 @@ func TestResolveRunControlsUsesConfigDefaultsWhenFlagsUnset(t *testing.T) {
 
 	cmd := &cobra.Command{Use: "run"}
 	cmd.Flags().Int("repair-iterations-max", 0, "")
+	cmd.Flags().Bool("clean", false, "")
+	cmd.Flags().Bool("no-destroy", false, "")
 
 	cfg := config.Default()
 	cfg.Agent.RepairIterationsMax = 7
@@ -984,6 +1080,8 @@ func TestResolveRunControlsUsesFlagOverridesWhenProvided(t *testing.T) {
 
 	cmd := &cobra.Command{Use: "run"}
 	cmd.Flags().Int("repair-iterations-max", 0, "")
+	cmd.Flags().Bool("clean", false, "")
+	cmd.Flags().Bool("no-destroy", false, "")
 	if err := cmd.Flags().Set("repair-iterations-max", "2"); err != nil {
 		t.Fatalf("set flag: %v", err)
 	}
@@ -1036,6 +1134,8 @@ func TestResolveRunControlsRejectsInvalidValues(t *testing.T) {
 
 			cmd := &cobra.Command{Use: "run"}
 			cmd.Flags().Int("repair-iterations-max", 0, "")
+			cmd.Flags().Bool("clean", false, "")
+			cmd.Flags().Bool("no-destroy", false, "")
 			tc.configureCmd(cmd)
 
 			_, err := resolveRunControls(cmd, &CommandRuntime{Config: tc.cfg})
@@ -1049,7 +1149,236 @@ func TestResolveRunControlsRejectsInvalidValues(t *testing.T) {
 	}
 }
 
+func TestResolveRunControlsRejectsMutuallyExclusiveCleanAndNoDestroy(t *testing.T) {
+	t.Parallel()
+
+	cmd := &cobra.Command{Use: "run"}
+	cmd.Flags().Int("repair-iterations-max", 0, "")
+	cmd.Flags().Bool("clean", false, "")
+	cmd.Flags().Bool("no-destroy", false, "")
+	_ = cmd.Flags().Set("clean", "true")
+	_ = cmd.Flags().Set("no-destroy", "true")
+
+	_, err := resolveRunControls(cmd, &CommandRuntime{Config: config.Default()})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Fatalf("expected mutual exclusivity error, got %v", err)
+	}
+}
+
+func TestDetectRunModeIncrementalWhenAllSignalsPresent(t *testing.T) {
+	t.Parallel()
+
+	outputDir := filepath.Join(t.TempDir(), "output", "example-scenario")
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		t.Fatalf("mkdir output dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(outputDir, "terraform.tfstate"), []byte("{}"), 0o644); err != nil {
+		t.Fatalf("write tfstate: %v", err)
+	}
+
+	store := runstore.NewFilesystemStore(filepath.Join(t.TempDir(), ".infrafactory", "runs"))
+	if err := store.WriteRunMetadata(runstore.RunMetadata{
+		Scenario:  "example-scenario",
+		RunID:     "run-123",
+		Status:    "success",
+		StartedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("write run metadata: %v", err)
+	}
+
+	mode, err := detectRunMode(context.Background(), &CommandRuntime{
+		Deps: RuntimeDependencies{
+			MockState: &fakeRunMockStateClient{statePayload: []byte(`{"instance":{"servers":[{"id":"srv-1"}]}}`)},
+		},
+	}, store, "example-scenario", outputDir, runControls{})
+	if err != nil {
+		t.Fatalf("detect run mode: %v", err)
+	}
+	if mode.Mode != runModeIncremental {
+		t.Fatalf("expected incremental mode, got %+v", mode)
+	}
+	if mode.PreviousRunID != "run-123" {
+		t.Fatalf("expected previous run id run-123, got %+v", mode)
+	}
+}
+
+func TestRunCommandNoDestroySkipsDestroyAndHoldouts(t *testing.T) {
+	h := newCommandTestHarness(t)
+	runstoreRoot := filepath.Join(h.WorkspaceDir, ".infrafactory", "runs")
+	t.Setenv("INFRAFACTORY_RUNSTORE_ROOT", runstoreRoot)
+	writeCriteriaOnlyHoldout(t, filepath.Join(h.WorkspaceDir, "scenarios", "holdout", "holdout-skip.yaml"), h.ScenarioPath, `  - type: destruction
+    expect: no_orphans
+`, "holdout-skip")
+
+	mockDeploy := &fakeMockDeployHarness{
+		result: &harness.MockDeployResult{
+			Apply:         harness.StageResult{Stage: "apply"},
+			StateSnapshot: []byte(`{"mock":true}`),
+		},
+	}
+	destroy := &fakeDestroyHarness{
+		result: &harness.DestroyResult{
+			Destroy:       harness.StageResult{Stage: "destroy"},
+			StateSnapshot: []byte(`{}`),
+			OrphanCount:   0,
+		},
+	}
+
+	opts := runtimeOptions{
+		configLoader: func(path string) (config.Config, error) {
+			cfg, err := config.Load(path)
+			if err != nil {
+				return config.Config{}, err
+			}
+			cfg.Paths.Scenarios = filepath.Join(h.WorkspaceDir, "scenarios")
+			cfg.Validation.Layers.Static.Enabled = false
+			cfg.Agent.RepairIterationsMax = 1
+			return cfg, nil
+		},
+		scenarioLoader: defaultScenarioLoader,
+		deps: RuntimeDependencies{
+			Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
+				return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte("terraform {}\n")}}, nil
+			}),
+			MockDeploy: mockDeploy,
+			Destroy:    destroy,
+			MockState:  &fakeRunMockStateClient{statePayload: []byte(`{"instance":{"servers":[]}}`)},
+		},
+	}
+
+	cmd := newRunCommandForTest(opts)
+	stdout := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{h.ScenarioPath, "--config", h.ConfigPath, "--no-destroy"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute run command: %v", err)
+	}
+	if destroy.calls != 0 {
+		t.Fatalf("expected destroy harness to be skipped, got %d calls", destroy.calls)
+	}
+	if !strings.Contains(stdout.String(), "holdout/skipped: skip (skipped by --no-destroy)") {
+		t.Fatalf("expected holdout skip output, got:\n%s", stdout.String())
+	}
+}
+
+func TestRunCommandIncrementalModeSnapshotsBaselineAndPersistsMetadata(t *testing.T) {
+	h := newCommandTestHarness(t)
+	outputRoot := filepath.Join(h.WorkspaceDir, "output")
+	outputDir := filepath.Join(outputRoot, "example-scenario")
+	runstoreRoot := filepath.Join(h.WorkspaceDir, ".infrafactory", "runs")
+	t.Setenv("INFRAFACTORY_RUNSTORE_ROOT", runstoreRoot)
+
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		t.Fatalf("mkdir output dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(outputDir, "terraform.tfstate"), []byte("{}"), 0o644); err != nil {
+		t.Fatalf("write tfstate: %v", err)
+	}
+
+	store := runstore.NewFilesystemStore(runstoreRoot)
+	if err := store.WriteRunMetadata(runstore.RunMetadata{
+		Scenario:  "example-scenario",
+		RunID:     "run-prev",
+		Status:    "success",
+		StartedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("write prior run metadata: %v", err)
+	}
+
+	mockState := &fakeRunMockStateClient{statePayload: []byte(`{"instance":{"servers":[{"id":"srv-1"}]}}`)}
+	opts := runtimeOptions{
+		configLoader: func(path string) (config.Config, error) {
+			cfg, err := config.Load(path)
+			if err != nil {
+				return config.Config{}, err
+			}
+			cfg.Paths.Output = outputRoot
+			cfg.Agent.RepairIterationsMax = 1
+			return cfg, nil
+		},
+		scenarioLoader: defaultScenarioLoader,
+		deps: RuntimeDependencies{
+			Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
+				return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte("terraform {}\n")}}, nil
+			}),
+			Static:     &fakeStaticHarness{result: &harness.StaticResult{Stages: []harness.StageResult{{Stage: "init"}, {Stage: "validate"}, {Stage: "plan"}, {Stage: "show"}}, PlanJSON: []byte(`{"planned_values":{"root_module":{}}}`)}},
+			MockDeploy: &fakeMockDeployHarness{result: &harness.MockDeployResult{Apply: harness.StageResult{Stage: "apply"}, StateSnapshot: []byte(`{"mock":true}`)}},
+			Destroy:    &fakeDestroyHarness{result: &harness.DestroyResult{Destroy: harness.StageResult{Stage: "destroy"}, OrphanCount: 0}},
+			MockState:  mockState,
+		},
+	}
+
+	cmd := newRunCommandForTest(opts)
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{h.ScenarioPath, "--config", h.ConfigPath})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute run command: %v", err)
+	}
+	if mockState.snapshotCalls != 1 {
+		t.Fatalf("expected one snapshot call, got %d", mockState.snapshotCalls)
+	}
+
+	runs, err := store.ListRuns("example-scenario")
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if len(runs) == 0 {
+		t.Fatal("expected persisted runs")
+	}
+	var current runstore.RunMetadata
+	found := false
+	for _, run := range runs {
+		if run.PreviousRunID == "run-prev" {
+			current = run
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected current incremental run metadata, got %+v", runs)
+	}
+	if !current.Incremental {
+		t.Fatalf("expected incremental metadata, got %+v", current)
+	}
+}
+
+type fakeRunMockStateClient struct {
+	statePayload  []byte
+	snapshotCalls int
+	restoreCalls  int
+	resetCalls    int
+}
+
+func (f *fakeRunMockStateClient) Reset(context.Context) error {
+	f.resetCalls++
+	return nil
+}
+
+func (f *fakeRunMockStateClient) Snapshot(context.Context) error {
+	f.snapshotCalls++
+	return nil
+}
+
+func (f *fakeRunMockStateClient) Restore(context.Context) error {
+	f.restoreCalls++
+	return nil
+}
+
+func (f *fakeRunMockStateClient) State(context.Context) ([]byte, error) {
+	return f.statePayload, nil
+}
+
 func newRunCommandForTest(opts runtimeOptions) *cobra.Command {
+	if opts.deps.MockState == nil {
+		opts.deps.MockState = &fakeRunMockStateClient{statePayload: []byte(`{"instance":{"servers":[]}}`)}
+	}
 	cmd := &cobra.Command{
 		Use:  "run <scenario>",
 		Args: requireScenarioArg,
@@ -1058,6 +1387,8 @@ func newRunCommandForTest(opts runtimeOptions) *cobra.Command {
 	cmd.Flags().String("config", config.DefaultPath, "")
 	cmd.Flags().String("output", string(OutputModeHuman), "")
 	cmd.Flags().Int("repair-iterations-max", 0, "")
+	cmd.Flags().Bool("clean", false, "")
+	cmd.Flags().Bool("no-destroy", false, "")
 	return cmd
 }
 
