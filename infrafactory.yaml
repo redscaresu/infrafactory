@@ -23,7 +23,6 @@ mockway:
 
 scaleway:
   credentials_source: env    # env | config-file
-  sandbox_project_id: ""
 
 validation:
   layers:

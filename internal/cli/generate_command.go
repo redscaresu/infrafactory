@@ -226,7 +226,7 @@ func validateLayer3ProjectResource(outputDir string) error {
 			return nil
 		}
 	}
-	return fmt.Errorf("Layer 3 requires a scaleway_account_project resource in the generated HCL for self-managed project lifecycle")
+	return fmt.Errorf("layer 3 requires a scaleway_account_project resource in the generated HCL for self-managed project lifecycle")
 }
 
 type generatedFileWriteMode string

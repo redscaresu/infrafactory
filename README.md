@@ -630,7 +630,6 @@ Error contract:
 | `validation.real_probes.timeout_seconds` | no | `5` | Per-attempt timeout for Layer 3 TCP/HTTP/DNS probes. |
 | `validation.real_probes.retries` | no | `6` | Retry budget for Layer 3 probes to tolerate startup and propagation delays. |
 | `validation.real_probes.retry_delay_seconds` | no | `5` | Delay between Layer 3 probe attempts. |
-| `scaleway.sandbox_project_id` | no | none | Scaleway project ID used for Layer 3 real deploy. Required when `sandbox_deploy.enabled=true`. |
 | `paths.output` | no | `./output` | Generated IaC output root. |
 | `paths.policies` | no | `./policies` | Policy root used by harness validation. |
 

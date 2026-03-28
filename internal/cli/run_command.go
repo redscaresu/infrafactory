@@ -431,6 +431,12 @@ func runIteration(
 				MockDeployMode: mockDeployModeForRunMode(mode),
 				SkipDestroy:    noDestroy,
 			})
+			if len(testResult.PlanLiveText) > 0 {
+				writeErr := store.WriteIterationArtifact(scenarioName, runID, iteration, "plan-live.txt", testResult.PlanLiveText)
+				if writeErr != nil && err == nil {
+					err = writeErr
+				}
+			}
 		} else {
 			switch step.name {
 			case "generate":

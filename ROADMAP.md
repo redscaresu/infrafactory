@@ -295,7 +295,7 @@ This file is intentionally high-level and mostly stable; day-to-day execution tr
 - Update README Web UI section: document Layer 3 toggle, credential status indicator, and real probe results display.
 - Apply slice-closure review protocol before marking Slice 29 complete.
 
-29. Slice 30: Layer 3 production readiness
+30. Slice 30: Layer 3 production readiness
 - Capture `plan-live.txt` artifact during sandbox deploy (`tofu plan` before `tofu apply`).
 - Auto-destroy real resources on failed runs (billing protection, Contract #14 destroy matrix).
 - Validate generated HCL includes `scaleway_account_project` when Layer 3 enabled (Contract #12).

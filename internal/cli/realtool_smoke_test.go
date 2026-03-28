@@ -289,10 +289,6 @@ func TestTestCommandRealToolLayer3Smoke(t *testing.T) {
 	if _, err := exec.LookPath("tofu"); err != nil {
 		t.Fatalf("tofu binary is required for Layer 3 smoke: %v", err)
 	}
-	projectID := strings.TrimSpace(os.Getenv("SCW_DEFAULT_PROJECT_ID"))
-	if projectID == "" {
-		t.Fatal("set SCW_DEFAULT_PROJECT_ID for Layer 3 smoke")
-	}
 	if strings.TrimSpace(os.Getenv("SCW_ACCESS_KEY")) == "" || strings.TrimSpace(os.Getenv("SCW_SECRET_KEY")) == "" {
 		t.Fatal("set SCW_ACCESS_KEY and SCW_SECRET_KEY for Layer 3 smoke")
 	}
@@ -329,8 +325,6 @@ agent:
   type: claude-code
 mockway:
   url: `+mockwayURL+`
-scaleway:
-  sandbox_project_id: `+projectID+`
 paths:
   output: `+outputRoot+`
 validation:
@@ -379,10 +373,6 @@ func TestRunCommandRealToolLayer3IncrementalE2E(t *testing.T) {
 	if _, err := exec.LookPath("tofu"); err != nil {
 		t.Fatalf("tofu binary is required for Layer 3 incremental e2e: %v", err)
 	}
-	projectID := strings.TrimSpace(os.Getenv("SCW_DEFAULT_PROJECT_ID"))
-	if projectID == "" {
-		t.Fatal("set SCW_DEFAULT_PROJECT_ID for Layer 3 incremental e2e")
-	}
 	if strings.TrimSpace(os.Getenv("SCW_ACCESS_KEY")) == "" || strings.TrimSpace(os.Getenv("SCW_SECRET_KEY")) == "" {
 		t.Fatal("set SCW_ACCESS_KEY and SCW_SECRET_KEY for Layer 3 incremental e2e")
 	}
@@ -400,8 +390,6 @@ agent:
   type: claude-code
 mockway:
   url: `+mockwayURL+`
-scaleway:
-  sandbox_project_id: `+projectID+`
 paths:
   output: `+outputRoot+`
 validation:

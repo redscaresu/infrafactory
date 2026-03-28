@@ -1301,7 +1301,8 @@ func TestRunCommandAutoDestroysRealResourcesOnFailure(t *testing.T) {
 		deps: RuntimeDependencies{
 			Generator: generator.SeedGeneratorFunc(func(_ context.Context, _ generator.Request) (*generator.GeneratedCode, error) {
 				return &generator.GeneratedCode{Files: map[string][]byte{
-					"main.tf":                    []byte("terraform {}\n"),
+					"main.tf":                 []byte("terraform {}\n"),
+					"project.tf":              []byte("resource \"scaleway_account_project\" \"sandbox\" { name = \"test\" }\n"),
 					harness.LiveStateFilename: []byte(`{"version":4}`),
 				}}, nil
 			}),
@@ -1356,7 +1357,8 @@ func TestRunCommandNoDestroyPreservesRealResourcesOnFailure(t *testing.T) {
 		deps: RuntimeDependencies{
 			Generator: generator.SeedGeneratorFunc(func(_ context.Context, _ generator.Request) (*generator.GeneratedCode, error) {
 				return &generator.GeneratedCode{Files: map[string][]byte{
-					"main.tf":                    []byte("terraform {}\n"),
+					"main.tf":                 []byte("terraform {}\n"),
+					"project.tf":              []byte("resource \"scaleway_account_project\" \"sandbox\" { name = \"test\" }\n"),
 					harness.LiveStateFilename: []byte(`{"version":4}`),
 				}}, nil
 			}),

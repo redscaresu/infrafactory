@@ -261,6 +261,7 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 
 	stages := append(make([]StageSummary, 0, len(unsupportedStages)+8), unsupportedStages...)
 	failures := make([]FailureSummary, 0)
+	var planLiveText []byte
 	env := testCommandEnv(runtime)
 
 	if !runtime.Config.Validation.Layers.MockDeploy.Enabled {
@@ -303,6 +304,9 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 			sandboxResult, sandboxErr := runtime.Deps.SandboxDeploy.Run(ctx, outputDir, sandboxEnv)
 			stages, failures = appendSandboxDeployResult(stages, failures, sandboxResult, sandboxErr)
 			sandboxSucceeded = sandboxErr == nil
+			if sandboxResult != nil && len(sandboxResult.Plan.Stdout) > 0 {
+				planLiveText = []byte(sandboxResult.Plan.Stdout)
+			}
 		}
 	}
 	if deployErr == nil && runtime.Config.Validation.Layers.Destruction.Enabled && !opts.SkipDestroy {
@@ -345,11 +349,12 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 	}
 
 	result := OutputResult{
-		Command:  "test",
-		Scenario: sc.Name,
-		Status:   status,
-		Stages:   stages,
-		Failures: failures,
+		Command:      "test",
+		Scenario:     sc.Name,
+		Status:       status,
+		Stages:       stages,
+		Failures:     failures,
+		PlanLiveText: planLiveText,
 	}
 	if status == CommandStatusFailed {
 		return result, &CLIError{

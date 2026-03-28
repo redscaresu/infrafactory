@@ -1180,7 +1180,6 @@ Output: output/web-app-paris/
 | `mockway.url` | string | Yes | — | Mockway HTTP URL (e.g., `http://localhost:8080`). |
 | `mockway.auto_reset` | boolean | No | `true` | Whether to `POST /mock/reset` at iteration start. |
 | `scaleway.credentials_source` | string | No | `env` | Where to read Scaleway credentials. `env` reads `SCW_ACCESS_KEY` etc. from environment. |
-| `scaleway.sandbox_project_id` | string | No | `""` | Scaleway project ID for Layer 3 sandbox deploy. Empty disables Layer 3. |
 | `validation.layers.static.enabled` | boolean | No | `true` | Enable Layer 1 (tofu validate/plan + OPA). |
 | `validation.layers.static.policy_paths` | []string | No | `[]` | Directories containing OPA `.rego` files. |
 | `validation.layers.mock_deploy.enabled` | boolean | No | `true` | Enable Layer 2 (tofu apply → Mockway). |

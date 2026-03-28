@@ -55,6 +55,10 @@ type OutputResult struct {
 	Stages         []StageSummary          `json:"stages"`
 	Failures       []FailureSummary        `json:"failures"`
 	Explainability []ExplainabilitySummary `json:"explainability,omitempty"`
+
+	// PlanLiveText holds the Layer 3 tofu plan stdout when sandbox deploy
+	// is enabled. Internal only — not serialized to command output.
+	PlanLiveText []byte `json:"-"`
 }
 
 type MachineOutput struct {
