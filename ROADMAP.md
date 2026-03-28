@@ -306,10 +306,9 @@ This file is intentionally high-level and mostly stable; day-to-day execution tr
 
 ## Near-term execution order
 
-1. Keep completed slices (1-29) stable and regression-green.
-2. `S9-T8` to be closed as part of Slice 30 (superseded by ADR-0010).
+1. Keep completed slices (1-30) stable and regression-green.
+2. `S9-T8` closed — superseded by Slices 26-30 (ADR-0010).
 3. Pipeline consistently achieves first-iteration pass (12/12 training scenarios); monitor for regressions.
-4. Slice 30 (Layer 3 production readiness). T1/T3/T4 can run in parallel; T2 depends on T1; T5 last.
 
 ## Live progress tracking
 
