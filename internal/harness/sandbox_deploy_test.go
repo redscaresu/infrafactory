@@ -12,6 +12,7 @@ func TestSandboxDeployHarnessRunSuccess(t *testing.T) {
 	runner := &fakeRunner{
 		responses: []runnerResponse{
 			{result: CommandResult{Stdout: []byte("init complete")}},
+			{result: CommandResult{Stdout: []byte("plan complete")}},
 			{result: CommandResult{Stdout: []byte("apply complete")}},
 		},
 	}
@@ -21,12 +22,13 @@ func TestSandboxDeployHarnessRunSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run sandbox deploy harness: %v", err)
 	}
-	if out.Init.Stage != "init" || out.Apply.Stage != "apply" {
+	if out.Init.Stage != "init" || out.Plan.Stage != "plan" || out.Apply.Stage != "apply" {
 		t.Fatalf("unexpected result: %+v", out)
 	}
 
 	expected := [][]string{
 		{"tofu", "init"},
+		{"tofu", "plan", "-state=" + LiveStateFilename},
 		{"tofu", "apply", "-auto-approve", "-state=" + LiveStateFilename},
 	}
 	for i := range expected {
@@ -55,9 +57,18 @@ func TestSandboxDeployHarnessRunFailures(t *testing.T) {
 			expectedStage: "init",
 		},
 		{
+			name: "plan failure",
+			responses: []runnerResponse{
+				{result: CommandResult{Stdout: []byte("init complete")}},
+				{result: CommandResult{Stderr: []byte("plan stderr")}, err: errors.New("plan failed")},
+			},
+			expectedStage: "plan",
+		},
+		{
 			name: "apply failure",
 			responses: []runnerResponse{
 				{result: CommandResult{Stdout: []byte("init complete")}},
+				{result: CommandResult{Stdout: []byte("plan complete")}},
 				{result: CommandResult{Stderr: []byte("apply stderr")}, err: errors.New("apply failed")},
 			},
 			expectedStage: "apply",

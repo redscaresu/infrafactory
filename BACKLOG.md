@@ -6,6 +6,11 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 
 | id | slice | title | priority | status | deps | owner |
 |---|---|---|---|---|---|---|
+| S30-T1 | Slice 30 | Capture `plan-live.txt` artifact during sandbox deploy (tofu plan before apply) | P1 | done | M36 | codex |
+| S30-T2 | Slice 30 | Auto-destroy real resources on failed runs (billing protection, Contract #14) | P1 | done | S30-T1 | codex |
+| S30-T3 | Slice 30 | Validate generated HCL includes `scaleway_account_project` when Layer 3 enabled | P1 | done | M36 | codex |
+| S30-T4 | Slice 30 | Verify holdout checks execute Layer 3 dual-apply pattern (Contract #10) | P1 | done | M36 | codex |
+| S30-T5 | Slice 30 | Close S9-T8 governance ticket + update STATUS/BACKLOG/CURRENT_TICKET docs | P1 | done | S30-T2 | codex |
 | M36 | Maintenance | Apply second-pass post-slice 22-29 hardening fixes and regressions | P1 | done | M35 | codex |
 | M35 | Maintenance | Remediate post-slice 22-29 review findings and add regressions | P1 | done | S29-T2 | codex |
 | S29-T1 | Slice 29 | UI: Layer 3 toggle on scenario page + credential status indicator | P1 | done | S28-T1 | codex |
@@ -107,7 +112,7 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 | S9-T5 | Slice 9 | Upgrade `run` from skeleton to criteria-aware convergence orchestration | P0 | done | S9-T3,S9-T4 | codex |
 | S9-T6 | Slice 9 | Wire criteria-only holdout evaluation into `run` completion path | P1 | done | S9-T5 | codex |
 | S9-T7 | Slice 9 | Expand `mock` command lifecycle (`start/stop/status/logs`) with parity tests | P1 | done | S9-T4 | codex |
-| S9-T8 | Slice 9 | Sandbox/live deploy layer wiring (real Scaleway) | P2 | blocked | - | codex |
+| S9-T8 | Slice 9 | Sandbox/live deploy layer wiring (real Scaleway) | P2 | done | - | codex |
 | S9-T9 | Slice 9 | Document sandbox deploy deferment due cost implications | P0 | done | S8-T3 | codex |
 | S10-T1 | Slice 10 | Freeze output contract with golden snapshots for all commands/modes | P0 | done | S10-T2,S10-T3,S10-T6 | codex |
 | S10-T2 | Slice 10 | Normalize CLI error taxonomy/messages across command paths | P0 | done | S9-T7 | codex |
@@ -228,7 +233,7 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 | S9-T5 | `internal/cli/run_command.go`, `internal/feedback`, `internal/runstore` | runstore backend redesign | `run` performs criteria-aware iteration decisions (not just stage pass-through) and preserves convergence semantics (success/max/stuck) | run command tests for criteria-driven success/failure, max-iteration stop, and stuck-detection stop |
 | S9-T6 | `internal/cli/run_command.go`, `internal/scenario/holdout.go` | holdout schema redesign | criteria-only holdouts auto-run after training convergence and block without feeding holdout failures into generator context | holdout discovery/execution tests for pass/block/no-feedback behavior |
 | S9-T7 | `internal/cli/root.go`, `internal/cli/mock_*`, `Makefile` (if needed) | external image publishing strategy | `mock` command supports `start`, `stop`, `status`, and `logs` with deterministic output and errors | command tests for stop/status/logs happy-path + missing-runtime/dependency failures |
-| S9-T8 | `internal/harness`, `internal/cli`, docs | mock deploy layer and hermetic defaults | sandbox/live deploy is unblocked by ADR-0010 (supersedes ADR-0003). Layer 3 real Scaleway deploy is planned in Slices 26-29 with Layer 2 gating, dual-apply, and auto-destroy | Layer 3 implementation tracked in S26-T1..S29-T2 |
+| S9-T8 | `internal/harness`, `internal/cli`, docs | mock deploy layer and hermetic defaults | Superseded by Slices 26-30 (ADR-0010). Layer 3 real Scaleway deploy fully implemented with dual-apply, auto-destroy, real probes, and production hardening. | Done. |
 | S9-T9 | `README.md`, `STATUS.md`, `ROADMAP.md` | runtime behavior changes | docs explicitly state sandbox/live deploy deferment due cost implications | doc assertion checklist |
 | S10-T1 | `internal/cli/output_contract*`, command tests, fixtures/goldens | command business logic changes | final human/json outputs for all commands are frozen via golden snapshots with deterministic ordering and schema assertions after Slice 10 contract-shaping tickets land | golden tests for `init/generate/validate/test/run/mock *` in human+json modes and deterministic fixture update guardrails |
 | S10-T2 | `internal/cli/runtime.go`, command adapters, error helpers | schema/provider behavior changes | CLI errors use consistent codes, operation names, and actionable detail shapes across config/scenario/runtime/dependency failures | table-driven error-shape tests for representative failure classes per command |

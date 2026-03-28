@@ -366,6 +366,84 @@ func TestGenerateCommandOpenRouterMissingAPIKeyReturnsDependencyUnavailable(t *t
 	}
 }
 
+func TestValidateLayer3ProjectResourceMissingReturnsError(t *testing.T) {
+	t.Parallel()
+
+	outputDir := filepath.Join(t.TempDir(), "output")
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(outputDir, "main.tf"), []byte(`resource "scaleway_instance_server" "web" {}`), 0o644); err != nil {
+		t.Fatalf("write tf: %v", err)
+	}
+
+	err := validateLayer3ProjectResource(outputDir)
+	if err == nil {
+		t.Fatal("expected error when scaleway_account_project is missing")
+	}
+	if !strings.Contains(err.Error(), "scaleway_account_project") {
+		t.Fatalf("expected error mentioning scaleway_account_project, got: %v", err)
+	}
+}
+
+func TestValidateLayer3ProjectResourcePresentNoError(t *testing.T) {
+	t.Parallel()
+
+	outputDir := filepath.Join(t.TempDir(), "output")
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(outputDir, "project.tf"), []byte(`resource "scaleway_account_project" "sandbox" { name = "test" }`), 0o644); err != nil {
+		t.Fatalf("write tf: %v", err)
+	}
+
+	if err := validateLayer3ProjectResource(outputDir); err != nil {
+		t.Fatalf("expected no error when scaleway_account_project present, got: %v", err)
+	}
+}
+
+func TestValidateLayer3ProjectResourceSkippedWhenDisabled(t *testing.T) {
+	t.Parallel()
+
+	h := newCommandTestHarness(t)
+	outputRoot := filepath.Join(h.WorkspaceDir, "output")
+
+	opts := runtimeOptions{
+		configLoader: func(path string) (config.Config, error) {
+			cfg, err := config.Load(path)
+			if err != nil {
+				return config.Config{}, err
+			}
+			cfg.Paths.Output = outputRoot
+			cfg.Validation.Layers.SandboxDeploy.Enabled = false
+			return cfg, nil
+		},
+		scenarioLoader: defaultScenarioLoader,
+		deps: RuntimeDependencies{
+			Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
+				return &generator.GeneratedCode{
+					Files: map[string][]byte{
+						"main.tf": []byte(`resource "scaleway_instance_server" "web" {}`),
+					},
+				}, nil
+			}),
+		},
+	}
+
+	cmd := newGenerateCommandForTest(opts)
+	stdout := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{h.ScenarioPath, "--config", h.ConfigPath})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected no error when layer 3 disabled, got: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "Status: success") {
+		t.Fatalf("expected success output, got:\n%s", stdout.String())
+	}
+}
+
 func newGenerateCommandForTest(opts runtimeOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:  "generate <scenario>",

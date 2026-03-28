@@ -212,7 +212,6 @@ func TestScenarioLayer3StatusHandlerReportsReadiness(t *testing.T) {
 	cfg := config.Default()
 	cfg.Paths.Scenarios = scenariosDir
 	cfg.Validation.Layers.SandboxDeploy.Enabled = true
-	cfg.Scaleway.SandboxProjectID = "project-123"
 	t.Setenv("SCW_ACCESS_KEY", "access")
 	t.Setenv("SCW_SECRET_KEY", "secret")
 

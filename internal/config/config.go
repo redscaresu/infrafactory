@@ -58,7 +58,6 @@ type MockwayConfig struct {
 
 type ScalewayConfig struct {
 	CredentialsSource string `yaml:"credentials_source"`
-	SandboxProjectID  string `yaml:"sandbox_project_id"`
 }
 
 type ValidationConfig struct {
@@ -147,7 +146,6 @@ func Default() Config {
 		},
 		Scaleway: ScalewayConfig{
 			CredentialsSource: "env",
-			SandboxProjectID:  "",
 		},
 		Validation: ValidationConfig{
 			Layers: ValidationLayers{

@@ -153,7 +153,10 @@ func TestCommandOutputGoldenSnapshots(t *testing.T) {
 					scenarioLoader: defaultScenarioLoader,
 					deps: RuntimeDependencies{
 						Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
-							return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte("terraform {}\n")}}, nil
+							return &generator.GeneratedCode{Files: map[string][]byte{
+								"main.tf":    []byte("terraform {}\n"),
+								"project.tf": []byte("resource \"scaleway_account_project\" \"sandbox\" { name = \"test\" }\n"),
+							}}, nil
 						}),
 						Static: &fakeStaticHarness{result: &harness.StaticResult{
 							Stages:   []harness.StageResult{{Stage: "init"}, {Stage: "validate"}, {Stage: "plan"}, {Stage: "show"}},

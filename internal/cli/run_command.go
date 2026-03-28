@@ -222,6 +222,50 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 		Detail:  fmt.Sprintf("completed_iterations=%d", completed),
 	})
 
+	// Auto-destroy real Scaleway resources on failure to prevent orphaned billing.
+	// Contract #14: failed run without --no-destroy must destroy real resources.
+	sandboxEnabled := runtime.Config.Validation.Layers.SandboxDeploy.Enabled
+	if sandboxEnabled && !controls.NoDestroy && terminalReason != "target_reached" {
+		liveStatePath := filepath.Join(runtime.OutputDir(), harness.LiveStateFilename)
+		if _, statErr := os.Stat(liveStatePath); statErr == nil {
+			sandboxEnv, sandboxEnvErr := sandboxCommandEnv(runtime)
+			if sandboxEnvErr != nil {
+				runtime.Logger.Log(LogEntry{
+					Level:   logLevelError,
+					Command: "run",
+					Event:   "layer3_auto_destroy_preflight",
+					Status:  "failed",
+					RunID:   runID,
+					Detail:  sandboxEnvErr.Error(),
+				})
+				allStages = append(allStages, StageSummary{Layer: "sandbox_deploy", Stage: "auto_destroy_preflight", Status: StageStatusFail})
+			} else {
+				destroyResult, destroyErr := runtime.Deps.SandboxDestroy.Run(cmd.Context(), runtime.OutputDir(), sandboxEnv)
+				destroyStages, destroyFailures := appendSandboxDestroyResult(nil, nil, destroyResult, destroyErr)
+				allStages = append(allStages, destroyStages...)
+				if destroyErr != nil {
+					runtime.Logger.Log(LogEntry{
+						Level:   logLevelError,
+						Command: "run",
+						Event:   "layer3_auto_destroy",
+						Status:  "failed",
+						RunID:   runID,
+						Detail:  destroyErr.Error(),
+					})
+					allFailures = append(allFailures, destroyFailures...)
+				} else {
+					runtime.Logger.Log(LogEntry{
+						Level:   logLevelInfo,
+						Command: "run",
+						Event:   "layer3_auto_destroy",
+						Status:  "success",
+						RunID:   runID,
+					})
+				}
+			}
+		}
+	}
+
 	if terminalReason == "target_reached" && !controls.NoDestroy {
 		holdoutStages, holdoutFailures, err := runCriteriaOnlyHoldouts(cmd.Context(), runtime, scenarioPath)
 		if err != nil {

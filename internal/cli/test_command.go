@@ -165,6 +165,9 @@ func appendSandboxDeployResult(stages []StageSummary, failures []FailureSummary,
 		if result != nil && result.Init.Stage != "" {
 			stages = append(stages, StageSummary{Layer: "sandbox_deploy", Stage: "init", Status: StageStatusPass})
 		}
+		if result != nil && result.Plan.Stage != "" {
+			stages = append(stages, StageSummary{Layer: "sandbox_deploy", Stage: "plan", Status: StageStatusPass})
+		}
 		if result != nil && result.Apply.Stage != "" {
 			stages = append(stages, StageSummary{Layer: "sandbox_deploy", Stage: "apply", Status: StageStatusPass})
 		}
@@ -180,6 +183,8 @@ func appendSandboxDeployResult(stages []StageSummary, failures []FailureSummary,
 	switch deployErr.Stage {
 	case "init":
 		stages = append(stages, StageSummary{Layer: "sandbox_deploy", Stage: "init", Status: StageStatusFail})
+	case "plan":
+		stages = append(stages, StageSummary{Layer: "sandbox_deploy", Stage: "plan", Status: StageStatusFail})
 	case "apply":
 		stages = append(stages, StageSummary{Layer: "sandbox_deploy", Stage: "apply", Status: StageStatusFail})
 	}
@@ -370,9 +375,6 @@ func sandboxCommandEnv(runtime *CommandRuntime) (map[string]string, error) {
 	env := map[string]string{
 		"SCW_ACCESS_KEY": accessKey,
 		"SCW_SECRET_KEY": secretKey,
-	}
-	if projectID := strings.TrimSpace(runtime.Config.Scaleway.SandboxProjectID); projectID != "" {
-		env["SCW_DEFAULT_PROJECT_ID"] = projectID
 	}
 	return env, nil
 }

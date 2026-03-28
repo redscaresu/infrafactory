@@ -197,7 +197,6 @@ func handleGetScenarioLayer3Status(w http.ResponseWriter, state *serverState, re
 		"config_default_enabled": state.cfg.Validation.Layers.SandboxDeploy.Enabled,
 		"credentials_ready":      ready,
 		"missing_credentials":    missing,
-		"project_id_configured":  strings.TrimSpace(state.cfg.Scaleway.SandboxProjectID) != "",
 		"ready":                  ready,
 		"detail":                 detail,
 	})

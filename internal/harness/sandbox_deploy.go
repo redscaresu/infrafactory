@@ -20,12 +20,14 @@ func NewSandboxDeployHarness(runner CommandRunner) *SandboxDeployHarness {
 
 type SandboxDeployResult struct {
 	Init  StageResult
+	Plan  StageResult
 	Apply StageResult
 }
 
 type SandboxDeployError struct {
 	Stage string
 	Init  StageResult
+	Plan  StageResult
 	Apply StageResult
 	Err   error
 }
@@ -70,6 +72,28 @@ func (h *SandboxDeployHarness) Run(ctx context.Context, workDir string, env map[
 		}
 	}
 
+	planCmd := Command{
+		Name: "tofu",
+		Args: []string{"plan", "-state=" + LiveStateFilename},
+		Dir:  workDir,
+		Env:  env,
+	}
+	planResult, err := h.runner.Run(ctx, planCmd)
+	planStage := StageResult{
+		Stage:  "plan",
+		Cmd:    []string{"tofu", "plan", "-state=" + LiveStateFilename},
+		Stdout: string(planResult.Stdout),
+		Stderr: string(planResult.Stderr),
+	}
+	if err != nil {
+		return nil, &SandboxDeployError{
+			Stage: "plan",
+			Init:  initStage,
+			Plan:  planStage,
+			Err:   err,
+		}
+	}
+
 	applyCmd := Command{
 		Name: "tofu",
 		Args: []string{"apply", "-auto-approve", "-state=" + LiveStateFilename},
@@ -87,6 +111,7 @@ func (h *SandboxDeployHarness) Run(ctx context.Context, workDir string, env map[
 		return nil, &SandboxDeployError{
 			Stage: "apply",
 			Init:  initStage,
+			Plan:  planStage,
 			Apply: applyStage,
 			Err:   err,
 		}
@@ -94,6 +119,7 @@ func (h *SandboxDeployHarness) Run(ctx context.Context, workDir string, env map[
 
 	return &SandboxDeployResult{
 		Init:  initStage,
+		Plan:  planStage,
 		Apply: applyStage,
 	}, nil
 }

@@ -3,15 +3,16 @@
 Last updated: 2026-03-14
 
 ## Current phase
-- Slices 1-29 complete. All 12 training scenarios pass `infrafactory run` on first iteration.
+- Slices 1-30 complete. All 12 training scenarios pass `infrafactory run` on first iteration.
 - ADRs 0009 (incremental deployment) and 0010 (Layer 3, supersedes ADR-0003) are implemented in code and docs.
 - 22 implementation contracts codified in CONCEPT.md § "Implementation Contracts (Slices 22-29)".
+- Layer 3 production readiness hardening complete (Slice 30).
 
 ## In progress
 - No active implementation tickets.
 
 ## Known blockers
-- None. `S9-T8` (sandbox/live deploy) is unblocked — ADR-0010 supersedes ADR-0003.
+- None. `S9-T8` closed — superseded by Slices 26-30 (ADR-0010).
 
 ## Next actions
 1. Keep the Layer 3 path regression-green under `go test -tags noui ./...` and `bash scripts/check_all.sh`.
@@ -25,6 +26,15 @@ Last updated: 2026-03-14
 - Keep startup/read-order instructions only in `SESSION_START.md` to avoid duplication.
 
 ## Recent updates
+- **Slice 30 complete (Layer 3 production readiness)**:
+  - Added `tofu plan -state=terraform-live.tfstate` stage to sandbox deploy harness for `plan-live.txt` artifact capture (Contract #8).
+  - Added auto-destroy of real Scaleway resources on failed runs without `--no-destroy` (Contract #14 billing protection).
+  - Added post-generation validation that `scaleway_account_project` resource exists when Layer 3 enabled (Contract #12 self-managed project lifecycle).
+  - Removed `sandbox_project_id` config field and `SCW_DEFAULT_PROJECT_ID` passthrough — project lifecycle is fully HCL-managed per ADR-0010.
+  - Verified holdout checks execute Layer 3 dual-apply with sandbox deploy + real probes (Contract #10).
+  - Closed `S9-T8` governance ticket (superseded by Slices 26-30).
+  - Updated AGENTS.md with Scaleway bootstrap documentation and project management workflow.
+  - All tests pass: `go test -tags noui ./...` green across all 8 packages.
 - **M36 maintenance hardening complete**:
   - Switched UI run-error WebSocket escaping to JSON-backed escaping so control characters cannot corrupt payloads.
   - Made state-policy input flattening reject a top-level `state` collision instead of silently shadowing it.

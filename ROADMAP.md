@@ -295,13 +295,21 @@ This file is intentionally high-level and mostly stable; day-to-day execution tr
 - Update README Web UI section: document Layer 3 toggle, credential status indicator, and real probe results display.
 - Apply slice-closure review protocol before marking Slice 29 complete.
 
+29. Slice 30: Layer 3 production readiness
+- Capture `plan-live.txt` artifact during sandbox deploy (`tofu plan` before `tofu apply`).
+- Auto-destroy real resources on failed runs (billing protection, Contract #14 destroy matrix).
+- Validate generated HCL includes `scaleway_account_project` when Layer 3 enabled (Contract #12).
+- Verify holdout checks execute Layer 3 dual-apply pattern (Contract #10).
+- Close `S9-T8` governance ticket (superseded by Slices 26-30).
+- Design reference: `docs/plans/layer3-production-plan.md`.
+- Apply slice-closure review protocol before marking Slice 30 complete.
+
 ## Near-term execution order
 
-1. Keep completed slices (1-21) stable and regression-green.
-2. `S9-T8` unblocked by ADR-0010 (supersedes ADR-0003).
+1. Keep completed slices (1-29) stable and regression-green.
+2. `S9-T8` to be closed as part of Slice 30 (superseded by ADR-0010).
 3. Pipeline consistently achieves first-iteration pass (12/12 training scenarios); monitor for regressions.
-4. Slice 22 → 23 → 24 → 25 (incremental deployment). Sequential dependency chain.
-5. Slice 26 → 27 → 28 → 29 (Layer 3 real Scaleway). Sequential dependency chain. Can start after Slice 23 (needs `--no-destroy` flag), but full incremental E2E (Slice 28) depends on Slice 24.
+4. Slice 30 (Layer 3 production readiness). T1/T3/T4 can run in parallel; T2 depends on T1; T5 last.
 
 ## Live progress tracking
 

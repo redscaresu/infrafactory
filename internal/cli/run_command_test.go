@@ -750,7 +750,10 @@ func TestRunCommandUsesSandboxLayerWhenEnabled(t *testing.T) {
 		scenarioLoader: defaultScenarioLoader,
 		deps: RuntimeDependencies{
 			Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
-				return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte("terraform {}\n")}}, nil
+				return &generator.GeneratedCode{Files: map[string][]byte{
+					"main.tf":    []byte("terraform {}\n"),
+					"project.tf": []byte("resource \"scaleway_account_project\" \"sandbox\" { name = \"test\" }\n"),
+				}}, nil
 			}),
 			Static: &fakeStaticHarness{result: &harness.StaticResult{
 				Stages:   []harness.StageResult{{Stage: "init"}, {Stage: "validate"}, {Stage: "plan"}, {Stage: "show"}},
@@ -1266,6 +1269,120 @@ func TestRunCommandNoDestroySkipsDestroyAndHoldouts(t *testing.T) {
 	}
 }
 
+func TestRunCommandAutoDestroysRealResourcesOnFailure(t *testing.T) {
+	h := newCommandTestHarness(t)
+	outputRoot := filepath.Join(h.WorkspaceDir, "output")
+	runstoreRoot := filepath.Join(h.WorkspaceDir, ".infrafactory", "runs")
+	t.Setenv("INFRAFACTORY_RUNSTORE_ROOT", runstoreRoot)
+	t.Setenv("SCW_ACCESS_KEY", "real-access")
+	t.Setenv("SCW_SECRET_KEY", "real-secret")
+
+	// Both iterations fail at validate (stuck detection triggers).
+	// The generator includes terraform-live.tfstate in its output files so that
+	// writeGeneratedFiles persists it alongside the .tf files — simulating a
+	// prior sandbox deploy having left state behind.
+	sandboxDestroy := &fakeSandboxDestroyHarness{
+		result: &harness.SandboxDestroyResult{
+			Destroy: harness.StageResult{Stage: "destroy"},
+		},
+	}
+	opts := runtimeOptions{
+		configLoader: func(path string) (config.Config, error) {
+			cfg, err := config.Load(path)
+			if err != nil {
+				return config.Config{}, err
+			}
+			cfg.Paths.Output = outputRoot
+			cfg.Validation.Layers.SandboxDeploy.Enabled = true
+			cfg.Agent.RepairIterationsMax = 1
+			return cfg, nil
+		},
+		scenarioLoader: defaultScenarioLoader,
+		deps: RuntimeDependencies{
+			Generator: generator.SeedGeneratorFunc(func(_ context.Context, _ generator.Request) (*generator.GeneratedCode, error) {
+				return &generator.GeneratedCode{Files: map[string][]byte{
+					"main.tf":                    []byte("terraform {}\n"),
+					harness.LiveStateFilename: []byte(`{"version":4}`),
+				}}, nil
+			}),
+			Static:         &fakeStaticHarness{err: &harness.StageError{StageResult: harness.StageResult{Stage: "validate", Cmd: []string{"tofu", "validate"}}, Err: errors.New("validate failed")}},
+			MockDeploy:     &fakeMockDeployHarness{},
+			Destroy:        &fakeDestroyHarness{},
+			SandboxDeploy:  &fakeSandboxDeployHarness{},
+			SandboxDestroy: sandboxDestroy,
+			RealProbe:      &fakeRealProbeHarness{result: &harness.RealProbeResult{}},
+		},
+	}
+
+	cmd := newRunCommandForTest(opts)
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{h.ScenarioPath, "--config", h.ConfigPath})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected run failure")
+	}
+	if sandboxDestroy.calls != 1 {
+		t.Fatalf("expected auto-destroy of real resources on failure, got %d destroy calls", sandboxDestroy.calls)
+	}
+}
+
+func TestRunCommandNoDestroyPreservesRealResourcesOnFailure(t *testing.T) {
+	h := newCommandTestHarness(t)
+	outputRoot := filepath.Join(h.WorkspaceDir, "output")
+	runstoreRoot := filepath.Join(h.WorkspaceDir, ".infrafactory", "runs")
+	t.Setenv("INFRAFACTORY_RUNSTORE_ROOT", runstoreRoot)
+	t.Setenv("SCW_ACCESS_KEY", "real-access")
+	t.Setenv("SCW_SECRET_KEY", "real-secret")
+
+	sandboxDestroy := &fakeSandboxDestroyHarness{
+		result: &harness.SandboxDestroyResult{
+			Destroy: harness.StageResult{Stage: "destroy"},
+		},
+	}
+	opts := runtimeOptions{
+		configLoader: func(path string) (config.Config, error) {
+			cfg, err := config.Load(path)
+			if err != nil {
+				return config.Config{}, err
+			}
+			cfg.Paths.Output = outputRoot
+			cfg.Validation.Layers.SandboxDeploy.Enabled = true
+			cfg.Agent.RepairIterationsMax = 1
+			return cfg, nil
+		},
+		scenarioLoader: defaultScenarioLoader,
+		deps: RuntimeDependencies{
+			Generator: generator.SeedGeneratorFunc(func(_ context.Context, _ generator.Request) (*generator.GeneratedCode, error) {
+				return &generator.GeneratedCode{Files: map[string][]byte{
+					"main.tf":                    []byte("terraform {}\n"),
+					harness.LiveStateFilename: []byte(`{"version":4}`),
+				}}, nil
+			}),
+			Static:         &fakeStaticHarness{err: &harness.StageError{StageResult: harness.StageResult{Stage: "validate", Cmd: []string{"tofu", "validate"}}, Err: errors.New("validate failed")}},
+			MockDeploy:     &fakeMockDeployHarness{},
+			Destroy:        &fakeDestroyHarness{},
+			SandboxDeploy:  &fakeSandboxDeployHarness{},
+			SandboxDestroy: sandboxDestroy,
+			RealProbe:      &fakeRealProbeHarness{result: &harness.RealProbeResult{}},
+		},
+	}
+
+	cmd := newRunCommandForTest(opts)
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{h.ScenarioPath, "--config", h.ConfigPath, "--no-destroy"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected run failure")
+	}
+	if sandboxDestroy.calls != 0 {
+		t.Fatalf("expected no auto-destroy with --no-destroy, got %d destroy calls", sandboxDestroy.calls)
+	}
+}
+
 func TestRunCommandIncrementalModeSnapshotsBaselineAndPersistsMetadata(t *testing.T) {
 	h := newCommandTestHarness(t)
 	outputRoot := filepath.Join(h.WorkspaceDir, "output")
@@ -1390,6 +1507,129 @@ func newRunCommandForTest(opts runtimeOptions) *cobra.Command {
 	cmd.Flags().Bool("clean", false, "")
 	cmd.Flags().Bool("no-destroy", false, "")
 	return cmd
+}
+
+func TestRunCommandHoldoutsExecuteLayer3WhenEnabled(t *testing.T) {
+	h := newCommandTestHarness(t)
+	runstoreRoot := filepath.Join(h.WorkspaceDir, ".infrafactory", "runs")
+	t.Setenv("INFRAFACTORY_RUNSTORE_ROOT", runstoreRoot)
+	t.Setenv("SCW_ACCESS_KEY", "real-access")
+	t.Setenv("SCW_SECRET_KEY", "real-secret")
+
+	// Training scenario uses dns_resolution which triggers sandbox deploy + real probes when Layer 3 is enabled.
+	trainingPath := filepath.Join(h.WorkspaceDir, "scenarios", "training", "layer3-training.yaml")
+	mustWriteFile(t, trainingPath, `scenario: layer3-training
+version: "1.0"
+cloud: scaleway
+description: training scenario with dns criterion
+resources:
+  compute:
+    purpose: web-server
+    size: small
+acceptance_criteria:
+  - type: destruction
+    expect: no_orphans
+  - type: dns_resolution
+    domain: "{{scenario_name}}.example.com"
+    expect: resolves
+`)
+
+	// Holdout scenario also has dns_resolution so it exercises Layer 3 during holdout phase.
+	holdoutPath := filepath.Join(h.WorkspaceDir, "scenarios", "holdout", "holdout-layer3.yaml")
+	writeCriteriaOnlyHoldout(t, holdoutPath, trainingPath, `  - type: destruction
+    expect: no_orphans
+  - type: dns_resolution
+    domain: "{{scenario_name}}.example.com"
+    expect: resolves
+`, "holdout-layer3")
+
+	sandboxDeploy := &fakeSandboxDeployHarness{
+		result: &harness.SandboxDeployResult{
+			Init:  harness.StageResult{Stage: "init"},
+			Plan:  harness.StageResult{Stage: "plan"},
+			Apply: harness.StageResult{Stage: "apply"},
+		},
+	}
+	sandboxDestroy := &fakeSandboxDestroyHarness{
+		result: &harness.SandboxDestroyResult{
+			Destroy: harness.StageResult{Stage: "destroy"},
+		},
+	}
+	realProbe := &fakeRealProbeHarness{
+		result: &harness.RealProbeResult{},
+	}
+	opts := runtimeOptions{
+		configLoader: func(path string) (config.Config, error) {
+			cfg, err := config.Load(path)
+			if err != nil {
+				return config.Config{}, err
+			}
+			cfg.Paths.Scenarios = filepath.Join(h.WorkspaceDir, "scenarios")
+			cfg.Validation.Layers.SandboxDeploy.Enabled = true
+			return cfg, nil
+		},
+		scenarioLoader: defaultScenarioLoader,
+		deps: RuntimeDependencies{
+			Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
+				return &generator.GeneratedCode{Files: map[string][]byte{
+					"main.tf":    []byte("terraform {}\n"),
+					"project.tf": []byte("resource \"scaleway_account_project\" \"sandbox\" { name = \"test\" }\n"),
+				}}, nil
+			}),
+			Static: &fakeStaticHarness{result: &harness.StaticResult{
+				Stages:   []harness.StageResult{{Stage: "init"}, {Stage: "validate"}, {Stage: "plan"}, {Stage: "show"}},
+				PlanJSON: []byte(`{"planned_values":{"root_module":{}}}`),
+			}},
+			MockDeploy: &fakeMockDeployHarness{result: &harness.MockDeployResult{
+				Apply:         harness.StageResult{Stage: "apply"},
+				StateSnapshot: []byte(`{}`),
+			}},
+			Destroy: &fakeDestroyHarness{result: &harness.DestroyResult{
+				Destroy:       harness.StageResult{Stage: "destroy"},
+				StateSnapshot: []byte(`{"instance":{"servers":[]}}`),
+				OrphanCount:   0,
+			}},
+			SandboxDeploy:  sandboxDeploy,
+			SandboxDestroy: sandboxDestroy,
+			RealProbe:      realProbe,
+		},
+	}
+
+	cmd := newRunCommandForTest(opts)
+	stdout := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{trainingPath, "--config", h.ConfigPath})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected run success, got %v\nstdout:\n%s", err, stdout.String())
+	}
+
+	// Sandbox deploy should be called at least twice: once during the training
+	// iteration test, and once during the holdout test.
+	if sandboxDeploy.calls < 2 {
+		t.Fatalf("expected sandbox deploy called at least 2 times (iteration + holdout), got %d", sandboxDeploy.calls)
+	}
+
+	// Sandbox destroy should be called at least twice: once during the training
+	// iteration destruction, and once during the holdout destruction.
+	if sandboxDestroy.calls < 2 {
+		t.Fatalf("expected sandbox destroy called at least 2 times (iteration + holdout), got %d", sandboxDestroy.calls)
+	}
+
+	// Real probe should be called at least twice: once during the training
+	// iteration criteria evaluation, and once during the holdout.
+	if realProbe.calls < 2 {
+		t.Fatalf("expected real probe called at least 2 times (iteration + holdout), got %d", realProbe.calls)
+	}
+
+	// Verify holdout stages appear in output.
+	if !strings.Contains(stdout.String(), "holdout/discovery: pass") {
+		t.Fatalf("expected holdout discovery stage, got:\n%s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "holdout/holdout-layer3: pass") {
+		t.Fatalf("expected holdout-layer3 pass stage, got:\n%s", stdout.String())
+	}
 }
 
 func writeCriteriaOnlyHoldout(t *testing.T, path string, trainingPath string, criteria string, scenarioName string) {

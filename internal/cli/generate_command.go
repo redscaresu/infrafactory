@@ -198,7 +198,35 @@ func generateAndWriteFilesWithResult(ctx context.Context, runtime *CommandRuntim
 	if err != nil {
 		return 0, nil, err
 	}
+	if runtime.Config.Validation.Layers.SandboxDeploy.Enabled {
+		if err := validateLayer3ProjectResource(runtime.OutputDir()); err != nil {
+			return 0, nil, err
+		}
+	}
 	return written, generated, nil
+}
+
+func validateLayer3ProjectResource(outputDir string) error {
+	entries, err := os.ReadDir(outputDir)
+	if err != nil {
+		return fmt.Errorf("read output directory for layer 3 validation: %w", err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		if !strings.HasSuffix(entry.Name(), ".tf") {
+			continue
+		}
+		content, err := os.ReadFile(filepath.Join(outputDir, entry.Name()))
+		if err != nil {
+			continue
+		}
+		if strings.Contains(string(content), `resource "scaleway_account_project"`) {
+			return nil
+		}
+	}
+	return fmt.Errorf("Layer 3 requires a scaleway_account_project resource in the generated HCL for self-managed project lifecycle")
 }
 
 type generatedFileWriteMode string
