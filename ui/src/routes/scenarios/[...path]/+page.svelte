@@ -156,9 +156,6 @@
         <span class={`rounded-full px-2 py-1 font-semibold uppercase tracking-[0.16em] ${layer3Status?.ready ? "bg-emerald-100 text-emerald-900" : "bg-rose-100 text-rose-900"}`}>
           {layer3Status?.ready ? "credentials ready" : "credentials missing"}
         </span>
-        {#if layer3Status?.project_id_configured}
-          <span class="rounded-full bg-slate-200 px-2 py-1 font-semibold uppercase tracking-[0.16em] text-slate-700">project id configured</span>
-        {/if}
       </div>
       <p class="mt-2">{layer3Status?.detail || "Layer 3 status unavailable."}</p>
       {#if layer3Status && layer3Status.missing_credentials.length > 0}

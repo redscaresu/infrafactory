@@ -180,6 +180,13 @@ func appendSandboxDeployResult(stages []StageSummary, failures []FailureSummary,
 		return stages, failures
 	}
 
+	// Record passed stages before the failed one for diagnostic visibility.
+	if deployErr.Init.Stage != "" && deployErr.Stage != "init" {
+		stages = append(stages, StageSummary{Layer: "sandbox_deploy", Stage: "init", Status: StageStatusPass})
+	}
+	if deployErr.Plan.Stage != "" && deployErr.Stage != "plan" {
+		stages = append(stages, StageSummary{Layer: "sandbox_deploy", Stage: "plan", Status: StageStatusPass})
+	}
 	switch deployErr.Stage {
 	case "init":
 		stages = append(stages, StageSummary{Layer: "sandbox_deploy", Stage: "init", Status: StageStatusFail})
@@ -306,6 +313,11 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 			sandboxSucceeded = sandboxErr == nil
 			if sandboxResult != nil && len(sandboxResult.Plan.Stdout) > 0 {
 				planLiveText = []byte(sandboxResult.Plan.Stdout)
+			} else if sandboxErr != nil {
+				var deployErr *harness.SandboxDeployError
+				if errors.As(sandboxErr, &deployErr) && len(deployErr.Plan.Stdout) > 0 {
+					planLiveText = []byte(deployErr.Plan.Stdout)
+				}
 			}
 		}
 	}

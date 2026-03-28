@@ -62,7 +62,6 @@ export interface ScenarioLayer3StatusResponse {
   config_default_enabled: boolean;
   credentials_ready: boolean;
   missing_credentials: string[];
-  project_id_configured: boolean;
   ready: boolean;
   detail: string;
 }
