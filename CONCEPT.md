@@ -36,11 +36,11 @@ Rule: if a change alters architecture, interfaces, or long-term workflow, create
 | Language | Go (everything) | Matches Scaleway ecosystem (CLI, SDK, TF provider all Go). Single language. |
 | Mock server | [Mockway](https://github.com/redscaresu/mockway) — stateful Scaleway API mock | No LocalStack for Scaleway. Build our own, LocalStack-inspired. Separate repo, built first as standalone building block. |
 | Mock architecture | Standalone binary, single server with path routing, SQLite state | Single port simplifies OpenTofu provider config. SQLite for persistent, queryable state. |
-| Mock scope | 9 services + 1 legacy alias (Instance, VPC, LB, K8s, RDB, IAM, Marketplace, Container Registry, Redis + Account legacy) | Breadth over depth. 21+ resource types, ~100+ handler methods + 3 admin endpoints + 1 catch-all. S3 deferred to Mockway v2. |
-| Mock generation | Codegen-first (`oapi-codegen`) with hand-written fallback | Scaleway specs include custom `x-one-of`; pre-process to standard `oneOf` and use codegen when viable, otherwise hand-write types/routes from spec references. |
+| Mock scope | 13 services + 1 legacy alias (Instance, VPC, LB, K8s, RDB, IAM, Marketplace, Container Registry, Redis, Block Storage, IPAM, Domain/DNS, VPC Gateways + Account legacy) | Breadth over depth. 42+ resource types, ~250 handler methods + 5 admin endpoints + 1 catch-all. S3 deferred to Mockway v2. |
+| Mock generation | Hand-written handlers derived from Terraform SDK + Scaleway API spec | Initial plan was codegen-first (`oapi-codegen`) but Scaleway spec quirks (`x-one-of`, incomplete schemas) made hand-writing faster and more accurate. All ~250 handlers are hand-written. |
 | Mock HTTP router | chi | Lightweight, stdlib-compatible, path-parameter routing. No framework lock-in. |
-| Mock testing | Unit + integration in Mockway repo | Unit: SQLite store, FK validation, handler logic. Integration: HTTP tests against running server (create/read/delete/list, FK rejection). |
-| Mock state model | SQLite with FK constraints + referential integrity | On create: validate referenced resources exist (404 if not). On delete: reject if dependents exist (409). Exceptions: server delete detaches IPs (`SET NULL`) and cascades NICs; LB delete cascades private network attachments (provider expects API to handle PN detachment). See *Mock fidelity limitations* below. |
+| Mock testing | Unit + integration + e2e in Mockway repo | Unit: SQLite store, FK validation, handler logic. Integration: 282 test functions (261 handler + 21 repository) (CRUD lifecycle, FK rejection, parent validation, error paths). E2E: 22 Terraform examples with double-apply idempotency check. Coverage: 74.9%. |
+| Mock state model | SQLite with FK constraints + referential integrity + parent validation | On create: validate referenced resources exist (404 if not). On delete: reject if dependents exist (409). On sub-resource operations: validate parent exists (404 if not). On nested-path operations: validate child belongs to parent in URL. On cross-parent references: validate resources share same grandparent (e.g. LB route frontend+backend same LB). Exceptions: server delete detaches IPs (`SET NULL`) and cascades NICs; LB delete cascades private network attachments and detaches LB IPs. See *Mock fidelity limitations* below. |
 | Mock admin API | Structured state schema, versioned contract | `GET /mock/state` returns full resource graph with relationships preserved. This schema is the interface between Mockway and InfraFactory. |
 | Topology evaluation | Harness-side, not Mockway | Mockway stores resources + relationships. The harness's TopologyEvaluator queries mock state and reasons about connectivity as graph queries. Clean separation: Mockway = realistic API mock, harness = domain logic. |
 | S3 mock | Deferred to Mockway v2 | Object Storage uses S3-compatible API (different auth). Separate port, Azurite-inspired. |
@@ -110,14 +110,18 @@ Rule: if a change alters architecture, interfaces, or long-term workflow, create
 | Category | Resources | API Pattern |
 |----------|-----------|-------------|
 | Compute | Instances, IPs, Security Groups, Private NICs, Volumes | Zoned: `/instance/v1/zones/{zone}/servers` |
-| Networking | VPC, Private Networks | Regional: `/vpc/v1/regions/{region}/` |
-| Load Balancing | Load Balancers, Frontends, Backends | Zoned: `/lb/v1/zones/{zone}/lbs` |
-| Kubernetes | Kapsule clusters + node pools | Regional: `/k8s/v1/regions/{region}/clusters` |
-| Databases | Managed PostgreSQL, MySQL | Regional: `/rdb/v1/regions/{region}/instances` |
-| IAM | Applications, API Keys, Policies, SSH Keys | Organisation-scoped: `/iam/v1alpha1/` |
-| Marketplace | Local Images (image label → UUID resolution) | `/marketplace/v2/` |
+| Networking | VPC, Private Networks, VPC Routes | Regional: `/vpc/v1/regions/{region}/` + `/vpc/v2/regions/{region}/` (routes on v2 only) |
+| VPC Gateways | Public Gateways, Gateway Networks | Zoned: `/vpc-gw/v2/zones/{zone}/` |
+| Load Balancing | LBs, Frontends, Backends, ACLs, Routes, Certificates, IPs, Private Networks, Health Checks | Zoned + Regional: `/lb/v1/zones/{zone}/` and `/lb/v1/regions/{region}/` |
+| Kubernetes | Clusters, Pools, Nodes, Versions, Upgrade, Set-Type, Kubeconfig | Regional: `/k8s/v1/regions/{region}/clusters` |
+| Databases | Instances, Databases, Users, Privileges, ACLs, Settings, Read Replicas, Snapshots, Backups, Endpoints, Certificates | Regional: `/rdb/v1/regions/{region}/instances` |
+| IAM | Applications, API Keys, Policies, Rules, SSH Keys, Users, Groups | Organisation-scoped: `/iam/v1alpha1/` |
+| Block Storage | Volumes, Snapshots, Volume Types | Zoned: `/block/v1alpha1/zones/{zone}/` |
+| IPAM | IPs (create, list, update, delete, detach, move) | Regional: `/ipam/v1/regions/{region}/` |
+| DNS | Zones, Records | `/domain/v2beta1/` |
+| Marketplace | Local Images (known label → UUID resolution, unknown labels rejected) | `/marketplace/v2/` |
 | Container Registry | Namespaces | Regional: `/registry/v1/regions/{region}/namespaces` |
-| Redis | Clusters | Zoned: `/redis/v1/zones/{zone}/clusters` |
+| Redis | Clusters, Versions, Node Types, ACL Rules, Endpoints, Settings, Certificates | Zoned: `/redis/v1/zones/{zone}/clusters` |
 | Account (legacy) | SSH Keys (alias → IAM ssh-keys state) | `/account/v2alpha1/` |
 | Storage | S3-compatible Object Storage (Mockway v2) | S3 API: `s3.{region}.scw.cloud` |
 
@@ -203,23 +207,29 @@ Rule: if a change alters architecture, interfaces, or long-term workflow, create
 
 ## Mock Fidelity Limitations
 
-Mockway's referential integrity model (FK constraints, 404 on missing references, 409 on dependent deletes) was derived from the **Terraform/OpenTofu provider's behavior**, not from testing against Scaleway's real API. This means the mock is accurate to what the provider expects, but may diverge from what Scaleway actually does.
+Mockway's referential integrity model was derived from studying the **Terraform/OpenTofu provider's behavior** and the **Scaleway API spec**, then hardened through 14+ rounds of systematic API fidelity review. This means the mock is accurate to what the provider expects, but may diverge from what Scaleway actually does.
 
 ### Known divergence risks
 
-1. **Provider-side cascades invisible to the mock** — the Scaleway provider may delete dependents (e.g., frontends) before calling the LB delete endpoint. Mockway enforces the 409 correctly, but this code path may never execute in practice because the provider handles it first. The mock is stricter than what the provider actually encounters.
+1. **LB delete cascade asymmetry** — the real Scaleway API cascade-deletes frontends/backends/routes/certificates when an LB is deleted. Mockway blocks deletion with 409 if frontends or backends exist (no SQL CASCADE), but cascade-deletes routes and certificates (ON DELETE CASCADE). This is acceptable because the Terraform provider always deletes children before the LB (dependency graph ordering), so this code path never executes in practice. The mock is stricter than the real API for frontends/backends.
 
-2. **Real API cascades the mock doesn't model** — Scaleway's API may silently cascade-delete resources that mockway rejects with 409. If a real `DELETE /lbs/{id}` auto-deletes frontends but mockway returns 409, the provider would work against real Scaleway but fail against the mock. The mock is stricter than the real API.
+2. **Implicit cross-service dependencies** — resources that share relationships outside the FK model (e.g., security group rules referencing other groups, DNS records pointing to LB IPs, or IAM policies scoped to specific resources) may produce 409s on the real API that mockway allows through. The mock is more permissive than the real API.
 
-3. **Implicit cross-service dependencies** — resources that share relationships outside the FK model (e.g., security group rules referencing other groups, DNS records pointing to LB IPs, or IAM policies scoped to specific resources) may produce 409s on the real API that mockway allows through. The mock is more permissive than the real API.
+3. **Eventual consistency** — Scaleway resources may have transient states (e.g., K8s cluster `provisioning`, RDB instance `configuring`) where operations are rejected. Mockway transitions resources to their final state immediately. The mock is simpler than the real API.
 
-4. **Eventual consistency** — Scaleway resources may have transient states (e.g., K8s cluster `provisioning`, RDB instance `configuring`) where operations are rejected. Mockway transitions resources to their final state immediately. The mock is simpler than the real API.
+4. **RDB private network refs not FK-enforced** — RDB instance endpoints store `private_network.id` inside JSON, not as a SQL FK column. Deleting a private network referenced by an RDB endpoint succeeds in mockway but would fail on real Scaleway.
+
+5. **No field-level validation** — mockway deliberately does not validate required fields, field formats, or value constraints (e.g., `commercial_type`, `engine`, `node_type`). The Terraform provider SDK validates these before the API call reaches mockway. This is a design choice, not a gap — mockway focuses on FK references, dependency ordering, attachment constraints, and response shapes.
+
+6. **VPC gateway network `enable_masquerade` drift** — `scaleway_vpc_gateway_network` with `enable_masquerade = true` causes perpetual plan diff. Needs investigation against the real Scaleway API.
 
 ### What this means in practice
 
-Mockway validates **structural correctness**: the generated HCL creates resources in the right order, with valid references, and tears down cleanly. It does not validate **behavioral correctness**: whether the real API accepts the exact sequence of operations the provider sends.
+Mockway validates **structural correctness**: the generated HCL creates resources in the right order, with valid references, correct resource IDs (not names), and tears down cleanly. It catches wrong reference types, incorrect resource IDs, cross-stack ordering problems, and unknown marketplace image labels.
 
-Layer 3 (real Scaleway deploy, planned in Slices 26-29 per ADR-0010) is the only way to close this gap. Until Layer 3 is implemented, the mock is a best-effort approximation — sufficient for catching the majority of IaC defects (wrong resource types, missing dependencies, invalid configurations) but not a guarantee of real-world success.
+It does not validate **behavioral correctness**: whether the real API accepts the exact sequence of operations the provider sends, or whether field values are within acceptable ranges.
+
+Layer 3 (real Scaleway deploy, planned in Slices 26-29 per ADR-0010) is the only way to close this gap. Until Layer 3 is implemented, the mock catches the majority of IaC defects — sufficient for the factory's feedback loop to converge on structurally correct HCL.
 
 ---
 
@@ -636,19 +646,20 @@ This matrix is testable: unit tests should verify each cell with mock/real state
 Config keys (in `infrafactory.yaml`):
 
 ```yaml
-probes:
-  timeout_seconds: 30       # Per-attempt timeout
-  retry_count: 3            # Number of attempts before declaring failure
-  retry_delay_seconds: 10   # Delay between retry attempts
+validation:
+  real_probes:
+    timeout_seconds: 5        # Per-attempt timeout
+    retries: 6                # Number of attempts before declaring failure
+    retry_delay_seconds: 5    # Delay between retry attempts
 ```
 
 **Layer 3 probe mode**: when Layer 3 is enabled, real probes **replace** graph queries for `connectivity` and `http_probe` — do not run both. Real probes are strictly more authoritative than graph queries. Layer 2 graph queries still run as part of Layer 2 validation (before Layer 3), so structural issues are caught first. Layer 3 probes validate behavioral correctness that graph queries cannot.
 
 **Fallback**: when Layer 3 is off, `connectivity` and `http_probe` use Layer 2 graph queries (existing behavior). `dns_resolution` remains auto-pass informational output.
 
-**`dns_resolution` stabilization**: DNS propagation is inherently asynchronous. There is no separate stabilization window — use the standard retry mechanism (`probes.retry_count` × `probes.retry_delay_seconds`). With defaults (3 retries × 10s delay), the probe has up to ~90s total (3 attempts × 30s timeout). If DNS hasn't propagated within this window, the probe fails. Operators can tune retry/delay config for environments with slower propagation.
+**`dns_resolution` stabilization**: DNS propagation is inherently asynchronous. There is no separate stabilization window — use the standard retry mechanism (`validation.real_probes.retries` × `validation.real_probes.retry_delay_seconds`). With defaults (6 retries × 5s delay), the probe has up to ~30s total timeout budget plus retry delays (6 attempts × 5s timeout, with 5 pauses between attempts). If DNS hasn't propagated within this window, the probe fails. Operators can tune retry/delay config for environments with slower propagation.
 
-**Probe config scope**: config keys are global (apply to all probes equally). Per-criterion overrides are not supported in v1. If needed later, add optional `timeout_seconds`/`retry_count` fields to individual acceptance criteria entries.
+**Probe config scope**: config keys are global (apply to all probes equally). Per-criterion overrides are not supported in v1. If needed later, add optional `timeout_seconds`/`retries` fields to individual acceptance criteria entries.
 
 ### 16. Opt-in gating for Layer 3 E2E tests (Slice 28)
 
@@ -689,7 +700,7 @@ The `/layer3-status` endpoint lets the UI check readiness before offering the st
 
 ### 19. RunMetadata versioning for new fields
 
-The existing `schema` field uses `"infrafactory.run.metadata.v1"`. Adding `incremental` and `previous_run_id` fields bumps the schema to `"infrafactory.run.metadata.v2"`. Backward-read rule: when reading a `v1` record that lacks these fields, treat `incremental` as `false` and `previous_run_id` as `""` (empty string). Never fail on missing fields — degrade gracefully. The `RunMetadataSchemaVersion` constant must be updated when these fields ship. `RunMetadataSchemaLegacy` (`"infrafactory.run.metadata.legacy"`) remains readable unchanged — the same backward-read defaults apply (missing fields → `false`/`""`).
+The new fields (`Incremental`, `PreviousRunID`, `Layer3Enabled`) were added as optional (`omitempty`) to the existing `"infrafactory.run.metadata.v1"` schema. No version bump was needed because the fields are additive and backward-compatible — Go's `json.Unmarshal` silently ignores missing fields, treating them as zero values (`false`/`""`). Backward-read rule: when reading a record that lacks these fields, `Incremental` defaults to `false`, `PreviousRunID` to `""`, `Layer3Enabled` to `false`. Never fail on missing fields — degrade gracefully. `RunMetadataSchemaLegacy` (`"infrafactory.run.metadata.legacy"`) remains readable unchanged — the same backward-read defaults apply.
 
 ### 20. Failure taxonomy for new failure sources
 
@@ -1173,7 +1184,7 @@ Output: output/web-app-paris/
 | `validation.layers.static.enabled` | boolean | No | `true` | Enable Layer 1 (tofu validate/plan + OPA). |
 | `validation.layers.static.policy_paths` | []string | No | `[]` | Directories containing OPA `.rego` files. |
 | `validation.layers.mock_deploy.enabled` | boolean | No | `true` | Enable Layer 2 (tofu apply → Mockway). |
-| `validation.layers.sandbox_deploy.enabled` | boolean | No | `false` | Enable Layer 3. **Not implemented in v1** — always set to `false`. |
+| `validation.layers.sandbox_deploy.enabled` | boolean | No | `false` | Enable Layer 3 (real Scaleway deploy). Requires `SCW_ACCESS_KEY` and `SCW_SECRET_KEY` env vars. See Implementation Contract #3, #11, #18. |
 | `validation.layers.destruction.enabled` | boolean | No | `true` | Enable Layer 4 (tofu destroy + orphan check). |
 | `constraint_policies` | map[string]string | No | `{}` | Maps constraint names to `.rego` file paths (relative to `paths.policies`). |
 | `paths.scenarios` | string | No | `./scenarios` | Root directory for scenario YAML files. |
@@ -1244,9 +1255,9 @@ This matches the "re-derive from scratch" philosophy — since the agent regener
 - Within Layer 1: OPA policies run in parallel against plan JSON
 - If Layer 1 has hard failures → skip Layer 2
 - Layer 2: `tofu apply` → Mockway, then TopologyEvaluator (connectivity graph queries), then OPA `deny_state` rules against mock state JSON
-- Layer 3 (sandbox) is opt-in, gated by config. **Not implemented in v1** — returns skip. Interface exists for future implementation
-- Layer 4 (destruction) runs if anything was deployed
-- `dns_resolution` acceptance criteria are **skipped** when sandbox deploy is disabled (they require real DNS). Skipped checks appear in feedback JSON with `"status": "skipped"` — they don't block convergence
+- Layer 3 (real Scaleway deploy) is opt-in, gated by `validation.layers.sandbox_deploy.enabled` config + `layer3_enabled` per-run flag. Only runs if Layers 1+2 pass. See *Real Scaleway Deploy (Layer 3)* section and Implementation Contracts #3, #18.
+- Layer 4 (destruction) runs if anything was deployed (skipped when `--no-destroy` is set)
+- `dns_resolution` acceptance criteria are **auto-pass** when sandbox deploy is disabled (they require real DNS). Auto-pass checks appear in output as informational — they don't block convergence
 
 ### TopologyEvaluator
 
@@ -1851,62 +1862,93 @@ type FailureSignature struct {
 
 | Service | Path Prefix | Key Endpoints |
 |---------|-------------|---------------|
-| Instance | `/instance/v1/zones/{zone}/` | servers, ips, security_groups, private_nics, volumes, products/servers catalog, user_data stubs, server action |
-| VPC | `/vpc/v1/regions/{region}/` | vpcs, private-networks |
-| Load Balancer | `/lb/v1/zones/{zone}/` | lbs, frontends, backends, private_networks |
-| Kubernetes | `/k8s/v1/regions/{region}/` | clusters, pools |
-| RDB | `/rdb/v1/regions/{region}/` | instances, databases, users |
-| IAM | `/iam/v1alpha1/` | applications, api-keys, policies, ssh-keys, rules |
+| Instance | `/instance/v1/zones/{zone}/` | servers, ips, security_groups, private_nics, volumes, products/servers catalog, user_data, server actions |
+| VPC | `/vpc/v1/regions/{region}/` + `/vpc/v2/regions/{region}/` | vpcs, private-networks, routes (routes on v2 only) |
+| VPC Gateways | `/vpc-gw/v2/zones/{zone}/` | gateways, gateway-networks |
+| Load Balancer | `/lb/v1/zones/{zone}/` + `/lb/v1/regions/{region}/` | lbs, frontends, backends, private_networks, acls, routes, certificates, health checks |
+| Kubernetes | `/k8s/v1/regions/{region}/` | clusters, pools, nodes, versions, upgrade, set-type, kubeconfig |
+| RDB | `/rdb/v1/regions/{region}/` | instances, databases, users, privileges, acls, settings, read-replicas, snapshots, backups, endpoints, certificates, logs |
+| IAM | `/iam/v1alpha1/` | applications, api-keys, policies, rules, ssh-keys, users, groups |
 | Container Registry | `/registry/v1/regions/{region}/` | namespaces |
-| Redis | `/redis/v1/zones/{zone}/` | clusters |
-| Marketplace | `/marketplace/v2/` | local-images (image label → zone-specific UUID resolution) |
+| Redis | `/redis/v1/zones/{zone}/` | clusters, versions, node-types, acl-rules, endpoints, settings, certificates |
+| Block Storage | `/block/v1alpha1/zones/{zone}/` | volumes, snapshots, volume-types |
+| IPAM | `/ipam/v1/regions/{region}/` | ips (create, list, update, delete, detach, move) |
+| Domain/DNS | `/domain/v2beta1/` | dns-zones, dns-records |
+| Marketplace | `/marketplace/v2/` | local-images (known label → zone-specific UUID resolution, unknown labels rejected) |
 | Account (legacy) | `/account/v2alpha1/` | ssh-keys (alias → IAM ssh-keys state) |
 
-**Scope**: 9 services + 1 legacy alias, 21+ resource types, ~100+ handler methods + 3 admin endpoints + 1 catch-all (UnimplementedHandler). Codegen-first (`oapi-codegen`) with hand-written fallback when spec quirks (for example `x-one-of`) block usable generation. No S3 in v1.
+**Scope**: 13 services + 1 legacy alias, 42+ resource types, ~250 handler methods + 5 admin endpoints + 1 catch-all (UnimplementedHandler). Hand-written handlers derived from studying the Terraform SDK and Scaleway API spec. API fidelity verified through systematic codex review loops (14 bug patterns documented). No S3 in v1.
 
 ### Referential Integrity
 
 Mockway enforces the same referential integrity as the real Scaleway API:
 
-- **On create**: validate that referenced resources exist. Creating a `private_nic` with a non-existent `server_id` → 404 Not Found. Creating an RDB instance with a `private_network_id` that doesn't exist → 404 Not Found. Creating an IAM API key with a non-existent `application_id` → 404 Not Found.
-- **On delete**: reject if dependents still exist (409 Conflict). Delete a VPC when private networks are still attached → 409. Delete a private network when NICs are attached → 409. Delete an IAM application with attached API keys or policies → 409. Delete a K8s cluster when pools exist → 409. Delete an RDB instance when databases/users exist → 409. Delete an LB when frontends or backends exist → 409.
-- **On delete (cascade/detach exceptions)**: server deletion detaches IPs and security group references (`ON DELETE SET NULL`) and cascades private NICs (`ON DELETE CASCADE`). LB deletion cascades `lb_private_networks` attachment records because the Scaleway TF provider does not detach private networks before LB delete. These exceptions match the destroy ordering the Terraform provider expects.
-- **`POST /mock/reset`**: wipes all state. Disables FK checks (`PRAGMA foreign_keys = OFF`), deletes all rows, re-enables FKs.
+- **On create**: validate that referenced resources exist via SQLite FK constraints. Creating a `private_nic` with a non-existent `server_id` → 404 Not Found. Creating an LB route with frontend/backend from different LBs → 400 Bad Request. Creating an LB with an already-attached `ip_id` → rejected. Unknown marketplace image labels → empty list (catches typos like `ubuntu_jammyy`).
+- **On sub-resource operations**: validate parent exists before proceeding. Listing databases for a non-existent RDB instance → 404. Setting ACLs on a non-existent instance → 404. Getting a NIC via `/servers/{server_id}/private_nics/{nic_id}` validates the NIC belongs to that server.
+- **On delete**: reject if dependents still exist (409 Conflict). Delete a VPC when private networks are still attached → 409. Delete an LB when frontends or backends exist → 409. Delete an LB IP while attached to an LB → rejected.
+- **On delete (cascade/detach exceptions)**: server deletion detaches IPs and security group references (`ON DELETE SET NULL`) and cascades private NICs (`ON DELETE CASCADE`). LB deletion cascades `lb_private_networks` attachment records, routes, and certificates, and detaches LB IPs. Frontends and backends are NOT cascaded — they block with 409. K8s cluster deletion cascades pools. RDB instance deletion cascades databases, users, privileges, ACLs, read replicas, snapshots, and backups.
+- **On update**: `patchMerge` helper preserves existing fields, skips nil values, deep-merges nested maps one level. All Update functions sync extracted SQL FK columns.
+- **`POST /mock/reset`**: wipes all state (including marketplace cache). Disables FK checks, deletes all rows, re-enables FKs.
+- **`POST /mock/snapshot`** / **`POST /mock/restore`**: snapshot and restore full state for iteration baselines.
+- **`GET /mock/state/{service}`**: per-service state queries for targeted inspection.
 
 ### Key Resource Relationships
 
 ```
 VPC
- └── Private Network
-      ├── Instance Private NIC → Instance Server
-      ├── RDB Instance (private endpoint)
-      └── LB Private Network attachment
+ ├── Private Network
+ │    ├── Instance Private NIC → Instance Server
+ │    ├── RDB Instance (private endpoint — JSON ref, not FK)
+ │    ├── LB Private Network attachment
+ │    └── VPC Gateway Network → VPC Public Gateway
+ └── VPC Route
 
 Instance Server
  ├── Instance IP (public, optional — ON DELETE SET NULL)
  ├── Instance Private NIC → Private Network (ON DELETE CASCADE)
+ ├── Instance Volume (embedded in server JSON — no FK, standalone table)
  └── Instance Security Group (ON DELETE SET NULL)
 
-Load Balancer
- ├── LB IP (public, auto-generated on LB create — stored inline in LB data JSON, no separate table)
- ├── LB Frontend (inbound port)
- ├── LB Backend (forward port, server IPs)
- └── LB Private Network attachment
+Block Volume (standalone — zone-scoped)
+ └── Block Snapshot (volume_id FK)
 
-K8s Cluster
- ├── K8s Node Pool
+Load Balancer
+ ├── LB IP (separate table, detached on LB delete)
+ ├── LB Frontend → LB ACL (ON DELETE CASCADE)
+ ├── LB Backend
+ ├── LB Route → Frontend + Backend (same-LB validated)
+ ├── LB Certificate (ON DELETE CASCADE)
+ └── LB Private Network attachment (cascaded on LB delete)
+
+K8s Cluster (ON DELETE CASCADE → pools)
+ ├── K8s Node Pool → synthesised Nodes
  └── Private Network (optional)
 
+RDB Instance (ON DELETE CASCADE → databases, users, privileges, ACLs, read replicas, snapshots, backups)
+ ├── RDB Database
+ ├── RDB User
+ ├── RDB Privilege
+ ├── RDB ACL
+ ├── RDB Read Replica → RDB Endpoint
+ ├── RDB Snapshot
+ └── RDB Backup
+
 IAM Application
- ├── IAM API Key (access_key is the PK, not UUID; application_id optional)
- └── IAM Policy (optional application_id FK)
+ ├── IAM API Key (access_key is the PK, not UUID; application_id optional, user_id validated)
+ └── IAM Policy → IAM Rules (ON DELETE CASCADE)
+
+IAM Group → IAM Group Members (ON DELETE CASCADE)
 
 IAM SSH Key (standalone — no parent dependency)
  └── Also accessible via Account legacy routes (same state)
 
+DNS Zone → DNS Records (cascaded on zone delete)
+
 Container Registry Namespace (standalone — region-scoped)
 
 Redis Cluster (standalone — zone-scoped)
+
+IPAM IP (standalone — region-scoped)
 ```
 
 ### SQLite Schema
@@ -1915,146 +1957,67 @@ Per-type tables with JSON blob for full resource data, extracted FK columns for 
 
 ```sql
 -- VPC
-CREATE TABLE vpcs (
-    id TEXT PRIMARY KEY,
-    region TEXT NOT NULL,
-    data JSON NOT NULL
-);
+CREATE TABLE vpcs (id TEXT PRIMARY KEY, region TEXT NOT NULL, data JSON NOT NULL);
+CREATE TABLE private_networks (id TEXT PRIMARY KEY, vpc_id TEXT NOT NULL REFERENCES vpcs(id), region TEXT NOT NULL, data JSON NOT NULL);
+CREATE TABLE vpc_routes (id TEXT PRIMARY KEY, vpc_id TEXT NOT NULL REFERENCES vpcs(id), region TEXT NOT NULL, data JSON NOT NULL);
+CREATE TABLE vpc_public_gateways (id TEXT PRIMARY KEY, zone TEXT NOT NULL, data JSON NOT NULL);
+CREATE TABLE vpc_gateway_networks (id TEXT PRIMARY KEY, gateway_id TEXT NOT NULL REFERENCES vpc_public_gateways(id), private_network_id TEXT NOT NULL REFERENCES private_networks(id), data JSON NOT NULL);
 
-CREATE TABLE private_networks (
-    id TEXT PRIMARY KEY,
-    vpc_id TEXT NOT NULL REFERENCES vpcs(id),
-    region TEXT NOT NULL,
-    data JSON NOT NULL
-);
-
--- Instance (security_groups first — referenced by servers)
-CREATE TABLE instance_security_groups (
-    id TEXT PRIMARY KEY,
-    zone TEXT NOT NULL,
-    data JSON NOT NULL
-);
-
-CREATE TABLE instance_servers (
-    id TEXT PRIMARY KEY,
-    zone TEXT NOT NULL,
-    security_group_id TEXT REFERENCES instance_security_groups(id) ON DELETE SET NULL,
-    data JSON NOT NULL
-);
-
-CREATE TABLE instance_ips (
-    id TEXT PRIMARY KEY,
-    server_id TEXT REFERENCES instance_servers(id) ON DELETE SET NULL,
-    zone TEXT NOT NULL,
-    data JSON NOT NULL
-);
-
-CREATE TABLE instance_private_nics (
-    id TEXT PRIMARY KEY,
-    server_id TEXT NOT NULL REFERENCES instance_servers(id) ON DELETE CASCADE,
-    private_network_id TEXT NOT NULL REFERENCES private_networks(id),
-    zone TEXT NOT NULL,
-    data JSON NOT NULL
-);
+-- Instance
+CREATE TABLE instance_security_groups (id TEXT PRIMARY KEY, zone TEXT NOT NULL, data JSON NOT NULL);
+CREATE TABLE instance_servers (id TEXT PRIMARY KEY, zone TEXT NOT NULL, security_group_id TEXT REFERENCES instance_security_groups(id) ON DELETE SET NULL, data JSON NOT NULL);
+CREATE TABLE instance_ips (id TEXT PRIMARY KEY, server_id TEXT REFERENCES instance_servers(id) ON DELETE SET NULL, zone TEXT NOT NULL, data JSON NOT NULL);
+CREATE TABLE instance_private_nics (id TEXT PRIMARY KEY, server_id TEXT NOT NULL REFERENCES instance_servers(id) ON DELETE CASCADE, private_network_id TEXT NOT NULL REFERENCES private_networks(id), zone TEXT NOT NULL, data JSON NOT NULL);
+CREATE TABLE instance_volumes (id TEXT PRIMARY KEY, zone TEXT NOT NULL, data JSON NOT NULL);
 
 -- Load Balancer
-CREATE TABLE lbs (
-    id TEXT PRIMARY KEY,
-    zone TEXT NOT NULL,
-    data JSON NOT NULL
-);
-
-CREATE TABLE lb_frontends (
-    id TEXT PRIMARY KEY,
-    lb_id TEXT NOT NULL REFERENCES lbs(id),
-    data JSON NOT NULL
-);
-
-CREATE TABLE lb_backends (
-    id TEXT PRIMARY KEY,
-    lb_id TEXT NOT NULL REFERENCES lbs(id),
-    data JSON NOT NULL
-);
-
-CREATE TABLE lb_private_networks (
-    lb_id TEXT NOT NULL REFERENCES lbs(id),
-    private_network_id TEXT NOT NULL REFERENCES private_networks(id),
-    data JSON NOT NULL,
-    PRIMARY KEY (lb_id, private_network_id)
-);
+CREATE TABLE lb_ips (id TEXT PRIMARY KEY, zone TEXT NOT NULL, data JSON NOT NULL);
+CREATE TABLE lbs (id TEXT PRIMARY KEY, zone TEXT NOT NULL, data JSON NOT NULL);
+CREATE TABLE lb_frontends (id TEXT PRIMARY KEY, lb_id TEXT NOT NULL REFERENCES lbs(id), data JSON NOT NULL);
+CREATE TABLE lb_backends (id TEXT PRIMARY KEY, lb_id TEXT NOT NULL REFERENCES lbs(id), data JSON NOT NULL);
+CREATE TABLE lb_private_networks (lb_id TEXT NOT NULL REFERENCES lbs(id), private_network_id TEXT NOT NULL REFERENCES private_networks(id), data JSON NOT NULL, PRIMARY KEY (lb_id, private_network_id));
+CREATE TABLE lb_acls (id TEXT PRIMARY KEY, frontend_id TEXT NOT NULL REFERENCES lb_frontends(id) ON DELETE CASCADE, data JSON NOT NULL);
+CREATE TABLE lb_routes (id TEXT PRIMARY KEY, lb_id TEXT NOT NULL REFERENCES lbs(id) ON DELETE CASCADE, data JSON NOT NULL);
+CREATE TABLE lb_certificates (id TEXT PRIMARY KEY, lb_id TEXT NOT NULL REFERENCES lbs(id) ON DELETE CASCADE, data JSON NOT NULL);
 
 -- Kubernetes
-CREATE TABLE k8s_clusters (
-    id TEXT PRIMARY KEY,
-    region TEXT NOT NULL,
-    private_network_id TEXT REFERENCES private_networks(id),
-    data JSON NOT NULL
-);
-
-CREATE TABLE k8s_pools (
-    id TEXT PRIMARY KEY,
-    cluster_id TEXT NOT NULL REFERENCES k8s_clusters(id),
-    region TEXT NOT NULL,
-    data JSON NOT NULL
-);
+CREATE TABLE k8s_clusters (id TEXT PRIMARY KEY, region TEXT NOT NULL, private_network_id TEXT REFERENCES private_networks(id), data JSON NOT NULL);
+CREATE TABLE k8s_pools (id TEXT PRIMARY KEY, cluster_id TEXT NOT NULL REFERENCES k8s_clusters(id) ON DELETE CASCADE, region TEXT NOT NULL, data JSON NOT NULL);
 
 -- RDB
-CREATE TABLE rdb_instances (
-    id TEXT PRIMARY KEY,
-    region TEXT NOT NULL,
-    data JSON NOT NULL
-);
-
-CREATE TABLE rdb_databases (
-    instance_id TEXT NOT NULL REFERENCES rdb_instances(id),
-    name TEXT NOT NULL,
-    data JSON NOT NULL,
-    PRIMARY KEY (instance_id, name)
-);
-
-CREATE TABLE rdb_users (
-    instance_id TEXT NOT NULL REFERENCES rdb_instances(id),
-    name TEXT NOT NULL,
-    data JSON NOT NULL,
-    PRIMARY KEY (instance_id, name)
-);
+CREATE TABLE rdb_instances (id TEXT PRIMARY KEY, region TEXT NOT NULL, data JSON NOT NULL);
+CREATE TABLE rdb_databases (instance_id TEXT NOT NULL REFERENCES rdb_instances(id) ON DELETE CASCADE, name TEXT NOT NULL, data JSON NOT NULL, PRIMARY KEY (instance_id, name));
+CREATE TABLE rdb_users (instance_id TEXT NOT NULL REFERENCES rdb_instances(id) ON DELETE CASCADE, name TEXT NOT NULL, data JSON NOT NULL, PRIMARY KEY (instance_id, name));
+CREATE TABLE rdb_privileges (instance_id TEXT NOT NULL REFERENCES rdb_instances(id) ON DELETE CASCADE, user_name TEXT NOT NULL, database_name TEXT NOT NULL, data JSON NOT NULL, PRIMARY KEY (instance_id, user_name, database_name));
+CREATE TABLE rdb_acls (instance_id TEXT PRIMARY KEY REFERENCES rdb_instances(id) ON DELETE CASCADE, data JSON NOT NULL);
+CREATE TABLE rdb_read_replicas (id TEXT PRIMARY KEY, instance_id TEXT NOT NULL REFERENCES rdb_instances(id) ON DELETE CASCADE, region TEXT NOT NULL, data JSON NOT NULL);
+CREATE TABLE rdb_snapshots (id TEXT PRIMARY KEY, instance_id TEXT NOT NULL REFERENCES rdb_instances(id) ON DELETE CASCADE, region TEXT NOT NULL, data JSON NOT NULL);
+CREATE TABLE rdb_backups (id TEXT PRIMARY KEY, instance_id TEXT NOT NULL REFERENCES rdb_instances(id) ON DELETE CASCADE, region TEXT NOT NULL, data JSON NOT NULL);
 
 -- IAM (organisation-scoped — no zone/region column)
-CREATE TABLE iam_applications (
-    id TEXT PRIMARY KEY,
-    data JSON NOT NULL
-);
+CREATE TABLE iam_applications (id TEXT PRIMARY KEY, data JSON NOT NULL);
+CREATE TABLE iam_api_keys (access_key TEXT PRIMARY KEY, application_id TEXT REFERENCES iam_applications(id), data JSON NOT NULL);
+CREATE TABLE iam_policies (id TEXT PRIMARY KEY, application_id TEXT REFERENCES iam_applications(id), data JSON NOT NULL);
+CREATE TABLE iam_rules (id TEXT PRIMARY KEY, policy_id TEXT NOT NULL REFERENCES iam_policies(id) ON DELETE CASCADE, data JSON NOT NULL);
+CREATE TABLE iam_ssh_keys (id TEXT PRIMARY KEY, data JSON NOT NULL);
+CREATE TABLE iam_users (id TEXT PRIMARY KEY, data JSON NOT NULL);
+CREATE TABLE iam_groups (id TEXT PRIMARY KEY, data JSON NOT NULL);
+CREATE TABLE iam_group_members (group_id TEXT NOT NULL REFERENCES iam_groups(id) ON DELETE CASCADE, user_id TEXT NOT NULL REFERENCES iam_users(id) ON DELETE CASCADE, PRIMARY KEY (group_id, user_id));
 
-CREATE TABLE iam_api_keys (
-    access_key TEXT PRIMARY KEY,
-    application_id TEXT REFERENCES iam_applications(id),
-    data JSON NOT NULL
-);
+-- Block Storage
+CREATE TABLE block_volumes (id TEXT PRIMARY KEY, zone TEXT NOT NULL, data JSON NOT NULL);
+CREATE TABLE block_snapshots (id TEXT PRIMARY KEY, zone TEXT NOT NULL, volume_id TEXT REFERENCES block_volumes(id), data JSON NOT NULL);
 
-CREATE TABLE iam_policies (
-    id TEXT PRIMARY KEY,
-    application_id TEXT REFERENCES iam_applications(id),
-    data JSON NOT NULL
-);
+-- DNS
+CREATE TABLE dns_zones (dns_zone TEXT PRIMARY KEY, domain TEXT NOT NULL, data JSON NOT NULL);
+CREATE TABLE domain_records (id TEXT PRIMARY KEY, dns_zone TEXT NOT NULL, data JSON NOT NULL);
 
-CREATE TABLE iam_ssh_keys (
-    id TEXT PRIMARY KEY,
-    data JSON NOT NULL
-);
-
--- Container Registry
-CREATE TABLE container_registry_namespaces (
-    id TEXT PRIMARY KEY,
-    region TEXT NOT NULL,
-    data JSON NOT NULL
-);
-
--- Redis
-CREATE TABLE redis_clusters (
-    id TEXT PRIMARY KEY,
-    zone TEXT NOT NULL,
-    data JSON NOT NULL
-);
+-- Other
+CREATE TABLE registry_namespaces (id TEXT PRIMARY KEY, region TEXT NOT NULL, data JSON NOT NULL);
+CREATE TABLE redis_clusters (id TEXT PRIMARY KEY, zone TEXT NOT NULL, data JSON NOT NULL);
+CREATE TABLE ipam_ips (id TEXT PRIMARY KEY, region TEXT NOT NULL, data JSON NOT NULL);
+CREATE TABLE marketplace_labels (label TEXT PRIMARY KEY);
+CREATE TABLE schema_versions (version INTEGER PRIMARY KEY);
 ```
 
 SQLite enforces FKs natively (`PRAGMA foreign_keys = ON`). The JSON `data` column holds the full API response shape — flexible, no migrations when Scaleway adds optional fields.
@@ -2064,9 +2027,11 @@ SQLite enforces FKs natively (`PRAGMA foreign_keys = ON`). The JSON `data` colum
 The admin state schema is a **versioned contract** between Mockway and InfraFactory.
 
 **Endpoints**:
-- `POST /mock/reset` — wipe all state
+- `POST /mock/reset` — wipe all state (including marketplace cache)
 - `GET /mock/state` — full resource graph as JSON
-- `GET /mock/state/{service}` — single service state (valid: `instance`, `vpc`, `lb`, `k8s`, `rdb`, `iam`, `registry`, `redis`; unknown → 404)
+- `GET /mock/state/{service}` — single service state (valid: `instance`, `vpc`, `lb`, `k8s`, `rdb`, `iam`, `registry`, `redis`, `block`, `ipam`, `domain`; unknown → 404)
+- `POST /mock/snapshot` — snapshot current state for later restore
+- `POST /mock/restore` — restore to last snapshot (404 if no snapshot exists)
 
 **Schema** (`GET /mock/state`):
 
@@ -2085,7 +2050,8 @@ The admin state schema is a **versioned contract** between Mockway and InfraFact
     ],
     "security_groups": [
       {"id": "uuid", "zone": "fr-par-1", "inbound_default_policy": "drop"}
-    ]
+    ],
+    "volumes": []
   },
   "vpc": {
     "vpcs": [
@@ -2093,12 +2059,18 @@ The admin state schema is a **versioned contract** between Mockway and InfraFact
     ],
     "private_networks": [
       {"id": "pn-uuid", "vpc_id": "uuid", "region": "fr-par", "name": "app-network"}
-    ]
+    ],
+    "routes": [],
+    "gateways": [],
+    "gateway_networks": []
   },
   "lb": {
     "lbs": [
       {"id": "uuid", "zone": "fr-par-1", "name": "web-lb",
        "ip": [{"id": "uuid", "ip_address": "51.15.x.x", "lb_id": "uuid"}]}
+    ],
+    "ips": [
+      {"id": "uuid", "ip_address": "51.15.x.x", "lb_id": "uuid"}
     ],
     "frontends": [
       {"id": "uuid", "lb_id": "uuid", "name": "http", "inbound_port": 80,
@@ -2108,6 +2080,9 @@ The admin state schema is a **versioned contract** between Mockway and InfraFact
       {"id": "be-uuid", "lb_id": "uuid", "name": "web-servers",
        "forward_port": 80, "server_ips": ["10.0.0.1", "10.0.0.2"]}
     ],
+    "acls": [],
+    "routes": [],
+    "certificates": [],
     "private_networks": [
       {"lb_id": "uuid", "private_network_id": "pn-uuid"}
     ]
@@ -2135,7 +2110,11 @@ The admin state schema is a **versioned contract** between Mockway and InfraFact
     ],
     "users": [
       {"instance_id": "uuid", "name": "appuser"}
-    ]
+    ],
+    "privileges": [],
+    "read_replicas": [],
+    "snapshots": [],
+    "backups": []
   },
   "iam": {
     "applications": [
@@ -2151,7 +2130,9 @@ The admin state schema is a **versioned contract** between Mockway and InfraFact
     "ssh_keys": [
       {"id": "uuid", "name": "my-laptop",
        "public_key": "ssh-ed25519 AAAA..."}
-    ]
+    ],
+    "users": [],
+    "groups": []
   },
   "registry": {
     "namespaces": [
@@ -2165,13 +2146,24 @@ The admin state schema is a **versioned contract** between Mockway and InfraFact
        "version": "7.0.12", "node_type": "RED1-MICRO",
        "cluster_size": 1}
     ]
+  },
+  "block": {
+    "volumes": [],
+    "snapshots": []
+  },
+  "ipam": {
+    "ips": []
+  },
+  "domain": {
+    "dns_zones": [],
+    "records": []
   }
 }
 ```
 
 This schema mirrors the Scaleway API response shapes. The TopologyEvaluator in InfraFactory consumes this to build the connectivity graph.
 
-**Mockway v2** (future): S3 on second port (Azurite-inspired), deeper resource simulation (K8s cluster lifecycle, LB health checks).
+**Mockway v2** (future): S3 on second port (Azurite-inspired), deeper resource simulation (K8s cluster lifecycle, LB health checks), eventual consistency simulation.
 
 **Distribution**: GoReleaser → Go binaries + Docker (`ghcr.io/redscaresu/mockway`) + Homebrew (`brew install redscaresu/tap/mockway`)
 
