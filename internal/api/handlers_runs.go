@@ -65,6 +65,10 @@ func runsByScenarioHandler(state *serverState) http.HandlerFunc {
 		}
 
 		scenarioName := parts[0]
+		if strings.Contains(scenarioName, "..") || strings.ContainsAny(scenarioName, "/\\") {
+			writeJSONError(w, http.StatusBadRequest, "invalid scenario name")
+			return
+		}
 		if len(parts) == 2 && parts[1] == "start" && r.Method == http.MethodPost {
 			startRunHandler(state, w, r, scenarioName)
 			return

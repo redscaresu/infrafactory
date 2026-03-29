@@ -225,9 +225,13 @@ func handleGetScenarioByPath(w http.ResponseWriter, state *serverState, relPath,
 
 func handlePutScenarioByPath(w http.ResponseWriter, r *http.Request, state *serverState, scenarioFile string) {
 	const maxScenarioPayloadBytes = 1 << 20 // 1 MB
-	payload, err := io.ReadAll(io.LimitReader(r.Body, maxScenarioPayloadBytes))
+	payload, err := io.ReadAll(io.LimitReader(r.Body, maxScenarioPayloadBytes+1))
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("read request body: %v", err))
+		return
+	}
+	if len(payload) > maxScenarioPayloadBytes {
+		writeJSONError(w, http.StatusRequestEntityTooLarge, "scenario payload exceeds 1 MB limit")
 		return
 	}
 
@@ -238,11 +242,11 @@ func handlePutScenarioByPath(w http.ResponseWriter, r *http.Request, state *serv
 	}
 	tmpPath := tmpFile.Name()
 	tmpFile.Close()
+	defer os.Remove(tmpPath)
 	if err := os.WriteFile(tmpPath, payload, 0o600); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("write temp scenario: %v", err))
 		return
 	}
-	defer os.Remove(tmpPath)
 
 	_, _, err = loadScenarioFile(tmpPath, state.scenarioSchemaPathCandidates())
 	if err != nil {
