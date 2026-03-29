@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
@@ -262,14 +263,24 @@ type claudeExecRunner struct{}
 
 func (claudeExecRunner) Run(ctx context.Context, req ClaudeCommandRequest) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, req.Command, req.Args...)
+	// Filter CLAUDECODE from inherited env to prevent nested claude processes
+	// from detecting an outer session and failing.
+	baseEnv := os.Environ()
+	filtered := make([]string, 0, len(baseEnv))
+	for _, e := range baseEnv {
+		if !strings.HasPrefix(e, "CLAUDECODE=") {
+			filtered = append(filtered, e)
+		}
+	}
 	if len(req.Env) > 0 {
 		envPairs := make([]string, 0, len(req.Env))
 		for k, v := range req.Env {
 			envPairs = append(envPairs, fmt.Sprintf("%s=%s", k, v))
 		}
 		sort.Strings(envPairs)
-		cmd.Env = append(cmd.Environ(), envPairs...)
+		filtered = append(filtered, envPairs...)
 	}
+	cmd.Env = filtered
 
 	out, err := cmd.Output()
 	if err != nil {

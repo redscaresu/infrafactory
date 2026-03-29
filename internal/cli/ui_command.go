@@ -122,10 +122,12 @@ func (s *uiRunStarter) StartRun(ctx context.Context, req api.StartRunRequest) (s
 
 		runCtx := context.WithValue(s.runContext(ctx), runIDContextKey{}, runID)
 		if err := s.executeRun(runCtx, req, runID); err != nil {
-			s.hub.Broadcast([]byte(`{"type":"run_error","data":{"error":"` + escapeJSONString(err.Error()) + `"}}`))
+			msg, _ := json.Marshal(map[string]any{"type": "run_error", "data": map[string]any{"error": err.Error()}})
+			s.hub.Broadcast(msg)
 			return
 		}
-		s.hub.Broadcast([]byte(`{"type":"run_complete","data":{"run_id":"` + runID + `","status":"success"}}`))
+		msg, _ := json.Marshal(map[string]any{"type": "run_complete", "data": map[string]any{"run_id": runID, "status": "success"}})
+		s.hub.Broadcast(msg)
 	}()
 
 	return runID, nil
@@ -218,10 +220,4 @@ func (s *uiRunStarter) runContext(requestCtx context.Context) context.Context {
 	return context.Background()
 }
 
-func escapeJSONString(value string) string {
-	encoded, err := json.Marshal(value)
-	if err != nil || len(encoded) < 2 {
-		return "internal error"
-	}
-	return string(encoded[1 : len(encoded)-1])
-}
+

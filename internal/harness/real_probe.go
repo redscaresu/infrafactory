@@ -171,8 +171,8 @@ func (h *RealProbeHarness) runHTTPProbe(ctx context.Context, host string, port i
 			return reqErr
 		}
 		resp, callErr := h.getHTTP(req)
-		if callErr == nil && resp != nil {
-			_ = resp.Body.Close()
+		if resp != nil && resp.Body != nil {
+			defer resp.Body.Close()
 		}
 		expectedReachable := expect == "reachable"
 		if expectedReachable {

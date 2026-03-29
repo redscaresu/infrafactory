@@ -219,7 +219,7 @@ func handleRunIterationSubresource(state *serverState, w http.ResponseWriter, r 
 		return
 	}
 
-	notImplementedAPIHandler(w, nil)
+	notImplementedAPIHandler(w, r)
 }
 
 func handleIterationFiles(state *serverState, w http.ResponseWriter, r *http.Request, scenarioName, runID string, iteration int, tail []string) {

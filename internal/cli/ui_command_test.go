@@ -146,13 +146,4 @@ func TestUIRunStarterPreflightResolvesClaudeToAbsolutePath(t *testing.T) {
 	}
 }
 
-func TestEscapeJSONStringEscapesControlCharacters(t *testing.T) {
-	t.Parallel()
 
-	escaped := escapeJSONString("bad\tline\r\nnext\b\f")
-	for _, want := range []string{`\t`, `\r`, `\n`, `\b`, `\f`} {
-		if !strings.Contains(escaped, want) {
-			t.Fatalf("expected %q in escaped string %q", want, escaped)
-		}
-	}
-}

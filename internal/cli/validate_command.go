@@ -159,7 +159,8 @@ func toValidateStageSummaries(result *harness.StaticResult, runErr error) []Stag
 	}
 
 	failedStage := ""
-	if stageErr, ok := runErr.(*harness.StageError); ok {
+	var stageErr *harness.StageError
+	if errors.As(runErr, &stageErr) {
 		failedStage = stageErr.Stage
 	}
 

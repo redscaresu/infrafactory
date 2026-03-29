@@ -145,7 +145,8 @@ func (c *httpMockStateClient) State(ctx context.Context) ([]byte, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("fetch mock state: unexpected status %d", resp.StatusCode)
 	}
-	return io.ReadAll(resp.Body)
+	const maxMockStateBytes = 8 << 20 // 8 MB, consistent with CLI limit
+	return io.ReadAll(io.LimitReader(resp.Body, maxMockStateBytes))
 }
 
 func (s *serverState) scenarioSchemaPathCandidates() []string {

@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/redscaresu/infrafactory/internal/runstore"
 	"github.com/redscaresu/infrafactory/internal/scenario"
@@ -225,20 +224,27 @@ func handleGetScenarioByPath(w http.ResponseWriter, state *serverState, relPath,
 }
 
 func handlePutScenarioByPath(w http.ResponseWriter, r *http.Request, state *serverState, scenarioFile string) {
-	payload, err := io.ReadAll(r.Body)
+	const maxScenarioPayloadBytes = 1 << 20 // 1 MB
+	payload, err := io.ReadAll(io.LimitReader(r.Body, maxScenarioPayloadBytes))
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("read request body: %v", err))
 		return
 	}
 
-	tmpFile := filepath.Join(os.TempDir(), fmt.Sprintf("scenario-validate-%d.yaml", time.Now().UnixNano()))
-	if err := os.WriteFile(tmpFile, payload, 0o600); err != nil {
+	tmpFile, err := os.CreateTemp("", "scenario-validate-*.yaml")
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("create temp file: %v", err))
+		return
+	}
+	tmpPath := tmpFile.Name()
+	tmpFile.Close()
+	if err := os.WriteFile(tmpPath, payload, 0o600); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("write temp scenario: %v", err))
 		return
 	}
-	defer os.Remove(tmpFile)
+	defer os.Remove(tmpPath)
 
-	_, _, err = loadScenarioFile(tmpFile, state.scenarioSchemaPathCandidates())
+	_, _, err = loadScenarioFile(tmpPath, state.scenarioSchemaPathCandidates())
 	if err != nil {
 		var validationErr *scenario.ValidationError
 		if errors.As(err, &validationErr) {
