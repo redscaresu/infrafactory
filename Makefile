@@ -51,6 +51,8 @@ help:
 	@echo "  ui-stack-up     Start API + frontend dev stack in Docker Compose."
 	@echo "  ui-stack-logs   Tail API + frontend docker logs."
 	@echo "  ui-stack-down   Stop and remove API + frontend docker services."
+	@echo "  build           Build frontend + Go binary into bin/infrafactory."
+	@echo "  run             Build and start the UI server (http://127.0.0.1:4173)."
 
 deps-up:
 	$(COMPOSE) up -d mockway

@@ -353,10 +353,9 @@ make deps-down
 ### Web UI Workflow
 
 ```bash
-make build
 make deps-up
-./bin/infrafactory ui
-# Open http://127.0.0.1:4173
+make run
+# Builds everything and starts the UI at http://127.0.0.1:4173
 ```
 
 The UI provides:
