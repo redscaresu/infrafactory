@@ -150,3 +150,13 @@ export function formatBaselineState(payload) {
     return payload;
   }
 }
+
+/**
+ * Returns true when a completed run needs one final data reload to pick up
+ * iterations that were written between the last poll and terminal detection.
+ */
+export function needsFinalReload(runMeta, finalReloadDone) {
+  if (!runMeta || !runMeta.status) return false;
+  if (runMeta.status === "running") return false;
+  return !finalReloadDone;
+}

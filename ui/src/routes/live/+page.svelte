@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { api } from "$lib/api";
-  import { deriveCurrentIteration, deriveCurrentStage, deriveFailureHint, deriveLiveConsoleNotice, formatBaselineState, mergeConsoleLines, selectLatestRun, synthesizeLiveConsoleLines } from "$lib/run-view.js";
+  import { deriveCurrentIteration, deriveCurrentStage, deriveFailureHint, deriveLiveConsoleNotice, formatBaselineState, mergeConsoleLines, needsFinalReload, selectLatestRun, synthesizeLiveConsoleLines } from "$lib/run-view.js";
   import { connectWS } from "$lib/ws";
 
   type RunFailure = {
@@ -32,6 +32,7 @@
   let baselineState = "";
   let baselineOpen = false;
   let planOpen = false;
+  let finalReloadDone = false;
   let elapsed = "";
   let elapsedTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -154,6 +155,21 @@
     if (runMeta?.status && runMeta.status !== "running" && pollTimer) {
       clearInterval(pollTimer);
       pollTimer = null;
+    }
+    if (needsFinalReload(runMeta, finalReloadDone)) {
+      finalReloadDone = true;
+      setTimeout(async () => {
+        try { runMeta = await api.getRun(scenario, runID); } catch {}
+        const reloaded: any[] = [];
+        for (let i = 1; i <= 20; i += 1) {
+          try { reloaded.push(await api.getIteration(scenario, runID, i)); } catch { break; }
+        }
+        if (reloaded.length > iterations.length) iterations = reloaded;
+        try {
+          const log = await api.getRunLog(scenario, runID);
+          replayLines = log.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
+        } catch {}
+      }, 500);
     }
   }
 

@@ -13,6 +13,7 @@ import {
   formatBaselineState,
   formatRunDate,
   mergeConsoleLines,
+  needsFinalReload,
   selectLatestRun,
   synthesizeLiveConsoleLines
 } from "../src/lib/run-view.js";
@@ -194,4 +195,24 @@ test("deriveCurrentStage returns stage without prefix when stage has no iteratio
     '{"event":"stage_start","stage":"validate","status":"start"}'
   ];
   assert.equal(deriveCurrentStage(lines), "validate");
+});
+
+// needsFinalReload tests — regression for iteration timeline not updating after run completes
+
+test("needsFinalReload returns false when runMeta is null", () => {
+  assert.equal(needsFinalReload(null, false), false);
+});
+
+test("needsFinalReload returns false when run is still running", () => {
+  assert.equal(needsFinalReload({ status: "running" }, false), false);
+});
+
+test("needsFinalReload returns true when run completed and no reload done yet", () => {
+  assert.equal(needsFinalReload({ status: "failed" }, false), true);
+  assert.equal(needsFinalReload({ status: "success" }, false), true);
+});
+
+test("needsFinalReload returns false after final reload is done", () => {
+  assert.equal(needsFinalReload({ status: "failed" }, true), false);
+  assert.equal(needsFinalReload({ status: "success" }, true), false);
 });
