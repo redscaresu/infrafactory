@@ -51,12 +51,8 @@ func ExtractLearnedPitfall(failureDetail, scenarioName string) *LearnedPitfall {
 
 	lower := strings.ToLower(failureDetail)
 
-	// Reject generic errors that are not actionable.
-	for _, pattern := range genericPatterns {
-		if strings.Contains(lower, pattern) {
-			return nil
-		}
-	}
+	// Check specific patterns BEFORE generic rejection, since specific
+	// errors may be embedded inside generic wrappers like "exit status 1 | stderr: ..."
 
 	// Try specific pattern: password constraint.
 	if strings.Contains(lower, "password does not respect constraint") ||
@@ -72,17 +68,30 @@ func ExtractLearnedPitfall(failureDetail, scenarioName string) *LearnedPitfall {
 		}
 	}
 
+	// Try specific pattern: K8s version / auto_upgrade mismatch.
+	if strings.Contains(lower, "minor version") && strings.Contains(lower, "auto upgrade") ||
+		strings.Contains(lower, "auto_upgrade") && strings.Contains(lower, "version") {
+		resource := extractResource(failureDetail)
+		if resource == "" {
+			resource = "scaleway_k8s_cluster"
+		}
+		return &LearnedPitfall{
+			Resource:       resource,
+			Rule:           "Version and auto_upgrade MUST be consistent: WITHOUT auto_upgrade use a full patch version like \"1.31.2\"; WITH auto_upgrade enabled use ONLY a minor version like \"1.31\".",
+			DiscoveredFrom: scenarioName,
+		}
+	}
+
 	// Try specific pattern: Unsupported argument.
 	if matches := unsupportedArgRe.FindStringSubmatch(failureDetail); len(matches) >= 2 {
 		resource := extractResource(failureDetail)
 		argName := matches[1]
-		if resource == "" {
-			return nil
-		}
-		return &LearnedPitfall{
-			Resource:       resource,
-			Rule:           fmt.Sprintf("The argument %q is not supported. Do not use it.", argName),
-			DiscoveredFrom: scenarioName,
+		if resource != "" {
+			return &LearnedPitfall{
+				Resource:       resource,
+				Rule:           fmt.Sprintf("The argument %q is not supported. Do not use it.", argName),
+				DiscoveredFrom: scenarioName,
+			}
 		}
 	}
 
@@ -90,13 +99,19 @@ func ExtractLearnedPitfall(failureDetail, scenarioName string) *LearnedPitfall {
 	if matches := atLeastOneOfRe.FindStringSubmatch(failureDetail); len(matches) >= 2 {
 		resource := extractResource(failureDetail)
 		constraint := strings.TrimSpace(matches[1])
-		if resource == "" {
-			return nil
+		if resource != "" {
+			return &LearnedPitfall{
+				Resource:       resource,
+				Rule:           fmt.Sprintf("At least one of %s must be set.", constraint),
+				DiscoveredFrom: scenarioName,
+			}
 		}
-		return &LearnedPitfall{
-			Resource:       resource,
-			Rule:           fmt.Sprintf("At least one of %s must be set.", constraint),
-			DiscoveredFrom: scenarioName,
+	}
+
+	// Reject remaining generic errors that are not actionable.
+	for _, pattern := range genericPatterns {
+		if strings.Contains(lower, pattern) {
+			return nil
 		}
 	}
 

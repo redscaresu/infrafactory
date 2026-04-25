@@ -25,6 +25,20 @@ func TestExtractLearnedPitfall_PasswordConstraint(t *testing.T) {
 	}
 }
 
+func TestExtractLearnedPitfall_K8sVersionAutoUpgrade(t *testing.T) {
+	detail := `exit status 1 | stderr: Error: minor version x.y must only be used with auto upgrade enabled with scaleway_k8s_cluster.main`
+	got := ExtractLearnedPitfall(detail, "k8s-cluster-paris")
+	if got == nil {
+		t.Fatal("expected pitfall, got nil")
+	}
+	if got.Resource != "scaleway_k8s_cluster" {
+		t.Errorf("resource = %q, want scaleway_k8s_cluster", got.Resource)
+	}
+	if got.Rule == "" {
+		t.Error("expected non-empty rule")
+	}
+}
+
 func TestExtractLearnedPitfall_UnsupportedArgument(t *testing.T) {
 	detail := `Error: Unsupported argument "zone" on scaleway_lb_backend.main`
 	got := ExtractLearnedPitfall(detail, "web-app-paris")
