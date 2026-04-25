@@ -92,14 +92,15 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 		Detail:  fmt.Sprintf("repair_iterations_max=%d run_mode=%s no_destroy=%t previous_run_id=%s", repairIterationsMax, mode.Mode, controls.NoDestroy, mode.PreviousRunID),
 	})
 	if err := store.WriteRunMetadata(runstore.RunMetadata{
-		Schema:        runstore.RunMetadataSchemaVersion,
-		Scenario:      sc.Name,
-		RunID:         runID,
-		Status:        "running",
-		Incremental:   mode.Mode == runModeIncremental,
-		Layer3Enabled: runtime.Config.Validation.Layers.SandboxDeploy.Enabled,
-		PreviousRunID: mode.PreviousRunID,
-		StartedAt:     startedAt,
+		Schema:              runstore.RunMetadataSchemaVersion,
+		Scenario:            sc.Name,
+		RunID:               runID,
+		Status:              "running",
+		Incremental:         mode.Mode == runModeIncremental,
+		Layer3Enabled:       runtime.Config.Validation.Layers.SandboxDeploy.Enabled,
+		PreviousRunID:       mode.PreviousRunID,
+		RepairIterationsMax: repairIterationsMax,
+		StartedAt:           startedAt,
 	}); err != nil {
 		return fmt.Errorf("write initial run metadata: %w", err)
 	}
@@ -284,15 +285,16 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 	}
 
 	if err := store.WriteRunMetadata(runstore.RunMetadata{
-		Schema:         runstore.RunMetadataSchemaVersion,
-		Scenario:       sc.Name,
-		RunID:          runID,
-		Status:         string(status),
-		TerminalReason: terminalReason,
-		Incremental:    mode.Mode == runModeIncremental,
-		Layer3Enabled:  runtime.Config.Validation.Layers.SandboxDeploy.Enabled,
-		PreviousRunID:  mode.PreviousRunID,
-		StartedAt:      startedAt,
+		Schema:              runstore.RunMetadataSchemaVersion,
+		Scenario:            sc.Name,
+		RunID:               runID,
+		Status:              string(status),
+		TerminalReason:      terminalReason,
+		Incremental:         mode.Mode == runModeIncremental,
+		Layer3Enabled:       runtime.Config.Validation.Layers.SandboxDeploy.Enabled,
+		PreviousRunID:       mode.PreviousRunID,
+		RepairIterationsMax: repairIterationsMax,
+		StartedAt:           startedAt,
 	}); err != nil {
 		return fmt.Errorf("write run metadata: %w", err)
 	}

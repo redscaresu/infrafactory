@@ -22,15 +22,16 @@ const (
 )
 
 type RunMetadata struct {
-	Schema         string    `json:"schema,omitempty"`
-	Scenario       string    `json:"scenario"`
-	RunID          string    `json:"run_id"`
-	Status         string    `json:"status"`
-	TerminalReason string    `json:"terminal_reason,omitempty"`
-	Incremental    bool      `json:"incremental,omitempty"`
-	Layer3Enabled  bool      `json:"layer3_enabled,omitempty"`
-	PreviousRunID  string    `json:"previous_run_id,omitempty"`
-	StartedAt      time.Time `json:"started_at"`
+	Schema              string    `json:"schema,omitempty"`
+	Scenario            string    `json:"scenario"`
+	RunID               string    `json:"run_id"`
+	Status              string    `json:"status"`
+	TerminalReason      string    `json:"terminal_reason,omitempty"`
+	Incremental         bool      `json:"incremental,omitempty"`
+	Layer3Enabled       bool      `json:"layer3_enabled,omitempty"`
+	PreviousRunID       string    `json:"previous_run_id,omitempty"`
+	RepairIterationsMax int       `json:"repair_iterations_max,omitempty"`
+	StartedAt           time.Time `json:"started_at"`
 }
 
 type FilesystemStore struct {

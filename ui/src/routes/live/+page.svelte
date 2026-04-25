@@ -234,7 +234,7 @@
           <div class="absolute h-4 w-4 animate-ping rounded-full bg-indigo-400 opacity-75"></div>
           <div class="h-3 w-3 rounded-full bg-indigo-600"></div>
         </div>
-        <span class="text-xl font-bold">Iteration {currentIteration}</span>
+        <span class="text-xl font-bold">Iteration {currentIteration}{#if runMeta?.repair_iterations_max} / {runMeta.repair_iterations_max}{/if}</span>
         {#if currentStage}
           <span class="animate-pulse rounded-md bg-indigo-200 px-3 py-1 text-sm font-semibold uppercase tracking-wider text-indigo-800">{currentStage}</span>
         {/if}
@@ -254,7 +254,7 @@
     {#if runMeta?.terminal_reason}
       <span class="rounded bg-white/60 px-2 py-0.5 text-xs font-medium">{runMeta.terminal_reason}</span>
     {/if}
-    <span class="text-xs">({iterations.length} iteration{iterations.length !== 1 ? "s" : ""})</span>
+    <span class="text-xs">({iterations.length}{#if runMeta?.repair_iterations_max} / {runMeta.repair_iterations_max}{/if} iteration{iterations.length !== 1 ? "s" : ""})</span>
   </div>
 {/if}
 

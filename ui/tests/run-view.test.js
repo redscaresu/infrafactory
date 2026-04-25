@@ -154,6 +154,12 @@ test("deriveCurrentIteration returns iterations.length when last iteration is em
   assert.equal(deriveCurrentIteration({ status: "running" }, iterations), 2);
 });
 
+test("deriveCurrentIteration does not depend on repair_iterations_max", () => {
+  const meta = { status: "running", repair_iterations_max: 5 };
+  const iterations = [{ iteration: 1, failures: [{ check: "x" }] }];
+  assert.equal(deriveCurrentIteration(meta, iterations), 2);
+});
+
 test("deriveCurrentStage returns empty string when no console lines", () => {
   assert.equal(deriveCurrentStage([]), "");
 });
