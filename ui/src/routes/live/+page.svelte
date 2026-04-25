@@ -33,6 +33,33 @@
   let baselineOpen = false;
   let planOpen = false;
 
+  $: currentIteration = (() => {
+    if (!runMeta || runMeta.status !== "running") return 0;
+    // Parse the latest console line for iteration info, or use iterations array length + 1
+    const completedIterations = iterations.length;
+    // If the last iteration has failures or stages, it's complete; the run is on the next one
+    const lastIteration = iterations[iterations.length - 1];
+    if (lastIteration && (lastIteration.failures?.length || lastIteration.stages?.length)) {
+      return completedIterations + 1;
+    }
+    return Math.max(completedIterations, 1);
+  })();
+
+  $: currentStage = (() => {
+    // Parse the last console line to find the current stage
+    const allLines = mergedLines.length > 0 ? mergedLines : [];
+    for (let i = allLines.length - 1; i >= 0; i--) {
+      const line = allLines[i];
+      try {
+        const parsed = JSON.parse(line.startsWith('{') ? line : '{}');
+        if (parsed.event === "stage_start" && parsed.status === "start") {
+          return parsed.stage?.replace(/^iteration_\d+_/, '') || "";
+        }
+      } catch { /* ignore non-JSON lines */ }
+    }
+    return "";
+  })();
+
   $: failureCards = iterations.flatMap((iteration) =>
     (iteration.failures || []).map((failure) => ({
       iteration: iteration.iteration || 0,
@@ -174,6 +201,29 @@
     <div><span class="font-semibold">Terminal reason:</span> {runMeta?.terminal_reason || "-"}</div>
     <div><span class="font-semibold">Mode:</span> {runMeta?.incremental ? "incremental" : "clean"}</div>
     <div><span class="font-semibold">Layer 3:</span> {runMeta?.layer3_enabled ? "enabled" : "disabled"}</div>
+  </div>
+{/if}
+
+{#if latestStatus === "running" && currentIteration > 0}
+  <div class="mt-4 flex items-center gap-3 rounded border border-indigo-200 bg-indigo-50 p-4 text-sm text-indigo-950">
+    <div class="h-3 w-3 animate-pulse rounded-full bg-indigo-500"></div>
+    <div>
+      <span class="text-lg font-bold">Iteration {currentIteration}</span>
+      {#if currentStage}
+        <span class="ml-2 rounded bg-indigo-100 px-2 py-0.5 text-xs font-medium uppercase tracking-wide">{currentStage}</span>
+      {/if}
+      {#if iterations.length > 0}
+        <span class="ml-2 text-xs text-indigo-600">({iterations.length} completed{iterations.flatMap(i => i.failures || []).length > 0 ? `, ${iterations.flatMap(i => i.failures || []).length} failure(s)` : ""})</span>
+      {/if}
+    </div>
+  </div>
+{:else if latestStatus && latestStatus !== "running" && latestStatus !== "starting"}
+  <div class="mt-4 flex items-center gap-3 rounded border p-4 text-sm {latestStatus === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-950' : 'border-red-200 bg-red-50 text-red-950'}">
+    <span class="text-lg font-bold">{latestStatus === "success" ? "Run succeeded" : "Run failed"}</span>
+    {#if runMeta?.terminal_reason}
+      <span class="rounded bg-white/60 px-2 py-0.5 text-xs font-medium">{runMeta.terminal_reason}</span>
+    {/if}
+    <span class="text-xs">({iterations.length} iteration{iterations.length !== 1 ? "s" : ""})</span>
   </div>
 {/if}
 
