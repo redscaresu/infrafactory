@@ -11,6 +11,7 @@ import (
 
 	"github.com/redscaresu/infrafactory/internal/generator"
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 )
 
 func runGenerateCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) error {
@@ -164,6 +165,11 @@ func generateAndWriteFilesWithResult(ctx context.Context, runtime *CommandRuntim
 
 	runtime.EnsureProviderSchema(ctx)
 
+	var scenarioMeta struct {
+		Cloud string `yaml:"cloud"`
+	}
+	_ = yaml.Unmarshal(scenarioPayload, &scenarioMeta)
+
 	var feedbackPayload []byte
 	if len(feedbackFailures) > 0 {
 		feedbackPayload, err = json.Marshal(struct {
@@ -183,6 +189,7 @@ func generateAndWriteFilesWithResult(ctx context.Context, runtime *CommandRuntim
 		Iteration:          iteration,
 		ProviderSchemaJSON: runtime.ProviderSchemaJSON,
 		Layer3Enabled:      runtime.Config.Validation.Layers.SandboxDeploy.Enabled,
+		Cloud:              scenarioMeta.Cloud,
 	})
 	if err != nil {
 		return 0, nil, fmt.Errorf("generate code: %w", err)

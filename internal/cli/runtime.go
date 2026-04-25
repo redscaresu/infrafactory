@@ -317,6 +317,7 @@ func buildDefaultSeedGenerator(cfg config.Config) (generator.SeedGenerator, erro
 		seed, err := generator.NewClaudeSeedGenerator(generator.ClaudeTransportConfig{
 			Command:          cfg.Agent.Claude.Command,
 			PromptsDir:       cfg.Paths.Prompts,
+			PitfallsDir:      cfg.Paths.Pitfalls,
 			Phases:           cfg.Agent.Phases,
 			PhaseDelay:       phaseDelay,
 			PhaseTimeout:     time.Duration(cfg.Agent.Claude.PhaseTimeoutSeconds) * time.Second,
@@ -344,6 +345,7 @@ func buildDefaultSeedGenerator(cfg config.Config) (generator.SeedGenerator, erro
 			RetryDelay:       time.Second,
 			PhaseDelay:       phaseDelay,
 			PromptsDir:       cfg.Paths.Prompts,
+			PitfallsDir:      cfg.Paths.Pitfalls,
 			Phases:           cfg.Agent.Phases,
 			Constraints:      "",
 			ResolvedMappings: "",

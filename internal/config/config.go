@@ -93,6 +93,7 @@ type PathsConfig struct {
 	Output    string `yaml:"output"`
 	Policies  string `yaml:"policies"`
 	Prompts   string `yaml:"prompts"`
+	Pitfalls  string `yaml:"pitfalls"`
 }
 
 type FieldError struct {
@@ -176,6 +177,7 @@ func Default() Config {
 			Output:    "./output",
 			Policies:  "./policies",
 			Prompts:   "./prompts",
+			Pitfalls:  "./pitfalls",
 		},
 	}
 }

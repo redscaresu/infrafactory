@@ -17,6 +17,7 @@ import (
 type ClaudeTransportConfig struct {
 	Command          string
 	PromptsDir       string
+	PitfallsDir      string
 	Phases           []string
 	PhaseDelay       time.Duration
 	PhaseTimeout     time.Duration
@@ -197,6 +198,8 @@ func (g *ClaudeSeedGenerator) renderPhasePrompt(phase string, req Request, outpu
 		return "", err
 	}
 	templatePath := filepath.Join(g.cfg.PromptsDir, fileName)
+	pitfalls, _ := LoadPitfalls(g.cfg.PitfallsDir, req.Cloud)
+
 	ctx := PromptContext{
 		ScenarioYAML:       string(req.ScenarioYAML),
 		Constraints:        g.cfg.Constraints,
@@ -208,6 +211,7 @@ func (g *ClaudeSeedGenerator) renderPhasePrompt(phase string, req Request, outpu
 		FeedbackJSON:       string(req.FeedbackJSON),
 		ProviderSchema:     filteredSchema,
 		Layer3Guidance:     layer3Guidance(req.Layer3Enabled),
+		Pitfalls:           pitfalls,
 	}
 
 	return RenderPromptFile(phase, templatePath, ctx)

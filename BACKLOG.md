@@ -12,11 +12,11 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 | S32-T4 | Slice 32 | Update CONCEPT.md, AGENTS.md, README.md for dynamic pitfalls | P1 | todo | S32-T2 | codex |
 | S32-T5 | Slice 32 | Design doc: auto-learning pitfalls from run feedback (future, no implementation) | P1 | todo | S32-T3 | codex |
 | S31-T1 | Slice 31 | ADR-0011 + CONCEPT.md topology derivation docs + BACKLOG/ROADMAP | P1 | done | S30-T5 | codex |
-| S31-T2 | Slice 31 | Implement `DeriveTopology()` in `internal/harness/topology_derive.go` | P1 | todo | S31-T1 | codex |
-| S31-T3 | Slice 31 | Wire derivation into `EvaluateTopology()` with auto-detection of raw state | P1 | todo | S31-T2 | codex |
-| S31-T4 | Slice 31 | Unit tests + fixtures for topology derivation (8+ test cases) | P1 | todo | S31-T3 | codex |
-| S31-T5 | Slice 31 | Playwright e2e: topology results visible on Live page iteration timeline | P1 | todo | S31-T3 | codex |
-| S31-T6 | Slice 31 | Integration verification: all 12 training scenarios pass with derived topology | P1 | todo | S31-T4, S31-T5 | codex |
+| S31-T2 | Slice 31 | Implement `DeriveTopology()` in `internal/harness/topology_derive.go` | P1 | done | S31-T1 | codex |
+| S31-T3 | Slice 31 | Wire derivation into `EvaluateTopology()` with auto-detection of raw state | P1 | done | S31-T2 | codex |
+| S31-T4 | Slice 31 | Unit tests + fixtures for topology derivation (11 test cases) | P1 | done | S31-T3 | codex |
+| S31-T5 | Slice 31 | Playwright e2e: topology results visible on Live page iteration timeline | P1 | done | S31-T3 | codex |
+| S31-T6 | Slice 31 | Integration verification: all 12 training scenarios pass with derived topology | P1 | done | S31-T4, S31-T5 | codex |
 | S30-T1 | Slice 30 | Capture `plan-live.txt` artifact during sandbox deploy (tofu plan before apply) | P1 | done | M36 | codex |
 | S30-T2 | Slice 30 | Auto-destroy real resources on failed runs (billing protection, Contract #14) | P1 | done | S30-T1 | codex |
 | S30-T3 | Slice 30 | Validate generated HCL includes `scaleway_account_project` when Layer 3 enabled | P1 | done | M36 | codex |

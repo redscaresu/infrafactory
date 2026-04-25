@@ -38,6 +38,14 @@ The previous iteration's generated code failed validation. Pay special attention
 ```
 {{end}}
 
+{{if .Pitfalls}}
+## Provider Pitfalls
+
+Verify compliance with these known pitfalls:
+
+{{.Pitfalls}}
+{{end}}
+
 {{if .Layer3Guidance}}
 ## Layer 3 Guidance
 

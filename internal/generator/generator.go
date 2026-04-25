@@ -31,6 +31,7 @@ type Request struct {
 	Iteration          int
 	ProviderSchemaJSON []byte
 	Layer3Enabled      bool
+	Cloud              string
 }
 
 type GeneratedCode struct {

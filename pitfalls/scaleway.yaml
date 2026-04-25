@@ -1,0 +1,81 @@
+provider: scaleway
+pitfalls:
+  - resource: scaleway_k8s_cluster
+    rule: >
+      Version and auto_upgrade MUST be consistent: (a) WITHOUT `auto_upgrade { enable = true }`, use a full patch version like `"1.31.2"`; (b) WITH `auto_upgrade { enable = true }`, use ONLY a minor version like `"1.31"`. Mixing these causes a plan error. When in doubt, use a patch version without auto_upgrade.
+    source: static
+
+  - resource: scaleway_k8s_cluster
+    rule: >
+      Always set `delete_additional_resources = true` to enable clean destroy.
+    source: static
+
+  - resource: scaleway_instance_server
+    rule: >
+      Use ONLY the exact instance type from the architecture plan (e.g. `DEV1-S`, `DEV1-M`, `GP1-S`, `GP1-M`). Do NOT invent types like `GP1-L` or `GP1-XL` — they do not exist. The architecture plan maps sizes to exact Scaleway commercial types.
+    source: static
+
+  - resource: scaleway_instance_server
+    rule: >
+      Do NOT reference `scaleway_instance_server.NAME.private_ips` — the attribute is empty until the NIC finishes attaching and IPAM assigns an address. Instead, reference the private NIC resource: `scaleway_instance_private_nic.NAME.private_ips[0].address`.
+    source: static
+
+  - resource: scaleway_instance_server
+    rule: >
+      There is no `routed_ip_enabled` argument. Do not use it.
+    source: static
+
+  - resource: scaleway_instance_server
+    rule: >
+      Use `ip_id = null` and `enable_dynamic_ip = false` to keep an instance off the public internet.
+    source: static
+
+  - resource: scaleway_instance_server
+    rule: >
+      Do NOT use inline `private_network` blocks on the server resource. Instead, create separate `scaleway_instance_private_nic` resources with `server_id` and `private_network_id` to attach servers to private networks. The validation policy checks for `scaleway_instance_private_nic` resources specifically.
+    source: static
+
+  - resource: scaleway_redis_cluster
+    rule: >
+      The `password` attribute is required. If you use a variable for it, the variable MUST have a `default` value that meets Scaleway's password complexity requirements (see below). A variable without a default will cause `tofu plan` to fail.
+    source: static
+
+  - resource: scaleway_lb
+    rule: >
+      Use `ip_ids = [scaleway_lb_ip.NAME.id]` (list), NOT `ip_id` (deprecated). Do NOT set `assign_flexible_ip` or `assign_flexible_ipv6` when using `ip_ids` — they conflict.
+    source: static
+
+  - resource: scaleway_lb_backend
+    rule: >
+      Does NOT support a `zone` argument. Do not add `zone` to backend resources — it will cause an "Unsupported argument" validation error.
+    source: static
+
+  - resource: scaleway_lb_frontend
+    rule: >
+      Does NOT support a `zone` argument. Do not add `zone` to frontend resources.
+    source: static
+
+  - resource: scaleway_rdb_instance
+    rule: >
+      Valid `volume_type` values are `lssd`, `sbs_5k`, `sbs_15k` — NOT `bssd`.
+    source: static
+
+  - resource: scaleway_rdb_instance
+    rule: >
+      Do not use `volume_size_in_gb` with `lssd` volume type.
+    source: static
+
+  - resource: scaleway_rdb_instance
+    rule: >
+      When using a `private_network` block, you MUST set either `ip_net` (e.g. `"10.0.0.254/24"`) or `enable_ipam = true`. Omitting both causes a validation error: "at least one of 'ip_net' or 'enable_ipam' (set to true) must be set".
+    source: static
+
+  - resource: scaleway_domain_record
+    rule: >
+      Do NOT create DNS records unless the scenario explicitly lists DNS/domain resources. The `dns_resolution` acceptance criterion is auto-evaluated and does NOT require a `scaleway_domain_record` resource in the generated HCL. Creating records for a non-existent zone will cause `tofu apply` to fail with "resource not found".
+    source: learned
+
+  - resource: scaleway_redis_cluster
+    rule: >
+      The `password` must meet Scaleway's complexity requirements: 8-128 characters, at least one digit, one uppercase, one lowercase, and one special character. Use a compliant default like `default = "Ch4ng3Me!@2024"`.
+    source: learned

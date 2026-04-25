@@ -21,6 +21,7 @@ type OpenRouterTransportConfig struct {
 	RetryDelay       time.Duration
 	PhaseDelay       time.Duration
 	PromptsDir       string
+	PitfallsDir      string
 	Phases           []string
 	Constraints      string
 	ResolvedMappings string
@@ -161,6 +162,8 @@ func (g *OpenRouterSeedGenerator) renderPhasePrompt(phase string, req Request, o
 		return "", err
 	}
 	templatePath := filepath.Join(g.cfg.PromptsDir, fileName)
+	pitfalls, _ := LoadPitfalls(g.cfg.PitfallsDir, req.Cloud)
+
 	ctx := PromptContext{
 		ScenarioYAML:       string(req.ScenarioYAML),
 		Constraints:        g.cfg.Constraints,
@@ -172,6 +175,7 @@ func (g *OpenRouterSeedGenerator) renderPhasePrompt(phase string, req Request, o
 		FeedbackJSON:       string(req.FeedbackJSON),
 		ProviderSchema:     filteredSchema,
 		Layer3Guidance:     layer3Guidance(req.Layer3Enabled),
+		Pitfalls:           pitfalls,
 	}
 	return RenderPromptFile(phase, templatePath, ctx)
 }

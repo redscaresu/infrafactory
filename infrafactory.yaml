@@ -53,3 +53,4 @@ paths:
   output: ./output
   policies: ./policies
   prompts: ./prompts
+  pitfalls: ./pitfalls
