@@ -314,6 +314,14 @@ This file is intentionally high-level and mostly stable; day-to-day execution tr
 - Design reference: `docs/plans/topology-derivation-plan.md`.
 - Apply slice-closure review protocol before marking Slice 31 complete.
 
+32. Slice 32: Dynamic pitfalls by cloud provider
+- Externalize provider pitfalls from hardcoded prompt templates into `pitfalls/{cloud}.yaml` files.
+- Load pitfalls at runtime based on scenario's `cloud` field and inject via `{{.Pitfalls}}` template variable.
+- Organized by provider: scaleway.yaml, gcp.yaml, aws.yaml, common.yaml.
+- Each pitfall has `source: static` (manual) or `source: learned` (auto-discovered from feedback).
+- Design doc for future auto-learning from run feedback patterns.
+- Design reference: `docs/plans/dynamic-pitfalls-plan.md`.
+
 ## Near-term execution order
 
 1. Keep completed slices (1-30) stable and regression-green.

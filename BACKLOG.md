@@ -6,6 +6,11 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 
 | id | slice | title | priority | status | deps | owner |
 |---|---|---|---|---|---|---|
+| S32-T1 | Slice 32 | Create `pitfalls/scaleway.yaml` with all 16 existing pitfalls, remove from prompt templates | P1 | todo | — | codex |
+| S32-T2 | Slice 32 | Add `Pitfalls` + `Cloud` to generator, load by cloud provider from `pitfalls/{cloud}.yaml` | P1 | todo | S32-T1 | codex |
+| S32-T3 | Slice 32 | Tests: pitfalls loading, rendering, empty file handling, scenario verification | P1 | todo | S32-T2 | codex |
+| S32-T4 | Slice 32 | Update CONCEPT.md, AGENTS.md, README.md for dynamic pitfalls | P1 | todo | S32-T2 | codex |
+| S32-T5 | Slice 32 | Design doc: auto-learning pitfalls from run feedback (future, no implementation) | P1 | todo | S32-T3 | codex |
 | S31-T1 | Slice 31 | ADR-0011 + CONCEPT.md topology derivation docs + BACKLOG/ROADMAP | P1 | done | S30-T5 | codex |
 | S31-T2 | Slice 31 | Implement `DeriveTopology()` in `internal/harness/topology_derive.go` | P1 | todo | S31-T1 | codex |
 | S31-T3 | Slice 31 | Wire derivation into `EvaluateTopology()` with auto-detection of raw state | P1 | todo | S31-T2 | codex |

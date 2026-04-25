@@ -1548,8 +1548,21 @@ Prompts stored as markdown with Go template interpolation. Template variables pe
 | `{{.AcceptanceCriteria}}` | — | Yes | Yes | Formatted acceptance criteria list |
 | `{{.GeneratedFiles}}` | — | — | Yes | Concatenated phase 2 output (all `# File:` blocks) |
 | `{{.FeedbackJSON}}` | Yes* | Yes* | Yes* | Previous iteration's failure JSON (nil on iteration 1) |
+| `{{.Pitfalls}}` | — | Yes | Yes | Provider-specific pitfalls loaded from `pitfalls/{cloud}.yaml` (Slice 32) |
 
 \* Only present on iterations 2+. Wrapped in `{{if .FeedbackJSON}}` conditional blocks in each template.
+
+### Dynamic Pitfalls (Slice 32)
+
+Provider pitfalls are loaded from `pitfalls/{cloud}.yaml` based on the scenario's `cloud` field. Each file contains a list of resource-specific rules that the LLM must follow. This replaces the previously hardcoded `## Scaleway Provider Pitfalls` section in the prompt templates.
+
+The pitfalls directory is organized by cloud provider:
+- `pitfalls/scaleway.yaml` — Scaleway provider pitfalls
+- `pitfalls/gcp.yaml` — GCP provider pitfalls (future)
+- `pitfalls/aws.yaml` — AWS/EKS pitfalls (future)
+- `pitfalls/common.yaml` — cross-provider pitfalls (future)
+
+Each pitfall has a `source` field: `static` (manually written) or `learned` (auto-discovered from run feedback). See `docs/plans/dynamic-pitfalls-plan.md` for the full design.
 
 **Rate limit mitigation**: configurable `agent.phase_delay_seconds` (default: 0) adds a pause between `claude -p` calls. Users hitting Max plan rate limits can set this to 5-10s.
 
