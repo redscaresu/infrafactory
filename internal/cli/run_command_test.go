@@ -468,8 +468,8 @@ func TestRunCommandStopsAtMaxIterations(t *testing.T) {
 	if cliErr.Op != "run" || cliErr.Code != errorCodeCommandFailed {
 		t.Fatalf("expected run/%s CLI error, got op=%q code=%q", errorCodeCommandFailed, cliErr.Op, cliErr.Code)
 	}
-	if !strings.Contains(stdout.String(), "check=stuck") {
-		t.Fatalf("expected stuck failure marker, got:\n%s", stdout.String())
+	if !strings.Contains(stdout.String(), "check=repair_budget_exhausted") {
+		t.Fatalf("expected repair_budget_exhausted failure marker, got:\n%s", stdout.String())
 	}
 
 	store := runstore.NewFilesystemStore(runstoreRoot)

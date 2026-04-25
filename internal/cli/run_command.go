@@ -197,7 +197,7 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 		previousFailures = currentFailures
 		previousIterationFailures = append(previousIterationFailures[:0], failures...)
 
-		if failedIterations > repairIterationsMax {
+		if failedIterations >= repairIterationsMax {
 			terminalReason = "repair_budget_exhausted"
 			allFailures = append(allFailures, FailureSummary{
 				Layer:   "run",
