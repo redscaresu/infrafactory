@@ -151,8 +151,26 @@ make test
 infrafactory test scenarios/training/web-app-paris.yaml
 ```
 
-## Out of Scope
+## S32-T5: Auto-Learning Design (Future Implementation)
 
-- Auto-discovery implementation (future slice, design only in T5)
-- Provider-agnostic pitfalls format (Scaleway-only for now)
+When a run self-corrects (iteration N fails, iteration N+1 passes with different HCL), the error→fix pattern can be captured as a new pitfall:
+
+1. **Detection**: After `target_reached`, compare iteration N's failure detail with iteration N+1's generated code diff
+2. **Extraction**: Parse the error message into a resource name and constraint (e.g., "password does not respect constraint" → `scaleway_redis_cluster` + password rule)
+3. **Persistence**: Append to `pitfalls/{cloud}.yaml` with `source: learned` and `discovered_from: {scenario_name}`
+4. **Deduplication**: Before appending, check if a pitfall with the same resource + similar rule text already exists
+5. **Review**: Learned pitfalls could be flagged for human review before being promoted to `source: static`
+
+This would make infrafactory progressively smarter — each run that self-corrects teaches the system to avoid the same mistake next time.
+
+**Implementation scope for future slice:**
+- Hook into the run loop after `target_reached` to extract error→fix patterns
+- Pitfall writer that appends to the YAML file atomically
+- Similarity check to avoid near-duplicate pitfalls
+- Optional `--learn-pitfalls` flag to enable/disable
+
+## Out of Scope (current slice)
+
+- Auto-discovery implementation (see design above)
+- Provider-agnostic pitfalls format (Scaleway-only for now, but YAML structure supports any provider)
 - UI for managing pitfalls (edit the YAML file directly)

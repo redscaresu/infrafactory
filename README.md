@@ -433,18 +433,13 @@ Terminal control markers are intentionally excluded from iterative repair feedba
 - **Injection**: phases 2 and 3 both receive the filtered schema as an "Authoritative Reference" section. The prompt instructs the LLM to verify every attribute name and block type against the schema before using it.
 - **Failure mode**: extraction failures are non-fatal; generation proceeds without schema injection. Look for `provider_schema skipped` in logs.
 
-### Scaleway Provider Pitfalls
+### Provider Pitfalls
 
-Phase 2 includes a curated pitfalls section that prevents the most common LLM-generated HCL errors. These are derived from iterative scenario runs across all 12 training scenarios:
+Provider-specific pitfalls are loaded from `pitfalls/{cloud}.yaml` at runtime based on the scenario's `cloud` field. Currently 16 Scaleway pitfalls covering K8s versioning, instance types, LB wiring, RDB configuration, Redis passwords, and DNS records.
 
-| Resource | Pitfall |
-|---|---|
-| `scaleway_k8s_cluster` | Version/auto_upgrade consistency: patch version without auto_upgrade, minor version with auto_upgrade. Always set `delete_additional_resources = true`. |
-| `scaleway_instance_server` | Use exact types from architecture plan (not invented types). No `routed_ip_enabled`. No inline `private_network` blocks — use separate `scaleway_instance_private_nic`. Use `ip_id = null` + `enable_dynamic_ip = false` for no public IP. Reference NIC private IPs, not server `private_ips`. |
-| `scaleway_lb` | Use `ip_ids` list (not `ip_id`). No `assign_flexible_ip` or `assign_flexible_ipv6` when `ip_ids` is set. |
-| `scaleway_lb_backend` / `scaleway_lb_frontend` | No `zone` argument — causes "Unsupported argument" error. |
-| `scaleway_rdb_instance` | Valid `volume_type`: `lssd`, `sbs_5k`, `sbs_15k`. No `volume_size_in_gb` with `lssd`. Private network block needs `ip_net` or `enable_ipam = true`. |
-| `scaleway_redis_cluster` | `password` required — variable must have a `default` value. |
+Pitfalls are injected into phases 2 and 3 via `{{.Pitfalls}}` — no code changes needed to add new ones. Each pitfall has a `source` field: `static` (manually written) or `learned` (discovered from run feedback).
+
+To add a new pitfall, edit `pitfalls/scaleway.yaml` (or create `pitfalls/gcp.yaml` for GCP, etc.).
 
 Phase 1 also enforces exact size mapping usage to prevent the LLM from inventing Scaleway types that don't exist in the mock or real API.
 

@@ -16,6 +16,7 @@ Additional references:
 - ADRs: `docs/decisions/*.md`
 - Plans: `docs/plans/*.md`
 - Prompts: `prompts/*.md`
+- Pitfalls: `pitfalls/{cloud}.yaml` — provider-specific rules loaded at runtime by scenario `cloud` field
 - Progress log: `STATUS.md`
 - Backlog source of truth: `BACKLOG.md`
 - Session execution stub: `CURRENT_TICKET.md`
