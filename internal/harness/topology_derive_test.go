@@ -71,6 +71,9 @@ func TestDeriveTopologyWebApp(t *testing.T) {
 	if conn["public_internet->database:5432"] {
 		t.Error("expected connectivity[public_internet->database:5432] = false")
 	}
+	if !conn["public_internet->compute"] {
+		t.Error("expected connectivity[public_internet->compute] = true (server has public IP)")
+	}
 }
 
 func TestDeriveTopologyNoLB(t *testing.T) {
@@ -221,5 +224,48 @@ func TestEvaluateTopologyWithRawState(t *testing.T) {
 		for _, f := range failures {
 			t.Errorf("unexpected failure: %s", f.Detail)
 		}
+	}
+}
+
+func TestDeriveTopologyRDBNonMatchingPN(t *testing.T) {
+	state := map[string]any{
+		"instance": map[string]any{
+			"servers":      []any{map[string]any{"id": "srv-1"}},
+			"private_nics": []any{map[string]any{"server_id": "srv-1", "private_network_id": "pn-aaa"}},
+		},
+		"rdb": map[string]any{
+			"instances": []any{map[string]any{
+				"id": "rdb-1",
+				"endpoints": []any{map[string]any{
+					"port":            float64(5432),
+					"private_network": map[string]any{"id": "pn-zzz"},
+				}},
+			}},
+		},
+	}
+	conn, _ := deriveAndParse(t, state)
+	if conn["compute->database:5432"] {
+		t.Error("expected no connectivity when server and RDB are on different private networks")
+	}
+}
+
+func TestDeriveTopologyRedisNoPrivateNetwork(t *testing.T) {
+	state := map[string]any{
+		"instance": map[string]any{
+			"servers":      []any{map[string]any{"id": "srv-1"}},
+			"private_nics": []any{map[string]any{"server_id": "srv-1", "private_network_id": "pn-aaa"}},
+		},
+		"redis": map[string]any{
+			"clusters": []any{map[string]any{
+				"id": "redis-1",
+				"endpoints": []any{map[string]any{
+					"port": float64(6379),
+				}},
+			}},
+		},
+	}
+	conn, _ := deriveAndParse(t, state)
+	if conn["compute->redis:6379"] {
+		t.Error("expected no connectivity when redis has no private_network in endpoint")
 	}
 }

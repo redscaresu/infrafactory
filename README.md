@@ -69,9 +69,11 @@ failure in an earlier layer prevents later layers from running.
   ├── POST /mock/reset          — clear mock state (or snapshot/restore for incremental)
   ├── tofu apply -auto-approve  — deploy against mock Scaleway API
   ├── GET /mock/state           — pull deployed resource state
-  ├── Topology checks           — verify connectivity and reachability between resources
-  │   ├── connectivity          — can compute reach database on port 5432?
-  │   ├── http_probe            — is the load balancer reachable on port 80?
+  ├── DeriveTopology            — compute connectivity/http_probe maps from raw resources
+  │   (walks LB frontends/backends/IPs, server NICs, RDB/Redis endpoints, private networks)
+  ├── Topology checks           — verify derived connectivity and reachability
+  │   ├── connectivity          — can compute reach database on port 5432? (shared private network)
+  │   ├── http_probe            — is the load balancer reachable on port 80? (LB+frontend+backend+IP)
   │   └── dns_resolution        — does the domain resolve? (informational until Layer 3)
   ├── OPA state policies        — evaluated against mock state using "deny_state" rules
   │   └── e.g. no_public_database checks deployed state for public endpoints
