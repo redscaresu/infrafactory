@@ -64,19 +64,12 @@ func deriveHTTPProbe(state *rawMockState) map[string]bool {
 			}
 		}
 
-		// Check if LB has an IP. First check the lb_ips table, then fall
-		// back to the LB's embedded "ip" array (mockway may not persist
-		// lb_id back to the lb_ips table in all cases).
+		// Check if LB has an IP in the lb_ips table.
 		hasIP := false
 		for _, ip := range state.LB.IPs {
 			if jsonStr(ip, "lb_id") == lbID {
 				hasIP = true
 				break
-			}
-		}
-		if !hasIP {
-			if ipArr, ok := lb["ip"].([]any); ok && len(ipArr) > 0 {
-				hasIP = true
 			}
 		}
 
