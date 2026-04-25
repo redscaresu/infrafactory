@@ -117,6 +117,29 @@ export function mergeConsoleLines(historyLines, liveLines) {
   return merged;
 }
 
+export function deriveCurrentIteration(runMeta, iterations) {
+  if (!runMeta || runMeta.status !== "running") return 0;
+  const completedIterations = iterations.length;
+  const lastIteration = iterations[iterations.length - 1];
+  if (lastIteration && (lastIteration.failures?.length || lastIteration.stages?.length)) {
+    return completedIterations + 1;
+  }
+  return Math.max(completedIterations, 1);
+}
+
+export function deriveCurrentStage(consoleLines) {
+  for (let i = consoleLines.length - 1; i >= 0; i--) {
+    const line = consoleLines[i];
+    try {
+      const parsed = JSON.parse(line.startsWith('{') ? line : '{}');
+      if (parsed.event === "stage_start" && parsed.status === "start") {
+        return parsed.stage?.replace(/^iteration_\d+_/, '') || "";
+      }
+    } catch { /* ignore non-JSON lines */ }
+  }
+  return "";
+}
+
 export function formatBaselineState(payload) {
   if (!payload) {
     return "";

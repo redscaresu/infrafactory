@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { api } from "$lib/api";
-  import { deriveFailureHint, deriveLiveConsoleNotice, formatBaselineState, mergeConsoleLines, selectLatestRun, synthesizeLiveConsoleLines } from "$lib/run-view.js";
+  import { deriveCurrentIteration, deriveCurrentStage, deriveFailureHint, deriveLiveConsoleNotice, formatBaselineState, mergeConsoleLines, selectLatestRun, synthesizeLiveConsoleLines } from "$lib/run-view.js";
   import { connectWS } from "$lib/ws";
 
   type RunFailure = {
@@ -33,32 +33,9 @@
   let baselineOpen = false;
   let planOpen = false;
 
-  $: currentIteration = (() => {
-    if (!runMeta || runMeta.status !== "running") return 0;
-    // Parse the latest console line for iteration info, or use iterations array length + 1
-    const completedIterations = iterations.length;
-    // If the last iteration has failures or stages, it's complete; the run is on the next one
-    const lastIteration = iterations[iterations.length - 1];
-    if (lastIteration && (lastIteration.failures?.length || lastIteration.stages?.length)) {
-      return completedIterations + 1;
-    }
-    return Math.max(completedIterations, 1);
-  })();
+  $: currentIteration = deriveCurrentIteration(runMeta, iterations);
 
-  $: currentStage = (() => {
-    // Parse the last console line to find the current stage
-    const allLines = mergedLines.length > 0 ? mergedLines : [];
-    for (let i = allLines.length - 1; i >= 0; i--) {
-      const line = allLines[i];
-      try {
-        const parsed = JSON.parse(line.startsWith('{') ? line : '{}');
-        if (parsed.event === "stage_start" && parsed.status === "start") {
-          return parsed.stage?.replace(/^iteration_\d+_/, '') || "";
-        }
-      } catch { /* ignore non-JSON lines */ }
-    }
-    return "";
-  })();
+  $: currentStage = deriveCurrentStage(mergedLines);
 
   $: failureCards = iterations.flatMap((iteration) =>
     (iteration.failures || []).map((failure) => ({

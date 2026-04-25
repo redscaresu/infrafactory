@@ -5,6 +5,8 @@ import {
   buildRunBaselineURL,
   buildRunPlanURL,
   compareRunIDs,
+  deriveCurrentIteration,
+  deriveCurrentStage,
   deriveFailureHint,
   deriveLiveConsoleNotice,
   filterRuns,
@@ -116,4 +118,80 @@ test("mergeConsoleLines appends live lines after replay lines without duplicatio
 test("formatBaselineState pretty prints valid json and preserves invalid text", () => {
   assert.equal(formatBaselineState('{"instance":{"servers":[{"id":"srv-1"}]}}'), '{\n  "instance": {\n    "servers": [\n      {\n        "id": "srv-1"\n      }\n    ]\n  }\n}');
   assert.equal(formatBaselineState("not-json"), "not-json");
+});
+
+test("deriveCurrentIteration returns 0 when run is not running", () => {
+  assert.equal(deriveCurrentIteration(null, []), 0);
+  assert.equal(deriveCurrentIteration({ status: "success" }, []), 0);
+  assert.equal(deriveCurrentIteration({ status: "failed" }, [{ iteration: 1, failures: [{ detail: "x" }] }]), 0);
+});
+
+test("deriveCurrentIteration returns 1 when running with no completed iterations", () => {
+  assert.equal(deriveCurrentIteration({ status: "running" }, []), 1);
+});
+
+test("deriveCurrentIteration returns N+1 when N iterations completed with failures", () => {
+  const iterations = [
+    { iteration: 1, failures: [{ detail: "something broke" }], stages: [] },
+    { iteration: 2, failures: [{ detail: "still broken" }], stages: [] }
+  ];
+  assert.equal(deriveCurrentIteration({ status: "running" }, iterations), 3);
+});
+
+test("deriveCurrentIteration returns N+1 when last iteration has stages but no failures", () => {
+  const iterations = [
+    { iteration: 1, stages: [{ stage: "generate", status: "success" }], failures: [] }
+  ];
+  assert.equal(deriveCurrentIteration({ status: "running" }, iterations), 2);
+});
+
+test("deriveCurrentIteration returns iterations.length when last iteration is empty", () => {
+  const iterations = [
+    { iteration: 1, failures: [{ detail: "x" }], stages: [] },
+    { iteration: 2 }
+  ];
+  assert.equal(deriveCurrentIteration({ status: "running" }, iterations), 2);
+});
+
+test("deriveCurrentStage returns empty string when no console lines", () => {
+  assert.equal(deriveCurrentStage([]), "");
+});
+
+test("deriveCurrentStage returns stage name from last stage_start event", () => {
+  const lines = [
+    '{"event":"stage_start","stage":"iteration_1_plan_architecture","status":"start"}',
+    '{"event":"stage_start","stage":"iteration_1_generate","status":"start"}'
+  ];
+  assert.equal(deriveCurrentStage(lines), "generate");
+});
+
+test("deriveCurrentStage strips iteration prefix", () => {
+  const lines = [
+    '{"event":"stage_start","stage":"iteration_2_generate","status":"start"}'
+  ];
+  assert.equal(deriveCurrentStage(lines), "generate");
+});
+
+test("deriveCurrentStage ignores non-JSON lines", () => {
+  const lines = [
+    '{"event":"stage_start","stage":"iteration_1_plan_architecture","status":"start"}',
+    "some plain text log line",
+    "another non-json line"
+  ];
+  assert.equal(deriveCurrentStage(lines), "plan_architecture");
+});
+
+test("deriveCurrentStage ignores stage events that are not status=start", () => {
+  const lines = [
+    '{"event":"stage_start","stage":"iteration_1_generate","status":"start"}',
+    '{"event":"stage_end","stage":"iteration_1_generate","status":"success"}'
+  ];
+  assert.equal(deriveCurrentStage(lines), "generate");
+});
+
+test("deriveCurrentStage returns stage without prefix when stage has no iteration prefix", () => {
+  const lines = [
+    '{"event":"stage_start","stage":"validate","status":"start"}'
+  ];
+  assert.equal(deriveCurrentStage(lines), "validate");
 });
