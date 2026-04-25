@@ -18,9 +18,9 @@ else
 LINUX_GOARCH := $(HOST_ARCH)
 endif
 
-.PHONY: help deps-up deps-down deps-ps deps-logs deps-pull deps-recreate deps-clean test-unit test-all \
+.PHONY: help deps-up deps-down deps-ps deps-logs deps-pull deps-recreate deps-clean test-unit test-all test \
 	bench-check smoke-validate smoke-mockway smoke-mockway-manual smoke-mockway-local smoke check \
-	ui-install ui-build ui-dev ui-clean ui-api-linux-build ui-stack-up ui-stack-logs ui-stack-down build
+	ui-install ui-build ui-test ui-test-e2e ui-dev ui-clean ui-api-linux-build ui-stack-up ui-stack-logs ui-stack-down build
 
 help:
 	@echo "Targets:"
@@ -31,7 +31,10 @@ help:
 	@echo "  deps-pull       Pull latest dependency images."
 	@echo "  deps-recreate   Recreate dependency containers from scratch."
 	@echo "  deps-clean      Stop and remove dependency containers + volumes."
-	@echo "  test-unit       Run hermetic package tests."
+	@echo "  test-unit       Run hermetic Go package tests."
+	@echo "  ui-test         Run frontend unit tests."
+	@echo "  ui-test-e2e     Build UI and run Playwright e2e tests."
+	@echo "  test            Run all tests (Go unit + UI unit + Playwright e2e)."
 	@echo "  test-all        Run full local checks (go test + doc hygiene)."
 	@echo "  bench-check     Run env-gated benchmark regression checks."
 	@echo "  smoke-validate  Run opt-in real-tool validate smoke test."
@@ -73,6 +76,14 @@ deps-clean:
 
 test-unit:
 	$(GO) test ./internal/... ./cmd/...
+
+ui-test:
+	cd ui && npm test
+
+ui-test-e2e: ui-build
+	cd ui && npx playwright test
+
+test: test-unit ui-test ui-test-e2e
 
 test-all:
 	bash scripts/check_all.sh

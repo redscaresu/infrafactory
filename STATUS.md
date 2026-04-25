@@ -26,6 +26,13 @@ Last updated: 2026-03-14
 - Keep startup/read-order instructions only in `SESSION_START.md` to avoid duplication.
 
 ## Recent updates
+- **UI hardening and Playwright e2e tests**:
+  - Fixed scenario navigation bug: sidebar clicks now reload data using `afterNavigate` instead of `onMount`.
+  - Added iteration progress banner to Live page: pulsing indicator during runs, pass/fail badge on completion.
+  - Redesigned Live page with iteration timeline showing per-iteration stages, failures, and retry reasons.
+  - Added Playwright e2e test suite (18 tests) covering navigation, scenario pages, and Live page iteration timeline.
+  - Added `make test` target (Go unit + UI unit + Playwright e2e), plus `make ui-test` and `make ui-test-e2e`.
+  - Replaced Mermaid diagrams with ASCII art in README.
 - **Slice 30 complete (Layer 3 production readiness)**:
   - Added `tofu plan -state=terraform-live.tfstate` stage to sandbox deploy harness for `plan-live.txt` artifact capture (Contract #8).
   - Added auto-destroy of real Scaleway resources on failed runs without `--no-destroy` (Contract #14 billing protection).
