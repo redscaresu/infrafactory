@@ -264,32 +264,43 @@
   </div>
 {/if}
 
-{#if failureCards.length > 0}
-  <div class="mt-4 space-y-3">
-    {#each failureCards as failure}
-      <section class="rounded border border-red-200 bg-red-50 p-4 text-sm text-red-950">
-        <h2 class="font-semibold">Iteration {failure.iteration}: {failure.stage}</h2>
-        <p class="mt-2"><span class="font-semibold">Check:</span> {failure.check}</p>
-        <p class="mt-1"><span class="font-semibold">Command:</span> {failure.command}</p>
-        <p class="mt-2 whitespace-pre-wrap break-words">{failure.detail}</p>
-      </section>
-    {/each}
-  </div>
-{:else if iterations.length > 0}
-  <div class="mt-4 space-y-3">
+{#if iterations.length > 0}
+  <h2 class="mt-6 text-lg font-bold text-slate-900">Iteration Timeline</h2>
+  <div class="mt-2 space-y-3">
     {#each iterations as iteration}
-      <section class="rounded border border-slate-300 bg-white/70 p-4 text-sm text-slate-800">
-        <h2 class="font-semibold">Iteration {iteration.iteration}</h2>
-        <p class="mt-2">
-          <span class="font-semibold">Statuses:</span>
-          {#if iteration.stages?.length}
-            {iteration.stages.map((status) => `${status.layer || "unknown"}/${status.stage || "unknown"}=${status.status || "unknown"}`).join(", ")}
-          {:else}
-            no status events recorded
-          {/if}
-        </p>
-        {#if iteration.failure_summary?.length}
-          <p class="mt-2 whitespace-pre-wrap break-words">{iteration.failure_summary.join("\n")}</p>
+      {@const hasFails = (iteration.failures?.length || 0) > 0}
+      {@const iterNum = iteration.iteration || 0}
+      <section class="rounded border p-4 text-sm {hasFails ? 'border-red-200 bg-red-50 text-red-950' : 'border-emerald-200 bg-emerald-50 text-emerald-950'}">
+        <div class="flex items-center gap-2">
+          <span class="text-base font-bold">Iteration {iterNum}</span>
+          <span class="rounded px-2 py-0.5 text-xs font-semibold uppercase {hasFails ? 'bg-red-200 text-red-800' : 'bg-emerald-200 text-emerald-800'}">
+            {hasFails ? `${iteration.failures.length} failure${iteration.failures.length !== 1 ? 's' : ''}` : 'passed'}
+          </span>
+        </div>
+
+        {#if iteration.stages?.length}
+          <div class="mt-2 flex flex-wrap gap-1">
+            {#each iteration.stages as stage}
+              <span class="rounded px-1.5 py-0.5 text-xs {stage.status === 'pass' ? 'bg-emerald-100 text-emerald-700' : stage.status === 'fail' ? 'bg-red-100 text-red-700' : 'bg-slate-100 text-slate-600'}">
+                {stage.stage || 'unknown'}: {stage.status || 'unknown'}
+              </span>
+            {/each}
+          </div>
+        {/if}
+
+        {#if hasFails}
+          <div class="mt-3 space-y-2">
+            <p class="text-xs font-semibold uppercase tracking-wide text-red-700">Retry reason:</p>
+            {#each iteration.failures as failure}
+              <div class="rounded border border-red-200 bg-white/60 p-2 text-xs">
+                <span class="font-semibold">{failure.check || failure.stage || 'unknown'}</span>
+                {#if failure.command}
+                  <span class="text-red-600"> ({failure.command})</span>
+                {/if}
+                <p class="mt-1 whitespace-pre-wrap break-words text-red-800">{failure.detail || 'No detail'}</p>
+              </div>
+            {/each}
+          </div>
         {/if}
       </section>
     {/each}
