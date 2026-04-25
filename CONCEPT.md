@@ -42,7 +42,7 @@ Rule: if a change alters architecture, interfaces, or long-term workflow, create
 | Mock testing | Unit + integration + e2e in Mockway repo | Unit: SQLite store, FK validation, handler logic. Integration: 282 test functions (261 handler + 21 repository) (CRUD lifecycle, FK rejection, parent validation, error paths). E2E: 22 Terraform examples with double-apply idempotency check. Coverage: 74.9%. |
 | Mock state model | SQLite with FK constraints + referential integrity + parent validation | On create: validate referenced resources exist (404 if not). On delete: reject if dependents exist (409). On sub-resource operations: validate parent exists (404 if not). On nested-path operations: validate child belongs to parent in URL. On cross-parent references: validate resources share same grandparent (e.g. LB route frontend+backend same LB). Exceptions: server delete detaches IPs (`SET NULL`) and cascades NICs; LB delete cascades private network attachments and detaches LB IPs. See *Mock fidelity limitations* below. |
 | Mock admin API | Structured state schema, versioned contract | `GET /mock/state` returns full resource graph with relationships preserved. This schema is the interface between Mockway and InfraFactory. |
-| Topology evaluation | Harness-side, not Mockway | Mockway stores resources + relationships. The harness's TopologyEvaluator queries mock state and reasons about connectivity as graph queries. Clean separation: Mockway = realistic API mock, harness = domain logic. |
+| Topology evaluation | Harness-side, not Mockway (ADR-0011) | Mockway returns raw resource state. InfraFactory's `DeriveTopology` function computes `connectivity` and `http_probe` maps from raw resources (LB frontends/backends/IPs, server NICs, RDB endpoints, private networks). Clean separation: Mockway = realistic API mock, harness = topology derivation + domain logic. Same derivation works for fakegcp. |
 | S3 mock | Deferred to Mockway v2 | Object Storage uses S3-compatible API (different auth). Separate port, Azurite-inspired. |
 | Security scanning | OPA only for v1 | tfsec/checkov have poor Scaleway support. We control OPA policies — better signal, no false promises. Add tfsec/checkov when they gain Scaleway rules. |
 | Agent | Claude Code CLI (`claude -p`), covered by Max plan | No API costs. Pluggable `SeedGenerator` interface for OpenRouter later. |
@@ -1258,21 +1258,24 @@ This matches the "re-derive from scratch" philosophy — since the agent regener
 - Layer 4 (destruction) runs if anything was deployed (skipped when `--no-destroy` is set)
 - `dns_resolution` acceptance criteria are **auto-pass** when sandbox deploy is disabled (they require real DNS). Auto-pass checks appear in output as informational — they don't block convergence
 
-### TopologyEvaluator
+### Topology Derivation (ADR-0011)
 
-The TopologyEvaluator is a harness component that reasons about infrastructure connectivity by querying Mockway's admin state API. It does **not** make network probes — it walks the resource graph.
+Mockway and fakegcp return raw resource state from `GET /mock/state`. InfraFactory's `DeriveTopology` function (in `internal/harness/topology_derive.go`) transforms this raw state into `connectivity` and `http_probe` maps that the topology evaluator consumes. This derivation is automatic — `EvaluateTopology` detects raw state (no pre-computed maps) and calls `DeriveTopology` transparently.
 
-**How connectivity checks resolve against mock state:**
+**Derivation rules:**
 
-| Check | Graph query |
-|-------|------------|
-| `from: compute, to: database, expect: success` | Do any servers have a `private_nic` whose `private_network_id` matches a private network the RDB instance is also attached to? |
-| `from: public_internet, to: database, expect: blocked` | Does the RDB instance have only private endpoints (no endpoint without `private_network`)? |
-| `from: public_internet, to: compute, expect: blocked` | Do any servers have a `public_ip` assigned? If not → blocked. |
-| `http_probe: load_balancer:80, expect: reachable` | Does an LB exist with a public IP, a frontend on port 80, and at least one backend? |
-| `destruction: expect: no_orphans` | After `tofu destroy`, is `GET /mock/state` empty across all services? |
+| Check | Derivation from raw state |
+|-------|--------------------------|
+| `http_probe["load_balancer:PORT"]` | LB exists + frontend with `inbound_port == PORT` + at least one backend + LB IP assigned |
+| `connectivity["compute->database:PORT"]` | Server has a private NIC on the same private network as the RDB instance's private endpoint |
+| `connectivity["compute->redis:PORT"]` | Server has a private NIC on the same private network as the Redis cluster endpoint |
+| `connectivity["public_internet->database:PORT"]` | RDB instance has a public endpoint (no `private_network` in endpoint) |
+| `connectivity["public_internet->compute"]` | Server has a public IP assigned |
 
-The evaluator fetches `GET /mock/state`, builds an in-memory graph (nodes = resources, edges = FK references), and answers each criterion by walking the graph. This is structural reasoning, not simulation.
+**Key design decisions:**
+- Topology logic lives in infrafactory, not in mock servers — mockway and fakegcp stay simple
+- Auto-detection: if raw state has no `connectivity`/`http_probe` keys, derivation runs automatically
+- Backward-compatible: pre-computed topology JSON (e.g., test fixtures) still works
 
 ### Feedback JSON Structure
 

@@ -16,6 +16,7 @@ Use ADRs for decisions that affect long-term behavior, interfaces, or contributo
 - `0008-ui-command-and-noui-api-mode.md`: Slice 21 CLI/UI wiring with always-registered `ui` command and `noui` API-only behavior.
 - `0009-incremental-deployment-model.md`: Incremental deployment support — single evolving scenario, mockway state persistence, snapshot/restore for feedback iterations, auto-detection.
 - `0010-layer3-real-scaleway-deploy.md`: Enable Layer 3 real Scaleway deploy — Layer 2 gates Layer 3, dual-apply with separate tfstate, project bootstrap in HCL, auto-destroy on failure.
+- `0011-topology-derivation-layer.md`: Derive topology (connectivity, http_probe) from raw mock state in infrafactory instead of requiring pre-computed maps from mockway/fakegcp.
 - `DECISION_RUBRIC.md`: yes/no gate for deciding when ADR is required.
 - `ADR_TEMPLATE.md`: copy/paste template for new ADRs.
 

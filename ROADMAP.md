@@ -304,10 +304,20 @@ This file is intentionally high-level and mostly stable; day-to-day execution tr
 - Design reference: `docs/plans/layer3-production-plan.md`.
 - Apply slice-closure review protocol before marking Slice 30 complete.
 
+31. Slice 31: Topology derivation from raw mock state (ADR-0011)
+- Derive `connectivity` and `http_probe` maps from raw mockway/fakegcp resource state.
+- Auto-detect raw state in `EvaluateTopology` and call `DeriveTopology` transparently.
+- Rules: LB frontend+backend+IP chain for http_probe; shared private network for connectivity.
+- Unit tests with fixture data covering all derivation rules and edge cases.
+- Playwright e2e test verifying topology results visible on Live page.
+- Integration verification: all 12 training scenarios pass with derived topology.
+- Design reference: `docs/plans/topology-derivation-plan.md`.
+- Apply slice-closure review protocol before marking Slice 31 complete.
+
 ## Near-term execution order
 
 1. Keep completed slices (1-30) stable and regression-green.
-2. `S9-T8` closed — superseded by Slices 26-30 (ADR-0010).
+2. Slice 31 (topology derivation). T1 done (ADR+docs). T2→T3→T4/T5→T6 sequential.
 3. Pipeline consistently achieves first-iteration pass (12/12 training scenarios); monitor for regressions.
 
 ## Live progress tracking
