@@ -46,26 +46,70 @@ Single-command lifecycle (`generate`, simplified):
 
 ## Architecture
 
-```mermaid
-flowchart TD
-    U[User / CI] --> CLI[cmd/infrafactory<br/>internal/cli]
+```
+                          +------------------+
+                          |   User / CI      |
+                          +--------+---------+
+                                   |
+                    +--------------+--------------+
+                    |                              |
+              +-----v------+              +-------v--------+
+              |  CLI        |              |  Web UI        |
+              |  infrafactory|              |  :4173         |
+              |  run/test/  |              |  SvelteKit     |
+              |  generate   |              |  (embedded)    |
+              +-----+------+              +-------+--------+
+                    |                              |
+                    +-------->  REST API  <--------+
+                              /api/runs, /api/scenarios, /api/ws
+                                   |
+         +-------------------------+-------------------------+
+         |                         |                         |
+   +-----v------+          +------v-------+          +------v-------+
+   |  Config     |          |  Scenario    |          |  RunStore    |
+   |  loader     |          |  loader +    |          |  .infrafactory/
+   |  infra-     |          |  schema      |          |  runs/       |
+   |  factory.   |          |  validation  |          |  artifacts   |
+   |  yaml       |          |              |          |              |
+   +-----+------+          +------+-------+          +--------------+
+         |                         |
+         +------------+------------+
+                      |
+               +------v-------+
+               |  Generator   |     3-phase LLM pipeline:
+               |  (Claude /   |     1. Plan Architecture
+               |  OpenRouter) |     2. Generate HCL
+               +------+-------+     3. Self-Review
+                      |
+                      v
+         +---------------------------+
+         |    Validation Layers      |
+         |                           |
+         |  Layer 1: Static          |  tofu init/validate/plan
+         |    + OPA policy checks    |  + show -json
+         |                           |
+         |  Layer 2: Mock Deploy     |  tofu apply -> Mockway
+         |    + topology checks      |  + state policy evaluation
+         |    + acceptance criteria  |
+         |                           |
+         |  Layer 3: Real Deploy     |  tofu plan/apply -> Scaleway
+         |    (optional, opt-in)     |  + real network probes
+         |                           |  + auto-destroy on failure
+         |  Layer 4: Destroy         |  tofu destroy
+         |    + orphan verification  |  + holdout checks
+         +------------+--------------+
+                      |
+         +------------+------------+
+         |                         |
+   +-----v------+          +------v-------+
+   |  Mockway    |          |  Scaleway    |
+   |  (mock API) |          |  (real API)  |
+   |  :8080      |          |  Layer 3     |
+   |  SQLite     |          |  only        |
+   +-------------+          +--------------+
 
-    CLI --> CFG[internal/config<br/>infrafactory.yaml loader + defaults + validation]
-    CLI --> SCN[internal/scenario<br/>scenario.yaml + scenario.schema.json validation]
-
-    CFG --> GEN[internal/generator<br/>contracts + prompt rendering + file parser]
-    SCN --> GEN
-
-    GEN --> H1[internal/harness static layer<br/>tofu init/validate/plan/show]
-    H1 --> H2[internal/harness mock deploy layer<br/>apply + topology + state policy]
-    H2 --> H3[internal/harness destroy layer<br/>destroy + orphan verification]
-
-    H1 --> FB[internal/feedback<br/>structured failures + stuck detection]
-    H2 --> FB
-    H3 --> FB
-
-    FB --> RS[internal/runstore<br/>.infrafactory/runs artifacts]
-    RS --> CLI
+    Feedback Loop (on failure):
+    structured failures -> FeedbackJSON -> next iteration's LLM prompt
 ```
 
 High-level flow:
@@ -106,40 +150,67 @@ Note: static validation currently uses `tofu init/validate/plan/show` plus OPA p
 
 Happy path (training + holdouts):
 
-```mermaid
-flowchart TD
-    A[Scenario YAML<br/>training + holdout refs] --> B[Load + schema validation]
-    B --> C[Generate IaC files]
-    C --> D[Static layer<br/>tofu init -> validate -> plan -> show]
-    D --> E[OPA plan policy checks]
-    E --> F[Mock deploy layer<br/>reset -> tofu apply -> state snapshot]
-    F --> G[Criteria checks<br/>connectivity/http_probe/policy]
-    G --> H[Destroy layer<br/>tofu destroy + orphan verification]
-    H --> I[Training convergence]
-    I --> J[Run criteria-only holdouts]
-    J --> K[All holdouts pass]
-    K --> L[Final success]
+```
+  Scenario YAML
+       |
+       v
+  Load + schema validation
+       |
+       v
+  Generate IaC files (3-phase LLM)
+       |
+       v
+  Layer 1: Static -----> OPA plan policy checks
+       |
+       v
+  Layer 2: Mock Deploy -> reset -> tofu apply -> state snapshot
+       |
+       v
+  Criteria checks (connectivity / http_probe / policy)
+       |
+       v
+  Layer 3: Real Deploy (optional) -> tofu plan/apply -> real probes
+       |
+       v
+  Layer 4: Destroy -> tofu destroy + orphan verification
+       |
+       v
+  Training convergence
+       |
+       v
+  Run criteria-only holdouts
+       |
+       v
+  All holdouts pass -> Final success
 ```
 
-Failure and retry loop path:
+Failure and retry loop:
 
-```mermaid
-flowchart TD
-    A[Run iteration n] --> B[Generate]
-    B --> C[Validate static + policy]
-    C --> D[Test mock deploy criteria + destroy]
-    D --> E{Any failures?}
-    E -- no --> G[Run criteria-only holdouts]
-    G --> H{Holdout failures?}
-    H -- no --> I[Final success]
-    H -- yes --> J[Final failed: holdout block]
-
-    E -- yes --> K[Record structured failures + artifacts]
-    K --> L{Stop condition}
-    L -- stuck signature --> M[Final failed: stuck]
-    L -- repair budget exhausted --> N[Final failed: repair_budget_exhausted]
-    L -- otherwise --> O[Next iteration]
-    O --> A
+```
+  +---> Iteration N
+  |         |
+  |         v
+  |     Generate -> Validate -> Test (mock + criteria + destroy)
+  |         |
+  |         v
+  |     Any failures? ---no---> Run holdouts ---pass---> Final success
+  |         |                       |
+  |        yes                     fail
+  |         |                       |
+  |         v                       v
+  |     Record structured       Final failed:
+  |     failures + artifacts    holdout block
+  |         |
+  |         v
+  |     Stop condition?
+  |      /     |      \
+  |   stuck  budget    no
+  |     |   exhausted   |
+  |     v      v        |
+  |   FAIL   FAIL       |
+  |                     |
+  +---------------------+
+    (feed failures into next iteration's LLM prompt)
 ```
 
 ## Validation Layers

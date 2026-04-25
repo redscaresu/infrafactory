@@ -145,5 +145,3 @@ func TestUIRunStarterPreflightResolvesClaudeToAbsolutePath(t *testing.T) {
 		t.Fatalf("expected resolved claude path %q, got %q", claudePath, starter.resolvedClaude)
 	}
 }
-
-

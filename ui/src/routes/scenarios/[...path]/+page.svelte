@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { afterNavigate } from "$app/navigation";
   import { page } from "$app/stores";
   import { api } from "$lib/api";
   import { modeSummary, normalizeRunOptions } from "$lib/scenario-run.js";
@@ -106,10 +106,14 @@
     }
   }
 
-  onMount(async () => {
-    await loadDetail();
-    await loadRunMode();
-    await loadLayer3Status();
+  // Reload data on every navigation (including client-side), since
+  // SvelteKit reuses the component for [...path] route changes.
+  // afterNavigate fires on both initial load and subsequent navigations.
+  afterNavigate(() => {
+    scenarioPath = ($page.params.path || "").toString();
+    loadDetail();
+    loadRunMode();
+    loadLayer3Status();
   });
 </script>
 

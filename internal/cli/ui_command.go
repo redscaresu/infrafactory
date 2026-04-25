@@ -219,5 +219,3 @@ func (s *uiRunStarter) runContext(requestCtx context.Context) context.Context {
 	}
 	return context.Background()
 }
-
-
