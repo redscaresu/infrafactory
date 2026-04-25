@@ -22,8 +22,12 @@ tfplan
 ISSUES.md
 issues.md
 
+# Claude Code
+.claude/
+
 # Web UI
 ui/node_modules/
 ui/build/
 ui/.svelte-kit/
+ui/test-results/
 cmd/infrafactory/ui/build/
