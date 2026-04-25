@@ -32,6 +32,34 @@
   let baselineState = "";
   let baselineOpen = false;
   let planOpen = false;
+  let elapsed = "";
+  let elapsedTimer: ReturnType<typeof setInterval> | null = null;
+
+  function startElapsedTimer() {
+    if (elapsedTimer) return;
+    const start = Date.now();
+    const tick = () => {
+      const secs = Math.floor((Date.now() - start) / 1000);
+      const m = Math.floor(secs / 60);
+      const s = secs % 60;
+      elapsed = m > 0 ? `${m}m ${s}s` : `${s}s`;
+    };
+    tick();
+    elapsedTimer = setInterval(tick, 1000);
+  }
+
+  function stopElapsedTimer() {
+    if (elapsedTimer) {
+      clearInterval(elapsedTimer);
+      elapsedTimer = null;
+    }
+  }
+
+  $: if (latestStatus === "running") {
+    startElapsedTimer();
+  } else {
+    stopElapsedTimer();
+  }
 
   $: currentIteration = deriveCurrentIteration(runMeta, iterations);
 
@@ -159,6 +187,7 @@
     return () => {
       disconnect();
       if (pollTimer) clearInterval(pollTimer);
+      stopElapsedTimer();
     };
   });
 </script>
@@ -182,17 +211,26 @@
 {/if}
 
 {#if latestStatus === "running" && currentIteration > 0}
-  <div class="mt-4 flex items-center gap-3 rounded border border-indigo-200 bg-indigo-50 p-4 text-sm text-indigo-950">
-    <div class="h-3 w-3 animate-pulse rounded-full bg-indigo-500"></div>
-    <div>
-      <span class="text-lg font-bold">Iteration {currentIteration}</span>
-      {#if currentStage}
-        <span class="ml-2 rounded bg-indigo-100 px-2 py-0.5 text-xs font-medium uppercase tracking-wide">{currentStage}</span>
-      {/if}
-      {#if iterations.length > 0}
-        <span class="ml-2 text-xs text-indigo-600">({iterations.length} completed{iterations.flatMap(i => i.failures || []).length > 0 ? `, ${iterations.flatMap(i => i.failures || []).length} failure(s)` : ""})</span>
-      {/if}
+  <div class="mt-4 rounded-lg border-2 border-indigo-300 bg-indigo-50 p-5 text-indigo-950 shadow-sm">
+    <div class="flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="relative flex h-4 w-4 items-center justify-center">
+          <div class="absolute h-4 w-4 animate-ping rounded-full bg-indigo-400 opacity-75"></div>
+          <div class="h-3 w-3 rounded-full bg-indigo-600"></div>
+        </div>
+        <span class="text-xl font-bold">Iteration {currentIteration}</span>
+        {#if currentStage}
+          <span class="animate-pulse rounded-md bg-indigo-200 px-3 py-1 text-sm font-semibold uppercase tracking-wider text-indigo-800">{currentStage}</span>
+        {/if}
+      </div>
+      <div class="text-right">
+        <div class="font-mono text-lg font-bold text-indigo-700">{elapsed}</div>
+        <div class="text-xs text-indigo-500">elapsed</div>
+      </div>
     </div>
+    {#if iterations.length > 0}
+      <div class="mt-2 text-sm text-indigo-600">{iterations.length} iteration{iterations.length !== 1 ? "s" : ""} completed{iterations.flatMap(i => i.failures || []).length > 0 ? ` with ${iterations.flatMap(i => i.failures || []).length} failure(s)` : ""}</div>
+    {/if}
   </div>
 {:else if latestStatus && latestStatus !== "running" && latestStatus !== "starting"}
   <div class="mt-4 flex items-center gap-3 rounded border p-4 text-sm {latestStatus === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-950' : 'border-red-200 bg-red-50 text-red-950'}">
