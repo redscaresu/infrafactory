@@ -23,6 +23,17 @@ func EvaluateTopology(stateJSON []byte, checks []TopologyCheck) ([]feedback.Fail
 		return nil, fmt.Errorf("decode mock state: %w", err)
 	}
 
+	// If no pre-computed topology maps exist, derive from raw resource state.
+	if state.Connectivity == nil && state.HTTPProbe == nil {
+		derived, err := DeriveTopology(stateJSON)
+		if err != nil {
+			return nil, fmt.Errorf("derive topology: %w", err)
+		}
+		if err := json.Unmarshal(derived, &state); err != nil {
+			return nil, fmt.Errorf("decode derived topology: %w", err)
+		}
+	}
+
 	failures := make([]feedback.Failure, 0)
 	for _, check := range checks {
 		switch check.Type {
