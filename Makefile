@@ -20,7 +20,7 @@ endif
 
 .PHONY: help deps-up deps-down deps-ps deps-logs deps-pull deps-recreate deps-clean test-unit test-all test \
 	bench-check smoke-validate smoke-mockway smoke-mockway-manual smoke-mockway-local smoke check \
-	ui-install ui-build ui-test ui-test-e2e ui-dev ui-clean ui-api-linux-build ui-stack-up ui-stack-logs ui-stack-down build
+	ui-install ui-build ui-test ui-test-e2e ui-dev ui-clean ui-api-linux-build ui-stack-up ui-stack-logs ui-stack-down build run
 
 help:
 	@echo "Targets:"
@@ -153,3 +153,6 @@ ui-stack-down:
 
 build: ui-build
 	$(GO) build -o bin/infrafactory ./cmd/infrafactory
+
+run: build
+	./bin/infrafactory ui
