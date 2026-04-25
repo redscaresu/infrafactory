@@ -15,6 +15,106 @@ InfraFactory addresses this by making infrastructure delivery scenario-driven an
 3. Generate and validate infrastructure through layered checks.
 4. Persist artifacts and structured failures for repeatable iteration.
 
+## How It Works
+
+You write a scenario YAML describing what you want (compute, database, load balancer, etc.).
+InfraFactory generates, validates, and optionally deploys the infrastructure through a multi-layer
+pipeline. If anything fails, it feeds the structured errors back to the LLM and retries automatically.
+
+### Step 1: Scenario Definition
+
+Write a YAML file declaring your infrastructure intent:
+- **Resources**: compute, networking, database, kubernetes, redis, registry, IAM
+- **Constraints**: region, zone, encryption, no public database, etc.
+- **Acceptance criteria**: what must be true for the infrastructure to be considered correct
+
+### Step 2: Three-Phase LLM Generation
+
+Each iteration runs three sequential LLM phases:
+
+```
+  Phase 1: Plan Architecture
+    Scenario YAML + size mappings -> JSON architecture plan
+    (maps "size: small" to concrete Scaleway types like DEV1-S)
+
+  Phase 2: Generate HCL
+    Architecture plan + constraints + criteria -> OpenTofu .tf files
+    (includes 18 Scaleway-specific pitfall rules to avoid common mistakes)
+
+  Phase 3: Self-Review
+    Generated HCL -> 10-point checklist review -> corrected files or "NO ISSUES FOUND"
+```
+
+### Step 3: Four-Layer Validation
+
+Every iteration runs the generated code through up to four validation layers.
+Each layer catches different classes of problems. Layers gate each other — a
+failure in an earlier layer prevents later layers from running.
+
+```
+  Layer 1: Static Validation (seconds)
+  ├── tofu init         — provider plugin setup
+  ├── tofu validate     — HCL syntax and type checking
+  ├── tofu plan         — resource graph and dependency resolution
+  ├── tofu show -json   — structured plan output for policy checks
+  └── OPA plan policies — evaluated against plan JSON using "deny" rules
+      ├── no_public_database    — databases must have private_network blocks
+      ├── no_public_endpoints   — no public IPs on internal resources
+      ├── vpc_required          — VPC must be present
+      ├── region_restriction    — resources in allowed regions/zones only
+      ├── encryption_at_rest    — storage encryption required
+      └── naming                — resource names follow conventions
+
+  Layer 2: Mock Deploy via Mockway (seconds)
+  ├── POST /mock/reset          — clear mock state (or snapshot/restore for incremental)
+  ├── tofu apply -auto-approve  — deploy against mock Scaleway API
+  ├── GET /mock/state           — pull deployed resource state
+  ├── Topology checks           — verify connectivity and reachability between resources
+  │   ├── connectivity          — can compute reach database on port 5432?
+  │   ├── http_probe            — is the load balancer reachable on port 80?
+  │   └── dns_resolution        — does the domain resolve? (informational until Layer 3)
+  ├── OPA state policies        — evaluated against mock state using "deny_state" rules
+  │   └── e.g. no_public_database checks deployed state for public endpoints
+  └── Referential integrity     — mock enforces FK constraints (delete returns 409 with dependents)
+
+  Layer 3: Real Scaleway Deploy (optional, minutes)
+  ├── tofu plan -state=terraform-live.tfstate   — capture plan-live.txt artifact
+  ├── tofu apply -state=terraform-live.tfstate  — deploy to real Scaleway API
+  ├── Real network probes (replace topology checks from Layer 2)
+  │   ├── connectivity    — TCP connect to actual host:port with retry
+  │   ├── http_probe      — HTTP GET to real endpoint, expect 2xx/3xx
+  │   └── dns_resolution  — DNS A/AAAA lookup with propagation retry
+  ├── Self-managed project lifecycle
+  │   └── scaleway_account_project resource in HCL — created and destroyed automatically
+  └── Auto-destroy on failure — prevents orphaned billable resources
+
+  Layer 4: Destroy Verification (seconds)
+  ├── tofu destroy -auto-approve  — tear down all resources
+  ├── Orphan check                — verify mock state has zero remaining resources
+  └── If Layer 3 enabled: tofu destroy -state=terraform-live.tfstate
+```
+
+### Step 4: Retry Loop
+
+If any validation layer fails, InfraFactory:
+1. Records the structured failure (layer, stage, check, detail)
+2. Checks stop conditions (stuck detection, repair budget exhausted)
+3. Feeds the failure JSON into the next iteration's LLM prompt
+4. Re-runs all three generation phases with the failure context
+5. Repeats until all criteria pass or the budget is exhausted (default: 5 retries)
+
+### Step 5: Holdout Verification
+
+After training convergence, criteria-only holdout scenarios run as a final gate.
+These are adversarial checks the LLM never sees during training — they verify the
+generated code works for edge cases the scenario author cares about.
+
+### Step 6: Incremental Evolution (optional)
+
+With `--no-destroy`, the infrastructure state persists between runs. You can evolve
+a scenario over time (e.g., add Redis to an existing web app + database stack) and
+InfraFactory regenerates all HCL while OpenTofu handles the incremental diff.
+
 ## New Here
 
 If you are onboarding to this repo, use this order:
@@ -112,133 +212,6 @@ Single-command lifecycle (`generate`, simplified):
     structured failures -> FeedbackJSON -> next iteration's LLM prompt
 ```
 
-High-level flow:
-1. Validate config and scenario contracts.
-2. Generate OpenTofu files via three-phase LLM pipeline (plan → generate → self-review).
-3. Run static checks (`tofu init/validate/plan/show`).
-4. Run deploy-layer checks (apply, topology, state policy).
-5. Run destroy and orphan verification.
-6. Persist run artifacts and iterate based on structured feedback.
-
-### Three-Phase Generation Pipeline
-
-Generation runs three sequential LLM phases, each with a specialized prompt template in `prompts/`:
-
-1. **Phase 1 — Plan Architecture** (`phase1_plan_architecture.md`):
-   - Input: scenario YAML, resolved size mappings from `mappings.yaml`, constraints, prescriptive overrides.
-   - Output: JSON architecture plan with concrete Scaleway resource types, dependency graph, and exact offerings.
-   - The prompt enforces that sizes map to exact Scaleway types from the mappings table (e.g. compute large → `GP1-S`, not invented types like `GP1-L`).
-   - Overrides from the scenario take priority over size mappings.
-
-2. **Phase 2 — Generate HCL** (`phase2_generate_hcl.md`):
-   - Input: architecture plan from phase 1, scenario YAML, constraints, acceptance criteria, provider resource schemas (when available), iteration feedback (when retrying).
-   - Output: complete OpenTofu HCL files in `# File: <name>` block format.
-   - Includes a **Scaleway Provider Pitfalls** section with 18 rules covering common LLM mistakes across K8s, Instance, Redis, LB, and RDB resources.
-   - Enforces naming conventions, data source prohibition, variable defaults, and provider credential separation.
-
-3. **Phase 3 — Self-Review** (`phase3_self_review.md`):
-   - Input: generated HCL files from phase 2, scenario YAML, constraints, acceptance criteria, provider schemas (when available), iteration feedback.
-   - Output: corrected `# File:` blocks for any files with issues, or `NO ISSUES FOUND` if clean.
-   - Runs a 10-point review checklist: data sources, syntax, provider config, resources, dependencies, constraints, RDB/LB specifics, criteria compliance, naming, and best practices.
-   - Corrected files are merged into the phase 2 output; uncorrected files are retained.
-
-All three phases receive iteration feedback (`FeedbackJSON`) from prior failed iterations when running under `run`, enabling the LLM to learn from concrete validation/deploy/destroy failures.
-
-## Process Flows
-
-Note: static validation currently uses `tofu init/validate/plan/show` plus OPA policy checks; `tflint` is not part of the wired default pipeline.
-
-Happy path (training + holdouts):
-
-```
-  Scenario YAML
-       |
-       v
-  Load + schema validation
-       |
-       v
-  Generate IaC files (3-phase LLM)
-       |
-       v
-  Layer 1: Static -----> OPA plan policy checks
-       |
-       v
-  Layer 2: Mock Deploy -> reset -> tofu apply -> state snapshot
-       |
-       v
-  Criteria checks (connectivity / http_probe / policy)
-       |
-       v
-  Layer 3: Real Deploy (optional) -> tofu plan/apply -> real probes
-       |
-       v
-  Layer 4: Destroy -> tofu destroy + orphan verification
-       |
-       v
-  Training convergence
-       |
-       v
-  Run criteria-only holdouts
-       |
-       v
-  All holdouts pass -> Final success
-```
-
-Failure and retry loop:
-
-```
-  +---> Iteration N
-  |         |
-  |         v
-  |     Generate -> Validate -> Test (mock + criteria + destroy)
-  |         |
-  |         v
-  |     Any failures? ---no---> Run holdouts ---pass---> Final success
-  |         |                       |
-  |        yes                     fail
-  |         |                       |
-  |         v                       v
-  |     Record structured       Final failed:
-  |     failures + artifacts    holdout block
-  |         |
-  |         v
-  |     Stop condition?
-  |      /     |      \
-  |   stuck  budget    no
-  |     |   exhausted   |
-  |     v      v        |
-  |   FAIL   FAIL       |
-  |                     |
-  +---------------------+
-    (feed failures into next iteration's LLM prompt)
-```
-
-## Validation Layers
-
-1. Layer 1: Static
-- Purpose: catch invalid IaC and policy violations early, before any deploy action.
-- Runs `tofu init`, `tofu validate`, `tofu plan -out=tfplan`, `tofu show -json tfplan`
-- Evaluates OPA policy checks on plan JSON (`deny`)
-
-2. Layer 2: Mock Deploy (Mockway-backed)
-- Purpose: verify deploy-time behavior and topology/policy expectations in a deterministic, low-cost environment.
-- Resets mock state via mock client (`POST /mock/reset`)
-- Runs `tofu apply -auto-approve`
-- Pulls mock state snapshot (`GET /mock/state`)
-- Runs topology checks on mock state
-- Evaluates OPA state policies on mock state (`deny_state`)
-
-3. Layer 3: Destroy Verification
-- Purpose: ensure cleanup behavior is correct and no resources are left behind.
-- Runs `tofu destroy -auto-approve`
-- Pulls mock state snapshot and verifies no orphan resources remain
-
-Supporting control loop:
-- `run` command loop with failure-only retries (`repair_iterations_max`)
-- first successful iteration ends training (`target_reached`)
-- Stuck detection via failure-signature subset logic (`check`+`resource`+`detail`)
-- Run/iteration artifact persistence under `.infrafactory/runs/...`
-
 ### Mockway API Coverage
 
 Mockway is a companion SQLite-backed mock server that simulates Scaleway APIs for deterministic, offline testing. It covers:
@@ -282,112 +255,32 @@ This is separate from holdouts:
 - OPA checks are part of the training validation stages within each run iteration.
 - Holdouts are criteria-only scenarios executed after training convergence as a final gating phase.
 
-## Current State
+## CLI Commands
 
-Core internal slices are implemented and tested:
-- Config loading and validation (`internal/config`)
-- Scenario parsing and JSON Schema validation (`internal/scenario`)
-- Generator contracts, prompt rendering, and `# File:` parsing (`internal/generator`)
-- Static, mock-deploy, and destroy harness primitives (`internal/harness`)
-- Failure-signature and stuck detection helpers (`internal/feedback`)
-- Filesystem run store (`internal/runstore`)
+| Command | Purpose |
+|---------|---------|
+| `infrafactory init --path <file>` | Scaffold a new scenario YAML |
+| `infrafactory generate <scenario>` | Run 3-phase LLM generation only |
+| `infrafactory validate <scenario>` | Run Layer 1 static checks only |
+| `infrafactory test <scenario>` | Run Layers 1-4 (no retry loop) |
+| `infrafactory run <scenario>` | Full pipeline with retry loop + holdouts |
+| `infrafactory mock start/stop/status/logs` | Manage mockway container |
+| `infrafactory ui` | Serve the web dashboard |
 
-CLI command orchestration is now wired for:
-- `init` scaffold generation
-- `generate` pipeline adapter (runtime + scenario + generator write path)
-- `validate` static harness + policy reporting
-- `test` mock deploy + destroy verification flow
-- `run` criteria-aware multi-iteration orchestration with convergence controls, holdout gating, and runstore persistence
-- `mock` lifecycle wrappers (`start`/`stop`/`status`/`logs`)
+Key flags for `run`:
+- `--clean` — force fresh start (wipe state)
+- `--no-destroy` — keep resources for incremental follow-up
+- `--repair-iterations-max N` — override retry limit (default: 5)
 
-Feature status snapshot:
+## Acceptance Criteria
 
-| Area | Status | Notes |
-|---|---|---|
-| `init` scaffold | implemented | Writes deterministic schema-valid starter file. |
-| `generate` runtime path | implemented with concrete transports | Runtime selects `claude-code` or `openrouter` adapters from config. |
-| `validate` static layer | implemented | Runs `tofu init/validate/plan/show` + plan policy evaluation. |
-| `test` mock deploy + destroy | implemented | Runs mock reset/apply/state checks and destruction verification flow. |
-| `run` orchestration | implemented | Criteria-aware convergence and criteria-only holdout completion checks are wired. |
-| `mock` command lifecycle | implemented | `mock start`/`stop`/`status`/`logs` are wired with deterministic output/error behavior. |
-| sandbox/live deploy | implemented (Layer 3) | Optional real Scaleway deploy gated by Layer 2, using `terraform-live.tfstate`, real probes, and UI/API controls. |
-
-Completed slices:
-- Slices 1-17: core pipeline, CLI orchestration, generator transports, feedback-driven regeneration, logging, adaptive retry, issue remediation, and end-to-end pipeline stabilization.
-- Slice 18 (`S18-T1`..`S18-T5`): expanded mockway coverage to all targeted Scaleway APIs — K8s standalone, IAM standalone, Container Registry, Redis, and Composite multi-service scenario. Extended `scenario.schema.json` with `kubernetes`, `iam`, `registry`, `redis` resource types (ADR-0007).
-- Slice 19 (`S19-T1`): reliability review of all Slice 18 code — fixed referential integrity (delete returns 409 when dependents exist), LB/Frontend/Backend update persistence, IAM defaults, RDB certificate checks, and cross-LB data leaks.
-- Slice 20 (`S20-T1`..`S20-T6`): scenario combination expansion — 6 new training scenarios exercising untested parameter combinations: MySQL engine + HA, large/xlarge compute sizes, multi-backend LB with TCP, private LB exposure, K8s/Redis/database overrides, public registry, selective IAM flags. Added prompt pitfalls for LB zone arguments, compute type mapping, and `assign_flexible_ipv6` conflicts. Expanded mockway server type catalog (GP1-L, GP1-XL, DEV1-L).
-- All 12 training scenarios pass `infrafactory run` on first iteration.
-- `S9-T8` (sandbox/live deploy) is implemented through Slices 26-29 under ADR-0010.
-
-### Web UI Runtime Notes
-
-- `infrafactory ui` serves the embedded frontend in normal builds and API-only mode under `-tags noui`.
-- Run history lives under `/runs`; per-run IaC history lives under `/runs/<scenario>/<run_id>`.
-- Scenario pages expose incremental controls (`--clean`, `--no-destroy`) plus a Layer 3 toggle with backend-reported credential readiness.
-- Each run should write `run.json` immediately with `status: running` so the Live page can poll active state before terminal completion.
-- Live pages show run mode, Layer 3 enablement, plan/baseline artifacts, Layer 3 stage progress, and real probe failures when present.
-- Live logs use two sources:
-  - primary: websocket stream at `/api/ws`
-  - replay: per-run `app.log` from `GET /api/runs/{scenario}/{run_id}/log`
-  - final fallback: synthesized console lines from polled run metadata and iteration artifacts when neither websocket frames nor log replay are available
-- In Vite dev mode (`http://127.0.0.1:5173`), HTTP `/api` calls still proxy through Vite, but websocket logs connect directly to the backend origin (`ws://127.0.0.1:4173/api/ws` by default). Override with `VITE_UI_API_ORIGIN` if the backend runs on a different host/port.
-- The backend explicitly allows local dev websocket origins (`127.0.0.1:*`, `localhost:*`) so this cross-origin browser connection succeeds in development.
-- The backend websocket connection is long-lived after upgrade; it is no longer tied to the short-lived HTTP request context.
-- When `agent.type=claude-code`, the UI run path resolves `agent.claude.command` once during preflight and uses that absolute binary path for the async run. This avoids “works in shell, not in UI run” drift caused by later `PATH` differences.
-- The repo config currently pins `agent.claude.command` to `/opt/homebrew/bin/claude` on this machine to remove shell/PATH ambiguity during local UI runs.
-- Run history tolerates incomplete historical run directories that do not contain `run.json`; they are skipped rather than breaking `/runs`.
-
-### Web UI Dev Workflow
-
-Terminal 1:
-```bash
-go run -tags noui ./cmd/infrafactory ui --addr 127.0.0.1:4173
-```
-
-Terminal 2:
-```bash
-cd ui
-npm install
-npm run dev
-```
-
-Open:
-- UI dev server: `http://127.0.0.1:5173`
-- Backend/API: `http://127.0.0.1:4173`
-
-If the backend is not on `:4173`:
-```bash
-cd ui
-VITE_UI_API_ORIGIN=http://127.0.0.1:4180 npm run dev
-```
-
-Required checks after Web UI changes:
-```bash
-go test -tags noui ./...
-cd ui && npm test && npm run build
-bash scripts/check_all.sh
-```
-
-If websocket log streaming still appears idle after a code change, restart both processes:
-```bash
-go run -tags noui ./cmd/infrafactory ui --addr 127.0.0.1:4173
-cd ui && npm run dev
-```
-
-Notes on current runtime prerequisites:
-- `generate` and `run` resolve a concrete transport-backed `SeedGenerator` from runtime (`internal/cli/runtime.go`) when no test/injected generator is provided.
-- Runtime wiring path: `buildRuntime(...)` selects `NewClaudeSeedGenerator(...)` for `agent.type=claude-code` and `NewOpenRouterSeedGenerator(...)` for `agent.type=openrouter`.
-- `openrouter` runtime path requires `OPENROUTER_API_KEY` at execution time; missing key surfaces deterministic `dependency_unavailable` failure output.
-- `validate`/`test`/`run` expect generated OpenTofu files and tool/runtime dependencies (`tofu`, Mockway, and Docker for `mock` lifecycle commands).
-- Sandbox/live deploy layer (Layer 3, real Scaleway) is implemented (see `docs/decisions/0010-layer3-real-scaleway-deploy.md`). Layer 2 (mockway) gates Layer 3. When enabled, real TCP/HTTP/DNS probes replace mock topology checks. Incremental runs snapshot mockway state before the first iteration and restore before each subsequent iteration. `test --no-destroy` skips post-test destruction to preserve state for incremental follow-up runs.
-
-Criteria support status:
-- `connectivity`: uses mock topology checks when Layer 3 is disabled, and real TCP probes when Layer 3 is enabled.
-- `http_probe`: uses mock topology checks when Layer 3 is disabled, and real HTTP requests when Layer 3 is enabled.
-- `policy`: fully functional. Evaluates OPA rules against plan JSON (layer 1) and mock state (layer 2). No network required.
-- `destruction`: fully functional. Runs `tofu destroy` and verifies no orphan resources remain in mock state.
-- `dns_resolution`: runs real DNS lookups when Layer 3 is enabled; otherwise it auto-passes with explicit informational output.
+| Type | Layer 2 (mock) | Layer 3 (real) |
+|------|---------------|----------------|
+| `connectivity` | Topology graph query | TCP connect with retry |
+| `http_probe` | Topology graph query | HTTP GET, expect 2xx/3xx |
+| `dns_resolution` | Auto-pass (informational) | DNS A/AAAA lookup with retry |
+| `policy` | OPA rules on plan + state | Same |
+| `destruction` | Orphan check after destroy | Same + real destroy |
 
 ## Repository Layout
 
@@ -427,180 +320,87 @@ Package ownership guide:
 
 ## Quick Start
 
-```bash
-go mod tidy
-go test ./...
-go run ./cmd/infrafactory --help
-```
+### Prerequisites
 
-## Web UI
+- Go 1.24.6+
+- OpenTofu (`tofu`) in PATH
+- Docker + Docker Compose
+- Claude CLI (`claude`) or `OPENROUTER_API_KEY`
 
-Serve the dashboard:
-
-```bash
-infrafactory ui --addr 127.0.0.1:4173
-```
-
-Build and run the single-binary UI bundle:
+### CLI Workflow
 
 ```bash
+# 1. Build
 make build
-./bin/infrafactory ui
-```
 
-Two-terminal development workflow:
-
-```bash
-# Terminal 1 (Go API server, no embedded assets required)
-go run -tags noui ./cmd/infrafactory ui --addr 127.0.0.1:4173
-
-# Terminal 2 (frontend dev server)
-make ui-install
-make ui-dev
-```
-
-Docker Compose dev workflow (single command stack):
-
-```bash
-make ui-stack-up
-make ui-stack-logs
-# stop when done
-make ui-stack-down
-```
-
-Notes:
-- Frontend dev proxy target is configurable via `UI_API_PROXY_URL` (default `http://127.0.0.1:4173`).
-- `make ui-build` runs frontend build and syncs embedded assets into `cmd/infrafactory/ui/build` for Go `!noui` builds (`make build`).
-- `make ui-stack-up` also builds a Linux backend binary for your host architecture and mounts it into the API container.
-
-Important:
-- For `agent.type=claude-code`, ensure `agent.claude.command` is installed and available in `PATH` (default: `claude`).
-- For `agent.type=openrouter`, set `OPENROUTER_API_KEY` and configure `agent.openrouter.model`.
-
-Useful UI routes:
-- `/scenarios/<group>/<name>` shows the scenario editor, run-mode detection, and start-run controls.
-- `/runs` shows global run history ordered by newest run first with filter controls.
-- `/runs/<scenario>/<run-id>` shows the per-run IaC viewer with per-iteration snapshot selection, diff view, richer syntax-highlighted code preview, and download actions.
-- `/live?scenario=<scenario>&run_id=<run-id>` shows live/log state for a specific run, including run mode, raw plan text, and baseline mock state when available.
-- `/diagnostics` shows backend generator readiness checks (`claude-code` or `openrouter`).
-
-Per-run IaC history:
-- `output/<scenario>/` remains the mutable latest working output for a scenario.
-- `.infrafactory/runs/<scenario>/<run-id>/generated/` is the immutable IaC snapshot for that specific run.
-- `.infrafactory/runs/<scenario>/<run-id>/iterations/<n>/generated/` stores iteration-scoped IaC snapshots inside the run.
-- `.infrafactory/runs/<scenario>/<run-id>/plan.txt` stores the static-layer plan text for that run.
-- `.infrafactory/runs/<scenario>/<run-id>/baseline_state.json` stores the mockway baseline state detected before the run started.
-- The UI run detail page reads both the final run-scoped snapshot and iteration-scoped snapshots, supports diffing between snapshots, and later runs do not overwrite historical IaC views.
-
-Incremental UI workflow:
-- The scenario page polls `GET /api/scenarios/<path>/run-mode` and shows whether the next run will be `clean` or `incremental`.
-- `Run` supports the same incremental controls as the CLI:
-  - `Keep state` sends `no_destroy: true`
-  - `Force clean` sends `clean: true`
-- The Live page shows the persisted run mode from `run.json` plus collapsible `Plan Diff` and `Baseline State` panels when those artifacts exist.
-
-## Happy Path (Claude Code)
-
-Run these commands from this repository root.
-
-1. Start dependencies (Mockway).
-```bash
+# 2. Start mockway (mock Scaleway API)
 make deps-up
-```
 
-2. Verify prerequisites.
-```bash
-tofu version
-go run ./cmd/infrafactory --help
-claude --version
-```
+# 3. Create a scenario
+./bin/infrafactory init --path scenarios/training/my-app.yaml
+# Edit the YAML with your resources and criteria
 
-3. Configure `infrafactory.yaml` for Claude transport:
-- `agent.type: claude-code`
-- `agent.claude.command: claude` (or full binary path)
-- ensure the `claude` CLI is authenticated in your shell session
+# 4. Run the full pipeline (generate + validate + deploy + destroy + retry)
+./bin/infrafactory run scenarios/training/my-app.yaml
 
-4. Run the full flow:
-```bash
-go run ./cmd/infrafactory generate scenarios/training/web-app-paris.yaml --config infrafactory.yaml --output human
-go run ./cmd/infrafactory validate scenarios/training/web-app-paris.yaml --config infrafactory.yaml --output human
-go run ./cmd/infrafactory test scenarios/training/web-app-paris.yaml --config infrafactory.yaml --output human
-go run ./cmd/infrafactory run scenarios/training/web-app-paris.yaml --config infrafactory.yaml --repair-iterations-max 3 --output human
-```
+# 5. Check artifacts
+ls .infrafactory/runs/my-app/
 
-Optional capture mode for run diagnostics:
-```bash
-INFRAFACTORY_CAPTURE_LLM_RAW=1 go run ./cmd/infrafactory run scenarios/training/web-app-paris.yaml --config infrafactory.yaml --repair-iterations-max 3 --output human
-```
-
-Incremental workflow examples:
-```bash
-go run ./cmd/infrafactory run scenarios/training/web-app-paris.yaml --config infrafactory.yaml --repair-iterations-max 3 --no-destroy
-go run ./cmd/infrafactory run scenarios/training/web-app-paris.yaml --config infrafactory.yaml --repair-iterations-max 3 --clean
-```
-
-5. Confirm artifacts:
-- generated Terraform: `output/web-app-paris/`
-- run artifacts: `.infrafactory/runs/web-app-paris/<run-id>/`
-- run-scoped IaC history: `.infrafactory/runs/web-app-paris/<run-id>/generated/`
-
-6. Cleanup:
-```bash
+# 6. Cleanup
 make deps-down
 ```
 
-## End-to-End Walkthrough
+### Web UI Workflow
 
-This is the shortest realistic path for a new contributor:
-
-1. Create a scenario scaffold.
 ```bash
-go run ./cmd/infrafactory init --path scenarios/training/new-scenario.yaml
+make build
+make deps-up
+./bin/infrafactory ui
+# Open http://127.0.0.1:4173
 ```
-2. Edit `scenarios/training/new-scenario.yaml` with real resources/criteria.
-3. Generate files.
+
+The UI provides:
+- **Scenario browser** — browse, edit, and save scenario YAML
+- **Run controls** — start runs with `--clean` / `--no-destroy` / Layer 3 toggles
+- **Live page** — real-time iteration progress with elapsed timer, stage indicators, retry reasons
+- **Run history** — per-run IaC viewer with iteration snapshots, diffs, and download
+- **Diagnostics** — backend readiness checks
+
+### Web UI Development
+
 ```bash
-go run ./cmd/infrafactory generate scenarios/training/new-scenario.yaml --config infrafactory.yaml --output human
+# Terminal 1: Go API server (no embedded assets)
+go run -tags noui ./cmd/infrafactory ui --addr 127.0.0.1:4173
+
+# Terminal 2: Svelte dev server with hot reload
+make ui-install && make ui-dev
+# Open http://127.0.0.1:5173
 ```
-4. Validate static checks.
+
+### Run Artifacts
+
+Each run persists to `.infrafactory/runs/<scenario>/<run-id>/`:
+
+| File | Contents |
+|------|----------|
+| `run.json` | Run metadata, status, terminal reason |
+| `app.log` | Structured JSON application logs |
+| `plan.txt` | Layer 1 tofu plan output |
+| `baseline_state.json` | Mockway state snapshot before run (incremental) |
+| `generated/` | Immutable IaC snapshot for this run |
+| `iterations/<n>/iteration.json` | Per-iteration stages and failures |
+| `iterations/<n>/generated/` | Per-iteration IaC snapshot |
+| `iterations/<n>/plan-live.txt` | Layer 3 tofu plan output (when enabled) |
+
+### Testing
+
 ```bash
-go run ./cmd/infrafactory validate scenarios/training/new-scenario.yaml --config infrafactory.yaml --output human
+make test          # Go unit + UI unit + Playwright e2e
+make test-unit     # Go tests only
+make ui-test       # Frontend unit tests only
+make ui-test-e2e   # Playwright e2e tests only
+make smoke         # Opt-in real-tool smoke tests
 ```
-5. Run full orchestration loop.
-```bash
-go run ./cmd/infrafactory run scenarios/training/new-scenario.yaml --config infrafactory.yaml --repair-iterations-max 3 --output json
-```
-6. Inspect run artifacts.
-```text
-.infrafactory/runs/<scenario>/<run-id>/
-```
-
-Expected artifacts:
-- `run.json` with run metadata/status and schema field (`infrafactory.run.metadata.v1`).
-- `iterations/<n>/iteration.json` with stage/failure snapshots, deterministic `failure_summary` (when failures exist), and schema field (`infrafactory.run.iteration.v1`).
-- `iterations/<n>/generated/` with immutable IaC snapshots for that specific iteration.
-- `app.log` run-scoped structured application logs (`stderr` mirror + file sink for `run`).
-- generated OpenTofu output under `output/<scenario>/` (latest mutable scenario output).
-- generated OpenTofu history under `.infrafactory/runs/<scenario>/<run-id>/generated/` (immutable per-run snapshot used by the UI IaC viewer).
-- downloadable UI archives:
-  - `/api/runs/<scenario>/<run-id>/bundle.zip` for IaC-only history
-  - `/api/runs/<scenario>/<run-id>/artifacts.zip` for the full run artifact directory
-- optional LLM diagnostic artifacts when `INFRAFACTORY_CAPTURE_LLM_RAW=1`:
-  - `iterations/<n>/llm_raw_<phase>.json` (raw model response per phase)
-  - `iterations/<n>/llm_prompt_<phase>.json` (redacted/truncated prompt sent to model per phase)
-
-Canonical run terminal reasons:
-- `target_reached`
-- `repair_budget_exhausted`
-- `stuck`
-
-Transport-dominated behavior (MVP):
-- consecutive transport-runtime failures are bounded and can stop early with `check=transport_runtime_dominated`.
-- per-iteration artifacts include `transport_diagnostics` when transport-runtime failures occur.
-
-Retry semantics:
-- retries only occur after failed iterations.
-- successful iteration ends training immediately.
 
 ### Logging
 
