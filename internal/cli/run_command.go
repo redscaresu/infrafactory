@@ -137,6 +137,18 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 		}
 
 		if len(failures) == 0 {
+			// Auto-learn pitfalls: if this is iteration 2+, a self-correction
+			// happened. Extract actionable patterns from the previous iteration's
+			// failures and persist them for future runs.
+			if iteration > 1 && len(previousIterationFailures) > 0 {
+				cloud := sc.Cloud
+				for _, failure := range previousIterationFailures {
+					learned := generator.ExtractLearnedPitfall(failure.Detail, sc.Name)
+					if learned != nil {
+						_ = generator.AppendPitfall(runtime.Config.Paths.Pitfalls, cloud, *learned)
+					}
+				}
+			}
 			lastIterationFailed = false
 			previousFailures = nil
 			previousIterationFailures = previousIterationFailures[:0]

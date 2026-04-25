@@ -12,9 +12,10 @@ import (
 
 // PitfallEntry represents a single provider pitfall rule.
 type PitfallEntry struct {
-	Resource string `yaml:"resource"`
-	Rule     string `yaml:"rule"`
-	Source   string `yaml:"source"`
+	Resource       string `yaml:"resource"`
+	Rule           string `yaml:"rule"`
+	Source         string `yaml:"source"`
+	DiscoveredFrom string `yaml:"discovered_from,omitempty"`
 }
 
 // PitfallsFile represents the YAML structure of a pitfalls file.
