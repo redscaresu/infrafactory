@@ -75,13 +75,15 @@ Avoid these common mistakes — the Scaleway OpenTofu provider will reject them:
 - `scaleway_instance_server`: There is no `routed_ip_enabled` argument. Do not use it.
 - `scaleway_instance_server`: Use `ip_id = null` and `enable_dynamic_ip = false` to keep an instance off the public internet.
 - `scaleway_instance_server`: Do NOT use inline `private_network` blocks on the server resource. Instead, create separate `scaleway_instance_private_nic` resources with `server_id` and `private_network_id` to attach servers to private networks. The validation policy checks for `scaleway_instance_private_nic` resources specifically.
-- `scaleway_redis_cluster`: The `password` attribute is required. If you use a variable for it, the variable MUST have a `default` value (e.g. `default = "changeme-redis-pwd"`). A variable without a default will cause `tofu plan` to fail.
+- `scaleway_redis_cluster`: The `password` attribute is required. If you use a variable for it, the variable MUST have a `default` value that meets Scaleway's password complexity requirements (see below). A variable without a default will cause `tofu plan` to fail.
 - `scaleway_lb`: Use `ip_ids = [scaleway_lb_ip.NAME.id]` (list), NOT `ip_id` (deprecated). Do NOT set `assign_flexible_ip` or `assign_flexible_ipv6` when using `ip_ids` — they conflict.
 - `scaleway_lb_backend`: Does NOT support a `zone` argument. Do not add `zone` to backend resources — it will cause an "Unsupported argument" validation error.
 - `scaleway_lb_frontend`: Does NOT support a `zone` argument. Do not add `zone` to frontend resources.
 - `scaleway_rdb_instance`: Valid `volume_type` values are `lssd`, `sbs_5k`, `sbs_15k` — NOT `bssd`.
 - `scaleway_rdb_instance`: Do not use `volume_size_in_gb` with `lssd` volume type.
 - `scaleway_rdb_instance`: When using a `private_network` block, you MUST set either `ip_net` (e.g. `"10.0.0.254/24"`) or `enable_ipam = true`. Omitting both causes a validation error: "at least one of 'ip_net' or 'enable_ipam' (set to true) must be set".
+- `scaleway_domain_record`: Do NOT create DNS records unless the scenario explicitly lists DNS/domain resources. The `dns_resolution` acceptance criterion is auto-evaluated and does NOT require a `scaleway_domain_record` resource in the generated HCL. Creating records for a non-existent zone will cause `tofu apply` to fail with "resource not found".
+- `scaleway_redis_cluster`: The `password` must meet Scaleway's complexity requirements: 8-128 characters, at least one digit, one uppercase, one lowercase, and one special character. Use a compliant default like `default = "Ch4ng3Me!@2024"`.
 
 ## Output Format
 
