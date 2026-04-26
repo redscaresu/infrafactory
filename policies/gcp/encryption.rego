@@ -63,3 +63,19 @@ disk_has_encryption(resource) if {
 	enc.sha256 != null
 	enc.sha256 != ""
 }
+
+# Layer 2 — fakegcp state-side enforcement so the criteria-driven
+# evaluator (test_command.go evaluateStatePolicyCriteria) actually
+# exercises this policy on a /mock/state response. fakegcp surfaces
+# camelCase fields verbatim from the GCP REST API.
+deny_state contains msg if {
+	bucket := input.storage.buckets[_]
+	not bucket.encryption.defaultKmsKeyName
+	msg := sprintf("storage bucket %s missing encryption.defaultKmsKeyName", [bucket.name])
+}
+
+deny_state contains msg if {
+	sql := input.sql.instances[_]
+	not sql.diskEncryptionConfiguration.kmsKeyName
+	msg := sprintf("Cloud SQL instance %s missing diskEncryptionConfiguration.kmsKeyName", [sql.name])
+}

@@ -41,3 +41,19 @@ has_cluster_network(resource) if {
 	resource.values.subnetwork != null
 	resource.values.subnetwork != ""
 }
+
+# Layer 2 — fakegcp state. An instance with no networkInterfaces or no
+# subnetwork on its primary interface is unscoped. Clusters lacking
+# both network and subnetwork are also unscoped.
+deny_state contains msg if {
+	inst := input.compute.instances[_]
+	count(inst.networkInterfaces) == 0
+	msg := sprintf("compute instance %s has no networkInterfaces — VPC scoping required", [inst.name])
+}
+
+deny_state contains msg if {
+	cluster := input.container.clusters[_]
+	not cluster.network
+	not cluster.subnetwork
+	msg := sprintf("GKE cluster %s has no network or subnetwork — VPC scoping required", [cluster.name])
+}

@@ -37,3 +37,21 @@ has_private_network(ip_cfg) if {
 	ip_cfg.private_network != null
 	ip_cfg.private_network != ""
 }
+
+# Layer 2 — fakegcp state shape uses camelCase. A 0.0.0.0/0 entry in
+# authorizedNetworks means the public internet can reach the instance.
+deny_state contains msg if {
+	sql := input.sql.instances[_]
+	auth := sql.settings.ipConfiguration.authorizedNetworks[_]
+	auth.value == "0.0.0.0/0"
+	msg := sprintf("Cloud SQL instance %s exposes 0.0.0.0/0 in authorizedNetworks", [sql.name])
+}
+
+# Layer 2 — ipv4Enabled with no privateNetwork configured implies a
+# public IP path, which Cloud SQL surfaces by default.
+deny_state contains msg if {
+	sql := input.sql.instances[_]
+	sql.settings.ipConfiguration.ipv4Enabled == true
+	not sql.settings.ipConfiguration.privateNetwork
+	msg := sprintf("Cloud SQL instance %s has ipv4Enabled with no privateNetwork", [sql.name])
+}

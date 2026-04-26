@@ -64,6 +64,22 @@ region_allowed(region) if {
 	allowlist[_] == region
 }
 
+# Layer 2 — fakegcp state surface. Compute instances surface their
+# zone; SQL/storage surface region.
+deny_state contains msg if {
+	inst := input.compute.instances[_]
+	inst.zone != ""
+	not location_allowed(inst.zone)
+	msg := sprintf("compute instance %s zone %s not in allowlist %v", [inst.name, inst.zone, allowlist])
+}
+
+deny_state contains msg if {
+	sql := input.sql.instances[_]
+	sql.region != ""
+	not region_allowed(sql.region)
+	msg := sprintf("Cloud SQL instance %s region %s not in allowlist %v", [sql.name, sql.region, allowlist])
+}
+
 # A location may be a region (e.g. "us-central1") or a zone within an
 # allowed region (e.g. "us-central1-a"). Accept both shapes.
 location_allowed(location) if {
