@@ -27,6 +27,10 @@ Last updated: 2026-04-26
 - Keep startup/read-order instructions only in `SESSION_START.md` to avoid duplication.
 
 ## Recent updates
+- **S36-T0 verified done (fakegcp prerequisites)**:
+  - Confirmed `../fakegcp/AGENTS.md` already covers the required Architecture, Testing, and Conventions sections (plus extras like "GCP API Conventions", "API Fidelity Principles", "Checklist for New Handlers", "Safe Workflow"). No update needed.
+  - Confirmed `google_compute_forwarding_rule` handler exists in `../fakegcp/handlers/loadbalancer.go` with Create/Get/List/Delete plus idempotency on the Terraform provider's read-then-apply path. CRUD is sufficient since Terraform's apply loop owns the idempotency contract.
+  - Real fakegcp git initialization + push remains as **S41-T0** (separate ticket, in the sibling repo).
 - **S37-T4 complete (Playwright e2e for pitfalls)**:
   - 5 new Playwright tests in `ui/e2e/pitfalls.spec.ts` cover page load via sidebar, default-tab selection, tab switch updating row count, edit + save with reload-and-restore for idempotent re-runs, and add/delete row dance. Total Playwright suite now 23 passing (up from 18).
   - Bundled into commit 2392eb5 (named for S39-T2/T3) due to the same sub-agent worktree merge race; tracked here for clarity.
