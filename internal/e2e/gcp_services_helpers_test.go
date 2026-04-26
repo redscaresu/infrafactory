@@ -60,6 +60,17 @@ func TestCollectKeyParents(t *testing.T) {
 				"sa=deploy@p.iam.gserviceaccount.com/i=0",
 			},
 		},
+		{
+			name: "mixed parent sources on same SA share the per-SA index",
+			state: keyState(
+				map[string]any{"serviceAccountEmail": "ci@p.iam.gserviceaccount.com"},
+				map[string]any{"name": "projects/p/serviceAccounts/ci@p.iam.gserviceaccount.com/keys/abcd"},
+			),
+			want: []string{
+				"sa=ci@p.iam.gserviceaccount.com/i=0",
+				"sa=ci@p.iam.gserviceaccount.com/i=1",
+			},
+		},
 	}
 
 	for _, tc := range cases {
