@@ -18,8 +18,11 @@ type LearnedPitfall struct {
 }
 
 var (
-	// Matches Terraform resource names like scaleway_redis_cluster.
-	resourceNameRe = regexp.MustCompile(`(scaleway_\w+)`)
+	// Matches Terraform resource names like scaleway_redis_cluster or
+	// google_compute_instance. Without the google_ branch, GCP-side
+	// auto-learning never extracts a resource and (after the cross-cloud
+	// guard added in the run loop) silently produces zero pitfalls.
+	resourceNameRe = regexp.MustCompile(`((?:scaleway|google)_\w+)`)
 
 	// Matches "Unsupported argument" errors with argument name in quotes.
 	unsupportedArgRe = regexp.MustCompile(`Unsupported argument.*"(\w+)"`)
@@ -57,9 +60,15 @@ func ExtractLearnedPitfall(failureDetail, scenarioName string) *LearnedPitfall {
 	// Try specific pattern: password constraint.
 	if strings.Contains(lower, "password does not respect constraint") ||
 		strings.Contains(lower, "password") && strings.Contains(lower, "complexity") {
+		// Only fall back to the Scaleway-flavoured default when the
+		// failure detail names no resource at all. This used to be a
+		// blind `scaleway_redis_cluster` default that, after the
+		// cross-cloud guard in run_command.go, silently dropped the
+		// learning on GCP. Now: extract whichever cloud's resource is
+		// in the detail; otherwise skip rather than fabricate.
 		resource := extractResource(failureDetail)
 		if resource == "" {
-			resource = "scaleway_redis_cluster"
+			return nil
 		}
 		return &LearnedPitfall{
 			Resource:       resource,
@@ -73,7 +82,7 @@ func ExtractLearnedPitfall(failureDetail, scenarioName string) *LearnedPitfall {
 		strings.Contains(lower, "auto_upgrade") && strings.Contains(lower, "version") {
 		resource := extractResource(failureDetail)
 		if resource == "" {
-			resource = "scaleway_k8s_cluster"
+			return nil
 		}
 		return &LearnedPitfall{
 			Resource:       resource,
@@ -134,7 +143,8 @@ func ExtractLearnedPitfall(failureDetail, scenarioName string) *LearnedPitfall {
 	return nil
 }
 
-// extractResource finds a Terraform resource name (scaleway_\w+) in the text.
+// extractResource finds a Terraform resource name in the text. Matches
+// scaleway_* or google_* prefixes (mockway / fakegcp providers).
 func extractResource(text string) string {
 	if match := resourceNameRe.FindString(text); match != "" {
 		return match

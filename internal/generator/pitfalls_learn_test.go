@@ -39,6 +39,33 @@ func TestExtractLearnedPitfall_K8sVersionAutoUpgrade(t *testing.T) {
 	}
 }
 
+// TestExtractLearnedPitfall_GoogleResource pins multi-cloud regex
+// support: a GCP-flavoured failure detail must extract the google_*
+// resource type so the run-loop's cross-cloud guard accepts the
+// pitfall on a `cloud: gcp` scenario.
+func TestExtractLearnedPitfall_GoogleResource(t *testing.T) {
+	detail := `Error: Unsupported argument "labels" on google_container_cluster.main`
+	got := ExtractLearnedPitfall(detail, "gcp-gke-cluster")
+	if got == nil {
+		t.Fatal("expected pitfall, got nil")
+	}
+	if got.Resource != "google_container_cluster" {
+		t.Errorf("resource = %q, want google_container_cluster", got.Resource)
+	}
+}
+
+// TestExtractLearnedPitfall_PasswordWithoutResourceReturnsNil pins the
+// review-11 fix: when the password failure detail names no resource,
+// the function must NOT fabricate a `scaleway_redis_cluster` default.
+// Otherwise the run loop's cross-cloud guard would silently drop the
+// learning on GCP.
+func TestExtractLearnedPitfall_PasswordWithoutResourceReturnsNil(t *testing.T) {
+	detail := `password does not respect constraint`
+	if got := ExtractLearnedPitfall(detail, "any-scenario"); got != nil {
+		t.Fatalf("expected nil for resource-less password failure, got %+v", got)
+	}
+}
+
 func TestExtractLearnedPitfall_UnsupportedArgument(t *testing.T) {
 	detail := `Error: Unsupported argument "zone" on scaleway_lb_backend.main`
 	got := ExtractLearnedPitfall(detail, "web-app-paris")
