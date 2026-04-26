@@ -139,7 +139,11 @@ func validateScenarioHandler(state *serverState) http.HandlerFunc {
 			return
 		}
 		contentType := strings.TrimSpace(strings.SplitN(r.Header.Get("Content-Type"), ";", 2)[0])
-		if contentType != "" && !strings.EqualFold(contentType, "application/json") {
+		// Require an explicit application/json content-type. Earlier this
+		// handler accepted empty content-type as JSON, but that's a silent
+		// asymmetry with the explicit text/plain rejection — clients
+		// should always declare what they're sending.
+		if !strings.EqualFold(contentType, "application/json") {
 			writeJSONError(w, http.StatusUnsupportedMediaType, "content-type must be application/json")
 			return
 		}

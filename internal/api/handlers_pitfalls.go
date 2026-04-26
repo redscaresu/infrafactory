@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -33,6 +34,13 @@ type pitfallsEditRequest struct {
 	Pitfalls []pitfallsResponseEntry `json:"pitfalls"`
 }
 
+// validProviderName matches lower-case provider identifiers like
+// "scaleway", "gcp", "fakegcp-internal". Leading dots are rejected so a
+// PUT to /api/pitfalls/.bashrc cannot create a hidden file inside the
+// pitfalls dir; punctuation outside `[a-z0-9_-]` is rejected so
+// path-traversal vectors can't sneak in via Unicode lookalikes.
+var validProviderName = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
+
 // pitfallsHandler routes both GET /api/pitfalls (list) and PUT
 // /api/pitfalls/{provider} (edit) onto a single dispatcher. The Go mux
 // matches /api/pitfalls (exact) and /api/pitfalls/ (prefix) separately;
@@ -46,7 +54,7 @@ func pitfallsHandler(state *serverState) http.HandlerFunc {
 		case strings.HasPrefix(path, "/api/pitfalls/"):
 			provider := strings.TrimPrefix(path, "/api/pitfalls/")
 			if provider == "" {
-				notImplementedAPIHandler(w, r)
+				writeJSONError(w, http.StatusBadRequest, "provider name is required")
 				return
 			}
 			editPitfalls(state, w, r, provider)
@@ -132,7 +140,7 @@ func editPitfalls(state *serverState, w http.ResponseWriter, r *http.Request, pr
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	if strings.Contains(provider, "..") || strings.ContainsAny(provider, "/\\") {
+	if !validProviderName.MatchString(provider) {
 		writeJSONError(w, http.StatusBadRequest, "invalid provider name")
 		return
 	}
@@ -187,13 +195,29 @@ func editPitfalls(state *serverState, w http.ResponseWriter, r *http.Request, pr
 	}
 
 	target := filepath.Join(dir, provider+".yaml")
-	tmp := target + ".tmp"
-	if err := os.WriteFile(tmp, out, 0o644); err != nil {
+	// os.CreateTemp gives us a unique tmp filename so two concurrent PUTs
+	// to the same provider can't clobber each other's tmp file before
+	// either rename completes; the loser's payload would otherwise
+	// silently overwrite the winner's.
+	tmp, err := os.CreateTemp(dir, provider+"-*.yaml.tmp")
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "create temp pitfalls: "+err.Error())
+		return
+	}
+	tmpPath := tmp.Name()
+	if _, err := tmp.Write(out); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
 		writeJSONError(w, http.StatusInternalServerError, "write temp pitfalls: "+err.Error())
 		return
 	}
-	if err := os.Rename(tmp, target); err != nil {
-		_ = os.Remove(tmp)
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		writeJSONError(w, http.StatusInternalServerError, "close temp pitfalls: "+err.Error())
+		return
+	}
+	if err := os.Rename(tmpPath, target); err != nil {
+		_ = os.Remove(tmpPath)
 		writeJSONError(w, http.StatusInternalServerError, "rename pitfalls: "+err.Error())
 		return
 	}

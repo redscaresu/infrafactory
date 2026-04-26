@@ -225,13 +225,84 @@ func TestPitfallsEditRejectsTraversalProvider(t *testing.T) {
 	cfg := config.Default()
 	cfg.Paths.Pitfalls = t.TempDir()
 
-	for _, name := range []string{"../etc", "a/b", "..\\evil"} {
+	// Includes leading-dot rejection (.bashrc would otherwise create a
+	// hidden .bashrc.yaml that the GET handler would expose), uppercase
+	// rejection, and the original traversal vectors.
+	for _, name := range []string{
+		"../etc",
+		"a/b",
+		"..\\evil",
+		".bashrc",
+		".",
+		"..",
+		"Scaleway",
+		"-leading-dash",
+		"trailing!",
+	} {
 		req := httptest.NewRequest(http.MethodPut, "/api/pitfalls/"+name, strings.NewReader(`{"pitfalls":[]}`))
 		rec := httptest.NewRecorder()
 		pitfallsHandler(&serverState{cfg: cfg}).ServeHTTP(rec, req)
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("expected 400 for provider %q, got %d", name, rec.Code)
 		}
+	}
+}
+
+// TestPitfallsHandlerEmptyProviderReturns400 guards against the previous
+// 501 response when the URL was exactly /api/pitfalls/ — that's a client
+// shape mistake, not an unimplemented capability.
+func TestPitfallsHandlerEmptyProviderReturns400(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.Default()
+	cfg.Paths.Pitfalls = t.TempDir()
+
+	req := httptest.NewRequest(http.MethodPut, "/api/pitfalls/", strings.NewReader(`{"pitfalls":[]}`))
+	rec := httptest.NewRecorder()
+	pitfallsHandler(&serverState{cfg: cfg}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for empty provider, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestPitfallsEditUsesUniqueTempFile guards against a regression where
+// two concurrent PUTs to the same provider collided on a fixed `.tmp`
+// suffix. With os.CreateTemp, each request gets a unique tmp file so
+// the loser's payload cannot silently overwrite the winner's.
+func TestPitfallsEditConcurrentWritesDoNotCorrupt(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.Default()
+	cfg.Paths.Pitfalls = t.TempDir()
+	handler := pitfallsHandler(&serverState{cfg: cfg})
+
+	bodyA := `{"pitfalls":[{"resource":"google_compute_instance","rule":"A","source":"static"}]}`
+	bodyB := `{"pitfalls":[{"resource":"google_storage_bucket","rule":"B","source":"static"}]}`
+
+	done := make(chan struct{}, 2)
+	for _, body := range []string{bodyA, bodyB} {
+		body := body
+		go func() {
+			req := httptest.NewRequest(http.MethodPut, "/api/pitfalls/gcp", strings.NewReader(body))
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			done <- struct{}{}
+		}()
+	}
+	<-done
+	<-done
+
+	written, err := os.ReadFile(filepath.Join(cfg.Paths.Pitfalls, "gcp.yaml"))
+	if err != nil {
+		t.Fatalf("read pitfalls/gcp.yaml: %v", err)
+	}
+	contents := string(written)
+	hasA := strings.Contains(contents, "rule: A") && strings.Contains(contents, "google_compute_instance")
+	hasB := strings.Contains(contents, "rule: B") && strings.Contains(contents, "google_storage_bucket")
+	// Exactly one of the two payloads should win — never a hybrid.
+	if !(hasA != hasB) {
+		t.Fatalf("expected exactly one payload to win (no hybrid), got:\n%s", contents)
 	}
 }
 

@@ -352,11 +352,15 @@ func pickHost(attrs map[string]any, resourceType string) string {
 	case "google_compute_global_address":
 		patterns = []string{"address", "ip_address", "ip"}
 	case "google_compute_forwarding_rule":
-		patterns = []string{"ip_address", "load_balancing_scheme", "address", "ip"}
+		// load_balancing_scheme is an enum, not a host; dropped to avoid
+		// noise even though net.ParseIP would discard it downstream.
+		patterns = []string{"ip_address", "address", "ip"}
 	case "google_sql_database_instance":
 		patterns = []string{"public_ip_address", "private_ip_address", "first_ip_address", "ip_address", "host", "address", "ip"}
 	case "google_redis_instance":
-		patterns = []string{"host", "read_endpoint", "current_location_id", "address", "ip"}
+		// current_location_id is a region label, not a host; read_endpoint
+		// only sometimes carries one. Keep host first.
+		patterns = []string{"host", "read_endpoint", "address", "ip"}
 	case "google_compute_instance":
 		patterns = []string{"network_interface.0.access_config.0.nat_ip", "network_interface.0.network_ip", "public_ip", "private_ip", "address", "ip"}
 	case "google_container_cluster":

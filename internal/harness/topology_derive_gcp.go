@@ -87,9 +87,11 @@ func deriveGCPHTTPProbe(state *rawGCPState) (map[string]bool, map[string]string)
 	}
 
 	frontendPorts := make(map[int]struct{})
+	rulesWithUnparseablePort := 0
 	for _, fr := range state.LB.GlobalForwardingRules {
 		port := gcpForwardingRulePort(fr)
 		if port == 0 {
+			rulesWithUnparseablePort++
 			continue
 		}
 		frontendPorts[port] = struct{}{}
@@ -104,7 +106,15 @@ func deriveGCPHTTPProbe(state *rawGCPState) (map[string]bool, map[string]string)
 	// LB-level fallback diagnostic mirrors the Scaleway path so
 	// EvaluateTopology can explain probes whose port has no entry above.
 	if len(frontendPorts) == 0 {
-		diagnostics["load_balancer"] = "no forwarding rules configured"
+		// Distinguish "no rules at all" (already returned above) from
+		// "rules exist but all have unparseable port shapes" — the latter
+		// is a hint that fakegcp is emitting a port format we don't
+		// recognise yet, not that the scenario is missing forwarding.
+		if rulesWithUnparseablePort > 0 {
+			diagnostics["load_balancer"] = "forwarding rules with no parseable port"
+		} else {
+			diagnostics["load_balancer"] = "no forwarding rules configured"
+		}
 	} else if !hasBackend {
 		diagnostics["load_balancer"] = "no backend services with backends attached"
 	} else {

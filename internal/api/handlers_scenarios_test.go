@@ -489,3 +489,32 @@ func TestValidateScenarioHandlerWrongContentType(t *testing.T) {
 		t.Fatalf("expected 415, got %d", resp.StatusCode)
 	}
 }
+
+// TestValidateScenarioHandlerNoContentTypeHeader pins the strict
+// application/json requirement: a request with no Content-Type at all
+// must 415, not silently fall through to JSON decoding. Earlier the
+// handler accepted empty content-type as JSON, an asymmetry with the
+// explicit text/plain rejection above.
+func TestValidateScenarioHandlerNoContentTypeHeader(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.Default()
+	cfg.Paths.Scenarios = filepath.Join(t.TempDir(), "scenarios")
+	srv := NewServer(ServerConfig{Config: cfg})
+	ts := httptest.NewServer(srv.Handler)
+	defer ts.Close()
+
+	req, err := http.NewRequest(http.MethodPost, ts.URL+"/api/scenarios/validate", strings.NewReader(`{"yaml":"x"}`))
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	// Note: intentionally no Content-Type set.
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("post validate: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnsupportedMediaType {
+		t.Fatalf("expected 415 for missing content-type, got %d", resp.StatusCode)
+	}
+}

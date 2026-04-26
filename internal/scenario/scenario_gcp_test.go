@@ -7,6 +7,43 @@ import (
 	"testing"
 )
 
+// TestLoadStorageResourcePopulatesField guards against a regression
+// where the schema accepts `resources.storage` but the Go Resources
+// struct lacked a Storage field, so the storage block was silently
+// dropped during JSON round-trip.
+func TestLoadStorageResourcePopulatesField(t *testing.T) {
+	t.Parallel()
+
+	schemaPath := filepath.Join("..", "..", "scenario.schema.json")
+	dir := t.TempDir()
+	scenarioPath := filepath.Join(dir, "scenario.yaml")
+	if err := os.WriteFile(scenarioPath, []byte(`scenario: gcp-storage-test
+version: "1.0"
+cloud: gcp
+description: storage resource round-trip test.
+resources:
+  storage:
+    purpose: app-assets
+    size: small
+acceptance_criteria:
+  - type: destruction
+    expect: no_orphans
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	sc, err := LoadWithSchema(scenarioPath, schemaPath)
+	if err != nil {
+		t.Fatalf("expected scenario to validate, got %v", err)
+	}
+	if sc.Resources.Storage == nil {
+		t.Fatal("expected sc.Resources.Storage to be populated")
+	}
+	if sc.Resources.Storage.Purpose != "app-assets" || sc.Resources.Storage.Size != "small" {
+		t.Fatalf("expected storage.purpose=app-assets size=small, got %+v", sc.Resources.Storage)
+	}
+}
+
 // TestLoadGCPTrainingScenarios verifies all checked-in GCP training
 // fixtures (S36-T10) validate against the live scenario schema.
 func TestLoadGCPTrainingScenarios(t *testing.T) {

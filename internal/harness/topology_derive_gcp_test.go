@@ -361,6 +361,38 @@ func TestDeriveTopologyGCPMalformedJSON(t *testing.T) {
 	}
 }
 
+// TestDeriveTopologyGCPForwardingRuleUnparseablePort guards the
+// distinction between "no rules at all" and "rules with no parseable
+// port". Both are misconfigurations but they need different
+// diagnostics — silent fall-through to "no forwarding rules
+// configured" hides the real problem (fakegcp emitting a port format
+// the derivation doesn't recognise).
+func TestDeriveTopologyGCPForwardingRuleUnparseablePort(t *testing.T) {
+	t.Parallel()
+
+	state := map[string]any{
+		"compute": map[string]any{},
+		"lb": map[string]any{
+			"global_forwarding_rules": []map[string]any{
+				{"port_range": ""},
+				{"name": "no-port-info"},
+			},
+			"backend_services": []map[string]any{
+				{"backends": []any{map[string]any{"group": "ig"}}},
+			},
+		},
+	}
+	stateJSON, _ := json.Marshal(state)
+
+	_, diagnostics, err := DeriveTopology(stateJSON)
+	if err != nil {
+		t.Fatalf("derive: %v", err)
+	}
+	if got := diagnostics["load_balancer"]; got != "forwarding rules with no parseable port" {
+		t.Fatalf("expected load_balancer diagnostic to flag unparseable port, got %q", got)
+	}
+}
+
 // TestDeriveTopologyGCPNoFirewallDefaultDeny ensures the default with no
 // firewall rules is private-only.
 func TestDeriveTopologyGCPNoFirewallDefaultDeny(t *testing.T) {

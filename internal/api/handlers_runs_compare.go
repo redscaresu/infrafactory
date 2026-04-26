@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"errors"
 	"net/http"
 	"os"
@@ -116,7 +117,7 @@ func handleRunCompare(state *serverState, w http.ResponseWriter, r *http.Request
 			entry.Status = "removed"
 		case !in1Ok && in2Ok:
 			entry.Status = "added"
-		case bytesEqual(content1, content2):
+		case bytes.Equal(content1, content2):
 			entry.Status = "unchanged"
 		default:
 			entry.Status = "modified"
@@ -133,18 +134,6 @@ func handleRunCompare(state *serverState, w http.ResponseWriter, r *http.Request
 	}
 
 	writeJSON(w, http.StatusOK, compareResponse{Run1: run1, Run2: run2, Diffs: diffs})
-}
-
-func bytesEqual(a, b []byte) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }
 
 func unifiedDiff(filename, fromLabel, toLabel string, from, to []byte) (string, error) {

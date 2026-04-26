@@ -28,7 +28,7 @@ validation:
   layers:
     static:
       enabled: true
-      policy_paths: [./policies/common, ./policies/scaleway]
+      policy_paths: [./policies/common, ./policies/scaleway, ./policies/gcp]
     mock_deploy:
       enabled: true
     sandbox_deploy:

@@ -17,11 +17,12 @@ type mockStateClient struct {
 	client  *http.Client
 }
 
-// newMockStateClient builds a multi-cloud-capable HTTP client for the
-// `/mock/{state,reset,snapshot,restore}` admin endpoints exposed by both
-// mockway (Scaleway) and fakegcp (GCP). The endpoint shapes are identical
-// across the two backends, so the same client serves either provider —
-// callers select the URL based on the scenario's cloud.
+// newMockStateClient builds an HTTP client for the
+// `/mock/{state,reset,snapshot,restore}` admin endpoints. mockway and
+// fakegcp expose the same endpoint shapes, so the same client wires up
+// either backend — but the runtime currently passes
+// cfg.Mockway.URL unconditionally; selecting the URL by scenario cloud
+// is a follow-up (tracked outside Slice 36).
 func newMockStateClient(baseURL string) *mockStateClient {
 	return &mockStateClient{
 		baseURL: strings.TrimRight(baseURL, "/"),

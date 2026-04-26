@@ -103,6 +103,27 @@ func TestDetectOscillationDetectsLongerGap(t *testing.T) {
 	}
 }
 
+// TestDetectOscillationNonMatchOnTwoIterationGap pins the documented
+// "single-iteration absence" contract — a [A, B, B, A] history must NOT
+// be flagged as oscillating, because there's no point at which A is
+// missing for exactly one iteration. Guards a future "smarter" detector
+// from silently widening the contract.
+func TestDetectOscillationNonMatchOnTwoIterationGap(t *testing.T) {
+	a := Failure{Check: "policy", Detail: "x"}
+	b := Failure{Check: "plan", Detail: "y"}
+
+	history := []IterationResult{
+		{Iteration: 1, Failures: []Failure{a}},
+		{Iteration: 2, Failures: []Failure{b}},
+		{Iteration: 3, Failures: []Failure{b}},
+		{Iteration: 4, Failures: []Failure{a}},
+	}
+
+	if got := DetectOscillation(history); len(got) != 0 {
+		t.Errorf("expected no oscillation for two-iteration absence, got %v", got)
+	}
+}
+
 func TestDetectOscillationDetectsOscillationWithinLongerHistory(t *testing.T) {
 	// Pattern: distinct failures for first 3 iterations, then A oscillates
 	// across the last 3.

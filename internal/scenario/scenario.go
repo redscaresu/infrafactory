@@ -39,6 +39,16 @@ type Resources struct {
 	IAM        *IAMResource        `json:"iam,omitempty"`
 	Registry   *RegistryResource   `json:"registry,omitempty"`
 	Redis      *RedisResource      `json:"redis,omitempty"`
+	Storage    *StorageResource    `json:"storage,omitempty"`
+}
+
+// StorageResource models the GCP `google_storage_bucket` shape (S36-T2
+// added it to the scenario schema). The schema-level enum keeps purpose
+// and size open-ended; downstream prompts and policies handle the
+// cloud-specific mapping.
+type StorageResource struct {
+	Purpose string `json:"purpose"`
+	Size    string `json:"size"`
 }
 
 type ComputeResource struct {

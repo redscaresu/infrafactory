@@ -150,6 +150,32 @@ func TestRunCompareHandlerReturns404WhenRunMissing(t *testing.T) {
 	}
 }
 
+// TestRunCompareHandlerRejectsNonGet pins the method gate so a typoed
+// POST/PUT/DELETE doesn't accidentally trigger any side effect.
+func TestRunCompareHandlerRejectsNonGet(t *testing.T) {
+	t.Parallel()
+
+	store := runstore.NewFilesystemStore(filepath.Join(t.TempDir(), ".infrafactory", "runs"))
+	srv := NewServer(ServerConfig{Config: config.Default(), Store: store})
+	ts := httptest.NewServer(srv.Handler)
+	defer ts.Close()
+
+	for _, method := range []string{http.MethodPost, http.MethodPut, http.MethodDelete} {
+		req, err := http.NewRequest(method, ts.URL+"/api/runs/web-app-paris/compare?run1=a&run2=b", nil)
+		if err != nil {
+			t.Fatalf("build %s request: %v", method, err)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("send %s: %v", method, err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusMethodNotAllowed {
+			t.Errorf("expected 405 for %s, got %d", method, resp.StatusCode)
+		}
+	}
+}
+
 func TestRunCompareHandlerRejectsPathTraversal(t *testing.T) {
 	t.Parallel()
 
