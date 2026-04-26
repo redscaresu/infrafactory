@@ -28,6 +28,11 @@ is_gcp_resource_path(name) if {
 }
 
 is_dns_fqdn(resource, name) if {
-	startswith(resource.type, "google_dns_")
+	# Only google_dns_record_set actually models its `name` as a DNS
+	# FQDN (e.g. "host.example.invalid."). google_dns_managed_zone.name
+	# is a regular slug like "test-zone" and must still pass the
+	# lowercase-alphanumeric check, so we don't exempt the whole
+	# `google_dns_*` family.
+	resource.type == "google_dns_record_set"
 	endswith(name, ".")
 }
