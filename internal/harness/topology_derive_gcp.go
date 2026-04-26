@@ -87,11 +87,9 @@ func deriveGCPHTTPProbe(state *rawGCPState) (map[string]bool, map[string]string)
 	}
 
 	frontendPorts := make(map[int]struct{})
-	rulesWithUnparseablePort := 0
 	for _, fr := range state.LB.GlobalForwardingRules {
 		port := gcpForwardingRulePort(fr)
 		if port == 0 {
-			rulesWithUnparseablePort++
 			continue
 		}
 		frontendPorts[port] = struct{}{}
@@ -105,16 +103,11 @@ func deriveGCPHTTPProbe(state *rawGCPState) (map[string]bool, map[string]string)
 
 	// LB-level fallback diagnostic mirrors the Scaleway path so
 	// EvaluateTopology can explain probes whose port has no entry above.
+	// The "no rules at all" case already returned at the top of the
+	// function; the only way to land here with frontendPorts==0 is for
+	// every rule to have had an unparseable port.
 	if len(frontendPorts) == 0 {
-		// Distinguish "no rules at all" (already returned above) from
-		// "rules exist but all have unparseable port shapes" — the latter
-		// is a hint that fakegcp is emitting a port format we don't
-		// recognise yet, not that the scenario is missing forwarding.
-		if rulesWithUnparseablePort > 0 {
-			diagnostics["load_balancer"] = "forwarding rules with no parseable port"
-		} else {
-			diagnostics["load_balancer"] = "no forwarding rules configured"
-		}
+		diagnostics["load_balancer"] = "forwarding rules with no parseable port"
 	} else if !hasBackend {
 		diagnostics["load_balancer"] = "no backend services with backends attached"
 	} else {
@@ -175,12 +168,19 @@ func deriveGCPConnectivity(state *rawGCPState) map[string]bool {
 
 // gcpSQLPort maps Cloud SQL `databaseVersion` strings (POSTGRES_15,
 // MYSQL_8_0, SQLSERVER_2019_STANDARD, …) to the canonical TCP port the
-// connectivity criteria reference. Unknown versions return 0 so the
-// caller can skip them without emitting a wrong-port edge.
+// connectivity criteria reference. Empty/missing version is treated as
+// postgres (the most common default for fakegcp scenarios). Unknown
+// engines return 0 so the caller can skip them without silently
+// emitting a wrong-port edge.
 func gcpSQLPort(sql map[string]any) int {
 	version, _ := sql["databaseVersion"].(string)
 	upper := strings.ToUpper(version)
 	switch {
+	case upper == "":
+		// No databaseVersion declared — fakegcp defaults to postgres
+		// in tests; emit the postgres port so a bare-bones scenario
+		// without an engine still produces a 5432 edge.
+		return 5432
 	case strings.HasPrefix(upper, "POSTGRES"):
 		return 5432
 	case strings.HasPrefix(upper, "MYSQL"):
@@ -188,19 +188,17 @@ func gcpSQLPort(sql map[string]any) int {
 	case strings.HasPrefix(upper, "SQLSERVER"):
 		return 1433
 	default:
-		// Unknown engine — fall back to postgres so a bare
-		// scenario without databaseVersion still produces SOME edge
-		// rather than zero edges.
-		return 5432
+		// Unknown engine (e.g. ORACLE_*). Skip rather than
+		// fabricating an edge with the wrong port.
+		return 0
 	}
 }
 
 // gcpSQLPublicReachable inspects a Cloud SQL instance's
 // settings.ipConfiguration to decide whether the public internet has a
-// path. A 0.0.0.0/0 authorized network dominates; otherwise we only
-// flip true when ipv4Enabled is explicitly true and authorized_networks
-// is non-empty (Cloud SQL requires at least one allow entry to actually
-// expose the public IP).
+// path. Only an explicit 0.0.0.0/0 authorized network counts — a
+// narrow allowlist like a single bastion CIDR (203.0.113.5/32) does
+// NOT mean "the public internet" can reach, even with ipv4Enabled set.
 func gcpSQLPublicReachable(sql map[string]any) bool {
 	settings, _ := sql["settings"].(map[string]any)
 	if settings == nil {
@@ -220,8 +218,7 @@ func gcpSQLPublicReachable(sql map[string]any) bool {
 			return true
 		}
 	}
-	ipv4, _ := ipCfg["ipv4Enabled"].(bool)
-	return ipv4 && len(auth) > 0
+	return false
 }
 
 // gcpForwardingRulePort extracts the listening port from a global

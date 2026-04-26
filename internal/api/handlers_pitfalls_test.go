@@ -250,8 +250,9 @@ func TestPitfallsEditRejectsTraversalProvider(t *testing.T) {
 }
 
 // TestPitfallsHandlerEmptyProviderReturns400 guards against the previous
-// 501 response when the URL was exactly /api/pitfalls/ — that's a client
-// shape mistake, not an unimplemented capability.
+// 501 response when the URL was exactly /api/pitfalls/ on PUT/etc.
+// (GET /api/pitfalls/ now routes to the list handler — see the next
+// test).
 func TestPitfallsHandlerEmptyProviderReturns400(t *testing.T) {
 	t.Parallel()
 
@@ -263,7 +264,30 @@ func TestPitfallsHandlerEmptyProviderReturns400(t *testing.T) {
 	pitfallsHandler(&serverState{cfg: cfg}).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for empty provider, got %d body=%s", rec.Code, rec.Body.String())
+		t.Fatalf("expected 400 for empty provider on PUT, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestPitfallsHandlerGetTrailingSlashRoutesToList confirms a bare GET
+// to /api/pitfalls/ (with the trailing slash) routes to the list
+// handler instead of the 400 reserved for PUT-with-empty-provider.
+// Most clients treat trailing slashes as equivalent.
+func TestPitfallsHandlerGetTrailingSlashRoutesToList(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.Default()
+	cfg.Paths.Pitfalls = t.TempDir()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/pitfalls/", nil)
+	rec := httptest.NewRecorder()
+	pitfallsHandler(&serverState{cfg: cfg}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for GET /api/pitfalls/, got %d", rec.Code)
+	}
+	var resp pitfallsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
 	}
 }
 

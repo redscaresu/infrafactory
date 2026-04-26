@@ -490,6 +490,29 @@ func TestValidateScenarioHandlerWrongContentType(t *testing.T) {
 	}
 }
 
+// TestValidateScenarioHandlerRejectsUnknownFields guards the strict
+// JSON decoder added in pass-3 — an extra `secret` field used to be
+// silently dropped, now it returns 400.
+func TestValidateScenarioHandlerRejectsUnknownFields(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.Default()
+	cfg.Paths.Scenarios = filepath.Join(t.TempDir(), "scenarios")
+	srv := NewServer(ServerConfig{Config: cfg})
+	ts := httptest.NewServer(srv.Handler)
+	defer ts.Close()
+
+	resp, err := http.Post(ts.URL+"/api/scenarios/validate", "application/json",
+		strings.NewReader(`{"yaml":"x","unexpected":1}`))
+	if err != nil {
+		t.Fatalf("post validate: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 for unknown JSON field, got %d", resp.StatusCode)
+	}
+}
+
 // TestValidateScenarioHandlerNoContentTypeHeader pins the strict
 // application/json requirement: a request with no Content-Type at all
 // must 415, not silently fall through to JSON decoding. Earlier the

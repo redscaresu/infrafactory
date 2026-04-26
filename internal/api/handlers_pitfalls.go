@@ -56,6 +56,13 @@ func pitfallsHandler(state *serverState) http.HandlerFunc {
 		case strings.HasPrefix(path, "/api/pitfalls/"):
 			provider := strings.TrimPrefix(path, "/api/pitfalls/")
 			if provider == "" {
+				// Trailing slash on a GET is a common client habit;
+				// route it to the list handler rather than reject.
+				// PUT/POST/etc. with empty provider is still 400.
+				if r.Method == http.MethodGet {
+					listPitfalls(state, w, r)
+					return
+				}
 				writeJSONError(w, http.StatusBadRequest, "provider name is required")
 				return
 			}

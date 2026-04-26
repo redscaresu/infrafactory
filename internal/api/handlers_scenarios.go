@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -160,7 +161,9 @@ func validateScenarioHandler(state *serverState) http.HandlerFunc {
 		}
 
 		var req validateScenarioRequest
-		if err := json.Unmarshal(body, &req); err != nil {
+		dec := json.NewDecoder(bytes.NewReader(body))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&req); err != nil {
 			writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("decode request body: %v", err))
 			return
 		}

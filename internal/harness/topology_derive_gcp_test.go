@@ -427,17 +427,91 @@ func TestDeriveTopologyGCPKubernetesEdge(t *testing.T) {
 	}
 }
 
-// TestDeriveTopologyGCPMalformedJSON ensures a non-JSON payload surfaces
-// as a derivation error rather than panicking or silently producing an
-// empty map.
-func TestDeriveTopologyGCPMalformedJSON(t *testing.T) {
+// TestDeriveTopologyGCPMalformedNestedShape exercises the GCP-path
+// unmarshal error: detectCloud succeeds (top-level `compute` parses
+// cleanly), but the nested `instances` field's wrong type fails
+// rawGCPState's strict decode. The previous test sent malformed
+// top-level JSON which actually fell back to the Scaleway path —
+// this version pins the GCP-specific error.
+func TestDeriveTopologyGCPMalformedNestedShape(t *testing.T) {
 	t.Parallel()
 
-	// Force the GCP path with the detection probe key, but pass garbage
-	// after that.
-	garbage := []byte(`{"compute": ` + "garbage")
-	if _, _, err := DeriveTopology(garbage); err == nil {
+	// `instances` should be an array; passing a string forces
+	// json.Unmarshal into rawGCPState to fail on the GCP path.
+	payload := []byte(`{"compute":{"instances":"not-an-array"}}`)
+	if _, _, err := DeriveTopology(payload); err == nil {
 		t.Fatal("expected error for malformed gcp state")
+	}
+}
+
+// TestDeriveTopologyGCPSQLNarrowAuthorizedNetworkIsPrivate guards the
+// pass-3 fix where a single-bastion-IP authorized_networks entry was
+// incorrectly flipping public_internet->database to true.
+func TestDeriveTopologyGCPSQLNarrowAuthorizedNetworkIsPrivate(t *testing.T) {
+	t.Parallel()
+
+	state := map[string]any{
+		"compute": map[string]any{
+			"instances": []map[string]any{{"name": "web-0"}},
+		},
+		"sql": map[string]any{
+			"instances": []map[string]any{{
+				"name":            "narrow-db",
+				"databaseVersion": "POSTGRES_15",
+				"settings": map[string]any{
+					"ipConfiguration": map[string]any{
+						"ipv4Enabled": true,
+						"authorizedNetworks": []any{
+							map[string]any{"value": "203.0.113.5/32"},
+						},
+					},
+				},
+			}},
+		},
+	}
+	stateJSON, _ := json.Marshal(state)
+
+	out, _, err := DeriveTopology(stateJSON)
+	if err != nil {
+		t.Fatalf("derive: %v", err)
+	}
+	var parsed struct {
+		Connectivity map[string]bool `json:"connectivity"`
+	}
+	_ = json.Unmarshal(out, &parsed)
+	if parsed.Connectivity["public_internet->database:5432"] {
+		t.Fatalf("expected public_internet->database:5432=false with narrow allowlist, got true")
+	}
+}
+
+// TestDeriveTopologyGCPSQLUnknownEngineProducesNoEdge guards the
+// pass-3 fix where unknown engines (e.g. ORACLE_*) used to silently
+// produce a postgres-port edge.
+func TestDeriveTopologyGCPSQLUnknownEngineProducesNoEdge(t *testing.T) {
+	t.Parallel()
+
+	state := map[string]any{
+		"compute": map[string]any{
+			"instances": []map[string]any{{"name": "web-0"}},
+		},
+		"sql": map[string]any{
+			"instances": []map[string]any{{"name": "oracle-db", "databaseVersion": "ORACLE_18"}},
+		},
+	}
+	stateJSON, _ := json.Marshal(state)
+
+	out, _, err := DeriveTopology(stateJSON)
+	if err != nil {
+		t.Fatalf("derive: %v", err)
+	}
+	var parsed struct {
+		Connectivity map[string]bool `json:"connectivity"`
+	}
+	_ = json.Unmarshal(out, &parsed)
+	for _, key := range []string{"compute->database:5432", "compute->database:3306", "compute->database:1433"} {
+		if _, ok := parsed.Connectivity[key]; ok {
+			t.Fatalf("expected no compute->database edge for unknown engine, got %s in %+v", key, parsed.Connectivity)
+		}
 	}
 }
 

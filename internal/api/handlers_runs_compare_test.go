@@ -175,28 +175,33 @@ func TestRunCompareHandlerRejectsLeadingDotRunID(t *testing.T) {
 	}
 }
 
-// TestRunCompareHandlerReturns404ForMetadataOnlyRun guards against a
-// regression where a run with only metadata (killed before any
-// generated/ snapshot landed) silently compared as two empty file sets.
-func TestRunCompareHandlerReturns404ForMetadataOnlyRun(t *testing.T) {
+// TestRunCompareHandlerReturns404WhenRunMetadataMissing guards the
+// pass-2 metadata pre-check. The previous incarnation of this test
+// relied on `ListGeneratedFiles` returning os.ErrNotExist for run-2's
+// missing `generated/` directory — but that path was already covered by
+// the earlier "WhenRunMissing" test. To uniquely exercise the metadata
+// gate, write run-1 and run-2 generated/ snapshots but NO metadata for
+// run-2. Without the pre-check, the handler would silently diff the
+// two file sets; with it, run-2's missing run.json triggers 404.
+func TestRunCompareHandlerReturns404WhenRunMetadataMissing(t *testing.T) {
 	t.Parallel()
 
 	store := runstore.NewFilesystemStore(filepath.Join(t.TempDir(), ".infrafactory", "runs"))
-	for _, runID := range []string{"run-1", "run-2"} {
-		if err := store.WriteRunMetadata(runstore.RunMetadata{
-			Scenario:  "web-app-paris",
-			RunID:     runID,
-			Status:    "success",
-			StartedAt: time.Now().UTC(),
-		}); err != nil {
-			t.Fatalf("write metadata: %v", err)
-		}
-	}
-	// Only run-1 has generated files; run-2 is metadata-only.
-	if err := store.WriteGeneratedFiles("web-app-paris", "run-1", map[string][]byte{
-		"main.tf": []byte("a"),
+	if err := store.WriteRunMetadata(runstore.RunMetadata{
+		Scenario:  "web-app-paris",
+		RunID:     "run-1",
+		Status:    "success",
+		StartedAt: time.Now().UTC(),
 	}); err != nil {
-		t.Fatalf("write files: %v", err)
+		t.Fatalf("write metadata: %v", err)
+	}
+	// Both runs have generated files, but only run-1 has run.json.
+	for _, runID := range []string{"run-1", "run-2"} {
+		if err := store.WriteGeneratedFiles("web-app-paris", runID, map[string][]byte{
+			"main.tf": []byte(runID),
+		}); err != nil {
+			t.Fatalf("write %s files: %v", runID, err)
+		}
 	}
 
 	srv := NewServer(ServerConfig{Config: config.Default(), Store: store})
@@ -208,10 +213,8 @@ func TestRunCompareHandlerReturns404ForMetadataOnlyRun(t *testing.T) {
 		t.Fatalf("request: %v", err)
 	}
 	resp.Body.Close()
-	// Metadata exists for both runs, but run-2 has no generated/ — that
-	// surfaces from ListGeneratedFiles as ErrNotExist (404).
 	if resp.StatusCode != http.StatusNotFound {
-		t.Fatalf("expected 404 for metadata-only run, got %d", resp.StatusCode)
+		t.Fatalf("expected 404 for run with missing metadata, got %d", resp.StatusCode)
 	}
 }
 
@@ -238,6 +241,28 @@ func TestRunCompareHandlerRejectsNonGet(t *testing.T) {
 		if resp.StatusCode != http.StatusMethodNotAllowed {
 			t.Errorf("expected 405 for %s, got %d", method, resp.StatusCode)
 		}
+	}
+}
+
+// TestRunCompareHandlerRejectsOversizedRunID guards the 64-char cap on
+// validRunID — an oversized run-id query parameter should surface as a
+// 400 client error instead of a 500 from os.ReadFile ENAMETOOLONG.
+func TestRunCompareHandlerRejectsOversizedRunID(t *testing.T) {
+	t.Parallel()
+
+	store := runstore.NewFilesystemStore(filepath.Join(t.TempDir(), ".infrafactory", "runs"))
+	srv := NewServer(ServerConfig{Config: config.Default(), Store: store})
+	ts := httptest.NewServer(srv.Handler)
+	defer ts.Close()
+
+	long := strings.Repeat("a", 256)
+	resp, err := http.Get(ts.URL + "/api/runs/web-app-paris/compare?run1=" + long + "&run2=run-1")
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 for oversized run id, got %d", resp.StatusCode)
 	}
 }
 

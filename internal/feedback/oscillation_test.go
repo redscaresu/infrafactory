@@ -83,26 +83,6 @@ func TestDetectOscillationDetectsMultipleOscillatingSignatures(t *testing.T) {
 	}
 }
 
-func TestDetectOscillationDetectsLongerGap(t *testing.T) {
-	// Signature appears at iter 1, absent at 2 and 3, reappears at 4.
-	// The strict "absent at N+1, present at N+2" pattern only matches
-	// when there's a single-iteration absence; longer gaps do not count
-	// as oscillation by the contract.
-	a := Failure{Check: "plan", Detail: "x"}
-	gap := Failure{Check: "plan", Detail: "y"}
-
-	history := []IterationResult{
-		{Iteration: 1, Failures: []Failure{a}},
-		{Iteration: 2, Failures: []Failure{gap}},
-		{Iteration: 3, Failures: []Failure{gap}},
-		{Iteration: 4, Failures: []Failure{a}},
-	}
-
-	if got := DetectOscillation(history); len(got) != 0 {
-		t.Errorf("expected no oscillation for >1 iteration gap, got %v", got)
-	}
-}
-
 // TestDetectOscillationNonMatchOnTwoIterationGap pins the documented
 // "single-iteration absence" contract — a [A, B, B, A] history must NOT
 // be flagged as oscillating, because there's no point at which A is
