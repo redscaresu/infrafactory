@@ -6,6 +6,39 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 
 | id | slice | title | priority | status | deps | owner |
 |---|---|---|---|---|---|---|
+| S39-T4 | Slice 39 | Playwright e2e tests for real-time validation | P1 | todo | S39-T3 | — |
+| S39-T3 | Slice 39 | Inline error display below textarea | P1 | todo | S39-T2 | — |
+| S39-T2 | Slice 39 | Debounced validation in scenario page textarea (500ms delay) | P1 | todo | S39-T1 | — |
+| S39-T1 | Slice 39 | POST /api/scenarios/validate endpoint (validates without saving) | P1 | todo | — | — |
+| S38-T3 | Slice 38 | Playwright e2e tests for run comparison | P1 | todo | S38-T2 | — |
+| S38-T2 | Slice 38 | /compare UI page with dual-pane IaC diff viewer | P1 | todo | S38-T1 | — |
+| S38-T1 | Slice 38 | GET /api/runs/{scenario}/compare endpoint returning diff data | P1 | todo | — | — |
+| S37-T4 | Slice 37 | Playwright e2e tests for pitfalls page | P1 | todo | S37-T3 | — |
+| S37-T3 | Slice 37 | /pitfalls UI page with table, source badges, and edit form | P1 | todo | S37-T2 | — |
+| S37-T2 | Slice 37 | PUT /api/pitfalls/{provider} endpoint for editing | P1 | todo | S37-T1 | — |
+| S37-T1 | Slice 37 | GET /api/pitfalls endpoint returning pitfalls grouped by provider | P1 | todo | — | — |
+| S36-T12 | Slice 36 | Playwright e2e: GCP scenarios appear in UI scenario list | P1 | todo | S36-T10 | — |
+| S36-T11 | Slice 36 | Cross-repo e2e tests against fakegcp + double-apply idempotency | P1 | todo | S33-T1, S36-T10 | — |
+| S36-T10 | Slice 36 | GCP training scenarios (gcp-vm-network, gcp-gke-cluster, gcp-cloud-sql) | P1 | todo | S36-T2, S36-T3, S36-T6, S36-T7 | — |
+| S36-T9 | Slice 36 | Add GCP resource patterns to real_probe.go | P1 | todo | S36-T4 | — |
+| S36-T8 | Slice 36 | Generalize mockway_client.go for multi-cloud mock (fakegcp admin endpoints) | P1 | todo | — | — |
+| S36-T7 | Slice 36 | GCP OPA policies: no_public_sql, vpc_required, region_restriction, encryption | P1 | todo | — | — |
+| S36-T6 | Slice 36 | pitfalls/gcp.yaml with initial GCP pitfalls | P1 | todo | — | — |
+| S36-T5 | Slice 36 | GCP topology derivation unit tests (10+ tests with fixture data) | P1 | todo | S36-T4 | — |
+| S36-T4 | Slice 36 | GCP topology derivation: cloud dispatch + GCP resource patterns | P1 | todo | — | — |
+| S36-T3 | Slice 36 | GCP prompt templates (prompts/gcp/phase1,2,3.md) | P1 | todo | S36-T1 | — |
+| S36-T2 | Slice 36 | Update scenario.schema.json: add gcp to cloud enum, GCP resource definitions | P1 | todo | — | — |
+| S36-T1 | Slice 36 | Reorganize prompts: move prompts/*.md → prompts/scaleway/, update generator paths | P1 | todo | — | — |
+| S36-T0 | Slice 36 | fakegcp: create AGENTS.md + add forwarding_rule handler (in fakegcp repo) | P1 | todo | — | — |
+| S35-T3 | Slice 35 | Tests verifying enriched http_probe error messages | P1 | todo | S35-T2 | — |
+| S35-T2 | Slice 35 | Include diagnostic in topology evaluation failure messages | P1 | todo | S35-T1 | — |
+| S35-T1 | Slice 35 | Add diagnostic detail to DeriveTopology when http_probe is false | P1 | todo | — | — |
+| S34-T3 | Slice 34 | Tests for oscillation detection and failed-run learning | P1 | todo | S34-T2 | — |
+| S34-T2 | Slice 34 | Extract and append pitfalls from oscillation failures | P1 | todo | S34-T1 | — |
+| S34-T1 | Slice 34 | Detect oscillation patterns in run loop (same failure signature repeating) | P1 | todo | — | — |
+| S33-T3 | Slice 33 | E2e test for full-stack-paris (all resource types) | P1 | todo | S33-T1 | — |
+| S33-T2 | Slice 33 | E2e test for web-app-paris (simplest scenario with topology checks) | P1 | todo | S33-T1 | — |
+| S33-T1 | Slice 33 | Test infrastructure: start mockway from source, infrafactory command helper | P1 | todo | — | — |
 | S32-T1 | Slice 32 | Create `pitfalls/scaleway.yaml` with all 16 existing pitfalls, remove from prompt templates | P1 | done | — | codex |
 | S32-T2 | Slice 32 | Add `Pitfalls` + `Cloud` to generator, load by cloud provider from `pitfalls/{cloud}.yaml` | P1 | done | S32-T1 | codex |
 | S32-T3 | Slice 32 | Tests: pitfalls loading, rendering, empty file handling, scenario verification | P1 | done | S32-T2 | codex |

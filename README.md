@@ -426,12 +426,27 @@ Terminal control markers are intentionally excluded from iterative repair feedba
 
 ### Provider Schema Prompt Injection
 
-`generate` and `run` lazily extract the Scaleway provider schema once per command runtime and inject it into phases 2 and 3:
+`generate` and `run` lazily extract the provider schema once per command runtime and inject it into phases 2 and 3. This works for any cloud provider — Scaleway (`scaleway/scaleway`) and GCP (`hashicorp/google`, planned Slice 36):
 - **Extraction**: `tofu init` + `tofu providers schema -json` in an isolated temp directory; cached for the runtime lifetime.
 - **Timing**: on first generate call (not during generic runtime bootstrap), so `validate`/`test`/`mock` commands avoid the overhead.
-- **Filtering**: phase 1 output identifies which Scaleway resource types are needed; `schema_filter.go` extracts only those types (plus companion sub-resources like `scaleway_k8s_pool` for `scaleway_k8s_cluster`) from the full provider schema. This keeps prompt size bounded.
+- **Filtering**: phase 1 output identifies which resource types are needed; `schema_filter.go` extracts only those types (plus companion sub-resources) from the full provider schema. This keeps prompt size bounded.
 - **Injection**: phases 2 and 3 both receive the filtered schema as an "Authoritative Reference" section. The prompt instructs the LLM to verify every attribute name and block type against the schema before using it.
 - **Failure mode**: extraction failures are non-fatal; generation proceeds without schema injection. Look for `provider_schema skipped` in logs.
+
+### Multi-Cloud Architecture (Planned)
+
+InfraFactory is designed to be cloud-agnostic. Four extension points are per-cloud:
+
+| Extension point | Scaleway (current) | GCP (Slice 36) |
+|----------------|-------------------|----------------|
+| Prompt templates | `prompts/scaleway/` | `prompts/gcp/` |
+| Pitfalls | `pitfalls/scaleway.yaml` | `pitfalls/gcp.yaml` |
+| Topology derivation | Scaleway resources in `topology_derive.go` | GCP resources (dispatch by cloud) |
+| Mock server | mockway (`:8080`) | fakegcp (`:8080`) |
+| OPA policies | `policies/scaleway/` | `policies/gcp/` |
+| Provider schema | `scaleway/scaleway` | `hashicorp/google` |
+
+Adding a new cloud provider requires: prompt templates, pitfalls file, topology derivation rules, mock server, OPA policies, and training scenarios. The scenario's `cloud` field drives all dispatch.
 
 ### Provider Pitfalls
 

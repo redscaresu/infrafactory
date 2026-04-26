@@ -322,11 +322,52 @@ This file is intentionally high-level and mostly stable; day-to-day execution tr
 - Design doc for future auto-learning from run feedback patterns.
 - Design reference: `docs/plans/dynamic-pitfalls-plan.md`.
 
+33. Slice 33: Cross-repo E2E test
+- Go integration test that starts mockway from source and runs `infrafactory run` against scenarios end-to-end.
+- Catches cross-repo bugs (field naming, missing response fields, port conventions).
+- Tests for web-app-paris (simple) and full-stack-paris (all resource types).
+- Gated by env var so normal `go test` is unaffected.
+- Design reference: `docs/plans/slices-33-39-plan.md`, ADR-0013.
+
+34. Slice 34: Pitfall learning from failed runs
+- Detect oscillation patterns (same failure signature alternating across iterations).
+- Learn pitfalls from oscillation failures, not just successful self-correction.
+- Extends the dynamic pitfalls auto-learning (Slice 32) to cover more learning opportunities.
+
+35. Slice 35: Better http_probe feedback
+- Enrich topology derivation with diagnostic detail when http_probe is false.
+- Failure messages include the specific missing link (no frontend, no backend, no IP).
+- Helps the LLM fix the right thing on retry.
+
+36. Slice 36: GCP support
+- Add `cloud: gcp` scenario type using fakegcp mock server.
+- Per-cloud prompt templates (`prompts/gcp/`), GCP topology derivation, GCP pitfalls.
+- Training scenarios: basic VM + network, GKE cluster, Cloud SQL.
+- Validates the cloud-agnostic architecture with a real second provider.
+- Design reference: `docs/plans/slices-33-39-plan.md`, ADR-0013.
+
+37. Slice 37: Pitfalls UI
+- `/pitfalls` page showing all pitfalls with source badges (static/learned), resource, and provider.
+- Edit form for curating learned pitfalls without editing YAML files.
+- GET/PUT API endpoints for pitfalls by provider.
+
+38. Slice 38: Run comparison
+- UI page that diffs two runs side-by-side using existing per-run IaC snapshots.
+- Dual-pane diff viewer with syntax highlighting and file list sidebar.
+- Compare endpoint returns file-level unified diffs.
+
+39. Slice 39: Real-time scenario validation in UI
+- Validate scenario YAML as user types (debounced 500ms).
+- POST /api/scenarios/validate endpoint (validates without saving).
+- Inline error display with line numbers below textarea.
+
 ## Near-term execution order
 
-1. Keep completed slices (1-30) stable and regression-green.
-2. Slice 31 (topology derivation). T1 done (ADR+docs). T2→T3→T4/T5→T6 sequential.
-3. Pipeline consistently achieves first-iteration pass (12/12 training scenarios); monitor for regressions.
+1. Keep completed slices (1-32) stable and regression-green.
+2. Slices 33-39 are all independent and can be executed in any order.
+3. Slice 33 (cross-repo e2e) and Slice 35 (http_probe feedback) are quick wins with high impact on developer productivity.
+4. Slice 36 (GCP) is the largest slice (13 tickets T0-T12). T0 first in fakegcp; T1/T2/T4/T6/T7/T8 parallel; T3/T5/T9 after deps; T10 after T2+T3+T6+T7; T11/T12 last.
+5. Pipeline consistently achieves first-iteration pass (12/12 training scenarios); monitor for regressions.
 
 ## Live progress tracking
 

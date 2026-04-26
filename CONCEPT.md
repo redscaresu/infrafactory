@@ -2263,10 +2263,27 @@ No other external dependencies required for v1. UUID generation is only needed i
 
 ---
 
+## Multi-Cloud Support
+
+The architecture is cloud-agnostic by design. Four extension points are parameterized by the scenario `cloud` field:
+
+1. **Prompt templates**: `prompts/{cloud}/phase1_plan_architecture.md`, `phase2_generate_hcl.md`, `phase3_self_review.md`. The generator selects the template directory based on `scenario.cloud`. Each cloud gets provider-specific generation guidance, resource naming, and provider block configuration.
+
+2. **Pitfalls**: `pitfalls/{cloud}.yaml`. Loaded at runtime by `LoadPitfalls(dir, cloud)` and injected into phases 2 and 3 via `{{.Pitfalls}}`. Each provider has its own pitfall file. `pitfalls/common.yaml` (optional) is merged into all providers.
+
+3. **Topology derivation**: `DeriveTopology` dispatches by cloud provider. Each cloud has its own derivation rules mapping provider-specific resource types to `connectivity` and `http_probe` maps. Scaleway: LB frontends/backends/IPs, server NICs, RDB endpoints. GCP: forwarding rules, compute instances, Cloud SQL, GKE.
+
+4. **Mock server**: Each cloud has its own mock server (mockway for Scaleway, fakegcp for GCP). Provider URL injection uses provider-specific env vars (`SCW_API_URL` for Scaleway, `GOOGLE_API_ENDPOINT` or equivalent for GCP).
+
+**Current status**: Scaleway is fully supported (13 services, 12 training scenarios). GCP support is planned in Slice 36 (ADR-0013). AWS/Azure follow the same pattern when needed.
+
+**Scenario schema**: The JSON Schema uses conditional validation — `if cloud=gcp then resources must match GCP resource schema`. This keeps each cloud's resource definitions clean without cross-cloud pollution.
+
+---
+
 ## What's NOT in v1
 
-- Layer 3: Sandbox Deploy (real Scaleway — requires real credentials, sandbox project, network probes, cost awareness)
-- Multi-cloud support (AWS, Azure, GCP)
+- Multi-cloud support beyond Scaleway (GCP planned in Slice 36, AWS/Azure future)
 - Continuous reconciliation / drift detection (Model B)
 - CXDB integration (flat files first, ContextStore interface ready)
 - StrongDM ID / agentic auth
