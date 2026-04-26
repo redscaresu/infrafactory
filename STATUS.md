@@ -27,6 +27,10 @@ Last updated: 2026-04-26
 - Keep startup/read-order instructions only in `SESSION_START.md` to avoid duplication.
 
 ## Recent updates
+- **S42-T1 + S42-T4 complete (sidebar grouped by cloud + API cloud field)**:
+  - `GET /api/scenarios` now returns `cloud` per scenario item (extracted from the loaded YAML during the directory walk).
+  - Sidebar layout regroups scenarios client-side by cloud: SCALEWAY first, then GCP, then OTHER for unknowns. Stable test ids: `sidebar-cloud-{cloud}`, `sidebar-cloud-label`, `sidebar-scenario-{path}`.
+  - Layer3-status per-cloud credential checks (S42-T4 second half) deferred — current `/api/scenarios/{path}/layer3-status` already adapts at runtime, but exposing a richer per-cloud schema lands with S42-T2 (scenario-page badge + dynamic credentials section).
 - **S38-T3 + S39-T4 complete (Playwright e2e for compare and validation)**:
   - `ui/e2e/compare.spec.ts` (4 tests): sidebar nav → /compare, &lt;2-runs disables Compare button, two-run compare renders file list with status badges, switching files updates the diff pane. Uses `findComparableScenario` precondition probe → tests skip cleanly on a fresh checkout with no `.infrafactory/runs/` data.
   - `ui/e2e/validation.spec.ts` (4 tests): seeded scenario shows valid after debounce, `cloud: scaleway → aws` flips to errors, garbage YAML surfaces `yaml syntax`, restoring a valid edit returns to green. Each test restores original textarea content in `finally`.

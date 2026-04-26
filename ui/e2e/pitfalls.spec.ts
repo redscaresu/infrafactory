@@ -62,7 +62,11 @@ test.describe('Pitfalls page', () => {
 
   test('add then delete a row toggles the row count without saving', async ({ page }) => {
     await gotoPitfalls(page);
+    // Wait for the seeded table to render before snapshotting the row count;
+    // otherwise a slow first paint races with `rows.count()` and `before` is
+    // captured at 0 instead of the seeded total.
     const rows = page.locator('[data-testid="pitfalls-row"]');
+    await expect(rows.first()).toBeVisible();
     const before = await rows.count();
 
     await page.click('[data-testid="pitfalls-add"]');

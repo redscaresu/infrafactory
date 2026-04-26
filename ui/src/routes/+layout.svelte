@@ -2,22 +2,52 @@
   import "../app.css";
   import { onMount } from "svelte";
   import { api } from "$lib/api";
-  import type { ConfigResponse, ScenarioGroup } from "$lib/types";
+  import type { ConfigResponse, ScenarioGroup, Scenario } from "$lib/types";
 
-  let groups: ScenarioGroup[] = [];
+  type CloudGroup = { cloud: string; label: string; scenarios: Scenario[] };
+
+  const CLOUD_LABELS: Record<string, string> = {
+    scaleway: "SCALEWAY",
+    gcp: "GCP"
+  };
+
+  let cloudGroups: CloudGroup[] = [];
   let backendVersion = "";
   let agentType = "";
   let uiMode = "";
   let backendSessionID = "";
   let backendStartedAt = "";
 
+  function regroupByCloud(groups: ScenarioGroup[]): CloudGroup[] {
+    const buckets = new Map<string, Scenario[]>();
+    for (const group of groups) {
+      for (const sc of group.scenarios) {
+        const cloud = (sc.cloud || "").toLowerCase();
+        const key = cloud in CLOUD_LABELS ? cloud : "other";
+        const existing = buckets.get(key) || [];
+        existing.push(sc);
+        buckets.set(key, existing);
+      }
+    }
+    const order = ["scaleway", "gcp", "other"];
+    return order
+      .filter((k) => buckets.has(k))
+      .concat([...buckets.keys()].filter((k) => !order.includes(k)).sort())
+      .map((cloud) => ({
+        cloud,
+        label: CLOUD_LABELS[cloud] || cloud.toUpperCase() || "OTHER",
+        scenarios: (buckets.get(cloud) || []).slice().sort((a, b) => a.path.localeCompare(b.path))
+      }));
+  }
+
   onMount(async () => {
     uiMode = window.location.port === "5173" ? "UI dev" : "Embedded UI";
     try {
       const payload = await api.getScenarios();
-      groups = (payload.groups as ScenarioGroup[]) || [];
+      const groups = (payload.groups as ScenarioGroup[]) || [];
+      cloudGroups = regroupByCloud(groups);
     } catch {
-      groups = [];
+      cloudGroups = [];
     }
 
     try {
@@ -44,13 +74,13 @@
   <aside class="border-r border-slate-300/70 bg-white/70 p-4 backdrop-blur-sm">
     <a href="/" class="block text-xl font-bold text-slate-900">InfraFactory</a>
     <div class="mt-6 space-y-5">
-      {#each groups as group}
-        <section>
-          <h2 class="text-xs uppercase tracking-wider text-slate-500">{group.name}</h2>
+      {#each cloudGroups as group (group.cloud)}
+        <section data-testid="sidebar-cloud-{group.cloud}">
+          <h2 class="text-xs uppercase tracking-wider text-slate-500" data-testid="sidebar-cloud-label">{group.label}</h2>
           <ul class="mt-2 space-y-1">
-            {#each group.scenarios as sc}
+            {#each group.scenarios as sc (sc.path)}
               <li>
-                <a class="text-sm text-slate-700 hover:text-slate-900" href={`/scenarios/${sc.path}`}>{sc.name}</a>
+                <a class="text-sm text-slate-700 hover:text-slate-900" href={`/scenarios/${sc.path}`} data-testid={`sidebar-scenario-${sc.path}`}>{sc.name}</a>
               </li>
             {/each}
           </ul>

@@ -113,6 +113,7 @@
     <label class="block">
       <span class="text-sm font-medium">Run 1 (left)</span>
       <select bind:value={run1} data-testid="compare-run1" class="mt-1 w-full rounded border border-slate-300 px-2 py-1">
+        <option value="">— select —</option>
         {#each runs as r}
           <option value={r.run_id}>{r.run_id} ({r.status})</option>
         {/each}
@@ -121,6 +122,7 @@
     <label class="block">
       <span class="text-sm font-medium">Run 2 (right)</span>
       <select bind:value={run2} data-testid="compare-run2" class="mt-1 w-full rounded border border-slate-300 px-2 py-1">
+        <option value="">— select —</option>
         {#each runs as r}
           <option value={r.run_id}>{r.run_id} ({r.status})</option>
         {/each}

@@ -17,12 +17,16 @@ export interface ScenarioItem {
   name: string;
   path: string;
   description: string;
+  cloud: string;
   last_run?: {
     run_id: string;
     status: string;
     terminal_reason?: string;
   };
 }
+
+// Backwards-compat alias used by the sidebar's cloud-regrouping helper.
+export type Scenario = ScenarioItem;
 
 export interface ScenarioGroup {
   name: string;

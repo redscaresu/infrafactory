@@ -31,6 +31,7 @@ type scenarioListItem struct {
 	Name        string              `json:"name"`
 	Path        string              `json:"path"`
 	Description string              `json:"description"`
+	Cloud       string              `json:"cloud"`
 	LastRun     *runMetadataSummary `json:"last_run,omitempty"`
 }
 
@@ -90,6 +91,7 @@ func listScenariosHandler(state *serverState) http.HandlerFunc {
 				Name:        sc.Name,
 				Path:        scenarioPath,
 				Description: sc.Description,
+				Cloud:       sc.Cloud,
 				LastRun:     latestRunSummary(state.store, sc.Name),
 			}
 			groupsMap[group] = append(groupsMap[group], item)
