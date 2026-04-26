@@ -118,14 +118,16 @@ func listPitfalls(state *serverState, w http.ResponseWriter, r *http.Request) {
 		}
 		provider := strings.TrimSuffix(strings.TrimSuffix(name, ".yml"), ".yaml")
 		if seenProvider[provider] {
-			// Both `gcp.yaml` and `gcp.yml` would map to the same
-			// provider; skip the second entry deterministically and
-			// surface a parse_error so the UI tab doesn't duplicate.
-			groups = append(groups, pitfallsProviderGroup{
-				Provider:   provider,
-				Pitfalls:   []pitfallsResponseEntry{},
-				ParseError: "duplicate pitfalls file (both .yaml and .yml exist)",
-			})
+			// Both `gcp.yaml` and `gcp.yml` map to the same provider.
+			// Don't append a second group entry (would render a
+			// duplicate UI tab); attach a parse_error to the existing
+			// one so the operator sees the conflict.
+			for i := range groups {
+				if groups[i].Provider == provider {
+					groups[i].ParseError = "duplicate pitfalls file: both .yaml and .yml exist for this provider; using " + provider + ".yaml"
+					break
+				}
+			}
 			continue
 		}
 		seenProvider[provider] = true

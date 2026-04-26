@@ -41,6 +41,25 @@ deny contains msg if {
 	)
 }
 
+# zonal GCP resources (google_compute_instance, google_compute_disk,
+# google_container_node_pool, …) carry their region in `zone`. The
+# allowlist semantics match `location`: a zone is allowed if the zone
+# string itself is in the allowlist OR if it's prefixed by an allowed
+# region (e.g. `us-central1-a` is allowed when the allowlist contains
+# `us-central1`).
+deny contains msg if {
+	resource := input.planned_values.root_module.resources[_]
+	startswith(resource.type, "google_")
+	zone := resource.values.zone
+	zone != null
+	zone != ""
+	not location_allowed(zone)
+	msg := sprintf(
+		"%s is in zone %s — must be one of %v",
+		[resource.address, zone, allowlist],
+	)
+}
+
 region_allowed(region) if {
 	allowlist[_] == region
 }

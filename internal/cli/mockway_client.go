@@ -58,11 +58,15 @@ func (c *mockStateClient) State(ctx context.Context) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read state response: %w", err)
 	}
-	if len(payload) > maxMockwayStateResponseBytes {
-		return nil, fmt.Errorf("read state response: payload exceeds %d bytes", maxMockwayStateResponseBytes)
-	}
+	// Status check before size check so a non-2xx with a multi-MB body
+	// surfaces with the upstream's body (truncated) rather than as an
+	// unhelpful "payload exceeds 8 MB". Mirrors the API-side
+	// httpMockStateClient.State.
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("fetch mock state: unexpected status %d: %s", resp.StatusCode, truncateMockwayErrorPayload(payload))
+	}
+	if len(payload) > maxMockwayStateResponseBytes {
+		return nil, fmt.Errorf("read state response: payload exceeds %d bytes", maxMockwayStateResponseBytes)
 	}
 
 	return payload, nil
