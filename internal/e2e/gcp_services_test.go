@@ -346,8 +346,6 @@ func runGCPServiceScenario(t *testing.T, mock *MockwayInstance, scenarioFile str
 		}
 		stateAfterUpdate := mock.FetchState(t)
 		identitiesAfter := collectIdentities(stateAfterUpdate, expects)
-		logicalKeysBefore := collectLogicalKeys(stateAfterCreate, expects)
-		logicalKeysAfter := collectLogicalKeys(stateAfterUpdate, expects)
 		allowReplace := map[string]struct{}{}
 		for _, k := range update.allowReplaceCollections {
 			allowReplace[k] = struct{}{}
@@ -355,23 +353,14 @@ func runGCPServiceScenario(t *testing.T, mock *MockwayInstance, scenarioFile str
 		for key, before := range identitiesBefore {
 			if _, exempt := allowReplace[key]; exempt {
 				// Even when replace-on-update is the documented API
-				// behaviour for this collection, the *count and
-				// stable logical keys* must survive — an unexpected
-				// wipe or split would slip through the identity check
-				// otherwise. For collections whose only logical key
-				// is itself the auto-assigned id, we fall back to
-				// count parity. The fallback is explicitly opt-in
-				// (uuidNamedCollections) rather than heuristic, so
-				// adding a new replace-allowed collection later
-				// can't accidentally degrade to count parity.
-				lb, la := logicalKeysBefore[key], logicalKeysAfter[key]
-				switch {
-				case uuidNamedCollections[key]:
-					if len(lb) != len(la) {
-						t.Errorf("update phase changed item count for %s: before=%d after=%d",
-							key, len(lb), len(la))
-					}
-				case !sameIdentities(lb, la):
+				// behaviour for this collection, the *logical key set*
+				// must survive — an unexpected wipe or migration to a
+				// different parent (e.g. an iam/keys recreate that
+				// silently rebound to a different service account)
+				// would slip through the identity check otherwise.
+				lb := collectReplaceLogicalKeys(stateAfterCreate, key)
+				la := collectReplaceLogicalKeys(stateAfterUpdate, key)
+				if !sameIdentities(lb, la) {
 					t.Errorf("update phase changed the logical %s set (replace allowed but contents differ): before=%v after=%v",
 						key, lb, la)
 				}
@@ -836,17 +825,51 @@ func firstSecretLabels(state map[string]any) map[string]any {
 	return labels
 }
 
-// uuidNamedCollections enumerates the replace-allowed collections
-// whose only logical key is itself the server-assigned uuid (the
-// uuid IS embedded in the resource name). For these the test
-// degrades to count parity rather than logical-set equality.
-//
-// Keep this list narrow on purpose: silent degradation to count
-// parity is a real loss of coverage if a new replace-allowed
-// collection happens to have uuid-shaped names but still tracks
-// meaningful identity in them.
-var uuidNamedCollections = map[string]bool{
-	"iam/keys": true,
+// collectReplaceLogicalKeys picks the strongest stable identifier
+// for items in a replace-allowed collection. The uuid suffix in
+// e.g. iam/keys regenerates on every refresh, so we extract a
+// parent-resource key (service-account email + key index) instead
+// of falling back to count parity. For other replace-allowed
+// collections we use the standard logical key (name+type for DNS
+// rrsets, name otherwise).
+func collectReplaceLogicalKeys(state map[string]any, collectionKey string) []string {
+	switch collectionKey {
+	case "iam/keys":
+		return collectKeyParents(state)
+	}
+	parts := strings.SplitN(collectionKey, "/", 2)
+	if len(parts) != 2 {
+		return nil
+	}
+	keys := collectLogicalKeys(state, []gcpStateExpect{{root: parts[0], collection: parts[1]}})
+	return keys[collectionKey]
+}
+
+// collectKeyParents returns one entry per IAM key, identified by
+// its parent service-account email. A delete-and-recreate under
+// the same SA produces a stable parent key; a recreate that rebound
+// the key to a different SA changes the parent and surfaces as a
+// difference.
+func collectKeyParents(state map[string]any) []string {
+	items := stateSlice(state, "iam", "keys")
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		if email, _ := item["serviceAccountEmail"].(string); email != "" {
+			out = append(out, "sa="+email)
+			continue
+		}
+		// Fall back to the parent path embedded in the key name:
+		// projects/<p>/serviceAccounts/<email>/keys/<uuid>.
+		if name, _ := item["name"].(string); name != "" {
+			parts := strings.Split(name, "/")
+			if len(parts) >= 4 && parts[len(parts)-2] == "keys" {
+				out = append(out, "sa="+parts[len(parts)-3])
+				continue
+			}
+			out = append(out, "name="+name)
+		}
+	}
+	return out
 }
 
 // collectLogicalKeys returns, for each (root, collection), a slice
