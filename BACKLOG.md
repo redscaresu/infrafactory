@@ -29,7 +29,7 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 | S39-T1 | Slice 39 | POST /api/scenarios/validate endpoint (validates without saving) | P1 | todo | — | — |
 | S38-T3 | Slice 38 | Playwright e2e tests for run comparison | P1 | todo | S38-T2 | — |
 | S38-T2 | Slice 38 | /compare UI page with dual-pane IaC diff viewer | P1 | todo | S38-T1 | — |
-| S38-T1 | Slice 38 | GET /api/runs/{scenario}/compare endpoint returning diff data | P1 | todo | — | — |
+| S38-T1 | Slice 38 | GET /api/runs/{scenario}/compare endpoint returning diff data | P1 | done | — | claude |
 | S37-T4 | Slice 37 | Playwright e2e tests for pitfalls page | P1 | todo | S37-T3 | — |
 | S37-T3 | Slice 37 | /pitfalls UI page with table, source badges, and edit form | P1 | todo | S37-T2 | — |
 | S37-T2 | Slice 37 | PUT /api/pitfalls/{provider} endpoint for editing | P1 | todo | S37-T1 | — |
@@ -44,7 +44,7 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 | S36-T5 | Slice 36 | GCP topology derivation unit tests (10+ tests with fixture data) | P1 | todo | S36-T4 | — |
 | S36-T4 | Slice 36 | GCP topology derivation: cloud dispatch + GCP resource patterns | P1 | todo | — | — |
 | S36-T3 | Slice 36 | GCP prompt templates (prompts/gcp/phase1,2,3.md) | P1 | todo | S36-T1 | — |
-| S36-T2 | Slice 36 | Update scenario.schema.json: add gcp to cloud enum, GCP resource definitions | P1 | todo | — | — |
+| S36-T2 | Slice 36 | Update scenario.schema.json: add gcp to cloud enum, GCP resource definitions | P1 | done | — | claude+codex |
 | S36-T1 | Slice 36 | Reorganize prompts: move prompts/*.md → prompts/scaleway/, update generator paths | P1 | todo | — | — |
 | S36-T0 | Slice 36 | fakegcp: create AGENTS.md + add forwarding_rule handler (in fakegcp repo) | P1 | todo | — | — |
 | S35-T3 | Slice 35 | Tests verifying enriched http_probe error messages | P1 | done | S35-T2 | claude+codex |

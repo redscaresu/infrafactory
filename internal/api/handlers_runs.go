@@ -74,6 +74,11 @@ func runsByScenarioHandler(state *serverState) http.HandlerFunc {
 			return
 		}
 
+		if len(parts) == 2 && parts[1] == "compare" {
+			handleRunCompare(state, w, r, scenarioName)
+			return
+		}
+
 		if len(parts) == 1 {
 			if r.Method != http.MethodGet {
 				writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")

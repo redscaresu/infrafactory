@@ -18,8 +18,8 @@
     },
     "cloud": {
       "type": "string",
-      "enum": ["scaleway"],
-      "description": "Target cloud provider. Only 'scaleway' in v1."
+      "enum": ["scaleway", "gcp"],
+      "description": "Target cloud provider. 'scaleway' or 'gcp'."
     },
     "description": {
       "type": "string",
@@ -44,7 +44,8 @@
         "kubernetes": { "$ref": "#/$defs/kubernetes_resource" },
         "iam": { "$ref": "#/$defs/iam_resource" },
         "registry": { "$ref": "#/$defs/registry_resource" },
-        "redis": { "$ref": "#/$defs/redis_resource" }
+        "redis": { "$ref": "#/$defs/redis_resource" },
+        "storage": { "$ref": "#/$defs/storage_resource" }
       },
       "additionalProperties": false
     },
@@ -269,6 +270,22 @@
             }
           },
           "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "storage_resource": {
+      "type": "object",
+      "required": ["purpose", "size"],
+      "properties": {
+        "purpose": {
+          "type": "string",
+          "description": "Purpose of the object storage bucket (e.g., backups, static-assets). Passed to agent for naming."
+        },
+        "size": {
+          "type": "string",
+          "enum": ["small", "medium", "large", "xlarge"],
+          "description": "T-shirt size hint for storage class / capacity expectations."
         }
       },
       "additionalProperties": false

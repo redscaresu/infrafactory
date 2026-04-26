@@ -27,6 +27,13 @@ Last updated: 2026-04-26
 - Keep startup/read-order instructions only in `SESSION_START.md` to avoid duplication.
 
 ## Recent updates
+- **S38-T1 complete (GET /api/runs/{scenario}/compare)**:
+  - Added `internal/api/handlers_runs_compare.go` returning file-level diffs between two runs of a scenario. Each entry has `filename`, `status` (`added`/`removed`/`modified`/`unchanged`), and `unified_diff` text (3 lines context). Empty diff for unchanged files. Validates run IDs (no path traversal), 400 on missing query params, 404 when either run's generated/ snapshot is absent.
+  - Added direct dep `github.com/pmezard/go-difflib`.
+  - 4 unit tests cover all four file statuses, validation, missing-run, and traversal cases.
+- **S36-T2 complete (scenario schema GCP enum)**:
+  - Widened `scenario.schema.json` `cloud` enum from `[scaleway]` to `[scaleway, gcp]`. Added a `storage` resource type (`purpose`, `size`) for GCS buckets. Existing compute/networking/database/kubernetes/redis/iam shapes are generic enough; no per-cloud branching.
+  - Added `internal/scenario/scenario_gcp_test.go` covering a full GCP scenario validates and `cloud: aws` is rejected.
 - **S36-T6 + S36-T7 complete (GCP pitfalls + OPA policies)**:
   - `pitfalls/gcp.yaml` seeded with 8 entries covering VPC/subnetwork prerequisites, required-API enablement, IAM principal format, GKE node pool strategy, Cloud SQL deletion protection / name reservation, GCS bucket naming, and firewall scoping.
   - `policies/gcp/{no_public_sql,vpc_required,region_restriction,encryption}.rego` — OPA bundle mirroring the Scaleway shape (`import rego.v1`, `deny contains msg if {...}`). `region_restriction.rego` reads `data.region_allowlist` with a `["us-central1","europe-west1","europe-west4"]` default. Wiring into `infrafactory.yaml`'s `policy_paths` and `constraint_policies` is deferred to a later S36 ticket.
