@@ -27,6 +27,8 @@ Last updated: 2026-04-26
 - Keep startup/read-order instructions only in `SESSION_START.md` to avoid duplication.
 
 ## Recent updates
+- **Slice 34-T2 complete (oscillation pitfall wiring)**:
+  - Run loop now accumulates `feedback.IterationResult` per iteration. When the run terminates with `repair_budget_exhausted` or `stuck`, it calls `feedback.DetectOscillation` and feeds each oscillating signature's detail through `generator.ExtractLearnedPitfall` + `generator.AppendPitfall`. Successful learns log `oscillation_pitfall_learned`; append errors log `oscillation_pitfall_append`.
 - **Slice 34-T1 complete (oscillation detection)**:
   - Added `DetectOscillation(history []IterationResult) []FailureSignature` in `internal/feedback/oscillation.go`. Returns signatures that follow the pattern present-at-N, absent-at-N+1, present-at-N+2, capturing alternating-fix loops the model gets into. Result is deterministically sorted; gaps longer than one iteration intentionally don't count.
   - 7 unit tests covering: short history, simple oscillation, sustained failure, distinct failures, multi-signature oscillation, longer gap (negative), embedded oscillation in longer history.

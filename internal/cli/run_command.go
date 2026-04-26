@@ -111,6 +111,7 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 	allFailures := make([]FailureSummary, 0)
 	var previousFailures []feedback.Failure
 	var previousIterationFailures []FailureSummary
+	var iterationHistory []feedback.IterationResult
 	holdoutBlocked := false
 	completed := 0
 	terminalReason := ""
@@ -183,6 +184,10 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 			Detail:    fmt.Sprintf("%d failure(s)", len(failures)),
 		})
 		currentFailures := toFeedbackFailures(failures)
+		iterationHistory = append(iterationHistory, feedback.IterationResult{
+			Iteration: iteration,
+			Failures:  currentFailures,
+		})
 		if consecutiveTransportFailures >= transportFailureRetryBudget {
 			terminalReason = "repair_budget_exhausted"
 			allFailures = append(allFailures, FailureSummary{
@@ -234,6 +239,41 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 		RunID:   runID,
 		Detail:  fmt.Sprintf("completed_iterations=%d", completed),
 	})
+
+	// Auto-learn from oscillation failures: when a run exhausts its repair
+	// budget or stops on stuck detection, scan the iteration history for
+	// failure signatures that oscillated (present-N, absent-N+1,
+	// present-N+2). These are stable indicators of the model alternating
+	// between two incomplete fixes; their detail strings are exactly the
+	// pitfall material we want future runs to inherit.
+	if terminalReason == "repair_budget_exhausted" || terminalReason == "stuck" {
+		oscillating := feedback.DetectOscillation(iterationHistory)
+		for _, sig := range oscillating {
+			learned := generator.ExtractLearnedPitfall(sig.Detail, sc.Name)
+			if learned == nil {
+				continue
+			}
+			if err := generator.AppendPitfall(runtime.Config.Paths.Pitfalls, sc.Cloud, *learned); err != nil {
+				runtime.Logger.Log(LogEntry{
+					Level:   logLevelError,
+					Command: "run",
+					Event:   "oscillation_pitfall_append",
+					Status:  "failed",
+					RunID:   runID,
+					Detail:  err.Error(),
+				})
+				continue
+			}
+			runtime.Logger.Log(LogEntry{
+				Level:   logLevelInfo,
+				Command: "run",
+				Event:   "oscillation_pitfall_learned",
+				Status:  "success",
+				RunID:   runID,
+				Detail:  fmt.Sprintf("resource=%s rule=%s", learned.Resource, learned.Rule),
+			})
+		}
+	}
 
 	// Auto-destroy real Scaleway resources on failure to prevent orphaned billing.
 	// Contract #14: failed run without --no-destroy must destroy real resources.
