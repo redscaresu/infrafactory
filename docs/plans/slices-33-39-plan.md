@@ -1,17 +1,17 @@
-# Plan: Slices 33-39 — Cross-Repo E2E, Pitfall Learning, Enriched Feedback, GCP, and UI Features
+# Plan: Slices 33-42 — Cross-Repo E2E, Pitfall Learning, GCP Multi-Cloud, and UI Features
 
 ## Context
 
-Slices 33-39 cover six themes: cross-repo end-to-end testing (Slice 33), smarter pitfall learning from failures (Slice 34), richer http_probe diagnostics (Slice 35), GCP multi-cloud support (Slice 36), and three UI features — pitfalls management (Slice 37), run comparison (Slice 38), and real-time scenario validation (Slice 39).
+Slices 33-42 cover ten themes: cross-repo end-to-end testing (33), smarter pitfall learning (34), richer http_probe diagnostics (35), GCP infrastructure support (36), pitfalls UI (37), run comparison (38), real-time validation (39), visual UI regression (40), fakegcp test parity (41), and GCP scenarios + multi-cloud UI (42).
 
-ADR-0013 covers the two cross-cutting architectural decisions: the cross-repo test strategy and the GCP multi-cloud approach.
+ADR-0013 covers the cross-repo test strategy and GCP multi-cloud approach.
 
 ## Quick Reference
 
 | Key | Value |
 |---|---|
-| Slices | 33-39 |
-| Ticket IDs | S33-T1 through S39-T4 |
+| Slices | 33-42 |
+| Ticket IDs | S33-T1 through S42-T5 |
 | Depends on | Slice 32 (done) |
 | ADR | 0013 (cross-repo e2e and multi-cloud) |
 
@@ -114,8 +114,8 @@ Add `cloud: gcp` scenario type with full validation parity against Scaleway. Thi
 | S36-T7 | `policies/gcp/` OPA policies: no_public_sql, vpc_required, region_restriction, encryption | P1 | — |
 | S36-T8 | Generalize `mockway_client.go` to support fakegcp admin endpoints (/mock/state, /mock/reset, /mock/snapshot) based on scenario cloud field | P1 | — |
 | S36-T9 | Add GCP resource patterns to `real_probe.go` (google_compute_instance, google_sql_database_instance, google_compute_forwarding_rule) | P1 | S36-T4 |
-| S36-T10 | GCP training scenarios (gcp-vm-network, gcp-gke-cluster, gcp-cloud-sql) | P1 | S36-T2, S36-T3, S36-T6, S36-T7 |
-| S36-T11 | Cross-repo e2e tests against fakegcp (reuse S33-T1 infrastructure) + double-apply idempotency | P1 | S33-T1, S36-T10 |
+| S36-T10 | GCP training scenarios (gcp-vm-network, gcp-gke-cluster, gcp-cloud-sql, gcp-full-stack) | P1 | S36-T2, S36-T3, S36-T6, S36-T7, S36-T8 |
+| S36-T11 | Cross-repo e2e tests against fakegcp (reuse S33-T1 infrastructure) + double-apply idempotency | P1 | S33-T1, S36-T10, S41-T1 |
 | S36-T12 | Playwright e2e: GCP scenarios appear in UI scenario list, can be browsed | P1 | S36-T10 |
 
 ### Acceptance Criteria
@@ -147,8 +147,8 @@ S36-T8 (mock client) ──────┘
 S36-T3 (GCP prompts) ────────── depends on T1
 S36-T5 (topology tests) ─────── depends on T4
 S36-T9 (real probes) ────────── depends on T4
-S36-T10 (training scenarios) ── depends on T2, T3, T6, T7
-S36-T11 (cross-repo e2e) ────── depends on S33-T1, T10
+S36-T10 (training scenarios) ── depends on T2, T3, T6, T7, T8
+S36-T11 (cross-repo e2e) ────── depends on S33-T1, T10, S41-T1
 S36-T12 (Playwright e2e) ────── depends on T10
 ```
 
@@ -258,19 +258,26 @@ Validate scenario YAML as the user types (debounced), showing errors inline inst
 ## Execution Order
 
 ```
-Slice 33 (cross-repo e2e)  ─── independent, can start immediately
-Slice 34 (pitfall learning) ── independent, can start immediately
-Slice 35 (http_probe feedback) ── independent, can start immediately
+Independent (can start immediately):
+  Slice 33 (cross-repo e2e)
+  Slice 34 (pitfall learning)
+  Slice 35 (http_probe feedback)
+  Slice 37 (pitfalls UI)
+  Slice 38 (run comparison)
+  Slice 39 (scenario validation)
+  Slice 40 (visual UI testing)
 
-Slice 36 (GCP support) ──────── independent, can start immediately
-                                  T1/T2/T3 parallel → T4 → T5
-
-Slice 37 (pitfalls UI) ──────── independent, can start immediately
-Slice 38 (run comparison) ───── independent, can start immediately
-Slice 39 (scenario validation) ── independent, can start immediately
+GCP critical path:
+  Slice 41 (fakegcp test parity) ─── must complete first
+       ↓
+  Slice 36 T0-T9 (GCP infra) ────── can start after S41-T1
+       ↓
+  Slice 36 T10-T12 (GCP scenarios + e2e) ─── needs S41 + S36 infra
+       ↓
+  Slice 42 (multi-cloud UI) ────── needs S36-T10 scenarios to exist
 ```
 
-All 7 slices are independent of each other and can be executed in any order.
+Slices 33-35, 37-40 are independent of each other and of the GCP path.
 
 ---
 
@@ -377,21 +384,20 @@ The scenario detail page needs:
 
 | id | title | priority | deps |
 |---|---|---|---|
-| S42-T1 | GCP training scenarios: gcp-vm-network, gcp-gke-cluster, gcp-cloud-sql, gcp-full-stack | P1 | S36-T2 |
-| S42-T2 | UI sidebar: group scenarios by cloud provider (Scaleway / GCP sections) | P1 | — |
-| S42-T3 | UI scenario page: cloud provider badge, dynamic Layer 3 label and credentials | P1 | S42-T2 |
-| S42-T4 | UI scenario page: mock server status based on cloud (mockway vs fakegcp readiness) | P1 | S42-T3 |
-| S42-T5 | API: GET /api/scenarios returns cloud field, GET /api/scenarios/{path}/layer3-status adapts per cloud | P1 | — |
-| S42-T6 | Playwright e2e: GCP scenarios appear under GCP group, cloud badge renders, credentials section adapts | P1 | S42-T3 |
+| S42-T1 | UI sidebar: group scenarios by cloud provider (Scaleway / GCP sections) | P1 | — |
+| S42-T2 | UI scenario page: cloud provider badge, dynamic Layer 3 label and credentials | P1 | S42-T1 |
+| S42-T3 | UI scenario page: mock server status based on cloud (mockway vs fakegcp readiness) | P1 | S42-T2, S36-T8 |
+| S42-T4 | API: GET /api/scenarios returns cloud field, layer3-status adapts per cloud | P1 | S36-T8 |
+| S42-T5 | Playwright e2e: GCP scenarios in sidebar, cloud badge, credentials, mock status | P1 | S42-T2 |
 
 ### Acceptance Criteria
 
-- S42-T1: At least 4 GCP training scenarios exist with `cloud: gcp`. Each defines GCP resources (google_compute_instance, google_container_cluster, google_sql_database_instance, etc.) and acceptance criteria.
-- S42-T2: Sidebar groups scenarios by cloud field. Scaleway scenarios under "SCALEWAY", GCP under "GCP". Unknown cloud shows under "OTHER".
-- S42-T3: Scenario page shows cloud badge (e.g., pill with "scaleway" or "gcp"). Layer 3 section says "Layer 3 (Real Scaleway)" or "Layer 3 (Real GCP)". Credentials section shows SCW_ACCESS_KEY/SCW_SECRET_KEY for Scaleway, GOOGLE_APPLICATION_CREDENTIALS for GCP.
-- S42-T4: Mock server status card shows mockway readiness for Scaleway scenarios, fakegcp readiness for GCP scenarios. Checks the correct mock server URL from config.
-- S42-T5: GET /api/scenarios response includes `cloud` field per scenario. layer3-status endpoint returns cloud-appropriate credential checks.
-- S42-T6: Playwright tests verify: GCP group in sidebar, cloud badge on scenario page, correct credentials section per cloud.
+Note: GCP training scenarios are created in S36-T10 (4 scenarios: gcp-vm-network, gcp-gke-cluster, gcp-cloud-sql, gcp-full-stack). Slice 42 focuses on the multi-cloud UI.
+- S42-T1: Sidebar groups scenarios by cloud field. Scaleway under "SCALEWAY", GCP under "GCP". Unknown cloud under "OTHER".
+- S42-T2: Scenario page shows cloud badge pill. Layer 3 says "Real Scaleway" or "Real GCP". Credentials section shows SCW_* for Scaleway, GOOGLE_* for GCP.
+- S42-T3: Mock server status checks correct mock (mockway for Scaleway, fakegcp for GCP) from config.
+- S42-T4: GET /api/scenarios includes `cloud` field. layer3-status returns cloud-appropriate credential checks.
+- S42-T5: Playwright tests: GCP group in sidebar, cloud badge, correct credentials, mock status per cloud.
 
 ### Key Files
 

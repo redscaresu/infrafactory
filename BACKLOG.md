@@ -6,12 +6,11 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 
 | id | slice | title | priority | status | deps | owner |
 |---|---|---|---|---|---|---|
-| S42-T6 | Slice 42 | Playwright e2e: GCP scenarios in sidebar, cloud badge, credentials adaptation | P1 | todo | S42-T3 | — |
-| S42-T5 | Slice 42 | API: GET /api/scenarios returns cloud field, layer3-status adapts per cloud | P1 | todo | — | — |
-| S42-T4 | Slice 42 | UI scenario page: mock server status based on cloud (mockway vs fakegcp) | P1 | todo | S42-T3 | — |
-| S42-T3 | Slice 42 | UI scenario page: cloud provider badge, dynamic Layer 3 label and credentials | P1 | todo | S42-T2 | — |
-| S42-T2 | Slice 42 | UI sidebar: group scenarios by cloud provider (Scaleway / GCP sections) | P1 | todo | — | — |
-| S42-T1 | Slice 42 | GCP training scenarios (gcp-vm-network, gcp-gke-cluster, gcp-cloud-sql, gcp-full-stack) | P1 | todo | S36-T2 | — |
+| S42-T5 | Slice 42 | Playwright e2e: GCP sidebar group, cloud badge, credentials, mock status | P1 | todo | S42-T2 | — |
+| S42-T4 | Slice 42 | API: GET /api/scenarios returns cloud field, layer3-status adapts per cloud | P1 | todo | S36-T8 | — |
+| S42-T3 | Slice 42 | UI scenario page: mock server status based on cloud (mockway vs fakegcp) | P1 | todo | S42-T2, S36-T8 | — |
+| S42-T2 | Slice 42 | UI scenario page: cloud provider badge, dynamic Layer 3 label and credentials | P1 | todo | S42-T1 | — |
+| S42-T1 | Slice 42 | UI sidebar: group scenarios by cloud provider (Scaleway / GCP sections) | P1 | todo | — | — |
 | S41-T7 | Slice 41 | fakegcp: misconfigured Terraform examples (FK violations, wrong refs, ordering) | P1 | todo | S41-T1 | — |
 | S41-T6 | Slice 41 | fakegcp: double-apply idempotency automation for all working examples | P1 | todo | S41-T1 | — |
 | S41-T5 | Slice 41 | fakegcp: admin endpoint tests (/mock/state, /mock/reset, /mock/snapshot, /mock/restore) | P1 | todo | S41-T1 | — |
@@ -36,8 +35,8 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 | S37-T2 | Slice 37 | PUT /api/pitfalls/{provider} endpoint for editing | P1 | todo | S37-T1 | — |
 | S37-T1 | Slice 37 | GET /api/pitfalls endpoint returning pitfalls grouped by provider | P1 | todo | — | — |
 | S36-T12 | Slice 36 | Playwright e2e: GCP scenarios appear in UI scenario list | P1 | todo | S36-T10 | — |
-| S36-T11 | Slice 36 | Cross-repo e2e tests against fakegcp + double-apply idempotency | P1 | todo | S33-T1, S36-T10 | — |
-| S36-T10 | Slice 36 | GCP training scenarios (gcp-vm-network, gcp-gke-cluster, gcp-cloud-sql) | P1 | todo | S36-T2, S36-T3, S36-T6, S36-T7 | — |
+| S36-T11 | Slice 36 | Cross-repo e2e tests against fakegcp + double-apply idempotency | P1 | todo | S33-T1, S36-T10, S41-T1 | — |
+| S36-T10 | Slice 36 | GCP training scenarios (gcp-vm-network, gcp-gke-cluster, gcp-cloud-sql, gcp-full-stack) | P1 | todo | S36-T2, S36-T3, S36-T6, S36-T7, S36-T8 | — |
 | S36-T9 | Slice 36 | Add GCP resource patterns to real_probe.go | P1 | todo | S36-T4 | — |
 | S36-T8 | Slice 36 | Generalize mockway_client.go for multi-cloud mock (fakegcp admin endpoints) | P1 | todo | — | — |
 | S36-T7 | Slice 36 | GCP OPA policies: no_public_sql, vpc_required, region_restriction, encryption | P1 | todo | — | — |

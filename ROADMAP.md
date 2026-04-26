@@ -386,10 +386,10 @@ This file is intentionally high-level and mostly stable; day-to-day execution tr
 ## Near-term execution order
 
 1. Keep completed slices (1-32) stable and regression-green.
-2. Slices 33-39 are all independent and can be executed in any order.
-3. Slice 33 (cross-repo e2e) and Slice 35 (http_probe feedback) are quick wins with high impact on developer productivity.
-4. Slice 36 (GCP) is the largest slice (13 tickets T0-T12). T0 first in fakegcp; T1/T2/T4/T6/T7/T8 parallel; T3/T5/T9 after deps; T10 after T2+T3+T6+T7; T11/T12 last.
-5. Pipeline consistently achieves first-iteration pass (12/12 training scenarios); monitor for regressions.
+2. Slices 33-35, 37-40 are independent — can start in any order.
+3. GCP critical path: Slice 41 (fakegcp parity) → Slice 36 T0-T9 (GCP infra) → Slice 36 T10-T12 (GCP scenarios/e2e) → Slice 42 (multi-cloud UI).
+4. Quick wins: Slice 33 (cross-repo e2e), Slice 35 (http_probe feedback).
+5. Pipeline consistently achieves first-iteration pass (12/12 Scaleway training scenarios); monitor for regressions.
 
 ## Live progress tracking
 
