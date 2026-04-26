@@ -233,15 +233,18 @@ func gcpSQLPublicReachable(sql map[string]any) bool {
 }
 
 // gcpForwardingRulePort extracts the listening port from a global
-// forwarding rule entry. fakegcp/Terraform encodes it either via a single
-// `port_range` ("80" or "80-80") or a `ports` array; we accept both.
-// Out-of-range values (port < 1 or port > 65535) are treated as
+// forwarding rule entry. The GCP Compute v1 API uses `portRange`
+// (camelCase) while older snake_case Terraform JSON dumps use
+// `port_range`; accept both. Multi-port `ports` array is treated as
+// "first declared port wins". Out-of-range values are treated as
 // unparseable so the caller can skip them and the LB-level fallback
 // diagnostic still fires correctly.
 func gcpForwardingRulePort(fr map[string]any) int {
-	if pr, ok := fr["port_range"].(string); ok && pr != "" {
-		if port := parseLeadingInt(pr); validTCPPort(port) {
-			return port
+	for _, key := range []string{"portRange", "port_range"} {
+		if pr, ok := fr[key].(string); ok && pr != "" {
+			if port := parseLeadingInt(pr); validTCPPort(port) {
+				return port
+			}
 		}
 	}
 	if ports, ok := fr["ports"].([]any); ok && len(ports) > 0 {
@@ -265,16 +268,22 @@ func validTCPPort(p int) bool {
 
 // gcpHasPublicIngressFirewall reports whether any firewall rule allows
 // ingress from 0.0.0.0/0 — the canonical GCP marker for a public-facing
-// instance. Only ALLOW rules with INGRESS direction count.
+// instance. Only ALLOW rules with INGRESS direction count. Accepts
+// both `sourceRanges` (camelCase, GCP v1 API + Terraform google
+// provider) and `source_ranges` (snake_case fallback for older test
+// fixtures).
 func gcpHasPublicIngressFirewall(firewalls []map[string]any) bool {
 	for _, fw := range firewalls {
 		direction, _ := fw["direction"].(string)
 		if direction != "" && !strings.EqualFold(direction, "INGRESS") {
 			continue
 		}
-		ranges, ok := fw["source_ranges"].([]any)
-		if !ok {
-			continue
+		var ranges []any
+		for _, key := range []string{"sourceRanges", "source_ranges"} {
+			if r, ok := fw[key].([]any); ok {
+				ranges = r
+				break
+			}
 		}
 		for _, r := range ranges {
 			if s, _ := r.(string); s == "0.0.0.0/0" {

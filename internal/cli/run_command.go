@@ -152,6 +152,14 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 						continue
 					}
 					if !pitfallResourceMatchesCloud(learned.Resource, cloud) {
+						runtime.Logger.Log(LogEntry{
+							Level:   logLevelInfo,
+							Command: "run",
+							Event:   "self_correction_pitfall_skipped",
+							Status:  "skipped",
+							RunID:   runID,
+							Detail:  fmt.Sprintf("cross-cloud resource %q for cloud=%s", learned.Resource, cloud),
+						})
 						continue
 					}
 					if err := generator.AppendPitfall(runtime.Config.Paths.Pitfalls, cloud, *learned); err != nil {

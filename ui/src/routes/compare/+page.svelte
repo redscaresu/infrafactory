@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import { api } from "$lib/api";
   import type { RunSummary } from "$lib/types";
   import { afterNavigate } from "$app/navigation";
@@ -81,9 +82,13 @@
 
   $: activeDiff = diffs.find((d) => d.filename === activeFile);
 
-  // afterNavigate fires on the initial mount too, so a single call here
-  // covers both the first load and subsequent client-side route changes
-  // — avoids a double fetch.
+  // onMount fires before the page is interactive (so initial render
+  // sees the scenario list); afterNavigate handles subsequent
+  // client-side route changes back into /compare. Yes, this double-
+  // fetches on first load (review-8 flagged it as P2); leaving the
+  // pattern in place because removing onMount creates a Playwright
+  // timing race where selectOption fires before scenarios populate.
+  onMount(loadScenarios);
   afterNavigate(loadScenarios);
   $: if (scenario) loadRunsForScenario();
 </script>

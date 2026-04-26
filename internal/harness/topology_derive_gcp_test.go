@@ -566,6 +566,52 @@ func TestDeriveTopologyGCPSQLEmptyEngineDefaultsToPostgres(t *testing.T) {
 	}
 }
 
+// TestDeriveTopologyGCPCamelCaseFromFakegcp pins the camelCase shape
+// fakegcp actually persists (the GCP Compute v1 API uses portRange and
+// sourceRanges, not snake_case). A regression to snake-case-only would
+// silently miss every real fakegcp state.
+func TestDeriveTopologyGCPCamelCaseFromFakegcp(t *testing.T) {
+	t.Parallel()
+
+	state := map[string]any{
+		"compute": map[string]any{
+			"instances": []map[string]any{{"name": "web-0"}},
+			"firewalls": []map[string]any{
+				{
+					"direction":    "INGRESS",
+					"sourceRanges": []any{"0.0.0.0/0"},
+					"allowed":      []any{map[string]any{"IPProtocol": "tcp"}},
+				},
+			},
+		},
+		"lb": map[string]any{
+			"global_forwarding_rules": []map[string]any{
+				{"portRange": "80"},
+			},
+			"backend_services": []map[string]any{
+				{"backends": []any{map[string]any{"group": "ig"}}},
+			},
+		},
+	}
+	stateJSON, _ := json.Marshal(state)
+
+	out, _, err := DeriveTopology(stateJSON)
+	if err != nil {
+		t.Fatalf("derive: %v", err)
+	}
+	var parsed struct {
+		Connectivity map[string]bool `json:"connectivity"`
+		HTTPProbe    map[string]bool `json:"http_probe"`
+	}
+	_ = json.Unmarshal(out, &parsed)
+	if !parsed.HTTPProbe["load_balancer:80"] {
+		t.Fatalf("expected load_balancer:80=true with camelCase portRange, got %+v", parsed.HTTPProbe)
+	}
+	if !parsed.Connectivity["public_internet->compute"] {
+		t.Fatalf("expected public_internet->compute=true with camelCase sourceRanges, got %+v", parsed.Connectivity)
+	}
+}
+
 // TestDeriveTopologyGCPForwardingRuleFloat64OutOfRangePort exercises
 // the float64 branch of gcpForwardingRulePort with an out-of-range
 // port. The string-path version is covered by
