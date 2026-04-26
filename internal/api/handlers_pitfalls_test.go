@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/redscaresu/infrafactory/internal/config"
@@ -19,7 +20,7 @@ func TestPitfallsHandlerReturnsEmptyWhenDirectoryUnset(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/pitfalls", nil)
 	rec := httptest.NewRecorder()
-	listPitfallsHandler(&serverState{cfg: cfg}).ServeHTTP(rec, req)
+	pitfallsHandler(&serverState{cfg: cfg}).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
@@ -41,7 +42,7 @@ func TestPitfallsHandlerReturnsEmptyWhenDirectoryMissing(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/pitfalls", nil)
 	rec := httptest.NewRecorder()
-	listPitfallsHandler(&serverState{cfg: cfg}).ServeHTTP(rec, req)
+	pitfallsHandler(&serverState{cfg: cfg}).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
@@ -89,7 +90,7 @@ pitfalls:
 
 	req := httptest.NewRequest(http.MethodGet, "/api/pitfalls", nil)
 	rec := httptest.NewRecorder()
-	listPitfallsHandler(&serverState{cfg: cfg}).ServeHTTP(rec, req)
+	pitfallsHandler(&serverState{cfg: cfg}).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
@@ -127,7 +128,7 @@ func TestPitfallsHandlerRejectsNonGet(t *testing.T) {
 	for _, method := range []string{http.MethodPost, http.MethodPut, http.MethodDelete} {
 		req := httptest.NewRequest(method, "/api/pitfalls", nil)
 		rec := httptest.NewRecorder()
-		listPitfallsHandler(&serverState{cfg: cfg}).ServeHTTP(rec, req)
+		pitfallsHandler(&serverState{cfg: cfg}).ServeHTTP(rec, req)
 		if rec.Code != http.StatusMethodNotAllowed {
 			t.Fatalf("expected 405 for %s, got %d", method, rec.Code)
 		}
@@ -146,8 +147,106 @@ func TestPitfallsHandlerErrorsOnMalformedYaml(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/pitfalls", nil)
 	rec := httptest.NewRecorder()
-	listPitfallsHandler(&serverState{cfg: cfg}).ServeHTTP(rec, req)
+	pitfallsHandler(&serverState{cfg: cfg}).ServeHTTP(rec, req)
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("expected 500 for malformed yaml, got %d", rec.Code)
+	}
+}
+
+func TestPitfallsEditWritesProviderFile(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	cfg := config.Default()
+	cfg.Paths.Pitfalls = dir
+
+	body := strings.NewReader(`{
+  "pitfalls": [
+    {"resource": "google_compute_instance", "rule": "Use subnetwork.", "source": "static"},
+    {"resource": "google_storage_bucket", "rule": "Set uniform_bucket_level_access.", "source": "static"}
+  ]
+}`)
+	req := httptest.NewRequest(http.MethodPut, "/api/pitfalls/gcp", body)
+	rec := httptest.NewRecorder()
+	pitfallsHandler(&serverState{cfg: cfg}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	written, err := os.ReadFile(filepath.Join(dir, "gcp.yaml"))
+	if err != nil {
+		t.Fatalf("expected pitfalls file written: %v", err)
+	}
+	for _, want := range []string{
+		"provider: gcp",
+		"resource: google_compute_instance",
+		"rule: Use subnetwork.",
+		"source: static",
+		"resource: google_storage_bucket",
+	} {
+		if !strings.Contains(string(written), want) {
+			t.Fatalf("expected file to contain %q, got:\n%s", want, string(written))
+		}
+	}
+}
+
+func TestPitfallsEditValidatesEntries(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.Default()
+	cfg.Paths.Pitfalls = t.TempDir()
+
+	cases := []struct {
+		name string
+		body string
+		want int
+	}{
+		{name: "missing resource", body: `{"pitfalls":[{"resource":"","rule":"x"}]}`, want: http.StatusUnprocessableEntity},
+		{name: "missing rule", body: `{"pitfalls":[{"resource":"x","rule":""}]}`, want: http.StatusUnprocessableEntity},
+		{name: "unknown field", body: `{"pitfalls":[{"resource":"x","rule":"y","extra":1}]}`, want: http.StatusBadRequest},
+		{name: "malformed json", body: `not json`, want: http.StatusBadRequest},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPut, "/api/pitfalls/gcp", strings.NewReader(tc.body))
+			rec := httptest.NewRecorder()
+			pitfallsHandler(&serverState{cfg: cfg}).ServeHTTP(rec, req)
+			if rec.Code != tc.want {
+				t.Fatalf("body %q: expected %d, got %d (%s)", tc.body, tc.want, rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestPitfallsEditRejectsTraversalProvider(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.Default()
+	cfg.Paths.Pitfalls = t.TempDir()
+
+	for _, name := range []string{"../etc", "a/b", "..\\evil"} {
+		req := httptest.NewRequest(http.MethodPut, "/api/pitfalls/"+name, strings.NewReader(`{"pitfalls":[]}`))
+		rec := httptest.NewRecorder()
+		pitfallsHandler(&serverState{cfg: cfg}).ServeHTTP(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400 for provider %q, got %d", name, rec.Code)
+		}
+	}
+}
+
+func TestPitfallsEditRejectsNonPut(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.Default()
+	cfg.Paths.Pitfalls = t.TempDir()
+
+	for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodDelete} {
+		req := httptest.NewRequest(method, "/api/pitfalls/gcp", strings.NewReader(`{"pitfalls":[]}`))
+		rec := httptest.NewRecorder()
+		pitfallsHandler(&serverState{cfg: cfg}).ServeHTTP(rec, req)
+		if rec.Code != http.StatusMethodNotAllowed {
+			t.Fatalf("expected 405 for %s, got %d", method, rec.Code)
+		}
 	}
 }

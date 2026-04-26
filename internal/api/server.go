@@ -91,7 +91,8 @@ func NewServer(cfg ServerConfig) *http.Server {
 	mux.HandleFunc("/api/runs", listAllRunsHandler(state))
 	mux.HandleFunc("/api/runs/", runsByScenarioHandler(state))
 	mux.HandleFunc("/api/output/", outputHandler(state))
-	mux.HandleFunc("/api/pitfalls", listPitfallsHandler(state))
+	mux.HandleFunc("/api/pitfalls", pitfallsHandler(state))
+	mux.HandleFunc("/api/pitfalls/", pitfallsHandler(state))
 	mux.HandleFunc("/api/ws", websocketHandler(state))
 
 	mux.HandleFunc("/api", notImplementedAPIHandler)

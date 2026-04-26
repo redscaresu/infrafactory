@@ -27,6 +27,9 @@ Last updated: 2026-04-26
 - Keep startup/read-order instructions only in `SESSION_START.md` to avoid duplication.
 
 ## Recent updates
+- **S37-T2 complete (PUT /api/pitfalls/{provider})**:
+  - Refactored `handlers_pitfalls.go` into a single `pitfallsHandler` dispatcher: `GET /api/pitfalls` lists, `PUT /api/pitfalls/{provider}` writes the provider's YAML file atomically (.tmp + rename). Body is `{"pitfalls": [...]}`. Validation rejects empty resource/rule (422), unknown fields (400), traversal in provider name (400), missing pitfalls dir (424), and non-PUT methods (405).
+  - Default `source: static` when omitted on a write. 4 new tests cover write success, validation, traversal rejection, and method rejection.
 - **S38-T1 complete (GET /api/runs/{scenario}/compare)**:
   - Added `internal/api/handlers_runs_compare.go` returning file-level diffs between two runs of a scenario. Each entry has `filename`, `status` (`added`/`removed`/`modified`/`unchanged`), and `unified_diff` text (3 lines context). Empty diff for unchanged files. Validates run IDs (no path traversal), 400 on missing query params, 404 when either run's generated/ snapshot is absent.
   - Added direct dep `github.com/pmezard/go-difflib`.
