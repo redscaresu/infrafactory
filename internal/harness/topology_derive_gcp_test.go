@@ -444,6 +444,56 @@ func TestDeriveTopologyGCPMalformedNestedShape(t *testing.T) {
 	}
 }
 
+// TestDeriveTopologyGCPSQLOrMergesPublicReachability guards the pass-8
+// fix: when two same-engine SQL instances differ in public
+// reachability, the shared public_internet->database edge must reflect
+// "reachable if any one is", regardless of iteration order.
+func TestDeriveTopologyGCPSQLOrMergesPublicReachability(t *testing.T) {
+	t.Parallel()
+
+	state := map[string]any{
+		"compute": map[string]any{
+			"instances": []map[string]any{{"name": "web-0"}},
+		},
+		"sql": map[string]any{
+			"instances": []map[string]any{
+				// First instance: public reachable.
+				{
+					"name":            "exposed-pg",
+					"databaseVersion": "POSTGRES_15",
+					"settings": map[string]any{
+						"ipConfiguration": map[string]any{
+							"ipv4Enabled":        true,
+							"authorizedNetworks": []any{map[string]any{"value": "0.0.0.0/0"}},
+						},
+					},
+				},
+				// Second instance same engine: private only.
+				{
+					"name":            "private-pg",
+					"databaseVersion": "POSTGRES_15",
+					"settings": map[string]any{
+						"ipConfiguration": map[string]any{"ipv4Enabled": false},
+					},
+				},
+			},
+		},
+	}
+	stateJSON, _ := json.Marshal(state)
+
+	out, _, err := DeriveTopology(stateJSON)
+	if err != nil {
+		t.Fatalf("derive: %v", err)
+	}
+	var parsed struct {
+		Connectivity map[string]bool `json:"connectivity"`
+	}
+	_ = json.Unmarshal(out, &parsed)
+	if !parsed.Connectivity["public_internet->database:5432"] {
+		t.Fatalf("expected OR-merged public_internet->database:5432=true, got %+v", parsed.Connectivity)
+	}
+}
+
 // TestDeriveTopologyGCPSQLNarrowAuthorizedNetworkIsPrivate guards the
 // pass-3 fix where a single-bastion-IP authorized_networks entry was
 // incorrectly flipping public_internet->database to true.

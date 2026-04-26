@@ -15,9 +15,10 @@ import (
 // validRunID matches the timestamp-shaped run identifiers the runstore
 // produces (e.g. 20260426T103008Z). Excluding leading dots and
 // punctuation other than `-_` rules out a `run1=.` request that would
-// otherwise resolve to the scenario root. Length is capped at 64 chars
-// so an oversized URL surfaces as a 400 client error rather than as a
-// filesystem 500 from os.ReadFile hitting ENAMETOOLONG.
+// otherwise resolve to the scenario root. Total length is capped at 64
+// chars (1 leading + 63 trailing) so an oversized URL surfaces as a
+// 400 client error rather than as a filesystem 500 from os.ReadFile
+// hitting ENAMETOOLONG.
 var validRunID = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$`)
 
 type compareResponse struct {
