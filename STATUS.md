@@ -27,6 +27,10 @@ Last updated: 2026-04-26
 - Keep startup/read-order instructions only in `SESSION_START.md` to avoid duplication.
 
 ## Recent updates
+- **S38-T3 + S39-T4 complete (Playwright e2e for compare and validation)**:
+  - `ui/e2e/compare.spec.ts` (4 tests): sidebar nav → /compare, &lt;2-runs disables Compare button, two-run compare renders file list with status badges, switching files updates the diff pane. Uses `findComparableScenario` precondition probe → tests skip cleanly on a fresh checkout with no `.infrafactory/runs/` data.
+  - `ui/e2e/validation.spec.ts` (4 tests): seeded scenario shows valid after debounce, `cloud: scaleway → aws` flips to errors, garbage YAML surfaces `yaml syntax`, restoring a valid edit returns to green. Each test restores original textarea content in `finally`.
+  - Playwright suite: 24 passed, 7 skipped. Slices 37-39 fully closed for the UI side.
 - **S41-T1 partial (fakegcp test infrastructure)**:
   - In the sibling `../fakegcp/` working tree: added `test-race`, `test-short`, `test-coverage` Makefile targets. `test-coverage` writes `coverage.out` and emits an HTML report; current handlers package coverage is **63.7%** of statements. Existing `testutil/testutil.go` is the helper set; further coverage targets land with S41-T2 (repository unit tests).
   - Not committed in fakegcp because that repo has no git history yet — `S41-T0` (git init + first commit + push) is the gate, owned by the user (avoiding unauthorised remote pushes).
