@@ -27,6 +27,10 @@ Last updated: 2026-04-26
 - Keep startup/read-order instructions only in `SESSION_START.md` to avoid duplication.
 
 ## Recent updates
+- **Slice 34-T3 complete (oscillation learning tests)**:
+  - Added `TestRunCommandLearnsPitfallFromOscillation` driving the run loop with an alternating-error static harness for 4 iterations (A, B, A, B). Asserts `repair_budget_exhausted` and that the K8s detail (extractable) is appended to `pitfalls/scaleway.yaml` while the generic detail (B) is correctly skipped.
+  - Added `TestRunCommandSkipsOscillationLearningWhenNoOscillation` confirming sustained linear failure → `stuck` terminal reason → no pitfalls file written.
+  - Closes Slice 34.
 - **Slice 35-T1 complete (http_probe diagnostics)**:
   - `DeriveTopology` now returns `(jsonBytes, diagnostics map[string]string, error)`. Diagnostics are keyed per http_probe entry (e.g. `load_balancer:80`) plus an `load_balancer` LB-level fallback for cases where the probe key doesn't exist (no frontend on requested port). Strings are short, lowercase, and factual ("no backend attached", "no public ip on lb", "frontends on port 443"). Existing JSON output and consumers are unchanged; only `internal/harness/topology.go:28` needed a compile-fix to ignore the new return.
   - 6 new diagnostic tests cover no-backend, no-public-IP, both, no-frontend-on-port, frontend-on-different-port, and a healthy-probe sanity check.
