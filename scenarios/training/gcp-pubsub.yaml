@@ -1,0 +1,19 @@
+scenario: gcp-pubsub
+version: "1.0"
+cloud: gcp
+description: >
+  A Pub/Sub topic with a default pull subscription, exercising
+  fakegcp's topic → subscription FK chain end-to-end through
+  infrafactory's Layer-2 mock-deploy harness.
+
+resources:
+  pubsub:
+    purpose: events
+    subscription: true
+
+constraints:
+  region: europe-west1
+
+acceptance_criteria:
+  - type: destruction
+    expect: no_orphans

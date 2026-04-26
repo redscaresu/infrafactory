@@ -45,7 +45,11 @@
         "iam": { "$ref": "#/$defs/iam_resource" },
         "registry": { "$ref": "#/$defs/registry_resource" },
         "redis": { "$ref": "#/$defs/redis_resource" },
-        "storage": { "$ref": "#/$defs/storage_resource" }
+        "storage": { "$ref": "#/$defs/storage_resource" },
+        "pubsub": { "$ref": "#/$defs/pubsub_resource" },
+        "dns": { "$ref": "#/$defs/dns_resource" },
+        "cloud_run": { "$ref": "#/$defs/cloud_run_resource" },
+        "secret_manager": { "$ref": "#/$defs/secret_manager_resource" }
       },
       "additionalProperties": false
     },
@@ -286,6 +290,69 @@
           "type": "string",
           "enum": ["small", "medium", "large", "xlarge"],
           "description": "T-shirt size hint for storage class / capacity expectations."
+        }
+      },
+      "additionalProperties": false
+    },
+    "pubsub_resource": {
+      "type": "object",
+      "required": ["purpose"],
+      "properties": {
+        "purpose": {
+          "type": "string",
+          "description": "Purpose of the Pub/Sub topic (e.g., events, audit-log). Passed to agent for naming."
+        },
+        "subscription": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether to provision a default pull subscription on the topic."
+        }
+      },
+      "additionalProperties": false
+    },
+    "dns_resource": {
+      "type": "object",
+      "required": ["domain"],
+      "properties": {
+        "domain": {
+          "type": "string",
+          "description": "Fully-qualified domain name for the managed zone (e.g., test.example.invalid)."
+        },
+        "record_set": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether to provision a default A-record under the zone."
+        }
+      },
+      "additionalProperties": false
+    },
+    "cloud_run_resource": {
+      "type": "object",
+      "required": ["purpose"],
+      "properties": {
+        "purpose": {
+          "type": "string",
+          "description": "Purpose of the Cloud Run service (e.g., api, worker). Passed to agent for naming."
+        },
+        "image": {
+          "type": "string",
+          "description": "Container image to deploy. Defaults to a documented placeholder when omitted."
+        }
+      },
+      "additionalProperties": false
+    },
+    "secret_manager_resource": {
+      "type": "object",
+      "required": ["purpose"],
+      "properties": {
+        "purpose": {
+          "type": "string",
+          "description": "Purpose of the secret bundle (e.g., db-credentials, api-tokens). Passed to agent for naming."
+        },
+        "version": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether to provision an initial secret version."
         }
       },
       "additionalProperties": false

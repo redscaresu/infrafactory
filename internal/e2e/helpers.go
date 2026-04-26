@@ -116,24 +116,39 @@ func (m *MockwayInstance) FetchState(t *testing.T) map[string]any {
 // the process when the test ends.
 func StartMockway(t *testing.T) *MockwayInstance {
 	t.Helper()
+	return startSiblingMock(t, "mockway", "../mockway", "./cmd/mockway")
+}
+
+// StartFakegcp compiles and starts fakegcp from the sibling
+// `../fakegcp` source repo on a free local port. Mirror of
+// StartMockway — fakegcp exposes the same `/mock/{state,reset,
+// snapshot,restore}` admin surface, so the returned MockwayInstance
+// helpers (FetchState/Reset/Stop) work against it without changes.
+func StartFakegcp(t *testing.T) *MockwayInstance {
+	t.Helper()
+	return startSiblingMock(t, "fakegcp", "../fakegcp", "./cmd/fakegcp")
+}
+
+func startSiblingMock(t *testing.T, name, repoRel, cmdPath string) *MockwayInstance {
+	t.Helper()
 
 	port := pickFreePort(t)
-	dbPath := filepath.Join(t.TempDir(), "mockway.sqlite")
-	logPath := filepath.Join(t.TempDir(), "mockway.log")
-	mockwayRoot := resolveSiblingMockwayRoot(t)
+	dbPath := filepath.Join(t.TempDir(), name+".sqlite")
+	logPath := filepath.Join(t.TempDir(), name+".log")
+	repoRoot := resolveSiblingRepo(t, repoRel)
 
 	logFile, err := os.Create(logPath)
 	if err != nil {
-		t.Fatalf("create mockway log file: %v", err)
+		t.Fatalf("create %s log file: %v", name, err)
 	}
 
-	cmd := exec.Command("go", "run", "./cmd/mockway", "--port", fmt.Sprintf("%d", port), "--db", dbPath)
-	cmd.Dir = mockwayRoot
+	cmd := exec.Command("go", "run", cmdPath, "--port", fmt.Sprintf("%d", port), "--db", dbPath)
+	cmd.Dir = repoRoot
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	if err := cmd.Start(); err != nil {
 		_ = logFile.Close()
-		t.Fatalf("start mockway: %v", err)
+		t.Fatalf("start %s: %v", name, err)
 	}
 
 	url := fmt.Sprintf("http://127.0.0.1:%d", port)
@@ -142,7 +157,7 @@ func StartMockway(t *testing.T) *MockwayInstance {
 		_ = cmd.Wait()
 		_ = logFile.Close()
 		logPayload, _ := os.ReadFile(logPath)
-		t.Fatalf("wait for mockway readiness: %v\nlog:\n%s", err, string(logPayload))
+		t.Fatalf("wait for %s readiness: %v\nlog:\n%s", name, err, string(logPayload))
 	}
 
 	instance := &MockwayInstance{
@@ -155,17 +170,18 @@ func StartMockway(t *testing.T) *MockwayInstance {
 	return instance
 }
 
-// resolveSiblingMockwayRoot returns the absolute path to the sibling
-// `../mockway` source repo. Fails the test if the repo is missing.
-func resolveSiblingMockwayRoot(t *testing.T) string {
+// resolveSiblingRepo returns the absolute path to a sibling source
+// repo (e.g. ../mockway, ../fakegcp). Fails the test if the repo's
+// command package isn't found.
+func resolveSiblingRepo(t *testing.T, rel string) string {
 	t.Helper()
 	_, thisFile, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("resolve current test file path")
 	}
-	root := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", "..", "..", "mockway"))
-	if _, err := os.Stat(filepath.Join(root, "cmd", "mockway")); err != nil {
-		t.Fatalf("resolve sibling mockway repo at %s: %v", root, err)
+	root := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", "..", rel))
+	if _, err := os.Stat(root); err != nil {
+		t.Fatalf("resolve sibling %s repo at %s: %v", rel, root, err)
 	}
 	return root
 }
@@ -294,7 +310,19 @@ func WriteFile(t *testing.T, path string, content []byte) {
 // hermetic mockway-only runs (sandbox deploy disabled). Policy, mapping,
 // prompt, and pitfall paths are resolved against the repository root so
 // scenarios with policy criteria can be evaluated end-to-end.
+//
+// fakegcp URL is left empty; for GCP scenarios use WriteConfigMultiCloud
+// so the cloudMockStateRouter has a target for `cloud: gcp`.
 func WriteConfig(t *testing.T, configPath, mockwayURL, outputRoot string) {
+	t.Helper()
+	WriteConfigMultiCloud(t, configPath, mockwayURL, "", outputRoot)
+}
+
+// WriteConfigMultiCloud writes an infrafactory.yaml with both mockway
+// and fakegcp URLs populated. fakegcpURL may be empty for
+// Scaleway-only setups; pass a non-empty URL when the test runs a
+// `cloud: gcp` scenario through the cloudMockStateRouter.
+func WriteConfigMultiCloud(t *testing.T, configPath, mockwayURL, fakegcpURL, outputRoot string) {
 	t.Helper()
 	repoRoot := RepoRoot(t)
 	WriteFile(t, configPath, fmt.Appendf(nil, `version: "1.0"
@@ -302,13 +330,15 @@ agent:
   type: claude-code
 mockway:
   url: %s
+fakegcp:
+  url: %s
 scaleway:
   credentials_source: env
 validation:
   layers:
     static:
       enabled: true
-      policy_paths: [%s/policies/common, %s/policies/scaleway]
+      policy_paths: [%s/policies/common, %s/policies/scaleway, %s/policies/gcp]
     mock_deploy:
       enabled: true
     sandbox_deploy:
@@ -330,7 +360,8 @@ paths:
   pitfalls: %s/pitfalls
 `,
 		mockwayURL,
-		repoRoot, repoRoot,
+		fakegcpURL,
+		repoRoot, repoRoot, repoRoot,
 		repoRoot, repoRoot, outputRoot, repoRoot, repoRoot, repoRoot,
 	))
 }

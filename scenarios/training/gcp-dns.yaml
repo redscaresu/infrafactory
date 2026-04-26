@@ -1,0 +1,19 @@
+scenario: gcp-dns
+version: "1.0"
+cloud: gcp
+description: >
+  A DNS managed zone with one default A record. Exercises fakegcp's
+  zone → record set FK chain (TestDNSZoneDeleteWithRecords) end-to-end
+  through infrafactory's Layer-2 mock-deploy harness.
+
+resources:
+  dns:
+    domain: test.example.invalid
+    record_set: true
+
+constraints:
+  region: europe-west1
+
+acceptance_criteria:
+  - type: destruction
+    expect: no_orphans

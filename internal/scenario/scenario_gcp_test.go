@@ -57,6 +57,10 @@ func TestLoadGCPTrainingScenarios(t *testing.T) {
 		"gcp-gke-cluster.yaml",
 		"gcp-cloud-sql.yaml",
 		"gcp-full-stack.yaml",
+		"gcp-pubsub.yaml",
+		"gcp-dns.yaml",
+		"gcp-cloud-run.yaml",
+		"gcp-secret-manager.yaml",
 	} {
 		path := filepath.Join(scenariosDir, name)
 		t.Run(name, func(t *testing.T) {

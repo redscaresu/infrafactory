@@ -1,0 +1,19 @@
+scenario: gcp-cloud-run
+version: "1.0"
+cloud: gcp
+description: >
+  A single Cloud Run v2 service with a documented placeholder image.
+  Exercises fakegcp's TestCloudRunServiceCRUD handler test path
+  end-to-end through infrafactory's Layer-2 mock-deploy harness.
+
+resources:
+  cloud_run:
+    purpose: api
+    image: us-docker.pkg.dev/cloudrun/container/hello
+
+constraints:
+  region: europe-west1
+
+acceptance_criteria:
+  - type: destruction
+    expect: no_orphans

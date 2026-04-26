@@ -32,14 +32,53 @@ type Scenario struct {
 }
 
 type Resources struct {
-	Compute    *ComputeResource    `json:"compute,omitempty"`
-	Networking *NetworkingResource `json:"networking,omitempty"`
-	Database   *DatabaseResource   `json:"database,omitempty"`
-	Kubernetes *KubernetesResource `json:"kubernetes,omitempty"`
-	IAM        *IAMResource        `json:"iam,omitempty"`
-	Registry   *RegistryResource   `json:"registry,omitempty"`
-	Redis      *RedisResource      `json:"redis,omitempty"`
-	Storage    *StorageResource    `json:"storage,omitempty"`
+	Compute       *ComputeResource       `json:"compute,omitempty"`
+	Networking    *NetworkingResource    `json:"networking,omitempty"`
+	Database      *DatabaseResource      `json:"database,omitempty"`
+	Kubernetes    *KubernetesResource    `json:"kubernetes,omitempty"`
+	IAM           *IAMResource           `json:"iam,omitempty"`
+	Registry      *RegistryResource      `json:"registry,omitempty"`
+	Redis         *RedisResource         `json:"redis,omitempty"`
+	Storage       *StorageResource       `json:"storage,omitempty"`
+	PubSub        *PubSubResource        `json:"pubsub,omitempty"`
+	DNS           *DNSResource           `json:"dns,omitempty"`
+	CloudRun      *CloudRunResource      `json:"cloud_run,omitempty"`
+	SecretManager *SecretManagerResource `json:"secret_manager,omitempty"`
+}
+
+// PubSubResource declares a Pub/Sub topic (and, by default, a single
+// pull subscription) on a `cloud: gcp` scenario. Wire shape proven by
+// fakegcp's TestPubSubTopicCRUD + TestPubSubSubscriptionFKViolation
+// + TestPubSubTopicDeleteWithSubscriptions handler tests.
+type PubSubResource struct {
+	Purpose      string `json:"purpose"`
+	Subscription bool   `json:"subscription,omitempty"`
+}
+
+// DNSResource declares a DNS managed zone (and, by default, a single
+// A record under it) on a `cloud: gcp` scenario. Wire shape proven by
+// fakegcp's TestDNSZoneCRUD + TestDNSRecordSetFKViolation +
+// TestDNSZoneDeleteWithRecords handler tests.
+type DNSResource struct {
+	Domain    string `json:"domain"`
+	RecordSet bool   `json:"record_set,omitempty"`
+}
+
+// CloudRunResource declares a Cloud Run v2 service on a `cloud: gcp`
+// scenario. Wire shape proven by fakegcp's TestCloudRunServiceCRUD
+// handler test.
+type CloudRunResource struct {
+	Purpose string `json:"purpose"`
+	Image   string `json:"image,omitempty"`
+}
+
+// SecretManagerResource declares a Secret Manager secret (and, by
+// default, an initial version) on a `cloud: gcp` scenario. Wire
+// shape proven by fakegcp's TestSecretCRUD + TestSecretVersionCRUD +
+// TestSecretDeleteWithVersions handler tests.
+type SecretManagerResource struct {
+	Purpose string `json:"purpose"`
+	Version bool   `json:"version,omitempty"`
 }
 
 // StorageResource models the GCP `google_storage_bucket` shape (S36-T2
