@@ -132,10 +132,28 @@ func listPitfalls(state *serverState, w http.ResponseWriter, r *http.Request) {
 		}
 		seenProvider[provider] = true
 		path := filepath.Join(dir, name)
-		data, err := os.ReadFile(path)
+		// Cap each pitfalls file at 1 MB so a multi-GB file (whether
+		// malicious or accidental) can't OOM the API. Mirrors the
+		// edit-handler size cap.
+		const maxPitfallsFileBytes = 1 << 20
+		f, err := os.Open(path)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "open pitfalls file "+name+": "+err.Error())
+			return
+		}
+		data, err := io.ReadAll(io.LimitReader(f, maxPitfallsFileBytes+1))
+		_ = f.Close()
 		if err != nil {
 			writeJSONError(w, http.StatusInternalServerError, "read pitfalls file "+name+": "+err.Error())
 			return
+		}
+		if len(data) > maxPitfallsFileBytes {
+			groups = append(groups, pitfallsProviderGroup{
+				Provider:   provider,
+				Pitfalls:   []pitfallsResponseEntry{},
+				ParseError: fmt.Sprintf("pitfalls file exceeds %d bytes", maxPitfallsFileBytes),
+			})
+			continue
 		}
 		var file generator.PitfallsFile
 		if err := yaml.Unmarshal(data, &file); err != nil {
