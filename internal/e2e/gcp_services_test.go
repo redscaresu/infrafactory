@@ -845,31 +845,39 @@ func collectReplaceLogicalKeys(state map[string]any, collectionKey string) []str
 	return keys[collectionKey]
 }
 
-// collectKeyParents returns one entry per IAM key, identified by
-// its parent service-account email. A delete-and-recreate under
-// the same SA produces a stable parent key; a recreate that rebound
-// the key to a different SA changes the parent and surfaces as a
-// difference.
+// collectKeyParents returns one entry per IAM key, anchored on its
+// parent service-account email plus a stable per-SA index. The
+// uuid embedded in the key name regenerates on every refresh, so
+// using it would defeat the purpose of the replace-allowed check;
+// counting per-SA gives us a key that survives the recreate but
+// catches a recreate that rebound the key to a different SA, or a
+// recreate that lost or duplicated keys under one SA.
 func collectKeyParents(state map[string]any) []string {
 	items := stateSlice(state, "iam", "keys")
+	perSA := map[string]int{}
 	out := make([]string, 0, len(items))
 	for _, item := range items {
-		if email, _ := item["serviceAccountEmail"].(string); email != "" {
-			out = append(out, "sa="+email)
-			continue
-		}
-		// Fall back to the parent path embedded in the key name:
-		// projects/<p>/serviceAccounts/<email>/keys/<uuid>.
-		if name, _ := item["name"].(string); name != "" {
-			parts := strings.Split(name, "/")
-			if len(parts) >= 4 && parts[len(parts)-2] == "keys" {
-				out = append(out, "sa="+parts[len(parts)-3])
-				continue
-			}
-			out = append(out, "name="+name)
-		}
+		email := getKeyParentEmail(item)
+		idx := perSA[email]
+		perSA[email] = idx + 1
+		out = append(out, fmt.Sprintf("sa=%s/i=%d", email, idx))
 	}
 	return out
+}
+
+// getKeyParentEmail extracts the parent service-account email
+// from a fakegcp IAM key state item, falling back to the email
+// embedded in the key name.
+func getKeyParentEmail(item map[string]any) string {
+	if email, _ := item["serviceAccountEmail"].(string); email != "" {
+		return email
+	}
+	name, _ := item["name"].(string)
+	parts := strings.Split(name, "/")
+	if len(parts) >= 4 && parts[len(parts)-2] == "keys" {
+		return parts[len(parts)-3]
+	}
+	return ""
 }
 
 // collectLogicalKeys returns, for each (root, collection), a slice
