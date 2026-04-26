@@ -22,6 +22,15 @@ tfplan
 ISSUES.md
 issues.md
 
+# Secrets
+.env
+.env.*
+*.pem
+*.key
+credentials.json
+service-account.json
+token.json
+
 # Claude Code
 .claude/
 

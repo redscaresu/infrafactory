@@ -26,17 +26,13 @@ Additional references:
 | `STATUS.md` | Progress log with recent updates | At end of each meaningful coding session |
 | `CONCEPT.md` | Durable architecture, contracts, design decisions | Only for major architecture/design shifts |
 | `docs/decisions/*.md` | ADRs for decision-impacting changes | When change crosses ADR trigger threshold (see below) |
-| `docs/plans/*.md` | Design reference for complex slices needing design discussion (optional) | When planning a complex slice |
-| `docs/process/TICKET_TEMPLATE.md` | Template for framing tickets | Rarely (process changes only) |
-| `docs/process/EXECUTION_PROMPT.md` | Reusable autonomous execution prompt | Rarely (process changes only) |
-
 ## Planning a New Slice
 
-1. **Research** — explore the codebase and read relevant docs.
-2. **Add tickets** — add tickets to `BACKLOG.md` with id, slice, title, priority, status (`todo`), deps, and owner.
-3. **Optionally write plan** — for complex slices, create `docs/plans/<slice-name>-plan.md`. Follow format of existing plans.
-4. **Add milestone** — append the slice to `ROADMAP.md`.
-5. **Get approval** — present the plan to the user before implementation begins.
+1. **Add tickets** to `BACKLOG.md` with id, slice, title, priority, status (`todo`), deps, and owner.
+2. **Add milestone** to `ROADMAP.md`.
+3. **Get approval** from the user before implementation begins.
+
+That's it. ADRs only when crossing the threshold below. No plan files needed — the tickets are the plan.
 
 ## Fresh Context
 
@@ -118,6 +114,13 @@ Layer 3 uses self-managed project lifecycle per ADR-0010. Generated HCL includes
 1. Org-level API keys (IAM -> API Keys, organization-level permissions).
 2. Env vars: `SCW_ACCESS_KEY`, `SCW_SECRET_KEY`.
 3. Enable Layer 3: `validation.layers.sandbox_deploy.enabled: true` in `infrafactory.yaml`.
+
+## Secrets
+- Never commit `.env`, credentials, API keys, or private keys.
+- `.gitignore` blocks common secret files (`.env`, `credentials.json`, `*.pem`, `*.key`).
+- Pre-commit hook scans staged diffs for secret patterns (`SCW_ACCESS_KEY=`, `OPENROUTER_API_KEY=`, `BEGIN PRIVATE KEY`, etc.).
+- If the hook blocks your commit, remove the secret from the file and use environment variables instead.
+- Same protections apply to mockway and fakegcp repos.
 
 ## Safety
 - Never revert/delete unrelated user changes.
