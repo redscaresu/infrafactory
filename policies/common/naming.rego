@@ -14,7 +14,7 @@ deny contains msg if {
 	#     resources we know expect that shape (google_dns_*). Without
 	#     the resource-type guard a typo'd compute / storage name like
 	#     "api." or "bucket." would slip through.
-	not is_gcp_resource_path(name)
+	not is_gcp_resource_path(resource, name)
 	not is_dns_fqdn(resource, name)
 	not regex.match(`^[a-z](?:[a-z0-9-]*[a-z0-9])?$`, name)
 	msg := sprintf(
@@ -23,8 +23,26 @@ deny contains msg if {
 	)
 }
 
-is_gcp_resource_path(name) if {
+is_gcp_resource_path(resource, name) if {
+	# Only resource types whose `name` attribute is server-assigned
+	# to a fully-qualified GCP resource path skip the slug rule. For
+	# everything else — google_pubsub_topic, google_storage_bucket,
+	# google_dns_managed_zone, etc. — `name` is a user-controlled
+	# slug and a leading "projects/" is an actual misconfiguration.
+	gcp_path_named_types[resource.type]
 	startswith(name, "projects/")
+}
+
+# gcp_path_named_types is the set of google_* resources whose `name`
+# in tofu state is the server-assigned fully-qualified path. The
+# Terraform google provider exposes the user-controlled leaf via a
+# different attribute (secret_id, account_id, etc.) — `name` is for
+# reading back, not for setting.
+gcp_path_named_types := {
+	"google_secret_manager_secret",
+	"google_secret_manager_secret_version",
+	"google_service_account",
+	"google_service_account_key",
 }
 
 is_dns_fqdn(resource, name) if {

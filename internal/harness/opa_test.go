@@ -335,3 +335,80 @@ func TestCommonNamingPolicyAllowsSingleCharacterNames(t *testing.T) {
 		})
 	}
 }
+
+// TestCommonNamingPolicyGCPExemptions pins the narrow set of
+// resource-type-gated exemptions added when GCP coverage landed.
+// A regression in the heuristic (e.g. accidentally exempting every
+// "projects/" name, or every trailing-dot name) would let real
+// misconfigurations slip through; this table-driven test makes
+// that surface immediately.
+func TestCommonNamingPolicyGCPExemptions(t *testing.T) {
+	t.Parallel()
+
+	policy := filepath.Join("..", "..", "policies", "common", "naming.rego")
+	cases := []struct {
+		name          string
+		resourceType  string
+		resourceName  string
+		expectedCount int
+	}{
+		// google_secret_manager_secret.name is server-assigned to the
+		// fully-qualified path — the slug check must skip it.
+		{
+			name:          "secret manager full path passes",
+			resourceType:  "google_secret_manager_secret",
+			resourceName:  "projects/p/secrets/db-credentials",
+			expectedCount: 0,
+		},
+		// google_dns_record_set.name is an FQDN — trailing dot is
+		// expected, not a misconfiguration.
+		{
+			name:          "dns record set FQDN passes",
+			resourceType:  "google_dns_record_set",
+			resourceName:  "host.example.invalid.",
+			expectedCount: 0,
+		},
+		// google_dns_managed_zone.name is a slug, NOT an FQDN. A
+		// trailing dot is a real mistake and must fail.
+		{
+			name:          "dns managed zone trailing dot fails",
+			resourceType:  "google_dns_managed_zone",
+			resourceName:  "zone.",
+			expectedCount: 1,
+		},
+		// A non-exempt resource with a name starting "projects/" is
+		// a typo — must fail.
+		{
+			name:          "pubsub topic projects-prefixed fails",
+			resourceType:  "google_pubsub_topic",
+			resourceName:  "projects/p/topics/events",
+			expectedCount: 1,
+		},
+		// A non-exempt resource with a trailing dot is a typo too.
+		{
+			name:          "storage bucket trailing dot fails",
+			resourceType:  "google_storage_bucket",
+			resourceName:  "bucket.",
+			expectedCount: 1,
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			planJSON := fmt.Sprintf(`{
+  "planned_values": {"root_module": {"resources": [
+    {"address":"%s.x","type":"%s","values":{"name":"%s"}}
+  ]}}
+}`, tc.resourceType, tc.resourceType, tc.resourceName)
+			failures, err := EvaluatePlanPoliciesWithConstraints(context.Background(), []byte(planJSON), nil, []string{policy})
+			if err != nil {
+				t.Fatalf("evaluate policy: %v", err)
+			}
+			if got := len(failures); got != tc.expectedCount {
+				t.Fatalf("expected %d failures, got %d (%+v)", tc.expectedCount, got, failures)
+			}
+		})
+	}
+}
