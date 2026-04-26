@@ -49,7 +49,7 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 | S36-T0 | Slice 36 | fakegcp: create AGENTS.md + add forwarding_rule handler (in fakegcp repo) | P1 | todo | — | — |
 | S35-T3 | Slice 35 | Tests verifying enriched http_probe error messages | P1 | todo | S35-T2 | — |
 | S35-T2 | Slice 35 | Include diagnostic in topology evaluation failure messages | P1 | todo | S35-T1 | — |
-| S35-T1 | Slice 35 | Add diagnostic detail to DeriveTopology when http_probe is false | P1 | todo | — | — |
+| S35-T1 | Slice 35 | Add diagnostic detail to DeriveTopology when http_probe is false | P1 | done | — | claude+codex |
 | S34-T3 | Slice 34 | Tests for oscillation detection and failed-run learning | P1 | todo | S34-T2 | — |
 | S34-T2 | Slice 34 | Extract and append pitfalls from oscillation failures | P1 | done | S34-T1 | claude |
 | S34-T1 | Slice 34 | Detect oscillation patterns in run loop (same failure signature repeating) | P1 | done | — | claude |

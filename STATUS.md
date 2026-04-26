@@ -27,6 +27,10 @@ Last updated: 2026-04-26
 - Keep startup/read-order instructions only in `SESSION_START.md` to avoid duplication.
 
 ## Recent updates
+- **Slice 35-T1 complete (http_probe diagnostics)**:
+  - `DeriveTopology` now returns `(jsonBytes, diagnostics map[string]string, error)`. Diagnostics are keyed per http_probe entry (e.g. `load_balancer:80`) plus an `load_balancer` LB-level fallback for cases where the probe key doesn't exist (no frontend on requested port). Strings are short, lowercase, and factual ("no backend attached", "no public ip on lb", "frontends on port 443"). Existing JSON output and consumers are unchanged; only `internal/harness/topology.go:28` needed a compile-fix to ignore the new return.
+  - 6 new diagnostic tests cover no-backend, no-public-IP, both, no-frontend-on-port, frontend-on-different-port, and a healthy-probe sanity check.
+  - S35-T2 will surface these into evaluation failure messages.
 - **Slice 34-T2 complete (oscillation pitfall wiring)**:
   - Run loop now accumulates `feedback.IterationResult` per iteration. When the run terminates with `repair_budget_exhausted` or `stuck`, it calls `feedback.DetectOscillation` and feeds each oscillating signature's detail through `generator.ExtractLearnedPitfall` + `generator.AppendPitfall`. Successful learns log `oscillation_pitfall_learned`; append errors log `oscillation_pitfall_append`.
 - **Slice 34-T1 complete (oscillation detection)**:

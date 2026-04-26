@@ -25,7 +25,7 @@ func EvaluateTopology(stateJSON []byte, checks []TopologyCheck) ([]feedback.Fail
 
 	// If no pre-computed topology maps exist, derive from raw resource state.
 	if state.Connectivity == nil && state.HTTPProbe == nil {
-		derived, err := DeriveTopology(stateJSON)
+		derived, _, err := DeriveTopology(stateJSON)
 		if err != nil {
 			return nil, fmt.Errorf("derive topology: %w", err)
 		}

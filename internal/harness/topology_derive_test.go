@@ -16,8 +16,14 @@ func mustMarshal(t *testing.T, v any) []byte {
 
 func deriveAndParse(t *testing.T, state map[string]any) (map[string]bool, map[string]bool) {
 	t.Helper()
+	conn, probe, _ := deriveAndParseAll(t, state)
+	return conn, probe
+}
+
+func deriveAndParseAll(t *testing.T, state map[string]any) (map[string]bool, map[string]bool, map[string]string) {
+	t.Helper()
 	raw := mustMarshal(t, state)
-	out, err := DeriveTopology(raw)
+	out, diagnostics, err := DeriveTopology(raw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -28,7 +34,7 @@ func deriveAndParse(t *testing.T, state map[string]any) (map[string]bool, map[st
 	if err := json.Unmarshal(out, &result); err != nil {
 		t.Fatal(err)
 	}
-	return result.Connectivity, result.HTTPProbe
+	return result.Connectivity, result.HTTPProbe, diagnostics
 }
 
 func webAppState() map[string]any {
@@ -246,6 +252,142 @@ func TestDeriveTopologyRDBNonMatchingPN(t *testing.T) {
 	conn, _ := deriveAndParse(t, state)
 	if conn["compute->database:5432"] {
 		t.Error("expected no connectivity when server and RDB are on different private networks")
+	}
+}
+
+func TestDeriveTopologyDiagnosticsNoBackend(t *testing.T) {
+	lbID := "lb-1"
+	state := map[string]any{
+		"lb": map[string]any{
+			"lbs":       []any{map[string]any{"id": lbID}},
+			"ips":       []any{map[string]any{"id": "lbip-1", "lb_id": lbID}},
+			"frontends": []any{map[string]any{"id": "fe-1", "lb_id": lbID, "inbound_port": float64(80)}},
+			"backends":  []any{},
+		},
+	}
+	_, probe, diagnostics := deriveAndParseAll(t, state)
+	if probe["load_balancer:80"] {
+		t.Fatal("expected http_probe[load_balancer:80] = false")
+	}
+	got, ok := diagnostics["load_balancer:80"]
+	if !ok {
+		t.Fatalf("expected diagnostics[load_balancer:80] to be set, got %v", diagnostics)
+	}
+	if got != "no backend attached" {
+		t.Errorf("expected 'no backend attached', got %q", got)
+	}
+}
+
+func TestDeriveTopologyDiagnosticsNoIP(t *testing.T) {
+	lbID := "lb-1"
+	state := map[string]any{
+		"lb": map[string]any{
+			"lbs":       []any{map[string]any{"id": lbID}},
+			"ips":       []any{},
+			"frontends": []any{map[string]any{"id": "fe-1", "lb_id": lbID, "inbound_port": float64(80)}},
+			"backends":  []any{map[string]any{"id": "be-1", "lb_id": lbID}},
+		},
+	}
+	_, probe, diagnostics := deriveAndParseAll(t, state)
+	if probe["load_balancer:80"] {
+		t.Fatal("expected http_probe[load_balancer:80] = false")
+	}
+	got, ok := diagnostics["load_balancer:80"]
+	if !ok {
+		t.Fatalf("expected diagnostics[load_balancer:80] to be set, got %v", diagnostics)
+	}
+	if got != "no public ip on lb" {
+		t.Errorf("expected 'no public ip on lb', got %q", got)
+	}
+}
+
+func TestDeriveTopologyDiagnosticsNoBackendNoIP(t *testing.T) {
+	lbID := "lb-1"
+	state := map[string]any{
+		"lb": map[string]any{
+			"lbs":       []any{map[string]any{"id": lbID}},
+			"ips":       []any{},
+			"frontends": []any{map[string]any{"id": "fe-1", "lb_id": lbID, "inbound_port": float64(80)}},
+			"backends":  []any{},
+		},
+	}
+	_, _, diagnostics := deriveAndParseAll(t, state)
+	got, ok := diagnostics["load_balancer:80"]
+	if !ok {
+		t.Fatalf("expected diagnostics[load_balancer:80] to be set, got %v", diagnostics)
+	}
+	if got != "no backend attached and no public ip on lb" {
+		t.Errorf("expected combined reason, got %q", got)
+	}
+}
+
+func TestDeriveTopologyDiagnosticsNoFrontendOnRequestedPort(t *testing.T) {
+	// LB has no frontends at all. A probe targeting port 80 has no
+	// http_probe key, so the diagnostic is keyed by the LB-level fallback.
+	lbID := "lb-1"
+	state := map[string]any{
+		"lb": map[string]any{
+			"lbs":       []any{map[string]any{"id": lbID}},
+			"ips":       []any{map[string]any{"id": "lbip-1", "lb_id": lbID}},
+			"frontends": []any{},
+			"backends":  []any{map[string]any{"id": "be-1", "lb_id": lbID}},
+		},
+	}
+	_, probe, diagnostics := deriveAndParseAll(t, state)
+	if _, ok := probe["load_balancer:80"]; ok {
+		t.Fatalf("did not expect http_probe[load_balancer:80] entry, got %v", probe)
+	}
+	got, ok := diagnostics["load_balancer"]
+	if !ok {
+		t.Fatalf("expected diagnostics[load_balancer] fallback, got %v", diagnostics)
+	}
+	if got != "no frontends configured on lb" {
+		t.Errorf("expected 'no frontends configured on lb', got %q", got)
+	}
+}
+
+func TestDeriveTopologyDiagnosticsFrontendOnDifferentPort(t *testing.T) {
+	// Frontend exists on 443; a probe for 80 has no http_probe key. The
+	// LB-level fallback diagnostic lists the actual frontend ports.
+	lbID := "lb-1"
+	state := map[string]any{
+		"lb": map[string]any{
+			"lbs":       []any{map[string]any{"id": lbID}},
+			"ips":       []any{map[string]any{"id": "lbip-1", "lb_id": lbID}},
+			"frontends": []any{map[string]any{"id": "fe-1", "lb_id": lbID, "inbound_port": float64(443)}},
+			"backends":  []any{map[string]any{"id": "be-1", "lb_id": lbID}},
+		},
+	}
+	_, probe, diagnostics := deriveAndParseAll(t, state)
+	if _, ok := probe["load_balancer:80"]; ok {
+		t.Fatalf("did not expect http_probe[load_balancer:80] entry, got %v", probe)
+	}
+	if !probe["load_balancer:443"] {
+		t.Errorf("expected http_probe[load_balancer:443] = true, got %v", probe)
+	}
+	got, ok := diagnostics["load_balancer"]
+	if !ok {
+		t.Fatalf("expected diagnostics[load_balancer] fallback, got %v", diagnostics)
+	}
+	if got != "frontends on port 443" {
+		t.Errorf("expected 'frontends on port 443', got %q", got)
+	}
+}
+
+func TestDeriveTopologyDiagnosticsHealthyProbeHasNoPortEntry(t *testing.T) {
+	// A fully wired LB has no port-specific diagnostic for a reachable
+	// probe; the only entry is the LB-level fallback (kept so probes on
+	// other ports can still surface what frontends do exist).
+	state := webAppState()
+	_, probe, diagnostics := deriveAndParseAll(t, state)
+	if !probe["load_balancer:80"] {
+		t.Fatal("expected probe to be reachable")
+	}
+	if _, ok := diagnostics["load_balancer:80"]; ok {
+		t.Errorf("did not expect diagnostic for healthy probe, got %v", diagnostics)
+	}
+	if got := diagnostics["load_balancer"]; got != "frontends on port 80" {
+		t.Errorf("expected fallback 'frontends on port 80', got %q", got)
 	}
 }
 
