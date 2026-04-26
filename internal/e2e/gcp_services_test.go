@@ -346,12 +346,32 @@ func runGCPServiceScenario(t *testing.T, mock *MockwayInstance, scenarioFile str
 		}
 		stateAfterUpdate := mock.FetchState(t)
 		identitiesAfter := collectIdentities(stateAfterUpdate, expects)
+		logicalKeysBefore := collectLogicalKeys(stateAfterCreate, expects)
+		logicalKeysAfter := collectLogicalKeys(stateAfterUpdate, expects)
 		allowReplace := map[string]struct{}{}
 		for _, k := range update.allowReplaceCollections {
 			allowReplace[k] = struct{}{}
 		}
 		for key, before := range identitiesBefore {
 			if _, exempt := allowReplace[key]; exempt {
+				// Even when replace-on-update is the documented API
+				// behaviour for this collection, the *count and
+				// stable logical keys* must survive — an unexpected
+				// wipe or split would slip through the identity check
+				// otherwise. For collections whose only logical key
+				// is the auto-assigned id (e.g. iam/keys, where the
+				// uuid IS the name), we fall back to count parity.
+				lb, la := logicalKeysBefore[key], logicalKeysAfter[key]
+				switch {
+				case logicalKeysAreServerAssigned(lb, la):
+					if len(lb) != len(la) {
+						t.Errorf("update phase changed item count for %s: before=%d after=%d",
+							key, len(lb), len(la))
+					}
+				case !sameIdentities(lb, la):
+					t.Errorf("update phase changed the logical %s set (replace allowed but contents differ): before=%v after=%v",
+						key, lb, la)
+				}
 				continue
 			}
 			after := identitiesAfter[key]
@@ -811,6 +831,55 @@ func firstSecretLabels(state map[string]any) map[string]any {
 	}
 	labels, _ := secrets[0]["labels"].(map[string]any)
 	return labels
+}
+
+// logicalKeysAreServerAssigned heuristically detects collections
+// whose only logical name is itself a server-assigned id (e.g.
+// google_service_account_key, where the uuid IS embedded in the
+// resource name). When every key on both sides looks like a uuid
+// suffix, the count check is the strongest assertion we can make.
+func logicalKeysAreServerAssigned(before, after []string) bool {
+	if len(before) == 0 || len(after) == 0 {
+		return false
+	}
+	uuidish := func(keys []string) bool {
+		for _, k := range keys {
+			seg := k
+			if i := strings.LastIndex(k, "/"); i >= 0 {
+				seg = k[i+1:]
+			}
+			if len(seg) != 36 || strings.Count(seg, "-") != 4 {
+				return false
+			}
+		}
+		return true
+	}
+	return uuidish(before) && uuidish(after)
+}
+
+// collectLogicalKeys returns, for each (root, collection), a slice
+// of "logical" keys identifying each item — name plus type for DNS
+// rrsets (since terraform-provider-google addresses them by both),
+// plain name elsewhere. Used to assert that replace-allowed
+// collections still contain the same set of items pre/post update.
+func collectLogicalKeys(state map[string]any, expects []gcpStateExpect) map[string][]string {
+	out := map[string][]string{}
+	for _, exp := range expects {
+		key := exp.root + "/" + exp.collection
+		items := stateSlice(state, exp.root, exp.collection)
+		keys := make([]string, 0, len(items))
+		for _, item := range items {
+			name, _ := item["name"].(string)
+			rtype, _ := item["type"].(string)
+			if rtype != "" {
+				keys = append(keys, name+"/"+rtype)
+			} else if name != "" {
+				keys = append(keys, name)
+			}
+		}
+		out[key] = keys
+	}
+	return out
 }
 
 // collectIdentities returns, for each (root, collection) in expects,
