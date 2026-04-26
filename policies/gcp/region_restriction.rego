@@ -14,6 +14,10 @@ allowlist := data.region_allowlist if {
 
 deny contains msg if {
 	resource := input.planned_values.root_module.resources[_]
+	# Only police GCP resources. The Scaleway side has its own
+	# region_restriction.rego; mixing them would deny Scaleway regions
+	# like fr-par/nl-ams/pl-waw under the GCP allowlist.
+	startswith(resource.type, "google_")
 	region := resource.values.region
 	region != null
 	region != ""
@@ -26,6 +30,7 @@ deny contains msg if {
 
 deny contains msg if {
 	resource := input.planned_values.root_module.resources[_]
+	startswith(resource.type, "google_")
 	location := resource.values.location
 	location != null
 	location != ""

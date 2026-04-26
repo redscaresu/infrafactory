@@ -38,8 +38,10 @@ type pitfallsEditRequest struct {
 // "scaleway", "gcp", "fakegcp-internal". Leading dots are rejected so a
 // PUT to /api/pitfalls/.bashrc cannot create a hidden file inside the
 // pitfalls dir; punctuation outside `[a-z0-9_-]` is rejected so
-// path-traversal vectors can't sneak in via Unicode lookalikes.
-var validProviderName = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
+// path-traversal vectors can't sneak in via Unicode lookalikes. Length
+// is capped at 40 chars so an oversized URL surfaces as a 400 client
+// error rather than as a filesystem 500 from os.CreateTemp.
+var validProviderName = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,39}$`)
 
 // pitfallsHandler routes both GET /api/pitfalls (list) and PUT
 // /api/pitfalls/{provider} (edit) onto a single dispatcher. The Go mux
@@ -205,22 +207,39 @@ func editPitfalls(state *serverState, w http.ResponseWriter, r *http.Request, pr
 		return
 	}
 	tmpPath := tmp.Name()
+	// Defer cleanup runs unconditionally; the success path nil-outs the
+	// path so cleanup becomes a no-op once the rename committed. This
+	// covers the panic-mid-flight case the previous straight-line
+	// chain could leak.
+	cleanupPath := tmpPath
+	defer func() {
+		if cleanupPath != "" {
+			_ = os.Remove(cleanupPath)
+		}
+	}()
 	if _, err := tmp.Write(out); err != nil {
 		_ = tmp.Close()
-		_ = os.Remove(tmpPath)
 		writeJSONError(w, http.StatusInternalServerError, "write temp pitfalls: "+err.Error())
 		return
 	}
+	// CreateTemp lands at 0600 by default; pitfalls files in the repo are
+	// 0644, so make the in-place mode match what users expect.
+	if err := tmp.Chmod(0o644); err != nil {
+		_ = tmp.Close()
+		writeJSONError(w, http.StatusInternalServerError, "chmod temp pitfalls: "+err.Error())
+		return
+	}
 	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmpPath)
 		writeJSONError(w, http.StatusInternalServerError, "close temp pitfalls: "+err.Error())
 		return
 	}
 	if err := os.Rename(tmpPath, target); err != nil {
-		_ = os.Remove(tmpPath)
 		writeJSONError(w, http.StatusInternalServerError, "rename pitfalls: "+err.Error())
 		return
 	}
+	// Rename succeeded — disarm the cleanup defer so it doesn't unlink
+	// the freshly-installed final file.
+	cleanupPath = ""
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"provider": provider,

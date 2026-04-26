@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -277,32 +278,94 @@ func TestPitfallsEditConcurrentWritesDoNotCorrupt(t *testing.T) {
 	cfg.Paths.Pitfalls = t.TempDir()
 	handler := pitfallsHandler(&serverState{cfg: cfg})
 
-	bodyA := `{"pitfalls":[{"resource":"google_compute_instance","rule":"A","source":"static"}]}`
-	bodyB := `{"pitfalls":[{"resource":"google_storage_bucket","rule":"B","source":"static"}]}`
+	// 10 concurrent writers exercises the os.CreateTemp uniqueness
+	// guarantee much harder than two would. Every writer must come back
+	// with HTTP 200 (no 5xx from a tmp-file collision) and the final
+	// file must be exactly one of the payloads.
+	const writers = 10
+	bodies := make([]string, writers)
+	for i := range bodies {
+		bodies[i] = fmt.Sprintf(`{"pitfalls":[{"resource":"google_compute_instance","rule":"R%d","source":"static"}]}`, i)
+	}
 
-	done := make(chan struct{}, 2)
-	for _, body := range []string{bodyA, bodyB} {
+	type result struct {
+		code int
+		body string
+	}
+	resultsCh := make(chan result, writers)
+	for _, body := range bodies {
 		body := body
 		go func() {
 			req := httptest.NewRequest(http.MethodPut, "/api/pitfalls/gcp", strings.NewReader(body))
 			rec := httptest.NewRecorder()
 			handler.ServeHTTP(rec, req)
-			done <- struct{}{}
+			resultsCh <- result{code: rec.Code, body: body}
 		}()
 	}
-	<-done
-	<-done
+	results := make([]result, 0, writers)
+	for i := 0; i < writers; i++ {
+		results = append(results, <-resultsCh)
+	}
+	for _, r := range results {
+		if r.code != http.StatusOK {
+			t.Fatalf("expected all writers to get 200, got %d for body %q", r.code, r.body)
+		}
+	}
 
 	written, err := os.ReadFile(filepath.Join(cfg.Paths.Pitfalls, "gcp.yaml"))
 	if err != nil {
 		t.Fatalf("read pitfalls/gcp.yaml: %v", err)
 	}
 	contents := string(written)
-	hasA := strings.Contains(contents, "rule: A") && strings.Contains(contents, "google_compute_instance")
-	hasB := strings.Contains(contents, "rule: B") && strings.Contains(contents, "google_storage_bucket")
-	// Exactly one of the two payloads should win — never a hybrid.
-	if !(hasA != hasB) {
-		t.Fatalf("expected exactly one payload to win (no hybrid), got:\n%s", contents)
+	matches := 0
+	for i := 0; i < writers; i++ {
+		if strings.Contains(contents, fmt.Sprintf("rule: R%d", i)) {
+			matches++
+		}
+	}
+	if matches != 1 {
+		t.Fatalf("expected exactly one writer's payload in final file, found %d:\n%s", matches, contents)
+	}
+
+	// File mode must be 0644 (CreateTemp default is 0600 — the handler
+	// chmod's it explicitly so user-readable files don't regress to
+	// owner-only).
+	info, err := os.Stat(filepath.Join(cfg.Paths.Pitfalls, "gcp.yaml"))
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if mode := info.Mode().Perm(); mode != 0o644 {
+		t.Fatalf("expected file mode 0644, got %o", mode)
+	}
+
+	// No leftover .tmp files after success.
+	entries, err := os.ReadDir(cfg.Paths.Pitfalls)
+	if err != nil {
+		t.Fatalf("read dir: %v", err)
+	}
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".tmp") {
+			t.Fatalf("expected no leftover tmp files, found %s", e.Name())
+		}
+	}
+}
+
+// TestPitfallsEditRejectsOversizedProviderName guards the regex length
+// cap so an oversized URL returns 400 client error instead of 500
+// "create temp pitfalls" from os.CreateTemp hitting filename limits.
+func TestPitfallsEditRejectsOversizedProviderName(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.Default()
+	cfg.Paths.Pitfalls = t.TempDir()
+
+	long := strings.Repeat("a", 41)
+	req := httptest.NewRequest(http.MethodPut, "/api/pitfalls/"+long, strings.NewReader(`{"pitfalls":[]}`))
+	rec := httptest.NewRecorder()
+	pitfallsHandler(&serverState{cfg: cfg}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for oversized provider name, got %d", rec.Code)
 	}
 }
 

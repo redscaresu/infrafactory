@@ -291,8 +291,9 @@ func TestDeriveTopologyGCPDatabaseOnlyHasNoComputeEdge(t *testing.T) {
 	}
 }
 
-// TestDeriveTopologyGCPMySQLPort covers the mysql 3306 edge alongside
-// postgres 5432; both should be present.
+// TestDeriveTopologyGCPMySQLPort covers engine-aware port selection:
+// a MYSQL_8_0 instance produces a 3306 edge, not 5432. Mixing two
+// instances (postgres + mysql) should produce both edges.
 func TestDeriveTopologyGCPMySQLPort(t *testing.T) {
 	t.Parallel()
 
@@ -301,7 +302,10 @@ func TestDeriveTopologyGCPMySQLPort(t *testing.T) {
 			"instances": []map[string]any{{"name": "web-0"}},
 		},
 		"sql": map[string]any{
-			"instances": []map[string]any{{"name": "main-db"}},
+			"instances": []map[string]any{
+				{"name": "pg-db", "databaseVersion": "POSTGRES_15"},
+				{"name": "my-db", "databaseVersion": "MYSQL_8_0"},
+			},
 		},
 	}
 	stateJSON, _ := json.Marshal(state)
@@ -314,8 +318,84 @@ func TestDeriveTopologyGCPMySQLPort(t *testing.T) {
 		Connectivity map[string]bool `json:"connectivity"`
 	}
 	_ = json.Unmarshal(out, &parsed)
+	if !parsed.Connectivity["compute->database:5432"] {
+		t.Fatalf("expected compute->database:5432=true (postgres), got %+v", parsed.Connectivity)
+	}
 	if !parsed.Connectivity["compute->database:3306"] {
-		t.Fatalf("expected compute->database:3306=true, got %+v", parsed.Connectivity)
+		t.Fatalf("expected compute->database:3306=true (mysql), got %+v", parsed.Connectivity)
+	}
+}
+
+// TestDeriveTopologyGCPSQLPostgresOnlyOmitsMySQLPort guards against the
+// pre-pass-2 behaviour where every SQL instance produced both 5432 and
+// 3306 edges regardless of engine — a postgres-only stack should NOT
+// surface 3306.
+func TestDeriveTopologyGCPSQLPostgresOnlyOmitsMySQLPort(t *testing.T) {
+	t.Parallel()
+
+	state := map[string]any{
+		"compute": map[string]any{
+			"instances": []map[string]any{{"name": "web-0"}},
+		},
+		"sql": map[string]any{
+			"instances": []map[string]any{{"name": "pg-db", "databaseVersion": "POSTGRES_15"}},
+		},
+	}
+	stateJSON, _ := json.Marshal(state)
+
+	out, _, err := DeriveTopology(stateJSON)
+	if err != nil {
+		t.Fatalf("derive: %v", err)
+	}
+	var parsed struct {
+		Connectivity map[string]bool `json:"connectivity"`
+	}
+	_ = json.Unmarshal(out, &parsed)
+	if !parsed.Connectivity["compute->database:5432"] {
+		t.Fatalf("expected compute->database:5432=true, got %+v", parsed.Connectivity)
+	}
+	if _, ok := parsed.Connectivity["compute->database:3306"]; ok {
+		t.Fatalf("expected no compute->database:3306 edge for postgres-only, got %+v", parsed.Connectivity)
+	}
+}
+
+// TestDeriveTopologyGCPSQLPublicReachableViaAuthorizedNetworks pins the
+// new public-reachability rule: a 0.0.0.0/0 authorized network flips
+// public_internet->database:5432 to true regardless of ipv4Enabled.
+func TestDeriveTopologyGCPSQLPublicReachableViaAuthorizedNetworks(t *testing.T) {
+	t.Parallel()
+
+	state := map[string]any{
+		"compute": map[string]any{
+			"instances": []map[string]any{{"name": "web-0"}},
+		},
+		"sql": map[string]any{
+			"instances": []map[string]any{{
+				"name":            "exposed-db",
+				"databaseVersion": "POSTGRES_15",
+				"settings": map[string]any{
+					"ipConfiguration": map[string]any{
+						"ipv4Enabled": true,
+						"authorizedNetworks": []any{
+							map[string]any{"value": "0.0.0.0/0"},
+						},
+					},
+				},
+			}},
+		},
+	}
+	stateJSON, _ := json.Marshal(state)
+
+	out, _, err := DeriveTopology(stateJSON)
+	if err != nil {
+		t.Fatalf("derive: %v", err)
+	}
+	var parsed struct {
+		Connectivity map[string]bool `json:"connectivity"`
+	}
+	_ = json.Unmarshal(out, &parsed)
+	if !parsed.Connectivity["public_internet->database:5432"] {
+		t.Fatalf("expected public_internet->database:5432=true with 0.0.0.0/0 authorized network, got %+v", parsed.Connectivity)
 	}
 }
 

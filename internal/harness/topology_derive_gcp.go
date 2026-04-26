@@ -137,17 +137,32 @@ func deriveGCPConnectivity(state *rawGCPState) map[string]bool {
 	conn := make(map[string]bool)
 
 	hasCompute := len(state.Compute.Instances) > 0
-	hasDatabase := len(state.SQL.Instances) > 0
 	hasKubernetes := len(state.Container.Clusters) > 0
 
 	publicIngressAllowed := gcpHasPublicIngressFirewall(state.Compute.Firewalls)
 
-	if hasCompute && hasDatabase {
-		conn["compute->database:5432"] = true
-		conn["compute->database:3306"] = true
-		conn["public_internet->database:5432"] = false
-		conn["public_internet->database:3306"] = false
+	// Per-instance database ports based on each Cloud SQL instance's
+	// databaseVersion. Mixing engines in one scenario produces both
+	// edges; a postgres-only stack does not surface 3306 (and vice
+	// versa). Public reachability follows ipConfiguration.ipv4Enabled
+	// and authorized_networks — a 0.0.0.0/0 entry flips the public
+	// edge to true even when ipv4Enabled is unset, matching how Cloud
+	// SQL actually exposes the instance.
+	for _, sql := range state.SQL.Instances {
+		port := gcpSQLPort(sql)
+		if port == 0 {
+			continue
+		}
+		key := connectivityKey("compute", "database", port)
+		pubKey := connectivityKey("public_internet", "database", port)
+		if hasCompute {
+			conn[key] = true
+		}
+		// Default-deny public unless ipv4 enabled with public auth
+		// or a 0.0.0.0/0 authorized network is present.
+		conn[pubKey] = gcpSQLPublicReachable(sql)
 	}
+
 	if hasCompute && hasKubernetes {
 		conn["compute->kubernetes"] = true
 	}
@@ -156,6 +171,57 @@ func deriveGCPConnectivity(state *rawGCPState) map[string]bool {
 	}
 
 	return conn
+}
+
+// gcpSQLPort maps Cloud SQL `databaseVersion` strings (POSTGRES_15,
+// MYSQL_8_0, SQLSERVER_2019_STANDARD, …) to the canonical TCP port the
+// connectivity criteria reference. Unknown versions return 0 so the
+// caller can skip them without emitting a wrong-port edge.
+func gcpSQLPort(sql map[string]any) int {
+	version, _ := sql["databaseVersion"].(string)
+	upper := strings.ToUpper(version)
+	switch {
+	case strings.HasPrefix(upper, "POSTGRES"):
+		return 5432
+	case strings.HasPrefix(upper, "MYSQL"):
+		return 3306
+	case strings.HasPrefix(upper, "SQLSERVER"):
+		return 1433
+	default:
+		// Unknown engine — fall back to postgres so a bare
+		// scenario without databaseVersion still produces SOME edge
+		// rather than zero edges.
+		return 5432
+	}
+}
+
+// gcpSQLPublicReachable inspects a Cloud SQL instance's
+// settings.ipConfiguration to decide whether the public internet has a
+// path. A 0.0.0.0/0 authorized network dominates; otherwise we only
+// flip true when ipv4Enabled is explicitly true and authorized_networks
+// is non-empty (Cloud SQL requires at least one allow entry to actually
+// expose the public IP).
+func gcpSQLPublicReachable(sql map[string]any) bool {
+	settings, _ := sql["settings"].(map[string]any)
+	if settings == nil {
+		return false
+	}
+	ipCfg, _ := settings["ipConfiguration"].(map[string]any)
+	if ipCfg == nil {
+		return false
+	}
+	auth, _ := ipCfg["authorizedNetworks"].([]any)
+	for _, entry := range auth {
+		m, _ := entry.(map[string]any)
+		if m == nil {
+			continue
+		}
+		if v, _ := m["value"].(string); v == "0.0.0.0/0" {
+			return true
+		}
+	}
+	ipv4, _ := ipCfg["ipv4Enabled"].(bool)
+	return ipv4 && len(auth) > 0
 }
 
 // gcpForwardingRulePort extracts the listening port from a global

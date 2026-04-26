@@ -5,11 +5,18 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 
 	"github.com/pmezard/go-difflib/difflib"
 )
+
+// validRunID matches the timestamp-shaped run identifiers the runstore
+// produces (e.g. 20260426T103008Z). Excluding leading dots and
+// punctuation other than `-_` rules out a `run1=.` request that would
+// otherwise resolve to the scenario root.
+var validRunID = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
 
 type compareResponse struct {
 	Run1  string             `json:"run1"`
@@ -46,8 +53,22 @@ func handleRunCompare(state *serverState, w http.ResponseWriter, r *http.Request
 		return
 	}
 	for _, id := range []string{run1, run2} {
-		if strings.Contains(id, "..") || strings.ContainsAny(id, "/\\") {
+		if !validRunID.MatchString(id) {
 			writeJSONError(w, http.StatusBadRequest, "invalid run id")
+			return
+		}
+	}
+
+	// Probe the run metadata itself so a metadata-only run (started but
+	// killed before any generated/ snapshot landed) returns 404 instead
+	// of silently comparing two empty file sets.
+	for _, id := range []string{run1, run2} {
+		if _, err := state.store.ReadRunMetadata(scenarioName, id); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				writeJSONError(w, http.StatusNotFound, "run "+id+" not found")
+				return
+			}
+			writeJSONError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 	}

@@ -150,6 +150,71 @@ func TestRunCompareHandlerReturns404WhenRunMissing(t *testing.T) {
 	}
 }
 
+// TestRunCompareHandlerRejectsLeadingDotRunID guards against the
+// pre-pass-2 traversal hole where `run1=.` resolved to the scenario
+// root because the validator only blocked `..`/`/`/`\`.
+func TestRunCompareHandlerRejectsLeadingDotRunID(t *testing.T) {
+	t.Parallel()
+
+	store := runstore.NewFilesystemStore(filepath.Join(t.TempDir(), ".infrafactory", "runs"))
+	srv := NewServer(ServerConfig{Config: config.Default(), Store: store})
+	ts := httptest.NewServer(srv.Handler)
+	defer ts.Close()
+
+	// All four start with non-alphanumeric characters and are rejected
+	// at the regex gate before any filesystem call.
+	for _, id := range []string{".", ".git", "-leading-dash", "_leading-underscore"} {
+		resp, err := http.Get(ts.URL + "/api/runs/web-app-paris/compare?run1=" + id + "&run2=run-1")
+		if err != nil {
+			t.Fatalf("get %s: %v", id, err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("run id %q: expected 400, got %d", id, resp.StatusCode)
+		}
+	}
+}
+
+// TestRunCompareHandlerReturns404ForMetadataOnlyRun guards against a
+// regression where a run with only metadata (killed before any
+// generated/ snapshot landed) silently compared as two empty file sets.
+func TestRunCompareHandlerReturns404ForMetadataOnlyRun(t *testing.T) {
+	t.Parallel()
+
+	store := runstore.NewFilesystemStore(filepath.Join(t.TempDir(), ".infrafactory", "runs"))
+	for _, runID := range []string{"run-1", "run-2"} {
+		if err := store.WriteRunMetadata(runstore.RunMetadata{
+			Scenario:  "web-app-paris",
+			RunID:     runID,
+			Status:    "success",
+			StartedAt: time.Now().UTC(),
+		}); err != nil {
+			t.Fatalf("write metadata: %v", err)
+		}
+	}
+	// Only run-1 has generated files; run-2 is metadata-only.
+	if err := store.WriteGeneratedFiles("web-app-paris", "run-1", map[string][]byte{
+		"main.tf": []byte("a"),
+	}); err != nil {
+		t.Fatalf("write files: %v", err)
+	}
+
+	srv := NewServer(ServerConfig{Config: config.Default(), Store: store})
+	ts := httptest.NewServer(srv.Handler)
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/api/runs/web-app-paris/compare?run1=run-1&run2=run-2")
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	resp.Body.Close()
+	// Metadata exists for both runs, but run-2 has no generated/ — that
+	// surfaces from ListGeneratedFiles as ErrNotExist (404).
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected 404 for metadata-only run, got %d", resp.StatusCode)
+	}
+}
+
 // TestRunCompareHandlerRejectsNonGet pins the method gate so a typoed
 // POST/PUT/DELETE doesn't accidentally trigger any side effect.
 func TestRunCompareHandlerRejectsNonGet(t *testing.T) {

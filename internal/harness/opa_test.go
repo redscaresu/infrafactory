@@ -191,6 +191,74 @@ func TestScalewayPoliciesPlanEvaluation(t *testing.T) {
 	}
 }
 
+// TestGCPPoliciesScopedToGoogleResources guards the P0 fix where
+// policies/gcp/region_restriction.rego previously fired on every
+// resource (including Scaleway ones) and broke the default-config
+// Scaleway run path. Each GCP policy must only deny google_* resource
+// types.
+func TestGCPPoliciesScopedToGoogleResources(t *testing.T) {
+	t.Parallel()
+
+	policiesRoot := filepath.Join("..", "..", "policies", "gcp")
+	policies := []string{
+		filepath.Join(policiesRoot, "region_restriction.rego"),
+		filepath.Join(policiesRoot, "no_public_sql.rego"),
+		filepath.Join(policiesRoot, "vpc_required.rego"),
+		filepath.Join(policiesRoot, "encryption.rego"),
+	}
+
+	// A plan with only Scaleway resources MUST produce zero GCP-policy
+	// denials. region_restriction in particular used to deny `nl-ams`
+	// and `pl-waw` regions because the rule didn't scope to google_*.
+	scalewayOnlyPlan := `{
+  "planned_values": {"root_module": {"resources": [
+    {"address":"scaleway_instance_server.web","type":"scaleway_instance_server","values":{"region":"nl-ams","zone":"nl-ams-1"}},
+    {"address":"scaleway_rdb_instance.main","type":"scaleway_rdb_instance","values":{"region":"pl-waw","encryption_at_rest":false}}
+  ]}}
+}`
+
+	failures, err := EvaluatePlanPoliciesWithConstraints(
+		context.Background(),
+		[]byte(scalewayOnlyPlan),
+		nil,
+		policies,
+	)
+	if err != nil {
+		t.Fatalf("evaluate gcp policies: %v", err)
+	}
+	if len(failures) != 0 {
+		t.Fatalf("expected zero gcp-policy denials on a Scaleway-only plan, got %d:\n%+v", len(failures), failures)
+	}
+}
+
+// TestGCPRegionRestrictionDeniesOutsideAllowlist confirms the policy
+// still fires when it should — a google_compute_instance in an
+// out-of-allowlist region.
+func TestGCPRegionRestrictionDeniesOutsideAllowlist(t *testing.T) {
+	t.Parallel()
+
+	policy := filepath.Join("..", "..", "policies", "gcp", "region_restriction.rego")
+	plan := `{
+  "planned_values": {"root_module": {"resources": [
+    {"address":"google_compute_instance.web","type":"google_compute_instance","values":{"zone":"asia-east1-a"}},
+    {"address":"google_sql_database_instance.main","type":"google_sql_database_instance","values":{"region":"asia-east1"}}
+  ]}}
+}`
+
+	failures, err := EvaluatePlanPoliciesWithConstraints(
+		context.Background(),
+		[]byte(plan),
+		nil,
+		[]string{policy},
+	)
+	if err != nil {
+		t.Fatalf("evaluate: %v", err)
+	}
+	if len(failures) == 0 {
+		t.Fatalf("expected at least one denial for asia-east1 outside allowlist, got 0")
+	}
+}
+
 func TestScalewayEncryptionPolicyMatchesEncryptionSemantics(t *testing.T) {
 	t.Parallel()
 
