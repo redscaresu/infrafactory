@@ -6,6 +6,14 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 
 | id | slice | title | priority | status | deps | owner |
 |---|---|---|---|---|---|---|
+| S41-T7 | Slice 41 | fakegcp: misconfigured Terraform examples (FK violations, wrong refs, ordering) | P1 | todo | S41-T1 | — |
+| S41-T6 | Slice 41 | fakegcp: double-apply idempotency automation for all working examples | P1 | todo | S41-T1 | — |
+| S41-T5 | Slice 41 | fakegcp: admin endpoint tests (/mock/state, /mock/reset, /mock/snapshot, /mock/restore) | P1 | todo | S41-T1 | — |
+| S41-T4 | Slice 41 | fakegcp: FK cascade delete tests for all parent-child relationships | P1 | todo | S41-T1 | — |
+| S41-T3 | Slice 41 | fakegcp: FK violation tests for all cross-resource references | P1 | todo | S41-T1 | — |
+| S41-T2 | Slice 41 | fakegcp: repository unit tests (CRUD, schema migration, FK enforcement) | P1 | todo | — | — |
+| S41-T1 | Slice 41 | fakegcp: test infrastructure — testutil helpers, coverage reporting, Makefile test targets | P1 | todo | — | — |
+| S41-T0 | Slice 41 | fakegcp: initialize git repo, commit existing code, push to GitHub | P1 | todo | — | — |
 | S40-T4 | Slice 40 | Error state coverage: empty states, 404 pages, API errors, missing scenarios | P1 | todo | — | — |
 | S40-T3 | Slice 40 | Functional spot-checks: verify data rendering across all pages | P1 | todo | — | — |
 | S40-T2 | Slice 40 | Visual regression tests: screenshot comparison with pixel diff threshold | P1 | todo | S40-T1 | — |

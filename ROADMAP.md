@@ -367,6 +367,15 @@ This file is intentionally high-level and mostly stable; day-to-day execution tr
 - Functional spot-checks: verify data rendering, YAML content, run metadata, iteration timeline.
 - Error state coverage: empty states, 404 pages, API errors, missing scenarios.
 
+41. Slice 41: fakegcp test coverage parity with mockway
+- Bring fakegcp to mockway-level reliability for blog-post readiness.
+- Repository unit tests, FK violation tests, FK cascade delete tests.
+- Admin endpoint tests (/mock/state, /mock/reset, /mock/snapshot).
+- Automated double-apply idempotency for all Terraform examples.
+- Misconfigured Terraform examples demonstrating FK violations and ordering problems.
+- Coverage reporting and Makefile test targets.
+- Prerequisite for Slice 36 (GCP support in infrafactory) and fakegcp blog post.
+
 ## Near-term execution order
 
 1. Keep completed slices (1-32) stable and regression-green.

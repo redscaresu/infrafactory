@@ -304,6 +304,47 @@ Use Playwright's screenshot comparison and functional assertions to catch UI reg
 
 ---
 
+---
+
+## Slice 41: fakegcp Test Coverage Parity
+
+Bring fakegcp to mockway-level test coverage so it's reliable enough for a blog post with the same guarantees as mockway. mockway has 280+ tests, 22 Terraform examples, 74.9% coverage. fakegcp currently has 52 handler tests, 4 examples, no repository tests.
+
+### Tickets
+
+| id | title | priority | deps |
+|---|---|---|---|
+| S41-T0 | Initialize git repo, commit existing code, push to GitHub | P1 | — |
+| S41-T1 | Test infrastructure: testutil helpers, coverage reporting, Makefile test targets | P1 | — |
+| S41-T2 | Repository unit tests (CRUD for all 13 tables, schema migration, FK enforcement) | P1 | — |
+| S41-T3 | FK violation tests for all cross-resource references (15+ tests) | P1 | S41-T1 |
+| S41-T4 | FK cascade delete tests for all parent-child relationships | P1 | S41-T1 |
+| S41-T5 | Admin endpoint tests (/mock/state, /mock/reset, /mock/snapshot, /mock/restore) | P1 | S41-T1 |
+| S41-T6 | Double-apply idempotency automation for all working Terraform examples | P1 | S41-T1 |
+| S41-T7 | Misconfigured Terraform examples demonstrating FK violations, wrong refs, ordering | P1 | S41-T1 |
+
+### Acceptance Criteria
+
+- S41-T0: fakegcp has a GitHub repo with CI-ready state. All existing code committed.
+- S41-T1: `go test ./...` runs all tests. `go test -cover ./...` reports coverage. Makefile has `test`, `test-cover`, `test-e2e` targets. testutil provides `NewTestServer`, HTTP helpers matching mockway's pattern.
+- S41-T2: Repository tests cover Create/Get/List/Update/Delete for all tables: compute_instances, compute_networks, compute_subnetworks, compute_firewalls, compute_disks, compute_addresses, container_clusters, container_node_pools, sql_instances, sql_databases, sql_users, iam_service_accounts, iam_sa_keys, storage_buckets, operations.
+- S41-T3: FK violation tests: instance→network, subnetwork→network, firewall→network, node_pool→cluster, sql_database→instance, sql_user→instance, sa_key→service_account. Each returns 404 when parent doesn't exist.
+- S41-T4: Cascade delete tests: cluster→node_pools, sql_instance→databases+users. Verify child resources are deleted when parent is deleted.
+- S41-T5: Admin tests: `/mock/reset` clears all tables, `/mock/state` returns all resources grouped by service, `/mock/snapshot` + `/mock/restore` preserves/restores state, `/mock/state/{service}` returns service-specific state.
+- S41-T6: For each `examples/working/` directory: `tofu init && tofu apply && tofu apply` (second apply must be no-op with 0 changes). Gated by env var `FAKEGCP_ENABLE_E2E=1`.
+- S41-T7: At least 5 misconfigured examples: instance missing network, subnetwork wrong network ref, node pool missing cluster, SQL database missing instance, firewall wrong network. Each demonstrates a 404/409 that `terraform validate/plan` cannot catch.
+
+### Key Files (all in fakegcp repo)
+
+- `repository/repository_test.go` (new)
+- `handlers/handlers_test.go` (expand from 52 to 150+ tests)
+- `examples/working/` (expand from 4 to 8+)
+- `examples/misconfigured/` (expand from 1 to 6+)
+- `scripts/e2e.sh` (new — double-apply automation)
+- `Makefile` (add test targets)
+
+---
+
 ## Verification
 
 ```bash
