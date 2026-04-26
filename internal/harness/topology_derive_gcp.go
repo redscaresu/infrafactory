@@ -215,11 +215,20 @@ func gcpSQLPublicReachable(sql map[string]any) bool {
 	if settings == nil {
 		return false
 	}
+	// Accept both camelCase (GCP v1 API + Terraform google provider)
+	// and snake_case (older test fixtures). Symmetric with the review-
+	// 12 fix to gcpForwardingRulePort / gcpHasPublicIngressFirewall.
 	ipCfg, _ := settings["ipConfiguration"].(map[string]any)
+	if ipCfg == nil {
+		ipCfg, _ = settings["ip_configuration"].(map[string]any)
+	}
 	if ipCfg == nil {
 		return false
 	}
 	auth, _ := ipCfg["authorizedNetworks"].([]any)
+	if auth == nil {
+		auth, _ = ipCfg["authorized_networks"].([]any)
+	}
 	for _, entry := range auth {
 		m, _ := entry.(map[string]any)
 		if m == nil {
