@@ -1,8 +1,10 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -21,6 +23,11 @@ type pitfallsResponse struct {
 type pitfallsProviderGroup struct {
 	Provider string                  `json:"provider"`
 	Pitfalls []pitfallsResponseEntry `json:"pitfalls"`
+	// ParseError, when non-empty, signals that the on-disk yaml for
+	// this provider couldn't be parsed and the entries list reflects
+	// that (typically empty). The UI should render the bad provider
+	// with an inline error rather than crashing the whole page.
+	ParseError string `json:"parse_error,omitempty"`
 }
 
 type pitfallsResponseEntry struct {
@@ -117,8 +124,14 @@ func listPitfalls(state *serverState, w http.ResponseWriter, r *http.Request) {
 		}
 		var file generator.PitfallsFile
 		if err := yaml.Unmarshal(data, &file); err != nil {
-			writeJSONError(w, http.StatusInternalServerError, "parse pitfalls file "+name+": "+err.Error())
-			return
+			// One bad file shouldn't blank the whole pitfalls page; surface
+			// it as a per-provider parse_error and continue with the rest.
+			groups = append(groups, pitfallsProviderGroup{
+				Provider:   provider,
+				Pitfalls:   []pitfallsResponseEntry{},
+				ParseError: err.Error(),
+			})
+			continue
 		}
 		outEntries := make([]pitfallsResponseEntry, 0, len(file.Pitfalls))
 		for _, p := range file.Pitfalls {
@@ -159,13 +172,23 @@ func editPitfalls(state *serverState, w http.ResponseWriter, r *http.Request, pr
 		return
 	}
 
-	// Cap payload at 1 MB to match validateScenarioHandler so a
-	// multi-GB body can't pin memory inside the JSON decoder.
+	// Cap payload at 1 MB to match validateScenarioHandler. Use
+	// LimitReader+explicit-size-check (rather than MaxBytesReader) so an
+	// oversized body returns 413, not the generic 400 MaxBytesReader
+	// surfaces via the decoder.
 	const maxEditPayloadBytes = 1 << 20
-	r.Body = http.MaxBytesReader(w, r.Body, maxEditPayloadBytes)
+	bodyBytes, err := io.ReadAll(io.LimitReader(r.Body, maxEditPayloadBytes+1))
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, "read request body: "+err.Error())
+		return
+	}
+	if len(bodyBytes) > maxEditPayloadBytes {
+		writeJSONError(w, http.StatusRequestEntityTooLarge, "edit payload exceeds 1 MB limit")
+		return
+	}
 
 	var req pitfallsEditRequest
-	dec := json.NewDecoder(r.Body)
+	dec := json.NewDecoder(bytes.NewReader(bodyBytes))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&req); err != nil {
 		writeJSONError(w, http.StatusBadRequest, "decode body: "+err.Error())
@@ -197,15 +220,18 @@ func editPitfalls(state *serverState, w http.ResponseWriter, r *http.Request, pr
 
 	pf := generator.PitfallsFile{Provider: provider}
 	for _, entry := range req.Pitfalls {
-		source := entry.Source
+		source := strings.TrimSpace(entry.Source)
 		if source == "" {
 			source = "static"
 		}
+		// Trim before persist so a YAML round-trip can't mangle leading
+		// or trailing whitespace, and downstream substring matching on
+		// resource type names sees the clean form.
 		pf.Pitfalls = append(pf.Pitfalls, generator.PitfallEntry{
-			Resource:       entry.Resource,
-			Rule:           entry.Rule,
+			Resource:       strings.TrimSpace(entry.Resource),
+			Rule:           strings.TrimSpace(entry.Rule),
 			Source:         source,
-			DiscoveredFrom: entry.DiscoveredFrom,
+			DiscoveredFrom: strings.TrimSpace(entry.DiscoveredFrom),
 		})
 	}
 

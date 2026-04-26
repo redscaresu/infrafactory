@@ -8,19 +8,19 @@ import (
 )
 
 // rawGCPState mirrors the per-service shape of fakegcp's `/mock/state`
-// response. Only the fields infrafactory's topology evaluation cares about
-// are pulled out; unknown fields are ignored. See `../fakegcp/repository`
-// for the canonical shape.
+// response. Only the fields infrafactory's topology evaluation cares
+// about are pulled out; unknown fields (notably compute.networks,
+// compute.subnetworks, container.nodePools) are intentionally elided.
+// They're fetched from fakegcp's response but not yet consumed by the
+// derivation; if a future check needs them, add them here. See
+// `../fakegcp/repository` for the canonical shape.
 type rawGCPState struct {
 	Compute struct {
-		Networks    []map[string]any `json:"networks"`
-		Subnetworks []map[string]any `json:"subnetworks"`
-		Firewalls   []map[string]any `json:"firewalls"`
-		Instances   []map[string]any `json:"instances"`
+		Firewalls []map[string]any `json:"firewalls"`
+		Instances []map[string]any `json:"instances"`
 	} `json:"compute"`
 	Container struct {
-		Clusters  []map[string]any `json:"clusters"`
-		NodePools []map[string]any `json:"nodePools"`
+		Clusters []map[string]any `json:"clusters"`
 	} `json:"container"`
 	SQL struct {
 		Instances []map[string]any `json:"instances"`

@@ -136,11 +136,23 @@ func TestPitfallsHandlerRejectsNonGet(t *testing.T) {
 	}
 }
 
-func TestPitfallsHandlerErrorsOnMalformedYaml(t *testing.T) {
+// TestPitfallsHandlerSurfacesPerProviderParseErrors guards the
+// review-7 graceful-degradation: one malformed yaml file no longer
+// 500s the whole listing. Instead, the bad provider appears with a
+// non-empty parse_error and the good providers still render.
+func TestPitfallsHandlerSurfacesPerProviderParseErrors(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "broken.yaml"), []byte("not: [valid yaml"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "gcp.yaml"), []byte(`provider: gcp
+pitfalls:
+  - resource: google_compute_instance
+    rule: Use subnetwork.
+    source: static
+`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	cfg := config.Default()
@@ -149,8 +161,36 @@ func TestPitfallsHandlerErrorsOnMalformedYaml(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/pitfalls", nil)
 	rec := httptest.NewRecorder()
 	pitfallsHandler(&serverState{cfg: cfg}).ServeHTTP(rec, req)
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("expected 500 for malformed yaml, got %d", rec.Code)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 with degraded listing, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var resp pitfallsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp.Providers) != 2 {
+		t.Fatalf("expected 2 providers (one good, one with parse_error), got %d", len(resp.Providers))
+	}
+	var sawBroken, sawGCP bool
+	for _, p := range resp.Providers {
+		switch p.Provider {
+		case "broken":
+			sawBroken = true
+			if p.ParseError == "" {
+				t.Fatalf("expected parse_error on broken provider, got empty")
+			}
+		case "gcp":
+			sawGCP = true
+			if p.ParseError != "" {
+				t.Fatalf("expected no parse_error on gcp provider, got %q", p.ParseError)
+			}
+			if len(p.Pitfalls) != 1 {
+				t.Fatalf("expected 1 gcp pitfall, got %d", len(p.Pitfalls))
+			}
+		}
+	}
+	if !sawBroken || !sawGCP {
+		t.Fatalf("expected both broken and gcp providers in response, sawBroken=%v sawGCP=%v", sawBroken, sawGCP)
 	}
 }
 
