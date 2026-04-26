@@ -1,4 +1,33 @@
 import { test, expect, type Page } from '@playwright/test';
+import { readFileSync, writeFileSync, statSync } from 'node:fs';
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+// The edit-save-reload test below rewrites pitfalls/<provider>.yaml in
+// the actual repo via the API's atomic-rename. To avoid leaving the
+// working tree dirty (whether the test passes, fails, or the YAML
+// formatter normalises the seeded folded scalars), snapshot the bytes
+// before each test and restore them after.
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const PITFALLS_DIR = resolve(__dirname, '..', '..', 'pitfalls');
+function snapshotPitfalls(): Map<string, Buffer> {
+  const snap = new Map<string, Buffer>();
+  for (const provider of ['gcp', 'scaleway']) {
+    const path = resolve(PITFALLS_DIR, `${provider}.yaml`);
+    try {
+      statSync(path);
+      snap.set(path, readFileSync(path));
+    } catch {
+      // file missing — leave snapshot entry absent.
+    }
+  }
+  return snap;
+}
+function restorePitfalls(snap: Map<string, Buffer>) {
+  for (const [path, bytes] of snap) {
+    writeFileSync(path, bytes);
+  }
+}
 
 // The /pitfalls page reads pitfalls/<provider>.yaml files at startup. The
 // repo seeds gcp.yaml and scaleway.yaml, so the alphabetically-first provider
@@ -23,6 +52,14 @@ async function selectProvider(page: Page, provider: string) {
 }
 
 test.describe('Pitfalls page', () => {
+  let pitfallsSnapshot: Map<string, Buffer>;
+  test.beforeEach(() => {
+    pitfallsSnapshot = snapshotPitfalls();
+  });
+  test.afterEach(() => {
+    if (pitfallsSnapshot) restorePitfalls(pitfallsSnapshot);
+  });
+
   test('loads via sidebar and shows provider tabs', async ({ page }) => {
     await gotoPitfalls(page);
     await expect(page.locator('[data-testid="pitfalls-load-error"]')).toHaveCount(0);
