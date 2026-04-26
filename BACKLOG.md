@@ -20,7 +20,7 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 | S41-T3 | Slice 41 | fakegcp: FK violation tests for all cross-resource references | P1 | todo | S41-T1 | — |
 | S41-T2 | Slice 41 | fakegcp: repository unit tests (CRUD, schema migration, FK enforcement) | P1 | todo | — | — |
 | S41-T1 | Slice 41 | fakegcp: test infrastructure — testutil helpers, coverage reporting, Makefile test targets | P1 | todo | — | — |
-| S41-T0 | Slice 41 | fakegcp: initialize git repo, commit existing code, push to GitHub | P1 | todo | — | — |
+| S41-T0 | Slice 41 | fakegcp: initialize git repo, commit existing code, push to GitHub | P1 | done | — | claude (user-authorized push) |
 | S40-T4 | Slice 40 | Error state coverage: empty states, 404 pages, API errors, missing scenarios | P1 | todo | — | — |
 | S40-T3 | Slice 40 | Functional spot-checks: verify data rendering across all pages | P1 | todo | — | — |
 | S40-T2 | Slice 40 | Visual regression tests: screenshot comparison with pixel diff threshold | P1 | todo | S40-T1 | — |
