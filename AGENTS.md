@@ -5,8 +5,6 @@ For AI coding agents. Human contributors should use `CONTRIBUTING.md`.
 ## Mission
 Build `infrafactory`, a Go CLI that generates and validates OpenTofu for Scaleway scenarios with deterministic, testable behavior.
 
-Fresh-session checklist lives in `SESSION_START.md`.
-
 ## Source of Truth
 1. `scenario.schema.json`
 2. `infrafactory.yaml`
@@ -14,73 +12,85 @@ Fresh-session checklist lives in `SESSION_START.md`.
 
 Additional references:
 - ADRs: `docs/decisions/*.md`
-- Plans: `docs/plans/*.md`
 - Prompts: `prompts/*.md`
 - Pitfalls: `pitfalls/{cloud}.yaml` — provider-specific rules loaded at runtime by scenario `cloud` field
 - Progress log: `STATUS.md`
 - Backlog source of truth: `BACKLOG.md`
-- Session execution stub: `CURRENT_TICKET.md`
 
 ## Project File Ecosystem
 
 | File | Purpose | When to update |
 |---|---|---|
-| `SESSION_START.md` | Fresh-context checklist and briefing facts for new conversations | When new durable contracts or operational guardrails are established |
 | `ROADMAP.md` | Stable milestones and sequencing (high-level) | When a new slice is planned or completed |
 | `BACKLOG.md` | Single source of ticket status across all slices | When tickets are created, started, or completed |
-| `CURRENT_TICKET.md` | Per-session execution stub (one active ticket) | At session start and as work progresses |
 | `STATUS.md` | Progress log with recent updates | At end of each meaningful coding session |
 | `CONCEPT.md` | Durable architecture, contracts, design decisions | Only for major architecture/design shifts |
 | `docs/decisions/*.md` | ADRs for decision-impacting changes | When change crosses ADR trigger threshold (see below) |
-| `docs/plans/*.md` | Design reference for planned slices | When planning a new slice |
+| `docs/plans/*.md` | Design reference for complex slices needing design discussion (optional) | When planning a complex slice |
 | `docs/process/TICKET_TEMPLATE.md` | Template for framing tickets | Rarely (process changes only) |
 | `docs/process/EXECUTION_PROMPT.md` | Reusable autonomous execution prompt | Rarely (process changes only) |
 
 ## Planning a New Slice
 
-When the user asks to plan new work (a new slice, feature, or initiative):
-
-1. **Research** — explore the codebase and read relevant docs to understand what exists and what's missing.
-2. **Write plan** — create `docs/plans/<slice-name>-plan.md` with: context, quick reference, gap analysis, tickets with acceptance criteria and impacted files, execution order, verification steps, and out-of-scope items. Follow the format of existing plans (e.g., `docs/plans/web-ui-plan.md`).
-3. **Add milestone** — append the slice to `ROADMAP.md` milestones with a summary and execution order.
-4. **Add tickets** — add tickets to `BACKLOG.md` with id, slice, title, priority (`P1`/`P2`), status (`todo`), deps, and owner. Insert new tickets at the top of the table (newest first).
+1. **Research** — explore the codebase and read relevant docs.
+2. **Add tickets** — add tickets to `BACKLOG.md` with id, slice, title, priority, status (`todo`), deps, and owner.
+3. **Optionally write plan** — for complex slices, create `docs/plans/<slice-name>-plan.md`. Follow format of existing plans.
+4. **Add milestone** — append the slice to `ROADMAP.md`.
 5. **Get approval** — present the plan to the user before implementation begins.
 
-Do NOT start implementing until the plan is approved. The plan file is the design reference; `BACKLOG.md` is the execution tracker.
+## Fresh Context
 
-## Session Bootstrap (Fresh Context)
+When starting a new conversation, follow this checklist:
 
-Follow `SESSION_START.md` exactly:
+### 1) Load minimal context
+1. `README.md`
+2. `AGENTS.md` (this file)
+3. `STATUS.md`
+4. `BACKLOG.md`
+5. `CONCEPT.md` (if major design context is needed)
+6. `docs/decisions/README.md` (+ relevant ADRs)
 
-1. Load the minimal context files listed there (README, AGENTS, STATUS, BACKLOG, CURRENT_TICKET, etc.).
-2. Run the preflight commands (`git status`, `git branch`, `git log`).
-3. Confirm active milestone in ROADMAP, blockers in STATUS, and next ticket in BACKLOG.
-4. Fill `CURRENT_TICKET.md` using `docs/process/TICKET_TEMPLATE.md`.
-5. Keep exactly one `in_progress` ticket in BACKLOG during execution.
+### 2) Preflight
+```bash
+git status --short
+git branch --show-current
+git log -1 --oneline
+```
+- If unexpected local changes appear, stop and ask the user.
+- Confirm active milestone in `ROADMAP.md`, blockers in `STATUS.md`.
+- Pick next uncompleted ticket from `BACKLOG.md` (status: `todo` or `in_progress`).
+- Keep exactly one `in_progress` ticket in `BACKLOG.md` during execution.
 
-If unexpected local changes appear, stop and ask the user.
+### 3) Startup verification
+```bash
+go test -tags noui ./...    # Use -tags noui until ui/build/ exists
+bash scripts/check_all.sh
+```
+If either fails, restore the repo to a green baseline before starting a new ticket.
+
+### 4) Operational caveats
+- Prefer `run` over manual `generate` + `test` — only `run` feeds prior iteration failures into LLM generation.
+- Use `http://127.0.0.1:8080` for local Mockway checks (more reliable than `localhost`).
+- Port 8080 conflicts are common — check for stale containers before `mock start`.
+- Debug iterative behavior from `.infrafactory/runs/<scenario>/<run-id>/iterations/<n>/iteration.json`.
+- `output/<scenario>/` is mutable (overwritten each run); immutable snapshots live under `.infrafactory/runs/<scenario>/<run-id>/generated/`.
+- `CLAUDECODE` env var blocks nested claude — `unset CLAUDECODE` before `go run ./cmd/infrafactory run`.
+- Docker rebuild required after any mockway code change: `docker compose up --build -d mockway`.
+- Build tag: `-tags noui` required when `ui/build/` doesn't exist. The `!noui` build requires `ui/build/`.
+- Playwright e2e tests: 18 tests in `ui/e2e/`. Run with `make test` (Go unit + UI unit + Playwright).
+- `make run` builds everything and starts the UI at `http://127.0.0.1:4173`.
 
 ## Execution Loop (mandatory)
 1. Frame task with `docs/process/TICKET_TEMPLATE.md`.
-2. Classify change:
-- `implementation-only`
-- `decision-impacting`
-3. If `decision-impacting`, create/update ADR (`docs/decisions/NNNN-title.md`) and update `docs/decisions/README.md`.
+2. Classify change: `implementation-only` or `decision-impacting`.
+3. If `decision-impacting`, create/update ADR (`docs/decisions/NNNN-title.md`).
 4. Implement smallest runnable vertical slice.
 5. Add/update focused tests.
 6. Run `go test ./...` (or report why not possible).
-7. Sync docs:
-- Always update `STATUS.md`.
-- Update `BACKLOG.md` ticket status.
-- Update `CURRENT_TICKET.md` session state.
-- Update `CONCEPT.md` for major architecture/durable design shifts.
-- Manual end-of-session `CONCEPT.md` sweep by maintainer is additive, not a replacement.
-- Update `AGENTS.md` only when workflow changes.
-8. Run hygiene check before handoff:
-- Local: `bash scripts/check_all.sh`
-- CI/PR: `bash scripts/check_doc_hygiene.sh <base-sha> <head-sha>`
+7. Sync docs: update `STATUS.md`, `BACKLOG.md` ticket status. Update `CONCEPT.md` for major shifts. Update `AGENTS.md` only when workflow changes.
+8. Run hygiene check: `bash scripts/check_all.sh`.
 
-## ADR Trigger Threshold (strict)
+## ADR Trigger Threshold
 Create/update ADR when change affects:
 - public CLI contract/wiring
 - cross-package architecture boundaries
@@ -88,43 +98,26 @@ Create/update ADR when change affects:
 - external dependency strategy (tofu/mockway/opa integration model)
 - durable workflow governance
 
-Usually no ADR needed for prompt wording tweaks or internal refactors without contract change.
-
 ## Engineering Rules
 - Keep command handlers thin; put logic in `internal/*` packages.
-- Keep packages cohesive:
-  - `internal/cli`, `internal/config`, `internal/scenario`, `internal/generator`, `internal/harness`, `internal/feedback`, `internal/runstore`, `internal/api`
-  - `ui/` — SvelteKit frontend (adapter-static, embedded via `go:embed`). Build tag `noui` excludes embed and `ui` command — use `go test -tags noui ./...` when `ui/build/` does not exist.
+- Keep packages cohesive: `internal/cli`, `internal/config`, `internal/scenario`, `internal/generator`, `internal/harness`, `internal/feedback`, `internal/runstore`, `internal/api`.
+- `ui/` — SvelteKit frontend (adapter-static, embedded via `go:embed`).
 - Use explicit structs and typed errors.
 - Keep behavior deterministic and tests hermetic where possible.
-- Keep CLI runnable at all times.
 
 ## Quality Bar
 - `go test ./...` passes for completed slices.
 - Stubs must return explicit "not implemented" errors.
 - No hidden side effects outside project paths.
 
-Roadmap for slices lives in `ROADMAP.md`.
-
 ## Scaleway Bootstrap (Layer 3 Prerequisites)
 
-Layer 3 (real Scaleway deploy) uses a self-managed project lifecycle per ADR-0010. The generated HCL always includes a `scaleway_account_project` resource — infrafactory creates and destroys its own project as part of the IaC lifecycle. No pre-existing sandbox project is required.
+Layer 3 uses self-managed project lifecycle per ADR-0010. Generated HCL includes `scaleway_account_project` — infrafactory creates/destroys its own project. No pre-existing sandbox required.
 
-**What the user must provide:**
-
-1. **Create org-level API keys** — via the [Scaleway console](https://console.scaleway.com/) under IAM → API Keys. The keys must have **organization-level permissions** (not project-scoped) so that `scaleway_account_project` can be created/destroyed by terraform.
-2. **Set environment variables**:
-   - `SCW_ACCESS_KEY` — the API key ID
-   - `SCW_SECRET_KEY` — the API secret key
-3. **Enable Layer 3 in config** — set `validation.layers.sandbox_deploy.enabled: true` in `infrafactory.yaml`.
-
-**Project lifecycle:**
-- `tofu apply` creates the project and all resources inside it.
-- `tofu destroy` destroys the project and everything inside it.
-- With `--no-destroy`, the project persists in `terraform-live.tfstate` and is reused on the next incremental run.
-- No `sandbox_project_id` config is needed — the project ID comes from terraform state.
-
-Credential validation happens at run start — missing keys produce a hard failure with a clear error message, not silent degradation to mock-only.
+**User must provide:**
+1. Org-level API keys (IAM -> API Keys, organization-level permissions).
+2. Env vars: `SCW_ACCESS_KEY`, `SCW_SECRET_KEY`.
+3. Enable Layer 3: `validation.layers.sandbox_deploy.enabled: true` in `infrafactory.yaml`.
 
 ## Safety
 - Never revert/delete unrelated user changes.

@@ -3,13 +3,11 @@
 ## Before you start
 Read:
 - `README.md`
-- `SESSION_START.md`
+- `AGENTS.md`
 - `docs/process/TICKET_TEMPLATE.md`
-- `docs/architecture.md`
 - `docs/decisions/README.md`
 - `STATUS.md`
 - `BACKLOG.md`
-- `CURRENT_TICKET.md`
 
 ## Workflow
 1. Pick a focused change.
@@ -19,7 +17,7 @@ Read:
 5. If decision-impacting, add/update ADR.
 6. If major architecture changed, update `CONCEPT.md`.
 7. Update `STATUS.md`.
-8. Update `BACKLOG.md` and `CURRENT_TICKET.md`.
+8. Update `BACKLOG.md`.
 9. Before commit run: `bash scripts/check_all.sh`.
 
 ## ADR policy
