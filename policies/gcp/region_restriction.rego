@@ -96,12 +96,14 @@ deny_state contains msg if {
 }
 
 # A location may be a region (e.g. "us-central1") or a zone within an
-# allowed region (e.g. "us-central1-a"). Accept both shapes.
+# allowed region (e.g. "us-central1-a"). Accept both shapes. Cloud
+# Storage normalises bucket locations to upper case ("US-CENTRAL1") so
+# we lower-case before comparing.
 location_allowed(location) if {
-	allowlist[_] == location
+	allowlist[_] == lower(location)
 }
 
 location_allowed(location) if {
 	region := allowlist[_]
-	startswith(location, sprintf("%s-", [region]))
+	startswith(lower(location), sprintf("%s-", [region]))
 }

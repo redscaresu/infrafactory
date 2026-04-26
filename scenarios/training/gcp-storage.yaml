@@ -1,0 +1,19 @@
+scenario: gcp-storage
+version: "1.0"
+cloud: gcp
+description: >
+  A Cloud Storage bucket with uniform bucket-level access enabled.
+  Exercises fakegcp's storage handlers (handlers/storage.go)
+  end-to-end through infrafactory's Layer-2 mock-deploy harness.
+
+resources:
+  storage:
+    purpose: app-assets
+    size: small
+
+constraints:
+  region: us-central1
+
+acceptance_criteria:
+  - type: destruction
+    expect: no_orphans

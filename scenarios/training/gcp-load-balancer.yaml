@@ -1,0 +1,23 @@
+scenario: gcp-load-balancer
+version: "1.0"
+cloud: gcp
+description: >
+  A global external HTTPS load-balancer stack (address → health-check
+  → backend → URL-map → SSL cert + HTTPS proxy → forwarding rule).
+  Exercises fakegcp's load-balancer handlers (handlers/loadbalancer.go)
+  end-to-end through infrafactory's Layer-2 mock-deploy harness.
+
+resources:
+  networking:
+    load_balancer:
+      exposure: public
+      backends:
+        - port: 80
+          protocol: http
+
+constraints:
+  region: us-central1
+
+acceptance_criteria:
+  - type: destruction
+    expect: no_orphans

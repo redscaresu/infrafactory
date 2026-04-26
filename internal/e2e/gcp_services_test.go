@@ -32,6 +32,15 @@ func TestE2E_GCPPubSub(t *testing.T) {
 			{root: "pubsub", collection: "topics", minCount: 1},
 			{root: "pubsub", collection: "subscriptions", minCount: 1},
 		},
+		&gcpUpdate{
+			files: gcpPubSubUpdateFiles(mock.URL),
+			verify: func(t *testing.T, state map[string]any) {
+				ack := firstSubscriptionAckDeadline(state)
+				if ack != 45 {
+					t.Errorf("expected subscription ackDeadlineSeconds=45 after update, got %v", ack)
+				}
+			},
+		},
 	)
 }
 
@@ -50,8 +59,17 @@ func TestE2E_GCPDNS(t *testing.T) {
 		"gcp-dns.yaml",
 		gcpDNSFiles(mock.URL),
 		[]gcpStateExpect{
-			{root: "dns", collection: "managed_zones", minCount: 1},
+			{root: "dns", collection: "zones", minCount: 1},
 			{root: "dns", collection: "record_sets", minCount: 1},
+		},
+		&gcpUpdate{
+			files: gcpDNSUpdateFiles(mock.URL),
+			verify: func(t *testing.T, state map[string]any) {
+				ttl := firstRecordSetTTL(state)
+				if ttl != 600 {
+					t.Errorf("expected record-set ttl=600 after update, got %v", ttl)
+				}
+			},
 		},
 	)
 }
@@ -71,6 +89,108 @@ func TestE2E_GCPCloudRun(t *testing.T) {
 		gcpCloudRunFiles(mock.URL),
 		[]gcpStateExpect{
 			{root: "cloudrun", collection: "services", minCount: 1},
+		},
+		&gcpUpdate{
+			files: gcpCloudRunUpdateFiles(mock.URL),
+			verify: func(t *testing.T, state map[string]any) {
+				labels := firstCloudRunServiceLabels(state)
+				if labels["env"] != "staging" {
+					t.Errorf("expected cloud-run service label env=staging after update, got %v", labels)
+				}
+			},
+		},
+	)
+}
+
+// TestE2E_GCPLoadBalancer drives the global external HTTPS LB stack
+// (forwarding rule → HTTPS proxy → URL map → backend service →
+// health check, plus SSL cert + global address) through fakegcp's
+// load-balancer handlers end-to-end.
+func TestE2E_GCPLoadBalancer(t *testing.T) {
+	SkipUnlessEnabled(t)
+	if _, err := exec.LookPath("tofu"); err != nil {
+		t.Fatalf("tofu binary required for e2e: %v", err)
+	}
+	mock := StartFakegcp(t)
+
+	runGCPServiceScenario(t,
+		mock,
+		"gcp-load-balancer.yaml",
+		gcpLoadBalancerFiles(mock.URL),
+		[]gcpStateExpect{
+			{root: "lb", collection: "global_addresses", minCount: 1},
+			{root: "lb", collection: "health_checks", minCount: 1},
+			{root: "lb", collection: "backend_services", minCount: 1},
+			{root: "lb", collection: "url_maps", minCount: 1},
+			{root: "lb", collection: "ssl_certificates", minCount: 1},
+			{root: "lb", collection: "target_https_proxies", minCount: 1},
+			{root: "lb", collection: "global_forwarding_rules", minCount: 1},
+		},
+		&gcpUpdate{
+			files: gcpLoadBalancerUpdateFiles(mock.URL),
+			verify: func(t *testing.T, state map[string]any) {
+				desc := firstBackendServiceDescription(state)
+				if desc != "updated-backend" {
+					t.Errorf("expected backend-service description=updated-backend after update, got %q", desc)
+				}
+			},
+		},
+	)
+}
+
+// TestE2E_GCPIAM provisions a service account + key against fakegcp's
+// IAM handler set.
+func TestE2E_GCPIAM(t *testing.T) {
+	SkipUnlessEnabled(t)
+	if _, err := exec.LookPath("tofu"); err != nil {
+		t.Fatalf("tofu binary required for e2e: %v", err)
+	}
+	mock := StartFakegcp(t)
+
+	runGCPServiceScenario(t,
+		mock,
+		"gcp-iam.yaml",
+		gcpIAMFiles(mock.URL),
+		[]gcpStateExpect{
+			{root: "iam", collection: "serviceAccounts", minCount: 1},
+			{root: "iam", collection: "keys", minCount: 1},
+		},
+		&gcpUpdate{
+			files: gcpIAMUpdateFiles(mock.URL),
+			verify: func(t *testing.T, state map[string]any) {
+				display := firstServiceAccountDisplayName(state)
+				if display != "CI runner (rotated)" {
+					t.Errorf("expected service account displayName='CI runner (rotated)' after update, got %q", display)
+				}
+			},
+		},
+	)
+}
+
+// TestE2E_GCPStorage provisions a Cloud Storage bucket against
+// fakegcp's storage handlers.
+func TestE2E_GCPStorage(t *testing.T) {
+	SkipUnlessEnabled(t)
+	if _, err := exec.LookPath("tofu"); err != nil {
+		t.Fatalf("tofu binary required for e2e: %v", err)
+	}
+	mock := StartFakegcp(t)
+
+	runGCPServiceScenario(t,
+		mock,
+		"gcp-storage.yaml",
+		gcpStorageFiles(mock.URL),
+		[]gcpStateExpect{
+			{root: "storage", collection: "buckets", minCount: 1},
+		},
+		&gcpUpdate{
+			files: gcpStorageUpdateFiles(mock.URL),
+			verify: func(t *testing.T, state map[string]any) {
+				labels := firstBucketLabels(state)
+				if labels["env"] != "prod" {
+					t.Errorf("expected bucket label env=prod after update, got %v", labels)
+				}
+			},
 		},
 	)
 }
@@ -92,6 +212,15 @@ func TestE2E_GCPSecretManager(t *testing.T) {
 			{root: "secretmanager", collection: "secrets", minCount: 1},
 			{root: "secretmanager", collection: "versions", minCount: 1},
 		},
+		&gcpUpdate{
+			files: gcpSecretManagerUpdateFiles(mock.URL),
+			verify: func(t *testing.T, state map[string]any) {
+				labels := firstSecretLabels(state)
+				if labels["rotation"] != "monthly" {
+					t.Errorf("expected secret label rotation=monthly after update, got %v", labels)
+				}
+			},
+		},
 	)
 }
 
@@ -101,11 +230,44 @@ type gcpStateExpect struct {
 	minCount   int
 }
 
-// runGCPServiceScenario centralises the two-stage run pattern shared
-// by all four GCP-service e2e tests: --no-destroy first to capture
-// post-apply state, then a destroy run to confirm orphan-free
-// teardown. Both runs must end with target_reached.
-func runGCPServiceScenario(t *testing.T, mock *MockwayInstance, scenarioFile string, files map[string][]byte, expects []gcpStateExpect) {
+// gcpUpdate carries the second-stage HCL plus a post-update assertion.
+// The update phase swaps the original GeneratorFiles for updateFiles
+// and re-runs --no-destroy; the resulting fakegcp state is then
+// inspected by verify. This proves the resource's Update path works
+// (otherwise tofu apply would fail or the expected change wouldn't
+// surface).
+type gcpUpdate struct {
+	files  map[string][]byte
+	verify func(t *testing.T, state map[string]any)
+}
+
+// gcpStateItemCount returns len(state[root][collection]). fakegcp's
+// FullState wraps each service in a per-service map of slice-valued
+// collections (pubsub→{topics,subscriptions}, dns→{zones,record_sets},
+// cloudrun→{services}, secretmanager→{secrets,versions}, …). Items
+// inside use GCP-shaped fields (name, not id), so we just count.
+func gcpStateItemCount(state map[string]any, root, collection string) int {
+	rootMap, ok := state[root].(map[string]any)
+	if !ok {
+		return 0
+	}
+	items, ok := rootMap[collection].([]any)
+	if !ok {
+		return 0
+	}
+	return len(items)
+}
+
+// runGCPServiceScenario drives the full Create → (optional) Update →
+// Delete lifecycle for a GCP-service scenario:
+//   1. --no-destroy with `files`         → proves Create + post-apply state.
+//   2. --no-destroy with `update.files`  → proves Update (only if update != nil).
+//   3. final run with `update.files`     → proves Delete via orphan-free teardown.
+// Every stage must end with target_reached. The update stage's verify
+// callback inspects fakegcp state to confirm the mutation actually
+// surfaced (otherwise an "update" might silently be a recreate or a
+// no-op).
+func runGCPServiceScenario(t *testing.T, mock *MockwayInstance, scenarioFile string, files map[string][]byte, expects []gcpStateExpect, update *gcpUpdate) {
 	t.Helper()
 
 	workspace := t.TempDir()
@@ -135,16 +297,35 @@ func runGCPServiceScenario(t *testing.T, mock *MockwayInstance, scenarioFile str
 
 	state := mock.FetchState(t)
 	for _, exp := range expects {
-		ids := stateResourceIDs(state, exp.root, exp.collection)
-		if len(ids) < exp.minCount {
-			t.Errorf("expected at least %d %s/%s after apply, got %d (ids=%v)",
-				exp.minCount, exp.root, exp.collection, len(ids), ids)
+		got := gcpStateItemCount(state, exp.root, exp.collection)
+		if got < exp.minCount {
+			t.Errorf("expected at least %d %s/%s after apply, got %d",
+				exp.minCount, exp.root, exp.collection, got)
 		}
+	}
+
+	finalFiles := files
+	if update != nil {
+		updateRun := RunInfrafactory(t, InfrafactoryRunOptions{
+			Args:           []string{"run", scenarioPath, "--config", configPath, "--no-destroy"},
+			GeneratorFiles: update.files,
+		})
+		if updateRun.Err != nil {
+			t.Fatalf("update --no-destroy run failed: %v\nstdout:\n%s\nstderr:\n%s\nfakegcp log: %s",
+				updateRun.Err, updateRun.Stdout, updateRun.Stderr, mock.LogPath())
+		}
+		if !strings.Contains(updateRun.Stdout, "run/terminal_reason: pass (target_reached)") {
+			t.Fatalf("expected update run to reach target_reached, got:\n%s", updateRun.Stdout)
+		}
+		if update.verify != nil {
+			update.verify(t, mock.FetchState(t))
+		}
+		finalFiles = update.files
 	}
 
 	final := RunInfrafactory(t, InfrafactoryRunOptions{
 		Args:           []string{"run", scenarioPath, "--config", configPath},
-		GeneratorFiles: files,
+		GeneratorFiles: finalFiles,
 	})
 	if final.Err != nil {
 		t.Fatalf("final destroy run failed: %v\nstdout:\n%s", final.Err, final.Stdout)
@@ -154,10 +335,10 @@ func runGCPServiceScenario(t *testing.T, mock *MockwayInstance, scenarioFile str
 	}
 }
 
-// gcpProviderTF returns the providers.tf body that points all
-// GCP-service custom endpoints at the running fakegcp instance. Each
-// per-service test only uses the endpoint(s) it needs, but bundling
-// them here keeps the four file maps short.
+// gcpProviderTF returns the providers.tf body that points every
+// GCP custom endpoint we exercise in e2e tests at the running fakegcp
+// instance. Per-service tests only use the endpoint(s) they need, but
+// bundling them here keeps each file map short.
 func gcpProviderTF(fakegcpURL string) string {
 	return fmt.Sprintf(`terraform {
   required_providers {
@@ -178,12 +359,16 @@ provider "google" {
     send_after = "0s"
   }
 
-  pubsub_custom_endpoint         = "%s/v1/"
-  dns_custom_endpoint            = "%s/dns/v1/"
-  cloud_run_v2_custom_endpoint   = "%s/"
-  secret_manager_custom_endpoint = "%s/"
+  compute_custom_endpoint                = "%[1]s/compute/v1/"
+  iam_custom_endpoint                    = "%[1]s/v1/"
+  cloud_resource_manager_custom_endpoint = "%[1]s/v1/"
+  storage_custom_endpoint                = "%[1]s/storage/v1/"
+  pubsub_custom_endpoint                 = "%[1]s/v1/"
+  dns_custom_endpoint                    = "%[1]s/dns/v1/"
+  cloud_run_v2_custom_endpoint           = "%[1]s/v2/"
+  secret_manager_custom_endpoint         = "%[1]s/v1/"
 }
-`, fakegcpURL, fakegcpURL, fakegcpURL, fakegcpURL)
+`, fakegcpURL)
 }
 
 func gcpPubSubFiles(fakegcpURL string) map[string][]byte {
@@ -241,6 +426,89 @@ func gcpCloudRunFiles(fakegcpURL string) map[string][]byte {
 	}
 }
 
+func gcpLoadBalancerFiles(fakegcpURL string) map[string][]byte {
+	return map[string][]byte{
+		"providers.tf": []byte(gcpProviderTF(fakegcpURL)),
+		"main.tf": []byte(`resource "google_compute_global_address" "lb" {
+  name = "lb-ip"
+}
+
+resource "google_compute_health_check" "hc" {
+  name = "lb-hc"
+
+  http_health_check {
+    port         = 80
+    request_path = "/"
+  }
+}
+
+resource "google_compute_backend_service" "be" {
+  name          = "lb-be"
+  protocol      = "HTTP"
+  health_checks = [google_compute_health_check.hc.id]
+}
+
+resource "google_compute_url_map" "um" {
+  name            = "lb-um"
+  default_service = google_compute_backend_service.be.id
+}
+
+resource "google_compute_ssl_certificate" "cert" {
+  name        = "lb-cert"
+  private_key = "fake-private-key"
+  certificate = "fake-certificate"
+}
+
+resource "google_compute_target_https_proxy" "thp" {
+  name             = "lb-thp"
+  url_map          = google_compute_url_map.um.id
+  ssl_certificates = [google_compute_ssl_certificate.cert.id]
+}
+
+resource "google_compute_global_forwarding_rule" "fr" {
+  name       = "lb-fr"
+  ip_address = google_compute_global_address.lb.id
+  port_range = "443"
+  target     = google_compute_target_https_proxy.thp.id
+}
+`),
+	}
+}
+
+func gcpIAMFiles(fakegcpURL string) map[string][]byte {
+	return map[string][]byte{
+		"providers.tf": []byte(gcpProviderTF(fakegcpURL)),
+		"main.tf": []byte(`resource "google_service_account" "ci" {
+  account_id   = "ci-runner"
+  display_name = "CI runner service account"
+}
+
+resource "google_service_account_key" "ci" {
+  service_account_id = google_service_account.ci.name
+  key_algorithm      = "KEY_ALG_RSA_2048"
+}
+`),
+	}
+}
+
+func gcpStorageFiles(fakegcpURL string) map[string][]byte {
+	return map[string][]byte{
+		"providers.tf": []byte(gcpProviderTF(fakegcpURL)),
+		"main.tf": []byte(`resource "google_storage_bucket" "assets" {
+  name          = "fake-project-app-assets"
+  location      = "us-central1"
+  force_destroy = true
+
+  uniform_bucket_level_access = true
+
+  encryption {
+    default_kms_key_name = "projects/fake-project/locations/us-central1/keyRings/r/cryptoKeys/k"
+  }
+}
+`),
+	}
+}
+
 func gcpSecretManagerFiles(fakegcpURL string) map[string][]byte {
 	return map[string][]byte{
 		"providers.tf": []byte(gcpProviderTF(fakegcpURL)),
@@ -258,4 +526,267 @@ resource "google_secret_manager_secret_version" "main" {
 }
 `),
 	}
+}
+
+// Update-stage HCL: each *UpdateFiles maps the same resources as
+// the corresponding *Files but with at least one mutable field
+// changed, so re-applying exercises the resource's Update path
+// rather than its Create path.
+
+func gcpPubSubUpdateFiles(fakegcpURL string) map[string][]byte {
+	return map[string][]byte{
+		"providers.tf": []byte(gcpProviderTF(fakegcpURL)),
+		"main.tf": []byte(`resource "google_pubsub_topic" "main" {
+  name = "events"
+}
+
+resource "google_pubsub_subscription" "main" {
+  name                 = "events-pull"
+  topic                = google_pubsub_topic.main.name
+  ack_deadline_seconds = 45
+}
+`),
+	}
+}
+
+func gcpDNSUpdateFiles(fakegcpURL string) map[string][]byte {
+	return map[string][]byte{
+		"providers.tf": []byte(gcpProviderTF(fakegcpURL)),
+		"main.tf": []byte(`resource "google_dns_managed_zone" "main" {
+  name        = "test-zone"
+  dns_name    = "test.example.invalid."
+  description = "fakegcp e2e zone (updated)"
+}
+
+resource "google_dns_record_set" "main" {
+  name         = "host.${google_dns_managed_zone.main.dns_name}"
+  managed_zone = google_dns_managed_zone.main.name
+  type         = "A"
+  ttl          = 600
+  rrdatas      = ["192.0.2.10"]
+}
+`),
+	}
+}
+
+func gcpCloudRunUpdateFiles(fakegcpURL string) map[string][]byte {
+	return map[string][]byte{
+		"providers.tf": []byte(gcpProviderTF(fakegcpURL)),
+		"main.tf": []byte(`resource "google_cloud_run_v2_service" "main" {
+  name     = "api"
+  location = "us-central1"
+
+  labels = {
+    env = "staging"
+  }
+
+  template {
+    containers {
+      image = "us-docker.pkg.dev/cloudrun/container/hello"
+    }
+  }
+
+  deletion_protection = false
+}
+`),
+	}
+}
+
+func gcpLoadBalancerUpdateFiles(fakegcpURL string) map[string][]byte {
+	return map[string][]byte{
+		"providers.tf": []byte(gcpProviderTF(fakegcpURL)),
+		"main.tf": []byte(`resource "google_compute_global_address" "lb" {
+  name = "lb-ip"
+}
+
+resource "google_compute_health_check" "hc" {
+  name = "lb-hc"
+
+  http_health_check {
+    port         = 80
+    request_path = "/"
+  }
+}
+
+resource "google_compute_backend_service" "be" {
+  name          = "lb-be"
+  description   = "updated-backend"
+  protocol      = "HTTP"
+  health_checks = [google_compute_health_check.hc.id]
+}
+
+resource "google_compute_url_map" "um" {
+  name            = "lb-um"
+  default_service = google_compute_backend_service.be.id
+}
+
+resource "google_compute_ssl_certificate" "cert" {
+  name        = "lb-cert"
+  private_key = "fake-private-key"
+  certificate = "fake-certificate"
+}
+
+resource "google_compute_target_https_proxy" "thp" {
+  name             = "lb-thp"
+  url_map          = google_compute_url_map.um.id
+  ssl_certificates = [google_compute_ssl_certificate.cert.id]
+}
+
+resource "google_compute_global_forwarding_rule" "fr" {
+  name       = "lb-fr"
+  ip_address = google_compute_global_address.lb.id
+  port_range = "443"
+  target     = google_compute_target_https_proxy.thp.id
+}
+`),
+	}
+}
+
+func gcpIAMUpdateFiles(fakegcpURL string) map[string][]byte {
+	return map[string][]byte{
+		"providers.tf": []byte(gcpProviderTF(fakegcpURL)),
+		"main.tf": []byte(`resource "google_service_account" "ci" {
+  account_id   = "ci-runner"
+  display_name = "CI runner (rotated)"
+}
+
+resource "google_service_account_key" "ci" {
+  service_account_id = google_service_account.ci.name
+  key_algorithm      = "KEY_ALG_RSA_2048"
+}
+`),
+	}
+}
+
+func gcpStorageUpdateFiles(fakegcpURL string) map[string][]byte {
+	return map[string][]byte{
+		"providers.tf": []byte(gcpProviderTF(fakegcpURL)),
+		"main.tf": []byte(`resource "google_storage_bucket" "assets" {
+  name          = "fake-project-app-assets"
+  location      = "us-central1"
+  force_destroy = true
+
+  uniform_bucket_level_access = true
+
+  labels = {
+    env = "prod"
+  }
+
+  encryption {
+    default_kms_key_name = "projects/fake-project/locations/us-central1/keyRings/r/cryptoKeys/k"
+  }
+}
+`),
+	}
+}
+
+func gcpSecretManagerUpdateFiles(fakegcpURL string) map[string][]byte {
+	return map[string][]byte{
+		"providers.tf": []byte(gcpProviderTF(fakegcpURL)),
+		"main.tf": []byte(`resource "google_secret_manager_secret" "main" {
+  secret_id = "db-credentials"
+
+  labels = {
+    rotation = "monthly"
+  }
+
+  replication {
+    auto {}
+  }
+}
+
+resource "google_secret_manager_secret_version" "main" {
+  secret      = google_secret_manager_secret.main.id
+  secret_data = "fakegcp-test-payload"
+}
+`),
+	}
+}
+
+// State extractors used by per-test update verifiers. Each picks a
+// single mutable field off the first matching item in the relevant
+// fakegcp state collection.
+
+func firstSubscriptionAckDeadline(state map[string]any) int {
+	subs := stateSlice(state, "pubsub", "subscriptions")
+	if len(subs) == 0 {
+		return 0
+	}
+	v, _ := subs[0]["ackDeadlineSeconds"].(float64)
+	return int(v)
+}
+
+func firstRecordSetTTL(state map[string]any) int {
+	rs := stateSlice(state, "dns", "record_sets")
+	if len(rs) == 0 {
+		return 0
+	}
+	v, _ := rs[0]["ttl"].(float64)
+	return int(v)
+}
+
+func firstCloudRunServiceLabels(state map[string]any) map[string]any {
+	svcs := stateSlice(state, "cloudrun", "services")
+	if len(svcs) == 0 {
+		return nil
+	}
+	labels, _ := svcs[0]["labels"].(map[string]any)
+	return labels
+}
+
+func firstBackendServiceDescription(state map[string]any) string {
+	bes := stateSlice(state, "lb", "backend_services")
+	if len(bes) == 0 {
+		return ""
+	}
+	v, _ := bes[0]["description"].(string)
+	return v
+}
+
+func firstServiceAccountDisplayName(state map[string]any) string {
+	sas := stateSlice(state, "iam", "serviceAccounts")
+	if len(sas) == 0 {
+		return ""
+	}
+	v, _ := sas[0]["displayName"].(string)
+	return v
+}
+
+func firstBucketLabels(state map[string]any) map[string]any {
+	buckets := stateSlice(state, "storage", "buckets")
+	if len(buckets) == 0 {
+		return nil
+	}
+	labels, _ := buckets[0]["labels"].(map[string]any)
+	return labels
+}
+
+func firstSecretLabels(state map[string]any) map[string]any {
+	secrets := stateSlice(state, "secretmanager", "secrets")
+	if len(secrets) == 0 {
+		return nil
+	}
+	labels, _ := secrets[0]["labels"].(map[string]any)
+	return labels
+}
+
+// stateSlice returns the typed object slice at state[root][collection]
+// or nil. fakegcp items are unmarshaled into map[string]any when JSON
+// is decoded into map[string]any.
+func stateSlice(state map[string]any, root, collection string) []map[string]any {
+	rootMap, ok := state[root].(map[string]any)
+	if !ok {
+		return nil
+	}
+	items, ok := rootMap[collection].([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]map[string]any, 0, len(items))
+	for _, it := range items {
+		if m, ok := it.(map[string]any); ok {
+			out = append(out, m)
+		}
+	}
+	return out
 }

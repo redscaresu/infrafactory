@@ -113,6 +113,12 @@ func countOrphans(stateJSON []byte) (int, error) {
 
 	ignoredRoots := map[string]struct{}{
 		"metadata": {},
+		// fakegcp persists every long-running operation (insert/delete/
+		// setLabels/...) to its operations table and surfaces them under
+		// state.operations. They aren't resources — they are the audit
+		// trail of API calls that produced the resources — so they
+		// shouldn't count as orphans on a clean teardown.
+		"operations": {},
 	}
 	ignoredCollections := map[string]struct{}{
 		"events":   {},

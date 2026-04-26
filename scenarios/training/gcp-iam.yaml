@@ -1,0 +1,20 @@
+scenario: gcp-iam
+version: "1.0"
+cloud: gcp
+description: >
+  A service account with a service-account key. Exercises fakegcp's
+  IAM handlers (handlers/iam.go) end-to-end through infrafactory's
+  Layer-2 mock-deploy harness.
+
+resources:
+  iam:
+    purpose: ci-cd
+    application: true
+    api_key: true
+
+constraints:
+  region: us-central1
+
+acceptance_criteria:
+  - type: destruction
+    expect: no_orphans
