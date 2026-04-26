@@ -327,7 +327,7 @@ This file is intentionally high-level and mostly stable; day-to-day execution tr
 - Catches cross-repo bugs (field naming, missing response fields, port conventions).
 - Tests for web-app-paris (simple) and full-stack-paris (all resource types).
 - Gated by env var so normal `go test` is unaffected.
-- Design reference: `docs/plans/slices-33-39-plan.md`, ADR-0013.
+- Design reference: `docs/plans/slices-33-42-plan.md`, ADR-0013.
 
 34. Slice 34: Pitfall learning from failed runs
 - Detect oscillation patterns (same failure signature alternating across iterations).
@@ -344,7 +344,7 @@ This file is intentionally high-level and mostly stable; day-to-day execution tr
 - Per-cloud prompt templates (`prompts/gcp/`), GCP topology derivation, GCP pitfalls.
 - Training scenarios: basic VM + network, GKE cluster, Cloud SQL.
 - Validates the cloud-agnostic architecture with a real second provider.
-- Design reference: `docs/plans/slices-33-39-plan.md`, ADR-0013.
+- Design reference: `docs/plans/slices-33-42-plan.md`, ADR-0013.
 
 37. Slice 37: Pitfalls UI
 - `/pitfalls` page showing all pitfalls with source badges (static/learned), resource, and provider.
