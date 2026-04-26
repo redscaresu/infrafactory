@@ -27,6 +27,9 @@ Last updated: 2026-04-26
 - Keep startup/read-order instructions only in `SESSION_START.md` to avoid duplication.
 
 ## Recent updates
+- **S38-T2 complete (/compare UI page)**:
+  - New SvelteKit route at `/compare` with scenario + run-1 + run-2 selectors, a Compare button, a left-side file list with status badges (`added`/`removed`/`modified`/`unchanged`), and a right-pane unified-diff viewer. Uses the existing `GET /api/runs/{scenario}/compare` endpoint via the new `api.compareRuns()` helper. Default selection picks the two most recent runs of the chosen scenario.
+  - Sidebar gains a "Compare" entry between Live and Pitfalls. Stable test ids: `compare-section`, `compare-scenario`, `compare-run1`, `compare-run2`, `compare-run`, `compare-files`, `compare-file-<name>`, `compare-status-<name>`, `compare-diff`, `compare-error`.
 - **S37-T3 complete (/pitfalls UI page)**:
   - Added `/pitfalls` SvelteKit route with provider tabs (default = first alphabetically), an inline-editable table per provider (Resource, Rule, Source, Discovered From), `+ Add`/Delete row controls, and per-provider Save calling the existing `PUT /api/pitfalls/{provider}`. Source badges: `learned` → sky accent, `static`/`seed`/unknown → neutral slate. Sidebar gains a "Pitfalls" entry between Live and Diagnostics.
   - Helpers extracted to `ui/src/lib/pitfalls-{view,api}.js` so the fetch and view logic stay testable. 15 new node:test cases (8 view + 7 api). `npm test` 55 → 70+ passes; `npm run build` clean. Stable test ids documented in the agent report so S37-T4 Playwright tests can drive the page deterministically.
