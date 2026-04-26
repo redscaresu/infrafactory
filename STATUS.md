@@ -27,6 +27,9 @@ Last updated: 2026-04-26
 - Keep startup/read-order instructions only in `SESSION_START.md` to avoid duplication.
 
 ## Recent updates
+- **Slice 37-T1 complete (GET /api/pitfalls)**:
+  - Added `internal/api/handlers_pitfalls.go` — scans the configured pitfalls dir for `*.yaml`/`*.yml`, parses each as `generator.PitfallsFile`, and returns providers grouped alphabetically with deterministic entries (`resource`, `rule`, `source`, `discovered_from`).
+  - Empty/missing directory → 200 with empty providers array. Malformed YAML → 500 with parse-error message. Non-GET → 405. 5 unit tests cover these branches.
 - **Slice 35 complete (S35-T2, S35-T3)**:
   - `EvaluateTopology` now appends the diagnostic to http_probe failure detail with `": "`, e.g. `http probe "load_balancer:80" expected true got false: no backend attached`. Pre-computed-topology callers leave diagnostics nil and behave unchanged.
   - Plumbing is internal: `EvaluateTopology` captures `DeriveTopology`'s second return into a local map and an unexported `httpProbeDiagnostic` helper does the exact-key → LB-fallback → empty lookup. No exported signatures changed.

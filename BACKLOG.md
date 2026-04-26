@@ -33,7 +33,7 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 | S37-T4 | Slice 37 | Playwright e2e tests for pitfalls page | P1 | todo | S37-T3 | — |
 | S37-T3 | Slice 37 | /pitfalls UI page with table, source badges, and edit form | P1 | todo | S37-T2 | — |
 | S37-T2 | Slice 37 | PUT /api/pitfalls/{provider} endpoint for editing | P1 | todo | S37-T1 | — |
-| S37-T1 | Slice 37 | GET /api/pitfalls endpoint returning pitfalls grouped by provider | P1 | todo | — | — |
+| S37-T1 | Slice 37 | GET /api/pitfalls endpoint returning pitfalls grouped by provider | P1 | done | — | claude |
 | S36-T12 | Slice 36 | Playwright e2e: GCP scenarios appear in UI scenario list | P1 | todo | S36-T10 | — |
 | S36-T11 | Slice 36 | Cross-repo e2e tests against fakegcp + double-apply idempotency | P1 | todo | S33-T1, S36-T10, S41-T1 | — |
 | S36-T10 | Slice 36 | GCP training scenarios (gcp-vm-network, gcp-gke-cluster, gcp-cloud-sql, gcp-full-stack) | P1 | todo | S36-T2, S36-T3, S36-T6, S36-T7, S36-T8 | — |
