@@ -20,15 +20,15 @@ var (
 )
 
 type Scenario struct {
-	Name               string                 `json:"scenario"`
-	Version            string                 `json:"version"`
-	Cloud              string                 `json:"cloud"`
-	Description        string                 `json:"description"`
-	Type               string                 `json:"type,omitempty"`
-	References         string                 `json:"references,omitempty"`
-	Resources          Resources              `json:"resources"`
-	Constraints        map[string]any         `json:"constraints,omitempty"`
-	AcceptanceCriteria []AcceptanceCriterion  `json:"acceptance_criteria"`
+	Name               string                `json:"scenario"`
+	Version            string                `json:"version"`
+	Cloud              string                `json:"cloud"`
+	Description        string                `json:"description"`
+	Type               string                `json:"type,omitempty"`
+	References         string                `json:"references,omitempty"`
+	Resources          Resources             `json:"resources"`
+	Constraints        map[string]any        `json:"constraints,omitempty"`
+	AcceptanceCriteria []AcceptanceCriterion `json:"acceptance_criteria"`
 }
 
 type Resources struct {
@@ -60,8 +60,8 @@ type NetworkingResource struct {
 }
 
 type LoadBalancer struct {
-	Exposure string       `json:"exposure"`
-	Backends []LBBackend  `json:"backends"`
+	Exposure string      `json:"exposure"`
+	Backends []LBBackend `json:"backends"`
 }
 
 type LBBackend struct {
@@ -127,8 +127,8 @@ type AcceptanceCriterion struct {
 }
 
 type Violation struct {
-	Path    string
-	Message string
+	Path    string `json:"path"`
+	Message string `json:"message"`
 }
 
 type ValidationError struct {
@@ -162,10 +162,24 @@ func LoadWithSchema(path, schemaPath string) (Scenario, error) {
 	if err != nil {
 		return Scenario{}, fmt.Errorf("read scenario %q: %w", path, err)
 	}
+	return parseAndValidate(payload, path, schemaPath)
+}
 
+// ValidateBytes validates raw scenario YAML bytes against the JSON schema
+// without writing to disk. It returns nil on success, ErrMalformedScenario
+// (wrapped) for YAML syntax errors, or *ValidationError for schema
+// violations. The sourceLabel is included in error messages for context
+// (callers may pass an empty string when there's no path, e.g. an editor
+// buffer).
+func ValidateBytes(payload []byte, schemaPath, sourceLabel string) error {
+	_, err := parseAndValidate(payload, sourceLabel, schemaPath)
+	return err
+}
+
+func parseAndValidate(payload []byte, sourceLabel, schemaPath string) (Scenario, error) {
 	var raw any
 	if err := yaml.Unmarshal(payload, &raw); err != nil {
-		return Scenario{}, fmt.Errorf("%w: parse scenario %q: %v", ErrMalformedScenario, path, err)
+		return Scenario{}, fmt.Errorf("%w: parse scenario %q: %v", ErrMalformedScenario, sourceLabel, err)
 	}
 
 	normalized := normalizeYAML(raw)
@@ -186,21 +200,21 @@ func LoadWithSchema(path, schemaPath string) (Scenario, error) {
 				return violations[i].Path < violations[j].Path
 			})
 			return Scenario{}, &ValidationError{
-				ScenarioPath: path,
+				ScenarioPath: sourceLabel,
 				Violations:   violations,
 			}
 		}
-		return Scenario{}, fmt.Errorf("%w: validate scenario %q: %v", ErrInvalidScenario, path, err)
+		return Scenario{}, fmt.Errorf("%w: validate scenario %q: %v", ErrInvalidScenario, sourceLabel, err)
 	}
 
 	jsonBytes, err := json.Marshal(normalized)
 	if err != nil {
-		return Scenario{}, fmt.Errorf("marshal scenario %q: %w", path, err)
+		return Scenario{}, fmt.Errorf("marshal scenario %q: %w", sourceLabel, err)
 	}
 
 	var result Scenario
 	if err := json.Unmarshal(jsonBytes, &result); err != nil {
-		return Scenario{}, fmt.Errorf("decode scenario %q: %w", path, err)
+		return Scenario{}, fmt.Errorf("decode scenario %q: %w", sourceLabel, err)
 	}
 
 	applyIAMDefaults(&result, normalized)

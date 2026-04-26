@@ -26,7 +26,7 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 | S39-T4 | Slice 39 | Playwright e2e tests for real-time validation | P1 | todo | S39-T3 | — |
 | S39-T3 | Slice 39 | Inline error display below textarea | P1 | todo | S39-T2 | — |
 | S39-T2 | Slice 39 | Debounced validation in scenario page textarea (500ms delay) | P1 | todo | S39-T1 | — |
-| S39-T1 | Slice 39 | POST /api/scenarios/validate endpoint (validates without saving) | P1 | todo | — | — |
+| S39-T1 | Slice 39 | POST /api/scenarios/validate endpoint (validates without saving) | P1 | done | — | claude+codex |
 | S38-T3 | Slice 38 | Playwright e2e tests for run comparison | P1 | todo | S38-T2 | — |
 | S38-T2 | Slice 38 | /compare UI page with dual-pane IaC diff viewer | P1 | todo | S38-T1 | — |
 | S38-T1 | Slice 38 | GET /api/runs/{scenario}/compare endpoint returning diff data | P1 | done | — | claude |

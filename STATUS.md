@@ -27,6 +27,10 @@ Last updated: 2026-04-26
 - Keep startup/read-order instructions only in `SESSION_START.md` to avoid duplication.
 
 ## Recent updates
+- **S39-T1 complete (POST /api/scenarios/validate)**:
+  - Added `validateScenarioHandler` returning `{"valid":..., "errors":[{"path","message"}]}` for any input. Schema-invalid YAML returns `200` with `valid: false` and per-violation entries; YAML syntax errors return `200` with a `yaml syntax: ...` message; empty body → 400; wrong method → 405; wrong content-type → 415.
+  - Added `scenario.ValidateBytes(payload, schemaPath, sourceLabel)` that operates on bytes (no temp file) and shares `parseAndValidate` with `LoadWithSchema`. `Violation` now has `json:"path"`/`json:"message"` tags.
+  - Routed at exact path `/api/scenarios/validate` so it sits cleanly next to the existing `/api/scenarios/{path}` PUT handler. 7 new tests cover valid, schema-invalid, missing-required-field, syntax-error, empty-body, wrong-method, wrong-content-type.
 - **S37-T2 complete (PUT /api/pitfalls/{provider})**:
   - Refactored `handlers_pitfalls.go` into a single `pitfallsHandler` dispatcher: `GET /api/pitfalls` lists, `PUT /api/pitfalls/{provider}` writes the provider's YAML file atomically (.tmp + rename). Body is `{"pitfalls": [...]}`. Validation rejects empty resource/rule (422), unknown fields (400), traversal in provider name (400), missing pitfalls dir (424), and non-PUT methods (405).
   - Default `source: static` when omitted on a write. 4 new tests cover write success, validation, traversal rejection, and method rejection.

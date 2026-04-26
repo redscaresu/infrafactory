@@ -87,6 +87,7 @@ func NewServer(cfg ServerConfig) *http.Server {
 	mux.HandleFunc("/api/config", newConfigHandler(state))
 	mux.HandleFunc("/api/diagnostics", diagnosticsHandler(state))
 	mux.HandleFunc("/api/scenarios", listScenariosHandler(state))
+	mux.HandleFunc("/api/scenarios/validate", validateScenarioHandler(state))
 	mux.HandleFunc("/api/scenarios/", scenarioByPathHandler(state))
 	mux.HandleFunc("/api/runs", listAllRunsHandler(state))
 	mux.HandleFunc("/api/runs/", runsByScenarioHandler(state))

@@ -121,6 +121,113 @@ func listScenariosHandler(state *serverState) http.HandlerFunc {
 	}
 }
 
+type validateScenarioRequest struct {
+	YAML string `json:"yaml"`
+}
+
+type validateScenarioResponse struct {
+	Valid  bool                 `json:"valid"`
+	Errors []scenario.Violation `json:"errors"`
+}
+
+func validateScenarioHandler(state *serverState) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		contentType := strings.TrimSpace(strings.SplitN(r.Header.Get("Content-Type"), ";", 2)[0])
+		if contentType != "" && !strings.EqualFold(contentType, "application/json") {
+			writeJSONError(w, http.StatusUnsupportedMediaType, "content-type must be application/json")
+			return
+		}
+
+		const maxValidatePayloadBytes = 1 << 20 // 1 MB
+		body, err := io.ReadAll(io.LimitReader(r.Body, maxValidatePayloadBytes+1))
+		if err != nil {
+			writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("read request body: %v", err))
+			return
+		}
+		if len(body) > maxValidatePayloadBytes {
+			writeJSONError(w, http.StatusRequestEntityTooLarge, "validate payload exceeds 1 MB limit")
+			return
+		}
+
+		var req validateScenarioRequest
+		if err := json.Unmarshal(body, &req); err != nil {
+			writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("decode request body: %v", err))
+			return
+		}
+		if strings.TrimSpace(req.YAML) == "" {
+			writeJSONError(w, http.StatusBadRequest, "yaml field is required")
+			return
+		}
+
+		schemaPath, err := selectSchemaPath(state.scenarioSchemaPathCandidates())
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		validateErr := scenario.ValidateBytes([]byte(req.YAML), schemaPath, "")
+		if validateErr == nil {
+			writeJSON(w, http.StatusOK, validateScenarioResponse{
+				Valid:  true,
+				Errors: []scenario.Violation{},
+			})
+			return
+		}
+
+		var validationErr *scenario.ValidationError
+		if errors.As(validateErr, &validationErr) {
+			writeJSON(w, http.StatusOK, validateScenarioResponse{
+				Valid:  false,
+				Errors: validationErr.Violations,
+			})
+			return
+		}
+
+		if errors.Is(validateErr, scenario.ErrMalformedScenario) {
+			writeJSON(w, http.StatusOK, validateScenarioResponse{
+				Valid: false,
+				Errors: []scenario.Violation{{
+					Path:    "",
+					Message: fmt.Sprintf("yaml syntax: %s", extractYAMLSyntaxDetail(validateErr.Error())),
+				}},
+			})
+			return
+		}
+
+		writeJSONError(w, http.StatusInternalServerError, validateErr.Error())
+	}
+}
+
+// extractYAMLSyntaxDetail strips the wrapper prefix added by parseAndValidate
+// (e.g. `malformed scenario: parse scenario "": <detail>`) so the message
+// surfaces just the underlying parser error.
+func extractYAMLSyntaxDetail(message string) string {
+	idx := strings.LastIndex(message, ": ")
+	if idx == -1 {
+		return message
+	}
+	return strings.TrimSpace(message[idx+2:])
+}
+
+func selectSchemaPath(candidates []string) (string, error) {
+	var lastErr error
+	for _, schemaPath := range candidates {
+		if _, err := os.Stat(schemaPath); err != nil {
+			lastErr = err
+			continue
+		}
+		return schemaPath, nil
+	}
+	if lastErr != nil {
+		return "", fmt.Errorf("locate scenario schema: %w", lastErr)
+	}
+	return "", fmt.Errorf("locate scenario schema: no schema paths configured")
+}
+
 func scenarioByPathHandler(state *serverState) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		relPath, ok := parseTailPath(r.URL.Path, "/api/scenarios/")
