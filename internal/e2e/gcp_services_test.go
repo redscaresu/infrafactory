@@ -830,10 +830,14 @@ func collectIdentities(state map[string]any, expects []gcpStateExpect) map[strin
 }
 
 // identityKey picks the most stable identifier on a fakegcp state
-// item. uniqueId (IAM) and id (DNS zones) take precedence over name
-// because tofu can recreate a resource under the same logical name
-// while the server-assigned id changes; falling back to name still
-// catches recreates for resources that don't surface a separate id.
+// item. uniqueId (IAM) and id (DNS zones, compute) take precedence;
+// they're server-assigned and change on recreate. Where the resource
+// shape doesn't expose a server id, we fall back to the pair
+// (name, creation-timestamp). The timestamp is critical: a delete +
+// recreate under the same logical name produces a fresh
+// createTime/creationTimestamp, so the identity flips even though
+// `name` is reused. Without it we'd silently miss same-name
+// recreates for resources like DNS record sets.
 func identityKey(item map[string]any) string {
 	for _, field := range []string{"uniqueId", "id"} {
 		switch v := item[field].(type) {
@@ -845,8 +849,24 @@ func identityKey(item map[string]any) string {
 			return fmt.Sprintf("%s=%v", field, v)
 		}
 	}
-	if name, _ := item["name"].(string); name != "" {
+	name, _ := item["name"].(string)
+	ts := firstStringField(item, "createTime", "creationTimestamp", "creationTime")
+	switch {
+	case name != "" && ts != "":
+		return "name=" + name + "@" + ts
+	case name != "":
 		return "name=" + name
+	case ts != "":
+		return "createTime=" + ts
+	}
+	return ""
+}
+
+func firstStringField(item map[string]any, fields ...string) string {
+	for _, f := range fields {
+		if v, _ := item[f].(string); v != "" {
+			return v
+		}
 	}
 	return ""
 }
