@@ -27,6 +27,9 @@ Last updated: 2026-04-26
 - Keep startup/read-order instructions only in `SESSION_START.md` to avoid duplication.
 
 ## Recent updates
+- **S36-T10 complete (GCP training scenarios)**:
+  - Added `scenarios/training/gcp-{vm-network,gke-cluster,cloud-sql,full-stack}.yaml`. All four validate against the GCP-widened schema (regression test in `scenario_gcp_test.go::TestLoadGCPTrainingScenarios`).
+  - Live `infrafactory run` parity against fakegcp is gated by S41-T1 (fakegcp test infrastructure in the sibling repo) and S36-T11 (cross-repo e2e); the scenario fixtures themselves are static and ship now.
 - **S36-T5 complete (GCP topology unit tests)**:
   - Added 6 more `TestDeriveTopologyGCP*` cases on top of the 5 from S36-T4: multiple forwarding rules, port_range/ports-array variants, database-only without compute, MySQL port, GKE edge, and malformed JSON. Now 11 GCP-specific tests + 1 dispatch detection test (4 sub-cases) = 12 total, matching the Scaleway 10+ floor.
 - **S36-T9 complete (real_probe.go GCP resource patterns)**:

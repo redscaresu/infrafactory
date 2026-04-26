@@ -1,0 +1,30 @@
+scenario: gcp-gke-cluster
+version: "1.0"
+cloud: gcp
+description: >
+  A GKE Standard cluster on a custom VPC with a separate node pool
+  resource (no inline default node pool), and a CMEK-encrypted GCS
+  bucket for Terraform state offload. Exercises the
+  google_container_cluster + google_container_node_pool +
+  google_storage_bucket flow.
+
+resources:
+  networking:
+    vpc: true
+    private_network: true
+  kubernetes:
+    size: small
+  storage:
+    purpose: state-bucket
+    size: small
+
+constraints:
+  region: europe-west1
+  encryption_at_rest: true
+
+acceptance_criteria:
+  - type: policy
+    check: encryption_at_rest
+    expect: pass
+  - type: destruction
+    expect: no_orphans

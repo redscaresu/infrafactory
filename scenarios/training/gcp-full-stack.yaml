@@ -1,0 +1,46 @@
+scenario: gcp-full-stack
+version: "1.0"
+cloud: gcp
+description: >
+  A full-stack GCP scenario in europe-west1: VPC + private subnet, a
+  GKE cluster with a separate node pool, a private Cloud SQL Postgres,
+  a Memorystore Redis instance, a GCS bucket for assets, and an IAM
+  service account with a CI/CD policy. Exercises the multi-service
+  composition (compute, networking, kubernetes, database, redis,
+  storage, iam) infrafactory needs to validate against fakegcp.
+
+resources:
+  compute:
+    purpose: api-server
+    size: small
+  networking:
+    vpc: true
+    private_network: true
+  kubernetes:
+    size: small
+  database:
+    engine: postgresql
+    size: small
+    high_availability: false
+  redis:
+    purpose: cache
+    size: small
+  storage:
+    purpose: app-assets
+    size: small
+  iam:
+    purpose: ci-cd
+    application: true
+    api_key: true
+    policy: true
+
+constraints:
+  region: europe-west1
+  encryption_at_rest: true
+
+acceptance_criteria:
+  - type: policy
+    check: encryption_at_rest
+    expect: pass
+  - type: destruction
+    expect: no_orphans

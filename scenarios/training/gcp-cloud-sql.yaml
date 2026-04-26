@@ -1,0 +1,49 @@
+scenario: gcp-cloud-sql
+version: "1.0"
+cloud: gcp
+description: >
+  A private Cloud SQL PostgreSQL instance reachable only via VPC peering
+  (no public IP, no 0.0.0.0/0 authorized network). Compute instances on
+  the same private network may connect on 5432; the public internet
+  must not. Exercises google_sql_database_instance + private_network
+  IP configuration.
+
+resources:
+  compute:
+    purpose: api-server
+    size: small
+  networking:
+    vpc: true
+    private_network: true
+  database:
+    engine: postgresql
+    size: small
+    high_availability: false
+
+constraints:
+  region: europe-west1
+  no_public_database: true
+  encryption_at_rest: true
+
+acceptance_criteria:
+  - type: connectivity
+    from: public_internet
+    to: database
+    port: 5432
+    expect: blocked
+    description: "Cloud SQL must not be reachable from the public internet"
+  - type: connectivity
+    from: compute
+    to: database
+    port: 5432
+    expect: success
+    description: "API servers reach the database via private VPC peering"
+  - type: policy
+    check: no_public_endpoints
+    target: database
+    expect: pass
+  - type: policy
+    check: encryption_at_rest
+    expect: pass
+  - type: destruction
+    expect: no_orphans

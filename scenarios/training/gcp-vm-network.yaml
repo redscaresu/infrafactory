@@ -1,0 +1,22 @@
+scenario: gcp-vm-network
+version: "1.0"
+cloud: gcp
+description: >
+  A simple GCP VM in europe-west1 attached to a custom VPC and subnet,
+  with a firewall rule allowing only SSH from a developer CIDR. Exercises
+  the VPC + subnetwork + instance + firewall flow.
+
+resources:
+  compute:
+    purpose: web-server
+    size: small
+  networking:
+    vpc: true
+    private_network: true
+
+constraints:
+  region: europe-west1
+
+acceptance_criteria:
+  - type: destruction
+    expect: no_orphans

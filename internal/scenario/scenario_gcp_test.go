@@ -7,6 +7,34 @@ import (
 	"testing"
 )
 
+// TestLoadGCPTrainingScenarios verifies all checked-in GCP training
+// fixtures (S36-T10) validate against the live scenario schema.
+func TestLoadGCPTrainingScenarios(t *testing.T) {
+	t.Parallel()
+
+	schemaPath := filepath.Join("..", "..", "scenario.schema.json")
+	scenariosDir := filepath.Join("..", "..", "scenarios", "training")
+
+	for _, name := range []string{
+		"gcp-vm-network.yaml",
+		"gcp-gke-cluster.yaml",
+		"gcp-cloud-sql.yaml",
+		"gcp-full-stack.yaml",
+	} {
+		path := filepath.Join(scenariosDir, name)
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			sc, err := LoadWithSchema(path, schemaPath)
+			if err != nil {
+				t.Fatalf("expected %s to validate, got %v", path, err)
+			}
+			if sc.Cloud != "gcp" {
+				t.Fatalf("expected cloud=gcp, got %q", sc.Cloud)
+			}
+		})
+	}
+}
+
 // TestLoadWithSchemaCloudGCP exercises the schema's cloud enum widening to
 // accept "gcp" alongside "scaleway", and verifies that GCP-flavored resource
 // shapes (including the new storage resource) validate against the schema
