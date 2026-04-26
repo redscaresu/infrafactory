@@ -2,6 +2,7 @@ package generator
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -60,13 +61,25 @@ func LoadPitfalls(dir, cloud string) (string, error) {
 
 // loadPitfallsFile reads and parses a single pitfalls YAML file.
 // Returns nil entries and nil error if the file does not exist.
+// Caps the file at 1 MB so an accidentally-or-maliciously-huge
+// pitfalls YAML can't OOM the generator. Mirrors the API listPitfalls
+// handler's symmetric cap.
 func loadPitfallsFile(path string) ([]PitfallEntry, error) {
-	data, err := os.ReadFile(path)
+	const maxPitfallsFileBytes = 1 << 20
+	f, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
 		}
 		return nil, err
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, maxPitfallsFileBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxPitfallsFileBytes {
+		return nil, fmt.Errorf("pitfalls file %q exceeds %d bytes", path, maxPitfallsFileBytes)
 	}
 
 	var pf PitfallsFile
