@@ -551,7 +551,7 @@ deny_state contains msg if {
 		},
 	}
 
-	failures := evaluateStatePolicyCriteria(context.Background(), runtime, []byte(`{"rdb":{"instances":[]}}`), specs)
+	failures := evaluateStatePolicyCriteria(context.Background(), runtime, "scaleway", []byte(`{"rdb":{"instances":[]}}`), specs)
 	if len(failures) != 0 {
 		t.Fatalf("expected no failures, got %+v", failures)
 	}

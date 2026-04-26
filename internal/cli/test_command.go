@@ -478,7 +478,7 @@ func evaluateSupportedCriteria(ctx context.Context, sc scenario.Scenario, runtim
 	failures := make([]FailureSummary, 0)
 
 	if len(policySpecs) > 0 {
-		policyFailures := evaluateStatePolicyCriteria(ctx, runtime, deployResult.StateSnapshot, policySpecs)
+		policyFailures := evaluateStatePolicyCriteria(ctx, runtime, sc.Cloud, deployResult.StateSnapshot, policySpecs)
 		if len(policyFailures) > 0 {
 			stages = append(stages, StageSummary{
 				Layer:  "mock_deploy",
@@ -545,7 +545,23 @@ func evaluateSupportedCriteria(ctx context.Context, sc scenario.Scenario, runtim
 	return stages, failures
 }
 
-func evaluateStatePolicyCriteria(ctx context.Context, runtime *CommandRuntime, stateSnapshot []byte, specs []scenario.ExecutableCheckSpec) []FailureSummary {
+// cloudConstraintPolicies maps a scenario's cloud to (criteria check
+// name → policy path) so a `cloud: gcp` scenario with
+// `check: encryption_at_rest` is routed to policies/gcp/encryption.rego
+// instead of the Scaleway-only encryption_at_rest.rego that would
+// otherwise vacuously pass on a google_*-only plan. Closes the
+// cross-cloud bypass M37 was tracking.
+var cloudConstraintPolicies = map[string]map[string]string{
+	"gcp": {
+		"encryption_at_rest":  "gcp/encryption.rego",
+		"no_public_endpoints": "gcp/no_public_sql.rego",
+		"no_public_database":  "gcp/no_public_sql.rego",
+		"region":              "gcp/region_restriction.rego",
+		"zone":                "gcp/region_restriction.rego",
+	},
+}
+
+func evaluateStatePolicyCriteria(ctx context.Context, runtime *CommandRuntime, cloud string, stateSnapshot []byte, specs []scenario.ExecutableCheckSpec) []FailureSummary {
 	failures := make([]FailureSummary, 0)
 
 	for _, spec := range specs {
@@ -553,8 +569,20 @@ func evaluateStatePolicyCriteria(ctx context.Context, runtime *CommandRuntime, s
 			continue
 		}
 
-		policyPath, ok := runtime.Config.ConstraintPolicies[spec.Policy.Check]
-		if !ok || policyPath == "" {
+		// Per-cloud lookup first; fall back to the flat
+		// `constraint_policies` map (which is Scaleway-shaped today).
+		policyPath := ""
+		if cloudMap, ok := cloudConstraintPolicies[cloud]; ok {
+			if p, ok := cloudMap[spec.Policy.Check]; ok {
+				policyPath = p
+			}
+		}
+		if policyPath == "" {
+			if p, ok := runtime.Config.ConstraintPolicies[spec.Policy.Check]; ok {
+				policyPath = p
+			}
+		}
+		if policyPath == "" {
 			failures = append(failures, FailureSummary{
 				Layer:   "mock_deploy",
 				Stage:   "state_policy",
