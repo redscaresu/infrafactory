@@ -31,10 +31,13 @@ type rawMockState struct {
 	} `json:"redis"`
 }
 
-// DeriveTopology computes connectivity and http_probe maps from raw mockway
-// resource state. Returns JSON with the same shape that EvaluateTopology
-// expects, plus a Diagnostics map that explains why http_probe entries are
-// false. Diagnostics is non-nil and may be empty.
+// DeriveTopology computes connectivity and http_probe maps from raw mock
+// resource state. It auto-detects the cloud provider from the state shape
+// (mockway uses `instance/lb/rdb/...` keys; fakegcp uses
+// `compute/container/sql/lb`) and dispatches to the appropriate
+// per-cloud derivation. Returns JSON with the same shape that
+// EvaluateTopology expects, plus a Diagnostics map that explains why
+// http_probe entries are false. Diagnostics is non-nil and may be empty.
 //
 // Diagnostics keys:
 //   - For each false http_probe entry, a key matching the http_probe key
@@ -44,6 +47,33 @@ type rawMockState struct {
 //     lets consumers explain probes that hit ports no frontend listens on,
 //     since at derivation time the requested port is not yet known.
 func DeriveTopology(stateJSON []byte) ([]byte, map[string]string, error) {
+	switch detectCloud(stateJSON) {
+	case "gcp":
+		return deriveTopologyGCP(stateJSON)
+	default:
+		return deriveTopologyScaleway(stateJSON)
+	}
+}
+
+// detectCloud inspects the raw mock state to decide whether it came from
+// mockway (Scaleway) or fakegcp. fakegcp's full state has a top-level
+// `compute` key; mockway's has `instance`/`lb`/`rdb`. Defaults to
+// "scaleway" so empty/unknown state keeps the historical behaviour.
+func detectCloud(stateJSON []byte) string {
+	var probe struct {
+		Compute  json.RawMessage `json:"compute"`
+		Instance json.RawMessage `json:"instance"`
+	}
+	if err := json.Unmarshal(stateJSON, &probe); err != nil {
+		return "scaleway"
+	}
+	if len(probe.Compute) > 0 && string(probe.Compute) != "null" {
+		return "gcp"
+	}
+	return "scaleway"
+}
+
+func deriveTopologyScaleway(stateJSON []byte) ([]byte, map[string]string, error) {
 	var state rawMockState
 	if err := json.Unmarshal(stateJSON, &state); err != nil {
 		return nil, nil, fmt.Errorf("unmarshal raw state: %w", err)
