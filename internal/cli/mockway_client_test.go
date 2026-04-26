@@ -12,7 +12,7 @@ import (
 func TestNewMockwayStateClientSetsHTTPTimeout(t *testing.T) {
 	t.Parallel()
 
-	client := newMockwayStateClient("http://localhost:8080")
+	client := newMockStateClient("http://localhost:8080")
 	if client.client.Timeout != 30*time.Second {
 		t.Fatalf("expected timeout 30s, got %s", client.client.Timeout)
 	}
@@ -29,7 +29,7 @@ func TestMockwayStateClientStateReadsWithinBound(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := newMockwayStateClient(server.URL)
+	client := newMockStateClient(server.URL)
 	state, err := client.State(context.Background())
 	if err != nil {
 		t.Fatalf("state read: %v", err)
@@ -48,7 +48,7 @@ func TestMockwayStateClientStateFailsWhenPayloadExceedsBound(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := newMockwayStateClient(server.URL)
+	client := newMockStateClient(server.URL)
 	_, err := client.State(context.Background())
 	if err == nil {
 		t.Fatal("expected payload limit error")
@@ -69,7 +69,7 @@ func TestMockwayStateClientStateTruncatesErrorPayload(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := newMockwayStateClient(server.URL)
+	client := newMockStateClient(server.URL)
 	_, err := client.State(context.Background())
 	if err == nil {
 		t.Fatal("expected status error")

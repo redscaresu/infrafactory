@@ -261,7 +261,7 @@ func buildRuntime(cmd *cobra.Command, opts runtimeOptions) (*CommandRuntime, err
 		deps.Generator = defaultGenerator
 	}
 	if deps.MockState == nil {
-		deps.MockState = newMockwayStateClient(cfg.Mockway.URL)
+		deps.MockState = newMockStateClient(cfg.Mockway.URL)
 	}
 	if deps.Static == nil {
 		deps.Static = harness.NewStaticHarness(execCommandRunner{})

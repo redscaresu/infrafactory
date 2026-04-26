@@ -12,31 +12,36 @@ import (
 const maxMockwayStateResponseBytes = 8 * 1024 * 1024
 const maxMockwayErrorPayloadBytes = 1024
 
-type mockwayStateClient struct {
+type mockStateClient struct {
 	baseURL string
 	client  *http.Client
 }
 
-func newMockwayStateClient(baseURL string) *mockwayStateClient {
-	return &mockwayStateClient{
+// newMockStateClient builds a multi-cloud-capable HTTP client for the
+// `/mock/{state,reset,snapshot,restore}` admin endpoints exposed by both
+// mockway (Scaleway) and fakegcp (GCP). The endpoint shapes are identical
+// across the two backends, so the same client serves either provider —
+// callers select the URL based on the scenario's cloud.
+func newMockStateClient(baseURL string) *mockStateClient {
+	return &mockStateClient{
 		baseURL: strings.TrimRight(baseURL, "/"),
 		client:  &http.Client{Timeout: 30 * time.Second},
 	}
 }
 
-func (c *mockwayStateClient) Reset(ctx context.Context) error {
+func (c *mockStateClient) Reset(ctx context.Context) error {
 	return c.postNoBody(ctx, "/mock/reset", "reset mock state")
 }
 
-func (c *mockwayStateClient) Snapshot(ctx context.Context) error {
+func (c *mockStateClient) Snapshot(ctx context.Context) error {
 	return c.postNoBody(ctx, "/mock/snapshot", "snapshot mock state")
 }
 
-func (c *mockwayStateClient) Restore(ctx context.Context) error {
+func (c *mockStateClient) Restore(ctx context.Context) error {
 	return c.postNoBody(ctx, "/mock/restore", "restore mock state")
 }
 
-func (c *mockwayStateClient) State(ctx context.Context) ([]byte, error) {
+func (c *mockStateClient) State(ctx context.Context) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/mock/state", nil)
 	if err != nil {
 		return nil, fmt.Errorf("build state request: %w", err)
@@ -62,7 +67,7 @@ func (c *mockwayStateClient) State(ctx context.Context) ([]byte, error) {
 	return payload, nil
 }
 
-func (c *mockwayStateClient) postNoBody(ctx context.Context, path string, action string) error {
+func (c *mockStateClient) postNoBody(ctx context.Context, path string, action string) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, nil)
 	if err != nil {
 		return fmt.Errorf("build %s request: %w", action, err)

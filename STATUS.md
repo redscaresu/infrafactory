@@ -27,6 +27,8 @@ Last updated: 2026-04-26
 - Keep startup/read-order instructions only in `SESSION_START.md` to avoid duplication.
 
 ## Recent updates
+- **S36-T8 complete (multi-cloud mock client)**:
+  - Renamed `mockwayStateClient` → `mockStateClient` (and `newMockwayStateClient` → `newMockStateClient`) since `/mock/state`, `/mock/reset`, `/mock/snapshot`, `/mock/restore` are identical between mockway and fakegcp. Same client serves either backend; callers pick the URL by cloud. Added a doc comment recording the multi-cloud contract.
 - **S36-T1 complete (prompts reorganization)**:
   - Moved `prompts/phase{1,2,3}_*.md` → `prompts/scaleway/`. Added `resolvePromptTemplatePath(promptsDir, cloud, fileName)` in `internal/generator/prompts.go` — prefers the cloud-specific subdirectory when `req.Cloud` is set and a matching template exists, falls back to the legacy flat layout (preserves existing test fixtures that write phase files directly into a temp `promptsDir`). Both `claude_adapter` and `openrouter_adapter` now route phase template loads through this resolver.
   - 4 new sub-tests cover cloud-specific exists, cloud-specific missing fallback, empty-cloud legacy, and the all-missing legacy-path return.

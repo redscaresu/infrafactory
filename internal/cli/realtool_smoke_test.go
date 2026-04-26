@@ -185,7 +185,7 @@ validation:
 				stage := incrementalStageFromScenarioYAML(string(req.ScenarioYAML))
 				return &generator.GeneratedCode{Files: incrementalStageFiles(stage)}, nil
 			}),
-			MockState: newMockwayStateClient(mockwayURL),
+			MockState: newMockStateClient(mockwayURL),
 		},
 	}
 
@@ -348,7 +348,7 @@ validation:
 				_ = req
 				return &generator.GeneratedCode{Files: incrementalStageFiles(1)}, nil
 			}),
-			MockState: newMockwayStateClient(mockwayURL),
+			MockState: newMockStateClient(mockwayURL),
 		},
 	}
 
@@ -413,7 +413,7 @@ validation:
 				stage := incrementalStageFromScenarioYAML(string(req.ScenarioYAML))
 				return &generator.GeneratedCode{Files: incrementalStageFiles(stage)}, nil
 			}),
-			MockState: newMockwayStateClient(mockwayURL),
+			MockState: newMockStateClient(mockwayURL),
 		},
 	}
 
