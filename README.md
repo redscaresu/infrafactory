@@ -154,45 +154,57 @@ Single-command lifecycle (`generate`, simplified):
                           +--------+---------+
                                    |
                     +--------------+--------------+
-                    |                              |
-              +-----v------+              +-------v--------+
-              |  CLI        |              |  Web UI        |
-              |  infrafactory|              |  :4173         |
-              |  run/test/  |              |  SvelteKit     |
-              |  generate   |              |  (embedded)    |
-              +-----+------+              +-------+--------+
-                    |                              |
-                    +-------->  REST API  <--------+
-                              /api/runs, /api/scenarios, /api/ws
+                    |                             |
+              +-----v-------+            +--------v--------+
+              |  CLI        |            |  Web UI         |
+              |  infrafactory            |  :4173          |
+              |  run/test/  |            |  SvelteKit      |
+              |  generate/  |            |  (embedded)     |
+              |  ui/mock    |            |  /scenarios     |
+              +-----+-------+            |  /runs /live    |
+                    |                    |  /compare       |
+                    |                    |  /pitfalls      |
+                    |                    +--------+--------+
+                    |                             |
+                    +---->  REST API  <-----------+
+                       /api/runs   /api/scenarios
+                       /api/runs/{s}/compare
+                       /api/scenarios/validate
+                       /api/pitfalls (GET/PUT)
+                       /api/output  /api/ws  /api/diagnostics
                                    |
          +-------------------------+-------------------------+
          |                         |                         |
-   +-----v------+          +------v-------+          +------v-------+
-   |  Config     |          |  Scenario    |          |  RunStore    |
-   |  loader     |          |  loader +    |          |  .infrafactory/
-   |  infra-     |          |  schema      |          |  runs/       |
-   |  factory.   |          |  validation  |          |  artifacts   |
-   |  yaml       |          |              |          |              |
-   +-----+------+          +------+-------+          +--------------+
+   +-----v-------+         +-------v------+         +--------v------+
+   |  Config     |         |  Scenario    |         |  RunStore     |
+   |  loader     |         |  loader +    |         |  .infrafactory/
+   |  infrafactory         |  schema      |         |  runs/        |
+   |  .yaml      |         |  validation  |         |  artifacts    |
+   +-----+-------+         +-------+------+         +---------------+
          |                         |
          +------------+------------+
                       |
                +------v-------+
-               |  Generator   |     3-phase LLM pipeline:
+               |  Generator   |     3-phase LLM pipeline (cloud-aware):
                |  (Claude /   |     1. Plan Architecture
                |  OpenRouter) |     2. Generate HCL
                +------+-------+     3. Self-Review
-                      |
+                      |             prompts/{scaleway,gcp}/phase{1,2,3}*
+                      |             pitfalls/{scaleway,gcp}.yaml
                       v
          +---------------------------+
          |    Validation Layers      |
          |                           |
          |  Layer 1: Static          |  tofu init/validate/plan
          |    + OPA policy checks    |  + show -json
+         |    (deny rules)           |  + naming, encryption_at_rest,
+         |                           |    no_public_*, vpc_required,
+         |                           |    region_restriction
          |                           |
-         |  Layer 2: Mock Deploy     |  tofu apply -> Mockway
-         |    + topology checks      |  + state policy evaluation
-         |    + acceptance criteria  |
+         |  Layer 2: Mock Deploy     |  tofu apply -> mockway / fakegcp
+         |    + topology derivation  |  + cloud auto-dispatch
+         |    + state policy checks  |  + acceptance criteria evaluator
+         |    (deny_state rules)     |
          |                           |
          |  Layer 3: Real Deploy     |  tofu plan/apply -> Scaleway
          |    (optional, opt-in)     |  + real network probes
@@ -201,20 +213,39 @@ Single-command lifecycle (`generate`, simplified):
          |    + orphan verification  |  + holdout checks
          +------------+--------------+
                       |
-         +------------+------------+
-         |                         |
-   +-----v------+          +------v-------+
-   |  Mockway    |          |  Scaleway    |
-   |  (mock API) |          |  (real API)  |
-   |  :8080      |          |  Layer 3     |
-   |  SQLite     |          |  only        |
-   +-------------+          +--------------+
+         +-------------+-------------+-------------------+
+         |                           |                   |
+   +-----v------+             +------v-------+    +------v------+
+   |  mockway   |             |  fakegcp     |    |  Scaleway   |
+   |  (Scaleway |             |  (GCP mock)  |    |  (real API) |
+   |   mock)    |             |  port :????  |    |  Layer 3    |
+   |  :8080     |             |  SQLite      |    |  only       |
+   |  SQLite    |             |  ../fakegcp/ |    |             |
+   |  ../mockway|             |              |    |             |
+   +------------+             +--------------+    +-------------+
 
     Feedback Loop (on failure):
     structured failures -> FeedbackJSON -> next iteration's LLM prompt
+
+    Auto-Pitfall Learning:
+    target_reached  -> ExtractLearnedPitfall -> AppendPitfall
+    repair_budget_  -> DetectOscillation     -> AppendPitfall (cross-
+    exhausted/stuck                              cloud filtered by
+                                                 sc.Cloud)
 ```
 
-### Mockway API Coverage
+### Multi-Cloud Mock Backends
+
+InfraFactory targets two cloud providers today, each with its own SQLite-backed mock binary started from source by the test harness (see `internal/e2e/helpers.go`):
+
+```
+   cloud=scaleway   --->   mockway   (../mockway, :8080)
+   cloud=gcp        --->   fakegcp   (../fakegcp, dynamic port)
+```
+
+Both mocks expose the same admin endpoints — `/mock/state`, `/mock/reset`, `/mock/snapshot`, `/mock/restore` — so `internal/cli/mockStateClient` works against either backend. Topology derivation auto-detects which cloud emitted a `/mock/state` payload (top-level `compute` key → GCP; `instance` → Scaleway) and dispatches to per-cloud rules.
+
+### Mockway API Coverage (Scaleway)
 
 Mockway is a companion SQLite-backed mock server that simulates Scaleway APIs for deterministic, offline testing. It covers:
 
@@ -244,12 +275,24 @@ OPA policies are evaluated at two points using a rule naming convention:
 A single `.rego` file can contain both rule types. For example, `no_public_database.rego` has a `deny` rule that checks the plan for missing `private_network` blocks and a `deny_state` rule that checks deployed state for public endpoints.
 
 Bundled policy files:
+
+Scaleway:
 - `policies/scaleway/no_public_database.rego` (plan + state)
 - `policies/scaleway/no_public_endpoints.rego` (plan)
 - `policies/scaleway/vpc_required.rego` (plan)
 - `policies/scaleway/region_restriction.rego` (plan)
 - `policies/scaleway/encryption_at_rest.rego` (plan)
+
+GCP (Slice 36):
+- `policies/gcp/no_public_sql.rego` (plan + state)
+- `policies/gcp/vpc_required.rego` (plan + state)
+- `policies/gcp/region_restriction.rego` (plan + state)
+- `policies/gcp/encryption.rego` (plan + state)
+
+Common:
 - `policies/common/naming.rego` (plan)
+
+Per-cloud routing for criteria-driven Layer 2 evaluation lives in `internal/cli/test_command.go::cloudConstraintPolicies` — a `cloud: gcp` scenario with `check: encryption_at_rest` resolves to `policies/gcp/encryption.rego`, not the Scaleway file. The Scaleway-shaped flat `constraint_policies:` config map remains the fallback for unmapped checks.
 
 Custom policies can be added to `policies/custom/` — any `.rego` file under `paths.policies` is automatically picked up.
 
