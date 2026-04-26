@@ -163,6 +163,11 @@ func TestE2E_GCPIAM(t *testing.T) {
 					t.Errorf("expected service account displayName='CI runner (rotated)' after update, got %q", display)
 				}
 			},
+			// google_service_account_key regenerates on every refresh by
+			// design; the parent service account is what we're actually
+			// patching here, and the identity check still asserts that
+			// stays in place.
+			allowReplaceCollections: []string{"iam/keys"},
 		},
 	)
 }
@@ -236,9 +241,17 @@ type gcpStateExpect struct {
 // inspected by verify. This proves the resource's Update path works
 // (otherwise tofu apply would fail or the expected change wouldn't
 // surface).
+//
+// allowReplaceCollections lists root/collection pairs that are
+// allowed to be replaced rather than patched in place. The default
+// is empty: every resource is expected to be patched in place. The
+// only legitimate use is google_service_account_key, whose Terraform
+// resource regenerates on every refresh by design (see the provider's
+// `keepers` documentation).
 type gcpUpdate struct {
-	files  map[string][]byte
-	verify func(t *testing.T, state map[string]any)
+	files                   map[string][]byte
+	verify                  func(t *testing.T, state map[string]any)
+	allowReplaceCollections []string
 }
 
 // gcpStateItemCount returns len(state[root][collection]). fakegcp's
@@ -295,9 +308,9 @@ func runGCPServiceScenario(t *testing.T, mock *MockwayInstance, scenarioFile str
 		}
 	}
 
-	state := mock.FetchState(t)
+	stateAfterCreate := mock.FetchState(t)
 	for _, exp := range expects {
-		got := gcpStateItemCount(state, exp.root, exp.collection)
+		got := gcpStateItemCount(stateAfterCreate, exp.root, exp.collection)
 		if got < exp.minCount {
 			t.Errorf("expected at least %d %s/%s after apply, got %d",
 				exp.minCount, exp.root, exp.collection, got)
@@ -306,6 +319,14 @@ func runGCPServiceScenario(t *testing.T, mock *MockwayInstance, scenarioFile str
 
 	finalFiles := files
 	if update != nil {
+		// Snapshot every collection's fakegcp-assigned `name` (which
+		// includes the immutable id segment for resources that don't
+		// expose `id`) so we can detect a delete/recreate rather than
+		// a real in-place update. CreateRun uses provider-assigned ids;
+		// if the update phase silently destroys + recreates, the names
+		// would change.
+		identitiesBefore := collectIdentities(stateAfterCreate, expects)
+
 		updateRun := RunInfrafactory(t, InfrafactoryRunOptions{
 			Args:           []string{"run", scenarioPath, "--config", configPath, "--no-destroy"},
 			GeneratorFiles: update.files,
@@ -317,8 +338,24 @@ func runGCPServiceScenario(t *testing.T, mock *MockwayInstance, scenarioFile str
 		if !strings.Contains(updateRun.Stdout, "run/terminal_reason: pass (target_reached)") {
 			t.Fatalf("expected update run to reach target_reached, got:\n%s", updateRun.Stdout)
 		}
+		stateAfterUpdate := mock.FetchState(t)
+		identitiesAfter := collectIdentities(stateAfterUpdate, expects)
+		allowReplace := map[string]struct{}{}
+		for _, k := range update.allowReplaceCollections {
+			allowReplace[k] = struct{}{}
+		}
+		for key, before := range identitiesBefore {
+			if _, exempt := allowReplace[key]; exempt {
+				continue
+			}
+			after := identitiesAfter[key]
+			if !sameIdentities(before, after) {
+				t.Errorf("update phase appears to have replaced (not patched) %s: ids before=%v after=%v",
+					key, before, after)
+			}
+		}
 		if update.verify != nil {
-			update.verify(t, mock.FetchState(t))
+			update.verify(t, stateAfterUpdate)
 		}
 		finalFiles = update.files
 	}
@@ -768,6 +805,67 @@ func firstSecretLabels(state map[string]any) map[string]any {
 	}
 	labels, _ := secrets[0]["labels"].(map[string]any)
 	return labels
+}
+
+// collectIdentities returns, for each (root, collection) in expects,
+// the set of stable identity keys for items currently in fakegcp state.
+// We use `name` because every GCP resource shape we exercise stores
+// its fully-qualified resource path there; an in-place update keeps
+// it stable, while a delete/recreate produces a different name (or
+// at minimum, a different uniqueId for IAM service accounts) — and
+// even when the name is reused, sameIdentities also checks uniqueId/
+// id when present so recreates surface.
+func collectIdentities(state map[string]any, expects []gcpStateExpect) map[string][]string {
+	out := map[string][]string{}
+	for _, exp := range expects {
+		key := exp.root + "/" + exp.collection
+		items := stateSlice(state, exp.root, exp.collection)
+		ids := make([]string, 0, len(items))
+		for _, item := range items {
+			ids = append(ids, identityKey(item))
+		}
+		out[key] = ids
+	}
+	return out
+}
+
+// identityKey picks the most stable identifier on a fakegcp state
+// item. uniqueId (IAM) and id (DNS zones) take precedence over name
+// because tofu can recreate a resource under the same logical name
+// while the server-assigned id changes; falling back to name still
+// catches recreates for resources that don't surface a separate id.
+func identityKey(item map[string]any) string {
+	for _, field := range []string{"uniqueId", "id"} {
+		switch v := item[field].(type) {
+		case string:
+			if v != "" {
+				return field + "=" + v
+			}
+		case float64:
+			return fmt.Sprintf("%s=%v", field, v)
+		}
+	}
+	if name, _ := item["name"].(string); name != "" {
+		return "name=" + name
+	}
+	return ""
+}
+
+func sameIdentities(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	seen := map[string]int{}
+	for _, k := range a {
+		seen[k]++
+	}
+	for _, k := range b {
+		if seen[k] == 0 {
+			return false
+		}
+		seen[k]--
+	}
+	return true
 }
 
 // stateSlice returns the typed object slice at state[root][collection]
