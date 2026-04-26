@@ -1,15 +1,16 @@
 # STATUS
 
-Last updated: 2026-03-14
+Last updated: 2026-04-26
 
 ## Current phase
-- Slices 1-30 complete. All 12 training scenarios pass `infrafactory run` on first iteration.
+- Slices 1-32 complete. 12 Scaleway training scenarios pass `infrafactory run`.
+- Slices 33-42 in flight. S33-T1 done.
 - ADRs 0009 (incremental deployment) and 0010 (Layer 3, supersedes ADR-0003) are implemented in code and docs.
 - 22 implementation contracts codified in CONCEPT.md § "Implementation Contracts (Slices 22-29)".
 - Layer 3 production readiness hardening complete (Slice 30).
 
 ## In progress
-- No active implementation tickets.
+- No active implementation tickets (next: S33-T2 e2e for web-app-paris).
 
 ## Known blockers
 - None. `S9-T8` closed — superseded by Slices 26-30 (ADR-0010).
@@ -26,6 +27,12 @@ Last updated: 2026-03-14
 - Keep startup/read-order instructions only in `SESSION_START.md` to avoid duplication.
 
 ## Recent updates
+- **Slice 33-T1 complete (cross-repo e2e infrastructure)**:
+  - Added `internal/e2e` package with `StartMockway`, `MockwayInstance` (Reset/FetchState/Stop), and `RunInfrafactory` helpers that drive the CLI in-process.
+  - Added `cli.WithRuntimeDependencies(RuntimeDependencies)` exported `RootOption` so external test packages can inject stub generators without subprocess overhead.
+  - Plumbed `rootConfig` through `newGenerateCmd`, `newValidateCmd`, `newTestCmd`, `newRunCmd`, and `newMockCmd` so `WithRuntimeDependencies` deps reach `withRuntimeWithOptions`.
+  - Added `TestStartMockwayInfrastructure` (env-gated by `INFRAFACTORY_ENABLE_E2E=1`) and `TestRunInfrafactoryDrivesValidate` (default) to verify the helpers.
+  - Verified with `make test` (Go unit + UI unit + 18 Playwright e2e) and `bash scripts/check_all.sh`.
 - **UI hardening and Playwright e2e tests**:
   - Fixed scenario navigation bug: sidebar clicks now reload data using `afterNavigate` instead of `onMount`.
   - Added iteration progress banner to Live page: pulsing indicator during runs, pass/fail badge on completion.

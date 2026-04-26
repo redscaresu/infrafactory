@@ -19,12 +19,34 @@ type RootOption func(*rootConfig)
 
 type rootConfig struct {
 	uiAssets fs.FS
+	deps     RuntimeDependencies
+	depsSet  bool
 }
 
 func WithUIAssets(assets fs.FS) RootOption {
 	return func(cfg *rootConfig) {
 		cfg.uiAssets = assets
 	}
+}
+
+// WithRuntimeDependencies overrides the default runtime dependencies used by
+// command handlers. External test packages use it to inject stub generators,
+// mock state clients, or harness runners without going through process
+// boundaries.
+func WithRuntimeDependencies(deps RuntimeDependencies) RootOption {
+	return func(cfg *rootConfig) {
+		cfg.deps = deps
+		cfg.depsSet = true
+	}
+}
+
+func (cfg *rootConfig) withRuntime(op string, next runtimeHandler) func(*cobra.Command, []string) error {
+	if cfg == nil || !cfg.depsSet {
+		return withRuntime(op, next)
+	}
+	opts := defaultRuntimeOptions()
+	opts.deps = cfg.deps
+	return withRuntimeWithOptions(op, opts, next)
 }
 
 func NewRootCmd(opts ...RootOption) *cobra.Command {
@@ -50,11 +72,11 @@ func NewRootCmd(opts ...RootOption) *cobra.Command {
 
 	cmd.AddCommand(
 		newInitCmd(),
-		newGenerateCmd(),
-		newValidateCmd(),
-		newTestCmd(),
-		newRunCmd(),
-		newMockCmd(),
+		newGenerateCmd(cfg),
+		newValidateCmd(cfg),
+		newTestCmd(cfg),
+		newRunCmd(cfg),
+		newMockCmd(cfg),
 		newUICmd(cfg.uiAssets),
 	)
 
@@ -132,30 +154,30 @@ acceptance_criteria:
 `
 }
 
-func newGenerateCmd() *cobra.Command {
+func newGenerateCmd(cfg *rootConfig) *cobra.Command {
 	return &cobra.Command{
 		Use:   "generate <scenario>",
 		Short: "Generate OpenTofu files from a scenario",
 		Args:  requireScenarioArg,
-		RunE:  withRuntime("generate", runGenerateCommand),
+		RunE:  cfg.withRuntime("generate", runGenerateCommand),
 	}
 }
 
-func newValidateCmd() *cobra.Command {
+func newValidateCmd(cfg *rootConfig) *cobra.Command {
 	return &cobra.Command{
 		Use:   "validate <scenario>",
 		Short: "Validate generated infrastructure definitions",
 		Args:  requireScenarioArg,
-		RunE:  withRuntime("validate", runValidateCommand),
+		RunE:  cfg.withRuntime("validate", runValidateCommand),
 	}
 }
 
-func newTestCmd() *cobra.Command {
+func newTestCmd(cfg *rootConfig) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "test <scenario>",
 		Short: "Run harness checks for a scenario",
 		Args:  requireScenarioArg,
-		RunE:  withRuntime("test", runTestCommand),
+		RunE:  cfg.withRuntime("test", runTestCommand),
 	}
 
 	cmd.Flags().Bool("no-destroy", false, "Skip destruction after a successful test run to preserve state for incremental follow-up runs")
@@ -163,12 +185,12 @@ func newTestCmd() *cobra.Command {
 	return cmd
 }
 
-func newRunCmd() *cobra.Command {
+func newRunCmd(cfg *rootConfig) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "run <scenario>",
 		Short: "Run generation and validation loop",
 		Args:  requireScenarioArg,
-		RunE:  withRuntime("run", runRunCommand),
+		RunE:  cfg.withRuntime("run", runRunCommand),
 	}
 
 	cmd.Flags().Int("repair-iterations-max", 0, "Override failure-triggered retry budget for run loop (0 uses config)")
@@ -178,7 +200,7 @@ func newRunCmd() *cobra.Command {
 	return cmd
 }
 
-func newMockCmd() *cobra.Command {
+func newMockCmd(cfg *rootConfig) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "mock",
 		Short: "Manage mock service dependencies",
@@ -188,22 +210,22 @@ func newMockCmd() *cobra.Command {
 		&cobra.Command{
 			Use:   "start",
 			Short: "Start Mockway dependency",
-			RunE:  withRuntime("mock start", runMockStartCommand),
+			RunE:  cfg.withRuntime("mock start", runMockStartCommand),
 		},
 		&cobra.Command{
 			Use:   "stop",
 			Short: "Stop Mockway dependency",
-			RunE:  withRuntime("mock stop", runMockStopCommand),
+			RunE:  cfg.withRuntime("mock stop", runMockStopCommand),
 		},
 		&cobra.Command{
 			Use:   "status",
 			Short: "Show Mockway dependency status",
-			RunE:  withRuntime("mock status", runMockStatusCommand),
+			RunE:  cfg.withRuntime("mock status", runMockStatusCommand),
 		},
 		&cobra.Command{
 			Use:   "logs",
 			Short: "Show Mockway dependency logs",
-			RunE:  withRuntime("mock logs", runMockLogsCommand),
+			RunE:  cfg.withRuntime("mock logs", runMockLogsCommand),
 		},
 	)
 
