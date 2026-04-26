@@ -260,8 +260,27 @@ func buildRuntime(cmd *cobra.Command, opts runtimeOptions) (*CommandRuntime, err
 		}
 		deps.Generator = defaultGenerator
 	}
+	// Build the runtime first so the cloudMockStateRouter can hold a
+	// back-pointer; harness factories below capture deps.MockState by
+	// value, but the router resolves the underlying client at call
+	// time via runtime.loadedScenario.Cloud.
+	runtime := &CommandRuntime{
+		ConfigPath:        configPath,
+		Config:            cfg,
+		TransportContract: transportContract,
+		Logger:            NewAppLogger(os.Stderr),
+		scenarioLoader:    opts.scenarioLoader,
+		schemaRunner:      execCommandRunner{},
+	}
 	if deps.MockState == nil {
-		deps.MockState = newMockStateClient(cfg.Mockway.URL)
+		router := &cloudMockStateRouter{
+			runtime:  runtime,
+			scaleway: newMockStateClient(cfg.Mockway.URL),
+		}
+		if strings.TrimSpace(cfg.Fakegcp.URL) != "" {
+			router.gcp = newMockStateClient(cfg.Fakegcp.URL)
+		}
+		deps.MockState = router
 	}
 	if deps.Static == nil {
 		deps.Static = harness.NewStaticHarness(execCommandRunner{})
@@ -298,15 +317,8 @@ func buildRuntime(cmd *cobra.Command, opts runtimeOptions) (*CommandRuntime, err
 		deps.MockLogs = &dockerMockStarter{}
 	}
 
-	return &CommandRuntime{
-		ConfigPath:        configPath,
-		Config:            cfg,
-		TransportContract: transportContract,
-		Deps:              deps,
-		Logger:            NewAppLogger(os.Stderr),
-		scenarioLoader:    opts.scenarioLoader,
-		schemaRunner:      execCommandRunner{},
-	}, nil
+	runtime.Deps = deps
+	return runtime, nil
 }
 
 func buildDefaultSeedGenerator(cfg config.Config) (generator.SeedGenerator, error) {

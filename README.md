@@ -240,10 +240,62 @@ InfraFactory targets two cloud providers today, each with its own SQLite-backed 
 
 ```
    cloud=scaleway   --->   mockway   (../mockway, :8080)
-   cloud=gcp        --->   fakegcp   (../fakegcp, dynamic port)
+   cloud=gcp        --->   fakegcp   (../fakegcp, :8081)
 ```
 
 Both mocks expose the same admin endpoints — `/mock/state`, `/mock/reset`, `/mock/snapshot`, `/mock/restore` — so `internal/cli/mockStateClient` works against either backend. Topology derivation auto-detects which cloud emitted a `/mock/state` payload (top-level `compute` key → GCP; `instance` → Scaleway) and dispatches to per-cloud rules.
+
+#### Running both mocks at the same time
+
+Check out `mockway` and `fakegcp` as siblings of `infrafactory`:
+
+```
+~/dev/
+├── infrafactory/
+├── mockway/
+└── fakegcp/
+```
+
+Then from the `infrafactory` repo root:
+
+```bash
+make mocks-up        # starts mockway on :8080 AND fakegcp on :8081
+make mocks-status    # prints running pids
+make mocks-logs      # tails 20 lines of each mock's log
+make mocks-down      # stops both
+```
+
+Individual control:
+
+```bash
+make mockway-up      # mockway only
+make fakegcp-up      # fakegcp only
+make mockway-down
+make fakegcp-down
+```
+
+Pidfiles and logs land in `/tmp/infrafactory-mocks/` (override with `MOCKS_RUN_DIR=...`). Ports default to `MOCKWAY_PORT=8080` / `FAKEGCP_PORT=8081` and are reflected in `infrafactory.yaml` as `mockway.url` and `fakegcp.url`.
+
+The runtime's `cloudMockStateRouter` (see `internal/cli/mockway_client.go`) reads each scenario's `cloud:` field after `LoadScenario` and dispatches every Layer-2 admin call (`State` / `Reset` / `Snapshot` / `Restore`) to the matching backend automatically — a single `infrafactory run` invocation can iterate over Scaleway scenarios and GCP scenarios back-to-back without restarting either mock. If `fakegcp.url` is empty, GCP scenarios fall back to mockway (which will 4xx but keeps the runtime constructible).
+
+Sample `infrafactory.yaml`:
+
+```yaml
+mockway:
+  url: http://127.0.0.1:8080
+  auto_reset: true
+
+fakegcp:
+  url: http://127.0.0.1:8081
+  auto_reset: true
+```
+
+End-to-end check after `make mocks-up`:
+
+```bash
+infrafactory run scenarios/training/web-app-paris.yaml      # cloud: scaleway -> mockway
+infrafactory run scenarios/training/gcp-vm-network.yaml     # cloud: gcp      -> fakegcp
+```
 
 ### Mockway API Coverage (Scaleway)
 

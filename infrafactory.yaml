@@ -21,6 +21,13 @@ mockway:
   url: http://127.0.0.1:8080
   auto_reset: true
 
+# fakegcp routes `cloud: gcp` scenarios. Optional — leave url empty if
+# only running Scaleway scenarios. `make mocks-up` starts both mockway
+# and fakegcp side-by-side at the URLs below.
+fakegcp:
+  url: http://127.0.0.1:8081
+  auto_reset: true
+
 scaleway:
   credentials_source: env    # env | config-file
 

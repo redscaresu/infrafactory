@@ -20,9 +20,8 @@ type mockStateClient struct {
 // newMockStateClient builds an HTTP client for the
 // `/mock/{state,reset,snapshot,restore}` admin endpoints. mockway and
 // fakegcp expose the same endpoint shapes, so the same client wires up
-// either backend — but the runtime currently passes
-// cfg.Mockway.URL unconditionally; selecting the URL by scenario cloud
-// is a follow-up (tracked outside Slice 36).
+// either backend. Per-scenario cloud dispatch happens at the
+// cloudMockStateRouter layer below.
 func newMockStateClient(baseURL string) *mockStateClient {
 	return &mockStateClient{
 		baseURL: strings.TrimRight(baseURL, "/"),
@@ -98,4 +97,45 @@ func truncateMockwayErrorPayload(payload []byte) string {
 		return trimmed
 	}
 	return trimmed[:maxMockwayErrorPayloadBytes] + "..."
+}
+
+// cloudMockStateRouter dispatches MockStateClient calls between the
+// Scaleway mock (mockway) and the GCP mock (fakegcp) based on the
+// currently-loaded scenario's cloud. The harness layer captures one
+// MockStateClient at construction time, so a single shared router
+// keeps that capture valid even when the scenario (and therefore the
+// target backend) changes between runs.
+type cloudMockStateRouter struct {
+	runtime  *CommandRuntime
+	scaleway *mockStateClient
+	gcp      *mockStateClient
+}
+
+func (r *cloudMockStateRouter) Reset(ctx context.Context) error {
+	return r.pick().Reset(ctx)
+}
+
+func (r *cloudMockStateRouter) Snapshot(ctx context.Context) error {
+	return r.pick().Snapshot(ctx)
+}
+
+func (r *cloudMockStateRouter) Restore(ctx context.Context) error {
+	return r.pick().Restore(ctx)
+}
+
+func (r *cloudMockStateRouter) State(ctx context.Context) ([]byte, error) {
+	return r.pick().State(ctx)
+}
+
+// pick resolves to the GCP client when the loaded scenario declares
+// `cloud: gcp` AND a GCP URL is configured; otherwise falls back to
+// Scaleway. Pre-LoadScenario calls (none today) and unknown clouds
+// default to Scaleway, matching the legacy behaviour.
+func (r *cloudMockStateRouter) pick() *mockStateClient {
+	if r.runtime != nil && r.runtime.loadedScenario != nil {
+		if strings.EqualFold(strings.TrimSpace(r.runtime.loadedScenario.Cloud), "gcp") && r.gcp != nil {
+			return r.gcp
+		}
+	}
+	return r.scaleway
 }

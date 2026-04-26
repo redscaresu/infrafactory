@@ -6,6 +6,12 @@ MOCKWAY_URL ?= http://127.0.0.1:8080
 MOCKWAY_IMAGE ?= ghcr.io/redscaresu/mockway
 MOCKWAY_CONTAINER ?= infrafactory-mockway
 MOCKWAY_BIN ?= mockway
+MOCKWAY_PORT ?= 8080
+MOCKWAY_REPO ?= ../mockway
+FAKEGCP_PORT ?= 8081
+FAKEGCP_URL ?= http://127.0.0.1:$(FAKEGCP_PORT)
+FAKEGCP_REPO ?= ../fakegcp
+MOCKS_RUN_DIR ?= /tmp/infrafactory-mocks
 HOST_ARCH ?= $(shell uname -m)
 
 ifeq ($(HOST_ARCH),arm64)
@@ -20,11 +26,18 @@ endif
 
 .PHONY: help deps-up deps-down deps-ps deps-logs deps-pull deps-recreate deps-clean test-unit test-all test \
 	bench-check smoke-validate smoke-mockway smoke-mockway-manual smoke-mockway-local smoke check \
-	ui-install ui-build ui-test ui-test-e2e ui-dev ui-clean ui-api-linux-build ui-stack-up ui-stack-logs ui-stack-down build run
+	ui-install ui-build ui-test ui-test-e2e ui-dev ui-clean ui-api-linux-build ui-stack-up ui-stack-logs ui-stack-down build run \
+	mocks-up mocks-down mocks-status mocks-logs mockway-up mockway-down fakegcp-up fakegcp-down
 
 help:
 	@echo "Targets:"
 	@echo "  deps-up         Start dependency containers (mockway)."
+	@echo "  mocks-up        Start mockway (:$(MOCKWAY_PORT)) AND fakegcp (:$(FAKEGCP_PORT)) from source siblings."
+	@echo "  mocks-down      Stop both mocks."
+	@echo "  mocks-status    Show running state of mockway / fakegcp."
+	@echo "  mocks-logs      Tail the last 20 log lines of each mock."
+	@echo "  mockway-up / fakegcp-up   Start one mock at a time."
+	@echo "  mockway-down / fakegcp-down  Stop one mock at a time."
 	@echo "  deps-down       Stop dependency containers."
 	@echo "  deps-ps         Show dependency container status."
 	@echo "  deps-logs       Tail dependency logs."
@@ -75,6 +88,90 @@ deps-recreate:
 
 deps-clean:
 	$(COMPOSE) down --remove-orphans --volumes
+
+# Multi-cloud mock orchestration: mockway (Scaleway, :8080) + fakegcp
+# (GCP, :8081) running side-by-side from sibling source repos. The
+# resulting URLs match the Mockway.URL / Fakegcp.URL keys
+# infrafactory.yaml expects, so a `cloud: gcp` scenario routes to
+# fakegcp via the cloudMockStateRouter without any extra config.
+#
+# pids and logs land under $(MOCKS_RUN_DIR) so the down targets can
+# reliably stop the right processes.
+$(MOCKS_RUN_DIR):
+	mkdir -p $(MOCKS_RUN_DIR)
+
+mockway-up: $(MOCKS_RUN_DIR)
+	@if [ -f $(MOCKS_RUN_DIR)/mockway.pid ] && kill -0 $$(cat $(MOCKS_RUN_DIR)/mockway.pid) 2>/dev/null; then \
+		echo "mockway already running (pid=$$(cat $(MOCKS_RUN_DIR)/mockway.pid)) on $(MOCKWAY_URL)"; \
+	else \
+		echo "starting mockway on $(MOCKWAY_URL) ($(MOCKWAY_REPO))"; \
+		cd $(MOCKWAY_REPO) && $(GO) run ./cmd/mockway --port $(MOCKWAY_PORT) > $(MOCKS_RUN_DIR)/mockway.log 2>&1 & \
+		echo $$! > $(MOCKS_RUN_DIR)/mockway.pid; \
+		until curl -sSf $(MOCKWAY_URL)/mock/state >/dev/null 2>&1; do \
+			sleep 1; \
+		done; \
+		echo "mockway ready on $(MOCKWAY_URL) (pid=$$(cat $(MOCKS_RUN_DIR)/mockway.pid))"; \
+	fi
+
+fakegcp-up: $(MOCKS_RUN_DIR)
+	@if [ -f $(MOCKS_RUN_DIR)/fakegcp.pid ] && kill -0 $$(cat $(MOCKS_RUN_DIR)/fakegcp.pid) 2>/dev/null; then \
+		echo "fakegcp already running (pid=$$(cat $(MOCKS_RUN_DIR)/fakegcp.pid)) on $(FAKEGCP_URL)"; \
+	else \
+		echo "starting fakegcp on $(FAKEGCP_URL) ($(FAKEGCP_REPO))"; \
+		cd $(FAKEGCP_REPO) && $(GO) run ./cmd/fakegcp --port $(FAKEGCP_PORT) > $(MOCKS_RUN_DIR)/fakegcp.log 2>&1 & \
+		echo $$! > $(MOCKS_RUN_DIR)/fakegcp.pid; \
+		until curl -sSf $(FAKEGCP_URL)/mock/state >/dev/null 2>&1; do \
+			sleep 1; \
+		done; \
+		echo "fakegcp ready on $(FAKEGCP_URL) (pid=$$(cat $(MOCKS_RUN_DIR)/fakegcp.pid))"; \
+	fi
+
+mockway-down:
+	@if [ -f $(MOCKS_RUN_DIR)/mockway.pid ]; then \
+		pid=$$(cat $(MOCKS_RUN_DIR)/mockway.pid); \
+		kill $$pid 2>/dev/null || true; \
+		wait $$pid 2>/dev/null || true; \
+		rm -f $(MOCKS_RUN_DIR)/mockway.pid; \
+		echo "mockway stopped"; \
+	else \
+		echo "mockway pidfile not found"; \
+	fi
+
+fakegcp-down:
+	@if [ -f $(MOCKS_RUN_DIR)/fakegcp.pid ]; then \
+		pid=$$(cat $(MOCKS_RUN_DIR)/fakegcp.pid); \
+		kill $$pid 2>/dev/null || true; \
+		wait $$pid 2>/dev/null || true; \
+		rm -f $(MOCKS_RUN_DIR)/fakegcp.pid; \
+		echo "fakegcp stopped"; \
+	else \
+		echo "fakegcp pidfile not found"; \
+	fi
+
+# mocks-up starts both mocks. Run from the infrafactory repo root with
+# ../mockway and ../fakegcp checked out as siblings.
+mocks-up: mockway-up fakegcp-up
+	@echo "both mocks ready: $(MOCKWAY_URL) (Scaleway) and $(FAKEGCP_URL) (GCP)"
+
+mocks-down: mockway-down fakegcp-down
+	@echo "both mocks stopped"
+
+mocks-status:
+	@for name in mockway fakegcp; do \
+		pidfile=$(MOCKS_RUN_DIR)/$$name.pid; \
+		if [ -f $$pidfile ] && kill -0 $$(cat $$pidfile) 2>/dev/null; then \
+			echo "$$name: up (pid=$$(cat $$pidfile))"; \
+		else \
+			echo "$$name: down"; \
+		fi; \
+	done
+
+mocks-logs:
+	@for name in mockway fakegcp; do \
+		log=$(MOCKS_RUN_DIR)/$$name.log; \
+		echo "=== $$name ==="; \
+		[ -f $$log ] && tail -n 20 $$log || echo "(no log yet)"; \
+	done
 
 test-unit:
 	$(GO) test ./internal/... ./cmd/...

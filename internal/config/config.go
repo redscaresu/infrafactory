@@ -24,6 +24,7 @@ type Config struct {
 	Version            string            `yaml:"version"`
 	Agent              AgentConfig       `yaml:"agent"`
 	Mockway            MockwayConfig     `yaml:"mockway"`
+	Fakegcp            FakegcpConfig     `yaml:"fakegcp"`
 	Scaleway           ScalewayConfig    `yaml:"scaleway"`
 	Validation         ValidationConfig  `yaml:"validation"`
 	ConstraintPolicies map[string]string `yaml:"constraint_policies"`
@@ -52,6 +53,15 @@ type OpenRouterConfig struct {
 }
 
 type MockwayConfig struct {
+	URL       string `yaml:"url"`
+	AutoReset bool   `yaml:"auto_reset"`
+}
+
+// FakegcpConfig points the runtime at the GCP mock when a scenario
+// declares `cloud: gcp`. Optional — if URL is empty, GCP scenarios
+// fall back to Mockway.URL (which would 4xx on GCP-shaped HCL but
+// keeps the runtime constructible).
+type FakegcpConfig struct {
 	URL       string `yaml:"url"`
 	AutoReset bool   `yaml:"auto_reset"`
 }
@@ -143,6 +153,9 @@ func Default() Config {
 			},
 		},
 		Mockway: MockwayConfig{
+			AutoReset: true,
+		},
+		Fakegcp: FakegcpConfig{
 			AutoReset: true,
 		},
 		Scaleway: ScalewayConfig{
