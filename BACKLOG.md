@@ -53,7 +53,7 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 | S34-T3 | Slice 34 | Tests for oscillation detection and failed-run learning | P1 | todo | S34-T2 | — |
 | S34-T2 | Slice 34 | Extract and append pitfalls from oscillation failures | P1 | todo | S34-T1 | — |
 | S34-T1 | Slice 34 | Detect oscillation patterns in run loop (same failure signature repeating) | P1 | todo | — | — |
-| S33-T3 | Slice 33 | E2e test for full-stack-paris (all resource types) | P1 | todo | S33-T1 | — |
+| S33-T3 | Slice 33 | E2e test for full-stack-paris (all resource types) | P1 | done | S33-T1 | claude |
 | S33-T2 | Slice 33 | E2e test for web-app-paris (simplest scenario with topology checks) | P1 | done | S33-T1 | claude |
 | S33-T1 | Slice 33 | Test infrastructure: start mockway from source, infrafactory command helper | P1 | done | — | claude |
 | S32-T1 | Slice 32 | Create `pitfalls/scaleway.yaml` with all 16 existing pitfalls, remove from prompt templates | P1 | done | — | codex |

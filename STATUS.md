@@ -10,7 +10,7 @@ Last updated: 2026-04-26
 - Layer 3 production readiness hardening complete (Slice 30).
 
 ## In progress
-- No active implementation tickets (next: S33-T3 e2e for full-stack-paris).
+- No active implementation tickets. Slice 33 complete. Open todos: S34, S35, S36, S37, S38, S39, S40, S41, S42.
 
 ## Known blockers
 - None. `S9-T8` closed — superseded by Slices 26-30 (ADR-0010).
@@ -27,6 +27,8 @@ Last updated: 2026-04-26
 - Keep startup/read-order instructions only in `SESSION_START.md` to avoid duplication.
 
 ## Recent updates
+- **Slice 33 complete (cross-repo e2e tests)**:
+  - **S33-T3**: Added `TestE2E_FullStackParis` exercising compute + VPC + RDB + Kubernetes + Redis + container registry + IAM in one run. Uses two-stage flow (`--no-destroy` then incremental destroy) to assert resources land in mockway state and that the destroy pass also reaches `target_reached`. Runtime ~7.5s gated.
 - **Slice 33-T2 complete (e2e for web-app-paris)**:
   - Added `TestE2E_WebAppParis` in `internal/e2e/web_app_paris_test.go` that runs the canonical web-app-paris training scenario against a freshly-started mockway with pre-baked HCL via the stub generator. Verified `target_reached` and all topology + policy criteria pass (4.5s wall time).
   - Extended `WriteConfig` to render absolute repo paths for `policies/`, `mappings.yaml`, `prompts/`, and `pitfalls/` so policy criteria evaluate end-to-end.
