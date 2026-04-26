@@ -60,6 +60,7 @@
     <nav class="mt-8 space-y-2 text-sm">
       <a class="block text-slate-700 hover:text-slate-900" href="/runs">Runs</a>
       <a class="block text-slate-700 hover:text-slate-900" href="/live">Live</a>
+      <a class="block text-slate-700 hover:text-slate-900" href="/pitfalls">Pitfalls</a>
       <a class="block text-slate-700 hover:text-slate-900" href="/diagnostics">Diagnostics</a>
     </nav>
     <div class="mt-8 rounded border border-slate-300 bg-slate-50 p-3 text-xs text-slate-600">

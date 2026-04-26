@@ -31,7 +31,7 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 | S38-T2 | Slice 38 | /compare UI page with dual-pane IaC diff viewer | P1 | todo | S38-T1 | — |
 | S38-T1 | Slice 38 | GET /api/runs/{scenario}/compare endpoint returning diff data | P1 | done | — | claude |
 | S37-T4 | Slice 37 | Playwright e2e tests for pitfalls page | P1 | todo | S37-T3 | — |
-| S37-T3 | Slice 37 | /pitfalls UI page with table, source badges, and edit form | P1 | todo | S37-T2 | — |
+| S37-T3 | Slice 37 | /pitfalls UI page with table, source badges, and edit form | P1 | done | S37-T2 | claude+codex |
 | S37-T2 | Slice 37 | PUT /api/pitfalls/{provider} endpoint for editing | P1 | done | S37-T1 | claude |
 | S37-T1 | Slice 37 | GET /api/pitfalls endpoint returning pitfalls grouped by provider | P1 | done | — | claude |
 | S36-T12 | Slice 36 | Playwright e2e: GCP scenarios appear in UI scenario list | P1 | todo | S36-T10 | — |

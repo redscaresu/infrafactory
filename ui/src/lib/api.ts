@@ -1,4 +1,12 @@
-import type { ScenarioLayer3StatusResponse, ScenarioRunModeResponse, StartRunOptions } from "$lib/types";
+import { fetchPitfalls, fetchSavePitfalls } from "$lib/pitfalls-api.js";
+import type {
+  Pitfall,
+  PitfallsResponse,
+  SavePitfallsResponse,
+  ScenarioLayer3StatusResponse,
+  ScenarioRunModeResponse,
+  StartRunOptions
+} from "$lib/types";
 
 const base = "";
 
@@ -60,5 +68,8 @@ export const api = {
     }),
   getOutputFiles: (scenario: string) => request<{ files: string[] }>(`/api/output/${scenario}`),
   getOutputFile: (scenario: string, file: string) => request<string>(withFormat(`/api/output/${scenario}/${file}`)),
-  getConfig: () => request("/api/config")
+  getConfig: () => request("/api/config"),
+  getPitfalls: (): Promise<PitfallsResponse> => fetchPitfalls() as Promise<PitfallsResponse>,
+  savePitfalls: (provider: string, pitfalls: Pitfall[]): Promise<SavePitfallsResponse> =>
+    fetchSavePitfalls(provider, pitfalls) as Promise<SavePitfallsResponse>
 };

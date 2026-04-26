@@ -81,3 +81,24 @@ export interface DiagnosticsResponse {
   started_at?: string;
   limitations?: string[];
 }
+
+export interface Pitfall {
+  resource: string;
+  rule: string;
+  source: string;
+  discovered_from?: string;
+}
+
+export interface PitfallProviderGroup {
+  provider: string;
+  pitfalls: Pitfall[];
+}
+
+export interface PitfallsResponse {
+  providers: PitfallProviderGroup[];
+}
+
+export interface SavePitfallsResponse {
+  provider: string;
+  count: number;
+}

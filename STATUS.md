@@ -27,6 +27,9 @@ Last updated: 2026-04-26
 - Keep startup/read-order instructions only in `SESSION_START.md` to avoid duplication.
 
 ## Recent updates
+- **S37-T3 complete (/pitfalls UI page)**:
+  - Added `/pitfalls` SvelteKit route with provider tabs (default = first alphabetically), an inline-editable table per provider (Resource, Rule, Source, Discovered From), `+ Add`/Delete row controls, and per-provider Save calling the existing `PUT /api/pitfalls/{provider}`. Source badges: `learned` → sky accent, `static`/`seed`/unknown → neutral slate. Sidebar gains a "Pitfalls" entry between Live and Diagnostics.
+  - Helpers extracted to `ui/src/lib/pitfalls-{view,api}.js` so the fetch and view logic stay testable. 15 new node:test cases (8 view + 7 api). `npm test` 55 → 70+ passes; `npm run build` clean. Stable test ids documented in the agent report so S37-T4 Playwright tests can drive the page deterministically.
 - **S36-T10 complete (GCP training scenarios)**:
   - Added `scenarios/training/gcp-{vm-network,gke-cluster,cloud-sql,full-stack}.yaml`. All four validate against the GCP-widened schema (regression test in `scenario_gcp_test.go::TestLoadGCPTrainingScenarios`).
   - Live `infrafactory run` parity against fakegcp is gated by S41-T1 (fakegcp test infrastructure in the sibling repo) and S36-T11 (cross-repo e2e); the scenario fixtures themselves are static and ship now.
