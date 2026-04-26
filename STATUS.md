@@ -27,6 +27,8 @@ Last updated: 2026-04-26
 - Keep startup/read-order instructions only in `SESSION_START.md` to avoid duplication.
 
 ## Recent updates
+- **S36-T5 complete (GCP topology unit tests)**:
+  - Added 6 more `TestDeriveTopologyGCP*` cases on top of the 5 from S36-T4: multiple forwarding rules, port_range/ports-array variants, database-only without compute, MySQL port, GKE edge, and malformed JSON. Now 11 GCP-specific tests + 1 dispatch detection test (4 sub-cases) = 12 total, matching the Scaleway 10+ floor.
 - **S36-T9 complete (real_probe.go GCP resource patterns)**:
   - `probeTargetResourceTypes` now returns mixed Scaleway + GCP resource type lists per probe target. `findHostForResourceType` already skips past types absent from live state, so a Scaleway scenario keeps resolving the same way and a GCP scenario picks up `google_compute_global_address`/`google_compute_forwarding_rule` (load_balancer), `google_sql_database_instance` (database), `google_redis_instance` (redis), `google_compute_instance` (compute), `google_container_cluster` (kubernetes).
   - `pickHost` learns six new GCP-specific attribute pattern lists (e.g. `network_interface.0.access_config.0.nat_ip` for compute, `endpoint` for GKE).

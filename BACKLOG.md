@@ -41,7 +41,7 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 | S36-T8 | Slice 36 | Generalize mockway_client.go for multi-cloud mock (fakegcp admin endpoints) | P1 | done | — | claude |
 | S36-T7 | Slice 36 | GCP OPA policies: no_public_sql, vpc_required, region_restriction, encryption | P1 | done | — | claude+codex |
 | S36-T6 | Slice 36 | pitfalls/gcp.yaml with initial GCP pitfalls | P1 | done | — | claude+codex |
-| S36-T5 | Slice 36 | GCP topology derivation unit tests (10+ tests with fixture data) | P1 | todo | S36-T4 | — |
+| S36-T5 | Slice 36 | GCP topology derivation unit tests (10+ tests with fixture data) | P1 | done | S36-T4 | claude |
 | S36-T4 | Slice 36 | GCP topology derivation: cloud dispatch + GCP resource patterns | P1 | done | — | claude |
 | S36-T3 | Slice 36 | GCP prompt templates (prompts/gcp/phase1,2,3.md) | P1 | done | S36-T1 | claude+codex |
 | S36-T2 | Slice 36 | Update scenario.schema.json: add gcp to cloud enum, GCP resource definitions | P1 | done | — | claude+codex |

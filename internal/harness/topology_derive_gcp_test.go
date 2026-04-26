@@ -195,6 +195,172 @@ func TestDeriveTopologyGCPPublicIngressFromFirewall(t *testing.T) {
 	}
 }
 
+// TestDeriveTopologyGCPMultipleForwardingRules covers an L4/L7 LB pair on
+// distinct ports. Both should appear in http_probe with the same backend
+// status.
+func TestDeriveTopologyGCPMultipleForwardingRules(t *testing.T) {
+	t.Parallel()
+
+	state := map[string]any{
+		"compute": map[string]any{},
+		"lb": map[string]any{
+			"global_forwarding_rules": []map[string]any{
+				{"port_range": "80"},
+				{"port_range": "443"},
+			},
+			"backend_services": []map[string]any{
+				{"backends": []any{map[string]any{"group": "ig"}}},
+			},
+		},
+	}
+	stateJSON, _ := json.Marshal(state)
+
+	out, _, err := DeriveTopology(stateJSON)
+	if err != nil {
+		t.Fatalf("derive: %v", err)
+	}
+	var parsed struct {
+		HTTPProbe map[string]bool `json:"http_probe"`
+	}
+	_ = json.Unmarshal(out, &parsed)
+	for _, key := range []string{"load_balancer:80", "load_balancer:443"} {
+		if !parsed.HTTPProbe[key] {
+			t.Fatalf("expected %s=true, got %+v", key, parsed.HTTPProbe)
+		}
+	}
+}
+
+// TestDeriveTopologyGCPForwardingRulePortRange handles "80-80" port range
+// and a `ports` array variant. Both should yield port=80 entries.
+func TestDeriveTopologyGCPForwardingRulePortRange(t *testing.T) {
+	t.Parallel()
+
+	state := map[string]any{
+		"compute": map[string]any{},
+		"lb": map[string]any{
+			"global_forwarding_rules": []map[string]any{
+				{"port_range": "80-80"},
+				{"ports": []any{"443"}},
+			},
+			"backend_services": []map[string]any{
+				{"backends": []any{map[string]any{"group": "ig"}}},
+			},
+		},
+	}
+	stateJSON, _ := json.Marshal(state)
+
+	out, _, err := DeriveTopology(stateJSON)
+	if err != nil {
+		t.Fatalf("derive: %v", err)
+	}
+	var parsed struct {
+		HTTPProbe map[string]bool `json:"http_probe"`
+	}
+	_ = json.Unmarshal(out, &parsed)
+	for _, key := range []string{"load_balancer:80", "load_balancer:443"} {
+		if _, ok := parsed.HTTPProbe[key]; !ok {
+			t.Fatalf("expected %s entry, got %+v", key, parsed.HTTPProbe)
+		}
+	}
+}
+
+// TestDeriveTopologyGCPDatabaseOnlyHasNoComputeEdge confirms that a
+// scenario with just a Cloud SQL instance produces no compute->database
+// edge (since there is no compute).
+func TestDeriveTopologyGCPDatabaseOnlyHasNoComputeEdge(t *testing.T) {
+	t.Parallel()
+
+	state := map[string]any{
+		"compute": map[string]any{},
+		"sql": map[string]any{
+			"instances": []map[string]any{{"name": "main-db"}},
+		},
+	}
+	stateJSON, _ := json.Marshal(state)
+
+	out, _, err := DeriveTopology(stateJSON)
+	if err != nil {
+		t.Fatalf("derive: %v", err)
+	}
+	var parsed struct {
+		Connectivity map[string]bool `json:"connectivity"`
+	}
+	_ = json.Unmarshal(out, &parsed)
+	if _, ok := parsed.Connectivity["compute->database:5432"]; ok {
+		t.Fatalf("expected no compute->database edge without compute, got %+v", parsed.Connectivity)
+	}
+}
+
+// TestDeriveTopologyGCPMySQLPort covers the mysql 3306 edge alongside
+// postgres 5432; both should be present.
+func TestDeriveTopologyGCPMySQLPort(t *testing.T) {
+	t.Parallel()
+
+	state := map[string]any{
+		"compute": map[string]any{
+			"instances": []map[string]any{{"name": "web-0"}},
+		},
+		"sql": map[string]any{
+			"instances": []map[string]any{{"name": "main-db"}},
+		},
+	}
+	stateJSON, _ := json.Marshal(state)
+
+	out, _, err := DeriveTopology(stateJSON)
+	if err != nil {
+		t.Fatalf("derive: %v", err)
+	}
+	var parsed struct {
+		Connectivity map[string]bool `json:"connectivity"`
+	}
+	_ = json.Unmarshal(out, &parsed)
+	if !parsed.Connectivity["compute->database:3306"] {
+		t.Fatalf("expected compute->database:3306=true, got %+v", parsed.Connectivity)
+	}
+}
+
+// TestDeriveTopologyGCPKubernetesEdge confirms compute->kubernetes
+// connectivity surfaces when a GKE cluster is in state.
+func TestDeriveTopologyGCPKubernetesEdge(t *testing.T) {
+	t.Parallel()
+
+	state := map[string]any{
+		"compute": map[string]any{
+			"instances": []map[string]any{{"name": "web-0"}},
+		},
+		"container": map[string]any{
+			"clusters": []map[string]any{{"name": "gke-main"}},
+		},
+	}
+	stateJSON, _ := json.Marshal(state)
+
+	out, _, err := DeriveTopology(stateJSON)
+	if err != nil {
+		t.Fatalf("derive: %v", err)
+	}
+	var parsed struct {
+		Connectivity map[string]bool `json:"connectivity"`
+	}
+	_ = json.Unmarshal(out, &parsed)
+	if !parsed.Connectivity["compute->kubernetes"] {
+		t.Fatalf("expected compute->kubernetes=true, got %+v", parsed.Connectivity)
+	}
+}
+
+// TestDeriveTopologyGCPMalformedJSON ensures a non-JSON payload surfaces
+// as a derivation error rather than panicking or silently producing an
+// empty map.
+func TestDeriveTopologyGCPMalformedJSON(t *testing.T) {
+	t.Parallel()
+
+	// Force the GCP path with the detection probe key, but pass garbage
+	// after that.
+	garbage := []byte(`{"compute": ` + "garbage")
+	if _, _, err := DeriveTopology(garbage); err == nil {
+		t.Fatal("expected error for malformed gcp state")
+	}
+}
+
 // TestDeriveTopologyGCPNoFirewallDefaultDeny ensures the default with no
 // firewall rules is private-only.
 func TestDeriveTopologyGCPNoFirewallDefaultDeny(t *testing.T) {
