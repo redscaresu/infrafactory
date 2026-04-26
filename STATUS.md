@@ -27,6 +27,9 @@ Last updated: 2026-04-26
 - Keep startup/read-order instructions only in `SESSION_START.md` to avoid duplication.
 
 ## Recent updates
+- **S36-T6 + S36-T7 complete (GCP pitfalls + OPA policies)**:
+  - `pitfalls/gcp.yaml` seeded with 8 entries covering VPC/subnetwork prerequisites, required-API enablement, IAM principal format, GKE node pool strategy, Cloud SQL deletion protection / name reservation, GCS bucket naming, and firewall scoping.
+  - `policies/gcp/{no_public_sql,vpc_required,region_restriction,encryption}.rego` — OPA bundle mirroring the Scaleway shape (`import rego.v1`, `deny contains msg if {...}`). `region_restriction.rego` reads `data.region_allowlist` with a `["us-central1","europe-west1","europe-west4"]` default. Wiring into `infrafactory.yaml`'s `policy_paths` and `constraint_policies` is deferred to a later S36 ticket.
 - **Slice 37-T1 complete (GET /api/pitfalls)**:
   - Added `internal/api/handlers_pitfalls.go` — scans the configured pitfalls dir for `*.yaml`/`*.yml`, parses each as `generator.PitfallsFile`, and returns providers grouped alphabetically with deterministic entries (`resource`, `rule`, `source`, `discovered_from`).
   - Empty/missing directory → 200 with empty providers array. Malformed YAML → 500 with parse-error message. Non-GET → 405. 5 unit tests cover these branches.
