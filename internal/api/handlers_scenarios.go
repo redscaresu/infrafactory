@@ -213,13 +213,15 @@ func validateScenarioHandler(state *serverState) http.HandlerFunc {
 
 // extractYAMLSyntaxDetail strips the wrapper prefix added by parseAndValidate
 // (e.g. `malformed scenario: parse scenario "": <detail>`) so the message
-// surfaces just the underlying parser error.
+// surfaces just the underlying parser error. Also strips the redundant
+// `yaml: ` prefix the underlying gopkg.in/yaml.v3 library prepends, so
+// the response message doesn't end up doubled as `yaml syntax: yaml: ...`.
 func extractYAMLSyntaxDetail(message string) string {
 	idx := strings.LastIndex(message, ": ")
-	if idx == -1 {
-		return message
+	if idx != -1 {
+		message = strings.TrimSpace(message[idx+2:])
 	}
-	return strings.TrimSpace(message[idx+2:])
+	return strings.TrimPrefix(message, "yaml: ")
 }
 
 func selectSchemaPath(candidates []string) (string, error) {

@@ -212,9 +212,15 @@ func TestRunCompareHandlerReturns404WhenRunMetadataMissing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("request: %v", err)
 	}
-	resp.Body.Close()
+	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("expected 404 for run with missing metadata, got %d", resp.StatusCode)
+	}
+	// Body must name the offending run (run-2), so a future regression
+	// that silently swapped the loop order would still trip this test.
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "run-2") {
+		t.Fatalf("expected body to mention run-2, got %s", string(body))
 	}
 }
 

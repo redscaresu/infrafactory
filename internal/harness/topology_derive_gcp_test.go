@@ -484,6 +484,39 @@ func TestDeriveTopologyGCPSQLNarrowAuthorizedNetworkIsPrivate(t *testing.T) {
 	}
 }
 
+// TestDeriveTopologyGCPForwardingRuleOutOfRangePort guards the pass-4
+// fix where a port_range like "70000" used to produce a bogus
+// load_balancer:70000 http_probe entry instead of being skipped.
+func TestDeriveTopologyGCPForwardingRuleOutOfRangePort(t *testing.T) {
+	t.Parallel()
+
+	state := map[string]any{
+		"compute": map[string]any{},
+		"lb": map[string]any{
+			"global_forwarding_rules": []map[string]any{
+				{"port_range": "70000"},
+				{"port_range": "0"},
+			},
+			"backend_services": []map[string]any{
+				{"backends": []any{map[string]any{"group": "ig"}}},
+			},
+		},
+	}
+	stateJSON, _ := json.Marshal(state)
+
+	out, _, err := DeriveTopology(stateJSON)
+	if err != nil {
+		t.Fatalf("derive: %v", err)
+	}
+	var parsed struct {
+		HTTPProbe map[string]bool `json:"http_probe"`
+	}
+	_ = json.Unmarshal(out, &parsed)
+	for key := range parsed.HTTPProbe {
+		t.Fatalf("expected no http_probe entries for out-of-range ports, got %s", key)
+	}
+}
+
 // TestDeriveTopologyGCPSQLUnknownEngineProducesNoEdge guards the
 // pass-3 fix where unknown engines (e.g. ORACLE_*) used to silently
 // produce a postgres-port edge.

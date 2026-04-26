@@ -29,6 +29,8 @@ Last updated: 2026-04-26
 - Keep startup/read-order instructions only in `SESSION_START.md` to avoid duplication.
 
 ## Recent updates
+- **API breaking change** (review-1 → review-3 hardening): `POST /api/scenarios/validate` now strictly requires `Content-Type: application/json` (previously accepted empty Content-Type as JSON) and rejects unknown JSON fields (previously silently dropped). External clients should set the header explicitly and limit the body to `{"yaml": "..."}`. Internal UI usage already complies.
+- **fakegcp Reset bug fixed** (review-4): `repository.Repository.Reset()` now removes the `*.snapshot` baseline file alongside the table truncation. Previously, `infrafactory run --clean` against fakegcp would silently retain the previous run's snapshot baseline, so a follow-up Restore could resurrect it. Mirrors mockway's contract.
 - **S42-T1 + S42-T4 complete (sidebar grouped by cloud + API cloud field)**:
   - `GET /api/scenarios` now returns `cloud` per scenario item (extracted from the loaded YAML during the directory walk).
   - Sidebar layout regroups scenarios client-side by cloud: SCALEWAY first, then GCP, then OTHER for unknowns. Stable test ids: `sidebar-cloud-{cloud}`, `sidebar-cloud-label`, `sidebar-scenario-{path}`.

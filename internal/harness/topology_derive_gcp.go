@@ -199,6 +199,14 @@ func gcpSQLPort(sql map[string]any) int {
 // path. Only an explicit 0.0.0.0/0 authorized network counts — a
 // narrow allowlist like a single bastion CIDR (203.0.113.5/32) does
 // NOT mean "the public internet" can reach, even with ipv4Enabled set.
+//
+// Note on the deliberate divergence from policies/gcp/no_public_sql.rego:
+// the policy denies `ipv4Enabled=true` even with no `authorized_networks`
+// (treated as "exposed because public IP is on but unrestricted"); this
+// derivation flips public_internet only when 0.0.0.0/0 is explicitly
+// allowed. The two layers are answering different questions —
+// reachability today vs posture/configuration risk — so they can
+// disagree without being inconsistent.
 func gcpSQLPublicReachable(sql map[string]any) bool {
 	settings, _ := sql["settings"].(map[string]any)
 	if settings == nil {
@@ -224,23 +232,32 @@ func gcpSQLPublicReachable(sql map[string]any) bool {
 // gcpForwardingRulePort extracts the listening port from a global
 // forwarding rule entry. fakegcp/Terraform encodes it either via a single
 // `port_range` ("80" or "80-80") or a `ports` array; we accept both.
+// Out-of-range values (port < 1 or port > 65535) are treated as
+// unparseable so the caller can skip them and the LB-level fallback
+// diagnostic still fires correctly.
 func gcpForwardingRulePort(fr map[string]any) int {
 	if pr, ok := fr["port_range"].(string); ok && pr != "" {
-		if port := parseLeadingInt(pr); port > 0 {
+		if port := parseLeadingInt(pr); validTCPPort(port) {
 			return port
 		}
 	}
 	if ports, ok := fr["ports"].([]any); ok && len(ports) > 0 {
 		switch v := ports[0].(type) {
 		case string:
-			if port := parseLeadingInt(v); port > 0 {
+			if port := parseLeadingInt(v); validTCPPort(port) {
 				return port
 			}
 		case float64:
-			return int(v)
+			if port := int(v); validTCPPort(port) {
+				return port
+			}
 		}
 	}
 	return 0
+}
+
+func validTCPPort(p int) bool {
+	return p >= 1 && p <= 65535
 }
 
 // gcpHasPublicIngressFirewall reports whether any firewall rule allows

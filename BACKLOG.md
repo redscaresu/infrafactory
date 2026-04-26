@@ -6,6 +6,8 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 
 | id | slice | title | priority | status | deps | owner |
 |---|---|---|---|---|---|---|
+| M37 | Maintenance | Per-cloud constraint_policies map (state-policy evaluator dispatches by sc.Cloud, not the global single map today) | P1 | todo | S36-T7 | — |
+| M38 | Maintenance | Auto-inject hashicorp/google provider wiring on GCP scenarios (analog of Slice 14/15 Scaleway provider auto-injection) | P1 | todo | S36-T1 | — |
 | S42-T5 | Slice 42 | Playwright e2e: GCP sidebar group, cloud badge, credentials, mock status | P1 | todo | S42-T2 | — |
 | S42-T4 | Slice 42 | API: GET /api/scenarios returns cloud field, layer3-status adapts per cloud | P1 | done | S36-T8 | claude |
 | S42-T3 | Slice 42 | UI scenario page: mock server status based on cloud (mockway vs fakegcp) | P1 | todo | S42-T2, S36-T8 | — |
