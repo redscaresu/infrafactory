@@ -294,18 +294,30 @@ func resolveProbeHost(state terraformState, target string) (string, error) {
 	return "", fmt.Errorf("could not resolve live endpoint for target %q", target)
 }
 
+// probeTargetResourceTypes returns the Terraform resource types whose live
+// state may carry the host/IP for a probe target, ordered from most likely
+// to least. The list deliberately mixes Scaleway and GCP types: live state
+// only carries the resources that the scenario actually generated, so
+// `findHostForResourceType` will skip past types absent from state without
+// caring which cloud the scenario targeted.
 func probeTargetResourceTypes(target string) []string {
 	switch target {
 	case "load_balancer":
-		return []string{"scaleway_lb_ip", "scaleway_lb"}
+		return []string{
+			// Scaleway
+			"scaleway_lb_ip", "scaleway_lb",
+			// GCP — global addresses are the canonical anchor for an
+			// L7 LB; forwarding rules carry the IP for L4 LBs.
+			"google_compute_global_address", "google_compute_forwarding_rule",
+		}
 	case "database":
-		return []string{"scaleway_rdb_instance"}
+		return []string{"scaleway_rdb_instance", "google_sql_database_instance"}
 	case "redis":
-		return []string{"scaleway_redis_cluster"}
+		return []string{"scaleway_redis_cluster", "google_redis_instance"}
 	case "compute":
-		return []string{"scaleway_instance_server"}
+		return []string{"scaleway_instance_server", "google_compute_instance"}
 	case "kubernetes":
-		return []string{"scaleway_k8s_cluster"}
+		return []string{"scaleway_k8s_cluster", "google_container_cluster"}
 	default:
 		return nil
 	}
@@ -337,6 +349,18 @@ func pickHost(attrs map[string]any, resourceType string) string {
 		patterns = []string{"ip_address", "address", "ip"}
 	case "scaleway_instance_server":
 		patterns = []string{"public_ip.0.address", "public_ip", "private_ip", "address", "ip"}
+	case "google_compute_global_address":
+		patterns = []string{"address", "ip_address", "ip"}
+	case "google_compute_forwarding_rule":
+		patterns = []string{"ip_address", "load_balancing_scheme", "address", "ip"}
+	case "google_sql_database_instance":
+		patterns = []string{"public_ip_address", "private_ip_address", "first_ip_address", "ip_address", "host", "address", "ip"}
+	case "google_redis_instance":
+		patterns = []string{"host", "read_endpoint", "current_location_id", "address", "ip"}
+	case "google_compute_instance":
+		patterns = []string{"network_interface.0.access_config.0.nat_ip", "network_interface.0.network_ip", "public_ip", "private_ip", "address", "ip"}
+	case "google_container_cluster":
+		patterns = []string{"endpoint", "private_cluster_config.0.private_endpoint", "address", "ip"}
 	}
 	type candidate struct {
 		key   string

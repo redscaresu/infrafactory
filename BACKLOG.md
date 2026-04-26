@@ -37,7 +37,7 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 | S36-T12 | Slice 36 | Playwright e2e: GCP scenarios appear in UI scenario list | P1 | todo | S36-T10 | — |
 | S36-T11 | Slice 36 | Cross-repo e2e tests against fakegcp + double-apply idempotency | P1 | todo | S33-T1, S36-T10, S41-T1 | — |
 | S36-T10 | Slice 36 | GCP training scenarios (gcp-vm-network, gcp-gke-cluster, gcp-cloud-sql, gcp-full-stack) | P1 | todo | S36-T2, S36-T3, S36-T6, S36-T7, S36-T8 | — |
-| S36-T9 | Slice 36 | Add GCP resource patterns to real_probe.go | P1 | todo | S36-T4 | — |
+| S36-T9 | Slice 36 | Add GCP resource patterns to real_probe.go | P1 | done | S36-T4 | claude |
 | S36-T8 | Slice 36 | Generalize mockway_client.go for multi-cloud mock (fakegcp admin endpoints) | P1 | done | — | claude |
 | S36-T7 | Slice 36 | GCP OPA policies: no_public_sql, vpc_required, region_restriction, encryption | P1 | done | — | claude+codex |
 | S36-T6 | Slice 36 | pitfalls/gcp.yaml with initial GCP pitfalls | P1 | done | — | claude+codex |
