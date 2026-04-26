@@ -11,9 +11,10 @@ deny contains msg if {
 	#   - GCP fully-qualified resource paths begin with `projects/`
 	#     (e.g. `projects/p/secrets/s` for google_secret_manager_secret).
 	#   - DNS record FQDNs end with a trailing dot, but only on
-	#     resources we know expect that shape (google_dns_*). Without
-	#     the resource-type guard a typo'd compute / storage name like
-	#     "api." or "bucket." would slip through.
+	#     google_dns_record_set (which models its name as an FQDN).
+	#     google_dns_managed_zone.name is a slug and a trailing dot
+	#     there is a real misconfiguration, so the type guard is
+	#     deliberately narrow.
 	not is_gcp_resource_path(resource, name)
 	not is_dns_fqdn(resource, name)
 	not regex.match(`^[a-z](?:[a-z0-9-]*[a-z0-9])?$`, name)

@@ -360,6 +360,29 @@ func TestCommonNamingPolicyGCPExemptions(t *testing.T) {
 			resourceName:  "projects/p/secrets/db-credentials",
 			expectedCount: 0,
 		},
+		// google_secret_manager_secret_version.name is also a path —
+		// "projects/.../secrets/.../versions/<n>".
+		{
+			name:          "secret manager version full path passes",
+			resourceType:  "google_secret_manager_secret_version",
+			resourceName:  "projects/p/secrets/db-credentials/versions/1",
+			expectedCount: 0,
+		},
+		// google_service_account.name is "projects/.../serviceAccounts/email".
+		{
+			name:          "service account full path passes",
+			resourceType:  "google_service_account",
+			resourceName:  "projects/p/serviceAccounts/ci@p.iam.gserviceaccount.com",
+			expectedCount: 0,
+		},
+		// google_service_account_key.name embeds the parent SA path
+		// + a uuid.
+		{
+			name:          "service account key full path passes",
+			resourceType:  "google_service_account_key",
+			resourceName:  "projects/p/serviceAccounts/ci@p.iam.gserviceaccount.com/keys/abc",
+			expectedCount: 0,
+		},
 		// google_dns_record_set.name is an FQDN — trailing dot is
 		// expected, not a misconfiguration.
 		{
