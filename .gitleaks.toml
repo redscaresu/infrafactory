@@ -1,0 +1,3 @@
+[allowlist]
+paths = ["Makefile"]
+description = "CGO_ENABLED=0 is a Go build flag, not a secret"
