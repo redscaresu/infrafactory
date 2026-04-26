@@ -27,6 +27,9 @@ Last updated: 2026-04-26
 - Keep startup/read-order instructions only in `SESSION_START.md` to avoid duplication.
 
 ## Recent updates
+- **S39-T2 + S39-T3 complete (debounced validation + inline errors)**:
+  - Scenario page now validates the YAML textarea on every change with a 500ms debounce. New `api.validateScenarioYAML(yaml)` calls the existing `POST /api/scenarios/validate` endpoint. Race protection via a `validationVersion` counter so an in-flight request from an earlier keystroke can't overwrite a later result.
+  - Inline UI shows "Validating…" while the request is in flight, "Valid scenario." in green when valid, and a red bulleted list `path: message` for each violation. Stable test ids: `scenario-yaml`, `scenario-validation`, `scenario-validation-{checking,valid,errors}`.
 - **S38-T2 complete (/compare UI page)**:
   - New SvelteKit route at `/compare` with scenario + run-1 + run-2 selectors, a Compare button, a left-side file list with status badges (`added`/`removed`/`modified`/`unchanged`), and a right-pane unified-diff viewer. Uses the existing `GET /api/runs/{scenario}/compare` endpoint via the new `api.compareRuns()` helper. Default selection picks the two most recent runs of the chosen scenario.
   - Sidebar gains a "Compare" entry between Live and Pitfalls. Stable test ids: `compare-section`, `compare-scenario`, `compare-run1`, `compare-run2`, `compare-run`, `compare-files`, `compare-file-<name>`, `compare-status-<name>`, `compare-diff`, `compare-error`.

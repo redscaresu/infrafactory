@@ -17,6 +17,37 @@
   let clean = false;
   let noDestroy = false;
   let layer3Enabled = false;
+  let validationErrors: { path: string; message: string }[] = [];
+  let validationState: "idle" | "checking" | "valid" | "invalid" = "idle";
+  let validationTimer: ReturnType<typeof setTimeout> | null = null;
+  let validationVersion = 0;
+
+  async function runValidation(yaml: string) {
+    if (!yaml.trim()) {
+      validationState = "idle";
+      validationErrors = [];
+      return;
+    }
+    const myVersion = ++validationVersion;
+    validationState = "checking";
+    try {
+      const resp = await api.validateScenarioYAML(yaml);
+      if (myVersion !== validationVersion) return;
+      validationErrors = resp.errors || [];
+      validationState = resp.valid ? "valid" : "invalid";
+    } catch (err) {
+      if (myVersion !== validationVersion) return;
+      validationState = "invalid";
+      validationErrors = [{ path: "", message: err instanceof Error ? err.message : "Validation request failed" }];
+    }
+  }
+
+  function scheduleValidation(yaml: string) {
+    if (validationTimer) clearTimeout(validationTimer);
+    validationTimer = setTimeout(() => runValidation(yaml), 500);
+  }
+
+  $: if (rawYAML !== undefined) scheduleValidation(rawYAML);
 
   $: scenarioPath = ($page.params.path || "").toString();
   $: runModeCard = modeSummary(runMode);
@@ -187,5 +218,22 @@
     <button class="rounded border border-slate-400 px-3 py-1.5 text-xs text-slate-900" on:click={saveScenario}>Save</button>
   </div>
   {#if status}<p class="mt-3 text-sm text-slate-700">{status}</p>{/if}
-  <textarea class="mt-4 h-[460px] w-full rounded border border-slate-300 p-3 font-mono text-sm" bind:value={rawYAML}></textarea>
+  <textarea
+    class="mt-4 h-[460px] w-full rounded border border-slate-300 p-3 font-mono text-sm"
+    data-testid="scenario-yaml"
+    bind:value={rawYAML}
+  ></textarea>
+  <div class="mt-2" data-testid="scenario-validation">
+    {#if validationState === "checking"}
+      <p class="text-xs text-slate-500" data-testid="scenario-validation-checking">Validating…</p>
+    {:else if validationState === "valid"}
+      <p class="text-xs font-medium text-emerald-700" data-testid="scenario-validation-valid">Valid scenario.</p>
+    {:else if validationState === "invalid"}
+      <ul class="space-y-1 text-xs text-rose-700" data-testid="scenario-validation-errors">
+        {#each validationErrors as err}
+          <li><span class="font-mono">{err.path || "(root)"}</span>: {err.message}</li>
+        {/each}
+      </ul>
+    {/if}
+  </div>
 {/if}

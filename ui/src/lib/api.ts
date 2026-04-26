@@ -70,6 +70,12 @@ export const api = {
     request<{ run1: string; run2: string; diffs: { filename: string; status: string; unified_diff?: string }[] }>(
       `/api/runs/${scenario}/compare?run1=${encodeURIComponent(run1)}&run2=${encodeURIComponent(run2)}`
     ),
+  validateScenarioYAML: (yaml: string) =>
+    request<{ valid: boolean; errors: { path: string; message: string }[] }>("/api/scenarios/validate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ yaml })
+    }),
   getOutputFiles: (scenario: string) => request<{ files: string[] }>(`/api/output/${scenario}`),
   getOutputFile: (scenario: string, file: string) => request<string>(withFormat(`/api/output/${scenario}/${file}`)),
   getConfig: () => request("/api/config"),
