@@ -27,6 +27,9 @@ Last updated: 2026-04-26
 - Keep startup/read-order instructions only in `SESSION_START.md` to avoid duplication.
 
 ## Recent updates
+- **S36-T1 complete (prompts reorganization)**:
+  - Moved `prompts/phase{1,2,3}_*.md` → `prompts/scaleway/`. Added `resolvePromptTemplatePath(promptsDir, cloud, fileName)` in `internal/generator/prompts.go` — prefers the cloud-specific subdirectory when `req.Cloud` is set and a matching template exists, falls back to the legacy flat layout (preserves existing test fixtures that write phase files directly into a temp `promptsDir`). Both `claude_adapter` and `openrouter_adapter` now route phase template loads through this resolver.
+  - 4 new sub-tests cover cloud-specific exists, cloud-specific missing fallback, empty-cloud legacy, and the all-missing legacy-path return.
 - **S39-T1 complete (POST /api/scenarios/validate)**:
   - Added `validateScenarioHandler` returning `{"valid":..., "errors":[{"path","message"}]}` for any input. Schema-invalid YAML returns `200` with `valid: false` and per-violation entries; YAML syntax errors return `200` with a `yaml syntax: ...` message; empty body → 400; wrong method → 405; wrong content-type → 415.
   - Added `scenario.ValidateBytes(payload, schemaPath, sourceLabel)` that operates on bytes (no temp file) and shares `parseAndValidate` with `LoadWithSchema`. `Violation` now has `json:"path"`/`json:"message"` tags.

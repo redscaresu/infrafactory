@@ -45,7 +45,7 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 | S36-T4 | Slice 36 | GCP topology derivation: cloud dispatch + GCP resource patterns | P1 | todo | — | — |
 | S36-T3 | Slice 36 | GCP prompt templates (prompts/gcp/phase1,2,3.md) | P1 | todo | S36-T1 | — |
 | S36-T2 | Slice 36 | Update scenario.schema.json: add gcp to cloud enum, GCP resource definitions | P1 | done | — | claude+codex |
-| S36-T1 | Slice 36 | Reorganize prompts: move prompts/*.md → prompts/scaleway/, update generator paths | P1 | todo | — | — |
+| S36-T1 | Slice 36 | Reorganize prompts: move prompts/*.md → prompts/scaleway/, update generator paths | P1 | done | — | claude |
 | S36-T0 | Slice 36 | fakegcp: create AGENTS.md + add forwarding_rule handler (in fakegcp repo) | P1 | todo | — | — |
 | S35-T3 | Slice 35 | Tests verifying enriched http_probe error messages | P1 | done | S35-T2 | claude+codex |
 | S35-T2 | Slice 35 | Include diagnostic in topology evaluation failure messages | P1 | done | S35-T1 | claude+codex |

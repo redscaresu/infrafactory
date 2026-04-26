@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -197,7 +196,7 @@ func (g *ClaudeSeedGenerator) renderPhasePrompt(phase string, req Request, outpu
 	if err != nil {
 		return "", err
 	}
-	templatePath := filepath.Join(g.cfg.PromptsDir, fileName)
+	templatePath := resolvePromptTemplatePath(g.cfg.PromptsDir, req.Cloud, fileName)
 	pitfalls, _ := LoadPitfalls(g.cfg.PitfallsDir, req.Cloud)
 
 	ctx := PromptContext{

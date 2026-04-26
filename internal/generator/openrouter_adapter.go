@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"path/filepath"
 	"strings"
 	"time"
 )
@@ -161,7 +160,7 @@ func (g *OpenRouterSeedGenerator) renderPhasePrompt(phase string, req Request, o
 	if err != nil {
 		return "", err
 	}
-	templatePath := filepath.Join(g.cfg.PromptsDir, fileName)
+	templatePath := resolvePromptTemplatePath(g.cfg.PromptsDir, req.Cloud, fileName)
 	pitfalls, _ := LoadPitfalls(g.cfg.PitfallsDir, req.Cloud)
 
 	ctx := PromptContext{
