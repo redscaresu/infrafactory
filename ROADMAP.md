@@ -361,6 +361,12 @@ This file is intentionally high-level and mostly stable; day-to-day execution tr
 - POST /api/scenarios/validate endpoint (validates without saving).
 - Inline error display with line numbers below textarea.
 
+40. Slice 40: Visual UI regression testing
+- Playwright screenshot baselines for all pages (home, scenario, live, runs, diagnostics).
+- Visual regression tests with pixel diff threshold (fail on unexpected layout changes).
+- Functional spot-checks: verify data rendering, YAML content, run metadata, iteration timeline.
+- Error state coverage: empty states, 404 pages, API errors, missing scenarios.
+
 ## Near-term execution order
 
 1. Keep completed slices (1-32) stable and regression-green.

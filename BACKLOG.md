@@ -6,6 +6,10 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 
 | id | slice | title | priority | status | deps | owner |
 |---|---|---|---|---|---|---|
+| S40-T4 | Slice 40 | Error state coverage: empty states, 404 pages, API errors, missing scenarios | P1 | todo | — | — |
+| S40-T3 | Slice 40 | Functional spot-checks: verify data rendering across all pages | P1 | todo | — | — |
+| S40-T2 | Slice 40 | Visual regression tests: screenshot comparison with pixel diff threshold | P1 | todo | S40-T1 | — |
+| S40-T1 | Slice 40 | Playwright visual snapshots: capture baselines for all pages | P1 | todo | — | — |
 | S39-T4 | Slice 39 | Playwright e2e tests for real-time validation | P1 | todo | S39-T3 | — |
 | S39-T3 | Slice 39 | Inline error display below textarea | P1 | todo | S39-T2 | — |
 | S39-T2 | Slice 39 | Debounced validation in scenario page textarea (500ms delay) | P1 | todo | S39-T1 | — |

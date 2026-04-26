@@ -272,6 +272,38 @@ Slice 39 (scenario validation) ── independent, can start immediately
 
 All 7 slices are independent of each other and can be executed in any order.
 
+---
+
+## Slice 40: Visual UI Regression Testing
+
+Use Playwright's screenshot comparison and functional assertions to catch UI regressions. Browse each page, spot visual/layout/data issues, and write targeted tests.
+
+### Tickets
+
+| id | title | priority | deps |
+|---|---|---|---|
+| S40-T1 | Playwright visual snapshots: capture baselines for all pages (home, scenario, live, runs, diagnostics) | P1 | — |
+| S40-T2 | Visual regression tests: screenshot comparison with pixel diff threshold, fail on unexpected changes | P1 | S40-T1 |
+| S40-T3 | Functional spot-checks: verify data rendering (YAML loads, run metadata displays, iteration timeline populates, stage pills correct) | P1 | — |
+| S40-T4 | Error state coverage: empty states, 404 pages, API errors, missing scenarios, stale run data | P1 | — |
+
+### Acceptance Criteria
+
+- S40-T1: Baselines captured for `/`, `/scenarios/training/web-app-paris`, `/live` (completed run), `/runs`, `/diagnostics`. Stored in `ui/e2e/screenshots/`.
+- S40-T2: `npx playwright test --update-snapshots` updates baselines. Tests fail when pixel diff > 0.1%. Part of `make test`.
+- S40-T3: Tests verify: scenario page YAML matches file content, run metadata card has all fields, iteration timeline count matches run.json, stage pills show correct pass/fail.
+- S40-T4: Tests for: empty scenario list, non-existent scenario URL, Live page with no runs, Diagnostics readiness checks, run with zero iterations.
+
+### Key Files
+
+- `ui/e2e/visual.spec.ts` (new)
+- `ui/e2e/functional.spec.ts` (new)
+- `ui/e2e/error-states.spec.ts` (new)
+- `ui/e2e/screenshots/` (baseline images)
+- `ui/playwright.config.ts` (add screenshot comparison config)
+
+---
+
 ## Verification
 
 ```bash
