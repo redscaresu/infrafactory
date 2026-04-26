@@ -374,6 +374,26 @@ func TestPitfallsEditConcurrentWritesDoNotCorrupt(t *testing.T) {
 	}
 }
 
+// TestPitfallsEditRejectsConcatenatedJSON pins the dec.More() check —
+// `{"pitfalls":[…]}{"pitfalls":[…]}` must 400, not silently land only
+// the first object's payload. Mirrors the matching validate-handler
+// regression.
+func TestPitfallsEditRejectsConcatenatedJSON(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.Default()
+	cfg.Paths.Pitfalls = t.TempDir()
+
+	body := `{"pitfalls":[{"resource":"a","rule":"first"}]}{"pitfalls":[{"resource":"b","rule":"second"}]}`
+	req := httptest.NewRequest(http.MethodPut, "/api/pitfalls/gcp", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	pitfallsHandler(&serverState{cfg: cfg}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for concatenated JSON, got %d", rec.Code)
+	}
+}
+
 // TestPitfallsEditRejectsOversizedProviderName guards the regex length
 // cap so an oversized URL returns 400 client error instead of 500
 // "create temp pitfalls" from os.CreateTemp hitting filename limits.

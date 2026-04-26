@@ -159,11 +159,23 @@ func editPitfalls(state *serverState, w http.ResponseWriter, r *http.Request, pr
 		return
 	}
 
+	// Cap payload at 1 MB to match validateScenarioHandler so a
+	// multi-GB body can't pin memory inside the JSON decoder.
+	const maxEditPayloadBytes = 1 << 20
+	r.Body = http.MaxBytesReader(w, r.Body, maxEditPayloadBytes)
+
 	var req pitfallsEditRequest
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&req); err != nil {
 		writeJSONError(w, http.StatusBadRequest, "decode body: "+err.Error())
+		return
+	}
+	// Reject trailing JSON so a body like `{"pitfalls":[]}{"pitfalls":[…]}`
+	// doesn't silently land only the first object. Mirrors the
+	// validateScenarioHandler check.
+	if dec.More() {
+		writeJSONError(w, http.StatusBadRequest, "request body must contain a single JSON object")
 		return
 	}
 
