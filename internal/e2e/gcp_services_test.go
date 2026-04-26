@@ -359,11 +359,14 @@ func runGCPServiceScenario(t *testing.T, mock *MockwayInstance, scenarioFile str
 				// stable logical keys* must survive — an unexpected
 				// wipe or split would slip through the identity check
 				// otherwise. For collections whose only logical key
-				// is the auto-assigned id (e.g. iam/keys, where the
-				// uuid IS the name), we fall back to count parity.
+				// is itself the auto-assigned id, we fall back to
+				// count parity. The fallback is explicitly opt-in
+				// (uuidNamedCollections) rather than heuristic, so
+				// adding a new replace-allowed collection later
+				// can't accidentally degrade to count parity.
 				lb, la := logicalKeysBefore[key], logicalKeysAfter[key]
 				switch {
-				case logicalKeysAreServerAssigned(lb, la):
+				case uuidNamedCollections[key]:
 					if len(lb) != len(la) {
 						t.Errorf("update phase changed item count for %s: before=%d after=%d",
 							key, len(lb), len(la))
@@ -833,28 +836,17 @@ func firstSecretLabels(state map[string]any) map[string]any {
 	return labels
 }
 
-// logicalKeysAreServerAssigned heuristically detects collections
-// whose only logical name is itself a server-assigned id (e.g.
-// google_service_account_key, where the uuid IS embedded in the
-// resource name). When every key on both sides looks like a uuid
-// suffix, the count check is the strongest assertion we can make.
-func logicalKeysAreServerAssigned(before, after []string) bool {
-	if len(before) == 0 || len(after) == 0 {
-		return false
-	}
-	uuidish := func(keys []string) bool {
-		for _, k := range keys {
-			seg := k
-			if i := strings.LastIndex(k, "/"); i >= 0 {
-				seg = k[i+1:]
-			}
-			if len(seg) != 36 || strings.Count(seg, "-") != 4 {
-				return false
-			}
-		}
-		return true
-	}
-	return uuidish(before) && uuidish(after)
+// uuidNamedCollections enumerates the replace-allowed collections
+// whose only logical key is itself the server-assigned uuid (the
+// uuid IS embedded in the resource name). For these the test
+// degrades to count parity rather than logical-set equality.
+//
+// Keep this list narrow on purpose: silent degradation to count
+// parity is a real loss of coverage if a new replace-allowed
+// collection happens to have uuid-shaped names but still tracks
+// meaningful identity in them.
+var uuidNamedCollections = map[string]bool{
+	"iam/keys": true,
 }
 
 // collectLogicalKeys returns, for each (root, collection), a slice
