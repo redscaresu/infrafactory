@@ -27,6 +27,11 @@ Last updated: 2026-04-26
 - Keep startup/read-order instructions only in `SESSION_START.md` to avoid duplication.
 
 ## Recent updates
+- **Slice 35 complete (S35-T2, S35-T3)**:
+  - `EvaluateTopology` now appends the diagnostic to http_probe failure detail with `": "`, e.g. `http probe "load_balancer:80" expected true got false: no backend attached`. Pre-computed-topology callers leave diagnostics nil and behave unchanged.
+  - Plumbing is internal: `EvaluateTopology` captures `DeriveTopology`'s second return into a local map and an unexported `httpProbeDiagnostic` helper does the exact-key → LB-fallback → empty lookup. No exported signatures changed.
+  - 5 new tests in `internal/harness/topology_evaluate_test.go`: exact-key diagnostic, LB-fallback diagnostic, no-diagnostic-keeps-bare-message, healthy-probe-no-detail, pre-computed-topology-no-diagnostic.
+  - These changes were bundled into commit `eb6c7b9` (named for S34-T3) due to a sub-agent worktree merge race during the pre-commit hook; tracked here for clarity.
 - **Slice 34-T3 complete (oscillation learning tests)**:
   - Added `TestRunCommandLearnsPitfallFromOscillation` driving the run loop with an alternating-error static harness for 4 iterations (A, B, A, B). Asserts `repair_budget_exhausted` and that the K8s detail (extractable) is appended to `pitfalls/scaleway.yaml` while the generic detail (B) is correctly skipped.
   - Added `TestRunCommandSkipsOscillationLearningWhenNoOscillation` confirming sustained linear failure → `stuck` terminal reason → no pitfalls file written.
