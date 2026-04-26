@@ -250,10 +250,17 @@ type gcpStateExpect struct {
 //
 // allowReplaceCollections lists root/collection pairs that are
 // allowed to be replaced rather than patched in place. The default
-// is empty: every resource is expected to be patched in place. The
-// only legitimate use is google_service_account_key, whose Terraform
-// resource regenerates on every refresh by design (see the provider's
-// `keepers` documentation).
+// is empty: every resource is expected to be patched in place.
+// Two cases legitimately need this opt-out today:
+//   - dns/record_sets: Cloud DNS has no in-place rrset patch in its
+//     API surface — mutations go through the v1 transactional changes
+//     API as a delete + add of the (name, type) pair, so a fresh
+//     creationTime on the addition side is the expected outcome.
+//   - iam/keys: google_service_account_key regenerates on every
+//     refresh by design (see the provider's `keepers` documentation).
+// Even when a collection is in this list the harness still asserts a
+// stable logical-key set (and a per-SA index for iam/keys) so a wipe
+// or unexpected migration is not silently accepted.
 type gcpUpdate struct {
 	files                   map[string][]byte
 	verify                  func(t *testing.T, state map[string]any)

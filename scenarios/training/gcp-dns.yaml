@@ -12,7 +12,7 @@ resources:
     record_set: true
 
 constraints:
-  region: europe-west1
+  region: us-central1
 
 acceptance_criteria:
   - type: destruction
