@@ -345,6 +345,67 @@ Bring fakegcp to mockway-level test coverage so it's reliable enough for a blog 
 
 ---
 
+---
+
+## Slice 42: GCP Training Scenarios + Multi-Cloud UI
+
+Write GCP-specific training scenarios and update the UI to show and filter by cloud provider. The scenario `cloud` field already exists — the UI just needs to surface it so users can see which provider a scenario targets and filter the sidebar accordingly.
+
+### UI Changes
+
+Looking at the current UI (screenshot), the sidebar lists all scenarios under TRAINING without any cloud indicator. With GCP scenarios added, users need to know which cloud a scenario targets. The Layer 3 section says "Real Scaleway" — this needs to be dynamic based on the scenario's cloud field.
+
+```
+Current sidebar:          After:
+TRAINING                  TRAINING
+  compute-lb-multi-paris    SCALEWAY
+  full-stack-paris            compute-lb-multi-paris
+  k8s-cluster-paris           full-stack-paris
+  ...                         ...
+                            GCP
+                              gcp-vm-network
+                              gcp-gke-cluster
+                              gcp-cloud-sql
+```
+
+The scenario detail page needs:
+- Cloud provider badge next to the scenario name (e.g., "scaleway" or "gcp")
+- Layer 3 section dynamically shows "Real Scaleway" or "Real GCP" based on cloud field
+- Credentials section shows the right env vars per cloud (SCW_* for Scaleway, GOOGLE_* for GCP)
+
+### Tickets
+
+| id | title | priority | deps |
+|---|---|---|---|
+| S42-T1 | GCP training scenarios: gcp-vm-network, gcp-gke-cluster, gcp-cloud-sql, gcp-full-stack | P1 | S36-T2 |
+| S42-T2 | UI sidebar: group scenarios by cloud provider (Scaleway / GCP sections) | P1 | — |
+| S42-T3 | UI scenario page: cloud provider badge, dynamic Layer 3 label and credentials | P1 | S42-T2 |
+| S42-T4 | UI scenario page: mock server status based on cloud (mockway vs fakegcp readiness) | P1 | S42-T3 |
+| S42-T5 | API: GET /api/scenarios returns cloud field, GET /api/scenarios/{path}/layer3-status adapts per cloud | P1 | — |
+| S42-T6 | Playwright e2e: GCP scenarios appear under GCP group, cloud badge renders, credentials section adapts | P1 | S42-T3 |
+
+### Acceptance Criteria
+
+- S42-T1: At least 4 GCP training scenarios exist with `cloud: gcp`. Each defines GCP resources (google_compute_instance, google_container_cluster, google_sql_database_instance, etc.) and acceptance criteria.
+- S42-T2: Sidebar groups scenarios by cloud field. Scaleway scenarios under "SCALEWAY", GCP under "GCP". Unknown cloud shows under "OTHER".
+- S42-T3: Scenario page shows cloud badge (e.g., pill with "scaleway" or "gcp"). Layer 3 section says "Layer 3 (Real Scaleway)" or "Layer 3 (Real GCP)". Credentials section shows SCW_ACCESS_KEY/SCW_SECRET_KEY for Scaleway, GOOGLE_APPLICATION_CREDENTIALS for GCP.
+- S42-T4: Mock server status card shows mockway readiness for Scaleway scenarios, fakegcp readiness for GCP scenarios. Checks the correct mock server URL from config.
+- S42-T5: GET /api/scenarios response includes `cloud` field per scenario. layer3-status endpoint returns cloud-appropriate credential checks.
+- S42-T6: Playwright tests verify: GCP group in sidebar, cloud badge on scenario page, correct credentials section per cloud.
+
+### Key Files
+
+- `scenarios/training/gcp-vm-network.yaml` (new)
+- `scenarios/training/gcp-gke-cluster.yaml` (new)
+- `scenarios/training/gcp-cloud-sql.yaml` (new)
+- `scenarios/training/gcp-full-stack.yaml` (new)
+- `ui/src/routes/+layout.svelte` — sidebar grouping by cloud
+- `ui/src/routes/scenarios/[...path]/+page.svelte` — cloud badge, dynamic Layer 3/credentials
+- `internal/api/handlers_scenarios.go` — cloud field in response, per-cloud layer3-status
+- `ui/e2e/scenarios.spec.ts` — new Playwright tests
+
+---
+
 ## Verification
 
 ```bash

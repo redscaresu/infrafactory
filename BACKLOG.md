@@ -6,6 +6,12 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 
 | id | slice | title | priority | status | deps | owner |
 |---|---|---|---|---|---|---|
+| S42-T6 | Slice 42 | Playwright e2e: GCP scenarios in sidebar, cloud badge, credentials adaptation | P1 | todo | S42-T3 | — |
+| S42-T5 | Slice 42 | API: GET /api/scenarios returns cloud field, layer3-status adapts per cloud | P1 | todo | — | — |
+| S42-T4 | Slice 42 | UI scenario page: mock server status based on cloud (mockway vs fakegcp) | P1 | todo | S42-T3 | — |
+| S42-T3 | Slice 42 | UI scenario page: cloud provider badge, dynamic Layer 3 label and credentials | P1 | todo | S42-T2 | — |
+| S42-T2 | Slice 42 | UI sidebar: group scenarios by cloud provider (Scaleway / GCP sections) | P1 | todo | — | — |
+| S42-T1 | Slice 42 | GCP training scenarios (gcp-vm-network, gcp-gke-cluster, gcp-cloud-sql, gcp-full-stack) | P1 | todo | S36-T2 | — |
 | S41-T7 | Slice 41 | fakegcp: misconfigured Terraform examples (FK violations, wrong refs, ordering) | P1 | todo | S41-T1 | — |
 | S41-T6 | Slice 41 | fakegcp: double-apply idempotency automation for all working examples | P1 | todo | S41-T1 | — |
 | S41-T5 | Slice 41 | fakegcp: admin endpoint tests (/mock/state, /mock/reset, /mock/snapshot, /mock/restore) | P1 | todo | S41-T1 | — |

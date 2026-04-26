@@ -376,6 +376,13 @@ This file is intentionally high-level and mostly stable; day-to-day execution tr
 - Coverage reporting and Makefile test targets.
 - Prerequisite for Slice 36 (GCP support in infrafactory) and fakegcp blog post.
 
+42. Slice 42: GCP training scenarios + multi-cloud UI
+- GCP training scenarios (vm-network, gke-cluster, cloud-sql, full-stack) with `cloud: gcp`.
+- UI sidebar groups scenarios by cloud provider (Scaleway / GCP sections).
+- Scenario page shows cloud badge, dynamic Layer 3 label, per-cloud credentials.
+- Mock server status adapts per cloud (mockway for Scaleway, fakegcp for GCP).
+- API returns cloud field in scenario responses, layer3-status adapts per cloud.
+
 ## Near-term execution order
 
 1. Keep completed slices (1-32) stable and regression-green.
