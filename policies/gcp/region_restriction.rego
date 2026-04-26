@@ -65,12 +65,27 @@ region_allowed(region) if {
 }
 
 # Layer 2 — fakegcp state surface. Compute instances surface their
-# zone; SQL/storage surface region.
+# zone as a full self-link URL (e.g.
+# http://HOST/compute/v1/projects/PROJECT/zones/europe-west1-a) since
+# fakegcp/handlers/compute.go:CreateInstance rewrites `zone` to the
+# self-link before persisting. zone_short strips the trailing path
+# segment so location_allowed can match the bare zone form.
+zone_short(z) := z if {
+	not contains(z, "/")
+}
+
+zone_short(z) := s if {
+	contains(z, "/")
+	parts := split(z, "/")
+	s := parts[count(parts) - 1]
+}
+
 deny_state contains msg if {
 	inst := input.compute.instances[_]
 	inst.zone != ""
-	not location_allowed(inst.zone)
-	msg := sprintf("compute instance %s zone %s not in allowlist %v", [inst.name, inst.zone, allowlist])
+	z := zone_short(inst.zone)
+	not location_allowed(z)
+	msg := sprintf("compute instance %s zone %s not in allowlist %v", [inst.name, z, allowlist])
 }
 
 deny_state contains msg if {
