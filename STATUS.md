@@ -27,6 +27,9 @@ Last updated: 2026-04-26
 - Keep startup/read-order instructions only in `SESSION_START.md` to avoid duplication.
 
 ## Recent updates
+- **S37-T4 complete (Playwright e2e for pitfalls)**:
+  - 5 new Playwright tests in `ui/e2e/pitfalls.spec.ts` cover page load via sidebar, default-tab selection, tab switch updating row count, edit + save with reload-and-restore for idempotent re-runs, and add/delete row dance. Total Playwright suite now 23 passing (up from 18).
+  - Bundled into commit 2392eb5 (named for S39-T2/T3) due to the same sub-agent worktree merge race; tracked here for clarity.
 - **S39-T2 + S39-T3 complete (debounced validation + inline errors)**:
   - Scenario page now validates the YAML textarea on every change with a 500ms debounce. New `api.validateScenarioYAML(yaml)` calls the existing `POST /api/scenarios/validate` endpoint. Race protection via a `validationVersion` counter so an in-flight request from an earlier keystroke can't overwrite a later result.
   - Inline UI shows "Validating…" while the request is in flight, "Valid scenario." in green when valid, and a red bulleted list `path: message` for each violation. Stable test ids: `scenario-yaml`, `scenario-validation`, `scenario-validation-{checking,valid,errors}`.

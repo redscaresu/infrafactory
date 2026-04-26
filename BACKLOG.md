@@ -30,7 +30,7 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 | S38-T3 | Slice 38 | Playwright e2e tests for run comparison | P1 | todo | S38-T2 | — |
 | S38-T2 | Slice 38 | /compare UI page with dual-pane IaC diff viewer | P1 | done | S38-T1 | claude |
 | S38-T1 | Slice 38 | GET /api/runs/{scenario}/compare endpoint returning diff data | P1 | done | — | claude |
-| S37-T4 | Slice 37 | Playwright e2e tests for pitfalls page | P1 | todo | S37-T3 | — |
+| S37-T4 | Slice 37 | Playwright e2e tests for pitfalls page | P1 | done | S37-T3 | claude+codex |
 | S37-T3 | Slice 37 | /pitfalls UI page with table, source badges, and edit form | P1 | done | S37-T2 | claude+codex |
 | S37-T2 | Slice 37 | PUT /api/pitfalls/{provider} endpoint for editing | P1 | done | S37-T1 | claude |
 | S37-T1 | Slice 37 | GET /api/pitfalls endpoint returning pitfalls grouped by provider | P1 | done | — | claude |
