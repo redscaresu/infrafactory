@@ -189,14 +189,35 @@ func AppendPitfall(pitfallsDir, cloud string, pitfall LearnedPitfall) error {
 		return fmt.Errorf("marshal pitfalls: %w", err)
 	}
 
-	tmpPath := filePath + ".tmp"
-	if err := os.WriteFile(tmpPath, out, 0o644); err != nil {
+	// Use os.CreateTemp so two concurrent learn-paths racing on the
+	// same provider can't clobber each other's tmp file before either
+	// rename completes. Mirrors the editPitfalls API handler.
+	tmp, err := os.CreateTemp(pitfallsDir, cloud+"-*.yaml.tmp")
+	if err != nil {
+		return fmt.Errorf("create temp pitfalls file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	cleanupPath := tmpPath
+	defer func() {
+		if cleanupPath != "" {
+			_ = os.Remove(cleanupPath)
+		}
+	}()
+	if _, err := tmp.Write(out); err != nil {
+		_ = tmp.Close()
 		return fmt.Errorf("write temp pitfalls file: %w", err)
 	}
+	if err := tmp.Chmod(0o644); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("chmod temp pitfalls file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close temp pitfalls file: %w", err)
+	}
 	if err := os.Rename(tmpPath, filePath); err != nil {
-		_ = os.Remove(tmpPath)
 		return fmt.Errorf("rename pitfalls file: %w", err)
 	}
+	cleanupPath = ""
 
 	return nil
 }

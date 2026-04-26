@@ -208,6 +208,7 @@ func TestPitfallsEditWritesProviderFile(t *testing.T) {
   ]
 }`)
 	req := httptest.NewRequest(http.MethodPut, "/api/pitfalls/gcp", body)
+	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	pitfallsHandler(&serverState{cfg: cfg}).ServeHTTP(rec, req)
 
@@ -251,6 +252,7 @@ func TestPitfallsEditValidatesEntries(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPut, "/api/pitfalls/gcp", strings.NewReader(tc.body))
+			req.Header.Set("Content-Type", "application/json")
 			rec := httptest.NewRecorder()
 			pitfallsHandler(&serverState{cfg: cfg}).ServeHTTP(rec, req)
 			if rec.Code != tc.want {
@@ -281,6 +283,7 @@ func TestPitfallsEditRejectsTraversalProvider(t *testing.T) {
 		"trailing!",
 	} {
 		req := httptest.NewRequest(http.MethodPut, "/api/pitfalls/"+name, strings.NewReader(`{"pitfalls":[]}`))
+		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 		pitfallsHandler(&serverState{cfg: cfg}).ServeHTTP(rec, req)
 		if rec.Code != http.StatusBadRequest {
@@ -300,6 +303,7 @@ func TestPitfallsHandlerEmptyProviderReturns400(t *testing.T) {
 	cfg.Paths.Pitfalls = t.TempDir()
 
 	req := httptest.NewRequest(http.MethodPut, "/api/pitfalls/", strings.NewReader(`{"pitfalls":[]}`))
+	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	pitfallsHandler(&serverState{cfg: cfg}).ServeHTTP(rec, req)
 
@@ -361,6 +365,7 @@ func TestPitfallsEditConcurrentWritesDoNotCorrupt(t *testing.T) {
 		body := body
 		go func() {
 			req := httptest.NewRequest(http.MethodPut, "/api/pitfalls/gcp", strings.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
 			rec := httptest.NewRecorder()
 			handler.ServeHTTP(rec, req)
 			resultsCh <- result{code: rec.Code, body: body}
@@ -426,6 +431,7 @@ func TestPitfallsEditRejectsConcatenatedJSON(t *testing.T) {
 
 	body := `{"pitfalls":[{"resource":"a","rule":"first"}]}{"pitfalls":[{"resource":"b","rule":"second"}]}`
 	req := httptest.NewRequest(http.MethodPut, "/api/pitfalls/gcp", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	pitfallsHandler(&serverState{cfg: cfg}).ServeHTTP(rec, req)
 
@@ -445,6 +451,7 @@ func TestPitfallsEditRejectsOversizedProviderName(t *testing.T) {
 
 	long := strings.Repeat("a", 41)
 	req := httptest.NewRequest(http.MethodPut, "/api/pitfalls/"+long, strings.NewReader(`{"pitfalls":[]}`))
+	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	pitfallsHandler(&serverState{cfg: cfg}).ServeHTTP(rec, req)
 

@@ -253,6 +253,23 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 			if learned == nil {
 				continue
 			}
+			// ExtractLearnedPitfall has Scaleway-flavoured fallbacks
+			// (scaleway_redis_cluster, scaleway_k8s_cluster) that fire
+			// when the failure detail names no resource. Don't pollute
+			// pitfalls/<otherCloud>.yaml with cross-cloud resource
+			// types; skip when the learned resource prefix doesn't
+			// match the scenario's cloud.
+			if !pitfallResourceMatchesCloud(learned.Resource, sc.Cloud) {
+				runtime.Logger.Log(LogEntry{
+					Level:   logLevelInfo,
+					Command: "run",
+					Event:   "oscillation_pitfall_skipped",
+					Status:  "skipped",
+					RunID:   runID,
+					Detail:  fmt.Sprintf("cross-cloud resource %q for cloud=%s", learned.Resource, sc.Cloud),
+				})
+				continue
+			}
 			if err := generator.AppendPitfall(runtime.Config.Paths.Pitfalls, sc.Cloud, *learned); err != nil {
 				runtime.Logger.Log(LogEntry{
 					Level:   logLevelError,
@@ -770,6 +787,25 @@ func generatedFileWriteModeForRunMode(mode runMode) generatedFileWriteMode {
 		return generatedFileWriteModeIncremental
 	}
 	return generatedFileWriteModeClean
+}
+
+// pitfallResourceMatchesCloud reports whether a learned pitfall's
+// resource name fits the scenario's cloud. Empty cloud and empty
+// resource accept anything (no signal to mismatch). Otherwise the
+// resource must be prefixed with the cloud's canonical Terraform
+// provider stem (scaleway_*, google_*).
+func pitfallResourceMatchesCloud(resource, cloud string) bool {
+	if cloud == "" || resource == "" {
+		return true
+	}
+	switch cloud {
+	case "scaleway":
+		return strings.HasPrefix(resource, "scaleway_")
+	case "gcp":
+		return strings.HasPrefix(resource, "google_")
+	default:
+		return true
+	}
 }
 
 func toFeedbackFailures(failures []FailureSummary) []feedback.Failure {

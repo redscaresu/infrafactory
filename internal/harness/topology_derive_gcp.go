@@ -152,8 +152,11 @@ func deriveGCPConnectivity(state *rawGCPState) map[string]bool {
 			conn[key] = true
 		}
 		// Default-deny public unless ipv4 enabled with public auth
-		// or a 0.0.0.0/0 authorized network is present.
-		conn[pubKey] = gcpSQLPublicReachable(sql)
+		// or a 0.0.0.0/0 authorized network is present. OR across
+		// multiple same-engine instances so one publicly-reachable
+		// instance flips the shared edge regardless of iteration
+		// order.
+		conn[pubKey] = conn[pubKey] || gcpSQLPublicReachable(sql)
 	}
 
 	if hasCompute && hasKubernetes {

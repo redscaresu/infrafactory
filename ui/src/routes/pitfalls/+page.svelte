@@ -27,14 +27,21 @@
     };
   }
 
+  let parseErrorByProvider: Record<string, string> = {};
+
   function ingest(payload: PitfallsResponse) {
     const groups: PitfallProviderGroup[] = payload?.providers || [];
     providers = groups.map((g) => g.provider).filter((p): p is string => !!p);
     const next: Record<string, Pitfall[]> = {};
+    const errs: Record<string, string> = {};
     for (const group of groups) {
       next[group.provider] = (group.pitfalls || []).map(cloneEntry);
+      if (group.parse_error) {
+        errs[group.provider] = group.parse_error;
+      }
     }
     entriesByProvider = next;
+    parseErrorByProvider = errs;
     selectedProvider = selectInitialProvider(groups);
   }
 
@@ -105,6 +112,7 @@
   $: currentEntries = entriesByProvider[selectedProvider] || [];
   $: currentStatus = saveStatus[selectedProvider] || "";
   $: currentSaving = !!saving[selectedProvider];
+  $: currentParseError = parseErrorByProvider[selectedProvider] || "";
   $: sortedProviders = [...providers].sort();
 </script>
 
@@ -143,6 +151,11 @@
   </div>
 
   <section class="mt-4" data-testid="pitfalls-section" data-provider={selectedProvider}>
+    {#if currentParseError}
+      <p class="mb-3 rounded bg-rose-50 px-3 py-2 text-sm text-rose-900" data-testid="pitfalls-parse-error">
+        Could not parse <code>{selectedProvider}.yaml</code>: {currentParseError}
+      </p>
+    {/if}
     <div class="flex flex-wrap items-center justify-between gap-3">
       <h2 class="text-lg font-semibold text-slate-900">{selectedProvider}</h2>
       <div class="flex gap-2">

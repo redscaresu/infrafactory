@@ -107,6 +107,7 @@ func listPitfalls(state *serverState, w http.ResponseWriter, r *http.Request) {
 	}
 
 	groups := make([]pitfallsProviderGroup, 0)
+	seenProvider := make(map[string]bool)
 	for _, ent := range entries {
 		if ent.IsDir() {
 			continue
@@ -116,6 +117,18 @@ func listPitfalls(state *serverState, w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		provider := strings.TrimSuffix(strings.TrimSuffix(name, ".yml"), ".yaml")
+		if seenProvider[provider] {
+			// Both `gcp.yaml` and `gcp.yml` would map to the same
+			// provider; skip the second entry deterministically and
+			// surface a parse_error so the UI tab doesn't duplicate.
+			groups = append(groups, pitfallsProviderGroup{
+				Provider:   provider,
+				Pitfalls:   []pitfallsResponseEntry{},
+				ParseError: "duplicate pitfalls file (both .yaml and .yml exist)",
+			})
+			continue
+		}
+		seenProvider[provider] = true
 		path := filepath.Join(dir, name)
 		data, err := os.ReadFile(path)
 		if err != nil {
@@ -164,6 +177,12 @@ func editPitfalls(state *serverState, w http.ResponseWriter, r *http.Request, pr
 	}
 	if !validProviderName.MatchString(provider) {
 		writeJSONError(w, http.StatusBadRequest, "invalid provider name")
+		return
+	}
+	// Match validateScenarioHandler — explicit application/json only.
+	contentType := strings.TrimSpace(strings.SplitN(r.Header.Get("Content-Type"), ";", 2)[0])
+	if !strings.EqualFold(contentType, "application/json") {
+		writeJSONError(w, http.StatusUnsupportedMediaType, "content-type must be application/json")
 		return
 	}
 	dir := strings.TrimSpace(state.cfg.Paths.Pitfalls)

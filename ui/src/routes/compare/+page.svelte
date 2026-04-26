@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from "svelte";
   import { api } from "$lib/api";
   import type { RunSummary } from "$lib/types";
   import { afterNavigate } from "$app/navigation";
@@ -82,7 +81,9 @@
 
   $: activeDiff = diffs.find((d) => d.filename === activeFile);
 
-  onMount(loadScenarios);
+  // afterNavigate fires on the initial mount too, so a single call here
+  // covers both the first load and subsequent client-side route changes
+  // — avoids a double fetch.
   afterNavigate(loadScenarios);
   $: if (scenario) loadRunsForScenario();
 </script>

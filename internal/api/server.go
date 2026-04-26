@@ -145,18 +145,25 @@ func (c *httpMockStateClient) State(ctx context.Context) ([]byte, error) {
 		return nil, fmt.Errorf("fetch mock state: %w", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("fetch mock state: unexpected status %d", resp.StatusCode)
-	}
+
 	const maxMockStateBytes = 8 << 20 // 8 MB, consistent with CLI limit
-	payload, err := io.ReadAll(io.LimitReader(resp.Body, maxMockStateBytes+1))
-	if err != nil {
-		return nil, fmt.Errorf("read mock state response: %w", err)
+	payload, readErr := io.ReadAll(io.LimitReader(resp.Body, maxMockStateBytes+1))
+	if readErr != nil {
+		return nil, fmt.Errorf("read mock state response: %w", readErr)
 	}
 	if len(payload) > maxMockStateBytes {
-		// Mirror internal/cli/mockway_client.go: surface the truncation
-		// explicitly rather than silently feeding broken JSON downstream.
 		return nil, fmt.Errorf("read mock state response: payload exceeds %d bytes", maxMockStateBytes)
+	}
+	if resp.StatusCode != http.StatusOK {
+		// Surface the response body (truncated) so a 503 with a meaningful
+		// body still tells the operator what went wrong. Mirrors the CLI
+		// client's truncateMockwayErrorPayload behaviour.
+		body := strings.TrimSpace(string(payload))
+		const maxErrPayload = 1024
+		if len(body) > maxErrPayload {
+			body = body[:maxErrPayload] + "..."
+		}
+		return nil, fmt.Errorf("fetch mock state: unexpected status %d: %s", resp.StatusCode, body)
 	}
 	return payload, nil
 }

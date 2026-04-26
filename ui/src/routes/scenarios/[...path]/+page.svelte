@@ -1,5 +1,6 @@
 <script lang="ts">
   import { afterNavigate } from "$app/navigation";
+  import { onDestroy } from "svelte";
   import { page } from "$app/stores";
   import { api } from "$lib/api";
   import { modeSummary, normalizeRunOptions } from "$lib/scenario-run.js";
@@ -48,6 +49,13 @@
   }
 
   $: if (rawYAML !== undefined) scheduleValidation(rawYAML);
+
+  // Clear the debounce timer on destroy so navigating away during the
+  // 500ms window doesn't fire a stale validation against a torn-down
+  // component (the validationVersion guard is per-instance).
+  onDestroy(() => {
+    if (validationTimer) clearTimeout(validationTimer);
+  });
 
   $: scenarioPath = ($page.params.path || "").toString();
   $: runModeCard = modeSummary(runMode);

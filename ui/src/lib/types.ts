@@ -96,6 +96,10 @@ export interface Pitfall {
 export interface PitfallProviderGroup {
   provider: string;
   pitfalls: Pitfall[];
+  // parse_error is set when the on-disk YAML for this provider
+  // couldn't be parsed; the UI should render an inline error banner
+  // alongside the (typically empty) pitfalls list.
+  parse_error?: string;
 }
 
 export interface PitfallsResponse {
