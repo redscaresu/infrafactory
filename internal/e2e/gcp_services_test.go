@@ -70,6 +70,12 @@ func TestE2E_GCPDNS(t *testing.T) {
 					t.Errorf("expected record-set ttl=600 after update, got %v", ttl)
 				}
 			},
+			// Cloud DNS record sets are mutated through the v1
+			// transactional changes API as a delete + add of the
+			// owner+type pair. There is no in-place rrset patch in
+			// the API surface, so a fresh creationTime is the
+			// correct, expected outcome of an "update".
+			allowReplaceCollections: []string{"dns/record_sets"},
 		},
 	)
 }
