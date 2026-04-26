@@ -27,6 +27,9 @@ Last updated: 2026-04-26
 - Keep startup/read-order instructions only in `SESSION_START.md` to avoid duplication.
 
 ## Recent updates
+- **S41-T1 partial (fakegcp test infrastructure)**:
+  - In the sibling `../fakegcp/` working tree: added `test-race`, `test-short`, `test-coverage` Makefile targets. `test-coverage` writes `coverage.out` and emits an HTML report; current handlers package coverage is **63.7%** of statements. Existing `testutil/testutil.go` is the helper set; further coverage targets land with S41-T2 (repository unit tests).
+  - Not committed in fakegcp because that repo has no git history yet — `S41-T0` (git init + first commit + push) is the gate, owned by the user (avoiding unauthorised remote pushes).
 - **S36-T0 verified done (fakegcp prerequisites)**:
   - Confirmed `../fakegcp/AGENTS.md` already covers the required Architecture, Testing, and Conventions sections (plus extras like "GCP API Conventions", "API Fidelity Principles", "Checklist for New Handlers", "Safe Workflow"). No update needed.
   - Confirmed `google_compute_forwarding_rule` handler exists in `../fakegcp/handlers/loadbalancer.go` with Create/Get/List/Delete plus idempotency on the Terraform provider's read-then-apply path. CRUD is sufficient since Terraform's apply loop owns the idempotency contract.
