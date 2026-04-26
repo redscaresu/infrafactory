@@ -10,7 +10,7 @@ Last updated: 2026-04-26
 - Layer 3 production readiness hardening complete (Slice 30).
 
 ## In progress
-- No active implementation tickets. Slice 33 complete. Open todos: S34, S35, S36, S37, S38, S39, S40, S41, S42.
+- No active implementation tickets. Slice 33 complete, S34-T1 complete. Open: S34-T2/T3, S35, S36, S37, S38, S39, S40, S41, S42.
 
 ## Known blockers
 - None. `S9-T8` closed — superseded by Slices 26-30 (ADR-0010).
@@ -27,6 +27,10 @@ Last updated: 2026-04-26
 - Keep startup/read-order instructions only in `SESSION_START.md` to avoid duplication.
 
 ## Recent updates
+- **Slice 34-T1 complete (oscillation detection)**:
+  - Added `DetectOscillation(history []IterationResult) []FailureSignature` in `internal/feedback/oscillation.go`. Returns signatures that follow the pattern present-at-N, absent-at-N+1, present-at-N+2, capturing alternating-fix loops the model gets into. Result is deterministically sorted; gaps longer than one iteration intentionally don't count.
+  - 7 unit tests covering: short history, simple oscillation, sustained failure, distinct failures, multi-signature oscillation, longer gap (negative), embedded oscillation in longer history.
+  - Detector is unwired so far (S34-T2 will plumb it into the run loop and pitfall extraction).
 - **Slice 33 complete (cross-repo e2e tests)**:
   - **S33-T3**: Added `TestE2E_FullStackParis` exercising compute + VPC + RDB + Kubernetes + Redis + container registry + IAM in one run. Uses two-stage flow (`--no-destroy` then incremental destroy) to assert resources land in mockway state and that the destroy pass also reaches `target_reached`. Runtime ~7.5s gated.
 - **Slice 33-T2 complete (e2e for web-app-paris)**:
