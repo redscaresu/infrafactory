@@ -291,26 +291,58 @@ func WriteFile(t *testing.T, path string, content []byte) {
 
 // WriteConfig writes a typical infrafactory.yaml that targets the given
 // mockway URL and output root with all validation layers configured for
-// hermetic mockway-only runs (sandbox deploy disabled).
+// hermetic mockway-only runs (sandbox deploy disabled). Policy, mapping,
+// prompt, and pitfall paths are resolved against the repository root so
+// scenarios with policy criteria can be evaluated end-to-end.
 func WriteConfig(t *testing.T, configPath, mockwayURL, outputRoot string) {
 	t.Helper()
+	repoRoot := RepoRoot(t)
 	WriteFile(t, configPath, fmt.Appendf(nil, `version: "1.0"
 agent:
   type: claude-code
 mockway:
   url: %s
-paths:
-  output: %s
+scaleway:
+  credentials_source: env
 validation:
   layers:
     static:
       enabled: true
-      policy_paths: []
+      policy_paths: [%s/policies/common, %s/policies/scaleway]
     mock_deploy:
       enabled: true
     sandbox_deploy:
       enabled: false
     destruction:
       enabled: true
-`, mockwayURL, outputRoot))
+constraint_policies:
+  no_public_database: scaleway/no_public_database.rego
+  encryption_at_rest: scaleway/encryption_at_rest.rego
+  no_public_endpoints: scaleway/no_public_endpoints.rego
+  region: scaleway/region_restriction.rego
+  zone: scaleway/region_restriction.rego
+paths:
+  scenarios: %s/scenarios
+  mappings: %s/mappings.yaml
+  output: %s
+  policies: %s/policies
+  prompts: %s/prompts
+  pitfalls: %s/pitfalls
+`,
+		mockwayURL,
+		repoRoot, repoRoot,
+		repoRoot, repoRoot, outputRoot, repoRoot, repoRoot, repoRoot,
+	))
+}
+
+// RepoRoot returns the absolute path to the infrafactory repository root,
+// resolved relative to this source file. Useful for tests that need to
+// reference repo-checked-in fixtures (scenarios, policies, mappings).
+func RepoRoot(t *testing.T) string {
+	t.Helper()
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("resolve current test file path")
+	}
+	return filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", ".."))
 }

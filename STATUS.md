@@ -10,7 +10,7 @@ Last updated: 2026-04-26
 - Layer 3 production readiness hardening complete (Slice 30).
 
 ## In progress
-- No active implementation tickets (next: S33-T2 e2e for web-app-paris).
+- No active implementation tickets (next: S33-T3 e2e for full-stack-paris).
 
 ## Known blockers
 - None. `S9-T8` closed — superseded by Slices 26-30 (ADR-0010).
@@ -27,6 +27,10 @@ Last updated: 2026-04-26
 - Keep startup/read-order instructions only in `SESSION_START.md` to avoid duplication.
 
 ## Recent updates
+- **Slice 33-T2 complete (e2e for web-app-paris)**:
+  - Added `TestE2E_WebAppParis` in `internal/e2e/web_app_paris_test.go` that runs the canonical web-app-paris training scenario against a freshly-started mockway with pre-baked HCL via the stub generator. Verified `target_reached` and all topology + policy criteria pass (4.5s wall time).
+  - Extended `WriteConfig` to render absolute repo paths for `policies/`, `mappings.yaml`, `prompts/`, and `pitfalls/` so policy criteria evaluate end-to-end.
+  - Added `RepoRoot` helper for fixture path resolution.
 - **Slice 33-T1 complete (cross-repo e2e infrastructure)**:
   - Added `internal/e2e` package with `StartMockway`, `MockwayInstance` (Reset/FetchState/Stop), and `RunInfrafactory` helpers that drive the CLI in-process.
   - Added `cli.WithRuntimeDependencies(RuntimeDependencies)` exported `RootOption` so external test packages can inject stub generators without subprocess overhead.
