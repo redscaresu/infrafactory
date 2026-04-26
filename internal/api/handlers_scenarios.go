@@ -167,6 +167,12 @@ func validateScenarioHandler(state *serverState) http.HandlerFunc {
 			writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("decode request body: %v", err))
 			return
 		}
+		// Reject trailing JSON so a body like `{"yaml":"x"}{"yaml":"y"}`
+		// doesn't silently validate only the first object.
+		if dec.More() {
+			writeJSONError(w, http.StatusBadRequest, "request body must contain a single JSON object")
+			return
+		}
 		if strings.TrimSpace(req.YAML) == "" {
 			writeJSONError(w, http.StatusBadRequest, "yaml field is required")
 			return
@@ -212,15 +218,25 @@ func validateScenarioHandler(state *serverState) http.HandlerFunc {
 }
 
 // extractYAMLSyntaxDetail strips the wrapper prefix added by parseAndValidate
-// (e.g. `malformed scenario: parse scenario "": <detail>`) so the message
-// surfaces just the underlying parser error. Also strips the redundant
-// `yaml: ` prefix the underlying gopkg.in/yaml.v3 library prepends, so
-// the response message doesn't end up doubled as `yaml syntax: yaml: ...`.
+// (e.g. `malformed scenario: parse scenario "<label>": <detail>`) so the
+// message surfaces just the underlying parser error. Also strips the
+// redundant `yaml: ` prefix the underlying gopkg.in/yaml.v3 library
+// prepends, so the response message doesn't end up doubled as
+// `yaml syntax: yaml: ...`.
+//
+// The previous implementation used strings.LastIndex(": ") which also
+// matched the colon inside `yaml: line 5: did not find expected key`,
+// truncating the helpful `line 5:` context. Splitting on the wrapper's
+// closing `": ` instead keeps the full yaml-side message.
 func extractYAMLSyntaxDetail(message string) string {
-	idx := strings.LastIndex(message, ": ")
-	if idx != -1 {
-		message = strings.TrimSpace(message[idx+2:])
+	const wrapperOpen = `parse scenario "`
+	if idx := strings.Index(message, wrapperOpen); idx != -1 {
+		// Walk past the closing `": ` of the sourceLabel quote.
+		if close := strings.Index(message[idx:], `": `); close != -1 {
+			message = message[idx+close+len(`": `):]
+		}
 	}
+	message = strings.TrimSpace(message)
 	return strings.TrimPrefix(message, "yaml: ")
 }
 

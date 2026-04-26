@@ -490,6 +490,30 @@ func TestValidateScenarioHandlerWrongContentType(t *testing.T) {
 	}
 }
 
+// TestValidateScenarioHandlerRejectsConcatenatedJSON pins the
+// dec.More() check added in review-5: a body like
+// `{"yaml":"x"}{"yaml":"y"}` must 400, not silently validate only the
+// first object.
+func TestValidateScenarioHandlerRejectsConcatenatedJSON(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.Default()
+	cfg.Paths.Scenarios = filepath.Join(t.TempDir(), "scenarios")
+	srv := NewServer(ServerConfig{Config: cfg})
+	ts := httptest.NewServer(srv.Handler)
+	defer ts.Close()
+
+	resp, err := http.Post(ts.URL+"/api/scenarios/validate", "application/json",
+		strings.NewReader(`{"yaml":"x"}{"yaml":"y"}`))
+	if err != nil {
+		t.Fatalf("post validate: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 for concatenated JSON, got %d", resp.StatusCode)
+	}
+}
+
 // TestValidateScenarioHandlerRejectsUnknownFields guards the strict
 // JSON decoder added in pass-3 — an extra `secret` field used to be
 // silently dropped, now it returns 400.

@@ -484,6 +484,72 @@ func TestDeriveTopologyGCPSQLNarrowAuthorizedNetworkIsPrivate(t *testing.T) {
 	}
 }
 
+// TestDeriveTopologyGCPSQLEmptyEngineDefaultsToPostgres pins the
+// review-3-era contract that an SQL instance without a databaseVersion
+// surfaces as a postgres edge (5432). fakegcp tests rely on this
+// default; the contract should fail if a future change flips empty to
+// 0 silently.
+func TestDeriveTopologyGCPSQLEmptyEngineDefaultsToPostgres(t *testing.T) {
+	t.Parallel()
+
+	state := map[string]any{
+		"compute": map[string]any{
+			"instances": []map[string]any{{"name": "web-0"}},
+		},
+		"sql": map[string]any{
+			// No databaseVersion field at all.
+			"instances": []map[string]any{{"name": "default-db"}},
+		},
+	}
+	stateJSON, _ := json.Marshal(state)
+
+	out, _, err := DeriveTopology(stateJSON)
+	if err != nil {
+		t.Fatalf("derive: %v", err)
+	}
+	var parsed struct {
+		Connectivity map[string]bool `json:"connectivity"`
+	}
+	_ = json.Unmarshal(out, &parsed)
+	if !parsed.Connectivity["compute->database:5432"] {
+		t.Fatalf("expected compute->database:5432=true for empty databaseVersion, got %+v", parsed.Connectivity)
+	}
+}
+
+// TestDeriveTopologyGCPForwardingRuleFloat64OutOfRangePort exercises
+// the float64 branch of gcpForwardingRulePort with an out-of-range
+// port. The string-path version is covered by
+// TestDeriveTopologyGCPForwardingRuleOutOfRangePort; this version
+// guards the parallel branch.
+func TestDeriveTopologyGCPForwardingRuleFloat64OutOfRangePort(t *testing.T) {
+	t.Parallel()
+
+	state := map[string]any{
+		"compute": map[string]any{},
+		"lb": map[string]any{
+			"global_forwarding_rules": []map[string]any{
+				{"ports": []any{float64(70000)}},
+			},
+			"backend_services": []map[string]any{
+				{"backends": []any{map[string]any{"group": "ig"}}},
+			},
+		},
+	}
+	stateJSON, _ := json.Marshal(state)
+
+	out, _, err := DeriveTopology(stateJSON)
+	if err != nil {
+		t.Fatalf("derive: %v", err)
+	}
+	var parsed struct {
+		HTTPProbe map[string]bool `json:"http_probe"`
+	}
+	_ = json.Unmarshal(out, &parsed)
+	for key := range parsed.HTTPProbe {
+		t.Fatalf("expected no http_probe entries for out-of-range float port, got %s", key)
+	}
+}
+
 // TestDeriveTopologyGCPForwardingRuleOutOfRangePort guards the pass-4
 // fix where a port_range like "70000" used to produce a bogus
 // load_balancer:70000 http_probe entry instead of being skipped.

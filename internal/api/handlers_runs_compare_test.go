@@ -216,11 +216,48 @@ func TestRunCompareHandlerReturns404WhenRunMetadataMissing(t *testing.T) {
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("expected 404 for run with missing metadata, got %d", resp.StatusCode)
 	}
-	// Body must name the offending run (run-2), so a future regression
-	// that silently swapped the loop order would still trip this test.
+	// Response must name run-2 (the missing one). Doesn't actually
+	// distinguish loop order — only run-2 is missing here — but the
+	// 404-status check above already catches a regression that skipped
+	// the metadata gate altogether.
 	body, _ := io.ReadAll(resp.Body)
 	if !strings.Contains(string(body), "run-2") {
 		t.Fatalf("expected body to mention run-2, got %s", string(body))
+	}
+}
+
+// TestRunCompareHandlerReportsFirstMissingRun pins the loop order: when
+// BOTH runs are missing metadata, the handler must report the FIRST one
+// iterated (run-1). A regression that swapped the loop order would
+// surface here as the body naming run-2 instead.
+func TestRunCompareHandlerReportsFirstMissingRun(t *testing.T) {
+	t.Parallel()
+
+	store := runstore.NewFilesystemStore(filepath.Join(t.TempDir(), ".infrafactory", "runs"))
+	// Both runs have generated/ snapshots but neither has run.json.
+	for _, runID := range []string{"run-1", "run-2"} {
+		if err := store.WriteGeneratedFiles("web-app-paris", runID, map[string][]byte{
+			"main.tf": []byte(runID),
+		}); err != nil {
+			t.Fatalf("write %s files: %v", runID, err)
+		}
+	}
+
+	srv := NewServer(ServerConfig{Config: config.Default(), Store: store})
+	ts := httptest.NewServer(srv.Handler)
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/api/runs/web-app-paris/compare?run1=run-1&run2=run-2")
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "run-1") {
+		t.Fatalf("expected body to mention run-1 (first iterated), got %s", string(body))
 	}
 }
 
