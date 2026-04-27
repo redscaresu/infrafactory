@@ -6,6 +6,66 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 
 | id | slice | title | priority | status | deps | owner |
 |---|---|---|---|---|---|---|
+| S48-T8 | Slice 48 | fakeaws Phase 6 / polish: pre-commit hook + gitleaks config + Makefile sweep matching fakegcp | P1 | todo | S48-T1 | — |
+| S48-T7 | Slice 48 | fakeaws Phase 6 / polish: misconfigured + updates examples for every service (one each per service in scope) | P1 | todo | S48-T1 | — |
+| S48-T6 | Slice 48 | fakeaws Phase 6 / polish: working/ examples for every in-scope service (one each, must apply→destroy clean) | P1 | todo | S43-T10..S47-T10 | — |
+| S48-T5 | Slice 48 | fakeaws Phase 6 / polish: README + AGENTS + PLAN + BACKLOG docs in fakeaws repo | P1 | todo | S43-T1 | — |
+| S48-T4 | Slice 48 | fakeaws Phase 6 / polish: codex review iteration loop until 2 consecutive NOTHING_TO_IMPROVE passes (mirror of fakegcp 33-pass loop) | P1 | todo | S47-T10 | — |
+| S48-T3 | Slice 48 | fakeaws Phase 6 / polish: cross-resource FK validators (resolveSameAccountName helper, mirror of fakegcp's resolveSameProjectName) | P1 | todo | S47-T10 | — |
+| S48-T2 | Slice 48 | fakeaws Phase 6 / polish: harness.countOrphans extension to ignore aws operations / log tables analogous to fakegcp | P1 | todo | S43-T6 | — |
+| S48-T1 | Slice 48 | fakeaws Phase 6 / polish: regression_test.go scaffolding + first round of pinned regressions across all phases | P1 | todo | S43-T6, S44-T6, S45-T6, S46-T6, S47-T6 | — |
+| S47-T10 | Slice 47 | fakeaws Phase 5: gated TestE2E_AWS_Route53 + TestE2E_AWS_SecretsManager in infrafactory/internal/e2e (mirror of fakegcp gated GCP e2e) | P1 | todo | S47-T7, S47-T9 | — |
+| S47-T9 | Slice 47 | fakeaws: examples/working/route53 + working/secrets_manager + matching misconfigured + updates dirs (v1/v2 tfvars) | P1 | todo | S47-T7 | — |
+| S47-T8 | Slice 47 | infrafactory: scenarios/training/aws-route53.yaml + aws-secrets-manager.yaml + scenario_aws_test loader for the new fixtures | P1 | todo | S47-T7, S43-T7 | — |
+| S47-T7 | Slice 47 | fakeaws: regression coverage for Route53 changes API atomicity + Secrets Manager :destroy / :enable terminal-state contract | P1 | todo | S47-T5, S47-T6 | — |
+| S47-T6 | Slice 47 | fakeaws: handlers_test.go integration tests for Route53 + Secrets Manager (CRUD, FK, cascade, change-id scoping) | P1 | todo | S47-T3, S47-T5 | — |
+| S47-T5 | Slice 47 | fakeaws: handlers/secretsmanager.go (Secret + Version state machine; DESTROYED terminal; tagging) | P1 | todo | S47-T4 | — |
+| S47-T4 | Slice 47 | fakeaws: repository support for secretsmanager_secrets + versions, with state column + FK from versions → secrets | P1 | todo | S43-T6 | — |
+| S47-T3 | Slice 47 | fakeaws: handlers/route53.go (HostedZone + ResourceRecordSet via ChangeResourceRecordSets, transactional) | P1 | todo | S47-T2 | — |
+| S47-T2 | Slice 47 | fakeaws: repository support for route53_hosted_zones + record_sets, FK + non-empty-zone delete refusal | P1 | todo | S43-T6 | — |
+| S47-T1 | Slice 47 | Phase 5 design note: Route53 XML wire format + Secrets Manager JSON-1.1 in awsproto, validate against terraform-provider-aws expectations | P1 | todo | S43-T2 | — |
+| S46-T10 | Slice 46 | fakeaws Phase 4: gated TestE2E_AWS_EKS + TestE2E_AWS_SQS in infrafactory | P1 | todo | S46-T7, S46-T9 | — |
+| S46-T9 | Slice 46 | fakeaws: examples/working/eks_cluster + working/sqs_queue + matching misconfigured + updates dirs | P1 | todo | S46-T7 | — |
+| S46-T8 | Slice 46 | infrafactory: scenarios/training/aws-eks.yaml + aws-sqs.yaml + scenario_aws_test loader update | P1 | todo | S46-T7, S43-T7 | — |
+| S46-T7 | Slice 46 | fakeaws: regression coverage for EKS cluster→nodegroup→addon dependencies + SQS DLQ + visibility-timeout edge cases | P1 | todo | S46-T5, S46-T6 | — |
+| S46-T6 | Slice 46 | fakeaws: handlers_test.go for EKS + SQS (CRUD, FK validation, cascade, message lifecycle) | P1 | todo | S46-T3, S46-T5 | — |
+| S46-T5 | Slice 46 | fakeaws: handlers/sqs.go (Queue + minimal SendMessage / ReceiveMessage / DeleteMessage) | P1 | todo | S46-T4 | — |
+| S46-T4 | Slice 46 | fakeaws: repository support for sqs_queues + sqs_messages with at-least-once visibility-timeout collapsed | P1 | todo | S43-T6 | — |
+| S46-T3 | Slice 46 | fakeaws: handlers/eks.go (Cluster + NodeGroup + AddOn; FK against IAM roles + EC2 subnets + security groups) | P1 | todo | S46-T2 | — |
+| S46-T2 | Slice 46 | fakeaws: repository support for eks_clusters + eks_node_groups + eks_addons with FK cascade + IAM/EC2 cross-resource validation | P1 | todo | S43-T6, S43-T8, S44-T2 | — |
+| S46-T1 | Slice 46 | Phase 4 design note: EKS JSON-REST and SQS x-amz-target wire formats; cluster/nodegroup state-machine simplification | P1 | todo | S43-T2 | — |
+| S45-T10 | Slice 45 | fakeaws Phase 3: gated TestE2E_AWS_RDS + TestE2E_AWS_DynamoDB in infrafactory | P1 | todo | S45-T7, S45-T9 | — |
+| S45-T9 | Slice 45 | fakeaws: examples/working/rds_instance + working/dynamodb_table + matching misconfigured + updates dirs | P1 | todo | S45-T7 | — |
+| S45-T8 | Slice 45 | infrafactory: scenarios/training/aws-rds.yaml + aws-dynamodb.yaml + loader update | P1 | todo | S45-T7, S43-T7 | — |
+| S45-T7 | Slice 45 | fakeaws: regression coverage for RDS read-replica chain + DynamoDB GSI/LSI + table-state transitions | P1 | todo | S45-T5, S45-T6 | — |
+| S45-T6 | Slice 45 | fakeaws: handlers_test.go for RDS + DynamoDB (CRUD, FK, cascade, basic item ops) | P1 | todo | S45-T3, S45-T5 | — |
+| S45-T5 | Slice 45 | fakeaws: handlers/dynamodb.go (Table CRUD + minimal item PutItem/GetItem/UpdateItem/DeleteItem/Query/Scan) | P1 | todo | S45-T4 | — |
+| S45-T4 | Slice 45 | fakeaws: repository support for dynamodb_tables + dynamodb_items (item PK index) | P1 | todo | S43-T6 | — |
+| S45-T3 | Slice 45 | fakeaws: handlers/rds.go (DBInstance + DBCluster + DBSubnetGroup + DBParameterGroup + ClusterParameterGroup) | P1 | todo | S45-T2 | — |
+| S45-T2 | Slice 45 | fakeaws: repository support for rds_instances + rds_clusters + rds_subnet_groups + rds_parameter_groups (FK on subnet group → EC2 subnets) | P1 | todo | S43-T6, S44-T2 | — |
+| S45-T1 | Slice 45 | Phase 3 design note: RDS query-RPC + DynamoDB JSON; collapsed state machines; private-network FK with EC2 | P1 | todo | S43-T2 | — |
+| S44-T12 | Slice 44 | fakeaws Phase 2: gated TestE2E_AWS_VPC + TestE2E_AWS_Instance + TestE2E_AWS_SecurityGroup in infrafactory | P1 | todo | S44-T9, S44-T11 | — |
+| S44-T11 | Slice 44 | fakeaws: examples/working/basic_instance + working/vpc_network + misconfigured/instance_missing_subnet + updates/update_security_group_rules | P1 | todo | S44-T9 | — |
+| S44-T10 | Slice 44 | infrafactory: scenarios/training/aws-vpc-network.yaml + aws-instance.yaml + loader update | P1 | todo | S44-T9, S43-T7 | — |
+| S44-T9 | Slice 44 | fakeaws: regression coverage for instance create/modify/terminate + ENI attachment + EIP lifecycle | P1 | todo | S44-T7, S44-T8 | — |
+| S44-T8 | Slice 44 | fakeaws: handlers_test.go for EC2 (CRUD across all resources, FK validation, cascade, instance state transitions) | P1 | todo | S44-T7 | — |
+| S44-T7 | Slice 44 | fakeaws: handlers/ec2_instance.go (Instance create/describe/modify/terminate, KeyPair, AMI fixture data) | P1 | todo | S44-T6 | — |
+| S44-T6 | Slice 44 | fakeaws: repository support for ec2_instances + ec2_key_pairs + ec2_amis (read-only fixture set) | P1 | todo | S44-T4 | — |
+| S44-T5 | Slice 44 | fakeaws: handlers/ec2_security.go (SecurityGroup + ingress/egress rules, AuthorizeSecurityGroupIngress / Revoke...) | P1 | todo | S44-T4 | — |
+| S44-T4 | Slice 44 | fakeaws: handlers/ec2_network.go (VPC, Subnet, InternetGateway, RouteTable, Route, EIP, NAT gateway) | P1 | todo | S44-T3 | — |
+| S44-T3 | Slice 44 | fakeaws: repository support for ec2_vpcs + ec2_subnets + ec2_security_groups + ec2_route_tables + ec2_internet_gateways + ec2_eips with FK | P1 | todo | S43-T6 | — |
+| S44-T2 | Slice 44 | fakeaws: awsproto query-RPC parser + XML response writer for EC2 (Action=Foo / Version=YYYY-MM-DD style) | P1 | todo | S43-T2 | — |
+| S44-T1 | Slice 44 | Phase 2 design note: EC2 query-RPC wire format vs SDK expectations; FK chain VPC→Subnet→Instance and SG→Instance | P1 | todo | S43-T2 | — |
+| S43-T10 | Slice 43 | fakeaws Phase 1: gated TestE2E_AWS_IAM + TestE2E_AWS_S3 wired up in infrafactory/internal/e2e | P1 | todo | S43-T8, S43-T9 | — |
+| S43-T9 | Slice 43 | fakeaws: examples/working/iam_role + working/s3_bucket; smoke through tofu apply→destroy | P1 | todo | S43-T8 | — |
+| S43-T8 | Slice 43 | fakeaws: handlers/iam.go (Role / Policy / InstanceProfile / User / AccessKey CRUD + AttachRolePolicy / DetachRolePolicy) + handlers_test coverage | P1 | todo | S43-T6 | — |
+| S43-T7 | Slice 43 | infrafactory: scenario.schema.json adds aws cloud enum; cloudMockStateRouter dispatches aws to fakeaws; StartFakeaws helper in internal/e2e/helpers.go (mirror of StartFakegcp) | P1 | todo | S43-T1 | — |
+| S43-T6 | Slice 43 | fakeaws: handlers/s3.go (Bucket CRUD + versioning + encryption + tagging + policy; Object PUT/HEAD/DELETE/List, payload discarded) + handlers_test coverage | P1 | todo | S43-T5 | — |
+| S43-T5 | Slice 43 | fakeaws: repository support for s3_buckets + s3_bucket_configs (versioning / encryption / policy / public-access-block / ownership-controls) | P1 | todo | S43-T3 | — |
+| S43-T4 | Slice 43 | fakeaws: handlers/admin.go (/mock/reset, /mock/snapshot, /mock/restore, /mock/state, /mock/state/{service}) + admin_test.go matching fakegcp | P1 | todo | S43-T3 | — |
+| S43-T3 | Slice 43 | fakeaws: repository/repository.go skeleton — modernc.org/sqlite, schema migrate, FK enforcement, snapshot/restore lifecycle, models.Err* sentinels | P1 | todo | S43-T1 | — |
+| S43-T2 | Slice 43 | fakeaws: awsproto/ helper package — XML response writer, JSON 1.1 + 1.0 helpers, x-amz-target parser, ErrInUse/ErrTerminalState→AWS error wire mapping | P1 | todo | S43-T1 | — |
+| S43-T1 | Slice 43 | fakeaws: repo scaffold (cmd/fakeaws, handlers/handlers.go, models/models.go, testutil/testutil.go, Makefile, README, .gitleaks.toml, AGENTS.md, go.mod) — mirror of fakegcp layout | P1 | todo | — | — |
 | M37 | Maintenance | Per-cloud constraint_policies map (state-policy evaluator dispatches by sc.Cloud, not the global single map today) | P1 | done | S36-T7 | claude (review-17) |
 | M38 | Maintenance | Auto-inject hashicorp/google provider wiring on GCP scenarios (analog of Slice 14/15 Scaleway provider auto-injection) | P1 | todo | S36-T1 | — |
 | S42-T5 | Slice 42 | Playwright e2e: GCP sidebar group, cloud badge, credentials, mock status | P1 | todo | S42-T2 | — |
