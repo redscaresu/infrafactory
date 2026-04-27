@@ -30,3 +30,30 @@ pitfalls:
     - resource: aws_secretsmanager_secret
       rule: 'For test/destroy cycles, set `recovery_window_in_days = 0` so the secret is deleted immediately on `tofu destroy`. The provider default is 30 days (the AWS soft-delete window), and a re-apply with the same secret name within 30 days fails with "InvalidRequestException: secret scheduled for deletion".'
       source: seed
+
+    # ----- S44-T0 — EC2 phase pitfalls. -----
+
+    - resource: aws_security_group
+      rule: 'Inline `ingress`/`egress` blocks on `aws_security_group` and separate `aws_security_group_rule` resources are MUTUALLY EXCLUSIVE. Mixing them on the same SG ID makes the provider drift detection oscillate (each plan tries to revert the rules added by the other path), and `tofu apply` repeatedly converges then diverges. Pick one style per SG and stick to it — inline for simple flat rules, separate `aws_security_group_rule` resources whenever the SG references itself or another SG.'
+      source: seed
+    - resource: aws_route_table
+      rule: '`aws_route_table_association` is the resource that binds a route table to a subnet — NOT a `subnet_id` argument on `aws_route_table` itself. Adding `subnet_id` to the route table fails with "Unsupported argument". Each subnet may have at most one route-table association; binding the same subnet to two route tables fails with "Resource.AlreadyAssociated".'
+      source: seed
+    - resource: aws_subnet
+      rule: 'EC2 subnets are AZ-scoped — `availability_zone` must be a real zone within the `region` declared on the provider. Format is `<region><letter>` (e.g., `us-east-1a`); using just the region (`us-east-1`) or a non-existent zone (`us-east-1f` in regions that only have a–c) fails with `InvalidParameterValue: invalid availability zone`. Subnets in different VPCs cannot be in the same AZ chain — each VPC has its own subnet-per-AZ tree.'
+      source: seed
+    - resource: aws_internet_gateway
+      rule: 'The Internet Gateway resource (`aws_internet_gateway`) creates the IGW; the attachment to a VPC happens via the SAME resource''s `vpc_id` argument. There is NO separate `aws_internet_gateway_attachment` (despite Azure/GCP analogues). Setting `vpc_id` is required at create time — detaching later means setting `vpc_id = null` (provider quirk: this triggers a destroy + recreate). For multi-VPC setups, create one IGW per VPC.'
+      source: seed
+    - resource: aws_eip
+      rule: 'Elastic IPs in a VPC require `domain = "vpc"` (the EC2-Classic default `"standard"` is rejected on accounts created after 2022). Associate via `aws_eip_association` to a network-interface OR `aws_eip.<name>.allocation_id` on the instance''s `network_interface { associate_public_ip = false ... }` block. Direct `instance` argument on `aws_eip` is deprecated and fails on subnet-launched instances.'
+      source: seed
+    - resource: aws_instance
+      rule: 'EC2 instances launched into a custom VPC subnet must specify BOTH `subnet_id` AND `vpc_security_group_ids` (NOT `security_groups` — that argument is for EC2-Classic). Using `security_groups` in a VPC fails with "InvalidParameterValue: vpc security_groups not supported in this context". `vpc_security_group_ids` takes a list even when there''s only one SG.'
+      source: seed
+    - resource: aws_instance
+      rule: 'AMI lookup data sources (`data.aws_ami`) are NOT supported by fakeaws at v1 — use a literal AMI id from the size-mappings table (e.g., `ami-0abcd1234`) instead of a `data.aws_ami` block. `data` sources fail at provider-init against the mock with "AccessDenied: data sources not implemented".'
+      source: seed
+    - resource: aws_route
+      rule: 'A route''s destination_cidr_block must be unique within its route table. Multiple `aws_route` resources sharing the same route_table_id + destination_cidr_block fail at apply with "RouteAlreadyExists". For IPv6, use `destination_ipv6_cidr_block`; mixing it with v4 on the same resource is allowed.'
+      source: seed
