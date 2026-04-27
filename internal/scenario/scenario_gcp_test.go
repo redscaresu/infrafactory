@@ -138,20 +138,29 @@ acceptance_criteria:
 			expectedErr: nil,
 		},
 		{
-			name: "cloud aws rejected",
-			yaml: `scenario: aws-not-supported
+			// S43-T9 added "aws" to the cloud enum. The earlier
+			// negative test asserted aws was rejected — flipped here
+			// to assert acceptance + the new aws_resource_anchors
+			// field round-trips. The cloud-route assertion below
+			// remains gcp-specific and runs only when expectedErr is nil
+			// AND yaml declares cloud: gcp.
+			name: "cloud aws accepted",
+			yaml: `scenario: aws-supported
 version: "1.0"
 cloud: aws
-description: AWS is not in the cloud enum.
+description: AWS scenario with anchors.
+aws_resource_anchors:
+  - aws_iam_role
+  - aws_s3_bucket
 resources:
-  compute:
-    purpose: web-server
-    size: small
+  iam:
+    purpose: app-role
+    api_key: false
 acceptance_criteria:
   - type: destruction
     expect: no_orphans
 `,
-			expectedErr: ErrInvalidScenario,
+			expectedErr: nil,
 		},
 	}
 
@@ -172,7 +181,17 @@ acceptance_criteria:
 			}
 
 			if tc.expectedErr == nil {
-				if sc.Cloud != "gcp" {
+				// The "cloud aws accepted" case asserts cloud=aws
+				// + aws_resource_anchors round-trip; the others
+				// assert cloud=gcp (the original gcp_test focus).
+				if tc.name == "cloud aws accepted" {
+					if sc.Cloud != "aws" {
+						t.Fatalf("expected cloud=aws, got %q", sc.Cloud)
+					}
+					if len(sc.AWSResourceAnchors) != 2 {
+						t.Fatalf("expected 2 aws_resource_anchors, got %v", sc.AWSResourceAnchors)
+					}
+				} else if sc.Cloud != "gcp" {
 					t.Fatalf("expected cloud=gcp, got %q", sc.Cloud)
 				}
 			}

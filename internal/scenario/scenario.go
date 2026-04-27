@@ -29,6 +29,14 @@ type Scenario struct {
 	Resources          Resources             `json:"resources"`
 	Constraints        map[string]any        `json:"constraints,omitempty"`
 	AcceptanceCriteria []AcceptanceCriterion `json:"acceptance_criteria"`
+	// AWSResourceAnchors lists the per-API resource types a cloud:aws
+	// scenario asserts end-to-end coverage for (e.g.,
+	// ["aws_iam_role", "aws_iam_role_policy_attachment"]). Required on
+	// cloud:aws scenarios; ignored on others. Feeds S48-T7's coverage
+	// audit so coarse-grained scenario keys like 'compute' don't
+	// trivially claim coverage of multiple AWS resources. See
+	// fakeaws/concepts.md "Required surface" item 2.
+	AWSResourceAnchors []string `json:"aws_resource_anchors,omitempty"`
 }
 
 type Resources struct {
@@ -44,6 +52,28 @@ type Resources struct {
 	DNS           *DNSResource           `json:"dns,omitempty"`
 	CloudRun      *CloudRunResource      `json:"cloud_run,omitempty"`
 	SecretManager *SecretManagerResource `json:"secret_manager,omitempty"`
+	// AWS-specific resource types (S43-T9). DynamoDB doesn't fit the
+	// generic Database envelope (NoSQL PK/SK / attribute projections),
+	// so it gets its own slot. Messaging is cloud-neutral so SQS on
+	// AWS and Pub/Sub-style queues on other clouds can share it.
+	DynamoDB  *DynamoDBResource  `json:"dynamodb,omitempty"`
+	Messaging *MessagingResource `json:"messaging,omitempty"`
+}
+
+// DynamoDBResource declares an AWS DynamoDB NoSQL table on a
+// cloud:aws scenario. Reusing 'database' was rejected because
+// DynamoDB's NoSQL shape (PK/SK, attribute projections) doesn't fit
+// a generic database envelope.
+type DynamoDBResource struct {
+	Purpose     string `json:"purpose"`
+	BillingMode string `json:"billing_mode,omitempty"`
+}
+
+// MessagingResource is the cloud-neutral messaging slot. AWS:
+// SQS queue. GCP: future Pub/Sub-style services can reuse it.
+type MessagingResource struct {
+	Purpose string `json:"purpose"`
+	FIFO    bool   `json:"fifo,omitempty"`
 }
 
 // PubSubResource declares a Pub/Sub topic (and, by default, a single

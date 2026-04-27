@@ -37,9 +37,11 @@ test.describe('Real-time scenario validation', () => {
         timeout: 5_000
       });
 
-      // Break the cloud value — schema enforces an enum and this should fail
-      // validation without producing yaml syntax errors.
-      const broken = original.replace(/cloud:\s*scaleway/, 'cloud: aws');
+      // Break the cloud value — schema enforces an enum (scaleway|gcp|aws)
+      // and an unknown value should fail validation without producing yaml
+      // syntax errors. (S43-T9 added 'aws' to the enum, so we use 'azure'
+      // instead — still rejected since it's not in the supported set.)
+      const broken = original.replace(/cloud:\s*scaleway/, 'cloud: azure');
       expect(broken).not.toEqual(original);
       await textarea.fill(broken);
 

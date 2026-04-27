@@ -2,6 +2,7 @@ package harness
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -25,6 +26,36 @@ func TestDeriveTopologyDispatchesGCPByDetection(t *testing.T) {
 	}
 	if got := detectCloud([]byte(`not json`)); got != "scaleway" {
 		t.Fatalf("expected scaleway default for malformed json, got %q", got)
+	}
+	// S43-T9: aws detection requires schema_version + iam + s3 (per
+	// fakeaws/handlers/admin.go § stateSchemaVersion). Just IAM
+	// alone is NOT aws (fakegcp also has an `iam` key).
+	awsState := []byte(`{"schema_version":1,"iam":{"roles":[]},"s3":{"buckets":[]}}`)
+	if got := detectCloud(awsState); got != "aws" {
+		t.Fatalf("expected aws detection for fakeaws state, got %q", got)
+	}
+	// Negative: gcp's `iam` key without S3 must not flip detection.
+	gcpIAM := []byte(`{"compute":{"instances":[]},"iam":{"service_accounts":[]}}`)
+	if got := detectCloud(gcpIAM); got != "gcp" {
+		t.Fatalf("expected gcp detection (iam alone shouldn't flip to aws), got %q", got)
+	}
+}
+
+func TestDeriveTopologyAWSEmptyStateProducesValidPayload(t *testing.T) {
+	t.Parallel()
+	awsState := []byte(`{"schema_version":1,"iam":{"roles":[]},"s3":{"buckets":[]},"operations":[],"audit":[]}`)
+	body, diag, err := DeriveTopology(awsState)
+	if err != nil {
+		t.Fatalf("DeriveTopology(aws): %v", err)
+	}
+	if diag == nil {
+		t.Errorf("diagnostics should be non-nil (parity with gcp/scaleway)")
+	}
+	if !strings.Contains(string(body), "http_probe") {
+		t.Errorf("aws topology missing http_probe: %s", body)
+	}
+	if !strings.Contains(string(body), "connectivity") {
+		t.Errorf("aws topology missing connectivity: %s", body)
 	}
 }
 

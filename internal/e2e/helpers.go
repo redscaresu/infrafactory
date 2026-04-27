@@ -129,6 +129,24 @@ func StartFakegcp(t *testing.T) *MockwayInstance {
 	return startSiblingMock(t, "fakegcp", "../fakegcp", "./cmd/fakegcp")
 }
 
+// StartFakeaws compiles and starts fakeaws from the sibling
+// `../fakeaws` source repo on a free local port. Mirror of
+// StartMockway / StartFakegcp — fakeaws exposes the same
+// `/mock/{state,reset,snapshot,restore}` admin surface (per
+// fakeaws/handlers/admin.go § stateSchemaVersion), so the returned
+// MockwayInstance helpers (FetchState/Reset/Stop) work against it
+// without changes.
+//
+// Per fakeaws/concepts.md "Required surface" item 10 (S43-T9):
+// signature mirrors StartFakegcp so test code is uniform across
+// clouds. The returned URL goes into Config.Fakeaws.URL via the
+// helper's config-writer (extended in S43-T9 to include the
+// fakeaws block + 'aws' in policy_paths).
+func StartFakeaws(t *testing.T) *MockwayInstance {
+	t.Helper()
+	return startSiblingMock(t, "fakeaws", "../fakeaws", "./cmd/fakeaws")
+}
+
 func startSiblingMock(t *testing.T, name, repoRel, cmdPath string) *MockwayInstance {
 	t.Helper()
 

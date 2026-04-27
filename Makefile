@@ -11,6 +11,9 @@ MOCKWAY_REPO ?= ../mockway
 FAKEGCP_PORT ?= 8081
 FAKEGCP_URL ?= http://127.0.0.1:$(FAKEGCP_PORT)
 FAKEGCP_REPO ?= ../fakegcp
+FAKEAWS_PORT ?= 8082
+FAKEAWS_URL ?= http://127.0.0.1:$(FAKEAWS_PORT)
+FAKEAWS_REPO ?= ../fakeaws
 MOCKS_RUN_DIR ?= /tmp/infrafactory-mocks
 HOST_ARCH ?= $(shell uname -m)
 
@@ -27,7 +30,7 @@ endif
 .PHONY: help deps-up deps-down deps-ps deps-logs deps-pull deps-recreate deps-clean test-unit test-all test \
 	bench-check smoke-validate smoke-mockway smoke-mockway-manual smoke-mockway-local smoke check \
 	ui-install ui-build ui-test ui-test-e2e ui-dev ui-clean ui-api-linux-build ui-stack-up ui-stack-logs ui-stack-down build run \
-	mocks-up mocks-down mocks-status mocks-logs mockway-up mockway-down fakegcp-up fakegcp-down
+	mocks-up mocks-down mocks-status mocks-logs mockway-up mockway-down fakegcp-up fakegcp-down fakeaws-up fakeaws-down
 
 help:
 	@echo "Targets:"
@@ -148,16 +151,41 @@ fakegcp-down:
 		echo "fakegcp pidfile not found"; \
 	fi
 
-# mocks-up starts both mocks. Run from the infrafactory repo root with
-# ../mockway and ../fakegcp checked out as siblings.
-mocks-up: mockway-up fakegcp-up
-	@echo "both mocks ready: $(MOCKWAY_URL) (Scaleway) and $(FAKEGCP_URL) (GCP)"
+# fakeaws-up / fakeaws-down — S43-T9 (the AWS sibling, port 8082).
+fakeaws-up: $(MOCKS_RUN_DIR)
+	@if [ -f $(MOCKS_RUN_DIR)/fakeaws.pid ] && kill -0 $$(cat $(MOCKS_RUN_DIR)/fakeaws.pid) 2>/dev/null; then \
+		echo "fakeaws already running (pid=$$(cat $(MOCKS_RUN_DIR)/fakeaws.pid)) on $(FAKEAWS_URL)"; \
+	else \
+		echo "starting fakeaws on $(FAKEAWS_URL) ($(FAKEAWS_REPO))"; \
+		cd $(FAKEAWS_REPO) && $(GO) run ./cmd/fakeaws --port $(FAKEAWS_PORT) > $(MOCKS_RUN_DIR)/fakeaws.log 2>&1 & \
+		echo $$! > $(MOCKS_RUN_DIR)/fakeaws.pid; \
+		until curl -sSf $(FAKEAWS_URL)/mock/state >/dev/null 2>&1; do \
+			sleep 1; \
+		done; \
+		echo "fakeaws ready on $(FAKEAWS_URL) (pid=$$(cat $(MOCKS_RUN_DIR)/fakeaws.pid))"; \
+	fi
 
-mocks-down: mockway-down fakegcp-down
-	@echo "both mocks stopped"
+fakeaws-down:
+	@if [ -f $(MOCKS_RUN_DIR)/fakeaws.pid ]; then \
+		pid=$$(cat $(MOCKS_RUN_DIR)/fakeaws.pid); \
+		kill $$pid 2>/dev/null || true; \
+		wait $$pid 2>/dev/null || true; \
+		rm -f $(MOCKS_RUN_DIR)/fakeaws.pid; \
+		echo "fakeaws stopped"; \
+	else \
+		echo "fakeaws pidfile not found"; \
+	fi
+
+# mocks-up starts all three mocks. Run from the infrafactory repo root
+# with ../mockway, ../fakegcp, ../fakeaws checked out as siblings.
+mocks-up: mockway-up fakegcp-up fakeaws-up
+	@echo "all three mocks ready: $(MOCKWAY_URL) (Scaleway), $(FAKEGCP_URL) (GCP), $(FAKEAWS_URL) (AWS)"
+
+mocks-down: mockway-down fakegcp-down fakeaws-down
+	@echo "all three mocks stopped"
 
 mocks-status:
-	@for name in mockway fakegcp; do \
+	@for name in mockway fakegcp fakeaws; do \
 		pidfile=$(MOCKS_RUN_DIR)/$$name.pid; \
 		if [ -f $$pidfile ] && kill -0 $$(cat $$pidfile) 2>/dev/null; then \
 			echo "$$name: up (pid=$$(cat $$pidfile))"; \

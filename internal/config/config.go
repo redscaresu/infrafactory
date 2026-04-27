@@ -25,6 +25,7 @@ type Config struct {
 	Agent              AgentConfig       `yaml:"agent"`
 	Mockway            MockwayConfig     `yaml:"mockway"`
 	Fakegcp            FakegcpConfig     `yaml:"fakegcp"`
+	Fakeaws            FakeawsConfig     `yaml:"fakeaws"`
 	Scaleway           ScalewayConfig    `yaml:"scaleway"`
 	Validation         ValidationConfig  `yaml:"validation"`
 	ConstraintPolicies map[string]string `yaml:"constraint_policies"`
@@ -62,6 +63,18 @@ type MockwayConfig struct {
 // fall back to Mockway.URL (which would 4xx on GCP-shaped HCL but
 // keeps the runtime constructible).
 type FakegcpConfig struct {
+	URL       string `yaml:"url"`
+	AutoReset bool   `yaml:"auto_reset"`
+}
+
+// FakeawsConfig points the runtime at the AWS mock when a scenario
+// declares `cloud: aws`. Same shape as FakegcpConfig: URL is the
+// HTTP endpoint where fakeaws is listening (default :8082 — mockway
+// owns :8080, fakegcp :8081). Optional — if URL is empty, AWS
+// scenarios fall back to Mockway.URL (which would 4xx on AWS HCL
+// but keeps the runtime constructible). Added in S43-T9 per
+// fakeaws/concepts.md "Required surface" item 4.
+type FakeawsConfig struct {
 	URL       string `yaml:"url"`
 	AutoReset bool   `yaml:"auto_reset"`
 }

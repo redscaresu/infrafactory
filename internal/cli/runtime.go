@@ -280,6 +280,9 @@ func buildRuntime(cmd *cobra.Command, opts runtimeOptions) (*CommandRuntime, err
 		if strings.TrimSpace(cfg.Fakegcp.URL) != "" {
 			router.gcp = newMockStateClient(cfg.Fakegcp.URL)
 		}
+		if strings.TrimSpace(cfg.Fakeaws.URL) != "" {
+			router.aws = newMockStateClient(cfg.Fakeaws.URL)
+		}
 		deps.MockState = router
 	}
 	if deps.Static == nil {

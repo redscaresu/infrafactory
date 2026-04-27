@@ -50,27 +50,62 @@ func DeriveTopology(stateJSON []byte) ([]byte, map[string]string, error) {
 	switch detectCloud(stateJSON) {
 	case "gcp":
 		return deriveTopologyGCP(stateJSON)
+	case "aws":
+		return deriveTopologyAWS(stateJSON)
 	default:
 		return deriveTopologyScaleway(stateJSON)
 	}
 }
 
-// detectCloud inspects the raw mock state to decide whether it came from
-// mockway (Scaleway) or fakegcp. fakegcp's full state has a top-level
-// `compute` key; mockway's has `instance`/`lb`/`rdb`. Defaults to
-// "scaleway" so empty/unknown state keeps the historical behaviour.
+// detectCloud inspects the raw mock state to decide which cloud
+// produced it. mockway (Scaleway): `instance`/`lb`/`rdb` keys.
+// fakegcp: top-level `compute` key. fakeaws: schema_version=1 with
+// top-level `iam` AND `s3` blocks (per fakeaws/handlers/admin.go).
+// Defaults to "scaleway" so empty/unknown state keeps the historical
+// behaviour.
 func detectCloud(stateJSON []byte) string {
 	var probe struct {
-		Compute  json.RawMessage `json:"compute"`
-		Instance json.RawMessage `json:"instance"`
+		Compute       json.RawMessage `json:"compute"`
+		Instance      json.RawMessage `json:"instance"`
+		IAM           json.RawMessage `json:"iam"`
+		S3            json.RawMessage `json:"s3"`
+		SchemaVersion json.RawMessage `json:"schema_version"`
 	}
 	if err := json.Unmarshal(stateJSON, &probe); err != nil {
 		return "scaleway"
+	}
+	// AWS: schema_version present AND both iam + s3 blocks are present.
+	// We require all three to disambiguate from fakegcp's `iam` key.
+	awsLike := len(probe.SchemaVersion) > 0 &&
+		len(probe.S3) > 0 && string(probe.S3) != "null" &&
+		len(probe.IAM) > 0 && string(probe.IAM) != "null"
+	if awsLike {
+		return "aws"
 	}
 	if len(probe.Compute) > 0 && string(probe.Compute) != "null" {
 		return "gcp"
 	}
 	return "scaleway"
+}
+
+// deriveTopologyAWS is the AWS-specific topology emitter. At S43-T9
+// this returns an empty-but-valid topology (IAM + S3 don't
+// contribute to the connectivity/probe graph). Service tickets in
+// S44+ extend this when EC2/RDS/EKS land — that's where load_balancer
+// probes and connectivity entries get populated.
+//
+// Returns (topologyJSON, diagnostics, error). Diagnostics is non-nil
+// (may be empty) for parity with the GCP/Scaleway derivers.
+func deriveTopologyAWS(stateJSON []byte) ([]byte, map[string]string, error) {
+	out := map[string]any{
+		"http_probe":   map[string]any{},
+		"connectivity": map[string]any{},
+	}
+	body, err := json.Marshal(out)
+	if err != nil {
+		return nil, nil, err
+	}
+	return body, map[string]string{}, nil
 }
 
 func deriveTopologyScaleway(stateJSON []byte) ([]byte, map[string]string, error) {

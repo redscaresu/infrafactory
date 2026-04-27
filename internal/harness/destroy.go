@@ -119,6 +119,15 @@ func countOrphans(stateJSON []byte) (int, error) {
 		// trail of API calls that produced the resources — so they
 		// shouldn't count as orphans on a clean teardown.
 		"operations": {},
+		// fakeaws (S43-T9) ships two universal bookkeeping tables
+		// alongside its service-specific state: `audit` (per-request
+		// log) and `schema_version` (the integer schema marker
+		// /mock/state emits). Per fakeaws/concepts.md "Required
+		// surface" item 7. Service-specific bookkeeping tables append
+		// to ignoredCollections in their landing tickets (S46-T4 SQS
+		// will add `sqs_messages`).
+		"audit":          {},
+		"schema_version": {},
 	}
 	ignoredCollections := map[string]struct{}{
 		"events":   {},

@@ -309,15 +309,37 @@ func probeTargetResourceTypes(target string) []string {
 			// GCP — global addresses are the canonical anchor for an
 			// L7 LB; forwarding rules carry the IP for L4 LBs.
 			"google_compute_global_address", "google_compute_forwarding_rule",
+			// AWS — concrete load-balancer probes land in S44 (EC2);
+			// stub here so dispatch is consistent across clouds.
+			"aws_lb", "aws_lb_target_group",
 		}
 	case "database":
-		return []string{"scaleway_rdb_instance", "google_sql_database_instance"}
+		return []string{
+			"scaleway_rdb_instance",
+			"google_sql_database_instance",
+			"aws_db_instance", // S45 RDS landing point
+		}
 	case "redis":
-		return []string{"scaleway_redis_cluster", "google_redis_instance"}
+		return []string{
+			"scaleway_redis_cluster",
+			"google_redis_instance",
+			// AWS ElastiCache is out of v1 scope; stub kept for fanout
+			// consistency. Concrete probe wiring lands when/if
+			// elasticache enters scope.
+			"aws_elasticache_cluster",
+		}
 	case "compute":
-		return []string{"scaleway_instance_server", "google_compute_instance"}
+		return []string{
+			"scaleway_instance_server",
+			"google_compute_instance",
+			"aws_instance", // S44 EC2 landing point
+		}
 	case "kubernetes":
-		return []string{"scaleway_k8s_cluster", "google_container_cluster"}
+		return []string{
+			"scaleway_k8s_cluster",
+			"google_container_cluster",
+			"aws_eks_cluster", // S46 EKS landing point
+		}
 	default:
 		return nil
 	}

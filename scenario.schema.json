@@ -18,8 +18,13 @@
     },
     "cloud": {
       "type": "string",
-      "enum": ["scaleway", "gcp"],
-      "description": "Target cloud provider. 'scaleway' or 'gcp'."
+      "enum": ["scaleway", "gcp", "aws"],
+      "description": "Target cloud provider. 'scaleway', 'gcp', or 'aws'."
+    },
+    "aws_resource_anchors": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "List of per-API resource types this scenario asserts end-to-end coverage for (e.g., 'aws_iam_role', 'aws_s3_bucket'). Required on cloud:aws scenarios; ignored on others. Feeds S48-T7's TestFullCoverageAudit so coarse-grained scenario keys like 'compute' don't trivially claim coverage of multiple AWS resources. See fakeaws/concepts.md \"Required surface\" item 2."
     },
     "description": {
       "type": "string",
@@ -49,7 +54,9 @@
         "pubsub": { "$ref": "#/$defs/pubsub_resource" },
         "dns": { "$ref": "#/$defs/dns_resource" },
         "cloud_run": { "$ref": "#/$defs/cloud_run_resource" },
-        "secret_manager": { "$ref": "#/$defs/secret_manager_resource" }
+        "secret_manager": { "$ref": "#/$defs/secret_manager_resource" },
+        "dynamodb": { "$ref": "#/$defs/dynamodb_resource" },
+        "messaging": { "$ref": "#/$defs/messaging_resource" }
       },
       "additionalProperties": false
     },
@@ -353,6 +360,40 @@
           "type": "boolean",
           "default": true,
           "description": "Whether to provision an initial secret version."
+        }
+      },
+      "additionalProperties": false
+    },
+    "dynamodb_resource": {
+      "type": "object",
+      "required": ["purpose"],
+      "description": "AWS DynamoDB NoSQL table. Added in S43-T9 for cloud:aws scenarios. Reusing 'database' was rejected because DynamoDB's NoSQL shape (PK/SK, attribute projections) doesn't fit a generic database envelope.",
+      "properties": {
+        "purpose": {
+          "type": "string",
+          "description": "Purpose of the table (e.g., session-store, event-log). Passed to agent for naming."
+        },
+        "billing_mode": {
+          "type": "string",
+          "enum": ["PROVISIONED", "PAY_PER_REQUEST"],
+          "default": "PAY_PER_REQUEST"
+        }
+      },
+      "additionalProperties": false
+    },
+    "messaging_resource": {
+      "type": "object",
+      "required": ["purpose"],
+      "description": "Cloud-neutral messaging service: SQS on AWS, Pub/Sub on GCP. The slot is intentionally cloud-neutral so future Pub/Sub-style services from other clouds can reuse it.",
+      "properties": {
+        "purpose": {
+          "type": "string",
+          "description": "Purpose of the queue/topic (e.g., job-queue, notifications)."
+        },
+        "fifo": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether the queue is FIFO (AWS only — GCP Pub/Sub doesn't have a direct FIFO equivalent)."
         }
       },
       "additionalProperties": false

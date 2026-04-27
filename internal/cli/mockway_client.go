@@ -100,15 +100,20 @@ func truncateMockwayErrorPayload(payload []byte) string {
 }
 
 // cloudMockStateRouter dispatches MockStateClient calls between the
-// Scaleway mock (mockway) and the GCP mock (fakegcp) based on the
-// currently-loaded scenario's cloud. The harness layer captures one
-// MockStateClient at construction time, so a single shared router
-// keeps that capture valid even when the scenario (and therefore the
-// target backend) changes between runs.
+// Scaleway mock (mockway), GCP mock (fakegcp), and AWS mock (fakeaws)
+// based on the currently-loaded scenario's cloud. The harness layer
+// captures one MockStateClient at construction time, so a single
+// shared router keeps that capture valid even when the scenario (and
+// therefore the target backend) changes between runs.
+//
+// Per concepts.md "Required surface" item 16 (S43-T9): per-cloud
+// reset/snapshot/restore — an aws scenario's reset only touches
+// fakeaws, not mockway or fakegcp. pick() enforces this.
 type cloudMockStateRouter struct {
 	runtime  *CommandRuntime
 	scaleway *mockStateClient
 	gcp      *mockStateClient
+	aws      *mockStateClient
 }
 
 func (r *cloudMockStateRouter) Reset(ctx context.Context) error {
@@ -127,14 +132,27 @@ func (r *cloudMockStateRouter) State(ctx context.Context) ([]byte, error) {
 	return r.pick().State(ctx)
 }
 
-// pick resolves to the GCP client when the loaded scenario declares
-// `cloud: gcp` AND a GCP URL is configured; otherwise falls back to
-// Scaleway. Pre-LoadScenario calls (none today) and unknown clouds
-// default to Scaleway, matching the legacy behaviour.
+// pick resolves to the per-cloud client based on the loaded scenario's
+// cloud field:
+//   - cloud:gcp → r.gcp (when configured)
+//   - cloud:aws → r.aws (when configured)
+//   - default / scaleway / pre-LoadScenario → r.scaleway
+//
+// When a cloud is named but its client URL is not configured (URL ==
+// "" → r.X is nil), we fall back to scaleway. This matches the legacy
+// fakegcp fallback behaviour and keeps the runtime constructible
+// when only a subset of clouds is wired.
 func (r *cloudMockStateRouter) pick() *mockStateClient {
 	if r.runtime != nil && r.runtime.loadedScenario != nil {
-		if strings.EqualFold(strings.TrimSpace(r.runtime.loadedScenario.Cloud), "gcp") && r.gcp != nil {
-			return r.gcp
+		switch strings.ToLower(strings.TrimSpace(r.runtime.loadedScenario.Cloud)) {
+		case "gcp":
+			if r.gcp != nil {
+				return r.gcp
+			}
+		case "aws":
+			if r.aws != nil {
+				return r.aws
+			}
 		}
 	}
 	return r.scaleway
