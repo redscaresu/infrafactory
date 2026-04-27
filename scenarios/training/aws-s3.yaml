@@ -1,0 +1,28 @@
+scenario: aws-s3
+version: "1.0"
+cloud: aws
+description: >
+  An S3 bucket with versioning + encryption configured. Exercises
+  fakeaws's S3 XML handlers (handlers/s3.go) end-to-end — bucket
+  CRUD, sub-resource configs (versioning, encryption), and the
+  CASCADE-on-bucket-delete contract. The aws_resource_anchors list
+  pins the specific per-API resource types this scenario asserts
+  coverage for.
+
+aws_resource_anchors:
+  - aws_s3_bucket
+  - aws_s3_bucket_versioning
+  - aws_s3_bucket_server_side_encryption_configuration
+
+resources:
+  storage:
+    purpose: app-assets
+    size: small
+
+constraints:
+  region: us-east-1
+  encryption_at_rest: true
+
+acceptance_criteria:
+  - type: destruction
+    expect: no_orphans
