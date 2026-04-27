@@ -12,7 +12,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const PITFALLS_DIR = resolve(__dirname, '..', '..', 'pitfalls');
 function snapshotPitfalls(): Map<string, Buffer> {
   const snap = new Map<string, Buffer>();
-  for (const provider of ['gcp', 'scaleway']) {
+  for (const provider of ['aws', 'gcp', 'scaleway']) {
     const path = resolve(PITFALLS_DIR, `${provider}.yaml`);
     try {
       statSync(path);
@@ -30,10 +30,11 @@ function restorePitfalls(snap: Map<string, Buffer>) {
 }
 
 // The /pitfalls page reads pitfalls/<provider>.yaml files at startup. The
-// repo seeds gcp.yaml and scaleway.yaml, so the alphabetically-first provider
-// (gcp) becomes the active tab on first load.
-const FIRST_PROVIDER = 'gcp';
-const SECOND_PROVIDER = 'scaleway';
+// S43-T11 added pitfalls/aws.yaml. The repo now seeds aws.yaml +
+// gcp.yaml + scaleway.yaml, so the alphabetically-first provider
+// is 'aws' and the second is 'gcp'.
+const FIRST_PROVIDER = 'aws';
+const SECOND_PROVIDER = 'gcp';
 
 async function gotoPitfalls(page: Page) {
   await page.goto('/');

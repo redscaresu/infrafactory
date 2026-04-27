@@ -42,12 +42,14 @@ func newRecordingMockServer(t *testing.T, label string) *recordingMockServer {
 func TestCloudMockStateRouterDispatchesByScenarioCloud(t *testing.T) {
 	scaleway := newRecordingMockServer(t, "scaleway")
 	gcp := newRecordingMockServer(t, "gcp")
+	aws := newRecordingMockServer(t, "aws")
 
 	runtime := &CommandRuntime{}
 	router := &cloudMockStateRouter{
 		runtime:  runtime,
 		scaleway: newMockStateClient(scaleway.server.URL),
 		gcp:      newMockStateClient(gcp.server.URL),
+		aws:      newMockStateClient(aws.server.URL),
 	}
 
 	cases := []struct {
@@ -58,7 +60,9 @@ func TestCloudMockStateRouterDispatchesByScenarioCloud(t *testing.T) {
 		{name: "scaleway scenario hits mockway", scenario: &scenario.Scenario{Cloud: "scaleway"}, wantBackend: "scaleway"},
 		{name: "gcp scenario hits fakegcp", scenario: &scenario.Scenario{Cloud: "gcp"}, wantBackend: "gcp"},
 		{name: "uppercase GCP still hits fakegcp", scenario: &scenario.Scenario{Cloud: "GCP"}, wantBackend: "gcp"},
-		{name: "unknown cloud falls back to scaleway", scenario: &scenario.Scenario{Cloud: "aws"}, wantBackend: "scaleway"},
+		{name: "aws scenario hits fakeaws", scenario: &scenario.Scenario{Cloud: "aws"}, wantBackend: "aws"},
+		{name: "uppercase AWS still hits fakeaws", scenario: &scenario.Scenario{Cloud: "AWS"}, wantBackend: "aws"},
+		{name: "unknown cloud falls back to scaleway", scenario: &scenario.Scenario{Cloud: "azure"}, wantBackend: "scaleway"},
 		{name: "empty cloud falls back to scaleway", scenario: &scenario.Scenario{Cloud: ""}, wantBackend: "scaleway"},
 		{name: "no scenario loaded falls back to scaleway", scenario: nil, wantBackend: "scaleway"},
 	}
@@ -67,6 +71,7 @@ func TestCloudMockStateRouterDispatchesByScenarioCloud(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			scaleway.hits = 0
 			gcp.hits = 0
+			aws.hits = 0
 			runtime.loadedScenario = tc.scenario
 
 			payload, err := router.State(context.Background())
@@ -76,16 +81,70 @@ func TestCloudMockStateRouterDispatchesByScenarioCloud(t *testing.T) {
 			if !strings.Contains(string(payload), `"label":"`+tc.wantBackend+`"`) {
 				t.Fatalf("expected payload from %s backend, got %s", tc.wantBackend, string(payload))
 			}
-			if tc.wantBackend == "scaleway" {
-				if scaleway.hits != 1 || gcp.hits != 0 {
-					t.Fatalf("expected 1 scaleway hit / 0 gcp, got scaleway=%d gcp=%d", scaleway.hits, gcp.hits)
+			switch tc.wantBackend {
+			case "scaleway":
+				if scaleway.hits != 1 || gcp.hits != 0 || aws.hits != 0 {
+					t.Fatalf("expected scaleway=1, got scaleway=%d gcp=%d aws=%d", scaleway.hits, gcp.hits, aws.hits)
 				}
-			} else {
-				if scaleway.hits != 0 || gcp.hits != 1 {
-					t.Fatalf("expected 0 scaleway / 1 gcp, got scaleway=%d gcp=%d", scaleway.hits, gcp.hits)
+			case "gcp":
+				if scaleway.hits != 0 || gcp.hits != 1 || aws.hits != 0 {
+					t.Fatalf("expected gcp=1, got scaleway=%d gcp=%d aws=%d", scaleway.hits, gcp.hits, aws.hits)
+				}
+			case "aws":
+				if scaleway.hits != 0 || gcp.hits != 0 || aws.hits != 1 {
+					t.Fatalf("expected aws=1, got scaleway=%d gcp=%d aws=%d", scaleway.hits, gcp.hits, aws.hits)
 				}
 			}
 		})
+	}
+}
+
+// TestCloudMockStateRouterFallsBackWhenAWSUnconfigured: aws scenario
+// falls back to scaleway when fakeaws URL not configured. Mirror of
+// the existing GCP-fallback test (concepts.md "Required surface"
+// item 16(c)).
+func TestCloudMockStateRouterFallsBackWhenAWSUnconfigured(t *testing.T) {
+	scaleway := newRecordingMockServer(t, "scaleway")
+	runtime := &CommandRuntime{loadedScenario: &scenario.Scenario{Cloud: "aws"}}
+	router := &cloudMockStateRouter{
+		runtime:  runtime,
+		scaleway: newMockStateClient(scaleway.server.URL),
+		aws:      nil,
+	}
+
+	if _, err := router.State(context.Background()); err != nil {
+		t.Fatalf("State: %v", err)
+	}
+	if scaleway.hits != 1 {
+		t.Fatalf("expected AWS scenario to fall back to scaleway when AWS unconfigured; got %d hits", scaleway.hits)
+	}
+}
+
+// TestCloudMockStateRouterPerCloudResetIsolation: an aws scenario's
+// reset must touch ONLY fakeaws, not mockway or fakegcp. Mirror of
+// concepts.md "Required surface" item 16(d) — per-cloud reset/snapshot/
+// restore isolation. 3-mock concurrent test: run three pretend
+// servers, fire reset on the aws scenario, assert only the aws one
+// was hit.
+func TestCloudMockStateRouterPerCloudResetIsolation(t *testing.T) {
+	scaleway := newRecordingMockServer(t, "scaleway")
+	gcp := newRecordingMockServer(t, "gcp")
+	aws := newRecordingMockServer(t, "aws")
+
+	runtime := &CommandRuntime{loadedScenario: &scenario.Scenario{Cloud: "aws"}}
+	router := &cloudMockStateRouter{
+		runtime:  runtime,
+		scaleway: newMockStateClient(scaleway.server.URL),
+		gcp:      newMockStateClient(gcp.server.URL),
+		aws:      newMockStateClient(aws.server.URL),
+	}
+
+	if err := router.Reset(context.Background()); err != nil {
+		t.Fatalf("Reset: %v", err)
+	}
+	if scaleway.hits != 0 || gcp.hits != 0 || aws.hits != 1 {
+		t.Fatalf("aws Reset should hit only aws; got scaleway=%d gcp=%d aws=%d",
+			scaleway.hits, gcp.hits, aws.hits)
 	}
 }
 

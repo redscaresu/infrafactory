@@ -1,0 +1,32 @@
+provider: aws
+pitfalls:
+    - resource: aws_security_group_rule
+      rule: 'For security groups that reference themselves (e.g., "allow all traffic within this SG"), use separate `aws_security_group_rule` resources INSTEAD OF inline `ingress`/`egress` blocks on `aws_security_group`. Inline blocks that self-reference create a circular dependency the provider cannot resolve and `tofu apply` fails with a "Cycle: aws_security_group" error.'
+      source: seed
+    - resource: aws_db_instance
+      rule: 'Any `aws_db_instance` placed in a custom VPC requires an `aws_db_subnet_group` listing ≥2 subnets in different AZs. Without one, the instance create fails with "DBSubnetGroupNotFound". The subnet group must be passed via `db_subnet_group_name`, NOT `subnet_ids` directly on the instance.'
+      source: seed
+    - resource: aws_db_instance
+      rule: 'For non-production / test scenarios, set `deletion_protection = false` AND `skip_final_snapshot = true` so `tofu destroy` can tear the instance down. Both default to `true`/`false` respectively, which makes destroys fail with "cannot delete instance: deletion protection enabled" or "final snapshot must be specified".'
+      source: seed
+    - resource: aws_iam_instance_profile
+      rule: '`aws_instance` cannot reference an `aws_iam_role` directly — the bridge between role and instance is `aws_iam_instance_profile`. Create the profile with `role = aws_iam_role.NAME.name`, then reference it via `iam_instance_profile = aws_iam_instance_profile.NAME.name` on the instance. Skipping the profile produces "InvalidParameterValue: IAM role cannot be associated with EC2 instance directly".'
+      source: seed
+    - resource: aws_s3_bucket
+      rule: 'S3 bucket names are GLOBALLY unique across all AWS accounts. Always include the account ID, region, or a random suffix in the bucket name (e.g. `"${var.run_id}-data"`). Set `force_destroy = true` for test scenarios so `tofu destroy` can remove non-empty buckets. The provider default is `false`, which makes destroy fail with "BucketNotEmpty".'
+      source: seed
+    - resource: aws_eks_cluster
+      rule: 'EKS clusters require an `aws_iam_role` with the `AmazonEKSClusterPolicy` and `AmazonEKSServicePolicy` managed policies attached, AND a trust policy with `Service: eks.amazonaws.com`. Cluster create fails with "InvalidParameterException: role does not have necessary trust relationship" if the trust policy is missing.'
+      source: seed
+    - resource: aws_eks_cluster
+      rule: 'EKS cluster `vpc_config.subnet_ids` MUST list ≥2 subnets in different Availability Zones, all with IPv4 CIDR blocks. Single-AZ subnets or IPv6-only subnets cause "InvalidParameterException: subnets must be in at least two different AZs".'
+      source: seed
+    - resource: aws_eks_node_group
+      rule: 'NodeGroups depend on the cluster being ACTIVE — set `depends_on = [aws_eks_cluster.NAME]` explicitly so the create order is correct. Node-group IAM role needs `AmazonEKSWorkerNodePolicy`, `AmazonEKS_CNI_Policy`, and `AmazonEC2ContainerRegistryReadOnly` attached.'
+      source: seed
+    - resource: aws_route53_record
+      rule: 'Use `aws_route53_record` with `set_identifier` only when implementing weighted/latency/failover routing. For simple A/AAAA records, omit set_identifier — its presence forces multi-record routing semantics and a single record will fail to apply with "RRSet must be unique".'
+      source: seed
+    - resource: aws_secretsmanager_secret
+      rule: 'For test/destroy cycles, set `recovery_window_in_days = 0` so the secret is deleted immediately on `tofu destroy`. The provider default is 30 days (the AWS soft-delete window), and a re-apply with the same secret name within 30 days fails with "InvalidRequestException: secret scheduled for deletion".'
+      source: seed
