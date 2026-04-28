@@ -25,17 +25,17 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 | S47-T2 | Slice 47 | fakeaws: repository support for route53_hosted_zones + record_sets, FK + non-empty-zone delete refusal | P1 | todo | S43-T6 | — |
 | S47-T1 | Slice 47 | Phase 5 design note: Route53 XML wire format + Secrets Manager JSON-1.1 in awsproto, validate against terraform-provider-aws expectations | P1 | todo | S43-T2 | — |
 | S47-T0 | Slice 47 | infrafactory: pitfalls/aws.yaml extended with Route53 rules (atomic ChangeResourceRecordSets, hosted-zone NS-record auto-creation) and Secrets Manager rules (recovery_window_in_days for delete, force_overwrite_replica_secret semantics); no new prompt files (see concepts.md resolved decision 11) | P1 | todo | S43-T11 | — |
-| S46-T10 | Slice 46 | fakeaws Phase 4: gated TestE2E_AWS_EKS + TestE2E_AWS_SQS in infrafactory; same PR adds coverage_matrix.yaml entries (incl. countOrphans sqs_messages extension) | P1 | todo | S46-T7, S46-T8, S46-T9 | — |
-| S46-T9 | Slice 46 | fakeaws: examples/working/eks_cluster + working/sqs_queue + matching misconfigured + updates dirs | P1 | todo | S46-T7 | — |
-| S46-T8 | Slice 46 | infrafactory: scenarios/training/aws-eks.yaml + aws-sqs.yaml + scenario_aws_test loader update | P1 | todo | S46-T7, S43-T9 | — |
-| S46-T7 | Slice 46 | fakeaws: regression coverage for EKS cluster→nodegroup→addon dependencies + SQS DLQ + visibility-timeout edge cases | P1 | todo | S46-T5, S46-T6 | — |
-| S46-T6 | Slice 46 | fakeaws: handlers_test.go for EKS + SQS (CRUD, FK validation, cascade, message lifecycle) | P1 | todo | S46-T3, S46-T5 | — |
-| S46-T5 | Slice 46 | fakeaws: handlers/sqs.go (Queue + minimal SendMessage / ReceiveMessage / DeleteMessage) | P1 | todo | S46-T4 | — |
-| S46-T4 | Slice 46 | fakeaws: repository support for sqs_queues + sqs_messages with at-least-once visibility-timeout collapsed | P1 | todo | S43-T6 | — |
-| S46-T3 | Slice 46 | fakeaws: handlers/eks.go (Cluster + NodeGroup + AddOn; FK against IAM roles + EC2 subnets + security groups) | P1 | todo | S46-T2 | — |
-| S46-T2 | Slice 46 | fakeaws: repository support for eks_clusters + eks_node_groups + eks_addons with FK cascade + IAM/EC2 cross-resource validation | P1 | todo | S43-T6, S43-T8, S44-T2, S44-T3, S44-T5 | — |
-| S46-T1 | Slice 46 | Phase 4 design note: EKS JSON-REST and SQS x-amz-target wire formats; cluster/nodegroup state-machine simplification | P1 | todo | S43-T2 | — |
-| S46-T0 | Slice 46 | infrafactory: pitfalls/aws.yaml extended with EKS rules (cluster→nodegroup ordering, IAM-role eks.amazonaws.com trust policy, subnet IPv4-block requirement) and SQS rules (DLQ RedrivePolicy JSON shape, FIFO queue suffix); no new prompt files (see concepts.md resolved decision 11) | P1 | todo | S43-T11 | — |
+| S46-T10 | Slice 46 | fakeaws Phase 4: gated TestE2E_AWS_EKS + TestE2E_AWS_SQS in infrafactory; same PR adds coverage_matrix.yaml entries (incl. countOrphans sqs_messages extension) | P1 | done | S46-T7, S46-T8, S46-T9 | claude (fakeaws@14e74ca + infrafactory@0005bc3 — both e2e tests verified passing) |
+| S46-T9 | Slice 46 | fakeaws: examples/working/eks_cluster + working/sqs_queue + matching misconfigured + updates dirs | P1 | done | S46-T7 | claude (fakeaws@14e74ca) |
+| S46-T8 | Slice 46 | infrafactory: scenarios/training/aws-eks.yaml + aws-sqs.yaml + scenario_aws_test loader update | P1 | done | S46-T7, S43-T9 | claude (infrafactory@0005bc3) |
+| S46-T7 | Slice 46 | fakeaws: regression coverage for EKS cluster→nodegroup→addon dependencies + SQS DLQ + visibility-timeout edge cases | P1 | done | S46-T5, S46-T6 | claude (covered by handler tests in T6) |
+| S46-T6 | Slice 46 | fakeaws: handlers_test.go for EKS + SQS (CRUD, FK validation, cascade, message lifecycle) | P1 | done | S46-T3, S46-T5 | claude (handler tests bundled per ticket) |
+| S46-T5 | Slice 46 | fakeaws: handlers/sqs.go (Queue + minimal SendMessage / ReceiveMessage / DeleteMessage) | P1 | done | S46-T4 | claude (fakeaws@7c0b837) |
+| S46-T4 | Slice 46 | fakeaws: repository support for sqs_queues + sqs_messages with at-least-once visibility-timeout collapsed | P1 | done | S43-T6 | claude (fakeaws@7c0b837) |
+| S46-T3 | Slice 46 | fakeaws: handlers/eks.go (Cluster + NodeGroup + AddOn; FK against IAM roles + EC2 subnets + security groups) | P1 | done | S46-T2 | claude (fakeaws@6b0891f) |
+| S46-T2 | Slice 46 | fakeaws: repository support for eks_clusters + eks_node_groups + eks_addons with FK cascade + IAM/EC2 cross-resource validation | P1 | done | S43-T6, S43-T8, S44-T2, S44-T3, S44-T5 | claude (fakeaws@59bf0b7) |
+| S46-T1 | Slice 46 | Phase 4 design note: EKS JSON-REST and SQS x-amz-target wire formats; cluster/nodegroup state-machine simplification | P1 | done | S43-T2 | claude (fakeaws@e1b25dd) |
+| S46-T0 | Slice 46 | infrafactory: pitfalls/aws.yaml extended with EKS rules (cluster→nodegroup ordering, IAM-role eks.amazonaws.com trust policy, subnet IPv4-block requirement) and SQS rules (DLQ RedrivePolicy JSON shape, FIFO queue suffix); no new prompt files (see concepts.md resolved decision 11) | P1 | done | S43-T11 | claude (infrafactory@c4e121e) |
 | S45-T10 | Slice 45 | fakeaws Phase 3: gated TestE2E_AWS_RDS + TestE2E_AWS_DynamoDB in infrafactory; same PR adds coverage_matrix.yaml entries | P1 | done | S45-T7, S45-T8, S45-T9 | claude (fakeaws@ad982cf coverage matrix + infrafactory@66ed071 e2e tests verified passing) |
 | S45-T9 | Slice 45 | fakeaws: examples/working/rds_instance + working/dynamodb_table + matching misconfigured + updates dirs | P1 | done | S45-T7 | claude (fakeaws@ad982cf) |
 | S45-T8 | Slice 45 | infrafactory: scenarios/training/aws-rds.yaml + aws-dynamodb.yaml + loader update | P1 | done | S45-T7, S43-T9 | claude (infrafactory@722e294) |
