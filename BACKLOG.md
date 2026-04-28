@@ -56,7 +56,7 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 | S44-T6 | Slice 44 | fakeaws: repository support for ec2_instances + ec2_key_pairs + ec2_amis (read-only fixture set) | P1 | todo | S44-T4 | — |
 | S44-T5 | Slice 44 | fakeaws: handlers/ec2_security.go (SecurityGroup + ingress/egress rules, AuthorizeSecurityGroupIngress / Revoke...) | P1 | todo | S44-T4 | — |
 | S44-T4 | Slice 44 | fakeaws: handlers/ec2_network.go (VPC, Subnet, InternetGateway, RouteTable, Route, EIP, NAT gateway) | P1 | todo | S44-T3 | — |
-| S44-T3 | Slice 44 | fakeaws: repository support for ec2_vpcs + ec2_subnets + ec2_security_groups + ec2_route_tables + ec2_internet_gateways + ec2_eips with FK | P1 | todo | S43-T6 | — |
+| S44-T3 | Slice 44 | fakeaws: repository support for ec2_vpcs + ec2_subnets + ec2_security_groups + ec2_route_tables + ec2_internet_gateways + ec2_eips with FK | P1 | done | S43-T6 | claude (fakeaws@06ec985) |
 | S44-T2 | Slice 44 | fakeaws: awsproto query-RPC parser + XML response writer for EC2 (Action=Foo / Version=YYYY-MM-DD style) | P1 | done | S43-T2 | claude (covered by S43-T2 fakeaws@2f12606 — IAM Query-RPC wire format is the same family; PLAN.md S44 design note confirms no new awsproto work needed) |
 | S44-T1 | Slice 44 | Phase 2 design note: EC2 query-RPC wire format vs SDK expectations; FK chain VPC→Subnet→Instance and SG→Instance | P1 | done | S43-T2 | claude (fakeaws@97e4ba3) |
 | S44-T0 | Slice 44 | infrafactory: pitfalls/aws.yaml extended with EC2-specific rules (security-group inline vs aws_security_group_rule, route-table FK shape, subnet/AZ pairing, IGW-attachment ordering); no new prompt files (see concepts.md resolved decision 11) | P1 | done | S43-T11 | claude (infrafactory@dc0886d) |
