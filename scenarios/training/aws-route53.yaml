@@ -1,0 +1,24 @@
+scenario: aws-route53
+version: "1.0"
+cloud: aws
+description: >
+  A Route53 hosted zone with one A-record pointing into a documentation
+  IP. Exercises fakeaws's Route53 XML REST handlers including the
+  transactional ChangeResourceRecordSets contract and apex-CNAME
+  rejection (S47-T0 pitfall).
+
+aws_resource_anchors:
+  - aws_route53_zone
+  - aws_route53_record
+
+resources:
+  dns:
+    domain: test.example.invalid
+    record_set: true
+
+constraints:
+  region: us-east-1
+
+acceptance_criteria:
+  - type: destruction
+    expect: no_orphans

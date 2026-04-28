@@ -516,6 +516,112 @@ func TestE2E_AWS_SQS(t *testing.T) {
 	mock.Reset(t)
 }
 
+// TestE2E_AWS_Route53 drives a full hosted-zone lifecycle through
+// the XML REST surface, including the transactional ChangeRRset
+// batch (one apex CNAME rejects whole batch).
+func TestE2E_AWS_Route53(t *testing.T) {
+	SkipUnlessEnabled(t)
+	mock := StartFakeaws(t)
+	r53URL := mock.URL + "/route53/2013-04-01"
+
+	r53Req := func(method, path, body string) (*http.Response, []byte) {
+		t.Helper()
+		var rd *strings.Reader
+		if body != "" {
+			rd = strings.NewReader(body)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		var req *http.Request
+		var err error
+		if rd != nil {
+			req, err = http.NewRequestWithContext(ctx, method, r53URL+path, rd)
+			req.Header.Set("Content-Type", "application/xml")
+		} else {
+			req, err = http.NewRequestWithContext(ctx, method, r53URL+path, nil)
+		}
+		if err != nil {
+			t.Fatalf("new request: %v", err)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("%s %s: %v", method, path, err)
+		}
+		defer resp.Body.Close()
+		out, _ := readAllBytes(resp.Body)
+		return resp, out
+	}
+
+	resp, body := r53Req(http.MethodPost, "/hostedzone",
+		`<CreateHostedZoneRequest><Name>e2e.example.invalid.</Name><CallerReference>r1</CallerReference></CreateHostedZoneRequest>`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("CreateHostedZone: %d %s", resp.StatusCode, body)
+	}
+	idStart := strings.Index(string(body), "<Id>/hostedzone/") + len("<Id>/hostedzone/")
+	idEnd := strings.Index(string(body)[idStart:], "</Id>") + idStart
+	zoneID := string(body)[idStart:idEnd]
+
+	// Apex CNAME → 409, atomic.
+	apex := `<ChangeResourceRecordSetsRequest><ChangeBatch><Changes>
+		<Change><Action>CREATE</Action><ResourceRecordSet>
+			<Name>e2e.example.invalid.</Name><Type>CNAME</Type><TTL>300</TTL>
+			<ResourceRecords><ResourceRecord><Value>x</Value></ResourceRecord></ResourceRecords>
+		</ResourceRecordSet></Change></Changes></ChangeBatch></ChangeResourceRecordSetsRequest>`
+	resp, _ = r53Req(http.MethodPost, "/hostedzone/"+zoneID+"/rrset/", apex)
+	if resp.StatusCode != http.StatusConflict {
+		t.Errorf("apex CNAME: got %d, want 409", resp.StatusCode)
+	}
+
+	// /mock/state surfaces the zone.
+	state := mock.FetchState(t)
+	stateBytes, _ := json.Marshal(state)
+	if !strings.Contains(string(stateBytes), zoneID) {
+		t.Errorf("zone missing from state: %s", stateBytes)
+	}
+
+	mock.Reset(t)
+}
+
+// TestE2E_AWS_SecretsManager drives the secret state machine through
+// CreateSecret → DeleteSecret(force) → RestoreSecret-on-Destroyed → 409.
+func TestE2E_AWS_SecretsManager(t *testing.T) {
+	SkipUnlessEnabled(t)
+	mock := StartFakeaws(t)
+	smURL := mock.URL + "/secretsmanager/region/us-east-1"
+
+	post := func(target, body string) (*http.Response, []byte) {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		req, _ := http.NewRequestWithContext(ctx, http.MethodPost, smURL,
+			strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/x-amz-json-1.1")
+		req.Header.Set("X-Amz-Target", target)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("POST %s: %v", target, err)
+		}
+		defer resp.Body.Close()
+		out, _ := readAllBytes(resp.Body)
+		return resp, out
+	}
+
+	resp, body := post("secretsmanager.CreateSecret", `{"Name":"e2e-secret","SecretString":"v1"}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("CreateSecret: %d %s", resp.StatusCode, body)
+	}
+
+	// Force-delete → Destroyed.
+	post("secretsmanager.DeleteSecret", `{"SecretId":"e2e-secret","ForceDeleteWithoutRecovery":true}`)
+
+	// Restore on Destroyed → 409.
+	resp, body = post("secretsmanager.RestoreSecret", `{"SecretId":"e2e-secret"}`)
+	if resp.StatusCode != http.StatusConflict {
+		t.Errorf("RestoreSecret on Destroyed: got %d, want 409; body=%s", resp.StatusCode, body)
+	}
+
+	mock.Reset(t)
+}
+
 // awsPostWithTargetJSON10 is the JSON 1.0 variant of awsPostWithTarget.
 func awsPostWithTargetJSON10(t *testing.T, url, target, body string) (*http.Response, []byte) {
 	t.Helper()

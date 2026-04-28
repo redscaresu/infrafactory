@@ -75,6 +75,16 @@ func TestLoadAWSScenarios(t *testing.T) {
 			expectedCloud: "aws",
 			expectedAnchors: []string{"aws_sqs_queue"},
 		},
+		{
+			path:          filepath.Join(repo, "scenarios", "training", "aws-route53.yaml"),
+			expectedCloud: "aws",
+			expectedAnchors: []string{"aws_route53_zone", "aws_route53_record"},
+		},
+		{
+			path:          filepath.Join(repo, "scenarios", "training", "aws-secrets-manager.yaml"),
+			expectedCloud: "aws",
+			expectedAnchors: []string{"aws_secretsmanager_secret", "aws_secretsmanager_secret_version"},
+		},
 	}
 	for _, c := range cases {
 		t.Run(filepath.Base(c.path), func(t *testing.T) {
