@@ -75,3 +75,18 @@ pitfalls:
     - resource: aws_dynamodb_table
       rule: 'Each `attribute.name` in a DynamoDB table must be UNIQUE — duplicate attribute names within the same table fail with "ValidationException: attribute name appears more than once". `billing_mode = "PAY_PER_REQUEST"` (on-demand) does NOT take `read_capacity`/`write_capacity` arguments; setting them with on-demand fails with "InvalidParameterCombination". For the v1 fakeaws fixture set, `billing_mode = "PAY_PER_REQUEST"` is the recommended path.'
       source: seed
+
+    # ----- S46-T0 — EKS + SQS phase pitfalls. -----
+
+    - resource: aws_eks_cluster
+      rule: 'EKS cluster create rejects when the role lacks the `eks.amazonaws.com` Service principal in its `assume_role_policy`. The IAM role MUST have `Action: "sts:AssumeRole"` AND `Principal: { Service: "eks.amazonaws.com" }` AND the AmazonEKSClusterPolicy / AmazonEKSServicePolicy managed policies attached. Without the trust relationship, cluster create fails with "InvalidParameterException: role does not have necessary trust relationship". For nodegroups, the trust principal is `Service: "ec2.amazonaws.com"` (NOT eks.amazonaws.com) — different IAM role.'
+      source: seed
+    - resource: aws_eks_node_group
+      rule: 'NodeGroups have a hard ordering constraint: the cluster must be ACTIVE before nodegroup create succeeds. Always set `depends_on = [aws_eks_cluster.NAME]` even when the implicit reference (`cluster_name = aws_eks_cluster.NAME.name`) would seem sufficient — the AWS provider sometimes parallelises and triggers "ResourceInUseException: cluster is creating". Subnet ids must be a SUBSET of the parent cluster''s `vpc_config.subnet_ids` (cross-cluster subnet reuse fails with "InvalidParameterException: subnet does not belong to cluster VPC").'
+      source: seed
+    - resource: aws_sqs_queue
+      rule: 'FIFO queues MUST end in `.fifo` suffix and have `fifo_queue = true`. Mismatch fails with "InvalidParameterValue: FIFO queue names must end in .fifo". Standard queues must NOT have the .fifo suffix. RedrivePolicy is a JSON-encoded string (NOT a HCL block) referencing the DLQ ARN: `redrive_policy = jsonencode({ deadLetterTargetArn = aws_sqs_queue.dlq.arn, maxReceiveCount = 5 })`. Inline objects fail with "InvalidParameterValue: invalid redrive policy".'
+      source: seed
+    - resource: aws_sqs_queue_policy
+      rule: '`aws_sqs_queue_policy` is a SEPARATE resource from `aws_sqs_queue` — attempting to set queue policy via inline argument on the queue (`policy = ...`) is silently ignored on most provider versions. Use the dedicated resource: `resource "aws_sqs_queue_policy" "p" { queue_url = aws_sqs_queue.NAME.url; policy = ... }`. Without the policy resource, the queue is created with the default empty policy.'
+      source: seed
