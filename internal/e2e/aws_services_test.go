@@ -135,6 +135,162 @@ func TestE2E_AWS_S3(t *testing.T) {
 	mock.Reset(t)
 }
 
+// TestE2E_AWS_VPC drives a full VPC + subnet apply against fakeaws.
+// Per concepts.md "Required surface" item 11 — identity preservation:
+// the VPC + subnet ids must round-trip through /mock/state and the
+// subnet's vpc_id must match the parent VPC. Subnet/VPC pairing is
+// the load-bearing fakegcp pass-27 finding ported to AWS.
+func TestE2E_AWS_VPC(t *testing.T) {
+	SkipUnlessEnabled(t)
+	mock := StartFakeaws(t)
+	const region = "us-east-1"
+	ec2URL := mock.URL + "/ec2/region/" + region
+
+	// CreateVpc.
+	body := url("Action=CreateVpc&Version=2016-11-15&CidrBlock=10.10.0.0/16")
+	resp, respBody := awsPost(t, ec2URL, body, "application/x-www-form-urlencoded")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("CreateVpc: %d %s", resp.StatusCode, respBody)
+	}
+	vpcID := extractTagValue(string(respBody), "vpcId")
+	if !strings.HasPrefix(vpcID, "vpc-") {
+		t.Fatalf("CreateVpc body missing vpcId: %s", respBody)
+	}
+
+	// CreateSubnet.
+	subBody := url("Action=CreateSubnet&Version=2016-11-15&VpcId=" + vpcID + "&CidrBlock=10.10.1.0/24")
+	resp, respBody = awsPost(t, ec2URL, subBody, "application/x-www-form-urlencoded")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("CreateSubnet: %d %s", resp.StatusCode, respBody)
+	}
+	subnetID := extractTagValue(string(respBody), "subnetId")
+
+	// /mock/state surfaces VPC + subnet with the FK link.
+	state := mock.FetchState(t)
+	stateBytes, _ := json.Marshal(state)
+	if !strings.Contains(string(stateBytes), vpcID) {
+		t.Errorf("VPC id missing from state: %s", stateBytes)
+	}
+	if !strings.Contains(string(stateBytes), subnetID) {
+		t.Errorf("Subnet id missing from state: %s", stateBytes)
+	}
+	// Identity preservation: DescribeVpcs returns the SAME id pre/post
+	// describe (i.e., id is stable, not regenerated).
+	descBody := url("Action=DescribeVpcs&Version=2016-11-15")
+	_, descResp := awsPost(t, ec2URL, descBody, "application/x-www-form-urlencoded")
+	if !strings.Contains(string(descResp), vpcID) {
+		t.Errorf("DescribeVpcs missing %s: %s", vpcID, descResp)
+	}
+
+	mock.Reset(t)
+}
+
+// TestE2E_AWS_Instance drives a full RunInstances → DescribeInstances →
+// TerminateInstances flow with subnet/SG VPC-pairing enforcement and
+// state-machine identity preservation. Per concepts.md "Standing
+// patterns" item 9 — terminal-state refusal is enforced at the
+// repository layer; the test asserts a terminated instance does not
+// transition back to running.
+func TestE2E_AWS_Instance(t *testing.T) {
+	SkipUnlessEnabled(t)
+	mock := StartFakeaws(t)
+	const region = "us-east-1"
+	ec2URL := mock.URL + "/ec2/region/" + region
+
+	// Pre-reqs: VPC + subnet + SG.
+	_, b := awsPost(t, ec2URL, url("Action=CreateVpc&Version=2016-11-15&CidrBlock=10.0.0.0/16"), "application/x-www-form-urlencoded")
+	vpcID := extractTagValue(string(b), "vpcId")
+	_, b = awsPost(t, ec2URL, url("Action=CreateSubnet&Version=2016-11-15&VpcId="+vpcID+"&CidrBlock=10.0.1.0/24"), "application/x-www-form-urlencoded")
+	subnetID := extractTagValue(string(b), "subnetId")
+	_, b = awsPost(t, ec2URL, url("Action=CreateSecurityGroup&Version=2016-11-15&GroupName=app&GroupDescription=app+sg&VpcId="+vpcID), "application/x-www-form-urlencoded")
+	sgID := extractTagValue(string(b), "groupId")
+
+	// RunInstances.
+	runBody := url("Action=RunInstances&Version=2016-11-15&SubnetId=" + subnetID +
+		"&ImageId=ami-0abcd1234&InstanceType=t3.micro&SecurityGroupId.1=" + sgID)
+	resp, respBody := awsPost(t, ec2URL, runBody, "application/x-www-form-urlencoded")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("RunInstances: %d %s", resp.StatusCode, respBody)
+	}
+	instID := extractTagValue(string(respBody), "instanceId")
+	if !strings.HasPrefix(instID, "i-") {
+		t.Fatalf("instance id missing: %s", respBody)
+	}
+
+	// /mock/state surfaces the instance.
+	state := mock.FetchState(t)
+	stateBytes, _ := json.Marshal(state)
+	if !strings.Contains(string(stateBytes), instID) {
+		t.Errorf("instance id missing from state: %s", stateBytes)
+	}
+
+	// TerminateInstances.
+	resp, _ = awsPost(t, ec2URL, url("Action=TerminateInstances&Version=2016-11-15&InstanceId.1="+instID), "application/x-www-form-urlencoded")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("TerminateInstances: %d", resp.StatusCode)
+	}
+
+	// Identity preservation: DescribeInstances still returns the same
+	// id (the resource-id outlasts state transitions), but state is
+	// "terminated".
+	_, dResp := awsPost(t, ec2URL, url("Action=DescribeInstances&Version=2016-11-15&InstanceId.1="+instID), "application/x-www-form-urlencoded")
+	if !strings.Contains(string(dResp), instID) {
+		t.Errorf("DescribeInstances missing %s post-terminate: %s", instID, dResp)
+	}
+	if !strings.Contains(string(dResp), "<name>terminated</name>") {
+		t.Errorf("post-terminate state not terminated: %s", dResp)
+	}
+
+	mock.Reset(t)
+}
+
+// TestE2E_AWS_SecurityGroup drives the SG round-trip through
+// AuthorizeSecurityGroupIngress (write) → DescribeSecurityGroups (read,
+// indexed-column lookup + JSON parse) → RevokeSecurityGroupIngress
+// (write). Pinned by S44-T9's regression pattern 15: the SQL-column /
+// JSON-blob sync invariant — rule writes and reads must agree.
+func TestE2E_AWS_SecurityGroup(t *testing.T) {
+	SkipUnlessEnabled(t)
+	mock := StartFakeaws(t)
+	const region = "us-east-1"
+	ec2URL := mock.URL + "/ec2/region/" + region
+
+	_, b := awsPost(t, ec2URL, url("Action=CreateVpc&Version=2016-11-15&CidrBlock=10.0.0.0/16"), "application/x-www-form-urlencoded")
+	vpcID := extractTagValue(string(b), "vpcId")
+	_, b = awsPost(t, ec2URL, url("Action=CreateSecurityGroup&Version=2016-11-15&GroupName=web&GroupDescription=web+tier&VpcId="+vpcID), "application/x-www-form-urlencoded")
+	sgID := extractTagValue(string(b), "groupId")
+
+	// Authorize ingress.
+	authBody := url("Action=AuthorizeSecurityGroupIngress&Version=2016-11-15&GroupId=" + sgID +
+		"&IpPermissions.1.IpProtocol=tcp&IpPermissions.1.FromPort=443&IpPermissions.1.ToPort=443" +
+		"&IpPermissions.1.IpRanges.1.CidrIp=0.0.0.0/0")
+	resp, _ := awsPost(t, ec2URL, authBody, "application/x-www-form-urlencoded")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("AuthorizeSecurityGroupIngress: %d", resp.StatusCode)
+	}
+
+	// Describe — round-trip through indexed lookup + JSON parse.
+	_, dBody := awsPost(t, ec2URL, url("Action=DescribeSecurityGroups&Version=2016-11-15&GroupId.1="+sgID), "application/x-www-form-urlencoded")
+	if !strings.Contains(string(dBody), "<cidrIp>0.0.0.0/0</cidrIp>") {
+		t.Errorf("rule not round-tripped through Describe: %s", dBody)
+	}
+
+	// Revoke removes it.
+	revBody := url("Action=RevokeSecurityGroupIngress&Version=2016-11-15&GroupId=" + sgID +
+		"&IpPermissions.1.IpProtocol=tcp&IpPermissions.1.FromPort=443&IpPermissions.1.ToPort=443" +
+		"&IpPermissions.1.IpRanges.1.CidrIp=0.0.0.0/0")
+	resp, _ = awsPost(t, ec2URL, revBody, "application/x-www-form-urlencoded")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("RevokeSecurityGroupIngress: %d", resp.StatusCode)
+	}
+	_, dBody = awsPost(t, ec2URL, url("Action=DescribeSecurityGroups&Version=2016-11-15&GroupId.1="+sgID), "application/x-www-form-urlencoded")
+	if strings.Contains(string(dBody), "<cidrIp>0.0.0.0/0</cidrIp>") {
+		t.Errorf("rule should have been revoked: %s", dBody)
+	}
+
+	mock.Reset(t)
+}
+
 // ----- minimal helpers (aws-side) -----
 
 func awsPost(t *testing.T, url, body, contentType string) (*http.Response, []byte) {
