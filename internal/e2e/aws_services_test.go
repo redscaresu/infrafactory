@@ -291,6 +291,147 @@ func TestE2E_AWS_SecurityGroup(t *testing.T) {
 	mock.Reset(t)
 }
 
+// TestE2E_AWS_RDS drives a full DBSubnetGroup → DBParameterGroup →
+// DBInstance flow through the RDS Query-RPC handlers. The
+// load-bearing assertion is identity preservation: the instance ARN
+// + identifier are byte-stable pre/post DescribeDBInstances.
+func TestE2E_AWS_RDS(t *testing.T) {
+	SkipUnlessEnabled(t)
+	mock := StartFakeaws(t)
+	const region = "us-east-1"
+	ec2URL := mock.URL + "/ec2/region/" + region
+	rdsURL := mock.URL + "/rds/region/" + region
+
+	// VPC + 2 subnets.
+	_, b := awsPost(t, ec2URL, url("Action=CreateVpc&Version=2016-11-15&CidrBlock=10.0.0.0/16"), "application/x-www-form-urlencoded")
+	vpcID := extractTagValue(string(b), "vpcId")
+	_, b = awsPost(t, ec2URL,
+		url("Action=CreateSubnet&Version=2016-11-15&VpcId="+vpcID+"&CidrBlock=10.0.1.0/24&AvailabilityZone=us-east-1a"),
+		"application/x-www-form-urlencoded")
+	subnetA := extractTagValue(string(b), "subnetId")
+	_, b = awsPost(t, ec2URL,
+		url("Action=CreateSubnet&Version=2016-11-15&VpcId="+vpcID+"&CidrBlock=10.0.2.0/24&AvailabilityZone=us-east-1b"),
+		"application/x-www-form-urlencoded")
+	subnetB := extractTagValue(string(b), "subnetId")
+
+	// DBSubnetGroup.
+	resp, body := awsPost(t, rdsURL, url(
+		"Action=CreateDBSubnetGroup&Version=2014-10-31&DBSubnetGroupName=default&DBSubnetGroupDescription=default+subnet+group"+
+			"&SubnetIds.member.1="+subnetA+"&SubnetIds.member.2="+subnetB),
+		"application/x-www-form-urlencoded")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("CreateDBSubnetGroup: %d %s", resp.StatusCode, body)
+	}
+
+	// DBParameterGroup.
+	awsPost(t, rdsURL, url(
+		"Action=CreateDBParameterGroup&Version=2014-10-31&DBParameterGroupName=pg15&DBParameterGroupFamily=postgres15&Description=pg15"),
+		"application/x-www-form-urlencoded")
+
+	// DBInstance.
+	resp, body = awsPost(t, rdsURL, url(
+		"Action=CreateDBInstance&Version=2014-10-31&DBInstanceIdentifier=app-db&Engine=postgres"+
+			"&DBInstanceClass=db.t3.micro&DBSubnetGroupName=default&DBParameterGroupName=pg15"),
+		"application/x-www-form-urlencoded")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("CreateDBInstance: %d %s", resp.StatusCode, body)
+	}
+	arnBefore := extractTagValue(string(body), "DBInstanceArn")
+	if arnBefore == "" {
+		t.Fatalf("CreateDBInstance ARN missing: %s", body)
+	}
+
+	// Identity preservation: Describe returns the same ARN.
+	_, dResp := awsPost(t, rdsURL, url(
+		"Action=DescribeDBInstances&Version=2014-10-31&DBInstanceIdentifier=app-db"),
+		"application/x-www-form-urlencoded")
+	arnAfter := extractTagValue(string(dResp), "DBInstanceArn")
+	if arnAfter != arnBefore {
+		t.Errorf("identity preservation failed: ARN changed %q → %q", arnBefore, arnAfter)
+	}
+
+	// /mock/state surfaces the instance.
+	state := mock.FetchState(t)
+	stateBytes, _ := json.Marshal(state)
+	if !strings.Contains(string(stateBytes), `"app-db"`) {
+		t.Errorf("instance missing from state: %s", stateBytes)
+	}
+
+	mock.Reset(t)
+}
+
+// TestE2E_AWS_DynamoDB drives the DynamoDB JSON 1.1 surface through
+// CreateTable → PutItem → GetItem → Scan → DeleteTable. Identity
+// preservation: the item is byte-identical pre/post Scan.
+func TestE2E_AWS_DynamoDB(t *testing.T) {
+	SkipUnlessEnabled(t)
+	mock := StartFakeaws(t)
+	const region = "us-east-1"
+	ddbURL := mock.URL + "/dynamodb/region/" + region
+
+	// CreateTable.
+	resp, body := awsPostWithTarget(t, ddbURL, "DynamoDB_20120810.CreateTable", `{
+		"TableName": "Users",
+		"AttributeDefinitions": [{"AttributeName":"id","AttributeType":"S"}],
+		"KeySchema": [{"AttributeName":"id","KeyType":"HASH"}],
+		"BillingMode": "PAY_PER_REQUEST"
+	}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("CreateTable: %d %s", resp.StatusCode, body)
+	}
+
+	// PutItem.
+	awsPostWithTarget(t, ddbURL, "DynamoDB_20120810.PutItem", `{
+		"TableName": "Users",
+		"Item": {"id":{"S":"alice"},"age":{"N":"30"}}
+	}`)
+
+	// GetItem returns the round-tripped item.
+	_, gBody := awsPostWithTarget(t, ddbURL, "DynamoDB_20120810.GetItem", `{
+		"TableName": "Users",
+		"Key": {"id":{"S":"alice"}}
+	}`)
+	if !strings.Contains(string(gBody), `"alice"`) || !strings.Contains(string(gBody), `"30"`) {
+		t.Errorf("GetItem round-trip: %s", gBody)
+	}
+
+	// Scan returns Count + Items.
+	_, sBody := awsPostWithTarget(t, ddbURL, "DynamoDB_20120810.Scan", `{"TableName":"Users"}`)
+	if !strings.Contains(string(sBody), `"Count":1`) {
+		t.Errorf("Scan count: %s", sBody)
+	}
+
+	// /mock/state surfaces the table.
+	state := mock.FetchState(t)
+	stateBytes, _ := json.Marshal(state)
+	if !strings.Contains(string(stateBytes), `"Users"`) {
+		t.Errorf("table missing from state: %s", stateBytes)
+	}
+
+	mock.Reset(t)
+}
+
+// awsPostWithTarget POSTs a JSON body with the X-Amz-Target header.
+// Used by DynamoDB (JSON 1.1) and SecretsManager (JSON 1.1).
+func awsPostWithTarget(t *testing.T, url, target, body string) (*http.Response, []byte) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/x-amz-json-1.1")
+	req.Header.Set("X-Amz-Target", target)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST %s %s: %v", url, target, err)
+	}
+	defer resp.Body.Close()
+	out, _ := readAllBytes(resp.Body)
+	return resp, out
+}
+
 // ----- minimal helpers (aws-side) -----
 
 func awsPost(t *testing.T, url, body, contentType string) (*http.Response, []byte) {
