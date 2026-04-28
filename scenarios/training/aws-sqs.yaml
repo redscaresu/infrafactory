@@ -1,0 +1,22 @@
+scenario: aws-sqs
+version: "1.0"
+cloud: aws
+description: >
+  A standard SQS queue used for asynchronous job processing. Exercises
+  fakeaws's SQS JSON 1.0 + X-Amz-Target dispatcher (handlers/sqs.go)
+  including the FIFO suffix contract from the S46-T0 pitfall.
+
+aws_resource_anchors:
+  - aws_sqs_queue
+
+resources:
+  messaging:
+    purpose: job-queue
+    fifo: false
+
+constraints:
+  region: us-east-1
+
+acceptance_criteria:
+  - type: destruction
+    expect: no_orphans

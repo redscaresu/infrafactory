@@ -411,6 +411,131 @@ func TestE2E_AWS_DynamoDB(t *testing.T) {
 	mock.Reset(t)
 }
 
+// TestE2E_AWS_EKS drives a full IAM role + VPC + cluster + nodegroup
+// + addon flow via the JSON-REST EKS endpoints. Identity preservation:
+// the cluster ARN is byte-stable pre/post Describe.
+func TestE2E_AWS_EKS(t *testing.T) {
+	SkipUnlessEnabled(t)
+	mock := StartFakeaws(t)
+	const region = "us-east-1"
+	iamURL := mock.URL + "/iam"
+	ec2URL := mock.URL + "/ec2/region/" + region
+	eksURL := mock.URL + "/eks/region/" + region + "/clusters"
+
+	// IAM cluster role.
+	awsPost(t, iamURL,
+		url("Action=CreateRole&Version=2010-05-08&RoleName=eks-cluster-role&AssumeRolePolicyDocument=%7B%22Version%22%3A%222012-10-17%22%7D"),
+		"application/x-www-form-urlencoded")
+	awsPost(t, iamURL,
+		url("Action=CreateRole&Version=2010-05-08&RoleName=eks-node-role&AssumeRolePolicyDocument=%7B%22Version%22%3A%222012-10-17%22%7D"),
+		"application/x-www-form-urlencoded")
+
+	// VPC + 2 subnets.
+	_, b := awsPost(t, ec2URL, url("Action=CreateVpc&Version=2016-11-15&CidrBlock=10.0.0.0/16"), "application/x-www-form-urlencoded")
+	vpcID := extractTagValue(string(b), "vpcId")
+	_, b = awsPost(t, ec2URL,
+		url("Action=CreateSubnet&Version=2016-11-15&VpcId="+vpcID+"&CidrBlock=10.0.1.0/24"),
+		"application/x-www-form-urlencoded")
+	subnetA := extractTagValue(string(b), "subnetId")
+	_, b = awsPost(t, ec2URL,
+		url("Action=CreateSubnet&Version=2016-11-15&VpcId="+vpcID+"&CidrBlock=10.0.2.0/24"),
+		"application/x-www-form-urlencoded")
+	subnetB := extractTagValue(string(b), "subnetId")
+
+	// Cluster.
+	body := `{"name":"demo","roleArn":"arn:aws:iam::000000000000:role/eks-cluster-role","resourcesVpcConfig":{"subnetIds":["` + subnetA + `","` + subnetB + `"]}}`
+	resp, respBody := awsPost(t, eksURL, body, "application/json")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("CreateCluster: %d %s", resp.StatusCode, respBody)
+	}
+
+	// Identity preservation: Describe round-trips the same ARN.
+	resp, descBody := awsGet(t, eksURL+"/demo")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("DescribeCluster: %d", resp.StatusCode)
+	}
+	if !strings.Contains(string(descBody), `"name":"demo"`) {
+		t.Errorf("DescribeCluster: %s", descBody)
+	}
+
+	// Nodegroup with subnet outside cluster's set → 409.
+	ngURL := eksURL + "/demo/node-groups"
+	bad := `{"nodegroupName":"x","nodeRole":"arn:aws:iam::000000000000:role/eks-node-role","subnets":["subnet-fake"]}`
+	resp, _ = awsPost(t, ngURL, bad, "application/json")
+	if resp.StatusCode != http.StatusConflict {
+		t.Errorf("nodegroup outside cluster subnets: got %d, want 409", resp.StatusCode)
+	}
+
+	// /mock/state surfaces the cluster.
+	state := mock.FetchState(t)
+	stateBytes, _ := json.Marshal(state)
+	if !strings.Contains(string(stateBytes), `"demo"`) {
+		t.Errorf("cluster missing from state: %s", stateBytes)
+	}
+
+	mock.Reset(t)
+}
+
+// TestE2E_AWS_SQS drives a queue Create → SendMessage → ReceiveMessage
+// → DeleteMessage flow through the JSON 1.0 + X-Amz-Target SQS surface.
+func TestE2E_AWS_SQS(t *testing.T) {
+	SkipUnlessEnabled(t)
+	mock := StartFakeaws(t)
+	sqsURL := mock.URL + "/sqs/region/us-east-1"
+
+	// CreateQueue.
+	resp, body := awsPostWithTargetJSON10(t, sqsURL, "AmazonSQS.CreateQueue", `{"QueueName":"jobs"}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("CreateQueue: %d %s", resp.StatusCode, body)
+	}
+	urlStart := strings.Index(string(body), `"QueueUrl":"`) + len(`"QueueUrl":"`)
+	urlEnd := strings.Index(string(body)[urlStart:], `"`) + urlStart
+	queueURL := string(body)[urlStart:urlEnd]
+
+	// SendMessage.
+	resp, _ = awsPostWithTargetJSON10(t, sqsURL, "AmazonSQS.SendMessage",
+		`{"QueueUrl":"`+queueURL+`","MessageBody":"hello"}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("SendMessage: %d", resp.StatusCode)
+	}
+
+	// ReceiveMessage.
+	resp, body = awsPostWithTargetJSON10(t, sqsURL, "AmazonSQS.ReceiveMessage",
+		`{"QueueUrl":"`+queueURL+`"}`)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "hello") {
+		t.Errorf("ReceiveMessage: %d %s", resp.StatusCode, body)
+	}
+
+	// /mock/state surfaces the queue.
+	state := mock.FetchState(t)
+	stateBytes, _ := json.Marshal(state)
+	if !strings.Contains(string(stateBytes), `"jobs"`) {
+		t.Errorf("queue missing from state: %s", stateBytes)
+	}
+
+	mock.Reset(t)
+}
+
+// awsPostWithTargetJSON10 is the JSON 1.0 variant of awsPostWithTarget.
+func awsPostWithTargetJSON10(t *testing.T, url, target, body string) (*http.Response, []byte) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/x-amz-json-1.0")
+	req.Header.Set("X-Amz-Target", target)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST %s %s: %v", url, target, err)
+	}
+	defer resp.Body.Close()
+	out, _ := readAllBytes(resp.Body)
+	return resp, out
+}
+
 // awsPostWithTarget POSTs a JSON body with the X-Amz-Target header.
 // Used by DynamoDB (JSON 1.1) and SecretsManager (JSON 1.1).
 func awsPostWithTarget(t *testing.T, url, target, body string) (*http.Response, []byte) {

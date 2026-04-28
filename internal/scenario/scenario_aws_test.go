@@ -62,6 +62,19 @@ func TestLoadAWSScenarios(t *testing.T) {
 			expectedCloud: "aws",
 			expectedAnchors: []string{"aws_dynamodb_table"},
 		},
+		{
+			path:          filepath.Join(repo, "scenarios", "training", "aws-eks.yaml"),
+			expectedCloud: "aws",
+			expectedAnchors: []string{
+				"aws_iam_role", "aws_vpc", "aws_subnet",
+				"aws_eks_cluster", "aws_eks_node_group", "aws_eks_addon",
+			},
+		},
+		{
+			path:          filepath.Join(repo, "scenarios", "training", "aws-sqs.yaml"),
+			expectedCloud: "aws",
+			expectedAnchors: []string{"aws_sqs_queue"},
+		},
 	}
 	for _, c := range cases {
 		t.Run(filepath.Base(c.path), func(t *testing.T) {

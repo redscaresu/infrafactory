@@ -1,0 +1,27 @@
+scenario: aws-eks
+version: "1.0"
+cloud: aws
+description: >
+  An EKS cluster + nodegroup + vpc-cni addon backed by a VPC with 2
+  subnets and dedicated IAM roles (cluster role with eks.amazonaws.com
+  trust, node role with ec2.amazonaws.com trust). Exercises the full
+  cross-service FK chain: EKS → IAM → EC2.
+
+aws_resource_anchors:
+  - aws_iam_role
+  - aws_vpc
+  - aws_subnet
+  - aws_eks_cluster
+  - aws_eks_node_group
+  - aws_eks_addon
+
+resources:
+  kubernetes:
+    size: small
+
+constraints:
+  region: us-east-1
+
+acceptance_criteria:
+  - type: destruction
+    expect: no_orphans
