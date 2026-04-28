@@ -90,3 +90,18 @@ pitfalls:
     - resource: aws_sqs_queue_policy
       rule: '`aws_sqs_queue_policy` is a SEPARATE resource from `aws_sqs_queue` — attempting to set queue policy via inline argument on the queue (`policy = ...`) is silently ignored on most provider versions. Use the dedicated resource: `resource "aws_sqs_queue_policy" "p" { queue_url = aws_sqs_queue.NAME.url; policy = ... }`. Without the policy resource, the queue is created with the default empty policy.'
       source: seed
+
+    # ----- S47-T0 — Route53 + Secrets Manager phase pitfalls. -----
+
+    - resource: aws_route53_zone
+      rule: 'Hosted-zone delete is REJECTED if the zone still has records other than the default NS / SOA. The error code is "HostedZoneNotEmpty". Always either (a) delete every aws_route53_record before the zone, or (b) set `force_destroy = true` on the zone resource (provider-side flag — fakeaws does not honour it; explicit record cleanup is the only reliable path).'
+      source: seed
+    - resource: aws_route53_record
+      rule: 'CNAME records cannot coexist with the apex (zone-root) of a hosted zone — for the apex, use an `alias` block pointing at an AWS resource (CloudFront, ALB, S3 website endpoint). For child records (`www.example.com`), CNAMEs are fine. ChangeResourceRecordSets is TRANSACTIONAL: if any change in the batch fails validation, the whole batch rejects with no partial state. fakeaws emulates this — the record-set update is all-or-nothing.'
+      source: seed
+    - resource: aws_secretsmanager_secret
+      rule: 'For test/destroy cycles, set `recovery_window_in_days = 0` so DeleteSecret is immediate (no soft-delete window). Default is 30 days — re-applying a scenario that creates a secret with the same name within 30 days fails with "InvalidRequestException: secret scheduled for deletion". RestoreSecret reverses scheduled deletion ONLY within the window; once the window elapses (or recovery_window_in_days=0), the secret is permanently destroyed and RestoreSecret returns 409.'
+      source: seed
+    - resource: aws_secretsmanager_secret_version
+      rule: 'Each `aws_secretsmanager_secret_version` produces a distinct VersionId. PutSecretValue is the AWS-side API; the Go SDK does NOT increment automatically — each call mints a new version. Stage labels (AWSCURRENT, AWSPREVIOUS) move to the new version on each Put. Reading via GetSecretValue without a VersionStage defaults to AWSCURRENT.'
+      source: seed
