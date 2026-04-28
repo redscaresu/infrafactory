@@ -33,6 +33,22 @@ func TestLoadAWSScenarios(t *testing.T) {
 			expectedCloud:   "aws",
 			expectedAnchors: []string{"aws_s3_bucket", "aws_s3_bucket_versioning", "aws_s3_bucket_server_side_encryption_configuration"},
 		},
+		{
+			path:          filepath.Join(repo, "scenarios", "training", "aws-vpc-network.yaml"),
+			expectedCloud: "aws",
+			expectedAnchors: []string{
+				"aws_vpc", "aws_subnet", "aws_internet_gateway",
+				"aws_route_table", "aws_route", "aws_route_table_association",
+				"aws_security_group",
+			},
+		},
+		{
+			path:          filepath.Join(repo, "scenarios", "training", "aws-instance.yaml"),
+			expectedCloud: "aws",
+			expectedAnchors: []string{
+				"aws_vpc", "aws_subnet", "aws_security_group", "aws_instance",
+			},
+		},
 	}
 	for _, c := range cases {
 		t.Run(filepath.Base(c.path), func(t *testing.T) {

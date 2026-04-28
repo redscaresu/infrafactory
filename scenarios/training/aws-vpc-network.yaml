@@ -1,0 +1,33 @@
+scenario: aws-vpc-network
+version: "1.0"
+cloud: aws
+description: >
+  A VPC with two subnets (public and private), an internet gateway,
+  a route table with default route via the IGW, and a security
+  group with inbound HTTPS. Exercises fakeaws's EC2 networking
+  handlers (handlers/ec2.go: VPC, Subnet, IGW, RouteTable, Route,
+  SecurityGroup) end-to-end. The aws_resource_anchors list pins the
+  specific per-API resource types this scenario asserts coverage
+  for.
+
+aws_resource_anchors:
+  - aws_vpc
+  - aws_subnet
+  - aws_internet_gateway
+  - aws_route_table
+  - aws_route
+  - aws_route_table_association
+  - aws_security_group
+
+resources:
+  networking:
+    vpc: true
+    private_network: true
+
+constraints:
+  region: us-east-1
+  cidr: 10.0.0.0/16
+
+acceptance_criteria:
+  - type: destruction
+    expect: no_orphans

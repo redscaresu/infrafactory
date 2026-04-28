@@ -1,0 +1,28 @@
+scenario: aws-instance
+version: "1.0"
+cloud: aws
+description: >
+  An EC2 instance running on Amazon Linux 2 inside a VPC + subnet,
+  protected by a security group. Exercises fakeaws's EC2 compute
+  handlers (handlers/ec2.go: RunInstances, DescribeInstances,
+  TerminateInstances) plus the SubnetId/SecurityGroupId VPC-pairing
+  contract. The aws_resource_anchors list pins the specific per-API
+  resource types this scenario asserts coverage for.
+
+aws_resource_anchors:
+  - aws_vpc
+  - aws_subnet
+  - aws_security_group
+  - aws_instance
+
+resources:
+  compute:
+    purpose: app-server
+    size: small
+
+constraints:
+  region: us-east-1
+
+acceptance_criteria:
+  - type: destruction
+    expect: no_orphans
