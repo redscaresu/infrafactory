@@ -49,6 +49,19 @@ func TestLoadAWSScenarios(t *testing.T) {
 				"aws_vpc", "aws_subnet", "aws_security_group", "aws_instance",
 			},
 		},
+		{
+			path:          filepath.Join(repo, "scenarios", "training", "aws-rds.yaml"),
+			expectedCloud: "aws",
+			expectedAnchors: []string{
+				"aws_vpc", "aws_subnet", "aws_db_subnet_group",
+				"aws_db_parameter_group", "aws_db_instance",
+			},
+		},
+		{
+			path:          filepath.Join(repo, "scenarios", "training", "aws-dynamodb.yaml"),
+			expectedCloud: "aws",
+			expectedAnchors: []string{"aws_dynamodb_table"},
+		},
 	}
 	for _, c := range cases {
 		t.Run(filepath.Base(c.path), func(t *testing.T) {

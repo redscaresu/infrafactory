@@ -1,0 +1,24 @@
+scenario: aws-dynamodb
+version: "1.0"
+cloud: aws
+description: >
+  A DynamoDB table with PAY_PER_REQUEST billing and a single hash key.
+  Exercises fakeaws's DynamoDB JSON 1.1 handlers (handlers/dynamodb.go).
+  GSI/LSI explicitly out of scope at v1 per fakeaws/concepts.md.
+  The aws_resource_anchors list pins the per-API resource types this
+  scenario asserts coverage for.
+
+aws_resource_anchors:
+  - aws_dynamodb_table
+
+resources:
+  dynamodb:
+    purpose: app-state
+    billing_mode: PAY_PER_REQUEST
+
+constraints:
+  region: us-east-1
+
+acceptance_criteria:
+  - type: destruction
+    expect: no_orphans

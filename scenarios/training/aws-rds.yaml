@@ -1,0 +1,28 @@
+scenario: aws-rds
+version: "1.0"
+cloud: aws
+description: >
+  An RDS PostgreSQL instance backed by a DBSubnetGroup spanning two
+  subnets in a custom VPC. Exercises fakeaws's RDS Query-RPC handlers
+  (handlers/rds.go) end-to-end including the load-bearing
+  DBSubnetGroup ↔ EC2-subnets-in-same-VPC contract. The aws_resource_anchors
+  list pins the per-API resource types this scenario asserts coverage for.
+
+aws_resource_anchors:
+  - aws_vpc
+  - aws_subnet
+  - aws_db_subnet_group
+  - aws_db_parameter_group
+  - aws_db_instance
+
+resources:
+  database:
+    engine: postgresql
+    size: small
+
+constraints:
+  region: us-east-1
+
+acceptance_criteria:
+  - type: destruction
+    expect: no_orphans
