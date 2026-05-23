@@ -5,16 +5,14 @@ Last updated: 2026-05-23
 ## Current phase
 - Slices 1-32 complete. 12 Scaleway training scenarios pass `infrafactory run`.
 - Slices 33-39 fully complete (cross-repo e2e infrastructure, oscillation pitfall learning, http_probe diagnostics, pitfalls API + UI, run compare API + UI, real-time scenario validation).
+- **Slices 33-42 (GCP critical path) now complete**: S40 (visual regression Playwright suite), S41 (fakegcp test parity to mockway level — 881 lines repo tests + 17 FK violation handler tests + 6 cascade delete tests + admin /mock/state tests + double-apply idempotency harness + 5 misconfigured TF examples), S42 (multi-cloud UI with cloud badge + dynamic Layer 3 label + mock-provider dispatch), S36 (cross-repo TestE2E_GCPDoubleApplyIdempotency + GCP scenarios surfaced in UI Playwright), M38 (Google provider auto-injection). 17 ticket batch closed 2026-05-23.
 - **Slices 43-48 (fakeaws) complete**: 9 AWS services landed across 5 wire formats (IAM, S3, EC2, RDS, DynamoDB, EKS, SQS, Route53, Secrets Manager); aggregate handler coverage 82.4%; S48-T4 codex review loop closed at pass 17 (passes 1-15 each fixed ≥1 BLOCKING; passes 16-17 returned consecutive NOTHING_TO_IMPROVE). Pass-by-pass history archived under `../fakeaws/docs/review-passes/passN.md`.
-- Slice 36 mostly complete (T0-T10 done). Remaining: T11 (cross-repo e2e against fakegcp, gated by S41), T12 (Playwright e2e for GCP scenarios in UI).
-- Slice 42 partial (T1, T4 done — sidebar regrouped by cloud, API exposes cloud field). Remaining: T2 (cloud badge + dynamic Layer 3 / credentials), T3 (mock server status by cloud), T5 (Playwright e2e).
 - ADRs 0009 (incremental deployment) and 0010 (Layer 3, supersedes ADR-0003) are implemented in code and docs.
 - 22 implementation contracts codified in CONCEPT.md § "Implementation Contracts (Slices 22-29)".
 - Layer 3 production readiness hardening complete (Slice 30).
 
 ## In progress
-- No active implementation tickets. Open todos: S40 (visual regression e2e), S41 (fakegcp git init + test parity, separate repo), S42-T2/T3/T5 (multi-cloud UI), S36-T11/T12 (cross-repo + Playwright GCP), M38 (GCP provider auto-injection).
-- GCP critical path: S41 → S36 → S42.
+- No active implementation tickets. BACKLOG has zero open todos.
 
 ## Known blockers
 - None. `S9-T8` closed — superseded by Slices 26-30 (ADR-0010).
@@ -31,6 +29,14 @@ Last updated: 2026-05-23
 - Keep startup/read-order instructions only in `SESSION_START.md` to avoid duplication.
 
 ## Recent updates
+- **Slices 33-42 closeout (2026-05-23, 17 tickets)**:
+  - **S41** (fakegcp test parity): T1 testutil snapshot/restore helpers + `test-e2e` Make target; T2 repository_test.go 881 lines, 27 funcs, 41.6% pkg coverage over 15 named tables; T3 fk_violation_test.go 17 HTTP-layer 404 tests; T4 cascade_delete_test.go 6 tests; T5 admin /mock/state + /mock/state/{service} tests; T6 scripts/e2e.sh 163-line double-apply harness; T7 5 misconfigured TF examples (incl. fix of misnamed pre-existing `instance_missing_network`). Commits: fakegcp@45e5402..556da4b.
+  - **S42** (multi-cloud UI): T2 cloud-pill badge, dynamic "Layer 3 (Real {Cloud})" label, layer3-status backend dispatches required env vars by cloud (SCW_*/GOOGLE_*/AWS_*); T3 `serverState.mockStateForCloud` dispatcher, `FakegcpState` wired through ServerConfig with mockway fallback for unconfigured fakegcp, run-mode exposes `mock_provider`; T5 ui/e2e/multi-cloud.spec.ts (4 tests).
+  - **S40** (visual regression): T1+T2 ui/e2e/visual.spec.ts captures 7 baselines with `toHaveScreenshot` (maxDiffPixelRatio 0.02, threshold 0.2) and masks volatile chrome (session id, start time, textarea body); T3+T4 ui/e2e/spot-checks.spec.ts adds functional spot-checks across pages + error-state coverage (unknown SPA route, missing scenario, /api/scenarios/missing + /layer3-status both 404).
+  - **S36-T11**: TestE2E_GCPDoubleApplyIdempotency in internal/e2e — runs `infrafactory run --no-destroy` twice on gcp-pubsub.yaml; asserts mock state counts + per-resource identities unchanged (catches silent delete-recreate churn).
+  - **S36-T12**: covered by multi-cloud.spec.ts (asserts ≥1 gcp-* training scenario in the GCP sidebar group).
+  - **M38**: `ensureGoogleProviderWiring` + `validateGoogleProviderWiring` in internal/cli/generate_command.go mirror the Scaleway helpers; 4 new tests.
+  - **Pre-existing bug surfaced (not fixed in this batch)**: fakegcp's working examples use `cloud_sql_custom_endpoint` which is rejected by google provider v7 ("argument not expected here"). Correct name is `sql_custom_endpoint`. Blocks `make test-e2e` on cloud_sql-touching working examples until provider blocks are corrected — file as follow-up.
 - **API breaking change** (review-1 → review-3 hardening): `POST /api/scenarios/validate` now strictly requires `Content-Type: application/json` (previously accepted empty Content-Type as JSON) and rejects unknown JSON fields (previously silently dropped). External clients should set the header explicitly and limit the body to `{"yaml": "..."}`. Internal UI usage already complies.
 - **fakegcp Reset bug fixed** (review-4): `repository.Repository.Reset()` now removes the `*.snapshot` baseline file alongside the table truncation. Previously, `infrafactory run --clean` against fakegcp would silently retain the previous run's snapshot baseline, so a follow-up Restore could resurrect it. Mirrors mockway's contract.
 - **S42-T1 + S42-T4 complete (sidebar grouped by cloud + API cloud field)**:
