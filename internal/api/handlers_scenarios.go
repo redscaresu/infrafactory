@@ -46,6 +46,7 @@ type scenarioDetailResponse struct {
 	Name        string                         `json:"name"`
 	Path        string                         `json:"path"`
 	Description string                         `json:"description"`
+	Cloud       string                         `json:"cloud"`
 	RawYAML     string                         `json:"raw_yaml"`
 	Resources   scenario.Resources             `json:"resources"`
 	Constraints map[string]any                 `json:"constraints,omitempty"`
@@ -302,7 +303,8 @@ func scenarioByPathHandler(state *serverState) http.HandlerFunc {
 }
 
 func handleGetScenarioLayer3Status(w http.ResponseWriter, state *serverState, relPath, scenarioFile string) {
-	if _, _, err := loadScenarioFile(scenarioFile, state.scenarioSchemaPathCandidates()); err != nil {
+	sc, _, err := loadScenarioFile(scenarioFile, state.scenarioSchemaPathCandidates())
+	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			writeJSONError(w, http.StatusNotFound, "scenario not found")
 			return
@@ -311,12 +313,12 @@ func handleGetScenarioLayer3Status(w http.ResponseWriter, state *serverState, re
 		return
 	}
 
-	missing := make([]string, 0, 2)
-	if strings.TrimSpace(os.Getenv("SCW_ACCESS_KEY")) == "" {
-		missing = append(missing, "SCW_ACCESS_KEY")
-	}
-	if strings.TrimSpace(os.Getenv("SCW_SECRET_KEY")) == "" {
-		missing = append(missing, "SCW_SECRET_KEY")
+	requiredVars := layer3RequiredEnvForCloud(sc.Cloud)
+	missing := make([]string, 0, len(requiredVars))
+	for _, name := range requiredVars {
+		if strings.TrimSpace(os.Getenv(name)) == "" {
+			missing = append(missing, name)
+		}
 	}
 	ready := len(missing) == 0
 	detail := "Layer 3 credentials ready"
@@ -327,12 +329,28 @@ func handleGetScenarioLayer3Status(w http.ResponseWriter, state *serverState, re
 	writeJSON(w, http.StatusOK, map[string]any{
 		"name":                   filepath.Base(relPath),
 		"path":                   relPath,
+		"cloud":                  sc.Cloud,
 		"config_default_enabled": state.cfg.Validation.Layers.SandboxDeploy.Enabled,
 		"credentials_ready":      ready,
 		"missing_credentials":    missing,
 		"ready":                  ready,
 		"detail":                 detail,
 	})
+}
+
+// layer3RequiredEnvForCloud returns the env vars that must be set for the
+// Layer 3 (real-cloud) credentials check, dispatched by the scenario's
+// `cloud` field. Falls back to Scaleway for empty/unknown values to keep
+// pre-multi-cloud scenarios working unchanged.
+func layer3RequiredEnvForCloud(cloud string) []string {
+	switch strings.ToLower(strings.TrimSpace(cloud)) {
+	case "gcp":
+		return []string{"GOOGLE_CREDENTIALS", "GOOGLE_PROJECT"}
+	case "aws":
+		return []string{"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"}
+	default:
+		return []string{"SCW_ACCESS_KEY", "SCW_SECRET_KEY"}
+	}
 }
 
 func handleGetScenarioByPath(w http.ResponseWriter, state *serverState, relPath, scenarioFile string) {
@@ -350,6 +368,7 @@ func handleGetScenarioByPath(w http.ResponseWriter, state *serverState, relPath,
 		Name:        sc.Name,
 		Path:        relPath,
 		Description: sc.Description,
+		Cloud:       sc.Cloud,
 		RawYAML:     string(rawYAML),
 		Resources:   sc.Resources,
 		Constraints: sc.Constraints,
@@ -434,12 +453,13 @@ func handleGetScenarioRunMode(w http.ResponseWriter, ctx context.Context, state 
 		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if state.mockState == nil {
-		writeJSONError(w, http.StatusNotImplemented, "mock state detection is not configured")
+	mockReader, mockName := state.mockStateForCloud(sc.Cloud)
+	if mockReader == nil {
+		writeJSONError(w, http.StatusNotImplemented, "mock state detection is not configured for cloud="+sc.Cloud)
 		return
 	}
 
-	statePayload, err := state.mockState.State(ctx)
+	statePayload, err := mockReader.State(ctx)
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -458,7 +478,7 @@ func handleGetScenarioRunMode(w http.ResponseWriter, ctx context.Context, state 
 
 	missing := make([]string, 0, 3)
 	if !hasMockResources {
-		missing = append(missing, "mockway state")
+		missing = append(missing, mockName+" state")
 	}
 	if !hasTFState {
 		missing = append(missing, "terraform.tfstate")
@@ -468,7 +488,7 @@ func handleGetScenarioRunMode(w http.ResponseWriter, ctx context.Context, state 
 	}
 
 	mode := "incremental"
-	reason := "auto-detected from mockway state, terraform.tfstate, and previous successful run"
+	reason := "auto-detected from " + mockName + " state, terraform.tfstate, and previous successful run"
 	if len(missing) > 0 {
 		mode = "clean"
 		reason = "missing " + strings.Join(missing, ", ")
@@ -477,6 +497,8 @@ func handleGetScenarioRunMode(w http.ResponseWriter, ctx context.Context, state 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"name":                        sc.Name,
 		"path":                        relPath,
+		"cloud":                       sc.Cloud,
+		"mock_provider":               mockName,
 		"mode":                        mode,
 		"reason":                      reason,
 		"previous_run_id":             previousRunID,

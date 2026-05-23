@@ -25,6 +25,7 @@ type ServerConfig struct {
 	Config        config.Config
 	Store         *runstore.FilesystemStore
 	MockState     MockStateReader
+	FakegcpState  MockStateReader
 	Formatter     IaCFormatter
 	Hub           *Hub
 	SchemaPath    string
@@ -59,15 +60,16 @@ func NewServer(cfg ServerConfig) *http.Server {
 	}
 
 	state := &serverState{
-		cfg:        cfg.Config,
-		store:      store,
-		mockState:  cfg.MockState,
-		formatter:  cfg.Formatter,
-		hub:        cfg.Hub,
-		schemaPath: cfg.SchemaPath,
-		runStarter: cfg.RunStarter,
-		sessionID:  fmt.Sprintf("%d-%d", os.Getpid(), time.Now().UTC().UnixNano()),
-		startedAt:  time.Now().UTC(),
+		cfg:          cfg.Config,
+		store:        store,
+		mockState:    cfg.MockState,
+		fakegcpState: cfg.FakegcpState,
+		formatter:    cfg.Formatter,
+		hub:          cfg.Hub,
+		schemaPath:   cfg.SchemaPath,
+		runStarter:   cfg.RunStarter,
+		sessionID:    fmt.Sprintf("%d-%d", os.Getpid(), time.Now().UTC().UnixNano()),
+		startedAt:    time.Now().UTC(),
 	}
 	if state.hub == nil {
 		state.hub = NewHub()
@@ -75,6 +77,12 @@ func NewServer(cfg ServerConfig) *http.Server {
 	if state.mockState == nil && strings.TrimSpace(cfg.Config.Mockway.URL) != "" {
 		state.mockState = &httpMockStateClient{
 			baseURL: strings.TrimRight(cfg.Config.Mockway.URL, "/"),
+			client:  &http.Client{Timeout: 5 * time.Second},
+		}
+	}
+	if state.fakegcpState == nil && strings.TrimSpace(cfg.Config.Fakegcp.URL) != "" {
+		state.fakegcpState = &httpMockStateClient{
+			baseURL: strings.TrimRight(cfg.Config.Fakegcp.URL, "/"),
 			client:  &http.Client{Timeout: 5 * time.Second},
 		}
 	}
@@ -112,15 +120,29 @@ func NewServer(cfg ServerConfig) *http.Server {
 }
 
 type serverState struct {
-	cfg        config.Config
-	store      *runstore.FilesystemStore
-	mockState  MockStateReader
-	formatter  IaCFormatter
-	hub        *Hub
-	schemaPath string
-	runStarter RunStarter
-	sessionID  string
-	startedAt  time.Time
+	cfg          config.Config
+	store        *runstore.FilesystemStore
+	mockState    MockStateReader
+	fakegcpState MockStateReader
+	formatter    IaCFormatter
+	hub          *Hub
+	schemaPath   string
+	runStarter   RunStarter
+	sessionID    string
+	startedAt    time.Time
+}
+
+// mockStateForCloud picks the mock-state reader appropriate for the
+// scenario's cloud field. Falls back to mockState (Scaleway) for empty/
+// unknown clouds to preserve pre-multi-cloud behavior.
+func (s *serverState) mockStateForCloud(cloud string) (MockStateReader, string) {
+	switch strings.ToLower(strings.TrimSpace(cloud)) {
+	case "gcp":
+		if s.fakegcpState != nil {
+			return s.fakegcpState, "fakegcp"
+		}
+	}
+	return s.mockState, "mockway"
 }
 
 type httpMockStateClient struct {

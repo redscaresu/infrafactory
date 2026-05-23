@@ -60,6 +60,16 @@
   $: scenarioPath = ($page.params.path || "").toString();
   $: runModeCard = modeSummary(runMode);
 
+  const CLOUD_LABELS: Record<string, string> = {
+    scaleway: "Scaleway",
+    gcp: "GCP",
+    aws: "AWS"
+  };
+
+  $: detailCloud = (detail?.cloud || "").toLowerCase();
+  $: cloudLabel = CLOUD_LABELS[detailCloud] || (detailCloud ? detailCloud.toUpperCase() : "Unknown");
+  $: layer3CloudLabel = CLOUD_LABELS[detailCloud] || "Cloud";
+
   function encodeLiveURL(scenario: string, runID: string): string {
     return `/live?scenario=${encodeURIComponent(scenario)}&run_id=${encodeURIComponent(runID)}`;
   }
@@ -157,7 +167,15 @@
 </script>
 
 {#if detail}
-  <h1 class="text-2xl font-bold text-slate-900">{detail.name}</h1>
+  <div class="flex flex-wrap items-center gap-3">
+    <h1 class="text-2xl font-bold text-slate-900">{detail.name}</h1>
+    <span
+      class="rounded-full bg-indigo-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-indigo-900"
+      data-testid="scenario-cloud-badge"
+    >
+      {cloudLabel}
+    </span>
+  </div>
   <p class="mt-2 text-slate-700">{detail.description}</p>
   <div class="mt-4 rounded border border-slate-300 bg-white/80 p-4">
     <div class="flex items-start justify-between gap-4">
@@ -182,7 +200,9 @@
     </div>
     {#if runMode}
       <div class="mt-4 grid gap-2 text-xs text-slate-600 md:grid-cols-3">
-        <div class="rounded bg-slate-100 px-3 py-2">Mock resources: {runMode.has_mock_resources ? "yes" : "no"}</div>
+        <div class="rounded bg-slate-100 px-3 py-2" data-testid="scenario-mock-status">
+          {runMode.mock_provider || "mockway"} state: {runMode.has_mock_resources ? "yes" : "no"}
+        </div>
         <div class="rounded bg-slate-100 px-3 py-2">terraform.tfstate: {runMode.has_tfstate ? "yes" : "no"}</div>
         <div class="rounded bg-slate-100 px-3 py-2">Previous success: {runMode.has_previous_successful_run ? "yes" : "no"}</div>
       </div>
@@ -194,7 +214,7 @@
       <div class="flex flex-wrap items-center gap-3">
         <label class="flex items-center gap-2 rounded border border-slate-300 bg-white px-3 py-2 text-xs text-slate-800">
           <input type="checkbox" bind:checked={layer3Enabled} />
-          <span>Layer 3 (Real Scaleway)</span>
+          <span data-testid="scenario-layer3-label">Layer 3 (Real {layer3CloudLabel})</span>
         </label>
         <span class={`rounded-full px-2 py-1 font-semibold uppercase tracking-[0.16em] ${layer3Status?.ready ? "bg-emerald-100 text-emerald-900" : "bg-rose-100 text-rose-900"}`}>
           {layer3Status?.ready ? "credentials ready" : "credentials missing"}

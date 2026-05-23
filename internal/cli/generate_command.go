@@ -110,6 +110,73 @@ func detectScalewayProviderWiring(files map[string][]byte) (bool, bool, bool) {
 	return hasScalewayResource, hasRequiredProviders, hasProviderBlock
 }
 
+func ensureGoogleProviderWiring(files map[string][]byte) {
+	hasGoogleResource, hasRequiredProviders, hasProviderBlock := detectGoogleProviderWiring(files)
+	if !hasGoogleResource {
+		return
+	}
+	missingRequiredProviders := !hasRequiredProviders
+	missingProviderBlock := !hasProviderBlock
+	if !missingRequiredProviders && !missingProviderBlock {
+		return
+	}
+
+	sections := make([]string, 0, 2)
+	if missingRequiredProviders {
+		sections = append(sections, `terraform {
+  required_providers {
+    google = {
+      source = "hashicorp/google"
+    }
+  }
+}`)
+	}
+	if missingProviderBlock {
+		sections = append(sections, `provider "google" {}`)
+	}
+	injected := strings.Join(sections, "\n\n")
+	if existing, ok := files["providers.tf"]; ok && strings.TrimSpace(string(existing)) != "" {
+		files["providers.tf"] = []byte(strings.TrimSpace(string(existing)) + "\n\n" + injected + "\n")
+		return
+	}
+	files["providers.tf"] = []byte(injected + "\n")
+}
+
+func validateGoogleProviderWiring(files map[string][]byte) error {
+	hasGoogleResource, hasRequiredProviders, hasProviderBlock := detectGoogleProviderWiring(files)
+
+	if !hasGoogleResource {
+		return nil
+	}
+	if !hasRequiredProviders {
+		return fmt.Errorf("google resources detected but required_providers.google is missing")
+	}
+	if !hasProviderBlock {
+		return fmt.Errorf("google resources detected but provider \"google\" block is missing")
+	}
+	return nil
+}
+
+func detectGoogleProviderWiring(files map[string][]byte) (bool, bool, bool) {
+	hasGoogleResource := false
+	hasRequiredProviders := false
+	hasProviderBlock := false
+
+	for _, content := range files {
+		text := strings.ToLower(string(content))
+		if strings.Contains(text, "google_") {
+			hasGoogleResource = true
+		}
+		if strings.Contains(text, "required_providers") && strings.Contains(text, "google") {
+			hasRequiredProviders = true
+		}
+		if strings.Contains(text, `provider "google"`) {
+			hasProviderBlock = true
+		}
+	}
+	return hasGoogleResource, hasRequiredProviders, hasProviderBlock
+}
+
 type feedbackFailure struct {
 	Layer        string `json:"layer"`
 	Stage        string `json:"stage"`
@@ -199,6 +266,10 @@ func generateAndWriteFilesWithResult(ctx context.Context, runtime *CommandRuntim
 	}
 	ensureScalewayProviderWiring(generated.Files)
 	if err := validateScalewayProviderWiring(generated.Files); err != nil {
+		return 0, nil, fmt.Errorf("validate generated files: %w", err)
+	}
+	ensureGoogleProviderWiring(generated.Files)
+	if err := validateGoogleProviderWiring(generated.Files); err != nil {
 		return 0, nil, fmt.Errorf("validate generated files: %w", err)
 	}
 	written, err := writeGeneratedFiles(runtime.OutputDir(), generated.Files, writeMode)

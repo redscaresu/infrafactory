@@ -77,19 +77,19 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 | M37 | Maintenance | Per-cloud constraint_policies map (state-policy evaluator dispatches by sc.Cloud, not the global single map today) | P1 | done | S36-T7 | claude (review-17) |
 | M40 | Maintenance | fakeaws cross-pollination policy enforcement (FOLDED into S48-T4 acceptance criteria — kept as historical reference for traceability): every phase exit's codex pass enumerates AWS-specific vs cross-cloud findings; cross-cloud findings get follow-up `M<n>` tickets filed against mockway/fakegcp before the next phase begins | — | done | S48-T4 | folded-pass-6 |
 | M39 | Maintenance | fakeaws per-service ARN builders (FOLDED into S43-T2 acceptance criteria — kept as historical reference): pass-6 retracted the original single-generic-ARN design; the resolved design is per-service `BuildXxxARN(...)` helpers in `awsproto/arn.go` because real AWS ARN formats vary per service (IAM omits region, S3 is bucket-scoped, Route53 is global, EC2/RDS/EKS embed region+account) | — | done | S43-T2 | folded-pass-6 |
-| M38 | Maintenance | Auto-inject hashicorp/google provider wiring on GCP scenarios (analog of Slice 14/15 Scaleway provider auto-injection) | P1 | todo | S36-T1 | — |
+| M38 | Maintenance | Auto-inject hashicorp/google provider wiring on GCP scenarios (analog of Slice 14/15 Scaleway provider auto-injection) | P1 | done | S36-T1 | claude (ensureGoogleProviderWiring + validateGoogleProviderWiring in internal/cli/generate_command.go, mirrored from Scaleway helpers; 4 new tests) |
 | S42-T5 | Slice 42 | Playwright e2e: GCP sidebar group, cloud badge, credentials, mock status | P1 | todo | S42-T2 | — |
 | S42-T4 | Slice 42 | API: GET /api/scenarios returns cloud field, layer3-status adapts per cloud | P1 | done | S36-T8 | claude |
-| S42-T3 | Slice 42 | UI scenario page: mock server status based on cloud (mockway vs fakegcp) | P1 | todo | S42-T2, S36-T8 | — |
-| S42-T2 | Slice 42 | UI scenario page: cloud provider badge, dynamic Layer 3 label and credentials | P1 | todo | S42-T1 | — |
+| S42-T3 | Slice 42 | UI scenario page: mock server status based on cloud (mockway vs fakegcp) | P1 | done | S42-T2, S36-T8 | claude (serverState.mockStateForCloud dispatcher + FakegcpState wired through ServerConfig; run-mode endpoint returns mock_provider; UI displays "{provider} state: yes/no") |
+| S42-T2 | Slice 42 | UI scenario page: cloud provider badge, dynamic Layer 3 label and credentials | P1 | done | S42-T1 | claude (cloud pill in scenario header, dynamic "Layer 3 (Real {Cloud})" label, layer3-status backend now dispatches required env vars by cloud) |
 | S42-T1 | Slice 42 | UI sidebar: group scenarios by cloud provider (Scaleway / GCP sections) | P1 | done | — | claude |
 | S41-T7 | Slice 41 | fakegcp: misconfigured Terraform examples (FK violations, wrong refs, ordering) | P1 | todo | S41-T1 | — |
 | S41-T6 | Slice 41 | fakegcp: double-apply idempotency automation for all working examples | P1 | todo | S41-T1 | — |
 | S41-T5 | Slice 41 | fakegcp: admin endpoint tests (/mock/state, /mock/reset, /mock/snapshot, /mock/restore) | P1 | todo | S41-T1 | — |
 | S41-T4 | Slice 41 | fakegcp: FK cascade delete tests for all parent-child relationships | P1 | todo | S41-T1 | — |
 | S41-T3 | Slice 41 | fakegcp: FK violation tests for all cross-resource references | P1 | todo | S41-T1 | — |
-| S41-T2 | Slice 41 | fakegcp: repository unit tests (CRUD, schema migration, FK enforcement) | P1 | todo | — | — |
-| S41-T1 | Slice 41 | fakegcp: test infrastructure — testutil helpers, coverage reporting, Makefile test targets | P1 | todo | — | — |
+| S41-T2 | Slice 41 | fakegcp: repository unit tests (CRUD, schema migration, FK enforcement) | P1 | done | — | claude+agent (881 lines repository/repository_test.go, 27 test funcs, 41.6% pkg coverage on the 15 named tables — fakegcp@2887d22) |
+| S41-T1 | Slice 41 | fakegcp: test infrastructure — testutil helpers, coverage reporting, Makefile test targets | P1 | done | — | claude (Snapshot/Restore/GetState helpers + test-e2e Makefile target gated by FAKEGCP_ENABLE_E2E=1) |
 | S41-T0 | Slice 41 | fakegcp: initialize git repo, commit existing code, push to GitHub | P1 | done | — | claude (user-authorized push) |
 | S40-T4 | Slice 40 | Error state coverage: empty states, 404 pages, API errors, missing scenarios | P1 | todo | — | — |
 | S40-T3 | Slice 40 | Functional spot-checks: verify data rendering across all pages | P1 | todo | — | — |

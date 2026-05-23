@@ -259,6 +259,107 @@ func TestGenerateCommandAutoAddsScalewayProviderWiringWhenMissing(t *testing.T) 
 	}
 }
 
+func TestGenerateCommandAutoAddsGoogleProviderWiringWhenMissing(t *testing.T) {
+	t.Parallel()
+
+	h := newCommandTestHarness(t)
+	outputRoot := filepath.Join(h.WorkspaceDir, "output")
+
+	opts := runtimeOptions{
+		configLoader: func(path string) (config.Config, error) {
+			cfg, err := config.Load(path)
+			if err != nil {
+				return config.Config{}, err
+			}
+			cfg.Paths.Output = outputRoot
+			return cfg, nil
+		},
+		scenarioLoader: defaultScenarioLoader,
+		deps: RuntimeDependencies{
+			Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
+				return &generator.GeneratedCode{
+					Files: map[string][]byte{
+						"compute.tf": []byte(`resource "google_compute_network" "vpc_1" { name = "vpc-1" }`),
+					},
+				}, nil
+			}),
+		},
+	}
+
+	cmd := newGenerateCommandForTest(opts)
+	stdout := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{h.ScenarioPath, "--config", h.ConfigPath})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute generate: %v", err)
+	}
+
+	providersPath := filepath.Join(outputRoot, "example-scenario", "providers.tf")
+	providers, err := os.ReadFile(providersPath)
+	if err != nil {
+		t.Fatalf("expected generated provider file %q: %v", providersPath, err)
+	}
+	providersContent := string(providers)
+	if !strings.Contains(providersContent, "required_providers") || !strings.Contains(providersContent, "hashicorp/google") {
+		t.Fatalf("expected required_providers.google wiring, got:\n%s", providersContent)
+	}
+	if !strings.Contains(providersContent, `provider "google"`) {
+		t.Fatalf("expected provider block wiring, got:\n%s", providersContent)
+	}
+	if !strings.Contains(stdout.String(), "Status: success") {
+		t.Fatalf("expected success output, got:\n%s", stdout.String())
+	}
+}
+
+func TestEnsureGoogleProviderWiringNoOpWhenNoGoogleResources(t *testing.T) {
+	t.Parallel()
+
+	files := map[string][]byte{
+		"main.tf": []byte(`resource "scaleway_instance_server" "web" {}`),
+	}
+	ensureGoogleProviderWiring(files)
+	if _, ok := files["providers.tf"]; ok {
+		t.Fatalf("expected no providers.tf injection when no google_ resources present, got: %s", files["providers.tf"])
+	}
+}
+
+func TestEnsureGoogleProviderWiringPreservesExistingProvidersTF(t *testing.T) {
+	t.Parallel()
+
+	files := map[string][]byte{
+		"compute.tf": []byte(`resource "google_compute_network" "vpc" { name = "vpc" }`),
+		"providers.tf": []byte(`terraform {
+  required_providers {
+    google = {
+      source = "hashicorp/google"
+    }
+  }
+}
+
+provider "google" {}
+`),
+	}
+	ensureGoogleProviderWiring(files)
+	got := string(files["providers.tf"])
+	// Should not double-inject when both required_providers.google and provider "google" already present.
+	if strings.Count(got, `provider "google"`) != 1 {
+		t.Fatalf("expected single provider \"google\" block, got:\n%s", got)
+	}
+}
+
+func TestValidateGoogleProviderWiringErrorsWhenIncomplete(t *testing.T) {
+	t.Parallel()
+
+	files := map[string][]byte{
+		"compute.tf": []byte(`resource "google_compute_network" "vpc" {}`),
+	}
+	if err := validateGoogleProviderWiring(files); err == nil {
+		t.Fatalf("expected error when google_ resources exist without provider wiring")
+	}
+}
+
 func TestWriteGeneratedFilesIncrementalPreservesTerraformState(t *testing.T) {
 	t.Parallel()
 

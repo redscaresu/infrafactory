@@ -37,6 +37,7 @@ export interface ScenarioDetail {
   name: string;
   path: string;
   description: string;
+  cloud: string;
   raw_yaml: string;
   resources: Record<string, unknown>;
   constraints?: Record<string, unknown>;
@@ -52,6 +53,8 @@ export interface StartRunOptions {
 export interface ScenarioRunModeResponse {
   name: string;
   path: string;
+  cloud?: string;
+  mock_provider?: string;
   mode: "clean" | "incremental";
   reason: string;
   previous_run_id?: string;
@@ -63,6 +66,7 @@ export interface ScenarioRunModeResponse {
 export interface ScenarioLayer3StatusResponse {
   name: string;
   path: string;
+  cloud?: string;
   config_default_enabled: boolean;
   credentials_ready: boolean;
   missing_credentials: string[];
