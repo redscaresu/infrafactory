@@ -107,7 +107,7 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 | S37-T2 | Slice 37 | PUT /api/pitfalls/{provider} endpoint for editing | P1 | done | S37-T1 | claude |
 | S37-T1 | Slice 37 | GET /api/pitfalls endpoint returning pitfalls grouped by provider | P1 | done | — | claude |
 | S36-T12 | Slice 36 | Playwright e2e: GCP scenarios appear in UI scenario list | P1 | done | S36-T10 | claude (covered by ui/e2e/multi-cloud.spec.ts "sidebar groups scenarios by cloud and includes a GCP section" — asserts ≥1 gcp-* training link present under the GCP group) |
-| S36-T11 | Slice 36 | Cross-repo e2e tests against fakegcp + double-apply idempotency | P1 | todo | S33-T1, S36-T10, S41-T1 | — |
+| S36-T11 | Slice 36 | Cross-repo e2e tests against fakegcp + double-apply idempotency | P1 | done | S33-T1, S36-T10, S41-T1 | claude (cross-repo TestE2E_GCP* lifecycle suite already in place via StartFakegcp + runGCPServiceScenario; this slice adds TestE2E_GCPDoubleApplyIdempotency in internal/e2e/gcp_idempotency_test.go — runs infrafactory run --no-destroy twice on gcp-pubsub.yaml and asserts mock state counts + per-resource identities are identical, catching silent delete-recreate churn) |
 | S36-T10 | Slice 36 | GCP training scenarios (gcp-vm-network, gcp-gke-cluster, gcp-cloud-sql, gcp-full-stack) | P1 | done | S36-T2, S36-T3, S36-T6, S36-T7, S36-T8 | claude |
 | S36-T9 | Slice 36 | Add GCP resource patterns to real_probe.go | P1 | done | S36-T4 | claude |
 | S36-T8 | Slice 36 | Generalize mockway_client.go for multi-cloud mock (fakegcp admin endpoints) | P1 | done | — | claude |
