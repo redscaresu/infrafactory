@@ -89,8 +89,11 @@ func TestE2E_AWS_S3(t *testing.T) {
 	SkipUnlessEnabled(t)
 	mock := StartFakeaws(t)
 
-	// PutBucket.
-	resp, _ := awsPost(t, mock.URL+"/s3/e2e-bucket/", "", "")
+	// PutBucket. S3 CreateBucket is HTTP PUT, not POST — the fakeaws
+	// router registers it as PUT only; a POST hits the unimplemented
+	// catch-all and returns 501. Pre-S51-era test bug; the rest of
+	// the test below already uses awsPut for versioning/tagging.
+	resp, _ := awsPut(t, mock.URL+"/s3/e2e-bucket/", "", "")
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("PutBucket: %d", resp.StatusCode)
 	}

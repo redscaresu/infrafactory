@@ -367,6 +367,7 @@ constraint_policies:
   no_public_database: scaleway/no_public_database.rego
   encryption_at_rest: scaleway/encryption_at_rest.rego
   no_public_endpoints: scaleway/no_public_endpoints.rego
+  region_restriction: scaleway/region_restriction.rego
   region: scaleway/region_restriction.rego
   zone: scaleway/region_restriction.rego
 paths:

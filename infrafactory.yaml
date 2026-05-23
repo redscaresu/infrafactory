@@ -51,6 +51,12 @@ constraint_policies:
   no_public_database: scaleway/no_public_database.rego
   encryption_at_rest: scaleway/encryption_at_rest.rego
   no_public_endpoints: scaleway/no_public_endpoints.rego
+  # region_restriction is the criterion `check:` value post-S51 (the
+  # migration renamed from constraint-key `region` to policy-name
+  # `region_restriction` to make the criterion self-documenting).
+  # Keep the legacy `region` + `zone` keys for backwards compat with
+  # any external scenario YAML still using the pre-S51 names.
+  region_restriction: scaleway/region_restriction.rego
   region: scaleway/region_restriction.rego
   zone: scaleway/region_restriction.rego
 

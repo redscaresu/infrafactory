@@ -556,14 +556,19 @@ var cloudConstraintPolicies = map[string]map[string]string{
 		"encryption_at_rest":  "gcp/encryption.rego",
 		"no_public_endpoints": "gcp/no_public_sql.rego",
 		"no_public_database":  "gcp/no_public_sql.rego",
-		"region":              "gcp/region_restriction.rego",
-		"zone":                "gcp/region_restriction.rego",
+		// region_restriction is the post-S51 criterion check name
+		// (matches the .rego filename); `region`/`zone` kept as
+		// legacy aliases for pre-S51 scenarios.
+		"region_restriction": "gcp/region_restriction.rego",
+		"region":             "gcp/region_restriction.rego",
+		"zone":               "gcp/region_restriction.rego",
 	},
 	"aws": {
 		"encryption_at_rest":  "aws/encryption.rego",
 		"no_public_endpoints": "aws/no_public_db.rego",
 		"no_public_database":  "aws/no_public_db.rego",
 		"vpc_required":        "aws/vpc_required.rego",
+		"region_restriction":  "aws/region_restriction.rego",
 		"region":              "aws/region_restriction.rego",
 	},
 }
