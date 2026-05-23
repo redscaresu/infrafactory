@@ -1,6 +1,52 @@
 # InfraFactory
 
-Scenario-driven infrastructure generation and validation for Scaleway with OpenTofu.
+[![CI](https://github.com/redscaresu/infrafactory/actions/workflows/ci.yml/badge.svg)](https://github.com/redscaresu/infrafactory/actions/workflows/ci.yml)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/redscaresu/infrafactory)](go.mod)
+
+Scenario-driven infrastructure generation and validation across **Scaleway**, **GCP**, and **AWS** — written in OpenTofu, validated against deterministic mock servers, optionally deployed against real cloud APIs.
+
+## Why this exists
+
+Hand-writing IaC + iterating manually against cloud APIs is slow, expensive, and flaky. LLMs are great at writing terraform but bad at debugging "why didn't this apply" — the error messages are layers deep and the feedback loop is 90 seconds per attempt against a real cloud.
+
+InfraFactory closes that loop:
+
+- **Scenario YAML declares intent** (resources + acceptance criteria) — not implementation.
+- **Three-phase LLM generation** (plan → write HCL → self-review) emits OpenTofu.
+- **Four-layer validation** (static → mock deploy → real deploy → destruction) runs in seconds against deterministic SQLite-backed mocks (`mockway`, `fakegcp`, `fakeaws`), not real cloud APIs.
+- **Structured failures feed back into the next iteration's prompt** — the LLM sees what broke, not just that something broke.
+- **`make mocks-up` and you're done.** No cloud credentials, no IAM dance, no waiting for resources to provision.
+
+Who this is for: teams using LLM agents to generate infrastructure-as-code who want a tight inner loop (subsecond mock validation) before paying the cost of a real cloud deploy. Educators who want a reproducible training environment for IaC. Researchers benchmarking LLM IaC generation.
+
+## Quickstart
+
+```bash
+# 1. Clone with siblings (mocks live in adjacent repos)
+mkdir -p ~/dev && cd ~/dev
+for repo in infrafactory mockway fakegcp fakeaws; do
+  git clone https://github.com/redscaresu/$repo.git
+done
+cd infrafactory
+
+# 2. Set up dev tooling
+make install-hooks    # gitleaks + go test pre-commit
+make test             # full suite must pass before you start changing things
+
+# 3. Start the three mocks (Scaleway/GCP/AWS — all on different ports)
+make mocks-up
+
+# 4. Run a scenario end-to-end
+infrafactory run scenarios/training/web-app-paris.yaml      # cloud: scaleway -> mockway
+infrafactory run scenarios/training/gcp-vm-network.yaml     # cloud: gcp      -> fakegcp
+infrafactory run scenarios/training/aws-vpc-network.yaml    # cloud: aws      -> fakeaws
+
+# 5. Or browse the web UI
+make run    # builds + serves UI at http://127.0.0.1:4173
+```
+
+Generated HCL lands in `output/<scenario>/`; immutable per-iteration snapshots live under `.infrafactory/runs/<scenario>/<run-id>/`.
 
 ## Problem It Solves
 

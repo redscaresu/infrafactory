@@ -1,0 +1,66 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build UI (embedded via go:embed)
+        run: |
+          cd ui && npm ci && npm run build
+          cd ..
+          rm -rf cmd/infrafactory/ui/build
+          mkdir -p cmd/infrafactory/ui
+          cp -R ui/build cmd/infrafactory/ui/
+
+      - name: Build binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: |
+          mkdir -p dist
+          BINARY_NAME="infrafactory-${GOOS}-${GOARCH}"
+          go build -trimpath -ldflags "-s -w -X main.version=${GITHUB_REF_NAME}" -o "dist/${BINARY_NAME}" ./cmd/infrafactory
+          (cd dist && sha256sum "${BINARY_NAME}" > "${BINARY_NAME}.sha256")
+
+      - name: Upload binary to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/infrafactory-${{ matrix.goos }}-${{ matrix.goarch }}
+            dist/infrafactory-${{ matrix.goos }}-${{ matrix.goarch }}.sha256
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          generate_release_notes: true
