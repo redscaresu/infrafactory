@@ -20,6 +20,17 @@ InfraFactory closes that loop:
 
 Who this is for: teams using LLM agents to generate infrastructure-as-code who want a tight inner loop (subsecond mock validation) before paying the cost of a real cloud deploy. Educators who want a reproducible training environment for IaC. Researchers benchmarking LLM IaC generation.
 
+## Demo
+
+<!--
+A ~60-second asciinema cast of an end-to-end `infrafactory run` lives at
+docs/demo/infrafactory.cast once recorded. The recording script
+(docs/demo/record.sh) is deterministic so the cast is reproducible.
+Replace the placeholder below with the asciinema URL after recording.
+-->
+
+> 🎬 **Demo:** _coming soon_ — re-record with `./docs/demo/record.sh` after running `make mocks-up`.
+
 ## Quickstart
 
 ```bash

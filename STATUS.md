@@ -12,7 +12,14 @@ Last updated: 2026-05-23
 - Layer 3 production readiness hardening complete (Slice 30).
 
 ## In progress
-- No active implementation tickets. BACKLOG has zero open todos.
+- No active implementation tickets. BACKLOG has S52-T1 + S52-T2 planned (audit-infrastructure parity for mockway + fakegcp) but unstarted.
+
+## OSS-readiness (2026-05-23)
+All four repos (`infrafactory`, `mockway`, `fakegcp`, `fakeaws`) now ship: Apache-2.0 LICENSE, SECURITY.md, CODE_OF_CONDUCT.md (Contributor Covenant v2.1), CONTRIBUTING.md, CHANGELOG.md (Keep a Changelog v1.1.0), .editorconfig, .github/ISSUE_TEMPLATE/ + pull_request_template.md, release workflow. GitHub repo metadata (description, topics, homepage) set on each. Discussions enabled. Pre-commit hook (`gitleaks` + `go test`) installable via `make install-hooks` on every repo. fakegcp gained its first CI workflow this session. Full-history `gitleaks detect` sweep across all four repos (413 commits) returned zero leaks.
+
+**Click-ops still pending (only the user can do these):**
+- `gh repo edit --visibility public` on each repo when ready.
+- Branch protection rules on `main` (blocked by free-tier GitHub on private repos; works post-flip).
 
 ## Known blockers
 - None. `S9-T8` closed — superseded by Slices 26-30 (ADR-0010).
