@@ -559,6 +559,13 @@ var cloudConstraintPolicies = map[string]map[string]string{
 		"region":              "gcp/region_restriction.rego",
 		"zone":                "gcp/region_restriction.rego",
 	},
+	"aws": {
+		"encryption_at_rest":  "aws/encryption.rego",
+		"no_public_endpoints": "aws/no_public_db.rego",
+		"no_public_database":  "aws/no_public_db.rego",
+		"vpc_required":        "aws/vpc_required.rego",
+		"region":              "aws/region_restriction.rego",
+	},
 }
 
 func evaluateStatePolicyCriteria(ctx context.Context, runtime *CommandRuntime, cloud string, stateSnapshot []byte, specs []scenario.ExecutableCheckSpec) []FailureSummary {

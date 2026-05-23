@@ -72,11 +72,16 @@ type RuntimeDependencies struct {
 }
 
 type CommandRuntime struct {
-	ConfigPath         string
-	Config             config.Config
-	TransportContract  generator.TransportContract
-	Deps               RuntimeDependencies
-	Logger             *AppLogger
+	ConfigPath        string
+	Config            config.Config
+	TransportContract generator.TransportContract
+	Deps              RuntimeDependencies
+	Logger            *AppLogger
+	// ProviderSchemaJSON is the cached schema for the *most recently
+	// ensured* cloud. Per-cloud cache lives in schemaByCloud so that a
+	// process that runs scaleway→aws scenarios back-to-back doesn't
+	// re-extract on the second visit AND doesn't leak the scaleway
+	// schema into the aws generator request.
 	ProviderSchemaJSON []byte
 
 	scenarioLoader  func(string) (scenario.Scenario, error)
@@ -84,7 +89,8 @@ type CommandRuntime struct {
 	scenarioPath    string
 	outputDir       string
 	schemaRunner    harness.CommandRunner
-	schemaExtracted bool
+	schemaByCloud   map[string][]byte
+	schemaTriedByCloud map[string]bool
 }
 
 func (r *CommandRuntime) LoadScenario(path string) (scenario.Scenario, error) {
@@ -111,19 +117,50 @@ func (r *CommandRuntime) OutputDir() string {
 	return r.outputDir
 }
 
-// EnsureProviderSchema extracts the Scaleway provider schema once, caching
-// the result for subsequent calls. If extraction fails (no tofu binary,
-// network issues), it logs a warning and proceeds — ProviderSchemaJSON
-// stays nil and prompts work without the schema section.
-func (r *CommandRuntime) EnsureProviderSchema(ctx context.Context) {
-	if r.schemaExtracted || r.schemaRunner == nil {
+// EnsureProviderSchema extracts the provider schema for the given cloud
+// once, caching the result for subsequent calls. The extraction is
+// dispatched to harness.ExtractProviderSchemaForCloud so the right
+// provider binary is invoked (scaleway/scaleway vs hashicorp/google vs
+// hashicorp/aws). The cache is keyed by cloud so a process that runs
+// scaleway→aws scenarios back-to-back gets each schema extracted
+// exactly once and doesn't leak the scaleway schema into the aws
+// generator request.
+//
+// Empty cloud falls back to "scaleway" to preserve pre-multi-cloud
+// behavior — older call sites that don't know the cloud yet still
+// extract the Scaleway schema as the historical default.
+//
+// If extraction fails (no tofu binary, network issues), it logs a
+// warning, marks the cloud as tried (no retry), and proceeds —
+// ProviderSchemaJSON stays nil and prompts work without the schema
+// section.
+func (r *CommandRuntime) EnsureProviderSchema(ctx context.Context, cloud string) {
+	if r.schemaRunner == nil {
 		return
 	}
-	r.schemaExtracted = true
+	if cloud == "" {
+		cloud = "scaleway"
+	}
+	if r.schemaByCloud == nil {
+		r.schemaByCloud = map[string][]byte{}
+	}
+	if r.schemaTriedByCloud == nil {
+		r.schemaTriedByCloud = map[string]bool{}
+	}
+	if cached, ok := r.schemaByCloud[cloud]; ok {
+		r.ProviderSchemaJSON = cached
+		return
+	}
+	if r.schemaTriedByCloud[cloud] {
+		// Prior attempt failed; surface nil schema without retrying.
+		r.ProviderSchemaJSON = nil
+		return
+	}
+	r.schemaTriedByCloud[cloud] = true
 
 	schemaCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
-	schema, err := harness.ExtractProviderSchema(schemaCtx, r.schemaRunner, nil)
+	schema, err := harness.ExtractProviderSchemaForCloud(schemaCtx, r.schemaRunner, nil, cloud)
 	if err != nil {
 		r.Logger.Log(LogEntry{
 			Level:  logLevelInfo,
@@ -131,8 +168,10 @@ func (r *CommandRuntime) EnsureProviderSchema(ctx context.Context) {
 			Status: "skipped",
 			Detail: err.Error(),
 		})
+		r.ProviderSchemaJSON = nil
 		return
 	}
+	r.schemaByCloud[cloud] = schema
 	r.ProviderSchemaJSON = schema
 }
 

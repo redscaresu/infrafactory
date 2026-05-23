@@ -557,6 +557,52 @@ deny_state contains msg if {
 	}
 }
 
+// TestEvaluateStatePolicyCriteriaAWSDispatchesToAWSPolicy proves
+// cloudConstraintPolicies routes a `cloud:aws` scenario's
+// `check: encryption_at_rest` to policies/aws/encryption.rego
+// (not the flat default that previously vacuously passed AWS scenarios).
+func TestEvaluateStatePolicyCriteriaAWSDispatchesToAWSPolicy(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	policiesDir := filepath.Join(root, "policies")
+	if err := os.MkdirAll(filepath.Join(policiesDir, "aws"), 0o755); err != nil {
+		t.Fatalf("mkdir policies dir: %v", err)
+	}
+	// Deny-by-default fixture proves the AWS-specific policy was actually
+	// evaluated rather than silently skipped.
+	policy := `package aws.encryption
+
+import rego.v1
+
+deny_state contains msg if {
+	msg := "aws encryption policy was evaluated"
+}
+`
+	if err := os.WriteFile(filepath.Join(policiesDir, "aws", "encryption.rego"), []byte(policy), 0o644); err != nil {
+		t.Fatalf("write policy fixture: %v", err)
+	}
+
+	runtime := &CommandRuntime{
+		Config: config.Config{
+			Paths: config.PathsConfig{Policies: policiesDir},
+		},
+	}
+	specs := []scenario.ExecutableCheckSpec{{
+		Type:   "policy",
+		Expect: "pass",
+		Policy: &scenario.PolicyCheckSpec{Check: "encryption_at_rest"},
+	}}
+
+	failures := evaluateStatePolicyCriteria(context.Background(), runtime, "aws", []byte(`{"iam":{},"s3":{}}`), specs)
+	if len(failures) != 1 {
+		t.Fatalf("expected aws encryption policy to fire (proving aws map was hit), got %d failures: %+v", len(failures), failures)
+	}
+	if failures[0].Detail == "" || !strings.Contains(failures[0].Detail, "aws encryption policy was evaluated") {
+		t.Fatalf("expected aws-specific deny message in failure detail, got: %+v", failures[0])
+	}
+}
+
 func TestAppendDestroyResultAvoidsConflictingPassFailStages(t *testing.T) {
 	t.Parallel()
 

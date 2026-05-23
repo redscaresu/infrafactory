@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/redscaresu/infrafactory/internal/feedback"
 	"github.com/redscaresu/infrafactory/internal/harness"
@@ -62,6 +63,7 @@ func executeValidateWithArtifacts(ctx context.Context, runtime *CommandRuntime, 
 
 	if staticErr == nil {
 		policyPaths := resolvePolicyPaths(runtime.Config.Paths.Policies, runtime.Config.Validation.Layers.Static.PolicyPaths)
+		policyPaths = filterPolicyPathsByCloud(policyPaths, sc.Cloud)
 		policyFailures, err := harness.EvaluatePlanPoliciesWithConstraints(ctx, staticResult.PlanJSON, sc.Constraints, policyPaths)
 		if err != nil {
 			return OutputResult{}, validateArtifacts{}, fmt.Errorf("evaluate static policies: %w", err)
@@ -128,6 +130,39 @@ func validateCommandEnv(runtime *CommandRuntime) map[string]string {
 		"SCW_SECRET_KEY":         "00000000-0000-0000-0000-000000000000",
 		"SCW_DEFAULT_PROJECT_ID": "00000000-0000-0000-0000-000000000000",
 	}
+}
+
+// filterPolicyPathsByCloud drops paths under `./policies/{other-cloud}/`
+// when a scenario declares a cloud. An `aws` scenario should not have
+// `policies/scaleway/*` or `policies/gcp/*` evaluated against its plan
+// (the rego packages would either no-op vacuously or worse, fire on
+// AWS resource shapes by accident). Paths that don't match any known
+// cloud directory (common/, custom/, project-specific dirs) are kept.
+// An empty/unknown cloud falls through unfiltered for backwards compat.
+func filterPolicyPathsByCloud(paths []string, cloud string) []string {
+	cloud = strings.ToLower(strings.TrimSpace(cloud))
+	if cloud == "" {
+		return paths
+	}
+	knownClouds := []string{"scaleway", "gcp", "aws"}
+	otherClouds := make(map[string]struct{}, len(knownClouds)-1)
+	for _, c := range knownClouds {
+		if c != cloud {
+			otherClouds[c] = struct{}{}
+		}
+	}
+	filtered := make([]string, 0, len(paths))
+	for _, p := range paths {
+		// Match the cloud-segmented directory regardless of the rest
+		// of the path. `./policies/scaleway` and `/abs/path/policies/scaleway`
+		// both filter out for cloud != "scaleway".
+		base := filepath.Base(strings.TrimRight(p, string(filepath.Separator)))
+		if _, isOther := otherClouds[base]; isOther {
+			continue
+		}
+		filtered = append(filtered, p)
+	}
+	return filtered
 }
 
 func resolvePolicyPaths(baseDir string, policyPaths []string) []string {

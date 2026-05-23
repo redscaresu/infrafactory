@@ -35,7 +35,7 @@ validation:
   layers:
     static:
       enabled: true
-      policy_paths: [./policies/common, ./policies/scaleway, ./policies/gcp]
+      policy_paths: [./policies/common, ./policies/scaleway, ./policies/gcp, ./policies/aws]
     mock_deploy:
       enabled: true
     sandbox_deploy:

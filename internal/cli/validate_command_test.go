@@ -378,3 +378,70 @@ func TestResolvePolicyPathsResolvesRelativeToPoliciesDir(t *testing.T) {
 		t.Fatalf("expected joined path %q, got %q", expectedJoined, resolved[2])
 	}
 }
+
+// TestFilterPolicyPathsByCloudDropsOtherCloudSubdirs proves an
+// aws-cloud scenario filters out ./policies/scaleway and ./policies/gcp
+// while keeping common/, custom/, and the cloud's own dir — so the
+// aws plan doesn't have unrelated cloud regos vacuously firing
+// against it.
+func TestFilterPolicyPathsByCloudDropsOtherCloudSubdirs(t *testing.T) {
+	t.Parallel()
+
+	paths := []string{
+		"./policies/common",
+		"./policies/scaleway",
+		"./policies/gcp",
+		"./policies/aws",
+		"./policies/custom",
+	}
+
+	got := filterPolicyPathsByCloud(paths, "aws")
+	want := []string{
+		"./policies/common",
+		"./policies/aws",
+		"./policies/custom",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("expected %d paths after aws filter, got %d: %v", len(want), len(got), got)
+	}
+	for i, p := range want {
+		if got[i] != p {
+			t.Fatalf("idx %d: expected %q, got %q (full: %v)", i, p, got[i], got)
+		}
+	}
+}
+
+// TestFilterPolicyPathsByCloudEmptyCloudIsPassthrough preserves
+// pre-multi-cloud behavior: scenarios that don't declare a cloud get
+// every policy path unchanged.
+func TestFilterPolicyPathsByCloudEmptyCloudIsPassthrough(t *testing.T) {
+	t.Parallel()
+
+	paths := []string{"./policies/common", "./policies/scaleway", "./policies/gcp"}
+	got := filterPolicyPathsByCloud(paths, "")
+	if len(got) != len(paths) {
+		t.Fatalf("expected passthrough on empty cloud, got %v", got)
+	}
+}
+
+// TestFilterPolicyPathsByCloudHandlesAbsolutePaths confirms the base-
+// name match works against absolute paths (production paths arrive
+// post-resolvePolicyPaths so they're typically absolute).
+func TestFilterPolicyPathsByCloudHandlesAbsolutePaths(t *testing.T) {
+	t.Parallel()
+
+	paths := []string{
+		"/etc/infrafactory/policies/common",
+		"/etc/infrafactory/policies/scaleway",
+		"/etc/infrafactory/policies/aws",
+	}
+	got := filterPolicyPathsByCloud(paths, "aws")
+	if len(got) != 2 {
+		t.Fatalf("expected 2 paths after filter, got %v", got)
+	}
+	for _, p := range got {
+		if filepath.Base(p) == "scaleway" {
+			t.Fatalf("scaleway dir should be filtered out for cloud=aws, got %v", got)
+		}
+	}
+}

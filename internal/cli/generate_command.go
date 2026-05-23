@@ -230,12 +230,17 @@ func generateAndWriteFilesWithResult(ctx context.Context, runtime *CommandRuntim
 		return 0, nil, fmt.Errorf("generator dependency unavailable: %w", ErrDependencyUnavailable)
 	}
 
-	runtime.EnsureProviderSchema(ctx)
-
+	// Parse the scenario's cloud BEFORE extracting the provider schema —
+	// the schema dispatcher needs sc.Cloud to pick the right provider
+	// binary (scaleway/scaleway vs hashicorp/google vs hashicorp/aws).
+	// Per-cloud caching inside EnsureProviderSchema keeps this O(1) for
+	// repeat visits within a single process.
 	var scenarioMeta struct {
 		Cloud string `yaml:"cloud"`
 	}
 	_ = yaml.Unmarshal(scenarioPayload, &scenarioMeta)
+
+	runtime.EnsureProviderSchema(ctx, scenarioMeta.Cloud)
 
 	var feedbackPayload []byte
 	if len(feedbackFailures) > 0 {

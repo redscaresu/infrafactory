@@ -46,9 +46,10 @@ test.describe('Functional spot-checks', () => {
   test('pitfalls page renders provider tabs', async ({ page }) => {
     await page.goto('/pitfalls');
     // pitfalls.spec.ts already covers detail; here we just confirm the
-    // page surfaces at least one provider tab.
-    await expect(page.locator('main')).toBeVisible();
+    // page surfaces at least one provider tab. Provider tabs load
+    // async via /api/pitfalls — wait for the first one before counting.
     const providerTabs = page.locator('main button, main [role="tab"]');
+    await providerTabs.first().waitFor({ state: 'visible' });
     expect(await providerTabs.count()).toBeGreaterThan(0);
   });
 

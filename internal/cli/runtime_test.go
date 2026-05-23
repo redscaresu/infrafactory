@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/redscaresu/infrafactory/internal/config"
 	"github.com/redscaresu/infrafactory/internal/generator"
+	"github.com/redscaresu/infrafactory/internal/harness"
 	"github.com/redscaresu/infrafactory/internal/scenario"
 	"github.com/spf13/cobra"
 )
@@ -375,5 +377,97 @@ func TestFormatCommandErrorPassThroughPaths(t *testing.T) {
 	formattedExisting := formatCommandError("run", existing)
 	if formattedExisting != existing {
 		t.Fatalf("expected existing CLI error to pass through unchanged")
+	}
+}
+
+// providersTFEchoRunner is a fake harness.CommandRunner whose Run reads
+// the providers.tf in cmd.Dir on the `tofu providers schema -json`
+// invocation and returns the file's bytes as the "schema". That lets
+// EnsureProviderSchema's per-cloud dispatcher prove it picked the right
+// provider — the schema bytes for scaleway, gcp, aws are all
+// distinguishable.
+type providersTFEchoRunner struct {
+	calls int
+}
+
+func (r *providersTFEchoRunner) Run(_ context.Context, cmd harness.Command) (harness.CommandResult, error) {
+	r.calls++
+	// tofu init is a no-op for the test; only schema returns a payload.
+	if len(cmd.Args) >= 1 && cmd.Args[0] == "providers" {
+		payload, err := os.ReadFile(filepath.Join(cmd.Dir, "providers.tf"))
+		if err != nil {
+			return harness.CommandResult{}, err
+		}
+		return harness.CommandResult{Stdout: payload}, nil
+	}
+	return harness.CommandResult{}, nil
+}
+
+// TestEnsureProviderSchemaLazyDispatchAcrossCloudsInOneProcess pins
+// S43-T9's lazy-extraction contract: a single CommandRuntime visiting
+// scaleway and aws scenarios back-to-back must extract each cloud's
+// schema exactly once AND surface the correct schema for whichever
+// cloud was last requested. Pre-S43-T9 the runtime cached only one
+// schema slot, so a scaleway→aws transition would either re-extract
+// from scratch every call (wasted work) or worse, leak the scaleway
+// schema into the aws generator request.
+func TestEnsureProviderSchemaLazyDispatchAcrossCloudsInOneProcess(t *testing.T) {
+	t.Parallel()
+
+	runner := &providersTFEchoRunner{}
+	runtime := &CommandRuntime{
+		Logger:       NewAppLogger(io.Discard),
+		schemaRunner: runner,
+	}
+
+	runtime.EnsureProviderSchema(context.Background(), "scaleway")
+	if !strings.Contains(string(runtime.ProviderSchemaJSON), "scaleway/scaleway") {
+		t.Fatalf("expected scaleway schema after first call, got %q", runtime.ProviderSchemaJSON)
+	}
+	callsAfterScaleway := runner.calls // 2 calls: init + schema
+
+	runtime.EnsureProviderSchema(context.Background(), "aws")
+	if !strings.Contains(string(runtime.ProviderSchemaJSON), "hashicorp/aws") {
+		t.Fatalf("expected aws schema after second call (cloud transition), got %q", runtime.ProviderSchemaJSON)
+	}
+	if runner.calls <= callsAfterScaleway {
+		t.Fatalf("expected runner to be re-invoked for aws extraction (got %d calls, was %d before aws)", runner.calls, callsAfterScaleway)
+	}
+	callsAfterAWS := runner.calls
+
+	// Second visit to scaleway must hit the cache — no new runner calls,
+	// schema reverts to the scaleway payload.
+	runtime.EnsureProviderSchema(context.Background(), "scaleway")
+	if !strings.Contains(string(runtime.ProviderSchemaJSON), "scaleway/scaleway") {
+		t.Fatalf("expected cached scaleway schema on revisit, got %q", runtime.ProviderSchemaJSON)
+	}
+	if runner.calls != callsAfterAWS {
+		t.Fatalf("expected cache hit for scaleway revisit (no new runner calls), got %d (was %d)", runner.calls, callsAfterAWS)
+	}
+
+	// Second visit to aws must also hit the cache.
+	runtime.EnsureProviderSchema(context.Background(), "aws")
+	if !strings.Contains(string(runtime.ProviderSchemaJSON), "hashicorp/aws") {
+		t.Fatalf("expected cached aws schema on revisit, got %q", runtime.ProviderSchemaJSON)
+	}
+	if runner.calls != callsAfterAWS {
+		t.Fatalf("expected cache hit for aws revisit, got %d (was %d)", runner.calls, callsAfterAWS)
+	}
+}
+
+// TestEnsureProviderSchemaEmptyCloudFallsBackToScaleway preserves the
+// pre-multi-cloud default for any straggling call site that didn't get
+// updated when EnsureProviderSchema gained the cloud parameter.
+func TestEnsureProviderSchemaEmptyCloudFallsBackToScaleway(t *testing.T) {
+	t.Parallel()
+
+	runner := &providersTFEchoRunner{}
+	runtime := &CommandRuntime{
+		Logger:       NewAppLogger(io.Discard),
+		schemaRunner: runner,
+	}
+	runtime.EnsureProviderSchema(context.Background(), "")
+	if !strings.Contains(string(runtime.ProviderSchemaJSON), "scaleway/scaleway") {
+		t.Fatalf("expected empty cloud to fall back to scaleway, got %q", runtime.ProviderSchemaJSON)
 	}
 }
