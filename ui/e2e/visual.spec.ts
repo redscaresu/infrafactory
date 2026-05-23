@@ -9,6 +9,11 @@ import { test, expect } from '@playwright/test';
 const VOLATILE_SELECTORS = [
   // Sidebar diagnostics block (session id + start time change every run).
   'aside .text-xs.text-slate-600',
+  // Mock-status pill on scenario pages — text depends on whether the
+  // mock (mockway/fakegcp/fakeaws) has resources at recording time, so
+  // it differs across runs (baseline captured with empty mocks may diff
+  // from a re-run with a populated mock or vice versa).
+  '[data-testid="scenario-mock-status"]',
 ];
 
 test.describe('Visual regression baselines', () => {
