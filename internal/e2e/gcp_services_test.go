@@ -421,14 +421,25 @@ provider "google" {
     send_after = "0s"
   }
 
+  # Endpoint shape per terraform-provider-google: the provider PREPENDS
+  # the service's full API path (e.g. "/v1/projects/...", "/sql/v1beta4/
+  # projects/...") to the configured *_custom_endpoint. So:
+  #   - iam, container, pubsub, secret_manager, cloud_resource_manager:
+  #     provider prepends /v1/... → endpoint MUST be the host root (no
+  #     /v1/ suffix) or routes double-prefix to /v1/v1/...
+  #   - compute, storage, sql, dns, cloud_run_v2: provider prepends only
+  #     the resource path (e.g. /projects/...), so the endpoint MUST
+  #     include the service API prefix.
+  # M41/M46 closeout — pre-S53 these were inconsistent; iam routed to
+  # /v1/v1/... and traffic actually hit real Google instead of fakegcp.
   compute_custom_endpoint                = "%[1]s/compute/v1/"
-  iam_custom_endpoint                    = "%[1]s/v1/"
-  cloud_resource_manager_custom_endpoint = "%[1]s/v1/"
+  iam_custom_endpoint                    = "%[1]s/"
+  cloud_resource_manager_custom_endpoint = "%[1]s/"
   storage_custom_endpoint                = "%[1]s/storage/v1/"
-  pubsub_custom_endpoint                 = "%[1]s/v1/"
+  pubsub_custom_endpoint                 = "%[1]s/"
   dns_custom_endpoint                    = "%[1]s/dns/v1/"
-  cloud_run_v2_custom_endpoint           = "%[1]s/v2/"
-  secret_manager_custom_endpoint         = "%[1]s/v1/"
+  cloud_run_v2_custom_endpoint           = "%[1]s/"
+  secret_manager_custom_endpoint         = "%[1]s/"
 }
 `, fakegcpURL)
 }
