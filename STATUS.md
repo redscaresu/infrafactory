@@ -1,10 +1,11 @@
 # STATUS
 
-Last updated: 2026-04-26
+Last updated: 2026-05-23
 
 ## Current phase
 - Slices 1-32 complete. 12 Scaleway training scenarios pass `infrafactory run`.
 - Slices 33-39 fully complete (cross-repo e2e infrastructure, oscillation pitfall learning, http_probe diagnostics, pitfalls API + UI, run compare API + UI, real-time scenario validation).
+- **Slices 43-48 (fakeaws) complete**: 9 AWS services landed across 5 wire formats (IAM, S3, EC2, RDS, DynamoDB, EKS, SQS, Route53, Secrets Manager); aggregate handler coverage 82.4%; S48-T4 codex review loop closed at pass 17 (passes 1-15 each fixed ≥1 BLOCKING; passes 16-17 returned consecutive NOTHING_TO_IMPROVE). Pass-by-pass history archived under `../fakeaws/docs/review-passes/passN.md`.
 - Slice 36 mostly complete (T0-T10 done). Remaining: T11 (cross-repo e2e against fakegcp, gated by S41), T12 (Playwright e2e for GCP scenarios in UI).
 - Slice 42 partial (T1, T4 done — sidebar regrouped by cloud, API exposes cloud field). Remaining: T2 (cloud badge + dynamic Layer 3 / credentials), T3 (mock server status by cloud), T5 (Playwright e2e).
 - ADRs 0009 (incremental deployment) and 0010 (Layer 3, supersedes ADR-0003) are implemented in code and docs.
@@ -12,7 +13,8 @@ Last updated: 2026-04-26
 - Layer 3 production readiness hardening complete (Slice 30).
 
 ## In progress
-- No active implementation tickets. Open todos: S40 (visual regression e2e), S41 (fakegcp git init + test parity, separate repo), S42-T2/T3/T5 (multi-cloud UI), S36-T11/T12 (cross-repo + Playwright GCP).
+- No active implementation tickets. Open todos: S40 (visual regression e2e), S41 (fakegcp git init + test parity, separate repo), S42-T2/T3/T5 (multi-cloud UI), S36-T11/T12 (cross-repo + Playwright GCP), M38 (GCP provider auto-injection).
+- GCP critical path: S41 → S36 → S42.
 
 ## Known blockers
 - None. `S9-T8` closed — superseded by Slices 26-30 (ADR-0010).

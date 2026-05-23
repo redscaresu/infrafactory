@@ -86,6 +86,16 @@ If either fails, restore the repo to a green baseline before starting a new tick
 7. Sync docs: update `STATUS.md`, `BACKLOG.md` ticket status. Update `CONCEPT.md` for major shifts. Update `AGENTS.md` only when workflow changes.
 8. Run hygiene check: `bash scripts/check_all.sh`.
 
+## Sibling Mock Repos
+
+Three HTTP-level mocks live alongside infrafactory and back its training scenarios:
+
+- **mockway** (`../mockway`) — Scaleway mock; 280+ tests; runs on `:8080`. Drives the Scaleway training scenarios used in Slices 1-32.
+- **fakegcp** (`../fakegcp`) — GCP mock; partial test coverage (Slice 41 is the parity ticket; no git init yet).
+- **fakeaws** (`../fakeaws`) — AWS mock; **complete as of Slice 48** (commits on `main`, no remote). Ships 9 services across 5 wire formats (IAM, S3, EC2, RDS, DynamoDB, EKS, SQS, Route53, Secrets Manager); aggregate handler coverage 82.4%; 17 codex review passes archived under `../fakeaws/docs/review-passes/`. AWS-side commits land on `main`; the cross-repo mirror lives on the `fakeaws-build` branch here.
+
+When extending a sibling mock, mirror the per-bundle PR rule in `../fakeaws/concepts.md` — handler + tests + examples + scenario anchors + coverage_matrix.yaml + `LandedServices` flip all in one slice. The `TestFullCoverageAudit` + `TestRegressionSeedAuditManifestMatchesHandlers` audits in each mock repo enforce this.
+
 ## ADR Trigger Threshold
 Create/update ADR when change affects:
 - public CLI contract/wiring
