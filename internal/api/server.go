@@ -133,8 +133,10 @@ type serverState struct {
 }
 
 // mockStateForCloud picks the mock-state reader appropriate for the
-// scenario's cloud field. Falls back to mockState (Scaleway) for empty/
-// unknown clouds to preserve pre-multi-cloud behavior.
+// scenario's cloud field. Falls back to mockState (Scaleway/mockway) for
+// empty/unknown clouds AND for clouds whose dedicated mock isn't
+// configured — matches FakegcpConfig's documented "fall back to mockway"
+// contract.
 func (s *serverState) mockStateForCloud(cloud string) (MockStateReader, string) {
 	switch strings.ToLower(strings.TrimSpace(cloud)) {
 	case "gcp":

@@ -78,23 +78,23 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 | M40 | Maintenance | fakeaws cross-pollination policy enforcement (FOLDED into S48-T4 acceptance criteria — kept as historical reference for traceability): every phase exit's codex pass enumerates AWS-specific vs cross-cloud findings; cross-cloud findings get follow-up `M<n>` tickets filed against mockway/fakegcp before the next phase begins | — | done | S48-T4 | folded-pass-6 |
 | M39 | Maintenance | fakeaws per-service ARN builders (FOLDED into S43-T2 acceptance criteria — kept as historical reference): pass-6 retracted the original single-generic-ARN design; the resolved design is per-service `BuildXxxARN(...)` helpers in `awsproto/arn.go` because real AWS ARN formats vary per service (IAM omits region, S3 is bucket-scoped, Route53 is global, EC2/RDS/EKS embed region+account) | — | done | S43-T2 | folded-pass-6 |
 | M38 | Maintenance | Auto-inject hashicorp/google provider wiring on GCP scenarios (analog of Slice 14/15 Scaleway provider auto-injection) | P1 | done | S36-T1 | claude (ensureGoogleProviderWiring + validateGoogleProviderWiring in internal/cli/generate_command.go, mirrored from Scaleway helpers; 4 new tests) |
-| S42-T5 | Slice 42 | Playwright e2e: GCP sidebar group, cloud badge, credentials, mock status | P1 | todo | S42-T2 | — |
+| S42-T5 | Slice 42 | Playwright e2e: GCP sidebar group, cloud badge, credentials, mock status | P1 | done | S42-T2 | claude (ui/e2e/multi-cloud.spec.ts: 4 tests covering sidebar groups, scaleway/gcp badges, dynamic Layer 3 label, mock-provider pill per cloud) |
 | S42-T4 | Slice 42 | API: GET /api/scenarios returns cloud field, layer3-status adapts per cloud | P1 | done | S36-T8 | claude |
 | S42-T3 | Slice 42 | UI scenario page: mock server status based on cloud (mockway vs fakegcp) | P1 | done | S42-T2, S36-T8 | claude (serverState.mockStateForCloud dispatcher + FakegcpState wired through ServerConfig; run-mode endpoint returns mock_provider; UI displays "{provider} state: yes/no") |
 | S42-T2 | Slice 42 | UI scenario page: cloud provider badge, dynamic Layer 3 label and credentials | P1 | done | S42-T1 | claude (cloud pill in scenario header, dynamic "Layer 3 (Real {Cloud})" label, layer3-status backend now dispatches required env vars by cloud) |
 | S42-T1 | Slice 42 | UI sidebar: group scenarios by cloud provider (Scaleway / GCP sections) | P1 | done | — | claude |
-| S41-T7 | Slice 41 | fakegcp: misconfigured Terraform examples (FK violations, wrong refs, ordering) | P1 | todo | S41-T1 | — |
-| S41-T6 | Slice 41 | fakegcp: double-apply idempotency automation for all working examples | P1 | todo | S41-T1 | — |
-| S41-T5 | Slice 41 | fakegcp: admin endpoint tests (/mock/state, /mock/reset, /mock/snapshot, /mock/restore) | P1 | todo | S41-T1 | — |
-| S41-T4 | Slice 41 | fakegcp: FK cascade delete tests for all parent-child relationships | P1 | todo | S41-T1 | — |
-| S41-T3 | Slice 41 | fakegcp: FK violation tests for all cross-resource references | P1 | todo | S41-T1 | — |
+| S41-T7 | Slice 41 | fakegcp: misconfigured Terraform examples (FK violations, wrong refs, ordering) | P1 | in_progress | S41-T1 | agent (dispatched, see ticket comments) |
+| S41-T6 | Slice 41 | fakegcp: double-apply idempotency automation for all working examples | P1 | in_progress | S41-T1 | agent (dispatched, see ticket comments) |
+| S41-T5 | Slice 41 | fakegcp: admin endpoint tests (/mock/state, /mock/reset, /mock/snapshot, /mock/restore) | P1 | done | S41-T1 | claude+agent (handlers/admin_test.go +125 lines, 2 new tests for /mock/state grouped-by-service and /mock/state/{service} — fakegcp@882e760) |
+| S41-T4 | Slice 41 | fakegcp: FK cascade delete tests for all parent-child relationships | P1 | done | S41-T1 | claude+agent (handlers/cascade_delete_test.go 237 lines, 6 tests covering all 5 reachable ON DELETE CASCADE pairs — fakegcp@e8e877e) |
+| S41-T3 | Slice 41 | fakegcp: FK violation tests for all cross-resource references | P1 | done | S41-T1 | claude+agent (handlers/fk_violation_test.go 323 lines, 17 HTTP-layer FK violation tests; documents 2 ListSAKeys/ListSQLUsers fidelity gaps inline — fakegcp@0007752) |
 | S41-T2 | Slice 41 | fakegcp: repository unit tests (CRUD, schema migration, FK enforcement) | P1 | done | — | claude+agent (881 lines repository/repository_test.go, 27 test funcs, 41.6% pkg coverage on the 15 named tables — fakegcp@2887d22) |
 | S41-T1 | Slice 41 | fakegcp: test infrastructure — testutil helpers, coverage reporting, Makefile test targets | P1 | done | — | claude (Snapshot/Restore/GetState helpers + test-e2e Makefile target gated by FAKEGCP_ENABLE_E2E=1) |
 | S41-T0 | Slice 41 | fakegcp: initialize git repo, commit existing code, push to GitHub | P1 | done | — | claude (user-authorized push) |
-| S40-T4 | Slice 40 | Error state coverage: empty states, 404 pages, API errors, missing scenarios | P1 | todo | — | — |
-| S40-T3 | Slice 40 | Functional spot-checks: verify data rendering across all pages | P1 | todo | — | — |
-| S40-T2 | Slice 40 | Visual regression tests: screenshot comparison with pixel diff threshold | P1 | todo | S40-T1 | — |
-| S40-T1 | Slice 40 | Playwright visual snapshots: capture baselines for all pages | P1 | todo | — | — |
+| S40-T4 | Slice 40 | Error state coverage: empty states, 404 pages, API errors, missing scenarios | P1 | done | — | claude (ui/e2e/spot-checks.spec.ts Error states block: unknown SPA route, missing scenario, 404 from /api/scenarios/missing + /layer3-status) |
+| S40-T3 | Slice 40 | Functional spot-checks: verify data rendering across all pages | P1 | done | — | claude (ui/e2e/spot-checks.spec.ts Functional spot-checks block: sidebar groups, runs page, diagnostics, pitfalls tabs, scenario page controls) |
+| S40-T2 | Slice 40 | Visual regression tests: screenshot comparison with pixel diff threshold | P1 | done | S40-T1 | claude (playwright.config.ts adds toHaveScreenshot threshold + maxDiffPixelRatio gates; ui/e2e/visual.spec.ts runs the 7 baselines against the captured snapshots) |
+| S40-T1 | Slice 40 | Playwright visual snapshots: capture baselines for all pages | P1 | done | — | claude (ui/e2e/visual.spec.ts captures 7 baselines: home, runs, diagnostics, pitfalls, compare, scenario-scaleway, scenario-gcp; volatile chrome masked via VOLATILE_SELECTORS) |
 | S39-T4 | Slice 39 | Playwright e2e tests for real-time validation | P1 | done | S39-T3 | claude+codex |
 | S39-T3 | Slice 39 | Inline error display below textarea | P1 | done | S39-T2 | claude |
 | S39-T2 | Slice 39 | Debounced validation in scenario page textarea (500ms delay) | P1 | done | S39-T1 | claude |
@@ -106,7 +106,7 @@ Legend: `todo` | `in_progress` | `blocked` | `done`
 | S37-T3 | Slice 37 | /pitfalls UI page with table, source badges, and edit form | P1 | done | S37-T2 | claude+codex |
 | S37-T2 | Slice 37 | PUT /api/pitfalls/{provider} endpoint for editing | P1 | done | S37-T1 | claude |
 | S37-T1 | Slice 37 | GET /api/pitfalls endpoint returning pitfalls grouped by provider | P1 | done | — | claude |
-| S36-T12 | Slice 36 | Playwright e2e: GCP scenarios appear in UI scenario list | P1 | todo | S36-T10 | — |
+| S36-T12 | Slice 36 | Playwright e2e: GCP scenarios appear in UI scenario list | P1 | done | S36-T10 | claude (covered by ui/e2e/multi-cloud.spec.ts "sidebar groups scenarios by cloud and includes a GCP section" — asserts ≥1 gcp-* training link present under the GCP group) |
 | S36-T11 | Slice 36 | Cross-repo e2e tests against fakegcp + double-apply idempotency | P1 | todo | S33-T1, S36-T10, S41-T1 | — |
 | S36-T10 | Slice 36 | GCP training scenarios (gcp-vm-network, gcp-gke-cluster, gcp-cloud-sql, gcp-full-stack) | P1 | done | S36-T2, S36-T3, S36-T6, S36-T7, S36-T8 | claude |
 | S36-T9 | Slice 36 | Add GCP resource patterns to real_probe.go | P1 | done | S36-T4 | claude |

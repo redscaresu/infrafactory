@@ -16,6 +16,16 @@ export default defineConfig({
     baseURL: 'http://127.0.0.1:4173',
     headless: true,
   },
+  // S40-T2 visual-regression threshold: small pixel-diff tolerance keeps
+  // anti-alias noise from flagging unchanged screens while still catching
+  // real visual regressions. maxDiffPixelRatio is the dominant gate;
+  // threshold tunes per-pixel color sensitivity.
+  expect: {
+    toHaveScreenshot: {
+      maxDiffPixelRatio: 0.02,
+      threshold: 0.2,
+    },
+  },
   projects: [
     { name: 'chromium', use: { browserName: 'chromium' } },
   ],
