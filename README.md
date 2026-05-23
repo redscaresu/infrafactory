@@ -201,8 +201,8 @@ Single-command lifecycle (`generate`, simplified):
          |                           |    no_public_*, vpc_required,
          |                           |    region_restriction
          |                           |
-         |  Layer 2: Mock Deploy     |  tofu apply -> mockway / fakegcp
-         |    + topology derivation  |  + cloud auto-dispatch
+         |  Layer 2: Mock Deploy     |  tofu apply -> mockway / fakegcp / fakeaws
+         |    + topology derivation  |  + cloud auto-dispatch (per scenario.cloud)
          |    + state policy checks  |  + acceptance criteria evaluator
          |    (deny_state rules)     |
          |                           |
@@ -213,16 +213,15 @@ Single-command lifecycle (`generate`, simplified):
          |    + orphan verification  |  + holdout checks
          +------------+--------------+
                       |
-         +-------------+-------------+-------------------+
-         |                           |                   |
-   +-----v------+             +------v-------+    +------v------+
-   |  mockway   |             |  fakegcp     |    |  Scaleway   |
-   |  (Scaleway |             |  (GCP mock)  |    |  (real API) |
-   |   mock)    |             |  port :????  |    |  Layer 3    |
-   |  :8080     |             |  SQLite      |    |  only       |
-   |  SQLite    |             |  ../fakegcp/ |    |             |
-   |  ../mockway|             |              |    |             |
-   +------------+             +--------------+    +-------------+
+         +------------+------+-----------+-----------+------------+
+         |                   |           |           |            |
+   +-----v------+   +--------v---+ +-----v-----+ +---v------+ +---v------+
+   | mockway    |   | fakegcp    | | fakeaws   | | Scaleway | |          |
+   | (Scaleway) |   | (GCP)      | | (AWS)     | | real API | |          |
+   | :8080      |   | :8081      | | :8082     | | Layer 3  | |          |
+   | SQLite     |   | SQLite     | | SQLite    | | only     | |          |
+   | ../mockway |   | ../fakegcp | | ../fakeaws|  |         | |          |
+   +------------+   +------------+ +-----------+ +----------+ +----------+
 
     Feedback Loop (on failure):
     structured failures -> FeedbackJSON -> next iteration's LLM prompt
@@ -241,28 +240,30 @@ InfraFactory targets two cloud providers today, each with its own SQLite-backed 
 ```
    cloud=scaleway   --->   mockway   (../mockway, :8080)
    cloud=gcp        --->   fakegcp   (../fakegcp, :8081)
+   cloud=aws        --->   fakeaws   (../fakeaws, :8082)
 ```
 
-Both mocks expose the same admin endpoints — `/mock/state`, `/mock/reset`, `/mock/snapshot`, `/mock/restore` — so `internal/cli/mockStateClient` works against either backend. Topology derivation auto-detects which cloud emitted a `/mock/state` payload (top-level `compute` key → GCP; `instance` → Scaleway) and dispatches to per-cloud rules.
+All three mocks expose the same admin endpoints — `/mock/state`, `/mock/reset`, `/mock/snapshot`, `/mock/restore` — so `internal/cli/mockStateClient` works against any backend. Topology derivation auto-detects which cloud emitted a `/mock/state` payload (`compute` key + `instance` → Scaleway; `compute_networks` shape → GCP; `iam` + `s3` + `schema_version` together → AWS) and dispatches to per-cloud rules.
 
-#### Running both mocks at the same time
+#### Running all three mocks at the same time
 
-Check out `mockway` and `fakegcp` as siblings of `infrafactory`:
+Check out `mockway`, `fakegcp`, and `fakeaws` as siblings of `infrafactory`:
 
 ```
 ~/dev/
 ├── infrafactory/
 ├── mockway/
-└── fakegcp/
+├── fakegcp/
+└── fakeaws/
 ```
 
 Then from the `infrafactory` repo root:
 
 ```bash
-make mocks-up        # starts mockway on :8080 AND fakegcp on :8081
+make mocks-up        # starts mockway on :8080, fakegcp on :8081, fakeaws on :8082
 make mocks-status    # prints running pids
 make mocks-logs      # tails 20 lines of each mock's log
-make mocks-down      # stops both
+make mocks-down      # stops all three
 ```
 
 Individual control:
@@ -270,13 +271,15 @@ Individual control:
 ```bash
 make mockway-up      # mockway only
 make fakegcp-up      # fakegcp only
+make fakeaws-up      # fakeaws only
 make mockway-down
 make fakegcp-down
+make fakeaws-down
 ```
 
-Pidfiles and logs land in `/tmp/infrafactory-mocks/` (override with `MOCKS_RUN_DIR=...`). Ports default to `MOCKWAY_PORT=8080` / `FAKEGCP_PORT=8081` and are reflected in `infrafactory.yaml` as `mockway.url` and `fakegcp.url`.
+Pidfiles and logs land in `/tmp/infrafactory-mocks/` (override with `MOCKS_RUN_DIR=...`). Ports default to `MOCKWAY_PORT=8080` / `FAKEGCP_PORT=8081` / `FAKEAWS_PORT=8082` and are reflected in `infrafactory.yaml` as `mockway.url`, `fakegcp.url`, and `fakeaws.url`.
 
-The runtime's `cloudMockStateRouter` (see `internal/cli/mockway_client.go`) reads each scenario's `cloud:` field after `LoadScenario` and dispatches every Layer-2 admin call (`State` / `Reset` / `Snapshot` / `Restore`) to the matching backend automatically — a single `infrafactory run` invocation can iterate over Scaleway scenarios and GCP scenarios back-to-back without restarting either mock. If `fakegcp.url` is empty, GCP scenarios fall back to mockway (which will 4xx but keeps the runtime constructible).
+The runtime's `cloudMockStateRouter` (see `internal/cli/mockway_client.go`) reads each scenario's `cloud:` field after `LoadScenario` and dispatches every Layer-2 admin call (`State` / `Reset` / `Snapshot` / `Restore`) to the matching backend automatically — a single `infrafactory run` invocation can iterate over Scaleway, GCP, and AWS scenarios back-to-back without restarting any mock. If a cloud-specific mock URL is empty, the runtime falls back to `mockway.url` (which will 4xx but keeps the runtime constructible).
 
 Sample `infrafactory.yaml`:
 
@@ -288,6 +291,10 @@ mockway:
 fakegcp:
   url: http://127.0.0.1:8081
   auto_reset: true
+
+fakeaws:
+  url: http://127.0.0.1:8082
+  auto_reset: true
 ```
 
 End-to-end check after `make mocks-up`:
@@ -295,6 +302,7 @@ End-to-end check after `make mocks-up`:
 ```bash
 infrafactory run scenarios/training/web-app-paris.yaml      # cloud: scaleway -> mockway
 infrafactory run scenarios/training/gcp-vm-network.yaml     # cloud: gcp      -> fakegcp
+infrafactory run scenarios/training/aws-vpc-network.yaml    # cloud: aws      -> fakeaws
 ```
 
 ### Mockway API Coverage (Scaleway)
@@ -341,10 +349,18 @@ GCP (Slice 36):
 - `policies/gcp/region_restriction.rego` (plan + state)
 - `policies/gcp/encryption.rego` (plan + state)
 
+AWS (Slice 43, fakeaws-side):
+- `policies/aws/no_public_db.rego` (plan + state)
+- `policies/aws/vpc_required.rego` (plan)
+- `policies/aws/region_restriction.rego` (plan + state)
+- `policies/aws/encryption.rego` (plan)
+
 Common:
 - `policies/common/naming.rego` (plan)
 
-Per-cloud routing for criteria-driven Layer 2 evaluation lives in `internal/cli/test_command.go::cloudConstraintPolicies` — a `cloud: gcp` scenario with `check: encryption_at_rest` resolves to `policies/gcp/encryption.rego`, not the Scaleway file. The Scaleway-shaped flat `constraint_policies:` config map remains the fallback for unmapped checks.
+Per-cloud routing for criteria-driven Layer 2 evaluation lives in `internal/cli/test_command.go::cloudConstraintPolicies` — a `cloud: gcp` scenario with `check: encryption_at_rest` resolves to `policies/gcp/encryption.rego`, a `cloud: aws` scenario with the same check resolves to `policies/aws/encryption.rego`, and the Scaleway-shaped flat `constraint_policies:` config map remains the fallback for unmapped checks. Per-criterion `params` (S51) flow into OPA as `input.params` — parametric policies like `region_restriction.rego` read region/zone from there.
+
+Validate-time policy filtering: `internal/cli/validate_command.go::filterPolicyPathsByCloud` drops `./policies/{other-cloud}/` subdirs based on the scenario's `cloud:` field, so an AWS scenario's plan isn't evaluated against Scaleway or GCP regos.
 
 Custom policies can be added to `policies/custom/` — any `.rego` file under `paths.policies` is automatically picked up.
 
@@ -521,27 +537,29 @@ Terminal control markers are intentionally excluded from iterative repair feedba
 
 ### Provider Schema Prompt Injection
 
-`generate` and `run` lazily extract the provider schema once per command runtime and inject it into phases 2 and 3. This works for any cloud provider — Scaleway (`scaleway/scaleway`) and GCP (`hashicorp/google`, planned Slice 36):
-- **Extraction**: `tofu init` + `tofu providers schema -json` in an isolated temp directory; cached for the runtime lifetime.
-- **Timing**: on first generate call (not during generic runtime bootstrap), so `validate`/`test`/`mock` commands avoid the overhead.
+`generate` and `run` lazily extract the provider schema once per cloud per command runtime and inject it into phases 2 and 3. Three providers are wired: Scaleway (`scaleway/scaleway`), GCP (`hashicorp/google`), AWS (`hashicorp/aws ~> 5.70`). The dispatcher is `harness.ExtractProviderSchemaForCloud`; the call-site lives in `CommandRuntime.EnsureProviderSchema(ctx, cloud)` which is invoked AFTER `LoadScenario` so the right provider binary is picked. Per-cloud caching (`schemaByCloud` map) means a single process visiting scaleway → aws → scaleway scenarios back-to-back extracts each schema exactly once.
+- **Extraction**: `tofu init` + `tofu providers schema -json` in an isolated temp directory; cached per cloud for the runtime lifetime.
+- **Timing**: on first generate call for that cloud (not during generic runtime bootstrap), so `validate`/`test`/`mock` commands avoid the overhead.
 - **Filtering**: phase 1 output identifies which resource types are needed; `schema_filter.go` extracts only those types (plus companion sub-resources) from the full provider schema. This keeps prompt size bounded.
 - **Injection**: phases 2 and 3 both receive the filtered schema as an "Authoritative Reference" section. The prompt instructs the LLM to verify every attribute name and block type against the schema before using it.
 - **Failure mode**: extraction failures are non-fatal; generation proceeds without schema injection. Look for `provider_schema skipped` in logs.
 
-### Multi-Cloud Architecture (Planned)
+### Multi-Cloud Architecture
 
-InfraFactory is designed to be cloud-agnostic. Four extension points are per-cloud:
+InfraFactory is cloud-agnostic. Three clouds are wired today (Scaleway, GCP, AWS); the scenario's `cloud:` field drives every dispatch.
 
-| Extension point | Scaleway (current) | GCP (Slice 36) |
-|----------------|-------------------|----------------|
-| Prompt templates | `prompts/scaleway/` | `prompts/gcp/` |
-| Pitfalls | `pitfalls/scaleway.yaml` | `pitfalls/gcp.yaml` |
-| Topology derivation | Scaleway resources in `topology_derive.go` | GCP resources (dispatch by cloud) |
-| Mock server | mockway (`:8080`) | fakegcp (`:8080`) |
-| OPA policies | `policies/scaleway/` | `policies/gcp/` |
-| Provider schema | `scaleway/scaleway` | `hashicorp/google` |
+| Extension point | Scaleway | GCP (Slice 36) | AWS (Slices 43-48) |
+|----------------|----------|----------------|--------------------|
+| Prompt templates | `prompts/scaleway/` | `prompts/gcp/` | `prompts/aws/` |
+| Pitfalls | `pitfalls/scaleway.yaml` | `pitfalls/gcp.yaml` | `pitfalls/aws.yaml` |
+| Topology derivation | `topology_derive.go` (scaleway resources) | `topology_derive.go` (gcp dispatch) | `topology_derive.go::deriveTopologyAWS` |
+| Mock server | mockway (`:8080`) | fakegcp (`:8081`) | fakeaws (`:8082`) |
+| OPA policies | `policies/scaleway/` | `policies/gcp/` | `policies/aws/` |
+| Provider schema | `scaleway/scaleway` | `hashicorp/google` | `hashicorp/aws ~> 5.70` |
+| Provider auto-injection | `ensureScalewayProviderWiring` | `ensureGoogleProviderWiring` (M38) | auto-injected on a `cloud: aws` scenario via the same pipeline |
+| Training scenarios | 12+ in `scenarios/training/` | 8 (gcp-*) | 11 (aws-*) |
 
-Adding a new cloud provider requires: prompt templates, pitfalls file, topology derivation rules, mock server, OPA policies, and training scenarios. The scenario's `cloud` field drives all dispatch.
+Adding a new cloud provider requires: prompt templates, pitfalls file, topology derivation rules, mock server, OPA policies, and training scenarios. The scenario's `cloud:` field drives all dispatch via `cloudMockStateRouter` (admin endpoints), `cloudConstraintPolicies` (state-policy criteria → rego file), `filterPolicyPathsByCloud` (validate-time policy filter), `ExtractProviderSchemaForCloud` (provider schema), and `detectCloud` (topology derivation from raw mock state).
 
 ### Provider Pitfalls
 
