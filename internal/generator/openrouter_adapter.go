@@ -15,14 +15,14 @@ type OpenRouterTransportConfig struct {
 	APIKey           string
 	Model            string
 	BaseURL          string
-	Timeout          time.Duration
-	MaxRetries       int
-	RetryDelay       time.Duration
-	PhaseDelay       time.Duration
-	PromptsDir       string
-	PitfallsDir      string
-	Phases           []string
-	Constraints      string
+	Timeout     time.Duration
+	MaxRetries  int
+	RetryDelay  time.Duration
+	PhaseDelay  time.Duration
+	PromptsDir  string
+	PitfallsDir string
+	Phases      []string
+	// Constraints removed in S51.
 	ResolvedMappings string
 	Overrides        string
 	Acceptance       string
@@ -165,7 +165,6 @@ func (g *OpenRouterSeedGenerator) renderPhasePrompt(phase string, req Request, o
 
 	ctx := PromptContext{
 		ScenarioYAML:       string(req.ScenarioYAML),
-		Constraints:        g.cfg.Constraints,
 		ResolvedMappings:   g.cfg.ResolvedMappings,
 		Overrides:          g.cfg.Overrides,
 		ArchitecturePlan:   outputs[PhasePlanArchitecture],

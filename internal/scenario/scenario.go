@@ -27,7 +27,6 @@ type Scenario struct {
 	Type               string                `json:"type,omitempty"`
 	References         string                `json:"references,omitempty"`
 	Resources          Resources             `json:"resources"`
-	Constraints        map[string]any        `json:"constraints,omitempty"`
 	AcceptanceCriteria []AcceptanceCriterion `json:"acceptance_criteria"`
 	// AWSResourceAnchors lists the per-API resource types a cloud:aws
 	// scenario asserts end-to-end coverage for (e.g.,
@@ -203,6 +202,11 @@ type AcceptanceCriterion struct {
 	Target string `json:"target,omitempty"`
 	Check  string `json:"check,omitempty"`
 	Domain string `json:"domain,omitempty"`
+	// Params is the per-criterion parameter bag passed to OPA as
+	// input.params. Replaces the previous top-level `constraints`
+	// scenario field (S51). Only meaningful for `type: policy`
+	// criteria today; other criterion types ignore it.
+	Params map[string]any `json:"params,omitempty"`
 }
 
 type Violation struct {

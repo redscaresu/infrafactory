@@ -24,10 +24,11 @@ resources:
     vpc: true
     private_network: true
 
-constraints:
-  region: us-east-1
-  cidr: 10.0.0.0/16
-
 acceptance_criteria:
+  - type: policy
+    check: region_restriction
+    params:
+      region: us-east-1
+    expect: pass
   - type: destruction
     expect: no_orphans

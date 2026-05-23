@@ -11,9 +11,11 @@ resources:
     purpose: app-assets
     size: small
 
-constraints:
-  region: us-central1
-
 acceptance_criteria:
+  - type: policy
+    check: region_restriction
+    params:
+      region: us-central1
+    expect: pass
   - type: destruction
     expect: no_orphans

@@ -24,12 +24,12 @@ resources:
     size: small
     high_availability: false
 
-constraints:
-  region: fr-par
-  no_public_database: true
-  encryption_at_rest: true
-
 acceptance_criteria:
+  - type: policy
+    check: region_restriction
+    params:
+      region: fr-par
+    expect: pass
   - type: http_probe
     target: load_balancer
     port: 80

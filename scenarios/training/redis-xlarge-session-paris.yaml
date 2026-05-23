@@ -23,10 +23,12 @@ resources:
     override:
       node_type: RED1-L
 
-constraints:
-  region: fr-par
-
 acceptance_criteria:
+  - type: policy
+    check: region_restriction
+    params:
+      region: fr-par
+    expect: pass
   - type: connectivity
     from: compute
     to: redis

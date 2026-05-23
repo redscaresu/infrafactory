@@ -29,13 +29,13 @@ resources:
       node_type: DB-DEV-S
       engine_version: "15"
 
-constraints:
-  region: fr-par
-  zone: fr-par-1
-  no_public_database: true
-  encryption_at_rest: true
-
 acceptance_criteria:
+  - type: policy
+    check: region_restriction
+    params:
+      region: fr-par
+      zone: fr-par-1
+    expect: pass
   - type: http_probe
     target: load_balancer
     port: 80

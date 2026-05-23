@@ -334,9 +334,12 @@ resources:
       backends:
         - port: 80
           protocol: http
-constraints:
-  region: fr-par
 acceptance_criteria:
+  - type: policy
+    check: region_restriction
+    params:
+      region: fr-par
+    expect: pass
   - type: http_probe
     target: load_balancer
     port: 80
@@ -366,10 +369,12 @@ resources:
   database:                          # ← added
     engine: postgresql               # ← added
     size: small                      # ← added
-constraints:
-  region: fr-par
-  no_public_database: true           # ← added
 acceptance_criteria:
+  - type: policy
+    check: region_restriction
+    params:
+      region: fr-par
+    expect: pass
   - type: http_probe
     target: load_balancer
     port: 80
@@ -412,10 +417,12 @@ resources:
   redis:                               # ← added
     purpose: session-cache             # ← added
     size: small                        # ← added
-constraints:
-  region: fr-par
-  no_public_database: true
 acceptance_criteria:
+  - type: policy
+    check: region_restriction
+    params:
+      region: fr-par
+    expect: pass
   - type: http_probe
     target: load_balancer
     port: 80
@@ -781,12 +788,12 @@ resources:
     size: small
     high_availability: false
 
-constraints:
-  region: fr-par
-  no_public_database: true
-  encryption_at_rest: true
-
 acceptance_criteria:
+  - type: policy
+    check: region_restriction
+    params:
+      region: fr-par
+    expect: pass
   - type: http_probe
     target: load_balancer
     port: 80
@@ -855,13 +862,13 @@ resources:
       node_type: DB-DEV-S
       engine_version: "15"
 
-constraints:
-  region: fr-par
-  zone: fr-par-1
-  no_public_database: true
-  encryption_at_rest: true
-
 acceptance_criteria:
+  - type: policy
+    check: region_restriction
+    params:
+      region: fr-par
+      zone: fr-par-1
+    expect: pass
   - type: http_probe
     target: load_balancer
     port: 80
@@ -944,8 +951,7 @@ The scenario YAML is validated at parse time against `scenario.schema.json` (JSO
 | `type` | string | No | Set to `"holdout"` for holdout scenarios. Omit for training/regression. |
 | `references` | string | No | Training scenario path (criteria-only holdouts only). Requires `type: holdout`. |
 | `resources` | object | Conditional | Required unless `type: holdout` with `references` (criteria-only holdout). |
-| `constraints` | object | No | Constraint key-value pairs mapped to OPA policies. |
-| `acceptance_criteria` | array | Yes | At least 1 criterion. All must pass for convergence. |
+| `acceptance_criteria` | array | Yes | At least 1 criterion. All must pass for convergence. Per S51, per-criterion `params` replaces the previous top-level `constraints` map for parametric policies. |
 
 **`resources.compute`**:
 
@@ -1009,17 +1015,16 @@ The scenario YAML is validated at parse time against `scenario.schema.json` (JSO
 | `size` | string | Yes | — | `small` \| `medium` \| `large` \| `xlarge`. Resolved via `mappings.yaml` (RED1-MICRO, RED1-S, RED1-M, RED1-L). |
 | `override.node_type` | string | No | — | Exact Redis node type. |
 
-**`constraints`** — extensible key-value map. Known keys:
+**`acceptance_criteria[].params`** (S51) — per-criterion parameter bag exposed to OPA as `input.params`. Only meaningful on `type: policy` criteria. Used by parametric policies that need a per-scenario value (region/zone today):
 
-| Key | Type | Description |
-|-----|------|-------------|
-| `region` | string | Required Scaleway region. Enforced by `region_restriction.rego`. |
-| `zone` | string | Required Scaleway zone. Enforced by `region_restriction.rego`. |
-| `no_public_database` | boolean | Enforced by `no_public_database.rego`. |
-| `encryption_at_rest` | boolean | Enforced by `encryption_at_rest.rego`. |
-| `no_public_endpoints` | boolean | Enforced by `no_public_endpoints.rego`. |
+| Key | Type | Read by | Description |
+|-----|------|---------|-------------|
+| `region` | string | `policies/{cloud}/region_restriction.rego` | Required region (e.g., `fr-par`, `us-east-1`, `us-central1`). |
+| `zone` | string | `policies/scaleway/region_restriction.rego` | Required Scaleway zone (e.g., `fr-par-1`). |
 
-Additional constraint keys can be added — they map to OPA policies via `constraint_policies` in `infrafactory.yaml`.
+Other policies (`encryption_at_rest.rego`, `no_public_database.rego`, `no_public_endpoints.rego`) are *constant policies* — they assert resource-shape invariants without reading `input.params`. Listing them as a criterion (`{type: policy, check: encryption_at_rest, expect: pass}`) is enough to enforce; they don't take params.
+
+Pre-S51 scenarios used a top-level `constraints:` map for this. The map was empirically half-vacuous (most keys weren't read by any policy), so S51 collapsed it into per-criterion `params` — every parameter now has a visible consumer.
 
 **`acceptance_criteria[]`** — each criterion has a `type` that determines required fields:
 

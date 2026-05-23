@@ -40,7 +40,8 @@ export interface ScenarioDetail {
   cloud: string;
   raw_yaml: string;
   resources: Record<string, unknown>;
-  constraints?: Record<string, unknown>;
+  // constraints removed in S51 — per-criterion params live on each
+  // criterion in the criteria array.
   criteria: Array<Record<string, unknown>>;
 }
 

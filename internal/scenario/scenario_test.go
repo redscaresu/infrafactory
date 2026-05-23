@@ -51,14 +51,18 @@ func TestLoadWithSchemaPaths(t *testing.T) {
 				if sc.References != "scenarios/training/web-app-paris.yaml" {
 					t.Fatalf("unexpected references: %q", sc.References)
 				}
-				if sc.Constraints["region"] != "fr-par" {
-					t.Fatalf("expected region constraint fr-par, got %#v", sc.Constraints["region"])
+				if len(sc.AcceptanceCriteria) != 5 {
+					t.Fatalf("expected 5 acceptance criteria, got %d", len(sc.AcceptanceCriteria))
 				}
-				if sc.Constraints["encryption_at_rest"] != true {
-					t.Fatalf("expected encryption_at_rest=true, got %#v", sc.Constraints["encryption_at_rest"])
+				// S51: region constraint moved into a region_restriction
+				// criterion's params; encryption_at_rest decorative
+				// constraint dropped (policy doesn't read it).
+				regionCriterion := sc.AcceptanceCriteria[1]
+				if regionCriterion.Type != "policy" || regionCriterion.Check != "region_restriction" {
+					t.Fatalf("expected criterion[1] to be policy/region_restriction, got %+v", regionCriterion)
 				}
-				if len(sc.AcceptanceCriteria) != 4 {
-					t.Fatalf("expected 4 acceptance criteria, got %d", len(sc.AcceptanceCriteria))
+				if regionCriterion.Params["region"] != "fr-par" {
+					t.Fatalf("expected region_restriction params.region=fr-par, got %#v", regionCriterion.Params["region"])
 				}
 
 				connectivity := sc.AcceptanceCriteria[0]
@@ -69,17 +73,17 @@ func TestLoadWithSchemaPaths(t *testing.T) {
 					t.Fatalf("expected connectivity port 5432, got %+v", connectivity.Port)
 				}
 
-				policy := sc.AcceptanceCriteria[1]
+				policy := sc.AcceptanceCriteria[2]
 				if policy.Type != "policy" || policy.Check != "encryption_at_rest" || policy.Target != "database" {
 					t.Fatalf("unexpected policy criterion: %+v", policy)
 				}
 
-				dns := sc.AcceptanceCriteria[2]
+				dns := sc.AcceptanceCriteria[3]
 				if dns.Type != "dns_resolution" || dns.Domain != "{{scenario_name}}.example.com" {
 					t.Fatalf("unexpected dns criterion: %+v", dns)
 				}
 
-				destruction := sc.AcceptanceCriteria[3]
+				destruction := sc.AcceptanceCriteria[4]
 				if destruction.Type != "destruction" || destruction.Expect != "no_orphans" {
 					t.Fatalf("unexpected destruction criterion: %+v", destruction)
 				}

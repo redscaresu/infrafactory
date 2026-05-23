@@ -10,6 +10,7 @@ import (
 
 	"github.com/redscaresu/infrafactory/internal/feedback"
 	"github.com/redscaresu/infrafactory/internal/harness"
+	"github.com/redscaresu/infrafactory/internal/scenario"
 	"github.com/spf13/cobra"
 )
 
@@ -64,7 +65,13 @@ func executeValidateWithArtifacts(ctx context.Context, runtime *CommandRuntime, 
 	if staticErr == nil {
 		policyPaths := resolvePolicyPaths(runtime.Config.Paths.Policies, runtime.Config.Validation.Layers.Static.PolicyPaths)
 		policyPaths = filterPolicyPathsByCloud(policyPaths, sc.Cloud)
-		policyFailures, err := harness.EvaluatePlanPoliciesWithConstraints(ctx, staticResult.PlanJSON, sc.Constraints, policyPaths)
+		// S51: collect every policy criterion's Params into a single
+		// input.params map. Pre-S51 this read sc.Constraints; the
+		// scenario-level constraints field was deleted in S51-T1.
+		// Auto-discovery of policy files is preserved (option A in
+		// the slice plan); each rego file sees the merged params.
+		params := mergeCriterionParams(sc.AcceptanceCriteria)
+		policyFailures, err := harness.EvaluatePlanPoliciesWithParams(ctx, staticResult.PlanJSON, params, policyPaths)
 		if err != nil {
 			return OutputResult{}, validateArtifacts{}, fmt.Errorf("evaluate static policies: %w", err)
 		}
@@ -163,6 +170,29 @@ func filterPolicyPathsByCloud(paths []string, cloud string) []string {
 		filtered = append(filtered, p)
 	}
 	return filtered
+}
+
+// mergeCriterionParams walks every acceptance_criteria entry and
+// merges each policy criterion's Params into a single map exposed to
+// OPA as input.params. Per S51 this replaces the scenario-level
+// constraints map. Later keys overwrite earlier ones on collision —
+// scenarios shouldn't declare conflicting values across criteria
+// (e.g., two `region_restriction` criteria with different `region`),
+// but the audit follow-up will catch that case.
+func mergeCriterionParams(criteria []scenario.AcceptanceCriterion) map[string]any {
+	merged := map[string]any{}
+	for _, c := range criteria {
+		if c.Type != "policy" {
+			continue
+		}
+		for k, v := range c.Params {
+			merged[k] = v
+		}
+	}
+	if len(merged) == 0 {
+		return nil
+	}
+	return merged
 }
 
 func resolvePolicyPaths(baseDir string, policyPaths []string) []string {

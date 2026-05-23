@@ -64,7 +64,7 @@ func TestEvaluatePlanPolicies(t *testing.T) {
 	}
 }
 
-func TestEvaluatePlanPoliciesWithConstraints(t *testing.T) {
+func TestEvaluatePlanPoliciesWithParams(t *testing.T) {
 	t.Parallel()
 
 	tmp := t.TempDir()
@@ -74,7 +74,7 @@ func TestEvaluatePlanPoliciesWithConstraints(t *testing.T) {
 import rego.v1
 
 deny contains msg if {
-	allowed := input.constraints.region
+	allowed := input.params.region
 	resource := input.planned_values.root_module.resources[_]
 	region := resource.values.region
 	region != allowed
@@ -95,7 +95,7 @@ deny contains msg if {
   }
 }`)
 
-	failures, err := EvaluatePlanPoliciesWithConstraints(
+	failures, err := EvaluatePlanPoliciesWithParams(
 		context.Background(),
 		planJSON,
 		map[string]any{"region": "fr-par"},
@@ -175,7 +175,7 @@ func TestScalewayPoliciesPlanEvaluation(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			failures, err := EvaluatePlanPoliciesWithConstraints(
+			failures, err := EvaluatePlanPoliciesWithParams(
 				context.Background(),
 				[]byte(tc.planJSON),
 				tc.constraints,
@@ -217,7 +217,7 @@ func TestGCPPoliciesScopedToGoogleResources(t *testing.T) {
   ]}}
 }`
 
-	failures, err := EvaluatePlanPoliciesWithConstraints(
+	failures, err := EvaluatePlanPoliciesWithParams(
 		context.Background(),
 		[]byte(scalewayOnlyPlan),
 		nil,
@@ -245,7 +245,7 @@ func TestGCPRegionRestrictionDeniesOutsideAllowlist(t *testing.T) {
   ]}}
 }`
 
-	failures, err := EvaluatePlanPoliciesWithConstraints(
+	failures, err := EvaluatePlanPoliciesWithParams(
 		context.Background(),
 		[]byte(plan),
 		nil,
@@ -292,7 +292,7 @@ func TestScalewayEncryptionPolicyMatchesEncryptionSemantics(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			failures, err := EvaluatePlanPoliciesWithConstraints(context.Background(), []byte(tc.planJSON), nil, []string{policy})
+			failures, err := EvaluatePlanPoliciesWithParams(context.Background(), []byte(tc.planJSON), nil, []string{policy})
 			if err != nil {
 				t.Fatalf("evaluate policy: %v", err)
 			}
@@ -325,7 +325,7 @@ func TestCommonNamingPolicyAllowsSingleCharacterNames(t *testing.T) {
     {"address":"scaleway_instance_server.web","type":"scaleway_instance_server","values":{"name":"%s"}}
   ]}}
 }`, tc.resourceName)
-			failures, err := EvaluatePlanPoliciesWithConstraints(context.Background(), []byte(planJSON), nil, []string{policy})
+			failures, err := EvaluatePlanPoliciesWithParams(context.Background(), []byte(planJSON), nil, []string{policy})
 			if err != nil {
 				t.Fatalf("evaluate policy: %v", err)
 			}
@@ -425,7 +425,7 @@ func TestCommonNamingPolicyGCPExemptions(t *testing.T) {
     {"address":"%s.x","type":"%s","values":{"name":"%s"}}
   ]}}
 }`, tc.resourceType, tc.resourceType, tc.resourceName)
-			failures, err := EvaluatePlanPoliciesWithConstraints(context.Background(), []byte(planJSON), nil, []string{policy})
+			failures, err := EvaluatePlanPoliciesWithParams(context.Background(), []byte(planJSON), nil, []string{policy})
 			if err != nil {
 				t.Fatalf("evaluate policy: %v", err)
 			}

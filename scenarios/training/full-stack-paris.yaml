@@ -33,11 +33,12 @@ resources:
     api_key: true
     policy: true
 
-constraints:
-  region: fr-par
-  encryption_at_rest: true
-
 acceptance_criteria:
+  - type: policy
+    check: region_restriction
+    params:
+      region: fr-par
+    expect: pass
   - type: policy
     check: encryption_at_rest
     expect: pass

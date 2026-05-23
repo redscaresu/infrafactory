@@ -69,14 +69,13 @@ func TestRenderPromptFile(t *testing.T) {
 
 	rendered, err := RenderPromptFile("phase1", filepath.Join("testdata", "prompt.tmpl"), PromptContext{
 		ScenarioYAML:       "scenario: test",
-		Constraints:        "region=fr-par",
-		AcceptanceCriteria: "type=policy",
+		AcceptanceCriteria: "type=policy params={region: fr-par}",
 	})
 	if err != nil {
 		t.Fatalf("render prompt file: %v", err)
 	}
 
-	if !strings.Contains(rendered, "scenario: test") || !strings.Contains(rendered, "region=fr-par") {
+	if !strings.Contains(rendered, "scenario: test") || !strings.Contains(rendered, "type=policy") {
 		t.Fatalf("unexpected rendered prompt:\n%s", rendered)
 	}
 }

@@ -14,15 +14,15 @@ import (
 )
 
 type ClaudeTransportConfig struct {
-	Command          string
-	PromptsDir       string
-	PitfallsDir      string
-	Phases           []string
-	PhaseDelay       time.Duration
-	PhaseTimeout     time.Duration
-	ProgressWriter   io.Writer
-	Environment      map[string]string
-	Constraints      string
+	Command        string
+	PromptsDir     string
+	PitfallsDir    string
+	Phases         []string
+	PhaseDelay     time.Duration
+	PhaseTimeout   time.Duration
+	ProgressWriter io.Writer
+	Environment    map[string]string
+	// Constraints removed in S51 (was always "" at the call sites).
 	ResolvedMappings string
 	Overrides        string
 	Acceptance       string
@@ -201,7 +201,6 @@ func (g *ClaudeSeedGenerator) renderPhasePrompt(phase string, req Request, outpu
 
 	ctx := PromptContext{
 		ScenarioYAML:       string(req.ScenarioYAML),
-		Constraints:        g.cfg.Constraints,
 		ResolvedMappings:   g.cfg.ResolvedMappings,
 		Overrides:          g.cfg.Overrides,
 		ArchitecturePlan:   outputs[PhasePlanArchitecture],

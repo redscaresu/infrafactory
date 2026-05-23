@@ -38,7 +38,7 @@ Each iteration runs three sequential LLM phases:
     (maps "size: small" to concrete Scaleway types like DEV1-S)
 
   Phase 2: Generate HCL
-    Architecture plan + constraints + criteria -> OpenTofu .tf files
+    Architecture plan + acceptance criteria -> OpenTofu .tf files
     (includes 18 Scaleway-specific pitfall rules to avoid common mistakes)
 
   Phase 3: Self-Review

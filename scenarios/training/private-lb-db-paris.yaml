@@ -29,12 +29,12 @@ resources:
       node_type: DB-GP-XS
       engine_version: "15"
 
-constraints:
-  region: fr-par
-  no_public_database: true
-  encryption_at_rest: true
-
 acceptance_criteria:
+  - type: policy
+    check: region_restriction
+    params:
+      region: fr-par
+    expect: pass
   - type: policy
     check: no_public_endpoints
     target: database

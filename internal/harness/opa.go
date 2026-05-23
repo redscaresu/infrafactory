@@ -11,10 +11,17 @@ import (
 )
 
 func EvaluatePlanPolicies(ctx context.Context, planJSON []byte, policyPaths []string) ([]feedback.Failure, error) {
-	return EvaluatePlanPoliciesWithConstraints(ctx, planJSON, nil, policyPaths)
+	return EvaluatePlanPoliciesWithParams(ctx, planJSON, nil, policyPaths)
 }
 
-func EvaluatePlanPoliciesWithConstraints(ctx context.Context, planJSON []byte, constraints map[string]any, policyPaths []string) ([]feedback.Failure, error) {
+// EvaluatePlanPoliciesWithParams evaluates every rego deny rule discovered
+// under policyPaths against the plan JSON, with `params` exposed as
+// `input.params` to parametric policies (e.g., region_restriction reads
+// input.params.region). Per S51 (collapsed constraints into acceptance_
+// criteria.params), the scenario-level `constraints` field is gone —
+// callers merge each policy criterion's Params into the single map
+// passed here.
+func EvaluatePlanPoliciesWithParams(ctx context.Context, planJSON []byte, params map[string]any, policyPaths []string) ([]feedback.Failure, error) {
 	if len(policyPaths) == 0 {
 		return nil, nil
 	}
@@ -24,18 +31,18 @@ func EvaluatePlanPoliciesWithConstraints(ctx context.Context, planJSON []byte, c
 		return nil, fmt.Errorf("decode plan json: %w", err)
 	}
 	input := decoded
-	if len(constraints) > 0 {
+	if len(params) > 0 {
 		if planMap, ok := decoded.(map[string]any); ok {
 			envelope := make(map[string]any, len(planMap)+1)
 			for key, value := range planMap {
 				envelope[key] = value
 			}
-			envelope["constraints"] = constraints
+			envelope["params"] = params
 			input = envelope
 		} else {
 			input = map[string]any{
-				"plan":        decoded,
-				"constraints": constraints,
+				"plan":   decoded,
+				"params": params,
 			}
 		}
 	}

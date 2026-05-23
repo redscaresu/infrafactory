@@ -8,8 +8,11 @@ import (
 )
 
 type PromptContext struct {
-	ScenarioYAML       string
-	Constraints        string
+	ScenarioYAML string
+	// Constraints removed in S51 — was always rendered as the empty
+	// string at the call sites and the scenario YAML no longer
+	// carries a constraints map. Per-criterion params are visible
+	// inline in AcceptanceCriteria.
 	ResolvedMappings   string
 	Overrides          string
 	ArchitecturePlan   string

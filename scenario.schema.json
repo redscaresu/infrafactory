@@ -60,26 +60,6 @@
       },
       "additionalProperties": false
     },
-    "constraints": {
-      "type": "object",
-      "description": "Constraints applied to generated infrastructure. Boolean constraints map to OPA policies via constraint_policies in infrafactory.yaml.",
-      "properties": {
-        "region": {
-          "type": "string",
-          "description": "Required Scaleway region (e.g., fr-par, nl-ams, pl-waw)."
-        },
-        "zone": {
-          "type": "string",
-          "description": "Required Scaleway zone (e.g., fr-par-1, fr-par-2)."
-        },
-        "no_public_database": { "type": "boolean" },
-        "encryption_at_rest": { "type": "boolean" },
-        "no_public_endpoints": { "type": "boolean" }
-      },
-      "additionalProperties": {
-        "type": ["boolean", "string"]
-      }
-    },
     "acceptance_criteria": {
       "type": "array",
       "minItems": 1,
@@ -525,6 +505,11 @@
               "target": {
                 "type": "string",
                 "description": "Optional resource type to scope the policy check (e.g., 'database'). Passed to OPA as input.target."
+              },
+              "params": {
+                "type": "object",
+                "description": "Optional per-criterion parameters fed to OPA as input.params. Used by parametric policies like region_restriction (region/zone) where the same .rego is reused across scenarios with different desired values.",
+                "additionalProperties": true
               }
             },
             "additionalProperties": false

@@ -10,9 +10,11 @@ resources:
     purpose: app-images
     is_public: false
 
-constraints:
-  region: fr-par
-
 acceptance_criteria:
+  - type: policy
+    check: region_restriction
+    params:
+      region: fr-par
+    expect: pass
   - type: destruction
     expect: no_orphans

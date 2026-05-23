@@ -24,10 +24,12 @@ resources:
         - port: 443
           protocol: tcp
 
-constraints:
-  region: fr-par
-
 acceptance_criteria:
+  - type: policy
+    check: region_restriction
+    params:
+      region: fr-par
+    expect: pass
   - type: http_probe
     target: load_balancer
     port: 80

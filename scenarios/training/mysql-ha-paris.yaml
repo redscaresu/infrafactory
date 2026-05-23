@@ -21,12 +21,12 @@ resources:
     size: medium
     high_availability: true
 
-constraints:
-  region: fr-par
-  no_public_database: true
-  encryption_at_rest: true
-
 acceptance_criteria:
+  - type: policy
+    check: region_restriction
+    params:
+      region: fr-par
+    expect: pass
   - type: connectivity
     from: compute
     to: database

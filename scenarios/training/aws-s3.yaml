@@ -19,10 +19,11 @@ resources:
     purpose: app-assets
     size: small
 
-constraints:
-  region: us-east-1
-  encryption_at_rest: true
-
 acceptance_criteria:
+  - type: policy
+    check: region_restriction
+    params:
+      region: us-east-1
+    expect: pass
   - type: destruction
     expect: no_orphans

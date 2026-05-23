@@ -11,9 +11,11 @@ resources:
     purpose: api
     image: us-docker.pkg.dev/cloudrun/container/hello
 
-constraints:
-  region: us-central1
-
 acceptance_criteria:
+  - type: policy
+    check: region_restriction
+    params:
+      region: us-central1
+    expect: pass
   - type: destruction
     expect: no_orphans

@@ -5,16 +5,17 @@ description: criteria-only holdout fixture with typed routing fields
 type: holdout
 references: scenarios/training/web-app-paris.yaml
 
-constraints:
-  region: fr-par
-  encryption_at_rest: true
-
 acceptance_criteria:
   - type: connectivity
     from: compute
     to: database
     port: 5432
     expect: success
+  - type: policy
+    check: region_restriction
+    params:
+      region: fr-par
+    expect: pass
   - type: policy
     check: encryption_at_rest
     target: database

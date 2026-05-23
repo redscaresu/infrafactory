@@ -20,12 +20,12 @@ resources:
     size: small
     high_availability: false
 
-constraints:
-  region: europe-west1
-  no_public_database: true
-  encryption_at_rest: true
-
 acceptance_criteria:
+  - type: policy
+    check: region_restriction
+    params:
+      region: europe-west1
+    expect: pass
   - type: connectivity
     from: public_internet
     to: database

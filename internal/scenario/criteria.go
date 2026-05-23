@@ -58,6 +58,10 @@ type HTTPProbeCheckSpec struct {
 type PolicyCheckSpec struct {
 	Check  string
 	Target string
+	// Params is the per-criterion parameter bag fed to OPA as
+	// input.params. Replaces the scenario-level `constraints` map
+	// after S51.
+	Params map[string]any
 }
 
 type DestructionCheckSpec struct{}
@@ -151,6 +155,7 @@ func ParseAcceptanceCriteria(criteria []AcceptanceCriterion) ([]ExecutableCheckS
 			spec.Policy = &PolicyCheckSpec{
 				Check:  criterion.Check,
 				Target: criterion.Target,
+				Params: criterion.Params,
 			}
 		case "destruction":
 			spec.Destruction = &DestructionCheckSpec{}

@@ -49,8 +49,9 @@ type scenarioDetailResponse struct {
 	Cloud       string                         `json:"cloud"`
 	RawYAML     string                         `json:"raw_yaml"`
 	Resources   scenario.Resources             `json:"resources"`
-	Constraints map[string]any                 `json:"constraints,omitempty"`
-	Criteria    []scenario.AcceptanceCriterion `json:"criteria"`
+	// S51: Constraints field removed; per-criterion Params live on
+	// AcceptanceCriterion now.
+	Criteria []scenario.AcceptanceCriterion `json:"criteria"`
 }
 
 func listScenariosHandler(state *serverState) http.HandlerFunc {
@@ -371,7 +372,6 @@ func handleGetScenarioByPath(w http.ResponseWriter, state *serverState, relPath,
 		Cloud:       sc.Cloud,
 		RawYAML:     string(rawYAML),
 		Resources:   sc.Resources,
-		Constraints: sc.Constraints,
 		Criteria:    sc.AcceptanceCriteria,
 	})
 }

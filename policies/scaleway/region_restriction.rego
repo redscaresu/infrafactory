@@ -3,7 +3,7 @@ package scaleway.region_restriction
 import rego.v1
 
 deny contains msg if {
-	allowed := input.constraints.region
+	allowed := input.params.region
 	resource := input.planned_values.root_module.resources[_]
 	region := resource.values.region
 	region != null
@@ -15,7 +15,7 @@ deny contains msg if {
 }
 
 deny contains msg if {
-	allowed := input.constraints.zone
+	allowed := input.params.zone
 	allowed != null
 	resource := input.planned_values.root_module.resources[_]
 	zone := resource.values.zone

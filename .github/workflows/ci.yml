@@ -18,6 +18,22 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build UI (embedded via go:embed)
+        # cmd/infrafactory/embed.go requires `cmd/infrafactory/ui/build/` to
+        # exist at compile time. Both are gitignored, so CI must produce
+        # them before any `go test`/`go build` of cmd/infrafactory runs.
+        run: |
+          cd ui && npm ci && npm run build
+          cd ..
+          rm -rf cmd/infrafactory/ui/build
+          mkdir -p cmd/infrafactory/ui
+          cp -R ui/build cmd/infrafactory/ui/
+
       - name: Run tests
         run: go test ./...
 
@@ -36,6 +52,19 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build UI (embedded via go:embed)
+        run: |
+          cd ui && npm ci && npm run build
+          cd ..
+          rm -rf cmd/infrafactory/ui/build
+          mkdir -p cmd/infrafactory/ui
+          cp -R ui/build cmd/infrafactory/ui/
 
       - name: Build binary
         run: |
