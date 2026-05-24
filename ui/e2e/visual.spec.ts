@@ -14,14 +14,21 @@ const VOLATILE_SELECTORS = [
   // it differs across runs (baseline captured with empty mocks may diff
   // from a re-run with a populated mock or vice versa).
   '[data-testid="scenario-mock-status"]',
+  // Sidebar scenario lists — adding a scenarios/training/*.yaml file
+  // changes sidebar height on every page, which would otherwise force
+  // a re-baseline for unrelated scenario additions.
+  'aside section[data-testid^="sidebar-cloud-"] ul',
 ];
 
 test.describe('Visual regression baselines', () => {
   test('home page', async ({ page }) => {
     await page.goto('/');
     await expect(page.locator('aside')).toBeVisible();
+    // Home page main is a grid of scenario cards — masking it keeps the
+    // baseline insulated from scenarios/training/*.yaml additions for
+    // the same reason as the sidebar list above.
     await expect(page).toHaveScreenshot('home.png', {
-      mask: VOLATILE_SELECTORS.map((sel) => page.locator(sel)),
+      mask: VOLATILE_SELECTORS.map((sel) => page.locator(sel)).concat([page.locator('main .grid')]),
       fullPage: true,
     });
   });

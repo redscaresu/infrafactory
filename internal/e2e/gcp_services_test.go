@@ -235,6 +235,74 @@ func TestE2E_GCPSecretManager(t *testing.T) {
 	)
 }
 
+// TestE2E_GCPCompute provisions a VPC + subnet + firewall + VM against
+// fakegcp's compute handlers (gcp-vm-network scenario, europe-west1).
+func TestE2E_GCPCompute(t *testing.T) {
+	SkipUnlessEnabled(t)
+	if _, err := exec.LookPath("tofu"); err != nil {
+		t.Fatalf("tofu binary required for e2e: %v", err)
+	}
+	mock := StartFakegcp(t)
+
+	runGCPServiceScenario(t,
+		mock,
+		"gcp-vm-network.yaml",
+		gcpComputeFiles(mock.URL),
+		[]gcpStateExpect{
+			{root: "compute", collection: "networks", minCount: 1},
+			{root: "compute", collection: "subnetworks", minCount: 1},
+			{root: "compute", collection: "instances", minCount: 1},
+		},
+		nil,
+	)
+}
+
+// TestE2E_GCPCloudSQL provisions a private PostgreSQL Cloud SQL
+// instance + VPC peering + an api-server VM against fakegcp's
+// sql / compute handlers (gcp-cloud-sql scenario, europe-west1).
+func TestE2E_GCPCloudSQL(t *testing.T) {
+	SkipUnlessEnabled(t)
+	if _, err := exec.LookPath("tofu"); err != nil {
+		t.Fatalf("tofu binary required for e2e: %v", err)
+	}
+	mock := StartFakegcp(t)
+
+	runGCPServiceScenario(t,
+		mock,
+		"gcp-cloud-sql.yaml",
+		gcpCloudSQLFiles(mock.URL),
+		[]gcpStateExpect{
+			{root: "sql", collection: "instances", minCount: 1},
+			{root: "sql", collection: "databases", minCount: 1},
+			{root: "compute", collection: "instances", minCount: 1},
+		},
+		nil,
+	)
+}
+
+// TestE2E_GCPGKE provisions a GKE cluster + node pool + CMEK-encrypted
+// state bucket against fakegcp's container + storage handlers
+// (gcp-gke-cluster scenario, europe-west1).
+func TestE2E_GCPGKE(t *testing.T) {
+	SkipUnlessEnabled(t)
+	if _, err := exec.LookPath("tofu"); err != nil {
+		t.Fatalf("tofu binary required for e2e: %v", err)
+	}
+	mock := StartFakegcp(t)
+
+	runGCPServiceScenario(t,
+		mock,
+		"gcp-gke-cluster.yaml",
+		gcpGKEFiles(mock.URL),
+		[]gcpStateExpect{
+			{root: "container", collection: "clusters", minCount: 1},
+			{root: "container", collection: "nodePools", minCount: 1},
+			{root: "storage", collection: "buckets", minCount: 1},
+		},
+		nil,
+	)
+}
+
 type gcpStateExpect struct {
 	root       string
 	collection string
@@ -401,12 +469,30 @@ func runGCPServiceScenario(t *testing.T, mock *MockwayInstance, scenarioFile str
 // GCP custom endpoint we exercise in e2e tests at the running fakegcp
 // instance. Per-service tests only use the endpoint(s) they need, but
 // bundling them here keeps each file map short.
+//
+// version pin: `>= 5.0` for most resources (v5+v6 both work). IAM
+// service-account ops need `~> 5.0` because provider-google v6+
+// stopped honoring `iam_custom_endpoint` for the `iam.admin.v1` API
+// path used by `google_service_account`; IAM tests use
+// gcpProviderTFV5 instead.
 func gcpProviderTF(fakegcpURL string) string {
+	return gcpProviderTFPinned(fakegcpURL, ">= 5.0")
+}
+
+// gcpProviderTFV5 pins provider-google to the v5 line. Required for
+// `google_service_account` resources because v6+ bypasses
+// `iam_custom_endpoint` for service-account ops, hitting real
+// iam.googleapis.com with a fake token (M41 / M46).
+func gcpProviderTFV5(fakegcpURL string) string {
+	return gcpProviderTFPinned(fakegcpURL, "~> 5.0")
+}
+
+func gcpProviderTFPinned(fakegcpURL, version string) string {
 	return fmt.Sprintf(`terraform {
   required_providers {
     google = {
       source  = "hashicorp/google"
-      version = ">= 5.0"
+      version = %[2]q
     }
   }
 }
@@ -436,12 +522,14 @@ provider "google" {
   iam_custom_endpoint                    = "%[1]s/"
   cloud_resource_manager_custom_endpoint = "%[1]s/"
   storage_custom_endpoint                = "%[1]s/storage/v1/"
-  pubsub_custom_endpoint                 = "%[1]s/"
+  pubsub_custom_endpoint                 = "%[1]s/v1/"
   dns_custom_endpoint                    = "%[1]s/dns/v1/"
-  cloud_run_v2_custom_endpoint           = "%[1]s/"
-  secret_manager_custom_endpoint         = "%[1]s/"
+  cloud_run_v2_custom_endpoint           = "%[1]s/v2/"
+  secret_manager_custom_endpoint         = "%[1]s/v1/"
+  sql_custom_endpoint                    = "%[1]s/sql/v1beta4/"
+  container_custom_endpoint              = "%[1]s/"
 }
-`, fakegcpURL)
+`, fakegcpURL, version)
 }
 
 func gcpPubSubFiles(fakegcpURL string) map[string][]byte {
@@ -550,7 +638,7 @@ resource "google_compute_global_forwarding_rule" "fr" {
 
 func gcpIAMFiles(fakegcpURL string) map[string][]byte {
 	return map[string][]byte{
-		"providers.tf": []byte(gcpProviderTF(fakegcpURL)),
+		"providers.tf": []byte(gcpProviderTFV5(fakegcpURL)),
 		"main.tf": []byte(`resource "google_service_account" "ci" {
   account_id   = "ci-runner"
   display_name = "CI runner service account"
@@ -577,6 +665,190 @@ func gcpStorageFiles(fakegcpURL string) map[string][]byte {
   encryption {
     default_kms_key_name = "projects/fake-project/locations/us-central1/keyRings/r/cryptoKeys/k"
   }
+}
+`),
+	}
+}
+
+// gcpComputeFiles satisfies gcp-vm-network: VPC + subnet + firewall +
+// VM all in europe-west1. region_restriction policy reads each
+// resource's region/zone so europe-west1 must be explicit on every
+// resource (provider-default `region` is fallback only).
+func gcpComputeFiles(fakegcpURL string) map[string][]byte {
+	return map[string][]byte{
+		"providers.tf": []byte(gcpProviderTF(fakegcpURL)),
+		"main.tf": []byte(`resource "google_compute_network" "main" {
+  name                    = "vm-net"
+  auto_create_subnetworks = false
+}
+
+resource "google_compute_subnetwork" "main" {
+  name          = "vm-subnet"
+  ip_cidr_range = "10.20.0.0/24"
+  region        = "europe-west1"
+  network       = google_compute_network.main.id
+}
+
+resource "google_compute_firewall" "allow_ssh" {
+  name    = "vm-allow-ssh"
+  network = google_compute_network.main.name
+
+  allow {
+    protocol = "tcp"
+    ports    = ["22"]
+  }
+
+  source_ranges = ["198.51.100.0/24"]
+}
+
+resource "google_compute_instance" "main" {
+  name         = "web-vm"
+  machine_type = "e2-small"
+  zone         = "europe-west1-b"
+
+  boot_disk {
+    initialize_params {
+      image = "debian-cloud/debian-11"
+    }
+  }
+
+  network_interface {
+    network    = "vm-net"
+    subnetwork = "vm-subnet"
+  }
+
+  depends_on = [google_compute_subnetwork.main]
+}
+`),
+	}
+}
+
+// gcpCloudSQLFiles satisfies gcp-cloud-sql: private Postgres + VPC
+// peering + api-server VM in europe-west1 with CMEK on the SQL
+// instance (encryption_at_rest) and ipv4_enabled=false +
+// authorized_networks empty (no_public_endpoints / public blocked).
+func gcpCloudSQLFiles(fakegcpURL string) map[string][]byte {
+	return map[string][]byte{
+		"providers.tf": []byte(gcpProviderTF(fakegcpURL)),
+		"main.tf": []byte(`resource "google_compute_network" "main" {
+  name                    = "sql-net"
+  auto_create_subnetworks = false
+}
+
+resource "google_compute_subnetwork" "main" {
+  name          = "sql-subnet"
+  ip_cidr_range = "10.30.0.0/24"
+  region        = "europe-west1"
+  network       = google_compute_network.main.id
+}
+
+resource "google_compute_global_address" "private_ip" {
+  name          = "sql-private-ip"
+  purpose       = "VPC_PEERING"
+  address_type  = "INTERNAL"
+  prefix_length = 16
+  network       = google_compute_network.main.id
+}
+
+resource "google_sql_database_instance" "main" {
+  name             = "private-sql"
+  database_version = "POSTGRES_15"
+  region           = "europe-west1"
+
+  encryption_key_name = "projects/fake-project/locations/europe-west1/keyRings/sql/cryptoKeys/sql-key"
+
+  settings {
+    tier = "db-f1-micro"
+
+    ip_configuration {
+      ipv4_enabled    = false
+      private_network = google_compute_network.main.id
+    }
+  }
+
+  deletion_protection = false
+}
+
+resource "google_sql_database" "main" {
+  name     = "app"
+  instance = google_sql_database_instance.main.name
+}
+
+resource "google_compute_instance" "api" {
+  name         = "api-server"
+  machine_type = "e2-small"
+  zone         = "europe-west1-b"
+
+  boot_disk {
+    initialize_params {
+      image = "debian-cloud/debian-11"
+    }
+  }
+
+  network_interface {
+    network    = "sql-net"
+    subnetwork = "sql-subnet"
+  }
+
+  depends_on = [google_compute_subnetwork.main]
+}
+`),
+	}
+}
+
+// gcpGKEFiles satisfies gcp-gke-cluster: GKE cluster + node pool +
+// CMEK-encrypted state bucket (encryption_at_rest reads
+// bucket.encryption.default_kms_key_name) in europe-west1.
+func gcpGKEFiles(fakegcpURL string) map[string][]byte {
+	return map[string][]byte{
+		"providers.tf": []byte(gcpProviderTF(fakegcpURL)),
+		"main.tf": []byte(`resource "google_compute_network" "gke" {
+  name                    = "gke-net"
+  auto_create_subnetworks = false
+}
+
+resource "google_compute_subnetwork" "gke" {
+  name          = "gke-subnet"
+  ip_cidr_range = "10.40.0.0/24"
+  region        = "europe-west1"
+  network       = google_compute_network.gke.id
+}
+
+resource "google_container_cluster" "main" {
+  name     = "tf-cluster"
+  location = "europe-west1"
+
+  network    = "gke-net"
+  subnetwork = "gke-subnet"
+
+  remove_default_node_pool = true
+  initial_node_count       = 1
+
+  deletion_protection = false
+
+  depends_on = [google_compute_subnetwork.gke]
+}
+
+resource "google_container_node_pool" "primary" {
+  name       = "primary-pool"
+  location   = "europe-west1"
+  cluster    = google_container_cluster.main.name
+  node_count = 1
+
+  node_config {
+    machine_type = "e2-small"
+  }
+}
+
+resource "google_storage_bucket" "state" {
+  name     = "tf-cluster-state-bucket"
+  location = "europe-west1"
+
+  encryption {
+    default_kms_key_name = "projects/fake-project/locations/europe-west1/keyRings/state/cryptoKeys/state-key"
+  }
+
+  force_destroy = true
 }
 `),
 	}
@@ -717,7 +989,7 @@ resource "google_compute_global_forwarding_rule" "fr" {
 
 func gcpIAMUpdateFiles(fakegcpURL string) map[string][]byte {
 	return map[string][]byte{
-		"providers.tf": []byte(gcpProviderTF(fakegcpURL)),
+		"providers.tf": []byte(gcpProviderTFV5(fakegcpURL)),
 		"main.tf": []byte(`resource "google_service_account" "ci" {
   account_id   = "ci-runner"
   display_name = "CI runner (rotated)"

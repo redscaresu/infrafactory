@@ -1,0 +1,24 @@
+scenario: lb-paris
+version: "1.0"
+cloud: scaleway
+description: >
+  A standalone Scaleway load balancer + IP + frontend + backend
+  in Paris. Exercises mockway's lb handlers without the multi-tier
+  scenario complexity of private-lb-db-paris / compute-lb-multi-paris.
+
+resources:
+  networking:
+    load_balancer:
+      exposure: public
+      backends:
+        - port: 80
+          protocol: http
+
+acceptance_criteria:
+  - type: policy
+    check: region_restriction
+    params:
+      region: fr-par
+    expect: pass
+  - type: destruction
+    expect: no_orphans

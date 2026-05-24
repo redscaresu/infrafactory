@@ -1,0 +1,20 @@
+scenario: domain-paris
+version: "1.0"
+cloud: scaleway
+description: >
+  A Scaleway Domain DNS zone with a default A record. Exercises
+  the dns_zone -> records FK chain against mockway's domain handlers.
+
+resources:
+  dns:
+    domain: svc.example.invalid
+    record_set: true
+
+acceptance_criteria:
+  - type: policy
+    check: region_restriction
+    params:
+      region: fr-par
+    expect: pass
+  - type: destruction
+    expect: no_orphans

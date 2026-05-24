@@ -1,0 +1,20 @@
+scenario: block-paris
+version: "1.0"
+cloud: scaleway
+description: >
+  A standalone Block Storage volume in Paris. Exercises
+  scaleway_block_volume against mockway's block handlers.
+
+resources:
+  storage:
+    purpose: app-data
+    size: small
+
+acceptance_criteria:
+  - type: policy
+    check: region_restriction
+    params:
+      region: fr-par
+    expect: pass
+  - type: destruction
+    expect: no_orphans
