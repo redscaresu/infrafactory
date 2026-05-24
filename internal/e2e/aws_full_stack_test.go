@@ -15,31 +15,45 @@ import (
 // (Scaleway) and TestE2E_GCPFullStack (GCP) — same lifecycle
 // contract.
 //
-// Currently SKIPPED — known fakeaws compatibility gaps that crash
-// the AWS provider (terraform-provider-aws v5.100) when this
-// composition is applied through tofu:
+// Currently SKIPPED — fakeaws ships a Query-RPC response envelope
+// that doesn't match the AWS provider's per-service XML parser.
+// Investigation summary (2026-05-24):
 //
-//  1. ec2.resourceVPCCreate panics with nil pointer dereference at
-//     vpc_.go:235 when fakeaws's CreateVpc response is missing one
-//     of the fields the provider expects to be non-nil
-//     (CidrBlockAssociationSet, Ipv6CidrBlockAssociationSet, or
-//     similar). Bug surfaces only on a tofu drive — the direct-HTTP
-//     TestE2E_AWS_VPC test bypasses the provider Read flow.
-//  2. Likely additional EKS post-create Read-flow gaps; iam handler
-//     parity was advanced in this PR (ListRolePolicies, ListRoleTags,
-//     ListInstanceProfilesForRole added with inline-XML to avoid the
-//     xml.Encoder type-wrapper that crashes the provider plugin).
+//  1. fakeaws's WriteQueryRPCResponse uses the IAM-style envelope —
+//     <{Action}Response><{Action}Result>...payload...</...></...>—
+//     for EVERY service. EC2's real wire shape has no Result wrapper:
+//     <{Action}Response><requestId/><vpc>...</vpc></{Action}Response>.
+//     terraform-provider-aws's EC2 parser can't find <vpc> nested
+//     two levels deep, so output.Vpc comes back nil and the provider
+//     panics in resourceVPCCreate at vpc_.go:235.
+//  2. fakeaws's typed XML helper also leaks the Go type name as a
+//     wrapper element (e.g. <ec2CreateVpcResult> around <vpc>) — a
+//     second mismatch on top of the envelope issue. The IAM-side
+//     equivalent (ListRolePolicies etc.) was worked around in
+//     fakeaws@fea333e by writing the XML inline; same approach would
+//     be needed for every EC2 / RDS handler.
+//  3. ec2VpcXML was extended in this PR with DhcpOptionsId,
+//     InstanceTenancy, OwnerId, CidrBlockAssociationSet,
+//     Ipv6CidrBlockAssociationSet — the standard EC2 VPC fields the
+//     provider Read flow reads. These improvements stand even though
+//     they don't unblock the test alone.
+//
+// Closing this requires a per-service envelope change in fakeaws's
+// awsproto.WriteQueryRPCResponse (EC2 uses no Result wrapper; IAM
+// and RDS do), plus inline-XML rewrites of every handler that
+// currently leaks its Go type name. Real work, separate from this
+// PR.
 //
 // Each AWS resource in this scenario is exercised individually by
 // TestE2E_AWS_{IAM,S3,VPC,Instance,SecurityGroup,RDS,DynamoDB,EKS,
-// SQS,Route53,SecretsManager} via direct HTTP — those all pass. The
-// composition gap is tracked separately; un-skip this test as each
-// gap closes.
+// SQS,Route53,SecretsManager} via direct HTTP — those all pass
+// because direct-HTTP tests only assert on body fragments, never
+// parse the envelope.
 //
 // Gated behind INFRAFACTORY_ENABLE_E2E=1 and requires `tofu` on PATH.
 func TestE2E_AWSFullStack(t *testing.T) {
 	SkipUnlessEnabled(t)
-	t.Skip("fakeaws: ec2.resourceVPCCreate crashes provider plugin (nil pointer at vpc_.go:235) when full-stack HCL is applied via tofu. Direct-HTTP TestE2E_AWS_VPC passes; gap is in the provider Read flow shape. Un-skip after fakeaws CreateVpc response is brought to parity.")
+	t.Skip("fakeaws Query-RPC envelope mismatch: WriteQueryRPCResponse wraps EC2 responses in a <{Action}Result> wrapper that the AWS provider's parser can't see through, and leaks Go type names as inner wrappers. See full investigation in the file-level comment above. Un-skip after fakeaws ships a per-service envelope + inline-XML rewrite.")
 	if _, err := exec.LookPath("tofu"); err != nil {
 		t.Fatalf("tofu binary required for e2e: %v", err)
 	}

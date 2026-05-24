@@ -8,8 +8,8 @@ import (
 // TestE2E_GCPFullStack runs the gcp-full-stack training scenario,
 // which exercises the GCP composition infrafactory cares about against
 // fakegcp: VPC + private subnet (compute networks), GKE cluster +
-// node pool, private Cloud SQL Postgres, and GCS storage bucket.
-// Mirrors the Scaleway full-stack composition test
+// node pool, private Cloud SQL Postgres, Memorystore Redis, and GCS
+// storage bucket. Mirrors the Scaleway full-stack composition test
 // (TestE2E_FullStackParis) — same lifecycle contract, different cloud.
 //
 // IAM service account is in the scenario YAML but NOT in this
@@ -20,11 +20,6 @@ import (
 // the iam.admin.v1 API path). A single root module can only pin one
 // provider version. IAM is exercised in isolation by TestE2E_GCPIAM
 // against the v5 line.
-//
-// Memorystore Redis is intentionally NOT included: fakegcp does not
-// yet ship a memorystore handler, and the gcp-full-stack.yaml
-// scenario was trimmed to match. Adding redis here would require new
-// fakegcp handlers (memorystore.googleapis.com).
 //
 // Gated behind INFRAFACTORY_ENABLE_E2E=1 and requires `tofu` on PATH.
 func TestE2E_GCPFullStack(t *testing.T) {
@@ -46,6 +41,7 @@ func TestE2E_GCPFullStack(t *testing.T) {
 			{root: "sql", collection: "instances", minCount: 1},
 			{root: "sql", collection: "databases", minCount: 1},
 			{root: "storage", collection: "buckets", minCount: 1},
+			{root: "redis", collection: "instances", minCount: 1},
 		},
 		nil,
 	)
@@ -137,6 +133,14 @@ resource "google_sql_database" "main" {
   }
 
   force_destroy = true
+}
+`),
+		"redis.tf": []byte(`resource "google_redis_instance" "cache" {
+  name           = "fs-cache"
+  tier           = "BASIC"
+  memory_size_gb = 1
+  region         = "europe-west1"
+  redis_version  = "REDIS_7_0"
 }
 `),
 	}

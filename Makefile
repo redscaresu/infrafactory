@@ -220,6 +220,20 @@ demo-ui: ui-build
 	cp docs/demo/walkthrough/ui-walkthrough-UI-walkthrough-full-stack-paris-chromium/video.webm docs/demo/ui-walkthrough.webm
 	@echo "Updated docs/demo/ui-walkthrough.webm"
 
+# ui-baseline-update refreshes the Playwright visual-regression
+# baselines under ui/e2e/visual.spec.ts-snapshots/. The masks in
+# visual.spec.ts hide volatile content (sidebar scenario lists,
+# home-page grid, mock-status pill) but they DON'T constrain
+# natural-flow layout height — adding a scenario YAML still grows
+# the sidebar and (therefore) the page by ~28px per entry. Refresh
+# the baselines whenever a scenarios/training/*.yaml file is added
+# or removed; stage the regenerated PNGs alongside the scenario in
+# the same commit. See project_visual_regression_masking.md for the
+# full history.
+ui-baseline-update: ui-build
+	cd ui && npx playwright test e2e/visual.spec.ts --update-snapshots
+	@echo "Refreshed ui/e2e/visual.spec.ts-snapshots/*.png"
+
 test: test-unit ui-test ui-test-e2e
 
 test-all:

@@ -528,6 +528,7 @@ provider "google" {
   secret_manager_custom_endpoint         = "%[1]s/v1/"
   sql_custom_endpoint                    = "%[1]s/sql/v1beta4/"
   container_custom_endpoint              = "%[1]s/"
+  redis_custom_endpoint                  = "%[1]s/v1/"
 }
 `, fakegcpURL, version)
 }
