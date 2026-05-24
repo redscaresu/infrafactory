@@ -15,45 +15,24 @@ import (
 // (Scaleway) and TestE2E_GCPFullStack (GCP) — same lifecycle
 // contract.
 //
-// Currently SKIPPED — fakeaws ships a Query-RPC response envelope
-// that doesn't match the AWS provider's per-service XML parser.
-// Investigation summary (2026-05-24):
-//
-//  1. fakeaws's WriteQueryRPCResponse uses the IAM-style envelope —
-//     <{Action}Response><{Action}Result>...payload...</...></...>—
-//     for EVERY service. EC2's real wire shape has no Result wrapper:
-//     <{Action}Response><requestId/><vpc>...</vpc></{Action}Response>.
-//     terraform-provider-aws's EC2 parser can't find <vpc> nested
-//     two levels deep, so output.Vpc comes back nil and the provider
-//     panics in resourceVPCCreate at vpc_.go:235.
-//  2. fakeaws's typed XML helper also leaks the Go type name as a
-//     wrapper element (e.g. <ec2CreateVpcResult> around <vpc>) — a
-//     second mismatch on top of the envelope issue. The IAM-side
-//     equivalent (ListRolePolicies etc.) was worked around in
-//     fakeaws@fea333e by writing the XML inline; same approach would
-//     be needed for every EC2 / RDS handler.
-//  3. ec2VpcXML was extended in this PR with DhcpOptionsId,
-//     InstanceTenancy, OwnerId, CidrBlockAssociationSet,
-//     Ipv6CidrBlockAssociationSet — the standard EC2 VPC fields the
-//     provider Read flow reads. These improvements stand even though
-//     they don't unblock the test alone.
-//
-// Closing this requires a per-service envelope change in fakeaws's
-// awsproto.WriteQueryRPCResponse (EC2 uses no Result wrapper; IAM
-// and RDS do), plus inline-XML rewrites of every handler that
-// currently leaks its Go type name. Real work, separate from this
-// PR.
-//
-// Each AWS resource in this scenario is exercised individually by
-// TestE2E_AWS_{IAM,S3,VPC,Instance,SecurityGroup,RDS,DynamoDB,EKS,
-// SQS,Route53,SecretsManager} via direct HTTP — those all pass
-// because direct-HTTP tests only assert on body fragments, never
-// parse the envelope.
+// fakeaws's Query-RPC envelope has been rewritten (M51,
+// fakeaws@f48dd0b) so the provider plugin no longer crashes on
+// parsing. EC2 subnet / EKS cluster + node group field parity has
+// been plumbed (fakeaws@pending). RDS DB instance, S3 bucket, and
+// Secrets Manager remain stripped down — RDS's DescribeDBInstances
+// poll hangs because something in the apply→ListTagsForResource→
+// DescribeDBParameters→DescribeDBInstances cycle still mismatches,
+// and S3 is queued for replacement with Adobe S3Mock instead of
+// per-field plumbing. This composition test stays in tree and
+// exercises the subset that now works: VPC + 2 subnets + 2 IAM
+// roles + EKS cluster + EKS node group. RDS / S3 / Secrets remain
+// individually covered by TestE2E_AWS_RDS / TestE2E_AWS_S3 /
+// TestE2E_AWS_SecretsManager (direct-HTTP), and the full-composition
+// coverage will be re-added when those gaps close.
 //
 // Gated behind INFRAFACTORY_ENABLE_E2E=1 and requires `tofu` on PATH.
 func TestE2E_AWSFullStack(t *testing.T) {
 	SkipUnlessEnabled(t)
-	t.Skip("fakeaws envelope rewrite (M51) landed — provider no longer crashes on parsing. New blocker: per-resource Read-flow field parity. ec2DescribeSubnets returns a stripped-down subnet that's missing fields the provider's Read polls for (availableIpAddressCount, ownerId, subnetArn, mapPublicIpOnLaunch, ipv6CidrBlockAssociationSet, etc.) → 'couldn't find resource (21 retries)'. Same gap exists for EKS / RDS / S3 / Secrets Manager Read flows. Each resource needs ~5-15 standard fields plumbed through ec2SubnetXML / eksClusterJSON / rdsDBInstanceXML / etc. Substantial incremental work; tracked in BACKLOG via the next M-ticket. Un-skip after per-resource field parity catches up.")
 	if _, err := exec.LookPath("tofu"); err != nil {
 		t.Fatalf("tofu binary required for e2e: %v", err)
 	}
@@ -89,6 +68,9 @@ func TestE2E_AWSFullStack(t *testing.T) {
 	// of slice-valued collections (ec2.vpcs, iam.roles, rds.instances,
 	// etc.) — same shape as fakegcp.
 	state := mock.FetchState(t)
+	// Only assert on the resources still in the trimmed HCL. RDS /
+	// S3 / Secrets are deferred (see file-level comment) and remain
+	// covered individually by their TestE2E_AWS_* direct-HTTP tests.
 	for _, exp := range []struct {
 		root       string
 		collection string
@@ -99,10 +81,6 @@ func TestE2E_AWSFullStack(t *testing.T) {
 		{root: "iam", collection: "roles", minCount: 2},
 		{root: "eks", collection: "clusters", minCount: 1},
 		{root: "eks", collection: "node_groups", minCount: 1},
-		{root: "rds", collection: "db_subnet_groups", minCount: 1},
-		{root: "rds", collection: "db_instances", minCount: 1},
-		{root: "s3", collection: "buckets", minCount: 1},
-		{root: "secretsmanager", collection: "secrets", minCount: 1},
 	} {
 		got := awsStateItemCount(state, exp.root, exp.collection)
 		if got < exp.minCount {
@@ -162,12 +140,9 @@ provider "aws" {
   skip_metadata_api_check     = true
   skip_requesting_account_id  = true
   endpoints {
-    iam            = "%[1]s/iam"
-    ec2            = "%[1]s/ec2/region/us-east-1"
-    eks            = "%[1]s/eks/region/us-east-1"
-    rds            = "%[1]s/rds/region/us-east-1"
-    s3             = "%[1]s/s3"
-    secretsmanager = "%[1]s/secretsmanager/region/us-east-1"
+    iam = "%[1]s/iam"
+    ec2 = "%[1]s/ec2/region/us-east-1"
+    eks = "%[1]s/eks/region/us-east-1"
   }
 }
 `, fakeawsURL)
@@ -238,57 +213,9 @@ resource "aws_eks_node_group" "default" {
   depends_on = [aws_eks_cluster.main]
 }
 `),
-		"rds.tf": []byte(`resource "aws_db_subnet_group" "default" {
-  name       = "fs-db-subnets"
-  subnet_ids = [aws_subnet.a.id, aws_subnet.b.id]
-}
-
-resource "aws_db_parameter_group" "pg15" {
-  name   = "fs-pg15"
-  family = "postgres15"
-}
-
-resource "aws_db_instance" "app" {
-  identifier           = "fs-app-db"
-  engine               = "postgres"
-  engine_version       = "15.4"
-  instance_class       = "db.t3.micro"
-  allocated_storage    = 20
-  username             = "appuser"
-  password             = "changeme"
-  db_subnet_group_name = aws_db_subnet_group.default.name
-  parameter_group_name = aws_db_parameter_group.pg15.name
-  skip_final_snapshot  = true
-  deletion_protection  = false
-  storage_encrypted    = true
-}
-`),
-		"storage.tf": []byte(`resource "aws_s3_bucket" "assets" {
-  bucket        = "fs-assets-bucket"
-  force_destroy = true
-}
-
-resource "aws_s3_bucket_server_side_encryption_configuration" "assets" {
-  # Use the literal bucket name (not aws_s3_bucket.assets.id) so the
-  # OPA encryption policy can resolve cfg.values.bucket at plan
-  # time — bucket name is known statically, but .id is computed
-  # and shows as null in planned_values.
-  bucket = "fs-assets-bucket"
-
-  rule {
-    apply_server_side_encryption_by_default {
-      sse_algorithm = "AES256"
-    }
-  }
-
-  depends_on = [aws_s3_bucket.assets]
-}
-`),
-		"secrets.tf": []byte(`resource "aws_secretsmanager_secret" "db" {
-  name                    = "fs-db-creds"
-  description             = "Full-stack app database credentials"
-  recovery_window_in_days = 0
-}
-`),
+		// RDS, S3, and Secrets Manager intentionally omitted — see the
+		// file-level comment on TestE2E_AWSFullStack for why. Each is
+		// individually covered by TestE2E_AWS_RDS / TestE2E_AWS_S3 /
+		// TestE2E_AWS_SecretsManager (direct-HTTP).
 	}
 }
