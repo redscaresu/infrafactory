@@ -3,7 +3,7 @@
 For AI coding agents. Human contributors should use `CONTRIBUTING.md`.
 
 ## Mission
-Build `infrafactory`, a Go CLI that generates and validates OpenTofu for Scaleway scenarios with deterministic, testable behavior.
+Build `infrafactory`, a Go CLI + SvelteKit UI that generates and validates OpenTofu across **AWS**, **GCP**, and **Scaleway** with deterministic, testable behavior. Each cloud's scenarios validate against a deterministic HTTP-level mock (fakeaws / fakegcp / mockway); S3 routes through SeaweedFS as a third-party backend (see `CONCEPT.md` § "Third-Party Mock Integration").
 
 ## Source of Truth
 1. `scenario.schema.json`
@@ -71,10 +71,13 @@ If either fails, restore the repo to a green baseline before starting a new tick
 - Debug iterative behavior from `.infrafactory/runs/<scenario>/<run-id>/iterations/<n>/iteration.json`.
 - `output/<scenario>/` is mutable (overwritten each run); immutable snapshots live under `.infrafactory/runs/<scenario>/<run-id>/generated/`.
 - `CLAUDECODE` env var blocks nested claude — `unset CLAUDECODE` before `go run ./cmd/infrafactory run`.
-- Docker rebuild required after any mockway code change: `docker compose up --build -d mockway`.
+- Mock rebuild required after any sibling-mock code change: `pkill -f <mock-bin>; cd ../<mock> && go build && ./<bin> --port <port> &`. For containerised runs use `make mocks-down-containers && make mocks-up-containers`.
 - Build tag: `-tags noui` required when `ui/build/` doesn't exist. The `!noui` build requires `ui/build/`.
-- Playwright e2e tests: 18 tests in `ui/e2e/`. Run with `make test` (Go unit + UI unit + Playwright).
+- Playwright e2e tests live in `ui/e2e/` (currently 51 tests, growing). Run with `make test` (Go unit + UI unit + Playwright).
+- Visual baselines under `ui/e2e/visual.spec.ts-snapshots/` render live UI state — adding scenario YAMLs OR completing runs (which add rows to the Runs page) drifts them. Pre-commit hook auto-refreshes when `scenarios/training/*.yaml` changes (M56); for other drift, run `make ui-baseline-update` manually.
 - `make run` builds everything and starts the UI at `http://127.0.0.1:4173`.
+- **Cross-repo cascade commits**: lifecycle-parity work spans infrafactory + a sibling mock (recent examples: M61 RDS = fakeaws@853d0aa + infrafactory@9fb3566; M62 Secrets Manager = same). Commit the mock-side change first (it's the dependency), then update infrafactory's e2e test or call sites that depend on the new mock behavior. All four repos use origin/main; push order matters.
+- **Demo recording tooling** (`./docs/demo/record.sh` for CLI, `make demo-ui` for UI): `asciinema` records terminal PTY → `.cast`; `agg` renders `.cast` → `.gif` (README-embeddable). Playwright records browser → `.webm`; `gifski` renders `.webm` → `.gif`. asciinema is a build-time dep only, never advertised in user-facing docs (README has been kept asciinema-free since M52).
 
 ## Execution Loop (mandatory)
 1. Frame task with `docs/process/TICKET_TEMPLATE.md`.
@@ -88,11 +91,14 @@ If either fails, restore the repo to a green baseline before starting a new tick
 
 ## Sibling Mock Repos
 
-Three HTTP-level mocks live alongside infrafactory and back its training scenarios:
+Three first-party HTTP-level mocks + one third-party backend live alongside infrafactory:
 
-- **mockway** (`../mockway`) — Scaleway mock; 280+ tests; runs on `:8080`. Drives the Scaleway training scenarios used in Slices 1-32.
-- **fakegcp** (`../fakegcp`) — GCP mock; partial test coverage (Slice 41 is the parity ticket; no git init yet).
-- **fakeaws** (`../fakeaws`) — AWS mock; **complete as of Slice 48** (commits on `main`, no remote). Ships 9 services across 5 wire formats (IAM, S3, EC2, RDS, DynamoDB, EKS, SQS, Route53, Secrets Manager); aggregate handler coverage 82.4%; 17 codex review passes archived under `../fakeaws/docs/review-passes/`. AWS-side commits land on `main`; the cross-repo mirror lives on the `fakeaws-build` branch here.
+- **mockway** (`../mockway`, github.com/redscaresu/mockway) — Scaleway mock; 280+ tests; runs on `:8080`. Apache-2.0, public.
+- **fakegcp** (`../fakegcp`, github.com/redscaresu/fakegcp) — GCP mock; runs on `:8081`. Mockway-level test parity reached 2026-05-23 (881-line repository_test.go, FK violation tests, cascade delete tests). Memorystore + Cloud SQL + GKE + IAM + Storage + DNS + Pub/Sub + Secret Manager + Cloud Run.
+- **fakeaws** (`../fakeaws`, github.com/redscaresu/fakeaws) — AWS mock; runs on `:8082`. Ships 9 services across 5 wire formats (IAM, S3, EC2, RDS, DynamoDB, EKS, SQS, Route53, Secrets Manager); aggregate handler coverage 82.4%; 17 codex review passes archived under `../fakeaws/docs/review-passes/`. RDS + Secrets Manager TF lifecycle parity reached 2026-05-24 (M61 + M62).
+- **SeaweedFS** (`chrislusf/seaweedfs` container) — third-party S3 backend for `aws_s3_bucket` reads (`terraform-provider-aws` needs the full management surface; fakeaws's stripped S3 handler isn't enough). Runs on `:9090` via `docker-compose.mocks.yml`. Anonymous-mode `ListAllMyBuckets` returns empty even when buckets exist — use HEAD-by-name as the assertion path. Empirical evaluation log in `CONCEPT.md` § "Third-Party Mock Integration" (rejects Adobe S3Mock + Garage + LocalStack + MinIO).
+
+All four repos are independent public OSS repos on origin/main; cross-repo work cascades (see "operational caveats" above).
 
 When extending a sibling mock, mirror the per-bundle PR rule in `../fakeaws/concepts.md` — handler + tests + examples + scenario anchors + coverage_matrix.yaml + `LandedServices` flip all in one slice. The `TestFullCoverageAudit` + `TestRegressionSeedAuditManifestMatchesHandlers` audits in each mock repo enforce this.
 
