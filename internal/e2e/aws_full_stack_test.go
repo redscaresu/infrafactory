@@ -11,21 +11,24 @@ import (
 
 // TestE2E_AWSFullStack runs the aws-full-stack training scenario
 // composition against fakeaws: VPC + 2 subnets, IAM cluster + node
-// roles, EKS cluster + node group, private RDS Postgres, S3 bucket,
-// and a Secrets Manager secret. Mirrors TestE2E_FullStackParis
-// (Scaleway) and TestE2E_GCPFullStack (GCP) — same lifecycle
-// contract.
+// roles, EKS cluster + node group, RDS DB subnet + parameter group
+// + Postgres DB instance, S3 bucket, and a Secrets Manager secret +
+// initial version. Mirrors TestE2E_FullStackParis (Scaleway) and
+// TestE2E_GCPFullStack (GCP) — same lifecycle contract.
 //
-// Composition currently exercised: VPC + 2 subnets + 2 IAM roles +
-// EKS cluster + EKS node group + S3 bucket (with SSE). VPC / IAM /
-// EKS run against fakeaws after the M51 envelope rewrite + M57
-// per-resource field parity. S3 runs against SeaweedFS (M59) — the
-// third-party S3 backend chosen after Adobe S3Mock + Garage both
-// failed evaluation (S3Mock only implements the object surface;
-// Garage requires AGPLv3 + cluster bootstrap). RDS DB instance +
-// Secrets Manager remain deferred (M61 + M62) and stay covered by
-// per-service TestE2E_AWS_RDS / TestE2E_AWS_SecretsManager direct-
-// HTTP tests in the meantime.
+// Composition exercised: VPC + 2 subnets + 2 IAM roles + EKS
+// cluster + EKS node group + S3 bucket (with SSE) + RDS subnet
+// group + parameter group + DB instance + Secrets Manager secret +
+// secret version. VPC / IAM / EKS run against fakeaws after the
+// M51 envelope rewrite + M57 per-resource field parity; RDS was
+// fully wired in M61 (DbiResourceId stability, service-specific
+// 404 codes, DeleteDBInstance envelope, user-supplied field
+// persistence); Secrets Manager was fully wired in M62 (ARN-or-
+// name SecretId resolution, DescribeSecret field parity including
+// VersionIdsToStages + epoch timestamps, GetResourcePolicy /
+// ListSecretVersionIds handlers). S3 runs against SeaweedFS
+// (M59) — the third-party S3 backend chosen after Adobe S3Mock +
+// Garage both failed evaluation.
 //
 // Gated behind INFRAFACTORY_ENABLE_E2E=1 and requires `tofu` on PATH.
 func TestE2E_AWSFullStack(t *testing.T) {
@@ -71,10 +74,9 @@ func TestE2E_AWSFullStack(t *testing.T) {
 	// of slice-valued collections (ec2.vpcs, iam.roles, rds.instances,
 	// etc.) — same shape as fakegcp.
 	state := mock.FetchState(t)
-	// VPC / IAM / EKS asserted against fakeaws state. RDS + Secrets
-	// Manager remain deferred (see file-level comment) and still
-	// covered by per-service TestE2E_AWS_* direct-HTTP tests until
-	// M61 / M62.
+	// VPC / IAM / EKS / RDS / Secrets Manager all asserted against
+	// fakeaws state after M61 + M62. The collection paths reflect
+	// gatherRDSStateReal + gatherSecretsManagerStateReal in fakeaws.
 	for _, exp := range []struct {
 		root       string
 		collection string
@@ -85,6 +87,9 @@ func TestE2E_AWSFullStack(t *testing.T) {
 		{root: "iam", collection: "roles", minCount: 2},
 		{root: "eks", collection: "clusters", minCount: 1},
 		{root: "eks", collection: "node_groups", minCount: 1},
+		{root: "rds", collection: "db_instances", minCount: 1},
+		{root: "rds", collection: "db_subnet_groups", minCount: 1},
+		{root: "secretsmanager", collection: "secrets", minCount: 1},
 	} {
 		got := awsStateItemCount(state, exp.root, exp.collection)
 		if got < exp.minCount {
@@ -176,10 +181,12 @@ provider "aws" {
   skip_requesting_account_id  = true
   s3_use_path_style           = true
   endpoints {
-    iam = "%[1]s/iam"
-    ec2 = "%[1]s/ec2/region/us-east-1"
-    eks = "%[1]s/eks/region/us-east-1"
-    s3  = "%[2]s"
+    iam            = "%[1]s/iam"
+    ec2            = "%[1]s/ec2/region/us-east-1"
+    eks            = "%[1]s/eks/region/us-east-1"
+    rds            = "%[1]s/rds/region/us-east-1"
+    secretsmanager = "%[1]s/secretsmanager/region/us-east-1"
+    s3             = "%[2]s"
   }
 }
 `, fakeawsURL, s3URL)
@@ -275,9 +282,67 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "assets" {
   depends_on = [aws_s3_bucket.assets]
 }
 `),
-		// RDS + Secrets Manager intentionally omitted — see the
-		// file-level comment on TestE2E_AWSFullStack for why. Each
-		// is individually covered by TestE2E_AWS_RDS /
-		// TestE2E_AWS_SecretsManager (direct-HTTP) until M61 / M62.
+		// RDS — DB subnet group + parameter group + Postgres
+		// instance. M61 closed the apply-wait hang + idempotent
+		// plan + clean destroy by (a) returning the user-supplied
+		// MasterUsername / Port / StorageEncrypted so the
+		// provider doesn't see drift and force a replace,
+		// (b) emitting DBInstanceNotFound / DBSubnetGroupNotFoundFault
+		// instead of the generic ResourceNotFoundException so the
+		// destroy-wait state machine recognises completion,
+		// (c) returning the deleted DB snapshot inside a
+		// <DeleteDBInstanceResult><DBInstance> envelope the SDK can
+		// deserialise, and (d) parsing the
+		// Filters.Filter.N.Name=dbi-resource-id lookup the provider
+		// uses after Create.
+		"rds.tf": []byte(`resource "aws_db_subnet_group" "main" {
+  name       = "fs-db-sng"
+  subnet_ids = [aws_subnet.a.id, aws_subnet.b.id]
+}
+
+resource "aws_db_parameter_group" "main" {
+  name   = "fs-pg15"
+  family = "postgres15"
+}
+
+resource "aws_db_instance" "main" {
+  identifier           = "fs-db"
+  engine               = "postgres"
+  engine_version       = "15.4"
+  instance_class       = "db.t3.micro"
+  allocated_storage    = 20
+  username             = "appuser"
+  password             = "changeme-not-secret"
+  db_subnet_group_name = aws_db_subnet_group.main.name
+  parameter_group_name = aws_db_parameter_group.main.name
+  skip_final_snapshot  = true
+  deletion_protection  = false
+  storage_encrypted    = true
+}
+`),
+		// Secrets Manager — secret + initial version. M62 closed
+		// the lifecycle by (a) accepting ARN-or-name as SecretId in
+		// the repository layer (terraform-provider-aws returns the
+		// ARN from CreateSecret and uses it as the id on every
+		// subsequent call), (b) returning epoch timestamps for
+		// CreatedDate / LastChangedDate / DeletionDate (the SDK
+		// rejects strings), (c) populating VersionIdsToStages so
+		// the version provider can find AWSCURRENT, and (d)
+		// implementing GetResourcePolicy / ListSecretVersionIds /
+		// no-op TagResource so refresh doesn't 404.
+		// recovery_window_in_days=0 makes destroy synchronous; the
+		// default 30-day window leaves the secret in PendingDeletion
+		// and breaks no_orphans.
+		"secrets.tf": []byte(`resource "aws_secretsmanager_secret" "db" {
+  name                    = "fs-db-password"
+  description             = "fakeaws full-stack DB password"
+  recovery_window_in_days = 0
+}
+
+resource "aws_secretsmanager_secret_version" "db" {
+  secret_id     = aws_secretsmanager_secret.db.id
+  secret_string = "changeme-not-secret"
+}
+`),
 	}
 }
