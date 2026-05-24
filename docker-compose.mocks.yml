@@ -1,0 +1,72 @@
+# docker-compose.mocks.yml — multi-mock orchestration for the three
+# first-party mock servers (mockway, fakegcp, fakeaws). Use via
+# `make mocks-up-containers` (this file is NOT the default
+# docker-compose.yml — that one's reserved for the UI/dev stack).
+#
+# Two image sources:
+#   1. Sibling-repo build (default). Each mock has a Dockerfile in
+#      its sibling source repo (../mockway, ../fakegcp, ../fakeaws);
+#      compose builds each one. Works today regardless of GHCR
+#      package visibility.
+#   2. GHCR pre-built image (opt-in). Set MOCKS_IMAGE_SOURCE=ghcr to
+#      pull pre-built images from ghcr.io/redscaresu/<name>:latest.
+#      Requires the GHCR packages to be public (M53 closeout) OR a
+#      `docker login ghcr.io` first.
+#
+# Switch with `MOCKS_IMAGE_SOURCE=ghcr make mocks-up-containers`.
+#
+# All three mocks bind to 127.0.0.1 by default so they're reachable
+# from host-side tofu apply but not from the wider network. Override
+# `MOCKS_BIND=0.0.0.0` to expose them.
+#
+# Port allocation mirrors the go-run path in `make mocks-up`:
+#   mockway → 8080   (Scaleway scenarios)
+#   fakegcp → 8081   (GCP scenarios)
+#   fakeaws → 8082   (AWS scenarios; S3 will move to Adobe S3Mock
+#                     when M59-T1 lands as a 4th service block here)
+
+services:
+  mockway:
+    image: ${MOCKWAY_IMAGE:-infrafactory-mockway:local}
+    build:
+      context: ../mockway
+    container_name: infrafactory-mockway
+    restart: unless-stopped
+    ports:
+      - "${MOCKS_BIND:-127.0.0.1}:8080:8080"
+    command: ["--port", "8080"]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/mock/state"]
+      interval: 5s
+      timeout: 2s
+      retries: 6
+
+  fakegcp:
+    image: ${FAKEGCP_IMAGE:-infrafactory-fakegcp:local}
+    build:
+      context: ../fakegcp
+    container_name: infrafactory-fakegcp
+    restart: unless-stopped
+    ports:
+      - "${MOCKS_BIND:-127.0.0.1}:8081:8080"
+    command: ["--port", "8080"]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/mock/state"]
+      interval: 5s
+      timeout: 2s
+      retries: 6
+
+  fakeaws:
+    image: ${FAKEAWS_IMAGE:-infrafactory-fakeaws:local}
+    build:
+      context: ../fakeaws
+    container_name: infrafactory-fakeaws
+    restart: unless-stopped
+    ports:
+      - "${MOCKS_BIND:-127.0.0.1}:8082:8082"
+    command: ["--port", "8082"]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8082/mock/state"]
+      interval: 5s
+      timeout: 2s
+      retries: 6

@@ -201,6 +201,41 @@ mocks-logs:
 		[ -f $$log ] && tail -n 20 $$log || echo "(no log yet)"; \
 	done
 
+# ----- Containerized multi-mock path (alternative to mocks-up) -----
+#
+# mocks-up-containers brings up all three mocks via the published
+# GHCR images orchestrated by docker-compose.mocks.yml. Use this
+# when you don't have Go installed locally (CI, contributor
+# machines), or want a reproducible per-version image set. The
+# port allocation is identical to mocks-up (8080/8081/8082) so
+# scenarios + infrafactory.yaml don't care which path is active.
+#
+# To bring up s3mock alongside (once M59-T1 lands), edit
+# docker-compose.mocks.yml and re-run mocks-up-containers.
+
+MOCKS_COMPOSE := $(COMPOSE) -f docker-compose.mocks.yml
+
+mocks-up-containers:
+	$(MOCKS_COMPOSE) up -d
+	@echo "all three mocks ready (containers):"
+	@echo "  mockway → http://127.0.0.1:8080  (Scaleway)"
+	@echo "  fakegcp → http://127.0.0.1:8081  (GCP)"
+	@echo "  fakeaws → http://127.0.0.1:8082  (AWS)"
+
+mocks-down-containers:
+	$(MOCKS_COMPOSE) down
+	@echo "all mock containers stopped"
+
+mocks-pull:
+	$(MOCKS_COMPOSE) pull
+	@echo "GHCR images refreshed"
+
+mocks-status-containers:
+	$(MOCKS_COMPOSE) ps
+
+mocks-logs-containers:
+	$(MOCKS_COMPOSE) logs --tail 50
+
 test-unit:
 	$(GO) test ./internal/... ./cmd/...
 

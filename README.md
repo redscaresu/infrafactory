@@ -161,12 +161,21 @@ make install-hooks
 
 Common targets:
 ```bash
-make test           # full suite
-make test-unit      # Go only
-make ui-test-e2e    # Playwright only
-make mocks-up       # start all three mocks
-make mocks-down     # stop them
-make mocks-status   # check
+make test                  # full suite
+make test-unit             # Go only
+make ui-test-e2e           # Playwright only
+
+# go-run mock path (foreground subprocesses; quick iteration on mock code):
+make mocks-up              # start all three mocks
+make mocks-down            # stop them
+make mocks-status          # check
+
+# container mock path (alternative — needs Docker, no Go install required;
+# wires identical ports 8080/8081/8082 so scenarios + infrafactory.yaml
+# don't care which path is active):
+make mocks-up-containers   # build + start mockway + fakegcp + fakeaws
+make mocks-down-containers
+make mocks-pull            # refresh published GHCR images (when public)
 ```
 
 Gated e2e tests (cross-repo, require `tofu` + the sibling mock repos checked out):
