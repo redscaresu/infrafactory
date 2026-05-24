@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
-# Records a deterministic ~60-second demo of an infrafactory run end-to-end.
-# Output: docs/demo/infrafactory.cast (asciinema) which can be uploaded to
-# asciinema.org OR rendered to GIF via `agg`/`svg-term-cli`.
+# Records the CLI demo for the README.
+#
+# Output: docs/demo/infrafactory.cast (raw recording) +
+#         docs/demo/infrafactory.gif (rendered for README embed).
+#
+# The .cast is produced by `asciinema rec` (terminal recorder) and
+# the .gif is rendered from it by `agg`. Only the .gif is embedded
+# in the README; the .cast is kept as the regeneration source.
 #
 # Prerequisites:
-#   - asciinema installed (brew install asciinema OR apt-get install asciinema)
-#   - mocks already running:  make mocks-up
-#   - OPENROUTER_API_KEY env var set (or claude credentials wired)
+#   - asciinema + agg on PATH:  brew install asciinema agg
+#   - mocks already running:    make mocks-up
+#   - LLM credential in env:    Claude CLI on PATH OR OPENROUTER_API_KEY exported
 #
 # Usage:
 #   ./docs/demo/record.sh
-#
-# Then either:
-#   asciinema upload docs/demo/infrafactory.cast
-#   # OR render to GIF:
-#   agg docs/demo/infrafactory.cast docs/demo/infrafactory.gif
 
 set -euo pipefail
 
@@ -119,7 +119,14 @@ echo "Recording to ${OUTPUT}..."
 echo "Pre-warmed dependencies. The recording starts in 3s."
 sleep 3
 asciinema rec --overwrite -c "bash ${SCRIPT_FILE}" "${OUTPUT}"
-echo "Done: ${OUTPUT}"
-echo ""
-echo "Upload:  asciinema upload ${OUTPUT}"
-echo "Render:  agg ${OUTPUT} docs/demo/infrafactory.gif"
+echo "Recorded: ${OUTPUT}"
+
+GIF_OUTPUT="docs/demo/infrafactory.gif"
+if command -v agg &>/dev/null; then
+  echo "Rendering GIF -> ${GIF_OUTPUT}..."
+  agg --theme github-dark --font-size 14 --speed 1.4 "${OUTPUT}" "${GIF_OUTPUT}"
+  echo "Rendered: ${GIF_OUTPUT}"
+else
+  echo "WARN: agg not installed; skipping GIF render. brew install agg, then:"
+  echo "      agg --theme github-dark --font-size 14 --speed 1.4 ${OUTPUT} ${GIF_OUTPUT}"
+fi

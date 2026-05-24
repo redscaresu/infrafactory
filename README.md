@@ -14,21 +14,11 @@ InfraFactory closes that loop. You write a scenario YAML declaring intent (resou
 
 ## Demo
 
-### CLI quickstart (~60s)
-
 ![CLI demo](docs/demo/infrafactory.gif)
 
-Records `infrafactory run scenarios/training/registry-paris.yaml` against `mockway` end-to-end: CLI surface → scenario YAML → 3-phase LLM generation (`plan_architecture` → `generate_hcl` → `self_review`) → 4-layer validation → `Status: success / target_reached` in 1 iteration → the actual OpenTofu the model converged on (`main.tf` + `providers.tf` + `variables.tf`).
+`infrafactory run scenarios/training/registry-paris.yaml` against `mockway`: scenario YAML → 3-phase LLM generation → 4-layer validation → `Status: success` in 1 iteration → the OpenTofu the model converged on. Re-record with `./docs/demo/record.sh` (requires `make mocks-up` + an LLM credential in env).
 
-Source `.cast` at [`docs/demo/infrafactory.cast`](docs/demo/infrafactory.cast); interactive (copyable text + scrub controls) at [asciinema.org/a/YBUP4WrZG0XbuCYM](https://asciinema.org/a/YBUP4WrZG0XbuCYM). Re-record with `./docs/demo/record.sh` after `make mocks-up`, then `agg docs/demo/infrafactory.cast docs/demo/infrafactory.gif --theme github-dark --font-size 14 --speed 1.4` to refresh the inline GIF.
-
-### UI walkthrough (~24s)
-
-<video src="https://github.com/redscaresu/infrafactory/raw/main/docs/demo/ui-walkthrough.webm" controls width="100%"></video>
-
-> If the player above is blank, GitHub doesn't auto-embed `.webm` from raw repo blobs in every renderer — open it directly: [`docs/demo/ui-walkthrough.webm`](docs/demo/ui-walkthrough.webm).
-
-Browser walkthrough of opening `scenarios/training/full-stack-paris.yaml` — the most resource-dense scenario in the suite (VPC + private network + Postgres + GKE + Redis + container registry + IAM) — via the web UI, then touring the Runs, Compare, Pitfalls, and Diagnostics pages. Re-record with `make demo-ui`.
+For the web UI: [`docs/demo/ui-walkthrough.webm`](docs/demo/ui-walkthrough.webm) (24s) tours `full-stack-paris` end-to-end through the SvelteKit dashboard. Re-record with `make demo-ui`.
 
 ## Quickstart
 
@@ -75,7 +65,7 @@ For an interactive walkthrough of the same loop:
 make run    # builds + serves the SvelteKit UI at http://127.0.0.1:4173
 ```
 
-The UI provides a scenario browser (edit YAML, see real-time validation), run controls (`--clean` / `--no-destroy` / Layer-3 toggles), a live page with per-iteration timer and stage indicators, per-run IaC viewer with diffs, and a pitfalls editor. See the demo placeholder above for a recorded walkthrough of `full-stack-paris` end-to-end.
+The UI provides a scenario browser (edit YAML, see real-time validation), run controls (`--clean` / `--no-destroy` / Layer-3 toggles), a live page with per-iteration timer and stage indicators, per-run IaC viewer with diffs, and a pitfalls editor. See the UI demo above for the `full-stack-paris` walkthrough.
 
 ## How it works
 
@@ -108,7 +98,7 @@ Each cloud has the same set of extension points; the scenario's `cloud:` field d
 | Prompts | `prompts/aws/` | `prompts/gcp/` | `prompts/scaleway/` |
 | Pitfalls | `pitfalls/aws.yaml` | `pitfalls/gcp.yaml` | `pitfalls/scaleway.yaml` |
 | OPA policies | `policies/aws/` | `policies/gcp/` | `policies/scaleway/` |
-| Training scenarios | `scenarios/training/aws-*.yaml` (11) | `scenarios/training/gcp-*.yaml` (8) | `scenarios/training/*-paris.yaml` (15) |
+| Training scenarios | `scenarios/training/aws-*.yaml` | `scenarios/training/gcp-*.yaml` | `scenarios/training/*-paris.yaml` |
 | Full-stack example | `aws-full-stack.yaml` | `gcp-full-stack.yaml` | `full-stack-paris.yaml` |
 
 Each first-party mock is wire-shape compatible with the matching real provider, enforced by an `examples/working/<svc>` smoke harness in the mock's own repo (`apply → plan -detailed-exitcode 0 → destroy`). See each mock's README for the API-compatibility contract.
@@ -126,7 +116,7 @@ Adding a new cloud requires: prompt templates, pitfalls file, topology derivatio
 | `infrafactory generate <scenario>` | 3-phase LLM generation only |
 | `infrafactory test <scenario>` | Layers 1-4 (no retry loop) |
 | `infrafactory run <scenario>` | Full pipeline with retry loop + holdouts |
-| `infrafactory mock start/stop/status/logs` | Manage the mockway container |
+| `infrafactory mock start/stop/status/logs` | Manage mock dependencies |
 | `infrafactory ui` | Serve the web dashboard |
 
 Key flags for `run`: `--clean` (fresh start), `--no-destroy` (keep resources for incremental follow-up), `--repair-iterations-max N` (retry budget, default 5).
@@ -189,7 +179,7 @@ make mocks-status          # check
 # don't care which path is active):
 make mocks-up-containers   # build + start mockway + fakegcp + fakeaws
 make mocks-down-containers
-make mocks-pull            # refresh published GHCR images (when public)
+make mocks-pull            # refresh published GHCR images
 ```
 
 Gated e2e tests (cross-repo, require `tofu` + the sibling mock repos checked out):
