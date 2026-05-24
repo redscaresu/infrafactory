@@ -2286,6 +2286,113 @@ The architecture is cloud-agnostic by design. Four extension points are paramete
 
 ---
 
+## Containerized Multi-Mock Orchestration
+
+The three first-party mocks (mockway, fakegcp, fakeaws) all ship as Go binaries AND as multi-arch container images published to GHCR (`ghcr.io/redscaresu/{mockway,fakegcp,fakeaws}:latest`). infrafactory can run them in either form, but the two paths are NOT currently unified:
+
+| Path | Target | Started by | Lifecycle | Use case |
+|---|---|---|---|---|
+| `go run` subprocess | mockway + fakegcp + fakeaws | `make mocks-up` (parallel `go run ./cmd/<mock>`) | Foreground per mock, killed via pidfile | Local dev — quick iteration on mock code |
+| Single-container | mockway only | `make deps-up` (docker compose) | One container | Smoke tests against a stable image |
+| Multi-container | none today | — | — | **The gap.** Reproducible CI demos, S3Mock integration, parity with the docker-published images |
+
+**Decision: introduce `docker-compose.mocks.yml`** as the canonical multi-mock orchestration file alongside the existing `docker-compose.yml`. Targets:
+
+- `make mocks-up-containers` brings up `mockway:8080` + `fakegcp:8081` + `fakeaws:8082` (+ `s3mock:9090` once the third-party integration lands) via `docker compose -f docker-compose.mocks.yml up -d`.
+- `make mocks-up` (existing) stays as the go-run path for local dev.
+- Both wire infrafactory.yaml the same way (`mockway.url`, `fakegcp.url`, `fakeaws.url`); URLs are identical between the two paths so scenarios don't care which is running.
+- README quickstart prefers `mocks-up-containers` because it works on any machine with Docker, no Go install required.
+
+Implementation slice (~half day):
+1. Author `docker-compose.mocks.yml` — three `services:` blocks referencing the published GHCR images with fixed ports.
+2. Add `mocks-up-containers` / `mocks-down-containers` / `mocks-pull` / `mocks-logs-containers` to Makefile.
+3. Smoke: `make mocks-up-containers && curl 127.0.0.1:8080/mock/state && curl 127.0.0.1:8081/mock/state && curl 127.0.0.1:8082/mock/state` — all return 200.
+4. Extend `internal/e2e/helpers.go::StartMockway` / `StartFakegcp` / `StartFakeaws` with a `MOCKS_USE_CONTAINERS=1` toggle that pings the running container instead of spawning a new subprocess. Lets the gated e2e suite reuse one set of mocks across tests instead of per-test spin-up.
+5. README + AGENTS.md updates documenting both paths.
+
+---
+
+## Third-Party Mock Integration (Adobe S3Mock)
+
+fakeaws's per-service field parity work (M57) hit diminishing returns on S3 — the bucket / object / encryption / versioning / lifecycle / CORS / website / tagging surface is large, the AWS S3 SDK is strict about wire-shape adherence, and Adobe already ships a mature open-source emulator with broad terraform-provider-aws coverage. Decision: **adopt Adobe S3Mock ([github.com/adobe/S3Mock](https://github.com/adobe/S3Mock)) as the S3 backend instead of growing fakeaws's S3 handler**.
+
+This is the first time infrafactory will host a non-first-party mock. The integration is a load-bearing template for any future third-party mock (Aspecto's LambdaMock, LocalStack DynamoDB, etc.), so the touch points are documented here as the canonical pattern.
+
+### Why S3Mock and not LocalStack
+
+| | S3Mock | LocalStack |
+|---|---|---|
+| Scope | S3 only | All AWS services |
+| Footprint | ~150 MB image, JVM | ~500 MB image, Python |
+| Boot time | ~1 s | ~10 s |
+| TF provider coverage | High (Adobe maintains compat) | High (community maintained) |
+| Apache 2.0 license | yes | yes |
+| Admin / reset surface | `/_internal/...` | `/_localstack/...` |
+| Per-bucket state inspection | `GET /<bucket>?list-type=2` (standard S3 API) | Standard S3 API |
+
+S3Mock wins on focus, footprint, and boot time. LocalStack is the right call if/when we need EKS/Lambda/etc. that fakeaws doesn't cover and we want one image to rule them all — but that's a v2 decision, not v1.
+
+### Integration touch points
+
+Every place fakeaws's S3 surface is currently referenced needs a routing decision: "fakeaws or S3Mock?" The seven touch points:
+
+1. **provider endpoint** (HCL). Today: `s3 = "{fakeawsURL}/s3"`. After: `s3 = "{s3MockURL}"`. Path-style addressing matches S3Mock's default; provider config needs `s3_use_path_style = true` (which it already does in fakeaws examples).
+
+2. **infrafactory.yaml config block**. New top-level `s3mock:` block with `url` + `auto_reset` mirroring the existing `mockway:` / `fakegcp:` / `fakeaws:` shape:
+   ```yaml
+   s3mock:
+     url: http://127.0.0.1:9090
+     auto_reset: true
+   ```
+
+3. **`internal/config/config.go::Config`**. Add `S3Mock S3MockConfig` field; load + validate at runtime construction time.
+
+4. **`internal/cli/runtime.go::cloudMockStateRouter`**. Currently dispatches by cloud name. Extend to dispatch by `(cloud, service)` tuple so AWS scenarios touching S3 route to s3mock while everything else routes to fakeaws. Concretely:
+   ```go
+   type cloudMockStateRouter struct {
+       scaleway *mockStateClient
+       gcp      *mockStateClient
+       aws      *mockStateClient
+       s3mock   *mockStateClient // S3 carve-out
+   }
+   ```
+   `pick()` extended with a `service` argument: `pick("s3")` returns s3mock; `pick("")` (default) returns the cloud-default.
+
+5. **`/mock/state` aggregation**. S3Mock does NOT expose `/mock/state`. Its admin surface is different. Infrafactory's `state.go` for AWS needs a polyfill that calls `GET /` (list buckets), then for each bucket `GET /<bucket>?list-type=2` (list objects), and synthesises the `{s3: {buckets: [...]}}` shape the existing `awsStateItemCount` helper expects. Lives in a new `internal/cli/s3mock_state.go`.
+
+6. **reset / snapshot / restore**. S3Mock's admin endpoint is `POST /_internal/reset`. Snapshot/restore aren't native — we'd implement snapshot/restore by listing+downloading all objects to a tar OR (simpler) by relying on Docker volume snapshots. v1: no-op snapshot/restore for s3mock; document the gap.
+
+7. **topology derivation**. `deriveTopologyAWS` currently treats S3 as no-op for connectivity (S3 doesn't have IP-level reachability), so this layer needs **zero changes**.
+
+### What stays in fakeaws
+
+fakeaws's existing S3 handler stays (don't delete) for the per-service `TestE2E_AWS_S3` direct-HTTP tests. Those tests bypass the provider envelope and exercise specific bytes — useful for unit-level S3-handler regression coverage even after S3Mock takes over the provider-driven path. Mark it `// Deprecated: provider-driven S3 work uses Adobe S3Mock` in `handlers/s3.go`.
+
+### Rollout slices
+
+Tracked separately in BACKLOG as M59 (umbrella) with sub-tickets:
+
+- **M59-T1**: docker-compose.mocks.yml adds `s3mock:` service (image `adobe/s3mock:latest`, port 9090). Smoke verify with `aws s3 ls --endpoint http://127.0.0.1:9090`.
+- **M59-T2**: `internal/config/config.go` + `infrafactory.yaml` example gain the `s3mock:` block.
+- **M59-T3**: `cloudMockStateRouter.pick(service string)` extension + s3-carve-out routing.
+- **M59-T4**: `internal/cli/s3mock_state.go` — S3Mock state polyfill (list buckets, list objects, return `{s3: {buckets: [...]}}` shape).
+- **M59-T5**: re-add S3 to `TestE2E_AWSFullStack` HCL, point `s3 = ...` at s3mock, assert `s3.buckets` in state. Should pass without further handler work.
+- **M59-T6**: README quickstart + cloud coverage table updated to name s3mock as the S3 backend.
+
+### Future third-party mocks
+
+Same pattern applies to any other third-party mock. The reusable shape:
+
+1. New top-level config block (`<mockname>:` with `url` + auth + `auto_reset`).
+2. Router carve-out by service (not cloud — S3Mock proves this matters).
+3. State polyfill if the mock doesn't expose `/mock/state`.
+4. Reset/snapshot/restore polyfill or "documented gap" note.
+5. Keep the first-party handler as a deprecated direct-HTTP test fixture.
+
+This contract lets infrafactory bring in any mature mock without rewriting the harness, just adding routing.
+
+---
+
 ## What's NOT in v1
 
 - Multi-cloud support beyond Scaleway (GCP planned in Slice 36, AWS/Azure future)
@@ -2300,7 +2407,7 @@ The architecture is cloud-agnostic by design. Four extension points are paramete
 - Scenario mixins / composition
 - Full Attractor graph runner
 - Cost estimation / budget checks (no reliable Scaleway pricing data source)
-- S3 mock (Mockway v2)
+- First-party S3 mock — superseded by Adobe S3Mock integration (see "Third-Party Mock Integration" section above; M59)
 - tfsec / checkov (poor Scaleway support — add when they gain rules)
 - Infracost (no Scaleway pricing support)
 
