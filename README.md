@@ -2,9 +2,9 @@
 
 [![CI](https://github.com/redscaresu/infrafactory/actions/workflows/ci.yml/badge.svg)](https://github.com/redscaresu/infrafactory/actions/workflows/ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![Go Version](https://img.shields.io/github/go-mod/go-version/redscaresu/infrafactory)](go.mod)
+[![Go 1.24+](https://img.shields.io/badge/Go-1.24%2B-00ADD8?logo=go)](go.mod)
 
-Scenario-driven infrastructure generation and validation across **Scaleway**, **GCP**, and **AWS** — written in OpenTofu, validated against deterministic mock servers, optionally deployed against real cloud APIs.
+Scenario-driven infrastructure generation and validation across **AWS**, **GCP**, and **Scaleway** — written in OpenTofu, validated against deterministic mock servers, optionally deployed against real cloud APIs.
 
 ## Why this exists
 
@@ -14,7 +14,7 @@ InfraFactory closes that loop:
 
 - **Scenario YAML declares intent** (resources + acceptance criteria) — not implementation.
 - **Three-phase LLM generation** (plan → write HCL → self-review) emits OpenTofu.
-- **Four-layer validation** (static → mock deploy → real deploy → destruction) runs in seconds against deterministic SQLite-backed mocks (`mockway`, `fakegcp`, `fakeaws`), not real cloud APIs.
+- **Four-layer validation** (static → mock deploy → real deploy → destruction) runs in seconds against deterministic SQLite-backed mocks (`fakeaws`, `fakegcp`, `mockway`), not real cloud APIs.
 - **Structured failures feed back into the next iteration's prompt** — the LLM sees what broke, not just that something broke.
 - **`make mocks-up` and you're done.** No cloud credentials, no IAM dance, no waiting for resources to provision.
 

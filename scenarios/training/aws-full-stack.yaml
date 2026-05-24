@@ -1,0 +1,57 @@
+scenario: aws-full-stack
+version: "1.0"
+cloud: aws
+description: >
+  A full-stack AWS scenario in us-east-1: VPC + private subnets, an
+  EKS cluster with a managed node group, a private RDS Postgres, an
+  S3 bucket for assets, a Secrets Manager entry for the DB password,
+  and IAM roles wired for both the EKS control plane and the node
+  group. Exercises the multi-service composition (compute, networking,
+  kubernetes, database, storage, iam, secrets) infrafactory needs to
+  validate against fakeaws. Mirrors the GCP full-stack and Scaleway
+  full-stack scenarios.
+
+aws_resource_anchors:
+  - aws_vpc
+  - aws_subnet
+  - aws_iam_role
+  - aws_eks_cluster
+  - aws_eks_node_group
+  - aws_db_subnet_group
+  - aws_db_instance
+  - aws_s3_bucket
+  - aws_secretsmanager_secret
+
+resources:
+  compute:
+    purpose: api-server
+    size: small
+  networking:
+    vpc: true
+    private_network: true
+  kubernetes:
+    size: small
+  database:
+    engine: postgresql
+    size: small
+    high_availability: false
+  storage:
+    purpose: app-assets
+    size: small
+  iam:
+    purpose: ci-cd
+    application: true
+    api_key: true
+    policy: true
+
+acceptance_criteria:
+  - type: policy
+    check: region_restriction
+    params:
+      region: us-east-1
+    expect: pass
+  - type: policy
+    check: encryption_at_rest
+    expect: pass
+  - type: destruction
+    expect: no_orphans

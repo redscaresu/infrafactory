@@ -4,10 +4,12 @@ cloud: gcp
 description: >
   A full-stack GCP scenario in europe-west1: VPC + private subnet, a
   GKE cluster with a separate node pool, a private Cloud SQL Postgres,
-  a Memorystore Redis instance, a GCS bucket for assets, and an IAM
-  service account with a CI/CD policy. Exercises the multi-service
-  composition (compute, networking, kubernetes, database, redis,
-  storage, iam) infrafactory needs to validate against fakegcp.
+  a GCS bucket for assets, and an IAM service account with a CI/CD
+  policy. Exercises the multi-service composition (compute, networking,
+  kubernetes, database, storage, iam) infrafactory needs to validate
+  against fakegcp. Memorystore Redis is intentionally omitted — fakegcp
+  does not yet ship a memorystore handler, so adding redis here would
+  break the documented `make mocks-up && infrafactory run` quickstart.
 
 resources:
   compute:
@@ -22,9 +24,6 @@ resources:
     engine: postgresql
     size: small
     high_availability: false
-  redis:
-    purpose: cache
-    size: small
   storage:
     purpose: app-assets
     size: small

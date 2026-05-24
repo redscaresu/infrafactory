@@ -32,7 +32,7 @@ func TestE2E_GCPDoubleApplyIdempotency(t *testing.T) {
 	configPath := filepath.Join(workspace, "infrafactory.yaml")
 	scenarioPath := repoScenariosPath(t, "gcp-pubsub.yaml")
 
-	WriteConfigMultiCloud(t, configPath, "http://127.0.0.1:1", mock.URL, outputRoot)
+	WriteConfigMultiCloud(t, configPath, "http://127.0.0.1:1", mock.URL, "", outputRoot)
 
 	files := gcpPubSubFiles(mock.URL)
 

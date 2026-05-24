@@ -329,18 +329,20 @@ func WriteFile(t *testing.T, path string, content []byte) {
 // prompt, and pitfall paths are resolved against the repository root so
 // scenarios with policy criteria can be evaluated end-to-end.
 //
-// fakegcp URL is left empty; for GCP scenarios use WriteConfigMultiCloud
-// so the cloudMockStateRouter has a target for `cloud: gcp`.
+// fakegcp + fakeaws URLs are left empty; for GCP/AWS scenarios use
+// WriteConfigMultiCloud so the cloudMockStateRouter has a target for
+// the matching cloud.
 func WriteConfig(t *testing.T, configPath, mockwayURL, outputRoot string) {
 	t.Helper()
-	WriteConfigMultiCloud(t, configPath, mockwayURL, "", outputRoot)
+	WriteConfigMultiCloud(t, configPath, mockwayURL, "", "", outputRoot)
 }
 
-// WriteConfigMultiCloud writes an infrafactory.yaml with both mockway
-// and fakegcp URLs populated. fakegcpURL may be empty for
-// Scaleway-only setups; pass a non-empty URL when the test runs a
-// `cloud: gcp` scenario through the cloudMockStateRouter.
-func WriteConfigMultiCloud(t *testing.T, configPath, mockwayURL, fakegcpURL, outputRoot string) {
+// WriteConfigMultiCloud writes an infrafactory.yaml with mockway,
+// fakegcp, and fakeaws URLs populated. Any URL may be empty when the
+// matching cloud isn't exercised by the test; pass a non-empty URL
+// when the test runs a `cloud: gcp` or `cloud: aws` scenario through
+// the cloudMockStateRouter.
+func WriteConfigMultiCloud(t *testing.T, configPath, mockwayURL, fakegcpURL, fakeawsURL, outputRoot string) {
 	t.Helper()
 	repoRoot := RepoRoot(t)
 	WriteFile(t, configPath, fmt.Appendf(nil, `version: "1.0"
@@ -350,13 +352,15 @@ mockway:
   url: %s
 fakegcp:
   url: %s
+fakeaws:
+  url: %s
 scaleway:
   credentials_source: env
 validation:
   layers:
     static:
       enabled: true
-      policy_paths: [%s/policies/common, %s/policies/scaleway, %s/policies/gcp]
+      policy_paths: [%s/policies/common, %s/policies/scaleway, %s/policies/gcp, %s/policies/aws]
     mock_deploy:
       enabled: true
     sandbox_deploy:
@@ -380,7 +384,8 @@ paths:
 `,
 		mockwayURL,
 		fakegcpURL,
-		repoRoot, repoRoot, repoRoot,
+		fakeawsURL,
+		repoRoot, repoRoot, repoRoot, repoRoot,
 		repoRoot, repoRoot, outputRoot, repoRoot, repoRoot, repoRoot,
 	))
 }
