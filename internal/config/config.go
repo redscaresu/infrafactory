@@ -26,6 +26,7 @@ type Config struct {
 	Mockway            MockwayConfig     `yaml:"mockway"`
 	Fakegcp            FakegcpConfig     `yaml:"fakegcp"`
 	Fakeaws            FakeawsConfig     `yaml:"fakeaws"`
+	S3                 S3Config          `yaml:"s3"`
 	Scaleway           ScalewayConfig    `yaml:"scaleway"`
 	Validation         ValidationConfig  `yaml:"validation"`
 	ConstraintPolicies map[string]string `yaml:"constraint_policies"`
@@ -75,6 +76,20 @@ type FakegcpConfig struct {
 // but keeps the runtime constructible). Added in S43-T9 per
 // fakeaws/concepts.md "Required surface" item 4.
 type FakeawsConfig struct {
+	URL       string `yaml:"url"`
+	AutoReset bool   `yaml:"auto_reset"`
+}
+
+// S3Config points the runtime at the third-party S3 backend used in
+// place of fakeaws's built-in S3 handler (decision documented in
+// CONCEPT.md "Third-Party Mock Integration" section, M59). Default
+// backend is SeaweedFS — Apache 2.0, full S3 surface, ~50 MB Go
+// binary. When URL is non-empty, the cloudMockStateRouter dispatches
+// AWS S3 calls here while everything else stays on Fakeaws.URL.
+// Optional — if URL is empty, S3 calls fall back to fakeaws's
+// stripped-down S3 surface (kept for direct-HTTP tests, not viable
+// for terraform-provider-aws Read flows).
+type S3Config struct {
 	URL       string `yaml:"url"`
 	AutoReset bool   `yaml:"auto_reset"`
 }
@@ -169,6 +184,9 @@ func Default() Config {
 			AutoReset: true,
 		},
 		Fakegcp: FakegcpConfig{
+			AutoReset: true,
+		},
+		S3: S3Config{
 			AutoReset: true,
 		},
 		Scaleway: ScalewayConfig{

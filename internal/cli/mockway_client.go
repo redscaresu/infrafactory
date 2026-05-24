@@ -109,31 +109,66 @@ func truncateMockwayErrorPayload(payload []byte) string {
 // Per concepts.md "Required surface" item 16 (S43-T9): per-cloud
 // reset/snapshot/restore — an aws scenario's reset only touches
 // fakeaws, not mockway or fakegcp. pick() enforces this.
+//
+// Third-party mock carve-out (M59): when an AWS scenario is loaded
+// AND r.s3 is configured, S3 calls fan out to the third-party S3
+// backend (SeaweedFS by default — Apache 2.0, full S3 surface)
+// instead of fakeaws's stripped-down S3 handler. The cloud-default
+// client (fakeaws) still handles everything else. Reset fans out
+// to both fakeaws AND the s3 backend; State() merges the s3-derived
+// S3 block into the fakeaws state (see internal/cli/s3_state.go).
 type cloudMockStateRouter struct {
 	runtime  *CommandRuntime
 	scaleway *mockStateClient
 	gcp      *mockStateClient
 	aws      *mockStateClient
+	s3       *mockStateClient // S3 carve-out for AWS scenarios (M59)
 }
 
 func (r *cloudMockStateRouter) Reset(ctx context.Context) error {
-	return r.pick().Reset(ctx)
+	if err := r.pick("").Reset(ctx); err != nil {
+		return err
+	}
+	if extra := r.pick("s3"); extra != nil && extra != r.pick("") {
+		// SeaweedFS / similar third-party S3 backends have no
+		// /mock/reset endpoint — go through the native S3 admin
+		// path (list+delete buckets).
+		return resetS3Backend(ctx, extra)
+	}
+	return nil
 }
 
 func (r *cloudMockStateRouter) Snapshot(ctx context.Context) error {
-	return r.pick().Snapshot(ctx)
+	if err := r.pick("").Snapshot(ctx); err != nil {
+		return err
+	}
+	// Third-party S3 backends have no native snapshot — documented
+	// gap in CONCEPT.md "Third-Party Mock Integration" §6.
+	return nil
 }
 
 func (r *cloudMockStateRouter) Restore(ctx context.Context) error {
-	return r.pick().Restore(ctx)
+	if err := r.pick("").Restore(ctx); err != nil {
+		return err
+	}
+	// Third-party S3 backends have no native restore — see Snapshot.
+	return nil
 }
 
 func (r *cloudMockStateRouter) State(ctx context.Context) ([]byte, error) {
-	return r.pick().State(ctx)
+	base, err := r.pick("").State(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if r.isAWSScenario() && r.s3 != nil {
+		return mergeS3IntoAWSState(ctx, base, r.s3)
+	}
+	return base, nil
 }
 
 // pick resolves to the per-cloud client based on the loaded scenario's
-// cloud field:
+// cloud field AND the optional service hint:
+//   - service "s3" + cloud:aws → r.s3 (when configured)
 //   - cloud:gcp → r.gcp (when configured)
 //   - cloud:aws → r.aws (when configured)
 //   - default / scaleway / pre-LoadScenario → r.scaleway
@@ -142,7 +177,14 @@ func (r *cloudMockStateRouter) State(ctx context.Context) ([]byte, error) {
 // "" → r.X is nil), we fall back to scaleway. This matches the legacy
 // fakegcp fallback behaviour and keeps the runtime constructible
 // when only a subset of clouds is wired.
-func (r *cloudMockStateRouter) pick() *mockStateClient {
+//
+// Pass `service=""` for the cloud-default; pass a specific service
+// name (e.g. "s3") when the call is service-scoped — used by the
+// fan-out Reset/State logic above.
+func (r *cloudMockStateRouter) pick(service string) *mockStateClient {
+	if service == "s3" && r.isAWSScenario() && r.s3 != nil {
+		return r.s3
+	}
 	if r.runtime != nil && r.runtime.loadedScenario != nil {
 		switch strings.ToLower(strings.TrimSpace(r.runtime.loadedScenario.Cloud)) {
 		case "gcp":
@@ -156,4 +198,14 @@ func (r *cloudMockStateRouter) pick() *mockStateClient {
 		}
 	}
 	return r.scaleway
+}
+
+// isAWSScenario reports whether the loaded scenario targets AWS —
+// used by the M59 S3 carve-out logic to decide whether the s3 backend
+// should be consulted.
+func (r *cloudMockStateRouter) isAWSScenario() bool {
+	if r.runtime == nil || r.runtime.loadedScenario == nil {
+		return false
+	}
+	return strings.ToLower(strings.TrimSpace(r.runtime.loadedScenario.Cloud)) == "aws"
 }

@@ -2312,82 +2312,79 @@ Implementation slice (~half day):
 
 ---
 
-## Third-Party Mock Integration (Adobe S3Mock)
+## Third-Party Mock Integration (SeaweedFS S3 — M59)
 
-fakeaws's per-service field parity work (M57) hit diminishing returns on S3 — the bucket / object / encryption / versioning / lifecycle / CORS / website / tagging surface is large, the AWS S3 SDK is strict about wire-shape adherence, and Adobe already ships a mature open-source emulator with broad terraform-provider-aws coverage. Decision: **adopt Adobe S3Mock ([github.com/adobe/S3Mock](https://github.com/adobe/S3Mock)) as the S3 backend instead of growing fakeaws's S3 handler**.
+fakeaws's per-service field parity work (M57) hit diminishing returns on S3 — the bucket / object / encryption / versioning / lifecycle / CORS / website / tagging surface is large, the AWS S3 SDK is strict about wire-shape adherence, and several mature open-source S3 servers already exist. Decision: **adopt SeaweedFS ([github.com/seaweedfs/seaweedfs](https://github.com/seaweedfs/seaweedfs)) as the S3 backend instead of growing fakeaws's S3 handler**.
 
-This is the first time infrafactory will host a non-first-party mock. The integration is a load-bearing template for any future third-party mock (Aspecto's LambdaMock, LocalStack DynamoDB, etc.), so the touch points are documented here as the canonical pattern.
+This is the first time infrafactory hosts a non-first-party mock. The integration is a load-bearing template for any future third-party mock, so the touch points are documented here as the canonical pattern.
 
-### Why S3Mock and not LocalStack
+### Backend evaluation
 
-| | S3Mock | LocalStack |
-|---|---|---|
-| Scope | S3 only | All AWS services |
-| Footprint | ~150 MB image, JVM | ~500 MB image, Python |
-| Boot time | ~1 s | ~10 s |
-| TF provider coverage | High (Adobe maintains compat) | High (community maintained) |
-| Apache 2.0 license | yes | yes |
-| Admin / reset surface | `/_internal/...` | `/_localstack/...` |
-| Per-bucket state inspection | `GET /<bucket>?list-type=2` (standard S3 API) | Standard S3 API |
+Four candidates were evaluated empirically — each booted in Docker, a bare `aws_s3_bucket` was applied via `terraform-provider-aws ~> 5.70`, and lifecycle observed:
 
-S3Mock wins on focus, footprint, and boot time. LocalStack is the right call if/when we need EKS/Lambda/etc. that fakeaws doesn't cover and we want one image to rule them all — but that's a v2 decision, not v1.
+| | **SeaweedFS** ✅ chosen | Adobe S3Mock ❌ | Garage ❌ | LocalStack ❌ | MinIO ❌ |
+|---|---|---|---|---|---|
+| License | Apache 2.0 | Apache 2.0 | AGPLv3 | community gone | open-core (April 2025 strip) |
+| `aws_s3_bucket` apply | ✅ pass | ✗ fails — `?policy` routes to ListObjects; provider errors "policy (<XML>) is invalid JSON" | ✅ pass | n/a | n/a |
+| Setup ceremony | `docker run server -s3` | `docker run` (but useless) | `garage.toml` + layout assign + key bootstrap + per-key perms | n/a | n/a |
+| Auth out of the box | accepts any creds | accepts any creds | requires real SigV4 with cluster-generated keys | n/a | n/a |
+| Footprint | ~50 MB Go | ~150 MB JVM | ~40 MB Rust | ~500 MB Python | ~250 MB Go |
+| Boot time | ~5 s | ~1 s | ~5 s + 3 admin calls | ~10 s | ~5 s |
+| Maintenance velocity | high (3000+ commits/yr) | low | medium | n/a (community killed) | dev active but strip-mining |
+
+**Why SeaweedFS won:**
+
+1. **License: Apache 2.0.** Garage's AGPLv3 is genuinely a problem for infrafactory users shipping pipelines built around it. MinIO's open-core trajectory makes it untrustworthy for OSS. SeaweedFS Apache 2.0 has no such constraint.
+2. **Setup simplicity.** SeaweedFS: one command, accepts `access_key = "fake"`. Garage: 4-step bootstrap dance per cluster. SeaweedFS matches the existing fakeaws ergonomics.
+3. **Proven provider compatibility.** SeaweedFS returns the exact error codes `terraform-provider-aws` expects (`NoSuchBucketPolicy`, `NoSuchTagSet`, etc.) — verified by empirical apply→plan-no-op→destroy cycle in `TestE2E_AWSFullStack`.
+
+S3Mock turned out to scope-limit hard: Adobe explicitly documents it as for "uploading and downloading objects," not full bucket-management compat. Bucket sub-resource reads (GetBucketPolicy / GetBucketTagging / etc.) fall through to ListObjects, breaking every `aws_s3_bucket` Read. We initially adopted S3Mock based on its footprint and boot-time numbers, then pivoted to SeaweedFS once the actual `tofu apply` evaluation surfaced the gap. The infrastructure built for M59-T1..T6 transferred unchanged — only the docker image, helper name (`StartS3Mock` → `StartSeaweedFS`), and config block name (`s3mock:` → `s3:`) changed.
 
 ### Integration touch points
 
-Every place fakeaws's S3 surface is currently referenced needs a routing decision: "fakeaws or S3Mock?" The seven touch points:
+Every place fakeaws's S3 surface is currently referenced needs a routing decision: "fakeaws or s3 backend?" The seven touch points (all landed in M59-T1..T5):
 
-1. **provider endpoint** (HCL). Today: `s3 = "{fakeawsURL}/s3"`. After: `s3 = "{s3MockURL}"`. Path-style addressing matches S3Mock's default; provider config needs `s3_use_path_style = true` (which it already does in fakeaws examples).
+1. **provider endpoint** (HCL). `s3 = "{s3URL}"` instead of `s3 = "{fakeawsURL}/s3"`. Path-style addressing required (`s3_use_path_style = true`) since SeaweedFS uses path-style URLs.
 
-2. **infrafactory.yaml config block**. New top-level `s3mock:` block with `url` + `auto_reset` mirroring the existing `mockway:` / `fakegcp:` / `fakeaws:` shape:
-   ```yaml
-   s3mock:
-     url: http://127.0.0.1:9090
-     auto_reset: true
-   ```
+2. **`infrafactory.yaml` config block**. `s3:` block with `url` + `auto_reset`, mirroring the existing `mockway:` / `fakegcp:` / `fakeaws:` shape.
 
-3. **`internal/config/config.go::Config`**. Add `S3Mock S3MockConfig` field; load + validate at runtime construction time.
+3. **`internal/config/config.go::Config`**. `S3 S3Config` field, loaded + validated at runtime construction time.
 
-4. **`internal/cli/runtime.go::cloudMockStateRouter`**. Currently dispatches by cloud name. Extend to dispatch by `(cloud, service)` tuple so AWS scenarios touching S3 route to s3mock while everything else routes to fakeaws. Concretely:
-   ```go
-   type cloudMockStateRouter struct {
-       scaleway *mockStateClient
-       gcp      *mockStateClient
-       aws      *mockStateClient
-       s3mock   *mockStateClient // S3 carve-out
-   }
-   ```
-   `pick()` extended with a `service` argument: `pick("s3")` returns s3mock; `pick("")` (default) returns the cloud-default.
+4. **`internal/cli/runtime.go::cloudMockStateRouter`**. Dispatches by `(cloud, service)` tuple — `s3` field on the router, populated when `cfg.S3.URL` is non-empty. `pick(service string)` returns `r.s3` for AWS scenarios requesting service "s3", falling through to cloud-default otherwise.
 
-5. **`/mock/state` aggregation**. S3Mock does NOT expose `/mock/state`. Its admin surface is different. Infrafactory's `state.go` for AWS needs a polyfill that calls `GET /` (list buckets), then for each bucket `GET /<bucket>?list-type=2` (list objects), and synthesises the `{s3: {buckets: [...]}}` shape the existing `awsStateItemCount` helper expects. Lives in a new `internal/cli/s3mock_state.go`.
+5. **`/mock/state` aggregation**. Third-party S3 backends don't expose `/mock/state`. `internal/cli/s3_state.go` polyfills the shape: `GET /` (list buckets) + per-bucket `GET /<bucket>?list-type=2` (object count) → `{s3: {buckets: [...]}}`. Merged into the fakeaws state by `mergeS3IntoAWSState` when the router routes an AWS scenario.
 
-6. **reset / snapshot / restore**. S3Mock's admin endpoint is `POST /_internal/reset`. Snapshot/restore aren't native — we'd implement snapshot/restore by listing+downloading all objects to a tar OR (simpler) by relying on Docker volume snapshots. v1: no-op snapshot/restore for s3mock; document the gap.
+6. **reset / snapshot / restore**. SeaweedFS has no `/mock/reset` — `resetS3Backend` polyfill: list all buckets, list+delete each bucket's objects (since standard S3 requires empty bucket before DELETE), then `DELETE /<bucket>`. Snapshot/restore are documented no-ops for v1 (no native equivalent; would need Docker volume snapshots or a per-bucket tar dump).
 
-7. **topology derivation**. `deriveTopologyAWS` currently treats S3 as no-op for connectivity (S3 doesn't have IP-level reachability), so this layer needs **zero changes**.
+7. **topology derivation**. `deriveTopologyAWS` treats S3 as no-op for connectivity (S3 has no IP-level reachability), so this layer needs **zero changes**.
+
+### Anonymous-mode listing quirk
+
+SeaweedFS's `server -s3` in anonymous mode (no IAM bootstrap) accepts bucket PUTs and lets HEAD/GET/DELETE work end-to-end, but `ListAllMyBuckets` returns empty — buckets exist without an owner, and the list groups by owner. This doesn't break the `terraform-provider-aws` lifecycle (the provider does HEAD/GET on specific bucket names, not lists), but it does mean infrafactory's state assertion can't use "count buckets in list" — it uses HEAD-by-name (`s3BucketExists`) instead. For test scenarios pinning specific bucket names this is fine; if a future scenario needs LIST-based assertions, we'd need to wire up SeaweedFS IAM (`weed iam` subcommand + an admin key) so buckets get owner records.
 
 ### What stays in fakeaws
 
-fakeaws's existing S3 handler stays (don't delete) for the per-service `TestE2E_AWS_S3` direct-HTTP tests. Those tests bypass the provider envelope and exercise specific bytes — useful for unit-level S3-handler regression coverage even after S3Mock takes over the provider-driven path. Mark it `// Deprecated: provider-driven S3 work uses Adobe S3Mock` in `handlers/s3.go`.
+fakeaws's existing S3 handler stays for the per-service `TestE2E_AWS_S3` direct-HTTP tests. Those tests bypass the provider envelope and exercise specific bytes — useful for unit-level S3-handler regression coverage even after SeaweedFS takes over the provider-driven path. Marked deprecated in code comments.
 
-### Rollout slices
+### Rollout (M59-T1..T6, landed)
 
-Tracked separately in BACKLOG as M59 (umbrella) with sub-tickets:
-
-- **M59-T1**: docker-compose.mocks.yml adds `s3mock:` service (image `adobe/s3mock:latest`, port 9090). Smoke verify with `aws s3 ls --endpoint http://127.0.0.1:9090`.
-- **M59-T2**: `internal/config/config.go` + `infrafactory.yaml` example gain the `s3mock:` block.
-- **M59-T3**: `cloudMockStateRouter.pick(service string)` extension + s3-carve-out routing.
-- **M59-T4**: `internal/cli/s3mock_state.go` — S3Mock state polyfill (list buckets, list objects, return `{s3: {buckets: [...]}}` shape).
-- **M59-T5**: re-add S3 to `TestE2E_AWSFullStack` HCL, point `s3 = ...` at s3mock, assert `s3.buckets` in state. Should pass without further handler work.
-- **M59-T6**: README quickstart + cloud coverage table updated to name s3mock as the S3 backend.
+- **M59-T1**: docker-compose.mocks.yml `s3:` service (image `chrislusf/seaweedfs:latest`, port 9090, `server -s3 -s3.port=8333 -s3.allowEmptyFolder=true`)
+- **M59-T2**: `S3Config` struct + `s3:` block in example `infrafactory.yaml` + `WriteConfigMultiCloud` test-helper extension
+- **M59-T3**: `cloudMockStateRouter.pick(service string)` + `r.s3` carve-out
+- **M59-T4**: `internal/cli/s3_state.go` — state polyfill + reset polyfill
+- **M59-T5**: `aws_s3_bucket` + SSE config re-added to `TestE2E_AWSFullStack` HCL; assertion via `s3BucketExists` HEAD-by-name; full lifecycle apply→destroy green
+- **M59-T6**: README + CONCEPT.md + AGENTS.md updates (this section)
 
 ### Future third-party mocks
 
 Same pattern applies to any other third-party mock. The reusable shape:
 
-1. New top-level config block (`<mockname>:` with `url` + auth + `auto_reset`).
-2. Router carve-out by service (not cloud — S3Mock proves this matters).
+1. New top-level config block (`<service>:` with `url` + auth + `auto_reset`).
+2. Router carve-out by service (not cloud — the S3 case proves this matters).
 3. State polyfill if the mock doesn't expose `/mock/state`.
 4. Reset/snapshot/restore polyfill or "documented gap" note.
 5. Keep the first-party handler as a deprecated direct-HTTP test fixture.
+6. Empirical apply→plan-no-op→destroy probe BEFORE committing to a backend — the S3Mock initial-pick-then-pivot proves spec compliance and lived terraform-provider-aws compat are different things.
 
 This contract lets infrafactory bring in any mature mock without rewriting the harness, just adding routing.
 
@@ -2407,7 +2404,7 @@ This contract lets infrafactory bring in any mature mock without rewriting the h
 - Scenario mixins / composition
 - Full Attractor graph runner
 - Cost estimation / budget checks (no reliable Scaleway pricing data source)
-- First-party S3 mock — superseded by Adobe S3Mock integration (see "Third-Party Mock Integration" section above; M59)
+- First-party S3 mock — superseded by SeaweedFS integration (see "Third-Party Mock Integration" section above; M59)
 - tfsec / checkov (poor Scaleway support — add when they gain rules)
 - Infracost (no Scaleway pricing support)
 

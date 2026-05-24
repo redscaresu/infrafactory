@@ -91,7 +91,7 @@ Each cloud has the same set of extension points; the scenario's `cloud:` field d
 
 | Extension point | AWS | GCP | Scaleway |
 |---|---|---|---|
-| Mock server | [`fakeaws`](https://github.com/redscaresu/fakeaws) (`:8082`) | [`fakegcp`](https://github.com/redscaresu/fakegcp) (`:8081`) | [`mockway`](https://github.com/redscaresu/mockway) (`:8080`) |
+| Mock server | [`fakeaws`](https://github.com/redscaresu/fakeaws) (`:8082`) + [SeaweedFS](https://github.com/seaweedfs/seaweedfs) for S3 (`:9090`) | [`fakegcp`](https://github.com/redscaresu/fakegcp) (`:8081`) | [`mockway`](https://github.com/redscaresu/mockway) (`:8080`) |
 | Provider pin | `hashicorp/aws ~> 5.70` | `hashicorp/google >= 5.0` (v5 for IAM SA) | `scaleway/scaleway >= 2.50` |
 | Prompts | `prompts/aws/` | `prompts/gcp/` | `prompts/scaleway/` |
 | Pitfalls | `pitfalls/aws.yaml` | `pitfalls/gcp.yaml` | `pitfalls/scaleway.yaml` |
@@ -99,7 +99,9 @@ Each cloud has the same set of extension points; the scenario's `cloud:` field d
 | Training scenarios | `scenarios/training/aws-*.yaml` (11) | `scenarios/training/gcp-*.yaml` (8) | `scenarios/training/*-paris.yaml` (15) |
 | Full-stack example | `aws-full-stack.yaml` | `gcp-full-stack.yaml` | `full-stack-paris.yaml` |
 
-Each mock is wire-shape compatible with the matching real provider, enforced by an `examples/working/<svc>` smoke harness in the mock's own repo (`apply → plan -detailed-exitcode 0 → destroy`). See each mock's README for the API-compatibility contract — it's the same shape across all three.
+Each first-party mock is wire-shape compatible with the matching real provider, enforced by an `examples/working/<svc>` smoke harness in the mock's own repo (`apply → plan -detailed-exitcode 0 → destroy`). See each mock's README for the API-compatibility contract.
+
+AWS S3 is the exception: bucket sub-resource reads (GetBucketPolicy / GetBucketTagging / etc.) are served by SeaweedFS instead of fakeaws's stripped-down S3 handler — `terraform-provider-aws`'s bucket Read flow needs the full management surface. Rationale + the SeaweedFS-vs-Adobe-S3Mock-vs-Garage-vs-LocalStack evaluation is documented in [`CONCEPT.md`](CONCEPT.md) under "Third-Party Mock Integration".
 
 Adding a new cloud requires: prompt templates, pitfalls file, topology derivation rules, mock server, OPA policies, and training scenarios. Dispatch is driven by `cloudMockStateRouter`, `cloudConstraintPolicies`, `filterPolicyPathsByCloud`, `ExtractProviderSchemaForCloud`, and `detectCloud`.
 

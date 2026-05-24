@@ -119,6 +119,80 @@ func StartMockway(t *testing.T) *MockwayInstance {
 	return startSiblingMock(t, "mockway", "../mockway", "./cmd/mockway")
 }
 
+// StartSeaweedFS pulls + starts the SeaweedFS S3 gateway container
+// on a free local port. Returns a MockwayInstance for API parity
+// with the other Start* helpers, but the URL points at SeaweedFS
+// (which speaks the standard S3 wire surface, NOT /mock/state).
+// FetchState / Reset on the returned instance will 404 — callers
+// should rely on the cloudMockStateRouter's mergeS3IntoAWSState
+// helper for state aggregation.
+//
+// Why SeaweedFS over Adobe S3Mock / Garage / etc. is documented in
+// CONCEPT.md "Third-Party Mock Integration" section. Short version:
+// SeaweedFS is the only Apache 2.0, low-footprint option that
+// implements the full bucket-management surface terraform-provider-
+// aws's Read flow needs.
+//
+// Skips the test (via t.Skipf) when Docker isn't on PATH — the
+// e2e suite degrades gracefully on machines without Docker, matching
+// the existing tofu-required skip pattern.
+func StartSeaweedFS(t *testing.T) *MockwayInstance {
+	t.Helper()
+	if _, err := exec.LookPath("docker"); err != nil {
+		t.Skipf("docker required for SeaweedFS e2e: %v", err)
+	}
+
+	port := pickFreePort(t)
+	containerName := fmt.Sprintf("infrafactory-s3-test-%d", port)
+	logPath := filepath.Join(t.TempDir(), "seaweedfs.log")
+	logFile, err := os.Create(logPath)
+	if err != nil {
+		t.Fatalf("create seaweedfs log file: %v", err)
+	}
+
+	// docker run -d so we don't block on stdout. --rm so the
+	// container is auto-removed on stop. `server -s3` is SeaweedFS's
+	// all-in-one mode (master + volume + S3 gateway in one process).
+	// `-s3.allowEmptyFolder=true` so the S3 gateway accepts a
+	// freshly-booted no-prior-buckets state.
+	cmd := exec.Command(
+		"docker", "run", "--rm", "-d",
+		"--name", containerName,
+		"-p", fmt.Sprintf("127.0.0.1:%d:8333", port),
+		"chrislusf/seaweedfs:latest",
+		"server", "-s3", "-s3.port=8333", "-s3.allowEmptyFolder=true",
+	)
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+	if err := cmd.Run(); err != nil {
+		_ = logFile.Close()
+		t.Fatalf("docker run chrislusf/seaweedfs: %v", err)
+	}
+
+	url := fmt.Sprintf("http://127.0.0.1:%d", port)
+	// SeaweedFS returns 200 on GET / once ready (ListAllMyBuckets).
+	// Boot includes master + volume + S3 gateway startup so give it
+	// a generous deadline.
+	if err := waitForHTTP200(url+"/", 30*time.Second); err != nil {
+		_ = exec.Command("docker", "rm", "-f", containerName).Run()
+		_ = logFile.Close()
+		t.Fatalf("wait for seaweedfs readiness: %v", err)
+	}
+
+	instance := &MockwayInstance{
+		URL:     url,
+		logFile: logFile,
+		logPath: logPath,
+	}
+	t.Cleanup(func() {
+		_ = exec.Command("docker", "rm", "-f", containerName).Run()
+		if instance.logFile != nil {
+			_ = instance.logFile.Close()
+		}
+	})
+	return instance
+}
+
 // StartFakegcp compiles and starts fakegcp from the sibling
 // `../fakegcp` source repo on a free local port. Mirror of
 // StartMockway — fakegcp exposes the same `/mock/{state,reset,
@@ -329,20 +403,22 @@ func WriteFile(t *testing.T, path string, content []byte) {
 // prompt, and pitfall paths are resolved against the repository root so
 // scenarios with policy criteria can be evaluated end-to-end.
 //
-// fakegcp + fakeaws URLs are left empty; for GCP/AWS scenarios use
+// fakegcp + fakeaws + s3 URLs are left empty; for GCP/AWS scenarios use
 // WriteConfigMultiCloud so the cloudMockStateRouter has a target for
-// the matching cloud.
+// the matching cloud + service.
 func WriteConfig(t *testing.T, configPath, mockwayURL, outputRoot string) {
 	t.Helper()
-	WriteConfigMultiCloud(t, configPath, mockwayURL, "", "", outputRoot)
+	WriteConfigMultiCloud(t, configPath, mockwayURL, "", "", "", outputRoot)
 }
 
 // WriteConfigMultiCloud writes an infrafactory.yaml with mockway,
-// fakegcp, and fakeaws URLs populated. Any URL may be empty when the
-// matching cloud isn't exercised by the test; pass a non-empty URL
-// when the test runs a `cloud: gcp` or `cloud: aws` scenario through
-// the cloudMockStateRouter.
-func WriteConfigMultiCloud(t *testing.T, configPath, mockwayURL, fakegcpURL, fakeawsURL, outputRoot string) {
+// fakegcp, fakeaws, and s3 URLs populated. Any URL may be empty when
+// the matching cloud/service isn't exercised by the test; pass a
+// non-empty URL when the test runs a `cloud: gcp` or `cloud: aws`
+// scenario through the cloudMockStateRouter. s3URL is the third-party
+// S3 backend (SeaweedFS by default, M59) for AWS S3 paths; leave
+// blank to fall back to fakeaws's stripped-down S3 surface.
+func WriteConfigMultiCloud(t *testing.T, configPath, mockwayURL, fakegcpURL, fakeawsURL, s3URL, outputRoot string) {
 	t.Helper()
 	repoRoot := RepoRoot(t)
 	WriteFile(t, configPath, fmt.Appendf(nil, `version: "1.0"
@@ -353,6 +429,8 @@ mockway:
 fakegcp:
   url: %s
 fakeaws:
+  url: %s
+s3:
   url: %s
 scaleway:
   credentials_source: env
@@ -385,6 +463,7 @@ paths:
 		mockwayURL,
 		fakegcpURL,
 		fakeawsURL,
+		s3URL,
 		repoRoot, repoRoot, repoRoot, repoRoot,
 		repoRoot, repoRoot, outputRoot, repoRoot, repoRoot, repoRoot,
 	))

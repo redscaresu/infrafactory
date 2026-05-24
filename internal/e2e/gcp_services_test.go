@@ -373,7 +373,7 @@ func runGCPServiceScenario(t *testing.T, mock *MockwayInstance, scenarioFile str
 	// so the cloudMockStateRouter dispatches to fakegcp; the mockway
 	// fallback is never reached. WriteConfigMultiCloud requires both
 	// args though, so use a placeholder.
-	WriteConfigMultiCloud(t, configPath, "http://127.0.0.1:1", mock.URL, "", outputRoot)
+	WriteConfigMultiCloud(t, configPath, "http://127.0.0.1:1", mock.URL, "", "", outputRoot)
 
 	noDestroy := RunInfrafactory(t, InfrafactoryRunOptions{
 		Args:           []string{"run", scenarioPath, "--config", configPath, "--no-destroy"},

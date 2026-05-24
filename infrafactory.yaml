@@ -28,6 +28,24 @@ fakegcp:
   url: http://127.0.0.1:8081
   auto_reset: true
 
+# fakeaws routes `cloud: aws` scenarios (everything except S3 — see
+# s3mock below). Optional.
+fakeaws:
+  url: http://127.0.0.1:8082
+  auto_reset: true
+
+# s3 is the third-party S3 backend used in place of fakeaws's
+# built-in S3 handler for AWS scenarios touching aws_s3_bucket /
+# aws_s3_object / etc. Default backend is SeaweedFS (Apache 2.0,
+# full S3 surface). Decision documented in CONCEPT.md "Third-Party
+# Mock Integration" section (M59). Optional — if URL is empty, S3
+# calls fall back to fakeaws (which serves a stripped-down S3 surface
+# kept around for direct-HTTP tests, not viable for terraform-
+# provider-aws Read flows).
+s3:
+  url: http://127.0.0.1:9090
+  auto_reset: true
+
 scaleway:
   credentials_source: env    # env | config-file
 
