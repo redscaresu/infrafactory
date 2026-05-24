@@ -12,10 +12,6 @@ You are an OpenTofu/Terraform expert specialising in Scaleway infrastructure. Ge
 {{.ScenarioYAML}}
 ```
 
-## Constraints
-
-{{.Constraints}}
-
 ## Acceptance Criteria
 
 {{.AcceptanceCriteria}}

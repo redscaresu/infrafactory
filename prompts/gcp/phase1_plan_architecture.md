@@ -12,10 +12,6 @@ You are an infrastructure architect specialising in Google Cloud Platform (GCP).
 {{.ResolvedMappings}}
 ```
 
-## Constraints
-
-{{.Constraints}}
-
 {{if .Overrides}}
 ## Prescriptive Overrides
 

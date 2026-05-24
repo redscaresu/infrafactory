@@ -12,10 +12,6 @@ You are an infrastructure architect specialising in Scaleway cloud. Your task is
 {{.ResolvedMappings}}
 ```
 
-## Constraints
-
-{{.Constraints}}
-
 {{if .Overrides}}
 ## Prescriptive Overrides
 

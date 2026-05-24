@@ -10,10 +10,6 @@ You are a senior infrastructure engineer reviewing OpenTofu code for Scaleway. R
 {{.ScenarioYAML}}
 ```
 
-## Constraints
-
-{{.Constraints}}
-
 ## Acceptance Criteria
 
 {{.AcceptanceCriteria}}

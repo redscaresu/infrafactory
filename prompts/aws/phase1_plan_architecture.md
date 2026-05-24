@@ -12,10 +12,6 @@ You are an infrastructure architect specialising in Amazon Web Services (AWS). Y
 {{.ResolvedMappings}}
 ```
 
-## Constraints
-
-{{.Constraints}}
-
 {{if .Overrides}}
 ## Prescriptive Overrides
 

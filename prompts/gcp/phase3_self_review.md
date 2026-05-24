@@ -10,10 +10,6 @@ You are a senior infrastructure engineer reviewing OpenTofu code for Google Clou
 {{.ScenarioYAML}}
 ```
 
-## Constraints
-
-{{.Constraints}}
-
 ## Acceptance Criteria
 
 {{.AcceptanceCriteria}}

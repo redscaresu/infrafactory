@@ -48,26 +48,70 @@ cat > "${SCRIPT_FILE}" <<'EOS'
 set -e
 PS1='$ '
 clear
-echo "InfraFactory: scenario-driven IaC with LLM agents + mock-backed validation"
-sleep 2
+echo "# InfraFactory: scenario-driven IaC with LLM agents + mock-backed validation"
 echo ""
-echo "Step 1 - Pick a scenario:"
+sleep 2
+
+# --- The CLI surface ---
+echo "$ infrafactory --help"
 sleep 1
-head -25 scenarios/training/web-app-paris.yaml
+infrafactory --help 2>&1 | head -16
 sleep 5
+
+# --- Setup: mocks must be running (pre-staged) ---
 echo ""
-echo "Step 2 - Run it against the Scaleway mock (mockway on :8080):"
-sleep 2
-infrafactory run scenarios/training/web-app-paris.yaml
-echo ""
-sleep 3
-echo "Step 3 - See the generated HCL:"
+echo "$ infrafactory mock status"
 sleep 1
-ls -la output/web-app-paris/ | head -10
-sleep 4
-echo ""
-echo "Convergence: structured failures -> next prompt -> retry. No human in the loop."
+infrafactory mock status 2>&1 | sed -n '/^Command:/,/^{/p' | head -10
 sleep 3
+
+# --- Step 1: scenario YAML = the intent ---
+echo ""
+echo "# Step 1 — Declare intent (scenarios/training/registry-paris.yaml):"
+sleep 1
+cat scenarios/training/registry-paris.yaml
+sleep 5
+
+# --- Step 2: the magic — 3-phase LLM + 4-layer validation ---
+echo ""
+echo "# Step 2 — Run the pipeline (Claude generates → mockway validates → retries on failure):"
+sleep 2
+infrafactory run scenarios/training/registry-paris.yaml
+sleep 2
+
+# --- Step 3: the actual HCL the LLM converged on ---
+echo ""
+echo "# Step 3 — The generated OpenTofu the model converged on:"
+sleep 1
+echo ""
+echo "$ ls output/registry-paris/"
+ls output/registry-paris/ | grep -E '\.tf$|\.tfstate$' | head -6
+sleep 3
+
+echo ""
+echo "$ cat output/registry-paris/main.tf"
+sleep 1
+cat output/registry-paris/main.tf
+sleep 4
+
+echo ""
+echo "$ cat output/registry-paris/providers.tf"
+sleep 1
+cat output/registry-paris/providers.tf
+sleep 4
+
+echo ""
+echo "$ cat output/registry-paris/variables.tf"
+sleep 1
+cat output/registry-paris/variables.tf
+sleep 5
+
+# --- Wrap ---
+echo ""
+echo "# That's the loop:"
+echo "#   scenario YAML  ->  LLM generates HCL  ->  mock validates  ->  retry on failure"
+echo "# Subsecond mock feedback. No cloud credentials. No 90-second apply-cycle waits."
+sleep 4
 EOS
 chmod +x "${SCRIPT_FILE}"
 

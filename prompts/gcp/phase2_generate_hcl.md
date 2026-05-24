@@ -12,10 +12,6 @@ You are an OpenTofu/Terraform expert specialising in Google Cloud Platform (GCP)
 {{.ScenarioYAML}}
 ```
 
-## Constraints
-
-{{.Constraints}}
-
 ## Acceptance Criteria
 
 {{.AcceptanceCriteria}}
