@@ -14,11 +14,13 @@ InfraFactory closes that loop. You write a scenario YAML declaring intent (resou
 
 ## Demo
 
-### CLI quickstart (~90s)
+### CLI quickstart (~60s)
 
-[![asciicast](https://asciinema.org/a/YBUP4WrZG0XbuCYM.svg)](https://asciinema.org/a/YBUP4WrZG0XbuCYM)
+![CLI demo](docs/demo/infrafactory.gif)
 
-Records `infrafactory run scenarios/training/registry-paris.yaml` against `mockway` end-to-end: CLI surface → scenario YAML → 3-phase LLM generation (`plan_architecture` → `generate_hcl` → `self_review`) → 4-layer validation → `Status: success / target_reached` in 1 iteration → the actual OpenTofu the model converged on (`main.tf` + `providers.tf` + `variables.tf`). Source `.cast` at [`docs/demo/infrafactory.cast`](docs/demo/infrafactory.cast); re-record with `./docs/demo/record.sh` after `make mocks-up`.
+Records `infrafactory run scenarios/training/registry-paris.yaml` against `mockway` end-to-end: CLI surface → scenario YAML → 3-phase LLM generation (`plan_architecture` → `generate_hcl` → `self_review`) → 4-layer validation → `Status: success / target_reached` in 1 iteration → the actual OpenTofu the model converged on (`main.tf` + `providers.tf` + `variables.tf`).
+
+Source `.cast` at [`docs/demo/infrafactory.cast`](docs/demo/infrafactory.cast); interactive (copyable text + scrub controls) at [asciinema.org/a/YBUP4WrZG0XbuCYM](https://asciinema.org/a/YBUP4WrZG0XbuCYM). Re-record with `./docs/demo/record.sh` after `make mocks-up`, then `agg docs/demo/infrafactory.cast docs/demo/infrafactory.gif --theme github-dark --font-size 14 --speed 1.4` to refresh the inline GIF.
 
 ### UI walkthrough (~24s)
 
