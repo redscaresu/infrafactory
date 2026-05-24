@@ -14,9 +14,19 @@ InfraFactory closes that loop. You write a scenario YAML declaring intent (resou
 
 ## Demo
 
-> 🎬 **UI walkthrough** — [`docs/demo/ui-walkthrough.webm`](docs/demo/ui-walkthrough.webm) (~24s). Browser walkthrough of opening `scenarios/training/full-stack-paris.yaml` — the most resource-dense scenario in the suite (VPC + private network + Postgres + GKE + Redis + container registry + IAM) — via the web UI, then touring the Runs, Compare, Pitfalls, and Diagnostics pages. Re-record with `make demo-ui`.
->
-> 🎬 **CLI quickstart** — [asciinema.org/a/YBUP4WrZG0XbuCYM](https://asciinema.org/a/YBUP4WrZG0XbuCYM) (~90s). Records `infrafactory run scenarios/training/registry-paris.yaml` against `mockway` end-to-end: CLI surface → scenario YAML → 3-phase LLM generation (`plan_architecture` → `generate_hcl` → `self_review`) → 4-layer validation → `Status: success / target_reached` in 1 iteration → the actual OpenTofu the model converged on (`main.tf` + `providers.tf` + `variables.tf`). Source `.cast` at [`docs/demo/infrafactory.cast`](docs/demo/infrafactory.cast); re-record with `./docs/demo/record.sh` after `make mocks-up` (requires `asciinema` + an LLM credential in env).
+### CLI quickstart (~90s)
+
+[![asciicast](https://asciinema.org/a/YBUP4WrZG0XbuCYM.svg)](https://asciinema.org/a/YBUP4WrZG0XbuCYM)
+
+Records `infrafactory run scenarios/training/registry-paris.yaml` against `mockway` end-to-end: CLI surface → scenario YAML → 3-phase LLM generation (`plan_architecture` → `generate_hcl` → `self_review`) → 4-layer validation → `Status: success / target_reached` in 1 iteration → the actual OpenTofu the model converged on (`main.tf` + `providers.tf` + `variables.tf`). Source `.cast` at [`docs/demo/infrafactory.cast`](docs/demo/infrafactory.cast); re-record with `./docs/demo/record.sh` after `make mocks-up`.
+
+### UI walkthrough (~24s)
+
+<video src="https://github.com/redscaresu/infrafactory/raw/main/docs/demo/ui-walkthrough.webm" controls width="100%"></video>
+
+> If the player above is blank, GitHub doesn't auto-embed `.webm` from raw repo blobs in every renderer — open it directly: [`docs/demo/ui-walkthrough.webm`](docs/demo/ui-walkthrough.webm).
+
+Browser walkthrough of opening `scenarios/training/full-stack-paris.yaml` — the most resource-dense scenario in the suite (VPC + private network + Postgres + GKE + Redis + container registry + IAM) — via the web UI, then touring the Runs, Compare, Pitfalls, and Diagnostics pages. Re-record with `make demo-ui`.
 
 ## Quickstart
 
