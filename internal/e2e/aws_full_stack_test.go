@@ -53,7 +53,7 @@ import (
 // Gated behind INFRAFACTORY_ENABLE_E2E=1 and requires `tofu` on PATH.
 func TestE2E_AWSFullStack(t *testing.T) {
 	SkipUnlessEnabled(t)
-	t.Skip("fakeaws Query-RPC envelope mismatch: WriteQueryRPCResponse wraps EC2 responses in a <{Action}Result> wrapper that the AWS provider's parser can't see through, and leaks Go type names as inner wrappers. See full investigation in the file-level comment above. Un-skip after fakeaws ships a per-service envelope + inline-XML rewrite.")
+	t.Skip("fakeaws envelope rewrite (M51) landed — provider no longer crashes on parsing. New blocker: per-resource Read-flow field parity. ec2DescribeSubnets returns a stripped-down subnet that's missing fields the provider's Read polls for (availableIpAddressCount, ownerId, subnetArn, mapPublicIpOnLaunch, ipv6CidrBlockAssociationSet, etc.) → 'couldn't find resource (21 retries)'. Same gap exists for EKS / RDS / S3 / Secrets Manager Read flows. Each resource needs ~5-15 standard fields plumbed through ec2SubnetXML / eksClusterJSON / rdsDBInstanceXML / etc. Substantial incremental work; tracked in BACKLOG via the next M-ticket. Un-skip after per-resource field parity catches up.")
 	if _, err := exec.LookPath("tofu"); err != nil {
 		t.Fatalf("tofu binary required for e2e: %v", err)
 	}

@@ -1,0 +1,39 @@
+#!/bin/sh
+# infrafactory pre-commit hook.
+# Order matters: gitleaks runs FIRST so secret detection short-circuits
+# the commit before tests have a chance to print env vars to terminal
+# logs. Wired via `git config core.hooksPath .githooks` — run
+# `make install-hooks` once per clone.
+set -e
+
+echo "Scanning for secrets (gitleaks)..."
+gitleaks protect --staged --no-banner
+echo "No secrets detected."
+
+# Auto-refresh Playwright visual baselines when scenarios changed.
+# Sidebar grows by one entry per scenarios/training/*.yaml addition;
+# visual masks hide content but don't constrain layout height, so the
+# baselines need refresh to stay in sync. Doing it here saves a manual
+# `make ui-baseline-update` + re-commit cycle. See
+# project_visual_regression_masking.md for the full background.
+SCENARIO_CHANGES=$(git diff --cached --name-only --diff-filter=ACDMR -- 'scenarios/training/*.yaml')
+if [ -n "$SCENARIO_CHANGES" ]; then
+  # Skip if baselines already staged (user ran make ui-baseline-update
+  # manually); avoids redoing work.
+  STAGED_BASELINES=$(git diff --cached --name-only -- 'ui/e2e/visual.spec.ts-snapshots/*.png')
+  if [ -z "$STAGED_BASELINES" ]; then
+    echo ""
+    echo "Scenario file(s) changed — auto-refreshing visual baselines:"
+    echo "$SCENARIO_CHANGES" | sed 's/^/  /'
+    make ui-baseline-update
+    git add ui/e2e/visual.spec.ts-snapshots/*.png
+    echo "Regenerated baselines staged."
+  else
+    echo "Scenario change detected but baselines already staged — skipping auto-refresh."
+  fi
+fi
+
+echo ""
+echo "Running make test..."
+make test
+echo "All tests passed."

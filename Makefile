@@ -307,3 +307,12 @@ build: ui-build
 
 run: build
 	./bin/infrafactory ui
+
+# install-hooks wires the tracked hook installer at .githooks/ via
+# core.hooksPath so the gitleaks + auto-baseline-refresh + make test
+# pre-commit gate runs locally on every commit. Mirrors fakegcp /
+# fakeaws / mockway pattern. Run once per clone.
+install-hooks:
+	git config core.hooksPath .githooks
+	chmod +x .githooks/pre-commit
+	@echo "Hooks installed: pre-commit will run gitleaks, refresh visual baselines if scenarios changed, and run make test."
