@@ -254,6 +254,13 @@ demo-ui: ui-build
 	cd ui && npx playwright test --config=playwright-demo.config.ts
 	cp docs/demo/walkthrough/ui-walkthrough-UI-walkthrough-full-stack-paris-chromium/video.webm docs/demo/ui-walkthrough.webm
 	@echo "Updated docs/demo/ui-walkthrough.webm"
+	@if command -v gifski >/dev/null 2>&1; then \
+	  gifski --output docs/demo/ui-walkthrough.gif --fps 15 --width 900 --quality 85 docs/demo/ui-walkthrough.webm; \
+	  echo "Updated docs/demo/ui-walkthrough.gif"; \
+	else \
+	  echo "WARN: gifski not installed; skipping GIF render. brew install gifski, then:"; \
+	  echo "      gifski --output docs/demo/ui-walkthrough.gif --fps 15 --width 900 --quality 85 docs/demo/ui-walkthrough.webm"; \
+	fi
 
 # ui-baseline-update refreshes the Playwright visual-regression
 # baselines under ui/e2e/visual.spec.ts-snapshots/. The masks in
