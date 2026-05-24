@@ -210,6 +210,16 @@ ui-test:
 ui-test-e2e: ui-build
 	cd ui && npx playwright test
 
+# demo-ui records a fresh docs/demo/ui-walkthrough.webm by driving the
+# embedded UI through the full-stack-paris scenario via Playwright. No
+# LLM credits required — the spec only navigates the UI; the actual
+# run is the matching CLI cast at docs/demo/infrafactory.cast. Run
+# after a UI change that affects the recorded surface.
+demo-ui: ui-build
+	cd ui && npx playwright test --config=playwright-demo.config.ts
+	cp docs/demo/walkthrough/ui-walkthrough-UI-walkthrough-full-stack-paris-chromium/video.webm docs/demo/ui-walkthrough.webm
+	@echo "Updated docs/demo/ui-walkthrough.webm"
+
 test: test-unit ui-test ui-test-e2e
 
 test-all:

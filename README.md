@@ -14,9 +14,9 @@ InfraFactory closes that loop. You write a scenario YAML declaring intent (resou
 
 ## Demo
 
-> 🎬 **CLI quickstart** — _coming soon_. The asciinema cast at `docs/demo/infrafactory.cast` records an `infrafactory run scenarios/training/gcp-full-stack.yaml` against fakegcp end-to-end. Re-record with `./docs/demo/record.sh` after `make mocks-up`.
+> 🎬 **UI walkthrough** — [`docs/demo/ui-walkthrough.webm`](docs/demo/ui-walkthrough.webm) (~24s). Browser walkthrough of opening `scenarios/training/full-stack-paris.yaml` — the most resource-dense scenario in the suite (VPC + private network + Postgres + GKE + Redis + container registry + IAM) — via the web UI, then touring the Runs, Compare, Pitfalls, and Diagnostics pages. Re-record with `make demo-ui`.
 >
-> 🎬 **UI walkthrough** — _coming soon_. Browser walkthrough of spinning up `scenarios/training/full-stack-paris.yaml` (the most resource-dense scenario: VPC + private network + Postgres + GKE + Redis + container registry + IAM) via the web UI.
+> 🎬 **CLI quickstart** — _placeholder_. The asciinema cast at `docs/demo/infrafactory.cast` records an `infrafactory run scenarios/training/gcp-full-stack.yaml` against fakegcp end-to-end. Re-record with `./docs/demo/record.sh` after `make mocks-up` (requires `asciinema` + an LLM credential in env).
 
 ## Quickstart
 

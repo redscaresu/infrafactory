@@ -40,3 +40,8 @@ ui/build/
 ui/.svelte-kit/
 ui/test-results/
 cmd/infrafactory/ui/build/
+
+# Per-run Playwright artifacts from the UI demo recording. The curated
+# final-cut docs/demo/ui-walkthrough.webm IS tracked; only the raw
+# per-run scratch outputs under walkthrough/ are ignored.
+docs/demo/walkthrough/
