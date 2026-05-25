@@ -24,7 +24,7 @@ InfraFactory closes that loop. You write a scenario YAML declaring intent (resou
 
 ![UI live-run demo](docs/demo/ui-walkthrough-run.gif)
 
-Actually runs `registry-paris` through the UI: scenario page → click Run → Live page populates with iterations + stages → success banner (~38s, 1 LLM iteration). Re-record with `make demo-ui-run` (needs mockway up + Claude CLI authenticated).
+Actually runs `lb-paris` through the UI: scenario page → click Run → Live page populates with iteration stages live as the AI builds the 4-resource Scaleway stack (`scaleway_lb_ip` + `scaleway_lb` + `scaleway_lb_backend` + `scaleway_lb_frontend`) → success banner → per-run IaC viewer shows the generated HCL the model converged on. ~70s end-to-end, 1 LLM iteration. Re-record with `make demo-ui-run` (needs mockway up + Claude CLI authenticated).
 
 ### Web UI — tour
 
