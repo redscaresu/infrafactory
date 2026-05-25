@@ -84,12 +84,12 @@ type CommandRuntime struct {
 	// schema into the aws generator request.
 	ProviderSchemaJSON []byte
 
-	scenarioLoader  func(string) (scenario.Scenario, error)
-	loadedScenario  *scenario.Scenario
-	scenarioPath    string
-	outputDir       string
-	schemaRunner    harness.CommandRunner
-	schemaByCloud   map[string][]byte
+	scenarioLoader     func(string) (scenario.Scenario, error)
+	loadedScenario     *scenario.Scenario
+	scenarioPath       string
+	outputDir          string
+	schemaRunner       harness.CommandRunner
+	schemaByCloud      map[string][]byte
 	schemaTriedByCloud map[string]bool
 }
 
@@ -319,11 +319,21 @@ func buildRuntime(cmd *cobra.Command, opts runtimeOptions) (*CommandRuntime, err
 		if strings.TrimSpace(cfg.Fakegcp.URL) != "" {
 			router.gcp = newMockStateClient(cfg.Fakegcp.URL)
 		}
-		if strings.TrimSpace(cfg.Fakeaws.URL) != "" {
+		// AWS backend selection (M64+): ministack takes precedence
+		// over fakeaws when configured. ministack covers the full
+		// S3 sub-resource surface natively, so the SeaweedFS-style
+		// router.s3 carve-out (M59) is also bypassed when ministack
+		// is active. fakeaws + r.s3 remain wired together as the
+		// pre-M64 fallback path; remove both in M67.
+		switch {
+		case strings.TrimSpace(cfg.Ministack.URL) != "":
+			router.aws = newMinistackClient(cfg.Ministack.URL)
+			// router.s3 deliberately left nil — ministack handles S3.
+		case strings.TrimSpace(cfg.Fakeaws.URL) != "":
 			router.aws = newMockStateClient(cfg.Fakeaws.URL)
-		}
-		if strings.TrimSpace(cfg.S3.URL) != "" {
-			router.s3 = newMockStateClient(cfg.S3.URL)
+			if strings.TrimSpace(cfg.S3.URL) != "" {
+				router.s3 = newMockStateClient(cfg.S3.URL)
+			}
 		}
 		deps.MockState = router
 	}

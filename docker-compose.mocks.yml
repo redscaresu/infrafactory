@@ -1,29 +1,24 @@
-# docker-compose.mocks.yml — multi-mock orchestration for the three
-# first-party mock servers (mockway, fakegcp, fakeaws). Use via
+# docker-compose.mocks.yml — multi-mock orchestration. Use via
 # `make mocks-up-containers` (this file is NOT the default
 # docker-compose.yml — that one's reserved for the UI/dev stack).
 #
-# Two image sources:
-#   1. Sibling-repo build (default). Each mock has a Dockerfile in
-#      its sibling source repo (../mockway, ../fakegcp, ../fakeaws);
-#      compose builds each one. Works today regardless of GHCR
-#      package visibility.
-#   2. GHCR pre-built image (opt-in). Set MOCKS_IMAGE_SOURCE=ghcr to
-#      pull pre-built images from ghcr.io/redscaresu/<name>:latest.
-#      Requires the GHCR packages to be public (M53 closeout) OR a
-#      `docker login ghcr.io` first.
+# M64+ topology: ministack is the active AWS backend; fakeaws + the
+# SeaweedFS S3 gateway are kept for the M64–M66 cutover window and
+# removed in M67. Active services after M67: mockway (Scaleway),
+# fakegcp (GCP), ministack (AWS).
 #
-# Switch with `MOCKS_IMAGE_SOURCE=ghcr make mocks-up-containers`.
+# Sibling-repo builds for the 1st-party mocks (mockway, fakegcp).
+# ministack pulls from Docker Hub since it's not a sibling repo.
 #
-# All three mocks bind to 127.0.0.1 by default so they're reachable
-# from host-side tofu apply but not from the wider network. Override
-# `MOCKS_BIND=0.0.0.0` to expose them.
+# All ports bind to 127.0.0.1 by default; override `MOCKS_BIND=0.0.0.0`
+# to expose them.
 #
-# Port allocation mirrors the go-run path in `make mocks-up`:
-#   mockway → 8080   (Scaleway scenarios)
-#   fakegcp → 8081   (GCP scenarios)
-#   fakeaws → 8082   (AWS scenarios; S3 will move to Adobe S3Mock
-#                     when M59-T1 lands as a 4th service block here)
+# Port allocation:
+#   mockway   → 8080   (Scaleway scenarios)
+#   fakegcp   → 8081   (GCP scenarios)
+#   ministack → 4566   (AWS scenarios; M64+, LocalStack convention)
+#   fakeaws   → 8082   (deprecated; removed in M67)
+#   s3        → 9090   (deprecated; ministack S3 covers it; removed in M67)
 
 services:
   mockway:
@@ -56,12 +51,34 @@ services:
       timeout: 2s
       retries: 6
 
+  # ministack — the active AWS backend (M64+). Covers 62 AWS
+  # services including the full S3 sub-resource surface, so it
+  # replaces both fakeaws AND the SeaweedFS S3 gateway. Pulled from
+  # Docker Hub (not a sibling repo). Healthcheck hits the
+  # /_ministack/health endpoint which returns a JSON service map.
+  ministack:
+    image: ${MINISTACK_IMAGE:-ministackorg/ministack:latest}
+    container_name: infrafactory-ministack
+    restart: unless-stopped
+    ports:
+      - "${MOCKS_BIND:-127.0.0.1}:4566:4566"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:4566/_ministack/health | grep -q '\"version\"'"]
+      interval: 5s
+      timeout: 2s
+      retries: 6
+
+  # fakeaws — DEPRECATED (M64+). Kept until M67 closeout so the
+  # transition window doesn't break for anyone running the
+  # pre-migration Makefile / config. Removed from the default
+  # `mocks-up-containers` profile via the `legacy` profile gate.
   fakeaws:
     image: ${FAKEAWS_IMAGE:-infrafactory-fakeaws:local}
     build:
       context: ../fakeaws
     container_name: infrafactory-fakeaws
     restart: unless-stopped
+    profiles: ["legacy"]
     ports:
       - "${MOCKS_BIND:-127.0.0.1}:8082:8082"
     command: ["--port", "8082"]
@@ -71,28 +88,17 @@ services:
       timeout: 2s
       retries: 6
 
-  # SeaweedFS S3 gateway — third-party S3 backend used in place of
-  # fakeaws's built-in S3 handler. Provider-driven S3 paths point
-  # here; fakeaws's S3 handler stays as a deprecated direct-HTTP test
-  # fixture for backward compatibility with TestE2E_AWS_S3.
-  #
-  # Why SeaweedFS over Adobe S3Mock: S3Mock only implements the
-  # object surface (PutObject/GetObject/ListObjects). Bucket
-  # sub-resource reads (GetBucketPolicy, GetBucketTagging, etc.) fall
-  # through to ListObjects, returning XML where terraform-provider-aws
-  # expects JSON. That breaks every aws_s3_bucket apply. SeaweedFS
-  # implements the full bucket-management surface with correct error
-  # codes (NoSuchBucketPolicy, NoSuchTagSet, etc.) and is Apache 2.0.
-  # Decision rationale + LocalStack/Garage/MinIO comparison documented
-  # in CONCEPT.md "Third-Party Mock Integration" section.
-  #
-  # Image: docker.io/chrislusf/seaweedfs (Apache 2.0, Go, ~50 MB).
-  # `server -s3` starts the all-in-one mode (master + volume + S3
-  # gateway in one process) which is the right shape for dev/test.
+  # SeaweedFS S3 gateway — DEPRECATED (M64+). ministack's S3 surface
+  # covers everything the fakeaws+SeaweedFS split previously did
+  # (GetBucketPolicy / GetBucketTagging / GetBucketEncryption / etc.
+  # all probed correctly in the M64-T4 spike). Kept here under the
+  # `legacy` profile so the transition window doesn't break; removed
+  # in M67. Decision rationale: docs/plans/ministack-spike.md.
   s3:
     image: ${SEAWEEDFS_IMAGE:-chrislusf/seaweedfs:latest}
     container_name: infrafactory-s3
     restart: unless-stopped
+    profiles: ["legacy"]
     ports:
       - "${MOCKS_BIND:-127.0.0.1}:9090:8333"
     command: ["server", "-s3", "-s3.port=8333", "-s3.allowEmptyFolder=true"]

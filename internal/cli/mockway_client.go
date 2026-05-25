@@ -12,6 +12,18 @@ import (
 const maxMockwayStateResponseBytes = 8 * 1024 * 1024
 const maxMockwayErrorPayloadBytes = 1024
 
+// stateClient is the contract every mock-state backend implements.
+// Used by cloudMockStateRouter so per-cloud dispatch can hand back
+// any concrete client — the legacy mockStateClient (mockway/fakegcp/
+// fakeaws), the M64 ministackClient, or a future third-party backend.
+// Each method is invoked once per run lifecycle step.
+type stateClient interface {
+	Reset(ctx context.Context) error
+	Snapshot(ctx context.Context) error
+	Restore(ctx context.Context) error
+	State(ctx context.Context) ([]byte, error)
+}
+
 type mockStateClient struct {
 	baseURL string
 	client  *http.Client
@@ -119,21 +131,23 @@ func truncateMockwayErrorPayload(payload []byte) string {
 // S3 block into the fakeaws state (see internal/cli/s3_state.go).
 type cloudMockStateRouter struct {
 	runtime  *CommandRuntime
-	scaleway *mockStateClient
-	gcp      *mockStateClient
-	aws      *mockStateClient
-	s3       *mockStateClient // S3 carve-out for AWS scenarios (M59)
+	scaleway stateClient
+	gcp      stateClient
+	aws      stateClient      // *mockStateClient (fakeaws) OR *ministackClient (M64+)
+	s3       *mockStateClient // S3 carve-out for AWS scenarios when aws is fakeaws (M59).
+	//                          Set to nil when aws is ministack — ministack covers S3 natively.
 }
 
 func (r *cloudMockStateRouter) Reset(ctx context.Context) error {
 	if err := r.pick("").Reset(ctx); err != nil {
 		return err
 	}
-	if extra := r.pick("s3"); extra != nil && extra != r.pick("") {
-		// SeaweedFS / similar third-party S3 backends have no
-		// /mock/reset endpoint — go through the native S3 admin
-		// path (list+delete buckets).
-		return resetS3Backend(ctx, extra)
+	// SeaweedFS-style S3 carve-out (only active when AWS scenario AND
+	// r.s3 is set — i.e. fakeaws+SeaweedFS path). When ministack is the
+	// AWS backend, r.s3 is nil and this branch is skipped (ministack
+	// covers S3 natively via /_ministack/reset already handled above).
+	if r.isAWSScenario() && r.s3 != nil {
+		return resetS3Backend(ctx, r.s3)
 	}
 	return nil
 }
@@ -181,7 +195,7 @@ func (r *cloudMockStateRouter) State(ctx context.Context) ([]byte, error) {
 // Pass `service=""` for the cloud-default; pass a specific service
 // name (e.g. "s3") when the call is service-scoped — used by the
 // fan-out Reset/State logic above.
-func (r *cloudMockStateRouter) pick(service string) *mockStateClient {
+func (r *cloudMockStateRouter) pick(service string) stateClient {
 	if service == "s3" && r.isAWSScenario() && r.s3 != nil {
 		return r.s3
 	}
