@@ -264,15 +264,17 @@ demo-ui: ui-build
 
 # demo-ui-run records docs/demo/ui-walkthrough-run.webm — the
 # live-run variant of demo-ui. Drives an actual `infrafactory run`
-# of lb-paris (4-resource Scaleway load-balancer stack: LB + IP +
-# backend + frontend; converges in 1 iteration) through the UI:
-# scenario page → click Run → Live page populates with iterations/
-# stages → success banner → per-run IaC preview shows the AI's
-# generated HCL. REQUIRES: mockway running on :8080 + Claude CLI
-# authenticated (or OPENROUTER_API_KEY exported). End-to-end ~70–90s.
+# of gcp-pubsub (Pub/Sub topic + subscription against fakegcp;
+# converges in 2 iterations — iter 1 fails because fakegcp doesn't
+# model google_project_service, LLM corrects and iter 2 succeeds)
+# through the UI: scenario page → click Run → Live page populates
+# with iteration stages → success banner → per-run IaC preview
+# shows the AI's converged HCL. REQUIRES: fakegcp running on :8081
+# (via `make mocks-up`) + Claude CLI authenticated (or
+# OPENROUTER_API_KEY exported). End-to-end ~150–180s.
 demo-ui-run: ui-build
-	cd ui && npx playwright test --config=playwright-demo.config.ts -g "live run of lb-paris"
-	cp docs/demo/walkthrough/ui-walkthrough-run-UI-walkthrough-live-run-of-lb-paris-chromium/video.webm docs/demo/ui-walkthrough-run.webm
+	cd ui && npx playwright test --config=playwright-demo.config.ts -g "live run of gcp-pubsub"
+	cp docs/demo/walkthrough/ui-walkthrough-run-UI-walkthrough-live-run-of-gcp-pubsub-chromium/video.webm docs/demo/ui-walkthrough-run.webm
 	@echo "Updated docs/demo/ui-walkthrough-run.webm"
 	@if command -v gifski >/dev/null 2>&1; then \
 	  gifski --output docs/demo/ui-walkthrough-run.gif --fps 15 --width 900 --quality 85 docs/demo/ui-walkthrough-run.webm; \

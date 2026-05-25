@@ -41,7 +41,12 @@ ui/.svelte-kit/
 ui/test-results/
 cmd/infrafactory/ui/build/
 
-# Per-run Playwright artifacts from the UI demo recording. The curated
-# final-cut docs/demo/ui-walkthrough.webm IS tracked; only the raw
-# per-run scratch outputs under walkthrough/ are ignored.
+# Per-run Playwright artifacts from the UI demo recording.
 docs/demo/walkthrough/
+
+# UI demo source webms. The .gif is what the README embeds; the .webm
+# is a regeneration-source kept around but not committed because longer
+# recordings (e.g. the gcp-pubsub multi-iteration walkthrough at ~2min)
+# blow past the 5MB pre-commit large-file guard. Re-record from source
+# via `make demo-ui` / `make demo-ui-run`.
+docs/demo/*.webm
