@@ -28,30 +28,20 @@ fakegcp:
   url: http://127.0.0.1:8081
   auto_reset: true
 
-# ministack is the active AWS backend (M64+). Single endpoint
-# covers all 62 AWS services including the full S3 sub-resource
-# surface (GetBucketPolicy, GetBucketTagging, GetBucketEncryption,
-# etc.) — that's the upgrade over fakeaws+SeaweedFS which split
-# S3 across two backends. Reset goes to /_ministack/reset, not
-# /mock/reset; state derivation goes through the polyfill in
-# internal/cli/ministack_state.go (M65).
-ministack:
-  url: http://127.0.0.1:4566
-  auto_reset: true
-
-# fakeaws — DEPRECATED in M64+, scheduled for removal in M67.
-# Kept here so the runtime stays constructible and any local
-# scenario still pointing at port 8082 keeps working. Once M66
-# proves ministack carries every AWS scenario green, this block
-# disappears and the cloudMockStateRouter drops the fakeaws path.
+# fakeaws routes `cloud: aws` scenarios (everything except S3 — see
+# s3mock below). Optional.
 fakeaws:
   url: http://127.0.0.1:8082
   auto_reset: true
 
-# s3 — DEPRECATED in M64+ alongside fakeaws. ministack covers the
-# full bucket sub-resource surface natively, so SeaweedFS is no
-# longer needed for terraform-provider-aws's Read flow. Block
-# kept temporarily for the M64–M66 cutover window; removed in M67.
+# s3 is the third-party S3 backend used in place of fakeaws's
+# built-in S3 handler for AWS scenarios touching aws_s3_bucket /
+# aws_s3_object / etc. Default backend is SeaweedFS (Apache 2.0,
+# full S3 surface). Decision documented in CONCEPT.md "Third-Party
+# Mock Integration" section (M59). Optional — if URL is empty, S3
+# calls fall back to fakeaws (which serves a stripped-down S3 surface
+# kept around for direct-HTTP tests, not viable for terraform-
+# provider-aws Read flows).
 s3:
   url: http://127.0.0.1:9090
   auto_reset: true

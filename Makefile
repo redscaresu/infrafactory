@@ -14,10 +14,6 @@ FAKEGCP_REPO ?= ../fakegcp
 FAKEAWS_PORT ?= 8082
 FAKEAWS_URL ?= http://127.0.0.1:$(FAKEAWS_PORT)
 FAKEAWS_REPO ?= ../fakeaws
-MINISTACK_PORT ?= 4566
-MINISTACK_URL ?= http://127.0.0.1:$(MINISTACK_PORT)
-MINISTACK_IMAGE ?= ministackorg/ministack:latest
-MINISTACK_CONTAINER ?= infrafactory-ministack
 MOCKS_RUN_DIR ?= /tmp/infrafactory-mocks
 HOST_ARCH ?= $(shell uname -m)
 
@@ -34,8 +30,7 @@ endif
 .PHONY: help deps-up deps-down deps-ps deps-logs deps-pull deps-recreate deps-clean test-unit test-all test \
 	bench-check smoke-validate smoke-mockway smoke-mockway-manual smoke-mockway-local smoke check \
 	ui-install ui-build ui-test ui-test-e2e ui-dev ui-clean ui-api-linux-build ui-stack-up ui-stack-logs ui-stack-down build run \
-	mocks-up mocks-down mocks-status mocks-logs mockway-up mockway-down fakegcp-up fakegcp-down fakeaws-up fakeaws-down \
-	ministack-up ministack-down ministack-status ministack-logs
+	mocks-up mocks-down mocks-status mocks-logs mockway-up mockway-down fakegcp-up fakegcp-down fakeaws-up fakeaws-down
 
 help:
 	@echo "Targets:"
@@ -181,46 +176,12 @@ fakeaws-down:
 		echo "fakeaws pidfile not found"; \
 	fi
 
-# ministack-up / ministack-down (M64): the active AWS backend.
-# Unlike fakeaws (Go subprocess), ministack ships as a Docker image —
-# launch via `docker run`, wait for the /_ministack/health endpoint to
-# respond, then we're ready. Image pinned to MINISTACK_IMAGE; override
-# via env if you want to test a different tag.
-ministack-up:
-	@if docker ps --filter "name=^/$(MINISTACK_CONTAINER)$$" --format '{{.Names}}' | grep -q .; then \
-		echo "ministack already running on $(MINISTACK_URL)"; \
-	else \
-		echo "starting ministack on $(MINISTACK_URL) (image=$(MINISTACK_IMAGE))"; \
-		docker run -d --rm --name $(MINISTACK_CONTAINER) -p $(MINISTACK_PORT):4566 $(MINISTACK_IMAGE) > /dev/null; \
-		until curl -sSf $(MINISTACK_URL)/_ministack/health >/dev/null 2>&1; do \
-			sleep 1; \
-		done; \
-		echo "ministack ready on $(MINISTACK_URL)"; \
-	fi
+# mocks-up starts all three mocks. Run from the infrafactory repo root
+# with ../mockway, ../fakegcp, ../fakeaws checked out as siblings.
+mocks-up: mockway-up fakegcp-up fakeaws-up
+	@echo "all three mocks ready: $(MOCKWAY_URL) (Scaleway), $(FAKEGCP_URL) (GCP), $(FAKEAWS_URL) (AWS)"
 
-ministack-down:
-	@if docker ps --filter "name=^/$(MINISTACK_CONTAINER)$$" --format '{{.Names}}' | grep -q .; then \
-		docker stop $(MINISTACK_CONTAINER) > /dev/null; \
-		echo "ministack stopped"; \
-	else \
-		echo "ministack not running"; \
-	fi
-
-ministack-status:
-	@docker ps --filter "name=^/$(MINISTACK_CONTAINER)$$" --format 'container: {{.Names}} status: {{.Status}}' \
-		|| echo "ministack not running"
-
-ministack-logs:
-	@docker logs $(MINISTACK_CONTAINER) 2>&1 | tail -50 || echo "ministack not running"
-
-# mocks-up starts every active mock. M64 swap: ministack replaces
-# fakeaws as the AWS backend. fakeaws-up is still callable for the
-# transition window (M64–M66) but isn't part of the default `mocks-up`
-# aggregate any more. Removed entirely in M67.
-mocks-up: mockway-up fakegcp-up ministack-up
-	@echo "mocks ready: $(MOCKWAY_URL) (Scaleway), $(FAKEGCP_URL) (GCP), $(MINISTACK_URL) (AWS via ministack)"
-
-mocks-down: mockway-down fakegcp-down ministack-down
+mocks-down: mockway-down fakegcp-down fakeaws-down
 	@echo "all three mocks stopped"
 
 mocks-status:

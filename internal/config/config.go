@@ -26,7 +26,6 @@ type Config struct {
 	Mockway            MockwayConfig     `yaml:"mockway"`
 	Fakegcp            FakegcpConfig     `yaml:"fakegcp"`
 	Fakeaws            FakeawsConfig     `yaml:"fakeaws"`
-	Ministack          MinistackConfig   `yaml:"ministack"`
 	S3                 S3Config          `yaml:"s3"`
 	Scaleway           ScalewayConfig    `yaml:"scaleway"`
 	Validation         ValidationConfig  `yaml:"validation"`
@@ -77,25 +76,6 @@ type FakegcpConfig struct {
 // but keeps the runtime constructible). Added in S43-T9 per
 // fakeaws/concepts.md "Required surface" item 4.
 type FakeawsConfig struct {
-	URL       string `yaml:"url"`
-	AutoReset bool   `yaml:"auto_reset"`
-}
-
-// MinistackConfig points the runtime at ministack — the open-source
-// AWS emulator (ministackorg/ministack) that's superseding fakeaws +
-// SeaweedFS in slices M64–M67. ministack covers 62 AWS services
-// (vs fakeaws's 9) and handles S3 bucket sub-resource reads natively
-// (vs needing SeaweedFS as a third-party polyfill). When URL is
-// non-empty AND a scenario declares `cloud: aws`, cloudMockStateRouter
-// routes everything to ministack instead of the Fakeaws/S3 split.
-// Default URL: http://127.0.0.1:4566 (LocalStack convention; ministack
-// preserves the port for drop-in client compatibility). Reset goes to
-// /_ministack/reset, not /mock/reset. State derivation goes through
-// the internal/cli/ministack_state.go polyfill (M65) which walks
-// ministack's AWS-SDK introspection APIs and synthesizes the
-// /mock/state JSON shape that topology_derive.go + OPA deny_state
-// policies expect.
-type MinistackConfig struct {
 	URL       string `yaml:"url"`
 	AutoReset bool   `yaml:"auto_reset"`
 }
@@ -204,9 +184,6 @@ func Default() Config {
 			AutoReset: true,
 		},
 		Fakegcp: FakegcpConfig{
-			AutoReset: true,
-		},
-		Ministack: MinistackConfig{
 			AutoReset: true,
 		},
 		S3: S3Config{
