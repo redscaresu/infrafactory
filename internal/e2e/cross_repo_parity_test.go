@@ -126,6 +126,7 @@ func fakeRepoSpecs() []fakeRepoSpec {
 				"dns":           {"gcp-dns.yaml"},
 				"iam":           {"gcp-iam.yaml"},
 				"loadbalancer":  {"gcp-load-balancer.yaml"},
+				"memorystore":   {"gcp-memorystore.yaml"},
 				"pubsub":        {"gcp-pubsub.yaml"},
 				"secretmanager": {"gcp-secret-manager.yaml"},
 				"sql":           {"gcp-cloud-sql.yaml"},
@@ -139,13 +140,6 @@ func fakeRepoSpecs() []fakeRepoSpec {
 				// transitively, so a dedicated scenario would only test
 				// the stub in isolation (M70).
 				"serviceusage": "meta-API exercised transitively by every GCP scenario via google_project_service",
-				// memorystore is fakegcp's Redis/Memcached service.
-				// Landed handler-side (slice 47) but no infrafactory
-				// scenario yet because the LLM-generated HCL for
-				// google_redis_instance hits provider auth paths that
-				// fakegcp doesn't model. Tracked as a follow-up; remove
-				// this exemption when gcp-memorystore.yaml lands.
-				"memorystore": "handler landed but no scenario yet — see BACKLOG M-tickets for memorystore parity work",
 			},
 		},
 		{

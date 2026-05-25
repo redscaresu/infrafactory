@@ -183,6 +183,7 @@ func buildGoogleProviderBlock(fakegcpURL string) string {
   cloud_run_v2_custom_endpoint           = "%[1]s/v2/"
   secret_manager_custom_endpoint         = "%[1]s/v1/"
   service_usage_custom_endpoint          = "%[1]s/v1/"
+  redis_custom_endpoint                  = "%[1]s/v1/"
 }`, fakegcpURL)
 }
 

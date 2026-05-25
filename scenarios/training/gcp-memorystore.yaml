@@ -1,0 +1,24 @@
+scenario: gcp-memorystore
+version: "1.0"
+cloud: gcp
+description: >
+  A Memorystore (Redis) instance in BASIC tier used for session
+  caching. Exercises fakegcp's google_redis_instance Create/Get/
+  Delete wire shape — the location-scoped instances collection at
+  /v1/projects/{project}/locations/{location}/instances and the
+  redis#operation envelope that terraform-provider-google's poll
+  loop expects on every mutation.
+
+resources:
+  redis:
+    purpose: session-cache
+    size: small
+
+acceptance_criteria:
+  - type: policy
+    check: region_restriction
+    params:
+      region: us-central1
+    expect: pass
+  - type: destruction
+    expect: no_orphans
