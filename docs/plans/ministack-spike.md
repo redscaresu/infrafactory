@@ -175,3 +175,67 @@ reversible move.
 - Documentation: README cloud-coverage table update + CONCEPT.md
   third-party-mock section gets a ministack subsection.
 - Tracked as a new M-ticket: M63 (parallel ministack backend).
+
+## Addendum (2026-05-25): Full migration attempted then rolled back
+
+After this spike's "supplement, don't replace" recommendation, scope
+was expanded to a **full** migration — see M64–M67 in BACKLOG. The
+migration was implemented end-to-end and the 14-resource
+TestE2E_AWSFullStack passed against ministack in 291s (apply → plan
+no-op → destroy clean). Then an FK-enforcement probe surfaced a
+correctness gap that hadn't been measured during the original spike:
+
+### FK probe (raw)
+
+| Test | fakeaws | ministack |
+|---|---|---|
+| `CreateSubnet --vpc-id vpc-doesnotexist` | 404 (FK rejection) | **silently accepts** — returns 200 with a created subnet |
+| `DeleteVpc` with surviving subnet | 409 `DependencyViolation` | 409 `DependencyViolation` ✓ |
+| `AttachRolePolicy --role-name nosuch-role` | 404 | 404 `NoSuchEntity` ✓ |
+
+ministack covers **~80%** of fakeaws's FK enforcement (DependencyViolation
+on delete, NoSuchEntity on lookup). It misses the **FK-on-create**
+class — accepting create requests whose parent reference doesn't
+resolve.
+
+### Why this matters
+
+- **LLM-driven workflows** rarely hit the gap. terraform-provider-aws
+  builds a resource graph from HCL references; apply ordering is
+  graph-determined, so by the time `CreateSubnet` fires the VPC
+  already exists.
+- **Misconfigured-example regression coverage** is the real loss.
+  `fakeaws/examples/misconfigured/` cases deliberately reference
+  non-existent VPCs / dangling FKs to verify rejection. Those tests
+  would pass-by-accident against ministack — silent acceptance is
+  worse than a noisy failure for regression suites.
+- **Design principle** (`feedback_mock_design.md` memory): "mocks
+  optimize for fast feedback." FK enforcement isn't realism, it's
+  correctness — a misconfigured HCL that passes the mock and fails
+  real AWS is a mock bug. fakeaws models FKs intentionally at the
+  SQLite schema level; ministack's defer-to-AWS-CLI-behavior approach
+  is less strict by design.
+
+### Decision
+
+**Rolled back** M64 (commit `d6fd125` → revert `06d4a39`) + M65
+(commit `74c9f0b` → revert `bfe50ab`). M66 changes were prepared in
+the working tree but never committed.
+
+Sticking with fakeaws + SeaweedFS for the AWS backend. The 600 LoC
+of M51/M57/M61/M62 patches were the cost of FK-strict behavior; that
+investment stays load-bearing.
+
+### Future revisit triggers
+
+- A scenario lands that exercises a service fakeaws doesn't cover
+  (Lambda, KMS, API Gateway, Step Functions). At that point M63
+  (parallel-backend, the original spike recommendation) becomes worth
+  building.
+- ministack adds FK-on-create rejection (open question whether the
+  upstream project considers this in scope; check before any
+  re-evaluation).
+- Misconfigured-example coverage stops being a goal of the project.
+
+The polyfill pattern (internal/cli/ministack_state.go from M65, now
+reverted) is reusable if/when the parallel-backend path is taken up.
