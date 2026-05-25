@@ -251,7 +251,7 @@ ui-test-e2e: ui-build
 # run is the matching CLI cast at docs/demo/infrafactory.cast. Run
 # after a UI change that affects the recorded surface.
 demo-ui: ui-build
-	cd ui && npx playwright test --config=playwright-demo.config.ts
+	cd ui && npx playwright test --config=playwright-demo.config.ts -g "full-stack-paris"
 	cp docs/demo/walkthrough/ui-walkthrough-UI-walkthrough-full-stack-paris-chromium/video.webm docs/demo/ui-walkthrough.webm
 	@echo "Updated docs/demo/ui-walkthrough.webm"
 	@if command -v gifski >/dev/null 2>&1; then \
@@ -260,6 +260,25 @@ demo-ui: ui-build
 	else \
 	  echo "WARN: gifski not installed; skipping GIF render. brew install gifski, then:"; \
 	  echo "      gifski --output docs/demo/ui-walkthrough.gif --fps 15 --width 900 --quality 85 docs/demo/ui-walkthrough.webm"; \
+	fi
+
+# demo-ui-run records docs/demo/ui-walkthrough-run.webm — the
+# live-run variant of demo-ui. Drives an actual `infrafactory run`
+# of registry-paris (single-resource Scaleway scenario, converges
+# in 1 iteration) through the UI: scenario page → click Run →
+# Live page populates with iterations/stages → success banner.
+# REQUIRES: mockway running on :8080 + Claude CLI authenticated
+# (or OPENROUTER_API_KEY exported). End-to-end ~45–75s.
+demo-ui-run: ui-build
+	cd ui && npx playwright test --config=playwright-demo.config.ts -g "live run of registry-paris"
+	cp docs/demo/walkthrough/ui-walkthrough-run-UI-walkthrough-live-run-of-registry-paris-chromium/video.webm docs/demo/ui-walkthrough-run.webm
+	@echo "Updated docs/demo/ui-walkthrough-run.webm"
+	@if command -v gifski >/dev/null 2>&1; then \
+	  gifski --output docs/demo/ui-walkthrough-run.gif --fps 15 --width 900 --quality 85 docs/demo/ui-walkthrough-run.webm; \
+	  echo "Updated docs/demo/ui-walkthrough-run.gif"; \
+	else \
+	  echo "WARN: gifski not installed; skipping GIF render. brew install gifski, then:"; \
+	  echo "      gifski --output docs/demo/ui-walkthrough-run.gif --fps 15 --width 900 --quality 85 docs/demo/ui-walkthrough-run.webm"; \
 	fi
 
 # ui-baseline-update refreshes the Playwright visual-regression

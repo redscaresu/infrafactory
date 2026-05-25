@@ -20,11 +20,17 @@ InfraFactory closes that loop. You write a scenario YAML declaring intent (resou
 
 `infrafactory run scenarios/training/registry-paris.yaml` against `mockway`: scenario YAML → 3-phase LLM generation → 4-layer validation → `Status: success` in 1 iteration → the OpenTofu the model converged on. Re-record with `./docs/demo/record.sh` (requires `make mocks-up` + an LLM credential in env).
 
-### Web UI
+### Web UI — live run
 
-![UI demo](docs/demo/ui-walkthrough.gif)
+![UI live-run demo](docs/demo/ui-walkthrough-run.gif)
 
-`full-stack-paris` end-to-end through the SvelteKit dashboard (24s). Re-record with `make demo-ui` (Playwright captures `.webm`, then `gifski` renders the inline GIF).
+Actually runs `registry-paris` through the UI: scenario page → click Run → Live page populates with iterations + stages → success banner (~38s, 1 LLM iteration). Re-record with `make demo-ui-run` (needs mockway up + Claude CLI authenticated).
+
+### Web UI — tour
+
+![UI walkthrough](docs/demo/ui-walkthrough.gif)
+
+Browser walkthrough of `full-stack-paris` (the most resource-dense scenario) — no `infrafactory run`, just a tour of the Scenario / Runs / Compare / Pitfalls / Diagnostics pages so viewers see the UI surface (24s, no LLM credit needed). Re-record with `make demo-ui`.
 
 ## Quickstart
 
