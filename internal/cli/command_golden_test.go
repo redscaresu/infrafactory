@@ -147,9 +147,11 @@ func TestCommandOutputGoldenSnapshots(t *testing.T) {
 						if err != nil {
 							return config.Config{}, err
 						}
+						cfg.Paths.Output = filepath.Join(h.WorkspaceDir, "output")
 						cfg.Validation.Layers.SandboxDeploy.Enabled = true
 						return cfg, nil
 					},
+					runstoreRoot:   filepath.Join(h.WorkspaceDir, ".infrafactory", "runs"),
 					scenarioLoader: defaultScenarioLoader,
 					deps: RuntimeDependencies{
 						Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {

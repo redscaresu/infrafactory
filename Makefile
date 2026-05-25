@@ -239,6 +239,18 @@ mocks-logs-containers:
 test-unit:
 	$(GO) test ./internal/... ./cmd/...
 
+# test-ci-parity reproduces the CI test conditions that caused the
+# May 2026 "passes on Mac, fails on Linux" regression in
+# TestCommandOutputGoldenSnapshots/run_json. Linux schedules t.Parallel
+# subtests aggressively enough that two run subtests with the same
+# scenario name + same wall-clock-second produced identical runIDs and
+# raced on shared relative-path defaults (`./output`,
+# `.infrafactory/runs`). Running with `-count=3` surfaces this class of
+# parallel-subtest races locally before they reach the CI badge. Run
+# this before pushing any change that touches the CLI test harness.
+test-ci-parity:
+	$(GO) test -count=3 ./internal/cli/
+
 ui-test:
 	cd ui && npm test
 

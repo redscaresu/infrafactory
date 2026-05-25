@@ -52,7 +52,7 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 	if runID == "" {
 		runID = startedAt.Format("20060102T150405Z0700")
 	}
-	store := runstore.NewFilesystemStore(resolveRunStoreRoot())
+	store := runstore.NewFilesystemStore(runtime.RunStoreRoot())
 	mode, err := detectRunMode(cmd.Context(), runtime, store, sc.Name, runtime.OutputDir(), controls)
 	if err != nil {
 		return err
@@ -67,7 +67,7 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 			return fmt.Errorf("snapshot mockway baseline: %w", err)
 		}
 	}
-	logPath := filepath.Join(resolveRunStoreRoot(), sc.Name, runID, "app.log")
+	logPath := filepath.Join(runtime.RunStoreRoot(), sc.Name, runID, "app.log")
 	closeRunLogSink, err := runtime.Logger.AddFileSink(logPath)
 	if err == nil {
 		defer func() {

@@ -84,12 +84,13 @@ type CommandRuntime struct {
 	// schema into the aws generator request.
 	ProviderSchemaJSON []byte
 
-	scenarioLoader  func(string) (scenario.Scenario, error)
-	loadedScenario  *scenario.Scenario
-	scenarioPath    string
-	outputDir       string
-	schemaRunner    harness.CommandRunner
-	schemaByCloud   map[string][]byte
+	scenarioLoader     func(string) (scenario.Scenario, error)
+	loadedScenario     *scenario.Scenario
+	scenarioPath       string
+	outputDir          string
+	runstoreRoot       string
+	schemaRunner       harness.CommandRunner
+	schemaByCloud      map[string][]byte
 	schemaTriedByCloud map[string]bool
 }
 
@@ -115,6 +116,16 @@ func (r *CommandRuntime) LoadScenario(path string) (scenario.Scenario, error) {
 
 func (r *CommandRuntime) OutputDir() string {
 	return r.outputDir
+}
+
+// RunStoreRoot resolves the on-disk run-store root for this runtime.
+// Falls back to the env-var/default path when the runtime wasn't
+// configured with an explicit override (production callers).
+func (r *CommandRuntime) RunStoreRoot() string {
+	if r != nil && r.runstoreRoot != "" {
+		return r.runstoreRoot
+	}
+	return resolveRunStoreRoot()
 }
 
 // EnsureProviderSchema extracts the provider schema for the given cloud
@@ -206,6 +217,11 @@ type runtimeOptions struct {
 	configLoader   func(string) (config.Config, error)
 	scenarioLoader func(string) (scenario.Scenario, error)
 	deps           RuntimeDependencies
+	// runstoreRoot overrides the on-disk run store root. Tests set this
+	// to a per-workspace tempdir so parallel subtests don't collide on
+	// the shared .infrafactory/runs path when their runIDs collide at
+	// 1-second timestamp resolution.
+	runstoreRoot string
 }
 
 func defaultRuntimeOptions() runtimeOptions {
@@ -310,6 +326,7 @@ func buildRuntime(cmd *cobra.Command, opts runtimeOptions) (*CommandRuntime, err
 		Logger:            NewAppLogger(os.Stderr),
 		scenarioLoader:    opts.scenarioLoader,
 		schemaRunner:      execCommandRunner{},
+		runstoreRoot:      opts.runstoreRoot,
 	}
 	if deps.MockState == nil {
 		router := &cloudMockStateRouter{

@@ -35,7 +35,12 @@ jobs:
           cp -R ui/build cmd/infrafactory/ui/
 
       - name: Run tests
-        run: go test ./...
+        # -count=2 surfaces parallel-subtest races that would otherwise
+        # flake only in CI (e.g. the May 2026 regression where
+        # TestCommandOutputGoldenSnapshots/run_json passed locally on
+        # macOS but failed on the Linux runner because two parallel
+        # subtests collided on the relative-path `./output` default).
+        run: go test -count=2 ./...
 
   build-binary:
     runs-on: ubuntu-latest
