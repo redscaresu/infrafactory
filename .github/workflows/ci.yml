@@ -9,6 +9,10 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      # M78 — share provider downloads across runs (~200MB saved per
+      # CI run; mirrors mockway's CI pattern).
+      TF_PLUGIN_CACHE_DIR: ~/.terraform.d/plugin-cache
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -23,6 +27,18 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Prepare Terraform plugin cache directory
+        run: mkdir -p "$TF_PLUGIN_CACHE_DIR"
+
+      - name: Cache Terraform providers
+        uses: actions/cache@v4
+        with:
+          path: ~/.terraform.d/plugin-cache
+          key: terraform-plugin-cache-${{ runner.os }}-v1
+
       - name: Build UI (embedded via go:embed)
         # cmd/infrafactory/embed.go requires `cmd/infrafactory/ui/build/` to
         # exist at compile time. Both are gitignored, so CI must produce
@@ -35,12 +51,32 @@ jobs:
           cp -R ui/build cmd/infrafactory/ui/
 
       - name: Run tests
-        # -count=2 surfaces parallel-subtest races that would otherwise
-        # flake only in CI (e.g. the May 2026 regression where
-        # TestCommandOutputGoldenSnapshots/run_json passed locally on
-        # macOS but failed on the Linux runner because two parallel
-        # subtests collided on the relative-path `./output` default).
-        run: go test -count=2 ./...
+        # M71: -race detects genuine Go data races (the 3 fakes all
+        # run with -race; infrafactory was the only repo without it
+        # despite being the most concurrency-heavy).
+        # -count=2 surfaces parallel-subtest filesystem races that
+        # would otherwise flake only in CI (e.g. the May 2026
+        # regression where TestCommandOutputGoldenSnapshots/run_json
+        # passed locally on macOS but failed on Linux because two
+        # parallel subtests collided on the relative-path `./output`
+        # default).
+        run: go test -race -count=2 ./...
+
+  gitleaks:
+    # M72: mirror the local pre-commit hook + the 3 sibling-fake CI
+    # jobs. The pre-commit hook is bypassable with --no-verify and
+    # does not run on fork PRs, so this job is the load-bearing
+    # secret scan for OSS-fork contributions.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Run gitleaks
+        run: |
+          curl -sSfL -o /tmp/gitleaks.tar.gz https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+          /tmp/gitleaks detect --redact --no-banner --source=. --config .gitleaks.toml
 
   build-binary:
     runs-on: ubuntu-latest
