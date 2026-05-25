@@ -40,8 +40,9 @@ type ministackStateBuilder interface {
 
 func newMinistackClient(baseURL string) *ministackClient {
 	return &ministackClient{
-		baseURL: strings.TrimRight(baseURL, "/"),
-		client:  &http.Client{Timeout: 30 * time.Second},
+		baseURL:      strings.TrimRight(baseURL, "/"),
+		client:       &http.Client{Timeout: 30 * time.Second},
+		stateBuilder: newMinistackStateBuilder(),
 	}
 }
 
