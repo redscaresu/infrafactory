@@ -319,7 +319,7 @@ func TestEnsureGoogleProviderWiringNoOpWhenNoGoogleResources(t *testing.T) {
 	files := map[string][]byte{
 		"main.tf": []byte(`resource "scaleway_instance_server" "web" {}`),
 	}
-	ensureGoogleProviderWiring(files)
+	ensureGoogleProviderWiring(files, config.Config{})
 	if _, ok := files["providers.tf"]; ok {
 		t.Fatalf("expected no providers.tf injection when no google_ resources present, got: %s", files["providers.tf"])
 	}
@@ -341,7 +341,7 @@ func TestEnsureGoogleProviderWiringPreservesExistingProvidersTF(t *testing.T) {
 provider "google" {}
 `),
 	}
-	ensureGoogleProviderWiring(files)
+	ensureGoogleProviderWiring(files, config.Config{})
 	got := string(files["providers.tf"])
 	// Should not double-inject when both required_providers.google and provider "google" already present.
 	if strings.Count(got, `provider "google"`) != 1 {

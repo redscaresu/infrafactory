@@ -33,11 +33,48 @@ func runTestCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) 
 }
 
 func testCommandEnv(runtime *CommandRuntime) map[string]string {
+	return cloudEnv(runtime)
+}
+
+// cloudEnv builds the env vars terraform-provider-* clients consult
+// regardless of which cloud's scenario is loaded. Setting all three
+// clouds' vars on every invocation is safe (each provider only reads
+// its own prefix) and keeps the runtime cloud-agnostic — a scenario
+// flip between cloud=scaleway and cloud=aws doesn't need a config
+// reload.
+//
+// Per-cloud notes:
+//   - Scaleway:  SCW_API_URL points the provider at mockway. Credential
+//     keys are dummy values mockway accepts.
+//   - GCP: terraform-provider-google needs a credential source even
+//     when *_custom_endpoint overrides will redirect every call to
+//     fakegcp. GOOGLE_OAUTH_ACCESS_TOKEN sets a static token (bypasses
+//     ADC); GOOGLE_PROJECT pins the default project so resources don't
+//     require explicit project = "..." in HCL.
+//   - AWS: AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY satisfy the SDK's
+//     credential check. AWS_REGION pins us-east-1 to match the
+//     endpoints injected by ensureAwsProviderWiring. AWS_EC2_METADATA_DISABLED
+//     stops the SDK from trying to hit IMDS.
+//
+// Endpoint redirection happens via the ensure*ProviderWiring functions
+// (GCP: per-service *_custom_endpoint; AWS: provider's endpoints{}
+// block) — env vars alone don't get the provider talking to the
+// right HTTP server.
+func cloudEnv(runtime *CommandRuntime) map[string]string {
 	return map[string]string{
+		// Scaleway
 		"SCW_API_URL":            runtime.Config.Mockway.URL,
 		"SCW_ACCESS_KEY":         "SCWMOCKACCESSKEY0000",
 		"SCW_SECRET_KEY":         "00000000-0000-0000-0000-000000000000",
 		"SCW_DEFAULT_PROJECT_ID": "00000000-0000-0000-0000-000000000000",
+		// GCP
+		"GOOGLE_OAUTH_ACCESS_TOKEN": "fakegcp-mock-token",
+		"GOOGLE_PROJECT":            "infrafactory-test",
+		// AWS
+		"AWS_ACCESS_KEY_ID":         "test",
+		"AWS_SECRET_ACCESS_KEY":     "test",
+		"AWS_REGION":                "us-east-1",
+		"AWS_EC2_METADATA_DISABLED": "true",
 	}
 }
 

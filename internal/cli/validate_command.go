@@ -131,12 +131,7 @@ func extractPlanText(result *harness.StaticResult) []byte {
 }
 
 func validateCommandEnv(runtime *CommandRuntime) map[string]string {
-	return map[string]string{
-		"SCW_API_URL":            runtime.Config.Mockway.URL,
-		"SCW_ACCESS_KEY":         "SCWMOCKACCESSKEY0000",
-		"SCW_SECRET_KEY":         "00000000-0000-0000-0000-000000000000",
-		"SCW_DEFAULT_PROJECT_ID": "00000000-0000-0000-0000-000000000000",
-	}
+	return cloudEnv(runtime)
 }
 
 // filterPolicyPathsByCloud drops paths under `./policies/{other-cloud}/`

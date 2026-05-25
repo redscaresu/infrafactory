@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/redscaresu/infrafactory/internal/config"
 	"github.com/redscaresu/infrafactory/internal/generator"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
@@ -110,11 +111,23 @@ func detectScalewayProviderWiring(files map[string][]byte) (bool, bool, bool) {
 	return hasScalewayResource, hasRequiredProviders, hasProviderBlock
 }
 
-func ensureGoogleProviderWiring(files map[string][]byte) {
+func ensureGoogleProviderWiring(files map[string][]byte, cfg config.Config) {
 	hasGoogleResource, hasRequiredProviders, hasProviderBlock := detectGoogleProviderWiring(files)
 	if !hasGoogleResource {
 		return
 	}
+
+	// If fakegcp is configured, ALWAYS rewrite the provider "google" {}
+	// block — terraform-provider-google reads endpoint URLs from
+	// per-service *_custom_endpoint fields on the block. A partial
+	// provider block from the LLM (missing the endpoints) sends every
+	// API call to api.googleapis.com instead of fakegcp. Same pattern
+	// as ensureAwsProviderWiring's strip-and-replace.
+	if hasProviderBlock && strings.TrimSpace(cfg.Fakegcp.URL) != "" {
+		stripGoogleProviderBlock(files)
+		hasProviderBlock = false
+	}
+
 	missingRequiredProviders := !hasRequiredProviders
 	missingProviderBlock := !hasProviderBlock
 	if !missingRequiredProviders && !missingProviderBlock {
@@ -132,7 +145,7 @@ func ensureGoogleProviderWiring(files map[string][]byte) {
 }`)
 	}
 	if missingProviderBlock {
-		sections = append(sections, `provider "google" {}`)
+		sections = append(sections, buildGoogleProviderBlock(cfg.Fakegcp.URL))
 	}
 	injected := strings.Join(sections, "\n\n")
 	if existing, ok := files["providers.tf"]; ok && strings.TrimSpace(string(existing)) != "" {
@@ -140,6 +153,37 @@ func ensureGoogleProviderWiring(files map[string][]byte) {
 		return
 	}
 	files["providers.tf"] = []byte(injected + "\n")
+}
+
+// buildGoogleProviderBlock emits the `provider "google" {}` block.
+// When fakegcpURL is non-empty (the normal in-process Layer-2
+// configuration), the block embeds per-service *_custom_endpoint
+// overrides pointing at fakegcp — terraform-provider-google reads
+// each service's API endpoint from these fields. Without them the
+// provider tries real ADC against api.googleapis.com.
+//
+// When fakegcpURL is empty (a degenerate config), emit the bare
+// block so the file still parses; the apply will fail later at
+// validate when the provider can't auth.
+func buildGoogleProviderBlock(fakegcpURL string) string {
+	fakegcpURL = strings.TrimRight(fakegcpURL, "/")
+	if fakegcpURL == "" {
+		return `provider "google" {}`
+	}
+	return fmt.Sprintf(`provider "google" {
+  project                                = "infrafactory-test"
+  compute_custom_endpoint                = "%[1]s/compute/v1/"
+  container_custom_endpoint              = "%[1]s/"
+  cloud_resource_manager_custom_endpoint = "%[1]s/v1/"
+  iam_custom_endpoint                    = "%[1]s/v1/"
+  storage_custom_endpoint                = "%[1]s/storage/v1/"
+  sql_custom_endpoint                    = "%[1]s/sql/v1beta4/"
+  pubsub_custom_endpoint                 = "%[1]s/v1/"
+  dns_custom_endpoint                    = "%[1]s/dns/v1/"
+  cloud_run_v2_custom_endpoint           = "%[1]s/v2/"
+  secret_manager_custom_endpoint         = "%[1]s/v1/"
+  service_usage_custom_endpoint          = "%[1]s/v1/"
+}`, fakegcpURL)
 }
 
 func validateGoogleProviderWiring(files map[string][]byte) error {
@@ -155,6 +199,212 @@ func validateGoogleProviderWiring(files map[string][]byte) error {
 		return fmt.Errorf("google resources detected but provider \"google\" block is missing")
 	}
 	return nil
+}
+
+// ensureAwsProviderWiring is the AWS counterpart to
+// ensureScalewayProviderWiring / ensureGoogleProviderWiring.
+//
+// Unlike Scaleway (which gets its endpoint via SCW_API_URL env var),
+// terraform-provider-aws reads endpoint URLs from the
+// `provider "aws" { endpoints { ... } }` block. The block is also
+// where we set skip_credentials_validation / skip_metadata_api_check
+// / skip_requesting_account_id so the SDK doesn't try to call real
+// AWS STS GetCallerIdentity (which would 403 against fakeaws). Same
+// pattern internal/e2e/aws_full_stack_test.go::awsProviderTF uses
+// for hand-rolled HCL.
+//
+// Endpoint URLs come from cfg.Fakeaws.URL (per-service path prefixes
+// match fakeaws's chi router from cmd/fakeaws/main.go); S3 goes to
+// cfg.S3.URL (the SeaweedFS gateway, M59).
+func ensureAwsProviderWiring(files map[string][]byte, cfg config.Config) {
+	hasAwsResource, hasRequiredProviders, hasProviderBlock := detectAwsProviderWiring(files)
+	if !hasAwsResource {
+		return
+	}
+
+	// If fakeaws is configured, ALWAYS rewrite the provider "aws" {}
+	// block to point at it — the LLM frequently emits a partial provider
+	// block (e.g. missing endpoints, missing skip_credentials_validation)
+	// that lets the provider escape to real AWS STS. Stripping +
+	// re-injecting is the only reliable way to keep apply hermetic.
+	// For required_providers, we only add when missing (the LLM-emitted
+	// version is usually correct).
+	if hasProviderBlock && strings.TrimSpace(cfg.Fakeaws.URL) != "" {
+		stripAwsProviderBlock(files)
+		hasProviderBlock = false
+	}
+
+	missingRequiredProviders := !hasRequiredProviders
+	missingProviderBlock := !hasProviderBlock
+	if !missingRequiredProviders && !missingProviderBlock {
+		return
+	}
+
+	sections := make([]string, 0, 2)
+	if missingRequiredProviders {
+		sections = append(sections, `terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.70"
+    }
+  }
+}`)
+	}
+	if missingProviderBlock {
+		sections = append(sections, buildAwsProviderBlock(cfg.Fakeaws.URL, cfg.S3.URL))
+	}
+	injected := strings.Join(sections, "\n\n")
+	if existing, ok := files["providers.tf"]; ok && strings.TrimSpace(string(existing)) != "" {
+		files["providers.tf"] = []byte(strings.TrimSpace(string(existing)) + "\n\n" + injected + "\n")
+		return
+	}
+	files["providers.tf"] = []byte(injected + "\n")
+}
+
+// stripAwsProviderBlock removes any `provider "aws" { ... }` blocks
+// from every file in the working set. Thin wrapper around
+// stripProviderBlock so call sites read naturally.
+func stripAwsProviderBlock(files map[string][]byte) {
+	stripProviderBlock(files, "aws")
+}
+
+// stripGoogleProviderBlock — same as stripAwsProviderBlock but for the
+// `provider "google" { ... }` blocks. Used when fakegcp is configured
+// and we need to inject *_custom_endpoint overrides; the LLM-emitted
+// block typically lacks them and would let calls escape to
+// api.googleapis.com.
+func stripGoogleProviderBlock(files map[string][]byte) {
+	stripProviderBlock(files, "google")
+}
+
+// stripProviderBlock removes every `provider "<name>" { ... }` block
+// from every file in the working set. Uses brace-matching (not regex)
+// so nested blocks like `endpoints { ... }` don't trip up the parser.
+// After stripping, the caller's re-injection path adds the canonical
+// test-mode version.
+func stripProviderBlock(files map[string][]byte, providerName string) {
+	marker := fmt.Sprintf(`provider %q`, providerName)
+	for name, content := range files {
+		text := string(content)
+		out := strings.Builder{}
+		i := 0
+		for i < len(text) {
+			idx := strings.Index(text[i:], marker)
+			if idx == -1 {
+				out.WriteString(text[i:])
+				break
+			}
+			start := i + idx
+			braceStart := strings.Index(text[start:], "{")
+			if braceStart == -1 {
+				out.WriteString(text[i : start+len(marker)])
+				i = start + len(marker)
+				continue
+			}
+			braceStart += start
+			depth := 0
+			end := -1
+			for j := braceStart; j < len(text); j++ {
+				switch text[j] {
+				case '{':
+					depth++
+				case '}':
+					depth--
+					if depth == 0 {
+						end = j
+					}
+				}
+				if end != -1 {
+					break
+				}
+			}
+			if end == -1 {
+				out.WriteString(text[i:])
+				break
+			}
+			out.WriteString(text[i:start])
+			i = end + 1
+			if i < len(text) && text[i] == '\n' {
+				i++
+			}
+		}
+		files[name] = []byte(out.String())
+	}
+}
+
+// buildAwsProviderBlock emits the `provider "aws" {}` block with the
+// test-mode flags + endpoints map that point at fakeaws (and
+// optionally SeaweedFS for S3, M59). When fakeawsURL is empty the
+// block falls back to a bare `provider "aws" { region = "us-east-1" }`
+// so the file parses; the apply will fail at validate when the
+// provider can't auth.
+func buildAwsProviderBlock(fakeawsURL, s3URL string) string {
+	fakeawsURL = strings.TrimRight(fakeawsURL, "/")
+	if fakeawsURL == "" {
+		return `provider "aws" {
+  region = "us-east-1"
+}`
+	}
+	s3Endpoint := strings.TrimRight(s3URL, "/")
+	if s3Endpoint == "" {
+		s3Endpoint = fakeawsURL + "/s3"
+	}
+	return fmt.Sprintf(`provider "aws" {
+  region                      = "us-east-1"
+  access_key                  = "test"
+  secret_key                  = "test"
+  skip_credentials_validation = true
+  skip_metadata_api_check     = true
+  skip_requesting_account_id  = true
+  s3_use_path_style           = true
+  endpoints {
+    iam            = "%[1]s/iam"
+    ec2            = "%[1]s/ec2/region/us-east-1"
+    eks            = "%[1]s/eks/region/us-east-1"
+    rds            = "%[1]s/rds/region/us-east-1"
+    sqs            = "%[1]s/sqs/region/us-east-1"
+    dynamodb       = "%[1]s/dynamodb/region/us-east-1"
+    secretsmanager = "%[1]s/secretsmanager/region/us-east-1"
+    route53        = "%[1]s/route53"
+    s3             = "%[2]s"
+  }
+}`, fakeawsURL, s3Endpoint)
+}
+
+func validateAwsProviderWiring(files map[string][]byte) error {
+	hasAwsResource, hasRequiredProviders, hasProviderBlock := detectAwsProviderWiring(files)
+
+	if !hasAwsResource {
+		return nil
+	}
+	if !hasRequiredProviders {
+		return fmt.Errorf("aws resources detected but required_providers.aws is missing")
+	}
+	if !hasProviderBlock {
+		return fmt.Errorf("aws resources detected but provider \"aws\" block is missing")
+	}
+	return nil
+}
+
+func detectAwsProviderWiring(files map[string][]byte) (bool, bool, bool) {
+	hasAwsResource := false
+	hasRequiredProviders := false
+	hasProviderBlock := false
+
+	for _, content := range files {
+		text := strings.ToLower(string(content))
+		if strings.Contains(text, "aws_") {
+			hasAwsResource = true
+		}
+		if strings.Contains(text, "required_providers") && strings.Contains(text, "\"hashicorp/aws\"") {
+			hasRequiredProviders = true
+		}
+		if strings.Contains(text, `provider "aws"`) {
+			hasProviderBlock = true
+		}
+	}
+	return hasAwsResource, hasRequiredProviders, hasProviderBlock
 }
 
 func detectGoogleProviderWiring(files map[string][]byte) (bool, bool, bool) {
@@ -273,8 +523,12 @@ func generateAndWriteFilesWithResult(ctx context.Context, runtime *CommandRuntim
 	if err := validateScalewayProviderWiring(generated.Files); err != nil {
 		return 0, nil, fmt.Errorf("validate generated files: %w", err)
 	}
-	ensureGoogleProviderWiring(generated.Files)
+	ensureGoogleProviderWiring(generated.Files, runtime.Config)
 	if err := validateGoogleProviderWiring(generated.Files); err != nil {
+		return 0, nil, fmt.Errorf("validate generated files: %w", err)
+	}
+	ensureAwsProviderWiring(generated.Files, runtime.Config)
+	if err := validateAwsProviderWiring(generated.Files); err != nil {
 		return 0, nil, fmt.Errorf("validate generated files: %w", err)
 	}
 	written, err := writeGeneratedFiles(runtime.OutputDir(), generated.Files, writeMode)
