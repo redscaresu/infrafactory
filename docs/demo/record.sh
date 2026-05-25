@@ -45,39 +45,44 @@ trap 'rm -f "${SCRIPT_FILE}"' EXIT
 
 cat > "${SCRIPT_FILE}" <<'EOS'
 #!/usr/bin/env bash
+# Dwell times sized for first-time viewers — same reading-time rules
+# as the UI demos: dense code blocks 8–12s; short lists 3–4s;
+# single headings 3–4s; result summaries 5–7s; closing pause 4s.
 set -e
 PS1='$ '
 clear
 echo "# InfraFactory: scenario-driven IaC with LLM agents + mock-backed validation"
 echo ""
-sleep 2
+sleep 3
 
-# --- The CLI surface ---
+# --- The CLI surface (16 lines of help — dense block) ---
 echo "$ infrafactory --help"
 sleep 1
 infrafactory --help 2>&1 | head -16
-sleep 5
+sleep 8
 
 # --- Setup: mocks must be running (pre-staged) ---
 echo ""
 echo "$ infrafactory mock status"
 sleep 1
 infrafactory mock status 2>&1 | sed -n '/^Command:/,/^{/p' | head -10
-sleep 3
+sleep 4
 
-# --- Step 1: scenario YAML = the intent ---
+# --- Step 1: scenario YAML = the intent (23 lines — dense block) ---
 echo ""
 echo "# Step 1 — Declare intent (scenarios/training/registry-paris.yaml):"
 sleep 1
 cat scenarios/training/registry-paris.yaml
-sleep 5
+sleep 11
 
 # --- Step 2: the magic — 3-phase LLM + 4-layer validation ---
 echo ""
 echo "# Step 2 — Run the pipeline (Claude generates → mockway validates → retries on failure):"
 sleep 2
 infrafactory run scenarios/training/registry-paris.yaml
-sleep 2
+# Viewer needs time to read the "Status: success" + stages summary
+# block that lands at the end of the run output. Bumped from 2s.
+sleep 6
 
 # --- Step 3: the actual HCL the LLM converged on ---
 echo ""
@@ -92,19 +97,19 @@ echo ""
 echo "$ cat output/registry-paris/main.tf"
 sleep 1
 cat output/registry-paris/main.tf
-sleep 4
+sleep 5
 
 echo ""
 echo "$ cat output/registry-paris/providers.tf"
 sleep 1
 cat output/registry-paris/providers.tf
-sleep 4
+sleep 6
 
 echo ""
 echo "$ cat output/registry-paris/variables.tf"
 sleep 1
 cat output/registry-paris/variables.tf
-sleep 5
+sleep 7
 
 # --- Wrap ---
 echo ""
