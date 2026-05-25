@@ -200,6 +200,20 @@ Gated e2e tests (cross-repo, require `tofu` + the sibling mock repos checked out
 INFRAFACTORY_ENABLE_E2E=1 go test ./internal/e2e/...
 ```
 
+### Cross-repo service-coverage harness
+
+`internal/e2e/cross_repo_parity_test.go` (`TestCrossRepoParity_EveryLandedServiceHasScenario`) is the gate that keeps infrafactory in lockstep with the three mocks. On every CI run it reads each sibling fake's `handlers/regression_manifest.go::LandedServices` slice and asserts every entry is either (a) mapped to ≥1 training scenario in `scenarios/training/` via the hand-curated `cloudParityMap` in that test, or (b) explicitly exempted with a written reason. Adding a new service on the fake side without the matching upstream scenario fails this test on the next infrafactory push — which is the whole point: a new handler set with zero infrafactory coverage doesn't ship silently.
+
+When a sibling repo isn't checked out (CI runners that only fetch infrafactory), the per-cloud subtest skips with a structured marker rather than passing vacuously.
+
+To add coverage for a newly-landed service:
+
+1. Add `scenarios/training/<cloud>-<service>.yaml` exercising the service through infrafactory's harness (plan → mock-apply → topology → destroy).
+2. Append a `cloudParityMap` entry in `internal/e2e/cross_repo_parity_test.go` pointing at the new YAML.
+3. (Optional) Add a `TestE2E_<Cloud><Svc>` in `internal/e2e/<cloud>_services_test.go` so the gated cross-repo e2e drives the scenario end-to-end.
+
+Exemptions belong in the `exempt` map of the same test and must explain *why* no scenario is appropriate (meta-APIs like GCP `serviceusage` or Scaleway `marketplace` are read-through paths that every scenario exercises transitively — they have no standalone resource type to model).
+
 ## Documentation
 
 - [`docs/architecture.md`](docs/architecture.md) — component overview and validation-layer details
