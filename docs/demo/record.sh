@@ -70,16 +70,16 @@ sleep 4
 
 # --- Step 1: scenario YAML = the intent (23 lines — dense block) ---
 echo ""
-echo "# Step 1 — Declare intent (scenarios/training/registry-paris.yaml):"
+echo "# Step 1 — Declare intent (scenarios/training/gcp-pubsub.yaml):"
 sleep 1
-cat scenarios/training/registry-paris.yaml
+cat scenarios/training/gcp-pubsub.yaml
 sleep 11
 
 # --- Step 2: the magic — 3-phase LLM + 4-layer validation ---
 echo ""
-echo "# Step 2 — Run the pipeline (Claude generates → mockway validates → retries on failure):"
+echo "# Step 2 — Run the pipeline (Claude generates → fakegcp validates → retries on failure):"
 sleep 2
-infrafactory run scenarios/training/registry-paris.yaml
+infrafactory run scenarios/training/gcp-pubsub.yaml
 # Viewer needs time to read the "Status: success" + stages summary
 # block that lands at the end of the run output. Bumped from 2s.
 sleep 6
@@ -89,26 +89,26 @@ echo ""
 echo "# Step 3 — The generated OpenTofu the model converged on:"
 sleep 1
 echo ""
-echo "$ ls output/registry-paris/"
-ls output/registry-paris/ | grep -E '\.tf$|\.tfstate$' | head -6
+echo "$ ls output/gcp-pubsub/"
+ls output/gcp-pubsub/ | grep -E '\.tf$|\.tfstate$' | head -6
 sleep 3
 
 echo ""
-echo "$ cat output/registry-paris/main.tf"
+echo "$ cat output/gcp-pubsub/main.tf"
 sleep 1
-cat output/registry-paris/main.tf
+cat output/gcp-pubsub/main.tf
 sleep 5
 
 echo ""
-echo "$ cat output/registry-paris/providers.tf"
+echo "$ cat output/gcp-pubsub/providers.tf"
 sleep 1
-cat output/registry-paris/providers.tf
+cat output/gcp-pubsub/providers.tf
 sleep 6
 
 echo ""
-echo "$ cat output/registry-paris/variables.tf"
+echo "$ cat output/gcp-pubsub/variables.tf"
 sleep 1
-cat output/registry-paris/variables.tf
+cat output/gcp-pubsub/variables.tf
 sleep 7
 
 # --- Wrap ---
