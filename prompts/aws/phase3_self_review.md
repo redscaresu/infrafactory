@@ -9,18 +9,18 @@ You are reviewing AWS Terraform/OpenTofu HCL for correctness against the scenari
 ## Architecture Plan
 
 ```json
-{{.ArchitectureJSON}}
+{{.ArchitecturePlan}}
 ```
 
 ## Generated HCL
 
 ```hcl
-{{.GeneratedHCL}}
+{{.GeneratedFiles}}
 ```
 
 ## Pitfalls
 
-{{.PitfallsTable}}
+{{.Pitfalls}}
 
 {{if .FeedbackJSON}}
 ## Previous Iteration Feedback
