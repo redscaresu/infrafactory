@@ -1,0 +1,56 @@
+# Dependabot config — M82.
+#
+# Three ecosystems: Go modules, npm (UI), and GitHub Actions.
+# Updates grouped per ecosystem to avoid PR noise (1 PR/week per
+# ecosystem instead of N per dep). Auto-merge is intentionally NOT
+# enabled — we want a human review pass on every bump given the
+# May 2026 M76 incident (4 high-severity CVEs that needed a
+# coordinated vite-8/sveltekit/vite-plugin-svelte/tailwindcss bump,
+# not auto-mergeable individually).
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      go-deps:
+        patterns:
+          - "*"
+
+  - package-ecosystem: npm
+    directory: /ui
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      ui-deps:
+        patterns:
+          - "*"
+        # Exclude major bumps from the group so they get individual
+        # review PRs (vite 7→8 / sveltekit 2→3 etc. are M76-class).
+        exclude-patterns:
+          - "vite"
+          - "@sveltejs/kit"
+          - "svelte"
+      ui-majors:
+        patterns:
+          - "vite"
+          - "@sveltejs/kit"
+          - "svelte"
+        update-types:
+          - "major"
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    groups:
+      actions:
+        patterns:
+          - "*"
