@@ -6,6 +6,13 @@ on:
   push:
     branches: [main]
 
+env:
+  # M80 — opt into Node 24 ahead of GitHub's forced June 2 2026 flip
+  # so any breakage in our Playwright + npm-install path surfaces on
+  # our schedule rather than at 00:00 UTC. Set at workflow scope so
+  # every job (test, gitleaks, build-binary) gets it uniformly.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
