@@ -97,6 +97,29 @@ func TestExtractLearnedPitfall_AtLeastOneOf(t *testing.T) {
 	}
 }
 
+// TestExtractLearnedPitfall_TofuEnvelopeWithResource regression-pins
+// the M86 bug fix. Every tofu apply failure detail starts with
+// "exit status 1 | stderr: ..." — "exit status" is in genericPatterns.
+// The prior ordering substring-rejected the whole detail before the
+// resource-extraction fallback could fire, so every apply-time
+// learning was silently dropped. The fix runs the resource-extraction
+// fallback BEFORE the generic-pattern rejection so the actionable
+// google_*/scaleway_* substring is honored.
+func TestExtractLearnedPitfall_TofuEnvelopeWithResource(t *testing.T) {
+	// Real M83 iter-1 failure detail (gcp-memorystore run).
+	detail := "exit status 1 | stderr: Error when reading or editing Project Service infrafactory-test/redis.googleapis.com: googleapi: Error 401: Request had invalid authentication credentials. Resource: google_project_service.redis"
+	got := ExtractLearnedPitfall(detail, "gcp-memorystore")
+	if got == nil {
+		t.Fatal("expected learned pitfall for tofu envelope with google_project_service in detail, got nil — M86 ordering bug has regressed")
+	}
+	if got.Resource != "google_project_service" {
+		t.Errorf("resource = %q, want google_project_service", got.Resource)
+	}
+	if got.Rule == "" {
+		t.Error("expected non-empty rule")
+	}
+}
+
 func TestExtractLearnedPitfall_GenericError(t *testing.T) {
 	cases := []string{
 		"test checks failed",

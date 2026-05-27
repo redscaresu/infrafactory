@@ -117,18 +117,16 @@ func ExtractLearnedPitfall(failureDetail, scenarioName string) *LearnedPitfall {
 		}
 	}
 
-	// Reject remaining generic errors that are not actionable.
-	for _, pattern := range genericPatterns {
-		if strings.Contains(lower, pattern) {
-			return nil
-		}
-	}
-
-	// Fallback: if we can extract a resource and the error is long enough
-	// to be meaningful, capture it as a general rule.
+	// Fallback FIRST: if a `scaleway_*` / `google_*` resource is named
+	// AND the detail is long enough to be meaningful, capture it.
+	// Generic-pattern rejection runs LAST so a detail like
+	// "exit status 1 | stderr: ... google_project_service.redis ..."
+	// learns from the actionable substring instead of being
+	// substring-rejected by the "exit status" envelope (M86 fix —
+	// every tofu apply failure starts with that envelope, so the
+	// prior ordering silently dropped every apply-time learning).
 	resource := extractResource(failureDetail)
 	if resource != "" && len(failureDetail) > 40 {
-		// Truncate excessively long details.
 		rule := failureDetail
 		if len(rule) > 300 {
 			rule = rule[:297] + "..."
@@ -137,6 +135,14 @@ func ExtractLearnedPitfall(failureDetail, scenarioName string) *LearnedPitfall {
 			Resource:       resource,
 			Rule:           rule,
 			DiscoveredFrom: scenarioName,
+		}
+	}
+
+	// Reject remaining generic errors that are not actionable. Only
+	// reached when no resource could be extracted.
+	for _, pattern := range genericPatterns {
+		if strings.Contains(lower, pattern) {
+			return nil
 		}
 	}
 

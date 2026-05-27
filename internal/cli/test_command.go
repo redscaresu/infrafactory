@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/redscaresu/infrafactory/internal/harness"
@@ -135,10 +136,10 @@ func mockDeployFailureDetail(err *harness.MockDeployError) string {
 		stderr = err.Apply.Stderr
 	}
 	if stderr != "" {
-		trimmedStderr := strings.TrimSpace(stderr)
+		trimmedStderr := stripAnsi(strings.TrimSpace(stderr))
 		if trimmedStderr != "" {
-			if len(trimmedStderr) > 600 {
-				trimmedStderr = trimmedStderr[:600] + "..."
+			if len(trimmedStderr) > failureStderrDetailMaxChars {
+				trimmedStderr = trimmedStderr[:failureStderrDetailMaxChars] + "..."
 			}
 			detail = fmt.Sprintf("%s | stderr: %s", detail, trimmedStderr)
 		}
@@ -187,14 +188,36 @@ func destroyFailureDetail(err *harness.DestroyError) string {
 		return ""
 	}
 	detail := err.Err.Error()
-	trimmedStderr := strings.TrimSpace(err.Destroy.Stderr)
+	trimmedStderr := stripAnsi(strings.TrimSpace(err.Destroy.Stderr))
 	if trimmedStderr == "" {
 		return detail
 	}
-	if len(trimmedStderr) > 600 {
-		trimmedStderr = trimmedStderr[:600] + "..."
+	if len(trimmedStderr) > failureStderrDetailMaxChars {
+		trimmedStderr = trimmedStderr[:failureStderrDetailMaxChars] + "..."
 	}
 	return fmt.Sprintf("%s | stderr: %s", detail, trimmedStderr)
+}
+
+// failureStderrDetailMaxChars caps the stderr portion stored in
+// FailureSummary.Detail. M86: bumped 600 → 2400 because tofu's error
+// envelope (ASCII art borders + OAuth metadata JSON) eats ~500 chars
+// before the actionable Resource: line. The lower limit silently
+// truncated `google_project_service.redis` past the cutoff, so
+// ExtractLearnedPitfall's resource regex never matched and the
+// auto-learning loop stayed dormant. 2400 comfortably fits the full
+// terraform-provider-google envelope + resource trailer.
+const failureStderrDetailMaxChars = 2400
+
+// ansiEscapeRE matches CSI sequences (\x1b[ ... letter) which tofu /
+// terraform-provider-google emit liberally in error output. Stripping
+// them before the truncation budget (above) makes the budget count
+// real chars, not display formatting — the M86 root cause was that
+// ANSI codes consumed the budget before `google_project_service.redis`
+// could land in the failure detail.
+var ansiEscapeRE = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
+
+func stripAnsi(s string) string {
+	return ansiEscapeRE.ReplaceAllString(s, "")
 }
 
 func appendSandboxDeployResult(stages []StageSummary, failures []FailureSummary, result *harness.SandboxDeployResult, runErr error) ([]StageSummary, []FailureSummary) {

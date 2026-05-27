@@ -24,3 +24,9 @@ pitfalls:
     - resource: google_compute_firewall
       rule: '`google_compute_firewall` rules attach to a `network`, not a subnetwork, and apply to all instances in that VPC matching `target_tags` or `target_service_accounts`. Do NOT add `subnetwork` — it is not a valid argument and will fail with "Unsupported argument". Restrict scope via `target_tags` plus narrow `source_ranges`.'
       source: seed
+    - resource: google_project_service
+      rule: |-
+        exit status 1 | stderr: ╷
+        │ Error: Error when reading or editing Project Service infrafactory-test/redis.googleapis.com: googleapi: Error 401: Request had invalid authentication credentials. Expected OAuth 2 access token, login cookie or other valid authentication credential. See https://deve...
+      source: learned
+      discovered_from: gcp-memorystore
