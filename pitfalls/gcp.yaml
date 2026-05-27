@@ -1,32 +1,6 @@
 provider: gcp
 pitfalls:
-    - resource: google_compute_instance
-      rule: A `google_compute_network` and at least one `google_compute_subnetwork` MUST exist before any `google_compute_instance` or `google_container_cluster` is created. Reference the subnetwork via `network_interface { subnetwork = google_compute_subnetwork.NAME.self_link }`. Do NOT rely on the `default` VPC — it is often disabled by org policy and will cause `tofu apply` to fail with "network not found".
-      source: seed
-    - resource: google_project_service
-      rule: 'Required GCP service APIs MUST be enabled via `google_project_service` BEFORE any resource references them. At minimum: `compute.googleapis.com` for VPC/instances, `container.googleapis.com` for GKE, `sqladmin.googleapis.com` for Cloud SQL, `iam.googleapis.com` for service accounts, `storage.googleapis.com` for buckets. Add an explicit `depends_on = [google_project_service.NAME]` on the first resource of each type to avoid race conditions during `tofu apply`.'
-      source: seed
-    - resource: google_service_account
-      rule: When binding IAM roles, the service account principal MUST be the fully qualified email `serviceAccount:NAME@PROJECT_ID.iam.gserviceaccount.com`, not just the account_id. Use `"serviceAccount:${google_service_account.NAME.email}"` in `google_project_iam_member.member` — never a bare `google_service_account.NAME.account_id`.
-      source: seed
-    - resource: google_container_cluster
-      rule: 'A GKE cluster must use exactly ONE node pool strategy: either set `initial_node_count` and `node_config` inline (default node pool), OR set `remove_default_node_pool = true` with `initial_node_count = 1` and create separate `google_container_node_pool` resources. Mixing inline `node_config` with a separate node pool causes a "default node pool conflict" plan error.'
-      source: seed
-    - resource: google_sql_database_instance
-      rule: 'For non-production / test scenarios, set `deletion_protection = false` so `tofu destroy` can tear the instance down. The provider default is `true`, which makes destroys fail with "cannot delete instance: deletion_protection is enabled". Production scenarios should leave the default in place.'
-      source: seed
-    - resource: google_sql_database_instance
-      rule: Cloud SQL instance `name` values are GLOBALLY reserved for ~7 days after deletion. Reusing the same hardcoded name across runs causes "instance name unavailable" errors. Use a `random_id` suffix or include a run-scoped token in the name to avoid collisions.
-      source: seed
-    - resource: google_storage_bucket
-      rule: GCS bucket names are GLOBALLY unique across all GCP projects. Always include the project ID or a random suffix in the bucket name (e.g. `"${var.project_id}-data"`) and set `force_destroy = true` for test scenarios so `tofu destroy` can remove non-empty buckets.
-      source: seed
-    - resource: google_compute_firewall
-      rule: '`google_compute_firewall` rules attach to a `network`, not a subnetwork, and apply to all instances in that VPC matching `target_tags` or `target_service_accounts`. Do NOT add `subnetwork` — it is not a valid argument and will fail with "Unsupported argument". Restrict scope via `target_tags` plus narrow `source_ranges`.'
-      source: seed
-    - resource: google_project_service
-      rule: |-
-        exit status 1 | stderr: ╷
-        │ Error: Error when reading or editing Project Service infrafactory-test/redis.googleapis.com: googleapi: Error 401: Request had invalid authentication credentials. Expected OAuth 2 access token, login cookie or other valid authentication credential. See https://deve...
-      source: learned
-      discovered_from: gcp-memorystore
+- resource: google_project_service
+  rule: "exit status 1 | stderr: \u2577\n\u2502 Error: Error when reading or editing Project Service infrafactory-test/redis.googleapis.com: googleapi: Error 401: Request had invalid authentication credentials. Expected OAuth 2 access token, login cookie or other valid authentication credential. See https://deve..."
+  source: learned
+  discovered_from: gcp-memorystore

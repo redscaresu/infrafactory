@@ -42,7 +42,15 @@
     }
     entriesByProvider = next;
     parseErrorByProvider = errs;
-    selectedProvider = selectInitialProvider(groups);
+    // Preserve the user's current tab across reloads (M91 follow-up):
+    // saveProvider() calls load() to pick up backend normalisation, and
+    // before this guard the reload was resetting selectedProvider to
+    // the alphabetically-first provider — yanking the user back to the
+    // wrong tab and making the save-status panel invisible because
+    // status is keyed by selectedProvider.
+    if (!selectedProvider || !providers.includes(selectedProvider)) {
+      selectedProvider = selectInitialProvider(groups);
+    }
   }
 
   async function load() {

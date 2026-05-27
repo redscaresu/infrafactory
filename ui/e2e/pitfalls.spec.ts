@@ -29,10 +29,12 @@ function restorePitfalls(snap: Map<string, Buffer>) {
   }
 }
 
-// The /pitfalls page reads pitfalls/<provider>.yaml files at startup. The
-// S43-T11 added pitfalls/aws.yaml. The repo now seeds aws.yaml +
-// gcp.yaml + scaleway.yaml, so the alphabetically-first provider
-// is 'aws' and the second is 'gcp'.
+// The /pitfalls page reads pitfalls/<provider>.yaml files at startup.
+// Post-M91 (seed strip): aws.yaml may be empty (0 learned), gcp.yaml +
+// scaleway.yaml have a few `source: learned` entries each from real
+// runs. Tests below tolerate either an empty or populated section —
+// the M91 ratchet enforces the seeding policy on the data side, the
+// UI just has to render whatever the file contains.
 const FIRST_PROVIDER = 'aws';
 const SECOND_PROVIDER = 'gcp';
 
@@ -77,32 +79,44 @@ test.describe('Pitfalls page', () => {
       'data-provider',
       FIRST_PROVIDER
     );
+    // Post-M91: aws.yaml may be empty (no learned pitfalls yet). If
+    // rows render, the source badge must be `learned` (the M91 ratchet
+    // enforces this on the data side). If no rows, that's also valid.
     const rows = page.locator('[data-testid="pitfalls-row"]');
-    await expect(rows.first()).toBeVisible({ timeout: 5_000 });
-    expect(await rows.count()).toBeGreaterThan(0);
-    // Source badges render with one of the documented label values.
-    const badge = page.locator('[data-testid="pitfalls-source-badge"]').first();
-    await expect(badge).toHaveText(/^(static|learned)$/);
+    if ((await rows.count()) > 0) {
+      const badge = page.locator('[data-testid="pitfalls-source-badge"]').first();
+      await expect(badge).toHaveText(/^(static|learned)$/);
+    }
   });
 
   test('switching provider tabs updates the active section and row set', async ({ page }) => {
     await gotoPitfalls(page);
-    const firstCount = await page.locator('[data-testid="pitfalls-row"]').count();
-    expect(firstCount).toBeGreaterThan(0);
-
-    await selectProvider(page, SECOND_PROVIDER);
+    // Find a provider that has rendered rows (post-M91, aws may be empty).
+    let providerWithRows = '';
+    for (const provider of ['aws', 'gcp', 'scaleway']) {
+      await selectProvider(page, provider);
+      if ((await page.locator('[data-testid="pitfalls-row"]').count()) > 0) {
+        providerWithRows = provider;
+        break;
+      }
+    }
+    expect(providerWithRows).not.toBe('');
     await expect(
-      page.locator(`[data-testid="pitfalls-tab-${SECOND_PROVIDER}"]`)
+      page.locator(`[data-testid="pitfalls-tab-${providerWithRows}"]`)
     ).toHaveAttribute('aria-selected', 'true');
-    const secondCount = await page.locator('[data-testid="pitfalls-row"]').count();
-    expect(secondCount).toBeGreaterThan(0);
   });
 
   test('add then delete a row toggles the row count without saving', async ({ page }) => {
     await gotoPitfalls(page);
-    // Wait for the seeded table to render before snapshotting the row count;
-    // otherwise a slow first paint races with `rows.count()` and `before` is
-    // captured at 0 instead of the seeded total.
+    // Post-M91: switch to a provider that has rows so the add-row test
+    // can verify the count delta. aws may be empty (no learned
+    // pitfalls); gcp + scaleway have learned entries from real runs.
+    for (const provider of ['gcp', 'scaleway', 'aws']) {
+      await selectProvider(page, provider);
+      if ((await page.locator('[data-testid="pitfalls-row"]').count()) > 0) {
+        break;
+      }
+    }
     const rows = page.locator('[data-testid="pitfalls-row"]');
     await expect(rows.first()).toBeVisible();
     const before = await rows.count();
@@ -117,7 +131,18 @@ test.describe('Pitfalls page', () => {
 
   test('edit + save persists across reload, then restore keeps the file clean', async ({ page }) => {
     await gotoPitfalls(page);
-    await selectProvider(page, FIRST_PROVIDER);
+    // Post-M91: select a provider with at least one row so we can edit
+    // its Rule textarea. aws may be empty (no learned pitfalls); gcp +
+    // scaleway have learned entries.
+    let editProvider = '';
+    for (const provider of ['gcp', 'scaleway', 'aws']) {
+      await selectProvider(page, provider);
+      if ((await page.locator('[data-testid="pitfalls-row"]').count()) > 0) {
+        editProvider = provider;
+        break;
+      }
+    }
+    expect(editProvider).not.toBe('');
 
     // Operate on the first row's Rule textarea so we always have a known target.
     const ruleTextarea = page
@@ -148,7 +173,7 @@ test.describe('Pitfalls page', () => {
     // Reload the whole page and re-select the same tab; the edited text must persist.
     await page.reload();
     await expect(page.locator('main h1')).toContainText('Pitfalls');
-    await selectProvider(page, FIRST_PROVIDER);
+    await selectProvider(page, editProvider);
     const reloadedTextarea = page
       .locator('[data-testid="pitfalls-row"]')
       .first()
