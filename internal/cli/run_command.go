@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"testing"
 	"time"
 
 	"github.com/redscaresu/infrafactory/internal/feedback"
@@ -45,6 +46,23 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 	sc, err := runtime.LoadScenario(scenarioPath)
 	if err != nil {
 		return fmt.Errorf("load scenario %q: %w", scenarioPath, err)
+	}
+
+	// M81 test-only isolation guard. Under `go test`, both the
+	// output dir and run-store root must be absolute so parallel
+	// subtests can't collide on shared relative-path defaults
+	// (`./output`, `.infrafactory/runs`). The May 2026 CI regression
+	// (M71) traced to two parallel subtests racing on `./output`
+	// after one's os.RemoveAll wiped the other's project.tf
+	// mid-iteration. macOS hid it; Linux didn't. Use isolatedRunOpts
+	// in tests to satisfy this guard.
+	if testing.Testing() {
+		if !filepath.IsAbs(runtime.Config.Paths.Output) {
+			return fmt.Errorf("test isolation: cfg.Paths.Output must be absolute under go test, got %q — use isolatedRunOpts(h, ...) which sets it to h.OutputDir()", runtime.Config.Paths.Output)
+		}
+		if !filepath.IsAbs(runtime.RunStoreRoot()) {
+			return fmt.Errorf("test isolation: runstoreRoot must be absolute under go test, got %q — use isolatedRunOpts(h, ...) which sets it to h.RunstoreRoot()", runtime.RunStoreRoot())
+		}
 	}
 
 	startedAt := time.Now().UTC()

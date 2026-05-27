@@ -4,6 +4,12 @@ output/
 # Runtime data
 .infrafactory/
 
+# Playwright artifacts (when run from repo root, not ui/)
+test-results/
+
+# Stray pitfalls dir from pre-M81 tests (now isolated to test workspace)
+internal/cli/pitfalls/
+
 # OpenTofu
 .terraform/
 *.tfstate

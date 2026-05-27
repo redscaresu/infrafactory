@@ -35,8 +35,6 @@ func (a *alternatingStaticHarness) Run(ctx context.Context, workDir string, env 
 // detail matches a known ExtractLearnedPitfall pattern.
 func TestRunCommandLearnsPitfallFromOscillation(t *testing.T) {
 	h := newCommandTestHarness(t)
-	runstoreRoot := filepath.Join(h.WorkspaceDir, ".infrafactory", "runs")
-	t.Setenv("INFRAFACTORY_RUNSTORE_ROOT", runstoreRoot)
 
 	pitfallsDir := filepath.Join(h.WorkspaceDir, "pitfalls")
 	if err := os.MkdirAll(pitfallsDir, 0o755); err != nil {
@@ -62,25 +60,18 @@ func TestRunCommandLearnsPitfallFromOscillation(t *testing.T) {
 		Err:         errors.New(detailB),
 	}
 
-	opts := runtimeOptions{
-		configLoader: func(path string) (config.Config, error) {
-			cfg, err := config.Load(path)
-			if err != nil {
-				return config.Config{}, err
-			}
-			cfg.Agent.RepairIterationsMax = 4
-			cfg.Paths.Pitfalls = pitfallsDir
-			return cfg, nil
-		},
-		scenarioLoader: defaultScenarioLoader,
-		deps: RuntimeDependencies{
-			Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
-				return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte("terraform {}\n")}}, nil
-			}),
-			Static:     &alternatingStaticHarness{errs: [2]error{stageErrA, stageErrB}},
-			MockDeploy: &fakeMockDeployHarness{},
-			Destroy:    &fakeDestroyHarness{},
-		},
+	opts := isolatedRunOpts(h, func(cfg config.Config) config.Config {
+		cfg.Agent.RepairIterationsMax = 4
+		cfg.Paths.Pitfalls = pitfallsDir
+		return cfg
+	})
+	opts.deps = RuntimeDependencies{
+		Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
+			return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte("terraform {}\n")}}, nil
+		}),
+		Static:     &alternatingStaticHarness{errs: [2]error{stageErrA, stageErrB}},
+		MockDeploy: &fakeMockDeployHarness{},
+		Destroy:    &fakeDestroyHarness{},
 	}
 
 	cmd := newRunCommandForTest(opts)
@@ -128,8 +119,6 @@ func TestRunCommandLearnsPitfallFromOscillation(t *testing.T) {
 // pitfalls in that case, and that path is unrelated to oscillation.
 func TestRunCommandSkipsOscillationLearningWhenNoOscillation(t *testing.T) {
 	h := newCommandTestHarness(t)
-	runstoreRoot := filepath.Join(h.WorkspaceDir, ".infrafactory", "runs")
-	t.Setenv("INFRAFACTORY_RUNSTORE_ROOT", runstoreRoot)
 
 	pitfallsDir := filepath.Join(h.WorkspaceDir, "pitfalls")
 	if err := os.MkdirAll(pitfallsDir, 0o755); err != nil {
@@ -142,25 +131,18 @@ func TestRunCommandSkipsOscillationLearningWhenNoOscillation(t *testing.T) {
 		Err:         errors.New(detailA),
 	}
 
-	opts := runtimeOptions{
-		configLoader: func(path string) (config.Config, error) {
-			cfg, err := config.Load(path)
-			if err != nil {
-				return config.Config{}, err
-			}
-			cfg.Agent.RepairIterationsMax = 4
-			cfg.Paths.Pitfalls = pitfallsDir
-			return cfg, nil
-		},
-		scenarioLoader: defaultScenarioLoader,
-		deps: RuntimeDependencies{
-			Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
-				return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte("terraform {}\n")}}, nil
-			}),
-			Static:     &fakeStaticHarness{err: stageErr},
-			MockDeploy: &fakeMockDeployHarness{},
-			Destroy:    &fakeDestroyHarness{},
-		},
+	opts := isolatedRunOpts(h, func(cfg config.Config) config.Config {
+		cfg.Agent.RepairIterationsMax = 4
+		cfg.Paths.Pitfalls = pitfallsDir
+		return cfg
+	})
+	opts.deps = RuntimeDependencies{
+		Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
+			return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte("terraform {}\n")}}, nil
+		}),
+		Static:     &fakeStaticHarness{err: stageErr},
+		MockDeploy: &fakeMockDeployHarness{},
+		Destroy:    &fakeDestroyHarness{},
 	}
 
 	cmd := newRunCommandForTest(opts)

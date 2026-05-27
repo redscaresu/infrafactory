@@ -23,29 +23,21 @@ type statusFixture struct {
 
 func TestCLIOrchestrationIntegrationSuccess(t *testing.T) {
 	h := newCommandTestHarness(t)
-	t.Setenv("INFRAFACTORY_RUNSTORE_ROOT", filepath.Join(h.WorkspaceDir, ".infrafactory", "runs"))
 
 	fixture := loadStatusFixture(t)
-	opts := runtimeOptions{
-		configLoader: func(path string) (config.Config, error) {
-			cfg, err := config.Load(path)
-			if err != nil {
-				return config.Config{}, err
-			}
-			cfg.Paths.Output = filepath.Join(h.WorkspaceDir, "output")
-			cfg.Agent.RepairIterationsMax = 2
-			return cfg, nil
-		},
-		scenarioLoader: defaultScenarioLoader,
-		deps: RuntimeDependencies{
-			Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
-				return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte("terraform {}\n")}}, nil
-			}),
-			Static:     &fakeStaticHarness{result: &harness.StaticResult{Stages: []harness.StageResult{{Stage: "init"}, {Stage: "validate"}, {Stage: "plan"}, {Stage: "show"}}, PlanJSON: []byte(`{"planned_values":{"root_module":{}}}`)}},
-			MockDeploy: &fakeMockDeployHarness{result: &harness.MockDeployResult{Apply: harness.StageResult{Stage: "apply"}, StateSnapshot: []byte(`{}`)}},
-			Destroy:    &fakeDestroyHarness{result: &harness.DestroyResult{Destroy: harness.StageResult{Stage: "destroy"}, OrphanCount: 0}},
-			MockStart:  &fakeMockStarter{},
-		},
+	opts := isolatedRunOpts(h, func(cfg config.Config) config.Config {
+		cfg.Paths.Output = filepath.Join(h.WorkspaceDir, "output")
+		cfg.Agent.RepairIterationsMax = 2
+		return cfg
+	})
+	opts.deps = RuntimeDependencies{
+		Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
+			return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte("terraform {}\n")}}, nil
+		}),
+		Static:     &fakeStaticHarness{result: &harness.StaticResult{Stages: []harness.StageResult{{Stage: "init"}, {Stage: "validate"}, {Stage: "plan"}, {Stage: "show"}}, PlanJSON: []byte(`{"planned_values":{"root_module":{}}}`)}},
+		MockDeploy: &fakeMockDeployHarness{result: &harness.MockDeployResult{Apply: harness.StageResult{Stage: "apply"}, StateSnapshot: []byte(`{}`)}},
+		Destroy:    &fakeDestroyHarness{result: &harness.DestroyResult{Destroy: harness.StageResult{Stage: "destroy"}, OrphanCount: 0}},
+		MockStart:  &fakeMockStarter{},
 	}
 
 	commands := map[string]*cobra.Command{
@@ -78,29 +70,21 @@ func TestCLIOrchestrationIntegrationSuccess(t *testing.T) {
 
 func TestCLIOrchestrationIntegrationFailureRegression(t *testing.T) {
 	h := newCommandTestHarness(t)
-	t.Setenv("INFRAFACTORY_RUNSTORE_ROOT", filepath.Join(h.WorkspaceDir, ".infrafactory", "runs"))
 
 	fixture := loadStatusFixture(t)
-	opts := runtimeOptions{
-		configLoader: func(path string) (config.Config, error) {
-			cfg, err := config.Load(path)
-			if err != nil {
-				return config.Config{}, err
-			}
-			cfg.Paths.Output = filepath.Join(h.WorkspaceDir, "output")
-			cfg.Agent.RepairIterationsMax = 2
-			return cfg, nil
-		},
-		scenarioLoader: defaultScenarioLoader,
-		deps: RuntimeDependencies{
-			Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
-				return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte("terraform {}\n")}}, nil
-			}),
-			Static:     &fakeStaticHarness{err: &harness.StageError{StageResult: harness.StageResult{Stage: "validate", Cmd: []string{"tofu", "validate"}}, Err: errors.New("validate failed")}},
-			MockDeploy: &fakeMockDeployHarness{},
-			Destroy:    &fakeDestroyHarness{},
-			MockStart:  &fakeMockStarter{},
-		},
+	opts := isolatedRunOpts(h, func(cfg config.Config) config.Config {
+		cfg.Paths.Output = filepath.Join(h.WorkspaceDir, "output")
+		cfg.Agent.RepairIterationsMax = 2
+		return cfg
+	})
+	opts.deps = RuntimeDependencies{
+		Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
+			return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte("terraform {}\n")}}, nil
+		}),
+		Static:     &fakeStaticHarness{err: &harness.StageError{StageResult: harness.StageResult{Stage: "validate", Cmd: []string{"tofu", "validate"}}, Err: errors.New("validate failed")}},
+		MockDeploy: &fakeMockDeployHarness{},
+		Destroy:    &fakeDestroyHarness{},
+		MockStart:  &fakeMockStarter{},
 	}
 
 	cases := map[string]*cobra.Command{

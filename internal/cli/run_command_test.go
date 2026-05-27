@@ -20,19 +20,14 @@ import (
 
 func TestRunCommandConvergesOnFirstIteration(t *testing.T) {
 	h := newCommandTestHarness(t)
-	runstoreRoot := filepath.Join(h.WorkspaceDir, ".infrafactory", "runs")
-	t.Setenv("INFRAFACTORY_RUNSTORE_ROOT", runstoreRoot)
-	opts := runtimeOptions{
-		configLoader:   config.Load,
-		scenarioLoader: defaultScenarioLoader,
-		deps: RuntimeDependencies{
-			Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
-				return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte("terraform {}\n")}}, nil
-			}),
-			Static:     &fakeStaticHarness{result: &harness.StaticResult{Stages: []harness.StageResult{{Stage: "init"}, {Stage: "validate"}, {Stage: "plan"}, {Stage: "show"}}, PlanJSON: []byte(`{"planned_values":{"root_module":{}}}`)}},
-			MockDeploy: &fakeMockDeployHarness{result: &harness.MockDeployResult{Apply: harness.StageResult{Stage: "apply"}, StateSnapshot: []byte(`{}`)}},
-			Destroy:    &fakeDestroyHarness{result: &harness.DestroyResult{Destroy: harness.StageResult{Stage: "destroy"}, OrphanCount: 0}},
-		},
+	opts := isolatedRunOpts(h, nil)
+	opts.deps = RuntimeDependencies{
+		Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
+			return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte("terraform {}\n")}}, nil
+		}),
+		Static:     &fakeStaticHarness{result: &harness.StaticResult{Stages: []harness.StageResult{{Stage: "init"}, {Stage: "validate"}, {Stage: "plan"}, {Stage: "show"}}, PlanJSON: []byte(`{"planned_values":{"root_module":{}}}`)}},
+		MockDeploy: &fakeMockDeployHarness{result: &harness.MockDeployResult{Apply: harness.StageResult{Stage: "apply"}, StateSnapshot: []byte(`{}`)}},
+		Destroy:    &fakeDestroyHarness{result: &harness.DestroyResult{Destroy: harness.StageResult{Stage: "destroy"}, OrphanCount: 0}},
 	}
 
 	cmd := newRunCommandForTest(opts)
@@ -57,7 +52,7 @@ func TestRunCommandConvergesOnFirstIteration(t *testing.T) {
 		}
 	}
 
-	store := runstore.NewFilesystemStore(runstoreRoot)
+	store := runstore.NewFilesystemStore(h.RunstoreRoot())
 	runs, err := store.ListRuns("example-scenario")
 	if err != nil {
 		t.Fatalf("list runs: %v", err)
@@ -65,7 +60,7 @@ func TestRunCommandConvergesOnFirstIteration(t *testing.T) {
 	if len(runs) != 1 || runs[0].Status != "success" {
 		t.Fatalf("expected one successful run, got: %+v", runs)
 	}
-	iterationPath := filepath.Join(runstoreRoot, "example-scenario", runs[0].RunID, "iterations", "1", "iteration.json")
+	iterationPath := filepath.Join(h.RunstoreRoot(), "example-scenario", runs[0].RunID, "iterations", "1", "iteration.json")
 	if _, err := os.Stat(iterationPath); err != nil {
 		t.Fatalf("expected iteration artifact: %v", err)
 	}
@@ -83,7 +78,7 @@ func TestRunCommandConvergesOnFirstIteration(t *testing.T) {
 		t.Fatalf("expected iteration schema %q, got %q", runstore.RunIterationSchemaVersion, iteration.Schema)
 	}
 
-	runPath := filepath.Join(runstoreRoot, "example-scenario", runs[0].RunID, "run.json")
+	runPath := filepath.Join(h.RunstoreRoot(), "example-scenario", runs[0].RunID, "run.json")
 	runPayload, err := os.ReadFile(runPath)
 	if err != nil {
 		t.Fatalf("read run metadata artifact: %v", err)
@@ -98,7 +93,7 @@ func TestRunCommandConvergesOnFirstIteration(t *testing.T) {
 		t.Fatalf("expected run metadata schema %q, got %q", runstore.RunMetadataSchemaVersion, runMeta.Schema)
 	}
 
-	appLogPath := filepath.Join(runstoreRoot, "example-scenario", runs[0].RunID, "app.log")
+	appLogPath := filepath.Join(h.RunstoreRoot(), "example-scenario", runs[0].RunID, "app.log")
 	appLog, err := os.ReadFile(appLogPath)
 	if err != nil {
 		t.Fatalf("read run app log: %v", err)
@@ -110,7 +105,7 @@ func TestRunCommandConvergesOnFirstIteration(t *testing.T) {
 		t.Fatalf("expected stage_start log entry, got:\n%s", string(appLog))
 	}
 
-	generatedPath := filepath.Join(runstoreRoot, "example-scenario", runs[0].RunID, "generated", "main.tf")
+	generatedPath := filepath.Join(h.RunstoreRoot(), "example-scenario", runs[0].RunID, "generated", "main.tf")
 	generatedPayload, err := os.ReadFile(generatedPath)
 	if err != nil {
 		t.Fatalf("read generated run file: %v", err)
@@ -119,7 +114,7 @@ func TestRunCommandConvergesOnFirstIteration(t *testing.T) {
 		t.Fatalf("unexpected generated run file: %s", string(generatedPayload))
 	}
 
-	iterationGeneratedPath := filepath.Join(runstoreRoot, "example-scenario", runs[0].RunID, "iterations", "1", "generated", "main.tf")
+	iterationGeneratedPath := filepath.Join(h.RunstoreRoot(), "example-scenario", runs[0].RunID, "iterations", "1", "generated", "main.tf")
 	iterationGeneratedPayload, err := os.ReadFile(iterationGeneratedPath)
 	if err != nil {
 		t.Fatalf("read iteration generated run file: %v", err)
@@ -131,22 +126,17 @@ func TestRunCommandConvergesOnFirstIteration(t *testing.T) {
 
 func TestRunCommandPersistsRunningMetadataBeforeCompletion(t *testing.T) {
 	h := newCommandTestHarness(t)
-	runstoreRoot := filepath.Join(h.WorkspaceDir, ".infrafactory", "runs")
-	t.Setenv("INFRAFACTORY_RUNSTORE_ROOT", runstoreRoot)
 
 	block := make(chan struct{})
-	opts := runtimeOptions{
-		configLoader:   config.Load,
-		scenarioLoader: defaultScenarioLoader,
-		deps: RuntimeDependencies{
-			Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
-				<-block
-				return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte("terraform {}\n")}}, nil
-			}),
-			Static:     &fakeStaticHarness{result: &harness.StaticResult{Stages: []harness.StageResult{{Stage: "init"}, {Stage: "validate"}, {Stage: "plan"}, {Stage: "show"}}, PlanJSON: []byte(`{"planned_values":{"root_module":{}}}`)}},
-			MockDeploy: &fakeMockDeployHarness{result: &harness.MockDeployResult{Apply: harness.StageResult{Stage: "apply"}, StateSnapshot: []byte(`{}`)}},
-			Destroy:    &fakeDestroyHarness{result: &harness.DestroyResult{Destroy: harness.StageResult{Stage: "destroy"}, OrphanCount: 0}},
-		},
+	opts := isolatedRunOpts(h, nil)
+	opts.deps = RuntimeDependencies{
+		Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
+			<-block
+			return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte("terraform {}\n")}}, nil
+		}),
+		Static:     &fakeStaticHarness{result: &harness.StaticResult{Stages: []harness.StageResult{{Stage: "init"}, {Stage: "validate"}, {Stage: "plan"}, {Stage: "show"}}, PlanJSON: []byte(`{"planned_values":{"root_module":{}}}`)}},
+		MockDeploy: &fakeMockDeployHarness{result: &harness.MockDeployResult{Apply: harness.StageResult{Stage: "apply"}, StateSnapshot: []byte(`{}`)}},
+		Destroy:    &fakeDestroyHarness{result: &harness.DestroyResult{Destroy: harness.StageResult{Stage: "destroy"}, OrphanCount: 0}},
 	}
 
 	cmd := newRunCommandForTest(opts)
@@ -159,7 +149,7 @@ func TestRunCommandPersistsRunningMetadataBeforeCompletion(t *testing.T) {
 		done <- cmd.Execute()
 	}()
 
-	store := runstore.NewFilesystemStore(runstoreRoot)
+	store := runstore.NewFilesystemStore(h.RunstoreRoot())
 	var runningMeta runstore.RunMetadata
 	found := false
 	for i := 0; i < 100; i++ {
@@ -186,30 +176,25 @@ func TestRunCommandPersistsRunningMetadataBeforeCompletion(t *testing.T) {
 
 func TestRunCommandPersistsPlanAndBaselineArtifacts(t *testing.T) {
 	h := newCommandTestHarness(t)
-	runstoreRoot := filepath.Join(h.WorkspaceDir, ".infrafactory", "runs")
-	t.Setenv("INFRAFACTORY_RUNSTORE_ROOT", runstoreRoot)
 
 	mockState := &fakeRunMockStateClient{statePayload: []byte(`{"instance":{"servers":[{"id":"srv-1"}]}}`)}
-	opts := runtimeOptions{
-		configLoader:   config.Load,
-		scenarioLoader: defaultScenarioLoader,
-		deps: RuntimeDependencies{
-			Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
-				return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte("terraform {}\n")}}, nil
-			}),
-			Static: &fakeStaticHarness{result: &harness.StaticResult{
-				Stages: []harness.StageResult{
-					{Stage: "init"},
-					{Stage: "validate"},
-					{Stage: "plan", Stdout: "Plan: 1 to add, 0 to change, 0 to destroy.\n"},
-					{Stage: "show"},
-				},
-				PlanJSON: []byte(`{"planned_values":{"root_module":{}}}`),
-			}},
-			MockState:  mockState,
-			MockDeploy: &fakeMockDeployHarness{result: &harness.MockDeployResult{Apply: harness.StageResult{Stage: "apply"}, StateSnapshot: []byte(`{}`)}},
-			Destroy:    &fakeDestroyHarness{result: &harness.DestroyResult{Destroy: harness.StageResult{Stage: "destroy"}, OrphanCount: 0}},
-		},
+	opts := isolatedRunOpts(h, nil)
+	opts.deps = RuntimeDependencies{
+		Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
+			return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte("terraform {}\n")}}, nil
+		}),
+		Static: &fakeStaticHarness{result: &harness.StaticResult{
+			Stages: []harness.StageResult{
+				{Stage: "init"},
+				{Stage: "validate"},
+				{Stage: "plan", Stdout: "Plan: 1 to add, 0 to change, 0 to destroy.\n"},
+				{Stage: "show"},
+			},
+			PlanJSON: []byte(`{"planned_values":{"root_module":{}}}`),
+		}},
+		MockState:  mockState,
+		MockDeploy: &fakeMockDeployHarness{result: &harness.MockDeployResult{Apply: harness.StageResult{Stage: "apply"}, StateSnapshot: []byte(`{}`)}},
+		Destroy:    &fakeDestroyHarness{result: &harness.DestroyResult{Destroy: harness.StageResult{Stage: "destroy"}, OrphanCount: 0}},
 	}
 
 	cmd := newRunCommandForTest(opts)
@@ -221,7 +206,7 @@ func TestRunCommandPersistsPlanAndBaselineArtifacts(t *testing.T) {
 		t.Fatalf("execute run command: %v", err)
 	}
 
-	store := runstore.NewFilesystemStore(runstoreRoot)
+	store := runstore.NewFilesystemStore(h.RunstoreRoot())
 	runs, err := store.ListRuns("example-scenario")
 	if err != nil {
 		t.Fatalf("list runs: %v", err)
@@ -245,26 +230,21 @@ func TestRunCommandPersistsPlanAndBaselineArtifacts(t *testing.T) {
 
 func TestRunCommandLLMRawCaptureDisabledByDefault(t *testing.T) {
 	h := newCommandTestHarness(t)
-	runstoreRoot := filepath.Join(h.WorkspaceDir, ".infrafactory", "runs")
-	t.Setenv("INFRAFACTORY_RUNSTORE_ROOT", runstoreRoot)
-	opts := runtimeOptions{
-		configLoader:   config.Load,
-		scenarioLoader: defaultScenarioLoader,
-		deps: RuntimeDependencies{
-			Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
-				return &generator.GeneratedCode{
-					Files: map[string][]byte{"main.tf": []byte("terraform {}\n")},
-					Metadata: generator.GenerationMetadata{
-						Phases: []generator.PhaseResult{
-							{Name: generator.PhaseGenerateHCL, Output: []byte("token: should-not-be-written")},
-						},
+	opts := isolatedRunOpts(h, nil)
+	opts.deps = RuntimeDependencies{
+		Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
+			return &generator.GeneratedCode{
+				Files: map[string][]byte{"main.tf": []byte("terraform {}\n")},
+				Metadata: generator.GenerationMetadata{
+					Phases: []generator.PhaseResult{
+						{Name: generator.PhaseGenerateHCL, Output: []byte("token: should-not-be-written")},
 					},
-				}, nil
-			}),
-			Static:     &fakeStaticHarness{result: &harness.StaticResult{Stages: []harness.StageResult{{Stage: "init"}, {Stage: "validate"}, {Stage: "plan"}, {Stage: "show"}}, PlanJSON: []byte(`{"planned_values":{"root_module":{}}}`)}},
-			MockDeploy: &fakeMockDeployHarness{result: &harness.MockDeployResult{Apply: harness.StageResult{Stage: "apply"}, StateSnapshot: []byte(`{}`)}},
-			Destroy:    &fakeDestroyHarness{result: &harness.DestroyResult{Destroy: harness.StageResult{Stage: "destroy"}, OrphanCount: 0}},
-		},
+				},
+			}, nil
+		}),
+		Static:     &fakeStaticHarness{result: &harness.StaticResult{Stages: []harness.StageResult{{Stage: "init"}, {Stage: "validate"}, {Stage: "plan"}, {Stage: "show"}}, PlanJSON: []byte(`{"planned_values":{"root_module":{}}}`)}},
+		MockDeploy: &fakeMockDeployHarness{result: &harness.MockDeployResult{Apply: harness.StageResult{Stage: "apply"}, StateSnapshot: []byte(`{}`)}},
+		Destroy:    &fakeDestroyHarness{result: &harness.DestroyResult{Destroy: harness.StageResult{Stage: "destroy"}, OrphanCount: 0}},
 	}
 
 	cmd := newRunCommandForTest(opts)
@@ -276,7 +256,7 @@ func TestRunCommandLLMRawCaptureDisabledByDefault(t *testing.T) {
 		t.Fatalf("execute run command: %v", err)
 	}
 
-	store := runstore.NewFilesystemStore(runstoreRoot)
+	store := runstore.NewFilesystemStore(h.RunstoreRoot())
 	runs, err := store.ListRuns("example-scenario")
 	if err != nil {
 		t.Fatalf("list runs: %v", err)
@@ -284,14 +264,14 @@ func TestRunCommandLLMRawCaptureDisabledByDefault(t *testing.T) {
 	if len(runs) != 1 {
 		t.Fatalf("expected one run, got %+v", runs)
 	}
-	matches, err := filepath.Glob(filepath.Join(runstoreRoot, "example-scenario", runs[0].RunID, "iterations", "1", "llm_raw_*.json"))
+	matches, err := filepath.Glob(filepath.Join(h.RunstoreRoot(), "example-scenario", runs[0].RunID, "iterations", "1", "llm_raw_*.json"))
 	if err != nil {
 		t.Fatalf("glob llm raw artifacts: %v", err)
 	}
 	if len(matches) != 0 {
 		t.Fatalf("expected no llm raw artifacts by default, got %v", matches)
 	}
-	promptMatches, err := filepath.Glob(filepath.Join(runstoreRoot, "example-scenario", runs[0].RunID, "iterations", "1", "llm_prompt_*.json"))
+	promptMatches, err := filepath.Glob(filepath.Join(h.RunstoreRoot(), "example-scenario", runs[0].RunID, "iterations", "1", "llm_prompt_*.json"))
 	if err != nil {
 		t.Fatalf("glob llm prompt artifacts: %v", err)
 	}
@@ -302,27 +282,22 @@ func TestRunCommandLLMRawCaptureDisabledByDefault(t *testing.T) {
 
 func TestRunCommandLLMRawCaptureWritesPhaseArtifactsWhenEnabled(t *testing.T) {
 	h := newCommandTestHarness(t)
-	runstoreRoot := filepath.Join(h.WorkspaceDir, ".infrafactory", "runs")
-	t.Setenv("INFRAFACTORY_RUNSTORE_ROOT", runstoreRoot)
 	t.Setenv(llmRawCaptureEnvVar, "1")
-	opts := runtimeOptions{
-		configLoader:   config.Load,
-		scenarioLoader: defaultScenarioLoader,
-		deps: RuntimeDependencies{
-			Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
-				return &generator.GeneratedCode{
-					Files: map[string][]byte{"main.tf": []byte("terraform {}\n")},
-					Metadata: generator.GenerationMetadata{
-						Phases: []generator.PhaseResult{
-							{Name: generator.PhaseGenerateHCL, Prompt: []byte("feedback token: prompt-should-be-redacted"), Output: []byte("token: should-be-redacted")},
-						},
+	opts := isolatedRunOpts(h, nil)
+	opts.deps = RuntimeDependencies{
+		Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
+			return &generator.GeneratedCode{
+				Files: map[string][]byte{"main.tf": []byte("terraform {}\n")},
+				Metadata: generator.GenerationMetadata{
+					Phases: []generator.PhaseResult{
+						{Name: generator.PhaseGenerateHCL, Prompt: []byte("feedback token: prompt-should-be-redacted"), Output: []byte("token: should-be-redacted")},
 					},
-				}, nil
-			}),
-			Static:     &fakeStaticHarness{result: &harness.StaticResult{Stages: []harness.StageResult{{Stage: "init"}, {Stage: "validate"}, {Stage: "plan"}, {Stage: "show"}}, PlanJSON: []byte(`{"planned_values":{"root_module":{}}}`)}},
-			MockDeploy: &fakeMockDeployHarness{result: &harness.MockDeployResult{Apply: harness.StageResult{Stage: "apply"}, StateSnapshot: []byte(`{}`)}},
-			Destroy:    &fakeDestroyHarness{result: &harness.DestroyResult{Destroy: harness.StageResult{Stage: "destroy"}, OrphanCount: 0}},
-		},
+				},
+			}, nil
+		}),
+		Static:     &fakeStaticHarness{result: &harness.StaticResult{Stages: []harness.StageResult{{Stage: "init"}, {Stage: "validate"}, {Stage: "plan"}, {Stage: "show"}}, PlanJSON: []byte(`{"planned_values":{"root_module":{}}}`)}},
+		MockDeploy: &fakeMockDeployHarness{result: &harness.MockDeployResult{Apply: harness.StageResult{Stage: "apply"}, StateSnapshot: []byte(`{}`)}},
+		Destroy:    &fakeDestroyHarness{result: &harness.DestroyResult{Destroy: harness.StageResult{Stage: "destroy"}, OrphanCount: 0}},
 	}
 
 	cmd := newRunCommandForTest(opts)
@@ -334,7 +309,7 @@ func TestRunCommandLLMRawCaptureWritesPhaseArtifactsWhenEnabled(t *testing.T) {
 		t.Fatalf("execute run command: %v", err)
 	}
 
-	store := runstore.NewFilesystemStore(runstoreRoot)
+	store := runstore.NewFilesystemStore(h.RunstoreRoot())
 	runs, err := store.ListRuns("example-scenario")
 	if err != nil {
 		t.Fatalf("list runs: %v", err)
@@ -342,7 +317,7 @@ func TestRunCommandLLMRawCaptureWritesPhaseArtifactsWhenEnabled(t *testing.T) {
 	if len(runs) != 1 {
 		t.Fatalf("expected one run, got %+v", runs)
 	}
-	artifactPath := filepath.Join(runstoreRoot, "example-scenario", runs[0].RunID, "iterations", "1", "llm_raw_generate_hcl.json")
+	artifactPath := filepath.Join(h.RunstoreRoot(), "example-scenario", runs[0].RunID, "iterations", "1", "llm_raw_generate_hcl.json")
 	payload, err := os.ReadFile(artifactPath)
 	if err != nil {
 		t.Fatalf("read llm raw artifact: %v", err)
@@ -358,7 +333,7 @@ func TestRunCommandLLMRawCaptureWritesPhaseArtifactsWhenEnabled(t *testing.T) {
 		t.Fatalf("expected redacted llm raw artifact content, got %q", artifact.Content)
 	}
 
-	promptArtifactPath := filepath.Join(runstoreRoot, "example-scenario", runs[0].RunID, "iterations", "1", "llm_prompt_generate_hcl.json")
+	promptArtifactPath := filepath.Join(h.RunstoreRoot(), "example-scenario", runs[0].RunID, "iterations", "1", "llm_prompt_generate_hcl.json")
 	promptPayload, err := os.ReadFile(promptArtifactPath)
 	if err != nil {
 		t.Fatalf("read llm prompt artifact: %v", err)
@@ -377,27 +352,18 @@ func TestRunCommandLLMRawCaptureWritesPhaseArtifactsWhenEnabled(t *testing.T) {
 
 func TestRunCommandPersistsRepairIterationsMaxInMetadata(t *testing.T) {
 	h := newCommandTestHarness(t)
-	runstoreRoot := filepath.Join(h.WorkspaceDir, ".infrafactory", "runs")
-	t.Setenv("INFRAFACTORY_RUNSTORE_ROOT", runstoreRoot)
 
-	opts := runtimeOptions{
-		configLoader: func(path string) (config.Config, error) {
-			cfg, err := config.Load(path)
-			if err != nil {
-				return config.Config{}, err
-			}
-			cfg.Agent.RepairIterationsMax = 3
-			return cfg, nil
-		},
-		scenarioLoader: defaultScenarioLoader,
-		deps: RuntimeDependencies{
-			Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
-				return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte("terraform {}\n")}}, nil
-			}),
-			Static:     &fakeStaticHarness{result: &harness.StaticResult{Stages: []harness.StageResult{{Stage: "init"}, {Stage: "validate"}, {Stage: "plan"}, {Stage: "show"}}, PlanJSON: []byte(`{"planned_values":{"root_module":{}}}`)}},
-			MockDeploy: &fakeMockDeployHarness{result: &harness.MockDeployResult{Apply: harness.StageResult{Stage: "apply"}, StateSnapshot: []byte(`{}`)}},
-			Destroy:    &fakeDestroyHarness{result: &harness.DestroyResult{Destroy: harness.StageResult{Stage: "destroy"}, OrphanCount: 0}},
-		},
+	opts := isolatedRunOpts(h, func(cfg config.Config) config.Config {
+		cfg.Agent.RepairIterationsMax = 3
+		return cfg
+	})
+	opts.deps = RuntimeDependencies{
+		Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
+			return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte("terraform {}\n")}}, nil
+		}),
+		Static:     &fakeStaticHarness{result: &harness.StaticResult{Stages: []harness.StageResult{{Stage: "init"}, {Stage: "validate"}, {Stage: "plan"}, {Stage: "show"}}, PlanJSON: []byte(`{"planned_values":{"root_module":{}}}`)}},
+		MockDeploy: &fakeMockDeployHarness{result: &harness.MockDeployResult{Apply: harness.StageResult{Stage: "apply"}, StateSnapshot: []byte(`{}`)}},
+		Destroy:    &fakeDestroyHarness{result: &harness.DestroyResult{Destroy: harness.StageResult{Stage: "destroy"}, OrphanCount: 0}},
 	}
 
 	cmd := newRunCommandForTest(opts)
@@ -409,7 +375,7 @@ func TestRunCommandPersistsRepairIterationsMaxInMetadata(t *testing.T) {
 		t.Fatalf("execute run command: %v", err)
 	}
 
-	store := runstore.NewFilesystemStore(runstoreRoot)
+	store := runstore.NewFilesystemStore(h.RunstoreRoot())
 	runs, err := store.ListRuns("example-scenario")
 	if err != nil {
 		t.Fatalf("list runs: %v", err)
@@ -424,29 +390,20 @@ func TestRunCommandPersistsRepairIterationsMaxInMetadata(t *testing.T) {
 
 func TestRunCommandStopsAfterFirstSuccess(t *testing.T) {
 	h := newCommandTestHarness(t)
-	runstoreRoot := filepath.Join(h.WorkspaceDir, ".infrafactory", "runs")
-	t.Setenv("INFRAFACTORY_RUNSTORE_ROOT", runstoreRoot)
 
 	genCalls := 0
-	opts := runtimeOptions{
-		configLoader: func(path string) (config.Config, error) {
-			cfg, err := config.Load(path)
-			if err != nil {
-				return config.Config{}, err
-			}
-			cfg.Agent.RepairIterationsMax = 2
-			return cfg, nil
-		},
-		scenarioLoader: defaultScenarioLoader,
-		deps: RuntimeDependencies{
-			Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
-				genCalls++
-				return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte("terraform {}\n")}}, nil
-			}),
-			Static:     &fakeStaticHarness{result: &harness.StaticResult{Stages: []harness.StageResult{{Stage: "init"}, {Stage: "validate"}, {Stage: "plan"}, {Stage: "show"}}, PlanJSON: []byte(`{"planned_values":{"root_module":{}}}`)}},
-			MockDeploy: &fakeMockDeployHarness{result: &harness.MockDeployResult{Apply: harness.StageResult{Stage: "apply"}, StateSnapshot: []byte(`{}`)}},
-			Destroy:    &fakeDestroyHarness{result: &harness.DestroyResult{Destroy: harness.StageResult{Stage: "destroy"}, OrphanCount: 0}},
-		},
+	opts := isolatedRunOpts(h, func(cfg config.Config) config.Config {
+		cfg.Agent.RepairIterationsMax = 2
+		return cfg
+	})
+	opts.deps = RuntimeDependencies{
+		Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
+			genCalls++
+			return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte("terraform {}\n")}}, nil
+		}),
+		Static:     &fakeStaticHarness{result: &harness.StaticResult{Stages: []harness.StageResult{{Stage: "init"}, {Stage: "validate"}, {Stage: "plan"}, {Stage: "show"}}, PlanJSON: []byte(`{"planned_values":{"root_module":{}}}`)}},
+		MockDeploy: &fakeMockDeployHarness{result: &harness.MockDeployResult{Apply: harness.StageResult{Stage: "apply"}, StateSnapshot: []byte(`{}`)}},
+		Destroy:    &fakeDestroyHarness{result: &harness.DestroyResult{Destroy: harness.StageResult{Stage: "destroy"}, OrphanCount: 0}},
 	}
 
 	cmd := newRunCommandForTest(opts)
@@ -471,31 +428,22 @@ func TestRunCommandStopsAfterFirstSuccess(t *testing.T) {
 
 func TestRunCommandStopsAtMaxIterations(t *testing.T) {
 	h := newCommandTestHarness(t)
-	runstoreRoot := filepath.Join(h.WorkspaceDir, ".infrafactory", "runs")
-	t.Setenv("INFRAFACTORY_RUNSTORE_ROOT", runstoreRoot)
 	iter := 0
-	opts := runtimeOptions{
-		configLoader: func(path string) (config.Config, error) {
-			cfg, err := config.Load(path)
-			if err != nil {
-				return config.Config{}, err
+	opts := isolatedRunOpts(h, func(cfg config.Config) config.Config {
+		cfg.Agent.RepairIterationsMax = 2
+		return cfg
+	})
+	opts.deps = RuntimeDependencies{
+		Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
+			iter++
+			if iter == 1 {
+				return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte("terraform {}\n")}}, nil
 			}
-			cfg.Agent.RepairIterationsMax = 2
-			return cfg, nil
-		},
-		scenarioLoader: defaultScenarioLoader,
-		deps: RuntimeDependencies{
-			Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
-				iter++
-				if iter == 1 {
-					return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte("terraform {}\n")}}, nil
-				}
-				return nil, errors.New("seed failed on second iteration")
-			}),
-			Static:     &fakeStaticHarness{err: &harness.StageError{StageResult: harness.StageResult{Stage: "validate", Cmd: []string{"tofu", "validate"}}, Err: errors.New("validate failed")}},
-			MockDeploy: &fakeMockDeployHarness{},
-			Destroy:    &fakeDestroyHarness{},
-		},
+			return nil, errors.New("seed failed on second iteration")
+		}),
+		Static:     &fakeStaticHarness{err: &harness.StageError{StageResult: harness.StageResult{Stage: "validate", Cmd: []string{"tofu", "validate"}}, Err: errors.New("validate failed")}},
+		MockDeploy: &fakeMockDeployHarness{},
+		Destroy:    &fakeDestroyHarness{},
 	}
 
 	cmd := newRunCommandForTest(opts)
@@ -519,7 +467,7 @@ func TestRunCommandStopsAtMaxIterations(t *testing.T) {
 		t.Fatalf("expected repair_budget_exhausted failure marker, got:\n%s", stdout.String())
 	}
 
-	store := runstore.NewFilesystemStore(runstoreRoot)
+	store := runstore.NewFilesystemStore(h.RunstoreRoot())
 	runs, err := store.ListRuns("example-scenario")
 	if err != nil {
 		t.Fatalf("list runs: %v", err)
@@ -528,7 +476,7 @@ func TestRunCommandStopsAtMaxIterations(t *testing.T) {
 		t.Fatalf("expected one failed run, got: %+v", runs)
 	}
 
-	iterationPath := filepath.Join(runstoreRoot, "example-scenario", runs[0].RunID, "iterations", "2", "iteration.json")
+	iterationPath := filepath.Join(h.RunstoreRoot(), "example-scenario", runs[0].RunID, "iterations", "2", "iteration.json")
 	iterationPayload, err := os.ReadFile(iterationPath)
 	if err != nil {
 		t.Fatalf("read iteration artifact: %v", err)
@@ -546,26 +494,17 @@ func TestRunCommandStopsAtMaxIterations(t *testing.T) {
 
 func TestRunCommandStopsOnStuckDetection(t *testing.T) {
 	h := newCommandTestHarness(t)
-	runstoreRoot := filepath.Join(h.WorkspaceDir, ".infrafactory", "runs")
-	t.Setenv("INFRAFACTORY_RUNSTORE_ROOT", runstoreRoot)
-	opts := runtimeOptions{
-		configLoader: func(path string) (config.Config, error) {
-			cfg, err := config.Load(path)
-			if err != nil {
-				return config.Config{}, err
-			}
-			cfg.Agent.RepairIterationsMax = 4
-			return cfg, nil
-		},
-		scenarioLoader: defaultScenarioLoader,
-		deps: RuntimeDependencies{
-			Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
-				return nil, errors.New("seed failed")
-			}),
-			Static:     &fakeStaticHarness{},
-			MockDeploy: &fakeMockDeployHarness{},
-			Destroy:    &fakeDestroyHarness{},
-		},
+	opts := isolatedRunOpts(h, func(cfg config.Config) config.Config {
+		cfg.Agent.RepairIterationsMax = 4
+		return cfg
+	})
+	opts.deps = RuntimeDependencies{
+		Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
+			return nil, errors.New("seed failed")
+		}),
+		Static:     &fakeStaticHarness{},
+		MockDeploy: &fakeMockDeployHarness{},
+		Destroy:    &fakeDestroyHarness{},
 	}
 
 	cmd := newRunCommandForTest(opts)
@@ -592,7 +531,7 @@ func TestRunCommandStopsOnStuckDetection(t *testing.T) {
 		t.Fatalf("expected singular terminal reason for stuck stop, got:\n%s", stdout.String())
 	}
 
-	store := runstore.NewFilesystemStore(runstoreRoot)
+	store := runstore.NewFilesystemStore(h.RunstoreRoot())
 	runs, err := store.ListRuns("example-scenario")
 	if err != nil {
 		t.Fatalf("list runs: %v", err)
@@ -604,34 +543,25 @@ func TestRunCommandStopsOnStuckDetection(t *testing.T) {
 
 func TestRunCommandPassesPreviousIterationFailuresAsGenerateFeedback(t *testing.T) {
 	h := newCommandTestHarness(t)
-	runstoreRoot := filepath.Join(h.WorkspaceDir, ".infrafactory", "runs")
-	t.Setenv("INFRAFACTORY_RUNSTORE_ROOT", runstoreRoot)
 
 	requests := make([]generator.Request, 0, 2)
-	opts := runtimeOptions{
-		configLoader: func(path string) (config.Config, error) {
-			cfg, err := config.Load(path)
-			if err != nil {
-				return config.Config{}, err
-			}
-			cfg.Agent.RepairIterationsMax = 3
-			return cfg, nil
-		},
-		scenarioLoader: defaultScenarioLoader,
-		deps: RuntimeDependencies{
-			Generator: generator.SeedGeneratorFunc(func(_ context.Context, req generator.Request) (*generator.GeneratedCode, error) {
-				requests = append(requests, req)
-				return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte("terraform {}\n")}}, nil
-			}),
-			Static: &fakeStaticHarness{
-				err: &harness.StageError{
-					StageResult: harness.StageResult{Stage: "validate", Cmd: []string{"tofu", "validate"}},
-					Err:         errors.New("validate failed"),
-				},
+	opts := isolatedRunOpts(h, func(cfg config.Config) config.Config {
+		cfg.Agent.RepairIterationsMax = 3
+		return cfg
+	})
+	opts.deps = RuntimeDependencies{
+		Generator: generator.SeedGeneratorFunc(func(_ context.Context, req generator.Request) (*generator.GeneratedCode, error) {
+			requests = append(requests, req)
+			return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte("terraform {}\n")}}, nil
+		}),
+		Static: &fakeStaticHarness{
+			err: &harness.StageError{
+				StageResult: harness.StageResult{Stage: "validate", Cmd: []string{"tofu", "validate"}},
+				Err:         errors.New("validate failed"),
 			},
-			MockDeploy: &fakeMockDeployHarness{},
-			Destroy:    &fakeDestroyHarness{},
 		},
+		MockDeploy: &fakeMockDeployHarness{},
+		Destroy:    &fakeDestroyHarness{},
 	}
 
 	cmd := newRunCommandForTest(opts)
@@ -670,12 +600,7 @@ func TestRunCommandPassesPreviousIterationFailuresAsGenerateFeedback(t *testing.
 
 func TestRunCommandDefaultRuntimeUsesConcreteGeneratorDependency(t *testing.T) {
 	h := newCommandTestHarness(t)
-	runstoreRoot := filepath.Join(h.WorkspaceDir, ".infrafactory", "runs")
-	t.Setenv("INFRAFACTORY_RUNSTORE_ROOT", runstoreRoot)
-	opts := runtimeOptions{
-		configLoader:   config.Load,
-		scenarioLoader: defaultScenarioLoader,
-	}
+	opts := isolatedRunOpts(h, nil)
 
 	cmd := newRunCommandForTest(opts)
 	stdout := &bytes.Buffer{}
@@ -700,27 +625,18 @@ func TestRunCommandDefaultRuntimeUsesConcreteGeneratorDependency(t *testing.T) {
 
 func TestRunCommandStopsEarlyOnTransportDominatedFailures(t *testing.T) {
 	h := newCommandTestHarness(t)
-	runstoreRoot := filepath.Join(h.WorkspaceDir, ".infrafactory", "runs")
-	t.Setenv("INFRAFACTORY_RUNSTORE_ROOT", runstoreRoot)
 
-	opts := runtimeOptions{
-		configLoader: func(path string) (config.Config, error) {
-			cfg, err := config.Load(path)
-			if err != nil {
-				return config.Config{}, err
-			}
-			cfg.Agent.RepairIterationsMax = 5
-			return cfg, nil
-		},
-		scenarioLoader: defaultScenarioLoader,
-		deps: RuntimeDependencies{
-			Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
-				return nil, generator.NewGenerateError(generator.ErrTransportFailed, "generate_hcl", errors.New("transport timeout"))
-			}),
-			Static:     &fakeStaticHarness{},
-			MockDeploy: &fakeMockDeployHarness{},
-			Destroy:    &fakeDestroyHarness{},
-		},
+	opts := isolatedRunOpts(h, func(cfg config.Config) config.Config {
+		cfg.Agent.RepairIterationsMax = 5
+		return cfg
+	})
+	opts.deps = RuntimeDependencies{
+		Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
+			return nil, generator.NewGenerateError(generator.ErrTransportFailed, "generate_hcl", errors.New("transport timeout"))
+		}),
+		Static:     &fakeStaticHarness{},
+		MockDeploy: &fakeMockDeployHarness{},
+		Destroy:    &fakeDestroyHarness{},
 	}
 
 	cmd := newRunCommandForTest(opts)
@@ -740,7 +656,7 @@ func TestRunCommandStopsEarlyOnTransportDominatedFailures(t *testing.T) {
 		t.Fatalf("expected early stop before additional retries, got:\n%s", stdout.String())
 	}
 
-	store := runstore.NewFilesystemStore(runstoreRoot)
+	store := runstore.NewFilesystemStore(h.RunstoreRoot())
 	runs, err := store.ListRuns("example-scenario")
 	if err != nil {
 		t.Fatalf("list runs: %v", err)
@@ -748,7 +664,7 @@ func TestRunCommandStopsEarlyOnTransportDominatedFailures(t *testing.T) {
 	if len(runs) != 1 {
 		t.Fatalf("expected one run, got %+v", runs)
 	}
-	iterationPath := filepath.Join(runstoreRoot, "example-scenario", runs[0].RunID, "iterations", "2", "iteration.json")
+	iterationPath := filepath.Join(h.RunstoreRoot(), "example-scenario", runs[0].RunID, "iterations", "2", "iteration.json")
 	iterationPayload, err := os.ReadFile(iterationPath)
 	if err != nil {
 		t.Fatalf("read iteration artifact: %v", err)
@@ -767,8 +683,6 @@ func TestRunCommandStopsEarlyOnTransportDominatedFailures(t *testing.T) {
 func TestRunCommandUsesSandboxLayerWhenEnabled(t *testing.T) {
 	h := newCommandTestHarness(t)
 	scenarioPath := writeUnsupportedCriteriaScenario(t, h.WorkspaceDir)
-	runstoreRoot := filepath.Join(h.WorkspaceDir, ".infrafactory", "runs")
-	t.Setenv("INFRAFACTORY_RUNSTORE_ROOT", runstoreRoot)
 	t.Setenv("SCW_ACCESS_KEY", "real-access")
 	t.Setenv("SCW_SECRET_KEY", "real-secret")
 	sandboxDeploy := &fakeSandboxDeployHarness{
@@ -785,40 +699,33 @@ func TestRunCommandUsesSandboxLayerWhenEnabled(t *testing.T) {
 	realProbe := &fakeRealProbeHarness{
 		result: &harness.RealProbeResult{},
 	}
-	opts := runtimeOptions{
-		configLoader: func(path string) (config.Config, error) {
-			cfg, err := config.Load(path)
-			if err != nil {
-				return config.Config{}, err
-			}
-			cfg.Validation.Layers.SandboxDeploy.Enabled = true
-			return cfg, nil
-		},
-		scenarioLoader: defaultScenarioLoader,
-		deps: RuntimeDependencies{
-			Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
-				return &generator.GeneratedCode{Files: map[string][]byte{
-					"main.tf":    []byte("terraform {}\n"),
-					"project.tf": []byte("resource \"scaleway_account_project\" \"sandbox\" { name = \"test\" }\n"),
-				}}, nil
-			}),
-			Static: &fakeStaticHarness{result: &harness.StaticResult{
-				Stages:   []harness.StageResult{{Stage: "init"}, {Stage: "validate"}, {Stage: "plan"}, {Stage: "show"}},
-				PlanJSON: []byte(`{"planned_values":{"root_module":{}}}`),
-			}},
-			MockDeploy: &fakeMockDeployHarness{result: &harness.MockDeployResult{
-				Apply:         harness.StageResult{Stage: "apply"},
-				StateSnapshot: []byte(`{}`),
-			}},
-			Destroy: &fakeDestroyHarness{result: &harness.DestroyResult{
-				Destroy:       harness.StageResult{Stage: "destroy"},
-				StateSnapshot: []byte(`{"instance":{"servers":[]}}`),
-				OrphanCount:   0,
-			}},
-			SandboxDeploy:  sandboxDeploy,
-			SandboxDestroy: sandboxDestroy,
-			RealProbe:      realProbe,
-		},
+	opts := isolatedRunOpts(h, func(cfg config.Config) config.Config {
+		cfg.Validation.Layers.SandboxDeploy.Enabled = true
+		return cfg
+	})
+	opts.deps = RuntimeDependencies{
+		Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
+			return &generator.GeneratedCode{Files: map[string][]byte{
+				"main.tf":    []byte("terraform {}\n"),
+				"project.tf": []byte("resource \"scaleway_account_project\" \"sandbox\" { name = \"test\" }\n"),
+			}}, nil
+		}),
+		Static: &fakeStaticHarness{result: &harness.StaticResult{
+			Stages:   []harness.StageResult{{Stage: "init"}, {Stage: "validate"}, {Stage: "plan"}, {Stage: "show"}},
+			PlanJSON: []byte(`{"planned_values":{"root_module":{}}}`),
+		}},
+		MockDeploy: &fakeMockDeployHarness{result: &harness.MockDeployResult{
+			Apply:         harness.StageResult{Stage: "apply"},
+			StateSnapshot: []byte(`{}`),
+		}},
+		Destroy: &fakeDestroyHarness{result: &harness.DestroyResult{
+			Destroy:       harness.StageResult{Stage: "destroy"},
+			StateSnapshot: []byte(`{"instance":{"servers":[]}}`),
+			OrphanCount:   0,
+		}},
+		SandboxDeploy:  sandboxDeploy,
+		SandboxDestroy: sandboxDestroy,
+		RealProbe:      realProbe,
 	}
 
 	cmd := newRunCommandForTest(opts)
@@ -843,25 +750,16 @@ func TestRunCommandUsesSandboxLayerWhenEnabled(t *testing.T) {
 
 func TestRunCommandHonorsDisabledStaticMockAndDestructionLayers(t *testing.T) {
 	h := newCommandTestHarness(t)
-	runstoreRoot := filepath.Join(h.WorkspaceDir, ".infrafactory", "runs")
-	t.Setenv("INFRAFACTORY_RUNSTORE_ROOT", runstoreRoot)
-	opts := runtimeOptions{
-		configLoader: func(path string) (config.Config, error) {
-			cfg, err := config.Load(path)
-			if err != nil {
-				return config.Config{}, err
-			}
-			cfg.Validation.Layers.Static.Enabled = false
-			cfg.Validation.Layers.MockDeploy.Enabled = false
-			cfg.Validation.Layers.Destruction.Enabled = false
-			return cfg, nil
-		},
-		scenarioLoader: defaultScenarioLoader,
-		deps: RuntimeDependencies{
-			Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
-				return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte("terraform {}\n")}}, nil
-			}),
-		},
+	opts := isolatedRunOpts(h, func(cfg config.Config) config.Config {
+		cfg.Validation.Layers.Static.Enabled = false
+		cfg.Validation.Layers.MockDeploy.Enabled = false
+		cfg.Validation.Layers.Destruction.Enabled = false
+		return cfg
+	})
+	opts.deps = RuntimeDependencies{
+		Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
+			return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte("terraform {}\n")}}, nil
+		}),
 	}
 
 	cmd := newRunCommandForTest(opts)
@@ -887,44 +785,35 @@ func TestRunCommandHonorsDisabledStaticMockAndDestructionLayers(t *testing.T) {
 
 func TestRunCommandPropagatesCriteriaFailuresForConvergence(t *testing.T) {
 	h := newCommandTestHarness(t)
-	runstoreRoot := filepath.Join(h.WorkspaceDir, ".infrafactory", "runs")
-	t.Setenv("INFRAFACTORY_RUNSTORE_ROOT", runstoreRoot)
 	scenarioPath := writeCriteriaScenario(t, h.WorkspaceDir, "success", "pass")
 
-	opts := runtimeOptions{
-		configLoader: func(path string) (config.Config, error) {
-			cfg, err := config.Load(path)
-			if err != nil {
-				return config.Config{}, err
-			}
-			cfg.Agent.RepairIterationsMax = 3
-			cfg.Validation.Layers.Destruction.Enabled = false
-			cfg.ConstraintPolicies = map[string]string{
-				"encryption_at_rest": filepath.Join("..", "harness", "testdata", "state-policy", "policy.rego"),
-			}
-			return cfg, nil
-		},
-		scenarioLoader: defaultScenarioLoader,
-		deps: RuntimeDependencies{
-			Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
-				return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte("terraform {}\n")}}, nil
-			}),
-			Static: &fakeStaticHarness{
-				result: &harness.StaticResult{
-					Stages:   []harness.StageResult{{Stage: "init"}, {Stage: "validate"}, {Stage: "plan"}, {Stage: "show"}},
-					PlanJSON: []byte(`{"planned_values":{"root_module":{}}}`),
-				},
+	opts := isolatedRunOpts(h, func(cfg config.Config) config.Config {
+		cfg.Agent.RepairIterationsMax = 3
+		cfg.Validation.Layers.Destruction.Enabled = false
+		cfg.ConstraintPolicies = map[string]string{
+			"encryption_at_rest": filepath.Join("..", "harness", "testdata", "state-policy", "policy.rego"),
+		}
+		return cfg
+	})
+	opts.deps = RuntimeDependencies{
+		Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
+			return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte("terraform {}\n")}}, nil
+		}),
+		Static: &fakeStaticHarness{
+			result: &harness.StaticResult{
+				Stages:   []harness.StageResult{{Stage: "init"}, {Stage: "validate"}, {Stage: "plan"}, {Stage: "show"}},
+				PlanJSON: []byte(`{"planned_values":{"root_module":{}}}`),
 			},
-			MockDeploy: &fakeMockDeployHarness{
-				result: &harness.MockDeployResult{
-					Apply: harness.StageResult{Stage: "apply"},
-					StateSnapshot: []byte(`{
+		},
+		MockDeploy: &fakeMockDeployHarness{
+			result: &harness.MockDeployResult{
+				Apply: harness.StageResult{Stage: "apply"},
+				StateSnapshot: []byte(`{
   "rdb": {"public_endpoint": true}
 }`),
-				},
 			},
-			Destroy: &fakeDestroyHarness{},
 		},
+		Destroy: &fakeDestroyHarness{},
 	}
 
 	cmd := newRunCommandForTest(opts)
@@ -947,32 +836,23 @@ func TestRunCommandPropagatesCriteriaFailuresForConvergence(t *testing.T) {
 
 func TestRunCommandExecutesCriteriaOnlyHoldoutsAfterConvergence(t *testing.T) {
 	h := newCommandTestHarness(t)
-	runstoreRoot := filepath.Join(h.WorkspaceDir, ".infrafactory", "runs")
-	t.Setenv("INFRAFACTORY_RUNSTORE_ROOT", runstoreRoot)
 	writeCriteriaOnlyHoldout(t, filepath.Join(h.WorkspaceDir, "scenarios", "holdout", "holdout-pass.yaml"), h.ScenarioPath, `  - type: destruction
     expect: no_orphans
 `, "holdout-pass")
 
-	opts := runtimeOptions{
-		configLoader: func(path string) (config.Config, error) {
-			cfg, err := config.Load(path)
-			if err != nil {
-				return config.Config{}, err
-			}
-			cfg.Paths.Scenarios = filepath.Join(h.WorkspaceDir, "scenarios")
-			cfg.Validation.Layers.Static.Enabled = false
-			cfg.Validation.Layers.MockDeploy.Enabled = false
-			cfg.Validation.Layers.Destruction.Enabled = false
-			return cfg, nil
-		},
-		scenarioLoader: defaultScenarioLoader,
-		deps: RuntimeDependencies{
-			Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
-				return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte("terraform {}\n")}}, nil
-			}),
-			MockDeploy: &fakeMockDeployHarness{},
-			Destroy:    &fakeDestroyHarness{},
-		},
+	opts := isolatedRunOpts(h, func(cfg config.Config) config.Config {
+		cfg.Paths.Scenarios = filepath.Join(h.WorkspaceDir, "scenarios")
+		cfg.Validation.Layers.Static.Enabled = false
+		cfg.Validation.Layers.MockDeploy.Enabled = false
+		cfg.Validation.Layers.Destruction.Enabled = false
+		return cfg
+	})
+	opts.deps = RuntimeDependencies{
+		Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
+			return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte("terraform {}\n")}}, nil
+		}),
+		MockDeploy: &fakeMockDeployHarness{},
+		Destroy:    &fakeDestroyHarness{},
 	}
 
 	cmd := newRunCommandForTest(opts)
@@ -996,8 +876,6 @@ func TestRunCommandExecutesCriteriaOnlyHoldoutsAfterConvergence(t *testing.T) {
 
 func TestRunCommandCriteriaOnlyHoldoutsReuseTrainingOutputDir(t *testing.T) {
 	h := newCommandTestHarness(t)
-	runstoreRoot := filepath.Join(h.WorkspaceDir, ".infrafactory", "runs")
-	t.Setenv("INFRAFACTORY_RUNSTORE_ROOT", runstoreRoot)
 	writeCriteriaOnlyHoldout(t, filepath.Join(h.WorkspaceDir, "scenarios", "holdout", "holdout-pass.yaml"), h.ScenarioPath, `  - type: destruction
     expect: no_orphans
 `, "holdout-pass")
@@ -1008,26 +886,19 @@ func TestRunCommandCriteriaOnlyHoldoutsReuseTrainingOutputDir(t *testing.T) {
 			StateSnapshot: []byte(`{}`),
 		},
 	}
-	opts := runtimeOptions{
-		configLoader: func(path string) (config.Config, error) {
-			cfg, err := config.Load(path)
-			if err != nil {
-				return config.Config{}, err
-			}
-			cfg.Paths.Scenarios = filepath.Join(h.WorkspaceDir, "scenarios")
-			cfg.Validation.Layers.Static.Enabled = false
-			cfg.Validation.Layers.MockDeploy.Enabled = true
-			cfg.Validation.Layers.Destruction.Enabled = false
-			return cfg, nil
-		},
-		scenarioLoader: defaultScenarioLoader,
-		deps: RuntimeDependencies{
-			Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
-				return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte("terraform {}\n")}}, nil
-			}),
-			MockDeploy: mockDeploy,
-			Destroy:    &fakeDestroyHarness{},
-		},
+	opts := isolatedRunOpts(h, func(cfg config.Config) config.Config {
+		cfg.Paths.Scenarios = filepath.Join(h.WorkspaceDir, "scenarios")
+		cfg.Validation.Layers.Static.Enabled = false
+		cfg.Validation.Layers.MockDeploy.Enabled = true
+		cfg.Validation.Layers.Destruction.Enabled = false
+		return cfg
+	})
+	opts.deps = RuntimeDependencies{
+		Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
+			return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte("terraform {}\n")}}, nil
+		}),
+		MockDeploy: mockDeploy,
+		Destroy:    &fakeDestroyHarness{},
 	}
 
 	cmd := newRunCommandForTest(opts)
@@ -1041,7 +912,7 @@ func TestRunCommandCriteriaOnlyHoldoutsReuseTrainingOutputDir(t *testing.T) {
 	if len(mockDeploy.dirs) != 2 {
 		t.Fatalf("expected two mock deploy calls (training + holdout), got %d", len(mockDeploy.dirs))
 	}
-	expected := filepath.Join("output", "example-scenario")
+	expected := filepath.Join(h.OutputDir(), "example-scenario")
 	if mockDeploy.dirs[0] != expected || mockDeploy.dirs[1] != expected {
 		t.Fatalf("expected both mock deploy calls to use %q, got %#v", expected, mockDeploy.dirs)
 	}
@@ -1049,36 +920,27 @@ func TestRunCommandCriteriaOnlyHoldoutsReuseTrainingOutputDir(t *testing.T) {
 
 func TestRunCommandAutoPassesDeferredDNSHoldoutWithoutFeedbackInjection(t *testing.T) {
 	h := newCommandTestHarness(t)
-	runstoreRoot := filepath.Join(h.WorkspaceDir, ".infrafactory", "runs")
-	t.Setenv("INFRAFACTORY_RUNSTORE_ROOT", runstoreRoot)
 	writeCriteriaOnlyHoldout(t, filepath.Join(h.WorkspaceDir, "scenarios", "holdout", "holdout-block.yaml"), h.ScenarioPath, `  - type: dns_resolution
     domain: "{{scenario_name}}.example.com"
     expect: resolves
 `, "holdout-block")
 
 	genCalls := 0
-	opts := runtimeOptions{
-		configLoader: func(path string) (config.Config, error) {
-			cfg, err := config.Load(path)
-			if err != nil {
-				return config.Config{}, err
-			}
-			cfg.Paths.Scenarios = filepath.Join(h.WorkspaceDir, "scenarios")
-			cfg.Validation.Layers.Static.Enabled = false
-			cfg.Validation.Layers.MockDeploy.Enabled = false
-			cfg.Validation.Layers.Destruction.Enabled = false
-			cfg.Agent.RepairIterationsMax = 3
-			return cfg, nil
-		},
-		scenarioLoader: defaultScenarioLoader,
-		deps: RuntimeDependencies{
-			Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
-				genCalls++
-				return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte("terraform {}\n")}}, nil
-			}),
-			MockDeploy: &fakeMockDeployHarness{},
-			Destroy:    &fakeDestroyHarness{},
-		},
+	opts := isolatedRunOpts(h, func(cfg config.Config) config.Config {
+		cfg.Paths.Scenarios = filepath.Join(h.WorkspaceDir, "scenarios")
+		cfg.Validation.Layers.Static.Enabled = false
+		cfg.Validation.Layers.MockDeploy.Enabled = false
+		cfg.Validation.Layers.Destruction.Enabled = false
+		cfg.Agent.RepairIterationsMax = 3
+		return cfg
+	})
+	opts.deps = RuntimeDependencies{
+		Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
+			genCalls++
+			return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte("terraform {}\n")}}, nil
+		}),
+		MockDeploy: &fakeMockDeployHarness{},
+		Destroy:    &fakeDestroyHarness{},
 	}
 
 	cmd := newRunCommandForTest(opts)
@@ -1257,8 +1119,6 @@ func TestDetectRunModeIncrementalWhenAllSignalsPresent(t *testing.T) {
 
 func TestRunCommandNoDestroySkipsDestroyAndHoldouts(t *testing.T) {
 	h := newCommandTestHarness(t)
-	runstoreRoot := filepath.Join(h.WorkspaceDir, ".infrafactory", "runs")
-	t.Setenv("INFRAFACTORY_RUNSTORE_ROOT", runstoreRoot)
 	writeCriteriaOnlyHoldout(t, filepath.Join(h.WorkspaceDir, "scenarios", "holdout", "holdout-skip.yaml"), h.ScenarioPath, `  - type: destruction
     expect: no_orphans
 `, "holdout-skip")
@@ -1277,26 +1137,19 @@ func TestRunCommandNoDestroySkipsDestroyAndHoldouts(t *testing.T) {
 		},
 	}
 
-	opts := runtimeOptions{
-		configLoader: func(path string) (config.Config, error) {
-			cfg, err := config.Load(path)
-			if err != nil {
-				return config.Config{}, err
-			}
-			cfg.Paths.Scenarios = filepath.Join(h.WorkspaceDir, "scenarios")
-			cfg.Validation.Layers.Static.Enabled = false
-			cfg.Agent.RepairIterationsMax = 1
-			return cfg, nil
-		},
-		scenarioLoader: defaultScenarioLoader,
-		deps: RuntimeDependencies{
-			Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
-				return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte("terraform {}\n")}}, nil
-			}),
-			MockDeploy: mockDeploy,
-			Destroy:    destroy,
-			MockState:  &fakeRunMockStateClient{statePayload: []byte(`{"instance":{"servers":[]}}`)},
-		},
+	opts := isolatedRunOpts(h, func(cfg config.Config) config.Config {
+		cfg.Paths.Scenarios = filepath.Join(h.WorkspaceDir, "scenarios")
+		cfg.Validation.Layers.Static.Enabled = false
+		cfg.Agent.RepairIterationsMax = 1
+		return cfg
+	})
+	opts.deps = RuntimeDependencies{
+		Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
+			return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte("terraform {}\n")}}, nil
+		}),
+		MockDeploy: mockDeploy,
+		Destroy:    destroy,
+		MockState:  &fakeRunMockStateClient{statePayload: []byte(`{"instance":{"servers":[]}}`)},
 	}
 
 	cmd := newRunCommandForTest(opts)
@@ -1319,8 +1172,6 @@ func TestRunCommandNoDestroySkipsDestroyAndHoldouts(t *testing.T) {
 func TestRunCommandAutoDestroysRealResourcesOnFailure(t *testing.T) {
 	h := newCommandTestHarness(t)
 	outputRoot := filepath.Join(h.WorkspaceDir, "output")
-	runstoreRoot := filepath.Join(h.WorkspaceDir, ".infrafactory", "runs")
-	t.Setenv("INFRAFACTORY_RUNSTORE_ROOT", runstoreRoot)
 	t.Setenv("SCW_ACCESS_KEY", "real-access")
 	t.Setenv("SCW_SECRET_KEY", "real-secret")
 
@@ -1333,33 +1184,26 @@ func TestRunCommandAutoDestroysRealResourcesOnFailure(t *testing.T) {
 			Destroy: harness.StageResult{Stage: "destroy"},
 		},
 	}
-	opts := runtimeOptions{
-		configLoader: func(path string) (config.Config, error) {
-			cfg, err := config.Load(path)
-			if err != nil {
-				return config.Config{}, err
-			}
-			cfg.Paths.Output = outputRoot
-			cfg.Validation.Layers.SandboxDeploy.Enabled = true
-			cfg.Agent.RepairIterationsMax = 1
-			return cfg, nil
-		},
-		scenarioLoader: defaultScenarioLoader,
-		deps: RuntimeDependencies{
-			Generator: generator.SeedGeneratorFunc(func(_ context.Context, _ generator.Request) (*generator.GeneratedCode, error) {
-				return &generator.GeneratedCode{Files: map[string][]byte{
-					"main.tf":                 []byte("terraform {}\n"),
-					"project.tf":              []byte("resource \"scaleway_account_project\" \"sandbox\" { name = \"test\" }\n"),
-					harness.LiveStateFilename: []byte(`{"version":4}`),
-				}}, nil
-			}),
-			Static:         &fakeStaticHarness{err: &harness.StageError{StageResult: harness.StageResult{Stage: "validate", Cmd: []string{"tofu", "validate"}}, Err: errors.New("validate failed")}},
-			MockDeploy:     &fakeMockDeployHarness{},
-			Destroy:        &fakeDestroyHarness{},
-			SandboxDeploy:  &fakeSandboxDeployHarness{},
-			SandboxDestroy: sandboxDestroy,
-			RealProbe:      &fakeRealProbeHarness{result: &harness.RealProbeResult{}},
-		},
+	opts := isolatedRunOpts(h, func(cfg config.Config) config.Config {
+		cfg.Paths.Output = outputRoot
+		cfg.Validation.Layers.SandboxDeploy.Enabled = true
+		cfg.Agent.RepairIterationsMax = 1
+		return cfg
+	})
+	opts.deps = RuntimeDependencies{
+		Generator: generator.SeedGeneratorFunc(func(_ context.Context, _ generator.Request) (*generator.GeneratedCode, error) {
+			return &generator.GeneratedCode{Files: map[string][]byte{
+				"main.tf":                 []byte("terraform {}\n"),
+				"project.tf":              []byte("resource \"scaleway_account_project\" \"sandbox\" { name = \"test\" }\n"),
+				harness.LiveStateFilename: []byte(`{"version":4}`),
+			}}, nil
+		}),
+		Static:         &fakeStaticHarness{err: &harness.StageError{StageResult: harness.StageResult{Stage: "validate", Cmd: []string{"tofu", "validate"}}, Err: errors.New("validate failed")}},
+		MockDeploy:     &fakeMockDeployHarness{},
+		Destroy:        &fakeDestroyHarness{},
+		SandboxDeploy:  &fakeSandboxDeployHarness{},
+		SandboxDestroy: sandboxDestroy,
+		RealProbe:      &fakeRealProbeHarness{result: &harness.RealProbeResult{}},
 	}
 
 	cmd := newRunCommandForTest(opts)
@@ -1379,8 +1223,6 @@ func TestRunCommandAutoDestroysRealResourcesOnFailure(t *testing.T) {
 func TestRunCommandNoDestroyPreservesRealResourcesOnFailure(t *testing.T) {
 	h := newCommandTestHarness(t)
 	outputRoot := filepath.Join(h.WorkspaceDir, "output")
-	runstoreRoot := filepath.Join(h.WorkspaceDir, ".infrafactory", "runs")
-	t.Setenv("INFRAFACTORY_RUNSTORE_ROOT", runstoreRoot)
 	t.Setenv("SCW_ACCESS_KEY", "real-access")
 	t.Setenv("SCW_SECRET_KEY", "real-secret")
 
@@ -1389,33 +1231,26 @@ func TestRunCommandNoDestroyPreservesRealResourcesOnFailure(t *testing.T) {
 			Destroy: harness.StageResult{Stage: "destroy"},
 		},
 	}
-	opts := runtimeOptions{
-		configLoader: func(path string) (config.Config, error) {
-			cfg, err := config.Load(path)
-			if err != nil {
-				return config.Config{}, err
-			}
-			cfg.Paths.Output = outputRoot
-			cfg.Validation.Layers.SandboxDeploy.Enabled = true
-			cfg.Agent.RepairIterationsMax = 1
-			return cfg, nil
-		},
-		scenarioLoader: defaultScenarioLoader,
-		deps: RuntimeDependencies{
-			Generator: generator.SeedGeneratorFunc(func(_ context.Context, _ generator.Request) (*generator.GeneratedCode, error) {
-				return &generator.GeneratedCode{Files: map[string][]byte{
-					"main.tf":                 []byte("terraform {}\n"),
-					"project.tf":              []byte("resource \"scaleway_account_project\" \"sandbox\" { name = \"test\" }\n"),
-					harness.LiveStateFilename: []byte(`{"version":4}`),
-				}}, nil
-			}),
-			Static:         &fakeStaticHarness{err: &harness.StageError{StageResult: harness.StageResult{Stage: "validate", Cmd: []string{"tofu", "validate"}}, Err: errors.New("validate failed")}},
-			MockDeploy:     &fakeMockDeployHarness{},
-			Destroy:        &fakeDestroyHarness{},
-			SandboxDeploy:  &fakeSandboxDeployHarness{},
-			SandboxDestroy: sandboxDestroy,
-			RealProbe:      &fakeRealProbeHarness{result: &harness.RealProbeResult{}},
-		},
+	opts := isolatedRunOpts(h, func(cfg config.Config) config.Config {
+		cfg.Paths.Output = outputRoot
+		cfg.Validation.Layers.SandboxDeploy.Enabled = true
+		cfg.Agent.RepairIterationsMax = 1
+		return cfg
+	})
+	opts.deps = RuntimeDependencies{
+		Generator: generator.SeedGeneratorFunc(func(_ context.Context, _ generator.Request) (*generator.GeneratedCode, error) {
+			return &generator.GeneratedCode{Files: map[string][]byte{
+				"main.tf":                 []byte("terraform {}\n"),
+				"project.tf":              []byte("resource \"scaleway_account_project\" \"sandbox\" { name = \"test\" }\n"),
+				harness.LiveStateFilename: []byte(`{"version":4}`),
+			}}, nil
+		}),
+		Static:         &fakeStaticHarness{err: &harness.StageError{StageResult: harness.StageResult{Stage: "validate", Cmd: []string{"tofu", "validate"}}, Err: errors.New("validate failed")}},
+		MockDeploy:     &fakeMockDeployHarness{},
+		Destroy:        &fakeDestroyHarness{},
+		SandboxDeploy:  &fakeSandboxDeployHarness{},
+		SandboxDestroy: sandboxDestroy,
+		RealProbe:      &fakeRealProbeHarness{result: &harness.RealProbeResult{}},
 	}
 
 	cmd := newRunCommandForTest(opts)
@@ -1436,8 +1271,6 @@ func TestRunCommandIncrementalModeSnapshotsBaselineAndPersistsMetadata(t *testin
 	h := newCommandTestHarness(t)
 	outputRoot := filepath.Join(h.WorkspaceDir, "output")
 	outputDir := filepath.Join(outputRoot, "example-scenario")
-	runstoreRoot := filepath.Join(h.WorkspaceDir, ".infrafactory", "runs")
-	t.Setenv("INFRAFACTORY_RUNSTORE_ROOT", runstoreRoot)
 
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		t.Fatalf("mkdir output dir: %v", err)
@@ -1446,7 +1279,7 @@ func TestRunCommandIncrementalModeSnapshotsBaselineAndPersistsMetadata(t *testin
 		t.Fatalf("write tfstate: %v", err)
 	}
 
-	store := runstore.NewFilesystemStore(runstoreRoot)
+	store := runstore.NewFilesystemStore(h.RunstoreRoot())
 	if err := store.WriteRunMetadata(runstore.RunMetadata{
 		Scenario:  "example-scenario",
 		RunID:     "run-prev",
@@ -1457,26 +1290,19 @@ func TestRunCommandIncrementalModeSnapshotsBaselineAndPersistsMetadata(t *testin
 	}
 
 	mockState := &fakeRunMockStateClient{statePayload: []byte(`{"instance":{"servers":[{"id":"srv-1"}]}}`)}
-	opts := runtimeOptions{
-		configLoader: func(path string) (config.Config, error) {
-			cfg, err := config.Load(path)
-			if err != nil {
-				return config.Config{}, err
-			}
-			cfg.Paths.Output = outputRoot
-			cfg.Agent.RepairIterationsMax = 1
-			return cfg, nil
-		},
-		scenarioLoader: defaultScenarioLoader,
-		deps: RuntimeDependencies{
-			Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
-				return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte("terraform {}\n")}}, nil
-			}),
-			Static:     &fakeStaticHarness{result: &harness.StaticResult{Stages: []harness.StageResult{{Stage: "init"}, {Stage: "validate"}, {Stage: "plan"}, {Stage: "show"}}, PlanJSON: []byte(`{"planned_values":{"root_module":{}}}`)}},
-			MockDeploy: &fakeMockDeployHarness{result: &harness.MockDeployResult{Apply: harness.StageResult{Stage: "apply"}, StateSnapshot: []byte(`{"mock":true}`)}},
-			Destroy:    &fakeDestroyHarness{result: &harness.DestroyResult{Destroy: harness.StageResult{Stage: "destroy"}, OrphanCount: 0}},
-			MockState:  mockState,
-		},
+	opts := isolatedRunOpts(h, func(cfg config.Config) config.Config {
+		cfg.Paths.Output = outputRoot
+		cfg.Agent.RepairIterationsMax = 1
+		return cfg
+	})
+	opts.deps = RuntimeDependencies{
+		Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
+			return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte("terraform {}\n")}}, nil
+		}),
+		Static:     &fakeStaticHarness{result: &harness.StaticResult{Stages: []harness.StageResult{{Stage: "init"}, {Stage: "validate"}, {Stage: "plan"}, {Stage: "show"}}, PlanJSON: []byte(`{"planned_values":{"root_module":{}}}`)}},
+		MockDeploy: &fakeMockDeployHarness{result: &harness.MockDeployResult{Apply: harness.StageResult{Stage: "apply"}, StateSnapshot: []byte(`{"mock":true}`)}},
+		Destroy:    &fakeDestroyHarness{result: &harness.DestroyResult{Destroy: harness.StageResult{Stage: "destroy"}, OrphanCount: 0}},
+		MockState:  mockState,
 	}
 
 	cmd := newRunCommandForTest(opts)
@@ -1560,8 +1386,6 @@ func newRunCommandForTest(opts runtimeOptions) *cobra.Command {
 
 func TestRunCommandHoldoutsExecuteLayer3WhenEnabled(t *testing.T) {
 	h := newCommandTestHarness(t)
-	runstoreRoot := filepath.Join(h.WorkspaceDir, ".infrafactory", "runs")
-	t.Setenv("INFRAFACTORY_RUNSTORE_ROOT", runstoreRoot)
 	t.Setenv("SCW_ACCESS_KEY", "real-access")
 	t.Setenv("SCW_SECRET_KEY", "real-secret")
 
@@ -1607,41 +1431,34 @@ acceptance_criteria:
 	realProbe := &fakeRealProbeHarness{
 		result: &harness.RealProbeResult{},
 	}
-	opts := runtimeOptions{
-		configLoader: func(path string) (config.Config, error) {
-			cfg, err := config.Load(path)
-			if err != nil {
-				return config.Config{}, err
-			}
-			cfg.Paths.Scenarios = filepath.Join(h.WorkspaceDir, "scenarios")
-			cfg.Validation.Layers.SandboxDeploy.Enabled = true
-			return cfg, nil
-		},
-		scenarioLoader: defaultScenarioLoader,
-		deps: RuntimeDependencies{
-			Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
-				return &generator.GeneratedCode{Files: map[string][]byte{
-					"main.tf":    []byte("terraform {}\n"),
-					"project.tf": []byte("resource \"scaleway_account_project\" \"sandbox\" { name = \"test\" }\n"),
-				}}, nil
-			}),
-			Static: &fakeStaticHarness{result: &harness.StaticResult{
-				Stages:   []harness.StageResult{{Stage: "init"}, {Stage: "validate"}, {Stage: "plan"}, {Stage: "show"}},
-				PlanJSON: []byte(`{"planned_values":{"root_module":{}}}`),
-			}},
-			MockDeploy: &fakeMockDeployHarness{result: &harness.MockDeployResult{
-				Apply:         harness.StageResult{Stage: "apply"},
-				StateSnapshot: []byte(`{}`),
-			}},
-			Destroy: &fakeDestroyHarness{result: &harness.DestroyResult{
-				Destroy:       harness.StageResult{Stage: "destroy"},
-				StateSnapshot: []byte(`{"instance":{"servers":[]}}`),
-				OrphanCount:   0,
-			}},
-			SandboxDeploy:  sandboxDeploy,
-			SandboxDestroy: sandboxDestroy,
-			RealProbe:      realProbe,
-		},
+	opts := isolatedRunOpts(h, func(cfg config.Config) config.Config {
+		cfg.Paths.Scenarios = filepath.Join(h.WorkspaceDir, "scenarios")
+		cfg.Validation.Layers.SandboxDeploy.Enabled = true
+		return cfg
+	})
+	opts.deps = RuntimeDependencies{
+		Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
+			return &generator.GeneratedCode{Files: map[string][]byte{
+				"main.tf":    []byte("terraform {}\n"),
+				"project.tf": []byte("resource \"scaleway_account_project\" \"sandbox\" { name = \"test\" }\n"),
+			}}, nil
+		}),
+		Static: &fakeStaticHarness{result: &harness.StaticResult{
+			Stages:   []harness.StageResult{{Stage: "init"}, {Stage: "validate"}, {Stage: "plan"}, {Stage: "show"}},
+			PlanJSON: []byte(`{"planned_values":{"root_module":{}}}`),
+		}},
+		MockDeploy: &fakeMockDeployHarness{result: &harness.MockDeployResult{
+			Apply:         harness.StageResult{Stage: "apply"},
+			StateSnapshot: []byte(`{}`),
+		}},
+		Destroy: &fakeDestroyHarness{result: &harness.DestroyResult{
+			Destroy:       harness.StageResult{Stage: "destroy"},
+			StateSnapshot: []byte(`{"instance":{"servers":[]}}`),
+			OrphanCount:   0,
+		}},
+		SandboxDeploy:  sandboxDeploy,
+		SandboxDestroy: sandboxDestroy,
+		RealProbe:      realProbe,
 	}
 
 	cmd := newRunCommandForTest(opts)
