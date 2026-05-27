@@ -117,7 +117,16 @@ func TestRunCommandLearnsPitfallFromOscillation(t *testing.T) {
 // oscillation pitfall path stays inert when failures are sustained
 // (linear) — only target_reached/iter-N->N-1 path should write learned
 // pitfalls in that case, and that path is unrelated to oscillation.
-func TestRunCommandSkipsOscillationLearningWhenNoOscillation(t *testing.T) {
+// TestRunCommandLearnsFromStuckRepeatedSignature pins the M90 contract.
+// Previously, when stuck-detection fired at 2 iterations with the SAME
+// failure signature both times, no learning happened: DetectOscillation
+// requires >= 3 iterations + a toggle pattern, so the most common
+// failure mode ("LLM made the same mistake twice in a row") produced
+// zero learned pitfalls. M90 added a second learning path that
+// extracts from the repeated signature directly. AWS scenarios in
+// M88's sweep hit this mode universally — without M90 the
+// pitfalls/aws.yaml file could never grow from its own runs.
+func TestRunCommandLearnsFromStuckRepeatedSignature(t *testing.T) {
 	h := newCommandTestHarness(t)
 
 	pitfallsDir := filepath.Join(h.WorkspaceDir, "pitfalls")
@@ -155,17 +164,20 @@ func TestRunCommandSkipsOscillationLearningWhenNoOscillation(t *testing.T) {
 		t.Fatal("expected run failure")
 	}
 
-	// Stuck detection fires before repair budget when failures repeat.
 	if !strings.Contains(stdout.String(), "run/terminal_reason: pass (stuck)") {
 		t.Fatalf("expected stuck terminal reason for sustained failures, got:\n%s", stdout.String())
 	}
 
-	// No oscillation → oscillation-pitfall logic must not have produced
-	// a pitfalls file.
 	pitfallsPath := filepath.Join(pitfallsDir, "scaleway.yaml")
-	if _, err := os.Stat(pitfallsPath); err == nil {
-		t.Fatalf("expected no pitfalls file when no oscillation occurred")
-	} else if !os.IsNotExist(err) {
-		t.Fatalf("unexpected stat error: %v", err)
+	data, err := os.ReadFile(pitfallsPath)
+	if err != nil {
+		t.Fatalf("M90 contract: expected pitfalls/scaleway.yaml to be written from the repeated-signature learning path, got: %v", err)
+	}
+	contents := string(data)
+	if !strings.Contains(contents, "source: learned") {
+		t.Fatalf("expected source: learned entry in pitfalls file, got:\n%s", contents)
+	}
+	if !strings.Contains(contents, "scaleway_k8s_cluster") {
+		t.Fatalf("expected scaleway_k8s_cluster pitfall extracted from repeated signature, got:\n%s", contents)
 	}
 }

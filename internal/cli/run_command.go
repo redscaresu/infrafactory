@@ -289,8 +289,27 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 	// between two incomplete fixes; their detail strings are exactly the
 	// pitfall material we want future runs to inherit.
 	if terminalReason == "repair_budget_exhausted" || terminalReason == "stuck" {
+		// Two learning paths:
+		// (1) Oscillation: a signature toggling present-N / absent-N+1 /
+		//     present-N+2. Catches "model alternating between two
+		//     incomplete fixes." Requires >= 3 iterations.
+		// (2) Repeated-same-mistake (M90): IsStuck fires after just 2
+		//     iterations with the same signature subset, which gives
+		//     DetectOscillation insufficient data to find a toggle. But
+		//     the repeated signature IS the lesson — the model made the
+		//     exact same mistake twice. Extract from the last iteration's
+		//     failures directly when oscillation path yields nothing.
 		oscillating := feedback.DetectOscillation(iterationHistory)
-		for _, sig := range oscillating {
+		repeatedSigs := []feedback.FailureSignature{}
+		if len(oscillating) == 0 && len(iterationHistory) > 0 {
+			lastFailures := iterationHistory[len(iterationHistory)-1].Failures
+			for _, sig := range feedback.FailureSignatures(lastFailures) {
+				repeatedSigs = append(repeatedSigs, sig)
+			}
+		}
+		learnSources := append([]feedback.FailureSignature(nil), oscillating...)
+		learnSources = append(learnSources, repeatedSigs...)
+		for _, sig := range learnSources {
 			learned := generator.ExtractLearnedPitfall(sig.Detail, sc.Name)
 			if learned == nil {
 				continue
