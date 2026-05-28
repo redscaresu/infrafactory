@@ -3,6 +3,7 @@ package generator
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -94,6 +95,89 @@ func TestExtractLearnedPitfall_AtLeastOneOf(t *testing.T) {
 	}
 	if got.Rule == "" {
 		t.Error("expected non-empty rule")
+	}
+}
+
+// TestExtractLearnedPitfall_M97Templates pins each of the 5 M97
+// prescriptive-rule templates. Each test feeds a real-shape failure
+// detail and asserts the produced rule is PRESCRIPTIVE — contains a
+// verb the LLM can act on ("Set", "Add", "Omit", "Do NOT use") —
+// not just a descriptive echo of the failure.
+func TestExtractLearnedPitfall_M97_MissingSubnetwork(t *testing.T) {
+	cases := []string{
+		`google_compute_instance.api_server has no network_interface.subnetwork — must be attached to an explicit VPC subnetwork`,
+		`google_container_cluster.primary has no network or subnetwork — GKE clusters must reference an explicit VPC`,
+	}
+	for _, detail := range cases {
+		got := ExtractLearnedPitfall(detail, "gcp-full-stack")
+		if got == nil {
+			t.Errorf("nil for %q", detail[:50])
+			continue
+		}
+		if !strings.Contains(got.Rule, "google_compute_subnetwork") {
+			t.Errorf("rule not prescriptive enough — missing 'google_compute_subnetwork' for %q", detail[:50])
+		}
+	}
+}
+
+func TestExtractLearnedPitfall_M97_MissingEncryption_Disabled(t *testing.T) {
+	// M97 follow-up: this template is intentionally a no-op until M98
+	// lands cross-policy awareness. Previous version told the LLM to
+	// "omit CMEK" but policies/gcp/encryption.rego REQUIRES CMEK —
+	// giving the LLM the opposite of what the gate enforces poisoned
+	// the learning loop. Pin the disabled state so we don't silently
+	// re-enable wrong advice.
+	detail := `google_storage_bucket.app_assets has no encryption.default_kms_key_name — customer-managed encryption not configured`
+	got := matchMissingEncryption(detail, "gcp-storage")
+	if got != nil {
+		t.Fatalf("CMEK template should be disabled (M97 follow-up); got: %+v", got)
+	}
+	// The descriptive fallback still produces SOMETHING for this detail
+	// (so the LLM still sees the failure in context); just not the
+	// wrong prescriptive form.
+	fallback := ExtractLearnedPitfall(detail, "gcp-storage")
+	if fallback == nil {
+		t.Fatal("expected descriptive fallback for encryption detail when template disabled")
+	}
+}
+
+func TestExtractLearnedPitfall_M97_NotImplemented(t *testing.T) {
+	detail := `exit status 1 | stderr: Error creating instance template: googleapi: Error 501: Not implemented for google_compute_instance_template`
+	got := ExtractLearnedPitfall(detail, "gcp-iam")
+	if got == nil {
+		t.Fatal("nil for 501 shape")
+	}
+	if !strings.Contains(got.Rule, "Do NOT use") {
+		t.Errorf("rule not prescriptive: %q", got.Rule)
+	}
+}
+
+func TestExtractLearnedPitfall_M97_OAuthEscape(t *testing.T) {
+	detail := `Error creating google_service_account: googleapi: Error 401: Request had invalid authentication credentials. Expected OAuth 2 access token`
+	got := ExtractLearnedPitfall(detail, "gcp-iam")
+	if got == nil {
+		t.Fatal("nil for OAuth-escape shape")
+	}
+	if !strings.Contains(got.Rule, "custom_endpoint") {
+		t.Errorf("rule not prescriptive: %q", got.Rule)
+	}
+}
+
+func TestExtractLearnedPitfall_M97_DestroyBlockers(t *testing.T) {
+	// deletion_protection
+	got := ExtractLearnedPitfall(`Error destroying aws_db_instance.main: deletion_protection is enabled, set to true`, "aws-rds")
+	if got == nil || !strings.Contains(got.Rule, "deletion_protection = false") {
+		t.Errorf("deletion_protection template failed: %+v", got)
+	}
+	// BucketNotEmpty
+	got = ExtractLearnedPitfall(`Error destroying aws_s3_bucket.assets: BucketNotEmpty: The bucket you tried to delete is not empty`, "aws-s3")
+	if got == nil || !strings.Contains(got.Rule, "force_destroy = true") {
+		t.Errorf("force_destroy template failed: %+v", got)
+	}
+	// skip_final_snapshot
+	got = ExtractLearnedPitfall(`Error destroying aws_db_instance.main: final snapshot must be specified or skip_final_snapshot = true`, "aws-rds")
+	if got == nil || !strings.Contains(got.Rule, "skip_final_snapshot") {
+		t.Errorf("skip_final_snapshot template failed: %+v", got)
 	}
 }
 

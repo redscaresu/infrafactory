@@ -123,6 +123,40 @@ func ExtractLearnedPitfall(failureDetail, scenarioName string) *LearnedPitfall {
 		}
 	}
 
+	// M97 prescriptive templates: pattern-match common error shapes
+	// and emit ACTIONABLE rules ("do Y") instead of descriptive ones
+	// ("X failed because..."). M95 showed that descriptive rules
+	// accumulate but don't help the LLM converge — it sees the same
+	// rule in its prompt context but can't translate "X failed" into
+	// "write HCL Y instead." The templates below cover the 5 most
+	// common error shapes seen in M88/M94/M95 sweeps. Coverage is
+	// intentionally narrow + specific; we'd rather miss a shape (and
+	// fall through to the descriptive fallback) than overgeneralize
+	// to a misleading prescriptive rule.
+
+	// (1) Missing subnetwork on compute instance / GKE cluster — the
+	// most common failure shape in gcp-full-stack and friends.
+	if pitfall := matchMissingSubnetwork(failureDetail, scenarioName); pitfall != nil {
+		return pitfall
+	}
+	// (2) CMEK encryption on bucket/SQL — fakegcp doesn't model KMS.
+	if pitfall := matchMissingEncryption(failureDetail, scenarioName); pitfall != nil {
+		return pitfall
+	}
+	// (3) "501 Not implemented" — the resource type isn't modelled.
+	if pitfall := matchNotImplemented(failureDetail, scenarioName); pitfall != nil {
+		return pitfall
+	}
+	// (4) "401 OAuth credentials" — provider escaped to the real cloud
+	// because no custom_endpoint covers this resource type.
+	if pitfall := matchOAuthEscape(failureDetail, scenarioName); pitfall != nil {
+		return pitfall
+	}
+	// (5) AWS deletion_protection / force_destroy that block destroy.
+	if pitfall := matchDestroyBlockers(failureDetail, scenarioName); pitfall != nil {
+		return pitfall
+	}
+
 	// Fallback FIRST: if a `scaleway_*` / `google_*` resource is named
 	// AND the detail is long enough to be meaningful, capture it.
 	// Generic-pattern rejection runs LAST so a detail like
@@ -162,6 +196,113 @@ func extractResource(text string) string {
 		return match
 	}
 	return ""
+}
+
+// M97 prescriptive-rule templates.
+//
+// Each match* function inspects the failure detail for one specific
+// error shape. On hit it returns a *LearnedPitfall whose Rule is
+// ACTIONABLE — tells the LLM what HCL to write — rather than just
+// echoing the failure ("X has no Y"). The descriptive fallback in
+// ExtractLearnedPitfall remains for shapes none of these match.
+
+// matchMissingSubnetwork — "no network or subnetwork" / "no
+// network_interface.subnetwork" failures on compute instances + GKE
+// clusters. The single most common shape in gcp-full-stack runs.
+func matchMissingSubnetwork(detail, scenario string) *LearnedPitfall {
+	lower := strings.ToLower(detail)
+	if !strings.Contains(lower, "subnetwork") && !strings.Contains(lower, "network_interface") {
+		return nil
+	}
+	if !strings.Contains(lower, "no network") && !strings.Contains(lower, "must be attached") && !strings.Contains(lower, "must reference") {
+		return nil
+	}
+	resource := extractResource(detail)
+	if resource == "" {
+		return nil
+	}
+	rule := "Always declare a `google_compute_network` AND at least one `google_compute_subnetwork` in the scenario's region. Then on `google_compute_instance` set `network_interface { subnetwork = google_compute_subnetwork.NAME.id }`. On `google_container_cluster` set BOTH `network = google_compute_network.NAME.id` AND `subnetwork = google_compute_subnetwork.NAME.id`. Do NOT use the `default` VPC — it is often disabled by org policy."
+	return &LearnedPitfall{Resource: resource, Rule: rule, DiscoveredFrom: scenario}
+}
+
+// matchMissingEncryption — DISABLED 2026-05-28: previous template
+// was in direct conflict with `policies/gcp/encryption.rego` (template
+// said "omit CMEK", policy requires CMEK). Auto-learning that tells
+// the LLM the OPPOSITE of what the gates enforce makes runs worse,
+// not better. The correct prescriptive rule needs to know whether
+// CMEK is required by the active policy set for this scenario — and
+// when it IS required, the rule should be "set encryption.default_
+// kms_key_name = google_kms_crypto_key.NAME.id (and ensure the KMS
+// keyring/key are also declared)." Until M98 lands cross-policy
+// awareness in the templates, this matcher is a no-op so we don't
+// poison the learning loop with wrong advice.
+func matchMissingEncryption(_, _ string) *LearnedPitfall {
+	return nil
+}
+
+// matchNotImplemented — 501 from a mock surface that doesn't model
+// the resource. The fix is to remove the resource, not to retry.
+func matchNotImplemented(detail, scenario string) *LearnedPitfall {
+	lower := strings.ToLower(detail)
+	if !strings.Contains(lower, "501") && !strings.Contains(lower, "not implemented") {
+		return nil
+	}
+	resource := extractResource(detail)
+	if resource == "" {
+		return nil
+	}
+	rule := fmt.Sprintf("`%s` is not implemented by the matching mock server. Do NOT use this resource type — pick an alternative that the mock supports. Check the mock's regression_manifest.go for the LandedServices list.", resource)
+	return &LearnedPitfall{Resource: resource, Rule: rule, DiscoveredFrom: scenario}
+}
+
+// matchOAuthEscape — 401 OAuth credentials means the provider routed
+// to the real cloud because no *_custom_endpoint covers this resource
+// type. The fix is to either add an endpoint override or to remove
+// the resource.
+func matchOAuthEscape(detail, scenario string) *LearnedPitfall {
+	lower := strings.ToLower(detail)
+	if !strings.Contains(lower, "401") {
+		return nil
+	}
+	if !strings.Contains(lower, "oauth") && !strings.Contains(lower, "authentication credentials") && !strings.Contains(lower, "invalid_grant") {
+		return nil
+	}
+	resource := extractResource(detail)
+	if resource == "" {
+		return nil
+	}
+	rule := fmt.Sprintf("`%s` is escaping to the REAL cloud API (401 OAuth/auth error). The provider block in `providers.tf` is missing a `*_custom_endpoint` override for this resource's service. Either add the matching custom_endpoint OR remove `%s` from this scenario (the mock doesn't intercept it).", resource, resource)
+	return &LearnedPitfall{Resource: resource, Rule: rule, DiscoveredFrom: scenario}
+}
+
+// matchDestroyBlockers — AWS resources with deletion_protection or
+// missing force_destroy that block tofu destroy.
+func matchDestroyBlockers(detail, scenario string) *LearnedPitfall {
+	lower := strings.ToLower(detail)
+	switch {
+	case strings.Contains(lower, "deletion_protection") && (strings.Contains(lower, "enabled") || strings.Contains(lower, "true")):
+		resource := extractResource(detail)
+		if resource == "" {
+			return nil
+		}
+		rule := fmt.Sprintf("`%s` defaults `deletion_protection = true`. For test scenarios, explicitly set `deletion_protection = false` so `tofu destroy` can tear the resource down.", resource)
+		return &LearnedPitfall{Resource: resource, Rule: rule, DiscoveredFrom: scenario}
+	case strings.Contains(lower, "bucketnotempty") || (strings.Contains(lower, "force_destroy") && strings.Contains(lower, "bucket")):
+		resource := extractResource(detail)
+		if resource == "" {
+			return nil
+		}
+		rule := fmt.Sprintf("`%s` must set `force_destroy = true` for test scenarios. The provider default is `false`, which makes destroy fail with BucketNotEmpty when objects/keys remain.", resource)
+		return &LearnedPitfall{Resource: resource, Rule: rule, DiscoveredFrom: scenario}
+	case strings.Contains(lower, "skip_final_snapshot") || (strings.Contains(lower, "final snapshot") && strings.Contains(lower, "must be specified")):
+		resource := extractResource(detail)
+		if resource == "" {
+			return nil
+		}
+		rule := fmt.Sprintf("`%s` requires `skip_final_snapshot = true` (test) or an explicit `final_snapshot_identifier`. Default behavior blocks destroy with 'final snapshot must be specified'.", resource)
+		return &LearnedPitfall{Resource: resource, Rule: rule, DiscoveredFrom: scenario}
+	}
+	return nil
 }
 
 // AppendPitfall appends a learned pitfall to the YAML file if it doesn't

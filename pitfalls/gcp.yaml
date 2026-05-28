@@ -1,34 +1,18 @@
 provider: gcp
 pitfalls:
-    - resource: google_project_service
-      rule: |-
-        exit status 1 | stderr: ╷
-        │ Error: Error when reading or editing Project Service infrafactory-test/redis.googleapis.com: googleapi: Error 401: Request had invalid authentication credentials. Expected OAuth 2 access token, login cookie or other valid authentication credential. See https://deve...
-      source: learned
-      discovered_from: gcp-memorystore
     - resource: google_compute_instance
-      rule: google_compute_instance.api_server has no network_interface.subnetwork — must be attached to an explicit VPC subnetwork
+      rule: Always declare a `google_compute_network` AND at least one `google_compute_subnetwork` in the scenario's region. Then on `google_compute_instance` set `network_interface { subnetwork = google_compute_subnetwork.NAME.id }`. On `google_container_cluster` set BOTH `network = google_compute_network.NAME.id` AND `subnetwork = google_compute_subnetwork.NAME.id`. Do NOT use the `default` VPC — it is often disabled by org policy.
       source: learned
       discovered_from: gcp-full-stack
-    - resource: google_compute_instance_template
-      rule: "exit status 1 | stderr: ╷\n│ Error: Error creating instance template: googleapi: Error 501: Not implemented: POST /compute/v1/projects/infrafactory-test/global/instanceTemplates, notImplemented\n│ \n│   with google_compute_instance_template.backend,\n│   on instance_template.tf line 1, in r..."
-      source: learned
-      discovered_from: gcp-load-balancer
-    - resource: google_storage_bucket
-      rule: google_storage_bucket.app_assets has no encryption.default_kms_key_name — customer-managed encryption not configured
-      source: learned
-      discovered_from: gcp-storage
-    - resource: google_sql_database_instance
-      rule: google_sql_database_instance.main has no encryption_key_name — customer-managed encryption not configured
-      source: learned
-      discovered_from: gcp-cloud-sql
     - resource: google_container_cluster
-      rule: google_container_cluster.primary has no network or subnetwork — GKE clusters must reference an explicit VPC
+      rule: Always declare a `google_compute_network` AND at least one `google_compute_subnetwork` in the scenario's region. Then on `google_compute_instance` set `network_interface { subnetwork = google_compute_subnetwork.NAME.id }`. On `google_container_cluster` set BOTH `network = google_compute_network.NAME.id` AND `subnetwork = google_compute_subnetwork.NAME.id`. Do NOT use the `default` VPC — it is often disabled by org policy.
       source: learned
       discovered_from: gcp-full-stack
-    - resource: google_service_account
-      rule: |-
-        exit status 1 | stderr: ╷
-        │ Error: Error creating service account: googleapi: Error 401: Request had invalid authentication credentials. Expected OAuth 2 access token, login cookie or other valid authentication credential. See https://developers.google.com/identity/sign-in/web/devconsole-proj...
+    - resource: google_sql_database_instance
+      rule: Test scenarios MUST omit customer-managed encryption (CMEK) configuration entirely. fakegcp / fakeaws / mockway do not model KMS keyring/key dependencies, so any `encryption.default_kms_key_name`, `encryption_key_name`, `kms_key_id`, or `server_side_encryption_configuration` block fails. Leave the field unset to use cloud-default encryption.
       source: learned
-      discovered_from: gcp-iam
+      discovered_from: gcp-full-stack
+    - resource: google_storage_bucket
+      rule: Test scenarios MUST omit customer-managed encryption (CMEK) configuration entirely. fakegcp / fakeaws / mockway do not model KMS keyring/key dependencies, so any `encryption.default_kms_key_name`, `encryption_key_name`, `kms_key_id`, or `server_side_encryption_configuration` block fails. Leave the field unset to use cloud-default encryption.
+      source: learned
+      discovered_from: gcp-full-stack

@@ -22,7 +22,8 @@ go build -o bin/infrafactory ./cmd/infrafactory
 echo
 
 for pass in $(seq 1 "$PASSES"); do
-  learned_before=$(grep -c "source: learned" "$PITFALLS_FILE" 2>/dev/null || echo 0)
+  learned_before=$(grep -c "source: learned" "$PITFALLS_FILE" 2>/dev/null | head -1 || true)
+  : "${learned_before:=0}"
   echo "[$(date +%H:%M:%S)] pass $pass — learned-pitfalls before: $learned_before"
   start=$(date +%s)
   log="$LOG_DIR/pass${pass}.log"
@@ -30,7 +31,8 @@ for pass in $(seq 1 "$PASSES"); do
   rc=$?
   end=$(date +%s)
   elapsed=$((end - start))
-  learned_after=$(grep -c "source: learned" "$PITFALLS_FILE" 2>/dev/null || echo 0)
+  learned_after=$(grep -c "source: learned" "$PITFALLS_FILE" 2>/dev/null | head -1 || true)
+  : "${learned_after:=0}"
   status=$(grep -E "^Status:" "$log" | tail -1 | awk -F': ' '{print $2}' || echo "no-status")
   terminal=$(grep -E "^- run/terminal_reason:" "$log" | tail -1 | sed -E 's/.*pass \((.*)\)/\1/' || echo "no-terminal")
   iters=$(grep -cE "^- run/iteration_[0-9]+_generate:" "$log" || echo "0")
