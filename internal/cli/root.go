@@ -59,7 +59,7 @@ func NewRootCmd(opts ...RootOption) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:           "infrafactory",
-		Short:         "Scenario-driven infrastructure generation and validation for Scaleway",
+		Short:         "Scenario-driven infrastructure generation and validation for AWS, GCP, and Scaleway",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
@@ -203,28 +203,28 @@ func newRunCmd(cfg *rootConfig) *cobra.Command {
 func newMockCmd(cfg *rootConfig) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "mock",
-		Short: "Manage mock service dependencies",
+		Short: "Manage the Mockway (Scaleway) mock — use `make mocks-up` to manage all three (mockway/fakegcp/fakeaws)",
 	}
 
 	cmd.AddCommand(
 		&cobra.Command{
 			Use:   "start",
-			Short: "Start Mockway dependency",
+			Short: "Start Mockway (Scaleway mock). For all three mocks use `make mocks-up`.",
 			RunE:  cfg.withRuntime("mock start", runMockStartCommand),
 		},
 		&cobra.Command{
 			Use:   "stop",
-			Short: "Stop Mockway dependency",
+			Short: "Stop Mockway (Scaleway mock). For all three mocks use `make mocks-down`.",
 			RunE:  cfg.withRuntime("mock stop", runMockStopCommand),
 		},
 		&cobra.Command{
 			Use:   "status",
-			Short: "Show Mockway dependency status",
+			Short: "Show Mockway status. For all three mocks use `make mocks-status`.",
 			RunE:  cfg.withRuntime("mock status", runMockStatusCommand),
 		},
 		&cobra.Command{
 			Use:   "logs",
-			Short: "Show Mockway dependency logs",
+			Short: "Show Mockway logs. For all three mocks use `make mocks-logs`.",
 			RunE:  cfg.withRuntime("mock logs", runMockLogsCommand),
 		},
 	)

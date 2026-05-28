@@ -97,6 +97,22 @@ func TestExtractLearnedPitfall_AtLeastOneOf(t *testing.T) {
 	}
 }
 
+// TestExtractLearnedPitfall_AwsResource pins the M92 fix: the resource
+// regex was scaleway_*|google_* only, so every AWS failure detail
+// produced "no resource extracted" and the learning loop silently
+// dropped it. M88's sweep showed 11/11 AWS scenarios failed without
+// growing pitfalls/aws.yaml even with M86+M90 active.
+func TestExtractLearnedPitfall_AwsResource(t *testing.T) {
+	detail := "exit status 1 | stderr: Error: invalid value for aws_db_instance.main: deletion_protection must be false to destroy. Resource: aws_db_instance.main"
+	got := ExtractLearnedPitfall(detail, "aws-rds")
+	if got == nil {
+		t.Fatal("M92 regression: AWS resource not extracted from tofu envelope")
+	}
+	if got.Resource != "aws_db_instance" {
+		t.Errorf("resource = %q, want aws_db_instance", got.Resource)
+	}
+}
+
 // TestExtractLearnedPitfall_TofuEnvelopeWithResource regression-pins
 // the M86 bug fix. Every tofu apply failure detail starts with
 // "exit status 1 | stderr: ..." — "exit status" is in genericPatterns.

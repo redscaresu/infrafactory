@@ -854,7 +854,7 @@ func generatedFileWriteModeForRunMode(mode runMode) generatedFileWriteMode {
 // resource name fits the scenario's cloud. Empty cloud and empty
 // resource accept anything (no signal to mismatch). Otherwise the
 // resource must be prefixed with the cloud's canonical Terraform
-// provider stem (scaleway_*, google_*).
+// provider stem (scaleway_*, google_*, aws_*).
 func pitfallResourceMatchesCloud(resource, cloud string) bool {
 	if cloud == "" || resource == "" {
 		return true
@@ -864,6 +864,8 @@ func pitfallResourceMatchesCloud(resource, cloud string) bool {
 		return strings.HasPrefix(resource, "scaleway_")
 	case "gcp":
 		return strings.HasPrefix(resource, "google_")
+	case "aws":
+		return strings.HasPrefix(resource, "aws_")
 	default:
 		return true
 	}

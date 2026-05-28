@@ -129,7 +129,7 @@ Adding a new cloud requires: prompt templates, pitfalls file, topology derivatio
 | `infrafactory generate <scenario>` | 3-phase LLM generation only |
 | `infrafactory test <scenario>` | Layers 1-4 (no retry loop) |
 | `infrafactory run <scenario>` | Full pipeline with retry loop + holdouts |
-| `infrafactory mock start/stop/status/logs` | Manage mock dependencies |
+| `infrafactory mock start/stop/status/logs` | Manage the Mockway (Scaleway) mock only. Use `make mocks-up`/`-down`/`-status`/`-logs` to manage all three (mockway/fakegcp/fakeaws). |
 | `infrafactory ui` | Serve the web dashboard |
 
 Key flags for `run`: `--clean` (fresh start), `--no-destroy` (keep resources for incremental follow-up), `--repair-iterations-max N` (retry budget, default 5).

@@ -130,26 +130,40 @@ fakegcp-up: $(MOCKS_RUN_DIR)
 	fi
 
 mockway-down:
-	@if [ -f $(MOCKS_RUN_DIR)/mockway.pid ]; then \
-		pid=$$(cat $(MOCKS_RUN_DIR)/mockway.pid); \
+	@pidfile=$(MOCKS_RUN_DIR)/mockway.pid; \
+	if [ -f $$pidfile ]; then \
+		pid=$$(cat $$pidfile); \
 		kill $$pid 2>/dev/null || true; \
 		wait $$pid 2>/dev/null || true; \
-		rm -f $(MOCKS_RUN_DIR)/mockway.pid; \
-		echo "mockway stopped"; \
-	else \
-		echo "mockway pidfile not found"; \
-	fi
+		rm -f $$pidfile; \
+	fi; \
+	port_pid=$$(lsof -nP -iTCP:$(MOCKWAY_PORT) -sTCP:LISTEN -t 2>/dev/null); \
+	if [ -n "$$port_pid" ]; then \
+		echo "killing stale process(es) on port $(MOCKWAY_PORT): $$port_pid"; \
+		kill $$port_pid 2>/dev/null || true; \
+		sleep 1; \
+		port_pid=$$(lsof -nP -iTCP:$(MOCKWAY_PORT) -sTCP:LISTEN -t 2>/dev/null); \
+		[ -n "$$port_pid" ] && kill -9 $$port_pid 2>/dev/null || true; \
+	fi; \
+	echo "mockway stopped"
 
 fakegcp-down:
-	@if [ -f $(MOCKS_RUN_DIR)/fakegcp.pid ]; then \
-		pid=$$(cat $(MOCKS_RUN_DIR)/fakegcp.pid); \
+	@pidfile=$(MOCKS_RUN_DIR)/fakegcp.pid; \
+	if [ -f $$pidfile ]; then \
+		pid=$$(cat $$pidfile); \
 		kill $$pid 2>/dev/null || true; \
 		wait $$pid 2>/dev/null || true; \
-		rm -f $(MOCKS_RUN_DIR)/fakegcp.pid; \
-		echo "fakegcp stopped"; \
-	else \
-		echo "fakegcp pidfile not found"; \
-	fi
+		rm -f $$pidfile; \
+	fi; \
+	port_pid=$$(lsof -nP -iTCP:$(FAKEGCP_PORT) -sTCP:LISTEN -t 2>/dev/null); \
+	if [ -n "$$port_pid" ]; then \
+		echo "killing stale process(es) on port $(FAKEGCP_PORT): $$port_pid"; \
+		kill $$port_pid 2>/dev/null || true; \
+		sleep 1; \
+		port_pid=$$(lsof -nP -iTCP:$(FAKEGCP_PORT) -sTCP:LISTEN -t 2>/dev/null); \
+		[ -n "$$port_pid" ] && kill -9 $$port_pid 2>/dev/null || true; \
+	fi; \
+	echo "fakegcp stopped"
 
 # fakeaws-up / fakeaws-down — S43-T9 (the AWS sibling, port 8082).
 fakeaws-up: $(MOCKS_RUN_DIR)
@@ -166,15 +180,22 @@ fakeaws-up: $(MOCKS_RUN_DIR)
 	fi
 
 fakeaws-down:
-	@if [ -f $(MOCKS_RUN_DIR)/fakeaws.pid ]; then \
-		pid=$$(cat $(MOCKS_RUN_DIR)/fakeaws.pid); \
+	@pidfile=$(MOCKS_RUN_DIR)/fakeaws.pid; \
+	if [ -f $$pidfile ]; then \
+		pid=$$(cat $$pidfile); \
 		kill $$pid 2>/dev/null || true; \
 		wait $$pid 2>/dev/null || true; \
-		rm -f $(MOCKS_RUN_DIR)/fakeaws.pid; \
-		echo "fakeaws stopped"; \
-	else \
-		echo "fakeaws pidfile not found"; \
-	fi
+		rm -f $$pidfile; \
+	fi; \
+	port_pid=$$(lsof -nP -iTCP:$(FAKEAWS_PORT) -sTCP:LISTEN -t 2>/dev/null); \
+	if [ -n "$$port_pid" ]; then \
+		echo "killing stale process(es) on port $(FAKEAWS_PORT): $$port_pid"; \
+		kill $$port_pid 2>/dev/null || true; \
+		sleep 1; \
+		port_pid=$$(lsof -nP -iTCP:$(FAKEAWS_PORT) -sTCP:LISTEN -t 2>/dev/null); \
+		[ -n "$$port_pid" ] && kill -9 $$port_pid 2>/dev/null || true; \
+	fi; \
+	echo "fakeaws stopped"
 
 # mocks-up starts all three mocks. Run from the infrafactory repo root
 # with ../mockway, ../fakegcp, ../fakeaws checked out as siblings.
@@ -185,10 +206,15 @@ mocks-down: mockway-down fakegcp-down fakeaws-down
 	@echo "all three mocks stopped"
 
 mocks-status:
-	@for name in mockway fakegcp fakeaws; do \
+	@for entry in "mockway:$(MOCKWAY_PORT)" "fakegcp:$(FAKEGCP_PORT)" "fakeaws:$(FAKEAWS_PORT)"; do \
+		name=$${entry%:*}; \
+		port=$${entry##*:}; \
 		pidfile=$(MOCKS_RUN_DIR)/$$name.pid; \
-		if [ -f $$pidfile ] && kill -0 $$(cat $$pidfile) 2>/dev/null; then \
-			echo "$$name: up (pid=$$(cat $$pidfile))"; \
+		port_pid=$$(lsof -nP -iTCP:$$port -sTCP:LISTEN -t 2>/dev/null | head -1); \
+		if [ -n "$$port_pid" ]; then \
+			echo "$$name: up (port=$$port pid=$$port_pid)"; \
+		elif [ -f $$pidfile ] && kill -0 $$(cat $$pidfile) 2>/dev/null; then \
+			echo "$$name: up (pid=$$(cat $$pidfile), port $$port not listening?)"; \
 		else \
 			echo "$$name: down"; \
 		fi; \

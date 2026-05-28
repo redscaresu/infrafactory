@@ -1,12 +1,18 @@
 provider: scaleway
 pitfalls:
-- resource: scaleway_domain_record
-  rule: 'Do NOT create DNS records unless the scenario explicitly lists DNS/domain resources. The `dns_resolution` acceptance criterion is auto-evaluated and does NOT require a `scaleway_domain_record` resource in the generated HCL. Creating records for a non-existent zone will cause `tofu apply` to fail with "resource not found".
-
-    '
-  source: learned
-- resource: scaleway_redis_cluster
-  rule: 'The `password` must meet Scaleway''s complexity requirements: 8-128 characters, at least one digit, one uppercase, one lowercase, and one special character. Use a compliant default like `default = "Ch4ng3Me!@2024"`.
-
-    '
-  source: learned
+    - resource: scaleway_domain_record
+      rule: |
+        Do NOT create DNS records unless the scenario explicitly lists DNS/domain resources. The `dns_resolution` acceptance criterion is auto-evaluated and does NOT require a `scaleway_domain_record` resource in the generated HCL. Creating records for a non-existent zone will cause `tofu apply` to fail with "resource not found".
+      source: learned
+    - resource: scaleway_redis_cluster
+      rule: |
+        The `password` must meet Scaleway's complexity requirements: 8-128 characters, at least one digit, one uppercase, one lowercase, and one special character. Use a compliant default like `default = "Ch4ng3Me!@2024"`.
+      source: learned
+    - resource: scaleway_rdb_privilege
+      rule: "exit status 1 | stderr: ╷\n│ Error: Provider produced inconsistent result after apply\n│ \n│ When applying changes to scaleway_rdb_privilege.app_access, provider\n│ \"provider[\\\"registry.opentofu.org/scaleway/scaleway\\\"]\" produced an\n│ unexpected new value: root object was present, but now..."
+      source: learned
+      discovered_from: mysql-ha-paris
+    - resource: scaleway_instance_server
+      rule: scaleway_instance_server.backend[0] is not attached to a private network via scaleway_instance_private_nic
+      source: learned
+      discovered_from: private-lb-db-paris

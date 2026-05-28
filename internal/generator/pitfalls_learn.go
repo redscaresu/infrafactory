@@ -22,7 +22,13 @@ var (
 	// google_compute_instance. Without the google_ branch, GCP-side
 	// auto-learning never extracts a resource and (after the cross-cloud
 	// guard added in the run loop) silently produces zero pitfalls.
-	resourceNameRe = regexp.MustCompile(`((?:scaleway|google)_\w+)`)
+	// M92: aws_* added so AWS scenarios can auto-learn. Prior regex
+	// matched only scaleway_*/google_* — every AWS run that hit
+	// stuck-detection failed to extract a resource and silently
+	// dropped the lesson. M88's sweep showed 11/11 AWS scenarios
+	// failed without growing pitfalls/aws.yaml; M86+M90 fixes alone
+	// weren't enough because the regex never matched.
+	resourceNameRe = regexp.MustCompile(`((?:scaleway|google|aws)_\w+)`)
 
 	// Matches "Unsupported argument" errors with argument name in quotes.
 	unsupportedArgRe = regexp.MustCompile(`Unsupported argument.*"(\w+)"`)
