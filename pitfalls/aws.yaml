@@ -1,2 +1,6 @@
 provider: aws
-pitfalls: []
+pitfalls:
+    - resource: aws_dynamodb_table
+      rule: "exit status 1 | stderr: ╷\n│ Error: reading AWS DynamoDB Table (app-state): continuous backups: operation error DynamoDB: DescribeContinuousBackups, https response error StatusCode: 404, RequestID: , api error ResourceNotFoundException: The specified resource does not exist.\n│ \n│   with aw..."
+      source: learned
+      discovered_from: aws-dynamodb

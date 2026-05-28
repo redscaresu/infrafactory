@@ -197,16 +197,49 @@ fakeaws-down:
 	fi; \
 	echo "fakeaws stopped"
 
+# seaweedfs-up / -down — M94. AWS scenarios depend on SeaweedFS
+# (S3-compatible) on :9090 for sub-resource Read flows; without it
+# every AWS scenario fails at `s3 reset: connection refused` before
+# the LLM is even invoked. Requires Docker. Container name is
+# pinned so seaweedfs-down can find it reliably.
+SEAWEEDFS_PORT ?= 9090
+SEAWEEDFS_CONTAINER ?= infrafactory-seaweedfs
+SEAWEEDFS_IMAGE ?= chrislusf/seaweedfs:latest
+
+seaweedfs-up:
+	@if curl -sSf http://127.0.0.1:$(SEAWEEDFS_PORT)/ >/dev/null 2>&1; then \
+		echo "seaweedfs already listening on http://127.0.0.1:$(SEAWEEDFS_PORT)"; \
+	elif ! command -v docker >/dev/null 2>&1; then \
+		echo "WARN: docker not found — AWS scenarios will fail at s3 reset"; \
+	else \
+		echo "starting seaweedfs on http://127.0.0.1:$(SEAWEEDFS_PORT) (container=$(SEAWEEDFS_CONTAINER))"; \
+		docker run -d --name $(SEAWEEDFS_CONTAINER) --rm \
+			-p 127.0.0.1:$(SEAWEEDFS_PORT):8333 \
+			$(SEAWEEDFS_IMAGE) server -s3 -s3.port=8333 -s3.allowEmptyFolder=true >/dev/null; \
+		until curl -sSf http://127.0.0.1:$(SEAWEEDFS_PORT)/ >/dev/null 2>&1; do sleep 1; done; \
+		echo "seaweedfs ready on http://127.0.0.1:$(SEAWEEDFS_PORT)"; \
+	fi
+
+seaweedfs-down:
+	@if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^$(SEAWEEDFS_CONTAINER)$$"; then \
+		docker stop $(SEAWEEDFS_CONTAINER) >/dev/null 2>&1 || true; \
+		echo "seaweedfs stopped"; \
+	else \
+		echo "seaweedfs not running"; \
+	fi
+
 # mocks-up starts all three mocks. Run from the infrafactory repo root
 # with ../mockway, ../fakegcp, ../fakeaws checked out as siblings.
-mocks-up: mockway-up fakegcp-up fakeaws-up
-	@echo "all three mocks ready: $(MOCKWAY_URL) (Scaleway), $(FAKEGCP_URL) (GCP), $(FAKEAWS_URL) (AWS)"
+# M94: seaweedfs-up added — AWS scenarios silently fail without
+# port 9090. Docker required for that piece only.
+mocks-up: mockway-up fakegcp-up fakeaws-up seaweedfs-up
+	@echo "all mocks ready: $(MOCKWAY_URL) (Scaleway), $(FAKEGCP_URL) (GCP), $(FAKEAWS_URL) (AWS), http://127.0.0.1:$(SEAWEEDFS_PORT) (S3/SeaweedFS)"
 
-mocks-down: mockway-down fakegcp-down fakeaws-down
-	@echo "all three mocks stopped"
+mocks-down: mockway-down fakegcp-down fakeaws-down seaweedfs-down
+	@echo "all mocks stopped"
 
 mocks-status:
-	@for entry in "mockway:$(MOCKWAY_PORT)" "fakegcp:$(FAKEGCP_PORT)" "fakeaws:$(FAKEAWS_PORT)"; do \
+	@for entry in "mockway:$(MOCKWAY_PORT)" "fakegcp:$(FAKEGCP_PORT)" "fakeaws:$(FAKEAWS_PORT)" "seaweedfs:$(SEAWEEDFS_PORT)"; do \
 		name=$${entry%:*}; \
 		port=$${entry##*:}; \
 		pidfile=$(MOCKS_RUN_DIR)/$$name.pid; \

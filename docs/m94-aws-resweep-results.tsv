@@ -1,0 +1,12 @@
+scenario	status	iters	terminal_reason	seconds
+aws-dynamodb	failed	2	stuck	109
+aws-eks	success	2	target_reached	203
+aws-full-stack	failed	2	stuck	188
+aws-iam	success	1	target_reached	67
+aws-instance	failed	2	stuck	114
+aws-rds	success	4	target_reached	430
+aws-route53	failed	5	repair_budget_exhausted	425
+aws-s3	failed	4	stuck	191
+aws-secrets-manager	success	2	target_reached	119
+aws-sqs	success	1	target_reached	83
+aws-vpc-network	failed	5	repair_budget_exhausted	311

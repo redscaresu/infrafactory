@@ -18,3 +18,17 @@ pitfalls:
       rule: google_storage_bucket.app_assets has no encryption.default_kms_key_name — customer-managed encryption not configured
       source: learned
       discovered_from: gcp-storage
+    - resource: google_sql_database_instance
+      rule: google_sql_database_instance.main has no encryption_key_name — customer-managed encryption not configured
+      source: learned
+      discovered_from: gcp-cloud-sql
+    - resource: google_container_cluster
+      rule: google_container_cluster.primary has no network or subnetwork — GKE clusters must reference an explicit VPC
+      source: learned
+      discovered_from: gcp-full-stack
+    - resource: google_service_account
+      rule: |-
+        exit status 1 | stderr: ╷
+        │ Error: Error creating service account: googleapi: Error 401: Request had invalid authentication credentials. Expected OAuth 2 access token, login cookie or other valid authentication credential. See https://developers.google.com/identity/sign-in/web/devconsole-proj...
+      source: learned
+      discovered_from: gcp-iam
