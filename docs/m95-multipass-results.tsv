@@ -1,0 +1,6 @@
+pass	status	iters	terminal_reason	seconds	learned_before	learned_after
+1	failed	2	stuck	283	7	7
+2	failed	3	stuck	530	7	7
+3	failed	4	stuck	670	7	7
+4	failed	4	stuck	717	7	7
+5	failed	2	stuck	376	7	7
