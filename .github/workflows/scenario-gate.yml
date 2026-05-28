@@ -1,0 +1,115 @@
+name: Scenario gate
+
+# M89 — block PR merge if any added/modified scenarios/training/*.yaml
+# can't converge through the LLM-driven pipeline.
+#
+# Triggers only on PRs that touch scenarios/training/*.yaml — most PRs
+# don't, so the LLM-cost bill stays bounded. The job gracefully skips
+# when OPENROUTER_API_KEY isn't configured (e.g. fork PRs without
+# secret access, or repos that haven't wired the credential yet).
+#
+# Background: the cross-repo parity harness M75 only checks that a
+# scenario file exists and is mapped; it does not run the scenario.
+# So scenarios could ship that schema-validate but the LLM can't
+# satisfy. M89 closes that gap one layer up.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - 'scenarios/training/**.yaml'
+
+permissions:
+  contents: read
+
+jobs:
+  scenario-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    steps:
+      - name: Checkout (full history for diff base)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Checkout sibling mock repos
+        # The 3 fake mocks live in adjacent repos. mocks-up looks for
+        # them at ../mockway, ../fakegcp, ../fakeaws (sibling layout).
+        run: |
+          for repo in mockway fakegcp fakeaws; do
+            git clone --depth 1 https://github.com/${{ github.repository_owner }}/$repo.git ../$repo
+          done
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Setup OpenTofu
+        uses: opentofu/setup-opentofu@v1
+
+      - name: Check LLM credentials
+        id: creds
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          if [ -z "${OPENROUTER_API_KEY:-}" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::OPENROUTER_API_KEY secret not configured — scenario-gate will skip"
+            echo "::warning::To activate the gate: Settings → Secrets and variables → Actions → add OPENROUTER_API_KEY"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: List changed scenarios
+        if: steps.creds.outputs.configured == 'true'
+        run: |
+          echo "Changed scenarios in this PR:"
+          git diff --name-only --diff-filter=AM origin/${{ github.event.pull_request.base.ref }}...HEAD -- 'scenarios/training/*.yaml' || true
+
+      - name: Switch agent config to openrouter
+        if: steps.creds.outputs.configured == 'true'
+        run: |
+          # Default infrafactory.yaml uses agent.type=claude-code (local
+          # Claude CLI). CI doesn't have the CLI, so switch to
+          # openrouter which works via API key. Pin a specific model
+          # so the gate result is reproducible.
+          python3 <<'PY'
+          import yaml
+          with open('infrafactory.yaml') as f:
+              cfg = yaml.safe_load(f)
+          cfg['agent']['type'] = 'openrouter'
+          cfg['agent'].setdefault('openrouter', {})
+          cfg['agent']['openrouter']['model'] = 'anthropic/claude-sonnet-4'
+          with open('infrafactory.yaml', 'w') as f:
+              yaml.dump(cfg, f, sort_keys=False)
+          PY
+
+      - name: Start mocks
+        if: steps.creds.outputs.configured == 'true'
+        # Builds + starts mockway/fakegcp/fakeaws as background go-run
+        # subprocesses + pulls SeaweedFS via Docker (Docker is preinstalled
+        # on ubuntu-latest runners).
+        run: make mocks-up
+
+      - name: Run scenario-change-gate
+        if: steps.creds.outputs.configured == 'true'
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          BASE_REF: origin/${{ github.event.pull_request.base.ref }}
+        run: bash scripts/scenario_change_gate.sh
+
+      - name: Upload scenario logs on failure
+        if: failure() && steps.creds.outputs.configured == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: scenario-gate-logs
+          path: |
+            /tmp/scenario_gate_logs/
+            /tmp/scenario_gate_results.tsv
+
+      - name: Stop mocks
+        if: always() && steps.creds.outputs.configured == 'true'
+        run: make mocks-down

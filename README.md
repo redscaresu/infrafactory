@@ -203,6 +203,17 @@ Gated e2e tests (cross-repo, require `tofu` + the sibling mock repos checked out
 INFRAFACTORY_ENABLE_E2E=1 go test ./internal/e2e/...
 ```
 
+### Scenario change gate (M89)
+
+`.github/workflows/scenario-gate.yml` runs every PR that modifies `scenarios/training/*.yaml`. It detects the added/modified scenarios in the PR diff and runs each through `infrafactory run --clean` end-to-end. The PR cannot merge unless every changed scenario terminates with `target_reached`.
+
+The gate requires LLM credentials. To activate: add an `OPENROUTER_API_KEY` repo secret (Settings → Secrets and variables → Actions). Without the secret, the workflow gracefully skips with a CI warning rather than blocking PRs — so the file is safe to merge before the secret is configured.
+
+Run locally:
+```bash
+BASE_REF=origin/main bash scripts/scenario_change_gate.sh
+```
+
 ### Cross-repo service-coverage harness
 
 `internal/e2e/cross_repo_parity_test.go` (`TestCrossRepoParity_EveryLandedServiceHasScenario`) is the gate that keeps infrafactory in lockstep with the three mocks. On every CI run it reads each sibling fake's `handlers/regression_manifest.go::LandedServices` slice and asserts every entry is either (a) mapped to ≥1 training scenario in `scenarios/training/` via the hand-curated `cloudParityMap` in that test, or (b) explicitly exempted with a written reason. Adding a new service on the fake side without the matching upstream scenario fails this test on the next infrafactory push — which is the whole point: a new handler set with zero infrafactory coverage doesn't ship silently.
