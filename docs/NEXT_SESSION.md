@@ -43,96 +43,105 @@ the appropriate mock repo and prune the pitfall — don't leave it.
 
 ## Sweep coverage map
 
-Final state of the full 39-scenario validation sweep (2026-05-31):
-**31/39 pass, 8 fail.** The 11 tickets below cover everything needed
-to get a clean 39/39 deterministic re-run.
+Final state after the 2026-05-31 evening close-out session: **33/39
+pass, 6 fail** (up from 31/39).
+
+### Closed this session
+
+- **T2** — `sql_custom_endpoint` host-only (infrafactory `8566033`).
+- **T3** — `service_networking_custom_endpoint` added (infrafactory `8566033`).
+- **T6** — `matchUnsupportedArgument` template + verbatim→prescriptive
+  upgrade path (infrafactory `8566033`).
+- **T7** — `--reset-mocks` flag (infrafactory `8566033`).
+- **T9** — `CONTRIBUTING.md` make up (infrafactory `8566033`).
+- **T11 (partial)** — `dns_custom_endpoint` host-only (infrafactory `8566033`).
+- **T1** — fakeaws IAM user policy persistence (fakeaws `c92e323`).
+  Validated via direct round-trip: AttachUserPolicy →
+  ListAttachedUserPolicies returns the attached ARN (previously
+  returned empty list).
+
+### Still open
 
 | Failing scenario | Closes when these tickets land | Confidence |
 |---|---|---|
-| `aws-full-stack` | Ticket 1 (IAM user policy persistence) | High — single root cause |
-| `gcp-cloud-sql` | Tickets 2 (`sql_custom_endpoint` path) + 3 (Service Networking) | High |
-| `gcp-full-stack` | Tickets 2 + 3 + 4 (plugin crash on `google_sql_database_instance`) | Medium — multi-cause |
+| `aws-full-stack` | **Ticket A** (fakeaws ListSSHPublicKeys handler) + **Ticket B** (fakeaws managed-policy orphan-counting) | High — both surfaced during T1 validation |
+| `gcp-cloud-sql` | Ticket 3 fakegcp routes (endpoint flag landed, routes pending) | High |
+| `gcp-full-stack` | Tickets 3 + 4 (plugin crash on `google_sql_database_instance`) | Medium |
 | `gcp-gke-cluster` | Ticket 4 (NodePool plugin crash) | High |
-| `gcp-dns` | Ticket 4 (`google_dns_record_set` plugin crash) | High |
-| `gcp-secret-manager` | Ticket 5 (SecretVersion 404) | Medium — needs handler trace |
-| `gcp-cloud-run` | Ticket 6 (`deletion_protection` prescriptive template) | High — LLM-side |
-| `gcp-storage` | Already closes intermittently — LLM non-determinism, not a fixable bug | n/a |
+| `gcp-secret-manager` | Ticket 5 (SecretVersion 404) | Medium |
+| `gcp-storage` | Intermittent — LLM non-determinism | n/a |
+| `web-app-paris` | Regression introduced this session — see notes | Unknown |
+
+### Tickets A + B (NEW — uncovered during T1 validation 2026-05-31 19:00)
+
+**Ticket A — fakeaws ListSSHPublicKeys / ListServiceSpecificCredentials**.
+`aws_iam_user` destroy preflight enumerates SSH keys + service-
+specific credentials. fakeaws returns 404 → destroy fails. Fix:
+add no-op handlers returning empty lists in `fakeaws/handlers/iam.go`
+similar to `iamListGroupsForUser`. ~15 min.
+
+**Ticket B — fakeaws auto-seeded managed policies count as orphans**.
+`SeedManagedPolicy` (called by AttachRolePolicy/AttachUserPolicy)
+inserts into `iam_policies`. `/mock/state` exposes them and
+`countOrphans` in infrafactory `internal/harness/destroy.go` then
+counts them. Two reasonable fixes: (a) seed managed policies into a
+separate `iam_managed_policy_seeds` table excluded from `/mock/state`,
+or (b) filter `arn:aws:iam::aws:policy/*` from the iam.policies
+output. (b) is simpler. ~30 min.
 
 **Recommended order** (lowest-cost-per-closed-scenario first):
 
 | # | Ticket | Effort | Closes |
 |---|---|---|---|
-| 1 | Ticket 6 — cloud-run prescriptive template | ~30 min | `gcp-cloud-run` |
-| 2 | Ticket 2 — `sql_custom_endpoint` double-path | ~30 min | `gcp-cloud-sql` partial |
-| 3 | Ticket 9 — `CONTRIBUTING.md` deps-up → up | ~5 min | (cleanup) |
-| 4 | Ticket 1 — IAM user policy persistence | ~2 hr | `aws-full-stack` |
-| 5 | Ticket 5 — Secret Manager version 404 | ~1 hr | `gcp-secret-manager` |
-| 6 | Ticket 3 — Service Networking endpoints | ~1-2 hr | `gcp-cloud-sql` rest |
-| 7 | Ticket 4 — plugin-crash family (3 resources) | ~3-4 hr per resource | `gcp-dns`, `gcp-gke-cluster`, `gcp-full-stack` |
-| 8 | Ticket 11 — audit other `*_custom_endpoint`s | ~1 hr | preventive |
-| 9 | Ticket 10 — mirror "one-shot demo" in mock READMEs | ~15 min | (docs) |
-| 10 | Ticket 7 — `--reset-mocks` in `infrafactory run` | ~1 hr | tooling |
-| 11 | Ticket 8 — fakeaws subnet attribute persistence | ~1-2 hr | latent |
+| 1 | **Ticket A** — fakeaws ListSSHPublicKeys etc | ~15 min | `aws-full-stack` destroy |
+| 2 | **Ticket B** — managed-policy orphan filter | ~30 min | `aws-full-stack` orphan-count |
+| 3 | Ticket 5 — Secret Manager version 404 | ~1 hr | `gcp-secret-manager` |
+| 4 | Ticket 3 (rest) — fakegcp Service Networking routes | ~1-2 hr | `gcp-cloud-sql` rest |
+| 5 | Ticket 4 — plugin-crash family (NodePool + SQL) | ~3-4 hr per resource | `gcp-gke-cluster`, `gcp-full-stack` |
+| 6 | Ticket 11 (rest) — audit other `*_custom_endpoint`s | ~1 hr | preventive |
+| 7 | Ticket 10 — mirror "one-shot demo" in mock READMEs | ~15 min | (docs) |
+| 8 | Ticket 8 — fakeaws subnet MapPublicIpOnLaunch persistence | ~1-2 hr | latent |
+| 9 | `web-app-paris` regression investigation | unknown | regression |
 
-**Realistic total to 39/39 deterministic**: one focused 6-10 hour
-session. Ticket 4 is the deep one — it requires reading
-provider-google source per resource to figure out what response
-field the parser nil-derefs on. Everything else is pattern-match
-work similar to what landed this session.
+**Realistic total to 39/39 deterministic**: ~6-8 hour session,
+mostly mock-source work. Ticket 4 is still the deep one (provider
+source-reading per resource); everything else is pattern-match.
 
 ## Open follow-ups (next session work)
 
 Tickets are detailed below in the same order they appeared during
 the sweep — but the map above is the order to *work* them.
 
-### 1. `aws-full-stack` — IAM user policy persistence (fakeaws)
+### 1. `aws-full-stack` — IAM user policy persistence (fakeaws) — CLOSED
 
-**Symptom:** `aws_iam_user_policy_attachment` create succeeds, then
-read fails with `empty result` because `ListAttachedUserPolicies`
-returns an empty list.
+**Closed by:** fakeaws `c92e323` (2026-05-31 evening session).
+`user_policy_attachments` + `user_inline_policies` tables added in
+`repository/iam.go`; handlers in `handlers/iam.go` switched from
+no-op stubs to persistence-backed implementations; round-trip tests
+landed in `handlers/iam_test.go`
+(`TestIAM_AttachDetachUserPolicy`, `TestIAM_PutGetDeleteUserPolicy`).
 
-**Why it broke:** I added `AttachUserPolicy` / `PutUserPolicy` /
-`GetUserPolicy` as no-ops in `fakeaws/handlers/iam.go`. CREATE
-passes, but the provider's READ path enumerates attachments to
-confirm — and gets nothing back.
+Verified live: `curl AttachUserPolicy` + `curl ListAttachedUserPolicies`
+returns the attached ARN.
 
-**Fix:** Add proper persistence in `fakeaws/repository/iam.go`:
+aws-full-stack does NOT yet close end-to-end though — destroy now
+fails on `ListSSHPublicKeys` 404 and orphan-check fires on
+auto-seeded managed policies. See Tickets A + B above.
 
-- `user_policy_attachments` table (account_id, user_name, policy_arn).
-  Same shape as `role_policy_attachments`.
-- `user_inline_policies` table (account_id, user_name, policy_name,
-  document JSON).
-- Wire the existing handlers to insert/list/delete from those tables.
+### 2. GCP `sql_custom_endpoint` path duplication — CLOSED
 
-Tests to add in `fakeaws/handlers/iam_test.go`:
-- Create+List+Delete round-trip for managed-policy attachments.
-- Create+Get+Delete round-trip for inline policies.
+**Closed by:** infrafactory `8566033`. `sql_custom_endpoint` flipped
+to host-only in `internal/cli/generate_command.go::buildGoogleProviderBlock`
+(inline comment explains v5 provider's strip-regex behaviour on
+http:// endpoints). `dns_custom_endpoint` also flipped to host-only
+in the same commit (closes `gcp-dns`).
 
-### 2. GCP `sql_custom_endpoint` path duplication
+### 3. fakegcp `Service Networking` endpoint missing — PARTIAL
 
-**Symptom:** `gcp-cloud-sql` and `gcp-full-stack` 501 on
-`POST /sql/v1beta4/sql/v1beta4/projects/...` (double `sql/v1beta4`).
-
-**Why:** Our template emits `sql_custom_endpoint = "%s/sql/v1beta4/"`
-and the v5 provider also prepends `sql/v1beta4/...` — same shape
-bug as the `iam_custom_endpoint` and `service_usage_custom_endpoint`
-ones I fixed by dropping the trailing path.
-
-**Fix:** In `internal/cli/generate_command.go::buildGoogleProviderBlock`,
-change `sql_custom_endpoint` to drop the trailing path. Verify by
-running `gcp-cloud-sql` against fakegcp.
-
-**Suspected sibling endpoints with same pattern:** `dns_custom_endpoint
-= "%s/dns/v1/"`, `cloud_run_v2_custom_endpoint = "%s/v2/"`. Test each
-against the v5 provider source-tree to confirm before changing.
-
-### 3. fakegcp `Service Networking` endpoint missing
-
-**Symptom:** `gcp-cloud-sql` private-IP path 401s against
-`servicenetworking.googleapis.com`.
-
-**Fix:** Add `service_networking_custom_endpoint` to
-`generate_command.go` template; add routes in fakegcp:
+**Partially closed by:** infrafactory `8566033` —
+`service_networking_custom_endpoint` added to the provider template
+so requests stop escaping to the real cloud. **Pending:** fakegcp
+routes still need to land so the requests have somewhere to land:
 
 - `GET  /v1/services/{service}/connections` (returns empty list)
 - `POST /v1/services/{service}/connections` (200 + synthesised resource)
@@ -169,30 +178,24 @@ file is misnamed, secrets live there) for the SecretVersion lookup.
 Likely a key-mismatch (version IDs not persisted as the provider
 expects) or path-param parsing issue.
 
-### 6. `gcp-cloud-run` — LLM hallucinates `deletion_protection`
+### 6. `gcp-cloud-run` — LLM hallucinates `deletion_protection` — CLOSED
 
-**Symptom:** LLM writes `deletion_protection = false` on
-`google_cloud_run_v2_service` which the v5 provider doesn't accept.
+**Closed by:** infrafactory `8566033`. `matchUnsupportedArgument`
+template in `internal/generator/pitfalls_learn.go` handles wrapped
+`Unsupported argument` diagnostics. The verbatim→prescriptive
+upgrade path in `AppendPitfall` lets later prescriptive rules
+REPLACE earlier raw-stderr entries for the same resource (otherwise
+the descriptive dump would permanently shadow the prescriptive form
+via dedup). First non-cloud-run firing: `google_redis_instance` got
+a clean prescriptive rule for `deletion_protection` in the same
+sweep.
 
-**Why this is interesting:** It's an LLM-generated HCL mistake the
-auto-learning pipeline should catch, not a mock gap. The descriptive
-fallback fires but the rule isn't actionable enough; the system
-keeps making the same mistake.
+### 7. Mock-state reset built into `infrafactory run` — CLOSED
 
-**Fix:** Add a M97-style prescriptive template in
-`internal/generator/pitfalls_learn.go` for "Unsupported argument
-NAME on RESOURCE_TYPE" that gives the LLM canonical removal
-guidance. Already pattern-similar to `matchUnsupportedAttribute`.
-
-### 7. Mock-state reset built into `infrafactory run`
-
-**Status:** My sweep script resets mockway/fakegcp/fakeaws between
-scenarios. Belongs in `internal/cli/run_command.go` so any sequential
-caller (sweep, CI batch, retry) gets it automatically.
-
-**Fix:**
-- Add `--reset-mocks` flag (default `true` when `run_mode=clean`).
-- Before iter 1 starts, POST to each configured mock's reset endpoint.
+**Closed by:** infrafactory `8566033`. `--reset-mocks` flag (default
+true on clean runs) fans `POST /mock/reset` to every configured
+mock URL (mockway/fakegcp/fakeaws). Replaces the per-script curl
+fan-out the sweep scripts used to do externally.
 
 ### 8. fakeaws `aws_subnet.MapPublicIpOnLaunch` doesn't persist
 
@@ -205,14 +208,9 @@ isn't stored.)
 `fakeaws/repository/ec2.go::EC2Subnet` struct, persist on
 ModifySubnetAttribute, surface on DescribeSubnets.
 
-### 9. Update `CONTRIBUTING.md` to reference `make up`
+### 9. Update `CONTRIBUTING.md` to reference `make up` — CLOSED
 
-**Symptom:** `CONTRIBUTING.md` line 20 still says
-`make deps-up` (the legacy single-mock docker-compose path that was
-removed in this session's Makefile cleanup).
-
-**Fix:** Replace with `make up` + a one-line note that it brings up
-all four mocks + UI, matching the new README quickstart.
+**Closed by:** infrafactory `8566033`.
 
 ### 10. Mirror "make up" demo in fakegcp + mockway READMEs
 
@@ -221,26 +219,22 @@ repos)" subsection pointing at infrafactory's `make up`. fakegcp and
 mockway READMEs should get the same blurb so a user landing on any
 mock repo's GitHub page sees the consistent entry point.
 
-### 11. `cloud_resource_manager_custom_endpoint` and others — audit for double-path bugs
+### 11. `cloud_resource_manager_custom_endpoint` and others — PARTIAL
 
-**Symptom (pattern, not blocking):** I fixed three GCP endpoint
-double-path bugs this session (`iam_custom_endpoint`,
-`service_usage_custom_endpoint`, and the staged `sql_custom_endpoint`
-listed in ticket 2). Other endpoints in
-`internal/cli/generate_command.go::buildGoogleProviderBlock` may
-have the same shape — the v5 provider's prepend behaviour varies
-per-service and our template hard-codes `/v1/` etc.
-
-**Fix:** For each `*_custom_endpoint` we emit, trace through the
-matching scenario and verify the wire URL fakegcp receives matches
-what the route is registered at. Candidates to audit:
+**Closed for `dns_custom_endpoint`:** infrafactory `8566033`. The
+remaining endpoints still need a per-endpoint audit:
 `cloud_resource_manager_custom_endpoint` (currently `/v1/`),
-`dns_custom_endpoint` (currently `/dns/v1/`),
 `cloud_run_v2_custom_endpoint` (currently `/v2/`),
 `pubsub_custom_endpoint` (currently `/v1/`),
 `storage_custom_endpoint` (currently `/storage/v1/`),
 `secret_manager_custom_endpoint` (currently `/v1/`),
 `redis_custom_endpoint` (currently `/v1/`).
+
+For each: trace through the matching scenario and verify the wire
+URL fakegcp receives matches the registered route. Pattern is
+"if the v5 provider's lib client uses RemoveBasePathVersion or a
+ReplaceAll-based path strip that doesn't fire on http:// endpoints,
+the trailing path doubles."
 
 ### 12. Failure classifier — keep mock quirks OUT of pitfalls
 
