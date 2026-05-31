@@ -22,9 +22,49 @@ End state:
   survive re-runs; the LLM is non-deterministic and some fixes
   uncovered deeper gaps. See `Open follow-ups` below.
 
+## Sweep coverage map
+
+Final state of the full 39-scenario validation sweep (2026-05-31):
+**31/39 pass, 8 fail.** The 11 tickets below cover everything needed
+to get a clean 39/39 deterministic re-run.
+
+| Failing scenario | Closes when these tickets land | Confidence |
+|---|---|---|
+| `aws-full-stack` | Ticket 1 (IAM user policy persistence) | High — single root cause |
+| `gcp-cloud-sql` | Tickets 2 (`sql_custom_endpoint` path) + 3 (Service Networking) | High |
+| `gcp-full-stack` | Tickets 2 + 3 + 4 (plugin crash on `google_sql_database_instance`) | Medium — multi-cause |
+| `gcp-gke-cluster` | Ticket 4 (NodePool plugin crash) | High |
+| `gcp-dns` | Ticket 4 (`google_dns_record_set` plugin crash) | High |
+| `gcp-secret-manager` | Ticket 5 (SecretVersion 404) | Medium — needs handler trace |
+| `gcp-cloud-run` | Ticket 6 (`deletion_protection` prescriptive template) | High — LLM-side |
+| `gcp-storage` | Already closes intermittently — LLM non-determinism, not a fixable bug | n/a |
+
+**Recommended order** (lowest-cost-per-closed-scenario first):
+
+| # | Ticket | Effort | Closes |
+|---|---|---|---|
+| 1 | Ticket 6 — cloud-run prescriptive template | ~30 min | `gcp-cloud-run` |
+| 2 | Ticket 2 — `sql_custom_endpoint` double-path | ~30 min | `gcp-cloud-sql` partial |
+| 3 | Ticket 9 — `CONTRIBUTING.md` deps-up → up | ~5 min | (cleanup) |
+| 4 | Ticket 1 — IAM user policy persistence | ~2 hr | `aws-full-stack` |
+| 5 | Ticket 5 — Secret Manager version 404 | ~1 hr | `gcp-secret-manager` |
+| 6 | Ticket 3 — Service Networking endpoints | ~1-2 hr | `gcp-cloud-sql` rest |
+| 7 | Ticket 4 — plugin-crash family (3 resources) | ~3-4 hr per resource | `gcp-dns`, `gcp-gke-cluster`, `gcp-full-stack` |
+| 8 | Ticket 11 — audit other `*_custom_endpoint`s | ~1 hr | preventive |
+| 9 | Ticket 10 — mirror "one-shot demo" in mock READMEs | ~15 min | (docs) |
+| 10 | Ticket 7 — `--reset-mocks` in `infrafactory run` | ~1 hr | tooling |
+| 11 | Ticket 8 — fakeaws subnet attribute persistence | ~1-2 hr | latent |
+
+**Realistic total to 39/39 deterministic**: one focused 6-10 hour
+session. Ticket 4 is the deep one — it requires reading
+provider-google source per resource to figure out what response
+field the parser nil-derefs on. Everything else is pattern-match
+work similar to what landed this session.
+
 ## Open follow-ups (next session work)
 
-Tickets are roughly ordered by impact. Each is 1-4 hours.
+Tickets are detailed below in the same order they appeared during
+the sweep — but the map above is the order to *work* them.
 
 ### 1. `aws-full-stack` — IAM user policy persistence (fakeaws)
 
