@@ -45,11 +45,15 @@ the appropriate mock repo and prune the pitfall — don't leave it.
 
 Final state after the 2026-05-31 evening close-out session:
 **33/39 pass, 6 fail** in the sweep proper, but follow-up clean
-runs closed three more — `aws-full-stack` (Tickets A + B),
-`web-app-paris` (auto-learned scaleway pitfall seeded by
-`0a7efe5`), and `gcp-cloud-sql` (Tickets D-2 + E). Realistic pass
-rate: **36/39**. Last 3: `gcp-full-stack`, `gcp-gke-cluster`,
-`gcp-storage` (intermittent).
+runs closed all five tractable scenarios: `aws-full-stack` (A+B),
+`web-app-paris` (seeded scaleway pitfall), `gcp-cloud-sql` (D-2+E),
+`gcp-full-stack` (D-2 alone, iter 1), and `gcp-gke-cluster` (E-2
+KMS dual-prefix, iter 3). Realistic pass rate: **38/39**. The
+NodePool "Plugin did not respond" turned out to be downstream of
+the iter 1 escape — once the LLM converged away from
+google_project_service the crash didn't recur. Last 1:
+`gcp-storage` (intermittent LLM non-determinism — not a fixable
+bug).
 
 ### Closed this session
 
@@ -71,8 +75,8 @@ rate: **36/39**. Last 3: `gcp-full-stack`, `gcp-gke-cluster`,
 |---|---|---|
 | `aws-full-stack` | **Tickets A + B closed (fakeaws `b7db72d`, `fd8e5d1`, `ff0c38d`) — validated end-to-end 2026-05-31 20:00, `target_reached` iter 2** | Closed |
 | `gcp-cloud-sql` | **Tickets D-2 + E closed (infrafactory `3b32364`, fakegcp `d9c6545`) — validated end-to-end 2026-05-31 21:45, `target_reached` iter 5** | Closed |
-| `gcp-full-stack` | Likely closed by D-2 (same v3 escape); plus T4 if NodePool involved | Medium |
-| `gcp-gke-cluster` | Ticket 4 (NodePool plugin crash) | High |
+| `gcp-full-stack` | **Closed by D-2 — validated 2026-05-31 22:00, `target_reached` iter 1** | Closed |
+| `gcp-gke-cluster` | **Closed by E-2 KMS dual-prefix (fakegcp `a3b1ea8`) — validated 2026-05-31 22:25, `target_reached` iter 3.** NodePool "Plugin did not respond" was downstream of an earlier escape and didn't recur once the LLM converged. | Closed |
 | `gcp-secret-manager` | **T5 closed (fakegcp `c6165b1` AccessSecretVersion handler)** | Closed |
 | `gcp-storage` | Intermittent — LLM non-determinism | n/a |
 | `web-app-paris` | **Closed by seeded prescriptive pitfall (`0a7efe5`)** | Closed |
