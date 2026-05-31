@@ -41,10 +41,11 @@ When starting a new conversation, follow this checklist:
 ### 1) Load minimal context
 1. `README.md`
 2. `AGENTS.md` (this file)
-3. `STATUS.md`
-4. `BACKLOG.md`
-5. `CONCEPT.md` (if major design context is needed)
-6. `docs/decisions/README.md` (+ relevant ADRs)
+3. `docs/NEXT_SESSION.md` (open follow-ups from prior session — read FIRST when starting work)
+4. `STATUS.md`
+5. `BACKLOG.md`
+6. `CONCEPT.md` (if major design context is needed)
+7. `docs/decisions/README.md` (+ relevant ADRs)
 
 ### 2) Preflight
 ```bash
@@ -76,6 +77,9 @@ If either fails, restore the repo to a green baseline before starting a new tick
 - Playwright e2e tests live in `ui/e2e/` (currently 51 tests, growing). Run with `make test` (Go unit + UI unit + Playwright).
 - Visual baselines under `ui/e2e/visual.spec.ts-snapshots/` render live UI state — adding scenario YAMLs OR completing runs (which add rows to the Runs page) drifts them. Pre-commit hook auto-refreshes when `scenarios/training/*.yaml` changes (M56); for other drift, run `make ui-baseline-update` manually.
 - `make run` builds everything and starts the UI at `http://127.0.0.1:4173`.
+- `make up` is the one-shot bring-up: mockway + fakegcp + fakeaws + SeaweedFS + UI in one command. `make down` tears down the mocks (Ctrl-C stops the UI).
+- **Sweep protocol** (see `feedback_sweep_protocol.md` memory): during multi-scenario sweeps, treat failures as either (a) mock-server gaps → fix at source in fakeaws/fakegcp/mockway, never seed `pitfalls/*.yaml`; or (b) LLM-generated HCL mistakes → let auto-learning capture a pitfall; if descriptive-only, add an M97 prescriptive template. Pruning stale pitfalls AFTER a mock-source fix is fine; seeding new content is not (M91 "no-seeding ratchet" CI test enforces this).
+- **Next-session brief**: `docs/NEXT_SESSION.md` lists the 8 concrete follow-up tickets from the 2026-05-30/31 sweep. Always read this before starting work — earlier-session context lives there.
 - **Cross-repo cascade commits**: lifecycle-parity work spans infrafactory + a sibling mock (recent examples: M61 RDS = fakeaws@853d0aa + infrafactory@9fb3566; M62 Secrets Manager = same). Commit the mock-side change first (it's the dependency), then update infrafactory's e2e test or call sites that depend on the new mock behavior. All four repos use origin/main; push order matters.
 - **Demo recording tooling** (`./docs/demo/record.sh` for CLI, `make demo-ui` for UI): `asciinema` records terminal PTY → `.cast`; `agg` renders `.cast` → `.gif` (README-embeddable). Playwright records browser → `.webm`; `gifski` renders `.webm` → `.gif`. asciinema is a build-time dep only, never advertised in user-facing docs (README has been kept asciinema-free since M52).
 
@@ -94,8 +98,8 @@ If either fails, restore the repo to a green baseline before starting a new tick
 Three first-party HTTP-level mocks + one third-party backend live alongside infrafactory:
 
 - **mockway** (`../mockway`, github.com/redscaresu/mockway) — Scaleway mock; 280+ tests; runs on `:8080`. Apache-2.0, public.
-- **fakegcp** (`../fakegcp`, github.com/redscaresu/fakegcp) — GCP mock; runs on `:8081`. Mockway-level test parity reached 2026-05-23 (881-line repository_test.go, FK violation tests, cascade delete tests). Memorystore + Cloud SQL + GKE + IAM + Storage + DNS + Pub/Sub + Secret Manager + Cloud Run.
-- **fakeaws** (`../fakeaws`, github.com/redscaresu/fakeaws) — AWS mock; runs on `:8082`. Ships 9 services across 5 wire formats (IAM, S3, EC2, RDS, DynamoDB, EKS, SQS, Route53, Secrets Manager); aggregate handler coverage 82.4%; 17 codex review passes archived under `../fakeaws/docs/review-passes/`. RDS + Secrets Manager TF lifecycle parity reached 2026-05-24 (M61 + M62).
+- **fakegcp** (`../fakegcp`, github.com/redscaresu/fakegcp) — GCP mock; runs on `:8081`. Mockway-level test parity reached 2026-05-23 (881-line repository_test.go, FK violation tests, cascade delete tests). Memorystore + Cloud SQL + GKE + IAM + Storage + DNS + Pub/Sub + Secret Manager + Cloud Run + Cloud KMS (added 2026-05-31 in fakegcp@c7999b5).
+- **fakeaws** (`../fakeaws`, github.com/redscaresu/fakeaws) — AWS mock; runs on `:8082`. Ships 10 services across 5 wire formats (IAM, S3, EC2, RDS, DynamoDB, EKS, SQS, Route53, Secrets Manager, KMS); aggregate handler coverage 82.4%; 17 codex review passes archived under `../fakeaws/docs/review-passes/`. EC2/IAM/Route53/DynamoDB substantially broadened 2026-05-30 → 2026-05-31 from a self-learning sweep (see fakeaws@348322d).
 - **SeaweedFS** (`chrislusf/seaweedfs` container) — third-party S3 backend for `aws_s3_bucket` reads (`terraform-provider-aws` needs the full management surface; fakeaws's stripped S3 handler isn't enough). Runs on `:9090` via `docker-compose.mocks.yml`. Anonymous-mode `ListAllMyBuckets` returns empty even when buckets exist — use HEAD-by-name as the assertion path. Empirical evaluation log in `CONCEPT.md` § "Third-Party Mock Integration" (rejects Adobe S3Mock + Garage + LocalStack + MinIO).
 
 All four repos are independent public OSS repos on origin/main; cross-repo work cascades (see "operational caveats" above).

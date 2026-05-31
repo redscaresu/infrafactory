@@ -50,9 +50,10 @@ cd infrafactory
 #    - Docker (for the SeaweedFS S3 backend used by AWS scenarios)
 #    - Claude CLI on PATH or OPENROUTER_API_KEY exported
 
-# 3. Build infrafactory + start all mocks side-by-side
-make build           # produces ./bin/infrafactory
-make mocks-up        # fakeaws:8082 + fakegcp:8081 + mockway:8080 + seaweedfs:9090 (S3, Docker)
+# 3. One-shot bring-up: mocks + UI + binary in a single command.
+make up              # mocks (8080/8081/8082) + SeaweedFS (9090) + UI (4173) in one
+# (alternatively, the unbundled equivalent:)
+# make build && make mocks-up
 
 # 4. Run the GCP full-stack scenario
 ./bin/infrafactory run scenarios/training/gcp-full-stack.yaml

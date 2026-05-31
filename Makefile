@@ -29,11 +29,13 @@ endif
 
 .PHONY: help deps-up deps-down deps-ps deps-logs deps-pull deps-recreate deps-clean test-unit test-all test \
 	bench-check smoke-validate smoke-mockway smoke-mockway-manual smoke-mockway-local smoke check \
-	ui-install ui-build ui-test ui-test-e2e ui-dev ui-clean ui-api-linux-build ui-stack-up ui-stack-logs ui-stack-down build run \
+	ui-install ui-build ui-test ui-test-e2e ui-dev ui-clean ui-api-linux-build ui-stack-up ui-stack-logs ui-stack-down build run up down \
 	mocks-up mocks-down mocks-status mocks-logs mockway-up mockway-down fakegcp-up fakegcp-down fakeaws-up fakeaws-down
 
 help:
 	@echo "Targets:"
+	@echo "  up              One-shot bring-up: all mocks + SeaweedFS + UI (most common starter)."
+	@echo "  down            Symmetric tear-down: stop all mocks (UI stops on Ctrl-C)."
 	@echo "  deps-up         Start dependency containers (mockway)."
 	@echo "  mocks-up        Start mockway (:$(MOCKWAY_PORT)) AND fakegcp (:$(FAKEGCP_PORT)) from source siblings."
 	@echo "  mocks-down      Stop both mocks."
@@ -442,6 +444,31 @@ build: ui-build
 
 run: build
 	./bin/infrafactory ui
+
+# up: one-shot bring-up — every mock + SeaweedFS + UI/API in one command.
+# Use when you sit down to a fresh terminal and want the full stack hot.
+# Idempotent: each mocks-* target checks for an existing pid/listener
+# before starting. SeaweedFS needs Docker running (Docker Desktop on
+# macOS) — the target will report which step failed if anything's down.
+#
+#   make up   # bring everything up
+#   make down # tear everything down (mocks-down + ui-stack-down)
+#
+# Layout afterwards:
+#   :8080  mockway (Scaleway)
+#   :8081  fakegcp (GCP)
+#   :8082  fakeaws (AWS)
+#   :9090  SeaweedFS (S3-compatible)
+#   :4173  infrafactory UI/API (served by `infrafactory ui`)
+up: mocks-up build
+	@echo "==> mocks ready: mockway :8080, fakegcp :8081, fakeaws :8082, seaweedfs :9090"
+	@echo "==> starting infrafactory UI on :4173 (Ctrl-C to stop)"
+	./bin/infrafactory ui
+
+# down — symmetric tear-down for `make up`. Mocks shut down, UI shuts
+# itself down when interrupted; nothing else lingers.
+down: mocks-down
+	@echo "==> mocks stopped. UI process is foreground-only — exit it manually if still running."
 
 # install-hooks wires the tracked hook installer at .githooks/ via
 # core.hooksPath so the gitleaks + auto-baseline-refresh + make test
