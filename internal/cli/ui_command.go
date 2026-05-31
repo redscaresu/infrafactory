@@ -170,6 +170,7 @@ func (s *uiRunStarter) executeRun(ctx context.Context, req api.StartRunRequest, 
 	runCmd.Flags().Int("repair-iterations-max", 0, "")
 	runCmd.Flags().Bool("clean", false, "")
 	runCmd.Flags().Bool("no-destroy", false, "")
+	runCmd.Flags().Bool("reset-mocks", true, "")
 	_ = runCmd.Flags().Set("config", s.configPath)
 	_ = runCmd.Flags().Set("output", string(OutputModeJSON))
 	if req.Clean {

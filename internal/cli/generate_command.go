@@ -207,15 +207,45 @@ func buildGoogleProviderBlock(fakegcpURL string) string {
   # 501s. Confirmed by the fakegcp working/iam example.
   iam_custom_endpoint                    = "%[1]s/"
   storage_custom_endpoint                = "%[1]s/storage/v1/"
-  sql_custom_endpoint                    = "%[1]s/sql/v1beta4/"
+  # sql_custom_endpoint must NOT include trailing /sql/v1beta4/. The v5
+  # provider's NewSqlAdminClient strips the version twice with a regex
+  # that requires literal "https://" — so for our http:// fakegcp
+  # endpoint the strip is a no-op and BasePath stays at
+  # http://.../sql/v1beta4/. The sqladmin/v1beta4 client then
+  # ResolveRelative-prepends sql/v1beta4/projects/... to that, doubling
+  # to /sql/v1beta4/sql/v1beta4/projects/... which fakegcp 501s.
+  # Dropping the trailing path leaves BasePath at http://.../ and the
+  # prepended sql/v1beta4/projects/... lands on the registered fakegcp
+  # route at /sql/v1beta4/projects/{project}.
+  sql_custom_endpoint                    = "%[1]s/"
   pubsub_custom_endpoint                 = "%[1]s/v1/"
-  dns_custom_endpoint                    = "%[1]s/dns/v1/"
+  # dns_custom_endpoint must be HOST-ONLY. terraform-provider-google
+  # uses TWO call patterns for DNS: direct {{DNSBasePath}}projects/...
+  # for zone CRUD (URL = ${DNSBasePath}projects/...) and the lib
+  # client for record-set Changes + zone delete preflight. The lib's
+  # NewDnsClient does RemoveBasePathVersion (no-op on http://) then
+  # ReplaceAll("/dns/", ""), so any endpoint that contains /dns/ ends
+  # up with the port mangled (e.g. ".../dns/v1/" → "...:8081v1/") and
+  # googleapi.ResolveRelative panics on url.Parse, surfacing as
+  # "Plugin did not respond" on google_dns_record_set. With host-only
+  # endpoint, ReplaceAll is a no-op and ResolveRelative composes the
+  # lib's "dns/v1/projects/..." relative path correctly. fakegcp also
+  # exposes the direct-path routes at /projects/{p}/managedZones so
+  # zone CRUD lands on the same handlers as /dns/v1/projects/...
+  dns_custom_endpoint                    = "%[1]s/"
   cloud_run_v2_custom_endpoint           = "%[1]s/v2/"
   secret_manager_custom_endpoint         = "%[1]s/v1/"
   # service_usage_custom_endpoint must NOT include /v1/ — the provider
   # prepends "v1/projects/.../services" itself. Including /v1/ here
   # produces /v1/v1/projects/.../services which fakegcp 501s.
   service_usage_custom_endpoint          = "%[1]s/"
+  # service_networking_custom_endpoint covers Private Service Access
+  # (google_service_networking_connection). servicenetworking lib uses
+  # v1/{+parent}/connections-style relative paths, so BasePath should
+  # be host-only. Without this override, the provider 401s against
+  # the real servicenetworking.googleapis.com and Cloud SQL private-IP
+  # scenarios stall.
+  service_networking_custom_endpoint     = "%[1]s/"
   redis_custom_endpoint                  = "%[1]s/v1/"
   # Cloud KMS — fakegcp ships stub key-ring/crypto-key handlers so
   # the gcp.encryption policy (CMEK on storage/sql/disk) can be

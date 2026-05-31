@@ -38,6 +38,21 @@ var (
 	//   `no argument, nested block, or exported attribute named "X"`
 	unsupportedAttrNameRe = regexp.MustCompile(`(?i)attribute\s+named\s+"([A-Za-z0-9_]+)"`)
 
+	// Captures the offending argument name from the wrapped Unsupported
+	// argument shape: `An argument named "X" is not expected here.`
+	// The legacy unsupportedArgRe ("Unsupported argument.*\"X\"") only
+	// matches single-line shapes because `.*` doesn't span newlines —
+	// real diagnostics wrap, so they fell through to the descriptive
+	// fallback and the LLM kept reintroducing the same bad argument
+	// (gcp-cloud-run deletion_protection was the motivating case).
+	unsupportedArgNameRe = regexp.MustCompile(`(?i)argument\s+named\s+"([A-Za-z0-9_]+)"`)
+
+	// Captures the resource type from `in resource "TYPE" "NAME":`
+	// (always present in terraform's Unsupported-argument diagnostic
+	// for the owning block — preferred over extractResource which
+	// picks up cross-resource references).
+	inResourceTypeRe = regexp.MustCompile(`in\s+resource\s+"([a-z][a-z0-9_]*)"`)
+
 	// Terraform's "Did you mean Y?" suggestion, when present.
 	didYouMeanRe = regexp.MustCompile(`(?i)Did you mean "([A-Za-z0-9_]+)"\??`)
 
@@ -199,6 +214,19 @@ func ExtractLearnedPitfall(failureDetail, scenarioName string) *LearnedPitfall {
 	// getting only the descriptive fallback ("X failed"), which it
 	// failed to act on; a prescriptive rule converges in one shot.
 	if pitfall := matchScalewayMissingPrivateNic(failureDetail, scenarioName); pitfall != nil {
+		return pitfall
+	}
+	// (8) Unsupported argument with wrapped diagnostic — the legacy
+	// unsupportedArgRe at line ~130 only catches single-line shapes;
+	// the real terraform output wraps the argument name onto a later
+	// `An argument named "X" is not expected here.` line which the
+	// single-line regex misses. This template fires on the wrapped
+	// shape and emits a prescriptive rule that names BOTH the resource
+	// type AND the arg to remove — motivated by gcp-cloud-run where
+	// the LLM kept reintroducing `deletion_protection = false` on
+	// `google_cloud_run_v2_service` because the descriptive fallback
+	// (raw stderr dump) was unactionable.
+	if pitfall := matchUnsupportedArgument(failureDetail, scenarioName); pitfall != nil {
 		return pitfall
 	}
 
@@ -427,6 +455,53 @@ func matchUnsupportedAttribute(detail, scenario string) *LearnedPitfall {
 	return &LearnedPitfall{Resource: resource, Rule: rule, DiscoveredFrom: scenario}
 }
 
+// matchUnsupportedArgument — terraform "Unsupported argument" diagnostic
+// in its real wrapped form. The legacy single-line regex
+// `Unsupported argument.*"(\w+)"` (unsupportedArgRe) misses the wrapped
+// shape because `.*` doesn't span newlines and terraform always wraps
+// the bad-arg line under the marker:
+//
+//	╷
+//	│ Error: Unsupported argument
+//	│
+//	│   on main.tf line 6, in resource "google_cloud_run_v2_service" "api":
+//	│    6:   deletion_protection = false
+//	│
+//	│ An argument named "deletion_protection" is not expected here.
+//	╵
+//
+// The descriptive fallback fired for this shape and produced a verbatim
+// stderr dump that the LLM couldn't parse. This template catches the
+// wrapped shape, prefers the `in resource "TYPE"` block as the owning
+// resource (over extractResource which would pick up the first
+// occurrence — fine here but fragile when references to other
+// resources appear in the same diagnostic), and emits a prescriptive
+// rule that names both the resource and the arg to remove.
+func matchUnsupportedArgument(detail, scenario string) *LearnedPitfall {
+	lower := strings.ToLower(detail)
+	if !strings.Contains(lower, "unsupported argument") &&
+		!strings.Contains(lower, "is not expected here") {
+		return nil
+	}
+	cleaned := boxDrawingStripRe.ReplaceAllString(detail, " ")
+	m := unsupportedArgNameRe.FindStringSubmatch(cleaned)
+	if len(m) < 2 {
+		return nil
+	}
+	argName := m[1]
+	var resource string
+	if rm := inResourceTypeRe.FindStringSubmatch(cleaned); len(rm) >= 2 {
+		resource = rm[1]
+	} else {
+		resource = extractResource(detail)
+	}
+	if resource == "" {
+		return nil
+	}
+	rule := fmt.Sprintf("`%s` does NOT accept the argument `%s` — the provider rejects it with \"An argument named \"%s\" is not expected here.\" Remove the `%s = ...` line from every `%s` block; do NOT reintroduce it across iterations. Check the provider docs for the canonical argument set (common traps: deprecated/renamed args, v1→v2 service rewrites where the old arg moved or disappeared).", resource, argName, argName, argName, resource)
+	return &LearnedPitfall{Resource: resource, Rule: rule, DiscoveredFrom: scenario}
+}
+
 // matchDestroyBlockers — AWS resources with deletion_protection or
 // missing force_destroy that block tofu destroy.
 func matchDestroyBlockers(detail, scenario string) *LearnedPitfall {
@@ -485,6 +560,28 @@ func AppendPitfall(pitfallsDir, cloud string, pitfall LearnedPitfall) error {
 		}
 	}
 
+	// Verbatim → prescriptive upgrade: when the new candidate is a
+	// prescriptive rule (no terraform box-drawing chars, no raw stderr
+	// prefix) and a same-resource entry is the old descriptive fallback
+	// (verbatim diagnostic dump), REPLACE the verbatim entry rather than
+	// dedup-skipping. The old shape would otherwise permanently shadow
+	// the prescriptive form because isDuplicate matches on shared words
+	// — and a verbatim dump shares the resource type / argument name
+	// with any subsequent prescriptive rule about the same failure.
+	if !isVerbatimFallback(pitfall.Rule) {
+		for i, entry := range pf.Pitfalls {
+			if entry.Resource == pitfall.Resource && isVerbatimFallback(entry.Rule) {
+				pf.Pitfalls[i] = PitfallEntry{
+					Resource:       pitfall.Resource,
+					Rule:           pitfall.Rule,
+					Source:         "learned",
+					DiscoveredFrom: pitfall.DiscoveredFrom,
+				}
+				return writePitfallsFile(pitfallsDir, filePath, cloud, &pf)
+			}
+		}
+	}
+
 	// Deduplication: check if a similar pitfall already exists.
 	if isDuplicate(pf.Pitfalls, pitfall) {
 		return nil
@@ -498,12 +595,17 @@ func AppendPitfall(pitfallsDir, cloud string, pitfall LearnedPitfall) error {
 		DiscoveredFrom: pitfall.DiscoveredFrom,
 	})
 
-	// Marshal and write atomically via temp file.
-	out, err := yaml.Marshal(&pf)
+	return writePitfallsFile(pitfallsDir, filePath, cloud, &pf)
+}
+
+// writePitfallsFile marshals the pitfalls file and writes it atomically
+// via a same-directory temp + rename. Used by AppendPitfall on both the
+// append path and the verbatim→prescriptive upgrade path.
+func writePitfallsFile(pitfallsDir, filePath, cloud string, pf *PitfallsFile) error {
+	out, err := yaml.Marshal(pf)
 	if err != nil {
 		return fmt.Errorf("marshal pitfalls: %w", err)
 	}
-
 	// Use os.CreateTemp so two concurrent learn-paths racing on the
 	// same provider can't clobber each other's tmp file before either
 	// rename completes. Mirrors the editPitfalls API handler.
@@ -533,8 +635,20 @@ func AppendPitfall(pitfallsDir, cloud string, pitfall LearnedPitfall) error {
 		return fmt.Errorf("rename pitfalls file: %w", err)
 	}
 	cleanupPath = ""
-
 	return nil
+}
+
+// isVerbatimFallback returns true if a rule is a raw terraform stderr
+// dump (the descriptive fallback ExtractLearnedPitfall returns when no
+// M97 template fires). Detection signals: terraform box-drawing chars
+// or the "exit status 1 | stderr:" envelope prefix. AppendPitfall uses
+// this to allow a later prescriptive rule to UPGRADE an older verbatim
+// entry rather than dedup-skipping. Without this, once a verbatim entry
+// is in the file for a resource, the same-3-word-share dedup keeps
+// blocking the prescriptive form forever.
+func isVerbatimFallback(rule string) bool {
+	return strings.ContainsAny(rule, "│╷╵─") ||
+		strings.Contains(rule, "exit status 1 | stderr:")
 }
 
 // isDuplicate returns true if any existing pitfall has the same resource

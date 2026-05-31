@@ -236,6 +236,91 @@ func TestExtractLearnedPitfall_M97_UnsupportedAttribute_AllClouds(t *testing.T) 
 	}
 }
 
+// TestExtractLearnedPitfall_M97_UnsupportedArgument pins the
+// matchUnsupportedArgument template (Ticket 6 — gcp-cloud-run
+// deletion_protection). The legacy unsupportedArgRe missed wrapped
+// diagnostics so the descriptive fallback fired with a verbatim
+// stderr dump; the new template extracts both the resource and the
+// arg, and produces a PRESCRIPTIVE rule the LLM can act on.
+func TestExtractLearnedPitfall_M97_UnsupportedArgument(t *testing.T) {
+	detail := "exit status 1 | stderr: ╷\n│ Error: Unsupported argument\n│ \n│   on main.tf line 6, in resource \"google_cloud_run_v2_service\" \"api\":\n│    6:   deletion_protection = false\n│ \n│ An argument named \"deletion_protection\" is not expected here.\n╵"
+	got := ExtractLearnedPitfall(detail, "gcp-cloud-run")
+	if got == nil {
+		t.Fatal("expected pitfall for Unsupported argument wrapped diagnostic")
+	}
+	if got.Resource != "google_cloud_run_v2_service" {
+		t.Errorf("resource = %q, want google_cloud_run_v2_service", got.Resource)
+	}
+	if !strings.Contains(got.Rule, "deletion_protection") {
+		t.Errorf("rule missing arg name: %q", got.Rule)
+	}
+	if !strings.Contains(got.Rule, "Remove") && !strings.Contains(got.Rule, "does NOT accept") {
+		t.Errorf("rule not prescriptive: %q", got.Rule)
+	}
+	// Rule must NOT be a raw stderr dump.
+	if isVerbatimFallback(got.Rule) {
+		t.Errorf("rule is verbatim fallback, expected prescriptive: %q", got.Rule)
+	}
+}
+
+// TestAppendPitfall_VerbatimUpgrade pins the
+// verbatim→prescriptive upgrade path. When a same-resource entry
+// exists as a raw stderr dump and a later prescriptive rule arrives,
+// AppendPitfall REPLACES the verbatim entry rather than dedup-skipping.
+func TestAppendPitfall_VerbatimUpgrade(t *testing.T) {
+	dir := t.TempDir()
+
+	// Seed with a verbatim fallback entry (real shape from gcp.yaml).
+	initial := PitfallsFile{
+		Provider: "gcp",
+		Pitfalls: []PitfallEntry{
+			{
+				Resource:       "google_cloud_run_v2_service",
+				Rule:           "exit status 1 | stderr: ╷\n│ Error: Unsupported argument\n│ \n│   on main.tf line 6, in resource \"google_cloud_run_v2_service\" \"api\":\n│    6:   deletion_protection = false\n│ \n│ An argument named \"deletion_protection\" is not expected here.\n╵",
+				Source:         "learned",
+				DiscoveredFrom: "gcp-cloud-run",
+			},
+		},
+	}
+	data, err := yaml.Marshal(&initial)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "gcp.yaml"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Append a prescriptive rule for the same resource — should REPLACE,
+	// not dedup-skip, even though the verbatim entry shares many
+	// significant words with the prescriptive form.
+	prescriptive := LearnedPitfall{
+		Resource:       "google_cloud_run_v2_service",
+		Rule:           "`google_cloud_run_v2_service` does NOT accept the argument `deletion_protection` — Remove the line from every block.",
+		DiscoveredFrom: "gcp-cloud-run",
+	}
+	if err := AppendPitfall(dir, "gcp", prescriptive); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := os.ReadFile(filepath.Join(dir, "gcp.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pf PitfallsFile
+	if err := yaml.Unmarshal(result, &pf); err != nil {
+		t.Fatal(err)
+	}
+	if len(pf.Pitfalls) != 1 {
+		t.Fatalf("expected 1 pitfall after upgrade, got %d", len(pf.Pitfalls))
+	}
+	if isVerbatimFallback(pf.Pitfalls[0].Rule) {
+		t.Errorf("expected prescriptive rule after upgrade, still verbatim: %q", pf.Pitfalls[0].Rule)
+	}
+	if !strings.Contains(pf.Pitfalls[0].Rule, "Remove") {
+		t.Errorf("rule lost prescription on write: %q", pf.Pitfalls[0].Rule)
+	}
+}
+
 // TestExtractLearnedPitfall_UnsupportedArgument_WrappedDiagnostic pins
 // the box-drawing-strip fix in ExtractLearnedPitfall. Real terraform
 // diagnostics wrap the bad-argument name onto a separate line framed

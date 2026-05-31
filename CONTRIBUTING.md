@@ -17,7 +17,7 @@ If this is your first PR:
 - Read `README.md` (architecture + quickstart).
 - Skim `BACKLOG.md` — see the "How to read this BACKLOG" note below.
 - Look for issues labelled `good first issue` on GitHub. They're scoped to land in one focused PR each.
-- Run `make deps-up` to start the three sibling mock servers (mockway, fakegcp, fakeaws) and then `infrafactory run scenarios/training/web-app-paris.yaml` to see the run loop end-to-end.
+- Run `make up` to bring up the four-mock stack (mockway, fakegcp, fakeaws, SeaweedFS) plus the UI in one shot, then `infrafactory run scenarios/training/web-app-paris.yaml` to see the run loop end-to-end. `make down` tears it all down.
 
 ## How to read this BACKLOG
 
