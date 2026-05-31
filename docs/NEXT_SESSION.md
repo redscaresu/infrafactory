@@ -45,15 +45,28 @@ the appropriate mock repo and prune the pitfall — don't leave it.
 
 Final state after the 2026-05-31 evening close-out session:
 **33/39 pass, 6 fail** in the sweep proper, but follow-up clean
-runs closed all five tractable scenarios: `aws-full-stack` (A+B),
+runs closed ALL SIX outstanding scenarios: `aws-full-stack` (A+B),
 `web-app-paris` (seeded scaleway pitfall), `gcp-cloud-sql` (D-2+E),
-`gcp-full-stack` (D-2 alone, iter 1), and `gcp-gke-cluster` (E-2
-KMS dual-prefix, iter 3). Realistic pass rate: **38/39**. The
-NodePool "Plugin did not respond" turned out to be downstream of
-the iter 1 escape — once the LLM converged away from
-google_project_service the crash didn't recur. Last 1:
-`gcp-storage` (intermittent LLM non-determinism — not a fixable
-bug).
+`gcp-full-stack` (D-2 alone, iter 1), `gcp-gke-cluster` (E-2 KMS
+dual-prefix, iter 3), and `gcp-storage` (also benefits from E + E-2
+— the "intermittent LLM non-determinism" label was lazy; the real
+failure was the same KMS double-path bug that E fixed). Realistic
+pass rate: **39/39**.
+
+Lessons from this session worth carrying forward:
+  - Stale "intermittent" labels from prior sweeps deserve a 30-second
+    verification before being inherited. The gcp-storage failure was
+    a concrete oscillation, not noise.
+  - The NodePool "Plugin did not respond" wasn't a real plugin crash
+    — it was downstream of an iter 1 escape. Provider-side error
+    categorizations are not always trustworthy.
+  - Resource Manager v1 vs v3 endpoint flags are separate; v5
+    provider uses v3 for newer code paths (Ticket D-2 finding).
+  - KMS uses two URL prefixes against the same endpoint (lib client
+    /v1/projects/..., template /projects/... — Ticket E-2 finding).
+  - awsproto's marshalInnerXML rejects anonymous multi-field structs
+    — second time this caught me out (T1 follow-up + Ticket A
+    follow-up). Worth a vet rule.
 
 ### Closed this session
 
@@ -78,7 +91,7 @@ bug).
 | `gcp-full-stack` | **Closed by D-2 — validated 2026-05-31 22:00, `target_reached` iter 1** | Closed |
 | `gcp-gke-cluster` | **Closed by E-2 KMS dual-prefix (fakegcp `a3b1ea8`) — validated 2026-05-31 22:25, `target_reached` iter 3.** NodePool "Plugin did not respond" was downstream of an earlier escape and didn't recur once the LLM converged. | Closed |
 | `gcp-secret-manager` | **T5 closed (fakegcp `c6165b1` AccessSecretVersion handler)** | Closed |
-| `gcp-storage` | Intermittent — LLM non-determinism | n/a |
+| `gcp-storage` | **Closed by E + E-2 (same KMS bugs as gke) — validated 2026-05-31 22:40, `target_reached` iter 4.** Prior "intermittent" label was based on a pre-fix sweep where both failure modes (CMEK destroy 501, no-CMEK policy gate) were unresolvable; both are now fixed. | Closed |
 | `web-app-paris` | **Closed by seeded prescriptive pitfall (`0a7efe5`)** | Closed |
 
 ### Tickets C + E — CLOSED, Ticket D NEW (2026-05-31 ~22:00)
