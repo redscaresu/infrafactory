@@ -187,7 +187,188 @@ learning pipeline worked — no static pitfall needed.
 mostly mock-source work. Ticket 4 is still the deep one (provider
 source-reading per resource); everything else is pattern-match.
 
-## Open follow-ups (next session work)
+## Next-session candidates (proposed 2026-05-31 23:50 after 39/39)
+
+Now that the sweep is at 39/39 realistic, the remaining work is
+durability + cleanup rather than scenario-closure. Six candidates
+ranked by value-per-hour:
+
+### N1. Full 39-scenario deterministic sweep — ~30-40 min
+
+**Why:** The session closed all six previously-failing scenarios
+via *one-off* validations. That proves each one CAN pass in
+isolation but NOT that the whole set stays green simultaneously
+under shared mock state. A clean sweep is the actual evidence for
+the 39/39 claim.
+
+**Fix:** Run `bash /tmp/sweep-revalidate.sh` (or regenerate from
+this session's pattern). Reset mocks between scenarios. Tally
+pass/fail. If any scenario regresses, treat the regression as a
+new ticket — likely something we missed in the one-off validations
+(e.g., scenario-to-scenario state leak that mock-reset doesn't
+catch).
+
+**Effort:** 30-40 min wall-clock, ~15 min active.
+
+### N2. Prune stale verbatim mock-quirk pitfalls — ~1 hr
+
+**Why:** `pitfalls/aws.yaml` and `pitfalls/gcp.yaml` accumulated
+~10 verbatim mock-quirk entries during the 2026-05-31 sweep
+(`aws_kms_key` DateType, `aws_iam_user_policy` empty-result wait
+loop, `aws_subnet` MapPublicIpOnLaunch, `google_dns_record_set`
+Plugin-did-not-respond, `google_container_node_pool` "not
+implemented", `google_kms_crypto_key_iam_member`, etc.). Every one
+of these underlying bugs was FIXED this session (T-A, T-B, T-C,
+T-D-2, T-E, T-E-2, and the recovery commits). The pitfall entries
+are now stale misinformation polluting future LLM prompts — they
+teach the LLM to avoid resources that now work fine.
+
+**Fix:** Per `feedback_sweep_protocol.md`: "Pruning stale entries
+is OK after a mock-source fix." For each verbatim entry, verify
+the underlying mock bug is fixed (run the relevant scenario, see
+the resource now works), then delete the entry. Update the
+`m91_no_seeding` ratchet test if needed.
+
+**Effort:** ~1 hr (5-10 min per entry, ~10 entries).
+
+**Pair with N3 for max effect** — if T12 lands first, future
+sweeps won't accumulate these in the first place, and N2 becomes
+one-time cleanup.
+
+### N3. T12 — `isMockActionable` classifier predicate — ~half day
+
+**Why:** The auto-learning pipeline currently writes ANY recurring
+failure to `pitfalls/*.yaml` regardless of whether the failure is
+LLM-actionable (real provider/cloud constraint) or mock-actionable
+(mock-server gap that the LLM can't work around). The mock-actionable
+ones are the verbatim mock-quirks N2 has to prune by hand. Without
+T12 they keep accumulating every sweep.
+
+**Fix:** Already specified in detail in section 12 below
+(`Failure classifier — keep mock quirks OUT of pitfalls`).
+Signals: `501 Not Implemented`, `Plugin did not respond`,
+`OAuth ... access token`, `couldn't find resource (N retries)`,
+`404 ... ResourceNotFoundException` on a Describe* path. When the
+predicate fires, append to `docs/mock-gaps.md` instead of
+`pitfalls/<cloud>.yaml`. Extend the M91 ratchet to fail CI if any
+learned entry matches the predicate.
+
+**Effort:** ~half day. Strict superset of the existing pipeline;
+detection rules are simple substring/regex matches.
+
+### N4. awsproto anonymous-struct compile-time guard — ~1-2 hr
+
+**Why:** `WriteQueryRPCResponse(w, "Action", &struct{...}{})` with
+a multi-field anonymous struct silently emits
+`<!-- marshal error: xml: unsupported type: struct{...} -->`
+inside the result wrapper. The handler returns 200 and looks fine
+in unit tests if the assertions are loose; only live curl reveals
+the broken output. Bit me TWICE this session:
+  - T1 `iamGetUserPolicy` initially used an anon struct (fixed
+    inline + documented on `iamGetUserPolicyResult`).
+  - Ticket A first wave used anon structs for 4 new destroy-preflight
+    handlers (`fd8e5d1` named-struct fix + tightened tests).
+The single-field anon struct in `iamListGroupsForUser` happens to
+slip through, which masks the pattern further.
+
+**Fix:** Two options:
+  (a) Refactor `WriteQueryRPCResponse` to require a non-anonymous
+      typed argument (use a marker interface or method receiver).
+      Compile-time enforcement.
+  (b) Add a `go vet` analyzer that walks calls to
+      `awsproto.WriteQueryRPCResponse` and flags anonymous-struct
+      args with >1 field.
+(a) is cleaner; (b) is less invasive. Either prevents the next
+person from re-discovering the bug via a confused 30-min debug
+session.
+
+**Effort:** ~1-2 hr. (a) needs refactoring all existing call sites;
+(b) is a new analyzer in `internal/tools/`.
+
+### N5. `make restart-fakegcp` / `make restart-fakeaws` targets — ~15 min
+
+**Why:** `make up` starts mocks via `go run ./cmd/fakegcp`, which
+compiles ONCE at boot. After a commit, the running mock is on the
+OLD binary. `kill $(cat pidfile)` only kills the `go run` wrapper
+(captured by `$!`), not the compiled child process. Caused a 20-min
+misdiagnosis this session on Ticket D-2 ("v3 endpoint flag isn't
+working" → no, the binary is stale).
+
+**Fix:** Add Makefile targets that do `pkill -f "fakegcp --port 8081"`
+(matches the actual binary by command line, not pid) + restart via
+`go run`. Mirror for fakeaws (`pkill -f "fakeaws --port 8082"`) and
+mockway. Optionally a single `make restart-mocks` that does all three.
+
+**Effort:** ~15 min.
+
+### N6. Mockway README mirror demo — ~15 min
+
+**Why:** fakeaws + fakegcp READMEs both have a "One-shot demo
+(with sibling repos)" subsection pointing at infrafactory's
+`make up`. Mockway hasn't been touched yet. Cross-repo polish item.
+
+**Fix:** Copy the existing fakeaws/fakegcp subsection text into
+mockway's README, adjust the example scenario path to a Scaleway
+one (e.g. `scenarios/training/block-paris.yaml`).
+
+**Effort:** ~15 min.
+
+### N7. `make clean-bg` target + session-close convention — ~30 min
+
+**Why:** Background-task hygiene bit me again this session. The
+prior incident (documented in the existing "Session-close hygiene"
+section below) covered `Monitor()` calls. This session's lingering
+task was an auto-backgrounded `Bash` command — specifically the
+`make up` from session start, which the harness backgrounded
+because `make` spawns long-running children (mockway, fakegcp,
+fakeaws, UI). The wrapper shell stayed in the task tracker for
+the entire 4-hour session, triggering the "Background work is
+running" prompt at exit.
+
+The broader rule: **any harness task with `run_in_background: true`
+needs an explicit `TaskStop` when its purpose is served**, not
+just `Monitor()`. This includes:
+  - `Bash` with `run_in_background: true` (validation runs,
+    background builds).
+  - `Bash` commands the harness auto-backgrounds because of
+    long-running children (`make up`, `nohup ...`).
+  - `Monitor()` calls (already covered in the existing convention).
+
+**Fix:** Two parts:
+  (a) **`make clean-bg`** (or `make clean`) Makefile target that
+      kills any lingering `bash /tmp/sweep-*.sh`, `tail -F
+      /tmp/sweep-*.log`, and per-mock `go run` wrappers from prior
+      sessions. Cheap, removes friction at session start when the
+      prior session crashed mid-run.
+  (b) **Convention update**: extend the existing close-out checklist
+      to call out `Bash run_in_background` tasks too, not just
+      `Monitor`. A future session that runs a long sweep via
+      `Bash(run_in_background=true)` should pair it with a
+      `TaskStop` when the sweep finishes (or when bailing out on
+      first failure).
+
+(b) is a memory-update; (a) is a small Makefile addition.
+
+**Effort:** ~30 min total.
+
+---
+
+## Recommended order
+
+If picking ONE thing: **N1 → N2** together (~2 hr total). The
+sweep proves 39/39 deterministic, and the prune cleans the pitfalls
+file based on what the sweep revealed as actually-recurring vs.
+fixed.
+
+If picking the most durable thing: **N3** (T12 classifier) —
+prevents future sweeps from re-polluting the pitfalls files,
+making N2 a one-time job rather than a recurring cleanup.
+
+Quick wins: N5 + N6 + N7 together (~75 min).
+
+---
+
+## Open follow-ups from prior sessions (mostly closed)
 
 Tickets are detailed below in the same order they appeared during
 the sweep — but the map above is the order to *work* them.
@@ -501,29 +682,37 @@ If you need to reproduce the full sweep:
 bash /tmp/sweep-full.sh   # if still on disk, else regenerate from this file's sweep order
 ```
 
-## Session-close hygiene (lesson from 2026-05-31 close)
+## Session-close hygiene (lessons from 2026-05-31 + 2026-06-01 closes)
 
-Long sweep sessions accumulate persistent harness Monitors that
-survive across sub-sessions and only die at session exit. They don't
-hurt anything but they cause the harness to prompt "Background work
-is running" when you try to exit. Always call **TaskStop** on every
-Monitor you launched before closing the session.
+Long sessions accumulate persistent background harness tasks that
+survive across sub-sessions and only die at session exit. They
+don't hurt anything but they cause the harness to prompt
+"Background work is running" when you try to exit. Always call
+**TaskStop** on every backgrounded task before closing the session.
 
-Workflow improvements to land in the next session:
+**Scope** (broadened after 2026-06-01 incident): the rule covers
+NOT JUST `Monitor()` calls but ALSO:
+- `Bash` with explicit `run_in_background: true`.
+- `Bash` commands the harness auto-backgrounds because of
+  long-running children (`make up`, anything `nohup`-style).
 
-- **Convention**: every `Monitor()` call gets a paired `TaskStop()`
+Workflow improvements proposed in [[N7]] above:
+
+- **Convention**: every backgrounded task gets a paired `TaskStop()`
   when its purpose is done — don't leave them armed "just in case."
   Especially after a sweep finishes (or stops on the first failure
-  for the bail-out pattern) — stop the monitor that was tailing
-  its stdout immediately.
+  for the bail-out pattern) — stop the monitor/wrapper that was
+  tailing its stdout immediately.
 
-- **Optional tooling**: an `infrafactory clean` (or just `make clean`)
-  target that finds and kills any lingering `bash /tmp/sweep-*.sh`
-  + `tail -F /tmp/sweep-*-stdout.log` processes the previous session
-  left running. Cheap, removes friction.
+- **Tooling**: `make clean-bg` (or `make clean`) target that finds
+  and kills any lingering `bash /tmp/sweep-*.sh` + `tail -F
+  /tmp/sweep-*-stdout.log` processes the previous session left
+  running. Cheap, removes friction. (See N7 for full spec.)
 
-Specific background tasks that survived this session's close
+Specific background tasks that survived prior-session closes
 (stopped manually before exit):
-- `bzlwxl814` — Sweep-progress monitor (initial sweep run)
-- `bek3umbwi` — Sweep 25 mock-state-reset monitor
-- `b2s4vo2i5` — Revalidation-sweep monitor
+- 2026-05-31: `bzlwxl814` (sweep-progress monitor), `bek3umbwi`
+  (sweep 25 reset monitor), `b2s4vo2i5` (revalidation-sweep monitor).
+- 2026-06-01: `b7qym91sk` (the `make up` wrapper shell that stayed
+  alive the entire ~4-hour session because make spawned long-running
+  child mocks).
