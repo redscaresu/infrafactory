@@ -48,3 +48,7 @@ pitfalls:
       rule: '`google_kms_crypto_key_iam_member` is not implemented by the matching mock server. Do NOT use this resource type — pick an alternative that the mock supports. Check the mock''s regression_manifest.go for the LandedServices list.'
       source: learned
       discovered_from: gcp-full-stack
+    - resource: google_kms_key_ring
+      rule: '`google_kms_key_ring` is not implemented by the matching mock server. Do NOT use this resource type — pick an alternative that the mock supports. Check the mock''s regression_manifest.go for the LandedServices list.'
+      source: learned
+      discovered_from: gcp-gke-cluster
