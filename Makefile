@@ -212,6 +212,40 @@ mocks-up: mockway-up fakegcp-up fakeaws-up seaweedfs-up
 mocks-down: mockway-down fakegcp-down fakeaws-down seaweedfs-down
 	@echo "all mocks stopped"
 
+# N5 (2026-06-01): per-mock restart shorthand. Picks up source changes in
+# the sibling repo by killing the running binary (via the *-down target's
+# port-fallback kill, which catches both the `go run` wrapper AND its
+# child binary) then re-running `go run`. The session that uncovered
+# Ticket D-2 wasted ~20 min on a "the fix isn't working" misdiagnosis
+# that was actually a stale binary still running with the OLD source.
+# Use `make fakegcp-restart` (etc) any time you commit a change to a
+# sibling mock repo and want the running mock to pick it up.
+mockway-restart: mockway-down mockway-up
+	@echo "mockway restarted"
+
+fakegcp-restart: fakegcp-down fakegcp-up
+	@echo "fakegcp restarted"
+
+fakeaws-restart: fakeaws-down fakeaws-up
+	@echo "fakeaws restarted"
+
+mocks-restart: mocks-down mocks-up
+	@echo "all mocks restarted"
+
+# N7 (2026-06-01): clean-bg sweeps lingering background processes the
+# previous session may have left running — sweep scripts, log tails,
+# stray mock binaries on non-canonical ports. Cheap, idempotent, safe
+# to run any time. Companion to the session-close hygiene convention
+# documented in docs/NEXT_SESSION.md.
+clean-bg:
+	@echo "stopping lingering sweep scripts + log tails..."
+	@pkill -f '^bash /tmp/sweep-.*\.sh$$' 2>/dev/null && echo "  killed sweep scripts" || echo "  no sweep scripts running"
+	@pkill -f '^tail -F /tmp/sweep-.*\.log$$' 2>/dev/null && echo "  killed sweep log tails" || echo "  no log tails running"
+	@pkill -f 'fakegcp --port [0-9]+ --db /tmp/' 2>/dev/null && echo "  killed stray fakegcp test binaries" || echo "  no stray fakegcp test binaries"
+	@pkill -f 'fakeaws --port [0-9]+ --db /tmp/' 2>/dev/null && echo "  killed stray fakeaws test binaries" || echo "  no stray fakeaws test binaries"
+	@pkill -f 'mockway --port [0-9]+ --db /tmp/' 2>/dev/null && echo "  killed stray mockway test binaries" || echo "  no stray mockway test binaries"
+	@echo "clean-bg complete"
+
 mocks-status:
 	@for entry in "mockway:$(MOCKWAY_PORT)" "fakegcp:$(FAKEGCP_PORT)" "fakeaws:$(FAKEAWS_PORT)" "seaweedfs:$(SEAWEEDFS_PORT)"; do \
 		name=$${entry%:*}; \
