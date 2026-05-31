@@ -201,6 +201,16 @@ func buildGoogleProviderBlock(fakegcpURL string) string {
   compute_custom_endpoint                = "%[1]s/compute/v1/"
   container_custom_endpoint              = "%[1]s/"
   cloud_resource_manager_custom_endpoint = "%[1]s/v1/"
+  # resource_manager_v3_custom_endpoint covers Resource Manager v3,
+  # which newer v5 code paths (notably google_service_networking_connection
+  # and the getProject() preflight several resources call before Read)
+  # use instead of v1. Pre-Ticket-D-2 the v1 override was set but v3
+  # wasn't, so the preflight escaped to real
+  # cloudresourcemanager.googleapis.com and surfaced as a misleading
+  # 401 ACCESS_TOKEN_TYPE_UNSUPPORTED error that LOOKED like an auth
+  # issue but was actually a missing-endpoint-override.
+  # Host-only (no trailing /v3/) — same shape pattern as T2 / T11.
+  resource_manager_v3_custom_endpoint    = "%[1]s/"
   # iam_custom_endpoint must NOT include a trailing /v1/ — the
   # provider prepends "v1/projects/..." for google_service_account.
   # Including /v1/ here produces /v1/v1/projects/... which fakegcp
