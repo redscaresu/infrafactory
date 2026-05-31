@@ -435,3 +435,155 @@ func TestCommonNamingPolicyGCPExemptions(t *testing.T) {
 		})
 	}
 }
+
+// TestM98_VpcRequiredAcceptsKnownAfterApplyRefs pins the M98 fix:
+// vpc_required.rego must accept HCL where subnetwork is a reference
+// to a not-yet-created resource (plan-time value is null, but
+// resource_changes[].change.after_unknown.network_interface[i]
+// .subnetwork == true signals "set via reference").
+func TestM98_VpcRequiredAcceptsKnownAfterApplyRefs(t *testing.T) {
+	t.Parallel()
+	policyPath := filepath.Join("..", "..", "policies", "gcp", "vpc_required.rego")
+
+	cases := []struct {
+		name       string
+		planJSON   string
+		expectFail bool
+	}{
+		{
+			name: "compute instance with subnetwork as reference passes",
+			planJSON: `{
+  "planned_values": {"root_module": {"resources": [
+    {"address":"google_compute_instance.api","type":"google_compute_instance","values":{
+      "network_interface":[{"network":null,"subnetwork":null}]
+    }}
+  ]}},
+  "resource_changes": [
+    {"address":"google_compute_instance.api","type":"google_compute_instance","change":{
+      "after_unknown":{"network_interface":[{"network":true,"subnetwork":true}]}
+    }}
+  ]
+}`,
+			expectFail: false,
+		},
+		{
+			name: "compute instance with no subnetwork at all still fails",
+			planJSON: `{
+  "planned_values": {"root_module": {"resources": [
+    {"address":"google_compute_instance.api","type":"google_compute_instance","values":{
+      "network_interface":[{"network":null,"subnetwork":null}]
+    }}
+  ]}},
+  "resource_changes": [
+    {"address":"google_compute_instance.api","type":"google_compute_instance","change":{
+      "after_unknown":{"network_interface":[{"network":false,"subnetwork":false}]}
+    }}
+  ]
+}`,
+			expectFail: true,
+		},
+		{
+			name: "gke cluster with network as reference passes",
+			planJSON: `{
+  "planned_values": {"root_module": {"resources": [
+    {"address":"google_container_cluster.primary","type":"google_container_cluster","values":{
+      "network":null,"subnetwork":null
+    }}
+  ]}},
+  "resource_changes": [
+    {"address":"google_container_cluster.primary","type":"google_container_cluster","change":{
+      "after_unknown":{"network":true,"subnetwork":false}
+    }}
+  ]
+}`,
+			expectFail: false,
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			failures, err := EvaluatePlanPolicies(context.Background(), []byte(tc.planJSON), []string{policyPath})
+			if err != nil {
+				t.Fatalf("evaluate: %v", err)
+			}
+			if tc.expectFail && len(failures) == 0 {
+				t.Fatalf("expected failure, got none")
+			}
+			if !tc.expectFail && len(failures) > 0 {
+				t.Fatalf("expected no failures (M98: refs should pass), got: %+v", failures)
+			}
+		})
+	}
+}
+
+// TestM98_EncryptionAcceptsKnownAfterApplyRefs pins the M98 fix for
+// encryption.rego: when encryption.default_kms_key_name or
+// encryption_key_name is a reference to a not-yet-created KMS key,
+// the policy passes via the after_unknown branch.
+func TestM98_EncryptionAcceptsKnownAfterApplyRefs(t *testing.T) {
+	t.Parallel()
+	policyPath := filepath.Join("..", "..", "policies", "gcp", "encryption.rego")
+
+	planJSON := `{
+  "planned_values": {"root_module": {"resources": [
+    {"address":"google_storage_bucket.assets","type":"google_storage_bucket","values":{
+      "encryption":[{"default_kms_key_name":null}]
+    }},
+    {"address":"google_sql_database_instance.main","type":"google_sql_database_instance","values":{
+      "encryption_key_name":null
+    }}
+  ]}},
+  "resource_changes": [
+    {"address":"google_storage_bucket.assets","type":"google_storage_bucket","change":{
+      "after_unknown":{"encryption":[{"default_kms_key_name":true}]}
+    }},
+    {"address":"google_sql_database_instance.main","type":"google_sql_database_instance","change":{
+      "after_unknown":{"encryption_key_name":true}
+    }}
+  ]
+}`
+	failures, err := EvaluatePlanPolicies(context.Background(), []byte(planJSON), []string{policyPath})
+	if err != nil {
+		t.Fatalf("evaluate: %v", err)
+	}
+	if len(failures) > 0 {
+		t.Fatalf("M98: encryption refs should pass; got failures: %+v", failures)
+	}
+}
+
+// TestM98_AWSVpcRequiredAcceptsKnownAfterApplyRefs pins the M98 fix
+// for aws/vpc_required.rego — aws_instance.subnet_id,
+// aws_db_instance.db_subnet_group_name, and aws_eks_cluster's
+// vpc_config.subnet_ids can be references.
+func TestM98_AWSVpcRequiredAcceptsKnownAfterApplyRefs(t *testing.T) {
+	t.Parallel()
+	policyPath := filepath.Join("..", "..", "policies", "aws", "vpc_required.rego")
+
+	planJSON := `{
+  "planned_values": {"root_module": {"resources": [
+    {"address":"aws_instance.web","type":"aws_instance","values":{"subnet_id":null}},
+    {"address":"aws_db_instance.main","type":"aws_db_instance","values":{"db_subnet_group_name":null}},
+    {"address":"aws_eks_cluster.k8s","type":"aws_eks_cluster","values":{"vpc_config":[{"subnet_ids":[]}]}}
+  ]}},
+  "resource_changes": [
+    {"address":"aws_instance.web","type":"aws_instance","change":{
+      "after_unknown":{"subnet_id":true}
+    }},
+    {"address":"aws_db_instance.main","type":"aws_db_instance","change":{
+      "after_unknown":{"db_subnet_group_name":true}
+    }},
+    {"address":"aws_eks_cluster.k8s","type":"aws_eks_cluster","change":{
+      "after_unknown":{"vpc_config":[{"subnet_ids":true}]}
+    }}
+  ]
+}`
+	failures, err := EvaluatePlanPolicies(context.Background(), []byte(planJSON), []string{policyPath})
+	if err != nil {
+		t.Fatalf("evaluate: %v", err)
+	}
+	if len(failures) > 0 {
+		t.Fatalf("M98: AWS refs should pass; got: %+v", failures)
+	}
+}
