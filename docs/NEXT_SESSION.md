@@ -45,11 +45,11 @@ the appropriate mock repo and prune the pitfall — don't leave it.
 
 Final state after the 2026-05-31 evening close-out session:
 **33/39 pass, 6 fail** in the sweep proper, but follow-up clean
-runs validated `aws-full-stack` (after Tickets A + B) AND
-`web-app-paris` (after the auto-learned scaleway_instance_server
-prescriptive pitfall was seeded by `0a7efe5`). Realistic pass rate
-going into next session: **35/39**. Last 4: `gcp-cloud-sql`,
-`gcp-full-stack`, `gcp-gke-cluster`, `gcp-storage` (intermittent).
+runs closed three more — `aws-full-stack` (Tickets A + B),
+`web-app-paris` (auto-learned scaleway pitfall seeded by
+`0a7efe5`), and `gcp-cloud-sql` (Tickets D-2 + E). Realistic pass
+rate: **36/39**. Last 3: `gcp-full-stack`, `gcp-gke-cluster`,
+`gcp-storage` (intermittent).
 
 ### Closed this session
 
@@ -70,12 +70,12 @@ going into next session: **35/39**. Last 4: `gcp-cloud-sql`,
 | Failing scenario | Closes when these tickets land | Confidence |
 |---|---|---|
 | `aws-full-stack` | **Tickets A + B closed (fakeaws `b7db72d`, `fd8e5d1`, `ff0c38d`) — validated end-to-end 2026-05-31 20:00, `target_reached` iter 2** | Closed |
-| `gcp-cloud-sql` | Ticket 3 fakegcp routes (endpoint flag landed, routes pending) | High |
-| `gcp-full-stack` | Tickets 3 + 4 (plugin crash on `google_sql_database_instance`) | Medium |
+| `gcp-cloud-sql` | **Tickets D-2 + E closed (infrafactory `3b32364`, fakegcp `d9c6545`) — validated end-to-end 2026-05-31 21:45, `target_reached` iter 5** | Closed |
+| `gcp-full-stack` | Likely closed by D-2 (same v3 escape); plus T4 if NodePool involved | Medium |
 | `gcp-gke-cluster` | Ticket 4 (NodePool plugin crash) | High |
-| `gcp-secret-manager` | Ticket 5 (SecretVersion 404) | Medium |
+| `gcp-secret-manager` | **T5 closed (fakegcp `c6165b1` AccessSecretVersion handler)** | Closed |
 | `gcp-storage` | Intermittent — LLM non-determinism | n/a |
-| `web-app-paris` | Regression introduced this session — see notes | Unknown |
+| `web-app-paris` | **Closed by seeded prescriptive pitfall (`0a7efe5`)** | Closed |
 
 ### Tickets C + E — CLOSED, Ticket D NEW (2026-05-31 ~22:00)
 
@@ -98,23 +98,25 @@ lib prepends v1/projects/... to BasePath itself, so trailing /v1/
 doubled to /v1/v1/projects/... which fakegcp 501'd. Surfaced in
 gcp-cloud-sql iter 5.
 
-**Ticket D — google_project_service Read escapes to real cloud — OPEN.**
-Even with T-C's GetProject handler in place, gcp-cloud-sql iter 1
-still hits Error 401 / ACCESS_TOKEN_TYPE_UNSUPPORTED on
-google_project_service Read for compute/sqladmin/servicenetworking.
-fakegcp log shows ZERO calls to the bare /v1/projects/<id> route
-during iter 1 — the provider's getProject helper for this resource
-uses a code path that DOESN'T respect cloud_resource_manager_custom_endpoint
-and escapes to the real cloudresourcemanager.googleapis.com.
-Likely a terraform-provider-google v5.45.2 bug. Three options for
-next session:
-  1. Bump provider version (try latest v5.x or v6 — may have other
-     fallout; v6 split / renamed endpoint vars).
-  2. Pitfall: tell the LLM that `google_project_service` is
-     unnecessary in fakegcp scenarios (all services are
-     always-enabled). Risk: teaches LLM to avoid a valid resource.
-  3. Read provider source to find the actual flag that routes
-     this specific call. Most rigorous.
+**Ticket D — google_project_service Read escapes — CLOSED via D-2.**
+Root cause: terraform-provider-google v5.45.2 uses Resource Manager
+**v3** for the getProject preflight inside google_service_networking_connection
++ several other newer code paths. We were only setting v1's endpoint
+(`cloud_resource_manager_custom_endpoint`), so v3 calls escaped to
+real cloudresourcemanager.googleapis.com and surfaced as misleading
+401 ACCESS_TOKEN_TYPE_UNSUPPORTED errors. Found via binary-strings
+hunt on the v5.45.2 provider:
+`GOOGLE_RESOURCE_MANAGER_V3_CUSTOM_ENDPOINT` is a distinct env-var
+override.
+
+Fix (Ticket D-2):
+  - infrafactory `3b32364` added `resource_manager_v3_custom_endpoint`
+    to the provider template (host-only per the strip-regex pattern).
+  - fakegcp `d9c6545` added `GET /v3/projects/{project}` handler
+    (v3 response shape differs: "name" is "projects/{id}", state
+    field is "state" not "lifecycleState", parent is a string).
+  - Validated end-to-end: `gcp-cloud-sql` closes target_reached
+    iter 5 after self-learning loop convergence.
 
 ### Tickets A + B — CLOSED 2026-05-31 evening, validated end-to-end
 
