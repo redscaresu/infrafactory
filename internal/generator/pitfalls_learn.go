@@ -33,6 +33,19 @@ var (
 	// Matches "Unsupported argument" errors with argument name in quotes.
 	unsupportedArgRe = regexp.MustCompile(`Unsupported argument.*"(\w+)"`)
 
+	// Captures the offending attribute name from either:
+	//   `does not have an attribute named "X"`
+	//   `no argument, nested block, or exported attribute named "X"`
+	unsupportedAttrNameRe = regexp.MustCompile(`(?i)attribute\s+named\s+"([A-Za-z0-9_]+)"`)
+
+	// Terraform's "Did you mean Y?" suggestion, when present.
+	didYouMeanRe = regexp.MustCompile(`(?i)Did you mean "([A-Za-z0-9_]+)"\??`)
+
+	// Terraform's diagnostic frame characters — `│` is on every wrapped
+	// line of the error body and silently breaks `\s+` bridging in the
+	// matchers above.
+	boxDrawingStripRe = regexp.MustCompile("[╷╵│─]+")
+
 	// Matches "at least one of" constraint errors.
 	atLeastOneOfRe = regexp.MustCompile(`at least one of\s+(.+?)(?:\s+must|\s+should|\s*\()`)
 
@@ -59,6 +72,15 @@ func ExtractLearnedPitfall(failureDetail, scenarioName string) *LearnedPitfall {
 	}
 
 	lower := strings.ToLower(failureDetail)
+
+	// Box-drawing characters (`╷`, `│`, `╵`, `─`) frame every line of a
+	// terraform diagnostic. Any regex below that uses `.*` or `\s+` to
+	// bridge content across lines silently fails on multi-line shapes
+	// because `.*` doesn't match newlines and `\s+` doesn't match `│`.
+	// Use a cleaned view for regex matching while preserving the raw
+	// failureDetail for substring checks and the descriptive fallback's
+	// rule text.
+	cleanedDetail := boxDrawingStripRe.ReplaceAllString(failureDetail, " ")
 
 	// Check specific patterns BEFORE generic rejection, since specific
 	// errors may be embedded inside generic wrappers like "exit status 1 | stderr: ..."
@@ -97,8 +119,12 @@ func ExtractLearnedPitfall(failureDetail, scenarioName string) *LearnedPitfall {
 		}
 	}
 
-	// Try specific pattern: Unsupported argument.
-	if matches := unsupportedArgRe.FindStringSubmatch(failureDetail); len(matches) >= 2 {
+	// Try specific pattern: Unsupported argument. Match against the
+	// box-drawing-stripped view because `Unsupported argument.*"X"` has
+	// `.*` between the marker and the quoted name, and `.*` doesn't
+	// span newlines — terraform's wrapped diagnostics put `X` on a
+	// later line in most real failures.
+	if matches := unsupportedArgRe.FindStringSubmatch(cleanedDetail); len(matches) >= 2 {
 		resource := extractResource(failureDetail)
 		argName := matches[1]
 		if resource != "" {
@@ -110,8 +136,10 @@ func ExtractLearnedPitfall(failureDetail, scenarioName string) *LearnedPitfall {
 		}
 	}
 
-	// Try specific pattern: "at least one of".
-	if matches := atLeastOneOfRe.FindStringSubmatch(failureDetail); len(matches) >= 2 {
+	// Try specific pattern: "at least one of". Same reason as above —
+	// the constraint list typically wraps to a second line in the
+	// diagnostic body and `\s+` won't bridge `│`.
+	if matches := atLeastOneOfRe.FindStringSubmatch(cleanedDetail); len(matches) >= 2 {
 		resource := extractResource(failureDetail)
 		constraint := strings.TrimSpace(matches[1])
 		if resource != "" {
@@ -156,6 +184,23 @@ func ExtractLearnedPitfall(failureDetail, scenarioName string) *LearnedPitfall {
 	if pitfall := matchDestroyBlockers(failureDetail, scenarioName); pitfall != nil {
 		return pitfall
 	}
+	// (6) "Unsupported attribute" / "no exported attribute named" — the
+	// LLM wrote `resource.X.private_ip` when the attribute is actually
+	// `private_ips` (plural). Common shape across all 3 clouds: the
+	// terraform error often includes a "Did you mean Y" suggestion we
+	// can hand straight to the LLM.
+	if pitfall := matchUnsupportedAttribute(failureDetail, scenarioName); pitfall != nil {
+		return pitfall
+	}
+	// (7) Scaleway VPC attachment — "X is not attached to a private
+	// network via scaleway_instance_private_nic". Counterpart to
+	// matchMissingSubnetwork on GCP. The 2026-05-30 sweep showed the
+	// LLM hitting this in web-app-paris and private-lb-db-paris and
+	// getting only the descriptive fallback ("X failed"), which it
+	// failed to act on; a prescriptive rule converges in one shot.
+	if pitfall := matchScalewayMissingPrivateNic(failureDetail, scenarioName); pitfall != nil {
+		return pitfall
+	}
 
 	// Fallback FIRST: if a `scaleway_*` / `google_*` resource is named
 	// AND the detail is long enough to be meaningful, capture it.
@@ -194,6 +239,22 @@ func ExtractLearnedPitfall(failureDetail, scenarioName string) *LearnedPitfall {
 func extractResource(text string) string {
 	if match := resourceNameRe.FindString(text); match != "" {
 		return match
+	}
+	return ""
+}
+
+// resourceOwningAttribute finds the resource type whose `.attr` access
+// triggered an Unsupported attribute / no exported attribute error.
+// Returns the empty string when no such chain is in the detail.
+func resourceOwningAttribute(detail, attr string) string {
+	pattern := `\b((?:scaleway|google|aws)_\w+)[\w.\[\]\*]*\.` + regexp.QuoteMeta(attr) + `\b`
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return ""
+	}
+	m := re.FindStringSubmatch(detail)
+	if len(m) >= 2 {
+		return m[1]
 	}
 	return ""
 }
@@ -272,6 +333,97 @@ func matchOAuthEscape(detail, scenario string) *LearnedPitfall {
 		return nil
 	}
 	rule := fmt.Sprintf("`%s` is escaping to the REAL cloud API (401 OAuth/auth error). The provider block in `providers.tf` is missing a `*_custom_endpoint` override for this resource's service. Either add the matching custom_endpoint OR remove `%s` from this scenario (the mock doesn't intercept it).", resource, resource)
+	return &LearnedPitfall{Resource: resource, Rule: rule, DiscoveredFrom: scenario}
+}
+
+// matchScalewayMissingPrivateNic — Scaleway VPC-attachment failure
+// surfaced by the vpc_required policy: a `scaleway_instance_server`
+// is not attached to a private network via `scaleway_instance_private_nic`.
+// The descriptive fallback echoes the policy message verbatim ("X is
+// not attached…") but the LLM treats that as a status, not a
+// prescription; the M97 sweep on 2026-05-30 showed it converging on
+// either oscillating or stuck without the explicit "declare these
+// resources" guidance. This template emits the same shape of
+// actionable rule as matchMissingSubnetwork does for GCP.
+func matchScalewayMissingPrivateNic(detail, scenario string) *LearnedPitfall {
+	lower := strings.ToLower(detail)
+	if !strings.Contains(lower, "scaleway_instance_private_nic") {
+		return nil
+	}
+	if !strings.Contains(lower, "not attached") && !strings.Contains(lower, "must be attached") {
+		return nil
+	}
+	resource := extractResource(detail)
+	if resource == "" {
+		// Fall back to the resource the rule applies to even when the
+		// caller's detail mentions only `scaleway_instance_private_nic`.
+		resource = "scaleway_instance_server"
+	}
+	rule := "Always declare a `scaleway_vpc_private_network` AND a `scaleway_instance_private_nic` for EACH `scaleway_instance_server`. The private NIC has the shape: `resource \"scaleway_instance_private_nic\" \"NAME\" { server_id = scaleway_instance_server.SERVER.id; private_network_id = scaleway_vpc_private_network.PN.id }`. The `vpc_required` policy fails any instance without this attachment. Add one NIC per instance (use `count` to mirror the `count` on the instance) — do NOT rely on the instance's `routed_ip_enabled` flag, which the provider doesn't accept."
+	return &LearnedPitfall{Resource: resource, Rule: rule, DiscoveredFrom: scenario}
+}
+
+// matchUnsupportedAttribute — terraform "Unsupported attribute" /
+// "no argument, nested block, or exported attribute named ..." errors.
+// Cloud-agnostic: applies to scaleway_*, google_*, aws_* identically.
+//
+// Two real shapes seen across the three mocks:
+//
+//	This object does not have an attribute named "private_ip".
+//	This object has no argument, nested block, or exported attribute
+//	named "private_ip". Did you mean "private_ips"?
+//
+// When terraform offers a "Did you mean Y" suggestion we forward it
+// verbatim — the LLM's most common failure mode here is guessing
+// `private_ip` (singular) when the provider exports `private_ips`
+// (plural), or `id`/`self_link`/`arn` confusion across clouds. A
+// prescriptive rule that names BOTH the wrong attribute AND the
+// suggested replacement converges in one shot.
+func matchUnsupportedAttribute(detail, scenario string) *LearnedPitfall {
+	lower := strings.ToLower(detail)
+	if !strings.Contains(lower, "unsupported attribute") &&
+		!strings.Contains(lower, "exported attribute named") {
+		return nil
+	}
+	// Terraform diagnostics embed box-drawing chars (`│`) at the start
+	// of every wrapped line of the error body. Without stripping these
+	// first, `\s+` between "attribute named" and the quoted attribute
+	// won't span the line break — the regex misses on every multi-line
+	// shape (which is most of them). Use a cleaned view for matching;
+	// raw `detail` is retained for the rule body where the suggestion
+	// extraction still works because "Did you mean" tends to fit on one
+	// line.
+	cleaned := boxDrawingStripRe.ReplaceAllString(detail, " ")
+	m := unsupportedAttrNameRe.FindStringSubmatch(cleaned)
+	if len(m) < 2 {
+		return nil
+	}
+	attr := m[1]
+	// Resource type: prefer the one whose `.<attr>` chain actually
+	// triggered the error. A typical detail mentions TWO resources —
+	// the containing block (`scaleway_lb_backend.web`) and the
+	// referenced resource being accessed
+	// (`scaleway_instance_server.web[*].private_ip`). extractResource
+	// just returns the first match (the containing block), which is
+	// the wrong resource to attribute the pitfall to. Find the one
+	// followed by `.<bad attr>` instead.
+	resource := resourceOwningAttribute(detail, attr)
+	if resource == "" {
+		resource = extractResource(detail)
+	}
+	if resource == "" {
+		return nil
+	}
+	suggestion := ""
+	if s := didYouMeanRe.FindStringSubmatch(detail); len(s) >= 2 {
+		suggestion = s[1]
+	}
+	var rule string
+	if suggestion != "" {
+		rule = fmt.Sprintf("`%s` has no attribute `%s` — use `%s` instead. The provider error suggested this directly: `Did you mean \"%s\"?`. Update every reference (`server_ips`, outputs, depends_on, etc.) to the suggested attribute name.", resource, attr, suggestion, suggestion)
+	} else {
+		rule = fmt.Sprintf("`%s` has no attribute named `%s`. Check the provider docs for the exact exported-attribute name (plural vs singular is the most common trap: `private_ips`, `public_ips`, `network_interfaces`). Do NOT keep retrying with the same name.", resource, attr)
+	}
 	return &LearnedPitfall{Resource: resource, Rule: rule, DiscoveredFrom: scenario}
 }
 

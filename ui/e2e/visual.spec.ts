@@ -36,9 +36,16 @@ test.describe('Visual regression baselines', () => {
   test('runs page', async ({ page }) => {
     await page.goto('/runs');
     await expect(page.locator('main')).toBeVisible();
+    // The runs table grows by one row on every `infrafactory run`, so
+    // fullPage + a mask over the table still produces a baseline diff
+    // because the page height itself changes. Capture the viewport
+    // only (1280x720) — that covers the sidebar, header, and filter
+    // controls and excludes the growing table altogether. The
+    // chrome-stability invariant is still pinned (mismatched filter
+    // markup or sidebar layout would still fail this test).
     await expect(page).toHaveScreenshot('runs.png', {
-      mask: VOLATILE_SELECTORS.map((sel) => page.locator(sel)),
-      fullPage: true,
+      mask: VOLATILE_SELECTORS.map((sel) => page.locator(sel)).concat([page.locator('main table')]),
+      fullPage: false,
     });
   });
 

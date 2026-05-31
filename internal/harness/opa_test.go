@@ -414,6 +414,34 @@ func TestCommonNamingPolicyGCPExemptions(t *testing.T) {
 			resourceName:  "bucket.",
 			expectedCount: 1,
 		},
+		// AWS Route53 zone names are DNS domains — dots are intrinsic
+		// and the lowercase-slug rule must NOT apply. Pre-2026-05-30
+		// this case raised a false positive that broke aws-route53 in
+		// the full-scenario sweep.
+		{
+			name:          "aws route53 zone DNS name passes",
+			resourceType:  "aws_route53_zone",
+			resourceName:  "test.example.invalid",
+			expectedCount: 0,
+		},
+		// AWS Route53 record names are FQDNs / subdomains — also
+		// exempt from the slug rule.
+		{
+			name:          "aws route53 record FQDN passes",
+			resourceType:  "aws_route53_record",
+			resourceName:  "www.test.example.invalid",
+			expectedCount: 0,
+		},
+		// A non-Route53 AWS resource with dots in its name is still a
+		// typo (e.g. aws_s3_bucket disallows dots when used with the
+		// preferred virtual-host endpoint). The exemption is narrowly
+		// scoped by resource type, not by the presence of dots.
+		{
+			name:          "aws s3 bucket dotted name fails",
+			resourceType:  "aws_s3_bucket",
+			resourceName:  "my.bucket",
+			expectedCount: 1,
+		},
 	}
 
 	for _, tc := range cases {

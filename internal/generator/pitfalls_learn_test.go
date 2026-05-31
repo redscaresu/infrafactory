@@ -181,6 +181,100 @@ func TestExtractLearnedPitfall_M97_DestroyBlockers(t *testing.T) {
 	}
 }
 
+// TestExtractLearnedPitfall_M97_UnsupportedAttribute_AllClouds —
+// terraform "Unsupported attribute" / "no exported attribute named"
+// errors are the most common cross-cloud failure shape we were
+// missing before. The template fires for scaleway_*, google_*,
+// aws_* identically and produces a prescriptive rule. When the
+// provider supplies a "Did you mean Y" suggestion we must forward
+// it into the rule.
+func TestExtractLearnedPitfall_M97_UnsupportedAttribute_AllClouds(t *testing.T) {
+	cases := []struct {
+		name        string
+		detail      string
+		wantRes     string
+		wantAttr    string
+		wantSuggest string
+	}{
+		{
+			name:        "scaleway with suggestion",
+			detail:      "Error: Unsupported attribute\n  on loadbalancer.tf line 21, in resource \"scaleway_lb_backend\" \"web\":\n  21:   server_ips = scaleway_instance_server.web[*].private_ip\nThis object has no argument, nested block, or exported attribute named \"private_ip\". Did you mean \"private_ips\"?",
+			wantRes:     "scaleway_instance_server",
+			wantAttr:    "private_ip",
+			wantSuggest: "private_ips",
+		},
+		{
+			name:     "google without suggestion",
+			detail:   "Error: Unsupported attribute on google_compute_instance.web.bogus_attr — This object does not have an attribute named \"bogus_attr\".",
+			wantRes:  "google_compute_instance",
+			wantAttr: "bogus_attr",
+		},
+		{
+			name:        "aws with suggestion",
+			detail:      "Error: Unsupported attribute on aws_instance.web.arn_name — This object has no argument, nested block, or exported attribute named \"arn_name\". Did you mean \"arn\"?",
+			wantRes:     "aws_instance",
+			wantAttr:    "arn_name",
+			wantSuggest: "arn",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ExtractLearnedPitfall(tc.detail, "scenario-"+tc.name)
+			if got == nil {
+				t.Fatalf("nil pitfall for %s", tc.name)
+			}
+			if got.Resource != tc.wantRes {
+				t.Errorf("resource = %q, want %q", got.Resource, tc.wantRes)
+			}
+			if !strings.Contains(got.Rule, tc.wantAttr) {
+				t.Errorf("rule missing bad attribute %q: %q", tc.wantAttr, got.Rule)
+			}
+			if tc.wantSuggest != "" && !strings.Contains(got.Rule, tc.wantSuggest) {
+				t.Errorf("rule missing 'Did you mean' suggestion %q: %q", tc.wantSuggest, got.Rule)
+			}
+		})
+	}
+}
+
+// TestExtractLearnedPitfall_UnsupportedArgument_WrappedDiagnostic pins
+// the box-drawing-strip fix in ExtractLearnedPitfall. Real terraform
+// diagnostics wrap the bad-argument name onto a separate line framed
+// by `│`, so `Unsupported argument.*"X"` (which uses `.*` and cannot
+// span newlines) never matched the multi-line shape before. The
+// single-line shape continued to work and masked the latent bug.
+func TestExtractLearnedPitfall_UnsupportedArgument_WrappedDiagnostic(t *testing.T) {
+	// Real-shape multi-line diagnostic for an unsupported argument on
+	// google_compute_instance. The bad arg name `bogus_field` lives on
+	// a different line than the "Unsupported argument" marker.
+	detail := "exit status 1 | stderr: ╷\n│ Error: Unsupported argument\n│ \n│   on main.tf line 12, in resource \"google_compute_instance\" \"web\":\n│   12:   bogus_field = \"v\"\n│ \n│ An argument named \"bogus_field\" is not expected here.\n╵"
+	got := ExtractLearnedPitfall(detail, "gcp-vm-network")
+	if got == nil {
+		t.Fatal("expected pitfall for wrapped Unsupported argument shape (regression: pre-fix code returned nil)")
+	}
+	if got.Resource != "google_compute_instance" {
+		t.Errorf("resource = %q, want google_compute_instance", got.Resource)
+	}
+	if !strings.Contains(got.Rule, "bogus_field") {
+		t.Errorf("rule missing arg name in body: %q", got.Rule)
+	}
+}
+
+// TestExtractLearnedPitfall_AtLeastOneOf_WrappedDiagnostic — companion
+// pin for the at-least-one-of regex. Same latent bug.
+func TestExtractLearnedPitfall_AtLeastOneOf_WrappedDiagnostic(t *testing.T) {
+	detail := "exit status 1 | stderr: ╷\n│ Error: Invalid combination of arguments\n│ \n│   with scaleway_rdb_instance.main,\n│   on db.tf line 4, in resource \"scaleway_rdb_instance\" \"main\":\n│    4:   name = \"app\"\n│ \n│ at least one of 'ip_net' or 'enable_ipam' (set to true) must be set\n╵"
+	got := ExtractLearnedPitfall(detail, "rdb-paris")
+	if got == nil {
+		t.Fatal("expected pitfall for wrapped at-least-one-of shape (regression: pre-fix code returned nil)")
+	}
+	if got.Resource != "scaleway_rdb_instance" {
+		t.Errorf("resource = %q, want scaleway_rdb_instance", got.Resource)
+	}
+	if !strings.Contains(got.Rule, "ip_net") {
+		t.Errorf("rule missing constraint body: %q", got.Rule)
+	}
+}
+
 // TestExtractLearnedPitfall_AwsResource pins the M92 fix: the resource
 // regex was scaleway_*|google_* only, so every AWS failure detail
 // produced "no resource extracted" and the learning loop silently

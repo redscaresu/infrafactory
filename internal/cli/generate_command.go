@@ -128,6 +128,18 @@ func ensureGoogleProviderWiring(files map[string][]byte, cfg config.Config) {
 		hasProviderBlock = false
 	}
 
+	// Even when the LLM emits a complete `terraform { required_providers
+	// { google = {...} } }` block (so missingRequiredProviders is false
+	// and the canonical version-pinned block below doesn't get
+	// injected), the LLM frequently omits the version pin. provider-
+	// google v6 drops + renames several *_custom_endpoint variables
+	// fakegcp depends on; v6 callers 401 against real google APIs.
+	// Surgically inject `version = "~> 5.0"` into the existing google
+	// entry so this regression can't slip through.
+	if hasRequiredProviders {
+		ensureGoogleVersionPin(files)
+	}
+
 	missingRequiredProviders := !hasRequiredProviders
 	missingProviderBlock := !hasProviderBlock
 	if !missingRequiredProviders && !missingProviderBlock {
@@ -136,10 +148,18 @@ func ensureGoogleProviderWiring(files map[string][]byte, cfg config.Config) {
 
 	sections := make([]string, 0, 2)
 	if missingRequiredProviders {
+		// Pin provider-google to ~> 5.0. v6 split iam_custom_endpoint
+		// away from the iam.admin.v1 API path that google_service_account
+		// uses, so SA create/read/delete hit real iam.googleapis.com
+		// with the fake-token and 401. v6 also renames several other
+		// endpoint vars in ways the LLM keeps tripping on. v5.x is the
+		// last version where the single iam_custom_endpoint covers
+		// every IAM resource fakegcp models.
 		sections = append(sections, `terraform {
   required_providers {
     google = {
-      source = "hashicorp/google"
+      source  = "hashicorp/google"
+      version = "~> 5.0"
     }
   }
 }`)
@@ -172,18 +192,36 @@ func buildGoogleProviderBlock(fakegcpURL string) string {
 	}
 	return fmt.Sprintf(`provider "google" {
   project                                = "infrafactory-test"
+  # fakegcp's requireBearerToken middleware 401s every request that
+  # arrives without an Authorization header. terraform-provider-google
+  # only sets the header when access_token is configured, so this is
+  # not optional — without it every API call gets the 401 OAuth
+  # error that looks like the provider escaped to real google.
+  access_token                           = "fake-token"
   compute_custom_endpoint                = "%[1]s/compute/v1/"
   container_custom_endpoint              = "%[1]s/"
   cloud_resource_manager_custom_endpoint = "%[1]s/v1/"
-  iam_custom_endpoint                    = "%[1]s/v1/"
+  # iam_custom_endpoint must NOT include a trailing /v1/ — the
+  # provider prepends "v1/projects/..." for google_service_account.
+  # Including /v1/ here produces /v1/v1/projects/... which fakegcp
+  # 501s. Confirmed by the fakegcp working/iam example.
+  iam_custom_endpoint                    = "%[1]s/"
   storage_custom_endpoint                = "%[1]s/storage/v1/"
   sql_custom_endpoint                    = "%[1]s/sql/v1beta4/"
   pubsub_custom_endpoint                 = "%[1]s/v1/"
   dns_custom_endpoint                    = "%[1]s/dns/v1/"
   cloud_run_v2_custom_endpoint           = "%[1]s/v2/"
   secret_manager_custom_endpoint         = "%[1]s/v1/"
-  service_usage_custom_endpoint          = "%[1]s/v1/"
+  # service_usage_custom_endpoint must NOT include /v1/ — the provider
+  # prepends "v1/projects/.../services" itself. Including /v1/ here
+  # produces /v1/v1/projects/.../services which fakegcp 501s.
+  service_usage_custom_endpoint          = "%[1]s/"
   redis_custom_endpoint                  = "%[1]s/v1/"
+  # Cloud KMS — fakegcp ships stub key-ring/crypto-key handlers so
+  # the gcp.encryption policy (CMEK on storage/sql/disk) can be
+  # satisfied by declaring KMS resources in HCL without hitting the
+  # real cloudkms.googleapis.com endpoint.
+  kms_custom_endpoint                    = "%[1]s/v1/"
 }`, fakegcpURL)
 }
 
@@ -279,6 +317,68 @@ func stripGoogleProviderBlock(files map[string][]byte) {
 	stripProviderBlock(files, "google")
 }
 
+// ensureGoogleVersionPin scans every file in the working set for a
+// `google = { ... }` entry inside `required_providers` and injects
+// `version = "~> 5.0"` when missing. provider-google v6 split / renamed
+// several *_custom_endpoint variables fakegcp depends on; without a
+// version pin terraform pulls v6 and the apply 401s against real
+// google APIs. Surgical rewrite preserves any sibling providers
+// (`random`, `time`, etc.) the LLM included.
+func ensureGoogleVersionPin(files map[string][]byte) {
+	for name, content := range files {
+		text := string(content)
+		marker := "google = {"
+		out := strings.Builder{}
+		i := 0
+		modified := false
+		for i < len(text) {
+			idx := strings.Index(text[i:], marker)
+			if idx == -1 {
+				out.WriteString(text[i:])
+				break
+			}
+			start := i + idx
+			braceStart := start + len(marker) - 1
+			depth := 0
+			end := -1
+			for j := braceStart; j < len(text); j++ {
+				switch text[j] {
+				case '{':
+					depth++
+				case '}':
+					depth--
+					if depth == 0 {
+						end = j
+					}
+				}
+				if end != -1 {
+					break
+				}
+			}
+			if end == -1 {
+				out.WriteString(text[i:])
+				break
+			}
+			block := text[start : end+1]
+			if !strings.Contains(block, "version") {
+				// Inject the version pin just before the closing brace.
+				inner := text[braceStart+1 : end]
+				inner = strings.TrimRight(inner, " \n\t")
+				newBlock := text[start:braceStart+1] + inner + "\n      version = \"~> 5.0\"\n    }"
+				out.WriteString(text[i:start])
+				out.WriteString(newBlock)
+				modified = true
+			} else {
+				out.WriteString(text[i : end+1])
+			}
+			i = end + 1
+		}
+		if modified {
+			files[name] = []byte(out.String())
+		}
+	}
+}
+
 // stripProviderBlock removes every `provider "<name>" { ... }` block
 // from every file in the working set. Uses brace-matching (not regex)
 // so nested blocks like `endpoints { ... }` don't trip up the parser.
@@ -367,6 +467,7 @@ func buildAwsProviderBlock(fakeawsURL, s3URL string) string {
     sqs            = "%[1]s/sqs/region/us-east-1"
     dynamodb       = "%[1]s/dynamodb/region/us-east-1"
     secretsmanager = "%[1]s/secretsmanager/region/us-east-1"
+    kms            = "%[1]s/kms/region/us-east-1"
     route53        = "%[1]s/route53"
     s3             = "%[2]s"
   }

@@ -11,10 +11,18 @@ type FailureSignature struct {
 func FailureSignatures(failures []Failure) []FailureSignature {
 	seen := make(map[FailureSignature]struct{})
 	for _, failure := range failures {
+		// Normalize Detail before forming the signature so iterations
+		// whose underlying bug is identical (`web_0.private_ip` vs
+		// `web[*].private_ip`, different line numbers, "Did you mean"
+		// suffix) collide into one signature. Without this the LLM's
+		// cosmetic mutations across iterations make every signature
+		// unique and DetectOscillation / IsStuck silently miss
+		// recurring problems. The original Failure.Detail is
+		// untouched — only this view is normalized.
 		sig := FailureSignature{
 			Check:    failure.Check,
 			Resource: failure.Resource,
-			Detail:   failure.Detail,
+			Detail:   NormalizeDetail(failure.Detail),
 		}
 		seen[sig] = struct{}{}
 	}

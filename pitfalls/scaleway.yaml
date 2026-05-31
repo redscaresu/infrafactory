@@ -1,18 +1,18 @@
 provider: scaleway
 pitfalls:
-    - resource: scaleway_domain_record
-      rule: |
-        Do NOT create DNS records unless the scenario explicitly lists DNS/domain resources. The `dns_resolution` acceptance criterion is auto-evaluated and does NOT require a `scaleway_domain_record` resource in the generated HCL. Creating records for a non-existent zone will cause `tofu apply` to fail with "resource not found".
-      source: learned
-    - resource: scaleway_redis_cluster
-      rule: |
-        The `password` must meet Scaleway's complexity requirements: 8-128 characters, at least one digit, one uppercase, one lowercase, and one special character. Use a compliant default like `default = "Ch4ng3Me!@2024"`.
-      source: learned
-    - resource: scaleway_rdb_privilege
-      rule: "exit status 1 | stderr: ╷\n│ Error: Provider produced inconsistent result after apply\n│ \n│ When applying changes to scaleway_rdb_privilege.app_access, provider\n│ \"provider[\\\"registry.opentofu.org/scaleway/scaleway\\\"]\" produced an\n│ unexpected new value: root object was present, but now..."
-      source: learned
-      discovered_from: mysql-ha-paris
     - resource: scaleway_instance_server
-      rule: scaleway_instance_server.backend[0] is not attached to a private network via scaleway_instance_private_nic
+      rule: '`scaleway_instance_server` has no attribute `private_ip` — use `private_ips` instead. The provider error suggested this directly: `Did you mean "private_ips"?`. Update every reference (`server_ips`, outputs, depends_on, etc.) to the suggested attribute name.'
       source: learned
-      discovered_from: private-lb-db-paris
+      discovered_from: web-app-paris-pinned
+    - resource: scaleway_instance_server
+      rule: "exit status 1 | stderr: ╷\n│ Error: Unsupported argument\n│ \n│   on main.tf line 7, in resource \"scaleway_instance_server\" \"web_0\":\n│    7:   routed_ip_enabled = false\n│ \n│ An argument named \"routed_ip_enabled\" is not expected here.\n╵\n╷\n│ Error: Unsupported argument\n│ \n│   o..."
+      source: learned
+      discovered_from: web-app-paris
+    - resource: scaleway_k8s_cluster
+      rule: 'Version and auto_upgrade MUST be consistent: WITHOUT auto_upgrade use a full patch version like "1.31.2"; WITH auto_upgrade enabled use ONLY a minor version like "1.31".'
+      source: learned
+      discovered_from: full-stack-paris
+    - resource: scaleway_domain_record
+      rule: "exit status 1 | stderr: ╷\n│ Error: scaleway-sdk-go: resource  with ID  is not found\n│ \n│   with scaleway_domain_record.app,\n│   on dns.tf line 1, in resource \"scaleway_domain_record\" \"app\":\n│    1: resource \"scaleway_domain_record\" \"app\" {\n│ \n╵"
+      source: learned
+      discovered_from: web-app-paris

@@ -1,6 +1,53 @@
 provider: aws
 pitfalls:
-    - resource: aws_dynamodb_table
-      rule: "exit status 1 | stderr: ╷\n│ Error: reading AWS DynamoDB Table (app-state): continuous backups: operation error DynamoDB: DescribeContinuousBackups, https response error StatusCode: 404, RequestID: , api error ResourceNotFoundException: The specified resource does not exist.\n│ \n│   with aw..."
+    - resource: aws_subnet
+      rule: "exit status 1 | stderr: ╷\n│ Error: waiting for EC2 Subnet (subnet-7db6b90c7d34cf27) MapPublicIpOnLaunch update: timeout while waiting for state to become 'true' (last state: 'false', timeout: 5m0s)\n│ \n│   with aws_subnet.public,\n│   on network.tf line 11, in resource \"aws_subnet\" \"publi..."
       source: learned
-      discovered_from: aws-dynamodb
+      discovered_from: aws-vpc-network
+    - resource: aws_iam_role_policy_attachment
+      rule: |-
+        exit status 1 | stderr: ╷
+        │ Error: attaching IAM Policy (arn:aws:iam::aws:policy/AmazonEKSClusterPolicy) to IAM Role (infrafactory-eks-cluster-role): operation error IAM: AttachRolePolicy, https response error StatusCode: 404, RequestID: fakeaws-synthetic, api error ResourceNotFoundException:...
+      source: learned
+      discovered_from: aws-full-stack
+    - resource: aws_iam_role_policy
+      rule: |-
+        exit status 1 | stderr: ╷
+        │ Error: putting IAM Role (infrafactory-eks-cluster-role) Policy (eks-cluster-inline): operation error IAM: PutRolePolicy, https response error StatusCode: 404, RequestID: fakeaws-synthetic, api error ResourceNotFoundException: The specified resource does not exist.
+        ...
+      source: learned
+      discovered_from: aws-full-stack
+    - resource: aws_vpc
+      rule: "exit status 1 | stderr: ╷\n│ Error: failed to read schema for aws_vpc.main in registry.opentofu.org/hashicorp/aws: failed to instantiate provider \"registry.opentofu.org/hashicorp/aws\" to obtain schema: Unrecognized remote plugin message: \n│ Failed to read any lines from plugin's stdout\n│ T..."
+      source: learned
+      discovered_from: aws-full-stack
+    - resource: aws_db_instance
+      rule: "exit status 1 | stderr: ╷\n│ Error: waiting for RDS DB Instance (infrafactory-fullstack-db) create: couldn't find resource (21 retries)\n│ \n│   with aws_db_instance.main,\n│   on rds.tf line 19, in resource \"aws_db_instance\" \"main\":\n│   19: resource \"aws_db_instance\" \"main\" {\n│ \n╵"
+      source: learned
+      discovered_from: aws-full-stack
+    - resource: aws_iam_user_policy_attachment
+      rule: |-
+        exit status 1 | stderr: ╷
+        │ Error: attaching IAM Policy (arn:aws:iam::000000000000:policy/infrafactory-cicd-policy) to IAM User (infrafactory-cicd): operation error IAM: AttachUserPolicy, https response error StatusCode: 404, RequestID: fakeaws-synthetic, api error ResourceNotFoundException: ...
+      source: learned
+      discovered_from: aws-full-stack
+    - resource: aws_instance
+      rule: "exit status 1 | stderr: ╷\n│ Error: creating EC2 Instance: operation error EC2: RunInstances, https response error StatusCode: 409, RequestID: fakeaws-synthetic, api error ConflictException: The request conflicts with the current resource state.\n│ \n│   with aws_instance.app,\n│   on main...."
+      source: learned
+      discovered_from: aws-instance
+    - resource: aws_kms_key
+      rule: "exit status 1 | stderr: ╷\n│ Error: creating KMS Key: operation error KMS: CreateKey, https response error StatusCode: 400, RequestID: 059d4af7-0c3b-4bfb-9730-c72ef490c3d5, api error UnrecognizedClientException: The security token included in the request is invalid.\n│ \n│   with aws_kms_key..."
+      source: learned
+      discovered_from: aws-full-stack
+    - resource: aws_secretsmanager_secret
+      rule: aws_secretsmanager_secret.db_password uses an AWS-managed KMS alias (alias/aws/secretsmanager); customer-managed key required for compliance scenarios
+      source: learned
+      discovered_from: aws-full-stack
+    - resource: aws_s3_bucket
+      rule: "exit status 1 | stderr: ╷\n│ Error: creating S3 Bucket (infrafactory-assets-AKIA5D31D6F863AAB893): operation error S3: CreateBucket, https response error StatusCode: 400, RequestID: 18B48331628847E8530310EC, HostID: , api error InvalidBucketName: The specified bucket is not valid.\n│ \n│   w..."
+      source: learned
+      discovered_from: aws-full-stack
+    - resource: aws_iam_user_policy
+      rule: "exit status 1 | stderr: ╷\n│ Error: waiting for IAM User Policy (infrafactory-cicd:infrafactory-cicd-policy) create: empty result\n│ \n│   with aws_iam_user_policy.cicd,\n│   on iam.tf line 55, in resource \"aws_iam_user_policy\" \"cicd\":\n│   55: resource \"aws_iam_user_policy\" \"cicd\" {\n│ \n╵"
+      source: learned
+      discovered_from: aws-full-stack
