@@ -426,3 +426,30 @@ If you need to reproduce the full sweep:
 # Use the script from this session
 bash /tmp/sweep-full.sh   # if still on disk, else regenerate from this file's sweep order
 ```
+
+## Session-close hygiene (lesson from 2026-05-31 close)
+
+Long sweep sessions accumulate persistent harness Monitors that
+survive across sub-sessions and only die at session exit. They don't
+hurt anything but they cause the harness to prompt "Background work
+is running" when you try to exit. Always call **TaskStop** on every
+Monitor you launched before closing the session.
+
+Workflow improvements to land in the next session:
+
+- **Convention**: every `Monitor()` call gets a paired `TaskStop()`
+  when its purpose is done — don't leave them armed "just in case."
+  Especially after a sweep finishes (or stops on the first failure
+  for the bail-out pattern) — stop the monitor that was tailing
+  its stdout immediately.
+
+- **Optional tooling**: an `infrafactory clean` (or just `make clean`)
+  target that finds and kills any lingering `bash /tmp/sweep-*.sh`
+  + `tail -F /tmp/sweep-*-stdout.log` processes the previous session
+  left running. Cheap, removes friction.
+
+Specific background tasks that survived this session's close
+(stopped manually before exit):
+- `bzlwxl814` — Sweep-progress monitor (initial sweep run)
+- `bek3umbwi` — Sweep 25 mock-state-reset monitor
+- `b2s4vo2i5` — Revalidation-sweep monitor
