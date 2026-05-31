@@ -43,8 +43,13 @@ the appropriate mock repo and prune the pitfall — don't leave it.
 
 ## Sweep coverage map
 
-Final state after the 2026-05-31 evening close-out session: **33/39
-pass, 6 fail** (up from 31/39).
+Final state after the 2026-05-31 evening close-out session:
+**33/39 pass, 6 fail** in the sweep proper, but `aws-full-stack`
+validated `target_reached` in a follow-up clean run after Tickets
+A + B landed — so the realistic pass rate is **34/39** going into
+next session. Last 5: `gcp-cloud-sql`, `gcp-full-stack`,
+`gcp-gke-cluster`, `web-app-paris` regression, `gcp-storage`
+(intermittent).
 
 ### Closed this session
 
@@ -64,7 +69,7 @@ pass, 6 fail** (up from 31/39).
 
 | Failing scenario | Closes when these tickets land | Confidence |
 |---|---|---|
-| `aws-full-stack` | **Ticket A** (fakeaws ListSSHPublicKeys handler) + **Ticket B** (fakeaws managed-policy orphan-counting) | High — both surfaced during T1 validation |
+| `aws-full-stack` | **Tickets A + B closed (fakeaws `b7db72d`, `fd8e5d1`, `ff0c38d`) — validated end-to-end 2026-05-31 20:00, `target_reached` iter 2** | Closed |
 | `gcp-cloud-sql` | Ticket 3 fakegcp routes (endpoint flag landed, routes pending) | High |
 | `gcp-full-stack` | Tickets 3 + 4 (plugin crash on `google_sql_database_instance`) | Medium |
 | `gcp-gke-cluster` | Ticket 4 (NodePool plugin crash) | High |
@@ -72,22 +77,39 @@ pass, 6 fail** (up from 31/39).
 | `gcp-storage` | Intermittent — LLM non-determinism | n/a |
 | `web-app-paris` | Regression introduced this session — see notes | Unknown |
 
-### Tickets A + B (NEW — uncovered during T1 validation 2026-05-31 19:00)
+### Tickets A + B — CLOSED 2026-05-31 evening, validated end-to-end
 
-**Ticket A — fakeaws ListSSHPublicKeys / ListServiceSpecificCredentials**.
-`aws_iam_user` destroy preflight enumerates SSH keys + service-
-specific credentials. fakeaws returns 404 → destroy fails. Fix:
-add no-op handlers returning empty lists in `fakeaws/handlers/iam.go`
-similar to `iamListGroupsForUser`. ~15 min.
+**Ticket A — fakeaws destroy-preflight no-op handlers — CLOSED.**
+First wave (fakeaws `b7db72d`): empty-list handlers for
+ListSSHPublicKeys, ListServiceSpecificCredentials, ListMFADevices,
+ListSigningCertificates. Pre-emptively added all four to avoid
+one-by-one discovery.
+Follow-up (fakeaws `fd8e5d1`): converted result types from
+anonymous structs to named structs (awsproto encoder's
+marshalInnerXML rejects anonymous multi-field structs — same gotcha
+as `iamGetUserPolicyResult`). Without this, live responses had
+`<!-- marshal error -->` in the result wrapper.
+Second wave (fakeaws `ff0c38d`): ListVirtualMFADevices (account-
+level virtual-MFA — distinct from user-level ListMFADevices),
+DeleteLoginProfile + GetLoginProfile (returns NoSuchEntity via
+WriteServiceError, NOT the generic ResourceNotFoundException that
+WriteAWSError emits — provider keys off NoSuchEntity exactly).
 
-**Ticket B — fakeaws auto-seeded managed policies count as orphans**.
-`SeedManagedPolicy` (called by AttachRolePolicy/AttachUserPolicy)
-inserts into `iam_policies`. `/mock/state` exposes them and
-`countOrphans` in infrafactory `internal/harness/destroy.go` then
-counts them. Two reasonable fixes: (a) seed managed policies into a
-separate `iam_managed_policy_seeds` table excluded from `/mock/state`,
-or (b) filter `arn:aws:iam::aws:policy/*` from the iam.policies
-output. (b) is simpler. ~30 min.
+**Ticket B — managed-policy orphan filter — CLOSED.**
+fakeaws `b7db72d` `gatherIAMStateReal` filters
+`arn:aws:iam::aws:policy/*` from the `/mock/state` iam.policies
+output. AWS-managed stubs (SeedManagedPolicy inserts) no longer
+count toward infrafactory's orphan gate; tenant policies
+(`arn:aws:iam::<account>:policy/*`) still surface.
+
+**Validation (2026-05-31 ~20:00):** `aws-full-stack` closes
+`target_reached` in iter 2 with empty `/mock/state` (0 collections
+populated). Iter 1 hit `orphan_check detected 1 orphaned resources`
+on an `aws_secretsmanager_secret` in `PendingDeletion` (default
+30-day recovery window). The auto-learning loop fed that failure
+back to the LLM; iter 2's HCL added `recovery_window_in_days = 0`
+(or `force_destroy`) and destroy completed cleanly. The self-
+learning pipeline worked — no static pitfall needed.
 
 **Recommended order** (lowest-cost-per-closed-scenario first):
 
