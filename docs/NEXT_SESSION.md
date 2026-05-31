@@ -22,6 +22,25 @@ End state:
   survive re-runs; the LLM is non-deterministic and some fixes
   uncovered deeper gaps. See `Open follow-ups` below.
 
+## Core design principle: mock quirks are tickets, not pitfalls
+
+**Pitfalls encode real provider/cloud constraints** the LLM needs to
+know about (e.g. "scaleway_instance_server exposes `private_ips`
+plural, not `private_ip`"; "Route53 zone names must be DNS-valid").
+
+**Mock-server gaps are bugs in fakeaws / fakegcp / mockway**. They
+must be fixed in the mock, not papered over with a pitfall that tells
+the LLM "avoid this resource". A pitfall that says "google_kms_key_ring
+escapes to the real API" is anti-pattern: it teaches the LLM to NOT
+use a perfectly valid resource because OUR mock is incomplete. That
+makes the system narrower over time instead of broader.
+
+Tickets 12, 13, 14 enforce this principle (classifier, self-healing,
+backfill). Until they land, the rule is manual: if you see a learned
+pitfall that describes a mock-server failure (`501`, `Plugin did not
+respond`, OAuth-escape, missing-handler 404), file a ticket against
+the appropriate mock repo and prune the pitfall — don't leave it.
+
 ## Sweep coverage map
 
 Final state of the full 39-scenario validation sweep (2026-05-31):
@@ -222,6 +241,106 @@ what the route is registered at. Candidates to audit:
 `storage_custom_endpoint` (currently `/storage/v1/`),
 `secret_manager_custom_endpoint` (currently `/v1/`),
 `redis_custom_endpoint` (currently `/v1/`).
+
+### 12. Failure classifier — keep mock quirks OUT of pitfalls
+
+**Status:** The auto-learning pipeline currently writes ANY recurring
+failure to `pitfalls/*.yaml`, including ones that describe mock-server
+gaps (`501 Not Implemented`, `Plugin did not respond`, OAuth-escape,
+404 from a Describe* on a resource we just created). This violates
+the "mock quirks are tickets, not pitfalls" principle — it teaches
+the LLM to AVOID valid resources because the mock is incomplete.
+
+**Fix:** Extend `internal/generator/pitfalls_learn.go` with a
+`isMockActionable(detail)` predicate. Detection signals:
+
+- `501 Not Implemented` anywhere in the body
+- `Plugin did not respond`
+- `OAuth ... access token` / `Request had invalid authentication credentials`
+- `couldn't find resource (N retries)` (wait-loop after Describe* miss)
+- `404 ... ResourceNotFoundException` on a Describe* path
+
+When the predicate fires, instead of writing to `pitfalls/<cloud>.yaml`,
+append a structured entry to `docs/mock-gaps.md` (or open a GitHub
+issue against the right mock repo). Also extend the M91 no-seeding
+ratchet (`TestPitfallsNoHumanSeeding`) to assert no learned entry
+matches the mock-actionable predicate — turning the principle into
+CI enforcement.
+
+Effort: ~half-day. Strict superset of the existing pipeline; the
+detection rules are simple substring/regex matches.
+
+### 13. Self-healing mocks (second agent loop) — multi-session direction
+
+**Status:** Ticket 12 is the lightweight "detect + document" version.
+The heavy version is a second agent loop with read+write access to
+the mock repos. When a mock-actionable failure is detected, it:
+
+1. Reads the failing request from infrafactory's run artifacts.
+2. Locates the matching handler in fakeaws / fakegcp / mockway — or
+   detects that no handler exists.
+3. Proposes a patch (adds a route + handler, or fixes a response
+   shape) using the provider source as ground truth.
+4. Runs the mock's existing tests to make sure nothing else breaks.
+5. Restarts the mock + retries the failing scenario.
+6. If green, opens a PR on the mock repo; if red, leaves a tracked
+   ticket.
+
+This closes the principle's loop end-to-end: mock quirks don't just
+get TICKETS, they get fixed. Risk: less bounded than the current
+LLM-driven pipeline because mock changes affect every scenario — needs
+guardrails (per-PR scope, sibling-scenario regression run, human
+approval for the patch).
+
+Effort: multi-session. Worth scoping in its own slice before
+starting. ADR-level decision (cross-repo write authority).
+
+### 14. Audit + prune existing mock-quirk entries from pitfalls/*.yaml
+
+**Status:** Per the principle above, almost every current entry in
+`pitfalls/aws.yaml` (5/5) and many in `pitfalls/gcp.yaml` (~6/10) are
+mock-quirk fingerprints written before the classifier existed. They
+should be removed and their underlying gaps tracked as tickets against
+the matching mock repo.
+
+**Entries currently violating the principle** (as of 2026-05-31):
+
+`pitfalls/aws.yaml` (all 5 entries):
+- `aws_subnet` MapPublicIpOnLaunch wait-loop timeout → ticket 8.
+- `aws_iam_role_policy_attachment` 404 → already fixed in fakeaws
+  `348322d` (managed-ARN auto-seed), pitfall is stale.
+- `aws_iam_role_policy` 404 → already fixed in fakeaws `348322d`
+  (PutRolePolicy handler), pitfall is stale.
+- `aws_vpc` "Failed to instantiate provider" → transient network
+  (registry-download timeout), not learnable.
+- `aws_db_instance` wait-loop "couldn't find resource" → fakeaws
+  RDS create→read shape mismatch, new ticket.
+
+`pitfalls/gcp.yaml`:
+- KEEP: `google_compute_instance` + `google_container_cluster` VPC
+  declaration rules (real GCP-side requirement).
+- KEEP: `google_storage_bucket` no CMEK (real policy requirement —
+  this is a Layer-1 gate).
+- KEEP: `google_cloud_run_v2_service` `deletion_protection`
+  (legitimate "the v5 provider doesn't accept this arg").
+- PRUNE: `google_service_account` "escaping" → fixed by v5 pin +
+  `iam_admin_v1` work, stale.
+- PRUNE: `google_project_service` "escaping" → fixed by
+  service_usage endpoint fix, stale.
+- PRUNE: `google_service_networking_connection` "escaping" → fakegcp
+  gap, ticket 3.
+- PRUNE: `google_kms_key_ring` "escaping" → fixed by KMS handler
+  (fakegcp `c7999b5`), stale.
+- PRUNE: `google_container_node_pool` "Plugin did not respond" →
+  ticket 4.
+- PRUNE: `google_dns_record_set` "Plugin did not respond" → ticket 4.
+
+**Fix:** Manual prune of stale entries (those that reference
+already-fixed gaps), file mock-repo tickets for the rest, document
+the principle in the auto-learning loop comments. Effort: ~1 hr.
+
+Pair with ticket 12 so the principle is enforced going forward, not
+just retroactively.
 
 ## Workflow / harness improvements
 

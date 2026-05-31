@@ -8,55 +8,11 @@ pitfalls:
       rule: Always declare a `google_compute_network` AND at least one `google_compute_subnetwork` in the scenario's region. Then on `google_compute_instance` set `network_interface { subnetwork = google_compute_subnetwork.NAME.id }`. On `google_container_cluster` set BOTH `network = google_compute_network.NAME.id` AND `subnetwork = google_compute_subnetwork.NAME.id`. Do NOT use the `default` VPC — it is often disabled by org policy.
       source: learned
       discovered_from: gcp-full-stack
-    - resource: google_service_account
-      rule: '`google_service_account` is escaping to the REAL cloud API (401 OAuth/auth error). The provider block in `providers.tf` is missing a `*_custom_endpoint` override for this resource''s service. Either add the matching custom_endpoint OR remove `google_service_account` from this scenario (the mock doesn''t intercept it).'
-      source: learned
-      discovered_from: gcp-full-stack
-    - resource: google_project_service
-      rule: '`google_project_service` is escaping to the REAL cloud API (401 OAuth/auth error). The provider block in `providers.tf` is missing a `*_custom_endpoint` override for this resource''s service. Either add the matching custom_endpoint OR remove `google_project_service` from this scenario (the mock doesn''t intercept it).'
-      source: learned
-      discovered_from: gcp-vm-network
     - resource: google_storage_bucket
       rule: google_storage_bucket.app_assets has no encryption.default_kms_key_name — customer-managed encryption not configured
       source: learned
       discovered_from: gcp-storage
-    - resource: google_service_networking_connection
-      rule: '`google_service_networking_connection` is escaping to the REAL cloud API (401 OAuth/auth error). The provider block in `providers.tf` is missing a `*_custom_endpoint` override for this resource''s service. Either add the matching custom_endpoint OR remove `google_service_networking_connection` from this scenario (the mock doesn''t intercept it).'
-      source: learned
-      discovered_from: gcp-cloud-sql
-    - resource: google_kms_key_ring
-      rule: '`google_kms_key_ring` is escaping to the REAL cloud API (401 OAuth/auth error). The provider block in `providers.tf` is missing a `*_custom_endpoint` override for this resource''s service. Either add the matching custom_endpoint OR remove `google_kms_key_ring` from this scenario (the mock doesn''t intercept it).'
-      source: learned
-      discovered_from: gcp-storage
-    - resource: google_container_node_pool
-      rule: "exit status 1 | stderr: ╷\n│ Error: Plugin did not respond\n│ \n│   with google_container_node_pool.primary_nodes,\n│   on gke.tf line 31, in resource \"google_container_node_pool\" \"primary_nodes\":\n│   31: resource \"google_container_node_pool\" \"primary_nodes\" {\n│ \n│ The plugin encounte..."
-      source: learned
-      discovered_from: gcp-gke-cluster
     - resource: google_cloud_run_v2_service
       rule: "exit status 1 | stderr: ╷\n│ Error: Unsupported argument\n│ \n│   on main.tf line 6, in resource \"google_cloud_run_v2_service\" \"api\":\n│    6:   deletion_protection = false\n│ \n│ An argument named \"deletion_protection\" is not expected here.\n╵"
       source: learned
       discovered_from: gcp-cloud-run
-    - resource: google_dns_record_set
-      rule: "exit status 1 | stderr: ╷\n│ Error: Plugin did not respond\n│ \n│   with google_dns_record_set.default_a,\n│   on main.tf line 8, in resource \"google_dns_record_set\" \"default_a\":\n│    8: resource \"google_dns_record_set\" \"default_a\" {\n│ \n│ The plugin encountered an error, and failed to..."
-      source: learned
-      discovered_from: gcp-dns
-    - resource: google_sql_database_instance
-      rule: '`google_sql_database_instance` is not implemented by the matching mock server. Do NOT use this resource type — pick an alternative that the mock supports. Check the mock''s regression_manifest.go for the LandedServices list.'
-      source: learned
-      discovered_from: gcp-cloud-sql
-    - resource: google_kms_key_ring
-      rule: "exit status 1 | stderr: ╷\n│ Error: Reference to undeclared resource\n│ \n│   on kms.tf line 5, in resource \"google_kms_key_ring\" \"sql\":\n│    5:   depends_on = [google_project_service.cloudkms]\n│ \n│ There is no managed resource \"google_project_service\" \"cloudkms\" definition\n│ in the ..."
-      source: learned
-      discovered_from: gcp-cloud-sql
-    - resource: google_secret_manager_secret_version
-      rule: "exit status 1 | stderr: ╷\n│ Error: Error reading SecretVersion: googleapi: Error 404: The resource was not found, notFound\n│ \n│   with google_secret_manager_secret_version.db_credentials_v1,\n│   on main.tf line 13, in resource \"google_secret_manager_secret_version\" \"db_credentials_v1\":\n..."
-      source: learned
-      discovered_from: gcp-secret-manager
-    - resource: google_sql_database_instance
-      rule: "exit status 1 | stderr: ╷\n│ Error: Plugin did not respond\n│ \n│   with google_sql_database_instance.postgres,\n│   on database.tf line 1, in resource \"google_sql_database_instance\" \"postgres\":\n│    1: resource \"google_sql_database_instance\" \"postgres\" {\n│ \n│ The plugin encountered a..."
-      source: learned
-      discovered_from: gcp-full-stack
-    - resource: google_container_node_pool
-      rule: '`google_container_node_pool` is not implemented by the matching mock server. Do NOT use this resource type — pick an alternative that the mock supports. Check the mock''s regression_manifest.go for the LandedServices list.'
-      source: learned
-      discovered_from: gcp-gke-cluster

@@ -12,7 +12,3 @@ pitfalls:
       rule: 'Version and auto_upgrade MUST be consistent: WITHOUT auto_upgrade use a full patch version like "1.31.2"; WITH auto_upgrade enabled use ONLY a minor version like "1.31".'
       source: learned
       discovered_from: full-stack-paris
-    - resource: scaleway_domain_record
-      rule: "exit status 1 | stderr: ╷\n│ Error: scaleway-sdk-go: resource  with ID  is not found\n│ \n│   with scaleway_domain_record.app,\n│   on dns.tf line 1, in resource \"scaleway_domain_record\" \"app\":\n│    1: resource \"scaleway_domain_record\" \"app\" {\n│ \n╵"
-      source: learned
-      discovered_from: web-app-paris
