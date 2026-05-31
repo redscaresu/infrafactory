@@ -44,12 +44,12 @@ the appropriate mock repo and prune the pitfall — don't leave it.
 ## Sweep coverage map
 
 Final state after the 2026-05-31 evening close-out session:
-**33/39 pass, 6 fail** in the sweep proper, but `aws-full-stack`
-validated `target_reached` in a follow-up clean run after Tickets
-A + B landed — so the realistic pass rate is **34/39** going into
-next session. Last 5: `gcp-cloud-sql`, `gcp-full-stack`,
-`gcp-gke-cluster`, `web-app-paris` regression, `gcp-storage`
-(intermittent).
+**33/39 pass, 6 fail** in the sweep proper, but follow-up clean
+runs validated `aws-full-stack` (after Tickets A + B) AND
+`web-app-paris` (after the auto-learned scaleway_instance_server
+prescriptive pitfall was seeded by `0a7efe5`). Realistic pass rate
+going into next session: **35/39**. Last 4: `gcp-cloud-sql`,
+`gcp-full-stack`, `gcp-gke-cluster`, `gcp-storage` (intermittent).
 
 ### Closed this session
 
@@ -76,6 +76,45 @@ next session. Last 5: `gcp-cloud-sql`, `gcp-full-stack`,
 | `gcp-secret-manager` | Ticket 5 (SecretVersion 404) | Medium |
 | `gcp-storage` | Intermittent — LLM non-determinism | n/a |
 | `web-app-paris` | Regression introduced this session — see notes | Unknown |
+
+### Tickets C + E — CLOSED, Ticket D NEW (2026-05-31 ~22:00)
+
+After A+B validated, ran gcp-cloud-sql to test T3-rest. Surfaced three more issues:
+
+**Ticket C — fakegcp Projects.GetProject — CLOSED.**
+fakegcp `e51d5de` added a synthetic GetProject handler at
+GET /v1/projects/{project} returning lifecycleState=ACTIVE.
+Before: 501-not-implemented for the route, which the v5 SDK
+surfaces as a confusing 401 ACCESS_TOKEN_TYPE_UNSUPPORTED that
+looks like a real-cloud escape. Now: the GetProject preflight
+called by getProject helpers across many resources resolves to
+fakegcp.
+
+**Ticket E — kms_custom_endpoint double-path — CLOSED.**
+infrafactory commit after `a0768c2` (this session) flipped
+kms_custom_endpoint from `%s/v1/` to `%s/`. Same shape as T2
+(sql_custom_endpoint) and T11 (dns_custom_endpoint): the v5 cloudkms
+lib prepends v1/projects/... to BasePath itself, so trailing /v1/
+doubled to /v1/v1/projects/... which fakegcp 501'd. Surfaced in
+gcp-cloud-sql iter 5.
+
+**Ticket D — google_project_service Read escapes to real cloud — OPEN.**
+Even with T-C's GetProject handler in place, gcp-cloud-sql iter 1
+still hits Error 401 / ACCESS_TOKEN_TYPE_UNSUPPORTED on
+google_project_service Read for compute/sqladmin/servicenetworking.
+fakegcp log shows ZERO calls to the bare /v1/projects/<id> route
+during iter 1 — the provider's getProject helper for this resource
+uses a code path that DOESN'T respect cloud_resource_manager_custom_endpoint
+and escapes to the real cloudresourcemanager.googleapis.com.
+Likely a terraform-provider-google v5.45.2 bug. Three options for
+next session:
+  1. Bump provider version (try latest v5.x or v6 — may have other
+     fallout; v6 split / renamed endpoint vars).
+  2. Pitfall: tell the LLM that `google_project_service` is
+     unnecessary in fakegcp scenarios (all services are
+     always-enabled). Risk: teaches LLM to avoid a valid resource.
+  3. Read provider source to find the actual flag that routes
+     this specific call. Most rigorous.
 
 ### Tickets A + B — CLOSED 2026-05-31 evening, validated end-to-end
 

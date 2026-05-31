@@ -151,6 +151,15 @@ func fakeRepoSpecs() []fakeRepoSpec {
 				// + google_kms_crypto_key the LLM declares to satisfy
 				// gcp.encryption policy. No standalone scenario.
 				"kms": "exercised transitively by gcp-storage / gcp-cloud-sql via google_kms_key_ring + google_kms_crypto_key",
+				// cloudresourcemanager.GetProject is a preflight helper
+				// the v5 provider calls before many resources read/edit;
+				// no user-facing resource maps to it directly, so every
+				// gcp-*.yaml scenario exercises it transitively.
+				"cloudresourcemanager": "preflight (Projects.GetProject) exercised transitively by every GCP scenario via the provider's getProject helper",
+				// servicenetworking only matters for private-IP Cloud SQL
+				// — gcp-cloud-sql declares google_service_networking_connection
+				// to satisfy private-VPC peering. No standalone scenario.
+				"servicenetworking": "exercised transitively by gcp-cloud-sql via google_service_networking_connection (private-IP peering)",
 			},
 		},
 		{

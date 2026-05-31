@@ -251,7 +251,14 @@ func buildGoogleProviderBlock(fakegcpURL string) string {
   # the gcp.encryption policy (CMEK on storage/sql/disk) can be
   # satisfied by declaring KMS resources in HCL without hitting the
   # real cloudkms.googleapis.com endpoint.
-  kms_custom_endpoint                    = "%[1]s/v1/"
+  #
+  # Host-only (no trailing /v1/) — terraform-provider-google's KMS
+  # client uses the v5 cloudkms lib which prepends "v1/projects/..."
+  # to the BasePath itself. With "%[1]s/v1/" we'd get
+  # /v1/v1/projects/... which fakegcp 501s. Same shape as T2's
+  # sql_custom_endpoint and T11's dns_custom_endpoint fixes.
+  # Surfaced in gcp-cloud-sql iter 5 (2026-05-31).
+  kms_custom_endpoint                    = "%[1]s/"
 }`, fakegcpURL)
 }
 
