@@ -5,10 +5,14 @@ pitfalls:
       source: learned
       discovered_from: web-app-paris-pinned
     - resource: scaleway_instance_server
-      rule: "exit status 1 | stderr: ╷\n│ Error: Unsupported argument\n│ \n│   on main.tf line 7, in resource \"scaleway_instance_server\" \"web_0\":\n│    7:   routed_ip_enabled = false\n│ \n│ An argument named \"routed_ip_enabled\" is not expected here.\n╵\n╷\n│ Error: Unsupported argument\n│ \n│   o..."
+      rule: 'Always declare a `scaleway_vpc_private_network` AND a `scaleway_instance_private_nic` for EACH `scaleway_instance_server`. The private NIC has the shape: `resource "scaleway_instance_private_nic" "NAME" { server_id = scaleway_instance_server.SERVER.id; private_network_id = scaleway_vpc_private_network.PN.id }`. The `vpc_required` policy fails any instance without this attachment. Add one NIC per instance (use `count` to mirror the `count` on the instance) — do NOT rely on the instance''s `routed_ip_enabled` flag, which the provider doesn''t accept.'
       source: learned
       discovered_from: web-app-paris
     - resource: scaleway_k8s_cluster
       rule: 'Version and auto_upgrade MUST be consistent: WITHOUT auto_upgrade use a full patch version like "1.31.2"; WITH auto_upgrade enabled use ONLY a minor version like "1.31".'
       source: learned
       discovered_from: full-stack-paris
+    - resource: scaleway_lb_backend
+      rule: "exit status 1 | stderr: ╷\n│ Error: Invalid index\n│ \n│   on loadbalancer.tf line 19, in resource \"scaleway_lb_backend\" \"web\":\n│   19:     scaleway_instance_server.web_1.private_ips[0].address,\n│     ├────────────────\n│     │ scaleway_instance_serve..."
+      source: learned
+      discovered_from: incremental-project-paris

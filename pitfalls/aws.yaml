@@ -8,3 +8,19 @@ pitfalls:
       rule: "exit status 1 | stderr: ╷\n│ Error: creating S3 Bucket (infrafactory-assets-AKIA5D31D6F863AAB893): operation error S3: CreateBucket, https response error StatusCode: 400, RequestID: 18B48331628847E8530310EC, HostID: , api error InvalidBucketName: The specified bucket is not valid.\n│ \n│   w..."
       source: learned
       discovered_from: aws-full-stack
+    - resource: aws_kms_key
+      rule: "exit status 1 | stderr: ╷\n│ Error: creating KMS Key: operation error KMS: CreateKey, https response error StatusCode: 200, RequestID: , deserialization failed, failed to decode response body, expected DateType to be a JSON Number, got string instead\n│ \n│   with aws_kms_key.secrets,\n│   ..."
+      source: learned
+      discovered_from: aws-full-stack
+    - resource: aws_iam_user_policy
+      rule: "exit status 1 | stderr: ╷\n│ Error: waiting for IAM User Policy (infrafactory-cicd:infrafactory-cicd-policy) create: empty result\n│ \n│   with aws_iam_user_policy.cicd,\n│   on iam.tf line 64, in resource \"aws_iam_user_policy\" \"cicd\":\n│   64: resource \"aws_iam_user_policy\" \"cicd\" {\n│ \n╵"
+      source: learned
+      discovered_from: aws-full-stack
+    - resource: aws_db_instance
+      rule: aws_db_instance.main has storage_encrypted = false; AWS RDS at-rest encryption is required
+      source: learned
+      discovered_from: aws-rds
+    - resource: aws_subnet
+      rule: "exit status 1 | stderr: ╷\n│ Error: waiting for EC2 Subnet (subnet-6cc5499a5e7589f9) MapPublicIpOnLaunch update: timeout while waiting for state to become 'true' (last state: 'false', timeout: 5m0s)\n│ \n│   with aws_subnet.public,\n│   on network.tf line 11, in resource \"aws_subnet\" \"publi..."
+      source: learned
+      discovered_from: aws-vpc-network
