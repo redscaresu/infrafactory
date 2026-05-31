@@ -146,6 +146,43 @@ isn't stored.)
 `fakeaws/repository/ec2.go::EC2Subnet` struct, persist on
 ModifySubnetAttribute, surface on DescribeSubnets.
 
+### 9. Update `CONTRIBUTING.md` to reference `make up`
+
+**Symptom:** `CONTRIBUTING.md` line 20 still says
+`make deps-up` (the legacy single-mock docker-compose path that was
+removed in this session's Makefile cleanup).
+
+**Fix:** Replace with `make up` + a one-line note that it brings up
+all four mocks + UI, matching the new README quickstart.
+
+### 10. Mirror "make up" demo in fakegcp + mockway READMEs
+
+**Status:** `fakeaws/README.md` got a "One-shot demo (with sibling
+repos)" subsection pointing at infrafactory's `make up`. fakegcp and
+mockway READMEs should get the same blurb so a user landing on any
+mock repo's GitHub page sees the consistent entry point.
+
+### 11. `cloud_resource_manager_custom_endpoint` and others — audit for double-path bugs
+
+**Symptom (pattern, not blocking):** I fixed three GCP endpoint
+double-path bugs this session (`iam_custom_endpoint`,
+`service_usage_custom_endpoint`, and the staged `sql_custom_endpoint`
+listed in ticket 2). Other endpoints in
+`internal/cli/generate_command.go::buildGoogleProviderBlock` may
+have the same shape — the v5 provider's prepend behaviour varies
+per-service and our template hard-codes `/v1/` etc.
+
+**Fix:** For each `*_custom_endpoint` we emit, trace through the
+matching scenario and verify the wire URL fakegcp receives matches
+what the route is registered at. Candidates to audit:
+`cloud_resource_manager_custom_endpoint` (currently `/v1/`),
+`dns_custom_endpoint` (currently `/dns/v1/`),
+`cloud_run_v2_custom_endpoint` (currently `/v2/`),
+`pubsub_custom_endpoint` (currently `/v1/`),
+`storage_custom_endpoint` (currently `/storage/v1/`),
+`secret_manager_custom_endpoint` (currently `/v1/`),
+`redis_custom_endpoint` (currently `/v1/`).
+
 ## Workflow / harness improvements
 
 Things I want to land before they're forgotten in a fresh session:

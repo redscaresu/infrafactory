@@ -32,53 +32,92 @@ Actually runs `gcp-pubsub` through the UI: scenario page → click Run → Live 
 
 Browser walkthrough of `full-stack-paris` (the most resource-dense scenario) — no `infrafactory run`, just a tour of the Scenario / Runs / Compare / Pitfalls / Diagnostics pages so viewers see the UI surface (24s, no LLM credit needed). Re-record with `make demo-ui`.
 
-## Quickstart
+## Quickstart — 60-second demo
 
-This walks through the GCP full-stack scenario — VPC + GKE + Cloud SQL + GCS — end-to-end against fakegcp. No GCP credentials, no real cloud calls.
+Three commands gets you a working LLM-driven infra pipeline against
+local mock servers, validates a real terraform scenario end-to-end,
+and tears everything down cleanly. **No cloud credentials. No real
+cloud calls. ~60 seconds.**
 
 ```bash
-# 1. Clone with siblings — the three mock servers live in adjacent repos.
+# 1. Clone the four repos side-by-side (sibling layout).
 mkdir -p ~/dev && cd ~/dev
 for repo in infrafactory fakeaws fakegcp mockway; do
   git clone https://github.com/redscaresu/$repo.git
 done
 cd infrafactory
 
-# 2. Toolchain prerequisites
-#    - Go 1.25+
-#    - OpenTofu (https://opentofu.org) on PATH
-#    - Docker (for the SeaweedFS S3 backend used by AWS scenarios)
-#    - Claude CLI on PATH or OPENROUTER_API_KEY exported
+# 2. Bring up the full stack — mockway + fakegcp + fakeaws +
+#    SeaweedFS (S3) + the SvelteKit UI — in one command, backgrounded.
+make up
 
-# 3. One-shot bring-up: mocks + UI + binary in a single command.
-make up              # mocks (8080/8081/8082) + SeaweedFS (9090) + UI (4173) in one
-# (alternatively, the unbundled equivalent:)
-# make build && make mocks-up
+# 3. Run the fastest scenario end-to-end (~30s, 1 iteration).
+./bin/infrafactory run scenarios/training/block-paris.yaml --config infrafactory.yaml
 
-# 4. Run the GCP full-stack scenario
-./bin/infrafactory run scenarios/training/gcp-full-stack.yaml
+# 4. (Optional) point a browser at http://127.0.0.1:4173 to see the
+#    same scenario in the UI with per-iteration stage breakdown.
 
-# 5. Inspect generated HCL + per-iteration snapshots
-ls output/gcp-full-stack/                       # final HCL the LLM converged on
-ls .infrafactory/runs/gcp-full-stack/           # immutable per-run artifacts
+# 5. Tear it all down.
+make down
 ```
 
-A successful run ends with `Status: success` and `run/terminal_reason: pass (target_reached)`. If a validation layer fails, the failure JSON feeds into the next iteration's LLM prompt and the loop retries (default budget: 5 iterations).
+You should see `Status: success` and `run/terminal_reason: pass (target_reached)`
+after step 3. The LLM generated a Scaleway Block Storage volume in HCL,
+the static validator + mockway apply + topology test all passed, and
+mockway is left in the post-apply state for inspection at
+`http://127.0.0.1:8080/mock/state`.
 
-To try the other clouds:
+Use `make status` at any time to see which of the five ports
+(`8080`, `8081`, `8082`, `9090`, `4173`) are listening.
+
+### Prerequisites
+
+- Go 1.25+
+- OpenTofu (https://opentofu.org) on PATH
+- Docker (for the SeaweedFS S3 backend used by AWS scenarios) — only
+  needed when running AWS-cloud scenarios; Scaleway-only and GCP-only
+  demos don't require it
+- An LLM credential, see below
+
+### LLM provider
+
+InfraFactory drives generation through the Claude CLI by default —
+sign in with `claude login` once and it works out of the box. To use
+a different model via OpenRouter instead, export `OPENROUTER_API_KEY`
+and set `agent.type: openrouter` in `infrafactory.yaml`. Both paths
+hit the same 3-phase generation pipeline (`plan → write HCL →
+self-review`); pick whichever fits your budget/latency profile.
+
+### What's running
+
+| Port | Service | Why |
+|---|---|---|
+| 8080 | mockway | Scaleway HTTP API mock |
+| 8081 | fakegcp | GCP API mock |
+| 8082 | fakeaws | AWS API mock |
+| 9090 | SeaweedFS | S3-compatible backend (Docker; AWS-only scenarios) |
+| 4173 | infrafactory UI | SvelteKit dashboard + scenario runner |
+
+### Other scenarios
+
+After `make up`, any of these run against the same stack:
+
 ```bash
-./bin/infrafactory run scenarios/training/aws-full-stack.yaml      # cloud: aws      → fakeaws
 ./bin/infrafactory run scenarios/training/gcp-full-stack.yaml      # cloud: gcp      → fakegcp
+./bin/infrafactory run scenarios/training/aws-full-stack.yaml      # cloud: aws      → fakeaws
 ./bin/infrafactory run scenarios/training/full-stack-paris.yaml    # cloud: scaleway → mockway
 ```
 
+There are 39 scenarios under `scenarios/training/`. Inspect generated
+HCL at `output/<scenario>/` (overwritten each run) and immutable
+per-run artifacts at `.infrafactory/runs/<scenario>/<run-id>/`.
+
+A successful run ends with `Status: success` and `run/terminal_reason: pass (target_reached)`. If a validation layer fails, the failure JSON feeds into the next iteration's LLM prompt and the loop retries (default budget: 5 iterations).
+
 ## Web UI
 
-For an interactive walkthrough of the same loop:
-
-```bash
-make run    # builds + serves the SvelteKit UI at http://127.0.0.1:4173
-```
+`make up` already started the UI on `http://127.0.0.1:4173`. If you'd
+rather start just the UI (without the mocks), use `make run`.
 
 The UI provides a scenario browser (edit YAML, see real-time validation), run controls (`--clean` / `--no-destroy` / Layer-3 toggles), a live page with per-iteration timer and stage indicators, per-run IaC viewer with diffs, and a pitfalls editor. See the UI demo above for the `full-stack-paris` walkthrough.
 
@@ -203,31 +242,6 @@ Gated e2e tests (cross-repo, require `tofu` + the sibling mock repos checked out
 ```bash
 INFRAFACTORY_ENABLE_E2E=1 go test ./internal/e2e/...
 ```
-
-### Scenario change gate (M89)
-
-`.github/workflows/scenario-gate.yml` runs every PR that modifies `scenarios/training/*.yaml`. It detects the added/modified scenarios in the PR diff and runs each through `infrafactory run --clean` end-to-end. The PR cannot merge unless every changed scenario terminates with `target_reached`.
-
-The gate requires LLM credentials. To activate: add an `OPENROUTER_API_KEY` repo secret (Settings → Secrets and variables → Actions). Without the secret, the workflow gracefully skips with a CI warning rather than blocking PRs — so the file is safe to merge before the secret is configured.
-
-Run locally:
-```bash
-BASE_REF=origin/main bash scripts/scenario_change_gate.sh
-```
-
-### Cross-repo service-coverage harness
-
-`internal/e2e/cross_repo_parity_test.go` (`TestCrossRepoParity_EveryLandedServiceHasScenario`) is the gate that keeps infrafactory in lockstep with the three mocks. On every CI run it reads each sibling fake's `handlers/regression_manifest.go::LandedServices` slice and asserts every entry is either (a) mapped to ≥1 training scenario in `scenarios/training/` via the hand-curated `cloudParityMap` in that test, or (b) explicitly exempted with a written reason. Adding a new service on the fake side without the matching upstream scenario fails this test on the next infrafactory push — which is the whole point: a new handler set with zero infrafactory coverage doesn't ship silently.
-
-When a sibling repo isn't checked out (CI runners that only fetch infrafactory), the per-cloud subtest skips with a structured marker rather than passing vacuously.
-
-To add coverage for a newly-landed service:
-
-1. Add `scenarios/training/<cloud>-<service>.yaml` exercising the service through infrafactory's harness (plan → mock-apply → topology → destroy).
-2. Append a `cloudParityMap` entry in `internal/e2e/cross_repo_parity_test.go` pointing at the new YAML.
-3. (Optional) Add a `TestE2E_<Cloud><Svc>` in `internal/e2e/<cloud>_services_test.go` so the gated cross-repo e2e drives the scenario end-to-end.
-
-Exemptions belong in the `exempt` map of the same test and must explain *why* no scenario is appropriate (meta-APIs like GCP `serviceusage` or Scaleway `marketplace` are read-through paths that every scenario exercises transitively — they have no standalone resource type to model).
 
 ## Documentation
 
