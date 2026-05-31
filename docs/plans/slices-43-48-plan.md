@@ -4,7 +4,7 @@
 
 Slices 43-48 build a third sibling mock for AWS, modelled after mockway (Scaleway) and fakegcp (GCP). LocalStack consolidated into a paid product in April 2026; fakeaws keeps the freedom-to-modify story alive for infrafactory's AWS scenarios.
 
-The full design lives in `/Users/ehsanashouri/go/src/github.com/redscaresu/fakeaws/concepts.md`. This plan covers the per-slice deliverables and exit criteria so the work can be picked up incrementally by any agent.
+The full design lives in `../fakeaws/concepts.md` (sibling repo). This plan covers the per-slice deliverables and exit criteria so the work can be picked up incrementally by any agent.
 
 ## Quick Reference
 
@@ -14,7 +14,7 @@ The full design lives in `/Users/ehsanashouri/go/src/github.com/redscaresu/fakea
 | Ticket IDs | S43-T1 through S48-T8, plus S44-T0 / S45-T0 / S46-T0 / S47-T0 (per-phase pitfalls-extension tickets added in pass 2; the per-service prompt-matrix design they originally carried was retracted in pass 4 — see concepts.md § "Resolved decisions" item 11) plus M39 + M40 (maintenance — ARN builder + cross-pollination policy) |
 | Total tickets | 68 fakeaws S-ticket rows (S43 14 + S44 13 + S45 11 + S46 11 + S47 11 + S48 8) of which 2 are vacated/MOVED in S48 (66 active), plus 2 maintenance M-tickets (M39 + M40) folded into S43-T2 / S48-T4 acceptance — see concepts.md § Phasing |
 | Depends on | Slice 42 (multi-cloud UI), Slice 36 (GCP infra) |
-| Out-of-tree work | New repo at `/Users/ehsanashouri/go/src/github.com/redscaresu/fakeaws` |
+| Out-of-tree work | New sibling repo `fakeaws/` (alongside the infrafactory checkout) |
 
 ## Quality bar
 
@@ -71,7 +71,7 @@ Boot the repo with the secret-scanning + CI gates *and* every Day-1 invariant co
 
 | id | title | priority | deps |
 |---|---|---|---|
-| S43-T1 | fakeaws: **`git init` at `/Users/ehsanashouri/go/src/github.com/redscaresu/fakeaws/` is the first action** (the directory exists today only as a concepts.md draft, not as a git repo); then repo scaffold + Day-1 gates in commit 1 (cmd, handlers, models, testutil, Makefile incl. `install-hooks` target, README, AGENTS.md, go.mod, **`.gitleaks.toml` allowlisting `examples/.*\.tf$`, tracked `.githooks/pre-commit` running `gitleaks protect --staged --no-banner` then `go test ./...`, `.github/workflows/ci.yml` with gitleaks+test+race+vet+build as required checks, `coverage_matrix.yaml` schema-only header (entries land per service-bundle PR), provider-version constraint file recording `hashicorp/aws ~> 5.70` per concepts.md "Resolved decisions" item 14**); commit author `redscaresu <ukashouri@googlemail.com>` | P1 | — |
+| S43-T1 | fakeaws: **`git init` in the sibling `fakeaws/` checkout is the first action** (the directory exists today only as a concepts.md draft, not as a git repo); then repo scaffold + Day-1 gates in commit 1 (cmd, handlers, models, testutil, Makefile incl. `install-hooks` target, README, AGENTS.md, go.mod, **`.gitleaks.toml` allowlisting `examples/.*\.tf$`, tracked `.githooks/pre-commit` running `gitleaks protect --staged --no-banner` then `go test ./...`, `.github/workflows/ci.yml` with gitleaks+test+race+vet+build as required checks, `coverage_matrix.yaml` schema-only header (entries land per service-bundle PR), provider-version constraint file recording `hashicorp/aws ~> 5.70` per concepts.md "Resolved decisions" item 14**); commit author `redscaresu <ukashouri@gmail.com>` | P1 | — |
 | S43-T2 | fakeaws: `awsproto/` helper package — XML response writer, JSON 1.0/1.1 helpers, x-amz-target parser, query-RPC parser, **per-protocol error mappers** (one per wire format, each tested for `ErrInUse`/`ErrTerminalState`/`ErrConflict`/`ErrNotFound` round-trip into terraform-provider-aws's expected error code and shape) | P1 | S43-T1 |
 | S43-T3 | fakeaws: `repository/repository.go` skeleton — modernc.org/sqlite, file-backed (`--db`) and in-memory modes, schema migrate, FK enforcement, snapshot/restore lifecycle covering SQLite *plus* in-process caches that exist in v1 (SQS visibility timeouts in S46; Route53 change-id cache in S47; DynamoDB stream cursors are out of v1 scope), `models.Err*` sentinels including `ErrInUse` / `ErrTerminalState`, `resolveSameAccountName` + post-merge PATCH validation helpers | P1 | S43-T1 |
 | S43-T4 | fakeaws: `handlers/admin.go` (/mock/reset, /mock/snapshot, /mock/restore, /mock/state, /mock/state/{service}) + admin_test.go; `/mock/state` schema documented inline so topology_derive_aws has a stable contract | P1 | S43-T3 |

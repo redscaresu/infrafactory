@@ -1,14 +1,14 @@
 # fakeaws kickoff prompt
 
 Self-contained prompt to drive the S43-S48 build to completion. Paste the
-fenced block below into a fresh Claude Code session at
-`/Users/ehsanashouri/go/src/github.com/redscaresu/infrafactory`. Designed
-to survive context compaction via the BACKLOG.md resume contract.
+fenced block below into a fresh Claude Code session at the
+`infrafactory` checkout root. Designed to survive context compaction via
+the BACKLOG.md resume contract.
 
 Pre-flight checklist (operational state, branch protection, codex auth,
-provider-version pin, mockway port assignments, etc.) lives in
-`/Users/ehsanashouri/go/src/github.com/redscaresu/fakeaws/concepts.md` §
-"Pre-flight checklist". Read that section before pasting the prompt.
+provider-version pin, mockway port assignments, etc.) lives in the
+sibling `fakeaws/concepts.md` § "Pre-flight checklist". Read that
+section before pasting the prompt.
 
 ---
 
@@ -16,17 +16,18 @@ provider-version pin, mockway port assignments, etc.) lives in
 You are driving the fakeaws build to completion. Plan and ticket
 source-of-truth (read all three first, plus the Pre-flight checklist):
 
-  - /Users/ehsanashouri/go/src/github.com/redscaresu/fakeaws/concepts.md
+  - ../fakeaws/concepts.md
     (esp. § "Pre-flight checklist (before starting S43-T1)")
-  - /Users/ehsanashouri/go/src/github.com/redscaresu/infrafactory/docs/plans/slices-43-48-plan.md
-  - /Users/ehsanashouri/go/src/github.com/redscaresu/infrafactory/BACKLOG.md
+  - docs/plans/slices-43-48-plan.md
+  - BACKLOG.md
 
 Also read the user's CLAUDE.md, infrafactory's AGENTS.md, and the auto-memory
-at ~/.claude/projects/-Users-ehsanashouri-go-src-github-com-redscaresu-infrafactory/memory/MEMORY.md.
+the harness keeps for this project (typically under
+~/.claude/projects/<project-slug>/memory/MEMORY.md).
 
-The fakeaws repo at /Users/ehsanashouri/go/src/github.com/redscaresu/fakeaws
-exists today only as concepts.md — the very first action of S43-T1 is
-`git init` there, then ship the four-file Day-1 invariant in commit 1.
+The fakeaws repo at ../fakeaws exists today only as concepts.md — the
+very first action of S43-T1 is `git init` there, then ship the
+four-file Day-1 invariant in commit 1.
 
 EXECUTION RULES
 
@@ -39,7 +40,7 @@ EXECUTION RULES
    exit gates from the plan's "Mandatory gates" section; (d) update the
    row from `todo` to `done`; (e) git commit with message
    `<ticket-id>: <one-line summary>`. Author identity:
-   `redscaresu <ukashouri@googlemail.com>`.
+   `redscaresu <ukashouri@gmail.com>`.
 
 3. Phase exit (gate 10) requires 2 consecutive codex `NOTHING_TO_IMPROVE`
    passes scoped to that phase's diff. Use the prompt template in
