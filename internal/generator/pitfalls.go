@@ -59,6 +59,20 @@ func LoadPitfalls(dir, cloud string) (string, error) {
 	return renderPitfalls(entries), nil
 }
 
+// LoadPitfallEntries reads pitfalls/<cloud>.yaml and returns the
+// parsed entries. Empty result + nil error if the file doesn't
+// exist (a fresh checkout has no learned pitfalls yet).
+//
+// Used by N8's DetectPolicyConflict in run_command.go to fetch the
+// pitfall list the LLM's HCL is being compared against.
+func LoadPitfallEntries(dir, cloud string) ([]PitfallEntry, error) {
+	if dir == "" || cloud == "" {
+		return nil, nil
+	}
+	path := filepath.Join(dir, cloud+".yaml")
+	return loadPitfallsFile(path)
+}
+
 // loadPitfallsFile reads and parses a single pitfalls YAML file.
 // Returns nil entries and nil error if the file does not exist.
 // Caps the file at 1 MB so an accidentally-or-maliciously-huge
