@@ -229,6 +229,8 @@ make ui-test-e2e           # Playwright only
 make mocks-up              # start mockway + fakegcp + fakeaws (+ SeaweedFS via Docker)
 make mocks-down            # stop them all
 make mocks-status          # show port + PID for each (probes lsof, not just pidfiles)
+make mocks-restart         # mocks-down + mocks-up; picks up sibling-repo source changes
+make mockway-restart       # restart just one mock (also: fakegcp-restart, fakeaws-restart)
 
 # container mock path (alternative — needs Docker, no Go install required;
 # wires identical ports 8080/8081/8082 so scenarios + infrafactory.yaml
@@ -236,7 +238,20 @@ make mocks-status          # show port + PID for each (probes lsof, not just pid
 make mocks-up-containers   # build + start fakeaws + fakegcp + mockway
 make mocks-down-containers
 make mocks-pull            # refresh published GHCR images
+
+# session-close hygiene — sweeps lingering sweep scripts, log tails,
+# and stray mock test binaries (compiled to /tmp/ by `go test`) on
+# non-canonical ports. Safe to run any time; idempotent.
+make clean-bg
 ```
+
+When working on a sibling mock repo (`../fakegcp`, `../fakeaws`,
+`../mockway`), `make mocks-up` spins up those mocks via `go run`
+which compiles ONCE at boot. After committing a change in the
+sibling repo, run `make <mock>-restart` (e.g. `make fakegcp-restart`)
+to pick up the new source — otherwise the running mock keeps
+serving the stale binary, a footgun that's wasted several debugging
+sessions worth of time.
 
 Gated e2e tests (cross-repo, require `tofu` + the sibling mock repos checked out):
 ```bash
