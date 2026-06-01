@@ -559,3 +559,151 @@ func TestAppendPitfall_EmptyDirOrCloud(t *testing.T) {
 		t.Errorf("empty cloud should be no-op, got error: %v", err)
 	}
 }
+
+// N3-T12: IsMockActionable classifier. Pinning the five signal
+// classes so future signal-list edits don't accidentally narrow the
+// predicate. Each test gives a realistic failure detail; the
+// predicate should fire.
+func TestIsMockActionable_FivePositiveSignalClasses(t *testing.T) {
+	cases := []struct {
+		name   string
+		detail string
+	}{
+		{
+			name:   "501 not implemented from fakegcp",
+			detail: `googleapi: Error 501: Not implemented: GET /v1/v1/projects/.../keyRings, notImplemented`,
+		},
+		{
+			name:   "plugin did not respond panic",
+			detail: "Error: Plugin did not respond\n\nThe plugin encountered an error, and failed to respond to the plugin.(*GRPCProvider).ApplyResourceChange call.",
+		},
+		{
+			name:   "OAuth escape from provider v5 v3-endpoint miss",
+			detail: `googleapi: Error 401: Request had invalid authentication credentials. ... "reason": "ACCESS_TOKEN_TYPE_UNSUPPORTED"`,
+		},
+		{
+			name:   "couldn't find resource wait-loop",
+			detail: "Error: waiting for IAM User Policy create: couldn't find resource (10 retries)",
+		},
+		{
+			name:   "ResourceNotFoundException from Describe* path",
+			detail: `Error: removing IAM User access keys: ListSSHPublicKeys, ResourceNotFoundException: The specified resource does not exist`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if !IsMockActionable(tc.detail) {
+				t.Errorf("expected IsMockActionable=true for %s, got false", tc.name)
+			}
+			if FirstMockSignal(tc.detail) == "" {
+				t.Errorf("FirstMockSignal returned empty for %s", tc.name)
+			}
+		})
+	}
+}
+
+// Negative cases — pure LLM mistakes must NOT be classified as
+// mock-actionable, otherwise the existing learning path silently
+// stops writing legitimate pitfalls.
+func TestIsMockActionable_NegativesStayOnPitfallPath(t *testing.T) {
+	cases := []struct {
+		name   string
+		detail string
+	}{
+		{
+			name:   "Unsupported argument (LLM typo)",
+			detail: `Error: Unsupported argument\n\nAn argument named "deletion_protection" is not expected here.`,
+		},
+		{
+			name:   "policy gate (LLM omitted required field)",
+			detail: "google_storage_bucket.app_assets has no encryption.default_kms_key_name",
+		},
+		{
+			name:   "password complexity (LLM picked a weak default)",
+			detail: "scaleway_redis_cluster.main: password does not respect constraint: minimum 8 characters",
+		},
+		{
+			name:   "empty detail",
+			detail: "",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if IsMockActionable(tc.detail) {
+				t.Errorf("expected IsMockActionable=false for %s, got true", tc.name)
+			}
+		})
+	}
+}
+
+// AppendMockGap writes to docs/mock-gaps.md, dedups on
+// (cloud, signal, resource), groups by cloud heading.
+func TestAppendMockGap_CreatesFileAndDedups(t *testing.T) {
+	dir := t.TempDir()
+	gap := MockGap{
+		Cloud:     "gcp",
+		Signal:    "501 not implemented",
+		Resource:  "google_kms_key_ring",
+		Scenario:  "gcp-storage",
+		Detail:    "googleapi: Error 501: Not implemented: POST /projects/test/locations/us/keyRings",
+		Timestamp: "20260601T120000Z",
+	}
+	if err := AppendMockGap(dir, gap); err != nil {
+		t.Fatalf("first append: %v", err)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, "mock-gaps.md"))
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	bodyStr := string(body)
+	// Header + per-cloud section present.
+	if !strings.Contains(bodyStr, "# Mock-server gaps") {
+		t.Errorf("missing header")
+	}
+	if !strings.Contains(bodyStr, "## gcp") {
+		t.Errorf("missing gcp section")
+	}
+	if !strings.Contains(bodyStr, "google_kms_key_ring") {
+		t.Errorf("missing resource row")
+	}
+
+	// Re-append the identical gap. Should not duplicate.
+	if err := AppendMockGap(dir, gap); err != nil {
+		t.Fatalf("second append: %v", err)
+	}
+	body2, _ := os.ReadFile(filepath.Join(dir, "mock-gaps.md"))
+	if strings.Count(string(body2), "google_kms_key_ring") != 1 {
+		t.Errorf("duplicate row created on re-append, got %d occurrences", strings.Count(string(body2), "google_kms_key_ring"))
+	}
+
+	// A different resource under the same cloud appends to the same section.
+	gap2 := gap
+	gap2.Resource = "google_dns_record_set"
+	if err := AppendMockGap(dir, gap2); err != nil {
+		t.Fatalf("third append: %v", err)
+	}
+	body3, _ := os.ReadFile(filepath.Join(dir, "mock-gaps.md"))
+	if !strings.Contains(string(body3), "google_dns_record_set") {
+		t.Errorf("second resource not appended")
+	}
+	if strings.Count(string(body3), "## gcp") != 1 {
+		t.Errorf("gcp heading duplicated, expected 1 got %d", strings.Count(string(body3), "## gcp"))
+	}
+
+	// Different cloud adds a new section.
+	gap3 := MockGap{
+		Cloud:     "aws",
+		Signal:    "plugin did not respond",
+		Resource:  "aws_subnet",
+		Scenario:  "aws-vpc",
+		Detail:    "Plugin did not respond",
+		Timestamp: "20260601T120000Z",
+	}
+	if err := AppendMockGap(dir, gap3); err != nil {
+		t.Fatalf("aws append: %v", err)
+	}
+	body4, _ := os.ReadFile(filepath.Join(dir, "mock-gaps.md"))
+	if !strings.Contains(string(body4), "## aws") {
+		t.Errorf("aws section missing")
+	}
+}

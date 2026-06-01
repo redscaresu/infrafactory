@@ -76,7 +76,220 @@ var (
 		"connection refused",
 		"timeout",
 	}
+
+	// mockActionableSignals are substrings that — when present in a
+	// failure detail — indicate the failure is a mock-server bug, NOT
+	// an LLM-side HCL mistake. Writing such failures to
+	// pitfalls/<cloud>.yaml teaches the LLM to avoid valid resources
+	// just because the mock is incomplete; that makes the system
+	// narrower over time. The correct destination is docs/mock-gaps.md
+	// (filed as a ticket against the matching mock repo).
+	//
+	// Detection is intentionally conservative (substring match, not
+	// regex) — false negatives leave the existing pitfall path active;
+	// false positives drop a learning that arguably belongs in the
+	// pitfalls file. We bias toward false negatives.
+	//
+	// Signals come from real failures observed in the 2026-05-31 sweep
+	// + earlier sessions. Add more here as new mock-gap shapes surface.
+	mockActionableSignals = []string{
+		// 501 Not Implemented — fakeaws/fakegcp/mockway return this
+		// from their default-not-found handler when no route matches.
+		// Always a missing-mock-handler symptom, never an LLM bug.
+		"501 not implemented",
+		"501: not implemented",
+		"\"reason\":\"notimplemented\"",
+		"reason: \"notimplemented\"",
+
+		// "Plugin did not respond" — the provider crashed parsing the
+		// mock's response (usually missing/wrong field shape that the
+		// SDK nil-derefs on). Mock-side fidelity bug.
+		"plugin did not respond",
+		"the plugin encountered an error",
+
+		// OAuth / auth escape — the lib client used a code path that
+		// bypasses the per-service custom_endpoint override and
+		// escaped to the real cloud. Either a missing endpoint flag
+		// (T-D-2 v3 pattern) or a missing route. Either way mock-side.
+		"access_token_type_unsupported",
+		"request had invalid authentication credentials",
+
+		// Wait-loop "couldn't find resource (N retries)" — provider's
+		// Read polled after a successful Create and the mock either
+		// 404s the Describe* path or returns null. Mock-side state
+		// divergence.
+		"couldn't find resource",
+		"resourcenotfoundexception",
+
+		// Generic "unimplemented" envelope variants (each mock has its
+		// own wire shape).
+		"\"error\":\"unimplemented\"",
+	}
 )
+
+// MockGap is a structured entry written to docs/mock-gaps.md when
+// the learning pipeline detects a mock-server-side failure. The
+// markdown writer formats one row per gap, dedup-keyed by (cloud,
+// signal, resource) so re-running the same scenario doesn't grow
+// the file linearly.
+type MockGap struct {
+	Cloud     string // "aws" | "gcp" | "scaleway"
+	Signal    string // matched mock-actionable signal (e.g. "501 not implemented")
+	Resource  string // extracted resource, empty when none parseable
+	Scenario  string // scenario name where the failure surfaced
+	Detail    string // first ~240 chars of the failure detail for context
+	Timestamp string // RFC3339; the run's timestamp (caller passes)
+}
+
+// AppendMockGap writes a structured mock-gap entry to
+// docs/mock-gaps.md inside the given docs directory, creating the
+// file with a header on first call. Dedup-keyed by (cloud, signal,
+// resource) — a re-run that produces the same gap shape is ignored
+// instead of growing the file.
+//
+// File format is markdown so it doubles as a human-readable backlog
+// for the matching mock repo's maintainers. Each entry is a row in
+// a per-cloud table.
+//
+// Caller pattern: see IsMockActionable godoc.
+func AppendMockGap(docsDir string, gap MockGap) error {
+	if docsDir == "" {
+		return fmt.Errorf("docs dir is required")
+	}
+	if gap.Cloud == "" || gap.Signal == "" {
+		return fmt.Errorf("cloud and signal are required")
+	}
+	if err := os.MkdirAll(docsDir, 0o755); err != nil {
+		return fmt.Errorf("mkdir docs dir: %w", err)
+	}
+	path := filepath.Join(docsDir, "mock-gaps.md")
+
+	existing, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("read mock-gaps: %w", err)
+	}
+	content := string(existing)
+
+	// Dedup: same (cloud, signal, resource) triple already recorded?
+	// Markdown row format includes these three columns; substring
+	// match on the resource cell is sufficient because the cloud +
+	// signal columns are stable per row group.
+	dedupKey := fmt.Sprintf("| %s | `%s` |", gap.Resource, gap.Signal)
+	if gap.Resource == "" {
+		dedupKey = fmt.Sprintf("| _(none)_ | `%s` |", gap.Signal)
+	}
+	if strings.Contains(content, dedupKey) {
+		return nil
+	}
+
+	if content == "" {
+		content = "# Mock-server gaps\n\n" +
+			"This file collects failures the auto-learning pipeline detects\n" +
+			"as mock-server bugs (missing routes, wrong response shapes,\n" +
+			"auth escape, stale state) rather than LLM-generated HCL\n" +
+			"mistakes. They belong against the matching mock repo\n" +
+			"(`fakeaws`, `fakegcp`, `mockway`), NOT in `pitfalls/<cloud>.yaml`.\n\n" +
+			"Entries dedup on (cloud, signal, resource). See\n" +
+			"`internal/generator/pitfalls_learn.go::IsMockActionable` for\n" +
+			"the detection signals.\n\n"
+	}
+
+	// Per-cloud heading + table. Idempotent: only adds the heading
+	// if the cloud doesn't already have a section.
+	heading := fmt.Sprintf("## %s\n\n", gap.Cloud)
+	if !strings.Contains(content, heading) {
+		content += heading +
+			"| Resource | Signal | Scenario | Detail | First seen |\n" +
+			"|---|---|---|---|---|\n"
+	}
+
+	resourceCell := gap.Resource
+	if resourceCell == "" {
+		resourceCell = "_(none)_"
+	}
+	detail := strings.TrimSpace(gap.Detail)
+	if len(detail) > 240 {
+		detail = detail[:237] + "..."
+	}
+	// Escape pipe + newline so the markdown table doesn't break.
+	detail = strings.ReplaceAll(detail, "|", "\\|")
+	detail = strings.ReplaceAll(detail, "\n", " ")
+
+	row := fmt.Sprintf("| %s | `%s` | %s | %s | %s |\n",
+		resourceCell, gap.Signal, gap.Scenario, detail, gap.Timestamp)
+
+	// Insert the row at the end of the appropriate cloud section.
+	// Sections are delimited by the `## ` heading; the row goes at
+	// the END of the section's table. Simple approach: append to the
+	// file end if the table is at the file end; otherwise insert
+	// before the next `## ` heading.
+	idx := strings.Index(content, heading)
+	sectionStart := idx + len(heading)
+	nextHeading := strings.Index(content[sectionStart:], "## ")
+	if nextHeading < 0 {
+		content += row
+	} else {
+		insertAt := sectionStart + nextHeading
+		content = content[:insertAt] + row + "\n" + content[insertAt:]
+	}
+
+	return os.WriteFile(path, []byte(content), 0o644)
+}
+
+// FirstMockSignal returns the first mock-actionable signal that
+// matched the given detail (lowercased, exactly as in
+// mockActionableSignals). Returns "" if no signal matches — callers
+// typically guard with IsMockActionable first.
+func FirstMockSignal(detail string) string {
+	if detail == "" {
+		return ""
+	}
+	lower := strings.ToLower(detail)
+	for _, sig := range mockActionableSignals {
+		if strings.Contains(lower, sig) {
+			return sig
+		}
+	}
+	return ""
+}
+
+// ExtractResourceFromDetail is a public wrapper around the package-
+// private resource-extraction helper. Used by run_command.go's mock-
+// gap routing to populate the Resource cell.
+func ExtractResourceFromDetail(detail string) string {
+	return extractResource(detail)
+}
+
+// IsMockActionable reports whether a failure detail is rooted in a
+// mock-server gap (missing route, wrong response shape, auth escape,
+// stale state) rather than an LLM-generated HCL mistake. Mock-
+// actionable failures should NOT be auto-learned into
+// pitfalls/<cloud>.yaml — they belong in docs/mock-gaps.md so the
+// matching mock repo can fix the gap at source.
+//
+// Detection is substring-based against a small, hand-curated signal
+// set (see mockActionableSignals above). Conservative by design.
+//
+// Caller pattern (run_command.go):
+//
+//	if generator.IsMockActionable(failure.Detail) {
+//	    generator.AppendMockGap(docsDir, cloud, gap)  // routes here
+//	    continue
+//	}
+//	learned := generator.ExtractLearnedPitfall(failure.Detail, scenario)
+//	// ... existing path
+func IsMockActionable(detail string) bool {
+	if detail == "" {
+		return false
+	}
+	lower := strings.ToLower(detail)
+	for _, sig := range mockActionableSignals {
+		if strings.Contains(lower, sig) {
+			return true
+		}
+	}
+	return false
+}
 
 // ExtractLearnedPitfall analyzes a failure detail string and extracts
 // a pitfall rule if the error is specific enough to be useful.
