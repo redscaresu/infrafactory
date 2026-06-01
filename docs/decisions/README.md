@@ -20,6 +20,7 @@ Use ADRs for decisions that affect long-term behavior, interfaces, or contributo
 - `0012-dynamic-pitfalls.md`: Externalize provider pitfalls into `pitfalls/{cloud}.yaml` with auto-learning from run feedback.
 - `0013-cross-repo-e2e-and-multi-cloud.md`: Cross-repo E2E test strategy (mockway from source) and GCP multi-cloud architecture (per-cloud prompts, topology derivation, pitfalls).
 - `0014-provider-endpoint-flag-discipline.md`: Three rules for terraform-provider-google v5 endpoint-flag work — host-only default, binary-strings ground truth, dual-prefix mock routes when CREATE/READ paths split.
+- `0015-classifier-routing.md`: Three classifier hooks (mock-actionable, orphan sub-shapes, policy_pitfall_conflict) before stuck/budget termination, routing matched failures to `docs/mock-gaps.md` or `docs/policy-gaps.md` instead of `pitfalls/<cloud>.yaml`.
 - `DECISION_RUBRIC.md`: yes/no gate for deciding when ADR is required.
 - `ADR_TEMPLATE.md`: copy/paste template for new ADRs.
 
