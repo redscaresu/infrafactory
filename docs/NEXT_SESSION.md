@@ -1,9 +1,137 @@
 # Next Session
 
-Self-contained brief for a fresh Claude / engineer starting in this repo
-after the 2026-05-30 → 2026-05-31 self-learning-sweep session.
+Self-contained brief for a fresh Claude / engineer starting in this repo.
 
-## Session context (TL;DR)
+## 2026-06-02 session close-out — READ FIRST
+
+> Read this whole section before touching anything. It supersedes
+> the older 2026-05-31 narrative below where they conflict.
+
+### What landed this session
+
+7 PRs across 3 repos. **`main` is healthy in all three.**
+
+**infrafactory:**
+1. **PR #15** — `fix: 3 classifier + policy bugs surfaced by full 39-scenario sweep`
+   - N3 stuck-path gap: `IsMockActionable` was wired only into the self-correction path; the stuck/budget path went straight to `ExtractLearnedPitfall`. Added the same guard before `ExtractLearnedPitfall` at `run_command.go:372`. Result: 4 GCP scenarios that had been re-learning OAuth-escape pitfalls now correctly route them to `docs/mock-gaps.md`.
+   - N8 policy field mismatch: `DetectPolicyConflict` was reading `f.Detail` and regex-extracting `policy=X.Y`, but `Policy` is a structured `FailureSummary`/`feedback.Failure` field. Changed signature to `DetectPolicyConflict(policy, detail, hcl, …)` and pass `f.Policy` explicitly.
+   - `scaleway.vpc_required` rego count-ref shape: PR #8 stripped `[N]` from server_address but only matched the singleton `X.id` reference shape. Count-based expressions store references as `["X", "count.index"]` (bare resource ref, no `.id`). Now accepts both shapes via two OR branches.
+2. **PR #16** — `fix: GCP auth-pipeline escape (user_project_override + credentials + env strip)` — added `user_project_override = false` to the Google provider template; added `stripGCPAuthEnv` in `exec_runner.go` to strip `GOOGLE_APPLICATION_CREDENTIALS`, `GOOGLE_CREDENTIALS`, `GOOGLE_OAUTH_ACCESS_TOKEN`, `GOOGLE_CLOUD_KEYFILE_JSON`, `CLOUDSDK_*`, `GCLOUD_*` from the tofu subprocess. Initial draft also added a `credentials` JSON stub but the v5 provider rejects HCL setting both `credentials` and `access_token`; removed in PR #17.
+3. **PR #17** — `fix: drop credentials attribute from Google provider block (conflicts with access_token)` — surgical fix to PR #16's mutual-exclusion bug.
+4. **PR #18** — `prompts/gcp: omit google_project_service + google_service_networking_connection for fakegcp target` — root cause was discovered after PR #16/17 weren't enough: the GCP prompts explicitly told the LLM to use these resources, but they trigger a v5-provider preflight that bypasses every `*_custom_endpoint` flag and escapes to real cloud. Updated `prompts/gcp/phase1/phase2/phase3` to instruct the LLM to omit them.
+5. **PR #19** — `docs: N10 + N11 + N12 tickets` (this NEXT_SESSION.md).
+6. **PR #20** — `feat: N10 — diff-based prescriptive-pitfall extractor`. `ExtractPrescriptiveFix` in `internal/generator/prescriptive_extractor.go` walks adjacent failing→passing iteration pairs after `target_reached`, diffs the failing iteration's HCL against the passing iteration's HCL, scopes to the failing resource + new sibling resources, and emits a `LearnedPitfall{Source: PrescriptiveSource}`. Wired into `run_command.go` after the existing stuck/budget classifier hooks. **Built but UNTESTED in production — first real exercise is the next sweep.**
+
+**mockway:**
+- **PR #3** — `handlers: register block API routes under both v1alpha1 and v1 prefixes`. scaleway-sdk-go switched from `/block/v1alpha1` to `/block/v1` around terraform-provider-scaleway 2.76.0. With host-only endpoint configs the bare prefix is what the SDK actually hits.
+
+**fakegcp:**
+- **PR #3** — `handlers: register SQL routes under both /sql/v1beta4 and bare /projects prefixes`. Same dual-prefix pattern. Unblocks gcp-cloud-sql + gcp-full-stack's SQL database create.
+
+### Sweep state (2026-06-02)
+
+Pre-session: **30/39 pass** (the 2026-06-02 deterministic sweep result that motivated this session).
+
+Post-session, 5 of the 9 failing scenarios now pass:
+
+| Scenario | Status | Fixed by |
+|---|---|---|
+| compute-lb-multi-paris | ✅ PASS | PR #15 (rego count-ref) + mockway #3 (block/v1) |
+| web-app-paris | ✅ PASS | same |
+| incremental-project-paris | ✅ PASS | same |
+| private-lb-db-paris | ✅ PASS | same |
+| gcp-cloud-run | ✅ PASS | PR #18 (omit project_service in prompts) |
+| **gcp-cloud-sql** | ❌ | CMEK policy gate + fakegcp `google_sql_database` 501 (fakegcp #3 fixed the 501; **untested in this session post-merge**) |
+| **gcp-gke-cluster** | ❌ | fakegcp `google_container_node_pool` plugin-crash (N12) |
+| **gcp-storage** | ❌ | CMEK policy gate + fakegcp `cryptoKeyVersions` 501 (N12) |
+| **gcp-full-stack** | ❌ | mix of fakegcp plugin-crashes (N12) |
+
+**Current sweep total: 35/39** (deterministic, single-shot). N12 closes the remaining 4. Some may also pass once N10 learns the CMEK shape from a future successful run.
+
+### What to do FIRST in the next session
+
+1. **Restart mocks if needed.** `make status` to check. If any look stale, `make mocks-restart`. fakegcp PR #3 was merged this session — confirm the running binary post-dates that merge.
+2. **Rebuild infrafactory binary.** `make build`. Current `bin/infrafactory` was built after PR #20 merged.
+3. **Re-run the 4 failing GCP scenarios** to populate N10's first `learned_from_diff` entries:
+   ```bash
+   mkdir -p /tmp/sweep-n10-validation
+   for s in gcp-cloud-sql gcp-gke-cluster gcp-storage gcp-full-stack; do
+     curl -sX POST http://127.0.0.1:8081/mock/reset >/dev/null
+     ./bin/infrafactory run scenarios/training/$s.yaml --config infrafactory.yaml \
+       > /tmp/sweep-n10-validation/$s.log 2>&1
+   done
+   ```
+4. **Inspect `pitfalls/gcp.yaml`** for new `source: learned_from_diff` entries. Even if a scenario fails overall, partial passes (some failures cleared between iterations) should produce entries. Filter the log for `prescriptive_pitfall_learned` events to confirm the extractor fired.
+5. **Read `docs/mock-gaps.md`** — every gap below is concretely reproducible with a URL + scenario name.
+
+### Tickets in priority order (this session's adds)
+
+- **N14** (new): Re-run the 4 GCP scenarios with N10 active. ~30 min. Most important *because it's the first production exercise of N10*.
+- **N12** (this session): fakegcp mock-gaps from the 2026-06-02 sweep. ~half-day each. Concrete reproducers in `docs/mock-gaps.md`. Plan to clear the highest-impact two first (node_pool plugin-crash + cryptoKeyVersions 501).
+- **N10 follow-up** (subset of N14): inspect first `learned_from_diff` entries. Iterate the extractor if false positives appear.
+- **N11** (post-N10-validation): retire prescriptive prompt rules 9–16 across all clouds. Detailed validation sequence in the N11 section below.
+- **N13** (new): N10 phase 2 — deletion-as-fix. Today the extractor only handles addition-as-fix (the LLM ADDED resources/attributes between failing and passing). Some failures clear via REMOVAL (LLM dropped an unsupported argument). Extending the extractor to detect deletion-as-fix would let prompt rule 9 ("don't use google_project_service") be self-learned. ~1 day.
+
+### Important context that's NOT in the code
+
+- **`feedback_sweep_protocol.md` rule.** "Fix-forward at the source (mock bugs in fakeaws/fakegcp/mockway, learning gaps in the pipeline); NEVER hand-edit `pitfalls/*.yaml`." This session inherited a habit of discarding `pitfalls/gcp.yaml` and `pitfalls/aws.yaml` working-tree changes after a sweep — those changes are auto-learning noise from the buggy pre-fix state. Discarding is OK (not editing); the next sweep with the fixes in place will re-populate cleanly.
+- **`feedback_mock_design.md` rule.** Mocks optimise for fast feedback. Don't propose realism-for-realism's-sake. The fakegcp gaps in N12 are about correctness (plugin-crashes the SDK can't handle), not realism.
+- **`feedback_orphan_check_extractor.md` rule.** "Rule of three" — don't generalise a one-off pattern. Relaxed for N9 (orphan_check) because the gap was the system's biggest blind spot.
+- **N10 + N11 architectural insight.** The prompt currently encodes "how to use each resource correctly" (rules 9–16 in `prompts/gcp/phase2_generate_hcl.md` and similar for aws/scaleway). That doesn't scale. N10 lets the system derive these from real runs; N11 retires the prompt rules once their N10 counterparts are stable. This shift moves prescriptive knowledge from hand-written prose to a living artifact.
+- **N10 bootstrap problem.** If you delete a prompt rule before its N10 counterpart exists, the LLM has nothing to bootstrap from and the scenario never passes — so N10 never fires either. Order matters: keep the prompt rule, let it pass, let N10 learn, THEN delete the prompt rule. The N11 validation sequence (steps 4–5) confirms the learned pitfall alone carries the load before permanent deletion.
+- **ADR-0014 rule 4 was wrong about the credentials field.** The initial PR #16 commit added `credentials = "<stub JSON>"` per an investigation agent's recommendation. That field is mutually exclusive with `access_token` in the v5 provider; the provider rejects HCL setting both. PR #17 reverted it. ADR-0014 amendment captures the revision.
+- **Pre-existing fakeaws CI bug fix.** While merging N4 (`fakeaws/PR #3`), discovered the `coverage-audit` job had been failing on EVERY fakeaws commit (main + PRs) for at least a week due to `actions/setup-go@v5` looking for `go.mod` in the workspace root after a two-checkout dance. Fixed at `go-version-file: fakeaws/go.mod`. Unrelated to N4 but rolled into the same PR.
+
+### Memory pointers
+
+- `project_self_learning_sweep_2026_05_31.md` — prior session (2026-05-30/31).
+- `feedback_sweep_protocol.md` — fix-at-source, never hand-edit pitfalls.
+- `feedback_mock_design.md` — mocks for feedback, not realism.
+- `feedback_orphan_check_extractor.md` — rule-of-three for one-off patterns.
+
+### N14 (new this session) — finish the GCP sweep with N10 active
+
+**Why:** the 4 GCP scenarios (gcp-cloud-sql, gcp-gke-cluster, gcp-storage, gcp-full-stack) still fail at the time of session close. fakegcp PR #3 (SQL dual-prefix) merged but wasn't re-validated against gcp-cloud-sql. N10 (PR #20) merged but hasn't fired in production. This ticket is the first production exercise of both.
+
+**Steps:**
+
+1. `make status` → confirm fakegcp PID post-dates `2026-06-02T20:23:00Z` (the merge time of fakegcp PR #3). If not, `make fakegcp-restart`.
+2. `make build` → confirm `bin/infrafactory` post-dates PR #20 merge.
+3. Run the script above for the 4 GCP scenarios.
+4. Per-scenario triage:
+   - **gcp-cloud-sql.** Expected to pass post-fakegcp #3. If it still fails, the failure is now CMEK-policy-gate-only (no more 501) and N10 should learn the CMEK shape from gcp-storage if THAT passes first. If neither passes, file as N12 work.
+   - **gcp-gke-cluster.** Will fail on `google_container_node_pool` plugin-crash. Capture the iter logs for N12. Even if it fails overall, partial pass between iters may produce a `learned_from_diff` entry — verify.
+   - **gcp-storage.** Will fail on CMEK + `cryptoKeyVersions` 501. Same triage.
+   - **gcp-full-stack.** Will fail on a mix. Same triage.
+5. Inspect `pitfalls/gcp.yaml` for `source: learned_from_diff` entries. Also grep the log dir for `prescriptive_pitfall_learned` log events to know whether the extractor ran but skipped (returned nil) vs. didn't run at all.
+6. If the extractor produced false-positive entries (e.g. unrelated whitespace changes, cross-resource attribution), file follow-up tickets to tighten the diff scope.
+
+**Effort:** ~30 min wall-clock for the sweep, ~30-60 min for triage. Bigger investment is the N12 follow-ups it surfaces.
+
+### N13 (new this session) — N10 phase 2: deletion-as-fix
+
+**Why:** N10 phase 1 only attributes a fix to the LLM ADDING resources/attributes between failing and passing iterations. Some failures clear via REMOVAL — e.g. the LLM stops emitting `deletion_protection` on `google_cloud_run_v2_service` (an unsupported argument), or stops including `google_project_service` (an escape-triggering meta-resource).
+
+These are "AVOID this attribute/resource" patterns. Prompt rule 9 (don't use `google_project_service`) is the obvious motivating case — if N10 could learn it, that rule could retire too.
+
+**Mechanism (proposed):**
+
+1. Extend `ExtractPrescriptiveFix` to compute BOTH the addition diff (today's behaviour) and the removal diff (what's in iter[N-1] but not iter[N]).
+2. When removal-only:
+   - The removed attribute/resource name is the avoid target.
+   - The pitfall rule wording flips from `"Add the following HCL: ..."` to `"Do NOT use \`<thing>\` — it causes <failure detail>."`.
+3. Heuristic to avoid noise: only emit when (a) the failing resource address contains the removed attribute, OR (b) a top-level resource of the failing type was removed entirely between iterations.
+4. New `LearnedPitfall.Source` value: `"learned_from_diff_avoid"`. Same writer, distinct sort key for triage.
+
+**Risks:** higher false-positive rate than phase 1 — the LLM legitimately deletes resources for many reasons. Mitigate by requiring the removed thing to appear in the failure detail (strict attribution).
+
+**Effort:** ~half-day, smaller than phase 1 because the infrastructure is in place. Tests need 3-4 new cases (project_service removal, deletion_protection removal, ipv4_enabled-true-to-false toggle).
+
+**Why now (or not):** prompt rule 9 is the only avoid rule currently in the GCP prompt; everything else is prescriptive ADD. If/when more avoid rules surface (e.g. `private_cluster_config` if we discover it causes fakegcp crashes), phase 2 becomes higher-priority.
+
+---
+
+## Session context (TL;DR — older, 2026-05-30 → 2026-05-31)
 
 We ran a self-learning sweep across all 39 infrafactory training
 scenarios, treating every failure as either:
@@ -546,21 +674,48 @@ phase1/phase3 + the aws/ + scaleway/ equivalents):
   static fix.
 - Rule 18 (naming convention) — same.
 
-**Gated on N10 stability.** Don't delete blindly. Expected workflow:
+**Gated on N10 stability.** Don't delete blindly. The validation
+sequence below is critical because a passing-with-prompt-rule
+scenario can MASK whether the learned pitfall actually carries the
+load — the prompt rule and the pitfall might both be active when
+the LLM succeeds, and you wouldn't know which one mattered.
 
-1. Run a full sweep with N10 active.
-2. Inspect `pitfalls/<cloud>.yaml` for `source: learned_from_diff`
-   entries that cover each retiring rule.
-3. For each prompt rule with a matching learned entry, delete the
-   prompt rule.
-4. Re-run the sweep with the prompt thinned to confirm no regression
-   (the auto-learned pitfalls carry the load).
-5. If a rule has no learned counterpart after a full sweep, leave
-   it (it's either still load-bearing or N10 didn't see it succeed
-   yet for that pattern — file a follow-up to seed a scenario that
-   exercises it).
+**Validation workflow (per rule):**
 
-**Effort:** ~2 hr, mostly the validation re-sweep.
+1. **Sweep with N10.** Run a full sweep. Each pass should cause N10
+   to extract a `learned_from_diff` pitfall for the patterns the
+   LLM used.
+2. **Inspect.** Open `pitfalls/<cloud>.yaml`. For each prompt rule
+   under consideration, check whether there's a `source:
+   learned_from_diff` entry covering that same pattern.
+   - If yes: that rule is retirement candidate.
+   - If no: leave the rule. Either the pattern wasn't exercised in
+     any passing scenario, or N10 mis-attributed (file a follow-up
+     to tighten the extractor).
+3. **Delete the prompt rule** locally (don't commit yet).
+4. **Blank the matching pitfall entry** in `pitfalls/<cloud>.yaml`
+   locally (the one N10 wrote in step 1).
+5. **Re-run the scenario that exercises that pattern.** Expected
+   result: **the scenario fails**. No prompt rule, no pitfall = no
+   signal to the LLM. This confirms the prompt rule was load-bearing
+   and the auto-learned pitfall is the actual replacement.
+6. **Restore the auto-learned pitfall.** Re-run. Expected: **the
+   scenario passes on iter 1 or 2.** This confirms the pitfall
+   alone is sufficient.
+7. Commit the prompt-rule deletion.
+
+If step 5 doesn't show a regression, the prompt rule was redundant
+to something else (another prompt rule, the provider's own
+validation, a static pitfall). That's fine — just delete with no
+follow-up.
+
+If step 6 doesn't recover, the auto-learned pitfall is malformed.
+Open an N10 follow-up to fix the extraction; don't delete the
+prompt rule.
+
+**Effort:** ~30 min per rule × ~5 retiring rules per cloud × 3
+clouds = ~7-8 hr if pursued comprehensively. Much smaller (~1-2 hr)
+if scoped to GCP rules 13–16 only.
 
 **Why this is worth doing:** the prompt collapses from "playbook of
 every gotcha across every resource" to "system contract + scenario
