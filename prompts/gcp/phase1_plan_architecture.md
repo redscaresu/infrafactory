@@ -46,8 +46,9 @@ The previous iteration's generated code failed validation. Analyze these failure
 4. Identify dependencies between resources. Required ordering:
    - Do NOT include `google_project_service`. The validation target is the fakegcp mock; APIs are implicitly enabled and `google_project_service` causes a v5-provider auth-pipeline escape (see phase 2 rule 9).
    - Do NOT include `google_service_networking_connection`. Same auth-escape reason.
+   - Do NOT include `google_project_iam_member` / `google_project_iam_binding` / `google_project_iam_policy`. Same auth-escape family — these all hit the v5 IAM client path that bypasses `cloud_resource_manager_custom_endpoint`. Use `google_service_account_iam_member` / `google_service_account_iam_binding` for any IAM bindings (see phase 2 rule 12).
    - `google_compute_network` and `google_compute_subnetwork` BEFORE any `google_compute_instance` or `google_container_cluster`.
-   - `google_service_account` BEFORE any `google_project_iam_member` that references it.
+   - `google_service_account` BEFORE any `google_service_account_iam_member` that references it.
    - Do NOT rely on the `default` VPC — always create an explicit VPC.
 5. Determine the correct GCP regions/zones based on constraints. Use a region from the allowed list (e.g. `us-central1`, `europe-west1`, `europe-west4`).
 6. Naming: include the project ID or a run-scoped suffix in globally-unique names (GCS buckets, Cloud SQL instances) to avoid collisions.

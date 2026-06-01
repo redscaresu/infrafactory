@@ -285,6 +285,22 @@ func buildGoogleProviderBlock(fakegcpURL string) string {
   # sql_custom_endpoint and T11's dns_custom_endpoint fixes.
   # Surfaced in gcp-cloud-sql iter 5 (2026-05-31).
   kms_custom_endpoint                    = "%[1]s/"
+
+  # Disable global request batching. With batching enabled (default),
+  # google_project_iam_member's writes are aggregated by the v5
+  # provider's BatchingConfig wrapper, which constructs its OWN
+  # cloudresourcemanager client. That client does NOT honor
+  # cloud_resource_manager_custom_endpoint reliably — empirical
+  # evidence: gcp-full-stack 2026-06-02 sweep saw
+  # google_project_iam_member.* escape to real
+  # cloudresourcemanager.googleapis.com with
+  # ACCESS_TOKEN_TYPE_UNSUPPORTED even though every other IAM /
+  # ResourceManager call landed cleanly on fakegcp. Disabling batching
+  # forces each IAM mutation through the normal client path which
+  # respects the endpoint override.
+  batching {
+    enable_batching = false
+  }
 }`, fakegcpURL)
 }
 
