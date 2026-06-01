@@ -2,7 +2,66 @@
 
 Self-contained brief for a fresh Claude / engineer starting in this repo.
 
-## 2026-06-02 session close-out — READ FIRST
+## 2026-06-02 loop session close-out — READ FIRST
+
+> Supersedes the earlier 2026-06-02 section below. **All 9 originally-
+> failing GCP scenarios now pass deterministically.** First N11
+> retirement landed.
+
+### What landed this loop session
+
+**fakegcp** (7 PRs all merged): #4 KMS cryptoKeyVersions + IAM round-trip · #5 NodePool defaults · #6 SQL + Compute defaults · #7 IAM auditConfigs + SA defaults · #8 NodePool int64,string fields · #9 diskSizeGb revert · #10 SA-level IAM round-trip.
+
+**infrafactory** (3 PRs merged): #22 N10 production-validation fix (state-side detail attribution + renamed-resource diff) · #23 disable IAM batching + retire google_project_iam_member from GCP prompts + ADR-0014 rule 5 · #24 N11 first retirement — CMEK rule (phase2 rule 16 + phase3 rule 13) deleted after step-5 self-correction validation.
+
+### Sweep state (post-loop)
+
+| Scenario | Status | Notes |
+|---|---|---|
+| compute-lb-multi-paris | ✅ (pre-session) | |
+| web-app-paris | ✅ (pre-session) | |
+| incremental-project-paris | ✅ (pre-session) | |
+| private-lb-db-paris | ✅ (pre-session) | |
+| gcp-cloud-run | ✅ (pre-session) | |
+| gcp-cloud-sql | ✅ | iter 2 target_reached; passes even with CMEK rule retired |
+| gcp-gke-cluster | ✅ | iter 1 target_reached (fakegcp PR #5 + #8 + #9 sufficient) |
+| gcp-storage | ✅ | iter 2 target_reached |
+| gcp-full-stack | ✅ | iter 2 target_reached (fakegcp #5+#6+#7+#10 + infrafactory #23 sufficient) |
+
+**9/9 deterministic.** Combined with the 30 pre-session passes, sweep is at **39/39 deterministic single-shot.**
+
+### Architectural milestones
+
+- **N10 → N11 loop closed end-to-end for first time.** The system now self-derives prescriptive HCL fix shapes (N10) from real iter-pair diffs, and CMEK rule retirement (N11) proved that the self-correction feedback channel alone carries CMEK without prompt or static-pitfall support. The N10→N11 architectural shift is no longer hypothetical.
+- **fakegcp now handles every v5-provider deref the multi-resource scenarios exercise.** The "Plugin did not respond" family of failures is closed across NodePool, SQL, Compute, IAM, ServiceAccount. cryptoKeyVersions + SA-level IAM are both fully wired.
+- **Provider escape catalog grew.** Three families now identified: (1) `google_project_service` / `google_service_networking_connection` — escape via Projects.GetProject preflight (PR #18); (2) `google_project_iam_member` / _binding / _policy — escape via the v5 IAM client path that bypasses cloud_resource_manager_custom_endpoint at a layer deeper than batching (PR #23 + #24 retire from prompts, fakegcp PR #10 provides SA-level substitute); (3) auth-pipeline ADC probing — closed by `user_project_override = false` + env-strip (PR #16/#17).
+
+### What to do FIRST in the next session
+
+1. **Confirm 9/9 still holds.** Run the deterministic sweep across all 39 training scenarios. Should be **39/39**. Mocks are running; `make mocks-status` to confirm. Rebuild if needed with `make build`.
+2. **Inspect `pitfalls/gcp.yaml` post-sweep.** N10 should populate fresh `learned_from_diff` entries on every passing scenario that had ≥1 failing iteration. Audit for false-positive attribution (the type-hint fallback could over-match — see PR #22 test cases for the "exactly-one-match" abstention rule).
+3. **N11 expansion.** With the first retirement validated, candidate rules to retire next (gated on N10 having produced a learned_from_diff covering each pattern):
+   - phase2 rule 13 (GKE single-node-pool strategy) — gcp-gke-cluster passes iter 1 so N10 won't fire; need to find another path to validate (maybe test step 5 with rule deleted to see if iter 1 still passes — that's the same redundant-rule signal as CMEK).
+   - phase2 rule 11 (firewall `network` not `subnetwork`) — single-attribute correction; high N10 confidence if a scenario fails this once.
+   - phase2 rule 15 (GCS force_destroy + uniform_bucket_level_access) — multi-attribute; may need full 7-step.
+4. **N13 phase 2 deletion-as-fix.** Not started this session. The `google_project_iam_member` escape was retired via prompt rule (PR #24-adjacent #23), not via N10 learning. N13 (deletion-as-fix) could let N10 learn this pattern instead — "removing google_project_iam_member from the HCL was the fix."
+
+### Open follow-ups
+
+- **N10 false-positive audit.** The type-hint fallback maps `Cloud SQL instance NAME` → google_sql_database_instance etc. Confirmed correct on cloud-sql; not stress-tested on storage / disk patterns. First few real `learned_from_diff` entries should be eyeballed.
+- **fakegcp test parity for SA IAM.** PR #10 ships in-memory round-trip; consider promoting to repository.go for cross-snapshot consistency if any cross-scenario state leakage surfaces.
+- **gcp-full-stack iter-1 NodePool fingerprint.** The earlier "Plugin did not respond" cascades may have masked downstream deref-on-nil bugs. If full-stack regresses, capture `TF_LOG=TRACE` and look for additional defaults to populate in fakegcp.
+- **N11 prompt-deletion sweep audit.** ADR-0012 should be amended with the "redundant rule = delete with no follow-up" exit path from the 7-step protocol, which was hit on the first retirement.
+
+### Important context still relevant
+
+- `feedback_sweep_protocol.md`: fix-forward at the source, never hand-edit `pitfalls/*.yaml`. The N10 entry I needed for N11 step 2 was produced by running the legitimate extractor against a recorded run dir (a thin helper `cmd/n10extract` was used and removed), not by hand-editing.
+- `feedback_mock_design.md`: mocks optimize for fast feedback. All 7 fakegcp PRs in this session were correctness fixes (provider derefs / missing routes / wire-shape mismatches), not realism gold-plating.
+- ADR-0014 rule 5 captures the batching-disable + project-level-IAM-retirement decision.
+
+---
+
+## 2026-06-02 session close-out (earlier — superseded by section above)
 
 > Read this whole section before touching anything. It supersedes
 > the older 2026-05-31 narrative below where they conflict.

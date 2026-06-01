@@ -62,9 +62,8 @@ Verify compliance with these known pitfalls:
 10. **GKE node pools**: Does each `google_container_cluster` use exactly ONE node pool strategy — `remove_default_node_pool = true` with a separate `google_container_node_pool`? Inline `node_config` on the cluster mixed with a separate `google_container_node_pool` MUST be removed.
 11. **No project-level IAM resources**: Are there ZERO `google_project_iam_member` / `google_project_iam_binding` / `google_project_iam_policy` resources? These all escape to real `cloudresourcemanager.googleapis.com` (same family as `google_project_service`). Use `google_service_account_iam_member` / `google_service_account_iam_binding` instead. For any `google_service_account_iam_member`, the `.member` for a service-account principal MUST be the fully-qualified `"serviceAccount:${google_service_account.NAME.email}"` — not a bare `account_id`.
 12. **GCS buckets**: Are bucket names globally unique (include `var.project_id` or a random suffix)? Is `force_destroy = true` set for test scenarios? Is `uniform_bucket_level_access = true`?
-13. **Encryption at rest**: If the scenario or constraints require encryption, is CMEK declared explicitly — `encryption.default_kms_key_name` on `google_storage_bucket`, `encryption_key_name` on `google_sql_database_instance`, `disk_encryption_key.kms_key_self_link` on `google_compute_disk`? The `encryption` OPA policy enforces this when applicable.
-14. **Region restriction**: Are all `region` and `location` values in the allowed list (default: `us-central1`, `europe-west1`, `europe-west4`)? Zones must be children of an allowed region (e.g. `us-central1-a`). The `region_restriction` OPA policy enforces this.
-15. **Acceptance criteria**: Will the generated infrastructure pass each criterion?
+13. **Region restriction**: Are all `region` and `location` values in the allowed list (default: `us-central1`, `europe-west1`, `europe-west4`)? Zones must be children of an allowed region (e.g. `us-central1-a`). The `region_restriction` OPA policy enforces this.
+14. **Acceptance criteria**: Will the generated infrastructure pass each criterion?
     - Connectivity checks: are subnetworks and firewall rules configured correctly?
     - HTTP probes: are `google_compute_forwarding_rule` / backend services / health checks set up?
     - Policy checks: do resources comply with all GCP OPA policies?
