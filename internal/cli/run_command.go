@@ -410,6 +410,42 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 				Detail:  fmt.Sprintf("resource=%s rule=%s", learned.Resource, learned.Rule),
 			})
 		}
+
+		// N8: policy_pitfall_conflict detection. When a candidate
+		// failure is a policy violation AND the LLM's HCL contains
+		// all the keywords from a same-resource prescriptive pitfall,
+		// the conflict is in the policy file (rego), not the LLM. Route
+		// to docs/policy-gaps.md instead of polluting pitfalls/<cloud>.yaml.
+		//
+		// Reads HCL from the latest iteration's generated/ dir.
+		// Pitfalls list comes from the current pitfalls/<cloud>.yaml.
+		existingPitfalls, _ := generator.LoadPitfallEntries(runtime.Config.Paths.Pitfalls, sc.Cloud)
+		hclSnapshot := readLatestGeneratedHCL(runtime, sc.Name, runID, completed)
+		for _, f := range candidates {
+			gap := generator.DetectPolicyConflict(f.Detail, hclSnapshot, existingPitfalls, sc.Cloud, sc.Name, runID)
+			if gap == nil {
+				continue
+			}
+			if err := generator.AppendPolicyGap(runtime.Config.Paths.Docs, *gap); err != nil {
+				runtime.Logger.Log(LogEntry{
+					Level:   logLevelError,
+					Command: "run",
+					Event:   "policy_gap_append",
+					Status:  "failed",
+					RunID:   runID,
+					Detail:  err.Error(),
+				})
+				continue
+			}
+			runtime.Logger.Log(LogEntry{
+				Level:   logLevelInfo,
+				Command: "run",
+				Event:   "policy_gap_recorded",
+				Status:  "success",
+				RunID:   runID,
+				Detail:  fmt.Sprintf("policy=%s resource=%s", gap.Policy, gap.Resource),
+			})
+		}
 	}
 
 	// Auto-destroy real Scaleway resources on failure to prevent orphaned billing.
@@ -966,6 +1002,40 @@ func failuresAreTransportDominated(failures []FailureSummary) bool {
 // fatal: a missing mock shouldn't block a Scaleway-only scenario,
 // and the caller logs the warning. Equivalent to the per-mock curl
 // fan-out the sweep scripts used to do externally.
+// readLatestGeneratedHCL concatenates all .tf files from the most
+// recent iteration's generated/ dir so N8's DetectPolicyConflict can
+// substring-match against the LLM's full output. Returns "" on any
+// error — the detector handles empty input cleanly (no keyword can
+// match an empty corpus, so it falls through to the existing
+// pitfall path).
+//
+// completedIter is the index of the last iteration that ran (caller
+// passes from the loop's `completed` variable).
+func readLatestGeneratedHCL(runtime *CommandRuntime, scenarioName, runID string, completedIter int) string {
+	if completedIter < 1 {
+		return ""
+	}
+	dir := filepath.Join(runtime.RunStoreRoot(), scenarioName, runID, "iterations",
+		fmt.Sprintf("%d", completedIter), "generated")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return ""
+	}
+	var sb strings.Builder
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".tf") {
+			continue
+		}
+		body, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			continue
+		}
+		sb.Write(body)
+		sb.WriteByte('\n')
+	}
+	return sb.String()
+}
+
 func resetAllConfiguredMocks(ctx context.Context, runtime *CommandRuntime) error {
 	urls := []struct {
 		name, url string
