@@ -107,3 +107,37 @@ Three rules for endpoint-flag work going forward:
   each, confirm whether a matching `_V3_` flag exists and whether
   the trailing path is load-bearing or a no-op. Tracked as T11
   in `docs/NEXT_SESSION.md` (partial).
+
+## 2026-06-02 amendment — auth pipeline discipline (rule 4)
+
+The 2026-06-02 deterministic sweep (post-classifier-fix) surfaced a
+new class of "looks like endpoint escape but isn't" failure on
+`google_project_service` (and `google_service_networking_connection`).
+Symptoms identical to a v1/v3 misroute (`401 ACCESS_TOKEN_TYPE_UNSUPPORTED`
+allegedly from `cloudresourcemanager.googleapis.com`), but every
+`*_custom_endpoint` was correct and fakegcp's handler verifiably
+returned 200 to curl with the same bearer token.
+
+Root cause: when `user_project_override` defaults to true OR the
+parent process has any `GOOGLE_APPLICATION_CREDENTIALS`,
+`GOOGLE_CREDENTIALS`, `GOOGLE_OAUTH_ACCESS_TOKEN`,
+`GOOGLE_CLOUD_KEYFILE_JSON`, `CLOUDSDK_*`, or `GCLOUD_*` env var set,
+the v5 SDK's auth pipeline bypasses the `access_token` short-circuit
+and probes the metadata server / token-exchange BEFORE the request
+reaches the configured BasePath. The 401 surfaces with
+`cloudresourcemanager.googleapis.com` in its `service` field because
+that's the API the SDK was *about* to call — the actual escape happens
+one layer up, in auth.
+
+**Rule 4: Auth pipeline discipline.**
+The Google provider block must include:
+1. `access_token = "fake-token"` (already required by rule 1)
+2. `user_project_override = false` (disables x-goog-user-project quota
+   header → no user-account OAuth requirement)
+3. `credentials = "<stub service-account JSON>"` (gets past ADC probing)
+
+AND the harness must strip the env-var families above from the tofu
+subprocess environment. Stripping is in
+`internal/cli/exec_runner.go::stripGCPAuthEnv`; the provider-block
+fields are templated in
+`internal/cli/generate_command.go::buildGoogleProviderBlock`.

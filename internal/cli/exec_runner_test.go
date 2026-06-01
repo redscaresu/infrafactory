@@ -51,3 +51,37 @@ func TestWithEnvOverridesAppliesSortedOverridesAndPreservesOtherBaseEntries(t *t
 		t.Fatalf("unexpected env output\nwant: %#v\ngot:  %#v", want, got)
 	}
 }
+
+// TestStripGCPAuthEnvRemovesAllPrefixes guards the GCP credential-strip
+// behavior added 2026-06-02. terraform-provider-google's v5 SDK probes
+// the metadata server / ADC chain when any of these env vars are set,
+// bypassing the access_token short-circuit and producing the misleading
+// "ACCESS_TOKEN_TYPE_UNSUPPORTED" error against fakegcp. Stripping at the
+// harness boundary guarantees the LLM's providers.tf credentials win.
+func TestStripGCPAuthEnvRemovesAllPrefixes(t *testing.T) {
+	t.Parallel()
+
+	in := []string{
+		"PATH=/usr/bin",
+		"HOME=/Users/x",
+		"GOOGLE_APPLICATION_CREDENTIALS=/var/keys/sa.json",
+		"GOOGLE_CREDENTIALS=inline-json",
+		"GOOGLE_CLOUD_KEYFILE_JSON=/etc/sa.json",
+		"GOOGLE_OAUTH_ACCESS_TOKEN=ya29.xyz",
+		"CLOUDSDK_CORE_PROJECT=my-proj",
+		"CLOUDSDK_AUTH_ACCESS_TOKEN=abc",
+		"GCLOUD_PROJECT=other-proj",
+		"GOOGLE_REGION=us-central1", // not stripped — generic region setting
+		"SCW_API_URL=http://mockway",
+	}
+	got := stripGCPAuthEnv(in)
+	want := []string{
+		"PATH=/usr/bin",
+		"HOME=/Users/x",
+		"GOOGLE_REGION=us-central1",
+		"SCW_API_URL=http://mockway",
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("strip mismatch\nwant: %#v\ngot:  %#v", want, got)
+	}
+}
