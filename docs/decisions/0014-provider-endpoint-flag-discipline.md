@@ -151,3 +151,43 @@ Revision history:
   exposed the mutual-exclusion bug — every GCP iteration failed at
   validate with `Invalid Attribute Combination`. Removed the
   `credentials` line; `access_token` + env-strip is sufficient.
+
+**Rule 5: Batching disabled + project-level IAM resources retired.**
+
+The v5 provider's `BatchingConfig` wrapper aggregates writes for
+`google_*_iam_*` resources and `google_project_service`, constructing
+its OWN `cloudresourcemanager` client that does not reliably honor
+`cloud_resource_manager_custom_endpoint`. The 2026-06-02
+`gcp-full-stack` sweep saw `google_project_iam_member.*` escape to
+real `cloudresourcemanager.googleapis.com` with
+`ACCESS_TOKEN_TYPE_UNSUPPORTED` despite every other IAM /
+ResourceManager call landing cleanly on fakegcp.
+
+The Google provider block must include:
+
+```
+batching {
+  enable_batching = false
+}
+```
+
+This forces each IAM mutation through the normal client path that
+respects the endpoint override.
+
+Even with batching disabled, **the v5 IAM client path for
+project-level resources (`google_project_iam_member` / `_binding` /
+`_policy`) bypasses the endpoint override at a deeper layer than
+the batching wrapper**. The sweep confirmed iter 1 still escaped
+post-batching-fix.
+
+**Substitute**: use the SA-level IAM family
+(`google_service_account_iam_member` / `_binding`) — these hit
+`iam.googleapis.com` which fakegcp serves via SA-IAM round-trip
+handlers (fakegcp PR #10). The GCP prompts (`prompts/gcp/phase1`,
+`phase2`, `phase3`) instruct the LLM to omit project-level IAM
+resources entirely, mirroring the rule-9 retirement of
+`google_project_service` + `google_service_networking_connection`.
+
+The provider-block change is templated in
+`internal/cli/generate_command.go::buildGoogleProviderBlock`. The
+prompt changes are in the three `prompts/gcp/phaseN*.md` files.
