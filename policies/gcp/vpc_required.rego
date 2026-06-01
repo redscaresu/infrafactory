@@ -32,6 +32,20 @@ has_subnetwork(resource) if {
 	nic.subnetwork != ""
 }
 
+# M98 — subnetwork referenced from a not-yet-created resource. At plan
+# time the value is null in `planned_values` (known-after-apply), but
+# `resource_changes[].change.after_unknown.network_interface[i]
+# .subnetwork == true` signals "this field IS being set, just to a
+# reference that resolves at apply time." Without this branch the
+# policy false-fires on correct HCL like
+# `subnetwork = google_compute_subnetwork.NAME.id`.
+has_subnetwork(resource) if {
+	rc := input.resource_changes[_]
+	rc.address == resource.address
+	nic := rc.change.after_unknown.network_interface[_]
+	nic.subnetwork == true
+}
+
 has_cluster_network(resource) if {
 	resource.values.network != null
 	resource.values.network != ""
@@ -40,6 +54,19 @@ has_cluster_network(resource) if {
 has_cluster_network(resource) if {
 	resource.values.subnetwork != null
 	resource.values.subnetwork != ""
+}
+
+# M98 — cluster references not-yet-created network/subnetwork.
+has_cluster_network(resource) if {
+	rc := input.resource_changes[_]
+	rc.address == resource.address
+	rc.change.after_unknown.network == true
+}
+
+has_cluster_network(resource) if {
+	rc := input.resource_changes[_]
+	rc.address == resource.address
+	rc.change.after_unknown.subnetwork == true
 }
 
 # Layer 2 — fakegcp state. An instance with no networkInterfaces or no

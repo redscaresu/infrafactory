@@ -27,38 +27,53 @@ else
 LINUX_GOARCH := $(HOST_ARCH)
 endif
 
-.PHONY: help deps-up deps-down deps-ps deps-logs deps-pull deps-recreate deps-clean test-unit test-all test \
+.PHONY: help test-unit test-all test \
 	bench-check smoke-validate smoke-mockway smoke-mockway-manual smoke-mockway-local smoke check \
-	ui-install ui-build ui-test ui-test-e2e ui-dev ui-clean ui-api-linux-build ui-stack-up ui-stack-logs ui-stack-down build run \
+	ui-install ui-build ui-test ui-test-e2e ui-dev ui-clean ui-api-linux-build ui-stack-up ui-stack-logs ui-stack-down build run up down status \
 	mocks-up mocks-down mocks-status mocks-logs mockway-up mockway-down fakegcp-up fakegcp-down fakeaws-up fakeaws-down
 
 help:
 	@echo "Targets:"
-	@echo "  deps-up         Start dependency containers (mockway)."
-	@echo "  mocks-up        Start mockway (:$(MOCKWAY_PORT)) AND fakegcp (:$(FAKEGCP_PORT)) from source siblings."
-	@echo "  mocks-down      Stop both mocks."
-	@echo "  mocks-status    Show running state of mockway / fakegcp."
+	@echo ""
+	@echo "  --- quickstart ---"
+	@echo "  up              One-shot bring-up (background): mockway + fakegcp + fakeaws + SeaweedFS + UI."
+	@echo "  down            Symmetric tear-down: stops everything started by 'make up'."
+	@echo "  status          Show which of the five ports (8080-8082/9090/4173) are listening."
+	@echo "  build           Build frontend + Go binary into bin/infrafactory."
+	@echo "  run             Build and start the UI server (http://127.0.0.1:4173)."
+	@echo ""
+	@echo "  --- mock lifecycle (go run, source siblings) ---"
+	@echo "  mocks-up        Start mockway (:$(MOCKWAY_PORT)) + fakegcp (:$(FAKEGCP_PORT)) + fakeaws (:$(FAKEAWS_PORT)) + seaweedfs (:$(SEAWEEDFS_PORT))."
+	@echo "  mocks-down      Stop all four."
+	@echo "  mocks-restart   Stop + start all four; picks up sibling-repo source changes."
+	@echo "  mocks-status    Show running state of each mock (via lsof on listening ports)."
 	@echo "  mocks-logs      Tail the last 20 log lines of each mock."
-	@echo "  mockway-up / fakegcp-up   Start one mock at a time."
-	@echo "  mockway-down / fakegcp-down  Stop one mock at a time."
-	@echo "  deps-down       Stop dependency containers."
-	@echo "  deps-ps         Show dependency container status."
-	@echo "  deps-logs       Tail dependency logs."
-	@echo "  deps-pull       Pull latest dependency images."
-	@echo "  deps-recreate   Recreate dependency containers from scratch."
-	@echo "  deps-clean      Stop and remove dependency containers + volumes."
+	@echo "  <mock>-up / -down / -restart   Single-mock variants (mockway-/fakegcp-/fakeaws-)."
+	@echo ""
+	@echo "  --- mock lifecycle (containers, alternative) ---"
+	@echo "  mocks-up-containers / -down-containers / -pull / -status-containers / -logs-containers"
+	@echo ""
+	@echo "  --- session hygiene ---"
+	@echo "  clean-bg        Sweep lingering sweep scripts, log tails, and stray test binaries from prior sessions."
+	@echo ""
+	@echo "  --- tests ---"
+	@echo "  test            Run all tests (Go unit + UI unit + Playwright e2e)."
 	@echo "  test-unit       Run hermetic Go package tests."
 	@echo "  ui-test         Run frontend unit tests."
 	@echo "  ui-test-e2e     Build UI and run Playwright e2e tests."
-	@echo "  test            Run all tests (Go unit + UI unit + Playwright e2e)."
+	@echo "  ui-baseline-update  Refresh Playwright visual-regression baseline PNGs."
 	@echo "  test-all        Run full local checks (go test + doc hygiene)."
+	@echo "  check           Alias for test-all."
 	@echo "  bench-check     Run env-gated benchmark regression checks."
+	@echo ""
+	@echo "  --- smoke (opt-in real-tool) ---"
 	@echo "  smoke-validate  Run opt-in real-tool validate smoke test."
 	@echo "  smoke-mockway   Run opt-in real-tool test smoke against Mockway."
 	@echo "  smoke-mockway-manual  Run manual docker+curl+smoke sequence."
 	@echo "  smoke-mockway-local   Run smoke test against local mockway binary."
 	@echo "  smoke           Run both real-tool smoke targets."
-	@echo "  check           Alias for test-all."
+	@echo ""
+	@echo "  --- frontend dev ---"
 	@echo "  ui-install      Install frontend dependencies."
 	@echo "  ui-dev          Run frontend dev server locally (:5173)."
 	@echo "  ui-build        Build frontend static assets."
@@ -67,30 +82,6 @@ help:
 	@echo "  ui-stack-up     Start API + frontend dev stack in Docker Compose."
 	@echo "  ui-stack-logs   Tail API + frontend docker logs."
 	@echo "  ui-stack-down   Stop and remove API + frontend docker services."
-	@echo "  build           Build frontend + Go binary into bin/infrafactory."
-	@echo "  run             Build and start the UI server (http://127.0.0.1:4173)."
-
-deps-up:
-	$(COMPOSE) up -d mockway
-
-deps-down:
-	$(COMPOSE) down --remove-orphans
-
-deps-ps:
-	$(COMPOSE) ps
-
-deps-logs:
-	$(COMPOSE) logs -f --tail=200 mockway
-
-deps-pull:
-	$(COMPOSE) pull mockway
-
-deps-recreate:
-	$(COMPOSE) down --remove-orphans
-	$(COMPOSE) up -d --force-recreate mockway
-
-deps-clean:
-	$(COMPOSE) down --remove-orphans --volumes
 
 # Multi-cloud mock orchestration: mockway (Scaleway, :8080) + fakegcp
 # (GCP, :8081) running side-by-side from sibling source repos. The
@@ -238,6 +229,40 @@ mocks-up: mockway-up fakegcp-up fakeaws-up seaweedfs-up
 mocks-down: mockway-down fakegcp-down fakeaws-down seaweedfs-down
 	@echo "all mocks stopped"
 
+# N5 (2026-06-01): per-mock restart shorthand. Picks up source changes in
+# the sibling repo by killing the running binary (via the *-down target's
+# port-fallback kill, which catches both the `go run` wrapper AND its
+# child binary) then re-running `go run`. The session that uncovered
+# Ticket D-2 wasted ~20 min on a "the fix isn't working" misdiagnosis
+# that was actually a stale binary still running with the OLD source.
+# Use `make fakegcp-restart` (etc) any time you commit a change to a
+# sibling mock repo and want the running mock to pick it up.
+mockway-restart: mockway-down mockway-up
+	@echo "mockway restarted"
+
+fakegcp-restart: fakegcp-down fakegcp-up
+	@echo "fakegcp restarted"
+
+fakeaws-restart: fakeaws-down fakeaws-up
+	@echo "fakeaws restarted"
+
+mocks-restart: mocks-down mocks-up
+	@echo "all mocks restarted"
+
+# N7 (2026-06-01): clean-bg sweeps lingering background processes the
+# previous session may have left running — sweep scripts, log tails,
+# stray mock binaries on non-canonical ports. Cheap, idempotent, safe
+# to run any time. Companion to the session-close hygiene convention
+# documented in docs/NEXT_SESSION.md.
+clean-bg:
+	@echo "stopping lingering sweep scripts + log tails..."
+	@pkill -f '^bash /tmp/sweep-.*\.sh$$' 2>/dev/null && echo "  killed sweep scripts" || echo "  no sweep scripts running"
+	@pkill -f '^tail -F /tmp/sweep-.*\.log$$' 2>/dev/null && echo "  killed sweep log tails" || echo "  no log tails running"
+	@pkill -f 'fakegcp --port [0-9]+ --db /tmp/' 2>/dev/null && echo "  killed stray fakegcp test binaries" || echo "  no stray fakegcp test binaries"
+	@pkill -f 'fakeaws --port [0-9]+ --db /tmp/' 2>/dev/null && echo "  killed stray fakeaws test binaries" || echo "  no stray fakeaws test binaries"
+	@pkill -f 'mockway --port [0-9]+ --db /tmp/' 2>/dev/null && echo "  killed stray mockway test binaries" || echo "  no stray mockway test binaries"
+	@echo "clean-bg complete"
+
 mocks-status:
 	@for entry in "mockway:$(MOCKWAY_PORT)" "fakegcp:$(FAKEGCP_PORT)" "fakeaws:$(FAKEAWS_PORT)" "seaweedfs:$(SEAWEEDFS_PORT)"; do \
 		name=$${entry%:*}; \
@@ -380,7 +405,7 @@ bench-check:
 smoke-validate:
 	INFRAFACTORY_ENABLE_REALTOOL_SMOKE=1 $(GO) test ./internal/cli -run TestValidateCommandRealToolSmoke
 
-smoke-mockway: deps-up
+smoke-mockway: mockway-up
 	@until curl -sSf $(MOCKWAY_URL)/mock/state >/dev/null; do \
 		echo "waiting for mockway at $(MOCKWAY_URL) ..."; \
 		sleep 1; \
@@ -442,6 +467,64 @@ build: ui-build
 
 run: build
 	./bin/infrafactory ui
+
+# up: one-shot bring-up — every mock + SeaweedFS + UI/API in one
+# command, all backgrounded so the shell stays interactive.
+# Idempotent: each mocks-* target checks for an existing pid/listener
+# before starting; the UI step does the same. SeaweedFS needs Docker
+# running (Docker Desktop on macOS) — the target will report which
+# step failed if anything's down.
+#
+#   make up      # bring everything up (background)
+#   make status  # show what's running
+#   make down    # tear everything down
+#
+# Layout afterwards:
+#   :8080  mockway (Scaleway)
+#   :8081  fakegcp (GCP)
+#   :8082  fakeaws (AWS)
+#   :9090  SeaweedFS (S3-compatible)
+#   :4173  infrafactory UI/API (served by `infrafactory ui`)
+up: mocks-up build $(MOCKS_RUN_DIR)
+	@if [ -f $(MOCKS_RUN_DIR)/ui.pid ] && kill -0 $$(cat $(MOCKS_RUN_DIR)/ui.pid) 2>/dev/null; then \
+		echo "==> UI already running (pid=$$(cat $(MOCKS_RUN_DIR)/ui.pid)) on http://127.0.0.1:4173"; \
+	else \
+		echo "==> starting infrafactory UI on http://127.0.0.1:4173"; \
+		nohup ./bin/infrafactory ui > $(MOCKS_RUN_DIR)/ui.log 2>&1 & \
+		echo $$! > $(MOCKS_RUN_DIR)/ui.pid; \
+		until curl -sSf http://127.0.0.1:4173/ >/dev/null 2>&1; do sleep 1; done; \
+	fi
+	@echo "==> all up: mockway :8080, fakegcp :8081, fakeaws :8082, seaweedfs :9090, ui :4173"
+	@echo "    make status   # check"
+	@echo "    make down     # stop"
+
+# down — symmetric tear-down for `make up`. Stops the UI (from its pid
+# file) and all mocks. SeaweedFS Docker container is also stopped.
+down: mocks-down
+	@if [ -f $(MOCKS_RUN_DIR)/ui.pid ]; then \
+		pid=$$(cat $(MOCKS_RUN_DIR)/ui.pid); \
+		if kill -0 $$pid 2>/dev/null; then \
+			kill $$pid 2>/dev/null && echo "==> UI stopped (pid=$$pid)"; \
+		else \
+			echo "==> UI was not running (stale pid file)"; \
+		fi; \
+		rm -f $(MOCKS_RUN_DIR)/ui.pid; \
+	else \
+		echo "==> UI was not running (no pid file)"; \
+	fi
+
+# status — show what's listening on the five ports up/down manage.
+status:
+	@printf "%-12s %-7s %s\n" "service" "port" "state"
+	@for entry in mockway:8080 fakegcp:8081 fakeaws:8082 seaweedfs:9090 ui:4173; do \
+		name=$${entry%:*}; port=$${entry#*:}; \
+		if lsof -nP -iTCP:$$port 2>/dev/null | grep -q LISTEN; then \
+			pid=$$(lsof -nP -iTCP:$$port 2>/dev/null | grep LISTEN | head -1 | awk '{print $$2}'); \
+			printf "%-12s %-7s UP   (pid=%s)\n" "$$name" "$$port" "$$pid"; \
+		else \
+			printf "%-12s %-7s DOWN\n" "$$name" "$$port"; \
+		fi; \
+	done
 
 # install-hooks wires the tracked hook installer at .githooks/ via
 # core.hooksPath so the gitleaks + auto-baseline-refresh + make test

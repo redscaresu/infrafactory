@@ -63,3 +63,47 @@ func DetectOscillation(history []IterationResult) []FailureSignature {
 	})
 	return out
 }
+
+// DetectRecurringFailures returns failure signatures that appear in at
+// least two distinct iterations of the history. This is a strictly
+// broader signal than DetectOscillation: a [A, B, C, A, D] run is not
+// oscillating (no 3-iteration toggle window contains A-absent-A) but A
+// clearly recurred — the model hit the same wall twice with intermediate
+// shape-shifts. NormalizeDetail (via FailureSignatures) collapses
+// cosmetic variation, so "private_ip on web_0" and "private_ip on
+// web[*]" share one signature and count as recurrence.
+//
+// Returns deterministically sorted signatures. Empty if history has
+// fewer than 2 iterations.
+func DetectRecurringFailures(history []IterationResult) []FailureSignature {
+	if len(history) < 2 {
+		return nil
+	}
+	iterCount := make(map[FailureSignature]int)
+	for _, ir := range history {
+		seen := make(map[FailureSignature]struct{})
+		for _, sig := range FailureSignatures(ir.Failures) {
+			if _, ok := seen[sig]; ok {
+				continue
+			}
+			seen[sig] = struct{}{}
+			iterCount[sig]++
+		}
+	}
+	out := make([]FailureSignature, 0)
+	for sig, n := range iterCount {
+		if n >= 2 {
+			out = append(out, sig)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Check != out[j].Check {
+			return out[i].Check < out[j].Check
+		}
+		if out[i].Resource != out[j].Resource {
+			return out[i].Resource < out[j].Resource
+		}
+		return out[i].Detail < out[j].Detail
+	})
+	return out
+}

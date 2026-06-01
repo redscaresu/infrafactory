@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -83,6 +84,24 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 	if mode.Mode == runModeIncremental {
 		if err := runtime.Deps.MockState.Snapshot(cmd.Context()); err != nil {
 			return fmt.Errorf("snapshot mockway baseline: %w", err)
+		}
+	}
+	// Ticket 7: fan-out /mock/reset to every configured mock before
+	// iter 1 of a clean run. Previously each sweep script had to do
+	// this externally; bringing it in-tree means CI batch + retry +
+	// any sequential caller gets a hermetic per-scenario state without
+	// extra plumbing. Skip on incremental runs (resetting would wipe
+	// the baseline they're meant to build on).
+	if mode.Mode == runModeClean && controls.ResetMocks {
+		if err := resetAllConfiguredMocks(cmd.Context(), runtime); err != nil {
+			runtime.Logger.Log(LogEntry{
+				Level:   logLevelInfo,
+				Command: "run",
+				Event:   "reset_mocks_failed",
+				Status:  "warn",
+				RunID:   runID,
+				Detail:  err.Error(),
+			})
 		}
 	}
 	logPath := filepath.Join(runtime.RunStoreRoot(), sc.Name, runID, "app.log")
@@ -282,35 +301,38 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 		Detail:  fmt.Sprintf("completed_iterations=%d", completed),
 	})
 
-	// Auto-learn from oscillation failures: when a run exhausts its repair
-	// budget or stops on stuck detection, scan the iteration history for
-	// failure signatures that oscillated (present-N, absent-N+1,
-	// present-N+2). These are stable indicators of the model alternating
-	// between two incomplete fixes; their detail strings are exactly the
-	// pitfall material we want future runs to inherit.
+	// Auto-learn from failures when a run exhausts its repair budget or
+	// stops on stuck detection. Prior versions only inspected (a) the
+	// signatures DetectOscillation surfaced from a 3-iteration toggle
+	// window or (b) the last iteration's failures as a fallback. Both
+	// miss the most common case observed in the wild: the LLM hits the
+	// same mistake in iters 1 and 4 (a 4-apart recurrence outside the
+	// toggle window) while iter 5 finally compiles and fails on a
+	// downstream check. The recurring mistake is exactly the pitfall
+	// material we want, but the prior fallback only saw iter 5's
+	// (unrelated) failure.
+	//
+	// New behavior: scan every iteration's failures, dedupe by
+	// (resource, normalized-detail), and run each unique candidate
+	// through ExtractLearnedPitfall. NormalizeDetail collapses
+	// cosmetic shifts (line numbers, `web_0` vs `web[*]`, "Did you
+	// mean") so the same logical bug isn't recorded twice in one run;
+	// AppendPitfall's isDuplicate then handles cross-run dedup.
 	if terminalReason == "repair_budget_exhausted" || terminalReason == "stuck" {
-		// Two learning paths:
-		// (1) Oscillation: a signature toggling present-N / absent-N+1 /
-		//     present-N+2. Catches "model alternating between two
-		//     incomplete fixes." Requires >= 3 iterations.
-		// (2) Repeated-same-mistake (M90): IsStuck fires after just 2
-		//     iterations with the same signature subset, which gives
-		//     DetectOscillation insufficient data to find a toggle. But
-		//     the repeated signature IS the lesson — the model made the
-		//     exact same mistake twice. Extract from the last iteration's
-		//     failures directly when oscillation path yields nothing.
-		oscillating := feedback.DetectOscillation(iterationHistory)
-		repeatedSigs := []feedback.FailureSignature{}
-		if len(oscillating) == 0 && len(iterationHistory) > 0 {
-			lastFailures := iterationHistory[len(iterationHistory)-1].Failures
-			for _, sig := range feedback.FailureSignatures(lastFailures) {
-				repeatedSigs = append(repeatedSigs, sig)
+		seen := make(map[string]struct{})
+		var candidates []feedback.Failure
+		for _, ir := range iterationHistory {
+			for _, f := range ir.Failures {
+				key := f.Resource + "|" + feedback.NormalizeDetail(f.Detail)
+				if _, ok := seen[key]; ok {
+					continue
+				}
+				seen[key] = struct{}{}
+				candidates = append(candidates, f)
 			}
 		}
-		learnSources := append([]feedback.FailureSignature(nil), oscillating...)
-		learnSources = append(learnSources, repeatedSigs...)
-		for _, sig := range learnSources {
-			learned := generator.ExtractLearnedPitfall(sig.Detail, sc.Name)
+		for _, f := range candidates {
+			learned := generator.ExtractLearnedPitfall(f.Detail, sc.Name)
 			if learned == nil {
 				continue
 			}
@@ -726,6 +748,7 @@ type runControls struct {
 	RepairIterationsMax int
 	Clean               bool
 	NoDestroy           bool
+	ResetMocks          bool
 }
 
 const transportFailureRetryBudget = 2
@@ -743,6 +766,10 @@ func resolveRunControls(cmd *cobra.Command, runtime *CommandRuntime) (runControl
 	if err != nil {
 		return runControls{}, &CLIError{Op: "run", Code: errorCodeUsage, Err: fmt.Errorf("read --no-destroy flag: %w", err)}
 	}
+	resetMocks, err := cmd.Flags().GetBool("reset-mocks")
+	if err != nil {
+		return runControls{}, &CLIError{Op: "run", Code: errorCodeUsage, Err: fmt.Errorf("read --reset-mocks flag: %w", err)}
+	}
 	if clean && noDestroy {
 		return runControls{}, &CLIError{Op: "run", Code: errorCodeUsage, Err: fmt.Errorf("clean and no-destroy are mutually exclusive")}
 	}
@@ -759,6 +786,7 @@ func resolveRunControls(cmd *cobra.Command, runtime *CommandRuntime) (runControl
 		RepairIterationsMax: repairMax,
 		Clean:               clean,
 		NoDestroy:           noDestroy,
+		ResetMocks:          resetMocks,
 	}, nil
 }
 
@@ -894,3 +922,53 @@ func failuresAreTransportDominated(failures []FailureSummary) bool {
 	}
 	return true
 }
+
+// resetAllConfiguredMocks fans /mock/reset out to every mock URL the
+// runtime config names — mockway, fakegcp, fakeaws. Unconfigured
+// (URL == "") clouds are skipped. Errors are accumulated but never
+// fatal: a missing mock shouldn't block a Scaleway-only scenario,
+// and the caller logs the warning. Equivalent to the per-mock curl
+// fan-out the sweep scripts used to do externally.
+func resetAllConfiguredMocks(ctx context.Context, runtime *CommandRuntime) error {
+	urls := []struct {
+		name, url string
+	}{
+		{"mockway", runtime.Config.Mockway.URL},
+		{"fakegcp", runtime.Config.Fakegcp.URL},
+		{"fakeaws", runtime.Config.Fakeaws.URL},
+	}
+	var errs []string
+	for _, m := range urls {
+		if strings.TrimSpace(m.url) == "" {
+			continue
+		}
+		if err := postMockReset(ctx, m.url); err != nil {
+			errs = append(errs, fmt.Sprintf("%s: %v", m.name, err))
+		}
+	}
+	if len(errs) == 0 {
+		return nil
+	}
+	return fmt.Errorf("mock reset partial: %s", strings.Join(errs, "; "))
+}
+
+// postMockReset issues a single POST {url}/mock/reset with a short
+// timeout. Used by resetAllConfiguredMocks.
+func postMockReset(ctx context.Context, baseURL string) error {
+	u := strings.TrimRight(baseURL, "/") + "/mock/reset"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := mockResetClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("status %d", resp.StatusCode)
+	}
+	return nil
+}
+
+var mockResetClient = &http.Client{Timeout: 10 * time.Second}

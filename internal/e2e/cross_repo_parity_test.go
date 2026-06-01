@@ -115,7 +115,13 @@ func fakeRepoSpecs() []fakeRepoSpec {
 				"secretsmanager": {"aws-secrets-manager.yaml"},
 				"sqs":            {"aws-sqs.yaml"},
 			},
-			exempt: map[string]string{},
+			exempt: map[string]string{
+				// kms is exercised transitively by every encryption-required
+				// scenario (gcp-storage CMEK, aws-full-stack S3+RDS) via
+				// the aws_kms_key resource that the LLM declares to
+				// satisfy the encryption policy. No standalone scenario.
+				"kms": "exercised transitively by aws-full-stack and other encryption-required scenarios",
+			},
 		},
 		{
 			name: "fakegcp",
@@ -140,6 +146,20 @@ func fakeRepoSpecs() []fakeRepoSpec {
 				// transitively, so a dedicated scenario would only test
 				// the stub in isolation (M70).
 				"serviceusage": "meta-API exercised transitively by every GCP scenario via google_project_service",
+				// kms is exercised transitively by every CMEK-required
+				// scenario (gcp-storage, gcp-cloud-sql) via google_kms_key_ring
+				// + google_kms_crypto_key the LLM declares to satisfy
+				// gcp.encryption policy. No standalone scenario.
+				"kms": "exercised transitively by gcp-storage / gcp-cloud-sql via google_kms_key_ring + google_kms_crypto_key",
+				// cloudresourcemanager.GetProject is a preflight helper
+				// the v5 provider calls before many resources read/edit;
+				// no user-facing resource maps to it directly, so every
+				// gcp-*.yaml scenario exercises it transitively.
+				"cloudresourcemanager": "preflight (Projects.GetProject) exercised transitively by every GCP scenario via the provider's getProject helper",
+				// servicenetworking only matters for private-IP Cloud SQL
+				// — gcp-cloud-sql declares google_service_networking_connection
+				// to satisfy private-VPC peering. No standalone scenario.
+				"servicenetworking": "exercised transitively by gcp-cloud-sql via google_service_networking_connection (private-IP peering)",
 			},
 		},
 		{

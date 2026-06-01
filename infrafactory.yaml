@@ -9,7 +9,7 @@ agent:
     - generate_hcl
     - self_review
   claude:
-    command: /opt/homebrew/bin/claude  # absolute command used for claude-code transport
+    command: claude  # claude-code transport binary; set to an absolute path (e.g. /opt/homebrew/bin/claude on macOS+brew) if `claude` isn't on PATH
     phase_timeout_seconds: 300  # hard timeout per claude phase call
   openrouter:
     model: ""                # required when type=openrouter

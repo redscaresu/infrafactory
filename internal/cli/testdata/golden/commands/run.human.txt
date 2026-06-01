@@ -31,5 +31,6 @@ Flags:
   -h, --help                        help for run
       --no-destroy                  
       --output string                (default "human")
-      --repair-iterations-max int
+      --repair-iterations-max int   
+      --reset-mocks
 

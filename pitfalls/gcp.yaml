@@ -8,11 +8,47 @@ pitfalls:
       rule: Always declare a `google_compute_network` AND at least one `google_compute_subnetwork` in the scenario's region. Then on `google_compute_instance` set `network_interface { subnetwork = google_compute_subnetwork.NAME.id }`. On `google_container_cluster` set BOTH `network = google_compute_network.NAME.id` AND `subnetwork = google_compute_subnetwork.NAME.id`. Do NOT use the `default` VPC — it is often disabled by org policy.
       source: learned
       discovered_from: gcp-full-stack
-    - resource: google_sql_database_instance
-      rule: Test scenarios MUST omit customer-managed encryption (CMEK) configuration entirely. fakegcp / fakeaws / mockway do not model KMS keyring/key dependencies, so any `encryption.default_kms_key_name`, `encryption_key_name`, `kms_key_id`, or `server_side_encryption_configuration` block fails. Leave the field unset to use cloud-default encryption.
-      source: learned
-      discovered_from: gcp-full-stack
     - resource: google_storage_bucket
-      rule: Test scenarios MUST omit customer-managed encryption (CMEK) configuration entirely. fakegcp / fakeaws / mockway do not model KMS keyring/key dependencies, so any `encryption.default_kms_key_name`, `encryption_key_name`, `kms_key_id`, or `server_side_encryption_configuration` block fails. Leave the field unset to use cloud-default encryption.
+      rule: google_storage_bucket.app_assets has no encryption.default_kms_key_name — customer-managed encryption not configured
+      source: learned
+      discovered_from: gcp-storage
+    - resource: google_cloud_run_v2_service
+      rule: "exit status 1 | stderr: ╷\n│ Error: Unsupported argument\n│ \n│   on main.tf line 6, in resource \"google_cloud_run_v2_service\" \"api\":\n│    6:   deletion_protection = false\n│ \n│ An argument named \"deletion_protection\" is not expected here.\n╵"
+      source: learned
+      discovered_from: gcp-cloud-run
+    - resource: google_project_service
+      rule: '`google_project_service` is escaping to the REAL cloud API (401 OAuth/auth error). The provider block in `providers.tf` is missing a `*_custom_endpoint` override for this resource''s service. Either add the matching custom_endpoint OR remove `google_project_service` from this scenario (the mock doesn''t intercept it).'
+      source: learned
+      discovered_from: gcp-cloud-run
+    - resource: google_dns_record_set
+      rule: "exit status 1 | stderr: ╷\n│ Error: Plugin did not respond\n│ \n│   with google_dns_record_set.default_a,\n│   on main.tf line 10, in resource \"google_dns_record_set\" \"default_a\":\n│   10: resource \"google_dns_record_set\" \"default_a\" {\n│ \n│ The plugin encountered an error, and failed t..."
+      source: learned
+      discovered_from: gcp-dns
+    - resource: google_container_node_pool
+      rule: '`google_container_node_pool` is not implemented by the matching mock server. Do NOT use this resource type — pick an alternative that the mock supports. Check the mock''s regression_manifest.go for the LandedServices list.'
+      source: learned
+      discovered_from: gcp-gke-cluster
+    - resource: google_container_node_pool
+      rule: "exit status 1 | stderr: ╷\n│ Error: Plugin did not respond\n│ \n│   with google_container_node_pool.primary_nodes,\n│   on main.tf line 83, in resource \"google_container_node_pool\" \"primary_nodes\":\n│   83: resource \"google_container_node_pool\" \"primary_nodes\" {\n│ \n│ The plugin encount..."
+      source: learned
+      discovered_from: gcp-gke-cluster
+    - resource: google_service_networking_connection
+      rule: '`google_service_networking_connection` is escaping to the REAL cloud API (401 OAuth/auth error). The provider block in `providers.tf` is missing a `*_custom_endpoint` override for this resource''s service. Either add the matching custom_endpoint OR remove `google_service_networking_connection` from this scenario (the mock doesn''t intercept it).'
+      source: learned
+      discovered_from: gcp-cloud-sql
+    - resource: google_project_iam_member
+      rule: '`google_project_iam_member` is escaping to the REAL cloud API (401 OAuth/auth error). The provider block in `providers.tf` is missing a `*_custom_endpoint` override for this resource''s service. Either add the matching custom_endpoint OR remove `google_project_iam_member` from this scenario (the mock doesn''t intercept it).'
       source: learned
       discovered_from: gcp-full-stack
+    - resource: google_redis_instance
+      rule: '`google_redis_instance` does NOT accept the argument `deletion_protection` — the provider rejects it with "An argument named "deletion_protection" is not expected here." Remove the `deletion_protection = ...` line from every `google_redis_instance` block; do NOT reintroduce it across iterations. Check the provider docs for the canonical argument set (common traps: deprecated/renamed args, v1→v2 service rewrites where the old arg moved or disappeared).'
+      source: learned
+      discovered_from: gcp-full-stack
+    - resource: google_kms_crypto_key_iam_member
+      rule: '`google_kms_crypto_key_iam_member` is not implemented by the matching mock server. Do NOT use this resource type — pick an alternative that the mock supports. Check the mock''s regression_manifest.go for the LandedServices list.'
+      source: learned
+      discovered_from: gcp-full-stack
+    - resource: google_kms_key_ring
+      rule: '`google_kms_key_ring` is not implemented by the matching mock server. Do NOT use this resource type — pick an alternative that the mock supports. Check the mock''s regression_manifest.go for the LandedServices list.'
+      source: learned
+      discovered_from: gcp-gke-cluster

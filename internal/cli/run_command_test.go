@@ -974,6 +974,7 @@ func TestResolveRunControlsUsesConfigDefaultsWhenFlagsUnset(t *testing.T) {
 	cmd.Flags().Int("repair-iterations-max", 0, "")
 	cmd.Flags().Bool("clean", false, "")
 	cmd.Flags().Bool("no-destroy", false, "")
+	cmd.Flags().Bool("reset-mocks", false, "")
 
 	cfg := config.Default()
 	cfg.Agent.RepairIterationsMax = 7
@@ -994,6 +995,7 @@ func TestResolveRunControlsUsesFlagOverridesWhenProvided(t *testing.T) {
 	cmd.Flags().Int("repair-iterations-max", 0, "")
 	cmd.Flags().Bool("clean", false, "")
 	cmd.Flags().Bool("no-destroy", false, "")
+	cmd.Flags().Bool("reset-mocks", false, "")
 	if err := cmd.Flags().Set("repair-iterations-max", "2"); err != nil {
 		t.Fatalf("set flag: %v", err)
 	}
@@ -1048,6 +1050,7 @@ func TestResolveRunControlsRejectsInvalidValues(t *testing.T) {
 			cmd.Flags().Int("repair-iterations-max", 0, "")
 			cmd.Flags().Bool("clean", false, "")
 			cmd.Flags().Bool("no-destroy", false, "")
+			cmd.Flags().Bool("reset-mocks", false, "")
 			tc.configureCmd(cmd)
 
 			_, err := resolveRunControls(cmd, &CommandRuntime{Config: tc.cfg})
@@ -1068,6 +1071,7 @@ func TestResolveRunControlsRejectsMutuallyExclusiveCleanAndNoDestroy(t *testing.
 	cmd.Flags().Int("repair-iterations-max", 0, "")
 	cmd.Flags().Bool("clean", false, "")
 	cmd.Flags().Bool("no-destroy", false, "")
+	cmd.Flags().Bool("reset-mocks", false, "")
 	_ = cmd.Flags().Set("clean", "true")
 	_ = cmd.Flags().Set("no-destroy", "true")
 
@@ -1381,6 +1385,7 @@ func newRunCommandForTest(opts runtimeOptions) *cobra.Command {
 	cmd.Flags().Int("repair-iterations-max", 0, "")
 	cmd.Flags().Bool("clean", false, "")
 	cmd.Flags().Bool("no-destroy", false, "")
+	cmd.Flags().Bool("reset-mocks", false, "")
 	return cmd
 }
 

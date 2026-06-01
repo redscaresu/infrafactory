@@ -128,7 +128,7 @@ To swap fakeaws for ministack we'd need to either:
 | `/mock/state` admin contract | native | needs polyfill or redesign | **fakeaws** |
 | Cross-cloud symmetry (mockway/fakegcp/fakeaws as 1st-party set) | preserved | breaks the pattern | **fakeaws** |
 | Battle-test hours for our use case | months + 17 codex passes | days | **fakeaws** |
-| Design principle: "fast feedback, not realism" ([feedback_mock_design.md](../../../.claude/projects/-Users-ehsanashouri-go-src-github-com-redscaresu-infrafactory/memory/feedback_mock_design.md)) | aligned | introduces real Postgres containers for RDS (light edition uses synthetic; full edition uses real) | **fakeaws** (slight) |
+| Design principle: "fast feedback, not realism" (recorded in agent project memory under the `feedback_mock_design` slug) | aligned | introduces real Postgres containers for RDS (light edition uses synthetic; full edition uses real) | **fakeaws** (slight) |
 | Lines of code we own | ~4000 (handlers) + 600 (M51/M57/M61/M62 patches) | 0 (vendor) | **ministack** |
 
 ## Recommendation: parallel backend (option A from the earlier list)

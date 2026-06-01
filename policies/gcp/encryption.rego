@@ -47,9 +47,25 @@ bucket_has_cmek(resource) if {
 	enc.default_kms_key_name != ""
 }
 
+# M98 — bucket's encryption.default_kms_key_name is a reference to a
+# not-yet-created KMS key (known after apply).
+bucket_has_cmek(resource) if {
+	rc := input.resource_changes[_]
+	rc.address == resource.address
+	enc := rc.change.after_unknown.encryption[_]
+	enc.default_kms_key_name == true
+}
+
 sql_has_cmek(resource) if {
 	resource.values.encryption_key_name != null
 	resource.values.encryption_key_name != ""
+}
+
+# M98 — encryption_key_name is a reference (known after apply).
+sql_has_cmek(resource) if {
+	rc := input.resource_changes[_]
+	rc.address == resource.address
+	rc.change.after_unknown.encryption_key_name == true
 }
 
 disk_has_encryption(resource) if {
@@ -62,6 +78,22 @@ disk_has_encryption(resource) if {
 	enc := resource.values.disk_encryption_key[_]
 	enc.sha256 != null
 	enc.sha256 != ""
+}
+
+# M98 — disk_encryption_key.kms_key_self_link or .sha256 is a
+# reference (known after apply).
+disk_has_encryption(resource) if {
+	rc := input.resource_changes[_]
+	rc.address == resource.address
+	enc := rc.change.after_unknown.disk_encryption_key[_]
+	enc.kms_key_self_link == true
+}
+
+disk_has_encryption(resource) if {
+	rc := input.resource_changes[_]
+	rc.address == resource.address
+	enc := rc.change.after_unknown.disk_encryption_key[_]
+	enc.sha256 == true
 }
 
 # Layer 2 — fakegcp state-side enforcement so the criteria-driven

@@ -39,6 +39,15 @@ has_sse_config(bucket) if {
 	cfg.values.bucket != null
 }
 
+# M98 — separate aws_s3_bucket_server_side_encryption_configuration
+# resource whose `bucket` is a reference (known after apply).
+has_sse_config(bucket) if {
+	rc := input.resource_changes[_]
+	rc.change.actions[_] == "create"
+	rc.type == "aws_s3_bucket_server_side_encryption_configuration"
+	rc.change.after_unknown.bucket == true
+}
+
 # Secrets Manager secrets default to AWS-managed KMS; we don't require
 # a customer-managed key for v1, but if a kms_key_id is set explicitly,
 # it must reference a customer key (alias/aws/secretsmanager is the

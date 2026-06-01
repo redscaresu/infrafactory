@@ -1,18 +1,22 @@
 provider: scaleway
 pitfalls:
-    - resource: scaleway_domain_record
-      rule: |
-        Do NOT create DNS records unless the scenario explicitly lists DNS/domain resources. The `dns_resolution` acceptance criterion is auto-evaluated and does NOT require a `scaleway_domain_record` resource in the generated HCL. Creating records for a non-existent zone will cause `tofu apply` to fail with "resource not found".
-      source: learned
-    - resource: scaleway_redis_cluster
-      rule: |
-        The `password` must meet Scaleway's complexity requirements: 8-128 characters, at least one digit, one uppercase, one lowercase, and one special character. Use a compliant default like `default = "Ch4ng3Me!@2024"`.
-      source: learned
-    - resource: scaleway_rdb_privilege
-      rule: "exit status 1 | stderr: ╷\n│ Error: Provider produced inconsistent result after apply\n│ \n│ When applying changes to scaleway_rdb_privilege.app_access, provider\n│ \"provider[\\\"registry.opentofu.org/scaleway/scaleway\\\"]\" produced an\n│ unexpected new value: root object was present, but now..."
-      source: learned
-      discovered_from: mysql-ha-paris
     - resource: scaleway_instance_server
-      rule: scaleway_instance_server.backend[0] is not attached to a private network via scaleway_instance_private_nic
+      rule: '`scaleway_instance_server` has no attribute `private_ip` — use `private_ips` instead. The provider error suggested this directly: `Did you mean "private_ips"?`. Update every reference (`server_ips`, outputs, depends_on, etc.) to the suggested attribute name.'
       source: learned
-      discovered_from: private-lb-db-paris
+      discovered_from: web-app-paris-pinned
+    - resource: scaleway_instance_server
+      rule: 'Always declare a `scaleway_vpc_private_network` AND a `scaleway_instance_private_nic` for EACH `scaleway_instance_server`. The private NIC has the shape: `resource "scaleway_instance_private_nic" "NAME" { server_id = scaleway_instance_server.SERVER.id; private_network_id = scaleway_vpc_private_network.PN.id }`. The `vpc_required` policy fails any instance without this attachment. Add one NIC per instance (use `count` to mirror the `count` on the instance) — do NOT rely on the instance''s `routed_ip_enabled` flag, which the provider doesn''t accept.'
+      source: learned
+      discovered_from: web-app-paris
+    - resource: scaleway_k8s_cluster
+      rule: 'Version and auto_upgrade MUST be consistent: WITHOUT auto_upgrade use a full patch version like "1.31.2"; WITH auto_upgrade enabled use ONLY a minor version like "1.31".'
+      source: learned
+      discovered_from: full-stack-paris
+    - resource: scaleway_lb_backend
+      rule: "exit status 1 | stderr: ╷\n│ Error: Invalid index\n│ \n│   on loadbalancer.tf line 19, in resource \"scaleway_lb_backend\" \"web\":\n│   19:     scaleway_instance_server.web_1.private_ips[0].address,\n│     ├────────────────\n│     │ scaleway_instance_serve..."
+      source: learned
+      discovered_from: incremental-project-paris
+    - resource: scaleway_domain_record
+      rule: "exit status 1 | stderr: ╷\n│ Error: scaleway-sdk-go: resource  with ID  is not found\n│ \n│   with scaleway_domain_record.app,\n│   on dns.tf line 1, in resource \"scaleway_domain_record\" \"app\":\n│    1: resource \"scaleway_domain_record\" \"app\" {\n│ \n╵"
+      source: learned
+      discovered_from: web-app-paris
