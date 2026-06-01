@@ -18,7 +18,7 @@ InfraFactory closes that loop. You write a scenario YAML declaring intent (resou
 
 ![CLI demo](docs/demo/infrafactory.gif)
 
-`infrafactory run scenarios/training/gcp-pubsub.yaml` against `fakegcp`: scenario YAML → 3-phase LLM generation → 4-layer validation → AI's first iteration fails (fakegcp rejects `google_project_service`) → feedback fed into the next iteration's prompt → second iteration converges to `Status: success`. Demonstrates the feedback loop that makes the pipeline robust against partial mock coverage. Re-record with `./docs/demo/record.sh` (requires `make mocks-up` + an LLM credential in env).
+`infrafactory run scenarios/training/gcp-pubsub.yaml` against `fakegcp`: scenario YAML → 3-phase LLM generation → 3-layer validation → AI's first iteration fails (fakegcp rejects `google_project_service`) → feedback fed into the next iteration's prompt → second iteration converges to `Status: success`. Demonstrates the feedback loop that makes the pipeline robust against partial mock coverage. Re-record with `./docs/demo/record.sh` (requires `make mocks-up` + an LLM credential in env).
 
 ### Web UI — live run
 
@@ -124,8 +124,8 @@ The UI provides a scenario browser (edit YAML, see real-time validation), run co
 ## How it works
 
 ```
-scenario YAML  ──▶  3-phase LLM generation  ──▶  4-layer validation  ──▶  retry on failure
-   (intent)         plan → write HCL → review     static / mock / real / destroy   (5x budget)
+scenario YAML  ──▶  3-phase LLM generation  ──▶  3-layer validation  ──▶  retry on failure
+   (intent)         plan → write HCL → review     static / mock / real     (5x budget)
 ```
 
 **Three-phase generation** (`prompts/{aws,gcp,scaleway}/phase{1,2,3}*.md`):
@@ -133,11 +133,10 @@ scenario YAML  ──▶  3-phase LLM generation  ──▶  4-layer validation 
 2. **Generate HCL** — architecture + cloud-specific pitfalls + provider schema → OpenTofu `.tf` files
 3. **Self-review** — generated HCL → 10-point checklist → corrections or `NO ISSUES FOUND`
 
-**Four-layer validation** (each gates the next):
+**Three-layer validation** (each gates the next):
 1. **Static** — `tofu init/validate/plan` + OPA `deny` policies on the plan JSON
 2. **Mock deploy** — `tofu apply` against the matching mock; topology checks against `/mock/state`; OPA `deny_state` policies; mock-enforced FK integrity
 3. **Real deploy** (optional, gated by `validation.layers.sandbox_deploy.enabled`) — `tofu apply` against the real cloud with auto-destroy on failure
-4. **Destroy verification** — `tofu destroy` + orphan check against `/mock/state`
 
 On failure, the structured failure (`layer`, `stage`, `check`, `detail`, `failure_class`) is appended to the next iteration's prompt as a `<feedback>` block so the LLM sees what specifically broke.
 
