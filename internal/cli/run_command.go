@@ -184,6 +184,43 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 			if iteration > 1 && len(previousIterationFailures) > 0 {
 				cloud := sc.Cloud
 				for _, failure := range previousIterationFailures {
+					// N3 / T12 classifier: mock-actionable failures
+					// (501, plugin-did-not-respond, auth escape,
+					// resource-not-found wait loops) belong in
+					// docs/mock-gaps.md, NOT pitfalls/<cloud>.yaml.
+					// Writing them as pitfalls teaches the LLM to
+					// avoid valid resources because the mock is
+					// incomplete — the system narrows over time.
+					if generator.IsMockActionable(failure.Detail) {
+						gap := generator.MockGap{
+							Cloud:     cloud,
+							Signal:    generator.FirstMockSignal(failure.Detail),
+							Resource:  generator.ExtractResourceFromDetail(failure.Detail),
+							Scenario:  sc.Name,
+							Detail:    failure.Detail,
+							Timestamp: runID,
+						}
+						if err := generator.AppendMockGap(runtime.Config.Paths.Docs, gap); err != nil {
+							runtime.Logger.Log(LogEntry{
+								Level:   logLevelError,
+								Command: "run",
+								Event:   "self_correction_mock_gap_append",
+								Status:  "failed",
+								RunID:   runID,
+								Detail:  err.Error(),
+							})
+						} else {
+							runtime.Logger.Log(LogEntry{
+								Level:   logLevelInfo,
+								Command: "run",
+								Event:   "self_correction_mock_gap_recorded",
+								Status:  "success",
+								RunID:   runID,
+								Detail:  fmt.Sprintf("cloud=%s signal=%s resource=%s", gap.Cloud, gap.Signal, gap.Resource),
+							})
+						}
+						continue
+					}
 					learned := generator.ExtractLearnedPitfall(failure.Detail, sc.Name)
 					if learned == nil {
 						continue

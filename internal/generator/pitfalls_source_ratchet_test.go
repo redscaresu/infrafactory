@@ -79,6 +79,50 @@ func TestPitfallsNoHumanSeeding(t *testing.T) {
 	}
 }
 
+// TestPitfallsNoMockActionableSeeds is the N3-T12 companion to M91.
+// While M91 asserts "no human-authored pitfalls," this guard asserts
+// "no learned pitfall whose Rule matches a mock-actionable signal."
+// The two together encode the principle "mock-server gaps are
+// tickets, not pitfalls" (see docs/NEXT_SESSION.md § Core design
+// principle): a learned entry whose rule echoes a 501 / Plugin-did-
+// not-respond / OAuth-escape / 404-from-Describe* failure should
+// never have made it into the file — it should have been routed to
+// docs/mock-gaps.md by the new IsMockActionable classifier in
+// run_command.go.
+//
+// Catching these in CI is the enforcement leg of T-12. Before the
+// classifier landed (this commit), the existing pitfalls files
+// accumulated ~9 such entries across aws + gcp during the 2026-05-31
+// sweep. Those are tracked separately under N2 for manual prune.
+func TestPitfallsNoMockActionableSeeds(t *testing.T) {
+	root := repoRoot(t)
+	for _, cloud := range []string{"aws", "gcp", "scaleway"} {
+		t.Run(cloud, func(t *testing.T) {
+			path := filepath.Join(root, "pitfalls", cloud+".yaml")
+			payload, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read %s: %v", path, err)
+			}
+			var file struct {
+				Pitfalls []struct {
+					Resource string `yaml:"resource"`
+					Rule     string `yaml:"rule"`
+				} `yaml:"pitfalls"`
+			}
+			if err := yaml.Unmarshal(payload, &file); err != nil {
+				t.Fatalf("parse %s: %v", path, err)
+			}
+			for _, p := range file.Pitfalls {
+				if IsMockActionable(p.Rule) {
+					sig := FirstMockSignal(p.Rule)
+					t.Errorf("pitfalls/%s.yaml: entry for %q has rule matching mock-actionable signal %q — T-12 forbids this. Route the failure to docs/mock-gaps.md instead; the matching mock repo (fakeaws/fakegcp/mockway) should fix the gap at source. Rule was: %.200s",
+						cloud, p.Resource, sig, p.Rule)
+				}
+			}
+		})
+	}
+}
+
 // repoRoot resolves the infrafactory repository root from this test
 // file's location, mirroring internal/e2e/helpers.go::RepoRoot. Lives
 // here as a local helper to avoid pulling in the e2e harness for

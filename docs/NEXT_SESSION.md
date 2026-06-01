@@ -351,6 +351,118 @@ just `Monitor()`. This includes:
 
 **Effort:** ~30 min total.
 
+### N8. `policy_pitfall_conflict` detection — ~2-3 hr
+
+**Why:** The 2026-06-01 deterministic sweep surfaced
+`web-app-paris` + `compute-lb-multi-paris` failures that looked
+like LLM oscillation but were actually a real policy bug
+(`policies/scaleway/vpc_required.rego` count-vs-singleton, fixed
+in infrafactory PR #8). The auto-learning loop couldn't catch
+this because the failure shape doesn't fit its model: the LLM's
+HCL was *correct* (matched the existing prescriptive
+`scaleway_instance_server` pitfall verbatim) but the policy
+rejected it anyway. The loop wrote no new pitfall (correctly —
+the LLM made no mistake), and the system bailed `stuck` after 2
+iterations with no actionable signal beyond "same failure twice
+in a row." Investigation cost ~30 min of human time that the
+system could have flagged directly.
+
+There's a detectable signature: **LLM's HCL matches an existing
+prescriptive pitfall's prescription AND the same policy fires twice
+in a row.** That's the "policy disagrees with its own pitfall"
+signal — almost always a policy bug, not an LLM mistake.
+
+This sits in the same anti-pattern family as T12 (mock-quirk
+classification): a class of failure that should NOT live in
+`pitfalls/*.yaml` because the fix isn't on the LLM side. T12 routes
+mock-server gaps to `docs/mock-gaps.md`; N8 routes policy bugs to
+`docs/policy-gaps.md`. Same shape, different category.
+
+**Fix:** Extend the recurrence-detection pipeline:
+
+1. After 2 consecutive failures with the same `policy=` failure
+   detail, compare the iteration's generated HCL against the
+   keyword set extracted from any existing same-resource
+   prescriptive pitfall (e.g., for
+   `policy=scaleway.vpc_required` on `scaleway_instance_server`,
+   the keyword set is `["scaleway_instance_private_nic",
+   "private_network_id", "server_id"]`).
+2. If the HCL contains all the prescribed keywords AND the policy
+   still fires → write a structured entry to `docs/policy-gaps.md`
+   instead of `pitfalls/<cloud>.yaml`. Optional sugar: open a
+   GitHub issue against the policy file via `gh issue create`.
+3. Extend the M91 no-seeding ratchet to assert no learned pitfall
+   matches the policy-pitfall-conflict signature — turning the
+   principle into CI enforcement.
+
+Keyword extraction can start simple (regex against the rule body
+for backticked-identifier tokens; reject common words). False
+positives flag for human review; false negatives just fall back
+to the existing "stuck after 2" terminal state.
+
+**Effort:** ~2-3 hr. The hard part is the keyword-set extraction
+heuristic; everything else mirrors T12's classifier shape.
+
+Pair with N3 (T12) — both push the same kind of "this isn't an
+LLM mistake" failure out of the pitfalls file into the right
+queue. If you're doing T12 anyway, this is a small extension on
+top.
+
+### N9. `orphan_check` extractor — classify the 5 sub-shapes — ~1 day
+
+**Why:** `orphan_check detected N orphaned resources` is a
+single failure signature that masks at least **five distinct root
+causes**, each needing a different fix channel. The auto-learning
+pipeline currently can't differentiate, so it writes nothing (the
+failure isn't a stderr-shape it knows) and the LLM oscillates or
+the run terminates `stuck`. aws-full-stack hit this in the 2026-06-01
+deterministic sweep; the sub-shape was sub-shape #1 (Secrets Manager
+soft-delete) and the dynamic loop broke it ~50% of the time. Other
+sub-shapes (#2-5) the system can't fix at all from inside the
+loop — they're mock or policy bugs.
+
+This is the highest-leverage learning-pipeline extension because
+orphan_check is the only validation-layer failure mode currently
+opaque to the learning system, and it covers a real gap in
+production sweeps.
+
+**The five sub-shapes:**
+
+| # | Cause | Fix channel |
+|---|---|---|
+| 1 | **LLM-side soft-delete**: aws_secretsmanager_secret without `recovery_window_in_days = 0`, aws_kms_key without `force_destroy`, etc. Provider's destroy returns 200, mock state lingers in `PendingDeletion`. | `pitfalls/<cloud>.yaml` — prescriptive rule for the resource type. |
+| 2 | **Mock-side auto-seeded catalogue**: fakeaws's SeedManagedPolicy auto-creates `arn:aws:iam::aws:policy/*` rows. Tenant never owned them; orphan check sees them. | `docs/mock-gaps.md` — file/PR against the mock to filter from `/mock/state`. *T-B this session was an example.* |
+| 3 | **Mock-side CASCADE missing**: parent deleted, child rows orphaned because the mock's schema lacks `ON DELETE CASCADE`. | `docs/mock-gaps.md` — fix in the mock's repository schema. |
+| 4 | **Mock-vs-provider state divergence**: mock Create succeeds, provider Read returns null/partial (wrong URL, missing handler), tfstate doesn't track → destroy can't find → mock retains. | `docs/mock-gaps.md` — same shape as T-D-2 / T-E this session. |
+| 5 | **Provider-side soft-delete** (distinct from #1): provider reports destroy success but underlying API only schedules deletion. Sometimes the mock can hard-delete on its side as a faithful-but-faster behaviour; sometimes the LLM needs a force flag. | Mixed — pitfall if force flag exists, mock-gap otherwise. |
+
+**Fix path:**
+
+1. Add `matchOrphanCheck(failureDetail, mockStateJSON, scenario) → LearnedPitfall | MockGapEntry | PolicyGapEntry | nil` to `internal/generator/pitfalls_learn.go`. Signature differs from existing M97 templates: it needs the live mock state, not just stderr.
+2. The harness calls this extractor on `orphan_check` failures, passing `/mock/state` snapshot (already captured for the check itself).
+3. Extractor walks the non-empty resource collections, looks up each `(service, collection)` pair in a hard-coded sub-shape table (keyed at module init):
+
+       sub-shape table (initial seed — extend per scenario):
+         aws       secretsmanager.secrets   → #1 soft-delete, force "recovery_window_in_days = 0"
+         aws       kms.keys                 → #1 soft-delete, force "force_destroy = true"
+         aws       iam.policies (arn:aws:iam::aws:policy/*)  → #2 auto-seed
+         gcp       secretmanager.secrets    → #1 (similar to AWS)
+         gcp       kms.crypto_keys          → mixed (#1 or #5)
+
+4. For each lingering resource that matches a known sub-shape, emit the appropriate output:
+   - sub-shape #1 → `AppendPitfall(...)` with the prescriptive rule.
+   - sub-shape #2-#5 → write to `docs/mock-gaps.md` (T12 channel) or `docs/policy-gaps.md` (N8 channel).
+   - Unrecognised lingering resource → descriptive fallback to `docs/orphan-gaps.md` for human triage.
+5. Extend the M91 no-seeding ratchet: if any learned pitfall matches an orphan-check-routable sub-shape #2-#5, fail CI. Ensures we don't regress the routing.
+
+**Tests:**
+- Per sub-shape, a unit test with synthetic `(failureDetail, mockState)` → assert the right output channel + content.
+- A regression with the aws-full-stack iter-2 state showing `secretsmanager.secrets: 1` → asserts a prescriptive `aws_secretsmanager_secret` pitfall is emitted with `recovery_window_in_days = 0`.
+
+**Effort:** ~1 day. Most of the work is the sub-shape table (small, but easy to under-engineer — start with the 5 entries above, extend per scenario as they surface). The extractor wiring + tests mirror existing M97 patterns.
+
+**Why now (user-prioritised 2026-06-01):** previously gated on "3+ scenarios show the same pattern" per `feedback_orphan_check_extractor.md`; reprioritised because the gap is the system's biggest blind spot and the design effort is mostly upfront (sub-shape table) rather than per-scenario.
+
 ---
 
 ## Recommended order
@@ -365,6 +477,16 @@ prevents future sweeps from re-polluting the pitfalls files,
 making N2 a one-time job rather than a recurring cleanup.
 
 Quick wins: N5 + N6 + N7 together (~75 min).
+
+N8 pairs naturally with N3 — both classify "not an LLM bug" failures
+into the right queue (mock-gaps for T12, policy-gaps for N8). If
+doing T12 anyway, N8 is a small extension.
+
+N9 is the highest-leverage learning-pipeline extension — closes
+the system's only currently-opaque validation-layer failure mode.
+The dynamic loop catches sub-shape #1 (LLM soft-delete) ~50% of
+the time today; sub-shapes #2-5 are completely outside the loop's
+reach until the routing lands. **User-prioritised 2026-06-01.**
 
 ---
 

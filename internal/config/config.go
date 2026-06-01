@@ -132,6 +132,11 @@ type PathsConfig struct {
 	Policies  string `yaml:"policies"`
 	Prompts   string `yaml:"prompts"`
 	Pitfalls  string `yaml:"pitfalls"`
+	// Docs is the directory where N3-T12 routes mock-actionable
+	// failures (writes mock-gaps.md there). Defaults to "./docs"
+	// when unset; an explicit empty string disables routing
+	// silently (callers should log instead of erroring).
+	Docs string `yaml:"docs"`
 }
 
 type FieldError struct {
@@ -222,6 +227,7 @@ func Default() Config {
 			Policies:  "./policies",
 			Prompts:   "./prompts",
 			Pitfalls:  "./pitfalls",
+			Docs:      "./docs",
 		},
 	}
 }
