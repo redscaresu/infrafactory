@@ -410,6 +410,94 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 				Detail:  fmt.Sprintf("resource=%s rule=%s", learned.Resource, learned.Rule),
 			})
 		}
+
+		// N9: orphan_check extractor. ExtractLearnedPitfall produces
+		// nothing for orphan_check failures because the failure detail
+		// names no resource (only a count). Route through
+		// generator.ClassifyOrphans which cross-references the live
+		// /mock/state to identify lingering resources and classify
+		// each across the 5 sub-shapes (see N9 doc in NEXT_SESSION.md).
+		//
+		// Fires only when stuck-detection or budget-exhaustion caught
+		// us on an orphan_check failure — the live mock state at that
+		// point reflects what destroy left behind.
+		hasOrphanCheck := false
+		for _, f := range candidates {
+			if strings.Contains(strings.ToLower(f.Detail), "orphaned resources") {
+				hasOrphanCheck = true
+				break
+			}
+		}
+		if hasOrphanCheck && runtime.Deps.MockState != nil {
+			mockState, stateErr := runtime.Deps.MockState.State(cmd.Context())
+			if stateErr != nil {
+				runtime.Logger.Log(LogEntry{
+					Level:   logLevelInfo,
+					Command: "run",
+					Event:   "orphan_classify_state_unavailable",
+					Status:  "warn",
+					RunID:   runID,
+					Detail:  stateErr.Error(),
+				})
+			} else {
+				routing := generator.ClassifyOrphans(mockState, sc.Cloud, sc.Name, runID)
+				for _, p := range routing.Pitfalls {
+					if !pitfallResourceMatchesCloud(p.Resource, sc.Cloud) {
+						continue
+					}
+					if err := generator.AppendPitfall(runtime.Config.Paths.Pitfalls, sc.Cloud, p); err != nil {
+						runtime.Logger.Log(LogEntry{
+							Level:   logLevelError,
+							Command: "run",
+							Event:   "orphan_pitfall_append",
+							Status:  "failed",
+							RunID:   runID,
+							Detail:  err.Error(),
+						})
+						continue
+					}
+					runtime.Logger.Log(LogEntry{
+						Level:   logLevelInfo,
+						Command: "run",
+						Event:   "orphan_pitfall_learned",
+						Status:  "success",
+						RunID:   runID,
+						Detail:  fmt.Sprintf("subshape=LLMSoftDelete resource=%s", p.Resource),
+					})
+				}
+				for _, g := range routing.MockGaps {
+					if err := generator.AppendMockGap(runtime.Config.Paths.Docs, g); err != nil {
+						runtime.Logger.Log(LogEntry{
+							Level:   logLevelError,
+							Command: "run",
+							Event:   "orphan_mock_gap_append",
+							Status:  "failed",
+							RunID:   runID,
+							Detail:  err.Error(),
+						})
+						continue
+					}
+					runtime.Logger.Log(LogEntry{
+						Level:   logLevelInfo,
+						Command: "run",
+						Event:   "orphan_mock_gap_recorded",
+						Status:  "success",
+						RunID:   runID,
+						Detail:  fmt.Sprintf("cloud=%s resource=%s signal=%s", g.Cloud, g.Resource, g.Signal),
+					})
+				}
+				if len(routing.Unclassified) > 0 {
+					runtime.Logger.Log(LogEntry{
+						Level:   logLevelInfo,
+						Command: "run",
+						Event:   "orphan_classify_unclassified",
+						Status:  "warn",
+						RunID:   runID,
+						Detail:  fmt.Sprintf("count=%d — extend the sub-shape table in pitfalls_learn/orphan_classify.go", len(routing.Unclassified)),
+					})
+				}
+			}
+		}
 	}
 
 	// Auto-destroy real Scaleway resources on failure to prevent orphaned billing.
