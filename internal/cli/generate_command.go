@@ -198,6 +198,23 @@ func buildGoogleProviderBlock(fakegcpURL string) string {
   # not optional — without it every API call gets the 401 OAuth
   # error that looks like the provider escaped to real google.
   access_token                           = "fake-token"
+  # user_project_override = false disables the x-goog-user-project
+  # quota-attribution header. With the default (true), the v5 SDK
+  # requires a user-account OAuth token and routes the
+  # google_project_service / google_service_networking_connection
+  # preflight (Projects.GetProject) through Google's token-exchange
+  # path even when cloud_resource_manager_custom_endpoint is set,
+  # surfacing as a 401 ACCESS_TOKEN_TYPE_UNSUPPORTED that LOOKS like
+  # the request escaped to real cloud. False = service-account semantics,
+  # which fakegcp's bearer-token middleware accepts directly.
+  user_project_override                  = false
+  # Stub credentials JSON. Combined with access_token, this gets the
+  # provider's auth pipeline past Application Default Credentials
+  # discovery — otherwise the v5 SDK probes the metadata server +
+  # GOOGLE_APPLICATION_CREDENTIALS env var before issuing the first
+  # request. The credentials block itself is unused (access_token wins)
+  # but must parse as JSON.
+  credentials                            = "{\"type\":\"service_account\",\"project_id\":\"infrafactory-test\",\"private_key_id\":\"fake\",\"client_email\":\"fake@infrafactory-test.iam.gserviceaccount.com\"}"
   compute_custom_endpoint                = "%[1]s/compute/v1/"
   container_custom_endpoint              = "%[1]s/"
   cloud_resource_manager_custom_endpoint = "%[1]s/v1/"
