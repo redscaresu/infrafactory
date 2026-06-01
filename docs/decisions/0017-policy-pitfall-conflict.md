@@ -65,3 +65,15 @@ path active; false positives surface a human-reviewable docs entry.
   in the same HCL".
 - Consider a periodic prune of `docs/policy-gaps.md` after rego fixes
   land (currently append-only with dedup).
+
+## 2026-06-02 amendment — policy field plumbing
+
+The 2026-06-01 sweep showed `DetectPolicyConflict` never matched any
+real failure because the regex hunted for `policy=X.Y` inside
+`f.Detail`, but `FailureSummary` and `feedback.Failure` expose
+`Policy` as a structured field — `Detail` only carries the rego
+deny message ("scaleway_instance_server.api[0] is not attached…").
+Fix: change the signature to `DetectPolicyConflict(policy, detail,
+hcl, …)` and pass `f.Policy` from the caller. The legacy
+`policy=X.Y` extraction is kept as a fall-through so the existing
+test cases stay valid. Routing rules unchanged.

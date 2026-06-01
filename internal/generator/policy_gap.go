@@ -79,9 +79,15 @@ var backtickedIdentRe = regexp.MustCompile("`([a-zA-Z_][a-zA-Z0-9_]+)`")
 // (stuck-detection precondition); this function only confirms the
 // "matches an existing pitfall" half.
 //
+// The caller provides `policy` directly because FailureSummary
+// already exposes it as a structured field — the legacy
+// failureDetail-only signature missed every real policy failure on
+// the 2026-06-01 sweep because the detail string contains the rego
+// deny message but NOT a `policy=X.Y` prefix.
+//
 // Returns nil if:
-//   - failureDetail isn't a policy violation (no policy= or no
-//     recognised rego shape).
+//   - policy is empty (not a policy violation).
+//   - failureDetail names no recognisable resource address.
 //   - No same-resource pitfall exists in the provided list.
 //   - The LLM's HCL doesn't contain the pitfall's keywords (the LLM
 //     IS still making a mistake — let the existing pitfall path
@@ -90,8 +96,12 @@ var backtickedIdentRe = regexp.MustCompile("`([a-zA-Z_][a-zA-Z0-9_]+)`")
 // Conservative by design: false negatives leave the existing
 // pitfall path active; false positives surface a likely policy bug
 // for human review. We bias toward false negatives.
-func DetectPolicyConflict(failureDetail, hcl string, pitfalls []PitfallEntry, cloud, scenario, timestamp string) *PolicyGap {
-	policy := extractPolicyName(failureDetail)
+func DetectPolicyConflict(policy, failureDetail, hcl string, pitfalls []PitfallEntry, cloud, scenario, timestamp string) *PolicyGap {
+	if policy == "" {
+		// Legacy callers may still rely on the embedded `policy=X.Y`
+		// prefix. Fall through so existing tests keep working.
+		policy = extractPolicyName(failureDetail)
+	}
 	resource := extractRegoResource(failureDetail)
 	if policy == "" || resource == "" {
 		return nil
