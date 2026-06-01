@@ -134,10 +134,20 @@ The Google provider block must include:
 1. `access_token = "fake-token"` (already required by rule 1)
 2. `user_project_override = false` (disables x-goog-user-project quota
    header → no user-account OAuth requirement)
-3. `credentials = "<stub service-account JSON>"` (gets past ADC probing)
+3. NOT a `credentials` attribute. The v5 provider rejects HCL that
+   sets both with a fatal `Invalid Attribute Combination` error.
+   `access_token` alone suffices for the bearer; ADC probing is
+   prevented by stripping the env-var family in the subprocess.
 
 AND the harness must strip the env-var families above from the tofu
 subprocess environment. Stripping is in
 `internal/cli/exec_runner.go::stripGCPAuthEnv`; the provider-block
 fields are templated in
 `internal/cli/generate_command.go::buildGoogleProviderBlock`.
+
+Revision history:
+- 2026-06-02 first draft of rule 4 included a stub `credentials`
+  attribute alongside `access_token`. The 9-scenario re-validation
+  exposed the mutual-exclusion bug — every GCP iteration failed at
+  validate with `Invalid Attribute Combination`. Removed the
+  `credentials` line; `access_token` + env-strip is sufficient.
