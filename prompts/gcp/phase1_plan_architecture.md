@@ -44,7 +44,8 @@ The previous iteration's generated code failed validation. Analyze these failure
 2. Map intent-driven sizes to concrete GCP offerings using ONLY the exact values in the Size Mappings table above. Do NOT invent machine types — use the mappings verbatim (e.g., compute large → `e2-standard-4`, NOT `e2-large`).
 3. Apply any prescriptive overrides — these take priority over size mappings.
 4. Identify dependencies between resources. Required ordering:
-   - `google_project_service` API enablement BEFORE any resource that depends on that API.
+   - Do NOT include `google_project_service`. The validation target is the fakegcp mock; APIs are implicitly enabled and `google_project_service` causes a v5-provider auth-pipeline escape (see phase 2 rule 9).
+   - Do NOT include `google_service_networking_connection`. Same auth-escape reason.
    - `google_compute_network` and `google_compute_subnetwork` BEFORE any `google_compute_instance` or `google_container_cluster`.
    - `google_service_account` BEFORE any `google_project_iam_member` that references it.
    - Do NOT rely on the `default` VPC — always create an explicit VPC.
@@ -61,19 +62,13 @@ Respond with ONLY a JSON object (no markdown fences, no explanation):
   "zone": "us-central1-a",
   "resources": [
     {
-      "type": "google_project_service",
-      "name": "compute",
-      "depends_on": [],
-      "config": {"service": "compute.googleapis.com"}
-    },
-    {
       "type": "google_compute_network",
       "name": "main",
-      "depends_on": ["google_project_service.compute"],
+      "depends_on": [],
       "config": {"auto_create_subnetworks": false}
     }
   ],
-  "dependency_order": ["google_project_service.compute", "google_compute_network.main", "google_compute_subnetwork.main", "..."]
+  "dependency_order": ["google_compute_network.main", "google_compute_subnetwork.main", "..."]
 }
 
 Each resource must include:
