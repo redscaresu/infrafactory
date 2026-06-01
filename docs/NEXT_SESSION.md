@@ -351,6 +351,63 @@ just `Monitor()`. This includes:
 
 **Effort:** ~30 min total.
 
+### N8. `policy_pitfall_conflict` detection — ~2-3 hr
+
+**Why:** The 2026-06-01 deterministic sweep surfaced
+`web-app-paris` + `compute-lb-multi-paris` failures that looked
+like LLM oscillation but were actually a real policy bug
+(`policies/scaleway/vpc_required.rego` count-vs-singleton, fixed
+in infrafactory PR #8). The auto-learning loop couldn't catch
+this because the failure shape doesn't fit its model: the LLM's
+HCL was *correct* (matched the existing prescriptive
+`scaleway_instance_server` pitfall verbatim) but the policy
+rejected it anyway. The loop wrote no new pitfall (correctly —
+the LLM made no mistake), and the system bailed `stuck` after 2
+iterations with no actionable signal beyond "same failure twice
+in a row." Investigation cost ~30 min of human time that the
+system could have flagged directly.
+
+There's a detectable signature: **LLM's HCL matches an existing
+prescriptive pitfall's prescription AND the same policy fires twice
+in a row.** That's the "policy disagrees with its own pitfall"
+signal — almost always a policy bug, not an LLM mistake.
+
+This sits in the same anti-pattern family as T12 (mock-quirk
+classification): a class of failure that should NOT live in
+`pitfalls/*.yaml` because the fix isn't on the LLM side. T12 routes
+mock-server gaps to `docs/mock-gaps.md`; N8 routes policy bugs to
+`docs/policy-gaps.md`. Same shape, different category.
+
+**Fix:** Extend the recurrence-detection pipeline:
+
+1. After 2 consecutive failures with the same `policy=` failure
+   detail, compare the iteration's generated HCL against the
+   keyword set extracted from any existing same-resource
+   prescriptive pitfall (e.g., for
+   `policy=scaleway.vpc_required` on `scaleway_instance_server`,
+   the keyword set is `["scaleway_instance_private_nic",
+   "private_network_id", "server_id"]`).
+2. If the HCL contains all the prescribed keywords AND the policy
+   still fires → write a structured entry to `docs/policy-gaps.md`
+   instead of `pitfalls/<cloud>.yaml`. Optional sugar: open a
+   GitHub issue against the policy file via `gh issue create`.
+3. Extend the M91 no-seeding ratchet to assert no learned pitfall
+   matches the policy-pitfall-conflict signature — turning the
+   principle into CI enforcement.
+
+Keyword extraction can start simple (regex against the rule body
+for backticked-identifier tokens; reject common words). False
+positives flag for human review; false negatives just fall back
+to the existing "stuck after 2" terminal state.
+
+**Effort:** ~2-3 hr. The hard part is the keyword-set extraction
+heuristic; everything else mirrors T12's classifier shape.
+
+Pair with N3 (T12) — both push the same kind of "this isn't an
+LLM mistake" failure out of the pitfalls file into the right
+queue. If you're doing T12 anyway, this is a small extension on
+top.
+
 ---
 
 ## Recommended order
@@ -365,6 +422,10 @@ prevents future sweeps from re-polluting the pitfalls files,
 making N2 a one-time job rather than a recurring cleanup.
 
 Quick wins: N5 + N6 + N7 together (~75 min).
+
+N8 pairs naturally with N3 — both classify "not an LLM bug" failures
+into the right queue (mock-gaps for T12, policy-gaps for N8). If
+doing T12 anyway, N8 is a small extension.
 
 ---
 
