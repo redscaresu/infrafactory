@@ -369,6 +369,43 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 			}
 		}
 		for _, f := range candidates {
+			// N3 / T12 classifier (stuck/budget path). Mirror of the
+			// self-correction hook above (~line 194): mock-actionable
+			// failures must route to docs/mock-gaps.md, not pollute
+			// pitfalls/<cloud>.yaml. Without this guard the
+			// 2026-06-01 sweep showed gcp-cloud-run, gcp-cloud-sql,
+			// gcp-gke-cluster, gcp-storage all re-learning the same
+			// OAuth-escape + plugin-crash rules N2 just pruned.
+			if generator.IsMockActionable(f.Detail) {
+				gap := generator.MockGap{
+					Cloud:     sc.Cloud,
+					Signal:    generator.FirstMockSignal(f.Detail),
+					Resource:  generator.ExtractResourceFromDetail(f.Detail),
+					Scenario:  sc.Name,
+					Detail:    f.Detail,
+					Timestamp: runID,
+				}
+				if err := generator.AppendMockGap(runtime.Config.Paths.Docs, gap); err != nil {
+					runtime.Logger.Log(LogEntry{
+						Level:   logLevelError,
+						Command: "run",
+						Event:   "oscillation_mock_gap_append",
+						Status:  "failed",
+						RunID:   runID,
+						Detail:  err.Error(),
+					})
+				} else {
+					runtime.Logger.Log(LogEntry{
+						Level:   logLevelInfo,
+						Command: "run",
+						Event:   "oscillation_mock_gap_recorded",
+						Status:  "success",
+						RunID:   runID,
+						Detail:  fmt.Sprintf("cloud=%s signal=%s resource=%s", gap.Cloud, gap.Signal, gap.Resource),
+					})
+				}
+				continue
+			}
 			learned := generator.ExtractLearnedPitfall(f.Detail, sc.Name)
 			if learned == nil {
 				continue
@@ -510,7 +547,7 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 		existingPitfalls, _ := generator.LoadPitfallEntries(runtime.Config.Paths.Pitfalls, sc.Cloud)
 		hclSnapshot := readLatestGeneratedHCL(runtime, sc.Name, runID, completed)
 		for _, f := range candidates {
-			gap := generator.DetectPolicyConflict(f.Detail, hclSnapshot, existingPitfalls, sc.Cloud, sc.Name, runID)
+			gap := generator.DetectPolicyConflict(f.Policy, f.Detail, hclSnapshot, existingPitfalls, sc.Cloud, sc.Name, runID)
 			if gap == nil {
 				continue
 			}

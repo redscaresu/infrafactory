@@ -82,3 +82,15 @@ mock-actionable substrings from re-entering committed pitfalls.
   AND no other LLM-visible mistake in the same HCL".
 - If a fourth class emerges, generalise these hooks into a single
   `RouteFailure(summary, hcl, ctx) Routing` dispatcher.
+
+## 2026-06-02 amendment — stuck/budget path wiring
+
+The 2026-06-01 deterministic sweep (30/39 pass) surfaced that
+`IsMockActionable` was wired ONLY into the self-correction path at
+`run_command.go:194` and not the stuck/budget-exhausted termination
+path at line 372. Four GCP scenarios (`gcp-cloud-run`, `gcp-cloud-sql`,
+`gcp-gke-cluster`, `gcp-storage`) hit `repair_budget_exhausted` and
+re-learned the same OAuth-escape and plugin-crash pitfalls that N2
+had just pruned. Fix: mirror the same `IsMockActionable` guard in
+the stuck/budget loop. The classifier-routing pattern itself is
+unchanged; the bug was in coverage, not design.

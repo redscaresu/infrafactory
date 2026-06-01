@@ -35,9 +35,9 @@ resource "scaleway_instance_private_nic" "web" {
 			Rule:     "Always declare a `scaleway_vpc_private_network` AND a `scaleway_instance_private_nic` for EACH `scaleway_instance_server`. Set `server_id = scaleway_instance_server.SERVER.id` and `private_network_id = scaleway_vpc_private_network.PN.id`.",
 		},
 	}
-	gap := DetectPolicyConflict(failureDetail, hcl, pitfalls, "scaleway", "web-app-paris", "20260601T130000Z")
+	gap := DetectPolicyConflict("", failureDetail, hcl, pitfalls, "scaleway", "web-app-paris", "20260601T130000Z")
 	if gap == nil {
-		t.Fatal("expected a PolicyGap for matching HCL + policy fire, got nil")
+		t.Fatal("expected a PolicyGap for matching HCL + policy fire (legacy `policy=` prefix in detail), got nil")
 	}
 	if gap.Policy != "scaleway.vpc_required" {
 		t.Errorf("policy = %q, want scaleway.vpc_required", gap.Policy)
@@ -65,7 +65,7 @@ func TestDetectPolicyConflict_LLMMissingKeywords(t *testing.T) {
 			Rule:     "Always declare a `scaleway_vpc_private_network` AND a `scaleway_instance_private_nic`.",
 		},
 	}
-	gap := DetectPolicyConflict(failureDetail, hcl, pitfalls, "scaleway", "scenario", "ts")
+	gap := DetectPolicyConflict("", failureDetail, hcl, pitfalls, "scaleway", "scenario", "ts")
 	if gap != nil {
 		t.Errorf("expected nil (LLM missing keywords), got %+v", gap)
 	}
@@ -81,7 +81,7 @@ func TestDetectPolicyConflict_NoMatchingPitfall(t *testing.T) {
 	pitfalls := []PitfallEntry{
 		{Resource: "google_compute_instance", Rule: "set network"},
 	}
-	gap := DetectPolicyConflict(failureDetail, hcl, pitfalls, "gcp", "scenario", "ts")
+	gap := DetectPolicyConflict("", failureDetail, hcl, pitfalls, "gcp", "scenario", "ts")
 	if gap != nil {
 		t.Errorf("expected nil (no matching pitfall), got %+v", gap)
 	}
@@ -94,9 +94,46 @@ func TestDetectPolicyConflict_NotAPolicyFailure(t *testing.T) {
 	failureDetail := `Error: Unsupported argument named "deletion_protection"`
 	hcl := `whatever`
 	pitfalls := []PitfallEntry{{Resource: "scaleway_instance_server", Rule: "Use `scaleway_instance_private_nic`"}}
-	gap := DetectPolicyConflict(failureDetail, hcl, pitfalls, "scaleway", "scenario", "ts")
+	gap := DetectPolicyConflict("", failureDetail, hcl, pitfalls, "scaleway", "scenario", "ts")
 	if gap != nil {
 		t.Errorf("expected nil (not a policy failure), got %+v", gap)
+	}
+}
+
+// TestDetectPolicyConflict_StructuredPolicyField pins the real
+// shape observed in the 2026-06-01 sweep: FailureSummary.Policy is
+// populated ("scaleway.vpc_required") but Detail contains only the
+// rego deny message ("scaleway_instance_server.api[0] is not
+// attached..."). Pre-fix, the regex required `policy=X.Y` in Detail
+// and missed every real failure.
+func TestDetectPolicyConflict_StructuredPolicyField(t *testing.T) {
+	policy := "scaleway.vpc_required"
+	failureDetail := `scaleway_instance_server.api[0] is not attached to a private network via scaleway_instance_private_nic`
+	hcl := `
+resource "scaleway_instance_server" "api" {
+  count = 2
+}
+resource "scaleway_instance_private_nic" "api_nic" {
+  count              = 2
+  server_id          = scaleway_instance_server.api[count.index].id
+  private_network_id = scaleway_vpc_private_network.main.id
+}
+`
+	pitfalls := []PitfallEntry{
+		{
+			Resource: "scaleway_instance_server",
+			Rule:     "Always declare a `scaleway_vpc_private_network` AND a `scaleway_instance_private_nic` for EACH `scaleway_instance_server`.",
+		},
+	}
+	gap := DetectPolicyConflict(policy, failureDetail, hcl, pitfalls, "scaleway", "compute-lb-multi-paris", "20260601T140659Z")
+	if gap == nil {
+		t.Fatal("expected a PolicyGap when policy passed as separate arg, got nil")
+	}
+	if gap.Policy != "scaleway.vpc_required" {
+		t.Errorf("policy = %q, want scaleway.vpc_required", gap.Policy)
+	}
+	if gap.Resource != "scaleway_instance_server" {
+		t.Errorf("resource = %q, want scaleway_instance_server", gap.Resource)
 	}
 }
 

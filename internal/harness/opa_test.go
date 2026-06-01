@@ -161,16 +161,14 @@ func TestScalewayPoliciesPlanEvaluation(t *testing.T) {
 		},
 		{
 			// Regression for the 2026-06-01 deterministic-sweep finding:
-			// count-based instance_server + matching count-based NIC. The
-			// planned_values address contains the concrete index
-			// ("scaleway_instance_server.web[0]") but the configuration
-			// reference is the symbolic bare name ("scaleway_instance_server.web")
-			// because count.index is dynamic. Pre-fix the policy compared
-			// these literally and falsely flagged every count-based server
-			// as un-NIC-attached, even when the HCL matched the
-			// prescriptive pitfall exactly. Fix strips trailing [N] from
-			// the planned address before comparison.
-			name:   "vpc required passes for count-based server with count-based NIC",
+			// count-based instance_server + matching count-based NIC,
+			// SINGLETON .id reference shape. planned_values address
+			// contains the concrete index ("scaleway_instance_server.web[0]")
+			// but the configuration reference is the symbolic bare name
+			// with `.id` suffix when the HCL was `server_id = X.id`
+			// without count interpolation. PR #8 fixed this by stripping
+			// the trailing [N] from the planned address.
+			name:   "vpc required passes for count-based server with singleton-shaped NIC ref",
 			policy: filepath.Join(policiesRoot, "vpc_required.rego"),
 			planJSON: `{
   "planned_values": {"root_module": {"resources": [
@@ -179,6 +177,30 @@ func TestScalewayPoliciesPlanEvaluation(t *testing.T) {
   ]}},
   "configuration": {"root_module": {"resources": [
     {"type":"scaleway_instance_private_nic","expressions":{"server_id":{"references":["scaleway_instance_server.web.id"]}}}
+  ]}}
+}`,
+			expectedCount: 0,
+		},
+		{
+			// Regression for the 2026-06-02 deterministic-sweep finding:
+			// LLM produced `server_id = scaleway_instance_server.web[count.index].id`
+			// — the COUNT-INDEXED reference shape. tofu stores this as
+			// ["scaleway_instance_server.web", "count.index"] (bare
+			// resource ref, no `.id` — the .id attribute access is
+			// represented in the second `count.index` ref). PR #8's
+			// singleton-only match missed it; the corrected rego
+			// accepts both shapes. compute-lb-multi-paris +
+			// web-app-paris + incremental-project-paris +
+			// private-lb-db-paris all failed pre-fix.
+			name:   "vpc required passes for count-based server with bare-ref count-based NIC",
+			policy: filepath.Join(policiesRoot, "vpc_required.rego"),
+			planJSON: `{
+  "planned_values": {"root_module": {"resources": [
+    {"address":"scaleway_instance_server.web[0]","type":"scaleway_instance_server","values":{}},
+    {"address":"scaleway_instance_server.web[1]","type":"scaleway_instance_server","values":{}}
+  ]}},
+  "configuration": {"root_module": {"resources": [
+    {"type":"scaleway_instance_private_nic","expressions":{"server_id":{"references":["scaleway_instance_server.web","count.index"]}}}
   ]}}
 }`,
 			expectedCount: 0,
