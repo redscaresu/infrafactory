@@ -160,6 +160,44 @@ func TestScalewayPoliciesPlanEvaluation(t *testing.T) {
 			expectedCount: 1,
 		},
 		{
+			// Regression for the 2026-06-01 deterministic-sweep finding:
+			// count-based instance_server + matching count-based NIC. The
+			// planned_values address contains the concrete index
+			// ("scaleway_instance_server.web[0]") but the configuration
+			// reference is the symbolic bare name ("scaleway_instance_server.web")
+			// because count.index is dynamic. Pre-fix the policy compared
+			// these literally and falsely flagged every count-based server
+			// as un-NIC-attached, even when the HCL matched the
+			// prescriptive pitfall exactly. Fix strips trailing [N] from
+			// the planned address before comparison.
+			name:   "vpc required passes for count-based server with count-based NIC",
+			policy: filepath.Join(policiesRoot, "vpc_required.rego"),
+			planJSON: `{
+  "planned_values": {"root_module": {"resources": [
+    {"address":"scaleway_instance_server.web[0]","type":"scaleway_instance_server","values":{}},
+    {"address":"scaleway_instance_server.web[1]","type":"scaleway_instance_server","values":{}}
+  ]}},
+  "configuration": {"root_module": {"resources": [
+    {"type":"scaleway_instance_private_nic","expressions":{"server_id":{"references":["scaleway_instance_server.web.id"]}}}
+  ]}}
+}`,
+			expectedCount: 0,
+		},
+		{
+			// Sibling regression: count-based server WITHOUT a matching
+			// NIC should still fail (one failure per indexed instance).
+			name:   "vpc required fails for count-based server without NIC",
+			policy: filepath.Join(policiesRoot, "vpc_required.rego"),
+			planJSON: `{
+  "planned_values": {"root_module": {"resources": [
+    {"address":"scaleway_instance_server.web[0]","type":"scaleway_instance_server","values":{}},
+    {"address":"scaleway_instance_server.web[1]","type":"scaleway_instance_server","values":{}}
+  ]}},
+  "configuration": {"root_module": {"resources": []}}
+}`,
+			expectedCount: 2,
+		},
+		{
 			name:   "no public endpoints checks server attribute",
 			policy: filepath.Join(policiesRoot, "no_public_endpoints.rego"),
 			planJSON: `{
