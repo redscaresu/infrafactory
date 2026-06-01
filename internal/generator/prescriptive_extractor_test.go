@@ -145,6 +145,107 @@ func TestExtractPrescriptiveFix_FailureWithoutAddress(t *testing.T) {
 	}
 }
 
+// TestExtractPrescriptiveFix_StatePolicyDetailFallsBackToTypeHint
+// pins the N14 attribution fallback. State-side policy failures emit
+// details like "Cloud SQL instance NAME missing
+// diskEncryptionConfiguration.kmsKeyName" — no terraform address.
+// Without the fallback, the extractor returned nil and gcp-cloud-sql's
+// learned_from_diff entry never landed. With the fallback, the
+// extractor maps "Cloud SQL instance" → google_sql_database_instance
+// and finds the one changed instance in the passing dir.
+func TestExtractPrescriptiveFix_StatePolicyDetailFallsBackToTypeHint(t *testing.T) {
+	failedDir := t.TempDir()
+	passingDir := t.TempDir()
+
+	writeTF(t, failedDir, "db.tf", `
+resource "google_sql_database_instance" "postgres" {
+  name             = "infrafactory-pg-run1"
+  database_version = "POSTGRES_14"
+  region           = "europe-west1"
+  settings {
+    tier = "db-f1-micro"
+  }
+}
+`)
+
+	writeTF(t, passingDir, "db.tf", `
+resource "google_sql_database_instance" "postgres" {
+  name                = "infrafactory-pg-run1"
+  database_version    = "POSTGRES_14"
+  region              = "europe-west1"
+  encryption_key_name = google_kms_crypto_key.sql.id
+  settings {
+    tier = "db-f1-micro"
+  }
+}
+`)
+	writeTF(t, passingDir, "kms.tf", `
+resource "google_kms_key_ring" "sql" {
+  name     = "sql-ring"
+  location = "europe-west1"
+}
+
+resource "google_kms_crypto_key" "sql" {
+  name     = "sql-key"
+  key_ring = google_kms_key_ring.sql.id
+}
+`)
+
+	failureDetail := "Cloud SQL instance infrafactory-pg-run1 missing diskEncryptionConfiguration.kmsKeyName"
+	entry, err := ExtractPrescriptiveFix(failedDir, passingDir, failureDetail, "", "gcp", "gcp-cloud-sql", "20260602T210000Z")
+	if err != nil {
+		t.Fatalf("extract: %v", err)
+	}
+	if entry == nil {
+		t.Fatal("expected entry from type-hint fallback, got nil")
+	}
+	if entry.Resource != "google_sql_database_instance" {
+		t.Errorf("resource = %q, want google_sql_database_instance", entry.Resource)
+	}
+	if !strings.Contains(entry.Rule, "encryption_key_name") {
+		t.Errorf("rule missing prescriptive attribute: %q", entry.Rule)
+	}
+	if !strings.Contains(entry.Rule, "google_kms_crypto_key") {
+		t.Errorf("rule missing companion KMS sibling: %q", entry.Rule)
+	}
+}
+
+// TestExtractPrescriptiveFix_TypeHintAmbiguousReturnsNil — when two
+// resources of the inferred type changed, attribution is ambiguous
+// and the extractor abstains rather than guess. Pins the "exactly
+// one match" rule.
+func TestExtractPrescriptiveFix_TypeHintAmbiguousReturnsNil(t *testing.T) {
+	d1 := t.TempDir()
+	d2 := t.TempDir()
+	writeTF(t, d1, "main.tf", `
+resource "google_storage_bucket" "a" {
+  name = "a"
+}
+
+resource "google_storage_bucket" "b" {
+  name = "b"
+}
+`)
+	writeTF(t, d2, "main.tf", `
+resource "google_storage_bucket" "a" {
+  name          = "a"
+  force_destroy = true
+}
+
+resource "google_storage_bucket" "b" {
+  name                        = "b"
+  uniform_bucket_level_access = true
+}
+`)
+	entry, err := ExtractPrescriptiveFix(d1, d2, "storage bucket a missing encryption.defaultKmsKeyName", "", "gcp", "s", "ts")
+	if err != nil {
+		t.Fatalf("extract: %v", err)
+	}
+	if entry != nil {
+		t.Errorf("expected nil (ambiguous), got %+v", entry)
+	}
+}
+
 // TestExtractPrescriptiveFix_SnippetCap pins the 600-char cap. We
 // generate a synthetic huge fix and assert the snippet ends with the
 // truncation marker rather than mid-line.

@@ -83,10 +83,21 @@ func ExtractPrescriptiveFix(failedDir, passingDir string, failureDetail, failure
 
 	// Attribution: locate the failing resource address. Prefer the
 	// structured `failure.Resource` if non-empty, else extract from
-	// the detail string.
+	// the detail string. State-side policy failures (deny_state in
+	// the OPA rules) describe the GCP-side resource by name only
+	// ("Cloud SQL instance NAME missing X"), not the terraform
+	// address — fall back to type-hint inference + diff scoping.
 	address := failureResource
 	if address == "" {
 		address = firstResourceAddress(failureDetail)
+	}
+	if address == "" {
+		if hint := inferResourceTypeFromDetail(failureDetail); hint != "" {
+			changed := changedResourcesOfType(failedResources, passingResources, hint)
+			if len(changed) == 1 {
+				address = changed[0]
+			}
+		}
 	}
 	if address == "" {
 		return nil, nil
@@ -111,21 +122,25 @@ func ExtractPrescriptiveFix(failedDir, passingDir string, failureDetail, failure
 	//      `encryption.default_kms_key_name` points to).
 	var pieces []string
 
-	if failedBlock, ok := failedResources[address]; ok {
-		if passingBlock, ok := passingResources[address]; ok {
-			if diff := blockAdditions(failedBlock.Body, passingBlock.Body); diff != "" {
-				pieces = append(pieces, fmt.Sprintf("resource %q %q {\n%s\n}", resourceType, blockName(passingBlock), diff))
-			}
+	if passingBlock, ok := passingResources[address]; ok {
+		failedBody := ""
+		if failedBlock, ok := failedResources[address]; ok {
+			failedBody = failedBlock.Body
+		}
+		// When the address only exists in passing (LLM renamed the
+		// resource between iterations, or added it entirely), the whole
+		// passing body is "new" relative to nothing. blockAdditions
+		// handles both — pre-set failedBody to empty and the function
+		// returns every passing line.
+		if diff := blockAdditions(failedBody, passingBlock.Body); diff != "" {
+			pieces = append(pieces, fmt.Sprintf("resource %q %q {\n%s\n}", resourceType, blockName(passingBlock), diff))
 		}
 	}
 	if len(pieces) == 0 {
-		// Common case: the failing resource didn't change but new
-		// sibling resources reference its address. Capture references
-		// by scanning the passing dir's NEW resources for `address.id`
-		// or `address.<attr>` mentions, indicative that the LLM
-		// wired the failing resource into a new dependent block.
-		// Skip this branch — for now phase 1 only emits a pitfall when
-		// the failing block itself changed.
+		// Failing resource present + unchanged, but new sibling resources
+		// might reference its address (e.g. iter 1 had google_storage_bucket
+		// only, iter 2 added a google_kms_crypto_key that the bucket then
+		// references). Phase 1 doesn't emit in that case; phase 2 might.
 		return nil, nil
 	}
 
@@ -355,6 +370,69 @@ func firstResourceAddress(detail string) string {
 		return ""
 	}
 	return m[1] + "." + m[2]
+}
+
+// detailTypeHints maps human-readable failure detail prefixes to the
+// terraform resource type the policy is talking about. Lets the
+// extractor handle state-side policy failures (e.g. "Cloud SQL
+// instance NAME missing X") that don't include a terraform address.
+// Order matters — longer / more specific phrases first so they win
+// over generic substrings.
+var detailTypeHints = []struct {
+	phrase string
+	rtype  string
+}{
+	{"Cloud SQL instance", "google_sql_database_instance"},
+	{"storage bucket", "google_storage_bucket"},
+	{"Compute Disk", "google_compute_disk"},
+	{"compute disk", "google_compute_disk"},
+	{"GKE cluster", "google_container_cluster"},
+	{"Memorystore", "google_redis_instance"},
+}
+
+// inferResourceTypeFromDetail returns the terraform resource type the
+// failure detail describes, or "" if no known hint matches. Used as
+// fallback attribution when the detail lacks a parseable address.
+func inferResourceTypeFromDetail(detail string) string {
+	for _, h := range detailTypeHints {
+		if strings.Contains(detail, h.phrase) {
+			return h.rtype
+		}
+	}
+	return ""
+}
+
+// changedResourcesOfType returns addresses in `passing` whose type
+// matches `rtype` and whose body differs from the corresponding
+// `failed` block (or is new). The caller uses this when address
+// attribution from the detail string fails — exactly one match is
+// the unambiguous signal that the LLM's fix targets that resource.
+func changedResourcesOfType(failed, passing map[string]*resourceBlock, rtype string) []string {
+	var out []string
+	for addr, p := range passing {
+		if p.Type != rtype {
+			continue
+		}
+		f, ok := failed[addr]
+		if !ok || normalizeBody(f.Body) != normalizeBody(p.Body) {
+			out = append(out, addr)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// normalizeBody collapses whitespace per line so trivial reformatting
+// (alignment changes the LLM might make) doesn't register as a
+// content change.
+func normalizeBody(s string) string {
+	var out []string
+	for _, line := range strings.Split(s, "\n") {
+		if n := normalizeLine(line); n != "" {
+			out = append(out, n)
+		}
+	}
+	return strings.Join(out, "\n")
 }
 
 // splitAddress splits "TYPE.NAME" into ("TYPE", "NAME", true). The
