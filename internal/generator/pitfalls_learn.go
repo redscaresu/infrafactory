@@ -11,9 +11,16 @@ import (
 )
 
 // LearnedPitfall represents a pitfall discovered from run feedback.
+//
+// Source is OPTIONAL. When empty, AppendPitfall defaults to "learned"
+// (the legacy symptom-extraction path in ExtractLearnedPitfall). N10
+// callers set Source = PrescriptiveSource ("learned_from_diff") so
+// the YAML file records which entries were derived from observed HCL
+// changes vs. raw failure text.
 type LearnedPitfall struct {
 	Resource       string
 	Rule           string
+	Source         string // optional: empty defaults to "learned"
 	DiscoveredFrom string // scenario name
 }
 
@@ -745,6 +752,17 @@ func matchDestroyBlockers(detail, scenario string) *LearnedPitfall {
 	return nil
 }
 
+// pitfallSource returns the Source string for a learned pitfall,
+// defaulting to "learned" when the caller didn't explicitly set one.
+// N10's ExtractPrescriptiveFix sets Source = PrescriptiveSource so
+// diff-derived rules are distinguishable in the YAML file.
+func pitfallSource(p LearnedPitfall) string {
+	if p.Source == "" {
+		return "learned"
+	}
+	return p.Source
+}
+
 // AppendPitfall appends a learned pitfall to the YAML file if it doesn't
 // already exist (deduplication by resource + similar rule text).
 func AppendPitfall(pitfallsDir, cloud string, pitfall LearnedPitfall) error {
@@ -787,7 +805,7 @@ func AppendPitfall(pitfallsDir, cloud string, pitfall LearnedPitfall) error {
 				pf.Pitfalls[i] = PitfallEntry{
 					Resource:       pitfall.Resource,
 					Rule:           pitfall.Rule,
-					Source:         "learned",
+					Source:         pitfallSource(pitfall),
 					DiscoveredFrom: pitfall.DiscoveredFrom,
 				}
 				return writePitfallsFile(pitfallsDir, filePath, cloud, &pf)
@@ -804,7 +822,7 @@ func AppendPitfall(pitfallsDir, cloud string, pitfall LearnedPitfall) error {
 	pf.Pitfalls = append(pf.Pitfalls, PitfallEntry{
 		Resource:       pitfall.Resource,
 		Rule:           pitfall.Rule,
-		Source:         "learned",
+		Source:         pitfallSource(pitfall),
 		DiscoveredFrom: pitfall.DiscoveredFrom,
 	})
 

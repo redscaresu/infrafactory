@@ -573,6 +573,74 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 		}
 	}
 
+	// N10 — diff-based prescriptive-pitfall extractor (target_reached path).
+	// When a run eventually passes after at least one failing iteration,
+	// diff the last-failing iter's HCL against the first-passing iter's
+	// HCL and extract a prescriptive pitfall for each cleared failure.
+	// Closes the symptom-only gap in ExtractLearnedPitfall: today the
+	// system learns WHAT failed; with N10 it also learns the HCL
+	// pattern that FIXED it.
+	//
+	// See `docs/NEXT_SESSION.md` § N10 for the design rationale and
+	// `internal/generator/prescriptive_extractor.go` for the diff logic.
+	if terminalReason == "target_reached" && len(iterationHistory) > 1 {
+		for i := 1; i < len(iterationHistory); i++ {
+			prev := iterationHistory[i-1]
+			curr := iterationHistory[i]
+			if len(prev.Failures) == 0 {
+				continue
+			}
+			// Cleared = failures in prev whose (resource, normalized)
+			// signature does NOT appear in curr.
+			currKeys := make(map[string]struct{}, len(curr.Failures))
+			for _, f := range curr.Failures {
+				currKeys[f.Resource+"|"+feedback.NormalizeDetail(f.Detail)] = struct{}{}
+			}
+			failedDir := iterationGeneratedDir(runtime, sc.Name, runID, prev.Iteration)
+			passingDir := iterationGeneratedDir(runtime, sc.Name, runID, curr.Iteration)
+			for _, cleared := range prev.Failures {
+				key := cleared.Resource + "|" + feedback.NormalizeDetail(cleared.Detail)
+				if _, stillFailing := currKeys[key]; stillFailing {
+					continue
+				}
+				entry, err := generator.ExtractPrescriptiveFix(
+					failedDir, passingDir,
+					cleared.Detail, cleared.Resource,
+					sc.Cloud, sc.Name, runID,
+				)
+				if err != nil {
+					runtime.Logger.Log(LogEntry{
+						Level: logLevelInfo, Command: "run",
+						Event: "prescriptive_extract_error", Status: "warn",
+						RunID: runID, Detail: err.Error(),
+					})
+					continue
+				}
+				if entry == nil {
+					continue
+				}
+				if !pitfallResourceMatchesCloud(entry.Resource, sc.Cloud) {
+					continue
+				}
+				if err := generator.AppendPitfall(runtime.Config.Paths.Pitfalls, sc.Cloud, *entry); err != nil {
+					runtime.Logger.Log(LogEntry{
+						Level: logLevelError, Command: "run",
+						Event: "prescriptive_pitfall_append", Status: "failed",
+						RunID: runID, Detail: err.Error(),
+					})
+					continue
+				}
+				runtime.Logger.Log(LogEntry{
+					Level: logLevelInfo, Command: "run",
+					Event: "prescriptive_pitfall_learned", Status: "success",
+					RunID: runID,
+					Detail: fmt.Sprintf("resource=%s iter_pair=%d->%d source=%s",
+						entry.Resource, prev.Iteration, curr.Iteration, entry.Source),
+				})
+			}
+		}
+	}
+
 	// Auto-destroy real Scaleway resources on failure to prevent orphaned billing.
 	// Contract #14: failed run without --no-destroy must destroy real resources.
 	sandboxEnabled := runtime.Config.Validation.Layers.SandboxDeploy.Enabled
@@ -1136,6 +1204,17 @@ func failuresAreTransportDominated(failures []FailureSummary) bool {
 //
 // completedIter is the index of the last iteration that ran (caller
 // passes from the loop's `completed` variable).
+// iterationGeneratedDir returns the path to a specific iteration's
+// generated/ directory. Used by N10's prescriptive extractor to diff
+// adjacent iterations' HCL.
+func iterationGeneratedDir(runtime *CommandRuntime, scenarioName, runID string, iter int) string {
+	if iter < 1 {
+		return ""
+	}
+	return filepath.Join(runtime.RunStoreRoot(), scenarioName, runID, "iterations",
+		fmt.Sprintf("%d", iter), "generated")
+}
+
 func readLatestGeneratedHCL(runtime *CommandRuntime, scenarioName, runID string, completedIter int) string {
 	if completedIter < 1 {
 		return ""
