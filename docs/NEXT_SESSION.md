@@ -408,6 +408,207 @@ LLM mistake" failure out of the pitfalls file into the right
 queue. If you're doing T12 anyway, this is a small extension on
 top.
 
+### N10. Diff-based prescriptive-pitfall extractor — ~1 day (~8 hr focused)
+
+**Why:** Today's `ExtractLearnedPitfall` captures the *symptom* (the
+stderr-shaped failure detail) as the pitfall rule, not the *fix*.
+The 2026-06-02 sweep showed why this matters: `gcp-storage` learned
+`google_storage_bucket has no encryption.default_kms_key_name —
+customer-managed encryption not configured` but the LLM still
+oscillated because nothing in the rule told it to
+"create a `google_kms_key_ring` + `google_kms_crypto_key` and
+reference its `.id` via an `encryption {}` block." Prescriptive
+guidance currently only comes from hand-crafted prompts (rules 13–16
+of `prompts/gcp/phase2_generate_hcl.md`).
+
+This extractor closes that gap: when a run eventually passes after N
+failed iterations, diff `iter[N].generated/*.tf` against
+`iter[N-1].generated/*.tf`, attribute the additions to the failures
+they cleared, and write a prescriptive pitfall containing the
+minimal HCL snippet that made the difference.
+
+**Once landed, prompt rules 13–16 become candidates to delete** —
+the system will re-derive them from the first successful run for
+each pattern (gated on the N11 follow-up below).
+
+**Trigger.**
+- `terminal_reason == target_reached` AND at least one prior iteration
+  failed.
+- For each adjacent `(iter[N-1], iter[N])` pair where `iter[N-1]`
+  had failures and `iter[N]` cleared at least one of them, run the
+  extractor against each cleared failure.
+
+**Diff mechanics** — new `internal/generator/prescriptive_extractor.go`:
+
+```go
+func ExtractPrescriptiveFix(
+    failedDir, passingDir string,
+    failure FailureSummary,
+    cloud, scenario, timestamp string,
+) (*PitfallEntry, error)
+```
+
+1. Parse all `*.tf` in both dirs with `hashicorp/hcl/v2/hclparse`.
+2. Build per-iteration maps: `{resource_address → *hclsyntax.Body}`.
+3. Locate the failing resource by address (`failure.Resource` or
+   extract from `failure.Detail`).
+4. Scoped diff: new attribute blocks on the failing resource AND new
+   resources whose `.id` is referenced from those new attributes.
+5. Serialise the additions back to HCL via `hclwrite`; strip
+   comments, normalise whitespace, cap at ~600 chars.
+6. Rule string: `"<resource>: <one-line summary>. Minimal HCL:
+   <snippet>"`.
+
+**Wiring** — `internal/cli/run_command.go`:
+
+After the existing `oscillation_pitfall_learned` block, when
+`terminalReason == "target_reached"` and `hasPriorFailures`, walk
+adjacent clearing pairs and call `ExtractPrescriptiveFix` per
+cleared failure. Append via existing `AppendPitfall`.
+
+**Storage / dedup.**
+- Same `pitfalls/<cloud>.yaml`, same writer.
+- New `source: learned_from_diff` discriminator (distinct from
+  `learned`).
+- Extend `isDuplicate` to ignore whitespace differences in the rule.
+
+**Auto-write decision (resolved 2026-06-02):** confident enough to
+write to `pitfalls/` automatically. CI ratchet guards quality
+(no rules longer than 600 chars, no comment-only diffs, no rules
+that match a mock-actionable signal). Revisit if false positives
+accumulate.
+
+**Cross-cloud isolation:** a `google_storage_bucket` CMEK fix
+learned from `gcp-storage` should not be re-extracted from
+`gcp-full-stack`. Existing `isDuplicate` should handle this — add
+an explicit test case.
+
+**Scope:** validate/apply failures only. Orphan_check stays with N9's
+specialised sub-shape table; the extractor doesn't try to learn
+those.
+
+**Risks & mitigations:**
+- **Noise diff** (unrelated LLM changes) → scope to the failing
+  resource's address subtree only.
+- **Multi-failure interleaving in one iteration** → per-failure
+  attribution; skip if no diff entry touches the failure's address.
+- **HCL parser quirks** → fall back to skipping if parsing fails.
+- **Deletion-as-fix** (e.g., LLM removes `deletion_protection`) →
+  out of scope for phase 1; phase 2 if needed.
+
+**Effort:** Phase 1 extractor + table tests ~5-6 hr; Phase 2
+`run_command.go` wiring + integration test ~2 hr; Phase 3
+`feedback_sweep_protocol.md` + ADR-0012 amendment ~30 min. **Total
+~8 hr, one PR.**
+
+**Validation:**
+1. Take `gcp-storage` (currently failing on CMEK), keep prompt rule
+   16 in place, let it pass once.
+2. Confirm the extractor wrote a prescriptive `google_storage_bucket`
+   pitfall to `pitfalls/gcp.yaml`.
+3. Revert prompt rule 16 to the pre-2026-06-02 wording, blank the
+   pitfall, re-run — the prior run's learned pitfall should get the
+   LLM to pass on iter 1. Proves prescriptive learning works
+   end-to-end without prompt support.
+
+---
+
+### N11. Retire prescriptive prompt rules once N10 stable — ~2 hr
+
+**Why:** N10 produces prescriptive pitfalls automatically. Most of
+`prompts/gcp/phase2_generate_hcl.md` (and the parallel `aws/` and
+`scaleway/` phase-2 prompts) is hand-written prescriptive guidance
+that N10 can re-derive from real runs. Prompt-as-source-of-truth
+doesn't scale — every cloud has dozens of these gotchas, and the
+system already sees each one when a scenario passes.
+
+**In scope for retirement** (gcp/phase2_generate_hcl.md, mirrors in
+phase1/phase3 + the aws/ + scaleway/ equivalents):
+
+| Rule | Pattern | Why N10 can learn it |
+|---|---|---|
+| 9 (no `google_project_service` / `google_service_networking_connection`) | Avoid (deletion-as-fix) | Phase-2 of N10 (see Risks); not phase-1 |
+| 10 (VPC + subnetwork wiring) | Add resources + reference attrs | Addition-as-fix; phase 1 |
+| 11 (firewall `network` not `subnetwork`) | Attribute correction | Single-attribute diff; phase 1 |
+| 12 (IAM principals format) | Attribute correction | Single-attribute diff; phase 1 |
+| 13 (GKE single-node-pool strategy) | Attribute + sibling-resource pattern | Phase 1 |
+| 14 (Cloud SQL flags + name suffix) | Multi-attribute pattern | Phase 1 |
+| 15 (GCS `force_destroy` + uniform access) | Multi-attribute pattern | Phase 1 |
+| 16 (CMEK mandatory) | Add KMS sibling resources + `encryption {}` block | The 2026-06-02 motivating case for N10 — phase 1 |
+
+**NOT in scope** (keep in prompt):
+- Rule 1–8 (system-level: provider source, file structure, variables
+  with defaults, no data sources, no LLM-credentials). These are
+  *meta* rules about how to write HCL at all, not specific
+  resource gotchas — N10 can't learn them because they apply to
+  every scenario from iter 1 onwards.
+- Rule 17 (region restriction) — bound to scenario params, not a
+  static fix.
+- Rule 18 (naming convention) — same.
+
+**Gated on N10 stability.** Don't delete blindly. Expected workflow:
+
+1. Run a full sweep with N10 active.
+2. Inspect `pitfalls/<cloud>.yaml` for `source: learned_from_diff`
+   entries that cover each retiring rule.
+3. For each prompt rule with a matching learned entry, delete the
+   prompt rule.
+4. Re-run the sweep with the prompt thinned to confirm no regression
+   (the auto-learned pitfalls carry the load).
+5. If a rule has no learned counterpart after a full sweep, leave
+   it (it's either still load-bearing or N10 didn't see it succeed
+   yet for that pattern — file a follow-up to seed a scenario that
+   exercises it).
+
+**Effort:** ~2 hr, mostly the validation re-sweep.
+
+**Why this is worth doing:** the prompt collapses from "playbook of
+every gotcha across every resource" to "system contract + scenario
+intent." The system's prescriptive knowledge becomes a living
+artifact in `pitfalls/<cloud>.yaml` that auto-updates as the LLM
+and the mocks evolve, instead of stale hand-written prose.
+
+---
+
+### N12. fakegcp gaps from 2026-06-02 sweep — ~half-day each
+
+The 9-scenario re-validation showed fakegcp has several
+mock-side gaps beyond `google_project_service` / SQL dual-prefix
+(both fixed this session). The N3 classifier correctly routed
+each to `docs/mock-gaps.md`; the fixes belong against fakegcp,
+not infrafactory.
+
+Open mock-gaps (see `docs/mock-gaps.md` for full failure detail):
+
+| Resource | Signal | Affects | Likely fix |
+|---|---|---|---|
+| `google_container_node_pool` | `plugin did not respond` | gcp-gke-cluster, gcp-full-stack | Response shape: `GetNodePool` is missing fields the v5 SDK derefs (likely `networkConfig`, `management`, `upgradeSettings` defaults). Reproduce locally with `TF_LOG=TRACE` against a minimal HCL; compare against real GCP `Get` response. |
+| `google_sql_database_instance` | `plugin did not respond` | gcp-full-stack | Same investigation. `GetSQLInstance` response likely missing `settings.activationPolicy` / `settings.ipConfiguration` defaults. |
+| `google_compute_instance` | `plugin did not respond` | gcp-full-stack | Same investigation. `GetInstance` response likely missing `disks[].source`, `networkInterfaces[].fingerprint`, or `selfLink`. |
+| `google_kms_crypto_key_iam_member` | `Provider produced inconsistent result after apply` | gcp-gke-cluster | The Apply response differs from the planned state. fakegcp's `SetIamPolicy` likely returns a different `etag` than the provider expected. |
+| `cryptoKeyVersions` 501 | `501: not implemented` | gcp-storage | Missing route: `GET /v1/projects/{p}/locations/{l}/keyRings/{r}/cryptoKeys/{k}/cryptoKeyVersions`. Returns a list of versions; with one synthetic `PRIMARY` version. |
+| `google_service_account` | 401 escape | gcp-full-stack | Possibly NOT a real escape — fakegcp's response shape may be missing fields and the SDK formats the 401 misleadingly. Reproduce + verify. |
+
+**Approach per resource:**
+1. Run minimal HCL against fakegcp with `TF_LOG=TRACE`.
+2. Capture the HTTP request + fakegcp's response.
+3. Compare against real GCP API reference for that endpoint.
+4. Fill in the missing fields with sensible synthetic values
+   (stable, derived from input where possible — same discipline as
+   the existing `GetProject` handler).
+5. Add a `TestXXX_PluginAcceptsResponse` test that POSTs+GETs
+   through fakegcp and asserts the response shape passes
+   `googleapi.Decode`.
+
+**Effort:** ~half-day per resource (5 above = 2-3 days). Some may
+share root causes (e.g., several plugin-crashes might share a
+missing `selfLink` field).
+
+**Why now:** the mock-gaps file is the official backlog for fakegcp;
+each row is a concrete reproducer with the failing URL + scenario.
+
+---
+
 ### N9. `orphan_check` extractor — classify the 5 sub-shapes — ~1 day
 
 **Why:** `orphan_check detected N orphaned resources` is a
