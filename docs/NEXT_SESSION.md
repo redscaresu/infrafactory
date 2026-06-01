@@ -513,38 +513,60 @@ those.
 
 ---
 
-### N11. Retire prompt rules 13–16 once N10 stable — ~1 hr
+### N11. Retire prescriptive prompt rules once N10 stable — ~2 hr
 
-**Why:** N10 produces prescriptive pitfalls automatically. Prompt
-rules 13–16 of `prompts/gcp/phase2_generate_hcl.md` (and their
-mirrors in `phase1` / `phase3`) are hand-written prescriptive
-guidance that N10 can re-derive from real runs.
+**Why:** N10 produces prescriptive pitfalls automatically. Most of
+`prompts/gcp/phase2_generate_hcl.md` (and the parallel `aws/` and
+`scaleway/` phase-2 prompts) is hand-written prescriptive guidance
+that N10 can re-derive from real runs. Prompt-as-source-of-truth
+doesn't scale — every cloud has dozens of these gotchas, and the
+system already sees each one when a scenario passes.
+
+**In scope for retirement** (gcp/phase2_generate_hcl.md, mirrors in
+phase1/phase3 + the aws/ + scaleway/ equivalents):
+
+| Rule | Pattern | Why N10 can learn it |
+|---|---|---|
+| 9 (no `google_project_service` / `google_service_networking_connection`) | Avoid (deletion-as-fix) | Phase-2 of N10 (see Risks); not phase-1 |
+| 10 (VPC + subnetwork wiring) | Add resources + reference attrs | Addition-as-fix; phase 1 |
+| 11 (firewall `network` not `subnetwork`) | Attribute correction | Single-attribute diff; phase 1 |
+| 12 (IAM principals format) | Attribute correction | Single-attribute diff; phase 1 |
+| 13 (GKE single-node-pool strategy) | Attribute + sibling-resource pattern | Phase 1 |
+| 14 (Cloud SQL flags + name suffix) | Multi-attribute pattern | Phase 1 |
+| 15 (GCS `force_destroy` + uniform access) | Multi-attribute pattern | Phase 1 |
+| 16 (CMEK mandatory) | Add KMS sibling resources + `encryption {}` block | The 2026-06-02 motivating case for N10 — phase 1 |
+
+**NOT in scope** (keep in prompt):
+- Rule 1–8 (system-level: provider source, file structure, variables
+  with defaults, no data sources, no LLM-credentials). These are
+  *meta* rules about how to write HCL at all, not specific
+  resource gotchas — N10 can't learn them because they apply to
+  every scenario from iter 1 onwards.
+- Rule 17 (region restriction) — bound to scenario params, not a
+  static fix.
+- Rule 18 (naming convention) — same.
 
 **Gated on N10 stability.** Don't delete blindly. Expected workflow:
 
 1. Run a full sweep with N10 active.
-2. Inspect `pitfalls/gcp.yaml` for `source: learned_from_diff`
-   entries that cover rules 13–16.
+2. Inspect `pitfalls/<cloud>.yaml` for `source: learned_from_diff`
+   entries that cover each retiring rule.
 3. For each prompt rule with a matching learned entry, delete the
    prompt rule.
 4. Re-run the sweep with the prompt thinned to confirm no regression
    (the auto-learned pitfalls carry the load).
-5. If a rule has no learned counterpart, leave it (it's either still
-   load-bearing or N10 didn't see it succeed yet).
+5. If a rule has no learned counterpart after a full sweep, leave
+   it (it's either still load-bearing or N10 didn't see it succeed
+   yet for that pattern — file a follow-up to seed a scenario that
+   exercises it).
 
-**Affected rules (current):**
-- Rule 13: GKE single-node-pool strategy.
-- Rule 14: Cloud SQL `deletion_protection = false` + name
-  suffix + no public IP.
-- Rule 15: GCS `force_destroy = true`, `uniform_bucket_level_access`.
-- Rule 16: CMEK mandatory for storage/SQL/disk (the 2026-06-02
-  motivating case for N10).
+**Effort:** ~2 hr, mostly the validation re-sweep.
 
-**Effort:** ~1 hr, just prompt deletions + a confirmation sweep.
-
-**Why this is worth doing:** prompt-as-source-of-truth doesn't
-scale — every cloud has dozens of these gotchas. Letting the system
-derive them keeps the prompt focused on architecture and intent.
+**Why this is worth doing:** the prompt collapses from "playbook of
+every gotcha across every resource" to "system contract + scenario
+intent." The system's prescriptive knowledge becomes a living
+artifact in `pitfalls/<cloud>.yaml` that auto-updates as the LLM
+and the mocks evolve, instead of stale hand-written prose.
 
 ---
 
