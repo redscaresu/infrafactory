@@ -1,12 +1,13 @@
 # STATUS
 
-Last updated: 2026-05-23
+Last updated: 2026-06-01
 
 ## Current phase
 - Slices 1-32 complete. 12 Scaleway training scenarios pass `infrafactory run`.
 - Slices 33-39 fully complete (cross-repo e2e infrastructure, oscillation pitfall learning, http_probe diagnostics, pitfalls API + UI, run compare API + UI, real-time scenario validation).
 - **Slices 33-42 (GCP critical path) now complete**: S40 (visual regression Playwright suite), S41 (fakegcp test parity to mockway level — 881 lines repo tests + 17 FK violation handler tests + 6 cascade delete tests + admin /mock/state tests + double-apply idempotency harness + 5 misconfigured TF examples), S42 (multi-cloud UI with cloud badge + dynamic Layer 3 label + mock-provider dispatch), S36 (cross-repo TestE2E_GCPDoubleApplyIdempotency + GCP scenarios surfaced in UI Playwright), M38 (Google provider auto-injection). 17 ticket batch closed 2026-05-23.
 - **Slices 43-48 (fakeaws) complete**: 9 AWS services landed across 5 wire formats (IAM, S3, EC2, RDS, DynamoDB, EKS, SQS, Route53, Secrets Manager); aggregate handler coverage 82.4%; S48-T4 codex review loop closed at pass 17 (passes 1-15 each fixed ≥1 BLOCKING; passes 16-17 returned consecutive NOTHING_TO_IMPROVE). Pass-by-pass history archived under `../fakeaws/docs/review-passes/passN.md`.
+- **2026-06-01 sweep close-out — realistic pass rate 39/39**: closed every outstanding training scenario via 18 named tickets across infrafactory + fakeaws + fakegcp + mockway. ADR-0014 captures the provider-endpoint-flag discipline learned this session (v1/v3 distinct flags, host-only default, dual-prefix mock routes). 22 infrafactory commits, 7 fakeaws, 6 fakegcp, 1 mockway. See `docs/NEXT_SESSION.md` for the per-ticket breakdown and remaining N1-N7 polish candidates.
 - ADRs 0009 (incremental deployment) and 0010 (Layer 3, supersedes ADR-0003) are implemented in code and docs.
 - 22 implementation contracts codified in CONCEPT.md § "Implementation Contracts (Slices 22-29)".
 - Layer 3 production readiness hardening complete (Slice 30).
