@@ -208,13 +208,12 @@ func buildGoogleProviderBlock(fakegcpURL string) string {
   # the request escaped to real cloud. False = service-account semantics,
   # which fakegcp's bearer-token middleware accepts directly.
   user_project_override                  = false
-  # Stub credentials JSON. Combined with access_token, this gets the
-  # provider's auth pipeline past Application Default Credentials
-  # discovery — otherwise the v5 SDK probes the metadata server +
-  # GOOGLE_APPLICATION_CREDENTIALS env var before issuing the first
-  # request. The credentials block itself is unused (access_token wins)
-  # but must parse as JSON.
-  credentials                            = "{\"type\":\"service_account\",\"project_id\":\"infrafactory-test\",\"private_key_id\":\"fake\",\"client_email\":\"fake@infrafactory-test.iam.gserviceaccount.com\"}"
+  # NOTE: do NOT add a credentials attribute here. The v5 provider rejects
+  # any HCL that sets BOTH access_token and credentials with a fatal
+  # Invalid Attribute Combination / Conflicting configuration arguments
+  # error. We rely on access_token (for the bearer) + the GCP env-var
+  # strip in internal/cli/exec_runner.go::stripGCPAuthEnv to keep the
+  # SDK's auth pipeline from probing Application Default Credentials.
   compute_custom_endpoint                = "%[1]s/compute/v1/"
   container_custom_endpoint              = "%[1]s/"
   cloud_resource_manager_custom_endpoint = "%[1]s/v1/"
