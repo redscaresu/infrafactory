@@ -4,11 +4,14 @@ Self-contained brief for a fresh Claude / engineer starting in this repo.
 
 ## READ FIRST — 2026-06-02
 
-S63 (post-collapse 39-scenario sweep) closed: **39/39 deterministic**, no regression from the S56–S60 prompt retirements. Four S63–S67 slices remain:
-- **S64**: N13 first-production audit. **N13 didn't fire organically this sweep**, so the PR is small — capture that outcome + audit the three S63 audit findings below.
-- **S65**: gcp-cloud-run `deletion_policy` hallucination triage. **The flake didn't recur in S63** — re-run gcp-cloud-run 5× to confirm consistency. If stable, the slice may close as "no longer reproducible."
+S63 + S64 closed. Three S63–S67 slices remain:
+- **S65**: gcp-cloud-run `deletion_policy` hallucination triage. **The flake didn't recur in S63** — re-run gcp-cloud-run 5× to confirm consistency. If stable, slice closes as "no longer reproducible" + N13's new case-insensitive attribution (S64) makes any future recurrence self-learnable.
 - **S66**: gcp-full-stack `google_apikeys_key` mock gap. Also didn't recur in S63 (3 iters → target_reached). Same "verify reproducibility" pattern.
 - **S67**: Sweep harness sustain ratchet (`infrafactory mock reset` CLI command).
+
+**Closed this session**:
+- S63: 39/39 deterministic post-collapse sweep — no regression from the six N11 retirements.
+- S64: N13 case-insensitive attribution. `attributeAppearsInDetail` matches removed attribute names in literal + case-insensitive snake_case + camelCase forms. Closes the aws_subnet `MapPublicIpOnLaunch` false-positive finding from S63. ADR-0012 amended.
 
 **S63 audit findings carried into S64**:
 1. `aws_subnet` `learned_from_diff` is a false positive — the LLM's iter-pair diff captured ADDED attrs (`cidr_block`, `availability_zone`) but the actual fix was REMOVAL of `map_public_ip_on_launch`. N13 should have caught it but the failure detail uses camelCase (`MapPublicIpOnLaunch`) while the HCL attribute is snake_case (`map_public_ip_on_launch`) — N13's `strings.Contains(failureDetail, attr)` attribution failed. **Fix in S64**: case-insensitive (or snake↔camel) attribute matching.

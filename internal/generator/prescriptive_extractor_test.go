@@ -448,6 +448,41 @@ func TestExtractPrescriptiveAvoid_UnrelatedRemovalReturnsNil(t *testing.T) {
 	}
 }
 
+// TestExtractPrescriptiveAvoid_CamelCaseAttributeInFailureDetail
+// pins the S63 audit fix. The aws_subnet `MapPublicIpOnLaunch` case
+// surfaced as a false-positive in S63's sweep: N13 saw the failing
+// iter remove `map_public_ip_on_launch` but couldn't attribute it
+// because the AWS API error echoed the JSON-side `MapPublicIpOnLaunch`
+// (camelCase) while the strict `strings.Contains(failureDetail, attr)`
+// check only matched the snake_case form. `attributeAppearsInDetail`
+// now tries case-insensitive + camelCase variants.
+func TestExtractPrescriptiveAvoid_CamelCaseAttributeInFailureDetail(t *testing.T) {
+	d1 := t.TempDir()
+	d2 := t.TempDir()
+	writeTF(t, d1, "main.tf", `resource "aws_subnet" "public" {
+  cidr_block                = "10.0.1.0/24"
+  availability_zone         = "us-east-1a"
+  map_public_ip_on_launch   = true
+}`)
+	writeTF(t, d2, "main.tf", `resource "aws_subnet" "public" {
+  cidr_block        = "10.0.1.0/24"
+  availability_zone = "us-east-1a"
+}`)
+
+	// Real AWS error shape (camelCase echo of the offending field).
+	failureDetail := `Error: waiting for EC2 Subnet (subnet-abc) MapPublicIpOnLaunch update: timeout while waiting for state to become 'true' (last state: 'false', timeout: 5m0s)`
+	entry, err := ExtractPrescriptiveAvoid(d1, d2, failureDetail, "aws_subnet.public", "aws", "aws-vpc-network", "ts")
+	if err != nil {
+		t.Fatalf("extract: %v", err)
+	}
+	if entry == nil {
+		t.Fatal("expected an avoid entry attributing the snake_case attribute via the camelCase failure detail, got nil")
+	}
+	if !strings.Contains(entry.Rule, "attribute `map_public_ip_on_launch`") {
+		t.Errorf("rule missing map_public_ip_on_launch avoid clause: %q", entry.Rule)
+	}
+}
+
 // TestExtractPrescriptiveAvoid_PartialResourceRemovalSkipped ensures
 // case (b) only fires when ALL instances of a type are dropped. A
 // scenario that goes from two `google_project_service` resources to

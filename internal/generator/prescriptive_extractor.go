@@ -383,6 +383,60 @@ func extractAttributeName(line string) string {
 	return m[1]
 }
 
+// attributeAppearsInDetail tests whether an HCL attribute name (always
+// snake_case in Terraform) appears in a failure detail string. The
+// match is case-insensitive on the snake_case form AND additionally
+// tries the camelCase equivalent — AWS provider errors frequently
+// echo the JSON-side field name (`MapPublicIpOnLaunch`) while the HCL
+// attribute is `map_public_ip_on_launch`. The S63 sweep's aws_subnet
+// false-positive surfaced this gap: N13 saw the failing iter remove
+// `map_public_ip_on_launch` but couldn't attribute it because
+// `strings.Contains(detail, attr)` returned false on the camelCase
+// failure detail.
+func attributeAppearsInDetail(detail, attr string) bool {
+	if strings.Contains(detail, attr) {
+		return true
+	}
+	// Case-insensitive snake_case (cheap; covers errors echoing the
+	// HCL attribute back with different casing).
+	if strings.Contains(strings.ToLower(detail), attr) {
+		return true
+	}
+	// camelCase equivalent (`foo_bar_baz` → `FooBarBaz` / `fooBarBaz`).
+	if camel := snakeToCamel(attr); camel != "" {
+		if strings.Contains(detail, camel) {
+			return true
+		}
+		// Lower-camel variant: `MapPublicIpOnLaunch` → `mapPublicIpOnLaunch`.
+		lowerCamel := strings.ToLower(camel[:1]) + camel[1:]
+		if strings.Contains(detail, lowerCamel) {
+			return true
+		}
+	}
+	return false
+}
+
+// snakeToCamel converts `map_public_ip_on_launch` → `MapPublicIpOnLaunch`.
+// Empty input returns "". Names that don't contain `_` round-trip with
+// only the first letter capitalised.
+func snakeToCamel(s string) string {
+	if s == "" {
+		return ""
+	}
+	parts := strings.Split(s, "_")
+	var b strings.Builder
+	for _, p := range parts {
+		if p == "" {
+			continue
+		}
+		b.WriteString(strings.ToUpper(p[:1]))
+		if len(p) > 1 {
+			b.WriteString(p[1:])
+		}
+	}
+	return b.String()
+}
+
 // ExtractPrescriptiveAvoid is the N13 deletion-as-fix companion to
 // ExtractPrescriptiveFix. When the LLM cleared a failure by REMOVING
 // HCL (an attribute the provider rejected, a resource that escapes
@@ -446,8 +500,13 @@ func ExtractPrescriptiveAvoid(failedDir, passingDir string, failureDetail, failu
 				}
 				// Strict attribution: the attribute name MUST appear in
 				// the failure detail. This filters unrelated whitespace
-				// rewrites + LLM refactors.
-				if strings.Contains(failureDetail, attr) {
+				// rewrites + LLM refactors. Matched both as-written (HCL
+				// is snake_case) and in camelCase form — AWS API errors
+				// echo back the JSON-side name (`MapPublicIpOnLaunch`)
+				// even though the HCL attribute is `map_public_ip_on_launch`.
+				// The S63 sweep's aws_subnet false-positive surfaced this
+				// gap.
+				if attributeAppearsInDetail(failureDetail, attr) {
 					avoidAttrs = append(avoidAttrs, attr)
 					seen[attr] = struct{}{}
 				}
