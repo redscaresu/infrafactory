@@ -34,3 +34,24 @@ Freeze the following command contract in `internal/cli`:
 - Tests can reliably distinguish usage failures from runtime failures.
 - Additional flags and output schema details must extend this contract rather than silently changing it.
 - Downstream command wiring can emit stable human and machine outputs without redefining ordering rules per command.
+
+## Amendment (2026-06-02, S67 — `mock reset` subcommand)
+
+Added `infrafactory mock reset` to the existing `mock` subcommand
+group. Same contract as the other `mock` subcommands (status / start
+/ stop / logs): scenario-independent, takes no positional args, uses
+the global `--output` flag, exit code 0 on success and 1 on
+command_failed.
+
+The implementation fans out via a new `cloudMockStateRouter.ResetAll`
+helper that hits every configured mock backend (mockway + fakegcp +
+fakeaws) and cascades to the s3 backend (SeaweedFS by default) via
+the existing `resetS3Backend`. This is the systematic fix for the
+S54 SeaweedFS state-leak — bare-curl `/mock/reset` to fakeaws does
+NOT cascade to SeaweedFS, so prior session buckets bled into sweeps
+as `BucketAlreadyExists`. Routing through `mock reset` (or directly
+through `cloudMockStateRouter` in `infrafactory run`'s clean-deploy
+path) is the right path.
+
+No change to the existing command contract or exit codes — `mock
+reset` slots in alongside the other `mock` subcommands.

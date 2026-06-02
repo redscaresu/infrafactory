@@ -228,6 +228,11 @@ func newMockCmd(cfg *rootConfig) *cobra.Command {
 			Short: "Show Mockway logs. For all three mocks use `make mocks-logs`.",
 			RunE:  cfg.withRuntime("mock logs", runMockLogsCommand),
 		},
+		&cobra.Command{
+			Use:   "reset",
+			Short: "Reset state across every configured mock backend (mockway + fakegcp + fakeaws + s3 cascade).",
+			RunE:  cfg.withRuntime("mock reset", runMockResetCommand),
+		},
 	)
 
 	return cmd
