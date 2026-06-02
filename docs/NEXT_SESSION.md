@@ -2,7 +2,19 @@
 
 Self-contained brief for a fresh Claude / engineer starting in this repo.
 
-## 2026-06-02 S55 N10 audit close-out — READ FIRST
+## 2026-06-02 S56 N11 retirement close-out — READ FIRST
+
+S56 retired GCP phase2 rule 11 (firewall `network` vs `subnetwork` attribute) via the 7-step protocol:
+
+- Step 1-2 (sweep + inspect pitfalls): no `learned_from_diff` for `google_compute_firewall` existed — the prompt rule kept the LLM correct, so no failure was ever recorded for N10 to learn from.
+- Step 3 (delete prompt rule): removed rule 11 from `prompts/gcp/phase2_generate_hcl.md` and the matching phase3 self-review checkpoint (rule 6).
+- Step 4 (blank matching pitfall): N/A — no matching entry.
+- Step 5 (re-run): `gcp-vm-network` (the only firewall-dense scenario) → target_reached on iter 1. LLM produced correct `network = google_compute_network.main.id` with no `subnetwork =`, narrow `source_ranges`.
+- Step 5 exit path hit: **"rule was redundant — delete with no follow-up."** Steps 6-7 skipped.
+
+**Second N11 retirement** (CMEK was first). Confirms the 7-step protocol generalizes to single-attribute correction rules where `tofu validate` provides strong machine-readable feedback. The architectural shift holds: well-typed validator errors flow through the dynamic auto-correction channel without any prompt or pitfall scaffolding.
+
+## 2026-06-02 S55 N10 audit close-out
 
 S55 audited the first N10 production entries by re-running 6 scenarios known to take ≥2 iters. Two wiring/quality fixes + one CI ratchet landed:
 
