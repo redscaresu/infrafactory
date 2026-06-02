@@ -747,6 +747,72 @@ func TestIsMockActionable_NegativesStayOnPitfallPath(t *testing.T) {
 	}
 }
 
+// S78-T2: N3 carve-out — ACCESS_TOKEN_TYPE_UNSUPPORTED is normally a
+// mock-actionable signal (the v5 GCP provider escaped to real cloud
+// because fakegcp lacks the route). But for a fixed set of resource
+// types — google_project_service, google_service_networking_connection,
+// google_project_iam_member / _binding / _policy — the LLM-side fix
+// (drop the resource) IS attainable and the mock-side fix is not
+// (these resources can't be modeled cleanly in fakegcp). For those,
+// the classifier must return false so the N13 deletion-as-fix
+// extractor can learn the avoid pattern via ExtractLearnedPitfall.
+//
+// Without this carve-out, S73's retirement of GCP phase2 rules 9 + 12
+// leaves no mechanism for the system to re-learn the rule on a fresh
+// scenario — failures would route to docs/mock-gaps.md and N13 would
+// never see them.
+func TestIsMockActionable_GCPEscapeCarveOut(t *testing.T) {
+	cases := []struct {
+		name   string
+		detail string
+		want   bool
+	}{
+		{
+			name:   "carve-out: google_project_service escape",
+			detail: `google_project_service.compute: googleapi: Error 401: Request had invalid authentication credentials. ... "reason": "ACCESS_TOKEN_TYPE_UNSUPPORTED"`,
+			want:   false,
+		},
+		{
+			name:   "carve-out: google_service_networking_connection escape",
+			detail: `Error: Error creating google_service_networking_connection: googleapi: Error 401: Request had invalid authentication credentials. ... "reason": "ACCESS_TOKEN_TYPE_UNSUPPORTED"`,
+			want:   false,
+		},
+		{
+			name:   "carve-out: google_project_iam_member escape",
+			detail: `google_project_iam_member.cluster_node_sa: googleapi: Error 401: ... "reason": "ACCESS_TOKEN_TYPE_UNSUPPORTED"`,
+			want:   false,
+		},
+		{
+			name:   "carve-out: google_project_iam_binding escape",
+			detail: `google_project_iam_binding.editors: googleapi: Error 401: ... "reason": "ACCESS_TOKEN_TYPE_UNSUPPORTED"`,
+			want:   false,
+		},
+		{
+			name:   "carve-out: google_project_iam_policy escape",
+			detail: `google_project_iam_policy.this: googleapi: Error 401: ... "reason": "ACCESS_TOKEN_TYPE_UNSUPPORTED"`,
+			want:   false,
+		},
+		{
+			name:   "non-carve-out: bare ACCESS_TOKEN_TYPE_UNSUPPORTED stays mock-actionable",
+			detail: `googleapi: Error 401: Request had invalid authentication credentials. ... "reason": "ACCESS_TOKEN_TYPE_UNSUPPORTED"`,
+			want:   true,
+		},
+		{
+			name:   "non-carve-out: ACCESS_TOKEN_TYPE_UNSUPPORTED on a non-escape resource stays mock-actionable",
+			detail: `google_compute_firewall.allow_ssh: googleapi: Error 401: ... "reason": "ACCESS_TOKEN_TYPE_UNSUPPORTED"`,
+			want:   true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := IsMockActionable(tc.detail)
+			if got != tc.want {
+				t.Errorf("IsMockActionable: got %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 // AppendMockGap writes to docs/mock-gaps.md, dedups on
 // (cloud, signal, resource), groups by cloud heading.
 func TestAppendMockGap_CreatesFileAndDedups(t *testing.T) {
