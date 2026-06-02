@@ -4,8 +4,9 @@ Self-contained brief for a fresh Claude / engineer starting in this repo.
 
 ## S74–S78 progress
 
-- ✅ **S74**: AWS phase3 rule 3 sub-bullets on DB subnet group ordering + SG cycle avoidance retired (Category A). Audit shows AWS phase2 is fully Category C; phase3 has 2 remaining sub-bullets (VPC — Category B, IAM profile chain — Category C).
-- ⬜ S75, S76, S77, S78: remaining.
+- ✅ **S74**: AWS phase3 rule 3 sub-bullets on DB subnet group ordering + SG cycle avoidance retired (Category A).
+- ✅ **S75**: Scaleway phase3 rule 6.b (private NIC requirement) retired (Category B — covered by existing `scaleway_instance_server` pitfall).
+- ⬜ S76, S77, S78: remaining.
 
 ## READ FIRST
 
