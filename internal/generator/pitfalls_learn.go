@@ -813,6 +813,26 @@ func AppendPitfall(pitfallsDir, cloud string, pitfall LearnedPitfall) error {
 		}
 	}
 
+	// learned → learned_from_diff upgrade: a prescriptive HCL-snippet
+	// rule (N10's PrescriptiveSource) strictly dominates a same-resource
+	// symptom-only `learned` entry. Without this, the older descriptive
+	// rule's significant-word overlap with the prescriptive snippet trips
+	// isDuplicate and the diff entry is silently dropped. Replace in
+	// place: keeps the YAML file flat and surfaces the actionable form.
+	if pitfall.Source == PrescriptiveSource {
+		for i, entry := range pf.Pitfalls {
+			if entry.Resource == pitfall.Resource && entry.Source != PrescriptiveSource {
+				pf.Pitfalls[i] = PitfallEntry{
+					Resource:       pitfall.Resource,
+					Rule:           pitfall.Rule,
+					Source:         pitfallSource(pitfall),
+					DiscoveredFrom: pitfall.DiscoveredFrom,
+				}
+				return writePitfallsFile(pitfallsDir, filePath, cloud, &pf)
+			}
+		}
+	}
+
 	// Deduplication: check if a similar pitfall already exists.
 	if isDuplicate(pf.Pitfalls, pitfall) {
 		return nil
