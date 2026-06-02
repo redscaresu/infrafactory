@@ -94,3 +94,35 @@ re-learned the same OAuth-escape and plugin-crash pitfalls that N2
 had just pruned. Fix: mirror the same `IsMockActionable` guard in
 the stuck/budget loop. The classifier-routing pattern itself is
 unchanged; the bug was in coverage, not design.
+
+## Amendment (2026-06-02, S68 — coverage extension)
+
+S63's post-collapse sweep surfaced two failure shapes that
+`IsMockActionable` didn't recognize:
+
+1. **Provider polling on a mock-side state field that doesn't
+   persist** — the provider acks the Update, then polls until the
+   field flips to the requested value, times out because the mock
+   never persisted the change. Shapes:
+   - `waiting for state to become 'true' (last state: 'false', timeout: ...)` (lower-case, EC2 Subnet MapPublicIpOnLaunch)
+   - `waiting for state to become 'TRUE' (last state: 'FALSE', timeout: ...)` (upper-case, AWS KMS rotation)
+2. **Mock acks Create but Read returns 0 rows** — distinct from the
+   pre-existing `ResourceNotFoundException` shape (which uses a
+   structured exception type). The Route 53 case in S63 used
+   `Error: reading Route 53 Record (...): empty result`.
+
+Both are textbook mock-side state-divergence — the LLM's HCL is
+correct, the mock just doesn't persist the change. Without the
+extension, these failures landed in `pitfalls/<cloud>.yaml` as
+`learned` entries on every sweep.
+
+S68 added four substring signals (two upper/lower case variants
+each for `waiting for state to become`, plus `empty result`) and
+three regression tests pinning the real S63 failure strings. The
+existing `TestPitfallsNoMockActionableSeeds` ratchet caught a
+pre-existing stale `aws_subnet` entry on first CI run after the
+extension; it was pruned in the same PR.
+
+Same conservative-substring-match discipline as the original
+classifier: false negatives leave the legacy learning path active;
+false positives drop a learning that arguably belongs in pitfalls.

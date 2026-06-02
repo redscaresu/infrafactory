@@ -131,6 +131,25 @@ var (
 		// Generic "unimplemented" envelope variants (each mock has its
 		// own wire shape).
 		"\"error\":\"unimplemented\"",
+
+		// S68 (S63 audit finding 2): provider polling on a mock-side
+		// state field that doesn't persist after Update. The provider
+		// kicks off an Update (e.g. AWS KMS rotation, EC2 Subnet
+		// MapPublicIpOnLaunch) and then polls until the field flips to
+		// the requested value; the mock acks the Update but never
+		// persists the change, so polling times out. Always mock-side
+		// state-divergence — the LLM's HCL is correct.
+		"waiting for state to become 'true'",
+		"waiting for state to become 'true' (last state: 'false', timeout:",
+		"waiting for state to become 'TRUE'",
+		"waiting for state to become 'TRUE' (last state: 'FALSE', timeout:",
+
+		// S68: provider Read returns empty (no row matched the key the
+		// mock should be tracking). Distinct from the ResourceNotFound
+		// case above — this is a "found the table, found 0 rows"
+		// shape, typical of mocks that auto-ack Create but never
+		// store the row. Real signal from aws_route53_record in S63.
+		"empty result",
 	}
 )
 
