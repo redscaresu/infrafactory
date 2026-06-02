@@ -39,8 +39,6 @@ Review the generated HCL against:
 3. AWS-specific correctness:
    - VPC + subnet exist before any compute, database, or kubernetes resource.
    - IAM role + instance profile chain is correct (profile bridges role to instance).
-   - DB subnet group exists before any RDS instance in a custom VPC.
-   - Security group rules use `aws_security_group_rule` resources (NOT inline `ingress` / `egress` blocks) when the same SG references itself, to avoid the cycle that inline blocks create.
 4. Provider version pin matches `hashicorp/aws ~> 5.70`.
 
 ## Output Format
