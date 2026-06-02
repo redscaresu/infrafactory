@@ -2,7 +2,17 @@
 
 Self-contained brief for a fresh Claude / engineer starting in this repo.
 
-## 2026-06-02 S59 N11 retirement close-out — READ FIRST
+## 2026-06-02 S60 N11 retirement close-out — READ FIRST
+
+S60 generalized the N11 retirement protocol across clouds. Retired:
+- **AWS phase3 rule 3 sub-bullet**: \`deletion_protection = false\` on RDS instances. Re-ran `aws-rds` → target_reached iter 1. LLM produced `skip_final_snapshot = true` (provider default `deletion_protection = false` is implicit-fine).
+- **Scaleway phase3 rule 7** (two sub-rules in one): RDB `private_network` requiring `ip_net` OR `enable_ipam = true`, AND LB `assign_flexible_ip` conflict with `ip_ids`. Re-ran `mysql-ha-paris` → target_reached iter 2 (RDB `private_network { pn_id = ... enable_ipam = true }` correctly produced); `lb-paris` → target_reached iter 1 (`ip_ids = [scaleway_lb_ip.main.id]` with no `assign_flexible_ip`).
+
+Per protocol step 5 (both): rules redundant — delete with no follow-up. **Seventh, eighth, ninth N11 retirements** (CMEK + firewall + GKE + SQL + GCS + VPC across GCP, then AWS-RDS + SCW-RDB + SCW-LB).
+
+The protocol now generalizes across all three cloud providers — strong evidence the N10→N11 architectural shift is cloud-agnostic.
+
+## 2026-06-02 S59 N11 retirement close-out
 
 S59 retired GCP phase2 rule 10 (VPC + subnetwork) — the highest-stakes GCP retirement (affects nearly every networked scenario).
 

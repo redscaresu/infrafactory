@@ -60,8 +60,6 @@ Verify compliance with these known pitfalls:
    - Private networking where required? Servers MUST have separate `scaleway_instance_private_nic` resources — the validation policy checks for these specifically. Do NOT remove them.
    - No public endpoints on databases if `no_public_database: true`?
    - Encryption at rest if required?
-7. **RDB private_network**: If `scaleway_rdb_instance` has a `private_network` block, verify it sets either `ip_net` (e.g. `"10.0.0.254/24"`) or `enable_ipam = true`. Omitting both causes: "at least one of 'ip_net' or 'enable_ipam' (set to true) must be set".
-   **LB flexible IP**: Do NOT set `assign_flexible_ip` when `ip_ids` is used on `scaleway_lb` — they conflict.
 8. **Acceptance criteria**: Will the generated infrastructure pass each criterion?
    - Connectivity checks: are security groups / private networks configured correctly?
    - HTTP probes: are load balancer frontends/backends set up?

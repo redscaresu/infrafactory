@@ -42,7 +42,6 @@ Review the generated HCL against:
    - DB subnet group exists before any RDS instance in a custom VPC.
    - Security group rules use `aws_security_group_rule` resources (NOT inline `ingress` / `egress` blocks) when the same SG references itself, to avoid the cycle that inline blocks create.
    - S3 bucket names include an account-synthetic or run-scoped suffix (S3's name space is global).
-   - `deletion_protection` is `false` on RDS instances meant for test/destroy cycles.
 4. Provider version pin matches `hashicorp/aws ~> 5.70`.
 
 ## Output Format
