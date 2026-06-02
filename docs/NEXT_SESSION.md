@@ -6,7 +6,8 @@ Self-contained brief for a fresh Claude / engineer starting in this repo.
 
 - ✅ **S74**: AWS phase3 rule 3 sub-bullets on DB subnet group ordering + SG cycle avoidance retired (Category A).
 - ✅ **S75**: Scaleway phase3 rule 6.b (private NIC requirement) retired (Category B — covered by existing `scaleway_instance_server` pitfall).
-- ⬜ S76, S77, S78: remaining.
+- ✅ **S76**: 39-scenario sweep — 37/39 (historical baseline). Two AWS failures, both correctly classified into `docs/mock-gaps.md`: `aws_kms_key` rotation timeout (mock-side fakeaws state-divergence), `aws-vpc-network` empty `main.tf` (LLM transport flake).
+- ⬜ S77, S78: remaining.
 
 ## READ FIRST
 
