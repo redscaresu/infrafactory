@@ -2,7 +2,52 @@
 
 Self-contained brief for a fresh Claude / engineer starting in this repo.
 
-## 2026-06-02 S61 N13 deletion-as-fix close-out — READ FIRST
+## 2026-06-02 S54–S62 sustain + prompt-collapse arc — CLOSED — READ FIRST
+
+The full S54–S62 arc landed. Summary:
+
+| Slice | Outcome |
+|---|---|
+| S54 | 39/39 deterministic sweep baseline (1 retry on aws-full-stack after SeaweedFS state cleared). N10 dedupe fix (learned → learned_from_diff upgrade path). |
+| S55 | N10 audit — three wiring/quality fixes: iterationHistory now records passing iters, `trimSnippet` cuts at top-level `}`, S55-T3 ratchet caps learned_from_diff rules at `snippetMaxBytes + 400` bytes. |
+| S56 | N11 retirement #2: GCP phase2 rule 11 (firewall network-vs-subnetwork). Category A. |
+| S57 | N11 retirement #3: GCP phase2 rule 13 (GKE single-node-pool). Category A. |
+| S58 | N11 retirements #4 + #5: GCP phase2 rules 14 (Cloud SQL teardown) + 15 (GCS test setup). Category A. |
+| S59 | N11 retirement #6: GCP phase2 rule 10 (VPC + subnetwork). Category B (replaced by auto-learned pitfalls). |
+| S60 | N11 retirements #7–#9: AWS RDS deletion_protection + Scaleway phase3 rule 7 (RDB + LB). Category A. |
+| S61 | N13 deletion-as-fix extractor (`ExtractPrescriptiveAvoid` + `learned_from_diff_avoid` source). Wired into run_command.go. |
+| S62 | ADR-0018 — three-category N11 retirement framework codified. |
+
+**Architectural milestones**:
+- **GCP phase2 prompt collapsed from 17 prescriptive rules to 11** (or 9 if the hand-applied `google_project_service` + `google_project_iam_member` retirements count as Category C pending N13 organic re-derivation).
+- The N10→N11→N13 sequence is end-to-end: addition fixes flow through `learned_from_diff`, removal fixes through `learned_from_diff_avoid`, both fed by real run diffs, both replacing hand-written prescription.
+- The 7-step protocol generalized across all three cloud providers (GCP, AWS, Scaleway) — strong evidence the architectural shift is cloud-agnostic.
+
+### What to do FIRST in the next session
+
+1. **Run a fresh deterministic 39-scenario sweep** (S54 cadence). Compare with the post-S54 baseline to confirm no regression from the six prompt retirements. Expect 39/39 again.
+2. **Audit organic `learned_from_diff_avoid` entries**. N13 was validated synthetically — the first real avoid emission needs the S55-style audit. The `deletion_policy` hallucination case from S59's gcp-cloud-run is the most likely trigger.
+3. **N11 audit on AWS phase3 + Scaleway phase3 remaining bullets**. Per ADR-0018, expect 1–2 more Category-A retirements per cloud.
+4. **Retire GCP phase2 rule 12** (Service accounts / `google_project_iam_member` avoidance) once N13 organically produces a `learned_from_diff_avoid` entry for it. Step-by-step: catch a sweep where the LLM converges by dropping `google_project_iam_member`, then verify N13 fired, then delete rule 12.
+
+### Open follow-ups carried into next arc
+
+- **gcp-cloud-run flakiness on `deletion_policy` hallucination** (from S59 step 5). The auto-correction loop should now catch it via N13 if the LLM self-corrects in 2+ iters before stuck detection trips. If recurrent, consider raising the stuck-detection threshold or making it value-aware.
+- **gcp-full-stack flakiness on `google_apikeys_key`** (from S57). LLM non-deterministically introduces an unsupported resource type. Two paths: (a) implement `google_apikeys_key` handlers in fakegcp, or (b) tighten the scenario architecture plan so the LLM doesn't reach for it.
+- **SeaweedFS state-leakage at sweep start** (S54). The bare-curl-based sweep harness doesn't drop pre-existing SeaweedFS buckets. Options: (a) sweep script explicitly clears, (b) `infrafactory mock reset` CLI command wraps `cloudMockStateRouter.Reset`.
+- **N10 `cmd/n10extract` helper** — temporary tool used + removed in prior session. Could land as a permanent CLI command if forced extraction (N11 step 2 fallback) becomes a routine retirement step.
+
+### Important context still relevant
+
+- ADR-0012 amendments capture N10 + N13 design.
+- ADR-0018 codifies N11 retirement criteria — read before attempting any further retirement.
+- `feedback_sweep_protocol.md`: never hand-edit `pitfalls/*.yaml`. Discard sweep pollution with `git checkout pitfalls/`. The N10/N13 extractors are the only legitimate authors going forward.
+- `feedback_mock_design.md`: mocks for feedback, not realism.
+- Pre-arc archived sections are below (S54–S61 individual close-outs).
+
+---
+
+## 2026-06-02 S61 N13 deletion-as-fix close-out
 
 S61 added `ExtractPrescriptiveAvoid` — the dual of N10's addition-as-fix extractor. When the LLM clears a failure by REMOVING HCL rather than adding it, the system now emits a "do NOT use" pitfall with `source: learned_from_diff_avoid`.
 
