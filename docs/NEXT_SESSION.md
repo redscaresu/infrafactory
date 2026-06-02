@@ -2,7 +2,22 @@
 
 Self-contained brief for a fresh Claude / engineer starting in this repo.
 
-## 2026-06-02 S56 N11 retirement close-out — READ FIRST
+## 2026-06-02 S57 N11 retirement close-out — READ FIRST
+
+S57 retired GCP phase2 rule 13 (GKE single-node-pool strategy) via the 7-step protocol:
+
+- Step 1-2 (sweep + inspect pitfalls): no `learned_from_diff` for `google_container_cluster` or `google_container_node_pool` existed.
+- Step 3 (delete prompt rule): removed rule 13 from `prompts/gcp/phase2_generate_hcl.md` and the matching phase3 self-review checkpoint (rule 10).
+- Step 5 (re-run):
+  - `gcp-gke-cluster` → target_reached on iter 4. The GKE config in iter 4 was correct (`remove_default_node_pool = true` + `initial_node_count = 1` + separate `google_container_node_pool`, no inline `node_config`). The 3 prior failed iters were CMEK self-correction on `google_storage_bucket.tfstate` (unrelated to rule 13).
+  - `gcp-full-stack` → repair_budget_exhausted on iter 5. BUT iter 5's failure was `google_apikeys_key` mock gap (`apikeys.googleapis.com` not implemented by fakegcp), and the GKE shape in iter 5's HCL was IDENTICAL to gke-cluster's correct shape. The LLM non-deterministically introduced `google_apikeys_key` — a separate bug, NOT a regression caused by rule 13 retirement.
+- Step 5 exit path hit: **"rule was redundant — delete with no follow-up."** Steps 6-7 skipped.
+
+**Third N11 retirement** (CMEK + firewall + GKE). The protocol now generalizes to multi-attribute rules with cross-resource patterns (cluster + separate node_pool).
+
+**Follow-up captured**: gcp-full-stack flakiness on `google_apikeys_key` is N12 territory — either implement the resource in fakegcp or improve the scenario architecture plan so the LLM doesn't reach for it.
+
+## 2026-06-02 S56 N11 retirement close-out
 
 S56 retired GCP phase2 rule 11 (firewall `network` vs `subnetwork` attribute) via the 7-step protocol:
 
