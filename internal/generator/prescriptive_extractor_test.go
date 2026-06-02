@@ -347,6 +347,143 @@ func TestExtractPrescriptiveFix_CrossCloudIsolation(t *testing.T) {
 	}
 }
 
+// --- N13 deletion-as-fix tests ---
+
+// TestExtractPrescriptiveAvoid_AttributeRemoval is the motivating
+// case for N13: the LLM clears an "Unsupported argument" failure by
+// REMOVING the offending attribute. The avoid extractor should emit
+// a "do NOT use" rule with the attribute name.
+func TestExtractPrescriptiveAvoid_AttributeRemoval(t *testing.T) {
+	d1 := t.TempDir()
+	d2 := t.TempDir()
+	writeTF(t, d1, "main.tf", `resource "google_cloud_run_v2_service" "api" {
+  name              = "api"
+  location          = "europe-west1"
+  deletion_policy   = "DELETE"
+}`)
+	writeTF(t, d2, "main.tf", `resource "google_cloud_run_v2_service" "api" {
+  name     = "api"
+  location = "europe-west1"
+}`)
+
+	failureDetail := `exit status 1 | stderr: Error: Unsupported argument; An argument named "deletion_policy" is not expected here.`
+	entry, err := ExtractPrescriptiveAvoid(d1, d2, failureDetail, "google_cloud_run_v2_service.api", "gcp", "gcp-cloud-run", "ts")
+	if err != nil {
+		t.Fatalf("extract: %v", err)
+	}
+	if entry == nil {
+		t.Fatal("expected an avoid entry, got nil")
+	}
+	if entry.Source != PrescriptiveAvoidSource {
+		t.Errorf("source = %q, want %q", entry.Source, PrescriptiveAvoidSource)
+	}
+	if entry.Resource != "google_cloud_run_v2_service" {
+		t.Errorf("resource = %q", entry.Resource)
+	}
+	if !strings.Contains(entry.Rule, "Do NOT use attribute `deletion_policy`") {
+		t.Errorf("rule missing avoid clause: %q", entry.Rule)
+	}
+}
+
+// TestExtractPrescriptiveAvoid_ResourceRemoval covers case (b): the
+// LLM clears the failure by dropping every resource of a given type.
+// Motivating case: google_project_service removal to escape the v5
+// provider's auth-pipeline preflight (the 2026-06-02 prompt-rule
+// retirement that pre-dated N13).
+func TestExtractPrescriptiveAvoid_ResourceRemoval(t *testing.T) {
+	d1 := t.TempDir()
+	d2 := t.TempDir()
+	writeTF(t, d1, "main.tf", `resource "google_compute_instance" "vm" {
+  name = "vm"
+}
+resource "google_project_service" "compute" {
+  service = "compute.googleapis.com"
+}
+resource "google_project_service" "iam" {
+  service = "iam.googleapis.com"
+}
+`)
+	writeTF(t, d2, "main.tf", `resource "google_compute_instance" "vm" {
+  name = "vm"
+}
+`)
+
+	failureDetail := `exit status 1 | stderr: Error: ACCESS_TOKEN_TYPE_UNSUPPORTED on google_project_service.compute reaching cloudresourcemanager.googleapis.com`
+	entry, err := ExtractPrescriptiveAvoid(d1, d2, failureDetail, "google_project_service.compute", "gcp", "gcp-cloud-run", "ts")
+	if err != nil {
+		t.Fatalf("extract: %v", err)
+	}
+	if entry == nil {
+		t.Fatal("expected an avoid entry, got nil")
+	}
+	if !strings.Contains(entry.Rule, "resource type `google_project_service`") {
+		t.Errorf("rule missing resource-type avoid clause: %q", entry.Rule)
+	}
+}
+
+// TestExtractPrescriptiveAvoid_UnrelatedRemovalReturnsNil pins the
+// attribution strictness: a removed attribute whose name does NOT
+// appear in the failure detail (cosmetic LLM rewrite) MUST NOT
+// produce an avoid entry — otherwise the file fills with noise.
+func TestExtractPrescriptiveAvoid_UnrelatedRemovalReturnsNil(t *testing.T) {
+	d1 := t.TempDir()
+	d2 := t.TempDir()
+	writeTF(t, d1, "main.tf", `resource "google_storage_bucket" "b" {
+  name     = "x"
+  location = "EU"
+  labels   = { env = "test" }
+}`)
+	writeTF(t, d2, "main.tf", `resource "google_storage_bucket" "b" {
+  name     = "x"
+  location = "EU"
+}`)
+
+	failureDetail := `policy=gcp.encryption: google_storage_bucket.b has no encryption.default_kms_key_name`
+	entry, err := ExtractPrescriptiveAvoid(d1, d2, failureDetail, "google_storage_bucket.b", "gcp", "gcp-storage", "ts")
+	if err != nil {
+		t.Fatalf("extract: %v", err)
+	}
+	if entry != nil {
+		t.Errorf("expected nil (removed `labels` is unrelated to CMEK failure), got %+v", entry)
+	}
+}
+
+// TestExtractPrescriptiveAvoid_PartialResourceRemovalSkipped ensures
+// case (b) only fires when ALL instances of a type are dropped. A
+// scenario that goes from two `google_project_service` resources to
+// one (the LLM kept compute, dropped iam) is too ambiguous — could
+// be a legit narrowing — so skip the avoid emission.
+func TestExtractPrescriptiveAvoid_PartialResourceRemovalSkipped(t *testing.T) {
+	d1 := t.TempDir()
+	d2 := t.TempDir()
+	writeTF(t, d1, "main.tf", `resource "google_compute_instance" "vm" {
+  name = "vm"
+}
+resource "google_project_service" "compute" {
+  service = "compute.googleapis.com"
+}
+resource "google_project_service" "iam" {
+  service = "iam.googleapis.com"
+}
+`)
+	writeTF(t, d2, "main.tf", `resource "google_compute_instance" "vm" {
+  name = "vm"
+}
+resource "google_project_service" "compute" {
+  service = "compute.googleapis.com"
+}
+`)
+
+	failureDetail := `Error reaching google_project_service.iam (ACCESS_TOKEN_TYPE_UNSUPPORTED)`
+	entry, err := ExtractPrescriptiveAvoid(d1, d2, failureDetail, "google_project_service.iam", "gcp", "gcp-cloud-run", "ts")
+	if err != nil {
+		t.Fatalf("extract: %v", err)
+	}
+	if entry != nil && strings.Contains(entry.Rule, "resource type") {
+		t.Errorf("expected no resource-type avoid (compute still present), got %q", entry.Rule)
+	}
+}
+
 // --- helpers ---
 
 func writeTF(t *testing.T, dir, name, content string) {

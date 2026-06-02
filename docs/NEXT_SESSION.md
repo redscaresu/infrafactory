@@ -2,7 +2,21 @@
 
 Self-contained brief for a fresh Claude / engineer starting in this repo.
 
-## 2026-06-02 S60 N11 retirement close-out — READ FIRST
+## 2026-06-02 S61 N13 deletion-as-fix close-out — READ FIRST
+
+S61 added `ExtractPrescriptiveAvoid` — the dual of N10's addition-as-fix extractor. When the LLM clears a failure by REMOVING HCL rather than adding it, the system now emits a "do NOT use" pitfall with `source: learned_from_diff_avoid`.
+
+Two attribution paths:
+- **Attribute-level**: a removed attribute whose name appears verbatim in the failure detail. Covers the `deletion_policy = "DELETE"` hallucination case from S59's gcp-cloud-run flakiness.
+- **Resource-level**: ALL instances of a top-level resource type were removed AND that type name appears in the failure detail. Covers `google_project_service` / `google_project_iam_member` escape patterns that PR #18 + #23 had to hand-retire from prompts.
+
+Strict attribution rules: returns nil if the deletion can't be tied to the failure (unrelated LLM refactors); partial-removal skips resource-type emission (ambiguous). Four unit tests pin attribute removal, resource removal, unrelated-removal-returns-nil, and partial-removal-no-emit. Both N10 and N13 extractors run together per cleared-failure iter pair — either or both can emit.
+
+ADR-0012 amended with N13 design rationale. M91 + S55-T3 ratchets extended to whitelist + size-check `learned_from_diff_avoid`.
+
+**Validation against recorded runs**: deferred to next sweep — the synthetic tests cover the mechanism; the real validation comes when a sweep produces an avoid entry organically. The S59 gcp-cloud-run \"deletion_policy\" hallucination is the most likely trigger — if it recurs and the LLM self-corrects by dropping the attribute (versus introducing yet another wrong one), N13 will record the rule and prevent future occurrences.
+
+## 2026-06-02 S60 N11 retirement close-out
 
 S60 generalized the N11 retirement protocol across clouds. Retired:
 - **AWS phase3 rule 3 sub-bullet**: \`deletion_protection = false\` on RDS instances. Re-ran `aws-rds` → target_reached iter 1. LLM produced `skip_final_snapshot = true` (provider default `deletion_protection = false` is implicit-fine).

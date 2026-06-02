@@ -624,28 +624,60 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 						Event: "prescriptive_extract_error", Status: "warn",
 						RunID: runID, Detail: err.Error(),
 					})
+				} else if entry != nil && pitfallResourceMatchesCloud(entry.Resource, sc.Cloud) {
+					if err := generator.AppendPitfall(runtime.Config.Paths.Pitfalls, sc.Cloud, *entry); err != nil {
+						runtime.Logger.Log(LogEntry{
+							Level: logLevelError, Command: "run",
+							Event: "prescriptive_pitfall_append", Status: "failed",
+							RunID: runID, Detail: err.Error(),
+						})
+					} else {
+						runtime.Logger.Log(LogEntry{
+							Level: logLevelInfo, Command: "run",
+							Event: "prescriptive_pitfall_learned", Status: "success",
+							RunID: runID,
+							Detail: fmt.Sprintf("resource=%s iter_pair=%d->%d source=%s",
+								entry.Resource, prev.Iteration, curr.Iteration, entry.Source),
+						})
+					}
+				}
+				// N13: deletion-as-fix (the dual of N10's addition-as-fix).
+				// Runs on the same cleared-failure cursor — the two
+				// extractors capture different patterns and either or
+				// both may emit per pair.
+				avoidEntry, err := generator.ExtractPrescriptiveAvoid(
+					failedDir, passingDir,
+					cleared.Detail, cleared.Resource,
+					sc.Cloud, sc.Name, runID,
+				)
+				if err != nil {
+					runtime.Logger.Log(LogEntry{
+						Level: logLevelInfo, Command: "run",
+						Event: "prescriptive_avoid_extract_error", Status: "warn",
+						RunID: runID, Detail: err.Error(),
+					})
 					continue
 				}
-				if entry == nil {
+				if avoidEntry == nil {
 					continue
 				}
-				if !pitfallResourceMatchesCloud(entry.Resource, sc.Cloud) {
+				if !pitfallResourceMatchesCloud(avoidEntry.Resource, sc.Cloud) {
 					continue
 				}
-				if err := generator.AppendPitfall(runtime.Config.Paths.Pitfalls, sc.Cloud, *entry); err != nil {
+				if err := generator.AppendPitfall(runtime.Config.Paths.Pitfalls, sc.Cloud, *avoidEntry); err != nil {
 					runtime.Logger.Log(LogEntry{
 						Level: logLevelError, Command: "run",
-						Event: "prescriptive_pitfall_append", Status: "failed",
+						Event: "prescriptive_avoid_append", Status: "failed",
 						RunID: runID, Detail: err.Error(),
 					})
 					continue
 				}
 				runtime.Logger.Log(LogEntry{
 					Level: logLevelInfo, Command: "run",
-					Event: "prescriptive_pitfall_learned", Status: "success",
+					Event: "prescriptive_avoid_learned", Status: "success",
 					RunID: runID,
 					Detail: fmt.Sprintf("resource=%s iter_pair=%d->%d source=%s",
-						entry.Resource, prev.Iteration, curr.Iteration, entry.Source),
+						avoidEntry.Resource, prev.Iteration, curr.Iteration, avoidEntry.Source),
 				})
 			}
 		}

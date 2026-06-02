@@ -109,3 +109,59 @@ mechanism described above remains correct. The amendment exists so
 a fresh reader can connect the on-disk behaviour (now-correct N10
 firing on every passing post-failure iter pair) to the original
 design intent.
+
+## Amendment (2026-06-02, N13 deletion-as-fix)
+
+N10's `ExtractPrescriptiveFix` captures **addition-as-fix** patterns:
+the LLM cleared a failure by ADDING HCL. The 2026-06-02 sweep
+surfaced the dual case repeatedly — failures cleared by REMOVING
+HCL (an attribute the provider rejected, a resource type that
+escapes to real cloud). The clearest motivating cases:
+
+- `deletion_policy = "DELETE"` on `google_cloud_run_v2_service` —
+  the LLM hallucinated this attribute; tofu validate rejects it;
+  the fix is dropping the line.
+- `google_project_service` / `google_project_iam_member` — these
+  resources escape fakegcp to real `cloudresourcemanager.googleapis.com`;
+  the fix is removing them entirely (PR #18 + #23 hand-retired the
+  prompts; N13 makes those retirements re-derivable from runs).
+
+`ExtractPrescriptiveAvoid` (this amendment) implements the dual:
+
+- New source tag `PrescriptiveAvoidSource = "learned_from_diff_avoid"`
+  distinguishes the avoid form from the add form in
+  `pitfalls/<cloud>.yaml`.
+- Two attribution paths:
+  - **Attribute-level**: the LLM removed an attribute from the
+    failing resource's body AND the attribute name appears verbatim
+    in the failure detail. The strictest signal — provider/policy
+    named the offending attribute, the LLM dropped it, the failure
+    cleared.
+  - **Resource-level**: ALL instances of a top-level resource type
+    were dropped between iters AND that type name appears in the
+    failure detail. Partial removals (some instances retained)
+    skip — ambiguous between "the type is forbidden" and "the LLM
+    narrowed legitimately."
+- Rule shape: `"<failure summary> Do NOT use <attribute|resource
+  type> on <resource> — observed in scenario X to cause the failure
+  above."`
+- M91 no-human-seeding ratchet + S55-T3 size ratchet both
+  whitelist `PrescriptiveAvoidSource` alongside `PrescriptiveSource`
+  — same provenance, different rule shape.
+
+The two extractors run together per cleared-failure iter pair:
+either or both may emit. The N10 addition extractor's logging
+event remains `prescriptive_pitfall_learned`; the N13 avoid
+extractor emits `prescriptive_avoid_learned` so per-event triage
+stays clean.
+
+**Why now (post-N11 instead of as part of N10).** N11's prompt-rule
+retirements landed before N13 because the manual deletions
+(prompts/aws/phase3 RDS, prompts/scaleway/phase3 RDB+LB,
+prompts/gcp/phase2 rules 9 + 12 + 16 + 11 + 13 + 14 + 15 + 10)
+proved the auto-correction channel carries the load. N13 makes
+those retirements RE-DERIVABLE — any future "do NOT use this
+attribute / resource" pitfall is one passing run away from the
+file. The N10→N11→N13 sequence converts hand-written prescription
+to a self-maintaining artifact for both addition and removal
+patterns.
