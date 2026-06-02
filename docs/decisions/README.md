@@ -23,6 +23,7 @@ Use ADRs for decisions that affect long-term behavior, interfaces, or contributo
 - `0015-classifier-routing.md`: Three classifier hooks (mock-actionable, orphan sub-shapes, policy_pitfall_conflict) before stuck/budget termination, routing matched failures to `docs/mock-gaps.md` or `docs/policy-gaps.md` instead of `pitfalls/<cloud>.yaml`.
 - `0016-orphan-subshape-classification.md`: Five sub-shapes of post-destroy orphan-check failures with a `(cloud, resource)` lookup table; each sub-shape routes to a different fix surface.
 - `0017-policy-pitfall-conflict.md`: Detector that fires when the LLM's HCL contains every backticked keyword of a matching prescriptive pitfall AND a rego policy still rejects it — routes to `docs/policy-gaps.md` rather than seeding an unhelpful pitfall.
+- `0018-n11-retirement-criteria.md`: Three-category framework for retiring prescriptive prompt rules — A: redundant (auto-correction carries it), B: replaced by `learned_from_diff` pitfall, C: load-bearing system/contract/scenario-bound rule kept.
 - `DECISION_RUBRIC.md`: yes/no gate for deciding when ADR is required.
 - `ADR_TEMPLATE.md`: copy/paste template for new ADRs.
 
