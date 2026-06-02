@@ -201,3 +201,58 @@ This is a wiring fix, not a design change. The N13 extractor remains
 strict (only emits when there's an attribution path between the
 deletion and the failure) — it now just recognizes one more legitimate
 attribution path.
+
+## Amendment (2026-06-02, S69 — M96 close-out + extractor layering)
+
+M96 (BACKLOG, filed 2026-05-30) flagged that `ExtractLearnedPitfall`
+produced descriptive rules ("X failed because…") rather than
+prescriptive ones, and proposed two paths: (1) template-based
+rewrites, or (2) a small LLM post-extraction call that synthesises a
+prescriptive rule from converged HCL.
+
+The S69 audit (after Slices 54-67) found that M96's question was
+already answered architecturally — not by either of the proposed
+paths, but by a layered set of extractors that each cover a
+different convergence state:
+
+**Layer 1 — N10 `ExtractPrescriptiveFix` (addition-as-fix)**:
+fires when `terminal_reason == target_reached` and at least one
+prior iter failed. Diffs the last-failing iter's HCL against the
+first-passing iter's HCL, emits a `learned_from_diff` rule with the
+minimal HCL snippet that resolved the failure. The strongest signal
+when available.
+
+**Layer 2 — N13 `ExtractPrescriptiveAvoid` (deletion-as-fix)**:
+same trigger as N10 but for the dual case — the LLM cleared the
+failure by REMOVING HCL (an attribute the provider rejected, a
+resource that escapes to real cloud). Emits a `learned_from_diff_avoid`
+rule of the shape "do NOT use X — observed to cause the failure
+above."
+
+**Layer 3 — M97 templates (in `ExtractLearnedPitfall`)**: fire on
+every failure, not just on target_reached. Pattern-match common
+error shapes (missing subnetwork, CMEK, unsupported argument,
+destroy blockers, etc.) and emit prescriptive rules without needing
+a converged run to learn from. Cover the still-stuck-runs niche
+where N10/N13 can't fire yet.
+
+**Layer 4 — descriptive fallback (in `ExtractLearnedPitfall`)**:
+captures the raw failure detail when no template matches. Last
+resort. Symptom-only, but still better than no learning for novel
+failure shapes.
+
+The four layers are *complementary*, not competing:
+- A converging run produces an N10 + possibly an N13 entry. The
+  M97 template that may have fired earlier in the same run is
+  silently superseded (the M91 ratchet doesn't drop it, but the
+  `learned → learned_from_diff` dedupe path replaces it).
+- A still-stuck run produces an M97 entry on the offending
+  iteration, which lets the LLM see the prescriptive shape on
+  the next attempt.
+- A run with a novel failure shape (no template match, no
+  convergence) produces a descriptive fallback entry that surfaces
+  the issue for a human to look at.
+
+M96 closes as superseded — no code change. The architectural
+answer was the N10→N11→N13 sequence, not a path-1 vs path-2
+choice on `ExtractLearnedPitfall`.
