@@ -282,6 +282,53 @@ func TestExtractPrescriptiveFix_SnippetCap(t *testing.T) {
 	}
 }
 
+// TestExtractPrescriptiveFix_SnippetTrimAtBlockBoundary pins the
+// trim improvement: when the snippet would exceed 600 bytes, prefer
+// cutting after a top-level `}` so the example remains balanced HCL.
+// Motivating case from the 2026-06-02 S55 audit: a
+// google_sql_database_instance snippet's `depends_on = [` got cut
+// mid-list inside a settings block, leaving the example unparseable.
+func TestExtractPrescriptiveFix_SnippetTrimAtBlockBoundary(t *testing.T) {
+	d1 := t.TempDir()
+	d2 := t.TempDir()
+	writeTF(t, d1, "main.tf", `resource "google_storage_bucket" "app" { name = "a" }`)
+
+	// One realistic-sized block (~300 bytes) followed by an oversized
+	// sibling — the trim should keep the first block intact and stop
+	// at its `}` rather than slicing the second mid-block.
+	var b strings.Builder
+	b.WriteString(`resource "google_storage_bucket" "app" {` + "\n")
+	b.WriteString(`  name     = "a"` + "\n")
+	b.WriteString(`  location = "EU"` + "\n")
+	b.WriteString(`  encryption {` + "\n")
+	b.WriteString(`    default_kms_key_name = google_kms_crypto_key.k.id` + "\n")
+	b.WriteString(`  }` + "\n")
+	b.WriteString("}\n")
+	b.WriteString(`resource "google_kms_crypto_key" "k" {` + "\n")
+	for i := 0; i < 50; i++ {
+		b.WriteString("  big_attr_" + repeat("x", 8) + " = \"" + repeat("y", 20) + "\"\n")
+	}
+	b.WriteString("}\n")
+	writeTF(t, d2, "main.tf", b.String())
+
+	entry, err := ExtractPrescriptiveFix(d1, d2, "google_storage_bucket.app fail", "google_storage_bucket.app", "gcp", "scenario", "ts")
+	if err != nil {
+		t.Fatalf("extract: %v", err)
+	}
+	if entry == nil {
+		t.Fatal("expected an entry, got nil")
+	}
+	if !strings.Contains(entry.Rule, "(truncated)") {
+		t.Fatal("expected truncation marker")
+	}
+	// The portion before "(truncated)" must end with "}\n" — the
+	// boundary cut. Anything else means we sliced mid-block.
+	pre := entry.Rule[:strings.Index(entry.Rule, "# ... (truncated)")]
+	if !strings.HasSuffix(pre, "}\n") {
+		t.Errorf("expected snippet to end with `}\\n` before truncation marker; got tail %q", pre[max(0, len(pre)-40):])
+	}
+}
+
 // TestExtractPrescriptiveFix_CrossCloudIsolation guards against
 // learning a google_storage_bucket fix from a Scaleway scenario
 // when no such resource exists. Should return nil.
