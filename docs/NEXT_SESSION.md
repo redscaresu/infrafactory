@@ -4,14 +4,14 @@ Self-contained brief for a fresh Claude / engineer starting in this repo.
 
 ## READ FIRST — 2026-06-02
 
-S63 + S64 + S65 closed. Two S63–S67 slices remain:
-- **S66**: gcp-full-stack `google_apikeys_key` mock gap. Didn't recur in S63 (3 iters → target_reached). Run 5× to confirm; close as "no longer reproducible" if stable, OR implement minimal handlers in fakegcp if it returns.
-- **S67**: Sweep harness sustain ratchet (`infrafactory mock reset` CLI command wrapping `cloudMockStateRouter.Reset`).
+S63 + S64 + S65 + S66 closed. One S63–S67 slice remains:
+- **S67**: Sweep harness sustain ratchet — `infrafactory mock reset` CLI command wrapping `cloudMockStateRouter.Reset` so sweep harnesses can drop SeaweedFS state without a curl carve-out. Optional: permanent `cmd/n10extract`.
 
 **Closed this session**:
 - S63: 39/39 deterministic post-collapse sweep — no regression from the six N11 retirements.
 - S64: N13 case-insensitive attribution. `attributeAppearsInDetail` matches removed attribute names in literal + case-insensitive snake_case + camelCase forms. Closes the aws_subnet `MapPublicIpOnLaunch` false-positive finding from S63. ADR-0012 amended.
-- S65: gcp-cloud-run `deletion_policy` flake no longer reproducible (5/5 clean runs). Safety net: S64's case-insensitive N13 + the existing `deletion_protection` pitfall mean future recurrence would auto-learn.
+- S65: gcp-cloud-run `deletion_policy` flake no longer reproducible (5/5 clean runs).
+- S66: gcp-full-stack `google_apikeys_key` flake no longer reproducible (5/5 clean runs, zero apikeys mentions). Safety net: if the LLM reaches for it in a future run, apply fails clearly; N13 should catch the removal organically.
 
 **S63 audit findings carried into S64**:
 1. `aws_subnet` `learned_from_diff` is a false positive — the LLM's iter-pair diff captured ADDED attrs (`cidr_block`, `availability_zone`) but the actual fix was REMOVAL of `map_public_ip_on_launch`. N13 should have caught it but the failure detail uses camelCase (`MapPublicIpOnLaunch`) while the HCL attribute is snake_case (`map_public_ip_on_launch`) — N13's `strings.Contains(failureDetail, attr)` attribution failed. **Fix in S64**: case-insensitive (or snake↔camel) attribute matching.
