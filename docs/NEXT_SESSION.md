@@ -13,6 +13,11 @@ Self-contained brief for a fresh Claude / engineer starting in this repo.
 - S66: gcp-full-stack `google_apikeys_key` flake no longer reproducible (5/5 clean runs, zero apikeys mentions).
 - S67: `infrafactory mock reset` CLI command added. `cloudMockStateRouter.ResetAll` fans out across mockway + fakegcp + fakeaws + s3 (SeaweedFS) cascade. Closes the S54 SeaweedFS state-leak gap — sweep harnesses no longer need a bare-curl carve-out.
 
+## S68–S72 progress
+
+- ✅ **S68**: N3 classifier coverage gap — `IsMockActionable` now recognizes `waiting for state to become` + `empty result` shapes. Stale `aws_subnet` `MapPublicIpOnLaunch` pitfall pruned.
+- ⬜ S69, S70, S71, S72: remaining.
+
 ## Next arc: S68–S72
 
 Plan file: `docs/plans/slices-68-72-plan.md`. Five slices, ~6–10 focused hours, designed for one autonomous loop session.

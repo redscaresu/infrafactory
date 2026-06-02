@@ -688,6 +688,18 @@ func TestIsMockActionable_FivePositiveSignalClasses(t *testing.T) {
 			name:   "ResourceNotFoundException from Describe* path",
 			detail: `Error: removing IAM User access keys: ListSSHPublicKeys, ResourceNotFoundException: The specified resource does not exist`,
 		},
+		{
+			name:   "S68: AWS KMS rotation update timeout (mock doesn't persist update)",
+			detail: `Error: waiting for KMS Key (9c3c2d1c-caa5-b730-1fea-d936e0dc2a6e) rotation update: timeout while waiting for state to become 'TRUE' (last state: 'FALSE', timeout: 10m0s)`,
+		},
+		{
+			name:   "S68: AWS Subnet MapPublicIpOnLaunch update timeout (lower-case state)",
+			detail: `Error: waiting for EC2 Subnet (subnet-6cc5499a5e7589f9) MapPublicIpOnLaunch update: timeout while waiting for state to become 'true' (last state: 'false', timeout: 5m0s)`,
+		},
+		{
+			name:   "S68: AWS Route 53 record empty result (mock acks create, read returns 0 rows)",
+			detail: `Error: reading Route 53 Record (Z95765F2BFAKEAWS_test.example.invalid_A): empty result`,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

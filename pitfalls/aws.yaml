@@ -12,7 +12,3 @@ pitfalls:
       rule: aws_db_instance.main has storage_encrypted = false; AWS RDS at-rest encryption is required
       source: learned
       discovered_from: aws-rds
-    - resource: aws_subnet
-      rule: "exit status 1 | stderr: ╷\n│ Error: waiting for EC2 Subnet (subnet-6cc5499a5e7589f9) MapPublicIpOnLaunch update: timeout while waiting for state to become 'true' (last state: 'false', timeout: 5m0s)\n│ \n│   with aws_subnet.public,\n│   on network.tf line 11, in resource \"aws_subnet\" \"publi..."
-      source: learned
-      discovered_from: aws-vpc-network
