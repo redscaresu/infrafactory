@@ -256,3 +256,31 @@ The four layers are *complementary*, not competing:
 M96 closes as superseded — no code change. The architectural
 answer was the N10→N11→N13 sequence, not a path-1 vs path-2
 choice on `ExtractLearnedPitfall`.
+
+## Amendment (2026-06-02, S70 — permanent cmd/n10extract)
+
+The N11 retirement protocol's step 2 ("inspect pitfalls for a
+`learned_from_diff` covering the rule's pattern; if absent, force one
+via recorded-run replay") originally relied on a hand-rolled
+`cmd/n10extract` helper written + removed inline in the 2026-06-02
+loop session. S70 promotes that helper to a permanent CLI command so
+future retirements have a stable forced-extract path without
+re-implementing it each time.
+
+The command wraps `generator.ExtractPrescriptiveFix` (mode=fix) and
+`generator.ExtractPrescriptiveAvoid` (mode=avoid), takes the same
+parameter set the extractors do (`--failed-dir`, `--passing-dir`,
+`--failure-detail`, `--failure-resource`, `--cloud`, `--scenario`),
+and emits a pitfalls-file YAML snippet on stdout so the operator can
+review then append (or pipe through `yq` into `pitfalls/<cloud>.yaml`).
+
+`--run-dir <path>` is the shorthand the loop session needed most: it
+walks `<runDir>/iterations/N/generated/`, picks the last-failing +
+last-passing iter, and uses those as the diff pair. Three unit tests
+pin the auto-discovery against synthetic dir trees.
+
+Build: `make build` now produces `bin/n10extract` alongside
+`bin/infrafactory`.
+
+This is a workflow tool, not a runtime extension — the extractors
+themselves are unchanged.

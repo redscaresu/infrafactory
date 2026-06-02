@@ -15,9 +15,10 @@ Self-contained brief for a fresh Claude / engineer starting in this repo.
 
 ## S68–S72 progress
 
-- ✅ **S68**: N3 classifier coverage gap — `IsMockActionable` now recognizes `waiting for state to become` + `empty result` shapes. Stale `aws_subnet` `MapPublicIpOnLaunch` pitfall pruned.
-- ✅ **S69**: M96 closed as superseded. `ExtractLearnedPitfall` (M97 templates + descriptive fallback) is layered with N10/N13, not competing. ADR-0012 amended with the four-layer extractor model.
-- ⬜ S70, S71, S72: remaining.
+- ✅ **S68**: N3 classifier coverage gap — `IsMockActionable` now recognizes `waiting for state to become` + `empty result` shapes.
+- ✅ **S69**: M96 closed as superseded. ADR-0012 amended with the four-layer extractor model.
+- ✅ **S70**: Permanent `cmd/n10extract` CLI — drives N10/N13 against a recorded run dir, emits a candidate pitfall YAML. `--run-dir` shorthand auto-discovers the iter pair. Three unit tests + smoke-tested against gcp-cloud-sql. `make build` includes it.
+- ⬜ S71, S72: remaining.
 
 ## Next arc: S68–S72
 
