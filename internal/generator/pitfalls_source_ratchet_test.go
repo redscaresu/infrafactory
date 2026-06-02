@@ -70,11 +70,13 @@ func TestPitfallsNoHumanSeeding(t *testing.T) {
 			}
 			sort.Strings(keys)
 			for _, src := range keys {
-				if src == "learned" || src == PrescriptiveSource {
+				if src == "learned" || src == PrescriptiveSource || src == PrescriptiveAvoidSource {
 					// `learned_from_diff` is N10's auto-derived source —
 					// strictly a richer shape of run-derived learning,
-					// not a human-authored seed. Whitelisted alongside
-					// the legacy `learned` tag.
+					// not a human-authored seed. `learned_from_diff_avoid`
+					// is the N13 deletion-as-fix companion (same
+					// provenance, different rule shape). Both whitelisted
+					// alongside the legacy `learned` tag.
 					continue
 				}
 				t.Errorf("pitfalls/%s.yaml has %d entries with source=%q — M91 forbids human-authored pitfalls. Delete them and let the M86+M90 auto-learning loop rebuild any genuinely-needed entries from real runs.", cloud, bySource[src], src)
@@ -156,7 +158,7 @@ func TestPitfallsLearnedFromDiffSnippetCap(t *testing.T) {
 				t.Fatalf("parse %s: %v", path, err)
 			}
 			for _, p := range file.Pitfalls {
-				if p.Source != PrescriptiveSource {
+				if p.Source != PrescriptiveSource && p.Source != PrescriptiveAvoidSource {
 					continue
 				}
 				if len(p.Rule) > maxRuleBytes {

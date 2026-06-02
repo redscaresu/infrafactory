@@ -33,6 +33,13 @@ import (
 // distinguish diff-learned rules from legacy symptom-only ones.
 const PrescriptiveSource = "learned_from_diff"
 
+// PrescriptiveAvoidSource is the source tag for N13's deletion-as-fix
+// pitfalls — rules of the shape "Do NOT use <thing>; it causes
+// <failure>." N10's PrescriptiveSource captures addition-as-fix
+// patterns (the LLM ADDED HCL that resolved a failure). N13 captures
+// the dual: the LLM REMOVED HCL that was causing a failure.
+const PrescriptiveAvoidSource = "learned_from_diff_avoid"
+
 // resourceHeaderRe matches the opening line of a Terraform resource
 // block: `resource "TYPE" "NAME" {`. We capture TYPE and NAME so we
 // can build the bare address (`TYPE.NAME`) used for failure
@@ -315,6 +322,215 @@ func newResourceAddresses(failed, passing map[string]*resourceBlock) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// removedResourceAddresses is the dual of newResourceAddresses:
+// addresses present in `failed` that disappear from `passing`. Used
+// by the N13 deletion-as-fix extractor to spot top-level resource
+// removals that correlate with failure clearance.
+func removedResourceAddresses(failed, passing map[string]*resourceBlock) []string {
+	var out []string
+	for addr := range failed {
+		if _, stillThere := passing[addr]; !stillThere {
+			out = append(out, addr)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// blockRemovals is the dual of blockAdditions: returns lines present
+// in `failed` but absent from `passing`. Same normalization rules
+// (whitespace-collapse + comment skip) so reformatting doesn't
+// register as a deletion.
+func blockRemovals(failed, passing string) string {
+	passingSet := make(map[string]struct{})
+	for _, line := range strings.Split(passing, "\n") {
+		passingSet[normalizeLine(line)] = struct{}{}
+	}
+	var out []string
+	for _, line := range strings.Split(failed, "\n") {
+		key := normalizeLine(line)
+		if key == "" {
+			continue
+		}
+		if _, seen := passingSet[key]; seen {
+			continue
+		}
+		t := strings.TrimSpace(line)
+		if strings.HasPrefix(t, "#") || strings.HasPrefix(t, "//") {
+			continue
+		}
+		out = append(out, line)
+	}
+	return strings.Join(out, "\n")
+}
+
+// attributeNameRe matches an HCL attribute assignment line and
+// captures the attribute name (left of `=`). Used by the N13
+// deletion-as-fix extractor to confirm a removed line's identifier
+// appears in the failure detail. Heredoc/nested-block headers are
+// rejected because they end in `{`.
+var attributeNameRe = regexp.MustCompile(`^\s*([a-z_][a-z0-9_]*)\s*=`)
+
+// extractAttributeName pulls the attribute name (lhs of `=`) from an
+// HCL line, or returns "" if the line isn't a scalar assignment.
+func extractAttributeName(line string) string {
+	m := attributeNameRe.FindStringSubmatch(line)
+	if len(m) < 2 {
+		return ""
+	}
+	return m[1]
+}
+
+// ExtractPrescriptiveAvoid is the N13 deletion-as-fix companion to
+// ExtractPrescriptiveFix. When the LLM cleared a failure by REMOVING
+// HCL (an attribute the provider rejected, a resource that escapes
+// to real cloud, etc.), the legitimate fix is "do NOT use <thing>"
+// rather than "add <thing>." This extractor emits the avoid form.
+//
+// Heuristic for attribution:
+//
+//	(a) Attribute-level: the LLM removed an attribute from the failing
+//	    resource's body, AND the attribute name appears verbatim in
+//	    the failure detail. This is the safest signal — the provider
+//	    or policy named the offending attribute, the LLM dropped it,
+//	    the failure cleared.
+//	(b) Resource-level: the LLM removed every top-level resource of
+//	    a given type, AND that resource type appears in the failure
+//	    detail. Covers patterns like dropping every
+//	    `google_project_service` to escape the auth-pipeline preflight.
+//
+// Returns nil when no productive deletion can be attributed — the
+// pipeline never emits noise on cases where ExtractPrescriptiveFix
+// already handled the fix.
+func ExtractPrescriptiveAvoid(failedDir, passingDir string, failureDetail, failureResource, cloud, scenario, timestamp string) (*LearnedPitfall, error) {
+	failedResources, err := loadResourceBlocks(failedDir)
+	if err != nil {
+		return nil, fmt.Errorf("read failed dir %q: %w", failedDir, err)
+	}
+	passingResources, err := loadResourceBlocks(passingDir)
+	if err != nil {
+		return nil, fmt.Errorf("read passing dir %q: %w", passingDir, err)
+	}
+
+	address := failureResource
+	if address == "" {
+		address = firstResourceAddress(failureDetail)
+	}
+	// Resource type for the entry. Fall back to a removed-resource
+	// hint when we can't resolve from failure metadata (rare; usually
+	// the address is present for apply/validate errors).
+	resourceType := ""
+	if address != "" {
+		if rt, _, ok := splitAddress(address); ok {
+			resourceType = rt
+		}
+	}
+
+	// Case (a): attribute-level removal.
+	var avoidAttrs []string
+	if address != "" {
+		failedBlock, hasFailed := failedResources[address]
+		passingBlock, hasPassing := passingResources[address]
+		if hasFailed && hasPassing {
+			removed := blockRemovals(failedBlock.Body, passingBlock.Body)
+			seen := make(map[string]struct{})
+			for _, line := range strings.Split(removed, "\n") {
+				attr := extractAttributeName(line)
+				if attr == "" {
+					continue
+				}
+				if _, dup := seen[attr]; dup {
+					continue
+				}
+				// Strict attribution: the attribute name MUST appear in
+				// the failure detail. This filters unrelated whitespace
+				// rewrites + LLM refactors.
+				if strings.Contains(failureDetail, attr) {
+					avoidAttrs = append(avoidAttrs, attr)
+					seen[attr] = struct{}{}
+				}
+			}
+		}
+	}
+
+	// Case (b): top-level resource-level removal. Looks for resource
+	// types where the failing iter had at least one instance and the
+	// passing iter has zero, AND the resource type name appears in
+	// the failure detail.
+	var avoidResourceTypes []string
+	removed := removedResourceAddresses(failedResources, passingResources)
+	if len(removed) > 0 {
+		typeCounts := make(map[string]int)
+		for _, addr := range removed {
+			if rt, _, ok := splitAddress(addr); ok {
+				typeCounts[rt]++
+			}
+		}
+		// Only emit when ALL instances of the type were removed —
+		// avoids treating a partial cleanup as an avoid signal.
+		passingHasType := make(map[string]bool)
+		for addr := range passingResources {
+			if rt, _, ok := splitAddress(addr); ok {
+				passingHasType[rt] = true
+			}
+		}
+		for rt := range typeCounts {
+			if passingHasType[rt] {
+				continue
+			}
+			if !strings.Contains(failureDetail, rt) {
+				continue
+			}
+			avoidResourceTypes = append(avoidResourceTypes, rt)
+		}
+		sort.Strings(avoidResourceTypes)
+	}
+
+	if len(avoidAttrs) == 0 && len(avoidResourceTypes) == 0 {
+		return nil, nil
+	}
+
+	// Attribute-removal entries are keyed on the FAILING resource type
+	// so the LLM sees them when generating that resource. Resource-
+	// removal entries are keyed on the removed type itself ("do NOT
+	// use this resource type").
+	emitResource := resourceType
+	if emitResource == "" && len(avoidResourceTypes) > 0 {
+		emitResource = avoidResourceTypes[0]
+	}
+	if emitResource == "" {
+		return nil, nil
+	}
+
+	rule := buildAvoidRule(emitResource, avoidAttrs, avoidResourceTypes, failureDetail, scenario)
+	return &LearnedPitfall{
+		Resource:       emitResource,
+		Rule:           rule,
+		Source:         PrescriptiveAvoidSource,
+		DiscoveredFrom: scenario,
+	}, nil
+}
+
+// buildAvoidRule composes the human-readable "do NOT use" rule. Keeps
+// the format close to buildRule's shape so the prompt-injected pitfall
+// list reads consistently.
+func buildAvoidRule(resource string, attrs, resourceTypes []string, failureDetail, scenario string) string {
+	summary := firstSentence(failureDetail)
+	if summary == "" {
+		summary = fmt.Sprintf("%s failure cleared by deletion.", resource)
+	}
+	var avoid []string
+	for _, a := range attrs {
+		avoid = append(avoid, fmt.Sprintf("attribute `%s`", a))
+	}
+	for _, t := range resourceTypes {
+		avoid = append(avoid, fmt.Sprintf("resource type `%s`", t))
+	}
+	avoidJoined := strings.Join(avoid, " and ")
+	return fmt.Sprintf("%s Do NOT use %s on `%s` — observed in scenario %q to cause the failure above.",
+		summary, avoidJoined, resource, scenario)
 }
 
 // referencesIn returns the subset of `candidates` whose address
