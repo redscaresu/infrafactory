@@ -464,6 +464,7 @@ ui-stack-down:
 
 build: ui-build
 	$(GO) build -o bin/infrafactory ./cmd/infrafactory
+	$(GO) build -o bin/n10extract ./cmd/n10extract
 
 run: build
 	./bin/infrafactory ui
