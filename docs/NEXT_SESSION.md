@@ -15,12 +15,14 @@ All five slices landed:
 
 **Both major prompt collapses are done.** GCP phase2 (S54–S73) + AWS/Scaleway phase3 (S74–S75). All four arcs (S54–S62, S63–S67, S68–S72, S74–S78) converged the auto-derivation loop to a steady 37/39 baseline with conservative classifier routing.
 
-**Open mock gaps surfaced by S76+S77** — candidates for the next sibling-mock arc:
-- fakeaws KMS tag persistence (same shape as the rotation fix, ~10 min)
-- fakeaws `aws_s3_bucket_public_access_block` returns 501 NotImplemented (bigger feature)
-- The S76 `aws-vpc-network` empty-`main.tf` flake (transport, may be unrelated)
+**Next arc planned**: `docs/plans/slices-79-83-plan.md` — sibling-mock drainage + carve-out validation + N2 pruning. Five slices, ~11-17 focused hours:
+- **S79**: fakeaws KMS tag persistence (same shape as S77 rotation fix; ~half-day).
+- **S80**: fakeaws `aws_s3_bucket_public_access_block` (bigger feature; ~1 day).
+- **S81**: post-fix 39-scenario sweep + N3 GCP-escape carve-out validation (does N13 actually learn?).
+- **S82**: N2 pruning audit of `pitfalls/*.yaml` (drift sweep + ratchet test).
+- **S83**: next sibling-mock fix (data-driven from S81).
 
-**Suggested next arc**: another `docs/mock-gaps.md`-driven tranche of 2–3 sibling-mock PRs, plus a fresh `make sweep-39` to confirm the baseline still holds and surface any drift.
+Autonomous-execution loop prompt at the bottom of the plan file.
 
 **Sweep entry point**: `make sweep-39` (or `bash scripts/sweep_39.sh` directly). Output lands in `/tmp/sweep-39/`.
 
