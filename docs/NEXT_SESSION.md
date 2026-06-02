@@ -2,33 +2,49 @@
 
 Self-contained brief for a fresh Claude / engineer starting in this repo.
 
-## S74–S78 arc complete (2026-06-02)
+## S79–S83 arc complete (2026-06-02)
 
-All five slices landed:
-- ✅ **S74**: AWS phase3 rule 3 sub-bullets on DB subnet group ordering + SG cycle avoidance retired (Category A).
-- ✅ **S75**: Scaleway phase3 rule 6.b (private NIC requirement) retired (Category B).
-- ✅ **S76**: 39-scenario sweep — 37/39 (historical baseline). N3 routed both failures cleanly to mock-gaps.md.
-- ✅ **S77**: First sibling-mock fix — fakeaws PR #4 adds KMS rotation persistence. aws-full-stack converges in 3 iters.
-- ✅ **S78**: `make sweep-39` Makefile target + N3 GCP-escape carve-out (`access_token_type_unsupported` × five GCP resource types → routes to N13 instead of mock-gaps).
+All five slices landed. 38/39 deterministic sweep (+1 from S76's 37/39). Full close-out narrative in `docs/status/ARCHIVE.md` § "2026-06-02 S79–S83".
+
+- ✅ **S79** — fakeaws#5 — KMS tag persistence.
+- ✅ **S80** — #59 — `cmd/s3router/` shim (architectural correction caught pre-execution).
+- ✅ **S81** — 38/39 sweep. N3 GCP-escape carve-out validated organically.
+- ✅ **S82** — #60 — N2 OPA-duplication ratchet + 3 dup deletions.
+- ✅ **S83** — this PR — arc close-out documentation.
 
 ## READ FIRST (next session)
 
-**Both major prompt collapses are done.** GCP phase2 (S54–S73) + AWS/Scaleway phase3 (S74–S75). All four arcs (S54–S62, S63–S67, S68–S72, S74–S78) converged the auto-derivation loop to a steady 37/39 baseline with conservative classifier routing.
+**Persistent gcp-full-stack failure.** The S81 sweep's only failure was gcp-full-stack `repair_budget_exhausted` on `google_service_networking_connection` ACCESS_TOKEN_TYPE_UNSUPPORTED.
 
-**Next arc planned**: `docs/plans/slices-79-83-plan.md` — sibling-mock drainage + carve-out validation + N2 pruning. Five slices, ~11-17 focused hours:
-- **S79**: fakeaws KMS tag persistence (same shape as S77 rotation fix; ~half-day).
-- **S80**: fakeaws `aws_s3_bucket_public_access_block` (bigger feature; ~1 day).
-- **S81**: post-fix 39-scenario sweep + N3 GCP-escape carve-out validation (does N13 actually learn?).
-- **S82**: N2 pruning audit of `pitfalls/*.yaml` (drift sweep + ratchet test).
-- **S83**: next sibling-mock fix (data-driven from S81).
+**Important architectural finding from S83 close-out:** `service_networking_custom_endpoint` IS already injected by `internal/cli/generate_command.go` (line 274). So the provider-block override exists. The fact that the request escapes anyway means one of:
 
-Autonomous-execution loop prompt at the bottom of the plan file.
+1. The LLM-generated HCL is defining a per-resource provider block / alias that overrides the global config.
+2. The provider's preflight `Projects.GetProject` is calling a different endpoint than the override targets (despite the comment block at lines 201-216 + `user_project_override = false` + `resource_manager_v3_custom_endpoint` already being set).
+3. fakegcp's `cloudresourcemanager.v1.Projects.GetProject` route is returning 401 itself for some reason.
 
-**Sweep entry point**: `make sweep-39` (or `bash scripts/sweep_39.sh` directly). Output lands in `/tmp/sweep-39/`.
+**Suggested first action:** read iterations/1..5 of `.infrafactory/runs/gcp-full-stack/<last>/iterations/N/generated/main.tf` (and related .tf files) and inspect whether the LLM is generating per-resource provider blocks or aliases. If yes — that's the LLM-side fix path (a pitfall rule against per-resource provider blocks). If no — the bug is in `generate_command.go`'s provider-config injection or fakegcp's preflight handler.
+
+Either way, this is a **focused debugging slice**, not a sibling-mock fix. The standing learning loop has already deposited two `source: learned` pitfalls naming the escape resources; the next sweep will exercise them.
+
+## Suggested next arc
+
+Either:
+
+- **Single-slice debug arc** for gcp-full-stack (1-2 sessions). Endpoint: 39/39 deterministic.
+- **Wait + observe** — re-run `make sweep-39` next session with the current pitfalls in place. If gcp-full-stack converges, the learning loop has self-healed; if not, debug it.
+
+**Sweep entry point**: `make sweep-39`. Output lands in `/tmp/sweep-39/`.
+
+## Open mock-gaps
+
+`docs/mock-gaps.md` is a git-untracked runtime artifact. Stale entries from prior sweeps (`aws_kms_key rotation`, `aws_subnet MapPublicIpOnLaunch`, `aws_route53_record empty result`) all now pass in the S81 sweep — they'll naturally drop when the file is regenerated. No action needed.
+
+The persistent GCP entries from S79–S83 era are addressed by the N3 carve-out routing them out of mock-gaps and into pitfalls (S78 + S81). The remaining `plugin did not respond` entries on fakegcp (`google_kms_crypto_key_iam_member`, `google_container_node_pool`, `google_compute_instance`, `google_sql_database_instance`) are the next sibling-mock arc candidates — likely fakegcp panics on a specific request shape.
 
 ## Recent arcs (full close-outs in `docs/status/ARCHIVE.md`)
 
-- **S73** (2026-06-02): retired GCP phase2 rules 9 + 12. GCP phase2 collapsed 11 → 9 rules.
-- **S68–S72 arc** (2026-06-02): N3 coverage + M96/M98 close-outs + `cmd/n10extract` CLI + 2 retirements + regression ratchets. 5 PRs (#43–#47).
-- **S63–S67 arc** (2026-06-02): 39/39 deterministic sweep, N13 case-insensitive attribution, two flakes verified non-reproducible, `infrafactory mock reset` CLI. 5 PRs (#37–#41).
-- **S54–S62 arc** (2026-06-02): 9 GCP retirements + ADR-0018 retirement framework. 9 PRs (#26–#34).
+- **S79–S83 arc** (2026-06-02): sibling-mock drainage + carve-out validation. 4 PRs.
+- **S74–S78 arc** (2026-06-02): AWS/Scaleway phase3 collapse + `make sweep-39` + N3 carve-out. 5 PRs.
+- **S68–S72 arc** (2026-06-02): N3 coverage + M96/M98 close-outs + `cmd/n10extract` CLI. 5 PRs.
+- **S63–S67 arc** (2026-06-02): 39/39 deterministic sweep, `infrafactory mock reset` CLI. 5 PRs.
+- **S54–S62 arc** (2026-06-02): 9 GCP retirements + ADR-0018 retirement framework. 9 PRs.

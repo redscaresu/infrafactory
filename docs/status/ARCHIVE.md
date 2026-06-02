@@ -1847,3 +1847,37 @@ Trimmed when the S54-S73 GCP collapse was rolled up into a single "GCP phase2 pr
 - **S63 — 39/39 deterministic sweep CLOSED.** Post-collapse re-validation across all 39 training scenarios: every scenario passed (`target_reached`) under the prompt-collapsed state from S54–S62. No regression from the six N11 retirements. Three audit findings carried into S64: (a) `aws_subnet` learned_from_diff false positive — N10 captured added attrs while the actual fix was a REMOVAL of `map_public_ip_on_launch` (N13 case but the failure detail used the camelCase `MapPublicIpOnLaunch` while the HCL attribute is `map_public_ip_on_launch`, so attribution missed); (b) two mock-actionable failures (`aws_kms_key` rotation timeout, `aws_route53_record` empty-result) bypassed the N3 classifier and landed in pitfalls as `learned`; (c) N13 didn't fire organically — the gcp-cloud-run `deletion_policy` flake from S59 didn't recur this sweep. Pitfall pollution discarded per protocol; the legitimate entries will re-emerge.
 - **S54–S62 sustain + prompt-collapse arc CLOSED.** Nine PRs merged (#26–#34). GCP phase2 prompt collapsed from 17 → 11 prescriptive rules. ADR-0018 codifies the three-category N11 retirement framework. The N10 → N11 → N13 sequence (addition + removal auto-derivation) is end-to-end across GCP + AWS + Scaleway.
 - Older milestones (S1–S53) are in `docs/status/ARCHIVE.md`.
+
+## 2026-06-02 S79–S83 sibling-mock drainage + carve-out validation arc — close-out
+
+Five slices, all closed in one autonomous-loop session:
+
+- **S79** (fakeaws#5) — KMS tag persistence. `kmsKey.Tags map[string]string` + CreateKey tag seeding + state-aware ListResourceTags/TagResource/UntagResource + 404 paths. Two regression tests pin the lifecycle. End-to-end validated: aws-full-stack converges `target_reached iter 3 → 4` across pre/post-S79 runs (stable).
+- **S80** (#59) — `cmd/s3router/` shim. Splits S3 traffic between SeaweedFS (data plane) and fakeaws (`?publicAccessBlock` subresource). SeaweedFS uniquely 501s on that one subresource; fakeaws already implements it under `/s3/` prefix but is dead code in the default config. Shim is ~250 lines + 12 tests; routes `?publicAccessBlock` to fakeaws, fans `PUT/DELETE /<bucket>` to both, everything else to SeaweedFS. `make mocks-up` wires it on :9091; `infrafactory.yaml` `s3.url` defaults there. ADR-0015 amended.
+
+  Architectural correction caught pre-execution: the initial plan framed S80 as a fakeaws-handler add. That was wrong — fakeaws's handler exists; the issue is routing. User-flagged. Plan was amended in #58 before any code was written, saving the implementation rabbit hole.
+- **S81** — Post-fix 39-scenario sweep. **38/39 target_reached** (+1 from S76's 37/39 baseline). Only failure: `gcp-full-stack` `repair_budget_exhausted` on `google_service_networking_connection` ACCESS_TOKEN_TYPE_UNSUPPORTED. aws-full-stack converges iter 4 / 1051s (post-S77 was iter 3 / 1260s — slightly slower but cheaper per-iter; faster wallclock). aws-vpc-network passes iter 1 / 101s (was empty-main.tf flake in S76). Sweep added zero new mock-gaps to `docs/mock-gaps.md`.
+
+  **N3 GCP-escape carve-out validated** (S78 ratchet, this sweep's first organic exercise). `pitfalls/gcp.yaml` got two new `source: learned` entries on the carve-out resource set: `google_service_account` + `google_service_networking_connection`. Both rule strings describe the escape ("missing `*_custom_endpoint`, remove or override"). The carve-out routes correctly — these would have landed in mock-gaps.md pre-S78 instead. N13 (`learned_from_diff_avoid`) didn't fire because gcp-full-stack didn't converge through deletion; the descriptive `learned` signal is the right shape for a stuck-budget run. All sweep pollution discarded per protocol.
+- **S82** (#60) — N2 OPA-duplication audit + ratchet. Found three pitfall entries whose rule string is verbatim the matching OPA policy's `sprintf` deny message: `aws_db_instance.storage_encrypted`, `aws_secretsmanager_secret` (AWS-managed KMS), `google_storage_bucket.default_kms_key_name`. Deleted. `TestPitfallsNoOPADuplication` extracts every `msg := sprintf(...)` literal from `policies/<cloud>/*.rego`, splits on `%s`/`%v`/`%d`/`%t`/`%f`, treats any chunk ≥ 30 chars as a duplication marker. Verified retroactively (stash + re-run): ratchet fires with exact three citations. Pitfalls now ratcheted on three orthogonal invariants (no human seeding, no mock-actionable seeds, no OPA-duplication). ADR-0012 amended.
+- **S83** — Arc close-out (this entry). No new sibling-mock fix landed — S81 added zero new mock-gaps; the one persistent failure (gcp-full-stack on `google_service_networking_connection` escape) is a provider-config debug, not a sibling-mock issue (`service_networking_custom_endpoint` IS already injected by `internal/cli/generate_command.go`; the LLM-generated HCL must be overriding the provider block somehow). Filed as next-session's first investigation target rather than forcing a sibling-mock fix where none was needed.
+
+### Net deltas
+
+- 38/39 deterministic sweep, +1 from S76 (37/39). aws-full-stack + aws-vpc-network now stable.
+- 4 PRs merged across two repos: fakeaws#5 (S79), infrafactory#59 (S80), infrafactory#60 (S82), plus #58 (the plan PR with architectural correction).
+- `cmd/s3router/` added — first infrastructure component that fans HTTP traffic across two backends. Single-subresource scope today (`publicAccessBlock`); extensible via `fakeawsSubresources` allowlist.
+- `TestPitfallsNoOPADuplication` ratchet — third pitfall-side invariant.
+- N3 GCP-escape carve-out (S78) validated organically for the first time.
+
+### Standing pitfalls trimmed
+
+- `pitfalls/aws.yaml`: removed `aws_db_instance.storage_encrypted` + `aws_secretsmanager_secret` (verbatim-OPA dups). Kept `aws_s3_bucket` invalid-name raw error.
+- `pitfalls/gcp.yaml`: removed `google_storage_bucket.default_kms_key_name`. Kept 4 entries (compute-instance VPC pattern, container-cluster VPC pattern, redis deletion_protection — N11 retirement carrier).
+- `pitfalls/scaleway.yaml`: no changes; audit found no OPA duplications.
+
+### Open follow-ups for next session
+
+1. **gcp-full-stack** convergence — debug why `service_networking_custom_endpoint` override isn't redirecting the `Projects.GetProject` preflight. Single-scenario investigation; check the LLM's generated HCL across iterations 1–5 for per-resource provider blocks or aliases that override the global provider config.
+2. **mock-gaps.md trim** — three entries are now stale post-S77 fix (`aws_kms_key rotation`), post-S79 implicit fix (`aws_route53_record empty result` no longer reproduces), and post-S68 fix (`aws_subnet MapPublicIpOnLaunch`). Trim on the next sweep when the file is regenerated.
+3. **Second carve-out exercise** — re-sweep with the S81 pitfalls now persisted to see whether gcp-full-stack converges via the LLM acting on the new escape-rule pitfall. If yes, N13 may fire and confirm the deletion-as-fix path.
