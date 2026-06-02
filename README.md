@@ -63,9 +63,11 @@ make down
 
 You should see `Status: success` and `run/terminal_reason: pass (target_reached)`
 after step 3. The LLM generated a Scaleway Block Storage volume in HCL,
-the static validator + mockway apply + topology test all passed, and
-mockway is left in the post-apply state for inspection at
-`http://127.0.0.1:8080/mock/state`.
+the static validator + mockway apply + topology test + destroy/orphan-check
+all passed. The default `run` tears the resources down at the end of the
+test cycle (the scenario's `destruction: no_orphans` acceptance criterion),
+so `http://127.0.0.1:8080/mock/state` reports empty collections. To inspect
+the post-apply state, add `--no-destroy` to the run command.
 
 Use `make status` at any time to see which of the five ports
 (`8080`, `8081`, `8082`, `9090`, `4173`) are listening.
