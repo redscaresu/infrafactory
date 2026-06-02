@@ -4,6 +4,7 @@ Last updated: 2026-06-02
 
 ## Current phase
 
+- **Next arc planned**: `docs/plans/slices-84-88-plan.md` — gcp-full-stack provider-config debug (S84-S85, timeboxed) + fakegcp `plugin did not respond` triage (S86-S87) + sweep close-out (S88). ~8-14 hr. Target: 39/39 deterministic.
 - **S79–S83 arc complete (2026-06-02).** Four PRs landed across two repos (fakeaws#5, infrafactory #58/#59/#60), one documentation slice (S83, this commit). Net deltas:
   - **38/39 deterministic sweep** (+1 from S76's 37/39). aws-full-stack + aws-vpc-network now stable. Only persistent failure: gcp-full-stack `repair_budget_exhausted` on `google_service_networking_connection` ACCESS_TOKEN_TYPE_UNSUPPORTED — provider-config debug for next session.
   - **S79** — fakeaws KMS tag persistence (`kmsKey.Tags` field + state-aware Tag/Untag/List). Same shape as S77 rotation fix. 4 tests pin lifecycle.

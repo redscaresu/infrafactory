@@ -28,10 +28,15 @@ Either way, this is a **focused debugging slice**, not a sibling-mock fix. The s
 
 ## Suggested next arc
 
-Either:
+**Planned**: `docs/plans/slices-84-88-plan.md` — five slices, ~8-14 focused hours:
 
-- **Single-slice debug arc** for gcp-full-stack (1-2 sessions). Endpoint: 39/39 deterministic.
-- **Wait + observe** — re-run `make sweep-39` next session with the current pitfalls in place. If gcp-full-stack converges, the learning loop has self-healed; if not, debug it.
+- **S84**: gcp-full-stack provider-config investigation (2-hr timebox).
+- **S85**: Land the gcp-full-stack fix (scope from S84 — LLM-side pitfall, infrafactory-side injection fix, or fakegcp-side handler fix).
+- **S86**: Triage the 4-5 fakegcp `plugin did not respond` mock-gaps entries.
+- **S87**: Fix the highest-impact fakegcp panic (one PR; rule-of-three for the rest).
+- **S88**: Post-fix 39-scenario sweep + arc close-out. Target: 39/39 deterministic.
+
+Autonomous-execution loop prompt at the bottom of the plan file.
 
 **Sweep entry point**: `make sweep-39`. Output lands in `/tmp/sweep-39/`.
 
