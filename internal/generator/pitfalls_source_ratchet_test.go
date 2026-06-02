@@ -70,7 +70,11 @@ func TestPitfallsNoHumanSeeding(t *testing.T) {
 			}
 			sort.Strings(keys)
 			for _, src := range keys {
-				if src == "learned" {
+				if src == "learned" || src == PrescriptiveSource {
+					// `learned_from_diff` is N10's auto-derived source —
+					// strictly a richer shape of run-derived learning,
+					// not a human-authored seed. Whitelisted alongside
+					// the legacy `learned` tag.
 					continue
 				}
 				t.Errorf("pitfalls/%s.yaml has %d entries with source=%q — M91 forbids human-authored pitfalls. Delete them and let the M86+M90 auto-learning loop rebuild any genuinely-needed entries from real runs.", cloud, bySource[src], src)
@@ -117,6 +121,46 @@ func TestPitfallsNoMockActionableSeeds(t *testing.T) {
 					sig := FirstMockSignal(p.Rule)
 					t.Errorf("pitfalls/%s.yaml: entry for %q has rule matching mock-actionable signal %q — T-12 forbids this. Route the failure to docs/mock-gaps.md instead; the matching mock repo (fakeaws/fakegcp/mockway) should fix the gap at source. Rule was: %.200s",
 						cloud, p.Resource, sig, p.Rule)
+				}
+			}
+		})
+	}
+}
+
+// TestPitfallsLearnedFromDiffSnippetCap is the S55-T3 ratchet. N10's
+// trim cap is `snippetMaxBytes = 600` (extractor side) but the rule
+// also includes the leading "Fix observed in scenario ..." summary
+// (typically ~80-150 bytes). Total rule length is bounded by
+// `snippetMaxBytes + 400` per the existing
+// TestExtractPrescriptiveFix_SnippetCap test. Enforcing the bound at
+// the file level catches any future trim regression that lets an
+// uncapped snippet leak through into the on-disk artifact.
+func TestPitfallsLearnedFromDiffSnippetCap(t *testing.T) {
+	const maxRuleBytes = snippetMaxBytes + 400
+	root := repoRoot(t)
+	for _, cloud := range []string{"aws", "gcp", "scaleway"} {
+		t.Run(cloud, func(t *testing.T) {
+			path := filepath.Join(root, "pitfalls", cloud+".yaml")
+			payload, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read %s: %v", path, err)
+			}
+			var file struct {
+				Pitfalls []struct {
+					Resource string `yaml:"resource"`
+					Rule     string `yaml:"rule"`
+					Source   string `yaml:"source"`
+				} `yaml:"pitfalls"`
+			}
+			if err := yaml.Unmarshal(payload, &file); err != nil {
+				t.Fatalf("parse %s: %v", path, err)
+			}
+			for _, p := range file.Pitfalls {
+				if p.Source != PrescriptiveSource {
+					continue
+				}
+				if len(p.Rule) > maxRuleBytes {
+					t.Errorf("pitfalls/%s.yaml: %q rule is %d bytes (> %d). N10 trim cap leaked.", cloud, p.Resource, len(p.Rule), maxRuleBytes)
 				}
 			}
 		})

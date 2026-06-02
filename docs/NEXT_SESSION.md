@@ -2,7 +2,25 @@
 
 Self-contained brief for a fresh Claude / engineer starting in this repo.
 
-## 2026-06-02 S54 sweep close-out — READ FIRST
+## 2026-06-02 S55 N10 audit close-out — READ FIRST
+
+S55 audited the first N10 production entries by re-running 6 scenarios known to take ≥2 iters. Two wiring/quality fixes + one CI ratchet landed:
+
+- **`iterationHistory` only contained failed iterations.** N10's `for i := 1; i < len(iterationHistory); i++` loop therefore skipped every 2-iter "1 fail → 1 pass" scenario (len=1). Only multi-failed-iter runs like gcp-full-stack (3 iters, 2 failed) ever fired. Fix in `internal/cli/run_command.go`: append the passing iter to iterationHistory too (with empty failures) before breaking. Validated: gcp-storage now emits `prescriptive_pitfall_learned` on iter 1→2.
+- **`trimSnippet` cut at the last newline, leaving unbalanced `depends_on = [`.** The audit caught a `google_sql_database_instance` entry whose snippet was sliced mid-list. Fix: prefer cutting after a column-0 `}` boundary (top-level resource close). Falls back to the prior behaviour if no boundary fits. New `TestExtractPrescriptiveFix_SnippetTrimAtBlockBoundary` pins this.
+- **S55-T3 ratchet `TestPitfallsLearnedFromDiffSnippetCap`.** Walks `pitfalls/*.yaml`, asserts every `source: learned_from_diff` rule is under `snippetMaxBytes + 400` bytes. Catches future trim regressions on the on-disk artifact. Also whitelisted `learned_from_diff` alongside `learned` in the M91 no-human-seeding ratchet.
+
+**Production audit result** (3 entries from gcp-full-stack / gcp-cloud-sql / web-app-paris re-runs, then discarded as sweep pollution per protocol — N10 will re-emit them on next sweep):
+
+| Entry | Type attribution | Snippet captures fix? | Trim cap |
+|---|---|---|---|
+| `google_storage_bucket` (gcp-full-stack) | direct address | bucket encryption block + KMS crypto_key sibling | ~470 bytes |
+| `google_sql_database_instance` (gcp-cloud-sql) | type-hint fallback | settings block + encryption_key_name + private_network | hit cap, now boundary-trim |
+| `scaleway_domain_record` (web-app-paris) | direct address | record + zone sibling + depends_on | ~340 bytes |
+
+All three were correct prescriptive fixes. Indentation is slightly inconsistent in sibling resource blocks (4-space inside the inner resource); the LLM downstream parses it fine. Not blocking.
+
+## 2026-06-02 S54 sweep close-out
 
 S54 ran the first sustain-arc 39-scenario sweep. Result: **39/39 deterministic** (38 first-try + aws-full-stack retried clean after SeaweedFS bucket cleared). Plus one architectural fix:
 

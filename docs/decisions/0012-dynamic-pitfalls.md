@@ -68,3 +68,44 @@ those translations a build artifact: the system re-derives them
 from real runs. Ticket N11 in `docs/NEXT_SESSION.md` covers the
 follow-up retirement of these prompt rules once their N10 counterparts
 have proven stable.
+
+## Amendment (2026-06-02, S55 audit fixes)
+
+The first S55 production audit surfaced three issues with the N10
+wiring that this amendment captures:
+
+1. **iterationHistory only contained failed iterations.** The
+   `run_command.go` extractor loop iterates iter pairs by index but
+   the success branch broke without recording the passing iter, so
+   `len(iterationHistory)` never exceeded the failure count. A
+   2-iter "1 fail → 1 pass" scenario had `len == 1` and the loop's
+   `len > 1` guard skipped extraction entirely — only multi-failed
+   runs ever produced entries. Fix: also append the passing iter
+   (with empty failures) before breaking. The N10 design assumed
+   iterationHistory tracked ALL iterations; that assumption is now
+   true.
+
+2. **`trimSnippet` cut at the last newline, not a block boundary.**
+   The 600-byte snippet cap is intended to keep the rule small
+   enough to inject into prompts, but a mid-line slice produced
+   unbalanced HCL (`depends_on = [` left open). Refinement: prefer
+   cutting after a column-0 `}` (top-level resource close); fall
+   back to line-trim only if no block boundary fits within the cap.
+   The truncation marker `# ... (truncated)` is preserved either
+   way.
+
+3. **M91 no-human-seeding ratchet rejected `learned_from_diff`.**
+   M91's existing whitelist of `source: learned` excluded N10's
+   `PrescriptiveSource = "learned_from_diff"` value, which would
+   have CI-failed every legitimate N10 entry as if it were a human
+   seed. Whitelist extended to include `PrescriptiveSource`.
+
+A new ratchet `TestPitfallsLearnedFromDiffSnippetCap` enforces the
+600-byte cap at the on-disk artifact level (rule length bounded by
+`snippetMaxBytes + 400`), catching future trim-logic regressions.
+
+These are wiring fixes, not architectural changes — the core
+mechanism described above remains correct. The amendment exists so
+a fresh reader can connect the on-disk behaviour (now-correct N10
+firing on every passing post-failure iter pair) to the original
+design intent.

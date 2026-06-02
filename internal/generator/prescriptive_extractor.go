@@ -348,12 +348,23 @@ func indent(body string) string {
 	return strings.Join(lines, "\n")
 }
 
-// trimSnippet truncates the snippet at the last full line before the
-// cap and appends an explicit truncation marker. Avoids cutting
-// mid-line which would produce a malformed example.
+// trimSnippet truncates the snippet at the last top-level block
+// boundary before the cap and appends an explicit truncation marker.
+// Avoids leaving an unbalanced `depends_on = [` or partial nested
+// block, which would render the example unparseable as HCL.
+//
+// The strategy: prefer cutting after a column-0 `}` (closes a
+// top-level `resource` block). Fall back to the last full line if no
+// such boundary exists within the cap.
 func trimSnippet(s string, max int) string {
 	if len(s) <= max {
 		return s
+	}
+	// Prefer cut after a column-0 `}` — that's a top-level resource
+	// block close. The literal we look for is "\n}\n" which leaves the
+	// snippet ending with the closing brace on its own line.
+	if idx := strings.LastIndex(s[:max], "\n}\n"); idx > 0 {
+		return s[:idx+3] + "# ... (truncated)\n"
 	}
 	cut := strings.LastIndex(s[:max], "\n")
 	if cut <= 0 {

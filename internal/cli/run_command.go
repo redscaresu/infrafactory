@@ -252,6 +252,16 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 			previousFailures = nil
 			previousIterationFailures = previousIterationFailures[:0]
 			terminalReason = "target_reached"
+			// Record the passing iteration in iterationHistory so the
+			// N10 diff-extractor sees the failed→passing pair. Without
+			// this, len(iterationHistory) stays at the count of failed
+			// iters and the simple "1 fail → 1 pass" case skips
+			// ExtractPrescriptiveFix entirely (the loop's `len > 1`
+			// guard never fires).
+			iterationHistory = append(iterationHistory, feedback.IterationResult{
+				Iteration: iteration,
+				Failures:  nil,
+			})
 			runtime.Logger.Log(LogEntry{
 				Level:     logLevelInfo,
 				Command:   "run",
