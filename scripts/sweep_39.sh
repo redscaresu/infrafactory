@@ -74,5 +74,40 @@ total=$(awk -F$'\t' 'NR>1' "$SUMMARY" | wc -l | tr -d ' ')
 echo
 echo "PASS=$pass / TOTAL=$total"
 
+# S87 panic-detection gate. Mocks logs are not perfectly stable in
+# layout across `make mocks-up` vs `make mocks-up-containers`, so
+# the probe checks both. A panic line in any mock log fails the
+# sweep exit code so CI surfaces the regression — the alternative
+# was silent re-occurrence of the historical `plugin did not
+# respond` class S86 found stale on 2026-06-03.
+#
+# Detects: `panic:`, `runtime error:`, `recovered from panic`,
+# `nil pointer dereference`. Lower-cased grep so case variants
+# don't slip through.
+echo
+echo "=== panic gate ==="
+PANIC_LOG="$SWEEP_DIR/panics.log"
+: > "$PANIC_LOG"
+for log in /private/tmp/infrafactory-mocks/fakegcp.log \
+           /private/tmp/infrafactory-mocks/fakeaws.log \
+           /private/tmp/infrafactory-mocks/mockway.log \
+           /private/tmp/infrafactory-mocks/s3router.log \
+           /private/tmp/fakegcp.log /private/tmp/fakeaws.log /private/tmp/mockway.log; do
+  [ -f "$log" ] || continue
+  if grep -iE 'panic:|runtime error:|recovered from panic|nil pointer dereference' "$log" >> "$PANIC_LOG" 2>/dev/null; then
+    echo "PANIC in $log:"
+    grep -iE 'panic:|runtime error:|recovered from panic|nil pointer dereference' "$log" | head -5 | sed 's/^/  /'
+  fi
+done
+
+panic_lines=$(wc -l < "$PANIC_LOG" | tr -d ' ')
+echo "PANIC_LINES=$panic_lines (summary at $PANIC_LOG)"
+
 # Per feedback_sweep_protocol.md: discard pitfall additions.
 git checkout pitfalls/ 2>/dev/null || true
+
+# Exit non-zero if any panic surfaced — that's a real regression.
+if [ "$panic_lines" -gt 0 ]; then
+  echo "FAIL: panic-gate detected $panic_lines line(s); see $PANIC_LOG"
+  exit 2
+fi
