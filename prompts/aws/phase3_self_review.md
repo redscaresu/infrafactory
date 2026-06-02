@@ -41,7 +41,6 @@ Review the generated HCL against:
    - IAM role + instance profile chain is correct (profile bridges role to instance).
    - DB subnet group exists before any RDS instance in a custom VPC.
    - Security group rules use `aws_security_group_rule` resources (NOT inline `ingress` / `egress` blocks) when the same SG references itself, to avoid the cycle that inline blocks create.
-   - S3 bucket names include an account-synthetic or run-scoped suffix (S3's name space is global).
 4. Provider version pin matches `hashicorp/aws ~> 5.70`.
 
 ## Output Format

@@ -59,7 +59,6 @@ Verify compliance with these known pitfalls:
    - Region/zone restrictions respected?
    - Private networking where required? Servers MUST have separate `scaleway_instance_private_nic` resources — the validation policy checks for these specifically. Do NOT remove them.
    - No public endpoints on databases if `no_public_database: true`?
-   - Encryption at rest if required?
 8. **Acceptance criteria**: Will the generated infrastructure pass each criterion?
    - Connectivity checks: are security groups / private networks configured correctly?
    - HTTP probes: are load balancer frontends/backends set up?

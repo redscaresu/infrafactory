@@ -13,13 +13,23 @@ Self-contained brief for a fresh Claude / engineer starting in this repo.
 - S66: gcp-full-stack `google_apikeys_key` flake no longer reproducible (5/5 clean runs, zero apikeys mentions).
 - S67: `infrafactory mock reset` CLI command added. `cloudMockStateRouter.ResetAll` fans out across mockway + fakegcp + fakeaws + s3 (SeaweedFS) cascade. Closes the S54 SeaweedFS state-leak gap — sweep harnesses no longer need a bare-curl carve-out.
 
-## S68–S72 progress
+## S68–S72 arc — CLOSED
 
 - ✅ **S68**: N3 classifier coverage gap — `IsMockActionable` now recognizes `waiting for state to become` + `empty result` shapes.
 - ✅ **S69**: M96 closed as superseded. ADR-0012 amended with the four-layer extractor model.
-- ✅ **S70**: Permanent `cmd/n10extract` CLI — drives N10/N13 against a recorded run dir, emits a candidate pitfall YAML. `--run-dir` shorthand. `make build` includes it.
-- ✅ **S71**: M98 already-fixed audit. All four affected policies already carry `after_unknown` branches (since 2026-05-23 / S60). Added `TestOPAPoliciesM98KnownAfterApplyBranches` ratchet. M98 closed as done.
-- ⬜ S72: remaining.
+- ✅ **S70**: Permanent `cmd/n10extract` CLI — drives N10/N13 against a recorded run dir, emits a candidate pitfall YAML.
+- ✅ **S71**: M98 already-fixed audit. All four affected policies already carry `after_unknown` branches. Added regression ratchet. M98 closed.
+- ✅ **S72**: Two Category-A retirements (AWS S3 suffix + Scaleway encryption_at_rest). 12 total N11 retirements since the arc began.
+
+## Suggested next-arc directions
+
+None of these are blocking; pick what you need:
+
+1. **Another full 39-scenario sweep** post-S68–S72 changes to confirm the broader picture is still 39/39 deterministic with N3 classifier + new ratchets in place. ~1 hr.
+2. **More N11 retirements** in AWS phase3 / Scaleway phase3 — each remaining sub-bullet is a candidate per ADR-0018. ~30 min per rule.
+3. **N10 organic emission audit** — sweep + audit any `learned_from_diff` or `learned_from_diff_avoid` entries that surface. The earlier S55-style audit pattern.
+4. **Mock-server gap closure** — `docs/mock-gaps.md` is the standing backlog for fakegcp/fakeaws/mockway. Pick the highest-impact entry.
+5. **Permanent `make clean-bg`** or similar session-hygiene target — the M53 era flagged session cleanup as friction; a tiny Makefile target would help.
 
 ## Next arc: S68–S72
 
