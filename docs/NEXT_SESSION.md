@@ -4,6 +4,8 @@ Self-contained brief for a fresh Claude / engineer starting in this repo.
 
 ## READ FIRST — 2026-06-02
 
+**S73 standalone retirement — GCP phase2 rules 9 + 12 (`google_project_service` family + `google_project_iam_member` family) retired Category A.** Audit prompted by "why aren't these in pitfalls?" — the real blocker was that the prompt rule was too effective (prevented the LLM from ever introducing the resource, so N13 had no failure to attribute). Executed N11 7-step protocol; 6 scenarios re-ran cleanly across two validation rounds with zero residual references. GCP phase2 collapsed 11 → 9 rules.
+
 **S63–S67 arc CLOSED.** Five PRs merged (#37–#41). The post-collapse arc validated 39/39 deterministic + tightened N13 attribution + verified two flakes are non-reproducible + added `infrafactory mock reset` CLI for sweep harness ergonomics.
 
 **Closed this session**:
