@@ -252,6 +252,12 @@ make mocks-up-containers   # build + start fakeaws + fakegcp + mockway
 make mocks-down-containers
 make mocks-pull            # refresh published GHCR images
 
+# canonical 39-scenario sustain-ratchet sweep (S78). Drives
+# `infrafactory run` across every scenario under scenarios/training/
+# with `infrafactory mock reset` between scenarios. Output lands in
+# /tmp/sweep-39/summary.tsv. Discards pitfall additions (sweep noise).
+make sweep-39
+
 # session-close hygiene — sweeps lingering sweep scripts, log tails,
 # and stray mock test binaries (compiled to /tmp/ by `go test`) on
 # non-canonical ports. Safe to run any time; idempotent.

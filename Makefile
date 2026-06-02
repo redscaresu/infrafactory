@@ -466,6 +466,18 @@ build: ui-build
 	$(GO) build -o bin/infrafactory ./cmd/infrafactory
 	$(GO) build -o bin/n10extract ./cmd/n10extract
 
+# sweep-39 — canonical 39-scenario sustain-ratchet sweep.
+# Drives `infrafactory run` across every training scenario, using
+# `infrafactory mock reset` between scenarios (the S67-landed CLI
+# command that cascades correctly to SeaweedFS — bare-curl resets
+# don't).
+#
+# Output: /tmp/sweep-39/summary.tsv + per-scenario logs.
+# Replaces the inline /tmp/sweep-*.sh scripts every prior arc
+# reinvented. See scripts/sweep_39.sh for the shell.
+sweep-39: build
+	@bash scripts/sweep_39.sh
+
 run: build
 	./bin/infrafactory ui
 

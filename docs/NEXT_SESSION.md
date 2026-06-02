@@ -2,26 +2,27 @@
 
 Self-contained brief for a fresh Claude / engineer starting in this repo.
 
-## S74–S78 progress
+## S74–S78 arc complete (2026-06-02)
 
+All five slices landed:
 - ✅ **S74**: AWS phase3 rule 3 sub-bullets on DB subnet group ordering + SG cycle avoidance retired (Category A).
-- ✅ **S75**: Scaleway phase3 rule 6.b (private NIC requirement) retired (Category B — covered by existing `scaleway_instance_server` pitfall).
-- ✅ **S76**: 39-scenario sweep — 37/39 (historical baseline). N3 classifier correctly routed both failures to mock-gaps.md.
-- ✅ **S77**: First sibling-mock fix landed — fakeaws PR #4 adds KMS rotation persistence. aws-full-stack now converges in 3 iters (was budget-exhausted). Two NEW mock gaps surfaced behind the rotation gap (KMS tag persistence, S3 PutPublicAccessBlock 501) — captured for next tranche.
-- ⬜ S78: remaining.
+- ✅ **S75**: Scaleway phase3 rule 6.b (private NIC requirement) retired (Category B).
+- ✅ **S76**: 39-scenario sweep — 37/39 (historical baseline). N3 routed both failures cleanly to mock-gaps.md.
+- ✅ **S77**: First sibling-mock fix — fakeaws PR #4 adds KMS rotation persistence. aws-full-stack converges in 3 iters.
+- ✅ **S78**: `make sweep-39` Makefile target + N3 GCP-escape carve-out (`access_token_type_unsupported` × five GCP resource types → routes to N13 instead of mock-gaps).
 
-## READ FIRST
+## READ FIRST (next session)
 
-**GCP phase2 prompt-collapse complete.** The 9-retirement target arc described in `docs/plans/slices-54-62-plan.md` § "Big picture" is done — GCP phase2 is now system-contract + scenario-intent only (rules 1–8 + 16 + 17). All 9 originally-prescriptive rules retired between S56 (firewall) and S73 (project_service + project_iam_member). 39/39 deterministic sweep confirmed at S63 and S72 baselines.
+**Both major prompt collapses are done.** GCP phase2 (S54–S73) + AWS/Scaleway phase3 (S74–S75). All four arcs (S54–S62, S63–S67, S68–S72, S74–S78) converged the auto-derivation loop to a steady 37/39 baseline with conservative classifier routing.
 
-**Start here:** `docs/plans/slices-74-78-plan.md` — five slices, ~8–12 focused hours:
-- **S74**: AWS phase2/3 audit + Category-A retirements (mirror of the GCP collapse).
-- **S75**: Scaleway phase2/3 audit + Category-A retirements.
-- **S76**: Post-collapse 39-scenario deterministic sweep.
-- **S77**: `docs/mock-gaps.md` triage — 2-3 sibling-mock PRs to drain the queue.
-- **S78**: `make sweep-39` Makefile target + N3 classifier escape carve-out.
+**Open mock gaps surfaced by S76+S77** — candidates for the next sibling-mock arc:
+- fakeaws KMS tag persistence (same shape as the rotation fix, ~10 min)
+- fakeaws `aws_s3_bucket_public_access_block` returns 501 NotImplemented (bigger feature)
+- The S76 `aws-vpc-network` empty-`main.tf` flake (transport, may be unrelated)
 
-Autonomous-execution loop prompt at the bottom of the plan file.
+**Suggested next arc**: another `docs/mock-gaps.md`-driven tranche of 2–3 sibling-mock PRs, plus a fresh `make sweep-39` to confirm the baseline still holds and surface any drift.
+
+**Sweep entry point**: `make sweep-39` (or `bash scripts/sweep_39.sh` directly). Output lands in `/tmp/sweep-39/`.
 
 ## Recent arcs (full close-outs in `docs/status/ARCHIVE.md`)
 

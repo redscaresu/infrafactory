@@ -126,3 +126,51 @@ extension; it was pruned in the same PR.
 Same conservative-substring-match discipline as the original
 classifier: false negatives leave the legacy learning path active;
 false positives drop a learning that arguably belongs in pitfalls.
+
+## Amendment (2026-06-02, S78 — GCP escape resource carve-out)
+
+S73 retired GCP phase2 rules 9 + 12 (the prescriptive "don't use
+google_project_service / google_project_iam_member" prompt rules)
+on the theory that the N10→N13 auto-derivation pipeline would
+re-learn the avoid patterns from sweep failures. S76 sustained at
+37/39 — but during that sweep, every `ACCESS_TOKEN_TYPE_UNSUPPORTED`
+failure on those resource types correctly classified as
+mock-actionable per the original 2026-06-02 amendment, routing them
+to `docs/mock-gaps.md` rather than `pitfalls/gcp.yaml`. This is the
+right call for the typical case (the v5 provider escapes to real
+cloud because fakegcp lacks the route) but wrong for this specific
+class: the LLM-side fix (drop the resource) IS attainable, and the
+mock-side fix is structurally impossible (these resources can't be
+modeled in fakegcp). Without a carve-out, N13 never sees these
+failures on stuck termination, and the system has no mechanism to
+re-learn the rule a future scenario will require.
+
+S78 added a narrow exclusion: when the matched signal is
+`access_token_type_unsupported` AND the failure detail contains a
+reference to one of `google_project_service`,
+`google_service_networking_connection`, `google_project_iam_member`,
+`google_project_iam_binding`, or `google_project_iam_policy`, the
+classifier returns false. The bare-signal case (no escape-resource
+reference) and the signal-on-other-GCP-resource case both stay
+mock-actionable.
+
+Two regression tests pin both shapes (`TestIsMockActionable_GCPEscapeCarveOut`).
+
+This is the first carve-out from the conservative "first signal
+wins" pattern. The general design holds: false negatives leave the
+legacy path active. The carve-out is narrow (one signal × five
+resource types) and motivated by a specific architectural mismatch
+(LLM-actionable resource × unmockable backend); it should not be
+generalized without a similar concrete case.
+
+## Amendment (2026-06-02, S78 — Makefile target)
+
+S77 surfaced that every prior sustain-ratchet sweep reinvented the
+same shell harness in `/tmp/sweep-*.sh`. S78 landed
+`scripts/sweep_39.sh` + `make sweep-39` as the canonical entry
+point. The harness uses `./bin/infrafactory mock reset` (the S67
+CLI) between scenarios — a bare `curl -X POST /mock/reset` to
+fakeaws does NOT cascade to SeaweedFS, which caused the S54 state-
+leak post-mortem. Discards `pitfalls/*.yaml` additions per
+`feedback_sweep_protocol.md` (sweep noise re-emerges on the next
+run). Not a routing change; a workflow ratchet.

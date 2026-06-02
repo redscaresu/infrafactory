@@ -311,6 +311,45 @@ func IsMockActionable(detail string) bool {
 	lower := strings.ToLower(detail)
 	for _, sig := range mockActionableSignals {
 		if strings.Contains(lower, sig) {
+			// S78 carve-out: the access_token_type_unsupported signal
+			// also fires on LLM-actionable GCP resources that the v5
+			// provider escapes to real cloud (google_project_service /
+			// google_service_networking_connection /
+			// google_project_iam_member / _binding / _policy). The
+			// LLM-side fix is to drop the resource; the mock-side fix
+			// is impossible (these resources can't be modeled in
+			// fakegcp). Routing to mock-gaps.md hides the lesson; the
+			// auto-correction loop + N13 deletion-as-fix extractor
+			// should learn the avoid pattern instead.
+			//
+			// Without this carve-out, S73's retirement of prompt
+			// rules 9 + 12 leaves no mechanism for the system to
+			// re-learn the rule if a future scenario triggers the
+			// escape (the failure would route to mock-gaps and N13
+			// would never see it on stuck termination).
+			if sig == "access_token_type_unsupported" && containsLLMActionableEscapeResource(detail) {
+				return false
+			}
+			return true
+		}
+	}
+	return false
+}
+
+// llmActionableEscapeResources lists the GCP resource types whose
+// v5-provider escape produces ACCESS_TOKEN_TYPE_UNSUPPORTED but
+// whose fix is LLM-side (drop the resource), not mock-side.
+var llmActionableEscapeResources = []string{
+	"google_project_service",
+	"google_service_networking_connection",
+	"google_project_iam_member",
+	"google_project_iam_binding",
+	"google_project_iam_policy",
+}
+
+func containsLLMActionableEscapeResource(detail string) bool {
+	for _, r := range llmActionableEscapeResources {
+		if strings.Contains(detail, r) {
 			return true
 		}
 	}
