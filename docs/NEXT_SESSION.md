@@ -2,6 +2,11 @@
 
 Self-contained brief for a fresh Claude / engineer starting in this repo.
 
+## S74–S78 progress
+
+- ✅ **S74**: AWS phase3 rule 3 sub-bullets on DB subnet group ordering + SG cycle avoidance retired (Category A). Audit shows AWS phase2 is fully Category C; phase3 has 2 remaining sub-bullets (VPC — Category B, IAM profile chain — Category C).
+- ⬜ S75, S76, S77, S78: remaining.
+
 ## READ FIRST
 
 **GCP phase2 prompt-collapse complete.** The 9-retirement target arc described in `docs/plans/slices-54-62-plan.md` § "Big picture" is done — GCP phase2 is now system-contract + scenario-intent only (rules 1–8 + 16 + 17). All 9 originally-prescriptive rules retired between S56 (firewall) and S73 (project_service + project_iam_member). 39/39 deterministic sweep confirmed at S63 and S72 baselines.
