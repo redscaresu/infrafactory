@@ -69,8 +69,8 @@ test cycle (the scenario's `destruction: no_orphans` acceptance criterion),
 so `http://127.0.0.1:8080/mock/state` reports empty collections. To inspect
 the post-apply state, add `--no-destroy` to the run command.
 
-Use `make status` at any time to see which of the five ports
-(`8080`, `8081`, `8082`, `9090`, `4173`) are listening.
+Use `make status` at any time to see which of the six ports
+(`8080`, `8081`, `8082`, `9090`, `9091`, `4173`) are listening.
 
 ### Prerequisites
 
@@ -98,6 +98,7 @@ self-review`); pick whichever fits your budget/latency profile.
 | 8081 | fakegcp | GCP API mock |
 | 8082 | fakeaws | AWS API mock |
 | 9090 | SeaweedFS | S3-compatible backend (Docker; AWS-only scenarios) |
+| 9091 | s3router (S80) | HTTP shim that fans S3 traffic across SeaweedFS (data plane) and fakeaws (`?publicAccessBlock` subresource SeaweedFS doesn't model). `infrafactory.yaml` `s3.url` points here, not directly at SeaweedFS. See `cmd/s3router/`. |
 | 4173 | infrafactory UI | SvelteKit dashboard + scenario runner |
 
 ### Other scenarios
@@ -162,7 +163,7 @@ Each cloud has the same set of extension points; the scenario's `cloud:` field d
 
 Each first-party mock is wire-shape compatible with the matching real provider, enforced by an `examples/working/<svc>` smoke harness in the mock's own repo (`apply → plan -detailed-exitcode 0 → destroy`). See each mock's README for the API-compatibility contract.
 
-AWS S3 is the exception: bucket sub-resource reads (GetBucketPolicy / GetBucketTagging / etc.) are served by SeaweedFS instead of fakeaws's stripped-down S3 handler — `terraform-provider-aws`'s bucket Read flow needs the full management surface. Rationale + the SeaweedFS-vs-Adobe-S3Mock-vs-Garage-vs-LocalStack evaluation is documented in [`CONCEPT.md`](CONCEPT.md) under "Third-Party Mock Integration".
+AWS S3 is the exception: bucket sub-resource reads (GetBucketPolicy / GetBucketTagging / etc.) are served by SeaweedFS instead of fakeaws's stripped-down S3 handler — `terraform-provider-aws`'s bucket Read flow needs the full management surface. SeaweedFS doesn't model `?publicAccessBlock`, so a small reverse-proxy shim (`cmd/s3router/`, S80) fronts both backends: it routes `?publicAccessBlock` to fakeaws and fans `PUT/DELETE /<bucket>` to both so the bucket exists in both stores. Rationale + the SeaweedFS-vs-Adobe-S3Mock-vs-Garage-vs-LocalStack evaluation is documented in [`CONCEPT.md`](CONCEPT.md) under "Third-Party Mock Integration".
 
 Adding a new cloud requires: prompt templates, pitfalls file, topology derivation rules, mock server, OPA policies, and training scenarios. Dispatch is driven by `cloudMockStateRouter`, `cloudConstraintPolicies`, `filterPolicyPathsByCloud`, `ExtractProviderSchemaForCloud`, and `detectCloud`.
 
