@@ -2,9 +2,16 @@
 
 Self-contained brief for a fresh Claude / engineer starting in this repo.
 
-## 2026-06-02 loop session close-out — READ FIRST
+## 2026-06-02 S54 sweep close-out — READ FIRST
 
-> Supersedes the earlier 2026-06-02 section below. **All 9 originally-
+S54 ran the first sustain-arc 39-scenario sweep. Result: **39/39 deterministic** (38 first-try + aws-full-stack retried clean after SeaweedFS bucket cleared). Plus one architectural fix:
+
+- **N10 dedupe gap closed**: learned → learned_from_diff replacement path added to `AppendPitfall`. Without it, every N10 entry for a resource that already had a symptom-only `learned` entry was silently dropped by `isDuplicate`'s 3+-shared-word rule. The S54 sweep emitted a `prescriptive_pitfall_learned` event for `google_storage_bucket` (gcp-full-stack iter 1→2) but the entry didn't land because the existing gcp-storage symptom-only rule shared "encryption", "default_kms_key_name", "google_storage_bucket". Fix in `internal/generator/pitfalls_learn.go` (parallel to the existing verbatim→prescriptive upgrade) with two new unit tests. **This unblocks every downstream N11 retirement** — S56-T2 / S57-T1 / S58-T1 / S59-T1 all need `learned_from_diff` entries to exist before they can validate the prompt rule is retirable.
+- **SeaweedFS state leakage (sustain-ratchet gap)**: aws-full-stack failed in the sweep on `infrafactory-assets-a1edbdc9 BucketAlreadyExists` from a pre-sweep SeaweedFS bucket. The bare `curl -X POST :8082/mock/reset` the sweep harness used to call between scenarios does NOT cascade to SeaweedFS — only `cloudMockStateRouter.Reset` (inside `infrafactory run`) does, via `resetS3Backend` at `internal/cli/s3_state.go:82`. The runtime path is correct; the pre-sweep state was the issue. Mitigations for future sweeps: either (a) drop SeaweedFS buckets explicitly at sweep start, or (b) add an `infrafactory mock reset` CLI command wrapping the router's Reset. Not blocking — captured for S62 hardening.
+
+## 2026-06-02 loop session close-out
+
+> Superseded by the S54 close-out section above. **All 9 originally-
 > failing GCP scenarios now pass deterministically.** First N11
 > retirement landed.
 

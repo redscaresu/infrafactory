@@ -321,6 +321,105 @@ func TestAppendPitfall_VerbatimUpgrade(t *testing.T) {
 	}
 }
 
+// TestAppendPitfall_LearnedToPrescriptiveUpgrade pins the
+// learned → learned_from_diff replacement path. A descriptive
+// `source: learned` symptom-only rule shares enough significant words
+// with N10's prescriptive HCL-snippet rule for the same resource that
+// isDuplicate would silently drop the new entry. The fix is an
+// explicit upgrade: when a PrescriptiveSource candidate sees any
+// same-resource non-prescriptive entry, REPLACE in place.
+func TestAppendPitfall_LearnedToPrescriptiveUpgrade(t *testing.T) {
+	dir := t.TempDir()
+
+	// Seed with a learned (descriptive, not verbatim) entry — real
+	// shape from the 2026-06-02 sweep's pitfalls/gcp.yaml.
+	initial := PitfallsFile{
+		Provider: "gcp",
+		Pitfalls: []PitfallEntry{
+			{
+				Resource:       "google_storage_bucket",
+				Rule:           "google_storage_bucket.app_assets has no encryption.default_kms_key_name — customer-managed encryption not configured",
+				Source:         "learned",
+				DiscoveredFrom: "gcp-storage",
+			},
+		},
+	}
+	data, err := yaml.Marshal(&initial)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "gcp.yaml"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Append a prescriptive N10-shape rule for the same resource.
+	prescriptive := LearnedPitfall{
+		Resource:       "google_storage_bucket",
+		Rule:           "google_storage_bucket: Minimal HCL:\nresource \"google_storage_bucket\" \"app_assets\" {\n  encryption {\n    default_kms_key_name = google_kms_crypto_key.bucket_key.id\n  }\n}",
+		Source:         PrescriptiveSource,
+		DiscoveredFrom: "gcp-full-stack",
+	}
+	if err := AppendPitfall(dir, "gcp", prescriptive); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := os.ReadFile(filepath.Join(dir, "gcp.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pf PitfallsFile
+	if err := yaml.Unmarshal(result, &pf); err != nil {
+		t.Fatal(err)
+	}
+	if len(pf.Pitfalls) != 1 {
+		t.Fatalf("expected 1 pitfall after upgrade, got %d", len(pf.Pitfalls))
+	}
+	if pf.Pitfalls[0].Source != PrescriptiveSource {
+		t.Errorf("expected source=%q after upgrade, got %q", PrescriptiveSource, pf.Pitfalls[0].Source)
+	}
+	if !strings.Contains(pf.Pitfalls[0].Rule, "default_kms_key_name = google_kms_crypto_key") {
+		t.Errorf("rule lost prescriptive HCL on write: %q", pf.Pitfalls[0].Rule)
+	}
+	if pf.Pitfalls[0].DiscoveredFrom != "gcp-full-stack" {
+		t.Errorf("expected DiscoveredFrom=gcp-full-stack, got %q", pf.Pitfalls[0].DiscoveredFrom)
+	}
+}
+
+// TestAppendPitfall_LearnedFromDiffDuplicatesDedupe pins that two
+// PrescriptiveSource entries for the same resource still dedupe — the
+// upgrade path only replaces non-prescriptive predecessors. Without
+// this guard, every iter-pair would re-write the same snippet.
+func TestAppendPitfall_LearnedFromDiffDuplicatesDedupe(t *testing.T) {
+	dir := t.TempDir()
+
+	first := LearnedPitfall{
+		Resource:       "google_storage_bucket",
+		Rule:           "google_storage_bucket: Minimal HCL:\nresource \"google_storage_bucket\" \"x\" {\n  encryption {\n    default_kms_key_name = google_kms_crypto_key.k.id\n  }\n}",
+		Source:         PrescriptiveSource,
+		DiscoveredFrom: "gcp-storage",
+	}
+	if err := AppendPitfall(dir, "gcp", first); err != nil {
+		t.Fatal(err)
+	}
+	second := first
+	second.DiscoveredFrom = "gcp-full-stack"
+	if err := AppendPitfall(dir, "gcp", second); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := os.ReadFile(filepath.Join(dir, "gcp.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pf PitfallsFile
+	if err := yaml.Unmarshal(result, &pf); err != nil {
+		t.Fatal(err)
+	}
+	if len(pf.Pitfalls) != 1 {
+		t.Fatalf("expected dedupe to keep 1 entry, got %d", len(pf.Pitfalls))
+	}
+}
+
 // TestExtractLearnedPitfall_UnsupportedArgument_WrappedDiagnostic pins
 // the box-drawing-strip fix in ExtractLearnedPitfall. Real terraform
 // diagnostics wrap the bad-argument name onto a separate line framed
