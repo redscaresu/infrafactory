@@ -38,13 +38,9 @@ Self-contained brief for a fresh Claude / engineer starting in this repo.
 
 ### What to do FIRST in the next session
 
-1. **Confirm 9/9 still holds.** Run the deterministic sweep across all 39 training scenarios. Should be **39/39**. Mocks are running; `make mocks-status` to confirm. Rebuild if needed with `make build`.
-2. **Inspect `pitfalls/gcp.yaml` post-sweep.** N10 should populate fresh `learned_from_diff` entries on every passing scenario that had ≥1 failing iteration. Audit for false-positive attribution (the type-hint fallback could over-match — see PR #22 test cases for the "exactly-one-match" abstention rule).
-3. **N11 expansion.** With the first retirement validated, candidate rules to retire next (gated on N10 having produced a learned_from_diff covering each pattern):
-   - phase2 rule 13 (GKE single-node-pool strategy) — gcp-gke-cluster passes iter 1 so N10 won't fire; need to find another path to validate (maybe test step 5 with rule deleted to see if iter 1 still passes — that's the same redundant-rule signal as CMEK).
-   - phase2 rule 11 (firewall `network` not `subnetwork`) — single-attribute correction; high N10 confidence if a scenario fails this once.
-   - phase2 rule 15 (GCS force_destroy + uniform_bucket_level_access) — multi-attribute; may need full 7-step.
-4. **N13 phase 2 deletion-as-fix.** Not started this session. The `google_project_iam_member` escape was retired via prompt rule (PR #24-adjacent #23), not via N10 learning. N13 (deletion-as-fix) could let N10 learn this pattern instead — "removing google_project_iam_member from the HCL was the fix."
+**Read `docs/plans/slices-54-62-plan.md`** — it defines the next 9 slices (S54–S62) as the "sustain + prompt-collapse arc": full 39-scenario sweep, N10 audit, 6 more N11 retirements across GCP/AWS/Scaleway, N13 deletion-as-fix, ADR-0018 close-out. ~14–18 focused hours. Designed for autonomous execution; the loop prompt to start it lives at the bottom of that plan file.
+
+The arc is the natural continuation: 9/9 deterministic + first N11 retirement (CMEK) validated the architecture; the next 9 slices push the prompt-collapse to its destination ("system contract + scenario intent only" — rules 1–8 + 16 + 17 in GCP phase2, equivalents in AWS/Scaleway).
 
 ### Open follow-ups
 
