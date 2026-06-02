@@ -284,3 +284,49 @@ Build: `make build` now produces `bin/n10extract` alongside
 
 This is a workflow tool, not a runtime extension — the extractors
 themselves are unchanged.
+
+## 2026-06-02 amendment — S82 OPA-duplication ratchet
+
+The dynamic learning loop can append a `learned` pitfall any time
+a recurring failure attaches to a policy_pitfall_conflict-free
+signature. When the OPA layer ALREADY enforces the same shape via
+a rego deny rule, the result is two carriers of the same lesson —
+one in `pitfalls/<cloud>.yaml`, one in `policies/<cloud>/*.rego` —
+and the prompt space wastes tokens on a rule the policy already
+catches at validate-time.
+
+S82's pre-existing-pitfall audit caught three such entries:
+
+- `pitfalls/aws.yaml`: `aws_db_instance` (storage_encrypted)
+  duplicating `policies/aws/encryption.rego`.
+- `pitfalls/aws.yaml`: `aws_secretsmanager_secret` (AWS-managed KMS)
+  duplicating the same policy.
+- `pitfalls/gcp.yaml`: `google_storage_bucket` (default_kms_key_name)
+  duplicating `policies/gcp/encryption.rego`.
+
+All three pitfall rules were verbatim copies of the policy's
+`sprintf("...")` deny message. Deleted in this slice.
+
+`TestPitfallsNoOPADuplication` (`internal/generator/pitfalls_opa_dedup_test.go`)
+extracts every `msg := sprintf(...)` literal from
+`policies/<cloud>/*.rego`, splits the format string on `%s` / `%v` /
+`%d` / `%t` / `%f`, and treats every literal chunk ≥ 30 chars as a
+duplication marker. If any pitfall rule contains the marker as a
+substring, the test fails and cites both files.
+
+Conservative by design: short chunks (<30 chars) would false-positive
+on common English; paraphrased rules slip through. This only catches
+the verbatim-copy case — which is the shape the M90 learning loop
+most frequently produces, and the one the S82 audit found.
+
+How to resolve a failure: the default action is to delete the
+pitfall entry. The OPA policy is the canonical carrier (it fires at
+validate-time before the LLM sees feedback). If both carriers
+matter (rare — only when the policy fires at a layer the prompt
+needs reinforcement for), document the divergence and add the
+pitfall rule string to an exemption list.
+
+Together with the existing `TestPitfallsNoHumanSeeding` (M91) and
+`TestPitfallsNoMockActionableSeeds` (S55+), the pitfalls files are
+now ratcheted on three orthogonal invariants: no human-authored
+seeds, no mock-actionable seeds, no OPA-duplication.

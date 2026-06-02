@@ -1,14 +1,6 @@
 provider: aws
 pitfalls:
-    - resource: aws_secretsmanager_secret
-      rule: aws_secretsmanager_secret.db_password uses an AWS-managed KMS alias (alias/aws/secretsmanager); customer-managed key required for compliance scenarios
-      source: learned
-      discovered_from: aws-full-stack
     - resource: aws_s3_bucket
       rule: "exit status 1 | stderr: ╷\n│ Error: creating S3 Bucket (infrafactory-assets-AKIA5D31D6F863AAB893): operation error S3: CreateBucket, https response error StatusCode: 400, RequestID: 18B48331628847E8530310EC, HostID: , api error InvalidBucketName: The specified bucket is not valid.\n│ \n│   w..."
       source: learned
       discovered_from: aws-full-stack
-    - resource: aws_db_instance
-      rule: aws_db_instance.main has storage_encrypted = false; AWS RDS at-rest encryption is required
-      source: learned
-      discovered_from: aws-rds
