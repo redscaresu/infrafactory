@@ -176,7 +176,17 @@ Adding a new cloud requires: prompt templates, pitfalls file, topology derivatio
 | `infrafactory test <scenario>` | Layers 1-4 (no retry loop) |
 | `infrafactory run <scenario>` | Full pipeline with retry loop + holdouts |
 | `infrafactory mock start/stop/status/logs` | Manage the Mockway (Scaleway) mock only. Use `make mocks-up`/`-down`/`-status`/`-logs` to manage all three (mockway/fakegcp/fakeaws). |
+| `infrafactory mock reset` | Reset state across every configured mock backend (mockway + fakegcp + fakeaws + s3 cascade in one call). Use this between scenarios in sweep harnesses instead of bare `curl` to `/mock/reset` — only this path cascades to the SeaweedFS s3 backend. |
 | `infrafactory ui` | Serve the web dashboard |
+
+Auxiliary binary (`bin/n10extract`, built by `make build`) drives the
+N10/N13 prescriptive-pitfall extractors against a recorded run
+directory and emits a candidate `pitfalls/<cloud>.yaml` snippet on
+stdout — used by the N11 retirement protocol's step 2 when the
+organic learning loop hasn't fired for the target pattern. See
+`docs/decisions/0012-dynamic-pitfalls.md` and
+`docs/decisions/0018-n11-retirement-criteria.md` for the
+auto-learning architecture.
 
 Key flags for `run`: `--clean` (fresh start), `--no-destroy` (keep resources for incremental follow-up), `--repair-iterations-max N` (retry budget, default 5).
 
