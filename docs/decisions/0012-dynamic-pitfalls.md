@@ -165,3 +165,39 @@ attribute / resource" pitfall is one passing run away from the
 file. The N10→N11→N13 sequence converts hand-written prescription
 to a self-maintaining artifact for both addition and removal
 patterns.
+
+## Amendment (2026-06-02, S64 — case-insensitive attribution)
+
+The S63 first-production sweep surfaced a false-positive shape that
+N13's `strings.Contains(failureDetail, attr)` attribution couldn't
+handle: the AWS API error for the `aws_subnet`
+`map_public_ip_on_launch` update timeout echoes the JSON-side field
+name `MapPublicIpOnLaunch` (camelCase) verbatim. The HCL attribute is
+snake_case, so the strict contains-check returned false even though
+the iter-pair diff plainly showed the LLM had removed
+`map_public_ip_on_launch` to clear the failure. Result: N10's addition
+heuristic instead grabbed unrelated added attrs (`cidr_block`,
+`availability_zone`) and emitted a `learned_from_diff` pitfall that
+didn't actually encode the fix.
+
+The amendment introduces `attributeAppearsInDetail(detail, attr)`
+which tries three matches in order:
+
+1. Literal substring (existing behaviour).
+2. Case-insensitive substring on the snake_case form. Catches errors
+   that echo back the attribute with different casing but the same
+   underscores.
+3. camelCase variant via `snakeToCamel(attr)`. Tries both
+   PascalCase (`MapPublicIpOnLaunch`) and lower-camelCase
+   (`mapPublicIpOnLaunch`).
+
+The motivating regression test is
+`TestExtractPrescriptiveAvoid_CamelCaseAttributeInFailureDetail` —
+real AWS error shape, snake_case HCL, asserts N13 attributes the
+removal correctly. Existing four tests remain green; no shape
+change to the other code paths.
+
+This is a wiring fix, not a design change. The N13 extractor remains
+strict (only emits when there's an attribution path between the
+deletion and the failure) — it now just recognizes one more legitimate
+attribution path.
