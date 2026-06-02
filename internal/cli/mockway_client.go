@@ -209,3 +209,34 @@ func (r *cloudMockStateRouter) isAWSScenario() bool {
 	}
 	return strings.ToLower(strings.TrimSpace(r.runtime.loadedScenario.Cloud)) == "aws"
 }
+
+// ResetAll resets every configured mock backend independently of the
+// loaded scenario, so a sweep harness (or interactive `infrafactory
+// mock reset`) can drop accumulated state in one call. Hits mockway,
+// fakegcp, fakeaws (each when configured) and cascades to the s3
+// backend (SeaweedFS by default) via resetS3Backend.
+//
+// Motivated by the S54 SeaweedFS state-leak: bare-curl harnesses
+// hitting `/mock/reset` on fakeaws don't touch SeaweedFS, leaving
+// pre-sweep buckets that caused `BucketAlreadyExists` on aws-full-stack.
+// Routing through this method instead is the systematic fix.
+//
+// Returns the first error encountered, but attempts every backend
+// before returning so partial resets still happen.
+func (r *cloudMockStateRouter) ResetAll(ctx context.Context) error {
+	var firstErr error
+	for _, c := range []*mockStateClient{r.scaleway, r.gcp, r.aws} {
+		if c == nil {
+			continue
+		}
+		if err := c.Reset(ctx); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	if r.s3 != nil {
+		if err := resetS3Backend(ctx, r.s3); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
