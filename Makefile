@@ -30,7 +30,7 @@ endif
 .PHONY: help test-unit test-all test \
 	bench-check smoke-validate smoke-mockway smoke-mockway-manual smoke-mockway-local smoke check \
 	ui-install ui-build ui-test ui-test-e2e ui-dev ui-clean ui-api-linux-build ui-stack-up ui-stack-logs ui-stack-down build run up down status \
-	mocks-up mocks-down mocks-status mocks-logs mockway-up mockway-down fakegcp-up fakegcp-down fakeaws-up fakeaws-down
+	mocks-up mocks-down mocks-status mocks-logs mockway-up mockway-down fakegcp-up fakegcp-down fakeaws-up fakeaws-down s3router-up s3router-down s3router-restart
 
 help:
 	@echo "Targets:"
@@ -43,7 +43,7 @@ help:
 	@echo "  run             Build and start the UI server (http://127.0.0.1:4173)."
 	@echo ""
 	@echo "  --- mock lifecycle (go run, source siblings) ---"
-	@echo "  mocks-up        Start mockway (:$(MOCKWAY_PORT)) + fakegcp (:$(FAKEGCP_PORT)) + fakeaws (:$(FAKEAWS_PORT)) + seaweedfs (:$(SEAWEEDFS_PORT))."
+	@echo "  mocks-up        Start mockway (:$(MOCKWAY_PORT)) + fakegcp (:$(FAKEGCP_PORT)) + fakeaws (:$(FAKEAWS_PORT)) + seaweedfs (:$(SEAWEEDFS_PORT)) + s3router (:$(S3ROUTER_PORT))."
 	@echo "  mocks-down      Stop all four."
 	@echo "  mocks-restart   Stop + start all four; picks up sibling-repo source changes."
 	@echo "  mocks-status    Show running state of each mock (via lsof on listening ports)."
@@ -219,14 +219,52 @@ seaweedfs-down:
 		echo "seaweedfs not running"; \
 	fi
 
+# s3router-up / -down — S80. Thin HTTP shim that splits S3 traffic
+# between SeaweedFS (data plane) and fakeaws (bucket subresources
+# SeaweedFS doesn't model — today just ?publicAccessBlock).
+# Listens on :9091 so infrafactory.yaml `s3.url` points here.
+S3ROUTER_PORT ?= 9091
+S3ROUTER_URL := http://127.0.0.1:$(S3ROUTER_PORT)
+
+s3router-up: $(MOCKS_RUN_DIR)
+	@if [ -f $(MOCKS_RUN_DIR)/s3router.pid ] && kill -0 $$(cat $(MOCKS_RUN_DIR)/s3router.pid) 2>/dev/null; then \
+		echo "s3router already running (pid=$$(cat $(MOCKS_RUN_DIR)/s3router.pid)) on $(S3ROUTER_URL)"; \
+	else \
+		echo "starting s3router on $(S3ROUTER_URL)"; \
+		$(GO) run ./cmd/s3router --addr 127.0.0.1:$(S3ROUTER_PORT) \
+			--seaweed-url http://127.0.0.1:$(SEAWEEDFS_PORT) \
+			--fakeaws-url $(FAKEAWS_URL) > $(MOCKS_RUN_DIR)/s3router.log 2>&1 & \
+		echo $$! > $(MOCKS_RUN_DIR)/s3router.pid; \
+		until curl -sSf $(S3ROUTER_URL)/healthz >/dev/null 2>&1 || nc -z 127.0.0.1 $(S3ROUTER_PORT) 2>/dev/null; do sleep 0.2; done; \
+		echo "s3router ready on $(S3ROUTER_URL) (pid=$$(cat $(MOCKS_RUN_DIR)/s3router.pid))"; \
+	fi
+
+s3router-down:
+	@pidfile=$(MOCKS_RUN_DIR)/s3router.pid; \
+	if [ -f $$pidfile ] && kill -0 $$(cat $$pidfile) 2>/dev/null; then \
+		kill $$(cat $$pidfile) 2>/dev/null || true; \
+		rm -f $$pidfile; \
+	fi; \
+	while pid=$$(lsof -tiTCP:$(S3ROUTER_PORT) -sTCP:LISTEN 2>/dev/null); [ -n "$$pid" ]; do \
+		kill $$pid 2>/dev/null || true; \
+		sleep 0.2; \
+	done; \
+	echo "s3router stopped"
+
+s3router-restart: s3router-down s3router-up
+	@echo "s3router restarted"
+
 # mocks-up starts all three mocks. Run from the infrafactory repo root
 # with ../mockway, ../fakegcp, ../fakeaws checked out as siblings.
 # M94: seaweedfs-up added — AWS scenarios silently fail without
 # port 9090. Docker required for that piece only.
-mocks-up: mockway-up fakegcp-up fakeaws-up seaweedfs-up
-	@echo "all mocks ready: $(MOCKWAY_URL) (Scaleway), $(FAKEGCP_URL) (GCP), $(FAKEAWS_URL) (AWS), http://127.0.0.1:$(SEAWEEDFS_PORT) (S3/SeaweedFS)"
+# S80: s3router-up added — wraps seaweedfs + fakeaws to route the
+# ?publicAccessBlock subresource correctly. infrafactory.yaml's
+# s3.url points at :9091 (the router), not :9090 (raw seaweed).
+mocks-up: mockway-up fakegcp-up fakeaws-up seaweedfs-up s3router-up
+	@echo "all mocks ready: $(MOCKWAY_URL) (Scaleway), $(FAKEGCP_URL) (GCP), $(FAKEAWS_URL) (AWS), http://127.0.0.1:$(SEAWEEDFS_PORT) (SeaweedFS), $(S3ROUTER_URL) (S3 router)"
 
-mocks-down: mockway-down fakegcp-down fakeaws-down seaweedfs-down
+mocks-down: mockway-down fakegcp-down fakeaws-down s3router-down seaweedfs-down
 	@echo "all mocks stopped"
 
 # N5 (2026-06-01): per-mock restart shorthand. Picks up source changes in

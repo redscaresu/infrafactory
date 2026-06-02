@@ -34,16 +34,19 @@ fakeaws:
   url: http://127.0.0.1:8082
   auto_reset: true
 
-# s3 is the third-party S3 backend used in place of fakeaws's
-# built-in S3 handler for AWS scenarios touching aws_s3_bucket /
-# aws_s3_object / etc. Default backend is SeaweedFS (Apache 2.0,
-# full S3 surface). Decision documented in CONCEPT.md "Third-Party
-# Mock Integration" section (M59). Optional — if URL is empty, S3
-# calls fall back to fakeaws (which serves a stripped-down S3 surface
-# kept around for direct-HTTP tests, not viable for terraform-
-# provider-aws Read flows).
+# s3 is the S3 backend used in place of fakeaws's built-in S3 handler
+# for AWS scenarios touching aws_s3_bucket / aws_s3_object / etc.
+# Default URL points at the s3router shim (S80), which fans S3 traffic
+# between two backends:
+#   - SeaweedFS (:9090) handles the data plane (bucket + object Put/Get).
+#   - fakeaws (:8082, under /s3) handles bucket subresources SeaweedFS
+#     doesn't model (today just ?publicAccessBlock; add to
+#     cmd/s3router/main.go fakeawsSubresources as new 501s surface).
+# To bypass the shim and point directly at SeaweedFS, set
+# url: http://127.0.0.1:9090 — scenarios using public_access_block
+# will then 501.
 s3:
-  url: http://127.0.0.1:9090
+  url: http://127.0.0.1:9091
   auto_reset: true
 
 scaleway:
