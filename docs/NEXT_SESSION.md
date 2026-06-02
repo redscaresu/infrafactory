@@ -2,7 +2,23 @@
 
 Self-contained brief for a fresh Claude / engineer starting in this repo.
 
-## 2026-06-02 S58 N11 retirements close-out — READ FIRST
+## 2026-06-02 S59 N11 retirement close-out — READ FIRST
+
+S59 retired GCP phase2 rule 10 (VPC + subnetwork) — the highest-stakes GCP retirement (affects nearly every networked scenario).
+
+- Step 3: deleted phase2 rule 10 + phase3 rule 5.
+- Step 5: re-ran three VPC-heavy scenarios:
+  - `gcp-vm-network` → target_reached iter 1. Generated HCL has explicit `google_compute_network` + `google_compute_subnetwork` with `auto_create_subnetworks = false`, and `network_interface { subnetwork = google_compute_subnetwork.main.id }` on the instance.
+  - `gcp-iam` → target_reached iter 1. Same VPC + service-account wiring pattern.
+  - `gcp-cloud-run` → **stuck** after 2 iters. BUT the failure was `deletion_policy = "DELETE"` on `google_cloud_run_v2_service` (LLM hallucinated an attribute — \"An argument named deletion_policy is not expected here\"). This is unrelated to VPC. The two-iter stuck-detection killed iteration before the auto-correction loop could resolve. Captured as follow-up.
+- Step 5 path: the **two existing same-resource pitfalls** (`google_compute_instance` and `google_container_cluster`, both `source: learned`) already encode the VPC pattern — they were auto-learned in a prior session and carry the rule. Rule 10 is redundant given those pitfalls.
+
+**Sixth N11 retirement** (CMEK + firewall + GKE + SQL + GCS + VPC). The highest-stakes single-rule retirement succeeded — confirms the protocol's "auto-learned pitfall replaces prompt rule" path works for cross-resource patterns affecting many scenarios.
+
+**Follow-ups captured**:
+- `gcp-cloud-run` flakiness on `deletion_policy` hallucination — the existing `google_cloud_run_v2_service` `deletion_protection` pitfall may be subtly mis-applied by the LLM. Worth a focused review.
+
+## 2026-06-02 S58 N11 retirements close-out
 
 S58 retired GCP phase2 rules 14 (Cloud SQL teardown + private IP) AND 15 (GCS test setup) in one PR via the 7-step protocol:
 
