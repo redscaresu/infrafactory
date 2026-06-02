@@ -2,7 +2,19 @@
 
 Self-contained brief for a fresh Claude / engineer starting in this repo.
 
-## 2026-06-02 S57 N11 retirement close-out — READ FIRST
+## 2026-06-02 S58 N11 retirements close-out — READ FIRST
+
+S58 retired GCP phase2 rules 14 (Cloud SQL teardown + private IP) AND 15 (GCS test setup) in one PR via the 7-step protocol:
+
+- Step 3 (delete prompt rules): removed both phase2 rules + the three matching phase3 checkpoints (rules 8 + 9 + 12).
+- Step 5 (re-run):
+  - `gcp-cloud-sql` → target_reached iter 2. Verified `deletion_protection = false`, `ipv4_enabled = false`, `private_network = google_compute_network.main.id`. Iter 1 failure was unrelated CMEK self-correction.
+  - `gcp-storage` → target_reached iter 1. Verified `force_destroy = true` + `uniform_bucket_level_access = true`.
+- Step 5 exit path: **rules redundant — delete with no follow-up** for both.
+
+**Fourth + fifth N11 retirements** (CMEK + firewall + GKE + SQL + GCS). The protocol now generalizes to multi-failure-mode rules (Cloud SQL: destroy + region + policy; GCS: destroy + uniqueness + access mode). Strong evidence the auto-correction channel carries any rule with at least one machine-readable failure path per attribute.
+
+## 2026-06-02 S57 N11 retirement close-out
 
 S57 retired GCP phase2 rule 13 (GKE single-node-pool strategy) via the 7-step protocol:
 
