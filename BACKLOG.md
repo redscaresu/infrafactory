@@ -230,10 +230,6 @@ Legend: `todo` | `in_progress` | `blocked` | `done` | `wontfix`
 | SUi-8 | `goreleaser.yml`, `Makefile`, `README.md` | feature implementation | `goreleaser build --snapshot --clean` produces binary with embedded UI; `make build` chains `ui-build` then Go compile; README documents `infrafactory ui` command and dev workflow | goreleaser snapshot build; `make build` success; README section exists |
 
 ## Operating notes
+- This file tracks **M-ticket maintenance work** (cross-arc, not slice-bound). Active slice work lives in `docs/plans/slices-<a>-<b>-plan.md`.
 - Update `status` and dependencies as work evolves.
-- Keep exactly one `in_progress` ticket at a time.
-- Use `CURRENT_TICKET.md` for session-level execution details.
-- Post-slice review-improve protocol (for unfinished slices): after each slice implementation, run a review pass, apply improvements, and repeat until two consecutive passes report no further improvements; log each pass in `STATUS.md` and `CURRENT_TICKET.md`.
-- Blocked-slice refinement protocol: for blocked tickets (for example `S9-T8`), refinement scope is governance/docs/risk communication only; do not implement blocked runtime behavior unless blocking ADR/policy is explicitly superseded.
-- **Slice 18 autonomous execution rule**: Do NOT ask for human confirmation during `S18-T1`..`S18-T5` execution. Write scenarios, run infrafactory, diagnose failures, fix mockway or infrafactory, write regression tests, rebuild Docker, and rerun autonomously until each scenario achieves first-iteration pass. This includes fixing bugs in either codebase, extending schemas, adding mockway handlers/tables, and updating prompts — all without stopping to ask.
-- **Slice 19 autonomous execution rule**: Do NOT ask for human confirmation during `S19-T1` execution. Review all Slice 18 code in both mockway and infrafactory, identify bugs/issues/edge cases, fix them with regression tests, rebuild Docker, and rerun all scenarios until every one passes on first iteration. Keep running until all issues are resolved — no human interaction required.
+- Slice tickets from S1–S52 are archived in `BACKLOG_ARCHIVE.md`. Slices S54+ live in plan files under `docs/plans/`.

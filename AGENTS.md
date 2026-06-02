@@ -3,7 +3,7 @@
 For AI coding agents. Human contributors should use `CONTRIBUTING.md`.
 
 ## Mission
-Build `infrafactory`, a Go CLI + SvelteKit UI that generates and validates OpenTofu across **AWS**, **GCP**, and **Scaleway** with deterministic, testable behavior. Each cloud's scenarios validate against a deterministic HTTP-level mock (fakeaws / fakegcp / mockway); S3 routes through SeaweedFS as a third-party backend (see `CONCEPT.md` § "Third-Party Mock Integration").
+Build `infrafactory`, a Go CLI + SvelteKit UI that generates and validates OpenTofu across **AWS**, **GCP**, and **Scaleway** with deterministic, testable behavior. Each cloud's scenarios validate against a deterministic HTTP-level mock (fakeaws / fakegcp / mockway); S3 routes through a small in-repo shim (`cmd/s3router/`, S80) that fans traffic between SeaweedFS (data plane) and fakeaws (`?publicAccessBlock` subresource SeaweedFS doesn't model). See `CONCEPT.md` § "Third-Party Mock Integration".
 
 ## Source of Truth
 1. `scenario.schema.json`
@@ -21,18 +21,22 @@ Additional references:
 
 | File | Purpose | When to update |
 |---|---|---|
-| `ROADMAP.md` | Stable milestones and sequencing (high-level) | When a new slice is planned or completed |
-| `BACKLOG.md` | Single source of ticket status across all slices | When tickets are created, started, or completed |
-| `STATUS.md` | Progress log with recent updates | At end of each meaningful coding session |
+| `docs/plans/slices-<a>-<b>-plan.md` | 5-slice arc plan with tickets, exit criteria, autonomous-execution prompt | When planning the next arc |
+| `docs/NEXT_SESSION.md` | Fresh-context handoff — points at the active arc + open follow-ups | At end of each meaningful coding session |
+| `docs/status/ARCHIVE.md` | Per-arc close-out narratives — durable history | At arc close-out |
+| `STATUS.md` | Current phase + recent arc summaries | At end of each meaningful coding session |
+| `BACKLOG.md` | M-ticket maintenance backlog (legacy slice tickets in `BACKLOG_ARCHIVE.md`) | When M-tickets are created/started/completed |
 | `CONCEPT.md` | Durable architecture, contracts, design decisions | Only for major architecture/design shifts |
 | `docs/decisions/*.md` | ADRs for decision-impacting changes | When change crosses ADR trigger threshold (see below) |
-## Planning a New Slice
 
-1. **Add tickets** to `BACKLOG.md` with id, slice, title, priority, status (`todo`), deps, and owner.
-2. **Add milestone** to `ROADMAP.md`.
-3. **Get approval** from the user before implementation begins.
+## Planning a New Arc
 
-That's it. ADRs only when crossing the threshold below. No plan files needed — the tickets are the plan.
+1. **Pick the next arc range** (e.g. S89–S93) — the next 5 slices.
+2. **Write the plan** at `docs/plans/slices-<a>-<b>-plan.md` modelled on the prior arc. Include: Big picture, Slices table, Standing rules, per-slice motivation + tickets + exit criteria, "Why this order", autonomous-execution loop prompt, fresh-context checklist.
+3. **Repoint** `STATUS.md` "Next arc planned" line + `docs/NEXT_SESSION.md` at the new plan.
+4. **Get approval** from the user before kicking off the autonomous loop.
+
+ADRs only when crossing the threshold below. Plan files are the slice ticket source — `BACKLOG.md` is only for cross-arc maintenance work (M-tickets).
 
 ## Fresh Context
 
@@ -43,9 +47,12 @@ When starting a new conversation, follow this checklist:
 2. `AGENTS.md` (this file)
 3. `docs/NEXT_SESSION.md` (open follow-ups from prior session — read FIRST when starting work)
 4. `STATUS.md`
-5. `BACKLOG.md`
-6. `CONCEPT.md` (if major design context is needed)
-7. `docs/decisions/README.md` (+ relevant ADRs)
+5. `docs/plans/slices-*.md` for the active arc — see `docs/NEXT_SESSION.md` for the current arc pointer
+6. `BACKLOG.md` (M-ticket maintenance backlog; slice tickets live in plan files)
+7. `CONCEPT.md` (if major design context is needed)
+8. `docs/decisions/README.md` (+ relevant ADRs)
+
+The S54 → S88 work has been organised as 5-slice arcs rather than M-tickets. Each arc lives in `docs/plans/slices-<start>-<end>-plan.md` with an autonomous-execution loop prompt at the bottom. `docs/status/ARCHIVE.md` has per-arc close-out narratives.
 
 ### 2) Preflight
 ```bash
@@ -54,9 +61,9 @@ git branch --show-current
 git log -1 --oneline
 ```
 - If unexpected local changes appear, stop and ask the user.
-- Confirm active milestone in `ROADMAP.md`, blockers in `STATUS.md`.
-- Pick next uncompleted ticket from `BACKLOG.md` (status: `todo` or `in_progress`).
-- Keep exactly one `in_progress` ticket in `BACKLOG.md` during execution.
+- Confirm active arc in `docs/NEXT_SESSION.md` § "Suggested next arc" or "READ FIRST"; blockers in `STATUS.md`.
+- Pick next uncompleted slice from the active `docs/plans/slices-*-plan.md`.
+- For maintenance work not tied to an arc, see `BACKLOG.md` M-tickets.
 
 ### 3) Startup verification
 ```bash
@@ -101,8 +108,9 @@ Three first-party HTTP-level mocks + one third-party backend live alongside infr
 - **fakegcp** (`../fakegcp`, github.com/redscaresu/fakegcp) — GCP mock; runs on `:8081`. Mockway-level test parity reached 2026-05-23 (881-line repository_test.go, FK violation tests, cascade delete tests). Memorystore + Cloud SQL + GKE + IAM + Storage + DNS + Pub/Sub + Secret Manager + Cloud Run + Cloud KMS (added 2026-05-31 in fakegcp@c7999b5).
 - **fakeaws** (`../fakeaws`, github.com/redscaresu/fakeaws) — AWS mock; runs on `:8082`. Ships 10 services across 5 wire formats (IAM, S3, EC2, RDS, DynamoDB, EKS, SQS, Route53, Secrets Manager, KMS); aggregate handler coverage 82.4%; 17 codex review passes archived under `../fakeaws/docs/review-passes/`. EC2/IAM/Route53/DynamoDB substantially broadened 2026-05-30 → 2026-05-31 from a self-learning sweep (see fakeaws@348322d).
 - **SeaweedFS** (`chrislusf/seaweedfs` container) — third-party S3 backend for `aws_s3_bucket` reads (`terraform-provider-aws` needs the full management surface; fakeaws's stripped S3 handler isn't enough). Runs on `:9090` via `docker-compose.mocks.yml`. Anonymous-mode `ListAllMyBuckets` returns empty even when buckets exist — use HEAD-by-name as the assertion path. Empirical evaluation log in `CONCEPT.md` § "Third-Party Mock Integration" (rejects Adobe S3Mock + Garage + LocalStack + MinIO).
+- **s3router** (`cmd/s3router/`, S80) — in-repo reverse-proxy shim that listens on `:9091` and fans S3 traffic across SeaweedFS and fakeaws. `?publicAccessBlock` → fakeaws (SeaweedFS uniquely 501s on that subresource); everything else → SeaweedFS; `PUT/DELETE /<bucket>` fans out to both. `infrafactory.yaml` `s3.url` points at the shim, not SeaweedFS directly. Add a subresource to `fakeawsSubresources` in `main.go` only when a new SeaweedFS 501 surfaces. ADR-0015 § "S80 — S3 backend router" carries the rationale.
 
-All four repos are independent public OSS repos on origin/main; cross-repo work cascades (see "operational caveats" above).
+All four sibling repos are independent public OSS repos on origin/main; cross-repo work cascades (see "operational caveats" above). The s3router is part of the infrafactory repo, not a sibling.
 
 When extending a sibling mock, mirror the per-bundle PR rule in `../fakeaws/concepts.md` — handler + tests + examples + scenario anchors + coverage_matrix.yaml + `LandedServices` flip all in one slice. The `TestFullCoverageAudit` + `TestRegressionSeedAuditManifestMatchesHandlers` audits in each mock repo enforce this.
 

@@ -2298,7 +2298,7 @@ The three first-party mocks (mockway, fakegcp, fakeaws) all ship as Go binaries 
 
 **Decision: introduce `docker-compose.mocks.yml`** as the canonical multi-mock orchestration file alongside the existing `docker-compose.yml`. Targets:
 
-- `make mocks-up-containers` brings up `mockway:8080` + `fakegcp:8081` + `fakeaws:8082` (+ `s3mock:9090` once the third-party integration lands) via `docker compose -f docker-compose.mocks.yml up -d`.
+- `make mocks-up-containers` brings up `mockway:8080` + `fakegcp:8081` + `fakeaws:8082` + `seaweedfs:9090` via `docker compose -f docker-compose.mocks.yml up -d`. The `go run` path (`make mocks-up`) additionally starts the in-repo `s3router` on :9091 (S80; not in the container compose because it depends on the local source).
 - `make mocks-up` (existing) stays as the go-run path for local dev.
 - Both wire infrafactory.yaml the same way (`mockway.url`, `fakegcp.url`, `fakeaws.url`); URLs are identical between the two paths so scenarios don't care which is running.
 - README quickstart prefers `mocks-up-containers` because it works on any machine with Docker, no Go install required.
@@ -2375,6 +2375,21 @@ fakeaws's existing S3 handler stays for the per-service `TestE2E_AWS_S3` direct-
 - **M59-T5**: `aws_s3_bucket` + SSE config re-added to `TestE2E_AWSFullStack` HCL; assertion via `s3BucketExists` HEAD-by-name; full lifecycle apply→destroy green
 - **M59-T6**: README + CONCEPT.md + AGENTS.md updates (this section)
 
+### S80 amendment — s3router shim for sub-resources SeaweedFS doesn't model
+
+SeaweedFS implements most S3 sub-resources, but specifically 501s on `?publicAccessBlock` (the `aws_s3_bucket_public_access_block` resource's PUT/GET/DELETE). Other sub-resources we probed (`?policy`, `?versioning`, `?lifecycle`, `?cors`, `?tagging`, `?encryption`, `?acl`) return 200/400/404 — partial implementations, not the same 501 class. fakeaws DOES implement `?publicAccessBlock` correctly under its `/s3/` route prefix, but pointing `s3.url` at fakeaws is not viable because fakeaws's S3 surface is intentionally stripped down.
+
+S80 lands `cmd/s3router/` — a small reverse-proxy shim that listens on :9091 and:
+- Routes `<bucket>?publicAccessBlock` to fakeaws (rewriting to `/s3/<bucket>?publicAccessBlock`).
+- Forwards everything else to SeaweedFS unchanged.
+- Fans `PUT /<bucket>` + `DELETE /<bucket>` to both backends so the bucket exists in both stores before any subresource call.
+
+`infrafactory.yaml` `s3.url` defaults to `http://127.0.0.1:9091` (the shim), not `http://127.0.0.1:9090` (raw SeaweedFS). `make mocks-up` starts the shim alongside the other mocks; `make s3router-restart` picks up source changes.
+
+The shim's allowlist (`fakeawsSubresources` in `main.go`) is one element today — `publicaccessblock`. Add a sub-resource to that allowlist only when a new SeaweedFS 501 surfaces in a sweep. Every additional route is a coordination surface between two backends that has to stay synced.
+
+ADR-0015 § "S80 — S3 backend router" carries the rationale + alternative options considered.
+
 ### Future third-party mocks
 
 Same pattern applies to any other third-party mock. The reusable shape:
@@ -2382,6 +2397,7 @@ Same pattern applies to any other third-party mock. The reusable shape:
 1. New top-level config block (`<service>:` with `url` + auth + `auto_reset`).
 2. Router carve-out by service (not cloud — the S3 case proves this matters).
 3. State polyfill if the mock doesn't expose `/mock/state`.
+4. If the mock doesn't model a specific sub-resource the provider needs and a sibling mock does: front both with a routing shim like `cmd/s3router/`.
 4. Reset/snapshot/restore polyfill or "documented gap" note.
 5. Keep the first-party handler as a deprecated direct-HTTP test fixture.
 6. Empirical apply→plan-no-op→destroy probe BEFORE committing to a backend — the S3Mock initial-pick-then-pivot proves spec compliance and lived terraform-provider-aws compat are different things.
