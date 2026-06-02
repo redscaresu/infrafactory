@@ -163,6 +163,28 @@ resource types) and motivated by a specific architectural mismatch
 (LLM-actionable resource × unmockable backend); it should not be
 generalized without a similar concrete case.
 
+## Amendment (2026-06-02, S80 — S3 backend router)
+
+`docs/mock-gaps.md` carried an `aws_s3_bucket_public_access_block` 501 mark from S76 / S77 close-outs (though it never made it to the canonical file). Spike findings:
+
+- SeaweedFS (the default S3 backend on :9090) returns 501 NotImplemented specifically for the `?publicAccessBlock` subresource. Every other subresource we probed returns 200/400/404 — partial implementations, not the same 501 class.
+- fakeaws DOES implement `?publicAccessBlock` correctly (handlers/s3.go since S43-T8) — but under the `/s3/` route prefix, and only as part of fakeaws's stripped-down S3 surface that is not viable as a full terraform-provider-aws Read target.
+
+Routing the request to either backend alone fails: SeaweedFS 501s, and pointing `s3.url` at fakeaws breaks bucket data-plane reads. S80 lands a small reverse-proxy shim (`cmd/s3router/`) that:
+
+1. Listens on :9091 (the new `s3.url` default).
+2. Forwards `<bucket>?publicAccessBlock` traffic to fakeaws (rewriting to `/s3/<bucket>?publicAccessBlock`).
+3. Forwards everything else to SeaweedFS.
+4. Fans `PUT /<bucket>` (and `DELETE /<bucket>`) out to both, so the bucket exists in both backends before any subresource call.
+
+The subresource set is intentionally a one-element allowlist (`fakeawsSubresources` in main.go). Adding to it requires a deliberate change with rationale — every routed path is a coordination surface between two backends that has to stay synced.
+
+Why a shim and not a fakeaws-side fix: fakeaws's S3 surface is described in `infrafactory.yaml` as "stripped-down... not viable for terraform-provider-aws Read flows" (M59). Replacing SeaweedFS with fakeaws for full S3 would regress every data-plane scenario. The shim isolates the fix to the one subresource that actually 501s.
+
+Tests (`cmd/s3router/main_test.go`) cover: subresource routing in 5 method/case variants, plain-object pass-through to SeaweedFS, PUT/DELETE bucket fan-out, object-PUT not fanning out, SeaweedFS-success-takes-priority on fan-out, fakeaws-fallback when SeaweedFS errors.
+
+Not a routing-classifier change; an infrastructure ratchet that unblocks one specific 501 class. Future SeaweedFS 501s on other subresources can be added to `fakeawsSubresources` once observed in a sweep — same conservative "wait for the failure" discipline as the rest of ADR-0015.
+
 ## Amendment (2026-06-02, S78 — Makefile target)
 
 S77 surfaced that every prior sustain-ratchet sweep reinvented the
