@@ -13,13 +13,18 @@ Self-contained brief for a fresh Claude / engineer starting in this repo.
 - S66: gcp-full-stack `google_apikeys_key` flake no longer reproducible (5/5 clean runs, zero apikeys mentions).
 - S67: `infrafactory mock reset` CLI command added. `cloudMockStateRouter.ResetAll` fans out across mockway + fakegcp + fakeaws + s3 (SeaweedFS) cascade. Closes the S54 SeaweedFS state-leak gap — sweep harnesses no longer need a bare-curl carve-out.
 
-## Suggested next-arc directions
+## Next arc: S68–S72
 
-Three open follow-ups carry forward (none blocking):
+Plan file: `docs/plans/slices-68-72-plan.md`. Five slices, ~6–10 focused hours, designed for one autonomous loop session.
 
-1. **N3 classifier coverage gap** (from S63 audit finding 2): the S63 sweep let two mock-actionable failures (`aws_kms_key` rotation timeout, `aws_route53_record` empty-result) land as `learned` pitfalls instead of routing to `docs/mock-gaps.md`. `IsMockActionable` needs "rotation update timeout" + "empty result" signal additions. ~30 min.
-2. **Permanent `cmd/n10extract`** (from S67 plan): the hand-rolled tool used in earlier N11 retirements (force-extract a `learned_from_diff` from a recorded run) could land as a permanent CLI command. Useful for future retirements where the organic learn loop hasn't fired yet. ~1 hr.
-3. **Continued N11 retirements**: ADR-0018's Category-A path is reliable. Audit the remaining AWS phase3 + Scaleway phase3 bullets every 1–2 sweeps; expect 1–2 more retirements per cloud.
+- **S68**: N3 classifier coverage gap — add the two patterns from S63's audit (`aws_kms_key` rotation timeout, `aws_route53_record` empty-result). ~30 min.
+- **S69**: Close M96 (descriptive vs prescriptive) as superseded by N10/N13 — audit the legacy extractor's call sites. ~1 hr.
+- **S70**: Promote the throwaway `cmd/n10extract` helper to a permanent CLI command. ~1-2 hr.
+- **S71**: M98 — fix OPA known-after-apply false-fire on `vpc_required.rego` + `encryption.rego` (false-flagging correct HCL because `planned_values` shows `null` for known-after-apply references). ~half-day.
+- **S72**: ADR-0018 sustaining audit — AWS + Scaleway phase3 retirements. Expect 1–2 more Category-A per cloud. ~2-3 hr.
+
+Autonomous-execution loop prompt at the bottom of the plan file.
+
 
 **S63 audit findings carried into S64**:
 1. `aws_subnet` `learned_from_diff` is a false positive — the LLM's iter-pair diff captured ADDED attrs (`cidr_block`, `availability_zone`) but the actual fix was REMOVAL of `map_public_ip_on_launch`. N13 should have caught it but the failure detail uses camelCase (`MapPublicIpOnLaunch`) while the HCL attribute is snake_case (`map_public_ip_on_launch`) — N13's `strings.Contains(failureDetail, attr)` attribution failed. **Fix in S64**: case-insensitive (or snake↔camel) attribute matching.
