@@ -1725,3 +1725,125 @@ When STATUS.md was trimmed for the S63 prep, the rolling narrative under § Curr
   - All 6 scenarios still pass on first iteration.
 - **S19-T1 complete (round 1)**: 3 bugs fixed (RDB update persistence, Redis missing fields).
 - Completed Slice 18 (`S18-T1`..`S18-T5`): all 5 new scenarios pass on first iteration.
+
+---
+
+## NEXT_SESSION.md per-slice close-outs (archived 2026-06-02 at S74 prep)
+
+Trimmed from NEXT_SESSION.md when the S63–S73 retirement chain was summarised into a single READ FIRST pointer. Per-slice details kept verbatim for traceability.
+
+## READ FIRST — 2026-06-02
+
+**S73 standalone retirement — GCP phase2 rules 9 + 12 (`google_project_service` family + `google_project_iam_member` family) retired Category A.** Audit prompted by "why aren't these in pitfalls?" — the real blocker was that the prompt rule was too effective (prevented the LLM from ever introducing the resource, so N13 had no failure to attribute). Executed N11 7-step protocol; 6 scenarios re-ran cleanly across two validation rounds with zero residual references. GCP phase2 collapsed 11 → 9 rules.
+
+**S63–S67 arc CLOSED.** Five PRs merged (#37–#41). The post-collapse arc validated 39/39 deterministic + tightened N13 attribution + verified two flakes are non-reproducible + added `infrafactory mock reset` CLI for sweep harness ergonomics.
+
+**Closed this session**:
+- S63: 39/39 deterministic post-collapse sweep — no regression from the six N11 retirements.
+- S64: N13 case-insensitive attribution. `attributeAppearsInDetail` matches removed attribute names in literal + case-insensitive snake_case + camelCase forms. Closes the aws_subnet `MapPublicIpOnLaunch` false-positive finding from S63. ADR-0012 amended.
+- S65: gcp-cloud-run `deletion_policy` flake no longer reproducible (5/5 clean runs).
+- S66: gcp-full-stack `google_apikeys_key` flake no longer reproducible (5/5 clean runs, zero apikeys mentions).
+- S67: `infrafactory mock reset` CLI command added. `cloudMockStateRouter.ResetAll` fans out across mockway + fakegcp + fakeaws + s3 (SeaweedFS) cascade. Closes the S54 SeaweedFS state-leak gap — sweep harnesses no longer need a bare-curl carve-out.
+
+## S68–S72 arc — CLOSED
+
+- ✅ **S68**: N3 classifier coverage gap — `IsMockActionable` now recognizes `waiting for state to become` + `empty result` shapes.
+- ✅ **S69**: M96 closed as superseded. ADR-0012 amended with the four-layer extractor model.
+- ✅ **S70**: Permanent `cmd/n10extract` CLI — drives N10/N13 against a recorded run dir, emits a candidate pitfall YAML.
+- ✅ **S71**: M98 already-fixed audit. All four affected policies already carry `after_unknown` branches. Added regression ratchet. M98 closed.
+- ✅ **S72**: Two Category-A retirements (AWS S3 suffix + Scaleway encryption_at_rest). 12 total N11 retirements since the arc began.
+
+## Suggested next-arc directions
+
+None of these are blocking; pick what you need:
+
+1. **Another full 39-scenario sweep** post-S68–S72 changes to confirm the broader picture is still 39/39 deterministic with N3 classifier + new ratchets in place. ~1 hr.
+2. **More N11 retirements** in AWS phase3 / Scaleway phase3 — each remaining sub-bullet is a candidate per ADR-0018. ~30 min per rule.
+3. **N10 organic emission audit** — sweep + audit any `learned_from_diff` or `learned_from_diff_avoid` entries that surface. The earlier S55-style audit pattern.
+4. **Mock-server gap closure** — `docs/mock-gaps.md` is the standing backlog for fakegcp/fakeaws/mockway. Pick the highest-impact entry.
+5. **Permanent `make clean-bg`** or similar session-hygiene target — the M53 era flagged session cleanup as friction; a tiny Makefile target would help.
+
+## Next arc: S68–S72
+
+Plan file: `docs/plans/slices-68-72-plan.md`. Five slices, ~6–10 focused hours, designed for one autonomous loop session.
+
+- **S68**: N3 classifier coverage gap — add the two patterns from S63's audit (`aws_kms_key` rotation timeout, `aws_route53_record` empty-result). ~30 min.
+- **S69**: Close M96 (descriptive vs prescriptive) as superseded by N10/N13 — audit the legacy extractor's call sites. ~1 hr.
+- **S70**: Promote the throwaway `cmd/n10extract` helper to a permanent CLI command. ~1-2 hr.
+- **S71**: M98 — fix OPA known-after-apply false-fire on `vpc_required.rego` + `encryption.rego` (false-flagging correct HCL because `planned_values` shows `null` for known-after-apply references). ~half-day.
+- **S72**: ADR-0018 sustaining audit — AWS + Scaleway phase3 retirements. Expect 1–2 more Category-A per cloud. ~2-3 hr.
+
+Autonomous-execution loop prompt at the bottom of the plan file.
+
+
+**S63 audit findings carried into S64**:
+1. `aws_subnet` `learned_from_diff` is a false positive — the LLM's iter-pair diff captured ADDED attrs (`cidr_block`, `availability_zone`) but the actual fix was REMOVAL of `map_public_ip_on_launch`. N13 should have caught it but the failure detail uses camelCase (`MapPublicIpOnLaunch`) while the HCL attribute is snake_case (`map_public_ip_on_launch`) — N13's `strings.Contains(failureDetail, attr)` attribution failed. **Fix in S64**: case-insensitive (or snake↔camel) attribute matching.
+2. Two mock-actionable failures (`aws_kms_key` rotation timeout, `aws_route53_record` empty-result) bypassed the N3 classifier and landed as `learned` pitfalls. The N3 `IsMockActionable` predicate needs to recognize "rotation update timeout" + "empty result" as signals. **Investigate in S64-T2 territory; may spawn a small N3-classifier patch slice.**
+3. No `learned_from_diff_avoid` entries — N13 in production confirms the heuristic doesn't false-positive (good) but also confirms the gcp-cloud-run flake from S59 wasn't deterministic.
+
+Plan file with full slice definitions: `docs/plans/slices-63-67-plan.md`.
+
+## What's already done (S54–S62 close-out)
+
+| Slice | PR | Outcome |
+|---|---|---|
+| S54 | #26 | 39/39 deterministic sweep baseline + N10 dedupe fix |
+| S55 | #27 | N10 wiring + trim + ratchet fixes |
+| S56 | #28 | Retire GCP rule 11 (firewall) — Category A |
+| S57 | #29 | Retire GCP rule 13 (GKE) — Category A |
+| S58 | #30 | Retire GCP rules 14 + 15 (Cloud SQL + GCS) — Category A |
+| S59 | #31 | Retire GCP rule 10 (VPC) — Category B |
+| S60 | #32 | Retire AWS RDS + Scaleway RDB/LB — Category A |
+| S61 | #33 | N13 deletion-as-fix extractor |
+| S62 | #34 | ADR-0018 retirement-criteria framework |
+
+**Architectural milestones**:
+- GCP phase2 prompt collapsed from 17 prescriptive rules to 11 (9 if hand-applied retirements count as Category C).
+- N10 → N11 → N13 sequence end-to-end: addition-as-fix via `learned_from_diff`, removal-as-fix via `learned_from_diff_avoid`, both fed by real run diffs.
+- 7-step retirement protocol generalized across GCP + AWS + Scaleway.
+
+## Open follow-ups carried into the S63–S67 arc
+
+- **gcp-cloud-run `deletion_policy` hallucination** (from S59 step 5) — S65 handles.
+- **gcp-full-stack `google_apikeys_key` mock gap** (from S57) — S66 handles.
+- **SeaweedFS state-leak in bare-curl sweep harness** (from S54) — S67-T1 handles via `infrafactory mock reset` CLI command.
+- **Permanent `cmd/n10extract`** — S67-T3 (optional).
+
+## Important context still relevant
+
+- **ADR-0012** (with two amendments) captures N10 + N13 design.
+- **ADR-0018** codifies N11 retirement criteria — read before any further retirement.
+- **`feedback_sweep_protocol.md`**: never hand-edit `pitfalls/*.yaml`. Discard sweep pollution with `git checkout pitfalls/`. The N10/N13 extractors are the only legitimate authors.
+- **`feedback_mock_design.md`**: mocks optimize for fast feedback, not realism. Mock gaps get fixed at source.
+- **Standing rules for autonomous execution** are in `docs/plans/slices-54-62-plan.md` § "Standing rules". S63–S67 inherits them all.
+
+## Older context
+
+- **Per-slice close-out notes for S54–S61** + **prior-session narratives back to 2026-05-30** live in `docs/status/ARCHIVE.md` (S54-S62 section).
+- **`STATUS.md`** has the rolling "current phase" log; older entries move to `docs/status/ARCHIVE.md` per the existing update policy.
+
+---
+
+## STATUS.md per-slice close-outs S63-S73 (archived 2026-06-02 at S74 prep)
+
+Trimmed when the S54-S73 GCP collapse was rolled up into a single "GCP phase2 prompt-collapse complete" milestone.
+
+## Current phase
+
+- **S73 — GCP phase2 rules 9 + 12 retired (project_service + project_iam_member family).** Two Category-A retirements based on a clarifying audit ("why are these not part of pitfalls?"): the real blocker to N13 self-learning was that the prompt rule was too effective — it prevented the LLM from ever introducing the resource, so no failure recorded for N13 to attribute. Executed N11 7-step protocol: deleted both rules + phase3 equivalents (rule 4 + rule 11), then re-ran 6 GCP scenarios (gcp-cloud-sql, gcp-cloud-run, gcp-storage, gcp-full-stack, gcp-iam, all twice). Every scenario passed `target_reached` with zero `google_project_service` / `google_project_iam_*` references in any generated HCL. The LLM doesn't reach for these resources even without the prompt rule — rule was redundant. Per ADR-0018 Category A: delete with no follow-up. GCP phase2 collapsed from 11 to 9 prescriptive rules (rules 1-8 system + rules 16+17 scenario-bound). N13's `learned_from_diff_avoid` could still capture these patterns IF a future scenario triggers them, but production behavior shows the LLM doesn't need the prompt rule to avoid them.
+- **S72 — AWS + Scaleway phase3 retirements landed. S68–S72 arc CLOSED.** Two Category-A retirements per ADR-0018:
+  - AWS phase3 rule 3 sub-bullet on `S3 bucket names include an account-synthetic or run-scoped suffix`. Re-ran `aws-s3` → target_reached iter 1 (LLM produced `bucket = var.bucket_name` correctly — the suffix is in the variable default).
+  - Scaleway phase3 rule 6.d on `Encryption at rest if required`. Re-ran `mysql-ha-paris` → target_reached iter 1 (LLM produced `encryption_at_rest = true` correctly).
+  - Both rules' violations had strong machine-readable signals (S3 `BucketAlreadyExists` from the runtime; OPA `encryption_at_rest not enabled` from the policy), so the auto-correction loop carries them. Eleventh and twelfth N11 retirements since the arc began (CMEK + firewall + GKE + SQL + GCS + VPC + AWS-RDS + SCW-RDB + SCW-LB + S3-suffix + SCW-encryption).
+  The S68–S72 arc is closed with 5 PRs (#43 S68, #44 S69, #45 S70, #46 S71, this S72 PR).
+- **S71 — M98 OPA known-after-apply audit closed.** Discovery: all four affected policies (`gcp/vpc_required.rego`, `gcp/encryption.rego`, `aws/vpc_required.rego`, `aws/encryption.rego`) already carry `after_unknown.X == true` branches — landed between 2026-05-23 and S60. The remaining 9 policies either inspect literal fields (region, plain bool, block presence) or use the `configuration` view (Scaleway `vpc_required`), so they're not affected. Empirical confirmation: the S63 39/39 sweep passed with no policy false-fire. S71 adds `TestOPAPoliciesM98KnownAfterApplyBranches` as a guard against accidental regression on the four fixes. BACKLOG M98 row updated to `done`.
+- **S70 — Permanent `cmd/n10extract` CLI landed.** Throwaway tool from the 2026-06-02 loop session promoted to a permanent command. Takes `--failed-dir` + `--passing-dir` + `--failure-detail` + `--failure-resource` + `--cloud` + `--scenario` + `--mode {fix,avoid}` and emits a candidate `LearnedPitfall` snippet as pitfalls-file YAML on stdout. `--run-dir <path>` shorthand auto-discovers the iter pair from `.infrafactory/runs/<scenario>/<run-id>/iterations/N/generated/` directories (picks last-failing + last-passing). Three unit tests pin the auto-discovery; smoke-tested against a real gcp-cloud-sql run dir (extracted the expected CMEK+private_network snippet). `make build` now also produces `bin/n10extract`. Stable forced-extract path for future N11 retirements (per ADR-0018) when the organic learn loop hasn't fired for the target pattern.
+- **S69 — M96 closed as superseded.** Audit found `ExtractLearnedPitfall` is not superseded by N10/N13 — they're layered, not competing. N10/N13 fire only on `target_reached` and produce prescriptive rules from real iter-pair diffs; M97 templates inside `ExtractLearnedPitfall` cover the still-stuck-runs niche where the auto-correction loop hasn't converged yet; the descriptive fallback is the last-resort base case when neither matches. M96's original question (path 1 vs path 2) was answered architecturally by the N10→N11→N13 sequence over Slices 54-67, not by changing `ExtractLearnedPitfall`. No code change; BACKLOG row marked done with the audit rationale, ADR-0012 amended with the four-layer extractor model.
+- **S68 — N3 classifier coverage gap closed.** Added two patterns to `IsMockActionable` from the S63 sweep audit: (a) `waiting for state to become '...'` (provider polling on a mock-side field that doesn't persist after Update — AWS KMS rotation, EC2 Subnet MapPublicIpOnLaunch, similar); (b) `empty result` (mock acks Create but Read returns 0 rows — aws_route53_record). The pre-existing `aws_subnet` `MapPublicIpOnLaunch` stale entry that the ratchet caught is removed from `pitfalls/aws.yaml`. Three new positive-case tests in `TestIsMockActionable_FivePositiveSignalClasses`. M91 ratchet was already source-aware and now enforces the new signals at CI time.
+- **S67 — `infrafactory mock reset` CLI command landed. S63–S67 arc CLOSED.** New subcommand resets every configured mock backend (mockway + fakegcp + fakeaws + s3 cascade via `cloudMockStateRouter.ResetAll`) in one call. Closes the S54 SeaweedFS state-leak gap: sweep harnesses no longer need a bare-curl carve-out to drop SeaweedFS buckets. Two unit tests pin the fan-out (with + without s3 configured). Smoke-tested against the live stack. With this, the entire S63–S67 arc is closed (5 PRs: #37 S63, #38 S64, #39 S65, #40 S66, this S67 PR).
+- **S66 — gcp-full-stack `google_apikeys_key` flake no longer reproducible.** Ran the scenario 5× consecutively (S66-T4): 4× target_reached iter 1 (164-266s), 1× target_reached iter 2 (414s). Zero `google_apikeys_key` mentions across any of the 5 logs — the LLM never reached for the unsupported resource. The S57 mock-gap was non-deterministic LLM behavior. Closing without a code change. Safety net: if the LLM reaches for `google_apikeys_key` in a future run, the apply will fail clearly (the resource isn't implemented by fakegcp); N13 should catch the removal organically once the LLM self-corrects.
+- **S65 — gcp-cloud-run `deletion_policy` flake no longer reproducible.** Ran the scenario 5× consecutively (S65-T1): 4× target_reached iter 1 (24-32s), 1× target_reached iter 2 (53s). No `deletion_policy` hallucination in any run. The S59 stuck-pattern was non-deterministic LLM behavior, not a systemic gap. Closing without a code change. Safety net: S64's case-insensitive N13 attribution + the existing `google_cloud_run_v2_service` `deletion_protection` learned pitfall mean any future recurrence would: (a) feed back through the dynamic correction loop, (b) self-learn into pitfalls via N13's `learned_from_diff_avoid` shape if the LLM removes the offending attr to clear it.
+- **S64 — N13 case-insensitive attribution CLOSED.** Closes finding (1) from S63's audit. `ExtractPrescriptiveAvoid` now matches removed attribute names against the failure detail in three forms — literal, case-insensitive snake_case, and camelCase (`map_public_ip_on_launch` → `MapPublicIpOnLaunch`). The AWS provider echoes JSON-side field names verbatim in many timeout errors, so the original strict-substring check missed legitimate deletion-as-fix patterns. New regression test pins the aws_subnet `MapPublicIpOnLaunch` shape; existing four N13 tests remain green. ADR-0012 amended. S63 audit findings (2) and (3) carried into S65/S66 (the two flake-triage slices) since both flakes also didn't recur in S63 — those slices become "verify reproducibility + close if stable" rather than fix-with-code.
+- **S63 — 39/39 deterministic sweep CLOSED.** Post-collapse re-validation across all 39 training scenarios: every scenario passed (`target_reached`) under the prompt-collapsed state from S54–S62. No regression from the six N11 retirements. Three audit findings carried into S64: (a) `aws_subnet` learned_from_diff false positive — N10 captured added attrs while the actual fix was a REMOVAL of `map_public_ip_on_launch` (N13 case but the failure detail used the camelCase `MapPublicIpOnLaunch` while the HCL attribute is `map_public_ip_on_launch`, so attribution missed); (b) two mock-actionable failures (`aws_kms_key` rotation timeout, `aws_route53_record` empty-result) bypassed the N3 classifier and landed in pitfalls as `learned`; (c) N13 didn't fire organically — the gcp-cloud-run `deletion_policy` flake from S59 didn't recur this sweep. Pitfall pollution discarded per protocol; the legitimate entries will re-emerge.
+- **S54–S62 sustain + prompt-collapse arc CLOSED.** Nine PRs merged (#26–#34). GCP phase2 prompt collapsed from 17 → 11 prescriptive rules. ADR-0018 codifies the three-category N11 retirement framework. The N10 → N11 → N13 sequence (addition + removal auto-derivation) is end-to-end across GCP + AWS + Scaleway.
+- Older milestones (S1–S53) are in `docs/status/ARCHIVE.md`.
