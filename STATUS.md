@@ -4,8 +4,9 @@ Last updated: 2026-06-03
 
 ## Current phase
 
-- 🎯 **Baseline: 39/39 deterministic, 0 panics** — robust modulo LLM transport. Sustain validated 2026-06-03 across 3 sweeps: 39/39 + 39/39 + 32/39, where 6 of 7 sweep-3 failures were pre-iter-1 LLM transport failures (Claude CLI quota/rate-limit, 5-9s durations) and the seventh (aws-route53) is a known convergence flake. Two clean sweeps prove the baseline isn't luck.
-- **Last arc complete**: `docs/plans/sustain-and-n13-durability-plan.md` — Option C's first goal-named arc. S94 landed `cmd/pitfall-merge/` (selectively preserves N13 entries through sweep teardown, discards `learned` + `learned_from_diff` as before; soft watchdog emits `N13_EMISSIONS=N`). S95 ran 3 sustain sweeps + folded close-out. N13 zero emissions across all 3 sweeps (no organic deletion-as-fix this cycle).
+- 🎯 **Baseline: 39/39 deterministic, 0 panics** — robust modulo LLM transport. Sustain validated 2026-06-03 across 3 sweeps: 39/39 + 39/39 + 32/39, where 6 of 7 sweep-3 failures were pre-iter-1 LLM transport failures and the seventh (`aws-route53`) is a known convergence flake.
+- **Next arc planned**: `docs/plans/post-sustain-tightening-plan.md` — second Option C arc. Four slices: (S96) aws-route53 flake fix; (S97) transport-failure classification in sweep_39.sh; (S98) retire GCP phase3 self-review rule #13 + AWS/Scaleway audit; (S99) extend OPA-dup ratchet to `prompts/*.md` + arc close-out. ~3.5–5.5 hr.
+- **Last arc complete**: `docs/plans/sustain-and-n13-durability-plan.md` — Option C's first goal-named arc. S94 landed `cmd/pitfall-merge/` (selectively preserves N13 entries through sweep teardown). S95 ran 3 sustain sweeps + folded close-out. N13 zero emissions across all 3 sweeps (no organic deletion-as-fix this cycle).
 
 ## Recent arcs
 
