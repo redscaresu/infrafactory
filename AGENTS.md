@@ -25,7 +25,7 @@ Additional references:
 | `docs/NEXT_SESSION.md` | Fresh-context handoff — points at the active arc + open follow-ups | At end of each meaningful coding session |
 | `docs/status/ARCHIVE.md` | Per-arc close-out narratives — durable history | At arc close-out |
 | `STATUS.md` | Current phase + recent arc summaries | At end of each meaningful coding session |
-| `BACKLOG.md` | M-ticket maintenance backlog (legacy slice tickets in `BACKLOG_ARCHIVE.md`) | When M-tickets are created/started/completed |
+| `BACKLOG.md` | M-ticket maintenance backlog (cross-arc work that doesn't fit the active arc). Stub today — no active M-tickets. Historical entries in `BACKLOG_ARCHIVE.md`. | When a maintenance need surfaces that doesn't belong in the active arc plan |
 | `CONCEPT.md` | Durable architecture, contracts, design decisions | Only for major architecture/design shifts |
 | `docs/decisions/*.md` | ADRs for decision-impacting changes | When change crosses ADR trigger threshold (see below) |
 
@@ -91,10 +91,9 @@ If either fails, restore the repo to a green baseline before starting a new tick
 - Visual baselines under `ui/e2e/visual.spec.ts-snapshots/` render live UI state — adding scenario YAMLs OR completing runs (which add rows to the Runs page) drifts them. Pre-commit hook auto-refreshes when `scenarios/training/*.yaml` changes (M56); for other drift, run `make ui-baseline-update` manually.
 - `make run` builds everything and starts the UI at `http://127.0.0.1:4173`.
 - `make up` is the one-shot bring-up: mockway + fakegcp + fakeaws + SeaweedFS + UI in one command. `make down` tears down the mocks (Ctrl-C stops the UI).
-- **Sweep protocol** (see `feedback_sweep_protocol.md` memory): during multi-scenario sweeps, treat failures as either (a) mock-server gaps → fix at source in fakeaws/fakegcp/mockway, never seed `pitfalls/*.yaml`; or (b) LLM-generated HCL mistakes → let auto-learning capture a pitfall; if descriptive-only, add an M97 prescriptive template. Pruning stale pitfalls AFTER a mock-source fix is fine; seeding new content is not (M91 "no-seeding ratchet" CI test enforces this).
-- **Next-session brief**: `docs/NEXT_SESSION.md` lists the 8 concrete follow-up tickets from the 2026-05-30/31 sweep. Always read this before starting work — earlier-session context lives there.
-- **Cross-repo cascade commits**: lifecycle-parity work spans infrafactory + a sibling mock (recent examples: M61 RDS = fakeaws@853d0aa + infrafactory@9fb3566; M62 Secrets Manager = same). Commit the mock-side change first (it's the dependency), then update infrafactory's e2e test or call sites that depend on the new mock behavior. All four repos use origin/main; push order matters.
-- **Demo recording tooling** (`./docs/demo/record.sh` for CLI, `make demo-ui` for UI): `asciinema` records terminal PTY → `.cast`; `agg` renders `.cast` → `.gif` (README-embeddable). Playwright records browser → `.webm`; `gifski` renders `.webm` → `.gif`. asciinema is a build-time dep only, never advertised in user-facing docs (README has been kept asciinema-free since M52).
+- **Sweep protocol** (see `feedback_sweep_protocol.md` memory): treat failures as either (a) mock-server gaps → fix at source in `fakeaws`/`fakegcp`/`mockway`, never seed `pitfalls/*.yaml`; or (b) LLM-generated HCL mistakes → let auto-learning capture a pitfall. Three CI ratchets enforce pitfall purity: `TestPitfallsNoHumanSeeding` rejects `source: seed`/`static`; `TestPitfallsNoMockActionableSeeds` rejects mock-actionable substrings; `TestPitfallsNoOPADuplication` rejects verbatim OPA-msg duplication. After-sweep cleanup: `git checkout pitfalls/` discards the additions (sweep noise), EXCEPT `learned_from_diff_avoid` which is preserved per the sustain-and-n13-durability arc.
+- **Cross-repo cascade commits**: lifecycle-parity work spans infrafactory + a sibling mock. Commit the mock-side change first (it's the dependency), then update infrafactory's e2e test or call sites that depend on the new mock behavior. All four repos use origin/main; push order matters.
+- **Demo recording tooling**: `asciinema` (CLI demo via `./docs/demo/record.sh`) → `.cast` → `agg` → `.gif`; Playwright (UI demo via `make demo-ui`) → `.webm` → `gifski` → `.gif`. Build-time dep only; never advertised in user-facing docs.
 
 ## Execution Loop (mandatory)
 1. Frame task with `docs/process/TICKET_TEMPLATE.md`.
