@@ -5,7 +5,9 @@ Last updated: 2026-06-03
 ## Current phase
 
 - 🎯 **Baseline: 39/39 deterministic, 0 panics** (achieved S90 in the S89–S93 arc). Full per-arc narratives in `docs/status/ARCHIVE.md`.
-- **Next arc planned**: `docs/plans/sustain-and-n13-durability-plan.md` — N13 durability (selective discard in sweep protocol so `learned_from_diff_avoid` entries survive) + 3 consecutive sustain sweeps to validate the baseline is stable. First goal-named arc under Option C (AGENTS.md § "Planning a New Arc"). ~3.5–5 hr.
+- **Active arc**: `docs/plans/sustain-and-n13-durability-plan.md` (first goal-named arc under Option C).
+  - **S94 (this PR)**: N13 durability. `cmd/pitfall-merge/` selectively preserves `learned_from_diff_avoid` entries through sweep teardown; `learned` + `learned_from_diff` discarded as before. Schema-enum ratchet + sweep-side `N13_EMISSIONS=N` counter (soft warn on zero).
+  - **S95 next**: three consecutive `make sweep-39` runs to validate the 39/39 baseline is stable + observe N13 emergence under the new protocol.
 
 ## Recent arcs
 
