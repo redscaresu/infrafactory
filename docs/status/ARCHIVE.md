@@ -1962,3 +1962,31 @@ First goal-named arc under Option C (no slice-count template; AGENTS.md § "Plan
 1. **aws-route53 flake** — single-scenario investigation, single PR. Reproduces. Read iterations/{1..5}/generated/*.tf, identify the oscillation, decide pitfall vs fakeaws fix.
 2. **LLM-transport robustness** — the sweep-3 tail (6 scenarios failing at iteration_1_generate in 5-9s) suggests the sweep harness should distinguish transport failures from convergence failures and retry the transport class. Bigger scope.
 3. **N13 organic exercise** — the infrastructure works but hasn't been exercised by a real emission. Either let it land naturally (next sweep that includes a deletion-as-fix), or design a test scenario that intentionally triggers N13. The latter is over-engineering; let it land naturally.
+
+## 2026-06-03 post-sustain tightening — close-out
+
+Second goal-named arc under Option C. Four slices, ~3.5 hr wallclock. Five PRs across two repos.
+
+- **S96** (fakeaws#7) — Route 53 fix. Two bugs identified via aws-route53 sweep-3 reproduction:
+  - `ListResourceRecordSets` walked storage order instead of lexicographic. Auto-inserted NS records sat before the user's A record; `terraform-provider-aws`'s per-record Read with `maxitems=1` returned the NS record and the A-record Read surfaced as "empty result". Fix: `sort.SliceStable` by `(normalised name, type, setIdentifier)` before applying the start-key filter.
+  - `ChangeTagsForResource` (POST `/tags/<type>/<id>`) was unregistered. `aws_route53_zone` with `tags = {}` 404'd; LLM oscillated between adding tags and dropping them. Fix: register handler, accept-and-ignore (zone tag storage not modeled; existing `ListTagsForResource` empty response round-trips cleanly).
+  - Two regression tests pin both fixes. End-to-end validated: aws-route53 converges iter 1.
+
+- **S97** (#78) — transport-failure classifier. Sweep 3 of the prior arc produced 6 scenarios failing at `iteration_*_generate` in 5–9s — Claude CLI rate-limit cluster, not LLM convergence. Without separating them, `PASS=X/39` conflated deterministic with transport flakes. Heuristic: `terminal=repair_budget_exhausted AND dur_s<30 AND only _generate stages failed` → reclassify as `transport_failed`. Emits `TRANSPORT_FAILED=N` alongside `PANIC_LINES=N`. The `PASS=` line gains a deterministic breakdown. Doesn't retry — that's a bigger arc on LLM-transport robustness. Validated against `/tmp/sweep-s95-3/`: 5/7 reclassified correctly.
+
+- **S98** (#79) — retire GCP phase3 self-review rule #13. The rule explicitly cited `region_restriction` OPA policy by name → textbook Category B per ADR-0018. Identified user-prompted during arc 89-93 but never executed. AWS + Scaleway phase3 audited for same shape: zero candidates (AWS has no OPA citations; Scaleway has one scenario-bound conditional that's Category C). Validated via gcp-cloud-run end-to-end iter 2.
+
+- **S99** (this PR) — extend OPA-dup ratchet to prompts. S82's `TestPitfallsNoOPADuplication` covered only `pitfalls/<cloud>.yaml`; rule #13 slipped past it. New `TestPromptsNoOPAPolicyCitations` collects `.rego` basenames per cloud and scans `prompts/<cloud>/*.md` for tight citation patterns (`<name>` OPA policy, `<name>` policy enforces, `<name>.rego`, etc.). Conservative — paraphrased mentions aren't caught (those are Category C). Verified retroactively: temporarily restoring rule #13 makes the test fire with the exact pattern `\`region_restriction\` OPA policy`.
+
+### Net deltas
+
+- **5 PRs landed across 2 repos**.
+- **One genuine flake resolved** (aws-route53) — next sustain sweep should hit 39/39 deterministic.
+- **Two ratchets now cover prompts AND pitfalls** for the OPA-duplication shape.
+- **Summary file sharper** — transport-blip noise no longer hides in `repair_budget_exhausted`.
+
+### Open follow-ups for next session
+
+1. **Sustain re-validation** — three more `make sweep-39` runs under the full S94+S96+S97+S98 protocol. Expected: 39/39 deterministic across multiple sweeps; transport failures correctly classified.
+2. **LLM-transport retry** — S97 classifies; the next step is retrying transport-class failures once before recording as failed. ~2-3 hr.
+3. **Layer 3 real-cloud validation** — still on the open-followups list from S93. Big arc; deferred.
