@@ -19,17 +19,16 @@ After this arc's fixes (fakeaws Route 53 sort + tag handler), aws-route53 conver
 - ✅ **S98** (#79): retire GCP phase3 self-review rule #13 (Category B — OPA `region_restriction` duplicate).
 - ✅ **S99** (this PR): extend OPA-dup ratchet to `prompts/<cloud>/*.md`.
 
-## Suggested next arc
+## Next arc planned
 
-The natural next move is a **sustain re-validation sweep** — three more `make sweep-39` runs to confirm the S96 + S97 + S98 fixes hold across multiple invocations. The classifier should split flakes cleanly into deterministic / transport. Likely a 1-2 slice arc:
+`docs/plans/sustain-revalidate-and-transport-retry-plan.md` — third Option C arc. Two slices, ~4–5 hr:
 
-- **Slice 1**: Three consecutive sweeps under the new protocol (S94 N13 durability + S97 transport classifier + S96 route53 fix). Document pass-count stability + transport-flake rate.
-- **Slice 2** (optional): arc close-out + STATUS/NEXT_SESSION/ARCHIVE update.
+- **S100**: three consecutive `make sweep-39` runs. Validates the post-sustain-tightening behavioural changes (S96 route53 fix, S97 transport classifier, S98 rule #13 retirement, S99 ratchet) hold collectively. Generates live transport-failure data for S101.
+- **S101**: LLM-transport retry in `sweep_39.sh`. When the existing S97 classifier detects a `transport_failed` shape mid-sweep, retry the scenario once before writing to `summary.tsv`. Emits `RETRY_TRANSPORT=N` + `RETRY_RECOVERED=M`. Arc close-out folded in per Option C.
 
-Alternative bigger-scope arcs (if you want to push into new territory):
+Order matters: sustain first so we know whether the recent fixes hold AND so we have real transport-failure data for S101 to validate against.
 
-- **LLM-transport retry** — now that S97 classifies transport failures, the next step is to RETRY them once before recording as failed. ~2-3 hr. Closes the transport noise.
-- **Layer 3 real-cloud validation** — still on the open-followups list from S93. Big arc; needs real cloud credentials and cleanup discipline.
+Autonomous-execution loop prompt at the bottom of the plan file.
 
 ## Sweep entry point
 
