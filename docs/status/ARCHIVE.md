@@ -1909,3 +1909,28 @@ Five slices, all closed in one session split across two calendar days:
 1. **aws-full-stack** `aws_secretsmanager_secret` LLM-soft-delete orphan_check. Fix shape: fakeaws Secrets Manager `DeleteSecret` should drop the secret immediately on delete (mirrors S77 KMS rotation pattern) — current behavior leaves it in PendingDeletion state, which the orphan_check reads as a leftover. Single-PR sibling-mock fix.
 2. **N13 hasn't fired on the SNC escape yet.** S85 added the pitfall manually as `source: learned`. A future organic exercise (LLM removes SNC across iters, run converges) would fire N13 and produce a `learned_from_diff_avoid` entry. Watch for it on the next sweep.
 3. **Consider dropping the 5-slice scaffold** for arcs where most substantive work is 1-2 fixes + 2-3 documentation slices. The S88 close-out template is friction for arcs that don't need it.
+
+## 2026-06-03 S89–S93 fakeaws Secrets Manager + AWS phase2 audit + 🎯 39/39 — close-out
+
+**First fully-deterministic 39-scenario sweep of the project.** Three PRs across two repos in ~3 hours of focused work.
+
+- **S89** (fakeaws#6) — `gatherSecretsManagerStateReal` now filters `PendingDeletion` + `Destroyed` from `/mock/state.secretsmanager.secrets`. The default `aws_secretsmanager_secret` `DeleteSecret` call leaves the row in `PendingDeletion` (30-day recovery window); the orphan-check was treating that as a leftover, but the secret IS gone from the user's perspective (`DescribeSecret` returns 404). Filter aligns `/mock/state` with AWS's contract. Handler + repository behaviour unchanged — `RestoreSecret` on `PendingDeletion` still works, the `TerminalStateRefusesRestore` / `PendingDeletionRoundTrip` / `DestroyedNotFoundContract` tests still pass. New regression test pinning the filter.
+
+- **S90** — post-S89 sweep: **39/39 target_reached, panic gate clean (0 lines).** `aws-full-stack` converged target_reached iter 1 / 273s (was S88's only failure). This is the first sweep that hit 39/39 since the deterministic baseline was set in S63.
+
+- **S91 + S92** (#69) — AWS phase2 audit per ADR-0018: **10/10 Category C, no retirements**. `docs/investigations/aws-phase2-audit-2026-06-03.md` documents per-rule rationale. Two rules (3: no data sources; 8: variable defaults required) initially flagged as B candidates but on closer reading are correctly Category C — diverse failure modes for rule 3 (5+ data-source variants would each need pitfalls); rule 8 is concise enough that a learned pitfall would say the same thing in more words. AWS phase2 was authored AFTER the auto-learning loop existed, so the original author already kept it system-contract-only. Unlike GCP phase2 (17 → 9 across S54–S73), there's no historical prescriptive content to retire. S92 closes as "no candidates" per the plan's explicit allowance.
+
+- **S93** (this PR) — close-out + **scaffold-question writeup under user-decision heading**. The agent does NOT commit to a new shape; the user picks. Three alternatives presented (A: keep 5-slice scaffold, B: single-PR arcs, C: goal-named variable-length arcs with mandatory close-out). Agent recommendation: Option C with one constraint (mandatory ARCHIVE + NEXT_SESSION update at arc end). No S94+ plan written — the user's shape choice drives that.
+
+### Net deltas
+
+- **🎯 39/39 deterministic.** First time. Sustained baseline now matches the headline goal.
+- **3 PRs landed** (fakeaws#6, infrafactory #69, this).
+- **AWS phase2 audited.** All prompt collapses across all three clouds are now done or formally concluded as not-applicable. The N11 retirement framework has nothing left to retire in any current prompt.
+- **Scaffold question framed for the user.** The arc's biggest non-code output: an explicit decision point on workflow rhythm that wasn't being made.
+
+### Open follow-ups for next session
+
+1. **User-decision: scaffold shape.** Pick A/B/C from the writeup. Agent then drafts a S94+ plan matching the chosen shape.
+2. **N13 organic exercise for the SNC pitfall.** S85 (prior arc) added the `google_service_networking_connection` pitfall manually. A future sweep where the LLM removes SNC across iterations would fire N13 and confirm the deletion-as-fix path organically.
+3. **`docs/mock-gaps.md` natural decay.** With 39/39 now baseline, the file's historical entries from earlier arcs are increasingly stale. No code-side action; the next sweep regenerates the file and stale entries fall out.
