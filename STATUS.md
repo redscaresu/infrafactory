@@ -4,6 +4,7 @@ Last updated: 2026-06-03
 
 ## Current phase
 
+- **Next arc planned**: `docs/plans/slices-89-93-plan.md` — fakeaws Secrets Manager soft-delete fix (S89-S90, targeting 39/39) + AWS phase2 audit per ADR-0018 (S91-S92, expected 0-2 retirements) + arc close-out with explicit scaffold-question reflection (S93). ~5-7 hr. Smallest arc since S54.
 - **S84–S88 arc complete (2026-06-03).** 38/39 sweep maintained; failure shape shifted from LLM-side to mock-side. Three PRs landed (#64, #65, #66). Highlights:
   - **gcp-full-stack converged** — was the persistent S81 failure on `google_service_networking_connection` escape. Root cause (S84): provider's servicenetworking pkg has an internal `retrieveProject` client that doesn't honor `cloud_resource_manager_custom_endpoint`. Fix (S85): `learned` pitfall instructing the LLM to use `ip_configuration.private_network` directly on `google_sql_database_instance` instead of declaring SNC. End-to-end validated iter 2 / 316s in the S88 sweep.
   - **fakegcp panic gate** — S86 found all 5 historical `plugin did not respond` mock-gap entries non-reproducible. S87 added a post-sweep panic detector to `scripts/sweep_39.sh` (greps fakegcp/fakeaws/mockway/s3router logs for `panic:` / `runtime error:` / `nil pointer dereference`, fails exit code 2 on hit). S88 sweep: zero panics detected.

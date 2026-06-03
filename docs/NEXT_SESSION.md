@@ -22,13 +22,15 @@ This is the same pattern as the historical `aws_iam_policy auto-seeded ARN` and 
 
 ## Suggested next arc
 
-**Single-focus debug + ratchet arc**:
-- **S89**: fakeaws Secrets Manager soft-delete fix (sibling-mock PR; small).
-- **S90**: post-fix `make sweep-39`; target 39/39.
-- **S91**: if 39/39: think about the *next* persistent failure to chase. If still <39: classify the new failure shape.
-- **S92-S93**: TBD — let S91 inform.
+**Planned**: `docs/plans/slices-89-93-plan.md` — five slices, ~5–7 focused hours (smallest arc since S54):
 
-Alternatively, drop the 5-slice scaffold and run focused 1-2 slice arcs while the deterministic baseline is steady. The 5-slice template is friction when most arcs are now 1-2 substantive fixes + 2-3 documentation slices.
+- **S89**: fakeaws Secrets Manager `DeleteSecret` immediate hard-delete (sibling-mock PR; same shape as S77 KMS rotation fix). Unblocks aws-full-stack.
+- **S90**: post-S89 39-scenario sweep + 39/39 confirmation.
+- **S91**: AWS phase2 audit per ADR-0018 (classify every rule Cat A/B/C). 10 rules; ~1 hr.
+- **S92**: Retire AWS phase2 Category-A candidates (0-2 expected; "no candidates" is a valid outcome).
+- **S93**: Post-retirement sweep + arc close-out + **explicit scaffold-question reflection** (whether the 5-slice template is still right for fix-driven arcs).
+
+Autonomous-execution loop prompt at the bottom of the plan file.
 
 **Sweep entry point**: `make sweep-39`. Output lands in `/tmp/sweep-39/summary.tsv` + `panics.log` + per-scenario logs.
 
