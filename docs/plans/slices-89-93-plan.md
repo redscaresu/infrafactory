@@ -36,7 +36,7 @@ Specifically for this arc:
 
 - **S89 is a fakeaws PR.** Land it in `../fakeaws` first, merge fakeaws-main, then rebuild + restart fakeaws locally so the sweep picks it up.
 - **AWS phase2 audit calibration.** Most of the 10 rules look Category C on a first read (system contract — provider pinning, file organisation, variable defaults). Realistic outcome: 0-2 retirements. Don't force retirements — Category C is a valid landing.
-- **S93 reflection is mandatory.** The S88 close-out flagged that the 5-slice scaffold is starting to feel heavy for arcs where most work is 1-2 substantive fixes + 2-3 documentation slices. S93 either commits to keeping the scaffold (with rationale) or proposes a lighter shape for the next arc.
+- **S93 scaffold-question writeup is mandatory, the decision is NOT the agent's.** The S88 close-out flagged that the 5-slice scaffold is starting to feel heavy for arcs where most work is 1-2 substantive fixes + 2-3 documentation slices. S93 writes the analysis (evidence + 2-3 alternative shapes + a recommendation with tradeoffs) under a "Scaffold question (user decision)" heading in NEXT_SESSION. The agent does NOT commit to a new shape. Don't pre-write S94+ — the user picks the shape first.
 
 ## S89 — fakeaws Secrets Manager `DeleteSecret` immediate-hard-delete
 
@@ -110,10 +110,10 @@ Execute the N11 7-step protocol on whatever S91 surfaced. The protocol: pick rul
 - 0-2 retirements landed (or "no candidates" formally documented).
 - No regression in impacted scenarios.
 
-## S93 — Post-retirement sweep + arc close-out + scaffold reflection
+## S93 — Post-retirement sweep + arc close-out + scaffold-question writeup
 
 ### Motivation
-Final sweep validates S89+S92 together. The scaffold reflection: was the 5-slice template still worth it for an arc where most substantive work was 1 mock fix + 0-2 prompt edits + 3 documentation slices?
+Final sweep validates S89+S92 together. The scaffold question — was the 5-slice template still worth it for an arc where most substantive work was 1 mock fix + 0-2 prompt edits + 3 documentation slices? — gets a **written analysis with options**. **The decision is the user's**, not the agent's. The agent prepares; the user picks.
 
 ### Tickets
 
@@ -121,11 +121,13 @@ Final sweep validates S89+S92 together. The scaffold reflection: was the 5-slice
 |---|---|---|---|
 | S93-T1 | `make sweep-39` post-S92. Verify no regression from S91/S92 prompt edits. | P0 | S92 |
 | S93-T2 | STATUS + NEXT_SESSION update. ARCHIVE per-slice narrative. | P0 | S93-T1 |
-| S93-T3 | **Scaffold reflection**: explicit written assessment in NEXT_SESSION. Either: "5-slice scaffold still right because X" OR "next arc should be Y-shape (e.g. 1-3 slices, drop the post-arc-sweep slice when it's deterministic)" — propose a concrete lighter shape. | P0 | S93-T2 |
+| S93-T3 | **Scaffold-question writeup**: in `docs/NEXT_SESSION.md` under a "Scaffold question (user decision)" heading, write a short analysis with: (a) evidence from S84–S88 and S89–S93 about where the 5-slice template helped vs. created friction, (b) 2-3 concrete alternative shapes (e.g. "1-3 slices, drop the post-arc-sweep slice when deterministic baseline holds"; "named-arc-by-goal instead of fixed-slice-count"; "keep 5-slice but allow slices to be 'skip with rationale'"), (c) the agent's recommendation with the main tradeoff. **No decision; no commit to a new shape.** | P0 | S93-T2 |
+| S93-T4 | When the next session starts and the user has chosen a shape, that choice drives the S94+ plan. Don't pre-write a S94+ plan in this arc. | P1 | S93-T3 |
 
 ### Exit criteria
 - Single uninterrupted sweep.
-- Arc close-out with explicit scaffold decision for the next arc.
+- Arc close-out written.
+- Scaffold-question analysis written under a clear "user decision" heading — no decision made.
 
 ## Why this order, in one paragraph
 
@@ -142,7 +144,7 @@ Work slices in order S89 → S90 → S91 → S92 → S93. S89 is a sibling-mock 
 
 Authority: open + merge PRs with `gh pr merge <N> --squash --admin --delete-branch` once CI is green, in all four repos. Discard auto-learning sweep pollution in pitfalls/*.yaml with `git checkout pitfalls/` — never hand-edit.
 
-S93 MUST include a written assessment of whether the 5-slice scaffold is still right for fix-driven arcs — either confirm with rationale OR propose a concrete lighter shape for the next arc.
+S93 MUST include a written analysis of whether the 5-slice scaffold is still right for fix-driven arcs: evidence + 2-3 alternative shapes + a recommendation with tradeoffs. **The decision is the user's, NOT the agent's.** Write under a "Scaffold question (user decision)" heading in `docs/NEXT_SESSION.md`. Do NOT commit to a new shape. Do NOT pre-write a S94+ plan — the user picks the shape first.
 
 Stop only when: (a) all 5 slices complete OR (b) you genuinely cannot proceed (regression in main blocks every scenario AND fix-forward isn't obvious — document the blocker in NEXT_SESSION + stop).
 
