@@ -8,8 +8,8 @@ Last updated: 2026-06-03
 - **Active arc**: `docs/plans/post-sustain-tightening-plan.md` (second Option C arc).
   - **S96 ✅** (fakeaws#7): aws-route53 fix — sort records lexicographically before maxitems=1 filter; add ChangeTagsForResource POST handler. End-to-end validated: aws-route53 converges iter 1.
   - **S97 in flight (this PR)**: transport-failure classification in `sweep_39.sh`. Heuristic (dur < 30s AND only `_generate` stage fails) reclassifies pre-iter-1 LLM transport failures as `transport_failed` distinct from `repair_budget_exhausted`. Dry-run on sweep-3 data: 5 reclassifications (5/9 of the sweep-3 tail correctly identified).
-  - **S98 next**: retire GCP phase3 self-review rule #13 + AWS/Scaleway audit.
-  - **S99 last**: extend OPA-dup ratchet to `prompts/*.md` + arc close-out.
+  - **S98 ✅ (this PR)**: retired GCP phase3 self-review rule #13 (region restriction — verbatim OPA duplicate). AWS/Scaleway phase3 audited: zero same-shape candidates. Validated: gcp-cloud-run converges iter 2 post-retirement, OPA `region_restriction.rego` enforces correctly.
+  - **S99 next**: extend OPA-dup ratchet to `prompts/*.md` + arc close-out.
 - **Last arc complete**: `docs/plans/sustain-and-n13-durability-plan.md` — Option C's first goal-named arc. S94 landed `cmd/pitfall-merge/` (selectively preserves N13 entries through sweep teardown). S95 ran 3 sustain sweeps + folded close-out. N13 zero emissions across all 3 sweeps (no organic deletion-as-fix this cycle).
 
 ## Recent arcs
