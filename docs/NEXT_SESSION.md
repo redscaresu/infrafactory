@@ -2,54 +2,41 @@
 
 Self-contained brief for a fresh Claude / engineer starting in this repo.
 
-## S79–S83 arc complete (2026-06-02)
+## S84–S88 arc complete (2026-06-03)
 
-All five slices landed. 38/39 deterministic sweep (+1 from S76's 37/39). Full close-out narrative in `docs/status/ARCHIVE.md` § "2026-06-02 S79–S83".
+All five slices landed. 38/39 deterministic sweep maintained; persistent failure shape shifted from LLM-side (S81: gcp-full-stack SNC escape) to mock-side (S88: aws-full-stack orphan_check on Secrets Manager soft-delete). Full close-out: `docs/status/ARCHIVE.md` § "2026-06-03 S84–S88".
 
-- ✅ **S79** — fakeaws#5 — KMS tag persistence.
-- ✅ **S80** — #59 — `cmd/s3router/` shim (architectural correction caught pre-execution).
-- ✅ **S81** — 38/39 sweep. N3 GCP-escape carve-out validated organically.
-- ✅ **S82** — #60 — N2 OPA-duplication ratchet + 3 dup deletions.
-- ✅ **S83** — this PR — arc close-out documentation.
+- ✅ **S84** — timeboxed investigation; root cause identified (`docs/investigations/gcp-full-stack-2026-06-03.md`).
+- ✅ **S85** — `learned` pitfall against `google_service_networking_connection`. End-to-end validated.
+- ✅ **S86** — fakegcp panic triage; all 5 historical mock-gap entries non-reproducible. Findings in `docs/investigations/fakegcp-panics-2026-06-03.md`.
+- ✅ **S87** — `scripts/sweep_39.sh` panic-detection gate.
+- ✅ **S88** — post-arc 39-scenario sweep (38/39, zero panics).
 
 ## READ FIRST (next session)
 
-**Persistent gcp-full-stack failure.** The S81 sweep's only failure was gcp-full-stack `repair_budget_exhausted` on `google_service_networking_connection` ACCESS_TOKEN_TYPE_UNSUPPORTED.
+**Persistent aws-full-stack failure** — different shape from S81's. Now `repair_budget_exhausted` via `stuck` on `orphan_check`: `aws_secretsmanager_secret` is not fully destroyed by the mock when the LLM removes it; the orphan_check sees the entry in `/mock/state` after destroy. Classifier already labels it `LLMSoftDelete` subshape.
 
-**Important architectural finding from S83 close-out:** `service_networking_custom_endpoint` IS already injected by `internal/cli/generate_command.go` (line 274). So the provider-block override exists. The fact that the request escapes anyway means one of:
+This is the same pattern as the historical `aws_iam_policy auto-seeded ARN` and `aws_subnet MapPublicIpOnLaunch` orphans (both now resolved). Fix shape: fakeaws Secrets Manager handler needs to honor the soft-delete window (real AWS sets the secret to PendingDeletion with a window, then garbage-collects). For test purposes, immediate hard-delete on `DeleteSecret` is fine — same approach S77 took for KMS.
 
-1. The LLM-generated HCL is defining a per-resource provider block / alias that overrides the global config.
-2. The provider's preflight `Projects.GetProject` is calling a different endpoint than the override targets (despite the comment block at lines 201-216 + `user_project_override = false` + `resource_manager_v3_custom_endpoint` already being set).
-3. fakegcp's `cloudresourcemanager.v1.Projects.GetProject` route is returning 401 itself for some reason.
-
-**Suggested first action:** read iterations/1..5 of `.infrafactory/runs/gcp-full-stack/<last>/iterations/N/generated/main.tf` (and related .tf files) and inspect whether the LLM is generating per-resource provider blocks or aliases. If yes — that's the LLM-side fix path (a pitfall rule against per-resource provider blocks). If no — the bug is in `generate_command.go`'s provider-config injection or fakegcp's preflight handler.
-
-Either way, this is a **focused debugging slice**, not a sibling-mock fix. The standing learning loop has already deposited two `source: learned` pitfalls naming the escape resources; the next sweep will exercise them.
+**Suggested S89-T1**: investigate fakeaws Secrets Manager `DeleteSecret` handler; either drop the secret immediately on delete (mirrors S77 KMS rotation pattern) or expose a `force_delete_without_recovery` short-circuit. Then re-run aws-full-stack.
 
 ## Suggested next arc
 
-**Planned**: `docs/plans/slices-84-88-plan.md` — five slices, ~8-14 focused hours:
+**Single-focus debug + ratchet arc**:
+- **S89**: fakeaws Secrets Manager soft-delete fix (sibling-mock PR; small).
+- **S90**: post-fix `make sweep-39`; target 39/39.
+- **S91**: if 39/39: think about the *next* persistent failure to chase. If still <39: classify the new failure shape.
+- **S92-S93**: TBD — let S91 inform.
 
-- **S84**: gcp-full-stack provider-config investigation (2-hr timebox).
-- **S85**: Land the gcp-full-stack fix (scope from S84 — LLM-side pitfall, infrafactory-side injection fix, or fakegcp-side handler fix).
-- **S86**: Triage the 4-5 fakegcp `plugin did not respond` mock-gaps entries.
-- **S87**: Fix the highest-impact fakegcp panic (one PR; rule-of-three for the rest).
-- **S88**: Post-fix 39-scenario sweep + arc close-out. Target: 39/39 deterministic.
+Alternatively, drop the 5-slice scaffold and run focused 1-2 slice arcs while the deterministic baseline is steady. The 5-slice template is friction when most arcs are now 1-2 substantive fixes + 2-3 documentation slices.
 
-Autonomous-execution loop prompt at the bottom of the plan file.
-
-**Sweep entry point**: `make sweep-39`. Output lands in `/tmp/sweep-39/`.
-
-## Open mock-gaps
-
-`docs/mock-gaps.md` is a git-untracked runtime artifact. Stale entries from prior sweeps (`aws_kms_key rotation`, `aws_subnet MapPublicIpOnLaunch`, `aws_route53_record empty result`) all now pass in the S81 sweep — they'll naturally drop when the file is regenerated. No action needed.
-
-The persistent GCP entries from S79–S83 era are addressed by the N3 carve-out routing them out of mock-gaps and into pitfalls (S78 + S81). The remaining `plugin did not respond` entries on fakegcp (`google_kms_crypto_key_iam_member`, `google_container_node_pool`, `google_compute_instance`, `google_sql_database_instance`) are the next sibling-mock arc candidates — likely fakegcp panics on a specific request shape.
+**Sweep entry point**: `make sweep-39`. Output lands in `/tmp/sweep-39/summary.tsv` + `panics.log` + per-scenario logs.
 
 ## Recent arcs (full close-outs in `docs/status/ARCHIVE.md`)
 
-- **S79–S83 arc** (2026-06-02): sibling-mock drainage + carve-out validation. 4 PRs.
-- **S74–S78 arc** (2026-06-02): AWS/Scaleway phase3 collapse + `make sweep-39` + N3 carve-out. 5 PRs.
-- **S68–S72 arc** (2026-06-02): N3 coverage + M96/M98 close-outs + `cmd/n10extract` CLI. 5 PRs.
-- **S63–S67 arc** (2026-06-02): 39/39 deterministic sweep, `infrafactory mock reset` CLI. 5 PRs.
-- **S54–S62 arc** (2026-06-02): 9 GCP retirements + ADR-0018 retirement framework. 9 PRs.
+- **S84–S88** (2026-06-03): gcp-full-stack convergence + panic gate. 3 PRs.
+- **S79–S83** (2026-06-02): sibling-mock drainage + carve-out validation. 4 PRs.
+- **S74–S78** (2026-06-02): AWS/Scaleway phase3 collapse + `make sweep-39` + N3 carve-out. 5 PRs.
+- **S68–S72** (2026-06-02): N3 coverage + M96/M98 close-outs + `cmd/n10extract` CLI. 5 PRs.
+- **S63–S67** (2026-06-02): 39/39 deterministic sweep, `infrafactory mock reset` CLI. 5 PRs.
+- **S54–S62** (2026-06-02): 9 GCP retirements + ADR-0018 retirement framework. 9 PRs.
