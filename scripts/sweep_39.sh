@@ -103,8 +103,36 @@ done
 panic_lines=$(wc -l < "$PANIC_LOG" | tr -d ' ')
 echo "PANIC_LINES=$panic_lines (summary at $PANIC_LOG)"
 
-# Per feedback_sweep_protocol.md: discard pitfall additions.
-git checkout pitfalls/ 2>/dev/null || true
+# S94 selective pitfall restoration. The blanket `git checkout pitfalls/`
+# discarded everything — including N13's `learned_from_diff_avoid` entries,
+# which are grounded in confirmed deletion-as-fix runs (iter N failed,
+# iter N+1 succeeded after removing a resource). Replace with a selective
+# merge that keeps only `learned_from_diff_avoid` from the post-sweep file
+# and discards `learned` + `learned_from_diff` as sweep noise.
+echo
+echo "=== N13 durability ==="
+if [ ! -x ./bin/pitfall-merge ]; then
+  echo "WARN: bin/pitfall-merge not found; falling back to blanket discard"
+  git checkout pitfalls/ 2>/dev/null || true
+  n13_total=0
+else
+  n13_total=0
+  for c in aws gcp scaleway; do
+    out=$(./bin/pitfall-merge \
+      --pre "$PRE/$c.yaml" \
+      --post "pitfalls/$c.yaml" \
+      --out "pitfalls/$c.yaml" \
+      --keep learned_from_diff_avoid 2>&1)
+    echo "  $c: $out"
+    added=$(echo "$out" | grep -oE 'kept_new=[0-9]+' | sed 's/kept_new=//')
+    n13_total=$((n13_total + ${added:-0}))
+  done
+fi
+
+echo "N13_EMISSIONS=$n13_total"
+if [ "$n13_total" = "0" ]; then
+  echo "WARN: zero learned_from_diff_avoid emissions this sweep — N13 silent. Could be (a) the LLM stopped making deletion-recoverable mistakes, or (b) N13 broken. Cross-reference next sweep before treating as a regression."
+fi
 
 # Exit non-zero if any panic surfaced — that's a real regression.
 if [ "$panic_lines" -gt 0 ]; then
