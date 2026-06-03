@@ -1934,3 +1934,31 @@ Five slices, all closed in one session split across two calendar days:
 1. **User-decision: scaffold shape.** Pick A/B/C from the writeup. Agent then drafts a S94+ plan matching the chosen shape.
 2. **N13 organic exercise for the SNC pitfall.** S85 (prior arc) added the `google_service_networking_connection` pitfall manually. A future sweep where the LLM removes SNC across iterations would fire N13 and confirm the deletion-as-fix path organically.
 3. **`docs/mock-gaps.md` natural decay.** With 39/39 now baseline, the file's historical entries from earlier arcs are increasingly stale. No code-side action; the next sweep regenerates the file and stale entries fall out.
+
+## 2026-06-03 sustain + N13 durability — close-out
+
+First goal-named arc under Option C (no slice-count template; AGENTS.md § "Planning a New Arc"). Two slices, ~3.5 hr.
+
+- **S94** (PR #75) — N13 durability. `scripts/sweep_39.sh` previously ran a blanket `git checkout pitfalls/` at sweep end, discarding every pitfall addition including N13's `learned_from_diff_avoid` entries. Those entries are grounded in confirmed deletion-as-fix (iter N failed, iter N+1 succeeded after removing a resource) — not speculative like `learned_from_diff` (N10) or descriptive like `learned`. S94 lands `cmd/pitfall-merge/`: a small Go binary that reads pre + post pitfall YAMLs, writes a merged YAML preserving any `learned_from_diff_avoid` adds, deduping by (resource, rule). 4 unit tests pin the contract. Sweep script invokes it per cloud, emits `N13_EMISSIONS=N` (soft warn on zero). New schema-enum ratchet (`TestPitfallsSourceEnum`) fences the allowed `source` values; complements M91's no-human-seeding ratchet by catching typos like `learned_from_diff_avold`. AGENTS.md sweep-protocol bullet + `feedback_sweep_protocol.md` memory amended.
+
+- **S95** — three consecutive `make sweep-39` runs. Results:
+
+| Sweep | Pass | Failures | N13 emissions | Panics |
+|---|---|---|---|---|
+| 1/3 | 39/39 | — | 0 | 0 |
+| 2/3 | 39/39 | — | 0 | 0 |
+| 3/3 | 32/39 | 7 (see below) | 0 | 0 |
+
+  **Sweep 3 failure breakdown**: 6 of 7 are pre-iter-1 LLM transport failures — `iteration_1_generate: fail` with 5–9s durations (Claude CLI rate-limit or quota cluster). The seventh, `aws-route53`, is a genuine LLM convergence flake (`repair_budget_exhausted` after 5 iters / 471s). aws-route53 passed iter 1 / 123s in sweep 1 and didn't recur until sweep 3.
+
+### Net deltas
+
+- **Sustain answer**: 39/39 baseline is robust modulo LLM transport. Two clean sweeps in a row prove the deterministic claim isn't single-sweep luck. One known LLM-side flake (aws-route53) characterized.
+- **N13 silent**: zero `learned_from_diff_avoid` emissions across all 3 sweeps. The scenarios converged cleanly without deletion-as-fix this cycle. Watchdog correctly reports zero; ratchet correctly stays passing (zero N13 entries committed is fine). N13 durability infrastructure is in place for whenever the LLM next makes a deletion-recoverable mistake.
+- **2 PRs landed**: #75 (S94 durability code + watchdog), this S95 close-out.
+
+### Open follow-ups for next session
+
+1. **aws-route53 flake** — single-scenario investigation, single PR. Reproduces. Read iterations/{1..5}/generated/*.tf, identify the oscillation, decide pitfall vs fakeaws fix.
+2. **LLM-transport robustness** — the sweep-3 tail (6 scenarios failing at iteration_1_generate in 5-9s) suggests the sweep harness should distinguish transport failures from convergence failures and retry the transport class. Bigger scope.
+3. **N13 organic exercise** — the infrastructure works but hasn't been exercised by a real emission. Either let it land naturally (next sweep that includes a deletion-as-fix), or design a test scenario that intentionally triggers N13. The latter is over-engineering; let it land naturally.

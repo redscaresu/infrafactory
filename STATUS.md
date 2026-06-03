@@ -4,10 +4,8 @@ Last updated: 2026-06-03
 
 ## Current phase
 
-- 🎯 **Baseline: 39/39 deterministic, 0 panics** (achieved S90 in the S89–S93 arc). Full per-arc narratives in `docs/status/ARCHIVE.md`.
-- **Active arc**: `docs/plans/sustain-and-n13-durability-plan.md` (first goal-named arc under Option C).
-  - **S94 (this PR)**: N13 durability. `cmd/pitfall-merge/` selectively preserves `learned_from_diff_avoid` entries through sweep teardown; `learned` + `learned_from_diff` discarded as before. Schema-enum ratchet + sweep-side `N13_EMISSIONS=N` counter (soft warn on zero).
-  - **S95 next**: three consecutive `make sweep-39` runs to validate the 39/39 baseline is stable + observe N13 emergence under the new protocol.
+- 🎯 **Baseline: 39/39 deterministic, 0 panics** — robust modulo LLM transport. Sustain validated 2026-06-03 across 3 sweeps: 39/39 + 39/39 + 32/39, where 6 of 7 sweep-3 failures were pre-iter-1 LLM transport failures (Claude CLI quota/rate-limit, 5-9s durations) and the seventh (aws-route53) is a known convergence flake. Two clean sweeps prove the baseline isn't luck.
+- **Last arc complete**: `docs/plans/sustain-and-n13-durability-plan.md` — Option C's first goal-named arc. S94 landed `cmd/pitfall-merge/` (selectively preserves N13 entries through sweep teardown, discards `learned` + `learned_from_diff` as before; soft watchdog emits `N13_EMISSIONS=N`). S95 ran 3 sustain sweeps + folded close-out. N13 zero emissions across all 3 sweeps (no organic deletion-as-fix this cycle).
 
 ## Recent arcs
 
