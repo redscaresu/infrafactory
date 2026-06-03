@@ -4,6 +4,7 @@ Last updated: 2026-06-03
 
 ## Current phase
 
+- **Next arc planned**: `docs/plans/sustain-and-n13-durability-plan.md` — first goal-named arc under Option C (no slice-count template). Two slices: (S94) N13 durability — selective discard in sweep protocol so `learned_from_diff_avoid` entries survive while `learned` + `learned_from_diff` still get discarded as today; (S95) three consecutive sustain sweeps to validate 39/39 stability + observe N13 emergence. ~3.5–5 hr.
 - **S89–S93 arc complete (2026-06-03). 🎯 39/39 deterministic sweep, panic gate clean.** First fully-deterministic sweep of the project. Three PRs (fakeaws#6 S89, infrafactory #69 S91+S92 audit, this commit S93). Highlights:
   - **aws-full-stack converged iter 1 / 273s.** Was the persistent S88 stuck case on `aws_secretsmanager_secret` LLMSoftDelete orphan_check. S89 fixed it: filter PendingDeletion + Destroyed from fakeaws's `/mock/state` so the orphan-check matches AWS's "secret is gone" semantics.
   - **AWS phase2 audit: 10/10 Category C.** No retirements. Documented in `docs/investigations/aws-phase2-audit-2026-06-03.md`. Unlike GCP phase2 (17 → 9 rules across S54–S73), AWS phase2 was authored after the auto-learning loop existed and was already system-contract-only.
