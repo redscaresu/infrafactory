@@ -59,6 +59,52 @@ while IFS= read -r sc; do
   printf "%-32s %-22s %-9s iters=%-2s dur=%ss ec=%s\n" "$name" "${terminal:-unknown}" "${status:-unknown}" "$iters" "$dur" "$ec"
 done < "$SWEEP_DIR/scenarios.txt"
 
+# S97 (2026-06-03): reclassify pre-iter-1 LLM transport failures.
+# Sustain sweep 3 produced 6 scenarios with shape:
+#   $name  repair_budget_exhausted  failed  2  5
+# Two iterations, 5-9s durations, both iterations failing at
+# iteration_*_generate (the claude CLI invocation itself — never
+# reached test or validate). That's a Claude rate-limit cluster, not
+# LLM convergence. Without separating them out, "X/39" conflates
+# deterministic flakes with transport blips.
+#
+# Heuristic: dur_s < 30 AND every iteration failed at the generate
+# stage (no _test or _validate failures). Approximate — false
+# positives surface as transport_failed rows the operator can
+# re-inspect; false negatives stay as repair_budget_exhausted (the
+# existing behaviour).
+#
+# Doesn't retry. That's bigger work (LLM-transport robustness arc).
+# S97 just classifies.
+echo
+echo "=== transport classifier ==="
+TRANSPORT_COUNT=0
+NEW_SUMMARY="$SWEEP_DIR/summary.tsv.new"
+: > "$NEW_SUMMARY"
+while IFS=$'\t' read -r name terminal status iters dur; do
+  if [ "$name" = "scenario" ]; then
+    echo -e "$name\t$terminal\t$status\t$iters\t$dur" >> "$NEW_SUMMARY"
+    continue
+  fi
+  if [ "$terminal" = "repair_budget_exhausted" ] && [ "${dur:-99}" -lt 30 ]; then
+    log="$SWEEP_DIR/$name.log"
+    if [ -f "$log" ]; then
+      # Every failed stage must be _generate; if ANY _test or _validate
+      # also failed, it's a real convergence problem, not transport.
+      test_fails=$(grep -cE '"stage_end".*"status":"failed".*"stage":"iteration_[0-9]+_(test|validate)"' "$log" 2>/dev/null)
+      generate_fails=$(grep -cE '"stage_end".*"status":"failed".*"stage":"iteration_[0-9]+_generate"' "$log" 2>/dev/null)
+      if [ "${test_fails:-0}" = "0" ] && [ "${generate_fails:-0}" -gt 0 ]; then
+        terminal="transport_failed"
+        TRANSPORT_COUNT=$((TRANSPORT_COUNT + 1))
+        echo "  $name reclassified: repair_budget_exhausted -> transport_failed (dur=${dur}s, generate_fails=$generate_fails, test_fails=0)"
+      fi
+    fi
+  fi
+  echo -e "$name\t$terminal\t$status\t$iters\t$dur" >> "$NEW_SUMMARY"
+done < "$SUMMARY"
+mv "$NEW_SUMMARY" "$SUMMARY"
+echo "TRANSPORT_FAILED=$TRANSPORT_COUNT"
+
 echo
 echo "=== summary ==="
 column -t -s$'\t' < "$SUMMARY"
@@ -72,7 +118,9 @@ done
 pass=$(awk -F$'\t' 'NR>1 && $2=="target_reached"' "$SUMMARY" | wc -l | tr -d ' ')
 total=$(awk -F$'\t' 'NR>1' "$SUMMARY" | wc -l | tr -d ' ')
 echo
-echo "PASS=$pass / TOTAL=$total"
+transport=$(awk -F$'\t' 'NR>1 && $2=="transport_failed"' "$SUMMARY" | wc -l | tr -d ' ')
+non_transport_total=$((total - transport))
+echo "PASS=$pass / TOTAL=$total (deterministic: $pass/$non_transport_total; transport_failed: $transport)"
 
 # S87 panic-detection gate. Mocks logs are not perfectly stable in
 # layout across `make mocks-up` vs `make mocks-up-containers`, so
