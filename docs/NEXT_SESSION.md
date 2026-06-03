@@ -11,6 +11,19 @@ First fully-deterministic 39-scenario sweep of the project. Three PRs landed (fa
 - ✅ **S91+S92** (#69) — AWS phase2 audit per ADR-0018: 10/10 Category C, no retirements. The prompt was already lean.
 - ✅ **S93** (this PR) — arc close-out + scaffold-question writeup (below).
 
+## Next arc planned
+
+`docs/plans/sustain-and-n13-durability-plan.md` — first goal-named arc under Option C. Two slices, ~3.5–5 hr:
+
+- **S94**: N13 durability — change the sweep protocol so `learned_from_diff_avoid` entries survive (`learned` + `learned_from_diff` still discarded as today). Add a static schema ratchet + sweep-side watchdog that counts N13 emissions per sweep.
+- **S95**: Three consecutive `make sweep-39` invocations to validate the 39/39 baseline is stable (not a single-sweep fluke) AND observe whether N13 emits + sticks. Arc close-out folded in per Option C.
+
+Autonomous-execution loop prompt at the bottom of the plan file.
+
+## Scaffold question — RESOLVED (Option C adopted)
+
+The S93 scaffold-question writeup proposed three shapes; the user picked Option C (goal-named, variable-length arcs, mandatory close-out). Codified in `AGENTS.md` § "Planning a New Arc" via PR #71 (2026-06-03). Original analysis preserved below for reference.
+
 ## Scaffold question (user decision)
 
 The S88 close-out flagged that the 5-slice scaffold is feeling heavy for arcs where most substantive work is 1-2 fixes + 2-3 documentation slices. S93 promised analysis + alternatives + recommendation; **the decision is yours**.
