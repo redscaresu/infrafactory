@@ -28,7 +28,7 @@ This is the same pattern as the historical `aws_iam_policy auto-seeded ARN` and 
 - **S90**: post-S89 39-scenario sweep + 39/39 confirmation.
 - **S91**: AWS phase2 audit per ADR-0018 (classify every rule Cat A/B/C). 10 rules; ~1 hr.
 - **S92**: Retire AWS phase2 Category-A candidates (0-2 expected; "no candidates" is a valid outcome).
-- **S93**: Post-retirement sweep + arc close-out + **explicit scaffold-question reflection** (whether the 5-slice template is still right for fix-driven arcs).
+- **S93**: Post-retirement sweep + arc close-out + **scaffold-question writeup** (agent writes the analysis + 2-3 alternative shapes + recommendation; **user picks the shape**, agent does NOT commit to one).
 
 Autonomous-execution loop prompt at the bottom of the plan file.
 
