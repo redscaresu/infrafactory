@@ -5,6 +5,7 @@ Last updated: 2026-06-03
 ## Current phase
 
 - 🎯 **Baseline: 39/39 deterministic, 0 panics** — robust modulo LLM transport. Sustain validated 2026-06-03 across 3 sweeps: 39/39 + 39/39 + 32/39, where 6 of 7 sweep-3 failures were pre-iter-1 LLM transport failures and the seventh (`aws-route53`) is a known convergence flake.
+- **Next arc planned**: `docs/plans/sustain-revalidate-and-transport-retry-plan.md` — third Option C arc. Two slices: (S100) three sustain sweeps to confirm the post-sustain-tightening behavioural changes hold collectively; (S101) LLM-transport retry in `sweep_39.sh` so detected `transport_failed` shapes get one retry before recording. Close-out folded into S101. ~4–5 hr.
 - **Last arc complete**: `docs/plans/post-sustain-tightening-plan.md` (second Option C arc). Five PRs landed.
   - **S96** (fakeaws#7): fakeaws Route 53 — sort records lexicographically before `maxitems=1` filter; add `ChangeTagsForResource` POST handler. aws-route53 converges iter 1 end-to-end.
   - **S97** (#78): transport-failure classifier in `sweep_39.sh`. Reclassifies pre-iter-1 Claude CLI failures as `transport_failed` distinct from `repair_budget_exhausted`. Dry-run on sweep-s95-3 data: 5/7 correctly reclassified.
