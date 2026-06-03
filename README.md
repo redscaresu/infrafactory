@@ -145,7 +145,7 @@ On failure, the structured failure (`layer`, `stage`, `check`, `detail`, `failur
 
 **Auto-learning loop**: when an iteration self-corrects (iter N+1 succeeds after iter N failed) OR a run terminates with `stuck`/`repair_budget_exhausted`, the failure detail is extracted into `pitfalls/<cloud>.yaml` so future runs of any scenario in that cloud see the lesson up front. Every entry is `source: learned` — the system seeds itself from real runs and a CI ratchet (`TestPitfallsNoHumanSeeding`) rejects hand-authored entries.
 
-When a run reaches `target_reached` AFTER ≥1 failing iteration, a second extractor (`source: learned_from_diff`) diffs the failing iteration's HCL against the passing iteration's HCL and emits the minimal HCL snippet that resolved the failure — prescriptive guidance derived from real runs, not hand-written. This unblocks the "prompt-collapse" arc: prescriptive rules in the phase-2 prompts retire as the system's learned pitfalls replace them. See `ADR-0012` for the dynamic-pitfalls contract and `docs/plans/slices-54-62-plan.md` for the active retirement plan.
+When a run reaches `target_reached` AFTER ≥1 failing iteration, a second extractor (`source: learned_from_diff`) diffs the failing iteration's HCL against the passing iteration's HCL and emits the minimal HCL snippet that resolved the failure — prescriptive guidance derived from real runs, not hand-written. This unblocked the "prompt-collapse" effort: prescriptive rules in the phase-2 prompts retired as the system's learned pitfalls replaced them. See `ADR-0012` (and the N11 retirement framework in `ADR-0018`) for the dynamic-pitfalls contract.
 
 ## Cloud coverage
 
