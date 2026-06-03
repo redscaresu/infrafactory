@@ -21,7 +21,7 @@ Additional references:
 
 | File | Purpose | When to update |
 |---|---|---|
-| `docs/plans/slices-<a>-<b>-plan.md` | 5-slice arc plan with tickets, exit criteria, autonomous-execution prompt | When planning the next arc |
+| `docs/plans/<arc-name>-plan.md` | Goal-named variable-length arc plan (typically 2-4 slices). Tickets, exit criteria, autonomous-execution prompt. | When planning the next arc |
 | `docs/NEXT_SESSION.md` | Fresh-context handoff — points at the active arc + open follow-ups | At end of each meaningful coding session |
 | `docs/status/ARCHIVE.md` | Per-arc close-out narratives — durable history | At arc close-out |
 | `STATUS.md` | Current phase + recent arc summaries | At end of each meaningful coding session |
@@ -31,10 +31,16 @@ Additional references:
 
 ## Planning a New Arc
 
-1. **Pick the next arc range** (e.g. S89–S93) — the next 5 slices.
-2. **Write the plan** at `docs/plans/slices-<a>-<b>-plan.md` modelled on the prior arc. Include: Big picture, Slices table, Standing rules, per-slice motivation + tickets + exit criteria, "Why this order", autonomous-execution loop prompt, fresh-context checklist.
-3. **Repoint** `STATUS.md` "Next arc planned" line + `docs/NEXT_SESSION.md` at the new plan.
-4. **Get approval** from the user before kicking off the autonomous loop.
+Arcs are **goal-named** and **variable-length** (typically 2-4 slices, sometimes up to 6 — but driven by the goal, not by a slice-count template). Adopted 2026-06-03 after the S89–S93 close-out (`docs/status/ARCHIVE.md` § "2026-06-03 S89–S93" → "Scaffold question").
+
+The shape:
+
+1. **Name the arc by goal**, not by slice numbers — e.g. "39/39 sustain validation", "fakegcp panic audit". Filename: `docs/plans/<arc-name>-plan.md` (kebab-case). The arc still numbers its slices sequentially (S94, S95, …) for cross-reference into commits / ARCHIVE entries.
+2. **Write the plan**: Big picture (what + why), Slices table (as many as the goal needs, including any sweep / audit / investigation steps), Standing rules (inherit from prior arcs), per-slice motivation + tickets + exit criteria, autonomous-execution loop prompt, fresh-context checklist.
+3. **No padding.** If the goal naturally fits in 2 slices, the plan is 2 slices. The 5-slice template from S54–S93 is retired.
+4. **Mandatory close-out**: every arc, regardless of length, ends with a `docs/status/ARCHIVE.md` per-arc section + `docs/NEXT_SESSION.md` update. The close-out can be the last slice or folded into the last substantive PR — but it has to happen. (The ARCHIVE entries are the project's institutional memory and the only thing that makes a fresh session bootable.)
+5. **Repoint** `STATUS.md` "Next arc planned" line + `docs/NEXT_SESSION.md` at the new plan.
+6. **Get approval** from the user before kicking off the autonomous loop.
 
 ADRs only when crossing the threshold below. Plan files are the slice ticket source — `BACKLOG.md` is only for cross-arc maintenance work (M-tickets).
 
@@ -52,7 +58,7 @@ When starting a new conversation, follow this checklist:
 7. `CONCEPT.md` (if major design context is needed)
 8. `docs/decisions/README.md` (+ relevant ADRs)
 
-The S54 → S88 work has been organised as 5-slice arcs rather than M-tickets. Each arc lives in `docs/plans/slices-<start>-<end>-plan.md` with an autonomous-execution loop prompt at the bottom. `docs/status/ARCHIVE.md` has per-arc close-out narratives.
+Slice work is organised as goal-named arcs (variable-length, typically 2-4 slices). Each arc lives in `docs/plans/<arc-name>-plan.md` with an autonomous-execution loop prompt at the bottom. `docs/status/ARCHIVE.md` has per-arc close-out narratives. Historical 5-slice arcs (S54–S93) live under `docs/plans/slices-<a>-<b>-plan.md`; the naming convention shifted at the S94 boundary.
 
 ### 2) Preflight
 ```bash
