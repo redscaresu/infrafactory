@@ -15,15 +15,16 @@ Self-contained brief for a fresh Claude / engineer starting in this repo.
 - ✅ **S94** (PR #75): N13 durability. `cmd/pitfall-merge/` selectively preserves `learned_from_diff_avoid` entries through sweep teardown; other sources still discarded. Schema-enum ratchet + sweep-side `N13_EMISSIONS=N` watchdog.
 - ✅ **S95**: 3 sustain sweeps (39/39, 39/39, 32/39 with transport tail) + arc close-out folded in.
 
-## Suggested next arc
+## Next arc planned
 
-Two natural follow-ups (you pick):
+`docs/plans/post-sustain-tightening-plan.md` — second goal-named arc under Option C. Four slices, ~3.5–5.5 hr:
 
-- **aws-route53 flake investigation** — single scenario, single PR. The flake reproduces (sweep 3 hit it after sweeps 1 + 2 didn't). Read `.infrafactory/runs/aws-route53/<sweep-3-failed-run>/iterations/{1..5}/generated/*.tf` and identify what oscillates. Likely outcome: a pitfall (Category C — load-bearing rule) or a fakeaws Route 53 handler fix. ~1-2 hr.
+- **S96**: aws-route53 flake fix. Investigation-first — either pitfall or fakeaws handler depending on what the iter HCL reveals.
+- **S97**: Transport-failure classification in `sweep_39.sh`. Detect "iter_1_generate fail in <30s" and report as `transport_failed` distinct from `repair_budget_exhausted`. Doesn't retry yet — just classifies so flake-budget characterization gets sharper.
+- **S98**: Retire GCP phase3 self-review rule #13 (Category B per ADR-0018, identified mid-arc-89-93 but never executed). Audit AWS + Scaleway phase3 for the same shape.
+- **S99**: Extend `TestPitfallsNoOPADuplication` to scan `prompts/*.md` — closes the gap that let rule #13 slip past S82. Arc close-out folded in.
 
-- **LLM-transport robustness** — the sweep-3 tail showed 6 scenarios failing at `iteration_1_generate` with 5-9s durations. That's the Claude CLI hitting some limit and failing fast. Make the sweep harness more resilient: detect the transport-failure shape vs convergence-failure shape, retry the transport class once, distinguish in `summary.tsv`. ~2-3 hr.
-
-The aws-route53 flake is the smaller-scope option with a clearer payoff (39/39 sustained). LLM-transport robustness is broader infra-quality work.
+Autonomous-execution loop prompt at the bottom of the plan file.
 
 ## Sweep entry point
 
