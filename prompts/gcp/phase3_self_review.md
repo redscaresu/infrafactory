@@ -54,7 +54,6 @@ Verify compliance with these known pitfalls:
 2. **Syntax**: Is the HCL valid? Are all blocks properly closed?
 3. **Provider**: Is the `hashicorp/google` provider configured correctly? No `credentials` attribute in the provider block (env vars supply auth)?
 7. **No public IPs on instances**: Unless the scenario explicitly requires one, `google_compute_instance.network_interface` should NOT include an `access_config` block (which would assign an ephemeral public IP).
-13. **Region restriction**: Are all `region` and `location` values in the allowed list (default: `us-central1`, `europe-west1`, `europe-west4`)? Zones must be children of an allowed region (e.g. `us-central1-a`). The `region_restriction` OPA policy enforces this.
 14. **Acceptance criteria**: Will the generated infrastructure pass each criterion?
     - Connectivity checks: are subnetworks and firewall rules configured correctly?
     - HTTP probes: are `google_compute_forwarding_rule` / backend services / health checks set up?
