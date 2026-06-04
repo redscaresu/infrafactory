@@ -11,6 +11,7 @@ Build `infrafactory`, a Go CLI + SvelteKit UI that generates and validates OpenT
 3. `CONCEPT.md` prose
 
 Additional references:
+- Auto-learning loop deep-dive: `docs/auto-learning-loop.md` — single explainer for N3/N10/N13/M97 + ratchets + sweep protocol + worked example
 - ADRs: `docs/decisions/*.md`
 - Prompts: `prompts/*.md`
 - Pitfalls: `pitfalls/{cloud}.yaml` — provider-specific rules loaded at runtime by scenario `cloud` field
