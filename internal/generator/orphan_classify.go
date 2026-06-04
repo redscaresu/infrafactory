@@ -13,7 +13,7 @@ package generator
 // The single `orphan_check detected N orphaned resources` failure
 // signature collapses these distinct root causes. The auto-learning
 // pipeline previously couldn't act on any of them — the failure
-// detail names no resource (only a count), so ExtractLearnedPitfall
+// detail names no resource (only a count), so ExtractDescriptivePitfall
 // returned nil and the run terminated `stuck` after 2 iterations.
 //
 // This extractor needs the live `/mock/state` snapshot (not just

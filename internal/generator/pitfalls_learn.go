@@ -12,15 +12,16 @@ import (
 
 // LearnedPitfall represents a pitfall discovered from run feedback.
 //
-// Source is OPTIONAL. When empty, AppendPitfall defaults to "learned"
-// (the legacy symptom-extraction path in ExtractLearnedPitfall). N10
-// callers set Source = PrescriptiveSource ("learned_from_diff") so
-// the YAML file records which entries were derived from observed HCL
-// changes vs. raw failure text.
+// Source is OPTIONAL. When empty, AppendPitfall defaults to "descriptive"
+// (the symptom-extraction path in ExtractDescriptivePitfall).
+// Callers of ExtractFixPitfall / ExtractAvoidPitfall set Source =
+// FixSource ("fix") or AvoidSource ("avoid") so the YAML file records
+// which entries were derived from observed HCL diffs vs. raw failure
+// text.
 type LearnedPitfall struct {
 	Resource       string
 	Rule           string
-	Source         string // optional: empty defaults to "learned"
+	Source         string // optional: empty defaults to "descriptive"
 	DiscoveredFrom string // scenario name
 }
 
@@ -177,7 +178,7 @@ type MockGap struct {
 // for the matching mock repo's maintainers. Each entry is a row in
 // a per-cloud table.
 //
-// Caller pattern: see IsMockActionable godoc.
+// Caller pattern: see IsMockServerBug godoc.
 func AppendMockGap(docsDir string, gap MockGap) error {
 	if docsDir == "" {
 		return fmt.Errorf("docs dir is required")
@@ -216,7 +217,7 @@ func AppendMockGap(docsDir string, gap MockGap) error {
 			"mistakes. They belong against the matching mock repo\n" +
 			"(`fakeaws`, `fakegcp`, `mockway`), NOT in `pitfalls/<cloud>.yaml`.\n\n" +
 			"Entries dedup on (cloud, signal, resource). See\n" +
-			"`internal/generator/pitfalls_learn.go::IsMockActionable` for\n" +
+			"`internal/generator/pitfalls_learn.go::IsMockServerBug` for\n" +
 			"the detection signals.\n\n"
 	}
 
@@ -265,7 +266,7 @@ func AppendMockGap(docsDir string, gap MockGap) error {
 // FirstMockSignal returns the first mock-actionable signal that
 // matched the given detail (lowercased, exactly as in
 // mockActionableSignals). Returns "" if no signal matches — callers
-// typically guard with IsMockActionable first.
+// typically guard with IsMockServerBug first.
 func FirstMockSignal(detail string) string {
 	if detail == "" {
 		return ""
@@ -286,7 +287,7 @@ func ExtractResourceFromDetail(detail string) string {
 	return extractResource(detail)
 }
 
-// IsMockActionable reports whether a failure detail is rooted in a
+// IsMockServerBug reports whether a failure detail is rooted in a
 // mock-server gap (missing route, wrong response shape, auth escape,
 // stale state) rather than an LLM-generated HCL mistake. Mock-
 // actionable failures should NOT be auto-learned into
@@ -298,13 +299,13 @@ func ExtractResourceFromDetail(detail string) string {
 //
 // Caller pattern (run_command.go):
 //
-//	if generator.IsMockActionable(failure.Detail) {
+//	if generator.IsMockServerBug(failure.Detail) {
 //	    generator.AppendMockGap(docsDir, cloud, gap)  // routes here
 //	    continue
 //	}
-//	learned := generator.ExtractLearnedPitfall(failure.Detail, scenario)
+//	learned := generator.ExtractDescriptivePitfall(failure.Detail, scenario)
 //	// ... existing path
-func IsMockActionable(detail string) bool {
+func IsMockServerBug(detail string) bool {
 	if detail == "" {
 		return false
 	}
@@ -356,10 +357,10 @@ func containsLLMActionableEscapeResource(detail string) bool {
 	return false
 }
 
-// ExtractLearnedPitfall analyzes a failure detail string and extracts
+// ExtractDescriptivePitfall analyzes a failure detail string and extracts
 // a pitfall rule if the error is specific enough to be useful.
 // Returns nil if the error is too vague (e.g., "test checks failed").
-func ExtractLearnedPitfall(failureDetail, scenarioName string) *LearnedPitfall {
+func ExtractDescriptivePitfall(failureDetail, scenarioName string) *LearnedPitfall {
 	if failureDetail == "" {
 		return nil
 	}
@@ -571,7 +572,7 @@ func resourceOwningAttribute(detail, attr string) string {
 // error shape. On hit it returns a *LearnedPitfall whose Rule is
 // ACTIONABLE — tells the LLM what HCL to write — rather than just
 // echoing the failure ("X has no Y"). The descriptive fallback in
-// ExtractLearnedPitfall remains for shapes none of these match.
+// ExtractDescriptivePitfall remains for shapes none of these match.
 
 // matchMissingSubnetwork — "no network or subnetwork" / "no
 // network_interface.subnetwork" failures on compute instances + GKE
@@ -811,12 +812,12 @@ func matchDestroyBlockers(detail, scenario string) *LearnedPitfall {
 }
 
 // pitfallSource returns the Source string for a learned pitfall,
-// defaulting to "learned" when the caller didn't explicitly set one.
-// N10's ExtractPrescriptiveFix sets Source = PrescriptiveSource so
+// defaulting to "descriptive" when the caller didn't explicitly set one.
+// N10's ExtractFixPitfall sets Source = FixSource so
 // diff-derived rules are distinguishable in the YAML file.
 func pitfallSource(p LearnedPitfall) string {
 	if p.Source == "" {
-		return "learned"
+		return "descriptive"
 	}
 	return p.Source
 }
@@ -871,15 +872,15 @@ func AppendPitfall(pitfallsDir, cloud string, pitfall LearnedPitfall) error {
 		}
 	}
 
-	// learned → learned_from_diff upgrade: a prescriptive HCL-snippet
-	// rule (N10's PrescriptiveSource) strictly dominates a same-resource
-	// symptom-only `learned` entry. Without this, the older descriptive
+	// learned → fix upgrade: a prescriptive HCL-snippet
+	// rule (N10's FixSource) strictly dominates a same-resource
+	// symptom-only `descriptive` entry. Without this, the older descriptive
 	// rule's significant-word overlap with the prescriptive snippet trips
 	// isDuplicate and the diff entry is silently dropped. Replace in
 	// place: keeps the YAML file flat and surfaces the actionable form.
-	if pitfall.Source == PrescriptiveSource {
+	if pitfall.Source == FixSource {
 		for i, entry := range pf.Pitfalls {
-			if entry.Resource == pitfall.Resource && entry.Source != PrescriptiveSource {
+			if entry.Resource == pitfall.Resource && entry.Source != FixSource {
 				pf.Pitfalls[i] = PitfallEntry{
 					Resource:       pitfall.Resource,
 					Rule:           pitfall.Rule,
@@ -948,7 +949,7 @@ func writePitfallsFile(pitfallsDir, filePath, cloud string, pf *PitfallsFile) er
 }
 
 // isVerbatimFallback returns true if a rule is a raw terraform stderr
-// dump (the descriptive fallback ExtractLearnedPitfall returns when no
+// dump (the descriptive fallback ExtractDescriptivePitfall returns when no
 // M97 template fires). Detection signals: terraform box-drawing chars
 // or the "exit status 1 | stderr:" envelope prefix. AppendPitfall uses
 // this to allow a later prescriptive rule to UPGRADE an older verbatim

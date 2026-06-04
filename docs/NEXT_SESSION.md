@@ -12,22 +12,20 @@ Self-contained brief for a fresh Claude / engineer starting in this repo.
 
 ## Last arc complete
 
-`docs/plans/sustain-revalidate-and-transport-retry-plan.md` — third Option C arc. Full close-out: `docs/status/ARCHIVE.md` § "2026-06-04 sustain re-validation + transport retry".
+`docs/plans/mock-gaps-and-rename-plan.md` — fourth Option C arc. Full close-out: `docs/status/ARCHIVE.md` § "2026-06-04 mock-gaps drain + learning-system rename".
 
-- ✅ **S100**: three sustain sweeps. S96 + S98 confirmed durable. S97 classifier gap identified (only `_generate` stage); fed forward into S101's broadened predicate.
-- ✅ **S101** (this PR): in-loop transport retry covering both `_generate` and `_validate` stage transport failures.
+- ✅ **S102** (mockway#5): enriched mockway domain 404s with `resource` + `resource_id` so scaleway-sdk-go formats `Error()` readably. Verified live on web-app-paris.
+- ✅ **S103** (#84): 13 stale `docs/mock-gaps.md` entries pruned; file moved to `.gitignore`; drainage protocol documented.
+- ✅ **S104** (this PR): atomic rename of the auto-learning vocabulary. `IsMockActionable → IsMockServerBug`; `ExtractPrescriptive{Fix,Avoid} → Extract{Fix,Avoid}Pitfall`; `ExtractLearnedPitfall → ExtractDescriptivePitfall`. Binary `cmd/n10extract → cmd/extract-pitfall`. YAML `source:` enum migrated atomically (`learned → descriptive`, `learned_from_diff → fix`, `learned_from_diff_avoid → avoid`).
 
 ## Suggested next arc
 
-- **`mock-gaps drain + learning-system rename`** (drafted 2026-06-04, `docs/plans/mock-gaps-and-rename-plan.md`). 3 slices (S102 + S103 + S104), ~5-7 hr. S102 diagnoses the 2026-06-04 probe-sweep web-app-paris empty-ID failure. S103 replays + prunes the 13 historical mock-gaps.md entries. S104 renames N3/N10/N13/M97 → Fix/Avoid scheme atomically (see `docs/tickets/rename-learning-system.md` for locked decisions) and folds close-out.
-
-Other candidates if the above is deferred:
-- **Sustain another 3 sweeps under the S101 retry** — confirms the retry actually fires + recovers in practice (S101 was implemented + dry-run-validated, not exercised live on a real transport hit yet). ~2-3 hr wallclock.
+- **Sustain another 3 sweeps under the renamed vocabulary** — confirms classifier + extractors + selective-discard still route correctly post-rename. ~2-3 hr wallclock. Smallest scope; validates the rename in production conditions.
 - **Layer 3 real-cloud validation** — open since S93. Genuinely deploys to real AWS/GCP/Scaleway. Big arc (cloud credentials, money, cleanup discipline). High value but high coordination cost.
 
 ## Open tickets
 
-- **`docs/tickets/rename-learning-system.md`** (decisions locked 2026-06-04) — **now folded into the next arc as S104.** Execution context for the rename slice; not a standalone ticket anymore.
+None — `docs/tickets/rename-learning-system.md` closed by S104.
 
 ## Sweep entry point
 

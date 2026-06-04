@@ -180,7 +180,7 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 			// failures and persist them for future runs. Mirrors the oscillation
 			// path's cross-cloud isolation — a GCP scenario whose detail had no
 			// resource name would otherwise pick up a Scaleway-flavoured fallback
-			// from ExtractLearnedPitfall and pollute pitfalls/gcp.yaml.
+			// from ExtractDescriptivePitfall and pollute pitfalls/gcp.yaml.
 			if iteration > 1 && len(previousIterationFailures) > 0 {
 				cloud := sc.Cloud
 				for _, failure := range previousIterationFailures {
@@ -191,7 +191,7 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 					// Writing them as pitfalls teaches the LLM to
 					// avoid valid resources because the mock is
 					// incomplete — the system narrows over time.
-					if generator.IsMockActionable(failure.Detail) {
+					if generator.IsMockServerBug(failure.Detail) {
 						gap := generator.MockGap{
 							Cloud:     cloud,
 							Signal:    generator.FirstMockSignal(failure.Detail),
@@ -221,7 +221,7 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 						}
 						continue
 					}
-					learned := generator.ExtractLearnedPitfall(failure.Detail, sc.Name)
+					learned := generator.ExtractDescriptivePitfall(failure.Detail, sc.Name)
 					if learned == nil {
 						continue
 					}
@@ -256,7 +256,7 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 			// N10 diff-extractor sees the failed→passing pair. Without
 			// this, len(iterationHistory) stays at the count of failed
 			// iters and the simple "1 fail → 1 pass" case skips
-			// ExtractPrescriptiveFix entirely (the loop's `len > 1`
+			// ExtractFixPitfall entirely (the loop's `len > 1`
 			// guard never fires).
 			iterationHistory = append(iterationHistory, feedback.IterationResult{
 				Iteration: iteration,
@@ -361,7 +361,7 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 	//
 	// New behavior: scan every iteration's failures, dedupe by
 	// (resource, normalized-detail), and run each unique candidate
-	// through ExtractLearnedPitfall. NormalizeDetail collapses
+	// through ExtractDescriptivePitfall. NormalizeDetail collapses
 	// cosmetic shifts (line numbers, `web_0` vs `web[*]`, "Did you
 	// mean") so the same logical bug isn't recorded twice in one run;
 	// AppendPitfall's isDuplicate then handles cross-run dedup.
@@ -386,7 +386,7 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 			// 2026-06-01 sweep showed gcp-cloud-run, gcp-cloud-sql,
 			// gcp-gke-cluster, gcp-storage all re-learning the same
 			// OAuth-escape + plugin-crash rules N2 just pruned.
-			if generator.IsMockActionable(f.Detail) {
+			if generator.IsMockServerBug(f.Detail) {
 				gap := generator.MockGap{
 					Cloud:     sc.Cloud,
 					Signal:    generator.FirstMockSignal(f.Detail),
@@ -416,11 +416,11 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 				}
 				continue
 			}
-			learned := generator.ExtractLearnedPitfall(f.Detail, sc.Name)
+			learned := generator.ExtractDescriptivePitfall(f.Detail, sc.Name)
 			if learned == nil {
 				continue
 			}
-			// ExtractLearnedPitfall has Scaleway-flavoured fallbacks
+			// ExtractDescriptivePitfall has Scaleway-flavoured fallbacks
 			// (scaleway_redis_cluster, scaleway_k8s_cluster) that fire
 			// when the failure detail names no resource. Don't pollute
 			// pitfalls/<otherCloud>.yaml with cross-cloud resource
@@ -458,7 +458,7 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 			})
 		}
 
-		// N9: orphan_check extractor. ExtractLearnedPitfall produces
+		// N9: orphan_check extractor. ExtractDescriptivePitfall produces
 		// nothing for orphan_check failures because the failure detail
 		// names no resource (only a count). Route through
 		// generator.ClassifyOrphans which cross-references the live
@@ -587,7 +587,7 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 	// When a run eventually passes after at least one failing iteration,
 	// diff the last-failing iter's HCL against the first-passing iter's
 	// HCL and extract a prescriptive pitfall for each cleared failure.
-	// Closes the symptom-only gap in ExtractLearnedPitfall: today the
+	// Closes the symptom-only gap in ExtractDescriptivePitfall: today the
 	// system learns WHAT failed; with N10 it also learns the HCL
 	// pattern that FIXED it.
 	//
@@ -613,7 +613,7 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 				if _, stillFailing := currKeys[key]; stillFailing {
 					continue
 				}
-				entry, err := generator.ExtractPrescriptiveFix(
+				entry, err := generator.ExtractFixPitfall(
 					failedDir, passingDir,
 					cleared.Detail, cleared.Resource,
 					sc.Cloud, sc.Name, runID,
@@ -645,7 +645,7 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 				// Runs on the same cleared-failure cursor — the two
 				// extractors capture different patterns and either or
 				// both may emit per pair.
-				avoidEntry, err := generator.ExtractPrescriptiveAvoid(
+				avoidEntry, err := generator.ExtractAvoidPitfall(
 					failedDir, passingDir,
 					cleared.Detail, cleared.Resource,
 					sc.Cloud, sc.Name, runID,

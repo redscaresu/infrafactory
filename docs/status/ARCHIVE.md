@@ -2,6 +2,36 @@
 
 Historical snapshots and older session notes can be moved here to keep `STATUS.md` concise.
 
+## 2026-06-04 mock-gaps drain + learning-system rename arc close-out
+
+Fourth Option C arc. Three slices: S102 (web-app-paris diagnosis + mockway fix), S103 (drain stale mock-gaps entries), S104 (rename N3/N10/N13/M97 → Fix/Avoid + close-out).
+
+**S102** (mockway#5, merged): mockway domain handlers (GetDNSZone, UpdateDNSZone, DeleteDNSZone, PatchDomainRecords, ListDomainRecords) now return `resource` + `resource_id` fields in 404 responses. scaleway-sdk-go's `ResourceNotFoundError` unmarshals those fields to format `Error()`; without them the SDK printed `resource  with ID  is not found` (empty type + empty id) which was uninterpretable for both humans and the auto-learning loop. Verified live: web-app-paris replay now reports `Error: scaleway-sdk-go: resource dns_zone with ID example.com is not found`. Classifier did NOT need widening — the failure was correctly LLM-side (missing zone declaration); only the fidelity bug was obscuring it.
+
+**S103** (#84, merged): the 13 historical `docs/mock-gaps.md` entries from 2026-06-01/02 verified stale (probe sweep passed every `discovered_from`). File moved to `.gitignore` as a per-host runtime artifact. Drainage protocol documented in `docs/auto-learning-loop.md` § "mock-gaps drainage"; AGENTS.md sweep-protocol bullet extended with the cadence guideline.
+
+**S104** (this PR): atomic rename of the auto-learning vocabulary from slice-ID names to concept-based names.
+
+| Layer | Was | Now |
+|---|---|---|
+| Classifier | `IsMockActionable` | `IsMockServerBug` |
+| Fix extractor | `ExtractPrescriptiveFix` (N10) | `ExtractFixPitfall` |
+| Avoid extractor | `ExtractPrescriptiveAvoid` (N13) | `ExtractAvoidPitfall` |
+| Descriptive fallback | `ExtractLearnedPitfall` | `ExtractDescriptivePitfall` |
+| Binary | `cmd/n10extract` / `bin/n10extract` | `cmd/extract-pitfall` / `bin/extract-pitfall` |
+| YAML `source:` | `learned` / `learned_from_diff` / `learned_from_diff_avoid` | `descriptive` / `fix` / `avoid` |
+| Sweep keep-flag | `--keep learned_from_diff_avoid` | `--keep avoid` |
+| Sweep summary line | `N13_EMISSIONS=N` | `AVOID_EMISSIONS=N` |
+| CI ratchet | `TestPitfallsNoMockActionableSeeds` | `TestPitfallsNoMockServerBugSeeds` |
+
+Atomic cutover: code identifiers + binary + YAML migration + loader enum + sweep harness + 4 READMEs + AGENTS.md + auto-learning-loop.md all in the same PR. No grace period — old enum values rejected by the loader from the first commit.
+
+Slice IDs remain in commit history, ARCHIVE entries, ADRs, and memory pointers as historical attribution — they're not active vocabulary anymore but they were the names when each piece was introduced. Future readers can map them via `docs/auto-learning-loop.md` § "Historical note: the slice-ID names".
+
+Sibling-repo PRs: mockway/README.md cross-link updated; fakegcp / fakeaws READMEs unchanged (their cross-links don't reference the legacy vocabulary).
+
+Decisions locked 2026-06-04 in `docs/tickets/rename-learning-system.md` — ticket now closed.
+
 ## 2026-02-22 (initial OSS docs baseline)
 
 - Added contributor-facing docs: `README.md`, `CONTRIBUTING.md`.

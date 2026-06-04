@@ -2,7 +2,7 @@ package generator
 
 // N10 — diff-based prescriptive-pitfall extractor.
 //
-// The legacy ExtractLearnedPitfall captures the failure detail
+// The legacy ExtractDescriptivePitfall captures the failure detail
 // verbatim as the pitfall rule. That's symptom-only: the LLM learns
 // what went wrong but not HOW to fix it. The 2026-06-02 sweep
 // motivating case was gcp-storage repeatedly hitting
@@ -29,16 +29,24 @@ import (
 	"strings"
 )
 
-// PrescriptiveSource is the source tag used in PitfallEntry to
-// distinguish diff-learned rules from legacy symptom-only ones.
-const PrescriptiveSource = "learned_from_diff"
+// FixSource is the source tag used in PitfallEntry to mark a pitfall
+// extracted from the ADDED side of an HCL diff between a failing
+// iteration and the subsequent passing iteration. Encoded as `fix`
+// in pitfalls/*.yaml.
+const FixSource = "fix"
 
-// PrescriptiveAvoidSource is the source tag for N13's deletion-as-fix
-// pitfalls — rules of the shape "Do NOT use <thing>; it causes
-// <failure>." N10's PrescriptiveSource captures addition-as-fix
-// patterns (the LLM ADDED HCL that resolved a failure). N13 captures
-// the dual: the LLM REMOVED HCL that was causing a failure.
-const PrescriptiveAvoidSource = "learned_from_diff_avoid"
+// AvoidSource is the source tag for deletion-as-fix pitfalls — rules
+// of the shape "Do NOT use <thing>; it causes <failure>." Where
+// FixSource captures addition-as-fix patterns (the LLM ADDED HCL
+// that resolved a failure), AvoidSource captures the dual: the LLM
+// REMOVED HCL that was causing a failure. Encoded as `avoid` in
+// pitfalls/*.yaml.
+const AvoidSource = "avoid"
+
+// DescriptiveSource is the default source tag for failures extracted
+// by the descriptive fallback path (failure-message echo, no diff
+// evidence). Encoded as `descriptive` in pitfalls/*.yaml.
+const DescriptiveSource = "descriptive"
 
 // resourceHeaderRe matches the opening line of a Terraform resource
 // block: `resource "TYPE" "NAME" {`. We capture TYPE and NAME so we
@@ -69,7 +77,7 @@ type PrescriptiveFix struct {
 // block) with margin for trimming.
 const snippetMaxBytes = 600
 
-// ExtractPrescriptiveFix returns a PitfallEntry encoding the HCL
+// ExtractFixPitfall returns a PitfallEntry encoding the HCL
 // addition the LLM made between failedDir and passingDir that
 // resolved `failure`. Returns nil if no productive diff can be
 // attributed to the failure.
@@ -78,7 +86,7 @@ const snippetMaxBytes = 600
 // then looked up in both directories' resource maps. The "fix" is
 // the union of (new attributes on the failing resource, new sibling
 // resources referenced from those new attributes).
-func ExtractPrescriptiveFix(failedDir, passingDir string, failureDetail, failureResource, cloud, scenario, timestamp string) (*LearnedPitfall, error) {
+func ExtractFixPitfall(failedDir, passingDir string, failureDetail, failureResource, cloud, scenario, timestamp string) (*LearnedPitfall, error) {
 	failedResources, err := loadResourceBlocks(failedDir)
 	if err != nil {
 		return nil, fmt.Errorf("read failed dir %q: %w", failedDir, err)
@@ -176,7 +184,7 @@ func ExtractPrescriptiveFix(failedDir, passingDir string, failureDetail, failure
 	return &LearnedPitfall{
 		Resource:       fix.Resource,
 		Rule:           rule,
-		Source:         PrescriptiveSource,
+		Source:         FixSource,
 		DiscoveredFrom: scenario,
 	}, nil
 }
@@ -437,8 +445,8 @@ func snakeToCamel(s string) string {
 	return b.String()
 }
 
-// ExtractPrescriptiveAvoid is the N13 deletion-as-fix companion to
-// ExtractPrescriptiveFix. When the LLM cleared a failure by REMOVING
+// ExtractAvoidPitfall is the N13 deletion-as-fix companion to
+// ExtractFixPitfall. When the LLM cleared a failure by REMOVING
 // HCL (an attribute the provider rejected, a resource that escapes
 // to real cloud, etc.), the legitimate fix is "do NOT use <thing>"
 // rather than "add <thing>." This extractor emits the avoid form.
@@ -456,9 +464,9 @@ func snakeToCamel(s string) string {
 //	    `google_project_service` to escape the auth-pipeline preflight.
 //
 // Returns nil when no productive deletion can be attributed — the
-// pipeline never emits noise on cases where ExtractPrescriptiveFix
+// pipeline never emits noise on cases where ExtractFixPitfall
 // already handled the fix.
-func ExtractPrescriptiveAvoid(failedDir, passingDir string, failureDetail, failureResource, cloud, scenario, timestamp string) (*LearnedPitfall, error) {
+func ExtractAvoidPitfall(failedDir, passingDir string, failureDetail, failureResource, cloud, scenario, timestamp string) (*LearnedPitfall, error) {
 	failedResources, err := loadResourceBlocks(failedDir)
 	if err != nil {
 		return nil, fmt.Errorf("read failed dir %q: %w", failedDir, err)
@@ -567,7 +575,7 @@ func ExtractPrescriptiveAvoid(failedDir, passingDir string, failureDetail, failu
 	return &LearnedPitfall{
 		Resource:       emitResource,
 		Rule:           rule,
-		Source:         PrescriptiveAvoidSource,
+		Source:         AvoidSource,
 		DiscoveredFrom: scenario,
 	}, nil
 }
