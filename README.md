@@ -281,6 +281,7 @@ INFRAFACTORY_ENABLE_E2E=1 go test ./internal/e2e/...
 ## Documentation
 
 - [`docs/architecture.md`](docs/architecture.md) — component overview and validation-layer details
+- [`docs/auto-learning-loop.md`](docs/auto-learning-loop.md) — deep-dive on N3/N10/N13/M97 extractors, the ratchets, the sweep-time protocol, and a worked example
 - [`docs/decisions/`](docs/decisions/) — ADRs (dynamic pitfalls, topology derivation, etc.)
 - [`docs/scenario-failure-matrix.md`](docs/scenario-failure-matrix.md) — per-scenario pass/fail snapshot + failure classification
 - [`AGENTS.md`](AGENTS.md) — entry point for AI agents working on this repo
