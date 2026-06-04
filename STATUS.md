@@ -37,6 +37,10 @@ All four repos (`infrafactory`, `mockway`, `fakegcp`, `fakeaws`) ship Apache-2.0
 
 None.
 
+## Open tickets
+
+- `docs/tickets/rename-learning-system.md` — folded into next arc as S104 (decisions locked 2026-06-04).
+
 ## Update policy
 
 - Trim this file every arc close-out — historical detail belongs in `docs/status/ARCHIVE.md`.
