@@ -1990,3 +1990,46 @@ Second goal-named arc under Option C. Four slices, ~3.5 hr wallclock. Five PRs a
 1. **Sustain re-validation** — three more `make sweep-39` runs under the full S94+S96+S97+S98 protocol. Expected: 39/39 deterministic across multiple sweeps; transport failures correctly classified.
 2. **LLM-transport retry** — S97 classifies; the next step is retrying transport-class failures once before recording as failed. ~2-3 hr.
 3. **Layer 3 real-cloud validation** — still on the open-followups list from S93. Big arc; deferred.
+
+## 2026-06-04 sustain re-validation + transport retry — close-out
+
+Third goal-named arc under Option C. Two slices, ~4 hr including sweep wallclock.
+
+- **S100** — three consecutive `make sweep-39` runs under the post-sustain-tightening protocol. Results:
+
+  | Sweep | Pass | Failure | N13 | Panics | Transport |
+  |---|---|---|---|---|---|
+  | 1/3 | 39/39 | — | **1 (durable)** | 0 | 0 |
+  | 2/3 | 38/39 | aws-route53 tofu init 502 (registry transport, validate-stage) | 0 | 0 | 0 (classifier missed it) |
+  | 3/3 | 39/39 | — | 0 | 0 | 0 |
+
+  **Three signal-bearing findings**:
+  1. S96 (route53) durable across sweeps — passes whenever the OpenTofu registry is up.
+  2. S98 (GCP rule #13 retirement) no regression across any GCP scenario.
+  3. **First organic N13 emission preserved**: `aws_subnet` "do NOT use `map_public_ip_on_launch`" learned from aws-eks iter pair. S94's selective discard worked exactly as designed — the entry survived sweep teardown. This is the first time N13's organic output has landed durably.
+  4. **S97 classifier gap**: the validate-stage 502 in sweep 2 fell outside S97's heuristic (which only matched `_generate` stage failures in <30s). The 502 was `_validate` stage in 59s. Fed forward into S101's broadened predicate.
+
+- **S101** — in-loop transport retry. Built on S100's data:
+  - **Predicate widened** from S97's narrow shape to cover both classes:
+    - `terminal in {repair_budget_exhausted, stuck}`
+    - `dur_s < 60` (covers both Claude rate-limit and registry 502)
+    - zero `_test` stage failures (a `_test` failure is LLM-side, not transport)
+    - at least one `_generate` OR `_validate` stage failure
+  - **Single-shot retry**: when the predicate matches mid-sweep, scenarios re-run ONCE before recording in `summary.tsv`. Original log preserved as `<scenario>.log.attempt1` for forensics.
+  - **New summary lines**: `RETRY_TRANSPORT=N` (attempted retries), `RETRY_RECOVERED=M` (succeeded on retry).
+  - **End-of-sweep classifier (S97)** re-applies the same predicate as a fallback for cases where the retry also failed — those rows get `terminal_reason=transport_failed`.
+  - **AGENTS.md sweep-protocol bullet** + `feedback_sweep_protocol.md` memory amended.
+  - **Predicate dry-run validated** against sweep-s100-2's data: correctly identifies the aws-route53 stuck/59s row as transport-class.
+
+### Net deltas
+
+- **2 PRs** (this arc).
+- **First organic N13 entry committed**: `aws_subnet` deletion-as-fix pitfall.
+- **Transport retry covers both classes**: Claude CLI rate-limit + OpenTofu registry blip.
+- **AGENTS.md sweep-protocol bullet** describes the four ratchets + classifier + retry + selective-discard end-to-end.
+
+### Open follow-ups for next session
+
+1. **Live exercise of S101 retry** — the retry is implemented + dry-run-validated, not yet exercised by a real transport hit in a sustain sweep. Three more sweeps would confirm it actually fires + recovers.
+2. **Layer 3 real-cloud validation** — still open since S93. Big arc.
+3. **fakegcp `plugin did not respond` re-check** — per S86, those were non-reproducible last time but worth re-checking now that we have more sweeps run.

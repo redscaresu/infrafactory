@@ -4,40 +4,43 @@ Self-contained brief for a fresh Claude / engineer starting in this repo.
 
 ## Read first
 
-**🎯 Baseline: 39/39 deterministic, sustain-validated.** Three sustain sweeps on 2026-06-03 returned 39/39 + 39/39 + 32/39. The third sweep's 7 failures decompose into 6 pre-iter-1 LLM transport failures (Claude CLI rate-limit cluster — now correctly classified as `transport_failed` by S97) and one genuine convergence flake (`aws-route53` — fixed by S96).
+**🎯 Baseline: 39/39 deterministic, sustain-validated across two arcs.** S95 (3 sweeps): 39/39 + 39/39 + 32/39 (transport tail). S100 (3 sweeps): 39/39 + 38/39 + 39/39 (the 38/39 was a tofu init 502 — provider-registry transport, not a regression). S101 in-loop retry now recovers both Claude CLI rate-limits AND OpenTofu provider-registry blips.
 
-After this arc's fixes (fakeaws Route 53 sort + tag handler), aws-route53 converges iter 1 cleanly. Next sustain sweep should hit 39/39 deterministic (or 38/39 + transport-classified noise).
+**First organic N13 emission preserved**: `pitfalls/aws.yaml` now carries `aws_subnet` "do NOT use `map_public_ip_on_launch` — observed in aws-eks". S94's selective discard worked as designed.
 
-**Scaffold shape (Option C)** — goal-named, variable-length arcs. Codified in `AGENTS.md` § "Planning a New Arc".
+**Scaffold shape (Option C)** — goal-named, variable-length arcs.
 
 ## Last arc complete
 
-`docs/plans/post-sustain-tightening-plan.md` — second Option C arc. Five PRs. Full close-out: `docs/status/ARCHIVE.md` § "2026-06-03 post-sustain tightening".
+`docs/plans/sustain-revalidate-and-transport-retry-plan.md` — third Option C arc. Full close-out: `docs/status/ARCHIVE.md` § "2026-06-04 sustain re-validation + transport retry".
 
-- ✅ **S96** (fakeaws#7): fakeaws Route 53 list-sort + `ChangeTagsForResource` handler. aws-route53 fix.
-- ✅ **S97** (#78): transport-failure classifier in `sweep_39.sh`.
-- ✅ **S98** (#79): retire GCP phase3 self-review rule #13 (Category B — OPA `region_restriction` duplicate).
-- ✅ **S99** (this PR): extend OPA-dup ratchet to `prompts/<cloud>/*.md`.
+- ✅ **S100**: three sustain sweeps. S96 + S98 confirmed durable. S97 classifier gap identified (only `_generate` stage); fed forward into S101's broadened predicate.
+- ✅ **S101** (this PR): in-loop transport retry covering both `_generate` and `_validate` stage transport failures.
 
-## Next arc planned
+## Suggested next arc
 
-`docs/plans/sustain-revalidate-and-transport-retry-plan.md` — third Option C arc. Two slices, ~4–5 hr:
+Two candidates depending on appetite:
 
-- **S100**: three consecutive `make sweep-39` runs. Validates the post-sustain-tightening behavioural changes (S96 route53 fix, S97 transport classifier, S98 rule #13 retirement, S99 ratchet) hold collectively. Generates live transport-failure data for S101.
-- **S101**: LLM-transport retry in `sweep_39.sh`. When the existing S97 classifier detects a `transport_failed` shape mid-sweep, retry the scenario once before writing to `summary.tsv`. Emits `RETRY_TRANSPORT=N` + `RETRY_RECOVERED=M`. Arc close-out folded in per Option C.
+- **Sustain another 3 sweeps under the S101 retry** — confirms the retry actually fires + recovers in practice (S101 was implemented + dry-run-validated, not exercised live on a real transport hit yet). ~2-3 hr wallclock. Smallest scope. If sweeps come back 3× 39/39, the arc proves out and you can move on; if retry doesn't recover, the predicate needs tuning.
+- **Layer 3 real-cloud validation** — open since S93. Genuinely deploys to real AWS/GCP/Scaleway. Big arc (cloud credentials, money, cleanup discipline). High value but high coordination cost.
 
-Order matters: sustain first so we know whether the recent fixes hold AND so we have real transport-failure data for S101 to validate against.
-
-Autonomous-execution loop prompt at the bottom of the plan file.
+A third option: pick a smaller backlog item — fakegcp `plugin did not respond` from older mock-gaps (per S86, those were non-reproducible last time but worth re-checking), or audit prompt files for other Category B retirement opportunities.
 
 ## Sweep entry point
 
-`make sweep-39`. Output: `/tmp/sweep-39/summary.tsv` + `panics.log` + per-scenario logs + `N13_EMISSIONS=N` + `TRANSPORT_FAILED=N`. The `PASS=` line now reports deterministic and transport-failed counts separately.
+`make sweep-39`. Output: `/tmp/sweep-39/summary.tsv` + `panics.log` + per-scenario logs. New summary lines from this arc:
+- `PASS=X / TOTAL=Y (deterministic: X/Z; transport_failed: W)` (S97)
+- `PANIC_LINES=N` (S87)
+- `N13_EMISSIONS=N` (S94)
+- `RETRY_TRANSPORT=N` (S101 attempted retries)
+- `RETRY_RECOVERED=M` (S101 succeeded on retry)
+- `TRANSPORT_FAILED=N` (S97 end-of-sweep classification, post-retry)
 
 ## Recent arcs (full close-outs in `docs/status/ARCHIVE.md`)
 
-- **post-sustain tightening** (2026-06-03): aws-route53 + transport classifier + OPA-dup follow-through. 4 PRs + 1 fakeaws.
-- **sustain + N13 durability** (2026-06-03): first Option C arc. 2 PRs.
+- **sustain re-validation + transport retry** (2026-06-04): 2 PRs. First organic N13 entry; transport-retry shipped.
+- **post-sustain tightening** (2026-06-03): 4 PRs + 1 fakeaws. aws-route53 + classifier + rule #13 + prompts ratchet.
+- **sustain + N13 durability** (2026-06-03): 2 PRs. First Option C arc.
 - **S89–S93** (2026-06-03): 🎯 39/39 first deterministic. 3 PRs.
 - **S84–S88** (2026-06-03): gcp-full-stack convergence + panic gate. 3 PRs.
 - **S79–S83** (2026-06-02): sibling-mock drainage + carve-out validation. 4 PRs.

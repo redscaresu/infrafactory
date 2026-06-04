@@ -43,21 +43,91 @@ cp pitfalls/scaleway.yaml "$PRE/scaleway.yaml"
 
 ls scenarios/training/ | grep -v '^gcp-full-stack$' > "$SWEEP_DIR/scenarios.txt"
 
+RETRY_TRANSPORT_TOTAL=0
+RETRY_RECOVERED_TOTAL=0
+
+# is_transport_failed_shape — S101 heuristic for transport-class
+# failures. Returns 0 (true) if the failure matches the transport
+# shape we expect to recover with a single retry. Two known classes:
+#
+#   1. Claude CLI rate-limit (S97): pre-iter-1 _generate stage fails
+#      in 5-9s. terminal=repair_budget_exhausted.
+#   2. OpenTofu provider-registry 502 (S100 sweep 2): _validate stage
+#      `tofu init` fails fetching provider checksums in 50-60s.
+#      terminal=stuck.
+#
+# Heuristic:
+#   - terminal in {repair_budget_exhausted, stuck}
+#   - dur_s < 60 (covers both classes; real LLM convergence sticks
+#     for >120s typically)
+#   - zero _test stage failures (a _test failure is LLM-side, not
+#     transport)
+#   - at least one _generate OR _validate stage failure
+#
+# False positives surface as `transport_failed` rows the operator
+# can re-inspect. False negatives miss the retry opportunity but
+# don't break anything.
+is_transport_failed_shape() {
+  local term="$1" duration="$2" logfile="$3"
+  case "$term" in
+    repair_budget_exhausted|stuck) ;;
+    *) return 1 ;;
+  esac
+  [ "${duration:-99}" -lt 60 ] || return 1
+  [ -f "$logfile" ] || return 1
+  local test_fails generate_fails validate_fails
+  test_fails=$(grep -cE '"stage_end".*"status":"failed".*"stage":"iteration_[0-9]+_test"' "$logfile" 2>/dev/null)
+  if [ "${test_fails:-0}" != "0" ]; then return 1; fi
+  generate_fails=$(grep -cE '"stage_end".*"status":"failed".*"stage":"iteration_[0-9]+_generate"' "$logfile" 2>/dev/null)
+  validate_fails=$(grep -cE '"stage_end".*"status":"failed".*"stage":"iteration_[0-9]+_validate"' "$logfile" 2>/dev/null)
+  if [ "${generate_fails:-0}" = "0" ] && [ "${validate_fails:-0}" = "0" ]; then
+    return 1
+  fi
+  return 0
+}
+
+run_scenario() {
+  local sc="$1" name="$2" log="$3"
+  ./bin/infrafactory mock reset --config infrafactory.yaml >/dev/null 2>&1 || true
+  local start
+  start=$(date +%s)
+  ./bin/infrafactory run "scenarios/training/$sc" --config infrafactory.yaml > "$log" 2>&1
+  RUN_EC=$?
+  RUN_DUR=$(( $(date +%s) - start ))
+  local rj
+  rj=$(ls -td .infrafactory/runs/$name/*/ 2>/dev/null | head -1)run.json
+  RUN_TERMINAL=$(grep -oE '"terminal_reason":[ ]*"[a-z_]+"' "$rj" 2>/dev/null | head -1 | sed 's/.*"\([a-z_]*\)"/\1/')
+  RUN_STATUS=$(grep -oE '"status":[ ]*"[a-z_]+"' "$rj" 2>/dev/null | head -1 | sed 's/.*"\([a-z_]*\)"/\1/')
+  RUN_ITERS=$(grep -c '"event":"iteration_start"' "$log" 2>/dev/null || echo 0)
+}
+
 while IFS= read -r sc; do
   name="${sc%.yaml}"
   log="$SWEEP_DIR/$name.log"
-  ./bin/infrafactory mock reset --config infrafactory.yaml >/dev/null 2>&1 || true
-  start=$(date +%s)
-  ./bin/infrafactory run "scenarios/training/$sc" --config infrafactory.yaml > "$log" 2>&1
-  ec=$?
-  dur=$(( $(date +%s) - start ))
-  rj=$(ls -td .infrafactory/runs/$name/*/ 2>/dev/null | head -1)run.json
-  terminal=$(grep -oE '"terminal_reason":[ ]*"[a-z_]+"' "$rj" 2>/dev/null | head -1 | sed 's/.*"\([a-z_]*\)"/\1/')
-  status=$(grep -oE '"status":[ ]*"[a-z_]+"' "$rj" 2>/dev/null | head -1 | sed 's/.*"\([a-z_]*\)"/\1/')
-  iters=$(grep -c '"event":"iteration_start"' "$log" 2>/dev/null || echo 0)
-  echo -e "$name\t${terminal:-unknown}\t${status:-unknown}\t$iters\t$dur" >> "$SUMMARY"
-  printf "%-32s %-22s %-9s iters=%-2s dur=%ss ec=%s\n" "$name" "${terminal:-unknown}" "${status:-unknown}" "$iters" "$dur" "$ec"
+  run_scenario "$sc" "$name" "$log"
+  # S101 single-shot retry. If the run hit a transport-failed shape,
+  # retry ONCE. Replace the row with the retry's result. The retry's
+  # outcome — pass, transport-fail again, or convergence-fail — is
+  # the final row in summary.tsv. Single-shot, not a loop: if the
+  # retry also fails, we don't keep retrying.
+  if is_transport_failed_shape "$RUN_TERMINAL" "$RUN_DUR" "$log"; then
+    echo "  RETRY $name (transport shape: terminal=$RUN_TERMINAL dur=${RUN_DUR}s)"
+    RETRY_TRANSPORT_TOTAL=$((RETRY_TRANSPORT_TOTAL + 1))
+    mv "$log" "$log.attempt1"
+    run_scenario "$sc" "$name" "$log"
+    if [ "$RUN_TERMINAL" = "target_reached" ]; then
+      RETRY_RECOVERED_TOTAL=$((RETRY_RECOVERED_TOTAL + 1))
+      echo "  RECOVERED $name on retry (terminal=$RUN_TERMINAL dur=${RUN_DUR}s)"
+    fi
+  fi
+  echo -e "$name\t${RUN_TERMINAL:-unknown}\t${RUN_STATUS:-unknown}\t$RUN_ITERS\t$RUN_DUR" >> "$SUMMARY"
+  printf "%-32s %-22s %-9s iters=%-2s dur=%ss ec=%s\n" "$name" "${RUN_TERMINAL:-unknown}" "${RUN_STATUS:-unknown}" "$RUN_ITERS" "$RUN_DUR" "$RUN_EC"
 done < "$SWEEP_DIR/scenarios.txt"
+
+echo
+echo "=== retry summary ==="
+echo "RETRY_TRANSPORT=$RETRY_TRANSPORT_TOTAL"
+echo "RETRY_RECOVERED=$RETRY_RECOVERED_TOTAL"
 
 # S97 (2026-06-03): reclassify pre-iter-1 LLM transport failures.
 # Sustain sweep 3 produced 6 scenarios with shape:
@@ -86,19 +156,14 @@ while IFS=$'\t' read -r name terminal status iters dur; do
     echo -e "$name\t$terminal\t$status\t$iters\t$dur" >> "$NEW_SUMMARY"
     continue
   fi
-  if [ "$terminal" = "repair_budget_exhausted" ] && [ "${dur:-99}" -lt 30 ]; then
-    log="$SWEEP_DIR/$name.log"
-    if [ -f "$log" ]; then
-      # Every failed stage must be _generate; if ANY _test or _validate
-      # also failed, it's a real convergence problem, not transport.
-      test_fails=$(grep -cE '"stage_end".*"status":"failed".*"stage":"iteration_[0-9]+_(test|validate)"' "$log" 2>/dev/null)
-      generate_fails=$(grep -cE '"stage_end".*"status":"failed".*"stage":"iteration_[0-9]+_generate"' "$log" 2>/dev/null)
-      if [ "${test_fails:-0}" = "0" ] && [ "${generate_fails:-0}" -gt 0 ]; then
-        terminal="transport_failed"
-        TRANSPORT_COUNT=$((TRANSPORT_COUNT + 1))
-        echo "  $name reclassified: repair_budget_exhausted -> transport_failed (dur=${dur}s, generate_fails=$generate_fails, test_fails=0)"
-      fi
-    fi
+  # S101 (2026-06-04): use the same widened transport-shape predicate
+  # the in-loop retry uses, so a row that still matches transport
+  # after retry gets correctly labeled. Reuses is_transport_failed_shape.
+  log="$SWEEP_DIR/$name.log"
+  if is_transport_failed_shape "$terminal" "$dur" "$log"; then
+    terminal="transport_failed"
+    TRANSPORT_COUNT=$((TRANSPORT_COUNT + 1))
+    echo "  $name reclassified -> transport_failed (dur=${dur}s, terminal-was=$(awk -F$'\t' -v n="$name" 'NR>1 && $1==n {print $2}' "$SUMMARY"))"
   fi
   echo -e "$name\t$terminal\t$status\t$iters\t$dur" >> "$NEW_SUMMARY"
 done < "$SUMMARY"
