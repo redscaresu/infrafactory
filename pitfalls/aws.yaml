@@ -2,9 +2,9 @@ provider: aws
 pitfalls:
     - resource: aws_s3_bucket
       rule: "exit status 1 | stderr: ╷\n│ Error: creating S3 Bucket (infrafactory-assets-AKIA5D31D6F863AAB893): operation error S3: CreateBucket, https response error StatusCode: 400, RequestID: 18B48331628847E8530310EC, HostID: , api error InvalidBucketName: The specified bucket is not valid.\n│ \n│   w..."
-      source: learned
+      source: descriptive
       discovered_from: aws-full-stack
     - resource: aws_subnet
       rule: 'exit status 1 | stderr: ╷ Do NOT use attribute `map_public_ip_on_launch` on `aws_subnet` — observed in scenario "aws-eks" to cause the failure above.'
-      source: learned_from_diff_avoid
+      source: avoid
       discovered_from: aws-eks

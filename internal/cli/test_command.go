@@ -203,7 +203,7 @@ func destroyFailureDetail(err *harness.DestroyError) string {
 // envelope (ASCII art borders + OAuth metadata JSON) eats ~500 chars
 // before the actionable Resource: line. The lower limit silently
 // truncated `google_project_service.redis` past the cutoff, so
-// ExtractLearnedPitfall's resource regex never matched and the
+// ExtractDescriptivePitfall's resource regex never matched and the
 // auto-learning loop stayed dormant. 2400 comfortably fits the full
 // terraform-provider-google envelope + resource trailer.
 const failureStderrDetailMaxChars = 2400

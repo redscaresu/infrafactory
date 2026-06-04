@@ -143,9 +143,9 @@ scenario YAML  ──▶  3-phase LLM generation  ──▶  3-layer validation 
 
 On failure, the structured failure (`layer`, `stage`, `check`, `detail`, `failure_class`) is appended to the next iteration's prompt as a `<feedback>` block so the LLM sees what specifically broke.
 
-**Auto-learning loop**: when an iteration self-corrects (iter N+1 succeeds after iter N failed) OR a run terminates with `stuck`/`repair_budget_exhausted`, the failure detail is extracted into `pitfalls/<cloud>.yaml` so future runs of any scenario in that cloud see the lesson up front. Every entry is `source: learned` — the system seeds itself from real runs and a CI ratchet (`TestPitfallsNoHumanSeeding`) rejects hand-authored entries.
+**Auto-learning loop**: when an iteration self-corrects (iter N+1 succeeds after iter N failed) OR a run terminates with `stuck`/`repair_budget_exhausted`, the failure detail is extracted into `pitfalls/<cloud>.yaml` so future runs of any scenario in that cloud see the lesson up front. The descriptive fallback emits `source: descriptive` — the system seeds itself from real runs and a CI ratchet (`TestPitfallsNoHumanSeeding`) rejects hand-authored entries.
 
-When a run reaches `target_reached` AFTER ≥1 failing iteration, a second extractor (`source: learned_from_diff`) diffs the failing iteration's HCL against the passing iteration's HCL and emits the minimal HCL snippet that resolved the failure — prescriptive guidance derived from real runs, not hand-written. This unblocked the "prompt-collapse" effort: prescriptive rules in the phase-2 prompts retired as the system's learned pitfalls replaced them. See `ADR-0012` (and the N11 retirement framework in `ADR-0018`) for the dynamic-pitfalls contract.
+When a run reaches `target_reached` AFTER ≥1 failing iteration, two diff-based extractors run: one emits `source: fix` (the HCL snippet the LLM added to clear the failure), the other emits `source: avoid` (an attribute or block the LLM removed). Both are prescriptive guidance derived from real runs, not hand-written. This unblocked the "prompt-collapse" effort: prescriptive rules in the phase-2 prompts retired as the system's learned pitfalls replaced them. See [`docs/auto-learning-loop.md`](docs/auto-learning-loop.md) for the full architecture; `ADR-0012` and `ADR-0018` carry the original contracts.
 
 ## Cloud coverage
 
@@ -180,12 +180,13 @@ Adding a new cloud requires: prompt templates, pitfalls file, topology derivatio
 | `infrafactory mock reset` | Reset state across every configured mock backend (mockway + fakegcp + fakeaws + s3 cascade in one call). Use this between scenarios in sweep harnesses instead of bare `curl` to `/mock/reset` — only this path cascades to the SeaweedFS s3 backend. |
 | `infrafactory ui` | Serve the web dashboard |
 
-Auxiliary binary (`bin/n10extract`, built by `make build`) drives the
-N10/N13 prescriptive-pitfall extractors against a recorded run
-directory and emits a candidate `pitfalls/<cloud>.yaml` snippet on
-stdout — used by the N11 retirement protocol's step 2 when the
-organic learning loop hasn't fired for the target pattern. See
-`docs/decisions/0012-dynamic-pitfalls.md` and
+Auxiliary binary (`bin/extract-pitfall`, built by `make build`) drives
+the fix + avoid pitfall extractors against a recorded run directory
+and emits a candidate `pitfalls/<cloud>.yaml` snippet on stdout —
+used by the prompt-rule retirement protocol's step 2 when the organic
+learning loop hasn't fired for the target pattern. See
+[`docs/auto-learning-loop.md`](docs/auto-learning-loop.md),
+`docs/decisions/0012-dynamic-pitfalls.md`, and
 `docs/decisions/0018-n11-retirement-criteria.md` for the
 auto-learning architecture.
 
@@ -281,7 +282,7 @@ INFRAFACTORY_ENABLE_E2E=1 go test ./internal/e2e/...
 ## Documentation
 
 - [`docs/architecture.md`](docs/architecture.md) — component overview and validation-layer details
-- [`docs/auto-learning-loop.md`](docs/auto-learning-loop.md) — deep-dive on N3/N10/N13/M97 extractors, the ratchets, the sweep-time protocol, and a worked example
+- [`docs/auto-learning-loop.md`](docs/auto-learning-loop.md) — deep-dive on the mock-server-bug classifier + fix/avoid extractors + diff-pattern templates, the ratchets, the sweep-time protocol, and a worked example
 - [`docs/decisions/`](docs/decisions/) — ADRs (dynamic pitfalls, topology derivation, etc.)
 - [`docs/scenario-failure-matrix.md`](docs/scenario-failure-matrix.md) — per-scenario pass/fail snapshot + failure classification
 - [`AGENTS.md`](AGENTS.md) — entry point for AI agents working on this repo

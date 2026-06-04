@@ -31,7 +31,7 @@ import (
 // To re-enable a temporarily-removed pitfall, run the scenario(s)
 // that surface its failure mode and let the auto-learning loop
 // rebuild it. If a failure mode can't be auto-learned, the bug is
-// in ExtractLearnedPitfall — fix that, not the file.
+// in ExtractDescriptivePitfall — fix that, not the file.
 //
 // Counts the absence of seed/static as part of the test; doesn't
 // just assert "no seed entries" because absence-of-source-field is
@@ -70,13 +70,13 @@ func TestPitfallsNoHumanSeeding(t *testing.T) {
 			}
 			sort.Strings(keys)
 			for _, src := range keys {
-				if src == "learned" || src == PrescriptiveSource || src == PrescriptiveAvoidSource {
-					// `learned_from_diff` is N10's auto-derived source —
+				if src == "descriptive" || src == FixSource || src == AvoidSource {
+					// `fix` is N10's auto-derived source —
 					// strictly a richer shape of run-derived learning,
-					// not a human-authored seed. `learned_from_diff_avoid`
+					// not a human-authored seed. `avoid`
 					// is the N13 deletion-as-fix companion (same
 					// provenance, different rule shape). Both whitelisted
-					// alongside the legacy `learned` tag.
+					// alongside the legacy `descriptive` tag.
 					continue
 				}
 				t.Errorf("pitfalls/%s.yaml has %d entries with source=%q — M91 forbids human-authored pitfalls. Delete them and let the M86+M90 auto-learning loop rebuild any genuinely-needed entries from real runs.", cloud, bySource[src], src)
@@ -85,7 +85,7 @@ func TestPitfallsNoHumanSeeding(t *testing.T) {
 	}
 }
 
-// TestPitfallsNoMockActionableSeeds is the N3-T12 companion to M91.
+// TestPitfallsNoMockServerBugSeeds is the N3-T12 companion to M91.
 // While M91 asserts "no human-authored pitfalls," this guard asserts
 // "no learned pitfall whose Rule matches a mock-actionable signal."
 // The two together encode the principle "mock-server gaps are
@@ -93,14 +93,14 @@ func TestPitfallsNoHumanSeeding(t *testing.T) {
 // principle): a learned entry whose rule echoes a 501 / Plugin-did-
 // not-respond / OAuth-escape / 404-from-Describe* failure should
 // never have made it into the file — it should have been routed to
-// docs/mock-gaps.md by the new IsMockActionable classifier in
+// docs/mock-gaps.md by the new IsMockServerBug classifier in
 // run_command.go.
 //
 // Catching these in CI is the enforcement leg of T-12. Before the
 // classifier landed (this commit), the existing pitfalls files
 // accumulated ~9 such entries across aws + gcp during the 2026-05-31
 // sweep. Those are tracked separately under N2 for manual prune.
-func TestPitfallsNoMockActionableSeeds(t *testing.T) {
+func TestPitfallsNoMockServerBugSeeds(t *testing.T) {
 	root := repoRoot(t)
 	for _, cloud := range []string{"aws", "gcp", "scaleway"} {
 		t.Run(cloud, func(t *testing.T) {
@@ -119,7 +119,7 @@ func TestPitfallsNoMockActionableSeeds(t *testing.T) {
 				t.Fatalf("parse %s: %v", path, err)
 			}
 			for _, p := range file.Pitfalls {
-				if IsMockActionable(p.Rule) {
+				if IsMockServerBug(p.Rule) {
 					sig := FirstMockSignal(p.Rule)
 					t.Errorf("pitfalls/%s.yaml: entry for %q has rule matching mock-actionable signal %q — T-12 forbids this. Route the failure to docs/mock-gaps.md instead; the matching mock repo (fakeaws/fakegcp/mockway) should fix the gap at source. Rule was: %.200s",
 						cloud, p.Resource, sig, p.Rule)
@@ -134,7 +134,7 @@ func TestPitfallsNoMockActionableSeeds(t *testing.T) {
 // also includes the leading "Fix observed in scenario ..." summary
 // (typically ~80-150 bytes). Total rule length is bounded by
 // `snippetMaxBytes + 400` per the existing
-// TestExtractPrescriptiveFix_SnippetCap test. Enforcing the bound at
+// TestExtractFixPitfall_SnippetCap test. Enforcing the bound at
 // the file level catches any future trim regression that lets an
 // uncapped snippet leak through into the on-disk artifact.
 func TestPitfallsLearnedFromDiffSnippetCap(t *testing.T) {
@@ -158,7 +158,7 @@ func TestPitfallsLearnedFromDiffSnippetCap(t *testing.T) {
 				t.Fatalf("parse %s: %v", path, err)
 			}
 			for _, p := range file.Pitfalls {
-				if p.Source != PrescriptiveSource && p.Source != PrescriptiveAvoidSource {
+				if p.Source != FixSource && p.Source != AvoidSource {
 					continue
 				}
 				if len(p.Rule) > maxRuleBytes {

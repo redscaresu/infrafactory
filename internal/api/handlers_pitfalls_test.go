@@ -68,7 +68,7 @@ pitfalls:
     source: seed
   - resource: scaleway_k8s_cluster
     rule: Use full patch version when auto_upgrade is disabled.
-    source: learned
+    source: descriptive
     discovered_from: k8s-cluster-paris
 `), 0o644); err != nil {
 		t.Fatal(err)
@@ -115,7 +115,7 @@ pitfalls:
 	if len(scw) != 2 {
 		t.Fatalf("expected 2 scaleway pitfalls, got %d", len(scw))
 	}
-	if scw[1].Source != "learned" || scw[1].DiscoveredFrom != "k8s-cluster-paris" {
+	if scw[1].Source != "descriptive" || scw[1].DiscoveredFrom != "k8s-cluster-paris" {
 		t.Fatalf("expected source/discovered_from preserved, got %+v", scw[1])
 	}
 }

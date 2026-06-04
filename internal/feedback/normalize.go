@@ -27,7 +27,7 @@ import (
 //     and collapse runs of whitespace.
 //
 // The original Detail is preserved on the Failure struct — only the
-// signature view is normalized. Downstream learning (ExtractLearnedPitfall)
+// signature view is normalized. Downstream learning (ExtractDescriptivePitfall)
 // is called with the kernel where it's more robust (templates match
 // substrings) or with the original Detail when the all-iterations
 // scan in run_command.go iterates raw failures directly.

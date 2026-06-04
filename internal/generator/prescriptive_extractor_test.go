@@ -7,13 +7,13 @@ import (
 	"testing"
 )
 
-// TestExtractPrescriptiveFix_CMEKStorageBucket is the motivating
+// TestExtractFixPitfall_CMEKStorageBucket is the motivating
 // case for N10. The 2026-06-02 sweep showed gcp-storage learn the
 // symptom "missing encryption.default_kms_key_name" but never
 // converge because nothing prescribed the fix shape. With the
 // extractor, after one successful run the diff yields a snippet
 // that the next iteration can lift verbatim.
-func TestExtractPrescriptiveFix_CMEKStorageBucket(t *testing.T) {
+func TestExtractFixPitfall_CMEKStorageBucket(t *testing.T) {
 	failedDir := t.TempDir()
 	passingDir := t.TempDir()
 
@@ -51,7 +51,7 @@ resource "google_kms_crypto_key" "app_assets" {
 `)
 
 	failureDetail := `google_storage_bucket.app_assets has no encryption.default_kms_key_name — customer-managed encryption not configured`
-	entry, err := ExtractPrescriptiveFix(failedDir, passingDir, failureDetail, "google_storage_bucket.app_assets", "gcp", "gcp-storage", "20260602T100000Z")
+	entry, err := ExtractFixPitfall(failedDir, passingDir, failureDetail, "google_storage_bucket.app_assets", "gcp", "gcp-storage", "20260602T100000Z")
 	if err != nil {
 		t.Fatalf("extract: %v", err)
 	}
@@ -61,8 +61,8 @@ resource "google_kms_crypto_key" "app_assets" {
 	if entry.Resource != "google_storage_bucket" {
 		t.Errorf("resource = %q, want google_storage_bucket", entry.Resource)
 	}
-	if entry.Source != PrescriptiveSource {
-		t.Errorf("source = %q, want %q", entry.Source, PrescriptiveSource)
+	if entry.Source != FixSource {
+		t.Errorf("source = %q, want %q", entry.Source, FixSource)
 	}
 	if !strings.Contains(entry.Rule, "encryption") {
 		t.Errorf("rule missing 'encryption': %q", entry.Rule)
@@ -75,11 +75,11 @@ resource "google_kms_crypto_key" "app_assets" {
 	}
 }
 
-// TestExtractPrescriptiveFix_NoChangeReturnsNil exercises the
+// TestExtractFixPitfall_NoChangeReturnsNil exercises the
 // conservative-by-design guard: if the failing resource's body is
 // identical between iterations, we have no evidence the LLM
 // changed anything relevant, so no pitfall is written.
-func TestExtractPrescriptiveFix_NoChangeReturnsNil(t *testing.T) {
+func TestExtractFixPitfall_NoChangeReturnsNil(t *testing.T) {
 	d1 := t.TempDir()
 	d2 := t.TempDir()
 	body := `
@@ -91,7 +91,7 @@ resource "google_storage_bucket" "app" {
 	writeTF(t, d1, "main.tf", body)
 	writeTF(t, d2, "main.tf", body)
 
-	entry, err := ExtractPrescriptiveFix(d1, d2, "google_storage_bucket.app has no encryption", "google_storage_bucket.app", "gcp", "scenario", "ts")
+	entry, err := ExtractFixPitfall(d1, d2, "google_storage_bucket.app has no encryption", "google_storage_bucket.app", "gcp", "scenario", "ts")
 	if err != nil {
 		t.Fatalf("extract: %v", err)
 	}
@@ -100,10 +100,10 @@ resource "google_storage_bucket" "app" {
 	}
 }
 
-// TestExtractPrescriptiveFix_WhitespaceOnlyChangeIgnored guards the
+// TestExtractFixPitfall_WhitespaceOnlyChangeIgnored guards the
 // normaliser: cosmetic re-formatting (alignment, blank lines) must
 // not register as a diff.
-func TestExtractPrescriptiveFix_WhitespaceOnlyChangeIgnored(t *testing.T) {
+func TestExtractFixPitfall_WhitespaceOnlyChangeIgnored(t *testing.T) {
 	d1 := t.TempDir()
 	d2 := t.TempDir()
 	writeTF(t, d1, "main.tf", `
@@ -119,7 +119,7 @@ resource "google_storage_bucket" "app" {
   location = "us-central1"
 }
 `)
-	entry, err := ExtractPrescriptiveFix(d1, d2, "google_storage_bucket.app fail", "google_storage_bucket.app", "gcp", "scenario", "ts")
+	entry, err := ExtractFixPitfall(d1, d2, "google_storage_bucket.app fail", "google_storage_bucket.app", "gcp", "scenario", "ts")
 	if err != nil {
 		t.Fatalf("extract: %v", err)
 	}
@@ -128,15 +128,15 @@ resource "google_storage_bucket" "app" {
 	}
 }
 
-// TestExtractPrescriptiveFix_FailureWithoutAddress is the fall-through
+// TestExtractFixPitfall_FailureWithoutAddress is the fall-through
 // case: the detail doesn't contain a `TYPE.NAME` reference, so the
 // extractor can't attribute the diff to a specific resource.
-func TestExtractPrescriptiveFix_FailureWithoutAddress(t *testing.T) {
+func TestExtractFixPitfall_FailureWithoutAddress(t *testing.T) {
 	d1 := t.TempDir()
 	d2 := t.TempDir()
 	writeTF(t, d1, "main.tf", `resource "google_storage_bucket" "app" { name = "a" }`)
 	writeTF(t, d2, "main.tf", `resource "google_storage_bucket" "app" { name = "a" force_destroy = true }`)
-	entry, err := ExtractPrescriptiveFix(d1, d2, "orphan_check detected 1 orphaned resources", "", "gcp", "scenario", "ts")
+	entry, err := ExtractFixPitfall(d1, d2, "orphan_check detected 1 orphaned resources", "", "gcp", "scenario", "ts")
 	if err != nil {
 		t.Fatalf("extract: %v", err)
 	}
@@ -145,15 +145,15 @@ func TestExtractPrescriptiveFix_FailureWithoutAddress(t *testing.T) {
 	}
 }
 
-// TestExtractPrescriptiveFix_StatePolicyDetailFallsBackToTypeHint
+// TestExtractFixPitfall_StatePolicyDetailFallsBackToTypeHint
 // pins the N14 attribution fallback. State-side policy failures emit
 // details like "Cloud SQL instance NAME missing
 // diskEncryptionConfiguration.kmsKeyName" — no terraform address.
 // Without the fallback, the extractor returned nil and gcp-cloud-sql's
-// learned_from_diff entry never landed. With the fallback, the
+// fix entry never landed. With the fallback, the
 // extractor maps "Cloud SQL instance" → google_sql_database_instance
 // and finds the one changed instance in the passing dir.
-func TestExtractPrescriptiveFix_StatePolicyDetailFallsBackToTypeHint(t *testing.T) {
+func TestExtractFixPitfall_StatePolicyDetailFallsBackToTypeHint(t *testing.T) {
 	failedDir := t.TempDir()
 	passingDir := t.TempDir()
 
@@ -192,7 +192,7 @@ resource "google_kms_crypto_key" "sql" {
 `)
 
 	failureDetail := "Cloud SQL instance infrafactory-pg-run1 missing diskEncryptionConfiguration.kmsKeyName"
-	entry, err := ExtractPrescriptiveFix(failedDir, passingDir, failureDetail, "", "gcp", "gcp-cloud-sql", "20260602T210000Z")
+	entry, err := ExtractFixPitfall(failedDir, passingDir, failureDetail, "", "gcp", "gcp-cloud-sql", "20260602T210000Z")
 	if err != nil {
 		t.Fatalf("extract: %v", err)
 	}
@@ -210,11 +210,11 @@ resource "google_kms_crypto_key" "sql" {
 	}
 }
 
-// TestExtractPrescriptiveFix_TypeHintAmbiguousReturnsNil — when two
+// TestExtractFixPitfall_TypeHintAmbiguousReturnsNil — when two
 // resources of the inferred type changed, attribution is ambiguous
 // and the extractor abstains rather than guess. Pins the "exactly
 // one match" rule.
-func TestExtractPrescriptiveFix_TypeHintAmbiguousReturnsNil(t *testing.T) {
+func TestExtractFixPitfall_TypeHintAmbiguousReturnsNil(t *testing.T) {
 	d1 := t.TempDir()
 	d2 := t.TempDir()
 	writeTF(t, d1, "main.tf", `
@@ -237,7 +237,7 @@ resource "google_storage_bucket" "b" {
   uniform_bucket_level_access = true
 }
 `)
-	entry, err := ExtractPrescriptiveFix(d1, d2, "storage bucket a missing encryption.defaultKmsKeyName", "", "gcp", "s", "ts")
+	entry, err := ExtractFixPitfall(d1, d2, "storage bucket a missing encryption.defaultKmsKeyName", "", "gcp", "s", "ts")
 	if err != nil {
 		t.Fatalf("extract: %v", err)
 	}
@@ -246,10 +246,10 @@ resource "google_storage_bucket" "b" {
 	}
 }
 
-// TestExtractPrescriptiveFix_SnippetCap pins the 600-char cap. We
+// TestExtractFixPitfall_SnippetCap pins the 600-char cap. We
 // generate a synthetic huge fix and assert the snippet ends with the
 // truncation marker rather than mid-line.
-func TestExtractPrescriptiveFix_SnippetCap(t *testing.T) {
+func TestExtractFixPitfall_SnippetCap(t *testing.T) {
 	d1 := t.TempDir()
 	d2 := t.TempDir()
 	writeTF(t, d1, "main.tf", `resource "google_storage_bucket" "app" { name = "a" }`)
@@ -264,7 +264,7 @@ func TestExtractPrescriptiveFix_SnippetCap(t *testing.T) {
 	b.WriteString("}\n")
 	writeTF(t, d2, "main.tf", b.String())
 
-	entry, err := ExtractPrescriptiveFix(d1, d2, "google_storage_bucket.app fail", "google_storage_bucket.app", "gcp", "scenario", "ts")
+	entry, err := ExtractFixPitfall(d1, d2, "google_storage_bucket.app fail", "google_storage_bucket.app", "gcp", "scenario", "ts")
 	if err != nil {
 		t.Fatalf("extract: %v", err)
 	}
@@ -282,13 +282,13 @@ func TestExtractPrescriptiveFix_SnippetCap(t *testing.T) {
 	}
 }
 
-// TestExtractPrescriptiveFix_SnippetTrimAtBlockBoundary pins the
+// TestExtractFixPitfall_SnippetTrimAtBlockBoundary pins the
 // trim improvement: when the snippet would exceed 600 bytes, prefer
 // cutting after a top-level `}` so the example remains balanced HCL.
 // Motivating case from the 2026-06-02 S55 audit: a
 // google_sql_database_instance snippet's `depends_on = [` got cut
 // mid-list inside a settings block, leaving the example unparseable.
-func TestExtractPrescriptiveFix_SnippetTrimAtBlockBoundary(t *testing.T) {
+func TestExtractFixPitfall_SnippetTrimAtBlockBoundary(t *testing.T) {
 	d1 := t.TempDir()
 	d2 := t.TempDir()
 	writeTF(t, d1, "main.tf", `resource "google_storage_bucket" "app" { name = "a" }`)
@@ -311,7 +311,7 @@ func TestExtractPrescriptiveFix_SnippetTrimAtBlockBoundary(t *testing.T) {
 	b.WriteString("}\n")
 	writeTF(t, d2, "main.tf", b.String())
 
-	entry, err := ExtractPrescriptiveFix(d1, d2, "google_storage_bucket.app fail", "google_storage_bucket.app", "gcp", "scenario", "ts")
+	entry, err := ExtractFixPitfall(d1, d2, "google_storage_bucket.app fail", "google_storage_bucket.app", "gcp", "scenario", "ts")
 	if err != nil {
 		t.Fatalf("extract: %v", err)
 	}
@@ -329,16 +329,16 @@ func TestExtractPrescriptiveFix_SnippetTrimAtBlockBoundary(t *testing.T) {
 	}
 }
 
-// TestExtractPrescriptiveFix_CrossCloudIsolation guards against
+// TestExtractFixPitfall_CrossCloudIsolation guards against
 // learning a google_storage_bucket fix from a Scaleway scenario
 // when no such resource exists. Should return nil.
-func TestExtractPrescriptiveFix_CrossCloudIsolation(t *testing.T) {
+func TestExtractFixPitfall_CrossCloudIsolation(t *testing.T) {
 	d1 := t.TempDir()
 	d2 := t.TempDir()
 	writeTF(t, d1, "main.tf", `resource "scaleway_instance_server" "web" { name = "w" }`)
 	writeTF(t, d2, "main.tf", `resource "scaleway_instance_server" "web" { name = "w" type = "DEV1-S" }`)
 
-	entry, err := ExtractPrescriptiveFix(d1, d2, "google_storage_bucket.x has no encryption", "google_storage_bucket.x", "gcp", "scenario", "ts")
+	entry, err := ExtractFixPitfall(d1, d2, "google_storage_bucket.x has no encryption", "google_storage_bucket.x", "gcp", "scenario", "ts")
 	if err != nil {
 		t.Fatalf("extract: %v", err)
 	}
@@ -349,11 +349,11 @@ func TestExtractPrescriptiveFix_CrossCloudIsolation(t *testing.T) {
 
 // --- N13 deletion-as-fix tests ---
 
-// TestExtractPrescriptiveAvoid_AttributeRemoval is the motivating
+// TestExtractAvoidPitfall_AttributeRemoval is the motivating
 // case for N13: the LLM clears an "Unsupported argument" failure by
 // REMOVING the offending attribute. The avoid extractor should emit
 // a "do NOT use" rule with the attribute name.
-func TestExtractPrescriptiveAvoid_AttributeRemoval(t *testing.T) {
+func TestExtractAvoidPitfall_AttributeRemoval(t *testing.T) {
 	d1 := t.TempDir()
 	d2 := t.TempDir()
 	writeTF(t, d1, "main.tf", `resource "google_cloud_run_v2_service" "api" {
@@ -367,15 +367,15 @@ func TestExtractPrescriptiveAvoid_AttributeRemoval(t *testing.T) {
 }`)
 
 	failureDetail := `exit status 1 | stderr: Error: Unsupported argument; An argument named "deletion_policy" is not expected here.`
-	entry, err := ExtractPrescriptiveAvoid(d1, d2, failureDetail, "google_cloud_run_v2_service.api", "gcp", "gcp-cloud-run", "ts")
+	entry, err := ExtractAvoidPitfall(d1, d2, failureDetail, "google_cloud_run_v2_service.api", "gcp", "gcp-cloud-run", "ts")
 	if err != nil {
 		t.Fatalf("extract: %v", err)
 	}
 	if entry == nil {
 		t.Fatal("expected an avoid entry, got nil")
 	}
-	if entry.Source != PrescriptiveAvoidSource {
-		t.Errorf("source = %q, want %q", entry.Source, PrescriptiveAvoidSource)
+	if entry.Source != AvoidSource {
+		t.Errorf("source = %q, want %q", entry.Source, AvoidSource)
 	}
 	if entry.Resource != "google_cloud_run_v2_service" {
 		t.Errorf("resource = %q", entry.Resource)
@@ -385,12 +385,12 @@ func TestExtractPrescriptiveAvoid_AttributeRemoval(t *testing.T) {
 	}
 }
 
-// TestExtractPrescriptiveAvoid_ResourceRemoval covers case (b): the
+// TestExtractAvoidPitfall_ResourceRemoval covers case (b): the
 // LLM clears the failure by dropping every resource of a given type.
 // Motivating case: google_project_service removal to escape the v5
 // provider's auth-pipeline preflight (the 2026-06-02 prompt-rule
 // retirement that pre-dated N13).
-func TestExtractPrescriptiveAvoid_ResourceRemoval(t *testing.T) {
+func TestExtractAvoidPitfall_ResourceRemoval(t *testing.T) {
 	d1 := t.TempDir()
 	d2 := t.TempDir()
 	writeTF(t, d1, "main.tf", `resource "google_compute_instance" "vm" {
@@ -409,7 +409,7 @@ resource "google_project_service" "iam" {
 `)
 
 	failureDetail := `exit status 1 | stderr: Error: ACCESS_TOKEN_TYPE_UNSUPPORTED on google_project_service.compute reaching cloudresourcemanager.googleapis.com`
-	entry, err := ExtractPrescriptiveAvoid(d1, d2, failureDetail, "google_project_service.compute", "gcp", "gcp-cloud-run", "ts")
+	entry, err := ExtractAvoidPitfall(d1, d2, failureDetail, "google_project_service.compute", "gcp", "gcp-cloud-run", "ts")
 	if err != nil {
 		t.Fatalf("extract: %v", err)
 	}
@@ -421,11 +421,11 @@ resource "google_project_service" "iam" {
 	}
 }
 
-// TestExtractPrescriptiveAvoid_UnrelatedRemovalReturnsNil pins the
+// TestExtractAvoidPitfall_UnrelatedRemovalReturnsNil pins the
 // attribution strictness: a removed attribute whose name does NOT
 // appear in the failure detail (cosmetic LLM rewrite) MUST NOT
 // produce an avoid entry — otherwise the file fills with noise.
-func TestExtractPrescriptiveAvoid_UnrelatedRemovalReturnsNil(t *testing.T) {
+func TestExtractAvoidPitfall_UnrelatedRemovalReturnsNil(t *testing.T) {
 	d1 := t.TempDir()
 	d2 := t.TempDir()
 	writeTF(t, d1, "main.tf", `resource "google_storage_bucket" "b" {
@@ -439,7 +439,7 @@ func TestExtractPrescriptiveAvoid_UnrelatedRemovalReturnsNil(t *testing.T) {
 }`)
 
 	failureDetail := `policy=gcp.encryption: google_storage_bucket.b has no encryption.default_kms_key_name`
-	entry, err := ExtractPrescriptiveAvoid(d1, d2, failureDetail, "google_storage_bucket.b", "gcp", "gcp-storage", "ts")
+	entry, err := ExtractAvoidPitfall(d1, d2, failureDetail, "google_storage_bucket.b", "gcp", "gcp-storage", "ts")
 	if err != nil {
 		t.Fatalf("extract: %v", err)
 	}
@@ -448,7 +448,7 @@ func TestExtractPrescriptiveAvoid_UnrelatedRemovalReturnsNil(t *testing.T) {
 	}
 }
 
-// TestExtractPrescriptiveAvoid_CamelCaseAttributeInFailureDetail
+// TestExtractAvoidPitfall_CamelCaseAttributeInFailureDetail
 // pins the S63 audit fix. The aws_subnet `MapPublicIpOnLaunch` case
 // surfaced as a false-positive in S63's sweep: N13 saw the failing
 // iter remove `map_public_ip_on_launch` but couldn't attribute it
@@ -456,7 +456,7 @@ func TestExtractPrescriptiveAvoid_UnrelatedRemovalReturnsNil(t *testing.T) {
 // (camelCase) while the strict `strings.Contains(failureDetail, attr)`
 // check only matched the snake_case form. `attributeAppearsInDetail`
 // now tries case-insensitive + camelCase variants.
-func TestExtractPrescriptiveAvoid_CamelCaseAttributeInFailureDetail(t *testing.T) {
+func TestExtractAvoidPitfall_CamelCaseAttributeInFailureDetail(t *testing.T) {
 	d1 := t.TempDir()
 	d2 := t.TempDir()
 	writeTF(t, d1, "main.tf", `resource "aws_subnet" "public" {
@@ -471,7 +471,7 @@ func TestExtractPrescriptiveAvoid_CamelCaseAttributeInFailureDetail(t *testing.T
 
 	// Real AWS error shape (camelCase echo of the offending field).
 	failureDetail := `Error: waiting for EC2 Subnet (subnet-abc) MapPublicIpOnLaunch update: timeout while waiting for state to become 'true' (last state: 'false', timeout: 5m0s)`
-	entry, err := ExtractPrescriptiveAvoid(d1, d2, failureDetail, "aws_subnet.public", "aws", "aws-vpc-network", "ts")
+	entry, err := ExtractAvoidPitfall(d1, d2, failureDetail, "aws_subnet.public", "aws", "aws-vpc-network", "ts")
 	if err != nil {
 		t.Fatalf("extract: %v", err)
 	}
@@ -483,12 +483,12 @@ func TestExtractPrescriptiveAvoid_CamelCaseAttributeInFailureDetail(t *testing.T
 	}
 }
 
-// TestExtractPrescriptiveAvoid_PartialResourceRemovalSkipped ensures
+// TestExtractAvoidPitfall_PartialResourceRemovalSkipped ensures
 // case (b) only fires when ALL instances of a type are dropped. A
 // scenario that goes from two `google_project_service` resources to
 // one (the LLM kept compute, dropped iam) is too ambiguous — could
 // be a legit narrowing — so skip the avoid emission.
-func TestExtractPrescriptiveAvoid_PartialResourceRemovalSkipped(t *testing.T) {
+func TestExtractAvoidPitfall_PartialResourceRemovalSkipped(t *testing.T) {
 	d1 := t.TempDir()
 	d2 := t.TempDir()
 	writeTF(t, d1, "main.tf", `resource "google_compute_instance" "vm" {
@@ -510,7 +510,7 @@ resource "google_project_service" "compute" {
 `)
 
 	failureDetail := `Error reaching google_project_service.iam (ACCESS_TOKEN_TYPE_UNSUPPORTED)`
-	entry, err := ExtractPrescriptiveAvoid(d1, d2, failureDetail, "google_project_service.iam", "gcp", "gcp-cloud-run", "ts")
+	entry, err := ExtractAvoidPitfall(d1, d2, failureDetail, "google_project_service.iam", "gcp", "gcp-cloud-run", "ts")
 	if err != nil {
 		t.Fatalf("extract: %v", err)
 	}

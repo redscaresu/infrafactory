@@ -1,6 +1,6 @@
 # Ticket: Rename the learning-system internals to be human-readable
 
-Status: **folded into next arc as S104** (`docs/plans/mock-gaps-and-rename-plan.md`)
+Status: **CLOSED 2026-06-04** — shipped as S104 in `docs/plans/mock-gaps-and-rename-plan.md`. See `docs/status/ARCHIVE.md` § "2026-06-04 mock-gaps drain + learning-system rename".
 Filed: 2026-06-04
 Decisions locked: 2026-06-04
 Priority: P2 — quality-of-life / OSS-readiness

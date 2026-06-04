@@ -8,8 +8,8 @@
 //
 // Used by scripts/sweep_39.sh to replace the blanket
 // `git checkout pitfalls/` with selective restoration that keeps
-// N13's `learned_from_diff_avoid` durably while still discarding
-// `learned` + `learned_from_diff` as sweep noise.
+// N13's `avoid` durably while still discarding
+// `descriptive` + `fix` as sweep noise.
 //
 // Rationale: N13 only fires when iter N+1 cleared a failure by
 // deleting a resource — the output is grounded in a confirmed
@@ -19,7 +19,7 @@
 // Usage:
 //
 //	bin/pitfall-merge --pre /tmp/pre/aws.yaml --post pitfalls/aws.yaml \
-//	  --out pitfalls/aws.yaml --keep learned_from_diff_avoid
+//	  --out pitfalls/aws.yaml --keep avoid
 package main
 
 import (
@@ -36,7 +36,7 @@ func main() {
 	preFile := flag.String("pre", "", "pre-sweep pitfalls yaml path (required)")
 	postFile := flag.String("post", "", "post-sweep pitfalls yaml path (required)")
 	outFile := flag.String("out", "", "output merged yaml path (required)")
-	keepFlag := flag.String("keep", "learned_from_diff_avoid", "comma-separated source values to preserve from post")
+	keepFlag := flag.String("keep", "avoid", "comma-separated source values to preserve from post")
 	flag.Parse()
 
 	if *preFile == "" || *postFile == "" || *outFile == "" {

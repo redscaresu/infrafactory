@@ -1,13 +1,14 @@
 # STATUS
 
-Last updated: 2026-06-03
+Last updated: 2026-06-04
 
 ## Current phase
 
-- 🎯 **Baseline: 39/39 deterministic, 0 panics** — robust modulo LLM transport. Sustain validated 2026-06-03 across 3 sweeps: 39/39 + 39/39 + 32/39, where 6 of 7 sweep-3 failures were pre-iter-1 LLM transport failures and the seventh (`aws-route53`) is a known convergence flake.
-- **Last arc complete**: `docs/plans/sustain-revalidate-and-transport-retry-plan.md` (third Option C arc). Two slices.
-  - **S100**: 3 sustain sweeps — 39/39 + 38/39 + 39/39. The 38/39 failure was an OpenTofu provider-registry 502 at `tofu init` (validate-stage transport) — NOT S96 regression. **First organic N13 emission preserved**: `aws_subnet map_public_ip_on_launch` from aws-eks (durable via S94).
-  - **S101 (this PR)**: in-loop transport retry. Predicate widened to cover both Claude CLI rate-limit (`_generate` stage, S97's original scope) AND OpenTofu provider-registry blips (`_validate` stage). Single-shot retry per scenario. Emits `RETRY_TRANSPORT=N` + `RETRY_RECOVERED=M`. End-of-sweep classifier (S97) re-applies the predicate as fallback. Arc close-out folded in.
+- 🎯 **Baseline: 38-39/39 deterministic, 0 panics** — last probe sweep 2026-06-04: 38/39 deterministic (one scenario stuck on Scaleway DNS zone declaration, now resolvable under the S102 enriched mockway 404).
+- **Last arc complete**: `docs/plans/mock-gaps-and-rename-plan.md` (fourth Option C arc). Three slices.
+  - **S102** (mockway#5, merged): mockway domain handlers now return `resource` + `resource_id` in 404 responses. scaleway-sdk-go's ResourceNotFoundError formats Error() using these — without them the SDK printed `resource  with ID  is not found` (empty fields). Verified live: web-app-paris now reports `resource dns_zone with ID example.com is not found`.
+  - **S103** (#84, merged): 13 stale historical `docs/mock-gaps.md` entries verified non-reproducible (probe sweep passed every `discovered_from`); file moved to `.gitignore` as per-host runtime artifact. Drainage protocol documented.
+  - **S104 (this PR)**: atomic rename of the auto-learning vocabulary. `IsMockActionable → IsMockServerBug`, `ExtractPrescriptive{Fix,Avoid} → Extract{Fix,Avoid}Pitfall`, `ExtractLearnedPitfall → ExtractDescriptivePitfall`. `cmd/n10extract → cmd/extract-pitfall`. YAML `source:` enum: `learned → descriptive`, `learned_from_diff → fix`, `learned_from_diff_avoid → avoid`. Sweep summary `N13_EMISSIONS → AVOID_EMISSIONS`. Code + binary + YAML + sweep harness + 4 READMEs + AGENTS.md + auto-learning-loop.md all migrated in one PR. Arc close-out folded in.
 - **Last arc complete**: `docs/plans/post-sustain-tightening-plan.md` (second Option C arc). Five PRs landed.
   - **S96** (fakeaws#7): fakeaws Route 53 — sort records lexicographically before `maxitems=1` filter; add `ChangeTagsForResource` POST handler. aws-route53 converges iter 1 end-to-end.
   - **S97** (#78): transport-failure classifier in `sweep_39.sh`. Reclassifies pre-iter-1 Claude CLI failures as `transport_failed` distinct from `repair_budget_exhausted`. Dry-run on sweep-s95-3 data: 5/7 correctly reclassified.
@@ -39,7 +40,7 @@ None.
 
 ## Open tickets
 
-- `docs/tickets/rename-learning-system.md` — folded into next arc as S104 (decisions locked 2026-06-04).
+None — `docs/tickets/rename-learning-system.md` closed by S104.
 
 ## Update policy
 

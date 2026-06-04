@@ -502,7 +502,7 @@ ui-stack-down:
 
 build: ui-build
 	$(GO) build -o bin/infrafactory ./cmd/infrafactory
-	$(GO) build -o bin/n10extract ./cmd/n10extract
+	$(GO) build -o bin/extract-pitfall ./cmd/extract-pitfall
 	$(GO) build -o bin/pitfall-merge ./cmd/pitfall-merge
 
 # sweep-39 — canonical 39-scenario sustain-ratchet sweep.

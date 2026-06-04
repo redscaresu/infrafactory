@@ -2,7 +2,7 @@
 // run directory to emit a candidate LearnedPitfall snippet on stdout.
 //
 // The N11 retirement protocol (see ADR-0018) step 2 requires a
-// `learned_from_diff` (or `learned_from_diff_avoid`) entry to exist
+// `fix` (or `avoid`) entry to exist
 // before a prompt rule can be retired with pitfall replacement. When
 // the organic learn loop hasn't fired for the target pattern (e.g.
 // the rule has been keeping the LLM correct, so no failure ever
@@ -84,9 +84,9 @@ func main() {
 	var err error
 	switch *mode {
 	case "fix":
-		entry, err = generator.ExtractPrescriptiveFix(*failedDir, *passingDir, *failureDetail, *failureResource, *cloud, *scenario, *timestamp)
+		entry, err = generator.ExtractFixPitfall(*failedDir, *passingDir, *failureDetail, *failureResource, *cloud, *scenario, *timestamp)
 	case "avoid":
-		entry, err = generator.ExtractPrescriptiveAvoid(*failedDir, *passingDir, *failureDetail, *failureResource, *cloud, *scenario, *timestamp)
+		entry, err = generator.ExtractAvoidPitfall(*failedDir, *passingDir, *failureDetail, *failureResource, *cloud, *scenario, *timestamp)
 	default:
 		fail(`--mode must be "fix" or "avoid", got %q`, *mode)
 	}
@@ -109,7 +109,7 @@ func main() {
 			{
 				"resource":        entry.Resource,
 				"rule":            entry.Rule,
-				"source":          orDefault(entry.Source, "learned"),
+				"source":          orDefault(entry.Source, "descriptive"),
 				"discovered_from": entry.DiscoveredFrom,
 			},
 		},

@@ -32,7 +32,7 @@ func (a *alternatingStaticHarness) Run(ctx context.Context, workDir string, env 
 // stub static harness that alternates between two distinct failures over
 // four iterations (A, B, A, B), exhausts the repair budget, and verifies
 // the run loop extracts a pitfall from the oscillating signature whose
-// detail matches a known ExtractLearnedPitfall pattern.
+// detail matches a known ExtractDescriptivePitfall pattern.
 func TestRunCommandLearnsPitfallFromOscillation(t *testing.T) {
 	h := newCommandTestHarness(t)
 
@@ -41,12 +41,12 @@ func TestRunCommandLearnsPitfallFromOscillation(t *testing.T) {
 		t.Fatalf("mkdir pitfalls: %v", err)
 	}
 
-	// Detail A is extractable: ExtractLearnedPitfall recognizes the K8s
+	// Detail A is extractable: ExtractDescriptivePitfall recognizes the K8s
 	// minor-version + auto_upgrade pattern when it sees both phrases plus
 	// a scaleway_ resource name in the text.
 	detailA := `exit status 1 | stderr: minor version 1.31 must only be used with auto upgrade enabled, on resource scaleway_k8s_cluster.main`
 	// Detail B is *generic* and intentionally not extractable. The oscillation
-	// detector still surfaces it as oscillating, but ExtractLearnedPitfall
+	// detector still surfaces it as oscillating, but ExtractDescriptivePitfall
 	// returns nil for it, exercising the "skip non-extractable" branch in
 	// run_command.go without polluting the learned pitfall file.
 	detailB := `exit status 1 | stderr: validation failed`
@@ -100,7 +100,7 @@ func TestRunCommandLearnsPitfallFromOscillation(t *testing.T) {
 	contents := string(data)
 	for _, want := range []string{
 		"resource: scaleway_k8s_cluster",
-		"source: learned",
+		"source: descriptive",
 		"discovered_from: example-scenario",
 	} {
 		if !strings.Contains(contents, want) {
@@ -374,8 +374,8 @@ func TestRunCommandLearnsFromStuckRepeatedSignature(t *testing.T) {
 		t.Fatalf("M90 contract: expected pitfalls/scaleway.yaml to be written from the repeated-signature learning path, got: %v", err)
 	}
 	contents := string(data)
-	if !strings.Contains(contents, "source: learned") {
-		t.Fatalf("expected source: learned entry in pitfalls file, got:\n%s", contents)
+	if !strings.Contains(contents, "source: descriptive") {
+		t.Fatalf("expected source: descriptive entry in pitfalls file, got:\n%s", contents)
 	}
 	if !strings.Contains(contents, "scaleway_k8s_cluster") {
 		t.Fatalf("expected scaleway_k8s_cluster pitfall extracted from repeated signature, got:\n%s", contents)
