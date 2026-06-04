@@ -19,12 +19,15 @@ Self-contained brief for a fresh Claude / engineer starting in this repo.
 
 ## Suggested next arc
 
-Two candidates depending on appetite:
+- **`mock-gaps drain + learning-system rename`** (drafted 2026-06-04, `docs/plans/mock-gaps-and-rename-plan.md`). 3 slices (S102 + S103 + S104), ~5-7 hr. S102 diagnoses the 2026-06-04 probe-sweep web-app-paris empty-ID failure. S103 replays + prunes the 13 historical mock-gaps.md entries. S104 renames N3/N10/N13/M97 → Fix/Avoid scheme atomically (see `docs/tickets/rename-learning-system.md` for locked decisions) and folds close-out.
 
-- **Sustain another 3 sweeps under the S101 retry** — confirms the retry actually fires + recovers in practice (S101 was implemented + dry-run-validated, not exercised live on a real transport hit yet). ~2-3 hr wallclock. Smallest scope. If sweeps come back 3× 39/39, the arc proves out and you can move on; if retry doesn't recover, the predicate needs tuning.
+Other candidates if the above is deferred:
+- **Sustain another 3 sweeps under the S101 retry** — confirms the retry actually fires + recovers in practice (S101 was implemented + dry-run-validated, not exercised live on a real transport hit yet). ~2-3 hr wallclock.
 - **Layer 3 real-cloud validation** — open since S93. Genuinely deploys to real AWS/GCP/Scaleway. Big arc (cloud credentials, money, cleanup discipline). High value but high coordination cost.
 
-A third option: pick a smaller backlog item — fakegcp `plugin did not respond` from older mock-gaps (per S86, those were non-reproducible last time but worth re-checking), or audit prompt files for other Category B retirement opportunities.
+## Open tickets
+
+- **`docs/tickets/rename-learning-system.md`** (decisions locked 2026-06-04) — **now folded into the next arc as S104.** Execution context for the rename slice; not a standalone ticket anymore.
 
 ## Sweep entry point
 

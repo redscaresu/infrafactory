@@ -78,6 +78,23 @@ Implementation: `bin/pitfall-merge` (`cmd/pitfall-merge/`). Reads pre + post pit
 
 Sweep also emits a `N13_EMISSIONS=N` line. Zero across multiple sweeps is a soft watchdog signal — either N13 is broken or the LLM stopped making deletion-recoverable mistakes.
 
+## mock-gaps drainage
+
+`docs/mock-gaps.md` is a git-ignored runtime artifact. The N3 classifier appends to it whenever a sweep surfaces a mock-actionable failure — never edited by hand. Each entry has a `discovered_from` scenario and a failure signal.
+
+Entries accumulate across sweeps and don't self-prune. If a mock-source bug is fixed in `fakeaws`/`fakegcp`/`mockway`, the matching entry stays in the file until a human prunes it.
+
+**Drainage protocol** (run after each major sustain arc, or whenever the file grows past ~10 entries):
+
+1. For each entry, run the `discovered_from` scenario once: `./bin/infrafactory run scenarios/training/<scenario>.yaml --clean`.
+2. If the scenario passes → entry is stale (the underlying mock bug got fixed without anyone updating this file). Delete the row.
+3. If the scenario fails with the same signal → entry is real. Open a PR against the appropriate sibling mock with a failing handler test + fix.
+4. After all entries are processed, blow the file away locally. The next sweep regenerates it from scratch if anything is still broken.
+
+**Don't** treat the file as a stable queue you can pick from later. The entries are point-in-time snapshots; a mock fix elsewhere can render an entry stale without notice. Either drain promptly or replay-verify before acting on an entry.
+
+The 2026-06-04 `mock-gaps-and-rename` arc drained 13 stale entries that had accumulated across the 2026-06-01 / 02 sweeps. All 13 `discovered_from` scenarios passed in the contemporaneous probe sweep — the entries were artifacts of mock fixes shipped in S77, S96, S100, etc. that nobody had pruned.
+
 ## Worked example: aws-subnet `map_public_ip_on_launch`
 
 The first organic N13 entry, captured 2026-06-04 during sustain re-validation sweep 1/3.
