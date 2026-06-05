@@ -3,7 +3,7 @@
 For AI coding agents. Human contributors should use `CONTRIBUTING.md`.
 
 ## Mission
-Build `infrafactory`, a Go CLI + SvelteKit UI that generates and validates OpenTofu across **AWS**, **GCP**, and **Scaleway** with deterministic, testable behavior. Each cloud's scenarios validate against a deterministic HTTP-level mock (fakeaws / fakegcp / mockway); S3 routes through a small in-repo shim (`cmd/s3router/`, S80) that fans traffic between SeaweedFS (data plane) and fakeaws (`?publicAccessBlock` subresource SeaweedFS doesn't model). See `CONCEPT.md` § "Third-Party Mock Integration".
+Build `infrafactory`, a Go CLI + SvelteKit UI that generates and validates OpenTofu across **AWS**, **GCP**, and **Scaleway** with deterministic, testable behavior. Each cloud's scenarios validate against a deterministic HTTP-level mock (fakeaws / fakegcp / mockway); S3 routes through a small in-repo shim (`cmd/s3router/`) that fans traffic between SeaweedFS (data plane) and fakeaws (`?publicAccessBlock` subresource SeaweedFS doesn't model). See `CONCEPT.md` § "Third-Party Mock Integration".
 
 ## Source of Truth
 1. `scenario.schema.json`
