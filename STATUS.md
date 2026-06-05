@@ -5,7 +5,8 @@ Last updated: 2026-06-05
 ## Current phase
 
 - 🎯 **Baseline: 39/39 deterministic, 0 panics** — sustain-validated 2026-06-05 across 3 consecutive sweeps under the renamed auto-learning vocabulary: 39/39 + 39/39 + 39/39 (117/117 total).
-- **Last arc complete**: `docs/plans/sustain-under-renamed-vocab-plan.md` (fifth Option C arc). Single slice (S105). Three consecutive `make sweep-39` runs all clean; zero leaks of the legacy source-enum literals or summary-line names anywhere; classifier routed an organic mock-gap (aws-secrets-manager KMS DescribeKey 404) in sweep 3 confirming `IsMockServerBug` works live. Arc close-out folded in.
+- **Last arc complete**: `docs/plans/fakeaws-kms-soft-delete-plan.md` (sixth Option C arc). Single slice (S106 / fakeaws#9). Closes the loop on the organic mock-gap S105 surfaced — fakeaws KMS now soft-deletes (state=PendingDeletion, DescribeKey returns 200) matching real AWS lifecycle. `aws-secrets-manager` converges target_reached in 1 iteration.
+- **Prior arc**: `docs/plans/sustain-under-renamed-vocab-plan.md` (S105). 117/117 deterministic across 3 sweeps; rename durable under live conditions.
 - **Last arc complete**: `docs/plans/post-sustain-tightening-plan.md` (second Option C arc). Five PRs landed.
   - **S96** (fakeaws#7): fakeaws Route 53 — sort records lexicographically before `maxitems=1` filter; add `ChangeTagsForResource` POST handler. aws-route53 converges iter 1 end-to-end.
   - **S97** (#78): transport-failure classifier in `sweep_39.sh`. Reclassifies pre-iter-1 Claude CLI failures as `transport_failed` distinct from `repair_budget_exhausted`. Dry-run on sweep-s95-3 data: 5/7 correctly reclassified.
