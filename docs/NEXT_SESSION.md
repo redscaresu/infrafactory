@@ -12,14 +12,16 @@ Self-contained brief for a fresh Claude / engineer starting in this repo.
 
 ## Last arc complete
 
-`docs/plans/sustain-under-renamed-vocab-plan.md` — fifth Option C arc. Full close-out: `docs/status/ARCHIVE.md` § "2026-06-05 sustain under renamed vocabulary".
+`docs/plans/fakeaws-kms-soft-delete-plan.md` — sixth Option C arc. Full close-out: `docs/status/ARCHIVE.md` § "2026-06-05 fakeaws KMS soft-delete".
 
-- ✅ **S105** (this PR): three consecutive `make sweep-39` runs under the renamed vocabulary. All 39/39 deterministic (117/117 total). Zero panics, zero transport retries needed. Zero hits for legacy source-enum literals (`learned` / `learned_from_diff` / `learned_from_diff_avoid`) in post-merge `pitfalls/*.yaml`. Zero hits for legacy summary names (`N13_EMISSIONS` / `learned_from_diff* lines` / `N13 durability`) in master logs. Classifier routed an organic mock-gap (aws-secrets-manager KMS DescribeKey 404) in sweep 3, confirming `IsMockServerBug` live. One stale-vocab leak found + fixed: local `docs/mock-gaps.md` header (the writer code already uses `IsMockServerBug`; only the boilerplate I wrote during S103 was pre-rename text).
+- ✅ **S106** (fakeaws#9, this infra PR is the close-out): fakeaws `kmsScheduleKeyDeletion` now soft-deletes (sets `KeyState="PendingDeletion"` + `DeletionDate`) instead of hard-deleting. `kmsKeyMetadata` emits `Enabled=(State=="Enabled")` + `DeletionDate`. Live: `aws-secrets-manager` converges `target_reached` in 1 iteration. Mirrors S89 (Secrets Manager soft-delete) structurally.
+
+Prior arc: S105 sustained the vocabulary rename for 3 sweeps; 117/117 deterministic.
 
 ## Suggested next arc
 
-- **fakeaws aws-secrets-manager KMS DescribeKey 404 after key destroy** — S105 surfaced this as a mock-gap. ~30-60 min single-slice arc against fakeaws.
 - **Layer 3 real-cloud validation** — open since S93. Genuinely deploys to real AWS/GCP/Scaleway. Big arc (cloud credentials, money, cleanup discipline). High value but high coordination cost.
+- **fakeaws `/mock/reset` purges KMS keys** — known limitation noted in S106 close-out. Pre-existing issue; the soft-delete change makes it slightly worse (PendingDeletion entries accumulate). ~20-30min single-slice if it ever causes a sweep flake.
 
 ## Open tickets
 

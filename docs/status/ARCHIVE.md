@@ -2,6 +2,23 @@
 
 Historical snapshots and older session notes can be moved here to keep `STATUS.md` concise.
 
+## 2026-06-05 fakeaws KMS soft-delete arc close-out
+
+Sixth Option C arc. Single slice (S106). Closes the loop on the organic mock-gap S105 surfaced in sweep 3/3.
+
+**The bug**: fakeaws' `handlers/kms.go::kmsScheduleKeyDeletion` hard-deleted the key from `kmsStore.keys` immediately on schedule. Real AWS keeps the key visible in `PendingDeletion` state for 7-30 days post-schedule. `terraform-provider-aws`'s destroy wait-loop polls `DescribeKey` expecting `KeyState="PendingDeletion"` — when fakeaws returned 404 NotFoundException instead, the wait-loop errored. The pre-fix comment at `kms.go:144` claimed the provider would treat 404 as "deletion complete"; the live failure proved that comment was wrong.
+
+**The fix** (fakeaws#9): mirrors S89 (Secrets Manager soft-delete) structurally:
+- `kmsScheduleKeyDeletion` sets `k.State = "PendingDeletion"` + `k.Deleted = computed` instead of removing the key.
+- `kmsKeyMetadata` emits `Enabled=(State=="Enabled")` and includes `DeletionDate` when set.
+- `kmsDescribeKey` no longer carries the misleading "404 means done" comment.
+
+**Verification**: `TestKMS_ScheduleDeletion_SoftDelete` pins the wire shape (DescribeKey returns 200 with `KeyState="PendingDeletion"` after `ScheduleKeyDeletion`). Live: `aws-secrets-manager` converges `target_reached` in 1 iteration (was prior wait-loop timeout). All existing handler tests still green.
+
+**Known limitation (not addressed in this slice)**: KMS state lives in an in-process `kmsStore` map, not the SQLite repo. `/mock/reset` doesn't currently purge KMS keys. Pre-existing issue; the soft-delete change makes it slightly worse (PendingDeletion keys accumulate). Out of scope for this single-slice arc; filed as a future concern if any sweep surfaces it.
+
+Arc closed.
+
 ## 2026-06-05 sustain under renamed vocabulary arc close-out
 
 Fifth Option C arc. Single slice (S105). The S104 rename was atomic and unit-test-validated; this slice exercised it under live sweep conditions across three consecutive `make sweep-39` runs.
