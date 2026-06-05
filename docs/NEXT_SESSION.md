@@ -12,15 +12,13 @@ Self-contained brief for a fresh Claude / engineer starting in this repo.
 
 ## Last arc complete
 
-`docs/plans/mock-gaps-and-rename-plan.md` — fourth Option C arc. Full close-out: `docs/status/ARCHIVE.md` § "2026-06-04 mock-gaps drain + learning-system rename".
+`docs/plans/sustain-under-renamed-vocab-plan.md` — fifth Option C arc. Full close-out: `docs/status/ARCHIVE.md` § "2026-06-05 sustain under renamed vocabulary".
 
-- ✅ **S102** (mockway#5): enriched mockway domain 404s with `resource` + `resource_id` so scaleway-sdk-go formats `Error()` readably. Verified live on web-app-paris.
-- ✅ **S103** (#84): 13 stale `docs/mock-gaps.md` entries pruned; file moved to `.gitignore`; drainage protocol documented.
-- ✅ **S104** (this PR): atomic rename of the auto-learning vocabulary. `IsMockActionable → IsMockServerBug`; `ExtractPrescriptive{Fix,Avoid} → Extract{Fix,Avoid}Pitfall`; `ExtractLearnedPitfall → ExtractDescriptivePitfall`. Binary `cmd/n10extract → cmd/extract-pitfall`. YAML `source:` enum migrated atomically (`learned → descriptive`, `learned_from_diff → fix`, `learned_from_diff_avoid → avoid`).
+- ✅ **S105** (this PR): three consecutive `make sweep-39` runs under the renamed vocabulary. All 39/39 deterministic (117/117 total). Zero panics, zero transport retries needed. Zero hits for legacy source-enum literals (`learned` / `learned_from_diff` / `learned_from_diff_avoid`) in post-merge `pitfalls/*.yaml`. Zero hits for legacy summary names (`N13_EMISSIONS` / `learned_from_diff* lines` / `N13 durability`) in master logs. Classifier routed an organic mock-gap (aws-secrets-manager KMS DescribeKey 404) in sweep 3, confirming `IsMockServerBug` live. One stale-vocab leak found + fixed: local `docs/mock-gaps.md` header (the writer code already uses `IsMockServerBug`; only the boilerplate I wrote during S103 was pre-rename text).
 
 ## Suggested next arc
 
-- **Sustain another 3 sweeps under the renamed vocabulary** — confirms classifier + extractors + selective-discard still route correctly post-rename. ~2-3 hr wallclock. Smallest scope; validates the rename in production conditions.
+- **fakeaws aws-secrets-manager KMS DescribeKey 404 after key destroy** — S105 surfaced this as a mock-gap. ~30-60 min single-slice arc against fakeaws.
 - **Layer 3 real-cloud validation** — open since S93. Genuinely deploys to real AWS/GCP/Scaleway. Big arc (cloud credentials, money, cleanup discipline). High value but high coordination cost.
 
 ## Open tickets

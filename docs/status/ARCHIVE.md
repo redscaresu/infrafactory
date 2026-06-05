@@ -2,6 +2,33 @@
 
 Historical snapshots and older session notes can be moved here to keep `STATUS.md` concise.
 
+## 2026-06-05 sustain under renamed vocabulary arc close-out
+
+Fifth Option C arc. Single slice (S105). The S104 rename was atomic and unit-test-validated; this slice exercised it under live sweep conditions across three consecutive `make sweep-39` runs.
+
+| Sweep | Result | AVOID_EMISSIONS | RETRY_TRANSPORT | Panics | Notes |
+|---|---|---|---|---|---|
+| 1 | 39/39 deterministic | 0 | 0 | 0 | web-app-paris converged in 2 iterations under the S102 mockway fix |
+| 2 | 39/39 deterministic | 0 | 0 | 0 | — |
+| 3 | 39/39 deterministic | 0 | 0 | 0 | Organic mock-gaps emission: aws-secrets-manager KMS DescribeKey 404 (classifier routing verified live) |
+
+**Total: 117/117 deterministic across three sweeps. Zero panics. Zero transport retries needed.**
+
+**Vocabulary leak audit** (after each sweep):
+- `grep -nE "source: (learned|learned_from_diff|learned_from_diff_avoid)$" pitfalls/*.yaml` → 0 hits
+- `grep -nE "N13_EMISSIONS|learned_from_diff\* lines|N13 durability" master.log` → 0 hits
+- All `pitfalls/*.yaml` `source:` values use the renamed enum (`descriptive` / `fix` / `avoid`)
+- All sweep summary lines use renamed names (`AVOID_EMISSIONS=N`, `+N diff-derived lines`, `avoid-pitfall durability`, `kept_new=N (sources: avoid)`)
+- `bin/pitfall-merge --keep avoid` invoked correctly per-cloud
+
+**One stale-vocab fix**: local `docs/mock-gaps.md` header (boilerplate written during S103, before the rename) still referenced `IsMockActionable` and "N3 classifier". The writer in `pitfalls_learn.go:213-221` already uses `IsMockServerBug`, so a fresh-environment regen would have been correct; only the locally-written header was stale. Fixed in place.
+
+`AVOID_EMISSIONS=0` across all three sweeps mirrors the S95 + S100 + probe-sweep pattern. Per S100's note: zero is a soft watchdog — could be the LLM stopped making deletion-recoverable mistakes OR the extractor broke. Tests confirm the extractor still fires correctly on synthetic input; the LLM under current pitfall load isn't producing the deletion-as-fix shape organically. Not treated as a regression.
+
+**Follow-up surfaced (not blocking)**: sweep 3's organic mock-gap (`aws-secrets-manager` → `KMS DescribeKey` returning 404 after key destroy) is a latent fakeaws fidelity issue — should be fixed at source in a future arc.
+
+Arc closed: the rename is durable under live sweep conditions.
+
 ## 2026-06-04 mock-gaps drain + learning-system rename arc close-out
 
 Fourth Option C arc. Three slices: S102 (web-app-paris diagnosis + mockway fix), S103 (drain stale mock-gaps entries), S104 (rename N3/N10/N13/M97 → Fix/Avoid + close-out).

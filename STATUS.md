@@ -1,14 +1,11 @@
 # STATUS
 
-Last updated: 2026-06-04
+Last updated: 2026-06-05
 
 ## Current phase
 
-- 🎯 **Baseline: 38-39/39 deterministic, 0 panics** — last probe sweep 2026-06-04: 38/39 deterministic (one scenario stuck on Scaleway DNS zone declaration, now resolvable under the S102 enriched mockway 404).
-- **Last arc complete**: `docs/plans/mock-gaps-and-rename-plan.md` (fourth Option C arc). Three slices.
-  - **S102** (mockway#5, merged): mockway domain handlers now return `resource` + `resource_id` in 404 responses. scaleway-sdk-go's ResourceNotFoundError formats Error() using these — without them the SDK printed `resource  with ID  is not found` (empty fields). Verified live: web-app-paris now reports `resource dns_zone with ID example.com is not found`.
-  - **S103** (#84, merged): 13 stale historical `docs/mock-gaps.md` entries verified non-reproducible (probe sweep passed every `discovered_from`); file moved to `.gitignore` as per-host runtime artifact. Drainage protocol documented.
-  - **S104 (this PR)**: atomic rename of the auto-learning vocabulary. `IsMockActionable → IsMockServerBug`, `ExtractPrescriptive{Fix,Avoid} → Extract{Fix,Avoid}Pitfall`, `ExtractLearnedPitfall → ExtractDescriptivePitfall`. `cmd/n10extract → cmd/extract-pitfall`. YAML `source:` enum: `learned → descriptive`, `learned_from_diff → fix`, `learned_from_diff_avoid → avoid`. Sweep summary `N13_EMISSIONS → AVOID_EMISSIONS`. Code + binary + YAML + sweep harness + 4 READMEs + AGENTS.md + auto-learning-loop.md all migrated in one PR. Arc close-out folded in.
+- 🎯 **Baseline: 39/39 deterministic, 0 panics** — sustain-validated 2026-06-05 across 3 consecutive sweeps under the renamed auto-learning vocabulary: 39/39 + 39/39 + 39/39 (117/117 total).
+- **Last arc complete**: `docs/plans/sustain-under-renamed-vocab-plan.md` (fifth Option C arc). Single slice (S105). Three consecutive `make sweep-39` runs all clean; zero leaks of the legacy source-enum literals or summary-line names anywhere; classifier routed an organic mock-gap (aws-secrets-manager KMS DescribeKey 404) in sweep 3 confirming `IsMockServerBug` works live. Arc close-out folded in.
 - **Last arc complete**: `docs/plans/post-sustain-tightening-plan.md` (second Option C arc). Five PRs landed.
   - **S96** (fakeaws#7): fakeaws Route 53 — sort records lexicographically before `maxitems=1` filter; add `ChangeTagsForResource` POST handler. aws-route53 converges iter 1 end-to-end.
   - **S97** (#78): transport-failure classifier in `sweep_39.sh`. Reclassifies pre-iter-1 Claude CLI failures as `transport_failed` distinct from `repair_budget_exhausted`. Dry-run on sweep-s95-3 data: 5/7 correctly reclassified.
