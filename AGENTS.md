@@ -122,6 +122,21 @@ When extending a sibling mock, mirror the per-bundle PR rule in `../fakeaws/conc
 
 **Provider smoke-harness pattern (canonical)**: every sibling fake uses the same `examples/provider_smoke_test.go` pattern — `examples/{working,misconfigured,updates}/<svc>/` directories auto-discovered, real provider binary run against the fake (no real-cloud credentials needed; the provider IS the wire-format validator). Gating is per-repo env var (`MOCKWAY_ENABLE_E2E` / `FAKEGCP_ENABLE_E2E` / `INFRAFACTORY_ENABLE_E2E`). When spawning a new sibling (e.g. fakegenesys), copy this harness as-is — it's the cheapest correctness gate we have. Detail in each sibling's `AGENTS.md` § "Provider smoke harness".
 
+### Sibling-fake fidelity strategies
+
+How each sibling fake decides what wire shape a handler SHOULD return (the smoke harness above is the correctness *gate*, not the discovery *source*). Quick reference for fresh agents:
+
+| Fake | Strategy | Source of truth | Cost per new handler |
+|---|---|---|---|
+| **mockway** | Spec-driven | `specs/` tree (downloaded Scaleway OpenAPI YAML) | Low — spec gives shape upfront |
+| **fakegcp** | Hybrid | GCP discovery docs (referenced ad-hoc, no `specs/` tree) | Medium — semi-discovered per handler |
+| **fakeaws** | Reactive | `terraform-provider-aws` source + `TF_LOG=DEBUG` capture | High — ~1-2hr per service before handler is confident |
+| **fakegenesys** *(planned, `docs/plans/fakegenesys-arc-plan.md`)* | Spec-driven (mirrors mockway) | `specs/genesys-openapi.json` (Genesys Swagger 2.0) | Low |
+
+**Recommendation for new fakes**: prefer spec-driven if the target cloud publishes an OpenAPI / Swagger / discovery doc. For sibling extensions: opportunistic upgrade — existing handlers stable, new ones can adopt spec-driven if a spec is available.
+
+Detail in each sibling's `AGENTS.md` § "Fidelity strategy".
+
 ## ADR Trigger Threshold
 Create/update ADR when change affects:
 - public CLI contract/wiring
