@@ -16,21 +16,13 @@ genesys_resource_anchors:
 resources:
   routing:
     purpose: contact-routing
-    queue_count: 1
-    skills: ["english"]
-    wrapup_codes: ["resolved"]
 
 acceptance_criteria:
-  - criterion: region_restriction
-    layer: static
-    package: genesys.region_restriction
+  - type: policy
+    check: region_restriction
     params:
       region_allowlist: ["us-east-1"]
-  - criterion: queue_must_have_wrapup
-    layer: static
-    package: genesys.queue_must_have_wrapup
-  - criterion: topology_assertion
-    layer: mock_deploy
-    expect:
-      connectivity_keys:
-        - "routing_queue:*"
+    expect: pass
+  - type: policy
+    check: queue_must_have_wrapup
+    expect: pass

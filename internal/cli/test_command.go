@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -62,7 +63,7 @@ func testCommandEnv(runtime *CommandRuntime) map[string]string {
 // block) — env vars alone don't get the provider talking to the
 // right HTTP server.
 func cloudEnv(runtime *CommandRuntime) map[string]string {
-	return map[string]string{
+	env := map[string]string{
 		// Scaleway
 		"SCW_API_URL":            runtime.Config.Mockway.URL,
 		"SCW_ACCESS_KEY":         "SCWMOCKACCESSKEY0000",
@@ -76,7 +77,42 @@ func cloudEnv(runtime *CommandRuntime) map[string]string {
 		"AWS_SECRET_ACCESS_KEY":     "test",
 		"AWS_REGION":                "us-east-1",
 		"AWS_EC2_METADATA_DISABLED": "true",
+		// Genesys Cloud (S114). The provider doesn't accept an HCL
+		// custom-endpoint attribute — instead it consults these
+		// GENESYSCLOUD_GATEWAY_* env vars to point at an alternate
+		// host. Credentials are placeholders fakegenesys accepts.
+		"GENESYSCLOUD_OAUTHCLIENT_ID":     "fake-client-id",
+		"GENESYSCLOUD_OAUTHCLIENT_SECRET": "fake-client-secret",
+		"GENESYSCLOUD_REGION":             "us-east-1",
+		"GENESYSCLOUD_GATEWAY_PROTOCOL":   "http",
+		"GENESYSCLOUD_GATEWAY_HOST":       "localhost",
+		"GENESYSCLOUD_GATEWAY_PORT":       "8083",
 	}
+	if u := strings.TrimSpace(runtime.Config.Fakegenesys.URL); u != "" {
+		// Override defaults from cfg.Fakegenesys.URL when set
+		// (parses http://HOST:PORT). Falls back to defaults on
+		// malformed URL so the env layer can't break the run.
+		if host, port, ok := splitHostPort(u); ok {
+			env["GENESYSCLOUD_GATEWAY_HOST"] = host
+			env["GENESYSCLOUD_GATEWAY_PORT"] = port
+		}
+	}
+	return env
+}
+
+// splitHostPort extracts the host + port from an http://host:port URL.
+// Used by cloudEnv to honor cfg.Fakegenesys.URL when set.
+func splitHostPort(u string) (string, string, bool) {
+	parsed, err := url.Parse(u)
+	if err != nil || parsed.Host == "" {
+		return "", "", false
+	}
+	host := parsed.Hostname()
+	port := parsed.Port()
+	if host == "" || port == "" {
+		return "", "", false
+	}
+	return host, port, true
 }
 
 func appendMockDeployResult(stages []StageSummary, failures []FailureSummary, result *harness.MockDeployResult, runErr error) ([]StageSummary, []FailureSummary) {

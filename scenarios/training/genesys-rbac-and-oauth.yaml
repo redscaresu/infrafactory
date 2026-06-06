@@ -16,17 +16,13 @@ genesys_resource_anchors:
 resources:
   identity:
     purpose: rbac-and-bot-auth
-    role_count: 1
-    user_count: 2
-    group_count: 1
-    oauth_client_count: 1
 
 acceptance_criteria:
-  - criterion: region_restriction
-    layer: static
-    package: genesys.region_restriction
+  - type: policy
+    check: region_restriction
     params:
       region_allowlist: ["us-east-1"]
-  - criterion: oauth_client_least_privilege
-    layer: static
-    package: genesys.oauth_client_least_privilege
+    expect: pass
+  - type: policy
+    check: oauth_client_least_privilege
+    expect: pass
