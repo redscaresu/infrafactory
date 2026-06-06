@@ -2,113 +2,85 @@
 
 Self-contained brief for a fresh Claude / engineer starting in this repo.
 
-## Read first
-
-**🎯 Baseline: 39/39 deterministic, sustain-validated across two arcs.** S95 (3 sweeps): 39/39 + 39/39 + 32/39 (transport tail). S100 (3 sweeps): 39/39 + 38/39 + 39/39 (the 38/39 was a tofu init 502 — provider-registry transport, not a regression). S101 in-loop retry now recovers both Claude CLI rate-limits AND OpenTofu provider-registry blips.
-
-**First organic N13 emission preserved**: `pitfalls/aws.yaml` now carries `aws_subnet` "do NOT use `map_public_ip_on_launch` — observed in aws-eks". S94's selective discard worked as designed.
-
-**Scaffold shape (Option C)** — goal-named, variable-length arcs.
-
 ## Read this first (handoff state as of 2026-06-06 end-of-session)
 
-### What just landed — fakegenesys arc S108-S115
+### What landed this session (S116–S121)
 
-The 4th-cloud arc (`docs/plans/fakegenesys-arc-plan.md`) is **structurally complete** — fakegenesys repo built + integrated into infrafactory + 4 sibling crosslinks shipped. **One outstanding manual step**: the actual sustain sweep validation (S115-T1 through T3) needs to be run by an operator with LLM credentials. Detailed below.
+- **fakegenesys#11 (S116)** + **fakegenesys#12 (S116b)**: TLS MITM CONNECT-proxy on `:8443` with persisted CA at `~/.fakegenesys/`. The genesyscloud provider hits `login.<region>.pure.cloud` unchanged; the proxy MITM-terminates TLS with leaf certs signed by a boot-time self-signed CA. CA exposed at `<fakegenesys>/mock/ca-cert`.
+- **infrafactory#94 (S117)**: `cloudEnv` fetches the CA at runtime and sets `HTTPS_PROXY` + `SSL_CERT_FILE` + `NO_PROXY` for cloud:genesys scenarios.
+- **fakegenesys#13 + #14 + #15 (S116c, S119)**: 10+ read-after-create mock-gap fixes — post-auth SDK probes (`/organizations/me`, `/authorization/products`, `/authorization/divisions{/,/home}`, `/tokens/me`), OAuth Basic Auth, user `division` default, voicemail userpolicy, user routing utilization, user routing skills/languages, `/users/search` with the correct `{results:[...]}` shape, routing queue `memberCount` derivation, routing queue create returns 200 (not 201), wrapupcodes subresource. The S119 fix added `oAuthClient.organization.id = "purecloud-builtin"` to `/tokens/me` — the OAuth client create path dereferenced this unconditionally and segfaulted the plugin.
+- **infrafactory#96 (S118)**: cloud-prefix set in the auto-learning pipeline. `resourceNameRe`, `addressRe`, `pitfallResourceMatchesCloud` were hardcoded to `(scaleway|google|aws)_`. After S114 added genesys as a peer cloud, **zero pitfalls had ever been auto-learned from any genesys run** because `ExtractResourceFromDetail` returned `""` for `genesyscloud_*` resources. ADR-0021 codifies the three-site lockstep rule + AGENTS.md § "The auto-learning pipeline is load-bearing — never excuse its silence" + regression test.
+- **infrafactory#97 (S120)**: prompt-level guidance for the `genesyscloud_flow` + `local_file` pattern. The provider rejects `file_content_hash` as unconfigurable; the LLM was oscillating on it across all five sweep iterations.
 
-- **fakegenesys repo**: 8 PRs merged (S108 scaffold + S109 identity + S110 routing + S111 architect/IDP + S112+S113 codex review × 2 = 14 substantive bugs fixed). 15 resources, OSS-mature day-one, port `:8083`. github.com/redscaresu/fakegenesys.
-- **infrafactory#92 (S114)**: Genesys wired as the 4th cloud across every dispatch point + scenario.schema.json + prompts/genesys/* + policies/genesys/* + pitfalls/genesys.yaml (empty for cold-start auto-learning test) + 5 training scenarios + Makefile + README + AGENTS + ADR-0020 + STATUS update.
-- **4-PR cross-link sweep**: mockway#9 + fakegcp#15 + fakeaws#13 add fakegenesys to their sibling lists. fakegenesys README already cross-links the others (landed in S108).
-- **ARCHIVE**: per-arc close-out entry under "2026-06-06 fakegenesys arc S108-S115 close-out" (this commit).
+### Sustain validation outcome (S119/S120/S121)
 
-### What needs operator action FIRST in next session
+| Sweep | target_reached | failures | Notes |
+|---|---|---|---|
+| 1 (cold start, post-S118 regex fix) | 40/44 | 3 genesys + 1 web-app-paris transport-flake | First sweep where auto-learning emits genesys pitfalls (4 events, 2 net new entries) |
+| 2 | 38/44 | 3 genesys + 3 transport flakes | Session-limit reset between sweeps fixed the transport flakes |
+| 3 (post-S119 + S120) | 41/44 | 3 genesys persistent | aws/gcp/scaleway: 39/39 clean. genesys: 2/5 |
 
-1. **TLS MITM landed (fakegenesys S116 + infrafactory S117)**: fakegenesys now runs a CONNECT-proxy on `:8443` that MITM-terminates client TLS with leaf certs signed by a boot-time self-signed CA. The CA is served as PEM at `<fakegenesys>/mock/ca-cert`. infrafactory's `cloudEnv` fetches it at runtime, writes it to a temp file, and sets `HTTPS_PROXY` + `SSL_CERT_FILE` + `NO_PROXY` (bypasses opentofu registry / GitHub Release CDN / Azure Blob / loopback / amazonaws).
-2. **macOS one-time setup** (S117 follow-up — **operator must run**): on macOS, Go's `crypto/tls` calls the Security framework via cgo and IGNORES `SSL_CERT_FILE`. The provider rejects the MITM leaf chain with "unknown authority". Workaround:
-   ```bash
-   make fakegenesys-up           # boot fakegenesys so /mock/ca-cert is reachable
-   make fakegenesys-trust-ca-darwin   # prompts for TouchID / password
-   ```
-   This is a ONE-TIME install (re-run safe). Cleanup: `make fakegenesys-untrust-ca-darwin`. Linux/CI is unaffected — `SSL_CERT_FILE` works there.
-3. **Single-scenario convergence (S118)**: after the trust-CA step, run `./bin/infrafactory run scenarios/training/genesys-basic-queue.yaml --clean`. The expected first-iteration failures are HCL-schema mistakes from the LLM on cold start (e.g. `roles = [...]` on a user — should be a separate resource). The feedback loop should self-correct. Watch `fakegenesys.log` for real `/api/v2/*` requests confirming the dispatch works end-to-end.
-4. **Sustain sweep (S119/S120/S121)** — after S118 converges: `make mocks-restart` for clean baseline, then `SWEEP_DIR=/tmp/sweep-s115-{1,2,3} make sweep-N` 3×. Cold-start auto-learning observation: pitfalls/genesys.yaml ships empty; sweep 1 may legitimately have genesys failures, sweep 2/3 should show learned-pitfall-driven improvement.
-2. **Tag fakegenesys v0.1.0** once sustain is clean: `cd ../fakegenesys && git tag v0.1.0 && git push origin v0.1.0`. The release workflow auto-builds linux/darwin × amd64/arm64.
-3. **User click-ops**:
-   - Flip `github.com/redscaresu/fakegenesys` to public (currently private).
-   - Enable branch protection on `main` matching the three other siblings' rules.
+**The 44/44 × 3 sweep win condition is NOT met.** Stopping under the "genuinely cannot proceed without harness work" branch.
 
-### What's in flight (poll + merge when CI green)
+### What's blocking (must be addressed before next sustain sweep)
 
-- **infrafactory#92** (S114 dispatch integration + S115 close-out folded in)
-- **mockway#9** / **fakegcp#15** / **fakeaws#13** (sibling crosslinks, pure-docs)
+Three genesys scenarios fail consistently. Each has a known root cause and a concrete fix:
 
-All four should be green ~1-2 min after push. Merge with `gh pr merge <N> --repo redscaresu/<repo> --squash --admin --delete-branch`.
+1. **`genesys-architect-flow` + `genesys-full-stack`** (repair_budget_exhausted, both scenarios) — `genesyscloud_flow` reads `filepath` at PLAN time via CustomizeDiff. No tofu pattern (`local_file` + `depends_on`, `null_resource`, etc.) can satisfy this because the file must exist on disk BEFORE tofu plan runs. S120's prompt guidance steered the LLM to use the right pattern, but the underlying constraint can't be solved in HCL.
 
-### Outstanding directive (carried from 2026-06-05)
-User asked: **"update, optimise agents.md, readmes.md across all the repos"** once the fidelity sweep lands. The fakegenesys arc carried sibling-list updates; broader optimization pass deferred. Could be a single-slice docs arc post-sustain.
+   **Fix path**: harness-level pre-placement. In `internal/harness/` or `internal/cli/`, when running a `cloud: genesys` scenario, write a minimal `flow.yaml` (and any other declared assets) into the workdir before invoking tofu init. Either: (a) the scenario YAML grows an `assets:` section listing files + contents, or (b) the harness drops a fixed `flow.yaml` stub when it detects `genesyscloud_flow` references. Option (a) is the cleaner design — generalises to other file-on-disk dependencies.
 
-## Next planned arc (queued, not started)
+2. **`genesys-rbac-and-oauth`** (repair_budget_exhausted) — three sub-issues:
+   - LLM keeps writing `authorized_grant_type = "CLIENT_CREDENTIALS"` (underscore) — the provider wants `"CLIENT-CREDENTIALS"` (hyphen). Pitfall is learned but the descriptive form isn't enough; the LLM trusts its training data. **Fix**: promote to a prompt-level instruction in `prompts/genesys/phase2_generate_hcl.md` § "Instructions" — the same way S120 handled the flow file pattern.
+   - `genesyscloud_group` plugin crash (iter 2, sweep 3). Likely missing fields in the group create or read response — similar pattern to S116c's user `division` fix. Reproduce with a single-resource HCL, find the panic line, add the missing field.
+   - `/api/v2/groups/{groupId}/voicemail` returns 501 (iter 4, 5, sweep 3). Add the handler — mirror voicemail userpolicy at `handlers/voicemail.go`.
 
-**`docs/plans/fakegenesys-arc-plan.md`** — fakegenesys (Genesys Cloud CCaaS mock) + infrafactory integration. **8 slices (S108-S115)**, ~5-7 days focused effort.
+### What's stable
 
-- **Repo already exists** at `../fakegenesys/` (`https://github.com/redscaresu/fakegenesys`, private). User created with initial commit + LICENSE on 2026-06-05. S108-T1 ("Create `../fakegenesys/` repo") is therefore effectively done — first commits should land directly there.
-- Port `:8083`, Apache-2.0, mirror fakeaws OSS-mature layout
-- Mature scope: 15 balanced resources (5 identity + 5 routing + 5 architect, including `flow` with multipart upload + lock/publish state machine)
-- **Spec-driven fidelity** (mirrors mockway): Genesys publishes OpenAPI; downloaded into `specs/genesys-openapi.json`
-- 5 training scenarios; sustain win condition is 44/44 (39 existing + 5 new) deterministic × 3 sweeps
-- Bundled infrafactory integration (S114): prompts/policies/scenarios/dispatch/topology
-- Also the **strongest end-to-end test of the auto-learning loop** the project has run — `pitfalls/genesys.yaml` starts empty; loop bootstraps a new cloud from cold start
-- Anti-nitpick rule documented for the codex review slices (S112/S113)
-- Full autonomous-execution loop prompt at the bottom of the plan doc
+- **39/39 non-genesys scenarios pass in all three sweeps.** No regressions from any of the S116–S120 changes.
+- **Auto-learning pipeline is now genesys-aware** — pitfalls/genesys.yaml grew from 2 entries (S118 commit) to 9 net entries across the three sweeps. The pipeline IS working.
+- **fakegenesys + TLS MITM end-to-end** is solid. `tofu apply` of a five-resource basic-queue scenario completes in <1 min.
 
-## Other open / shelved items
+### Standing rules that came up this session
 
-- **Layer 3 real-cloud validation** — open since S93. Big arc (cloud credentials, money, cleanup discipline). High value, high coordination cost.
-- **fakeaws `/mock/reset` purges KMS keys** — known pre-existing limitation noted in S106 close-out. ~20-30min single-slice if it causes a sweep flake.
-- **`docs/plans/pitfall-pruning-automation-plan.md`** (S107, **SHELVED**) — automation for self-pruning stale `pitfalls/*.yaml` entries. Shelved 2026-06-05 because the file isn't currently a problem (22 entries total). Shelf note includes N-trial-replay design recommendation for if reactivated. S107 slice ID stays reserved (don't reuse).
+- **`repair_budget_exhausted` is never "expected cold-start"** unless you've verified the auto-learning pipeline emitted at least one pitfall. AGENTS.md § "The auto-learning pipeline is load-bearing" + `feedback_learning_failure_is_a_bug.md` + ADR-0021 all reinforce this. The S118 fix surfaced because the user pushed back on my "expected" framing.
+- **Adding a new cloud means updating three regex/switch sites in lockstep**: `internal/generator/pitfalls_learn.go::resourceNameRe`, `internal/generator/prescriptive_extractor.go::addressRe`, `internal/cli/run_command.go::pitfallResourceMatchesCloud`. Missing one breaks learning silently for that cloud. ADR-0021.
+
+### In flight (no action required unless CI flakes)
+
+None. All session PRs are merged.
 
 ## Standing preferences (this user)
 
-Captured as memory entries — also worth knowing inline:
+- **Don't let codex nitpick.** Act on substantive only. Stop after 2 no-substantive passes.
+- **Sustain sweeps cover ALL scenarios.** Never reduce.
+- **Mature OSS scope from day one** for new sibling fakes.
+- **Cost-sensitive on CI.** Don't pitch nightly sweeps unprompted.
+- **`/loop` autonomous execution is the default for big arcs.**
+- **NEVER hand-edit `pitfalls/*.yaml`.** Auto-learning writes them; prompts + code are the legitimate intervention points.
 
-- **Don't let codex nitpick.** Triage every codex finding into substantive vs style; act on substantive only. Document declined nitpicks with rationale in `docs/review-passes/passN.md`. Stop iterating after 2 consecutive no-substantive-findings passes.
-- **Sustain sweeps cover ALL scenarios.** Never run a reduced sweep "just for the new stuff" — the dispatch wiring changes that go with new clouds/features touch code paths existing scenarios traverse; a reduced sweep would miss regressions.
-- **Mature OSS scope from day one** for new sibling fakes. Apache-2.0 + SECURITY + CONTRIBUTING + CODE_OF_CONDUCT + CHANGELOG + release workflow + gitleaks pre-commit + branch protection. Mirror fakeaws layout exactly.
-- **Cost-sensitive on CI.** Declined nightly sweep proposal because of LLM API cost. Don't pitch it again unless something material changes.
-- **`/loop` autonomous execution is the default for big arcs.** Plan docs end with the verbatim loop prompt; user kicks it off and walks away.
+## Outstanding directive (carried)
 
-## Reference patterns (used this session, worth knowing)
-
-- **4-PR cross-repo sweep**: for cross-cutting docs changes (smoke harness, fidelity strategy), open one PR per repo (3 siblings + infra) with consistent commit messages cross-referencing each other. Merge in any order once all green.
-- **Single-slice arc with close-out folded** is the right shape when the work is genuinely one cohesive unit (e.g. S106 KMS soft-delete; S105 sustain). 2-4 slices when the work splits naturally (e.g. S102/103/104 mock-gaps-and-rename).
-- **Slice IDs are sequential and shelved IDs stay reserved.** S107 = reserved-shelved (pitfall pruning). Next active = S108.
+User asked 2026-06-05: **"update, optimise agents.md, readmes.md across all the repos"** once the fidelity sweep lands. Still queued; could be a single-slice docs arc after the genesys harness/pitfall work above lands.
 
 ## Sweep entry point
 
-`make sweep-N` (was `make sweep-39`; renames at S114-T8 to discover all scenarios under `scenarios/training/`). Output: `/tmp/sweep-*/summary.tsv` + `panics.log` + per-scenario logs. Summary lines:
+`make sweep-N`. Output: `/tmp/sweep-*/summary.tsv` + `panics.log` + per-scenario logs. Summary lines:
 - `PASS=X / TOTAL=Y (deterministic: X/Z; transport_failed: W)`
 - `PANIC_LINES=N`
 - `AVOID_EMISSIONS=N` (per-cloud breakdown in pitfall-merge output)
 - `RETRY_TRANSPORT=N` / `RETRY_RECOVERED=M`
 - `TRANSPORT_FAILED=N`
 
-## Sweep entry point
-
-`make sweep-39`. Output: `/tmp/sweep-39/summary.tsv` + `panics.log` + per-scenario logs. New summary lines from this arc:
-- `PASS=X / TOTAL=Y (deterministic: X/Z; transport_failed: W)` (S97)
-- `PANIC_LINES=N` (S87)
-- `N13_EMISSIONS=N` (S94)
-- `RETRY_TRANSPORT=N` (S101 attempted retries)
-- `RETRY_RECOVERED=M` (S101 succeeded on retry)
-- `TRANSPORT_FAILED=N` (S97 end-of-sweep classification, post-retry)
-
 ## Recent arcs (full close-outs in `docs/status/ARCHIVE.md`)
 
-- **sustain re-validation + transport retry** (2026-06-04): 2 PRs. First organic N13 entry; transport-retry shipped.
-- **post-sustain tightening** (2026-06-03): 4 PRs + 1 fakeaws. aws-route53 + classifier + rule #13 + prompts ratchet.
-- **sustain + N13 durability** (2026-06-03): 2 PRs. First Option C arc.
+- **S116–S121 (this session, 2026-06-06)**: TLS MITM + read-after-create stubs + auto-learning genesys-awareness + sustain sweeps 1/2/3. 41/44 ceiling; 3 genesys scenarios blocked by described root causes. 8 PRs merged across infrafactory + fakegenesys.
+- **S108–S115 (2026-06-06)**: fakegenesys arc shipped — 4th cloud structurally integrated. 9 PRs + 3 cross-link PRs.
+- **sustain re-validation + transport retry** (2026-06-04): 2 PRs.
+- **post-sustain tightening** (2026-06-03): 4 PRs + 1 fakeaws.
+- **sustain + N13 durability** (2026-06-03): 2 PRs.
 - **S89–S93** (2026-06-03): 🎯 39/39 first deterministic. 3 PRs.
 - **S84–S88** (2026-06-03): gcp-full-stack convergence + panic gate. 3 PRs.
-- **S79–S83** (2026-06-02): sibling-mock drainage + carve-out validation. 4 PRs.
-- **S74–S78** (2026-06-02): AWS/Scaleway phase3 collapse + `make sweep-39` + N3 carve-out. 5 PRs.
-- **S54–S73**: GCP phase2 collapse, sustain ratchets, N3/N10/N13 architecture build-out. ~22 PRs.
+- **S79–S83** (2026-06-02): sibling-mock drainage + carve-out. 4 PRs.
+- **S74–S78** (2026-06-02): phase3 collapse + `make sweep-39` + N3 carve-out. 5 PRs.
+- **S54–S73**: GCP phase2 collapse, sustain ratchets, N3/N10/N13 architecture. ~22 PRs.
