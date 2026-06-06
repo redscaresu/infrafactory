@@ -34,6 +34,13 @@ fakeaws:
   url: http://127.0.0.1:8082
   auto_reset: true
 
+# fakegenesys routes `cloud: genesys` scenarios (Genesys Cloud CCaaS
+# mock). Default URL :8083 — added in S114-T7. Optional; leave url
+# empty when not running Genesys scenarios.
+fakegenesys:
+  url: http://127.0.0.1:8083
+  auto_reset: true
+
 # s3 is the S3 backend used in place of fakeaws's built-in S3 handler
 # for AWS scenarios touching aws_s3_bucket / aws_s3_object / etc.
 # Default URL points at the s3router shim (S80), which fans S3 traffic

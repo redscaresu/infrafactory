@@ -1,0 +1,26 @@
+scenario: genesys-architect-flow
+version: "1.0"
+cloud: genesys
+description: >
+  An architect flow with a user prompt and a datatable lookup. Exercises
+  fakegenesys's architect surface — flow multipart upload, prompt
+  reference, datatable + rows CRUD.
+
+genesys_resource_anchors:
+  - genesyscloud_flow
+  - genesyscloud_architect_user_prompt
+  - genesyscloud_architect_datatable
+
+resources:
+  architect:
+    purpose: ivr-with-lookup
+    flow_count: 1
+    prompt_count: 1
+    datatable_rows: 5
+
+acceptance_criteria:
+  - criterion: region_restriction
+    layer: static
+    package: genesys.region_restriction
+    params:
+      region_allowlist: ["us-east-1"]

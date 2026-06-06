@@ -8,7 +8,9 @@
 
   const CLOUD_LABELS: Record<string, string> = {
     scaleway: "SCALEWAY",
-    gcp: "GCP"
+    gcp: "GCP",
+    aws: "AWS",
+    genesys: "GENESYS"
   };
 
   let cloudGroups: CloudGroup[] = [];
@@ -29,7 +31,7 @@
         buckets.set(key, existing);
       }
     }
-    const order = ["scaleway", "gcp", "other"];
+    const order = ["scaleway", "gcp", "aws", "genesys", "other"];
     return order
       .filter((k) => buckets.has(k))
       .concat([...buckets.keys()].filter((k) => !order.includes(k)).sort())

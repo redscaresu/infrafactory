@@ -18,13 +18,18 @@
     },
     "cloud": {
       "type": "string",
-      "enum": ["scaleway", "gcp", "aws"],
-      "description": "Target cloud provider. 'scaleway', 'gcp', or 'aws'."
+      "enum": ["scaleway", "gcp", "aws", "genesys"],
+      "description": "Target cloud provider. 'scaleway', 'gcp', 'aws', or 'genesys'."
     },
     "aws_resource_anchors": {
       "type": "array",
       "items": { "type": "string" },
       "description": "List of per-API resource types this scenario asserts end-to-end coverage for (e.g., 'aws_iam_role', 'aws_s3_bucket'). Required on cloud:aws scenarios; ignored on others. Feeds S48-T7's TestFullCoverageAudit so coarse-grained scenario keys like 'compute' don't trivially claim coverage of multiple AWS resources. See fakeaws/concepts.md \"Required surface\" item 2."
+    },
+    "genesys_resource_anchors": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "List of Genesys Cloud resource types this scenario asserts end-to-end coverage for (e.g., 'genesyscloud_routing_queue', 'genesyscloud_flow'). Required on cloud:genesys scenarios."
     },
     "description": {
       "type": "string",
@@ -56,7 +61,11 @@
         "cloud_run": { "$ref": "#/$defs/cloud_run_resource" },
         "secret_manager": { "$ref": "#/$defs/secret_manager_resource" },
         "dynamodb": { "$ref": "#/$defs/dynamodb_resource" },
-        "messaging": { "$ref": "#/$defs/messaging_resource" }
+        "messaging": { "$ref": "#/$defs/messaging_resource" },
+        "routing": { "$ref": "#/$defs/genesys_resource" },
+        "identity": { "$ref": "#/$defs/genesys_resource" },
+        "architect": { "$ref": "#/$defs/genesys_resource" },
+        "full_stack": { "$ref": "#/$defs/genesys_resource" }
       },
       "additionalProperties": false
     },
@@ -377,6 +386,18 @@
         }
       },
       "additionalProperties": false
+    },
+    "genesys_resource": {
+      "type": "object",
+      "required": ["purpose"],
+      "description": "Genesys Cloud CCaaS resource group — routing / identity / architect / full_stack. Loose schema since CCaaS doesn't map to the IaaS resource shapes (compute, networking, ...).",
+      "properties": {
+        "purpose": {
+          "type": "string",
+          "description": "Logical purpose (e.g., contact-routing, rbac-and-bot-auth). Passed to agent for naming."
+        }
+      },
+      "additionalProperties": true
     },
     "registry_resource": {
       "type": "object",

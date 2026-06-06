@@ -1,0 +1,13 @@
+# pitfalls/genesys.yaml — auto-learning pitfall corpus for Genesys
+# Cloud CCaaS scenarios.
+#
+# **Starts empty by design** (S114-T2). The auto-learning loop
+# bootstraps this file from sweep failures via the descriptive/fix/avoid
+# extractors. Sweep 1 may legitimately have genesys failures; that's
+# diagnostic data, not arc failure. Watch for sweep 2 / sweep 3
+# improvement driven by learned pitfalls — that's the cold-start test
+# of the loop closing.
+#
+# Source enum (per ADR-0019): `descriptive` | `fix` | `avoid`.
+# Hand-editing rejected by TestPitfallsNoHumanSeeding.
+pitfalls: []

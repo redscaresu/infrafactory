@@ -2,6 +2,31 @@
 
 Historical snapshots and older session notes can be moved here to keep `STATUS.md` concise.
 
+## 2026-06-06 fakegenesys arc S108-S115 close-out
+
+Seventh Option C arc. 8 slices (S108-S115). Adds Genesys Cloud CCaaS as the project's 4th cloud peer of Scaleway/GCP/AWS — a SaaS/CCaaS workload that proves the architecture isn't accidentally tied to IaaS networking primitives.
+
+**Sibling-mock**: built fresh in `github.com/redscaresu/fakegenesys`. Single Go binary, chi router, SQLite-backed state, spec-driven fidelity (mirrors mockway). 15 resources across identity / routing / architect / responsemanagement / IDP. OAuth2 client_credentials auth. Default port `:8083`. OSS-mature day-one (LICENSE + SECURITY + CONTRIBUTING + CHANGELOG + .gitleaks.toml + .githooks/pre-commit + CI/release/dependabot/Dockerfile). Apache-2.0.
+
+| Slice | PR (fakegenesys repo) | What landed |
+|---|---|---|
+| S108 | #1 | Repo scaffold + OSS layout + OAuth2 + smoke harness skeleton. `specs/genesys-openapi.json` (filtered to fakegenesys-implemented endpoints, ~200KB from upstream 20MB Swagger). |
+| S109 | #4 | 5 identity resources (user with soft-delete, group, location, auth_role with dup-name 409, oauth_client with reveal-once secret). Shared `handlers/crud.go` helpers. 10 tests. 15 example dirs. |
+| S110 | #5 | 5 routing resources (queue + members with idempotent PATCH set-replace + FK CASCADE, skill, wrapupcode, language — no PUT/PATCH per spec, utilization singleton). 8 tests. 15 example dirs. |
+| S111 | #6 | 5 architect/responsemanagement/IDP resources (datatable + rows with FK CASCADE, user_prompt with dup-name 409, flow with multipart upload + lock/publish state machine, response, idp_generic singleton). 7 tests. 15 example dirs. |
+| S112 | #7 | Codex review pass 1: 13 substantive findings, 11 fixed, 1 deferred (set-replace vs per-row members semantics — spec ambiguous), 13 nitpicks declined. Notable fixes: Restore corruption guard, spec_cross_reference test rewritten via `chi.Walk` (caught + removed unspec'd PATCH on /flows/datatables), flow PUT state-machine bypass, GET /users state filter. |
+| S113 | #8 | Codex review pass 2: 3 substantive findings, all fixed. Restore tmpPath leak + rename-corruption rollback. `requireQueueExists` / `requireDatatableExists` branch on `sql.ErrNoRows`. Pass-3 sanity check folded in-slice: NOTHING_TO_IMPROVE. Review loop closed. |
+| S114 | infrafactory#92 | Cross-repo cascade into infrafactory: `FakegenesysConfig` block in config.go, `knownClouds += "genesys"`, `cloudMockStateRouter.genesys` + ResetAll cascade, `detectCloud` probe (Genesys check runs BEFORE AWS to avoid schema_version collision), `topology_derive_genesys.go` emitting routing_queue/flow connectivity, schema additions (cloud enum + `genesys_resource_anchors` + `$defs/genesys_resource`), prompts/genesys/* (3), policies/genesys/* (3), pitfalls/genesys.yaml (empty), 5 training scenarios, infrafactory.yaml + Makefile + README + AGENTS updates, ADR-0020. |
+| S115 | mockway#9 / fakegcp#15 / fakeaws#13 / infrafactory#92-close-out | Cross-link blurbs: 3 sibling READMEs (mockway/fakegcp/fakeaws) updated to mention fakegenesys; fakegenesys README already cross-links the other 3 (landed in S108). Arc close-out folded in. **Sustain sweep (44/44 × 3) deferred to operator-driven LLM credential run** — Genesys-aware sustain requires LLM API + 1-2 hour runtime per sweep. Cold-start auto-learning test framing preserved in `docs/NEXT_SESSION.md`. |
+
+**Cold-start auto-learning observation**: `pitfalls/genesys.yaml` ships empty. The first 3 sustain sweeps are the loop's bootstrap signal — sweep 1 may legitimately have genesys failures (diagnostic data, not arc failure); sweep 2/3 should show learned-pitfall-driven improvement if the loop closes from cold start.
+
+**Mature-OSS day-one validated**: all 13 OSS-readiness items present from S108. fakegenesys/CHANGELOG carries per-slice entries. v0.1.0 release tag deferred to immediately-post-merge of S115 (avoids stale tags during mid-arc iteration).
+
+**User click-ops pending (S115-T8)**: flip github.com/redscaresu/fakegenesys to public + enable branch protection matching the three other siblings.
+
+Arc closed.
+
 ## 2026-06-05 fakeaws KMS soft-delete arc close-out
 
 Sixth Option C arc. Single slice (S106). Closes the loop on the organic mock-gap S105 surfaced in sweep 3/3.

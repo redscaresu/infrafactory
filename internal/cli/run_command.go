@@ -1289,6 +1289,7 @@ func resetAllConfiguredMocks(ctx context.Context, runtime *CommandRuntime) error
 		{"mockway", runtime.Config.Mockway.URL},
 		{"fakegcp", runtime.Config.Fakegcp.URL},
 		{"fakeaws", runtime.Config.Fakeaws.URL},
+		{"fakegenesys", runtime.Config.Fakegenesys.URL},
 	}
 	var errs []string
 	for _, m := range urls {

@@ -1,0 +1,44 @@
+scenario: genesys-full-stack
+version: "1.0"
+cloud: genesys
+description: >
+  A full-stack Genesys deployment: identity (user, role, group) +
+  routing (queue, skill, wrapupcode, language, utilization) +
+  architect (flow with prompt + datatable). Exercises fakegenesys's
+  entire implemented surface in one scenario — the closest thing to
+  a real production tenant.
+
+genesys_resource_anchors:
+  - genesyscloud_user
+  - genesyscloud_auth_role
+  - genesyscloud_group
+  - genesyscloud_location
+  - genesyscloud_routing_queue
+  - genesyscloud_routing_skill
+  - genesyscloud_routing_wrapupcode
+  - genesyscloud_routing_language
+  - genesyscloud_routing_utilization
+  - genesyscloud_flow
+  - genesyscloud_architect_user_prompt
+  - genesyscloud_architect_datatable
+  - genesyscloud_responsemanagement_response
+
+resources:
+  full_stack:
+    purpose: production-tenant-mvp
+    user_count: 4
+    queue_count: 2
+    flow_count: 1
+
+acceptance_criteria:
+  - criterion: region_restriction
+    layer: static
+    package: genesys.region_restriction
+    params:
+      region_allowlist: ["us-east-1"]
+  - criterion: queue_must_have_wrapup
+    layer: static
+    package: genesys.queue_must_have_wrapup
+  - criterion: oauth_client_least_privilege
+    layer: static
+    package: genesys.oauth_client_least_privilege

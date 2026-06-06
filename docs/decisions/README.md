@@ -25,6 +25,7 @@ Use ADRs for decisions that affect long-term behavior, interfaces, or contributo
 - `0017-policy-pitfall-conflict.md`: Detector that fires when the LLM's HCL contains every backticked keyword of a matching prescriptive pitfall AND a rego policy still rejects it — routes to `docs/policy-gaps.md` rather than seeding an unhelpful pitfall.
 - `0018-n11-retirement-criteria.md`: Three-category framework for retiring prescriptive prompt rules — A: redundant (auto-correction carries it), B: replaced by `learned_from_diff` pitfall, C: load-bearing system/contract/scenario-bound rule kept.
 - `0019-learning-system-vocabulary.md`: Atomic rename of the auto-learning vocabulary from slice IDs (N3/N10/N13/M97) to concept names (Fix/Avoid/Descriptive). Source enum: `learned`/`learned_from_diff`/`learned_from_diff_avoid` → `descriptive`/`fix`/`avoid`.
+- `0020-fakegenesys-fourth-cloud.md`: Genesys Cloud CCaaS registered as the 4th cloud peer of scaleway/gcp/aws. Dispatch wiring + schema additions + topology deriver + cold-start auto-learning test. fakegenesys sibling-mock at `../fakegenesys` (S108-S115 arc).
 - `DECISION_RUBRIC.md`: yes/no gate for deciding when ADR is required.
 - `ADR_TEMPLATE.md`: copy/paste template for new ADRs.
 
