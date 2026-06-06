@@ -97,6 +97,7 @@ self-review`); pick whichever fits your budget/latency profile.
 | 8080 | mockway | Scaleway HTTP API mock |
 | 8081 | fakegcp | GCP API mock |
 | 8082 | fakeaws | AWS API mock |
+| 8083 | fakegenesys | Genesys Cloud CCaaS mock |
 | 9090 | SeaweedFS | S3-compatible backend (Docker; AWS-only scenarios) |
 | 9091 | s3router (S80) | HTTP shim that fans S3 traffic across SeaweedFS (data plane) and fakeaws (`?publicAccessBlock` subresource SeaweedFS doesn't model). `infrafactory.yaml` `s3.url` points here, not directly at SeaweedFS. See `cmd/s3router/`. |
 | 4173 | infrafactory UI | SvelteKit dashboard + scenario runner |
@@ -106,12 +107,13 @@ self-review`); pick whichever fits your budget/latency profile.
 After `make up`, any of these run against the same stack:
 
 ```bash
-./bin/infrafactory run scenarios/training/gcp-full-stack.yaml      # cloud: gcp      → fakegcp
-./bin/infrafactory run scenarios/training/aws-full-stack.yaml      # cloud: aws      → fakeaws
-./bin/infrafactory run scenarios/training/full-stack-paris.yaml    # cloud: scaleway → mockway
+./bin/infrafactory run scenarios/training/gcp-full-stack.yaml          # cloud: gcp      → fakegcp
+./bin/infrafactory run scenarios/training/aws-full-stack.yaml          # cloud: aws      → fakeaws
+./bin/infrafactory run scenarios/training/full-stack-paris.yaml        # cloud: scaleway → mockway
+./bin/infrafactory run scenarios/training/genesys-full-stack.yaml      # cloud: genesys  → fakegenesys
 ```
 
-There are 39 scenarios under `scenarios/training/`. Inspect generated
+There are 44 scenarios under `scenarios/training/` (39 existing + 5 genesys from the S108-S115 arc). Inspect generated
 HCL at `output/<scenario>/` (overwritten each run) and immutable
 per-run artifacts at `.infrafactory/runs/<scenario>/<run-id>/`.
 

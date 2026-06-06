@@ -52,6 +52,8 @@ func DeriveTopology(stateJSON []byte) ([]byte, map[string]string, error) {
 		return deriveTopologyGCP(stateJSON)
 	case "aws":
 		return deriveTopologyAWS(stateJSON)
+	case "genesys":
+		return deriveTopologyGenesys(stateJSON)
 	default:
 		return deriveTopologyScaleway(stateJSON)
 	}
@@ -70,9 +72,22 @@ func detectCloud(stateJSON []byte) string {
 		IAM           json.RawMessage `json:"iam"`
 		S3            json.RawMessage `json:"s3"`
 		SchemaVersion json.RawMessage `json:"schema_version"`
+		// fakegenesys (S114-T5): top-level `routing_queues` + `flows`
+		// keys distinguish it from fakeaws (no routing_queues key).
+		RoutingQueues json.RawMessage `json:"routing_queues"`
+		Flows         json.RawMessage `json:"flows"`
 	}
 	if err := json.Unmarshal(stateJSON, &probe); err != nil {
 		return "scaleway"
+	}
+	// Genesys: schema_version + routing_queues + flows present. Check
+	// BEFORE the AWS probe so we don't misclassify when both have
+	// schema_version=1.
+	genesysLike := len(probe.SchemaVersion) > 0 &&
+		len(probe.RoutingQueues) > 0 && string(probe.RoutingQueues) != "null" &&
+		len(probe.Flows) > 0 && string(probe.Flows) != "null"
+	if genesysLike {
+		return "genesys"
 	}
 	// AWS: schema_version present AND both iam + s3 blocks are present.
 	// We require all three to disambiguate from fakegcp's `iam` key.

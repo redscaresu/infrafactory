@@ -1,0 +1,32 @@
+scenario: genesys-rbac-and-oauth
+version: "1.0"
+cloud: genesys
+description: >
+  An RBAC + OAuth integration: an auth_role, a user with that role, an
+  oauth_client for service-to-service auth, and a group. Exercises
+  fakegenesys's identity surface end-to-end, including the
+  oauth_client reveal-once secret semantics.
+
+genesys_resource_anchors:
+  - genesyscloud_auth_role
+  - genesyscloud_user
+  - genesyscloud_group
+  - genesyscloud_oauth_client
+
+resources:
+  identity:
+    purpose: rbac-and-bot-auth
+    role_count: 1
+    user_count: 2
+    group_count: 1
+    oauth_client_count: 1
+
+acceptance_criteria:
+  - criterion: region_restriction
+    layer: static
+    package: genesys.region_restriction
+    params:
+      region_allowlist: ["us-east-1"]
+  - criterion: oauth_client_least_privilege
+    layer: static
+    package: genesys.oauth_client_least_privilege

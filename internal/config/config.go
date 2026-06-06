@@ -26,6 +26,7 @@ type Config struct {
 	Mockway            MockwayConfig     `yaml:"mockway"`
 	Fakegcp            FakegcpConfig     `yaml:"fakegcp"`
 	Fakeaws            FakeawsConfig     `yaml:"fakeaws"`
+	Fakegenesys        FakegenesysConfig `yaml:"fakegenesys"`
 	S3                 S3Config          `yaml:"s3"`
 	Scaleway           ScalewayConfig    `yaml:"scaleway"`
 	Validation         ValidationConfig  `yaml:"validation"`
@@ -76,6 +77,15 @@ type FakegcpConfig struct {
 // but keeps the runtime constructible). Added in S43-T9 per
 // fakeaws/concepts.md "Required surface" item 4.
 type FakeawsConfig struct {
+	URL       string `yaml:"url"`
+	AutoReset bool   `yaml:"auto_reset"`
+}
+
+// FakegenesysConfig points the runtime at the Genesys Cloud CCaaS mock
+// when a scenario declares `cloud: genesys`. URL is the HTTP endpoint
+// fakegenesys is listening on (default :8083 — mockway owns :8080,
+// fakegcp :8081, fakeaws :8082). Added in S114-T7.
+type FakegenesysConfig struct {
 	URL       string `yaml:"url"`
 	AutoReset bool   `yaml:"auto_reset"`
 }

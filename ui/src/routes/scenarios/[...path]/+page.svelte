@@ -63,7 +63,8 @@
   const CLOUD_LABELS: Record<string, string> = {
     scaleway: "Scaleway",
     gcp: "GCP",
-    aws: "AWS"
+    aws: "AWS",
+    genesys: "Genesys"
   };
 
   $: detailCloud = (detail?.cloud || "").toLowerCase();

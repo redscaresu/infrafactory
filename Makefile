@@ -13,6 +13,11 @@ FAKEGCP_URL ?= http://127.0.0.1:$(FAKEGCP_PORT)
 FAKEGCP_REPO ?= ../fakegcp
 FAKEAWS_PORT ?= 8082
 FAKEAWS_URL ?= http://127.0.0.1:$(FAKEAWS_PORT)
+# fakegenesys lives at the Genesys Cloud CCaaS mock — port 8083 (next
+# after fakeaws's 8082). Added in S114-T8.
+FAKEGENESYS_PORT ?= 8083
+FAKEGENESYS_URL ?= http://127.0.0.1:$(FAKEGENESYS_PORT)
+FAKEGENESYS_REPO ?= ../fakegenesys
 FAKEAWS_REPO ?= ../fakeaws
 MOCKS_RUN_DIR ?= /tmp/infrafactory-mocks
 HOST_ARCH ?= $(shell uname -m)
@@ -30,7 +35,7 @@ endif
 .PHONY: help test-unit test-all test \
 	bench-check smoke-validate smoke-mockway smoke-mockway-manual smoke-mockway-local smoke check \
 	ui-install ui-build ui-test ui-test-e2e ui-dev ui-clean ui-api-linux-build ui-stack-up ui-stack-logs ui-stack-down build run up down status \
-	mocks-up mocks-down mocks-status mocks-logs mockway-up mockway-down fakegcp-up fakegcp-down fakeaws-up fakeaws-down s3router-up s3router-down s3router-restart
+	mocks-up mocks-down mocks-status mocks-logs mockway-up mockway-down fakegcp-up fakegcp-down fakeaws-up fakeaws-down fakegenesys-up fakegenesys-down fakegenesys-restart s3router-up s3router-down s3router-restart
 
 help:
 	@echo "Targets:"
@@ -188,6 +193,40 @@ fakeaws-down:
 	fi; \
 	echo "fakeaws stopped"
 
+# fakegenesys-up / fakegenesys-down — S114-T8 (the Genesys CCaaS sibling, port 8083).
+fakegenesys-up: $(MOCKS_RUN_DIR)
+	@if [ -f $(MOCKS_RUN_DIR)/fakegenesys.pid ] && kill -0 $$(cat $(MOCKS_RUN_DIR)/fakegenesys.pid) 2>/dev/null; then \
+		echo "fakegenesys already running (pid=$$(cat $(MOCKS_RUN_DIR)/fakegenesys.pid)) on $(FAKEGENESYS_URL)"; \
+	else \
+		echo "starting fakegenesys on $(FAKEGENESYS_URL) ($(FAKEGENESYS_REPO))"; \
+		cd $(FAKEGENESYS_REPO) && $(GO) run ./cmd/fakegenesys --port $(FAKEGENESYS_PORT) > $(MOCKS_RUN_DIR)/fakegenesys.log 2>&1 & \
+		echo $$! > $(MOCKS_RUN_DIR)/fakegenesys.pid; \
+		until curl -sSf $(FAKEGENESYS_URL)/healthz >/dev/null 2>&1; do \
+			sleep 1; \
+		done; \
+		echo "fakegenesys ready on $(FAKEGENESYS_URL) (pid=$$(cat $(MOCKS_RUN_DIR)/fakegenesys.pid))"; \
+	fi
+
+fakegenesys-down:
+	@pidfile=$(MOCKS_RUN_DIR)/fakegenesys.pid; \
+	if [ -f $$pidfile ]; then \
+		pid=$$(cat $$pidfile); \
+		kill $$pid 2>/dev/null || true; \
+		wait $$pid 2>/dev/null || true; \
+		rm -f $$pidfile; \
+	fi; \
+	port_pid=$$(lsof -nP -iTCP:$(FAKEGENESYS_PORT) -sTCP:LISTEN -t 2>/dev/null); \
+	if [ -n "$$port_pid" ]; then \
+		echo "killing stale process(es) on port $(FAKEGENESYS_PORT): $$port_pid"; \
+		kill $$port_pid 2>/dev/null || true; \
+		sleep 1; \
+		port_pid=$$(lsof -nP -iTCP:$(FAKEGENESYS_PORT) -sTCP:LISTEN -t 2>/dev/null); \
+		[ -n "$$port_pid" ] && kill -9 $$port_pid 2>/dev/null || true; \
+	fi; \
+	echo "fakegenesys stopped"
+
+fakegenesys-restart: fakegenesys-down fakegenesys-up
+
 # seaweedfs-up / -down — M94. AWS scenarios depend on SeaweedFS
 # (S3-compatible) on :9090 for sub-resource Read flows; without it
 # every AWS scenario fails at `s3 reset: connection refused` before
@@ -261,10 +300,10 @@ s3router-restart: s3router-down s3router-up
 # S80: s3router-up added — wraps seaweedfs + fakeaws to route the
 # ?publicAccessBlock subresource correctly. infrafactory.yaml's
 # s3.url points at :9091 (the router), not :9090 (raw seaweed).
-mocks-up: mockway-up fakegcp-up fakeaws-up seaweedfs-up s3router-up
+mocks-up: mockway-up fakegcp-up fakeaws-up fakegenesys-up seaweedfs-up s3router-up
 	@echo "all mocks ready: $(MOCKWAY_URL) (Scaleway), $(FAKEGCP_URL) (GCP), $(FAKEAWS_URL) (AWS), http://127.0.0.1:$(SEAWEEDFS_PORT) (SeaweedFS), $(S3ROUTER_URL) (S3 router)"
 
-mocks-down: mockway-down fakegcp-down fakeaws-down s3router-down seaweedfs-down
+mocks-down: mockway-down fakegcp-down fakeaws-down fakegenesys-down s3router-down seaweedfs-down
 	@echo "all mocks stopped"
 
 # N5 (2026-06-01): per-mock restart shorthand. Picks up source changes in
@@ -302,7 +341,7 @@ clean-bg:
 	@echo "clean-bg complete"
 
 mocks-status:
-	@for entry in "mockway:$(MOCKWAY_PORT)" "fakegcp:$(FAKEGCP_PORT)" "fakeaws:$(FAKEAWS_PORT)" "seaweedfs:$(SEAWEEDFS_PORT)"; do \
+	@for entry in "mockway:$(MOCKWAY_PORT)" "fakegcp:$(FAKEGCP_PORT)" "fakeaws:$(FAKEAWS_PORT)" "fakegenesys:$(FAKEGENESYS_PORT)" "seaweedfs:$(SEAWEEDFS_PORT)"; do \
 		name=$${entry%:*}; \
 		port=$${entry##*:}; \
 		pidfile=$(MOCKS_RUN_DIR)/$$name.pid; \
@@ -505,17 +544,21 @@ build: ui-build
 	$(GO) build -o bin/extract-pitfall ./cmd/extract-pitfall
 	$(GO) build -o bin/pitfall-merge ./cmd/pitfall-merge
 
-# sweep-39 — canonical 39-scenario sustain-ratchet sweep.
-# Drives `infrafactory run` across every training scenario, using
-# `infrafactory mock reset` between scenarios (the S67-landed CLI
-# command that cascades correctly to SeaweedFS — bare-curl resets
-# don't).
+# sweep-N — canonical sustain-ratchet sweep (formerly sweep-39 +
+# sweep-44; now scenario-count-agnostic per S114-T8 since the genesys
+# arc added 5 scenarios). Drives `infrafactory run` across every
+# training scenario, using `infrafactory mock reset` between scenarios
+# (the S67-landed CLI command that cascades correctly to SeaweedFS —
+# bare-curl resets don't).
 #
-# Output: /tmp/sweep-39/summary.tsv + per-scenario logs.
-# Replaces the inline /tmp/sweep-*.sh scripts every prior arc
-# reinvented. See scripts/sweep_39.sh for the shell.
-sweep-39: build
+# Output: /tmp/sweep-N/summary.tsv + per-scenario logs.
+# `sweep-39` kept as an alias for backwards compat with prior arc
+# scripts that hard-code the name.
+sweep-N: build
 	@bash scripts/sweep_39.sh
+
+sweep-39: sweep-N
+	@echo "sweep-39: aliased to sweep-N (44 scenarios as of S114; was 39)"
 
 run: build
 	./bin/infrafactory ui
@@ -535,6 +578,7 @@ run: build
 #   :8080  mockway (Scaleway)
 #   :8081  fakegcp (GCP)
 #   :8082  fakeaws (AWS)
+#   :8083  fakegenesys (Genesys Cloud CCaaS)
 #   :9090  SeaweedFS (S3-compatible)
 #   :4173  infrafactory UI/API (served by `infrafactory ui`)
 up: mocks-up build $(MOCKS_RUN_DIR)

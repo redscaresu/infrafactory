@@ -31,6 +31,9 @@ func runMockResetCommand(cmd *cobra.Command, _ []string, runtime *CommandRuntime
 	if strings.TrimSpace(cfg.Fakeaws.URL) != "" {
 		router.aws = newMockStateClient(cfg.Fakeaws.URL)
 	}
+	if strings.TrimSpace(cfg.Fakegenesys.URL) != "" {
+		router.genesys = newMockStateClient(cfg.Fakegenesys.URL)
+	}
 	if strings.TrimSpace(cfg.S3.URL) != "" {
 		router.s3 = newMockStateClient(cfg.S3.URL)
 	}
@@ -80,6 +83,9 @@ func resetSummary(r *cloudMockStateRouter) string {
 	}
 	if r.aws != nil {
 		parts = append(parts, "fakeaws")
+	}
+	if r.genesys != nil {
+		parts = append(parts, "fakegenesys")
 	}
 	if r.s3 != nil {
 		parts = append(parts, "s3")

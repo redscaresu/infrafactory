@@ -122,6 +122,7 @@ type cloudMockStateRouter struct {
 	scaleway *mockStateClient
 	gcp      *mockStateClient
 	aws      *mockStateClient
+	genesys  *mockStateClient // S114-T5: Genesys Cloud CCaaS mock
 	s3       *mockStateClient // S3 carve-out for AWS scenarios (M59)
 }
 
@@ -195,6 +196,10 @@ func (r *cloudMockStateRouter) pick(service string) *mockStateClient {
 			if r.aws != nil {
 				return r.aws
 			}
+		case "genesys":
+			if r.genesys != nil {
+				return r.genesys
+			}
 		}
 	}
 	return r.scaleway
@@ -225,7 +230,7 @@ func (r *cloudMockStateRouter) isAWSScenario() bool {
 // before returning so partial resets still happen.
 func (r *cloudMockStateRouter) ResetAll(ctx context.Context) error {
 	var firstErr error
-	for _, c := range []*mockStateClient{r.scaleway, r.gcp, r.aws} {
+	for _, c := range []*mockStateClient{r.scaleway, r.gcp, r.aws, r.genesys} {
 		if c == nil {
 			continue
 		}

@@ -146,7 +146,7 @@ func filterPolicyPathsByCloud(paths []string, cloud string) []string {
 	if cloud == "" {
 		return paths
 	}
-	knownClouds := []string{"scaleway", "gcp", "aws"}
+	knownClouds := []string{"scaleway", "gcp", "aws", "genesys"}
 	otherClouds := make(map[string]struct{}, len(knownClouds)-1)
 	for _, c := range knownClouds {
 		if c != cloud {
