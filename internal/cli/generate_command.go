@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -719,6 +720,13 @@ func generateAndWriteFilesWithResult(ctx context.Context, runtime *CommandRuntim
 	if err := validateAwsProviderWiring(generated.Files); err != nil {
 		return 0, nil, fmt.Errorf("validate generated files: %w", err)
 	}
+	// S122: pre-place a default flow YAML when the LLM emits a
+	// genesyscloud_flow resource. The provider reads filepath at PLAN
+	// time via CustomizeDiff, so no tofu pattern (local_file +
+	// depends_on, null_resource provisioners) can satisfy the
+	// constraint. The harness drops the file alongside the .tf so a
+	// bare `filepath = "${path.module}/flow.yaml"` resolves at plan.
+	ensureGenesysFlowAsset(generated.Files)
 	written, err := writeGeneratedFiles(runtime.OutputDir(), generated.Files, writeMode)
 	if err != nil {
 		return 0, nil, err
@@ -752,6 +760,62 @@ func validateLayer3ProjectResource(outputDir string) error {
 		}
 	}
 	return fmt.Errorf("layer 3 requires a scaleway_account_project resource in the generated HCL for self-managed project lifecycle")
+}
+
+// genesysFlowResourceRe matches a `resource "genesyscloud_flow" "<name>"`
+// declaration anywhere in the generated HCL.
+var genesysFlowResourceRe = regexp.MustCompile(`resource\s+"genesyscloud_flow"\s+"[^"]+"`)
+
+// defaultGenesysFlowYAML is a minimal inboundCall flow that the
+// fakegenesys mock accepts without complaint. Real Genesys validates
+// the shape strictly; the mock just stores whatever bytes arrive.
+const defaultGenesysFlowYAML = `inboundCall:
+  name: harness-stub-flow
+  defaultLanguage: en-us
+  startUpRef: "/inboundCall/menus/menu[main]"
+  supportedLanguages:
+    en-us:
+      defaultLanguageSkill:
+        noValue: true
+  menus:
+    - menu:
+        name: main
+        refId: main
+        audio:
+          defaultAudio:
+            tts: "Hello."
+        choices: []
+`
+
+// ensureGenesysFlowAsset pre-places a default `flow.yaml` in the
+// generated-files map whenever the LLM emits a `genesyscloud_flow`
+// resource. The provider reads `filepath` at PLAN time via
+// CustomizeDiff (resource_genesyscloud_flow.go) — local_file +
+// depends_on, null_resource provisioners, etc. all evaluate after
+// plan, so the file MUST exist on disk before `tofu plan` runs.
+//
+// If the LLM already provided a `flow.yaml` (e.g. via the inline-
+// generate pattern from phase2_generate_hcl.md), keep it. Otherwise
+// drop the harness stub.
+//
+// Coordinated with prompts/genesys/phase2_generate_hcl.md item #11:
+// the LLM is told to reference `"${path.module}/flow.yaml"` so this
+// file resolves correctly.
+func ensureGenesysFlowAsset(files map[string][]byte) {
+	hasFlow := false
+	for _, b := range files {
+		if genesysFlowResourceRe.Match(b) {
+			hasFlow = true
+			break
+		}
+	}
+	if !hasFlow {
+		return
+	}
+	if _, ok := files["flow.yaml"]; ok {
+		return
+	}
+	files["flow.yaml"] = []byte(defaultGenesysFlowYAML)
 }
 
 type generatedFileWriteMode string
