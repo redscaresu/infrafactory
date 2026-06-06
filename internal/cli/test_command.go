@@ -748,6 +748,16 @@ var cloudConstraintPolicies = map[string]map[string]string{
 		"region_restriction":  "aws/region_restriction.rego",
 		"region":              "aws/region_restriction.rego",
 	},
+	// S118: genesys policy checks for the 5 genesys training scenarios.
+	// Three policies cover the CCaaS surface — region restriction
+	// (mirroring scaleway/gcp/aws shape), queue→wrapup associations,
+	// and OAuth client least-privilege.
+	"genesys": {
+		"region_restriction":           "genesys/region_restriction.rego",
+		"region":                       "genesys/region_restriction.rego",
+		"queue_must_have_wrapup":       "genesys/queue_must_have_wrapup.rego",
+		"oauth_client_least_privilege": "genesys/oauth_client_least_privilege.rego",
+	},
 }
 
 func evaluateStatePolicyCriteria(ctx context.Context, runtime *CommandRuntime, cloud string, stateSnapshot []byte, specs []scenario.ExecutableCheckSpec) []FailureSummary {
