@@ -23,11 +23,15 @@ The 4th-cloud arc (`docs/plans/fakegenesys-arc-plan.md`) is **structurally compl
 
 ### What needs operator action FIRST in next session
 
-1. **Genesys SDK fidelity gap surfaced 2026-06-06** during the operator-driven smoke test: the `mypurecloud/genesyscloud` provider's auth path does NOT honor `GENESYSCLOUD_GATEWAY_{PROTOCOL,HOST,PORT}` env vars — auth calls still hit the hardcoded `login.<region>.pure.cloud` URL. `HTTPS_PROXY` IS honored (we saw CONNECT requests reach fakegenesys), but fakegenesys would need TLS termination + transparent forwarding to actually proxy upstream. **The 44/44 win condition is NOT achievable today without that proxy layer.** Options:
-   - Add TLS termination + CONNECT handling to fakegenesys (so HTTPS_PROXY=localhost:8443 works).
-   - Stand up `mitmproxy` (or `caddy proxy`) as a separate process the runtime starts alongside the mocks.
-   - Vendor the Genesys SDK and patch the URL construction.
-2. **Sustain sweep (S115-T1/T2/T3)** — after the proxy layer above lands: run `make sweep-N` 3× with LLM credentials. Cold-start auto-learning observation: pitfalls/genesys.yaml ships empty; sweep 1 may fail, sweep 2/3 should show learned-pitfall-driven improvement.
+1. **TLS MITM landed (fakegenesys S116 + infrafactory S117)**: fakegenesys now runs a CONNECT-proxy on `:8443` that MITM-terminates client TLS with leaf certs signed by a boot-time self-signed CA. The CA is served as PEM at `<fakegenesys>/mock/ca-cert`. infrafactory's `cloudEnv` fetches it at runtime, writes it to a temp file, and sets `HTTPS_PROXY` + `SSL_CERT_FILE` + `NO_PROXY` (bypasses opentofu registry / GitHub Release CDN / Azure Blob / loopback / amazonaws).
+2. **macOS one-time setup** (S117 follow-up — **operator must run**): on macOS, Go's `crypto/tls` calls the Security framework via cgo and IGNORES `SSL_CERT_FILE`. The provider rejects the MITM leaf chain with "unknown authority". Workaround:
+   ```bash
+   make fakegenesys-up           # boot fakegenesys so /mock/ca-cert is reachable
+   make fakegenesys-trust-ca-darwin   # prompts for TouchID / password
+   ```
+   This is a ONE-TIME install (re-run safe). Cleanup: `make fakegenesys-untrust-ca-darwin`. Linux/CI is unaffected — `SSL_CERT_FILE` works there.
+3. **Single-scenario convergence (S118)**: after the trust-CA step, run `./bin/infrafactory run scenarios/training/genesys-basic-queue.yaml --clean`. The expected first-iteration failures are HCL-schema mistakes from the LLM on cold start (e.g. `roles = [...]` on a user — should be a separate resource). The feedback loop should self-correct. Watch `fakegenesys.log` for real `/api/v2/*` requests confirming the dispatch works end-to-end.
+4. **Sustain sweep (S119/S120/S121)** — after S118 converges: `make mocks-restart` for clean baseline, then `SWEEP_DIR=/tmp/sweep-s115-{1,2,3} make sweep-N` 3×. Cold-start auto-learning observation: pitfalls/genesys.yaml ships empty; sweep 1 may legitimately have genesys failures, sweep 2/3 should show learned-pitfall-driven improvement.
 2. **Tag fakegenesys v0.1.0** once sustain is clean: `cd ../fakegenesys && git tag v0.1.0 && git push origin v0.1.0`. The release workflow auto-builds linux/darwin × amd64/arm64.
 3. **User click-ops**:
    - Flip `github.com/redscaresu/fakegenesys` to public (currently private).
