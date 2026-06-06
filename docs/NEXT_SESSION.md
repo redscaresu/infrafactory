@@ -10,23 +10,37 @@ Self-contained brief for a fresh Claude / engineer starting in this repo.
 
 **Scaffold shape (Option C)** — goal-named, variable-length arcs.
 
-## Read this first (handoff state as of 2026-06-05 end-of-session)
+## Read this first (handoff state as of 2026-06-06 end-of-session)
 
-### What just landed
-- **S105** sustain under renamed vocab: 117/117 deterministic × 3 sweeps. ARCHIVE entry.
-- **S106** fakeaws KMS soft-delete (fakeaws#9 + infra#87): fix-forward on a mock-gap S105 surfaced. ARCHIVE entry.
-- **Smoke-harness docs sweep** (4 PRs merged earlier in session): canonical `examples/provider_smoke_test.go` pattern documented in all 3 sibling AGENTS.md + cross-link in infra AGENTS.md.
+### What just landed — fakegenesys arc S108-S115
+
+The 4th-cloud arc (`docs/plans/fakegenesys-arc-plan.md`) is **structurally complete** — fakegenesys repo built + integrated into infrafactory + 4 sibling crosslinks shipped. **One outstanding manual step**: the actual sustain sweep validation (S115-T1 through T3) needs to be run by an operator with LLM credentials. Detailed below.
+
+- **fakegenesys repo**: 8 PRs merged (S108 scaffold + S109 identity + S110 routing + S111 architect/IDP + S112+S113 codex review × 2 = 14 substantive bugs fixed). 15 resources, OSS-mature day-one, port `:8083`. github.com/redscaresu/fakegenesys.
+- **infrafactory#92 (S114)**: Genesys wired as the 4th cloud across every dispatch point + scenario.schema.json + prompts/genesys/* + policies/genesys/* + pitfalls/genesys.yaml (empty for cold-start auto-learning test) + 5 training scenarios + Makefile + README + AGENTS + ADR-0020 + STATUS update.
+- **4-PR cross-link sweep**: mockway#9 + fakegcp#15 + fakeaws#13 add fakegenesys to their sibling lists. fakegenesys README already cross-links the others (landed in S108).
+- **ARCHIVE**: per-arc close-out entry under "2026-06-06 fakegenesys arc S108-S115 close-out" (this commit).
+
+### What needs operator action FIRST in next session
+
+1. **Sustain sweep (S115-T1/T2/T3)**: run `make sweep-N` 3× with LLM credentials. The expected shape:
+   - Win condition: 44/44 deterministic × 3 (5 genesys + 39 existing).
+   - **Cold-start auto-learning observation**: sweep 1 may legitimately fail on some genesys scenarios (pitfalls/genesys.yaml ships empty). Sweep 2 / sweep 3 should show learned-pitfall-driven improvement if the loop closes from cold start.
+   - Track per-sweep: `pitfalls/genesys.yaml` line count delta + AVOID_EMISSIONS per-cloud + any `IsMockServerBug`-classified failures → `docs/mock-gaps.md` (fix at source in fakegenesys, mirror S106 KMS soft-delete pattern).
+2. **Tag fakegenesys v0.1.0** once sustain is clean: `cd ../fakegenesys && git tag v0.1.0 && git push origin v0.1.0`. The release workflow auto-builds linux/darwin × amd64/arm64.
+3. **User click-ops**:
+   - Flip `github.com/redscaresu/fakegenesys` to public (currently private).
+   - Enable branch protection on `main` matching the three other siblings' rules.
 
 ### What's in flight (poll + merge when CI green)
-- **mockway#8** — AGENTS: fidelity strategy (spec-driven)
-- **fakegcp#13** — AGENTS: fidelity strategy (hybrid)
-- **fakeaws#11** — AGENTS: fidelity strategy (reactive)
-- **infra#89** — AGENTS: cross-cutting sibling-fake fidelity comparison + `docs/plans/fakegenesys-arc-plan.md` (the next arc)
 
-All 4 are pure-docs AGENTS.md edits. CI typically green in ~1-2 min. Merge with `gh pr merge <N> --repo redscaresu/<repo> --squash --admin --delete-branch`.
+- **infrafactory#92** (S114 dispatch integration + S115 close-out folded in)
+- **mockway#9** / **fakegcp#15** / **fakeaws#13** (sibling crosslinks, pure-docs)
 
-### Outstanding directive
-User asked (mid-session, after the fidelity sweep): **"update, optimise agents.md, readmes.md across all the repos"** once the fidelity sweep lands. Scope: broader pass to tighten / deduplicate / freshen the AGENTS + README content across all 4 (soon 5) repos. Not yet planned as an arc; could be a single-slice docs arc or just executed inline. **Pick this up after the 4 in-flight PRs merge.**
+All four should be green ~1-2 min after push. Merge with `gh pr merge <N> --repo redscaresu/<repo> --squash --admin --delete-branch`.
+
+### Outstanding directive (carried from 2026-06-05)
+User asked: **"update, optimise agents.md, readmes.md across all the repos"** once the fidelity sweep lands. The fakegenesys arc carried sibling-list updates; broader optimization pass deferred. Could be a single-slice docs arc post-sustain.
 
 ## Next planned arc (queued, not started)
 
