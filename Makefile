@@ -227,6 +227,32 @@ fakegenesys-down:
 
 fakegenesys-restart: fakegenesys-down fakegenesys-up
 
+# fakegenesys-trust-ca-darwin — one-time install of fakegenesys's boot-time
+# CA into the user macOS keychain. The genesyscloud Terraform provider
+# uses Go's crypto/tls which on darwin calls the Security framework via
+# cgo and IGNORES SSL_CERT_FILE. On Linux (CI) SSL_CERT_FILE is honored
+# and this target is a no-op.
+#
+# Prereqs: fakegenesys-up has run (so /mock/ca-cert is reachable). The
+# `security add-trusted-cert` call WILL trigger a TouchID / password
+# prompt — that's expected. Re-running is safe; the preceding
+# delete-certificate is best-effort.
+fakegenesys-trust-ca-darwin:
+	@if [ "$$(uname)" != "Darwin" ]; then \
+		echo "fakegenesys-trust-ca-darwin: not on macOS — SSL_CERT_FILE alone is enough on Linux"; \
+		exit 0; \
+	fi
+	@echo "Fetching fakegenesys CA from $(FAKEGENESYS_URL)/mock/ca-cert..."
+	@curl -sSf $(FAKEGENESYS_URL)/mock/ca-cert -o /tmp/fakegenesys-mitm-ca.pem
+	@echo "Installing CA to user keychain (TouchID / password prompt expected)..."
+	@security delete-certificate -c "fakegenesys-mitm-ca" 2>/dev/null || true
+	@security add-trusted-cert -r trustRoot -p ssl -k ~/Library/Keychains/login.keychain-db /tmp/fakegenesys-mitm-ca.pem
+	@echo "CA installed. The genesyscloud provider can now reach fakegenesys via HTTPS_PROXY."
+
+fakegenesys-untrust-ca-darwin:
+	@if [ "$$(uname)" != "Darwin" ]; then exit 0; fi
+	@security delete-certificate -c "fakegenesys-mitm-ca" 2>/dev/null && echo "CA removed" || echo "CA not present"
+
 # seaweedfs-up / -down — M94. AWS scenarios depend on SeaweedFS
 # (S3-compatible) on :9090 for sub-resource Read flows; without it
 # every AWS scenario fails at `s3 reset: connection refused` before
