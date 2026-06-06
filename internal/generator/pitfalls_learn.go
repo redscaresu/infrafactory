@@ -36,7 +36,11 @@ var (
 	// dropped the lesson. M88's sweep showed 11/11 AWS scenarios
 	// failed without growing pitfalls/aws.yaml; M86+M90 fixes alone
 	// weren't enough because the regex never matched.
-	resourceNameRe = regexp.MustCompile(`((?:scaleway|google|aws)_\w+)`)
+	// S118: include `genesyscloud_` so auto-learning recognises Genesys
+	// resource names. Without this, every genesys failure produces an
+	// empty Resource, which makes ExtractDescriptivePitfall return nil
+	// — the dynamic loop oscillates without ever emitting a pitfall.
+	resourceNameRe = regexp.MustCompile(`((?:scaleway|google|aws|genesyscloud)_\w+)`)
 
 	// Matches "Unsupported argument" errors with argument name in quotes.
 	unsupportedArgRe = regexp.MustCompile(`Unsupported argument.*"(\w+)"`)

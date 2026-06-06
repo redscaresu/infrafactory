@@ -1202,6 +1202,12 @@ func pitfallResourceMatchesCloud(resource, cloud string) bool {
 		return strings.HasPrefix(resource, "google_")
 	case "aws":
 		return strings.HasPrefix(resource, "aws_")
+	case "genesys":
+		// S118: gate genesys auto-learning by the genesyscloud_ prefix.
+		// Without this case, the default-true branch lets cross-cloud
+		// resources (like Scaleway-flavoured fallbacks from
+		// ExtractDescriptivePitfall) pollute pitfalls/genesys.yaml.
+		return strings.HasPrefix(resource, "genesyscloud_")
 	default:
 		return true
 	}
