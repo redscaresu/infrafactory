@@ -27,6 +27,7 @@ Use ADRs for decisions that affect long-term behavior, interfaces, or contributo
 - `0019-learning-system-vocabulary.md`: Atomic rename of the auto-learning vocabulary from slice IDs (N3/N10/N13/M97) to concept names (Fix/Avoid/Descriptive). Source enum: `learned`/`learned_from_diff`/`learned_from_diff_avoid` → `descriptive`/`fix`/`avoid`.
 - `0020-fakegenesys-fourth-cloud.md`: Genesys Cloud CCaaS registered as the 4th cloud peer of scaleway/gcp/aws. Dispatch wiring + schema additions + topology deriver + cold-start auto-learning test. fakegenesys sibling-mock at `../fakegenesys` (S108-S115 arc).
 - `0021-cloud-prefix-set-in-auto-learning.md`: The cloud-prefix set in `resourceNameRe` / `addressRe` / `pitfallResourceMatchesCloud` is load-bearing — a missed prefix silently disables learning for that cloud. Adding a new cloud requires updating all three sites in lockstep. Codifies the diagnostic protocol surfaced when sweep 1 caught the S114-era Genesys gap.
+- `0022-genesys-flow-harness-asset.md`: `genesyscloud_flow.filepath` is read at PLAN time via the provider's `CustomizeDiff`, so no Terraform pattern can place the file. The harness pre-places a stub `flow.yaml` in the workdir alongside the generated `.tf` files whenever a `genesyscloud_flow` resource is declared. Generalising the mechanism (an `assets:` section in scenario YAML) is queued as future work.
 - `DECISION_RUBRIC.md`: yes/no gate for deciding when ADR is required.
 - `ADR_TEMPLATE.md`: copy/paste template for new ADRs.
 
