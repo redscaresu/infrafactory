@@ -48,6 +48,24 @@ Genesys is registered as a peer of `scaleway` | `gcp` | `aws` across every cloud
 - Schema additions are backward-compatible — existing scenarios don't change.
 - The cold-start auto-learning test in S115 is now well-defined: `pitfalls/genesys.yaml` is empty and the loop has 3 sweeps to populate it.
 
+## Post-merge hardening (2026-06-06)
+
+Three dispatch bugs surfaced during the operator-driven S115 smoke
+test. Captured here for ADR fidelity:
+
+1. **`detectAwsProviderWiring` over-matched**: was substring-matching `aws_` anywhere in HCL, which tripped on the genesyscloud provider's `aws_region = "us-east-1"` attribute and injected an AWS provider block. Tightened to require an actual `resource "aws_…"` or `data "aws_…"` declaration.
+2. **`cloudEnv` missing genesys env vars**: the genesyscloud provider doesn't accept HCL endpoint overrides. infrafactory now sets `GENESYSCLOUD_OAUTHCLIENT_{ID,SECRET}`, `GENESYSCLOUD_REGION`, and `GENESYSCLOUD_GATEWAY_{PROTOCOL,HOST,PORT}` env vars at tofu invocation time.
+3. **Scenario `acceptance_criteria` shape**: the 5 training scenarios used `criterion/layer/package` (wrong); fixed to `type/check/expect` matching the schema.
+
+## Known limitation: Genesys provider does not honor `GENESYSCLOUD_GATEWAY_*`
+
+The S115 smoke test surfaced a fidelity gap that does NOT have a clean fix at the dispatch layer: the `mypurecloud/genesyscloud` provider's SDK appears to ignore the `GENESYSCLOUD_GATEWAY_{PROTOCOL,HOST,PORT}` env vars for the OAuth login endpoint — auth calls go to the SDK's hardcoded `login.<region>.pure.cloud` URL regardless. The provider DOES honor `HTTPS_PROXY` (we observed CONNECT requests reach fakegenesys), but fakegenesys would need TLS termination to actually proxy the upstream call.
+
+Implications:
+- Handler-level tests in fakegenesys remain the wire-shape correctness gate.
+- The infrafactory smoke harness can validate HCL generation + plan-time schema (cold-start auto-learning still works on `tofu validate` failures), but live `apply` against fakegenesys requires a TLS-terminating proxy layer.
+- The 44/44 win condition is NOT achievable today without that proxy. Filed as the next operator-driven follow-up; not blocking on this PR.
+
 ## Related
 
 - `docs/plans/fakegenesys-arc-plan.md` (the arc plan).

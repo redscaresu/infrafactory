@@ -14,13 +14,10 @@ genesys_resource_anchors:
 resources:
   architect:
     purpose: ivr-with-lookup
-    flow_count: 1
-    prompt_count: 1
-    datatable_rows: 5
 
 acceptance_criteria:
-  - criterion: region_restriction
-    layer: static
-    package: genesys.region_restriction
+  - type: policy
+    check: region_restriction
     params:
       region_allowlist: ["us-east-1"]
+    expect: pass

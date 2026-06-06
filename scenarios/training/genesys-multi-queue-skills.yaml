@@ -15,17 +15,13 @@ genesys_resource_anchors:
 resources:
   routing:
     purpose: tiered-contact-routing
-    queue_count: 3
-    skills: ["english", "french"]
-    wrapup_codes: ["resolved", "callback", "escalated"]
-    languages: ["en-US", "fr-FR"]
 
 acceptance_criteria:
-  - criterion: region_restriction
-    layer: static
-    package: genesys.region_restriction
+  - type: policy
+    check: region_restriction
     params:
       region_allowlist: ["us-east-1", "eu-west-1"]
-  - criterion: queue_must_have_wrapup
-    layer: static
-    package: genesys.queue_must_have_wrapup
+    expect: pass
+  - type: policy
+    check: queue_must_have_wrapup
+    expect: pass

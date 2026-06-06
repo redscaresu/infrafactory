@@ -26,19 +26,16 @@ genesys_resource_anchors:
 resources:
   full_stack:
     purpose: production-tenant-mvp
-    user_count: 4
-    queue_count: 2
-    flow_count: 1
 
 acceptance_criteria:
-  - criterion: region_restriction
-    layer: static
-    package: genesys.region_restriction
+  - type: policy
+    check: region_restriction
     params:
       region_allowlist: ["us-east-1"]
-  - criterion: queue_must_have_wrapup
-    layer: static
-    package: genesys.queue_must_have_wrapup
-  - criterion: oauth_client_least_privilege
-    layer: static
-    package: genesys.oauth_client_least_privilege
+    expect: pass
+  - type: policy
+    check: queue_must_have_wrapup
+    expect: pass
+  - type: policy
+    check: oauth_client_least_privilege
+    expect: pass

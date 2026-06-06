@@ -575,7 +575,14 @@ func detectAwsProviderWiring(files map[string][]byte) (bool, bool, bool) {
 
 	for _, content := range files {
 		text := strings.ToLower(string(content))
-		if strings.Contains(text, "aws_") {
+		// Require an actual `resource "aws_…"` or `data "aws_…"`
+		// declaration, not just any substring containing "aws_".
+		// The looser check tripped on the genesyscloud provider's
+		// `aws_region = "us-east-1"` attribute and injected an AWS
+		// provider block into Genesys scenarios — duplicating
+		// `terraform {}` and breaking `tofu init`. S114 dispatch
+		// hardening.
+		if strings.Contains(text, `resource "aws_`) || strings.Contains(text, `data "aws_`) {
 			hasAwsResource = true
 		}
 		if strings.Contains(text, "required_providers") && strings.Contains(text, "\"hashicorp/aws\"") {

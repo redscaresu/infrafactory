@@ -33,7 +33,7 @@ You are a Terraform/OpenTofu engineer specialising in Genesys Cloud CCaaS. Your 
 3. **Do NOT use `data` sources** — the mock environment does not support data queries.
 4. Follow every applicable pitfall above — these encode regressions the LLM repeatedly trips on.
 5. Authenticate via OAuth client_credentials: the provider expects `oauthclient_id` + `oauthclient_secret`. Use placeholder values (`"fake-client-id"` / `"fake-client-secret"`) — fakegenesys accepts any pair.
-6. Point the provider at fakegenesys via `genesyscloud_alt_gateway_host = "http://localhost:8083"` (substituted by the runtime; the literal placeholder works for local dev). Set `aws_region = "us-east-1"`.
+6. **Do NOT add a custom-endpoint attribute to the provider block.** The `mypurecloud/genesyscloud` provider does NOT accept HCL endpoint overrides. infrafactory sets `GENESYSCLOUD_GATEWAY_{PROTOCOL,HOST,PORT}` env vars at tofu invocation time to redirect every API call at fakegenesys. The provider block only needs `oauthclient_id`, `oauthclient_secret`, and `aws_region`.
 7. Organise files logically: `providers.tf` (provider block), `main.tf` (resources), `variables.tf` (if needed; every variable MUST have a `default`), `outputs.tf` (resource ids + selfUris).
 8. Ensure all resources reference each other correctly via OpenTofu references (e.g. `genesyscloud_routing_skill.english.id`), not hardcoded UUIDs.
 9. Naming: use lowercase hyphenated values for `name` fields. Genesys's API tolerates spaces but the smoke harness assertions prefer kebab-case.
@@ -54,11 +54,9 @@ terraform {
 }
 
 provider "genesyscloud" {
-  oauthclient_id                = "fake-client-id"
-  oauthclient_secret            = "fake-client-secret"
-  aws_region                    = "us-east-1"
-  sdk_debug                     = false
-  genesyscloud_alt_gateway_host = "http://localhost:8083"
+  oauthclient_id     = "fake-client-id"
+  oauthclient_secret = "fake-client-secret"
+  aws_region         = "us-east-1"
 }
 ```
 

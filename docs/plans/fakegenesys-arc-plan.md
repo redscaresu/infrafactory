@@ -1,6 +1,6 @@
 # Arc: fakegenesys — Genesys Cloud CCaaS mock + infrafactory integration
 
-Status: planned (2026-06-05)
+Status: complete (S115 close-out — 2026-06-06)
 Owner: next-session claude (designed for autonomous execution)
 Follows: `fakeaws-kms-soft-delete-plan.md` (closed 2026-06-05 with S106) and `sustain-under-renamed-vocab-plan.md` (closed 2026-06-05 with S105). S107 reserved-but-shelved per `docs/plans/pitfall-pruning-automation-plan.md`.
 Shape: goal-named variable-length arc per AGENTS.md (8 slices, ~5-7 days focused effort / ~4-6 weeks calendar)

@@ -23,10 +23,11 @@ The 4th-cloud arc (`docs/plans/fakegenesys-arc-plan.md`) is **structurally compl
 
 ### What needs operator action FIRST in next session
 
-1. **Sustain sweep (S115-T1/T2/T3)**: run `make sweep-N` 3× with LLM credentials. The expected shape:
-   - Win condition: 44/44 deterministic × 3 (5 genesys + 39 existing).
-   - **Cold-start auto-learning observation**: sweep 1 may legitimately fail on some genesys scenarios (pitfalls/genesys.yaml ships empty). Sweep 2 / sweep 3 should show learned-pitfall-driven improvement if the loop closes from cold start.
-   - Track per-sweep: `pitfalls/genesys.yaml` line count delta + AVOID_EMISSIONS per-cloud + any `IsMockServerBug`-classified failures → `docs/mock-gaps.md` (fix at source in fakegenesys, mirror S106 KMS soft-delete pattern).
+1. **Genesys SDK fidelity gap surfaced 2026-06-06** during the operator-driven smoke test: the `mypurecloud/genesyscloud` provider's auth path does NOT honor `GENESYSCLOUD_GATEWAY_{PROTOCOL,HOST,PORT}` env vars — auth calls still hit the hardcoded `login.<region>.pure.cloud` URL. `HTTPS_PROXY` IS honored (we saw CONNECT requests reach fakegenesys), but fakegenesys would need TLS termination + transparent forwarding to actually proxy upstream. **The 44/44 win condition is NOT achievable today without that proxy layer.** Options:
+   - Add TLS termination + CONNECT handling to fakegenesys (so HTTPS_PROXY=localhost:8443 works).
+   - Stand up `mitmproxy` (or `caddy proxy`) as a separate process the runtime starts alongside the mocks.
+   - Vendor the Genesys SDK and patch the URL construction.
+2. **Sustain sweep (S115-T1/T2/T3)** — after the proxy layer above lands: run `make sweep-N` 3× with LLM credentials. Cold-start auto-learning observation: pitfalls/genesys.yaml ships empty; sweep 1 may fail, sweep 2/3 should show learned-pitfall-driven improvement.
 2. **Tag fakegenesys v0.1.0** once sustain is clean: `cd ../fakegenesys && git tag v0.1.0 && git push origin v0.1.0`. The release workflow auto-builds linux/darwin × amd64/arm64.
 3. **User click-ops**:
    - Flip `github.com/redscaresu/fakegenesys` to public (currently private).

@@ -5,7 +5,7 @@ Last updated: 2026-06-06
 ## Current phase
 
 - 🎯 **Baseline: 39/39 deterministic, 0 panics** (pre-S114). Genesys-aware sustain (44/44 = 39 existing + 5 genesys) deferred to S115's actual sweep.
-- **In progress arc**: `docs/plans/fakegenesys-arc-plan.md` — 4th cloud (Genesys Cloud CCaaS) build-out. fakegenesys S108-S113 merged (6 PRs into github.com/redscaresu/fakegenesys). S114 (this PR) wires Genesys into infrafactory: config + dispatch + topology deriver + 3 phase prompts + 3 OPA policies + 5 scenarios + schema + UI. S115 = sustain sweep + cross-link blurbs + arc close-out (cross-links landed; sustain sweep needs operator-driven LLM credentials).
+- **In progress arc**: `docs/plans/fakegenesys-arc-plan.md` — 4th cloud (Genesys Cloud CCaaS) build-out. fakegenesys S108-S113 merged + S114 merged + S115 cross-link/close-out merged. **S115 hardening (THIS PR + fakegenesys#10)** caught 3 dispatch bugs from the operator-driven smoke test: `detectAwsProviderWiring` over-matched on `aws_region`, `cloudEnv` missing `GENESYSCLOUD_*` env vars, scenario `acceptance_criteria` shape wrong. All fix-forward at source.
 - **Last arc complete**: `docs/plans/fakeaws-kms-soft-delete-plan.md` (sixth Option C arc). Single slice (S106 / fakeaws#9). Closes the loop on the organic mock-gap S105 surfaced — fakeaws KMS now soft-deletes (state=PendingDeletion, DescribeKey returns 200) matching real AWS lifecycle. `aws-secrets-manager` converges target_reached in 1 iteration.
 - **Prior arc**: `docs/plans/sustain-under-renamed-vocab-plan.md` (S105). 117/117 deterministic across 3 sweeps; rename durable under live conditions.
 - **Last arc complete**: `docs/plans/post-sustain-tightening-plan.md` (second Option C arc). Five PRs landed.
