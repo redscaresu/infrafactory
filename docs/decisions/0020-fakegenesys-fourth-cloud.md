@@ -57,7 +57,13 @@ test. Captured here for ADR fidelity:
 2. **`cloudEnv` missing genesys env vars**: the genesyscloud provider doesn't accept HCL endpoint overrides. infrafactory now sets `GENESYSCLOUD_OAUTHCLIENT_{ID,SECRET}`, `GENESYSCLOUD_REGION`, and `GENESYSCLOUD_GATEWAY_{PROTOCOL,HOST,PORT}` env vars at tofu invocation time.
 3. **Scenario `acceptance_criteria` shape**: the 5 training scenarios used `criterion/layer/package` (wrong); fixed to `type/check/expect` matching the schema.
 
-## Known limitation: Genesys provider does not honor `GENESYSCLOUD_GATEWAY_*`
+## Resolution (2026-06-06): TLS MITM CONNECT proxy
+
+The "known limitation" below was resolved by adding a TLS MITM CONNECT proxy to fakegenesys (fakegenesys#11, S116) and wiring `HTTPS_PROXY` + `SSL_CERT_FILE` into infrafactory's `cloudEnv` (infrafactory#94, S117). The provider hits `login.<region>.pure.cloud` unchanged; the proxy at `:8443` MITM-terminates TLS with a leaf cert signed by a boot-time self-signed CA, and the decrypted HTTP traffic flows through the same chi router serving `:8083`. The CA is exposed as PEM via `GET /mock/ca-cert` so harnesses can install it at runtime.
+
+**macOS exception**: Go's `crypto/tls` on darwin calls the Security framework via cgo and IGNORES `SSL_CERT_FILE`. macOS dev machines need a one-time keychain install: `make fakegenesys-trust-ca-darwin` (prompts for TouchID / password). Linux/CI is unaffected.
+
+## (historical) Known limitation: Genesys provider does not honor `GENESYSCLOUD_GATEWAY_*`
 
 The S115 smoke test surfaced a fidelity gap that does NOT have a clean fix at the dispatch layer: the `mypurecloud/genesyscloud` provider's SDK appears to ignore the `GENESYSCLOUD_GATEWAY_{PROTOCOL,HOST,PORT}` env vars for the OAuth login endpoint — auth calls go to the SDK's hardcoded `login.<region>.pure.cloud` URL regardless. The provider DOES honor `HTTPS_PROXY` (we observed CONNECT requests reach fakegenesys), but fakegenesys would need TLS termination to actually proxy the upstream call.
 
