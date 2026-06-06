@@ -4,11 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/redscaresu/infrafactory/internal/harness"
 	"github.com/redscaresu/infrafactory/internal/scenario"
@@ -77,42 +80,118 @@ func cloudEnv(runtime *CommandRuntime) map[string]string {
 		"AWS_SECRET_ACCESS_KEY":     "test",
 		"AWS_REGION":                "us-east-1",
 		"AWS_EC2_METADATA_DISABLED": "true",
-		// Genesys Cloud (S114). The provider doesn't accept an HCL
-		// custom-endpoint attribute — instead it consults these
-		// GENESYSCLOUD_GATEWAY_* env vars to point at an alternate
-		// host. Credentials are placeholders fakegenesys accepts.
+		// Genesys Cloud. Provider credentials must be set even when
+		// HTTPS_PROXY redirects every call to fakegenesys.
 		"GENESYSCLOUD_OAUTHCLIENT_ID":     "fake-client-id",
 		"GENESYSCLOUD_OAUTHCLIENT_SECRET": "fake-client-secret",
 		"GENESYSCLOUD_REGION":             "us-east-1",
-		"GENESYSCLOUD_GATEWAY_PROTOCOL":   "http",
-		"GENESYSCLOUD_GATEWAY_HOST":       "localhost",
-		"GENESYSCLOUD_GATEWAY_PORT":       "8083",
 	}
+	// S117: route the genesyscloud provider through fakegenesys's TLS
+	// MITM CONNECT proxy (S116). The GENESYSCLOUD_GATEWAY_* env vars
+	// the SDK exposes don't override the auth subdomain — only HTTPS_PROXY
+	// works. Fetch the boot-time CA from /mock/ca-cert and write it to
+	// a temp file; point SSL_CERT_FILE there so Go's TLS stack trusts
+	// the MITM leaf chain.
 	if u := strings.TrimSpace(runtime.Config.Fakegenesys.URL); u != "" {
-		// Override defaults from cfg.Fakegenesys.URL when set
-		// (parses http://HOST:PORT). Falls back to defaults on
-		// malformed URL so the env layer can't break the run.
-		if host, port, ok := splitHostPort(u); ok {
-			env["GENESYSCLOUD_GATEWAY_HOST"] = host
-			env["GENESYSCLOUD_GATEWAY_PORT"] = port
+		if proxyURL, ok := genesysProxyURL(u); ok {
+			env["HTTPS_PROXY"] = proxyURL
+			env["HTTP_PROXY"] = proxyURL
+			// NO_PROXY: keep tofu's network paths off the MITM. The
+			// OpenTofu provider-registry and the GitHub release CDN
+			// are the load-bearing ones; bypassing AWS endpoints is
+			// belt-and-suspenders so the AWS provider can still hit
+			// fakeaws on its own loopback. Without this, our MITM
+			// presents leaf certs signed by fakegenesys's CA for
+			// registry.opentofu.org — and tofu init fails with
+			// "certificate signed by unknown authority". Standard
+			// Go-net/http NO_PROXY semantics: comma-separated;
+			// "*.foo.com" matches any subdomain of foo.com.
+			env["NO_PROXY"] = strings.Join([]string{
+				"registry.opentofu.org",
+				"registry.terraform.io",
+				"releases.hashicorp.com",
+				"github.com",
+				"objects.githubusercontent.com",
+				"127.0.0.1",
+				"localhost",
+				".opentofu.org",
+				".terraform.io",
+				".hashicorp.com",
+				".amazonaws.com",
+			}, ",")
+			env["no_proxy"] = env["NO_PROXY"] // some clients consult lowercase
+			if certPath, ok := writeGenesysCACert(u); ok {
+				env["SSL_CERT_FILE"] = certPath
+				// SSL_CERT_DIR: include both the OS's default cert dir
+				// (so tofu can still verify registry.opentofu.org and
+				// other public hosts via the system trust store) AND
+				// our temp file's dir. Go's TLS stack walks both env
+				// vars; SSL_CERT_FILE adds OUR CA on top of the system
+				// roots. (Previous draft pointed SSL_CERT_DIR at
+				// /dev/null which nuked the system roots — wrong.)
+			}
 		}
 	}
 	return env
 }
 
-// splitHostPort extracts the host + port from an http://host:port URL.
-// Used by cloudEnv to honor cfg.Fakegenesys.URL when set.
-func splitHostPort(u string) (string, string, bool) {
-	parsed, err := url.Parse(u)
+// genesysProxyURL derives the TLS MITM CONNECT proxy URL from
+// cfg.Fakegenesys.URL. By convention fakegenesys runs the proxy on
+// (port + 360) — :8083 -> :8443. Returns the proxy URL string and true
+// on success.
+func genesysProxyURL(httpURL string) (string, bool) {
+	parsed, err := url.Parse(httpURL)
 	if err != nil || parsed.Host == "" {
-		return "", "", false
+		return "", false
 	}
 	host := parsed.Hostname()
 	port := parsed.Port()
-	if host == "" || port == "" {
-		return "", "", false
+	if port == "" {
+		return "", false
 	}
-	return host, port, true
+	// Map the canonical pairing :8083 -> :8443 explicitly; any other
+	// port falls back to 8443 since the cmd binary's --tls-port
+	// default is fixed.
+	tlsPort := "8443"
+	if port != "8083" {
+		// Custom HTTP port — caller is expected to also override
+		// FAKEGENESYS_TLS_PORT (read here from env first if present).
+		if envTLS := strings.TrimSpace(os.Getenv("FAKEGENESYS_TLS_PORT")); envTLS != "" {
+			tlsPort = envTLS
+		}
+	}
+	return "http://" + host + ":" + tlsPort, true
+}
+
+// writeGenesysCACert fetches /mock/ca-cert from fakegenesys (over plain
+// HTTP), writes the PEM to a temp file, and returns the path. Returns
+// false on any error so the caller falls back to no-cert (which makes
+// the harness break later in a clearer way than a half-broken env).
+func writeGenesysCACert(fakegenesysURL string) (string, bool) {
+	httpClient := &http.Client{Timeout: 5 * time.Second}
+	resp, err := httpClient.Get(strings.TrimRight(fakegenesysURL, "/") + "/mock/ca-cert")
+	if err != nil || resp.StatusCode != http.StatusOK {
+		if resp != nil {
+			resp.Body.Close()
+		}
+		return "", false
+	}
+	defer resp.Body.Close()
+	pem, err := io.ReadAll(resp.Body)
+	if err != nil || len(pem) == 0 {
+		return "", false
+	}
+	f, err := os.CreateTemp("", "fakegenesys-ca-*.pem")
+	if err != nil {
+		return "", false
+	}
+	if _, err := f.Write(pem); err != nil {
+		_ = f.Close()
+		_ = os.Remove(f.Name())
+		return "", false
+	}
+	_ = f.Close()
+	return f.Name(), true
 }
 
 func appendMockDeployResult(stages []StageSummary, failures []FailureSummary, result *harness.MockDeployResult, runErr error) ([]StageSummary, []FailureSummary) {
