@@ -111,13 +111,15 @@ func cloudEnv(runtime *CommandRuntime) map[string]string {
 				"registry.terraform.io",
 				"releases.hashicorp.com",
 				"github.com",
-				"objects.githubusercontent.com",
 				"127.0.0.1",
 				"localhost",
 				".opentofu.org",
 				".terraform.io",
 				".hashicorp.com",
 				".amazonaws.com",
+				".githubusercontent.com",
+				".github.com",
+				".windows.net",
 			}, ",")
 			env["no_proxy"] = env["NO_PROXY"] // some clients consult lowercase
 			if certPath, ok := writeGenesysCACert(u); ok {
