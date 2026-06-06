@@ -59,7 +59,10 @@ var resourceHeaderRe = regexp.MustCompile(`^\s*resource\s+"([a-z][a-z0-9_]*)"\s+
 // indexed) from a failure detail string. The trailing `[N]` is
 // dropped for matching since the diff sees the configuration
 // (symbolic) reference, not the planned (indexed) address.
-var addressRe = regexp.MustCompile(`((?:scaleway|google|aws|random)_[a-z_]+)\.([A-Za-z][A-Za-z0-9_-]*)(?:\[\d+\])?`)
+// S118: include `genesyscloud_` so the prescriptive (Fix/Avoid)
+// extractors recognise Genesys resource addresses. Same systemic gap
+// as resourceNameRe in pitfalls_learn.go.
+var addressRe = regexp.MustCompile(`((?:scaleway|google|aws|random|genesyscloud)_[a-z_]+)\.([A-Za-z][A-Za-z0-9_-]*)(?:\[\d+\])?`)
 
 // PrescriptiveFix is the structured output of the extractor before
 // it's converted into a PitfallEntry. Exposed for testing.

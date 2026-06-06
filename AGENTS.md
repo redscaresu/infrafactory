@@ -158,6 +158,17 @@ Create/update ADR when change affects:
 - Stubs must return explicit "not implemented" errors.
 - No hidden side effects outside project paths.
 
+## The auto-learning pipeline is load-bearing — never excuse its silence
+
+When `infrafactory run` exits with `repair_budget_exhausted` or `stuck` on a failure that is NOT `IsMockServerBug`-classified, the dynamic loop's pipeline failed to extract a pitfall. Treat that as a real bug to investigate, NOT as "expected cold-start", "first run is allowed to fail", or "sweep 2 will fix it". Those framings hide systemic gaps.
+
+Why this matters: 2026-06-06 sustain sweep 1 surfaced `genesys-architect-flow` exhausting its budget after 5 oscillating iterations. The "expected cold start" framing nearly let it pass — investigation revealed `resourceNameRe` had been hardcoded to `(scaleway|google|aws)_\w+` since the regex was written, so every Genesys failure produced an empty Resource, `ExtractDescriptivePitfall` returned nil, and **zero pitfalls had ever been auto-learned from Genesys runs**. Fixed in infrafactory#96.
+
+Diagnostic protocol when a run exits without learning:
+1. Grep the run's `app.log` for `pitfall_emitted`, `oscillation_pitfall_*`, `self_correction_pitfall_*`, `mock_gap_recorded`. None firing + failure not mock-classified ⇒ pipeline silently no-op'd.
+2. Drop a scratch `_test.go` next to `internal/generator/pitfalls_learn.go`, call `IsMockServerBug`, `ExtractResourceFromDetail`, `ExtractDescriptivePitfall` against the failure detail. Empty Resource + nil pitfall ⇒ the regex or classifier doesn't recognise this resource family.
+3. When adding a new cloud (or any new resource-name prefix), there are three sites to update: `resourceNameRe`, `addressRe`, `pitfallResourceMatchesCloud`. Miss one and the learner breaks silently.
+
 ## Scaleway Bootstrap (Layer 3 Prerequisites)
 
 Layer 3 uses self-managed project lifecycle per ADR-0010. Generated HCL includes `scaleway_account_project` — infrafactory creates/destroys its own project. No pre-existing sandbox required.
