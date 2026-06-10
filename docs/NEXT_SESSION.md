@@ -24,6 +24,17 @@ Three CI-enforced audits now cover wire-shape and pipeline conventions across th
 
 Pattern: convention as code, not convention as doc. Each is empty-state-safe (zero coverage passes trivially) and self-tested where applicable. The convention is opt-in — adding a `CRITICAL[<id>]:` tag opts a handler in; handlers without one are invisible to the audit.
 
+### Queued arc (do this first)
+
+**`docs/plans/fakegenesys-example-drift-fix-plan.md`** — fakegenesys example HCL drift fix + smoke harness self-containment. S136–S138, ~5–7 hr. The standalone smoke test (`FAKEGENESYS_ENABLE_E2E=1 go test ./examples/...`) currently fails for two distinct reasons:
+
+1. **Harness setup gap** (S136): the smoke test boots fakegenesys + its TLS MITM proxy but doesn't set the env vars the genesyscloud provider's SDK reads (`HTTPS_PROXY`, `SSL_CERT_FILE`, `NO_PROXY`, `GENESYSCLOUD_OAUTHCLIENT_ID/SECRET/REGION`). Every example fails identically with `400 invalid_client`, masking the real HCL drift.
+2. **HCL drift** (S137–S138): a handful of examples have HCL that's drifted from what the current `mypurecloud/genesyscloud` provider expects (e.g. `genesyscloud_architect_datatable.schema = jsonencode({...})` → `properties { ... }` blocks; `genesyscloud_idp_generic.certificate` → `certificates`; `genesyscloud_flow.file_content_hash` is unconfigurable now).
+
+S136 must land FIRST so S137 can inventory drift cleanly. Pin provider versions in each fixed example's `versions.tf` so future provider releases surface drift loudly at upgrade time. Closes at fakegenesys v0.2.1.
+
+**Key insight from this arc**: example HCL rot is a different layer from the contract audit. The contract audit (S127) defends the mock's wire shape against internal regression. Example HCL is what the consumer (the provider) sends INTO the mock — drift there comes from upstream provider releases, not from mock-side changes. Version-pin + periodic sweep is the mitigation; new `feedback_example_hcl_drift.md` memory will capture the pattern.
+
 ### Last arcs complete
 
 **Post-S135 follow-up (2026-06-10)** — two paper-cut fixes: lockstep audit (`internal/cli/cloud_prefix_lockstep_test.go`) brings ADR-0021 from code-review-enforced to CI-enforced; duplicate v0.1.0 GitHub release Draft cleaned up. One PR (infrafactory#105). ADR-0021 amended with the enforcement note. AGENTS.md § 3 cross-references the test.
