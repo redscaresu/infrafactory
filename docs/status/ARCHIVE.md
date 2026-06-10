@@ -2,6 +2,24 @@
 
 Historical snapshots and older session notes can be moved here to keep `STATUS.md` concise.
 
+## 2026-06-10 post-S135 follow-up: cloud-prefix lockstep audit + v0.1.0 release cleanup
+
+Single-PR follow-up (infrafactory#105) to the v0.2 + S128–S135 work. Closes two leftover paper-cuts:
+
+- **`internal/cli/cloud_prefix_lockstep_test.go::TestCloudPrefixLockstep`** brings ADR-0021's three-site lockstep rule from "enforced by code review only" to "fails CI with a per-site diff." Same shape as the sibling-fake `handlers/contract_audit_test.go` — parses each source file, extracts the cloud-prefix set, asserts equality (sites 1 ↔ 3) and superset (site 2 may add `random_` for provider-less resources via `permittedExtras`). Synthetic-drift verified by injecting a phantom `azure` into site 1 and confirming the per-site diagnostic.
+- **v0.1.0 GitHub release Draft duplicate deleted** — the first release workflow had failed and left a phantom Draft alongside the now-published v0.1.0. `gh api -X DELETE repos/redscaresu/fakegenesys/releases/337091171`.
+
+ADR-0021 amended with an "Amendment 2026-06-10: CI-enforced lockstep audit" section explaining the test's behaviour + drift diagnostic.
+
+**Pattern note — convention as code, not convention as doc**: three CI-enforced audits now cover wire-shape and pipeline conventions across the project:
+- 27 sibling-fake wire-shape contracts (S123 + S128–S130) via `handlers/contract_audit_test.go`
+- ADR-0021 cloud-prefix lockstep (post-S135) via `internal/cli/cloud_prefix_lockstep_test.go`
+- OPA-dup ratchet (S99) via `internal/generator/pitfalls_opa_dedup_test.go` + `prompts_opa_dedup_test.go`
+
+All follow the "drift becomes failed `go test`" pattern. Future enforcement gaps at this layer should default to a small audit test rather than a written-down rule.
+
+---
+
 ## 2026-06-10 sibling CRITICAL sweep + AGENTS/README cleanup (S128–S135)
 
 Follow-up to the v0.2 hardening close — bridges the existing wire-shape invariants in mockway/fakegcp/fakeaws into the `CRITICAL[<id>]:` convention so their `handlers/contract_audit_test.go` audits report `>0 contracts paired` rather than empty-state pass. Plus the 2026-06-05 carried AGENTS+README cleanup sweep across all 5 repos. Plus a final smoke check (genesys-full-stack) to confirm no LLM-layer regression. Plus the v0.1.0 release Draft → published cleanup.

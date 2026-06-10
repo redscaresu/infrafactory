@@ -7,13 +7,28 @@ Self-contained brief for a fresh Claude / engineer starting in this repo.
 ### Baseline
 
 - **44/44 deterministic** (full scope, sweep 8, 2026-06-10).
-- **fakegenesys v0.2.0 tagged + pushed** (commit `3e5dc55`). v0.1.0 GitHub release flipped from Draft → published.
+- **fakegenesys v0.2.0 tagged + pushed** (commit `3e5dc55`). v0.1.0 GitHub release published (duplicate Draft cleaned up).
 - **27 paired contracts CI-enforced across all 4 sibling fakes** via `handlers/contract_audit_test.go`. Convention is `CRITICAL[<id>]:` docstring ↔ `TestContract_<id>` test.
+- **ADR-0021 cloud-prefix lockstep CI-enforced** via `internal/cli/cloud_prefix_lockstep_test.go`. The three sites (`resourceNameRe` / `addressRe` / `pitfallResourceMatchesCloud`) are parsed at test time; disagreement on the cloud-prefix set fails CI with a per-site diff. Same shape as the sibling-fake contract audit.
 - Smoke check post-S135: genesys-full-stack target_reached in 329s / 2 iters (no LLM-layer regression).
+
+### "Drift becomes failed `go test`" — the durable enforcement pattern
+
+Three CI-enforced audits now cover wire-shape and pipeline conventions across the project:
+
+| Audit | Where | What it catches |
+|---|---|---|
+| Sibling contract audit | `handlers/contract_audit_test.go` in mockway, fakegcp, fakeaws, fakegenesys | Missing `TestContract_<id>` for a `CRITICAL[<id>]:` docstring (or vice versa) |
+| Cloud-prefix lockstep | `internal/cli/cloud_prefix_lockstep_test.go` | The three auto-learning regex sites disagree on the cloud-prefix set |
+| OPA-dup ratchet | `internal/generator/pitfalls_opa_dedup_test.go` + `prompts_opa_dedup_test.go` | Pitfalls or prompts duplicate an OPA-policy citation verbatim |
+
+Pattern: convention as code, not convention as doc. Each is empty-state-safe (zero coverage passes trivially) and self-tested where applicable. The convention is opt-in — adding a `CRITICAL[<id>]:` tag opts a handler in; handlers without one are invisible to the audit.
 
 ### Last arcs complete
 
-**S128–S135 (this session, 2026-06-10)** — sibling CRITICAL sweep + AGENTS+README cleanup + smoke. 8 PRs across all 5 repos. Bridged 10 new paired contracts in mockway (2) + fakegcp (4) + fakeaws (4) — combined with fakegenesys's 17 = 27 family-wide. Cross-repo AGENTS/README normalization with new Contract-coverage convention sections in each sibling's docs. Full close-out in `docs/status/ARCHIVE.md` § "2026-06-10 sibling CRITICAL sweep + AGENTS/README cleanup".
+**Post-S135 follow-up (2026-06-10)** — two paper-cut fixes: lockstep audit (`internal/cli/cloud_prefix_lockstep_test.go`) brings ADR-0021 from code-review-enforced to CI-enforced; duplicate v0.1.0 GitHub release Draft cleaned up. One PR (infrafactory#105). ADR-0021 amended with the enforcement note. AGENTS.md § 3 cross-references the test.
+
+**S128–S135 (2026-06-10)** — sibling CRITICAL sweep + AGENTS+README cleanup + smoke. 8 PRs across all 5 repos. Bridged 10 new paired contracts in mockway (2) + fakegcp (4) + fakeaws (4) — combined with fakegenesys's 17 = 27 family-wide. Cross-repo AGENTS/README normalization with new Contract-coverage convention sections in each sibling's docs. Full close-out in `docs/status/ARCHIVE.md` § "2026-06-10 sibling CRITICAL sweep + AGENTS/README cleanup".
 
 **S123–S127 (earlier 2026-06-10)** — fakegenesys v0.2 hardening (full arc detail below).
 
