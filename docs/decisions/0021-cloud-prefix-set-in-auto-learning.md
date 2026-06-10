@@ -32,6 +32,14 @@ Current set (post-S118): `scaleway | google | aws | genesyscloud`. `random_` is 
 2. **Compile-time enum drawn from `internal/cli/cloudConstraintPolicies` keys**. Rejected: the constraint-policies map is downstream of the extraction layer; couples two concerns that are independently evolved. Better to fix the gap with a regression test + the explicit checklist in AGENTS.md than to over-engineer the linkage.
 3. **Late-binding via a registry hook in each `internal/generator/*.go` file**. Rejected: same coupling concern; the three sites are small enough that the "lockstep edit" rule is cheaper than a registry.
 
+## Amendment 2026-06-10: CI-enforced lockstep audit
+
+The original ADR relied on `TestExtractResourceFromDetail_Genesys` to catch missing-cloud regressions reactively (after a sweep notices empty Resource fields). After the v0.2 hardening arc shipped `handlers/contract_audit_test.go` across the sibling fakes (S127, same family of "drift becomes failed `go test`" enforcement), the lockstep rule got the same treatment at the infrafactory layer.
+
+`internal/cli/cloud_prefix_lockstep_test.go::TestCloudPrefixLockstep` parses all three sites at test time, extracts the cloud-prefix set from each, and fails CI with a per-site diff on disagreement. Sites 1 and 3 must be identical; site 2 may be a superset for non-cloud providers (currently just `random_`; the `permittedExtras` list in the test enumerates what's allowed). Synthetic-drift verified: injecting a phantom prefix into site 1 alone produces a `missing from site 3: [<prefix>] / missing from addressRe: [<prefix>]` diagnostic.
+
+This makes the silent-no-op surface as a failed `go test` before merge, not after the next sustain sweep notices empty `Resource` fields from `ExtractDescriptivePitfall`.
+
 ## Related
 
 - ADR-0020 (fakegenesys as the 4th cloud).
