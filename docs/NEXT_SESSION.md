@@ -7,10 +7,15 @@ Self-contained brief for a fresh Claude / engineer starting in this repo.
 ### Baseline
 
 - **44/44 deterministic** (full scope, sweep 8, 2026-06-10).
-- **fakegenesys v0.2.0 tagged + pushed** (commit `3e5dc55`). v0.1.0 tagged earlier at `ba2de5a`.
-- **All 4 sibling fakes share the `CRITICAL[<id>]:` / `TestContract_<id>` contract-coverage convention** + a CI-enforced `handlers/contract_audit_test.go` audit (S127). New contracts inherit enforcement automatically.
+- **fakegenesys v0.2.0 tagged + pushed** (commit `3e5dc55`). v0.1.0 GitHub release flipped from Draft → published.
+- **27 paired contracts CI-enforced across all 4 sibling fakes** via `handlers/contract_audit_test.go`. Convention is `CRITICAL[<id>]:` docstring ↔ `TestContract_<id>` test.
+- Smoke check post-S135: genesys-full-stack target_reached in 329s / 2 iters (no LLM-layer regression).
 
-### Last arc complete (S123–S127)
+### Last arcs complete
+
+**S128–S135 (this session, 2026-06-10)** — sibling CRITICAL sweep + AGENTS+README cleanup + smoke. 8 PRs across all 5 repos. Bridged 10 new paired contracts in mockway (2) + fakegcp (4) + fakeaws (4) — combined with fakegenesys's 17 = 27 family-wide. Cross-repo AGENTS/README normalization with new Contract-coverage convention sections in each sibling's docs. Full close-out in `docs/status/ARCHIVE.md` § "2026-06-10 sibling CRITICAL sweep + AGENTS/README cleanup".
+
+**S123–S127 (earlier 2026-06-10)** — fakegenesys v0.2 hardening (full arc detail below).
 
 **`docs/plans/fakegenesys-v0.2-hardening-plan.md`** — fakegenesys v0.2 hardening + cross-repo contract-coverage convention rollout. 5 slices shipped:
 
