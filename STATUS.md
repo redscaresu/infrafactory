@@ -1,11 +1,12 @@
 # STATUS
 
-Last updated: 2026-06-06
+Last updated: 2026-06-10
 
 ## Current phase
 
-- 🎯 **Baseline: 44/44 deterministic** — fakegenesys arc shipped 2026-06-10. Genesys is the 4th cloud peer of scaleway/gcp/aws.
-- **Last arc complete**: `docs/plans/fakegenesys-arc-plan.md` — 4th cloud (Genesys Cloud CCaaS) build-out. fakegenesys v0.1.0 tagged. **Sweep 8 = 44/44 (full scope)**; sweep 11 = 8/8 (reduced scope: 5 genesys + 3 full-stacks per user 2026-06-10 directive). S122 sub-arc closed 7 successive mock-gap layers as the genesyscloud provider's call chain unwound: group subresources (a/b/16), flow upload-job protocol (b/17), oauth_client `OAuthClient` PascalCase + responsemanagement libraries (c/18), terraform-user role chain (d/19), subjects/grants (f/20), password POST + bulkadd (g/21). Auto-learning regex hole fixed in S118 (ADR-0021); harness pre-places `flow.yaml` for genesyscloud_flow (ADR-0022 — plan-time CustomizeDiff read).
+- 🎯 **Baseline: 44/44 deterministic** + **fakegenesys v0.2.0** — hardening arc shipped 2026-06-10.
+- **Last arc complete**: `docs/plans/fakegenesys-v0.2-hardening-plan.md` — S123–S127. Closes the 4 standalone-quality gaps fakegenesys had vs siblings at v0.1.0 and locks in a CI-enforced contract-coverage convention shared across the family. **Numbers**: 17 `TestContract_*` regression tests + `CRITICAL[<id>]:` docstring convention + `handlers/contract_audit_test.go` audit (5th instance of the 4-PR cross-repo doc/code sweep pattern; mockway/fakegcp/fakeaws all adopted the audit as empty-state). `docker.yml` workflow added (sibling parity, 3 workflows now). Codex review loop closed at pass 4 (NOTHING_TO_IMPROVE × 2). All 4 sibling READMEs share the same "Testing examples" stanza pointing at `go test ./examples/...` (or `./e2e/...` for mockway).
+- **Prior arc**: `docs/plans/fakegenesys-arc-plan.md` — 4th cloud (Genesys Cloud CCaaS) build-out. fakegenesys v0.1.0 tagged. **Sweep 8 = 44/44 (full scope)**; sweep 11 = 8/8 (reduced scope). S122 sub-arc closed 7 successive mock-gap layers. Auto-learning regex hole fixed in S118 (ADR-0021); harness pre-places `flow.yaml` for genesyscloud_flow (ADR-0022 — plan-time CustomizeDiff read).
 - **Last arc complete**: `docs/plans/fakeaws-kms-soft-delete-plan.md` (sixth Option C arc). Single slice (S106 / fakeaws#9). Closes the loop on the organic mock-gap S105 surfaced — fakeaws KMS now soft-deletes (state=PendingDeletion, DescribeKey returns 200) matching real AWS lifecycle. `aws-secrets-manager` converges target_reached in 1 iteration.
 - **Prior arc**: `docs/plans/sustain-under-renamed-vocab-plan.md` (S105). 117/117 deterministic across 3 sweeps; rename durable under live conditions.
 - **Last arc complete**: `docs/plans/post-sustain-tightening-plan.md` (second Option C arc). Five PRs landed.

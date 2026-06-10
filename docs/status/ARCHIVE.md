@@ -2,6 +2,51 @@
 
 Historical snapshots and older session notes can be moved here to keep `STATUS.md` concise.
 
+## 2026-06-10 fakegenesys v0.2 hardening — sibling parity close + durable contract audit
+
+Five-slice arc (S123–S127) closing fakegenesys's standalone-quality gaps vs siblings at v0.1.0 and locking in a CI-enforced contract-coverage convention shared across all four sibling fakes.
+
+### Sub-arc tickets
+
+| Slice | What landed | Where |
+|---|---|---|
+| S123 | 17 `TestContract_*` regression tests for the post-S116/S122 surface + `CRITICAL[<id>]:` docstring convention + matrix doc + flow.go `r.Host` fix | fakegenesys#22 |
+| S125 | `.github/workflows/docker.yml` — multi-arch ghcr push on `ci` workflow success on main; sibling parity | fakegenesys#23 |
+| S124 | Codex review-pass loop on the post-S116/S122 surface — `docs/review-passes/pass3.md` documents passes 3 + 4, both `NOTHING_TO_IMPROVE` | fakegenesys#24 (bundled with S126+S127 fakegenesys-side) |
+| S126 | README "Testing examples" stanza pointing at `go test ./examples/...` as the canonical entry point — same wording across all 4 siblings | fakegenesys#24, mockway#10, fakegcp#16, fakeaws#14 |
+| S127 | `handlers/contract_audit_test.go` rolled out across all 4 siblings + `CRITICAL[<id>]:` convention codified in `feedback_oss_mature_day_one.md` item 14 + new AGENTS.md § "Contract-coverage convention" | fakegenesys#24, mockway#10, fakegcp#16, fakeaws#14 |
+
+### Coverage bars (the durable framing)
+
+The S123 PR description embedded a 17-row contract matrix derived from three signals:
+
+1. **Regression-per-mock-gap layer**: every S116/S122 mock-gap layer has a regression test asserting what would have failed *before* the fix. Revert the fix → test breaks.
+2. **Docstring-derived assertions**: every `CRITICAL[<id>]:` / `MUST[<id>]:` note in handler docstrings has one explicit assertion in a paired `TestContract_<id>`.
+3. **Nil-deref defenses**: every pointer field the genesyscloud SDK dereferences without nil-check (e.g. `OAuthClient.Organization.Id`, `Division.Id`, `ProductEntities.Total`) gets an explicit non-nil assertion on the stub response.
+
+This frames coverage in terms of contracts rather than test-line counts (per `feedback_test_coverage_metrics.md` — line counts force padding on smaller API surfaces).
+
+### Cross-repo convergence pattern
+
+S127 is the 5th instance of the 4-PR cross-repo doc/code sweep pattern (`reference_cross_repo_docs_sweep.md`):
+
+1. Smoke-harness AGENTS.md sweep
+2. Fidelity-strategy AGENTS.md sweep
+3. README crosslinks for fakegenesys (S115)
+4. In-test example-test convergence (S126)
+5. Contract audit + `CRITICAL[<id>]:` convention (S127)
+
+### Release
+
+- **fakegenesys v0.2.0 tagged + pushed 2026-06-10** (commit `3e5dc55`). CHANGELOG.md `[0.2.0]` section enumerates the 5-slice arc.
+- All 3 sibling PRs (mockway#10, fakegcp#16, fakeaws#14) shipped the `handlers/contract_audit_test.go` audit as empty-state (current handler surfaces have zero `CRITICAL[id]:` tags; future contracts inherit the enforcement).
+
+### Discovery: smaller scope than planned
+
+The original plan assumed mockway/fakegcp shell scripts (`test-examples.sh`, `e2e.sh`) were the authoritative test path and needed retiring. Investigation showed each repo's `provider_smoke_test.go` was already the canonical CI test; the shell scripts are documented in their own headers as "manual debugging aids." S126 reduced to README normalization only, preserving the scripts as supplementary tools.
+
+---
+
 ## 2026-06-10 fakegenesys S116–S122 sustain validation + v0.1.0
 
 Closing layer of the fakegenesys arc — moves from "structurally complete" (post-S115) to "deterministic, tagged, shippable." 11 sweeps + 7 fakegenesys mock-gap PRs + 5 infrafactory PRs landed across one session.
