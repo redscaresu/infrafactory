@@ -40,14 +40,14 @@ and tears everything down cleanly. **No cloud credentials. No real
 cloud calls. ~60 seconds.**
 
 ```bash
-# 1. Clone the four repos side-by-side (sibling layout).
+# 1. Clone the five repos side-by-side (sibling layout).
 mkdir -p ~/dev && cd ~/dev
-for repo in infrafactory fakeaws fakegcp mockway; do
+for repo in infrafactory fakeaws fakegcp mockway fakegenesys; do
   git clone https://github.com/redscaresu/$repo.git
 done
 cd infrafactory
 
-# 2. Bring up the full stack — mockway + fakegcp + fakeaws +
+# 2. Bring up the full stack — mockway + fakegcp + fakeaws + fakegenesys +
 #    SeaweedFS (S3) + the SvelteKit UI — in one command, backgrounded.
 make up
 
