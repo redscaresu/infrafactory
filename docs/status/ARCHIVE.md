@@ -2,6 +2,44 @@
 
 Historical snapshots and older session notes can be moved here to keep `STATUS.md` concise.
 
+## 2026-06-10 sibling CRITICAL sweep + AGENTS/README cleanup (S128–S135)
+
+Follow-up to the v0.2 hardening close — bridges the existing wire-shape invariants in mockway/fakegcp/fakeaws into the `CRITICAL[<id>]:` convention so their `handlers/contract_audit_test.go` audits report `>0 contracts paired` rather than empty-state pass. Plus the 2026-06-05 carried AGENTS+README cleanup sweep across all 5 repos. Plus a final smoke check (genesys-full-stack) to confirm no LLM-layer regression. Plus the v0.1.0 release Draft → published cleanup.
+
+### Sub-arc tickets
+
+| Slice | What landed | Where |
+|---|---|---|
+| S128 | mockway: bridge LB `ip_ids` + Redis port-6379 invariants → 2 paired contracts | mockway#11 |
+| S129 | fakegcp: bridge GKE/SQL/SA cascade-delete invariants → 4 paired contracts | fakegcp#17 |
+| S130 | fakeaws: bridge RDS/KMS/SecretsManager/Route53 invariants → 4 paired contracts | fakeaws#15 |
+| S131 | infrafactory AGENTS+README: 4-sibling consistency, fakegenesys references, smoke-harness env-var list, contract-coverage convention note | infrafactory#103 |
+| S132 | mockway AGENTS: fakegenesys in fidelity comparison + new Contract-coverage convention section | mockway#12 |
+| S133 | fakegcp AGENTS: same shape | fakegcp#18 |
+| S134 | fakeaws AGENTS: same shape | fakeaws#16 |
+| S135 | fakegenesys AGENTS: new Contract-coverage convention section (fakegenesys = reference impl) | fakegenesys#25 |
+
+### Numbers
+
+- 10 new paired contracts across mockway/fakegcp/fakeaws (2/4/4).
+- Combined with fakegenesys's 17 from S123, the family now has **27 CI-enforced wire-shape contracts**.
+- 8 PRs merged (3 ARC 1 + 5 ARC 2).
+- v0.1.0 GitHub release flipped from Draft → published.
+- Smoke check (`genesys-full-stack` only, per user's reduced-scope directive): **1/1 target_reached** in 329s / 2 iters / PASS=1 of 1. No LLM-layer regression introduced by the arcs (expected — both touched only tests + docstring tags + markdown, never runtime LLM-facing surface).
+
+### Discovery
+
+The plan's literal-grep candidate enumeration (`grep -nE 'CRITICAL[^[]|MUST[^[]'`) returned almost nothing pre-existing in the 3 siblings (mockway: 0, fakegcp: 0, fakeaws: 1). The actual sweep is therefore "broader interpretation": signals from MEMORY's "Key Bug Patterns", existing test names that already lock in a wire-shape invariant, and docstring patterns. The 10 contracts above are bridges from existing-but-untagged regression tests — logic unchanged, just bound to the audit's matching convention via test rename + docstring tag.
+
+### Cross-repo convergence pattern
+
+- 6th instance: sibling CRITICAL sweep (S128–S130, mockway+fakegcp+fakeaws).
+- 7th instance: AGENTS+README cleanup (S131–S135, all 5 repos).
+
+S127's 5th instance is the most recent prior; the pattern is now well-established as a project standard.
+
+---
+
 ## 2026-06-10 fakegenesys v0.2 hardening — sibling parity close + durable contract audit
 
 Five-slice arc (S123–S127) closing fakegenesys's standalone-quality gaps vs siblings at v0.1.0 and locking in a CI-enforced contract-coverage convention shared across all four sibling fakes.
