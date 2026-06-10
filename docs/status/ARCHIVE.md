@@ -2,6 +2,67 @@
 
 Historical snapshots and older session notes can be moved here to keep `STATUS.md` concise.
 
+## 2026-06-10 fakegenesys S116–S122 sustain validation + v0.1.0
+
+Closing layer of the fakegenesys arc — moves from "structurally complete" (post-S115) to "deterministic, tagged, shippable." 11 sweeps + 7 fakegenesys mock-gap PRs + 5 infrafactory PRs landed across one session.
+
+### Sweep table
+
+| Sweep | Scope | Result | Notes |
+|---|---|---|---|
+| 1 | full (44) | 40/44 | cold start + 3 genesys |
+| 2 | full | 38/44 | 3 genesys + 3 transport flakes |
+| 3 | full | 41/44 | post-S118 regex fix |
+| 4 | full | 42/44 | S122 + S122b mid-sweep |
+| 5 | full | 43/44 | S122c live |
+| 6 | full | 43/44 | S122d live |
+| 7 | full | 43/44 | 1 transport flake |
+| **8** | **full** | **44/44 ✓** | first clean sweep, all S122a–d active |
+| 9 | full | 33/44 | 1 real genesys-full-stack (S122f-fixable) + 9 session-limit transport flakes |
+| 10 | reduced (8) | 7/8 | full-stack hit S122g-fixable gaps (password POST + bulkadd grants) |
+| **11** | **reduced** | **8/8 ✓** | post-S122g; close-out trigger |
+
+Reduced scope per 2026-06-10 user directive: 5 genesys + aws-full-stack + gcp-full-stack + full-stack-paris (the most complex scenario per IaaS cloud).
+
+### S122 sub-arc — mock-gap layers unwound
+
+Each fakegenesys PR closed the next 501 the genesyscloud provider call chain hit:
+
+| PR | What landed | Provider call site exposed |
+|---|---|---|
+| fakegenesys#11 (S116) | TLS MITM CONNECT proxy on `:8443` | provider hits `login.<region>.pure.cloud` unchanged |
+| fakegenesys#12 (S116b) | CA persistence at `~/.fakegenesys/` | keychain trust survives restart |
+| fakegenesys#13 (S116c) | 10+ read-after-create stubs | post-auth SDK probes + user/queue subresources |
+| fakegenesys#14 | `/users/search` returns `{results:[...]}` | `getDeletedUserId` destroy verification |
+| fakegenesys#15 (S119) | `/tokens/me` includes `oAuthClient.organization.id` | `updateTerraformUserWithRole` purecloud-builtin check |
+| fakegenesys#16 (S122a) | group `/individuals`, `/members`, `/voicemail` | `flattenQueueMembers` consistency loop |
+| fakegenesys#17 (S122b) | flow upload-job protocol + datatable Division | `genesyscloud_flow` POST /flows/jobs chain |
+| fakegenesys#18 (S122c) | `OAuthClient` PascalCase + libraries | SDK custom UnmarshalJSON case-sensitive lookup |
+| fakegenesys#19 (S122d) | `/users/me` + `/users/{id}/roles` | terraform-user role chain |
+| fakegenesys#20 (S122f) | `/authorization/subjects/{id}` | `genesyscloud_user_roles` getAssignedGrants |
+| fakegenesys#21 (S122g) | password POST + bulkadd/bulkremove | user password + Roledivisiongrants chain |
+
+### infrafactory PRs
+
+| PR | What landed |
+|---|---|
+| #94 (S117) | `cloudEnv` plumbs `HTTPS_PROXY` + `SSL_CERT_FILE` + `NO_PROXY` for genesys |
+| #96 (S118) | cloud-prefix set in 3 auto-learning regex sites — closed S114 oversight where every genesys failure produced empty Resource ⇒ zero pitfalls learned (ADR-0021 + AGENTS § "auto-learning is load-bearing") |
+| #98 (S122 main) | `ensureGenesysFlowAsset` pre-places `flow.yaml` — provider reads `filepath` at PLAN via CustomizeDiff (ADR-0022) + prompt rule for `CLIENT-CREDENTIALS` hyphen vs underscore |
+| #99 (S122d) | Prompt rule — `genesyscloud_user` has no `roles { }` block (use `genesyscloud_user_roles`) |
+| #100 (S122e) | Prompt rule — only `auto_answer_only` exists; `auto_answer_on` / `auto_answer_number_of_calls` etc. are rejected |
+
+### ADRs
+
+- ADR-0021: cloud-prefix set in auto-learning is load-bearing (regression test + AGENTS lockstep rule)
+- ADR-0022: `flow.yaml` harness pre-placement for `genesyscloud_flow.filepath` CustomizeDiff read
+
+### Release
+
+`fakegenesys v0.1.0` tagged + pushed 2026-06-10 from main at `ba2de5a`. GitHub release workflow builds linux/darwin × amd64/arm64.
+
+---
+
 ## 2026-06-06 fakegenesys arc S108-S115 close-out
 
 Seventh Option C arc. 8 slices (S108-S115). Adds Genesys Cloud CCaaS as the project's 4th cloud peer of Scaleway/GCP/AWS — a SaaS/CCaaS workload that proves the architecture isn't accidentally tied to IaaS networking primitives.

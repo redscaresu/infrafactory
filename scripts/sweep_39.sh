@@ -41,7 +41,11 @@ cp pitfalls/aws.yaml "$PRE/aws.yaml"
 cp pitfalls/gcp.yaml "$PRE/gcp.yaml"
 cp pitfalls/scaleway.yaml "$PRE/scaleway.yaml"
 
-ls scenarios/training/ | grep -v '^gcp-full-stack$' > "$SWEEP_DIR/scenarios.txt"
+if [ -n "${SCENARIOS_FILE:-}" ]; then
+  cp "$SCENARIOS_FILE" "$SWEEP_DIR/scenarios.txt"
+else
+  ls scenarios/training/ | grep -v '^gcp-full-stack$' > "$SWEEP_DIR/scenarios.txt"
+fi
 
 RETRY_TRANSPORT_TOTAL=0
 RETRY_RECOVERED_TOTAL=0
