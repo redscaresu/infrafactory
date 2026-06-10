@@ -2,6 +2,35 @@
 
 Historical snapshots and older session notes can be moved here to keep `STATUS.md` concise.
 
+## 2026-06-11 fakegenesys example drift fix arc — v0.2.1 (S136–S138)
+
+Three-PR arc closing the standalone smoke-test gap. User discovered `FAKEGENESYS_ENABLE_E2E=1 go test ./examples/...` failed for two layered reasons from a fresh clone: an environment-plumbing gap that the infrafactory harness handled automatically but `go test` did not, AND HCL drift in 8+ examples against the current `mypurecloud/genesyscloud` provider. The two failure modes looked identical from the outside; the harness setup gap masked the real drift inventory until S136 cleared it.
+
+### Sub-arc tickets
+
+| Slice | What landed | Where |
+|---|---|---|
+| S136 | Smoke harness env-var bridge — `setupGenesysProviderEnv` mirrors infrafactory's `cloudEnv` (HTTPS_PROXY, NO_PROXY, SSL_CERT_FILE, GENESYSCLOUD_OAUTHCLIENT_* + `FAKEGENESYS_UPLOAD_HOST` for the flow protocol). All via `t.Setenv`. | fakegenesys#26 |
+| S137 | HCL drift fixes in `examples/working/` (8 examples) + fakegenesys handler fix: `handleFlowJobCreate` respects `FAKEGENESYS_UPLOAD_HOST` env var so the smoke harness can override the upload URL host. | fakegenesys#27 |
+| S138 | Same drift refresh in `examples/updates/` (8) + 1 `examples/misconfigured/` expected.txt + CHANGELOG `[0.2.1]` section. | fakegenesys#28 |
+
+### Numbers
+
+- 3 fakegenesys PRs merged.
+- 16 example HCL files refreshed + 1 expected.txt + 1 fakegenesys handler refactor.
+- **fakegenesys v0.2.1 tagged + pushed 2026-06-11.** GitHub release page shows it as Latest published.
+- Smoke verification: `FAKEGENESYS_ENABLE_E2E=1 go test ./examples/...` runs **100% green in ~205s** across all 3 trees from a fresh clone with zero manual env setup. `known_broken.yaml` is empty.
+
+### Key insight captured
+
+**Example HCL rot is a different layer from the contract audit.** The contract audit (S127) defends the mock's wire-shape against internal regression. Example HCL is what the consumer (the provider) sends INTO the mock — drift there comes from upstream provider releases. Different mitigation: provider version pin per-example + periodic sweep on major provider releases, not continuous CI. Captured in new `feedback_example_hcl_drift.md` memory.
+
+### Pattern note — drift "looks identical, is different"
+
+The arc's design constraint mattered: S136 had to land BEFORE S137 inventoried drift, because every example failed identically with `400 invalid_client`. Without unblocking visibility first, the real drift inventory was masked. Worth remembering for future "two reasons that look the same" arcs: fix the upstream cause first; let downstream failures emerge with clean signals.
+
+---
+
 ## 2026-06-10 post-S135 follow-up: cloud-prefix lockstep audit + v0.1.0 release cleanup
 
 Single-PR follow-up (infrafactory#105) to the v0.2 + S128–S135 work. Closes two leftover paper-cuts:
