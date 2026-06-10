@@ -169,7 +169,7 @@ Why this matters: 2026-06-06 sustain sweep 1 surfaced `genesys-architect-flow` e
 Diagnostic protocol when a run exits without learning:
 1. Grep the run's `app.log` for `pitfall_emitted`, `oscillation_pitfall_*`, `self_correction_pitfall_*`, `mock_gap_recorded`. None firing + failure not mock-classified ⇒ pipeline silently no-op'd.
 2. Drop a scratch `_test.go` next to `internal/generator/pitfalls_learn.go`, call `IsMockServerBug`, `ExtractResourceFromDetail`, `ExtractDescriptivePitfall` against the failure detail. Empty Resource + nil pitfall ⇒ the regex or classifier doesn't recognise this resource family.
-3. When adding a new cloud (or any new resource-name prefix), there are three sites to update: `resourceNameRe`, `addressRe`, `pitfallResourceMatchesCloud`. Miss one and the learner breaks silently.
+3. When adding a new cloud (or any new resource-name prefix), there are three sites to update: `resourceNameRe`, `addressRe`, `pitfallResourceMatchesCloud`. Miss one and the learner breaks silently. **Enforced**: `internal/cli/cloud_prefix_lockstep_test.go::TestCloudPrefixLockstep` parses all three sites and fails CI if they disagree on the cloud-prefix set (per ADR-0021).
 
 ## Scaleway Bootstrap (Layer 3 Prerequisites)
 
