@@ -2,6 +2,45 @@
 
 Historical snapshots and older session notes can be moved here to keep `STATUS.md` concise.
 
+## 2026-06-11 demo-* Makefile sibling sweep (sibling parity follow-up)
+
+Three-PR sweep mirroring the `make demo-*` lifecycle harness (originally shipped in fakegenesys#29 the same day) into the three sibling fakes — so a fresh clone of any of the four mocks now drives a real provider through `init → apply → plan -detailed-exitcode → destroy` against the local mock with one command.
+
+### Sub-arc tickets
+
+| PR | What landed | Default example |
+|---|---|---|
+| mockway#13 | 8 `demo-*` Makefile targets + README "Driving real terraform/tofu against the mock" subsection. SCW_API_URL + canonical creds env file at `/tmp/mockway.env`. | `lb_with_ip` |
+| fakegcp#19 | Same target set + README subsection. GOOGLE_PROJECT + fake-token env at `/tmp/fakegcp.env`. providers.tf inside each example hardcodes the endpoint, so DEMO_PORT is pinned at 8080. | `secret_manager` |
+| fakeaws#17 | Same target set + README subsection. AWS_REGION + fake creds env at `/tmp/fakeaws.env` (not strictly needed since example HCL fully specifies them; mirrors the canonical smoke shape). | `sqs_queue` |
+
+### Targets
+
+Each sibling now exposes the same eight targets (matching fakegenesys's shape from PR #29):
+
+- `demo-help` — list targets + available examples
+- `demo-up` — boot the mock + write `/tmp/<sibling>.env`
+- `demo-down` — kill mock + remove temp files
+- `demo-env` — `cat` the env file for sourcing
+- `demo-shell` — drop into a bash subshell with env set + cd'd to example
+- `demo-apply` — full lifecycle init → apply → plan-detailed-exitcode (correctness oracle)
+- `demo-destroy` — `tofu destroy` on the example
+- `demo-clean` — destroy + nuke `.terraform/` + state files
+
+### Numbers
+
+- 3 PRs (mockway#13, fakegcp#19, fakeaws#17) opened in parallel + merged once CI green.
+- 16 sibling-mock examples now reachable via `make demo-apply EXAMPLE=<dir>` from a fresh clone.
+- All three siblings verified end-to-end against their default example (apply succeeds, `plan -detailed-exitcode == 0`).
+
+### Pattern note
+
+Simpler than the fakegenesys variant because scaleway, google, and aws providers all honour endpoint overrides natively (`SCW_API_URL`, per-service `*_custom_endpoint` blocks in providers.tf, per-service `endpoints { }` block in main.tf respectively) — no TLS MITM scaffolding needed. The fakegenesys variant carries the CA file + HTTPS_PROXY + NO_PROXY + SSL_CERT_FILE setup because the `mypurecloud/genesyscloud` provider doesn't take an endpoint override; the other three siblings drop all of that.
+
+**Cross-repo convergence pattern instances**: this is the 8th iteration of the 4-PR cross-repo sweep pattern (counting S127 as the 5th, S128–S130 as 6th, S131–S135 as 7th). The pattern continues to be the right shape for cross-cutting docs/tooling additions. Captured in `reference_cross_repo_docs_sweep.md`.
+
+---
+
 ## 2026-06-11 fakegenesys example drift fix arc — v0.2.1 (S136–S138)
 
 Three-PR arc closing the standalone smoke-test gap. User discovered `FAKEGENESYS_ENABLE_E2E=1 go test ./examples/...` failed for two layered reasons from a fresh clone: an environment-plumbing gap that the infrafactory harness handled automatically but `go test` did not, AND HCL drift in 8+ examples against the current `mypurecloud/genesyscloud` provider. The two failure modes looked identical from the outside; the harness setup gap masked the real drift inventory until S136 cleared it.

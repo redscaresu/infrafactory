@@ -26,6 +26,8 @@ Pattern: convention as code, not convention as doc. Each is empty-state-safe (ze
 
 ### Last arcs complete
 
+**Demo-Makefile sibling sweep (2026-06-11)** — 3 PRs mirroring fakegenesys#29's `make demo-*` lifecycle harness into the three sibling fakes. mockway#13, fakegcp#19, fakeaws#17 — eight `demo-*` targets per repo (help/up/down/env/shell/apply/destroy/clean) that drive a real provider through `init → apply → plan -detailed-exitcode → destroy` against the local mock with one command. All four sibling fakes now expose the same demo shape. Simpler than the fakegenesys variant because scaleway/google/aws providers all honour endpoint overrides natively. 8th iteration of the 4-PR cross-repo sweep pattern (see `reference_cross_repo_docs_sweep.md`).
+
 **S136–S138 (2026-06-11)** — fakegenesys example drift fix arc. 3 PRs across fakegenesys. S136 brings the standalone smoke test's environment up to par with infrafactory's `cloudEnv` (HTTPS_PROXY, NO_PROXY, SSL_CERT_FILE, GENESYSCLOUD_OAUTHCLIENT_*, FAKEGENESYS_UPLOAD_HOST). S137 + S138 refresh 16 examples + 1 expected.txt against the current `mypurecloud/genesyscloud` provider schema. fakegenesys v0.2.1 tagged. Smoke runs 100% green in ~205s from a fresh clone. New `feedback_example_hcl_drift.md` memory captures the pattern: example HCL rot is a different layer from the contract audit.
 
 **Post-S135 follow-up (2026-06-10)** — two paper-cut fixes: lockstep audit (`internal/cli/cloud_prefix_lockstep_test.go`) brings ADR-0021 from code-review-enforced to CI-enforced; duplicate v0.1.0 GitHub release Draft cleaned up. One PR (infrafactory#105). ADR-0021 amended with the enforcement note. AGENTS.md § 3 cross-references the test.
