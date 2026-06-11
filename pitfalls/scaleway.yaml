@@ -20,3 +20,13 @@ pitfalls:
       rule: "exit status 1 | stderr: ╷\n│ Error: scaleway-sdk-go: resource  with ID  is not found\n│ \n│   with scaleway_domain_record.app,\n│   on dns.tf line 1, in resource \"scaleway_domain_record\" \"app\":\n│    1: resource \"scaleway_domain_record\" \"app\" {\n│ \n╵"
       source: descriptive
       discovered_from: web-app-paris
+    - resource: scaleway_rdb_instance
+      rule: |-
+        exit status 1 | stderr: ╷ Fix observed in scenario "full-stack-paris": add the following HCL.
+        resource "scaleway_rdb_instance" "postgres" {
+          name               = "postgres-db"
+          user_name          = "admin"
+            enable_ipam = true
+        }
+      source: fix
+      discovered_from: full-stack-paris
