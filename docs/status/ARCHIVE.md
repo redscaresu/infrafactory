@@ -2,6 +2,48 @@
 
 Historical snapshots and older session notes can be moved here to keep `STATUS.md` concise.
 
+## 2026-06-11 testify-conversion cross-repo sweep
+
+Project-wide refactor: every Go test in `handlers/` packages across the four sibling fakes now uses `github.com/stretchr/testify` assertions where possible, replacing the older `if x != y { t.Fatalf(...) }` stdlib pattern. Rule codified in each repo's AGENTS.md (the 5-PR AGENTS sweep earlier today) and the user's global `~/.claude/CLAUDE.md` "Testing (Go)" section.
+
+### Conversions by sibling
+
+| Repo | Bulk PR | Files touched | Test funcs in scope | Stdlib blocks → testify |
+|---|---|---|---|---|
+| fakegenesys | #32 (after kickoff #30) | 7 + 1 (identity_test.go) | ~58 | ~200 |
+| fakeaws | #20 (after kickoff #18) | 15 | 145 | 514 |
+| fakegcp | #21 (straggler) | 1 (dns_cache_internal_test.go) | 1 | 4 |
+| mockway | — phase no-op | 0 | 0 | 0 |
+
+mockway's "stragglers" were 3 audit files whose `t.Fatalf` calls all live inside package-private helpers the sweep rule explicitly forbids refactoring; the test functions themselves delegate via those helpers and have nothing to convert at the call site.
+
+### "Where possible" — what stayed stdlib
+
+The rule's qualifier did real work. Per-test judgment kept these stdlib:
+
+- **Audit tests** (`contract_audit_test.go`, `regression_audit_test.go` in each sibling): the per-id diff loops emit rich multi-line context (declared-at-locations, expected-test/docstring guidance, vacuous-pass-risk multi-sentence advice). testify can't carry that without losing the structured messaging the human reader needs at audit-failure time. Each audit file's *setup* paths (`os.ReadDir`, `parser.ParseFile`) converted cleanly; only the rich-diff payloads stayed stdlib.
+- **Lazy-body-read failure branches** (3 instances in fakegenesys/architect_test.go + tls_mitm_test.go): the body is read only inside the failure branch; converting would force eager body reads on the happy path.
+
+### Mechanics
+
+- **Two parallel agents** drove the heavy lifting: one for fakegenesys (~58 funcs, 7 files), one for fakeaws (~145 funcs, 15 files). Both delivered in ~8min and ~20min wall-clock respectively.
+- All PRs verified locally with `go test ./handlers/...` before commit; all CIs went green; merged via `gh pr merge <N> --squash --admin --delete-branch`.
+- **No tests changed behavior** — pure mechanical conversion.
+
+### Numbers
+
+- 5 sibling PRs total this sweep (fakegenesys #32, fakeaws #20, fakegcp #21, prior #30 + #18 + sibling AGENTS sweep #14, #20, #19, #31, #111).
+- ~210 test functions touched.
+- ~720 if-fatalf blocks → testify across the family.
+- Largest single-file diff: fakeaws/ec2_test.go.
+- Smallest: fakegcp/dns_cache_internal_test.go (4 blocks).
+
+### Pattern note — agent-driven mass refactor
+
+For mechanical-but-judgment-requiring refactors at this scale (210+ functions), spawning parallel subagents with a clear "where possible" qualifier worked well. The subagents handled per-test judgment (which lines stay stdlib, which use `require` vs `assert`) consistently because the rule was written down in three reachable places: `~/.claude/CLAUDE.md`, each sibling's `AGENTS.md`, and the reference test in the prompt. Each agent returned a brief structured report that the parent could verify without re-reading the diff.
+
+---
+
 ## 2026-06-11 demo-* Makefile sibling sweep (sibling parity follow-up)
 
 Three-PR sweep mirroring the `make demo-*` lifecycle harness (originally shipped in fakegenesys#29 the same day) into the three sibling fakes — so a fresh clone of any of the four mocks now drives a real provider through `init → apply → plan -detailed-exitcode → destroy` against the local mock with one command.
