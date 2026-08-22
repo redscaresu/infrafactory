@@ -4,6 +4,8 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+
+	"github.com/redscaresu/infrafactory/internal/config"
 )
 
 // The recovery command is read at the worst possible moment -- a failed
@@ -56,9 +58,42 @@ func TestShellQuoteQuotesEmptyString(t *testing.T) {
 func TestRecoveryCommandIsPasteableForPathWithSpace(t *testing.T) {
 	failures := []FailureSummary{{Layer: "sandbox_deploy", Stage: "orphan_sweep", Detail: "unreachable"}}
 
-	annotateWithRecoveryCommand(failures, "/tmp/my scenarios/block-paris.yaml")
+	annotateWithRecoveryCommand(failures, config.DefaultPath, "/tmp/my scenarios/block-paris.yaml")
 
 	if !strings.Contains(failures[0].Detail, `'/tmp/my scenarios/block-paris.yaml'`) {
 		t.Errorf("recovery command did not quote a path with a space: %q", failures[0].Detail)
+	}
+}
+
+// reap rebuilds its runtime from --config. A Layer 3 run started with a
+// non-default config usually has its own paths.output, so a hint that drops
+// the flag sends the operator to the default output dir, where reap finds no
+// live state and reports nothing to do -- while the resources keep billing.
+func TestReapCommandCarriesNonDefaultConfig(t *testing.T) {
+	got := reapCommand("/tmp/l3run/infrafactory.yaml", "scenarios/training/block-paris.yaml")
+
+	want := "infrafactory --config /tmp/l3run/infrafactory.yaml reap scenarios/training/block-paris.yaml"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+// The default config is implied, so naming it would be noise in a line read
+// under stress.
+func TestReapCommandOmitsDefaultConfig(t *testing.T) {
+	got := reapCommand(config.DefaultPath, "scenarios/training/block-paris.yaml")
+
+	want := "infrafactory reap scenarios/training/block-paris.yaml"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+// Both halves of the command must survive a shell, not just the scenario.
+func TestReapCommandQuotesConfigPathWithSpace(t *testing.T) {
+	got := reapCommand("/tmp/my configs/infrafactory.yaml", "scenarios/training/block-paris.yaml")
+
+	if !strings.Contains(got, `--config '/tmp/my configs/infrafactory.yaml'`) {
+		t.Errorf("config path with a space was not quoted: %q", got)
 	}
 }

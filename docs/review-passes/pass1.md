@@ -37,7 +37,43 @@ of the eight cases.
 
 None this pass.
 
+## Pass 2 — clean
+
+No findings. "The changes add bounded Layer 3 apply retry handling, better
+stderr surfacing, and post-failure cleanup verification without introducing
+an obvious regression."
+
+## Pass 3 — one finding, accepted
+
+| # | Severity | Finding | Verdict |
+|---|---|---|---|
+| 2 | P2 | The reap hint drops the run's `--config`, so a run started with a non-default config sends the operator to the wrong output directory (`run_command.go:1387`) | **Accepted — fixed** |
+
+### 2. Recovery command drops `--config` — accepted
+
+The best finding of the loop, and it describes the exact flow this arc used
+all evening: `--config /tmp/l3run/infrafactory.yaml` with its own
+`paths.output: /tmp/l3run/output`.
+
+`reap` rebuilds its runtime from `--config`. A hint that names only the
+scenario sends the operator to the default `./infrafactory.yaml` and the
+default output directory, where there is no live state — so reap reports
+nothing to do and the operator concludes they are clean, while the real
+resources keep billing from the directory the hint omitted. A cleanup hint
+that confidently reports success against the wrong directory is worse than
+no hint at all.
+
+Fixed by routing both call sites through one `reapCommand(configPath,
+scenarioPath)` builder, which also removes the duplicated formatting pass 1
+noted in passing. The flag is included only when the config is non-default,
+so the common case stays short.
+
+This reset the convergence counter: pass 3 had a substantive finding, so two
+further clean passes are required.
+
 ## Outcome
 
-1 finding, 1 accepted, 0 declined. Not yet converged — the loop needs two
-consecutive passes with no substantive findings.
+Passes 1–3: 2 findings, both accepted, 0 declined. Notably **zero nitpicks** —
+the anti-nitpick filter did not have to reject anything, which is unusual and
+suggests the prompt scope (real-money safety paths) kept the reviewer on
+target.

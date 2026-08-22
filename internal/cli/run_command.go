@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/redscaresu/infrafactory/internal/config"
 	"github.com/redscaresu/infrafactory/internal/feedback"
 	"github.com/redscaresu/infrafactory/internal/generator"
 	"github.com/redscaresu/infrafactory/internal/harness"
@@ -719,7 +720,7 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 						RunID:   runID,
 						Detail:  destroyErr.Error(),
 					})
-					annotateWithRecoveryCommand(destroyFailures, scenarioPath)
+					annotateWithRecoveryCommand(destroyFailures, runtime.ConfigPath, scenarioPath)
 					allFailures = append(allFailures, destroyFailures...)
 					logLayer3RecoveryHint(runtime, runID, scenarioPath, "auto-destroy failed")
 				} else {
@@ -740,7 +741,7 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 					allStages, allFailures = appendOrphanSweepResult(
 						cmd.Context(), allStages, allFailures, runtime, sweepTarget, sweepTargetErr, sandboxEnv)
 					if len(allFailures) > failuresBeforeSweep {
-						annotateWithRecoveryCommand(allFailures[failuresBeforeSweep:], scenarioPath)
+						annotateWithRecoveryCommand(allFailures[failuresBeforeSweep:], runtime.ConfigPath, scenarioPath)
 						logLayer3RecoveryHint(runtime, runID, scenarioPath,
 							"orphan sweep did not confirm the account is clean")
 					}
@@ -1381,11 +1382,28 @@ func shellQuote(s string) string {
 // because the failure list is what the operator reads in the terminal the
 // moment the run stops -- and the alternative to reading it there is
 // finding out from a bill.
-func annotateWithRecoveryCommand(failures []FailureSummary, scenarioPath string) {
+func annotateWithRecoveryCommand(failures []FailureSummary, configPath, scenarioPath string) {
 	for i := range failures {
 		failures[i].Detail = strings.TrimSpace(strings.TrimSpace(failures[i].Detail) +
-			fmt.Sprintf(" | real Scaleway resources may still exist: run `infrafactory reap %s` to tear them down and verify", shellQuote(scenarioPath)))
+			fmt.Sprintf(" | real Scaleway resources may still exist: run `%s` to tear them down and verify",
+				reapCommand(configPath, scenarioPath)))
 	}
+}
+
+// reapCommand renders the exact cleanup invocation for this run.
+//
+// It has to reproduce the run's own configuration, not just its scenario.
+// `reap` rebuilds its runtime from --config, and a Layer 3 run commonly
+// uses a non-default config with its own paths.output. A hint that drops
+// the flag sends the operator to the default output directory, where reap
+// finds no live state and cheerfully reports nothing to do -- while the
+// real resources keep billing somewhere else.
+func reapCommand(configPath, scenarioPath string) string {
+	cmd := "infrafactory"
+	if trimmed := strings.TrimSpace(configPath); trimmed != "" && trimmed != config.DefaultPath {
+		cmd += " --config " + shellQuote(trimmed)
+	}
+	return cmd + " reap " + shellQuote(scenarioPath)
 }
 
 // logLayer3RecoveryHint names the exact command that cleans up after a
@@ -1403,7 +1421,7 @@ func logLayer3RecoveryHint(runtime *CommandRuntime, runID, scenarioPath, reason 
 		Event:   "layer3_cleanup_unverified",
 		Status:  "failed",
 		RunID:   runID,
-		Detail: fmt.Sprintf("%s: real Scaleway resources may still exist; run `infrafactory reap %s` to tear them down and verify",
-			reason, shellQuote(scenarioPath)),
+		Detail: fmt.Sprintf("%s: real Scaleway resources may still exist; run `%s` to tear them down and verify",
+			reason, reapCommand(runtime.ConfigPath, scenarioPath)),
 	})
 }
