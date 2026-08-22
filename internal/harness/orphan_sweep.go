@@ -85,7 +85,7 @@ func (s *ScalewayOrphanSweep) Run(ctx context.Context, workDir string, secretKey
 			Stage:   "orphan_sweep",
 			Check:   "project_deleted",
 			Command: "GET " + s.apiBase + "/account/v3/projects/" + projectID,
-			Detail: fmt.Sprintf("could not verify that project %s was destroyed: %v. Treating as a leak: an unverifiable sweep must not look like a clean one. Re-check with `tofu destroy -state=%s` in %s once connectivity is restored.",
+			Detail: fmt.Sprintf("could not verify that project %s was destroyed: %v. Treating as a leak: an unverifiable sweep must not look like a clean one. Re-check with `infrafactory reap` (state: %s in %s) once connectivity is restored.",
 				projectID, err, LiveStateFilename, workDir),
 		})
 		return result, nil
@@ -96,7 +96,7 @@ func (s *ScalewayOrphanSweep) Run(ctx context.Context, workDir string, secretKey
 			Stage:   "orphan_sweep",
 			Check:   "project_deleted",
 			Command: "GET " + s.apiBase + "/account/v3/projects/" + projectID,
-			Detail: fmt.Sprintf("project %s still exists after destroy — it is billable until removed. Tear it down with `tofu destroy -state=%s` in %s, then confirm in the Scaleway console.",
+			Detail: fmt.Sprintf("project %s still exists after destroy — it is billable until removed. Tear it down with `infrafactory reap` (state: %s in %s), then confirm in the Scaleway console.",
 				projectID, LiveStateFilename, workDir),
 		})
 	}

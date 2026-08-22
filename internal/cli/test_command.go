@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -25,17 +26,22 @@ func runTestCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) 
 		return &CLIError{Op: "test", Code: errorCodeUsage, Err: fmt.Errorf("read --no-destroy flag: %w", err)}
 	}
 
-	result, err := executeTest(cmd.Context(), runtime, args[0], testExecutionOptions{
-		MockDeployMode: harness.MockDeployModeClean,
-		SkipDestroy:    noDestroy,
-	})
-	if err != nil {
-		if writeErr := writeCommandOutput(cmd, result); writeErr != nil {
-			return writeErr
+	// The guard only engages when Layer 3 is on. Interrupting a
+	// mock-only run costs nothing; interrupting one that has already
+	// applied to real Scaleway leaves billable resources behind.
+	return withSandboxInterruptGuard(cmd, runtime, signal.NotifyContext, func(ctx context.Context) error {
+		result, err := executeTest(ctx, runtime, args[0], testExecutionOptions{
+			MockDeployMode: harness.MockDeployModeClean,
+			SkipDestroy:    noDestroy,
+		})
+		if err != nil {
+			if writeErr := writeCommandOutput(cmd, result); writeErr != nil {
+				return writeErr
+			}
+			return err
 		}
-		return err
-	}
-	return writeCommandOutput(cmd, result)
+		return writeCommandOutput(cmd, result)
+	})
 }
 
 func testCommandEnv(runtime *CommandRuntime) map[string]string {

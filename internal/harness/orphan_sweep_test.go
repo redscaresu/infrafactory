@@ -66,7 +66,7 @@ func TestOrphanSweepFailsWhenProjectSurvives(t *testing.T) {
 	if result.Clean() {
 		t.Fatal("a surviving project is billable and must be reported as a leak")
 	}
-	if !strings.Contains(result.Failures[0].Detail, "tofu destroy") {
+	if !strings.Contains(result.Failures[0].Detail, "infrafactory reap") {
 		t.Errorf("failure should tell the operator how to clean up, got: %s", result.Failures[0].Detail)
 	}
 }
