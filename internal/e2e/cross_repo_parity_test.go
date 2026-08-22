@@ -190,6 +190,16 @@ func fakeRepoSpecs() []fakeRepoSpec {
 				// scaleway_marketplace_* resource type to model in
 				// isolation.
 				"marketplace": "read-only catalog API exercised by every instance/k8s scenario — no standalone resource type",
+				// account backs scaleway_account_project (mockway S140).
+				// It is Layer 3 infrastructure, not a scenario subject:
+				// the project resource is injected by Layer 3 itself
+				// (ADR-0010 self-managed project lifecycle) and is
+				// validated by validateLayer3ProjectResource, so every
+				// Layer 3 run exercises it while no Layer 2 scenario
+				// should declare one. Coverage lives in mockway's own
+				// TestContract_account_project_* pair plus
+				// examples/working/account_project.
+				"account": "Layer 3 injects scaleway_account_project itself (ADR-0010); no Layer 2 scenario declares one",
 			},
 		},
 	}
