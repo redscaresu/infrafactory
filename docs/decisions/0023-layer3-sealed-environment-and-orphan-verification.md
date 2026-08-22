@@ -48,4 +48,6 @@ Supporting these, the sandbox environment requires `SCW_DEFAULT_ORGANIZATION_ID`
 
 **Relationship to ADR-0010**: amends rather than supersedes. ADR-0010's decisions stand — including decision 4 (self-managed project lifecycle), which S140 made actually reachable by teaching mockway `/account/v3/projects`. This ADR constrains *how* a Layer 3 run may execute and what a passing result means.
 
+**Implementation status (2026-08-22)**: rules 1, 2 and 5 are fully landed (S139, S142). Rule 3 is landed as the sweep itself plus the state-derived stray-resource check, and rule 4 as `harness.AssertProjectDeletable` (S141). What remains of rules 3–4 is the *interrupt* path: a run killed mid-apply leaves `terraform-live.tfstate` recording created resources with nothing to clean them up. Signal handling and a `reap` command are tracked as S141b, and **a real Layer 3 apply must not be attempted until they land** — the guarantees above hold only for runs that reach their destroy step.
+
 **Enforcement**: the guards carry synthetic-drift coverage — removing `SCW_API_URL` from `SandboxStripEnv` fails three tests, verified before S139 merged. Following the project's "drift becomes failed `go test`" pattern.
