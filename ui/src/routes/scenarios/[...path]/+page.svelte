@@ -199,22 +199,41 @@
         {layer3Enabled ? "mock + real" : runMode?.mode || "unknown"}
       </span>
     </div>
+    <!-- M99: this card must render the SAME NUMBER OF ELEMENTS whether or
+         not the run-mode API answered. It previously rendered one grid
+         tile when the API was unreachable and three when it responded,
+         plus a conditional error line — so page height, and therefore
+         the visual-regression baselines, depended on whether mockway
+         happened to be running. Masking cannot fix that: masks hide
+         content but do not constrain layout height.
+
+         Every tile is always present (value "unavailable" when unknown)
+         and `truncate` keeps each to exactly one line regardless of
+         content length. -->
     <div class="mt-4 grid gap-2 text-xs text-slate-600 md:grid-cols-3">
-      <div class="rounded bg-slate-100 px-3 py-2" data-testid="scenario-mock-status">
+      <div class="truncate rounded bg-slate-100 px-3 py-2" data-testid="scenario-mock-status">
         {#if runMode}
           {runMode.mock_provider || "mockway"} state: {runMode.has_mock_resources ? "yes" : "no"}
         {:else}
           {detailCloud === "gcp" ? "fakegcp" : "mockway"} state: unavailable
         {/if}
       </div>
-      {#if runMode}
-        <div class="rounded bg-slate-100 px-3 py-2">terraform.tfstate: {runMode.has_tfstate ? "yes" : "no"}</div>
-        <div class="rounded bg-slate-100 px-3 py-2">Previous success: {runMode.has_previous_successful_run ? "yes" : "no"}</div>
-      {/if}
+      <div class="truncate rounded bg-slate-100 px-3 py-2" data-testid="scenario-tfstate-status">
+        terraform.tfstate: {runMode ? (runMode.has_tfstate ? "yes" : "no") : "unavailable"}
+      </div>
+      <div class="truncate rounded bg-slate-100 px-3 py-2" data-testid="scenario-previous-run-status">
+        Previous success: {runMode ? (runMode.has_previous_successful_run ? "yes" : "no") : "unavailable"}
+      </div>
     </div>
-    {#if runModeError}
-      <p class="mt-3 text-sm text-red-700">{runModeError}</p>
-    {/if}
+    <!-- Always rendered, always one line: a conditional error paragraph
+         is another height variance. Full text on hover when truncated. -->
+    <p
+      class="mt-3 truncate text-sm text-red-700"
+      data-testid="scenario-run-mode-error"
+      title={runModeError}
+    >
+      {runModeError || "\u00a0"}
+    </p>
     <div class="mt-4 rounded border border-slate-200 bg-slate-50 px-3 py-3 text-xs text-slate-700">
       <div class="flex flex-wrap items-center gap-3">
         <label class="flex items-center gap-2 rounded border border-slate-300 bg-white px-3 py-2 text-xs text-slate-800">

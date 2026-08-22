@@ -6,7 +6,7 @@ Legend: `todo` | `in_progress` | `blocked` | `done` | `wontfix`
 
 | id | title | priority | status | owner |
 |---|---|---|---|---|
-| M99 | Scenario-page visual baselines are environment-dependent (pass/fail flips on whether mockway is listening on :8080) | P2 | todo | — |
+| M99 | Scenario-page visual baselines are environment-dependent (pass/fail flips on whether mockway is listening on :8080) | P2 | done | — |
 | M100 | mockway instance examples 501 on `/instance/v2alpha1/.../private-network-interfaces` (provider drift) | P2 | todo | — |
 
 **M100 detail.** Three env-gated mockway examples — `basic_instance`, `vpc_and_private_network`, `rename_server` — fail against the current `scaleway/scaleway` provider, which calls `GET /instance/v2alpha1/zones/{zone}/private-network-interfaces`. mockway 501s that route. Verified pre-existing on clean `main` (not caused by the S140 account/v3 work). Invisible in CI because the example suite sits behind `MOCKWAY_ENABLE_E2E=1`, so nothing catches it until someone runs the gated suite. This is the example-drift layer described in `feedback_example_hcl_drift.md`, not the contract layer. Surfaced 2026-08-22 during S140.

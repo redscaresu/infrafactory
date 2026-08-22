@@ -18,6 +18,14 @@ const VOLATILE_SELECTORS = [
   // changes sidebar height on every page, which would otherwise force
   // a re-baseline for unrelated scenario additions.
   'aside section[data-testid^="sidebar-cloud-"] ul',
+  // Run-mode tiles + error line: their TEXT depends on whether the mock
+  // is reachable and on local run artifacts. M99 made the card's LAYOUT
+  // stable (always three tiles, always one error line, all truncated);
+  // masking handles the remaining content variance so the baseline no
+  // longer depends on whether mockway happens to be running.
+  '[data-testid="scenario-tfstate-status"]',
+  '[data-testid="scenario-previous-run-status"]',
+  '[data-testid="scenario-run-mode-error"]',
 ];
 
 test.describe('Visual regression baselines', () => {
