@@ -16,6 +16,7 @@ import (
 	"github.com/redscaresu/infrafactory/internal/harness"
 	"github.com/redscaresu/infrafactory/internal/scenario"
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 )
 
 func runTestCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) error {
@@ -485,6 +486,17 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 				Detail:  sandboxEnvErr.Error(),
 			})
 		} else {
+			// Emit the preflight as an explicit pass, not just a silent
+			// absence on success. The whole point of the endpoint
+			// assertion is that an operator can see it ran -- a Layer 3
+			// stage summary with no preflight line is indistinguishable
+			// from one where the check was skipped.
+			stages = append(stages, StageSummary{
+				Layer:  "sandbox_deploy",
+				Stage:  "preflight",
+				Status: StageStatusPass,
+				Detail: "credentials present; endpoint asserted as " + realScalewayAPIURL,
+			})
 			sandboxResult, sandboxErr := runtime.Deps.SandboxDeploy.Run(ctx, outputDir, sandboxEnv)
 			stages, failures = appendSandboxDeployResult(stages, failures, sandboxResult, sandboxErr)
 			sandboxSucceeded = sandboxErr == nil
@@ -556,6 +568,17 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 	return result, nil
 }
 
+// realScalewayAPIURL is the only endpoint a Layer 3 apply may target.
+const realScalewayAPIURL = "https://api.scaleway.com"
+
+// sandboxCommandEnv builds the environment for a Layer 3 (real Scaleway)
+// subprocess.
+//
+// Unlike cloudEnv, which deliberately points every provider at a local
+// mock, this env must reach the real API -- and must be provably unable
+// to reach anything else. The keys returned here are only half of that
+// guarantee; the other half is harness.SandboxStripEnv, which removes
+// the inherited overrides an override map cannot unset.
 func sandboxCommandEnv(runtime *CommandRuntime) (map[string]string, error) {
 	accessKey := strings.TrimSpace(os.Getenv("SCW_ACCESS_KEY"))
 	if accessKey == "" {
@@ -565,12 +588,104 @@ func sandboxCommandEnv(runtime *CommandRuntime) (map[string]string, error) {
 	if secretKey == "" {
 		return nil, fmt.Errorf("sandbox deploy requires SCW_SECRET_KEY in the environment")
 	}
+	// Required because ADR-0010 has the run create its own project, and a
+	// project has to be created in some organization. A resource-scoped
+	// key without an org will fail at the first resource, so surface it
+	// here rather than several minutes into an apply.
+	orgID := strings.TrimSpace(os.Getenv("SCW_DEFAULT_ORGANIZATION_ID"))
+	if orgID == "" {
+		return nil, fmt.Errorf("sandbox deploy requires SCW_DEFAULT_ORGANIZATION_ID in the environment (scaleway_account_project needs an organization to create the run project in)")
+	}
+
+	region := strings.TrimSpace(runtime.Config.Scaleway.Region)
+	if region == "" {
+		region = "fr-par"
+	}
+	zone := strings.TrimSpace(runtime.Config.Scaleway.Zone)
+	if zone == "" {
+		zone = "fr-par-1"
+	}
 
 	env := map[string]string{
-		"SCW_ACCESS_KEY": accessKey,
-		"SCW_SECRET_KEY": secretKey,
+		"SCW_ACCESS_KEY":              accessKey,
+		"SCW_SECRET_KEY":              secretKey,
+		"SCW_DEFAULT_ORGANIZATION_ID": orgID,
+		"SCW_DEFAULT_REGION":          region,
+		"SCW_DEFAULT_ZONE":            zone,
+	}
+
+	if err := assertRealScalewayEndpoint(env); err != nil {
+		return nil, err
 	}
 	return env, nil
+}
+
+// assertRealScalewayEndpoint fails closed unless the provider will talk
+// to real Scaleway.
+//
+// Two ways an apply can be misdirected. The env is the obvious one and
+// harness.SandboxStripEnv already removes it -- this re-checks the map
+// we are about to hand over, so a future edit that reintroduces the key
+// fails here instead of silently applying against a mock.
+//
+// The config file is the subtle one: the Scaleway SDK reads
+// ~/.config/scw/config.yaml whether or not any SCW_* var is set, and
+// its top-level keys are the default profile. A developer whose config
+// carries an api_url pointing somewhere else would get an apply that
+// never touches Scaleway while every stage reports pass. Stripping
+// SCW_CONFIG_PATH / SCW_PROFILE forces the default profile; this checks
+// what that profile actually says.
+func assertRealScalewayEndpoint(env map[string]string) error {
+	if v := strings.TrimSpace(env["SCW_API_URL"]); v != "" && v != realScalewayAPIURL {
+		return fmt.Errorf("refusing to run a Layer 3 apply against %q: sandbox deploy targets real Scaleway (%s) only", v, realScalewayAPIURL)
+	}
+	if v := strings.TrimSpace(os.Getenv("SCW_API_URL")); v != "" && v != realScalewayAPIURL {
+		return fmt.Errorf("refusing to run a Layer 3 apply: inherited SCW_API_URL=%q would retarget it away from real Scaleway (%s). This is usually a leftover from driving mockway by hand", v, realScalewayAPIURL)
+	}
+	apiURL, err := scwConfigFileAPIURL()
+	if err != nil {
+		return fmt.Errorf("cannot verify the Layer 3 endpoint: %w", err)
+	}
+	if apiURL != "" && apiURL != realScalewayAPIURL {
+		return fmt.Errorf("refusing to run a Layer 3 apply: the default profile in %s sets api_url=%q, not %s", scwConfigPath(), apiURL, realScalewayAPIURL)
+	}
+	return nil
+}
+
+func scwConfigPath() string {
+	if base := strings.TrimSpace(os.Getenv("XDG_CONFIG_HOME")); base != "" {
+		return filepath.Join(base, "scw", "config.yaml")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".config", "scw", "config.yaml")
+}
+
+// scwConfigFileAPIURL returns the default profile's api_url, or "" when
+// the file is absent or does not set one (the SDK then uses the real
+// endpoint). Only the top-level key is read: named entries under
+// `profiles:` are unreachable because SCW_PROFILE is stripped.
+func scwConfigFileAPIURL() (string, error) {
+	path := scwConfigPath()
+	if path == "" {
+		return "", nil
+	}
+	raw, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", path, err)
+	}
+	var parsed struct {
+		APIURL string `yaml:"api_url"`
+	}
+	if err := yaml.Unmarshal(raw, &parsed); err != nil {
+		return "", fmt.Errorf("parse %s: %w", path, err)
+	}
+	return strings.TrimSpace(parsed.APIURL), nil
 }
 
 func evaluateSupportedCriteria(ctx context.Context, sc scenario.Scenario, runtime *CommandRuntime, deployResult *harness.MockDeployResult) ([]StageSummary, []FailureSummary) {

@@ -106,6 +106,13 @@ type S3Config struct {
 
 type ScalewayConfig struct {
 	CredentialsSource string `yaml:"credentials_source"`
+	// Region and Zone are the real-Scaleway defaults for Layer 3. Layer 2
+	// never needs them (mockway ignores placement), but the real provider
+	// does, and leaving them unset makes the target location depend on
+	// whatever ~/.config/scw/config.yaml happens to say. Defaults match
+	// the scenarios/training/*-paris.yaml naming.
+	Region string `yaml:"region"`
+	Zone   string `yaml:"zone"`
 }
 
 type ValidationConfig struct {
@@ -206,6 +213,8 @@ func Default() Config {
 		},
 		Scaleway: ScalewayConfig{
 			CredentialsSource: "env",
+			Region:            "fr-par",
+			Zone:              "fr-par-1",
 		},
 		Validation: ValidationConfig{
 			Layers: ValidationLayers{

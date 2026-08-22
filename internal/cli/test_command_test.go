@@ -731,8 +731,7 @@ func TestTestCommandSkipsDestructionWhenLayerDisabled(t *testing.T) {
 func TestTestCommandRunsSandboxLayerWhenEnabled(t *testing.T) {
 	h := newCommandTestHarness(t)
 	scenarioPath := writeUnsupportedCriteriaScenario(t, h.WorkspaceDir)
-	t.Setenv("SCW_ACCESS_KEY", "real-access")
-	t.Setenv("SCW_SECRET_KEY", "real-secret")
+	sandboxCredsForTest(t)
 	sandboxDeploy := &fakeSandboxDeployHarness{
 		result: &harness.SandboxDeployResult{
 			Init:  harness.StageResult{Stage: "init"},
@@ -806,8 +805,7 @@ func TestTestCommandRunsSandboxLayerWhenEnabled(t *testing.T) {
 func TestTestCommandAutoDestroysSandboxResourcesAfterProbeFailure(t *testing.T) {
 	h := newCommandTestHarness(t)
 	scenarioPath := writeCriteriaScenario(t, h.WorkspaceDir, "success", "pass")
-	t.Setenv("SCW_ACCESS_KEY", "real-access")
-	t.Setenv("SCW_SECRET_KEY", "real-secret")
+	sandboxCredsForTest(t)
 
 	sandboxDeploy := &fakeSandboxDeployHarness{
 		result: &harness.SandboxDeployResult{

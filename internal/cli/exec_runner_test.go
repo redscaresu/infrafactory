@@ -85,3 +85,38 @@ func TestStripGCPAuthEnvRemovesAllPrefixes(t *testing.T) {
 		t.Fatalf("strip mismatch\nwant: %#v\ngot:  %#v", want, got)
 	}
 }
+
+// TestStripEnvKeysExactAndWildcard covers the per-command strip added
+// for Layer 3. Unlike stripGCPAuthEnv, which is unconditional, this one
+// is opt-in per command because Layer 2 legitimately needs SCW_API_URL
+// while Layer 3 must never see it.
+func TestStripEnvKeysExactAndWildcard(t *testing.T) {
+	t.Parallel()
+
+	in := []string{
+		"PATH=/usr/bin",
+		"SCW_API_URL=http://localhost:8080",
+		"SCW_ACCESS_KEY=keep-me",
+		"SCW_DEFAULT_PROJECT_ID=00000000-0000-0000-0000-000000000000",
+		"SCW_DEFAULT_REGION=fr-par",
+		"MALFORMED_NO_EQUALS",
+	}
+	got := stripEnvKeys(in, []string{"SCW_API_URL", "SCW_DEFAULT_*"})
+	want := []string{
+		"PATH=/usr/bin",
+		"SCW_ACCESS_KEY=keep-me",
+		"MALFORMED_NO_EQUALS",
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("strip mismatch\nwant: %#v\ngot:  %#v", want, got)
+	}
+}
+
+func TestStripEnvKeysNoKeysIsIdentity(t *testing.T) {
+	t.Parallel()
+
+	in := []string{"A=1", "B=2"}
+	if got := stripEnvKeys(in, nil); !slices.Equal(got, in) {
+		t.Fatalf("expected identity, got %#v", got)
+	}
+}

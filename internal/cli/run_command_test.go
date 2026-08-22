@@ -683,8 +683,7 @@ func TestRunCommandStopsEarlyOnTransportDominatedFailures(t *testing.T) {
 func TestRunCommandUsesSandboxLayerWhenEnabled(t *testing.T) {
 	h := newCommandTestHarness(t)
 	scenarioPath := writeUnsupportedCriteriaScenario(t, h.WorkspaceDir)
-	t.Setenv("SCW_ACCESS_KEY", "real-access")
-	t.Setenv("SCW_SECRET_KEY", "real-secret")
+	sandboxCredsForTest(t)
 	sandboxDeploy := &fakeSandboxDeployHarness{
 		result: &harness.SandboxDeployResult{
 			Init:  harness.StageResult{Stage: "init"},
@@ -1176,8 +1175,7 @@ func TestRunCommandNoDestroySkipsDestroyAndHoldouts(t *testing.T) {
 func TestRunCommandAutoDestroysRealResourcesOnFailure(t *testing.T) {
 	h := newCommandTestHarness(t)
 	outputRoot := filepath.Join(h.WorkspaceDir, "output")
-	t.Setenv("SCW_ACCESS_KEY", "real-access")
-	t.Setenv("SCW_SECRET_KEY", "real-secret")
+	sandboxCredsForTest(t)
 
 	// Both iterations fail at validate (stuck detection triggers).
 	// The generator includes terraform-live.tfstate in its output files so that
@@ -1227,8 +1225,7 @@ func TestRunCommandAutoDestroysRealResourcesOnFailure(t *testing.T) {
 func TestRunCommandNoDestroyPreservesRealResourcesOnFailure(t *testing.T) {
 	h := newCommandTestHarness(t)
 	outputRoot := filepath.Join(h.WorkspaceDir, "output")
-	t.Setenv("SCW_ACCESS_KEY", "real-access")
-	t.Setenv("SCW_SECRET_KEY", "real-secret")
+	sandboxCredsForTest(t)
 
 	sandboxDestroy := &fakeSandboxDestroyHarness{
 		result: &harness.SandboxDestroyResult{
@@ -1391,8 +1388,7 @@ func newRunCommandForTest(opts runtimeOptions) *cobra.Command {
 
 func TestRunCommandHoldoutsExecuteLayer3WhenEnabled(t *testing.T) {
 	h := newCommandTestHarness(t)
-	t.Setenv("SCW_ACCESS_KEY", "real-access")
-	t.Setenv("SCW_SECRET_KEY", "real-secret")
+	sandboxCredsForTest(t)
 
 	// Training scenario uses dns_resolution which triggers sandbox deploy + real probes when Layer 3 is enabled.
 	trainingPath := filepath.Join(h.WorkspaceDir, "scenarios", "training", "layer3-training.yaml")

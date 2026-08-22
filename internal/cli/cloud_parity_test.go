@@ -1,10 +1,12 @@
 package cli
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/redscaresu/infrafactory/internal/config"
+	"github.com/redscaresu/infrafactory/internal/harness"
 )
 
 // TestCloudEnvCoversAllThreeClouds asserts that cloudEnv sets the
@@ -171,5 +173,43 @@ func TestEnsureGoogleProviderWiringInjectsCustomEndpoints(t *testing.T) {
 	}
 	if !strings.Contains(body, "http://127.0.0.1:8081") {
 		t.Errorf("injected providers.tf doesn't reference cfg.Fakegcp.URL\n%s", body)
+	}
+}
+
+// TestLayer2AndLayer3ScalewayEnvsAreInverses pins the single most
+// important invariant Layer 3 depends on: the two layers must disagree
+// about SCW_API_URL.
+//
+// Layer 2 sets it, to keep the apply on mockway. Layer 3 must both omit
+// it AND strip any inherited value, so the provider falls through to
+// its real default. The parity test above guards the Layer 2 half; if
+// the two ever agree, one of the layers is applying to the wrong place
+// -- and the failure mode is silent, because a mock-targeted "real"
+// apply still reports pass.
+func TestLayer2AndLayer3ScalewayEnvsAreInverses(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("SCW_ACCESS_KEY", "real-access")
+	t.Setenv("SCW_SECRET_KEY", "real-secret")
+	t.Setenv("SCW_DEFAULT_ORGANIZATION_ID", "22222222-2222-2222-2222-222222222222")
+
+	runtime := &CommandRuntime{Config: config.Config{
+		Mockway:  config.MockwayConfig{URL: "http://127.0.0.1:8080"},
+		Scaleway: config.ScalewayConfig{Region: "fr-par", Zone: "fr-par-1"},
+	}}
+
+	layer2 := cloudEnv(runtime)
+	if layer2["SCW_API_URL"] != "http://127.0.0.1:8080" {
+		t.Fatalf("Layer 2 must point SCW_API_URL at mockway, got %q", layer2["SCW_API_URL"])
+	}
+
+	layer3, err := sandboxCommandEnv(runtime)
+	if err != nil {
+		t.Fatalf("sandboxCommandEnv: %v", err)
+	}
+	if _, ok := layer3["SCW_API_URL"]; ok {
+		t.Fatal("Layer 3 must not set SCW_API_URL — the provider default is the real endpoint")
+	}
+	if !slices.Contains(harness.SandboxStripEnv, "SCW_API_URL") {
+		t.Fatal("Layer 3 must strip an inherited SCW_API_URL; omitting it from the override map is not enough")
 	}
 }

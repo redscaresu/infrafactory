@@ -46,10 +46,11 @@ func (e *SandboxDestroyError) Is(target error) bool {
 
 func (h *SandboxDestroyHarness) Run(ctx context.Context, workDir string, env map[string]string) (*SandboxDestroyResult, error) {
 	cmd := Command{
-		Name: "tofu",
-		Args: []string{"destroy", "-auto-approve", "-state=" + LiveStateFilename},
-		Dir:  workDir,
-		Env:  env,
+		Name:     "tofu",
+		Args:     []string{"destroy", "-auto-approve", "-state=" + LiveStateFilename},
+		Dir:      workDir,
+		Env:      env,
+		StripEnv: SandboxStripEnv,
 	}
 	destroyResult, err := h.runner.Run(ctx, cmd)
 	stage := StageResult{
