@@ -48,6 +48,21 @@ Pattern: convention as code, not convention as doc. Each is empty-state-safe (ze
 
 Full close-out: `docs/status/ARCHIVE.md` § "2026-06-10 fakegenesys v0.2 hardening".
 
+## ACTIVE ARC — read first
+
+**`docs/plans/layer3-real-scaleway-plan.md`** (S139–S143, planned 2026-08-22). Goal: get one scenario (`block-paris`) through apply → verify → destroy → provably-zero-orphans against **real Scaleway**.
+
+Layer 3 has been code-complete since S30 (Slices 26–30: plan/apply/destroy on `terraform-live.tfstate`, real probes, credential preflight, auto-destroy, UI toggle) and has **never made a single call to `api.scaleway.com`**. It was validated entirely against mockway standing in for Scaleway.
+
+Two blockers found during planning, both of which mean Layer 3 is currently unreachable end-to-end:
+
+- **B1 false-green env leak** — `sandboxCommandEnv()` (`internal/cli/test_command.go:559`) returns only the two credential keys, and `execCommandRunner` merges `os.Environ()` on top. An override map can set but never unset, so an inherited `SCW_API_URL` retargets the "real" apply at mockway and it reports pass. No test asserts otherwise. Fixed in S139.
+- **B2 self-managed-project deadlock** — ADR-0010 requires `scaleway_account_project` in the HCL and `validateLayer3ProjectResource` enforces it, but mockway registers only `/account/v2alpha1/ssh-keys` and 501s the project call. Layer 2 gates Layer 3, so mock apply fails and Layer 3 never runs. Fixed in S140 (mockway PR).
+
+Verified NOT gaps (don't re-investigate): `tofu plan/apply -state=` works on OpenTofu 1.11.5; same-HCL dual-apply is sound for Scaleway because the provider block is bare and the endpoint comes only from `SCW_API_URL`; auto-destroy-on-failure and `plan-live.txt` capture are both implemented.
+
+**S139–S142 are autonomous. S143 is operator-gated** — it needs `SCW_ACCESS_KEY` / `SCW_SECRET_KEY` / `SCW_DEFAULT_ORGANIZATION_ID` with project-manager rights, and it spends real money.
+
 ## Next arc candidates (no commitment)
 
 1. **AGENTS.md + README.md optimisation sweep across all 5 repos** (carried directive from 2026-06-05). Cross-repo docs cleanup — same 4-PR sweep pattern as S126/S127. Now unblocked.
