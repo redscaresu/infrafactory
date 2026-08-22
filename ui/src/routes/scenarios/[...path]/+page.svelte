@@ -225,10 +225,11 @@
           {layer3Status?.ready ? "credentials ready" : "credentials missing"}
         </span>
       </div>
+      <!-- The API's `detail` already spells out the missing credentials
+           ("Missing SCW_ACCESS_KEY, SCW_SECRET_KEY" — see
+           internal/api/handlers_scenarios.go), so rendering
+           missing_credentials again duplicated the same line verbatim. -->
       <p class="mt-2">{layer3Status?.detail || "Layer 3 status unavailable."}</p>
-      {#if layer3Status && layer3Status.missing_credentials.length > 0}
-        <p class="mt-1">Missing: {layer3Status.missing_credentials.join(", ")}</p>
-      {/if}
       {#if layer3Error}
         <p class="mt-2 text-red-700">{layer3Error}</p>
       {/if}
