@@ -70,6 +70,24 @@ func (f *fakeSandboxDestroyHarness) Run(ctx context.Context, _ string, _ map[str
 	return f.result, f.err
 }
 
+// fakeOrphanSweep stands in for the real-API sweep. Tests that exercise
+// the sandbox layer need one: the production sweep reads
+// terraform-live.tfstate and calls api.scaleway.com, neither of which
+// exists in a unit test, and it fails closed by design.
+type fakeOrphanSweep struct {
+	result *harness.OrphanSweepResult
+	err    error
+	calls  int
+}
+
+func (f *fakeOrphanSweep) Run(_ context.Context, _ string, _ string) (*harness.OrphanSweepResult, error) {
+	f.calls++
+	if f.result == nil && f.err == nil {
+		return &harness.OrphanSweepResult{ProjectID: "test-project"}, nil
+	}
+	return f.result, f.err
+}
+
 type fakeRealProbeHarness struct {
 	result   *harness.RealProbeResult
 	err      error
@@ -746,6 +764,7 @@ func TestTestCommandRunsSandboxLayerWhenEnabled(t *testing.T) {
 	realProbe := &fakeRealProbeHarness{
 		result: &harness.RealProbeResult{},
 	}
+	orphanSweep := &fakeOrphanSweep{}
 	opts := runtimeOptions{
 		configLoader: func(path string) (config.Config, error) {
 			cfg, err := config.Load(path)
@@ -772,6 +791,7 @@ func TestTestCommandRunsSandboxLayerWhenEnabled(t *testing.T) {
 			},
 			SandboxDeploy:  sandboxDeploy,
 			SandboxDestroy: sandboxDestroy,
+			OrphanSweep:    orphanSweep,
 			RealProbe:      realProbe,
 		},
 	}
@@ -784,6 +804,12 @@ func TestTestCommandRunsSandboxLayerWhenEnabled(t *testing.T) {
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("expected success, got %v", err)
+	}
+	if orphanSweep.calls != 1 {
+		t.Fatalf("a Layer 3 destroy must be followed by a real-API orphan sweep; got %d sweeps", orphanSweep.calls)
+	}
+	if !strings.Contains(stdout.String(), "- sandbox_deploy/orphan_sweep: pass") {
+		t.Fatalf("expected orphan_sweep stage in output, got:\n%s", stdout.String())
 	}
 	if sandboxDeploy.calls != 1 || sandboxDestroy.calls != 1 {
 		t.Fatalf("expected sandbox apply+destroy once, got deploy=%d destroy=%d", sandboxDeploy.calls, sandboxDestroy.calls)
@@ -863,6 +889,7 @@ func TestTestCommandAutoDestroysSandboxResourcesAfterProbeFailure(t *testing.T) 
 			Destroy:        destroy,
 			SandboxDeploy:  sandboxDeploy,
 			SandboxDestroy: sandboxDestroy,
+			OrphanSweep:    &fakeOrphanSweep{},
 			RealProbe:      realProbe,
 		},
 	}
@@ -912,6 +939,7 @@ func TestTestCommandFailsSandboxPreflightWithoutCredentials(t *testing.T) {
 			Destroy:        &fakeDestroyHarness{},
 			SandboxDeploy:  &fakeSandboxDeployHarness{},
 			SandboxDestroy: &fakeSandboxDestroyHarness{},
+			OrphanSweep:    &fakeOrphanSweep{},
 		},
 	}
 
@@ -1055,4 +1083,74 @@ acceptance_criteria:
 		t.Fatalf("write scenario fixture: %v", err)
 	}
 	return path
+}
+
+// TestTestCommandFailsWhenOrphanSweepReportsLeak is the assertion that
+// makes Layer 3's no_orphans mean something. A destroy exiting 0 is not
+// evidence that nothing survived -- before the sweep existed, a
+// half-worked destroy reported clean while real resources kept billing.
+func TestTestCommandFailsWhenOrphanSweepReportsLeak(t *testing.T) {
+	h := newCommandTestHarness(t)
+	scenarioPath := writeUnsupportedCriteriaScenario(t, h.WorkspaceDir)
+	sandboxCredsForTest(t)
+	sandboxDeploy := &fakeSandboxDeployHarness{result: &harness.SandboxDeployResult{
+		Init:  harness.StageResult{Stage: "init"},
+		Plan:  harness.StageResult{Stage: "plan"},
+		Apply: harness.StageResult{Stage: "apply"},
+	}}
+	sandboxDestroy := &fakeSandboxDestroyHarness{result: &harness.SandboxDestroyResult{
+		Destroy: harness.StageResult{Stage: "destroy"},
+	}}
+	leaking := &fakeOrphanSweep{result: &harness.OrphanSweepResult{
+		ProjectID: "11111111-1111-1111-1111-111111111111",
+		Failures: []feedback.Failure{{
+			Layer:  "sandbox_deploy",
+			Stage:  "orphan_sweep",
+			Check:  "project_deleted",
+			Detail: "project 11111111-1111-1111-1111-111111111111 still exists after destroy",
+		}},
+	}}
+
+	opts := runtimeOptions{
+		configLoader: func(path string) (config.Config, error) {
+			cfg, err := config.Load(path)
+			if err != nil {
+				return config.Config{}, err
+			}
+			cfg.Validation.Layers.SandboxDeploy.Enabled = true
+			return cfg, nil
+		},
+		scenarioLoader: defaultScenarioLoader,
+		deps: RuntimeDependencies{
+			MockDeploy: &fakeMockDeployHarness{result: &harness.MockDeployResult{
+				Apply:         harness.StageResult{Stage: "apply"},
+				StateSnapshot: []byte(`{}`),
+			}},
+			Destroy: &fakeDestroyHarness{result: &harness.DestroyResult{
+				Destroy:       harness.StageResult{Stage: "destroy"},
+				StateSnapshot: []byte(`{"instance":{"servers":[]}}`),
+			}},
+			SandboxDeploy:  sandboxDeploy,
+			SandboxDestroy: sandboxDestroy,
+			OrphanSweep:    leaking,
+			RealProbe:      &fakeRealProbeHarness{result: &harness.RealProbeResult{}},
+		},
+	}
+
+	cmd := newTestCommandForTest(opts)
+	stdout := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{scenarioPath, "--config", h.ConfigPath})
+
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("a reported leak must fail the run — a successful destroy is not proof of cleanliness")
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "orphan_sweep") {
+		t.Fatalf("output must surface the orphan_sweep failure, got:\n%s", out)
+	}
+	if !strings.Contains(out, "still exists after destroy") {
+		t.Fatalf("output must carry the sweep's detail so the operator can act, got:\n%s", out)
+	}
 }

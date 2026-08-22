@@ -66,7 +66,8 @@ Credentials are present and working (`~/.config/scw/config.yaml`, `scw account p
 |---|---|---|
 | S139 | Sealed sandbox environment + endpoint assertion (closes B1) | ~2–3 hr |
 | S140 | mockway `account/v3` project CRUD + non-empty-delete semantics (closes B2) | ~2–3 hr |
-| S141 | Real-API orphan sweep + interrupt-safe destroy + `reap` command | ~3–4 hr |
+| S141 | Real-API orphan sweep + protected-project guard (**landed**) | ~2 hr |
+| S141b | Interrupt-safe destroy + `reap` command (**outstanding — blocks S143**) | ~2 hr |
 | S142 | Resource-type allowlist for sandbox deploy | ~1.5–2 hr |
 | S143 | **Canary execution**: `block-paris` end-to-end against real Scaleway + ADR-0023 + arc close-out | ~2 hr + operator-gated run |
 
