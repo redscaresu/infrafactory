@@ -735,8 +735,83 @@ func generateAndWriteFilesWithResult(ctx context.Context, runtime *CommandRuntim
 		if err := validateLayer3ProjectResource(runtime.OutputDir()); err != nil {
 			return 0, nil, err
 		}
+		if err := validateLayer3ResourceAllowlist(runtime.OutputDir(), runtime.Config.Validation.Layers.SandboxDeploy.AllowResourceTypes); err != nil {
+			return 0, nil, err
+		}
 	}
 	return written, generated, nil
+}
+
+// layer3ResourceRe matches a `resource "<type>" "<name>"` declaration.
+// Same approach as genesysFlowResourceRe below -- the generated HCL is
+// machine-written and regular, and a full HCL parse would buy nothing
+// here.
+var layer3ResourceRe = regexp.MustCompile(`resource\s+"([a-z0-9_]+)"\s+"[^"]+"`)
+
+// validateLayer3ResourceAllowlist blocks expensive resource types before
+// any API call is made.
+//
+// The iteration loop is an LLM writing HCL. Against mockway a stray
+// scaleway_k8s_cluster costs nothing and gets caught; against real
+// Scaleway it is a slow, expensive apply followed by a slow destroy,
+// several times over as the loop iterates. Failing here -- after
+// generation, before apply -- turns that into a fast structural error
+// the next iteration can route around.
+//
+// Deny-by-default: an empty allowlist denies everything rather than
+// permitting everything. A config that forgot to set the list should
+// stop the run, not provision whatever was generated.
+func validateLayer3ResourceAllowlist(outputDir string, allowed []string) error {
+	entries, err := os.ReadDir(outputDir)
+	if err != nil {
+		return fmt.Errorf("read output directory for layer 3 allowlist validation: %w", err)
+	}
+
+	denied := make([]string, 0)
+	seen := make(map[string]struct{})
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".tf") {
+			continue
+		}
+		content, err := os.ReadFile(filepath.Join(outputDir, entry.Name()))
+		if err != nil {
+			continue
+		}
+		for _, match := range layer3ResourceRe.FindAllStringSubmatch(string(content), -1) {
+			resourceType := match[1]
+			if _, ok := seen[resourceType]; ok {
+				continue
+			}
+			seen[resourceType] = struct{}{}
+			if !resourceTypeAllowed(resourceType, allowed) {
+				denied = append(denied, resourceType)
+			}
+		}
+	}
+	if len(denied) == 0 {
+		return nil
+	}
+	sort.Strings(denied)
+	return fmt.Errorf(
+		"layer 3 refuses to apply resource type(s) %s: not in validation.layers.sandbox_deploy.allow_resource_types (%s). These types are denied by default because they are slow and costly to provision against real Scaleway; either use a cheaper equivalent or widen the allowlist deliberately",
+		strings.Join(denied, ", "),
+		strings.Join(allowed, ", "),
+	)
+}
+
+func resourceTypeAllowed(resourceType string, allowed []string) bool {
+	for _, pattern := range allowed {
+		if prefix, ok := strings.CutSuffix(pattern, "*"); ok {
+			if strings.HasPrefix(resourceType, prefix) {
+				return true
+			}
+			continue
+		}
+		if resourceType == pattern {
+			return true
+		}
+	}
+	return false
 }
 
 func validateLayer3ProjectResource(outputDir string) error {

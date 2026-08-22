@@ -67,7 +67,35 @@ validation:
     mock_deploy:
       enabled: true
     sandbox_deploy:
+      # Layer 3 applies to REAL Scaleway and spends real money.
+      # Requires SCW_ACCESS_KEY, SCW_SECRET_KEY and
+      # SCW_DEFAULT_ORGANIZATION_ID (the last one because each run
+      # creates its own project — ADR-0010).
       enabled: false
+      # Resource types allowed to reach a real apply. Exact names, or a
+      # `scaleway_lb*` prefix. Deny-by-default: an empty or absent list
+      # denies everything, so a config that forgets this stops the run
+      # rather than provisioning whatever was generated. Omit the key
+      # entirely to inherit the defaults in internal/config/config.go.
+      allow_resource_types:
+        - scaleway_account_project
+        - scaleway_block_volume
+        - scaleway_block_snapshot
+        - scaleway_vpc
+        - scaleway_vpc_private_network
+        - scaleway_lb*
+        - scaleway_domain*
+        - scaleway_iam*
+        - scaleway_registry_namespace
+        # Uncommenting any of these opts into slow, genuinely costly
+        # provisioning against real Scaleway. Clusters and HA database
+        # instances take minutes to create AND minutes to destroy, on
+        # every iteration of the repair loop.
+        # - scaleway_k8s_cluster
+        # - scaleway_k8s_pool
+        # - scaleway_rdb_instance
+        # - scaleway_redis_cluster
+        # - scaleway_instance_server
     destruction:
       enabled: true
   real_probes:

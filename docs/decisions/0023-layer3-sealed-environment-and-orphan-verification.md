@@ -29,7 +29,9 @@ Four rules govern any Layer 3 execution. All four fail closed: where a guard can
 
 4. **Blast radius is exactly one purpose-created project, and nothing else is deletable.** Per ADR-0010 decision 4 each run creates its own `scaleway_account_project`. No destroy, sweep or `reap` path may delete a project whose id was not created by that run and recorded in its `terraform-live.tfstate`; a project id equal to the organization id (the `default` project) is refused unconditionally. This is what makes rule 3 cheap, and what protects pre-existing projects. *(S141)*
 
-Supporting these, the sandbox environment requires `SCW_DEFAULT_ORGANIZATION_ID` (a project must be created somewhere) and pins region/zone from config rather than inheriting them, and expensive resource types are denied by default via a config allowlist enforced before any API call *(S142)*.
+Supporting these, the sandbox environment requires `SCW_DEFAULT_ORGANIZATION_ID` (a project must be created somewhere) and pins region/zone from config rather than inheriting them *(S139)*.
+
+5. **Expensive resource types are denied by default, before any API call.** `validation.layers.sandbox_deploy.allow_resource_types` gates which types may reach a real apply, checked after generation and before apply so a denied type costs nothing. The list is deny-by-default — empty or absent denies everything — because the iteration loop is an LLM writing HCL, and the failure mode of a permissive default is a bill that repeats once per repair iteration. *(S142)*
 
 ## Consequences
 

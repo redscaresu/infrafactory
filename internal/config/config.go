@@ -121,15 +121,31 @@ type ValidationConfig struct {
 }
 
 type ValidationLayers struct {
-	Static        StaticLayerConfig `yaml:"static"`
-	MockDeploy    LayerConfig       `yaml:"mock_deploy"`
-	SandboxDeploy LayerConfig       `yaml:"sandbox_deploy"`
-	Destruction   LayerConfig       `yaml:"destruction"`
+	Static        StaticLayerConfig  `yaml:"static"`
+	MockDeploy    LayerConfig        `yaml:"mock_deploy"`
+	SandboxDeploy SandboxLayerConfig `yaml:"sandbox_deploy"`
+	Destruction   LayerConfig        `yaml:"destruction"`
 }
 
 type StaticLayerConfig struct {
 	Enabled     bool     `yaml:"enabled"`
 	PolicyPaths []string `yaml:"policy_paths"`
+}
+
+// SandboxLayerConfig extends LayerConfig with the Layer 3 cost control.
+// It needs its own type because LayerConfig is shared by all four layers
+// and only Layer 3 spends money -- the same reason StaticLayerConfig
+// extends it with PolicyPaths.
+type SandboxLayerConfig struct {
+	LayerConfig `yaml:",inline"`
+	// AllowResourceTypes gates which resource types may reach a real
+	// apply. Entries are exact type names or a `scaleway_lb*` prefix.
+	//
+	// Deny-by-default: an empty or absent list denies everything. That is
+	// deliberate -- the failure mode of a permissive default is a bill,
+	// and a config that forgot to set this should stop the run rather
+	// than provision whatever the LLM happened to write.
+	AllowResourceTypes []string `yaml:"allow_resource_types"`
 }
 
 type LayerConfig struct {
@@ -225,8 +241,26 @@ func Default() Config {
 				MockDeploy: LayerConfig{
 					Enabled: true,
 				},
-				SandboxDeploy: LayerConfig{
-					Enabled: false,
+				SandboxDeploy: SandboxLayerConfig{
+					LayerConfig: LayerConfig{
+						Enabled: false,
+					},
+					// Cheap, fast-provisioning types only. Notably absent:
+					// scaleway_k8s_* (clusters take minutes and cost real
+					// money), scaleway_rdb_* , scaleway_redis_* and
+					// scaleway_instance_server. Widening this list is a
+					// deliberate, cost-bearing act.
+					AllowResourceTypes: []string{
+						"scaleway_account_project",
+						"scaleway_block_volume",
+						"scaleway_block_snapshot",
+						"scaleway_vpc",
+						"scaleway_vpc_private_network",
+						"scaleway_lb*",
+						"scaleway_domain*",
+						"scaleway_iam*",
+						"scaleway_registry_namespace",
+					},
 				},
 				Destruction: LayerConfig{
 					Enabled: true,
