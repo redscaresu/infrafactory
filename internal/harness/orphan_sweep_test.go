@@ -44,7 +44,7 @@ func TestOrphanSweepCleanWhenProjectGone(t *testing.T) {
 	writeSweepLiveState(t, dir, stateWithProjectAndVolume(testProjectID))
 
 	sweep := NewScalewayOrphanSweepWithDoer("https://api.example", respondWith(http.StatusNotFound, `{}`))
-	result, err := sweep.Run(context.Background(), dir, "secret")
+	result, err := sweepDir(t, sweep, dir)
 	if err != nil {
 		t.Fatalf("sweep: %v", err)
 	}
@@ -59,7 +59,7 @@ func TestOrphanSweepFailsWhenProjectSurvives(t *testing.T) {
 	writeSweepLiveState(t, dir, stateWithProjectAndVolume(testProjectID))
 
 	sweep := NewScalewayOrphanSweepWithDoer("https://api.example", respondWith(http.StatusOK, `{"id":"`+testProjectID+`"}`))
-	result, err := sweep.Run(context.Background(), dir, "secret")
+	result, err := sweepDir(t, sweep, dir)
 	if err != nil {
 		t.Fatalf("sweep: %v", err)
 	}
@@ -80,7 +80,7 @@ func TestOrphanSweepFailsWhenAPIUnreachable(t *testing.T) {
 	sweep := NewScalewayOrphanSweepWithDoer("https://api.example", func(*http.Request) (*http.Response, error) {
 		return nil, errors.New("dial tcp: no route to host")
 	})
-	result, err := sweep.Run(context.Background(), dir, "secret")
+	result, err := sweepDir(t, sweep, dir)
 	if err != nil {
 		t.Fatalf("transport failure should surface as a reported leak, not a hard error: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestOrphanSweepFailsOnUnexpectedStatus(t *testing.T) {
 	writeSweepLiveState(t, dir, stateWithProjectAndVolume(testProjectID))
 
 	sweep := NewScalewayOrphanSweepWithDoer("https://api.example", respondWith(http.StatusForbidden, `{"message":"denied"}`))
-	result, err := sweep.Run(context.Background(), dir, "secret")
+	result, err := sweepDir(t, sweep, dir)
 	if err != nil {
 		t.Fatalf("sweep: %v", err)
 	}
@@ -113,7 +113,7 @@ func TestOrphanSweepDetectsResourceOutsideRunProject(t *testing.T) {
 	writeSweepLiveState(t, dir, stateWithProjectAndVolume(testOrgID))
 
 	sweep := NewScalewayOrphanSweepWithDoer("https://api.example", respondWith(http.StatusNotFound, `{}`))
-	result, err := sweep.Run(context.Background(), dir, "secret")
+	result, err := sweepDir(t, sweep, dir)
 	if err != nil {
 		t.Fatalf("sweep: %v", err)
 	}
@@ -134,7 +134,7 @@ func TestOrphanSweepRequiresProjectInState(t *testing.T) {
 	writeSweepLiveState(t, dir, `{"resources":[{"type":"scaleway_block_volume","instances":[{"attributes":{"id":"vol-1"}}]}]}`)
 
 	sweep := NewScalewayOrphanSweepWithDoer("https://api.example", respondWith(http.StatusNotFound, `{}`))
-	if _, err := sweep.Run(context.Background(), dir, "secret"); !errors.Is(err, ErrOrphanSweepFailed) {
+	if _, err := sweepDir(t, sweep, dir); !errors.Is(err, ErrOrphanSweepFailed) {
 		t.Fatalf("state without a project resource means the blast radius is unknown; expected ErrOrphanSweepFailed, got %v", err)
 	}
 }
@@ -167,4 +167,16 @@ func TestAssertProjectDeletable(t *testing.T) {
 			}
 		})
 	}
+}
+
+// sweepDir mirrors production ordering: capture the target from live
+// state, then sweep. Production captures before destroy; tests capture
+// from a state file that was never destroyed.
+func sweepDir(t *testing.T, sweep *ScalewayOrphanSweep, dir string) (*OrphanSweepResult, error) {
+	t.Helper()
+	target, err := CaptureSweepTarget(dir)
+	if err != nil {
+		return nil, err
+	}
+	return sweep.Run(context.Background(), target, "secret")
 }

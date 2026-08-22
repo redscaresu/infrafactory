@@ -54,4 +54,8 @@ Supporting these, the sandbox environment requires `SCW_DEFAULT_ORGANIZATION_ID`
 
 The interrupt path closed the last gap. `withSandboxInterruptGuard` installs a SIGINT/SIGTERM handler for the window in which real resources exist: the in-flight tofu call unwinds on the cancelled context, then destroy runs on a **fresh** one, because doing work after cancellation is the entire point. A second signal restores default handling and aborts, printing the state path and the exact recovery command. `infrafactory reap <scenario>` handles the cases where the process never got to run its own cleanup, gated by the same `AssertProjectDeletable` and verified by the same sweep — a reap that cannot prove the account is clean fails.
 
+**Amendment — capture before destroy (2026-08-22, from the first canary run).** Rule 3 originally had the sweep read `terraform-live.tfstate` at sweep time. That is after `tofu destroy` has emptied it, so the project id was gone and the sweep could never determine the blast radius — it failed closed on teardowns that had actually worked. Correct for a fail-closed guard, useless as a tool. Capture and verification are now split: `harness.CaptureSweepTarget` reads the live state **before** destroy, and the sweep verifies against that captured target. The stray-resource check moved with it for the same reason.
+
+This is the first defect the arc found that no unit test or mock could have: it only appears when a real destroy actually empties real state.
+
 **Enforcement**: the guards carry synthetic-drift coverage — removing `SCW_API_URL` from `SandboxStripEnv` fails three tests, verified before S139 merged. Following the project's "drift becomes failed `go test`" pattern.
