@@ -77,10 +77,12 @@ Three defects no unit test or mock could have produced — the return on the who
 
 (1) and (2) were fixed in S143a; (3) is a real-API behaviour, recorded rather than "fixed".
 
-### Two follow-ups, both deliberately not taken
+### Both follow-ups CLOSED (post-arc, same day)
 
-1. **Bounded retry on Layer 3 apply** (tainted-state-aware, one attempt). Layer 3 has no retry, so the transient in (3) fails an otherwise-correct run — and under `infrafactory run` it burns a repair iteration teaching the LLM nothing, because the HCL was fine. Direct fix, small.
-2. **Orphan sweep on the auto-destroy-on-failure path.** `run_command.go` destroys real resources when a run fails but does not then sweep, so the cleanup most likely to leave orphans is the one path that never verifies itself. Left for the user: it is a design question (should a failed run fail *harder* on an unverifiable sweep?), and it touches the real-money path.
+1. **Bounded retry on Layer 3 apply** — `sandboxApplyAttempts = 2`. A second apply replaces the tainted resource. One retry only, surfaced as `succeeded on attempt 2`, and **never on a cancelled context** so the interrupt guard still holds.
+2. **Orphan sweep on the auto-destroy-on-failure path** — a failed run now captures the sweep target before destroy and sweeps after. The run has already failed so the exit code is unchanged; what changed is that an unverifiable cleanup says so, and carries `infrafactory reap <scenario>` in the failure **detail** rather than only the log.
+
+Both carry synthetic-drift coverage. ADR-0023 amended with the reasoning.
 
 ### Setup, if you need to run Layer 3 again
 
@@ -104,11 +106,10 @@ The org holds **`openclaw`** (`0b6a8a6a-…`) with live infrastructure — a 20G
 ## Next arc candidates (no commitment)
 
 1. **`lb-paris` as probe canary** — the designated Layer 3 follow-on, and the arc's own nominated opener. The real-probe path (`connectivity` / `http_probe` / `dns_resolution`) is still unexercised against real infrastructure; `block-paris` declares no probes. Costs more than the block canary — a load balancer and its IP — so scope it deliberately.
-2. **The two Layer 3 follow-ups above** — bounded apply retry, and a sweep on the auto-destroy-on-failure path. Both small; (2) wants a design call first.
-3. **AGENTS.md + README.md optimisation sweep across all 5 repos** (carried directive from 2026-06-05). Cross-repo docs cleanup — same 4-PR sweep pattern as S126/S127. Now unblocked.
-4. **Pitfall-pruning automation** (shelved 2026-06-06; S107 slot). `docs/plans/pitfall-pruning-automation-plan.md`. Detects pitfalls that haven't fired in N sweeps and demotes them.
-5. **5th cloud** (speculative — no concrete request). The day-one OSS checklist + contract-audit convention are now durable enough that adding a 5th cloud would be ~1 session of structural work.
-6. **fakegenesys public visibility flip + branch protection** — operator click-ops, not engineering. Still pending.
+2. **AGENTS.md + README.md optimisation sweep across all 5 repos** (carried directive from 2026-06-05). Cross-repo docs cleanup — same 4-PR sweep pattern as S126/S127. Now unblocked.
+3. **Pitfall-pruning automation** (shelved 2026-06-06; S107 slot). `docs/plans/pitfall-pruning-automation-plan.md`. Detects pitfalls that haven't fired in N sweeps and demotes them.
+4. **5th cloud** (speculative — no concrete request). The day-one OSS checklist + contract-audit convention are now durable enough that adding a 5th cloud would be ~1 session of structural work.
+5. **fakegenesys public visibility flip + branch protection** — operator click-ops, not engineering. Still pending.
 
 ## Standing preferences (this user)
 

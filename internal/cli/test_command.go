@@ -359,7 +359,14 @@ func appendSandboxDeployResult(stages []StageSummary, failures []FailureSummary,
 			stages = append(stages, StageSummary{Layer: "sandbox_deploy", Stage: "plan", Status: StageStatusPass})
 		}
 		if result != nil && result.Apply.Stage != "" {
-			stages = append(stages, StageSummary{Layer: "sandbox_deploy", Stage: "apply", Status: StageStatusPass})
+			// A retry means the real API flapped. Report it rather than
+			// quietly passing -- a silently-retried apply looks identical
+			// to one that worked first time.
+			detail := ""
+			if result.Attempts > 1 {
+				detail = fmt.Sprintf("succeeded on attempt %d (real API returned a retryable error)", result.Attempts)
+			}
+			stages = append(stages, StageSummary{Layer: "sandbox_deploy", Stage: "apply", Status: StageStatusPass, Detail: detail})
 		}
 		return stages, failures
 	}
@@ -412,7 +419,11 @@ func sandboxDeployFailureDetail(err *harness.SandboxDeployError) string {
 	case "apply":
 		stderr = err.Apply.Stderr
 	}
-	return stderrFailureDetail(err.Err, stderr)
+	detail := stderrFailureDetail(err.Err, stderr)
+	if err.Stage == "apply" && err.Attempts > 1 {
+		detail = fmt.Sprintf("%s (failed %d attempts, so not a transient blip)", detail, err.Attempts)
+	}
+	return detail
 }
 
 func appendSandboxDestroyResult(stages []StageSummary, failures []FailureSummary, result *harness.SandboxDestroyResult, runErr error) ([]StageSummary, []FailureSummary) {

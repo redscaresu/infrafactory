@@ -42,15 +42,16 @@ injection the project has already declined (`feedback_mock_design.md`) —
 it would slow the inner generate/test loop to simulate something the loop
 cannot act on anyway.
 
-**What to do instead** — tolerate it in infrafactory, not in the mock:
-
-- Layer 3 has **no retry** at all today. `SandboxDeployHarness.Run`
-  (`internal/harness/sandbox_deploy.go`) runs `init → plan → apply` once,
-  and any non-zero exit fails the layer. A single transient API blip
-  therefore fails an otherwise-correct run, and under `infrafactory run`
-  it burns a repair iteration teaching the LLM nothing — the HCL was fine.
-- A bounded retry on apply (one attempt, tainted-state-aware) is the
-  obvious fix and is the top follow-up from this arc.
+**What was done instead** — tolerated in infrafactory, not in the mock.
+`SandboxDeployHarness.Run` now retries apply once (`sandboxApplyAttempts`).
+A second apply replaces the tainted resource, which is documented tofu
+behaviour, so this is a real fix rather than a hope. It is one retry, not
+a loop — a genuinely broken plan should fail fast rather than bill for
+every attempt — and it never retries a cancelled context, because on the
+interrupt path a retry would create exactly what the operator just asked
+us to stop creating. Retries are reported (`succeeded on attempt 2`), not
+swallowed: a silent retry looks identical to a clean first run, and the
+difference is a real API flapping.
 
 ## D2 — Diagnostics were the real blocker
 

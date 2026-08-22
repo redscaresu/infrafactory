@@ -701,6 +701,11 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 				})
 				allStages = append(allStages, StageSummary{Layer: "sandbox_deploy", Stage: "auto_destroy_preflight", Status: StageStatusFail})
 			} else {
+				// Capture the sweep target BEFORE destroy: tofu empties
+				// terraform-live.tfstate, taking the project id with it.
+				// Same ordering the success path learned the hard way in
+				// the first canary run.
+				sweepTarget, sweepTargetErr := harness.CaptureSweepTarget(runtime.OutputDir())
 				destroyResult, destroyErr := runtime.Deps.SandboxDestroy.Run(cmd.Context(), runtime.OutputDir(), sandboxEnv)
 				destroyStages, destroyFailures := appendSandboxDestroyResult(nil, nil, destroyResult, destroyErr)
 				allStages = append(allStages, destroyStages...)
@@ -713,7 +718,9 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 						RunID:   runID,
 						Detail:  destroyErr.Error(),
 					})
+					annotateWithRecoveryCommand(destroyFailures, scenarioPath)
 					allFailures = append(allFailures, destroyFailures...)
+					logLayer3RecoveryHint(runtime, runID, scenarioPath, "auto-destroy failed")
 				} else {
 					runtime.Logger.Log(LogEntry{
 						Level:   logLevelInfo,
@@ -722,6 +729,20 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 						Status:  "success",
 						RunID:   runID,
 					})
+					// Destroy reporting success is not evidence the account
+					// is clean -- it is the claim the sweep exists to check.
+					// The run has already failed, so this cannot change the
+					// exit code; what it changes is whether the operator is
+					// told the cleanup went unverified. "We could not check"
+					// and "nothing leaked" must never look alike.
+					failuresBeforeSweep := len(allFailures)
+					allStages, allFailures = appendOrphanSweepResult(
+						cmd.Context(), allStages, allFailures, runtime, sweepTarget, sweepTargetErr, sandboxEnv)
+					if len(allFailures) > failuresBeforeSweep {
+						annotateWithRecoveryCommand(allFailures[failuresBeforeSweep:], scenarioPath)
+						logLayer3RecoveryHint(runtime, runID, scenarioPath,
+							"orphan sweep did not confirm the account is clean")
+					}
 				}
 			}
 		}
@@ -1332,3 +1353,37 @@ func postMockReset(ctx context.Context, baseURL string) error {
 }
 
 var mockResetClient = &http.Client{Timeout: 10 * time.Second}
+
+// annotateWithRecoveryCommand appends the exact cleanup invocation to
+// failures raised while real resources may still exist.
+//
+// This goes in the failure detail rather than only the structured log,
+// because the failure list is what the operator reads in the terminal the
+// moment the run stops -- and the alternative to reading it there is
+// finding out from a bill.
+func annotateWithRecoveryCommand(failures []FailureSummary, scenarioPath string) {
+	for i := range failures {
+		failures[i].Detail = strings.TrimSpace(strings.TrimSpace(failures[i].Detail) +
+			fmt.Sprintf(" | real Scaleway resources may still exist: run `infrafactory reap %s` to tear them down and verify", scenarioPath))
+	}
+}
+
+// logLayer3RecoveryHint names the exact command that cleans up after a
+// failed Layer 3 run.
+//
+// This fires only when real resources may still exist: auto-destroy
+// errored, or it succeeded but the sweep could not prove the account is
+// clean. At that moment the recovery command is worth more to the
+// operator than any amount of failure detail, because the alternative is
+// finding out from a bill.
+func logLayer3RecoveryHint(runtime *CommandRuntime, runID, scenarioPath, reason string) {
+	runtime.Logger.Log(LogEntry{
+		Level:   logLevelError,
+		Command: "run",
+		Event:   "layer3_cleanup_unverified",
+		Status:  "failed",
+		RunID:   runID,
+		Detail: fmt.Sprintf("%s: real Scaleway resources may still exist; run `infrafactory reap %s` to tear them down and verify",
+			reason, scenarioPath),
+	})
+}

@@ -11,7 +11,9 @@ The canary found three defects nothing else could. Run 1: the orphan sweep read 
 
 Deltas in `docs/layer3-real-vs-mock-deltas.md`. Close-out in `docs/status/ARCHIVE.md`.
 
-**Next-arc opener**: `lb-paris` as probe canary — the real-probe path is still unexercised against real infrastructure. Two follow-ups recorded in the close-out: a bounded retry on Layer 3 apply (for the transient above), and an orphan sweep on the auto-destroy-on-failure path, which today destroys without verifying.
+**Layer 3 follow-ups now closed** (post-arc). A failed run no longer just destroys and hopes: it captures the sweep target before destroy and sweeps afterwards, and any failure raised while real resources may still exist carries `infrafactory reap <scenario>` in its detail, where the operator actually reads it. Apply also retries once — bounded, surfaced as `succeeded on attempt 2`, and never on a cancelled context, so the interrupt guard still holds.
+
+**Next-arc opener**: `lb-paris` as probe canary — the real-probe path is still unexercised against real infrastructure. Costs materially more than the block canary (a load balancer plus its IP), so scope it deliberately.
 
 ## Recent arcs
 
