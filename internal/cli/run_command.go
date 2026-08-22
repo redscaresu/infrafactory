@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -1354,6 +1355,25 @@ func postMockReset(ctx context.Context, baseURL string) error {
 
 var mockResetClient = &http.Client{Timeout: 10 * time.Second}
 
+// shellSafeArgRE matches the characters a POSIX shell passes through
+// untouched, so an already-safe path is printed as-is.
+var shellSafeArgRE = regexp.MustCompile(`^[A-Za-z0-9_@%+=:,./-]+$`)
+
+// shellQuote makes a path safe to paste into a shell.
+//
+// The recovery command is only worth printing if it actually runs, and
+// this one is read at the worst possible moment -- a failed run that may
+// have left real resources billing. A scenario path under a directory
+// with a space would otherwise be split by the shell and the cleanup
+// would not happen. Safe paths are left unquoted so the common case
+// stays easy to read.
+func shellQuote(s string) string {
+	if s != "" && shellSafeArgRE.MatchString(s) {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
 // annotateWithRecoveryCommand appends the exact cleanup invocation to
 // failures raised while real resources may still exist.
 //
@@ -1364,7 +1384,7 @@ var mockResetClient = &http.Client{Timeout: 10 * time.Second}
 func annotateWithRecoveryCommand(failures []FailureSummary, scenarioPath string) {
 	for i := range failures {
 		failures[i].Detail = strings.TrimSpace(strings.TrimSpace(failures[i].Detail) +
-			fmt.Sprintf(" | real Scaleway resources may still exist: run `infrafactory reap %s` to tear them down and verify", scenarioPath))
+			fmt.Sprintf(" | real Scaleway resources may still exist: run `infrafactory reap %s` to tear them down and verify", shellQuote(scenarioPath)))
 	}
 }
 
@@ -1384,6 +1404,6 @@ func logLayer3RecoveryHint(runtime *CommandRuntime, runID, scenarioPath, reason 
 		Status:  "failed",
 		RunID:   runID,
 		Detail: fmt.Sprintf("%s: real Scaleway resources may still exist; run `infrafactory reap %s` to tear them down and verify",
-			reason, scenarioPath),
+			reason, shellQuote(scenarioPath)),
 	})
 }
