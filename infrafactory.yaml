@@ -57,6 +57,13 @@ s3:
   auto_reset: true
 
 scaleway:
+  # Owns any Layer 3 resource whose HCL omits project_id. Per-run projects
+  # are created by the stack itself (ADR-0010); this is purely a net for
+  # resources that forget to reference one, so a stray lands somewhere
+  # disposable instead of in the organization's default project next to
+  # real infrastructure. Not a secret; leave empty to keep the provider
+  # default. Created 2026-08-22 as the `infrafactory` project.
+  fallback_project_id: "2397e80e-ec12-4a7e-819f-a2caba3867b6"
   credentials_source: env    # env | config-file
 
 validation:

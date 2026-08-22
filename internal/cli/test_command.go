@@ -616,6 +616,19 @@ func sandboxCommandEnv(runtime *CommandRuntime) (map[string]string, error) {
 		"SCW_DEFAULT_REGION":          region,
 		"SCW_DEFAULT_ZONE":            zone,
 	}
+	// Contain strays. harness.SandboxStripEnv removes any inherited
+	// SCW_DEFAULT_PROJECT_ID so an ambient value cannot pin the run to
+	// someone else's project; setting our own here decides where a
+	// resource that omits project_id actually lands. Without it the
+	// provider falls through to the default project in
+	// ~/.config/scw/config.yaml -- typically the organization default,
+	// next to real infrastructure.
+	if fallback := strings.TrimSpace(runtime.Config.Scaleway.FallbackProjectID); fallback != "" {
+		if fallback == orgID {
+			return nil, fmt.Errorf("scaleway.fallback_project_id must not be the organization's default project (%s): a stray resource would land next to real infrastructure, which is exactly what this setting exists to prevent", orgID)
+		}
+		env["SCW_DEFAULT_PROJECT_ID"] = fallback
+	}
 
 	if err := assertRealScalewayEndpoint(env); err != nil {
 		return nil, err
