@@ -51,9 +51,19 @@ type fakeSandboxDeployHarness struct {
 	lastCtx context.Context
 }
 
-func (f *fakeSandboxDeployHarness) Run(ctx context.Context, _ string, _ map[string]string) (*harness.SandboxDeployResult, error) {
+// Run writes a minimal terraform-live.tfstate, because a real apply
+// does. The orphan sweep captures its target from that file before
+// destroy, so a fake apply that leaves no state makes every Layer 3 test
+// fail at capture -- which is correct fail-closed behaviour, just not
+// what these tests are exercising.
+func (f *fakeSandboxDeployHarness) Run(ctx context.Context, workDir string, _ map[string]string) (*harness.SandboxDeployResult, error) {
 	f.calls++
 	f.lastCtx = ctx
+	if f.err == nil && workDir != "" {
+		_ = os.MkdirAll(workDir, 0o755)
+		_ = os.WriteFile(filepath.Join(workDir, harness.LiveStateFilename), []byte(
+			`{"resources":[{"type":"scaleway_account_project","instances":[{"attributes":{"id":"test-run-project"}}]}]}`), 0o600)
+	}
 	return f.result, f.err
 }
 
@@ -80,7 +90,7 @@ type fakeOrphanSweep struct {
 	calls  int
 }
 
-func (f *fakeOrphanSweep) Run(_ context.Context, _ string, _ string) (*harness.OrphanSweepResult, error) {
+func (f *fakeOrphanSweep) Run(_ context.Context, _ *harness.SweepTarget, _ string) (*harness.OrphanSweepResult, error) {
 	f.calls++
 	if f.result == nil && f.err == nil {
 		return &harness.OrphanSweepResult{ProjectID: "test-project"}, nil

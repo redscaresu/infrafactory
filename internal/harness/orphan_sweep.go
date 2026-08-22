@@ -58,35 +58,62 @@ type OrphanSweepResult struct {
 
 func (r *OrphanSweepResult) Clean() bool { return r != nil && len(r.Failures) == 0 }
 
-// Run reports every reason to believe the run leaked.
+// SweepTarget is what the sweep needs to know, captured BEFORE destroy.
 //
-// Every uncertain outcome is a failure, never a skip. A sweep that
-// cannot reach the API is exactly when you most want a red result --
-// "we could not check" and "nothing leaked" must never look alike.
-func (s *ScalewayOrphanSweep) Run(ctx context.Context, workDir string, secretKey string) (*OrphanSweepResult, error) {
+// This split exists because the first real canary run failed on it: the
+// sweep originally read terraform-live.tfstate at sweep time, which is
+// after `tofu destroy` has emptied the file. The project id was gone, so
+// the sweep could never determine the run's blast radius and failed
+// closed on every successful teardown -- correct behaviour, useless
+// tool. Capture has to happen while the state still describes what
+// exists.
+type SweepTarget struct {
+	ProjectID string
+	// Strays are resources found outside the run project. Computed at
+	// capture time for the same reason.
+	Strays []feedback.Failure
+}
+
+// CaptureSweepTarget reads the live state while it still has contents.
+// Call it before destroy.
+func CaptureSweepTarget(workDir string) (*SweepTarget, error) {
 	state, err := loadLiveTerraformState(filepath.Join(workDir, LiveStateFilename))
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrOrphanSweepFailed, err)
 	}
-
 	projectID := runProjectID(state)
 	if projectID == "" {
 		return nil, fmt.Errorf("%w: live state has no %s resource, so the run's blast radius cannot be determined (ADR-0010 requires one)",
 			ErrOrphanSweepFailed, ProjectResourceType)
 	}
+	return &SweepTarget{
+		ProjectID: projectID,
+		Strays:    strayResourceFailures(state, projectID),
+	}, nil
+}
 
-	result := &OrphanSweepResult{ProjectID: projectID}
-	result.Failures = append(result.Failures, strayResourceFailures(state, projectID)...)
+// Run reports every reason to believe the run leaked.
+//
+// Every uncertain outcome is a failure, never a skip. A sweep that
+// cannot reach the API is exactly when you most want a red result --
+// "we could not check" and "nothing leaked" must never look alike.
+func (s *ScalewayOrphanSweep) Run(ctx context.Context, target *SweepTarget, secretKey string) (*OrphanSweepResult, error) {
+	if target == nil || strings.TrimSpace(target.ProjectID) == "" {
+		return nil, fmt.Errorf("%w: no sweep target captured before destroy", ErrOrphanSweepFailed)
+	}
 
-	remaining, err := s.projectExists(ctx, projectID, secretKey)
+	result := &OrphanSweepResult{ProjectID: target.ProjectID}
+	result.Failures = append(result.Failures, target.Strays...)
+
+	remaining, err := s.projectExists(ctx, target.ProjectID, secretKey)
 	if err != nil {
 		result.Failures = append(result.Failures, feedback.Failure{
 			Layer:   "sandbox_deploy",
 			Stage:   "orphan_sweep",
 			Check:   "project_deleted",
-			Command: "GET " + s.apiBase + "/account/v3/projects/" + projectID,
-			Detail: fmt.Sprintf("could not verify that project %s was destroyed: %v. Treating as a leak: an unverifiable sweep must not look like a clean one. Re-check with `infrafactory reap` (state: %s in %s) once connectivity is restored.",
-				projectID, err, LiveStateFilename, workDir),
+			Command: "GET " + s.apiBase + "/account/v3/projects/" + target.ProjectID,
+			Detail: fmt.Sprintf("could not verify that project %s was destroyed: %v. Treating as a leak: an unverifiable sweep must not look like a clean one. Re-check with `infrafactory reap` once connectivity is restored.",
+				target.ProjectID, err),
 		})
 		return result, nil
 	}
@@ -95,9 +122,9 @@ func (s *ScalewayOrphanSweep) Run(ctx context.Context, workDir string, secretKey
 			Layer:   "sandbox_deploy",
 			Stage:   "orphan_sweep",
 			Check:   "project_deleted",
-			Command: "GET " + s.apiBase + "/account/v3/projects/" + projectID,
-			Detail: fmt.Sprintf("project %s still exists after destroy — it is billable until removed. Tear it down with `infrafactory reap` (state: %s in %s), then confirm in the Scaleway console.",
-				projectID, LiveStateFilename, workDir),
+			Command: "GET " + s.apiBase + "/account/v3/projects/" + target.ProjectID,
+			Detail: fmt.Sprintf("project %s still exists after destroy -- it is billable until removed. Tear it down with `infrafactory reap`, then confirm in the Scaleway console.",
+				target.ProjectID),
 		})
 	}
 	return result, nil

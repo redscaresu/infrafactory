@@ -40,7 +40,7 @@ type SandboxDestroyHarnessRunner interface {
 // left nothing billable behind. For Layer 3 this -- not mockway state --
 // is what satisfies a `destruction: no_orphans` criterion.
 type OrphanSweepRunner interface {
-	Run(ctx context.Context, workDir string, secretKey string) (*harness.OrphanSweepResult, error)
+	Run(ctx context.Context, target *harness.SweepTarget, secretKey string) (*harness.OrphanSweepResult, error)
 }
 
 type RealProbeHarnessRunner interface {

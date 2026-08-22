@@ -149,10 +149,46 @@ func countOrphans(stateJSON []byte) (int, error) {
 				continue
 			}
 			if items, ok := value.([]any); ok {
-				count += len(items)
+				count += countOrphanItems(root, collection, items)
 			}
 		}
 	}
 
 	return count, nil
+}
+
+// mockwayDefaultProjectID is the project mockway seeds at boot (S140).
+// It mirrors models.DefaultProjectID in the mockway repo; duplicated as
+// a literal because infrafactory does not import the sibling fakes.
+const mockwayDefaultProjectID = "00000000-0000-0000-0000-000000000000"
+
+// countOrphanItems counts a collection's entries, skipping ones that are
+// boot-time fixtures rather than anything a scenario created.
+//
+// mockway seeds a default project so scenarios that never declare one
+// still have a valid project_id to send (S140). That row is present on
+// every clean teardown, so counting it would fail `destruction:
+// no_orphans` for every scenario in the suite.
+//
+// Only the seeded default is exempt. A project a scenario actually
+// created and failed to destroy is a real orphan and still counts --
+// which matters more now that Layer 3 has stacks creating their own
+// projects.
+func countOrphanItems(root, collection string, items []any) int {
+	if root != "account" || collection != "projects" {
+		return len(items)
+	}
+	count := 0
+	for _, item := range items {
+		entry, ok := item.(map[string]any)
+		if !ok {
+			count++
+			continue
+		}
+		if id, _ := entry["id"].(string); id == mockwayDefaultProjectID {
+			continue
+		}
+		count++
+	}
+	return count
 }

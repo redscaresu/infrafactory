@@ -535,10 +535,14 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 					Detail:  sandboxEnvErr.Error(),
 				})
 			} else {
+				// Capture the sweep target BEFORE destroy: tofu empties
+				// terraform-live.tfstate, taking the project id with it.
+				// The first canary run failed exactly here.
+				sweepTarget, sweepTargetErr := harness.CaptureSweepTarget(outputDir)
 				sandboxDestroyResult, sandboxDestroyErr := runtime.Deps.SandboxDestroy.Run(ctx, outputDir, sandboxEnv)
 				stages, failures = appendSandboxDestroyResult(stages, failures, sandboxDestroyResult, sandboxDestroyErr)
 				if sandboxDestroyErr == nil {
-					stages, failures = appendOrphanSweepResult(ctx, stages, failures, runtime, outputDir, sandboxEnv)
+					stages, failures = appendOrphanSweepResult(ctx, stages, failures, runtime, sweepTarget, sweepTargetErr, sandboxEnv)
 				}
 			}
 		}
@@ -1001,8 +1005,15 @@ func resolveConstraintPolicyPath(baseDir, policyPath string) string {
 // state even for Layer 3 runs, so a destroy that half-worked reported
 // clean while real resources kept billing. A destroy exiting 0 is not
 // evidence that nothing survived.
-func appendOrphanSweepResult(ctx context.Context, stages []StageSummary, failures []FailureSummary, runtime *CommandRuntime, outputDir string, sandboxEnv map[string]string) ([]StageSummary, []FailureSummary) {
-	result, err := runtime.Deps.OrphanSweep.Run(ctx, outputDir, sandboxEnv["SCW_SECRET_KEY"])
+func appendOrphanSweepResult(ctx context.Context, stages []StageSummary, failures []FailureSummary, runtime *CommandRuntime, target *harness.SweepTarget, captureErr error, sandboxEnv map[string]string) ([]StageSummary, []FailureSummary) {
+	if captureErr != nil {
+		stages = append(stages, StageSummary{Layer: "sandbox_deploy", Stage: "orphan_sweep", Status: StageStatusFail})
+		return stages, append(failures, FailureSummary{
+			Layer: "sandbox_deploy", Stage: "orphan_sweep", Check: "no_orphans",
+			Command: "capture sweep target", Detail: captureErr.Error(),
+		})
+	}
+	result, err := runtime.Deps.OrphanSweep.Run(ctx, target, sandboxEnv["SCW_SECRET_KEY"])
 	if err != nil {
 		stages = append(stages, StageSummary{Layer: "sandbox_deploy", Stage: "orphan_sweep", Status: StageStatusFail})
 		return stages, append(failures, FailureSummary{
