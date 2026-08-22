@@ -531,6 +531,9 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 			} else {
 				sandboxDestroyResult, sandboxDestroyErr := runtime.Deps.SandboxDestroy.Run(ctx, outputDir, sandboxEnv)
 				stages, failures = appendSandboxDestroyResult(stages, failures, sandboxDestroyResult, sandboxDestroyErr)
+				if sandboxDestroyErr == nil {
+					stages, failures = appendOrphanSweepResult(ctx, stages, failures, runtime, outputDir, sandboxEnv)
+				}
 			}
 		}
 	} else if deployErr == nil {
@@ -971,4 +974,44 @@ func resolveConstraintPolicyPath(baseDir, policyPath string) string {
 		return policyPath
 	}
 	return filepath.Join(baseDir, policyPath)
+}
+
+// appendOrphanSweepResult asks the real API whether the run leaked.
+//
+// Before this, `destruction: no_orphans` was evaluated against mockway
+// state even for Layer 3 runs, so a destroy that half-worked reported
+// clean while real resources kept billing. A destroy exiting 0 is not
+// evidence that nothing survived.
+func appendOrphanSweepResult(ctx context.Context, stages []StageSummary, failures []FailureSummary, runtime *CommandRuntime, outputDir string, sandboxEnv map[string]string) ([]StageSummary, []FailureSummary) {
+	result, err := runtime.Deps.OrphanSweep.Run(ctx, outputDir, sandboxEnv["SCW_SECRET_KEY"])
+	if err != nil {
+		stages = append(stages, StageSummary{Layer: "sandbox_deploy", Stage: "orphan_sweep", Status: StageStatusFail})
+		return stages, append(failures, FailureSummary{
+			Layer:   "sandbox_deploy",
+			Stage:   "orphan_sweep",
+			Check:   "no_orphans",
+			Command: "orphan sweep",
+			Detail:  err.Error(),
+		})
+	}
+	if result.Clean() {
+		stages = append(stages, StageSummary{
+			Layer:  "sandbox_deploy",
+			Stage:  "orphan_sweep",
+			Status: StageStatusPass,
+			Detail: "project " + result.ProjectID + " destroyed; no resources left outside it",
+		})
+		return stages, failures
+	}
+	stages = append(stages, StageSummary{Layer: "sandbox_deploy", Stage: "orphan_sweep", Status: StageStatusFail})
+	for _, f := range result.Failures {
+		failures = append(failures, FailureSummary{
+			Layer:   f.Layer,
+			Stage:   f.Stage,
+			Check:   f.Check,
+			Command: f.Command,
+			Detail:  f.Detail,
+		})
+	}
+	return stages, failures
 }

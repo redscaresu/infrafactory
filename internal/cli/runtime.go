@@ -36,6 +36,13 @@ type SandboxDestroyHarnessRunner interface {
 	Run(context.Context, string, map[string]string) (*harness.SandboxDestroyResult, error)
 }
 
+// OrphanSweepRunner verifies, against the real API, that a Layer 3 run
+// left nothing billable behind. For Layer 3 this -- not mockway state --
+// is what satisfies a `destruction: no_orphans` criterion.
+type OrphanSweepRunner interface {
+	Run(ctx context.Context, workDir string, secretKey string) (*harness.OrphanSweepResult, error)
+}
+
 type RealProbeHarnessRunner interface {
 	Run(context.Context, string, string, []harness.ProbeCheck) (*harness.RealProbeResult, error)
 }
@@ -63,6 +70,7 @@ type RuntimeDependencies struct {
 	Destroy        DestroyHarnessRunner
 	SandboxDeploy  SandboxDeployHarnessRunner
 	SandboxDestroy SandboxDestroyHarnessRunner
+	OrphanSweep    OrphanSweepRunner
 	RealProbe      RealProbeHarnessRunner
 	MockState      harness.MockStateClient
 	MockStart      MockStarter
@@ -361,6 +369,10 @@ func buildRuntime(cmd *cobra.Command, opts runtimeOptions) (*CommandRuntime, err
 	}
 	if deps.SandboxDestroy == nil {
 		deps.SandboxDestroy = harness.NewSandboxDestroyHarness(execCommandRunner{})
+	}
+	if deps.OrphanSweep == nil {
+		deps.OrphanSweep = harness.NewScalewayOrphanSweep(
+			time.Duration(cfg.Validation.RealProbes.TimeoutSeconds) * time.Second)
 	}
 	if deps.RealProbe == nil {
 		deps.RealProbe = harness.NewRealProbeHarness(harness.ProbeConfig{

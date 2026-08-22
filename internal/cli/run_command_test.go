@@ -724,6 +724,7 @@ func TestRunCommandUsesSandboxLayerWhenEnabled(t *testing.T) {
 		}},
 		SandboxDeploy:  sandboxDeploy,
 		SandboxDestroy: sandboxDestroy,
+		OrphanSweep:    &fakeOrphanSweep{},
 		RealProbe:      realProbe,
 	}
 
@@ -1205,6 +1206,7 @@ func TestRunCommandAutoDestroysRealResourcesOnFailure(t *testing.T) {
 		Destroy:        &fakeDestroyHarness{},
 		SandboxDeploy:  &fakeSandboxDeployHarness{},
 		SandboxDestroy: sandboxDestroy,
+		OrphanSweep:    &fakeOrphanSweep{},
 		RealProbe:      &fakeRealProbeHarness{result: &harness.RealProbeResult{}},
 	}
 
@@ -1251,6 +1253,7 @@ func TestRunCommandNoDestroyPreservesRealResourcesOnFailure(t *testing.T) {
 		Destroy:        &fakeDestroyHarness{},
 		SandboxDeploy:  &fakeSandboxDeployHarness{},
 		SandboxDestroy: sandboxDestroy,
+		OrphanSweep:    &fakeOrphanSweep{},
 		RealProbe:      &fakeRealProbeHarness{result: &harness.RealProbeResult{}},
 	}
 
@@ -1459,6 +1462,7 @@ acceptance_criteria:
 		}},
 		SandboxDeploy:  sandboxDeploy,
 		SandboxDestroy: sandboxDestroy,
+		OrphanSweep:    &fakeOrphanSweep{},
 		RealProbe:      realProbe,
 	}
 
