@@ -50,6 +50,47 @@ Full close-out: `docs/status/ARCHIVE.md` § "2026-06-10 fakegenesys v0.2 hardeni
 
 ## ACTIVE ARC — read first
 
+### Ready to run autonomously. Scope: S143 run 2, then arc close-out, then STOP.
+
+`docs/plans/layer3-real-scaleway-plan.md`. Everything except run 2 and the close-out has shipped — 13 PRs (infrafactory #136–#146, mockway #21).
+
+**Layer 3 works.** On 2026-08-22 it applied to and destroyed real Scaleway infrastructure with the sweep confirming clean:
+
+```
+sandbox_deploy/preflight:    pass (endpoint asserted as https://api.scaleway.com)
+sandbox_deploy/init/plan/apply/destroy: pass
+sandbox_deploy/orphan_sweep: pass (project destroyed; no resources left outside it)
+```
+
+That was run 1, with **fixed HCL**, deliberately — isolating the Layer 3 harness from LLM generation on the first-ever real apply. It found two bugs immediately (both fixed in #144): the sweep read state after destroy emptied it, and mockway's seeded default project counted as a Layer 2 orphan, which would have failed `no_orphans` for every scenario in the suite.
+
+#### What to do
+
+1. **S143 run 2** — `infrafactory run scenarios/training/block-paris.yaml` with Layer 3 enabled, letting the **LLM generate the HCL**. Run 1 proved the harness; this proves the pipeline. Expect the generator to need the `scaleway_account_project` (ADR-0010) — `validateLayer3ProjectResource` enforces it and `Layer3Guidance` prompts for it, but that path has never been exercised against a real apply.
+2. **Arc close-out** (mandatory per AGENTS.md): `docs/status/ARCHIVE.md` section, `docs/NEXT_SESSION.md` repoint, `STATUS.md` trim.
+3. **Stop.** Do not widen to more scenarios without asking.
+
+#### Setup that already works
+
+- **Credentials**: `~/.config/scw/config.yaml` has a working key. Export `SCW_ACCESS_KEY` / `SCW_SECRET_KEY` / `SCW_DEFAULT_ORGANIZATION_ID` from it — the org id is required (each run creates its own project).
+- **Config**: `/tmp/l3run/infrafactory.yaml` (ephemeral; recreate if gone). It needs `constraint_policies` mapped to **absolute** policy paths or `mock_deploy/state_policy` fails.
+- **mockway must be running** on :8080, built from current main (needs the S140 `account/v3` handlers): `go -C ../mockway build -o /tmp/mockway ./cmd/mockway && /tmp/mockway --port 8080 &`
+- **M99 is fixed** (#146), so `make test` now passes with mockway up. No more stop-the-mock-before-committing dance.
+
+#### Account facts that constrain everything
+
+The org holds **`openclaw`** (`0b6a8a6a-…`) with live infrastructure — a 20GB volume at minimum. Never let a destroy path near it; `harness.AssertProjectDeletable` enforces this, and the dedicated `infrafactory` project (`2397e80e-…`) catches resources that omit `project_id`.
+
+#### Repo mechanics that will bite
+
+- `main` on both repos has a **ruleset** (`gh api repos/<o>/<r>/rulesets`, not `/branches/main/protection`). infrafactory requires 1 approval → self-merge needs `--admin`. Both now require status checks.
+- A **PreToolUse hook** blocks `gh pr merge` unless every check on the head SHA is green. It has no bypass; fix the checks.
+- **Doc Hygiene is CI-only.** Any `internal/cli/` or `cmd/infrafactory/` change needs an ADR touch; any `cmd/|internal/|prompts/|policies/|scenarios/` change needs `STATUS.md`. The pre-commit hook does not check this, so it fails after push.
+- `make test` rewrites `ui/package-lock.json` (strips `libc` fields). **Restore it before `git add`, not after** — #144 committed the churn and needed #145 to undo it.
+- `gofmt -w <dir>` reformats unrelated files; ~19 are already unformatted on main. Format only what you changed.
+
+
+
 **`docs/plans/layer3-real-scaleway-plan.md`** (S139–S143, planned 2026-08-22). Goal: get one scenario (`block-paris`) through apply → verify → destroy → provably-zero-orphans against **real Scaleway**.
 
 Layer 3 has been code-complete since S30 (Slices 26–30: plan/apply/destroy on `terraform-live.tfstate`, real probes, credential preflight, auto-destroy, UI toggle) and has **never made a single call to `api.scaleway.com`**. It was validated entirely against mockway standing in for Scaleway.
