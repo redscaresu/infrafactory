@@ -58,10 +58,52 @@ func stripGCPAuthEnv(env []string) []string {
 	return out
 }
 
+// stripEnvKeys removes the named keys from env. Entries are matched
+// exactly, or as a prefix when they end in `*` (e.g. `SCW_DEFAULT_*`).
+//
+// This is the generic form of stripGCPAuthEnv above: that one is an
+// unconditional, global strip because the Google provider must never
+// see ADC vars on any command, whereas StripEnv is per-command because
+// Layer 2 legitimately needs SCW_API_URL set while Layer 3 must not
+// see it at all.
+func stripEnvKeys(env []string, keys []string) []string {
+	if len(keys) == 0 {
+		return env
+	}
+	out := make([]string, 0, len(env))
+	for _, entry := range env {
+		idx := strings.IndexByte(entry, '=')
+		if idx < 0 {
+			out = append(out, entry)
+			continue
+		}
+		if envKeyMatches(entry[:idx], keys) {
+			continue
+		}
+		out = append(out, entry)
+	}
+	return out
+}
+
+func envKeyMatches(key string, patterns []string) bool {
+	for _, pattern := range patterns {
+		if prefix, ok := strings.CutSuffix(pattern, "*"); ok {
+			if strings.HasPrefix(key, prefix) {
+				return true
+			}
+			continue
+		}
+		if key == pattern {
+			return true
+		}
+	}
+	return false
+}
+
 func (execCommandRunner) Run(ctx context.Context, cmd harness.Command) (harness.CommandResult, error) {
 	execCmd := exec.CommandContext(ctx, cmd.Name, cmd.Args...)
 	execCmd.Dir = cmd.Dir
-	execCmd.Env = withEnvOverrides(stripGCPAuthEnv(os.Environ()), cmd.Env)
+	execCmd.Env = withEnvOverrides(stripEnvKeys(stripGCPAuthEnv(os.Environ()), cmd.StripEnv), cmd.Env)
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer

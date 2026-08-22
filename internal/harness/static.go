@@ -14,6 +14,16 @@ type Command struct {
 	Args []string
 	Dir  string
 	Env  map[string]string
+	// StripEnv lists environment keys to remove from the inherited
+	// parent environment before Env is applied. An Env override map can
+	// only *set* a key, never unset one, so a variable the parent shell
+	// happens to export survives into the subprocess unless it is named
+	// here. Entries are exact keys, or a `FOO_*` prefix wildcard.
+	//
+	// Layer 3 depends on this: the sandbox apply must reach real
+	// Scaleway, and an inherited SCW_API_URL would silently retarget it
+	// at mockway while still reporting success. See ADR-0023.
+	StripEnv []string
 }
 
 type CommandResult struct {
