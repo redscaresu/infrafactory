@@ -174,12 +174,22 @@ Diagnostic protocol when a run exits without learning:
 
 ## Scaleway Bootstrap (Layer 3 Prerequisites)
 
-Layer 3 uses self-managed project lifecycle per ADR-0010. Generated HCL includes `scaleway_account_project` — infrafactory creates/destroys its own project. No pre-existing sandbox required.
+Layer 3 spends real money. It applies to `api.scaleway.com` — first proven end-to-end on 2026-08-22 (S143), including with LLM-generated HCL. Read ADR-0023 before changing anything on this path; it defines what a passing Layer 3 result *means*.
+
+Self-managed project lifecycle per ADR-0010: generated HCL includes `scaleway_account_project`, so each run creates and destroys its own project. No pre-existing sandbox required, and that project-per-run is what keeps the blast radius to one disposable project.
 
 **User must provide:**
-1. Org-level API keys (IAM -> API Keys, organization-level permissions).
-2. Env vars: `SCW_ACCESS_KEY`, `SCW_SECRET_KEY`.
+1. An API key with **project-manager** rights (IAM → API Keys, organization-level). A resource-scoped key 403s on the very first resource.
+2. Env vars: `SCW_ACCESS_KEY`, `SCW_SECRET_KEY`, `SCW_DEFAULT_ORGANIZATION_ID`. The org id is **required** — a project has to be created somewhere — and preflight fails closed without it.
 3. Enable Layer 3: `validation.layers.sandbox_deploy.enabled: true` in `infrafactory.yaml`.
+4. `validation.layers.sandbox_deploy.allow_resource_types` — **deny-by-default**. Empty or absent denies everything. Checked after generation and before apply, so a denied type costs nothing.
+5. `scaleway.fallback_project_id` — a dedicated disposable project. A generated resource that omits `project_id` lands wherever the provider resolves the default, which on a normal account sits next to real infrastructure. Refused if set to the organization id.
+
+**Operational notes:**
+- The sandbox subprocess environment is *sealed*, not merely overridden (`harness.SandboxStripEnv`). An inherited `SCW_API_URL` cannot retarget a "real" apply at mockway — that false-green was the arc's opening blocker.
+- `infrafactory reap <scenario>` destroys what an interrupted run left behind, gated by `AssertProjectDeletable` and verified by the same real-API sweep. A reap that cannot prove the account is clean fails.
+- Layer 3 stays opt-in and off by default, and must never be wired into a scheduled CI job (cost-sensitive-CI standing rule).
+- Real-vs-mock behavioural deltas live in `docs/layer3-real-vs-mock-deltas.md`. Layer 3 has no retry, so a transient API error fails an otherwise-correct run.
 
 ## Secrets
 - Never commit `.env`, credentials, API keys, or private keys.
