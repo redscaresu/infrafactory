@@ -251,7 +251,6 @@ func mockDeployFailureDetail(err *harness.MockDeployError) string {
 	if err == nil {
 		return ""
 	}
-	detail := err.Err.Error()
 	var stderr string
 	switch err.Stage {
 	case "init":
@@ -259,16 +258,7 @@ func mockDeployFailureDetail(err *harness.MockDeployError) string {
 	case "apply":
 		stderr = err.Apply.Stderr
 	}
-	if stderr != "" {
-		trimmedStderr := stripAnsi(strings.TrimSpace(stderr))
-		if trimmedStderr != "" {
-			if len(trimmedStderr) > failureStderrDetailMaxChars {
-				trimmedStderr = trimmedStderr[:failureStderrDetailMaxChars] + "..."
-			}
-			detail = fmt.Sprintf("%s | stderr: %s", detail, trimmedStderr)
-		}
-	}
-	return detail
+	return stderrFailureDetail(err.Err, stderr)
 }
 
 func appendDestroyResult(stages []StageSummary, failures []FailureSummary, result *harness.DestroyResult, runErr error) ([]StageSummary, []FailureSummary) {
@@ -311,8 +301,24 @@ func destroyFailureDetail(err *harness.DestroyError) string {
 	if err == nil {
 		return ""
 	}
-	detail := err.Err.Error()
-	trimmedStderr := stripAnsi(strings.TrimSpace(err.Destroy.Stderr))
+	return stderrFailureDetail(err.Err, err.Destroy.Stderr)
+}
+
+// stderrFailureDetail renders a harness error for FailureSummary.Detail,
+// appending the failing command's stderr when it carried any.
+//
+// The bare exec error is nearly always "exit status 1", which says
+// nothing about what broke. Layer 3 needs this most: reproducing a real
+// Scaleway failure costs money, so the one line the operator gets has to
+// carry the provider's own message. The S143 run 2 canary hit a
+// transient block-volume create error and the run reported exactly
+// "exit status 1" and nothing else.
+func stderrFailureDetail(baseErr error, stderr string) string {
+	detail := ""
+	if baseErr != nil {
+		detail = baseErr.Error()
+	}
+	trimmedStderr := stripAnsi(strings.TrimSpace(stderr))
 	if trimmedStderr == "" {
 		return detail
 	}
@@ -385,9 +391,28 @@ func appendSandboxDeployResult(stages []StageSummary, failures []FailureSummary,
 		Stage:   deployErr.Stage,
 		Check:   deployErr.Stage,
 		Command: "sandbox deploy harness",
-		Detail:  deployErr.Err.Error(),
+		Detail:  sandboxDeployFailureDetail(deployErr),
 	})
 	return stages, failures
+}
+
+// sandboxDeployFailureDetail picks the stderr belonging to the stage
+// that actually failed. Layer 3 runs three commands against the real
+// API, and only the failing one's output is worth surfacing.
+func sandboxDeployFailureDetail(err *harness.SandboxDeployError) string {
+	if err == nil {
+		return ""
+	}
+	var stderr string
+	switch err.Stage {
+	case "init":
+		stderr = err.Init.Stderr
+	case "plan":
+		stderr = err.Plan.Stderr
+	case "apply":
+		stderr = err.Apply.Stderr
+	}
+	return stderrFailureDetail(err.Err, stderr)
 }
 
 func appendSandboxDestroyResult(stages []StageSummary, failures []FailureSummary, result *harness.SandboxDestroyResult, runErr error) ([]StageSummary, []FailureSummary) {
@@ -409,7 +434,7 @@ func appendSandboxDestroyResult(stages []StageSummary, failures []FailureSummary
 		Stage:   destroyErr.Stage,
 		Check:   destroyErr.Stage,
 		Command: "sandbox destroy harness",
-		Detail:  destroyErr.Err.Error(),
+		Detail:  stderrFailureDetail(destroyErr.Err, destroyErr.Destroy.Stderr),
 	})
 	return stages, failures
 }

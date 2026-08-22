@@ -58,4 +58,10 @@ The interrupt path closed the last gap. `withSandboxInterruptGuard` installs a S
 
 This is the first defect the arc found that no unit test or mock could have: it only appears when a real destroy actually empties real state.
 
+**Amendment — a failing guard must say why (2026-08-22, from the LLM-generated canary run).** The rules above decide *whether* a Layer 3 run may proceed and what a pass means. They said nothing about what a **failure** reports, and the answer turned out to be almost nothing: both Layer 3 paths built their `FailureSummary.Detail` from the bare exec error, so a real Scaleway failure surfaced as `exit status 1` and the provider's message — captured by the harness in `SandboxDeployError.Apply.Stderr` — was discarded. The sandbox destroy path had the same hole, which matters more: a failed real destroy is the orphaned-billing case.
+
+Fail-closed is necessary but not sufficient. A guard that stops the run without saying why is only half a guard, and the asymmetry is specific to Layer 3: against a mock, reproducing `exit status 1` under a debugger is free; against a real API it costs money and a project-create round trip, so the first report has to carry the message. Layer 2 had solved this long ago in `mockDeployFailureDetail`; the shared `stderrFailureDetail` helper now backs all four paths (mock deploy, destroy, sandbox deploy, sandbox destroy), ANSI-stripped and bounded by the same `failureStderrDetailMaxChars` budget.
+
+The failure this surfaced is recorded in `docs/layer3-real-vs-mock-deltas.md` (D1): real Scaleway returned a create error *after* the block volume existed, leaving it tainted with computed fields unset. It was transient — a re-apply succeeded — and Layer 3 has no retry, so a single API blip fails an otherwise-correct run. That retry is the arc's top follow-up, not part of this decision.
+
 **Enforcement**: the guards carry synthetic-drift coverage — removing `SCW_API_URL` from `SandboxStripEnv` fails three tests, verified before S139 merged. Following the project's "drift becomes failed `go test`" pattern.

@@ -2,7 +2,7 @@
 
 Self-contained brief for a fresh Claude / engineer starting in this repo.
 
-## Read this first (handoff state as of 2026-06-10)
+## Read this first (handoff state as of 2026-08-22)
 
 ### Baseline
 
@@ -48,13 +48,11 @@ Pattern: convention as code, not convention as doc. Each is empty-state-safe (ze
 
 Full close-out: `docs/status/ARCHIVE.md` § "2026-06-10 fakegenesys v0.2 hardening".
 
-## ACTIVE ARC — read first
+## Last arc — CLOSED, nothing outstanding
 
-### Ready to run autonomously. Scope: S143 run 2, then arc close-out, then STOP.
+### `docs/plans/layer3-real-scaleway-plan.md` (S139–S143). Layer 3 is done and proven.
 
-`docs/plans/layer3-real-scaleway-plan.md`. Everything except run 2 and the close-out has shipped — 13 PRs (infrafactory #136–#146, mockway #21).
-
-**Layer 3 works.** On 2026-08-22 it applied to and destroyed real Scaleway infrastructure with the sweep confirming clean:
+**Layer 3 applies to and destroys real Scaleway infrastructure.** Code-complete since S30, it had never called `api.scaleway.com` until 2026-08-22. Both canary runs on `block-paris` are green end-to-end:
 
 ```
 sandbox_deploy/preflight:    pass (endpoint asserted as https://api.scaleway.com)
@@ -62,54 +60,55 @@ sandbox_deploy/init/plan/apply/destroy: pass
 sandbox_deploy/orphan_sweep: pass (project destroyed; no resources left outside it)
 ```
 
-That was run 1, with **fixed HCL**, deliberately — isolating the Layer 3 harness from LLM generation on the first-ever real apply. It found two bugs immediately (both fixed in #144): the sweep read state after destroy emptied it, and mockway's seeded default project counted as a Layer 2 orphan, which would have failed `no_orphans` for every scenario in the suite.
+- **Run 1** used seeded HCL, deliberately isolating the harness from LLM generation on the first-ever real apply.
+- **Run 2** let the **LLM generate the HCL** — `target_reached` in a single iteration, 71s including generation. The `scaleway_account_project` path (ADR-0010) that had never been exercised against a real apply worked first try.
 
-#### What to do
+Both sweeps verified independently against the account afterwards. It ends in the state it started: 3 projects (`default`, `openclaw`, `infrafactory`), one pre-existing 20GB `openclaw` volume, nothing else.
 
-1. **S143 run 2** — `infrafactory run scenarios/training/block-paris.yaml` with Layer 3 enabled, letting the **LLM generate the HCL**. Run 1 proved the harness; this proves the pipeline. Expect the generator to need the `scaleway_account_project` (ADR-0010) — `validateLayer3ProjectResource` enforces it and `Layer3Guidance` prompts for it, but that path has never been exercised against a real apply.
-2. **Arc close-out** (mandatory per AGENTS.md): `docs/status/ARCHIVE.md` section, `docs/NEXT_SESSION.md` repoint, `STATUS.md` trim.
-3. **Stop.** Do not widen to more scenarios without asking.
+15 PRs across two repos: infrafactory #136–#147 + mockway #21. Full close-out in `docs/status/ARCHIVE.md` § "2026-08-22 Layer 3 real-Scaleway arc". Deltas in `docs/layer3-real-vs-mock-deltas.md`. Governance in ADR-0023.
 
-#### Setup that already works
+### What the canary bought
 
-- **Credentials**: `~/.config/scw/config.yaml` has a working key. Export `SCW_ACCESS_KEY` / `SCW_SECRET_KEY` / `SCW_DEFAULT_ORGANIZATION_ID` from it — the org id is required (each run creates its own project).
-- **Config**: `/tmp/l3run/infrafactory.yaml` (ephemeral; recreate if gone). It needs `constraint_policies` mapped to **absolute** policy paths or `mock_deploy/state_policy` fails.
-- **mockway must be running** on :8080, built from current main (needs the S140 `account/v3` handlers): `go -C ../mockway build -o /tmp/mockway ./cmd/mockway && /tmp/mockway --port 8080 &`
-- **M99 is fixed** (#146), so `make test` now passes with mockway up. No more stop-the-mock-before-committing dance.
+Three defects no unit test or mock could have produced — the return on the whole arc:
+
+1. The orphan sweep read `terraform-live.tfstate` *after* destroy emptied it, so it failed closed on teardowns that had actually worked.
+2. mockway's boot-seeded default project counted as a Layer 2 orphan, which would have failed `destruction: no_orphans` for **every scenario in the suite**.
+3. Real Scaleway returned a block-volume create error *after* the volume existed server-side, leaving it tainted. Transient — a re-apply succeeded.
+
+(1) and (2) were fixed in S143a; (3) is a real-API behaviour, recorded rather than "fixed".
+
+### Two follow-ups, both deliberately not taken
+
+1. **Bounded retry on Layer 3 apply** (tainted-state-aware, one attempt). Layer 3 has no retry, so the transient in (3) fails an otherwise-correct run — and under `infrafactory run` it burns a repair iteration teaching the LLM nothing, because the HCL was fine. Direct fix, small.
+2. **Orphan sweep on the auto-destroy-on-failure path.** `run_command.go` destroys real resources when a run fails but does not then sweep, so the cleanup most likely to leave orphans is the one path that never verifies itself. Left for the user: it is a design question (should a failed run fail *harder* on an unverifiable sweep?), and it touches the real-money path.
+
+### Setup, if you need to run Layer 3 again
+
+- **Credentials**: `~/.config/scw/config.yaml` default profile. Export `SCW_ACCESS_KEY` / `SCW_SECRET_KEY` / `SCW_DEFAULT_ORGANIZATION_ID` from it — read the **top-level** keys, not the `myProfile:` block, whose `api_url` points elsewhere.
+- **Config**: `/tmp/l3run/infrafactory.yaml` (ephemeral; recreate if gone). Needs `constraint_policies` mapped to **absolute** policy paths or `mock_deploy/state_policy` fails.
+- **mockway must be running** on :8080 built from current main: `go -C ../mockway build -o /tmp/mockway ./cmd/mockway && /tmp/mockway --port 8080 &`
+- Layer 3 artifacts land in `.infrafactory/runs/<scenario>/<run_id>/` (git-ignored) — `plan-live.txt` and `run.json` (`layer3_enabled`) are the ones worth reading.
 
 #### Account facts that constrain everything
 
-The org holds **`openclaw`** (`0b6a8a6a-…`) with live infrastructure — a 20GB volume at minimum. Never let a destroy path near it; `harness.AssertProjectDeletable` enforces this, and the dedicated `infrafactory` project (`2397e80e-…`) catches resources that omit `project_id`.
+The org holds **`openclaw`** (`0b6a8a6a-…`) with live infrastructure — a 20GB volume at minimum. Never let a destroy path near it; `harness.AssertProjectDeletable` enforces this, and the dedicated `infrafactory` project (`2397e80e-…`) catches resources that omit `project_id`. Note the default scw profile's `default_project_id` **is** `openclaw`; the sealed env overrides it, which is the whole point of `scaleway.fallback_project_id`.
 
 #### Repo mechanics that will bite
 
-- `main` on both repos has a **ruleset** (`gh api repos/<o>/<r>/rulesets`, not `/branches/main/protection`). infrafactory requires 1 approval → self-merge needs `--admin`. Both now require status checks.
-- A **PreToolUse hook** blocks `gh pr merge` unless every check on the head SHA is green. It has no bypass; fix the checks.
+- `main` on both repos has a **ruleset** (`gh api repos/<o>/<r>/rulesets`, not `/branches/main/protection`). infrafactory requires 1 approval → self-merge needs `--admin`. Both require status checks.
+- A **PreToolUse hook** blocks `gh pr merge` unless every check on the head SHA is green. No bypass; fix the checks.
 - **Doc Hygiene is CI-only.** Any `internal/cli/` or `cmd/infrafactory/` change needs an ADR touch; any `cmd/|internal/|prompts/|policies/|scenarios/` change needs `STATUS.md`. The pre-commit hook does not check this, so it fails after push.
-- `make test` rewrites `ui/package-lock.json` (strips `libc` fields). **Restore it before `git add`, not after** — #144 committed the churn and needed #145 to undo it.
+- `make test` rewrites `ui/package-lock.json` (strips `libc` fields). **Restore it before `git add`, not after.**
 - `gofmt -w <dir>` reformats unrelated files; ~19 are already unformatted on main. Format only what you changed.
-
-
-
-**`docs/plans/layer3-real-scaleway-plan.md`** (S139–S143, planned 2026-08-22). Goal: get one scenario (`block-paris`) through apply → verify → destroy → provably-zero-orphans against **real Scaleway**.
-
-Layer 3 has been code-complete since S30 (Slices 26–30: plan/apply/destroy on `terraform-live.tfstate`, real probes, credential preflight, auto-destroy, UI toggle) and has **never made a single call to `api.scaleway.com`**. It was validated entirely against mockway standing in for Scaleway.
-
-Two blockers found during planning, both of which mean Layer 3 is currently unreachable end-to-end:
-
-- **B1 false-green env leak** — `sandboxCommandEnv()` (`internal/cli/test_command.go:559`) returns only the two credential keys, and `execCommandRunner` merges `os.Environ()` on top. An override map can set but never unset, so an inherited `SCW_API_URL` retargets the "real" apply at mockway and it reports pass. No test asserts otherwise. Fixed in S139.
-- **B2 self-managed-project deadlock** — ADR-0010 requires `scaleway_account_project` in the HCL and `validateLayer3ProjectResource` enforces it, but mockway registers only `/account/v2alpha1/ssh-keys` and 501s the project call. Layer 2 gates Layer 3, so mock apply fails and Layer 3 never runs. Fixed in S140 (mockway PR).
-
-Verified NOT gaps (don't re-investigate): `tofu plan/apply -state=` works on OpenTofu 1.11.5; same-HCL dual-apply is sound for Scaleway because the provider block is bare and the endpoint comes only from `SCW_API_URL`; auto-destroy-on-failure and `plan-live.txt` capture are both implemented.
-
-**S139–S142 are autonomous. S143 is operator-gated** — it needs `SCW_ACCESS_KEY` / `SCW_SECRET_KEY` / `SCW_DEFAULT_ORGANIZATION_ID` with project-manager rights, and it spends real money.
 
 ## Next arc candidates (no commitment)
 
-1. **AGENTS.md + README.md optimisation sweep across all 5 repos** (carried directive from 2026-06-05). Cross-repo docs cleanup — same 4-PR sweep pattern as S126/S127. Now unblocked.
-2. **Pitfall-pruning automation** (shelved 2026-06-06; S107 slot). `docs/plans/pitfall-pruning-automation-plan.md`. Detects pitfalls that haven't fired in N sweeps and demotes them.
-3. **5th cloud** (speculative — no concrete request). The day-one OSS checklist + contract-audit convention are now durable enough that adding a 5th cloud would be ~1 session of structural work.
-4. **fakegenesys public visibility flip + branch protection** — operator click-ops, not engineering. Still pending.
+1. **`lb-paris` as probe canary** — the designated Layer 3 follow-on, and the arc's own nominated opener. The real-probe path (`connectivity` / `http_probe` / `dns_resolution`) is still unexercised against real infrastructure; `block-paris` declares no probes. Costs more than the block canary — a load balancer and its IP — so scope it deliberately.
+2. **The two Layer 3 follow-ups above** — bounded apply retry, and a sweep on the auto-destroy-on-failure path. Both small; (2) wants a design call first.
+3. **AGENTS.md + README.md optimisation sweep across all 5 repos** (carried directive from 2026-06-05). Cross-repo docs cleanup — same 4-PR sweep pattern as S126/S127. Now unblocked.
+4. **Pitfall-pruning automation** (shelved 2026-06-06; S107 slot). `docs/plans/pitfall-pruning-automation-plan.md`. Detects pitfalls that haven't fired in N sweeps and demotes them.
+5. **5th cloud** (speculative — no concrete request). The day-one OSS checklist + contract-audit convention are now durable enough that adding a 5th cloud would be ~1 session of structural work.
+6. **fakegenesys public visibility flip + branch protection** — operator click-ops, not engineering. Still pending.
 
 ## Standing preferences (this user)
 

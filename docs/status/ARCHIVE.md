@@ -2,6 +2,121 @@
 
 Historical snapshots and older session notes can be moved here to keep `STATUS.md` concise.
 
+## 2026-08-22 Layer 3 real-Scaleway arc (S139–S143) — CLOSED
+
+`docs/plans/layer3-real-scaleway-plan.md`. Goal: get one scenario
+(`block-paris`) through apply → verify → destroy → provably-zero-orphans
+against **real Scaleway**, and find out what a mock had been hiding.
+
+Layer 3 had been code-complete since S30 and had never called
+`api.scaleway.com`. It does now.
+
+### Outcome
+
+| Exit criterion | Result |
+|---|---|
+| `block-paris` apply → verify → destroy in one unattended invocation | met (run 1 seeded HCL, run 2 LLM-generated) |
+| Orphan sweep clean **and** independently confirmed against the account | met — checked via `account/v3` + `block/v1alpha1` after each run |
+| An interrupted run self-cleans | met (S141b `withSandboxInterruptGuard` + `infrafactory reap`) |
+| Real-vs-mock deltas written down | met — `docs/layer3-real-vs-mock-deltas.md` |
+| ADR-0023 merged; close-out done | met |
+
+### Slices
+
+- **S139** — sealed sandbox env + fail-closed endpoint assertion. Closed
+  B1, the false-green env leak: an override map can set but never unset,
+  so an inherited `SCW_API_URL` silently retargeted the "real" apply at
+  mockway and it passed. `harness.SandboxStripEnv` removes the whole
+  family (including `SCW_PROFILE` / `SCW_CONFIG_PATH`) before the
+  override map applies.
+- **S140** (mockway#21) — `account/v3` project CRUD with
+  non-empty-delete enforcement. Closed B2: ADR-0010 mandates
+  `scaleway_account_project`, mockway 501'd it, and Layer 2 gates
+  Layer 3, so Layer 3 was unreachable end-to-end.
+- **S141 / S141b / S141c** — real-API orphan sweep + stray-resource
+  check + `AssertProjectDeletable`; interrupt-safe destroy and the
+  `reap` command; a dedicated disposable `infrafactory` project as
+  `scaleway.fallback_project_id` so a resource that omits `project_id`
+  is contained instead of landing next to live infrastructure.
+- **S142** — deny-by-default resource-type allowlist, enforced after
+  generation and before apply, so a denied type costs nothing.
+- **S143** — the canary itself, run twice.
+
+Every guard carries synthetic-drift coverage: break it, watch the test
+fail. That was a precondition of running unattended against real money,
+not a nicety.
+
+### What the canary actually found
+
+Three defects, none of which any unit test or mock could have produced.
+
+**Run 1 (seeded HCL, deliberately isolating the harness from the LLM)**
+found two, both fixed in S143a (#144):
+
+1. The orphan sweep read `terraform-live.tfstate` at sweep time — i.e.
+   *after* `tofu destroy` emptied it — so it could never determine the
+   blast radius and failed closed on teardowns that had actually worked.
+   Capture and verification are now split via `harness.CaptureSweepTarget`.
+2. mockway's boot-seeded default project counted as a Layer 2 orphan,
+   which would have failed `destruction: no_orphans` for **every scenario
+   in the suite** at the next sweep.
+
+**Run 2 (LLM-generated HCL, proving the pipeline rather than the
+harness)** passed first try — `target_reached` in one iteration, 71s
+including generation — and found the third:
+
+3. Real Scaleway returned a `scaleway_block_volume` create error *after*
+   the volume existed server-side, leaving it tainted with `srn` / `zone`
+   unset in state but populated in the API. Transient — a re-apply
+   succeeded. Layer 3 has **no retry**, so a single API blip fails an
+   otherwise-correct run and, under `infrafactory run`, burns a repair
+   iteration teaching the LLM nothing, because the HCL was fine.
+
+Diagnosing (3) was harder than it should have been: the failure surfaced
+as `detail="exit status 1"` and nothing else. Both Layer 3 paths built
+`FailureSummary.Detail` from the bare exec error and discarded the
+provider's message, which the harness had already captured in
+`SandboxDeployError.Apply.Stderr`. The sandbox **destroy** path had the
+same hole — worse, since a failed real destroy is the orphaned-billing
+case. Layer 2 solved this long ago in `mockDeployFailureDetail`; the
+shared `stderrFailureDetail` helper now backs all four paths. ADR-0023
+amended: fail-closed is necessary but not sufficient — a guard that stops
+the run without saying why is half a guard.
+
+### Verification of the canary itself
+
+A fast green run is exactly what a false-green looks like, so run 2 was
+checked rather than trusted. Layer 2 and Layer 3 produced different state
+lineages and different resource ids; the Layer 3 project was absent from
+`GET /mock/state`; `plan-live.txt` showed the real two-resource plan; and
+a `--no-destroy` run left `infrafactory-block-paris` visible in the
+account via the real API until `reap` removed it. `run.json` records
+`layer3_enabled: true`.
+
+Account state after the arc: 3 projects (`default`, `openclaw`,
+`infrafactory`), one pre-existing 20GB `openclaw` volume, nothing else.
+Same as before it started.
+
+### Follow-ups (deliberately not taken here)
+
+1. **Bounded retry on Layer 3 apply** — one attempt, tainted-state-aware.
+   The direct fix for the D1 transient. Top of the list.
+2. **No orphan sweep on the auto-destroy-on-failure path.**
+   `run_command.go` destroys real resources when a run fails, but does
+   not then sweep, so the cleanup most likely to leave orphans is the one
+   path that never verifies it did. Left alone deliberately: it is a
+   design question (should a failed run also fail on an unverifiable
+   sweep?) worth the user's call, not an autonomous edit to the
+   real-money path.
+3. **`lb-paris` as probe canary** — the real-probe path
+   (`connectivity` / `http_probe` / `dns_resolution`) is still unexercised
+   against real infrastructure. `block-paris` declares no probes. This is
+   the designated next-arc opener.
+
+### PRs
+
+15 across two repos: infrafactory #136–#147 + mockway #21.
+
 ## 2026-06-11 testify-conversion cross-repo sweep
 
 Project-wide refactor: every Go test in `handlers/` packages across the four sibling fakes now uses `github.com/stretchr/testify` assertions where possible, replacing the older `if x != y { t.Fatalf(...) }` stdlib pattern. Rule codified in each repo's AGENTS.md (the 5-PR AGENTS sweep earlier today) and the user's global `~/.claude/CLAUDE.md` "Testing (Go)" section.
