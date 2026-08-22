@@ -192,6 +192,45 @@ Self-managed project lifecycle per ADR-0010: generated HCL includes `scaleway_ac
 - Real-vs-mock behavioural deltas live in `docs/layer3-real-vs-mock-deltas.md`. Real Scaleway can return a create error *after* the resource exists; apply retries once (`sandboxApplyAttempts`) to absorb it, never on a cancelled context.
 - A **failed** run auto-destroys and then sweeps to prove it worked. If the sweep cannot confirm the account is clean, the failure detail names `infrafactory reap <scenario>` — act on it, don't assume the destroy was enough.
 
+## Codex review loop (required on every PR)
+
+Every PR gets a codex review loop before merge. No exceptions, including
+docs-only and "obvious" changes.
+
+```bash
+codex exec review --base main      # from the PR branch
+```
+
+`--base` cannot be combined with a custom prompt, so run the default review
+and apply the triage yourself.
+
+**Triage.** Codex produces real correctness findings and endless style
+nitpicks; act only on the former.
+
+- **Act on**: correctness bugs, safety regressions (anything that could leave
+  real cloud resources uncleaned or make a check report clean when it is not),
+  missing test coverage that hides a behavioural assumption, error/stderr
+  propagation, auth and wire-shape defects.
+- **Push back on**: "could be more idiomatic", renaming suggestions, comment
+  rewording, repeat findings on patterns that match the sibling fakes'
+  conventions, and tests that would pin behaviour we would accept changing.
+
+Pushing back is a real option — record the finding and the rationale rather
+than implementing it to make the reviewer quiet.
+
+**Convergence**: **two consecutive passes with no substantive findings.** A
+pass containing a substantive finding resets the counter, so a fix is always
+followed by at least two more passes. Only then may the PR merge.
+
+**Record every loop** in `docs/review-passes/passN.md`: each finding, its
+severity, and accepted-vs-declined with the reasoning. Future readers need to
+see why something was declined, not just that it was.
+
+Worked example: `docs/review-passes/pass1.md` (Layer 3 arc, converged in 5
+passes). Both of its findings were in the operator-facing recovery string
+rather than the logic that had tests — a useful reminder of where this loop
+earns its keep.
+
 ## Secrets
 - Never commit `.env`, credentials, API keys, or private keys.
 - `.gitignore` blocks common secret files (`.env`, `credentials.json`, `*.pem`, `*.key`).

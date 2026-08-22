@@ -71,9 +71,27 @@ so the common case stays short.
 This reset the convergence counter: pass 3 had a substantive finding, so two
 further clean passes are required.
 
+## Passes 4 and 5 — clean, CONVERGED
+
+Both returned no actionable findings. Two consecutive clean passes, so the
+loop is converged and the PR is mergeable.
+
+> Pass 4: "I did not identify any discrete, actionable regressions in the
+> changed code. The new Layer 3 cleanup verification, retry reporting, and
+> stderr surfacing paths are covered by focused tests."
+
 ## Outcome
 
-Passes 1–3: 2 findings, both accepted, 0 declined. Notably **zero nitpicks** —
+Passes 1–5: 2 findings, both accepted, 0 declined. Notably **zero nitpicks** —
 the anti-nitpick filter did not have to reject anything, which is unusual and
 suggests the prompt scope (real-money safety paths) kept the reviewer on
 target.
+
+Both findings were in the *same* place, and it is the place a human reviewer
+would be least likely to look: not the retry loop or the sweep logic, which
+have tests and got the attention, but the **operator-facing recovery string**.
+Neither breaks a test; both would have broken the cleanup at the exact moment
+it was needed. Worth remembering that the failure mode of a safety feature can
+be in the message rather than the mechanism.
+
+**Convergence: 5 passes** (finding, clean, finding, clean, clean).
