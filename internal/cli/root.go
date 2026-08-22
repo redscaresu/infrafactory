@@ -76,6 +76,7 @@ func NewRootCmd(opts ...RootOption) *cobra.Command {
 		newValidateCmd(cfg),
 		newTestCmd(cfg),
 		newRunCmd(cfg),
+		newReapCmd(cfg),
 		newMockCmd(cfg),
 		newUICmd(cfg.uiAssets),
 	)
@@ -181,6 +182,22 @@ func newTestCmd(cfg *rootConfig) *cobra.Command {
 	}
 
 	cmd.Flags().Bool("no-destroy", false, "Skip destruction after a successful test run to preserve state for incremental follow-up runs")
+
+	return cmd
+}
+
+// newReapCmd tears down real Scaleway resources an interrupted Layer 3
+// run left behind. Separate from `test`/`run` because by definition it
+// is used when those did not get to finish.
+func newReapCmd(cfg *rootConfig) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "reap <scenario>",
+		Short: "Destroy real Scaleway resources left behind by an interrupted Layer 3 run",
+		Args:  requireScenarioArg,
+		RunE:  cfg.withRuntime("reap", runReapCommand),
+	}
+
+	cmd.Flags().Bool("dry-run", false, "Report what would be destroyed without destroying it")
 
 	return cmd
 }
