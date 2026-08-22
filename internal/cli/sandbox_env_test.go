@@ -26,6 +26,12 @@ func sandboxTestRuntime() *CommandRuntime {
 	}}
 }
 
+func sandboxTestRuntimeWithFallback(projectID string) *CommandRuntime {
+	rt := sandboxTestRuntime()
+	rt.Config.Scaleway.FallbackProjectID = projectID
+	return rt
+}
+
 func withSandboxCredentials(t *testing.T) {
 	t.Helper()
 	t.Setenv("SCW_ACCESS_KEY", "SCWTESTACCESSKEY0000")
@@ -227,4 +233,51 @@ func sandboxCredsForTest(t *testing.T) {
 	t.Setenv("SCW_ACCESS_KEY", "real-access")
 	t.Setenv("SCW_SECRET_KEY", "real-secret")
 	t.Setenv("SCW_DEFAULT_ORGANIZATION_ID", "22222222-2222-2222-2222-222222222222")
+}
+
+// A resource whose HCL omits project_id does not fail -- it lands in
+// whatever the provider resolves as the default project, which on a
+// normal account is the organization default, next to real
+// infrastructure. Pointing the default at a dedicated throwaway project
+// contains that. Detection stays with the orphan sweep; this is
+// containment.
+func TestSandboxEnvPinsFallbackProject(t *testing.T) {
+	isolateSCWConfig(t)
+	withSandboxCredentials(t)
+
+	env, err := sandboxCommandEnv(sandboxTestRuntimeWithFallback("2397e80e-ec12-4a7e-819f-a2caba3867b6"))
+	if err != nil {
+		t.Fatalf("sandboxCommandEnv: %v", err)
+	}
+	if env["SCW_DEFAULT_PROJECT_ID"] != "2397e80e-ec12-4a7e-819f-a2caba3867b6" {
+		t.Fatalf("fallback project not pinned, got %q", env["SCW_DEFAULT_PROJECT_ID"])
+	}
+}
+
+func TestSandboxEnvRejectsOrgAsFallbackProject(t *testing.T) {
+	isolateSCWConfig(t)
+	withSandboxCredentials(t)
+
+	// The org id IS the default project's id. Accepting it would make the
+	// setting a no-op while looking configured.
+	_, err := sandboxCommandEnv(sandboxTestRuntimeWithFallback("22222222-2222-2222-2222-222222222222"))
+	if err == nil {
+		t.Fatal("the organization default project must be refused as a fallback target")
+	}
+	if !strings.Contains(err.Error(), "fallback_project_id") {
+		t.Fatalf("error should name the setting, got: %v", err)
+	}
+}
+
+func TestSandboxEnvOmitsProjectWhenNoFallbackConfigured(t *testing.T) {
+	isolateSCWConfig(t)
+	withSandboxCredentials(t)
+
+	env, err := sandboxCommandEnv(sandboxTestRuntime())
+	if err != nil {
+		t.Fatalf("sandboxCommandEnv: %v", err)
+	}
+	if _, ok := env["SCW_DEFAULT_PROJECT_ID"]; ok {
+		t.Fatal("with no fallback configured the provider default must be left alone")
+	}
 }

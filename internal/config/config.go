@@ -113,6 +113,22 @@ type ScalewayConfig struct {
 	// the scenarios/training/*-paris.yaml naming.
 	Region string `yaml:"region"`
 	Zone   string `yaml:"zone"`
+	// FallbackProjectID owns any Layer 3 resource whose HCL omits
+	// project_id.
+	//
+	// ADR-0010 has each run create its own project, but a generated
+	// resource that forgets to reference it does not fail -- it silently
+	// lands in whatever the provider resolves as the default project,
+	// which for a normal Scaleway account is the organization's `default`
+	// project, sitting alongside whatever else lives there. Pointing the
+	// default at a dedicated throwaway project instead means a stray is
+	// contained somewhere disposable rather than mixed in with real
+	// infrastructure.
+	//
+	// This is containment, not detection: the sweep still reports strays
+	// as leaks (harness.strayResourceFailures). Empty means "leave the
+	// provider default alone", which preserves the old behaviour.
+	FallbackProjectID string `yaml:"fallback_project_id"`
 }
 
 type ValidationConfig struct {
