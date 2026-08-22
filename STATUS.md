@@ -13,6 +13,8 @@ Deltas in `docs/layer3-real-vs-mock-deltas.md`. Close-out in `docs/status/ARCHIV
 
 **Layer 3 follow-ups now closed** (post-arc). A failed run no longer just destroys and hopes: it captures the sweep target before destroy and sweeps afterwards, and any failure raised while real resources may still exist carries `infrafactory reap <scenario>` in its detail, where the operator actually reads it. Apply also retries once — bounded, surfaced as `succeeded on attempt 2`, and never on a cancelled context, so the interrupt guard still holds.
 
+Codex review loop now runs on every PR (2 consecutive clean passes to converge; passes recorded in `docs/review-passes/`). Pass 1 on the arc caught one real defect: the `infrafactory reap` recovery hint was not shell-quoted, so a scenario path containing a space produced a command that would not run.
+
 **Next-arc opener**: `lb-paris` as probe canary — the real-probe path is still unexercised against real infrastructure. Costs materially more than the block canary (a load balancer plus its IP), so scope it deliberately.
 
 ## Recent arcs

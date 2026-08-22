@@ -7,10 +7,12 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/redscaresu/infrafactory/internal/config"
 	"github.com/redscaresu/infrafactory/internal/feedback"
 	"github.com/redscaresu/infrafactory/internal/generator"
 	"github.com/redscaresu/infrafactory/internal/harness"
@@ -718,7 +720,7 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 						RunID:   runID,
 						Detail:  destroyErr.Error(),
 					})
-					annotateWithRecoveryCommand(destroyFailures, scenarioPath)
+					annotateWithRecoveryCommand(destroyFailures, runtime.ConfigPath, scenarioPath)
 					allFailures = append(allFailures, destroyFailures...)
 					logLayer3RecoveryHint(runtime, runID, scenarioPath, "auto-destroy failed")
 				} else {
@@ -739,7 +741,7 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 					allStages, allFailures = appendOrphanSweepResult(
 						cmd.Context(), allStages, allFailures, runtime, sweepTarget, sweepTargetErr, sandboxEnv)
 					if len(allFailures) > failuresBeforeSweep {
-						annotateWithRecoveryCommand(allFailures[failuresBeforeSweep:], scenarioPath)
+						annotateWithRecoveryCommand(allFailures[failuresBeforeSweep:], runtime.ConfigPath, scenarioPath)
 						logLayer3RecoveryHint(runtime, runID, scenarioPath,
 							"orphan sweep did not confirm the account is clean")
 					}
@@ -1354,6 +1356,25 @@ func postMockReset(ctx context.Context, baseURL string) error {
 
 var mockResetClient = &http.Client{Timeout: 10 * time.Second}
 
+// shellSafeArgRE matches the characters a POSIX shell passes through
+// untouched, so an already-safe path is printed as-is.
+var shellSafeArgRE = regexp.MustCompile(`^[A-Za-z0-9_@%+=:,./-]+$`)
+
+// shellQuote makes a path safe to paste into a shell.
+//
+// The recovery command is only worth printing if it actually runs, and
+// this one is read at the worst possible moment -- a failed run that may
+// have left real resources billing. A scenario path under a directory
+// with a space would otherwise be split by the shell and the cleanup
+// would not happen. Safe paths are left unquoted so the common case
+// stays easy to read.
+func shellQuote(s string) string {
+	if s != "" && shellSafeArgRE.MatchString(s) {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
 // annotateWithRecoveryCommand appends the exact cleanup invocation to
 // failures raised while real resources may still exist.
 //
@@ -1361,11 +1382,28 @@ var mockResetClient = &http.Client{Timeout: 10 * time.Second}
 // because the failure list is what the operator reads in the terminal the
 // moment the run stops -- and the alternative to reading it there is
 // finding out from a bill.
-func annotateWithRecoveryCommand(failures []FailureSummary, scenarioPath string) {
+func annotateWithRecoveryCommand(failures []FailureSummary, configPath, scenarioPath string) {
 	for i := range failures {
 		failures[i].Detail = strings.TrimSpace(strings.TrimSpace(failures[i].Detail) +
-			fmt.Sprintf(" | real Scaleway resources may still exist: run `infrafactory reap %s` to tear them down and verify", scenarioPath))
+			fmt.Sprintf(" | real Scaleway resources may still exist: run `%s` to tear them down and verify",
+				reapCommand(configPath, scenarioPath)))
 	}
+}
+
+// reapCommand renders the exact cleanup invocation for this run.
+//
+// It has to reproduce the run's own configuration, not just its scenario.
+// `reap` rebuilds its runtime from --config, and a Layer 3 run commonly
+// uses a non-default config with its own paths.output. A hint that drops
+// the flag sends the operator to the default output directory, where reap
+// finds no live state and cheerfully reports nothing to do -- while the
+// real resources keep billing somewhere else.
+func reapCommand(configPath, scenarioPath string) string {
+	cmd := "infrafactory"
+	if trimmed := strings.TrimSpace(configPath); trimmed != "" && trimmed != config.DefaultPath {
+		cmd += " --config " + shellQuote(trimmed)
+	}
+	return cmd + " reap " + shellQuote(scenarioPath)
 }
 
 // logLayer3RecoveryHint names the exact command that cleans up after a
@@ -1383,7 +1421,7 @@ func logLayer3RecoveryHint(runtime *CommandRuntime, runID, scenarioPath, reason 
 		Event:   "layer3_cleanup_unverified",
 		Status:  "failed",
 		RunID:   runID,
-		Detail: fmt.Sprintf("%s: real Scaleway resources may still exist; run `infrafactory reap %s` to tear them down and verify",
-			reason, scenarioPath),
+		Detail: fmt.Sprintf("%s: real Scaleway resources may still exist; run `%s` to tear them down and verify",
+			reason, reapCommand(runtime.ConfigPath, scenarioPath)),
 	})
 }

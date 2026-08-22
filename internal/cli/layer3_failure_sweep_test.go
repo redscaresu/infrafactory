@@ -115,9 +115,7 @@ func TestFailedRunReportsUnverifiableSweepWithRecoveryCommand(t *testing.T) {
 	if !strings.Contains(out, "no such host") {
 		t.Errorf("run did not say why the sweep could not verify:\n%s", out)
 	}
-	if !strings.Contains(out, "infrafactory reap") {
-		t.Errorf("run did not name the recovery command:\n%s", out)
-	}
+	assertNamesReapCommand(t, out)
 }
 
 // A failed destroy is the orphaned-billing case. Don't sweep after it (there
@@ -137,7 +135,21 @@ func TestFailedRunSkipsSweepButHintsWhenAutoDestroyFails(t *testing.T) {
 	if sweep.calls != 0 {
 		t.Fatalf("got %d sweep calls after a failed destroy, want 0", sweep.calls)
 	}
-	if !strings.Contains(out, "infrafactory reap") {
-		t.Errorf("failed destroy did not name the recovery command:\n%s", out)
+	assertNamesReapCommand(t, out)
+}
+
+// assertNamesReapCommand checks the run printed a cleanup command the
+// operator can actually paste. These runs use a non-default --config, so
+// the hint must carry it: reap rebuilds its runtime from that flag, and
+// without it the operator is sent to the default output directory where
+// reap finds no live state and reports nothing to do.
+func assertNamesReapCommand(t *testing.T, out string) {
+	t.Helper()
+	if !strings.Contains(out, " reap ") {
+		t.Errorf("run did not name the recovery command:\n%s", out)
+		return
+	}
+	if !strings.Contains(out, "--config") {
+		t.Errorf("recovery command dropped the run's --config, so reap would look in the wrong output dir:\n%s", out)
 	}
 }
