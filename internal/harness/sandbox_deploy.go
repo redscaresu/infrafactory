@@ -50,14 +50,34 @@ type SandboxDeployResult struct {
 	Init  StageResult
 	Plan  StageResult
 	Apply StageResult
+	// Attempts counts how many times apply ran. >1 means a retry
+	// happened, which the stage summary surfaces -- a silent retry
+	// would hide a real API flapping.
+	Attempts int
 }
+
+// sandboxApplyAttempts bounds how many times a Layer 3 apply is tried.
+//
+// Real Scaleway can return an error *after* the resource exists, leaving
+// it tainted with its computed fields unset; a second apply replaces the
+// tainted resource and succeeds. That is exactly what the S143 run 2
+// canary hit, and with no retry a single API blip fails an otherwise
+// correct run -- and under `infrafactory run` burns a repair iteration
+// teaching the LLM nothing, because the HCL was fine.
+//
+// One retry, not more. A genuinely broken plan should fail fast rather
+// than bill for every attempt.
+const sandboxApplyAttempts = 2
 
 type SandboxDeployError struct {
 	Stage string
-	Init  StageResult
-	Plan  StageResult
-	Apply StageResult
-	Err   error
+	// Attempts is how many times the failing stage ran. Only apply
+	// retries, so this is 1 for every other stage.
+	Attempts int
+	Init     StageResult
+	Plan     StageResult
+	Apply    StageResult
+	Err      error
 }
 
 func (e *SandboxDeployError) Error() string {
@@ -131,26 +151,44 @@ func (h *SandboxDeployHarness) Run(ctx context.Context, workDir string, env map[
 		Env:      env,
 		StripEnv: SandboxStripEnv,
 	}
-	applyResult, err := h.runner.Run(ctx, applyCmd)
-	applyStage := StageResult{
-		Stage:  "apply",
-		Cmd:    []string{"tofu", "apply", "-auto-approve", "-state=" + LiveStateFilename},
-		Stdout: string(applyResult.Stdout),
-		Stderr: string(applyResult.Stderr),
+	var applyStage StageResult
+	attempts := 0
+	for attempts < sandboxApplyAttempts {
+		attempts++
+		var applyResult CommandResult
+		applyResult, err = h.runner.Run(ctx, applyCmd)
+		applyStage = StageResult{
+			Stage:  "apply",
+			Cmd:    []string{"tofu", "apply", "-auto-approve", "-state=" + LiveStateFilename},
+			Stdout: string(applyResult.Stdout),
+			Stderr: string(applyResult.Stderr),
+		}
+		if err == nil {
+			break
+		}
+		// Never retry a cancelled run. On the interrupt path the whole
+		// point is to stop touching the API and get to destroy, so a
+		// retry here would create exactly what the operator asked us to
+		// stop creating.
+		if ctx.Err() != nil {
+			break
+		}
 	}
 	if err != nil {
 		return nil, &SandboxDeployError{
-			Stage: "apply",
-			Init:  initStage,
-			Plan:  planStage,
-			Apply: applyStage,
-			Err:   err,
+			Stage:    "apply",
+			Init:     initStage,
+			Plan:     planStage,
+			Apply:    applyStage,
+			Attempts: attempts,
+			Err:      err,
 		}
 	}
 
 	return &SandboxDeployResult{
-		Init:  initStage,
-		Plan:  planStage,
-		Apply: applyStage,
+		Init:     initStage,
+		Plan:     planStage,
+		Apply:    applyStage,
+		Attempts: attempts,
 	}, nil
 }

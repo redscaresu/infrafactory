@@ -189,7 +189,8 @@ Self-managed project lifecycle per ADR-0010: generated HCL includes `scaleway_ac
 - The sandbox subprocess environment is *sealed*, not merely overridden (`harness.SandboxStripEnv`). An inherited `SCW_API_URL` cannot retarget a "real" apply at mockway — that false-green was the arc's opening blocker.
 - `infrafactory reap <scenario>` destroys what an interrupted run left behind, gated by `AssertProjectDeletable` and verified by the same real-API sweep. A reap that cannot prove the account is clean fails.
 - Layer 3 stays opt-in and off by default, and must never be wired into a scheduled CI job (cost-sensitive-CI standing rule).
-- Real-vs-mock behavioural deltas live in `docs/layer3-real-vs-mock-deltas.md`. Layer 3 has no retry, so a transient API error fails an otherwise-correct run.
+- Real-vs-mock behavioural deltas live in `docs/layer3-real-vs-mock-deltas.md`. Real Scaleway can return a create error *after* the resource exists; apply retries once (`sandboxApplyAttempts`) to absorb it, never on a cancelled context.
+- A **failed** run auto-destroys and then sweeps to prove it worked. If the sweep cannot confirm the account is clean, the failure detail names `infrafactory reap <scenario>` — act on it, don't assume the destroy was enough.
 
 ## Secrets
 - Never commit `.env`, credentials, API keys, or private keys.
