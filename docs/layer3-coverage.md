@@ -130,10 +130,18 @@ and are the basis of this table.
 ## Refreshing this
 
 ```bash
-# resource types per scenario, from real generated HCL
+# Resource types per scenario, from real generated HCL.
+# Scans BOTH the final snapshot and per-iteration snapshots: a scenario that
+# converged on iteration 3 still generated -- and would have applied -- the
+# types from iterations 1 and 2. compute-lb-multi-paris emits
+# scaleway_ipam_ip only in an iteration snapshot, and web-app-paris does the
+# same for its VPC gateway resources, so scanning only generated/*.tf drops
+# real blockers.
 for s in $(grep -l 'cloud: scaleway' scenarios/training/*.yaml | xargs -n1 basename | sed 's/.yaml//'); do
-  echo "$s: $(grep -ho 'resource "[a-z0-9_]*"' .infrafactory/runs/$s/*/generated/*.tf 2>/dev/null \
-    | sort -u | tr '\n' ' ')"
+  echo "$s: $(grep -ho 'resource "[a-z0-9_]*"' \
+    .infrafactory/runs/$s/*/generated/*.tf \
+    .infrafactory/runs/$s/*/iterations/*/generated/*.tf 2>/dev/null \
+    | sed 's/resource "//;s/"//' | sort -u | tr '\n' ' ')"
 done
 ```
 
