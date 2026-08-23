@@ -82,4 +82,16 @@ The canary demonstrated it rather than arguing it: `scaleway_account_project` an
 
 Note what did work, on first real use: the failure arrived as `insufficient permissions: read loadbalancer` rather than `exit status 1`, and the retry reported `failed 2 attempts, so not a transient blip`. Both landed the previous day and both paid for themselves here.
 
+**Amendment — the credential is part of the blast radius (2026-08-23).** Rules 3 and 4 bound what a run *does*; nothing bounded what its credential *could* do. Every Layer 3 run so far authenticated as `openclaw-terraform` — an API key belonging to the organization **owner**, with full rights over every project including the one holding live infrastructure. The sealed-environment rule made that inevitable rather than accidental: S139 strips `SCW_PROFILE` and `SCW_CONFIG_PATH` so a developer profile cannot redirect the endpoint, which also forces the *default* profile, and on this machine the default profile is the owner.
+
+So the entire "blast radius is one disposable project" guarantee rested on software: `AssertProjectDeletable`, the sweep, the allowlist. Correct code, but one bug away from reaching real infrastructure, with nothing behind it.
+
+Layer 3 now authenticates as a dedicated IAM **application** (`infrafactory-layer3`), never a user, with a policy granting `ProjectManager` plus only the allowlisted product families (`BlockStorageFullAccess`, `LoadBalancersFullAccess`, `VPCFullAccess`). Instances, IAM, registry, serverless, object storage and billing are all absent, verified by probe: creating an Instance flexible IP, a registry namespace, or an IAM application all return 403, while an LB IP returns 200.
+
+That last point is what makes it defence in depth rather than decoration: `openclaw-prod` and its flexible IP are Instances resources, so a guardrail bug can no longer reach them **at all** — the API refuses before any of our checks run.
+
+Two limits worth stating rather than discovering later. Product permission sets are project-scoped and each run creates its own project, so the rules are organization-scoped to cover projects that do not exist yet; the key can therefore still act on block/LB/VPC resources in *existing* projects. And `scaleway_iam*` and `scaleway_registry_namespace` remain in the default allowlist but will now fail — deliberately, since a sandbox that can mint IAM credentials is not a sandbox.
+
+Widening the policy is a cost-and-blast-radius decision, exactly like widening the allowlist, and belongs in the same review.
+
 **Enforcement**: the guards carry synthetic-drift coverage — removing `SCW_API_URL` from `SandboxStripEnv` fails three tests, verified before S139 merged. Following the project's "drift becomes failed `go test`" pattern.

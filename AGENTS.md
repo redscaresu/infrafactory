@@ -178,12 +178,23 @@ Layer 3 spends real money. It applies to `api.scaleway.com` — first proven end
 
 Self-managed project lifecycle per ADR-0010: generated HCL includes `scaleway_account_project`, so each run creates and destroys its own project. No pre-existing sandbox required, and that project-per-run is what keeps the blast radius to one disposable project.
 
-**User must provide:**
-1. An API key with **project-manager** rights (IAM → API Keys, organization-level). A resource-scoped key 403s on the very first resource.
-2. Env vars: `SCW_ACCESS_KEY`, `SCW_SECRET_KEY`, `SCW_DEFAULT_ORGANIZATION_ID`. The org id is **required** — a project has to be created somewhere — and preflight fails closed without it.
-3. Enable Layer 3: `validation.layers.sandbox_deploy.enabled: true` in `infrafactory.yaml`.
-4. `validation.layers.sandbox_deploy.allow_resource_types` — **deny-by-default**. Empty or absent denies everything. Checked after generation and before apply, so a denied type costs nothing.
-5. `scaleway.fallback_project_id` — a dedicated disposable project. A generated resource that omits `project_id` lands wherever the provider resolves the default, which on a normal account sits next to real infrastructure. Refused if set to the organization id.
+**Credentials — use the dedicated application key, not your own:**
+
+Layer 3 authenticates as the `infrafactory-layer3` IAM **application**, whose key lives in `~/.config/infrafactory/scw-layer3.env` (mode `0600`):
+
+```bash
+set -a; . ~/.config/infrafactory/scw-layer3.env; set +a
+```
+
+Do **not** fall back to the default `scw` profile. On a normal developer machine that is a personal key, and here it was the organization **owner** — full rights over every project, including live infrastructure. S139 strips `SCW_PROFILE`/`SCW_CONFIG_PATH` to stop a profile redirecting the endpoint, which also forces the default profile, so "just use the default profile" silently means "run as whoever that is".
+
+The application's policy grants `ProjectManager` plus only the allowlisted product families. Instances, IAM, registry, serverless and object storage are absent, so a guardrail bug cannot reach `openclaw-prod` — the API refuses first. Widening it is a blast-radius decision; see ADR-0023.
+
+**User must also provide:**
+1. `SCW_DEFAULT_ORGANIZATION_ID` — required, since a project has to be created somewhere. Preflight fails closed without it. (The env file above sets it.)
+2. Enable Layer 3: `validation.layers.sandbox_deploy.enabled: true` in `infrafactory.yaml`.
+3. `validation.layers.sandbox_deploy.allow_resource_types` — **deny-by-default**. Empty or absent denies everything. Checked after generation and before apply, so a denied type costs nothing.
+4. `scaleway.fallback_project_id` — a dedicated disposable project. A generated resource that omits `project_id` lands wherever the provider resolves the default, which on a normal account sits next to real infrastructure. Refused if set to the organization id.
 
 **Operational notes:**
 - The sandbox subprocess environment is *sealed*, not merely overridden (`harness.SandboxStripEnv`). An inherited `SCW_API_URL` cannot retarget a "real" apply at mockway — that false-green was the arc's opening blocker.

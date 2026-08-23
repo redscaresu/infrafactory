@@ -86,7 +86,7 @@ Both carry synthetic-drift coverage. ADR-0023 amended with the reasoning.
 
 ### Setup, if you need to run Layer 3 again
 
-- **Credentials**: `~/.config/scw/config.yaml` default profile. Export `SCW_ACCESS_KEY` / `SCW_SECRET_KEY` / `SCW_DEFAULT_ORGANIZATION_ID` from it — read the **top-level** keys, not the `myProfile:` block, whose `api_url` points elsewhere.
+- **Credentials**: `set -a; . ~/.config/infrafactory/scw-layer3.env; set +a`. This is the dedicated `infrafactory-layer3` IAM application. **Do not use the `scw` default profile** — that is the org owner's `openclaw-terraform` key, which every Layer 3 run used until 2026-08-23 and which can reach live infrastructure. See ADR-0023's credential amendment.
 - **Config**: `/tmp/l3run/infrafactory.yaml` (ephemeral; recreate if gone). Needs `constraint_policies` mapped to **absolute** policy paths or `mock_deploy/state_policy` fails.
 - **mockway must be running** on :8080 built from current main: `go -C ../mockway build -o /tmp/mockway ./cmd/mockway && /tmp/mockway --port 8080 &`
 - Layer 3 artifacts land in `.infrafactory/runs/<scenario>/<run_id>/` (git-ignored) — `plan-live.txt` and `run.json` (`layer3_enabled`) are the ones worth reading.
