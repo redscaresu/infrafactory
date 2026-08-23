@@ -125,3 +125,31 @@ mock usually gets wrong; mockway already matched it.
 Real `init → plan → apply → destroy → sweep` for one project plus one
 volume completes in about 9 seconds. Fast enough that Layer 3 latency is
 not a reason to keep the canary scope narrow — cost is.
+
+## D4 — Real probes work; the credential surface is wider than block storage
+
+From the `lb-paris` probe canary (2026-08-23), the first exercise of the
+real-probe path against anything but a mock.
+
+The path itself is sound: `connectivity` resolved the load balancer's
+public IP out of `terraform-live.tfstate` (`scaleway_lb_ip` →
+`ip_address`) and opened a TCP connection to it from the machine running
+the harness. That is the whole chain the probe layer exists for, and it had
+never run for real before.
+
+Two things a mock cannot tell you:
+
+- **IAM is per-service.** A key that creates projects and block volumes
+  happily can still fail with
+  `scaleway-sdk-go: insufficient permissions: read loadbalancer`. mockway
+  authorises everything, so credential scope is invisible until Layer 3
+  touches a new service. Expect to widen the key's policy once per service
+  the suite grows into, and expect the first failure to look like a code
+  bug.
+- **`http_probe` needs something behind the load balancer.** `expect:
+  reachable` requires an HTTP status below 400, and a Scaleway LB with an
+  empty backend answers 503. `lb-paris` declares no compute, so it asserts
+  `connectivity` (TCP) instead — the strongest claim the scenario can
+  honestly make. Upgrading to `http_probe` means adding a backend that
+  serves, which means `scaleway_instance_server`, which is deliberately
+  outside the allowlist.

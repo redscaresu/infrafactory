@@ -76,4 +76,10 @@ Two bounds keep this from weakening the guarantees above. It is **one** retry, n
 
 **Amendment — the recovery command must be pasteable (codex review pass 1).** The `infrafactory reap <scenario>` hint added above is only worth printing if it actually runs. Scenario paths are interpolated into a shell command the operator copies at the moment real resources may be billing, so they are shell-quoted (`shellQuote`, standard shlex algorithm) rather than concatenated. Already-safe paths stay unquoted so the line remains easy to scan under stress. Verified by round-tripping paths containing spaces, quotes and metacharacters through `/bin/sh`.
 
+**Amendment — clean up after a failed apply, not only a successful one (2026-08-23, from the lb-paris probe canary).** The sweep-on-failure amendment above fixed `run`. `test` kept the original gate: sandbox destroy and sweep ran only when the apply had **succeeded**. That is backwards. `tofu` creates resources one at a time and writes each to state as it goes, so an apply that dies partway is precisely the case that has left real infrastructure behind.
+
+The canary demonstrated it rather than arguing it: `scaleway_account_project` and `scaleway_lb_ip` were created, the next call failed on an API permission error, cleanup was skipped because the apply had not succeeded, and a real project plus a real load-balancer IP billed until they were reaped by hand. Cleanup is now gated on the sandbox layer having **run**, not on it having worked.
+
+Note what did work, on first real use: the failure arrived as `insufficient permissions: read loadbalancer` rather than `exit status 1`, and the retry reported `failed 2 attempts, so not a transient blip`. Both landed the previous day and both paid for themselves here.
+
 **Enforcement**: the guards carry synthetic-drift coverage — removing `SCW_API_URL` from `SandboxStripEnv` fails three tests, verified before S139 merged. Following the project's "drift becomes failed `go test`" pattern.

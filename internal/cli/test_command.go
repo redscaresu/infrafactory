@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -515,7 +516,9 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 	deployResult, deployErr := runtime.Deps.MockDeploy.Run(ctx, outputDir, env, deployMode)
 	stages, failures = appendMockDeployResult(stages, failures, deployResult, deployErr)
 	sandboxEnabled := runtime.Config.Validation.Layers.SandboxDeploy.Enabled
-	sandboxSucceeded := false
+	// sandboxAttempted records that a real apply was issued, so cleanup
+	// runs even when that apply failed partway and left resources behind.
+	sandboxAttempted := false
 	if deployErr == nil && sandboxEnabled {
 		sandboxEnv, sandboxEnvErr := sandboxCommandEnv(runtime)
 		if sandboxEnvErr != nil {
@@ -539,9 +542,9 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 				Status: StageStatusPass,
 				Detail: "credentials present; endpoint asserted as " + realScalewayAPIURL,
 			})
+			sandboxAttempted = true
 			sandboxResult, sandboxErr := runtime.Deps.SandboxDeploy.Run(ctx, outputDir, sandboxEnv)
 			stages, failures = appendSandboxDeployResult(stages, failures, sandboxResult, sandboxErr)
-			sandboxSucceeded = sandboxErr == nil
 			if sandboxResult != nil && len(sandboxResult.Plan.Stdout) > 0 {
 				planLiveText = []byte(sandboxResult.Plan.Stdout)
 			} else if sandboxErr != nil {
@@ -559,7 +562,20 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 
 		destroyResult, destroyErr := runtime.Deps.Destroy.Run(ctx, outputDir, env)
 		stages, failures = appendDestroyResult(stages, failures, destroyResult, destroyErr)
-		if sandboxEnabled && sandboxSucceeded {
+		// Clean up whenever real resources MIGHT exist, not only when the
+		// apply succeeded. tofu creates resources one at a time and writes
+		// each to state as it goes, so an apply that dies partway is
+		// precisely the case that has left infrastructure behind -- the
+		// lb-paris canary leaked a real project and load-balancer IP
+		// exactly this way, because cleanup was gated on success.
+		//
+		// The live state file is the evidence, which is why it is the gate
+		// rather than the attempt: a failure in init or plan happens
+		// before any resource exists and writes no live state, so cleaning
+		// up there would destroy nothing and then report an unverifiable
+		// sweep, telling the operator to chase a leak that cannot exist.
+		// run_command.go uses the same signal.
+		if sandboxEnabled && sandboxAttempted && liveStateMayHoldResources(outputDir) {
 			sandboxEnv, sandboxEnvErr := sandboxCommandEnv(runtime)
 			if sandboxEnvErr != nil {
 				stages = append(stages, StageSummary{Layer: "sandbox_deploy", Stage: "destroy_preflight", Status: StageStatusFail})
@@ -615,6 +631,37 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 	}
 
 	return result, nil
+}
+
+// liveStateMayHoldResources reports whether Layer 3 state might still
+// describe real infrastructure.
+//
+// It fails CLOSED: it answers true unless it can positively prove
+// otherwise. The one case it can be sure about is a state that parses
+// cleanly and records no resources -- which is exactly what a successful
+// destroy leaves behind, and treating that as "resources may exist" turns
+// a clean teardown into a spurious leak warning on the next pre-apply
+// failure.
+//
+// Everything else gets cleanup. An unreadable or unparseable state means
+// we cannot tell what is out there, and "we cannot tell" must never look
+// like "nothing is there" on a path that spends real money.
+func liveStateMayHoldResources(outputDir string) bool {
+	raw, err := os.ReadFile(filepath.Join(outputDir, harness.LiveStateFilename))
+	if err != nil {
+		// Absence is the ONLY read error that means "nothing was applied".
+		// A permissions or I/O error means the file is there and we cannot
+		// read it, which is the definition of not knowing -- and on this
+		// path not knowing must never be mistaken for a clean account.
+		return !os.IsNotExist(err)
+	}
+	var state struct {
+		Resources []json.RawMessage `json:"resources"`
+	}
+	if err := json.Unmarshal(raw, &state); err != nil {
+		return true
+	}
+	return len(state.Resources) > 0
 }
 
 // realScalewayAPIURL is the only endpoint a Layer 3 apply may target.
