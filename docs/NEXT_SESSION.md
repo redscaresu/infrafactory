@@ -48,7 +48,22 @@ Pattern: convention as code, not convention as doc. Each is empty-state-safe (ze
 
 Full close-out: `docs/status/ARCHIVE.md` § "2026-06-10 fakegenesys v0.2 hardening".
 
-## Last arc — CLOSED, nothing outstanding
+## ACTIVE ARC — read first
+
+### `docs/plans/presentable-arc-plan.md` (S144–S150) — make infrafactory demonstrable on stage
+
+Driver: a conference talk with a **live PR-gate demo**, 2–6 weeks out. The arc is scoped by what the talk must be able to show.
+
+Start at **S144** — it is the spine and the demo. Everything else is supporting evidence.
+
+Two decisions already taken, so do not re-litigate them:
+
+- **Keep the LLM out of the live path.** Generation is 40–60s with real variance; the S143 canary hit a transport failure mid-run. Record that half of the story, run the verification half live.
+- **`InstancesFullAccess` was granted 2026-08-23** to allow a backend behind the load balancer. `openclaw-prod` is now protected by software, not by the API. See ADR-0023.
+
+Read `docs/layer3-coverage.md` before proposing any expansion — the cheap pool is empty and every widening is a costed decision.
+
+## Previous arc — CLOSED, nothing outstanding
 
 ### `docs/plans/layer3-real-scaleway-plan.md` (S139–S143). Layer 3 is done and proven.
 
