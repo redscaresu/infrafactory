@@ -32,15 +32,24 @@ updates:
           - "*"
         # Exclude major bumps from the group so they get individual
         # review PRs (vite 7→8 / sveltekit 2→3 etc. are M76-class).
+        #
+        # typescript joined this list on 2026-08-23. Dependabot grouped
+        # typescript 5.9.3 → 7.0.2 with four harmless patch bumps, and
+        # @sveltejs/kit peers on `typescript: ^5.3.3 || ^6.0.0`, so
+        # `npm ci` died with ERESOLVE and took the whole group down with
+        # it (#130). One major poisoning four safe bumps is exactly what
+        # this exclude list exists to prevent.
         exclude-patterns:
           - "vite"
           - "@sveltejs/kit"
           - "svelte"
+          - "typescript"
       ui-majors:
         patterns:
           - "vite"
           - "@sveltejs/kit"
           - "svelte"
+          - "typescript"
         update-types:
           - "major"
 
