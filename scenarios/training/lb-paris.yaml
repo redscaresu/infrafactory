@@ -20,5 +20,24 @@ acceptance_criteria:
     params:
       region: fr-par
     expect: pass
+  # The probe canary. Against real Scaleway this resolves the load
+  # balancer's public IP out of terraform-live.tfstate and opens a TCP
+  # connection to it from this machine -- the first time the real-probe
+  # path has been exercised against anything but a mock.
+  #
+  # Deliberately connectivity rather than http_probe: this scenario
+  # declares no compute, so the LB backend has no servers and Scaleway
+  # answers HTTP with 503. `expect: reachable` requires a status below
+  # 400, so an http_probe here would fail for a reason that says nothing
+  # about the probe path. A TCP connect proves what this scenario can
+  # honestly prove -- the frontend exists, holds a public address, and
+  # accepts connections from the internet. Upgrade to http_probe if this
+  # scenario ever grows a backend that serves.
+  - type: connectivity
+    from: public_internet
+    to: load_balancer
+    port: 80
+    expect: success
+    description: "The load balancer frontend must accept TCP from the internet"
   - type: destruction
     expect: no_orphans

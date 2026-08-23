@@ -345,6 +345,33 @@ func deriveConnectivity(state *rawMockState) map[string]bool {
 		}
 	}
 
+	// Public internet → load balancer, per frontend port.
+	//
+	// TCP reachability is a weaker claim than the http_probe entry derived
+	// above, and deliberately so: a frontend that has an IP accepts
+	// connections even when no backend server is attached. Real Scaleway
+	// completes the TCP handshake and then answers HTTP 503, which is why
+	// a scenario with no compute can assert `connectivity` but not
+	// `http_probe`. Requiring a backend here would make the mock disagree
+	// with the real API for exactly that case.
+	for _, frontend := range state.LB.Frontends {
+		lbID := jsonStr(frontend, "lb_id")
+		port := jsonInt(frontend["inbound_port"])
+		if lbID == "" || port == 0 {
+			continue
+		}
+		hasIP := false
+		for _, ip := range state.LB.IPs {
+			if jsonStr(ip, "lb_id") == lbID {
+				hasIP = true
+				break
+			}
+		}
+		if hasIP {
+			conn[connectivityKey("public_internet", "load_balancer", port)] = true
+		}
+	}
+
 	// Public internet → compute: check if any server has a public IP.
 	for _, ip := range state.Instance.IPs {
 		serverObj, ok := ip["server"].(map[string]any)
