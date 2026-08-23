@@ -1,6 +1,8 @@
 # Layer 3 coverage: which Scaleway scenarios can run against the real API
 
-Audit date: 2026-08-23. Derived from the **actually generated HCL** in
+Audit date: 2026-08-23. **Refreshed the same day** after
+`InstancesFullAccess` was added to the policy — see the credential
+amendments in ADR-0023. Derived from the **actually generated HCL** in
 `.infrafactory/runs/<scenario>/<run_id>/generated/*.tf`, not inferred from
 `mappings.yaml` — every one of the 16 Scaleway scenarios has prior run
 artifacts.
@@ -19,8 +21,8 @@ A scenario reaches the real API only if **both** allow it:
    `scaleway_vpc`, `scaleway_vpc_private_network`, `scaleway_lb*`,
    `scaleway_domain*`, `scaleway_iam*`, `scaleway_registry_namespace`.
 2. **The `infrafactory-layer3` IAM policy** — `ProjectManager`,
-   `BlockStorageFullAccess`, `LoadBalancersFullAccess`, `VPCFullAccess`.
-   Nothing else (ADR-0023, credential amendment).
+   `BlockStorageFullAccess`, `LoadBalancersFullAccess`, `VPCFullAccess`,
+   `InstancesFullAccess`. Nothing else (ADR-0023, credential amendments).
 
 They do not agree, deliberately. Three allowlisted families —
 `scaleway_iam*`, `scaleway_registry_namespace`, `scaleway_domain*` — pass the
@@ -33,22 +35,27 @@ if you do not know it; it is the credential doing its job.
 |---|---|---|---|
 | `block-paris` | **runnable** | instant | — (run 2026-08-22) |
 | `lb-paris` | **runnable** | hourly | — (run 2026-08-23) |
+| `incremental-project-paris` | **allowlist only** | hourly | allowlist: `instance_*` — the key already permits it |
 | `registry-paris` | key only | instant | Registry |
 | `iam-policies-paris` | key only | instant | IAM |
 | `public-registry-iam-paris` | key only | instant | IAM + Registry |
 | `domain-paris` | key only | instant | DomainsDNS **+ a registered domain** |
-| `compute-lb-multi-paris` | allowlist + key | hourly | Instances, IPAM |
-| `incremental-project-paris` | allowlist + key | hourly | Instances |
+| `compute-lb-multi-paris` | allowlist + key | hourly | IPAM; allowlist `instance_*`, `ipam_ip` |
 | `k8s-cluster-paris` | allowlist + key | slow + expensive | Kubernetes |
 | `k8s-medium-override-paris` | allowlist + key | slow + expensive | Kubernetes |
-| `mysql-ha-paris` | allowlist + key | slow + expensive | Instances + RDB |
-| `private-lb-db-paris` | allowlist + key | slow + expensive | Instances + RDB |
 | `redis-paris` | allowlist + key | slow + expensive | Redis |
-| `redis-xlarge-session-paris` | allowlist + key | slow + expensive | Instances + Redis |
-| `web-app-paris` | allowlist + key | slow + expensive | Instances, RDB, DomainsDNS, IPAM, VPCGateway |
-| `full-stack-paris` | allowlist + key | slow + expensive | IAM, Instances, K8s, RDB, Redis, Registry |
+| `redis-xlarge-session-paris` | allowlist + key | slow + expensive | Redis; allowlist `instance_*` |
+| `mysql-ha-paris` | allowlist + key | slow + expensive | RDB; allowlist `instance_*`, `rdb_*` |
+| `private-lb-db-paris` | allowlist + key | slow + expensive | RDB; allowlist `instance_*`, `rdb_*` |
+| `web-app-paris` | allowlist + key | slow + expensive | DomainsDNS, IPAM, RDB, VPCGateway |
+| `full-stack-paris` | allowlist + key | slow + expensive | IAM, Kubernetes, RDB, Redis, Registry |
 
-**2 runnable, 4 blocked by the key alone, 10 blocked by both.**
+**2 runnable, 1 blocked by the allowlist alone, 4 by the key alone, 9 by both.**
+
+`incremental-project-paris` is the one that moved when Instances was granted:
+the credential now permits it and only the deny-by-default allowlist stands in
+the way. That is the two-gate design working — granting a permission did not
+silently enable a scenario.
 
 Class is provisioning cost, not money: *instant* is seconds and negligible
 (project, block volume, VPC, registry namespace); *hourly* bills for as long as
