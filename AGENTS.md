@@ -188,7 +188,9 @@ set -a; . ~/.config/infrafactory/scw-layer3.env; set +a
 
 Do **not** fall back to the default `scw` profile. On a normal developer machine that is a personal key, and here it was the organization **owner** — full rights over every project, including live infrastructure. S139 strips `SCW_PROFILE`/`SCW_CONFIG_PATH` to stop a profile redirecting the endpoint, which also forces the default profile, so "just use the default profile" silently means "run as whoever that is".
 
-The application's policy grants `ProjectManager` plus only the allowlisted product families. Instances, IAM, registry, serverless and object storage are absent, so a guardrail bug cannot reach `openclaw-prod` — the API refuses first. Widening it is a blast-radius decision; see ADR-0023.
+The application's policy grants `ProjectManager`, `BlockStorageFullAccess`, `LoadBalancersFullAccess`, `VPCFullAccess` and — since 2026-08-23 — `InstancesFullAccess`. IAM, registry, serverless, object storage, domains and billing are absent.
+
+**Do not rely on the API to protect `openclaw-prod`.** It did until Instances was granted; it does not now. That project is protected by software again — the deny-by-default allowlist (which still excludes `scaleway_instance_*`), `AssertProjectDeletable`, the orphan sweep, and project-per-run. Two gates remain and only one moved, but treat the remaining ones as load-bearing rather than belt-and-braces. Widening either is a blast-radius decision; see ADR-0023.
 
 **User must also provide:**
 1. `SCW_DEFAULT_ORGANIZATION_ID` — required, since a project has to be created somewhere. Preflight fails closed without it. (The env file above sets it.)
