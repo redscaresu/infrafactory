@@ -83,18 +83,35 @@ and the expensive class the allowlist exists to keep out.
 
 ### Two families that are easy to miss
 
-Neither shows up as a headline resource, and both need their own permission set:
+Neither appears in any scenario's `resources:` block, and each needs its own
+permission set:
 
-- **`scaleway_ipam_ip`** → `IPAMFullAccess`. The generator emits it alongside
-  private-network attachments, so any scenario with private networking pulls it
-  in even though nothing in the scenario YAML mentions IPAM.
+- **`scaleway_ipam_ip`** → `IPAMFullAccess`. Emitted by `compute-lb-multi-paris`
+  and `web-app-paris`.
 - **`scaleway_vpc_public_gateway`, `scaleway_vpc_public_gateway_ip`,
   `scaleway_vpc_gateway_network`** → `VPCGatewayFullAccess`, and a public
-  gateway **bills hourly**. Note the allowlist entries are the exact strings
-  `scaleway_vpc` and `scaleway_vpc_private_network`, *not* a `scaleway_vpc*`
-  glob, so the gateway types are already denied locally. That is the allowlist
-  working as intended rather than an oversight — widening it to `scaleway_vpc*`
-  would silently admit an hourly-billed resource.
+  gateway **bills hourly**. Emitted by `web-app-paris` only.
+
+The allowlist entries are the exact strings `scaleway_vpc` and
+`scaleway_vpc_private_network`, *not* a `scaleway_vpc*` glob, so the gateway
+types are already denied locally. That is the allowlist working as intended —
+widening it to a glob would silently admit an hourly-billed resource.
+
+### The types are not stable across runs
+
+Worth internalising before trusting any row here: **10 scenarios declare
+private networking, but only 2 emitted `scaleway_ipam_ip` and only 1 emitted
+gateway resources.** Topologically similar scenarios diverge because the LLM
+writes the HCL — `mysql-ha-paris` and `private-lb-db-paris` both attach servers
+to a private network and neither pulled in IPAM, while `compute-lb-multi-paris`
+did.
+
+So this table is a snapshot of what the generator *has produced*, not a
+guarantee of what it *will* produce. A scenario currently marked runnable could
+emit a new type on its next run and be refused by the allowlist — which is the
+allowlist doing its job, and is why it is deny-by-default rather than a warning.
+Re-run the refresh command after any regeneration rather than trusting a
+months-old row.
 
 **Consequence for `http_probe`.** Proving infrastructure actually *serves*
 traffic rather than merely accepting TCP needs a backend behind the load
