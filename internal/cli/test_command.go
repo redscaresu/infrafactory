@@ -649,9 +649,11 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 func liveStateMayHoldResources(outputDir string) bool {
 	raw, err := os.ReadFile(filepath.Join(outputDir, harness.LiveStateFilename))
 	if err != nil {
-		// No live state at all: the apply never got far enough to record
-		// anything, so there is nothing to destroy.
-		return false
+		// Absence is the ONLY read error that means "nothing was applied".
+		// A permissions or I/O error means the file is there and we cannot
+		// read it, which is the definition of not knowing -- and on this
+		// path not knowing must never be mistaken for a clean account.
+		return !os.IsNotExist(err)
 	}
 	var state struct {
 		Resources []json.RawMessage `json:"resources"`

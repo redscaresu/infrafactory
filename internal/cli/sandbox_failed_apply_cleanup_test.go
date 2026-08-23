@@ -309,3 +309,43 @@ func TestUnparseableLiveStateStillTriggersCleanup(t *testing.T) {
 		t.Errorf("got %d destroy calls on unparseable state, want 1 — must fail closed", sandboxDestroy.calls)
 	}
 }
+
+// A live state that exists but cannot be READ is the same class of
+// unknown as one that cannot be parsed. Only its absence means nothing
+// was applied.
+func TestUnreadableLiveStateStillTriggersCleanup(t *testing.T) {
+	h := newCommandTestHarness(t)
+	scenarioPath := writeUnsupportedCriteriaScenario(t, h.WorkspaceDir)
+	sandboxCredsForTest(t)
+	outputRoot := filepath.Join(h.WorkspaceDir, "output")
+
+	// A directory where the state file should be: present, unreadable,
+	// and portable across platforms unlike chmod games.
+	if err := os.MkdirAll(filepath.Join(outputRoot, "unsupported-dns", harness.LiveStateFilename), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	sandboxDestroy := &fakeSandboxDestroyHarness{
+		result: &harness.SandboxDestroyResult{Destroy: harness.StageResult{Stage: "destroy"}},
+	}
+	sweep := &fakeOrphanSweep{}
+	sandboxDeploy := &fakeSandboxDeployHarness{
+		err: &harness.SandboxDeployError{
+			Stage: "apply",
+			Apply: harness.StageResult{Stage: "apply", Stderr: "Error: boom"},
+			Err:   errors.New("exit status 1"),
+		},
+	}
+
+	cmd := newTestCommandForTest(sandboxCleanupOpts(outputRoot, sandboxDeploy, sandboxDestroy, sweep))
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{scenarioPath, "--config", h.ConfigPath})
+
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected failure")
+	}
+	if sandboxDestroy.calls != 1 {
+		t.Errorf("got %d destroy calls on unreadable state, want 1 — must fail closed", sandboxDestroy.calls)
+	}
+}
