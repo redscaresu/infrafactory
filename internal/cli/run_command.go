@@ -689,8 +689,11 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 	// Contract #14: failed run without --no-destroy must destroy real resources.
 	sandboxEnabled := runtime.Config.Validation.Layers.SandboxDeploy.Enabled
 	if sandboxEnabled && !controls.NoDestroy && terminalReason != "target_reached" {
-		liveStatePath := filepath.Join(runtime.OutputDir(), harness.LiveStateFilename)
-		if _, statErr := os.Stat(liveStatePath); statErr == nil {
+		// Fails closed: unreadable or unparseable state still gets
+		// cleanup. Only a state that parses and records nothing is
+		// treated as already clean -- which is what a successful destroy
+		// leaves behind.
+		if liveStateMayHoldResources(runtime.OutputDir()) {
 			sandboxEnv, sandboxEnvErr := sandboxCommandEnv(runtime)
 			if sandboxEnvErr != nil {
 				runtime.Logger.Log(LogEntry{

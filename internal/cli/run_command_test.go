@@ -1198,7 +1198,7 @@ func TestRunCommandAutoDestroysRealResourcesOnFailure(t *testing.T) {
 			return &generator.GeneratedCode{Files: map[string][]byte{
 				"main.tf":                 []byte("terraform {}\n"),
 				"project.tf":              []byte("resource \"scaleway_account_project\" \"sandbox\" { name = \"test\" }\n"),
-				harness.LiveStateFilename: []byte(`{"version":4}`),
+				harness.LiveStateFilename: []byte(liveStateWithProject),
 			}}, nil
 		}),
 		Static:         &fakeStaticHarness{err: &harness.StageError{StageResult: harness.StageResult{Stage: "validate", Cmd: []string{"tofu", "validate"}}, Err: errors.New("validate failed")}},
@@ -1245,7 +1245,7 @@ func TestRunCommandNoDestroyPreservesRealResourcesOnFailure(t *testing.T) {
 			return &generator.GeneratedCode{Files: map[string][]byte{
 				"main.tf":                 []byte("terraform {}\n"),
 				"project.tf":              []byte("resource \"scaleway_account_project\" \"sandbox\" { name = \"test\" }\n"),
-				harness.LiveStateFilename: []byte(`{"version":4}`),
+				harness.LiveStateFilename: []byte(liveStateWithProject),
 			}}, nil
 		}),
 		Static:         &fakeStaticHarness{err: &harness.StageError{StageResult: harness.StageResult{Stage: "validate", Cmd: []string{"tofu", "validate"}}, Err: errors.New("validate failed")}},

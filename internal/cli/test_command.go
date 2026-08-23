@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -574,7 +575,7 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 		// up there would destroy nothing and then report an unverifiable
 		// sweep, telling the operator to chase a leak that cannot exist.
 		// run_command.go uses the same signal.
-		if sandboxEnabled && sandboxAttempted && liveStateExists(outputDir) {
+		if sandboxEnabled && sandboxAttempted && liveStateMayHoldResources(outputDir) {
 			sandboxEnv, sandboxEnvErr := sandboxCommandEnv(runtime)
 			if sandboxEnvErr != nil {
 				stages = append(stages, StageSummary{Layer: "sandbox_deploy", Stage: "destroy_preflight", Status: StageStatusFail})
@@ -632,11 +633,33 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 	return result, nil
 }
 
-// liveStateExists reports whether a Layer 3 state file is present, i.e.
-// whether an apply got far enough to record real resources.
-func liveStateExists(outputDir string) bool {
-	info, err := os.Stat(filepath.Join(outputDir, harness.LiveStateFilename))
-	return err == nil && info.Size() > 0
+// liveStateMayHoldResources reports whether Layer 3 state might still
+// describe real infrastructure.
+//
+// It fails CLOSED: it answers true unless it can positively prove
+// otherwise. The one case it can be sure about is a state that parses
+// cleanly and records no resources -- which is exactly what a successful
+// destroy leaves behind, and treating that as "resources may exist" turns
+// a clean teardown into a spurious leak warning on the next pre-apply
+// failure.
+//
+// Everything else gets cleanup. An unreadable or unparseable state means
+// we cannot tell what is out there, and "we cannot tell" must never look
+// like "nothing is there" on a path that spends real money.
+func liveStateMayHoldResources(outputDir string) bool {
+	raw, err := os.ReadFile(filepath.Join(outputDir, harness.LiveStateFilename))
+	if err != nil {
+		// No live state at all: the apply never got far enough to record
+		// anything, so there is nothing to destroy.
+		return false
+	}
+	var state struct {
+		Resources []json.RawMessage `json:"resources"`
+	}
+	if err := json.Unmarshal(raw, &state); err != nil {
+		return true
+	}
+	return len(state.Resources) > 0
 }
 
 // realScalewayAPIURL is the only endpoint a Layer 3 apply may target.

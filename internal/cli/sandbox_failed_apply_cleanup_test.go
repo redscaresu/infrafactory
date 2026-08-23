@@ -217,3 +217,95 @@ func TestPreApplySandboxFailureSkipsCleanup(t *testing.T) {
 		t.Errorf("got %d sweep calls with no live state, want 0 — a spurious leak warning", sweep.calls)
 	}
 }
+
+// A successful destroy leaves the live state file in place but emptied.
+// That must read as "nothing to clean up", not as "resources may exist" --
+// otherwise the next pre-apply failure destroys nothing and then reports
+// an unverifiable sweep, sending the operator after a leak that was
+// already cleaned up.
+func TestEmptiedLiveStateDoesNotTriggerCleanup(t *testing.T) {
+	h := newCommandTestHarness(t)
+	scenarioPath := writeUnsupportedCriteriaScenario(t, h.WorkspaceDir)
+	sandboxCredsForTest(t)
+	outputRoot := filepath.Join(h.WorkspaceDir, "output")
+
+	dir := filepath.Join(outputRoot, "unsupported-dns")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	// Exactly what tofu leaves behind after a clean destroy.
+	emptied := `{"version":4,"serial":2,"resources":[],"outputs":{}}`
+	if err := os.WriteFile(filepath.Join(dir, harness.LiveStateFilename), []byte(emptied), 0o600); err != nil {
+		t.Fatalf("write live state: %v", err)
+	}
+
+	sandboxDeploy := &fakeSandboxDeployHarness{
+		err: &harness.SandboxDeployError{
+			Stage: "plan",
+			Plan:  harness.StageResult{Stage: "plan", Stderr: "Error: Invalid resource type"},
+			Err:   errors.New("exit status 1"),
+		},
+	}
+	sandboxDestroy := &fakeSandboxDestroyHarness{
+		result: &harness.SandboxDestroyResult{Destroy: harness.StageResult{Stage: "destroy"}},
+	}
+	sweep := &fakeOrphanSweep{}
+
+	cmd := newTestCommandForTest(sandboxCleanupOpts(outputRoot, sandboxDeploy, sandboxDestroy, sweep))
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{scenarioPath, "--config", h.ConfigPath})
+
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected failure from the plan error")
+	}
+	if sandboxDestroy.calls != 0 {
+		t.Errorf("got %d destroy calls against an emptied state, want 0", sandboxDestroy.calls)
+	}
+	if sweep.calls != 0 {
+		t.Errorf("got %d sweep calls against an emptied state, want 0 — spurious leak warning", sweep.calls)
+	}
+}
+
+// Fail closed. If the live state cannot be parsed we do not know what is
+// out there, and on a path that spends real money "we cannot tell" must
+// never behave like "nothing is there". Cleanup runs.
+func TestUnparseableLiveStateStillTriggersCleanup(t *testing.T) {
+	h := newCommandTestHarness(t)
+	scenarioPath := writeUnsupportedCriteriaScenario(t, h.WorkspaceDir)
+	sandboxCredsForTest(t)
+	outputRoot := filepath.Join(h.WorkspaceDir, "output")
+
+	dir := filepath.Join(outputRoot, "unsupported-dns")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	// Truncated mid-write, as an interrupted apply can leave it.
+	if err := os.WriteFile(filepath.Join(dir, harness.LiveStateFilename), []byte(`{"version":4,"resou`), 0o600); err != nil {
+		t.Fatalf("write live state: %v", err)
+	}
+
+	sandboxDestroy := &fakeSandboxDestroyHarness{
+		result: &harness.SandboxDestroyResult{Destroy: harness.StageResult{Stage: "destroy"}},
+	}
+	sweep := &fakeOrphanSweep{}
+	sandboxDeploy := &fakeSandboxDeployHarness{
+		err: &harness.SandboxDeployError{
+			Stage: "apply",
+			Apply: harness.StageResult{Stage: "apply", Stderr: "Error: interrupted"},
+			Err:   errors.New("exit status 1"),
+		},
+	}
+
+	cmd := newTestCommandForTest(sandboxCleanupOpts(outputRoot, sandboxDeploy, sandboxDestroy, sweep))
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{scenarioPath, "--config", h.ConfigPath})
+
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected failure")
+	}
+	if sandboxDestroy.calls != 1 {
+		t.Errorf("got %d destroy calls on unparseable state, want 1 — must fail closed", sandboxDestroy.calls)
+	}
+}
