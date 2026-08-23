@@ -96,4 +96,12 @@ And three entries in the default `allow_resource_types` are now **allowed locall
 
 A run that generates one of those types will pass the allowlist and then fail at the real API with a 403, which reads like a bug unless you know this. Widening the policy is the fix when a scenario genuinely needs one — and it is a blast-radius decision, exactly like widening the allowlist, belonging in the same review.
 
+**Amendment — Instances granted, and what that costs (2026-08-23).** The credential amendment above listed Instances as absent, and said that was what put `openclaw-prod` and its flexible IP structurally out of reach. `InstancesFullAccess` has now been added to the policy, by explicit decision, to allow a backend server behind the load balancer — which is the difference between proving a load balancer *accepts TCP* and proving it *serves traffic*.
+
+State the cost plainly rather than let it decay into folklore. The API no longer refuses this key on Instances operations, so `openclaw-prod` is protected by software again — the deny-by-default allowlist (which still excludes `scaleway_instance_*`), `AssertProjectDeletable`, the orphan sweep, and project-per-run. That is the position every other resource family is already in, and it is the position the whole arc was built to make safe; it is simply no longer *also* backstopped by the API for this family.
+
+Two gates remain and only one moved. Widening the allowlist to admit `scaleway_instance_*` is a separate decision from widening the policy, and should be taken separately.
+
+Still absent, and deliberately: IAM (no privilege escalation), registry, serverless, object storage, billing, domains.
+
 **Enforcement**: the guards carry synthetic-drift coverage — removing `SCW_API_URL` from `SandboxStripEnv` fails three tests, verified before S139 merged. Following the project's "drift becomes failed `go test`" pattern.
