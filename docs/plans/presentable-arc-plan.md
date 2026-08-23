@@ -82,7 +82,8 @@ and makes the result visible on the PR.
 | S144-T2 | Post the `StageSummary` back as a PR comment, updating in place rather than appending on re-run. Must render the same stage list the CLI prints — the demo's visual payload. | P0 |
 | S144-T3 | Credentials via repo secrets bound to the `infrafactory-layer3` application key. Never the owner key; the workflow must fail closed if the org id is absent. | P0 |
 | S144-T4 | Hard timeout and guaranteed cleanup: if the job is cancelled or times out, `reap` runs. A gate that leaks on cancellation is worse than no gate. | P0 |
-| S144-T5 | Fork-PR safety: secrets must not be exposed to untrusted forks. Gate on `pull_request_target` semantics or require the label be applied by a maintainer, and document which. | P0 |
+| S144-T5 | **Fork-PR safety. Read this before writing the workflow.** The gate holds real Scaleway credentials and executes HCL from the PR, so the threat is credential exfiltration by anyone who can open a PR against a public repo. Three things are each necessary and none is sufficient alone: **(a)** the real-cloud path runs **only for same-repo PRs** — fork PRs get the existing mock-only gate and no secrets; **(b)** secrets live behind a **GitHub Environment with required reviewers**, so every run needs explicit approval and approval does not carry over to new commits; **(c)** the job records the head SHA it was approved for and **re-verifies it at run time**, aborting if the PR moved. | P0 |
+| S144-T5a | Two patterns that look safe and are not, called out so nobody reaches for them: **`pull_request_target` is not a boundary** if the workflow then checks out or executes the PR's code — it grants base-repo secrets precisely to a job running attacker-controlled content. And a **maintainer-applied label is not a boundary on its own**: labelling is a moment in time, the PR can be updated afterwards, and the workflow would then run new code under the old approval. Label for *intent*, gate on *identity and SHA*. | P0 |
 | S144-T6 | Measure and record end-to-end wall-clock from label to comment. Feeds S147 and determines whether the live demo is viable. | P1 |
 
 ### Exit criteria
@@ -244,6 +245,7 @@ genuine delta, not a wholesale import.
 | Widening Instances weakens the `openclaw` protection | taken knowingly 2026-08-23; recorded in ADR-0023. The allowlist still excludes `scaleway_instance_*`, so two gates remain and only one moved |
 | An audience member asks about multi-cloud | S149-T2 makes it a slide, not a stumble |
 | Gate leaks resources under cancellation | S144-T4, proven deliberately once |
+| Fork PR exfiltrates cloud credentials | S144-T5/T5a: same-repo only, Environment with required reviewers, run-time SHA re-verification. The repo is public, so this is an open invitation if got wrong |
 
 ## Fresh-context checklist
 
