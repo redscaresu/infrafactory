@@ -249,6 +249,61 @@ genuine delta, not a wholesale import.
 | Layer 3 gate reports green without applying | S150-T2a: fork skips green, same-repo fails closed. The arc exists because of a false green |
 | Fork PR exfiltrates cloud credentials | S144-T5/T5a: same-repo only, Environment with required reviewers, run-time SHA re-verification. The repo is public, so this is an open invitation if got wrong |
 
+## Autonomous execution loop prompt
+
+> Execute `docs/plans/presentable-arc-plan.md` slices **S144 through S150**.
+> One PR per slice, codex review loop to convergence (two consecutive clean
+> passes) on each, merge when green. Do not stop for permission on anything
+> covered below.
+>
+> **Suggested order**: S144 and S150 first — the spine and the hardening that
+> protects it. S144 alone makes the talk's central claim true, so if time runs
+> short there is still a defensible talk. Then S145, S146, S147, S148, S149.
+>
+> **Spend ceiling: £10 total for the arc.** Scaleway pricing is not codeable
+> (ADR-0010), so treat it operationally rather than as a meter: the resources
+> in scope are short-lived (a load balancer and an instance bill hourly, block
+> volumes are pennies) and runs last minutes, so the ceiling is generous for
+> ~30 real applies. **The way this budget gets blown is a leak that runs for
+> days, not a run that costs more than expected.** Therefore: verify the
+> account is clean at the end of every working session, and if anything
+> survives, stop and report rather than improvising cleanup.
+>
+> **Authorised without asking again**: `gh secret set` for the Layer 3
+> credential; creating the GitHub Environment and its protection rules;
+> merging arc PRs once green and converged; real applies within the ceiling.
+>
+> **Ask first**: widening the IAM policy or the allowlist beyond what a slice
+> names; anything touching the `openclaw` project; exceeding the spend
+> ceiling; changing what the talk claims.
+>
+> **Stop and report** when S144–S150 are merged, or when blocked on something
+> in the ask-first list. Do not widen scope to other scenarios, clouds or
+> arcs — `docs/layer3-coverage.md` exists precisely so expansion is a costed
+> decision rather than a reflex.
+
+## Demo choreography (decided 2026-08-23)
+
+Two clicks from the presenter, and both are deliberate.
+
+**Required reviewers stay on.** The approval prompt is not friction to be
+engineered away — it is the talk's thesis made visible. *"Agents change
+production without breaking it"*: the **without breaking it** is a human
+approving the real-cloud apply, and the machine then proving it applied,
+verified and destroyed. An automatic run is faster and says less. It also
+costs nothing in security terms — same-repo-only already excludes the fork
+attack, and required reviewers is what remains if a collaborator account is
+compromised.
+
+**The presenter merges; the agent does not.** During the build, arc PRs are
+agent-merged. On stage, the human merges. The message is that the human
+decides, and an agent merging its own change in front of the audience
+undercuts that in the one moment it matters.
+
+Stage sequence: PR exists → label applied → **presenter approves the
+deployment** → gate applies to real Scaleway, destroys, sweeps → bot comments
+the stage summary → **presenter merges**.
+
 ## Fresh-context checklist
 
 1. `AGENTS.md` § "Codex review loop" and § "Scaleway Bootstrap"
