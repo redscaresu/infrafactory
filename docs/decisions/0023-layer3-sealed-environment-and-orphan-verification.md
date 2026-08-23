@@ -90,8 +90,10 @@ Layer 3 now authenticates as a dedicated IAM **application** (`infrafactory-laye
 
 That last point is what makes it defence in depth rather than decoration: `openclaw-prod` and its flexible IP are Instances resources, so a guardrail bug can no longer reach them **at all** — the API refuses before any of our checks run.
 
-Two limits worth stating rather than discovering later. Product permission sets are project-scoped and each run creates its own project, so the rules are organization-scoped to cover projects that do not exist yet; the key can therefore still act on block/LB/VPC resources in *existing* projects. And `scaleway_iam*` and `scaleway_registry_namespace` remain in the default allowlist but will now fail — deliberately, since a sandbox that can mint IAM credentials is not a sandbox.
+Two limits worth stating rather than discovering later. Product permission sets are project-scoped and each run creates its own project, so the rules are organization-scoped to cover projects that do not exist yet; the key can therefore still act on block/LB/VPC resources in *existing* projects.
 
-Widening the policy is a cost-and-blast-radius decision, exactly like widening the allowlist, and belongs in the same review.
+And three entries in the default `allow_resource_types` are now **allowed locally but refused by the API**: `scaleway_iam*`, `scaleway_registry_namespace`, and `scaleway_domain*`. The first two are obvious — a sandbox that can mint IAM credentials is not a sandbox. Domains are excluded for the same least-privilege reason and a specific one: `DomainsDNSFullAccess` would let a canary modify real DNS, and no scenario in the suite manages domains today. (`dns_resolution` probes only *resolve* names; they need no domain permission.)
+
+A run that generates one of those types will pass the allowlist and then fail at the real API with a 403, which reads like a bug unless you know this. Widening the policy is the fix when a scenario genuinely needs one — and it is a blast-radius decision, exactly like widening the allowlist, belonging in the same review.
 
 **Enforcement**: the guards carry synthetic-drift coverage — removing `SCW_API_URL` from `SandboxStripEnv` fails three tests, verified before S139 merged. Following the project's "drift becomes failed `go test`" pattern.
