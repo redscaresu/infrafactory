@@ -13,6 +13,11 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Test the doc-hygiene rules themselves
+        # The dependency carve-out relaxes a rule, so its guard against
+        # being used as a bypass is worth pinning in CI.
+        run: bash scripts/check_doc_hygiene_test.sh
+
       - name: Validate STATUS/ADR sync
         run: |
           bash scripts/check_doc_hygiene.sh \

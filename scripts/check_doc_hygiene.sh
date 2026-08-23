@@ -94,6 +94,21 @@ any_changed_matching_regex() {
 STATUS_REQUIRED_PREFIXES=("cmd/" "internal/" "prompts/" "policies/" "scenarios/" "testdata/")
 STATUS_REQUIRED_FILES=("go.mod" "go.sum" "scenario.schema.json" "infrafactory.yaml")
 
+# Dependency manifests are exempt from the STATUS.md rule -- but only when
+# they are the ONLY thing that changed.
+#
+# The rule exists so a human records what a code change means. A dependabot
+# bump has no such meaning to record, and dependabot cannot edit STATUS.md,
+# so requiring it made every Go dependency PR permanently red -- and with
+# required status checks on main, permanently unmergeable. Eight of them had
+# piled up, the oldest three weeks old, which is the opposite of the
+# "keep dependencies updated" posture this repo wants.
+#
+# The exemption is deliberately all-or-nothing: a PR that bumps go.mod AND
+# edits internal/ still needs STATUS.md, so a real change cannot smuggle
+# itself in behind a lockfile.
+DEPENDENCY_MANIFESTS=("go.mod" "go.sum" "ui/package.json" "ui/package-lock.json")
+
 DECISION_PREFIXES=("cmd/infrafactory/" "internal/cli/")
 DECISION_FILES=("scenario.schema.json" "infrafactory.yaml" "docs/architecture.md")
 
@@ -122,6 +137,27 @@ if any_changed_in_prefixes "${DECISION_PREFIXES[@]}"; then
       decision_required=true
     fi
   done
+fi
+
+only_dependency_manifests() {
+  for f in "${CHANGED[@]}"; do
+    local matched=false
+    for manifest in "${DEPENDENCY_MANIFESTS[@]}"; do
+      if [[ "${f}" == "${manifest}" ]]; then
+        matched=true
+        break
+      fi
+    done
+    if [[ "${matched}" == "false" ]]; then
+      return 1
+    fi
+  done
+  return 0
+}
+
+if [[ "${status_required}" == "true" ]] && only_dependency_manifests; then
+  echo "Dependency-manifest-only change: STATUS.md not required."
+  status_required=false
 fi
 
 if [[ "${status_required}" == "true" ]] && ! contains_file "STATUS.md"; then
