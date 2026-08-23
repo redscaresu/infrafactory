@@ -216,7 +216,8 @@ genuine delta, not a wholesale import.
 | id | detail | priority |
 |---|---|---|
 | S150-T1 | **`govulncheck` job in CI.** goldfinger has one; infrafactory has none, so a known-vulnerable Go dependency currently ships silently. `go run golang.org/x/vuln/cmd/govulncheck@latest ./...`. The single clearest gap. | P0 |
-| S150-T2 | **Adopt goldfinger's secret-guard pattern for S144.** Its `e2e` job already solves exactly the problem S144-T5 describes: a job doing real external mutations that needs a secret, guarded so it skips cleanly and green when the secret is absent — including on fork PRs, where secrets are unavailable. Reuse the shape rather than reinventing it. | P0 |
+| S150-T2 | **Adopt goldfinger's secret-guard pattern for S144 — but not its skip-green semantics.** Its `e2e` job solves the mechanical half of S144-T5: a job doing real external mutations, guarded on the secret's presence. Reuse that shape. **Do not reuse "absent secret ⇒ skip green" for the Layer 3 gate**, which needs the opposite for its own runs. See S150-T2a. | P0 |
+| S150-T2a | **The skip/fail distinction, which is not optional.** A fork PR legitimately has no secrets and should **skip green** — the gate is not running and claims nothing. A **same-repo run must fail closed** when credentials or the org id are absent: there the gate *is* expected to run, and a green result asserts "applied to real Scaleway and cleaned up". Reporting success without having applied anything is a false green, and a false green is the exact failure this project was built to eliminate — S139 existed because an inherited `SCW_API_URL` let a "real" apply pass against a mock. The two cases must be distinguishable in the workflow and in the reported status, never collapsed into one guard. | P0 |
 | S150-T3 | **`permissions:` blocks on every workflow.** `ci.yml` and `doc-hygiene.yml` have none, so `GITHUB_TOKEN` gets the default scope. Least-privilege matters more once S144's workflow needs `pull-requests: write` to comment — that workflow should hold that permission and no other, and the rest should hold `contents: read`. | P0 |
 | S150-T4 | **Pin third-party actions to commit SHAs.** Both repos use mutable tags (`actions/checkout@v7`). A tag can be repointed at malicious code by a compromised upstream, and this pipeline holds cloud credentials. Pin at least the workflows that can see secrets; `dependabot` already knows how to bump SHA pins. Neither repo does this today — it is a shared gap, not a goldfinger import. | P1 |
 | S150-T5 | Record the comparison in `docs/` so "did we copy goldfinger's security setup?" has a written answer, including the measures infrafactory already had. | P2 |
@@ -245,6 +246,7 @@ genuine delta, not a wholesale import.
 | Widening Instances weakens the `openclaw` protection | taken knowingly 2026-08-23; recorded in ADR-0023. The allowlist still excludes `scaleway_instance_*`, so two gates remain and only one moved |
 | An audience member asks about multi-cloud | S149-T2 makes it a slide, not a stumble |
 | Gate leaks resources under cancellation | S144-T4, proven deliberately once |
+| Layer 3 gate reports green without applying | S150-T2a: fork skips green, same-repo fails closed. The arc exists because of a false green |
 | Fork PR exfiltrates cloud credentials | S144-T5/T5a: same-repo only, Environment with required reviewers, run-time SHA re-verification. The repo is public, so this is an open invitation if got wrong |
 
 ## Fresh-context checklist
