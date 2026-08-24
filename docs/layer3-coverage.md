@@ -40,7 +40,7 @@ if you do not know it; it is the credential doing its job.
 | `block-paris` | **runnable** | instant | — (run 2026-08-22) |
 | `lb-paris` | **runnable** | hourly | — (run 2026-08-23) |
 | `lb-serving-paris` | **runnable** | hourly | — (added 2026-08-24; the first `http_probe` against real Scaleway) |
-| `incremental-project-paris` | gates open, never run | hourly | — (`instance_ip`/`instance_server` allowlisted 2026-08-24) |
+| `incremental-project-paris` | key only | hourly | IPAM (allowlist cleared 2026-08-24; it declares private networking) |
 | `registry-paris` | key only | instant | Registry |
 | `iam-policies-paris` | key only | instant | IAM |
 | `public-registry-iam-paris` | key only | instant | IAM + Registry |
@@ -55,18 +55,20 @@ if you do not know it; it is the credential doing its job.
 | `web-app-paris` | allowlist + key | slow + expensive | DomainsDNS, IPAM, RDB, VPCGateway |
 | `full-stack-paris` | allowlist + key | slow + expensive | IAM, Kubernetes, RDB, Redis, Registry |
 
-**Current: 3 have run, 1 has both gates open and has never run, 4 are
-blocked by the key alone, 9 by both.** As first audited on 2026-08-23 it
-was 2 runnable, 1 blocked by the allowlist alone, 4 by the key alone and
-9 by both; `lb-serving-paris` did not exist yet.
+**Current: 3 have run, 5 are blocked by the key alone, 9 by both.** As
+first audited on 2026-08-23 it was 2 runnable, 1 blocked by the allowlist
+alone, 4 by the key alone and 9 by both; `lb-serving-paris` did not exist
+yet, and `incremental-project-paris` has since moved from the allowlist
+column to the key one.
 
-`incremental-project-paris` is the one that has moved twice. Granting
-Instances opened the credential gate and left the deny-by-default allowlist
-holding it — the two-gate design working, since granting a permission did
-not silently enable a scenario. Admitting `instance_ip` and
-`instance_server` on 2026-08-24 then opened the second gate too. Nothing
-stands in its way now except that nobody has run it, which is why it is
-listed as *gates open, never run* rather than runnable.
+`incremental-project-paris` has swapped blockers rather than lost one.
+Admitting `instance_ip`, `instance_server` and `instance_private_nic` on
+2026-08-24 cleared its allowlist gate — and left the credential gate
+holding it, because the scenario declares `private_network: true` and its
+generated HCL creates `scaleway_instance_private_nic`, which needs
+`IPAMFullAccess`. It is the clearest illustration in this table of why
+two gates are counted separately: opening one moved the scenario sideways,
+not forward.
 
 Class is provisioning cost, not money: *instant* is seconds and negligible
 (project, block volume, VPC, registry namespace); *hourly* bills for as long as
@@ -79,8 +81,9 @@ be worse than none.
 ## The finding: the cheap end of the pool is empty
 
 Every scenario marked **runnable** is one that has actually run against
-the real API; `incremental-project-paris` is the one whose gates are open
-without that having been demonstrated. There is no free
+the real API — the word means has-run here, deliberately, because an
+untested claim about what the real cloud will accept is the exact thing
+this arc exists to distrust. There is no free
 expansion, and three of the four "key only" entries are not the easy wins they
 look like:
 
@@ -178,13 +181,13 @@ Re-run it after any change to the allowlist, the IAM policy, or a scenario's
 
 **Runnable: 3 of 17** Scaleway training scenarios — 18 counting the holdout. `block-paris`, `lb-paris`, and the new `lb-serving-paris`, all three of which have actually run.
 
-`incremental-project-paris` is a fourth whose gates both now admit — it was blocked on `instance_*` alone — but it has never been run against the real API, so it is listed as *gates open, never run* rather than runnable. "Runnable" means *has run*, deliberately: an untested claim about what the real cloud will accept is the exact thing this arc exists to distrust.
+`incremental-project-paris` had looked like a fourth: admitting the Instances types cleared its allowlist gate. It is not. The scenario declares private networking and its generated HCL creates `scaleway_instance_private_nic`, so it still needs `IPAMFullAccess` — it swapped blockers rather than losing one.
 
 (The earlier "3 of 16" here counted `lb-serving-paris` in the numerator and not the denominator: adding it made 16 into 17.)
 
 `lb-serving-paris` is the first scenario to satisfy an `http_probe` against real Scaleway. It goes green end to end in **144 seconds** — apply, HTTP 200 through the load balancer frontend, destroy, orphan sweep — and it is the scenario that surfaced the auto-created security group defect (ADR-0023, second amendment of this date).
 
-Thirteen scenarios remain gated, and what gates them is unchanged and
+Fourteen scenarios remain gated, and what gates them is unchanged and
 unchanged deliberately:
 
 - **Cost/time.** `scaleway_k8s_*`, `scaleway_rdb_instance`, `scaleway_redis_cluster` stay commented out. They take minutes to create *and* minutes to destroy, on every iteration of the repair loop.
