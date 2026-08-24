@@ -735,7 +735,7 @@ func generateAndWriteFilesWithResult(ctx context.Context, runtime *CommandRuntim
 		if err := validateLayer3ProjectResource(runtime.OutputDir()); err != nil {
 			return 0, nil, err
 		}
-		if err := validateLayer3NoEscapeHatches(runtime.OutputDir()); err != nil {
+		if err := validateLayer3HCLShape(runtime.OutputDir(), runtime.Config.Validation.Layers.SandboxDeploy.AllowResourceTypes); err != nil {
 			return 0, nil, err
 		}
 		if err := validateLayer3ResourceAllowlist(runtime.OutputDir(), runtime.Config.Validation.Layers.SandboxDeploy.AllowResourceTypes); err != nil {
@@ -815,53 +815,6 @@ func resourceTypeAllowed(resourceType string, allowed []string) bool {
 		}
 	}
 	return false
-}
-
-// layer3EscapeHatchRe matches HCL constructs that can create or execute
-// things the resource-type allowlist cannot see.
-var layer3EscapeHatchRe = regexp.MustCompile(`(?m)^\s*(module|provisioner)\s+"`)
-
-// validateLayer3NoEscapeHatches rejects HCL that could sidestep the
-// resource-type allowlist.
-//
-// The allowlist scans top-level `resource "<type>"` declarations, which is
-// sufficient for generated HCL because the generator only emits those. It
-// is NOT sufficient for HCL that arrives from a pull request, which is what
-// the S144 gate applies:
-//
-//   - a `module` block declares resources the scan never sees, so any type
-//     at all can reach the real API through one.
-//   - a `provisioner` block runs arbitrary commands during apply, in a job
-//     that holds live cloud credentials in its environment. That is shell
-//     execution and credential exposure, not merely an unvetted resource.
-//
-// Both are refused outright rather than analysed. A Layer 3 stack is a
-// handful of flat resources by design; nothing legitimate here needs
-// either construct, so the cost of banning them is zero and the cost of
-// reasoning about them correctly is not.
-func validateLayer3NoEscapeHatches(outputDir string) error {
-	entries, err := os.ReadDir(outputDir)
-	if err != nil {
-		return fmt.Errorf("read output directory for layer 3 escape-hatch validation: %w", err)
-	}
-	found := make([]string, 0)
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".tf") {
-			continue
-		}
-		content, err := os.ReadFile(filepath.Join(outputDir, entry.Name()))
-		if err != nil {
-			continue
-		}
-		for _, match := range layer3EscapeHatchRe.FindAllStringSubmatch(string(content), -1) {
-			found = append(found, fmt.Sprintf("%s in %s", match[1], entry.Name()))
-		}
-	}
-	if len(found) > 0 {
-		return fmt.Errorf("layer 3 refuses %s: a module can declare resource types the allowlist never sees, and a provisioner executes commands during apply in a process holding live cloud credentials",
-			strings.Join(found, ", "))
-	}
-	return nil
 }
 
 func validateLayer3ProjectResource(outputDir string) error {

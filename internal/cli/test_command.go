@@ -553,14 +553,11 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 			//   - the project resource, which is what bounds blast radius
 			//     to one disposable project (ADR-0010)
 			//   - the resource-type allowlist (ADR-0023 rule 5)
-			//   - escape hatches, because a type allowlist cannot see
-			//     inside a module or stop a provisioner running commands
+			//   - the HCL shape, parsed rather than pattern-matched,
+			//     because this input can come from a pull request
 			allowErr := validateLayer3ProjectResource(outputDir)
 			if allowErr == nil {
-				allowErr = validateLayer3NoEscapeHatches(outputDir)
-			}
-			if allowErr == nil {
-				allowErr = validateLayer3ResourceAllowlist(outputDir,
+				allowErr = validateLayer3HCLShape(outputDir,
 					runtime.Config.Validation.Layers.SandboxDeploy.AllowResourceTypes)
 			}
 			if allowErr != nil {

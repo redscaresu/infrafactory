@@ -110,7 +110,15 @@ Enforcement moved to where the guarantee belongs — immediately before the sand
 
 All three of the pre-apply checks moved with it — the project resource (ADR-0010's blast-radius boundary), the type allowlist, and a new escape-hatch refusal.
 
-**Escape hatches.** A resource-type allowlist is sufficient for *generated* HCL, because the generator only emits flat `resource` blocks. It is not sufficient for HCL arriving from a pull request. A `module` block declares resources the scan never sees, so any type at all can reach the API through one; a `provisioner` block runs arbitrary commands during apply, in a process holding live cloud credentials in its environment — shell execution and credential exposure, not merely an unvetted resource. Both are refused outright rather than analysed: a Layer 3 stack is a handful of flat resources by design, so the cost of banning them is zero and the cost of reasoning about them correctly is not.
+**Untrusted HCL is validated by parsing, and deny-by-default on block type.** This took three attempts, and the failures are more instructive than the answer.
+
+A resource-type allowlist is sufficient for *generated* HCL, because the generator emits flat `resource` blocks and nothing else. It is not sufficient for HCL arriving from a pull request. First a `module` block declares resources the scan never sees; then a `provisioner` executes commands during apply inside a process holding live credentials. Both were denylisted — and `data "external"` with `program = [...]` still ran arbitrary commands, at *plan* time, before any check that inspects plan output could help.
+
+Then the scanner itself proved unsound: `resource /*x*/ "scaleway_k8s_cluster"` is valid HCL that a `resource\s+"` pattern does not match, and the grammar permits comments and whitespace almost anywhere, so no expression closes the class.
+
+The configuration is now parsed (`hashicorp/hcl/v2`) and validated against an **allowlist of block types** — `terraform`, `provider`, `variable`, `output`, `locals`, `resource`, `data` — with providers and data sources restricted to Scaleway, resource types checked against `allow_resource_types`, and `provisioner`/`connection` refused anywhere in the tree. Unparseable input is refused rather than applied: unknowable is not the same as harmless.
+
+Two general lessons, both learned the expensive way. **A denylist of known escapes is a race you lose** — each fix invited the next bypass, and only enumerating what is permitted ended it. And **a scanner that is not a parser will always have a gap**, because the grammar is richer than the pattern. Neither would have mattered for generated HCL; both matter the moment the input comes from a pull request.
 
 **Consequence for cleanup.** With validation now able to refuse *before* any apply, "did this run attempt an apply" stopped being a usable cleanup gate — a refusal can coincide with an earlier run's resources still being recorded, and those still need destroying. The live state is now the only gate: what matters is whether resources may exist, not who created them.
 
