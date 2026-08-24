@@ -47,6 +47,12 @@ var layer3DeniedNestedBlocks = map[string]bool{
 	// an expression evaluated at PLAN time and surfaced in tofu's output.
 	// A Layer 3 stack has no need of it.
 	"lifecycle": true,
+	// backend is processed by `tofu init`, before any apply. A PR-chosen
+	// backend would have the secret-bearing job contact it, and would move
+	// state off the local terraform-live.tfstate that every cleanup and
+	// sweep decision reads.
+	"backend": true,
+	"cloud":   true,
 }
 
 // layer3SafeProviderAttrs are the only settings a PR may put in the
@@ -217,7 +223,14 @@ func layer3ProviderSourceProblems(tfBlock *hclsyntax.Block, file string) ([]stri
 					file, name, layer3ScalewayProviderSource))
 				continue
 			}
-			sawCanonical = true
+			// Only the `scaleway` LOCAL NAME satisfies the requirement.
+			// `foo = { source = "scaleway/scaleway" }` declares a correct
+			// source under a name nothing uses, while scaleway_* resources
+			// still resolve `scaleway` implicitly -- which is the exact
+			// case this check exists to catch.
+			if name == "scaleway" {
+				sawCanonical = true
+			}
 		}
 	}
 	return problems, sawCanonical
