@@ -3,6 +3,9 @@ package cli
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/redscaresu/infrafactory/internal/harness"
@@ -120,3 +123,38 @@ func TestDestroyReportsSecondFailure(t *testing.T) {
 }
 
 const purgeProjectID = "6c4390c9-664e-4289-a34f-cdc865653fc7"
+
+// Every real-cloud teardown must go through destroySandbox.
+//
+// The purge/retry was added to the ordinary destroy paths first and the
+// interrupt-cleanup path was missed -- which is the path where a leak
+// matters most, because nothing else is coming to clean up after it.
+// Bypassing the wrapper reintroduces exactly that bug, so make it a
+// failing test rather than a convention.
+func TestAllDestroyCallsGoThroughTheRetryWrapper(t *testing.T) {
+	entries, err := os.ReadDir(".")
+	require.NoError(t, err)
+
+	var offenders []string
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		// The wrapper is the one place allowed to call the harness.
+		if name == "destroy_retry.go" {
+			continue
+		}
+		src, err := os.ReadFile(name)
+		require.NoError(t, err)
+		for i, line := range strings.Split(string(src), "\n") {
+			if strings.Contains(line, "SandboxDestroy.Run(") {
+				offenders = append(offenders, fmt.Sprintf("%s:%d: %s", name, i+1, strings.TrimSpace(line)))
+			}
+		}
+	}
+
+	assert.Empty(t, offenders,
+		"call destroySandbox instead: a raw SandboxDestroy.Run skips the auto-created-resource purge, "+
+			"so the run leaks its project whenever the API put something in it that Terraform does not own")
+}
