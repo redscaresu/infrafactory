@@ -174,9 +174,17 @@ Adding a new cloud requires: prompt templates, pitfalls file, topology derivatio
 Layers 1 and 2 — static analysis, OPA policy, and a mock apply — run on every
 cloud, in seconds, without credentials. **Layer 3 applies the generated stack
 to real Scaleway, probes it, destroys it, and then asks the API whether
-anything survived.** A label-triggered GitHub Actions workflow runs that on a
-pull request and comments the result back, so an infrastructure change is
-deployed for real *before* it merges.
+anything survived.**
+
+Today Layer 3 runs from the CLI: set
+`validation.layers.sandbox_deploy.enabled` and supply real credentials, and
+`infrafactory test` or `infrafactory run` will apply, probe, destroy and
+sweep. Wiring that into a label-triggered pull-request gate — so an
+infrastructure change is deployed for real *before* it merges, with the
+result commented back on the PR — is in flight and **not yet merged**; there
+is no `layer3-gate` workflow in `.github/workflows/` on `main`. Treat the
+pre-merge gate as a design that has been demonstrated, not as a guarantee
+this repository currently enforces.
 
 ### What it proves
 
