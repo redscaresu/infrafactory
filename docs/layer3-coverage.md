@@ -5,8 +5,10 @@ Audit date: 2026-08-24. **Refreshed** after `scaleway_instance_ip` and
 balancer could have a backend that serves — see the allowlist amendment
 in ADR-0023. Derived from the **actually generated HCL** in
 `.infrafactory/runs/<scenario>/<run_id>/generated/*.tf`, not inferred from
-`mappings.yaml` — every one of the 16 Scaleway scenarios has prior run
-artifacts.
+`mappings.yaml` — every one of the 16 Scaleway scenarios that existed at
+audit time has prior run artifacts. `lb-serving-paris`, added afterwards,
+has none: it is driven from fixed HCL through the gate rather than
+generated.
 
 The point of this file is to stop "let's expand Layer 3" being a vague
 ambition. Expansion is a cost-and-blast-radius decision per scenario, and
@@ -21,15 +23,23 @@ A scenario reaches the real API only if **both** allow it:
    `scaleway_account_project`, `scaleway_block_volume`, `scaleway_block_snapshot`,
    `scaleway_vpc`, `scaleway_vpc_private_network`, `scaleway_lb*`,
    `scaleway_domain*`, `scaleway_iam*`, `scaleway_registry_namespace`,
-   `scaleway_instance_ip`, `scaleway_instance_server`.
+   `scaleway_instance_ip`, `scaleway_instance_server`,
+   `scaleway_instance_private_nic`.
 2. **The `infrafactory-layer3` IAM policy** — `ProjectManager`,
    `BlockStorageFullAccess`, `LoadBalancersFullAccess`, `VPCFullAccess`,
    `InstancesFullAccess`. Nothing else (ADR-0023, credential amendments).
 
-They do not agree, deliberately. Three allowlisted families —
-`scaleway_iam*`, `scaleway_registry_namespace`, `scaleway_domain*` — pass the
-local check and are then refused by the API with a 403. That looks like a bug
-if you do not know it; it is the credential doing its job.
+They do not agree, deliberately. Four allowlisted entries —
+`scaleway_iam*`, `scaleway_registry_namespace`, `scaleway_domain*` and
+`scaleway_instance_private_nic` — pass the local check and are then refused
+by the API with a 403. That looks like a bug if you do not know it; it is
+the credential doing its job.
+
+The first three are least-privilege choices. The fourth is not: private
+NICs are allowlisted only because `policies/scaleway/vpc_required.rego`
+denies any instance server without one, so omitting them would leave
+static policy demanding a resource the allowlist forbids — unsatisfiable
+by any generated HCL. It waits on `IPAMFullAccess`.
 
 ## Coverage
 
@@ -37,7 +47,8 @@ if you do not know it; it is the credential doing its job.
 |---|---|---|---|
 | `block-paris` | **runnable** | instant | — (run 2026-08-22) |
 | `lb-paris` | **runnable** | hourly | — (run 2026-08-23) |
-| `incremental-project-paris` | **allowlist only** | hourly | allowlist: `instance_*` — the key already permits it |
+| `lb-serving-paris` | **runnable** | hourly | — (added 2026-08-24; the first `http_probe` against real Scaleway) |
+| `incremental-project-paris` | key only | hourly | IPAM (allowlist cleared 2026-08-24; it declares private networking) |
 | `registry-paris` | key only | instant | Registry |
 | `iam-policies-paris` | key only | instant | IAM |
 | `public-registry-iam-paris` | key only | instant | IAM + Registry |
@@ -52,12 +63,20 @@ if you do not know it; it is the credential doing its job.
 | `web-app-paris` | allowlist + key | slow + expensive | DomainsDNS, IPAM, RDB, VPCGateway |
 | `full-stack-paris` | allowlist + key | slow + expensive | IAM, Kubernetes, RDB, Redis, Registry |
 
-**2 runnable, 1 blocked by the allowlist alone, 4 by the key alone, 9 by both.**
+**Current: 3 have run, 5 are blocked by the key alone, 9 by both.** As
+first audited on 2026-08-23 it was 2 runnable, 1 blocked by the allowlist
+alone, 4 by the key alone and 9 by both; `lb-serving-paris` did not exist
+yet, and `incremental-project-paris` has since moved from the allowlist
+column to the key one.
 
-`incremental-project-paris` is the one that moved when Instances was granted:
-the credential now permits it and only the deny-by-default allowlist stands in
-the way. That is the two-gate design working — granting a permission did not
-silently enable a scenario.
+`incremental-project-paris` has swapped blockers rather than lost one.
+Admitting `instance_ip`, `instance_server` and `instance_private_nic` on
+2026-08-24 cleared its allowlist gate — and left the credential gate
+holding it, because the scenario declares `private_network: true` and its
+generated HCL creates `scaleway_instance_private_nic`, which needs
+`IPAMFullAccess`. It is the clearest illustration in this table of why
+two gates are counted separately: opening one moved the scenario sideways,
+not forward.
 
 Class is provisioning cost, not money: *instant* is seconds and negligible
 (project, block volume, VPC, registry namespace); *hourly* bills for as long as
@@ -69,9 +88,12 @@ be worse than none.
 
 ## The finding: the cheap end of the pool is empty
 
-The two runnable scenarios are the two already run. There is no free
-expansion, and three of the four "key only" entries are not the easy wins they
-look like:
+Every scenario marked **runnable** is one that has actually run against
+the real API — the word means has-run here, deliberately, because an
+untested claim about what the real cloud will accept is the exact thing
+this arc exists to distrust. There is no free
+expansion, and four of the five "key only" entries are not the easy wins
+they look like:
 
 - **`domain-paris` is not a permission problem.** The account holds no
   registered public domain — only the auto-created `privatedns` zone for
@@ -81,13 +103,24 @@ look like:
   blocked.** Granting IAM to the sandbox credential defeats the credential:
   a sandbox that can mint API keys is not a sandbox. Keep them as Layer 2
   scenarios.
+- **`incremental-project-paris` needs IPAM**, which is a real widening
+  rather than a formality: IPAM hands out addresses across the whole
+  organization's private networks. It is the cheapest *remaining* hourly
+  scenario, and still a blast-radius decision rather than a config line.
 - **`registry-paris` is the only defensible near-free expansion** — one
   permission set, instant provisioning. Note it still widens org-scoped
   registry access over the existing `funcscwblognolj7nc9` namespace, because
   product permission sets are project-scoped and per-run projects do not exist
   yet, so the rules must be organization-scoped.
 
-Everything else needs Instances, RDB, Redis or Kubernetes — both gates widened,
+Before widening anything here, check it against
+`examples/layer3-plan-lied/`. The `iam-scope` case works precisely because
+`scaleway_domain*` is allowlisted and refused by the credential, so a grant
+that closed that gap would quietly invalidate committed evidence. Domains
+is on nobody's expansion list, which is exactly why it was chosen for the
+fixture.
+
+Everything below those needs RDB, Redis or Kubernetes — both gates widened,
 and the expensive class the allowlist exists to keep out.
 
 ### Two families that are easy to miss
@@ -161,11 +194,16 @@ Re-run it after any change to the allowlist, the IAM policy, or a scenario's
 
 `scaleway_instance_ip` and `scaleway_instance_server` are now allowlisted, and the policy already carried `InstancesFullAccess`, so both gates admit a small compute backend.
 
-**Runnable: 3 of 16.** `block-paris`, `lb-paris`, and the new `lb-serving-paris`.
+**Runnable: 3 of 17** Scaleway training scenarios — 18 counting the holdout. `block-paris`, `lb-paris`, and the new `lb-serving-paris`, all three of which have actually run.
+
+`incremental-project-paris` had looked like a fourth: admitting the Instances types cleared its allowlist gate. It is not. The scenario declares private networking and its generated HCL creates `scaleway_instance_private_nic`, so it still needs `IPAMFullAccess` — it swapped blockers rather than losing one.
+
+(The earlier "3 of 16" here counted `lb-serving-paris` in the numerator and not the denominator: adding it made 16 into 17.)
 
 `lb-serving-paris` is the first scenario to satisfy an `http_probe` against real Scaleway. It goes green end to end in **144 seconds** — apply, HTTP 200 through the load balancer frontend, destroy, orphan sweep — and it is the scenario that surfaced the auto-created security group defect (ADR-0023, second amendment of this date).
 
-What still gates the remaining 13 is unchanged and unchanged deliberately:
+Fourteen scenarios remain gated, and what gates them is unchanged and
+unchanged deliberately:
 
 - **Cost/time.** `scaleway_k8s_*`, `scaleway_rdb_instance`, `scaleway_redis_cluster` stay commented out. They take minutes to create *and* minutes to destroy, on every iteration of the repair loop.
 - **Policy.** `scaleway_iam*`, `scaleway_registry_namespace` and `scaleway_domain*` pass the allowlist and are refused by the API with a 403. That is the credential doing its job. `scaleway_domain*` is also, now, the `iam-scope` case in the plan-lied corpus — it is deliberately never granted.
