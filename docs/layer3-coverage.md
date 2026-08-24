@@ -23,15 +23,23 @@ A scenario reaches the real API only if **both** allow it:
    `scaleway_account_project`, `scaleway_block_volume`, `scaleway_block_snapshot`,
    `scaleway_vpc`, `scaleway_vpc_private_network`, `scaleway_lb*`,
    `scaleway_domain*`, `scaleway_iam*`, `scaleway_registry_namespace`,
-   `scaleway_instance_ip`, `scaleway_instance_server`.
+   `scaleway_instance_ip`, `scaleway_instance_server`,
+   `scaleway_instance_private_nic`.
 2. **The `infrafactory-layer3` IAM policy** — `ProjectManager`,
    `BlockStorageFullAccess`, `LoadBalancersFullAccess`, `VPCFullAccess`,
    `InstancesFullAccess`. Nothing else (ADR-0023, credential amendments).
 
-They do not agree, deliberately. Three allowlisted families —
-`scaleway_iam*`, `scaleway_registry_namespace`, `scaleway_domain*` — pass the
-local check and are then refused by the API with a 403. That looks like a bug
-if you do not know it; it is the credential doing its job.
+They do not agree, deliberately. Four allowlisted entries —
+`scaleway_iam*`, `scaleway_registry_namespace`, `scaleway_domain*` and
+`scaleway_instance_private_nic` — pass the local check and are then refused
+by the API with a 403. That looks like a bug if you do not know it; it is
+the credential doing its job.
+
+The first three are least-privilege choices. The fourth is not: private
+NICs are allowlisted only because `policies/scaleway/vpc_required.rego`
+denies any instance server without one, so omitting them would leave
+static policy demanding a resource the allowlist forbids — unsatisfiable
+by any generated HCL. It waits on `IPAMFullAccess`.
 
 ## Coverage
 
