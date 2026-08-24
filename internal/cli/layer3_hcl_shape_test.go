@@ -374,3 +374,38 @@ resource "scaleway_block_volume" "escapee" {
 		t.Errorf("error did not explain the requirement: %v", err)
 	}
 }
+
+// .name is also a reference to the project, but the name is chosen by the
+// PR and can be set to any existing project's UUID.
+func TestLayer3ShapeRefusesProjectIDFromNonIDAttribute(t *testing.T) {
+	dir := writeShapeHCL(t, shapeProject+`
+resource "scaleway_block_volume" "escapee" {
+  size_in_gb = 1
+  project_id = scaleway_account_project.main.name
+}`)
+
+	if err := validateLayer3HCLShape(dir, gateAllowlist); err == nil {
+		t.Fatal("project_id must be the project's .id, not an attribute the PR chooses")
+	}
+}
+
+// The generation-path check is a substring scan, which a comment satisfies.
+// On the untrusted path the parser decides.
+func TestLayer3ShapeRefusesCommentedOutProjectResource(t *testing.T) {
+	dir := writeShapeHCL(t, `
+terraform {
+  required_providers {
+    scaleway = { source = "scaleway/scaleway" }
+  }
+}
+# resource "scaleway_account_project" "main" {}
+resource "scaleway_block_volume" "orphan" { size_in_gb = 1 }`)
+
+	err := validateLayer3HCLShape(dir, gateAllowlist)
+	if err == nil {
+		t.Fatal("a commented-out project must not satisfy the containment requirement")
+	}
+	if !strings.Contains(err.Error(), "disposable project") {
+		t.Errorf("error did not explain the requirement: %v", err)
+	}
+}

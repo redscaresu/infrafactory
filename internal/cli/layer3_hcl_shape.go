@@ -80,6 +80,7 @@ func validateLayer3HCLShape(outputDir string, allowedResourceTypes []string) err
 	}
 	problems := make([]string, 0)
 	sawCanonicalProvider := false
+	sawProjectResource := false
 	for _, entry := range entries {
 		// OpenTofu loads .tf.json exactly as it loads .tf. This validator
 		// parses native HCL, so a JSON file would sail past it and apply
@@ -105,9 +106,13 @@ func validateLayer3HCLShape(outputDir string, allowedResourceTypes []string) err
 		if !ok {
 			return fmt.Errorf("layer 3 refuses %s: unexpected body type", entry.Name())
 		}
-		fileProblems, sawProvider := layer3BlockProblems(body, entry.Name(), allowedResourceTypes)
+		fileProblems, sawProvider, sawProject := layer3BlockProblems(body, entry.Name(), allowedResourceTypes)
 		problems = append(problems, fileProblems...)
 		sawCanonicalProvider = sawCanonicalProvider || sawProvider
+		sawProjectResource = sawProjectResource || sawProject
+	}
+	if !sawProjectResource {
+		problems = append(problems, "no scaleway_account_project resource is declared, so this stack has no disposable project of its own to create and destroy")
 	}
 	if !sawCanonicalProvider {
 		// Omitting required_providers is not a safe default: tofu then
@@ -124,15 +129,19 @@ func validateLayer3HCLShape(outputDir string, allowedResourceTypes []string) err
 	return nil
 }
 
-func layer3BlockProblems(body *hclsyntax.Body, file string, allowedResourceTypes []string) ([]string, bool) {
+func layer3BlockProblems(body *hclsyntax.Body, file string, allowedResourceTypes []string) ([]string, bool, bool) {
 	problems := make([]string, 0)
 	sawCanonicalProvider := false
+	sawProjectResource := false
 	for _, block := range body.Blocks {
 		switch {
 		case !layer3AllowedTopLevelBlocks[block.Type]:
 			problems = append(problems, fmt.Sprintf("%s: %q blocks are not permitted", file, block.Type))
 			continue
 		case block.Type == "resource":
+			if len(block.Labels) > 0 && block.Labels[0] == "scaleway_account_project" {
+				sawProjectResource = true
+			}
 			if len(block.Labels) > 0 && !resourceTypeAllowed(block.Labels[0], allowedResourceTypes) {
 				problems = append(problems, fmt.Sprintf("%s: resource type %q is not in allow_resource_types", file, block.Labels[0]))
 			}
@@ -164,7 +173,7 @@ func layer3BlockProblems(body *hclsyntax.Body, file string, allowedResourceTypes
 		}
 		problems = append(problems, layer3NestedProblems(block, file)...)
 	}
-	return problems, sawCanonicalProvider
+	return problems, sawCanonicalProvider, sawProjectResource
 }
 
 // layer3NestedProblems walks the whole tree: a provisioner is nested inside
@@ -280,6 +289,14 @@ func layer3ProjectBindingProblems(resource *hclsyntax.Block, file string) []stri
 	}
 	if traversal.Traversal.RootName() != "scaleway_account_project" {
 		problems = append(problems, fmt.Sprintf("%s: %s sets project_id from %q; it must reference this stack's scaleway_account_project", file, name, traversal.Traversal.RootName()))
+		return problems
+	}
+	// ...and specifically its .id. `scaleway_account_project.main.name` is
+	// also a reference to the project, but the NAME is chosen by the PR and
+	// can be set to any existing project's UUID.
+	last, ok := traversal.Traversal[len(traversal.Traversal)-1].(hcl.TraverseAttr)
+	if len(traversal.Traversal) < 3 || !ok || last.Name != "id" {
+		problems = append(problems, fmt.Sprintf("%s: %s must set project_id to scaleway_account_project.<name>.id; any other attribute is a value the PR chooses", file, name))
 	}
 	return problems
 }
@@ -287,9 +304,12 @@ func layer3ProjectBindingProblems(resource *hclsyntax.Block, file string) []stri
 // layer3PreflightHCL is every structural check Layer 3 makes on a
 // configuration, in the order that matters: all of them before any tofu
 // process starts.
+// The project check is done by the PARSER inside validateLayer3HCLShape,
+// not by the substring scan used on the generation path: a comment or a
+// string containing `resource "scaleway_account_project"` satisfies the
+// latter while the stack declares no such resource, and an allowed
+// resource would then land in the configured fallback project instead of
+// a disposable one.
 func layer3PreflightHCL(outputDir string, allowedResourceTypes []string) error {
-	if err := validateLayer3ProjectResource(outputDir); err != nil {
-		return err
-	}
 	return validateLayer3HCLShape(outputDir, allowedResourceTypes)
 }
