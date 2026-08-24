@@ -1,0 +1,5 @@
+Error: scaleway-sdk-go: invalid argument(s): perf_iops is required, The provided 'perf_iops' value is not available. If provided, please choose from the following available values: [5000, 15000].
+
+  with scaleway_block_volume.app_data,
+  on main.tf line 4, in resource "scaleway_block_volume" "app_data":
+   4: resource "scaleway_block_volume" "app_data" {

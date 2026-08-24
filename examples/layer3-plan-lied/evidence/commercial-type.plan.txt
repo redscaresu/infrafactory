@@ -1,0 +1,38 @@
+OpenTofu used the selected providers to generate the following execution
+plan. Resource actions are indicated with the following symbols:
+  + create
+OpenTofu will perform the following actions:
+  # scaleway_account_project.main will be created
+  + resource "scaleway_account_project" "main" {
+      + created_at      = (known after apply)
+      + id              = (known after apply)
+      + name            = "if-s145-a"
+      + organization_id = (known after apply)
+      + updated_at      = (known after apply)
+    }
+  # scaleway_block_volume.app_data will be created
+  + resource "scaleway_block_volume" "app_data" {
+      + id                 = (known after apply)
+      + instance_volume_id = (known after apply)
+      + iops               = 9000
+      + name               = "s145-a-vol"
+      + project_id         = (known after apply)
+      + size_in_gb         = 1
+      + srn                = (known after apply)
+      + zone               = (known after apply)
+    }
+Plan: 2 to add, 0 to change, 0 to destroy.
+  with provider["registry.opentofu.org/scaleway/scaleway"],
+  on common.tf line 6, in provider "scaleway":
+   6: provider "scaleway" {
+Variable                        Available sources
+Currently using
+SCW_ACCESS_KEY                  Active Profile in config.yaml, Environment
+variable                    Environment variable
+SCW_SECRET_KEY                  Active Profile in config.yaml, Environment
+variable                    Environment variable
+SCW_DEFAULT_ORGANIZATION_ID     Active Profile in config.yaml, Environment
+variable                    Environment variable
+SCW_DEFAULT_REGION              Active Profile in config.yaml, Profile
+SCW_DEFAULT_ZONE                Active Profile in config.yaml, Profile
+(and one more similar warning elsewhere)
