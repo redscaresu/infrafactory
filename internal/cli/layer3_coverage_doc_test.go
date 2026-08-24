@@ -77,9 +77,15 @@ func TestLayer3CoverageDocAllowlistMatchesConfig(t *testing.T) {
 	t.Parallel()
 	doc := layer3CoverageDoc(t)
 
+	// Both anchors checked against -1 before comparing them. A missing
+	// "Repo default" gives start == -1, which is still less than end, so
+	// a Greater check alone passes and doc[-1:end] then panics -- turning
+	// an intended "the doc moved" failure into a crash.
 	start := strings.Index(doc, "Repo default")
+	require.GreaterOrEqual(t, start, 0, "could not find the 'Repo default' anchor; the allowlist prose moved")
 	end := strings.Index(doc, "2. **The")
-	require.Greater(t, end, start, "could not locate the enumerated allowlist")
+	require.GreaterOrEqual(t, end, 0, "could not find the '2. **The' anchor; the two-gates section moved")
+	require.Greater(t, end, start, "the allowlist anchors are out of order")
 
 	documented := map[string]bool{}
 	for _, m := range allowlistEntryRe.FindAllStringSubmatch(doc[start:end], -1) {
