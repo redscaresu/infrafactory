@@ -127,3 +127,11 @@ The cost is that a *second* family is now protected by software rather than by t
 The purge is deliberately lenient where the sweep is strict. `ScalewayOrphanSweep` remains the authoritative "did we leak?" answer and still fails closed; a purge that cannot list a zone simply moves on, because a transient list error must not turn into a failed teardown when the sweep is there to catch a genuine leak.
 
 No mock surfaces this class of defect at all. The auto-creation is a behaviour of the real API, not of the configuration, so mockway — which creates exactly what it is asked for and nothing else — deletes its project cleanly every time.
+
+**Amendment — the coverage document's counts are CI-enforced (2026-08-24).** `docs/layer3-coverage.md` is not commentary. It is the artifact someone reads to decide which scenario to point at real, billable infrastructure next, and its central claims are counts: how many scenarios have run, how many each gate blocks, which resource types are admitted locally and refused by the credential.
+
+Those counts were hand-maintained, and over a single slice they drifted four times — a scenario counted in the numerator and not the denominator, a gated remainder that no longer matched the table, a "three families" claim that had become four, and an enumerated allowlist that had fallen behind `infrafactory.yaml`. Each was a paragraph disagreeing with a table two screens away, and each hand-fix introduced the next.
+
+`TestLayer3CoverageDocTotalsMatchItsTable` and `TestLayer3CoverageDocAllowlistMatchesConfig` now derive the totals and the gated remainder from the table's own rows, and diff the enumerated allowlist against the config. Both carry synthetic-drift coverage.
+
+This extends the project's existing "drift becomes a failed `go test`" pattern — ADR-0021's cloud-prefix lockstep, the sibling contract audits, the pitfalls/OPA dedup check — to prose. The justification is the same one the pattern always rests on: a convention nobody can violate accidentally is worth more than a convention written down. It applies here because the prose makes checkable numerical claims about committed configuration, not because documentation in general should be tested.
