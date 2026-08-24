@@ -59,7 +59,11 @@ func TestLayer3CoverageDocTotalsMatchItsTable(t *testing.T) {
 	assert.True(t, strings.Contains(doc, wantTotals),
 		"the totals line must match the table (%d rows). Expected to find:\n  %s", len(rows), wantTotals)
 
-	wantGated := gatedSentence(keyOnly + both)
+	wantGated, ok := gatedSentence(keyOnly + both)
+	require.True(t, ok,
+		"no spelled-out word for %d gated scenarios. Add it to numberWords -- "+
+			"without one this check degrades to matching \" scenarios remain gated\", "+
+			"which any count satisfies", keyOnly+both)
 	assert.True(t, strings.Contains(doc, wantGated),
 		"the gated remainder must equal key-only + both = %d. Expected to find:\n  %q",
 		keyOnly+both, wantGated)
@@ -108,12 +112,30 @@ func sprintTotals(run, keyOnly, both int) string {
 	return fmt.Sprintf("**Current: %d have run, %d are blocked by the key alone, %d by both.**", run, keyOnly, both)
 }
 
-func gatedSentence(n int) string {
-	words := map[int]string{
-		11: "Eleven", 12: "Twelve", 13: "Thirteen", 14: "Fourteen",
-		15: "Fifteen", 16: "Sixteen", 17: "Seventeen",
+// numberWords covers the plausible range for this table. A count outside
+// it is a signal to extend the map, never to skip the check.
+var numberWords = map[int]string{
+	0: "No", 1: "One", 2: "Two", 3: "Three", 4: "Four", 5: "Five",
+	6: "Six", 7: "Seven", 8: "Eight", 9: "Nine", 10: "Ten",
+	11: "Eleven", 12: "Twelve", 13: "Thirteen", 14: "Fourteen",
+	15: "Fifteen", 16: "Sixteen", 17: "Seventeen", 18: "Eighteen",
+	19: "Nineteen", 20: "Twenty",
+}
+
+// gatedSentence reports the sentence the doc must contain, and whether a
+// word exists for n at all.
+//
+// Returning the miss rather than an empty word matters: with words[n]
+// empty the expected substring became " scenarios remain gated", which
+// every possible count satisfies -- so the guard would have gone on
+// passing while silently checking nothing, at exactly the moment the
+// table grew past its range.
+func gatedSentence(n int) (string, bool) {
+	word, ok := numberWords[n]
+	if !ok {
+		return "", false
 	}
-	return fmt.Sprintf("%s scenarios remain gated", words[n])
+	return fmt.Sprintf("%s scenarios remain gated", word), true
 }
 
 func TestAllowlistEntryRegexAcceptsDigits(t *testing.T) {
@@ -128,4 +150,13 @@ func TestAllowlistEntryRegexAcceptsDigits(t *testing.T) {
 	}
 	assert.Equal(t, []string{"scaleway_k8s_cluster", "scaleway_lb*", "scaleway_block_volume"}, got,
 		"dropping a digit-bearing type would silently shrink the documented set")
+}
+
+// The degenerate case the explicit miss exists to prevent.
+func TestGatedSentenceReportsUnknownCounts(t *testing.T) {
+	t.Parallel()
+
+	_, ok := gatedSentence(999)
+
+	assert.False(t, ok, "an unmapped count must be reported, not turned into a substring that always matches")
 }
