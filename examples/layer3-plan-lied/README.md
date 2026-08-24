@@ -60,6 +60,18 @@ if the misses are in it too.
     tofu init && tofu plan      # clean
     tofu apply                  # refused
 
-Real credentials, real API, no `SCW_API_URL`. Both cases create their own
-disposable `scaleway_account_project` (ADR-0010), so a failed apply leaves a
-project and nothing billable; `tofu destroy` removes it.
+Real credentials, real API, no `SCW_API_URL`.
+
+**`iam-scope` only reproduces with a credential that lacks
+`write api_namespace`** — that is the whole point of the case, and it cuts
+both ways. Run it with an organization-owner key and the apply *succeeds*,
+creating a real container registry namespace that bills until you remove it.
+Use the dedicated restricted Layer 3 application key the captured evidence
+was produced with; do not run this one under a default profile.
+
+`commercial-type` has no such dependency. The API refuses `iops = 9000`
+whoever asks, so it is the safer of the two to demo live.
+
+Both cases create their own disposable `scaleway_account_project`
+(ADR-0010), so a failed apply leaves a project and nothing billable;
+`tofu destroy` removes it.
