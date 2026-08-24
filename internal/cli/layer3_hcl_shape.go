@@ -136,6 +136,7 @@ func layer3BlockProblems(body *hclsyntax.Body, file string, allowedResourceTypes
 			if len(block.Labels) > 0 && !resourceTypeAllowed(block.Labels[0], allowedResourceTypes) {
 				problems = append(problems, fmt.Sprintf("%s: resource type %q is not in allow_resource_types", file, block.Labels[0]))
 			}
+			problems = append(problems, layer3ProjectBindingProblems(block, file)...)
 		case block.Type == "data":
 			// `data "external"` runs a program at plan time. Restricting
 			// data sources to the cloud under test removes that whole
@@ -234,4 +235,45 @@ func layer3ProviderSourceProblems(tfBlock *hclsyntax.Block, file string) ([]stri
 		}
 	}
 	return problems, sawCanonical
+}
+
+// layer3ProjectBindingProblems refuses a project_id that is not a reference
+// to the stack's own scaleway_account_project.
+//
+// The whole blast-radius argument (ADR-0010, ADR-0023 rule 4) is that each
+// run creates a disposable project and everything lives inside it. Checking
+// that a scaleway_account_project EXISTS is not enough: a fixture can
+// declare one to satisfy that check and then pin its actual resources
+// elsewhere with `project_id = "<some other project>"`. On this account
+// "elsewhere" includes the project holding live infrastructure.
+//
+// A literal, a variable, or a data lookup are all refused. Only a direct
+// reference to a scaleway_account_project resource in this stack is
+// accepted, because only that is provably the project the sweep will
+// destroy.
+func layer3ProjectBindingProblems(resource *hclsyntax.Block, file string) []string {
+	problems := make([]string, 0)
+	if resource.Body == nil {
+		return problems
+	}
+	attr, ok := resource.Body.Attributes["project_id"]
+	if !ok {
+		return problems
+	}
+	name := "<unnamed>"
+	if len(resource.Labels) > 1 {
+		name = resource.Labels[1]
+	}
+	vars := attr.Expr.Variables()
+	if len(vars) == 0 {
+		problems = append(problems, fmt.Sprintf("%s: %s sets project_id to a literal; it must reference this stack's scaleway_account_project, which is the only project the sweep will destroy", file, name))
+		return problems
+	}
+	for _, traversal := range vars {
+		root := traversal.RootName()
+		if root != "scaleway_account_project" {
+			problems = append(problems, fmt.Sprintf("%s: %s sets project_id from %q; it must reference this stack's scaleway_account_project", file, name, root))
+		}
+	}
+	return problems
 }

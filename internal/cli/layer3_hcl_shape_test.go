@@ -307,3 +307,51 @@ resource "scaleway_account_project" "main" { name = "x" }`)
 		t.Errorf("error did not explain the gap: %v", err)
 	}
 }
+
+// Declaring a scaleway_account_project satisfies the existence check while
+// the actual resources are pinned somewhere else entirely — on this account,
+// "somewhere else" includes the project holding live infrastructure.
+func TestLayer3ShapeRefusesLiteralProjectID(t *testing.T) {
+	dir := writeShapeHCL(t, shapeProject+`
+resource "scaleway_block_volume" "escapee" {
+  size_in_gb = 1
+  project_id = "0b6a8a6a-7242-4852-a0cb-ac2e4fc86b92"
+}`)
+
+	err := validateLayer3HCLShape(dir, gateAllowlist)
+	if err == nil {
+		t.Fatal("a literal project_id must be refused — it escapes the disposable project")
+	}
+	if !strings.Contains(err.Error(), "project_id") {
+		t.Errorf("error did not name the attribute: %v", err)
+	}
+}
+
+func TestLayer3ShapeRefusesProjectIDFromVariable(t *testing.T) {
+	dir := writeShapeHCL(t, shapeProject+`
+variable "target" {
+  type    = string
+  default = "0b6a8a6a-7242-4852-a0cb-ac2e4fc86b92"
+}
+resource "scaleway_block_volume" "escapee" {
+  size_in_gb = 1
+  project_id = var.target
+}`)
+
+	if err := validateLayer3HCLShape(dir, gateAllowlist); err == nil {
+		t.Fatal("project_id from a variable must be refused")
+	}
+}
+
+// The legitimate shape: bound to the stack's own project.
+func TestLayer3ShapeAcceptsProjectIDBoundToOwnProject(t *testing.T) {
+	dir := writeShapeHCL(t, shapeProject+`
+resource "scaleway_block_volume" "data" {
+  size_in_gb = 1
+  project_id = scaleway_account_project.main.id
+}`)
+
+	if err := validateLayer3HCLShape(dir, gateAllowlist); err != nil {
+		t.Errorf("a resource bound to its own project was refused: %v", err)
+	}
+}

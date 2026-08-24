@@ -20,8 +20,28 @@ name: Layer 3 gate
 #      moment in time; the PR can move afterwards. Label for intent, gate on
 #      identity and SHA.
 
+# pull_request_target, deliberately — and note this reverses the warning an
+# earlier revision of this file carried, because that warning was about a
+# different usage.
+#
+# `pull_request` loads the workflow FILE from the PR head. A same-repo PR can
+# therefore rewrite this very file to skip the trusted checkout and print the
+# credentials, which makes every other control here decorative. Building the
+# binary from base only helps if the workflow deciding what to run is itself
+# trusted.
+#
+# `pull_request_target` loads the workflow from the base branch, so changes to
+# it take effect only once merged and reviewed. Its notorious danger is real
+# but specific: it grants secrets to a job that then CHECKS OUT AND EXECUTES
+# PR code. This job never does. It takes exactly one thing from the PR — .tf
+# files, copied as data — and every executable is from base: the workflow, the
+# infrafactory binary, mockway at a pinned SHA, and tofu. The HCL is itself
+# validated by that trusted binary before any apply.
+#
+# The same-repo guard below is kept regardless, so a fork PR cannot reach this
+# job at all.
 on:
-  pull_request:
+  pull_request_target:
     types: [labeled, synchronize, reopened]
 
 permissions:
@@ -47,7 +67,7 @@ jobs:
       SCENARIO: ${{ vars.LAYER3_GATE_SCENARIO || 'scenarios/training/block-paris.yaml' }}
       OUTPUT_ROOT: /tmp/layer3-gate/output
     steps:
-      - name: Checkout TRUSTED base code (the tool that will hold the secrets)
+      - name: Checkout TRUSTED base code (workflow, tool, everything executable)
         # The binary that runs with SCW_* in its environment must NOT be
         # built from the PR. A PR can change internal/cli just as easily as
         # it changes HCL, and a compromised binary exfiltrates the
@@ -62,7 +82,9 @@ jobs:
           ref: ${{ github.event.pull_request.base.sha }}
           path: trusted
 
-      - name: Checkout the PR's infrastructure only
+      - name: Checkout the PR's infrastructure as DATA ONLY
+        # Nothing under pr/ is ever built or executed. The staging step
+        # copies *.tf out of it and nothing else.
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ github.event.pull_request.head.sha }}
