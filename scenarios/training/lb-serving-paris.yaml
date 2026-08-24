@@ -1,0 +1,38 @@
+scenario: lb-serving-paris
+version: "1.0"
+cloud: scaleway
+description: >
+  A public load balancer in Paris with one compute backend that
+  actually serves HTTP. The smallest stack that can honestly satisfy
+  an http_probe against real Scaleway: lb-paris declares no compute,
+  so its backend has no servers and the frontend answers 503.
+
+resources:
+  compute:
+    purpose: web-server
+    size: small
+    count: 1
+  networking:
+    load_balancer:
+      exposure: public
+      backends:
+        - port: 80
+          protocol: http
+
+acceptance_criteria:
+  - type: policy
+    check: region_restriction
+    params:
+      region: fr-par
+    expect: pass
+  # The difference between "the load balancer accepts TCP" and "the
+  # load balancer serves traffic". Against real Scaleway this resolves
+  # the frontend's public IP from terraform-live.tfstate and requires a
+  # status below 400 -- which can only happen if the backend booted,
+  # started serving, and the LB health check marked it up.
+  - type: http_probe
+    target: load_balancer
+    port: 80
+    expect: reachable
+  - type: destruction
+    expect: no_orphans

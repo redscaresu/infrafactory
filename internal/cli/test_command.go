@@ -591,8 +591,11 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 				// terraform-live.tfstate, taking the project id with it.
 				// The first canary run failed exactly here.
 				sweepTarget, sweepTargetErr := harness.CaptureSweepTarget(outputDir)
-				sandboxDestroyResult, sandboxDestroyErr := runtime.Deps.SandboxDestroy.Run(ctx, outputDir, sandboxEnv)
+				sandboxDestroyResult, purged, sandboxDestroyErr := destroySandbox(ctx, runtime, outputDir, sandboxEnv, sweepTargetProjectID(sweepTarget))
 				stages, failures = appendSandboxDestroyResult(stages, failures, sandboxDestroyResult, sandboxDestroyErr)
+				if len(purged) > 0 {
+					stages = append(stages, autoCreatedPurgeStage(purged))
+				}
 				if sandboxDestroyErr == nil {
 					stages, failures = appendOrphanSweepResult(ctx, stages, failures, runtime, sweepTarget, sweepTargetErr, sandboxEnv)
 				}

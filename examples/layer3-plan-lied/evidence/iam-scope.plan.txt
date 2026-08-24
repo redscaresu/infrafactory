@@ -6,19 +6,22 @@ OpenTofu will perform the following actions:
   + resource "scaleway_account_project" "main" {
       + created_at      = (known after apply)
       + id              = (known after apply)
-      + name            = "if-s145-c"
+      + name            = "if-s145-iam-scope"
       + organization_id = (known after apply)
       + updated_at      = (known after apply)
     }
-  # scaleway_registry_namespace.images will be created
-  + resource "scaleway_registry_namespace" "images" {
-      + endpoint        = (known after apply)
-      + id              = (known after apply)
-      + is_public       = false
-      + name            = "if-s145-c-images"
-      + organization_id = (known after apply)
-      + project_id      = (known after apply)
-      + region          = (known after apply)
+  # scaleway_domain_zone.app will be created
+  + resource "scaleway_domain_zone" "app" {
+      + domain     = "infrafactory-demo.com"
+      + id         = (known after apply)
+      + message    = (known after apply)
+      + ns         = (known after apply)
+      + ns_default = (known after apply)
+      + ns_master  = (known after apply)
+      + project_id = (known after apply)
+      + status     = (known after apply)
+      + subdomain  = "gate"
+      + updated_at = (known after apply)
     }
 Plan: 2 to add, 0 to change, 0 to destroy.
   with provider["registry.opentofu.org/scaleway/scaleway"],

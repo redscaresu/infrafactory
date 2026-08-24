@@ -263,9 +263,23 @@ func Default() Config {
 					},
 					// Cheap, fast-provisioning types only. Notably absent:
 					// scaleway_k8s_* (clusters take minutes and cost real
-					// money), scaleway_rdb_* , scaleway_redis_* and
-					// scaleway_instance_server. Widening this list is a
-					// deliberate, cost-bearing act.
+					// money), scaleway_rdb_* and scaleway_redis_*.
+					// Widening this list is a deliberate, cost-bearing act.
+					//
+					// The two Instances entries are named individually
+					// rather than as scaleway_instance_*: this is a
+					// deny-by-default list, and a glob would also admit
+					// snapshots and images no scenario needs. They are here
+					// so a load balancer can have a backend that actually
+					// serves -- see ADR-0023's allowlist amendment. This
+					// list and the checked-in infrafactory.yaml must agree;
+					// TestLayer3DefaultAllowlistMatchesCheckedInConfig
+					// enforces it.
+					//
+					// private_nic is here because vpc_required.rego denies
+					// any instance server without one -- omitting it would
+					// leave static policy demanding a resource this list
+					// forbids, which no generated HCL could satisfy.
 					AllowResourceTypes: []string{
 						"scaleway_account_project",
 						"scaleway_block_volume",
@@ -276,6 +290,9 @@ func Default() Config {
 						"scaleway_domain*",
 						"scaleway_iam*",
 						"scaleway_registry_namespace",
+						"scaleway_instance_ip",
+						"scaleway_instance_server",
+						"scaleway_instance_private_nic",
 					},
 				},
 				Destruction: LayerConfig{

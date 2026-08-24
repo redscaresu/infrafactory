@@ -233,4 +233,3 @@ func TestCloudMockStateRouterRespectsScenarioReassignment(t *testing.T) {
 		t.Fatalf("expected scaleway=2 gcp=1 across the three swaps, got scaleway=%d gcp=%d", scaleway.hits, gcp.hits)
 	}
 }
-

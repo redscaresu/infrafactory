@@ -166,7 +166,7 @@ stages live in `examples/layer3-plan-lied/`.
 | case | plan | mock apply | real apply |
 |---|---|---|---|
 | block volume, `iops = 9000` | `2 to add` | `2 added` | `perf_iops ... choose from [5000, 15000]` |
-| registry namespace, unprivileged key | `2 to add` | `2 added` | `insufficient permissions: write api_namespace` |
+| DNS zone, unprivileged key | `2 to add` | `2 added` | `403 Forbidden: permission denied` |
 
 The honest split between them:
 
@@ -181,3 +181,36 @@ Do not present the first as though it were the second.
 
 **Refuted**: duplicate project names were expected to collide and do not.
 Scaleway permits them. Left in the record deliberately.
+
+## D6 — The API puts things in your project that Terraform will not remove
+
+`tofu destroy` cannot delete a project that still contains anything, and
+Scaleway puts something in it without being asked: the first Instance in a
+fresh project causes a **"Default security group"** to be auto-created there.
+It is not in the plan, not in the state file, and not Terraform's to remove.
+
+Destroy therefore ends with
+
+    Error: scaleway-sdk-go: precondition failed: resource is still in use,
+    all resources are not deleted
+
+and ADR-0010's disposable project — the thing the entire blast-radius
+argument rests on — stops being disposable for **every run that declares
+compute**. Nothing billable survives, so a naive cost check reports clean
+while projects accumulate one per run.
+
+No mock surfaces this, because the auto-creation is a behaviour of the real
+API rather than of the configuration. mockway creates exactly what it is
+asked for and nothing else, so the project it never had to delete deleted
+fine.
+
+`destroySandbox` now purges what the API auto-created inside the run's
+project and retries the destroy once, reporting what it removed:
+
+    - sandbox_deploy/auto_created_purge: pass (destroy was blocked by 1
+      resource(s) the API created but Terraform did not own:
+      security_group e3e8f632-... (Default security group) in fr-par-1)
+
+Only groups Scaleway marks `project_default` are touched. A security group
+the run's own HCL declared is Terraform's to destroy, and purging it here
+would hide a real destroy bug.

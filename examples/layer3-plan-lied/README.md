@@ -33,10 +33,19 @@ nothing for the next one. The real API knows its own catalogue for free.
 
 ## iam-scope
 
-A container registry namespace, inside the deploy allowlist, outside what the
-credential is permitted to do.
+A DNS zone for a domain nobody here owns. `scaleway_domain*` is inside the
+deploy allowlist, so infrafactory's own check passes it through; the
+credential is not permitted to create one.
 
-    Error: scaleway-sdk-go: insufficient permissions: write api_namespace
+    Error: scaleway-sdk-go: http error 403 Forbidden: permission denied
+
+The mock's answer to the identical configuration:
+
+    scaleway_domain_zone.app: Creation complete after 0s [id=gate.infrafactory-demo.com]
+    Apply complete! Resources: 2 added, 0 changed, 0 destroyed.
+
+The mock issued a DNS zone for a domain that is not ours, in zero seconds,
+to a pipeline that was never allowed to create one.
 
 **Could a mock have caught this? No — not without becoming the real cloud.**
 The refusal is not a property of the configuration. It is a property of the
@@ -62,12 +71,14 @@ if the misses are in it too.
 
 Real credentials, real API, no `SCW_API_URL`.
 
-**`iam-scope` only reproduces with a credential that lacks
-`write api_namespace`** — that is the whole point of the case, and it cuts
-both ways. Run it with an organization-owner key and the apply *succeeds*,
-creating a real container registry namespace that bills until you remove it.
-Use the dedicated restricted Layer 3 application key the captured evidence
-was produced with; do not run this one under a default profile.
+**`iam-scope` only reproduces with a credential that is not permitted to
+create DNS zones** — that is the whole point of the case. Run it with an
+organization-owner key and the apply behaves differently. Use the dedicated
+restricted Layer 3 application key the captured evidence was produced with;
+do not run this one under a default profile.
+
+The Layer 3 key is deliberately never granted Domains permissions, so this
+fixture stays valid as the policy widens for other resource types.
 
 `commercial-type` has no such dependency. The API refuses `iops = 9000`
 whoever asks, so it is the safer of the two to demo live.

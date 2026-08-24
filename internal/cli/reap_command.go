@@ -79,8 +79,11 @@ func runReapCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) 
 	}
 
 	sweepTarget, sweepTargetErr := harness.CaptureSweepTarget(workDir)
-	destroyResult, destroyErr := runtime.Deps.SandboxDestroy.Run(ctx, workDir, sandboxEnv)
+	destroyResult, purged, destroyErr := destroySandbox(ctx, runtime, workDir, sandboxEnv, sweepTargetProjectID(sweepTarget))
 	stages, failures := appendSandboxDestroyResult(nil, nil, destroyResult, destroyErr)
+	if len(purged) > 0 {
+		stages = append(stages, autoCreatedPurgeStage(purged))
+	}
 	if destroyErr == nil {
 		stages, failures = appendOrphanSweepResult(ctx, stages, failures, runtime, sweepTarget, sweepTargetErr, sandboxEnv)
 	}
@@ -156,9 +159,20 @@ func withSandboxInterruptGuard(
 		reportAbandonedResources(out, statePath, envErr)
 		return err
 	}
-	if _, destroyErr := runtime.Deps.SandboxDestroy.Run(context.Background(), workDir, sandboxEnv); destroyErr != nil {
+	// Through destroySandbox, not the raw harness: an interrupted run is
+	// exactly when a project the API made undeletable matters most,
+	// because nothing else is coming to clean it up. Capture can fail
+	// here -- the state may be mid-write -- and an empty project id just
+	// means no purge, never a skipped destroy.
+	cleanupTarget, _ := harness.CaptureSweepTarget(workDir)
+	_, purged, destroyErr := destroySandbox(
+		context.Background(), runtime, workDir, sandboxEnv, sweepTargetProjectID(cleanupTarget))
+	if destroyErr != nil {
 		reportAbandonedResources(out, statePath, destroyErr)
 		return err
+	}
+	if len(purged) > 0 {
+		_, _ = fmt.Fprintf(out, "%s\n", autoCreatedPurgeStage(purged).Detail)
 	}
 	_, _ = fmt.Fprintf(out, "Cleanup destroy completed.\n")
 	return err
