@@ -142,6 +142,10 @@ jobs:
           # as the secret-bearing step; an unpinned clone would mean code
           # that changed after approval is running beside the credentials.
           # Same reasoning as the SHA-pinned actions in S150.
+          if [ ! -f trusted/.github/mockway-pin ]; then
+            echo "::error::trusted/.github/mockway-pin is missing. The pin must live in the BASE branch to be trustworthy, so this fails until the pin is merged. Refusing to clone an unpinned mockway next to the credentials."
+            exit 1
+          fi
           pin=$(cat trusted/.github/mockway-pin)
           git clone --filter=blob:none https://github.com/${{ github.repository_owner }}/mockway.git ../mockway
           git -C ../mockway checkout --detach "$pin"
@@ -266,6 +270,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # Own the directory rather than inheriting it from a step that
+          # may never have run. The gate failing EARLY is exactly when the
+          # comment matters most, and the first version of this step died
+          # with "No such file or directory" in precisely that case.
+          mkdir -p /tmp/layer3-gate
+          touch /tmp/layer3-gate/result.txt
           marker="<!-- layer3-gate -->"
           verdict="pass"; icon="✅"
           [ "${{ steps.gate.outputs.rc }}" != "0" ] && { verdict="fail"; icon="❌"; }
