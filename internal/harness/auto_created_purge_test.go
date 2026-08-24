@@ -131,3 +131,16 @@ func TestPurgeRefusesGroupsWithNoProject(t *testing.T) {
 	assert.Empty(t, deleted)
 	assert.Empty(t, removed)
 }
+
+// The first version of this list was written from memory and omitted
+// it-mil-1, a real Instance zone -- an instance placed there would have
+// left its project undeletable. Pin the enumeration so the next edit is
+// deliberate.
+func TestInstanceZonesCoverEveryScalewayInstanceZone(t *testing.T) {
+	assert.ElementsMatch(t, []string{
+		"fr-par-1", "fr-par-2", "fr-par-3",
+		"nl-ams-1", "nl-ams-2", "nl-ams-3",
+		"pl-waw-1", "pl-waw-2", "pl-waw-3",
+		"it-mil-1",
+	}, InstanceZones, "verified against the live API on 2026-08-24; see the InstanceZones doc comment to re-verify")
+}

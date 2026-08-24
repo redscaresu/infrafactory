@@ -14,10 +14,22 @@ import (
 // because a generated stack is free to name any zone it likes, and a
 // purge that looked only where it expected the run to be would leave the
 // project undeletable exactly when the generator surprised us.
+//
+// Enumerated against the live API on 2026-08-24 rather than from
+// memory -- the first version of this list omitted it-mil-1, which is a
+// real Instance zone. To re-verify, list security groups per candidate
+// zone and keep the ones that answer 200:
+//
+//	GET /instance/v1/zones/<zone>/security_groups?project=<id>
+//
+// A zone missing from this list does not leak silently: the retried
+// destroy still fails and ScalewayOrphanSweep still fails closed. It
+// degrades to a loud failure, not a quiet leak.
 var InstanceZones = []string{
 	"fr-par-1", "fr-par-2", "fr-par-3",
 	"nl-ams-1", "nl-ams-2", "nl-ams-3",
 	"pl-waw-1", "pl-waw-2", "pl-waw-3",
+	"it-mil-1",
 }
 
 // ScalewayAutoCreatedPurge removes resources the API creates by itself
