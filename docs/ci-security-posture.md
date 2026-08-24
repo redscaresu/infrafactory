@@ -43,6 +43,27 @@ with no remedy available, and a check nobody can act on is a check everybody
 learns to ignore. Symbol-level fails only when our code actually reaches the
 vulnerable path, which is the question worth blocking a merge on.
 
+### What it found on its first run
+
+The gate paid for itself immediately, and not in the way expected. `go.mod`
+pinned `go 1.25.0`, CI installs exactly that (`GOTOOLCHAIN: local`), and the
+**Go 1.25.0 standard library** carries roughly twenty known advisories with
+fixes spread from 1.25.2 to 1.25.13. Several were genuinely reachable, not
+theoretical — for example `GO-2026-6218` in `net/url`, reached from
+`internal/api/server.go` via `http.Client.Do`.
+
+So every binary this repo built was linked against a stdlib with known,
+reachable vulnerabilities. `go.mod` now pins `go 1.25.13`, the highest patch
+any of the findings required.
+
+**This was invisible locally**, which is the part worth remembering. A local
+`govulncheck` reported clean because the toolchain auto-switched to go1.26.7
+(`golang.org/x/vuln` requires ≥1.25.0) and scanned *that* stdlib. CI pins the
+toolchain and scanned go1.25.0. Local and CI were answering different
+questions, and only the CI answer was about what ships. When verifying a
+toolchain-sensitive check, pin the toolchain: `GOTOOLCHAIN=go1.25.13
+govulncheck ...`.
+
 **Explicit `permissions:` on every workflow.** `ci.yml` and `doc-hygiene.yml`
 had none, so `GITHUB_TOKEN` took the default scope — wider than either needs.
 Both are now `contents: read`. This matters more than it did last week: S144
