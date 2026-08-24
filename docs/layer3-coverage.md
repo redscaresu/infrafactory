@@ -39,7 +39,8 @@ if you do not know it; it is the credential doing its job.
 |---|---|---|---|
 | `block-paris` | **runnable** | instant | — (run 2026-08-22) |
 | `lb-paris` | **runnable** | hourly | — (run 2026-08-23) |
-| `incremental-project-paris` | **allowlist only** | hourly | allowlist: `instance_*` — the key already permits it |
+| `lb-serving-paris` | **runnable** | hourly | — (added 2026-08-24; the first `http_probe` against real Scaleway) |
+| `incremental-project-paris` | gates open, never run | hourly | — (`instance_ip`/`instance_server` allowlisted 2026-08-24) |
 | `registry-paris` | key only | instant | Registry |
 | `iam-policies-paris` | key only | instant | IAM |
 | `public-registry-iam-paris` | key only | instant | IAM + Registry |
@@ -54,7 +55,10 @@ if you do not know it; it is the credential doing its job.
 | `web-app-paris` | allowlist + key | slow + expensive | DomainsDNS, IPAM, RDB, VPCGateway |
 | `full-stack-paris` | allowlist + key | slow + expensive | IAM, Kubernetes, RDB, Redis, Registry |
 
-**2 runnable, 1 blocked by the allowlist alone, 4 by the key alone, 9 by both.**
+**As first audited (2026-08-23): 2 runnable, 1 blocked by the allowlist
+alone, 4 by the key alone, 9 by both.** The 2026-08-24 refresh below
+supersedes the first two columns for `lb-serving-paris` and
+`incremental-project-paris`.
 
 `incremental-project-paris` is the one that moved when Instances was granted:
 the credential now permits it and only the deny-by-default allowlist stands in
@@ -71,7 +75,9 @@ be worse than none.
 
 ## The finding: the cheap end of the pool is empty
 
-The two runnable scenarios are the two already run. There is no free
+Every scenario marked **runnable** is one that has actually run against
+the real API; `incremental-project-paris` is the one whose gates are open
+without that having been demonstrated. There is no free
 expansion, and three of the four "key only" entries are not the easy wins they
 look like:
 
@@ -163,13 +169,15 @@ Re-run it after any change to the allowlist, the IAM policy, or a scenario's
 
 `scaleway_instance_ip` and `scaleway_instance_server` are now allowlisted, and the policy already carried `InstancesFullAccess`, so both gates admit a small compute backend.
 
-**Runnable: 3 of 17** Scaleway training scenarios — 18 counting the holdout. `block-paris`, `lb-paris`, and the new `lb-serving-paris`.
+**Runnable: 3 of 17** Scaleway training scenarios — 18 counting the holdout. `block-paris`, `lb-paris`, and the new `lb-serving-paris`, all three of which have actually run.
+
+`incremental-project-paris` is a fourth whose gates both now admit — it was blocked on `instance_*` alone — but it has never been run against the real API, so it is listed as *gates open, never run* rather than runnable. "Runnable" means *has run*, deliberately: an untested claim about what the real cloud will accept is the exact thing this arc exists to distrust.
 
 (The earlier "3 of 16" here counted `lb-serving-paris` in the numerator and not the denominator: adding it made 16 into 17.)
 
 `lb-serving-paris` is the first scenario to satisfy an `http_probe` against real Scaleway. It goes green end to end in **144 seconds** — apply, HTTP 200 through the load balancer frontend, destroy, orphan sweep — and it is the scenario that surfaced the auto-created security group defect (ADR-0023, second amendment of this date).
 
-What still gates the remaining 13 is unchanged and unchanged deliberately:
+What still gates the remaining 14 is unchanged and unchanged deliberately:
 
 - **Cost/time.** `scaleway_k8s_*`, `scaleway_rdb_instance`, `scaleway_redis_cluster` stay commented out. They take minutes to create *and* minutes to destroy, on every iteration of the repair loop.
 - **Policy.** `scaleway_iam*`, `scaleway_registry_namespace` and `scaleway_domain*` pass the allowlist and are refused by the API with a 403. That is the credential doing its job. `scaleway_domain*` is also, now, the `iam-scope` case in the plan-lied corpus — it is deliberately never granted.
