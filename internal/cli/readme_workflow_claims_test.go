@@ -39,6 +39,13 @@ func TestReadmeLayer3GateClaimMatchesWorkflows(t *testing.T) {
 	if gateExists {
 		assert.False(t, disclaimed,
 			"the layer3-gate workflow exists now, so the README must stop saying the gate is not yet merged")
+		// Dropping the disclaimer is only half of it. A README that
+		// deleted the caveat and said nothing about the gate would
+		// satisfy the check above while leaving a real safety control
+		// undocumented -- which is the understating direction this
+		// guard is supposed to close.
+		assert.Contains(t, text, "layer3-gate",
+			"the layer3-gate workflow exists, so the README must describe it rather than merely stop disclaiming it")
 		return
 	}
 	assert.True(t, disclaimed,
