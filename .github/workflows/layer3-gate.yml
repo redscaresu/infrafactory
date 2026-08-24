@@ -219,7 +219,18 @@ jobs:
           set -e
           echo "elapsed=$(( $(date +%s) - start ))" >> "$GITHUB_OUTPUT"
           echo "rc=$rc" >> "$GITHUB_OUTPUT"
-          cat /tmp/layer3-gate/result.txt
+          # Structured lines only, here as well as in the comment. tofu
+          # evaluates PR-supplied expressions at plan time, so failure text
+          # can be attacker-chosen -- `tags = [file("/proc/self/environ")]`
+          # on an otherwise-allowed resource is enough. The Actions log of a
+          # public repository is a publication channel exactly like the
+          # comment, so it gets the same filter.
+          #
+          # The cost is real: a genuine failure is less debuggable from the
+          # log. Reproduce it locally with the same fixture instead -- a
+          # plan-time failure needs no credentials.
+          sed -e 's/\x1b\[[0-9;]*m//g' /tmp/layer3-gate/result.txt \
+            | grep -E '^(Status:|- [a-z_]+/)' || echo "(no structured stages; see the verdict step)"
           exit 0   # the comment step reports; the verdict step decides
 
       - name: Comment the stage summary on the PR
