@@ -9,6 +9,7 @@ import (
 
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/hclsyntax"
+	"github.com/zclconf/go-cty/cty"
 )
 
 // Layer 3 applies HCL that can arrive from a pull request (the S144 gate
@@ -105,6 +106,9 @@ func layer3BlockProblems(body *hclsyntax.Body, file string, allowedResourceTypes
 				problems = append(problems, fmt.Sprintf("%s: provider %q is not permitted", file, block.Labels[0]))
 			}
 		}
+		if block.Type == "terraform" {
+			problems = append(problems, layer3ProviderSourceProblems(block, file)...)
+		}
 		problems = append(problems, layer3NestedProblems(block, file)...)
 	}
 	return problems
@@ -122,6 +126,50 @@ func layer3NestedProblems(block *hclsyntax.Block, file string) []string {
 			problems = append(problems, fmt.Sprintf("%s: %q executes commands during apply, in a process holding cloud credentials", file, nested.Type))
 		}
 		problems = append(problems, layer3NestedProblems(nested, file)...)
+	}
+	return problems
+}
+
+// layer3ScalewayProviderSource is the only provider a Layer 3 stack may pull.
+const layer3ScalewayProviderSource = "scaleway/scaleway"
+
+// layer3ProviderSourceProblems refuses any required_providers entry that is
+// not the real Scaleway provider.
+//
+// Allowing `terraform` blocks wholesale left a hole that the block-type
+// allowlist could not see: a fixture can write
+//
+//	terraform { required_providers { scaleway = { source = "attacker/scaleway" } } }
+//
+// and the local name still satisfies the `provider "scaleway"` check while
+// tofu init downloads and EXECUTES that plugin with SCW_ACCESS_KEY and
+// SCW_SECRET_KEY in the environment. The provider binary is code, and this
+// path takes it from a registry address supplied by a pull request.
+func layer3ProviderSourceProblems(tfBlock *hclsyntax.Block, file string) []string {
+	problems := make([]string, 0)
+	if tfBlock.Body == nil {
+		return problems
+	}
+	for _, inner := range tfBlock.Body.Blocks {
+		if inner.Type != "required_providers" || inner.Body == nil {
+			continue
+		}
+		for name, attr := range inner.Body.Attributes {
+			val, diags := attr.Expr.Value(nil)
+			if diags.HasErrors() || val.IsNull() || !val.Type().IsObjectType() {
+				problems = append(problems, fmt.Sprintf("%s: required_provider %q is not a literal object this check can verify", file, name))
+				continue
+			}
+			if !val.Type().HasAttribute("source") {
+				problems = append(problems, fmt.Sprintf("%s: required_provider %q declares no source", file, name))
+				continue
+			}
+			src := val.GetAttr("source")
+			if src.IsNull() || src.Type() != cty.String || src.AsString() != layer3ScalewayProviderSource {
+				problems = append(problems, fmt.Sprintf("%s: required_provider %q must be source %q (a provider binary is code, and this one is chosen by the PR)",
+					file, name, layer3ScalewayProviderSource))
+			}
+		}
 	}
 	return problems
 }

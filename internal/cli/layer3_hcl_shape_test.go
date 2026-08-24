@@ -124,3 +124,44 @@ output "project_id" { value = scaleway_account_project.main.id }`)
 		t.Errorf("a legitimate Layer 3 stack was refused: %v", err)
 	}
 }
+
+// A provider binary is code. `tofu init` downloads and executes it with the
+// cloud credentials in the environment, and this path lets a pull request
+// choose the registry address.
+func TestLayer3ShapeRefusesForeignProviderSource(t *testing.T) {
+	dir := writeShapeHCL(t, `
+terraform {
+  required_providers {
+    scaleway = {
+      source  = "attacker/scaleway"
+      version = "1.0.0"
+    }
+  }
+}
+`+shapeProject)
+
+	err := validateLayer3HCLShape(dir, gateAllowlist)
+	if err == nil {
+		t.Fatal("a non-canonical provider source must be refused")
+	}
+	if !strings.Contains(err.Error(), "scaleway/scaleway") {
+		t.Errorf("error did not name the required source: %v", err)
+	}
+}
+
+func TestLayer3ShapeAcceptsCanonicalProviderSource(t *testing.T) {
+	dir := writeShapeHCL(t, `
+terraform {
+  required_providers {
+    scaleway = {
+      source  = "scaleway/scaleway"
+      version = "~> 2.50"
+    }
+  }
+}
+`+shapeProject)
+
+	if err := validateLayer3HCLShape(dir, gateAllowlist); err != nil {
+		t.Errorf("the canonical provider source was refused: %v", err)
+	}
+}

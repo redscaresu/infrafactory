@@ -47,10 +47,26 @@ jobs:
       SCENARIO: ${{ vars.LAYER3_GATE_SCENARIO || 'scenarios/training/block-paris.yaml' }}
       OUTPUT_ROOT: /tmp/layer3-gate/output
     steps:
-      - name: Checkout the exact head this run was triggered for
+      - name: Checkout TRUSTED base code (the tool that will hold the secrets)
+        # The binary that runs with SCW_* in its environment must NOT be
+        # built from the PR. A PR can change internal/cli just as easily as
+        # it changes HCL, and a compromised binary exfiltrates the
+        # credentials before any HCL check it is supposed to perform ever
+        # runs. Validation cannot live in the artefact being validated.
+        #
+        # So: the tool comes from the base branch, the infrastructure comes
+        # from the PR. That is also the honest model of the gate -- the PR
+        # proposes infrastructure; trusted machinery applies it.
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: trusted
+
+      - name: Checkout the PR's infrastructure only
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ github.event.pull_request.head.sha }}
+          path: pr
 
       - name: Re-verify the PR head has not moved
         # The gate may have waited on a required-reviewer approval. If the PR
@@ -90,7 +106,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version-file: go.mod
+          go-version-file: trusted/go.mod
 
       - name: Setup OpenTofu
         uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2
@@ -109,13 +125,14 @@ jobs:
           done
           curl -sf http://localhost:8080/mock/state > /dev/null
 
-      - name: Build infrafactory
+      - name: Build infrafactory from the trusted base
+        working-directory: trusted
         run: go build -tags noui -o /tmp/infrafactory ./cmd/infrafactory
 
       - name: Write the Layer 3 run config
         run: |
           mkdir -p /tmp/layer3-gate "$OUTPUT_ROOT"
-          repo="$GITHUB_WORKSPACE"
+          repo="$GITHUB_WORKSPACE/trusted"
           cat > /tmp/layer3-gate/infrafactory.yaml <<CFG
           version: "1.0"
           agent:
@@ -167,7 +184,8 @@ jobs:
         # front of a check that wants to be deterministic.
         run: |
           scenario_name=$(basename "$SCENARIO" .yaml)
-          src="examples/layer3-gate/$scenario_name"
+          # HCL from the PR; everything else from trusted.
+          src="pr/examples/layer3-gate/$scenario_name"
           if [ ! -d "$src" ]; then
             echo "::error::No gate fixture at $src. Add the HCL this scenario should apply."
             exit 1
@@ -192,7 +210,7 @@ jobs:
           start=$(date +%s)
           set +e
           /tmp/infrafactory --config /tmp/layer3-gate/infrafactory.yaml \
-            test "$SCENARIO" > /tmp/layer3-gate/result.txt 2>&1
+            test "trusted/$SCENARIO" > /tmp/layer3-gate/result.txt 2>&1
           rc=$?
           set -e
           echo "elapsed=$(( $(date +%s) - start ))" >> "$GITHUB_OUTPUT"
@@ -263,7 +281,7 @@ jobs:
             echo "live state records no resources — the run cleaned up after itself"; exit 0
           fi
           echo "::warning::live state still holds resources; reaping"
-          /tmp/infrafactory --config /tmp/layer3-gate/infrafactory.yaml reap "$SCENARIO"
+          /tmp/infrafactory --config /tmp/layer3-gate/infrafactory.yaml reap "trusted/$SCENARIO"
 
       - name: Verdict
         # Separate from the run step so the comment always posts first.
