@@ -277,3 +277,13 @@ func layer3ProjectBindingProblems(resource *hclsyntax.Block, file string) []stri
 	}
 	return problems
 }
+
+// layer3PreflightHCL is every structural check Layer 3 makes on a
+// configuration, in the order that matters: all of them before any tofu
+// process starts.
+func layer3PreflightHCL(outputDir string, allowedResourceTypes []string) error {
+	if err := validateLayer3ProjectResource(outputDir); err != nil {
+		return err
+	}
+	return validateLayer3HCLShape(outputDir, allowedResourceTypes)
+}

@@ -513,9 +513,70 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 		deployMode = harness.MockDeployModeClean
 	}
 
+	// Validate BEFORE any tofu runs, including Layer 2's.
+	//
+	// The mock deploy is not a safe place to execute unvalidated HCL. It
+	// runs `tofu init/apply` in this same process, whose environment holds
+	// the cloud credentials, so a `provisioner` or `data "external"` in a
+	// PR fixture would execute there — before a check placed in front of
+	// the sandbox deploy ever ran. "Before the real apply" was the wrong
+	// bar; "before any tofu" is the right one.
+	//
+	// Only when Layer 3 is enabled: with sandbox off there are no
+	// credentials to protect and the mock is the whole point.
+	sandboxEnabled := runtime.Config.Validation.Layers.SandboxDeploy.Enabled
+	hclRefused := false
+	if sandboxEnabled {
+		if shapeErr := layer3PreflightHCL(outputDir,
+			runtime.Config.Validation.Layers.SandboxDeploy.AllowResourceTypes); shapeErr != nil {
+			hclRefused = true
+			stages = append(stages, StageSummary{Layer: "sandbox_deploy", Stage: "allowlist", Status: StageStatusFail})
+			failures = append(failures, FailureSummary{
+				Layer:   "sandbox_deploy",
+				Stage:   "allowlist",
+				Check:   "allow_resource_types",
+				Command: "layer 3 hcl validation",
+				Detail:  shapeErr.Error(),
+			})
+		} else {
+			stages = append(stages, StageSummary{Layer: "sandbox_deploy", Stage: "allowlist", Status: StageStatusPass})
+		}
+	}
+
+	// A refused configuration means no tofu runs at all -- not even to
+	// clean up. `tofu destroy` evaluates the same configuration, and
+	// destroy-time provisioners are a thing, so "execute it just to tidy
+	// up" would hand the refused HCL exactly the execution it was refused
+	// for.
+	//
+	// That leaves one honest gap, and it is reported rather than papered
+	// over: if the live state already records resources from an earlier
+	// run, they are not destroyed here. The operator is told, loudly,
+	// because a human deciding what to do beats a machine executing HCL it
+	// has just declared untrustworthy.
+	if hclRefused {
+		if liveStateMayHoldResources(outputDir) {
+			failures = append(failures, FailureSummary{
+				Layer:   "sandbox_deploy",
+				Stage:   "cleanup_blocked",
+				Check:   "no_orphans",
+				Command: "layer 3 hcl validation",
+				Detail: "the configuration was refused, so no tofu was run -- including destroy. " +
+					"Live state still records resources: inspect them and clean up with a configuration that passes validation.",
+			})
+			stages = append(stages, StageSummary{Layer: "sandbox_deploy", Stage: "cleanup_blocked", Status: StageStatusFail})
+		}
+		return OutputResult{
+			Command:  "test",
+			Scenario: sc.Name,
+			Status:   CommandStatusFailed,
+			Stages:   stages,
+			Failures: failures,
+		}, &CLIError{Op: "test", Code: errorCodeCommandFailed, Err: errors.New("test checks failed")}
+	}
+
 	deployResult, deployErr := runtime.Deps.MockDeploy.Run(ctx, outputDir, env, deployMode)
 	stages, failures = appendMockDeployResult(stages, failures, deployResult, deployErr)
-	sandboxEnabled := runtime.Config.Validation.Layers.SandboxDeploy.Enabled
 	if deployErr == nil && sandboxEnabled {
 		sandboxEnv, sandboxEnvErr := sandboxCommandEnv(runtime)
 		if sandboxEnvErr != nil {
@@ -547,30 +608,7 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 			// route: it stages committed fixtures and calls test, and its
 			// HCL comes from a pull request, which is precisely where an
 			// unvetted resource type would arrive from.
-			// Three checks, all of which used to live only in the
-			// generation path and so were skipped by any route applying
-			// pre-existing HCL:
-			//   - the project resource, which is what bounds blast radius
-			//     to one disposable project (ADR-0010)
-			//   - the resource-type allowlist (ADR-0023 rule 5)
-			//   - the HCL shape, parsed rather than pattern-matched,
-			//     because this input can come from a pull request
-			allowErr := validateLayer3ProjectResource(outputDir)
-			if allowErr == nil {
-				allowErr = validateLayer3HCLShape(outputDir,
-					runtime.Config.Validation.Layers.SandboxDeploy.AllowResourceTypes)
-			}
-			if allowErr != nil {
-				stages = append(stages, StageSummary{Layer: "sandbox_deploy", Stage: "allowlist", Status: StageStatusFail})
-				failures = append(failures, FailureSummary{
-					Layer:   "sandbox_deploy",
-					Stage:   "allowlist",
-					Check:   "allow_resource_types",
-					Command: "layer 3 allowlist",
-					Detail:  allowErr.Error(),
-				})
-			} else {
-				stages = append(stages, StageSummary{Layer: "sandbox_deploy", Stage: "allowlist", Status: StageStatusPass})
+			{
 				sandboxResult, sandboxErr := runtime.Deps.SandboxDeploy.Run(ctx, outputDir, sandboxEnv)
 				stages, failures = appendSandboxDeployResult(stages, failures, sandboxResult, sandboxErr)
 				if sandboxResult != nil && len(sandboxResult.Plan.Stdout) > 0 {

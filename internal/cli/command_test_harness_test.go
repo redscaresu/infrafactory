@@ -101,6 +101,32 @@ acceptance_criteria:
     expect: no_orphans
 `)
 
+	// Layer 3 validates the configuration before any tofu runs, so a
+	// harness whose output directory holds no HCL cannot reach the sandbox
+	// path at all. Seed the shape a real run produces: a declared provider
+	// source, the stack's own project, and a resource bound to it.
+	for _, scenario := range []string{"example-scenario", "unsupported-dns", "criteria-eval"} {
+		dir := filepath.Join(workspace, "output", scenario)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("seed output dir: %v", err)
+		}
+		mustWriteFile(t, filepath.Join(dir, "main.tf"), `terraform {
+  required_providers {
+    scaleway = {
+      source = "scaleway/scaleway"
+    }
+  }
+}
+resource "scaleway_account_project" "main" {
+  name = "harness"
+}
+resource "scaleway_block_volume" "data" {
+  size_in_gb = 1
+  project_id = scaleway_account_project.main.id
+}
+`)
+	}
+
 	return &CommandTestHarness{
 		T:            t,
 		WorkspaceDir: workspace,

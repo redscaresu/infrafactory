@@ -782,6 +782,10 @@ func TestTestCommandRunsSandboxLayerWhenEnabled(t *testing.T) {
 				return config.Config{}, err
 			}
 			cfg.Validation.Layers.SandboxDeploy.Enabled = true
+			// Workspace-scoped, like every other test: the relative
+			// default ./output leaks into the package dir (M71/M81) and
+			// no longer holds the HCL Layer 3 validates before running.
+			cfg.Paths.Output = h.OutputDir()
 			return cfg, nil
 		},
 		scenarioLoader: defaultScenarioLoader,
@@ -883,6 +887,7 @@ func TestTestCommandAutoDestroysSandboxResourcesAfterProbeFailure(t *testing.T) 
 				return config.Config{}, err
 			}
 			cfg.Validation.Layers.SandboxDeploy.Enabled = true
+			cfg.Paths.Output = h.OutputDir()
 			cfg.ConstraintPolicies = map[string]string{
 				"encryption_at_rest": policyPath,
 			}
@@ -936,6 +941,10 @@ func TestTestCommandFailsSandboxPreflightWithoutCredentials(t *testing.T) {
 				return config.Config{}, err
 			}
 			cfg.Validation.Layers.SandboxDeploy.Enabled = true
+			// Workspace-scoped, like every other test: the relative
+			// default ./output leaks into the package dir (M71/M81) and
+			// no longer holds the HCL Layer 3 validates before running.
+			cfg.Paths.Output = h.OutputDir()
 			return cfg, nil
 		},
 		scenarioLoader: defaultScenarioLoader,
@@ -1128,6 +1137,10 @@ func TestTestCommandFailsWhenOrphanSweepReportsLeak(t *testing.T) {
 				return config.Config{}, err
 			}
 			cfg.Validation.Layers.SandboxDeploy.Enabled = true
+			// Workspace-scoped, like every other test: the relative
+			// default ./output leaks into the package dir (M71/M81) and
+			// no longer holds the HCL Layer 3 validates before running.
+			cfg.Paths.Output = h.OutputDir()
 			return cfg, nil
 		},
 		scenarioLoader: defaultScenarioLoader,
