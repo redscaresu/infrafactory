@@ -16,9 +16,9 @@ weakest part of the argument. Say so before the numbers rather than after.
 
 | | |
 |---|---|
-| Scenarios ever run against real Scaleway | **3** of 16 (`block-paris`, `lb-paris`, `lb-serving-paris`) |
+| Scenarios ever run against real Scaleway | **3** of 17 Scaleway training scenarios, 18 counting the holdout (`block-paris`, `lb-paris`, `lb-serving-paris`) |
 | Real applies during the arc's validation | roughly **50**, most of them repeated runs of the same two fixtures |
-| Distinct resource types exercised | 7 (`account_project`, `block_volume`, `lb`, `lb_ip`, `lb_backend`, `lb_frontend`, `instance_server`/`instance_ip`) |
+| Distinct resource types exercised | 8 (`account_project`, `block_volume`, `lb`, `lb_ip`, `lb_backend`, `lb_frontend`, `instance_server`, `instance_ip`) |
 | Clouds with a real-apply layer | **1** of 4 (Scaleway only; GCP, AWS and Genesys are mock-only) |
 | CI gate runs on real pull requests | **11** |
 

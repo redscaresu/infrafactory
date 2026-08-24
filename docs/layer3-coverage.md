@@ -5,8 +5,10 @@ Audit date: 2026-08-24. **Refreshed** after `scaleway_instance_ip` and
 balancer could have a backend that serves — see the allowlist amendment
 in ADR-0023. Derived from the **actually generated HCL** in
 `.infrafactory/runs/<scenario>/<run_id>/generated/*.tf`, not inferred from
-`mappings.yaml` — every one of the 16 Scaleway scenarios has prior run
-artifacts.
+`mappings.yaml` — every one of the 16 Scaleway scenarios that existed at
+audit time has prior run artifacts. `lb-serving-paris`, added afterwards,
+has none: it is driven from fixed HCL through the gate rather than
+generated.
 
 The point of this file is to stop "let's expand Layer 3" being a vague
 ambition. Expansion is a cost-and-blast-radius decision per scenario, and
@@ -161,7 +163,9 @@ Re-run it after any change to the allowlist, the IAM policy, or a scenario's
 
 `scaleway_instance_ip` and `scaleway_instance_server` are now allowlisted, and the policy already carried `InstancesFullAccess`, so both gates admit a small compute backend.
 
-**Runnable: 3 of 16.** `block-paris`, `lb-paris`, and the new `lb-serving-paris`.
+**Runnable: 3 of 17** Scaleway training scenarios — 18 counting the holdout. `block-paris`, `lb-paris`, and the new `lb-serving-paris`.
+
+(The earlier "3 of 16" here counted `lb-serving-paris` in the numerator and not the denominator: adding it made 16 into 17.)
 
 `lb-serving-paris` is the first scenario to satisfy an `http_probe` against real Scaleway. It goes green end to end in **144 seconds** — apply, HTTP 200 through the load balancer frontend, destroy, orphan sweep — and it is the scenario that surfaced the auto-created security group defect (ADR-0023, second amendment of this date).
 
