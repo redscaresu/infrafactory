@@ -1,5 +1,5 @@
-Error: scaleway-sdk-go: insufficient permissions: write api_namespace
+Error: scaleway-sdk-go: http error 403 Forbidden: Permission denied
 
-  with scaleway_registry_namespace.images,
-  on main.tf line 4, in resource "scaleway_registry_namespace" "images":
-   4: resource "scaleway_registry_namespace" "images" {
+  with scaleway_rdb_instance.app,
+  on main.tf line 7, in resource "scaleway_rdb_instance" "app":
+   7: resource "scaleway_rdb_instance" "app" {

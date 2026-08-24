@@ -36,6 +36,13 @@ type SandboxDestroyHarnessRunner interface {
 	Run(context.Context, string, map[string]string) (*harness.SandboxDestroyResult, error)
 }
 
+// AutoCreatedPurgeRunner removes resources the cloud API created inside
+// a run's project without being asked -- which Terraform therefore never
+// destroys, and which keep the disposable project undeletable.
+type AutoCreatedPurgeRunner interface {
+	Run(ctx context.Context, projectID, secretKey string) ([]string, error)
+}
+
 // OrphanSweepRunner verifies, against the real API, that a Layer 3 run
 // left nothing billable behind. For Layer 3 this -- not mockway state --
 // is what satisfies a `destruction: no_orphans` criterion.
@@ -70,6 +77,7 @@ type RuntimeDependencies struct {
 	Destroy        DestroyHarnessRunner
 	SandboxDeploy  SandboxDeployHarnessRunner
 	SandboxDestroy SandboxDestroyHarnessRunner
+	AutoCreated    AutoCreatedPurgeRunner
 	OrphanSweep    OrphanSweepRunner
 	RealProbe      RealProbeHarnessRunner
 	MockState      harness.MockStateClient
@@ -369,6 +377,9 @@ func buildRuntime(cmd *cobra.Command, opts runtimeOptions) (*CommandRuntime, err
 	}
 	if deps.SandboxDestroy == nil {
 		deps.SandboxDestroy = harness.NewSandboxDestroyHarness(execCommandRunner{})
+	}
+	if deps.AutoCreated == nil {
+		deps.AutoCreated = harness.NewScalewayAutoCreatedPurge(autoCreatedPurgeTimeout)
 	}
 	if deps.OrphanSweep == nil {
 		deps.OrphanSweep = harness.NewScalewayOrphanSweep(

@@ -33,10 +33,18 @@ nothing for the next one. The real API knows its own catalogue for free.
 
 ## iam-scope
 
-A container registry namespace, inside the deploy allowlist, outside what the
-credential is permitted to do.
+A managed PostgreSQL instance, inside the deploy allowlist, outside what the
+credential is permitted to create.
 
-    Error: scaleway-sdk-go: insufficient permissions: write api_namespace
+    Error: scaleway-sdk-go: http error 403 Forbidden: Permission denied
+
+The mock's answer to the identical configuration:
+
+    scaleway_rdb_instance.app: Creation complete after 0s [id=fr-par/e2daae65-...]
+    Apply complete! Resources: 2 added, 0 changed, 0 destroyed.
+
+A production database, provisioned in zero seconds, by a pipeline that was
+never allowed to provision one.
 
 **Could a mock have caught this? No — not without becoming the real cloud.**
 The refusal is not a property of the configuration. It is a property of the
@@ -62,12 +70,15 @@ if the misses are in it too.
 
 Real credentials, real API, no `SCW_API_URL`.
 
-**`iam-scope` only reproduces with a credential that lacks
-`write api_namespace`** — that is the whole point of the case, and it cuts
-both ways. Run it with an organization-owner key and the apply *succeeds*,
-creating a real container registry namespace that bills until you remove it.
-Use the dedicated restricted Layer 3 application key the captured evidence
-was produced with; do not run this one under a default profile.
+**`iam-scope` only reproduces with a credential that is not permitted to
+create a managed database** — that is the whole point of the case, and it
+cuts both ways. Run it with an organization-owner key and the apply
+*succeeds*, provisioning a real PostgreSQL instance that bills until you
+remove it. Use the dedicated restricted Layer 3 application key the captured
+evidence was produced with; do not run this one under a default profile.
+
+The Layer 3 key is deliberately never granted database permissions, so this
+fixture stays valid as the policy widens for other resource types.
 
 `commercial-type` has no such dependency. The API refuses `iops = 9000`
 whoever asks, so it is the safer of the two to demo live.

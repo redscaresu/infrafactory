@@ -79,8 +79,11 @@ func runReapCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) 
 	}
 
 	sweepTarget, sweepTargetErr := harness.CaptureSweepTarget(workDir)
-	destroyResult, destroyErr := runtime.Deps.SandboxDestroy.Run(ctx, workDir, sandboxEnv)
+	destroyResult, purged, destroyErr := destroySandbox(ctx, runtime, workDir, sandboxEnv, sweepTargetProjectID(sweepTarget))
 	stages, failures := appendSandboxDestroyResult(nil, nil, destroyResult, destroyErr)
+	if len(purged) > 0 {
+		stages = append(stages, autoCreatedPurgeStage(purged))
+	}
 	if destroyErr == nil {
 		stages, failures = appendOrphanSweepResult(ctx, stages, failures, runtime, sweepTarget, sweepTargetErr, sandboxEnv)
 	}

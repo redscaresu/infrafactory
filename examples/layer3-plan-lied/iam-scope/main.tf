@@ -1,8 +1,16 @@
 resource "scaleway_account_project" "main" {
-  name = "if-s145-c"
+  name = "if-s145-iam-scope"
 }
-resource "scaleway_registry_namespace" "images" {
-  name       = "if-s145-c-images"
-  is_public  = false
-  project_id = scaleway_account_project.main.id
+
+# A managed PostgreSQL instance. The deploy allowlist permits it; the
+# credential running the apply is deliberately not allowed to create one.
+resource "scaleway_rdb_instance" "app" {
+  name           = "if-s145-db"
+  node_type      = "DB-DEV-S"
+  engine         = "PostgreSQL-15"
+  is_ha_cluster  = false
+  disable_backup = true
+  user_name      = "appuser"
+  password       = "Refused-Before-Use-1!"
+  project_id     = scaleway_account_project.main.id
 }
