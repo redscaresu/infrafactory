@@ -6,6 +6,13 @@ on:
   push:
     branches: [main]
 
+# S150-T3. Without this the GITHUB_TOKEN gets the default scope, which is
+# wider than any job here needs. Read-only is sufficient: nothing in CI
+# writes to the repo. The job that will hold cloud credentials (S144) must
+# declare its own narrower set rather than inherit anything from here.
+permissions:
+  contents: read
+
 env:
   # M80 — opt into Node 24 ahead of GitHub's forced June 2 2026 flip
   # so any breakage in our Playwright + npm-install path surfaces on
@@ -68,6 +75,38 @@ jobs:
         # parallel subtests collided on the relative-path `./output`
         # default).
         run: go test -race -count=2 ./...
+
+  govulncheck:
+    # S150-T1. Nothing scanned Go dependencies for known vulnerabilities
+    # before this, so a vulnerable module could ship silently.
+    #
+    # Symbol-level (the default) rather than -scan module, deliberately.
+    # The tree currently requires golang.org/x/crypto v0.53.0, which carries
+    # GO-2026-5932 with "Fixed in: N/A" -- no fix exists. A module-level gate
+    # would be permanently red with no remedy available, and a check nobody
+    # can act on is a check everybody learns to ignore. Symbol-level fails
+    # only when our code actually reaches the vulnerable path, which is the
+    # question worth blocking a merge on.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Run govulncheck
+        # -tags noui, and NOT for convenience. cmd/infrafactory/embed.go
+        # carries `//go:embed all:ui/build`, and that directory is generated
+        # and gitignored, so on a clean runner it does not exist and
+        # `go build ./...` fails to load that package.
+        #
+        # govulncheck does not fail on it -- it exits 0 and says nothing.
+        # It simply cannot analyse a package that will not load, so the
+        # scan would quietly cover less than it appears to. A green result
+        # that skipped a package is the kind of false green this repo has
+        # been bitten by before. The noui build tag swaps the embed for a
+        # stub so every package loads and is actually scanned.
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest -tags noui ./...
 
   gitleaks:
     # M72: mirror the local pre-commit hook + the 3 sibling-fake CI

@@ -1,5 +1,9 @@
 name: Doc Hygiene
 
+# S150-T3. Least-privilege GITHUB_TOKEN: this workflow only reads the diff.
+permissions:
+  contents: read
+
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
