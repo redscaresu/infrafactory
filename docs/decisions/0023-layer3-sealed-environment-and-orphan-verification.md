@@ -135,3 +135,9 @@ Those counts were hand-maintained, and over a single slice they drifted four tim
 `TestLayer3CoverageDocTotalsMatchItsTable` and `TestLayer3CoverageDocAllowlistMatchesConfig` now derive the totals and the gated remainder from the table's own rows, and diff the enumerated allowlist against the config. Both carry synthetic-drift coverage.
 
 This extends the project's existing "drift becomes a failed `go test`" pattern — ADR-0021's cloud-prefix lockstep, the sibling contract audits, the pitfalls/OPA dedup check — to prose. The justification is the same one the pattern always rests on: a convention nobody can violate accidentally is worth more than a convention written down. It applies here because the prose makes checkable numerical claims about committed configuration, not because documentation in general should be tested.
+
+**Amendment — the README's gate claim is CI-enforced (2026-08-24).** The README describes what Layer 3 guarantees, and a reader has no way to check whether the described pre-merge gate actually runs. It briefly did not: the section was written while `.github/workflows/layer3-gate.yml` still lived on an unmerged branch, so a public safety claim outran the repository by one merge.
+
+`TestReadmeLayer3GateClaimMatchesWorkflows` ties the two together in both directions. With no gate workflow present the README must carry its "not yet merged" qualification; once the workflow lands the same test fails until the qualification is removed. Both directions carry synthetic-drift coverage.
+
+The asymmetry is the point. Overstating a safety control is the dangerous direction — someone relies on a gate that is not there — but understating it is how a repository ends up with a working control nobody knows about. Neither should survive a merge.
