@@ -158,6 +158,24 @@ jobs:
             zone: $repo/policies/scaleway/region_restriction.rego
           CFG
 
+      - name: Stage the PR's infrastructure code
+        # This is the point of the gate rather than setup for it: the HCL
+        # under examples/layer3-gate/ is what the PR proposes, and the gate
+        # applies exactly that. `infrafactory test` runs the harness against
+        # an output directory; it does not generate, which is deliberate --
+        # the generator would put a 40-60s LLM call with real variance in
+        # front of a check that wants to be deterministic.
+        run: |
+          scenario_name=$(basename "$SCENARIO" .yaml)
+          src="examples/layer3-gate/$scenario_name"
+          if [ ! -d "$src" ]; then
+            echo "::error::No gate fixture at $src. Add the HCL this scenario should apply."
+            exit 1
+          fi
+          mkdir -p "$OUTPUT_ROOT/$scenario_name"
+          cp "$src"/*.tf "$OUTPUT_ROOT/$scenario_name/"
+          echo "staged $(ls "$src"/*.tf | wc -l) file(s) from $src"
+
       - name: Run the gate
         id: gate
         env:
