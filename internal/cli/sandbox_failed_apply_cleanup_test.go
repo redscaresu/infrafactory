@@ -349,3 +349,62 @@ func TestUnreadableLiveStateStillTriggersCleanup(t *testing.T) {
 		t.Errorf("got %d destroy calls on unreadable state, want 1 — must fail closed", sandboxDestroy.calls)
 	}
 }
+
+// ADR-0023 rule 5 denies expensive resource types before any API call. That
+// check lived only in the generation path, so any route applying
+// pre-existing HCL -- notably the S144 PR gate, which stages committed
+// fixtures and calls test -- reached the real API with the allowlist never
+// consulted. The gate's HCL comes from a pull request, which is exactly
+// where an unvetted resource type would arrive from.
+func TestDisallowedResourceTypeNeverReachesTheRealAPI(t *testing.T) {
+	h := newCommandTestHarness(t)
+	scenarioPath := writeUnsupportedCriteriaScenario(t, h.WorkspaceDir)
+	sandboxCredsForTest(t)
+	outputRoot := filepath.Join(h.WorkspaceDir, "output")
+
+	dir := filepath.Join(outputRoot, "unsupported-dns")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	// A k8s cluster is slow and expensive, and is deliberately absent from
+	// the allowlist below.
+	hcl := `resource "scaleway_account_project" "main" { name = "x" }
+resource "scaleway_k8s_cluster" "expensive" { name = "nope" }`
+	if err := os.WriteFile(filepath.Join(dir, "main.tf"), []byte(hcl), 0o600); err != nil {
+		t.Fatalf("write hcl: %v", err)
+	}
+
+	sandboxDeploy := &fakeSandboxDeployHarness{}
+	sandboxDestroy := &fakeSandboxDestroyHarness{
+		result: &harness.SandboxDestroyResult{Destroy: harness.StageResult{Stage: "destroy"}},
+	}
+	sweep := &fakeOrphanSweep{}
+	opts := sandboxCleanupOpts(outputRoot, sandboxDeploy, sandboxDestroy, sweep)
+	base := opts.configLoader
+	opts.configLoader = func(path string) (config.Config, error) {
+		cfg, err := base(path)
+		if err != nil {
+			return config.Config{}, err
+		}
+		cfg.Validation.Layers.SandboxDeploy.AllowResourceTypes = []string{
+			"scaleway_account_project", "scaleway_block_volume",
+		}
+		return cfg, nil
+	}
+
+	cmd := newTestCommandForTest(opts)
+	stdout := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{scenarioPath, "--config", h.ConfigPath})
+
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected the disallowed type to fail the run")
+	}
+	if sandboxDeploy.calls != 0 {
+		t.Errorf("a disallowed type reached the real API: %d sandbox deploy call(s)", sandboxDeploy.calls)
+	}
+	if !strings.Contains(stdout.String(), "scaleway_k8s_cluster") {
+		t.Errorf("failure did not name the offending type:\n%s", stdout.String())
+	}
+}

@@ -178,6 +178,12 @@ jobs:
 
       - name: Run the gate
         id: gate
+        # Step-level timeout, deliberately well below the job's. A job-level
+        # timeout terminates the job outright and `if: always()` steps never
+        # run -- so a hung apply would skip the reap and leak. Capping the
+        # step instead means a stuck tofu fails the step and the job still
+        # has budget left to clean up.
+        timeout-minutes: 10
         env:
           SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}
           SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}

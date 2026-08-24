@@ -104,4 +104,10 @@ Two gates remain and only one moved. Widening the allowlist to admit `scaleway_i
 
 Still absent, and deliberately: IAM (no privilege escalation), registry, serverless, object storage, billing, domains.
 
+**Amendment — the allowlist gates every real apply, not just generated ones (2026-08-24).** Rule 5 says expensive types are denied by default before any API call. The check only ever ran in the *generation* path, which was sufficient while every Layer 3 run came from the generator. The S144 PR gate broke that assumption: it stages committed HCL from `examples/layer3-gate/` and calls `test`, so the allowlist was configured and never consulted, and a pull request could have introduced a `scaleway_k8s_cluster` that applied for real.
+
+Enforcement moved to where the guarantee belongs — immediately before the sandbox deploy, so it covers any route to a real apply rather than one particular caller. The gate's HCL arrives from a pull request, which is precisely the untrusted-input case rule 5 exists for.
+
+Generalising: a control attached to *one path into* a dangerous operation is a control that a second path silently bypasses. Attach it to the operation.
+
 **Enforcement**: the guards carry synthetic-drift coverage — removing `SCW_API_URL` from `SandboxStripEnv` fails three tests, verified before S139 merged. Following the project's "drift becomes failed `go test`" pattern.

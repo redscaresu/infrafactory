@@ -542,15 +542,37 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 				Status: StageStatusPass,
 				Detail: "credentials present; endpoint asserted as " + realScalewayAPIURL,
 			})
-			sandboxAttempted = true
-			sandboxResult, sandboxErr := runtime.Deps.SandboxDeploy.Run(ctx, outputDir, sandboxEnv)
-			stages, failures = appendSandboxDeployResult(stages, failures, sandboxResult, sandboxErr)
-			if sandboxResult != nil && len(sandboxResult.Plan.Stdout) > 0 {
-				planLiveText = []byte(sandboxResult.Plan.Stdout)
-			} else if sandboxErr != nil {
-				var deployErr *harness.SandboxDeployError
-				if errors.As(sandboxErr, &deployErr) && len(deployErr.Plan.Stdout) > 0 {
-					planLiveText = []byte(deployErr.Plan.Stdout)
+			// Enforce the allowlist here too, not only in the generation
+			// path. ADR-0023 rule 5 denies expensive types before any API
+			// call, but that check lived solely in generate -- so any route
+			// applying pre-existing HCL reached the real API with the
+			// allowlist never consulted. The S144 PR gate is exactly such a
+			// route: it stages committed fixtures and calls test, and its
+			// HCL comes from a pull request, which is precisely where an
+			// unvetted resource type would arrive from.
+			allowErr := validateLayer3ResourceAllowlist(outputDir,
+				runtime.Config.Validation.Layers.SandboxDeploy.AllowResourceTypes)
+			if allowErr != nil {
+				stages = append(stages, StageSummary{Layer: "sandbox_deploy", Stage: "allowlist", Status: StageStatusFail})
+				failures = append(failures, FailureSummary{
+					Layer:   "sandbox_deploy",
+					Stage:   "allowlist",
+					Check:   "allow_resource_types",
+					Command: "layer 3 allowlist",
+					Detail:  allowErr.Error(),
+				})
+			} else {
+				stages = append(stages, StageSummary{Layer: "sandbox_deploy", Stage: "allowlist", Status: StageStatusPass})
+				sandboxAttempted = true
+				sandboxResult, sandboxErr := runtime.Deps.SandboxDeploy.Run(ctx, outputDir, sandboxEnv)
+				stages, failures = appendSandboxDeployResult(stages, failures, sandboxResult, sandboxErr)
+				if sandboxResult != nil && len(sandboxResult.Plan.Stdout) > 0 {
+					planLiveText = []byte(sandboxResult.Plan.Stdout)
+				} else if sandboxErr != nil {
+					var deployErr *harness.SandboxDeployError
+					if errors.As(sandboxErr, &deployErr) && len(deployErr.Plan.Stdout) > 0 {
+						planLiveText = []byte(deployErr.Plan.Stdout)
+					}
 				}
 			}
 		}
