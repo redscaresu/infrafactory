@@ -1,5 +1,5 @@
-Error: scaleway-sdk-go: http error 403 Forbidden: Permission denied
+Error: scaleway-sdk-go: http error 403 Forbidden: permission denied
 
-  with scaleway_rdb_instance.app,
-  on main.tf line 7, in resource "scaleway_rdb_instance" "app":
-   7: resource "scaleway_rdb_instance" "app" {
+  with scaleway_domain_zone.app,
+  on main.tf line 8, in resource "scaleway_domain_zone" "app":
+   8: resource "scaleway_domain_zone" "app" {

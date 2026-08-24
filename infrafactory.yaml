@@ -94,6 +94,15 @@ validation:
         - scaleway_domain*
         - scaleway_iam*
         - scaleway_registry_namespace
+        # Named individually rather than as scaleway_instance_*: this is a
+        # deny-by-default list, and a glob would also admit snapshots and
+        # images that no scenario needs. Admitted so a load balancer can
+        # have a backend that actually serves -- the difference between
+        # proving an LB accepts TCP and proving it serves traffic
+        # (ADR-0023, allowlist amendment). An instance boots in well under
+        # a minute, unlike the clusters below.
+        - scaleway_instance_ip
+        - scaleway_instance_server
         # Uncommenting any of these opts into slow, genuinely costly
         # provisioning against real Scaleway. Clusters and HA database
         # instances take minutes to create AND minutes to destroy, on
@@ -102,7 +111,6 @@ validation:
         # - scaleway_k8s_pool
         # - scaleway_rdb_instance
         # - scaleway_redis_cluster
-        # - scaleway_instance_server
     destruction:
       enabled: true
   real_probes:

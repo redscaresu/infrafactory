@@ -166,7 +166,7 @@ stages live in `examples/layer3-plan-lied/`.
 | case | plan | mock apply | real apply |
 |---|---|---|---|
 | block volume, `iops = 9000` | `2 to add` | `2 added` | `perf_iops ... choose from [5000, 15000]` |
-| managed PostgreSQL, unprivileged key | `2 to add` | `2 added` | `403 Forbidden: Permission denied` |
+| DNS zone, unprivileged key | `2 to add` | `2 added` | `403 Forbidden: permission denied` |
 
 The honest split between them:
 

@@ -1,8 +1,9 @@
 # Layer 3 coverage: which Scaleway scenarios can run against the real API
 
-Audit date: 2026-08-23. **Refreshed the same day** after
-`InstancesFullAccess` was added to the policy — see the credential
-amendments in ADR-0023. Derived from the **actually generated HCL** in
+Audit date: 2026-08-24. **Refreshed** after `scaleway_instance_ip` and
+`scaleway_instance_server` were admitted to the allowlist so a load
+balancer could have a backend that serves — see the allowlist amendment
+in ADR-0023. Derived from the **actually generated HCL** in
 `.infrafactory/runs/<scenario>/<run_id>/generated/*.tf`, not inferred from
 `mappings.yaml` — every one of the 16 Scaleway scenarios has prior run
 artifacts.
@@ -19,7 +20,8 @@ A scenario reaches the real API only if **both** allow it:
    checked after generation and before apply (ADR-0023 rule 5). Repo default:
    `scaleway_account_project`, `scaleway_block_volume`, `scaleway_block_snapshot`,
    `scaleway_vpc`, `scaleway_vpc_private_network`, `scaleway_lb*`,
-   `scaleway_domain*`, `scaleway_iam*`, `scaleway_registry_namespace`.
+   `scaleway_domain*`, `scaleway_iam*`, `scaleway_registry_namespace`,
+   `scaleway_instance_ip`, `scaleway_instance_server`.
 2. **The `infrafactory-layer3` IAM policy** — `ProjectManager`,
    `BlockStorageFullAccess`, `LoadBalancersFullAccess`, `VPCFullAccess`,
    `InstancesFullAccess`. Nothing else (ADR-0023, credential amendments).
@@ -154,3 +156,17 @@ done
 
 Re-run it after any change to the allowlist, the IAM policy, or a scenario's
 `resources:` block.
+
+## Refresh, 2026-08-24
+
+`scaleway_instance_ip` and `scaleway_instance_server` are now allowlisted, and the policy already carried `InstancesFullAccess`, so both gates admit a small compute backend.
+
+**Runnable: 3 of 16.** `block-paris`, `lb-paris`, and the new `lb-serving-paris`.
+
+`lb-serving-paris` is the first scenario to satisfy an `http_probe` against real Scaleway. It goes green end to end in **144 seconds** — apply, HTTP 200 through the load balancer frontend, destroy, orphan sweep — and it is the scenario that surfaced the auto-created security group defect (ADR-0023, second amendment of this date).
+
+What still gates the remaining 13 is unchanged and unchanged deliberately:
+
+- **Cost/time.** `scaleway_k8s_*`, `scaleway_rdb_instance`, `scaleway_redis_cluster` stay commented out. They take minutes to create *and* minutes to destroy, on every iteration of the repair loop.
+- **Policy.** `scaleway_iam*`, `scaleway_registry_namespace` and `scaleway_domain*` pass the allowlist and are refused by the API with a 403. That is the credential doing its job. `scaleway_domain*` is also, now, the `iam-scope` case in the plan-lied corpus — it is deliberately never granted.
+- **Private networking.** `IPAMFullAccess` has still not been granted. Add it when a scenario actually needs it, not before.
