@@ -55,15 +55,18 @@ if you do not know it; it is the credential doing its job.
 | `web-app-paris` | allowlist + key | slow + expensive | DomainsDNS, IPAM, RDB, VPCGateway |
 | `full-stack-paris` | allowlist + key | slow + expensive | IAM, Kubernetes, RDB, Redis, Registry |
 
-**As first audited (2026-08-23): 2 runnable, 1 blocked by the allowlist
-alone, 4 by the key alone, 9 by both.** The 2026-08-24 refresh below
-supersedes the first two columns for `lb-serving-paris` and
-`incremental-project-paris`.
+**Current: 3 have run, 1 has both gates open and has never run, 4 are
+blocked by the key alone, 9 by both.** As first audited on 2026-08-23 it
+was 2 runnable, 1 blocked by the allowlist alone, 4 by the key alone and
+9 by both; `lb-serving-paris` did not exist yet.
 
-`incremental-project-paris` is the one that moved when Instances was granted:
-the credential now permits it and only the deny-by-default allowlist stands in
-the way. That is the two-gate design working — granting a permission did not
-silently enable a scenario.
+`incremental-project-paris` is the one that has moved twice. Granting
+Instances opened the credential gate and left the deny-by-default allowlist
+holding it — the two-gate design working, since granting a permission did
+not silently enable a scenario. Admitting `instance_ip` and
+`instance_server` on 2026-08-24 then opened the second gate too. Nothing
+stands in its way now except that nobody has run it, which is why it is
+listed as *gates open, never run* rather than runnable.
 
 Class is provisioning cost, not money: *instant* is seconds and negligible
 (project, block volume, VPC, registry namespace); *hourly* bills for as long as
@@ -90,7 +93,11 @@ look like:
   a sandbox that can mint API keys is not a sandbox. Keep them as Layer 2
   scenarios.
 - **`registry-paris` is the only defensible near-free expansion** — one
-  permission set, instant provisioning. Note it still widens org-scoped
+  permission set, instant provisioning. It is also, as things stand, the
+  cheapest way to break the `iam-scope` case in
+  `examples/layer3-plan-lied/`, which relies on `scaleway_domain*` being
+  allowlisted and refused; granting Registry alone would not touch that,
+  but it is the kind of coupling worth checking before widening. Note it still widens org-scoped
   registry access over the existing `funcscwblognolj7nc9` namespace, because
   product permission sets are project-scoped and per-run projects do not exist
   yet, so the rules must be organization-scoped.
@@ -177,7 +184,8 @@ Re-run it after any change to the allowlist, the IAM policy, or a scenario's
 
 `lb-serving-paris` is the first scenario to satisfy an `http_probe` against real Scaleway. It goes green end to end in **144 seconds** — apply, HTTP 200 through the load balancer frontend, destroy, orphan sweep — and it is the scenario that surfaced the auto-created security group defect (ADR-0023, second amendment of this date).
 
-What still gates the remaining 14 is unchanged and unchanged deliberately:
+Thirteen scenarios remain gated, and what gates them is unchanged and
+unchanged deliberately:
 
 - **Cost/time.** `scaleway_k8s_*`, `scaleway_rdb_instance`, `scaleway_redis_cluster` stay commented out. They take minutes to create *and* minutes to destroy, on every iteration of the repair loop.
 - **Policy.** `scaleway_iam*`, `scaleway_registry_namespace` and `scaleway_domain*` pass the allowlist and are refused by the API with a 403. That is the credential doing its job. `scaleway_domain*` is also, now, the `iam-scope` case in the plan-lied corpus — it is deliberately never granted.
