@@ -516,9 +516,6 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 	deployResult, deployErr := runtime.Deps.MockDeploy.Run(ctx, outputDir, env, deployMode)
 	stages, failures = appendMockDeployResult(stages, failures, deployResult, deployErr)
 	sandboxEnabled := runtime.Config.Validation.Layers.SandboxDeploy.Enabled
-	// sandboxAttempted records that a real apply was issued, so cleanup
-	// runs even when that apply failed partway and left resources behind.
-	sandboxAttempted := false
 	if deployErr == nil && sandboxEnabled {
 		sandboxEnv, sandboxEnvErr := sandboxCommandEnv(runtime)
 		if sandboxEnvErr != nil {
@@ -550,8 +547,22 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 			// route: it stages committed fixtures and calls test, and its
 			// HCL comes from a pull request, which is precisely where an
 			// unvetted resource type would arrive from.
-			allowErr := validateLayer3ResourceAllowlist(outputDir,
-				runtime.Config.Validation.Layers.SandboxDeploy.AllowResourceTypes)
+			// Three checks, all of which used to live only in the
+			// generation path and so were skipped by any route applying
+			// pre-existing HCL:
+			//   - the project resource, which is what bounds blast radius
+			//     to one disposable project (ADR-0010)
+			//   - the resource-type allowlist (ADR-0023 rule 5)
+			//   - escape hatches, because a type allowlist cannot see
+			//     inside a module or stop a provisioner running commands
+			allowErr := validateLayer3ProjectResource(outputDir)
+			if allowErr == nil {
+				allowErr = validateLayer3NoEscapeHatches(outputDir)
+			}
+			if allowErr == nil {
+				allowErr = validateLayer3ResourceAllowlist(outputDir,
+					runtime.Config.Validation.Layers.SandboxDeploy.AllowResourceTypes)
+			}
 			if allowErr != nil {
 				stages = append(stages, StageSummary{Layer: "sandbox_deploy", Stage: "allowlist", Status: StageStatusFail})
 				failures = append(failures, FailureSummary{
@@ -563,7 +574,6 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 				})
 			} else {
 				stages = append(stages, StageSummary{Layer: "sandbox_deploy", Stage: "allowlist", Status: StageStatusPass})
-				sandboxAttempted = true
 				sandboxResult, sandboxErr := runtime.Deps.SandboxDeploy.Run(ctx, outputDir, sandboxEnv)
 				stages, failures = appendSandboxDeployResult(stages, failures, sandboxResult, sandboxErr)
 				if sandboxResult != nil && len(sandboxResult.Plan.Stdout) > 0 {
@@ -591,13 +601,17 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 		// lb-paris canary leaked a real project and load-balancer IP
 		// exactly this way, because cleanup was gated on success.
 		//
-		// The live state file is the evidence, which is why it is the gate
-		// rather than the attempt: a failure in init or plan happens
+		// The live state is the ONLY gate, deliberately. Keying off "did
+		// this run attempt an apply" was both redundant and wrong: the
+		// pre-apply validations can refuse before any attempt while an
+		// earlier run's resources are still recorded, and those still need
+		// destroying. What matters is whether resources may exist, not who
+		// created them. a failure in init or plan happens
 		// before any resource exists and writes no live state, so cleaning
 		// up there would destroy nothing and then report an unverifiable
 		// sweep, telling the operator to chase a leak that cannot exist.
 		// run_command.go uses the same signal.
-		if sandboxEnabled && sandboxAttempted && liveStateMayHoldResources(outputDir) {
+		if sandboxEnabled && liveStateMayHoldResources(outputDir) {
 			sandboxEnv, sandboxEnvErr := sandboxCommandEnv(runtime)
 			if sandboxEnvErr != nil {
 				stages = append(stages, StageSummary{Layer: "sandbox_deploy", Stage: "destroy_preflight", Status: StageStatusFail})

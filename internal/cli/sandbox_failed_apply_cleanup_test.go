@@ -34,7 +34,12 @@ const livePartialApplyState = `{
 }`
 
 // writePartialLiveState plants that state in the output dir the run will
-// actually use.
+// actually use, alongside HCL valid enough to reach the sandbox deploy.
+//
+// The HCL is not incidental: Layer 3 refuses to apply a stack with no
+// scaleway_account_project (ADR-0010) or with escape hatches, and those
+// checks run before the deploy. A fixture without HCL would never reach the
+// code these tests are about.
 func writePartialLiveState(t *testing.T, outputDir string) {
 	t.Helper()
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
@@ -43,6 +48,11 @@ func writePartialLiveState(t *testing.T, outputDir string) {
 	path := filepath.Join(outputDir, harness.LiveStateFilename)
 	if err := os.WriteFile(path, []byte(livePartialApplyState), 0o600); err != nil {
 		t.Fatalf("write live state: %v", err)
+	}
+	hcl := `resource "scaleway_account_project" "main" { name = "t" }
+resource "scaleway_block_volume" "data" { size_in_gb = 1 }`
+	if err := os.WriteFile(filepath.Join(outputDir, "main.tf"), []byte(hcl), 0o600); err != nil {
+		t.Fatalf("write hcl: %v", err)
 	}
 }
 

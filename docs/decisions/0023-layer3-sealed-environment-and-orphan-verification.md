@@ -108,6 +108,12 @@ Still absent, and deliberately: IAM (no privilege escalation), registry, serverl
 
 Enforcement moved to where the guarantee belongs — immediately before the sandbox deploy, so it covers any route to a real apply rather than one particular caller. The gate's HCL arrives from a pull request, which is precisely the untrusted-input case rule 5 exists for.
 
+All three of the pre-apply checks moved with it — the project resource (ADR-0010's blast-radius boundary), the type allowlist, and a new escape-hatch refusal.
+
+**Escape hatches.** A resource-type allowlist is sufficient for *generated* HCL, because the generator only emits flat `resource` blocks. It is not sufficient for HCL arriving from a pull request. A `module` block declares resources the scan never sees, so any type at all can reach the API through one; a `provisioner` block runs arbitrary commands during apply, in a process holding live cloud credentials in its environment — shell execution and credential exposure, not merely an unvetted resource. Both are refused outright rather than analysed: a Layer 3 stack is a handful of flat resources by design, so the cost of banning them is zero and the cost of reasoning about them correctly is not.
+
+**Consequence for cleanup.** With validation now able to refuse *before* any apply, "did this run attempt an apply" stopped being a usable cleanup gate — a refusal can coincide with an earlier run's resources still being recorded, and those still need destroying. The live state is now the only gate: what matters is whether resources may exist, not who created them.
+
 Generalising: a control attached to *one path into* a dangerous operation is a control that a second path silently bypasses. Attach it to the operation.
 
 **Enforcement**: the guards carry synthetic-drift coverage — removing `SCW_API_URL` from `SandboxStripEnv` fails three tests, verified before S139 merged. Following the project's "drift becomes failed `go test`" pattern.
