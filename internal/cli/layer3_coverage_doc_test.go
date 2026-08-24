@@ -29,6 +29,12 @@ func layer3CoverageDoc(t *testing.T) string {
 	return string(raw)
 }
 
+// allowlistEntryRe must accept digits: scaleway_k8s_cluster is a real
+// candidate for admission and [a-z_*]+ drops it silently, which would
+// make the sync test compare an incomplete documented set against the
+// config and fail for the wrong reason.
+var allowlistEntryRe = regexp.MustCompile("`(scaleway_[a-z0-9_*]+)`")
+
 var coverageRowRe = regexp.MustCompile(`(?m)^\| ` + "`" + `([a-z0-9-]+)` + "`" + ` \| ([^|]+) \|`)
 
 // The status totals must match the rows they summarise.
@@ -72,7 +78,7 @@ func TestLayer3CoverageDocAllowlistMatchesConfig(t *testing.T) {
 	require.Greater(t, end, start, "could not locate the enumerated allowlist")
 
 	documented := map[string]bool{}
-	for _, m := range regexp.MustCompile("`(scaleway_[a-z_*]+)`").FindAllStringSubmatch(doc[start:end], -1) {
+	for _, m := range allowlistEntryRe.FindAllStringSubmatch(doc[start:end], -1) {
 		documented[m[1]] = true
 	}
 
@@ -108,4 +114,18 @@ func gatedSentence(n int) string {
 		15: "Fifteen", 16: "Sixteen", 17: "Seventeen",
 	}
 	return fmt.Sprintf("%s scenarios remain gated", words[n])
+}
+
+func TestAllowlistEntryRegexAcceptsDigits(t *testing.T) {
+	t.Parallel()
+
+	found := allowlistEntryRe.FindAllStringSubmatch(
+		"`scaleway_k8s_cluster`, `scaleway_lb*` and `scaleway_block_volume`", -1)
+
+	var got []string
+	for _, m := range found {
+		got = append(got, m[1])
+	}
+	assert.Equal(t, []string{"scaleway_k8s_cluster", "scaleway_lb*", "scaleway_block_volume"}, got,
+		"dropping a digit-bearing type would silently shrink the documented set")
 }
