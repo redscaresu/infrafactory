@@ -58,6 +58,7 @@ func NewScalewayAutoCreatedPurgeWithDoer(apiBase string, doer func(*http.Request
 type securityGroup struct {
 	ID             string `json:"id"`
 	Name           string `json:"name"`
+	Project        string `json:"project"`
 	ProjectDefault bool   `json:"project_default"`
 }
 
@@ -87,9 +88,18 @@ func (p *ScalewayAutoCreatedPurge) Run(ctx context.Context, projectID, secretKey
 	return removed, nil
 }
 
-// listDefaultSecurityGroups returns only groups Scaleway marks as the
-// project default. A group the run's own HCL created is Terraform's to
-// destroy, and deleting it here would hide a real destroy bug.
+// listDefaultSecurityGroups returns only groups that are BOTH inside
+// projectID and marked by Scaleway as that project's default.
+//
+// Two independent conditions, deliberately. A group the run's own HCL
+// created is Terraform's to destroy, and deleting it here would hide a
+// real destroy bug -- that is what project_default screens out. The
+// membership check is defence in depth for the other direction: this
+// code deletes things, and trusting a query parameter to be the only
+// thing standing between it and another project's resources is not a
+// guarantee, it is a hope. The credential can see every project in the
+// organization, so a changed filter name or an unfiltered page would be
+// enough. The API is asked to filter and the response is checked.
 func (p *ScalewayAutoCreatedPurge) listDefaultSecurityGroups(ctx context.Context, zone, projectID, secretKey string) ([]securityGroup, error) {
 	url := fmt.Sprintf("%s/instance/v1/zones/%s/security_groups?project=%s&per_page=100", p.apiBase, zone, projectID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -116,7 +126,7 @@ func (p *ScalewayAutoCreatedPurge) listDefaultSecurityGroups(ctx context.Context
 
 	var defaults []securityGroup
 	for _, g := range body.SecurityGroups {
-		if g.ProjectDefault {
+		if g.ProjectDefault && g.Project == projectID {
 			defaults = append(defaults, g)
 		}
 	}

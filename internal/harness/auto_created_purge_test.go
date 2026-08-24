@@ -44,7 +44,7 @@ func purgeServer(t *testing.T, body string, deleted *[]string) *httptest.Server 
 func TestPurgeRemovesProjectDefaultSecurityGroup(t *testing.T) {
 	var deleted []string
 	srv := purgeServer(t, `{"security_groups":[
-		{"id":"142eef7b","name":"Default security group","project_default":true}]}`, &deleted)
+		{"id":"142eef7b","name":"Default security group","project_default":true,"project":"6c4390c9-664e-4289-a34f-cdc865653fc7"}]}`, &deleted)
 	defer srv.Close()
 
 	purge := NewScalewayAutoCreatedPurgeWithDoer(srv.URL, srv.Client().Do)
@@ -61,7 +61,7 @@ func TestPurgeRemovesProjectDefaultSecurityGroup(t *testing.T) {
 func TestPurgeLeavesNonDefaultSecurityGroupsAlone(t *testing.T) {
 	var deleted []string
 	srv := purgeServer(t, `{"security_groups":[
-		{"id":"declared-by-hcl","name":"web","project_default":false}]}`, &deleted)
+		{"id":"declared-by-hcl","name":"web","project_default":false,"project":"6c4390c9-664e-4289-a34f-cdc865653fc7"}]}`, &deleted)
 	defer srv.Close()
 
 	purge := NewScalewayAutoCreatedPurgeWithDoer(srv.URL, srv.Client().Do)
@@ -91,5 +91,43 @@ func TestPurgeToleratesUnreachableZones(t *testing.T) {
 	removed, err := purge.Run(context.Background(), purgeProject, "secret")
 
 	require.NoError(t, err)
+	assert.Empty(t, removed)
+}
+
+// Defence in depth for destructive code: the API is asked to filter by
+// project, and the response is checked anyway. The credential can see
+// every project in the organization, so a changed filter name or an
+// unfiltered page would otherwise be enough to delete another project's
+// default security group.
+func TestPurgeRefusesGroupsOutsideTheRunProject(t *testing.T) {
+	var deleted []string
+	srv := purgeServer(t, `{"security_groups":[
+		{"id":"someone-elses","name":"Default security group","project_default":true,
+		 "project":"0b6a8a6a-7242-4852-a0cb-ac2e4fc86b92"},
+		{"id":"ours","name":"Default security group","project_default":true,
+		 "project":"6c4390c9-664e-4289-a34f-cdc865653fc7"}]}`, &deleted)
+	defer srv.Close()
+
+	purge := NewScalewayAutoCreatedPurgeWithDoer(srv.URL, srv.Client().Do)
+	removed, err := purge.Run(context.Background(), purgeProject, "secret")
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"ours"}, deleted,
+		"a group the API returned but that belongs to another project must not be deleted")
+	require.Len(t, removed, 1)
+}
+
+// A response with no project field is not evidence of membership.
+func TestPurgeRefusesGroupsWithNoProject(t *testing.T) {
+	var deleted []string
+	srv := purgeServer(t, `{"security_groups":[
+		{"id":"unattributed","name":"Default security group","project_default":true}]}`, &deleted)
+	defer srv.Close()
+
+	purge := NewScalewayAutoCreatedPurgeWithDoer(srv.URL, srv.Client().Do)
+	removed, err := purge.Run(context.Background(), purgeProject, "secret")
+
+	require.NoError(t, err)
+	assert.Empty(t, deleted)
 	assert.Empty(t, removed)
 }
