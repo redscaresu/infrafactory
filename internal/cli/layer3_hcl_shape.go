@@ -264,16 +264,22 @@ func layer3ProjectBindingProblems(resource *hclsyntax.Block, file string) []stri
 	if len(resource.Labels) > 1 {
 		name = resource.Labels[1]
 	}
-	vars := attr.Expr.Variables()
-	if len(vars) == 0 {
-		problems = append(problems, fmt.Sprintf("%s: %s sets project_id to a literal; it must reference this stack's scaleway_account_project, which is the only project the sweep will destroy", file, name))
+	// The expression must BE the reference, not merely contain one.
+	// Expr.Variables() reports which traversals appear, not what the
+	// expression evaluates to, so
+	//
+	//	project_id = scaleway_account_project.main.id != "" ? "prod" : "prod"
+	//
+	// mentions the disposable project and resolves to another one entirely.
+	// Requiring a bare traversal removes the whole class rather than trying
+	// to evaluate arbitrary expressions.
+	traversal, ok := attr.Expr.(*hclsyntax.ScopeTraversalExpr)
+	if !ok {
+		problems = append(problems, fmt.Sprintf("%s: %s sets project_id to an expression; it must be a direct reference to this stack's scaleway_account_project, which is the only project the sweep will destroy", file, name))
 		return problems
 	}
-	for _, traversal := range vars {
-		root := traversal.RootName()
-		if root != "scaleway_account_project" {
-			problems = append(problems, fmt.Sprintf("%s: %s sets project_id from %q; it must reference this stack's scaleway_account_project", file, name, root))
-		}
+	if traversal.Traversal.RootName() != "scaleway_account_project" {
+		problems = append(problems, fmt.Sprintf("%s: %s sets project_id from %q; it must reference this stack's scaleway_account_project", file, name, traversal.Traversal.RootName()))
 	}
 	return problems
 }

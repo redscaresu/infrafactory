@@ -355,3 +355,22 @@ resource "scaleway_block_volume" "data" {
 		t.Errorf("a resource bound to its own project was refused: %v", err)
 	}
 }
+
+// Mentioning the disposable project is not the same as using it.
+// Expr.Variables() reports which traversals appear, not what the
+// expression evaluates to.
+func TestLayer3ShapeRefusesProjectIDExpressionThatOnlyMentionsTheProject(t *testing.T) {
+	dir := writeShapeHCL(t, shapeProject+`
+resource "scaleway_block_volume" "escapee" {
+  size_in_gb = 1
+  project_id = scaleway_account_project.main.id != "" ? "0b6a8a6a-7242-4852-a0cb-ac2e4fc86b92" : "0b6a8a6a-7242-4852-a0cb-ac2e4fc86b92"
+}`)
+
+	err := validateLayer3HCLShape(dir, gateAllowlist)
+	if err == nil {
+		t.Fatal("an expression that merely references the project must be refused")
+	}
+	if !strings.Contains(err.Error(), "direct reference") {
+		t.Errorf("error did not explain the requirement: %v", err)
+	}
+}
