@@ -122,6 +122,10 @@ The configuration is now parsed (`hashicorp/hcl/v2`) and validated against an **
 
 **A provider binary is code.** `required_providers { scaleway = { source = "attacker/scaleway" } }` keeps the local name that satisfies the `provider "scaleway"` check, while `tofu init` downloads and executes that plugin with the credentials in scope. The source must now be exactly `scaleway/scaleway`, and any other required provider is refused.
 
+**What is NOT closed, stated plainly.** Terraform evaluates expressions at plan time, and functions like `file()` can read from the runner. A fixture could put `file("/proc/self/environ")` where its value reaches tofu's output. The gate no longer publishes that automatically — the PR comment carries only structured stage lines and the verdict, never raw tofu output — but on a public repository the Actions log is readable anyway, so this is mitigation, not elimination.
+
+The control that actually answers this threat is the one already in place: the real-cloud path runs only for same-repo pull requests, and the `layer3` environment requires a reviewer. It takes a trusted collaborator to reach the credentials at all, and a human approves each run. Structural validation raises the cost of a mistake; it does not replace the human gate, and it should not be described as though it does.
+
 Two general lessons, both learned the expensive way. **A denylist of known escapes is a race you lose** — each fix invited the next bypass, and only enumerating what is permitted ended it. And **a scanner that is not a parser will always have a gap**, because the grammar is richer than the pattern. Neither would have mattered for generated HCL; both matter the moment the input comes from a pull request.
 
 **Consequence for cleanup.** With validation now able to refuse *before* any apply, "did this run attempt an apply" stopped being a usable cleanup gate — a refusal can coincide with an earlier run's resources still being recorded, and those still need destroying. The live state is now the only gate: what matters is whether resources may exist, not who created them.

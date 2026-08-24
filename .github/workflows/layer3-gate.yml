@@ -234,8 +234,16 @@ jobs:
             echo "Commit \`${{ github.event.pull_request.head.sha }}\` · ${{ steps.gate.outputs.elapsed }}s"
             echo
             echo '```'
-            sed -e 's/\x1b\[[0-9;]*m//g' /tmp/layer3-gate/result.txt | grep -vE '^\{"level"' | head -60
+            # Only the structured stage lines and the verdict, never raw
+            # tofu output. Expressions in PR-supplied HCL are evaluated at
+            # plan time, so error text can be attacker-chosen; echoing it
+            # into a public comment would publish whatever it encoded.
+            # Failures point at the job log instead of quoting it.
+            sed -e 's/\x1b\[[0-9;]*m//g' /tmp/layer3-gate/result.txt \
+              | grep -E '^(Status:|- [a-z_]+/)' | head -40
             echo '```'
+            echo
+            [ "${{ steps.gate.outputs.rc }}" != "0" ] && echo "Full output is in the [job log](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})."
             echo
             echo "_\`plan\` proves intent. This proves the change survived contact with the API._"
           } > /tmp/layer3-gate/comment.md

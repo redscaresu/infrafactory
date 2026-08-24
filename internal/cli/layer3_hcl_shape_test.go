@@ -165,3 +165,76 @@ terraform {
 		t.Errorf("the canonical provider source was refused: %v", err)
 	}
 }
+
+// The endpoint comes from the sealed environment and nowhere else (S139).
+// A provider block accepting api_url would let a fixture retarget a "real"
+// apply at something that is not the real cloud.
+func TestLayer3ShapeRefusesProviderEndpointOverride(t *testing.T) {
+	dir := writeShapeHCL(t, `provider "scaleway" { api_url = "https://attacker.example" }`+"\n"+shapeProject)
+
+	err := validateLayer3HCLShape(dir, gateAllowlist)
+	if err == nil {
+		t.Fatal("a provider api_url override must be refused")
+	}
+	if !strings.Contains(err.Error(), "api_url") {
+		t.Errorf("error did not name the setting: %v", err)
+	}
+}
+
+// project_id would move resources out of the disposable per-run project
+// that bounds blast radius.
+func TestLayer3ShapeRefusesProviderProjectOverride(t *testing.T) {
+	dir := writeShapeHCL(t, `provider "scaleway" { project_id = "0b6a8a6a-7242-4852-a0cb-ac2e4fc86b92" }`+"\n"+shapeProject)
+
+	if err := validateLayer3HCLShape(dir, gateAllowlist); err == nil {
+		t.Fatal("a provider project_id override must be refused")
+	}
+}
+
+func TestLayer3ShapeAllowsRegionAndZoneOnProvider(t *testing.T) {
+	dir := writeShapeHCL(t, `provider "scaleway" {
+  region = "fr-par"
+  zone   = "fr-par-1"
+}`+"\n"+shapeProject)
+
+	if err := validateLayer3HCLShape(dir, gateAllowlist); err != nil {
+		t.Errorf("region/zone are placement, not identity, and must be allowed: %v", err)
+	}
+}
+
+// tofu loads .tf.json exactly as it loads .tf, and this validator parses
+// native HCL only — so a JSON file would sail past it.
+func TestLayer3ShapeRefusesTfJSON(t *testing.T) {
+	dir := writeShapeHCL(t, shapeProject)
+	if err := os.WriteFile(filepath.Join(dir, "sneaky.tf.json"),
+		[]byte(`{"resource":{"scaleway_k8s_cluster":{"c":{"name":"x"}}}}`), 0o600); err != nil {
+		t.Fatalf("write json: %v", err)
+	}
+
+	err := validateLayer3HCLShape(dir, gateAllowlist)
+	if err == nil {
+		t.Fatal(".tf.json must be refused — tofu reads it and this check does not")
+	}
+	if !strings.Contains(err.Error(), "tf.json") {
+		t.Errorf("error did not name the file type: %v", err)
+	}
+}
+
+// lifecycle carries precondition/postcondition, whose error_message is an
+// expression evaluated at plan time and surfaced in tofu's output.
+func TestLayer3ShapeRefusesLifecycleBlock(t *testing.T) {
+	dir := writeShapeHCL(t, shapeProject+`
+resource "scaleway_block_volume" "v" {
+  size_in_gb = 1
+  lifecycle {
+    precondition {
+      condition     = false
+      error_message = file("/proc/self/environ")
+    }
+  }
+}`)
+
+	if err := validateLayer3HCLShape(dir, gateAllowlist); err == nil {
+		t.Fatal("a lifecycle block must be refused on the untrusted path")
+	}
+}

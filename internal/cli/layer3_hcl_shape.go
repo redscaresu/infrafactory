@@ -43,6 +43,23 @@ var layer3AllowedTopLevelBlocks = map[string]bool{
 var layer3DeniedNestedBlocks = map[string]bool{
 	"provisioner": true,
 	"connection":  true,
+	// lifecycle carries precondition/postcondition, whose error_message is
+	// an expression evaluated at PLAN time and surfaced in tofu's output.
+	// A Layer 3 stack has no need of it.
+	"lifecycle": true,
+}
+
+// layer3SafeProviderAttrs are the only settings a PR may put in the
+// scaleway provider block.
+//
+// The endpoint comes from the sealed environment and nowhere else -- that
+// is the whole of S139. A provider block accepting `api_url` would let a
+// fixture retarget a "real" apply, and `project_id` would move resources
+// out of the disposable per-run project that bounds blast radius. Region
+// and zone are placement, not identity or destination.
+var layer3SafeProviderAttrs = map[string]bool{
+	"region": true,
+	"zone":   true,
 }
 
 // validateLayer3HCLShape refuses anything a Layer 3 stack has no business
@@ -57,6 +74,13 @@ func validateLayer3HCLShape(outputDir string, allowedResourceTypes []string) err
 	}
 	problems := make([]string, 0)
 	for _, entry := range entries {
+		// OpenTofu loads .tf.json exactly as it loads .tf. This validator
+		// parses native HCL, so a JSON file would sail past it and apply
+		// whatever it liked. Refuse rather than grow a second parser: no
+		// Layer 3 stack has ever needed one.
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".tf.json") {
+			return fmt.Errorf("layer 3 refuses %s: .tf.json is loaded by tofu but not validated here", entry.Name())
+		}
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".tf") {
 			continue
 		}
@@ -104,6 +128,14 @@ func layer3BlockProblems(body *hclsyntax.Body, file string, allowedResourceTypes
 		case block.Type == "provider":
 			if len(block.Labels) > 0 && block.Labels[0] != "scaleway" {
 				problems = append(problems, fmt.Sprintf("%s: provider %q is not permitted", file, block.Labels[0]))
+				break
+			}
+			if block.Body != nil {
+				for name := range block.Body.Attributes {
+					if !layer3SafeProviderAttrs[name] {
+						problems = append(problems, fmt.Sprintf("%s: provider setting %q is not permitted (the endpoint and project come from the sealed environment, not from the configuration)", file, name))
+					}
+				}
 			}
 		}
 		if block.Type == "terraform" {
