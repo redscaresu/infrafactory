@@ -275,6 +275,11 @@ func Default() Config {
 					// list and the checked-in infrafactory.yaml must agree;
 					// TestLayer3DefaultAllowlistMatchesCheckedInConfig
 					// enforces it.
+					//
+					// private_nic is here because vpc_required.rego denies
+					// any instance server without one -- omitting it would
+					// leave static policy demanding a resource this list
+					// forbids, which no generated HCL could satisfy.
 					AllowResourceTypes: []string{
 						"scaleway_account_project",
 						"scaleway_block_volume",
@@ -287,6 +292,7 @@ func Default() Config {
 						"scaleway_registry_namespace",
 						"scaleway_instance_ip",
 						"scaleway_instance_server",
+						"scaleway_instance_private_nic",
 					},
 				},
 				Destruction: LayerConfig{

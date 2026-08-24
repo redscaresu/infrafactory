@@ -146,6 +146,27 @@ func TestLayer3DefaultAllowlistMatchesCheckedInConfig(t *testing.T) {
 		"internal/config/config.go and infrafactory.yaml must declare the same Layer 3 allowlist")
 }
 
+// Static policy and the allowlist must not contradict each other.
+//
+// policies/scaleway/vpc_required.rego DENIES any scaleway_instance_server
+// that is not attached to a private network via
+// scaleway_instance_private_nic. If the allowlist admits the server but
+// not the NIC, then generated HCL that satisfies static policy is refused
+// by the allowlist and HCL that satisfies the allowlist is refused by
+// static policy -- no generated stack can pass both, and the error points
+// at neither cause.
+func TestLayer3AllowlistDoesNotContradictStaticPolicy(t *testing.T) {
+	t.Parallel()
+	defaults := defaultSandboxAllowlistForTest(t)
+
+	if !resourceTypeAllowed("scaleway_instance_server", defaults) {
+		t.Skip("instance servers are not allowlisted, so the policy coupling does not apply")
+	}
+	assert.True(t, resourceTypeAllowed("scaleway_instance_private_nic", defaults),
+		"vpc_required.rego requires a private NIC on every instance server, so admitting servers "+
+			"without admitting NICs makes the two gates unsatisfiable together")
+}
+
 func defaultSandboxAllowlistForTest(t *testing.T) []string {
 	t.Helper()
 	return config.Default().Validation.Layers.SandboxDeploy.AllowResourceTypes

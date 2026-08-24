@@ -101,8 +101,17 @@ validation:
         # proving an LB accepts TCP and proving it serves traffic
         # (ADR-0023, allowlist amendment). An instance boots in well under
         # a minute, unlike the clusters below.
+        #
+        # private_nic is here because policies/scaleway/vpc_required.rego
+        # DENIES any instance server without one. Omitting it would leave
+        # static policy demanding a resource this list forbids, so no
+        # generated HCL could satisfy both gates. It joins the "allowed
+        # locally, refused by the API" group in ADR-0023 until
+        # IPAMFullAccess is granted -- which is a separate decision, taken
+        # when a scenario needs private networking rather than now.
         - scaleway_instance_ip
         - scaleway_instance_server
+        - scaleway_instance_private_nic
         # Uncommenting any of these opts into slow, genuinely costly
         # provisioning against real Scaleway. Clusters and HA database
         # instances take minutes to create AND minutes to destroy, on
