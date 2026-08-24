@@ -1,0 +1,5 @@
+Error: scaleway-sdk-go: insufficient permissions: write api_namespace
+
+  with scaleway_registry_namespace.images,
+  on main.tf line 4, in resource "scaleway_registry_namespace" "images":
+   4: resource "scaleway_registry_namespace" "images" {

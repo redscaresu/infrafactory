@@ -153,3 +153,31 @@ Two things a mock cannot tell you:
   honestly make. Upgrading to `http_probe` means adding a backend that
   serves, which means `scaleway_instance_server`, which is deliberately
   outside the allowlist.
+
+## D5 — `plan` is green, the mock is green, the API refuses
+
+D1–D4 are deltas found in infrafactory's own harness. D5 is the class the
+talk actually rests on: a **generated infrastructure change** that clears
+every pre-real gate and is then rejected by Scaleway.
+
+Two reproduce 10 times out of 10. Full HCL and captured output for all three
+stages live in `examples/layer3-plan-lied/`.
+
+| case | plan | mock apply | real apply |
+|---|---|---|---|
+| block volume, `iops = 9000` | `2 to add` | `2 added` | `perf_iops ... choose from [5000, 15000]` |
+| registry namespace, unprivileged key | `2 to add` | `2 added` | `insufficient permissions: write api_namespace` |
+
+The honest split between them:
+
+- The **iops** case a mock *could* catch — the valid set is static. It is a
+  mockway fidelity gap. The point is that the gap is unbounded, not that it
+  was unforeseeable.
+- The **IAM** case a mock *cannot* catch without replicating live IAM state.
+  The same plan with a different key gives a different answer, so no amount
+  of configuration analysis reaches it.
+
+Do not present the first as though it were the second.
+
+**Refuted**: duplicate project names were expected to collide and do not.
+Scaleway permits them. Left in the record deliberately.
