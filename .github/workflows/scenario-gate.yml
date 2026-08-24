@@ -13,6 +13,13 @@ name: Scenario gate
 # So scenarios could ship that schema-validate but the LLM can't
 # satisfy. M89 closes that gap one layer up.
 
+# S150-T4. Third-party actions are pinned to commit SHAs in this workflow
+# because it runs with elevated capability -- a mutable tag can be repointed
+# at new code by a compromised upstream, and this job can see the OPENROUTER_API_KEY secret.
+# The `# vN` comment is what lets dependabot keep the pins current.
+#
+# ci.yml and doc-hygiene.yml stay on tags: they are read-only and hold no
+# secrets, so pinning there would be churn without a threat to answer.
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
@@ -30,7 +37,7 @@ jobs:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - name: Checkout (full history for diff base)
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
 
@@ -43,12 +50,12 @@ jobs:
           done
 
       - name: Setup Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: go.mod
 
       - name: Setup OpenTofu
-        uses: opentofu/setup-opentofu@v2
+        uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2
 
       - name: Check LLM credentials
         id: creds
@@ -103,7 +110,7 @@ jobs:
 
       - name: Upload scenario logs on failure
         if: failure() && steps.creds.outputs.configured == 'true'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: scenario-gate-logs
           path: |
