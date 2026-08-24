@@ -18,7 +18,18 @@ func writeShapeHCL(t *testing.T, body string) string {
 	return dir
 }
 
-const shapeProject = `resource "scaleway_account_project" "main" { name = "x" }` + "\n"
+// A realistic minimum: every Layer 3 stack declares its provider source
+// and creates its own project.
+const shapeProject = `
+terraform {
+  required_providers {
+    scaleway = {
+      source = "scaleway/scaleway"
+    }
+  }
+}
+resource "scaleway_account_project" "main" { name = "x" }
+`
 
 // The bypass that retired the regex. `resource /*x*/ "..."` is valid HCL
 // that a `resource\s+"` pattern does not match, and the grammar permits
@@ -138,7 +149,7 @@ terraform {
     }
   }
 }
-`+shapeProject)
+resource "scaleway_account_project" "main" { name = "x" }`)
 
 	err := validateLayer3HCLShape(dir, gateAllowlist)
 	if err == nil {
@@ -159,7 +170,7 @@ terraform {
     }
   }
 }
-`+shapeProject)
+resource "scaleway_account_project" "main" { name = "x" }`)
 
 	if err := validateLayer3HCLShape(dir, gateAllowlist); err != nil {
 		t.Errorf("the canonical provider source was refused: %v", err)
@@ -236,5 +247,21 @@ resource "scaleway_block_volume" "v" {
 
 	if err := validateLayer3HCLShape(dir, gateAllowlist); err == nil {
 		t.Fatal("a lifecycle block must be refused on the untrusted path")
+	}
+}
+
+// Omitting required_providers is not a safe default: tofu resolves
+// scaleway_* from the default namespace, which is a choice the
+// configuration made implicitly rather than one this check verified.
+func TestLayer3ShapeRequiresDeclaredProviderSource(t *testing.T) {
+	dir := writeShapeHCL(t, `resource "scaleway_account_project" "main" { name = "x" }
+resource "scaleway_block_volume" "v" { size_in_gb = 1 }`)
+
+	err := validateLayer3HCLShape(dir, gateAllowlist)
+	if err == nil {
+		t.Fatal("HCL with no declared provider source must be refused")
+	}
+	if !strings.Contains(err.Error(), "resolved implicitly") {
+		t.Errorf("error did not explain the omission: %v", err)
 	}
 }

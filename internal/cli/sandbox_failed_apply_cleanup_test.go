@@ -49,7 +49,15 @@ func writePartialLiveState(t *testing.T, outputDir string) {
 	if err := os.WriteFile(path, []byte(livePartialApplyState), 0o600); err != nil {
 		t.Fatalf("write live state: %v", err)
 	}
-	hcl := `resource "scaleway_account_project" "main" { name = "t" }
+	hcl := `
+terraform {
+  required_providers {
+    scaleway = {
+      source = "scaleway/scaleway"
+    }
+  }
+}
+resource "scaleway_account_project" "main" { name = "t" }
 resource "scaleway_block_volume" "data" { size_in_gb = 1 }`
 	if err := os.WriteFile(filepath.Join(outputDir, "main.tf"), []byte(hcl), 0o600); err != nil {
 		t.Fatalf("write hcl: %v", err)

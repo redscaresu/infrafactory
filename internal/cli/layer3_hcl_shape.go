@@ -73,6 +73,7 @@ func validateLayer3HCLShape(outputDir string, allowedResourceTypes []string) err
 		return fmt.Errorf("read output directory for layer 3 HCL validation: %w", err)
 	}
 	problems := make([]string, 0)
+	sawCanonicalProvider := false
 	for _, entry := range entries {
 		// OpenTofu loads .tf.json exactly as it loads .tf. This validator
 		// parses native HCL, so a JSON file would sail past it and apply
@@ -98,7 +99,17 @@ func validateLayer3HCLShape(outputDir string, allowedResourceTypes []string) err
 		if !ok {
 			return fmt.Errorf("layer 3 refuses %s: unexpected body type", entry.Name())
 		}
-		problems = append(problems, layer3BlockProblems(body, entry.Name(), allowedResourceTypes)...)
+		fileProblems, sawProvider := layer3BlockProblems(body, entry.Name(), allowedResourceTypes)
+		problems = append(problems, fileProblems...)
+		sawCanonicalProvider = sawCanonicalProvider || sawProvider
+	}
+	if !sawCanonicalProvider {
+		// Omitting required_providers is not a safe default: tofu then
+		// resolves scaleway_* from the default namespace, which is a
+		// choice the configuration made implicitly rather than one this
+		// check verified. Declaring it is the only way to know which
+		// provider binary will run beside the credentials.
+		problems = append(problems, fmt.Sprintf("no terraform.required_providers entry declares source %q, so the provider binary would be resolved implicitly", layer3ScalewayProviderSource))
 	}
 	if len(problems) > 0 {
 		sort.Strings(problems)
@@ -107,8 +118,9 @@ func validateLayer3HCLShape(outputDir string, allowedResourceTypes []string) err
 	return nil
 }
 
-func layer3BlockProblems(body *hclsyntax.Body, file string, allowedResourceTypes []string) []string {
+func layer3BlockProblems(body *hclsyntax.Body, file string, allowedResourceTypes []string) ([]string, bool) {
 	problems := make([]string, 0)
+	sawCanonicalProvider := false
 	for _, block := range body.Blocks {
 		switch {
 		case !layer3AllowedTopLevelBlocks[block.Type]:
@@ -139,11 +151,13 @@ func layer3BlockProblems(body *hclsyntax.Body, file string, allowedResourceTypes
 			}
 		}
 		if block.Type == "terraform" {
-			problems = append(problems, layer3ProviderSourceProblems(block, file)...)
+			tfProblems, sawProvider := layer3ProviderSourceProblems(block, file)
+			problems = append(problems, tfProblems...)
+			sawCanonicalProvider = sawCanonicalProvider || sawProvider
 		}
 		problems = append(problems, layer3NestedProblems(block, file)...)
 	}
-	return problems
+	return problems, sawCanonicalProvider
 }
 
 // layer3NestedProblems walks the whole tree: a provisioner is nested inside
@@ -177,10 +191,11 @@ const layer3ScalewayProviderSource = "scaleway/scaleway"
 // tofu init downloads and EXECUTES that plugin with SCW_ACCESS_KEY and
 // SCW_SECRET_KEY in the environment. The provider binary is code, and this
 // path takes it from a registry address supplied by a pull request.
-func layer3ProviderSourceProblems(tfBlock *hclsyntax.Block, file string) []string {
+func layer3ProviderSourceProblems(tfBlock *hclsyntax.Block, file string) ([]string, bool) {
 	problems := make([]string, 0)
+	sawCanonical := false
 	if tfBlock.Body == nil {
-		return problems
+		return problems, sawCanonical
 	}
 	for _, inner := range tfBlock.Body.Blocks {
 		if inner.Type != "required_providers" || inner.Body == nil {
@@ -200,8 +215,10 @@ func layer3ProviderSourceProblems(tfBlock *hclsyntax.Block, file string) []strin
 			if src.IsNull() || src.Type() != cty.String || src.AsString() != layer3ScalewayProviderSource {
 				problems = append(problems, fmt.Sprintf("%s: required_provider %q must be source %q (a provider binary is code, and this one is chosen by the PR)",
 					file, name, layer3ScalewayProviderSource))
+				continue
 			}
+			sawCanonical = true
 		}
 	}
-	return problems
+	return problems, sawCanonical
 }

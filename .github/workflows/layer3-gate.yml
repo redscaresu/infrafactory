@@ -116,7 +116,13 @@ jobs:
         # this gate is Scaleway-only, and the other mocks would just add
         # startup time to a check that wants to be fast enough to watch.
         run: |
-          git clone --depth 1 https://github.com/${{ github.repository_owner }}/mockway.git ../mockway
+          # Pinned, not tracking main. This process runs as the same user
+          # as the secret-bearing step; an unpinned clone would mean code
+          # that changed after approval is running beside the credentials.
+          # Same reasoning as the SHA-pinned actions in S150.
+          pin=$(cat trusted/.github/mockway-pin)
+          git clone --filter=blob:none https://github.com/${{ github.repository_owner }}/mockway.git ../mockway
+          git -C ../mockway checkout --detach "$pin"
           go -C ../mockway build -o /tmp/mockway ./cmd/mockway
           nohup /tmp/mockway --port 8080 > /tmp/mockway.log 2>&1 &
           for _ in $(seq 1 30); do
@@ -230,7 +236,7 @@ jobs:
           # log. Reproduce it locally with the same fixture instead -- a
           # plan-time failure needs no credentials.
           sed -e 's/\x1b\[[0-9;]*m//g' /tmp/layer3-gate/result.txt \
-            | grep -E '^(Status:|- [a-z_]+/)' || echo "(no structured stages; see the verdict step)"
+            | grep -E '^(Status: |- [a-z_]+/[a-z_]+: )' || echo "(no structured stages; see the verdict step)"
           exit 0   # the comment step reports; the verdict step decides
 
       - name: Comment the stage summary on the PR
@@ -255,7 +261,7 @@ jobs:
             # into a public comment would publish whatever it encoded.
             # Failures point at the job log instead of quoting it.
             sed -e 's/\x1b\[[0-9;]*m//g' /tmp/layer3-gate/result.txt \
-              | grep -E '^(Status:|- [a-z_]+/)' | head -40
+              | grep -E '^(Status: |- [a-z_]+/[a-z_]+: )' | head -40
             echo '```'
             echo
             [ "${{ steps.gate.outputs.rc }}" != "0" ] && echo "Full output is in the [job log](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})."
