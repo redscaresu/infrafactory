@@ -29,9 +29,16 @@ const autoCreatedPurgeTimeout = 15 * time.Second
 // only what the API auto-created and retrying turns that into a clean
 // teardown, while a genuine destroy bug still fails both attempts.
 //
-// The purge is scoped to projectID, which callers must already have put
-// through harness.AssertProjectDeletable. When projectID is empty --
-// nothing to scope to -- the first result stands.
+// The purge is scoped to projectID and guarded by
+// harness.AssertProjectDeletable here rather than at the call sites.
+// reap asserted it; run, test and the interrupt path did not, and this
+// deletes real resources over HTTP with Terraform nowhere in the loop --
+// so the guard belongs where it cannot be forgotten. A state file that
+// is stale, hand-edited, or names the organization's default project as
+// its scaleway_account_project gets no purge at all.
+//
+// When projectID is empty -- nothing to scope to -- the first result
+// stands.
 // The returned slice names what the purge removed, so callers can put it
 // in the stage summary. A teardown that silently deleted things nobody
 // asked it to delete would be worse than the leak it fixes.
@@ -53,6 +60,11 @@ func destroySandbox(
 	}
 
 	if runtime.Deps.AutoCreated == nil {
+		return result, nil, err
+	}
+	if assertErr := harness.AssertProjectDeletable(
+		projectID, projectID, sandboxEnv["SCW_DEFAULT_ORGANIZATION_ID"],
+	); assertErr != nil {
 		return result, nil, err
 	}
 	removed, purgeErr := runtime.Deps.AutoCreated.Run(ctx, projectID, secretKey)

@@ -158,3 +158,26 @@ func TestAllDestroyCallsGoThroughTheRetryWrapper(t *testing.T) {
 		"call destroySandbox instead: a raw SandboxDestroy.Run skips the auto-created-resource purge, "+
 			"so the run leaks its project whenever the API put something in it that Terraform does not own")
 }
+
+// The purge deletes real resources over HTTP with Terraform nowhere in
+// the loop, so a project id that fails AssertProjectDeletable must not
+// reach it. reap asserted this; run, test and the interrupt path did
+// not, so the guard lives in the wrapper.
+func TestDestroyRefusesToPurgeTheOrganizationDefaultProject(t *testing.T) {
+	wantErr := errors.New("destroy failed")
+	destroy := &sequencedDestroy{errs: []error{wantErr, nil}}
+	purge := &fakePurge{removed: []string{"security_group would-have-deleted"}}
+	env := map[string]string{
+		"SCW_SECRET_KEY": "secret",
+		// The state names the organization's own default project.
+		"SCW_DEFAULT_ORGANIZATION_ID": purgeProjectID,
+	}
+
+	_, purged, err := destroySandbox(
+		context.Background(), retryRuntime(t, destroy, purge), "/work", env, purgeProjectID)
+
+	require.ErrorIs(t, err, wantErr)
+	assert.Zero(t, purge.calls, "the organization default project must never be purged")
+	assert.Empty(t, purged)
+	assert.Equal(t, 1, destroy.calls, "and no retry should follow a refused purge")
+}

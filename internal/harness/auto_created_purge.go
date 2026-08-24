@@ -63,9 +63,12 @@ type securityGroup struct {
 }
 
 // Run deletes auto-created resources in projectID and reports what it
-// removed. projectID must already have passed AssertProjectDeletable --
-// this type does no ownership checking of its own and will delete what
-// it is pointed at.
+// removed.
+//
+// This type does no ownership checking of its own and will delete what
+// it is pointed at, so projectID must already have passed
+// AssertProjectDeletable. cli.destroySandbox is the only caller and
+// applies that guard itself rather than trusting its own callers to.
 func (p *ScalewayAutoCreatedPurge) Run(ctx context.Context, projectID, secretKey string) ([]string, error) {
 	if projectID == "" {
 		return nil, fmt.Errorf("purge requires a project id")
