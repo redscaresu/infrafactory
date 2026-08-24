@@ -95,7 +95,18 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Run govulncheck
-        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+        # -tags noui, and NOT for convenience. cmd/infrafactory/embed.go
+        # carries `//go:embed all:ui/build`, and that directory is generated
+        # and gitignored, so on a clean runner it does not exist and
+        # `go build ./...` fails to load that package.
+        #
+        # govulncheck does not fail on it -- it exits 0 and says nothing.
+        # It simply cannot analyse a package that will not load, so the
+        # scan would quietly cover less than it appears to. A green result
+        # that skipped a package is the kind of false green this repo has
+        # been bitten by before. The noui build tag swaps the embed for a
+        # stub so every package loads and is actually scanned.
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest -tags noui ./...
 
   gitleaks:
     # M72: mirror the local pre-commit hook + the 3 sibling-fake CI

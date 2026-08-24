@@ -27,6 +27,15 @@ comparison produced one genuine gap, not a wholesale import.
 **`govulncheck` in CI.** The one thing goldfinger had that we did not, so a
 vulnerable Go dependency could ship silently.
 
+Run with **`-tags noui`**, which is a correctness requirement rather than a
+convenience. `cmd/infrafactory/embed.go` carries `//go:embed all:ui/build`,
+and that directory is generated and gitignored — so on a clean runner
+`go build ./...` cannot load that package. govulncheck does not fail on that:
+it exits 0 and says nothing, having simply skipped what it could not load. A
+green scan covering fewer packages than it appears to is precisely the false
+green this repo keeps encountering. The tag swaps the embed for a stub so
+every package loads.
+
 Symbol-level (the default) rather than `-scan module`, deliberately. The tree
 requires `golang.org/x/crypto@v0.53.0`, which carries **GO-2026-5932** with
 `Fixed in: N/A` — no fix exists. A module-level gate would be permanently red
