@@ -84,8 +84,8 @@ Every scenario marked **runnable** is one that has actually run against
 the real API — the word means has-run here, deliberately, because an
 untested claim about what the real cloud will accept is the exact thing
 this arc exists to distrust. There is no free
-expansion, and three of the four "key only" entries are not the easy wins they
-look like:
+expansion, and four of the five "key only" entries are not the easy wins
+they look like:
 
 - **`domain-paris` is not a permission problem.** The account holds no
   registered public domain — only the auto-created `privatedns` zone for
@@ -95,17 +95,24 @@ look like:
   blocked.** Granting IAM to the sandbox credential defeats the credential:
   a sandbox that can mint API keys is not a sandbox. Keep them as Layer 2
   scenarios.
+- **`incremental-project-paris` needs IPAM**, which is a real widening
+  rather than a formality: IPAM hands out addresses across the whole
+  organization's private networks. It is the cheapest *remaining* hourly
+  scenario, and still a blast-radius decision rather than a config line.
 - **`registry-paris` is the only defensible near-free expansion** — one
-  permission set, instant provisioning. It is also, as things stand, the
-  cheapest way to break the `iam-scope` case in
-  `examples/layer3-plan-lied/`, which relies on `scaleway_domain*` being
-  allowlisted and refused; granting Registry alone would not touch that,
-  but it is the kind of coupling worth checking before widening. Note it still widens org-scoped
+  permission set, instant provisioning. Note it still widens org-scoped
   registry access over the existing `funcscwblognolj7nc9` namespace, because
   product permission sets are project-scoped and per-run projects do not exist
   yet, so the rules must be organization-scoped.
 
-Everything else needs Instances, RDB, Redis or Kubernetes — both gates widened,
+Before widening anything here, check it against
+`examples/layer3-plan-lied/`. The `iam-scope` case works precisely because
+`scaleway_domain*` is allowlisted and refused by the credential, so a grant
+that closed that gap would quietly invalidate committed evidence. Domains
+is on nobody's expansion list, which is exactly why it was chosen for the
+fixture.
+
+Everything below those needs RDB, Redis or Kubernetes — both gates widened,
 and the expensive class the allowlist exists to keep out.
 
 ### Two families that are easy to miss
