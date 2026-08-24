@@ -202,6 +202,10 @@ jobs:
         # step instead means a stuck tofu fails the step and the job still
         # has budget left to clean up.
         timeout-minutes: 10
+        # From trusted/, so the scenario path and scenario.schema.json
+        # resolve the way they do in a normal checkout. The output root and
+        # policy paths in the config are absolute, so they are unaffected.
+        working-directory: trusted
         env:
           SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}
           SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
@@ -210,7 +214,7 @@ jobs:
           start=$(date +%s)
           set +e
           /tmp/infrafactory --config /tmp/layer3-gate/infrafactory.yaml \
-            test "trusted/$SCENARIO" > /tmp/layer3-gate/result.txt 2>&1
+            test "$SCENARIO" > /tmp/layer3-gate/result.txt 2>&1
           rc=$?
           set -e
           echo "elapsed=$(( $(date +%s) - start ))" >> "$GITHUB_OUTPUT"
@@ -289,7 +293,7 @@ jobs:
             echo "live state records no resources — the run cleaned up after itself"; exit 0
           fi
           echo "::warning::live state still holds resources; reaping"
-          /tmp/infrafactory --config /tmp/layer3-gate/infrafactory.yaml reap "trusted/$SCENARIO"
+          cd trusted && /tmp/infrafactory --config /tmp/layer3-gate/infrafactory.yaml reap "$SCENARIO"
 
       - name: Verdict
         # Separate from the run step so the comment always posts first.
