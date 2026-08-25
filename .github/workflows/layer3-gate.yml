@@ -132,6 +132,13 @@ jobs:
 
       - name: Setup OpenTofu
         uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2
+        with:
+          # Pinned for the same reason the Scaleway provider is: tofu is
+          # the process that evaluates PR-supplied HCL with real cloud
+          # credentials in its environment. Leaving it unset installs
+          # whatever the action defaults to on the day, so the executable
+          # doing the most sensitive work would be the one nobody chose.
+          tofu_version: 1.11.5
 
       - name: Start mockway
         # Layer 2 gates Layer 3, so the mock has to be up. Only mockway --
@@ -191,7 +198,15 @@ jobs:
                 allow_resource_types:
                   - scaleway_account_project
                   - scaleway_block_volume
-                  - scaleway_lb*
+                  # Named individually rather than scaleway_lb*. The glob
+                  # admits child-scoped types like scaleway_lb_acl, which
+                  # carry no project_id and would be refused by the
+                  # containment check as if they were unbound -- an
+                  # allowlist that admits what the preflight then rejects.
+                  - scaleway_lb
+                  - scaleway_lb_ip
+                  - scaleway_lb_backend
+                  - scaleway_lb_frontend
                   - scaleway_instance_ip
                   - scaleway_instance_server
                   - scaleway_instance_private_nic
@@ -367,7 +382,26 @@ jobs:
           scenario_name=$(basename "$SCENARIO" .yaml)
           state="$OUTPUT_ROOT/$scenario_name/terraform-live.tfstate"
           if [ ! -f "$state" ]; then
-            echo "no live state — nothing was applied"; exit 0
+            # No state file means one of two very different things, and
+            # they must not be collapsed.
+            #
+            # If the gate ran to completion, nothing was applied and there
+            # is nothing to clean up. If it was killed -- the step timeout
+            # is the case this whole step exists for -- tofu may already
+            # have sent a create request and died before flushing state.
+            # The resources exist, nothing records them, and reap has no
+            # project id to work from.
+            #
+            # "We could not check" and "nothing leaked" must never look
+            # alike, so the second case fails the job loudly instead of
+            # exiting green.
+            if [ "${{ steps.gate.outcome }}" = "success" ] || [ "${{ steps.gate.outcome }}" = "failure" ]; then
+              echo "no live state — the gate ran and applied nothing"; exit 0
+            fi
+            echo "::error::The gate step did not complete (outcome=${{ steps.gate.outcome }}) and left no state file."
+            echo "::error::tofu may have created resources before it was killed. Nothing records them, so reap cannot run."
+            echo "::error::Check the Scaleway account by hand for projects created during this run."
+            exit 1
           fi
           # Fail closed: if the state cannot be parsed we do not know what is
           # out there, so reap rather than assume it is clean. Same rule as

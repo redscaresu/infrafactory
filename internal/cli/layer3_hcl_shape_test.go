@@ -612,6 +612,11 @@ func gateWorkflowAllowlist(t *testing.T) []string {
 		if !collecting {
 			continue
 		}
+		// Comments and blank lines sit inside the list; only a
+		// non-comment, non-item line ends it.
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
 		if !strings.HasPrefix(trimmed, "- ") {
 			break
 		}
