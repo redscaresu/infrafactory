@@ -71,13 +71,13 @@ func repoScenariosPath(t *testing.T, name string) string {
 // since the cli helpers are unexported.
 func webAppParisFiles() map[string][]byte {
 	return map[string][]byte{
-		"providers.tf": []byte(webAppParisProvidersTF),
-		"variables.tf": []byte(webAppParisVariablesTF),
-		"network.tf":   []byte(webAppParisNetworkTF),
-		"compute.tf":   []byte(webAppParisComputeTF),
-		"database.tf":  []byte(webAppParisDatabaseTF),
+		"providers.tf":    []byte(webAppParisProvidersTF),
+		"variables.tf":    []byte(webAppParisVariablesTF),
+		"network.tf":      []byte(webAppParisNetworkTF),
+		"compute.tf":      []byte(webAppParisComputeTF),
+		"database.tf":     []byte(webAppParisDatabaseTF),
 		"loadbalancer.tf": []byte(webAppParisLoadBalancerTF),
-		"outputs.tf":   []byte(webAppParisOutputsTF),
+		"outputs.tf":      []byte(webAppParisOutputsTF),
 	}
 }
 
@@ -85,6 +85,7 @@ const webAppParisProvidersTF = `terraform {
   required_providers {
     scaleway = {
       source = "scaleway/scaleway"
+      version = "2.81.0"
     }
   }
 }

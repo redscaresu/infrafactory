@@ -58,13 +58,18 @@ func ensureScalewayProviderWiring(files map[string][]byte) {
 
 	sections := make([]string, 0, 2)
 	if missingRequiredProviders {
-		sections = append(sections, `terraform {
+		// Pinned, because Layer 3 refuses an unpinned provider and this
+		// block is what a generated stack gets when the model omitted
+		// one -- injecting a version-less block would make the repair
+		// loop fight a check it cannot satisfy by editing HCL.
+		sections = append(sections, fmt.Sprintf(`terraform {
   required_providers {
     scaleway = {
-      source = "scaleway/scaleway"
+      source  = %q
+      version = %q
     }
   }
-}`)
+}`, layer3ScalewayProviderSource, layer3ScalewayProviderVersion))
 	}
 	if missingProviderBlock {
 		sections = append(sections, `provider "scaleway" {}`)

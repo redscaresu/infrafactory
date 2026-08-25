@@ -226,6 +226,25 @@ jobs:
           cp "$src"/*.tf "$OUTPUT_ROOT/$scenario_name/"
           echo "staged $(ls "$src"/*.tf | wc -l) file(s) from $src"
 
+          # The dependency lock comes from TRUSTED, never from the PR.
+          #
+          # The shape check pins the provider version string, but a version
+          # string is not a binary. The lock file records the hashes tofu
+          # will accept for that provider, so init fails rather than
+          # executing a plugin that is not the reviewed one -- and the
+          # provider executes with SCW_SECRET_KEY in its environment.
+          #
+          # Taking it from the PR would defeat the point entirely: the
+          # thing being verified would be supplied by the thing being
+          # checked.
+          lock="trusted/examples/layer3-gate/$scenario_name/.terraform.lock.hcl"
+          if [ ! -f "$lock" ]; then
+            echo "::error::No trusted dependency lock at $lock. Refusing to let the PR choose the provider binary."
+            exit 1
+          fi
+          cp "$lock" "$OUTPUT_ROOT/$scenario_name/.terraform.lock.hcl"
+          echo "locked provider to $(awk '/^provider /{p=1} p&&/version/{print $3; exit}' "$lock")"
+
       - name: Run the gate
         id: gate
         # Step-level timeout, deliberately well below the job's. A job-level

@@ -218,6 +218,20 @@ func layer3NestedProblems(block *hclsyntax.Block, file string) []string {
 // layer3ScalewayProviderSource is the only provider a Layer 3 stack may pull.
 const layer3ScalewayProviderSource = "scaleway/scaleway"
 
+// layer3ScalewayProviderVersion is the exact provider version a Layer 3
+// stack may pull, and it lives here -- in the binary the gate builds from
+// the BASE branch -- precisely so a pull request cannot change it.
+//
+// A constraint is not a pin. The gate fixtures carried `~> 2.57` and
+// resolved to 2.81.0, because a range means "whatever the registry is
+// serving when init runs". The provider is an executable that runs with
+// SCW_ACCESS_KEY and SCW_SECRET_KEY in its environment, so which build of
+// it executes should be a decision someone made, not a decision the
+// registry makes at 3am.
+//
+// Bumping this is a base-branch change, reviewed like any other.
+const layer3ScalewayProviderVersion = "2.81.0"
+
 // layer3ProviderSourceProblems refuses any required_providers entry that is
 // not the real Scaleway provider.
 //
@@ -230,6 +244,24 @@ const layer3ScalewayProviderSource = "scaleway/scaleway"
 // tofu init downloads and EXECUTES that plugin with SCW_ACCESS_KEY and
 // SCW_SECRET_KEY in the environment. The provider binary is code, and this
 // path takes it from a registry address supplied by a pull request.
+// layer3ProviderVersionProblem requires an exact version equal to the
+// trusted pin. Ranges, omissions and any other exact version are refused.
+func layer3ProviderVersionProblem(val cty.Value, file, name string) (string, bool) {
+	if !val.Type().HasAttribute("version") {
+		return fmt.Sprintf("%s: required_provider %q declares no version; it must pin exactly %q, or tofu init downloads whatever the registry is serving",
+			file, name, layer3ScalewayProviderVersion), false
+	}
+	version := val.GetAttr("version")
+	if version.IsNull() || version.Type() != cty.String {
+		return fmt.Sprintf("%s: required_provider %q has a version this check cannot read", file, name), false
+	}
+	if version.AsString() != layer3ScalewayProviderVersion {
+		return fmt.Sprintf("%s: required_provider %q pins version %q; the gate only runs provider %q. A range such as \"~> 2.57\" is not a pin -- it resolves to whatever the registry serves at init time",
+			file, name, version.AsString(), layer3ScalewayProviderVersion), false
+	}
+	return "", true
+}
+
 func layer3ProviderSourceProblems(tfBlock *hclsyntax.Block, file string) ([]string, bool) {
 	problems := make([]string, 0)
 	sawCanonical := false
@@ -254,6 +286,10 @@ func layer3ProviderSourceProblems(tfBlock *hclsyntax.Block, file string) ([]stri
 			if src.IsNull() || src.Type() != cty.String || src.AsString() != layer3ScalewayProviderSource {
 				problems = append(problems, fmt.Sprintf("%s: required_provider %q must be source %q (a provider binary is code, and this one is chosen by the PR)",
 					file, name, layer3ScalewayProviderSource))
+				continue
+			}
+			if versionProblem, ok := layer3ProviderVersionProblem(val, file, name); !ok {
+				problems = append(problems, versionProblem)
 				continue
 			}
 			// Only the `scaleway` LOCAL NAME satisfies the requirement.

