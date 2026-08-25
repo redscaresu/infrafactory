@@ -655,6 +655,13 @@ func layer3CostProblems(resource *hclsyntax.Block, file string, varDefaults map[
 		}
 	}
 
+	// Nested blocks carry cost too: scaleway_instance_server declares its
+	// disk as `root_volume { size_in_gb = ... }`, so a top-level-only
+	// check bounds the server type and lets the disk be any size.
+	for _, inner := range resource.Body.Blocks {
+		problems = append(problems, layer3NestedCostProblems(inner, file, name, varDefaults)...)
+	}
+
 	for attrName, allowed := range layer3EnumBounds[resourceType] {
 		attr, ok := resource.Body.Attributes[attrName]
 		if !ok {
@@ -708,4 +715,40 @@ func layer3VariableDefaults(body *hclsyntax.Body, into map[string]cty.Value) {
 			into[block.Labels[0]] = val
 		}
 	}
+}
+
+// layer3NestedCostBounds caps attributes wherever they appear inside a
+// resource, regardless of which block holds them. Keyed by attribute
+// rather than by block, because the same name means the same thing --
+// and enumerating every nested block Scaleway might add is the kind of
+// list this surface keeps proving wrong.
+var layer3NestedCostBounds = map[string]float64{
+	"size_in_gb": 20,
+	"iops":       15000,
+}
+
+func layer3NestedCostProblems(block *hclsyntax.Block, file, owner string, varDefaults map[string]cty.Value) []string {
+	problems := make([]string, 0)
+	if block.Body == nil {
+		return problems
+	}
+	for attrName, max := range layer3NestedCostBounds {
+		attr, ok := block.Body.Attributes[attrName]
+		if !ok {
+			continue
+		}
+		val, resolved := layer3ResolveConstant(attr.Expr, varDefaults)
+		if !resolved || val.Type() != cty.Number {
+			problems = append(problems, fmt.Sprintf("%s: %s sets %s.%s to something this check cannot resolve to a constant, so its cost cannot be bounded", file, owner, block.Type, attrName))
+			continue
+		}
+		f, _ := val.AsBigFloat().Float64()
+		if f > max {
+			problems = append(problems, fmt.Sprintf("%s: %s sets %s.%s to %g; the gate caps it at %g because it applies to real, billed infrastructure", file, owner, block.Type, attrName, f, max))
+		}
+	}
+	for _, inner := range block.Body.Blocks {
+		problems = append(problems, layer3NestedCostProblems(inner, file, owner, varDefaults)...)
+	}
+	return problems
 }

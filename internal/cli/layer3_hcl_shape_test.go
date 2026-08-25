@@ -843,3 +843,23 @@ resource "scaleway_instance_server" "big" {
 
 	require.Error(t, validateLayer3HCLShape(dir, append(gateAllowlist, "scaleway_instance_server")))
 }
+
+// A server declares its disk in a nested block, so a top-level-only cost
+// check bounds the server type and lets the disk be any size.
+func TestLayer3ShapeBoundsNestedVolumeSize(t *testing.T) {
+	dir := writeShapeHCL(t, shapeProject+`
+resource "scaleway_instance_server" "web" {
+  type       = "DEV1-S"
+  image      = "ubuntu_jammy"
+  project_id = scaleway_account_project.main.id
+
+  root_volume {
+    size_in_gb = 5000
+  }
+}`)
+
+	err := validateLayer3HCLShape(dir, append(gateAllowlist, "scaleway_instance_server"))
+
+	require.Error(t, err, "the disk inside a small server is still a real, billed disk")
+	assert.Contains(t, err.Error(), "root_volume.size_in_gb")
+}

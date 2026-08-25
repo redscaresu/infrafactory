@@ -34,6 +34,15 @@ var SandboxStripEnv = []string{
 	"SCW_DEFAULT_ORGANIZATION_ID",
 	"SCW_PROFILE",
 	"SCW_CONFIG_PATH",
+	// TF_VAR_* and TF_CLI_ARGS* decide what the configuration actually
+	// applies, from outside the configuration. The cost bounds read a
+	// variable's DEFAULT to decide whether a volume is 10 GB or 10 TB,
+	// and an inherited TF_VAR_volume_size_in_gb silently overrides that
+	// default -- so the check would vouch for a number that never
+	// reaches the API. TF_CLI_ARGS is broader still: it injects
+	// arbitrary flags, `-var` among them.
+	"TF_VAR_*",
+	"TF_CLI_ARGS*",
 }
 
 var ErrSandboxDeployFailed = errors.New("sandbox deploy failed")
