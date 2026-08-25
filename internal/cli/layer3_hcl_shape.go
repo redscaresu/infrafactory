@@ -178,6 +178,7 @@ func layer3BlockProblems(body *hclsyntax.Body, file string, allowedResourceTypes
 				problems = append(problems, fmt.Sprintf("%s: resource type %q is not in allow_resource_types", file, block.Labels[0]))
 			}
 			problems = append(problems, layer3ContainmentProblems(block, file)...)
+			problems = append(problems, layer3MultiplicityProblems(block, file)...)
 		case block.Type == "provider":
 			if len(block.Labels) > 0 && block.Labels[0] != "scaleway" {
 				problems = append(problems, fmt.Sprintf("%s: provider %q is not permitted", file, block.Labels[0]))
@@ -500,3 +501,38 @@ func (w layer3CallWalker) Enter(node hclsyntax.Node) hcl.Diagnostics {
 }
 
 func (w layer3CallWalker) Exit(hclsyntax.Node) hcl.Diagnostics { return nil }
+
+// layer3MultiplicityProblems refuses count and for_each on PR-supplied
+// resources.
+//
+// Every other check here asks "may this resource type exist?" and none
+// asked "how many?". `count = 50` on an allowed scaleway_instance_server
+// is fifty real servers billing by the hour, and the arc's spend ceiling
+// is not enforced by anything else -- ADR-0010 bounds the blast radius to
+// one project, not the contents of it.
+//
+// The other direction matters as much and is quieter: `count = 0` makes
+// an allowed resource vanish, so the gate applies nothing, probes
+// nothing, sweeps clean and reports green. That is a false green, which
+// is the failure this whole workflow exists to eliminate.
+//
+// A fixture that genuinely needs several of something can write them out.
+// The gate applies a handful of resources by design.
+func layer3MultiplicityProblems(resource *hclsyntax.Block, file string) []string {
+	problems := make([]string, 0)
+	if resource.Body == nil {
+		return problems
+	}
+	name := "<unnamed>"
+	if len(resource.Labels) > 1 {
+		name = resource.Labels[1]
+	}
+	for _, meta := range []string{"count", "for_each"} {
+		if _, ok := resource.Body.Attributes[meta]; ok {
+			problems = append(problems, fmt.Sprintf(
+				"%s: %s sets %s; Layer 3 applies to real infrastructure, so how MANY resources a fixture creates is not the PR's to choose (and %s = 0 would make the gate verify nothing and still report green)",
+				file, name, meta, meta))
+		}
+	}
+	return problems
+}

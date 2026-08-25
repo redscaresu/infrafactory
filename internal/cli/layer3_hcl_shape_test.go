@@ -694,3 +694,43 @@ data "scaleway_account_project" "someone_elses" {
 	require.Error(t, err, "data blocks read the real account outside the run's project")
 	assert.Contains(t, err.Error(), "not permitted")
 }
+
+// Fifty real servers, billing hourly, from one allowed resource type.
+func TestLayer3ShapeRefusesCountOnAResource(t *testing.T) {
+	dir := writeShapeHCL(t, shapeProject+`
+resource "scaleway_block_volume" "many" {
+  count      = 50
+  size_in_gb = 1
+  project_id = scaleway_account_project.main.id
+}`)
+
+	err := validateLayer3HCLShape(dir, gateAllowlist)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "count")
+}
+
+// The quieter direction: count = 0 applies nothing, sweeps clean, and
+// reports green -- a false green, which is the failure the gate exists
+// to eliminate.
+func TestLayer3ShapeRefusesCountZero(t *testing.T) {
+	dir := writeShapeHCL(t, shapeProject+`
+resource "scaleway_block_volume" "vanished" {
+  count      = 0
+  size_in_gb = 1
+  project_id = scaleway_account_project.main.id
+}`)
+
+	require.Error(t, validateLayer3HCLShape(dir, gateAllowlist))
+}
+
+func TestLayer3ShapeRefusesForEachOnAResource(t *testing.T) {
+	dir := writeShapeHCL(t, shapeProject+`
+resource "scaleway_block_volume" "spread" {
+  for_each   = { a = 1, b = 2 }
+  size_in_gb = 1
+  project_id = scaleway_account_project.main.id
+}`)
+
+	require.Error(t, validateLayer3HCLShape(dir, gateAllowlist))
+}
