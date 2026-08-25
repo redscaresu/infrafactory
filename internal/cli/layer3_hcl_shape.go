@@ -28,6 +28,16 @@ import (
 // `provisioner` were blocked, and `data "external"` with `program = [...]`
 // still executed commands during plan. Enumerating what is permitted ends
 // that game.
+// layer3AllowedTopLevelBlocks is deny-by-default. `data` is deliberately
+// absent: a data source reads the REAL account, outside the run's
+// disposable project, and its result can be interpolated into an allowed
+// resource -- `user_data` on an instance the PR boot-scripts, or an
+// output the gate posts onto the pull request. Refusing function calls
+// closed the file() path; a data block is the same exfiltration with a
+// traversal instead of a call.
+//
+// No gate fixture uses one. If a scenario ever needs a data source, it
+// gets admitted deliberately and with a story for what it may read.
 var layer3AllowedTopLevelBlocks = map[string]bool{
 	"terraform": true,
 	"provider":  true,
@@ -35,7 +45,6 @@ var layer3AllowedTopLevelBlocks = map[string]bool{
 	"output":    true,
 	"locals":    true,
 	"resource":  true,
-	"data":      true,
 }
 
 // layer3DeniedNestedBlocks execute commands during apply, inside a process
@@ -169,13 +178,6 @@ func layer3BlockProblems(body *hclsyntax.Body, file string, allowedResourceTypes
 				problems = append(problems, fmt.Sprintf("%s: resource type %q is not in allow_resource_types", file, block.Labels[0]))
 			}
 			problems = append(problems, layer3ContainmentProblems(block, file)...)
-		case block.Type == "data":
-			// `data "external"` runs a program at plan time. Restricting
-			// data sources to the cloud under test removes that whole
-			// family rather than naming the dangerous ones.
-			if len(block.Labels) > 0 && !strings.HasPrefix(block.Labels[0], "scaleway_") {
-				problems = append(problems, fmt.Sprintf("%s: data source %q is not a scaleway_ source", file, block.Labels[0]))
-			}
 		case block.Type == "provider":
 			if len(block.Labels) > 0 && block.Labels[0] != "scaleway" {
 				problems = append(problems, fmt.Sprintf("%s: provider %q is not permitted", file, block.Labels[0]))

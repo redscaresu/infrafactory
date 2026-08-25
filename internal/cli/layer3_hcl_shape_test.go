@@ -678,3 +678,19 @@ variable "zones" {
 
 	assert.NoError(t, validateLayer3HCLShape(dir, gateAllowlist))
 }
+
+// A data source reads the real account, outside the run's disposable
+// project, and the value can be interpolated into an allowed resource --
+// the same exfiltration as file(), reached by a traversal rather than a
+// call, so refusing function calls does not cover it.
+func TestLayer3ShapeRefusesDataSources(t *testing.T) {
+	dir := writeShapeHCL(t, shapeProject+`
+data "scaleway_account_project" "someone_elses" {
+  name = "openclaw"
+}`)
+
+	err := validateLayer3HCLShape(dir, gateAllowlist)
+
+	require.Error(t, err, "data blocks read the real account outside the run's project")
+	assert.Contains(t, err.Error(), "not permitted")
+}

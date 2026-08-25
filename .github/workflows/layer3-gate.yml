@@ -395,10 +395,17 @@ jobs:
             # "We could not check" and "nothing leaked" must never look
             # alike, so the second case fails the job loudly instead of
             # exiting green.
-            if [ "${{ steps.gate.outcome }}" = "success" ] || [ "${{ steps.gate.outcome }}" = "failure" ]; then
-              echo "no live state — the gate ran and applied nothing"; exit 0
+            # Only a gate that ran AND succeeded proves nothing was
+            # applied. The run step deliberately swallows tofu's exit code
+            # (`set +e`, capture rc, exit 0) so the comment posts before
+            # the verdict -- which means steps.gate.outcome is `success`
+            # even when the apply failed. Reading outcome alone here would
+            # call every failed no-state run clean, including the ones
+            # that died mid-create.
+            if [ "${{ steps.gate.outcome }}" = "success" ] && [ "${{ steps.gate.outputs.rc }}" = "0" ]; then
+              echo "no live state — the gate ran, succeeded, and applied nothing"; exit 0
             fi
-            echo "::error::The gate step did not complete (outcome=${{ steps.gate.outcome }}) and left no state file."
+            echo "::error::The gate did not complete cleanly (outcome=${{ steps.gate.outcome }}, rc=${{ steps.gate.outputs.rc }}) and left no state file."
             echo "::error::tofu may have created resources before it was killed. Nothing records them, so reap cannot run."
             echo "::error::Check the Scaleway account by hand for projects created during this run."
             exit 1
