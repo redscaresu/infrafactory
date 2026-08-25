@@ -100,13 +100,25 @@ var layer3ProjectExemptTypes = map[string]bool{
 	"scaleway_account_project": true,
 }
 
-// layer3UnreadableConfigExt reports whether tofu would load the file as
-// configuration while validateLayer3HCLShape would not parse it.
+// layer3UnreadableConfigExt reports whether tofu would load the file
+// automatically while validateLayer3HCLShape would not read it.
 //
-// Checked longest-first: ".tf.json" also ends in ".json", and a plain
-// ".tf" must stay readable.
+// Two families, both auto-loaded and neither parsed here:
+//
+//   - .tf.json, .tofu, .tofu.json -- configuration in a dialect this
+//     validator does not speak.
+//   - terraform.tfvars and *.auto.tfvars (and their .json forms) --
+//     variable VALUES, loaded with no flag. The .tf files can validate
+//     perfectly and still apply something else: `size_in_gb = var.size`
+//     is checked once and priced by whatever the tfvars says.
+//
+// Checked by suffix, longest-first: ".tf.json" also ends in ".json", and
+// a plain ".tf" must stay readable.
 func layer3UnreadableConfigExt(name string) bool {
-	for _, ext := range []string{".tf.json", ".tofu.json", ".tofu"} {
+	if name == "terraform.tfvars" || name == "terraform.tfvars.json" {
+		return true
+	}
+	for _, ext := range []string{".tf.json", ".tofu.json", ".tofu", ".auto.tfvars", ".auto.tfvars.json"} {
 		if strings.HasSuffix(name, ext) {
 			return true
 		}
@@ -137,7 +149,7 @@ func validateLayer3HCLShape(outputDir string, allowedResourceTypes []string) err
 		// checks below. Refuse rather than grow a second parser and a
 		// second dialect: no Layer 3 stack has ever needed either.
 		if !entry.IsDir() && layer3UnreadableConfigExt(entry.Name()) {
-			return fmt.Errorf("layer 3 refuses %s: tofu loads that extension but this validator does not read it", entry.Name())
+			return fmt.Errorf("layer 3 refuses %s: tofu loads it automatically but this validator does not read it", entry.Name())
 		}
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".tf") {
 			continue

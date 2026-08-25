@@ -240,13 +240,17 @@ jobs:
             echo "::error::No gate fixture at $src. Add the HCL this scenario should apply."
             exit 1
           fi
-          # tofu loads .tf, .tf.json, .tofu and .tofu.json. Only .tf is
-          # staged and only .tf is validated, so a fixture carrying any of
-          # the others is refused here rather than silently left behind --
-          # "the gate passed" must not be able to mean "the gate ignored
-          # half of what you submitted".
+          # tofu auto-loads more than .tf: other config dialects
+          # (.tf.json, .tofu, .tofu.json) and variable values
+          # (terraform.tfvars, *.auto.tfvars, and their .json forms).
+          # Only .tf is staged and only .tf is validated, so a fixture
+          # carrying any of the others is refused here rather than
+          # silently left behind -- "the gate passed" must not be able to
+          # mean "the gate ignored half of what you submitted".
           unstageable=$(find "$src" -maxdepth 1 -type f \
-            \( -name '*.tf.json' -o -name '*.tofu' -o -name '*.tofu.json' \) -print)
+            \( -name '*.tf.json' -o -name '*.tofu' -o -name '*.tofu.json' \
+               -o -name 'terraform.tfvars' -o -name 'terraform.tfvars.json' \
+               -o -name '*.auto.tfvars' -o -name '*.auto.tfvars.json' \) -print)
           if [ -n "$unstageable" ]; then
             echo "::error::Fixture contains OpenTofu config this gate does not validate:"
             echo "$unstageable" | sed 's/^/::error::  /'

@@ -739,7 +739,14 @@ resource "scaleway_block_volume" "spread" {
 // beside valid .tf would be applied with cloud credentials having passed
 // none of the checks in this file.
 func TestLayer3ShapeRefusesEveryConfigExtensionItCannotRead(t *testing.T) {
-	for _, name := range []string{"extra.tf.json", "extra.tofu", "extra.tofu.json"} {
+	for _, name := range []string{
+		"extra.tf.json", "extra.tofu", "extra.tofu.json",
+		// Not configuration but auto-loaded all the same: these set
+		// variable VALUES, so the .tf can validate and the apply can
+		// still be priced by something nobody checked.
+		"terraform.tfvars", "terraform.tfvars.json",
+		"sizes.auto.tfvars", "sizes.auto.tfvars.json",
+	} {
 		t.Run(name, func(t *testing.T) {
 			dir := writeShapeHCL(t, shapeProject)
 			require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(`{"resource":{}}`), 0o600))
