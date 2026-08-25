@@ -126,7 +126,7 @@ func validateLayer3HCLShape(outputDir string, allowedResourceTypes []string) err
 	}
 	problems := make([]string, 0)
 	sawCanonicalProvider := false
-	sawProjectResource := false
+	projectResources := 0
 	for _, entry := range entries {
 		// Every extension tofu loads must be one this validator reads.
 		//
@@ -156,13 +156,23 @@ func validateLayer3HCLShape(outputDir string, allowedResourceTypes []string) err
 		if !ok {
 			return fmt.Errorf("layer 3 refuses %s: unexpected body type", entry.Name())
 		}
-		fileProblems, sawProvider, sawProject := layer3BlockProblems(body, entry.Name(), allowedResourceTypes)
+		fileProblems, sawProvider, projectsHere := layer3BlockProblems(body, entry.Name(), allowedResourceTypes)
 		problems = append(problems, fileProblems...)
 		sawCanonicalProvider = sawCanonicalProvider || sawProvider
-		sawProjectResource = sawProjectResource || sawProject
+		projectResources += projectsHere
 	}
-	if !sawProjectResource {
+	// Exactly one, not at least one. The teardown model assumes a single
+	// disposable project throughout: CaptureSweepTarget records one
+	// project id, AssertProjectDeletable guards that one, and the orphan
+	// sweep asks the API about that one. A stack with two projects passes
+	// a saw-at-least-one check, binds half its resources to the second,
+	// and leaves that half unverified by the sweep -- resources in a
+	// project nothing is looking at.
+	switch {
+	case projectResources == 0:
 		problems = append(problems, "no scaleway_account_project resource is declared, so this stack has no disposable project of its own to create and destroy")
+	case projectResources > 1:
+		problems = append(problems, fmt.Sprintf("%d scaleway_account_project resources are declared; the sweep verifies exactly one, so resources in the others would be destroyed and checked by nothing", projectResources))
 	}
 	if !sawCanonicalProvider {
 		// Omitting required_providers is not a safe default: tofu then
@@ -179,10 +189,10 @@ func validateLayer3HCLShape(outputDir string, allowedResourceTypes []string) err
 	return nil
 }
 
-func layer3BlockProblems(body *hclsyntax.Body, file string, allowedResourceTypes []string) ([]string, bool, bool) {
+func layer3BlockProblems(body *hclsyntax.Body, file string, allowedResourceTypes []string) ([]string, bool, int) {
 	problems := make([]string, 0)
 	sawCanonicalProvider := false
-	sawProjectResource := false
+	projectResources := 0
 	for _, block := range body.Blocks {
 		switch {
 		case !layer3AllowedTopLevelBlocks[block.Type]:
@@ -190,7 +200,7 @@ func layer3BlockProblems(body *hclsyntax.Body, file string, allowedResourceTypes
 			continue
 		case block.Type == "resource":
 			if len(block.Labels) > 0 && block.Labels[0] == "scaleway_account_project" {
-				sawProjectResource = true
+				projectResources++
 			}
 			if len(block.Labels) > 0 && !resourceTypeAllowed(block.Labels[0], allowedResourceTypes) {
 				problems = append(problems, fmt.Sprintf("%s: resource type %q is not in allow_resource_types", file, block.Labels[0]))
@@ -218,7 +228,7 @@ func layer3BlockProblems(body *hclsyntax.Body, file string, allowedResourceTypes
 		problems = append(problems, layer3NestedProblems(block, file)...)
 		problems = append(problems, layer3FunctionCallProblems(block, file)...)
 	}
-	return problems, sawCanonicalProvider, sawProjectResource
+	return problems, sawCanonicalProvider, projectResources
 }
 
 // layer3NestedProblems walks the whole tree: a provisioner is nested inside

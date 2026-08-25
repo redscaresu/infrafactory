@@ -759,3 +759,21 @@ func TestLayer3ShapeAcceptsTheTrustedLockFile(t *testing.T) {
 
 	assert.NoError(t, validateLayer3HCLShape(dir, gateAllowlist))
 }
+
+// The teardown model assumes one disposable project throughout:
+// CaptureSweepTarget records one id, AssertProjectDeletable guards that
+// one, the sweep asks about that one. A second project would take half
+// the stack somewhere nothing is looking.
+func TestLayer3ShapeRefusesASecondProject(t *testing.T) {
+	dir := writeShapeHCL(t, shapeProject+`
+resource "scaleway_account_project" "shadow" { name = "y" }
+resource "scaleway_block_volume" "hidden" {
+  size_in_gb = 1
+  project_id = scaleway_account_project.shadow.id
+}`)
+
+	err := validateLayer3HCLShape(dir, gateAllowlist)
+
+	require.Error(t, err, "two projects means the sweep verifies only one of them")
+	assert.Contains(t, err.Error(), "exactly one")
+}
