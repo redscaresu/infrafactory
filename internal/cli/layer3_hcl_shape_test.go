@@ -863,3 +863,25 @@ resource "scaleway_instance_server" "web" {
 	require.Error(t, err, "the disk inside a small server is still a real, billed disk")
 	assert.Contains(t, err.Error(), "root_volume.size_in_gb")
 }
+
+// A private NIC names two parents. Binding the server correctly and the
+// network to a literal attaches the run's machine to a network the run
+// does not own and the sweep will never look at.
+func TestLayer3ShapeRefusesPrivateNICBoundToAForeignNetwork(t *testing.T) {
+	dir := writeShapeHCL(t, shapeProject+`
+resource "scaleway_instance_server" "web" {
+  type       = "DEV1-S"
+  image      = "ubuntu_jammy"
+  project_id = scaleway_account_project.main.id
+}
+resource "scaleway_instance_private_nic" "nic" {
+  server_id          = scaleway_instance_server.web.id
+  private_network_id = "fr-par-1/11111111-2222-3333-4444-555555555555"
+}`)
+
+	err := validateLayer3HCLShape(dir,
+		append(gateAllowlist, "scaleway_instance_server", "scaleway_instance_private_nic"))
+
+	require.Error(t, err, "private_network_id is a second parent and needs the same treatment as the first")
+	assert.Contains(t, err.Error(), "private_network_id")
+}

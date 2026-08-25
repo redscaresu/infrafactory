@@ -88,12 +88,17 @@ var layer3SafeProviderAttrs = map[string]bool{
 // That only holds if the parent is a resource in THIS stack --
 // `lb_id = "<some existing lb uuid>"` would attach a backend to a load
 // balancer the run does not own and will never destroy.
-var layer3ChildScopedTypes = map[string]string{
-	"scaleway_lb_backend":           "lb_id",
-	"scaleway_lb_frontend":          "lb_id",
-	"scaleway_lb_route":             "frontend_id",
-	"scaleway_lb_certificate":       "lb_id",
-	"scaleway_instance_private_nic": "server_id",
+// Every parent reference is listed, not just the one that scopes
+// billing. A private NIC names both a server and a private network, and
+// checking only the server lets a literal private_network_id attach the
+// run's server to a network the run does not own and will not sweep.
+// Same for a frontend, which names a backend as well as a load balancer.
+var layer3ChildScopedTypes = map[string][]string{
+	"scaleway_lb_backend":           {"lb_id"},
+	"scaleway_lb_frontend":          {"lb_id", "backend_id"},
+	"scaleway_lb_route":             {"frontend_id", "backend_id"},
+	"scaleway_lb_certificate":       {"lb_id"},
+	"scaleway_instance_private_nic": {"server_id", "private_network_id"},
 }
 
 // layer3ProjectExemptTypes carry no project binding of any kind.
@@ -406,8 +411,11 @@ func layer3ContainmentProblems(resource *hclsyntax.Block, file string) []string 
 		return problems
 	}
 
-	if parentAttr, isChild := layer3ChildScopedTypes[resourceType]; isChild {
-		return layer3ParentBindingProblems(resource, file, name, parentAttr)
+	if parentAttrs, isChild := layer3ChildScopedTypes[resourceType]; isChild {
+		for _, parentAttr := range parentAttrs {
+			problems = append(problems, layer3ParentBindingProblems(resource, file, name, parentAttr)...)
+		}
+		return problems
 	}
 
 	if _, hasProject := resource.Body.Attributes["project_id"]; !hasProject {

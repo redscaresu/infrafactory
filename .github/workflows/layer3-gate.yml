@@ -455,15 +455,23 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh pr comment "${{ github.event.pull_request.number }}" --body "$(cat <<'BODY'
-          ### ⚠️ Layer 3 cleanup did not verify
-
-          The stage summary above was posted before teardown finished. Cleanup
-          then failed, so **real Scaleway resources may still exist**.
-
-          Check the account before relying on the summary above.
-          BODY
-          )"
+          # gh api with an explicit repos/ path, not `gh pr comment`: this
+          # step runs from $GITHUB_WORKSPACE, which holds the trusted/ and
+          # pr/ checkouts and is not itself a repository, so anything that
+          # infers the repo from the working directory fails here. The
+          # stage-summary step above uses the same form for the same
+          # reason -- and this comment matters more, because without it a
+          # green summary stays the last word on a run that did not clean
+          # up.
+          body=$(printf '%s\n' \
+            "### ⚠️ Layer 3 cleanup did not verify" \
+            "" \
+            "The stage summary above was posted before teardown finished. Cleanup then failed, so **real Scaleway resources may still exist**." \
+            "" \
+            "Check the account before relying on that summary.")
+          jq -n --arg b "$body" '{body: $b}' > /tmp/layer3-gate/cleanup-warning.json
+          gh api -X POST "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
+            --input /tmp/layer3-gate/cleanup-warning.json
 
       - name: Verdict
         # Last, so it can account for cleanup as well as the run.
