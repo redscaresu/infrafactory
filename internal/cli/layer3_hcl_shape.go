@@ -195,6 +195,7 @@ func layer3BlockProblems(body *hclsyntax.Body, file string, allowedResourceTypes
 			sawCanonicalProvider = sawCanonicalProvider || sawProvider
 		}
 		problems = append(problems, layer3NestedProblems(block, file)...)
+		problems = append(problems, layer3FunctionCallProblems(block, file)...)
 	}
 	return problems, sawCanonicalProvider, sawProjectResource
 }
@@ -432,3 +433,68 @@ func layer3ProjectBindingProblems(resource *hclsyntax.Block, file string) []stri
 func layer3PreflightHCL(outputDir string, allowedResourceTypes []string) error {
 	return validateLayer3HCLShape(outputDir, allowedResourceTypes)
 }
+
+// layer3FunctionCallProblems refuses every function call in PR-supplied
+// HCL.
+//
+// Blocking provisioners, `data "external"` and the rest closed the paths
+// that obviously execute something. Ordinary expressions were still
+// unrestricted, and that is enough:
+//
+//	resource "scaleway_instance_server" "web" {
+//	  user_data = { cloud-init = file("/proc/self/environ") }
+//	}
+//
+// reads the runner's environment -- SCW_ACCESS_KEY and SCW_SECRET_KEY
+// included -- and hands it to a machine the PR controls the boot script
+// of. An `output` would do it more directly still, since the gate posts
+// its output to the pull request.
+//
+// Deny-by-default rather than a denylist of file/templatefile/fileset,
+// for the same reason the block check is: this surface has produced a
+// bypass for every enumerate-the-bad-ones attempt on it. A fixture that
+// genuinely needs a function can have one allowlisted, deliberately.
+//
+// Type constraints are exempt. `type = list(string)` parses as a call and
+// is not one -- it names a type and evaluates nothing.
+func layer3FunctionCallProblems(block *hclsyntax.Block, file string) []string {
+	problems := make([]string, 0)
+	if block.Body == nil {
+		return problems
+	}
+	isVariable := block.Type == "variable"
+	for name, attr := range block.Body.Attributes {
+		if isVariable && name == "type" {
+			continue
+		}
+		for _, fn := range layer3CallsIn(attr.Expr) {
+			problems = append(problems, fmt.Sprintf(
+				"%s: %s calls %s(); Layer 3 evaluates PR-supplied HCL with real credentials in the environment, so function calls are refused (file() and friends can read them, and the stack can ship them out)",
+				file, name, fn))
+		}
+	}
+	for _, inner := range block.Body.Blocks {
+		problems = append(problems, layer3FunctionCallProblems(inner, file)...)
+	}
+	return problems
+}
+
+// layer3CallsIn reports the function names called anywhere inside an
+// expression, including nested inside other calls and collections.
+func layer3CallsIn(expr hclsyntax.Expression) []string {
+	var found []string
+	walker := layer3CallWalker{found: &found}
+	_ = hclsyntax.Walk(expr, walker)
+	return found
+}
+
+type layer3CallWalker struct{ found *[]string }
+
+func (w layer3CallWalker) Enter(node hclsyntax.Node) hcl.Diagnostics {
+	if call, ok := node.(*hclsyntax.FunctionCallExpr); ok {
+		*w.found = append(*w.found, call.Name)
+	}
+	return nil
+}
+
+func (w layer3CallWalker) Exit(hclsyntax.Node) hcl.Diagnostics { return nil }

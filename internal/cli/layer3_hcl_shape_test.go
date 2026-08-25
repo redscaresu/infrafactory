@@ -621,3 +621,55 @@ func gateWorkflowAllowlist(t *testing.T) []string {
 	require.NotEmpty(t, allow, "could not read allow_resource_types out of the gate workflow")
 	return allow
 }
+
+// The exfiltration path that provisioner and data-source blocking did
+// not close: an ordinary attribute reading the runner's environment and
+// handing it to a machine whose boot script the PR controls.
+func TestLayer3ShapeRefusesFileFunctionInUserData(t *testing.T) {
+	dir := writeShapeHCL(t, shapeProject+`
+resource "scaleway_instance_server" "web" {
+  type       = "DEV1-S"
+  image      = "ubuntu_jammy"
+  project_id = scaleway_account_project.main.id
+  user_data  = { cloud-init = file("/proc/self/environ") }
+}`)
+
+	err := validateLayer3HCLShape(dir, append(gateAllowlist, "scaleway_instance_server"))
+
+	require.Error(t, err, "file() can read SCW_SECRET_KEY out of the runner environment")
+	assert.Contains(t, err.Error(), "file()")
+}
+
+// The gate posts its output to the pull request, so an output is the
+// shortest path of all.
+func TestLayer3ShapeRefusesFunctionCallInOutput(t *testing.T) {
+	dir := writeShapeHCL(t, shapeProject+`
+output "leak" {
+  value = file("/proc/self/environ")
+}`)
+
+	require.Error(t, validateLayer3HCLShape(dir, gateAllowlist))
+}
+
+// Nested inside a collection, which a shallow check would miss.
+func TestLayer3ShapeRefusesFunctionCallNestedInACollection(t *testing.T) {
+	dir := writeShapeHCL(t, shapeProject+`
+locals {
+  sneaky = { a = [1, templatefile("x.tpl", {})] }
+}`)
+
+	require.Error(t, validateLayer3HCLShape(dir, gateAllowlist))
+}
+
+// `type = list(string)` parses as a call and is not one. block-paris
+// declares exactly this, so getting it wrong would refuse a committed
+// fixture.
+func TestLayer3ShapeAllowsTypeConstraintsThatLookLikeCalls(t *testing.T) {
+	dir := writeShapeHCL(t, shapeProject+`
+variable "zones" {
+  type    = list(string)
+  default = ["fr-par-1"]
+}`)
+
+	assert.NoError(t, validateLayer3HCLShape(dir, gateAllowlist))
+}
