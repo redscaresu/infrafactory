@@ -37,9 +37,11 @@ const livePartialApplyState = `{
 // actually use, alongside HCL valid enough to reach the sandbox deploy.
 //
 // The HCL is not incidental: Layer 3 refuses to apply a stack with no
-// scaleway_account_project (ADR-0010) or with escape hatches, and those
-// checks run before the deploy. A fixture without HCL would never reach the
-// code these tests are about.
+// scaleway_account_project (ADR-0010), with escape hatches, or with any
+// resource not bound to that project, and those checks run before the
+// deploy. A fixture that trips one of them takes the refusal path instead
+// and never reaches the cleanup code these tests are about -- which is
+// how it broke when the containment rule was tightened.
 func writePartialLiveState(t *testing.T, outputDir string) {
 	t.Helper()
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
@@ -58,7 +60,10 @@ terraform {
   }
 }
 resource "scaleway_account_project" "main" { name = "t" }
-resource "scaleway_block_volume" "data" { size_in_gb = 1 }`
+resource "scaleway_block_volume" "data" {
+  size_in_gb = 1
+  project_id = scaleway_account_project.main.id
+}`
 	if err := os.WriteFile(filepath.Join(outputDir, "main.tf"), []byte(hcl), 0o600); err != nil {
 		t.Fatalf("write hcl: %v", err)
 	}
@@ -386,8 +391,13 @@ func TestDisallowedResourceTypeNeverReachesTheRealAPI(t *testing.T) {
 	}
 	// A k8s cluster is slow and expensive, and is deliberately absent from
 	// the allowlist below.
+	// Bound to the run's project like any real stack, so the refusal
+	// under test is the allowlist one and not a containment one.
 	hcl := `resource "scaleway_account_project" "main" { name = "x" }
-resource "scaleway_k8s_cluster" "expensive" { name = "nope" }`
+resource "scaleway_k8s_cluster" "expensive" {
+  name       = "nope"
+  project_id = scaleway_account_project.main.id
+}`
 	if err := os.WriteFile(filepath.Join(dir, "main.tf"), []byte(hcl), 0o600); err != nil {
 		t.Fatalf("write hcl: %v", err)
 	}

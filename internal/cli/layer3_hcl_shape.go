@@ -68,6 +68,29 @@ var layer3SafeProviderAttrs = map[string]bool{
 	"zone":   true,
 }
 
+// layer3ChildScopedTypes are resource types that carry no project_id
+// because they live inside a parent resource. The value is the attribute
+// naming that parent.
+//
+// Their containment is inherited: an lb_backend belongs to whichever load
+// balancer its lb_id names, and that load balancer is itself project-bound.
+// That only holds if the parent is a resource in THIS stack --
+// `lb_id = "<some existing lb uuid>"` would attach a backend to a load
+// balancer the run does not own and will never destroy.
+var layer3ChildScopedTypes = map[string]string{
+	"scaleway_lb_backend":           "lb_id",
+	"scaleway_lb_frontend":          "lb_id",
+	"scaleway_lb_route":             "frontend_id",
+	"scaleway_lb_certificate":       "lb_id",
+	"scaleway_instance_private_nic": "server_id",
+}
+
+// layer3ProjectExemptTypes carry no project binding of any kind.
+// scaleway_account_project IS the project.
+var layer3ProjectExemptTypes = map[string]bool{
+	"scaleway_account_project": true,
+}
+
 // validateLayer3HCLShape refuses anything a Layer 3 stack has no business
 // containing, before any tofu invocation.
 //
@@ -145,7 +168,7 @@ func layer3BlockProblems(body *hclsyntax.Body, file string, allowedResourceTypes
 			if len(block.Labels) > 0 && !resourceTypeAllowed(block.Labels[0], allowedResourceTypes) {
 				problems = append(problems, fmt.Sprintf("%s: resource type %q is not in allow_resource_types", file, block.Labels[0]))
 			}
-			problems = append(problems, layer3ProjectBindingProblems(block, file)...)
+			problems = append(problems, layer3ContainmentProblems(block, file)...)
 		case block.Type == "data":
 			// `data "external"` runs a program at plan time. Restricting
 			// data sources to the cloud under test removes that whole
@@ -260,6 +283,66 @@ func layer3ProviderSourceProblems(tfBlock *hclsyntax.Block, file string) ([]stri
 // reference to a scaleway_account_project resource in this stack is
 // accepted, because only that is provably the project the sweep will
 // destroy.
+// layer3ContainmentProblems requires every resource to be provably inside
+// the run's disposable project -- by binding project_id to it, or by
+// belonging to a parent resource in this stack that is.
+//
+// Omitting project_id entirely was the gap this closes. The provider
+// falls back to SCW_DEFAULT_PROJECT_ID, which the sealed environment
+// points at the configured fallback project, so an allowed resource with
+// no project_id applied cleanly to a REAL project the run never created
+// and the sweep never destroys. Nothing in the HCL looked wrong.
+func layer3ContainmentProblems(resource *hclsyntax.Block, file string) []string {
+	problems := make([]string, 0)
+	if resource.Body == nil || len(resource.Labels) == 0 {
+		return problems
+	}
+	resourceType := resource.Labels[0]
+	name := "<unnamed>"
+	if len(resource.Labels) > 1 {
+		name = resource.Labels[1]
+	}
+
+	if layer3ProjectExemptTypes[resourceType] {
+		return problems
+	}
+
+	if parentAttr, isChild := layer3ChildScopedTypes[resourceType]; isChild {
+		return layer3ParentBindingProblems(resource, file, name, parentAttr)
+	}
+
+	if _, hasProject := resource.Body.Attributes["project_id"]; !hasProject {
+		return append(problems, fmt.Sprintf(
+			"%s: %s %s sets no project_id, so it would be created in the fallback project rather than this run's disposable one; bind it to scaleway_account_project.<name>.id",
+			file, resourceType, name))
+	}
+	return layer3ProjectBindingProblems(resource, file)
+}
+
+// layer3ParentBindingProblems requires a child resource's parent id to be
+// a reference to a resource in this stack, for the same reason project_id
+// must be: a literal UUID names infrastructure the run does not own.
+func layer3ParentBindingProblems(resource *hclsyntax.Block, file, name, parentAttr string) []string {
+	problems := make([]string, 0)
+	attr, ok := resource.Body.Attributes[parentAttr]
+	if !ok {
+		return append(problems, fmt.Sprintf(
+			"%s: %s sets no %s, so nothing ties it to a resource this run created", file, name, parentAttr))
+	}
+	traversal, ok := attr.Expr.(*hclsyntax.ScopeTraversalExpr)
+	if !ok || !strings.HasPrefix(traversal.Traversal.RootName(), "scaleway_") {
+		return append(problems, fmt.Sprintf(
+			"%s: %s must set %s to a reference to a resource in this stack; a literal id names infrastructure the run does not own and will not destroy",
+			file, name, parentAttr))
+	}
+	last, isAttr := traversal.Traversal[len(traversal.Traversal)-1].(hcl.TraverseAttr)
+	if len(traversal.Traversal) < 3 || !isAttr || last.Name != "id" {
+		problems = append(problems, fmt.Sprintf(
+			"%s: %s must set %s to <resource>.<name>.id", file, name, parentAttr))
+	}
+	return problems
+}
+
 func layer3ProjectBindingProblems(resource *hclsyntax.Block, file string) []string {
 	problems := make([]string, 0)
 	if resource.Body == nil {

@@ -5,6 +5,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 var gateAllowlist = []string{"scaleway_account_project", "scaleway_block_volume", "scaleway_lb*"}
@@ -407,5 +410,81 @@ resource "scaleway_block_volume" "orphan" { size_in_gb = 1 }`)
 	}
 	if !strings.Contains(err.Error(), "disposable project") {
 		t.Errorf("error did not explain the requirement: %v", err)
+	}
+}
+
+// Omitting project_id is not a neutral omission: the provider falls back
+// to SCW_DEFAULT_PROJECT_ID, which the sealed environment points at a
+// real project the run never created and the sweep never destroys.
+func TestLayer3ShapeRefusesResourceWithNoProjectID(t *testing.T) {
+	dir := writeShapeHCL(t, shapeProject+`
+resource "scaleway_block_volume" "adrift" {
+  size_in_gb = 1
+}`)
+
+	err := validateLayer3HCLShape(dir, gateAllowlist)
+
+	require.Error(t, err, "a resource with no project_id lands in the fallback project")
+	assert.Contains(t, err.Error(), "fallback project")
+}
+
+// A child resource inherits containment from its parent, so the parent
+// must be a resource this run created.
+func TestLayer3ShapeRefusesChildBoundToALiteralParent(t *testing.T) {
+	dir := writeShapeHCL(t, shapeProject+`
+resource "scaleway_lb_backend" "hijack" {
+  lb_id            = "fr-par-1/11111111-2222-3333-4444-555555555555"
+  forward_protocol = "http"
+  forward_port     = 80
+}`)
+
+	err := validateLayer3HCLShape(dir, gateAllowlist)
+
+	require.Error(t, err, "a literal lb_id attaches a backend to someone else's load balancer")
+	assert.Contains(t, err.Error(), "does not own")
+}
+
+// ...and the ordinary shape must still be accepted, or the gate cannot
+// run the very stack it exists to run.
+func TestLayer3ShapeAcceptsChildBoundToAnInStackParent(t *testing.T) {
+	dir := writeShapeHCL(t, shapeProject+`
+resource "scaleway_lb_ip" "front" {
+  project_id = scaleway_account_project.main.id
+}
+resource "scaleway_lb" "main" {
+  ip_ids     = [scaleway_lb_ip.front.id]
+  type       = "LB-S"
+  project_id = scaleway_account_project.main.id
+}
+resource "scaleway_lb_backend" "web" {
+  lb_id            = scaleway_lb.main.id
+  forward_protocol = "http"
+  forward_port     = 80
+}`)
+
+	assert.NoError(t, validateLayer3HCLShape(dir, gateAllowlist))
+}
+
+// The project resource is the project; requiring it to bind to itself
+// would make every valid stack unrepresentable.
+func TestLayer3ShapeExemptsTheProjectResourceItself(t *testing.T) {
+	dir := writeShapeHCL(t, shapeProject)
+
+	assert.NoError(t, validateLayer3HCLShape(dir, gateAllowlist))
+}
+
+// The checker and the fixtures the gate actually applies must agree. A
+// containment rule that rejects the committed stack is a broken gate, and
+// it would only be discovered by a real run costing real money.
+func TestRealGateFixturesPassTheirOwnPreflight(t *testing.T) {
+	allow := []string{
+		"scaleway_account_project", "scaleway_block_volume", "scaleway_lb*",
+		"scaleway_instance_ip", "scaleway_instance_server", "scaleway_instance_private_nic",
+	}
+	for _, scenario := range []string{"block-paris", "lb-serving-paris"} {
+		t.Run(scenario, func(t *testing.T) {
+			dir := filepath.Join("..", "..", "examples", "layer3-gate", scenario)
+			assert.NoError(t, layer3PreflightHCL(dir, allow))
+		})
 	}
 }
