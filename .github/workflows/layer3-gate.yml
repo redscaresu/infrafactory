@@ -248,6 +248,24 @@ jobs:
           cp "$lock" "$OUTPUT_ROOT/$scenario_name/.terraform.lock.hcl"
           echo "locked provider to $(awk '/^provider /{p=1} p&&/version/{print $3; exit}' "$lock")"
 
+          # The scenario comes from the PR too, because it is what the PR
+          # is proposing. Reading it from trusted/ would validate the new
+          # HCL against the OLD acceptance criteria -- a PR that adds a
+          # probe, or changes what "pass" means, would get a green for
+          # criteria nobody is reviewing.
+          #
+          # Safe to take from the PR because the scenario is data, not
+          # code, and none of the safety controls live in it: the deploy
+          # allowlist, the policy paths and the fallback project are in
+          # the config written above, the containment and shape checks
+          # are in the binary built from trusted/, and both are beyond a
+          # scenario's reach. What a scenario can do is make the gate
+          # assert less -- which is a diff a reviewer reads, exactly like
+          # the HCL.
+          mkdir -p /tmp/layer3-gate/scenario
+          cp "pr/$SCENARIO" /tmp/layer3-gate/scenario/
+          echo "scenario staged from the PR: $SCENARIO"
+
       - name: Run the gate
         id: gate
         # Step-level timeout, deliberately well below the job's. A job-level
@@ -268,7 +286,8 @@ jobs:
           start=$(date +%s)
           set +e
           /tmp/infrafactory --config /tmp/layer3-gate/infrafactory.yaml \
-            test "$SCENARIO" > /tmp/layer3-gate/result.txt 2>&1
+            test "/tmp/layer3-gate/scenario/$(basename "$SCENARIO")" \
+            > /tmp/layer3-gate/result.txt 2>&1
           rc=$?
           set -e
           echo "elapsed=$(( $(date +%s) - start ))" >> "$GITHUB_OUTPUT"
@@ -364,7 +383,8 @@ jobs:
             echo "live state records no resources — the run cleaned up after itself"; exit 0
           fi
           echo "::warning::live state still holds resources; reaping"
-          cd trusted && /tmp/infrafactory --config /tmp/layer3-gate/infrafactory.yaml reap "$SCENARIO"
+          cd trusted && /tmp/infrafactory --config /tmp/layer3-gate/infrafactory.yaml \
+            reap "/tmp/layer3-gate/scenario/$(basename "$SCENARIO")"
 
       - name: Verdict
         # Separate from the run step so the comment always posts first.
