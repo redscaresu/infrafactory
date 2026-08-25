@@ -240,6 +240,19 @@ jobs:
             echo "::error::No gate fixture at $src. Add the HCL this scenario should apply."
             exit 1
           fi
+          # tofu loads .tf, .tf.json, .tofu and .tofu.json. Only .tf is
+          # staged and only .tf is validated, so a fixture carrying any of
+          # the others is refused here rather than silently left behind --
+          # "the gate passed" must not be able to mean "the gate ignored
+          # half of what you submitted".
+          unstageable=$(find "$src" -maxdepth 1 -type f \
+            \( -name '*.tf.json' -o -name '*.tofu' -o -name '*.tofu.json' \) -print)
+          if [ -n "$unstageable" ]; then
+            echo "::error::Fixture contains OpenTofu config this gate does not validate:"
+            echo "$unstageable" | sed 's/^/::error::  /'
+            exit 1
+          fi
+
           mkdir -p "$OUTPUT_ROOT/$scenario_name"
           cp "$src"/*.tf "$OUTPUT_ROOT/$scenario_name/"
           echo "staged $(ls "$src"/*.tf | wc -l) file(s) from $src"

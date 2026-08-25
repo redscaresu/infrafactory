@@ -734,3 +734,28 @@ resource "scaleway_block_volume" "spread" {
 
 	require.Error(t, validateLayer3HCLShape(dir, gateAllowlist))
 }
+
+// OpenTofu loads .tofu and .tofu.json as configuration. A .tofu file
+// beside valid .tf would be applied with cloud credentials having passed
+// none of the checks in this file.
+func TestLayer3ShapeRefusesEveryConfigExtensionItCannotRead(t *testing.T) {
+	for _, name := range []string{"extra.tf.json", "extra.tofu", "extra.tofu.json"} {
+		t.Run(name, func(t *testing.T) {
+			dir := writeShapeHCL(t, shapeProject)
+			require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(`{"resource":{}}`), 0o600))
+
+			err := validateLayer3HCLShape(dir, gateAllowlist)
+
+			require.Error(t, err, "%s is loaded by tofu but not parsed here", name)
+			assert.Contains(t, err.Error(), name)
+		})
+	}
+}
+
+// ...and the lock file the workflow stages must not be mistaken for one.
+func TestLayer3ShapeAcceptsTheTrustedLockFile(t *testing.T) {
+	dir := writeShapeHCL(t, shapeProject)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".terraform.lock.hcl"), []byte(`provider "x" {}`), 0o600))
+
+	assert.NoError(t, validateLayer3HCLShape(dir, gateAllowlist))
+}

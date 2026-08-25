@@ -100,6 +100,20 @@ var layer3ProjectExemptTypes = map[string]bool{
 	"scaleway_account_project": true,
 }
 
+// layer3UnreadableConfigExt reports whether tofu would load the file as
+// configuration while validateLayer3HCLShape would not parse it.
+//
+// Checked longest-first: ".tf.json" also ends in ".json", and a plain
+// ".tf" must stay readable.
+func layer3UnreadableConfigExt(name string) bool {
+	for _, ext := range []string{".tf.json", ".tofu.json", ".tofu"} {
+		if strings.HasSuffix(name, ext) {
+			return true
+		}
+	}
+	return false
+}
+
 // validateLayer3HCLShape refuses anything a Layer 3 stack has no business
 // containing, before any tofu invocation.
 //
@@ -114,12 +128,16 @@ func validateLayer3HCLShape(outputDir string, allowedResourceTypes []string) err
 	sawCanonicalProvider := false
 	sawProjectResource := false
 	for _, entry := range entries {
-		// OpenTofu loads .tf.json exactly as it loads .tf. This validator
-		// parses native HCL, so a JSON file would sail past it and apply
-		// whatever it liked. Refuse rather than grow a second parser: no
-		// Layer 3 stack has ever needed one.
-		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".tf.json") {
-			return fmt.Errorf("layer 3 refuses %s: .tf.json is loaded by tofu but not validated here", entry.Name())
+		// Every extension tofu loads must be one this validator reads.
+		//
+		// .tf.json is loaded exactly as .tf and would sail past a native
+		// HCL parser. OpenTofu also loads .tofu and .tofu.json, which are
+		// easier still to miss -- a .tofu file sitting beside valid .tf
+		// gets applied with cloud credentials having passed none of the
+		// checks below. Refuse rather than grow a second parser and a
+		// second dialect: no Layer 3 stack has ever needed either.
+		if !entry.IsDir() && layer3UnreadableConfigExt(entry.Name()) {
+			return fmt.Errorf("layer 3 refuses %s: tofu loads that extension but this validator does not read it", entry.Name())
 		}
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".tf") {
 			continue
