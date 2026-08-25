@@ -104,6 +104,46 @@ Two gates remain and only one moved. Widening the allowlist to admit `scaleway_i
 
 Still absent, and deliberately: IAM (no privilege escalation), registry, serverless, object storage, billing, domains.
 
+**Amendment — the allowlist gates every real apply, not just generated ones (2026-08-24).** Rule 5 says expensive types are denied by default before any API call. The check only ever ran in the *generation* path, which was sufficient while every Layer 3 run came from the generator. The S144 PR gate broke that assumption: it stages committed HCL from `examples/layer3-gate/` and calls `test`, so the allowlist was configured and never consulted, and a pull request could have introduced a `scaleway_k8s_cluster` that applied for real.
+
+Enforcement moved to where the guarantee belongs — immediately before the sandbox deploy, so it covers any route to a real apply rather than one particular caller. The gate's HCL arrives from a pull request, which is precisely the untrusted-input case rule 5 exists for.
+
+All three of the pre-apply checks moved with it — the project resource (ADR-0010's blast-radius boundary), the type allowlist, and a new escape-hatch refusal.
+
+**Untrusted HCL is validated by parsing, and deny-by-default on block type.** This took three attempts, and the failures are more instructive than the answer.
+
+A resource-type allowlist is sufficient for *generated* HCL, because the generator emits flat `resource` blocks and nothing else. It is not sufficient for HCL arriving from a pull request. First a `module` block declares resources the scan never sees; then a `provisioner` executes commands during apply inside a process holding live credentials. Both were denylisted — and `data "external"` with `program = [...]` still ran arbitrary commands, at *plan* time, before any check that inspects plan output could help.
+
+Then the scanner itself proved unsound: `resource /*x*/ "scaleway_k8s_cluster"` is valid HCL that a `resource\s+"` pattern does not match, and the grammar permits comments and whitespace almost anywhere, so no expression closes the class.
+
+The configuration is now parsed (`hashicorp/hcl/v2`) and validated against an **allowlist of block types** — `terraform`, `provider`, `variable`, `output`, `locals`, `resource`, `data` — with providers and data sources restricted to Scaleway, resource types checked against `allow_resource_types`, and `provisioner`/`connection` refused anywhere in the tree. Unparseable input is refused rather than applied: unknowable is not the same as harmless.
+
+**"Before the real apply" was the wrong bar; "before any tofu" is the right one.** The structural checks originally ran immediately before the *sandbox* deploy — but Layer 2's mock deploy runs `tofu init/apply` on the same configuration first, in the same process, whose environment holds the credentials. A `provisioner` or `data "external"` would therefore have executed during the mock deploy, before the check that exists to refuse it. Validation now happens before either layer runs.
+
+A refused configuration means **no tofu at all**, including for cleanup: `tofu destroy` evaluates the same configuration, and destroy-time provisioners exist, so "run it just to tidy up" would grant exactly the execution the refusal denied. That leaves one honest gap — resources recorded by an earlier run are not destroyed — and it is reported loudly rather than papered over, because a human deciding what to do beats a machine executing HCL it has just declared untrustworthy.
+
+**The workflow is part of the artefact too.** `pull_request` loads the workflow file from the PR head, so a same-repo PR could rewrite the gate itself to skip the trusted checkout and print the credentials — making every other control decorative. The gate therefore runs on `pull_request_target`, which loads the workflow from base.
+
+That reverses a warning an earlier revision of this ADR carried, and the reversal is not a change of mind so much as a distinction. `pull_request_target` is dangerous when it grants secrets to a job that then checks out **and executes** PR code. This job never does: it takes exactly one thing from the PR — `.tf` files, copied as data — and everything executable comes from base, namely the workflow, the infrafactory binary, mockway at a pinned SHA, and tofu. The HCL is then validated by that trusted binary before any apply. The same-repo guard is kept regardless, so a fork cannot reach the job at all.
+
+**Existence of a project is not the same as using it.** Checking that a `scaleway_account_project` is declared satisfies the letter of ADR-0010 while a fixture pins its actual resources elsewhere with `project_id = "<another project>"` — and on this account "elsewhere" includes the project holding live infrastructure. A `project_id` must now be a direct reference to the stack's own project resource; literals, variables and data lookups are all refused, because only a reference is provably the project the sweep will destroy.
+
+**The validator cannot live in the artefact being validated.** The gate originally built `infrafactory` from the PR and then ran that binary with `SCW_ACCESS_KEY` and `SCW_SECRET_KEY` in its environment. A pull request can change `internal/cli` as easily as it changes HCL, so a compromised binary exfiltrates the credentials before performing any of the checks it is supposed to perform — and every control above becomes decorative. The tool is now built from the **base** commit and only the HCL comes from the PR head. That is also the honest model: the PR proposes infrastructure, trusted machinery applies it.
+
+**A provider binary is code.** `required_providers { scaleway = { source = "attacker/scaleway" } }` keeps the local name that satisfies the `provider "scaleway"` check, while `tofu init` downloads and executes that plugin with the credentials in scope. The source must now be exactly `scaleway/scaleway`, and any other required provider is refused.
+
+**What is NOT closed, stated plainly.** Terraform evaluates expressions at plan time, and functions like `file()` can read from the runner. A fixture could put `file("/proc/self/environ")` where its value reaches tofu's output. Both publication channels are now filtered to structured stage lines: the PR comment and the Actions log, which on a public repository is equally readable. tofu's own output never reaches the console directly — infrafactory captures it into stage results — so filtering what the workflow echoes closes the automatic channel. The cost is accepted deliberately: a genuine gate failure is less debuggable from the log, and the answer is to reproduce it locally with the same fixture, which needs no credentials for a plan-time failure.
+
+That narrows the exposure rather than removing it. An attacker-chosen expression still executes; it just has nowhere obvious to print.
+
+The control that actually answers this threat is the one already in place: the real-cloud path runs only for same-repo pull requests, and the `layer3` environment requires a reviewer. It takes a trusted collaborator to reach the credentials at all, and a human approves each run. Structural validation raises the cost of a mistake; it does not replace the human gate, and it should not be described as though it does.
+
+Two general lessons, both learned the expensive way. **A denylist of known escapes is a race you lose** — each fix invited the next bypass, and only enumerating what is permitted ended it. And **a scanner that is not a parser will always have a gap**, because the grammar is richer than the pattern. Neither would have mattered for generated HCL; both matter the moment the input comes from a pull request.
+
+**Consequence for cleanup.** With validation now able to refuse *before* any apply, "did this run attempt an apply" stopped being a usable cleanup gate — a refusal can coincide with an earlier run's resources still being recorded, and those still need destroying. The live state is now the only gate: what matters is whether resources may exist, not who created them.
+
+Generalising: a control attached to *one path into* a dangerous operation is a control that a second path silently bypasses. Attach it to the operation.
+
 **Enforcement**: the guards carry synthetic-drift coverage — removing `SCW_API_URL` from `SandboxStripEnv` fails three tests, verified before S139 merged. Following the project's "drift becomes failed `go test`" pattern.
 
 **Amendment — the allowlist admits two Instances types (2026-08-24).** The Instances amendment above closed by saying that widening the allowlist to admit `scaleway_instance_*` was a separate decision, to be taken separately. This is that decision.

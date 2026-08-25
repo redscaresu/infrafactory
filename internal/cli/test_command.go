@@ -513,12 +513,70 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 		deployMode = harness.MockDeployModeClean
 	}
 
+	// Validate BEFORE any tofu runs, including Layer 2's.
+	//
+	// The mock deploy is not a safe place to execute unvalidated HCL. It
+	// runs `tofu init/apply` in this same process, whose environment holds
+	// the cloud credentials, so a `provisioner` or `data "external"` in a
+	// PR fixture would execute there — before a check placed in front of
+	// the sandbox deploy ever ran. "Before the real apply" was the wrong
+	// bar; "before any tofu" is the right one.
+	//
+	// Only when Layer 3 is enabled: with sandbox off there are no
+	// credentials to protect and the mock is the whole point.
+	sandboxEnabled := runtime.Config.Validation.Layers.SandboxDeploy.Enabled
+	hclRefused := false
+	if sandboxEnabled {
+		if shapeErr := layer3PreflightHCL(outputDir,
+			runtime.Config.Validation.Layers.SandboxDeploy.AllowResourceTypes); shapeErr != nil {
+			hclRefused = true
+			stages = append(stages, StageSummary{Layer: "sandbox_deploy", Stage: "allowlist", Status: StageStatusFail})
+			failures = append(failures, FailureSummary{
+				Layer:   "sandbox_deploy",
+				Stage:   "allowlist",
+				Check:   "allow_resource_types",
+				Command: "layer 3 hcl validation",
+				Detail:  shapeErr.Error(),
+			})
+		} else {
+			stages = append(stages, StageSummary{Layer: "sandbox_deploy", Stage: "allowlist", Status: StageStatusPass})
+		}
+	}
+
+	// A refused configuration means no tofu runs at all -- not even to
+	// clean up. `tofu destroy` evaluates the same configuration, and
+	// destroy-time provisioners are a thing, so "execute it just to tidy
+	// up" would hand the refused HCL exactly the execution it was refused
+	// for.
+	//
+	// That leaves one honest gap, and it is reported rather than papered
+	// over: if the live state already records resources from an earlier
+	// run, they are not destroyed here. The operator is told, loudly,
+	// because a human deciding what to do beats a machine executing HCL it
+	// has just declared untrustworthy.
+	if hclRefused {
+		if liveStateMayHoldResources(outputDir) {
+			failures = append(failures, FailureSummary{
+				Layer:   "sandbox_deploy",
+				Stage:   "cleanup_blocked",
+				Check:   "no_orphans",
+				Command: "layer 3 hcl validation",
+				Detail: "the configuration was refused, so no tofu was run -- including destroy. " +
+					"Live state still records resources: inspect them and clean up with a configuration that passes validation.",
+			})
+			stages = append(stages, StageSummary{Layer: "sandbox_deploy", Stage: "cleanup_blocked", Status: StageStatusFail})
+		}
+		return OutputResult{
+			Command:  "test",
+			Scenario: sc.Name,
+			Status:   CommandStatusFailed,
+			Stages:   stages,
+			Failures: failures,
+		}, &CLIError{Op: "test", Code: errorCodeCommandFailed, Err: errors.New("test checks failed")}
+	}
+
 	deployResult, deployErr := runtime.Deps.MockDeploy.Run(ctx, outputDir, env, deployMode)
 	stages, failures = appendMockDeployResult(stages, failures, deployResult, deployErr)
-	sandboxEnabled := runtime.Config.Validation.Layers.SandboxDeploy.Enabled
-	// sandboxAttempted records that a real apply was issued, so cleanup
-	// runs even when that apply failed partway and left resources behind.
-	sandboxAttempted := false
 	if deployErr == nil && sandboxEnabled {
 		sandboxEnv, sandboxEnvErr := sandboxCommandEnv(runtime)
 		if sandboxEnvErr != nil {
@@ -542,15 +600,24 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 				Status: StageStatusPass,
 				Detail: "credentials present; endpoint asserted as " + realScalewayAPIURL,
 			})
-			sandboxAttempted = true
-			sandboxResult, sandboxErr := runtime.Deps.SandboxDeploy.Run(ctx, outputDir, sandboxEnv)
-			stages, failures = appendSandboxDeployResult(stages, failures, sandboxResult, sandboxErr)
-			if sandboxResult != nil && len(sandboxResult.Plan.Stdout) > 0 {
-				planLiveText = []byte(sandboxResult.Plan.Stdout)
-			} else if sandboxErr != nil {
-				var deployErr *harness.SandboxDeployError
-				if errors.As(sandboxErr, &deployErr) && len(deployErr.Plan.Stdout) > 0 {
-					planLiveText = []byte(deployErr.Plan.Stdout)
+			// Enforce the allowlist here too, not only in the generation
+			// path. ADR-0023 rule 5 denies expensive types before any API
+			// call, but that check lived solely in generate -- so any route
+			// applying pre-existing HCL reached the real API with the
+			// allowlist never consulted. The S144 PR gate is exactly such a
+			// route: it stages committed fixtures and calls test, and its
+			// HCL comes from a pull request, which is precisely where an
+			// unvetted resource type would arrive from.
+			{
+				sandboxResult, sandboxErr := runtime.Deps.SandboxDeploy.Run(ctx, outputDir, sandboxEnv)
+				stages, failures = appendSandboxDeployResult(stages, failures, sandboxResult, sandboxErr)
+				if sandboxResult != nil && len(sandboxResult.Plan.Stdout) > 0 {
+					planLiveText = []byte(sandboxResult.Plan.Stdout)
+				} else if sandboxErr != nil {
+					var deployErr *harness.SandboxDeployError
+					if errors.As(sandboxErr, &deployErr) && len(deployErr.Plan.Stdout) > 0 {
+						planLiveText = []byte(deployErr.Plan.Stdout)
+					}
 				}
 			}
 		}
@@ -569,13 +636,17 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 		// lb-paris canary leaked a real project and load-balancer IP
 		// exactly this way, because cleanup was gated on success.
 		//
-		// The live state file is the evidence, which is why it is the gate
-		// rather than the attempt: a failure in init or plan happens
+		// The live state is the ONLY gate, deliberately. Keying off "did
+		// this run attempt an apply" was both redundant and wrong: the
+		// pre-apply validations can refuse before any attempt while an
+		// earlier run's resources are still recorded, and those still need
+		// destroying. What matters is whether resources may exist, not who
+		// created them. a failure in init or plan happens
 		// before any resource exists and writes no live state, so cleaning
 		// up there would destroy nothing and then report an unverifiable
 		// sweep, telling the operator to chase a leak that cannot exist.
 		// run_command.go uses the same signal.
-		if sandboxEnabled && sandboxAttempted && liveStateMayHoldResources(outputDir) {
+		if sandboxEnabled && liveStateMayHoldResources(outputDir) {
 			sandboxEnv, sandboxEnvErr := sandboxCommandEnv(runtime)
 			if sandboxEnvErr != nil {
 				stages = append(stages, StageSummary{Layer: "sandbox_deploy", Stage: "destroy_preflight", Status: StageStatusFail})

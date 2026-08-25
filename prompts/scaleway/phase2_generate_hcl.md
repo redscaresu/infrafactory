@@ -76,12 +76,17 @@ Output each file with a header comment indicating the filename:
 terraform {
   required_providers {
     scaleway = {
-      source = "scaleway/scaleway"
+      source  = "scaleway/scaleway"
+      version = "2.81.0"
     }
   }
 }
 ...
 ```
+
+Pin the provider to exactly `version = "2.81.0"`. Not a range — `~>` lets
+the registry choose which build runs, and the provider executes with real
+cloud credentials in its environment. Layer 3 refuses any other value.
 
 Generate ALL files needed. Do not omit any resources from the architecture plan.
 

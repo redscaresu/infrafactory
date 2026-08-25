@@ -176,15 +176,29 @@ cloud, in seconds, without credentials. **Layer 3 applies the generated stack
 to real Scaleway, probes it, destroys it, and then asks the API whether
 anything survived.**
 
-Today Layer 3 runs from the CLI: set
-`validation.layers.sandbox_deploy.enabled` and supply real credentials, and
-`infrafactory test` or `infrafactory run` will apply, probe, destroy and
-sweep. Wiring that into a label-triggered pull-request gate — one that
-deploys a proposed infrastructure change for real while it is still a pull
-request, and comments the result back — is in flight and **not yet
-merged**; there is no `layer3-gate` workflow in `.github/workflows/` on
-`main`. Treat that gate as a design which has been demonstrated, not as a
-guarantee this repository currently enforces.
+Layer 3 runs two ways.
+
+From the CLI: set `validation.layers.sandbox_deploy.enabled`, supply real
+credentials, and `infrafactory test` or `infrafactory run` will apply, probe,
+destroy and sweep.
+
+And as a pull-request gate. `.github/workflows/layer3-gate.yml` is triggered
+by applying the `layer3-gate` label to a PR: it applies that PR's
+infrastructure code to real Scaleway, probes it, destroys it, sweeps the
+account, and comments the stage-by-stage result back onto the pull request.
+A proposed infrastructure change is therefore deployed for real while it is
+still a proposal.
+
+Two things about that workflow are worth knowing before you copy it:
+
+- **It requires a deployment approval.** The `layer3` environment has
+  required reviewers, so applying the label does not start an apply — a human
+  approving the deployment does. That is deliberate: the approval is the
+  control, not friction to engineer away.
+- **A maintainer label is not a security boundary.** A PR can be updated
+  after it is labelled, so the workflow builds the binary and reads the
+  harness from the **base** branch and takes only the HCL from the PR, and
+  that HCL is parsed and shape-checked before any `tofu` runs.
 
 ### What it proves
 

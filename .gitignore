@@ -61,3 +61,4 @@ docs/demo/walkthrough/
 # blow past the 5MB pre-commit large-file guard. Re-record from source
 # via `make demo-ui` / `make demo-ui-run`.
 docs/demo/*.webm
+*.test

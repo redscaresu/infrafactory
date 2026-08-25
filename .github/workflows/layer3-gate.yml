@@ -1,0 +1,488 @@
+name: Layer 3 gate
+
+# S144. Applies the PR's infrastructure to REAL Scaleway, destroys it, sweeps
+# for orphans, and comments the result back. This is the check that makes
+# "verified against the real world" true rather than aspirational: `plan`
+# proves intent, this proves the change survives contact with the API.
+#
+# It spends real money, so it is opt-in per PR via the `layer3-gate` label.
+#
+# SECURITY — read before editing. This job can see cloud credentials and it
+# executes HCL from the PR. Three controls, each necessary, none sufficient
+# alone:
+#   1. same-repo PRs only. Fork PRs never reach this job, so they never see a
+#      secret. Note this is `pull_request`, NOT `pull_request_target` --
+#      the latter would hand base-repo secrets to a job running fork code,
+#      which is the exfiltration path, not a defence against it.
+#   2. the `layer3` environment holds the secrets and carries required
+#      reviewers, so approval is per-run and does not carry to new commits.
+#   3. the head SHA is re-verified at run time. A label or an approval is a
+#      moment in time; the PR can move afterwards. Label for intent, gate on
+#      identity and SHA.
+
+# pull_request_target, deliberately — and note this reverses the warning an
+# earlier revision of this file carried, because that warning was about a
+# different usage.
+#
+# `pull_request` loads the workflow FILE from the PR head. A same-repo PR can
+# therefore rewrite this very file to skip the trusted checkout and print the
+# credentials, which makes every other control here decorative. Building the
+# binary from base only helps if the workflow deciding what to run is itself
+# trusted.
+#
+# `pull_request_target` loads the workflow from the base branch, so changes to
+# it take effect only once merged and reviewed. Its notorious danger is real
+# but specific: it grants secrets to a job that then CHECKS OUT AND EXECUTES
+# PR code. This job never does. It takes exactly one thing from the PR — .tf
+# files, copied as data — and every executable is from base: the workflow, the
+# infrafactory binary, mockway at a pinned SHA, and tofu. The HCL is itself
+# validated by that trusted binary before any apply.
+#
+# The same-repo guard below is kept regardless, so a fork PR cannot reach this
+# job at all.
+on:
+  pull_request_target:
+    types: [labeled, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write   # to post the result comment, and nothing more
+
+concurrency:
+  # One real-cloud run per PR at a time. Two concurrent applies would race
+  # for the same output directory and confuse the orphan sweep.
+  group: layer3-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  layer3-gate:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      contains(github.event.pull_request.labels.*.name, 'layer3-gate')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: layer3
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      SCENARIO: ${{ vars.LAYER3_GATE_SCENARIO || 'scenarios/training/block-paris.yaml' }}
+      OUTPUT_ROOT: /tmp/layer3-gate/output
+    steps:
+      - name: Checkout TRUSTED base code (workflow, tool, everything executable)
+        # The binary that runs with SCW_* in its environment must NOT be
+        # built from the PR. A PR can change internal/cli just as easily as
+        # it changes HCL, and a compromised binary exfiltrates the
+        # credentials before any HCL check it is supposed to perform ever
+        # runs. Validation cannot live in the artefact being validated.
+        #
+        # So: the tool comes from the base branch, the infrastructure comes
+        # from the PR. That is also the honest model of the gate -- the PR
+        # proposes infrastructure; trusted machinery applies it.
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: trusted
+
+      - name: Checkout the PR's infrastructure as DATA ONLY
+        # Nothing under pr/ is ever built or executed. The staging step
+        # copies *.tf out of it and nothing else.
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: pr
+
+      - name: Re-verify the PR head has not moved
+        # The gate may have waited on a required-reviewer approval. If the PR
+        # was updated in the meantime, the approval was for different code.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APPROVED_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          current=$(gh api "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}" --jq .head.sha)
+          if [ "$current" != "$APPROVED_SHA" ]; then
+            echo "::error::PR head moved since this run was authorised ($APPROVED_SHA -> $current). Refusing to apply."
+            exit 1
+          fi
+          echo "head verified: $APPROVED_SHA"
+
+      - name: Require credentials (fail closed)
+        # Deliberately NOT the "skip green when the secret is absent" pattern.
+        # A fork PR legitimately has no secrets and never reaches this job. A
+        # same-repo run is EXPECTED to run, so a green result here asserts
+        # "applied to real Scaleway and cleaned up". Reporting success without
+        # having applied anything would be a false green -- the exact failure
+        # S139 exists to prevent.
+        env:
+          SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}
+          SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
+          SCW_DEFAULT_ORGANIZATION_ID: ${{ secrets.SCW_DEFAULT_ORGANIZATION_ID }}
+        run: |
+          missing=""
+          [ -z "${SCW_ACCESS_KEY:-}" ] && missing="$missing SCW_ACCESS_KEY"
+          [ -z "${SCW_SECRET_KEY:-}" ] && missing="$missing SCW_SECRET_KEY"
+          [ -z "${SCW_DEFAULT_ORGANIZATION_ID:-}" ] && missing="$missing SCW_DEFAULT_ORGANIZATION_ID"
+          if [ -n "$missing" ]; then
+            echo "::error::Layer 3 gate cannot run without:$missing. Failing closed rather than reporting a green that proves nothing."
+            exit 1
+          fi
+
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: trusted/go.mod
+
+      - name: Setup OpenTofu
+        uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2
+        with:
+          # Pinned for the same reason the Scaleway provider is: tofu is
+          # the process that evaluates PR-supplied HCL with real cloud
+          # credentials in its environment. Leaving it unset installs
+          # whatever the action defaults to on the day, so the executable
+          # doing the most sensitive work would be the one nobody chose.
+          tofu_version: 1.11.5
+
+      - name: Start mockway
+        # Layer 2 gates Layer 3, so the mock has to be up. Only mockway --
+        # this gate is Scaleway-only, and the other mocks would just add
+        # startup time to a check that wants to be fast enough to watch.
+        run: |
+          # Pinned, not tracking main. This process runs as the same user
+          # as the secret-bearing step; an unpinned clone would mean code
+          # that changed after approval is running beside the credentials.
+          # Same reasoning as the SHA-pinned actions in S150.
+          if [ ! -f trusted/.github/mockway-pin ]; then
+            echo "::error::trusted/.github/mockway-pin is missing. The pin must live in the BASE branch to be trustworthy, so this fails until the pin is merged. Refusing to clone an unpinned mockway next to the credentials."
+            exit 1
+          fi
+          pin=$(cat trusted/.github/mockway-pin)
+          git clone --filter=blob:none https://github.com/${{ github.repository_owner }}/mockway.git ../mockway
+          git -C ../mockway checkout --detach "$pin"
+          go -C ../mockway build -o /tmp/mockway ./cmd/mockway
+          nohup /tmp/mockway --port 8080 > /tmp/mockway.log 2>&1 &
+          for _ in $(seq 1 30); do
+            [ "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/mock/state)" = "200" ] && break
+            sleep 1
+          done
+          curl -sf http://localhost:8080/mock/state > /dev/null
+
+      - name: Build infrafactory from the trusted base
+        working-directory: trusted
+        run: go build -tags noui -o /tmp/infrafactory ./cmd/infrafactory
+
+      - name: Write the Layer 3 run config
+        run: |
+          mkdir -p /tmp/layer3-gate "$OUTPUT_ROOT"
+          repo="$GITHUB_WORKSPACE/trusted"
+          cat > /tmp/layer3-gate/infrafactory.yaml <<CFG
+          version: "1.0"
+          agent:
+            type: claude-code
+            repair_iterations_max: 1
+          mockway:
+            url: http://127.0.0.1:8080
+          scaleway:
+            credentials_source: env
+            region: fr-par
+            zone: fr-par-1
+            fallback_project_id: "2397e80e-ec12-4a7e-819f-a2caba3867b6"
+          paths:
+            output: $OUTPUT_ROOT
+          validation:
+            layers:
+              static:
+                enabled: true
+                policy_paths: [$repo/policies/common, $repo/policies/scaleway]
+              mock_deploy:
+                enabled: true
+              sandbox_deploy:
+                enabled: true
+                allow_resource_types:
+                  - scaleway_account_project
+                  - scaleway_block_volume
+                  # Named individually rather than scaleway_lb*. The glob
+                  # admits child-scoped types like scaleway_lb_acl, which
+                  # carry no project_id and would be refused by the
+                  # containment check as if they were unbound -- an
+                  # allowlist that admits what the preflight then rejects.
+                  - scaleway_lb
+                  - scaleway_lb_ip
+                  - scaleway_lb_backend
+                  - scaleway_lb_frontend
+                  - scaleway_instance_ip
+                  - scaleway_instance_server
+                  - scaleway_instance_private_nic
+              destruction:
+                enabled: true
+            real_probes:
+              timeout_seconds: 10
+              retries: 6
+              retry_delay_seconds: 5
+          constraint_policies:
+            no_public_database: $repo/policies/scaleway/no_public_database.rego
+            encryption_at_rest: $repo/policies/scaleway/encryption_at_rest.rego
+            no_public_endpoints: $repo/policies/scaleway/no_public_endpoints.rego
+            region_restriction: $repo/policies/scaleway/region_restriction.rego
+            region: $repo/policies/scaleway/region_restriction.rego
+            zone: $repo/policies/scaleway/region_restriction.rego
+          CFG
+
+      - name: Stage the PR's infrastructure code
+        # This is the point of the gate rather than setup for it: the HCL
+        # under examples/layer3-gate/ is what the PR proposes, and the gate
+        # applies exactly that. `infrafactory test` runs the harness against
+        # an output directory; it does not generate, which is deliberate --
+        # the generator would put a 40-60s LLM call with real variance in
+        # front of a check that wants to be deterministic.
+        run: |
+          scenario_name=$(basename "$SCENARIO" .yaml)
+          # HCL from the PR; everything else from trusted.
+          src="pr/examples/layer3-gate/$scenario_name"
+          if [ ! -d "$src" ]; then
+            echo "::error::No gate fixture at $src. Add the HCL this scenario should apply."
+            exit 1
+          fi
+          # tofu auto-loads more than .tf: other config dialects
+          # (.tf.json, .tofu, .tofu.json) and variable values
+          # (terraform.tfvars, *.auto.tfvars, and their .json forms).
+          # Only .tf is staged and only .tf is validated, so a fixture
+          # carrying any of the others is refused here rather than
+          # silently left behind -- "the gate passed" must not be able to
+          # mean "the gate ignored half of what you submitted".
+          unstageable=$(find "$src" -maxdepth 1 -type f \
+            \( -name '*.tf.json' -o -name '*.tofu' -o -name '*.tofu.json' \
+               -o -name 'terraform.tfvars' -o -name 'terraform.tfvars.json' \
+               -o -name '*.auto.tfvars' -o -name '*.auto.tfvars.json' \) -print)
+          if [ -n "$unstageable" ]; then
+            echo "::error::Fixture contains OpenTofu config this gate does not validate:"
+            echo "$unstageable" | sed 's/^/::error::  /'
+            exit 1
+          fi
+
+          mkdir -p "$OUTPUT_ROOT/$scenario_name"
+          cp "$src"/*.tf "$OUTPUT_ROOT/$scenario_name/"
+          echo "staged $(ls "$src"/*.tf | wc -l) file(s) from $src"
+
+          # The dependency lock comes from TRUSTED, never from the PR.
+          #
+          # The shape check pins the provider version string, but a version
+          # string is not a binary. The lock file records the hashes tofu
+          # will accept for that provider, so init fails rather than
+          # executing a plugin that is not the reviewed one -- and the
+          # provider executes with SCW_SECRET_KEY in its environment.
+          #
+          # Taking it from the PR would defeat the point entirely: the
+          # thing being verified would be supplied by the thing being
+          # checked.
+          lock="trusted/examples/layer3-gate/$scenario_name/.terraform.lock.hcl"
+          if [ ! -f "$lock" ]; then
+            echo "::error::No trusted dependency lock at $lock. Refusing to let the PR choose the provider binary."
+            exit 1
+          fi
+          cp "$lock" "$OUTPUT_ROOT/$scenario_name/.terraform.lock.hcl"
+          echo "locked provider to $(awk '/^provider /{p=1} p&&/version/{print $3; exit}' "$lock")"
+
+          # The scenario comes from the PR too, because it is what the PR
+          # is proposing. Reading it from trusted/ would validate the new
+          # HCL against the OLD acceptance criteria -- a PR that adds a
+          # probe, or changes what "pass" means, would get a green for
+          # criteria nobody is reviewing.
+          #
+          # Safe to take from the PR because the scenario is data, not
+          # code, and none of the safety controls live in it: the deploy
+          # allowlist, the policy paths and the fallback project are in
+          # the config written above, the containment and shape checks
+          # are in the binary built from trusted/, and both are beyond a
+          # scenario's reach. What a scenario can do is make the gate
+          # assert less -- which is a diff a reviewer reads, exactly like
+          # the HCL.
+          mkdir -p /tmp/layer3-gate/scenario
+          cp "pr/$SCENARIO" /tmp/layer3-gate/scenario/
+          echo "scenario staged from the PR: $SCENARIO"
+
+      - name: Run the gate
+        id: gate
+        # Step-level timeout, deliberately well below the job's. A job-level
+        # timeout terminates the job outright and `if: always()` steps never
+        # run -- so a hung apply would skip the reap and leak. Capping the
+        # step instead means a stuck tofu fails the step and the job still
+        # has budget left to clean up.
+        timeout-minutes: 10
+        # From trusted/, so the scenario path and scenario.schema.json
+        # resolve the way they do in a normal checkout. The output root and
+        # policy paths in the config are absolute, so they are unaffected.
+        working-directory: trusted
+        env:
+          SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}
+          SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
+          SCW_DEFAULT_ORGANIZATION_ID: ${{ secrets.SCW_DEFAULT_ORGANIZATION_ID }}
+        run: |
+          start=$(date +%s)
+          set +e
+          /tmp/infrafactory --config /tmp/layer3-gate/infrafactory.yaml \
+            test "/tmp/layer3-gate/scenario/$(basename "$SCENARIO")" \
+            > /tmp/layer3-gate/result.txt 2>&1
+          rc=$?
+          set -e
+          echo "elapsed=$(( $(date +%s) - start ))" >> "$GITHUB_OUTPUT"
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          # Structured lines only, here as well as in the comment. tofu
+          # evaluates PR-supplied expressions at plan time, so failure text
+          # can be attacker-chosen -- `tags = [file("/proc/self/environ")]`
+          # on an otherwise-allowed resource is enough. The Actions log of a
+          # public repository is a publication channel exactly like the
+          # comment, so it gets the same filter.
+          #
+          # The cost is real: a genuine failure is less debuggable from the
+          # log. Reproduce it locally with the same fixture instead -- a
+          # plan-time failure needs no credentials.
+          sed -e 's/\x1b\[[0-9;]*m//g' /tmp/layer3-gate/result.txt \
+            | grep -E '^(Status: |- [a-z_]+/[a-z_]+: )' || echo "(no structured stages; see the verdict step)"
+          exit 0   # the comment step reports; the verdict step decides
+
+      - name: Comment the stage summary on the PR
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Own the directory rather than inheriting it from a step that
+          # may never have run. The gate failing EARLY is exactly when the
+          # comment matters most, and the first version of this step died
+          # with "No such file or directory" in precisely that case.
+          mkdir -p /tmp/layer3-gate
+          touch /tmp/layer3-gate/result.txt
+          marker="<!-- layer3-gate -->"
+          verdict="pass"; icon="✅"
+          [ "${{ steps.gate.outputs.rc }}" != "0" ] && { verdict="fail"; icon="❌"; }
+          {
+            echo "$marker"
+            echo "## $icon Layer 3 gate: $verdict"
+            echo
+            echo "Applied \`$SCENARIO\` to **real Scaleway**, destroyed it, and swept for orphans."
+            echo "Commit \`${{ github.event.pull_request.head.sha }}\` · ${{ steps.gate.outputs.elapsed }}s"
+            echo
+            echo '```'
+            # Only the structured stage lines and the verdict, never raw
+            # tofu output. Expressions in PR-supplied HCL are evaluated at
+            # plan time, so error text can be attacker-chosen; echoing it
+            # into a public comment would publish whatever it encoded.
+            # Failures point at the job log instead of quoting it.
+            sed -e 's/\x1b\[[0-9;]*m//g' /tmp/layer3-gate/result.txt \
+              | grep -E '^(Status: |- [a-z_]+/[a-z_]+: )' | head -40
+            echo '```'
+            echo
+            [ "${{ steps.gate.outputs.rc }}" != "0" ] && echo "Full output is in the [job log](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})."
+            echo
+            echo "_\`plan\` proves intent. This proves the change survived contact with the API._"
+          } > /tmp/layer3-gate/comment.md
+          existing=$(gh api "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
+            --jq "[.[] | select(.body | startswith(\"$marker\"))] | .[0].id // empty")
+          if [ -n "$existing" ]; then
+            gh api -X PATCH "repos/${{ github.repository }}/issues/comments/$existing" \
+              -F body=@/tmp/layer3-gate/comment.md --silent
+            echo "updated comment $existing"
+          else
+            gh api -X POST "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
+              -F body=@/tmp/layer3-gate/comment.md --silent
+            echo "created comment"
+          fi
+
+      - name: Reap anything the run left behind
+        id: reap
+        # Runs on cancellation and timeout too, which is the whole point: a
+        # gate that leaks when interrupted is worse than no gate. reap is
+        # gated by AssertProjectDeletable and verified by the same sweep, so
+        # it cannot touch a project this run did not create.
+        if: always()
+        env:
+          SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}
+          SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
+          SCW_DEFAULT_ORGANIZATION_ID: ${{ secrets.SCW_DEFAULT_ORGANIZATION_ID }}
+        run: |
+          scenario_name=$(basename "$SCENARIO" .yaml)
+          state="$OUTPUT_ROOT/$scenario_name/terraform-live.tfstate"
+          if [ ! -f "$state" ]; then
+            # No state file means one of two very different things, and
+            # they must not be collapsed.
+            #
+            # If the gate ran to completion, nothing was applied and there
+            # is nothing to clean up. If it was killed -- the step timeout
+            # is the case this whole step exists for -- tofu may already
+            # have sent a create request and died before flushing state.
+            # The resources exist, nothing records them, and reap has no
+            # project id to work from.
+            #
+            # "We could not check" and "nothing leaked" must never look
+            # alike, so the second case fails the job loudly instead of
+            # exiting green.
+            # Only a gate that ran AND succeeded proves nothing was
+            # applied. The run step deliberately swallows tofu's exit code
+            # (`set +e`, capture rc, exit 0) so the comment posts before
+            # the verdict -- which means steps.gate.outcome is `success`
+            # even when the apply failed. Reading outcome alone here would
+            # call every failed no-state run clean, including the ones
+            # that died mid-create.
+            if [ "${{ steps.gate.outcome }}" = "success" ] && [ "${{ steps.gate.outputs.rc }}" = "0" ]; then
+              echo "no live state — the gate ran, succeeded, and applied nothing"; exit 0
+            fi
+            echo "::error::The gate did not complete cleanly (outcome=${{ steps.gate.outcome }}, rc=${{ steps.gate.outputs.rc }}) and left no state file."
+            echo "::error::tofu may have created resources before it was killed. Nothing records them, so reap cannot run."
+            echo "::error::Check the Scaleway account by hand for projects created during this run."
+            exit 1
+          fi
+          # Fail closed: if the state cannot be parsed we do not know what is
+          # out there, so reap rather than assume it is clean. Same rule as
+          # liveStateMayHoldResources in the CLI.
+          if python3 - "$state" <<'PY'; then
+          import json, sys
+          try:
+              with open(sys.argv[1]) as f:
+                  sys.exit(0 if not json.load(f).get("resources") else 1)
+          except Exception:
+              sys.exit(1)   # unreadable/unparseable -> treat as "may hold resources"
+          PY
+            echo "live state records no resources — the run cleaned up after itself"; exit 0
+          fi
+          echo "::warning::live state still holds resources; reaping"
+          cd trusted && /tmp/infrafactory --config /tmp/layer3-gate/infrafactory.yaml \
+            reap "/tmp/layer3-gate/scenario/$(basename "$SCENARIO")"
+
+      - name: Correct the comment if cleanup failed
+        # The stage summary posts before cleanup runs, so a green summary
+        # can be followed by a failed reap. Leaving that comment as the
+        # last word on the PR would say "applied and cleaned up" about a
+        # run that did not clean up -- so the PR gets told, on the PR,
+        # where anyone reading the first comment will see it.
+        if: always() && steps.reap.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # gh api with an explicit repos/ path, not `gh pr comment`: this
+          # step runs from $GITHUB_WORKSPACE, which holds the trusted/ and
+          # pr/ checkouts and is not itself a repository, so anything that
+          # infers the repo from the working directory fails here. The
+          # stage-summary step above uses the same form for the same
+          # reason -- and this comment matters more, because without it a
+          # green summary stays the last word on a run that did not clean
+          # up.
+          body=$(printf '%s\n' \
+            "### ⚠️ Layer 3 cleanup did not verify" \
+            "" \
+            "The stage summary above was posted before teardown finished. Cleanup then failed, so **real Scaleway resources may still exist**." \
+            "" \
+            "Check the account before relying on that summary.")
+          jq -n --arg b "$body" '{body: $b}' > /tmp/layer3-gate/cleanup-warning.json
+          gh api -X POST "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
+            --input /tmp/layer3-gate/cleanup-warning.json
+
+      - name: Verdict
+        # Last, so it can account for cleanup as well as the run.
+        if: always()
+        run: |
+          if [ "${{ steps.reap.outcome }}" = "failure" ]; then
+            echo "::error::Layer 3 cleanup did not verify — real resources may still exist"
+            exit 1
+          fi
+          if [ "${{ steps.gate.outputs.rc }}" != "0" ]; then
+            echo "::error::Layer 3 gate failed — see the PR comment for the stage summary"
+            exit 1
+          fi
+          echo "Layer 3 gate passed in ${{ steps.gate.outputs.elapsed }}s, cleanup verified"

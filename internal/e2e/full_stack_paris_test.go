@@ -126,17 +126,17 @@ func stateResourceIDs(state map[string]any, root, collection string) []string {
 
 func fullStackParisFiles() map[string][]byte {
 	return map[string][]byte{
-		"providers.tf": []byte(fullStackParisProvidersTF),
-		"variables.tf": []byte(fullStackParisVariablesTF),
-		"network.tf":   []byte(fullStackParisNetworkTF),
-		"security.tf":  []byte(fullStackParisSecurityTF),
-		"compute.tf":   []byte(fullStackParisComputeTF),
-		"database.tf":  []byte(fullStackParisDatabaseTF),
+		"providers.tf":  []byte(fullStackParisProvidersTF),
+		"variables.tf":  []byte(fullStackParisVariablesTF),
+		"network.tf":    []byte(fullStackParisNetworkTF),
+		"security.tf":   []byte(fullStackParisSecurityTF),
+		"compute.tf":    []byte(fullStackParisComputeTF),
+		"database.tf":   []byte(fullStackParisDatabaseTF),
 		"kubernetes.tf": []byte(fullStackParisKubernetesTF),
-		"redis.tf":     []byte(fullStackParisRedisTF),
-		"registry.tf":  []byte(fullStackParisRegistryTF),
-		"iam.tf":       []byte(fullStackParisIAMTF),
-		"outputs.tf":   []byte(fullStackParisOutputsTF),
+		"redis.tf":      []byte(fullStackParisRedisTF),
+		"registry.tf":   []byte(fullStackParisRegistryTF),
+		"iam.tf":        []byte(fullStackParisIAMTF),
+		"outputs.tf":    []byte(fullStackParisOutputsTF),
 	}
 }
 
@@ -144,6 +144,7 @@ const fullStackParisProvidersTF = `terraform {
   required_providers {
     scaleway = {
       source = "scaleway/scaleway"
+      version = "2.81.0"
     }
   }
 }
