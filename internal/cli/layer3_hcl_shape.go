@@ -2,8 +2,10 @@ package cli
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -139,6 +141,13 @@ func validateLayer3HCLShape(outputDir string, allowedResourceTypes []string) err
 	problems := make([]string, 0)
 	sawCanonicalProvider := false
 	projectResources := 0
+	// Variable defaults are collected across ALL files before any
+	// resource is checked, because a bound attribute in main.tf routinely
+	// reads a default declared in variables.tf. A single pass would see
+	// `size_in_gb = var.volume_size_in_gb` with no default in scope yet,
+	// call it unresolvable, and refuse a committed fixture.
+	parsed := make(map[string]*hclsyntax.Body)
+	varDefaults := make(map[string]cty.Value)
 	for _, entry := range entries {
 		// Every extension tofu loads must be one this validator reads.
 		//
@@ -168,10 +177,20 @@ func validateLayer3HCLShape(outputDir string, allowedResourceTypes []string) err
 		if !ok {
 			return fmt.Errorf("layer 3 refuses %s: unexpected body type", entry.Name())
 		}
-		fileProblems, sawProvider, projectsHere := layer3BlockProblems(body, entry.Name(), allowedResourceTypes)
+		parsed[entry.Name()] = body
+		layer3VariableDefaults(body, varDefaults)
+	}
+	for _, name := range slices.Sorted(maps.Keys(parsed)) {
+		body := parsed[name]
+		fileProblems, sawProvider, projectsHere := layer3BlockProblems(body, name, allowedResourceTypes)
 		problems = append(problems, fileProblems...)
 		sawCanonicalProvider = sawCanonicalProvider || sawProvider
 		projectResources += projectsHere
+		for _, block := range body.Blocks {
+			if block.Type == "resource" {
+				problems = append(problems, layer3CostProblems(block, name, varDefaults)...)
+			}
+		}
 	}
 	// Exactly one, not at least one. The teardown model assumes a single
 	// disposable project throughout: CaptureSweepTarget records one
@@ -575,4 +594,118 @@ func layer3MultiplicityProblems(resource *hclsyntax.Block, file string) []string
 		}
 	}
 	return problems
+}
+
+// layer3AttributeBounds caps the cost-bearing attributes of the allowed
+// resource types.
+//
+// The allowlist bounds which TYPES may be created and says nothing about
+// how expensive an instance of one is. `scaleway_block_volume` stays
+// within it at 10 GB and at 10 TB; `scaleway_instance_server` stays
+// within it at DEV1-S and at the largest GPU node Scaleway rents. The
+// spend ceiling for this whole arc is single-digit pounds.
+//
+// Numeric entries are maxima. String entries are exact permitted values.
+// Both are deliberately close to what the committed fixtures use: this
+// is a demo gate applying a handful of small resources, not a general
+// deployment pipeline, and a fixture that needs more should say so in a
+// base-branch change.
+var layer3NumericBounds = map[string]map[string]float64{
+	"scaleway_block_volume": {
+		"size_in_gb": 20,
+		"iops":       15000,
+	},
+}
+
+var layer3EnumBounds = map[string]map[string][]string{
+	"scaleway_instance_server": {"type": {"DEV1-S", "DEV1-M"}},
+	"scaleway_lb":              {"type": {"LB-S"}},
+}
+
+// layer3CostProblems refuses out-of-bound cost attributes.
+//
+// Values reach the attribute either literally or through a variable
+// default -- tfvars files are refused outright, and function calls are
+// too, so those are the only two forms left. An attribute whose value
+// cannot be resolved to a constant is refused rather than assumed small.
+func layer3CostProblems(resource *hclsyntax.Block, file string, varDefaults map[string]cty.Value) []string {
+	problems := make([]string, 0)
+	if resource.Body == nil || len(resource.Labels) == 0 {
+		return problems
+	}
+	resourceType := resource.Labels[0]
+	name := "<unnamed>"
+	if len(resource.Labels) > 1 {
+		name = resource.Labels[1]
+	}
+
+	for attrName, max := range layer3NumericBounds[resourceType] {
+		attr, ok := resource.Body.Attributes[attrName]
+		if !ok {
+			continue
+		}
+		val, resolved := layer3ResolveConstant(attr.Expr, varDefaults)
+		if !resolved || val.Type() != cty.Number {
+			problems = append(problems, fmt.Sprintf("%s: %s sets %s to something this check cannot resolve to a constant, so its cost cannot be bounded", file, name, attrName))
+			continue
+		}
+		f, _ := val.AsBigFloat().Float64()
+		if f > max {
+			problems = append(problems, fmt.Sprintf("%s: %s sets %s to %g; the gate caps it at %g because it applies to real, billed infrastructure", file, name, attrName, f, max))
+		}
+	}
+
+	for attrName, allowed := range layer3EnumBounds[resourceType] {
+		attr, ok := resource.Body.Attributes[attrName]
+		if !ok {
+			continue
+		}
+		val, resolved := layer3ResolveConstant(attr.Expr, varDefaults)
+		if !resolved || val.Type() != cty.String {
+			problems = append(problems, fmt.Sprintf("%s: %s sets %s to something this check cannot resolve to a constant, so its cost cannot be bounded", file, name, attrName))
+			continue
+		}
+		if !slices.Contains(allowed, val.AsString()) {
+			problems = append(problems, fmt.Sprintf("%s: %s sets %s to %q; the gate permits only %v", file, name, attrName, val.AsString(), allowed))
+		}
+	}
+	return problems
+}
+
+// layer3ResolveConstant evaluates a literal, or a `var.x` whose default
+// is a literal. Anything else is unresolved -- and unresolved is refused
+// by the caller, never assumed harmless.
+func layer3ResolveConstant(expr hclsyntax.Expression, varDefaults map[string]cty.Value) (cty.Value, bool) {
+	if traversal, ok := expr.(*hclsyntax.ScopeTraversalExpr); ok {
+		if traversal.Traversal.RootName() != "var" || len(traversal.Traversal) < 2 {
+			return cty.NilVal, false
+		}
+		attr, ok := traversal.Traversal[1].(hcl.TraverseAttr)
+		if !ok {
+			return cty.NilVal, false
+		}
+		val, ok := varDefaults[attr.Name]
+		return val, ok
+	}
+	val, diags := expr.Value(nil)
+	if diags.HasErrors() || val.IsNull() {
+		return cty.NilVal, false
+	}
+	return val, true
+}
+
+// layer3VariableDefaults collects `variable "x" { default = <literal> }`.
+func layer3VariableDefaults(body *hclsyntax.Body, into map[string]cty.Value) {
+	for _, block := range body.Blocks {
+		if block.Type != "variable" || len(block.Labels) == 0 || block.Body == nil {
+			continue
+		}
+		attr, ok := block.Body.Attributes["default"]
+		if !ok {
+			continue
+		}
+		if val, diags := attr.Expr.Value(nil); !diags.HasErrors() && !val.IsNull() {
+			into[block.Labels[0]] = val
+		}
+	}
 }

@@ -386,6 +386,7 @@ jobs:
           fi
 
       - name: Reap anything the run left behind
+        id: reap
         # Runs on cancellation and timeout too, which is the whole point: a
         # gate that leaks when interrupted is worse than no gate. reap is
         # gated by AssertProjectDeletable and verified by the same sweep, so
@@ -444,11 +445,36 @@ jobs:
           cd trusted && /tmp/infrafactory --config /tmp/layer3-gate/infrafactory.yaml \
             reap "/tmp/layer3-gate/scenario/$(basename "$SCENARIO")"
 
-      - name: Verdict
-        # Separate from the run step so the comment always posts first.
+      - name: Correct the comment if cleanup failed
+        # The stage summary posts before cleanup runs, so a green summary
+        # can be followed by a failed reap. Leaving that comment as the
+        # last word on the PR would say "applied and cleaned up" about a
+        # run that did not clean up -- so the PR gets told, on the PR,
+        # where anyone reading the first comment will see it.
+        if: always() && steps.reap.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          gh pr comment "${{ github.event.pull_request.number }}" --body "$(cat <<'BODY'
+          ### ⚠️ Layer 3 cleanup did not verify
+
+          The stage summary above was posted before teardown finished. Cleanup
+          then failed, so **real Scaleway resources may still exist**.
+
+          Check the account before relying on the summary above.
+          BODY
+          )"
+
+      - name: Verdict
+        # Last, so it can account for cleanup as well as the run.
+        if: always()
+        run: |
+          if [ "${{ steps.reap.outcome }}" = "failure" ]; then
+            echo "::error::Layer 3 cleanup did not verify — real resources may still exist"
+            exit 1
+          fi
           if [ "${{ steps.gate.outputs.rc }}" != "0" ]; then
             echo "::error::Layer 3 gate failed — see the PR comment for the stage summary"
             exit 1
           fi
-          echo "Layer 3 gate passed in ${{ steps.gate.outputs.elapsed }}s"
+          echo "Layer 3 gate passed in ${{ steps.gate.outputs.elapsed }}s, cleanup verified"

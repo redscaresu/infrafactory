@@ -784,3 +784,62 @@ resource "scaleway_block_volume" "hidden" {
 	require.Error(t, err, "two projects means the sweep verifies only one of them")
 	assert.Contains(t, err.Error(), "exactly one")
 }
+
+// The allowlist bounds which types may exist and says nothing about how
+// expensive one is. A block volume is within it at 10GB and at 10TB.
+func TestLayer3ShapeRefusesAnOversizedVolume(t *testing.T) {
+	dir := writeShapeHCL(t, shapeProject+`
+resource "scaleway_block_volume" "huge" {
+  size_in_gb = 10000
+  project_id = scaleway_account_project.main.id
+}`)
+
+	err := validateLayer3HCLShape(dir, gateAllowlist)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "caps it at")
+}
+
+// The bound has to follow a variable default, because that is how the
+// committed block-paris fixture expresses its size.
+func TestLayer3ShapeFollowsVariableDefaultsWhenBounding(t *testing.T) {
+	dir := writeShapeHCL(t, shapeProject+`
+variable "size" {
+  type    = number
+  default = 9000
+}
+resource "scaleway_block_volume" "sneaky" {
+  size_in_gb = var.size
+  project_id = scaleway_account_project.main.id
+}`)
+
+	require.Error(t, validateLayer3HCLShape(dir, gateAllowlist),
+		"a default is where the value actually comes from; a literal-only bound checks nothing")
+}
+
+// ...and a value it cannot resolve is refused rather than assumed small.
+func TestLayer3ShapeRefusesAnUnresolvableCostAttribute(t *testing.T) {
+	dir := writeShapeHCL(t, shapeProject+`
+variable "size" { type = number }
+resource "scaleway_block_volume" "unknown" {
+  size_in_gb = var.size
+  project_id = scaleway_account_project.main.id
+}`)
+
+	err := validateLayer3HCLShape(dir, gateAllowlist)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cannot resolve")
+}
+
+// Instance and LB sizes are enumerations, not maxima.
+func TestLayer3ShapeRefusesAnExpensiveInstanceType(t *testing.T) {
+	dir := writeShapeHCL(t, shapeProject+`
+resource "scaleway_instance_server" "big" {
+  type       = "GPU-3070-S"
+  image      = "ubuntu_jammy"
+  project_id = scaleway_account_project.main.id
+}`)
+
+	require.Error(t, validateLayer3HCLShape(dir, append(gateAllowlist, "scaleway_instance_server")))
+}
