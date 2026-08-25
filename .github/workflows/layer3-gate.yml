@@ -192,6 +192,9 @@ jobs:
                   - scaleway_account_project
                   - scaleway_block_volume
                   - scaleway_lb*
+                  - scaleway_instance_ip
+                  - scaleway_instance_server
+                  - scaleway_instance_private_nic
               destruction:
                 enabled: true
             real_probes:
