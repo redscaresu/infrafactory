@@ -1,0 +1,3 @@
+scaleway_domain_zone.app: Creating...
+scaleway_domain_zone.app: Creation complete after 0s [id=gate.infrafactory-demo.com]
+Apply complete! Resources: 2 added, 0 changed, 0 destroyed.

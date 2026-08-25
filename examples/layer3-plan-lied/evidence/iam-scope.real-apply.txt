@@ -1,0 +1,5 @@
+Error: scaleway-sdk-go: http error 403 Forbidden: permission denied
+
+  with scaleway_domain_zone.app,
+  on main.tf line 8, in resource "scaleway_domain_zone" "app":
+   8: resource "scaleway_domain_zone" "app" {

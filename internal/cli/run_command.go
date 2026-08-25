@@ -711,9 +711,12 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 				// Same ordering the success path learned the hard way in
 				// the first canary run.
 				sweepTarget, sweepTargetErr := harness.CaptureSweepTarget(runtime.OutputDir())
-				destroyResult, destroyErr := runtime.Deps.SandboxDestroy.Run(cmd.Context(), runtime.OutputDir(), sandboxEnv)
+				destroyResult, purged, destroyErr := destroySandbox(cmd.Context(), runtime, runtime.OutputDir(), sandboxEnv, sweepTargetProjectID(sweepTarget))
 				destroyStages, destroyFailures := appendSandboxDestroyResult(nil, nil, destroyResult, destroyErr)
 				allStages = append(allStages, destroyStages...)
+				if len(purged) > 0 {
+					allStages = append(allStages, autoCreatedPurgeStage(purged))
+				}
 				if destroyErr != nil {
 					runtime.Logger.Log(LogEntry{
 						Level:   logLevelError,

@@ -145,3 +145,39 @@ Two general lessons, both learned the expensive way. **A denylist of known escap
 Generalising: a control attached to *one path into* a dangerous operation is a control that a second path silently bypasses. Attach it to the operation.
 
 **Enforcement**: the guards carry synthetic-drift coverage — removing `SCW_API_URL` from `SandboxStripEnv` fails three tests, verified before S139 merged. Following the project's "drift becomes failed `go test`" pattern.
+
+**Amendment — the allowlist admits two Instances types (2026-08-24).** The Instances amendment above closed by saying that widening the allowlist to admit `scaleway_instance_*` was a separate decision, to be taken separately. This is that decision.
+
+`scaleway_instance_ip` and `scaleway_instance_server` are now allowed. They are named individually rather than as a glob: this is a deny-by-default list, and `scaleway_instance_*` would also admit snapshots and images no scenario needs.
+
+The reason is `http_probe`. `lb-paris` asserts *connectivity* — a TCP connect — and its own comment explains why: it declares no compute, so the load balancer's backend has no servers and Scaleway answers HTTP with 503. `lb-serving-paris` puts one small instance behind the frontend, and the probe then proves the frontend **serves traffic** rather than merely accepting connections. Against real Scaleway the whole scenario — apply, HTTP 200 through the load balancer, destroy, sweep — completes in 144 seconds.
+
+The cost is that a *second* family is now protected by software rather than by the API, joining block, LB and VPC. The guards are unchanged and still apply: project-per-run, `AssertProjectDeletable`, the orphan sweep, and the allowlist itself.
+
+**Amendment — the API creates resources Terraform will not destroy (2026-08-24).** ADR-0010's disposable project is the foundation of every blast-radius claim here, and it silently stopped holding for any scenario that declares compute.
+
+`tofu destroy` cannot delete a project that still contains anything, and Scaleway puts something in it without being asked: the first Instance in a fresh project causes a **"Default security group"** to be auto-created there. It is absent from the plan, absent from the state file, and not Terraform's to remove. Destroy therefore ends with `precondition failed: resource is still in use`, and the run leaks a project. Nothing billable survives, so a cost-based check reports clean while projects accumulate one per run.
+
+`destroySandbox` now purges what the API auto-created inside the run's own project and retries the destroy once. Three constraints make that safe to state:
+
+1. **Scoped to the run's project**, which callers have already put through `AssertProjectDeletable`.
+2. **Only `project_default` groups.** A security group the run's own HCL declared is Terraform's to destroy; purging it here would hide a real destroy bug.
+3. **Reported, never silent.** What was removed goes in the stage summary. That is not decoration — the first verification run passed with the purge firing invisibly, and the stage output was the only way to distinguish the fix working from the destroy having coincidentally succeeded.
+
+The purge is deliberately lenient where the sweep is strict. `ScalewayOrphanSweep` remains the authoritative "did we leak?" answer and still fails closed; a purge that cannot list a zone simply moves on, because a transient list error must not turn into a failed teardown when the sweep is there to catch a genuine leak.
+
+No mock surfaces this class of defect at all. The auto-creation is a behaviour of the real API, not of the configuration, so mockway — which creates exactly what it is asked for and nothing else — deletes its project cleanly every time.
+
+**Amendment — the coverage document's counts are CI-enforced (2026-08-24).** `docs/layer3-coverage.md` is not commentary. It is the artifact someone reads to decide which scenario to point at real, billable infrastructure next, and its central claims are counts: how many scenarios have run, how many each gate blocks, which resource types are admitted locally and refused by the credential.
+
+Those counts were hand-maintained, and over a single slice they drifted four times — a scenario counted in the numerator and not the denominator, a gated remainder that no longer matched the table, a "three families" claim that had become four, and an enumerated allowlist that had fallen behind `infrafactory.yaml`. Each was a paragraph disagreeing with a table two screens away, and each hand-fix introduced the next.
+
+`TestLayer3CoverageDocTotalsMatchItsTable` and `TestLayer3CoverageDocAllowlistMatchesConfig` now derive the totals and the gated remainder from the table's own rows, and diff the enumerated allowlist against the config. Both carry synthetic-drift coverage.
+
+This extends the project's existing "drift becomes a failed `go test`" pattern — ADR-0021's cloud-prefix lockstep, the sibling contract audits, the pitfalls/OPA dedup check — to prose. The justification is the same one the pattern always rests on: a convention nobody can violate accidentally is worth more than a convention written down. It applies here because the prose makes checkable numerical claims about committed configuration, not because documentation in general should be tested.
+
+**Amendment — the README's gate claim is CI-enforced (2026-08-24).** The README describes what Layer 3 guarantees, and a reader has no way to check whether the described pre-merge gate actually runs. It briefly did not: the section was written while `.github/workflows/layer3-gate.yml` still lived on an unmerged branch, so a public safety claim outran the repository by one merge.
+
+`TestReadmeLayer3GateClaimMatchesWorkflows` ties the two together in both directions. With no gate workflow present the README must carry its "not yet merged" qualification; once the workflow lands the same test fails until the qualification is removed. Both directions carry synthetic-drift coverage.
+
+The asymmetry is the point. Overstating a safety control is the dangerous direction — someone relies on a gate that is not there — but understating it is how a repository ends up with a working control nobody knows about. Neither should survive a merge.

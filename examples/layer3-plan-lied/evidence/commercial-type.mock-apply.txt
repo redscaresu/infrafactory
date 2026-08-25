@@ -1,0 +1,3 @@
+scaleway_block_volume.app_data: Creating...
+scaleway_block_volume.app_data: Creation complete after 0s [id=fr-par-1/10ae6bcb-ba77-4270-b188-5123c4ccc5c1]
+Apply complete! Resources: 2 added, 0 changed, 0 destroyed.
