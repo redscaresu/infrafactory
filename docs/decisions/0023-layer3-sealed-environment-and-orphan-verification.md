@@ -181,3 +181,19 @@ This extends the project's existing "drift becomes a failed `go test`" pattern �
 `TestReadmeLayer3GateClaimMatchesWorkflows` ties the two together in both directions. With no gate workflow present the README must carry its "not yet merged" qualification; once the workflow lands the same test fails until the qualification is removed. Both directions carry synthetic-drift coverage.
 
 The asymmetry is the point. Overstating a safety control is the dangerous direction — someone relies on a gate that is not there — but understating it is how a repository ends up with a working control nobody knows about. Neither should survive a merge.
+
+**Amendment — function calls are allowlisted, not banned (2026-08-26).** S144 closed a credential-exfiltration path by refusing **every** function call in HCL that Layer 3 evaluates. The reasoning was sound and the scope was wrong.
+
+The path is real: `user_data = file("/proc/self/environ")` reads `SCW_ACCESS_KEY` and `SCW_SECRET_KEY` out of the runner's environment and hands them to a machine whose boot script the pull request wrote, and `data "external"` and provisioners were already blocked, so an ordinary attribute was what remained. A blanket ban closed it.
+
+It also broke the product's main path, which was not noticed because the rule was written against the gate and tested against the gate. `validateLayer3HCLShape` runs on **generated** HCL as well as on a PR's, and the first real generation after it landed emitted
+
+    tags = concat(var.tags, ["web-server"])
+
+which Layer 3 refused. `concat` computes over its arguments and reaches nothing else; refusing it protected against nothing and made Layer 3 unusable for every generated stack.
+
+The rule is now an allowlist of **pure** functions — ones whose result cannot depend on anything outside their arguments. That keeps deny-by-default, which is the property that matters on this surface: an explicit list of dangerous names (`file`, `templatefile`, `fileset`, `filebase64`, `abspath`, `pathexpand`) would be another enumerate-the-bad-ones list, and every one of those attempted here produced a bypass. Adding an entry asks one question: can this function's result depend on anything other than what it was passed?
+
+Two things worth keeping from how this was found. The rule was **verified against the generator rather than against the tests** — 40 review passes and a full suite all agreed the blanket ban was fine, and a single real `infrafactory generate` disagreed. And a check that runs on two paths needs exercising on both: this one was written for untrusted input and silently applied to trusted input, where its cost was invisible until something real ran through it.
+
+**Related, and recorded here because it constrains the demo:** a real generation of `lb-serving-paris` is refused by the gate for a different reason — it emits `scaleway_instance_security_group` and private networking, which need `IPAMFullAccess` and are not allowlisted. That is the two gates working as designed, not a defect. `block-paris` generates cleanly and is therefore the demo scenario. Widening the allowlist to accommodate a richer generated stack remains a blast-radius decision, unchanged by the demo's convenience.
