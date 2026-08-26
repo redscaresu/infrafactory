@@ -885,3 +885,70 @@ resource "scaleway_instance_private_nic" "nic" {
 	require.Error(t, err, "private_network_id is a second parent and needs the same treatment as the first")
 	assert.Contains(t, err.Error(), "private_network_id")
 }
+
+// A blanket function ban was the first attempt and it broke Layer 3 for
+// every generated stack: the generator writes
+// `tags = concat(var.tags, ["web-server"])`, and concat cannot read a
+// secret. The allowlist is pure functions only.
+func TestLayer3ShapeAllowsPureFunctions(t *testing.T) {
+	dir := writeShapeHCL(t, shapeProject+`
+variable "tags" {
+  type    = list(string)
+  default = ["gate"]
+}
+resource "scaleway_block_volume" "data" {
+  size_in_gb = 1
+  project_id = scaleway_account_project.main.id
+  tags       = concat(var.tags, ["web-server"])
+  name       = lower(format("%s-%s", "vol", "data"))
+}`)
+
+	assert.NoError(t, validateLayer3HCLShape(dir, gateAllowlist))
+}
+
+// ...and anything not on it is still refused, including functions that
+// merely look harmless. The question is whether the result can depend on
+// something outside the arguments.
+func TestLayer3ShapeRefusesFunctionsOffTheAllowlist(t *testing.T) {
+	for _, call := range []string{
+		`file("/proc/self/environ")`,
+		`templatefile("t.tpl", {})`,
+		`filebase64("/etc/passwd")`,
+		`abspath(".")`,
+		`pathexpand("~")`,
+	} {
+		t.Run(call, func(t *testing.T) {
+			dir := writeShapeHCL(t, shapeProject+`
+resource "scaleway_block_volume" "data" {
+  size_in_gb = 1
+  project_id = scaleway_account_project.main.id
+  name       = `+call+`
+}`)
+			require.Error(t, validateLayer3HCLShape(dir, gateAllowlist))
+		})
+	}
+}
+
+// The recorded generation is what `make demo-gate` puts on the PR, so it
+// has to clear the same preflight the gate will run against it.
+//
+// It is machine-written and refreshed by regenerating, which means it can
+// drift the moment the model or the prompts change. Finding that out in
+// CI beats finding it out on stage.
+func TestRecordedGenerationPassesPreflight(t *testing.T) {
+	recorded, err := filepath.Glob(filepath.Join("..", "..", "docs", "demo", "recorded-generation", "*"))
+	require.NoError(t, err)
+	require.NotEmpty(t, recorded, "no recorded generation; make demo-gate has nothing to replay")
+
+	allow := gateWorkflowAllowlist(t)
+	for _, dir := range recorded {
+		info, statErr := os.Stat(dir)
+		if statErr != nil || !info.IsDir() {
+			continue
+		}
+		t.Run(filepath.Base(dir), func(t *testing.T) {
+			assert.NoError(t, layer3PreflightHCL(dir, allow),
+				"regenerate with `make demo-gate GENERATE=live` and commit the result")
+		})
+	}
+}

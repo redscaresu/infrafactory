@@ -32,7 +32,7 @@ else
 LINUX_GOARCH := $(HOST_ARCH)
 endif
 
-.PHONY: help test-unit test-all test \
+.PHONY: help doc-hygiene demo-gate demo-preflight test-unit test-all test \
 	bench-check smoke-validate smoke-mockway smoke-mockway-manual smoke-mockway-local smoke check \
 	ui-install ui-build ui-test ui-test-e2e ui-dev ui-clean ui-api-linux-build ui-stack-up ui-stack-logs ui-stack-down build run up down status \
 	mocks-up mocks-down mocks-status mocks-logs mockway-up mockway-down fakegcp-up fakegcp-down fakeaws-up fakeaws-down fakegenesys-up fakegenesys-down fakegenesys-restart s3router-up s3router-down s3router-restart
@@ -656,3 +656,28 @@ install-hooks:
 	git config core.hooksPath .githooks
 	chmod +x .githooks/pre-commit
 	@echo "Hooks installed: pre-commit will run gitleaks, refresh visual baselines if scenarios changed, and run make test."
+
+# --- Doc hygiene -----------------------------------------------------
+# The same check CI runs, against the same range: this branch vs main.
+#
+# The pre-commit hook cannot do this. Doc hygiene is a PR-level question
+# ("does this BRANCH record its decisions?"), not a per-commit one, so
+# there is nothing to hang it on until the branch exists. Run it before
+# pushing.
+doc-hygiene:
+	@bash scripts/check_doc_hygiene.sh $$(git merge-base origin/main HEAD) HEAD
+
+# --- Demo ------------------------------------------------------------
+# The on-stage path, in one command. See scripts/demo_gate.sh.
+#
+#   make demo-gate                 replay the recorded generation
+#   make demo-gate GENERATE=live   regenerate with the LLM first
+#
+# SPENDS MONEY: applies to real Scaleway.
+demo-gate:
+	@bash scripts/demo_gate.sh
+
+# Everything demo-gate checks, without opening anything. Run this the
+# morning of the talk.
+demo-preflight:
+	@bash scripts/demo_preflight.sh
