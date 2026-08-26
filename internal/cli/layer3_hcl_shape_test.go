@@ -928,3 +928,27 @@ resource "scaleway_block_volume" "data" {
 		})
 	}
 }
+
+// The recorded generation is what `make demo-gate` puts on the PR, so it
+// has to clear the same preflight the gate will run against it.
+//
+// It is machine-written and refreshed by regenerating, which means it can
+// drift the moment the model or the prompts change. Finding that out in
+// CI beats finding it out on stage.
+func TestRecordedGenerationPassesPreflight(t *testing.T) {
+	recorded, err := filepath.Glob(filepath.Join("..", "..", "docs", "demo", "recorded-generation", "*"))
+	require.NoError(t, err)
+	require.NotEmpty(t, recorded, "no recorded generation; make demo-gate has nothing to replay")
+
+	allow := gateWorkflowAllowlist(t)
+	for _, dir := range recorded {
+		info, statErr := os.Stat(dir)
+		if statErr != nil || !info.IsDir() {
+			continue
+		}
+		t.Run(filepath.Base(dir), func(t *testing.T) {
+			assert.NoError(t, layer3PreflightHCL(dir, allow),
+				"regenerate with `make demo-gate GENERATE=live` and commit the result")
+		})
+	}
+}
