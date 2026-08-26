@@ -885,3 +885,46 @@ resource "scaleway_instance_private_nic" "nic" {
 	require.Error(t, err, "private_network_id is a second parent and needs the same treatment as the first")
 	assert.Contains(t, err.Error(), "private_network_id")
 }
+
+// A blanket function ban was the first attempt and it broke Layer 3 for
+// every generated stack: the generator writes
+// `tags = concat(var.tags, ["web-server"])`, and concat cannot read a
+// secret. The allowlist is pure functions only.
+func TestLayer3ShapeAllowsPureFunctions(t *testing.T) {
+	dir := writeShapeHCL(t, shapeProject+`
+variable "tags" {
+  type    = list(string)
+  default = ["gate"]
+}
+resource "scaleway_block_volume" "data" {
+  size_in_gb = 1
+  project_id = scaleway_account_project.main.id
+  tags       = concat(var.tags, ["web-server"])
+  name       = lower(format("%s-%s", "vol", "data"))
+}`)
+
+	assert.NoError(t, validateLayer3HCLShape(dir, gateAllowlist))
+}
+
+// ...and anything not on it is still refused, including functions that
+// merely look harmless. The question is whether the result can depend on
+// something outside the arguments.
+func TestLayer3ShapeRefusesFunctionsOffTheAllowlist(t *testing.T) {
+	for _, call := range []string{
+		`file("/proc/self/environ")`,
+		`templatefile("t.tpl", {})`,
+		`filebase64("/etc/passwd")`,
+		`abspath(".")`,
+		`pathexpand("~")`,
+	} {
+		t.Run(call, func(t *testing.T) {
+			dir := writeShapeHCL(t, shapeProject+`
+resource "scaleway_block_volume" "data" {
+  size_in_gb = 1
+  project_id = scaleway_account_project.main.id
+  name       = `+call+`
+}`)
+			require.Error(t, validateLayer3HCLShape(dir, gateAllowlist))
+		})
+	}
+}

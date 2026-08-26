@@ -520,10 +520,19 @@ func layer3PreflightHCL(outputDir string, allowedResourceTypes []string) error {
 // of. An `output` would do it more directly still, since the gate posts
 // its output to the pull request.
 //
-// Deny-by-default rather than a denylist of file/templatefile/fileset,
-// for the same reason the block check is: this surface has produced a
-// bypass for every enumerate-the-bad-ones attempt on it. A fixture that
-// genuinely needs a function can have one allowlisted, deliberately.
+// Allowlisted rather than denylisted, and the allowlist holds only PURE
+// functions -- ones that compute over their arguments and touch nothing
+// else. The dangerous families all share one property: they reach
+// outside the expression, into the filesystem (file, templatefile,
+// fileset, filebase64) or the runner's paths (abspath, pathexpand). A
+// denylist of those names would be another enumerate-the-bad-ones list,
+// and every one of those on this surface has produced a bypass.
+//
+// A blanket ban was the first attempt and it was too strict to survive
+// contact with the generator, which writes
+// `tags = concat(var.tags, ["web-server"])`. concat cannot read a
+// secret. Refusing it bought nothing and broke Layer 3 for every
+// generated stack.
 //
 // Type constraints are exempt. `type = list(string)` parses as a call and
 // is not one -- it names a type and evaluates nothing.
@@ -538,8 +547,11 @@ func layer3FunctionCallProblems(block *hclsyntax.Block, file string) []string {
 			continue
 		}
 		for _, fn := range layer3CallsIn(attr.Expr) {
+			if layer3PureFunctions[fn] {
+				continue
+			}
 			problems = append(problems, fmt.Sprintf(
-				"%s: %s calls %s(); Layer 3 evaluates PR-supplied HCL with real credentials in the environment, so function calls are refused (file() and friends can read them, and the stack can ship them out)",
+				"%s: %s calls %s(), which is not on the pure-function allowlist; Layer 3 evaluates this HCL with real credentials in the environment, and a function that reads the filesystem can put them in a resource attribute",
 				file, name, fn))
 		}
 	}
@@ -556,6 +568,31 @@ func layer3CallsIn(expr hclsyntax.Expression) []string {
 	walker := layer3CallWalker{found: &found}
 	_ = hclsyntax.Walk(expr, walker)
 	return found
+}
+
+// layer3PureFunctions compute over their arguments and reach nothing
+// else -- no filesystem, no runner paths, no external process. Adding to
+// this list is a deliberate act: the question to ask of a candidate is
+// not "is it useful?" but "can its result depend on anything outside its
+// arguments?"
+var layer3PureFunctions = map[string]bool{
+	// collections
+	"concat": true, "merge": true, "lookup": true, "element": true,
+	"length": true, "keys": true, "values": true, "flatten": true,
+	"distinct": true, "compact": true, "slice": true, "contains": true,
+	"coalesce": true, "coalescelist": true, "zipmap": true, "range": true,
+	"tolist": true, "toset": true, "tomap": true,
+	// strings
+	"format": true, "formatlist": true, "join": true, "split": true,
+	"replace": true, "substr": true, "trimspace": true, "trim": true,
+	"trimprefix": true, "trimsuffix": true, "lower": true, "upper": true,
+	"title": true, "chomp": true, "regex": true, "regexall": true,
+	// numbers and types
+	"max": true, "min": true, "abs": true, "ceil": true, "floor": true,
+	"tostring": true, "tonumber": true, "tobool": true,
+	"jsonencode": true, "jsondecode": true, "try": true, "can": true,
+	// networking, used by generated VPC scenarios
+	"cidrsubnet": true, "cidrhost": true, "cidrnetmask": true,
 }
 
 type layer3CallWalker struct{ found *[]string }
