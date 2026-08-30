@@ -102,13 +102,31 @@ validation:
         # (ADR-0023, allowlist amendment). An instance boots in well under
         # a minute, unlike the clusters below.
         #
-        # private_nic is here because policies/scaleway/vpc_required.rego
-        # DENIES any instance server without one. Omitting it would leave
-        # static policy demanding a resource this list forbids, so no
-        # generated HCL could satisfy both gates. It joins the "allowed
-        # locally, refused by the API" group in ADR-0023 until
-        # IPAMFullAccess is granted -- which is a separate decision, taken
-        # when a scenario needs private networking rather than now.
+        # private_nic is here because pitfalls/scaleway.yaml instructs the
+        # generator to attach one to every instance server, citing
+        # vpc_required.rego. (That rego is wired for AWS only -- it is not
+        # in this file's constraint_policies -- so the pitfall is steering
+        # generation on the strength of a policy Scaleway does not enforce.
+        # Open question, 2026-08-30.)
+        #
+        # It was previously recorded here as blocked on IPAMFullAccess.
+        # That was wrong, and a canary said so: the real API asked for
+        # `write compute_private_networks`, i.e. PrivateNetworksFullAccess,
+        # which was granted 2026-08-30. Private NETWORKS now create.
+        #
+        # Private NICs still do not, for a subtler reason:
+        #
+        #   Cannot create a private_network_interface in a project
+        #   attached to a server from another project
+        #
+        # scaleway_instance_private_nic takes no project_id -- it is a
+        # child resource, which is why layer3_hcl_shape.go lists it under
+        # parent references rather than project binding -- so the provider
+        # creates it in the DEFAULT project. That default is
+        # scaleway.fallback_project_id, the containment project from
+        # ADR-0010, while the server lives in the run's own project. The
+        # blast-radius mechanism and private NICs are therefore mutually
+        # exclusive as things stand. Unresolved; see ADR-0024.
         - scaleway_instance_ip
         - scaleway_instance_server
         - scaleway_instance_private_nic

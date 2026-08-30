@@ -288,3 +288,46 @@ func TestLiveReapSkipsAlreadyReleasedDeployments(t *testing.T) {
 	assert.Zero(t, destroy.calls)
 	assert.Contains(t, out.String(), "Nothing has expired.")
 }
+
+// A dry run that exits 0 with an unaccounted record is the failure the
+// fail-closed rule exists to prevent: a CI wrapper that dry-runs first
+// sees green while something that may be running is unaccounted for.
+func TestLiveReapDryRunStillFailsOnUnreadableRecords(t *testing.T) {
+	sandboxCredsForTest(t)
+	destroy, sweep := &fakeSandboxDestroyHarness{}, &fakeOrphanSweep{}
+	rt, store, workspace := liveTeardownRuntime(t, destroy, sweep)
+	liveDeploymentWithState(t, store, workspace, "dep-old", -time.Minute)
+	require.NoError(t, os.WriteFile(filepath.Join(store.Root, "mystery.json"), []byte("{oops"), 0o644))
+
+	var out strings.Builder
+	err := runLiveReap(t, rt, &out, "--dry-run")
+
+	require.Error(t, err, "dry-run must not report success while a record is unaccounted for")
+	assert.Zero(t, destroy.calls, "and it still destroys nothing")
+}
+
+// Releasing after a destroy could fail (read-only disk, say). The retry
+// the message used to promise was impossible: destroy has emptied the
+// state, so the next pass read no project and reported the deployment as
+// a leak forever -- about a project that no longer existed.
+func TestTeardownOfAnAlreadyDestroyedDeploymentReleasesInsteadOfCryingLeak(t *testing.T) {
+	sandboxCredsForTest(t)
+	destroy, sweep := &fakeSandboxDestroyHarness{}, &fakeOrphanSweep{}
+	rt, store, workspace := liveTeardownRuntime(t, destroy, sweep)
+	d := liveDeploymentWithState(t, store, workspace, "dep-twice", -time.Minute)
+
+	// Destroy leaves an empty state behind; simulate that.
+	require.NoError(t, os.WriteFile(
+		filepath.Join(d.WorkDir, "terraform-live.tfstate"), []byte(`{"resources":[]}`), 0o600))
+
+	stages, failures := tearDownDeployment(context.Background(), rt, store, d)
+
+	assert.Empty(t, failures, "an empty state means destroy already ran, not that something leaked")
+	assert.Zero(t, destroy.calls, "and there is nothing left to destroy")
+	require.NotEmpty(t, stages)
+	assert.Contains(t, stages[len(stages)-1].Detail, "already destroyed")
+
+	got, err := store.Get(d.ID)
+	require.NoError(t, err)
+	assert.Equal(t, livestore.StateReleased, got.State, "so it stops being reaped every pass")
+}

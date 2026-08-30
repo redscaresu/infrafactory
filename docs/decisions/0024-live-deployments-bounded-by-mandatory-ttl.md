@@ -189,3 +189,63 @@ trusts that the store knows every live deployment. A wiped working directory
 loses records while the cloud keeps the resources, and nothing yet detects that.
 It is the largest remaining hole in this ADR and belongs in S157 with cost
 accounting.
+
+## Amendment, 2026-08-30 (S153a): what the audit found, and what rule 3 actually required
+
+PR #170 merged without a review pass. A post-merge audit returned 15 findings,
+several of them leaks in code whose job is to destroy real infrastructure. The
+corrections belong here because two of them were **this ADR's own rules, stated
+and not implemented**.
+
+**Rule 3 was prose, not behaviour.** "Unreadable is expired" promised that a
+record which will not decode is *reported as expired so the reaper takes it
+down*. `Reapable` filtered over decodable records only, so such a record never
+entered the set, and `MarkReleased` decoded before writing, so it could not be
+cleared either — it failed every pass forever with no way out. `List` now returns
+undecodable records as deployments marked `Undecodable`, and `MarkReleased`
+replaces one it cannot read with a minimal released record. The original
+regression test covered only decodable-but-invalid records, which is why the gap
+survived.
+
+**Fail-closed was not applied to `--dry-run`.** `live reap --dry-run` returned
+early, discarding failures already recorded for unreadable records: it exited 0
+while something that might be running was unaccounted for, and skipped the output
+contract entirely. It now finishes through the same path as a real run.
+
+**The blast-radius argument had a hole in the id.** Deployment ids were
+second-resolution, so two deploys of one scenario within a second shared a record
+path *and* a workdir — the second apply adopted the first's state and left a
+project running with nothing that knew how to destroy it. Ids now carry entropy,
+and `copyDeploySource` refuses a workdir that already holds live state. The
+per-deployment workdir was the right decision; the id defeated it.
+
+**Registration on the failure path did not cover signals.** The claim that a
+record is written "whether or not the apply succeeded" held for a returned error
+and not for SIGINT, which killed the process outright with the project already
+created. `deploy` now runs its apply under a signal guard — and, unlike
+`run`/`test`, it **records rather than destroys** on interrupt: deploy's purpose
+is that things stay up, so an interrupted deploy is left to its TTL rather than
+torn down under the operator.
+
+**Two further corrections of fact.** A relative store root made a scheduled
+reaper in another working directory report "nothing has expired" and exit 0;
+roots are now absolute. Writes were `os.WriteFile` (truncate-then-write), which
+manufactures exactly the truncated record rule 3 concerns itself with; they are
+now temp-file-plus-rename. Ids are validated against path traversal, because they
+are derived from scenario names the schema does not constrain and are also taken
+straight from the command line.
+
+**And the private-networking blocker was misdiagnosed.** This repo recorded it as
+`IPAMFullAccess`. A canary asked the real API, which wanted
+`write compute_private_networks` — `PrivateNetworksFullAccess`, granted
+2026-08-30. Private *networks* now create. Private *NICs* still cannot, and no
+permission grant will fix it: `scaleway_instance_private_nic` takes no
+`project_id`, so the provider creates it in the default project — which is
+`scaleway.fallback_project_id`, the ADR-0010 containment project — while the
+server lives in the run's own project, and the API refuses the mismatch.
+**Containment and private NICs are mutually exclusive as things stand.**
+`pitfalls/scaleway.yaml` now makes private networking opt-in, so generation stops
+requesting a resource no Layer 3 run can apply.
+
+The standing correction: the review loop runs on every PR **before** merge. Every
+one of these 15 findings coexisted with a fully green test suite.

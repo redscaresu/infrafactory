@@ -26,7 +26,11 @@ func newLiveCmd(cfg *rootConfig) *cobra.Command {
 	cmd.AddCommand(&cobra.Command{
 		Use:   "ls",
 		Short: "List live deployments, their remaining TTL, and anything unaccounted for",
-		RunE:  cfg.withRuntime("live ls", runLiveListCommand),
+		// NoArgs like its siblings: without it cobra silently swallows a
+		// mistyped `live ls <id>` and prints the whole listing, which a
+		// script filtering on that argument reads as a match.
+		Args: cobra.NoArgs,
+		RunE: cfg.withRuntime("live ls", runLiveListCommand),
 	})
 
 	cmd.AddCommand(&cobra.Command{
@@ -95,8 +99,12 @@ func renderLiveTable(out io.Writer, deployments []livestore.Deployment, unreadab
 		w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 		fmt.Fprintln(w, "ID\tSCENARIO\tIMAGE\tSTATE\tTTL\tPROJECT\tADDRESS")
 		for _, d := range deployments {
+			state := string(d.State)
+			if d.Undecodable {
+				state = "UNREADABLE"
+			}
 			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-				d.ID, d.Scenario, imageRef(d), d.State, ttlLabel(d, now), d.ProjectID, addressOrDash(d.Address))
+				d.ID, orDash(d.Scenario), imageRef(d), state, ttlLabel(d, now), orDash(d.ProjectID), orDash(d.Address))
 		}
 		if err := w.Flush(); err != nil {
 			return err
@@ -170,11 +178,11 @@ func imageRef(d livestore.Deployment) string {
 	return d.Image + ":" + d.Tag
 }
 
-func addressOrDash(address string) string {
-	if address == "" {
+func orDash(value string) string {
+	if value == "" {
 		return "-"
 	}
-	return address
+	return value
 }
 
 // ttlLabel renders remaining life. Expired is spelled out rather than

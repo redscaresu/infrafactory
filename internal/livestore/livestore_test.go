@@ -3,6 +3,7 @@ package livestore
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,10 +16,7 @@ func validDeployment() Deployment {
 	return Deployment{
 		ID:        "web-live-paris-001",
 		Scenario:  "web-live-paris",
-		RunID:     "run-123",
 		ProjectID: "11111111-2222-3333-4444-555555555555",
-		Region:    "fr-par",
-		Zone:      "fr-par-1",
 		Address:   "51.15.0.1",
 		Image:     "nginx",
 		Tag:       "1.27",
@@ -170,9 +168,72 @@ func TestListSurfacesUnreadableRecordsRatherThanDroppingThem(t *testing.T) {
 	got, unreadable, err := store.List()
 
 	require.NoError(t, err)
-	assert.Len(t, got, 1, "the readable record is still returned")
 	require.Len(t, unreadable, 1, "the corrupt one is reported, not silently skipped")
 	assert.Contains(t, unreadable[0].Error(), "corrupt")
+
+	// And it comes back AS a deployment, so the reaper sees it. ADR-0024
+	// rule 3 says unreadable means expired; a record that never entered
+	// the set was not honouring that.
+	require.Len(t, got, 2)
+	byID := map[string]Deployment{}
+	for _, d := range got {
+		byID[d.ID] = d
+	}
+	assert.False(t, byID["web-live-paris-001"].Undecodable)
+	corrupt := byID["corrupt"]
+	assert.True(t, corrupt.Undecodable, "the unparseable record is surfaced as a deployment")
+	assert.True(t, corrupt.Reapable(time.Now()), "and it is reapable, per ADR-0024 rule 3")
+}
+
+// The gap the previous test missed: an undecodable record could never be
+// reaped (it never reached the set) and never released (MarkReleased
+// decodes first), so it failed every pass forever with no way out.
+func TestUndecodableRecordsAreReapableAndReleasable(t *testing.T) {
+	store := NewFilesystemStore(t.TempDir())
+	require.NoError(t, os.WriteFile(filepath.Join(store.Root, "truncated.json"), []byte(`{"id":"trunc`), 0o644))
+
+	expired, unreadable, err := store.Reapable(time.Now())
+	require.NoError(t, err)
+	require.Len(t, unreadable, 1)
+	require.Len(t, expired, 1, "an unreadable record reaches the reaper")
+	assert.Equal(t, "truncated", expired[0].ID)
+
+	require.NoError(t, store.MarkReleased("truncated"), "and a human who cleaned up by hand can clear it")
+
+	after, _, err := store.Reapable(time.Now())
+	require.NoError(t, err)
+	assert.Empty(t, after, "released, so it stops failing every pass")
+}
+
+func TestNewFilesystemStoreResolvesRootToAbsolute(t *testing.T) {
+	store := NewFilesystemStore(".infrafactory/live")
+	assert.True(t, filepath.IsAbs(store.Root),
+		"a relative root makes a reaper in another directory see an empty store and report nothing expired")
+}
+
+// Ids reach the filesystem via filepath.Join, and `live teardown <id>`
+// takes one straight from the command line.
+func TestValidateRejectsIDsThatEscapeTheStore(t *testing.T) {
+	for _, id := range []string{"../evil", "a/b", "..", ".", "  padded", "x/../../y"} {
+		t.Run(id, func(t *testing.T) {
+			d := validDeployment()
+			d.ID = id
+			require.Error(t, d.Validate())
+		})
+	}
+}
+
+func TestPutWritesAtomically(t *testing.T) {
+	store := NewFilesystemStore(t.TempDir())
+	require.NoError(t, store.Put(validDeployment()))
+
+	entries, err := os.ReadDir(store.Root)
+	require.NoError(t, err)
+	for _, e := range entries {
+		assert.False(t, strings.HasSuffix(e.Name(), ".tmp"),
+			"the staging file is renamed or removed, never left behind: %s", e.Name())
+	}
+	assert.Len(t, entries, 1)
 }
 
 func TestReapableSelectsExpiredAndUnreleased(t *testing.T) {

@@ -63,6 +63,23 @@ func tearDownDeployment(
 			d.ID, harness.LiveStateFilename, d.WorkDir, d.ProjectID))
 	}
 
+	// An empty state is the signature of a destroy that already ran, not
+	// of a leak. Without this, a teardown whose release failed -- or a
+	// second teardown of the same id -- hits AssertProjectDeletable with
+	// an empty state project and is reported as "may still be running"
+	// on every pass, forever, about a project that no longer exists.
+	if !liveStateMayHoldResources(d.WorkDir) {
+		if err := store.MarkReleased(d.ID); err != nil {
+			return unreclaimable(fmt.Sprintf(
+				"%s was already destroyed (its state is empty) but the record could not be released: %v", d.ID, err))
+		}
+		stages = append(stages, StageSummary{
+			Layer: "live", Stage: "release", Status: StageStatusPass,
+			Detail: fmt.Sprintf("%s was already destroyed; record released without re-running destroy", d.ID),
+		})
+		return stages, failures
+	}
+
 	stateProjectID, err := harness.RunProjectIDFromState(d.WorkDir)
 	if err != nil {
 		return unreclaimable(fmt.Sprintf("read live state for %s: %v", d.ID, err))
@@ -108,7 +125,8 @@ func tearDownDeployment(
 			Command: "live teardown " + d.ID,
 			Detail: fmt.Sprintf(
 				"%s was destroyed and swept, but the record could not be marked released: %v. "+
-					"It will be attempted again on the next reap", d.ID, err),
+					"Its resources are GONE -- delete the record by hand; do not expect a later reap to "+
+					"re-verify it, because destroy has already emptied the state it would read", d.ID, err),
 		})
 	}
 
@@ -144,7 +162,10 @@ func runLiveTeardownCommand(cmd *cobra.Command, args []string, runtime *CommandR
 // indistinguishable from one that did nothing, which is the D6 lesson.
 func runLiveReapCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) error {
 	store := livestore.NewFilesystemStore(runtime.LiveStoreRoot())
-	out := cmd.OutOrStdout()
+	// Progress goes to stderr: stdout carries the output contract, and
+	// interleaving human lines there makes --output json unparseable
+	// from byte 0.
+	progress := cmd.ErrOrStderr()
 
 	dryRun, err := cmd.Flags().GetBool("dry-run")
 	if err != nil {
@@ -173,7 +194,7 @@ func runLiveReapCommand(cmd *cobra.Command, args []string, runtime *CommandRunti
 	}
 
 	if len(expired) == 0 {
-		_, _ = fmt.Fprintln(out, "Nothing has expired.")
+		_, _ = fmt.Fprintln(progress, "Nothing has expired.")
 		stages = append(stages, StageSummary{Layer: "live", Stage: "reap", Status: StageStatusPass, Detail: "no expired deployments"})
 		return finishLiveCommand(cmd, "live reap", "n/a", stages, failures,
 			errors.New("reap could not account for every live record"))
@@ -181,15 +202,25 @@ func runLiveReapCommand(cmd *cobra.Command, args []string, runtime *CommandRunti
 
 	if dryRun {
 		for _, d := range expired {
-			_, _ = fmt.Fprintf(out, "would tear down %s (scenario %s, project %s, expired %s)\n",
+			_, _ = fmt.Fprintf(progress, "would tear down %s (scenario %s, project %s, expired %s)\n",
 				d.ID, d.Scenario, d.ProjectID, d.ExpiresAt.Format(time.RFC3339))
 		}
-		_, _ = fmt.Fprintf(out, "\n--dry-run: nothing destroyed. %d deployment(s) would be torn down.\n", len(expired))
-		return nil
+		_, _ = fmt.Fprintf(progress, "\n--dry-run: nothing destroyed. %d deployment(s) would be torn down.\n", len(expired))
+		// Through finishLiveCommand, not `return nil`. Returning early
+		// discarded the failures already recorded for unreadable
+		// records, so a dry run exited 0 while something that may be
+		// running was unaccounted for -- and skipped the output
+		// contract entirely, so --output json emitted no JSON.
+		stages = append(stages, StageSummary{
+			Layer: "live", Stage: "reap", Status: StageStatusSkip,
+			Detail: fmt.Sprintf("--dry-run: %d deployment(s) would be torn down", len(expired)),
+		})
+		return finishLiveCommand(cmd, "live reap", "n/a", stages, failures,
+			errors.New("reap could not account for every live record"))
 	}
 
 	for _, d := range expired {
-		_, _ = fmt.Fprintf(out, "tearing down %s (scenario %s, project %s)\n", d.ID, d.Scenario, d.ProjectID)
+		_, _ = fmt.Fprintf(progress, "tearing down %s (scenario %s, project %s)\n", d.ID, d.Scenario, d.ProjectID)
 		deploymentStages, deploymentFailures := tearDownDeployment(cmd.Context(), runtime, store, d)
 		stages = append(stages, deploymentStages...)
 		failures = append(failures, deploymentFailures...)

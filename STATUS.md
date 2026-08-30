@@ -4,6 +4,45 @@ Last updated: 2026-08-24
 
 ## Current phase
 
+- 🔧 **S153a hardening (2026-08-30)** — a post-merge audit of #170 returned
+  **15 findings, several of them real leaks** in code that destroys real
+  infrastructure. #170 merged without a review pass; the loop now runs on every
+  PR before merge, not after.
+
+  Two were principles written into a doc and not implemented beside it.
+  **ADR-0024 rule 3 promises "unreadable means expired"** — but `Reapable`
+  filtered only decodable records, so an undecodable one never reached the reaper
+  and `MarkReleased` could not clear it either: it failed every pass, forever,
+  with no way out. And **`live reap --dry-run` returned `nil`**, discarding
+  failures already recorded for unreadable records, so a dry run exited 0 while
+  something that might be running was unaccounted for.
+
+  The leaks: **second-resolution deployment ids** meant two deploys of one
+  scenario in the same second shared a record path *and* a workdir, so the second
+  apply adopted the first's state and left a project running with nothing that
+  knew how to destroy it — the per-deployment workdir defeated by the id, and the
+  arc's own test slept 1100ms to dodge it. **No SIGINT guard on `deploy`**, so
+  Ctrl-C during a ~140s apply killed the process with the project already created
+  and the record not yet written — `live ls` showed nothing and it billed
+  indefinitely. **A relative store root** made a scheduled reaper in any other
+  directory report "nothing has expired" and exit 0. **Non-atomic writes**
+  manufactured exactly the truncated record that could not be recovered. And
+  **unsanitised ids** reached `filepath.Join`.
+
+  Also fixed: teardown of an already-destroyed deployment reported a permanent
+  false leak alarm (destroy empties the state the next pass reads); `--output
+  json` was unparseable for `deploy` and `live reap`; the deploy failure hint
+  pointed at teardown even when nothing was recorded; `live ls` swallowed stray
+  args; and `docs/layer3-coverage.md` contradicted itself on the training-set
+  denominator — the same unenforced-prose bug S152 took credit for catching.
+
+  **The IPAM diagnosis was wrong.** A canary asked the real API, which wanted
+  `write compute_private_networks` (`PrivateNetworksFullAccess`, granted). Private
+  *networks* now create; private *NICs* still cannot, and no permission fixes it:
+  the resource takes no `project_id`, so it lands in the ADR-0010 containment
+  project while the server is in the run's own. `pitfalls/scaleway.yaml` now makes
+  private networking opt-in rather than attaching a NIC to every instance.
+
 - ✅ **Live-services canary green (2026-08-30)** — `deploy` → `live ls` →
   `live teardown` proven against **real Scaleway**, first attempt. Deploy 35.8s,
   teardown 36.1s, **HTTP 200 through a real load balancer**, account back to its

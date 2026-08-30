@@ -48,7 +48,7 @@ by any generated HCL. It waits on `IPAMFullAccess`.
 | `block-paris` | **runnable** | instant | — (run 2026-08-22) |
 | `lb-paris` | **runnable** | hourly | — (run 2026-08-23) |
 | `lb-serving-paris` | **runnable** | hourly | — (added 2026-08-24; the first `http_probe` against real Scaleway) |
-| `web-live-paris` | key only | hourly | IPAM (generation emits `scaleway_instance_private_nic`; canary 2026-08-30) |
+| `web-live-paris` | key only | hourly | private networking (generation emits `scaleway_instance_private_nic`; canary 2026-08-30) |
 | `incremental-project-paris` | key only | hourly | IPAM (allowlist cleared 2026-08-24; it declares private networking) |
 | `registry-paris` | key only | instant | Registry |
 | `iam-policies-paris` | key only | instant | IAM |
@@ -195,7 +195,7 @@ Re-run it after any change to the allowlist, the IAM policy, or a scenario's
 
 `scaleway_instance_ip` and `scaleway_instance_server` are now allowlisted, and the policy already carried `InstancesFullAccess`, so both gates admit a small compute backend.
 
-**Runnable: 3 of 17** Scaleway training scenarios — 18 counting the holdout. `block-paris`, `lb-paris`, and the new `lb-serving-paris`, all three of which have actually run.
+**Runnable: 3 of 17** Scaleway training scenarios — 18 counting the holdout. `block-paris`, `lb-paris`, and the new `lb-serving-paris`, all three of which have actually run. *(Denominator as of 2026-08-24. `web-live-paris` made it 18 training scenarios on 2026-08-30 — see the update below, which supersedes this line's counts.)*
 
 **Update, 2026-08-30 (S152).** `web-live-paris` brings the Scaleway training set
 to 18 — 19 counting the holdout. It needs a status this table did not previously
@@ -210,8 +210,18 @@ claim a real-cloud run that never happened, so it is recorded as
 **Corrected same day, by running it.** `web-live-paris` is *not* ungated. Its
 first generation emitted `scaleway_instance_private_nic`, because
 `pitfalls/scaleway.yaml` instructs the generator to attach a private NIC to every
-`scaleway_instance_server` — so it needs `IPAMFullAccess` exactly as
-`incremental-project-paris` does, and it is recorded as **key only**. Ungated is
+`scaleway_instance_server`, and it is recorded as **key only**.
+
+**The blocker is not `IPAMFullAccess`.** That was this document's diagnosis and it
+was wrong; a canary on 2026-08-30 asked the real API, which wanted
+`write compute_private_networks` — `PrivateNetworksFullAccess`, granted the same
+day. Private *networks* now create. Private *NICs* still do not, and no permission
+can fix it: `scaleway_instance_private_nic` takes no `project_id`, so it is created
+in the provider default project — `scaleway.fallback_project_id`, the ADR-0010
+containment project — while the server lives in the run's own project, and the API
+refuses the mismatch. **Blast-radius containment and private NICs are mutually
+exclusive as things stand.** The narrowed pitfall (2026-08-30) stops generation
+requesting them unless a scenario asks. Ungated is
 3 of 18, not 4; have-run is 3 of 18. The `runnable, unrun` bucket now has no
 members and is kept because the state is real and will recur.
 

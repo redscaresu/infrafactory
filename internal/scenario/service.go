@@ -52,15 +52,6 @@ func (s ServiceSpec) Ref() string {
 	return s.Image + ":" + s.Tag
 }
 
-// HealthPathOrDefault resolves the configured probe path, falling back to
-// the schema default when omitted.
-func (s ServiceSpec) HealthPathOrDefault() string {
-	if strings.TrimSpace(s.HealthPath) == "" {
-		return DefaultHealthPath
-	}
-	return s.HealthPath
-}
-
 // TimeToLive parses the declared TTL.
 func (s ServiceSpec) TimeToLive() (time.Duration, error) {
 	ttl, err := time.ParseDuration(s.TTL)
