@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -287,4 +288,235 @@ func TestLiveReapSkipsAlreadyReleasedDeployments(t *testing.T) {
 
 	assert.Zero(t, destroy.calls)
 	assert.Contains(t, out.String(), "Nothing has expired.")
+}
+
+// A dry run that exits 0 with an unaccounted record is the failure the
+// fail-closed rule exists to prevent: a CI wrapper that dry-runs first
+// sees green while something that may be running is unaccounted for.
+func TestLiveReapDryRunStillFailsOnUnreadableRecords(t *testing.T) {
+	sandboxCredsForTest(t)
+	destroy, sweep := &fakeSandboxDestroyHarness{}, &fakeOrphanSweep{}
+	rt, store, workspace := liveTeardownRuntime(t, destroy, sweep)
+	liveDeploymentWithState(t, store, workspace, "dep-old", -time.Minute)
+	require.NoError(t, os.WriteFile(filepath.Join(store.Root, "mystery.json"), []byte("{oops"), 0o644))
+
+	var out strings.Builder
+	err := runLiveReap(t, rt, &out, "--dry-run")
+
+	require.Error(t, err, "dry-run must not report success while a record is unaccounted for")
+	assert.Zero(t, destroy.calls, "and it still destroys nothing")
+}
+
+// Releasing after a destroy could fail (read-only disk, say). The retry
+// the message used to promise was impossible: destroy has emptied the
+// state, so the next pass read no project and reported the deployment as
+// a leak forever -- about a project that no longer existed.
+func TestTeardownOfAnAlreadyDestroyedDeploymentReleasesInsteadOfCryingLeak(t *testing.T) {
+	sandboxCredsForTest(t)
+	destroy, sweep := &fakeSandboxDestroyHarness{}, &fakeOrphanSweep{}
+	rt, store, workspace := liveTeardownRuntime(t, destroy, sweep)
+	d := liveDeploymentWithState(t, store, workspace, "dep-twice", -time.Minute)
+
+	// Destroy leaves an empty state behind; simulate that.
+	require.NoError(t, os.WriteFile(
+		filepath.Join(d.WorkDir, "terraform-live.tfstate"), []byte(`{"resources":[]}`), 0o600))
+
+	stages, failures := tearDownDeployment(context.Background(), rt, store, d)
+
+	assert.Empty(t, failures, "an empty state means destroy already ran, not that something leaked")
+	assert.Zero(t, destroy.calls, "and there is nothing left to destroy")
+	require.NotEmpty(t, stages)
+	assert.Contains(t, stages[len(stages)-1].Detail, "already destroyed")
+
+	got, err := store.Get(d.ID)
+	require.NoError(t, err)
+	assert.Equal(t, livestore.StateReleased, got.State, "so it stops being reaped every pass")
+}
+
+// The regression this closes: the empty-state shortcut released the
+// record with a PASS without re-running the sweep, so a teardown whose
+// orphan sweep had FAILED was laundered green on the next pass and the
+// orphans became invisible.
+func TestTeardownOfAnAlreadyDestroyedDeploymentReVerifiesTheAccount(t *testing.T) {
+	sandboxCredsForTest(t)
+	destroy := &fakeSandboxDestroyHarness{}
+	sweep := &fakeOrphanSweep{err: harness.ErrOrphanSweepFailed}
+	rt, store, workspace := liveTeardownRuntime(t, destroy, sweep)
+	d := liveDeploymentWithState(t, store, workspace, "dep-laundered", -time.Minute)
+	require.NoError(t, os.WriteFile(
+		filepath.Join(d.WorkDir, "terraform-live.tfstate"), []byte(`{"resources":[]}`), 0o600))
+
+	_, failures := tearDownDeployment(context.Background(), rt, store, d)
+
+	assert.Equal(t, 1, sweep.calls, "the account is re-verified, not assumed clean")
+	require.NotEmpty(t, failures, "a failing sweep must not be laundered into a release")
+
+	got, err := store.Get(d.ID)
+	require.NoError(t, err)
+	assert.NotEqual(t, livestore.StateReleased, got.State, "the record stays, so the orphans stay visible")
+}
+
+// An undecodable record is reapable by design but not reclaimable, so
+// without an escape it fails every pass forever. `live forget` is that
+// escape: it releases without destroying and says what it gives up.
+func TestLiveForgetReleasesARecordTheToolingCannotAct(t *testing.T) {
+	sandboxCredsForTest(t)
+	rt, store, _ := liveTeardownRuntime(t, &fakeSandboxDestroyHarness{}, &fakeOrphanSweep{})
+	require.NoError(t, os.MkdirAll(store.Root, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(store.Root, "mystery.json"), []byte("{oops"), 0o644))
+
+	expired, _, err := store.Reapable(time.Now())
+	require.NoError(t, err)
+	require.Len(t, expired, 1, "precondition: it is reapable but unreclaimable")
+
+	var out bytes.Buffer
+	cmd := &cobra.Command{Use: "forget"}
+	cmd.Flags().String("output", string(OutputModeHuman), "")
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetContext(context.Background())
+	require.NoError(t, runLiveForgetCommand(cmd, []string{"mystery"}, rt))
+
+	assert.Contains(t, out.String(), "WITHOUT destroying anything")
+	after, _, err := store.Reapable(time.Now())
+	require.NoError(t, err)
+	assert.Empty(t, after, "and it stops failing every pass")
+	assert.FileExists(t, filepath.Join(store.Root, "mystery.json.unreadable"),
+		"the unparseable bytes are preserved, not overwritten")
+}
+
+// Both reviewers found this independently. A sweep that failed found
+// strays OUTSIDE the run project, computed from state that destroy has
+// since emptied — so a later pass cannot recompute them, and releasing on
+// an empty state would launder that failure into a clean result.
+func TestTeardownRefusesToReleaseWhenAnEarlierSweepFailed(t *testing.T) {
+	sandboxCredsForTest(t)
+	destroy, sweep := &fakeSandboxDestroyHarness{}, &fakeOrphanSweep{}
+	rt, store, workspace := liveTeardownRuntime(t, destroy, sweep)
+	d := liveDeploymentWithState(t, store, workspace, "dep-strays", -time.Minute)
+	d.SweepVerificationFailed = true
+	require.NoError(t, store.Put(d))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(d.WorkDir, "terraform-live.tfstate"), []byte(`{"resources":[]}`), 0o600))
+
+	_, failures := tearDownDeployment(context.Background(), rt, store, d)
+
+	require.NotEmpty(t, failures)
+	assert.Contains(t, failures[0].Detail, "orphan sweep FAIL")
+	assert.Zero(t, sweep.calls, "a sweep that cannot see the strays proves nothing")
+
+	got, err := store.Get(d.ID)
+	require.NoError(t, err)
+	assert.NotEqual(t, livestore.StateReleased, got.State, "the strays stay tracked")
+}
+
+// A failing sweep must set the sticky flag, or the next pass takes the
+// empty-state shortcut and releases.
+func TestTeardownRecordsThatASweepFailed(t *testing.T) {
+	sandboxCredsForTest(t)
+	destroy := &fakeSandboxDestroyHarness{}
+	sweep := &fakeOrphanSweep{err: harness.ErrOrphanSweepFailed}
+	rt, store, workspace := liveTeardownRuntime(t, destroy, sweep)
+	d := liveDeploymentWithState(t, store, workspace, "dep-sticky", -time.Minute)
+
+	_, failures := tearDownDeployment(context.Background(), rt, store, d)
+
+	require.NotEmpty(t, failures)
+	got, err := store.Get(d.ID)
+	require.NoError(t, err)
+	assert.True(t, got.SweepVerificationFailed, "sticky, so no later pass can release on an empty state")
+}
+
+// live forget abandons tracking. Pointed at a healthy deployment it would
+// be a one-command permanent leak, so it refuses what teardown can handle.
+func TestLiveForgetRefusesAReclaimableDeployment(t *testing.T) {
+	sandboxCredsForTest(t)
+	rt, store, workspace := liveTeardownRuntime(t, &fakeSandboxDestroyHarness{}, &fakeOrphanSweep{})
+	d := liveDeploymentWithState(t, store, workspace, "dep-healthy", time.Hour)
+
+	var out bytes.Buffer
+	cmd := &cobra.Command{Use: "forget"}
+	cmd.Flags().String("output", string(OutputModeHuman), "")
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetContext(context.Background())
+
+	err := runLiveForgetCommand(cmd, []string{d.ID}, rt)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "live teardown")
+
+	got, getErr := store.Get(d.ID)
+	require.NoError(t, getErr)
+	assert.Equal(t, livestore.StateLive, got.State, "still tracked, still reapable")
+	assert.True(t, got.Reapable(time.Now().Add(2*time.Hour)))
+}
+
+// The dead end pass 11 caught: teardown refuses a sticky empty-state
+// record and says "use live forget", so forget must accept it. Counting
+// it as reclaimable made the two commands point at each other.
+func TestLiveForgetAcceptsTheRecordTeardownRefuses(t *testing.T) {
+	sandboxCredsForTest(t)
+	rt, store, workspace := liveTeardownRuntime(t, &fakeSandboxDestroyHarness{}, &fakeOrphanSweep{})
+	d := liveDeploymentWithState(t, store, workspace, "dep-deadend", -time.Minute)
+	d.SweepVerificationFailed = true
+	require.NoError(t, store.Put(d))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(d.WorkDir, "terraform-live.tfstate"), []byte(`{"resources":[]}`), 0o600))
+
+	// teardown refuses and names forget...
+	_, failures := tearDownDeployment(context.Background(), rt, store, d)
+	require.NotEmpty(t, failures)
+	require.Contains(t, failures[0].Detail, "live forget")
+
+	// ...so forget must not bounce it back.
+	var out bytes.Buffer
+	cmd := &cobra.Command{Use: "forget"}
+	cmd.Flags().String("output", string(OutputModeHuman), "")
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetContext(context.Background())
+	require.NoError(t, runLiveForgetCommand(cmd, []string{d.ID}, rt))
+
+	got, err := store.Get(d.ID)
+	require.NoError(t, err)
+	assert.Equal(t, livestore.StateReleased, got.State)
+}
+
+// A dropped marker write leaves the flag false, so the next pass takes
+// the empty-state path and releases anyway.
+func TestTeardownFailsWhenTheSweepMarkerCannotBeWritten(t *testing.T) {
+	sandboxCredsForTest(t)
+	destroy := &fakeSandboxDestroyHarness{}
+	sweep := &fakeOrphanSweep{err: harness.ErrOrphanSweepFailed}
+	rt, store, workspace := liveTeardownRuntime(t, destroy, sweep)
+	d := liveDeploymentWithState(t, store, workspace, "dep-marker", -time.Minute)
+
+	// Make the store unwritable so store.Put fails.
+	require.NoError(t, os.Chmod(store.Root, 0o500))
+	t.Cleanup(func() { _ = os.Chmod(store.Root, 0o755) })
+
+	_, failures := tearDownDeployment(context.Background(), rt, store, d)
+
+	var details string
+	for _, f := range failures {
+		details += f.Detail
+	}
+	assert.Contains(t, details, "marker recording that could not be written",
+		"a dropped marker must surface, not be swallowed")
+}
+
+// Same dead end, one class along: a record that decodes but carries no
+// project id cannot be torn down (AssertProjectDeletable refuses) so it
+// must be forgettable.
+func TestLiveForgetAcceptsARecordWithNoProjectID(t *testing.T) {
+	sandboxCredsForTest(t)
+	_, store, workspace := liveTeardownRuntime(t, &fakeSandboxDestroyHarness{}, &fakeOrphanSweep{})
+	d := liveDeploymentWithState(t, store, workspace, "dep-noproject", -time.Minute)
+
+	assert.False(t, reclaimable(livestore.Deployment{
+		WorkDir: d.WorkDir, State: livestore.StateLive,
+	}), "no project id means teardown cannot act, so forget must")
+
+	assert.True(t, reclaimable(d), "a complete record is still teardown's business")
 }

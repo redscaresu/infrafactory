@@ -1,11 +1,16 @@
 package cli
 
 import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -44,7 +49,9 @@ func newDeployCmd(cfg *rootConfig) *cobra.Command {
 
 func runDeployCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) error {
 	ctx := cmd.Context()
-	out := cmd.OutOrStdout()
+	// Progress on stderr; stdout carries the output contract, and mixing
+	// them makes --output json unparseable from the first byte.
+	progress := cmd.ErrOrStderr()
 
 	sc, err := runtime.LoadScenario(args[0])
 	if err != nil {
@@ -93,17 +100,23 @@ func runDeployCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime
 	// terraform-live.tfstate, and the second apply would overwrite the
 	// first one's -- orphaning real resources with nothing left that
 	// knows how to destroy them.
+	// Store first: NewFilesystemStore resolves Root to an absolute path,
+	// and the workdir is derived from it so the recorded WorkDir is
+	// absolute too. A relative one would be unusable to a reaper running
+	// from any other directory.
+	store := livestore.NewFilesystemStore(runtime.LiveStoreRoot())
 	deploymentID := newDeploymentID(sc.Name, time.Now())
-	workDir := deploymentWorkDir(runtime.LiveStoreRoot(), deploymentID)
+	workDir := deploymentWorkDir(store.Root, deploymentID)
 	if err := copyDeploySource(source, workDir); err != nil {
 		return &CLIError{Op: "deploy", Code: errorCodeCommandFailed, Err: err}
 	}
 
-	_, _ = fmt.Fprintf(out, "Deploying %s (%s) for %s\n", sc.Name, sc.Service.Ref(), ttl)
-	_, _ = fmt.Fprintf(out, "  workdir: %s\n", workDir)
+	_, _ = fmt.Fprintf(progress, "Deploying %s (%s) for %s\n", sc.Name, sc.Service.Ref(), ttl)
+	_, _ = fmt.Fprintf(progress, "  workdir: %s\n", workDir)
 
-	store := livestore.NewFilesystemStore(runtime.LiveStoreRoot())
-	deployResult, deployErr := runtime.Deps.SandboxDeploy.Run(ctx, workDir, sandboxEnv)
+	deployResult, deployErr := runDeployApply(cmd, ctx, signal.NotifyContext, func(applyCtx context.Context) (*harness.SandboxDeployResult, error) {
+		return runtime.Deps.SandboxDeploy.Run(applyCtx, workDir, sandboxEnv)
+	})
 	stages, failures := appendSandboxDeployResult(nil, nil, deployResult, deployErr)
 
 	// Registered from whatever the state shows, whether or not the apply
@@ -114,6 +127,7 @@ func runDeployCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime
 	registerStages, registerFailures := registerDeployment(store, sc, deploymentID, workDir, ttl)
 	stages = append(stages, registerStages...)
 	failures = append(failures, registerFailures...)
+	recorded := len(registerFailures) == 0 && len(registerStages) > 0 && registerStages[0].Status == StageStatusPass
 
 	status := CommandStatusSuccess
 	if len(failures) > 0 {
@@ -131,14 +145,74 @@ func runDeployCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime
 	}
 
 	if status == CommandStatusFailed {
+		// Only point at teardown when a record actually exists. Telling
+		// an operator to reap something that was never recorded yields
+		// "no such file or directory" as a usage error, which reads like
+		// they mistyped rather than like nothing was created.
+		// Keyed off whether registration SUCCEEDED, not off whether a file
+		// happens to exist. registerDeployment fails precisely when a
+		// project is live and could not be recorded -- saying "nothing to
+		// tear down" there contradicts its own failure detail and
+		// reassures the operator that nothing leaked.
+		recovery := "resources may be live and could NOT be recorded — see the failure detail above and destroy by hand"
+		switch {
+		case recorded:
+			recovery = fmt.Sprintf("tear it down with `infrafactory live teardown %s`", deploymentID)
+		case len(registerFailures) == 0:
+			recovery = "no resources were recorded, so there is nothing to tear down"
+		}
 		return &CLIError{Op: "deploy", Code: errorCodeCommandFailed, Err: fmt.Errorf(
-			"deploy failed; if resources were created they are recorded as %s — tear it down with `infrafactory live teardown %s`",
-			deploymentID, deploymentID)}
+			"deploy failed; %s", recovery)}
 	}
 
-	_, _ = fmt.Fprintf(out, "\nDeployed as %s. It expires in %s; `infrafactory live reap` destroys it then.\n", deploymentID, ttl)
+	_, _ = fmt.Fprintf(progress, "\nDeployed as %s. It expires in %s; `infrafactory live reap` destroys it then.\n", deploymentID, ttl)
 
 	return nil
+}
+
+// runDeployApply runs the real apply under a SIGINT/SIGTERM handler.
+//
+// Without one, Ctrl-C during a ~140s apply kills the process outright:
+// scaleway_account_project and everything after it already exist, but
+// the record is written after the apply returns, so nothing is written
+// at all. `live ls` then says "No live deployments", `live reap` says
+// "Nothing has expired", and the project bills indefinitely.
+//
+// Catching the signal cancels the apply's context instead, the harness
+// unwinds, and the caller reaches registerDeployment -- which reads
+// whatever state exists and records it, so the reaper can find it. That
+// is deliberately different from run/test's guard, which DESTROYS on
+// interrupt: deploy's whole purpose is that things stay up, so an
+// interrupted deploy is recorded and left to its TTL rather than torn
+// down out from under the operator.
+//
+// stop() runs before returning, so a second Ctrl-C kills the process
+// outright rather than being swallowed.
+func runDeployApply(
+	cmd *cobra.Command,
+	ctx context.Context,
+	notify func(context.Context, ...os.Signal) (context.Context, context.CancelFunc),
+	apply func(context.Context) (*harness.SandboxDeployResult, error),
+) (*harness.SandboxDeployResult, error) {
+	sigCtx, stop := notify(ctx, os.Interrupt, syscall.SIGTERM)
+	result, err := apply(sigCtx)
+	// A signal, not merely a cancelled parent. sigCtx derives from ctx, so
+	// sigCtx.Err() is non-nil for a command timeout or an SDK cancel too --
+	// reporting those as "interrupted" names the wrong cause.
+	interrupted := ctx.Err() == nil && sigCtx.Err() != nil
+
+	// Restored before the message: from here on there is only the
+	// registration write, so a second signal should terminate normally
+	// rather than be swallowed. The message therefore does not invite one
+	// -- by the time it prints there is nothing left to abandon.
+	stop()
+
+	if interrupted {
+		_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
+			"\nInterrupted during apply. Recording whatever was created so `infrafactory live reap` can destroy it.\n")
+	}
+
+	return result, err
 }
 
 // registerDeployment records what the apply created. A deployment whose
@@ -252,6 +326,15 @@ func assertDeployableSource(dir string) error {
 }
 
 func copyDeploySource(source, workDir string) error {
+	// Refuse to reuse a workdir that already holds live state. Adopting
+	// another deployment's state is how a project ends up running with
+	// nothing tracking it, so this fails loudly rather than proceeding.
+	if _, err := os.Stat(filepath.Join(workDir, harness.LiveStateFilename)); err == nil {
+		return fmt.Errorf(
+			"deployment workdir %s already holds %s: refusing to reuse it, because the apply would adopt another deployment's state",
+			workDir, harness.LiveStateFilename)
+	}
+
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
 		return fmt.Errorf("create deployment workdir: %w", err)
 	}
@@ -293,9 +376,31 @@ func deploymentWorkDir(root, deploymentID string) string {
 	return filepath.Join(root, "workdirs", deploymentID)
 }
 
-// newDeploymentID is scenario-scoped and timestamped so two deployments
-// of the same scenario never collide -- which is the whole reason each
-// gets its own workdir.
+// newDeploymentID is scenario-scoped, timestamped, and carries random
+// entropy.
+//
+// The timestamp alone was second-resolution, so two deploys of one
+// scenario inside the same second produced the same id -- and therefore
+// the same record path AND the same workdir. The second apply then
+// adopted the first's terraform-live.tfstate and the second Put
+// overwrote the first's record, leaving a project running with nothing
+// that knew how to destroy it. That is the leak the per-deployment
+// workdir exists to prevent, reintroduced by the id.
+//
+// The suffix is defence in depth, not the only guard: copyDeploySource
+// also refuses a workdir that already holds state.
 func newDeploymentID(scenarioName string, now time.Time) string {
-	return fmt.Sprintf("%s-%s", scenarioName, now.UTC().Format("20060102T150405Z"))
+	return fmt.Sprintf("%s-%s-%s", scenarioName, now.UTC().Format("20060102T150405Z"), randomIDSuffix())
+}
+
+// randomIDSuffix returns six hex characters. crypto/rand cannot fail in
+// practice, but a fallback keeps a deploy from dying on entropy: the
+// timestamp still separates ids in every realistic case, and
+// copyDeploySource is the guard that actually prevents state adoption.
+func randomIDSuffix() string {
+	buf := make([]byte, 3)
+	if _, err := rand.Read(buf); err != nil {
+		return "000000"
+	}
+	return hex.EncodeToString(buf)
 }

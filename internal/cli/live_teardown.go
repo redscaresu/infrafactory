@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -49,10 +50,17 @@ func tearDownDeployment(
 	}
 
 	if d.WorkDir == "" {
-		return unreclaimable(fmt.Sprintf(
+		detail := fmt.Sprintf(
 			"deployment %s records no work_dir, so there is no state to destroy from. "+
-				"Its project %s may still be running: destroy it by hand and delete the record",
-			d.ID, d.ProjectID))
+				"Its project %s may still be running: destroy it by hand, then clear the record with "+
+				"`infrafactory live forget %s`", d.ID, d.ProjectID, d.ID)
+		if d.Undecodable {
+			detail = fmt.Sprintf(
+				"deployment %s could not be decoded, so nothing can be destroyed from it. Its resources may "+
+					"still be running -- inspect %s.json by hand, destroy what it names, then clear it with "+
+					"`infrafactory live forget %s`", d.ID, d.ID, d.ID)
+		}
+		return unreclaimable(detail)
 	}
 
 	statePath := filepath.Join(d.WorkDir, harness.LiveStateFilename)
@@ -61,6 +69,53 @@ func tearDownDeployment(
 			"deployment %s has no %s (looked in %s). Its project %s may still be running; "+
 				"the record is kept rather than released so the leak stays visible",
 			d.ID, harness.LiveStateFilename, d.WorkDir, d.ProjectID))
+	}
+
+	// An empty state is the signature of a destroy that already ran, so
+	// re-running destroy would do nothing. It is NOT evidence the account
+	// is clean, and releasing on it alone would launder a previously
+	// FAILED orphan sweep into a green result: destroy succeeds, the
+	// sweep finds orphans and fails before release, and the next pass
+	// sees an empty state and retires the record without ever re-running
+	// the sweep. So the sweep is re-run here, against the project id the
+	// record carries, and the record is released only if it passes.
+	if !liveStateMayHoldResources(d.WorkDir) {
+		// A sweep that previously failed cannot be re-run faithfully: it
+		// found strays OUTSIDE the run project, and CaptureSweepTarget
+		// computes those from the state that destroy has since emptied.
+		// Re-running against the project id alone would find the project
+		// gone, report clean, and release the record while the strays keep
+		// billing untracked -- laundering the failure this branch exists
+		// to prevent. Refuse, and point at the escape hatch.
+		if d.SweepVerificationFailed {
+			return unreclaimable(fmt.Sprintf(
+				"%s had an orphan sweep FAIL before its state was emptied, so strays outside project %s "+
+					"cannot be recomputed and this pass cannot prove the account is clean. Verify by hand, "+
+					"then clear the record with `infrafactory live forget %s`", d.ID, d.ProjectID, d.ID))
+		}
+
+		sandboxEnv, envErr := sandboxCommandEnv(runtime)
+		if envErr != nil {
+			return unreclaimable(fmt.Sprintf(
+				"%s appears already destroyed, but the account cannot be verified: %v", d.ID, envErr))
+		}
+
+		stages, failures = appendOrphanSweepResult(ctx, stages, failures, runtime,
+			&harness.SweepTarget{ProjectID: d.ProjectID}, nil, sandboxEnv)
+		if len(failures) > 0 {
+			return stages, failures
+		}
+
+		if err := store.MarkReleased(d.ID); err != nil {
+			return unreclaimable(fmt.Sprintf(
+				"%s was already destroyed and the account verified clean, but the record could not be released: %v",
+				d.ID, err))
+		}
+		stages = append(stages, StageSummary{
+			Layer: "live", Stage: "release", Status: StageStatusPass,
+			Detail: fmt.Sprintf("%s was already destroyed; account re-verified, record released", d.ID),
+		})
+		return stages, failures
 	}
 
 	stateProjectID, err := harness.RunProjectIDFromState(d.WorkDir)
@@ -90,7 +145,28 @@ func tearDownDeployment(
 		stages = append(stages, autoCreatedPurgeStage(purged))
 	}
 	if destroyErr == nil {
+		failuresBeforeSweep := len(failures)
 		stages, failures = appendOrphanSweepResult(ctx, stages, failures, runtime, sweepTarget, sweepTargetErr, sandboxEnv)
+		if len(failures) > failuresBeforeSweep {
+			// Sticky, and written before returning: the next pass sees an
+			// empty state and must not treat that as evidence of a clean
+			// account. A failed write is itself a failure -- dropping it
+			// leaves the flag false, so the next pass takes the
+			// empty-state path and releases while the strays it could not
+			// see keep billing.
+			d.SweepVerificationFailed = true
+			if err := store.Put(d); err != nil {
+				stages = append(stages, StageSummary{Layer: "live", Stage: "sweep_marker", Status: StageStatusFail})
+				failures = append(failures, FailureSummary{
+					Layer: "live", Stage: "sweep_marker", Check: "record",
+					Command: "live teardown " + d.ID,
+					Detail: fmt.Sprintf(
+						"%s had an orphan sweep fail AND the marker recording that could not be written: %v. "+
+							"Do not re-run teardown expecting it to refuse -- verify project %s by hand",
+						d.ID, err, d.ProjectID),
+				})
+			}
+		}
 	}
 
 	if len(failures) > 0 {
@@ -108,7 +184,8 @@ func tearDownDeployment(
 			Command: "live teardown " + d.ID,
 			Detail: fmt.Sprintf(
 				"%s was destroyed and swept, but the record could not be marked released: %v. "+
-					"It will be attempted again on the next reap", d.ID, err),
+					"Its resources are GONE -- delete the record by hand; do not expect a later reap to "+
+					"re-verify it, because destroy has already emptied the state it would read", d.ID, err),
 		})
 	}
 
@@ -122,12 +199,95 @@ func tearDownDeployment(
 	return stages, failures
 }
 
+// runLiveForgetCommand releases a record WITHOUT destroying anything.
+//
+// The escape hatch for a record the tooling cannot act on: one whose
+// bytes will not decode, or whose workdir is gone. Those are reapable by
+// design (ADR-0024 rule 3) but not reclaimable, so without this they
+// fail every pass forever and `live ls`/`live reap` stay red with no way
+// out -- while `live teardown` cannot even load them.
+//
+// It destroys nothing and verifies nothing. It is the operator asserting
+// they have dealt with the resources by hand, so it says plainly what it
+// is giving up, and the unparseable bytes are preserved beside the
+// released record rather than replaced.
+func runLiveForgetCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) error {
+	store := livestore.NewFilesystemStore(runtime.LiveStoreRoot())
+	id := args[0]
+	out := cmd.ErrOrStderr()
+
+	known := "unreadable"
+	if d, err := store.Get(id); err == nil {
+		known = fmt.Sprintf("scenario %s, project %s", d.Scenario, d.ProjectID)
+
+		// Refuse a deployment teardown could still handle. This command
+		// exists for records the tooling CANNOT act on; pointed at a
+		// healthy one it would mark it released, make Reapable() false
+		// forever, and leave the project billing with nothing that will
+		// ever destroy it -- a one-command permanent leak, which is the
+		// failure class this whole subsystem exists to prevent.
+		if reclaimable(d) {
+			return &CLIError{Op: "live forget", Code: errorCodeUsage, Err: fmt.Errorf(
+				"%s is reclaimable (%s): use `infrafactory live teardown %s`, which destroys and verifies. "+
+					"forget abandons tracking and is only for records teardown cannot act on", id, known, id)}
+		}
+	}
+
+	if err := store.MarkReleased(id); err != nil {
+		return &CLIError{Op: "live forget", Code: errorCodeCommandFailed, Err: err}
+	}
+
+	_, _ = fmt.Fprintf(out,
+		"Released %s (%s) WITHOUT destroying anything and WITHOUT verifying the account.\n"+
+			"If its resources still exist they are now untracked — nothing will reap them.\n", id, known)
+
+	return finishLiveCommand(cmd, "live forget", "n/a",
+		[]StageSummary{{
+			Layer: "live", Stage: "forget", Status: StageStatusPass,
+			Detail: fmt.Sprintf("%s released without destroy or verification (%s)", id, known),
+		}}, nil, nil)
+}
+
+// reclaimable reports whether teardown could still act on this record --
+// it decodes, it is not already released, and its state is on disk.
+func reclaimable(d livestore.Deployment) bool {
+	if d.Undecodable || d.State == livestore.StateReleased || d.WorkDir == "" {
+		return false
+	}
+	if _, err := os.Stat(filepath.Join(d.WorkDir, harness.LiveStateFilename)); err != nil {
+		return false
+	}
+	// Teardown needs a project id: without one AssertProjectDeletable
+	// refuses and nothing can be destroyed or released. Treating such a
+	// record as teardown's business left it rejected by both commands --
+	// the same dead end, one class along.
+	if strings.TrimSpace(d.ProjectID) == "" {
+		return false
+	}
+	// A record whose sweep failed before its state was emptied is exactly
+	// what teardown refuses and tells the operator to forget. Counting it
+	// as reclaimable made the two commands point at each other with no way
+	// out -- a dead end introduced while closing the previous one.
+	if d.SweepVerificationFailed && !liveStateMayHoldResources(d.WorkDir) {
+		return false
+	}
+	return true
+}
+
 func runLiveTeardownCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) error {
 	store := livestore.NewFilesystemStore(runtime.LiveStoreRoot())
 
 	d, err := store.Get(args[0])
 	if err != nil {
-		return &CLIError{Op: "live teardown", Code: errorCodeUsage, Err: err}
+		// An undecodable record still reaches teardown, which reports it
+		// as unreclaimable and names `live forget`. Failing at load
+		// returned a *usage* error, which reads like the operator
+		// mistyped the id rather than like the store cannot parse it.
+		if !errors.Is(err, os.ErrNotExist) {
+			d = livestore.Deployment{ID: args[0], Undecodable: true}
+		} else {
+			return &CLIError{Op: "live teardown", Code: errorCodeUsage, Err: err}
+		}
 	}
 
 	stages, failures := tearDownDeployment(cmd.Context(), runtime, store, d)
@@ -144,7 +304,10 @@ func runLiveTeardownCommand(cmd *cobra.Command, args []string, runtime *CommandR
 // indistinguishable from one that did nothing, which is the D6 lesson.
 func runLiveReapCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) error {
 	store := livestore.NewFilesystemStore(runtime.LiveStoreRoot())
-	out := cmd.OutOrStdout()
+	// Progress goes to stderr: stdout carries the output contract, and
+	// interleaving human lines there makes --output json unparseable
+	// from byte 0.
+	progress := cmd.ErrOrStderr()
 
 	dryRun, err := cmd.Flags().GetBool("dry-run")
 	if err != nil {
@@ -173,7 +336,7 @@ func runLiveReapCommand(cmd *cobra.Command, args []string, runtime *CommandRunti
 	}
 
 	if len(expired) == 0 {
-		_, _ = fmt.Fprintln(out, "Nothing has expired.")
+		_, _ = fmt.Fprintln(progress, "Nothing has expired.")
 		stages = append(stages, StageSummary{Layer: "live", Stage: "reap", Status: StageStatusPass, Detail: "no expired deployments"})
 		return finishLiveCommand(cmd, "live reap", "n/a", stages, failures,
 			errors.New("reap could not account for every live record"))
@@ -181,15 +344,25 @@ func runLiveReapCommand(cmd *cobra.Command, args []string, runtime *CommandRunti
 
 	if dryRun {
 		for _, d := range expired {
-			_, _ = fmt.Fprintf(out, "would tear down %s (scenario %s, project %s, expired %s)\n",
+			_, _ = fmt.Fprintf(progress, "would tear down %s (scenario %s, project %s, expired %s)\n",
 				d.ID, d.Scenario, d.ProjectID, d.ExpiresAt.Format(time.RFC3339))
 		}
-		_, _ = fmt.Fprintf(out, "\n--dry-run: nothing destroyed. %d deployment(s) would be torn down.\n", len(expired))
-		return nil
+		_, _ = fmt.Fprintf(progress, "\n--dry-run: nothing destroyed. %d deployment(s) would be torn down.\n", len(expired))
+		// Through finishLiveCommand, not `return nil`. Returning early
+		// discarded the failures already recorded for unreadable
+		// records, so a dry run exited 0 while something that may be
+		// running was unaccounted for -- and skipped the output
+		// contract entirely, so --output json emitted no JSON.
+		stages = append(stages, StageSummary{
+			Layer: "live", Stage: "reap", Status: StageStatusSkip,
+			Detail: fmt.Sprintf("--dry-run: %d deployment(s) would be torn down", len(expired)),
+		})
+		return finishLiveCommand(cmd, "live reap", "n/a", stages, failures,
+			errors.New("reap could not account for every live record"))
 	}
 
 	for _, d := range expired {
-		_, _ = fmt.Fprintf(out, "tearing down %s (scenario %s, project %s)\n", d.ID, d.Scenario, d.ProjectID)
+		_, _ = fmt.Fprintf(progress, "tearing down %s (scenario %s, project %s)\n", d.ID, d.Scenario, d.ProjectID)
 		deploymentStages, deploymentFailures := tearDownDeployment(cmd.Context(), runtime, store, d)
 		stages = append(stages, deploymentStages...)
 		failures = append(failures, deploymentFailures...)

@@ -17,6 +17,7 @@ var fileHeaderPattern = regexp.MustCompile(`^#\s*File:\s*(.+)\s*$`)
 func SelfReviewIndicatesNoChanges(text string) bool {
 	return strings.EqualFold(strings.TrimSpace(text), "NO ISSUES FOUND")
 }
+
 var heredocOpenPattern = regexp.MustCompile(`<<-?\s*(\w+)\s*$`)
 
 // updateHeredocState tracks whether the current line is inside an HCL

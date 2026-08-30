@@ -189,3 +189,181 @@ trusts that the store knows every live deployment. A wiped working directory
 loses records while the cloud keeps the resources, and nothing yet detects that.
 It is the largest remaining hole in this ADR and belongs in S157 with cost
 accounting.
+
+## Amendment, 2026-08-30 (S153a): what the audit found, and what rule 3 actually required
+
+PR #170 merged without a review pass. A post-merge audit returned 15 findings,
+several of them leaks in code whose job is to destroy real infrastructure. The
+corrections belong here because two of them were **this ADR's own rules, stated
+and not implemented**.
+
+**Rule 3 was prose, not behaviour.** "Unreadable is expired" promised that a
+record which will not decode is *reported as expired so the reaper takes it
+down*. `Reapable` filtered over decodable records only, so such a record never
+entered the set, and `MarkReleased` decoded before writing, so it could not be
+cleared either — it failed every pass forever with no way out. `List` now returns
+undecodable records as deployments marked `Undecodable`, and `MarkReleased`
+replaces one it cannot read with a minimal released record. The original
+regression test covered only decodable-but-invalid records, which is why the gap
+survived.
+
+**Fail-closed was not applied to `--dry-run`.** `live reap --dry-run` returned
+early, discarding failures already recorded for unreadable records: it exited 0
+while something that might be running was unaccounted for, and skipped the output
+contract entirely. It now finishes through the same path as a real run.
+
+**The blast-radius argument had a hole in the id.** Deployment ids were
+second-resolution, so two deploys of one scenario within a second shared a record
+path *and* a workdir — the second apply adopted the first's state and left a
+project running with nothing that knew how to destroy it. Ids now carry entropy,
+and `copyDeploySource` refuses a workdir that already holds live state. The
+per-deployment workdir was the right decision; the id defeated it.
+
+**Registration on the failure path did not cover signals.** The claim that a
+record is written "whether or not the apply succeeded" held for a returned error
+and not for SIGINT, which killed the process outright with the project already
+created. `deploy` now runs its apply under a signal guard — and, unlike
+`run`/`test`, it **records rather than destroys** on interrupt: deploy's purpose
+is that things stay up, so an interrupted deploy is left to its TTL rather than
+torn down under the operator.
+
+**Two further corrections of fact.** A relative store root made a scheduled
+reaper in another working directory report "nothing has expired" and exit 0;
+roots are now absolute. Writes were `os.WriteFile` (truncate-then-write), which
+manufactures exactly the truncated record rule 3 concerns itself with; they are
+now temp-file-plus-rename. Ids are validated against path traversal, because they
+are derived from scenario names the schema does not constrain and are also taken
+straight from the command line.
+
+**And the private-networking blocker was misdiagnosed — twice.**
+
+The repo recorded it as `IPAMFullAccess`. A canary asked the real API, which
+wanted `write compute_private_networks` — `PrivateNetworksFullAccess`, granted
+2026-08-30. Private *networks* now create. Private *NICs* still cannot, and no
+permission grant will fix it: `scaleway_instance_private_nic` takes no
+`project_id`, so the provider creates it in the default project — which is
+`scaleway.fallback_project_id`, the ADR-0010 containment project — while the
+server lives in the run's own project, and the API refuses the mismatch.
+
+The second misdiagnosis was mine, and it went the other way. I concluded
+`vpc_required.rego` was "wired for AWS only" because it is absent from
+`constraint_policies`, narrowed `pitfalls/scaleway.yaml` on that basis, and wrote
+the claim into four files. It is false: `constraint_policies` is a different
+mechanism, and `filterPolicyPathsByCloud` drops only *other* clouds, so every
+`policies/scaleway/*.rego` runs against a Scaleway plan. A generation run the same
+day failed on exactly that rule. All of it is retracted, and the pitfall is
+restored.
+
+**What is actually true is worse than either diagnosis: the two gates
+contradict each other.** Layer 1 requires a private NIC on every
+`scaleway_instance_server`; Layer 3 cannot apply one while the run creates its own
+project. **No Scaleway compute scenario satisfies both today** — not
+`web-live-paris`, not any other. This is a design question, not a permission or a
+pitfall, and it is the real blocker on the live-services arc reaching real
+infrastructure with generated HCL.
+
+Options, none yet taken: give the NIC an explicit `project_id` if a newer provider
+supports one; relax `vpc_required` for scenarios that declare no private
+networking; or accept that scenarios creating their own project cannot use private
+networking and say so in the policy. **The method lesson is the cheaper one: both
+misdiagnoses came from reading configuration and inferring, and both were settled
+in minutes by running the thing.**
+
+The standing correction: the review loop runs on every PR **before** merge. Every
+one of these 15 findings coexisted with a fully green test suite.
+
+## Amendment, 2026-08-30 (S153b): the fixes needed fixing
+
+The review of S153a found 15 further issues, several of them regressions S153a
+introduced. Three change what this ADR promises.
+
+**"Already destroyed" is not evidence the account is clean.** S153a added a
+shortcut: an empty state means destroy already ran, so release the record. That
+laundered a *failed orphan sweep* into a green result — destroy succeeds, the
+sweep finds orphans and fails before release, and the next pass sees an empty
+state and retires the record without ever re-running the sweep. The orphans then
+exist with nothing tracking them, which is the leak class this whole ADR exists to
+prevent. The sweep is now re-run against the project id the record carries, and
+the record is released only if it passes. **Rule: releasing requires positive
+verification, never the absence of contrary evidence.**
+
+**Rule 3 needs an escape hatch, not just detection.** Making undecodable records
+reapable (S153a) was half the fix: they are reapable *by design* and unreclaimable
+*by nature*, so they failed every pass forever while `live teardown` could not
+even load them. `live forget` releases a record without destroying or verifying
+anything — the operator asserting they have dealt with the resources by hand. It
+says exactly what it gives up, and preserves the unparseable bytes beside the
+released record rather than overwriting them, because a record truncated mid-write
+often still contains the project id someone would need to finish the job.
+
+**Interrupting an apply must not corrupt its state.** The guard added in S153a
+cancelled a context wired into `exec.CommandContext`, whose default cancel sends
+**SIGKILL** — stopping `tofu apply` between a resource being created and its state
+being flushed, which produces exactly the untracked resource the guard existed to
+prevent. It now sends SIGINT and bounds the wait, because tofu forks provider
+plugins that inherit the output pipes and would otherwise hang the parent
+indefinitely.
+
+The pattern across all three: **a safety mechanism added in haste reproduced the
+failure it was written to prevent.** Each was caught by review, not by tests — the
+suite was green for every one of them.
+
+## Amendment, 2026-08-30 (pass 10): releasing requires positive verification
+
+The empty-state release path added in S153b was still unsafe, and both an
+independent Codex review and a Claude review found it. It rebuilt the sweep
+target from the record's project id alone, with **no strays**. Strays are
+resources found *outside* the run project, computed by `CaptureSweepTarget` from
+state that destroy has since emptied — so where the first sweep failed on a
+stray, the re-verification found only that the project was gone, reported clean,
+and released the record while the stray kept billing untracked.
+
+`Deployment` now carries a sticky `SweepVerificationFailed`. It is set the moment
+a sweep fails and checked before the empty-state path, which refuses rather than
+re-verifying something it cannot see. **The rule this makes explicit: a record is
+released on positive verification, never on the absence of contrary evidence.**
+Where verification is impossible, the operator is pointed at `live forget`.
+
+`live forget` gained the guard it should have had on arrival. It took any id and
+released it with no state check, so pointing it at a healthy deployment — a
+mistyped but existing id — made `Reapable()` false forever and left a project
+billing with nothing that would ever destroy it. **An escape hatch for
+unreclaimable records became the sharpest way to create one.** It now refuses
+anything teardown can still handle.
+
+Method note, recorded because it changed the outcome: the three review passes
+before this one used Claude's `/code-review` skill, not the Codex loop AGENTS.md
+requires. A same-family reviewer shares the blind spots that produced the defect,
+which is the most plausible explanation for three consecutive rounds in which a
+safety fix reproduced the failure it targeted.
+
+## Amendment, 2026-08-30 (pass 11): an escape hatch must accept what the guard refuses
+
+Three further corrections, each closing a gap the previous fix opened.
+
+**A guard that cannot record itself is not a guard.** The sticky
+`SweepVerificationFailed` marker was written with `_ = store.Put(d)`. A failed
+write left the flag false, so the next pass would take the empty-state path and
+release anyway — silently undoing the protection. A failed marker write is now a
+teardown failure in its own right, and says not to expect a re-run to refuse.
+
+**`teardown` and `forget` must not point at each other.** Teardown refuses a
+sticky empty-state record and names `live forget` as the way out, but
+`reclaimable` counted any record with a state file as teardown's business — so
+`forget` bounced it straight back. The operator had no CLI escape at all. The
+rule this makes explicit: **whenever a guard refuses and names a remedy, the
+remedy must accept exactly that case**, and it is worth a test that walks the
+pair rather than each half alone.
+
+Pass 12 found the same loop one class along: a record that decodes but carries no
+`project_id` counted as reclaimable purely because a state file existed, so
+`forget` refused it while teardown failed at `AssertProjectDeletable`.
+`reclaimable` now asks what teardown actually requires rather than whether a file
+happens to be present — which is the general form of the rule above.
+
+**Removing a hazard must not remove the escape.** Dropping `WaitDelay` avoided
+turning successful applies into `ErrWaitDelay`, but it also removed any bound on
+a `tofu` that ignores SIGINT — which would hang `deploy` before registration,
+recreating the unrecorded-live-resource path the signal guard exists to close.
+The kill fallback is now armed inside `Cancel`, so it is scoped to cancellation
+and a normal exit cannot trip it.

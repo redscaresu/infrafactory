@@ -23,23 +23,10 @@ func TestServiceSpecAccessors(t *testing.T) {
 	s := validServiceSpec()
 
 	assert.Equal(t, "nginx:1.27", s.Ref())
-	assert.Equal(t, "/", s.HealthPathOrDefault())
 
 	ttl, err := s.TimeToLive()
 	require.NoError(t, err)
 	assert.Equal(t, 4*time.Hour, ttl)
-}
-
-func TestHealthPathFallsBackToTheSchemaDefault(t *testing.T) {
-	s := validServiceSpec()
-	s.HealthPath = ""
-	assert.Equal(t, DefaultHealthPath, s.HealthPathOrDefault())
-
-	s.HealthPath = "   "
-	assert.Equal(t, DefaultHealthPath, s.HealthPathOrDefault(), "whitespace is not a path")
-
-	s.HealthPath = "/healthz"
-	assert.Equal(t, "/healthz", s.HealthPathOrDefault())
 }
 
 func TestValidateAcceptsAPinnedVersion(t *testing.T) {

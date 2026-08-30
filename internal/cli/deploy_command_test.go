@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -152,10 +153,10 @@ func TestDeployGivesEachDeploymentItsOwnWorkdir(t *testing.T) {
 	writeDeployableHCL(t, rt.OutputDir())
 
 	var out strings.Builder
+	// Back to back, no sleep. The previous version slept 1100ms to get
+	// past second-resolution ids, which dodged the collision bug rather
+	// than testing that it is gone.
 	require.NoError(t, runDeploy(t, rt, scenarioPath, &out))
-	// Deployment ids are second-resolution, so a same-second second
-	// deploy would collide. Exercise the isolation, not the clock.
-	time.Sleep(1100 * time.Millisecond)
 	require.NoError(t, runDeploy(t, rt, scenarioPath, &out))
 
 	records, _, err := store.List()
@@ -287,7 +288,8 @@ func TestDeployRecordsNothingWhenTheApplyCreatedNothing(t *testing.T) {
 	err := runDeploy(t, rt, scenarioPath, &out)
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "live teardown", "the operator is told how to clean up")
+	assert.Contains(t, err.Error(), "nothing to tear down",
+		"pointing at teardown when no record exists reads like a typo, not like nothing was created")
 
 	records, _, listErr := store.List()
 	require.NoError(t, listErr)
@@ -378,5 +380,107 @@ func TestRegisterDeploymentSkipsWhenNothingWasCreated(t *testing.T) {
 
 func TestNewDeploymentIDIsScenarioScopedAndTimestamped(t *testing.T) {
 	at := time.Date(2026, 8, 30, 17, 4, 5, 0, time.UTC)
-	assert.Equal(t, "web-live-paris-20260830T170405Z", newDeploymentID("web-live-paris", at))
+	id := newDeploymentID("web-live-paris", at)
+	assert.True(t, strings.HasPrefix(id, "web-live-paris-20260830T170405Z-"), "got %q", id)
+}
+
+// The leak this closes: a second-resolution id made two deploys of one
+// scenario in the same second share a record path AND a workdir, so the
+// second apply adopted the first's state and left a project running with
+// nothing that knew how to destroy it.
+func TestDeploymentIDsAreUniqueWithinTheSameSecond(t *testing.T) {
+	at := time.Date(2026, 8, 30, 17, 4, 5, 0, time.UTC)
+	seen := map[string]bool{}
+	for i := 0; i < 200; i++ {
+		id := newDeploymentID("web-live-paris", at)
+		require.False(t, seen[id], "collision at iteration %d: %s", i, id)
+		seen[id] = true
+	}
+}
+
+// Defence in depth behind the id: even given a collision, an apply must
+// never adopt another deployment's state.
+func TestCopyDeploySourceRefusesAWorkdirHoldingLiveState(t *testing.T) {
+	source, workDir := t.TempDir(), t.TempDir()
+	writeDeployableHCL(t, source)
+	require.NoError(t, os.WriteFile(filepath.Join(workDir, harness.LiveStateFilename), []byte(`{}`), 0o600))
+
+	err := copyDeploySource(source, workDir)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "refusing to reuse it")
+}
+
+// stubNotify simulates a signal arriving during the apply: the returned
+// context is already cancelled, which is what signal.NotifyContext gives
+// the apply once SIGINT lands.
+func stubNotify(cancelled bool) func(context.Context, ...os.Signal) (context.Context, context.CancelFunc) {
+	return func(parent context.Context, _ ...os.Signal) (context.Context, context.CancelFunc) {
+		ctx, cancel := context.WithCancel(parent)
+		if cancelled {
+			cancel()
+		}
+		return ctx, cancel
+	}
+}
+
+// The leak this closes: without a signal handler, Ctrl-C during a ~140s
+// apply killed the process outright. The project already existed, the
+// record is written after the apply returns, so nothing was written at
+// all -- `live ls` showed nothing and the project billed indefinitely.
+func TestDeployApplyRunsUnderASignalGuardAndReportsInterruption(t *testing.T) {
+	var out bytes.Buffer
+	cmd := &cobra.Command{Use: "deploy"}
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+
+	var sawCtx context.Context
+	_, err := runDeployApply(cmd, context.Background(), stubNotify(true),
+		func(ctx context.Context) (*harness.SandboxDeployResult, error) {
+			sawCtx = ctx
+			return nil, ctx.Err()
+		})
+
+	require.Error(t, err, "the apply unwinds rather than the process dying")
+	require.NotNil(t, sawCtx)
+	assert.Error(t, sawCtx.Err(), "the apply is handed a cancelled context")
+	assert.Contains(t, out.String(), "Recording whatever was created so `infrafactory live reap` can destroy it")
+}
+
+// sigCtx derives from ctx, so sigCtx.Err() is also non-nil when the
+// PARENT is cancelled — a command timeout or an SDK cancel. Reporting
+// those as a user interrupt names the wrong cause.
+func TestDeployApplyDoesNotReportAParentCancellationAsAnInterrupt(t *testing.T) {
+	var out bytes.Buffer
+	cmd := &cobra.Command{Use: "deploy"}
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+
+	parent, cancelParent := context.WithCancel(context.Background())
+	cancelParent()
+
+	_, err := runDeployApply(cmd, parent, stubNotify(false),
+		func(ctx context.Context) (*harness.SandboxDeployResult, error) {
+			return nil, ctx.Err()
+		})
+
+	require.Error(t, err)
+	assert.NotContains(t, out.String(), "Interrupted during apply",
+		"a cancelled parent is not a Ctrl-C")
+}
+
+func TestDeployApplyIsTransparentWhenNotInterrupted(t *testing.T) {
+	var out bytes.Buffer
+	cmd := &cobra.Command{Use: "deploy"}
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+
+	result, err := runDeployApply(cmd, context.Background(), stubNotify(false),
+		func(context.Context) (*harness.SandboxDeployResult, error) {
+			return &harness.SandboxDeployResult{}, nil
+		})
+
+	require.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.NotContains(t, out.String(), "Interrupted")
 }

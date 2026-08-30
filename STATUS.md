@@ -4,6 +4,149 @@ Last updated: 2026-08-24
 
 ## Current phase
 
+- ✅ **Review CLEAN at pass 13 (2026-08-30)** — `codex exec review --base main`
+  found no correctness, safety or maintainability issues in the diff. S153a/S153b
+  converged after four Codex passes (10–13), archived in
+  `docs/review-passes/pass10.md`.
+
+  Worth recording: pass 10 returned **one** finding where a Claude
+  `/code-review` pass had returned fifteen — and that one was the most serious of
+  them. The three earlier Claude passes are not counted toward convergence.
+
+- 🔎 **Review pass 12 (2026-08-30)** — one finding: `live forget` still rejected
+  records teardown cannot reclaim, where the record decodes but carries no
+  `project_id`. Same no-escape loop as pass 11, one class along. `reclaimable`
+  now requires a project id.
+
+- 🔎 **Review pass 11 (2026-08-30)** — three findings, all real, all fixed. A
+  dropped `store.Put` error meant a failed sweep-marker write left the sticky flag
+  false, silently undoing pass 10's fix. `live forget` **rejected exactly the
+  record teardown refused** — a dead end created while closing the previous one,
+  leaving no CLI escape at all. And dropping `WaitDelay` removed the kill
+  fallback, so a `tofu` ignoring SIGINT would hang forever and stop `deploy` ever
+  reaching registration; `Cancel` now arms a SIGKILL fallback scoped to
+  cancellation, where a normal exit cannot trip it.
+
+- 🔎 **Review pass 10 (2026-08-30)** — `codex exec review --base main`, archived
+  in `docs/review-passes/pass10.md`. **Codex returned one finding**, and it was
+  the same one a Claude `/code-review` pass had rated worst: the empty-state
+  release path rebuilt the sweep target with **nil `Strays`**, so a sweep that had
+  failed on resources *outside* the run project would be re-run against a project
+  that no longer exists, report clean, and release the record — laundering the
+  failure the branch existed to prevent. Fixed with a sticky
+  `SweepVerificationFailed` flag: **positive verification, never the absence of
+  contrary evidence.**
+
+  Four Claude-only findings acted on anyway, each a real safety problem: `live
+  forget` would release a *healthy* deployment on one command (permanent
+  untracked leak); `MarkReleased` wrote outside the store before rejecting a
+  traversing id; the `CLAUDE_CODE_` prefix stripped `CLAUDE_CODE_OAUTH_TOKEN`,
+  which would have broken generation in CI — worse than the hang it fixed; and
+  `WaitDelay` applied to every command, where its timer also starts on a *normal*
+  exit, so a lingering provider plugin would turn a successful apply into
+  `ErrWaitDelay` with truncated output.
+
+  Five declined with reasons recorded, including one whose stated threat model is
+  false — `scenario.schema.json` does constrain scenario names, so a traversing id
+  cannot arrive by that route.
+
+  **Process correction**: the three earlier passes used Claude's `/code-review`
+  skill, not the Codex loop `AGENTS.md` requires. A same-family reviewer shares
+  the blind spots that produced the defect, which is plausibly why three rounds of
+  fixes each reproduced the failure they targeted.
+
+- 🔧 **S153b (2026-08-30)** — the review of S153a found 15 more findings, several
+  of them **regressions S153a itself introduced**. Worst: the empty-state shortcut
+  released a record with a PASS without re-running the orphan sweep, so a teardown
+  whose sweep had *failed* was laundered green on the next pass and the orphans
+  became invisible. The sweep is now re-run against the record's project id, and
+  the record is released only if it passes.
+
+  Also fixed: `exec.CommandContext` sent **SIGKILL** to `tofu`, so an interrupted
+  apply could leave a resource live and absent from state — now SIGINT plus a
+  bounded `WaitDelay`, because tofu forks provider plugins that hold the output
+  pipes. An undecodable record had **no CLI route out** (`live teardown` failed at
+  load, `live reap` failed forever) — new `live forget` releases without
+  destroying, says exactly what it gives up, and preserves the unparseable bytes
+  beside the record rather than overwriting the project id they may still contain.
+  `validateID` now guards **reads** as well as writes. Records written with a
+  relative `WorkDir` resolve deterministically. The deploy failure hint is keyed
+  off whether registration *succeeded*, so it no longer says "nothing to tear
+  down" in the one case where a project is live and unrecordable. A cancelled
+  parent is no longer reported as a Ctrl-C. `live ls --output json` marks
+  unreadable records instead of emitting phantom deployments.
+
+  **And generation is unblocked.** `claude_adapter.go` filtered only
+  `CLAUDECODE=`, while a parent Claude Code session exports nine more
+  (`CLAUDE_CODE_MESSAGING_SOCKET`, `CLAUDE_CODE_BRIDGE_SESSION_ID`, …). The nested
+  `claude` inherited them, behaved as part of the parent session, and hung on the
+  first phase that used a **tool** — `self_review`, the only one that writes files
+  — until the 300s timeout. Phases 1 and 2 are pure text and completed, which is
+  why it looked like a `self_review` bug rather than an environment one. Now
+  prefix-matched so a new variable is excluded by default.
+
+  **Verified, not inferred**: provider 2.81.0's `scaleway_instance_private_nic`
+  has no `project_id` attribute, so the containment conflict cannot be fixed in
+  HCL. And **#163 (TypeScript 5→7) does not install** — `@sveltejs/kit@2.70.3`
+  declares `peerOptional typescript@"^5.3.3 || ^6.0.0"`, so npm refuses without
+  `--force`. TypeScript 6 would satisfy that range.
+
+- 🔧 **S153a hardening (2026-08-30)** — a post-merge audit of #170 returned
+  **15 findings, several of them real leaks** in code that destroys real
+  infrastructure. #170 merged without a review pass; the loop now runs on every
+  PR before merge, not after.
+
+  Two were principles written into a doc and not implemented beside it.
+  **ADR-0024 rule 3 promises "unreadable means expired"** — but `Reapable`
+  filtered only decodable records, so an undecodable one never reached the reaper
+  and `MarkReleased` could not clear it either: it failed every pass, forever,
+  with no way out. And **`live reap --dry-run` returned `nil`**, discarding
+  failures already recorded for unreadable records, so a dry run exited 0 while
+  something that might be running was unaccounted for.
+
+  The leaks: **second-resolution deployment ids** meant two deploys of one
+  scenario in the same second shared a record path *and* a workdir, so the second
+  apply adopted the first's state and left a project running with nothing that
+  knew how to destroy it — the per-deployment workdir defeated by the id, and the
+  arc's own test slept 1100ms to dodge it. **No SIGINT guard on `deploy`**, so
+  Ctrl-C during a ~140s apply killed the process with the project already created
+  and the record not yet written — `live ls` showed nothing and it billed
+  indefinitely. **A relative store root** made a scheduled reaper in any other
+  directory report "nothing has expired" and exit 0. **Non-atomic writes**
+  manufactured exactly the truncated record that could not be recovered. And
+  **unsanitised ids** reached `filepath.Join`.
+
+  Also fixed: teardown of an already-destroyed deployment reported a permanent
+  false leak alarm (destroy empties the state the next pass reads); `--output
+  json` was unparseable for `deploy` and `live reap`; the deploy failure hint
+  pointed at teardown even when nothing was recorded; `live ls` swallowed stray
+  args; and `docs/layer3-coverage.md` contradicted itself on the training-set
+  denominator — the same unenforced-prose bug S152 took credit for catching.
+
+  **Two misdiagnoses of the private-networking blocker, both retracted.** The
+  repo said `IPAMFullAccess`; the real API wanted `write compute_private_networks`
+  (`PrivateNetworksFullAccess`, granted). Private *networks* now create; private
+  *NICs* still cannot, and no permission fixes it — the resource takes no
+  `project_id`, so it lands in the ADR-0010 containment project while the server
+  is in the run's own. Then I claimed `vpc_required.rego` was "wired for AWS only"
+  and narrowed the pitfall on that basis. Also false: `filterPolicyPathsByCloud`
+  drops only *other* clouds, so all five `policies/scaleway/*.rego` run. A
+  generation run failed on exactly that rule. Pitfall restored, claim retracted in
+  four files.
+
+  **What is actually true is worse: the two gates contradict each other.** Layer 1
+  requires a private NIC on every `scaleway_instance_server`; Layer 3 cannot apply
+  one while the run creates its own project. **No Scaleway compute scenario
+  satisfies both today.** That — not IPAM, not permissions, not the pitfall — is
+  what blocks generated HCL from reaching real infrastructure.
+
+  **Generation was also blocked on this machine, and is now fixed.**
+  `claude_adapter.go` filtered only `CLAUDECODE=`, while a parent Claude Code
+  session exports nine more `CLAUDE_CODE_*` variables. The nested `claude`
+  inherited them, behaved as a child session, and hung on the first phase that
+  used a **tool** — `self_review`, the only one that writes files — until the 300s
+  timeout. With the family unset, all three phases complete.
+
 - ✅ **Live-services canary green (2026-08-30)** — `deploy` → `live ls` →
   `live teardown` proven against **real Scaleway**, first attempt. Deploy 35.8s,
   teardown 36.1s, **HTTP 200 through a real load balancer**, account back to its

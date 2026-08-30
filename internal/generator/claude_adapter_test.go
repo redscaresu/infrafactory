@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
 )
 
 type fakeClaudeRunner struct {
@@ -522,4 +524,35 @@ func writeSchemaAwarePromptFixtures(t *testing.T) string {
 	mustWriteFile("phase2_generate_hcl.md", "S2\n{{.ArchitecturePlan}}\n{{.ScenarioYAML}}\n{{if .ProviderSchema}}SCHEMA:{{.ProviderSchema}}{{end}}\n")
 	mustWriteFile("phase3_self_review.md", "S3\n{{.GeneratedFiles}}\n{{.ScenarioYAML}}\n{{if .ProviderSchema}}SCHEMA:{{.ProviderSchema}}{{end}}\n")
 	return dir
+}
+
+// Filtering CLAUDECODE alone left nine other parent-session variables to
+// leak, which made the nested claude behave as part of the parent session
+// and hang on the first phase that used a tool.
+func TestIsParentSessionEnvStripsTheWholeFamily(t *testing.T) {
+	stripped := []string{
+		"CLAUDECODE=1",
+		"CLAUDE_CODE_ENTRYPOINT=cli",
+		"CLAUDE_CODE_MESSAGING_SOCKET=/tmp/sock",
+		"CLAUDE_CODE_MESSAGING_TOKEN=abc",
+		"CLAUDE_CODE_BRIDGE_SESSION_ID=xyz",
+		"CLAUDE_CODE_CHILD_SESSION=1",
+		"CLAUDE_CODE_SESSION_ID=sid",
+		"CLAUDE_CODE_EXECPATH=/usr/bin/claude",
+		"CLAUDE_PID=123",
+		"CLAUDE_EFFORT=high",
+	}
+	for _, e := range stripped {
+		assert.True(t, isParentSessionEnv(e), "expected %q to be stripped from the nested claude env", e)
+	}
+
+	// Credentials and provider routing share the prefix but must survive:
+	// stripping them does not prevent a hang, it stops the CLI working.
+	kept := []string{
+		"PATH=/usr/bin", "HOME=/home/x", "ANTHROPIC_API_KEY=sk-x", "SCW_ACCESS_KEY=k",
+		"CLAUDE_CODE_OAUTH_TOKEN=tok", "CLAUDE_CODE_USE_BEDROCK=1", "CLAUDE_CODE_USE_VERTEX=1",
+	}
+	for _, e := range kept {
+		assert.False(t, isParentSessionEnv(e), "expected %q to survive", e)
+	}
 }

@@ -26,7 +26,11 @@ func newLiveCmd(cfg *rootConfig) *cobra.Command {
 	cmd.AddCommand(&cobra.Command{
 		Use:   "ls",
 		Short: "List live deployments, their remaining TTL, and anything unaccounted for",
-		RunE:  cfg.withRuntime("live ls", runLiveListCommand),
+		// NoArgs like its siblings: without it cobra silently swallows a
+		// mistyped `live ls <id>` and prints the whole listing, which a
+		// script filtering on that argument reads as a match.
+		Args: cobra.NoArgs,
+		RunE: cfg.withRuntime("live ls", runLiveListCommand),
 	})
 
 	cmd.AddCommand(&cobra.Command{
@@ -34,6 +38,13 @@ func newLiveCmd(cfg *rootConfig) *cobra.Command {
 		Short: "Destroy one live deployment, sweep the account, and release the record",
 		Args:  cobra.ExactArgs(1),
 		RunE:  cfg.withRuntime("live teardown", runLiveTeardownCommand),
+	})
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "forget <deployment-id>",
+		Short: "Release a record without destroying anything — for records the tooling cannot act on",
+		Args:  cobra.ExactArgs(1),
+		RunE:  cfg.withRuntime("live forget", runLiveForgetCommand),
 	})
 
 	reap := &cobra.Command{
@@ -95,8 +106,12 @@ func renderLiveTable(out io.Writer, deployments []livestore.Deployment, unreadab
 		w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 		fmt.Fprintln(w, "ID\tSCENARIO\tIMAGE\tSTATE\tTTL\tPROJECT\tADDRESS")
 		for _, d := range deployments {
+			state := string(d.State)
+			if d.Undecodable {
+				state = "UNREADABLE"
+			}
 			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-				d.ID, d.Scenario, imageRef(d), d.State, ttlLabel(d, now), d.ProjectID, addressOrDash(d.Address))
+				d.ID, orDash(d.Scenario), imageRef(d), state, ttlLabel(d, now), orDash(d.ProjectID), orDash(d.Address))
 		}
 		if err := w.Flush(); err != nil {
 			return err
@@ -124,6 +139,11 @@ type liveListJSON struct {
 
 type liveDeploymentJSON struct {
 	livestore.Deployment
+	// Unreadable is exported because the embedded Deployment's flag is
+	// json:"-". Without it a JSON consumer sees a phantom deployment with
+	// an empty scenario, project and state and no way to tell it apart
+	// from a real record.
+	Unreadable   bool   `json:"unreadable"`
 	Expired      bool   `json:"expired"`
 	TimeToLive   string `json:"time_to_live"`
 	TTLSeconds   int64  `json:"time_to_live_seconds"`
@@ -141,6 +161,7 @@ func renderLiveJSON(out io.Writer, deployments []livestore.Deployment, unreadabl
 		ttl := d.TimeToLive(now)
 		payload.Deployments = append(payload.Deployments, liveDeploymentJSON{
 			Deployment:   d,
+			Unreadable:   d.Undecodable,
 			Expired:      d.Expired(now),
 			TimeToLive:   ttl.Round(time.Second).String(),
 			TTLSeconds:   int64(ttl.Seconds()),
@@ -170,11 +191,11 @@ func imageRef(d livestore.Deployment) string {
 	return d.Image + ":" + d.Tag
 }
 
-func addressOrDash(address string) string {
-	if address == "" {
+func orDash(value string) string {
+	if value == "" {
 		return "-"
 	}
-	return address
+	return value
 }
 
 // ttlLabel renders remaining life. Expired is spelled out rather than

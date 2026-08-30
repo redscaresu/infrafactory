@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/redscaresu/infrafactory/internal/harness"
 )
@@ -100,8 +101,44 @@ func envKeyMatches(key string, patterns []string) bool {
 	return false
 }
 
+// cancelKillFallback is how long a cancelled command may ignore SIGINT
+// before it is killed. Long enough for tofu to flush state, short enough
+// that a hung provider cannot stall a teardown indefinitely.
+const cancelKillFallback = 20 * time.Second
+
 func (execCommandRunner) Run(ctx context.Context, cmd harness.Command) (harness.CommandResult, error) {
 	execCmd := exec.CommandContext(ctx, cmd.Name, cmd.Args...)
+	// Interrupt, not kill. The default CommandContext cancel sends
+	// SIGKILL, which stops `tofu apply` mid-flight: a resource whose
+	// create call has returned but whose state has not been flushed is
+	// then live in the account and absent from terraform-live.tfstate --
+	// so teardown destroys from an incomplete state and the project
+	// delete fails on the resource nothing recorded. SIGINT lets tofu
+	// finish writing state before exiting.
+	//
+	// Imperfect in one case, and knowingly so: on an interactive Ctrl-C
+	// the terminal already signalled the whole foreground process group,
+	// so this delivers tofu's SECOND interrupt and it exits immediately.
+	// That is no worse than the SIGKILL it replaces, and strictly better
+	// for the non-interactive paths (deploy in CI, a cancelled context, a
+	// timeout) where this is the only signal tofu receives. Fixing the
+	// interactive case properly needs Setpgid so the child is not in the
+	// terminal's group, which is a larger change than this slice.
+	//
+	// SIGINT first, SIGKILL if it is ignored. WaitDelay would be the
+	// obvious way to bound this, but its timer also starts when the child
+	// exits NORMALLY -- so a provider plugin still holding the output pipe
+	// would turn a successful apply into exec.ErrWaitDelay with truncated
+	// output. Arming the fallback inside Cancel scopes it to cancellation
+	// only, where a tofu that ignores SIGINT would otherwise hang forever
+	// and stop deploy ever reaching registration.
+	execCmd.Cancel = func() error {
+		if err := execCmd.Process.Signal(os.Interrupt); err != nil {
+			return err
+		}
+		time.AfterFunc(cancelKillFallback, func() { _ = execCmd.Process.Kill() })
+		return nil
+	}
 	execCmd.Dir = cmd.Dir
 	execCmd.Env = withEnvOverrides(stripEnvKeys(stripGCPAuthEnv(os.Environ()), cmd.StripEnv), cmd.Env)
 
