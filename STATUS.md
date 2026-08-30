@@ -35,8 +35,8 @@ Last updated: 2026-08-24
   that never touched infrafactory's code.
 - ✅ **Review CLEAN at pass 13 (2026-08-30)** — `codex exec review --base main`
   found no correctness, safety or maintainability issues in the diff. S153a/S153b
-  converged after four Codex passes (10–13), archived in
-  `docs/review-passes/pass10.md`.
+  converged after four Codex passes (10–13), archived as
+  `docs/review-passes/pass10.md` … `pass13.md`.
 
   Worth recording: pass 10 returned **one** finding where a Claude
   `/code-review` pass had returned fifteen — and that one was the most serious of
@@ -57,7 +57,7 @@ Last updated: 2026-08-24
   cancellation, where a normal exit cannot trip it.
 
 - 🔎 **Review pass 10 (2026-08-30)** — `codex exec review --base main`, archived
-  in `docs/review-passes/pass10.md`. **Codex returned one finding**, and it was
+  in `docs/review-passes/` — one file per pass, `pass10.md` … `pass13.md`. **Codex returned one finding**, and it was
   the same one a Claude `/code-review` pass had rated worst: the empty-state
   release path rebuilt the sweep target with **nil `Strays`**, so a sweep that had
   failed on resources *outside* the run project would be re-run against a project
