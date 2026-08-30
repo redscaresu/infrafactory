@@ -87,6 +87,26 @@ deliberately so.
 accounting per live deployment and exposure hardening for a 24/7 public instance
 are S157 — until then a live service is reachable on `:80` through the load
 balancer, which is a different security proposition from a 144-second one and is
-not treated as free. The 4h default TTL is provisional: revising it requires
-reading real Scaleway pricing, and per S147 no euro figure enters this repo
-until someone has.
+not treated as free.
+
+The default TTL is 4h. That number is now backed by Scaleway's published list
+prices rather than by intuition (read 2026-08-30, before tax, PAR-1):
+
+| component | €/hour | source |
+|---|---|---|
+| `DEV1-S` instance | 0.00898 | [virtual-instances](https://www.scaleway.com/en/pricing/virtual-instances/) |
+| `LB-S` load balancer | 0.023 | [network](https://www.scaleway.com/en/pricing/network/) |
+| IPv4, instance | 0.005 | [network](https://www.scaleway.com/en/pricing/network/) |
+| IPv4, load balancer | 0.005 | [network](https://www.scaleway.com/en/pricing/network/) |
+
+So the `lb-serving-paris` shape costs **€0.042/hour**: about **€0.17 per 4h TTL**,
+**€1.01 per day**, **€30 per 30 days**. If Scaleway bundles the first IPv4 per
+asset rather than charging for it — the price list says "Additional IP address",
+which is ambiguous on this point and has not been confirmed against an invoice —
+the figures fall to €0.032/hour, €0.13 per TTL and €23 per 30 days.
+
+The consequence is that 4h is conservative to the point of being cheap, and the
+binding constraint on TTL is exposure and forgetting, not money. A deployment
+left running for a month costs roughly what one takeaway does; a deployment
+left running and *forgotten* is the actual risk, which is what the reaper is
+for. S157 replaces this table with measured spend rather than list price.

@@ -83,10 +83,17 @@ There is no default that means "forever". The reaper ships in the same slice as
 persistence itself (S153) — shipping the ability to leave things running without
 the thing that stops them is how this project has historically leaked money.
 
-Initial default 4h, deliberately short. Revising it requires reading real
-Scaleway pricing for DEV1-S + LB-S + two public IPs; per S147 no euro figure
-appears in this repo until someone has read the price list, because an invented
-number is worse than none.
+Default 4h. Scaleway's list prices (read 2026-08-30, before tax, PAR-1) put the
+`lb-serving-paris` shape at **€0.042/hour** — DEV1-S 0.00898, LB-S 0.023, two
+IPv4 at 0.005 each — so **€0.17 per 4h TTL, €1.01 per day, €30 per 30 days**.
+Sources: [virtual-instances](https://www.scaleway.com/en/pricing/virtual-instances/),
+[network](https://www.scaleway.com/en/pricing/network/). Recorded in ADR-0024
+with the one ambiguity that remains (whether the first IPv4 per asset is
+bundled) called out rather than smoothed over.
+
+That changes the design's centre of gravity: the binding constraint on TTL is
+**exposure and forgetting, not money**. A month of uptime costs about €30. A
+deployment nobody remembers is the real risk, which is what the reaper is for.
 
 ### 4. Live failures enter the learning loop through the existing extractors
 
@@ -133,7 +140,7 @@ in 144-second bursts.
 
 | risk | mitigation |
 |---|---|
-| **Continuous billing.** Ephemeral runs cost ~2 min of resources; a live service costs 24/7. | mandatory TTL, reaper in the same slice, cost accounting in S157 |
+| **Continuous billing.** Ephemeral runs cost ~2 min of resources; a live service costs 24/7 — €0.042/hour for this shape. | mandatory TTL, reaper in the same slice, measured cost accounting in S157 |
 | **A leak now looks like a feature.** "Still running" is the intended state, so the signal that used to mean *bug* now means *normal*. | the registry is the only source of truth for what may persist; anything live and unregistered is a leak and fails |
 | **24/7 public attack surface.** | S157; :80 on the LB only until then |
 | **Reaper fails silently** and things run forever. | reaper reports what it removed — the D6 lesson: a fix that fires invisibly is indistinguishable from a coincidence |
