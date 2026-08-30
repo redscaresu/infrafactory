@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -254,6 +255,13 @@ func reclaimable(d livestore.Deployment) bool {
 		return false
 	}
 	if _, err := os.Stat(filepath.Join(d.WorkDir, harness.LiveStateFilename)); err != nil {
+		return false
+	}
+	// Teardown needs a project id: without one AssertProjectDeletable
+	// refuses and nothing can be destroyed or released. Treating such a
+	// record as teardown's business left it rejected by both commands --
+	// the same dead end, one class along.
+	if strings.TrimSpace(d.ProjectID) == "" {
 		return false
 	}
 	// A record whose sweep failed before its state was emptied is exactly

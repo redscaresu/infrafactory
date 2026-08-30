@@ -355,6 +355,12 @@ rule this makes explicit: **whenever a guard refuses and names a remedy, the
 remedy must accept exactly that case**, and it is worth a test that walks the
 pair rather than each half alone.
 
+Pass 12 found the same loop one class along: a record that decodes but carries no
+`project_id` counted as reclaimable purely because a state file existed, so
+`forget` refused it while teardown failed at `AssertProjectDeletable`.
+`reclaimable` now asks what teardown actually requires rather than whether a file
+happens to be present — which is the general form of the rule above.
+
 **Removing a hazard must not remove the escape.** Dropping `WaitDelay` avoided
 turning successful applies into `ErrWaitDelay`, but it also removed any bound on
 a `tofu` that ignores SIGINT — which would hang `deploy` before registration,

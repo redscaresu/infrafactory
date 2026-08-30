@@ -505,3 +505,18 @@ func TestTeardownFailsWhenTheSweepMarkerCannotBeWritten(t *testing.T) {
 	assert.Contains(t, details, "marker recording that could not be written",
 		"a dropped marker must surface, not be swallowed")
 }
+
+// Same dead end, one class along: a record that decodes but carries no
+// project id cannot be torn down (AssertProjectDeletable refuses) so it
+// must be forgettable.
+func TestLiveForgetAcceptsARecordWithNoProjectID(t *testing.T) {
+	sandboxCredsForTest(t)
+	_, store, workspace := liveTeardownRuntime(t, &fakeSandboxDestroyHarness{}, &fakeOrphanSweep{})
+	d := liveDeploymentWithState(t, store, workspace, "dep-noproject", -time.Minute)
+
+	assert.False(t, reclaimable(livestore.Deployment{
+		WorkDir: d.WorkDir, State: livestore.StateLive,
+	}), "no project id means teardown cannot act, so forget must")
+
+	assert.True(t, reclaimable(d), "a complete record is still teardown's business")
+}

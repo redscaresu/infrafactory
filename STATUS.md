@@ -4,6 +4,11 @@ Last updated: 2026-08-24
 
 ## Current phase
 
+- 🔎 **Review pass 12 (2026-08-30)** — one finding: `live forget` still rejected
+  records teardown cannot reclaim, where the record decodes but carries no
+  `project_id`. Same no-escape loop as pass 11, one class along. `reclaimable`
+  now requires a project id.
+
 - 🔎 **Review pass 11 (2026-08-30)** — three findings, all real, all fixed. A
   dropped `store.Put` error meant a failed sweep-marker write left the sticky flag
   false, silently undoing pass 10's fix. `live forget` **rejected exactly the
