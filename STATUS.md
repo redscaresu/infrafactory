@@ -4,6 +4,15 @@ Last updated: 2026-08-24
 
 ## Current phase
 
+- ✅ **Review CLEAN at pass 13 (2026-08-30)** — `codex exec review --base main`
+  found no correctness, safety or maintainability issues in the diff. S153a/S153b
+  converged after four Codex passes (10–13), archived in
+  `docs/review-passes/pass10.md`.
+
+  Worth recording: pass 10 returned **one** finding where a Claude
+  `/code-review` pass had returned fifteen — and that one was the most serious of
+  them. The three earlier Claude passes are not counted toward convergence.
+
 - 🔎 **Review pass 12 (2026-08-30)** — one finding: `live forget` still rejected
   records teardown cannot reclaim, where the record decodes but carries no
   `project_id`. Same no-escape loop as pass 11, one class along. `reclaimable`
