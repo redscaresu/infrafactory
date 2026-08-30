@@ -235,17 +235,39 @@ now temp-file-plus-rename. Ids are validated against path traversal, because the
 are derived from scenario names the schema does not constrain and are also taken
 straight from the command line.
 
-**And the private-networking blocker was misdiagnosed.** This repo recorded it as
-`IPAMFullAccess`. A canary asked the real API, which wanted
-`write compute_private_networks` — `PrivateNetworksFullAccess`, granted
+**And the private-networking blocker was misdiagnosed — twice.**
+
+The repo recorded it as `IPAMFullAccess`. A canary asked the real API, which
+wanted `write compute_private_networks` — `PrivateNetworksFullAccess`, granted
 2026-08-30. Private *networks* now create. Private *NICs* still cannot, and no
 permission grant will fix it: `scaleway_instance_private_nic` takes no
 `project_id`, so the provider creates it in the default project — which is
 `scaleway.fallback_project_id`, the ADR-0010 containment project — while the
 server lives in the run's own project, and the API refuses the mismatch.
-**Containment and private NICs are mutually exclusive as things stand.**
-`pitfalls/scaleway.yaml` now makes private networking opt-in, so generation stops
-requesting a resource no Layer 3 run can apply.
+
+The second misdiagnosis was mine, and it went the other way. I concluded
+`vpc_required.rego` was "wired for AWS only" because it is absent from
+`constraint_policies`, narrowed `pitfalls/scaleway.yaml` on that basis, and wrote
+the claim into four files. It is false: `constraint_policies` is a different
+mechanism, and `filterPolicyPathsByCloud` drops only *other* clouds, so every
+`policies/scaleway/*.rego` runs against a Scaleway plan. A generation run the same
+day failed on exactly that rule. All of it is retracted, and the pitfall is
+restored.
+
+**What is actually true is worse than either diagnosis: the two gates
+contradict each other.** Layer 1 requires a private NIC on every
+`scaleway_instance_server`; Layer 3 cannot apply one while the run creates its own
+project. **No Scaleway compute scenario satisfies both today** — not
+`web-live-paris`, not any other. This is a design question, not a permission or a
+pitfall, and it is the real blocker on the live-services arc reaching real
+infrastructure with generated HCL.
+
+Options, none yet taken: give the NIC an explicit `project_id` if a newer provider
+supports one; relax `vpc_required` for scenarios that declare no private
+networking; or accept that scenarios creating their own project cannot use private
+networking and say so in the policy. **The method lesson is the cheaper one: both
+misdiagnoses came from reading configuration and inferring, and both were settled
+in minutes by running the thing.**
 
 The standing correction: the review loop runs on every PR **before** merge. Every
 one of these 15 findings coexisted with a fully green test suite.

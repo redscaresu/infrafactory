@@ -220,8 +220,21 @@ can fix it: `scaleway_instance_private_nic` takes no `project_id`, so it is crea
 in the provider default project — `scaleway.fallback_project_id`, the ADR-0010
 containment project — while the server lives in the run's own project, and the API
 refuses the mismatch. **Blast-radius containment and private NICs are mutually
-exclusive as things stand.** The narrowed pitfall (2026-08-30) stops generation
-requesting them unless a scenario asks. Ungated is
+exclusive as things stand.**
+
+**A second claim made the same day, that `vpc_required.rego` is "wired for AWS
+only", was also wrong and is retracted.** It is absent from
+`constraint_policies`, but that is a different mechanism:
+`filterPolicyPathsByCloud` drops only *other* clouds, so every
+`policies/scaleway/*.rego` — all five, `vpc_required` included — is evaluated
+against a Scaleway plan. A generation run the same day failed on exactly that
+rule (`scaleway_instance_server.web is not attached to a private network`).
+
+So the real position is a **contradiction between the two gates**, not a missing
+permission: **Layer 1 requires a private NIC on every instance server, and Layer 3
+cannot apply one.** No Scaleway compute scenario satisfies both today. That is
+what actually blocks `web-live-paris`, and it blocks every other compute scenario
+equally. Ungated is
 3 of 18, not 4; have-run is 3 of 18. The `runnable, unrun` bucket now has no
 members and is kept because the state is real and will recur.
 

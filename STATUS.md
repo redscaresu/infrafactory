@@ -36,12 +36,29 @@ Last updated: 2026-08-24
   args; and `docs/layer3-coverage.md` contradicted itself on the training-set
   denominator — the same unenforced-prose bug S152 took credit for catching.
 
-  **The IPAM diagnosis was wrong.** A canary asked the real API, which wanted
-  `write compute_private_networks` (`PrivateNetworksFullAccess`, granted). Private
-  *networks* now create; private *NICs* still cannot, and no permission fixes it:
-  the resource takes no `project_id`, so it lands in the ADR-0010 containment
-  project while the server is in the run's own. `pitfalls/scaleway.yaml` now makes
-  private networking opt-in rather than attaching a NIC to every instance.
+  **Two misdiagnoses of the private-networking blocker, both retracted.** The
+  repo said `IPAMFullAccess`; the real API wanted `write compute_private_networks`
+  (`PrivateNetworksFullAccess`, granted). Private *networks* now create; private
+  *NICs* still cannot, and no permission fixes it — the resource takes no
+  `project_id`, so it lands in the ADR-0010 containment project while the server
+  is in the run's own. Then I claimed `vpc_required.rego` was "wired for AWS only"
+  and narrowed the pitfall on that basis. Also false: `filterPolicyPathsByCloud`
+  drops only *other* clouds, so all five `policies/scaleway/*.rego` run. A
+  generation run failed on exactly that rule. Pitfall restored, claim retracted in
+  four files.
+
+  **What is actually true is worse: the two gates contradict each other.** Layer 1
+  requires a private NIC on every `scaleway_instance_server`; Layer 3 cannot apply
+  one while the run creates its own project. **No Scaleway compute scenario
+  satisfies both today.** That — not IPAM, not permissions, not the pitfall — is
+  what blocks generated HCL from reaching real infrastructure.
+
+  **Generation was also blocked on this machine, and is now fixed.**
+  `claude_adapter.go` filtered only `CLAUDECODE=`, while a parent Claude Code
+  session exports nine more `CLAUDE_CODE_*` variables. The nested `claude`
+  inherited them, behaved as a child session, and hung on the first phase that
+  used a **tool** — `self_review`, the only one that writes files — until the 300s
+  timeout. With the family unset, all three phases complete.
 
 - ✅ **Live-services canary green (2026-08-30)** — `deploy` → `live ls` →
   `live teardown` proven against **real Scaleway**, first attempt. Deploy 35.8s,
