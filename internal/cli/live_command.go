@@ -29,6 +29,22 @@ func newLiveCmd(cfg *rootConfig) *cobra.Command {
 		RunE:  cfg.withRuntime("live ls", runLiveListCommand),
 	})
 
+	cmd.AddCommand(&cobra.Command{
+		Use:   "teardown <deployment-id>",
+		Short: "Destroy one live deployment, sweep the account, and release the record",
+		Args:  cobra.ExactArgs(1),
+		RunE:  cfg.withRuntime("live teardown", runLiveTeardownCommand),
+	})
+
+	reap := &cobra.Command{
+		Use:   "reap",
+		Short: "Destroy every live deployment whose TTL has run out",
+		Args:  cobra.NoArgs,
+		RunE:  cfg.withRuntime("live reap", runLiveReapCommand),
+	}
+	reap.Flags().Bool("dry-run", false, "Report what would be destroyed without destroying it")
+	cmd.AddCommand(reap)
+
 	return cmd
 }
 

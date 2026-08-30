@@ -4,6 +4,36 @@ Last updated: 2026-08-24
 
 ## Current phase
 
+- 🚧 **S153 landed (2026-08-30)** — the first slice where something stays up,
+  and the thing that takes it down, in one PR. `infrafactory deploy` applies a
+  validated scenario and records it; `live teardown <id>` destroys one;
+  `live reap` destroys everything past its TTL.
+
+  **`deploy` deliberately does not generate.** `run` proves a change is safe;
+  `deploy` takes what `run` validated and keeps it. The allowlist is still
+  re-checked at deploy time, deny-by-default — *already validated* is a claim
+  about a previous command.
+
+  **Every deployment gets its own workdir** (`<live root>/workdirs/<id>`), never
+  the shared `output/<scenario>`. Two deployments of one scenario would otherwise
+  share a single `terraform-live.tfstate` and the second apply would overwrite
+  the first's, orphaning real resources with nothing left that knows how to
+  destroy them — the D6 class again, invisible to any cost check.
+
+  **The registry is not authority for what gets destroyed.** It says which
+  deployment; the state file says which project, and `AssertProjectDeletable`
+  gets both, so a disagreement is fatal. A deployment whose state has vanished is
+  reported and **not** released: its resources may still be running, and
+  releasing it would retire the only record that says so.
+
+  Registration happens on the failure path too — a half-finished apply leaves
+  real resources, and the record is the only thing that brings the reaper back.
+
+  **Known hole, deliberately left open**: the reaper trusts the store to know
+  every live deployment. A wiped working directory loses records while the cloud
+  keeps the resources. Reconcile-against-API is the largest remaining gap in
+  ADR-0024 and is queued for S157.
+
 - 🚧 **S152 landed (2026-08-30)** — the app gets a version. `service:` in
   `scenario.schema.json` names the image, tag, port, health path and TTL that a
   live-service scenario runs, and `scenarios/training/web-live-paris.yaml` is the

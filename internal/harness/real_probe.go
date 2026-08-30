@@ -281,6 +281,19 @@ func loadLiveTerraformState(path string) (terraformState, error) {
 	return state, nil
 }
 
+// LiveEndpoint resolves the public address of a probe target from a
+// workdir's live state, e.g. target "load_balancer" gives the frontend
+// IP. Exported for `infrafactory deploy`, which records the address on
+// the live deployment so `live ls` can say where the service actually
+// answers -- an estate you cannot reach is one nobody will check on.
+func LiveEndpoint(workDir, target string) (string, error) {
+	state, err := loadLiveTerraformState(filepath.Join(workDir, LiveStateFilename))
+	if err != nil {
+		return "", err
+	}
+	return resolveProbeHost(state, target)
+}
+
 func resolveProbeHost(state terraformState, target string) (string, error) {
 	resourceTypes := probeTargetResourceTypes(target)
 	if len(resourceTypes) == 0 {

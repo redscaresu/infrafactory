@@ -145,3 +145,47 @@ claim a real-cloud run that never happened — the S147 failure class, caught by
 `TestLayer3CoverageDocTotalsMatchItsTable` rather than by review. The table gains
 a fourth bucket, `runnable, unrun`, enforced by that same test. A row is promoted
 to `**runnable**` on the day it goes green and not before.
+
+## Amendment, 2026-08-30 (S153): deploy, teardown, and the reaper
+
+The slice where something actually stays up. Per rule 2 the reaper ships with it,
+not after it.
+
+**`deploy` does not generate.** `run` proves a change is safe — generate,
+validate, mock apply, real apply, destroy, sweep. `deploy` takes what `run`
+already validated and keeps it. Splitting the verbs means deploy cannot become a
+route around the layers, and it keeps "prove this is safe" separate from "put it
+up", which is the distinction the whole project is about. The allowlist is
+nonetheless re-checked at deploy time: *already validated* is a claim about a
+previous command, and anything that may touch the cloud is checked
+deny-by-default at the point it does.
+
+**Every deployment gets its own workdir.** `<live root>/workdirs/<id>`, never the
+shared `output/<scenario>`. Two deployments of one scenario would otherwise share
+a single `terraform-live.tfstate`, and the second apply would overwrite the
+first's — orphaning real resources with nothing left that knows how to destroy
+them. This is the same class of defect as D6: a leak that no cost check would
+show, because the resources are real but unowned.
+
+**Registration happens on the failure path too.** An apply that dies partway
+leaves real resources and a real project. The record is the only thing that will
+bring the reaper back to them, so it is written from whatever the state shows
+rather than only when the apply returns success. An apply that created nothing
+writes no state and is recorded as a skip — there is nothing to reap.
+
+**The registry is not authority for what gets destroyed.** It says *which*
+deployment; the state file in that deployment's workdir says which project, and
+`AssertProjectDeletable` is given both so a disagreement is fatal. A stale,
+hand-edited or tampered record therefore cannot aim teardown at a project it did
+not create, including the organization default.
+
+**A deployment whose state has vanished is not released.** Its resources may
+still be running, and marking it released would retire the only record that says
+so — turning a visible problem into an invisible one. It stays reapable and is
+reported as unreclaimable, with the project id, so a human can finish the job.
+
+Still outstanding from rule 3's promise: reconcile-against-API. The reaper today
+trusts that the store knows every live deployment. A wiped working directory
+loses records while the cloud keeps the resources, and nothing yet detects that.
+It is the largest remaining hole in this ADR and belongs in S157 with cost
+accounting.
