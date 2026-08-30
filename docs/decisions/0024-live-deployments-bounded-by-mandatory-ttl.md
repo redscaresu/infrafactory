@@ -336,3 +336,28 @@ before this one used Claude's `/code-review` skill, not the Codex loop AGENTS.md
 requires. A same-family reviewer shares the blind spots that produced the defect,
 which is the most plausible explanation for three consecutive rounds in which a
 safety fix reproduced the failure it targeted.
+
+## Amendment, 2026-08-30 (pass 11): an escape hatch must accept what the guard refuses
+
+Three further corrections, each closing a gap the previous fix opened.
+
+**A guard that cannot record itself is not a guard.** The sticky
+`SweepVerificationFailed` marker was written with `_ = store.Put(d)`. A failed
+write left the flag false, so the next pass would take the empty-state path and
+release anyway — silently undoing the protection. A failed marker write is now a
+teardown failure in its own right, and says not to expect a re-run to refuse.
+
+**`teardown` and `forget` must not point at each other.** Teardown refuses a
+sticky empty-state record and names `live forget` as the way out, but
+`reclaimable` counted any record with a state file as teardown's business — so
+`forget` bounced it straight back. The operator had no CLI escape at all. The
+rule this makes explicit: **whenever a guard refuses and names a remedy, the
+remedy must accept exactly that case**, and it is worth a test that walks the
+pair rather than each half alone.
+
+**Removing a hazard must not remove the escape.** Dropping `WaitDelay` avoided
+turning successful applies into `ErrWaitDelay`, but it also removed any bound on
+a `tofu` that ignores SIGINT — which would hang `deploy` before registration,
+recreating the unrecorded-live-resource path the signal guard exists to close.
+The kill fallback is now armed inside `Cancel`, so it is scoped to cancellation
+and a normal exit cannot trip it.

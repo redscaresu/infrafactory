@@ -451,3 +451,57 @@ func TestLiveForgetRefusesAReclaimableDeployment(t *testing.T) {
 	assert.Equal(t, livestore.StateLive, got.State, "still tracked, still reapable")
 	assert.True(t, got.Reapable(time.Now().Add(2*time.Hour)))
 }
+
+// The dead end pass 11 caught: teardown refuses a sticky empty-state
+// record and says "use live forget", so forget must accept it. Counting
+// it as reclaimable made the two commands point at each other.
+func TestLiveForgetAcceptsTheRecordTeardownRefuses(t *testing.T) {
+	sandboxCredsForTest(t)
+	rt, store, workspace := liveTeardownRuntime(t, &fakeSandboxDestroyHarness{}, &fakeOrphanSweep{})
+	d := liveDeploymentWithState(t, store, workspace, "dep-deadend", -time.Minute)
+	d.SweepVerificationFailed = true
+	require.NoError(t, store.Put(d))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(d.WorkDir, "terraform-live.tfstate"), []byte(`{"resources":[]}`), 0o600))
+
+	// teardown refuses and names forget...
+	_, failures := tearDownDeployment(context.Background(), rt, store, d)
+	require.NotEmpty(t, failures)
+	require.Contains(t, failures[0].Detail, "live forget")
+
+	// ...so forget must not bounce it back.
+	var out bytes.Buffer
+	cmd := &cobra.Command{Use: "forget"}
+	cmd.Flags().String("output", string(OutputModeHuman), "")
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetContext(context.Background())
+	require.NoError(t, runLiveForgetCommand(cmd, []string{d.ID}, rt))
+
+	got, err := store.Get(d.ID)
+	require.NoError(t, err)
+	assert.Equal(t, livestore.StateReleased, got.State)
+}
+
+// A dropped marker write leaves the flag false, so the next pass takes
+// the empty-state path and releases anyway.
+func TestTeardownFailsWhenTheSweepMarkerCannotBeWritten(t *testing.T) {
+	sandboxCredsForTest(t)
+	destroy := &fakeSandboxDestroyHarness{}
+	sweep := &fakeOrphanSweep{err: harness.ErrOrphanSweepFailed}
+	rt, store, workspace := liveTeardownRuntime(t, destroy, sweep)
+	d := liveDeploymentWithState(t, store, workspace, "dep-marker", -time.Minute)
+
+	// Make the store unwritable so store.Put fails.
+	require.NoError(t, os.Chmod(store.Root, 0o500))
+	t.Cleanup(func() { _ = os.Chmod(store.Root, 0o755) })
+
+	_, failures := tearDownDeployment(context.Background(), rt, store, d)
+
+	var details string
+	for _, f := range failures {
+		details += f.Detail
+	}
+	assert.Contains(t, details, "marker recording that could not be written",
+		"a dropped marker must surface, not be swallowed")
+}

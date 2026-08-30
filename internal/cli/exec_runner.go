@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/redscaresu/infrafactory/internal/harness"
 )
@@ -100,6 +101,11 @@ func envKeyMatches(key string, patterns []string) bool {
 	return false
 }
 
+// cancelKillFallback is how long a cancelled command may ignore SIGINT
+// before it is killed. Long enough for tofu to flush state, short enough
+// that a hung provider cannot stall a teardown indefinitely.
+const cancelKillFallback = 20 * time.Second
+
 func (execCommandRunner) Run(ctx context.Context, cmd harness.Command) (harness.CommandResult, error) {
 	execCmd := exec.CommandContext(ctx, cmd.Name, cmd.Args...)
 	// Interrupt, not kill. The default CommandContext cancel sends
@@ -119,11 +125,20 @@ func (execCommandRunner) Run(ctx context.Context, cmd harness.Command) (harness.
 	// interactive case properly needs Setpgid so the child is not in the
 	// terminal's group, which is a larger change than this slice.
 	//
-	// No WaitDelay: it applies to every command here, and its timer also
-	// starts when the child exits NORMALLY -- so a provider plugin still
-	// holding the output pipe would turn a successful apply into
-	// exec.ErrWaitDelay with truncated output.
-	execCmd.Cancel = func() error { return execCmd.Process.Signal(os.Interrupt) }
+	// SIGINT first, SIGKILL if it is ignored. WaitDelay would be the
+	// obvious way to bound this, but its timer also starts when the child
+	// exits NORMALLY -- so a provider plugin still holding the output pipe
+	// would turn a successful apply into exec.ErrWaitDelay with truncated
+	// output. Arming the fallback inside Cancel scopes it to cancellation
+	// only, where a tofu that ignores SIGINT would otherwise hang forever
+	// and stop deploy ever reaching registration.
+	execCmd.Cancel = func() error {
+		if err := execCmd.Process.Signal(os.Interrupt); err != nil {
+			return err
+		}
+		time.AfterFunc(cancelKillFallback, func() { _ = execCmd.Process.Kill() })
+		return nil
+	}
 	execCmd.Dir = cmd.Dir
 	execCmd.Env = withEnvOverrides(stripEnvKeys(stripGCPAuthEnv(os.Environ()), cmd.StripEnv), cmd.Env)
 

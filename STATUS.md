@@ -4,6 +4,15 @@ Last updated: 2026-08-24
 
 ## Current phase
 
+- 🔎 **Review pass 11 (2026-08-30)** — three findings, all real, all fixed. A
+  dropped `store.Put` error meant a failed sweep-marker write left the sticky flag
+  false, silently undoing pass 10's fix. `live forget` **rejected exactly the
+  record teardown refused** — a dead end created while closing the previous one,
+  leaving no CLI escape at all. And dropping `WaitDelay` removed the kill
+  fallback, so a `tofu` ignoring SIGINT would hang forever and stop `deploy` ever
+  reaching registration; `Cancel` now arms a SIGKILL fallback scoped to
+  cancellation, where a normal exit cannot trip it.
+
 - 🔎 **Review pass 10 (2026-08-30)** — `codex exec review --base main`, archived
   in `docs/review-passes/pass10.md`. **Codex returned one finding**, and it was
   the same one a Claude `/code-review` pass had rated worst: the empty-state

@@ -149,9 +149,22 @@ func tearDownDeployment(
 		if len(failures) > failuresBeforeSweep {
 			// Sticky, and written before returning: the next pass sees an
 			// empty state and must not treat that as evidence of a clean
-			// account.
+			// account. A failed write is itself a failure -- dropping it
+			// leaves the flag false, so the next pass takes the
+			// empty-state path and releases while the strays it could not
+			// see keep billing.
 			d.SweepVerificationFailed = true
-			_ = store.Put(d)
+			if err := store.Put(d); err != nil {
+				stages = append(stages, StageSummary{Layer: "live", Stage: "sweep_marker", Status: StageStatusFail})
+				failures = append(failures, FailureSummary{
+					Layer: "live", Stage: "sweep_marker", Check: "record",
+					Command: "live teardown " + d.ID,
+					Detail: fmt.Sprintf(
+						"%s had an orphan sweep fail AND the marker recording that could not be written: %v. "+
+							"Do not re-run teardown expecting it to refuse -- verify project %s by hand",
+						d.ID, err, d.ProjectID),
+				})
+			}
 		}
 	}
 
@@ -240,8 +253,17 @@ func reclaimable(d livestore.Deployment) bool {
 	if d.Undecodable || d.State == livestore.StateReleased || d.WorkDir == "" {
 		return false
 	}
-	_, err := os.Stat(filepath.Join(d.WorkDir, harness.LiveStateFilename))
-	return err == nil
+	if _, err := os.Stat(filepath.Join(d.WorkDir, harness.LiveStateFilename)); err != nil {
+		return false
+	}
+	// A record whose sweep failed before its state was emptied is exactly
+	// what teardown refuses and tells the operator to forget. Counting it
+	// as reclaimable made the two commands point at each other with no way
+	// out -- a dead end introduced while closing the previous one.
+	if d.SweepVerificationFailed && !liveStateMayHoldResources(d.WorkDir) {
+		return false
+	}
+	return true
 }
 
 func runLiveTeardownCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) error {
