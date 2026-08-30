@@ -104,6 +104,48 @@ tractable rather than a second learning system: the new work is producing the
 signal, not consuming it. Live-sourced entries are tagged `source: live` so they
 are distinguishable from `descriptive` / `fix` / `avoid` (ADR-0019 vocabulary).
 
+## Canary, 2026-08-30: the persistence path, proven against real Scaleway
+
+Run with **seeded HCL to isolate the harness** — this repo's S143 pattern. The
+`lb-serving-paris` fixture was used as `web-live-paris`'s generated output, so
+any failure would be S151–S153 code rather than generation.
+
+| step | result |
+|---|---|
+| `deploy` | success, **35.8s**, project `4bfdb8db-…` created and recorded |
+| `live ls` | live, TTL counting down from 4h, address `62.210.39.190` |
+| real API | 1 instance, 1 load balancer; recorded address **matched** the real LB IP |
+| HTTP through the LB | **200** |
+| `live teardown` | success, **36.1s**, destroy + sweep + released |
+| account afterwards | back to 3 projects; canary project returns **404**; LB IP no longer answers |
+
+Verified against the API directly rather than by trusting the command's own
+report, because a green teardown that leaves a project behind is exactly what a
+self-report cannot catch.
+
+**D6 reproduced itself in the new path, and the purge caught it:**
+
+    sandbox_deploy/auto_created_purge: pass (destroy was blocked by 1 resource(s)
+      the API created but Terraform did not own: security_group 9508dfd3-…
+      (Default security group) in fr-par-1)
+
+Scaleway auto-created the security group on the first Instance, `tofu destroy`
+could not delete the project while it existed, and the S146 purge-and-retry
+cleared it. The teardown would have read as an ordinary clean run without that
+line — which is why the purge reports what it removed rather than fixing things
+silently.
+
+**What this canary does not prove.** The HCL was seeded, so nothing here says a
+`service:` block generates correct infrastructure. The instance served
+`python3 -m http.server` while the record claimed `nginx:1.27`: **`deploy`
+records the declared image without verifying what is running.** That gap is real
+and belongs in S155, where upgrade makes it load-bearing — an upgrade to a
+version nobody confirmed is running proves nothing.
+
+Run 2 — the same path with the LLM generating — is blocked behind the private-NIC
+question (mockway answers the `v2alpha1` private-network-interfaces endpoint with
+501, and Layer 2 gates Layer 3).
+
 ## Slices
 
 | id | slice | why it matters |

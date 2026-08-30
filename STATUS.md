@@ -4,6 +4,23 @@ Last updated: 2026-08-24
 
 ## Current phase
 
+- ✅ **Live-services canary green (2026-08-30)** — `deploy` → `live ls` →
+  `live teardown` proven against **real Scaleway**, first attempt. Deploy 35.8s,
+  teardown 36.1s, **HTTP 200 through a real load balancer**, account back to its
+  3 baseline projects with the canary project returning 404 — verified against
+  the API, not from the command's own report.
+
+  Seeded HCL, deliberately: the `lb-serving-paris` fixture stood in for generated
+  output so any failure would be S151–S153 code rather than generation (the S143
+  pattern). **D6 reproduced itself in the new teardown path** — Scaleway
+  auto-created a `Default security group`, destroy could not delete the project
+  while it existed, and the S146 purge-and-retry cleared it *and said so*. Without
+  that reporting the teardown would have read as an ordinary clean run.
+
+  **Gap it exposed**: `deploy` records the *declared* image without verifying what
+  is running. The record said `nginx:1.27`; the instance served
+  `python3 -m http.server`. Queued for S155, where upgrade makes it load-bearing.
+
 - 🚧 **S153 landed (2026-08-30)** — the first slice where something stays up,
   and the thing that takes it down, in one PR. `infrafactory deploy` applies a
   validated scenario and records it; `live teardown <id>` destroys one;
