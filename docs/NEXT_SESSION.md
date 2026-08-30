@@ -4,7 +4,15 @@ Self-contained brief for a fresh Claude / engineer starting in this repo.
 
 ## Read this first (handoff state as of 2026-08-31)
 
-### ACTIVE ARC — live services
+### START HERE — S165, the run-owned project
+
+**Next slice: S165** (`docs/plans/run-owned-project-plan.md`, ADR-0025). It is
+the prerequisite for everything else: until it lands, no Scaleway compute
+scenario can satisfy Layer 1 and Layer 3 at once (see THE BLOCKER below), so the
+remaining live-services slices cannot reach real infrastructure with generated
+HCL. The mechanism is already proven by hand against real Scaleway.
+
+### Arc context — live services
 
 `docs/plans/live-services-arc-plan.md` (S151–S158). infrafactory can now deploy a
 versioned service that outlives its run, and destroy it again.
