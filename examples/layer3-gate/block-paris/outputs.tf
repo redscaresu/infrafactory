@@ -1,54 +1,14 @@
 output "project_id" {
-  description = "ID of the bootstrapped Scaleway project"
+  description = "Bootstrapped project id owning all scenario resources"
   value       = scaleway_account_project.main.id
 }
 
-output "project_name" {
-  description = "Name of the bootstrapped Scaleway project"
-  value       = scaleway_account_project.main.name
-}
-
-output "project_organization_id" {
-  description = "Organization the bootstrapped project belongs to"
-  value       = scaleway_account_project.main.organization_id
-}
-
 output "block_volume_id" {
-  description = "ID of the application data block volume"
+  description = "Zoned id of the app-data block volume for destruction/orphan verification"
   value       = scaleway_block_volume.app_data.id
 }
 
-output "block_volume_name" {
-  description = "Name of the application data block volume"
-  value       = scaleway_block_volume.app_data.name
-}
-
-output "block_volume_srn" {
-  description = "Scaleway Resource Name (SRN) of the application data block volume"
-  value       = scaleway_block_volume.app_data.srn
-}
-
 output "block_volume_zone" {
-  description = "Zone the application data block volume is attached to"
+  description = "Zone the volume was provisioned in, for region_restriction policy checks"
   value       = scaleway_block_volume.app_data.zone
-}
-
-output "block_volume_size_in_gb" {
-  description = "Size of the application data block volume in GB"
-  value       = scaleway_block_volume.app_data.size_in_gb
-}
-
-output "block_volume_iops" {
-  description = "Provisioned IO/s of the application data block volume"
-  value       = scaleway_block_volume.app_data.iops
-}
-
-output "region" {
-  description = "Region the stack is deployed to"
-  value       = var.region
-}
-
-output "zone" {
-  description = "Zone the stack is deployed to"
-  value       = var.zone
 }
