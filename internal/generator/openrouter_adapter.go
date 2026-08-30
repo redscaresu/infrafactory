@@ -12,9 +12,9 @@ import (
 )
 
 type OpenRouterTransportConfig struct {
-	APIKey           string
-	Model            string
-	BaseURL          string
+	APIKey      string
+	Model       string
+	BaseURL     string
 	Timeout     time.Duration
 	MaxRetries  int
 	RetryDelay  time.Duration

@@ -40,6 +40,13 @@ func newLiveCmd(cfg *rootConfig) *cobra.Command {
 		RunE:  cfg.withRuntime("live teardown", runLiveTeardownCommand),
 	})
 
+	cmd.AddCommand(&cobra.Command{
+		Use:   "forget <deployment-id>",
+		Short: "Release a record without destroying anything — for records the tooling cannot act on",
+		Args:  cobra.ExactArgs(1),
+		RunE:  cfg.withRuntime("live forget", runLiveForgetCommand),
+	})
+
 	reap := &cobra.Command{
 		Use:   "reap",
 		Short: "Destroy every live deployment whose TTL has run out",
@@ -132,6 +139,11 @@ type liveListJSON struct {
 
 type liveDeploymentJSON struct {
 	livestore.Deployment
+	// Unreadable is exported because the embedded Deployment's flag is
+	// json:"-". Without it a JSON consumer sees a phantom deployment with
+	// an empty scenario, project and state and no way to tell it apart
+	// from a real record.
+	Unreadable   bool   `json:"unreadable"`
 	Expired      bool   `json:"expired"`
 	TimeToLive   string `json:"time_to_live"`
 	TTLSeconds   int64  `json:"time_to_live_seconds"`
@@ -149,6 +161,7 @@ func renderLiveJSON(out io.Writer, deployments []livestore.Deployment, unreadabl
 		ttl := d.TimeToLive(now)
 		payload.Deployments = append(payload.Deployments, liveDeploymentJSON{
 			Deployment:   d,
+			Unreadable:   d.Undecodable,
 			Expired:      d.Expired(now),
 			TimeToLive:   ttl.Round(time.Second).String(),
 			TTLSeconds:   int64(ttl.Seconds()),

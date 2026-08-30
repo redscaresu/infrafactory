@@ -261,16 +261,46 @@ func renderGeneratedFiles(files map[string][]byte) string {
 	return out.String()
 }
 
+// parentSessionEnvPrefixes name the variables a parent Claude Code
+// session exports. All of them must be stripped before spawning a nested
+// `claude`, not just CLAUDECODE.
+//
+// Filtering CLAUDECODE alone was not enough. A parent session also
+// exports CLAUDE_CODE_MESSAGING_SOCKET, CLAUDE_CODE_BRIDGE_SESSION_ID,
+// CLAUDE_CODE_CHILD_SESSION and others; the child inherited them, behaved
+// as part of the parent session, and hung on the first phase that used a
+// TOOL -- self_review, the only phase that writes files -- until the
+// 300s phase timeout killed it. Phases 1 and 2 are pure text and
+// completed, which is why this looked like a self_review-specific bug
+// rather than an environment one.
+//
+// Prefix-matched deliberately: the set has grown before and the failure
+// mode is a silent five-minute hang, so a new variable should be excluded
+// by default rather than leak through.
+var parentSessionEnvPrefixes = []string{
+	"CLAUDECODE=",
+	"CLAUDE_CODE_",
+	"CLAUDE_PID=",
+	"CLAUDE_EFFORT=",
+}
+
+func isParentSessionEnv(entry string) bool {
+	for _, prefix := range parentSessionEnvPrefixes {
+		if strings.HasPrefix(entry, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 type claudeExecRunner struct{}
 
 func (claudeExecRunner) Run(ctx context.Context, req ClaudeCommandRequest) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, req.Command, req.Args...)
-	// Filter CLAUDECODE from inherited env to prevent nested claude processes
-	// from detecting an outer session and failing.
 	baseEnv := os.Environ()
 	filtered := make([]string, 0, len(baseEnv))
 	for _, e := range baseEnv {
-		if !strings.HasPrefix(e, "CLAUDECODE=") {
+		if !isParentSessionEnv(e) {
 			filtered = append(filtered, e)
 		}
 	}

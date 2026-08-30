@@ -271,3 +271,39 @@ in minutes by running the thing.**
 
 The standing correction: the review loop runs on every PR **before** merge. Every
 one of these 15 findings coexisted with a fully green test suite.
+
+## Amendment, 2026-08-30 (S153b): the fixes needed fixing
+
+The review of S153a found 15 further issues, several of them regressions S153a
+introduced. Three change what this ADR promises.
+
+**"Already destroyed" is not evidence the account is clean.** S153a added a
+shortcut: an empty state means destroy already ran, so release the record. That
+laundered a *failed orphan sweep* into a green result — destroy succeeds, the
+sweep finds orphans and fails before release, and the next pass sees an empty
+state and retires the record without ever re-running the sweep. The orphans then
+exist with nothing tracking them, which is the leak class this whole ADR exists to
+prevent. The sweep is now re-run against the project id the record carries, and
+the record is released only if it passes. **Rule: releasing requires positive
+verification, never the absence of contrary evidence.**
+
+**Rule 3 needs an escape hatch, not just detection.** Making undecodable records
+reapable (S153a) was half the fix: they are reapable *by design* and unreclaimable
+*by nature*, so they failed every pass forever while `live teardown` could not
+even load them. `live forget` releases a record without destroying or verifying
+anything — the operator asserting they have dealt with the resources by hand. It
+says exactly what it gives up, and preserves the unparseable bytes beside the
+released record rather than overwriting them, because a record truncated mid-write
+often still contains the project id someone would need to finish the job.
+
+**Interrupting an apply must not corrupt its state.** The guard added in S153a
+cancelled a context wired into `exec.CommandContext`, whose default cancel sends
+**SIGKILL** — stopping `tofu apply` between a resource being created and its state
+being flushed, which produces exactly the untracked resource the guard existed to
+prevent. It now sends SIGINT and bounds the wait, because tofu forks provider
+plugins that inherit the output pipes and would otherwise hang the parent
+indefinitely.
+
+The pattern across all three: **a safety mechanism added in haste reproduced the
+failure it was written to prevent.** Each was caught by review, not by tests — the
+suite was green for every one of them.

@@ -523,3 +523,33 @@ func writeSchemaAwarePromptFixtures(t *testing.T) string {
 	mustWriteFile("phase3_self_review.md", "S3\n{{.GeneratedFiles}}\n{{.ScenarioYAML}}\n{{if .ProviderSchema}}SCHEMA:{{.ProviderSchema}}{{end}}\n")
 	return dir
 }
+
+// Filtering CLAUDECODE alone left nine other parent-session variables to
+// leak, which made the nested claude behave as part of the parent session
+// and hang on the first phase that used a tool.
+func TestIsParentSessionEnvStripsTheWholeFamily(t *testing.T) {
+	stripped := []string{
+		"CLAUDECODE=1",
+		"CLAUDE_CODE_ENTRYPOINT=cli",
+		"CLAUDE_CODE_MESSAGING_SOCKET=/tmp/sock",
+		"CLAUDE_CODE_MESSAGING_TOKEN=abc",
+		"CLAUDE_CODE_BRIDGE_SESSION_ID=xyz",
+		"CLAUDE_CODE_CHILD_SESSION=1",
+		"CLAUDE_CODE_SESSION_ID=sid",
+		"CLAUDE_CODE_EXECPATH=/usr/bin/claude",
+		"CLAUDE_PID=123",
+		"CLAUDE_EFFORT=high",
+	}
+	for _, e := range stripped {
+		if !isParentSessionEnv(e) {
+			t.Errorf("expected %q to be stripped from the nested claude env", e)
+		}
+	}
+
+	kept := []string{"PATH=/usr/bin", "HOME=/home/x", "ANTHROPIC_API_KEY=sk-x", "SCW_ACCESS_KEY=k"}
+	for _, e := range kept {
+		if isParentSessionEnv(e) {
+			t.Errorf("expected %q to survive", e)
+		}
+	}
+}

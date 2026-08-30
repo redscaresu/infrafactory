@@ -4,6 +4,42 @@ Last updated: 2026-08-24
 
 ## Current phase
 
+- 🔧 **S153b (2026-08-30)** — the review of S153a found 15 more findings, several
+  of them **regressions S153a itself introduced**. Worst: the empty-state shortcut
+  released a record with a PASS without re-running the orphan sweep, so a teardown
+  whose sweep had *failed* was laundered green on the next pass and the orphans
+  became invisible. The sweep is now re-run against the record's project id, and
+  the record is released only if it passes.
+
+  Also fixed: `exec.CommandContext` sent **SIGKILL** to `tofu`, so an interrupted
+  apply could leave a resource live and absent from state — now SIGINT plus a
+  bounded `WaitDelay`, because tofu forks provider plugins that hold the output
+  pipes. An undecodable record had **no CLI route out** (`live teardown` failed at
+  load, `live reap` failed forever) — new `live forget` releases without
+  destroying, says exactly what it gives up, and preserves the unparseable bytes
+  beside the record rather than overwriting the project id they may still contain.
+  `validateID` now guards **reads** as well as writes. Records written with a
+  relative `WorkDir` resolve deterministically. The deploy failure hint is keyed
+  off whether registration *succeeded*, so it no longer says "nothing to tear
+  down" in the one case where a project is live and unrecordable. A cancelled
+  parent is no longer reported as a Ctrl-C. `live ls --output json` marks
+  unreadable records instead of emitting phantom deployments.
+
+  **And generation is unblocked.** `claude_adapter.go` filtered only
+  `CLAUDECODE=`, while a parent Claude Code session exports nine more
+  (`CLAUDE_CODE_MESSAGING_SOCKET`, `CLAUDE_CODE_BRIDGE_SESSION_ID`, …). The nested
+  `claude` inherited them, behaved as part of the parent session, and hung on the
+  first phase that used a **tool** — `self_review`, the only one that writes files
+  — until the 300s timeout. Phases 1 and 2 are pure text and completed, which is
+  why it looked like a `self_review` bug rather than an environment one. Now
+  prefix-matched so a new variable is excluded by default.
+
+  **Verified, not inferred**: provider 2.81.0's `scaleway_instance_private_nic`
+  has no `project_id` attribute, so the containment conflict cannot be fixed in
+  HCL. And **#163 (TypeScript 5→7) does not install** — `@sveltejs/kit@2.70.3`
+  declares `peerOptional typescript@"^5.3.3 || ^6.0.0"`, so npm refuses without
+  `--force`. TypeScript 6 would satisfy that range.
+
 - 🔧 **S153a hardening (2026-08-30)** — a post-merge audit of #170 returned
   **15 findings, several of them real leaks** in code that destroys real
   infrastructure. #170 merged without a review pass; the loop now runs on every

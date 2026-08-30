@@ -49,10 +49,17 @@ func tearDownDeployment(
 	}
 
 	if d.WorkDir == "" {
-		return unreclaimable(fmt.Sprintf(
+		detail := fmt.Sprintf(
 			"deployment %s records no work_dir, so there is no state to destroy from. "+
-				"Its project %s may still be running: destroy it by hand and delete the record",
-			d.ID, d.ProjectID))
+				"Its project %s may still be running: destroy it by hand, then clear the record with "+
+				"`infrafactory live forget %s`", d.ID, d.ProjectID, d.ID)
+		if d.Undecodable {
+			detail = fmt.Sprintf(
+				"deployment %s could not be decoded, so nothing can be destroyed from it. Its resources may "+
+					"still be running -- inspect %s.json by hand, destroy what it names, then clear it with "+
+					"`infrafactory live forget %s`", d.ID, d.ID, d.ID)
+		}
+		return unreclaimable(detail)
 	}
 
 	statePath := filepath.Join(d.WorkDir, harness.LiveStateFilename)
@@ -63,19 +70,35 @@ func tearDownDeployment(
 			d.ID, harness.LiveStateFilename, d.WorkDir, d.ProjectID))
 	}
 
-	// An empty state is the signature of a destroy that already ran, not
-	// of a leak. Without this, a teardown whose release failed -- or a
-	// second teardown of the same id -- hits AssertProjectDeletable with
-	// an empty state project and is reported as "may still be running"
-	// on every pass, forever, about a project that no longer exists.
+	// An empty state is the signature of a destroy that already ran, so
+	// re-running destroy would do nothing. It is NOT evidence the account
+	// is clean, and releasing on it alone would launder a previously
+	// FAILED orphan sweep into a green result: destroy succeeds, the
+	// sweep finds orphans and fails before release, and the next pass
+	// sees an empty state and retires the record without ever re-running
+	// the sweep. So the sweep is re-run here, against the project id the
+	// record carries, and the record is released only if it passes.
 	if !liveStateMayHoldResources(d.WorkDir) {
+		sandboxEnv, envErr := sandboxCommandEnv(runtime)
+		if envErr != nil {
+			return unreclaimable(fmt.Sprintf(
+				"%s appears already destroyed, but the account cannot be verified: %v", d.ID, envErr))
+		}
+
+		stages, failures = appendOrphanSweepResult(ctx, stages, failures, runtime,
+			&harness.SweepTarget{ProjectID: d.ProjectID}, nil, sandboxEnv)
+		if len(failures) > 0 {
+			return stages, failures
+		}
+
 		if err := store.MarkReleased(d.ID); err != nil {
 			return unreclaimable(fmt.Sprintf(
-				"%s was already destroyed (its state is empty) but the record could not be released: %v", d.ID, err))
+				"%s was already destroyed and the account verified clean, but the record could not be released: %v",
+				d.ID, err))
 		}
 		stages = append(stages, StageSummary{
 			Layer: "live", Stage: "release", Status: StageStatusPass,
-			Detail: fmt.Sprintf("%s was already destroyed; record released without re-running destroy", d.ID),
+			Detail: fmt.Sprintf("%s was already destroyed; account re-verified, record released", d.ID),
 		})
 		return stages, failures
 	}
@@ -140,12 +163,57 @@ func tearDownDeployment(
 	return stages, failures
 }
 
+// runLiveForgetCommand releases a record WITHOUT destroying anything.
+//
+// The escape hatch for a record the tooling cannot act on: one whose
+// bytes will not decode, or whose workdir is gone. Those are reapable by
+// design (ADR-0024 rule 3) but not reclaimable, so without this they
+// fail every pass forever and `live ls`/`live reap` stay red with no way
+// out -- while `live teardown` cannot even load them.
+//
+// It destroys nothing and verifies nothing. It is the operator asserting
+// they have dealt with the resources by hand, so it says plainly what it
+// is giving up, and the unparseable bytes are preserved beside the
+// released record rather than replaced.
+func runLiveForgetCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) error {
+	store := livestore.NewFilesystemStore(runtime.LiveStoreRoot())
+	id := args[0]
+	out := cmd.ErrOrStderr()
+
+	known := "unreadable"
+	if d, err := store.Get(id); err == nil {
+		known = fmt.Sprintf("scenario %s, project %s", d.Scenario, d.ProjectID)
+	}
+
+	if err := store.MarkReleased(id); err != nil {
+		return &CLIError{Op: "live forget", Code: errorCodeCommandFailed, Err: err}
+	}
+
+	_, _ = fmt.Fprintf(out,
+		"Released %s (%s) WITHOUT destroying anything and WITHOUT verifying the account.\n"+
+			"If its resources still exist they are now untracked — nothing will reap them.\n", id, known)
+
+	return finishLiveCommand(cmd, "live forget", "n/a",
+		[]StageSummary{{
+			Layer: "live", Stage: "forget", Status: StageStatusPass,
+			Detail: fmt.Sprintf("%s released without destroy or verification (%s)", id, known),
+		}}, nil, nil)
+}
+
 func runLiveTeardownCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) error {
 	store := livestore.NewFilesystemStore(runtime.LiveStoreRoot())
 
 	d, err := store.Get(args[0])
 	if err != nil {
-		return &CLIError{Op: "live teardown", Code: errorCodeUsage, Err: err}
+		// An undecodable record still reaches teardown, which reports it
+		// as unreclaimable and names `live forget`. Failing at load
+		// returned a *usage* error, which reads like the operator
+		// mistyped the id rather than like the store cannot parse it.
+		if !errors.Is(err, os.ErrNotExist) {
+			d = livestore.Deployment{ID: args[0], Undecodable: true}
+		} else {
+			return &CLIError{Op: "live teardown", Code: errorCodeUsage, Err: err}
+		}
 	}
 
 	stages, failures := tearDownDeployment(cmd.Context(), runtime, store, d)

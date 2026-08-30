@@ -127,6 +127,7 @@ func runDeployCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime
 	registerStages, registerFailures := registerDeployment(store, sc, deploymentID, workDir, ttl)
 	stages = append(stages, registerStages...)
 	failures = append(failures, registerFailures...)
+	recorded := len(registerFailures) == 0 && len(registerStages) > 0 && registerStages[0].Status == StageStatusPass
 
 	status := CommandStatusSuccess
 	if len(failures) > 0 {
@@ -148,9 +149,17 @@ func runDeployCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime
 		// an operator to reap something that was never recorded yields
 		// "no such file or directory" as a usage error, which reads like
 		// they mistyped rather than like nothing was created.
-		recovery := "no resources were recorded, so there is nothing to tear down"
-		if _, getErr := store.Get(deploymentID); getErr == nil {
+		// Keyed off whether registration SUCCEEDED, not off whether a file
+		// happens to exist. registerDeployment fails precisely when a
+		// project is live and could not be recorded -- saying "nothing to
+		// tear down" there contradicts its own failure detail and
+		// reassures the operator that nothing leaked.
+		recovery := "resources may be live and could NOT be recorded — see the failure detail above and destroy by hand"
+		switch {
+		case recorded:
 			recovery = fmt.Sprintf("tear it down with `infrafactory live teardown %s`", deploymentID)
+		case len(registerFailures) == 0:
+			recovery = "no resources were recorded, so there is nothing to tear down"
 		}
 		return &CLIError{Op: "deploy", Code: errorCodeCommandFailed, Err: fmt.Errorf(
 			"deploy failed; %s", recovery)}
@@ -187,12 +196,20 @@ func runDeployApply(
 ) (*harness.SandboxDeployResult, error) {
 	sigCtx, stop := notify(ctx, os.Interrupt, syscall.SIGTERM)
 	result, err := apply(sigCtx)
-	interrupted := sigCtx.Err() != nil
+	// A signal, not merely a cancelled parent. sigCtx derives from ctx, so
+	// sigCtx.Err() is non-nil for a command timeout or an SDK cancel too --
+	// reporting those as "interrupted" names the wrong cause.
+	interrupted := ctx.Err() == nil && sigCtx.Err() != nil
+
+	// Restored before the message: from here on there is only the
+	// registration write, so a second signal should terminate normally
+	// rather than be swallowed. The message therefore does not invite one
+	// -- by the time it prints there is nothing left to abandon.
 	stop()
 
 	if interrupted {
 		_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
-			"\nInterrupted during apply. Recording whatever was created so it can be reaped — press Ctrl-C again to abandon it.\n")
+			"\nInterrupted during apply. Recording whatever was created so `infrafactory live reap` can destroy it.\n")
 	}
 
 	return result, err

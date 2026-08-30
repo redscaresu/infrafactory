@@ -444,7 +444,29 @@ func TestDeployApplyRunsUnderASignalGuardAndReportsInterruption(t *testing.T) {
 	require.Error(t, err, "the apply unwinds rather than the process dying")
 	require.NotNil(t, sawCtx)
 	assert.Error(t, sawCtx.Err(), "the apply is handed a cancelled context")
-	assert.Contains(t, out.String(), "Recording whatever was created so it can be reaped")
+	assert.Contains(t, out.String(), "Recording whatever was created so `infrafactory live reap` can destroy it")
+}
+
+// sigCtx derives from ctx, so sigCtx.Err() is also non-nil when the
+// PARENT is cancelled — a command timeout or an SDK cancel. Reporting
+// those as a user interrupt names the wrong cause.
+func TestDeployApplyDoesNotReportAParentCancellationAsAnInterrupt(t *testing.T) {
+	var out bytes.Buffer
+	cmd := &cobra.Command{Use: "deploy"}
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+
+	parent, cancelParent := context.WithCancel(context.Background())
+	cancelParent()
+
+	_, err := runDeployApply(cmd, parent, stubNotify(false),
+		func(ctx context.Context) (*harness.SandboxDeployResult, error) {
+			return nil, ctx.Err()
+		})
+
+	require.Error(t, err)
+	assert.NotContains(t, out.String(), "Interrupted during apply",
+		"a cancelled parent is not a Ctrl-C")
 }
 
 func TestDeployApplyIsTransparentWhenNotInterrupted(t *testing.T) {

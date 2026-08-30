@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -330,4 +331,56 @@ func TestTeardownOfAnAlreadyDestroyedDeploymentReleasesInsteadOfCryingLeak(t *te
 	got, err := store.Get(d.ID)
 	require.NoError(t, err)
 	assert.Equal(t, livestore.StateReleased, got.State, "so it stops being reaped every pass")
+}
+
+// The regression this closes: the empty-state shortcut released the
+// record with a PASS without re-running the sweep, so a teardown whose
+// orphan sweep had FAILED was laundered green on the next pass and the
+// orphans became invisible.
+func TestTeardownOfAnAlreadyDestroyedDeploymentReVerifiesTheAccount(t *testing.T) {
+	sandboxCredsForTest(t)
+	destroy := &fakeSandboxDestroyHarness{}
+	sweep := &fakeOrphanSweep{err: harness.ErrOrphanSweepFailed}
+	rt, store, workspace := liveTeardownRuntime(t, destroy, sweep)
+	d := liveDeploymentWithState(t, store, workspace, "dep-laundered", -time.Minute)
+	require.NoError(t, os.WriteFile(
+		filepath.Join(d.WorkDir, "terraform-live.tfstate"), []byte(`{"resources":[]}`), 0o600))
+
+	_, failures := tearDownDeployment(context.Background(), rt, store, d)
+
+	assert.Equal(t, 1, sweep.calls, "the account is re-verified, not assumed clean")
+	require.NotEmpty(t, failures, "a failing sweep must not be laundered into a release")
+
+	got, err := store.Get(d.ID)
+	require.NoError(t, err)
+	assert.NotEqual(t, livestore.StateReleased, got.State, "the record stays, so the orphans stay visible")
+}
+
+// An undecodable record is reapable by design but not reclaimable, so
+// without an escape it fails every pass forever. `live forget` is that
+// escape: it releases without destroying and says what it gives up.
+func TestLiveForgetReleasesARecordTheToolingCannotAct(t *testing.T) {
+	sandboxCredsForTest(t)
+	rt, store, _ := liveTeardownRuntime(t, &fakeSandboxDestroyHarness{}, &fakeOrphanSweep{})
+	require.NoError(t, os.MkdirAll(store.Root, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(store.Root, "mystery.json"), []byte("{oops"), 0o644))
+
+	expired, _, err := store.Reapable(time.Now())
+	require.NoError(t, err)
+	require.Len(t, expired, 1, "precondition: it is reapable but unreclaimable")
+
+	var out bytes.Buffer
+	cmd := &cobra.Command{Use: "forget"}
+	cmd.Flags().String("output", string(OutputModeHuman), "")
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetContext(context.Background())
+	require.NoError(t, runLiveForgetCommand(cmd, []string{"mystery"}, rt))
+
+	assert.Contains(t, out.String(), "WITHOUT destroying anything")
+	after, _, err := store.Reapable(time.Now())
+	require.NoError(t, err)
+	assert.Empty(t, after, "and it stops failing every pass")
+	assert.FileExists(t, filepath.Join(store.Root, "mystery.json.unreadable"),
+		"the unparseable bytes are preserved, not overwritten")
 }

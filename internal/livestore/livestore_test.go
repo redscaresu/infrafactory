@@ -291,3 +291,41 @@ func TestMarkReleasedOnAnUnknownIDErrors(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "read deployment nope")
 }
+
+func TestResolveLegacyWorkDirFindsTheStateWhereverItIs(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "repo", ".infrafactory", "live")
+	require.NoError(t, os.MkdirAll(root, 0o755))
+	store := NewFilesystemStore(root)
+
+	// A record written by #170: WorkDir relative to the repo root.
+	relative := filepath.Join(".infrafactory", "live", "workdirs", "dep-1")
+	actual := filepath.Join(filepath.Dir(filepath.Dir(store.Root)), relative)
+	require.NoError(t, os.MkdirAll(actual, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(actual, LiveStateFilename), []byte(`{}`), 0o600))
+
+	got := store.resolveLegacyWorkDir(relative)
+
+	assert.True(t, filepath.IsAbs(got))
+	assert.FileExists(t, filepath.Join(got, LiveStateFilename),
+		"resolved to the directory that actually holds the state, not to the process cwd")
+}
+
+func TestResolveLegacyWorkDirReturnsAnAbsolutePathWhenNothingMatches(t *testing.T) {
+	store := NewFilesystemStore(t.TempDir())
+	got := store.resolveLegacyWorkDir("nowhere/at/all")
+	assert.True(t, filepath.IsAbs(got), "so the error names a real path rather than a fragment")
+}
+
+// harness.LiveStateFilename is duplicated here to keep this package free
+// of a harness dependency; the two must not drift.
+func TestLiveStateFilenameMatchesHarness(t *testing.T) {
+	assert.Equal(t, "terraform-live.tfstate", LiveStateFilename)
+}
+
+func TestGetRejectsTraversingIDsOnTheReadPath(t *testing.T) {
+	store := NewFilesystemStore(t.TempDir())
+	for _, id := range []string{"../../../etc/hosts", "a/b", ".."} {
+		_, err := store.Get(id)
+		require.Error(t, err, "id %q must be refused before it reaches the filesystem", id)
+	}
+}

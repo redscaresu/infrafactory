@@ -35,6 +35,11 @@ const DefaultRoot = ".infrafactory/live"
 
 const DeploymentSchemaVersion = "infrafactory.live.deployment.v1"
 
+// LiveStateFilename mirrors harness.LiveStateFilename. Duplicated rather
+// than imported to keep this package free of a dependency on the harness;
+// TestLiveStateFilenameMatchesHarness pins them together.
+const LiveStateFilename = "terraform-live.tfstate"
+
 // State is where a deployment is in its lifecycle. It is deliberately not
 // a proxy for what the cloud believes -- only the API can answer that.
 type State string
@@ -235,6 +240,14 @@ func (s *FilesystemStore) write(d Deployment) error {
 
 // Get reads one deployment by id.
 func (s *FilesystemStore) Get(id string) (Deployment, error) {
+	// Validated on the READ path as well: `live teardown <id>` passes a
+	// command-line argument straight here, and a traversing id would
+	// otherwise read an arbitrary file and, if it happened to decode,
+	// feed a chosen WorkDir and ProjectID into teardown.
+	if err := validateID(id); err != nil {
+		return Deployment{}, err
+	}
+
 	payload, err := os.ReadFile(s.path(id))
 	if err != nil {
 		return Deployment{}, fmt.Errorf("read deployment %s: %w", id, err)
@@ -245,7 +258,45 @@ func (s *FilesystemStore) Get(id string) (Deployment, error) {
 		return Deployment{}, fmt.Errorf("decode deployment %s: %w", id, err)
 	}
 
+	if d.WorkDir != "" && !filepath.IsAbs(d.WorkDir) {
+		d.WorkDir = s.resolveLegacyWorkDir(d.WorkDir)
+	}
+
 	return d, nil
+}
+
+// resolveLegacyWorkDir makes sense of a relative WorkDir written before
+// roots were absolute. Such a record is unreclaimable from any other
+// working directory -- reported as "may still be running" on every pass,
+// forever -- so it is worth resolving rather than failing.
+//
+// Two candidates are tried and the one that actually holds the state
+// wins, rather than assuming a layout: the process's working directory
+// (where it was written from, if that has not changed) and the store
+// root's grandparent (the repo root, for the default
+// `.infrafactory/live` placement). If neither has the state, the
+// absolute form of the original is returned so the error names a real
+// path.
+func (s *FilesystemStore) resolveLegacyWorkDir(workDir string) string {
+	candidates := []string{workDir}
+	if grandparent := filepath.Dir(filepath.Dir(s.Root)); grandparent != "" {
+		candidates = append(candidates, filepath.Join(grandparent, workDir))
+	}
+
+	for _, candidate := range candidates {
+		abs, err := filepath.Abs(candidate)
+		if err != nil {
+			continue
+		}
+		if fileExists(filepath.Join(abs, LiveStateFilename)) {
+			return abs
+		}
+	}
+
+	if abs, err := filepath.Abs(workDir); err == nil {
+		return abs
+	}
+	return workDir
 }
 
 // List returns every record, newest first. Records that fail to decode are
@@ -321,6 +372,15 @@ func (s *FilesystemStore) MarkReleased(id string) error {
 	if err != nil {
 		if !fileExists(s.path(id)) {
 			return err
+		}
+		// The unparseable bytes are preserved alongside, not replaced.
+		// A record truncated mid-write often still contains a readable
+		// project id -- the one thing an operator would need to finish
+		// the job by hand -- and overwriting it in place would destroy
+		// that while marking the deployment "released", so no reaper
+		// would ever look at it again.
+		if raw, readErr := os.ReadFile(s.path(id)); readErr == nil {
+			_ = os.WriteFile(s.path(id)+".unreadable", raw, 0o644)
 		}
 		return s.write(Deployment{ID: id, State: StateReleased})
 	}

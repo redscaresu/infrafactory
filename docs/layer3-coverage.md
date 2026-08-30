@@ -1,5 +1,26 @@
 # Layer 3 coverage: which Scaleway scenarios can run against the real API
 
+> **Retraction, 2026-08-30 — read before the IPAM references below.**
+> This document repeatedly names `IPAMFullAccess` as what gates private
+> networking. That was wrong. A canary asked the real API, which wanted
+> `write compute_private_networks` — `PrivateNetworksFullAccess`, granted
+> 2026-08-30. Private *networks* now create. Private *NICs* still cannot, and
+> **no permission fixes it**: `scaleway_instance_private_nic` has no `project_id`
+> attribute (verified against provider 2.81.0), so it is created in the provider
+> default project — the ADR-0010 containment project — while the server lives in
+> the run's own, and the API refuses the mismatch.
+>
+> A second claim made the same day, that `vpc_required.rego` is enforced for AWS
+> only, was **also wrong and is retracted**: `filterPolicyPathsByCloud` drops only
+> *other* clouds, so all five `policies/scaleway/*.rego` run against a Scaleway
+> plan.
+>
+> The real position: **Layer 1 requires a private NIC on every instance server and
+> Layer 3 cannot apply one.** The gates contradict each other. Every "waits on
+> IPAM" line below should be read as "blocked on private networking, unresolvably
+> so today".
+
+
 Audit date: 2026-08-24. **Refreshed** after `scaleway_instance_ip` and
 `scaleway_instance_server` were admitted to the allowlist so a load
 balancer could have a backend that serves — see the allowlist amendment
@@ -39,7 +60,7 @@ The first three are least-privilege choices. The fourth is not: private
 NICs are allowlisted only because `policies/scaleway/vpc_required.rego`
 denies any instance server without one, so omitting them would leave
 static policy demanding a resource the allowlist forbids — unsatisfiable
-by any generated HCL. It waits on `IPAMFullAccess`.
+by any generated HCL. It waits on private networking becoming applicable at all (see the retraction at the top), not on `IPAMFullAccess`.
 
 ## Coverage
 
@@ -243,9 +264,10 @@ the allowlist and concluding nothing blocked it; the correction came from
 actually generating the scenario, which is the same lesson S139–S143 paid for at
 much greater length. And the pitfall that forces the NIC cites the `vpc_required`
 policy, which is **not** in Scaleway's `constraint_policies` — it is wired for AWS
-only. So generation is being steered into an IPAM-gated resource on the strength
-of a policy this cloud does not enforce. Whether the fix is to grant IPAM or to
-narrow the pitfall is an open decision, not a documentation matter.
+only for the `constraint_policies` mapping — but that is a different mechanism,
+and the rego IS evaluated for Scaleway via the per-cloud directory walk. See the
+retraction at the top of this document: the blocker is the contradiction between
+the two gates, not a permission and not the pitfall.
 
 `incremental-project-paris` had looked like a fourth: admitting the Instances types cleared its allowlist gate. It is not. The scenario declares private networking and its generated HCL creates `scaleway_instance_private_nic`, so it still needs `IPAMFullAccess` — it swapped blockers rather than losing one.
 
@@ -258,8 +280,8 @@ unchanged deliberately:
 
 - **Cost/time.** `scaleway_k8s_*`, `scaleway_rdb_instance`, `scaleway_redis_cluster` stay commented out. They take minutes to create *and* minutes to destroy, on every iteration of the repair loop.
 - **Policy.** `scaleway_iam*`, `scaleway_registry_namespace` and `scaleway_domain*` pass the allowlist and are refused by the API with a 403. That is the credential doing its job. `scaleway_domain*` is also, now, the `iam-scope` case in the plan-lied corpus — it is deliberately never granted.
-- **Private networking.** `IPAMFullAccess` has still not been granted. Add it when a scenario actually needs it, not before.
+- **Private networking.** `PrivateNetworksFullAccess` was granted 2026-08-30 and private networks now create; `IPAMFullAccess` remains ungranted and is **not** what blocks private NICs. See the retraction at the top: no permission unblocks them.
 
-`scaleway_instance_private_nic` is allowlisted alongside the server, because `policies/scaleway/vpc_required.rego` denies any instance server without one — admitting the server but not the NIC would leave static policy demanding a resource the allowlist forbids, and no generated HCL could satisfy both. It sits in the "allowed locally, refused by the API" group until `IPAMFullAccess` is granted.
+`scaleway_instance_private_nic` is allowlisted alongside the server, because `policies/scaleway/vpc_required.rego` denies any instance server without one — admitting the server but not the NIC would leave static policy demanding a resource the allowlist forbids, and no generated HCL could satisfy both. It sits in the "allowed locally, refused by the API" group permanently, not pending a grant: see the retraction at the top.
 
-That distinction matters for reading the count above. `lb-serving-paris` is runnable **through the gate**, which uses `infrafactory test` against fixed HCL and does not run the static layer. Driving the same scenario through `infrafactory run` — generate, then validate — additionally needs private networking, and therefore IPAM.
+That distinction matters for reading the count above. `lb-serving-paris` is runnable **through the gate**, which uses `infrafactory test` against fixed HCL and does not run the static layer. Driving the same scenario through `infrafactory run` — generate, then validate — additionally needs private networking, which is unresolvable today (see the retraction at the top).

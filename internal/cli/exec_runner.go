@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/redscaresu/infrafactory/internal/harness"
 )
@@ -100,8 +101,24 @@ func envKeyMatches(key string, patterns []string) bool {
 	return false
 }
 
+// cancelGraceWindow bounds how long a cancelled command may keep running
+// after its interrupt before it is killed outright. It also bounds Wait:
+// tofu forks provider plugins that inherit the stdout/stderr pipe write
+// ends, so without a delay Wait can block indefinitely on a grandchild
+// after the child is gone.
+const cancelGraceWindow = 15 * time.Second
+
 func (execCommandRunner) Run(ctx context.Context, cmd harness.Command) (harness.CommandResult, error) {
 	execCmd := exec.CommandContext(ctx, cmd.Name, cmd.Args...)
+	// Interrupt, not kill. The default CommandContext cancel sends
+	// SIGKILL, which stops `tofu apply` mid-flight: a resource whose
+	// create call has returned but whose state has not been flushed is
+	// then live in the account and absent from terraform-live.tfstate --
+	// so teardown destroys from an incomplete state and the project
+	// delete fails on the resource nothing recorded. SIGINT lets tofu
+	// finish writing state before exiting.
+	execCmd.Cancel = func() error { return execCmd.Process.Signal(os.Interrupt) }
+	execCmd.WaitDelay = cancelGraceWindow
 	execCmd.Dir = cmd.Dir
 	execCmd.Env = withEnvOverrides(stripEnvKeys(stripGCPAuthEnv(os.Environ()), cmd.StripEnv), cmd.Env)
 
