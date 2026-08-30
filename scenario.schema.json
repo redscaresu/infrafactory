@@ -44,6 +44,10 @@
       "type": "string",
       "description": "Path to the training scenario this criteria-only holdout validates against (e.g., 'scenarios/training/web-app-paris.yaml'). Only valid when type=holdout."
     },
+    "service": {
+      "$ref": "#/$defs/service_spec",
+      "description": "The versioned application this scenario runs on the infrastructure it declares. Presence of this block makes the scenario a live-service scenario (S152)."
+    },
     "resources": {
       "type": "object",
       "description": "Infrastructure resources to provision. Required for training, regression, and full holdout scenarios. Omitted for criteria-only holdouts.",
@@ -97,6 +101,41 @@
     }
   ],
   "$defs": {
+    "service_spec": {
+      "type": "object",
+      "description": "A versioned application deployed onto the scenario's infrastructure. Version identity is the point: without it an upgrade is not an event that can succeed or fail, and the live-services learning signal does not exist.",
+      "required": ["image", "tag", "port", "ttl"],
+      "additionalProperties": false,
+      "properties": {
+        "image": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Container image without its tag (e.g. 'nginx'). A public image by default -- a first-party registry is deliberately out of scope for this arc."
+        },
+        "tag": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Immutable image tag (e.g. '1.27'). Mutable tags such as 'latest' are refused by the loader: if the running version cannot be named, an upgrade signal means nothing."
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535,
+          "description": "Port the application listens on inside the instance, and the port the load balancer forwards to."
+        },
+        "health_path": {
+          "type": "string",
+          "pattern": "^/",
+          "default": "/",
+          "description": "HTTP path polled to decide whether the service is serving. Used by the http_probe criterion and, from S154, by the soak stage."
+        },
+        "ttl": {
+          "type": "string",
+          "pattern": "^[0-9]+(ns|us|ms|s|m|h)$",
+          "description": "How long a deployment of this service may live before the reaper destroys it, as a Go duration (e.g. '4h'). Mandatory: there is no value meaning 'forever' (ADR-0024)."
+        }
+      }
+    },
     "compute_resource": {
       "type": "object",
       "required": ["purpose", "size"],

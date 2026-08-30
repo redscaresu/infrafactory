@@ -110,3 +110,38 @@ binding constraint on TTL is exposure and forgetting, not money. A deployment
 left running for a month costs roughly what one takeaway does; a deployment
 left running and *forgotten* is the actual risk, which is what the reaper is
 for. S157 replaces this table with measured spend rather than list price.
+
+## Amendment, 2026-08-30 (S152): the service spec, and why a moving tag is refused
+
+`scenario.schema.json` gains a top-level `service:` block — `image`, `tag`,
+`port`, `health_path`, `ttl` — with `image`, `tag`, `port` and `ttl` required.
+Its presence makes a scenario a live-service scenario; its absence leaves every
+scenario that predates S152 untouched.
+
+Two rules follow from the decisions above rather than being new policy.
+
+**TTL lives in the schema, not in a flag.** Rule 2 says an expiry is mandatory
+with no unbounded form. Putting it on the service spec means a scenario cannot
+*declare* a service without saying how long a deployment of it may live, and the
+JSON schema enforces that for callers which validate without decoding — the UI's
+real-time validation path included. `MaxServiceTTL` is 168h. That is a typo
+control, not a cost control: at roughly EUR 0.042/hour a week is small money, but
+`400h` written where `4h` was meant should fail at validation rather than on an
+invoice.
+
+**A moving tag is refused.** `latest`, `stable`, `edge`, `main`, `master`,
+`nightly` and similar are rejected by the loader. Version identity is the only
+property this arc needs from an image: without it an upgrade cannot be
+distinguished from a no-op, and a soak failure cannot be attributed to a version
+— which would make the entire S154–S156 signal meaningless. This is honest about
+its own limits: it catches the common case and is not a proof of immutability. A
+numeric tag such as `1` also moves, and only a digest (`@sha256:...`) is
+genuinely fixed. Digest pinning is worth doing and is deliberately not done here.
+
+**Consequence for `docs/layer3-coverage.md`.** That document counts
+`**runnable**` rows as scenarios that *have run*. `web-live-paris` is ungated but
+has never been run, so recording it as runnable would have made the document
+claim a real-cloud run that never happened — the S147 failure class, caught by
+`TestLayer3CoverageDocTotalsMatchItsTable` rather than by review. The table gains
+a fourth bucket, `runnable, unrun`, enforced by that same test. A row is promoted
+to `**runnable**` on the day it goes green and not before.

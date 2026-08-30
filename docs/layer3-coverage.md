@@ -48,6 +48,7 @@ by any generated HCL. It waits on `IPAMFullAccess`.
 | `block-paris` | **runnable** | instant | — (run 2026-08-22) |
 | `lb-paris` | **runnable** | hourly | — (run 2026-08-23) |
 | `lb-serving-paris` | **runnable** | hourly | — (added 2026-08-24; the first `http_probe` against real Scaleway) |
+| `web-live-paris` | runnable, unrun | hourly | — (added 2026-08-30 by S152; nothing gates it, and it has not been run) |
 | `incremental-project-paris` | key only | hourly | IPAM (allowlist cleared 2026-08-24; it declares private networking) |
 | `registry-paris` | key only | instant | Registry |
 | `iam-policies-paris` | key only | instant | IAM |
@@ -63,7 +64,7 @@ by any generated HCL. It waits on `IPAMFullAccess`.
 | `web-app-paris` | allowlist + key | slow + expensive | DomainsDNS, IPAM, RDB, VPCGateway |
 | `full-stack-paris` | allowlist + key | slow + expensive | IAM, Kubernetes, RDB, Redis, Registry |
 
-**Current: 3 have run, 5 are blocked by the key alone, 9 by both.** As
+**Current: 3 have run, 1 ungated but unrun, 5 are blocked by the key alone, 9 by both.** As
 first audited on 2026-08-23 it was 2 runnable, 1 blocked by the allowlist
 alone, 4 by the key alone and 9 by both; `lb-serving-paris` did not exist
 yet, and `incremental-project-paris` has since moved from the allowlist
@@ -195,6 +196,17 @@ Re-run it after any change to the allowlist, the IAM policy, or a scenario's
 `scaleway_instance_ip` and `scaleway_instance_server` are now allowlisted, and the policy already carried `InstancesFullAccess`, so both gates admit a small compute backend.
 
 **Runnable: 3 of 17** Scaleway training scenarios — 18 counting the holdout. `block-paris`, `lb-paris`, and the new `lb-serving-paris`, all three of which have actually run.
+
+**Update, 2026-08-30 (S152).** `web-live-paris` brings the Scaleway training set
+to 18 — 19 counting the holdout. It needs a status this table did not previously
+have to express. Nothing gates it: every resource it declares is allowlisted and
+the key permits them, exactly as for `lb-serving-paris`. But it **has not been
+run**, and the totals line below counts `**runnable**` rows as scenarios that
+*have run*. Marking it `**runnable**` would therefore have made this document
+claim a real-cloud run that never happened, so it is recorded as
+`runnable, unrun` and is deliberately absent from the 3/5/9 totals. **Ungated is
+now 4 of 18; have-run remains 3 of 18.** The row becomes `**runnable**` on the
+day it goes green, and not before.
 
 `incremental-project-paris` had looked like a fourth: admitting the Instances types cleared its allowlist gate. It is not. The scenario declares private networking and its generated HCL creates `scaleway_instance_private_nic`, so it still needs `IPAMFullAccess` — it swapped blockers rather than losing one.
 

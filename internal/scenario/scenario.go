@@ -28,6 +28,11 @@ type Scenario struct {
 	References         string                `json:"references,omitempty"`
 	Resources          Resources             `json:"resources"`
 	AcceptanceCriteria []AcceptanceCriterion `json:"acceptance_criteria"`
+	// Service is the versioned application this scenario runs on the
+	// infrastructure it declares. Its presence makes the scenario a
+	// live-service scenario; nil means the scenario is infrastructure
+	// only, which is every scenario that predates S152.
+	Service *ServiceSpec `json:"service,omitempty"`
 	// AWSResourceAnchors lists the per-API resource types a cloud:aws
 	// scenario asserts end-to-end coverage for (e.g.,
 	// ["aws_iam_role", "aws_iam_role_policy_attachment"]). Required on
@@ -301,6 +306,10 @@ func parseAndValidate(payload []byte, sourceLabel, schemaPath string) (Scenario,
 	}
 
 	applyIAMDefaults(&result, normalized)
+
+	if err := validateService(&result); err != nil {
+		return Scenario{}, fmt.Errorf("scenario %q: %w", sourceLabel, err)
+	}
 
 	return result, nil
 }

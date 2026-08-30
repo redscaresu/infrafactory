@@ -1,0 +1,48 @@
+scenario: web-live-paris
+version: "1.0"
+cloud: scaleway
+description: >
+  A versioned web application on one small instance behind a public load
+  balancer. The first scenario to declare a `service:` -- an image pinned
+  to an immutable tag -- rather than only the infrastructure under it.
+  lb-serving-paris proves a load balancer can serve; this one names what
+  it is serving, which is what makes an upgrade an event that can succeed
+  or fail.
+
+# The application. Its tag is the whole point: an upgrade from a tag that
+# moves cannot be told from a no-op, so the loader refuses `latest`.
+# ttl is mandatory -- there is no value meaning "forever" (ADR-0024).
+service:
+  image: nginx
+  tag: "1.27"
+  port: 80
+  health_path: /
+  ttl: 4h
+
+resources:
+  compute:
+    purpose: web-server
+    size: small
+    count: 1
+  networking:
+    load_balancer:
+      exposure: public
+      backends:
+        - port: 80
+          protocol: http
+
+acceptance_criteria:
+  - type: policy
+    check: region_restriction
+    params:
+      region: fr-par
+    expect: pass
+  # Satisfied only if the instance booted, the container started, and the
+  # load balancer health check marked the backend up -- the same bar
+  # lb-serving-paris set, now against a named version.
+  - type: http_probe
+    target: load_balancer
+    port: 80
+    expect: reachable
+  - type: destruction
+    expect: no_orphans

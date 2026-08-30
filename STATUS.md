@@ -4,6 +4,29 @@ Last updated: 2026-08-24
 
 ## Current phase
 
+- 🚧 **S152 landed (2026-08-30)** — the app gets a version. `service:` in
+  `scenario.schema.json` names the image, tag, port, health path and TTL that a
+  live-service scenario runs, and `scenarios/training/web-live-paris.yaml` is the
+  first to declare one. Infrastructure-only scenarios are unaffected: no
+  `service:` block means nothing changes.
+
+  **The tag must not move.** `latest`, `stable`, `edge`, `main`, `master` and
+  friends are refused by the loader, because an upgrade from a tag that moves
+  cannot be told from a no-op and a soak failure cannot be attributed to a
+  version. This catches the common case and is not a proof of immutability — a
+  numeric tag like `1` moves too, and only a digest is genuinely fixed. TTL is
+  bounded at 168h as a typo control, not a cost control: `400h` where `4h` was
+  meant should fail at validation rather than on an invoice.
+
+  Caught by the audit tests, and worth recording because it is the S147 failure
+  class exactly: `docs/layer3-coverage.md` counts `**runnable**` rows as
+  scenarios that **have run**, so adding `web-live-paris` as runnable would have
+  made the doc claim a real-cloud run that never happened. The table had no way
+  to say *ungated but never run*. It now does — `runnable, unrun`, a fourth
+  bucket in both the doc and `TestLayer3CoverageDocTotalsMatchItsTable`. Ungated
+  is 4 of 18; have-run remains 3 of 18, and the row becomes `**runnable**` the
+  day it goes green, not before.
+
 - 🚧 **S151 landed (2026-08-30)** — first slice of the live-services arc
   (`docs/plans/live-services-arc-plan.md`). `internal/livestore` records
   infrastructure that deliberately outlives the run which created it, and

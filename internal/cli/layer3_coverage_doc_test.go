@@ -50,12 +50,17 @@ func TestLayer3CoverageDocTotalsMatchItsTable(t *testing.T) {
 	require.NotEmpty(t, rows, "no scenario rows parsed -- the table format changed")
 
 	run := counts["**runnable**"]
+	// Ungated but never run. The table needs this bucket because
+	// "**runnable**" is counted as *have run* in the totals line, so a
+	// scenario added before its first real-cloud run would otherwise
+	// have to claim a run that never happened (S152).
+	unrun := counts["runnable, unrun"]
 	keyOnly := counts["key only"]
 	both := counts["allowlist + key"]
 
 	// assert.Contains on the whole document prints the whole document
 	// on failure, which buries the one number that is wrong.
-	wantTotals := sprintTotals(run, keyOnly, both)
+	wantTotals := sprintTotals(run, unrun, keyOnly, both)
 	assert.True(t, strings.Contains(doc, wantTotals),
 		"the totals line must match the table (%d rows). Expected to find:\n  %s", len(rows), wantTotals)
 
@@ -68,8 +73,8 @@ func TestLayer3CoverageDocTotalsMatchItsTable(t *testing.T) {
 		"the gated remainder must equal key-only + both = %d. Expected to find:\n  %q",
 		keyOnly+both, wantGated)
 
-	assert.Equal(t, len(rows), run+keyOnly+both,
-		"every row must fall into exactly one of the three buckets")
+	assert.Equal(t, len(rows), run+unrun+keyOnly+both,
+		"every row must fall into exactly one of the four buckets")
 }
 
 // The enumerated allowlist must be the allowlist.
@@ -114,8 +119,10 @@ func TestLayer3CoverageDocAllowlistMatchesConfig(t *testing.T) {
 		"docs/layer3-coverage.md enumerates the repo-default allowlist; it must match infrafactory.yaml exactly")
 }
 
-func sprintTotals(run, keyOnly, both int) string {
-	return fmt.Sprintf("**Current: %d have run, %d are blocked by the key alone, %d by both.**", run, keyOnly, both)
+func sprintTotals(run, unrun, keyOnly, both int) string {
+	return fmt.Sprintf(
+		"**Current: %d have run, %d ungated but unrun, %d are blocked by the key alone, %d by both.**",
+		run, unrun, keyOnly, both)
 }
 
 // numberWords covers the plausible range for this table. A count outside
