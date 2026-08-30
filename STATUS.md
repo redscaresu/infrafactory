@@ -4,6 +4,101 @@ Last updated: 2026-08-24
 
 ## Current phase
 
+- ✅ **Live-services canary green (2026-08-30)** — `deploy` → `live ls` →
+  `live teardown` proven against **real Scaleway**, first attempt. Deploy 35.8s,
+  teardown 36.1s, **HTTP 200 through a real load balancer**, account back to its
+  3 baseline projects with the canary project returning 404 — verified against
+  the API, not from the command's own report.
+
+  Seeded HCL, deliberately: the `lb-serving-paris` fixture stood in for generated
+  output so any failure would be S151–S153 code rather than generation (the S143
+  pattern). **D6 reproduced itself in the new teardown path** — Scaleway
+  auto-created a `Default security group`, destroy could not delete the project
+  while it existed, and the S146 purge-and-retry cleared it *and said so*. Without
+  that reporting the teardown would have read as an ordinary clean run.
+
+  **Gap it exposed**: `deploy` records the *declared* image without verifying what
+  is running. The record said `nginx:1.27`; the instance served
+  `python3 -m http.server`. Queued for S155, where upgrade makes it load-bearing.
+
+- 🚧 **S153 landed (2026-08-30)** — the first slice where something stays up,
+  and the thing that takes it down, in one PR. `infrafactory deploy` applies a
+  validated scenario and records it; `live teardown <id>` destroys one;
+  `live reap` destroys everything past its TTL.
+
+  **`deploy` deliberately does not generate.** `run` proves a change is safe;
+  `deploy` takes what `run` validated and keeps it. The allowlist is still
+  re-checked at deploy time, deny-by-default — *already validated* is a claim
+  about a previous command.
+
+  **Every deployment gets its own workdir** (`<live root>/workdirs/<id>`), never
+  the shared `output/<scenario>`. Two deployments of one scenario would otherwise
+  share a single `terraform-live.tfstate` and the second apply would overwrite
+  the first's, orphaning real resources with nothing left that knows how to
+  destroy them — the D6 class again, invisible to any cost check.
+
+  **The registry is not authority for what gets destroyed.** It says which
+  deployment; the state file says which project, and `AssertProjectDeletable`
+  gets both, so a disagreement is fatal. A deployment whose state has vanished is
+  reported and **not** released: its resources may still be running, and
+  releasing it would retire the only record that says so.
+
+  Registration happens on the failure path too — a half-finished apply leaves
+  real resources, and the record is the only thing that brings the reaper back.
+
+  **Known hole, deliberately left open**: the reaper trusts the store to know
+  every live deployment. A wiped working directory loses records while the cloud
+  keeps the resources. Reconcile-against-API is the largest remaining gap in
+  ADR-0024 and is queued for S157.
+
+- 🚧 **S152 landed (2026-08-30)** — the app gets a version. `service:` in
+  `scenario.schema.json` names the image, tag, port, health path and TTL that a
+  live-service scenario runs, and `scenarios/training/web-live-paris.yaml` is the
+  first to declare one. Infrastructure-only scenarios are unaffected: no
+  `service:` block means nothing changes.
+
+  **The tag must not move.** `latest`, `stable`, `edge`, `main`, `master` and
+  friends are refused by the loader, because an upgrade from a tag that moves
+  cannot be told from a no-op and a soak failure cannot be attributed to a
+  version. This catches the common case and is not a proof of immutability — a
+  numeric tag like `1` moves too, and only a digest is genuinely fixed. TTL is
+  bounded at 168h as a typo control, not a cost control: `400h` where `4h` was
+  meant should fail at validation rather than on an invoice.
+
+  Caught by the audit tests, and worth recording because it is the S147 failure
+  class exactly: `docs/layer3-coverage.md` counts `**runnable**` rows as
+  scenarios that **have run**, so adding `web-live-paris` as runnable would have
+  made the doc claim a real-cloud run that never happened. The table had no way
+  to say *ungated but never run*. It now does — `runnable, unrun`, a fourth
+  bucket in both the doc and `TestLayer3CoverageDocTotalsMatchItsTable`. Ungated
+  is 4 of 18; have-run remains 3 of 18, and the row becomes `**runnable**` the
+  day it goes green, not before.
+
+- 🚧 **S151 landed (2026-08-30)** — first slice of the live-services arc
+  (`docs/plans/live-services-arc-plan.md`). `internal/livestore` records
+  infrastructure that deliberately outlives the run which created it, and
+  `infrafactory live ls` reports what is running and how long it has left.
+
+  Nothing persists yet — this slice is bookkeeping, on purpose: there must be a
+  record of what is out there before anything is allowed to stay up. The
+  decisions are in **ADR-0024**, and all of them fail toward teardown. An expiry
+  is mandatory and there is no value meaning "forever". A record that will not
+  decode, or that lacks an expiry or a project id, is reported as **expired and
+  reapable** rather than skipped — "we could not check" must never look like
+  "nothing is running", so `live ls` exits non-zero and names the record.
+
+  Caught while writing it: `MarkReleased` originally routed through `Put`, which
+  validates. A damaged record is still reapable and its resources are still
+  real, so the reaper would have destroyed them, failed to record that it had,
+  and destroyed the same already-destroyed deployment on every later pass.
+  Releasing now bypasses validation; creating still does not.
+
+  Live deployments will get their own Scaleway project rather than teaching the
+  orphan sweep to discriminate live resources from strays — that would make
+  sweep correctness depend on registry accuracy, where one stale entry is a
+  silent leak (the D6 class). **The ephemeral invariant is therefore unchanged:
+  per-run projects are still destroyed and swept.**
+
 - 🔒 **S150 landed (2026-08-24)** — first slice of the Presentable arc, taken before S144 so the workflow that will hold cloud credentials is born into a hardened pipeline. `govulncheck` in CI, explicit `permissions:` on every workflow, SHA-pinned actions on the two workflows with elevated capability. **The scanner found ~20 known stdlib advisories on its first run**: `go.mod` pinned `go 1.25.0` and several were genuinely reachable (`GO-2026-6218` in `net/url` via `http.Client.Do` from `internal/api/server.go`), so every binary built here was linked against a vulnerable stdlib. Now pinned to `go 1.25.13`. Posture and the goldfinger comparison in `docs/ci-security-posture.md`.
 
 - 🚦 **S148 in progress (2026-08-26)** — `make demo-gate` puts a generated change on a PR, labels it, waits on the deployment approval and follows the run; `make demo-preflight` fails rather than reads, and checks the account is clean before you start. **The demo is agent-authored**: `infrafactory generate` writes the HCL and a script only carries it to a PR, so the agent in the talk's title is on screen rather than taken on faith.

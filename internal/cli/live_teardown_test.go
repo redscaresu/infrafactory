@@ -1,0 +1,290 @@
+package cli
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/spf13/cobra"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/redscaresu/infrafactory/internal/config"
+	"github.com/redscaresu/infrafactory/internal/harness"
+	"github.com/redscaresu/infrafactory/internal/livestore"
+)
+
+// liveTeardownRuntime builds a Layer-3-enabled runtime with fake destroy
+// and sweep harnesses and a workspace-scoped live store, so no test can
+// reach the operator's real record or the real API.
+func liveTeardownRuntime(t *testing.T, destroy *fakeSandboxDestroyHarness, sweep *fakeOrphanSweep) (*CommandRuntime, *livestore.FilesystemStore, string) {
+	t.Helper()
+	h := newCommandTestHarness(t)
+
+	cfg, err := config.Load(h.ConfigPath)
+	require.NoError(t, err)
+	cfg.Paths.Output = h.OutputDir()
+	cfg.Validation.Layers.SandboxDeploy.Enabled = true
+
+	rt := &CommandRuntime{
+		Config:        cfg,
+		livestoreRoot: h.LivestoreRoot(),
+		Deps: RuntimeDependencies{
+			SandboxDestroy: destroy,
+			OrphanSweep:    sweep,
+		},
+	}
+
+	return rt, livestore.NewFilesystemStore(h.LivestoreRoot()), h.WorkspaceDir
+}
+
+// liveDeploymentWithState writes a deployment record plus the live state
+// file its teardown reads, both scoped to the same project.
+func liveDeploymentWithState(t *testing.T, store *livestore.FilesystemStore, workspace, id string, expiresIn time.Duration) livestore.Deployment {
+	t.Helper()
+
+	workDir := filepath.Join(workspace, "live", id)
+	require.NoError(t, os.MkdirAll(workDir, 0o755))
+	writeReapLiveState(t, workDir, reapProjectID)
+
+	now := time.Now()
+	d := livestore.Deployment{
+		ID:        id,
+		Scenario:  "web-live-paris",
+		ProjectID: reapProjectID,
+		Image:     "nginx",
+		Tag:       "1.27",
+		WorkDir:   workDir,
+		CreatedAt: now.Add(-time.Hour),
+		ExpiresAt: now.Add(expiresIn),
+	}
+	require.NoError(t, store.Put(d))
+	return d
+}
+
+func runLiveReap(t *testing.T, rt *CommandRuntime, out *strings.Builder, args ...string) error {
+	t.Helper()
+	cmd := &cobra.Command{Use: "reap"}
+	cmd.Flags().Bool("dry-run", false, "")
+	cmd.Flags().String("output", string(OutputModeHuman), "")
+	require.NoError(t, cmd.ParseFlags(args))
+	cmd.SetOut(out)
+	cmd.SetErr(out)
+	cmd.SetContext(context.Background())
+	return runLiveReapCommand(cmd, nil, rt)
+}
+
+func TestTeardownDestroysSweepsAndReleases(t *testing.T) {
+	sandboxCredsForTest(t)
+	destroy, sweep := &fakeSandboxDestroyHarness{}, &fakeOrphanSweep{}
+	rt, store, workspace := liveTeardownRuntime(t, destroy, sweep)
+	d := liveDeploymentWithState(t, store, workspace, "dep-1", -time.Minute)
+
+	_, failures := tearDownDeployment(context.Background(), rt, store, d)
+
+	assert.Empty(t, failures)
+	assert.Equal(t, 1, destroy.calls, "the destroy harness ran")
+	assert.Equal(t, 1, sweep.calls, "and the account was verified afterwards")
+
+	got, err := store.Get(d.ID)
+	require.NoError(t, err)
+	assert.Equal(t, livestore.StateReleased, got.State)
+	assert.False(t, got.Reapable(time.Now()), "a released deployment is not reaped again")
+}
+
+// The registry says WHICH deployment; the state file says which project.
+// A record pointed at a project its own state does not name must not be
+// able to aim the destroyer at it.
+func TestTeardownRefusesWhenTheRecordDisagreesWithTheState(t *testing.T) {
+	sandboxCredsForTest(t)
+	destroy, sweep := &fakeSandboxDestroyHarness{}, &fakeOrphanSweep{}
+	rt, store, workspace := liveTeardownRuntime(t, destroy, sweep)
+
+	d := liveDeploymentWithState(t, store, workspace, "dep-tampered", -time.Minute)
+	d.ProjectID = "99999999-9999-9999-9999-999999999999"
+
+	_, failures := tearDownDeployment(context.Background(), rt, store, d)
+
+	require.NotEmpty(t, failures)
+	assert.Contains(t, failures[0].Detail, "refusing to destroy")
+	assert.Zero(t, destroy.calls, "nothing was destroyed")
+	assert.Zero(t, sweep.calls)
+}
+
+// Refusing to destroy the organization default is the guard that matters
+// most, because that project holds real infrastructure.
+func TestTeardownRefusesTheOrganizationDefaultProject(t *testing.T) {
+	sandboxCredsForTest(t)
+	destroy, sweep := &fakeSandboxDestroyHarness{}, &fakeOrphanSweep{}
+	rt, store, workspace := liveTeardownRuntime(t, destroy, sweep)
+
+	workDir := filepath.Join(workspace, "live", "dep-org")
+	require.NoError(t, os.MkdirAll(workDir, 0o755))
+	writeReapLiveState(t, workDir, reapOrgID)
+
+	now := time.Now()
+	d := livestore.Deployment{
+		ID: "dep-org", Scenario: "web-live-paris", ProjectID: reapOrgID,
+		WorkDir: workDir, CreatedAt: now.Add(-time.Hour), ExpiresAt: now.Add(-time.Minute),
+	}
+	require.NoError(t, store.Put(d))
+
+	_, failures := tearDownDeployment(context.Background(), rt, store, d)
+
+	require.NotEmpty(t, failures)
+	assert.Contains(t, failures[0].Detail, "organization's default project")
+	assert.Zero(t, destroy.calls)
+}
+
+// A record whose state has vanished must stay in the registry. Its
+// resources may still be running, and releasing it would retire the only
+// evidence that says so.
+func TestTeardownKeepsTheRecordWhenTheStateIsMissing(t *testing.T) {
+	sandboxCredsForTest(t)
+	destroy, sweep := &fakeSandboxDestroyHarness{}, &fakeOrphanSweep{}
+	rt, store, workspace := liveTeardownRuntime(t, destroy, sweep)
+
+	d := liveDeploymentWithState(t, store, workspace, "dep-lost", -time.Minute)
+	require.NoError(t, os.Remove(filepath.Join(d.WorkDir, "terraform-live.tfstate")))
+
+	_, failures := tearDownDeployment(context.Background(), rt, store, d)
+
+	require.NotEmpty(t, failures)
+	assert.Contains(t, failures[0].Detail, "may still be running")
+	assert.Zero(t, destroy.calls)
+
+	got, err := store.Get(d.ID)
+	require.NoError(t, err)
+	assert.NotEqual(t, livestore.StateReleased, got.State, "the leak stays visible")
+	assert.True(t, got.Reapable(time.Now()), "and it is retried next pass")
+}
+
+func TestTeardownWithoutAWorkDirIsUnreclaimable(t *testing.T) {
+	sandboxCredsForTest(t)
+	destroy, sweep := &fakeSandboxDestroyHarness{}, &fakeOrphanSweep{}
+	rt, store, _ := liveTeardownRuntime(t, destroy, sweep)
+
+	now := time.Now()
+	d := livestore.Deployment{
+		ID: "dep-nowhere", Scenario: "web-live-paris", ProjectID: reapProjectID,
+		CreatedAt: now.Add(-time.Hour), ExpiresAt: now.Add(-time.Minute),
+	}
+	require.NoError(t, store.Put(d))
+
+	_, failures := tearDownDeployment(context.Background(), rt, store, d)
+
+	require.NotEmpty(t, failures)
+	assert.Contains(t, failures[0].Detail, "records no work_dir")
+	assert.Zero(t, destroy.calls)
+}
+
+// A failed destroy must not release the record: the resources are still
+// there.
+func TestTeardownDoesNotReleaseWhenDestroyFails(t *testing.T) {
+	sandboxCredsForTest(t)
+	destroy := &fakeSandboxDestroyHarness{err: harness.ErrSandboxDestroyFailed}
+	sweep := &fakeOrphanSweep{}
+	rt, store, workspace := liveTeardownRuntime(t, destroy, sweep)
+	d := liveDeploymentWithState(t, store, workspace, "dep-stuck", -time.Minute)
+
+	_, failures := tearDownDeployment(context.Background(), rt, store, d)
+
+	require.NotEmpty(t, failures)
+	assert.Zero(t, sweep.calls, "no point verifying an account the destroy did not clear")
+
+	got, err := store.Get(d.ID)
+	require.NoError(t, err)
+	assert.NotEqual(t, livestore.StateReleased, got.State)
+}
+
+func TestLiveReapWithNothingExpiredSucceedsAndSaysSo(t *testing.T) {
+	sandboxCredsForTest(t)
+	destroy, sweep := &fakeSandboxDestroyHarness{}, &fakeOrphanSweep{}
+	rt, store, workspace := liveTeardownRuntime(t, destroy, sweep)
+	liveDeploymentWithState(t, store, workspace, "dep-fresh", time.Hour)
+
+	var out strings.Builder
+	require.NoError(t, runLiveReap(t, rt, &out))
+
+	assert.Contains(t, out.String(), "Nothing has expired.")
+	assert.Zero(t, destroy.calls)
+}
+
+func TestLiveReapTearsDownOnlyExpiredDeployments(t *testing.T) {
+	sandboxCredsForTest(t)
+	destroy, sweep := &fakeSandboxDestroyHarness{}, &fakeOrphanSweep{}
+	rt, store, workspace := liveTeardownRuntime(t, destroy, sweep)
+
+	expired := liveDeploymentWithState(t, store, workspace, "dep-old", -time.Minute)
+	fresh := liveDeploymentWithState(t, store, workspace, "dep-new", time.Hour)
+
+	var out strings.Builder
+	require.NoError(t, runLiveReap(t, rt, &out))
+
+	assert.Equal(t, 1, destroy.calls, "exactly one deployment was expired")
+	assert.Contains(t, out.String(), "dep-old", "and the reaper names what it removed")
+	assert.NotContains(t, out.String(), "tearing down dep-new")
+
+	gotExpired, err := store.Get(expired.ID)
+	require.NoError(t, err)
+	assert.Equal(t, livestore.StateReleased, gotExpired.State)
+
+	gotFresh, err := store.Get(fresh.ID)
+	require.NoError(t, err)
+	assert.Equal(t, livestore.StateLive, gotFresh.State, "an unexpired deployment is untouched")
+}
+
+// --dry-run must be inert, for the same reason reap's is: pointing it at
+// the estate to see what it would do has to be safe.
+func TestLiveReapDryRunDestroysNothing(t *testing.T) {
+	sandboxCredsForTest(t)
+	destroy, sweep := &fakeSandboxDestroyHarness{}, &fakeOrphanSweep{}
+	rt, store, workspace := liveTeardownRuntime(t, destroy, sweep)
+	d := liveDeploymentWithState(t, store, workspace, "dep-old", -time.Minute)
+
+	var out strings.Builder
+	require.NoError(t, runLiveReap(t, rt, &out, "--dry-run"))
+
+	assert.Zero(t, destroy.calls)
+	assert.Contains(t, out.String(), "would tear down dep-old")
+	assert.Contains(t, out.String(), "nothing destroyed")
+
+	got, err := store.Get(d.ID)
+	require.NoError(t, err)
+	assert.Equal(t, livestore.StateLive, got.State)
+}
+
+// An unreadable record may describe running infrastructure the reaper
+// cannot reach. Reporting success while one exists would tell the
+// operator the estate is clean when it might not be.
+func TestLiveReapFailsWhenARecordCannotBeRead(t *testing.T) {
+	sandboxCredsForTest(t)
+	destroy, sweep := &fakeSandboxDestroyHarness{}, &fakeOrphanSweep{}
+	rt, store, workspace := liveTeardownRuntime(t, destroy, sweep)
+	liveDeploymentWithState(t, store, workspace, "dep-old", -time.Minute)
+	require.NoError(t, os.WriteFile(filepath.Join(store.Root, "mystery.json"), []byte("{oops"), 0o644))
+
+	var out strings.Builder
+	err := runLiveReap(t, rt, &out)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "provably clean")
+	assert.Equal(t, 1, destroy.calls, "the readable expired deployment is still torn down")
+}
+
+func TestLiveReapSkipsAlreadyReleasedDeployments(t *testing.T) {
+	sandboxCredsForTest(t)
+	destroy, sweep := &fakeSandboxDestroyHarness{}, &fakeOrphanSweep{}
+	rt, store, workspace := liveTeardownRuntime(t, destroy, sweep)
+	d := liveDeploymentWithState(t, store, workspace, "dep-done", -time.Minute)
+	require.NoError(t, store.MarkReleased(d.ID))
+
+	var out strings.Builder
+	require.NoError(t, runLiveReap(t, rt, &out))
+
+	assert.Zero(t, destroy.calls)
+	assert.Contains(t, out.String(), "Nothing has expired.")
+}

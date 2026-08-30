@@ -48,6 +48,7 @@ by any generated HCL. It waits on `IPAMFullAccess`.
 | `block-paris` | **runnable** | instant | — (run 2026-08-22) |
 | `lb-paris` | **runnable** | hourly | — (run 2026-08-23) |
 | `lb-serving-paris` | **runnable** | hourly | — (added 2026-08-24; the first `http_probe` against real Scaleway) |
+| `web-live-paris` | key only | hourly | IPAM (generation emits `scaleway_instance_private_nic`; canary 2026-08-30) |
 | `incremental-project-paris` | key only | hourly | IPAM (allowlist cleared 2026-08-24; it declares private networking) |
 | `registry-paris` | key only | instant | Registry |
 | `iam-policies-paris` | key only | instant | IAM |
@@ -63,7 +64,7 @@ by any generated HCL. It waits on `IPAMFullAccess`.
 | `web-app-paris` | allowlist + key | slow + expensive | DomainsDNS, IPAM, RDB, VPCGateway |
 | `full-stack-paris` | allowlist + key | slow + expensive | IAM, Kubernetes, RDB, Redis, Registry |
 
-**Current: 3 have run, 5 are blocked by the key alone, 9 by both.** As
+**Current: 3 have run, 0 ungated but unrun, 6 are blocked by the key alone, 9 by both.** As
 first audited on 2026-08-23 it was 2 runnable, 1 blocked by the allowlist
 alone, 4 by the key alone and 9 by both; `lb-serving-paris` did not exist
 yet, and `incremental-project-paris` has since moved from the allowlist
@@ -196,13 +197,40 @@ Re-run it after any change to the allowlist, the IAM policy, or a scenario's
 
 **Runnable: 3 of 17** Scaleway training scenarios — 18 counting the holdout. `block-paris`, `lb-paris`, and the new `lb-serving-paris`, all three of which have actually run.
 
+**Update, 2026-08-30 (S152).** `web-live-paris` brings the Scaleway training set
+to 18 — 19 counting the holdout. It needs a status this table did not previously
+have to express. Nothing gates it: every resource it declares is allowlisted and
+the key permits them, exactly as for `lb-serving-paris`. But it **has not been
+run**, and the totals line below counts `**runnable**` rows as scenarios that
+*have run*. Marking it `**runnable**` would therefore have made this document
+claim a real-cloud run that never happened, so it is recorded as
+`runnable, unrun` and is deliberately absent from the totals. The row becomes
+`**runnable**` on the day it goes green, and not before.
+
+**Corrected same day, by running it.** `web-live-paris` is *not* ungated. Its
+first generation emitted `scaleway_instance_private_nic`, because
+`pitfalls/scaleway.yaml` instructs the generator to attach a private NIC to every
+`scaleway_instance_server` — so it needs `IPAMFullAccess` exactly as
+`incremental-project-paris` does, and it is recorded as **key only**. Ungated is
+3 of 18, not 4; have-run is 3 of 18. The `runnable, unrun` bucket now has no
+members and is kept because the state is real and will recur.
+
+Two things are worth keeping from how this was found. The claim came from reading
+the allowlist and concluding nothing blocked it; the correction came from
+actually generating the scenario, which is the same lesson S139–S143 paid for at
+much greater length. And the pitfall that forces the NIC cites the `vpc_required`
+policy, which is **not** in Scaleway's `constraint_policies` — it is wired for AWS
+only. So generation is being steered into an IPAM-gated resource on the strength
+of a policy this cloud does not enforce. Whether the fix is to grant IPAM or to
+narrow the pitfall is an open decision, not a documentation matter.
+
 `incremental-project-paris` had looked like a fourth: admitting the Instances types cleared its allowlist gate. It is not. The scenario declares private networking and its generated HCL creates `scaleway_instance_private_nic`, so it still needs `IPAMFullAccess` — it swapped blockers rather than losing one.
 
 (The earlier "3 of 16" here counted `lb-serving-paris` in the numerator and not the denominator: adding it made 16 into 17.)
 
 `lb-serving-paris` is the first scenario to satisfy an `http_probe` against real Scaleway. It goes green end to end in **144 seconds** — apply, HTTP 200 through the load balancer frontend, destroy, orphan sweep — and it is the scenario that surfaced the auto-created security group defect (ADR-0023, second amendment of this date).
 
-Fourteen scenarios remain gated, and what gates them is unchanged and
+Fifteen scenarios remain gated, and what gates them is unchanged and
 unchanged deliberately:
 
 - **Cost/time.** `scaleway_k8s_*`, `scaleway_rdb_instance`, `scaleway_redis_cluster` stay commented out. They take minutes to create *and* minutes to destroy, on every iteration of the repair loop.

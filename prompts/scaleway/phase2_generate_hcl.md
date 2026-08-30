@@ -58,6 +58,13 @@ The previous iteration's generated code failed validation. These failures indica
 8. Apply all constraints from the scenario.
 9. Use private networking where required by constraints.
 10. **Naming convention**: All `name` attributes on resources MUST match the pattern `^[a-z](?:[a-z0-9-]*[a-z0-9])?$` — start with a lowercase letter, use only lowercase alphanumeric characters and hyphens, and do not end with a hyphen. Do NOT use underscores in names. For example, use `webapp-user` instead of `webapp_user`.
+11. **If the scenario declares a `service:` block**, it names a versioned application that must actually run on the compute instance. Implement it, do not ignore it:
+    - Run the image **exactly as pinned** — `image` and `tag` verbatim, e.g. `nginx:1.27`. Never substitute `latest` or a different tag: the whole point of the block is that the running version can be named.
+    - Start it from the instance's `user_data.cloud-init`, and make the container restart on boot and on crash (`docker run -d --restart=always`).
+    - The Scaleway base images do not all ship a container runtime. Install one in the same cloud-init before running the image, and wait for it to be ready — a `docker run` that fires before the daemon is up leaves the instance healthy and the service down, which is the hardest failure of this shape to diagnose.
+    - Publish the container's port to the host on `service.port`, and point the load balancer backend's `forward_port` at that same port.
+    - Bind the health path (`service.health_path`, default `/`) — the `http_probe` criterion polls it through the load balancer, so it must return a status below 400 once the instance has booted.
+    - Do **not** put `service.ttl` into the HCL. It bounds how long a deployment may live and is enforced by the reaper, not by Terraform.
 
 {{if .Pitfalls}}
 ## Provider Pitfalls
