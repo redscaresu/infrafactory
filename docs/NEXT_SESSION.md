@@ -2,121 +2,94 @@
 
 Self-contained brief for a fresh Claude / engineer starting in this repo.
 
-## Read this first (handoff state as of 2026-08-22)
+## Read this first (handoff state as of 2026-08-31)
 
-### Baseline
+### ACTIVE ARC — live services
 
-- **44/44 deterministic** (full scope, sweep 8, 2026-06-10).
-- **fakegenesys v0.2.0 tagged + pushed** (commit `3e5dc55`). v0.1.0 GitHub release published (duplicate Draft cleaned up).
-- **27 paired contracts CI-enforced across all 4 sibling fakes** via `handlers/contract_audit_test.go`. Convention is `CRITICAL[<id>]:` docstring ↔ `TestContract_<id>` test.
-- **ADR-0021 cloud-prefix lockstep CI-enforced** via `internal/cli/cloud_prefix_lockstep_test.go`. The three sites (`resourceNameRe` / `addressRe` / `pitfallResourceMatchesCloud`) are parsed at test time; disagreement on the cloud-prefix set fails CI with a per-site diff. Same shape as the sibling-fake contract audit.
-- Smoke check post-S135: genesys-full-stack target_reached in 329s / 2 iters (no LLM-layer regression).
+`docs/plans/live-services-arc-plan.md` (S151–S158). infrafactory can now deploy a
+versioned service that outlives its run, and destroy it again.
 
-### "Drift becomes failed `go test`" — the durable enforcement pattern
+**Landed** — S151 live deployment registry, S152 `service:` in the scenario
+schema, S153 `deploy`/`live teardown`/`live reap`, plus S153a/S153b hardening
+(PR #171).
 
-Three CI-enforced audits now cover wire-shape and pipeline conventions across the project:
+    infrafactory run <scenario>        prove it is safe
+    infrafactory deploy <scenario>     put it up under a TTL
+    infrafactory live ls               what is running, how long it has left
+    infrafactory live teardown <id>    destroy one
+    infrafactory live forget <id>      release a record nothing can act on
+    infrafactory live reap             destroy everything expired
 
-| Audit | Where | What it catches |
-|---|---|---|
-| Sibling contract audit | `handlers/contract_audit_test.go` in mockway, fakegcp, fakeaws, fakegenesys | Missing `TestContract_<id>` for a `CRITICAL[<id>]:` docstring (or vice versa) |
-| Cloud-prefix lockstep | `internal/cli/cloud_prefix_lockstep_test.go` | The three auto-learning regex sites disagree on the cloud-prefix set |
-| OPA-dup ratchet | `internal/generator/pitfalls_opa_dedup_test.go` + `prompts_opa_dedup_test.go` | Pitfalls or prompts duplicate an OPA-policy citation verbatim |
+**Proven against real Scaleway** (2026-08-30): deploy 35.8s, HTTP 200 through a
+real load balancer, teardown 36.1s, account back to its 3 baseline projects —
+verified against the API, not from the tool's own report. D6 (the auto-created
+`Default security group` blocking project deletion) reproduced **three** separate
+times, including once in a path with no infrafactory code in it.
 
-Pattern: convention as code, not convention as doc. Each is empty-state-safe (zero coverage passes trivially) and self-tested where applicable. The convention is opt-in — adding a `CRITICAL[<id>]:` tag opts a handler in; handlers without one are invisible to the audit.
+### THE BLOCKER — read before planning anything Scaleway + compute
 
-### Last arcs complete
+**Layer 1 requires a resource Layer 3 cannot create.**
+`policies/scaleway/vpc_required.rego` denies any `scaleway_instance_server`
+without a private NIC, and it *is* evaluated for Scaleway (`filterPolicyPathsByCloud`
+drops only *other* clouds). But `scaleway_instance_private_nic` has **no
+`project_id` attribute** (provider 2.81.0), so it lands in the provider's default
+project — the shared containment project — while its server is in the run's own,
+and the API refuses the mismatch.
 
-**Testify-conversion cross-repo sweep (2026-06-11)** — every Go test in `handlers/` across the 4 sibling fakes now uses `github.com/stretchr/testify` where possible. fakegenesys#32 (7 files / ~200 blocks) and fakeaws#20 (15 files / 514 blocks) shipped via parallel agents in one turn each; fakegcp#21 cleaned one straggler; mockway phase was a no-op (its remaining stdlib lives in package-private helpers the sweep rule deliberately doesn't refactor). Rule lives in each repo's AGENTS.md (the 5-PR AGENTS sweep landed earlier today) + the user's global `~/.claude/CLAUDE.md` "Testing (Go)" section.
+**No Scaleway compute scenario satisfies both gates today.** Not
+`web-live-paris`, not any other.
 
-**Demo-Makefile sibling sweep (2026-06-11)** — 3 PRs mirroring fakegenesys#29's `make demo-*` lifecycle harness into the three sibling fakes. mockway#13, fakegcp#19, fakeaws#17 — eight `demo-*` targets per repo (help/up/down/env/shell/apply/destroy/clean) that drive a real provider through `init → apply → plan -detailed-exitcode → destroy` against the local mock with one command. All four sibling fakes now expose the same demo shape. Simpler than the fakegenesys variant because scaleway/google/aws providers all honour endpoint overrides natively. 8th iteration of the 4-PR cross-repo sweep pattern (see `reference_cross_repo_docs_sweep.md`).
+The fix is planned and proven: **ADR-0025** + `docs/plans/run-owned-project-plan.md`
+(S165–S168) — create the run's project via the Account API *before* the apply,
+pass it as `SCW_DEFAULT_PROJECT_ID`, and drop `scaleway_account_project` from the
+HCL. A hand-run experiment applied a private NIC cleanly this way and destroyed
+cleanly. **S166 is the slice to be careful with**: it replaces
+`AssertProjectDeletable`'s state-derived cross-check, and must land before S167
+removes that check's input.
 
-**S136–S138 (2026-06-11)** — fakegenesys example drift fix arc. 3 PRs across fakegenesys. S136 brings the standalone smoke test's environment up to par with infrafactory's `cloudEnv` (HTTPS_PROXY, NO_PROXY, SSL_CERT_FILE, GENESYSCLOUD_OAUTHCLIENT_*, FAKEGENESYS_UPLOAD_HOST). S137 + S138 refresh 16 examples + 1 expected.txt against the current `mypurecloud/genesyscloud` provider schema. fakegenesys v0.2.1 tagged. Smoke runs 100% green in ~205s from a fresh clone. New `feedback_example_hcl_drift.md` memory captures the pattern: example HCL rot is a different layer from the contract audit.
+Two diagnoses of this blocker were wrong before the right one, both from reading
+configuration instead of running something: `IPAMFullAccess` (the API actually
+wanted `write compute_private_networks` — `PrivateNetworksFullAccess`, granted
+2026-08-30), and "`vpc_required` is AWS-only". Both retracted in ADR-0024.
 
-**Post-S135 follow-up (2026-06-10)** — two paper-cut fixes: lockstep audit (`internal/cli/cloud_prefix_lockstep_test.go`) brings ADR-0021 from code-review-enforced to CI-enforced; duplicate v0.1.0 GitHub release Draft cleaned up. One PR (infrafactory#105). ADR-0021 amended with the enforcement note. AGENTS.md § 3 cross-references the test.
+### Also planned, not started
 
-**S128–S135 (2026-06-10)** — sibling CRITICAL sweep + AGENTS+README cleanup + smoke. 8 PRs across all 5 repos. Bridged 10 new paired contracts in mockway (2) + fakegcp (4) + fakeaws (4) — combined with fakegenesys's 17 = 27 family-wide. Cross-repo AGENTS/README normalization with new Contract-coverage convention sections in each sibling's docs. Full close-out in `docs/status/ARCHIVE.md` § "2026-06-10 sibling CRITICAL sweep + AGENTS/README cleanup".
+- `docs/plans/ui-deployment-arc-plan.md` (S159–S164) — drive a deployment from
+  the UI. Mostly wiring over proven code. **S160 (deploy safety model) comes
+  before any button**: the UI is unauthenticated on localhost.
+- `docs/plans/live-learning-loop-plan.md` (S154–S156) — the arc the live work
+  exists for. Until S156 lands, live deployments produce **logs, not learning**.
+  Note `ExtractFixPitfall` needs a *diff*, which is why S155 (upgrade) is what
+  makes S156 produce prescriptive rules rather than weak symptom text.
 
-**S123–S127 (earlier 2026-06-10)** — fakegenesys v0.2 hardening (full arc detail below).
+### Operational gotchas learned the hard way
 
-**`docs/plans/fakegenesys-v0.2-hardening-plan.md`** — fakegenesys v0.2 hardening + cross-repo contract-coverage convention rollout. 5 slices shipped:
+- **Review with Codex, not `/code-review`.** `codex exec review --base main`,
+  archived to `docs/review-passes/`. A Claude review of Claude-written code shares
+  its blind spots: three rounds of fixes each reproduced the failure they
+  targeted. Codex pass 10 returned **one** finding where the Claude pass returned
+  fifteen — and it was the most serious of them.
+- **Running infrafactory from inside a Claude Code session** used to hang
+  `self_review` for the full 300s timeout. Cause: `claude_adapter.go` filtered
+  only `CLAUDECODE=` while a parent session exports nine more `CLAUDE_CODE_*`
+  variables. Fixed, with credentials and provider routing explicitly kept.
+- **Layer 3 credentials** live in the `layer3` GitHub *environment*, not the repo.
+  Locally they must be `SCW_ACCESS_KEY` / `SCW_SECRET_KEY` /
+  `SCW_DEFAULT_ORGANIZATION_ID` in the environment. Never
+  `SCW_DEFAULT_PROJECT_ID` — it is stripped and set from
+  `scaleway.fallback_project_id`.
+- **Cost**: the `lb-serving-paris` shape is **EUR 0.042/hour** (DEV1-S 0.00898,
+  LB-S 0.023, two IPv4 at 0.005) — list prices read 2026-08-30. The binding
+  constraint on TTL is exposure and forgetting, not money.
 
-- **S123**: 17 `TestContract_*` regression tests for the post-S116/S122 surface. Three coverage bars (regression-per-mock-gap, docstring-derived, nil-deref defenses). Per-row matrix in `fakegenesys/docs/contract-matrix-s123.md`. NO line-count target per `feedback_test_coverage_metrics.md`.
-- **S124**: codex review-pass loop closed at pass 4 (`NOTHING_TO_IMPROVE × 2`). `fakegenesys/docs/review-passes/pass3.md` documents both.
-- **S125**: `.github/workflows/docker.yml` — sibling parity (3 workflows now: ci, release, docker).
-- **S126**: all 4 sibling READMEs share the same "Testing examples" stanza pointing at `go test ./examples/...` (or `./e2e/...` for mockway). Shell scripts stay as documented supplementary aids.
-- **S127**: `handlers/contract_audit_test.go` rolled out across all 4 siblings (5th instance of the 4-PR cross-repo doc/code sweep pattern). Empty-state passes; future contracts inherit enforcement.
+### Open, not blocked
 
-Full close-out: `docs/status/ARCHIVE.md` § "2026-06-10 fakegenesys v0.2 hardening".
+- **#163** (TypeScript 5→7) is verified broken: `@sveltejs/kit@2.70.3` declares
+  `peerOptional typescript@"^5.3.3 || ^6.0.0"`, so `npm install` fails with
+  ERESOLVE. Close it, or downgrade to TypeScript 6, which satisfies the range.
+- `docs/layer3-coverage.md` carries a governing retraction banner; its older IPAM
+  references are superseded by it.
 
-## ACTIVE ARC — read first
-
-### `docs/plans/presentable-arc-plan.md` (S144–S150) — make infrafactory demonstrable on stage
-
-Driver: a conference talk with a **live PR-gate demo**, 2–6 weeks out. The arc is scoped by what the talk must be able to show.
-
-Start at **S144** — it is the spine and the demo. Everything else is supporting evidence.
-
-Two decisions already taken, so do not re-litigate them:
-
-- **Keep the LLM out of the live path.** Generation is 40–60s with real variance; the S143 canary hit a transport failure mid-run. Record that half of the story, run the verification half live.
-- **`InstancesFullAccess` was granted 2026-08-23** to allow a backend behind the load balancer. `openclaw-prod` is now protected by software, not by the API. See ADR-0023.
-
-Read `docs/layer3-coverage.md` before proposing any expansion — the cheap pool is empty and every widening is a costed decision.
-
-## Previous arc — CLOSED, nothing outstanding
-
-### `docs/plans/layer3-real-scaleway-plan.md` (S139–S143). Layer 3 is done and proven.
-
-**Layer 3 applies to and destroys real Scaleway infrastructure.** Code-complete since S30, it had never called `api.scaleway.com` until 2026-08-22. Both canary runs on `block-paris` are green end-to-end:
-
-```
-sandbox_deploy/preflight:    pass (endpoint asserted as https://api.scaleway.com)
-sandbox_deploy/init/plan/apply/destroy: pass
-sandbox_deploy/orphan_sweep: pass (project destroyed; no resources left outside it)
-```
-
-- **Run 1** used seeded HCL, deliberately isolating the harness from LLM generation on the first-ever real apply.
-- **Run 2** let the **LLM generate the HCL** — `target_reached` in a single iteration, 71s including generation. The `scaleway_account_project` path (ADR-0010) that had never been exercised against a real apply worked first try.
-
-Both sweeps verified independently against the account afterwards. It ends in the state it started: 3 projects (`default`, `openclaw`, `infrafactory`), one pre-existing 20GB `openclaw` volume, nothing else.
-
-15 PRs across two repos: infrafactory #136–#147 + mockway #21. Full close-out in `docs/status/ARCHIVE.md` § "2026-08-22 Layer 3 real-Scaleway arc". Deltas in `docs/layer3-real-vs-mock-deltas.md`. Governance in ADR-0023.
-
-### What the canary bought
-
-Three defects no unit test or mock could have produced — the return on the whole arc:
-
-1. The orphan sweep read `terraform-live.tfstate` *after* destroy emptied it, so it failed closed on teardowns that had actually worked.
-2. mockway's boot-seeded default project counted as a Layer 2 orphan, which would have failed `destruction: no_orphans` for **every scenario in the suite**.
-3. Real Scaleway returned a block-volume create error *after* the volume existed server-side, leaving it tainted. Transient — a re-apply succeeded.
-
-(1) and (2) were fixed in S143a; (3) is a real-API behaviour, recorded rather than "fixed".
-
-### Both follow-ups CLOSED (post-arc, same day)
-
-1. **Bounded retry on Layer 3 apply** — `sandboxApplyAttempts = 2`. A second apply replaces the tainted resource. One retry only, surfaced as `succeeded on attempt 2`, and **never on a cancelled context** so the interrupt guard still holds.
-2. **Orphan sweep on the auto-destroy-on-failure path** — a failed run now captures the sweep target before destroy and sweeps after. The run has already failed so the exit code is unchanged; what changed is that an unverifiable cleanup says so, and carries `infrafactory reap <scenario>` in the failure **detail** rather than only the log.
-
-Both carry synthetic-drift coverage. ADR-0023 amended with the reasoning.
-
-### Setup, if you need to run Layer 3 again
-
-- **Credentials**: `set -a; . ~/.config/infrafactory/scw-layer3.env; set +a`. This is the dedicated `infrafactory-layer3` IAM application. **Do not use the `scw` default profile** — that is the org owner's `openclaw-terraform` key, which every Layer 3 run used until 2026-08-23 and which can reach live infrastructure. See ADR-0023's credential amendment.
-- **Config**: `/tmp/l3run/infrafactory.yaml` (ephemeral; recreate if gone). Needs `constraint_policies` mapped to **absolute** policy paths or `mock_deploy/state_policy` fails.
-- **mockway must be running** on :8080 built from current main: `go -C ../mockway build -o /tmp/mockway ./cmd/mockway && /tmp/mockway --port 8080 &`
-- Layer 3 artifacts land in `.infrafactory/runs/<scenario>/<run_id>/` (git-ignored) — `plan-live.txt` and `run.json` (`layer3_enabled`) are the ones worth reading.
-
-#### Account facts that constrain everything
-
-The org holds **`openclaw`** (`0b6a8a6a-…`) with live infrastructure — a 20GB volume at minimum. Never let a destroy path near it; `harness.AssertProjectDeletable` enforces this, and the dedicated `infrafactory` project (`2397e80e-…`) catches resources that omit `project_id`. Note the default scw profile's `default_project_id` **is** `openclaw`; the sealed env overrides it, which is the whole point of `scaleway.fallback_project_id`.
-
-#### Repo mechanics that will bite
-
-- `main` on both repos has a **ruleset** (`gh api repos/<o>/<r>/rulesets`, not `/branches/main/protection`). infrafactory requires 1 approval → self-merge needs `--admin`. Both require status checks.
-- A **PreToolUse hook** blocks `gh pr merge` unless every check on the head SHA is green. No bypass; fix the checks.
-- **Doc Hygiene is CI-only.** Any `internal/cli/` or `cmd/infrafactory/` change needs an ADR touch; any `cmd/|internal/|prompts/|policies/|scenarios/` change needs `STATUS.md`. The pre-commit hook does not check this, so it fails after push.
-- `make test` rewrites `ui/package-lock.json` (strips `libc` fields). **Restore it before `git add`, not after.**
-- `gofmt -w <dir>` reformats unrelated files; ~19 are already unformatted on main. Format only what you changed.
 
 ## Next arc candidates (no commitment)
 
