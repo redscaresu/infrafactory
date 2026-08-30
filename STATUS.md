@@ -1,13 +1,42 @@
 # STATUS
 
-Last updated: 2026-08-24
+Last updated: 2026-08-31
 
 ## Current phase
 
+- 🧪 **ADR-0025 + S165–S168 planned (2026-08-30)** — take the run's project out
+  of the generated HCL. `scaleway_instance_private_nic` has **no `project_id`
+  attribute** (verified against provider 2.81.0), so it is created in the
+  provider's default project — the shared containment project — while its server
+  is in the run's own, and the API refuses the mismatch. Since `vpc_required.rego`
+  denies any instance server without a NIC, **Layer 1 required a resource Layer 3
+  could not create**: no Scaleway compute scenario satisfied both gates.
+
+  Fix, proven on real Scaleway *before* the ADR was written: create the project
+  through the Account API before the apply, pass it as `SCW_DEFAULT_PROJECT_ID`,
+  and drop `scaleway_account_project` from the HCL. A private network + instance +
+  **NIC** stack applied cleanly (NIC `available`, confirmed against the API) and
+  destroyed cleanly. The blocker was never the allowlist, the permission or the
+  pitfall — the NIC is allowlisted and gate-exempt already. It was *when the
+  project came into existence*.
+
+  **It tightens blast radius.** An omitted `project_id` currently lands in the
+  shared fallback project alongside other runs' strays; afterwards it lands in the
+  run's own disposable project and is swept with everything else.
+
+  **The care is in S166.** `AssertProjectDeletable` refuses a target that does not
+  match the project named in `terraform-live.tfstate` — the check that stops a
+  tampered record aiming teardown at real infrastructure. With the project out of
+  the HCL that input disappears, so it is replaced by a run-owned marker **plus**
+  an API-side provenance check, both required, before S167 removes it.
+
+  Incidentally, **D6 reproduced a third time**: the experiment's project refused
+  to delete until the auto-created `Default security group` was purged — in a path
+  that never touched infrafactory's code.
 - ✅ **Review CLEAN at pass 13 (2026-08-30)** — `codex exec review --base main`
   found no correctness, safety or maintainability issues in the diff. S153a/S153b
-  converged after four Codex passes (10–13), archived in
-  `docs/review-passes/pass10.md`.
+  converged after four Codex passes (10–13), archived as
+  `docs/review-passes/pass10.md` … `pass13.md`.
 
   Worth recording: pass 10 returned **one** finding where a Claude
   `/code-review` pass had returned fifteen — and that one was the most serious of
@@ -28,7 +57,7 @@ Last updated: 2026-08-24
   cancellation, where a normal exit cannot trip it.
 
 - 🔎 **Review pass 10 (2026-08-30)** — `codex exec review --base main`, archived
-  in `docs/review-passes/pass10.md`. **Codex returned one finding**, and it was
+  in `docs/review-passes/` — one file per pass, `pass10.md` … `pass13.md`. **Codex returned one finding**, and it was
   the same one a Claude `/code-review` pass had rated worst: the empty-state
   release path rebuilt the sweep target with **nil `Strays`**, so a sweep that had
   failed on resources *outside* the run project would be re-run against a project
