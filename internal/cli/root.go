@@ -77,6 +77,7 @@ func NewRootCmd(opts ...RootOption) *cobra.Command {
 		newTestCmd(cfg),
 		newRunCmd(cfg),
 		newReapCmd(cfg),
+		newLiveCmd(cfg),
 		newMockCmd(cfg),
 		newUICmd(cfg.uiAssets),
 	)

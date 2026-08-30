@@ -105,6 +105,7 @@ type CommandRuntime struct {
 	scenarioPath       string
 	outputDir          string
 	runstoreRoot       string
+	livestoreRoot      string
 	schemaRunner       harness.CommandRunner
 	schemaByCloud      map[string][]byte
 	schemaTriedByCloud map[string]bool
@@ -142,6 +143,16 @@ func (r *CommandRuntime) RunStoreRoot() string {
 		return r.runstoreRoot
 	}
 	return resolveRunStoreRoot()
+}
+
+// LiveStoreRoot resolves the on-disk live-deployment store root for this
+// runtime, falling back to the env-var/default path when no override was
+// configured. Mirrors RunStoreRoot.
+func (r *CommandRuntime) LiveStoreRoot() string {
+	if r != nil && r.livestoreRoot != "" {
+		return r.livestoreRoot
+	}
+	return resolveLiveStoreRoot()
 }
 
 // EnsureProviderSchema extracts the provider schema for the given cloud
@@ -238,6 +249,10 @@ type runtimeOptions struct {
 	// the shared .infrafactory/runs path when their runIDs collide at
 	// 1-second timestamp resolution.
 	runstoreRoot string
+	// livestoreRoot overrides the on-disk live-deployment store root, for
+	// the same reason as runstoreRoot: tests must never read or write the
+	// real record of what is running in the cloud.
+	livestoreRoot string
 }
 
 func defaultRuntimeOptions() runtimeOptions {
@@ -343,6 +358,7 @@ func buildRuntime(cmd *cobra.Command, opts runtimeOptions) (*CommandRuntime, err
 		scenarioLoader:    opts.scenarioLoader,
 		schemaRunner:      execCommandRunner{},
 		runstoreRoot:      opts.runstoreRoot,
+		livestoreRoot:     opts.livestoreRoot,
 	}
 	if deps.MockState == nil {
 		router := &cloudMockStateRouter{

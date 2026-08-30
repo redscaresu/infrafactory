@@ -40,6 +40,14 @@ func (h *CommandTestHarness) RunstoreRoot() string {
 	return filepath.Join(h.WorkspaceDir, ".infrafactory", "runs")
 }
 
+// LivestoreRoot returns the workspace-scoped live-deployment store root.
+// Tests must never touch the real record of what is running in the cloud:
+// reading it would make assertions depend on the operator's account, and
+// writing it could mask or invent a live deployment.
+func (h *CommandTestHarness) LivestoreRoot() string {
+	return filepath.Join(h.WorkspaceDir, ".infrafactory", "live")
+}
+
 // isolatedRunOpts returns a runtimeOptions pre-wired with
 // workspace-scoped output/pitfalls/runstore paths so a test cannot
 // share filesystem state with parallel siblings. The `customize`
@@ -66,6 +74,7 @@ func isolatedRunOpts(h *CommandTestHarness, customize func(config.Config) config
 		},
 		scenarioLoader: defaultScenarioLoader,
 		runstoreRoot:   h.RunstoreRoot(),
+		livestoreRoot:  h.LivestoreRoot(),
 	}
 }
 

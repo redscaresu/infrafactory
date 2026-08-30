@@ -4,6 +4,31 @@ Last updated: 2026-08-24
 
 ## Current phase
 
+- 🚧 **S151 landed (2026-08-30)** — first slice of the live-services arc
+  (`docs/plans/live-services-arc-plan.md`). `internal/livestore` records
+  infrastructure that deliberately outlives the run which created it, and
+  `infrafactory live ls` reports what is running and how long it has left.
+
+  Nothing persists yet — this slice is bookkeeping, on purpose: there must be a
+  record of what is out there before anything is allowed to stay up. The
+  decisions are in **ADR-0024**, and all of them fail toward teardown. An expiry
+  is mandatory and there is no value meaning "forever". A record that will not
+  decode, or that lacks an expiry or a project id, is reported as **expired and
+  reapable** rather than skipped — "we could not check" must never look like
+  "nothing is running", so `live ls` exits non-zero and names the record.
+
+  Caught while writing it: `MarkReleased` originally routed through `Put`, which
+  validates. A damaged record is still reapable and its resources are still
+  real, so the reaper would have destroyed them, failed to record that it had,
+  and destroyed the same already-destroyed deployment on every later pass.
+  Releasing now bypasses validation; creating still does not.
+
+  Live deployments will get their own Scaleway project rather than teaching the
+  orphan sweep to discriminate live resources from strays — that would make
+  sweep correctness depend on registry accuracy, where one stale entry is a
+  silent leak (the D6 class). **The ephemeral invariant is therefore unchanged:
+  per-run projects are still destroyed and swept.**
+
 - 🔒 **S150 landed (2026-08-24)** — first slice of the Presentable arc, taken before S144 so the workflow that will hold cloud credentials is born into a hardened pipeline. `govulncheck` in CI, explicit `permissions:` on every workflow, SHA-pinned actions on the two workflows with elevated capability. **The scanner found ~20 known stdlib advisories on its first run**: `go.mod` pinned `go 1.25.0` and several were genuinely reachable (`GO-2026-6218` in `net/url` via `http.Client.Do` from `internal/api/server.go`), so every binary built here was linked against a vulnerable stdlib. Now pinned to `go 1.25.13`. Posture and the goldfinger comparison in `docs/ci-security-posture.md`.
 
 - 🚦 **S148 in progress (2026-08-26)** — `make demo-gate` puts a generated change on a PR, labels it, waits on the deployment approval and follows the run; `make demo-preflight` fails rather than reads, and checks the account is clean before you start. **The demo is agent-authored**: `infrafactory generate` writes the HCL and a script only carries it to a PR, so the agent in the talk's title is on screen rather than taken on faith.
