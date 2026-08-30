@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/redscaresu/infrafactory/internal/harness"
 )
@@ -101,13 +100,6 @@ func envKeyMatches(key string, patterns []string) bool {
 	return false
 }
 
-// cancelGraceWindow bounds how long a cancelled command may keep running
-// after its interrupt before it is killed outright. It also bounds Wait:
-// tofu forks provider plugins that inherit the stdout/stderr pipe write
-// ends, so without a delay Wait can block indefinitely on a grandchild
-// after the child is gone.
-const cancelGraceWindow = 15 * time.Second
-
 func (execCommandRunner) Run(ctx context.Context, cmd harness.Command) (harness.CommandResult, error) {
 	execCmd := exec.CommandContext(ctx, cmd.Name, cmd.Args...)
 	// Interrupt, not kill. The default CommandContext cancel sends
@@ -117,8 +109,21 @@ func (execCommandRunner) Run(ctx context.Context, cmd harness.Command) (harness.
 	// so teardown destroys from an incomplete state and the project
 	// delete fails on the resource nothing recorded. SIGINT lets tofu
 	// finish writing state before exiting.
+	//
+	// Imperfect in one case, and knowingly so: on an interactive Ctrl-C
+	// the terminal already signalled the whole foreground process group,
+	// so this delivers tofu's SECOND interrupt and it exits immediately.
+	// That is no worse than the SIGKILL it replaces, and strictly better
+	// for the non-interactive paths (deploy in CI, a cancelled context, a
+	// timeout) where this is the only signal tofu receives. Fixing the
+	// interactive case properly needs Setpgid so the child is not in the
+	// terminal's group, which is a larger change than this slice.
+	//
+	// No WaitDelay: it applies to every command here, and its timer also
+	// starts when the child exits NORMALLY -- so a provider plugin still
+	// holding the output pipe would turn a successful apply into
+	// exec.ErrWaitDelay with truncated output.
 	execCmd.Cancel = func() error { return execCmd.Process.Signal(os.Interrupt) }
-	execCmd.WaitDelay = cancelGraceWindow
 	execCmd.Dir = cmd.Dir
 	execCmd.Env = withEnvOverrides(stripEnvKeys(stripGCPAuthEnv(os.Environ()), cmd.StripEnv), cmd.Env)
 

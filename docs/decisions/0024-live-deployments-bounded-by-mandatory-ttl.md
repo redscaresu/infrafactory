@@ -307,3 +307,32 @@ indefinitely.
 The pattern across all three: **a safety mechanism added in haste reproduced the
 failure it was written to prevent.** Each was caught by review, not by tests — the
 suite was green for every one of them.
+
+## Amendment, 2026-08-30 (pass 10): releasing requires positive verification
+
+The empty-state release path added in S153b was still unsafe, and both an
+independent Codex review and a Claude review found it. It rebuilt the sweep
+target from the record's project id alone, with **no strays**. Strays are
+resources found *outside* the run project, computed by `CaptureSweepTarget` from
+state that destroy has since emptied — so where the first sweep failed on a
+stray, the re-verification found only that the project was gone, reported clean,
+and released the record while the stray kept billing untracked.
+
+`Deployment` now carries a sticky `SweepVerificationFailed`. It is set the moment
+a sweep fails and checked before the empty-state path, which refuses rather than
+re-verifying something it cannot see. **The rule this makes explicit: a record is
+released on positive verification, never on the absence of contrary evidence.**
+Where verification is impossible, the operator is pointed at `live forget`.
+
+`live forget` gained the guard it should have had on arrival. It took any id and
+released it with no state check, so pointing it at a healthy deployment — a
+mistyped but existing id — made `Reapable()` false forever and left a project
+billing with nothing that would ever destroy it. **An escape hatch for
+unreclaimable records became the sharpest way to create one.** It now refuses
+anything teardown can still handle.
+
+Method note, recorded because it changed the outcome: the three review passes
+before this one used Claude's `/code-review` skill, not the Codex loop AGENTS.md
+requires. A same-family reviewer shares the blind spots that produced the defect,
+which is the most plausible explanation for three consecutive rounds in which a
+safety fix reproduced the failure it targeted.

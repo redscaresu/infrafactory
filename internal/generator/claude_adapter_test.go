@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
 )
 
 type fakeClaudeRunner struct {
@@ -541,15 +543,16 @@ func TestIsParentSessionEnvStripsTheWholeFamily(t *testing.T) {
 		"CLAUDE_EFFORT=high",
 	}
 	for _, e := range stripped {
-		if !isParentSessionEnv(e) {
-			t.Errorf("expected %q to be stripped from the nested claude env", e)
-		}
+		assert.True(t, isParentSessionEnv(e), "expected %q to be stripped from the nested claude env", e)
 	}
 
-	kept := []string{"PATH=/usr/bin", "HOME=/home/x", "ANTHROPIC_API_KEY=sk-x", "SCW_ACCESS_KEY=k"}
+	// Credentials and provider routing share the prefix but must survive:
+	// stripping them does not prevent a hang, it stops the CLI working.
+	kept := []string{
+		"PATH=/usr/bin", "HOME=/home/x", "ANTHROPIC_API_KEY=sk-x", "SCW_ACCESS_KEY=k",
+		"CLAUDE_CODE_OAUTH_TOKEN=tok", "CLAUDE_CODE_USE_BEDROCK=1", "CLAUDE_CODE_USE_VERTEX=1",
+	}
 	for _, e := range kept {
-		if isParentSessionEnv(e) {
-			t.Errorf("expected %q to survive", e)
-		}
+		assert.False(t, isParentSessionEnv(e), "expected %q to survive", e)
 	}
 }

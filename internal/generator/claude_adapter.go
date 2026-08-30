@@ -284,7 +284,26 @@ var parentSessionEnvPrefixes = []string{
 	"CLAUDE_EFFORT=",
 }
 
+// parentSessionEnvKeep names variables that share the CLAUDE_CODE_ prefix
+// but configure the nested CLI rather than tying it to the parent session.
+// Stripping these does not prevent a hang, it prevents the CLI working at
+// all: CLAUDE_CODE_OAUTH_TOKEN is how `claude` authenticates where no
+// ANTHROPIC_API_KEY is set (GitHub Actions, notably), and the USE_* pair
+// routes to Bedrock or Vertex. A bare prefix match took the credential
+// with the plumbing.
+var parentSessionEnvKeep = []string{
+	"CLAUDE_CODE_OAUTH_TOKEN=",
+	"CLAUDE_CODE_USE_BEDROCK=",
+	"CLAUDE_CODE_USE_VERTEX=",
+	"CLAUDE_CODE_MAX_OUTPUT_TOKENS=",
+}
+
 func isParentSessionEnv(entry string) bool {
+	for _, keep := range parentSessionEnvKeep {
+		if strings.HasPrefix(entry, keep) {
+			return false
+		}
+	}
 	for _, prefix := range parentSessionEnvPrefixes {
 		if strings.HasPrefix(entry, prefix) {
 			return true

@@ -68,6 +68,13 @@ type Deployment struct {
 	CreatedAt time.Time `json:"created_at"`
 	ExpiresAt time.Time `json:"expires_at"`
 
+	// SweepVerificationFailed records that an orphan sweep for this
+	// deployment has failed at least once. It is sticky: once a sweep has
+	// reported strays, no later pass may release the record on the
+	// strength of an empty state, because destroy has erased the state the
+	// strays would be recomputed from.
+	SweepVerificationFailed bool `json:"sweep_verification_failed,omitempty"`
+
 	// Undecodable marks a record the store could not parse. It is never
 	// persisted: it exists so an unreadable file still reaches the
 	// reaper as a deployment rather than only as a log line. ADR-0024
@@ -368,6 +375,14 @@ func (s *FilesystemStore) Reapable(now time.Time) ([]Deployment, []error, error)
 // pass. The replacement keeps the id and nothing else, because nothing
 // else was recoverable.
 func (s *FilesystemStore) MarkReleased(id string) error {
+	// Before any side effect. The fallback path below reads and writes
+	// s.path(id); without this an id that Get rejects still reached
+	// os.ReadFile/os.WriteFile and copied a file to an operator-chosen
+	// location outside the store before the write was finally refused.
+	if err := validateID(id); err != nil {
+		return err
+	}
+
 	d, err := s.Get(id)
 	if err != nil {
 		if !fileExists(s.path(id)) {

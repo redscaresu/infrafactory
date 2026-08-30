@@ -70,7 +70,7 @@ by any generated HCL. It waits on private networking becoming applicable at all 
 | `lb-paris` | **runnable** | hourly | — (run 2026-08-23) |
 | `lb-serving-paris` | **runnable** | hourly | — (added 2026-08-24; the first `http_probe` against real Scaleway) |
 | `web-live-paris` | key only | hourly | private networking (generation emits `scaleway_instance_private_nic`; canary 2026-08-30) |
-| `incremental-project-paris` | key only | hourly | IPAM (allowlist cleared 2026-08-24; it declares private networking) |
+| `incremental-project-paris` | key only | hourly | private networking (allowlist cleared 2026-08-24; see the retraction at the top) |
 | `registry-paris` | key only | instant | Registry |
 | `iam-policies-paris` | key only | instant | IAM |
 | `public-registry-iam-paris` | key only | instant | IAM + Registry |
@@ -125,7 +125,7 @@ they look like:
   blocked.** Granting IAM to the sandbox credential defeats the credential:
   a sandbox that can mint API keys is not a sandbox. Keep them as Layer 2
   scenarios.
-- **`incremental-project-paris` needs IPAM**, which is a real widening
+- **`incremental-project-paris` needs private networking** (recorded as IPAM at the time; see the retraction at the top), which is a real widening
   rather than a formality: IPAM hands out addresses across the whole
   organization's private networks. It is the cheapest *remaining* hourly
   scenario, and still a blast-radius decision rather than a config line.
@@ -269,7 +269,7 @@ and the rego IS evaluated for Scaleway via the per-cloud directory walk. See the
 retraction at the top of this document: the blocker is the contradiction between
 the two gates, not a permission and not the pitfall.
 
-`incremental-project-paris` had looked like a fourth: admitting the Instances types cleared its allowlist gate. It is not. The scenario declares private networking and its generated HCL creates `scaleway_instance_private_nic`, so it still needs `IPAMFullAccess` — it swapped blockers rather than losing one.
+`incremental-project-paris` had looked like a fourth: admitting the Instances types cleared its allowlist gate. It is not. The scenario declares private networking and its generated HCL creates `scaleway_instance_private_nic`, so it still needs private networking, which is unresolvable today — it swapped blockers rather than losing one. (Recorded here as IPAM at the time; see the retraction at the top.)
 
 (The earlier "3 of 16" here counted `lb-serving-paris` in the numerator and not the denominator: adding it made 16 into 17.)
 

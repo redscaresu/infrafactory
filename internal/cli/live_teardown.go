@@ -79,6 +79,20 @@ func tearDownDeployment(
 	// the sweep. So the sweep is re-run here, against the project id the
 	// record carries, and the record is released only if it passes.
 	if !liveStateMayHoldResources(d.WorkDir) {
+		// A sweep that previously failed cannot be re-run faithfully: it
+		// found strays OUTSIDE the run project, and CaptureSweepTarget
+		// computes those from the state that destroy has since emptied.
+		// Re-running against the project id alone would find the project
+		// gone, report clean, and release the record while the strays keep
+		// billing untracked -- laundering the failure this branch exists
+		// to prevent. Refuse, and point at the escape hatch.
+		if d.SweepVerificationFailed {
+			return unreclaimable(fmt.Sprintf(
+				"%s had an orphan sweep FAIL before its state was emptied, so strays outside project %s "+
+					"cannot be recomputed and this pass cannot prove the account is clean. Verify by hand, "+
+					"then clear the record with `infrafactory live forget %s`", d.ID, d.ProjectID, d.ID))
+		}
+
 		sandboxEnv, envErr := sandboxCommandEnv(runtime)
 		if envErr != nil {
 			return unreclaimable(fmt.Sprintf(
@@ -130,7 +144,15 @@ func tearDownDeployment(
 		stages = append(stages, autoCreatedPurgeStage(purged))
 	}
 	if destroyErr == nil {
+		failuresBeforeSweep := len(failures)
 		stages, failures = appendOrphanSweepResult(ctx, stages, failures, runtime, sweepTarget, sweepTargetErr, sandboxEnv)
+		if len(failures) > failuresBeforeSweep {
+			// Sticky, and written before returning: the next pass sees an
+			// empty state and must not treat that as evidence of a clean
+			// account.
+			d.SweepVerificationFailed = true
+			_ = store.Put(d)
+		}
 	}
 
 	if len(failures) > 0 {
@@ -183,6 +205,18 @@ func runLiveForgetCommand(cmd *cobra.Command, args []string, runtime *CommandRun
 	known := "unreadable"
 	if d, err := store.Get(id); err == nil {
 		known = fmt.Sprintf("scenario %s, project %s", d.Scenario, d.ProjectID)
+
+		// Refuse a deployment teardown could still handle. This command
+		// exists for records the tooling CANNOT act on; pointed at a
+		// healthy one it would mark it released, make Reapable() false
+		// forever, and leave the project billing with nothing that will
+		// ever destroy it -- a one-command permanent leak, which is the
+		// failure class this whole subsystem exists to prevent.
+		if reclaimable(d) {
+			return &CLIError{Op: "live forget", Code: errorCodeUsage, Err: fmt.Errorf(
+				"%s is reclaimable (%s): use `infrafactory live teardown %s`, which destroys and verifies. "+
+					"forget abandons tracking and is only for records teardown cannot act on", id, known, id)}
+		}
 	}
 
 	if err := store.MarkReleased(id); err != nil {
@@ -198,6 +232,16 @@ func runLiveForgetCommand(cmd *cobra.Command, args []string, runtime *CommandRun
 			Layer: "live", Stage: "forget", Status: StageStatusPass,
 			Detail: fmt.Sprintf("%s released without destroy or verification (%s)", id, known),
 		}}, nil, nil)
+}
+
+// reclaimable reports whether teardown could still act on this record --
+// it decodes, it is not already released, and its state is on disk.
+func reclaimable(d livestore.Deployment) bool {
+	if d.Undecodable || d.State == livestore.StateReleased || d.WorkDir == "" {
+		return false
+	}
+	_, err := os.Stat(filepath.Join(d.WorkDir, harness.LiveStateFilename))
+	return err == nil
 }
 
 func runLiveTeardownCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) error {

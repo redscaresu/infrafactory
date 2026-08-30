@@ -4,6 +4,34 @@ Last updated: 2026-08-24
 
 ## Current phase
 
+- 🔎 **Review pass 10 (2026-08-30)** — `codex exec review --base main`, archived
+  in `docs/review-passes/pass10.md`. **Codex returned one finding**, and it was
+  the same one a Claude `/code-review` pass had rated worst: the empty-state
+  release path rebuilt the sweep target with **nil `Strays`**, so a sweep that had
+  failed on resources *outside* the run project would be re-run against a project
+  that no longer exists, report clean, and release the record — laundering the
+  failure the branch existed to prevent. Fixed with a sticky
+  `SweepVerificationFailed` flag: **positive verification, never the absence of
+  contrary evidence.**
+
+  Four Claude-only findings acted on anyway, each a real safety problem: `live
+  forget` would release a *healthy* deployment on one command (permanent
+  untracked leak); `MarkReleased` wrote outside the store before rejecting a
+  traversing id; the `CLAUDE_CODE_` prefix stripped `CLAUDE_CODE_OAUTH_TOKEN`,
+  which would have broken generation in CI — worse than the hang it fixed; and
+  `WaitDelay` applied to every command, where its timer also starts on a *normal*
+  exit, so a lingering provider plugin would turn a successful apply into
+  `ErrWaitDelay` with truncated output.
+
+  Five declined with reasons recorded, including one whose stated threat model is
+  false — `scenario.schema.json` does constrain scenario names, so a traversing id
+  cannot arrive by that route.
+
+  **Process correction**: the three earlier passes used Claude's `/code-review`
+  skill, not the Codex loop `AGENTS.md` requires. A same-family reviewer shares
+  the blind spots that produced the defect, which is plausibly why three rounds of
+  fixes each reproduced the failure they targeted.
+
 - 🔧 **S153b (2026-08-30)** — the review of S153a found 15 more findings, several
   of them **regressions S153a itself introduced**. Worst: the empty-state shortcut
   released a record with a PASS without re-running the orphan sweep, so a teardown
