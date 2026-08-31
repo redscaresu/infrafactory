@@ -12,8 +12,17 @@ Last updated: 2026-08-31
   — an operator-visible switch that silently does nothing is worse than no switch,
   and `TestCreateRunProjectIsNotYetWired` fails the moment that stops being true.
 
-  Next increment: the env plumbing, so the flag actually routes
-  `SCW_DEFAULT_PROJECT_ID` at the run's own project. **S166 is deliberately not
+  `sandboxCommandEnvForProject` is the seam that will route
+  `SCW_DEFAULT_PROJECT_ID` at the run's own project; `sandboxCommandEnv`
+  delegates to it with an empty project, so the old path is unchanged by
+  construction. The organization-default refusal applies to a run-supplied
+  project too — the check is about where strays land, and that does not change
+  with where the id came from. The flag is **refused at config load** while
+  unwired, because accepting it silently would hand an operator a switch that
+  changes nothing.
+
+  Next increment: the create/delete lifecycle, wired together so the path is
+  never half-safe. **S166 is deliberately not
   in scope** — it replaces `AssertProjectDeletable`'s state-derived cross-check,
   which is the guard between teardown and real infrastructure.
 

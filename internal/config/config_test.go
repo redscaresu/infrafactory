@@ -345,6 +345,29 @@ func TestCreateRunProjectDefaultsOff(t *testing.T) {
 	}
 }
 
+// Accepting the key silently would be worse than not having it: an
+// operator would get a switch that changes nothing, with no error. It is
+// refused at load until the runtime honours it.
+func TestCreateRunProjectIsRefusedUntilWired(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "infrafactory.yaml")
+	raw, err := os.ReadFile("../../infrafactory.yaml")
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	body := strings.Replace(string(raw), "  credentials_source: env",
+		"  credentials_source: env\n  create_run_project: true", 1)
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	if _, err := Load(path); err == nil {
+		t.Fatal("create_run_project: true must be refused while it is unwired, not silently ignored")
+	} else if !strings.Contains(err.Error(), "not implemented yet") {
+		t.Fatalf("error should say why: %v", err)
+	}
+}
+
 // The field is not yet read by the runtime, so it is deliberately absent
 // from infrafactory.yaml -- an operator-visible switch that silently does
 // nothing is worse than no switch. This test fails the moment the flag is

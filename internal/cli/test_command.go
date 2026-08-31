@@ -749,7 +749,23 @@ const realScalewayAPIURL = "https://api.scaleway.com"
 // to reach anything else. The keys returned here are only half of that
 // guarantee; the other half is harness.SandboxStripEnv, which removes
 // the inherited overrides an override map cannot unset.
+// sandboxCommandEnv builds the sealed Layer 3 environment with the
+// configured fallback project as the provider default.
 func sandboxCommandEnv(runtime *CommandRuntime) (map[string]string, error) {
+	return sandboxCommandEnvForProject(runtime, "")
+}
+
+// sandboxCommandEnvForProject is sandboxCommandEnv with an explicit
+// provider default project.
+//
+// ADR-0025 needs this seam: when the run creates its own project before
+// the apply, SCW_DEFAULT_PROJECT_ID must point at THAT project rather
+// than the shared fallback, so a resource carrying no project_id of its
+// own -- scaleway_instance_private_nic has no such attribute -- lands
+// somewhere disposable and swept rather than somewhere shared.
+//
+// An empty runProjectID keeps the pre-ADR-0025 behaviour exactly.
+func sandboxCommandEnvForProject(runtime *CommandRuntime, runProjectID string) (map[string]string, error) {
 	accessKey := strings.TrimSpace(os.Getenv("SCW_ACCESS_KEY"))
 	if accessKey == "" {
 		return nil, fmt.Errorf("sandbox deploy requires SCW_ACCESS_KEY in the environment")
@@ -790,11 +806,22 @@ func sandboxCommandEnv(runtime *CommandRuntime) (map[string]string, error) {
 	// provider falls through to the default project in
 	// ~/.config/scw/config.yaml -- typically the organization default,
 	// next to real infrastructure.
-	if fallback := strings.TrimSpace(runtime.Config.Scaleway.FallbackProjectID); fallback != "" {
-		if fallback == orgID {
-			return nil, fmt.Errorf("scaleway.fallback_project_id must not be the organization's default project (%s): a stray resource would land next to real infrastructure, which is exactly what this setting exists to prevent", orgID)
+	//
+	// The run's own project takes precedence when there is one. The
+	// organization-default refusal below applies to it too: the check is
+	// about where strays land, and that reasoning does not change with
+	// where the project id came from.
+	projectDefault := strings.TrimSpace(runtime.Config.Scaleway.FallbackProjectID)
+	source := "scaleway.fallback_project_id"
+	if trimmed := strings.TrimSpace(runProjectID); trimmed != "" {
+		projectDefault = trimmed
+		source = "the run's own project"
+	}
+	if projectDefault != "" {
+		if projectDefault == orgID {
+			return nil, fmt.Errorf("%s must not be the organization's default project (%s): a stray resource would land next to real infrastructure, which is exactly what this setting exists to prevent", source, orgID)
 		}
-		env["SCW_DEFAULT_PROJECT_ID"] = fallback
+		env["SCW_DEFAULT_PROJECT_ID"] = projectDefault
 	}
 
 	if err := assertRealScalewayEndpoint(env); err != nil {

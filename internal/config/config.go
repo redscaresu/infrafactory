@@ -378,6 +378,19 @@ func Load(path string) (Config, error) {
 func validate(cfg Config) error {
 	var fields []FieldError
 
+	// Fail closed while the flag is unwired. Accepting `true` silently
+	// would hand an operator a switch that changes nothing: they would
+	// get no run-owned project and no error, and Layer 3 resources with
+	// no project_id of their own would still land in the shared fallback
+	// -- the exact outcome ADR-0025 exists to fix. Delete this check in
+	// the same commit that honours the flag.
+	if cfg.Scaleway.CreateRunProject {
+		fields = append(fields, FieldError{
+			Field: "scaleway.create_run_project",
+			Err:   "is not implemented yet (ADR-0025, S165 in progress): setting it would change nothing, so it is refused rather than silently ignored",
+		})
+	}
+
 	if cfg.Version == "" {
 		fields = append(fields, FieldError{Field: "version", Err: "is required"})
 	}
