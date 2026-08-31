@@ -4,6 +4,21 @@ Last updated: 2026-08-31
 
 ## Current phase
 
+- ⚠️ **The `layer3-gate` cannot validate this change before it merges (2026-08-31)** —
+  it builds its binary from **base**, deliberately (S144-T5a: otherwise a same-repo
+  PR could rewrite the checks judging it), so it ran *main's* shape check — which
+  requires a `scaleway_account_project` — against fixtures the cutover strips it
+  from. Fails at `allowlist` in 0s, before any API call; nothing leaked.
+  **Any change that inverts a check in the trusted binary is unverifiable by its
+  own gate until merged.** Re-run the gate on the next PR after merge.
+
+  The run did catch one real thing: **the gate's reap step keyed off the state
+  file**, and reported "nothing records them, so reap cannot run" when it was
+  missing. Post-cutover a run can own a project and never write state, and the
+  marker exists iff a project does — so the step checks the marker first now. The
+  same defect the codex loop found seven times in Go, surviving fourteen passes
+  because it lives in YAML.
+
 - ✅ **S168 canary: the cutover verified against real Scaleway (2026-08-31)** —
   three applies from `s166-cutover`, ~€0.005. `block-paris` and `lb-serving-paris`
   both pass with **no `scaleway_account_project` and no `project_id` anywhere in
