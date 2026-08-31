@@ -28,6 +28,14 @@ Last updated: 2026-08-31
   - **It refuses to start from a version the service contradicts**, because that
     would record a v1→v2 transition that never happened. Unchecked is allowed and
     said out loud; contradicted is not.
+  Pass 50 corrected two of them. The tag advanced even when the apply never ran —
+  right for a failure *during* apply, wrong at init or plan where nothing reached
+  the cloud, and there it made the record claim a version that was never deployed.
+  And the address could go stale: replacement HCL can recreate the load balancer,
+  so verification would probe infrastructure the deployment no longer owns. It is
+  re-read after the apply now, reported when it moves, and when it cannot be
+  re-read the old one is kept **and said out loud**.
+
   - **The previous HCL is kept** in `.infrafactory-previous/`. That pair either
     side of one change is the diff `ExtractFixPitfall` needs and cannot
     reconstruct — it is what lets S156 produce prescriptive rules rather than the

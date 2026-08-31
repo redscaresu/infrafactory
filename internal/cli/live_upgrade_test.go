@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -259,4 +260,79 @@ func TestUpgradeRequiresNewConfiguration(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "--from is required")
+}
+
+// A failure at init or plan changed nothing on the cloud. Advancing the
+// tag there would make the record claim a version that was never
+// deployed -- the exact falsehood S155a exists to prevent.
+func TestUpgradeDoesNotAdvanceTheTagWhenTheApplyNeverRan(t *testing.T) {
+	sandboxCredsForTest(t)
+	probe := &stagingVersionProbe{running: "nginx/1.27.4"}
+	deploy := &fakeSandboxDeployHarness{err: &harness.SandboxDeployError{
+		Stage: "plan", Err: errors.New("invalid configuration"),
+	}}
+	rt, store := upgradeRuntime(t, probe, deploy)
+	d := upgradeableDeployment(t, store, "dep-planfail", "1.27")
+
+	require.Error(t, runUpgrade(t, rt, d.ID, &strings.Builder{},
+		"--from", newHCLDir(t), "--tag", "1.28"))
+
+	got, err := store.Get(d.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "1.27", got.Tag, "nothing was applied, so the record must not claim 1.28")
+	assert.True(t, got.UpgradedAt.IsZero())
+}
+
+// A failure DURING apply may have changed a great deal, so the record
+// moves: an observation looking for the old version would look for the
+// wrong thing.
+func TestUpgradeAdvancesTheTagWhenTheApplyFailedPartway(t *testing.T) {
+	sandboxCredsForTest(t)
+	probe := &stagingVersionProbe{running: "nginx/1.27.4"}
+	deploy := &fakeSandboxDeployHarness{err: &harness.SandboxDeployError{
+		Stage: "apply", Err: errors.New("timeout waiting for instance"),
+	}}
+	rt, store := upgradeRuntime(t, probe, deploy)
+	d := upgradeableDeployment(t, store, "dep-partial", "1.27")
+
+	require.Error(t, runUpgrade(t, rt, d.ID, &strings.Builder{},
+		"--from", newHCLDir(t), "--tag", "1.28"))
+
+	got, err := store.Get(d.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "1.28", got.Tag, "something may be running; the record must not hide it")
+}
+
+// Replacement HCL can recreate the load balancer. Verifying against the
+// address captured at first deploy would probe infrastructure this
+// deployment no longer owns, and point every later observation there too.
+func TestUpgradeRefreshesTheAddressWhenTheEndpointMoves(t *testing.T) {
+	sandboxCredsForTest(t)
+	probe := &stagingVersionProbe{running: "nginx/1.27.4"}
+	deploy := &fakeSandboxDeployHarness{}
+	rt, store := upgradeRuntime(t, probe, deploy)
+	d := upgradeableDeployment(t, store, "dep-moved", "1.27")
+
+	deploy.onRun = func() {
+		probe.running = "nginx/1.28.0"
+		writeUpgradeStateWithLBAddress(t, d.WorkDir, "9.9.9.9")
+	}
+
+	var out strings.Builder
+	require.NoError(t, runUpgrade(t, rt, d.ID, &out, "--from", newHCLDir(t), "--tag", "1.28"))
+
+	assert.Contains(t, out.String(), "moved from 1.2.3.4 to 9.9.9.9")
+	got, err := store.Get(d.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "9.9.9.9", got.Address)
+}
+
+// writeUpgradeStateWithLBAddress fakes what an apply leaves behind when
+// the load balancer's IP has changed.
+func writeUpgradeStateWithLBAddress(t *testing.T, workDir, address string) {
+	t.Helper()
+	state := `{"version":4,"outputs":{},"resources":[{"type":"scaleway_lb_ip","name":"front",
+	  "instances":[{"attributes":{"id":"ip-1","ip_address":"` + address + `"}}]}]}`
+	require.NoError(t, os.WriteFile(
+		filepath.Join(workDir, harness.LiveStateFilename), []byte(state), 0o600))
 }

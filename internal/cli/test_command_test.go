@@ -61,15 +61,17 @@ type fakeSandboxDeployHarness struct {
 // fail at capture -- which is correct fail-closed behaviour, just not
 // what these tests are exercising.
 func (f *fakeSandboxDeployHarness) Run(ctx context.Context, workDir string, _ map[string]string) (*harness.SandboxDeployResult, error) {
-	if f.onRun != nil {
-		f.onRun()
-	}
 	f.calls++
 	f.lastCtx = ctx
 	if f.err == nil && workDir != "" {
 		_ = os.MkdirAll(workDir, 0o755)
 		_ = os.WriteFile(filepath.Join(workDir, harness.LiveStateFilename), []byte(
 			`{"resources":[{"type":"scaleway_account_project","instances":[{"attributes":{"id":"test-run-project"}}]}]}`), 0o600)
+	}
+	// Last, so a hook that writes its own state is not overwritten by the
+	// default one above.
+	if f.onRun != nil {
+		f.onRun()
 	}
 	return f.result, f.err
 }

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -107,14 +108,44 @@ func runLiveUpgradeCommand(cmd *cobra.Command, args []string, runtime *CommandRu
 	})
 	stages, failures = appendSandboxDeployResult(stages, failures, applyResult, applyErr)
 
-	// The record moves to the new tag whether or not the apply worked.
-	// A half-finished upgrade is running something, and a record still
+	// The record moves to the new tag only if the apply actually RAN.
+	//
+	// A half-finished apply is running something, and a record still
 	// claiming the old version would send the next observation looking
-	// for the wrong thing.
-	if strings.TrimSpace(newTag) != "" {
-		d.Tag = strings.TrimSpace(newTag)
+	// for the wrong thing -- so a failure during apply still advances it.
+	// But a failure at init or plan changed nothing at all, and advancing
+	// the tag there would make the record claim a version that was never
+	// deployed, which is the exact falsehood S155a exists to prevent.
+	if applyRan(applyErr) {
+		if strings.TrimSpace(newTag) != "" {
+			d.Tag = strings.TrimSpace(newTag)
+		}
+		d.UpgradedAt = time.Now()
+
+		// The address can move: replacement HCL may recreate the load
+		// balancer. Verifying against the address captured at first
+		// deploy would probe infrastructure this deployment no longer
+		// owns, and leave every later observation pointed there too.
+		if address, addrErr := harness.LiveEndpoint(d.WorkDir, "load_balancer"); addrErr == nil && address != "" {
+			if address != d.Address {
+				stages = append(stages, StageSummary{
+					Layer: "live", Stage: "upgrade_address", Status: StageStatusPass,
+					Detail: fmt.Sprintf("%s moved from %s to %s", d.ID, d.Address, address),
+				})
+			}
+			d.Address = address
+		} else if d.Address != "" {
+			// Said out loud rather than assumed unchanged: everything
+			// after this probes an address nothing just confirmed.
+			stages = append(stages, StageSummary{
+				Layer: "live", Stage: "upgrade_address", Status: StageStatusSkip,
+				Detail: fmt.Sprintf(
+					"could not re-read the endpoint after the apply, so %s is still assumed to serve at %s",
+					d.ID, d.Address),
+			})
+		}
 	}
-	d.UpgradedAt = time.Now()
+
 	if err := store.Put(d); err != nil {
 		failures = append(failures, FailureSummary{
 			Layer: "live", Stage: "upgrade", Check: "record",
@@ -308,4 +339,21 @@ func reportUpgrade(cmd *cobra.Command, d livestore.Deployment, stages []StageSum
 			"%s was not upgraded cleanly", d.ID)}
 	}
 	return nil
+}
+
+// applyRan reports whether the apply stage actually executed.
+//
+// A failure at init or plan changed nothing on the cloud, so the record
+// must not move; a failure during apply may have changed a great deal,
+// so it must. Anything unrecognised is treated as "it ran", because
+// assuming nothing happened is the answer that loses infrastructure.
+func applyRan(err error) bool {
+	if err == nil {
+		return true
+	}
+	var deployErr *harness.SandboxDeployError
+	if errors.As(err, &deployErr) {
+		return deployErr.Stage != "init" && deployErr.Stage != "plan"
+	}
+	return true
 }

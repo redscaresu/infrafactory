@@ -481,3 +481,11 @@ Three rules:
   iteration that fixed it" — but an upgrade has a before and an after, which is
   the same shape. Discarding it would leave live signals at the weakest class of
   lesson.
+
+Two corrections from pass 50. The record advances onto the new tag only when the
+apply **ran**: a failure during apply may have changed a great deal, but a failure
+at init or plan changed nothing, and advancing there would make the record claim a
+version that was never deployed. And the address is re-read from state after the
+apply, because replacement HCL can recreate the load balancer — verifying against
+the address captured at first deploy would probe infrastructure the deployment no
+longer owns, and leave every later observation pointed there too.
