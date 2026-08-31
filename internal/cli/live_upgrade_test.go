@@ -580,3 +580,28 @@ func TestUpgradeRefusesAProjectThatNoLongerExists(t *testing.T) {
 	assert.Contains(t, err.Error(), "no longer exists")
 	assert.Zero(t, deploy.calls)
 }
+
+// An upgrade holds its record across a real apply -- minutes, not
+// microseconds -- so a teardown finishing in that window would be
+// overwritten by the upgrade's write, resurrecting a deployment that is
+// already gone.
+func TestUpgradeDoesNotResurrectARecordTornDownWhileApplying(t *testing.T) {
+	sandboxCredsForTest(t)
+	probe := &stagingVersionProbe{running: "nginx/1.27.4"}
+	deploy := &fakeSandboxDeployHarness{}
+	rt, store := upgradeRuntime(t, probe, deploy)
+	d := upgradeableDeployment(t, store, "dep-racing-upgrade", "1.27")
+
+	// Teardown lands while the apply is running.
+	deploy.onRun = func() { require.NoError(t, store.MarkReleased(d.ID)) }
+
+	var out strings.Builder
+	require.Error(t, runUpgrade(t, rt, d.ID, &out, "--from", newHCLDir(t), "--tag", "1.28"))
+
+	got, err := store.Get(d.ID)
+	require.NoError(t, err)
+	assert.Equal(t, livestore.StateReleased, got.State, "the teardown stands")
+	assert.Equal(t, "1.27", got.Tag, "and the upgrade does not write over it")
+	assert.Contains(t, out.String(), "was torn down while this upgrade was applying")
+	assert.Contains(t, out.String(), "check project")
+}

@@ -253,7 +253,29 @@ func runLiveUpgradeCommand(cmd *cobra.Command, args []string, runtime *CommandRu
 		}
 	}
 
-	if err := store.Put(d); err != nil {
+	// Re-read before writing, as `live observe` does. An upgrade holds
+	// its record across a real apply -- minutes, not microseconds -- and
+	// a `live teardown` finishing in that window would be overwritten by
+	// this write, resurrecting a deployment that is already gone.
+	//
+	// The window is narrowed, not closed: the store has no
+	// compare-and-swap, and claiming more than narrowing would be wrong.
+	if fresh, readErr := store.Get(d.ID); readErr != nil {
+		failures = append(failures, FailureSummary{
+			Layer: "live", Stage: "upgrade", Check: "record",
+			Command: "live upgrade " + d.ID,
+			Detail: fmt.Sprintf(
+				"%s was applied but its record could not be re-read to save the result: %v", d.ID, readErr),
+		})
+	} else if fresh.State == livestore.StateReleased {
+		failures = append(failures, FailureSummary{
+			Layer: "live", Stage: "upgrade", Check: "record",
+			Command: "live upgrade " + d.ID,
+			Detail: fmt.Sprintf(
+				"%s was torn down while this upgrade was applying. Whatever the apply created is NOT tracked by "+
+					"that record -- check project %s by hand", d.ID, d.ProjectID),
+		})
+	} else if err := store.Put(d); err != nil {
 		failures = append(failures, FailureSummary{
 			Layer: "live", Stage: "upgrade", Check: "record",
 			Command: "live upgrade " + d.ID,

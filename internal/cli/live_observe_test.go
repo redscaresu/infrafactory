@@ -484,3 +484,29 @@ func TestObserveSaysWhyTheVersionWasUncheckedRatherThanGuessing(t *testing.T) {
 	assert.Contains(t, out.String(), "/version is unreachable")
 	assert.NotContains(t, out.String(), "no version_path declared")
 }
+
+// A plain substring match confirms tag "1.2" against a service reporting
+// "nginx/1.27.4" -- a service running something other than what the
+// record claims, passed off as confirmation. That is the precise drift
+// this check exists to catch.
+func TestVersionMatchingRespectsVersionBoundaries(t *testing.T) {
+	cases := []struct {
+		body, tag string
+		want      bool
+		why       string
+	}{
+		{"nginx/1.27.4", "1.27", true, "a patch of the same version confirms it"},
+		{"nginx/1.27.4", "1.2", false, "1.2 is not 1.27, however the substring falls"},
+		{"nginx/11.27", "1.27", false, "and 11.27 is not 1.27"},
+		{"nginx/1.27", "1.27", true, "exact"},
+		{"running 1.27 now", "1.27", true, "surrounded by spaces"},
+		{"v1.27", "1.27", true, "a leading v is not a digit"},
+		{"1.270", "1.27", false, "nor is 1.270"},
+		{"anything", "", false, "an empty tag confirms nothing"},
+	}
+
+	for _, tc := range cases {
+		assert.Equal(t, tc.want, mentionsVersion(tc.body, tc.tag),
+			"%q vs %q: %s", tc.body, tc.tag, tc.why)
+	}
+}

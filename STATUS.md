@@ -75,11 +75,20 @@ Last updated: 2026-08-31
   project. The API is asked now, and deliberately not through the deletion guard,
   which treats "gone" as success.
 
-  **The shape of this slice**: six passes, eleven findings, and ten of them are
+  Pass 56: a prefix match confirmed tag `1.2` against a service reporting
+  `nginx/1.27.4` — a **false confirmation**, the exact drift S155a exists to
+  catch. `mentionsVersion` requires version boundaries now. And the upgrade could
+  overwrite a concurrent teardown: the same race fixed in `observe`, worse here
+  because an upgrade holds its record across a real apply — minutes, not the
+  microseconds a probe takes.
+
+  **The shape of this slice**: seven passes, thirteen findings, and ten of them are
   one incomplete answer rather than eleven mistakes — "did anything reach the
-  cloud?" answered four times, "which project do we trust?" three. **The rule
-  already existed and was written down.** Reading ADR-0025's own words before
-  writing the guard would have collapsed three passes into one.
+  cloud?" answered four times, "which project do we trust?" three, and three
+  separate fixes that **already existed elsewhere in the codebase** and were not
+  carried to a new path. The lesson is not "review harder": new code touching an
+  existing mechanism should start by reading how that mechanism is already used,
+  rather than reimplementing the parts of it that seem needed.
 
   - **The previous HCL is kept** in `.infrafactory-previous/`. That pair either
     side of one change is the diff `ExtractFixPitfall` needs and cannot
