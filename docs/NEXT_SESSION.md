@@ -4,35 +4,43 @@ Self-contained brief for a fresh Claude / engineer starting in this repo.
 
 ## Read this first (handoff state as of 2026-08-31)
 
-### START HERE — S165, the run-owned project
+### START HERE — S166, the teardown guard
 
-**Next slice: S165** (`docs/plans/run-owned-project-plan.md`, ADR-0025). It is
-the prerequisite for everything else: until it lands, no Scaleway compute
-scenario can satisfy Layer 1 and Layer 3 at once (see THE BLOCKER below), so the
-remaining live-services slices cannot reach real infrastructure with generated
-HCL. The mechanism is already proven by hand against real Scaleway.
+**Read `docs/plans/s166-teardown-guard-design.md` first, and disagree with it
+before anything is built.** It collects four judgement calls for a human; the
+weakest is the migration disjunction.
 
-### Arc context — live services
+S166 replaces `AssertProjectDeletable`'s state-derived cross-check — the guard
+between an automated destroy and real infrastructure. Under ADR-0025 the project
+is no longer a Terraform resource, so `terraform-live.tfstate` stops naming it
+and the check loses its input. The proposal is two checks, both required: a
+run-owned marker beside the state (identity) plus an API-side provenance check
+against S165's `if-run-` stamp (class, not locally forgeable). Neither alone is
+sufficient, and provenance alone would *regress* — it authorises deleting any
+stamped project, so parallel runs could delete each other's.
 
-`docs/plans/live-services-arc-plan.md` (S151–S158). infrafactory can now deploy a
-versioned service that outlives its run, and destroy it again.
+**S166 must land before S167.** Removing `scaleway_account_project` from the HCL
+before replacing the guard that reads it breaks the guard. This is a safety
+requirement, not an ordering preference.
 
-**Landed** — S151 live deployment registry, S152 `service:` in the scenario
-schema, S153 `deploy`/`live teardown`/`live reap`, plus S153a/S153b hardening
-(PR #171).
+### Done: S165 (merged, canaried)
 
-    infrafactory run <scenario>        prove it is safe
-    infrafactory deploy <scenario>     put it up under a TTL
-    infrafactory live ls               what is running, how long it has left
-    infrafactory live teardown <id>    destroy one
-    infrafactory live forget <id>      release a record nothing can act on
-    infrafactory live reap             destroy everything expired
+`scaleway.create_run_project` (default **false**) creates the run's project via
+the Account API before the apply and passes it as `SCW_DEFAULT_PROJECT_ID`.
+Canary on real Scaleway, 2026-08-31: `block-paris`, 14.2s, every stage pass,
+account back to its 3 baseline projects with both ids returning 404.
 
-**Proven against real Scaleway** (2026-08-30): deploy 35.8s, HTTP 200 through a
-real load balancer, teardown 36.1s, account back to its 3 baseline projects —
-verified against the API, not from the tool's own report. D6 (the auto-created
-`Default security group` blocking project deletion) reproduced **three** separate
-times, including once in a path with no infrafactory code in it.
+Two things to know before using it:
+
+- Enabling it **before S167** gives a run two projects — the pre-created one and
+  the one its HCL still declares. Nothing leaks (the canary cleaned up both), but
+  it is waste. The flag is mechanically complete, not coherent, until S167.
+- A run whose destroy falls to `run`'s auto-destroy-on-failure path keeps its
+  project. Reported as a skipped delete, not silent.
+
+Nine review passes went into S165 and almost none found a wrong computation.
+Every real finding was an **operation ordered so a failure left something
+behind** — worth expecting rather than rediscovering.
 
 ### THE BLOCKER — read before planning anything Scaleway + compute
 
