@@ -19,9 +19,13 @@ against S165's `if-run-` stamp (class, not locally forgeable). Neither alone is
 sufficient, and provenance alone would *regress* — it authorises deleting any
 stamped project, so parallel runs could delete each other's.
 
-**S166 must land before S167.** Removing `scaleway_account_project` from the HCL
-before replacing the guard that reads it breaks the guard. This is a safety
-requirement, not an ordering preference.
+**S166 and S167 are ONE change** (decided 2026-08-31). The guard's input changes
+at exactly the moment the HCL changes, so they cannot be separated — and the
+transition that would have separated them was dropped: there is no fleet to
+migrate, and two code paths is where this arc's bugs came from.
+`scaleway.create_run_project` is scaffolding and gets deleted by the cutover.
+
+All four judgement calls in the design are **answered**; it is ready to build.
 
 ### Done: S165 (merged, canaried)
 

@@ -1,10 +1,12 @@
 # S166 design: replacing the teardown guard's second source of truth
 
 Written 2026-08-31 for review **before** implementation. S165 is merged and
-canaried; S166 is the slice that must land before S167, and it is the one that
-touches the guard standing between an automated destroy and real infrastructure.
+canaried. S166 replaces the guard standing between an automated destroy and real
+infrastructure — and, per the cutover decision below, it now lands **together
+with** S167 as one atomic change rather than before it.
 
-Nothing here is built yet. The judgement calls are collected at the end.
+Nothing here is built yet. The four judgement calls this document was written to
+surface were answered on 2026-08-31 and are recorded below as decisions.
 
 ## What the guard does today
 
@@ -27,10 +29,9 @@ bypassed by an argument.
 
 Under the new model the project is created through the Account API before tofu
 runs, so it is **not a Terraform resource** and `terraform-live.tfstate` will not
-name it. Once S167 removes `scaleway_account_project` from the HCL, the witness
-is gone and the check has no input. That is why the ordering is a safety
-requirement: **removing the resource before replacing the guard that reads it
-breaks the guard.**
+name it. Removing `scaleway_account_project` from the HCL takes the witness away
+and leaves the check with no input — which is why the guard and the HCL change
+are the same change, not two ordered ones.
 
 ## The proposed replacement: two checks, both required
 
@@ -88,20 +89,36 @@ delete" — the lesson the orphan sweep already encodes.
 | project exists, **not** stamped | **refuse, loudly** | something is badly wrong; this is not our project |
 | marker and target disagree | **refuse** | the argument does not get to win over the record |
 
-## Migration: a disjunction, not a replacement
+## No migration: a cutover (decided 2026-08-31)
 
-Both models coexist until S167 lands and the fixtures move. During that window a
-project may have been created either way, so the guard answers *"may I delete
-X?"* with yes when **either**:
+The design originally proposed running both models side by side and accepting
+whichever check applied. **That was wrong, and the question that killed it was
+"what is the benefit of a transition for a non-production tool like this?"**
 
-- the state names X as `scaleway_account_project` (old model, today's check), or
-- the marker names X **and** X carries the provenance stamp (new model)
+There is none. No deployed fleet, no external consumers, nobody mid-migration.
+The only thing a transition protected was the PR gate's fixtures — and the gate
+runs on every PR, so breaking it is *caught*, not discovered later. Rollback for
+a single-user repo is `git revert`, not a migration plan.
 
-This is a disjunction, which is weaker than requiring both. It is not weaker than
-today, because each branch is independently sufficient for the model that
-produced it — but it is the part of this design I would most want a second
-opinion on. The alternative is a hard cutover, which cannot be staged and would
-break the PR gate.
+It also cost something real: two models means two code paths, and two code paths
+is where this arc's bugs came from — five of S165's nine review findings were a
+cleanup path that did not run, and the dual model is what produced the
+"two projects per run" wart. **`create_run_project` was scaffolding mistaken for
+a feature.**
+
+So: **one model, one guard, one path.** The flag is deleted.
+
+### Consequence: S166 and S167 are one atomic change
+
+The guard's input changes at exactly the moment the HCL changes, so they cannot
+be separated. One slice, containing: the new guard, the shape gate no longer
+requiring a `scaleway_account_project` binding, prompts and pitfalls updated, and
+the gate fixtures plus recorded generation regenerated.
+
+That is a large security-critical change to review at once. **"Split for review
+size" is a different argument from "split for migration"** — this needs a hard
+review and a real-cloud canary before merge, but it does not need a flag kept
+alive to get them.
 
 ## Blast radius if this is wrong
 
@@ -116,19 +133,24 @@ running. Given today's evidence — nine review passes on S165, five of them abo
 cleanup not running — **over-strict is the safer failure and the one to prefer
 when uncertain.**
 
-## Judgement calls I want reviewed
+## Decisions (2026-08-31)
 
-1. **Is marker + provenance genuinely equivalent to the state-derived check?**
-   My claim is yes, and slightly better because provenance is not locally
-   forgeable. Disagreeing here changes the whole design.
-2. **Is the migration disjunction acceptable?** It is the weakest point. The
-   alternative is a flag day.
-3. **Should the marker live in the workdir or in the live-deployment record?**
-   Workdir is proposed, because `reap` operates on a workdir and has no record.
-   `live teardown` has both.
-4. **Does "API unreachable ⇒ refuse" make teardown too fragile?** It means a
-   network blip leaves resources running until someone retries. That is the
-   deliberate choice, but it has a cost and it is worth stating out loud.
+1. **Marker + provenance is accepted as equivalent.** The marker gives identity
+   at tfstate's trust level; provenance adds something tfstate never had — a
+   check that cannot be forged locally. Neither alone: marker alone is a pure
+   downgrade, and provenance alone authorises deleting *any* stamped project, so
+   parallel runs could delete each other's.
+2. **Cut over; no transition.** See above. The flag is deleted and S166+S167
+   become one slice.
+3. **The marker lives in the workdir**, beside the state, as
+   `.infrafactory-run-project`. `reap` has no deployment record — it exists for
+   runs that died before anything was recorded — so a record-only marker would
+   leave the guard blind on the command most likely to be aimed at orphaned
+   infrastructure. It also sits where the witness it replaces sat.
+4. **API unreachable ⇒ refuse.** Consistent with the orphan sweep's rule that
+   "we could not check" must never look like "nothing leaked". A blip costs a
+   retry; proceeding wrongly costs a project nobody meant to destroy. Resources
+   keep billing either way, so the asymmetry favours refusing.
 
 ## Explicitly out of scope
 

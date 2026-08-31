@@ -37,16 +37,21 @@ existence*.
 
 | id | slice | why |
 |---|---|---|
-| S165 | Pre-apply project creation + `SCW_DEFAULT_PROJECT_ID` wiring, behind a config flag; both paths work | the mechanism, provably reversible |
-| S166 | Replace `AssertProjectDeletable`'s second source of truth | the guard that stands between teardown and real infrastructure — see below |
-| S167 | Remove `scaleway_account_project` from generation: prompts, pitfalls, shape gate, fixtures | the HCL change itself |
-| S168 | Real-cloud canary on the new path, then delete the old one + evidence | proven before the fallback is removed |
+| S165 | Pre-apply project creation + `SCW_DEFAULT_PROJECT_ID` wiring | ✅ **done, merged, canaried 2026-08-31** |
+| S166+S167 | The cutover: new guard **and** `scaleway_account_project` out of the HCL, prompts, pitfalls, shape gate, fixtures, recorded generation — in one change | the guard's input changes exactly when the HCL does, so they are one change |
+| S168 | Real-cloud canary on the new path + evidence | proven before merge, not after |
 
-**S165 → S166 → S167 → S168 is strictly ordered.** S166 must land before S167:
-once the project leaves the HCL the state no longer names it, and the guard has
-to already have its replacement.
+**Revised 2026-08-31.** The plan originally staged S166 before S167 behind a
+flag, on the assumption that both models should coexist during a transition.
+Challenged and dropped: there is no fleet to migrate, no external consumers, and
+the PR gate catches fixture breakage on the PR itself. Two models meant two code
+paths, which is where this arc's bugs came from — five of S165's nine review
+findings were a cleanup path that did not run. `scaleway.create_run_project` was
+scaffolding mistaken for a feature and is deleted by the cutover.
 
-## S166 is the slice to be careful with
+Design and decisions: `docs/plans/s166-teardown-guard-design.md`.
+
+## The cutover is the slice to be careful with
 
 `AssertProjectDeletable(stateProjectID, targetProjectID, organizationID)` refuses
 when the target is the organization default, and when it does not match the

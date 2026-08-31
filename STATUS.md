@@ -17,8 +17,11 @@ Last updated: 2026-08-31
   sufficient, and provenance alone would be a regression: it authorises deleting
   *any* stamped project, so two parallel runs could delete each other's.
 
-  Four judgement calls are collected at the end for a human to disagree with, the
-  weakest being the migration disjunction. Over-strict is named as the preferred
+  **All four judgement calls answered 2026-08-31**, and one of them changed the
+  arc: challenged on *why a non-production tool needs a transition at all*, the
+  dual-model plan was dropped. S166+S167 are now **one atomic cutover** and
+  `scaleway.create_run_project` is deleted as the scaffolding it was — two code
+  paths is where this arc's bugs came from. Over-strict is named as the preferred
   failure mode, given that five of S165's nine review findings were cleanup that
   did not run.
 
