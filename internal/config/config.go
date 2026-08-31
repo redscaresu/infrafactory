@@ -127,6 +127,13 @@ type ScalewayConfig struct {
 	// skipped delete rather than removed, because the project id is the
 	// handle to whatever survived.
 	//
+	// NOT USABLE ON ITS OWN YET: before S167 the HCL still declares
+	// scaleway_account_project, so enabling this gives a run two projects
+	// -- this one and the declared one. Nothing leaks, but it is waste,
+	// and the orphan sweep still derives its target from the declared
+	// resource. S167 removes it; S166 must land first, because the sweep
+	// target feeds AssertProjectDeletable.
+	//
 	// `deploy` refuses the flag outright for now: that command keeps its
 	// project by design, so deleting it belongs to `live teardown` (a
 	// later increment), and honouring it today would create a project

@@ -38,6 +38,13 @@ Last updated: 2026-08-31
   branch, so an apply failing at preflight/init/plan created a project and never
   removed it — on exactly the runs most likely to be repeated.
 
+  **Not usable on its own yet**: before S167 the HCL still declares
+  `scaleway_account_project`, so enabling the flag gives a run two projects.
+  Nothing leaks, but it is waste — and codex pass 24 correctly noted that once
+  S167 removes that resource, `CaptureSweepTarget` fails closed. Declined as
+  S166 scope: the sweep target feeds `AssertProjectDeletable`, so **S166 must
+  land before S167**.
+
   Next increment: `deploy` + `live teardown`, so a live deployment's project is
   deleted at teardown; then S167's fixture and prompt migration. **S166 is deliberately not
   in scope** — it replaces `AssertProjectDeletable`'s state-derived cross-check,

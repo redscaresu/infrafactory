@@ -156,3 +156,24 @@ The rule, stated so it cannot be re-derived incorrectly: **every Layer 3
 environment for a given run is built from the same project.** It is enforced by a
 source audit rather than a unit test, because the defect lives in which helper a
 call site picks — and no test of either helper would have caught it.
+
+## Amendment, 2026-08-31 (S165, pass 24): S166 must land before S167
+
+The slice ordering in the plan was a preference. It is a safety requirement.
+
+`CaptureSweepTarget` derives the run's blast radius from the
+`scaleway_account_project` resource in state, and its output flows into
+`destroySandbox`, which calls `AssertProjectDeletable`. So the moment S167 removes
+that resource from the HCL, the sweep target has no source — a successful
+apply/destroy would report an orphan-sweep failure, and the auto-created purge
+would be skipped for want of a project id. **Removing the resource before
+replacing the guard that reads it breaks the guard.**
+
+Hence: **S166 before S167**, not merely S166 then S167.
+
+One consequence of S165 landing first, stated so nobody mistakes the flag for
+finished: enabling `create_run_project` *before* S167 gives a run **two**
+projects — the pre-created one and the one its HCL still declares. Nothing leaks;
+the pre-created one is empty and deleted by the cleanup, and the declared one is
+destroyed and swept as always. But it is waste, and the flag is mechanically
+complete rather than coherent until S167.
