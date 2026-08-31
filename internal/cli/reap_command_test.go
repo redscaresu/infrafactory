@@ -12,6 +12,7 @@ import (
 	"github.com/redscaresu/infrafactory/internal/harness"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 const reapProjectID = "2397e80e-ec12-4a7e-819f-a2caba3867b6"
@@ -221,6 +222,29 @@ func TestInterruptGuardDestroysLiveResources(t *testing.T) {
 	if destroy.lastCtx != nil && destroy.lastCtx.Err() != nil {
 		t.Fatal("cleanup destroy must run on a fresh context — doing work after cancellation is the whole point")
 	}
+	// tofu cannot delete the project any more, and an interrupt is the
+	// one exit with no summary to report a kept project in.
+	projects := rt.Deps.RunProject.(*fakeRunProject)
+	assert.Equal(t, 1, projects.deletes, "the interrupt must delete the run project too")
+	assert.Contains(t, out.String(), "Run project "+reapProjectID+" deleted")
+}
+
+// Interrupted between creating the project and writing any state: there
+// is nothing for tofu to destroy, but a real project to delete. Before
+// ADR-0025 this shape did not exist -- the project came from the apply.
+func TestInterruptGuardDeletesTheProjectWhenNothingWasApplied(t *testing.T) {
+	sandboxCredsForTest(t)
+	destroy := &fakeSandboxDestroyHarness{}
+	rt, _ := reapRuntime(t, destroy, &fakeOrphanSweep{})
+	require.NoError(t, harness.WriteRunProjectMarker(rt.OutputDir(),
+		harness.RunProject{ID: reapProjectID, Name: harness.RunProjectNamePrefix + "interrupt"}))
+
+	out := &strings.Builder{}
+	_ = withSandboxInterruptGuard(guardCmd(out), rt, cancelledNotify(), func(context.Context) error { return nil })
+
+	assert.Zero(t, destroy.calls, "no state means nothing for tofu to do")
+	assert.Equal(t, 1, rt.Deps.RunProject.(*fakeRunProject).deletes)
+	assert.Contains(t, out.String(), "deleted")
 }
 
 // If cleanup itself fails the operator must be left knowing resources

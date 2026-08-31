@@ -67,6 +67,20 @@ Last updated: 2026-08-31
   project — **is closed**. It existed because the id lived in the state file that
   path could not read; the marker gives it one.
 
+  **Every teardown path now names the project explicitly** (pass 33). `live
+  teardown` and `reap` build their environment with
+  `sandboxCommandEnvForProject`, so the destroy runs with the same provider
+  default the apply did rather than the shared fallback. The interrupt guard
+  deletes the project after its cleanup destroy — it is the one exit with no
+  stage summary, so a project kept there could not even be reported — and it no
+  longer treats a missing state file as "nothing to clean up", because an
+  interrupt between creating the project and the first apply leaves exactly that.
+
+  Six placements of "delete the project" have now been wrong across passes 30–33
+  and none of the conditions have been. Removing a deletion Terraform used to
+  perform invalidated every path that had been relying on it without saying so,
+  and they surfaced one review at a time rather than from any single reading.
+
 - 📐 **S166 design written for review (2026-08-31)** —
   `docs/plans/s166-teardown-guard-design.md`. Not implemented: this is the slice
   that touches `AssertProjectDeletable`, the guard between an automated destroy

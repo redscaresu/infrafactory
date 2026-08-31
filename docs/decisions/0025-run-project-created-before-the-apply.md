@@ -312,3 +312,16 @@ The deletability guard now lives inside `releaseRunProject` rather than at its
 call sites, matching the rule `destroy_retry.go` already states for the purge: a
 check reached by four paths that deletes real infrastructure over HTTP belongs
 where it cannot be forgotten.
+
+### Follow-up, pass 33: the provider default, and the exit with no summary
+
+- **A destroy must run in the same provider context as its apply.** `live
+  teardown` and `reap` were building their environment with an empty project, so
+  `tofu destroy` ran against the shared fallback while the resources had been
+  created with the run's own project as the default. Both now use
+  `sandboxCommandEnvForProject`.
+- **The interrupt guard deletes the project.** Ctrl-C is the one exit with no
+  stage summary, so a project kept there is not merely leaked but unreported. It
+  also stopped treating a missing state file as "nothing to clean up": since the
+  project now precedes the apply, an interrupt in between leaves a real project
+  and no state.

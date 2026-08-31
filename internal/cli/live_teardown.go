@@ -91,7 +91,7 @@ func tearDownDeployment(
 					"then clear the record with `infrafactory live forget %s`", d.ID, d.ProjectID, d.ID))
 		}
 
-		sandboxEnv, envErr := sandboxCommandEnv(runtime)
+		sandboxEnv, envErr := sandboxCommandEnvForProject(runtime, d.ProjectID)
 		if envErr != nil {
 			return unreclaimable(fmt.Sprintf(
 				"%s has nothing to destroy, but the account cannot be verified: %v", d.ID, envErr))
@@ -128,7 +128,11 @@ func tearDownDeployment(
 		return stages, failures
 	}
 
-	sandboxEnv, err := sandboxCommandEnv(runtime)
+	// The deployment's own project as the provider default: the apply
+	// created these resources with it set, so the destroy that inverts
+	// the apply must run with the same one rather than the shared
+	// fallback.
+	sandboxEnv, err := sandboxCommandEnvForProject(runtime, d.ProjectID)
 	if err != nil {
 		return unreclaimable(fmt.Sprintf("sandbox credentials for %s: %v", d.ID, err))
 	}

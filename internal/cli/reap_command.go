@@ -61,7 +61,9 @@ func runReapCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) 
 	}
 	projectID := marker.ProjectID
 
-	sandboxEnv, err := sandboxCommandEnv(runtime)
+	// Scoped to the project the marker names: the apply ran with it as
+	// the provider default, so the destroy that inverts it must too.
+	sandboxEnv, err := sandboxCommandEnvForProject(runtime, projectID)
 	if err != nil {
 		return &CLIError{Op: "reap", Code: errorCodeCommandFailed, Err: err}
 	}
@@ -151,42 +153,74 @@ func withSandboxInterruptGuard(
 		return err
 	}
 
-	// Interrupted. Anything the apply created is live and unowned.
+	// Interrupted. Anything the apply created is live and unowned -- and
+	// since ADR-0025 that includes the project itself, which exists
+	// before the apply and outlives `tofu destroy`.
 	out := cmd.ErrOrStderr()
 	workDir := runtime.OutputDir()
 	statePath := filepath.Join(workDir, harness.LiveStateFilename)
-	if _, statErr := os.Stat(statePath); errors.Is(statErr, os.ErrNotExist) {
+	_, stateErr := os.Stat(statePath)
+	hasState := !errors.Is(stateErr, os.ErrNotExist)
+
+	// The marker, because "no state" no longer means "nothing exists".
+	marker, markerErr := harness.ReadRunProjectMarker(workDir)
+	if !hasState && markerErr != nil {
 		_, _ = fmt.Fprintf(out, "\nInterrupted before any real resources were created — nothing to clean up.\n")
 		return err
 	}
 
-	_, _ = fmt.Fprintf(out, "\nInterrupted with real resources live. Destroying before exit — press Ctrl-C again to abandon.\n")
+	if hasState {
+		_, _ = fmt.Fprintf(out, "\nInterrupted with real resources live. Destroying before exit — press Ctrl-C again to abandon.\n")
+	} else {
+		_, _ = fmt.Fprintf(out,
+			"\nInterrupted before anything was applied, but project %s exists. Deleting it before exit — press Ctrl-C again to abandon.\n",
+			marker.ProjectID)
+	}
 
 	// stop() restores default signal handling, so a second Ctrl-C kills
 	// the process outright rather than being swallowed here.
 	stop()
 
-	sandboxEnv, envErr := sandboxCommandEnv(runtime)
+	// Scoped to the run's project, so the destroy runs with the same
+	// provider default the apply did.
+	sandboxEnv, envErr := sandboxCommandEnvForProject(runtime, marker.ProjectID)
 	if envErr != nil {
 		reportAbandonedResources(out, statePath, envErr)
 		return err
 	}
-	// Through destroySandbox, not the raw harness: an interrupted run is
-	// exactly when a project the API made undeletable matters most,
-	// because nothing else is coming to clean it up. Capture can fail
-	// here -- the state may be mid-write -- and an empty project id just
-	// means no purge, never a skipped destroy.
-	cleanupTarget, _ := harness.CaptureSweepTarget(workDir)
-	_, purged, destroyErr := destroySandbox(
-		context.Background(), runtime, workDir, sandboxEnv, sweepTargetProjectID(cleanupTarget))
-	if destroyErr != nil {
-		reportAbandonedResources(out, statePath, destroyErr)
+
+	if hasState {
+		// Through destroySandbox, not the raw harness: an interrupted run
+		// is exactly when a project the API made undeletable matters
+		// most, because nothing else is coming to clean it up. Capture
+		// can fail here -- the state may be mid-write -- and an empty
+		// project id just means no purge, never a skipped destroy.
+		cleanupTarget, _ := harness.CaptureSweepTarget(workDir)
+		_, purged, destroyErr := destroySandbox(
+			context.Background(), runtime, workDir, sandboxEnv, sweepTargetProjectID(cleanupTarget))
+		if destroyErr != nil {
+			reportAbandonedResources(out, statePath, destroyErr)
+			return err
+		}
+		if len(purged) > 0 {
+			_, _ = fmt.Fprintf(out, "%s\n", autoCreatedPurgeStage(purged).Detail)
+		}
+		_, _ = fmt.Fprintf(out, "Cleanup destroy completed.\n")
+	}
+
+	// The project last, because tofu cannot delete it and nothing else
+	// will: an interrupt is the one exit with no summary to report a
+	// kept project in.
+	if markerErr != nil {
 		return err
 	}
-	if len(purged) > 0 {
-		_, _ = fmt.Fprintf(out, "%s\n", autoCreatedPurgeStage(purged).Detail)
+	_, projectFailures := releaseRunProject(
+		context.Background(), runtime, workDir, marker.ProjectID, sandboxEnv)
+	if len(projectFailures) > 0 {
+		_, _ = fmt.Fprintf(out, "%s\n", projectFailures[0].Detail)
+		return err
 	}
-	_, _ = fmt.Fprintf(out, "Cleanup destroy completed.\n")
+	_, _ = fmt.Fprintf(out, "Run project %s deleted.\n", marker.ProjectID)
 	return err
 }
 
