@@ -1,7 +1,3 @@
-output "project_id" {
-  description = "Bootstrapped project id owning all scenario resources"
-  value       = scaleway_account_project.main.id
-}
 
 output "block_volume_id" {
   description = "Zoned id of the app-data block volume for destruction/orphan verification"

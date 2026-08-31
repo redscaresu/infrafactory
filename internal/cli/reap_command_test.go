@@ -36,6 +36,7 @@ func reapRuntime(t *testing.T, destroy *fakeSandboxDestroyHarness, sweep *fakeOr
 		Deps: RuntimeDependencies{
 			SandboxDestroy: destroy,
 			OrphanSweep:    sweep,
+			RunProject:     &fakeRunProject{},
 		},
 	}
 	if _, err := rt.LoadScenario(scenarioPath); err != nil {
@@ -49,6 +50,13 @@ func reapRuntime(t *testing.T, destroy *fakeSandboxDestroyHarness, sweep *fakeOr
 
 func writeReapLiveState(t *testing.T, dir, projectID string) {
 	t.Helper()
+	// ADR-0025: reap reads the marker, not the state, to learn what it
+	// may destroy. Written alongside so fixtures cover both.
+	if err := harness.WriteRunProjectMarker(dir, harness.RunProject{
+		ID: projectID, Name: harness.RunProjectNamePrefix + "reap",
+	}); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
 	body := `{"resources":[
 	  {"type":"scaleway_account_project","instances":[{"attributes":{"id":"` + projectID + `"}}]},
 	  {"type":"scaleway_block_volume","instances":[{"attributes":{"id":"vol-1","project_id":"` + projectID + `"}}]}

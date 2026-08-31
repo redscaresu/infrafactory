@@ -68,7 +68,10 @@ func deployTestRuntime(t *testing.T, scenarioYAML string, deploy *fakeSandboxDep
 		Config:         cfg,
 		scenarioLoader: defaultScenarioLoader,
 		livestoreRoot:  h.LivestoreRoot(),
-		Deps:           RuntimeDependencies{SandboxDeploy: deploy},
+		Deps: RuntimeDependencies{
+			SandboxDeploy: deploy,
+			RunProject:    &fakeRunProject{created: harness.RunProject{ID: "run-proj-1", Name: "if-run-web-live-paris"}},
+		},
 	}
 	_, err = rt.LoadScenario(scenarioPath)
 	require.NoError(t, err)
@@ -90,15 +93,10 @@ func writeDeployableHCL(t *testing.T, dir string) {
   }
 }
 
-resource "scaleway_account_project" "run" {
-  name = "if-live"
-}
-
 resource "scaleway_block_volume" "data" {
   name       = "if-live-data"
   size_in_gb = 10
   iops       = 5000
-  project_id = scaleway_account_project.run.id
 }
 `
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "main.tf"), []byte(body), 0o600))
@@ -137,7 +135,7 @@ func TestDeployAppliesAndRecordsWithoutDestroying(t *testing.T) {
 	assert.Equal(t, "nginx", d.Image)
 	assert.Equal(t, "1.27", d.Tag)
 	assert.Equal(t, livestore.StateLive, d.State)
-	assert.Equal(t, "test-run-project", d.ProjectID, "taken from the live state, not the record")
+	assert.Equal(t, "run-proj-1", d.ProjectID, "the run's own project, not one derived from state")
 	assert.InDelta(t, 4*time.Hour, d.ExpiresAt.Sub(d.CreatedAt), float64(time.Second),
 		"the TTL comes from service.ttl")
 	assert.Contains(t, out.String(), "nginx:1.27")
@@ -214,8 +212,7 @@ func TestDeployRefusesHCLOutsideTheAllowlist(t *testing.T) {
 	deploy := &fakeSandboxDeployHarness{}
 	rt, _, scenarioPath := deployTestRuntime(t, liveServiceScenarioYAML, deploy)
 	require.NoError(t, os.WriteFile(filepath.Join(rt.OutputDir(), "main.tf"), []byte(
-		`resource "scaleway_account_project" "run" {}
-resource "scaleway_rdb_instance" "expensive" {}
+		`resource "scaleway_rdb_instance" "expensive" {}
 `), 0o600))
 
 	var out strings.Builder
@@ -275,10 +272,10 @@ func TestDeployRefusesAnOutOfBoundsTTLOverride(t *testing.T) {
 	assert.Zero(t, deploy.calls)
 }
 
-// An apply that fails before creating anything leaves no state, so there
-// is nothing to record and nothing to reap -- but the operator is still
-// told how to clean up if they think otherwise.
-func TestDeployRecordsNothingWhenTheApplyCreatedNothing(t *testing.T) {
+// Since ADR-0025 the project is created BEFORE the apply, so an apply
+// that fails early still leaves a real project. It must be recorded, or
+// `live teardown` cannot find it -- the leak the record exists to stop.
+func TestDeployRecordsTheProjectEvenWhenTheApplyCreatedNothing(t *testing.T) {
 	sandboxCredsForTest(t)
 	deploy := &fakeSandboxDeployHarness{err: harness.ErrSandboxDeployFailed}
 	rt, store, scenarioPath := deployTestRuntime(t, liveServiceScenarioYAML, deploy)
@@ -288,12 +285,13 @@ func TestDeployRecordsNothingWhenTheApplyCreatedNothing(t *testing.T) {
 	err := runDeploy(t, rt, scenarioPath, &out)
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "nothing to tear down",
-		"pointing at teardown when no record exists reads like a typo, not like nothing was created")
+	assert.Contains(t, err.Error(), "live teardown",
+		"the project exists, so the operator is told exactly how to remove it")
 
 	records, _, listErr := store.List()
 	require.NoError(t, listErr)
-	assert.Empty(t, records, "no state means nothing was created")
+	require.Len(t, records, 1, "the project exists even though the apply wrote no state")
+	assert.Equal(t, "run-proj-1", records[0].ProjectID)
 }
 
 // partialApplyHarness fails the way a real apply does when it dies with
@@ -328,7 +326,7 @@ func TestDeployRecordsAPartialApplySoItCanBeReaped(t *testing.T) {
 	records, _, listErr := store.List()
 	require.NoError(t, listErr)
 	require.Len(t, records, 1, "but what it created is recorded anyway")
-	assert.Equal(t, "half-made-project", records[0].ProjectID)
+	assert.Equal(t, "run-proj-1", records[0].ProjectID)
 	assert.True(t, records[0].Reapable(records[0].ExpiresAt.Add(time.Second)),
 		"so the reaper will come back for it")
 }
@@ -356,26 +354,26 @@ func TestRegisterDeploymentFailsWhenStateNamesNoProject(t *testing.T) {
 		[]byte(`{"resources":[]}`), 0o600))
 
 	sc := scenarioWithService(t)
-	stages, failures := registerDeployment(store, sc, "dep-x", workDir, time.Hour)
+	stages, failures := registerDeployment(store, sc, "dep-x", workDir, "", time.Hour)
 
 	require.Len(t, failures, 1)
-	assert.Contains(t, failures[0].Detail, "cannot be recorded or reaped")
+	assert.Contains(t, failures[0].Detail, "cannot be reaped")
 	require.Len(t, stages, 1)
 	assert.Equal(t, StageStatusFail, stages[0].Status)
 }
 
-func TestRegisterDeploymentSkipsWhenNothingWasCreated(t *testing.T) {
+func TestRegisterDeploymentRecordsTheProjectWithoutState(t *testing.T) {
 	h := newCommandTestHarness(t)
 	store := livestore.NewFilesystemStore(h.LivestoreRoot())
 	workDir := filepath.Join(h.WorkspaceDir, "empty")
 	require.NoError(t, os.MkdirAll(workDir, 0o755))
 
-	stages, failures := registerDeployment(store, scenarioWithService(t), "dep-y", workDir, time.Hour)
+	stages, failures := registerDeployment(store, scenarioWithService(t), "dep-y", workDir, "run-proj-1", time.Hour)
 
 	assert.Empty(t, failures)
 	require.Len(t, stages, 1)
-	assert.Equal(t, StageStatusSkip, stages[0].Status)
-	assert.Contains(t, stages[0].Detail, "nothing was created")
+	assert.Equal(t, StageStatusPass, stages[0].Status,
+		"the project exists before any state does, so it is recorded regardless")
 }
 
 func TestNewDeploymentIDIsScenarioScopedAndTimestamped(t *testing.T) {
@@ -483,26 +481,4 @@ func TestDeployApplyIsTransparentWhenNotInterrupted(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotNil(t, result)
 	assert.NotContains(t, out.String(), "Interrupted")
-}
-
-// `deploy` keeps its project, so deleting it belongs to `live teardown`.
-// Until that exists, honouring the flag here would create a project
-// nothing ever deletes — the leak this arc closes.
-func TestDeployRefusesTheRunOwnedProjectFlag(t *testing.T) {
-	sandboxCredsForTest(t)
-	deploy := &fakeSandboxDeployHarness{}
-	rt, store, scenarioPath := deployTestRuntime(t, liveServiceScenarioYAML, deploy)
-	rt.Config.Scaleway.CreateRunProject = true
-	writeDeployableHCL(t, rt.OutputDir())
-
-	var out strings.Builder
-	err := runDeploy(t, rt, scenarioPath, &out)
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "not supported by `deploy` yet")
-	assert.Zero(t, deploy.calls, "nothing is applied")
-
-	records, _, listErr := store.List()
-	require.NoError(t, listErr)
-	assert.Empty(t, records)
 }

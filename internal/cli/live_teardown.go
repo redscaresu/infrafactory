@@ -118,21 +118,16 @@ func tearDownDeployment(
 		return stages, failures
 	}
 
-	stateProjectID, err := harness.RunProjectIDFromState(d.WorkDir)
-	if err != nil {
-		return unreclaimable(fmt.Sprintf("read live state for %s: %v", d.ID, err))
-	}
-
 	sandboxEnv, err := sandboxCommandEnv(runtime)
 	if err != nil {
 		return unreclaimable(fmt.Sprintf("sandbox credentials for %s: %v", d.ID, err))
 	}
 
-	// The record says which deployment; the state says which project.
-	// Passing both makes a disagreement fatal rather than silent.
-	if err := harness.AssertProjectDeletable(
-		stateProjectID, d.ProjectID, sandboxEnv["SCW_DEFAULT_ORGANIZATION_ID"],
-	); err != nil {
+	// The record says which deployment; the marker and the API say which
+	// project. A disagreement between any of them is fatal rather than
+	// silent, so neither a stale record nor a forged marker can aim this
+	// at infrastructure the run did not create.
+	if err := assertRunProjectDeletable(ctx, runtime, d.WorkDir, d.ProjectID, sandboxEnv); err != nil {
 		return unreclaimable(fmt.Sprintf(
 			"refusing to destroy for deployment %s: %v", d.ID, err))
 	}
@@ -145,6 +140,14 @@ func tearDownDeployment(
 		stages = append(stages, autoCreatedPurgeStage(purged))
 	}
 	if destroyErr == nil {
+		// Before the sweep, for the same reason as the run path: the
+		// sweep verifies the project is GONE, and tofu no longer deletes
+		// it. Deleting afterwards would make every clean teardown report
+		// a leak.
+		projectStages, projectFailures := releaseRunProject(ctx, runtime, d.ProjectID)
+		stages = append(stages, projectStages...)
+		failures = append(failures, projectFailures...)
+
 		failuresBeforeSweep := len(failures)
 		stages, failures = appendOrphanSweepResult(ctx, stages, failures, runtime, sweepTarget, sweepTargetErr, sandboxEnv)
 		if len(failures) > failuresBeforeSweep {

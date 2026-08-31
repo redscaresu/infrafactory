@@ -252,3 +252,21 @@ together — reviewed hard and canaried before merge, with the flag deleted.
 
 Design and the four decisions behind it:
 `docs/plans/s166-teardown-guard-design.md`.
+
+## Amendment, 2026-08-31 (S166+S167 cutover): the sweep's blast radius comes from the marker
+
+`CaptureSweepTarget` used to read the project id out of
+`terraform-live.tfstate`, because the project was a Terraform resource. It is
+not one any more, so the sweep now reads `.infrafactory-run-project` — the same
+witness the teardown guard uses. Two consequences worth stating:
+
+- **A run that applied nothing is still swept.** The project exists before the
+  apply, so "no state" no longer means "nothing to verify". Previously an apply
+  that failed before writing state left the sweep with no target.
+- **No marker is a hard failure.** Without it nothing says which project the run
+  owns, so the blast radius is unknown and the sweep refuses rather than
+  reporting clean.
+
+The project is also deleted **before** the sweep runs, not after. The sweep
+verifies the project is gone; deleting it afterwards made every clean teardown
+report the project as a leak.

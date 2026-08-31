@@ -580,10 +580,6 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 	// Declared out here because the destroy path below has to delete what
 	// the apply path created, and they are separate branches.
 	var runProjectID string
-	// Whether the sandbox teardown itself proved the account clean.
-	// Deliberately not len(failures) == 0: that also counts failures from
-	// earlier stages, which say nothing about the account.
-	var sandboxTeardownClean bool
 
 	if deployErr == nil && sandboxEnabled {
 		// Validate the sealed environment BEFORE creating anything. The
@@ -599,7 +595,7 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 			// ADR-0025: the run's own project has to exist before the
 			// provider's environment is built, which is why it can no
 			// longer be a Terraform resource.
-			createdID, runProjectStages, runProjectFailures := ensureRunProject(ctx, runtime, sc.Name)
+			createdID, runProjectStages, runProjectFailures := ensureRunProject(ctx, runtime, sc.Name, outputDir)
 			runProjectID = createdID
 			stages = append(stages, runProjectStages...)
 			failures = append(failures, runProjectFailures...)
@@ -708,13 +704,23 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 					stages = append(stages, autoCreatedPurgeStage(purged))
 				}
 				if sandboxDestroyErr == nil {
+					// Where tofu used to delete the project. Under
+					// ADR-0025 it is not a Terraform resource, so we
+					// delete it here -- BEFORE the sweep, because the
+					// sweep's job is to verify the project is gone.
+					// Deleting it afterwards would make every clean
+					// teardown report a leak.
+					deleteStages, deleteFailures := releaseRunProject(ctx, runtime, runProjectID)
+					stages = append(stages, deleteStages...)
+					failures = append(failures, deleteFailures...)
+
 					failuresBeforeSweep := len(failures)
 					stages, failures = appendOrphanSweepResult(ctx, stages, failures, runtime, sweepTarget, sweepTargetErr, sandboxEnv)
 					// The teardown's own verdict, not the command's. A
 					// failure recorded earlier -- a mock criteria check,
 					// say -- says nothing about whether the account came
 					// back clean.
-					sandboxTeardownClean = len(failures) == failuresBeforeSweep
+					_ = failuresBeforeSweep
 				}
 			}
 		}
@@ -749,12 +755,9 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 	// accumulated failure list. A mock criteria failure followed by a
 	// clean destroy leaves nothing behind but would otherwise strand the
 	// empty project forever.
-	destructionRan := runtime.Config.Validation.Layers.Destruction.Enabled && !opts.SkipDestroy
-
-	if runProjectID != "" {
+	if runProjectID != "" && !runProjectReleased(stages) {
 		switch {
-		case !liveStateMayHoldResources(outputDir),
-			destructionRan && sandboxTeardownClean:
+		case !liveStateMayHoldResources(outputDir):
 			deleteStages, deleteFailures := releaseRunProject(ctx, runtime, runProjectID)
 			stages = append(stages, deleteStages...)
 			failures = append(failures, deleteFailures...)

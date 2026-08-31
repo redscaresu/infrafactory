@@ -705,8 +705,8 @@ func TestRunCommandUsesSandboxLayerWhenEnabled(t *testing.T) {
 	opts.deps = RuntimeDependencies{
 		Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
 			return &generator.GeneratedCode{Files: map[string][]byte{
-				"main.tf":    []byte("terraform {}\n"),
-				"project.tf": []byte("resource \"scaleway_account_project\" \"sandbox\" { name = \"test\" }\n"),
+				"main.tf":   []byte("terraform {}\n"),
+				"volume.tf": []byte("resource \"scaleway_block_volume\" \"sandbox\" { size_in_gb = 1 }\n"),
 			}}, nil
 		}),
 		Static: &fakeStaticHarness{result: &harness.StaticResult{
@@ -722,6 +722,7 @@ func TestRunCommandUsesSandboxLayerWhenEnabled(t *testing.T) {
 			StateSnapshot: []byte(`{"instance":{"servers":[]}}`),
 			OrphanCount:   0,
 		}},
+		RunProject:     &fakeRunProject{created: harness.RunProject{ID: "run-proj-1", Name: "if-run-t"}},
 		SandboxDeploy:  sandboxDeploy,
 		SandboxDestroy: sandboxDestroy,
 		OrphanSweep:    &fakeOrphanSweep{},
@@ -1197,13 +1198,14 @@ func TestRunCommandAutoDestroysRealResourcesOnFailure(t *testing.T) {
 		Generator: generator.SeedGeneratorFunc(func(_ context.Context, _ generator.Request) (*generator.GeneratedCode, error) {
 			return &generator.GeneratedCode{Files: map[string][]byte{
 				"main.tf":                 []byte("terraform {}\n"),
-				"project.tf":              []byte("resource \"scaleway_account_project\" \"sandbox\" { name = \"test\" }\n"),
+				"volume.tf":               []byte("resource \"scaleway_block_volume\" \"sandbox\" { size_in_gb = 1 }\n"),
 				harness.LiveStateFilename: []byte(liveStateWithProject),
 			}}, nil
 		}),
 		Static:         &fakeStaticHarness{err: &harness.StageError{StageResult: harness.StageResult{Stage: "validate", Cmd: []string{"tofu", "validate"}}, Err: errors.New("validate failed")}},
 		MockDeploy:     &fakeMockDeployHarness{},
 		Destroy:        &fakeDestroyHarness{},
+		RunProject:     &fakeRunProject{created: harness.RunProject{ID: "run-proj-1", Name: "if-run-t"}},
 		SandboxDeploy:  &fakeSandboxDeployHarness{},
 		SandboxDestroy: sandboxDestroy,
 		OrphanSweep:    &fakeOrphanSweep{},
@@ -1244,13 +1246,14 @@ func TestRunCommandNoDestroyPreservesRealResourcesOnFailure(t *testing.T) {
 		Generator: generator.SeedGeneratorFunc(func(_ context.Context, _ generator.Request) (*generator.GeneratedCode, error) {
 			return &generator.GeneratedCode{Files: map[string][]byte{
 				"main.tf":                 []byte("terraform {}\n"),
-				"project.tf":              []byte("resource \"scaleway_account_project\" \"sandbox\" { name = \"test\" }\n"),
+				"volume.tf":               []byte("resource \"scaleway_block_volume\" \"sandbox\" { size_in_gb = 1 }\n"),
 				harness.LiveStateFilename: []byte(liveStateWithProject),
 			}}, nil
 		}),
 		Static:         &fakeStaticHarness{err: &harness.StageError{StageResult: harness.StageResult{Stage: "validate", Cmd: []string{"tofu", "validate"}}, Err: errors.New("validate failed")}},
 		MockDeploy:     &fakeMockDeployHarness{},
 		Destroy:        &fakeDestroyHarness{},
+		RunProject:     &fakeRunProject{created: harness.RunProject{ID: "run-proj-1", Name: "if-run-t"}},
 		SandboxDeploy:  &fakeSandboxDeployHarness{},
 		SandboxDestroy: sandboxDestroy,
 		OrphanSweep:    &fakeOrphanSweep{},
@@ -1443,8 +1446,8 @@ acceptance_criteria:
 	opts.deps = RuntimeDependencies{
 		Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
 			return &generator.GeneratedCode{Files: map[string][]byte{
-				"main.tf":    []byte("terraform {}\n"),
-				"project.tf": []byte("resource \"scaleway_account_project\" \"sandbox\" { name = \"test\" }\n"),
+				"main.tf":   []byte("terraform {}\n"),
+				"volume.tf": []byte("resource \"scaleway_block_volume\" \"sandbox\" { size_in_gb = 1 }\n"),
 			}}, nil
 		}),
 		Static: &fakeStaticHarness{result: &harness.StaticResult{
@@ -1460,6 +1463,7 @@ acceptance_criteria:
 			StateSnapshot: []byte(`{"instance":{"servers":[]}}`),
 			OrphanCount:   0,
 		}},
+		RunProject:     &fakeRunProject{created: harness.RunProject{ID: "run-proj-1", Name: "if-run-t"}},
 		SandboxDeploy:  sandboxDeploy,
 		SandboxDestroy: sandboxDestroy,
 		OrphanSweep:    &fakeOrphanSweep{},

@@ -331,16 +331,3 @@ func TestLoadMalformedConfigReturnsDecodeError(t *testing.T) {
 		t.Fatalf("expected decode error prefix, got %v", err)
 	}
 }
-
-// ADR-0025's switch must default OFF: the gate applies fixture HCL that
-// declares scaleway_account_project, and flipping the model by accident
-// would break the artifact the talk rests on.
-func TestCreateRunProjectDefaultsOff(t *testing.T) {
-	cfg, err := Load("../../infrafactory.yaml")
-	if err != nil {
-		t.Fatalf("load config: %v", err)
-	}
-	if cfg.Scaleway.CreateRunProject {
-		t.Fatal("scaleway.create_run_project must stay false until S167/S168")
-	}
-}

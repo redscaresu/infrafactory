@@ -50,8 +50,8 @@ func TestRunCommand_ParallelSubtestsAreWorkspaceIsolated(t *testing.T) {
 				deps: RuntimeDependencies{
 					Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
 						return &generator.GeneratedCode{Files: map[string][]byte{
-							"main.tf":    []byte("terraform {}\n"),
-							"project.tf": []byte("resource \"scaleway_account_project\" \"sandbox\" { name = \"test\" }\n"),
+							"main.tf":   []byte("terraform {}\n"),
+							"volume.tf": []byte("resource \"scaleway_block_volume\" \"sandbox\" { size_in_gb = 1 }\n"),
 						}}, nil
 					}),
 					Static: &fakeStaticHarness{result: &harness.StaticResult{
@@ -83,7 +83,7 @@ func TestRunCommand_ParallelSubtestsAreWorkspaceIsolated(t *testing.T) {
 			// clobbered our output dir. Similarly, "directory not empty"
 			// on the runstore reset means parallel subtests shared the
 			// same .infrafactory/runs/<scenario>/<runID> dir.
-			if strings.Contains(out, "scaleway_account_project resource") {
+			if strings.Contains(out, "scaleway_account_project resource(s) declared") {
 				t.Fatalf("invocation %d: layer-3 fired — cfg.Paths.Output is not workspace-isolated; output:\n%s", i, out)
 			}
 			if strings.Contains(out, "directory not empty") {

@@ -221,7 +221,7 @@ func layer3Guidance(enabled bool) string {
 	}
 	return strings.TrimSpace(`Layer 3 real Scaleway deploy is enabled for this run.
 
-- Include a dedicated ` + "`scaleway_account_project`" + ` resource so the stack can bootstrap and later destroy its own project lifecycle.
+- Do NOT declare a ` + "`scaleway_account_project`" + ` resource, and do NOT set ` + "`project_id`" + ` on any resource. infrafactory creates the run's project before the apply and passes it to the provider, so every resource lands in it automatically. A declared project would be a second one that nothing destroys, and a project_id could place a resource outside the run entirely.
 - Ensure resources that require a project are wired to the bootstrapped project instead of assuming a pre-existing long-lived sandbox project.
 - Preserve useful outputs for externally reachable endpoints and service addresses so real connectivity, HTTP, and DNS probes can resolve the deployed infrastructure deterministically.`)
 }

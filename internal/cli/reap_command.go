@@ -43,20 +43,23 @@ func runReapCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) 
 
 	workDir := runtime.OutputDir()
 	statePath := filepath.Join(workDir, harness.LiveStateFilename)
-	if _, statErr := os.Stat(statePath); errors.Is(statErr, os.ErrNotExist) {
-		_, _ = fmt.Fprintf(out, "No %s in %s — nothing to reap.\n", harness.LiveStateFilename, workDir)
+	markerPath := filepath.Join(workDir, harness.RunProjectMarkerFilename)
+	_, stateErr := os.Stat(statePath)
+	_, markerErr := os.Stat(markerPath)
+	if errors.Is(stateErr, os.ErrNotExist) && errors.Is(markerErr, os.ErrNotExist) {
+		_, _ = fmt.Fprintf(out, "No %s or %s in %s — nothing to reap.\n",
+			harness.LiveStateFilename, harness.RunProjectMarkerFilename, workDir)
 		return nil
 	}
 
-	projectID, err := harness.RunProjectIDFromState(workDir)
+	// The marker, not the state: ADR-0025 took the project out of
+	// Terraform, so the state no longer names it.
+	marker, err := harness.ReadRunProjectMarker(workDir)
 	if err != nil {
-		return &CLIError{Op: "reap", Code: errorCodeCommandFailed, Err: fmt.Errorf("read live state: %w", err)}
-	}
-	if projectID == "" {
 		return &CLIError{Op: "reap", Code: errorCodeCommandFailed, Err: fmt.Errorf(
-			"%s records no %s, so there is no way to tell which project this run created. Refusing to destroy anything",
-			harness.LiveStateFilename, harness.ProjectResourceType)}
+			"%v, so there is no way to tell which project this run created. Refusing to destroy anything", err)}
 	}
+	projectID := marker.ProjectID
 
 	sandboxEnv, err := sandboxCommandEnv(runtime)
 	if err != nil {
@@ -66,7 +69,7 @@ func runReapCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) 
 	// reap only ever destroys the project recorded in the state file it
 	// was handed -- never one named on the command line, never the
 	// organization default.
-	if err := harness.AssertProjectDeletable(projectID, projectID, sandboxEnv["SCW_DEFAULT_ORGANIZATION_ID"]); err != nil {
+	if err := assertRunProjectDeletable(ctx, runtime, workDir, projectID, sandboxEnv); err != nil {
 		return &CLIError{Op: "reap", Code: errorCodeCommandFailed, Err: err}
 	}
 

@@ -36,6 +36,7 @@ func liveTeardownRuntime(t *testing.T, destroy *fakeSandboxDestroyHarness, sweep
 		Deps: RuntimeDependencies{
 			SandboxDestroy: destroy,
 			OrphanSweep:    sweep,
+			RunProject:     &fakeRunProject{},
 		},
 	}
 
@@ -50,6 +51,9 @@ func liveDeploymentWithState(t *testing.T, store *livestore.FilesystemStore, wor
 	workDir := filepath.Join(workspace, "live", id)
 	require.NoError(t, os.MkdirAll(workDir, 0o755))
 	writeReapLiveState(t, workDir, reapProjectID)
+	// ADR-0025: the marker is the guard's witness, not the state file.
+	require.NoError(t, harness.WriteRunProjectMarker(workDir,
+		harness.RunProject{ID: reapProjectID, Name: harness.RunProjectNamePrefix + id}))
 
 	now := time.Now()
 	d := livestore.Deployment{
@@ -125,6 +129,8 @@ func TestTeardownRefusesTheOrganizationDefaultProject(t *testing.T) {
 	workDir := filepath.Join(workspace, "live", "dep-org")
 	require.NoError(t, os.MkdirAll(workDir, 0o755))
 	writeReapLiveState(t, workDir, reapOrgID)
+	require.NoError(t, harness.WriteRunProjectMarker(workDir,
+		harness.RunProject{ID: reapOrgID, Name: harness.RunProjectNamePrefix + "org"}))
 
 	now := time.Now()
 	d := livestore.Deployment{

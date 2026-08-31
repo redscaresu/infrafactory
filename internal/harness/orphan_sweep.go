@@ -76,19 +76,30 @@ type SweepTarget struct {
 
 // CaptureSweepTarget reads the live state while it still has contents.
 // Call it before destroy.
+// CaptureSweepTarget records what the sweep must verify, before destroy
+// empties the state.
+//
+// ADR-0025: the project id comes from the run-project marker, not from a
+// scaleway_account_project in state -- the project is no longer a
+// Terraform resource, so the state never names it. The strays still come
+// from state, because a stray is precisely a resource the state records
+// as living OUTSIDE the run's project.
 func CaptureSweepTarget(workDir string) (*SweepTarget, error) {
+	marker, err := ReadRunProjectMarker(workDir)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v, so the run's blast radius cannot be determined", ErrOrphanSweepFailed, err)
+	}
+
 	state, err := loadLiveTerraformState(filepath.Join(workDir, LiveStateFilename))
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrOrphanSweepFailed, err)
+		// No state means nothing was applied, so there are no strays to
+		// compute -- but the project still exists and must be verified.
+		return &SweepTarget{ProjectID: marker.ProjectID}, nil
 	}
-	projectID := runProjectID(state)
-	if projectID == "" {
-		return nil, fmt.Errorf("%w: live state has no %s resource, so the run's blast radius cannot be determined (ADR-0010 requires one)",
-			ErrOrphanSweepFailed, ProjectResourceType)
-	}
+
 	return &SweepTarget{
-		ProjectID: projectID,
-		Strays:    strayResourceFailures(state, projectID),
+		ProjectID: marker.ProjectID,
+		Strays:    strayResourceFailures(state, marker.ProjectID),
 	}, nil
 }
 

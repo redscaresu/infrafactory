@@ -16,6 +16,23 @@ Last updated: 2026-08-31
   other's, which the old check cannot do because it pins to one id. The
   organization-default refusal is unchanged and runs first.
 
+  **Wired**: the marker is written when the project is created (a failed write is
+  fatal — an unrecordable project is unreclaimable), and all three destroy paths
+  — `destroySandbox`'s purge, `reap`, `live teardown` — go through one
+  `assertRunProjectDeletable` helper, so none can carry a weaker check. `reap`
+  reads the marker instead of the state, since ADR-0025 took the project out of
+  Terraform.
+
+  **The cutover is complete and the flag is gone.** One model: the run's project
+  is created before every apply and is the provider default. The shape gate
+  **inverted** — `project_id` is now *forbidden* on resources (there is no correct
+  value; the provider default is the run's own project) and a declared
+  `scaleway_account_project` is refused as a second project nothing tracks. The
+  generation-path check inverted with it, the prompt now tells the generator not
+  to create one, and the gate fixtures and recorded generation were regenerated.
+  `deploy` gets its own project too, deleted by `live teardown` once the sweep
+  proves the account clean.
+
   `Describe` distinguishes **gone** from **unreachable**: a 404 is a fact the
   guard acts on, anything else is an error, because "we could not check" must not
   look like "already deleted".
