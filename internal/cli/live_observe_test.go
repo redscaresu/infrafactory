@@ -265,3 +265,38 @@ func TestHumanSummaryOmitsTheScenarioLineWhenThereIsNoScenario(t *testing.T) {
 	assert.NotContains(t, spanning, "Scenario:")
 	assert.Contains(t, spanning, "Command: live observe")
 }
+
+// `live observe` is the command most likely to be on a cron, so it is the
+// one most likely to be mid-probe when an operator runs `live teardown`.
+// A read-modify-write over a slow probe would put `state: live` back over
+// a record teardown had just released.
+func TestObserveDoesNotResurrectARecordReleasedWhileItWasProbing(t *testing.T) {
+	rt, store := observeRuntime(t, nil)
+	d := observableDeployment(t, store, "dep-racing")
+
+	// The probe stands in for a slow one: teardown lands while it runs.
+	rt.Deps.ServiceProbe = &releasingProbe{store: store, id: d.ID}
+
+	var out strings.Builder
+	require.NoError(t, runObserve(t, rt, &out))
+
+	got, err := store.Get(d.ID)
+	require.NoError(t, err)
+	assert.Equal(t, livestore.StateReleased, got.State, "the release stands")
+	assert.Empty(t, got.Observations, "and no observation is written over it")
+	assert.Contains(t, out.String(), "released while it was being probed")
+}
+
+// releasingProbe releases the deployment during the probe, reproducing
+// the interleaving without a sleep.
+type releasingProbe struct {
+	store *livestore.FilesystemStore
+	id    string
+}
+
+func (p *releasingProbe) Probe(context.Context, string, int, string) (harness.ServiceProbeResult, error) {
+	if err := p.store.MarkReleased(p.id); err != nil {
+		return harness.ServiceProbeResult{}, err
+	}
+	return harness.ServiceProbeResult{Reachable: true, Healthy: true}, nil
+}

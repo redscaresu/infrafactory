@@ -398,3 +398,11 @@ One probe per invocation and no retries, deliberately: the existing
 `RealProbeHarness` retries because it runs seconds after an apply, whereas this
 runs out-of-band and a retry would smear over exactly the flapping it exists to
 notice. Scheduling stays the operator's cron, as `live reap`'s does.
+
+`observe` re-reads a record immediately before writing to it. It is the command
+most likely to run on a cron, and therefore the one most likely to be mid-probe
+when an operator runs `live teardown`; a read-modify-write spanning a slow probe
+would restore `state: live` over a record that had just been released. The
+re-read narrows that window to the microseconds around one write. It does not
+close it — the store has no compare-and-swap — and this record should not be
+read as claiming otherwise.
