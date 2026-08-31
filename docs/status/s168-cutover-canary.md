@@ -118,3 +118,41 @@ The reap step now checks the marker first. This is the same defect the codex
 loop found seven times inside the Go code — a path that had been depending on
 `tofu destroy` owning the project without saying so — and it survived fourteen
 review passes because it lives in YAML.
+
+## S154 verification: the live lifecycle, end to end against real Scaleway
+
+Run 2026-08-31, same account, ~€0.01. This closes the gap the canary above
+named: `deploy`, `live teardown` and `live reap` had **never** touched real
+Scaleway — only the `test` path had.
+
+| step | result |
+|---|---|
+| `deploy web-live-paris --ttl 30m` | **pass**, 36s — project created before the apply, deployment registered with project id, address and expiry |
+| `curl` the recorded address | **HTTP 200**, serving |
+| `live observe` | **healthy**, recorded against the deployment |
+| `live observe` again | second observation appended, ring intact |
+| `live ls` | `HEALTH` column shows `healthy`; the released deployment shows `unobserved` |
+| `live teardown` | **pass**, 39s — destroy, purge, project delete, sweep |
+| account afterwards | 3 projects (all pre-existing), 1 server, 0 LBs — `openclaw-prod` only |
+
+D6's purge fired here too, in `live teardown`, and reported what it removed.
+
+### What this run did NOT verify
+
+Only the **healthy** observation path ran against real infrastructure.
+`unhealthy` and `unreachable` are unit-covered and were not reproduced against a
+real service, because breaking a live backend on purpose costs more than the
+signal is worth at this stage. Worth stating rather than letting the table imply
+otherwise.
+
+### And the falsehood the plan predicted, demonstrated
+
+The record says `nginx:1.27`. What is actually serving is
+`python3 -m http.server` printing that string, because `ubuntu_jammy` has no
+docker and the fixture never installed one. `deploy` recorded the **declared**
+image without checking what runs.
+
+This is exactly the attribution failure `live-learning-loop-plan.md` decision 4
+warns about — a loop that blamed `nginx:1.27` for a failure here would be
+learning a falsehood. It is now demonstrated rather than asserted, and
+**verifying the running version stays a prerequisite for S155**, not a nicety.
