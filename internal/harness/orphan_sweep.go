@@ -85,6 +85,14 @@ type SweepTarget struct {
 // Terraform resource, so the state never names it. The strays still come
 // from state, because a stray is precisely a resource the state records
 // as living OUTSIDE the run's project.
+//
+// There is deliberately NO fallback to a scaleway_account_project in
+// state for workdirs written before the cutover. Reading the project
+// from two sources is the dual model ADR-0025 dropped on purpose, and it
+// would buy nothing: no such workdir exists -- every Layer 3 run
+// destroys and sweeps before it finishes -- so the fallback would be an
+// untested second path guarding a case that has no instance. Refusing is
+// loud, and a workdir that genuinely predates this can be swept by hand.
 func CaptureSweepTarget(workDir string) (*SweepTarget, error) {
 	marker, err := ReadRunProjectMarker(workDir)
 	if err != nil {

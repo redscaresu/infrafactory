@@ -53,7 +53,13 @@ func runReapCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) 
 	}
 
 	// The marker, not the state: ADR-0025 took the project out of
-	// Terraform, so the state no longer names it.
+	// Terraform, so the state no longer names it. And only the marker --
+	// falling back to a scaleway_account_project in state for a
+	// pre-cutover workdir is the dual model the cutover dropped, for a
+	// case with no instance. Refusing outright is the right answer here
+	// specifically: reap's contract is "destroy this run's project and
+	// prove the account is clean", and without a marker it can do
+	// neither half.
 	marker, err := harness.ReadRunProjectMarker(workDir)
 	if err != nil {
 		return &CLIError{Op: "reap", Code: errorCodeCommandFailed, Err: fmt.Errorf(

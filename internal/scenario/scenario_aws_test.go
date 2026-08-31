@@ -58,8 +58,8 @@ func TestLoadAWSScenarios(t *testing.T) {
 			},
 		},
 		{
-			path:          filepath.Join(repo, "scenarios", "training", "aws-dynamodb.yaml"),
-			expectedCloud: "aws",
+			path:            filepath.Join(repo, "scenarios", "training", "aws-dynamodb.yaml"),
+			expectedCloud:   "aws",
 			expectedAnchors: []string{"aws_dynamodb_table"},
 		},
 		{
@@ -71,18 +71,18 @@ func TestLoadAWSScenarios(t *testing.T) {
 			},
 		},
 		{
-			path:          filepath.Join(repo, "scenarios", "training", "aws-sqs.yaml"),
-			expectedCloud: "aws",
+			path:            filepath.Join(repo, "scenarios", "training", "aws-sqs.yaml"),
+			expectedCloud:   "aws",
 			expectedAnchors: []string{"aws_sqs_queue"},
 		},
 		{
-			path:          filepath.Join(repo, "scenarios", "training", "aws-route53.yaml"),
-			expectedCloud: "aws",
+			path:            filepath.Join(repo, "scenarios", "training", "aws-route53.yaml"),
+			expectedCloud:   "aws",
 			expectedAnchors: []string{"aws_route53_zone", "aws_route53_record"},
 		},
 		{
-			path:          filepath.Join(repo, "scenarios", "training", "aws-secrets-manager.yaml"),
-			expectedCloud: "aws",
+			path:            filepath.Join(repo, "scenarios", "training", "aws-secrets-manager.yaml"),
+			expectedCloud:   "aws",
 			expectedAnchors: []string{"aws_secretsmanager_secret", "aws_secretsmanager_secret_version"},
 		},
 	}

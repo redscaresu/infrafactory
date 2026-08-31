@@ -361,3 +361,17 @@ own workdir, so its blast radius is bounded by the state rather than by a projec
 id, and both calls that reach the API *by project* — the purge and the Account
 delete — carry the guard themselves. Guarding the destroy as well only stopped a
 pre-cutover record from being destroyed at all.
+
+### Follow-up, pass 36: the fallback that stays declined
+
+Review raised, twice in one pass, that a workdir with state and no marker cannot
+resolve its project, and proposed falling back to `scaleway_account_project` in
+`terraform-live.tfstate`. **Declined**, and the sites now say so inline.
+
+It is the dual model this ADR dropped, and it has no instance to serve: the live
+store does not exist, `./output` holds no live state, and the only two
+`terraform-live.tfstate` files on disk are committed test fixtures. Every Layer 3
+run destroys and sweeps before finishing. A fallback would therefore be a second
+project-resolution path that nothing exercises — untested by construction,
+guarding a case that does not occur. Passes 30–35 are the argument against
+adding one.

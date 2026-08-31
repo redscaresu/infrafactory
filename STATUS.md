@@ -81,6 +81,15 @@ Last updated: 2026-08-31
   perform invalidated every path that had been relying on it without saying so,
   and they surfaced one review at a time rather than from any single reading.
 
+  **Pass 36 declined both findings** — both asked for a state-file fallback when
+  a workdir has no marker, which is the dual model the cutover dropped. Checked
+  rather than assumed: no such workdir exists (the live store is absent,
+  `./output` holds no live state, and the only two on disk are committed test
+  fixtures), so the fallback would be a second project-resolution path that no
+  test run can walk, guarding a case with no instance. The safety property behind
+  the finding is already held by pass 35. Both sites now carry the reasoning
+  inline so the next reviewer meets the decision rather than re-deriving it.
+
   **Pass 35: nothing forgettable on no evidence.** Gating `reclaimable()` on the
   marker fixed the post-cutover shape and broke its mirror — a pre-cutover
   workdir has state and no marker, and unreclaimable is what routes an operator
