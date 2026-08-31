@@ -341,3 +341,23 @@ before-the-project-exists credentials check that hands back nothing. Building an
 environment requires naming a project. The audit remains for the case the type
 cannot express — an explicit `""` — now over every `internal/cli` file, and it
 fails if it ever finds fewer than two files to read.
+
+### Follow-up, pass 35: unreclaimable is the answer to be stingy with
+
+Moving `reclaimable()` from "state on disk" to "marker on disk" fixed the
+post-cutover shape and broke its mirror image: a pre-cutover workdir has state
+and no marker, and *unreclaimable* is what routes an operator to `live forget` —
+the one command that turns a leak into a clean slate.
+
+The fix is **not** a compatibility path; the no-transition decision stands. It is
+that nothing is deleted on no evidence and nothing is forgettable on no evidence
+either. `reclaimable()` accepts marker **or** state. `releaseRunProject` skips
+rather than fails when no marker names the project, because no marker means
+nothing there created it through the Account API. The orphan sweep asks the API
+and is the judge.
+
+The guard on `tofu destroy` itself was removed. Destroy acts on the state in its
+own workdir, so its blast radius is bounded by the state rather than by a project
+id, and both calls that reach the API *by project* — the purge and the Account
+delete — carry the guard themselves. Guarding the destroy as well only stopped a
+pre-cutover record from being destroyed at all.

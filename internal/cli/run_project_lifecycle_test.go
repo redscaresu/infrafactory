@@ -356,16 +356,36 @@ func TestReleaseRunProjectReportsTheOriginalErrorWhenNothingWasAutoCreated(t *te
 	assert.Equal(t, 1, fake.deletes, "no blocker was removed, so a retry would only repeat the failure")
 }
 
-// The guard lives inside releaseRunProject because four paths reach it
-// and a check that can be forgotten will be.
-func TestReleaseRunProjectRefusesAProjectNoMarkerNames(t *testing.T) {
+// No marker means nothing here created the project through the Account
+// API -- a workdir from before ADR-0025, whose project went with `tofu
+// destroy`. Deleting on no evidence is what the guard exists to prevent,
+// and it is not a failure either: the sweep asks the API, which is the
+// only answer worth having.
+func TestReleaseRunProjectSkipsWhenNoMarkerNamesTheProject(t *testing.T) {
 	fake := &fakeRunProject{}
 	rt := &CommandRuntime{Deps: RuntimeDependencies{RunProject: fake}}
 	_, env := releaseFixture(t)
 
-	_, failures := releaseRunProject(context.Background(), rt, t.TempDir(), "proj-1", env)
+	stages, failures := releaseRunProject(context.Background(), rt, t.TempDir(), "proj-1", env)
+
+	assert.Empty(t, failures, "the sweep is the judge of whether the project is gone")
+	require.Len(t, stages, 1)
+	assert.Equal(t, StageStatusSkip, stages[0].Status)
+	assert.Zero(t, fake.deletes, "nothing proves this project is the run's")
+}
+
+// The guard lives inside releaseRunProject because five paths reach it
+// and a check that can be forgotten will be. A marker that names a
+// DIFFERENT project is the case it cannot let through: the argument
+// must not win over the record.
+func TestReleaseRunProjectRefusesAProjectTheMarkerDoesNotName(t *testing.T) {
+	fake := &fakeRunProject{}
+	rt := &CommandRuntime{Deps: RuntimeDependencies{RunProject: fake}}
+	workDir, env := releaseFixture(t)
+
+	_, failures := releaseRunProject(context.Background(), rt, workDir, "someone-elses-project", env)
 
 	require.Len(t, failures, 1)
 	assert.Contains(t, failures[0].Detail, "refusing to delete it")
-	assert.Zero(t, fake.deletes, "nothing proves this project is the run's")
+	assert.Zero(t, fake.deletes)
 }

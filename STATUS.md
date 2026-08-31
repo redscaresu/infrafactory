@@ -81,6 +81,17 @@ Last updated: 2026-08-31
   perform invalidated every path that had been relying on it without saying so,
   and they surfaced one review at a time rather than from any single reading.
 
+  **Pass 35: nothing forgettable on no evidence.** Gating `reclaimable()` on the
+  marker fixed the post-cutover shape and broke its mirror — a pre-cutover
+  workdir has state and no marker, and unreclaimable is what routes an operator
+  to `live forget`, which retires a record while resources keep running. Now
+  marker **or** state keeps a record in teardown's hands; `releaseRunProject`
+  *skips* (not fails) when no marker names the project, because nothing there
+  created it through the Account API; and the sweep, which asks the API, is the
+  judge. The redundant guard on `tofu destroy` itself is gone — destroy is
+  bounded by its own state, while the purge and the Account delete each carry
+  the guard.
+
   **Pass 34 stopped the recurrence at the type level.** An audit test for the
   apply/destroy project asymmetry already existed — and read `test_command.go`
   alone, which is why the same defect kept landing in the other three files.

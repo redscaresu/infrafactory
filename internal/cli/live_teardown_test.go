@@ -103,10 +103,16 @@ func TestTeardownDestroysSweepsAndReleases(t *testing.T) {
 // The registry says WHICH deployment; the state file says which project.
 // A record pointed at a project its own state does not name must not be
 // able to aim the destroyer at it.
-func TestTeardownRefusesWhenTheRecordDisagreesWithTheState(t *testing.T) {
+// A record whose project id disagrees with the marker must not be able
+// to aim anything at that id. `tofu destroy` still runs -- it acts on
+// the state in this workdir and nothing else -- but every call that
+// reaches the API BY PROJECT takes the marker's id, and the Account
+// delete refuses outright.
+func TestTeardownRefusesWhenTheRecordDisagreesWithTheMarker(t *testing.T) {
 	sandboxCredsForTest(t)
 	destroy, sweep := &fakeSandboxDestroyHarness{}, &fakeOrphanSweep{}
 	rt, store, workspace := liveTeardownRuntime(t, destroy, sweep)
+	projects := rt.Deps.RunProject.(*fakeRunProject)
 
 	d := liveDeploymentWithState(t, store, workspace, "dep-tampered", -time.Minute)
 	d.ProjectID = "99999999-9999-9999-9999-999999999999"
@@ -114,9 +120,14 @@ func TestTeardownRefusesWhenTheRecordDisagreesWithTheState(t *testing.T) {
 	_, failures := tearDownDeployment(context.Background(), rt, store, d)
 
 	require.NotEmpty(t, failures)
-	assert.Contains(t, failures[0].Detail, "refusing to destroy")
-	assert.Zero(t, destroy.calls, "nothing was destroyed")
-	assert.Zero(t, sweep.calls)
+	assert.Contains(t, failures[0].Detail, "refusing to delete it")
+	assert.Zero(t, projects.deletes, "the argument must not win over the record")
+	assert.Equal(t, reapProjectID, sweep.lastProjectID,
+		"and the sweep verifies the marker's project, never the record's")
+
+	got, err := store.Get(d.ID)
+	require.NoError(t, err)
+	assert.NotEqual(t, livestore.StateReleased, got.State)
 }
 
 // Refusing to destroy the organization default is the guard that matters
@@ -174,28 +185,47 @@ func TestTeardownDeletesTheProjectWhenNoStateWasEverWritten(t *testing.T) {
 	assert.Equal(t, livestore.StateReleased, got.State, "and the record stops being reaped")
 }
 
-// The marker is what proves the project is this run's, so a record
-// without one must fail closed -- not release quietly on the path that
-// now deletes.
-func TestTeardownRefusesWhenNeitherStateNorMarkerExists(t *testing.T) {
+// A workdir written before ADR-0025 has state and no marker. Teardown
+// must still own it: `reclaimable` false would send it to `live forget`,
+// which retires the record while the resources keep running. Nothing is
+// deleted on no evidence -- the sweep decides -- but the record is not
+// forgettable either.
+func TestTeardownStillOwnsAPreCutoverRecordWithStateAndNoMarker(t *testing.T) {
 	sandboxCredsForTest(t)
 	destroy, sweep := &fakeSandboxDestroyHarness{}, &fakeOrphanSweep{}
 	rt, store, workspace := liveTeardownRuntime(t, destroy, sweep)
 	projects := rt.Deps.RunProject.(*fakeRunProject)
 
+	d := liveDeploymentWithState(t, store, workspace, "dep-legacy", -time.Minute)
+	require.NoError(t, os.Remove(filepath.Join(d.WorkDir, harness.RunProjectMarkerFilename)))
+
+	assert.True(t, reclaimable(d), "state alone keeps it out of `live forget`")
+
+	_, failures := tearDownDeployment(context.Background(), rt, store, d)
+
+	assert.Equal(t, 1, destroy.calls, "tofu destroy is bounded by the state, so it still runs")
+	assert.Zero(t, projects.deletes, "but nothing here created that project through the API")
+
+	// And it stays visible rather than releasing: without a marker the
+	// sweep cannot say what the blast radius was, and "we could not
+	// check" must never look like "nothing leaked".
+	require.NotEmpty(t, failures)
+	got, err := store.Get(d.ID)
+	require.NoError(t, err)
+	assert.NotEqual(t, livestore.StateReleased, got.State)
+}
+
+// Neither state nor marker: there is nothing for teardown to act on, and
+// `live forget` is the honest answer.
+func TestARecordWithNeitherStateNorMarkerIsNotReclaimable(t *testing.T) {
+	sandboxCredsForTest(t)
+	_, store, workspace := liveTeardownRuntime(t, &fakeSandboxDestroyHarness{}, &fakeOrphanSweep{})
+
 	d := liveDeploymentWithState(t, store, workspace, "dep-blind", -time.Minute)
 	require.NoError(t, os.Remove(filepath.Join(d.WorkDir, "terraform-live.tfstate")))
 	require.NoError(t, os.Remove(filepath.Join(d.WorkDir, harness.RunProjectMarkerFilename)))
 
-	_, failures := tearDownDeployment(context.Background(), rt, store, d)
-
-	require.NotEmpty(t, failures)
-	assert.Contains(t, failures[0].Detail, "refusing to delete it")
-	assert.Zero(t, projects.deletes, "nothing proves which project this is")
-
-	got, err := store.Get(d.ID)
-	require.NoError(t, err)
-	assert.NotEqual(t, livestore.StateReleased, got.State, "the leak stays visible")
+	assert.False(t, reclaimable(d))
 }
 
 func TestTeardownWithoutAWorkDirIsUnreclaimable(t *testing.T) {

@@ -137,14 +137,13 @@ func tearDownDeployment(
 		return unreclaimable(fmt.Sprintf("sandbox credentials for %s: %v", d.ID, err))
 	}
 
-	// The record says which deployment; the marker and the API say which
-	// project. A disagreement between any of them is fatal rather than
-	// silent, so neither a stale record nor a forged marker can aim this
-	// at infrastructure the run did not create.
-	if err := assertRunProjectDeletable(ctx, runtime, d.WorkDir, d.ProjectID, sandboxEnv); err != nil {
-		return unreclaimable(fmt.Sprintf(
-			"refusing to destroy for deployment %s: %v", d.ID, err))
-	}
+	// No project guard here on purpose. `tofu destroy` acts only on the
+	// state in this workdir, so its blast radius is bounded by the state
+	// rather than by a project id, and the two things that DO reach the
+	// API by project -- destroySandbox's purge and releaseRunProject's
+	// delete -- each carry the guard themselves. Gating the destroy on it
+	// as well only stopped a pre-cutover record from being destroyed at
+	// all, which is the opposite of what the guard is for.
 
 	sweepTarget, sweepTargetErr := harness.CaptureSweepTarget(d.WorkDir)
 	destroyResult, purged, destroyErr := destroySandbox(
@@ -266,20 +265,23 @@ func runLiveForgetCommand(cmd *cobra.Command, args []string, runtime *CommandRun
 }
 
 // reclaimable reports whether teardown could still act on this record --
-// it decodes, it is not already released, and its run-project marker is
-// on disk.
+// it decodes, it is not already released, and its workdir holds either a
+// run-project marker or live state.
 //
-// The marker, not the state file: since ADR-0025 a deploy that failed
-// before writing state still left a real project behind, and teardown
-// can delete it. Gating on state would send exactly those records to
-// `live forget`, retiring the record while the project kept existing.
-// The marker is also what the teardown guard reads, so a record without
-// one is the one teardown genuinely cannot act on.
+// EITHER, not the marker alone. Since ADR-0025 a deploy that failed
+// before writing state still left a real project behind, so gating on
+// state would send exactly those records to `live forget`. But gating on
+// the marker alone strands the mirror image: a workdir written before
+// the cutover has state and no marker, and `live forget` retires a
+// record without destroying anything. Unreclaimable is the answer that
+// makes a leak forgettable, so it is the answer to be stingy with.
 func reclaimable(d livestore.Deployment) bool {
 	if d.Undecodable || d.State == livestore.StateReleased || d.WorkDir == "" {
 		return false
 	}
-	if _, err := os.Stat(filepath.Join(d.WorkDir, harness.RunProjectMarkerFilename)); err != nil {
+	_, markerErr := os.Stat(filepath.Join(d.WorkDir, harness.RunProjectMarkerFilename))
+	_, stateErr := os.Stat(filepath.Join(d.WorkDir, harness.LiveStateFilename))
+	if markerErr != nil && stateErr != nil {
 		return false
 	}
 	// Teardown needs a project id: without one AssertProjectDeletable

@@ -119,8 +119,25 @@ func releaseRunProject(
 	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), runProjectTimeout)
 	defer cancel()
 
+	// No marker at all means infrafactory did not create this project
+	// through the Account API -- a workdir predating ADR-0025, whose
+	// project was a Terraform resource and went with `tofu destroy`.
+	// There is nothing here to delete, and deleting on no evidence is the
+	// one thing this guard exists to prevent. Skip, say so, and let the
+	// orphan sweep be the judge of whether the project actually went:
+	// it asks the API, which is the only answer worth having.
+	if _, err := harness.ReadRunProjectMarker(workDir); err != nil {
+		return []StageSummary{{
+			Layer: "sandbox_deploy", Stage: "run_project_delete", Status: StageStatusSkip,
+			Detail: fmt.Sprintf(
+				"no %s in %s, so nothing here created project %s through the Account API. "+
+					"The orphan sweep decides whether it is gone",
+				harness.RunProjectMarkerFilename, workDir, projectID),
+		}}, nil
+	}
+
 	// The guard lives here, not at the call sites, for the same reason
-	// destroySandbox's purge guard does: four paths reach this, it
+	// destroySandbox's purge guard does: five paths reach this, it
 	// deletes a real project over HTTP with Terraform nowhere in the
 	// loop, and a check that can be forgotten will be.
 	if err := assertRunProjectDeletable(cleanupCtx, runtime, workDir, projectID, sandboxEnv); err != nil {

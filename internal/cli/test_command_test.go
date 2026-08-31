@@ -88,10 +88,16 @@ type fakeOrphanSweep struct {
 	result *harness.OrphanSweepResult
 	err    error
 	calls  int
+	// lastProjectID records what the sweep was aimed at, so a test can
+	// prove a tampered record cannot redirect it.
+	lastProjectID string
 }
 
-func (f *fakeOrphanSweep) Run(_ context.Context, _ *harness.SweepTarget, _ string) (*harness.OrphanSweepResult, error) {
+func (f *fakeOrphanSweep) Run(_ context.Context, target *harness.SweepTarget, _ string) (*harness.OrphanSweepResult, error) {
 	f.calls++
+	if target != nil {
+		f.lastProjectID = target.ProjectID
+	}
 	if f.result == nil && f.err == nil {
 		return &harness.OrphanSweepResult{ProjectID: "test-project"}, nil
 	}
