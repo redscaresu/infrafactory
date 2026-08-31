@@ -4,6 +4,22 @@ Last updated: 2026-08-31
 
 ## Current phase
 
+- 🔧 **S166+S167 cutover in progress (2026-08-31)** — the guard core first,
+  wired next. `AssertRunProjectDeletable` replaces the state-derived cross-check
+  with **two checks that must both pass**: the marker
+  (`.infrafactory-run-project`, written beside the state at creation, same trust
+  level as the tfstate it replaces) and API provenance (the `if-run-` + fixed
+  description stamp, **not locally forgeable**).
+
+  Neither alone: the marker alone is a pure downgrade, and provenance alone would
+  authorise deleting *any* stamped project — parallel runs could delete each
+  other's, which the old check cannot do because it pins to one id. The
+  organization-default refusal is unchanged and runs first.
+
+  `Describe` distinguishes **gone** from **unreachable**: a 404 is a fact the
+  guard acts on, anything else is an error, because "we could not check" must not
+  look like "already deleted".
+
 - 📐 **S166 design written for review (2026-08-31)** —
   `docs/plans/s166-teardown-guard-design.md`. Not implemented: this is the slice
   that touches `AssertProjectDeletable`, the guard between an automated destroy
