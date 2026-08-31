@@ -185,3 +185,4 @@ func ParseAcceptanceCriteria(criteria []AcceptanceCriterion) ([]ExecutableCheckS
 
 	return specs, nil
 }
+

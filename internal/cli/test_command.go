@@ -580,6 +580,10 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 	// Declared out here because the destroy path below has to delete what
 	// the apply path created, and they are separate branches.
 	var runProjectID string
+	// Whether the sandbox teardown itself proved the account clean.
+	// Deliberately not len(failures) == 0: that also counts failures from
+	// earlier stages, which say nothing about the account.
+	var sandboxTeardownClean bool
 
 	if deployErr == nil && sandboxEnabled {
 		// Validate the sealed environment BEFORE creating anything. The
@@ -589,14 +593,13 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 		// SCW_ACCESS_KEY, say -- still leave a real project behind,
 		// relying on best-effort cleanup for residue that should never
 		// have existed.
-		var sandboxEnv map[string]string
-		sandboxEnvErr := assertSandboxCredentials(runtime)
+		sandboxEnv, sandboxEnvErr := sandboxCommandEnvForProject(runtime, "")
 
 		if sandboxEnvErr == nil {
 			// ADR-0025: the run's own project has to exist before the
 			// provider's environment is built, which is why it can no
 			// longer be a Terraform resource.
-			createdID, runProjectStages, runProjectFailures := ensureRunProject(ctx, runtime, sc.Name, outputDir)
+			createdID, runProjectStages, runProjectFailures := ensureRunProject(ctx, runtime, sc.Name)
 			runProjectID = createdID
 			stages = append(stages, runProjectStages...)
 			failures = append(failures, runProjectFailures...)
@@ -705,23 +708,13 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 					stages = append(stages, autoCreatedPurgeStage(purged))
 				}
 				if sandboxDestroyErr == nil {
-					// Where tofu used to delete the project. Under
-					// ADR-0025 it is not a Terraform resource, so we
-					// delete it here -- BEFORE the sweep, because the
-					// sweep's job is to verify the project is gone.
-					// Deleting it afterwards would make every clean
-					// teardown report a leak.
-					deleteStages, deleteFailures := releaseRunProject(ctx, runtime, outputDir, runProjectID, sandboxEnv)
-					stages = append(stages, deleteStages...)
-					failures = append(failures, deleteFailures...)
-
 					failuresBeforeSweep := len(failures)
 					stages, failures = appendOrphanSweepResult(ctx, stages, failures, runtime, sweepTarget, sweepTargetErr, sandboxEnv)
 					// The teardown's own verdict, not the command's. A
 					// failure recorded earlier -- a mock criteria check,
 					// say -- says nothing about whether the account came
 					// back clean.
-					_ = failuresBeforeSweep
+					sandboxTeardownClean = len(failures) == failuresBeforeSweep
 				}
 			}
 		}
@@ -756,26 +749,13 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 	// accumulated failure list. A mock criteria failure followed by a
 	// clean destroy leaves nothing behind but would otherwise strand the
 	// empty project forever.
-	if runProjectID != "" && !runProjectReleased(stages) {
+	destructionRan := runtime.Config.Validation.Layers.Destruction.Enabled && !opts.SkipDestroy
+
+	if runProjectID != "" {
 		switch {
-		case !liveStateMayHoldResources(outputDir):
-			// Its own credentials: this sits outside the sandbox block on
-			// purpose, so it cannot borrow an env built on a path it may
-			// not have taken.
-			cleanupEnv, cleanupEnvErr := sandboxCommandEnvForProject(runtime, runProjectID)
-			if cleanupEnvErr != nil {
-				stages = append(stages, StageSummary{
-					Layer: "sandbox_deploy", Stage: "run_project_delete", Status: StageStatusFail,
-				})
-				failures = append(failures, FailureSummary{
-					Layer: "sandbox_deploy", Stage: "run_project_delete", Check: "credentials",
-					Command: "delete run project",
-					Detail: fmt.Sprintf("project %s holds nothing but could not be deleted: %v",
-						runProjectID, cleanupEnvErr),
-				})
-				break
-			}
-			deleteStages, deleteFailures := releaseRunProject(ctx, runtime, outputDir, runProjectID, cleanupEnv)
+		case !liveStateMayHoldResources(outputDir),
+			destructionRan && sandboxTeardownClean:
+			deleteStages, deleteFailures := releaseRunProject(ctx, runtime, runProjectID)
 			stages = append(stages, deleteStages...)
 			failures = append(failures, deleteFailures...)
 		default:
@@ -854,20 +834,10 @@ const realScalewayAPIURL = "https://api.scaleway.com"
 // to reach anything else. The keys returned here are only half of that
 // guarantee; the other half is harness.SandboxStripEnv, which removes
 // the inherited overrides an override map cannot unset.
-// assertSandboxCredentials checks that Layer 3 can run at all, BEFORE
-// the run's project is created. It deliberately returns no environment.
-//
-// It used to return one, as `sandboxCommandEnv`, and that env had no
-// provider default project. Three teardown paths picked it up and
-// destroyed against the shared fallback while their apply had run in the
-// run's own project -- passes 33 and 34, the same mistake each time,
-// invited by a name that reads like "the env for a sandbox command".
-// Handing back nothing usable makes that misuse impossible rather than
-// merely discouraged: every caller that needs an env must now say which
-// project it is for.
-func assertSandboxCredentials(runtime *CommandRuntime) error {
-	_, err := sandboxEnvWithProjectDefault(runtime, "")
-	return err
+// sandboxCommandEnv builds the sealed Layer 3 environment with the
+// configured fallback project as the provider default.
+func sandboxCommandEnv(runtime *CommandRuntime) (map[string]string, error) {
+	return sandboxCommandEnvForProject(runtime, "")
 }
 
 // sandboxCommandEnvForProject is sandboxCommandEnv with an explicit
@@ -881,27 +851,6 @@ func assertSandboxCredentials(runtime *CommandRuntime) error {
 //
 // An empty runProjectID keeps the pre-ADR-0025 behaviour exactly.
 func sandboxCommandEnvForProject(runtime *CommandRuntime, runProjectID string) (map[string]string, error) {
-	// An empty project id is an error, never a fall-through. Every
-	// accidental one so far arrived as a value -- a zero-value marker, a
-	// failed sweep capture, a record field -- so the audit for a literal
-	// "" could not see any of them, and the result each time was a
-	// destroy silently scoped to the shared fallback (or, with no
-	// fallback configured, to whatever ~/.config/scw names, typically the
-	// organization default). Refusing here ends the class: the only
-	// caller allowed to pass nothing is the credentials preflight, which
-	// takes no environment away with it.
-	if strings.TrimSpace(runProjectID) == "" {
-		return nil, fmt.Errorf(
-			"refusing to build a Layer 3 environment with no run project: a destroy scoped to the " +
-				"shared fallback is not the inverse of an apply that ran in the run's own project")
-	}
-	return sandboxEnvWithProjectDefault(runtime, runProjectID)
-}
-
-// sandboxEnvWithProjectDefault is the builder. It accepts an empty
-// project so the credentials preflight can run before one exists;
-// everything else goes through sandboxCommandEnvForProject.
-func sandboxEnvWithProjectDefault(runtime *CommandRuntime, runProjectID string) (map[string]string, error) {
 	accessKey := strings.TrimSpace(os.Getenv("SCW_ACCESS_KEY"))
 	if accessKey == "" {
 		return nil, fmt.Errorf("sandbox deploy requires SCW_ACCESS_KEY in the environment")

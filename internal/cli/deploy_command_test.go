@@ -3,7 +3,6 @@ package cli
 import (
 	"bytes"
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -69,10 +68,7 @@ func deployTestRuntime(t *testing.T, scenarioYAML string, deploy *fakeSandboxDep
 		Config:         cfg,
 		scenarioLoader: defaultScenarioLoader,
 		livestoreRoot:  h.LivestoreRoot(),
-		Deps: RuntimeDependencies{
-			SandboxDeploy: deploy,
-			RunProject:    &fakeRunProject{created: harness.RunProject{ID: "run-proj-1", Name: "if-run-web-live-paris"}},
-		},
+		Deps:           RuntimeDependencies{SandboxDeploy: deploy},
 	}
 	_, err = rt.LoadScenario(scenarioPath)
 	require.NoError(t, err)
@@ -94,10 +90,15 @@ func writeDeployableHCL(t *testing.T, dir string) {
   }
 }
 
+resource "scaleway_account_project" "run" {
+  name = "if-live"
+}
+
 resource "scaleway_block_volume" "data" {
   name       = "if-live-data"
   size_in_gb = 10
   iops       = 5000
+  project_id = scaleway_account_project.run.id
 }
 `
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "main.tf"), []byte(body), 0o600))
@@ -136,7 +137,7 @@ func TestDeployAppliesAndRecordsWithoutDestroying(t *testing.T) {
 	assert.Equal(t, "nginx", d.Image)
 	assert.Equal(t, "1.27", d.Tag)
 	assert.Equal(t, livestore.StateLive, d.State)
-	assert.Equal(t, "run-proj-1", d.ProjectID, "the run's own project, not one derived from state")
+	assert.Equal(t, "test-run-project", d.ProjectID, "taken from the live state, not the record")
 	assert.InDelta(t, 4*time.Hour, d.ExpiresAt.Sub(d.CreatedAt), float64(time.Second),
 		"the TTL comes from service.ttl")
 	assert.Contains(t, out.String(), "nginx:1.27")
@@ -213,7 +214,8 @@ func TestDeployRefusesHCLOutsideTheAllowlist(t *testing.T) {
 	deploy := &fakeSandboxDeployHarness{}
 	rt, _, scenarioPath := deployTestRuntime(t, liveServiceScenarioYAML, deploy)
 	require.NoError(t, os.WriteFile(filepath.Join(rt.OutputDir(), "main.tf"), []byte(
-		`resource "scaleway_rdb_instance" "expensive" {}
+		`resource "scaleway_account_project" "run" {}
+resource "scaleway_rdb_instance" "expensive" {}
 `), 0o600))
 
 	var out strings.Builder
@@ -273,10 +275,10 @@ func TestDeployRefusesAnOutOfBoundsTTLOverride(t *testing.T) {
 	assert.Zero(t, deploy.calls)
 }
 
-// Since ADR-0025 the project is created BEFORE the apply, so an apply
-// that fails early still leaves a real project. It must be recorded, or
-// `live teardown` cannot find it -- the leak the record exists to stop.
-func TestDeployRecordsTheProjectEvenWhenTheApplyCreatedNothing(t *testing.T) {
+// An apply that fails before creating anything leaves no state, so there
+// is nothing to record and nothing to reap -- but the operator is still
+// told how to clean up if they think otherwise.
+func TestDeployRecordsNothingWhenTheApplyCreatedNothing(t *testing.T) {
 	sandboxCredsForTest(t)
 	deploy := &fakeSandboxDeployHarness{err: harness.ErrSandboxDeployFailed}
 	rt, store, scenarioPath := deployTestRuntime(t, liveServiceScenarioYAML, deploy)
@@ -286,13 +288,12 @@ func TestDeployRecordsTheProjectEvenWhenTheApplyCreatedNothing(t *testing.T) {
 	err := runDeploy(t, rt, scenarioPath, &out)
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "live teardown",
-		"the project exists, so the operator is told exactly how to remove it")
+	assert.Contains(t, err.Error(), "nothing to tear down",
+		"pointing at teardown when no record exists reads like a typo, not like nothing was created")
 
 	records, _, listErr := store.List()
 	require.NoError(t, listErr)
-	require.Len(t, records, 1, "the project exists even though the apply wrote no state")
-	assert.Equal(t, "run-proj-1", records[0].ProjectID)
+	assert.Empty(t, records, "no state means nothing was created")
 }
 
 // partialApplyHarness fails the way a real apply does when it dies with
@@ -327,7 +328,7 @@ func TestDeployRecordsAPartialApplySoItCanBeReaped(t *testing.T) {
 	records, _, listErr := store.List()
 	require.NoError(t, listErr)
 	require.Len(t, records, 1, "but what it created is recorded anyway")
-	assert.Equal(t, "run-proj-1", records[0].ProjectID)
+	assert.Equal(t, "half-made-project", records[0].ProjectID)
 	assert.True(t, records[0].Reapable(records[0].ExpiresAt.Add(time.Second)),
 		"so the reaper will come back for it")
 }
@@ -355,26 +356,26 @@ func TestRegisterDeploymentFailsWhenStateNamesNoProject(t *testing.T) {
 		[]byte(`{"resources":[]}`), 0o600))
 
 	sc := scenarioWithService(t)
-	stages, failures := registerDeployment(store, sc, "dep-x", workDir, "", time.Hour)
+	stages, failures := registerDeployment(store, sc, "dep-x", workDir, time.Hour)
 
 	require.Len(t, failures, 1)
-	assert.Contains(t, failures[0].Detail, "cannot be reaped")
+	assert.Contains(t, failures[0].Detail, "cannot be recorded or reaped")
 	require.Len(t, stages, 1)
 	assert.Equal(t, StageStatusFail, stages[0].Status)
 }
 
-func TestRegisterDeploymentRecordsTheProjectWithoutState(t *testing.T) {
+func TestRegisterDeploymentSkipsWhenNothingWasCreated(t *testing.T) {
 	h := newCommandTestHarness(t)
 	store := livestore.NewFilesystemStore(h.LivestoreRoot())
 	workDir := filepath.Join(h.WorkspaceDir, "empty")
 	require.NoError(t, os.MkdirAll(workDir, 0o755))
 
-	stages, failures := registerDeployment(store, scenarioWithService(t), "dep-y", workDir, "run-proj-1", time.Hour)
+	stages, failures := registerDeployment(store, scenarioWithService(t), "dep-y", workDir, time.Hour)
 
 	assert.Empty(t, failures)
 	require.Len(t, stages, 1)
-	assert.Equal(t, StageStatusPass, stages[0].Status,
-		"the project exists before any state does, so it is recorded regardless")
+	assert.Equal(t, StageStatusSkip, stages[0].Status)
+	assert.Contains(t, stages[0].Detail, "nothing was created")
 }
 
 func TestNewDeploymentIDIsScenarioScopedAndTimestamped(t *testing.T) {
@@ -443,10 +444,7 @@ func TestDeployApplyRunsUnderASignalGuardAndReportsInterruption(t *testing.T) {
 	require.Error(t, err, "the apply unwinds rather than the process dying")
 	require.NotNil(t, sawCtx)
 	assert.Error(t, sawCtx.Err(), "the apply is handed a cancelled context")
-	// The guard now covers project creation as well as the apply, so the
-	// message names both and points at teardown, which owns the record.
-	assert.Contains(t, out.String(), "Recording whatever was created")
-	assert.Contains(t, out.String(), "infrafactory live teardown")
+	assert.Contains(t, out.String(), "Recording whatever was created so `infrafactory live reap` can destroy it")
 }
 
 // sigCtx derives from ctx, so sigCtx.Err() is also non-nil when the
@@ -487,57 +485,24 @@ func TestDeployApplyIsTransparentWhenNotInterrupted(t *testing.T) {
 	assert.NotContains(t, out.String(), "Interrupted")
 }
 
-// ensureRunProject's failures carry the project id and how to remove it
-// by hand -- on a marker-write failure they are the ONLY handle to a
-// project that now exists. Deploy used to discard them and report a
-// generic "nothing was applied", which is the one path where the
-// operator has nothing else to go on.
-func TestDeploySurfacesWhyTheRunProjectFailedRatherThanAGenericMessage(t *testing.T) {
+// `deploy` keeps its project, so deleting it belongs to `live teardown`.
+// Until that exists, honouring the flag here would create a project
+// nothing ever deletes — the leak this arc closes.
+func TestDeployRefusesTheRunOwnedProjectFlag(t *testing.T) {
 	sandboxCredsForTest(t)
 	deploy := &fakeSandboxDeployHarness{}
 	rt, store, scenarioPath := deployTestRuntime(t, liveServiceScenarioYAML, deploy)
+	rt.Config.Scaleway.CreateRunProject = true
 	writeDeployableHCL(t, rt.OutputDir())
-	rt.Deps.RunProject = &fakeRunProject{
-		createErr: errors.New("http 403: insufficient permissions to create a project"),
-	}
 
 	var out strings.Builder
-	err := runDeploy(t, rt, scenarioPath, &out, "--output", string(OutputModeJSON))
+	err := runDeploy(t, rt, scenarioPath, &out)
 
 	require.Error(t, err)
-	assert.Contains(t, out.String(), "insufficient permissions to create a project",
-		"the reason reaches the operator, not just the verdict")
-	assert.Contains(t, out.String(), "run_project")
-	assert.Zero(t, deploy.calls, "nothing was applied")
+	assert.Contains(t, err.Error(), "not supported by `deploy` yet")
+	assert.Zero(t, deploy.calls, "nothing is applied")
 
-	ds, _, listErr := store.List()
+	records, _, listErr := store.List()
 	require.NoError(t, listErr)
-	assert.Empty(t, ds, "no project means no deployment to record")
-}
-
-// The project is real from the moment it is created, so it must be made
-// inside the interrupt guard: a Ctrl-C between creating it and starting
-// the apply would otherwise leave one behind with no record and nothing
-// coming for it.
-func TestDeployCreatesTheProjectInsideTheInterruptGuard(t *testing.T) {
-	var sawCtx context.Context
-	created := false
-
-	cmd := &cobra.Command{Use: "deploy"}
-	cmd.SetOut(&bytes.Buffer{})
-	cmd.SetErr(&bytes.Buffer{})
-
-	_, _ = runDeployApply(cmd, context.Background(), stubNotify(true),
-		func(ctx context.Context) (*harness.SandboxDeployResult, error) {
-			// Stands in for ensureRunProject: whatever creates the project
-			// must see the signal-derived context, not the bare one.
-			sawCtx = ctx
-			created = true
-			return nil, ctx.Err()
-		})
-
-	require.True(t, created)
-	require.NotNil(t, sawCtx)
-	assert.Error(t, sawCtx.Err(),
-		"project creation is handed the guarded context, so an interrupt reaches it")
+	assert.Empty(t, records)
 }

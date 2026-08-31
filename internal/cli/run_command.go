@@ -694,24 +694,7 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 		// treated as already clean -- which is what a successful destroy
 		// leaves behind.
 		if liveStateMayHoldResources(runtime.OutputDir()) {
-			// The env must be scoped to the run's OWN project: the apply
-			// ran with it as the provider default, and a destroy against
-			// the shared fallback is not the inverse of that apply.
-			//
-			// From the marker DIRECTLY, not from the sweep target. The
-			// two questions are separate -- which project is ours, and
-			// what strays does the state name -- and CaptureSweepTarget
-			// answers both, so an unreadable state file would take the
-			// project id down with it and quietly leave the destroy
-			// pointed at the shared fallback. An unknown project is a
-			// reason to stop, never a reason to guess.
-			sweepTarget, sweepTargetErr := harness.CaptureSweepTarget(runtime.OutputDir())
-			runProjectMarker, markerErr := harness.ReadRunProjectMarker(runtime.OutputDir())
-			sandboxEnvErr := markerErr
-			var sandboxEnv map[string]string
-			if markerErr == nil {
-				sandboxEnv, sandboxEnvErr = sandboxCommandEnvForProject(runtime, runProjectMarker.ProjectID)
-			}
+			sandboxEnv, sandboxEnvErr := sandboxCommandEnv(runtime)
 			if sandboxEnvErr != nil {
 				runtime.Logger.Log(LogEntry{
 					Level:   logLevelError,
@@ -722,26 +705,12 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 					Detail:  sandboxEnvErr.Error(),
 				})
 				allStages = append(allStages, StageSummary{Layer: "sandbox_deploy", Stage: "auto_destroy_preflight", Status: StageStatusFail})
-				// Not just a failed stage: the resources are live and
-				// nothing is coming for them, so the operator gets the
-				// reason and the command that finishes the job. A guard
-				// that stops without saying why is half a guard.
-				preflightFailures := []FailureSummary{{
-					Layer: "sandbox_deploy", Stage: "auto_destroy_preflight", Check: "run_project",
-					Command: "auto-destroy preflight",
-					Detail: fmt.Sprintf(
-						"real resources are live and were NOT destroyed: %v. Destroying against the shared "+
-							"fallback project would not be the inverse of the apply, so it was refused",
-						sandboxEnvErr),
-				}}
-				annotateWithRecoveryCommand(preflightFailures, runtime.ConfigPath, scenarioPath)
-				allFailures = append(allFailures, preflightFailures...)
-				logLayer3RecoveryHint(runtime, runID, scenarioPath, "auto-destroy preflight could not identify the run project")
 			} else {
-				// The sweep target is captured above, BEFORE destroy: tofu
-				// empties terraform-live.tfstate, and the strays it names
-				// go with it. Same ordering the success path learned the
-				// hard way in the first canary run.
+				// Capture the sweep target BEFORE destroy: tofu empties
+				// terraform-live.tfstate, taking the project id with it.
+				// Same ordering the success path learned the hard way in
+				// the first canary run.
+				sweepTarget, sweepTargetErr := harness.CaptureSweepTarget(runtime.OutputDir())
 				destroyResult, purged, destroyErr := destroySandbox(cmd.Context(), runtime, runtime.OutputDir(), sandboxEnv, sweepTargetProjectID(sweepTarget))
 				destroyStages, destroyFailures := appendSandboxDestroyResult(nil, nil, destroyResult, destroyErr)
 				allStages = append(allStages, destroyStages...)
@@ -768,21 +737,6 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 						Status:  "success",
 						RunID:   runID,
 					})
-					// The project, before the sweep, like every other
-					// teardown path. S165 documented this path as a
-					// deliberate gap because the id lived in the state
-					// file and this code had none; ADR-0025's marker
-					// gives it one, so the gap closes here rather than
-					// staying a known leak.
-					projectStages, projectFailures := releaseRunProject(
-						cmd.Context(), runtime, runtime.OutputDir(),
-						runProjectMarker.ProjectID, sandboxEnv)
-					allStages = append(allStages, projectStages...)
-					if len(projectFailures) > 0 {
-						annotateWithRecoveryCommand(projectFailures, runtime.ConfigPath, scenarioPath)
-						allFailures = append(allFailures, projectFailures...)
-					}
-
 					// Destroy reporting success is not evidence the account
 					// is clean -- it is the claim the sweep exists to check.
 					// The run has already failed, so this cannot change the

@@ -10,6 +10,18 @@ variable "zone" {
   default     = "fr-par-1"
 }
 
+variable "project_name" {
+  description = "Name of the ephemeral project bootstrapped for this scenario"
+  type        = string
+  default     = "block-paris"
+}
+
+variable "project_description" {
+  description = "Description applied to the bootstrapped project"
+  type        = string
+  default     = "Ephemeral project bootstrapped for the block-paris scenario"
+}
+
 variable "block_volume_name" {
   description = "Name of the app-data block volume"
   type        = string

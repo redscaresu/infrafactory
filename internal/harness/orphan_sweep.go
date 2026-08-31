@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -77,47 +76,19 @@ type SweepTarget struct {
 
 // CaptureSweepTarget reads the live state while it still has contents.
 // Call it before destroy.
-// CaptureSweepTarget records what the sweep must verify, before destroy
-// empties the state.
-//
-// ADR-0025: the project id comes from the run-project marker, not from a
-// scaleway_account_project in state -- the project is no longer a
-// Terraform resource, so the state never names it. The strays still come
-// from state, because a stray is precisely a resource the state records
-// as living OUTSIDE the run's project.
-//
-// There is deliberately NO fallback to a scaleway_account_project in
-// state for workdirs written before the cutover. Reading the project
-// from two sources is the dual model ADR-0025 dropped on purpose, and it
-// would buy nothing: no such workdir exists -- every Layer 3 run
-// destroys and sweeps before it finishes -- so the fallback would be an
-// untested second path guarding a case that has no instance. Refusing is
-// loud, and a workdir that genuinely predates this can be swept by hand.
 func CaptureSweepTarget(workDir string) (*SweepTarget, error) {
-	marker, err := ReadRunProjectMarker(workDir)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %v, so the run's blast radius cannot be determined", ErrOrphanSweepFailed, err)
-	}
-
 	state, err := loadLiveTerraformState(filepath.Join(workDir, LiveStateFilename))
 	if err != nil {
-		// An ABSENT state means nothing was applied, so there are no
-		// strays to compute -- but the project still exists and must be
-		// verified.
-		if errors.Is(err, os.ErrNotExist) {
-			return &SweepTarget{ProjectID: marker.ProjectID}, nil
-		}
-		// Anything else -- unreadable, truncated, corrupt -- means the
-		// stray half of the sweep cannot run, and a sweep that reports
-		// clean without computing strays is the false green this whole
-		// mechanism exists to prevent.
-		return nil, fmt.Errorf("%w: %v, so strays outside project %s cannot be computed",
-			ErrOrphanSweepFailed, err, marker.ProjectID)
+		return nil, fmt.Errorf("%w: %v", ErrOrphanSweepFailed, err)
 	}
-
+	projectID := runProjectID(state)
+	if projectID == "" {
+		return nil, fmt.Errorf("%w: live state has no %s resource, so the run's blast radius cannot be determined (ADR-0010 requires one)",
+			ErrOrphanSweepFailed, ProjectResourceType)
+	}
 	return &SweepTarget{
-		ProjectID: marker.ProjectID,
-		Strays:    strayResourceFailures(state, marker.ProjectID),
+		ProjectID: projectID,
+		Strays:    strayResourceFailures(state, projectID),
 	}, nil
 }
 

@@ -63,11 +63,14 @@ func tearDownDeployment(
 		return unreclaimable(detail)
 	}
 
-	// No early bail on a missing state file. Since ADR-0025 the project
-	// is created BEFORE the apply, so "no state" is the ordinary shape of
-	// a deploy that failed at preflight, init or plan: nothing to destroy
-	// with tofu, but a real project to delete. That case falls through to
-	// the no-resources path below, which deletes it and verifies.
+	statePath := filepath.Join(d.WorkDir, harness.LiveStateFilename)
+	if _, err := os.Stat(statePath); errors.Is(err, os.ErrNotExist) {
+		return unreclaimable(fmt.Sprintf(
+			"deployment %s has no %s (looked in %s). Its project %s may still be running; "+
+				"the record is kept rather than released so the leak stays visible",
+			d.ID, harness.LiveStateFilename, d.WorkDir, d.ProjectID))
+	}
+
 	// An empty state is the signature of a destroy that already ran, so
 	// re-running destroy would do nothing. It is NOT evidence the account
 	// is clean, and releasing on it alone would launder a previously
@@ -91,29 +94,11 @@ func tearDownDeployment(
 					"then clear the record with `infrafactory live forget %s`", d.ID, d.ProjectID, d.ID))
 		}
 
-		// Same rule as the destroy path below: the marker where there is
-		// one, the record only as a fallback.
-		verifyProjectID := d.ProjectID
-		if marker, markerErr := harness.ReadRunProjectMarker(d.WorkDir); markerErr == nil {
-			verifyProjectID = marker.ProjectID
-		}
-		sandboxEnv, envErr := sandboxCommandEnvForProject(runtime, verifyProjectID)
+		sandboxEnv, envErr := sandboxCommandEnv(runtime)
 		if envErr != nil {
 			return unreclaimable(fmt.Sprintf(
-				"%s has nothing to destroy, but the account cannot be verified: %v", d.ID, envErr))
+				"%s appears already destroyed, but the account cannot be verified: %v", d.ID, envErr))
 		}
-
-		// tofu never created the project and cannot remove it, so the
-		// delete happens here -- before the sweep, which exists to verify
-		// the project is gone. A project already deleted answers 404 and
-		// that is success, so this is safe to re-run.
-		//
-		// releaseRunProject runs the deletability guard itself, so a
-		// record with neither state nor marker fails closed here rather
-		// than releasing quietly.
-		projectStages, projectFailures := releaseRunProject(ctx, runtime, d.WorkDir, d.ProjectID, sandboxEnv)
-		stages = append(stages, projectStages...)
-		failures = append(failures, projectFailures...)
 
 		stages, failures = appendOrphanSweepResult(ctx, stages, failures, runtime,
 			&harness.SweepTarget{ProjectID: d.ProjectID}, nil, sandboxEnv)
@@ -123,42 +108,34 @@ func tearDownDeployment(
 
 		if err := store.MarkReleased(d.ID); err != nil {
 			return unreclaimable(fmt.Sprintf(
-				"%s was cleaned up and the account verified clean, but the record could not be released: %v",
+				"%s was already destroyed and the account verified clean, but the record could not be released: %v",
 				d.ID, err))
 		}
 		stages = append(stages, StageSummary{
 			Layer: "live", Stage: "release", Status: StageStatusPass,
-			Detail: fmt.Sprintf(
-				"%s held no resources; its project was deleted, the account verified, record released", d.ID),
+			Detail: fmt.Sprintf("%s was already destroyed; account re-verified, record released", d.ID),
 		})
 		return stages, failures
 	}
 
-	// The deployment's own project as the provider default: the apply
-	// created these resources with it set, so the destroy that inverts
-	// the apply must run with the same one rather than the shared
-	// fallback.
-	//
-	// From the MARKER where there is one. The record is the weaker of the
-	// two -- it is the half a stale or edited file can change, and the
-	// half the guard refuses to trust when they disagree -- so it is the
-	// fallback, for a pre-cutover workdir that has no marker at all.
-	destroyProjectID := d.ProjectID
-	if marker, markerErr := harness.ReadRunProjectMarker(d.WorkDir); markerErr == nil {
-		destroyProjectID = marker.ProjectID
+	stateProjectID, err := harness.RunProjectIDFromState(d.WorkDir)
+	if err != nil {
+		return unreclaimable(fmt.Sprintf("read live state for %s: %v", d.ID, err))
 	}
-	sandboxEnv, err := sandboxCommandEnvForProject(runtime, destroyProjectID)
+
+	sandboxEnv, err := sandboxCommandEnv(runtime)
 	if err != nil {
 		return unreclaimable(fmt.Sprintf("sandbox credentials for %s: %v", d.ID, err))
 	}
 
-	// No project guard here on purpose. `tofu destroy` acts only on the
-	// state in this workdir, so its blast radius is bounded by the state
-	// rather than by a project id, and the two things that DO reach the
-	// API by project -- destroySandbox's purge and releaseRunProject's
-	// delete -- each carry the guard themselves. Gating the destroy on it
-	// as well only stopped a pre-cutover record from being destroyed at
-	// all, which is the opposite of what the guard is for.
+	// The record says which deployment; the state says which project.
+	// Passing both makes a disagreement fatal rather than silent.
+	if err := harness.AssertProjectDeletable(
+		stateProjectID, d.ProjectID, sandboxEnv["SCW_DEFAULT_ORGANIZATION_ID"],
+	); err != nil {
+		return unreclaimable(fmt.Sprintf(
+			"refusing to destroy for deployment %s: %v", d.ID, err))
+	}
 
 	sweepTarget, sweepTargetErr := harness.CaptureSweepTarget(d.WorkDir)
 	destroyResult, purged, destroyErr := destroySandbox(
@@ -168,14 +145,6 @@ func tearDownDeployment(
 		stages = append(stages, autoCreatedPurgeStage(purged))
 	}
 	if destroyErr == nil {
-		// Before the sweep, for the same reason as the run path: the
-		// sweep verifies the project is GONE, and tofu no longer deletes
-		// it. Deleting afterwards would make every clean teardown report
-		// a leak.
-		projectStages, projectFailures := releaseRunProject(ctx, runtime, d.WorkDir, d.ProjectID, sandboxEnv)
-		stages = append(stages, projectStages...)
-		failures = append(failures, projectFailures...)
-
 		failuresBeforeSweep := len(failures)
 		stages, failures = appendOrphanSweepResult(ctx, stages, failures, runtime, sweepTarget, sweepTargetErr, sandboxEnv)
 		if len(failures) > failuresBeforeSweep {
@@ -280,23 +249,12 @@ func runLiveForgetCommand(cmd *cobra.Command, args []string, runtime *CommandRun
 }
 
 // reclaimable reports whether teardown could still act on this record --
-// it decodes, it is not already released, and its workdir holds either a
-// run-project marker or live state.
-//
-// EITHER, not the marker alone. Since ADR-0025 a deploy that failed
-// before writing state still left a real project behind, so gating on
-// state would send exactly those records to `live forget`. But gating on
-// the marker alone strands the mirror image: a workdir written before
-// the cutover has state and no marker, and `live forget` retires a
-// record without destroying anything. Unreclaimable is the answer that
-// makes a leak forgettable, so it is the answer to be stingy with.
+// it decodes, it is not already released, and its state is on disk.
 func reclaimable(d livestore.Deployment) bool {
 	if d.Undecodable || d.State == livestore.StateReleased || d.WorkDir == "" {
 		return false
 	}
-	_, markerErr := os.Stat(filepath.Join(d.WorkDir, harness.RunProjectMarkerFilename))
-	_, stateErr := os.Stat(filepath.Join(d.WorkDir, harness.LiveStateFilename))
-	if markerErr != nil && stateErr != nil {
+	if _, err := os.Stat(filepath.Join(d.WorkDir, harness.LiveStateFilename)); err != nil {
 		return false
 	}
 	// Teardown needs a project id: without one AssertProjectDeletable

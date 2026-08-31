@@ -32,7 +32,7 @@ terraform {
     }
   }
 }
-resource "scaleway_block_volume" "data" { name = "x" }
+resource "scaleway_account_project" "main" { name = "x" }
 `
 
 // The bypass that retired the regex. `resource /*x*/ "..."` is valid HCL
@@ -127,12 +127,13 @@ variable "size" {
   type    = number
   default = 5
 }
-resource "scaleway_block_volume" "vol" { name = "run-data" }
+resource "scaleway_account_project" "main" { name = "run" }
 resource "scaleway_block_volume" "data" {
   name       = "d"
   size_in_gb = var.size
+  project_id = scaleway_account_project.main.id
 }
-output "volume_id" { value = scaleway_block_volume.vol.id }`)
+output "project_id" { value = scaleway_account_project.main.id }`)
 
 	if err := validateLayer3HCLShape(dir, gateAllowlist); err != nil {
 		t.Errorf("a legitimate Layer 3 stack was refused: %v", err)
@@ -152,7 +153,7 @@ terraform {
     }
   }
 }
-resource "scaleway_block_volume" "data" { name = "x" }`)
+resource "scaleway_account_project" "main" { name = "x" }`)
 
 	err := validateLayer3HCLShape(dir, gateAllowlist)
 	if err == nil {
@@ -173,7 +174,7 @@ terraform {
     }
   }
 }
-resource "scaleway_block_volume" "data" { name = "x" }`)
+resource "scaleway_account_project" "main" { name = "x" }`)
 
 	if err := validateLayer3HCLShape(dir, gateAllowlist); err != nil {
 		t.Errorf("the canonical provider source was refused: %v", err)
@@ -193,7 +194,7 @@ terraform {
     }
   }
 }
-resource "scaleway_block_volume" "data" { name = "x" }`)
+resource "scaleway_account_project" "main" { name = "x" }`)
 
 	err := validateLayer3HCLShape(dir, gateAllowlist)
 
@@ -209,7 +210,7 @@ terraform {
     scaleway = { source = "scaleway/scaleway" }
   }
 }
-resource "scaleway_block_volume" "data" { name = "x" }`)
+resource "scaleway_account_project" "main" { name = "x" }`)
 
 	err := validateLayer3HCLShape(dir, gateAllowlist)
 
@@ -228,7 +229,7 @@ terraform {
     }
   }
 }
-resource "scaleway_block_volume" "data" { name = "x" }`)
+resource "scaleway_account_project" "main" { name = "x" }`)
 
 	require.Error(t, validateLayer3HCLShape(dir, gateAllowlist))
 }
@@ -310,7 +311,7 @@ resource "scaleway_block_volume" "v" {
 // scaleway_* from the default namespace, which is a choice the
 // configuration made implicitly rather than one this check verified.
 func TestLayer3ShapeRequiresDeclaredProviderSource(t *testing.T) {
-	dir := writeShapeHCL(t, `resource "scaleway_block_volume" "data" { name = "x" }
+	dir := writeShapeHCL(t, `resource "scaleway_account_project" "main" { name = "x" }
 resource "scaleway_block_volume" "v" { size_in_gb = 1 }`)
 
 	err := validateLayer3HCLShape(dir, gateAllowlist)
@@ -336,7 +337,7 @@ terraform {
     address = "https://attacker.example/state"
   }
 }
-resource "scaleway_block_volume" "data" { name = "x" }`)
+resource "scaleway_account_project" "main" { name = "x" }`)
 
 	if err := validateLayer3HCLShape(dir, gateAllowlist); err == nil {
 		t.Fatal("a backend block must be refused — cleanup reads local state")
@@ -353,7 +354,7 @@ terraform {
     foo = { source = "scaleway/scaleway", version = "2.81.0" }
   }
 }
-resource "scaleway_block_volume" "data" { name = "x" }`)
+resource "scaleway_account_project" "main" { name = "x" }`)
 
 	err := validateLayer3HCLShape(dir, gateAllowlist)
 	if err == nil {
@@ -399,6 +400,40 @@ resource "scaleway_block_volume" "escapee" {
 	}
 }
 
+// The legitimate shape: bound to the stack's own project.
+func TestLayer3ShapeAcceptsProjectIDBoundToOwnProject(t *testing.T) {
+	dir := writeShapeHCL(t, shapeProject+`
+resource "scaleway_block_volume" "data" {
+  size_in_gb = 1
+  project_id = scaleway_account_project.main.id
+}`)
+
+	if err := validateLayer3HCLShape(dir, gateAllowlist); err != nil {
+		t.Errorf("a resource bound to its own project was refused: %v", err)
+	}
+}
+
+// Mentioning the disposable project is not the same as using it.
+// Expr.Variables() reports which traversals appear, not what the
+// expression evaluates to.
+func TestLayer3ShapeRefusesProjectIDExpressionThatOnlyMentionsTheProject(t *testing.T) {
+	dir := writeShapeHCL(t, shapeProject+`
+resource "scaleway_block_volume" "escapee" {
+  size_in_gb = 1
+  project_id = scaleway_account_project.main.id != "" ? "0b6a8a6a-7242-4852-a0cb-ac2e4fc86b92" : "0b6a8a6a-7242-4852-a0cb-ac2e4fc86b92"
+}`)
+
+	err := validateLayer3HCLShape(dir, gateAllowlist)
+	if err == nil {
+		t.Fatal("an expression that merely references the project must be refused")
+	}
+	if !strings.Contains(err.Error(), "direct reference") {
+		t.Errorf("error did not explain the requirement: %v", err)
+	}
+}
+
+// .name is also a reference to the project, but the name is chosen by the
+// PR and can be set to any existing project's UUID.
 func TestLayer3ShapeRefusesProjectIDFromNonIDAttribute(t *testing.T) {
 	dir := writeShapeHCL(t, shapeProject+`
 resource "scaleway_block_volume" "escapee" {
@@ -411,6 +446,44 @@ resource "scaleway_block_volume" "escapee" {
 	}
 }
 
+// The generation-path check is a substring scan, which a comment satisfies.
+// On the untrusted path the parser decides.
+func TestLayer3ShapeRefusesCommentedOutProjectResource(t *testing.T) {
+	dir := writeShapeHCL(t, `
+terraform {
+  required_providers {
+    scaleway = { source = "scaleway/scaleway", version = "2.81.0" }
+  }
+}
+# resource "scaleway_account_project" "main" {}
+resource "scaleway_block_volume" "orphan" { size_in_gb = 1 }`)
+
+	err := validateLayer3HCLShape(dir, gateAllowlist)
+	if err == nil {
+		t.Fatal("a commented-out project must not satisfy the containment requirement")
+	}
+	if !strings.Contains(err.Error(), "disposable project") {
+		t.Errorf("error did not explain the requirement: %v", err)
+	}
+}
+
+// Omitting project_id is not a neutral omission: the provider falls back
+// to SCW_DEFAULT_PROJECT_ID, which the sealed environment points at a
+// real project the run never created and the sweep never destroys.
+func TestLayer3ShapeRefusesResourceWithNoProjectID(t *testing.T) {
+	dir := writeShapeHCL(t, shapeProject+`
+resource "scaleway_block_volume" "adrift" {
+  size_in_gb = 1
+}`)
+
+	err := validateLayer3HCLShape(dir, gateAllowlist)
+
+	require.Error(t, err, "a resource with no project_id lands in the fallback project")
+	assert.Contains(t, err.Error(), "fallback project")
+}
+
+// A child resource inherits containment from its parent, so the parent
+// must be a resource this run created.
 func TestLayer3ShapeRefusesChildBoundToALiteralParent(t *testing.T) {
 	dir := writeShapeHCL(t, shapeProject+`
 resource "scaleway_lb_backend" "hijack" {
@@ -430,10 +503,12 @@ resource "scaleway_lb_backend" "hijack" {
 func TestLayer3ShapeAcceptsChildBoundToAnInStackParent(t *testing.T) {
 	dir := writeShapeHCL(t, shapeProject+`
 resource "scaleway_lb_ip" "front" {
+  project_id = scaleway_account_project.main.id
 }
 resource "scaleway_lb" "main" {
   ip_ids     = [scaleway_lb_ip.front.id]
   type       = "LB-S"
+  project_id = scaleway_account_project.main.id
 }
 resource "scaleway_lb_backend" "web" {
   lb_id            = scaleway_lb.main.id
@@ -444,6 +519,17 @@ resource "scaleway_lb_backend" "web" {
 	assert.NoError(t, validateLayer3HCLShape(dir, gateAllowlist))
 }
 
+// The project resource is the project; requiring it to bind to itself
+// would make every valid stack unrepresentable.
+func TestLayer3ShapeExemptsTheProjectResourceItself(t *testing.T) {
+	dir := writeShapeHCL(t, shapeProject)
+
+	assert.NoError(t, validateLayer3HCLShape(dir, gateAllowlist))
+}
+
+// The checker and the fixtures the gate actually applies must agree. A
+// containment rule that rejects the committed stack is a broken gate, and
+// it would only be discovered by a real run costing real money.
 func TestRealGateFixturesPassTheirOwnPreflight(t *testing.T) {
 	// Read the allowlist the workflow actually writes, rather than
 	// restating it here. A hardcoded copy passes while the gate fails --
@@ -549,6 +635,7 @@ func TestLayer3ShapeRefusesFileFunctionInUserData(t *testing.T) {
 resource "scaleway_instance_server" "web" {
   type       = "DEV1-S"
   image      = "ubuntu_jammy"
+  project_id = scaleway_account_project.main.id
   user_data  = { cloud-init = file("/proc/self/environ") }
 }`)
 
@@ -614,6 +701,7 @@ func TestLayer3ShapeRefusesCountOnAResource(t *testing.T) {
 resource "scaleway_block_volume" "many" {
   count      = 50
   size_in_gb = 1
+  project_id = scaleway_account_project.main.id
 }`)
 
 	err := validateLayer3HCLShape(dir, gateAllowlist)
@@ -630,6 +718,7 @@ func TestLayer3ShapeRefusesCountZero(t *testing.T) {
 resource "scaleway_block_volume" "vanished" {
   count      = 0
   size_in_gb = 1
+  project_id = scaleway_account_project.main.id
 }`)
 
 	require.Error(t, validateLayer3HCLShape(dir, gateAllowlist))
@@ -640,6 +729,7 @@ func TestLayer3ShapeRefusesForEachOnAResource(t *testing.T) {
 resource "scaleway_block_volume" "spread" {
   for_each   = { a = 1, b = 2 }
   size_in_gb = 1
+  project_id = scaleway_account_project.main.id
 }`)
 
 	require.Error(t, validateLayer3HCLShape(dir, gateAllowlist))
@@ -677,10 +767,31 @@ func TestLayer3ShapeAcceptsTheTrustedLockFile(t *testing.T) {
 	assert.NoError(t, validateLayer3HCLShape(dir, gateAllowlist))
 }
 
+// The teardown model assumes one disposable project throughout:
+// CaptureSweepTarget records one id, AssertProjectDeletable guards that
+// one, the sweep asks about that one. A second project would take half
+// the stack somewhere nothing is looking.
+func TestLayer3ShapeRefusesASecondProject(t *testing.T) {
+	dir := writeShapeHCL(t, shapeProject+`
+resource "scaleway_account_project" "shadow" { name = "y" }
+resource "scaleway_block_volume" "hidden" {
+  size_in_gb = 1
+  project_id = scaleway_account_project.shadow.id
+}`)
+
+	err := validateLayer3HCLShape(dir, gateAllowlist)
+
+	require.Error(t, err, "two projects means the sweep verifies only one of them")
+	assert.Contains(t, err.Error(), "exactly one")
+}
+
+// The allowlist bounds which types may exist and says nothing about how
+// expensive one is. A block volume is within it at 10GB and at 10TB.
 func TestLayer3ShapeRefusesAnOversizedVolume(t *testing.T) {
 	dir := writeShapeHCL(t, shapeProject+`
 resource "scaleway_block_volume" "huge" {
   size_in_gb = 10000
+  project_id = scaleway_account_project.main.id
 }`)
 
 	err := validateLayer3HCLShape(dir, gateAllowlist)
@@ -699,6 +810,7 @@ variable "size" {
 }
 resource "scaleway_block_volume" "sneaky" {
   size_in_gb = var.size
+  project_id = scaleway_account_project.main.id
 }`)
 
 	require.Error(t, validateLayer3HCLShape(dir, gateAllowlist),
@@ -711,6 +823,7 @@ func TestLayer3ShapeRefusesAnUnresolvableCostAttribute(t *testing.T) {
 variable "size" { type = number }
 resource "scaleway_block_volume" "unknown" {
   size_in_gb = var.size
+  project_id = scaleway_account_project.main.id
 }`)
 
 	err := validateLayer3HCLShape(dir, gateAllowlist)
@@ -725,6 +838,7 @@ func TestLayer3ShapeRefusesAnExpensiveInstanceType(t *testing.T) {
 resource "scaleway_instance_server" "big" {
   type       = "GPU-3070-S"
   image      = "ubuntu_jammy"
+  project_id = scaleway_account_project.main.id
 }`)
 
 	require.Error(t, validateLayer3HCLShape(dir, append(gateAllowlist, "scaleway_instance_server")))
@@ -737,6 +851,7 @@ func TestLayer3ShapeBoundsNestedVolumeSize(t *testing.T) {
 resource "scaleway_instance_server" "web" {
   type       = "DEV1-S"
   image      = "ubuntu_jammy"
+  project_id = scaleway_account_project.main.id
 
   root_volume {
     size_in_gb = 5000
@@ -757,6 +872,7 @@ func TestLayer3ShapeRefusesPrivateNICBoundToAForeignNetwork(t *testing.T) {
 resource "scaleway_instance_server" "web" {
   type       = "DEV1-S"
   image      = "ubuntu_jammy"
+  project_id = scaleway_account_project.main.id
 }
 resource "scaleway_instance_private_nic" "nic" {
   server_id          = scaleway_instance_server.web.id
@@ -782,6 +898,7 @@ variable "tags" {
 }
 resource "scaleway_block_volume" "data" {
   size_in_gb = 1
+  project_id = scaleway_account_project.main.id
   tags       = concat(var.tags, ["web-server"])
   name       = lower(format("%s-%s", "vol", "data"))
 }`)
@@ -804,6 +921,7 @@ func TestLayer3ShapeRefusesFunctionsOffTheAllowlist(t *testing.T) {
 			dir := writeShapeHCL(t, shapeProject+`
 resource "scaleway_block_volume" "data" {
   size_in_gb = 1
+  project_id = scaleway_account_project.main.id
   name       = `+call+`
 }`)
 			require.Error(t, validateLayer3HCLShape(dir, gateAllowlist))
@@ -833,59 +951,4 @@ func TestRecordedGenerationPassesPreflight(t *testing.T) {
 				"regenerate with `make demo-gate GENERATE=live` and commit the result")
 		})
 	}
-}
-
-// ADR-0025 inverted this rule. The run's project is the provider default,
-// so a resource naming ANY project could place itself outside the run's
-// blast radius. There is no correct value, so the attribute is refused
-// rather than validated.
-func TestLayer3ShapeRefusesAnyProjectID(t *testing.T) {
-	cases := map[string]string{
-		"literal":    `project_id = "0b6a8a6a-7242-4852-a0cb-ac2e4fc86b92"`,
-		"variable":   `project_id = var.project`,
-		"expression": `project_id = var.a != "" ? var.a : var.b`,
-	}
-
-	for name, attr := range cases {
-		t.Run(name, func(t *testing.T) {
-			dir := writeShapeHCL(t, shapeProject+"\nresource \"scaleway_block_volume\" \"escapee\" {\n  size_in_gb = 1\n  "+attr+"\n}")
-
-			err := validateLayer3HCLShape(dir, gateAllowlist)
-
-			require.Error(t, err, "naming a project is how a resource escapes the run's blast radius")
-			assert.Contains(t, err.Error(), "sets project_id")
-		})
-	}
-}
-
-// The shape the new model wants: no project_id at all, so the resource
-// lands in the run's own project by construction.
-func TestLayer3ShapeAcceptsAResourceWithNoProjectID(t *testing.T) {
-	dir := writeShapeHCL(t, shapeProject+"\nresource \"scaleway_block_volume\" \"adrift\" {\n  size_in_gb = 1\n}")
-
-	assert.NoError(t, validateLayer3HCLShape(dir, gateAllowlist),
-		"the provider default is the run's own project, so omitting project_id is correct")
-}
-
-// Declaring a project creates a SECOND one: the run already has its own,
-// created before the apply. Nothing tracks the declared one, no marker
-// names it, no teardown deletes it.
-func TestLayer3ShapeRefusesADeclaredProject(t *testing.T) {
-	dir := writeShapeHCL(t, shapeProject+"\nresource \"scaleway_account_project\" \"shadow\" { name = \"y\" }")
-
-	err := validateLayer3HCLShape(dir, gateAllowlist)
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "second project nothing tracks or destroys")
-}
-
-// The parser decides, not a substring scan: `resource /*x*/ "..."` is
-// valid HCL that a regex over the source does not match.
-func TestLayer3ShapeCatchesAnObfuscatedProjectResource(t *testing.T) {
-	dir := writeShapeHCL(t, shapeProject+"\nresource /*sneaky*/ \"scaleway_account_project\" \"shadow\" { name = \"y\" }")
-
-	err := validateLayer3HCLShape(dir, gateAllowlist)
-
-	require.Error(t, err, "a comment must not hide a declared project from the gate")
-	assert.Contains(t, err.Error(), "second project nothing tracks or destroys")
 }

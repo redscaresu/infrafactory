@@ -88,16 +88,10 @@ type fakeOrphanSweep struct {
 	result *harness.OrphanSweepResult
 	err    error
 	calls  int
-	// lastProjectID records what the sweep was aimed at, so a test can
-	// prove a tampered record cannot redirect it.
-	lastProjectID string
 }
 
-func (f *fakeOrphanSweep) Run(_ context.Context, target *harness.SweepTarget, _ string) (*harness.OrphanSweepResult, error) {
+func (f *fakeOrphanSweep) Run(_ context.Context, _ *harness.SweepTarget, _ string) (*harness.OrphanSweepResult, error) {
 	f.calls++
-	if target != nil {
-		f.lastProjectID = target.ProjectID
-	}
 	if f.result == nil && f.err == nil {
 		return &harness.OrphanSweepResult{ProjectID: "test-project"}, nil
 	}
@@ -809,7 +803,6 @@ func TestTestCommandRunsSandboxLayerWhenEnabled(t *testing.T) {
 					OrphanCount:   0,
 				},
 			},
-			RunProject:     &fakeRunProject{created: harness.RunProject{ID: "run-proj-1", Name: "if-run-t"}},
 			SandboxDeploy:  sandboxDeploy,
 			SandboxDestroy: sandboxDestroy,
 			OrphanSweep:    orphanSweep,
@@ -909,7 +902,6 @@ func TestTestCommandAutoDestroysSandboxResourcesAfterProbeFailure(t *testing.T) 
 				},
 			},
 			Destroy:        destroy,
-			RunProject:     &fakeRunProject{created: harness.RunProject{ID: "run-proj-1", Name: "if-run-t"}},
 			SandboxDeploy:  sandboxDeploy,
 			SandboxDestroy: sandboxDestroy,
 			OrphanSweep:    &fakeOrphanSweep{},
@@ -964,7 +956,6 @@ func TestTestCommandFailsSandboxPreflightWithoutCredentials(t *testing.T) {
 				},
 			},
 			Destroy:        &fakeDestroyHarness{},
-			RunProject:     &fakeRunProject{created: harness.RunProject{ID: "run-proj-1", Name: "if-run-t"}},
 			SandboxDeploy:  &fakeSandboxDeployHarness{},
 			SandboxDestroy: &fakeSandboxDestroyHarness{},
 			OrphanSweep:    &fakeOrphanSweep{},
@@ -1162,7 +1153,6 @@ func TestTestCommandFailsWhenOrphanSweepReportsLeak(t *testing.T) {
 				Destroy:       harness.StageResult{Stage: "destroy"},
 				StateSnapshot: []byte(`{"instance":{"servers":[]}}`),
 			}},
-			RunProject:     &fakeRunProject{created: harness.RunProject{ID: "run-proj-1", Name: "if-run-t"}},
 			SandboxDeploy:  sandboxDeploy,
 			SandboxDestroy: sandboxDestroy,
 			OrphanSweep:    leaking,

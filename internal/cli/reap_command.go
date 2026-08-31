@@ -43,33 +43,22 @@ func runReapCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) 
 
 	workDir := runtime.OutputDir()
 	statePath := filepath.Join(workDir, harness.LiveStateFilename)
-	markerPath := filepath.Join(workDir, harness.RunProjectMarkerFilename)
-	_, stateErr := os.Stat(statePath)
-	_, markerErr := os.Stat(markerPath)
-	if errors.Is(stateErr, os.ErrNotExist) && errors.Is(markerErr, os.ErrNotExist) {
-		_, _ = fmt.Fprintf(out, "No %s or %s in %s — nothing to reap.\n",
-			harness.LiveStateFilename, harness.RunProjectMarkerFilename, workDir)
+	if _, statErr := os.Stat(statePath); errors.Is(statErr, os.ErrNotExist) {
+		_, _ = fmt.Fprintf(out, "No %s in %s — nothing to reap.\n", harness.LiveStateFilename, workDir)
 		return nil
 	}
 
-	// The marker, not the state: ADR-0025 took the project out of
-	// Terraform, so the state no longer names it. And only the marker --
-	// falling back to a scaleway_account_project in state for a
-	// pre-cutover workdir is the dual model the cutover dropped, for a
-	// case with no instance. Refusing outright is the right answer here
-	// specifically: reap's contract is "destroy this run's project and
-	// prove the account is clean", and without a marker it can do
-	// neither half.
-	marker, err := harness.ReadRunProjectMarker(workDir)
+	projectID, err := harness.RunProjectIDFromState(workDir)
 	if err != nil {
-		return &CLIError{Op: "reap", Code: errorCodeCommandFailed, Err: fmt.Errorf(
-			"%v, so there is no way to tell which project this run created. Refusing to destroy anything", err)}
+		return &CLIError{Op: "reap", Code: errorCodeCommandFailed, Err: fmt.Errorf("read live state: %w", err)}
 	}
-	projectID := marker.ProjectID
+	if projectID == "" {
+		return &CLIError{Op: "reap", Code: errorCodeCommandFailed, Err: fmt.Errorf(
+			"%s records no %s, so there is no way to tell which project this run created. Refusing to destroy anything",
+			harness.LiveStateFilename, harness.ProjectResourceType)}
+	}
 
-	// Scoped to the project the marker names: the apply ran with it as
-	// the provider default, so the destroy that inverts it must too.
-	sandboxEnv, err := sandboxCommandEnvForProject(runtime, projectID)
+	sandboxEnv, err := sandboxCommandEnv(runtime)
 	if err != nil {
 		return &CLIError{Op: "reap", Code: errorCodeCommandFailed, Err: err}
 	}
@@ -77,7 +66,7 @@ func runReapCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) 
 	// reap only ever destroys the project recorded in the state file it
 	// was handed -- never one named on the command line, never the
 	// organization default.
-	if err := assertRunProjectDeletable(ctx, runtime, workDir, projectID, sandboxEnv); err != nil {
+	if err := harness.AssertProjectDeletable(projectID, projectID, sandboxEnv["SCW_DEFAULT_ORGANIZATION_ID"]); err != nil {
 		return &CLIError{Op: "reap", Code: errorCodeCommandFailed, Err: err}
 	}
 
@@ -96,15 +85,6 @@ func runReapCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) 
 		stages = append(stages, autoCreatedPurgeStage(purged))
 	}
 	if destroyErr == nil {
-		// The project goes BEFORE the sweep, for the same reason it does
-		// in `test` and `live teardown`: since ADR-0025 `tofu destroy`
-		// cannot delete it -- it is not a Terraform resource -- and the
-		// sweep's whole job is to verify it is gone. Deleting it
-		// afterwards would make every clean reap report a leak.
-		projectStages, projectFailures := releaseRunProject(ctx, runtime, workDir, projectID, sandboxEnv)
-		stages = append(stages, projectStages...)
-		failures = append(failures, projectFailures...)
-
 		stages, failures = appendOrphanSweepResult(ctx, stages, failures, runtime, sweepTarget, sweepTargetErr, sandboxEnv)
 	}
 
@@ -159,86 +139,42 @@ func withSandboxInterruptGuard(
 		return err
 	}
 
-	// Interrupted. Anything the apply created is live and unowned -- and
-	// since ADR-0025 that includes the project itself, which exists
-	// before the apply and outlives `tofu destroy`.
+	// Interrupted. Anything the apply created is live and unowned.
 	out := cmd.ErrOrStderr()
 	workDir := runtime.OutputDir()
 	statePath := filepath.Join(workDir, harness.LiveStateFilename)
-	_, stateErr := os.Stat(statePath)
-	hasState := !errors.Is(stateErr, os.ErrNotExist)
-
-	// The marker, because "no state" no longer means "nothing exists".
-	marker, markerErr := harness.ReadRunProjectMarker(workDir)
-	if !hasState && markerErr != nil {
+	if _, statErr := os.Stat(statePath); errors.Is(statErr, os.ErrNotExist) {
 		_, _ = fmt.Fprintf(out, "\nInterrupted before any real resources were created — nothing to clean up.\n")
 		return err
 	}
 
-	if hasState {
-		_, _ = fmt.Fprintf(out, "\nInterrupted with real resources live. Destroying before exit — press Ctrl-C again to abandon.\n")
-	} else {
-		_, _ = fmt.Fprintf(out,
-			"\nInterrupted before anything was applied, but project %s exists. Deleting it before exit — press Ctrl-C again to abandon.\n",
-			marker.ProjectID)
-	}
+	_, _ = fmt.Fprintf(out, "\nInterrupted with real resources live. Destroying before exit — press Ctrl-C again to abandon.\n")
 
 	// stop() restores default signal handling, so a second Ctrl-C kills
 	// the process outright rather than being swallowed here.
 	stop()
 
-	// An unreadable marker with state on disk is the one shape this
-	// cannot proceed on. marker is the zero value there, so building the
-	// env from it would silently scope the destroy to the SHARED
-	// fallback -- which is not the inverse of the apply that created
-	// these resources. A post-cutover run always writes the marker
-	// (failing to is fatal at creation), so its absence here means the
-	// workdir is damaged, and the honest answer is to hand the operator
-	// the recovery command rather than destroy against a guess.
-	if markerErr != nil {
-		reportAbandonedResources(out, statePath, fmt.Errorf(
-			"cannot tell which project this run owns (%v), and destroying against the shared "+
-				"fallback project would not be the inverse of the apply", markerErr))
-		return err
-	}
-
-	// Scoped to the run's project, so the destroy runs with the same
-	// provider default the apply did.
-	sandboxEnv, envErr := sandboxCommandEnvForProject(runtime, marker.ProjectID)
+	sandboxEnv, envErr := sandboxCommandEnv(runtime)
 	if envErr != nil {
 		reportAbandonedResources(out, statePath, envErr)
 		return err
 	}
-
-	if hasState {
-		// Through destroySandbox, not the raw harness: an interrupted run
-		// is exactly when a project the API made undeletable matters
-		// most, because nothing else is coming to clean it up. Capture
-		// can fail here -- the state may be mid-write -- and an empty
-		// project id just means no purge, never a skipped destroy.
-		cleanupTarget, _ := harness.CaptureSweepTarget(workDir)
-		_, purged, destroyErr := destroySandbox(
-			context.Background(), runtime, workDir, sandboxEnv, sweepTargetProjectID(cleanupTarget))
-		if destroyErr != nil {
-			reportAbandonedResources(out, statePath, destroyErr)
-			return err
-		}
-		if len(purged) > 0 {
-			_, _ = fmt.Fprintf(out, "%s\n", autoCreatedPurgeStage(purged).Detail)
-		}
-		_, _ = fmt.Fprintf(out, "Cleanup destroy completed.\n")
-	}
-
-	// The project last, because tofu cannot delete it and nothing else
-	// will: an interrupt is the one exit with no summary to report a
-	// kept project in.
-	_, projectFailures := releaseRunProject(
-		context.Background(), runtime, workDir, marker.ProjectID, sandboxEnv)
-	if len(projectFailures) > 0 {
-		_, _ = fmt.Fprintf(out, "%s\n", projectFailures[0].Detail)
+	// Through destroySandbox, not the raw harness: an interrupted run is
+	// exactly when a project the API made undeletable matters most,
+	// because nothing else is coming to clean it up. Capture can fail
+	// here -- the state may be mid-write -- and an empty project id just
+	// means no purge, never a skipped destroy.
+	cleanupTarget, _ := harness.CaptureSweepTarget(workDir)
+	_, purged, destroyErr := destroySandbox(
+		context.Background(), runtime, workDir, sandboxEnv, sweepTargetProjectID(cleanupTarget))
+	if destroyErr != nil {
+		reportAbandonedResources(out, statePath, destroyErr)
 		return err
 	}
-	_, _ = fmt.Fprintf(out, "Run project %s deleted.\n", marker.ProjectID)
+	if len(purged) > 0 {
+		_, _ = fmt.Fprintf(out, "%s\n", autoCreatedPurgeStage(purged).Detail)
+	}
+	_, _ = fmt.Fprintf(out, "Cleanup destroy completed.\n")
 	return err
 }
 

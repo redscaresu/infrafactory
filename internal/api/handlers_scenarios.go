@@ -43,12 +43,12 @@ type runMetadataSummary struct {
 }
 
 type scenarioDetailResponse struct {
-	Name        string             `json:"name"`
-	Path        string             `json:"path"`
-	Description string             `json:"description"`
-	Cloud       string             `json:"cloud"`
-	RawYAML     string             `json:"raw_yaml"`
-	Resources   scenario.Resources `json:"resources"`
+	Name        string                         `json:"name"`
+	Path        string                         `json:"path"`
+	Description string                         `json:"description"`
+	Cloud       string                         `json:"cloud"`
+	RawYAML     string                         `json:"raw_yaml"`
+	Resources   scenario.Resources             `json:"resources"`
 	// S51: Constraints field removed; per-criterion Params live on
 	// AcceptanceCriterion now.
 	Criteria []scenario.AcceptanceCriterion `json:"criteria"`
