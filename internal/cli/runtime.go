@@ -50,7 +50,15 @@ type AutoCreatedPurgeRunner interface {
 // longer be a Terraform resource.
 type RunProjectManager interface {
 	Create(ctx context.Context, secretKey, organizationID, scenario, stamp string) (harness.RunProject, error)
+	Describe(ctx context.Context, secretKey, projectID string) (harness.ProjectProvenance, error)
 	Delete(ctx context.Context, secretKey, projectID string) error
+}
+
+// ServiceProbeRunner checks a live deployment's health path. Separate
+// from RealProbeHarnessRunner because it runs out-of-band, against an
+// address recorded earlier, with no run in progress (S154).
+type ServiceProbeRunner interface {
+	Probe(ctx context.Context, address string, port int, healthPath string) (harness.ServiceProbeResult, error)
 }
 
 // OrphanSweepRunner verifies, against the real API, that a Layer 3 run
@@ -90,6 +98,7 @@ type RuntimeDependencies struct {
 	AutoCreated    AutoCreatedPurgeRunner
 	OrphanSweep    OrphanSweepRunner
 	RunProject     RunProjectManager
+	ServiceProbe   ServiceProbeRunner
 	RealProbe      RealProbeHarnessRunner
 	MockState      harness.MockStateClient
 	MockStart      MockStarter
@@ -410,6 +419,10 @@ func buildRuntime(cmd *cobra.Command, opts runtimeOptions) (*CommandRuntime, err
 	}
 	if deps.RunProject == nil {
 		deps.RunProject = harness.NewScalewayRunProject(runProjectTimeout)
+	}
+	if deps.ServiceProbe == nil {
+		deps.ServiceProbe = harness.NewServiceProbe(
+			time.Duration(cfg.Validation.RealProbes.TimeoutSeconds) * time.Second)
 	}
 	if deps.OrphanSweep == nil {
 		deps.OrphanSweep = harness.NewScalewayOrphanSweep(

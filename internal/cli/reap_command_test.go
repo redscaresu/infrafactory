@@ -11,6 +11,8 @@ import (
 	"github.com/redscaresu/infrafactory/internal/feedback"
 	"github.com/redscaresu/infrafactory/internal/harness"
 	"github.com/spf13/cobra"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 const reapProjectID = "2397e80e-ec12-4a7e-819f-a2caba3867b6"
@@ -36,6 +38,7 @@ func reapRuntime(t *testing.T, destroy *fakeSandboxDestroyHarness, sweep *fakeOr
 		Deps: RuntimeDependencies{
 			SandboxDestroy: destroy,
 			OrphanSweep:    sweep,
+			RunProject:     &fakeRunProject{},
 		},
 	}
 	if _, err := rt.LoadScenario(scenarioPath); err != nil {
@@ -49,6 +52,13 @@ func reapRuntime(t *testing.T, destroy *fakeSandboxDestroyHarness, sweep *fakeOr
 
 func writeReapLiveState(t *testing.T, dir, projectID string) {
 	t.Helper()
+	// ADR-0025: reap reads the marker, not the state, to learn what it
+	// may destroy. Written alongside so fixtures cover both.
+	if err := harness.WriteRunProjectMarker(dir, harness.RunProject{
+		ID: projectID, Name: harness.RunProjectNamePrefix + "reap",
+	}); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
 	body := `{"resources":[
 	  {"type":"scaleway_account_project","instances":[{"attributes":{"id":"` + projectID + `"}}]},
 	  {"type":"scaleway_block_volume","instances":[{"attributes":{"id":"vol-1","project_id":"` + projectID + `"}}]}
@@ -106,6 +116,11 @@ func TestReapDestroysThenVerifies(t *testing.T) {
 	if destroy.calls != 1 || sweep.calls != 1 {
 		t.Fatalf("reap must destroy then verify; destroy=%d sweep=%d", destroy.calls, sweep.calls)
 	}
+	// The sweep verifies the project is GONE, and since ADR-0025 tofu
+	// cannot delete it. Without this, every clean reap reported a leak.
+	projects := rt.Deps.RunProject.(*fakeRunProject)
+	assert.Equal(t, 1, projects.deletes, "reap must delete the run project itself")
+	assert.Equal(t, reapProjectID, projects.deletedID)
 }
 
 // Destroying is not the same as proving the account is clean.
@@ -207,6 +222,49 @@ func TestInterruptGuardDestroysLiveResources(t *testing.T) {
 	if destroy.lastCtx != nil && destroy.lastCtx.Err() != nil {
 		t.Fatal("cleanup destroy must run on a fresh context — doing work after cancellation is the whole point")
 	}
+	// tofu cannot delete the project any more, and an interrupt is the
+	// one exit with no summary to report a kept project in.
+	projects := rt.Deps.RunProject.(*fakeRunProject)
+	assert.Equal(t, 1, projects.deletes, "the interrupt must delete the run project too")
+	assert.Contains(t, out.String(), "Run project "+reapProjectID+" deleted")
+}
+
+// Interrupted between creating the project and writing any state: there
+// is nothing for tofu to destroy, but a real project to delete. Before
+// ADR-0025 this shape did not exist -- the project came from the apply.
+func TestInterruptGuardDeletesTheProjectWhenNothingWasApplied(t *testing.T) {
+	sandboxCredsForTest(t)
+	destroy := &fakeSandboxDestroyHarness{}
+	rt, _ := reapRuntime(t, destroy, &fakeOrphanSweep{})
+	require.NoError(t, harness.WriteRunProjectMarker(rt.OutputDir(),
+		harness.RunProject{ID: reapProjectID, Name: harness.RunProjectNamePrefix + "interrupt"}))
+
+	out := &strings.Builder{}
+	_ = withSandboxInterruptGuard(guardCmd(out), rt, cancelledNotify(), func(context.Context) error { return nil })
+
+	assert.Zero(t, destroy.calls, "no state means nothing for tofu to do")
+	assert.Equal(t, 1, rt.Deps.RunProject.(*fakeRunProject).deletes)
+	assert.Contains(t, out.String(), "deleted")
+}
+
+// State on disk and no marker: the destroy cannot be scoped to the
+// project the apply used, and running it against the shared fallback
+// would not be the inverse of that apply. Refuse and hand over the
+// recovery command rather than destroy against a guess.
+func TestInterruptGuardRefusesToDestroyWithoutAMarker(t *testing.T) {
+	sandboxCredsForTest(t)
+	destroy := &fakeSandboxDestroyHarness{result: &harness.SandboxDestroyResult{Destroy: harness.StageResult{Stage: "destroy"}}}
+	rt, _ := reapRuntime(t, destroy, &fakeOrphanSweep{})
+	writeReapLiveState(t, rt.OutputDir(), reapProjectID)
+	require.NoError(t, os.Remove(filepath.Join(rt.OutputDir(), harness.RunProjectMarkerFilename)))
+
+	out := &strings.Builder{}
+	_ = withSandboxInterruptGuard(guardCmd(out), rt, cancelledNotify(), func(context.Context) error { return nil })
+
+	assert.Zero(t, destroy.calls, "a destroy scoped to the wrong project is not the inverse of the apply")
+	assert.Zero(t, rt.Deps.RunProject.(*fakeRunProject).deletes)
+	assert.Contains(t, out.String(), "CLEANUP FAILED")
+	assert.Contains(t, out.String(), "cannot tell which project this run owns")
 }
 
 // If cleanup itself fails the operator must be left knowing resources

@@ -46,7 +46,22 @@ func (f *fakePurge) Run(_ context.Context, projectID, secretKey string) ([]strin
 
 func retryRuntime(t *testing.T, destroy *sequencedDestroy, purge *fakePurge) *CommandRuntime {
 	t.Helper()
-	return &CommandRuntime{Deps: RuntimeDependencies{SandboxDestroy: destroy, AutoCreated: purge}}
+	return &CommandRuntime{Deps: RuntimeDependencies{
+		SandboxDestroy: destroy, AutoCreated: purge, RunProject: &fakeRunProject{},
+	}}
+}
+
+// purgeWorkDir is a workdir carrying the run-project marker the guard
+// now reads instead of the state file (ADR-0025).
+func purgeWorkDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := harness.WriteRunProjectMarker(dir, harness.RunProject{
+		ID: purgeProjectID, Name: harness.RunProjectNamePrefix + "purge",
+	}); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+	return dir
 }
 
 var destroyEnv = map[string]string{"SCW_SECRET_KEY": "secret"}
@@ -57,7 +72,7 @@ func TestDestroyRetriesAfterPurgingAutoCreatedResources(t *testing.T) {
 	destroy := &sequencedDestroy{errs: []error{errors.New("precondition failed: resource is still in use")}}
 	purge := &fakePurge{removed: []string{"security_group 142eef7b (Default security group) in fr-par-1"}}
 
-	result, purged, err := destroySandbox(context.Background(), retryRuntime(t, destroy, purge), "/work", destroyEnv, purgeProjectID)
+	result, purged, err := destroySandbox(context.Background(), retryRuntime(t, destroy, purge), purgeWorkDir(t), destroyEnv, purgeProjectID)
 
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -79,7 +94,7 @@ func TestDestroyDoesNotRetryWhenNothingWasPurged(t *testing.T) {
 	destroy := &sequencedDestroy{errs: []error{wantErr, nil}}
 	purge := &fakePurge{}
 
-	_, _, err := destroySandbox(context.Background(), retryRuntime(t, destroy, purge), "/work", destroyEnv, purgeProjectID)
+	_, _, err := destroySandbox(context.Background(), retryRuntime(t, destroy, purge), purgeWorkDir(t), destroyEnv, purgeProjectID)
 
 	require.ErrorIs(t, err, wantErr)
 	assert.Equal(t, 1, destroy.calls)
@@ -89,7 +104,7 @@ func TestDestroySkipsPurgeWhenItSucceeds(t *testing.T) {
 	destroy := &sequencedDestroy{}
 	purge := &fakePurge{}
 
-	_, _, err := destroySandbox(context.Background(), retryRuntime(t, destroy, purge), "/work", destroyEnv, purgeProjectID)
+	_, _, err := destroySandbox(context.Background(), retryRuntime(t, destroy, purge), purgeWorkDir(t), destroyEnv, purgeProjectID)
 
 	require.NoError(t, err)
 	assert.Equal(t, 1, destroy.calls)
@@ -103,7 +118,7 @@ func TestDestroyWithoutProjectIDDoesNotPurge(t *testing.T) {
 	destroy := &sequencedDestroy{errs: []error{wantErr, nil}}
 	purge := &fakePurge{}
 
-	_, _, err := destroySandbox(context.Background(), retryRuntime(t, destroy, purge), "/work", destroyEnv, "")
+	_, _, err := destroySandbox(context.Background(), retryRuntime(t, destroy, purge), purgeWorkDir(t), destroyEnv, "")
 
 	require.ErrorIs(t, err, wantErr)
 	assert.Zero(t, purge.calls)
@@ -116,7 +131,7 @@ func TestDestroyReportsSecondFailure(t *testing.T) {
 	destroy := &sequencedDestroy{errs: []error{errors.New("first"), second}}
 	purge := &fakePurge{removed: []string{"security_group 142eef7b"}}
 
-	_, _, err := destroySandbox(context.Background(), retryRuntime(t, destroy, purge), "/work", destroyEnv, purgeProjectID)
+	_, _, err := destroySandbox(context.Background(), retryRuntime(t, destroy, purge), purgeWorkDir(t), destroyEnv, purgeProjectID)
 
 	require.ErrorIs(t, err, second)
 	assert.Equal(t, 2, destroy.calls)

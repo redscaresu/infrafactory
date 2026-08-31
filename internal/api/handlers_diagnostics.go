@@ -11,13 +11,13 @@ import (
 )
 
 type diagnosticsResponse struct {
-	AgentType    string            `json:"agent_type"`
-	Ready        bool              `json:"ready"`
-	Summary      string            `json:"summary"`
-	Checks       []diagnosticCheck `json:"checks"`
-	SessionID    string            `json:"session_id,omitempty"`
-	StartedAt    string            `json:"started_at,omitempty"`
-	Limitations  []string          `json:"limitations,omitempty"`
+	AgentType   string            `json:"agent_type"`
+	Ready       bool              `json:"ready"`
+	Summary     string            `json:"summary"`
+	Checks      []diagnosticCheck `json:"checks"`
+	SessionID   string            `json:"session_id,omitempty"`
+	StartedAt   string            `json:"started_at,omitempty"`
+	Limitations []string          `json:"limitations,omitempty"`
 }
 
 type diagnosticCheck struct {

@@ -48,9 +48,18 @@ Nine review passes went into S165 and almost none found a wrong computation.
 Every real finding was an **operation ordered so a failure left something
 behind** — worth expecting rather than rediscovering.
 
-### THE BLOCKER — read before planning anything Scaleway + compute
+### THE BLOCKER — RESOLVED by the S166+S167 cutover (2026-08-31)
 
-**Layer 1 requires a resource Layer 3 cannot create.**
+**This is history now. Left in place because the shape of the mistake is worth
+keeping, not because it still holds.** The cutover landed: infrafactory creates
+the run's project through the Account API before the apply and hands it to the
+provider as the default, so a private NIC and its server land in the same
+project. Verified against real Scaleway on 2026-08-31 —
+[docs/status/s168-cutover-canary.md](status/s168-cutover-canary.md).
+
+What follows is the position as it stood before that.
+
+**Layer 1 required a resource Layer 3 could not create.**
 `policies/scaleway/vpc_required.rego` denies any `scaleway_instance_server`
 without a private NIC, and it *is* evaluated for Scaleway (`filterPolicyPathsByCloud`
 drops only *other* clouds). But `scaleway_instance_private_nic` has **no
@@ -58,10 +67,10 @@ drops only *other* clouds). But `scaleway_instance_private_nic` has **no
 project — the shared containment project — while its server is in the run's own,
 and the API refuses the mismatch.
 
-**No Scaleway compute scenario satisfies both gates today.** Not
-`web-live-paris`, not any other.
+**No Scaleway compute scenario satisfied both gates.** Not `web-live-paris`, not
+any other.
 
-The fix is planned and proven: **ADR-0025** + `docs/plans/run-owned-project-plan.md`
+The fix, now shipped: **ADR-0025** + `docs/plans/run-owned-project-plan.md`
 (S165–S168) — create the run's project via the Account API *before* the apply,
 pass it as `SCW_DEFAULT_PROJECT_ID`, and drop `scaleway_account_project` from the
 HCL. A hand-run experiment applied a private NIC cleanly this way and destroyed

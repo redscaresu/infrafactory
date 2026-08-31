@@ -1,9 +1,5 @@
-resource "scaleway_account_project" "main" {
-  name = "if-s146-lb"
-}
 
 resource "scaleway_instance_ip" "web" {
-  project_id = scaleway_account_project.main.id
 }
 
 # python3 is already on the Ubuntu image, so the backend is serving within
@@ -14,7 +10,6 @@ resource "scaleway_instance_server" "web" {
   type       = "DEV1-S"
   image      = "ubuntu_jammy"
   ip_id      = scaleway_instance_ip.web.id
-  project_id = scaleway_account_project.main.id
 
   user_data = {
     cloud-init = <<-EOT
@@ -26,14 +21,12 @@ resource "scaleway_instance_server" "web" {
 }
 
 resource "scaleway_lb_ip" "front" {
-  project_id = scaleway_account_project.main.id
 }
 
 resource "scaleway_lb" "main" {
   name       = "if-s146-lb"
   ip_ids     = [scaleway_lb_ip.front.id]
   type       = "LB-S"
-  project_id = scaleway_account_project.main.id
 }
 
 resource "scaleway_lb_backend" "web" {

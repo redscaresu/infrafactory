@@ -1,19 +1,36 @@
-# S166 design review pass 34 — one finding, acted on
+# Codex review pass 34 — S166+S167 cutover
 
-### [P2] Three S165 entries in STATUS contradicted each other
+`codex exec review --base main` on `s166-cutover` at `03601e3`.
 
-Recording the canary left the two earlier S165 entries in place, still saying
-"not yet exercised against real Scaleway" and "`create_run_project` not yet
-honoured" — both false by then. A reader could no longer tell whether the flag
-had been wired or exercised, in the file `AGENTS.md` makes part of the
-fresh-session source of truth.
+One finding, accepted.
 
-Fixed by **consolidating the three same-day entries into one accurate entry**
-rather than patching the stale sentences. Appending a correction above a wrong
-statement leaves both on the page; STATUS's own update policy already says
-historical detail belongs in `ARCHIVE.md`, not stacked in the current phase.
+## [P1] `run`'s auto-destroy built its environment without the run project
 
-Fourth finding this session about a document describing a state that had moved.
-The recurring cause is the same: I record the new fact and leave the sentence
-that framed the old one. Consolidating beats appending when the entries are from
-the same day and the same slice.
+The seventh path, and the same defect pass 33 fixed in `live teardown` and
+`reap`: `sandboxCommandEnv(runtime)` returns an env with no
+`SCW_DEFAULT_PROJECT_ID`, so the auto-destroy ran against the shared fallback
+while the apply had run in the run's own project.
+
+## Why it kept recurring, and what changed
+
+`internal/cli` already had an audit test for exactly this
+(`TestPipelineNeverBuildsSandboxEnvWithoutTheRunProject`). **It read
+`test_command.go` and nothing else**, so it could not see `run_command.go`,
+`live_teardown.go` or `reap_command.go` — the three files the defect actually
+landed in, one review pass each.
+
+Two changes, because the audit alone had already failed once:
+
+1. **The helper no longer returns an environment.** `sandboxCommandEnv` became
+   `assertSandboxCredentials(runtime) error` — it checks that Layer 3 can run at
+   all, before the project exists, and hands back nothing usable. Every caller
+   that needs an env must now name a project. The old name read like "the env
+   for a sandbox command", which is what invited three call sites to take it.
+   This is the fix; the compiler enforces it.
+2. **The audit reads every `internal/cli` source file** and now checks for the
+   one thing the type system cannot: a call site passing `""` explicitly. It
+   fails if it ever finds fewer than two files to read, so it cannot quietly
+   narrow again. Verified against synthetic drift — reintroducing the exact
+   defect fails it, naming the file and line.
+
+## Nothing declined this pass.
