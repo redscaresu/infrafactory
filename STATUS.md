@@ -26,6 +26,15 @@ Last updated: 2026-08-31
   `openclaw-prod` and its root volume from 2026-02-21. Full record:
   [docs/status/s168-cutover-canary.md](status/s168-cutover-canary.md).
 
+- 📝 **Pass 39: the cutover had not finished telling the generator (2026-08-31)** —
+  the Layer 3 prompt forbade `project_id` in one bullet and asked for it in the
+  next ("wire resources to the bootstrapped project"), which does not fail loudly
+  — it spends repair iterations. Worse, `pitfalls/scaleway.yaml` still told every
+  Scaleway generation that a private NIC **cannot be applied**, the exact conflict
+  this cutover ends and one the canary had already disproved. Both fixed, plus
+  three docs (`NEXT_SESSION.md`, `layer3-coverage.md` ×2, ADR-0024) that carried
+  the blocker as live fact and now record it as history.
+
 - 🔧 **S166+S167 cutover in progress (2026-08-31)** — the guard core first,
   wired next. `AssertRunProjectDeletable` replaces the state-derived cross-check
   with **two checks that must both pass**: the marker

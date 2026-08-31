@@ -215,14 +215,21 @@ func (g *ClaudeSeedGenerator) renderPhasePrompt(phase string, req Request, outpu
 	return RenderPromptFile(phase, templatePath, ctx)
 }
 
+// layer3Guidance is the prompt's project rule, and it says exactly one
+// thing about projects because ADR-0025 left exactly one thing to say.
+//
+// It used to carry a second bullet asking the model to wire resources to
+// "the bootstrapped project", from when the run declared a
+// scaleway_account_project of its own. Under the inverted shape gate that
+// is an instruction to emit the attribute the line above forbids -- and a
+// contradictory prompt does not fail loudly, it spends repair iterations.
 func layer3Guidance(enabled bool) string {
 	if !enabled {
 		return ""
 	}
 	return strings.TrimSpace(`Layer 3 real Scaleway deploy is enabled for this run.
 
-- Do NOT declare a ` + "`scaleway_account_project`" + ` resource, and do NOT set ` + "`project_id`" + ` on any resource. infrafactory creates the run's project before the apply and passes it to the provider, so every resource lands in it automatically. A declared project would be a second one that nothing destroys, and a project_id could place a resource outside the run entirely.
-- Ensure resources that require a project are wired to the bootstrapped project instead of assuming a pre-existing long-lived sandbox project.
+- Do NOT declare a ` + "`scaleway_account_project`" + ` resource, and do NOT set ` + "`project_id`" + ` on any resource. infrafactory creates the run's project before the apply and hands it to the provider as the default, so every resource lands in it automatically. There is no bootstrapped project to reference and no long-lived sandbox project to assume. A declared project would be a second one that nothing destroys, and a project_id could place a resource outside the run entirely.
 - Preserve useful outputs for externally reachable endpoints and service addresses so real connectivity, HTTP, and DNS probes can resolve the deployed infrastructure deterministically.`)
 }
 

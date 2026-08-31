@@ -1,5 +1,10 @@
 # Take the project out of the HCL (S165–S168)
 
+**Status: DONE.** S165 merged (#172); S166+S167 landed as one cutover and S168
+canaried it against real Scaleway on 2026-08-31 —
+[docs/status/s168-cutover-canary.md](../status/s168-cutover-canary.md). The
+driver below is resolved.
+
 Planned 2026-08-30. Driver: `policies/scaleway/vpc_required.rego` requires a
 private NIC on every `scaleway_instance_server`, and Layer 3 cannot create one —
 so **no Scaleway compute scenario satisfies both gates**. ADR-0025 records why
