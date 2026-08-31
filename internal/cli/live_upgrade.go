@@ -123,17 +123,32 @@ func runLiveUpgradeCommand(cmd *cobra.Command, args []string, runtime *CommandRu
 	// names -- so a disagreement is refused rather than resolved in the
 	// record's favour. `live teardown` learned this in pass 37; applying
 	// deserves at least the care destroying gets.
-	applyProjectID := d.ProjectID
-	if marker, markerErr := harness.ReadRunProjectMarker(d.WorkDir); markerErr == nil {
-		if marker.ProjectID != d.ProjectID {
-			return &CLIError{Op: "live upgrade", Code: errorCodeCommandFailed, Err: fmt.Errorf(
-				"refusing to upgrade %s: the record names project %s but %s names %s. "+
-					"Applying into a project this workdir does not own could change infrastructure "+
-					"belonging to another deployment",
-				d.ID, d.ProjectID, harness.RunProjectMarkerFilename, marker.ProjectID)}
-		}
-		applyProjectID = marker.ProjectID
+	// REQUIRED, not merely preferred. Falling back to the record when the
+	// marker cannot be read would leave the editable half deciding where
+	// real infrastructure gets applied, which is the hole the marker
+	// exists to close.
+	//
+	// `live teardown` does fall back, deliberately (pass 35): refusing
+	// there would strand a pre-cutover record whose resources are real,
+	// and destroy is bounded by the state in its own workdir anyway.
+	// Neither argument holds here. Applying is not bounded by anything
+	// already deployed, and an operator who cannot upgrade can still tear
+	// down and deploy again -- nothing is stranded by refusing.
+	marker, markerErr := harness.ReadRunProjectMarker(d.WorkDir)
+	if markerErr != nil {
+		return &CLIError{Op: "live upgrade", Code: errorCodeCommandFailed, Err: fmt.Errorf(
+			"refusing to upgrade %s: %v. Without it the only thing naming a project to apply into is the "+
+				"deployment record, which is editable -- tear down and deploy again rather than applying on that basis",
+			d.ID, markerErr)}
 	}
+	if marker.ProjectID != d.ProjectID {
+		return &CLIError{Op: "live upgrade", Code: errorCodeCommandFailed, Err: fmt.Errorf(
+			"refusing to upgrade %s: the record names project %s but %s names %s. "+
+				"Applying into a project this workdir does not own could change infrastructure "+
+				"belonging to another deployment",
+			d.ID, d.ProjectID, harness.RunProjectMarkerFilename, marker.ProjectID)}
+	}
+	applyProjectID := marker.ProjectID
 
 	sandboxEnv, err := sandboxCommandEnvForProject(runtime, applyProjectID)
 	if err != nil {

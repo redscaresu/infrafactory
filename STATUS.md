@@ -60,6 +60,18 @@ Last updated: 2026-08-31
   trivially passed, reporting a transition that was never attempted — a green
   built from checking that nothing changed.
 
+  Pass 54 finished it: the marker was *preferred*, not required, so an unreadable
+  one fell back to the editable record — a guard that degrades to the thing it was
+  guarding against. Required now, and the contrast with `live teardown` (which
+  does fall back, deliberately) is written down: refusing there strands real
+  pre-cutover resources and destroy is bounded by its own state; neither holds
+  when applying.
+
+  **The shape of this slice**: five passes, ten findings, and the through-line is
+  one fix applied incompletely rather than ten separate mistakes — "did anything
+  reach the cloud?" answered four times, "which project do we trust?" answered
+  twice. Both only converged once the answer became a single mechanism.
+
   - **The previous HCL is kept** in `.infrafactory-previous/`. That pair either
     side of one change is the diff `ExtractFixPitfall` needs and cannot
     reconstruct — it is what lets S156 produce prescriptive rules rather than the

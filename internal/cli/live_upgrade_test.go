@@ -59,6 +59,11 @@ func upgradeableDeployment(t *testing.T, store *livestore.FilesystemStore, id, t
 	workDir := filepath.Join(t.TempDir(), "wd")
 	require.NoError(t, os.MkdirAll(workDir, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(workDir, "providers.tf"), []byte(deployableProvidersTF), 0o644))
+	// Every post-cutover deployment has one: ensureRunProject writes it
+	// before the apply, and failing to is fatal there.
+	require.NoError(t, harness.WriteRunProjectMarker(workDir, harness.RunProject{
+		ID: "7c98d82e-ad6d-4f4c-99ea-d1886b0f38e5", Name: harness.RunProjectNamePrefix + "fixture",
+	}))
 	require.NoError(t, os.WriteFile(filepath.Join(workDir, "main.tf"),
 		[]byte("resource \"scaleway_block_volume\" \"v\" { size_in_gb = 1 }\n"), 0o644))
 
@@ -495,4 +500,25 @@ func TestUpgradeWithoutANewTagDoesNotClaimAVersionChange(t *testing.T) {
 
 	assert.Contains(t, out.String(), "unchanged rather than upgraded")
 	assert.NotContains(t, out.String(), "now confirms")
+}
+
+// Required, not merely preferred. Falling back to the record would leave
+// the editable half deciding where real infrastructure gets applied.
+//
+// `live teardown` does fall back, deliberately: refusing there strands a
+// pre-cutover record whose resources are real, and destroy is bounded by
+// its own state anyway. Neither argument holds for applying, and an
+// operator who cannot upgrade can still tear down and deploy again.
+func TestUpgradeRefusesWithoutAReadableMarker(t *testing.T) {
+	sandboxCredsForTest(t)
+	deploy := &fakeSandboxDeployHarness{}
+	rt, store := upgradeRuntime(t, &stagingVersionProbe{running: "nginx/1.27.4"}, deploy)
+	d := upgradeableDeployment(t, store, "dep-unmarked", "1.27")
+	require.NoError(t, os.Remove(filepath.Join(d.WorkDir, harness.RunProjectMarkerFilename)))
+
+	err := runUpgrade(t, rt, d.ID, &strings.Builder{}, "--from", newHCLDir(t), "--tag", "1.28")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "which is editable")
+	assert.Zero(t, deploy.calls)
 }

@@ -521,3 +521,10 @@ Verification distinguishes an upgrade from a no-op. Without a new tag the record
 still names the old version, so confirming it shows the service is unchanged
 rather than upgraded; reporting otherwise would be a green built from checking
 that nothing changed.
+
+The marker is **required** for an upgrade, not merely preferred: falling back to
+the record when it cannot be read leaves the editable half deciding where real
+infrastructure is applied. `live teardown` does fall back, deliberately — refusing
+there strands a pre-cutover record whose resources are real, and destroy is bounded
+by the state in its own workdir. Neither argument holds when applying, and an
+operator who cannot upgrade can still tear down and deploy again.
