@@ -100,7 +100,7 @@ version is a prerequisite for attribution**, not a nicety, and it lands in S155.
 
 | id | slice | produces |
 |---|---|---|
-| S154 | Soak observation — `live observe` probes every live deployment's health path on a schedule and records the result against its deployment record | the first post-apply signal; no learning yet |
+| S154 | **DONE (2026-08-31)** Soak observation — `live observe` probes every live deployment's health path and records the result against its deployment record | the first post-apply signal; no learning yet |
 | S155 | Upgrade / rollout — deploy v1→v2 against a running service, **and verify the running version matches the record** | change-time signals, attribution, and the diffs S156 needs |
 | S156 | Promotion + extraction — reproduced observations become `source: live` pitfalls through the existing extractors | the loop, closed |
 

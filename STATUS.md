@@ -4,6 +4,34 @@ Last updated: 2026-08-31
 
 ## Current phase
 
+- 🌱 **S154 SHIPPED — `live observe`, the first post-apply signal (2026-08-31)** —
+  probes every live deployment's health path once and records what it saw on that
+  deployment's record. **No learning yet, deliberately**: an observation is not a
+  lesson until it is reproduced, and that gate is S156's.
+
+  Three decisions worth keeping. **`unhealthy` and `unreachable` are separate
+  statuses** — "it told us it is broken" and "we got no answer" are different
+  facts, and a loop that collapses them learns the wrong lesson. **A probe that
+  could not run records nothing**, because a failure to observe is not an
+  observation of failure. And **port and health path are snapshotted at deploy
+  time**: the scenario file changes, while the record describes one deployment
+  that already happened.
+
+  Observations are a capped ring (`MaxObservations = 50`) — a permanently broken
+  deployment emits one per probe forever, and the plan's own risk section is about
+  that firehose. `live ls` grew a `HEALTH` column, because an observation nobody
+  can see is not a signal.
+
+  One probe per invocation, no retries: retrying would smear over exactly the
+  flapping this exists to notice. Scheduling is a cron, like `live reap` — a
+  daemon would be another thing to supervise for no signal cron does not give.
+
+  **Verified end to end against real Scaleway**, which also closed the gap the
+  cutover canary named: `deploy` and `live teardown` had never run for real.
+  deploy → HTTP 200 → observe healthy → observe again → teardown → account clean.
+  Only the healthy path ran for real; `unhealthy`/`unreachable` are unit-covered.
+  [docs/status/s168-cutover-canary.md](status/s168-cutover-canary.md).
+
 - ⚠️ **The `layer3-gate` cannot validate this change before it merges (2026-08-31)** —
   it builds its binary from **base**, deliberately (S144-T5a: otherwise a same-repo
   PR could rewrite the checks judging it), so it ran *main's* shape check — which

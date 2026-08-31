@@ -368,3 +368,33 @@ a `tofu` that ignores SIGINT — which would hang `deploy` before registration,
 recreating the unrecorded-live-resource path the signal guard exists to close.
 The kill fallback is now armed inside `Cancel`, so it is scoped to cancellation
 and a normal exit cannot trip it.
+
+## Amendment, 2026-08-31 (S154): the record carries what the service did
+
+`live observe` probes each live deployment's health path once and appends an
+`Observation` to its record. Four choices that this ADR should hold, because
+each one is a place a later slice could quietly get it wrong:
+
+- **`unhealthy` and `unreachable` are distinct statuses.** "It answered and said
+  it is broken" and "we got no answer" are different facts about the world.
+  S156's promotion gate groups observations by normalized detail, so collapsing
+  them here would put two different failures in one bucket and teach the wrong
+  lesson from both.
+- **A probe that could not run records nothing.** A malformed address or a
+  missing port is a failure to *observe*, not an observation of failure. It is
+  reported as a command failure and no `Observation` is written, so the
+  reproduction gate never counts it.
+- **Port and health path are snapshotted at deploy time**, alongside the address
+  they belong with. The scenario file changes; the record describes one
+  deployment that already happened, and an observation attributed to a health
+  path that deployment never had is worse than no observation.
+- **Observations are a bounded ring** (`MaxObservations`). A permanently broken
+  deployment emits one per probe for as long as it lives. Without a cap the
+  record becomes an append-only log that grows until the disk does — the
+  unbounded-signal risk the learning-loop plan names, arriving one slice earlier
+  than expected.
+
+One probe per invocation and no retries, deliberately: the existing
+`RealProbeHarness` retries because it runs seconds after an apply, whereas this
+runs out-of-band and a retry would smear over exactly the flapping it exists to
+notice. Scheduling stays the operator's cron, as `live reap`'s does.
