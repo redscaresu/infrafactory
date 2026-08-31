@@ -406,3 +406,13 @@ would restore `state: live` over a record that had just been released. The
 re-read narrows that window to the microseconds around one write. It does not
 close it — the store has no compare-and-swap — and this record should not be
 read as claiming otherwise.
+
+A live deployment that **cannot** be probed is a failure, not a skip. `observe`
+originally skipped a record carrying no address or no port, and exited zero —
+excused as an artefact of records written before S154. That was wrong about
+where the case comes from: `registerDeployment` captures the address
+best-effort, so an apply that succeeded without producing a load balancer
+address writes exactly that record today. Reporting it as a skip meant the
+command said "all is well" about a deployment it had just admitted it could not
+see. Only a **released** deployment skips, because only there is nothing left to
+observe.

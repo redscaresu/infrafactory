@@ -22,6 +22,13 @@ Last updated: 2026-08-31
   that firehose. `live ls` grew a `HEALTH` column, because an observation nobody
   can see is not a signal.
 
+  **Pass 44 corrected a false green.** A live deployment with no address was
+  *skipped*, exiting zero — and the case comes from today's deploy path, not from
+  legacy records: `registerDeployment` captures the address best-effort, so an
+  apply that produced no load balancer address leaves a live deployment nobody
+  can monitor. It fails now, naming which half is missing and the way out. A
+  released deployment still skips, because there is genuinely nothing to observe.
+
   It also **re-reads the record before writing**. `observe` is the command most
   likely to be on a cron, so it is the one most likely to be mid-probe when an
   operator runs `live teardown` — and a read-modify-write over a probe that took

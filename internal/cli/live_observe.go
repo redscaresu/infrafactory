@@ -109,17 +109,34 @@ func observeDeployment(
 	if d.State == livestore.StateReleased {
 		return skip("released")
 	}
+	// Skipped here and FAILED by the unreadable loop in the caller --
+	// List returns an undecodable record in both slices. The skip says
+	// this deployment was not probed; the failure says why, and it is
+	// what makes the command exit non-zero. Neither alone would do both.
 	if d.Undecodable {
-		return skip("record could not be decoded")
+		return skip("record could not be decoded; reported as a failure below")
 	}
 
 	// Not skipped for being expired. An expired deployment that is still
 	// answering is a fact worth recording -- it means the reaper has not
 	// run, which is exactly the kind of thing this command exists to
 	// surface.
-	if d.Address == "" || d.Port == 0 {
-		return skip("no address and port recorded, so there is nothing to probe. " +
-			"Deployments created before S154 carry neither")
+
+	// A LIVE deployment that cannot be probed is a failure, not a skip.
+	//
+	// Skipping read as "nothing to see here" and exited zero, which is
+	// the false green this project refuses everywhere else: the record
+	// says something is running and this command just said it could not
+	// tell. Two ways to get here and both matter -- `registerDeployment`
+	// captures the address best-effort, so an apply that never produced a
+	// load balancer address leaves a live deployment nobody can monitor;
+	// and a record written before S154 carries no port at all.
+	if missing := missingProbeTarget(d); missing != "" {
+		return fail("target", fmt.Sprintf(
+			"%s is live but cannot be observed: %s. Its project %s may be running and unmonitored -- "+
+				"tear it down with `infrafactory live teardown %s`, or if it is already gone clear the "+
+				"record with `infrafactory live forget %s`",
+			d.ID, missing, d.ProjectID, d.ID, d.ID))
 	}
 
 	if runtime.Deps.ServiceProbe == nil {
@@ -183,4 +200,20 @@ func observeDeployment(
 	}
 
 	return fail(string(observation.Status), fmt.Sprintf("%s: %s", d.ID, observation.Detail))
+}
+
+// missingProbeTarget names what the record lacks, or "" when it can be
+// probed. Named rather than inlined so the message says WHICH half is
+// missing: "no address" and "no port" have different causes and
+// different fixes.
+func missingProbeTarget(d livestore.Deployment) string {
+	switch {
+	case d.Address == "" && d.Port == 0:
+		return "it records neither an address nor a port"
+	case d.Address == "":
+		return "it records no address, so the apply never produced one to monitor"
+	case d.Port == 0:
+		return "it records no service port (records written before S154 carry none)"
+	}
+	return ""
 }

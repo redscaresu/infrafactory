@@ -150,8 +150,9 @@ func TestObserveRecordsNothingWhenTheProbeItselfFailed(t *testing.T) {
 }
 
 // Probing a released deployment's old address would attribute whatever
-// answers there now to a service that no longer exists.
-func TestObserveSkipsReleasedAndUnprobeableRecords(t *testing.T) {
+// answers there now to a service that no longer exists. That one is a
+// genuine skip: there is nothing left to observe.
+func TestObserveSkipsAReleasedDeployment(t *testing.T) {
 	probe := &fakeServiceProbe{result: harness.ServiceProbeResult{Reachable: true, Healthy: true}}
 	rt, store := observeRuntime(t, probe)
 
@@ -159,16 +160,47 @@ func TestObserveSkipsReleasedAndUnprobeableRecords(t *testing.T) {
 	released.State = livestore.StateReleased
 	require.NoError(t, store.Put(released))
 
-	// A record from before S154 carries no port.
-	legacy := observableDeployment(t, store, "dep-legacy")
-	legacy.Port = 0
-	require.NoError(t, store.Put(legacy))
-
 	var out strings.Builder
-	require.NoError(t, runObserve(t, rt, &out), "skipping is not failing")
+	require.NoError(t, runObserve(t, rt, &out), "skipping a released record is not failing")
 	assert.Zero(t, probe.calls)
 	assert.Contains(t, out.String(), "released")
-	assert.Contains(t, out.String(), "nothing to probe")
+}
+
+// A LIVE deployment that cannot be probed is a failure, not a skip. The
+// record says something is running and the command has just admitted it
+// cannot tell -- exiting zero there is the false green this project
+// refuses everywhere else.
+//
+// Both halves reach it from the CURRENT deploy path, not only from old
+// records: registerDeployment captures the address best-effort, so an
+// apply that never produced a load balancer address leaves a live
+// deployment nobody can monitor.
+func TestObserveFailsOnALiveDeploymentItCannotProbe(t *testing.T) {
+	cases := map[string]func(*livestore.Deployment){
+		"no address": func(d *livestore.Deployment) { d.Address = "" },
+		"no port":    func(d *livestore.Deployment) { d.Port = 0 },
+		"neither":    func(d *livestore.Deployment) { d.Address, d.Port = "", 0 },
+	}
+
+	for name, break_ := range cases {
+		t.Run(name, func(t *testing.T) {
+			probe := &fakeServiceProbe{}
+			rt, store := observeRuntime(t, probe)
+			d := observableDeployment(t, store, "dep-unmonitorable")
+			break_(&d)
+			require.NoError(t, store.Put(d))
+
+			var out strings.Builder
+			err := runObserve(t, rt, &out)
+
+			require.Error(t, err, "an unmonitorable live deployment must not exit zero")
+			assert.Zero(t, probe.calls)
+			assert.Contains(t, out.String(), "cannot be observed")
+			// The operator gets the project id and a way out, not just a verdict.
+			assert.Contains(t, out.String(), d.ProjectID)
+			assert.Contains(t, out.String(), "live teardown")
+		})
+	}
 }
 
 // An expired deployment that is still answering means the reaper has not
