@@ -4,6 +4,41 @@ Last updated: 2026-08-31
 
 ## Current phase
 
+- 📐 **S166 design written for review (2026-08-31)** —
+  `docs/plans/s166-teardown-guard-design.md`. Not implemented: this is the slice
+  that touches `AssertProjectDeletable`, the guard between an automated destroy
+  and real infrastructure.
+
+  Proposal: replace the state-derived cross-check with **two** checks, both
+  required — a run-owned marker written beside the state (identity: "this run
+  created *this* project", trust parity with tfstate) and an API-side provenance
+  check against S165's `if-run-` + description stamp (class: "this is an
+  infrafactory disposable project", **not locally forgeable**). Neither alone is
+  sufficient, and provenance alone would be a regression: it authorises deleting
+  *any* stamped project, so two parallel runs could delete each other's.
+
+  Four judgement calls are collected at the end for a human to disagree with, the
+  weakest being the migration disjunction. Over-strict is named as the preferred
+  failure mode, given that five of S165's nine review findings were cleanup that
+  did not run.
+
+- ✅ **S165 canary green against real Scaleway (2026-08-31)** — `block-paris`
+  with `create_run_project: true`, **14.2s**, every stage pass:
+
+      run_project:        created 33838f22-… (if-run-block-paris-20260831t083759z)
+      orphan_sweep:       project 7394b328-… destroyed; nothing left outside it
+      run_project_delete: deleted 33838f22-…
+
+  Account back to its 3 baseline projects; both ids return 404, verified against
+  the API rather than from the tool's report.
+
+  **It shows the documented two-project behaviour and cleans up both**: the
+  pre-created run project *and* the one the HCL still declares, because S167 has
+  not removed `scaleway_account_project` yet. So this proves S165's
+  create/pass/delete works and does not break the existing flow — **not** the
+  post-S167 shape, which cannot be exercised until the shape gate stops requiring
+  a `scaleway_account_project` binding.
+
 - ✅ **S165 complete, review CLEAN (2026-08-31)** — ADR-0025's run-owned project
   is implemented for `run`/`test`, converged after nine Codex passes (20–28).
   **Not yet exercised against real Scaleway** — that canary is S168 and is a
