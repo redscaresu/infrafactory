@@ -66,9 +66,10 @@ func destroySandbox(
 	if runtime.Deps.AutoCreated == nil {
 		return result, nil, err
 	}
-	if assertErr := harness.AssertProjectDeletable(
-		projectID, projectID, sandboxEnv["SCW_DEFAULT_ORGANIZATION_ID"],
-	); assertErr != nil {
+	// The marker plus API provenance, not the state file: under ADR-0025
+	// the project is not a Terraform resource, so the state never names
+	// it. Same guarantee, one forgeable half and one that is not.
+	if assertErr := assertRunProjectDeletable(ctx, runtime, workDir, projectID, sandboxEnv); assertErr != nil {
 		return result, nil, err
 	}
 	removed, purgeErr := runtime.Deps.AutoCreated.Run(ctx, projectID, secretKey)

@@ -156,8 +156,8 @@ func TestCommandOutputGoldenSnapshots(t *testing.T) {
 					deps: RuntimeDependencies{
 						Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
 							return &generator.GeneratedCode{Files: map[string][]byte{
-								"main.tf":    []byte("terraform {}\n"),
-								"project.tf": []byte("resource \"scaleway_account_project\" \"sandbox\" { name = \"test\" }\n"),
+								"main.tf":   []byte("terraform {}\n"),
+								"volume.tf": []byte("resource \"scaleway_block_volume\" \"sandbox\" { size_in_gb = 1 }\n"),
 							}}, nil
 						}),
 						Static: &fakeStaticHarness{result: &harness.StaticResult{

@@ -467,7 +467,7 @@ func TestGenerateCommandOpenRouterMissingAPIKeyReturnsDependencyUnavailable(t *t
 	}
 }
 
-func TestValidateLayer3ProjectResourceMissingReturnsError(t *testing.T) {
+func TestValidateLayer3ProjectResourceAbsentIsCorrect(t *testing.T) {
 	t.Parallel()
 
 	outputDir := filepath.Join(t.TempDir(), "output")
@@ -478,16 +478,14 @@ func TestValidateLayer3ProjectResourceMissingReturnsError(t *testing.T) {
 		t.Fatalf("write tf: %v", err)
 	}
 
-	err := validateLayer3ProjectResource(outputDir)
-	if err == nil {
-		t.Fatal("expected error when scaleway_account_project is missing")
-	}
-	if !strings.Contains(err.Error(), "scaleway_account_project") {
-		t.Fatalf("expected error mentioning scaleway_account_project, got: %v", err)
+	// ADR-0025: the run's project is created before the apply, so HCL
+	// that declares none is the correct shape.
+	if err := validateLayer3ProjectResource(outputDir); err != nil {
+		t.Fatalf("generated HCL with no project resource is correct now, got: %v", err)
 	}
 }
 
-func TestValidateLayer3ProjectResourcePresentNoError(t *testing.T) {
+func TestValidateLayer3ProjectResourcePresentIsRefused(t *testing.T) {
 	t.Parallel()
 
 	outputDir := filepath.Join(t.TempDir(), "output")
@@ -498,8 +496,14 @@ func TestValidateLayer3ProjectResourcePresentNoError(t *testing.T) {
 		t.Fatalf("write tf: %v", err)
 	}
 
-	if err := validateLayer3ProjectResource(outputDir); err != nil {
-		t.Fatalf("expected no error when scaleway_account_project present, got: %v", err)
+	// A declared project is now a SECOND project: the run already has its
+	// own, created before the apply, and nothing would destroy this one.
+	err := validateLayer3ProjectResource(outputDir)
+	if err == nil {
+		t.Fatal("a declared scaleway_account_project must be refused")
+	}
+	if !strings.Contains(err.Error(), "second project nothing destroys") {
+		t.Fatalf("the error should say why, got: %v", err)
 	}
 }
 

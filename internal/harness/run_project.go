@@ -148,6 +148,56 @@ func (p *ScalewayRunProject) Create(ctx context.Context, secretKey, organization
 	return RunProject{ID: decoded.ID, Name: decoded.Name}, nil
 }
 
+// Describe reports what the API says about a project, for the provenance
+// half of AssertRunProjectDeletable.
+//
+// A 404 is a positive answer -- the project is gone -- and returns
+// Exists false with no error. Any other failure is an error, because an
+// unreachable API must never be mistaken for "already deleted": that is
+// the same fail-closed rule the orphan sweep applies, and the reason a
+// teardown refuses rather than proceeds when it cannot check.
+func (p *ScalewayRunProject) Describe(ctx context.Context, secretKey, projectID string) (ProjectProvenance, error) {
+	if strings.TrimSpace(secretKey) == "" {
+		return ProjectProvenance{}, fmt.Errorf("describe run project: no secret key")
+	}
+	if strings.TrimSpace(projectID) == "" {
+		return ProjectProvenance{}, fmt.Errorf("describe run project: no project id")
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		p.apiBase+"/account/v3/projects/"+projectID, nil)
+	if err != nil {
+		return ProjectProvenance{}, fmt.Errorf("build describe-project request: %w", err)
+	}
+	req.Header.Set("X-Auth-Token", secretKey)
+
+	resp, err := p.doer(req)
+	if err != nil {
+		return ProjectProvenance{}, fmt.Errorf("describe project %s: %w", projectID, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return ProjectProvenance{Exists: false}, nil
+	}
+
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return ProjectProvenance{}, fmt.Errorf("describe project %s: http %d: %s",
+			projectID, resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	var decoded struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+	}
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		return ProjectProvenance{}, fmt.Errorf("decode describe-project response: %w", err)
+	}
+
+	return ProjectProvenance{Exists: true, Name: decoded.Name, Description: decoded.Description}, nil
+}
+
 // Delete removes the run's project once its resources are gone.
 //
 // `tofu destroy` no longer removes it -- the project is not a Terraform

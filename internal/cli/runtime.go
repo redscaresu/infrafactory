@@ -50,6 +50,7 @@ type AutoCreatedPurgeRunner interface {
 // longer be a Terraform resource.
 type RunProjectManager interface {
 	Create(ctx context.Context, secretKey, organizationID, scenario, stamp string) (harness.RunProject, error)
+	Describe(ctx context.Context, secretKey, projectID string) (harness.ProjectProvenance, error)
 	Delete(ctx context.Context, secretKey, projectID string) error
 }
 

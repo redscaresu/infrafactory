@@ -73,17 +73,6 @@ func runDeployCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime
 		return &CLIError{Op: "deploy", Code: errorCodeUsage, Err: err}
 	}
 
-	// ADR-0025's run-owned project is wired for `run`/`test`, where create
-	// and delete happen inside one invocation. `deploy` deliberately keeps
-	// its project, so deleting it belongs to `live teardown` -- a separate
-	// increment. Until that exists, honouring the flag here would create a
-	// project nothing ever deletes, which is the leak this arc closes.
-	if runtime.Config.Scaleway.CreateRunProject {
-		return &CLIError{Op: "deploy", Code: errorCodeCommandFailed, Err: errors.New(
-			"scaleway.create_run_project is not supported by `deploy` yet: the project would outlive the run " +
-				"and nothing would delete it. Use `infrafactory run` for now, or turn the flag off")}
-	}
-
 	if !runtime.Config.Validation.Layers.SandboxDeploy.Enabled {
 		return &CLIError{Op: "deploy", Code: errorCodeCommandFailed, Err: errors.New(
 			"deploy applies to real infrastructure and requires validation.layers.sandbox_deploy.enabled")}
@@ -101,8 +90,9 @@ func runDeployCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime
 		return &CLIError{Op: "deploy", Code: errorCodeCommandFailed, Err: fmt.Errorf("layer 3 hcl validation: %w", err)}
 	}
 
-	sandboxEnv, err := sandboxCommandEnv(runtime)
-	if err != nil {
+	// Credentials only, before the project exists. The env itself comes
+	// later, scoped to that project.
+	if err := assertSandboxCredentials(runtime); err != nil {
 		return &CLIError{Op: "deploy", Code: errorCodeCommandFailed, Err: err}
 	}
 
@@ -125,17 +115,65 @@ func runDeployCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime
 	_, _ = fmt.Fprintf(progress, "Deploying %s (%s) for %s\n", sc.Name, sc.Service.Ref(), ttl)
 	_, _ = fmt.Fprintf(progress, "  workdir: %s\n", workDir)
 
+	// The deployment gets its own project, exactly as a run does. It
+	// simply outlives the command: `live teardown` deletes it once the
+	// destroy and sweep prove the account clean.
+	//
+	// Created inside the interrupt guard, with the apply. The project is
+	// real from the moment it is created, so a Ctrl-C between creating it
+	// and starting the apply would otherwise leave one behind with no
+	// record and nothing coming for it -- the leak the record exists to
+	// prevent, in the window just before the record is written.
+	var (
+		runProjectID       string
+		runProjectStages   []StageSummary
+		runProjectFailures []FailureSummary
+		sandboxEnv         map[string]string
+	)
 	deployResult, deployErr := runDeployApply(cmd, ctx, signal.NotifyContext, func(applyCtx context.Context) (*harness.SandboxDeployResult, error) {
+		runProjectID, runProjectStages, runProjectFailures = ensureRunProject(applyCtx, runtime, sc.Name, workDir)
+		if len(runProjectFailures) > 0 {
+			return nil, errors.New("no run project")
+		}
+
+		// An env failure here leaves a live project, so it falls through
+		// to registration below rather than returning early -- the record
+		// is what brings teardown back to it.
+		var envErr error
+		if sandboxEnv, envErr = sandboxCommandEnvForProject(runtime, runProjectID); envErr != nil {
+			return nil, envErr
+		}
+
 		return runtime.Deps.SandboxDeploy.Run(applyCtx, workDir, sandboxEnv)
 	})
-	stages, failures := appendSandboxDeployResult(nil, nil, deployResult, deployErr)
+
+	stages := append([]StageSummary{}, runProjectStages...)
+	failures := append([]FailureSummary{}, runProjectFailures...)
+
+	// ensureRunProject's failures carry the leaked project id and how to
+	// remove it by hand. A generic "nothing was applied" here would throw
+	// away the one handle the operator has, on the single path where they
+	// most need it. Nothing is registered: ensureRunProject either
+	// deleted the project again or said plainly that it could not.
+	if len(runProjectFailures) > 0 {
+		if writeErr := writeCommandOutput(cmd, OutputResult{
+			Command: "deploy", Scenario: sc.Name, Status: CommandStatusFailed,
+			Stages: stages, Failures: failures,
+		}); writeErr != nil {
+			return writeErr
+		}
+		return &CLIError{Op: "deploy", Code: errorCodeCommandFailed, Err: errors.New(
+			"could not create the deployment's project, so nothing was applied")}
+	}
+
+	stages, failures = appendSandboxDeployResult(stages, failures, deployResult, deployErr)
 
 	// Registered from whatever the state shows, whether or not the apply
 	// succeeded. A half-finished apply leaves real resources behind, and
 	// the record is the only thing that will bring the reaper back to
 	// them -- so it is written on the failure path too, not just the
 	// happy one.
-	registerStages, registerFailures := registerDeployment(store, sc, deploymentID, workDir, ttl)
+	registerStages, registerFailures := registerDeployment(store, sc, deploymentID, workDir, runProjectID, ttl)
 	stages = append(stages, registerStages...)
 	failures = append(failures, registerFailures...)
 	recorded := len(registerFailures) == 0 && len(registerStages) > 0 && registerStages[0].Status == StageStatusPass
@@ -220,7 +258,7 @@ func runDeployApply(
 
 	if interrupted {
 		_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
-			"\nInterrupted during apply. Recording whatever was created so `infrafactory live reap` can destroy it.\n")
+			"\nInterrupted. Recording whatever was created — the project, and anything the apply got to — so `infrafactory live teardown` can destroy it.\n")
 	}
 
 	return result, err
@@ -232,27 +270,23 @@ func runDeployApply(
 func registerDeployment(
 	store *livestore.FilesystemStore,
 	sc scenario.Scenario,
-	deploymentID, workDir string,
+	deploymentID, workDir, runProjectID string,
 	ttl time.Duration,
 ) ([]StageSummary, []FailureSummary) {
-	statePath := filepath.Join(workDir, harness.LiveStateFilename)
-	if _, err := os.Stat(statePath); errors.Is(err, os.ErrNotExist) {
-		// No state at all means the apply never created anything. There
-		// is nothing to record and nothing to reap.
-		return []StageSummary{{
-			Layer: "live", Stage: "register", Status: StageStatusSkip,
-			Detail: "no live state written, so nothing was created",
-		}}, nil
-	}
+	// Deliberately NOT gated on live state existing. Since ADR-0025 the
+	// project is created before the apply, so an apply that fails at
+	// preflight, init or plan leaves a real project behind with no state
+	// to show for it. Skipping registration there would hide it from
+	// `live teardown` entirely -- the leak this record exists to prevent.
 
-	projectID, err := harness.RunProjectIDFromState(workDir)
-	if err != nil || projectID == "" {
+	// The run's own project, not one derived from state: under ADR-0025
+	// the project is not a Terraform resource, so the state never names
+	// it.
+	projectID := runProjectID
+	if strings.TrimSpace(projectID) == "" {
 		detail := fmt.Sprintf(
-			"live state in %s names no %s, so a deployment that may be running cannot be recorded or reaped. Destroy it by hand",
-			workDir, harness.ProjectResourceType)
-		if err != nil {
-			detail = fmt.Sprintf("read live state in %s: %v", workDir, err)
-		}
+			"no run project was recorded for %s, so a deployment that may be running cannot be reaped. Destroy it by hand",
+			workDir)
 		return []StageSummary{{Layer: "live", Stage: "register", Status: StageStatusFail}},
 			[]FailureSummary{{
 				Layer: "live", Stage: "register", Check: "project_id",

@@ -15,10 +15,16 @@
 > *other* clouds, so all five `policies/scaleway/*.rego` run against a Scaleway
 > plan.
 >
-> The real position: **Layer 1 requires a private NIC on every instance server and
-> Layer 3 cannot apply one.** The gates contradict each other. Every "waits on
-> IPAM" line below should be read as "blocked on private networking, unresolvably
-> so today".
+> The real position **at the time**: Layer 1 required a private NIC on every
+> instance server and Layer 3 could not apply one. The gates contradicted each
+> other.
+>
+> **RESOLVED 2026-08-31 by the S166+S167 cutover (ADR-0025).** The run's project
+> is created through the Account API before the apply and handed to the provider
+> as the default, so the NIC lands in the same project as its server. Verified
+> against real Scaleway: [docs/status/s168-cutover-canary.md](status/s168-cutover-canary.md).
+> The "waits on IPAM" lines below are stale in their *reason*; whether each
+> scenario is runnable is a costing question again, not a blocked one.
 
 
 Audit date: 2026-08-24. **Refreshed** after `scaleway_instance_ip` and
@@ -251,11 +257,15 @@ only", was also wrong and is retracted.** It is absent from
 against a Scaleway plan. A generation run the same day failed on exactly that
 rule (`scaleway_instance_server.web is not attached to a private network`).
 
-So the real position is a **contradiction between the two gates**, not a missing
-permission: **Layer 1 requires a private NIC on every instance server, and Layer 3
-cannot apply one.** No Scaleway compute scenario satisfies both today. That is
-what actually blocks `web-live-paris`, and it blocks every other compute scenario
-equally. Ungated is
+So the real position was a **contradiction between the two gates**, not a missing
+permission: Layer 1 required a private NIC on every instance server, and Layer 3
+could not apply one. No Scaleway compute scenario satisfied both, which is what
+actually blocked `web-live-paris` and every other compute scenario equally.
+
+**Resolved 2026-08-31 by the S166+S167 cutover (ADR-0025)**: the run's project is
+created before the apply and is the provider default, so the NIC lands with its
+server. The counts below are from before that and are stale in their *reason* —
+what remains for each compute scenario is cost, not a contradiction. Ungated is
 3 of 18, not 4; have-run is 3 of 18. The `runnable, unrun` bucket now has no
 members and is kept because the state is real and will recur.
 

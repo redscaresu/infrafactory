@@ -257,7 +257,8 @@ restored.
 **What is actually true is worse than either diagnosis: the two gates
 contradict each other.** Layer 1 requires a private NIC on every
 `scaleway_instance_server`; Layer 3 cannot apply one while the run creates its own
-project. **No Scaleway compute scenario satisfies both today** — not
+project **as a Terraform resource**. (Resolved 2026-08-31 by ADR-0025's cutover,
+which stops it being one; this paragraph records the position as it stood.) **No Scaleway compute scenario satisfies both today** — not
 `web-live-paris`, not any other. This is a design question, not a permission or a
 pitfall, and it is the real blocker on the live-services arc reaching real
 infrastructure with generated HCL.

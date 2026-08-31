@@ -161,4 +161,3 @@ func TestScenarioExecutableChecksUsesLoadedCriteria(t *testing.T) {
 		t.Fatalf("expected %d specs, got %d", len(sc.AcceptanceCriteria), len(specs))
 	}
 }
-

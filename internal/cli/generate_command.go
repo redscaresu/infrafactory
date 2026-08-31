@@ -838,11 +838,22 @@ func validateLayer3ProjectResource(outputDir string) error {
 		if err != nil {
 			continue
 		}
+		// Inverted by ADR-0025: the run's project is created before the
+		// apply and handed to the provider, so generated HCL must NOT
+		// declare one. A declared project would be a second project that
+		// nothing tracks, no marker names and no teardown deletes.
+		//
+		// A substring scan is enough here because this is the generation
+		// path, where the HCL came from our own prompt. The untrusted
+		// path parses instead -- `resource /*x*/ "..."` is valid HCL a
+		// regex does not match, which is what layer3PreflightHCL is for.
 		if strings.Contains(string(content), `resource "scaleway_account_project"`) {
-			return nil
+			return fmt.Errorf(
+				"generated HCL declares a scaleway_account_project in %s; under ADR-0025 the run's project is created before the apply, so a declared one would be a second project nothing destroys",
+				entry.Name())
 		}
 	}
-	return fmt.Errorf("layer 3 requires a scaleway_account_project resource in the generated HCL for self-managed project lifecycle")
+	return nil
 }
 
 // genesysFlowResourceRe matches a `resource "genesyscloud_flow" "<name>"`
