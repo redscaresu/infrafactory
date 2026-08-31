@@ -106,6 +106,28 @@ type S3Config struct {
 
 type ScalewayConfig struct {
 	CredentialsSource string `yaml:"credentials_source"`
+	// CreateRunProject switches Layer 3 from creating the run's project
+	// in the generated HCL to creating it through the Account API before
+	// tofu runs, then passing it as SCW_DEFAULT_PROJECT_ID (ADR-0025).
+	//
+	// It exists because scaleway_instance_private_nic has no project_id
+	// attribute, so it is created in the provider's DEFAULT project while
+	// its server is in the run's own -- and the API refuses the mismatch.
+	// Since vpc_required.rego denies any instance server without a NIC,
+	// Layer 1 requires a resource Layer 3 cannot create, and no Scaleway
+	// compute scenario satisfies both gates.
+	//
+	// NOT YET HONOURED by the runtime, and deliberately absent from
+	// infrafactory.yaml until it is: an operator-visible switch that
+	// silently does nothing is worse than no switch. The env plumbing
+	// lands in the next S165 increment; TestCreateRunProjectIsNotYetWired
+	// fails once it does, so this comment cannot outlive its truth.
+	//
+	// Defaults to false. Both paths stay supported until the gate fixtures
+	// and prompts move over (S167) and a real-cloud canary passes (S168);
+	// the gate applies fixture HCL that declares scaleway_account_project
+	// today, and the gate is the artifact the talk rests on.
+	CreateRunProject bool `yaml:"create_run_project"`
 	// Region and Zone are the real-Scaleway defaults for Layer 3. Layer 2
 	// never needs them (mockway ignores placement), but the real provider
 	// does, and leaving them unset makes the target location depend on

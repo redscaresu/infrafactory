@@ -331,3 +331,30 @@ func TestLoadMalformedConfigReturnsDecodeError(t *testing.T) {
 		t.Fatalf("expected decode error prefix, got %v", err)
 	}
 }
+
+// ADR-0025's switch must default OFF: the gate applies fixture HCL that
+// declares scaleway_account_project, and flipping the model by accident
+// would break the artifact the talk rests on.
+func TestCreateRunProjectDefaultsOff(t *testing.T) {
+	cfg, err := Load("../../infrafactory.yaml")
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if cfg.Scaleway.CreateRunProject {
+		t.Fatal("scaleway.create_run_project must stay false until S167/S168")
+	}
+}
+
+// The field is not yet read by the runtime, so it is deliberately absent
+// from infrafactory.yaml -- an operator-visible switch that silently does
+// nothing is worse than no switch. This test fails the moment the flag is
+// wired, which is the signal to document it and delete this test.
+func TestCreateRunProjectIsNotYetWired(t *testing.T) {
+	raw, err := os.ReadFile("../../infrafactory.yaml")
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	if strings.Contains(string(raw), "create_run_project") {
+		t.Fatal("create_run_project is advertised in infrafactory.yaml; if it is now honoured, delete this test and document the flag")
+	}
+}

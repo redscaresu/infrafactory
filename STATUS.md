@@ -4,6 +4,19 @@ Last updated: 2026-08-31
 
 ## Current phase
 
+- 🔧 **S165 in progress (2026-08-31)** — ADR-0025's run-owned project.
+  `harness.ScalewayRunProject` creates and deletes the disposable project through
+  the Account API, stamping it `if-run-*` plus a fixed description so S166 has a
+  provenance marker to verify. `scaleway.create_run_project` exists but is **not
+  yet honoured**, and is deliberately absent from `infrafactory.yaml` until it is
+  — an operator-visible switch that silently does nothing is worse than no switch,
+  and `TestCreateRunProjectIsNotYetWired` fails the moment that stops being true.
+
+  Next increment: the env plumbing, so the flag actually routes
+  `SCW_DEFAULT_PROJECT_ID` at the run's own project. **S166 is deliberately not
+  in scope** — it replaces `AssertProjectDeletable`'s state-derived cross-check,
+  which is the guard between teardown and real infrastructure.
+
 - 🧪 **ADR-0025 + S165–S168 planned (2026-08-30)** — take the run's project out
   of the generated HCL. `scaleway_instance_private_nic` has **no `project_id`
   attribute** (verified against provider 2.81.0), so it is created in the
