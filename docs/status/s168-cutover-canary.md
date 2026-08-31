@@ -78,3 +78,43 @@ The account is identical to how it started.
 - One fixture with compute, one without. `lb-serving-paris` has no private NIC,
   so the NIC containment ADR-0025 was written for is proven by the apply
   succeeding with the run's project as provider default, not by this fixture.
+
+## The gate cannot validate this change before it merges
+
+Running the `layer3-gate` label on PR #177 fails at `sandbox_deploy/allowlist`
+in 0s, before any API call. **That is structural, not a defect in the change.**
+
+The gate builds its binary from the **base** branch, deliberately — S144-T5a:
+`pull_request_target` loads the workflow from base, and the binary must come
+from base too, or a same-repo PR could rewrite the checks that are supposed to
+be judging it. So the gate ran *main's* shape check, which requires exactly one
+`scaleway_account_project`, against fixtures the cutover strips it from.
+
+Any change that **inverts a check living in the trusted binary** is unverifiable
+by its own gate until it is merged. The alternatives are all worse: building the
+binary from the PR is the exfiltration path the gate exists to close, and a
+compatibility window is the dual model this arc dropped. The honest handling is
+to know it, say it, and re-run the gate on the next PR after merge.
+
+Nothing leaked. The account was checked directly afterwards: three projects,
+all pre-existing.
+
+## What the run did catch: the gate's own cleanup read the wrong signal
+
+The reap step keyed entirely off `terraform-live.tfstate`, and on a missing one
+reported:
+
+> tofu may have created resources before it was killed. Nothing records them, so
+> reap cannot run. Check the Scaleway account by hand.
+
+Post-cutover that is wrong in the dangerous direction. The project is created
+before tofu starts and the marker is written at the same moment, so a run can
+own a real project and never write state — an apply failing at preflight, init
+or plan does exactly that. **The marker exists if and only if a project does**,
+which makes it both the safer signal and the more precise one: it turns "check
+the account by hand" into a reap that knows what to remove.
+
+The reap step now checks the marker first. This is the same defect the codex
+loop found seven times inside the Go code — a path that had been depending on
+`tofu destroy` owning the project without saying so — and it survived fourteen
+review passes because it lives in YAML.
