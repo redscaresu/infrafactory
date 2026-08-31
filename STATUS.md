@@ -28,6 +28,11 @@ Last updated: 2026-08-31
   refuses the flag outright — it keeps its project by design, so deletion belongs
   to `live teardown`.
 
+  Codex pass 25 caught the third cleanup-placement bug: with `--no-destroy` or
+  destruction disabled, a failed apply left the project behind. The cleanup now
+  sits **outside every branch** — created in one place, released in one place.
+  Placing it inside a branch is what kept producing the bug.
+
   Codex pass 23 caught the asymmetry that mattered most: the apply used the
   run-owned project while the **destroy** rebuilt its environment from the shared
   fallback, so resources with no `project_id` of their own — the whole motivating

@@ -177,3 +177,13 @@ projects — the pre-created one and the one its HCL still declares. Nothing lea
 the pre-created one is empty and deleted by the cleanup, and the declared one is
 destroyed and swept as always. But it is waste, and the flag is mechanically
 complete rather than coherent until S167.
+
+## Amendment, 2026-08-31 (S165, pass 25): released in one place
+
+The run project's cleanup was written three times and skipped by some exit path
+twice: first on the happy path only, then inside the destroy branch, which
+`--no-destroy` and disabled destruction both walk past.
+
+It now sits outside every branch, immediately before the result is assembled.
+**A resource created in one place is released in one place** — every attempt to
+attach the release to a particular outcome produced a path that escaped it.

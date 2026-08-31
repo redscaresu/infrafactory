@@ -697,31 +697,6 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 			}
 		}
 		// One cleanup for every exit from the sandbox block, not just the
-		// happy one. An apply that fails at preflight, init or plan
-		// writes no state, so the destroy branch above never runs -- and
-		// the project it created would be left behind on the very runs
-		// most likely to be repeated. Empty projects are free and still
-		// accumulate.
-		//
-		// Deleted only when nothing of the run can still exist: either
-		// the account was proven clean, or no state was ever written so
-		// there was nothing to destroy. Otherwise it is kept and said
-		// so, because the project id is the handle to whatever remains.
-		if runProjectID != "" {
-			switch {
-			case len(failures) == 0, !liveStateMayHoldResources(outputDir):
-				deleteStages, deleteFailures := releaseRunProject(ctx, runtime, runProjectID)
-				stages = append(stages, deleteStages...)
-				failures = append(failures, deleteFailures...)
-			default:
-				stages = append(stages, StageSummary{
-					Layer: "sandbox_deploy", Stage: "run_project_delete", Status: StageStatusSkip,
-					Detail: fmt.Sprintf(
-						"kept %s: this run may still have resources, and the project is the handle to them. "+
-							"Destroy them, then delete it by hand", runProjectID),
-				})
-			}
-		}
 	} else if deployErr == nil {
 		criteriaStages, criteriaFailures := evaluateSupportedCriteria(ctx, sc, runtime, deployResult)
 		stages = append(stages, criteriaStages...)
@@ -731,6 +706,32 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 			detail = "skipped by --no-destroy"
 		}
 		stages = append(stages, StageSummary{Layer: "destruction", Stage: "disabled", Status: StageStatusSkip, Detail: detail})
+	}
+
+	// Outside every branch on purpose. Three separate placements of this
+	// cleanup were each skipped by some exit path -- the happy-path-only
+	// one, then the destroy-branch one, which `--no-destroy` and disabled
+	// destruction both walk past. The project is created in one place, so
+	// it is released in one place, after all of them.
+	//
+	// Deleted only when nothing of the run can still exist: the account
+	// was proven clean, or no state was ever written so nothing was
+	// created. Otherwise it is kept and said so, because the project id
+	// is the handle to whatever remains.
+	if runProjectID != "" {
+		switch {
+		case len(failures) == 0, !liveStateMayHoldResources(outputDir):
+			deleteStages, deleteFailures := releaseRunProject(ctx, runtime, runProjectID)
+			stages = append(stages, deleteStages...)
+			failures = append(failures, deleteFailures...)
+		default:
+			stages = append(stages, StageSummary{
+				Layer: "sandbox_deploy", Stage: "run_project_delete", Status: StageStatusSkip,
+				Detail: fmt.Sprintf(
+					"kept %s: this run may still have resources, and the project is the handle to them. "+
+						"Destroy them, then delete it by hand", runProjectID),
+			})
+		}
 	}
 
 	status := CommandStatusSuccess
