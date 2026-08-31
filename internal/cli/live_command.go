@@ -47,6 +47,13 @@ func newLiveCmd(cfg *rootConfig) *cobra.Command {
 		RunE:  cfg.withRuntime("live forget", runLiveForgetCommand),
 	})
 
+	cmd.AddCommand(&cobra.Command{
+		Use:   "observe",
+		Short: "Probe every live deployment's health path once and record what it saw",
+		Args:  cobra.NoArgs,
+		RunE:  cfg.withRuntime("live observe", runLiveObserveCommand),
+	})
+
 	reap := &cobra.Command{
 		Use:   "reap",
 		Short: "Destroy every live deployment whose TTL has run out",
@@ -104,14 +111,15 @@ func renderLiveTable(out io.Writer, deployments []livestore.Deployment, unreadab
 
 	if len(deployments) > 0 {
 		w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "ID\tSCENARIO\tIMAGE\tSTATE\tTTL\tPROJECT\tADDRESS")
+		fmt.Fprintln(w, "ID\tSCENARIO\tIMAGE\tSTATE\tHEALTH\tTTL\tPROJECT\tADDRESS")
 		for _, d := range deployments {
 			state := string(d.State)
 			if d.Undecodable {
 				state = "UNREADABLE"
 			}
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-				d.ID, orDash(d.Scenario), imageRef(d), state, ttlLabel(d, now), orDash(d.ProjectID), orDash(d.Address))
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				d.ID, orDash(d.Scenario), imageRef(d), state, healthLabel(d),
+				ttlLabel(d, now), orDash(d.ProjectID), orDash(d.Address))
 		}
 		if err := w.Flush(); err != nil {
 			return err
@@ -126,6 +134,19 @@ func renderLiveTable(out io.Writer, deployments []livestore.Deployment, unreadab
 	}
 
 	return nil
+}
+
+// healthLabel is the last thing `live observe` saw.
+//
+// Surfaced here because an observation nobody can see is not a signal:
+// without this the only way to learn a live service is failing is to
+// read the JSON record by hand, and nobody does that until after they
+// already know.
+func healthLabel(d livestore.Deployment) string {
+	if len(d.Observations) == 0 {
+		return "unobserved"
+	}
+	return string(d.Observations[len(d.Observations)-1].Status)
 }
 
 // liveListJSON is a listing, not a staged run, so it does not pretend to

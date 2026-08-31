@@ -231,9 +231,17 @@ nitpicks; act only on the former.
 Pushing back is a real option — record the finding and the rationale rather
 than implementing it to make the reviewer quiet.
 
-**Convergence**: **two consecutive passes with no substantive findings.** A
-pass containing a substantive finding resets the counter, so a fix is always
-followed by at least two more passes. Only then may the PR merge.
+**Convergence**: **one pass with no substantive findings.** A pass containing a
+substantive finding resets it, so a fix is always followed by at least one more
+pass. Only then may the PR merge.
+
+Reduced from two consecutive passes on 2026-08-31, deliberately and for cost:
+the cutover arc spent fourteen passes converging, and codex hit its usage limit
+three times in one afternoon. The trade is real and worth stating rather than
+pretending otherwise — the second pass is what caught the pass-41 regression,
+where a fix introduced a new defect. The mitigation is to treat *your own* fix
+as the thing most likely to be wrong: after acting on a finding, re-read the
+change against the defect class it belongs to before calling the pass.
 
 **Record every loop** in `docs/review-passes/passN.md`: each finding, its
 severity, and accepted-vs-declined with the reasoning. Future readers need to

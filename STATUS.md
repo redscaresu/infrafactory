@@ -4,6 +4,74 @@ Last updated: 2026-08-31
 
 ## Current phase
 
+- 🌱 **S154 SHIPPED — `live observe`, the first post-apply signal (2026-08-31)** —
+  probes every live deployment's health path once and records what it saw on that
+  deployment's record. **No learning yet, deliberately**: an observation is not a
+  lesson until it is reproduced, and that gate is S156's.
+
+  Three decisions worth keeping. **`unhealthy` and `unreachable` are separate
+  statuses** — "it told us it is broken" and "we got no answer" are different
+  facts, and a loop that collapses them learns the wrong lesson. **A probe that
+  could not run records nothing**, because a failure to observe is not an
+  observation of failure. And **port and health path are snapshotted at deploy
+  time**: the scenario file changes, while the record describes one deployment
+  that already happened.
+
+  Observations are a capped ring (`MaxObservations = 50`) — a permanently broken
+  deployment emits one per probe forever, and the plan's own risk section is about
+  that firehose. `live ls` grew a `HEALTH` column, because an observation nobody
+  can see is not a signal.
+
+  **Converged in three codex passes (44–46)**, the first slice under the
+  one-clean-pass rule. Both findings were in code written for this PR, and pass
+  45's was in the fix shipped alongside pass 44's — caught only because the rule
+  change came with an obligation to re-read your own fix against its defect class.
+  Both were also **YAML-resident**: the gate workflow has no type system and no
+  test, and is the only place that both reads these invariants and can leak real
+  infrastructure.
+
+  **Pass 44 corrected a false green.** A live deployment with no address was
+  *skipped*, exiting zero — and the case comes from today's deploy path, not from
+  legacy records: `registerDeployment` captures the address best-effort, so an
+  apply that produced no load balancer address leaves a live deployment nobody
+  can monitor. It fails now, naming which half is missing and the way out. A
+  released deployment still skips, because there is genuinely nothing to observe.
+
+  It also **re-reads the record before writing**. `observe` is the command most
+  likely to be on a cron, so it is the one most likely to be mid-probe when an
+  operator runs `live teardown` — and a read-modify-write over a probe that took
+  seconds would put `state: live` back over a record teardown had just released.
+  This narrows the window rather than closing it; the store has no
+  compare-and-swap, and claiming more than narrowing would be wrong.
+
+  One probe per invocation, no retries: retrying would smear over exactly the
+  flapping this exists to notice. Scheduling is a cron, like `live reap` — a
+  daemon would be another thing to supervise for no signal cron does not give.
+
+  **Verified end to end against real Scaleway**, which also closed the gap the
+  cutover canary named: `deploy` and `live teardown` had never run for real.
+  deploy → HTTP 200 → observe healthy → observe again → teardown → account clean.
+  Only the healthy path ran for real; `unhealthy`/`unreachable` are unit-covered.
+  [docs/status/s168-cutover-canary.md](status/s168-cutover-canary.md).
+
+- ⚠️ **The `layer3-gate` cannot validate this change before it merges (2026-08-31)** —
+  it builds its binary from **base**, deliberately (S144-T5a: otherwise a same-repo
+  PR could rewrite the checks judging it), so it ran *main's* shape check — which
+  requires a `scaleway_account_project` — against fixtures the cutover strips it
+  from. Fails at `allowlist` in 0s, before any API call; nothing leaked.
+  **Any change that inverts a check in the trusted binary is unverifiable by its
+  own gate until merged.** Re-run the gate on the next PR after merge.
+
+  The run did catch one real thing: **the gate's reap step keyed off the state
+  file**, and reported "nothing records them, so reap cannot run" when it was
+  missing. Post-cutover a run can own a project and never write state, and the
+  marker says a project was created — so the step consults it when there is no
+  state, and only there: nothing removes the marker after a successful delete, so
+  checking it first made every green run pay for a redundant reap (caught by pass
+  45, confirmed on disk). The
+  same defect the codex loop found seven times in Go, surviving fourteen passes
+  because it lives in YAML.
+
 - ✅ **S168 canary: the cutover verified against real Scaleway (2026-08-31)** —
   three applies from `s166-cutover`, ~€0.005. `block-paris` and `lb-serving-paris`
   both pass with **no `scaleway_account_project` and no `project_id` anywhere in

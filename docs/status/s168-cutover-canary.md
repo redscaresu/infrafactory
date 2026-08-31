@@ -78,3 +78,92 @@ The account is identical to how it started.
 - One fixture with compute, one without. `lb-serving-paris` has no private NIC,
   so the NIC containment ADR-0025 was written for is proven by the apply
   succeeding with the run's project as provider default, not by this fixture.
+
+## The gate cannot validate this change before it merges
+
+Running the `layer3-gate` label on PR #177 fails at `sandbox_deploy/allowlist`
+in 0s, before any API call. **That is structural, not a defect in the change.**
+
+The gate builds its binary from the **base** branch, deliberately — S144-T5a:
+`pull_request_target` loads the workflow from base, and the binary must come
+from base too, or a same-repo PR could rewrite the checks that are supposed to
+be judging it. So the gate ran *main's* shape check, which requires exactly one
+`scaleway_account_project`, against fixtures the cutover strips it from.
+
+Any change that **inverts a check living in the trusted binary** is unverifiable
+by its own gate until it is merged. The alternatives are all worse: building the
+binary from the PR is the exfiltration path the gate exists to close, and a
+compatibility window is the dual model this arc dropped. The honest handling is
+to know it, say it, and re-run the gate on the next PR after merge.
+
+Nothing leaked. The account was checked directly afterwards: three projects,
+all pre-existing.
+
+## What the run did catch: the gate's own cleanup read the wrong signal
+
+The reap step keyed entirely off `terraform-live.tfstate`, and on a missing one
+reported:
+
+> tofu may have created resources before it was killed. Nothing records them, so
+> reap cannot run. Check the Scaleway account by hand.
+
+Post-cutover that is wrong in the dangerous direction. The project is created
+before tofu starts and the marker is written at the same moment, so a run can
+own a real project and never write state — an apply failing at preflight, init
+or plan does exactly that. The reap step consults the marker in that case now,
+turning "check the account by hand" into a reap that knows what to remove.
+
+The same defect the codex loop found seven times inside the Go code — a path
+depending on `tofu destroy` owning the project without saying so — and it
+survived fourteen review passes **because it lives in YAML**.
+
+**The first version of this fix was wrong, and pass 45 caught it.** It read the
+marker as proof a project *still exists* and checked it before anything else.
+Nothing removes the marker after a successful delete, so a green run leaves one
+behind too — verified on disk after the `block-paris` run above, which ended
+with the marker present and a state file holding zero resources. Every green
+gate run would have paid for a redundant real-API reap, and gone red if that
+reap hit a transient error.
+
+The marker proves a project was **created**, never that one **survives**.
+Whether it survives is the API's question, and reap asks it. So the check sits
+*inside* the no-state branch, where a green run — which leaves an empty state
+file, not a missing one — never reaches it.
+
+## S154 verification: the live lifecycle, end to end against real Scaleway
+
+Run 2026-08-31, same account, ~€0.01. This closes the gap the canary above
+named: `deploy`, `live teardown` and `live reap` had **never** touched real
+Scaleway — only the `test` path had.
+
+| step | result |
+|---|---|
+| `deploy web-live-paris --ttl 30m` | **pass**, 36s — project created before the apply, deployment registered with project id, address and expiry |
+| `curl` the recorded address | **HTTP 200**, serving |
+| `live observe` | **healthy**, recorded against the deployment |
+| `live observe` again | second observation appended, ring intact |
+| `live ls` | `HEALTH` column shows `healthy`; the released deployment shows `unobserved` |
+| `live teardown` | **pass**, 39s — destroy, purge, project delete, sweep |
+| account afterwards | 3 projects (all pre-existing), 1 server, 0 LBs — `openclaw-prod` only |
+
+D6's purge fired here too, in `live teardown`, and reported what it removed.
+
+### What this run did NOT verify
+
+Only the **healthy** observation path ran against real infrastructure.
+`unhealthy` and `unreachable` are unit-covered and were not reproduced against a
+real service, because breaking a live backend on purpose costs more than the
+signal is worth at this stage. Worth stating rather than letting the table imply
+otherwise.
+
+### And the falsehood the plan predicted, demonstrated
+
+The record says `nginx:1.27`. What is actually serving is
+`python3 -m http.server` printing that string, because `ubuntu_jammy` has no
+docker and the fixture never installed one. `deploy` recorded the **declared**
+image without checking what runs.
+
+This is exactly the attribution failure `live-learning-loop-plan.md` decision 4
+warns about — a loop that blamed `nginx:1.27` for a failure here would be
+learning a falsehood. It is now demonstrated rather than asserted, and
+**verifying the running version stays a prerequisite for S155**, not a nicety.
