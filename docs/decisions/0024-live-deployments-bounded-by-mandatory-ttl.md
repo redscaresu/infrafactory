@@ -528,3 +528,18 @@ infrastructure is applied. `live teardown` does fall back, deliberately — refu
 there strands a pre-cutover record whose resources are real, and destroy is bounded
 by the state in its own workdir. Neither argument holds when applying, and an
 operator who cannot upgrade can still tear down and deploy again.
+
+The version comparison respects version boundaries. A plain substring match
+confirms tag `1.2` against a service reporting `nginx/1.27.4` — a service running
+something other than what the record claims, reported as confirmation, which is
+the precise drift this check exists to catch. A match may not be flanked by digits
+and may not directly follow a dot: `1.27` is confirmed by `1.27.4`, `1.2` is not,
+and `11.27` does not confirm `1.27`.
+
+`live upgrade` also re-reads its record before writing, as `observe` does. It
+holds that record across a real apply — minutes, not the microseconds a probe
+takes — so a teardown finishing in that window would otherwise be overwritten and
+the deployment resurrected. A record released mid-apply produces a loud failure
+naming the project, because whatever the apply created is not tracked by a
+released record. The window is narrowed, not closed: the store has no
+compare-and-swap.
