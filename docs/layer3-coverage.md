@@ -19,12 +19,15 @@
 > instance server and Layer 3 could not apply one. The gates contradicted each
 > other.
 >
-> **RESOLVED 2026-08-31 by the S166+S167 cutover (ADR-0025).** The run's project
-> is created through the Account API before the apply and handed to the provider
-> as the default, so the NIC lands in the same project as its server. Verified
-> against real Scaleway: [docs/status/s168-cutover-canary.md](status/s168-cutover-canary.md).
-> The "waits on IPAM" lines below are stale in their *reason*; whether each
-> scenario is runnable is a costing question again, not a blocked one.
+> **RESOLVED 2026-08-31 by the S166+S167 cutover (ADR-0025)**, and *measured*
+> rather than assumed — see "The NIC blocker, retested" below. A private NIC now
+> applies against real Scaleway and reaches `state: available`.
+>
+> **A different, narrower blocker took its place**, and every "waits on IPAM"
+> line below is stale in its reason: `mockway` returns **501** for
+> `POST /instance/v2alpha1/zones/{zone}/private-network-interfaces`, and Layer 3
+> only runs when the mock apply succeeded. So the constraint is now a mock gap
+> with a known endpoint, not a contradiction between gates.
 
 
 Audit date: 2026-08-24. **Refreshed** after `scaleway_instance_ip` and
@@ -56,17 +59,49 @@ A scenario reaches the real API only if **both** allow it:
    `BlockStorageFullAccess`, `LoadBalancersFullAccess`, `VPCFullAccess`,
    `InstancesFullAccess`. Nothing else (ADR-0023, credential amendments).
 
-They do not agree, deliberately. Four allowlisted entries —
-`scaleway_iam*`, `scaleway_registry_namespace`, `scaleway_domain*` and
-`scaleway_instance_private_nic` — pass the local check and are then refused
-by the API with a 403. That looks like a bug if you do not know it; it is
-the credential doing its job.
+They do not agree, deliberately. Three allowlisted entries —
+`scaleway_iam*`, `scaleway_registry_namespace` and `scaleway_domain*` —
+pass the local check and are then refused by the API with a 403. That looks
+like a bug if you do not know it; it is the credential doing its job, and
+all three are least-privilege choices.
 
-The first three are least-privilege choices. The fourth is not: private
-NICs are allowlisted only because `policies/scaleway/vpc_required.rego`
-denies any instance server without one, so omitting them would leave
-static policy demanding a resource the allowlist forbids — unsatisfiable
-by any generated HCL. It waits on private networking becoming applicable at all (see the retraction at the top), not on `IPAMFullAccess`.
+`scaleway_instance_private_nic` **used to be a fourth** and is not any more.
+It was allowlisted only because `policies/scaleway/vpc_required.rego` denies
+any instance server without one, so omitting it would have left static
+policy demanding a resource the allowlist forbade. It now applies for real
+(below), so the allowlist entry earns its place.
+
+## The NIC blocker, retested (2026-08-31)
+
+The claim above — that a private NIC is refused with a 403 — was written
+before `PrivateNetworksFullAccess` was granted and before the cutover, and
+**nothing had ever actually applied one.** The one scenario with an instance
+(`lb-serving-paris`) declares no NIC at all, so no canary in this arc
+exercised it. Retested directly, because a claim about the API that nobody
+has asked the API is folklore.
+
+| question | answer |
+|---|---|
+| Does a private NIC apply against real Scaleway? | **Yes.** `state: available`, attached to the server, inside the run's own project |
+| Does it apply against the mock? | **No** — `501 Not Implemented: POST /instance/v2alpha1/zones/{zone}/private-network-interfaces` |
+| Can a NIC-bearing scenario reach Layer 3 via `test`? | **No.** Layer 3 runs only `if deployErr == nil && sandboxEnabled` — a failed mock apply stops it |
+| Via `deploy`? | **Yes** — `deploy` skips Layer 2 entirely, which is how the above was measured |
+
+Two corrections to earlier readings, both from inferring instead of running:
+
+- A first attempt failed with `resource with ID  is not found` on the
+  private network, and the obvious reading — "mockway has no private
+  network support" — was **wrong**. It implements the full CRUD on
+  `/vpc/v1` and `/vpc/v2`; the HCL was simply missing an explicit
+  `scaleway_vpc` for the network to sit in.
+- mockway also already answers `ListPrivateNetworkInterfacesV2`. What it
+  lacks is exactly one verb on one path: **create**.
+
+So the next slice on this path is small and well defined: implement
+`POST` (and `GET`/`DELETE`) for
+`/instance/v2alpha1/zones/{zone}/private-network-interfaces` in mockway.
+Until then, every Scaleway compute scenario is blocked at **Layer 2**, not
+at Layer 1 or Layer 3, and `deploy` is the only route to a real NIC.
 
 ## Coverage
 

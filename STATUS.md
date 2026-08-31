@@ -4,6 +4,27 @@ Last updated: 2026-08-31
 
 ## Current phase
 
+- 🔬 **The NIC blocker retested — it moved, and narrowed (2026-08-31)** — the
+  claim that `scaleway_instance_private_nic` is refused by the API with a 403 was
+  written before `PrivateNetworksFullAccess` and before the cutover, and **nothing
+  had ever applied one**: the arc's only instance-bearing scenario,
+  `lb-serving-paris`, declares no NIC. So it was folklore. Measured instead:
+
+  - **Real Scaleway applies it.** `state: available`, attached, in the run's own
+    project. The contradiction ADR-0025 was written to end is genuinely gone.
+  - **The mock does not.** `501 Not Implemented: POST
+    /instance/v2alpha1/zones/{zone}/private-network-interfaces` — and Layer 3 runs
+    only `if deployErr == nil`, so a failed mock apply stops it. Every compute
+    scenario is now blocked at **Layer 2**, not Layer 1 or 3.
+
+  Two readings corrected along the way, both from inferring rather than running:
+  "mockway has no private networks" (it has full CRUD on `/vpc/v1` and `/vpc/v2`;
+  my HCL was missing an explicit `scaleway_vpc`), and the 403 claim itself.
+
+  Next slice is small and named: `POST`/`GET`/`DELETE` for
+  `private-network-interfaces` in mockway. Detail:
+  [docs/layer3-coverage.md](layer3-coverage.md).
+
 - 🌱 **S154 SHIPPED — `live observe`, the first post-apply signal (2026-08-31)** —
   probes every live deployment's health path once and records what it saw on that
   deployment's record. **No learning yet, deliberately**: an observation is not a
