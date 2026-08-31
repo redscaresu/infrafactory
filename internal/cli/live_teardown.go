@@ -91,7 +91,13 @@ func tearDownDeployment(
 					"then clear the record with `infrafactory live forget %s`", d.ID, d.ProjectID, d.ID))
 		}
 
-		sandboxEnv, envErr := sandboxCommandEnvForProject(runtime, d.ProjectID)
+		// Same rule as the destroy path below: the marker where there is
+		// one, the record only as a fallback.
+		verifyProjectID := d.ProjectID
+		if marker, markerErr := harness.ReadRunProjectMarker(d.WorkDir); markerErr == nil {
+			verifyProjectID = marker.ProjectID
+		}
+		sandboxEnv, envErr := sandboxCommandEnvForProject(runtime, verifyProjectID)
 		if envErr != nil {
 			return unreclaimable(fmt.Sprintf(
 				"%s has nothing to destroy, but the account cannot be verified: %v", d.ID, envErr))
@@ -132,7 +138,16 @@ func tearDownDeployment(
 	// created these resources with it set, so the destroy that inverts
 	// the apply must run with the same one rather than the shared
 	// fallback.
-	sandboxEnv, err := sandboxCommandEnvForProject(runtime, d.ProjectID)
+	//
+	// From the MARKER where there is one. The record is the weaker of the
+	// two -- it is the half a stale or edited file can change, and the
+	// half the guard refuses to trust when they disagree -- so it is the
+	// fallback, for a pre-cutover workdir that has no marker at all.
+	destroyProjectID := d.ProjectID
+	if marker, markerErr := harness.ReadRunProjectMarker(d.WorkDir); markerErr == nil {
+		destroyProjectID = marker.ProjectID
+	}
+	sandboxEnv, err := sandboxCommandEnvForProject(runtime, destroyProjectID)
 	if err != nil {
 		return unreclaimable(fmt.Sprintf("sandbox credentials for %s: %v", d.ID, err))
 	}

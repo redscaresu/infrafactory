@@ -694,12 +694,24 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 		// treated as already clean -- which is what a successful destroy
 		// leaves behind.
 		if liveStateMayHoldResources(runtime.OutputDir()) {
-			// Capture first, because the env must be scoped to the run's
-			// OWN project: the apply ran with it as the provider default,
-			// and a destroy against the shared fallback is not the
-			// inverse of that apply.
+			// The env must be scoped to the run's OWN project: the apply
+			// ran with it as the provider default, and a destroy against
+			// the shared fallback is not the inverse of that apply.
+			//
+			// From the marker DIRECTLY, not from the sweep target. The
+			// two questions are separate -- which project is ours, and
+			// what strays does the state name -- and CaptureSweepTarget
+			// answers both, so an unreadable state file would take the
+			// project id down with it and quietly leave the destroy
+			// pointed at the shared fallback. An unknown project is a
+			// reason to stop, never a reason to guess.
 			sweepTarget, sweepTargetErr := harness.CaptureSweepTarget(runtime.OutputDir())
-			sandboxEnv, sandboxEnvErr := sandboxCommandEnvForProject(runtime, sweepTargetProjectID(sweepTarget))
+			runProjectMarker, markerErr := harness.ReadRunProjectMarker(runtime.OutputDir())
+			sandboxEnvErr := markerErr
+			var sandboxEnv map[string]string
+			if markerErr == nil {
+				sandboxEnv, sandboxEnvErr = sandboxCommandEnvForProject(runtime, runProjectMarker.ProjectID)
+			}
 			if sandboxEnvErr != nil {
 				runtime.Logger.Log(LogEntry{
 					Level:   logLevelError,
@@ -710,6 +722,21 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 					Detail:  sandboxEnvErr.Error(),
 				})
 				allStages = append(allStages, StageSummary{Layer: "sandbox_deploy", Stage: "auto_destroy_preflight", Status: StageStatusFail})
+				// Not just a failed stage: the resources are live and
+				// nothing is coming for them, so the operator gets the
+				// reason and the command that finishes the job. A guard
+				// that stops without saying why is half a guard.
+				preflightFailures := []FailureSummary{{
+					Layer: "sandbox_deploy", Stage: "auto_destroy_preflight", Check: "run_project",
+					Command: "auto-destroy preflight",
+					Detail: fmt.Sprintf(
+						"real resources are live and were NOT destroyed: %v. Destroying against the shared "+
+							"fallback project would not be the inverse of the apply, so it was refused",
+						sandboxEnvErr),
+				}}
+				annotateWithRecoveryCommand(preflightFailures, runtime.ConfigPath, scenarioPath)
+				allFailures = append(allFailures, preflightFailures...)
+				logLayer3RecoveryHint(runtime, runID, scenarioPath, "auto-destroy preflight could not identify the run project")
 			} else {
 				// The sweep target is captured above, BEFORE destroy: tofu
 				// empties terraform-live.tfstate, and the strays it names
@@ -749,7 +776,7 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 					// staying a known leak.
 					projectStages, projectFailures := releaseRunProject(
 						cmd.Context(), runtime, runtime.OutputDir(),
-						sweepTargetProjectID(sweepTarget), sandboxEnv)
+						runProjectMarker.ProjectID, sandboxEnv)
 					allStages = append(allStages, projectStages...)
 					if len(projectFailures) > 0 {
 						annotateWithRecoveryCommand(projectFailures, runtime.ConfigPath, scenarioPath)

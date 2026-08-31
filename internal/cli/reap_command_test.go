@@ -247,6 +247,26 @@ func TestInterruptGuardDeletesTheProjectWhenNothingWasApplied(t *testing.T) {
 	assert.Contains(t, out.String(), "deleted")
 }
 
+// State on disk and no marker: the destroy cannot be scoped to the
+// project the apply used, and running it against the shared fallback
+// would not be the inverse of that apply. Refuse and hand over the
+// recovery command rather than destroy against a guess.
+func TestInterruptGuardRefusesToDestroyWithoutAMarker(t *testing.T) {
+	sandboxCredsForTest(t)
+	destroy := &fakeSandboxDestroyHarness{result: &harness.SandboxDestroyResult{Destroy: harness.StageResult{Stage: "destroy"}}}
+	rt, _ := reapRuntime(t, destroy, &fakeOrphanSweep{})
+	writeReapLiveState(t, rt.OutputDir(), reapProjectID)
+	require.NoError(t, os.Remove(filepath.Join(rt.OutputDir(), harness.RunProjectMarkerFilename)))
+
+	out := &strings.Builder{}
+	_ = withSandboxInterruptGuard(guardCmd(out), rt, cancelledNotify(), func(context.Context) error { return nil })
+
+	assert.Zero(t, destroy.calls, "a destroy scoped to the wrong project is not the inverse of the apply")
+	assert.Zero(t, rt.Deps.RunProject.(*fakeRunProject).deletes)
+	assert.Contains(t, out.String(), "CLEANUP FAILED")
+	assert.Contains(t, out.String(), "cannot tell which project this run owns")
+}
+
 // If cleanup itself fails the operator must be left knowing resources
 // are live and exactly how to finish the job.
 func TestInterruptGuardReportsAbandonedResourcesOnCleanupFailure(t *testing.T) {

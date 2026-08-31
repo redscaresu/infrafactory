@@ -187,6 +187,21 @@ func withSandboxInterruptGuard(
 	// the process outright rather than being swallowed here.
 	stop()
 
+	// An unreadable marker with state on disk is the one shape this
+	// cannot proceed on. marker is the zero value there, so building the
+	// env from it would silently scope the destroy to the SHARED
+	// fallback -- which is not the inverse of the apply that created
+	// these resources. A post-cutover run always writes the marker
+	// (failing to is fatal at creation), so its absence here means the
+	// workdir is damaged, and the honest answer is to hand the operator
+	// the recovery command rather than destroy against a guess.
+	if markerErr != nil {
+		reportAbandonedResources(out, statePath, fmt.Errorf(
+			"cannot tell which project this run owns (%v), and destroying against the shared "+
+				"fallback project would not be the inverse of the apply", markerErr))
+		return err
+	}
+
 	// Scoped to the run's project, so the destroy runs with the same
 	// provider default the apply did.
 	sandboxEnv, envErr := sandboxCommandEnvForProject(runtime, marker.ProjectID)
@@ -217,9 +232,6 @@ func withSandboxInterruptGuard(
 	// The project last, because tofu cannot delete it and nothing else
 	// will: an interrupt is the one exit with no summary to report a
 	// kept project in.
-	if markerErr != nil {
-		return err
-	}
 	_, projectFailures := releaseRunProject(
 		context.Background(), runtime, workDir, marker.ProjectID, sandboxEnv)
 	if len(projectFailures) > 0 {

@@ -375,3 +375,22 @@ run destroys and sweeps before finishing. A fallback would therefore be a second
 project-resolution path that nothing exercises — untested by construction,
 guarding a case that does not occur. Passes 30–35 are the argument against
 adding one.
+
+### Follow-up, pass 37: an empty project id is not a literal
+
+Passes 33–35 fixed the apply/destroy provider-default asymmetry on the happy
+path and introduced it on three error paths, where the empty project id arrived
+from a zero-value marker, a failed sweep capture, or a deployment record — never
+as a literal `""`, which is all the audit can see.
+
+Two rules came out of it, both now held in code:
+
+- **The project id comes from the marker, and from nothing else.** The record is
+  the half a stale file can change; `CaptureSweepTarget` also answers "what
+  strays does the state name", so sourcing the project from it lets an unreadable
+  state file silently empty the project id. The questions are separate and are
+  now asked separately.
+- **An unknown project stops the cleanup.** Destroying against the shared
+  fallback is not the inverse of an apply that ran in the run's own project. The
+  operator gets the reason and the recovery command; a post-cutover run always
+  writes the marker, so its absence means the workdir is damaged.

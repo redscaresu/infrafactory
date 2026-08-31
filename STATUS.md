@@ -81,6 +81,17 @@ Last updated: 2026-08-31
   perform invalidated every path that had been relying on it without saying so,
   and they surfaced one review at a time rather than from any single reading.
 
+  **Pass 37: the same asymmetry, on three error paths.** Fixing the provider
+  default on the happy path left three places where an empty project id arrived
+  by accident — a zero-value marker in the interrupt guard, a failed
+  `CaptureSweepTarget` in `run`'s auto-destroy, and the deployment record rather
+  than the marker in `live teardown`. None is a literal `""`, so pass 34's audit
+  could not see them. The project id now comes from the marker directly and is
+  separate from the sweep capture (which also answers "what strays", and took the
+  project down with it when the state was unreadable); where the marker cannot be
+  read, cleanup **stops and says why** with the recovery command rather than
+  destroying against the shared fallback.
+
   **Pass 36 declined both findings** — both asked for a state-file fallback when
   a workdir has no marker, which is the dual model the cutover dropped. Checked
   rather than assumed: no such workdir exists (the live store is absent,
