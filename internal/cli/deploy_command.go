@@ -90,8 +90,9 @@ func runDeployCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime
 		return &CLIError{Op: "deploy", Code: errorCodeCommandFailed, Err: fmt.Errorf("layer 3 hcl validation: %w", err)}
 	}
 
-	sandboxEnv, err := sandboxCommandEnv(runtime)
-	if err != nil {
+	// Credentials only, before the project exists. The env itself comes
+	// later, scoped to that project.
+	if err := assertSandboxCredentials(runtime); err != nil {
 		return &CLIError{Op: "deploy", Code: errorCodeCommandFailed, Err: err}
 	}
 
@@ -125,7 +126,7 @@ func runDeployCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime
 			"could not create the deployment's project, so nothing was applied")}
 	}
 
-	sandboxEnv, err = sandboxCommandEnvForProject(runtime, runProjectID)
+	sandboxEnv, err := sandboxCommandEnvForProject(runtime, runProjectID)
 	if err != nil {
 		return &CLIError{Op: "deploy", Code: errorCodeCommandFailed, Err: err}
 	}

@@ -589,7 +589,8 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 		// SCW_ACCESS_KEY, say -- still leave a real project behind,
 		// relying on best-effort cleanup for residue that should never
 		// have existed.
-		sandboxEnv, sandboxEnvErr := sandboxCommandEnvForProject(runtime, "")
+		var sandboxEnv map[string]string
+		sandboxEnvErr := assertSandboxCredentials(runtime)
 
 		if sandboxEnvErr == nil {
 			// ADR-0025: the run's own project has to exist before the
@@ -853,10 +854,20 @@ const realScalewayAPIURL = "https://api.scaleway.com"
 // to reach anything else. The keys returned here are only half of that
 // guarantee; the other half is harness.SandboxStripEnv, which removes
 // the inherited overrides an override map cannot unset.
-// sandboxCommandEnv builds the sealed Layer 3 environment with the
-// configured fallback project as the provider default.
-func sandboxCommandEnv(runtime *CommandRuntime) (map[string]string, error) {
-	return sandboxCommandEnvForProject(runtime, "")
+// assertSandboxCredentials checks that Layer 3 can run at all, BEFORE
+// the run's project is created. It deliberately returns no environment.
+//
+// It used to return one, as `sandboxCommandEnv`, and that env had no
+// provider default project. Three teardown paths picked it up and
+// destroyed against the shared fallback while their apply had run in the
+// run's own project -- passes 33 and 34, the same mistake each time,
+// invited by a name that reads like "the env for a sandbox command".
+// Handing back nothing usable makes that misuse impossible rather than
+// merely discouraged: every caller that needs an env must now say which
+// project it is for.
+func assertSandboxCredentials(runtime *CommandRuntime) error {
+	_, err := sandboxCommandEnvForProject(runtime, "")
+	return err
 }
 
 // sandboxCommandEnvForProject is sandboxCommandEnv with an explicit

@@ -325,3 +325,19 @@ where it cannot be forgotten.
   also stopped treating a missing state file as "nothing to clean up": since the
   project now precedes the apply, an interrupt in between leaves a real project
   and no state.
+
+### Follow-up, pass 34: an audit that read one file
+
+The apply/destroy project asymmetry had an audit test from the start. It read
+`test_command.go` and nothing else, so the defect landed in `run_command.go`,
+`live_teardown.go` and `reap_command.go` — one review pass each — with a green
+audit the whole time. **A narrowly scoped audit is worse than none: it reads as
+coverage.**
+
+The durable fix is the signature, not the audit. `sandboxCommandEnv` returned an
+environment with no provider default project and was named as though it were the
+general one; it is now `assertSandboxCredentials(runtime) error`, a
+before-the-project-exists credentials check that hands back nothing. Building an
+environment requires naming a project. The audit remains for the case the type
+cannot express — an explicit `""` — now over every `internal/cli` file, and it
+fails if it ever finds fewer than two files to read.

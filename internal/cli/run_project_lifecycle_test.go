@@ -167,22 +167,54 @@ func TestReleaseRunProjectRunsWhenNoStateWasEverWritten(t *testing.T) {
 // project_id of their own would be looked for in the wrong project --
 // failing teardown or leaving them behind.
 //
-// A source audit rather than a unit test because the asymmetry lives in
-// which helper each call site picks, which is exactly what drifts. Same
+// The type signature now carries most of this: assertSandboxCredentials
+// returns no environment, so nothing can be built without naming a
+// project. What it cannot carry is a call site passing "" explicitly,
+// which is the same asymmetry one keystroke along.
+//
+// A source audit over EVERY cli source file, not one of them. The
+// previous version of this test read test_command.go alone, which is
+// precisely why the same defect kept surfacing in run_command.go,
+// live_teardown.go and reap_command.go, one review pass at a time. Same
 // idiom as cloud_prefix_lockstep_test.go.
-func TestPipelineNeverBuildsSandboxEnvWithoutTheRunProject(t *testing.T) {
-	source, err := os.ReadFile("test_command.go")
+func TestNoProductionPathBuildsSandboxEnvWithoutARunProject(t *testing.T) {
+	entries, err := os.ReadDir(".")
 	require.NoError(t, err)
 
-	for i, line := range strings.Split(string(source), "\n") {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "//") || strings.HasPrefix(trimmed, "func sandboxCommandEnv(") {
+	audited := 0
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
 			continue
 		}
-		assert.NotContains(t, trimmed, "sandboxCommandEnv(runtime)",
-			"test_command.go:%d builds the Layer 3 environment without a run project; "+
-				"use sandboxCommandEnvForProject so apply and destroy agree", i+1)
+		source, err := os.ReadFile(name)
+		require.NoError(t, err)
+		audited++
+
+		inPreflight := false
+		for i, line := range strings.Split(string(source), "\n") {
+			trimmed := strings.TrimSpace(line)
+			// The one legitimate caller: the credentials check that runs
+			// before the project exists, and hands back no env.
+			if strings.HasPrefix(trimmed, "func assertSandboxCredentials(") {
+				inPreflight = true
+				continue
+			}
+			if inPreflight {
+				if trimmed == "}" {
+					inPreflight = false
+				}
+				continue
+			}
+			if strings.HasPrefix(trimmed, "//") {
+				continue
+			}
+			assert.NotContains(t, trimmed, `sandboxCommandEnvForProject(runtime, "")`,
+				"%s:%d builds the Layer 3 environment with no run project; a destroy that "+
+					"does this is not the inverse of the apply that created the resources", name, i+1)
+		}
 	}
+	require.Greater(t, audited, 1, "the audit must read every cli source file, not one of them")
 }
 
 // A cancelled run is exactly when cleanup matters most. Delete must not

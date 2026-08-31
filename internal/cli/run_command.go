@@ -694,7 +694,12 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 		// treated as already clean -- which is what a successful destroy
 		// leaves behind.
 		if liveStateMayHoldResources(runtime.OutputDir()) {
-			sandboxEnv, sandboxEnvErr := sandboxCommandEnv(runtime)
+			// Capture first, because the env must be scoped to the run's
+			// OWN project: the apply ran with it as the provider default,
+			// and a destroy against the shared fallback is not the
+			// inverse of that apply.
+			sweepTarget, sweepTargetErr := harness.CaptureSweepTarget(runtime.OutputDir())
+			sandboxEnv, sandboxEnvErr := sandboxCommandEnvForProject(runtime, sweepTargetProjectID(sweepTarget))
 			if sandboxEnvErr != nil {
 				runtime.Logger.Log(LogEntry{
 					Level:   logLevelError,
@@ -706,11 +711,10 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 				})
 				allStages = append(allStages, StageSummary{Layer: "sandbox_deploy", Stage: "auto_destroy_preflight", Status: StageStatusFail})
 			} else {
-				// Capture the sweep target BEFORE destroy: tofu empties
-				// terraform-live.tfstate, taking the project id with it.
-				// Same ordering the success path learned the hard way in
-				// the first canary run.
-				sweepTarget, sweepTargetErr := harness.CaptureSweepTarget(runtime.OutputDir())
+				// The sweep target is captured above, BEFORE destroy: tofu
+				// empties terraform-live.tfstate, and the strays it names
+				// go with it. Same ordering the success path learned the
+				// hard way in the first canary run.
 				destroyResult, purged, destroyErr := destroySandbox(cmd.Context(), runtime, runtime.OutputDir(), sandboxEnv, sweepTargetProjectID(sweepTarget))
 				destroyStages, destroyFailures := appendSandboxDestroyResult(nil, nil, destroyResult, destroyErr)
 				allStages = append(allStages, destroyStages...)

@@ -81,6 +81,16 @@ Last updated: 2026-08-31
   perform invalidated every path that had been relying on it without saying so,
   and they surfaced one review at a time rather than from any single reading.
 
+  **Pass 34 stopped the recurrence at the type level.** An audit test for the
+  apply/destroy project asymmetry already existed — and read `test_command.go`
+  alone, which is why the same defect kept landing in the other three files.
+  `sandboxCommandEnv` is now `assertSandboxCredentials(runtime) error`: it checks
+  Layer 3 can run before the project exists and returns **no environment**, so
+  nothing can be built without naming a project. The audit was widened to every
+  `internal/cli` source file, catches an explicit `""` (the one thing the
+  signature cannot), refuses to pass if it finds fewer than two files to read,
+  and is verified against synthetic drift.
+
 - 📐 **S166 design written for review (2026-08-31)** —
   `docs/plans/s166-teardown-guard-design.md`. Not implemented: this is the slice
   that touches `AssertProjectDeletable`, the guard between an automated destroy

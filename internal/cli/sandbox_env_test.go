@@ -123,7 +123,7 @@ func TestSandboxPreflightRejectsNonScalewayEndpoint(t *testing.T) {
 	withSandboxCredentials(t)
 	t.Setenv("SCW_API_URL", "http://localhost:8080")
 
-	_, err := sandboxCommandEnv(sandboxTestRuntime())
+	_, err := sandboxCommandEnvForProject(sandboxTestRuntime(), "")
 	if err == nil {
 		t.Fatal("expected sandbox preflight to refuse an inherited mockway endpoint, got nil error")
 	}
@@ -137,7 +137,7 @@ func TestSandboxPreflightAcceptsRealScalewayEndpoint(t *testing.T) {
 	withSandboxCredentials(t)
 	t.Setenv("SCW_API_URL", realScalewayAPIURL)
 
-	if _, err := sandboxCommandEnv(sandboxTestRuntime()); err != nil {
+	if _, err := sandboxCommandEnvForProject(sandboxTestRuntime(), ""); err != nil {
 		t.Fatalf("explicit real endpoint should be accepted, got: %v", err)
 	}
 }
@@ -158,7 +158,7 @@ func TestSandboxPreflightRejectsConfigFileEndpoint(t *testing.T) {
 		t.Fatalf("write scw config: %v", err)
 	}
 
-	_, err := sandboxCommandEnv(sandboxTestRuntime())
+	_, err := sandboxCommandEnvForProject(sandboxTestRuntime(), "")
 	if err == nil {
 		t.Fatal("expected refusal when the default scw profile redirects api_url")
 	}
@@ -182,7 +182,7 @@ func TestSandboxPreflightIgnoresNamedProfileEndpoint(t *testing.T) {
 		t.Fatalf("write scw config: %v", err)
 	}
 
-	if _, err := sandboxCommandEnv(sandboxTestRuntime()); err != nil {
+	if _, err := sandboxCommandEnvForProject(sandboxTestRuntime(), ""); err != nil {
 		t.Fatalf("a named profile is unreachable once SCW_PROFILE is stripped; should not fail preflight: %v", err)
 	}
 }
@@ -193,7 +193,7 @@ func TestSandboxCommandEnvRequiresOrganizationID(t *testing.T) {
 	t.Setenv("SCW_SECRET_KEY", "11111111-1111-1111-1111-111111111111")
 	t.Setenv("SCW_DEFAULT_ORGANIZATION_ID", "")
 
-	_, err := sandboxCommandEnv(sandboxTestRuntime())
+	_, err := sandboxCommandEnvForProject(sandboxTestRuntime(), "")
 	if err == nil {
 		t.Fatal("expected sandbox preflight to require SCW_DEFAULT_ORGANIZATION_ID")
 	}
@@ -206,7 +206,7 @@ func TestSandboxCommandEnvCarriesPlacementAndOmitsAPIURL(t *testing.T) {
 	isolateSCWConfig(t)
 	withSandboxCredentials(t)
 
-	env, err := sandboxCommandEnv(sandboxTestRuntime())
+	env, err := sandboxCommandEnvForProject(sandboxTestRuntime(), "")
 	if err != nil {
 		t.Fatalf("sandboxCommandEnv: %v", err)
 	}
@@ -248,7 +248,7 @@ func TestSandboxEnvPinsFallbackProject(t *testing.T) {
 	isolateSCWConfig(t)
 	withSandboxCredentials(t)
 
-	env, err := sandboxCommandEnv(sandboxTestRuntimeWithFallback("2397e80e-ec12-4a7e-819f-a2caba3867b6"))
+	env, err := sandboxCommandEnvForProject(sandboxTestRuntimeWithFallback("2397e80e-ec12-4a7e-819f-a2caba3867b6"), "")
 	if err != nil {
 		t.Fatalf("sandboxCommandEnv: %v", err)
 	}
@@ -263,7 +263,7 @@ func TestSandboxEnvRejectsOrgAsFallbackProject(t *testing.T) {
 
 	// The org id IS the default project's id. Accepting it would make the
 	// setting a no-op while looking configured.
-	_, err := sandboxCommandEnv(sandboxTestRuntimeWithFallback("22222222-2222-2222-2222-222222222222"))
+	_, err := sandboxCommandEnvForProject(sandboxTestRuntimeWithFallback("22222222-2222-2222-2222-222222222222"), "")
 	if err == nil {
 		t.Fatal("the organization default project must be refused as a fallback target")
 	}
@@ -276,7 +276,7 @@ func TestSandboxEnvOmitsProjectWhenNoFallbackConfigured(t *testing.T) {
 	isolateSCWConfig(t)
 	withSandboxCredentials(t)
 
-	env, err := sandboxCommandEnv(sandboxTestRuntime())
+	env, err := sandboxCommandEnvForProject(sandboxTestRuntime(), "")
 	if err != nil {
 		t.Fatalf("sandboxCommandEnv: %v", err)
 	}
@@ -294,7 +294,7 @@ func TestSandboxEnvPrefersTheRunsOwnProject(t *testing.T) {
 	rt := &CommandRuntime{}
 	rt.Config.Scaleway.FallbackProjectID = "11111111-1111-1111-1111-111111111111"
 
-	fallbackEnv, err := sandboxCommandEnv(rt)
+	fallbackEnv, err := sandboxCommandEnvForProject(rt, "")
 	require.NoError(t, err)
 	assert.Equal(t, "11111111-1111-1111-1111-111111111111", fallbackEnv["SCW_DEFAULT_PROJECT_ID"],
 		"an empty run project keeps the pre-ADR-0025 behaviour exactly")
