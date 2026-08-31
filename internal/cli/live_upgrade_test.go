@@ -47,7 +47,12 @@ func upgradeRuntime(t *testing.T, probe ServiceProbeRunner, deploy *fakeSandboxD
 	rt := &CommandRuntime{
 		Config:        cfg,
 		livestoreRoot: h.LivestoreRoot(),
-		Deps:          RuntimeDependencies{ServiceProbe: probe, SandboxDeploy: deploy},
+		Deps: RuntimeDependencies{
+			ServiceProbe: probe, SandboxDeploy: deploy,
+			// Provenance is the half local files cannot forge, so every
+			// upgrade asks the API before applying.
+			RunProject: &fakeRunProject{},
+		},
 	}
 	return rt, livestore.NewFilesystemStore(h.LivestoreRoot())
 }
@@ -520,5 +525,58 @@ func TestUpgradeRefusesWithoutAReadableMarker(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "which is editable")
+	assert.Zero(t, deploy.calls)
+}
+
+// The marker and the record are both local files, so together they prove
+// only that two local files agree. Provenance asks the API, which is the
+// half that cannot be forged from a text editor.
+func TestUpgradeRefusesAProjectTheAPIDoesNotVouchFor(t *testing.T) {
+	sandboxCredsForTest(t)
+	deploy := &fakeSandboxDeployHarness{}
+	rt, store := upgradeRuntime(t, &stagingVersionProbe{running: "nginx/1.27.4"}, deploy)
+	d := upgradeableDeployment(t, store, "dep-unstamped", "1.27")
+
+	// A real project that is not one of ours: exactly what editing two
+	// local files would point an apply at.
+	rt.Deps.RunProject = &fakeRunProject{describeUnstamped: true}
+
+	err := runUpgrade(t, rt, d.ID, &strings.Builder{}, "--from", newHCLDir(t), "--tag", "1.28")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "does not carry infrafactory's stamp")
+	assert.NotContains(t, err.Error(), "refusing to delete",
+		"the message must describe the operation being refused")
+	assert.Zero(t, deploy.calls)
+}
+
+// "We could not check" must never behave like "it is fine".
+func TestUpgradeRefusesWhenProvenanceCannotBeChecked(t *testing.T) {
+	sandboxCredsForTest(t)
+	deploy := &fakeSandboxDeployHarness{}
+	rt, store := upgradeRuntime(t, &stagingVersionProbe{running: "nginx/1.27.4"}, deploy)
+	d := upgradeableDeployment(t, store, "dep-unreachable-api", "1.27")
+	rt.Deps.RunProject = &fakeRunProject{describeErr: errors.New("dial tcp: connection refused")}
+
+	err := runUpgrade(t, rt, d.ID, &strings.Builder{}, "--from", newHCLDir(t), "--tag", "1.28")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "could not verify project")
+	assert.Zero(t, deploy.calls)
+}
+
+// Applying into a project that is already gone is not an upgrade. The
+// deletion guard treats gone as success; this is the opposite case.
+func TestUpgradeRefusesAProjectThatNoLongerExists(t *testing.T) {
+	sandboxCredsForTest(t)
+	deploy := &fakeSandboxDeployHarness{}
+	rt, store := upgradeRuntime(t, &stagingVersionProbe{running: "nginx/1.27.4"}, deploy)
+	d := upgradeableDeployment(t, store, "dep-vanished", "1.27")
+	rt.Deps.RunProject = &fakeRunProject{describeGone: true}
+
+	err := runUpgrade(t, rt, d.ID, &strings.Builder{}, "--from", newHCLDir(t), "--tag", "1.28")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no longer exists")
 	assert.Zero(t, deploy.calls)
 }

@@ -155,6 +155,19 @@ func runLiveUpgradeCommand(cmd *cobra.Command, args []string, runtime *CommandRu
 		return &CLIError{Op: "live upgrade", Code: errorCodeCommandFailed, Err: err}
 	}
 
+	// The other half of ADR-0025's rule, and the half that is not
+	// forgeable locally. The marker gives identity -- this workdir owns
+	// that project -- but the marker is a file, and so is the record.
+	// Both together still only prove that two local files agree.
+	//
+	// Provenance asks the API whether the project is one of
+	// infrafactory's disposable ones. Without it, editing two files is
+	// enough to point a real apply at somebody's production project.
+	if err := assertRunProjectOurs(ctx, runtime, applyProjectID, sandboxEnv); err != nil {
+		return &CLIError{Op: "live upgrade", Code: errorCodeCommandFailed, Err: fmt.Errorf(
+			"refusing to upgrade %s: %w", d.ID, err)}
+	}
+
 	_, _ = fmt.Fprintf(progress, "Upgrading %s in project %s\n", d.ID, d.ProjectID)
 
 	if err := stashPreviousHCL(d.WorkDir); err != nil {
@@ -536,6 +549,44 @@ func restorePreviousHCL(workDir string) error {
 		if err := os.WriteFile(filepath.Join(workDir, entry.Name()), payload, 0o644); err != nil {
 			return fmt.Errorf("restore %s: %w", entry.Name(), err)
 		}
+	}
+	return nil
+}
+
+// assertRunProjectOurs asks the API whether a project is one of
+// infrafactory's disposable run projects, before real infrastructure is
+// applied into it.
+//
+// The deletion guard (AssertRunProjectDeletable) treats a project the API
+// reports GONE as fine, because gone is the outcome it wants. Applying is
+// the opposite: a project that does not exist, or exists without the
+// stamp, is one this command must not touch.
+//
+// An unreachable API refuses, for the same reason every other guard in
+// this arc does -- "we could not check" must never behave like "it is
+// fine".
+//
+// Deliberately NOT wrapping ErrProtectedProject: that sentinel renders as
+// "refusing to delete a project this run did not create", which is
+// actively wrong on a path that applies. A guard whose message describes
+// the wrong operation sends the reader looking in the wrong place.
+func assertRunProjectOurs(ctx context.Context, runtime *CommandRuntime, projectID string, sandboxEnv map[string]string) error {
+	if runtime.Deps.RunProject == nil {
+		return fmt.Errorf("no run-project client, so the project's provenance cannot be checked")
+	}
+
+	provenance, err := runtime.Deps.RunProject.Describe(ctx, sandboxEnv["SCW_SECRET_KEY"], projectID)
+	if err != nil {
+		return fmt.Errorf("could not verify project %s with the API: %v", projectID, err)
+	}
+	if !provenance.Exists {
+		return fmt.Errorf("project %s no longer exists, so there is nothing to upgrade in it", projectID)
+	}
+	if !provenance.IsInfrafactoryRunProject() {
+		return fmt.Errorf(
+			"%s does not carry infrafactory's stamp (name %q, description %q). Local files say this "+
+				"deployment owns it and the API disagrees -- refusing rather than applying into it",
+			projectID, provenance.Name, provenance.Description)
 	}
 	return nil
 }

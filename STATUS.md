@@ -67,10 +67,19 @@ Last updated: 2026-08-31
   pre-cutover resources and destroy is bounded by its own state; neither holds
   when applying.
 
-  **The shape of this slice**: five passes, ten findings, and the through-line is
-  one fix applied incompletely rather than ten separate mistakes — "did anything
-  reach the cloud?" answered four times, "which project do we trust?" answered
-  twice. Both only converged once the answer became a single mechanism.
+  Pass 55 finished the second thread: the marker and the record are **both local
+  files**, so trusting either only proves two local files agree. ADR-0025 never
+  said "use the marker" — it said *two checks that must both pass*, the marker for
+  identity and **API provenance** for class, because the second cannot be forged
+  locally. Editing two files was enough to point a real apply at a production
+  project. The API is asked now, and deliberately not through the deletion guard,
+  which treats "gone" as success.
+
+  **The shape of this slice**: six passes, eleven findings, and ten of them are
+  one incomplete answer rather than eleven mistakes — "did anything reach the
+  cloud?" answered four times, "which project do we trust?" three. **The rule
+  already existed and was written down.** Reading ADR-0025's own words before
+  writing the guard would have collapsed three passes into one.
 
   - **The previous HCL is kept** in `.infrafactory-previous/`. That pair either
     side of one change is the diff `ExtractFixPitfall` needs and cannot
