@@ -73,23 +73,23 @@ It is replaced by two independent checks, both required, each failing closed:
 The organization-default refusal is unchanged. This is also the first real piece
 of the reconcile-against-API work ADR-0024 has owed since S153.
 
-## Migration, and why both paths coexist for a while
+## No migration (revised 2026-08-31)
 
-`examples/layer3-gate/*` and `docs/demo/recorded-generation/*` declare
-`scaleway_account_project` today, and the PR gate applies that fixture HCL
-directly — so flipping the model in one commit would break the gate, which is the
-artifact the talk rests on. The pre-created path therefore lands behind a config
-flag (S165), fixtures and prompts move over in S167, and the old path is deleted
-only in S168, after a real-cloud canary has passed on the new one.
+The original plan kept both models alive behind a flag until a canary passed.
+Dropped — see the slice table above and
+`docs/plans/s166-teardown-guard-design.md`. The gate applies fixture HCL that
+declares `scaleway_account_project`, and those fixtures move **in the same
+change** as the guard; the gate running on the PR is what catches it if that goes
+wrong.
 
 ## Risks
 
 | risk | mitigation |
 |---|---|
-| **The teardown guard is weakened in the gap between S165 and S167.** | strict ordering: S166 lands its replacement before S167 removes the input |
+| **The teardown guard is weakened while the model changes.** | there is no gap: the guard's replacement and the HCL change are the same commit, reviewed hard and canaried before merge |
 | **Empty projects accumulate** from crashes between creation and apply. | sweep them by provenance marker; they are free but must not pile up |
 | **`tofu destroy` no longer removes the project**, so a teardown that stops early leaves it. | delete it via the API after destroy — the same sequence `destroySandbox` already runs for the auto-created security group |
-| **The gate fixtures drift** from generated HCL during the transition. | both paths supported until S168; the gate keeps applying fixtures unchanged |
+| **The gate fixtures drift** from generated HCL. | fixtures and recorded generation are regenerated in the cutover commit, and the gate runs on the PR that does it |
 
 ## What success looks like
 

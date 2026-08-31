@@ -224,3 +224,31 @@ Across nine review passes on this slice, the condition on *whether* to delete wa
 correct from the first version. Where and when it ran was wrong five times. That
 is the shape of defect this arc keeps producing, and it is worth expecting rather
 than rediscovering.
+
+## Amendment, 2026-08-31: no transition — supersedes the migration decision and the pass-24 ordering
+
+This supersedes two earlier parts of this record: the **Migration** paragraph in
+the original Consequences ("both models must work during the transition"), and
+the **pass 24** amendment titled "S166 must land before S167". Both are wrong,
+and left in place above only because an ADR records what was decided when.
+
+The question that changed it: *what is the benefit of a transition for a
+non-production tool like this?* There is none. No fleet, no external consumers,
+nobody mid-migration. The only thing a transition protected was the PR gate's
+fixtures — and the gate runs on every PR, so breaking them is caught there.
+Rollback in a single-user repo is `git revert`.
+
+It also cost something. Two models means two code paths, and two code paths is
+where this arc's defects came from: five of S165's nine review findings were a
+cleanup path that did not run, and the dual model produced the "two projects per
+run" wart this ADR had to document. **`scaleway.create_run_project` was
+scaffolding mistaken for a feature.**
+
+So there is no ordering between S166 and S167, because they are **one change**:
+the guard's input changes at exactly the moment the HCL changes. The cutover
+lands the new guard, the shape gate without its `scaleway_account_project`
+requirement, the prompts, the pitfalls, the fixtures and the recorded generation
+together — reviewed hard and canaried before merge, with the flag deleted.
+
+Design and the four decisions behind it:
+`docs/plans/s166-teardown-guard-design.md`.

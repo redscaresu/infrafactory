@@ -154,7 +154,9 @@ when uncertain.**
 
 ## Explicitly out of scope
 
-Removing `scaleway_account_project` from generated HCL and the fixtures — that is
-S167, and it must not land until this does. Signing or tamper-proofing the
-marker: it is parity with the state file, and a local tool that a user can already
+Removing `scaleway_account_project` from generated HCL and the fixtures is **in**
+scope, not out — it is the other half of the same change (see the cutover
+decision). Implementing the guard without it produces a guard with no input.
+
+Signing or tamper-proofing the marker: it is parity with the state file, and a local tool that a user can already
 edit gains little from cryptography.

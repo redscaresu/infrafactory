@@ -37,9 +37,10 @@ account back to its 3 baseline projects with both ids returning 404.
 
 Two things to know before using it:
 
-- Enabling it **before S167** gives a run two projects — the pre-created one and
-  the one its HCL still declares. Nothing leaks (the canary cleaned up both), but
-  it is waste. The flag is mechanically complete, not coherent, until S167.
+- Enabling the flag today gives a run two projects — the pre-created one and the
+  one its HCL still declares. Nothing leaks (the canary cleaned up both), but it
+  is waste. **The cutover deletes the flag**, so this is a wart with a scheduled
+  end rather than a behaviour to design around.
 - A run whose destroy falls to `run`'s auto-destroy-on-failure path keeps its
   project. Reported as a skipped delete, not silent.
 
@@ -64,9 +65,9 @@ The fix is planned and proven: **ADR-0025** + `docs/plans/run-owned-project-plan
 (S165–S168) — create the run's project via the Account API *before* the apply,
 pass it as `SCW_DEFAULT_PROJECT_ID`, and drop `scaleway_account_project` from the
 HCL. A hand-run experiment applied a private NIC cleanly this way and destroyed
-cleanly. **S166 is the slice to be careful with**: it replaces
-`AssertProjectDeletable`'s state-derived cross-check, and must land before S167
-removes that check's input.
+cleanly. **The cutover is the slice to be careful with**: it replaces
+`AssertProjectDeletable`'s state-derived cross-check in the same change that
+removes the resource that check reads.
 
 Two diagnoses of this blocker were wrong before the right one, both from reading
 configuration instead of running something: `IPAMFullAccess` (the API actually

@@ -105,12 +105,12 @@ Last updated: 2026-08-31
   branch, so an apply failing at preflight/init/plan created a project and never
   removed it — on exactly the runs most likely to be repeated.
 
-  **Not usable on its own yet**: before S167 the HCL still declares
+  **Not usable on its own yet**: until the cutover the HCL still declares
   `scaleway_account_project`, so enabling the flag gives a run two projects.
   Nothing leaks, but it is waste — and codex pass 24 correctly noted that once
   S167 removes that resource, `CaptureSweepTarget` fails closed. Declined as
-  S166 scope: the sweep target feeds `AssertProjectDeletable`, so **S166 must
-  land before S167**.
+  S166 scope: the sweep target feeds `AssertProjectDeletable`, so it moves in the
+  cutover, with the guard.
 
   Next increment: `deploy` + `live teardown`, so a live deployment's project is
   deleted at teardown; then S167's fixture and prompt migration. **S166 is deliberately not
@@ -141,7 +141,7 @@ Last updated: 2026-08-31
   match the project named in `terraform-live.tfstate` — the check that stops a
   tampered record aiming teardown at real infrastructure. With the project out of
   the HCL that input disappears, so it is replaced by a run-owned marker **plus**
-  an API-side provenance check, both required, before S167 removes it.
+  an API-side provenance check, both required, in the same change that removes it.
 
   Incidentally, **D6 reproduced a third time**: the experiment's project refused
   to delete until the auto-created `Default security group` was purged — in a path
