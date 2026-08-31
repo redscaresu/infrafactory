@@ -164,3 +164,20 @@ func TestPipelineNeverBuildsSandboxEnvWithoutTheRunProject(t *testing.T) {
 				"use sandboxCommandEnvForProject so apply and destroy agree", i+1)
 	}
 }
+
+// A cancelled run is exactly when cleanup matters most. Delete must not
+// inherit the cancelled context, or the project survives every Ctrl-C.
+func TestReleaseRunProjectSurvivesACancelledRunContext(t *testing.T) {
+	fake := &fakeRunProject{}
+	rt := &CommandRuntime{Deps: RuntimeDependencies{RunProject: fake}}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	stages, failures := releaseRunProject(ctx, rt, "proj-1")
+
+	assert.Empty(t, failures)
+	assert.Equal(t, 1, fake.deletes, "the delete still reaches the API after cancellation")
+	require.Len(t, stages, 1)
+	assert.Equal(t, StageStatusPass, stages[0].Status)
+}

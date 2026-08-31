@@ -28,6 +28,13 @@ Last updated: 2026-08-31
   refuses the flag outright — it keeps its project by design, so deletion belongs
   to `live teardown`.
 
+  Codex pass 26 caught a regression from pass 25's own fix — lifting the cleanup
+  out of the destroy branch lost the fact that destruction had *run*, so
+  `--no-destroy` would delete a project whose resources are deliberately live.
+  **"No failures" is not "nothing is left."** It also caught that a cancelled run
+  skipped cleanup entirely; deletion now uses a fresh bounded context, the same
+  reasoning as the interrupt guard's destroy.
+
   Codex pass 25 caught the third cleanup-placement bug: with `--no-destroy` or
   destruction disabled, a failed apply left the project behind. The cleanup now
   sits **outside every branch** — created in one place, released in one place.

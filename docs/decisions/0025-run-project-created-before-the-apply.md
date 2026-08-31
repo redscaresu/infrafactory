@@ -187,3 +187,17 @@ twice: first on the happy path only, then inside the destroy branch, which
 It now sits outside every branch, immediately before the result is assembled.
 **A resource created in one place is released in one place** — every attempt to
 attach the release to a particular outcome produced a path that escaped it.
+
+## Amendment, 2026-08-31 (S165, pass 26): two rules the cleanup needed
+
+**"No failures" is not "nothing is left."** A `--no-destroy` run succeeds with an
+empty failure list while its resources are deliberately still up, so a clean
+result alone must never authorise deleting the run project. Deletion requires
+that nothing was created, or that destruction actually ran and the account came
+back clean.
+
+**Cleanup runs on a fresh context.** Passing the run's own context to the delete
+meant a cancelled run — Ctrl-C, a timeout — skipped cleanup entirely, leaving the
+project behind on exactly the runs that most need it. The same reasoning the
+interrupt guard already applies to its destroy: the point of cleanup is to do
+work after cancellation.

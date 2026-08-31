@@ -718,9 +718,17 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 	// was proven clean, or no state was ever written so nothing was
 	// created. Otherwise it is kept and said so, because the project id
 	// is the handle to whatever remains.
+	// "No failures" is not the same as "nothing is left". On a --no-destroy
+	// run the apply succeeds and the resources are deliberately still
+	// live, so deleting the project would either fail on resources in use
+	// or remove the handle to a run the operator asked to keep. Deletion
+	// needs destruction to have actually run.
+	destructionRan := runtime.Config.Validation.Layers.Destruction.Enabled && !opts.SkipDestroy
+
 	if runProjectID != "" {
 		switch {
-		case len(failures) == 0, !liveStateMayHoldResources(outputDir):
+		case !liveStateMayHoldResources(outputDir),
+			destructionRan && len(failures) == 0:
 			deleteStages, deleteFailures := releaseRunProject(ctx, runtime, runProjectID)
 			stages = append(stages, deleteStages...)
 			failures = append(failures, deleteFailures...)

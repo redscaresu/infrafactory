@@ -65,8 +65,16 @@ func releaseRunProject(ctx context.Context, runtime *CommandRuntime, projectID s
 		return nil, nil
 	}
 
+	// A FRESH context, bounded on its own. If the run was cancelled --
+	// Ctrl-C, a timeout -- the inherited context is already done, and
+	// Delete would never reach the API, leaving the project behind on
+	// exactly the runs that most need cleaning up. Same reasoning as the
+	// interrupt guard's destroy, which also runs after cancellation.
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), runProjectTimeout)
+	defer cancel()
+
 	secretKey := strings.TrimSpace(os.Getenv("SCW_SECRET_KEY"))
-	if err := runtime.Deps.RunProject.Delete(ctx, secretKey, projectID); err != nil {
+	if err := runtime.Deps.RunProject.Delete(cleanupCtx, secretKey, projectID); err != nil {
 		return []StageSummary{{Layer: "sandbox_deploy", Stage: "run_project_delete", Status: StageStatusFail}},
 			[]FailureSummary{{
 				Layer: "sandbox_deploy", Stage: "run_project_delete", Check: "delete",
