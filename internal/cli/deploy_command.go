@@ -73,6 +73,17 @@ func runDeployCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime
 		return &CLIError{Op: "deploy", Code: errorCodeUsage, Err: err}
 	}
 
+	// ADR-0025's run-owned project is wired for `run`/`test`, where create
+	// and delete happen inside one invocation. `deploy` deliberately keeps
+	// its project, so deleting it belongs to `live teardown` -- a separate
+	// increment. Until that exists, honouring the flag here would create a
+	// project nothing ever deletes, which is the leak this arc closes.
+	if runtime.Config.Scaleway.CreateRunProject {
+		return &CLIError{Op: "deploy", Code: errorCodeCommandFailed, Err: errors.New(
+			"scaleway.create_run_project is not supported by `deploy` yet: the project would outlive the run " +
+				"and nothing would delete it. Use `infrafactory run` for now, or turn the flag off")}
+	}
+
 	if !runtime.Config.Validation.Layers.SandboxDeploy.Enabled {
 		return &CLIError{Op: "deploy", Code: errorCodeCommandFailed, Err: errors.New(
 			"deploy applies to real infrastructure and requires validation.layers.sandbox_deploy.enabled")}

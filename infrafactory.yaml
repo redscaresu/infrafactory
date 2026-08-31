@@ -65,6 +65,27 @@ scaleway:
   # default. Created 2026-08-22 as the `infrafactory` project.
   fallback_project_id: "2397e80e-ec12-4a7e-819f-a2caba3867b6"
   credentials_source: env    # env | config-file
+  # ADR-0025. false keeps the run's project in the generated HCL. true
+  # creates it via the Account API before the apply and passes it as
+  # SCW_DEFAULT_PROJECT_ID, so resources with no project_id of their own
+  # -- scaleway_instance_private_nic has no such attribute, which is why
+  # no Scaleway compute scenario can satisfy vpc_required AND Layer 3
+  # today -- land in the run's own disposable project rather than the
+  # shared fallback above.
+  #
+  # Honoured wherever the Layer 3 apply goes through executeTest, which is
+  # both `test` and `run`. The project is deleted once the account is
+  # proven clean, or immediately if no state was ever written. A run whose
+  # destroy falls to run's auto-destroy-on-failure path keeps its project
+  # and says so -- the id is the handle to whatever survived. `deploy`
+  # refuses the flag outright for now: it keeps its project by design, so
+  # deletion belongs to `live teardown` (a later increment).
+  #
+  # Stays false until the gate fixtures move over (S167) and a real-cloud
+  # canary passes (S168). The gate applies fixture HCL that declares
+  # scaleway_account_project, and the gate is the artifact the talk rests
+  # on.
+  create_run_project: false
 
 validation:
   layers:

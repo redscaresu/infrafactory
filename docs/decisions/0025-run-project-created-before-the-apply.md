@@ -110,3 +110,32 @@ real-cloud canary has passed on the new one.
 **Not decided here.** Whether `vpc_required` should apply to scenarios that
 declare no private networking at all. This ADR makes the policy *satisfiable*; it
 does not argue the policy is right.
+
+## Amendment, 2026-08-31 (S165): the lifecycle, and where it stops
+
+The flag is honoured wherever the Layer 3 apply goes through `executeTest` —
+`test` and `run` both — creating the project before the apply and deleting it
+afterwards. Three things the implementation settled that the ADR had left open.
+
+**Deletion is conditional on the account, not on the destroy.** A run project is
+removed only when nothing of the run can still exist: the account was proven
+clean, or no state was ever written so there was nothing to create. Otherwise the
+project is **kept and reported as a skipped delete**, because its id is the handle
+to whatever survived — removing it would discard the only pointer to the leak.
+A codex pass caught the inverse of this: the delete was originally gated behind
+the destroy branch, so an apply failing at preflight, init or plan created a
+project and never removed it.
+
+**Creation failure is fatal to the run.** It does not fall back to the shared
+project. The caller asked for a run-owned project precisely so this run's strays
+would not sit next to every other run's, and silently applying into the shared
+one would give exactly what was being avoided.
+
+**`deploy` refuses the flag for now.** It keeps its project by design, so deletion
+belongs to `live teardown`; honouring the flag there before that exists would
+create projects nothing deletes. The refusal is explicit rather than silent.
+
+Known gap, deliberately left: a run whose destroy falls to `run`'s
+auto-destroy-on-failure path keeps its project. That path runs outside
+`executeTest` and has no access to the id. It is reported, not silent, and closing
+it belongs with the `deploy`/`teardown` work.

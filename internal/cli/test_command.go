@@ -577,8 +577,26 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 
 	deployResult, deployErr := runtime.Deps.MockDeploy.Run(ctx, outputDir, env, deployMode)
 	stages, failures = appendMockDeployResult(stages, failures, deployResult, deployErr)
+	// Declared out here because the destroy path below has to delete what
+	// the apply path created, and they are separate branches.
+	var runProjectID string
+
 	if deployErr == nil && sandboxEnabled {
-		sandboxEnv, sandboxEnvErr := sandboxCommandEnv(runtime)
+		// ADR-0025: the run's own project has to exist before the
+		// provider's environment is built, which is why it can no longer
+		// be a Terraform resource.
+		createdID, runProjectStages, runProjectFailures := ensureRunProject(ctx, runtime, sc.Name)
+		runProjectID = createdID
+		stages = append(stages, runProjectStages...)
+		failures = append(failures, runProjectFailures...)
+
+		sandboxEnv, sandboxEnvErr := sandboxCommandEnvForProject(runtime, runProjectID)
+		if len(runProjectFailures) > 0 {
+			// Creating it failed, so there is nothing to apply into.
+			// Falling back to the shared project would put this run's
+			// strays next to every other run's.
+			sandboxEnvErr = fmt.Errorf("run project unavailable")
+		}
 		if sandboxEnvErr != nil {
 			stages = append(stages, StageSummary{Layer: "sandbox_deploy", Stage: "preflight", Status: StageStatusFail})
 			failures = append(failures, FailureSummary{
@@ -670,6 +688,32 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 				if sandboxDestroyErr == nil {
 					stages, failures = appendOrphanSweepResult(ctx, stages, failures, runtime, sweepTarget, sweepTargetErr, sandboxEnv)
 				}
+			}
+		}
+		// One cleanup for every exit from the sandbox block, not just the
+		// happy one. An apply that fails at preflight, init or plan
+		// writes no state, so the destroy branch above never runs -- and
+		// the project it created would be left behind on the very runs
+		// most likely to be repeated. Empty projects are free and still
+		// accumulate.
+		//
+		// Deleted only when nothing of the run can still exist: either
+		// the account was proven clean, or no state was ever written so
+		// there was nothing to destroy. Otherwise it is kept and said
+		// so, because the project id is the handle to whatever remains.
+		if runProjectID != "" {
+			switch {
+			case len(failures) == 0, !liveStateMayHoldResources(outputDir):
+				deleteStages, deleteFailures := releaseRunProject(ctx, runtime, runProjectID)
+				stages = append(stages, deleteStages...)
+				failures = append(failures, deleteFailures...)
+			default:
+				stages = append(stages, StageSummary{
+					Layer: "sandbox_deploy", Stage: "run_project_delete", Status: StageStatusSkip,
+					Detail: fmt.Sprintf(
+						"kept %s: this run may still have resources, and the project is the handle to them. "+
+							"Destroy them, then delete it by hand", runProjectID),
+				})
 			}
 		}
 	} else if deployErr == nil {

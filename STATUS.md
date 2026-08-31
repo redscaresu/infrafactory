@@ -21,8 +21,19 @@ Last updated: 2026-08-31
   unwired, because accepting it silently would hand an operator a switch that
   changes nothing.
 
-  Next increment: the create/delete lifecycle, wired together so the path is
-  never half-safe. **S166 is deliberately not
+  The create/delete lifecycle is wired for the `test`/`run` path: the project is
+  created before the apply, and deleted once the account is proven clean or
+  immediately if no state was ever written. When resources may survive it is
+  **kept and reported**, because the project id is the handle to them. `deploy`
+  refuses the flag outright — it keeps its project by design, so deletion belongs
+  to `live teardown`.
+
+  Codex pass 22 caught a real leak: the delete had been gated behind the destroy
+  branch, so an apply failing at preflight/init/plan created a project and never
+  removed it — on exactly the runs most likely to be repeated.
+
+  Next increment: `deploy` + `live teardown`, so a live deployment's project is
+  deleted at teardown; then S167's fixture and prompt migration. **S166 is deliberately not
   in scope** — it replaces `AssertProjectDeletable`'s state-derived cross-check,
   which is the guard between teardown and real infrastructure.
 

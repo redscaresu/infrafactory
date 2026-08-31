@@ -117,11 +117,20 @@ type ScalewayConfig struct {
 	// Layer 1 requires a resource Layer 3 cannot create, and no Scaleway
 	// compute scenario satisfies both gates.
 	//
-	// NOT YET HONOURED by the runtime, and deliberately absent from
-	// infrafactory.yaml until it is: an operator-visible switch that
-	// silently does nothing is worse than no switch. The env plumbing
-	// lands in the next S165 increment; TestCreateRunProjectIsNotYetWired
-	// fails once it does, so this comment cannot outlive its truth.
+	// Honoured wherever the Layer 3 apply goes through executeTest, which
+	// is both `test` and `run` -- the project is created before the apply
+	// and deleted once the account is proven clean, or immediately if no
+	// state was ever written.
+	//
+	// Not yet covered: a run whose destroy is deferred to `run`'s
+	// auto-destroy-on-failure path keeps its project, reported as a
+	// skipped delete rather than removed, because the project id is the
+	// handle to whatever survived.
+	//
+	// `deploy` refuses the flag outright for now: that command keeps its
+	// project by design, so deleting it belongs to `live teardown` (a
+	// later increment), and honouring it today would create a project
+	// nothing deletes.
 	//
 	// Defaults to false. Both paths stay supported until the gate fixtures
 	// and prompts move over (S167) and a real-cloud canary passes (S168);
@@ -377,19 +386,6 @@ func Load(path string) (Config, error) {
 
 func validate(cfg Config) error {
 	var fields []FieldError
-
-	// Fail closed while the flag is unwired. Accepting `true` silently
-	// would hand an operator a switch that changes nothing: they would
-	// get no run-owned project and no error, and Layer 3 resources with
-	// no project_id of their own would still land in the shared fallback
-	// -- the exact outcome ADR-0025 exists to fix. Delete this check in
-	// the same commit that honours the flag.
-	if cfg.Scaleway.CreateRunProject {
-		fields = append(fields, FieldError{
-			Field: "scaleway.create_run_project",
-			Err:   "is not implemented yet (ADR-0025, S165 in progress): setting it would change nothing, so it is refused rather than silently ignored",
-		})
-	}
 
 	if cfg.Version == "" {
 		fields = append(fields, FieldError{Field: "version", Err: "is required"})

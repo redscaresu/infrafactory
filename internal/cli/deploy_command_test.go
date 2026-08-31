@@ -484,3 +484,25 @@ func TestDeployApplyIsTransparentWhenNotInterrupted(t *testing.T) {
 	assert.NotNil(t, result)
 	assert.NotContains(t, out.String(), "Interrupted")
 }
+
+// `deploy` keeps its project, so deleting it belongs to `live teardown`.
+// Until that exists, honouring the flag here would create a project
+// nothing ever deletes — the leak this arc closes.
+func TestDeployRefusesTheRunOwnedProjectFlag(t *testing.T) {
+	sandboxCredsForTest(t)
+	deploy := &fakeSandboxDeployHarness{}
+	rt, store, scenarioPath := deployTestRuntime(t, liveServiceScenarioYAML, deploy)
+	rt.Config.Scaleway.CreateRunProject = true
+	writeDeployableHCL(t, rt.OutputDir())
+
+	var out strings.Builder
+	err := runDeploy(t, rt, scenarioPath, &out)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not supported by `deploy` yet")
+	assert.Zero(t, deploy.calls, "nothing is applied")
+
+	records, _, listErr := store.List()
+	require.NoError(t, listErr)
+	assert.Empty(t, records)
+}
