@@ -144,8 +144,28 @@ func observeDeployment(
 		observation.Status = livestore.ObservationUnreachable
 	}
 
-	d.RecordObservation(observation)
-	if err := store.Put(d); err != nil {
+	// Re-read before writing. `live observe` is the command most likely
+	// to be on a cron, so it is the one most likely to be mid-probe when
+	// an operator runs `live teardown` -- and a read-modify-write over a
+	// probe that took seconds would put `state: live` back over a record
+	// teardown had just released, resurrecting a deployment that is
+	// already gone.
+	//
+	// This narrows the window rather than closing it; the store has no
+	// compare-and-swap. Narrowing it to the microseconds around one write
+	// is worth doing, and claiming more than that would be wrong.
+	fresh, err := store.Get(d.ID)
+	if err != nil {
+		return fail("record", fmt.Sprintf(
+			"%s was observed as %s but the record could not be re-read to save it: %v",
+			d.ID, observation.Status, err))
+	}
+	if fresh.State == livestore.StateReleased {
+		return skip("released while it was being probed")
+	}
+
+	fresh.RecordObservation(observation)
+	if err := store.Put(fresh); err != nil {
 		// The probe ran and the answer is being lost. Reported rather
 		// than dropped, because a silently unrecorded observation is
 		// indistinguishable from one that never happened -- and S156's

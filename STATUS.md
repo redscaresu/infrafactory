@@ -22,6 +22,13 @@ Last updated: 2026-08-31
   that firehose. `live ls` grew a `HEALTH` column, because an observation nobody
   can see is not a signal.
 
+  It also **re-reads the record before writing**. `observe` is the command most
+  likely to be on a cron, so it is the one most likely to be mid-probe when an
+  operator runs `live teardown` — and a read-modify-write over a probe that took
+  seconds would put `state: live` back over a record teardown had just released.
+  This narrows the window rather than closing it; the store has no
+  compare-and-swap, and claiming more than narrowing would be wrong.
+
   One probe per invocation, no retries: retrying would smear over exactly the
   flapping this exists to notice. Scheduling is a cron, like `live reap` — a
   daemon would be another thing to supervise for no signal cron does not give.
