@@ -22,6 +22,14 @@ Last updated: 2026-08-31
   that firehose. `live ls` grew a `HEALTH` column, because an observation nobody
   can see is not a signal.
 
+  **Converged in three codex passes (44–46)**, the first slice under the
+  one-clean-pass rule. Both findings were in code written for this PR, and pass
+  45's was in the fix shipped alongside pass 44's — caught only because the rule
+  change came with an obligation to re-read your own fix against its defect class.
+  Both were also **YAML-resident**: the gate workflow has no type system and no
+  test, and is the only place that both reads these invariants and can leak real
+  infrastructure.
+
   **Pass 44 corrected a false green.** A live deployment with no address was
   *skipped*, exiting zero — and the case comes from today's deploy path, not from
   legacy records: `registerDeployment` captures the address best-effort, so an
