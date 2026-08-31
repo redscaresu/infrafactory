@@ -3,6 +3,8 @@ package cli
 import (
 	"context"
 	"errors"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -137,4 +139,28 @@ func TestReleaseRunProjectRunsWhenNoStateWasEverWritten(t *testing.T) {
 	// file, which is the condition the cleanup keys off.
 	assert.False(t, liveStateMayHoldResources(t.TempDir()),
 		"no state means nothing was created, so the project is safe to delete")
+}
+
+// Apply and destroy must use the SAME provider default project. They were
+// asymmetric once: the apply used the run-owned project while destroy
+// rebuilt its environment from the shared fallback, so resources with no
+// project_id of their own would be looked for in the wrong project --
+// failing teardown or leaving them behind.
+//
+// A source audit rather than a unit test because the asymmetry lives in
+// which helper each call site picks, which is exactly what drifts. Same
+// idiom as cloud_prefix_lockstep_test.go.
+func TestPipelineNeverBuildsSandboxEnvWithoutTheRunProject(t *testing.T) {
+	source, err := os.ReadFile("test_command.go")
+	require.NoError(t, err)
+
+	for i, line := range strings.Split(string(source), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "//") || strings.HasPrefix(trimmed, "func sandboxCommandEnv(") {
+			continue
+		}
+		assert.NotContains(t, trimmed, "sandboxCommandEnv(runtime)",
+			"test_command.go:%d builds the Layer 3 environment without a run project; "+
+				"use sandboxCommandEnvForProject so apply and destroy agree", i+1)
+	}
 }

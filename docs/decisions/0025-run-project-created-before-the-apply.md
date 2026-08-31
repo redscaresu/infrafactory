@@ -139,3 +139,20 @@ Known gap, deliberately left: a run whose destroy falls to `run`'s
 auto-destroy-on-failure path keeps its project. That path runs outside
 `executeTest` and has no access to the id. It is reported, not silent, and closing
 it belongs with the `deploy`/`teardown` work.
+
+## Amendment, 2026-08-31 (S165, pass 23): apply and destroy must agree
+
+A run's apply and its destroy must use **the same** provider default project.
+They did not: the apply was wired to the run-owned project while the destroy
+rebuilt its environment from the shared fallback.
+
+That is worse than it sounds. Destroy refreshes and removes resources carrying no
+`project_id` of their own — the entire motivating case for this ADR — so it would
+have looked for them in the wrong project and either failed the teardown or left
+them running. A change made to stop projectless resources being stranded would
+have stranded them.
+
+The rule, stated so it cannot be re-derived incorrectly: **every Layer 3
+environment for a given run is built from the same project.** It is enforced by a
+source audit rather than a unit test, because the defect lives in which helper a
+call site picks — and no test of either helper would have caught it.

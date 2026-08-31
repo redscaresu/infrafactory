@@ -28,6 +28,12 @@ Last updated: 2026-08-31
   refuses the flag outright — it keeps its project by design, so deletion belongs
   to `live teardown`.
 
+  Codex pass 23 caught the asymmetry that mattered most: the apply used the
+  run-owned project while the **destroy** rebuilt its environment from the shared
+  fallback, so resources with no `project_id` of their own — the whole motivating
+  case — would be looked for in the wrong project at teardown. Guarded now by a
+  source audit, verified against injected drift.
+
   Codex pass 22 caught a real leak: the delete had been gated behind the destroy
   branch, so an apply failing at preflight/init/plan created a project and never
   removed it — on exactly the runs most likely to be repeated.

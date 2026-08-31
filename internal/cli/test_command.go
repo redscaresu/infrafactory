@@ -665,7 +665,13 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 		// sweep, telling the operator to chase a leak that cannot exist.
 		// run_command.go uses the same signal.
 		if sandboxEnabled && liveStateMayHoldResources(outputDir) {
-			sandboxEnv, sandboxEnvErr := sandboxCommandEnv(runtime)
+			// The SAME project the apply used. Destroy refreshes and
+			// removes resources that carry no project_id of their own,
+			// so pointing the provider back at the shared fallback here
+			// would look for them in the wrong project -- failing the
+			// teardown, or leaving them behind, for exactly the
+			// projectless resources this flag exists to support.
+			sandboxEnv, sandboxEnvErr := sandboxCommandEnvForProject(runtime, runProjectID)
 			if sandboxEnvErr != nil {
 				stages = append(stages, StageSummary{Layer: "sandbox_deploy", Stage: "destroy_preflight", Status: StageStatusFail})
 				failures = append(failures, FailureSummary{
