@@ -11,6 +11,7 @@ import (
 	"github.com/redscaresu/infrafactory/internal/feedback"
 	"github.com/redscaresu/infrafactory/internal/harness"
 	"github.com/spf13/cobra"
+	"github.com/stretchr/testify/assert"
 )
 
 const reapProjectID = "2397e80e-ec12-4a7e-819f-a2caba3867b6"
@@ -114,6 +115,11 @@ func TestReapDestroysThenVerifies(t *testing.T) {
 	if destroy.calls != 1 || sweep.calls != 1 {
 		t.Fatalf("reap must destroy then verify; destroy=%d sweep=%d", destroy.calls, sweep.calls)
 	}
+	// The sweep verifies the project is GONE, and since ADR-0025 tofu
+	// cannot delete it. Without this, every clean reap reported a leak.
+	projects := rt.Deps.RunProject.(*fakeRunProject)
+	assert.Equal(t, 1, projects.deletes, "reap must delete the run project itself")
+	assert.Equal(t, reapProjectID, projects.deletedID)
 }
 
 // Destroying is not the same as proving the account is clean.

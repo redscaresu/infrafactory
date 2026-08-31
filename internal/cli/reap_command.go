@@ -88,6 +88,15 @@ func runReapCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) 
 		stages = append(stages, autoCreatedPurgeStage(purged))
 	}
 	if destroyErr == nil {
+		// The project goes BEFORE the sweep, for the same reason it does
+		// in `test` and `live teardown`: since ADR-0025 `tofu destroy`
+		// cannot delete it -- it is not a Terraform resource -- and the
+		// sweep's whole job is to verify it is gone. Deleting it
+		// afterwards would make every clean reap report a leak.
+		projectStages, projectFailures := releaseRunProject(ctx, runtime, projectID)
+		stages = append(stages, projectStages...)
+		failures = append(failures, projectFailures...)
+
 		stages, failures = appendOrphanSweepResult(ctx, stages, failures, runtime, sweepTarget, sweepTargetErr, sandboxEnv)
 	}
 

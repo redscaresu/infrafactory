@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -92,9 +93,18 @@ func CaptureSweepTarget(workDir string) (*SweepTarget, error) {
 
 	state, err := loadLiveTerraformState(filepath.Join(workDir, LiveStateFilename))
 	if err != nil {
-		// No state means nothing was applied, so there are no strays to
-		// compute -- but the project still exists and must be verified.
-		return &SweepTarget{ProjectID: marker.ProjectID}, nil
+		// An ABSENT state means nothing was applied, so there are no
+		// strays to compute -- but the project still exists and must be
+		// verified.
+		if errors.Is(err, os.ErrNotExist) {
+			return &SweepTarget{ProjectID: marker.ProjectID}, nil
+		}
+		// Anything else -- unreadable, truncated, corrupt -- means the
+		// stray half of the sweep cannot run, and a sweep that reports
+		// clean without computing strays is the false green this whole
+		// mechanism exists to prevent.
+		return nil, fmt.Errorf("%w: %v, so strays outside project %s cannot be computed",
+			ErrOrphanSweepFailed, err, marker.ProjectID)
 	}
 
 	return &SweepTarget{

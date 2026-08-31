@@ -37,6 +37,21 @@ Last updated: 2026-08-31
   guard acts on, anything else is an error, because "we could not check" must not
   look like "already deleted".
 
+  **Cleanup ordering, from review passes 30 and 31.** The project is deleted
+  **before** the orphan sweep on every path — `test`, `reap` and `live teardown`
+  — because the sweep's job is to verify the project is gone and tofu can no
+  longer delete it. Getting this wrong made every *clean* teardown report a leak,
+  and it had to be fixed three times, once per path: the condition was right each
+  time and the set of places it ran was not. The sweep now takes its blast radius
+  from the marker, so a run that applied nothing is still verified, and an
+  unreadable state file is a sweep **failure** rather than a silent "no strays".
+
+  A deployment with a project but no state — the ordinary shape of an apply that
+  failed at preflight, init or plan — is now `live teardown`'s business rather
+  than the operator's: `reclaimable()` gates on the marker, not the state file,
+  and the no-resources path runs the guard, deletes the project, sweeps and
+  releases.
+
 - 📐 **S166 design written for review (2026-08-31)** —
   `docs/plans/s166-teardown-guard-design.md`. Not implemented: this is the slice
   that touches `AssertProjectDeletable`, the guard between an automated destroy

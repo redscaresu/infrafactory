@@ -9,6 +9,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 const testProjectID = "11111111-1111-1111-1111-111111111111"
@@ -147,6 +150,20 @@ func TestOrphanSweepRequiresTheRunProjectMarker(t *testing.T) {
 	if _, err := CaptureSweepTarget(dir); !errors.Is(err, ErrOrphanSweepFailed) {
 		t.Fatalf("without a marker the blast radius is unknown; expected ErrOrphanSweepFailed, got %v", err)
 	}
+}
+
+// "We could not read the state" is not "there were no strays" -- the
+// same rule the sweep applies to an unreachable API.
+func TestCaptureSweepTargetRefusesAnUnreadableState(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	require.NoError(t, WriteRunProjectMarker(dir, RunProject{ID: testProjectID, Name: RunProjectNamePrefix + "x"}))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, LiveStateFilename), []byte("{truncated"), 0o600))
+
+	_, err := CaptureSweepTarget(dir)
+
+	require.ErrorIs(t, err, ErrOrphanSweepFailed)
+	assert.Contains(t, err.Error(), "strays outside project")
 }
 
 // An apply that wrote no state still created a project, and the sweep

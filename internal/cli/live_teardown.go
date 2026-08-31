@@ -63,14 +63,11 @@ func tearDownDeployment(
 		return unreclaimable(detail)
 	}
 
-	statePath := filepath.Join(d.WorkDir, harness.LiveStateFilename)
-	if _, err := os.Stat(statePath); errors.Is(err, os.ErrNotExist) {
-		return unreclaimable(fmt.Sprintf(
-			"deployment %s has no %s (looked in %s). Its project %s may still be running; "+
-				"the record is kept rather than released so the leak stays visible",
-			d.ID, harness.LiveStateFilename, d.WorkDir, d.ProjectID))
-	}
-
+	// No early bail on a missing state file. Since ADR-0025 the project
+	// is created BEFORE the apply, so "no state" is the ordinary shape of
+	// a deploy that failed at preflight, init or plan: nothing to destroy
+	// with tofu, but a real project to delete. That case falls through to
+	// the no-resources path below, which deletes it and verifies.
 	// An empty state is the signature of a destroy that already ran, so
 	// re-running destroy would do nothing. It is NOT evidence the account
 	// is clean, and releasing on it alone would launder a previously
@@ -97,8 +94,26 @@ func tearDownDeployment(
 		sandboxEnv, envErr := sandboxCommandEnv(runtime)
 		if envErr != nil {
 			return unreclaimable(fmt.Sprintf(
-				"%s appears already destroyed, but the account cannot be verified: %v", d.ID, envErr))
+				"%s has nothing to destroy, but the account cannot be verified: %v", d.ID, envErr))
 		}
+
+		// The same guard the destroy path runs, for the same reason: this
+		// branch now DELETES a project, so it must prove first that the
+		// project is this run's. Without a marker it refuses, which is
+		// also what makes a record with neither state nor marker fail
+		// closed here rather than release quietly.
+		if err := assertRunProjectDeletable(ctx, runtime, d.WorkDir, d.ProjectID, sandboxEnv); err != nil {
+			return unreclaimable(fmt.Sprintf(
+				"refusing to release deployment %s: %v", d.ID, err))
+		}
+
+		// tofu never created the project and cannot remove it, so the
+		// delete happens here -- before the sweep, which exists to verify
+		// the project is gone. A project already deleted answers 404 and
+		// that is success, so this is safe to re-run.
+		projectStages, projectFailures := releaseRunProject(ctx, runtime, d.ProjectID)
+		stages = append(stages, projectStages...)
+		failures = append(failures, projectFailures...)
 
 		stages, failures = appendOrphanSweepResult(ctx, stages, failures, runtime,
 			&harness.SweepTarget{ProjectID: d.ProjectID}, nil, sandboxEnv)
@@ -108,12 +123,13 @@ func tearDownDeployment(
 
 		if err := store.MarkReleased(d.ID); err != nil {
 			return unreclaimable(fmt.Sprintf(
-				"%s was already destroyed and the account verified clean, but the record could not be released: %v",
+				"%s was cleaned up and the account verified clean, but the record could not be released: %v",
 				d.ID, err))
 		}
 		stages = append(stages, StageSummary{
 			Layer: "live", Stage: "release", Status: StageStatusPass,
-			Detail: fmt.Sprintf("%s was already destroyed; account re-verified, record released", d.ID),
+			Detail: fmt.Sprintf(
+				"%s held no resources; its project was deleted, the account verified, record released", d.ID),
 		})
 		return stages, failures
 	}
@@ -252,12 +268,20 @@ func runLiveForgetCommand(cmd *cobra.Command, args []string, runtime *CommandRun
 }
 
 // reclaimable reports whether teardown could still act on this record --
-// it decodes, it is not already released, and its state is on disk.
+// it decodes, it is not already released, and its run-project marker is
+// on disk.
+//
+// The marker, not the state file: since ADR-0025 a deploy that failed
+// before writing state still left a real project behind, and teardown
+// can delete it. Gating on state would send exactly those records to
+// `live forget`, retiring the record while the project kept existing.
+// The marker is also what the teardown guard reads, so a record without
+// one is the one teardown genuinely cannot act on.
 func reclaimable(d livestore.Deployment) bool {
 	if d.Undecodable || d.State == livestore.StateReleased || d.WorkDir == "" {
 		return false
 	}
-	if _, err := os.Stat(filepath.Join(d.WorkDir, harness.LiveStateFilename)); err != nil {
+	if _, err := os.Stat(filepath.Join(d.WorkDir, harness.RunProjectMarkerFilename)); err != nil {
 		return false
 	}
 	// Teardown needs a project id: without one AssertProjectDeletable

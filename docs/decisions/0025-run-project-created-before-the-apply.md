@@ -270,3 +270,23 @@ witness the teardown guard uses. Two consequences worth stating:
 The project is also deleted **before** the sweep runs, not after. The sweep
 verifies the project is gone; deleting it afterwards made every clean teardown
 report the project as a leak.
+
+### Follow-up, pass 31: the same ordering bug, two paths further along
+
+`reap` was missed when the delete moved ahead of the sweep, so it destroyed
+resources, deleted nothing, and then asked the API whether the project was gone.
+That is the third path this arc has had to fix for the same reason, and the
+pattern is worth naming: **the condition on whether to delete has been right
+every time; where and when it runs has been wrong five times.**
+
+Two further consequences of the project outliving Terraform:
+
+- **A deployment with a project but no state is teardown's business.** It is the
+  ordinary shape of an apply that failed at preflight, init or plan. `reclaimable`
+  now gates on the marker rather than the state file, and the no-resources
+  teardown path runs the guard, deletes the project, sweeps and releases. Sending
+  those records to `live forget` retired the record while the project kept
+  existing — the leak the record exists to prevent.
+- **An unreadable state file fails the sweep.** Treating every read error as
+  "nothing was applied" produced a target with no strays computed and a clean
+  verdict. Only `os.ErrNotExist` means nothing was applied.

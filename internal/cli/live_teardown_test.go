@@ -149,24 +149,53 @@ func TestTeardownRefusesTheOrganizationDefaultProject(t *testing.T) {
 // A record whose state has vanished must stay in the registry. Its
 // resources may still be running, and releasing it would retire the only
 // evidence that says so.
-func TestTeardownKeepsTheRecordWhenTheStateIsMissing(t *testing.T) {
+// Since ADR-0025 the project exists before the apply, so "no state" is
+// the ordinary shape of a deploy that failed at preflight, init or plan:
+// a real project and nothing for tofu to destroy. Teardown owns that
+// case -- telling the operator to delete it by hand was the leak.
+func TestTeardownDeletesTheProjectWhenNoStateWasEverWritten(t *testing.T) {
 	sandboxCredsForTest(t)
 	destroy, sweep := &fakeSandboxDestroyHarness{}, &fakeOrphanSweep{}
 	rt, store, workspace := liveTeardownRuntime(t, destroy, sweep)
+	projects := rt.Deps.RunProject.(*fakeRunProject)
 
 	d := liveDeploymentWithState(t, store, workspace, "dep-lost", -time.Minute)
 	require.NoError(t, os.Remove(filepath.Join(d.WorkDir, "terraform-live.tfstate")))
 
 	_, failures := tearDownDeployment(context.Background(), rt, store, d)
 
+	assert.Empty(t, failures)
+	assert.Zero(t, destroy.calls, "there is no state, so tofu has nothing to destroy")
+	assert.Equal(t, 1, projects.deletes, "but the project is real and gets deleted")
+	assert.Equal(t, reapProjectID, projects.deletedID)
+
+	got, err := store.Get(d.ID)
+	require.NoError(t, err)
+	assert.Equal(t, livestore.StateReleased, got.State, "and the record stops being reaped")
+}
+
+// The marker is what proves the project is this run's, so a record
+// without one must fail closed -- not release quietly on the path that
+// now deletes.
+func TestTeardownRefusesWhenNeitherStateNorMarkerExists(t *testing.T) {
+	sandboxCredsForTest(t)
+	destroy, sweep := &fakeSandboxDestroyHarness{}, &fakeOrphanSweep{}
+	rt, store, workspace := liveTeardownRuntime(t, destroy, sweep)
+	projects := rt.Deps.RunProject.(*fakeRunProject)
+
+	d := liveDeploymentWithState(t, store, workspace, "dep-blind", -time.Minute)
+	require.NoError(t, os.Remove(filepath.Join(d.WorkDir, "terraform-live.tfstate")))
+	require.NoError(t, os.Remove(filepath.Join(d.WorkDir, harness.RunProjectMarkerFilename)))
+
+	_, failures := tearDownDeployment(context.Background(), rt, store, d)
+
 	require.NotEmpty(t, failures)
-	assert.Contains(t, failures[0].Detail, "may still be running")
-	assert.Zero(t, destroy.calls)
+	assert.Contains(t, failures[0].Detail, "refusing to release")
+	assert.Zero(t, projects.deletes, "nothing proves which project this is")
 
 	got, err := store.Get(d.ID)
 	require.NoError(t, err)
 	assert.NotEqual(t, livestore.StateReleased, got.State, "the leak stays visible")
-	assert.True(t, got.Reapable(time.Now()), "and it is retried next pass")
 }
 
 func TestTeardownWithoutAWorkDirIsUnreclaimable(t *testing.T) {
@@ -331,8 +360,10 @@ func TestTeardownOfAnAlreadyDestroyedDeploymentReleasesInsteadOfCryingLeak(t *te
 
 	assert.Empty(t, failures, "an empty state means destroy already ran, not that something leaked")
 	assert.Zero(t, destroy.calls, "and there is nothing left to destroy")
+	assert.Equal(t, 1, rt.Deps.RunProject.(*fakeRunProject).deletes,
+		"tofu never owned the project, so this path deletes it")
 	require.NotEmpty(t, stages)
-	assert.Contains(t, stages[len(stages)-1].Detail, "already destroyed")
+	assert.Contains(t, stages[len(stages)-1].Detail, "record released")
 
 	got, err := store.Get(d.ID)
 	require.NoError(t, err)
