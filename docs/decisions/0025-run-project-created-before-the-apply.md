@@ -201,3 +201,14 @@ meant a cancelled run — Ctrl-C, a timeout — skipped cleanup entirely, leavin
 project behind on exactly the runs that most need it. The same reasoning the
 interrupt guard already applies to its destroy: the point of cleanup is to do
 work after cancellation.
+
+## Amendment, 2026-08-31 (S165, pass 27): validate before you create
+
+The run project is created only after the sealed environment validates. Creating
+it first meant a configuration certain to be rejected — a missing
+`SCW_ACCESS_KEY` — still produced a real project, with cleanup left to best
+effort.
+
+The rule generalises past this ADR, and is most of what this slice's review
+passes actually found: **an operation with a side effect goes after the checks
+that can refuse it**, not before them with cleanup as compensation.

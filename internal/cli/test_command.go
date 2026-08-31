@@ -582,20 +582,32 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 	var runProjectID string
 
 	if deployErr == nil && sandboxEnabled {
-		// ADR-0025: the run's own project has to exist before the
-		// provider's environment is built, which is why it can no longer
-		// be a Terraform resource.
-		createdID, runProjectStages, runProjectFailures := ensureRunProject(ctx, runtime, sc.Name)
-		runProjectID = createdID
-		stages = append(stages, runProjectStages...)
-		failures = append(failures, runProjectFailures...)
+		// Validate the sealed environment BEFORE creating anything. The
+		// credential and endpoint checks live in sandboxCommandEnv, and
+		// running them only after the Account API call would let a
+		// configuration that is going to be rejected -- a missing
+		// SCW_ACCESS_KEY, say -- still leave a real project behind,
+		// relying on best-effort cleanup for residue that should never
+		// have existed.
+		sandboxEnv, sandboxEnvErr := sandboxCommandEnvForProject(runtime, "")
 
-		sandboxEnv, sandboxEnvErr := sandboxCommandEnvForProject(runtime, runProjectID)
-		if len(runProjectFailures) > 0 {
-			// Creating it failed, so there is nothing to apply into.
-			// Falling back to the shared project would put this run's
-			// strays next to every other run's.
-			sandboxEnvErr = fmt.Errorf("run project unavailable")
+		if sandboxEnvErr == nil {
+			// ADR-0025: the run's own project has to exist before the
+			// provider's environment is built, which is why it can no
+			// longer be a Terraform resource.
+			createdID, runProjectStages, runProjectFailures := ensureRunProject(ctx, runtime, sc.Name)
+			runProjectID = createdID
+			stages = append(stages, runProjectStages...)
+			failures = append(failures, runProjectFailures...)
+
+			if len(runProjectFailures) > 0 {
+				// Creating it failed, so there is nothing to apply into.
+				// Falling back to the shared project would put this run's
+				// strays next to every other run's.
+				sandboxEnvErr = fmt.Errorf("run project unavailable")
+			} else if runProjectID != "" {
+				sandboxEnv, sandboxEnvErr = sandboxCommandEnvForProject(runtime, runProjectID)
+			}
 		}
 		if sandboxEnvErr != nil {
 			stages = append(stages, StageSummary{Layer: "sandbox_deploy", Stage: "preflight", Status: StageStatusFail})

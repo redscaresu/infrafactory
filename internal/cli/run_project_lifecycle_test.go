@@ -181,3 +181,20 @@ func TestReleaseRunProjectSurvivesACancelledRunContext(t *testing.T) {
 	require.Len(t, stages, 1)
 	assert.Equal(t, StageStatusPass, stages[0].Status)
 }
+
+// A configuration that is going to be rejected must not leave a real
+// project behind. ensureRunProject is only reached once the sealed
+// environment validates, so a missing credential produces no API call at
+// all rather than residue cleaned up on a best-effort basis.
+func TestNoProjectIsCreatedWhenTheSandboxEnvIsInvalid(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("SCW_SECRET_KEY", "secret")
+	t.Setenv("SCW_DEFAULT_ORGANIZATION_ID", "22222222-2222-2222-2222-222222222222")
+	t.Setenv("SCW_ACCESS_KEY", "") // the missing piece
+
+	rt := &CommandRuntime{}
+	_, err := sandboxCommandEnvForProject(rt, "")
+
+	require.Error(t, err, "the environment is rejected before any project could be created")
+	assert.Contains(t, err.Error(), "SCW_ACCESS_KEY")
+}

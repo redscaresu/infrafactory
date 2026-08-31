@@ -28,6 +28,11 @@ Last updated: 2026-08-31
   refuses the flag outright — it keeps its project by design, so deletion belongs
   to `live teardown`.
 
+  Codex pass 27: the project was created *before* the sealed environment was
+  validated, so a missing `SCW_ACCESS_KEY` would create a real project and then
+  fail preflight. Validated first now — an API side effect from a configuration
+  that was always going to be rejected is residue that should never exist.
+
   Codex pass 26 caught a regression from pass 25's own fix — lifting the cleanup
   out of the destroy branch lost the fact that destruction had *run*, so
   `--no-destroy` would delete a project whose resources are deliberately live.
