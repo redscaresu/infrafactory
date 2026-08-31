@@ -106,6 +106,44 @@ type S3Config struct {
 
 type ScalewayConfig struct {
 	CredentialsSource string `yaml:"credentials_source"`
+	// CreateRunProject switches Layer 3 from creating the run's project
+	// in the generated HCL to creating it through the Account API before
+	// tofu runs, then passing it as SCW_DEFAULT_PROJECT_ID (ADR-0025).
+	//
+	// It exists because scaleway_instance_private_nic has no project_id
+	// attribute, so it is created in the provider's DEFAULT project while
+	// its server is in the run's own -- and the API refuses the mismatch.
+	// Since vpc_required.rego denies any instance server without a NIC,
+	// Layer 1 requires a resource Layer 3 cannot create, and no Scaleway
+	// compute scenario satisfies both gates.
+	//
+	// Honoured wherever the Layer 3 apply goes through executeTest, which
+	// is both `test` and `run` -- the project is created before the apply
+	// and deleted once the account is proven clean, or immediately if no
+	// state was ever written.
+	//
+	// Not yet covered: a run whose destroy is deferred to `run`'s
+	// auto-destroy-on-failure path keeps its project, reported as a
+	// skipped delete rather than removed, because the project id is the
+	// handle to whatever survived.
+	//
+	// NOT USABLE ON ITS OWN YET: before S167 the HCL still declares
+	// scaleway_account_project, so enabling this gives a run two projects
+	// -- this one and the declared one. Nothing leaks, but it is waste,
+	// and the orphan sweep still derives its target from the declared
+	// resource. S167 removes it; S166 must land first, because the sweep
+	// target feeds AssertProjectDeletable.
+	//
+	// `deploy` refuses the flag outright for now: that command keeps its
+	// project by design, so deleting it belongs to `live teardown` (a
+	// later increment), and honouring it today would create a project
+	// nothing deletes.
+	//
+	// Defaults to false. Both paths stay supported until the gate fixtures
+	// and prompts move over (S167) and a real-cloud canary passes (S168);
+	// the gate applies fixture HCL that declares scaleway_account_project
+	// today, and the gate is the artifact the talk rests on.
+	CreateRunProject bool `yaml:"create_run_project"`
 	// Region and Zone are the real-Scaleway defaults for Layer 3. Layer 2
 	// never needs them (mockway ignores placement), but the real provider
 	// does, and leaving them unset makes the target location depend on

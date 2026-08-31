@@ -75,76 +75,12 @@ type Deployment struct {
 	// strays would be recomputed from.
 	SweepVerificationFailed bool `json:"sweep_verification_failed,omitempty"`
 
-	// Port and HealthPath are the service's own, snapshotted at deploy
-	// time rather than re-read from the scenario when a probe runs. The
-	// scenario is a file that changes; this record describes one
-	// deployment that already happened, and an observation attributed to
-	// a health path the deployment never had is worse than no
-	// observation (S154).
-	Port       int    `json:"port,omitempty"`
-	HealthPath string `json:"health_path,omitempty"`
-
-	// Observations are what `live observe` saw, oldest first, capped at
-	// MaxObservations. A live service can fail every probe forever, so
-	// the record cannot grow with it -- the corpus this eventually feeds
-	// has never faced a firehose, and the cap is where that starts.
-	Observations []Observation `json:"observations,omitempty"`
-
 	// Undecodable marks a record the store could not parse. It is never
 	// persisted: it exists so an unreadable file still reaches the
 	// reaper as a deployment rather than only as a log line. ADR-0024
 	// rule 3 says unreadable means expired, and a record that never
 	// entered the reapable set did not honour that.
 	Undecodable bool `json:"-"`
-}
-
-// ObservationStatus is what one probe of a live service concluded.
-type ObservationStatus string
-
-const (
-	// ObservationHealthy means the health path answered as expected.
-	ObservationHealthy ObservationStatus = "healthy"
-	// ObservationUnhealthy means the service answered, and answered
-	// wrongly -- a 503, say. The service is up and not working.
-	ObservationUnhealthy ObservationStatus = "unhealthy"
-	// ObservationUnreachable means the probe got no answer at all.
-	// Deliberately distinct from unhealthy: "we could not reach it" and
-	// "it told us it is broken" are different facts, and collapsing them
-	// would teach the wrong lesson downstream.
-	ObservationUnreachable ObservationStatus = "unreachable"
-)
-
-// MaxObservations bounds the ring kept on a record.
-//
-// A failing deployment emits one of these per probe for as long as it
-// lives, so this is the difference between a record and an append-only
-// log that grows until the disk does. Fifty is comfortably more than the
-// reproduction window S156 needs and small enough that a record stays
-// readable by a human.
-const MaxObservations = 50
-
-// Observation is one probe of one deployment's health path.
-type Observation struct {
-	At     time.Time         `json:"at"`
-	Status ObservationStatus `json:"status"`
-	// Detail is the reason, in the shape the pitfall extractors already
-	// take. Empty on a healthy probe: there is nothing to say.
-	Detail string `json:"detail,omitempty"`
-}
-
-// Healthy is the only status that means the service is working. Written
-// as an allow-list rather than `!= unhealthy` so a status added later is
-// not silently treated as fine.
-func (o Observation) Healthy() bool {
-	return o.Status == ObservationHealthy
-}
-
-// RecordObservation appends to the ring, dropping the oldest when full.
-func (d *Deployment) RecordObservation(o Observation) {
-	d.Observations = append(d.Observations, o)
-	if len(d.Observations) > MaxObservations {
-		d.Observations = d.Observations[len(d.Observations)-MaxObservations:]
-	}
 }
 
 // Expired reports whether the deployment's TTL has run out. A zero

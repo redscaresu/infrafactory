@@ -121,12 +121,7 @@ func RenderHumanSummary(result OutputResult) string {
 
 	var b strings.Builder
 	_, _ = fmt.Fprintf(&b, "Command: %s\n", normalized.Command)
-	// Omitted rather than printed empty: `live observe` and `live reap`
-	// span every deployment, so they belong to no one scenario, and a
-	// blank "Scenario:" reads as a value that failed to render.
-	if normalized.Scenario != "" {
-		_, _ = fmt.Fprintf(&b, "Scenario: %s\n", normalized.Scenario)
-	}
+	_, _ = fmt.Fprintf(&b, "Scenario: %s\n", normalized.Scenario)
 	_, _ = fmt.Fprintf(&b, "Status: %s\n", normalized.Status)
 
 	if len(normalized.Stages) > 0 {

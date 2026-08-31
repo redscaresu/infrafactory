@@ -1,5 +1,17 @@
+output "project_id" {
+  description = "ID of the bootstrapped Scaleway project"
+  value       = scaleway_account_project.main.id
+}
 
+output "project_name" {
+  description = "Name of the bootstrapped Scaleway project"
+  value       = scaleway_account_project.main.name
+}
 
+output "project_organization_id" {
+  description = "Organization the bootstrapped project belongs to"
+  value       = scaleway_account_project.main.organization_id
+}
 
 output "block_volume_id" {
   description = "ID of the application data block volume"

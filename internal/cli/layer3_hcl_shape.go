@@ -102,12 +102,10 @@ var layer3ChildScopedTypes = map[string][]string{
 }
 
 // layer3ProjectExemptTypes carry no project binding of any kind.
-//
-// scaleway_account_project used to be here because it IS the project.
-// Under ADR-0025 it is refused outright instead: the run's project is
-// created before the apply, so a stack that declares one would create a
-// SECOND project that nothing tracks and no teardown would delete.
-var layer3ProjectExemptTypes = map[string]bool{}
+// scaleway_account_project IS the project.
+var layer3ProjectExemptTypes = map[string]bool{
+	"scaleway_account_project": true,
+}
 
 // layer3UnreadableConfigExt reports whether tofu would load the file
 // automatically while validateLayer3HCLShape would not read it.
@@ -199,19 +197,18 @@ func validateLayer3HCLShape(outputDir string, allowedResourceTypes []string) err
 			}
 		}
 	}
-	// The teardown model assumes a single disposable project throughout:
-	// the marker records one project id, AssertRunProjectDeletable guards
-	// that one, and the orphan sweep asks the API about that one.
-	// Inverted by ADR-0025: the run's disposable project is created before
-	// the apply and handed to the provider, so a stack must declare NONE.
-	// Declaring one creates a second project that nothing tracks, no
-	// marker names and no teardown deletes -- which is the leak the
-	// single-project rule was written to prevent, arrived at from the
-	// other direction.
-	if projectResources > 0 {
-		problems = append(problems, fmt.Sprintf(
-			"%d scaleway_account_project resource(s) declared; the run's project is created before the apply and is the provider default, so a declared one would be a second project nothing tracks or destroys",
-			projectResources))
+	// Exactly one, not at least one. The teardown model assumes a single
+	// disposable project throughout: CaptureSweepTarget records one
+	// project id, AssertProjectDeletable guards that one, and the orphan
+	// sweep asks the API about that one. A stack with two projects passes
+	// a saw-at-least-one check, binds half its resources to the second,
+	// and leaves that half unverified by the sweep -- resources in a
+	// project nothing is looking at.
+	switch {
+	case projectResources == 0:
+		problems = append(problems, "no scaleway_account_project resource is declared, so this stack has no disposable project of its own to create and destroy")
+	case projectResources > 1:
+		problems = append(problems, fmt.Sprintf("%d scaleway_account_project resources are declared; the sweep verifies exactly one, so resources in the others would be destroyed and checked by nothing", projectResources))
 	}
 	if !sawCanonicalProvider {
 		// Omitting required_providers is not a safe default: tofu then
@@ -410,12 +407,6 @@ func layer3ContainmentProblems(resource *hclsyntax.Block, file string) []string 
 		name = resource.Labels[1]
 	}
 
-	if resourceType == "scaleway_account_project" {
-		return append(problems, fmt.Sprintf(
-			"%s: %s declares a %s; under ADR-0025 the run's project is created before the apply and handed to the provider, so a stack that declares one would create a SECOND project that nothing tracks and no teardown would delete. Remove it",
-			file, name, resourceType))
-	}
-
 	if layer3ProjectExemptTypes[resourceType] {
 		return problems
 	}
@@ -427,23 +418,12 @@ func layer3ContainmentProblems(resource *hclsyntax.Block, file string) []string 
 		return problems
 	}
 
-	// ADR-0025 inverts this rule. The run's project is created before the
-	// apply and handed to the provider as SCW_DEFAULT_PROJECT_ID, so a
-	// resource that sets NO project_id lands in it by construction --
-	// which is what makes scaleway_instance_private_nic, an attribute
-	// that cannot carry one, applicable at all.
-	//
-	// So project_id is now FORBIDDEN rather than required. Allowing it
-	// would let a configuration name some other project and escape the
-	// run's blast radius, which is exactly what the old binding rule
-	// existed to stop. Forbidding it is the stronger form of the same
-	// guarantee: there is no value to get wrong.
-	if _, hasProject := resource.Body.Attributes["project_id"]; hasProject {
+	if _, hasProject := resource.Body.Attributes["project_id"]; !hasProject {
 		return append(problems, fmt.Sprintf(
-			"%s: %s %s sets project_id; under ADR-0025 the run's project is the provider default, so a resource that names a project could place itself outside this run's blast radius. Remove the attribute",
+			"%s: %s %s sets no project_id, so it would be created in the fallback project rather than this run's disposable one; bind it to scaleway_account_project.<name>.id",
 			file, resourceType, name))
 	}
-	return problems
+	return layer3ProjectBindingProblems(resource, file)
 }
 
 // layer3ParentBindingProblems requires a child resource's parent id to be

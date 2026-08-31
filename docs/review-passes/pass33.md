@@ -1,49 +1,21 @@
-# Codex review pass 33 — S166+S167 cutover
+# S166 design review pass 33 — three findings, one root cause, all acted on
 
-`codex exec review --base main` on `s166-cutover` at `bc7f1bd`.
+Three separate findings, all the same mistake: the cutover decision was recorded
+in some places and not in the ones that framed it.
 
-Two findings, both accepted, both P1. Both are the cutover reaching a path that
-was written when the project came out of Terraform.
+- **`s166-teardown-guard-design.md`** — "out of scope: removing
+  `scaleway_account_project`, that is S167" directly contradicted the decision
+  that they are one slice. An implementer following it would have built a guard
+  with no input.
+- **`run-owned-project-plan.md`** — the whole "Migration, and why both paths
+  coexist" section, plus two risk rows describing a gap that no longer exists.
+- **`NEXT_SESSION.md`** — the S165 caveat and the blocker section both still
+  ordered S166 before S167.
 
-## [P1] Teardown destroyed with the wrong provider default project
+Fixed by grepping for every surviving mention of the old ordering rather than
+patching the three that were reported — the previous two passes on this file were
+each one-at-a-time fixes for the same class, which is how it took three passes.
 
-`live_teardown.go` built its environment with `sandboxCommandEnv(runtime)`,
-which passes an empty project, so `tofu destroy` ran with the **shared
-fallback** as the provider default while the apply that created those resources
-ran with the run's own project. A destroy is the inverse of an apply and must
-run in the same provider context; anything the provider resolves by project
-rather than by id refreshes against the wrong one.
-
-`reap` had the same call, and it already had the marker's project id in hand.
-
-Fixed: both use `sandboxCommandEnvForProject(runtime, <project>)`.
-
-## [P1] The interrupt guard never deleted the project
-
-`withSandboxInterruptGuard` destroys on Ctrl-C and then exits. Before the
-cutover `tofu destroy` took the project with it. Now it does not, so every
-interrupted Layer 3 run left an empty project — and an interrupt is the **one
-exit with no stage summary**, so unlike the other paths it could not even report
-what it kept.
-
-The same review of that function surfaced a second half the earlier passes
-missed: it bailed on a missing state file with "nothing to clean up". Since the
-project is created before the apply, an interrupt between those two points
-leaves a real project and no state — precisely the shape the message denied.
-
-Fixed: the guard reads the marker, and
-
-- state present → destroy, then delete the project;
-- no state but a marker → skip the destroy, delete the project, and say so;
-- neither → unchanged, genuinely nothing to clean up.
-
-Covered by `TestInterruptGuardDeletesTheProjectWhenNothingWasApplied` and an
-assertion added to `TestInterruptGuardDestroysLiveResources`.
-
-## Nothing declined this pass.
-
-Running total across passes 30–33: **six placements of "delete the project"
-have been wrong and none of the conditions have been.** Removing a deletion
-Terraform used to perform invalidated every path that had been depending on it
-implicitly, and the paths surfaced one review at a time rather than from any
-one reading of the diff.
+ADR-0025's stale parts were **superseded, not rewritten**: an ADR records what was
+decided when, so the original Migration paragraph and the pass-24 ordering
+amendment stay, with a new amendment saying explicitly that it supersedes both.

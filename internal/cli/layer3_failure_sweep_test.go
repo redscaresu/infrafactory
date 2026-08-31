@@ -36,8 +36,6 @@ func failingRunDeps(sweep *fakeOrphanSweep, destroy *fakeSandboxDestroyHarness) 
 				"main.tf":                 []byte("terraform {}\n"),
 				"project.tf":              []byte("resource \"scaleway_account_project\" \"main\" { name = \"test\" }\n"),
 				harness.LiveStateFilename: []byte(liveStateWithProject),
-				// ADR-0025: the sweep target comes from the marker now.
-				harness.RunProjectMarkerFilename: []byte(`{"project_id":"11111111-1111-1111-1111-111111111111","name":"if-run-t"}`),
 			}}, nil
 		}),
 		Static: &fakeStaticHarness{err: &harness.StageError{
@@ -46,7 +44,6 @@ func failingRunDeps(sweep *fakeOrphanSweep, destroy *fakeSandboxDestroyHarness) 
 		}},
 		MockDeploy:     &fakeMockDeployHarness{},
 		Destroy:        &fakeDestroyHarness{},
-		RunProject:     &fakeRunProject{created: harness.RunProject{ID: "run-proj-1", Name: "if-run-t"}},
 		SandboxDeploy:  &fakeSandboxDeployHarness{},
 		SandboxDestroy: destroy,
 		OrphanSweep:    sweep,

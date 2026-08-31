@@ -127,8 +127,12 @@ acceptance_criteria:
     }
   }
 }
+resource "scaleway_account_project" "main" {
+  name = "harness"
+}
 resource "scaleway_block_volume" "data" {
   size_in_gb = 1
+  project_id = scaleway_account_project.main.id
 }
 `)
 	}

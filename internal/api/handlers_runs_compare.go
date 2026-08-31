@@ -28,9 +28,9 @@ type compareResponse struct {
 }
 
 type compareDiffEntry struct {
-	Filename    string `json:"filename"`
-	Status      string `json:"status"` // added | removed | modified | unchanged
-	UnifiedDiff string `json:"unified_diff,omitempty"`
+	Filename     string `json:"filename"`
+	Status       string `json:"status"` // added | removed | modified | unchanged
+	UnifiedDiff  string `json:"unified_diff,omitempty"`
 }
 
 // handleRunCompare serves GET /api/runs/{scenario}/compare?run1=X&run2=Y.

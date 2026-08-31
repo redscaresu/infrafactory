@@ -10,6 +10,18 @@ variable "zone" {
   default     = "fr-par-1"
 }
 
+variable "project_name" {
+  description = "Name of the bootstrapped Scaleway project"
+  type        = string
+  default     = "infrafactory-block-paris"
+}
+
+variable "project_description" {
+  description = "Description of the bootstrapped Scaleway project"
+  type        = string
+  default     = "Bootstrapped project for the block-paris scenario"
+}
+
 variable "volume_name" {
   description = "Name of the application data block volume"
   type        = string

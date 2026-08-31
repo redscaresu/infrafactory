@@ -16,8 +16,6 @@ import (
 	"github.com/redscaresu/infrafactory/internal/harness"
 	"github.com/redscaresu/infrafactory/internal/runstore"
 	"github.com/spf13/cobra"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestRunCommandConvergesOnFirstIteration(t *testing.T) {
@@ -707,8 +705,8 @@ func TestRunCommandUsesSandboxLayerWhenEnabled(t *testing.T) {
 	opts.deps = RuntimeDependencies{
 		Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
 			return &generator.GeneratedCode{Files: map[string][]byte{
-				"main.tf":   []byte("terraform {}\n"),
-				"volume.tf": []byte("resource \"scaleway_block_volume\" \"sandbox\" { size_in_gb = 1 }\n"),
+				"main.tf":    []byte("terraform {}\n"),
+				"project.tf": []byte("resource \"scaleway_account_project\" \"sandbox\" { name = \"test\" }\n"),
 			}}, nil
 		}),
 		Static: &fakeStaticHarness{result: &harness.StaticResult{
@@ -724,7 +722,6 @@ func TestRunCommandUsesSandboxLayerWhenEnabled(t *testing.T) {
 			StateSnapshot: []byte(`{"instance":{"servers":[]}}`),
 			OrphanCount:   0,
 		}},
-		RunProject:     &fakeRunProject{created: harness.RunProject{ID: "run-proj-1", Name: "if-run-t"}},
 		SandboxDeploy:  sandboxDeploy,
 		SandboxDestroy: sandboxDestroy,
 		OrphanSweep:    &fakeOrphanSweep{},
@@ -1200,18 +1197,13 @@ func TestRunCommandAutoDestroysRealResourcesOnFailure(t *testing.T) {
 		Generator: generator.SeedGeneratorFunc(func(_ context.Context, _ generator.Request) (*generator.GeneratedCode, error) {
 			return &generator.GeneratedCode{Files: map[string][]byte{
 				"main.tf":                 []byte("terraform {}\n"),
-				"volume.tf":               []byte("resource \"scaleway_block_volume\" \"sandbox\" { size_in_gb = 1 }\n"),
+				"project.tf":              []byte("resource \"scaleway_account_project\" \"sandbox\" { name = \"test\" }\n"),
 				harness.LiveStateFilename: []byte(liveStateWithProject),
-				// A prior sandbox deploy leaves BOTH: ensureRunProject
-				// writes the marker into the output dir before the apply,
-				// so state without one is not a shape a run can produce.
-				harness.RunProjectMarkerFilename: []byte(`{"project_id":"11111111-1111-1111-1111-111111111111","name":"if-run-t"}`),
 			}}, nil
 		}),
 		Static:         &fakeStaticHarness{err: &harness.StageError{StageResult: harness.StageResult{Stage: "validate", Cmd: []string{"tofu", "validate"}}, Err: errors.New("validate failed")}},
 		MockDeploy:     &fakeMockDeployHarness{},
 		Destroy:        &fakeDestroyHarness{},
-		RunProject:     &fakeRunProject{created: harness.RunProject{ID: "run-proj-1", Name: "if-run-t"}},
 		SandboxDeploy:  &fakeSandboxDeployHarness{},
 		SandboxDestroy: sandboxDestroy,
 		OrphanSweep:    &fakeOrphanSweep{},
@@ -1230,55 +1222,6 @@ func TestRunCommandAutoDestroysRealResourcesOnFailure(t *testing.T) {
 	if sandboxDestroy.calls != 1 {
 		t.Fatalf("expected auto-destroy of real resources on failure, got %d destroy calls", sandboxDestroy.calls)
 	}
-}
-
-// Prior state with no marker cannot be destroyed faithfully: the apply
-// ran with the run's own project as the provider default and nothing
-// here can say which one that was. Refusing beats destroying against the
-// shared fallback -- but silence would be worse than either, so the
-// operator gets the reason and the recovery command.
-func TestRunCommandRefusesAutoDestroyWhenTheRunProjectIsUnknown(t *testing.T) {
-	h := newCommandTestHarness(t)
-	outputRoot := filepath.Join(h.WorkspaceDir, "output")
-	sandboxCredsForTest(t)
-
-	sandboxDestroy := &fakeSandboxDestroyHarness{
-		result: &harness.SandboxDestroyResult{Destroy: harness.StageResult{Stage: "destroy"}},
-	}
-	opts := isolatedRunOpts(h, func(cfg config.Config) config.Config {
-		cfg.Paths.Output = outputRoot
-		cfg.Validation.Layers.SandboxDeploy.Enabled = true
-		cfg.Agent.RepairIterationsMax = 1
-		return cfg
-	})
-	opts.deps = RuntimeDependencies{
-		Generator: generator.SeedGeneratorFunc(func(_ context.Context, _ generator.Request) (*generator.GeneratedCode, error) {
-			// State, deliberately with NO marker beside it.
-			return &generator.GeneratedCode{Files: map[string][]byte{
-				"main.tf":                 []byte("terraform {}\n"),
-				harness.LiveStateFilename: []byte(liveStateWithProject),
-			}}, nil
-		}),
-		Static:         &fakeStaticHarness{err: &harness.StageError{StageResult: harness.StageResult{Stage: "validate", Cmd: []string{"tofu", "validate"}}, Err: errors.New("validate failed")}},
-		MockDeploy:     &fakeMockDeployHarness{},
-		Destroy:        &fakeDestroyHarness{},
-		RunProject:     &fakeRunProject{created: harness.RunProject{ID: "run-proj-1", Name: "if-run-t"}},
-		SandboxDeploy:  &fakeSandboxDeployHarness{},
-		SandboxDestroy: sandboxDestroy,
-		OrphanSweep:    &fakeOrphanSweep{},
-		RealProbe:      &fakeRealProbeHarness{result: &harness.RealProbeResult{}},
-	}
-
-	cmd := newRunCommandForTest(opts)
-	out := &bytes.Buffer{}
-	cmd.SetOut(out)
-	cmd.SetErr(&bytes.Buffer{})
-	cmd.SetArgs([]string{h.ScenarioPath, "--config", h.ConfigPath, "--output", string(OutputModeJSON)})
-
-	require.Error(t, cmd.Execute())
-	assert.Zero(t, sandboxDestroy.calls, "destroying against the shared fallback is not the inverse of the apply")
-	assert.Contains(t, out.String(), "auto_destroy_preflight")
-	assert.Contains(t, out.String(), "real resources are live and were NOT destroyed")
 }
 
 func TestRunCommandNoDestroyPreservesRealResourcesOnFailure(t *testing.T) {
@@ -1301,18 +1244,13 @@ func TestRunCommandNoDestroyPreservesRealResourcesOnFailure(t *testing.T) {
 		Generator: generator.SeedGeneratorFunc(func(_ context.Context, _ generator.Request) (*generator.GeneratedCode, error) {
 			return &generator.GeneratedCode{Files: map[string][]byte{
 				"main.tf":                 []byte("terraform {}\n"),
-				"volume.tf":               []byte("resource \"scaleway_block_volume\" \"sandbox\" { size_in_gb = 1 }\n"),
+				"project.tf":              []byte("resource \"scaleway_account_project\" \"sandbox\" { name = \"test\" }\n"),
 				harness.LiveStateFilename: []byte(liveStateWithProject),
-				// A prior sandbox deploy leaves BOTH: ensureRunProject
-				// writes the marker into the output dir before the apply,
-				// so state without one is not a shape a run can produce.
-				harness.RunProjectMarkerFilename: []byte(`{"project_id":"11111111-1111-1111-1111-111111111111","name":"if-run-t"}`),
 			}}, nil
 		}),
 		Static:         &fakeStaticHarness{err: &harness.StageError{StageResult: harness.StageResult{Stage: "validate", Cmd: []string{"tofu", "validate"}}, Err: errors.New("validate failed")}},
 		MockDeploy:     &fakeMockDeployHarness{},
 		Destroy:        &fakeDestroyHarness{},
-		RunProject:     &fakeRunProject{created: harness.RunProject{ID: "run-proj-1", Name: "if-run-t"}},
 		SandboxDeploy:  &fakeSandboxDeployHarness{},
 		SandboxDestroy: sandboxDestroy,
 		OrphanSweep:    &fakeOrphanSweep{},
@@ -1505,8 +1443,8 @@ acceptance_criteria:
 	opts.deps = RuntimeDependencies{
 		Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
 			return &generator.GeneratedCode{Files: map[string][]byte{
-				"main.tf":   []byte("terraform {}\n"),
-				"volume.tf": []byte("resource \"scaleway_block_volume\" \"sandbox\" { size_in_gb = 1 }\n"),
+				"main.tf":    []byte("terraform {}\n"),
+				"project.tf": []byte("resource \"scaleway_account_project\" \"sandbox\" { name = \"test\" }\n"),
 			}}, nil
 		}),
 		Static: &fakeStaticHarness{result: &harness.StaticResult{
@@ -1522,7 +1460,6 @@ acceptance_criteria:
 			StateSnapshot: []byte(`{"instance":{"servers":[]}}`),
 			OrphanCount:   0,
 		}},
-		RunProject:     &fakeRunProject{created: harness.RunProject{ID: "run-proj-1", Name: "if-run-t"}},
 		SandboxDeploy:  sandboxDeploy,
 		SandboxDestroy: sandboxDestroy,
 		OrphanSweep:    &fakeOrphanSweep{},

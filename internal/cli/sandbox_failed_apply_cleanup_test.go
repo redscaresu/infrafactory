@@ -60,8 +60,10 @@ terraform {
     }
   }
 }
+resource "scaleway_account_project" "main" { name = "t" }
 resource "scaleway_block_volume" "data" {
   size_in_gb = 1
+  project_id = scaleway_account_project.main.id
 }`
 	if err := os.WriteFile(filepath.Join(outputDir, "main.tf"), []byte(hcl), 0o600); err != nil {
 		t.Fatalf("write hcl: %v", err)
@@ -98,7 +100,6 @@ func sandboxCleanupOpts(outputRoot string, sandboxDeploy *fakeSandboxDeployHarne
 					OrphanCount:   0,
 				},
 			},
-			RunProject:     &fakeRunProject{created: harness.RunProject{ID: "run-proj-1", Name: "if-run-t"}},
 			SandboxDeploy:  sandboxDeploy,
 			SandboxDestroy: sandboxDestroy,
 			OrphanSweep:    sweep,
@@ -393,8 +394,10 @@ func TestDisallowedResourceTypeNeverReachesTheRealAPI(t *testing.T) {
 	// the allowlist below.
 	// Bound to the run's project like any real stack, so the refusal
 	// under test is the allowlist one and not a containment one.
-	hcl := `resource "scaleway_k8s_cluster" "expensive" {
+	hcl := `resource "scaleway_account_project" "main" { name = "x" }
+resource "scaleway_k8s_cluster" "expensive" {
   name       = "nope"
+  project_id = scaleway_account_project.main.id
 }`
 	if err := os.WriteFile(filepath.Join(dir, "main.tf"), []byte(hcl), 0o600); err != nil {
 		t.Fatalf("write hcl: %v", err)

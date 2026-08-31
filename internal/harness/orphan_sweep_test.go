@@ -9,9 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 const testProjectID = "11111111-1111-1111-1111-111111111111"
@@ -21,11 +18,6 @@ func writeSweepLiveState(t *testing.T, dir, body string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(dir, LiveStateFilename), []byte(body), 0o600); err != nil {
 		t.Fatalf("write live state: %v", err)
-	}
-	// ADR-0025: CaptureSweepTarget takes the project from the marker, not
-	// from a scaleway_account_project in state.
-	if err := WriteRunProjectMarker(dir, RunProject{ID: testProjectID, Name: RunProjectNamePrefix + "sweep"}); err != nil {
-		t.Fatalf("write marker: %v", err)
 	}
 }
 
@@ -136,51 +128,14 @@ func TestOrphanSweepDetectsResourceOutsideRunProject(t *testing.T) {
 	}
 }
 
-// ADR-0025 moved the blast radius from the state file to the marker, so
-// this is the shape that now means "we cannot tell what to verify".
-func TestOrphanSweepRequiresTheRunProjectMarker(t *testing.T) {
+func TestOrphanSweepRequiresProjectInState(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	// State but no marker: nothing says which project this run owns.
-	if err := os.WriteFile(filepath.Join(dir, LiveStateFilename),
-		[]byte(`{"resources":[{"type":"scaleway_block_volume","instances":[{"attributes":{"id":"vol-1"}}]}]}`), 0o600); err != nil {
-		t.Fatalf("write live state: %v", err)
-	}
+	writeSweepLiveState(t, dir, `{"resources":[{"type":"scaleway_block_volume","instances":[{"attributes":{"id":"vol-1"}}]}]}`)
 
-	if _, err := CaptureSweepTarget(dir); !errors.Is(err, ErrOrphanSweepFailed) {
-		t.Fatalf("without a marker the blast radius is unknown; expected ErrOrphanSweepFailed, got %v", err)
-	}
-}
-
-// "We could not read the state" is not "there were no strays" -- the
-// same rule the sweep applies to an unreachable API.
-func TestCaptureSweepTargetRefusesAnUnreadableState(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	require.NoError(t, WriteRunProjectMarker(dir, RunProject{ID: testProjectID, Name: RunProjectNamePrefix + "x"}))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, LiveStateFilename), []byte("{truncated"), 0o600))
-
-	_, err := CaptureSweepTarget(dir)
-
-	require.ErrorIs(t, err, ErrOrphanSweepFailed)
-	assert.Contains(t, err.Error(), "strays outside project")
-}
-
-// An apply that wrote no state still created a project, and the sweep
-// must still verify it.
-func TestCaptureSweepTargetWorksWithoutState(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	if err := WriteRunProjectMarker(dir, RunProject{ID: testProjectID, Name: RunProjectNamePrefix + "x"}); err != nil {
-		t.Fatalf("write marker: %v", err)
-	}
-
-	target, err := CaptureSweepTarget(dir)
-	if err != nil {
-		t.Fatalf("a marker with no state is still verifiable: %v", err)
-	}
-	if target.ProjectID != testProjectID {
-		t.Fatalf("got project %q, want %q", target.ProjectID, testProjectID)
+	sweep := NewScalewayOrphanSweepWithDoer("https://api.example", respondWith(http.StatusNotFound, `{}`))
+	if _, err := sweepDir(t, sweep, dir); !errors.Is(err, ErrOrphanSweepFailed) {
+		t.Fatalf("state without a project resource means the blast radius is unknown; expected ErrOrphanSweepFailed, got %v", err)
 	}
 }
 

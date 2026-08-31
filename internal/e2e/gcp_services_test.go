@@ -326,7 +326,6 @@ type gcpStateExpect struct {
 //     creationTime on the addition side is the expected outcome.
 //   - iam/keys: google_service_account_key regenerates on every
 //     refresh by design (see the provider's `keepers` documentation).
-//
 // Even when a collection is in this list the harness still asserts a
 // stable logical-key set (and a per-SA index for iam/keys) so a wipe
 // or unexpected migration is not silently accepted.
@@ -355,10 +354,9 @@ func gcpStateItemCount(state map[string]any, root, collection string) int {
 
 // runGCPServiceScenario drives the full Create → (optional) Update →
 // Delete lifecycle for a GCP-service scenario:
-//  1. --no-destroy with `files`         → proves Create + post-apply state.
-//  2. --no-destroy with `update.files`  → proves Update (only if update != nil).
-//  3. final run with `update.files`     → proves Delete via orphan-free teardown.
-//
+//   1. --no-destroy with `files`         → proves Create + post-apply state.
+//   2. --no-destroy with `update.files`  → proves Update (only if update != nil).
+//   3. final run with `update.files`     → proves Delete via orphan-free teardown.
 // Every stage must end with target_reached. The update stage's verify
 // callback inspects fakegcp state to confirm the mutation actually
 // surfaced (otherwise an "update" might silently be a recreate or a
