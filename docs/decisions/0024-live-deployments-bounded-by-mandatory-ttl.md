@@ -448,3 +448,36 @@ response is `unchecked`, and only a complete one can produce `unconfirmed`.
 Every `unchecked` carries the reason it was not checked — "no version_path
 declared" is a lie for a declared path that could not be reached, and that
 distinction is the whole point of having three states.
+
+## Amendment, 2026-08-31 (S155b): an apply is not an upgrade
+
+`live upgrade` rolls a deployment onto new configuration in place — same project,
+same workdir, so the address survives.
+
+**infrafactory does not produce the new HCL.** It owns applying it safely: into
+the project the deployment already owns, under the same deny-by-default checks a
+first deploy runs, and with proof afterwards that the version changed. This
+composes with however the configuration was produced, and keeps the generator out
+of the live path.
+
+Not parameterised through `TF_VAR`, deliberately. `SandboxStripEnv` removes
+`TF_VAR_*` because the cost bounds read a variable's **default** to decide blast
+radius; an injected variable would make those checks vouch for a number that never
+reaches the API. Handing over whole HCL keeps every check applying to the
+configuration actually applied.
+
+Three rules:
+
+- **A successful apply is not an upgrade.** Terraform reaching its desired state
+  says nothing about whether the service restarted, pulled the image, or ran its
+  user data. Reporting an upgrade on the strength of the apply is the same error
+  as trusting the record over the service, one step later.
+- **An upgrade refuses to start from a contradicted version.** Rolling forward
+  from a version the service denies would record a transition that never happened.
+  Unchecked is permitted and stated; contradicted is not.
+- **The superseded configuration is kept** in `.infrafactory-previous/`, one
+  generation deep. `ExtractFixPitfall` produces prescriptive rules by diffing a
+  failing configuration against a passing one, and a live failure has no "next
+  iteration that fixed it" — but an upgrade has a before and an after, which is
+  the same shape. Discarding it would leave live signals at the weakest class of
+  lesson.

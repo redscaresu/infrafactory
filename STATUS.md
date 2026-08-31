@@ -4,6 +4,35 @@ Last updated: 2026-08-31
 
 ## Current phase
 
+- 🚀 **S155b: `live upgrade` — an apply is not an upgrade (2026-08-31)** —
+  rolls a live deployment onto new configuration **in place**: same project, same
+  workdir, so the load balancer and its address survive.
+
+  **infrafactory does not invent the new HCL.** It owns the part that is hard to
+  get right — applying it into the project the deployment already owns, under the
+  same deny-by-default checks a first deploy runs, and proving afterwards that the
+  version actually changed. That composes with however the HCL was produced.
+
+  **Deliberately not parameterised through `TF_VAR`.** `SandboxStripEnv` removes
+  `TF_VAR_*` because the cost bounds read a variable's *default* to decide blast
+  radius, so an injected variable would make those checks vouch for a number that
+  never reaches the API. Handing over whole HCL keeps every existing check
+  applying to the configuration that is actually applied.
+
+  Three properties worth naming:
+
+  - **A successful apply is not an upgrade.** Terraform reaching its desired state
+    does not mean the service is running the new version — the instance may not
+    have restarted, the image may not have been pulled, the user data may never
+    have run. `upgrade_verify` fails on exactly that, and it is the whole point.
+  - **It refuses to start from a version the service contradicts**, because that
+    would record a v1→v2 transition that never happened. Unchecked is allowed and
+    said out loud; contradicted is not.
+  - **The previous HCL is kept** in `.infrafactory-previous/`. That pair either
+    side of one change is the diff `ExtractFixPitfall` needs and cannot
+    reconstruct — it is what lets S156 produce prescriptive rules rather than the
+    weakest class of lesson.
+
 - 🔍 **S155a: the record states intent; only the service states fact (2026-08-31)** —
   `deploy` records the **declared** image and tag, and the canary showed how far
   that drifts: the record said `nginx:1.27` while the instance served

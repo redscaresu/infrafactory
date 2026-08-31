@@ -49,6 +49,10 @@ type fakeSandboxDeployHarness struct {
 	err     error
 	calls   int
 	lastCtx context.Context
+	// onRun fires during the apply, so a test can move the world at the
+	// moment a real apply would -- an upgrade's version changes because
+	// the apply changed it, not before.
+	onRun func()
 }
 
 // Run writes a minimal terraform-live.tfstate, because a real apply
@@ -57,6 +61,9 @@ type fakeSandboxDeployHarness struct {
 // fail at capture -- which is correct fail-closed behaviour, just not
 // what these tests are exercising.
 func (f *fakeSandboxDeployHarness) Run(ctx context.Context, workDir string, _ map[string]string) (*harness.SandboxDeployResult, error) {
+	if f.onRun != nil {
+		f.onRun()
+	}
 	f.calls++
 	f.lastCtx = ctx
 	if f.err == nil && workDir != "" {

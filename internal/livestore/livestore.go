@@ -75,6 +75,10 @@ type Deployment struct {
 	// strays would be recomputed from.
 	SweepVerificationFailed bool `json:"sweep_verification_failed,omitempty"`
 
+	// UpgradedAt is when this deployment was last rolled onto new
+	// configuration. Zero means never.
+	UpgradedAt time.Time `json:"upgraded_at,omitempty"`
+
 	// VersionPath, when declared, is probed to check that the service is
 	// running the version this record claims. Snapshotted with the rest.
 	VersionPath string `json:"version_path,omitempty"`
