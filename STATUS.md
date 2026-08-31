@@ -44,6 +44,14 @@ Last updated: 2026-08-31
   the cloud?* — which is the real fix: one question answered consistently rather
   than three patches.
 
+  Pass 52 closed it: `upgrade` never checked the `sandbox_deploy.enabled` opt-in,
+  so Layer 3 could be off and an upgrade would still apply to the real project —
+  a gate on one entry point and not the other guards nothing. And an environment
+  failure could still leave unapplied configuration behind, which was **fixed by
+  reordering rather than another rollback**: everything that can fail without
+  touching the workdir now happens before the part that does. Ordering beats
+  compensating — one rollback path instead of one per early return.
+
   - **The previous HCL is kept** in `.infrafactory-previous/`. That pair either
     side of one change is the diff `ExtractFixPitfall` needs and cannot
     reconstruct — it is what lets S156 produce prescriptive rules rather than the

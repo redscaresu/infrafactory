@@ -407,3 +407,50 @@ func TestUpgradeKeepsTheNewHCLWhenTheApplyRan(t *testing.T) {
 	assert.Contains(t, string(current), "size_in_gb = 2",
 		"something may be running from this configuration; reverting would hide it")
 }
+
+// An upgrade applies to real infrastructure exactly as a first deploy
+// does. A gate that guards one entry point and not the other guards
+// nothing.
+func TestUpgradeRequiresTheRealDeployOptIn(t *testing.T) {
+	sandboxCredsForTest(t)
+	deploy := &fakeSandboxDeployHarness{}
+	rt, store := upgradeRuntime(t, &stagingVersionProbe{running: "nginx/1.27.4"}, deploy)
+	rt.Config.Validation.Layers.SandboxDeploy.Enabled = false
+	d := upgradeableDeployment(t, store, "dep-optout", "1.27")
+
+	err := runUpgrade(t, rt, d.ID, &strings.Builder{}, "--from", newHCLDir(t), "--tag", "1.28")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "sandbox_deploy.enabled")
+	assert.Zero(t, deploy.calls, "Layer 3 is off, so nothing reaches the real project")
+
+	// And the workdir is untouched: the refusal came before the swap.
+	current, readErr := os.ReadFile(filepath.Join(d.WorkDir, "main.tf"))
+	require.NoError(t, readErr)
+	assert.Contains(t, string(current), "size_in_gb = 1")
+}
+
+// Everything that can fail without touching the workdir happens before
+// the destructive swap, so an environment problem cannot leave the
+// workdir holding configuration that was never applied.
+func TestUpgradeLeavesTheWorkdirAloneWhenTheEnvironmentIsUnusable(t *testing.T) {
+	sandboxCredsForTest(t)
+	// No organisation id: sandboxCommandEnvForProject refuses.
+	t.Setenv("SCW_DEFAULT_ORGANIZATION_ID", "")
+	deploy := &fakeSandboxDeployHarness{}
+	rt, store := upgradeRuntime(t, &stagingVersionProbe{running: "nginx/1.27.4"}, deploy)
+	d := upgradeableDeployment(t, store, "dep-noenv", "1.27")
+
+	require.Error(t, runUpgrade(t, rt, d.ID, &strings.Builder{},
+		"--from", newHCLDir(t), "--tag", "1.28"))
+
+	assert.Zero(t, deploy.calls)
+	current, err := os.ReadFile(filepath.Join(d.WorkDir, "main.tf"))
+	require.NoError(t, err)
+	assert.Contains(t, string(current), "size_in_gb = 1",
+		"a failure before the apply must not leave unapplied configuration behind")
+
+	got, storeErr := store.Get(d.ID)
+	require.NoError(t, storeErr)
+	assert.Equal(t, "1.27", got.Tag)
+}

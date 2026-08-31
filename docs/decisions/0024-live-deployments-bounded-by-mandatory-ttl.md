@@ -500,3 +500,13 @@ describes something that was never applied.
 The tag, the address and the workdir contents all hang off one predicate: **did
 anything reach the cloud?** Three separate answers to that question is how the
 first version got two of them wrong.
+
+`live upgrade` requires `validation.layers.sandbox_deploy.enabled`, as `deploy`
+does. A gate on one entry point into real infrastructure and not the other guards
+nothing.
+
+And the ordering is load-bearing: every fallible step that does not touch the
+workdir runs **before** the destructive swap. Three review passes each found a
+different early return leaving unapplied configuration behind; the fix is not a
+fourth rollback path but removing the opportunity for one. **Ordering beats
+compensating.**

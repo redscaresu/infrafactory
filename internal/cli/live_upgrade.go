@@ -73,6 +73,14 @@ func runLiveUpgradeCommand(cmd *cobra.Command, args []string, runtime *CommandRu
 			"%s records no work_dir, so its existing state cannot be updated in place", d.ID)}
 	}
 
+	// The same opt-in `deploy` requires. An upgrade applies to real
+	// infrastructure exactly as a first deploy does, and a gate that
+	// guards one entry point and not the other guards nothing.
+	if !runtime.Config.Validation.Layers.SandboxDeploy.Enabled {
+		return &CLIError{Op: "live upgrade", Code: errorCodeCommandFailed, Err: errors.New(
+			"live upgrade applies to real infrastructure and requires validation.layers.sandbox_deploy.enabled")}
+	}
+
 	if err := assertDeployableSource(source); err != nil {
 		return &CLIError{Op: "live upgrade", Code: errorCodeUsage, Err: err}
 	}
@@ -98,19 +106,34 @@ func runLiveUpgradeCommand(cmd *cobra.Command, args []string, runtime *CommandRu
 		return &CLIError{Op: "live upgrade", Code: errorCodeUsage, Err: err}
 	}
 
+	// Every fallible step that does NOT touch the workdir happens first.
+	//
+	// The swap below is destructive, so anything that can fail after it
+	// leaves the workdir holding configuration that was never applied.
+	// Ordering removes that failure mode instead of compensating for it,
+	// which is the difference between one rollback path and one per
+	// early return.
+	//
+	// The deployment's OWN project, so the apply updates what is already
+	// there rather than building a second copy somewhere else.
+	sandboxEnv, err := sandboxCommandEnvForProject(runtime, d.ProjectID)
+	if err != nil {
+		return &CLIError{Op: "live upgrade", Code: errorCodeCommandFailed, Err: err}
+	}
+
 	_, _ = fmt.Fprintf(progress, "Upgrading %s in project %s\n", d.ID, d.ProjectID)
 
 	if err := stashPreviousHCL(d.WorkDir); err != nil {
 		return &CLIError{Op: "live upgrade", Code: errorCodeCommandFailed, Err: err}
 	}
 	if err := replaceDeployedHCL(source, d.WorkDir); err != nil {
-		return &CLIError{Op: "live upgrade", Code: errorCodeCommandFailed, Err: err}
-	}
-
-	// The deployment's OWN project, so the apply updates what is already
-	// there rather than building a second copy somewhere else.
-	sandboxEnv, err := sandboxCommandEnvForProject(runtime, d.ProjectID)
-	if err != nil {
+		// The swap failed partway, so the workdir may hold a mixture.
+		// Put back what was running rather than leaving it ambiguous.
+		if restoreErr := restorePreviousHCL(d.WorkDir); restoreErr != nil {
+			return &CLIError{Op: "live upgrade", Code: errorCodeCommandFailed, Err: fmt.Errorf(
+				"%w; and the previous configuration could not be restored: %v (it is in %s)",
+				err, restoreErr, PreviousHCLDirname)}
+		}
 		return &CLIError{Op: "live upgrade", Code: errorCodeCommandFailed, Err: err}
 	}
 
