@@ -489,3 +489,14 @@ version that was never deployed. And the address is re-read from state after the
 apply, because replacement HCL can recreate the load balancer — verifying against
 the address captured at first deploy would probe infrastructure the deployment no
 longer owns, and leave every later observation pointed there too.
+
+Pass 51 added two more consequences of the same question. `--from` may not name
+the deployment's own workdir or anything inside it: the superseded configuration
+is removed before the new one is read, so that would leave the workdir empty while
+the infrastructure kept running. And when nothing reached the cloud, the rejected
+configuration is reverted from `.infrafactory-previous/` — otherwise the workdir
+describes something that was never applied.
+
+The tag, the address and the workdir contents all hang off one predicate: **did
+anything reach the cloud?** Three separate answers to that question is how the
+first version got two of them wrong.

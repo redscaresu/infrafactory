@@ -87,6 +87,17 @@ func runLiveUpgradeCommand(cmd *cobra.Command, args []string, runtime *CommandRu
 		return reportUpgrade(cmd, d, stages, failures)
 	}
 
+	// Refuse a source that IS the workdir, or lives inside it.
+	//
+	// replaceDeployedHCL removes the superseded .tf files before copying
+	// the new ones in, so pointing --from at the deployment's own workdir
+	// deletes the very files it is about to read: the workdir ends up
+	// holding no configuration at all, for infrastructure that is still
+	// running.
+	if err := assertUpgradeSourceIsSeparate(source, d.WorkDir); err != nil {
+		return &CLIError{Op: "live upgrade", Code: errorCodeUsage, Err: err}
+	}
+
 	_, _ = fmt.Fprintf(progress, "Upgrading %s in project %s\n", d.ID, d.ProjectID)
 
 	if err := stashPreviousHCL(d.WorkDir); err != nil {
@@ -107,6 +118,30 @@ func runLiveUpgradeCommand(cmd *cobra.Command, args []string, runtime *CommandRu
 		return runtime.Deps.SandboxDeploy.Run(applyCtx, d.WorkDir, sandboxEnv)
 	})
 	stages, failures = appendSandboxDeployResult(stages, failures, applyResult, applyErr)
+
+	// An init or plan failure never reached the cloud, so the deployment
+	// is still running the OLD configuration -- and the workdir would be
+	// left holding the new, rejected one. Every later operation would
+	// then plan against configuration that was never applied. Put it
+	// back, and say so.
+	if !applyRan(applyErr) {
+		if restoreErr := restorePreviousHCL(d.WorkDir); restoreErr != nil {
+			failures = append(failures, FailureSummary{
+				Layer: "live", Stage: "upgrade_rollback", Check: "restore",
+				Command: "live upgrade " + d.ID,
+				Detail: fmt.Sprintf(
+					"%s was not applied, but its workdir still holds the rejected configuration and could not be reverted: %v. "+
+						"The previous configuration is in %s",
+					d.ID, restoreErr, PreviousHCLDirname),
+			})
+		} else {
+			stages = append(stages, StageSummary{
+				Layer: "live", Stage: "upgrade_rollback", Status: StageStatusPass,
+				Detail: fmt.Sprintf(
+					"nothing was applied, so %s keeps the configuration it was already running", d.ID),
+			})
+		}
+	}
 
 	// The record moves to the new tag only if the apply actually RAN.
 	//
@@ -356,4 +391,78 @@ func applyRan(err error) bool {
 		return deployErr.Stage != "init" && deployErr.Stage != "plan"
 	}
 	return true
+}
+
+// assertUpgradeSourceIsSeparate refuses a source that is, or is inside,
+// the deployment's own workdir.
+//
+// Symlinks are resolved before comparing, because the check protects
+// against deleting the files about to be read and a symlinked path
+// deletes them just as effectively as a literal one.
+func assertUpgradeSourceIsSeparate(source, workDir string) error {
+	resolve := func(path string) (string, error) {
+		abs, err := filepath.Abs(path)
+		if err != nil {
+			return "", err
+		}
+		if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+			return resolved, nil
+		}
+		return abs, nil
+	}
+
+	src, err := resolve(source)
+	if err != nil {
+		return fmt.Errorf("resolve --from %s: %w", source, err)
+	}
+	wd, err := resolve(workDir)
+	if err != nil {
+		return fmt.Errorf("resolve deployment workdir %s: %w", workDir, err)
+	}
+
+	if src == wd || strings.HasPrefix(src, wd+string(os.PathSeparator)) {
+		return fmt.Errorf(
+			"--from %s is the deployment's own workdir (%s): the superseded configuration is removed before "+
+				"the new one is copied in, so this would leave the workdir with no configuration at all while "+
+				"the infrastructure is still running",
+			source, workDir)
+	}
+	return nil
+}
+
+// restorePreviousHCL puts the stashed configuration back, for an upgrade
+// that never reached the cloud.
+func restorePreviousHCL(workDir string) error {
+	previous := filepath.Join(workDir, PreviousHCLDirname)
+	entries, err := os.ReadDir(previous)
+	if err != nil {
+		return fmt.Errorf("read stashed configuration: %w", err)
+	}
+
+	current, err := os.ReadDir(workDir)
+	if err != nil {
+		return fmt.Errorf("read deployment workdir: %w", err)
+	}
+	for _, entry := range current {
+		if entry.IsDir() || !hasDeployableExtension(entry.Name()) {
+			continue
+		}
+		if err := os.Remove(filepath.Join(workDir, entry.Name())); err != nil {
+			return fmt.Errorf("remove rejected %s: %w", entry.Name(), err)
+		}
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() || !hasDeployableExtension(entry.Name()) {
+			continue
+		}
+		payload, err := os.ReadFile(filepath.Join(previous, entry.Name()))
+		if err != nil {
+			return fmt.Errorf("read stashed %s: %w", entry.Name(), err)
+		}
+		if err := os.WriteFile(filepath.Join(workDir, entry.Name()), payload, 0o644); err != nil {
+			return fmt.Errorf("restore %s: %w", entry.Name(), err)
+		}
+	}
+	return nil
 }

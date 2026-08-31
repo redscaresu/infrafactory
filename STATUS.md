@@ -36,6 +36,14 @@ Last updated: 2026-08-31
   re-read after the apply now, reported when it moves, and when it cannot be
   re-read the old one is kept **and said out loud**.
 
+  Pass 51 found two more, both data-safety: `--from` naming the deployment's own
+  workdir **emptied it** (the superseded files are removed before the new ones are
+  read), and a rejected configuration was left in place after an init or plan
+  failure, so every later operation would plan against something never applied.
+  Both now hang off the same `applyRan` predicate as the tag — *did anything reach
+  the cloud?* — which is the real fix: one question answered consistently rather
+  than three patches.
+
   - **The previous HCL is kept** in `.infrafactory-previous/`. That pair either
     side of one change is the diff `ExtractFixPitfall` needs and cannot
     reconstruct — it is what lets S156 produce prescriptive rules rather than the

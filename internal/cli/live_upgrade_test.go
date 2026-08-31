@@ -336,3 +336,74 @@ func writeUpgradeStateWithLBAddress(t *testing.T, workDir, address string) {
 	require.NoError(t, os.WriteFile(
 		filepath.Join(workDir, harness.LiveStateFilename), []byte(state), 0o600))
 }
+
+// replaceDeployedHCL removes the superseded .tf files before copying the
+// new ones in, so a --from pointing at the workdir deletes the files it
+// is about to read -- leaving no configuration at all for infrastructure
+// that is still running.
+func TestUpgradeRefusesASourceInsideTheDeploymentWorkdir(t *testing.T) {
+	sandboxCredsForTest(t)
+	deploy := &fakeSandboxDeployHarness{}
+	rt, store := upgradeRuntime(t, &stagingVersionProbe{running: "nginx/1.27.4"}, deploy)
+	d := upgradeableDeployment(t, store, "dep-selfref", "1.27")
+
+	for name, source := range map[string]string{
+		"the workdir itself": d.WorkDir,
+		"a path inside it":   filepath.Join(d.WorkDir, PreviousHCLDirname),
+	} {
+		t.Run(name, func(t *testing.T) {
+			require.NoError(t, os.MkdirAll(source, 0o755))
+			require.NoError(t, os.WriteFile(filepath.Join(source, "providers.tf"), []byte(deployableProvidersTF), 0o644))
+
+			err := runUpgrade(t, rt, d.ID, &strings.Builder{}, "--from", source, "--tag", "1.28")
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "deployment's own workdir")
+			assert.Zero(t, deploy.calls)
+
+			// And the configuration it was running is untouched.
+			_, statErr := os.Stat(filepath.Join(d.WorkDir, "main.tf"))
+			assert.NoError(t, statErr, "the running configuration must survive a refused upgrade")
+		})
+	}
+}
+
+// An init or plan failure never reached the cloud, so the deployment is
+// still running the old configuration. Leaving the rejected one in the
+// workdir would make every later operation plan against something that
+// was never applied.
+func TestUpgradeRestoresTheOldHCLWhenNothingWasApplied(t *testing.T) {
+	sandboxCredsForTest(t)
+	deploy := &fakeSandboxDeployHarness{err: &harness.SandboxDeployError{
+		Stage: "plan", Err: errors.New("invalid configuration"),
+	}}
+	rt, store := upgradeRuntime(t, &stagingVersionProbe{running: "nginx/1.27.4"}, deploy)
+	d := upgradeableDeployment(t, store, "dep-reverted", "1.27")
+
+	var out strings.Builder
+	require.Error(t, runUpgrade(t, rt, d.ID, &out, "--from", newHCLDir(t), "--tag", "1.28"))
+
+	current, err := os.ReadFile(filepath.Join(d.WorkDir, "main.tf"))
+	require.NoError(t, err)
+	assert.Contains(t, string(current), "size_in_gb = 1",
+		"the workdir must hold what is actually running, not what was rejected")
+	assert.Contains(t, out.String(), "keeps the configuration it was already running")
+}
+
+// A failure DURING apply may have changed the cloud, so the new
+// configuration stays: it is the one that describes what is out there.
+func TestUpgradeKeepsTheNewHCLWhenTheApplyRan(t *testing.T) {
+	sandboxCredsForTest(t)
+	deploy := &fakeSandboxDeployHarness{err: &harness.SandboxDeployError{
+		Stage: "apply", Err: errors.New("timeout"),
+	}}
+	rt, store := upgradeRuntime(t, &stagingVersionProbe{running: "nginx/1.27.4"}, deploy)
+	d := upgradeableDeployment(t, store, "dep-kept", "1.27")
+
+	require.Error(t, runUpgrade(t, rt, d.ID, &strings.Builder{}, "--from", newHCLDir(t), "--tag", "1.28"))
+
+	current, err := os.ReadFile(filepath.Join(d.WorkDir, "main.tf"))
+	require.NoError(t, err)
+	assert.Contains(t, string(current), "size_in_gb = 2",
+		"something may be running from this configuration; reverting would hide it")
+}
