@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -70,8 +71,13 @@ func runLiveObserveCommand(cmd *cobra.Command, _ []string, runtime *CommandRunti
 	}
 
 	if status == CommandStatusFailed {
+		// "not serving" would be a lie for the version findings: a
+		// deployment can answer perfectly and still be running something
+		// other than what the record claims, which is the more dangerous
+		// of the two because it looks fine. The summary must not
+		// contradict the failure beneath it.
 		return &CLIError{Op: "live observe", Code: errorCodeCommandFailed, Err: fmt.Errorf(
-			"%d live deployment(s) are not serving", len(failures))}
+			"%d live deployment(s) did not observe clean", len(failures))}
 	}
 	return nil
 }
@@ -152,6 +158,16 @@ func observeDeployment(
 	}
 
 	observation := livestore.Observation{At: now, Detail: result.Detail}
+
+	// The version check is separate from health on purpose: a service can
+	// be perfectly healthy and running something other than what the
+	// record claims, which is the more dangerous of the two because it
+	// looks fine.
+	versionDetail := ""
+	if d.VersionPath != "" {
+		observation.Version, versionDetail = checkRunningVersion(ctx, runtime, d)
+	}
+
 	switch {
 	case result.Healthy:
 		observation.Status = livestore.ObservationHealthy
@@ -192,14 +208,55 @@ func observeDeployment(
 			d.ID, observation.Status, err))
 	}
 
+	// A record that misstates what is running is a finding even when the
+	// service is up, and it is reported BEFORE health so it cannot be
+	// hidden behind a green probe.
+	if observation.Version == livestore.VersionUnconfirmed {
+		return fail("version", fmt.Sprintf("%s: %s", d.ID, versionDetail))
+	}
+
 	if observation.Healthy() {
+		detail := fmt.Sprintf("%s is serving (%s)", d.ID, d.Address)
+		switch observation.Version {
+		case livestore.VersionConfirmed:
+			detail += fmt.Sprintf(" and confirms %s", imageRef(d))
+		case livestore.VersionUnchecked:
+			// Said out loud. Silence here would read as confirmation,
+			// and the record's version is a claim nobody checked.
+			detail += "; running version unchecked (no version_path declared)"
+		}
 		return StageSummary{
-			Layer: "live", Stage: "observe", Status: StageStatusPass,
-			Detail: fmt.Sprintf("%s is serving (%s)", d.ID, d.Address),
+			Layer: "live", Stage: "observe", Status: StageStatusPass, Detail: detail,
 		}, nil
 	}
 
 	return fail(string(observation.Status), fmt.Sprintf("%s: %s", d.ID, observation.Detail))
+}
+
+// checkRunningVersion asks the service what it is running and compares it
+// with what the record claims.
+//
+// The comparison is deliberately weak: the response must MENTION the tag.
+// That verifies a cooperating service and cannot verify an uncooperative
+// one -- so a failure to probe is unchecked, never unconfirmed. Claiming
+// a contradiction on a probe that did not happen would be the same
+// falsehood in the other direction.
+func checkRunningVersion(ctx context.Context, runtime *CommandRuntime, d livestore.Deployment) (livestore.VersionCheck, string) {
+	result, err := runtime.Deps.ServiceProbe.Probe(ctx, d.Address, d.Port, d.VersionPath)
+	if err != nil || !result.Reachable {
+		return livestore.VersionUnchecked, ""
+	}
+	if d.Tag == "" {
+		return livestore.VersionUnchecked, ""
+	}
+
+	if strings.Contains(result.Body, d.Tag) {
+		return livestore.VersionConfirmed, ""
+	}
+	return livestore.VersionUnconfirmed, fmt.Sprintf(
+		"the record claims %s but %s does not mention %q. The record states intent, not fact -- "+
+			"an upgrade to a version nobody confirmed is running proves nothing",
+		imageRef(d), d.VersionPath, d.Tag)
 }
 
 // missingProbeTarget names what the record lacks, or "" when it can be

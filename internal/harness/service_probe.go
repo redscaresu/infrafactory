@@ -28,7 +28,19 @@ type ServiceProbeResult struct {
 	// Detail is the reason, phrased for the pitfall extractors that
 	// eventually consume it. Empty when healthy.
 	Detail string
+	// Body is the start of what the service said, bounded. Kept so a
+	// caller can check the running version against what the record
+	// claims (S155); a service answering with a firehose must not be
+	// able to grow this.
+	Body string
 }
+
+// maxProbeBodyBytes bounds what a probe keeps from the response.
+//
+// Enough to hold a version string or a small health document, and small
+// enough that a service answering with a firehose cannot grow a
+// deployment record -- which is stored, and stored per observation.
+const maxProbeBodyBytes = 4096
 
 // ServiceProbe checks a live deployment's health path.
 //
@@ -93,14 +105,16 @@ func (p *ServiceProbe) Probe(ctx context.Context, address string, port int, heal
 			Detail: fmt.Sprintf("health path %s is unreachable: %v", target, err),
 		}, nil
 	}
+	// Read the head of the body rather than discarding it: the version
+	// check needs what the service said. Still bounded, and the rest is
+	// still drained so the connection can be reused.
+	head, _ := io.ReadAll(io.LimitReader(resp.Body, maxProbeBodyBytes))
 	defer func() {
-		// Drained so the connection can be reused, and bounded so a
-		// service answering with a firehose cannot exhaust memory here.
-		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxProbeBodyBytes))
 		_ = resp.Body.Close()
 	}()
 
-	result := ServiceProbeResult{Reachable: true, Status: resp.StatusCode}
+	result := ServiceProbeResult{Reachable: true, Status: resp.StatusCode, Body: string(head)}
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		result.Healthy = true
 		return result, nil

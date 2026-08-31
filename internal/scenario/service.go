@@ -45,6 +45,24 @@ type ServiceSpec struct {
 	Port       int    `json:"port"`
 	HealthPath string `json:"health_path,omitempty"`
 	TTL        string `json:"ttl"`
+
+	// VersionPath is a path whose response names the version actually
+	// running. Optional, and its absence means unchecked rather than
+	// confirmed.
+	//
+	// `deploy` records the DECLARED image and tag. That is a claim about
+	// intent, and the 2026-08-31 canary showed how far it can drift: the
+	// record said `nginx:1.27` while the instance served
+	// `python3 -m http.server`. An upgrade to a version nobody confirmed
+	// is running proves nothing, and a learning loop that attributed a
+	// failure to `nginx:1.27` on that basis would be learning a
+	// falsehood.
+	//
+	// The check this enables is deliberately weak and deliberately
+	// stated: the service's own response must MENTION the tag. That
+	// verifies a cooperating service and cannot verify an uncooperative
+	// one, which is why declaring the path is opt-in.
+	VersionPath string `json:"version_path,omitempty"`
 }
 
 // Ref is the fully qualified image reference the instance pulls.

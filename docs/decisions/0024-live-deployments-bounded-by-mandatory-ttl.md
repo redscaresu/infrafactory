@@ -416,3 +416,27 @@ address writes exactly that record today. Reporting it as a skip meant the
 command said "all is well" about a deployment it had just admitted it could not
 see. Only a **released** deployment skips, because only there is nothing left to
 observe.
+
+## Amendment, 2026-08-31 (S155a): the record states intent, not fact
+
+`deploy` records the image and tag a scenario **declares**. That is a claim about
+what was asked for, and the 2026-08-31 canary measured the gap: the record said
+`nginx:1.27` while the instance served `python3 -m http.server`.
+
+A scenario may declare `service.version_path`, which `live observe` probes
+separately from health. Three decisions worth holding:
+
+- **Three states, not two.** `unchecked` means nothing was asked; `unconfirmed`
+  means the service answered and did not confirm. Treating the first as
+  confirmation is precisely the falsehood this exists to prevent, and a probe
+  that fails is `unchecked` — claiming a contradiction on evidence nobody
+  gathered is the same error inverted.
+- **The check is weak on purpose, and says so.** The response must *mention* the
+  tag. That verifies a cooperating service and cannot verify an uncooperative
+  one, which is why the path is opt-in rather than assumed.
+- **A mismatch fails a healthy deployment.** A service that answers perfectly
+  while running something else is the more dangerous case, because nothing else
+  in the system will notice.
+
+This is S155's prerequisite: an upgrade to a version nobody confirmed is running
+proves nothing.
