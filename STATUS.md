@@ -4,7 +4,19 @@ Last updated: 2026-08-31
 
 ## Current phase
 
-- 🔧 **S165 in progress (2026-08-31)** — ADR-0025's run-owned project.
+- ✅ **S165 complete, review CLEAN (2026-08-31)** — ADR-0025's run-owned project
+  is implemented for `run`/`test`, converged after nine Codex passes (20–28).
+  **Not yet exercised against real Scaleway** — that canary is S168 and is a
+  human decision, since it spends money.
+
+  What the passes found is worth more than the feature: almost nothing was a
+  wrong computation. Every real finding was an **operation ordered so a failure
+  left something behind** — a project created before its config was validated, a
+  cleanup attached to a branch some exit path skipped (three times, three
+  places), a delete inheriting a cancelled context, and a decision reading the
+  command's failure list instead of the teardown's verdict.
+
+- 🔧 **S165 detail (2026-08-31)** — ADR-0025's run-owned project.
   `harness.ScalewayRunProject` creates and deletes the disposable project through
   the Account API, stamping it `if-run-*` plus a fixed description so S166 has a
   provenance marker to verify. `scaleway.create_run_project` exists but is **not

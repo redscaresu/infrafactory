@@ -212,3 +212,15 @@ effort.
 The rule generalises past this ADR, and is most of what this slice's review
 passes actually found: **an operation with a side effect goes after the checks
 that can refuse it**, not before them with cleanup as compensation.
+
+## Amendment, 2026-08-31 (S165, pass 28): the teardown's verdict, not the command's
+
+Whether to delete the run project is a question about **the account**, and only
+the destroy-and-sweep outcome answers it. Keying the decision off the command's
+accumulated failure list meant a mock criteria failure — which says nothing about
+Scaleway — stranded an empty project forever after a demonstrably clean teardown.
+
+Across nine review passes on this slice, the condition on *whether* to delete was
+correct from the first version. Where and when it ran was wrong five times. That
+is the shape of defect this arc keeps producing, and it is worth expecting rather
+than rediscovering.
