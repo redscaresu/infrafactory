@@ -34,7 +34,22 @@ func ensureRunProject(ctx context.Context, runtime *CommandRuntime, scenario, wo
 	secretKey := strings.TrimSpace(os.Getenv("SCW_SECRET_KEY"))
 	orgID := strings.TrimSpace(os.Getenv("SCW_DEFAULT_ORGANIZATION_ID"))
 
-	project, err := runtime.Deps.RunProject.Create(ctx, secretKey, orgID, scenario, runProjectStamp(time.Now()))
+	// The create is NOT cancellable by the caller's context, and the
+	// marker write that records it follows immediately.
+	//
+	// Callers hand this a signal-derived context so an interrupt during
+	// creation is trapped rather than killing the process. If that
+	// cancellation reached the HTTP call, a Ctrl-C timed inside the
+	// request would abort the client while the API had already created
+	// the project -- leaving one that no marker names, no record
+	// mentions and no teardown can authorise removing. Losing the id is
+	// worse than the extra second: the id IS the handle.
+	//
+	// Bounded on its own so a hung API cannot make Ctrl-C feel ignored.
+	createCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), runProjectTimeout)
+	defer cancel()
+
+	project, err := runtime.Deps.RunProject.Create(createCtx, secretKey, orgID, scenario, runProjectStamp(time.Now()))
 	if err != nil {
 		return "", []StageSummary{{Layer: "sandbox_deploy", Stage: "run_project", Status: StageStatusFail}},
 			[]FailureSummary{{

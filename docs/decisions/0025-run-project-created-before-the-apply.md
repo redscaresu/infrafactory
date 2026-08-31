@@ -418,3 +418,19 @@ generic "nothing was applied". They are written to the command output now. This
 arc keeps rediscovering the same rule: **a guard that stops without saying why
 is half a guard**, and the moment the operator has no other handle is exactly
 when the detail gets dropped.
+
+### Follow-up, pass 41: the guard active, the create uncancellable
+
+Pass 40's fix handed `ensureRunProject` a signal-derived context, so a Ctrl-C
+timed inside the create request could abort the client after the API had already
+made the project — one no marker names and no teardown can authorise removing.
+It traded a window before the guard for a window inside it.
+
+Both properties are needed and do not conflict: the signal guard **active**
+during creation, so an interrupt is trapped rather than killing the process, and
+the create itself **uncancellable**, so it returns an id the caller can act on.
+Creation runs on `context.WithoutCancel` with `runProjectTimeout`, the shape the
+delete already used, and it lives inside `ensureRunProject` so `test`'s path gets
+it without being told.
+
+**Losing the id is worse than the extra second: the id is the handle.**

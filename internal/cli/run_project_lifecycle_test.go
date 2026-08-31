@@ -406,3 +406,31 @@ func TestReleaseRunProjectRefusesAProjectTheMarkerDoesNotName(t *testing.T) {
 	assert.Contains(t, failures[0].Detail, "refusing to delete it")
 	assert.Zero(t, fake.deletes)
 }
+
+// The mirror of the cancelled-delete test, and the harder half.
+//
+// Callers hand ensureRunProject a signal-derived context so an interrupt
+// during creation is trapped rather than killing the process. If that
+// cancellation reached the HTTP call, a Ctrl-C timed inside the request
+// would abort the client while the API had already created the project,
+// leaving one no marker names and no teardown can authorise removing.
+func TestEnsureRunProjectCreatesDespiteACancelledContext(t *testing.T) {
+	sandboxCredsForTest(t)
+	fake := &fakeRunProject{created: harness.RunProject{ID: "proj-1", Name: "if-run-x"}}
+	rt := &CommandRuntime{Deps: RuntimeDependencies{RunProject: fake}}
+	workDir := t.TempDir()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	id, _, failures := ensureRunProject(ctx, rt, "web-live-paris", workDir)
+
+	assert.Empty(t, failures)
+	assert.Equal(t, "proj-1", id, "the id is the handle; losing it is worse than the extra second")
+	assert.Equal(t, 1, fake.creates)
+
+	// And it is recorded, so a teardown can prove the project is ours.
+	marker, err := harness.ReadRunProjectMarker(workDir)
+	require.NoError(t, err)
+	assert.Equal(t, "proj-1", marker.ProjectID)
+}

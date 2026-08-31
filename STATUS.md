@@ -26,6 +26,16 @@ Last updated: 2026-08-31
   `openclaw-prod` and its root volume from 2026-02-21. Full record:
   [docs/status/s168-cutover-canary.md](status/s168-cutover-canary.md).
 
+- 🔧 **Pass 41: creation is uncancellable now (2026-08-31)** — pass 40 put
+  `ensureRunProject` inside the signal guard and thereby handed it a cancellable
+  context, so a Ctrl-C timed *inside* the create request could abort the client
+  after the API had made the project. It traded one window for another. Both
+  properties are needed and are not in tension: the guard **active** during
+  creation, the create itself **uncancellable**. Creation now runs on
+  `context.WithoutCancel` with a timeout, inside `ensureRunProject` so `test`
+  gets it too — losing the id is worse than the extra second, because the id is
+  the handle.
+
 - 🔧 **Pass 40: `deploy` could lose a project to Ctrl-C (2026-08-31)** — it
   created the run's project *outside* `runDeployApply`'s signal guard, and the
   deployment record is written only after the apply, so an interrupt in between
