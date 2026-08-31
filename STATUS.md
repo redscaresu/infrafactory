@@ -4,6 +4,28 @@ Last updated: 2026-08-31
 
 ## Current phase
 
+- ✅ **S168 canary: the cutover verified against real Scaleway (2026-08-31)** —
+  three applies from `s166-cutover`, ~€0.005. `block-paris` and `lb-serving-paris`
+  both pass with **no `scaleway_account_project` and no `project_id` anywhere in
+  the HCL**, and `lb-serving-paris` serves a real HTTP 200 through a real LB.
+
+  **D6 moved exactly as pass 32 predicted, and was caught doing it.** `destroy`
+  now *passes* — the project is not its resource — so the `resource is still in
+  use` 412 lands on the Account API delete, where `releaseRunProject`'s purge
+  unblocks it: *"deleted 2ab4a19e… after purging 1 resource(s) the API created
+  but Terraform did not own"*. Reproduced on both compute runs.
+
+  One run failed on `real_probe` with a 503; its apply had reported `succeeded on
+  attempt 2 (real API returned a retryable error)`, so the instance was young
+  when the probe ran. Re-run passed unchanged — diagnosed by running it again
+  rather than from the log, because a transient and a regression read the same on
+  one sample.
+
+  Account verified against the API afterwards, not from the sweep's own verdict:
+  **zero `if-run-*` projects**, and the only server and volume in the org are
+  `openclaw-prod` and its root volume from 2026-02-21. Full record:
+  [docs/status/s168-cutover-canary.md](status/s168-cutover-canary.md).
+
 - 🔧 **S166+S167 cutover in progress (2026-08-31)** — the guard core first,
   wired next. `AssertRunProjectDeletable` replaces the state-derived cross-check
   with **two checks that must both pass**: the marker
