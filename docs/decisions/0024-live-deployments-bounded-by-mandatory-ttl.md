@@ -510,3 +510,14 @@ workdir runs **before** the destructive swap. Three review passes each found a
 different early return leaving unapplied configuration behind; the fix is not a
 fourth rollback path but removing the opportunity for one. **Ordering beats
 compensating.**
+
+The project an upgrade applies into comes from the **marker**, not the deployment
+record, and a disagreement between them is refused. The record is the half a stale
+or edited file can change, and this call applies real infrastructure into whatever
+it names — applying deserves at least the care destroying gets (pass 37 for
+teardown, pass 53 for upgrade).
+
+Verification distinguishes an upgrade from a no-op. Without a new tag the record
+still names the old version, so confirming it shows the service is unchanged
+rather than upgraded; reporting otherwise would be a green built from checking
+that nothing changed.

@@ -52,6 +52,14 @@ Last updated: 2026-08-31
   touching the workdir now happens before the part that does. Ordering beats
   compensating — one rollback path instead of one per early return.
 
+  Pass 53: the project id came from the **record** rather than the marker — the
+  half a stale file can change — on a call that applies real infrastructure.
+  `live teardown` learned that in pass 37 and I did not carry it into new code;
+  a disagreement is refused now. **Applying deserves at least the care destroying
+  gets.** Also, with no `--tag` the verification compared the *old* tag and
+  trivially passed, reporting a transition that was never attempted — a green
+  built from checking that nothing changed.
+
   - **The previous HCL is kept** in `.infrafactory-previous/`. That pair either
     side of one change is the diff `ExtractFixPitfall` needs and cannot
     reconstruct — it is what lets S156 produce prescriptive rules rather than the

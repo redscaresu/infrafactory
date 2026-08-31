@@ -116,7 +116,26 @@ func runLiveUpgradeCommand(cmd *cobra.Command, args []string, runtime *CommandRu
 	//
 	// The deployment's OWN project, so the apply updates what is already
 	// there rather than building a second copy somewhere else.
-	sandboxEnv, err := sandboxCommandEnvForProject(runtime, d.ProjectID)
+	//
+	// From the MARKER, as every destroy path does since ADR-0025. The
+	// record's project id is the half a stale or hand-edited file can
+	// change, and this call applies real infrastructure into whatever it
+	// names -- so a disagreement is refused rather than resolved in the
+	// record's favour. `live teardown` learned this in pass 37; applying
+	// deserves at least the care destroying gets.
+	applyProjectID := d.ProjectID
+	if marker, markerErr := harness.ReadRunProjectMarker(d.WorkDir); markerErr == nil {
+		if marker.ProjectID != d.ProjectID {
+			return &CLIError{Op: "live upgrade", Code: errorCodeCommandFailed, Err: fmt.Errorf(
+				"refusing to upgrade %s: the record names project %s but %s names %s. "+
+					"Applying into a project this workdir does not own could change infrastructure "+
+					"belonging to another deployment",
+				d.ID, d.ProjectID, harness.RunProjectMarkerFilename, marker.ProjectID)}
+		}
+		applyProjectID = marker.ProjectID
+	}
+
+	sandboxEnv, err := sandboxCommandEnvForProject(runtime, applyProjectID)
 	if err != nil {
 		return &CLIError{Op: "live upgrade", Code: errorCodeCommandFailed, Err: err}
 	}
@@ -174,9 +193,11 @@ func runLiveUpgradeCommand(cmd *cobra.Command, args []string, runtime *CommandRu
 	// But a failure at init or plan changed nothing at all, and advancing
 	// the tag there would make the record claim a version that was never
 	// deployed, which is the exact falsehood S155a exists to prevent.
+	tagChanged := false
 	if applyRan(applyErr) {
-		if strings.TrimSpace(newTag) != "" {
-			d.Tag = strings.TrimSpace(newTag)
+		if trimmed := strings.TrimSpace(newTag); trimmed != "" && trimmed != d.Tag {
+			d.Tag = trimmed
+			tagChanged = true
 		}
 		d.UpgradedAt = time.Now()
 
@@ -213,7 +234,7 @@ func runLiveUpgradeCommand(cmd *cobra.Command, args []string, runtime *CommandRu
 	}
 
 	if applyErr == nil {
-		stages, failures = appendUpgradeVerification(ctx, runtime, d, stages, failures)
+		stages, failures = appendUpgradeVerification(ctx, runtime, d, tagChanged, stages, failures)
 	}
 
 	return reportUpgrade(cmd, d, stages, failures)
@@ -271,6 +292,7 @@ func appendUpgradeVerification(
 	ctx context.Context,
 	runtime *CommandRuntime,
 	d livestore.Deployment,
+	tagChanged bool,
 	stages []StageSummary,
 	failures []FailureSummary,
 ) ([]StageSummary, []FailureSummary) {
@@ -284,6 +306,19 @@ func appendUpgradeVerification(
 	after, detail := checkRunningVersion(ctx, runtime, d)
 	switch after {
 	case livestore.VersionConfirmed:
+		// Without a new tag the record still names the OLD version, so
+		// confirming it proves the service is running what the record
+		// says -- and proves nothing about a transition. Reporting
+		// "upgraded" here would be a green built from checking that
+		// nothing changed.
+		if !tagChanged {
+			return append(stages, StageSummary{
+				Layer: "live", Stage: "upgrade_verify", Status: StageStatusPass,
+				Detail: fmt.Sprintf(
+					"%s still confirms %s: no --tag was given, so this shows the service is unchanged rather than upgraded",
+					d.ID, imageRef(d)),
+			}), failures
+		}
 		return append(stages, StageSummary{
 			Layer: "live", Stage: "upgrade_verify", Status: StageStatusPass,
 			Detail: fmt.Sprintf("%s now confirms %s", d.ID, imageRef(d)),

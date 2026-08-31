@@ -454,3 +454,45 @@ func TestUpgradeLeavesTheWorkdirAloneWhenTheEnvironmentIsUnusable(t *testing.T) 
 	require.NoError(t, storeErr)
 	assert.Equal(t, "1.27", got.Tag)
 }
+
+// The record's project id is the half a stale or edited file can change.
+// This call applies REAL infrastructure into whatever it names, so a
+// disagreement with the marker is refused rather than resolved in the
+// record's favour.
+func TestUpgradeRefusesWhenTheRecordAndMarkerDisagreeOnTheProject(t *testing.T) {
+	sandboxCredsForTest(t)
+	deploy := &fakeSandboxDeployHarness{}
+	rt, store := upgradeRuntime(t, &stagingVersionProbe{running: "nginx/1.27.4"}, deploy)
+	d := upgradeableDeployment(t, store, "dep-mismatch", "1.27")
+	require.NoError(t, harness.WriteRunProjectMarker(d.WorkDir, harness.RunProject{
+		ID: "99999999-9999-9999-9999-999999999999", Name: harness.RunProjectNamePrefix + "other",
+	}))
+
+	err := runUpgrade(t, rt, d.ID, &strings.Builder{}, "--from", newHCLDir(t), "--tag", "1.28")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "could change infrastructure belonging to another deployment")
+	assert.Zero(t, deploy.calls)
+
+	current, readErr := os.ReadFile(filepath.Join(d.WorkDir, "main.tf"))
+	require.NoError(t, readErr)
+	assert.Contains(t, string(current), "size_in_gb = 1", "refused before the swap")
+}
+
+// Without --tag the record still names the old version, so confirming it
+// proves the service is running what the record says and proves nothing
+// about a transition. Calling that "upgraded" would be a green built from
+// checking that nothing changed.
+func TestUpgradeWithoutANewTagDoesNotClaimAVersionChange(t *testing.T) {
+	sandboxCredsForTest(t)
+	probe := &stagingVersionProbe{running: "nginx/1.27.4"}
+	deploy := &fakeSandboxDeployHarness{}
+	rt, store := upgradeRuntime(t, probe, deploy)
+	d := upgradeableDeployment(t, store, "dep-notag", "1.27")
+
+	var out strings.Builder
+	require.NoError(t, runUpgrade(t, rt, d.ID, &out, "--from", newHCLDir(t)))
+
+	assert.Contains(t, out.String(), "unchanged rather than upgraded")
+	assert.NotContains(t, out.String(), "now confirms")
+}
