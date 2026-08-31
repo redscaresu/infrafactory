@@ -737,6 +737,21 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 						Status:  "success",
 						RunID:   runID,
 					})
+					// The project, before the sweep, like every other
+					// teardown path. S165 documented this path as a
+					// deliberate gap because the id lived in the state
+					// file and this code had none; ADR-0025's marker
+					// gives it one, so the gap closes here rather than
+					// staying a known leak.
+					projectStages, projectFailures := releaseRunProject(
+						cmd.Context(), runtime, runtime.OutputDir(),
+						sweepTargetProjectID(sweepTarget), sandboxEnv)
+					allStages = append(allStages, projectStages...)
+					if len(projectFailures) > 0 {
+						annotateWithRecoveryCommand(projectFailures, runtime.ConfigPath, scenarioPath)
+						allFailures = append(allFailures, projectFailures...)
+					}
+
 					// Destroy reporting success is not evidence the account
 					// is clean -- it is the claim the sweep exists to check.
 					// The run has already failed, so this cannot change the

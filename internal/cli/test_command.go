@@ -710,7 +710,7 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 					// sweep's job is to verify the project is gone.
 					// Deleting it afterwards would make every clean
 					// teardown report a leak.
-					deleteStages, deleteFailures := releaseRunProject(ctx, runtime, runProjectID)
+					deleteStages, deleteFailures := releaseRunProject(ctx, runtime, outputDir, runProjectID, sandboxEnv)
 					stages = append(stages, deleteStages...)
 					failures = append(failures, deleteFailures...)
 
@@ -758,7 +758,23 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 	if runProjectID != "" && !runProjectReleased(stages) {
 		switch {
 		case !liveStateMayHoldResources(outputDir):
-			deleteStages, deleteFailures := releaseRunProject(ctx, runtime, runProjectID)
+			// Its own credentials: this sits outside the sandbox block on
+			// purpose, so it cannot borrow an env built on a path it may
+			// not have taken.
+			cleanupEnv, cleanupEnvErr := sandboxCommandEnvForProject(runtime, runProjectID)
+			if cleanupEnvErr != nil {
+				stages = append(stages, StageSummary{
+					Layer: "sandbox_deploy", Stage: "run_project_delete", Status: StageStatusFail,
+				})
+				failures = append(failures, FailureSummary{
+					Layer: "sandbox_deploy", Stage: "run_project_delete", Check: "credentials",
+					Command: "delete run project",
+					Detail: fmt.Sprintf("project %s holds nothing but could not be deleted: %v",
+						runProjectID, cleanupEnvErr),
+				})
+				break
+			}
+			deleteStages, deleteFailures := releaseRunProject(ctx, runtime, outputDir, runProjectID, cleanupEnv)
 			stages = append(stages, deleteStages...)
 			failures = append(failures, deleteFailures...)
 		default:

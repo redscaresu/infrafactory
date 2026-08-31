@@ -80,14 +80,33 @@ func ensureRunProject(ctx context.Context, runtime *CommandRuntime, scenario, wo
 }
 
 // releaseRunProject deletes the run's project after its resources are
-// gone.
+// gone, purging and retrying once if Scaleway put something in it that
+// nobody asked for.
 //
 // `tofu destroy` cannot do this any more: under ADR-0025 the project is
-// not a Terraform resource. A project left behind is empty and free, but
-// it accumulates and it is exactly the kind of residue the orphan sweep
-// exists to make impossible, so a failed delete is reported rather than
-// swallowed.
-func releaseRunProject(ctx context.Context, runtime *CommandRuntime, projectID string) ([]StageSummary, []FailureSummary) {
+// not a Terraform resource. That also moved D6 here. The first Instance
+// in a fresh project gets a "Default security group" the API creates and
+// Terraform never owns, and a project containing anything cannot be
+// deleted:
+//
+//	precondition failed: resource is still in use
+//
+// Destroy used to hit that, which is why destroySandbox purges and
+// retries. Destroy now SUCCEEDS -- the project is not its problem -- and
+// the 412 lands on this call instead. Without the same purge here, every
+// run that declares compute leaks a project again, silently enough that
+// cost checks stay clean, which is exactly how D6 went unnoticed the
+// first time.
+//
+// An empty project is free but it does not clean itself up, so a failed
+// delete is reported rather than swallowed, and the purge reports what
+// it removed.
+func releaseRunProject(
+	ctx context.Context,
+	runtime *CommandRuntime,
+	workDir, projectID string,
+	sandboxEnv map[string]string,
+) ([]StageSummary, []FailureSummary) {
 	if strings.TrimSpace(projectID) == "" || runtime.Deps.RunProject == nil {
 		return nil, nil
 	}
@@ -100,22 +119,66 @@ func releaseRunProject(ctx context.Context, runtime *CommandRuntime, projectID s
 	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), runProjectTimeout)
 	defer cancel()
 
-	secretKey := strings.TrimSpace(os.Getenv("SCW_SECRET_KEY"))
-	if err := runtime.Deps.RunProject.Delete(cleanupCtx, secretKey, projectID); err != nil {
-		return []StageSummary{{Layer: "sandbox_deploy", Stage: "run_project_delete", Status: StageStatusFail}},
-			[]FailureSummary{{
-				Layer: "sandbox_deploy", Stage: "run_project_delete", Check: "delete",
-				Command: "delete run project",
-				Detail: fmt.Sprintf(
-					"the run's resources were destroyed but its project %s was not deleted: %v. "+
-						"An empty project is free but does not clean itself up", projectID, err),
-			}}
+	// The guard lives here, not at the call sites, for the same reason
+	// destroySandbox's purge guard does: four paths reach this, it
+	// deletes a real project over HTTP with Terraform nowhere in the
+	// loop, and a check that can be forgotten will be.
+	if err := assertRunProjectDeletable(cleanupCtx, runtime, workDir, projectID, sandboxEnv); err != nil {
+		return runProjectDeleteFailure(projectID, fmt.Sprintf("refusing to delete it: %v", err))
 	}
 
-	return []StageSummary{{
-		Layer: "sandbox_deploy", Stage: "run_project_delete", Status: StageStatusPass,
-		Detail: fmt.Sprintf("deleted %s", projectID),
-	}}, nil
+	secretKey := sandboxEnv["SCW_SECRET_KEY"]
+	err := runtime.Deps.RunProject.Delete(cleanupCtx, secretKey, projectID)
+	if err == nil {
+		return []StageSummary{{
+			Layer: "sandbox_deploy", Stage: "run_project_delete", Status: StageStatusPass,
+			Detail: fmt.Sprintf("deleted %s", projectID),
+		}}, nil
+	}
+
+	removed, purgeErr := purgeAutoCreated(cleanupCtx, runtime, projectID, secretKey)
+	if purgeErr != nil || len(removed) == 0 {
+		// Nothing was auto-created, so the delete failed for its own
+		// reasons. Report that error, not a retry's.
+		return runProjectDeleteFailure(projectID, err.Error())
+	}
+
+	if retryErr := runtime.Deps.RunProject.Delete(cleanupCtx, secretKey, projectID); retryErr != nil {
+		return runProjectDeleteFailure(projectID, fmt.Sprintf(
+			"%v. Purging %d API-auto-created resource(s) (%s) did not unblock it",
+			retryErr, len(removed), strings.Join(removed, "; ")))
+	}
+
+	return []StageSummary{
+		autoCreatedPurgeStage(removed),
+		{
+			Layer: "sandbox_deploy", Stage: "run_project_delete", Status: StageStatusPass,
+			Detail: fmt.Sprintf("deleted %s after purging %d resource(s) the API created but Terraform did not own",
+				projectID, len(removed)),
+		},
+	}, nil
+}
+
+// purgeAutoCreated is nil-safe on the dependency and on credentials, so
+// a runtime without a purger simply reports nothing removed.
+func purgeAutoCreated(ctx context.Context, runtime *CommandRuntime, projectID, secretKey string) ([]string, error) {
+	if runtime.Deps.AutoCreated == nil || secretKey == "" {
+		return nil, nil
+	}
+	return runtime.Deps.AutoCreated.Run(ctx, projectID, secretKey)
+}
+
+// runProjectDeleteFailure keeps every unhappy exit reporting the same
+// shape: the project id is the handle to what survived.
+func runProjectDeleteFailure(projectID, detail string) ([]StageSummary, []FailureSummary) {
+	return []StageSummary{{Layer: "sandbox_deploy", Stage: "run_project_delete", Status: StageStatusFail}},
+		[]FailureSummary{{
+			Layer: "sandbox_deploy", Stage: "run_project_delete", Check: "delete",
+			Command: "delete run project",
+			Detail: fmt.Sprintf(
+				"the run's resources were destroyed but its project %s was not deleted: %s. "+
+					"An empty project is free but does not clean itself up", projectID, detail),
+		}}
 }
 
 // assertRunProjectDeletable is the single place a teardown asks whether

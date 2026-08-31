@@ -97,21 +97,15 @@ func tearDownDeployment(
 				"%s has nothing to destroy, but the account cannot be verified: %v", d.ID, envErr))
 		}
 
-		// The same guard the destroy path runs, for the same reason: this
-		// branch now DELETES a project, so it must prove first that the
-		// project is this run's. Without a marker it refuses, which is
-		// also what makes a record with neither state nor marker fail
-		// closed here rather than release quietly.
-		if err := assertRunProjectDeletable(ctx, runtime, d.WorkDir, d.ProjectID, sandboxEnv); err != nil {
-			return unreclaimable(fmt.Sprintf(
-				"refusing to release deployment %s: %v", d.ID, err))
-		}
-
 		// tofu never created the project and cannot remove it, so the
 		// delete happens here -- before the sweep, which exists to verify
 		// the project is gone. A project already deleted answers 404 and
 		// that is success, so this is safe to re-run.
-		projectStages, projectFailures := releaseRunProject(ctx, runtime, d.ProjectID)
+		//
+		// releaseRunProject runs the deletability guard itself, so a
+		// record with neither state nor marker fails closed here rather
+		// than releasing quietly.
+		projectStages, projectFailures := releaseRunProject(ctx, runtime, d.WorkDir, d.ProjectID, sandboxEnv)
 		stages = append(stages, projectStages...)
 		failures = append(failures, projectFailures...)
 
@@ -160,7 +154,7 @@ func tearDownDeployment(
 		// sweep verifies the project is GONE, and tofu no longer deletes
 		// it. Deleting afterwards would make every clean teardown report
 		// a leak.
-		projectStages, projectFailures := releaseRunProject(ctx, runtime, d.ProjectID)
+		projectStages, projectFailures := releaseRunProject(ctx, runtime, d.WorkDir, d.ProjectID, sandboxEnv)
 		stages = append(stages, projectStages...)
 		failures = append(failures, projectFailures...)
 

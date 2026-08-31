@@ -190,7 +190,7 @@ func TestTeardownRefusesWhenNeitherStateNorMarkerExists(t *testing.T) {
 	_, failures := tearDownDeployment(context.Background(), rt, store, d)
 
 	require.NotEmpty(t, failures)
-	assert.Contains(t, failures[0].Detail, "refusing to release")
+	assert.Contains(t, failures[0].Detail, "refusing to delete it")
 	assert.Zero(t, projects.deletes, "nothing proves which project this is")
 
 	got, err := store.Get(d.ID)

@@ -19,6 +19,7 @@ type fakeRunProject struct {
 	created      harness.RunProject
 	createErr    error
 	deleteErr    error
+	deleteErrs   []error
 	describeErr  error
 	describeGone bool
 	creates      int
@@ -50,9 +51,23 @@ func (f *fakeRunProject) Describe(_ context.Context, _, projectID string) (harne
 }
 
 func (f *fakeRunProject) Delete(_ context.Context, _, projectID string) error {
+	i := f.deletes
 	f.deletes++
 	f.deletedID = projectID
+	if i < len(f.deleteErrs) {
+		return f.deleteErrs[i]
+	}
 	return f.deleteErr
+}
+
+// releaseFixture gives releaseRunProject what the guard now needs: a
+// workdir carrying the marker, and sandbox credentials.
+func releaseFixture(t *testing.T) (string, map[string]string) {
+	t.Helper()
+	dir := t.TempDir()
+	require.NoError(t, harness.WriteRunProjectMarker(dir,
+		harness.RunProject{ID: "proj-1", Name: harness.RunProjectNamePrefix + "release"}))
+	return dir, map[string]string{"SCW_SECRET_KEY": "secret"}
 }
 
 func TestEnsureRunProjectCreatesAndReportsIt(t *testing.T) {
@@ -91,7 +106,9 @@ func TestReleaseRunProjectDeletesAndReports(t *testing.T) {
 	fake := &fakeRunProject{}
 	rt := &CommandRuntime{Deps: RuntimeDependencies{RunProject: fake}}
 
-	stages, failures := releaseRunProject(context.Background(), rt, "proj-1")
+	workDir, env := releaseFixture(t)
+
+	stages, failures := releaseRunProject(context.Background(), rt, workDir, "proj-1", env)
 
 	assert.Empty(t, failures)
 	require.Len(t, stages, 1)
@@ -103,7 +120,9 @@ func TestReleaseRunProjectIsInertWithoutAProject(t *testing.T) {
 	fake := &fakeRunProject{}
 	rt := &CommandRuntime{Deps: RuntimeDependencies{RunProject: fake}}
 
-	stages, failures := releaseRunProject(context.Background(), rt, "")
+	workDir, env := releaseFixture(t)
+
+	stages, failures := releaseRunProject(context.Background(), rt, workDir, "", env)
 
 	assert.Empty(t, stages)
 	assert.Empty(t, failures)
@@ -116,7 +135,9 @@ func TestReleaseRunProjectReportsAFailedDelete(t *testing.T) {
 	fake := &fakeRunProject{deleteErr: errors.New("http 412: resource_still_in_use")}
 	rt := &CommandRuntime{Deps: RuntimeDependencies{RunProject: fake}}
 
-	stages, failures := releaseRunProject(context.Background(), rt, "proj-1")
+	workDir, env := releaseFixture(t)
+
+	stages, failures := releaseRunProject(context.Background(), rt, workDir, "proj-1", env)
 
 	require.Len(t, failures, 1)
 	assert.Contains(t, failures[0].Detail, "resource_still_in_use")
@@ -173,7 +194,9 @@ func TestReleaseRunProjectSurvivesACancelledRunContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	stages, failures := releaseRunProject(ctx, rt, "proj-1")
+	workDir, env := releaseFixture(t)
+
+	stages, failures := releaseRunProject(ctx, rt, workDir, "proj-1", env)
 
 	assert.Empty(t, failures)
 	assert.Equal(t, 1, fake.deletes, "the delete still reaches the API after cancellation")
@@ -260,4 +283,57 @@ func TestEnsureRunProjectDeletesTheProjectIfTheMarkerCannotBeWritten(t *testing.
 	require.Len(t, failures, 1)
 	assert.Equal(t, 1, fake.deletes, "the project is reclaimed while it still can be")
 	assert.Contains(t, failures[0].Detail, "deleted again, so nothing was left behind")
+}
+
+// D6, arrived at from the other direction. Before the cutover the 412
+// landed on `tofu destroy` and destroySandbox purged and retried. Now
+// destroy succeeds -- the project is not its resource -- and the 412
+// lands here instead. Without this purge every run declaring compute
+// leaks a project again, and quietly: nothing billable survives, so cost
+// checks keep reporting clean.
+func TestReleaseRunProjectPurgesTheAutoCreatedBlockerAndRetries(t *testing.T) {
+	fake := &fakeRunProject{deleteErrs: []error{errors.New("http 412: resource_still_in_use")}}
+	purge := &fakePurge{removed: []string{"security_group 142eef7b (Default security group) in fr-par-1"}}
+	rt := &CommandRuntime{Deps: RuntimeDependencies{RunProject: fake, AutoCreated: purge}}
+	workDir, env := releaseFixture(t)
+
+	stages, failures := releaseRunProject(context.Background(), rt, workDir, "proj-1", env)
+
+	assert.Empty(t, failures)
+	assert.Equal(t, 2, fake.deletes, "the delete is retried once the blocker is gone")
+	assert.Equal(t, "proj-1", purge.gotProj, "the purge is scoped to the run's project")
+	require.Len(t, stages, 2)
+	// A teardown that silently deleted things nobody asked it to delete
+	// would be worse than the leak it fixes.
+	assert.Contains(t, stages[0].Detail, "Default security group")
+	assert.Equal(t, StageStatusPass, stages[1].Status)
+}
+
+// A purge that removes nothing means the delete failed on its own
+// merits, so the original error is what the operator needs to see.
+func TestReleaseRunProjectReportsTheOriginalErrorWhenNothingWasAutoCreated(t *testing.T) {
+	fake := &fakeRunProject{deleteErr: errors.New("http 500: boom")}
+	purge := &fakePurge{}
+	rt := &CommandRuntime{Deps: RuntimeDependencies{RunProject: fake, AutoCreated: purge}}
+	workDir, env := releaseFixture(t)
+
+	_, failures := releaseRunProject(context.Background(), rt, workDir, "proj-1", env)
+
+	require.Len(t, failures, 1)
+	assert.Contains(t, failures[0].Detail, "http 500: boom")
+	assert.Equal(t, 1, fake.deletes, "no blocker was removed, so a retry would only repeat the failure")
+}
+
+// The guard lives inside releaseRunProject because four paths reach it
+// and a check that can be forgotten will be.
+func TestReleaseRunProjectRefusesAProjectNoMarkerNames(t *testing.T) {
+	fake := &fakeRunProject{}
+	rt := &CommandRuntime{Deps: RuntimeDependencies{RunProject: fake}}
+	_, env := releaseFixture(t)
+
+	_, failures := releaseRunProject(context.Background(), rt, t.TempDir(), "proj-1", env)
+
+	require.Len(t, failures, 1)
+	assert.Contains(t, failures[0].Detail, "refusing to delete it")
+	assert.Zero(t, fake.deletes, "nothing proves this project is the run's")
 }

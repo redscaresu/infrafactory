@@ -52,6 +52,21 @@ Last updated: 2026-08-31
   and the no-resources path runs the guard, deletes the project, sweeps and
   releases.
 
+  **D6 moved, and pass 32 caught it.** `destroySandbox` purges Scaleway's
+  auto-created default security group and retries *because `tofu destroy` fails*
+  on `resource is still in use`. After the cutover destroy **succeeds** — the
+  project is not its resource — and the 412 lands on the Account API delete
+  instead. `releaseRunProject` now purges and retries itself, and reports what it
+  removed; without that, every run declaring compute leaks a project again, as
+  invisibly as the first time, because nothing billable survives to fail a cost
+  check. The deletability guard moved inside `releaseRunProject` for the same
+  reason `destroySandbox` holds its own: four paths reach it and it deletes real
+  infrastructure with Terraform nowhere in the loop.
+
+  S165's one documented gap — `run`'s auto-destroy-on-failure path keeping its
+  project — **is closed**. It existed because the id lived in the state file that
+  path could not read; the marker gives it one.
+
 - 📐 **S166 design written for review (2026-08-31)** —
   `docs/plans/s166-teardown-guard-design.md`. Not implemented: this is the slice
   that touches `AssertProjectDeletable`, the guard between an automated destroy

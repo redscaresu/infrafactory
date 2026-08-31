@@ -290,3 +290,25 @@ Two further consequences of the project outliving Terraform:
 - **An unreadable state file fails the sweep.** Treating every read error as
   "nothing was applied" produced a target with no strays computed and a clean
   verdict. Only `os.ErrNotExist` means nothing was applied.
+
+### Follow-up, pass 32: the deletion site Terraform used to be
+
+Two more consequences of the same removal, and both had the same shape: *tofu
+destroy used to do this — who does it now?*
+
+- **D6 moved rather than went away.** `destroySandbox` purges the API's
+  auto-created default security group and retries **because destroy fails** with
+  `resource is still in use`. Destroy now succeeds — the project is not its
+  resource — so the 412 lands on the Account API delete. `releaseRunProject`
+  purges and retries there, and reports what it removed. Nothing billable
+  survives a leaked-but-empty project, so a missing purge here would have gone
+  unnoticed exactly as it did the first time.
+- **`run`'s auto-destroy path is no longer a documented gap.** S165 left it
+  keeping its project because the id lived in the state file that path could not
+  read. The marker gives it one, so the gap closes with the change that removed
+  its cause rather than outliving it.
+
+The deletability guard now lives inside `releaseRunProject` rather than at its
+call sites, matching the rule `destroy_retry.go` already states for the purge: a
+check reached by four paths that deletes real infrastructure over HTTP belongs
+where it cannot be forgotten.

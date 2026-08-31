@@ -93,7 +93,7 @@ func runReapCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) 
 		// cannot delete it -- it is not a Terraform resource -- and the
 		// sweep's whole job is to verify it is gone. Deleting it
 		// afterwards would make every clean reap report a leak.
-		projectStages, projectFailures := releaseRunProject(ctx, runtime, projectID)
+		projectStages, projectFailures := releaseRunProject(ctx, runtime, workDir, projectID, sandboxEnv)
 		stages = append(stages, projectStages...)
 		failures = append(failures, projectFailures...)
 
