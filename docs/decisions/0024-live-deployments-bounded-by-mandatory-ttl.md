@@ -440,3 +440,11 @@ separately from health. Three decisions worth holding:
 
 This is S155's prerequisite: an upgrade to a version nobody confirmed is running
 proves nothing.
+
+The evidence rule is asymmetric, and pass 47 found the slice breaking it.
+**Finding** the tag in a truncated body proves the tag is there; **not** finding
+it proves nothing, because the rest was never read. So a partial or unreadable
+response is `unchecked`, and only a complete one can produce `unconfirmed`.
+Every `unchecked` carries the reason it was not checked — "no version_path
+declared" is a lie for a declared path that could not be reached, and that
+distinction is the whole point of having three states.

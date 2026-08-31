@@ -339,6 +339,9 @@ func (p *releasingProbe) Probe(context.Context, string, int, string) (harness.Se
 type versionProbe struct {
 	healthy     bool
 	versionBody string
+	// partial marks the body as truncated or unreadable, which makes the
+	// ABSENCE of a tag prove nothing.
+	partial     bool
 	unreachable bool
 	paths       []string
 }
@@ -349,7 +352,10 @@ func (p *versionProbe) Probe(_ context.Context, _ string, _ int, path string) (h
 		return harness.ServiceProbeResult{}, nil
 	}
 	if path == "/version" {
-		return harness.ServiceProbeResult{Reachable: true, Healthy: true, Body: p.versionBody}, nil
+		return harness.ServiceProbeResult{
+			Reachable: true, Healthy: true,
+			Body: p.versionBody, BodyComplete: !p.partial,
+		}, nil
 	}
 	return harness.ServiceProbeResult{Reachable: true, Healthy: p.healthy}, nil
 }
@@ -429,4 +435,52 @@ func TestObserveSaysWhenTheRunningVersionWasNeverChecked(t *testing.T) {
 
 	assert.Contains(t, out.String(), "running version unchecked")
 	assert.Equal(t, 1, probe.calls, "no version_path means no second probe")
+}
+
+// Finding the tag proves it is there whatever was cut off; NOT finding it
+// in a partial body proves nothing. Reporting a mismatch on evidence we
+// do not have is the same error as treating unchecked as confirmed, only
+// inverted.
+func TestObserveWillNotCallAMismatchOnAPartialBody(t *testing.T) {
+	probe := &versionProbe{healthy: true, versionBody: "server: something-else", partial: true}
+	rt, store := observeRuntime(t, nil)
+	rt.Deps.ServiceProbe = probe
+	d := versionedDeployment(t, store, "dep-truncated")
+
+	var out strings.Builder
+	require.NoError(t, runObserve(t, rt, &out), "an unreadable answer is not a contradiction")
+	assert.Contains(t, out.String(), "means nothing")
+
+	got, err := store.Get(d.ID)
+	require.NoError(t, err)
+	assert.Equal(t, livestore.VersionUnchecked, got.Observations[0].Version)
+}
+
+// A tag found in a truncated body is still found.
+func TestObserveConfirmsFromAPartialBodyThatContainsTheTag(t *testing.T) {
+	probe := &versionProbe{healthy: true, versionBody: "nginx/1.27.4 and then a lot more", partial: true}
+	rt, store := observeRuntime(t, nil)
+	rt.Deps.ServiceProbe = probe
+	d := versionedDeployment(t, store, "dep-truncated-ok")
+
+	require.NoError(t, runObserve(t, rt, &strings.Builder{}))
+
+	got, err := store.Get(d.ID)
+	require.NoError(t, err)
+	assert.Equal(t, livestore.VersionConfirmed, got.Observations[0].Version)
+}
+
+// "no version_path declared" is a lie for a declared path that could not
+// be reached, and that is the exact distinction this check exists to draw.
+func TestObserveSaysWhyTheVersionWasUncheckedRatherThanGuessing(t *testing.T) {
+	probe := &versionProbe{healthy: true, unreachable: true}
+	rt, store := observeRuntime(t, nil)
+	rt.Deps.ServiceProbe = probe
+	versionedDeployment(t, store, "dep-silent-path")
+
+	var out strings.Builder
+	require.NoError(t, runObserve(t, rt, &out))
+
+	assert.Contains(t, out.String(), "/version is unreachable")
+	assert.NotContains(t, out.String(), "no version_path declared")
 }

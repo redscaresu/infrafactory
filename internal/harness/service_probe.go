@@ -33,6 +33,14 @@ type ServiceProbeResult struct {
 	// claims (S155); a service answering with a firehose must not be
 	// able to grow this.
 	Body string
+	// BodyComplete reports whether Body is the whole response.
+	//
+	// It is false when the read failed or hit the byte limit, and the
+	// distinction is load-bearing: FINDING a version string in a partial
+	// body proves it is there, but NOT finding one proves nothing. A
+	// caller that ignores this reports a mismatch on evidence it does
+	// not have.
+	BodyComplete bool
 }
 
 // maxProbeBodyBytes bounds what a probe keeps from the response.
@@ -108,13 +116,24 @@ func (p *ServiceProbe) Probe(ctx context.Context, address string, port int, heal
 	// Read the head of the body rather than discarding it: the version
 	// check needs what the service said. Still bounded, and the rest is
 	// still drained so the connection can be reused.
-	head, _ := io.ReadAll(io.LimitReader(resp.Body, maxProbeBodyBytes))
+	//
+	// One byte over the limit is read on purpose, so hitting it is
+	// distinguishable from a body that merely ends there.
+	head, readErr := io.ReadAll(io.LimitReader(resp.Body, maxProbeBodyBytes+1))
 	defer func() {
-		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxProbeBodyBytes))
+		_, _ = io.Copy(io.Discard, resp.Body)
 		_ = resp.Body.Close()
 	}()
 
-	result := ServiceProbeResult{Reachable: true, Status: resp.StatusCode, Body: string(head)}
+	complete := readErr == nil && len(head) <= maxProbeBodyBytes
+	if len(head) > maxProbeBodyBytes {
+		head = head[:maxProbeBodyBytes]
+	}
+
+	result := ServiceProbeResult{
+		Reachable: true, Status: resp.StatusCode,
+		Body: string(head), BodyComplete: complete,
+	}
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		result.Healthy = true
 		return result, nil

@@ -24,6 +24,14 @@ Last updated: 2026-08-31
   even when the service is perfectly healthy — that is the more dangerous case,
   because it looks fine.
 
+  **Pass 47 caught the slice violating its own doctrine**: a truncated or
+  unreadable body was compared anyway, so a partial response could be called a
+  mismatch — claiming a contradiction on evidence nobody fully gathered, which is
+  the same error as treating unchecked as confirmed. The asymmetry is explicit
+  now: *finding* the tag proves it is there whatever was cut off; *not* finding it
+  in a partial body proves nothing. Every `unchecked` also carries its reason, so
+  a declared-but-unreachable path no longer prints "no version_path declared".
+
   **Verified against real Scaleway** by deploying a service that contradicts its
   own record: `the record claims nginx:1.27 but / does not mention "1.27"`. Along
   the way it also confirmed pass 44's fix on real infrastructure — a deployment
