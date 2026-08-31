@@ -866,7 +866,7 @@ const realScalewayAPIURL = "https://api.scaleway.com"
 // merely discouraged: every caller that needs an env must now say which
 // project it is for.
 func assertSandboxCredentials(runtime *CommandRuntime) error {
-	_, err := sandboxCommandEnvForProject(runtime, "")
+	_, err := sandboxEnvWithProjectDefault(runtime, "")
 	return err
 }
 
@@ -881,6 +881,27 @@ func assertSandboxCredentials(runtime *CommandRuntime) error {
 //
 // An empty runProjectID keeps the pre-ADR-0025 behaviour exactly.
 func sandboxCommandEnvForProject(runtime *CommandRuntime, runProjectID string) (map[string]string, error) {
+	// An empty project id is an error, never a fall-through. Every
+	// accidental one so far arrived as a value -- a zero-value marker, a
+	// failed sweep capture, a record field -- so the audit for a literal
+	// "" could not see any of them, and the result each time was a
+	// destroy silently scoped to the shared fallback (or, with no
+	// fallback configured, to whatever ~/.config/scw names, typically the
+	// organization default). Refusing here ends the class: the only
+	// caller allowed to pass nothing is the credentials preflight, which
+	// takes no environment away with it.
+	if strings.TrimSpace(runProjectID) == "" {
+		return nil, fmt.Errorf(
+			"refusing to build a Layer 3 environment with no run project: a destroy scoped to the " +
+				"shared fallback is not the inverse of an apply that ran in the run's own project")
+	}
+	return sandboxEnvWithProjectDefault(runtime, runProjectID)
+}
+
+// sandboxEnvWithProjectDefault is the builder. It accepts an empty
+// project so the credentials preflight can run before one exists;
+// everything else goes through sandboxCommandEnvForProject.
+func sandboxEnvWithProjectDefault(runtime *CommandRuntime, runProjectID string) (map[string]string, error) {
 	accessKey := strings.TrimSpace(os.Getenv("SCW_ACCESS_KEY"))
 	if accessKey == "" {
 		return nil, fmt.Errorf("sandbox deploy requires SCW_ACCESS_KEY in the environment")

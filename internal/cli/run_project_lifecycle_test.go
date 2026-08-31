@@ -195,7 +195,10 @@ func TestNoProductionPathBuildsSandboxEnvWithoutARunProject(t *testing.T) {
 		for i, line := range strings.Split(string(source), "\n") {
 			trimmed := strings.TrimSpace(line)
 			// The one legitimate caller: the credentials check that runs
-			// before the project exists, and hands back no env.
+			// before the project exists, and hands back no env. Anything
+			// else that needs an env goes through
+			// sandboxCommandEnvForProject, which now refuses an empty
+			// project outright -- this audit covers only the raw builder.
 			if strings.HasPrefix(trimmed, "func assertSandboxCredentials(") {
 				inPreflight = true
 				continue
@@ -209,7 +212,7 @@ func TestNoProductionPathBuildsSandboxEnvWithoutARunProject(t *testing.T) {
 			if strings.HasPrefix(trimmed, "//") {
 				continue
 			}
-			assert.NotContains(t, trimmed, `sandboxCommandEnvForProject(runtime, "")`,
+			assert.NotContains(t, trimmed, `sandboxEnvWithProjectDefault(runtime, "")`,
 				"%s:%d builds the Layer 3 environment with no run project; a destroy that "+
 					"does this is not the inverse of the apply that created the resources", name, i+1)
 		}
@@ -247,10 +250,24 @@ func TestNoProjectIsCreatedWhenTheSandboxEnvIsInvalid(t *testing.T) {
 	t.Setenv("SCW_ACCESS_KEY", "") // the missing piece
 
 	rt := &CommandRuntime{}
-	_, err := sandboxCommandEnvForProject(rt, "")
+	err := assertSandboxCredentials(rt)
 
 	require.Error(t, err, "the environment is rejected before any project could be created")
 	assert.Contains(t, err.Error(), "SCW_ACCESS_KEY")
+}
+
+// The seam that ends the class: every accidental empty project id so far
+// arrived as a VALUE -- a zero-value marker, a failed sweep capture, a
+// record field -- so a source audit for a literal "" saw none of them.
+// Refusing here turns each of those into a loud error instead of a
+// destroy silently scoped to the shared fallback.
+func TestSandboxEnvRefusesToBuildWithoutARunProject(t *testing.T) {
+	sandboxCredsForTest(t)
+
+	_, err := sandboxCommandEnvForProject(&CommandRuntime{}, "  ")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not the inverse of an apply")
 }
 
 // Every destroy path goes through one guard, so none can carry a weaker

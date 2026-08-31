@@ -394,3 +394,9 @@ Two rules came out of it, both now held in code:
   fallback is not the inverse of an apply that ran in the run's own project. The
   operator gets the reason and the recovery command; a post-cutover run always
   writes the marker, so its absence means the workdir is damaged.
+
+Closed at the seam rather than by inspection: `sandboxCommandEnvForProject`
+returns an error on an empty project id, and the builder that tolerates one
+(`sandboxEnvWithProjectDefault`) is reachable only from the credentials
+preflight, which discards the environment it builds. Three review passes fixed
+individual instances of this before the seam ended the class.

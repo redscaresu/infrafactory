@@ -202,7 +202,7 @@ func TestLayer2AndLayer3ScalewayEnvsAreInverses(t *testing.T) {
 		t.Fatalf("Layer 2 must point SCW_API_URL at mockway, got %q", layer2["SCW_API_URL"])
 	}
 
-	layer3, err := sandboxCommandEnvForProject(runtime, "")
+	layer3, err := sandboxEnvWithProjectDefault(runtime, "")
 	if err != nil {
 		t.Fatalf("sandboxCommandEnv: %v", err)
 	}

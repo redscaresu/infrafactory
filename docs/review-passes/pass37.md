@@ -54,4 +54,19 @@ refusal it now is.
 New coverage: `TestInterruptGuardRefusesToDestroyWithoutAMarker`,
 `TestRunCommandRefusesAutoDestroyWhenTheRunProjectIsUnknown`.
 
+## And then the class was closed at the seam
+
+Three passes have now fixed instances of "an empty project id reached the env
+builder". The audit cannot catch them because none is a literal.
+
+`sandboxCommandEnvForProject` now **returns an error** on an empty project id.
+The builder that tolerates one is `sandboxEnvWithProjectDefault`, reachable from
+the credentials preflight — which discards the environment it builds. So an
+accidental empty is a loud failure rather than a destroy quietly scoped to the
+shared fallback, or, with no fallback configured, to whatever `~/.config/scw`
+names — typically the organization default.
+
+The audit stays, repointed at the raw builder and re-verified against synthetic
+drift in two separate files.
+
 ## Nothing declined this pass.

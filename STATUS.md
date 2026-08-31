@@ -92,6 +92,12 @@ Last updated: 2026-08-31
   read, cleanup **stops and says why** with the recovery command rather than
   destroying against the shared fallback.
 
+  Then the class was closed at the seam: `sandboxCommandEnvForProject` now
+  **errors** on an empty project id. The builder that tolerates one is
+  `sandboxEnvWithProjectDefault`, reachable only from the credentials preflight,
+  which discards the env it builds. Three passes fixed instances of this; the
+  seam ends it.
+
   **Pass 36 declined both findings** — both asked for a state-file fallback when
   a workdir has no marker, which is the dual model the cutover dropped. Checked
   rather than assumed: no such workdir exists (the live store is absent,
