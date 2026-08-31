@@ -37,16 +37,21 @@ existence*.
 
 | id | slice | why |
 |---|---|---|
-| S165 | Pre-apply project creation + `SCW_DEFAULT_PROJECT_ID` wiring, behind a config flag; both paths work | the mechanism, provably reversible |
-| S166 | Replace `AssertProjectDeletable`'s second source of truth | the guard that stands between teardown and real infrastructure — see below |
-| S167 | Remove `scaleway_account_project` from generation: prompts, pitfalls, shape gate, fixtures | the HCL change itself |
-| S168 | Real-cloud canary on the new path, then delete the old one + evidence | proven before the fallback is removed |
+| S165 | Pre-apply project creation + `SCW_DEFAULT_PROJECT_ID` wiring | ✅ **done, merged, canaried 2026-08-31** |
+| S166+S167 | The cutover: new guard **and** `scaleway_account_project` out of the HCL, prompts, pitfalls, shape gate, fixtures, recorded generation — in one change | the guard's input changes exactly when the HCL does, so they are one change |
+| S168 | Real-cloud canary on the new path + evidence | proven before merge, not after |
 
-**S165 → S166 → S167 → S168 is strictly ordered.** S166 must land before S167:
-once the project leaves the HCL the state no longer names it, and the guard has
-to already have its replacement.
+**Revised 2026-08-31.** The plan originally staged S166 before S167 behind a
+flag, on the assumption that both models should coexist during a transition.
+Challenged and dropped: there is no fleet to migrate, no external consumers, and
+the PR gate catches fixture breakage on the PR itself. Two models meant two code
+paths, which is where this arc's bugs came from — five of S165's nine review
+findings were a cleanup path that did not run. `scaleway.create_run_project` was
+scaffolding mistaken for a feature and is deleted by the cutover.
 
-## S166 is the slice to be careful with
+Design and decisions: `docs/plans/s166-teardown-guard-design.md`.
+
+## The cutover is the slice to be careful with
 
 `AssertProjectDeletable(stateProjectID, targetProjectID, organizationID)` refuses
 when the target is the organization default, and when it does not match the
@@ -68,23 +73,23 @@ It is replaced by two independent checks, both required, each failing closed:
 The organization-default refusal is unchanged. This is also the first real piece
 of the reconcile-against-API work ADR-0024 has owed since S153.
 
-## Migration, and why both paths coexist for a while
+## No migration (revised 2026-08-31)
 
-`examples/layer3-gate/*` and `docs/demo/recorded-generation/*` declare
-`scaleway_account_project` today, and the PR gate applies that fixture HCL
-directly — so flipping the model in one commit would break the gate, which is the
-artifact the talk rests on. The pre-created path therefore lands behind a config
-flag (S165), fixtures and prompts move over in S167, and the old path is deleted
-only in S168, after a real-cloud canary has passed on the new one.
+The original plan kept both models alive behind a flag until a canary passed.
+Dropped — see the slice table above and
+`docs/plans/s166-teardown-guard-design.md`. The gate applies fixture HCL that
+declares `scaleway_account_project`, and those fixtures move **in the same
+change** as the guard; the gate running on the PR is what catches it if that goes
+wrong.
 
 ## Risks
 
 | risk | mitigation |
 |---|---|
-| **The teardown guard is weakened in the gap between S165 and S167.** | strict ordering: S166 lands its replacement before S167 removes the input |
+| **The teardown guard is weakened while the model changes.** | there is no gap: the guard's replacement and the HCL change are the same commit, reviewed hard and canaried before merge |
 | **Empty projects accumulate** from crashes between creation and apply. | sweep them by provenance marker; they are free but must not pile up |
 | **`tofu destroy` no longer removes the project**, so a teardown that stops early leaves it. | delete it via the API after destroy — the same sequence `destroySandbox` already runs for the auto-created security group |
-| **The gate fixtures drift** from generated HCL during the transition. | both paths supported until S168; the gate keeps applying fixtures unchanged |
+| **The gate fixtures drift** from generated HCL. | fixtures and recorded generation are regenerated in the cutover commit, and the gate runs on the PR that does it |
 
 ## What success looks like
 
