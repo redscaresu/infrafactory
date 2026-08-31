@@ -309,12 +309,13 @@ func registerDeployment(
 		// Snapshotted, not looked up later: the scenario file changes,
 		// this record describes one deployment that already happened
 		// (S154).
-		Port:       sc.Service.Port,
-		HealthPath: sc.Service.HealthPath,
-		State:      livestore.StateLive,
-		WorkDir:    workDir,
-		CreatedAt:  now,
-		ExpiresAt:  now.Add(ttl),
+		Port:        sc.Service.Port,
+		HealthPath:  sc.Service.HealthPath,
+		VersionPath: sc.Service.VersionPath,
+		State:       livestore.StateLive,
+		WorkDir:     workDir,
+		CreatedAt:   now,
+		ExpiresAt:   now.Add(ttl),
 	}
 
 	if err := store.Put(d); err != nil {

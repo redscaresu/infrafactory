@@ -4,6 +4,47 @@ Last updated: 2026-08-31
 
 ## Current phase
 
+- 🔍 **S155a: the record states intent; only the service states fact (2026-08-31)** —
+  `deploy` records the **declared** image and tag, and the canary showed how far
+  that drifts: the record said `nginx:1.27` while the instance served
+  `python3 -m http.server`. An upgrade to a version nobody confirmed is running
+  proves nothing, so this is S155's prerequisite rather than a nicety.
+
+  A scenario may now declare `service.version_path`. `live observe` probes it
+  separately from health and records one of **three** states — deliberately not
+  two. `unchecked` (nothing was asked) and `unconfirmed` (we asked and the
+  service did not confirm) are different facts, and treating the first as
+  confirmation is the falsehood this exists to stop. A probe that fails is
+  `unchecked`, never `unconfirmed`: claiming a contradiction on evidence nobody
+  gathered is the same error in the other direction.
+
+  The check is **deliberately weak and deliberately stated**: the response must
+  *mention* the tag. That verifies a cooperating service and cannot verify an
+  uncooperative one, which is why declaring the path is opt-in. A mismatch fails
+  even when the service is perfectly healthy — that is the more dangerous case,
+  because it looks fine.
+
+  **Pass 47 caught the slice violating its own doctrine**: a truncated or
+  unreadable body was compared anyway, so a partial response could be called a
+  mismatch — claiming a contradiction on evidence nobody fully gathered, which is
+  the same error as treating unchecked as confirmed. The asymmetry is explicit
+  now: *finding* the tag proves it is there whatever was cut off; *not* finding it
+  in a partial body proves nothing. Every `unchecked` also carries its reason, so
+  a declared-but-unreachable path no longer prints "no version_path declared".
+
+  Pass 48 then caught a regression pass 47 had introduced: reading the body head
+  meant editing the `defer` beside it, and the response drain lost its bound. It
+  would have shown up as slowness rather than a hang — `live observe` probes
+  every deployment in turn, so one streaming body delays all the ones behind it.
+  **An incidental edit inside a fix is still an edit**, and under a one-clean-pass
+  rule those are the ones that survive, because attention is on the finding.
+
+  **Verified against real Scaleway** by deploying a service that contradicts its
+  own record: `the record claims nginx:1.27 but / does not mention "1.27"`. Along
+  the way it also confirmed pass 44's fix on real infrastructure — a deployment
+  with no load balancer produced no address, and `observe` refused it rather than
+  reporting clean.
+
 - 🔬 **The NIC blocker retested — it moved, and narrowed (2026-08-31)** — the
   claim that `scaleway_instance_private_nic` is refused by the API with a 403 was
   written before `PrivateNetworksFullAccess` and before the cutover, and **nothing

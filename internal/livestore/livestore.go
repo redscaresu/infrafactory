@@ -75,6 +75,10 @@ type Deployment struct {
 	// strays would be recomputed from.
 	SweepVerificationFailed bool `json:"sweep_verification_failed,omitempty"`
 
+	// VersionPath, when declared, is probed to check that the service is
+	// running the version this record claims. Snapshotted with the rest.
+	VersionPath string `json:"version_path,omitempty"`
+
 	// Port and HealthPath are the service's own, snapshotted at deploy
 	// time rather than re-read from the scenario when a probe runs. The
 	// scenario is a file that changes; this record describes one
@@ -123,6 +127,29 @@ const (
 // readable by a human.
 const MaxObservations = 50
 
+// VersionCheck is what a probe could establish about the version the
+// service is ACTUALLY running, as opposed to the one the record claims.
+//
+// Three states, not two. "We did not look" and "we looked and the
+// service did not confirm it" are different facts, and a loop that
+// attributed a failure to a version on the strength of the first would
+// be learning a falsehood -- which is exactly the drift the 2026-08-31
+// canary found, where the record said nginx:1.27 and the instance served
+// python3 -m http.server.
+type VersionCheck string
+
+const (
+	// VersionUnchecked means no version_path was declared, so nothing
+	// was asked. Never treat it as confirmation.
+	VersionUnchecked VersionCheck = ""
+	// VersionConfirmed means the service's own response mentioned the
+	// tag this deployment claims to run.
+	VersionConfirmed VersionCheck = "confirmed"
+	// VersionUnconfirmed means the service answered and did NOT mention
+	// it. The record and the world disagree.
+	VersionUnconfirmed VersionCheck = "unconfirmed"
+)
+
 // Observation is one probe of one deployment's health path.
 type Observation struct {
 	At     time.Time         `json:"at"`
@@ -130,6 +157,9 @@ type Observation struct {
 	// Detail is the reason, in the shape the pitfall extractors already
 	// take. Empty on a healthy probe: there is nothing to say.
 	Detail string `json:"detail,omitempty"`
+	// Version is what this probe could establish about the running
+	// version. Empty means unchecked.
+	Version VersionCheck `json:"version,omitempty"`
 }
 
 // Healthy is the only status that means the service is working. Written

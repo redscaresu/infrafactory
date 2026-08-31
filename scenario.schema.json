@@ -129,6 +129,11 @@
           "default": "/",
           "description": "HTTP path polled to decide whether the service is serving. Used by the http_probe criterion and, from S154, by the soak stage."
         },
+        "version_path": {
+          "type": "string",
+          "pattern": "^/",
+          "description": "HTTP path whose response names the version actually running. Optional; its absence means the running version is unchecked, never confirmed. deploy records the DECLARED image and tag, which is a claim about intent -- the 2026-08-31 canary recorded nginx:1.27 while the instance served python3 -m http.server. The check is deliberately weak: the response must MENTION the tag, which verifies a cooperating service and cannot verify an uncooperative one."
+        },
         "ttl": {
           "type": "string",
           "pattern": "^[0-9]+(ns|us|ms|s|m|h)$",

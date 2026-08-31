@@ -332,3 +332,155 @@ func (p *releasingProbe) Probe(context.Context, string, int, string) (harness.Se
 	}
 	return harness.ServiceProbeResult{Reachable: true, Healthy: true}, nil
 }
+
+// versionProbe answers the health path and the version path differently,
+// which is the whole point: a service can be healthy and running
+// something other than what the record claims.
+type versionProbe struct {
+	healthy     bool
+	versionBody string
+	// partial marks the body as truncated or unreadable, which makes the
+	// ABSENCE of a tag prove nothing.
+	partial     bool
+	unreachable bool
+	paths       []string
+}
+
+func (p *versionProbe) Probe(_ context.Context, _ string, _ int, path string) (harness.ServiceProbeResult, error) {
+	p.paths = append(p.paths, path)
+	if p.unreachable && path == "/version" {
+		return harness.ServiceProbeResult{}, nil
+	}
+	if path == "/version" {
+		return harness.ServiceProbeResult{
+			Reachable: true, Healthy: true,
+			Body: p.versionBody, BodyComplete: !p.partial,
+		}, nil
+	}
+	return harness.ServiceProbeResult{Reachable: true, Healthy: p.healthy}, nil
+}
+
+func versionedDeployment(t *testing.T, store *livestore.FilesystemStore, id string) livestore.Deployment {
+	t.Helper()
+	d := observableDeployment(t, store, id)
+	d.VersionPath = "/version"
+	require.NoError(t, store.Put(d))
+	return d
+}
+
+// The record states intent. Only the service states fact.
+func TestObserveConfirmsTheRunningVersion(t *testing.T) {
+	probe := &versionProbe{healthy: true, versionBody: "nginx/1.27.4"}
+	rt, store := observeRuntime(t, nil)
+	rt.Deps.ServiceProbe = probe
+	d := versionedDeployment(t, store, "dep-versioned")
+
+	var out strings.Builder
+	require.NoError(t, runObserve(t, rt, &out))
+
+	assert.Contains(t, probe.paths, "/version", "the version path is probed separately from health")
+	assert.Contains(t, out.String(), "confirms nginx:1.27")
+
+	got, err := store.Get(d.ID)
+	require.NoError(t, err)
+	require.Len(t, got.Observations, 1)
+	assert.Equal(t, livestore.VersionConfirmed, got.Observations[0].Version)
+}
+
+// The canary's exact shape: the record says nginx:1.27, a python
+// one-liner answers. Healthy, and lying.
+func TestObserveFailsWhenTheServiceDoesNotConfirmTheRecordedVersion(t *testing.T) {
+	probe := &versionProbe{healthy: true, versionBody: "SimpleHTTP/0.6 Python/3.10.12"}
+	rt, store := observeRuntime(t, nil)
+	rt.Deps.ServiceProbe = probe
+	d := versionedDeployment(t, store, "dep-lying")
+
+	var out strings.Builder
+	err := runObserve(t, rt, &out)
+
+	require.Error(t, err, "a healthy service running the wrong version is still a finding")
+	assert.Contains(t, out.String(), "does not mention")
+	assert.Contains(t, out.String(), "proves nothing")
+
+	got, storeErr := store.Get(d.ID)
+	require.NoError(t, storeErr)
+	assert.Equal(t, livestore.VersionUnconfirmed, got.Observations[0].Version)
+}
+
+// A probe that did not happen is unchecked, never unconfirmed. Claiming
+// a contradiction on evidence nobody gathered is the same falsehood in
+// the other direction.
+func TestObserveTreatsAnUnreachableVersionPathAsUnchecked(t *testing.T) {
+	probe := &versionProbe{healthy: true, unreachable: true}
+	rt, store := observeRuntime(t, nil)
+	rt.Deps.ServiceProbe = probe
+	d := versionedDeployment(t, store, "dep-silent")
+
+	require.NoError(t, runObserve(t, rt, &strings.Builder{}), "unchecked is not a failure")
+
+	got, err := store.Get(d.ID)
+	require.NoError(t, err)
+	assert.Equal(t, livestore.VersionUnchecked, got.Observations[0].Version)
+}
+
+// Silence would read as confirmation, so a deployment that declares no
+// version_path says so in its own stage line.
+func TestObserveSaysWhenTheRunningVersionWasNeverChecked(t *testing.T) {
+	probe := &fakeServiceProbe{result: harness.ServiceProbeResult{Reachable: true, Healthy: true}}
+	rt, store := observeRuntime(t, probe)
+	observableDeployment(t, store, "dep-unversioned")
+
+	var out strings.Builder
+	require.NoError(t, runObserve(t, rt, &out))
+
+	assert.Contains(t, out.String(), "running version unchecked")
+	assert.Equal(t, 1, probe.calls, "no version_path means no second probe")
+}
+
+// Finding the tag proves it is there whatever was cut off; NOT finding it
+// in a partial body proves nothing. Reporting a mismatch on evidence we
+// do not have is the same error as treating unchecked as confirmed, only
+// inverted.
+func TestObserveWillNotCallAMismatchOnAPartialBody(t *testing.T) {
+	probe := &versionProbe{healthy: true, versionBody: "server: something-else", partial: true}
+	rt, store := observeRuntime(t, nil)
+	rt.Deps.ServiceProbe = probe
+	d := versionedDeployment(t, store, "dep-truncated")
+
+	var out strings.Builder
+	require.NoError(t, runObserve(t, rt, &out), "an unreadable answer is not a contradiction")
+	assert.Contains(t, out.String(), "means nothing")
+
+	got, err := store.Get(d.ID)
+	require.NoError(t, err)
+	assert.Equal(t, livestore.VersionUnchecked, got.Observations[0].Version)
+}
+
+// A tag found in a truncated body is still found.
+func TestObserveConfirmsFromAPartialBodyThatContainsTheTag(t *testing.T) {
+	probe := &versionProbe{healthy: true, versionBody: "nginx/1.27.4 and then a lot more", partial: true}
+	rt, store := observeRuntime(t, nil)
+	rt.Deps.ServiceProbe = probe
+	d := versionedDeployment(t, store, "dep-truncated-ok")
+
+	require.NoError(t, runObserve(t, rt, &strings.Builder{}))
+
+	got, err := store.Get(d.ID)
+	require.NoError(t, err)
+	assert.Equal(t, livestore.VersionConfirmed, got.Observations[0].Version)
+}
+
+// "no version_path declared" is a lie for a declared path that could not
+// be reached, and that is the exact distinction this check exists to draw.
+func TestObserveSaysWhyTheVersionWasUncheckedRatherThanGuessing(t *testing.T) {
+	probe := &versionProbe{healthy: true, unreachable: true}
+	rt, store := observeRuntime(t, nil)
+	rt.Deps.ServiceProbe = probe
+	versionedDeployment(t, store, "dep-silent-path")
+
+	var out strings.Builder
+	require.NoError(t, runObserve(t, rt, &out))
+
+	assert.Contains(t, out.String(), "/version is unreachable")
+	assert.NotContains(t, out.String(), "no version_path declared")
+}
