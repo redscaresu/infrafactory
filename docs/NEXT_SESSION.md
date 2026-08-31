@@ -6,9 +6,10 @@ Self-contained brief for a fresh Claude / engineer starting in this repo.
 
 ### START HERE — S166, the teardown guard
 
-**Read `docs/plans/s166-teardown-guard-design.md` first, and disagree with it
-before anything is built.** It collects four judgement calls for a human; the
-weakest is the migration disjunction.
+**Read `docs/plans/s166-teardown-guard-design.md` first — it is decided and ready
+to build.** All four judgement calls were answered on 2026-08-31 and are recorded
+there as decisions; you do not need to re-open them, but the reasoning is written
+down so you can tell whether a new fact should.
 
 S166 replaces `AssertProjectDeletable`'s state-derived cross-check — the guard
 between an automated destroy and real infrastructure. Under ADR-0025 the project
