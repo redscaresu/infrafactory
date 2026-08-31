@@ -577,8 +577,42 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 
 	deployResult, deployErr := runtime.Deps.MockDeploy.Run(ctx, outputDir, env, deployMode)
 	stages, failures = appendMockDeployResult(stages, failures, deployResult, deployErr)
+	// Declared out here because the destroy path below has to delete what
+	// the apply path created, and they are separate branches.
+	var runProjectID string
+	// Whether the sandbox teardown itself proved the account clean.
+	// Deliberately not len(failures) == 0: that also counts failures from
+	// earlier stages, which say nothing about the account.
+	var sandboxTeardownClean bool
+
 	if deployErr == nil && sandboxEnabled {
-		sandboxEnv, sandboxEnvErr := sandboxCommandEnv(runtime)
+		// Validate the sealed environment BEFORE creating anything. The
+		// credential and endpoint checks live in sandboxCommandEnv, and
+		// running them only after the Account API call would let a
+		// configuration that is going to be rejected -- a missing
+		// SCW_ACCESS_KEY, say -- still leave a real project behind,
+		// relying on best-effort cleanup for residue that should never
+		// have existed.
+		sandboxEnv, sandboxEnvErr := sandboxCommandEnvForProject(runtime, "")
+
+		if sandboxEnvErr == nil {
+			// ADR-0025: the run's own project has to exist before the
+			// provider's environment is built, which is why it can no
+			// longer be a Terraform resource.
+			createdID, runProjectStages, runProjectFailures := ensureRunProject(ctx, runtime, sc.Name)
+			runProjectID = createdID
+			stages = append(stages, runProjectStages...)
+			failures = append(failures, runProjectFailures...)
+
+			if len(runProjectFailures) > 0 {
+				// Creating it failed, so there is nothing to apply into.
+				// Falling back to the shared project would put this run's
+				// strays next to every other run's.
+				sandboxEnvErr = fmt.Errorf("run project unavailable")
+			} else if runProjectID != "" {
+				sandboxEnv, sandboxEnvErr = sandboxCommandEnvForProject(runtime, runProjectID)
+			}
+		}
 		if sandboxEnvErr != nil {
 			stages = append(stages, StageSummary{Layer: "sandbox_deploy", Stage: "preflight", Status: StageStatusFail})
 			failures = append(failures, FailureSummary{
@@ -647,7 +681,13 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 		// sweep, telling the operator to chase a leak that cannot exist.
 		// run_command.go uses the same signal.
 		if sandboxEnabled && liveStateMayHoldResources(outputDir) {
-			sandboxEnv, sandboxEnvErr := sandboxCommandEnv(runtime)
+			// The SAME project the apply used. Destroy refreshes and
+			// removes resources that carry no project_id of their own,
+			// so pointing the provider back at the shared fallback here
+			// would look for them in the wrong project -- failing the
+			// teardown, or leaving them behind, for exactly the
+			// projectless resources this flag exists to support.
+			sandboxEnv, sandboxEnvErr := sandboxCommandEnvForProject(runtime, runProjectID)
 			if sandboxEnvErr != nil {
 				stages = append(stages, StageSummary{Layer: "sandbox_deploy", Stage: "destroy_preflight", Status: StageStatusFail})
 				failures = append(failures, FailureSummary{
@@ -668,10 +708,17 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 					stages = append(stages, autoCreatedPurgeStage(purged))
 				}
 				if sandboxDestroyErr == nil {
+					failuresBeforeSweep := len(failures)
 					stages, failures = appendOrphanSweepResult(ctx, stages, failures, runtime, sweepTarget, sweepTargetErr, sandboxEnv)
+					// The teardown's own verdict, not the command's. A
+					// failure recorded earlier -- a mock criteria check,
+					// say -- says nothing about whether the account came
+					// back clean.
+					sandboxTeardownClean = len(failures) == failuresBeforeSweep
 				}
 			}
 		}
+		// One cleanup for every exit from the sandbox block, not just the
 	} else if deployErr == nil {
 		criteriaStages, criteriaFailures := evaluateSupportedCriteria(ctx, sc, runtime, deployResult)
 		stages = append(stages, criteriaStages...)
@@ -681,6 +728,44 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 			detail = "skipped by --no-destroy"
 		}
 		stages = append(stages, StageSummary{Layer: "destruction", Stage: "disabled", Status: StageStatusSkip, Detail: detail})
+	}
+
+	// Outside every branch on purpose. Three separate placements of this
+	// cleanup were each skipped by some exit path -- the happy-path-only
+	// one, then the destroy-branch one, which `--no-destroy` and disabled
+	// destruction both walk past. The project is created in one place, so
+	// it is released in one place, after all of them.
+	//
+	// Deleted only when nothing of the run can still exist: the account
+	// was proven clean, or no state was ever written so nothing was
+	// created. Otherwise it is kept and said so, because the project id
+	// is the handle to whatever remains.
+	// "No failures" is not the same as "nothing is left". On a --no-destroy
+	// run the apply succeeds and the resources are deliberately still
+	// live, so deleting the project would either fail on resources in use
+	// or remove the handle to a run the operator asked to keep. Deletion
+	// needs destruction to have actually run AND to have proved the
+	// account clean -- which is sandboxTeardownClean, not the command's
+	// accumulated failure list. A mock criteria failure followed by a
+	// clean destroy leaves nothing behind but would otherwise strand the
+	// empty project forever.
+	destructionRan := runtime.Config.Validation.Layers.Destruction.Enabled && !opts.SkipDestroy
+
+	if runProjectID != "" {
+		switch {
+		case !liveStateMayHoldResources(outputDir),
+			destructionRan && sandboxTeardownClean:
+			deleteStages, deleteFailures := releaseRunProject(ctx, runtime, runProjectID)
+			stages = append(stages, deleteStages...)
+			failures = append(failures, deleteFailures...)
+		default:
+			stages = append(stages, StageSummary{
+				Layer: "sandbox_deploy", Stage: "run_project_delete", Status: StageStatusSkip,
+				Detail: fmt.Sprintf(
+					"kept %s: this run may still have resources, and the project is the handle to them. "+
+						"Destroy them, then delete it by hand", runProjectID),
+			})
+		}
 	}
 
 	status := CommandStatusSuccess
@@ -749,7 +834,23 @@ const realScalewayAPIURL = "https://api.scaleway.com"
 // to reach anything else. The keys returned here are only half of that
 // guarantee; the other half is harness.SandboxStripEnv, which removes
 // the inherited overrides an override map cannot unset.
+// sandboxCommandEnv builds the sealed Layer 3 environment with the
+// configured fallback project as the provider default.
 func sandboxCommandEnv(runtime *CommandRuntime) (map[string]string, error) {
+	return sandboxCommandEnvForProject(runtime, "")
+}
+
+// sandboxCommandEnvForProject is sandboxCommandEnv with an explicit
+// provider default project.
+//
+// ADR-0025 needs this seam: when the run creates its own project before
+// the apply, SCW_DEFAULT_PROJECT_ID must point at THAT project rather
+// than the shared fallback, so a resource carrying no project_id of its
+// own -- scaleway_instance_private_nic has no such attribute -- lands
+// somewhere disposable and swept rather than somewhere shared.
+//
+// An empty runProjectID keeps the pre-ADR-0025 behaviour exactly.
+func sandboxCommandEnvForProject(runtime *CommandRuntime, runProjectID string) (map[string]string, error) {
 	accessKey := strings.TrimSpace(os.Getenv("SCW_ACCESS_KEY"))
 	if accessKey == "" {
 		return nil, fmt.Errorf("sandbox deploy requires SCW_ACCESS_KEY in the environment")
@@ -790,11 +891,22 @@ func sandboxCommandEnv(runtime *CommandRuntime) (map[string]string, error) {
 	// provider falls through to the default project in
 	// ~/.config/scw/config.yaml -- typically the organization default,
 	// next to real infrastructure.
-	if fallback := strings.TrimSpace(runtime.Config.Scaleway.FallbackProjectID); fallback != "" {
-		if fallback == orgID {
-			return nil, fmt.Errorf("scaleway.fallback_project_id must not be the organization's default project (%s): a stray resource would land next to real infrastructure, which is exactly what this setting exists to prevent", orgID)
+	//
+	// The run's own project takes precedence when there is one. The
+	// organization-default refusal below applies to it too: the check is
+	// about where strays land, and that reasoning does not change with
+	// where the project id came from.
+	projectDefault := strings.TrimSpace(runtime.Config.Scaleway.FallbackProjectID)
+	source := "scaleway.fallback_project_id"
+	if trimmed := strings.TrimSpace(runProjectID); trimmed != "" {
+		projectDefault = trimmed
+		source = "the run's own project"
+	}
+	if projectDefault != "" {
+		if projectDefault == orgID {
+			return nil, fmt.Errorf("%s must not be the organization's default project (%s): a stray resource would land next to real infrastructure, which is exactly what this setting exists to prevent", source, orgID)
 		}
-		env["SCW_DEFAULT_PROJECT_ID"] = fallback
+		env["SCW_DEFAULT_PROJECT_ID"] = projectDefault
 	}
 
 	if err := assertRealScalewayEndpoint(env); err != nil {

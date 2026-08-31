@@ -13,6 +13,10 @@ import (
 // Instance zone, so it is a handful of small requests, not one long one.
 const autoCreatedPurgeTimeout = 15 * time.Second
 
+// runProjectTimeout bounds the two Account API calls that bracket a
+// Layer 3 run. Both are single small requests.
+const runProjectTimeout = 20 * time.Second
+
 // destroySandbox runs the sandbox destroy, and on failure clears
 // API-auto-created resources out of the run's project and tries once
 // more.

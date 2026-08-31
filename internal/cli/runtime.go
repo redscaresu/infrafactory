@@ -43,6 +43,16 @@ type AutoCreatedPurgeRunner interface {
 	Run(ctx context.Context, projectID, secretKey string) ([]string, error)
 }
 
+// RunProjectManager creates and deletes the disposable project a Layer 3
+// run applies into (ADR-0025). Separate from the sweep and the purge
+// because it runs BEFORE the apply: the project id has to exist when the
+// provider's environment is built, which is the whole reason it can no
+// longer be a Terraform resource.
+type RunProjectManager interface {
+	Create(ctx context.Context, secretKey, organizationID, scenario, stamp string) (harness.RunProject, error)
+	Delete(ctx context.Context, secretKey, projectID string) error
+}
+
 // OrphanSweepRunner verifies, against the real API, that a Layer 3 run
 // left nothing billable behind. For Layer 3 this -- not mockway state --
 // is what satisfies a `destruction: no_orphans` criterion.
@@ -79,6 +89,7 @@ type RuntimeDependencies struct {
 	SandboxDestroy SandboxDestroyHarnessRunner
 	AutoCreated    AutoCreatedPurgeRunner
 	OrphanSweep    OrphanSweepRunner
+	RunProject     RunProjectManager
 	RealProbe      RealProbeHarnessRunner
 	MockState      harness.MockStateClient
 	MockStart      MockStarter
@@ -396,6 +407,9 @@ func buildRuntime(cmd *cobra.Command, opts runtimeOptions) (*CommandRuntime, err
 	}
 	if deps.AutoCreated == nil {
 		deps.AutoCreated = harness.NewScalewayAutoCreatedPurge(autoCreatedPurgeTimeout)
+	}
+	if deps.RunProject == nil {
+		deps.RunProject = harness.NewScalewayRunProject(runProjectTimeout)
 	}
 	if deps.OrphanSweep == nil {
 		deps.OrphanSweep = harness.NewScalewayOrphanSweep(

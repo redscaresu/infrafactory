@@ -10,6 +10,9 @@ import (
 
 	"github.com/redscaresu/infrafactory/internal/config"
 	"github.com/redscaresu/infrafactory/internal/harness"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // isolateSCWConfig points the scw-config lookup at an empty directory so
@@ -280,4 +283,39 @@ func TestSandboxEnvOmitsProjectWhenNoFallbackConfigured(t *testing.T) {
 	if _, ok := env["SCW_DEFAULT_PROJECT_ID"]; ok {
 		t.Fatal("with no fallback configured the provider default must be left alone")
 	}
+}
+
+// ADR-0025's seam: with a run-owned project the provider default must be
+// that project, not the shared fallback — otherwise a resource with no
+// project_id of its own (scaleway_instance_private_nic has none) lands in
+// a project shared with every other run's strays.
+func TestSandboxEnvPrefersTheRunsOwnProject(t *testing.T) {
+	sandboxCredsForTest(t)
+	rt := &CommandRuntime{}
+	rt.Config.Scaleway.FallbackProjectID = "11111111-1111-1111-1111-111111111111"
+
+	fallbackEnv, err := sandboxCommandEnv(rt)
+	require.NoError(t, err)
+	assert.Equal(t, "11111111-1111-1111-1111-111111111111", fallbackEnv["SCW_DEFAULT_PROJECT_ID"],
+		"an empty run project keeps the pre-ADR-0025 behaviour exactly")
+
+	runEnv, err := sandboxCommandEnvForProject(rt, "33333333-3333-3333-3333-333333333333")
+	require.NoError(t, err)
+	assert.Equal(t, "33333333-3333-3333-3333-333333333333", runEnv["SCW_DEFAULT_PROJECT_ID"])
+}
+
+// The organization-default refusal is about where strays land, so it must
+// apply to a run-supplied project exactly as it does to the configured
+// fallback.
+func TestSandboxEnvRefusesTheOrganizationDefaultAsRunProject(t *testing.T) {
+	sandboxCredsForTest(t)
+	orgID := os.Getenv("SCW_DEFAULT_ORGANIZATION_ID")
+	require.NotEmpty(t, orgID)
+
+	rt := &CommandRuntime{}
+	_, err := sandboxCommandEnvForProject(rt, orgID)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "organization's default project")
+	assert.Contains(t, err.Error(), "the run's own project", "the message must name which source was refused")
 }

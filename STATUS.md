@@ -4,6 +4,81 @@ Last updated: 2026-08-31
 
 ## Current phase
 
+- ✅ **S165 complete, review CLEAN (2026-08-31)** — ADR-0025's run-owned project
+  is implemented for `run`/`test`, converged after nine Codex passes (20–28).
+  **Not yet exercised against real Scaleway** — that canary is S168 and is a
+  human decision, since it spends money.
+
+  What the passes found is worth more than the feature: almost nothing was a
+  wrong computation. Every real finding was an **operation ordered so a failure
+  left something behind** — a project created before its config was validated, a
+  cleanup attached to a branch some exit path skipped (three times, three
+  places), a delete inheriting a cancelled context, and a decision reading the
+  command's failure list instead of the teardown's verdict.
+
+- 🔧 **S165 detail (2026-08-31)** — ADR-0025's run-owned project.
+  `harness.ScalewayRunProject` creates and deletes the disposable project through
+  the Account API, stamping it `if-run-*` plus a fixed description so S166 has a
+  provenance marker to verify. `scaleway.create_run_project` exists but is **not
+  yet honoured**, and is deliberately absent from `infrafactory.yaml` until it is
+  — an operator-visible switch that silently does nothing is worse than no switch,
+  and `TestCreateRunProjectIsNotYetWired` fails the moment that stops being true.
+
+  `sandboxCommandEnvForProject` is the seam that will route
+  `SCW_DEFAULT_PROJECT_ID` at the run's own project; `sandboxCommandEnv`
+  delegates to it with an empty project, so the old path is unchanged by
+  construction. The organization-default refusal applies to a run-supplied
+  project too — the check is about where strays land, and that does not change
+  with where the id came from. The flag is **refused at config load** while
+  unwired, because accepting it silently would hand an operator a switch that
+  changes nothing.
+
+  The create/delete lifecycle is wired for the `test`/`run` path: the project is
+  created before the apply, and deleted once the account is proven clean or
+  immediately if no state was ever written. When resources may survive it is
+  **kept and reported**, because the project id is the handle to them. `deploy`
+  refuses the flag outright — it keeps its project by design, so deletion belongs
+  to `live teardown`.
+
+  Codex pass 27: the project was created *before* the sealed environment was
+  validated, so a missing `SCW_ACCESS_KEY` would create a real project and then
+  fail preflight. Validated first now — an API side effect from a configuration
+  that was always going to be rejected is residue that should never exist.
+
+  Codex pass 26 caught a regression from pass 25's own fix — lifting the cleanup
+  out of the destroy branch lost the fact that destruction had *run*, so
+  `--no-destroy` would delete a project whose resources are deliberately live.
+  **"No failures" is not "nothing is left."** It also caught that a cancelled run
+  skipped cleanup entirely; deletion now uses a fresh bounded context, the same
+  reasoning as the interrupt guard's destroy.
+
+  Codex pass 25 caught the third cleanup-placement bug: with `--no-destroy` or
+  destruction disabled, a failed apply left the project behind. The cleanup now
+  sits **outside every branch** — created in one place, released in one place.
+  Placing it inside a branch is what kept producing the bug.
+
+  Codex pass 23 caught the asymmetry that mattered most: the apply used the
+  run-owned project while the **destroy** rebuilt its environment from the shared
+  fallback, so resources with no `project_id` of their own — the whole motivating
+  case — would be looked for in the wrong project at teardown. Guarded now by a
+  source audit, verified against injected drift.
+
+  Codex pass 22 caught a real leak: the delete had been gated behind the destroy
+  branch, so an apply failing at preflight/init/plan created a project and never
+  removed it — on exactly the runs most likely to be repeated.
+
+  **Not usable on its own yet**: before S167 the HCL still declares
+  `scaleway_account_project`, so enabling the flag gives a run two projects.
+  Nothing leaks, but it is waste — and codex pass 24 correctly noted that once
+  S167 removes that resource, `CaptureSweepTarget` fails closed. Declined as
+  S166 scope: the sweep target feeds `AssertProjectDeletable`, so **S166 must
+  land before S167**.
+
+  Next increment: `deploy` + `live teardown`, so a live deployment's project is
+  deleted at teardown; then S167's fixture and prompt migration. **S166 is deliberately not
+  in scope** — it replaces `AssertProjectDeletable`'s state-derived cross-check,
+  which is the guard between teardown and real infrastructure.
+
 - 🧪 **ADR-0025 + S165–S168 planned (2026-08-30)** — take the run's project out
   of the generated HCL. `scaleway_instance_private_nic` has **no `project_id`
   attribute** (verified against provider 2.81.0), so it is created in the

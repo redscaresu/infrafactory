@@ -110,3 +110,117 @@ real-cloud canary has passed on the new one.
 **Not decided here.** Whether `vpc_required` should apply to scenarios that
 declare no private networking at all. This ADR makes the policy *satisfiable*; it
 does not argue the policy is right.
+
+## Amendment, 2026-08-31 (S165): the lifecycle, and where it stops
+
+The flag is honoured wherever the Layer 3 apply goes through `executeTest` —
+`test` and `run` both — creating the project before the apply and deleting it
+afterwards. Three things the implementation settled that the ADR had left open.
+
+**Deletion is conditional on the account, not on the destroy.** A run project is
+removed only when nothing of the run can still exist: the account was proven
+clean, or no state was ever written so there was nothing to create. Otherwise the
+project is **kept and reported as a skipped delete**, because its id is the handle
+to whatever survived — removing it would discard the only pointer to the leak.
+A codex pass caught the inverse of this: the delete was originally gated behind
+the destroy branch, so an apply failing at preflight, init or plan created a
+project and never removed it.
+
+**Creation failure is fatal to the run.** It does not fall back to the shared
+project. The caller asked for a run-owned project precisely so this run's strays
+would not sit next to every other run's, and silently applying into the shared
+one would give exactly what was being avoided.
+
+**`deploy` refuses the flag for now.** It keeps its project by design, so deletion
+belongs to `live teardown`; honouring the flag there before that exists would
+create projects nothing deletes. The refusal is explicit rather than silent.
+
+Known gap, deliberately left: a run whose destroy falls to `run`'s
+auto-destroy-on-failure path keeps its project. That path runs outside
+`executeTest` and has no access to the id. It is reported, not silent, and closing
+it belongs with the `deploy`/`teardown` work.
+
+## Amendment, 2026-08-31 (S165, pass 23): apply and destroy must agree
+
+A run's apply and its destroy must use **the same** provider default project.
+They did not: the apply was wired to the run-owned project while the destroy
+rebuilt its environment from the shared fallback.
+
+That is worse than it sounds. Destroy refreshes and removes resources carrying no
+`project_id` of their own — the entire motivating case for this ADR — so it would
+have looked for them in the wrong project and either failed the teardown or left
+them running. A change made to stop projectless resources being stranded would
+have stranded them.
+
+The rule, stated so it cannot be re-derived incorrectly: **every Layer 3
+environment for a given run is built from the same project.** It is enforced by a
+source audit rather than a unit test, because the defect lives in which helper a
+call site picks — and no test of either helper would have caught it.
+
+## Amendment, 2026-08-31 (S165, pass 24): S166 must land before S167
+
+The slice ordering in the plan was a preference. It is a safety requirement.
+
+`CaptureSweepTarget` derives the run's blast radius from the
+`scaleway_account_project` resource in state, and its output flows into
+`destroySandbox`, which calls `AssertProjectDeletable`. So the moment S167 removes
+that resource from the HCL, the sweep target has no source — a successful
+apply/destroy would report an orphan-sweep failure, and the auto-created purge
+would be skipped for want of a project id. **Removing the resource before
+replacing the guard that reads it breaks the guard.**
+
+Hence: **S166 before S167**, not merely S166 then S167.
+
+One consequence of S165 landing first, stated so nobody mistakes the flag for
+finished: enabling `create_run_project` *before* S167 gives a run **two**
+projects — the pre-created one and the one its HCL still declares. Nothing leaks;
+the pre-created one is empty and deleted by the cleanup, and the declared one is
+destroyed and swept as always. But it is waste, and the flag is mechanically
+complete rather than coherent until S167.
+
+## Amendment, 2026-08-31 (S165, pass 25): released in one place
+
+The run project's cleanup was written three times and skipped by some exit path
+twice: first on the happy path only, then inside the destroy branch, which
+`--no-destroy` and disabled destruction both walk past.
+
+It now sits outside every branch, immediately before the result is assembled.
+**A resource created in one place is released in one place** — every attempt to
+attach the release to a particular outcome produced a path that escaped it.
+
+## Amendment, 2026-08-31 (S165, pass 26): two rules the cleanup needed
+
+**"No failures" is not "nothing is left."** A `--no-destroy` run succeeds with an
+empty failure list while its resources are deliberately still up, so a clean
+result alone must never authorise deleting the run project. Deletion requires
+that nothing was created, or that destruction actually ran and the account came
+back clean.
+
+**Cleanup runs on a fresh context.** Passing the run's own context to the delete
+meant a cancelled run — Ctrl-C, a timeout — skipped cleanup entirely, leaving the
+project behind on exactly the runs that most need it. The same reasoning the
+interrupt guard already applies to its destroy: the point of cleanup is to do
+work after cancellation.
+
+## Amendment, 2026-08-31 (S165, pass 27): validate before you create
+
+The run project is created only after the sealed environment validates. Creating
+it first meant a configuration certain to be rejected — a missing
+`SCW_ACCESS_KEY` — still produced a real project, with cleanup left to best
+effort.
+
+The rule generalises past this ADR, and is most of what this slice's review
+passes actually found: **an operation with a side effect goes after the checks
+that can refuse it**, not before them with cleanup as compensation.
+
+## Amendment, 2026-08-31 (S165, pass 28): the teardown's verdict, not the command's
+
+Whether to delete the run project is a question about **the account**, and only
+the destroy-and-sweep outcome answers it. Keying the decision off the command's
+accumulated failure list meant a mock criteria failure — which says nothing about
+Scaleway — stranded an empty project forever after a demonstrably clean teardown.
+
+Across nine review passes on this slice, the condition on *whether* to delete was
+correct from the first version. Where and when it ran was wrong five times. That
+is the shape of defect this arc keeps producing, and it is worth expecting rather
+than rediscovering.
