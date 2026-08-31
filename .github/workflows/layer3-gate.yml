@@ -401,26 +401,6 @@ jobs:
           state="$OUTPUT_ROOT/$scenario_name/terraform-live.tfstate"
           marker="$OUTPUT_ROOT/$scenario_name/.infrafactory-run-project"
 
-          # The marker, checked BEFORE the state file, because ADR-0025
-          # made the state file the wrong question.
-          #
-          # infrafactory now creates the run's project through the Account
-          # API before tofu starts, and writes this marker at the same
-          # moment. So a run can own a real project and never write state
-          # -- an apply that fails at preflight, init or plan does exactly
-          # that. Under the old model the project came from the apply, so
-          # "no state" did mean "nothing exists"; it no longer does.
-          #
-          # The marker exists if and only if a project does, which makes it
-          # both the safer signal and the more precise one: it turns "check
-          # the account by hand" into a reap that knows what to remove.
-          if [ -f "$marker" ]; then
-            echo "::warning::a run project was created; reaping"
-            cd trusted && /tmp/infrafactory --config /tmp/layer3-gate/infrafactory.yaml \
-              reap "/tmp/layer3-gate/scenario/$(basename "$SCENARIO")"
-            exit $?
-          fi
-
           if [ ! -f "$state" ]; then
             # No state file means one of two very different things, and
             # they must not be collapsed.
@@ -442,8 +422,30 @@ jobs:
             # even when the apply failed. Reading outcome alone here would
             # call every failed no-state run clean, including the ones
             # that died mid-create.
+            # ADR-0025 added a third possibility to those two, and it is
+            # the one the marker answers. The project is created through
+            # the Account API before tofu starts, so a run can own a real
+            # project and never write state -- an apply failing at
+            # preflight, init or plan does exactly that.
+            #
+            # The marker proves a project was CREATED. It is deliberately
+            # NOT read as proof one still EXISTS: nothing removes it after
+            # a successful delete, so a successful run leaves it behind
+            # too. Whether the project survives is the API's question, and
+            # reap asks it -- a project already gone answers 404, which
+            # reap treats as success. Checked here, inside the no-state
+            # branch, precisely so a green run (which leaves an EMPTY
+            # state file, not a missing one) never reaches it and never
+            # pays for a redundant reap.
+            if [ -f "$marker" ]; then
+              echo "::warning::no live state, but a run project was created; reaping"
+              cd trusted && /tmp/infrafactory --config /tmp/layer3-gate/infrafactory.yaml \
+                reap "/tmp/layer3-gate/scenario/$(basename "$SCENARIO")"
+              exit $?
+            fi
+
             if [ "${{ steps.gate.outcome }}" = "success" ] && [ "${{ steps.gate.outputs.rc }}" = "0" ]; then
-              echo "no live state — the gate ran, succeeded, and applied nothing"; exit 0
+              echo "no live state and no run project — the gate ran, succeeded, and applied nothing"; exit 0
             fi
             echo "::error::The gate did not complete cleanly (outcome=${{ steps.gate.outcome }}, rc=${{ steps.gate.outputs.rc }}) and left neither a state file nor a run-project marker."
             echo "::error::infrafactory writes the marker before the apply, so its absence means the run died before creating a project -- but tofu could still have sent a create request and died before flushing state."

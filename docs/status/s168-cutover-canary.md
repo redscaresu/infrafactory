@@ -110,14 +110,25 @@ reported:
 Post-cutover that is wrong in the dangerous direction. The project is created
 before tofu starts and the marker is written at the same moment, so a run can
 own a real project and never write state — an apply failing at preflight, init
-or plan does exactly that. **The marker exists if and only if a project does**,
-which makes it both the safer signal and the more precise one: it turns "check
-the account by hand" into a reap that knows what to remove.
+or plan does exactly that. The reap step consults the marker in that case now,
+turning "check the account by hand" into a reap that knows what to remove.
 
-The reap step now checks the marker first. This is the same defect the codex
-loop found seven times inside the Go code — a path that had been depending on
-`tofu destroy` owning the project without saying so — and it survived fourteen
-review passes because it lives in YAML.
+The same defect the codex loop found seven times inside the Go code — a path
+depending on `tofu destroy` owning the project without saying so — and it
+survived fourteen review passes **because it lives in YAML**.
+
+**The first version of this fix was wrong, and pass 45 caught it.** It read the
+marker as proof a project *still exists* and checked it before anything else.
+Nothing removes the marker after a successful delete, so a green run leaves one
+behind too — verified on disk after the `block-paris` run above, which ended
+with the marker present and a state file holding zero resources. Every green
+gate run would have paid for a redundant real-API reap, and gone red if that
+reap hit a transient error.
+
+The marker proves a project was **created**, never that one **survives**.
+Whether it survives is the API's question, and reap asks it. So the check sits
+*inside* the no-state branch, where a green run — which leaves an empty state
+file, not a missing one — never reaches it.
 
 ## S154 verification: the live lifecycle, end to end against real Scaleway
 

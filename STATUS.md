@@ -57,7 +57,10 @@ Last updated: 2026-08-31
   The run did catch one real thing: **the gate's reap step keyed off the state
   file**, and reported "nothing records them, so reap cannot run" when it was
   missing. Post-cutover a run can own a project and never write state, and the
-  marker exists iff a project does — so the step checks the marker first now. The
+  marker says a project was created — so the step consults it when there is no
+  state, and only there: nothing removes the marker after a successful delete, so
+  checking it first made every green run pay for a redundant reap (caught by pass
+  45, confirmed on disk). The
   same defect the codex loop found seven times in Go, surviving fourteen passes
   because it lives in YAML.
 
