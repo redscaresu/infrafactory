@@ -400,3 +400,21 @@ returns an error on an empty project id, and the builder that tolerates one
 (`sandboxEnvWithProjectDefault`) is reachable only from the credentials
 preflight, which discards the environment it builds. Three review passes fixed
 individual instances of this before the seam ended the class.
+
+### Follow-up, pass 40: `deploy` had nothing to lose before this ADR
+
+`deploy` created the run's project outside `runDeployApply`'s signal guard, and
+its deployment record is written only after the apply. Between those two points
+a Ctrl-C left a real project with no record and nothing coming for it — the leak
+the record exists to prevent, in the window just before the record is written.
+The code was correct when the project was a Terraform resource that only existed
+once the apply had started.
+
+Creation and the environment build now happen inside the guarded closure.
+
+The same command also discarded `ensureRunProject`'s staged failures — the ones
+that name the leaked project id and how to remove it by hand — in favour of a
+generic "nothing was applied". They are written to the command output now. This
+arc keeps rediscovering the same rule: **a guard that stops without saying why
+is half a guard**, and the moment the operator has no other handle is exactly
+when the detail gets dropped.

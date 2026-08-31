@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -442,7 +443,10 @@ func TestDeployApplyRunsUnderASignalGuardAndReportsInterruption(t *testing.T) {
 	require.Error(t, err, "the apply unwinds rather than the process dying")
 	require.NotNil(t, sawCtx)
 	assert.Error(t, sawCtx.Err(), "the apply is handed a cancelled context")
-	assert.Contains(t, out.String(), "Recording whatever was created so `infrafactory live reap` can destroy it")
+	// The guard now covers project creation as well as the apply, so the
+	// message names both and points at teardown, which owns the record.
+	assert.Contains(t, out.String(), "Recording whatever was created")
+	assert.Contains(t, out.String(), "infrafactory live teardown")
 }
 
 // sigCtx derives from ctx, so sigCtx.Err() is also non-nil when the
@@ -481,4 +485,59 @@ func TestDeployApplyIsTransparentWhenNotInterrupted(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotNil(t, result)
 	assert.NotContains(t, out.String(), "Interrupted")
+}
+
+// ensureRunProject's failures carry the project id and how to remove it
+// by hand -- on a marker-write failure they are the ONLY handle to a
+// project that now exists. Deploy used to discard them and report a
+// generic "nothing was applied", which is the one path where the
+// operator has nothing else to go on.
+func TestDeploySurfacesWhyTheRunProjectFailedRatherThanAGenericMessage(t *testing.T) {
+	sandboxCredsForTest(t)
+	deploy := &fakeSandboxDeployHarness{}
+	rt, store, scenarioPath := deployTestRuntime(t, liveServiceScenarioYAML, deploy)
+	writeDeployableHCL(t, rt.OutputDir())
+	rt.Deps.RunProject = &fakeRunProject{
+		createErr: errors.New("http 403: insufficient permissions to create a project"),
+	}
+
+	var out strings.Builder
+	err := runDeploy(t, rt, scenarioPath, &out, "--output", string(OutputModeJSON))
+
+	require.Error(t, err)
+	assert.Contains(t, out.String(), "insufficient permissions to create a project",
+		"the reason reaches the operator, not just the verdict")
+	assert.Contains(t, out.String(), "run_project")
+	assert.Zero(t, deploy.calls, "nothing was applied")
+
+	ds, _, listErr := store.List()
+	require.NoError(t, listErr)
+	assert.Empty(t, ds, "no project means no deployment to record")
+}
+
+// The project is real from the moment it is created, so it must be made
+// inside the interrupt guard: a Ctrl-C between creating it and starting
+// the apply would otherwise leave one behind with no record and nothing
+// coming for it.
+func TestDeployCreatesTheProjectInsideTheInterruptGuard(t *testing.T) {
+	var sawCtx context.Context
+	created := false
+
+	cmd := &cobra.Command{Use: "deploy"}
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	_, _ = runDeployApply(cmd, context.Background(), stubNotify(true),
+		func(ctx context.Context) (*harness.SandboxDeployResult, error) {
+			// Stands in for ensureRunProject: whatever creates the project
+			// must see the signal-derived context, not the bare one.
+			sawCtx = ctx
+			created = true
+			return nil, ctx.Err()
+		})
+
+	require.True(t, created)
+	require.NotNil(t, sawCtx)
+	assert.Error(t, sawCtx.Err(),
+		"project creation is handed the guarded context, so an interrupt reaches it")
 }

@@ -118,22 +118,54 @@ func runDeployCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime
 	// The deployment gets its own project, exactly as a run does. It
 	// simply outlives the command: `live teardown` deletes it once the
 	// destroy and sweep prove the account clean.
-	runProjectID, runProjectStages, runProjectFailures := ensureRunProject(ctx, runtime, sc.Name, workDir)
+	//
+	// Created inside the interrupt guard, with the apply. The project is
+	// real from the moment it is created, so a Ctrl-C between creating it
+	// and starting the apply would otherwise leave one behind with no
+	// record and nothing coming for it -- the leak the record exists to
+	// prevent, in the window just before the record is written.
+	var (
+		runProjectID       string
+		runProjectStages   []StageSummary
+		runProjectFailures []FailureSummary
+		sandboxEnv         map[string]string
+	)
+	deployResult, deployErr := runDeployApply(cmd, ctx, signal.NotifyContext, func(applyCtx context.Context) (*harness.SandboxDeployResult, error) {
+		runProjectID, runProjectStages, runProjectFailures = ensureRunProject(applyCtx, runtime, sc.Name, workDir)
+		if len(runProjectFailures) > 0 {
+			return nil, errors.New("no run project")
+		}
+
+		// An env failure here leaves a live project, so it falls through
+		// to registration below rather than returning early -- the record
+		// is what brings teardown back to it.
+		var envErr error
+		if sandboxEnv, envErr = sandboxCommandEnvForProject(runtime, runProjectID); envErr != nil {
+			return nil, envErr
+		}
+
+		return runtime.Deps.SandboxDeploy.Run(applyCtx, workDir, sandboxEnv)
+	})
+
 	stages := append([]StageSummary{}, runProjectStages...)
 	failures := append([]FailureSummary{}, runProjectFailures...)
+
+	// ensureRunProject's failures carry the leaked project id and how to
+	// remove it by hand. A generic "nothing was applied" here would throw
+	// away the one handle the operator has, on the single path where they
+	// most need it. Nothing is registered: ensureRunProject either
+	// deleted the project again or said plainly that it could not.
 	if len(runProjectFailures) > 0 {
-		return &CLIError{Op: "deploy", Code: errorCodeCommandFailed, Err: fmt.Errorf(
+		if writeErr := writeCommandOutput(cmd, OutputResult{
+			Command: "deploy", Scenario: sc.Name, Status: CommandStatusFailed,
+			Stages: stages, Failures: failures,
+		}); writeErr != nil {
+			return writeErr
+		}
+		return &CLIError{Op: "deploy", Code: errorCodeCommandFailed, Err: errors.New(
 			"could not create the deployment's project, so nothing was applied")}
 	}
 
-	sandboxEnv, err := sandboxCommandEnvForProject(runtime, runProjectID)
-	if err != nil {
-		return &CLIError{Op: "deploy", Code: errorCodeCommandFailed, Err: err}
-	}
-
-	deployResult, deployErr := runDeployApply(cmd, ctx, signal.NotifyContext, func(applyCtx context.Context) (*harness.SandboxDeployResult, error) {
-		return runtime.Deps.SandboxDeploy.Run(applyCtx, workDir, sandboxEnv)
-	})
 	stages, failures = appendSandboxDeployResult(stages, failures, deployResult, deployErr)
 
 	// Registered from whatever the state shows, whether or not the apply
@@ -226,7 +258,7 @@ func runDeployApply(
 
 	if interrupted {
 		_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
-			"\nInterrupted during apply. Recording whatever was created so `infrafactory live reap` can destroy it.\n")
+			"\nInterrupted. Recording whatever was created — the project, and anything the apply got to — so `infrafactory live teardown` can destroy it.\n")
 	}
 
 	return result, err

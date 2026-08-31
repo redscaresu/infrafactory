@@ -26,6 +26,15 @@ Last updated: 2026-08-31
   `openclaw-prod` and its root volume from 2026-02-21. Full record:
   [docs/status/s168-cutover-canary.md](status/s168-cutover-canary.md).
 
+- 🔧 **Pass 40: `deploy` could lose a project to Ctrl-C (2026-08-31)** — it
+  created the run's project *outside* `runDeployApply`'s signal guard, and the
+  deployment record is written only after the apply, so an interrupt in between
+  left a real project with no record and nothing coming for it. Creation and the
+  env build moved inside the guard. Separately, deploy discarded
+  `ensureRunProject`'s staged failures — the ones carrying the leaked project id
+  and how to remove it by hand — in favour of a generic "nothing was applied", on
+  the one path where that id is the operator's only handle.
+
 - 📝 **Pass 39: the cutover had not finished telling the generator (2026-08-31)** —
   the Layer 3 prompt forbade `project_id` in one bullet and asked for it in the
   next ("wire resources to the bootstrapped project"), which does not fail loudly
