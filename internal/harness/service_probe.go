@@ -121,7 +121,12 @@ func (p *ServiceProbe) Probe(ctx context.Context, address string, port int, heal
 	// distinguishable from a body that merely ends there.
 	head, readErr := io.ReadAll(io.LimitReader(resp.Body, maxProbeBodyBytes+1))
 	defer func() {
-		_, _ = io.Copy(io.Discard, resp.Body)
+		// Bounded, still. The drain exists so the connection can be
+		// reused, which is worth a few kilobytes and not worth spending
+		// the probe's whole timeout budget on a streaming endpoint --
+		// and this probe runs against every live deployment in turn, so
+		// one slow body delays all the ones behind it.
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxProbeBodyBytes))
 		_ = resp.Body.Close()
 	}()
 

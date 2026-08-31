@@ -32,6 +32,13 @@ Last updated: 2026-08-31
   in a partial body proves nothing. Every `unchecked` also carries its reason, so
   a declared-but-unreachable path no longer prints "no version_path declared".
 
+  Pass 48 then caught a regression pass 47 had introduced: reading the body head
+  meant editing the `defer` beside it, and the response drain lost its bound. It
+  would have shown up as slowness rather than a hang — `live observe` probes
+  every deployment in turn, so one streaming body delays all the ones behind it.
+  **An incidental edit inside a fix is still an edit**, and under a one-clean-pass
+  rule those are the ones that survive, because attention is on the finding.
+
   **Verified against real Scaleway** by deploying a service that contradicts its
   own record: `the record claims nginx:1.27 but / does not mention "1.27"`. Along
   the way it also confirmed pass 44's fix on real infrastructure — a deployment
