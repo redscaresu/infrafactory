@@ -31,6 +31,17 @@ Last updated: 2026-08-31
   - **No remedy is invented.** A descriptive rule states what was seen and stops;
     the prescriptive form comes from an upgrade diff in S156d.
 
+  **Pass 76 caught the slice's main behaviour being defeated by reuse.**
+  `AppendPitfall` dedupes on *word overlap* — right for provider diagnostics that
+  vary in phrasing, wrong for live rules generated from a template, where two
+  genuinely different failures on one resource share nearly every word. The second
+  lesson was dropped as a duplicate, silently. Live entries append on **exact
+  identity** now, which is sound precisely because the text is derived
+  deterministically from the candidate.
+
+  Third time in this arc that reusing an existing mechanism was the mistake rather
+  than the shortcut. **A mechanism's semantics travel with it.**
+
   **Every entry is stamped**, and that is a hard coupling rather than a nicety:
   S156a never retires an entry without `last_seen`, so an unstamped live entry
   would be **immortal** — the inflow quietly undoing the slice built to bound it.

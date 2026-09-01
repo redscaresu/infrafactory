@@ -285,16 +285,36 @@ func AppendLivePitfall(pitfallsDir, cloud string, pitfall LearnedPitfall, now ti
 		return nil
 	}
 
-	if err := AppendPitfall(pitfallsDir, cloud, pitfall); err != nil {
+	// Appended directly rather than through AppendPitfall, whose
+	// deduplication is deliberately FUZZY -- it matches on significant
+	// word overlap, which is right for provider diagnostics that vary in
+	// phrasing between runs.
+	//
+	// Live rules are the opposite: generated from a template, so two
+	// genuinely different failures on the same resource share nearly
+	// every word ("Observed on a RUNNING deployment, after the apply
+	// reported success: ... Evidence: ..."). Fuzzy matching would drop
+	// the second as a duplicate of the first and the corpus would keep
+	// whichever happened to be observed earliest, silently.
+	//
+	// Exact identity is also SOUND here in a way it is not for the fuzzy
+	// path: the text is derived deterministically from the candidate, so
+	// the same candidate always produces the same string, and a different
+	// string means a different candidate.
+	pf, filePath, err := loadCloudPitfalls(pitfallsDir, cloud)
+	if err != nil {
 		return err
 	}
-
-	// Stamp it. AppendPitfall may have deduplicated against a similar
-	// existing rule, in which case there is nothing carrying this exact
-	// text to stamp -- and that is not an error: the corpus already says
-	// what this observation would have said.
-	if err := TouchLivePitfall(pitfallsDir, cloud, pitfall.Resource, pitfall.Rule, now); err != nil {
-		return nil
+	if pf == nil {
+		pf = &PitfallsFile{Provider: cloud}
 	}
-	return nil
+
+	pf.Pitfalls = append(pf.Pitfalls, PitfallEntry{
+		Resource:       pitfall.Resource,
+		Rule:           pitfall.Rule,
+		Source:         LiveSource,
+		DiscoveredFrom: pitfall.DiscoveredFrom,
+		LastSeen:       now.UTC().Format(time.RFC3339),
+	})
+	return writePitfallsFile(pitfallsDir, filePath, cloud, pf)
 }
