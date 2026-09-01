@@ -162,6 +162,56 @@ failure, then with it present and observe the failure gone.
 One such entry is worth more than a hundred symptom lines, and is the honest bar
 for saying the loop is closed.
 
+## S156, broken up (planned 2026-09-01)
+
+S156 was one slice. It should not be, and the evidence is S155b: **seven codex
+passes, thirteen findings, and ten of them were one incomplete answer applied to
+six interacting invariants in a single command.** S154, S170 and S155a — each
+smaller — converged in three. Slice size is the lever that mattered, not review
+effort.
+
+So S156 becomes five, ordered by dependency, each independently mergeable and
+each with a single question to get right.
+
+| id | slice | the one question | depends on |
+|---|---|---|---|
+| **S156a** | **Retirement path for `source: live` entries** | how does a pitfall stop being true? | nothing |
+| S156b | Promotion gate — reproduction over stored observations | when is an observation a lesson? | S154 |
+| S156c | Extraction, descriptive — promoted observations become `source: live` pitfalls | does the existing extractor accept a live signal unchanged? | S156a, S156b |
+| S156d | Extraction, prescriptive — upgrade diffs through `ExtractFixPitfall` | is the before/after pair a usable diff? | S156c, **S155b** |
+| S156e | The validation run | does a live-sourced pitfall demonstrably prevent a repeat? | all of the above |
+
+### S156a comes first, and can start today
+
+The prerequisite section above is unambiguous: *"S156 should not merge without at
+least a retirement path for `source: live` entries."* It is also the **only one of
+the five with no dependency**, so it is the slice to build while S155b waits on
+its canary.
+
+It is worth doing first for a second reason. Every other slice adds entries to the
+corpus; this one is the only thing that can take them out. Building the inflow
+before the outflow is how a corpus becomes something nobody dares prune later —
+and a pitfall that steers generation away from something no longer broken makes
+every future generation worse, **silently**, which is the failure mode this
+project has learned to fear most.
+
+Scope, deliberately narrow:
+
+- an expiry or supersession rule for `source: live` entries only — static,
+  `fix` and `avoid` entries are out of scope and keep their current lifetime
+- re-validation against the holdout set as the retirement trigger, reusing what
+  already exists rather than inventing a second corpus mechanism
+- **removal is reported, never silent.** Same rule as the D6 purge: a corpus that
+  quietly drops entries is indistinguishable from one that never learned them
+
+### What S156e must show, restated
+
+One live-sourced pitfall that is prescriptive, attributable, and demonstrably
+prevents a repeat — proven the way this project proves everything, by running it:
+generate the scenario with the pitfall absent and observe the failure, then with
+it present and observe the failure gone. **One such entry is worth more than a
+hundred symptom lines.**
+
 ## Out of scope
 
 Drift detection (periodic re-plan against live state) — cheapest of the three

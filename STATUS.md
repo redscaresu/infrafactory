@@ -4,6 +4,24 @@ Last updated: 2026-08-31
 
 ## Current phase
 
+- 🗂️ **S156 broken into five slices, and its unscheduled prerequisite scheduled
+  (2026-09-01)** — `docs/plans/live-learning-loop-plan.md`. The plan already
+  warned that **S156 must not merge without a retirement path for `source: live`
+  pitfalls**, and nothing was scheduled to build one. It is now **S156a**, and it
+  is the only one of the five with no dependency — so it was the slice to build
+  while S155b waited on its canary. **Both have since shipped** (below).
+
+  Doing the outflow before the inflow is deliberate: every other slice *adds* to
+  the corpus. A pitfall that steers generation away from something no longer
+  broken makes every future generation worse, **silently**, which is the failure
+  mode this project has learned to fear most.
+
+  **Why five and not one**: S155b took seven codex passes and thirteen findings,
+  ten of which were one incomplete answer spread across six interacting invariants
+  in a single command. S154, S170 and S155a — each smaller — converged in three.
+  **Slice size was the lever, not review effort**, and S156 is bigger than S155b
+  was.
+
 - 🧹 **S156a: the corpus gets an outflow (2026-09-01)** — `pitfalls retire`
   removes `source: live` entries that have not been seen within a retention
   window, and **names every one it removed**.
