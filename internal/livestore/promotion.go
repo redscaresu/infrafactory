@@ -54,6 +54,14 @@ type Candidate struct {
 	// answer" — different facts that must not merge (ADR-0024, S154).
 	Status ObservationStatus
 
+	// VersionDrift marks a candidate that is a version mismatch rather
+	// than a health failure: the service answered fine and is running
+	// something other than what the record claims.
+	//
+	// The most dangerous shape live observation can find, because every
+	// other signal in the system reports it as healthy.
+	VersionDrift bool
+
 	// Detail is the normalized form, and the identity of the candidate.
 	Detail string
 
@@ -105,8 +113,12 @@ const (
 // Three rules worth stating, because each one is a way the gate could be
 // wrong rather than merely incomplete:
 //
-//   - **Healthy observations are not candidates.** They carry no detail;
-//     there is nothing to learn from a service that worked.
+//   - **A healthy probe is not automatically fine.** A service can answer
+//     perfectly while running something other than what the record
+//     claims, and that is the most dangerous shape live observation can
+//     find precisely because every other signal reports it as healthy.
+//     `adverse` treats an unconfirmed version as a failure; a genuinely
+//     healthy observation carries no detail and teaches nothing.
 //   - **A run is broken by anything that is not the same failure.** A
 //     healthy probe between two 503s means the service recovered, which
 //     is precisely the blip this gate exists to reject. Counting them as
@@ -123,6 +135,15 @@ func PromotionCandidates(deployments []Deployment, rule PromotionRule) []Candida
 
 	type key struct {
 		status ObservationStatus
+		// drift separates "healthy but running the wrong version" from
+		// "down", because they are different problems with different
+		// fixes and their details come from different probes.
+		//
+		// Deliberately a bool rather than the VersionCheck itself:
+		// keying on the raw value would also split two identical health
+		// failures merely because one happened to have its version
+		// confirmed and the other did not, which is incidental.
+		drift  bool
 		detail string
 	}
 	type evidence struct {
@@ -140,14 +161,14 @@ func PromotionCandidates(deployments []Deployment, rule PromotionRule) []Candida
 		// run in time rather than a count.
 		runs := map[key]int{}
 		for _, o := range d.Observations {
-			if o.Healthy() || o.Detail == "" {
+			if !adverse(o) || o.Detail == "" {
 				// Anything that is not a failure ends every run: a
 				// service that recovered did not keep failing.
 				runs = map[key]int{}
 				continue
 			}
 
-			k := key{status: o.Status, detail: normalize(o.Detail)}
+			k := key{status: o.Status, drift: versionDrift(o), detail: normalize(o.Detail)}
 
 			// This observation continues its own run and breaks every
 			// other, because only one thing can be true of a service at
@@ -187,6 +208,7 @@ func PromotionCandidates(deployments []Deployment, rule PromotionRule) []Candida
 
 		out = append(out, Candidate{
 			Status:       k.status,
+			VersionDrift: k.drift,
 			Detail:       k.detail,
 			Example:      e.example,
 			Scenarios:    sortedKeys(e.scenarios),
@@ -229,4 +251,28 @@ func sortedKeys(set map[string]bool) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// adverse reports whether an observation is something to learn from.
+//
+// Not simply "unhealthy". The S155b canary produced an apply that
+// SUCCEEDED while the service kept serving the old version, and its
+// observation is `healthy` with an unconfirmed version -- so a gate
+// keyed on health alone would silently exclude the strongest signal this
+// arc has produced.
+//
+// `unchecked` is not adverse: nobody looked, which is not evidence of
+// anything (S155a).
+func adverse(o Observation) bool {
+	return !o.Healthy() || versionDrift(o)
+}
+
+// versionDrift is the healthy-but-wrong-version case specifically.
+//
+// An observation that is BOTH unhealthy and version-unconfirmed is not
+// drift: its detail describes the health failure, which is the more
+// urgent story, and it should group with other instances of that
+// failure rather than splitting off on a version field.
+func versionDrift(o Observation) bool {
+	return o.Healthy() && o.Version == VersionUnconfirmed
 }

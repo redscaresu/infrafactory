@@ -105,7 +105,14 @@ func describeCandidate(c livestore.Candidate) string {
 	if c.Attributable {
 		attribution = "version confirmed"
 	}
+	kind := string(c.Status)
+	if c.VersionDrift {
+		// Naming it plainly matters: "healthy" alone would read as the
+		// opposite of a finding, and this is the shape every other
+		// signal in the system already reports as fine.
+		kind = "version drift (service healthy)"
+	}
 	return fmt.Sprintf("%s across %d deployment(s), longest run %d — %s; %s: %s",
 		c.Reason, len(c.Deployments), c.LongestRun, attribution,
-		c.Status, truncateRule(strings.TrimSpace(c.Example)))
+		kind, truncateRule(strings.TrimSpace(c.Example)))
 }

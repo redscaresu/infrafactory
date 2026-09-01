@@ -39,6 +39,15 @@ Last updated: 2026-08-31
   live, and dropping them would discard exactly the reproduced evidence the gate
   looks for.
 
+  **Pass 73 caught the gate excluding the signal the arc exists for.** It skipped
+  anything `Healthy()` — and a service answering perfectly while running the wrong
+  version records `Status: healthy`, so **version drift could never be promoted**.
+  Checking it also turned up something the finding did not say: the mismatch was
+  never on the record at all, only in the failure summary, so the reason vanished
+  when the command exited. Both fixed — the record carries it, and `adverse()`
+  covers it. The report names it `version drift (service healthy)`, because
+  "healthy" alone reads as the opposite of a finding.
+
 - 🔁 **S158: the live lifecycle has a journey test (2026-09-01)** — deploy → ls →
   observe → upgrade (with an observation landing *during* the apply) → observe →
   teardown → ls → observe, through the **real commands and the real

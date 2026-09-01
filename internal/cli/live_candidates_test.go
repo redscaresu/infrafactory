@@ -124,3 +124,33 @@ func TestCandidatesGroupsThroughTheSharedNormalizer(t *testing.T) {
 		"line numbers must not make one problem look like two")
 	assert.Contains(t, out.String(), "across 2 deployment(s)")
 }
+
+// "healthy" alone would read as the opposite of a finding, and version
+// drift is the shape every other signal in the system already reports as
+// fine. The report has to name it.
+func TestCandidatesNamesVersionDriftRatherThanCallingItHealthy(t *testing.T) {
+	rt, store := candidatesRuntime(t)
+
+	now := time.Now()
+	d := livestore.Deployment{
+		ID: "dep-drift", Scenario: "web-live-paris",
+		ProjectID: "7c98d82e-ad6d-4f4c-99ea-d1886b0f38e5",
+		State:     livestore.StateLive,
+		CreatedAt: now.Add(-time.Hour), ExpiresAt: now.Add(time.Hour),
+	}
+	for i := 0; i < 3; i++ {
+		d.RecordObservation(livestore.Observation{
+			At: now, Status: livestore.ObservationHealthy,
+			Version: livestore.VersionUnconfirmed,
+			Detail:  `the record claims nginx:1.28 but / does not mention "1.28"`,
+		})
+	}
+	require.NoError(t, store.Put(d))
+
+	var out strings.Builder
+	require.NoError(t, runCandidates(t, rt, &out))
+
+	assert.Contains(t, out.String(), "version drift (service healthy)")
+	assert.Contains(t, out.String(), "does not mention")
+	assert.NotContains(t, out.String(), "nothing has reproduced")
+}

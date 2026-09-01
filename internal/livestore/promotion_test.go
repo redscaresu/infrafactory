@@ -245,3 +245,75 @@ func TestAZeroRulePromotesNothing(t *testing.T) {
 
 	assert.Empty(t, got)
 }
+
+// The most dangerous shape live observation can find: the service
+// answers perfectly and is running something other than what the record
+// claims. Every other signal in the system reports it as healthy, which
+// is exactly why the gate must not.
+//
+// This is the S155b canary's shape — an apply that SUCCEEDED while the
+// service kept serving the old version.
+func TestVersionDriftIsPromotableEvenThoughTheServiceIsHealthy(t *testing.T) {
+	drift := func() Observation {
+		o := healthy()
+		o.Version = VersionUnconfirmed
+		o.Detail = `the record claims nginx:1.28 but / does not mention "1.28"`
+		return o
+	}
+
+	got := PromotionCandidates([]Deployment{
+		deploymentWith("dep-1", "web", drift(), drift(), drift()),
+	}, testRule)
+
+	require.Len(t, got, 1, "a healthy service running the wrong version is a lesson")
+	assert.True(t, got[0].VersionDrift)
+	assert.Equal(t, ObservationHealthy, got[0].Status, "healthy, and still wrong")
+	assert.Contains(t, got[0].Example, "does not mention")
+}
+
+// Drift and a health failure are different problems with different
+// fixes, and their details come from different probes.
+func TestVersionDriftDoesNotMergeWithAHealthFailure(t *testing.T) {
+	drift := healthy()
+	drift.Version = VersionUnconfirmed
+	drift.Detail = "same words"
+
+	got := PromotionCandidates([]Deployment{
+		deploymentWith("dep-1", "web", drift),
+		deploymentWith("dep-2", "web", obs(ObservationUnhealthy, "same words")),
+	}, testRule)
+
+	assert.Empty(t, got, "one of each is not two of either")
+}
+
+// An observation that is BOTH unhealthy and version-unconfirmed is not
+// drift: its detail describes the health failure, which is the more
+// urgent story, and it must group with other instances of that failure
+// rather than splitting off on a version field.
+func TestAnUnhealthyObservationGroupsByItsFailureNotItsVersion(t *testing.T) {
+	both := obs(ObservationUnhealthy, "returned HTTP 502")
+	both.Version = VersionUnconfirmed
+
+	got := PromotionCandidates([]Deployment{
+		deploymentWith("dep-1", "web", both),
+		deploymentWith("dep-2", "web", obs(ObservationUnhealthy, "returned HTTP 502")),
+	}, testRule)
+
+	require.Len(t, got, 1, "the health failure is the story; the version is incidental")
+	assert.False(t, got[0].VersionDrift)
+	assert.Len(t, got[0].Deployments, 2)
+}
+
+// `unchecked` is not adverse: nobody looked, which is not evidence of
+// anything (S155a).
+func TestAnUncheckedVersionIsNotDrift(t *testing.T) {
+	unchecked := healthy()
+	unchecked.Detail = "irrelevant"
+
+	got := PromotionCandidates([]Deployment{
+		deploymentWith("dep-1", "web", unchecked, unchecked, unchecked),
+		deploymentWith("dep-2", "web", unchecked),
+	}, testRule)
+
+	assert.Empty(t, got, "nobody having looked is not a failure")
+}

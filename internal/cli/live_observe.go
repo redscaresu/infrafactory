@@ -177,6 +177,19 @@ func observeDeployment(
 		observation.Status = livestore.ObservationUnreachable
 	}
 
+	// A version mismatch must reach the RECORD, not only the failure
+	// summary. A healthy service running the wrong version has an empty
+	// health detail, so without this the record says "healthy" and
+	// nothing else -- the reason is gone the moment the command exits,
+	// and the promotion gate has nothing to group on.
+	//
+	// It never overwrites a health detail: a service that is both down
+	// and misreporting its version should say the more urgent thing
+	// first, and the version state is on the observation regardless.
+	if observation.Version == livestore.VersionUnconfirmed && observation.Detail == "" {
+		observation.Detail = versionDetail
+	}
+
 	// Re-read before writing. `live observe` is the command most likely
 	// to be on a cron, so it is the one most likely to be mid-probe when
 	// an operator runs `live teardown` -- and a read-modify-write over a
