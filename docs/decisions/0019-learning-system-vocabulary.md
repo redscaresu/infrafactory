@@ -160,5 +160,14 @@ the append path and the sweep merge — keys on `observed_key`, and a refresh
 rewrites the text so the corpus carries the strongest evidence rather than
 whichever was written first.
 
+The key is the **whole** of the gate's identity — status, version drift, and the
+normalized detail — and not the detail alone. The gate keeps `unhealthy` apart
+from `unreachable`, and a health failure apart from a version mismatch, because
+they are different facts with different fixes; a corpus keyed more narrowly would
+collapse distinctions the gate had just been careful to preserve, and one
+reproduced failure would overwrite another. It is therefore derived by the gate
+(`Candidate.Key()`) rather than reassembled by whatever persists it, so the two
+cannot drift apart.
+
 An entry without a key is refused: it could never be recognised again, and
 writing something unmaintainable is worse than writing nothing.

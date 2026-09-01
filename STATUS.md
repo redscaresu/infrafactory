@@ -53,6 +53,13 @@ Last updated: 2026-08-31
   next review** rather than after: `pitfall-merge` keyed live entries on rule text
   too, so a sweep would have duplicated every refreshed lesson.
 
+  **Pass 85 then caught the other half of the same identity question.** The key
+  was the normalized detail, but the gate groups on *(status, drift, detail)* —
+  `unhealthy` apart from `unreachable`, a health failure apart from a version
+  mismatch. Persisting anything narrower let one reproduced failure overwrite
+  another. `Candidate.Key()` now lives beside the gate and is what gets
+  persisted: derived rather than reassembled, so the two identities cannot drift.
+
   **Every entry is stamped**, and that is a hard coupling rather than a nicety:
   S156a never retires an entry without `last_seen`, so an unstamped live entry
   would be **immortal** — the inflow quietly undoing the slice built to bound it.

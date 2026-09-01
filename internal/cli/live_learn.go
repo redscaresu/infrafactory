@@ -108,10 +108,12 @@ func runLiveLearnCommand(cmd *cobra.Command, _ []string, runtime *CommandRuntime
 			Source:         generator.LiveSource,
 			DiscoveredFrom: strings.Join(c.Scenarios, ", "),
 		}
-		// c.Detail is the NORMALIZED form the gate grouped by, and it is
-		// what stays the same as evidence accumulates -- unlike the rule
-		// text, which states that evidence.
-		if err := generator.AppendLivePitfall(runtime.Config.Paths.Pitfalls, cloud, c.Detail, pitfall, now); err != nil {
+		// c.Key() is the gate's OWN identity: status, drift and the
+		// normalized detail. Persisting anything narrower would collapse
+		// distinctions the gate had just been careful to preserve --
+		// `unhealthy` and `unreachable` with the same words are two
+		// reproduced failures, and one must not overwrite the other.
+		if err := generator.AppendLivePitfall(runtime.Config.Paths.Pitfalls, cloud, c.Key(), pitfall, now); err != nil {
 			failures = append(failures, FailureSummary{
 				Layer: "live", Stage: "learn", Check: "append",
 				Command: "live learn",

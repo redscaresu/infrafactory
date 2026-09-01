@@ -274,3 +274,38 @@ func TestLearnDoesNotInventARemedy(t *testing.T) {
 	}
 	assert.Contains(t, rule, "never confirmed", "and it says what it could not establish")
 }
+
+// The gate keeps `unhealthy` apart from `unreachable` on purpose. A store
+// that keyed on the detail alone would collapse that distinction and one
+// reproduced failure would overwrite the other.
+func TestLearnKeepsUnhealthyAndUnreachableApartInTheCorpus(t *testing.T) {
+	rt, store, pitfalls := learnRuntime(t)
+	now := time.Now()
+
+	for _, spec := range []struct {
+		id     string
+		status livestore.ObservationStatus
+	}{
+		{"dep-sick", livestore.ObservationUnhealthy},
+		{"dep-gone", livestore.ObservationUnreachable},
+	} {
+		d := livestore.Deployment{
+			ID: spec.id, Scenario: "web-live-paris", Cloud: "scaleway",
+			ProjectID:       "7c98d82e-ad6d-4f4c-99ea-d1886b0f38e5",
+			AddressResource: "scaleway_lb_ip",
+			State:           livestore.StateLive,
+			CreatedAt:       now.Add(-time.Hour), ExpiresAt: now.Add(time.Hour),
+		}
+		for i := 0; i < 3; i++ {
+			d.RecordObservation(livestore.Observation{
+				At: now, Status: spec.status, Detail: "the same words exactly",
+			})
+		}
+		require.NoError(t, store.Put(d))
+	}
+
+	require.NoError(t, runLearn(t, rt, &strings.Builder{}))
+
+	assert.Len(t, corpus(t, pitfalls), 2,
+		"one of each is two lessons, and neither may overwrite the other")
+}
