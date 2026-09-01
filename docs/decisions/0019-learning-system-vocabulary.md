@@ -52,3 +52,32 @@ Alternatives considered:
 
 **Follow-up**
 - None mandatory. If a future arc introduces a fourth extractor or a new pitfall source value, it should use concept names from day one — no slice ID in the public vocabulary.
+
+## Amendment, 2026-09-01 (S156a): `live`, and the first source with a lifetime
+
+The vocabulary gains a fourth value: **`live`**, for a pitfall learned from a
+service that was already running rather than from a failed apply.
+
+It is the first source with a **lifetime**. The others do not need one: a rule
+extracted from a reproducible apply failure does not stop being true because
+nobody hit it lately. A live rule does, once the thing it describes is fixed —
+and learning used to be bounded, because a run emits at most
+`repair_iterations_max` failures and a scenario that stops failing stops
+emitting. Live observation removed that bound.
+
+So `live` entries carry `last_seen`, and `pitfalls retire` removes those not seen
+within a retention window. Three rules, all of them about refusing to delete
+learning on weak evidence:
+
+- **No timestamp is never retired.** Absence means nobody recorded when the rule
+  was last true, which is not evidence it stopped being true. An unparseable
+  value counts as absent, because treating it as zero would make every malformed
+  entry infinitely stale and delete it.
+- **The boundary is exclusive**, so a 14-day window does not delete something last
+  seen 14 days ago to the second.
+- **A non-positive window is refused**, on the dry-run path as well as the real
+  one. A mistyped flag would empty the corpus in one command, and a dry-run that
+  accepts what the real run rejects teaches the wrong thing about what is safe.
+
+Removal is reported, never silent — the rule the D6 purge established. A corpus
+that quietly drops entries is indistinguishable from one that never learned them.

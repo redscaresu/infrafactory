@@ -4,6 +4,39 @@ Last updated: 2026-08-31
 
 ## Current phase
 
+- 🧹 **S156a: the corpus gets an outflow (2026-09-01)** — `pitfalls retire`
+  removes `source: live` entries that have not been seen within a retention
+  window, and **names every one it removed**.
+
+  Built before anything produces a live entry, deliberately. Every other S156
+  slice *adds* to the corpus; this is the only thing that can take entries out,
+  and building the inflow first is how a corpus becomes something nobody dares
+  prune. The plan flagged it as a hard prerequisite and nothing was scheduled for
+  it.
+
+  Why live entries decay and the others do not: learning used to be **bounded** —
+  a run emits at most `repair_iterations_max` failures, and a scenario that stops
+  failing stops emitting. Live observation removed that bound. And a stale pitfall
+  is not inert: it steers generation away from something no longer broken, making
+  every future generation worse **silently**.
+
+  Three refusals, each guarding against deleting learning on weak evidence:
+
+  - **No timestamp is never retired.** Absence means nobody recorded when the rule
+    was last true — not evidence that it stopped being true. An unparseable value
+    counts as absent too, because zero would make every malformed entry infinitely
+    stale.
+  - **Retirement is exclusive at the boundary**, so a 14-day threshold does not
+    delete something last seen 14 days ago to the second.
+  - **A non-positive window is refused on both entry points** — a mistyped flag
+    would otherwise empty the corpus in one command, and a dry-run that accepts
+    what the real run rejects teaches the wrong thing about what is safe to type.
+
+  `--dry-run` and the real thing share one rule by construction: a dry-run that
+  can disagree with the real thing is worse than no dry-run. And `TouchLivePitfall`
+  refreshes rather than appends, which is what makes retention mean *last
+  observed* instead of *first observed*.
+
 - ✅ **S155b canary: the thesis, demonstrated on real infrastructure (2026-09-01)** —
   deployed v1, confirmed the service was serving `nginx:1.27`, upgraded to 1.28,
   and **`sandbox_deploy/apply` passed while `upgrade_verify` failed.** Confirmed
