@@ -120,3 +120,31 @@ is a falsehood — so the fact travels with the candidate and the extractor deci
 The gate produces candidates and not pitfalls, deliberately: it can then be
 judged on whether it promotes the right things without simultaneously arguing
 about rule text, which is the harder and far more subjective half.
+
+## Amendment, 2026-09-01 (S156c): a live lesson is attributed to what was probed
+
+The corpus is keyed by resource. A live observation names none — *"the thing at
+this address returned 503"* is about an endpoint — and
+`ExtractDescriptivePitfall` refuses such a detail on purpose: **skip rather than
+fabricate**.
+
+The resource a live lesson belongs to is **the one the probed address was
+resolved from**. `LiveEndpointResource` reports it and `deploy` records it, at
+the only moment it is a fact rather than an inference. Where it cannot be
+established, or where the deployments exhibiting a candidate disagree about it,
+nothing is written and the operator is told — a corpus that looks complete when
+it is not is worse than one that admits a gap.
+
+Two further rules follow from the corpus's own shape:
+
+- **A candidate spanning two clouds writes nothing.** The corpus is per-cloud, so
+  either choice files half the evidence where it does not apply.
+- **Every live entry is stamped with `last_seen`.** S156a never retires an
+  unstamped entry, so writing one without a timestamp would make it immortal —
+  the inflow silently undoing the outflow. Re-learning refreshes rather than
+  duplicates.
+
+And the rule text stays descriptive: it states what was observed and what the
+evidence was, and does not invent a remedy. A descriptive rule that fabricates a
+fix is worse than one admitting it has none; the prescriptive form comes from an
+upgrade diff (S156d).

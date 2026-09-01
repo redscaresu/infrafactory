@@ -76,6 +76,19 @@ func newLiveCmd(cfg *rootConfig) *cobra.Command {
 		"Distinct deployments before a failure counts as a property of the shape")
 	cmd.AddCommand(candidates)
 
+	learn := &cobra.Command{
+		Use:   "learn",
+		Short: "Record reproduced observations in the pitfall corpus as source: live",
+		Args:  cobra.NoArgs,
+		RunE:  cfg.withRuntimeNoGenerator("live learn", runLiveLearnCommand),
+	}
+	learn.Flags().Int("consecutive", livestore.DefaultPromotionRule.ConsecutiveProbes,
+		"Probes in a row on one deployment before a failure counts as persistent")
+	learn.Flags().Int("deployments", livestore.DefaultPromotionRule.DistinctDeployments,
+		"Distinct deployments before a failure counts as a property of the shape")
+	learn.Flags().Bool("dry-run", false, "Report what would be learned without writing to the corpus")
+	cmd.AddCommand(learn)
+
 	reap := &cobra.Command{
 		Use:   "reap",
 		Short: "Destroy every live deployment whose TTL has run out",

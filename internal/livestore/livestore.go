@@ -79,6 +79,25 @@ type Deployment struct {
 	// configuration. Zero means never.
 	UpgradedAt time.Time `json:"upgraded_at,omitempty"`
 
+	// Cloud is the provider this deployment was applied to, recorded so a
+	// lesson learned from it lands in the right corpus. Taken from the
+	// scenario at deploy time, because that is where it is a fact.
+	Cloud string `json:"cloud,omitempty"`
+
+	// AddressResource is the Terraform resource type the probed address
+	// came from, e.g. `scaleway_lb_ip`.
+	//
+	// It is what makes a live observation attributable. An observation
+	// says "the thing at this address returned 503" and names no
+	// resource, and the corpus is keyed by resource -- so without this a
+	// live signal could only become a pitfall by fabricating one, which
+	// ExtractDescriptivePitfall refuses to do for exactly the right
+	// reason (S156c).
+	//
+	// Recorded at deploy time because that is the only moment it is a
+	// fact rather than an inference.
+	AddressResource string `json:"address_resource,omitempty"`
+
 	// VersionPath, when declared, is probed to check that the service is
 	// running the version this record claims. Snapshotted with the rest.
 	VersionPath string `json:"version_path,omitempty"`

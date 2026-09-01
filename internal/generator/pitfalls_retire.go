@@ -264,3 +264,37 @@ func TouchLivePitfall(pitfallsDir, cloud, resource, rule string, now time.Time) 
 
 	return fmt.Errorf("no live pitfall for %s matching that rule", resource)
 }
+
+// AppendLivePitfall records a lesson learned from a running service,
+// stamped so it can later be retired.
+//
+// The stamp is not optional. S156a never retires an entry with no
+// `last_seen` -- absence means nobody recorded when the rule was last
+// true, which is not evidence it stopped being true -- so a live entry
+// written without one would be **immortal**, which is precisely what the
+// retirement path exists to prevent. Writing the inflow without the
+// timestamp would quietly undo the slice built to bound it.
+//
+// A rule seen again REFRESHES rather than duplicates, which is what makes
+// retention mean "last observed" rather than "first observed".
+func AppendLivePitfall(pitfallsDir, cloud string, pitfall LearnedPitfall, now time.Time) error {
+	pitfall.Source = LiveSource
+
+	// Already known: this is a re-observation, not a new lesson.
+	if err := TouchLivePitfall(pitfallsDir, cloud, pitfall.Resource, pitfall.Rule, now); err == nil {
+		return nil
+	}
+
+	if err := AppendPitfall(pitfallsDir, cloud, pitfall); err != nil {
+		return err
+	}
+
+	// Stamp it. AppendPitfall may have deduplicated against a similar
+	// existing rule, in which case there is nothing carrying this exact
+	// text to stamp -- and that is not an error: the corpus already says
+	// what this observation would have said.
+	if err := TouchLivePitfall(pitfallsDir, cloud, pitfall.Resource, pitfall.Rule, now); err != nil {
+		return nil
+	}
+	return nil
+}

@@ -4,6 +4,38 @@ Last updated: 2026-08-31
 
 ## Current phase
 
+- 🔄 **S156c: the loop closes — reproduced observations become pitfalls
+  (2026-09-01)** — `live learn` writes promoted candidates into the corpus as
+  `source: live`, and the generator sees them on the next run.
+
+  **The hard part was not writing; it was attribution.** The corpus is keyed by
+  resource and the generator steers on it — but a live observation names none:
+  *"the thing at this address returned 503"* is about an endpoint.
+  `ExtractDescriptivePitfall` already refuses to invent a resource
+  (*"skip rather than fabricate"*), and inventing one here would have been the
+  same mistake with a new name.
+
+  The honest answer is **the resource the address was resolved from**.
+  `LiveEndpointResource` now reports it alongside the address, and `deploy`
+  records it — at the only moment it is a fact rather than an inference.
+
+  Four refusals, each preferring silence to a guess:
+
+  - **No resource, nothing written** — and the operator is told, so the corpus
+    does not look complete when it is not.
+  - **Deployments that disagree on the resource write nothing.** If one served
+    from an `scaleway_lb_ip` and another from an `scaleway_instance_ip`, the
+    failure they share is a fact about neither.
+  - **Deployments that disagree on the cloud write nothing**, because the corpus
+    is per-cloud and either choice files half the evidence where it does not apply.
+  - **No remedy is invented.** A descriptive rule states what was seen and stops;
+    the prescriptive form comes from an upgrade diff in S156d.
+
+  **Every entry is stamped**, and that is a hard coupling rather than a nicety:
+  S156a never retires an entry without `last_seen`, so an unstamped live entry
+  would be **immortal** — the inflow quietly undoing the slice built to bound it.
+  Learning the same lesson twice refreshes rather than duplicates.
+
 - 🎯 **S156b: the promotion gate — when is an observation a lesson? (2026-09-01)**
   — `live candidates` reports observations that have **reproduced**, and says
   what promoted each one and why.

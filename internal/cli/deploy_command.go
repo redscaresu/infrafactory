@@ -296,7 +296,11 @@ func registerDeployment(
 
 	// Best effort: an unreachable address is worth recording as empty
 	// rather than failing a deploy that otherwise worked.
-	address, _ := harness.LiveEndpoint(workDir, "load_balancer")
+	//
+	// The resource type comes back with it, because a live observation of
+	// this address names no resource and the corpus is keyed by one.
+	// Capturing it here is the only point at which it is a fact.
+	address, addressResource, _ := harness.LiveEndpointResource(workDir, "load_balancer")
 
 	now := time.Now()
 	d := livestore.Deployment{
@@ -309,13 +313,15 @@ func registerDeployment(
 		// Snapshotted, not looked up later: the scenario file changes,
 		// this record describes one deployment that already happened
 		// (S154).
-		Port:        sc.Service.Port,
-		HealthPath:  sc.Service.HealthPath,
-		VersionPath: sc.Service.VersionPath,
-		State:       livestore.StateLive,
-		WorkDir:     workDir,
-		CreatedAt:   now,
-		ExpiresAt:   now.Add(ttl),
+		Port:            sc.Service.Port,
+		HealthPath:      sc.Service.HealthPath,
+		VersionPath:     sc.Service.VersionPath,
+		AddressResource: addressResource,
+		Cloud:           sc.Cloud,
+		State:           livestore.StateLive,
+		WorkDir:         workDir,
+		CreatedAt:       now,
+		ExpiresAt:       now.Add(ttl),
 	}
 
 	if err := store.Put(d); err != nil {
