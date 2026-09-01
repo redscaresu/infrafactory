@@ -53,6 +53,10 @@ type fakeSandboxDeployHarness struct {
 	// moment a real apply would -- an upgrade's version changes because
 	// the apply changed it, not before.
 	onRun func()
+	// onRunDir is onRun with the workdir the apply was given, for tests
+	// that need to write state into a directory they cannot name in
+	// advance -- a first deploy picks its own workdir.
+	onRunDir func(workDir string)
 }
 
 // Run writes a minimal terraform-live.tfstate, because a real apply
@@ -70,6 +74,9 @@ func (f *fakeSandboxDeployHarness) Run(ctx context.Context, workDir string, _ ma
 	}
 	// Last, so a hook that writes its own state is not overwritten by the
 	// default one above.
+	if f.onRunDir != nil {
+		f.onRunDir(workDir)
+	}
 	if f.onRun != nil {
 		f.onRun()
 	}

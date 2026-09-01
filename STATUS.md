@@ -4,6 +4,33 @@ Last updated: 2026-08-31
 
 ## Current phase
 
+- 🔁 **S158: the live lifecycle has a journey test (2026-09-01)** — deploy → ls →
+  observe → upgrade (with an observation landing *during* the apply) → observe →
+  teardown → ls → observe, through the **real commands and the real
+  `livestore`**, with only the cloud faked.
+
+  **The plan's premise was wrong and is corrected in place.** It said the test
+  would drive the commands against mockway. It cannot:
+  `assertRealScalewayEndpoint` refuses any Layer 3 apply not pointed at
+  `api.scaleway.com` — checking the passed env, the inherited `SCW_API_URL` *and*
+  the scw config file. `deploy`, `upgrade` and `teardown` all inherit that
+  refusal. Pointing the test at a mock would mean weakening ADR-0023 containment,
+  so the cloud is faked instead and everything touching the record is real.
+
+  That turns out to be the better test anyway: all three defects this slice
+  exists to catch are **record-coupling**, and none needs a cloud.
+
+  **Verified by reverting the fixes.** Undo pass 57 and the journey fails with
+  *"the observation recorded during the apply must survive the upgrade's write"*;
+  undo pass 44 and it fails with *"a live deployment nobody can monitor is a
+  finding, not a skip"*. A journey test nobody has seen fail is a journey test
+  nobody should trust.
+
+  One real transient noted rather than papered over: an `observe` landing after
+  the service has moved but before the upgrade writes the new tag sees record and
+  world genuinely disagree, and reports `unconfirmed`. Correct, and exactly the
+  single-blip noise **S156b's reproduction gate** exists to filter.
+
 - 🔗 **Doc links are now ratcheted (2026-09-01)** — `STATUS.md` lives at the repo
   **root** while what it points at lives under `docs/`, so `](plans/x.md)` looks
   right and resolves to nothing. **All four** of its relative links were broken;
