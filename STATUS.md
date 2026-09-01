@@ -2,6 +2,46 @@
 
 Last updated: 2026-08-31
 
+## 2026-09-01 — S159a: the live estate, read-only, over the API
+
+S159 as planned bundles a read path, five mutating endpoints and a seam
+extraction. Split, applying S156d's lesson: the read path carries no guards and
+the mutating ones carry all of them, so shipping the read first lets the estate
+page be built against something real without any of those guards being
+reimplemented in a hurry.
+
+`GET /api/deployments` serves the estate. It refuses every mutating method, and
+says so when no live store is configured rather than answering with an empty list
+that reads as "nothing is running" — the same rule `live reconcile` applies.
+
+**The health summary moved onto the record.** `live ls` and this listing must
+agree about what silence means, and two implementations of "the last observation,
+unless there are none" is how one of them eventually renders `unobserved` as
+healthy — silently, and only in the UI, where it is least likely to be noticed.
+`healthLabel` now defers to `Deployment.Health()`.
+
+**`unchecked` is spelled out, and finding that was the point of the slice.**
+`VersionUnchecked` is the empty string on the stored record, which is right there
+— `omitempty` keeps the file terse. In a *view* it is a falsehood: a UI rendering
+`""` shows a blank cell beside a `confirmed` one and invites the reader to read
+nothing-was-checked as nothing-is-wrong. The UI arc plan warns about exactly this
+and the zero value would have delivered it. `HealthSummary.Version` is a string
+that always says the word.
+
+**The same defect turned up three times, and the third fix is the one that
+matters.** `omitempty` does nothing on a `time.Time` — it is a struct, so the tag
+has nothing to act on — and `VersionUnchecked` is the empty string. So the
+version label would have rendered blank, the observation timestamp as
+`0001-01-01`, and the embedded record's upgrade timestamps the same. Pass 99's
+own note says that *checking the field I was thinking about and not its
+neighbours* caused it; pass 100 was me doing that again. It is closed as a class
+now: a test marshals a deployment with every optional field unset and asserts
+`0001-01-01` appears nowhere, so the next optional time inherits a failing test
+rather than the defect.
+
+Records the store could not decode travel in the payload. `live ls` exits
+non-zero for those; a GET cannot, so the count has to reach the page.
+
 ## 2026-09-01 — S156d: prescriptive rules from upgrade diffs
 
 S156c writes descriptive rules only — what was observed, nothing about what to do.

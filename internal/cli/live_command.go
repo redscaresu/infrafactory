@@ -187,11 +187,12 @@ func renderLiveTable(out io.Writer, deployments []livestore.Deployment, unreadab
 // without this the only way to learn a live service is failing is to
 // read the JSON record by hand, and nobody does that until after they
 // already know.
+// healthLabel defers to the record so this table and the API's listing
+// cannot disagree about what silence means. Two implementations of "the
+// last observation, unless there are none" is how one of them eventually
+// renders `unobserved` as healthy.
 func healthLabel(d livestore.Deployment) string {
-	if len(d.Observations) == 0 {
-		return "unobserved"
-	}
-	return string(d.Observations[len(d.Observations)-1].Status)
+	return d.Health().Status
 }
 
 // liveListJSON is a listing, not a staged run, so it does not pretend to

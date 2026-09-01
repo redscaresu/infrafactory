@@ -18,6 +18,7 @@ import (
 	"github.com/redscaresu/infrafactory/internal/api"
 	"github.com/redscaresu/infrafactory/internal/config"
 	"github.com/redscaresu/infrafactory/internal/generator"
+	"github.com/redscaresu/infrafactory/internal/livestore"
 	"github.com/redscaresu/infrafactory/internal/runstore"
 	"github.com/spf13/cobra"
 )
@@ -69,6 +70,10 @@ func newUICmd(assets fs.FS) *cobra.Command {
 				Store:      runstore.NewFilesystemStore(resolveRunStoreRoot()),
 				Hub:        hub,
 				RunStarter: starter,
+				// Read-only. Deploy, teardown and reap carry guards that
+				// live in this package and are not reachable from the API
+				// without a seam that does not exist yet (S159a).
+				Deployments: livestore.NewFilesystemStore(resolveLiveStoreRoot()),
 			})
 
 			errCh := make(chan error, 1)

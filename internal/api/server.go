@@ -30,6 +30,7 @@ type ServerConfig struct {
 	Hub           *Hub
 	SchemaPath    string
 	RunStarter    RunStarter
+	Deployments   DeploymentLister
 	RuntimeErrors chan error
 }
 
@@ -67,6 +68,7 @@ func NewServer(cfg ServerConfig) *http.Server {
 		hub:          cfg.Hub,
 		schemaPath:   cfg.SchemaPath,
 		runStarter:   cfg.RunStarter,
+		deployments:  cfg.Deployments,
 		sessionID:    fmt.Sprintf("%d-%d", os.Getpid(), time.Now().UTC().UnixNano()),
 		startedAt:    time.Now().UTC(),
 	}
@@ -101,6 +103,7 @@ func NewServer(cfg ServerConfig) *http.Server {
 	mux.HandleFunc("/api/output/", outputHandler(state))
 	mux.HandleFunc("/api/pitfalls", pitfallsHandler(state))
 	mux.HandleFunc("/api/pitfalls/", pitfallsHandler(state))
+	mux.HandleFunc("/api/deployments", deploymentsHandler(state))
 	mux.HandleFunc("/api/ws", websocketHandler(state))
 
 	mux.HandleFunc("/api", notImplementedAPIHandler)
@@ -129,6 +132,7 @@ type serverState struct {
 	hub          *Hub
 	schemaPath   string
 	runStarter   RunStarter
+	deployments  DeploymentLister
 	sessionID    string
 	startedAt    time.Time
 }

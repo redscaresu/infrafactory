@@ -664,3 +664,20 @@ they describe neither the old configuration nor the new one, only the changeover
 A record with no `upgrade_started_at` is declined for repair-learning rather than
 guessed at — fail-closed, and it costs only records written before this field
 existed.
+
+## Amendment, 2026-09-01 (S159a): what a view of a deployment must say out loud
+
+The record is terse on purpose: `VersionUnchecked` is the empty string and
+`omitempty` keeps it out of the file entirely. A **view** of the record may not
+be.
+
+`unobserved` and `unchecked` are the load-bearing states of this ADR's three-state
+design, and both are the zero value. Rendered as a blank cell beside a
+`confirmed` one, they invite the reader to read *nothing was checked* as *nothing
+is wrong* — rebuilding the falsehood the design exists to prevent, in the one
+place it is least likely to be noticed.
+
+So `Deployment.Health()` always spells them out, and lives on the record rather
+than being assembled by each caller. `live ls` and `GET /api/deployments` must
+agree about what silence means; two implementations of "the last observation,
+unless there are none" is how one of them eventually gets it wrong.
