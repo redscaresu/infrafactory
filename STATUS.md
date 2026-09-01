@@ -54,6 +54,18 @@ Last updated: 2026-08-31
   `withRuntimeNoGenerator` keeps the logging and substitutes a generator that
   **refuses**, since this command must never generate.
 
+  **Pass 62**: the `<cloud>` argument went into `filepath.Join` unvalidated, so
+  `retire ../../x` would have **rewritten** a file outside the corpus.
+  `livestore.validateID` already guards deployment ids against exactly that;
+  `assertCloudName` now does the same on all three entry points.
+
+  Across S156a's four passes, **three findings were mechanisms that already
+  existed in this repository** — the source ratchets, the sweep's preservation
+  rule, the path guard. Slice size is not the whole story: the other half is that
+  new code touching an existing mechanism should start by finding every place that
+  mechanism is already enforced. Adding `LiveSource` was three lines; the work was
+  the four places that had to learn about it.
+
   `--dry-run` and the real thing share one rule by construction: a dry-run that
   can disagree with the real thing is worse than no dry-run. And `TouchLivePitfall`
   refreshes rather than appends, which is what makes retention mean *last

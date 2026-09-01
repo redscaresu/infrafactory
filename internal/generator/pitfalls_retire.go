@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -151,6 +152,32 @@ func partitionStale(entries []PitfallEntry, retention time.Duration, now time.Ti
 	return kept, stale
 }
 
+// assertCloudName refuses anything that would escape the corpus when
+// joined into a path.
+//
+// `cloud` arrives from the command line -- `pitfalls retire <cloud>` --
+// and is joined straight onto the pitfalls directory. Without this,
+// `retire ../../something` reads and REWRITES a YAML file outside the
+// corpus entirely, which is a write, not just a read.
+//
+// The same guard livestore.validateID applies to deployment ids, for the
+// same reason: a name that came from a caller decides a path.
+func assertCloudName(cloud string) error {
+	if strings.TrimSpace(cloud) == "" {
+		return fmt.Errorf("cloud is required")
+	}
+	if cloud != strings.TrimSpace(cloud) {
+		return fmt.Errorf("cloud %q has leading or trailing whitespace", cloud)
+	}
+	if strings.ContainsRune(cloud, os.PathSeparator) || strings.Contains(cloud, "/") {
+		return fmt.Errorf("cloud %q contains a path separator", cloud)
+	}
+	if cloud == "." || cloud == ".." || strings.Contains(cloud, "..") {
+		return fmt.Errorf("cloud %q contains a parent-directory reference", cloud)
+	}
+	return nil
+}
+
 // loadCloudPitfalls returns nil without error when the cloud has no
 // corpus: nothing to retire is not a failure to retire.
 //
@@ -158,6 +185,9 @@ func partitionStale(entries []PitfallEntry, retention time.Duration, now time.Ti
 // only the entries -- retirement needs the whole file back so it can be
 // written again.
 func loadCloudPitfalls(pitfallsDir, cloud string) (*PitfallsFile, string, error) {
+	if err := assertCloudName(cloud); err != nil {
+		return nil, "", err
+	}
 	filePath := filepath.Join(pitfallsDir, cloud+".yaml")
 	payload, err := os.ReadFile(filePath)
 	if err != nil {
@@ -210,6 +240,9 @@ func (e PitfallEntry) lastSeenAt() (time.Time, bool) {
 // every day for a month would still retire on the anniversary of the day
 // it was learned.
 func TouchLivePitfall(pitfallsDir, cloud, resource, rule string, now time.Time) error {
+	if err := assertCloudName(cloud); err != nil {
+		return err
+	}
 	filePath := filepath.Join(pitfallsDir, cloud+".yaml")
 	payload, err := os.ReadFile(filePath)
 	if err != nil {

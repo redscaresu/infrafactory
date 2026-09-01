@@ -205,3 +205,25 @@ func TestTouchReportsWhenThereIsNoSuchLivePitfall(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no live pitfall")
 }
+
+// `cloud` arrives from the command line and is joined straight onto the
+// pitfalls directory, so without a guard `retire ../../x` REWRITES a file
+// outside the corpus. The same guard livestore.validateID applies to
+// deployment ids, for the same reason.
+func TestRetireRefusesACloudNameThatEscapesTheCorpus(t *testing.T) {
+	dir := writeCorpus(t, liveEntry("scaleway_lb", "r", time.Now()))
+
+	for _, cloud := range []string{
+		"../escape", "sub/dir", "..", ".", " scaleway", "scaleway ", "",
+		"a/../../b",
+	} {
+		_, err := RetireStaleLivePitfalls(dir, cloud, time.Hour, time.Now())
+		assert.Error(t, err, "cloud %q must be refused", cloud)
+
+		_, err = StaleLivePitfalls(dir, cloud, time.Hour, time.Now())
+		assert.Error(t, err, "the dry-run must refuse it too: %q", cloud)
+
+		err = TouchLivePitfall(dir, cloud, "r", "r", time.Now())
+		assert.Error(t, err, "touch must refuse it too: %q", cloud)
+	}
+}

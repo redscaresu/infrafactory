@@ -81,3 +81,10 @@ learning on weak evidence:
 
 Removal is reported, never silent — the rule the D6 purge established. A corpus
 that quietly drops entries is indistinguishable from one that never learned them.
+
+Adding a source value is not a three-line change. `live` had to be learned by the
+two corpus ratchets, the sweep's preservation list, and the path guard on the
+maintenance command — four places, found across four review passes, three of them
+mechanisms that already existed in the repository. **A vocabulary is only as real
+as the things that enforce it**, and the next value added here should start by
+enumerating them rather than by adding the constant.
