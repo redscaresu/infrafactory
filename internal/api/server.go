@@ -114,8 +114,10 @@ func NewServer(cfg ServerConfig) *http.Server {
 	}
 
 	return &http.Server{
-		Addr:    cfg.Addr,
-		Handler: mux,
+		Addr: cfg.Addr,
+		// Above the routing on purpose -- see guardCrossOriginRequests.
+		// A handler registered later cannot be unguarded by omission.
+		Handler: guardCrossOriginRequests(mux),
 	}
 }
 
