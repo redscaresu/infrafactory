@@ -576,3 +576,16 @@ right — a green Layer 3 result must not be able to be evidence of nothing.
 
 Faking the cloud rather than the record is also the stronger choice: every defect
 this test exists to catch lives in the record, not in the API.
+
+An observation records **why** it was adverse, including a version mismatch.
+`live observe` originally put the version detail only in its failure summary, so a
+healthy-but-wrong-version observation reached the record as `healthy` with an
+empty detail and the reason vanished when the command exited. It is written onto
+the observation now, unless a health failure already claimed the field — a service
+that is both down and misreporting its version should say the more urgent thing
+first.
+
+This matters beyond readability: the promotion gate groups on that detail, so
+without it the most dangerous shape live observation can find — the service and
+the record disagreeing while every other signal reports success — could never
+become a candidate lesson.

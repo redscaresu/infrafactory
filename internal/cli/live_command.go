@@ -64,6 +64,18 @@ func newLiveCmd(cfg *rootConfig) *cobra.Command {
 	upgrade.Flags().String("tag", "", "Tag the deployment now claims to run; recorded and verified against the service")
 	cmd.AddCommand(upgrade)
 
+	candidates := &cobra.Command{
+		Use:   "candidates",
+		Short: "Show observations that have reproduced enough to be worth learning from",
+		Args:  cobra.NoArgs,
+		RunE:  cfg.withRuntimeNoGenerator("live candidates", runLiveCandidatesCommand),
+	}
+	candidates.Flags().Int("consecutive", livestore.DefaultPromotionRule.ConsecutiveProbes,
+		"Probes in a row on one deployment before a failure counts as persistent")
+	candidates.Flags().Int("deployments", livestore.DefaultPromotionRule.DistinctDeployments,
+		"Distinct deployments before a failure counts as a property of the shape")
+	cmd.AddCommand(candidates)
+
 	reap := &cobra.Command{
 		Use:   "reap",
 		Short: "Destroy every live deployment whose TTL has run out",
