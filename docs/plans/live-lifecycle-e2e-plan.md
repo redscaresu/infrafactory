@@ -63,12 +63,42 @@ Two properties the sequence exists to pin, which no single-command test can:
 - **Observations survive an upgrade.** The pass-57 defect, as a test rather than
   a review finding.
 
-### Against the mock, and once for real
+### Correction, 2026-09-01: it cannot run against mockway
 
-Mockway is the default so the test can run in CI on every PR. The real-cloud
-pass is manual and recorded, exactly as the S154/S155 canaries were — the mock
-proves the commands agree with each other, and only real Scaleway proves they
-agree with the world.
+The paragraph this replaces said the test would drive the commands against
+mockway. **That is impossible, and should not be made possible.**
+
+`assertRealScalewayEndpoint` refuses any Layer 3 apply whose environment points
+somewhere other than `https://api.scaleway.com` — checking the passed env, the
+inherited `SCW_API_URL`, *and* the default profile in `~/.config/scw/config.yaml`.
+`deploy`, `live upgrade` and `live teardown` all build a sandbox env and so all
+inherit that refusal. It is ADR-0023's containment, and it exists precisely so a
+green Layer 3 result cannot be evidence of nothing.
+
+Pointing the journey test at a mock would mean weakening it. The plan was wrong,
+not the control.
+
+### What the test does instead
+
+The defects this slice exists to catch are **record-coupling** defects, and none
+of them needs a cloud:
+
+| defect | what it actually required |
+|---|---|
+| `observe` failing on an address-less record | a record `deploy` wrote, and `observe` reading it |
+| `upgrade` discarding concurrent observations | a record held across an apply |
+| record and marker disagreeing on the project | two writers of the same identity |
+
+So the journey runs the **real command functions** and the **real `livestore`**,
+with the cloud harnesses faked — `SandboxDeploy`, `SandboxDestroy`, `RunProject`,
+`OrphanSweep`, `ServiceProbe`. Every line that reads or writes a deployment
+record is the production one; only the parts that would talk to Scaleway are not.
+
+That is a stronger test than a mock-driven one would have been, because mockway
+was never reachable from these commands anyway.
+
+The real-cloud pass stays exactly as it was: manual, recorded, and the only thing
+that proves the commands agree with the world rather than with each other.
 
 ### Explicitly out of scope
 

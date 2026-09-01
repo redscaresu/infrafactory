@@ -551,3 +551,28 @@ observations in exactly that window. Writing back the stale copy discarded them 
 which does not corrupt the record, it quietly weakens the learning signal S156's
 promotion gate counts. An upgrade merges only the three fields it owns (`Tag`,
 `UpgradedAt`, `Address`); anything else belongs to whoever wrote it last.
+
+## Amendment, 2026-09-01 (S158): the record is the interface, so the record is what gets tested
+
+The live commands do not call each other. They are coupled through the
+deployment record: `deploy` writes it, `observe` appends, `upgrade` rewrites three
+fields, `teardown` releases it, `reap` acts on what it finds.
+
+Every command's own tests build the record they read, which is why three defects
+in this arc were interactions no unit test could see — `observe` failing on an
+address-less record `deploy` legitimately wrote, `upgrade` discarding
+observations appended during its apply, and the record and marker disagreeing
+about which project an apply may touch.
+
+The journey test runs the real commands and the real `livestore`, with only the
+cloud faked, and asserts what each step **leaves for the next one**.
+
+It cannot run against a mock, and that is worth recording so nobody tries:
+`assertRealScalewayEndpoint` refuses any Layer 3 apply not pointed at
+`api.scaleway.com`, checking the passed env, the inherited `SCW_API_URL` and the
+`scw` config file. Every command that builds a sandbox env inherits the refusal.
+Pointing a test at a mock would mean weakening that control, and the control is
+right — a green Layer 3 result must not be able to be evidence of nothing.
+
+Faking the cloud rather than the record is also the stronger choice: every defect
+this test exists to catch lives in the record, not in the API.
