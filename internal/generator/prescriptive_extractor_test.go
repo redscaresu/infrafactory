@@ -531,3 +531,36 @@ func writeTF(t *testing.T, dir, name, content string) {
 func repeat(s string, n int) string {
 	return strings.Repeat(s, n)
 }
+
+// A removed resource is a changed resource. Walking only the passing
+// side reports "exactly one changed" for an upgrade that deleted one
+// thing and modified another, defeating the caller's ambiguity gate.
+func TestChangedResourceAddressesCountsDeletions(t *testing.T) {
+	before := `resource "scaleway_lb_backend" "app" {
+  forward_port = 80
+}
+resource "scaleway_lb_frontend" "legacy" {
+  inbound_port = 8080
+}
+`
+	after := `resource "scaleway_lb_backend" "app" {
+  forward_port = 443
+}
+`
+	d1, d2 := t.TempDir(), t.TempDir()
+	if err := os.WriteFile(filepath.Join(d1, "main.tf"), []byte(before), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(d2, "main.tf"), []byte(after), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	got, err := ChangedResourceAddresses(d1, d2)
+	if err != nil {
+		t.Fatalf("changed: %v", err)
+	}
+	want := []string{"scaleway_lb_backend.app", "scaleway_lb_frontend.legacy"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("expected the deletion to count as a change: got %v, want %v", got, want)
+	}
+}

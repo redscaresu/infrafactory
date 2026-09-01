@@ -170,6 +170,12 @@ func runLiveUpgradeCommand(cmd *cobra.Command, args []string, runtime *CommandRu
 
 	_, _ = fmt.Fprintf(progress, "Upgrading %s in project %s\n", d.ID, d.ProjectID)
 
+	// Stamped BEFORE the apply, so the pair (start, finish) brackets the
+	// window in which this service is expected to be disrupted. Without
+	// it, a probe taken mid-apply is indistinguishable from the failure
+	// the upgrade was meant to fix -- see UpgradeStartedAt.
+	upgradeStartedAt := time.Now()
+
 	if err := stashPreviousHCL(d.WorkDir); err != nil {
 		return &CLIError{Op: "live upgrade", Code: errorCodeCommandFailed, Err: err}
 	}
@@ -227,7 +233,12 @@ func runLiveUpgradeCommand(cmd *cobra.Command, args []string, runtime *CommandRu
 			d.Tag = trimmed
 			tagChanged = true
 		}
+		d.UpgradeStartedAt = upgradeStartedAt
 		d.UpgradedAt = time.Now()
+		// applyRan() is true for a FAILED apply past plan -- deliberately,
+		// since resources may exist and the record must say so. Only a
+		// clean apply means the running configuration is the new one.
+		d.UpgradeSucceeded = applyErr == nil
 
 		// The address can move: replacement HCL may recreate the load
 		// balancer. Verifying against the address captured at first
@@ -629,11 +640,13 @@ func assertRunProjectOurs(ctx context.Context, runtime *CommandRuntime, projectI
 // losing them does not corrupt the record -- it quietly weakens the
 // learning signal, which is harder to notice.
 //
-// An allow-list of the four fields an upgrade owns, not a blanket copy:
+// An allow-list of the fields an upgrade owns, not a blanket copy:
 // anything else belongs to whoever wrote it last.
 func mergeUpgradeOntoFresh(fresh, upgraded livestore.Deployment) livestore.Deployment {
 	fresh.Tag = upgraded.Tag
 	fresh.UpgradedAt = upgraded.UpgradedAt
+	fresh.UpgradeStartedAt = upgraded.UpgradeStartedAt
+	fresh.UpgradeSucceeded = upgraded.UpgradeSucceeded
 	fresh.Address = upgraded.Address
 	fresh.AddressResource = upgraded.AddressResource
 	return fresh

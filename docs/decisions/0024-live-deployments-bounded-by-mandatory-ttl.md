@@ -645,3 +645,22 @@ deleted. **Cost: nothing** — Scaleway projects are free; only resources bill.
 The baseline that run printed is worth recording: **3 projects in the
 organization, 0 carrying infrafactory's stamp.** The account holds no leaked run
 projects, so the D6 fix is holding.
+
+## Amendment, 2026-09-01 (S156d): an upgrade records when its apply began
+
+A deployment record now carries `upgrade_started_at` alongside `upgraded_at`. The
+pair brackets the window in which the service is expected to be disrupted.
+
+Without it, an upgrade's **own downtime is indistinguishable from the failure it
+was meant to fix**. `live observe` can run during an apply that takes minutes —
+S158's journey test does precisely that — and those probes are stamped *before*
+`upgraded_at`, because `upgraded_at` is written after the apply returns. A
+`connection refused` from mid-apply then reads as the pre-existing failure, and
+S156d would write a prescriptive rule teaching a remedy for an outage this tool
+caused.
+
+Probes landing inside the window are **discarded**, not assigned to either side:
+they describe neither the old configuration nor the new one, only the changeover.
+A record with no `upgrade_started_at` is declined for repair-learning rather than
+guessed at — fail-closed, and it costs only records written before this field
+existed.

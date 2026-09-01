@@ -2,6 +2,58 @@
 
 Last updated: 2026-08-31
 
+## 2026-09-01 — S156d: prescriptive rules from upgrade diffs
+
+S156c writes descriptive rules only — what was observed, nothing about what to do.
+ADR-0019 calls that the weakest useful class, and it is all a single live failure
+can support: there is no "next iteration that fixed it" to diff against.
+
+An upgrade supplies one, which is why S155b stashes `.infrafactory-previous/`.
+
+**The planned risk was real, and the resolution was to change what does the
+discriminating.** An upgrade diffs two configurations that *both applied
+successfully*, so the apply cannot tell a fix from a routine version bump. The
+observations can: `livestore.Repairs` promotes an upgrade only when the service
+was observed failing **before** and healthy **after** — precisely "this failed,
+then this passed", measured against the running service rather than terraform,
+which reported success both times.
+
+Healthy-but-on-the-wrong-version does not count as "after": a service answering
+fine while running something other than what was deployed is close to evidence
+the upgrade never took. One healthy probe does not count either.
+
+**Attribution turned out to be the hard part, and the first answer was wrong.**
+A run-loop failure names a resource address; a live probe says `health path
+http://… returned HTTP 503` and names nothing. `AddressResource` looked like the
+substitute and is not — it is where the probe *pointed* (a load balancer IP), not
+where the fault was (a backend block), so narrowing the diff to its type skips
+exactly the upgrades worth learning from. Review caught it, and caught that the
+test only passed because it seeded a synthetic detail containing a Terraform
+address. Attribution now comes from the diff: use the change only when **exactly
+one** resource differs.
+
+**Eight findings across five review passes, and every one the same shape**: a rule
+the surrounding code already enforced that the new path did not inherit — the
+ambiguity gate (deletions uncounted), per-cloud handling, failure-must-persist,
+attribution-from-detail, "an absent input is not an empty input", and the
+apply-window boundary. S156a's lesson was that a change lands in every place that
+reads it; this is its mirror, and the sharper one, because none of those rules are
+written where a new path can see them.
+
+The worst was subtle: `upgraded_at` is written *after* the apply returns, so a
+concurrent `live observe` — which S158's journey test performs — records the
+upgrade's **own downtime** as the failure being repaired. Records now carry
+`upgrade_started_at`, probes inside the window are discarded rather than assigned
+to either side, and a record without the boundary is declined rather than guessed
+at.
+
+Remedies stay `source: live`, not `fix`. `fix` is permanent; `live` is retirable.
+A rule extracted from a running deployment is prescriptive in shape and live in
+provenance, and what is true of a running service stops being true — tagging it
+`fix` would make it immortal and break S156c's rule that nothing is written which
+cannot later be retired. ADR-0019 amended: the source tag is about provenance and
+retention, the rule text is about shape, and they are separate axes.
+
 ## 2026-09-01 — S157a: reconcile against the API
 
 ADR-0024 called this "the largest remaining hole" in it, and the hole was worse
