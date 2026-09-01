@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -236,4 +237,112 @@ func (p *ScalewayRunProject) Delete(ctx context.Context, secretKey, projectID st
 	}
 
 	return nil
+}
+
+// ListedProject is one project the API knows about, with the fields the
+// provenance stamp is read from.
+type ListedProject struct {
+	ID          string
+	Name        string
+	Description string
+}
+
+// Provenance re-reads the stamp from a listed project, so a caller uses
+// one rule for "is this ours" whether it listed the project or described
+// it.
+func (l ListedProject) Provenance() ProjectProvenance {
+	return ProjectProvenance{Exists: true, Name: l.Name, Description: l.Description}
+}
+
+// maxProjectListPages bounds the pagination walk.
+//
+// Not a tuning knob: it is the difference between "this account has more
+// projects than expected" and an unbounded loop against a paid API if it
+// ever returns a page that does not shrink. At 100 per page it allows
+// 5,000 projects, far past anything this tool creates.
+const maxProjectListPages = 50
+
+const projectListPageSize = 100
+
+// List returns every project in the organization.
+//
+// It does NOT filter to infrafactory's own. The caller decides what is
+// theirs, using the same `IsInfrafactoryRunProject` stamp that guards
+// teardown, so there is one definition of ownership rather than one here
+// and another there.
+//
+// Reading the whole organization is deliberate and is the only way to
+// answer the question reconciliation asks -- *what is running that
+// nothing knows about?* A list filtered by the API could only return
+// projects matching something we already knew to ask for, which is the
+// assumption being checked.
+func (p *ScalewayRunProject) List(ctx context.Context, secretKey, organizationID string) ([]ListedProject, error) {
+	if strings.TrimSpace(secretKey) == "" {
+		return nil, fmt.Errorf("list projects: no secret key")
+	}
+	if strings.TrimSpace(organizationID) == "" {
+		return nil, fmt.Errorf("list projects: no organization id")
+	}
+
+	var out []ListedProject
+	for page := 1; page <= maxProjectListPages; page++ {
+		listed, err := p.listPage(ctx, secretKey, organizationID, page)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, listed...)
+		if len(listed) < projectListPageSize {
+			// A short page is the last page. Stopping on an EMPTY page
+			// instead would spend one extra request per call, every
+			// call, against an API that charges for nothing else here
+			// but is rate limited.
+			return out, nil
+		}
+	}
+	// Fail rather than return a truncated list. A caller comparing this
+	// against the live store would read missing projects as "nothing
+	// unaccounted for", which is the precise falsehood reconciliation
+	// exists to prevent.
+	return nil, fmt.Errorf("list projects: more than %d pages in organization %s; refusing to report a partial estate",
+		maxProjectListPages, organizationID)
+}
+
+func (p *ScalewayRunProject) listPage(ctx context.Context, secretKey, organizationID string, page int) ([]ListedProject, error) {
+	endpoint := fmt.Sprintf("%s/account/v3/projects?organization_id=%s&page=%d&page_size=%d",
+		p.apiBase, url.QueryEscape(organizationID), page, projectListPageSize)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, fmt.Errorf("build list-projects request: %w", err)
+	}
+	req.Header.Set("X-Auth-Token", secretKey)
+
+	resp, err := p.doer(req)
+	if err != nil {
+		return nil, fmt.Errorf("list projects (page %d): %w", page, err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return nil, fmt.Errorf("list projects (page %d): http %d: %s",
+			page, resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	var decoded struct {
+		Projects []struct {
+			ID          string `json:"id"`
+			Name        string `json:"name"`
+			Description string `json:"description"`
+		} `json:"projects"`
+	}
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		return nil, fmt.Errorf("decode list-projects response: %w", err)
+	}
+
+	out := make([]ListedProject, 0, len(decoded.Projects))
+	for _, pr := range decoded.Projects {
+		out = append(out, ListedProject{ID: pr.ID, Name: pr.Name, Description: pr.Description})
+	}
+	return out, nil
 }

@@ -3,6 +3,7 @@ package harness
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -144,4 +145,99 @@ func TestDeleteRefusesWithoutCredentialsOrProject(t *testing.T) {
 
 	require.Error(t, client.Delete(context.Background(), "", "proj-1"))
 	require.Error(t, client.Delete(context.Background(), "secret", ""))
+}
+
+func listResponse(projects string) *http.Response {
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(`{"projects":[` + projects + `]}`)),
+	}
+}
+
+func project(id, name, description string) string {
+	return `{"id":"` + id + `","name":"` + name + `","description":"` + description + `"}`
+}
+
+// List returns the whole organization, unfiltered. Filtering here would
+// only return projects matching something we already knew to ask for,
+// which is the assumption reconciliation exists to check.
+func TestListReturnsEveryProjectIncludingOnesNotOurs(t *testing.T) {
+	var gotURL string
+	client := NewScalewayRunProjectWithDoer("https://api.example", func(r *http.Request) (*http.Response, error) {
+		gotURL = r.URL.String()
+		return listResponse(
+			project("p1", "if-run-a", RunProjectDescription) + "," +
+				project("p2", "openclaw", "our real project")), nil
+	})
+
+	got, err := client.List(context.Background(), "secret", "org-1")
+	require.NoError(t, err)
+
+	require.Len(t, got, 2)
+	assert.True(t, got[0].Provenance().IsInfrafactoryRunProject())
+	assert.False(t, got[1].Provenance().IsInfrafactoryRunProject(),
+		"the caller decides what is ours, using the stamp that guards teardown")
+	assert.Contains(t, gotURL, "organization_id=org-1")
+}
+
+// A short page is the last page. Stopping on an empty one instead would
+// spend an extra request against a rate-limited API on every call.
+func TestListStopsOnAShortPage(t *testing.T) {
+	pages := 0
+	client := NewScalewayRunProjectWithDoer("https://api.example", func(*http.Request) (*http.Response, error) {
+		pages++
+		return listResponse(project("p1", "if-run-a", RunProjectDescription)), nil
+	})
+
+	got, err := client.List(context.Background(), "secret", "org-1")
+	require.NoError(t, err)
+
+	assert.Len(t, got, 1)
+	assert.Equal(t, 1, pages)
+}
+
+// Refusing beats truncating. A caller comparing a partial list against
+// the live store would read the missing projects as "nothing
+// unaccounted for" -- the precise falsehood reconciliation prevents.
+func TestListRefusesToReportAPartialEstate(t *testing.T) {
+	full := make([]string, 0, projectListPageSize)
+	for i := 0; i < projectListPageSize; i++ {
+		full = append(full, project(fmt.Sprintf("p%d", i), "if-run-a", RunProjectDescription))
+	}
+	body := strings.Join(full, ",")
+
+	client := NewScalewayRunProjectWithDoer("https://api.example", func(*http.Request) (*http.Response, error) {
+		return listResponse(body), nil
+	})
+
+	_, err := client.List(context.Background(), "secret", "org-1")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "refusing to report a partial estate")
+}
+
+// An unreachable API is an error, never an empty organization.
+func TestListFailsRatherThanReportingAnEmptyOrganization(t *testing.T) {
+	client := NewScalewayRunProjectWithDoer("https://api.example", func(*http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusForbidden,
+			Body:       io.NopCloser(strings.NewReader(`{"message":"denied"}`)),
+		}, nil
+	})
+
+	_, err := client.List(context.Background(), "secret", "org-1")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "403")
+}
+
+func TestListRefusesWithoutCredentials(t *testing.T) {
+	client := NewScalewayRunProjectWithDoer("https://api.example", func(*http.Request) (*http.Response, error) {
+		t.Fatal("must not reach the API without credentials")
+		return nil, nil
+	})
+
+	_, err := client.List(context.Background(), "", "org-1")
+	require.Error(t, err)
+
+	_, err = client.List(context.Background(), "secret", "")
+	require.Error(t, err)
 }

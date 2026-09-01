@@ -52,6 +52,12 @@ type RunProjectManager interface {
 	Create(ctx context.Context, secretKey, organizationID, scenario, stamp string) (harness.RunProject, error)
 	Describe(ctx context.Context, secretKey, projectID string) (harness.ProjectProvenance, error)
 	Delete(ctx context.Context, secretKey, projectID string) error
+
+	// List enumerates the organization's projects, which is the only way
+	// to find infrastructure no record explains (S157a). Describe cannot
+	// do it: it can only confirm a project id somebody already knew to
+	// ask about, and the missing ids are the whole problem.
+	List(ctx context.Context, secretKey, organizationID string) ([]harness.ListedProject, error)
 }
 
 // ServiceProbeRunner checks a live deployment's health path. Separate

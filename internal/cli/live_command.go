@@ -89,6 +89,16 @@ func newLiveCmd(cfg *rootConfig) *cobra.Command {
 	learn.Flags().Bool("dry-run", false, "Report what would be learned without writing to the corpus")
 	cmd.AddCommand(learn)
 
+	reconcile := &cobra.Command{
+		Use:   "reconcile",
+		Short: "Compare the organization's projects against the live store",
+		Long: "Reports infrafactory projects the cloud holds that no live record explains, and " +
+			"records naming projects that no longer exist. Never destroys anything.",
+		Args: cobra.NoArgs,
+		RunE: cfg.withRuntime("live reconcile", runLiveReconcileCommand),
+	}
+	cmd.AddCommand(reconcile)
+
 	reap := &cobra.Command{
 		Use:   "reap",
 		Short: "Destroy every live deployment whose TTL has run out",

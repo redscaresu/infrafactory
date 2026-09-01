@@ -29,8 +29,14 @@ import (
 )
 
 // DefaultRoot sits beside .infrafactory/runs so both stores share a fate:
-// wiping the working directory loses the record, which is why the reaper
-// reconciles against the API rather than trusting this file alone.
+// wiping the working directory loses the record while the cloud keeps the
+// resources.
+//
+// `live reconcile` is what detects that (S157a). The REAPER does not: it
+// reads this store and nothing else, so a deployment whose record is gone
+// is a deployment it will never expire. This comment previously claimed
+// the reaper reconciled against the API, which was never true and made
+// the hole invisible to anyone reading for it.
 const DefaultRoot = ".infrafactory/live"
 
 const DeploymentSchemaVersion = "infrafactory.live.deployment.v1"

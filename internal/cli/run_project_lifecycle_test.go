@@ -30,6 +30,9 @@ type fakeRunProject struct {
 	lastOrg           string
 	lastScen          string
 	deletedID         string
+	lists             int
+	listed            []harness.ListedProject
+	listErr           error
 }
 
 func (f *fakeRunProject) Create(_ context.Context, _, organizationID, scenario, _ string) (harness.RunProject, error) {
@@ -439,4 +442,10 @@ func TestEnsureRunProjectCreatesDespiteACancelledContext(t *testing.T) {
 	marker, err := harness.ReadRunProjectMarker(workDir)
 	require.NoError(t, err)
 	assert.Equal(t, "proj-1", marker.ProjectID)
+}
+
+func (f *fakeRunProject) List(_ context.Context, _, organizationID string) ([]harness.ListedProject, error) {
+	f.lists++
+	f.lastOrg = organizationID
+	return f.listed, f.listErr
 }
