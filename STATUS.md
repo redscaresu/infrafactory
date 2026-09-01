@@ -32,6 +32,14 @@ Last updated: 2026-08-31
     would otherwise empty the corpus in one command, and a dry-run that accepts
     what the real run rejects teaches the wrong thing about what is safe to type.
 
+  **Pass 59**: `live` was added as a persisted value while two ratchets still
+  fenced the corpus to `descriptive`/`fix`/`avoid`, so the first live entry would
+  have failed CI with the blame pointing at the entry rather than the ratchet.
+  Both updated. Sweeping for the same class then found what the finding did not:
+  `pitfall-merge` preserves `--keep avoid` across a sweep, so **a sweep would have
+  silently deleted every live entry** — the exact thing this slice exists to
+  prevent. Now `avoid,live`.
+
   `--dry-run` and the real thing share one rule by construction: a dry-run that
   can disagree with the real thing is worse than no dry-run. And `TouchLivePitfall`
   refreshes rather than appends, which is what makes retention mean *last

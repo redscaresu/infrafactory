@@ -70,13 +70,20 @@ func TestPitfallsNoHumanSeeding(t *testing.T) {
 			}
 			sort.Strings(keys)
 			for _, src := range keys {
-				if src == "descriptive" || src == FixSource || src == AvoidSource {
+				if src == "descriptive" || src == FixSource || src == AvoidSource || src == LiveSource {
 					// `fix` is N10's auto-derived source —
 					// strictly a richer shape of run-derived learning,
 					// not a human-authored seed. `avoid`
 					// is the N13 deletion-as-fix companion (same
 					// provenance, different rule shape). Both whitelisted
 					// alongside the legacy `descriptive` tag.
+					//
+					// `live` (S156) is run-derived too, just from a
+					// later moment: the run is a service that was
+					// already deployed rather than an apply. The policy
+					// this ratchet enforces is "no human authorship",
+					// and an observation of a real service is the
+					// opposite of that.
 					continue
 				}
 				t.Errorf("pitfalls/%s.yaml has %d entries with source=%q — M91 forbids human-authored pitfalls. Delete them and let the M86+M90 auto-learning loop rebuild any genuinely-needed entries from real runs.", cloud, bySource[src], src)

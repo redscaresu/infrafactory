@@ -36,7 +36,13 @@ func main() {
 	preFile := flag.String("pre", "", "pre-sweep pitfalls yaml path (required)")
 	postFile := flag.String("post", "", "post-sweep pitfalls yaml path (required)")
 	outFile := flag.String("out", "", "output merged yaml path (required)")
-	keepFlag := flag.String("keep", "avoid", "comma-separated source values to preserve from post")
+	// `live` joins `avoid` in the default: both are run-derived, and a
+	// sweep that discards live entries would delete learning SILENTLY --
+	// which is the one thing S156a's retirement path exists to prevent.
+	// Retirement names what it removes; a sweep dropping the same entries
+	// on the floor would make the corpus untrustworthy in exactly the way
+	// the reporting was meant to fix.
+	keepFlag := flag.String("keep", "avoid,live", "comma-separated source values to preserve from post")
 	flag.Parse()
 
 	if *preFile == "" || *postFile == "" || *outFile == "" {

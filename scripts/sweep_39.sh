@@ -239,7 +239,7 @@ else
       --pre "$PRE/$c.yaml" \
       --post "pitfalls/$c.yaml" \
       --out "pitfalls/$c.yaml" \
-      --keep avoid 2>&1)
+      --keep avoid,live 2>&1)
     echo "  $c: $out"
     added=$(echo "$out" | grep -oE 'kept_new=[0-9]+' | sed 's/kept_new=//')
     avoid_total=$((avoid_total + ${added:-0}))
