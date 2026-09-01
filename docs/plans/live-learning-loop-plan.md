@@ -128,6 +128,20 @@ entries** — an expiry, a supersession rule, or a re-validation against the
 holdout set. Unshelving the full pruning plan is the larger option and may be the
 right one.
 
+## Known gap: genesys is outside the sweep's pitfall handling
+
+`scripts/sweep_39.sh` and `m93_resweep.sh` snapshot and merge
+`aws / gcp / scaleway` and omit **genesys**, and so do all three corpus ratchets —
+consistently, and since long before this arc. `pitfalls/genesys.yaml` is real (19
+entries) but no sweep ever touches it.
+
+That costs nothing today: no live entries exist for any cloud. It starts costing
+at the slice that first produces them. Closing it means deciding whether genesys
+joins the ratchets, whether the no-human-seeding policy applies to a corpus that
+predates it, and what `AVOID_EMISSIONS` means for a cloud with no avoid entries —
+a decision with its own scope, which is why it was declined during the retirement
+slice rather than folded in (review pass 65).
+
 ## Risks
 
 | risk | mitigation |

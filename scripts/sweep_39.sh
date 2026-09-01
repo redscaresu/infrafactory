@@ -239,9 +239,13 @@ else
       --pre "$PRE/$c.yaml" \
       --post "pitfalls/$c.yaml" \
       --out "pitfalls/$c.yaml" \
-      --keep avoid 2>&1)
+      --keep avoid,live 2>&1)
     echo "  $c: $out"
-    added=$(echo "$out" | grep -oE 'kept_new=[0-9]+' | sed 's/kept_new=//')
+    # kept_avoid, not kept_new: kept_new now also counts preserved
+    # `live` entries, and folding those in would let live preservation
+    # mask an avoid-learning regression -- a ratchet that reads healthy
+    # while the thing it measures is broken.
+    added=$(echo "$out" | grep -oE 'kept_avoid=[0-9]+' | sed 's/kept_avoid=//')
     avoid_total=$((avoid_total + ${added:-0}))
   done
 fi

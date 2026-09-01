@@ -19,6 +19,13 @@ import (
 //     (ExtractFixPitfall).
 //   - `avoid`       — extracted from the REMOVED side of the same diff
 //     (ExtractAvoidPitfall).
+//   - `live`        — learned from a service that was already running
+//     rather than from a failed apply (S156). The only source with a
+//     lifetime: `live` entries carry `last_seen` and are retired by
+//     `pitfalls retire` once the thing they describe stops being
+//     observed. The others do not decay, because a rule extracted from a
+//     reproducible apply failure does not stop being true because nobody
+//     hit it lately.
 //
 // The TestPitfallsNoHumanSeeding ratchet already rejects `seed` /
 // `static` / empty. This test complements it by fencing the positive
@@ -34,6 +41,7 @@ func TestPitfallsSourceEnum(t *testing.T) {
 		"descriptive": true,
 		"fix":         true,
 		"avoid":       true,
+		"live":        true,
 	}
 	for _, cloud := range []string{"aws", "gcp", "scaleway"} {
 		t.Run(cloud, func(t *testing.T) {
@@ -53,7 +61,7 @@ func TestPitfallsSourceEnum(t *testing.T) {
 			}
 			for _, p := range file.Pitfalls {
 				if !allowed[p.Source] {
-					t.Errorf("pitfalls/%s.yaml: %s has source=%q — must be one of descriptive / fix / avoid",
+					t.Errorf("pitfalls/%s.yaml: %s has source=%q — must be one of descriptive / fix / avoid / live",
 						cloud, p.Resource, p.Source)
 				}
 			}

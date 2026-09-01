@@ -1,6 +1,8 @@
 package main
 
 import (
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"testing"
 
 	"github.com/redscaresu/infrafactory/internal/generator"
@@ -24,7 +26,7 @@ func TestMerge_KeepsLearnedFromDiffAvoid(t *testing.T) {
 		mk("google_sql_database_instance", "descriptive failure echo", "descriptive"), // should drop
 	}}
 
-	got, added := merge(pre, post, map[string]bool{"avoid": true})
+	got, added, _, _ := merge(pre, post, map[string]bool{"avoid": true})
 
 	if added != 1 {
 		t.Fatalf("expected 1 added, got %d", added)
@@ -55,7 +57,7 @@ func TestMerge_SkipsDuplicates(t *testing.T) {
 		mk("google_service_account", "do NOT use X", "avoid"), // duplicate
 	}}
 
-	got, added := merge(pre, post, map[string]bool{"avoid": true})
+	got, added, _, _ := merge(pre, post, map[string]bool{"avoid": true})
 
 	if added != 0 {
 		t.Errorf("expected 0 added (dup), got %d", added)
@@ -78,7 +80,7 @@ func TestMerge_EmptyKeepSet(t *testing.T) {
 		mk("b", "new N13 entry", "avoid"),
 	}}
 
-	got, added := merge(pre, post, map[string]bool{})
+	got, added, _, _ := merge(pre, post, map[string]bool{})
 
 	if added != 0 {
 		t.Errorf("empty keep-set: expected 0 added, got %d", added)
@@ -100,7 +102,7 @@ func TestMerge_MultipleKeepSources(t *testing.T) {
 		mk("c", "descriptive", "descriptive"),
 	}}
 
-	got, added := merge(pre, post, map[string]bool{
+	got, added, _, _ := merge(pre, post, map[string]bool{
 		"fix":   true,
 		"avoid": true,
 	})
@@ -111,4 +113,136 @@ func TestMerge_MultipleKeepSources(t *testing.T) {
 	if len(got.Pitfalls) != 2 {
 		t.Errorf("expected 2 total, got %d", len(got.Pitfalls))
 	}
+}
+
+// A live entry re-observed during the sweep exists in BOTH files.
+// Skipping it as a duplicate keeps pre's older timestamp, which makes
+// retention mean "first observed" instead of "last observed" -- and the
+// rule then retires early while it is still true.
+func TestMergeCarriesForwardARefreshedLastSeen(t *testing.T) {
+	const rule = "a live rule"
+	pre := generator.PitfallsFile{Provider: "scaleway", Pitfalls: []generator.PitfallEntry{
+		{Resource: "scaleway_lb", Rule: rule, Source: "live", LastSeen: "2026-08-01T00:00:00Z"},
+	}}
+	post := generator.PitfallsFile{Provider: "scaleway", Pitfalls: []generator.PitfallEntry{
+		{Resource: "scaleway_lb", Rule: rule, Source: "live", LastSeen: "2026-09-01T00:00:00Z"},
+	}}
+
+	got, added, refreshed, _ := merge(pre, post, map[string]bool{"live": true})
+
+	assert.Zero(t, added, "it is the same entry, not a new one")
+	assert.Equal(t, 1, refreshed)
+	require.Len(t, got.Pitfalls, 1)
+	assert.Equal(t, "2026-09-01T00:00:00Z", got.Pitfalls[0].LastSeen)
+}
+
+// Older or unreadable timestamps never win: the existing value is
+// evidence somebody recorded, and replacing it with something unreadable
+// would make the entry look never-seen and retire it.
+func TestMergeKeepsTheBetterLastSeen(t *testing.T) {
+	const rule = "a live rule"
+	cases := map[string]struct{ pre, post, want string }{
+		"older post":       {"2026-09-01T00:00:00Z", "2026-08-01T00:00:00Z", "2026-09-01T00:00:00Z"},
+		"unparseable post": {"2026-09-01T00:00:00Z", "sometime", "2026-09-01T00:00:00Z"},
+		"empty post":       {"2026-09-01T00:00:00Z", "", "2026-09-01T00:00:00Z"},
+		"empty pre":        {"", "2026-09-01T00:00:00Z", "2026-09-01T00:00:00Z"},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			pre := generator.PitfallsFile{Pitfalls: []generator.PitfallEntry{
+				{Resource: "r", Rule: rule, Source: "live", LastSeen: tc.pre},
+			}}
+			post := generator.PitfallsFile{Pitfalls: []generator.PitfallEntry{
+				{Resource: "r", Rule: rule, Source: "live", LastSeen: tc.post},
+			}}
+
+			got, _, _, _ := merge(pre, post, map[string]bool{"live": true})
+
+			require.Len(t, got.Pitfalls, 1)
+			assert.Equal(t, tc.want, got.Pitfalls[0].LastSeen)
+		})
+	}
+}
+
+// entryKey is (resource, rule) and ignores source, so the same rule can
+// be `descriptive` in pre and `live` in post. Copying the live timestamp
+// onto the descriptive entry would attach a lifetime to something that
+// has none -- and only live entries are ever retired, so the timestamp
+// would sit there meaning nothing while the live record vanished as a
+// duplicate.
+func TestMergeDoesNotRefreshAcrossSources(t *testing.T) {
+	const rule = "the same rule, learned twice"
+	pre := generator.PitfallsFile{Pitfalls: []generator.PitfallEntry{
+		{Resource: "scaleway_lb", Rule: rule, Source: "descriptive"},
+	}}
+	post := generator.PitfallsFile{Pitfalls: []generator.PitfallEntry{
+		{Resource: "scaleway_lb", Rule: rule, Source: "live", LastSeen: "2026-09-01T00:00:00Z"},
+	}}
+
+	got, added, refreshed, _ := merge(pre, post, map[string]bool{"live": true})
+
+	assert.Zero(t, refreshed, "a live timestamp must not land on a descriptive entry")
+
+	// And the live entry is KEPT rather than swallowed as a duplicate.
+	// Pass 63 dropped it to preserve the historical dedup; pass 66
+	// reversed that, because live is the only source carrying state that
+	// cannot be rebuilt -- losing it loses the timestamp retirement runs
+	// on, silently.
+	assert.Equal(t, 1, added)
+	require.Len(t, got.Pitfalls, 2)
+	assert.Equal(t, "descriptive", got.Pitfalls[0].Source)
+	assert.Empty(t, got.Pitfalls[0].LastSeen, "a source with no lifetime gains no timestamp")
+	assert.Equal(t, "live", got.Pitfalls[1].Source)
+	assert.Equal(t, "2026-09-01T00:00:00Z", got.Pitfalls[1].LastSeen)
+}
+
+// The asymmetry is deliberate and only live gets it: dropping a duplicate
+// `avoid` loses a rule the corpus already states in other words, while
+// dropping a duplicate `live` loses information nothing can rebuild.
+func TestMergeKeepsHistoricalIdentityForNonLiveSources(t *testing.T) {
+	const rule = "the same rule"
+	pre := generator.PitfallsFile{Pitfalls: []generator.PitfallEntry{
+		{Resource: "scaleway_lb", Rule: rule, Source: "descriptive"},
+	}}
+	post := generator.PitfallsFile{Pitfalls: []generator.PitfallEntry{
+		{Resource: "scaleway_lb", Rule: rule, Source: "avoid"},
+	}}
+
+	got, added, _, _ := merge(pre, post, map[string]bool{"avoid": true})
+
+	assert.Zero(t, added, "avoid keeps the historical (resource, rule) identity")
+	assert.Len(t, got.Pitfalls, 1)
+}
+
+// AVOID_EMISSIONS in scripts/sweep_39.sh ratchets on whether the avoid
+// extractor still works. A combined kept_new would let preserved `live`
+// entries mask an avoid-learning regression -- a metric that reads
+// healthy while the thing it measures is broken.
+func TestMergeReportsKeptCountsPerSource(t *testing.T) {
+	pre := generator.PitfallsFile{}
+	post := generator.PitfallsFile{Pitfalls: []generator.PitfallEntry{
+		{Resource: "a", Rule: "1", Source: "avoid"},
+		{Resource: "b", Rule: "2", Source: "live", LastSeen: "2026-09-01T00:00:00Z"},
+		{Resource: "c", Rule: "3", Source: "live", LastSeen: "2026-09-01T00:00:00Z"},
+		{Resource: "d", Rule: "4", Source: "descriptive"},
+	}}
+
+	_, added, _, bySource := merge(pre, post, map[string]bool{"avoid": true, "live": true})
+
+	assert.Equal(t, 3, added)
+	assert.Equal(t, 1, bySource["avoid"], "the avoid ratchet must be readable on its own")
+	assert.Equal(t, 2, bySource["live"])
+	assert.Zero(t, bySource["descriptive"], "not in keepSet, so not preserved")
+
+	rendered := perSourceCounts(bySource)
+	assert.Contains(t, rendered, "kept_avoid=1")
+	assert.Contains(t, rendered, "kept_live=2")
+}
+
+// A sweep that preserved nothing must still print a parseable line: the
+// script greps for kept_avoid and treats a miss as zero, so an absent
+// field is fine but a malformed one is not.
+func TestMergeRendersNothingWhenNothingWasKept(t *testing.T) {
+	assert.Empty(t, perSourceCounts(map[string]int{}))
 }

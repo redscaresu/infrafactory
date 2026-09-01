@@ -4,6 +4,110 @@ Last updated: 2026-08-31
 
 ## Current phase
 
+- 🧹 **S156a: the corpus gets an outflow (2026-09-01)** — `pitfalls retire`
+  removes `source: live` entries that have not been seen within a retention
+  window, and **names every one it removed**.
+
+  Built before anything produces a live entry, deliberately. Every other S156
+  slice *adds* to the corpus; this is the only thing that can take entries out,
+  and building the inflow first is how a corpus becomes something nobody dares
+  prune. The plan flagged it as a hard prerequisite and nothing was scheduled for
+  it.
+
+  Why live entries decay and the others do not: learning used to be **bounded** —
+  a run emits at most `repair_iterations_max` failures, and a scenario that stops
+  failing stops emitting. Live observation removed that bound. And a stale pitfall
+  is not inert: it steers generation away from something no longer broken, making
+  every future generation worse **silently**.
+
+  Three refusals, each guarding against deleting learning on weak evidence:
+
+  - **No timestamp is never retired.** Absence means nobody recorded when the rule
+    was last true — not evidence that it stopped being true. An unparseable value
+    counts as absent too, because zero would make every malformed entry infinitely
+    stale.
+  - **Retirement is exclusive at the boundary**, so a 14-day threshold does not
+    delete something last seen 14 days ago to the second.
+  - **A non-positive window is refused on both entry points** — a mistyped flag
+    would otherwise empty the corpus in one command, and a dry-run that accepts
+    what the real run rejects teaches the wrong thing about what is safe to type.
+
+  **Pass 59**: `live` was added as a persisted value while two ratchets still
+  fenced the corpus to `descriptive`/`fix`/`avoid`, so the first live entry would
+  have failed CI with the blame pointing at the entry rather than the ratchet.
+  Both updated. Sweeping for the same class then found what the finding did not:
+  `pitfall-merge` preserves `--keep avoid` across a sweep, so **a sweep would have
+  silently deleted every live entry** — the exact thing this slice exists to
+  prevent. Now `avoid,live`.
+
+  **Pass 60** then caught the incomplete half of that: preserving live entries
+  through a sweep preserved the *entries* but not their *freshness*, so a rule
+  re-observed during a sweep kept the older timestamp — retention silently
+  reverting to *first observed* and retiring a rule that was still true.
+  `pitfall-merge` carries forward a newer `last_seen` now and reports
+  `refreshed=N`. **Preserving a record is not the same as preserving what the
+  record says.**
+
+  **Pass 61**: the command was wired through the full runtime, which builds the
+  Claude transport — so corpus maintenance would fail because the *agent* was
+  unconfigured, on exactly the machine doing housekeeping.
+  `withRuntimeNoGenerator` keeps the logging and substitutes a generator that
+  **refuses**, since this command must never generate.
+
+  **Pass 62**: the `<cloud>` argument went into `filepath.Join` unvalidated, so
+  `retire ../../x` would have **rewritten** a file outside the corpus.
+  `livestore.validateID` already guards deployment ids against exactly that;
+  `assertCloudName` now does the same on all three entry points.
+
+  Across S156a's four passes, **three findings were mechanisms that already
+  existed in this repository** — the source ratchets, the sweep's preservation
+  rule, the path guard. Slice size is not the whole story: the other half is that
+  new code touching an existing mechanism should start by finding every place that
+  mechanism is already enforced. Adding `LiveSource` was three lines; the work was
+  the four places that had to learn about it.
+
+  **Pass 63**: the refresh crossed source boundaries. `entryKey` ignores `source`,
+  so a live timestamp could land on a `descriptive` entry — attaching a lifetime
+  to a source that has none, while the live record vanished as a duplicate. Now
+  like-with-like.
+
+  Passes 59, 60 and 63 all landed on the same **fifteen lines** of merge code,
+  each fix correct and each too narrow. What S156a actually teaches is not about
+  slice size, since this slice is small: **a change to a data model lands in every
+  place that reads it**, and the reliable way to find those is to enumerate the
+  readers before the first edit rather than after each review.
+
+  **Pass 64**: the sweep parses `kept_new` into `AVOID_EMISSIONS`, a ratchet on
+  whether the avoid extractor still works — so preserving live entries could have
+  made a sweep with **zero** avoid pitfalls report a healthy number. `pitfall-merge`
+  prints per-source counts now and the sweep ratchets on `kept_avoid`.
+
+  Five passes, five findings, all downstream of adding **one constant**. The
+  places that had to learn about `live`: two corpus ratchets, the sweep's
+  preservation list, the merge's freshness handling, the merge's source
+  semantics, the metric reading the merge, and the new command's path guard.
+
+  **Pass 66 reversed pass 63.** Skipping a source-mismatched duplicate preserved
+  the old dedup and silently dropped the *live* entry whenever an older
+  `descriptive` rule shared its `(resource, rule)` — losing the `last_seen` that
+  retirement runs on. `mergeKey` includes the source for `live` only: dropping a
+  duplicate `avoid` loses a rule the corpus already states in other words;
+  dropping a duplicate `live` loses information nothing can rebuild.
+
+  **Pass 65 was declined** — the first decline in the slice. The sweep omits
+  genesys from its pitfall handling, and so do all three ratchets, consistently
+  and since long before this arc; `LiveSource` neither created that gap nor widens
+  it. Bringing genesys in means deciding whether it joins the ratchets and what
+  `AVOID_EMISSIONS` means for a cloud with no avoid entries — its own scope, and
+  folding it in is how a small slice becomes S155b. Recorded in the plan as a
+  prerequisite for **S156c**, the first slice that will actually produce live
+  entries.
+
+  `--dry-run` and the real thing share one rule by construction: a dry-run that
+  can disagree with the real thing is worse than no dry-run. And `TouchLivePitfall`
+  refreshes rather than appends, which is what makes retention mean *last
+  observed* instead of *first observed*.
+
 - ✅ **S155b canary: the thesis, demonstrated on real infrastructure (2026-09-01)** —
   deployed v1, confirmed the service was serving `nginx:1.27`, upgraded to 1.28,
   and **`sandbox_deploy/apply` passed while `upgrade_verify` failed.** Confirmed

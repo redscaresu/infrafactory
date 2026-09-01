@@ -17,6 +17,15 @@ type PitfallEntry struct {
 	Rule           string `yaml:"rule"`
 	Source         string `yaml:"source"`
 	DiscoveredFrom string `yaml:"discovered_from,omitempty"`
+
+	// LastSeen is when the signal behind this rule was last observed,
+	// RFC3339. Only `source: live` entries carry it, and only they are
+	// retired for going stale (S156a).
+	//
+	// A rule extracted from a reproducible apply failure does not stop
+	// being true because nobody hit it lately; a rule learned from a
+	// service that was running does, once that service is fixed.
+	LastSeen string `yaml:"last_seen,omitempty"`
 }
 
 // PitfallsFile represents the YAML structure of a pitfalls file.
