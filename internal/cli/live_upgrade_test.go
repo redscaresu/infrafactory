@@ -605,3 +605,35 @@ func TestUpgradeDoesNotResurrectARecordTornDownWhileApplying(t *testing.T) {
 	assert.Contains(t, out.String(), "was torn down while this upgrade was applying")
 	assert.Contains(t, out.String(), "check project")
 }
+
+// An apply takes minutes, and `live observe` may append observations
+// during it. Writing back the copy loaded before the apply discards them
+// -- which does not corrupt the record, it quietly weakens the learning
+// signal S156's promotion gate counts.
+func TestUpgradeKeepsObservationsRecordedWhileItWasApplying(t *testing.T) {
+	sandboxCredsForTest(t)
+	probe := &stagingVersionProbe{running: "nginx/1.27.4"}
+	deploy := &fakeSandboxDeployHarness{}
+	rt, store := upgradeRuntime(t, probe, deploy)
+	d := upgradeableDeployment(t, store, "dep-observed", "1.27")
+
+	// An observation lands mid-apply, exactly as a cron'd observe would.
+	deploy.onRun = func() {
+		probe.running = "nginx/1.28.0"
+		concurrent, err := store.Get(d.ID)
+		require.NoError(t, err)
+		concurrent.RecordObservation(livestore.Observation{
+			At: time.Now(), Status: livestore.ObservationHealthy,
+		})
+		require.NoError(t, store.Put(concurrent))
+	}
+
+	require.NoError(t, runUpgrade(t, rt, d.ID, &strings.Builder{},
+		"--from", newHCLDir(t), "--tag", "1.28"))
+
+	got, err := store.Get(d.ID)
+	require.NoError(t, err)
+	assert.Len(t, got.Observations, 1, "the concurrent observation survives the upgrade's write")
+	assert.Equal(t, "1.28", got.Tag, "and the upgrade's own fields still land")
+	assert.False(t, got.UpgradedAt.IsZero())
+}

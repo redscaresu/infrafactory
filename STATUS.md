@@ -82,7 +82,14 @@ Last updated: 2026-08-31
   because an upgrade holds its record across a real apply — minutes, not the
   microseconds a probe takes.
 
-  **The shape of this slice**: seven passes, thirteen findings, and ten of them are
+  Pass 57: the pass-56 re-read was used for the released check and then
+  **discarded**, writing back the stale copy — so observations `live observe`
+  appended during a minutes-long apply were silently dropped. Those are the input
+  S156's promotion gate counts, so it weakens the learning signal rather than
+  breaking anything visibly. Now an allow-list merge of the three fields an
+  upgrade owns onto the fresh record.
+
+  **The shape of this slice**: eight passes, fourteen findings, and ten of them are
   one incomplete answer rather than eleven mistakes — "did anything reach the
   cloud?" answered four times, "which project do we trust?" three, and three
   separate fixes that **already existed elsewhere in the codebase** and were not

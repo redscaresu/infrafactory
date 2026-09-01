@@ -275,7 +275,7 @@ func runLiveUpgradeCommand(cmd *cobra.Command, args []string, runtime *CommandRu
 				"%s was torn down while this upgrade was applying. Whatever the apply created is NOT tracked by "+
 					"that record -- check project %s by hand", d.ID, d.ProjectID),
 		})
-	} else if err := store.Put(d); err != nil {
+	} else if err := store.Put(mergeUpgradeOntoFresh(fresh, d)); err != nil {
 		failures = append(failures, FailureSummary{
 			Layer: "live", Stage: "upgrade", Check: "record",
 			Command: "live upgrade " + d.ID,
@@ -611,4 +611,24 @@ func assertRunProjectOurs(ctx context.Context, runtime *CommandRuntime, projectI
 			projectID, provenance.Name, provenance.Description)
 	}
 	return nil
+}
+
+// mergeUpgradeOntoFresh applies the fields an upgrade owns onto the
+// record as it stands NOW, rather than writing back the copy this
+// command loaded before the apply.
+//
+// Re-reading only to check whether the record was released was half the
+// fix: `live observe` may have appended observations during an apply that
+// takes minutes, and overwriting with the stale copy silently discards
+// them. Those observations are the input S156's promotion gate counts, so
+// losing them does not corrupt the record -- it quietly weakens the
+// learning signal, which is harder to notice.
+//
+// An allow-list of three fields, not a blanket copy: anything an upgrade
+// does not own belongs to whoever wrote it last.
+func mergeUpgradeOntoFresh(fresh, upgraded livestore.Deployment) livestore.Deployment {
+	fresh.Tag = upgraded.Tag
+	fresh.UpgradedAt = upgraded.UpgradedAt
+	fresh.Address = upgraded.Address
+	return fresh
 }
