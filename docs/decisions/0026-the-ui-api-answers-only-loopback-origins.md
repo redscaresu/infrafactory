@@ -140,3 +140,55 @@ used the checkbox now gets no real-cloud apply until they restart with
 `--allow-layer3`. That is the intended behaviour change and the whole point of
 the slice: it makes the moment of authorisation explicit and attributable to a
 person, rather than implicit in a file.
+
+## Amendment, 2026-09-02 (S159b): destructive actions are start-time too
+
+`DELETE /api/deployments/{id}` and `POST /api/deployments/reap` exist only when
+the server was started with `infrafactory ui --allow-teardown`. Without it the
+actor is nil and the routes answer **404** — the capability does not exist, so
+there is nothing to bypass.
+
+That is the same rule as `--allow-layer3`, applied to the other direction of
+harm. Teardown is not safe merely because it removes rather than creates: it is
+irreversible, it acts on real infrastructure, and a demo torn down mid-talk costs
+something even though the bill goes down.
+
+**404, not 501.** Announcing "not implemented" would advertise a capability the
+operator declined.
+
+**And it fails loudly when asked for.** If `--allow-teardown` is given and the
+teardown runtime cannot be built, the server refuses to start rather than coming
+up without it. A UI silently missing a capability the operator requested is a
+guard that stops without saying why (ADR-0023).
+
+### The guards are not re-expressed at the seam
+
+`LiveActions` calls `tearDownDeployment` — the same function the CLI calls — and
+does nothing but translate its staged output. Teardown refuses unless a run-owned
+marker *and* the API's own provenance both say the project is infrafactory's, and
+it declines to mark a deployment released when its state has vanished, because
+that would retire the only record saying its resources may still exist. None of
+that is restated here. **A second implementation of a guard is a second thing
+that can be wrong.**
+
+### A partial teardown is a 409
+
+ADR-0024's rule is that a teardown which cannot *prove* the account clean must
+not report success. `ActionResult.Clean` is its own field rather than "no
+failures", and a result carrying failures answers 409 — a page rendering a green
+tick over *"the state file has vanished and the resources may still be running"*
+is exactly the false green this project exists to avoid.
+
+### A destroy is not cancellable by the caller
+
+`r.Context()` is cancelled when the client disconnects — closing the tab,
+navigating away, a flaky wifi hop. A teardown cancelled halfway has already
+deleted some resources and not others, and the live record then describes neither
+the old state nor the new one.
+
+So the destructive handlers run on a context detached from the request, with a
+generous timeout as a backstop against a hung provider call rather than as a
+deadline. This is the same rule `ensureRunProject` applies to creating a run's
+project: **once an operation begins changing real infrastructure, the caller
+going away must not stop it.** Whoever asked can leave; the destroy finishes and
+the record ends up describing what is actually there.

@@ -20,18 +20,23 @@ import (
 const uiAssetsMissingMessage = "UI assets not embedded. Run Vite dev server on :5173 or build with: make build"
 
 type ServerConfig struct {
-	Addr          string
-	Assets        fs.FS
-	Config        config.Config
-	Store         *runstore.FilesystemStore
-	MockState     MockStateReader
-	FakegcpState  MockStateReader
-	Formatter     IaCFormatter
-	Hub           *Hub
-	SchemaPath    string
-	RunStarter    RunStarter
-	Deployments   DeploymentLister
-	RuntimeErrors chan error
+	Addr         string
+	Assets       fs.FS
+	Config       config.Config
+	Store        *runstore.FilesystemStore
+	MockState    MockStateReader
+	FakegcpState MockStateReader
+	Formatter    IaCFormatter
+	Hub          *Hub
+	SchemaPath   string
+	RunStarter   RunStarter
+	Deployments  DeploymentLister
+
+	// DeploymentActor is nil unless the operator started the server with
+	// --allow-teardown. Nil means the destructive endpoints do not
+	// exist, rather than existing and refusing.
+	DeploymentActor DeploymentActor
+	RuntimeErrors   chan error
 }
 
 type StartRunRequest struct {
@@ -69,8 +74,10 @@ func NewServer(cfg ServerConfig) *http.Server {
 		schemaPath:   cfg.SchemaPath,
 		runStarter:   cfg.RunStarter,
 		deployments:  cfg.Deployments,
-		sessionID:    fmt.Sprintf("%d-%d", os.Getpid(), time.Now().UTC().UnixNano()),
-		startedAt:    time.Now().UTC(),
+
+		deploymentActor: cfg.DeploymentActor,
+		sessionID:       fmt.Sprintf("%d-%d", os.Getpid(), time.Now().UTC().UnixNano()),
+		startedAt:       time.Now().UTC(),
 	}
 	if state.hub == nil {
 		state.hub = NewHub()
@@ -104,6 +111,7 @@ func NewServer(cfg ServerConfig) *http.Server {
 	mux.HandleFunc("/api/pitfalls", pitfallsHandler(state))
 	mux.HandleFunc("/api/pitfalls/", pitfallsHandler(state))
 	mux.HandleFunc("/api/deployments", deploymentsHandler(state))
+	mux.HandleFunc("/api/deployments/", deploymentActionHandler(state))
 	mux.HandleFunc("/api/ws", websocketHandler(state))
 
 	mux.HandleFunc("/api", notImplementedAPIHandler)
@@ -133,8 +141,10 @@ type serverState struct {
 	schemaPath   string
 	runStarter   RunStarter
 	deployments  DeploymentLister
-	sessionID    string
-	startedAt    time.Time
+
+	deploymentActor DeploymentActor
+	sessionID       string
+	startedAt       time.Time
 }
 
 // mockStateForCloud picks the mock-state reader appropriate for the

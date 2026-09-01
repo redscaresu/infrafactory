@@ -1,8 +1,12 @@
 package api
 
 import (
+	"context"
+	"errors"
 	"net/http"
+	"os"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/redscaresu/infrafactory/internal/livestore"
@@ -133,4 +137,120 @@ func deploymentsHandler(state *serverState) http.HandlerFunc {
 
 		writeJSON(w, http.StatusOK, payload)
 	}
+}
+
+// deploymentActionHandler serves the destructive half of live
+// management: `DELETE /api/deployments/{id}` and
+// `POST /api/deployments/reap`.
+//
+// # Why it can be absent
+//
+// A nil actor is a 404, not a 501, and the difference is deliberate. The
+// server is started with `--allow-teardown` or it is not, and when it is
+// not there is genuinely no such endpoint -- announcing "not
+// implemented" would advertise a capability the operator declined.
+//
+// The gate is start-time for the same reason S160b moved real-cloud
+// apply out of the request body: a REQUEST must not be able to talk this
+// server into destroying infrastructure. The origin guard (S160a) stops
+// a page the server did not serve from reaching here at all, and this
+// stops the capability existing unless a person asked for it in the
+// shell. Two properties, and the second survives a bug in the first.
+//
+// Teardown is not "safe because it only removes things". It is
+// irreversible, it acts on real infrastructure, and a demo torn down
+// mid-talk is a real cost even though the bill goes down.
+func deploymentActionHandler(state *serverState) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if state.deploymentActor == nil {
+			writeJSONError(w, http.StatusNotFound,
+				"this server was not started with --allow-teardown, so it cannot destroy deployments")
+			return
+		}
+
+		tail := strings.TrimPrefix(r.URL.Path, "/api/deployments/")
+		if tail == "reap" {
+			if r.Method != http.MethodPost {
+				writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+				return
+			}
+			ctx, cancel := destructiveContext(r)
+			defer cancel()
+			result, err := state.deploymentActor.Reap(ctx)
+			writeActionResult(w, result, err)
+			return
+		}
+
+		if r.Method != http.MethodDelete {
+			writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		// One segment, and no separators. A deployment id addresses a
+		// file in the live store, so anything that could climb out of it
+		// is refused rather than cleaned up: `livestore.validateID`
+		// guards the store itself, and this refuses before the store is
+		// asked, so a traversal attempt is never a lookup.
+		if tail == "" || strings.ContainsAny(tail, "/\\.") {
+			writeJSONError(w, http.StatusBadRequest, "invalid deployment id")
+			return
+		}
+
+		ctx, cancel := destructiveContext(r)
+		defer cancel()
+
+		result, err := state.deploymentActor.Teardown(ctx, tail)
+		if errors.Is(err, os.ErrNotExist) {
+			writeJSONError(w, http.StatusNotFound, "no such deployment")
+			return
+		}
+		writeActionResult(w, result, err)
+	}
+}
+
+// writeActionResult reports what happened, and refuses to call a
+// partial teardown a success.
+//
+// A result carrying failures is 409, not 200: ADR-0024's rule is that a
+// teardown which cannot PROVE the account clean must not report success,
+// and a page rendering a green tick over "the state file has vanished
+// and the resources may still be running" is exactly the false green
+// this project exists to avoid.
+func writeActionResult(w http.ResponseWriter, result ActionResult, err error) {
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	status := http.StatusOK
+	if !result.Clean {
+		status = http.StatusConflict
+	}
+	writeJSON(w, status, result)
+}
+
+// destructiveTimeout bounds an action that is deliberately not
+// cancellable by its caller.
+//
+// Generous rather than tight: a destroy plus an orphan sweep plus the
+// project delete has taken minutes against real Scaleway, and cutting
+// one short is the failure this timeout exists to avoid, not the one it
+// exists to cause. It is a backstop against a hung provider call, not a
+// deadline.
+const destructiveTimeout = 30 * time.Minute
+
+// destructiveContext detaches an action from the HTTP request.
+//
+// `r.Context()` is cancelled when the client disconnects -- closing the
+// tab, navigating away, a flaky wifi hop. A teardown cancelled halfway
+// has already deleted some resources and not others, and the live record
+// then describes neither the old state nor the new one.
+//
+// The same rule `ensureRunProject` applies to creating a run's project:
+// once an operation begins changing real infrastructure, the caller
+// going away must not stop it. Whoever asked can leave; the destroy
+// finishes and the record ends up describing what is actually there.
+//
+// The request's VALUES are kept (tracing, deadlines set by middleware
+// upstream) while its cancellation is dropped.
+func destructiveContext(r *http.Request) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(r.Context()), destructiveTimeout)
 }

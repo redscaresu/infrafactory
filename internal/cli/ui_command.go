@@ -26,6 +26,7 @@ import (
 func newUICmd(assets fs.FS) *cobra.Command {
 	var addr string
 	var allowLayer3 bool
+	var allowTeardown bool
 
 	cmd := &cobra.Command{
 		Use:   "ui",
@@ -54,6 +55,11 @@ func newUICmd(assets fs.FS) *cobra.Command {
 			// start a UI.
 			cfg.Validation.Layers.SandboxDeploy.Enabled = allowLayer3
 
+			actor, err := teardownActor(cmd, allowTeardown)
+			if err != nil {
+				return formatCommandError("ui", err)
+			}
+
 			hub := api.NewHub()
 			go hub.Run(cmd.Context())
 			starter := &uiRunStarter{
@@ -64,16 +70,18 @@ func newUICmd(assets fs.FS) *cobra.Command {
 			}
 
 			srv := api.NewServer(api.ServerConfig{
-				Addr:       addr,
-				Assets:     assets,
-				Config:     cfg,
-				Store:      runstore.NewFilesystemStore(resolveRunStoreRoot()),
-				Hub:        hub,
-				RunStarter: starter,
-				// Read-only. Deploy, teardown and reap carry guards that
-				// live in this package and are not reachable from the API
-				// without a seam that does not exist yet (S159a).
+				Addr:        addr,
+				Assets:      assets,
+				Config:      cfg,
+				Store:       runstore.NewFilesystemStore(resolveRunStoreRoot()),
+				Hub:         hub,
+				RunStarter:  starter,
 				Deployments: livestore.NewFilesystemStore(resolveLiveStoreRoot()),
+				// Nil unless the operator asked. A server that cannot
+				// destroy infrastructure cannot be talked into
+				// destroying it, and that property survives a bug in
+				// the origin guard (S159b, ADR-0026).
+				DeploymentActor: actor,
 			})
 
 			errCh := make(chan error, 1)
@@ -104,8 +112,49 @@ func newUICmd(assets fs.FS) *cobra.Command {
 	cmd.Flags().StringVar(&addr, "addr", "127.0.0.1:4173", "Address to bind UI server")
 	cmd.Flags().BoolVar(&allowLayer3, "allow-layer3", false,
 		"Permit runs started from this UI to apply to real infrastructure and spend money")
+	cmd.Flags().BoolVar(&allowTeardown, "allow-teardown", false,
+		"Permit this UI to destroy live deployments (irreversible)")
 
 	return cmd
+}
+
+// teardownActor builds the destructive actor, or nil when the operator
+// did not ask for one.
+//
+// Returning nil rather than a refusing implementation is the point: the
+// endpoints do not exist, so there is nothing to bypass.
+//
+// It returns an ERROR rather than nil when the operator DID ask and the
+// runtime could not be built. Starting anyway would give them a UI that
+// silently lacks the capability they requested -- and a guard that stops
+// without saying why is half a guard (ADR-0023).
+func teardownActor(cmd *cobra.Command, allowTeardown bool) (api.DeploymentActor, error) {
+	if !allowTeardown {
+		return nil, nil
+	}
+	// Built WITHOUT a generator, for the same reason `pitfalls retire`
+	// is: teardown never generates, and `buildRuntime` constructs the
+	// LLM transport by default -- a construction that fails on a missing
+	// `claude` binary or an unreadable prompts directory.
+	//
+	// Requiring LLM credentials in order to DESTROY infrastructure would
+	// make the recovery capability unavailable in exactly the situation
+	// that needs it: real resources running on a machine where the
+	// generator is not configured. Nobody asked for that dependency.
+	//
+	// The stub refuses rather than returning nothing, so a call would be
+	// a loud bug rather than a silent no-op.
+	opts := defaultRuntimeOptions()
+	opts.deps.Generator = generator.SeedGeneratorFunc(
+		func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
+			return nil, errors.New("the UI teardown path does not generate")
+		})
+
+	runtime, err := buildRuntime(cmd, opts)
+	if err != nil {
+		return nil, fmt.Errorf("--allow-teardown was requested but the teardown path could not be built: %w", err)
+	}
+	return NewLiveActions(runtime), nil
 }
 
 type uiRunStarter struct {
