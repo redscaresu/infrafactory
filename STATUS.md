@@ -69,6 +69,12 @@ Last updated: 2026-08-31
   first live write could not create its own corpus, because `MkdirAll` was an
   obligation on callers rather than on the writer that needs the directory.
 
+  **Converged on pass 87.** Three of the four passes were one question at
+  widening scope — *what is the identity of a live lesson?* — and each answer was
+  correct and incomplete in a way visible from the one before. What ended it was
+  not a better answer but a structural move: stop restating the identity at the
+  persistence layer and derive it from the gate that defines it.
+
   **Every entry is stamped**, and that is a hard coupling rather than a nicety:
   S156a never retires an entry without `last_seen`, so an unstamped live entry
   would be **immortal** — the inflow quietly undoing the slice built to bound it.
