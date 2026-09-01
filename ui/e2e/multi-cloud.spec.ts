@@ -27,7 +27,7 @@ test.describe('Multi-cloud UI', () => {
     await page.goto('/scenarios/training/web-app-paris');
 
     await expect(page.getByTestId('scenario-cloud-badge')).toHaveText('Scaleway');
-    await expect(page.getByTestId('scenario-layer3-label')).toHaveText('Layer 3 (Real Scaleway)');
+    await expect(page.getByTestId('scenario-layer3-label')).toContainText('Layer 3 (Real Scaleway)');
   });
 
   test('gcp scenario shows GCP badge and GCP Layer 3 label', async ({ page }) => {
@@ -35,7 +35,7 @@ test.describe('Multi-cloud UI', () => {
     await page.goto('/scenarios/training/gcp-gke-cluster');
 
     await expect(page.getByTestId('scenario-cloud-badge')).toHaveText('GCP');
-    await expect(page.getByTestId('scenario-layer3-label')).toHaveText('Layer 3 (Real GCP)');
+    await expect(page.getByTestId('scenario-layer3-label')).toContainText('Layer 3 (Real GCP)');
   });
 
   test('mock-provider status pill reflects the scenario cloud', async ({ page }) => {

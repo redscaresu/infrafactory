@@ -17,7 +17,9 @@
   let layer3Error = "";
   let clean = false;
   let noDestroy = false;
-  let layer3Enabled = false;
+  // Reflects what the SERVER decided at start time. This page reports it;
+  // it cannot change it (ADR-0026).
+  $: layer3Enabled = layer3Status?.server_allows_layer3 === true;
   let validationErrors: { path: string; message: string }[] = [];
   let validationState: "idle" | "checking" | "valid" | "invalid" = "idle";
   let validationTimer: ReturnType<typeof setTimeout> | null = null;
@@ -109,9 +111,6 @@
     layer3Error = "";
     try {
       layer3Status = await api.getScenarioLayer3Status(scenarioPath);
-      if (layer3Status?.config_default_enabled) {
-        layer3Enabled = true;
-      }
     } catch (err) {
       layer3Status = null;
       layer3Error = err instanceof Error ? err.message : "Layer 3 status lookup failed";
@@ -136,7 +135,7 @@
     running = true;
     status = "Starting run...";
     try {
-      const resp = await api.startRun(detail.name, normalizeRunOptions({ clean, no_destroy: noDestroy, layer3_enabled: layer3Enabled }));
+      const resp = await api.startRun(detail.name, normalizeRunOptions({ clean, no_destroy: noDestroy }));
       status = `Run started: ${resp.run_id}`;
       window.location.href = encodeLiveURL(detail.name, resp.run_id);
     } catch (err) {
@@ -236,10 +235,20 @@
     </p>
     <div class="mt-4 rounded border border-slate-200 bg-slate-50 px-3 py-3 text-xs text-slate-700">
       <div class="flex flex-wrap items-center gap-3">
-        <label class="flex items-center gap-2 rounded border border-slate-300 bg-white px-3 py-2 text-xs text-slate-800">
-          <input type="checkbox" bind:checked={layer3Enabled} />
-          <span data-testid="scenario-layer3-label">Layer 3 (Real {layer3CloudLabel})</span>
-        </label>
+        <!-- Deliberately NOT a checkbox. Real-cloud apply is decided when
+             the server starts, by the person in the shell that holds the
+             credentials, and a control here would imply this page can
+             change it. It reports instead. -->
+        <span
+          data-testid="scenario-layer3-label"
+          class={`rounded border px-3 py-2 text-xs font-semibold ${
+            layer3Enabled
+              ? "border-sky-300 bg-sky-50 text-sky-900"
+              : "border-slate-300 bg-white text-slate-800"
+          }`}
+        >
+          Layer 3 (Real {layer3CloudLabel}): {layer3Enabled ? "enabled by this server" : "off"}
+        </span>
         <span class={`rounded-full px-2 py-1 font-semibold uppercase tracking-[0.16em] ${layer3Status?.ready ? "bg-emerald-100 text-emerald-900" : "bg-rose-100 text-rose-900"}`}>
           {layer3Status?.ready ? "credentials ready" : "credentials missing"}
         </span>
@@ -249,6 +258,12 @@
            internal/api/handlers_scenarios.go), so rendering
            missing_credentials again duplicated the same line verbatim. -->
       <p class="mt-2">{layer3Status?.detail || "Layer 3 status unavailable."}</p>
+      {#if layer3Status && !layer3Enabled}
+        <p class="mt-2" data-testid="scenario-layer3-how-to-enable">
+          Runs from this UI will not touch real infrastructure. To allow it,
+          restart the server with <code>infrafactory ui --allow-layer3</code>.
+        </p>
+      {/if}
       {#if layer3Error}
         <p class="mt-2 text-red-700">{layer3Error}</p>
       {/if}

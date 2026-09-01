@@ -90,3 +90,53 @@ public→private requests would stop some of these, which is why this was
 exploitable-in-principle rather than exploitable-everywhere. It is neither
 universal nor something this repository controls, and a mitigation you do not own
 is not a control.
+
+## Amendment, 2026-09-01 (S160b): real cloud is decided at start time
+
+The origin guard closes the drive-by. It does not close the separate idea that a
+**request** can escalate the server into spending money, and those are different
+properties: the second survives a bug in the first.
+
+`layer3_enabled` is removed from `StartRunRequest`. Real-cloud apply for runs
+started from the UI is now settled by `infrafactory ui --allow-layer3`, read once
+when the server starts — a decision made in the shell that already holds the
+credentials, by the person who typed the command.
+
+### The config file does not get a vote either
+
+This is the stricter half, and it has a live failure mode rather than a
+theoretical one.
+
+The per-run configuration is **re-read from disk on every run**, which is what
+lets an operator edit `infrafactory.yaml` without restarting the UI. So a file
+carrying `sandbox_deploy.enabled: true` would walk real-cloud apply straight back
+in on a server started *without* `--allow-layer3` — silently, and on every run
+after it. `uiRunStarter.configLoader` re-applies the server's decision over the
+freshly loaded file for exactly this reason.
+
+`sandbox_deploy.enabled` is a checked-in setting that says what this repository
+does when somebody runs a scenario deliberately. It should not also mean "and the
+web server may spend money on its own", because nobody re-reads a config file at
+the moment they start a UI.
+
+### What the UI shows instead of a checkbox
+
+The scenario page had a Layer 3 checkbox. It now reports what the server decided
+and says how to change it, because a control implies this page can change
+something it cannot. The status field was renamed `config_default_enabled` →
+`server_allows_layer3`: the old name described a *default* a client could
+override, and no client can. A field named for an overridable default, serving a
+value nothing can override, is a lie the next reader has to discover for
+themselves.
+
+`run.json` keeps its own `layer3_enabled` field. That is a **record of what a run
+did**, not a request for what it should do — the same word for two different
+things, and only the request side is removed.
+
+### Consequence
+
+An operator who ran the UI with `sandbox_deploy.enabled: true` in their config and
+used the checkbox now gets no real-cloud apply until they restart with
+`--allow-layer3`. That is the intended behaviour change and the whole point of
+the slice: it makes the moment of authorisation explicit and attributable to a
+person, rather than implicit in a file.

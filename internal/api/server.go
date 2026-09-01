@@ -34,11 +34,10 @@ type ServerConfig struct {
 }
 
 type StartRunRequest struct {
-	ScenarioName  string `json:"-"`
-	ScenarioPath  string `json:"-"`
-	Clean         bool   `json:"clean"`
-	NoDestroy     bool   `json:"no_destroy"`
-	Layer3Enabled *bool  `json:"layer3_enabled,omitempty"`
+	ScenarioName string `json:"-"`
+	ScenarioPath string `json:"-"`
+	Clean        bool   `json:"clean"`
+	NoDestroy    bool   `json:"no_destroy"`
 }
 
 type RunStarter interface {
