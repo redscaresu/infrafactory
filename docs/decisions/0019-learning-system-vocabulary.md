@@ -178,3 +178,73 @@ filter would discard evidence that was sufficient on its own merely because
 another cloud observed the same words, and — in the other direction — would let a
 breadth threshold count deployments across clouds, promoting a coincidence of
 wording that is a fact about neither.
+
+## Amendment, 2026-09-01 (S156d): a live entry may be prescriptive
+
+`source: live` says where a lesson came from and how long it may live. It does
+**not** say what shape the rule takes.
+
+S156c could only write descriptive rules, because a single live failure has no
+"next iteration that fixed it" to diff against. An **upgrade** supplies one:
+S155b keeps the previous configuration in `.infrafactory-previous/`, and
+`ExtractFixPitfall` turns a before/after pair into a rule that says what to do.
+
+Such an entry stays `source: live` rather than becoming `fix`, and the reason is
+retention. `fix` entries are permanent; `live` entries are retirable by S156a.
+A rule extracted from a running deployment is prescriptive in **shape** and live
+in **provenance** — it describes a service that is running now, and what is true
+of a running service stops being true. Tagging it `fix` would make it immortal
+and break S156c's rule that nothing is written which cannot later be retired.
+
+So the source tag is about **provenance and retention**, and the rule text is
+about shape. They are separate axes, and this is where that becomes visible.
+
+### The apply cannot tell a fix from a version bump; the observations can
+
+The risk this slice was planned against was that an upgrade diffs two
+configurations that **both applied successfully**, which is not the shape
+`ExtractFixPitfall` was built for.
+
+That is true, and the resolution is that the apply is not the discriminator.
+`livestore.Repairs` promotes an upgrade only when the service was observed
+failing **before** it and healthy **after** — which is precisely "this failed,
+then this passed", measured against the running service rather than against
+terraform. Terraform reported success both times, which is the entire reason live
+observation exists.
+
+Healthy-but-on-the-wrong-version does not count as "after". A service answering
+fine while running something other than what was deployed is close to evidence
+the upgrade did not take at all.
+
+### Attribution comes from the diff, because a live failure names nothing
+
+A run-loop failure names a resource address. A live health probe says
+`health path http://… returned HTTP 503` and names nothing at all.
+
+The deployment record's `AddressResource` looks like the answer and is not: it is
+where the probe **pointed** — a load balancer IP — not where the fault was, which
+is typically a backend block. Narrowing the diff to its type skips exactly the
+upgrades worth learning from.
+
+So the live path attributes from the diff itself, under the rule the extractor
+already applies to ambiguity: use the change only when **exactly one** resource
+differs between the two configurations. Several is an ordinary upgrade and simply
+carries no attributable remedy; the diff cannot say which change cleared the
+failure, and picking one would be a guess presented as a finding.
+
+### Both prescriptive shapes are tried, and one of them barely fits
+
+A repair is not always an addition: removing something is as much a fix, which is
+what `avoid` entries are for. The live path tries `ExtractFixPitfall` and then
+`ExtractAvoidPitfall`.
+
+The avoid path will rarely fire on a live signal, and the reason is worth
+recording rather than rediscovering. `ExtractAvoidPitfall` attributes strictly —
+the removed attribute's name **must appear in the failure detail**, a rule added
+after a false positive in S63. A provider error names the offending attribute; a
+health probe reporting `returned HTTP 503` names nothing at all.
+
+Loosening that attribution to suit live signals would weaken a guard the **run
+loop** depends on, in service of a different caller. That is not a trade a
+live-learning slice is entitled to make, so the limit stands and is pinned by a
+test rather than left as a surprise.

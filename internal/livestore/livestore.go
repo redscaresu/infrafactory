@@ -85,6 +85,39 @@ type Deployment struct {
 	// configuration. Zero means never.
 	UpgradedAt time.Time `json:"upgraded_at,omitempty"`
 
+	// UpgradeStartedAt is when that upgrade's apply BEGAN.
+	//
+	// The pair brackets a window in which the service is expected to be
+	// disrupted, and without it an upgrade's own downtime is
+	// indistinguishable from the failure it was meant to fix. `live
+	// observe` can run during an apply that takes minutes -- S158's
+	// journey test does exactly that -- and those probes are stamped
+	// before UpgradedAt, because UpgradedAt is written after the apply
+	// returns. Treating a `connection refused` from mid-apply as the
+	// pre-existing failure would teach a remedy for the outage the
+	// upgrade CAUSED (S156d).
+	UpgradeStartedAt time.Time `json:"upgrade_started_at,omitempty"`
+
+	// UpgradeSucceeded records whether that apply COMPLETED, as opposed
+	// to merely having run.
+	//
+	// `live upgrade` updates this record whenever the apply got past
+	// plan, because a failed apply may still have created resources and
+	// a record that ignored it would describe infrastructure that no
+	// longer exists. So `UpgradedAt` being set does not mean the upgrade
+	// worked.
+	//
+	// The distinction matters for S156d. After a partial apply the
+	// running infrastructure is some mixture of the old and new
+	// configurations, so diffing one against the other describes a
+	// change that was never fully made -- and pairing that with "the
+	// service is healthy now" would attribute the recovery to HCL that
+	// was never applied.
+	//
+	// False by default, which declines records written before this
+	// existed. That is the intended direction.
+	UpgradeSucceeded bool `json:"upgrade_succeeded,omitempty"`
+
 	// Cloud is the provider this deployment was applied to, recorded so a
 	// lesson learned from it lands in the right corpus. Taken from the
 	// scenario at deploy time, because that is where it is a fact.

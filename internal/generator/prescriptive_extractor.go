@@ -787,3 +787,53 @@ func firstSentence(detail string) string {
 	}
 	return ""
 }
+
+// ChangedResourceAddresses returns every resource address that differs
+// between two configuration directories: added, modified, or REMOVED.
+//
+// Exported for the live path (S156d), which has an attribution problem
+// the run loop does not. A run-loop failure names a resource address; a
+// live health probe says `health path http://… returned HTTP 503` and
+// names nothing at all. The deployment record's `AddressResource` is not
+// a substitute -- it is where the probe POINTED (a load balancer IP), not
+// where the fault was (a backend block), so narrowing the diff to its
+// type skips exactly the upgrades worth learning from.
+//
+// The caller's rule is the one this file already uses for ambiguity: use
+// the change only when there is exactly one. Several changed resources
+// mean the diff cannot say which cleared the failure, and picking one
+// would be a guess presented as a finding.
+func ChangedResourceAddresses(failedDir, passingDir string) ([]string, error) {
+	failed, err := loadResourceBlocks(failedDir)
+	if err != nil {
+		return nil, fmt.Errorf("read failed dir %q: %w", failedDir, err)
+	}
+	passing, err := loadResourceBlocks(passingDir)
+	if err != nil {
+		return nil, fmt.Errorf("read passing dir %q: %w", passingDir, err)
+	}
+
+	var out []string
+	for addr, p := range passing {
+		f, ok := failed[addr]
+		if !ok || normalizeBody(f.Body) != normalizeBody(p.Body) {
+			out = append(out, addr)
+		}
+	}
+	// Deletions count. An upgrade that REMOVES a resource has changed
+	// the configuration just as much as one that adds a block, and the
+	// removal may well be what cleared the failure -- ADR-0019's `avoid`
+	// entries exist precisely because deletion-as-fix is a real shape.
+	//
+	// Walking only the passing side would report "exactly one changed"
+	// for an upgrade that deleted one resource and modified another,
+	// defeating the caller's ambiguity gate and attributing the fix to
+	// whichever one happened to survive.
+	for addr := range failed {
+		if _, ok := passing[addr]; !ok {
+			out = append(out, addr)
+		}
+	}
+	sort.Strings(out)
+	return out, nil
+}

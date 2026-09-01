@@ -92,6 +92,15 @@ func runLiveLearnCommand(cmd *cobra.Command, _ []string, runtime *CommandRuntime
 		}
 	}
 
+	// The PRESCRIPTIVE half (S156d). Runs over every deployment rather
+	// than per cloud: a repair names its own cloud on the record, so
+	// there is no grouping to get wrong.
+	repairStages, repairFailures, repaired, repairsSeen := learnRepairs(runtime, deployments, dryRun, now)
+	stages = append(stages, repairStages...)
+	failures = append(failures, repairFailures...)
+	written += repaired
+	considered += repairsSeen
+
 	if uncloudedCount > 0 {
 		// Said out loud. The corpus is per-cloud, so a record that names
 		// none cannot be filed anywhere -- but whatever it observed was
