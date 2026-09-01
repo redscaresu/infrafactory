@@ -2,6 +2,33 @@
 
 Last updated: 2026-08-31
 
+## 2026-09-02 — S161: the estate page
+
+`/deployments` renders what is running, built on S159a's read endpoint. It reads;
+it does not act — teardown and reap still need the seam S159b will build.
+
+**The page has one job and it is not layout.** It is that *silence must not look
+like health*, and a blank table cell is the most natural way in the world to
+render "we do not know". So every state says a word: `never observed`,
+`version unchecked`, `version NOT confirmed`, `never` for a last-observed time.
+
+**The row that matters most is green.** A service answering perfectly while
+running something other than the record claims is the most dangerous state this
+system can reach, precisely because every other signal calls it healthy. If this
+page rendered it as a quiet green row, nothing anywhere would flag it —
+`needsAttention` marks it, and both a text test and a **visual** baseline pin it,
+because a regression that made the three states look alike would pass every text
+assertion.
+
+Two failures reported rather than hidden: records the store could not decode
+(they may describe running, billing infrastructure — `live ls` exits non-zero,
+a page has to show it), and a failed read, which keeps the previous rows and says
+so. An empty table would read as "nothing is running", and a failed refresh is
+not evidence the estate is empty.
+
+The summary states what was examined, not only what is wrong — the same reason
+`live reconcile` does.
+
 ## 2026-09-01 — S159a: the live estate, read-only, over the API
 
 S159 as planned bundles a read path, five mutating endpoints and a seam

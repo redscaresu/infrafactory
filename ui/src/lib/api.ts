@@ -5,6 +5,7 @@ import type {
   SavePitfallsResponse,
   ScenarioLayer3StatusResponse,
   ScenarioRunModeResponse,
+  DeploymentsResponse,
   StartRunOptions
 } from "$lib/types";
 
@@ -38,6 +39,7 @@ export const api = {
   getDiagnostics: () => request("/api/diagnostics"),
   getScenario: (path: string) => request(`/api/scenarios/${path}`),
   getScenarioRunMode: (path: string) => request<ScenarioRunModeResponse>(`/api/scenarios/${path}/run-mode`),
+  getDeployments: () => request<DeploymentsResponse>("/api/deployments"),
   getScenarioLayer3Status: (path: string) => request<ScenarioLayer3StatusResponse>(`/api/scenarios/${path}/layer3-status`),
   putScenario: (path: string, rawYAML: string) =>
     request(`/api/scenarios/${path}`, {
