@@ -4,6 +4,41 @@ Last updated: 2026-08-31
 
 ## Current phase
 
+- 🎯 **S156b: the promotion gate — when is an observation a lesson? (2026-09-01)**
+  — `live candidates` reports observations that have **reproduced**, and says
+  what promoted each one and why.
+
+  Reproduced means either **N consecutive probes on one deployment** (persistent,
+  not a blip) or **≥2 distinct deployments** (a property of the shape, not of one
+  machine). A single 502 never becomes a pitfall.
+
+  It deliberately produces **candidates, not pitfalls**. Turning one into a rule
+  is S156c, and keeping them apart means the gate can be judged on whether it
+  promotes the right things without also arguing about rule text — the harder and
+  far more subjective half.
+
+  Four refusals, each a way the gate could be wrong rather than merely incomplete:
+
+  - **A recovery breaks the run.** A healthy probe between two 503s means the
+    service recovered — precisely the blip this exists to reject. Four failures
+    with a recovery in the middle promote nothing.
+  - **A different failure breaks it too**, because only one thing can be true of
+    a service at a given probe.
+  - **`unhealthy` and `unreachable` never merge.** One of each is not two of
+    either.
+  - **A zero rule promotes nothing.** A misconfigured gate that opens is worse
+    than one that closes.
+
+  **Attribution travels with the candidate rather than filtering it.** Something
+  was broken either way, but a lesson blamed on a version nobody verified is a
+  falsehood (S155a) — so an unattributable candidate is reported as
+  *"version UNCONFIRMED, so nothing may be blamed on a tag"* and the extractor
+  decides.
+
+  Released deployments still count: their observations happened while they were
+  live, and dropping them would discard exactly the reproduced evidence the gate
+  looks for.
+
 - 🔁 **S158: the live lifecycle has a journey test (2026-09-01)** — deploy → ls →
   observe → upgrade (with an observation landing *during* the apply) → observe →
   teardown → ls → observe, through the **real commands and the real

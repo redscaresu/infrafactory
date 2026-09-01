@@ -88,3 +88,35 @@ maintenance command — four places, found across four review passes, three of t
 mechanisms that already existed in the repository. **A vocabulary is only as real
 as the things that enforce it**, and the next value added here should start by
 enumerating them rather than by adding the constant.
+
+## Amendment, 2026-09-01 (S156b): reproduction is the gate, not severity or provenance
+
+An observation becomes a candidate lesson when it has **reproduced** — N
+consecutive probes on one deployment, or ≥2 distinct deployments. Not when it is
+severe, and not when Terraform also failed.
+
+That last one is worth stating because it is the intuitive answer and it is
+wrong. A Terraform failure is already learned from by the run loop; live
+observation exists for the failures Terraform reports as **success**. The
+strongest lesson this arc produced came from an apply that passed while the
+service kept serving the old version — under a terraform-failure gate it would
+produce nothing at all.
+
+Four things the gate refuses, each a way it could be wrong rather than
+incomplete:
+
+- **A recovery breaks the run.** A healthy probe between two failures means the
+  service recovered, which is the blip the gate exists to reject.
+- **A different failure breaks it**, because only one thing can be true of a
+  service at a given probe.
+- **`unhealthy` and `unreachable` never merge.** One of each is not two of either.
+- **A rule with no thresholds promotes nothing.** A misconfigured gate that opens
+  is worse than one that closes.
+
+Attribution is **recorded, not filtered**. Something was broken whether or not
+the running version was confirmed, but a rule blamed on a version nobody verified
+is a falsehood — so the fact travels with the candidate and the extractor decides.
+
+The gate produces candidates and not pitfalls, deliberately: it can then be
+judged on whether it promotes the right things without simultaneously arguing
+about rule text, which is the harder and far more subjective half.
