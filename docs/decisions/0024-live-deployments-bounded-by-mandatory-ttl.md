@@ -543,3 +543,11 @@ the deployment resurrected. A record released mid-apply produces a loud failure
 naming the project, because whatever the apply created is not tracked by a
 released record. The window is narrowed, not closed: the store has no
 compare-and-swap.
+
+Re-reading a record before writing is only half the rule: the write must go onto
+the **fresh** copy, not the one loaded earlier. `live upgrade` holds its record
+across an apply that takes minutes, and `live observe` on a cron appends
+observations in exactly that window. Writing back the stale copy discarded them —
+which does not corrupt the record, it quietly weakens the learning signal S156's
+promotion gate counts. An upgrade merges only the three fields it owns (`Tag`,
+`UpgradedAt`, `Address`); anything else belongs to whoever wrote it last.
