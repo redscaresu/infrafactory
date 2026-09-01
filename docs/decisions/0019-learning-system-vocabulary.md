@@ -171,3 +171,10 @@ cannot drift apart.
 
 An entry without a key is refused: it could never be recognised again, and
 writing something unmaintainable is worse than writing nothing.
+
+Because the corpus is per-cloud, the **cloud is part of the identity too**, and
+the partition happens before promotion rather than as a filter afterwards. A
+filter would discard evidence that was sufficient on its own merely because
+another cloud observed the same words, and — in the other direction — would let a
+breadth threshold count deployments across clouds, promoting a coincidence of
+wording that is a fact about neither.

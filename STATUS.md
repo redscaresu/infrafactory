@@ -60,6 +60,15 @@ Last updated: 2026-08-31
   another. `Candidate.Key()` now lives beside the gate and is what gets
   persisted: derived rather than reassembled, so the two identities cannot drift.
 
+  **Pass 86 found the grouping wrong one dimension further out.** The gate ran
+  over every deployment and filtered cross-cloud candidates afterwards, which
+  both discarded sufficient single-cloud evidence and counted breadth *across*
+  clouds — one observation apiece promoting a coincidence of wording. The corpus
+  is per-cloud, so the partition belongs before the gate; the old test had
+  encoded the bug by relying on cross-cloud breadth to promote. Same pass: the
+  first live write could not create its own corpus, because `MkdirAll` was an
+  obligation on callers rather than on the writer that needs the directory.
+
   **Every entry is stamped**, and that is a hard coupling rather than a nicety:
   S156a never retires an entry without `last_seen`, so an unstamped live entry
   would be **immortal** — the inflow quietly undoing the slice built to bound it.

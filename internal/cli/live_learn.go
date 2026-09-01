@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -49,82 +50,57 @@ func runLiveLearnCommand(cmd *cobra.Command, _ []string, runtime *CommandRuntime
 		return &CLIError{Op: "live learn", Code: errorCodeCommandFailed, Err: err}
 	}
 
-	candidates := livestore.PromotionCandidates(deployments, livestore.PromotionRule{
-		ConsecutiveProbes:   consecutive,
-		DistinctDeployments: distinct,
-		Normalize:           feedback.NormalizeDetail,
-	})
+	// Promotion runs PER CLOUD, and the partition happens before the gate
+	// rather than after it.
+	//
+	// Filtering cross-cloud candidates out afterwards looks equivalent
+	// and is not. Two things go wrong. A Scaleway deployment that met the
+	// threshold on its own is DROPPED because a GCP deployment happened
+	// to observe the same words — evidence sufficient on its own is
+	// discarded by unrelated evidence. And `--deployments` would count
+	// breadth across clouds, promoting on a coincidence that is a fact
+	// about neither of them.
+	//
+	// The corpus is per-cloud, so the cloud is part of what makes an
+	// observation the same observation, exactly as its status is.
+	byCloud, uncloudedCount := partitionByCloud(deployments)
 
 	resources := addressResources(deployments)
-	clouds := deploymentClouds(deployments)
 	now := time.Now()
 
 	var stages []StageSummary
 	var failures []FailureSummary
 	written := 0
+	considered := 0
 
-	for _, c := range candidates {
-		resource := resourceForCandidate(c, resources)
-		if resource == "" {
-			// Said out loud rather than dropped. A reproduced failure
-			// nobody can attribute is a real signal that this system
-			// cannot yet use, and hiding that would make the corpus look
-			// like it had learned everything available.
-			stages = append(stages, StageSummary{
-				Layer: "live", Stage: "learn", Status: StageStatusSkip,
-				Detail: fmt.Sprintf(
-					"reproduced across %d deployment(s) but no resource can be attributed, so nothing is written: %s",
-					len(c.Deployments), truncateRule(strings.TrimSpace(c.Example))),
-			})
-			continue
-		}
+	for _, cloud := range sortedKeys(byCloud) {
+		candidates := livestore.PromotionCandidates(byCloud[cloud], livestore.PromotionRule{
+			ConsecutiveProbes:   consecutive,
+			DistinctDeployments: distinct,
+			Normalize:           feedback.NormalizeDetail,
+		})
+		considered += len(candidates)
 
-		cloud := agreedValue(c.Deployments, clouds)
-		if cloud == "" {
-			// The corpus is per-cloud. A candidate spanning two of them
-			// is not one lesson, and picking either would file it where
-			// half its evidence does not apply.
-			stages = append(stages, StageSummary{
-				Layer: "live", Stage: "learn", Status: StageStatusSkip,
-				Detail: fmt.Sprintf(
-					"reproduced across %d deployment(s) that do not agree on a cloud, so nothing is written",
-					len(c.Deployments)),
-			})
-			continue
+		for _, c := range candidates {
+			s, f, w := learnCandidate(learnContext{
+				cloud: cloud, resources: resources, dryRun: dryRun,
+				pitfallsDir: runtime.Config.Paths.Pitfalls, now: now,
+			}, c)
+			stages = append(stages, s...)
+			failures = append(failures, f...)
+			written += w
 		}
+	}
 
-		rule := liveRuleText(c)
-		if dryRun {
-			stages = append(stages, StageSummary{
-				Layer: "live", Stage: "learn", Status: StageStatusSkip,
-				Detail: fmt.Sprintf("--dry-run: would learn for %s — %s", resource, truncateRule(rule)),
-			})
-			continue
-		}
-
-		pitfall := generator.LearnedPitfall{
-			Resource:       resource,
-			Rule:           rule,
-			Source:         generator.LiveSource,
-			DiscoveredFrom: strings.Join(c.Scenarios, ", "),
-		}
-		// c.Key() is the gate's OWN identity: status, drift and the
-		// normalized detail. Persisting anything narrower would collapse
-		// distinctions the gate had just been careful to preserve --
-		// `unhealthy` and `unreachable` with the same words are two
-		// reproduced failures, and one must not overwrite the other.
-		if err := generator.AppendLivePitfall(runtime.Config.Paths.Pitfalls, cloud, c.Key(), pitfall, now); err != nil {
-			failures = append(failures, FailureSummary{
-				Layer: "live", Stage: "learn", Check: "append",
-				Command: "live learn",
-				Detail:  fmt.Sprintf("could not record the lesson for %s: %v", resource, err),
-			})
-			continue
-		}
-		written++
+	if uncloudedCount > 0 {
+		// Said out loud. The corpus is per-cloud, so a record that names
+		// none cannot be filed anywhere -- but whatever it observed was
+		// real, and silently ignoring it would make the run look like it
+		// had considered everything.
 		stages = append(stages, StageSummary{
-			Layer: "live", Stage: "learn", Status: StageStatusPass,
-			Detail: fmt.Sprintf("%s: %s", resource, truncateRule(rule)),
+			Layer: "live", Stage: "learn", Status: StageStatusSkip,
+			Detail: fmt.Sprintf(
+				"%d live record(s) name no cloud, so nothing they observed can be filed", uncloudedCount),
 		})
 	}
 
@@ -139,7 +115,7 @@ func runLiveLearnCommand(cmd *cobra.Command, _ []string, runtime *CommandRuntime
 
 	stages = append([]StageSummary{{
 		Layer: "live", Stage: "learn", Status: StageStatusPass,
-		Detail: learnSummary(len(candidates), written, dryRun),
+		Detail: learnSummary(considered, written, dryRun),
 	}}, stages...)
 
 	status := CommandStatusSuccess
@@ -211,17 +187,6 @@ func agreedValue(ids []string, byID map[string]string) string {
 	return agreed
 }
 
-// deploymentClouds maps deployment id to the cloud it was applied to.
-func deploymentClouds(deployments []livestore.Deployment) map[string]string {
-	out := map[string]string{}
-	for _, d := range deployments {
-		if d.Cloud != "" {
-			out[d.ID] = d.Cloud
-		}
-	}
-	return out
-}
-
 // liveRuleText phrases what was observed for a reader who will meet it
 // as generation guidance, months later, with none of this context.
 //
@@ -248,4 +213,88 @@ func liveRuleText(c livestore.Candidate) string {
 	return fmt.Sprintf(
 		"Observed on a RUNNING deployment, after the apply reported success: %s. Evidence: %s.%s",
 		strings.TrimSpace(c.Example), evidence, attribution)
+}
+
+// learnContext is what learning one candidate needs beyond the candidate.
+type learnContext struct {
+	cloud       string
+	resources   map[string]string
+	dryRun      bool
+	pitfallsDir string
+	now         time.Time
+}
+
+// learnCandidate turns one promoted candidate into a corpus entry, or
+// says why it did not.
+func learnCandidate(ctx learnContext, c livestore.Candidate) ([]StageSummary, []FailureSummary, int) {
+	resource := resourceForCandidate(c, ctx.resources)
+	if resource == "" {
+		// Said out loud rather than dropped. A reproduced failure
+		// nobody can attribute is a real signal that this system
+		// cannot yet use, and hiding that would make the corpus look
+		// like it had learned everything available.
+		return []StageSummary{{
+			Layer: "live", Stage: "learn", Status: StageStatusSkip,
+			Detail: fmt.Sprintf(
+				"%s: reproduced across %d deployment(s) but no resource can be attributed, so nothing is written: %s",
+				ctx.cloud, len(c.Deployments), truncateRule(strings.TrimSpace(c.Example))),
+		}}, nil, 0
+	}
+
+	rule := liveRuleText(c)
+	if ctx.dryRun {
+		return []StageSummary{{
+			Layer: "live", Stage: "learn", Status: StageStatusSkip,
+			Detail: fmt.Sprintf("--dry-run: would learn for %s/%s — %s", ctx.cloud, resource, truncateRule(rule)),
+		}}, nil, 0
+	}
+
+	pitfall := generator.LearnedPitfall{
+		Resource:       resource,
+		Rule:           rule,
+		Source:         generator.LiveSource,
+		DiscoveredFrom: strings.Join(c.Scenarios, ", "),
+	}
+	// c.Key() is the gate's OWN identity: status, drift and the
+	// normalized detail. Persisting anything narrower would collapse
+	// distinctions the gate had just been careful to preserve --
+	// `unhealthy` and `unreachable` with the same words are two
+	// reproduced failures, and one must not overwrite the other.
+	if err := generator.AppendLivePitfall(ctx.pitfallsDir, ctx.cloud, c.Key(), pitfall, ctx.now); err != nil {
+		return nil, []FailureSummary{{
+			Layer: "live", Stage: "learn", Check: "append",
+			Command: "live learn",
+			Detail:  fmt.Sprintf("could not record the lesson for %s: %v", resource, err),
+		}}, 0
+	}
+
+	return []StageSummary{{
+		Layer: "live", Stage: "learn", Status: StageStatusPass,
+		Detail: fmt.Sprintf("%s/%s: %s", ctx.cloud, resource, truncateRule(rule)),
+	}}, nil, 1
+}
+
+// partitionByCloud groups deployments by the cloud they were applied to,
+// reporting how many named none rather than dropping them quietly.
+func partitionByCloud(deployments []livestore.Deployment) (map[string][]livestore.Deployment, int) {
+	out := map[string][]livestore.Deployment{}
+	unclouded := 0
+	for _, d := range deployments {
+		if d.Cloud == "" {
+			unclouded++
+			continue
+		}
+		out[d.Cloud] = append(out[d.Cloud], d)
+	}
+	return out, unclouded
+}
+
+// sortedKeys keeps the per-cloud output deterministic; map order is not.
+func sortedKeys(byCloud map[string][]livestore.Deployment) []string {
+	out := make([]string, 0, len(byCloud))
+	for k := range byCloud {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }

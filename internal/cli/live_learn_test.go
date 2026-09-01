@@ -77,7 +77,12 @@ func runLearn(t *testing.T, rt *CommandRuntime, out *strings.Builder, args ...st
 
 func corpus(t *testing.T, dir string) []generator.PitfallEntry {
 	t.Helper()
-	payload, err := os.ReadFile(filepath.Join(dir, "scaleway.yaml"))
+	return corpusFor(t, dir, "scaleway")
+}
+
+func corpusFor(t *testing.T, dir, cloud string) []generator.PitfallEntry {
+	t.Helper()
+	payload, err := os.ReadFile(filepath.Join(dir, cloud+".yaml"))
 	require.NoError(t, err)
 	var pf generator.PitfallsFile
 	require.NoError(t, yaml.Unmarshal(payload, &pf))
@@ -162,8 +167,10 @@ func TestLearnRefusesWhenDeploymentsDisagreeOnTheResource(t *testing.T) {
 	assert.Empty(t, corpus(t, pitfalls), "attributing it to whichever came first would be a guess")
 }
 
-// The corpus is per-cloud. A candidate spanning two is not one lesson.
-func TestLearnRefusesWhenDeploymentsDisagreeOnTheCloud(t *testing.T) {
+// Breadth means "reproduced on this cloud", not "seen once on each of
+// two". One observation apiece is a coincidence of wording, and a fact
+// about neither cloud.
+func TestLearnDoesNotCountBreadthAcrossClouds(t *testing.T) {
 	rt, store, pitfalls := learnRuntime(t)
 	for _, c := range []struct{ id, cloud string }{
 		{"dep-1", "scaleway"},
@@ -178,7 +185,22 @@ func TestLearnRefusesWhenDeploymentsDisagreeOnTheCloud(t *testing.T) {
 	var out strings.Builder
 	require.NoError(t, runLearn(t, rt, &out))
 	assert.Empty(t, corpus(t, pitfalls))
-	assert.Contains(t, out.String(), "do not agree on a cloud")
+	assert.Contains(t, out.String(), "nothing has reproduced")
+}
+
+// A record naming no cloud cannot be filed anywhere, but what it observed
+// was real -- so the run says so rather than looking like it considered
+// everything.
+func TestLearnReportsRecordsThatNameNoCloud(t *testing.T) {
+	rt, store, _ := learnRuntime(t)
+	seedLearnDeployment(t, store, learnDeployment{
+		id: "dep-nocloud", detail: "health path returned HTTP 503",
+		resource: "scaleway_lb_ip", cloud: "", observations: 3,
+	})
+
+	var out strings.Builder
+	require.NoError(t, runLearn(t, rt, &out))
+	assert.Contains(t, out.String(), "name no cloud")
 }
 
 // Nothing reproduced is a normal answer, and writing nothing is correct.
@@ -208,7 +230,7 @@ func TestLearnDryRunWritesNothing(t *testing.T) {
 	require.NoError(t, runLearn(t, rt, &out, "--dry-run"))
 
 	assert.Empty(t, corpus(t, pitfalls))
-	assert.Contains(t, out.String(), "would learn for scaleway_lb_ip")
+	assert.Contains(t, out.String(), "would learn for scaleway/scaleway_lb_ip")
 }
 
 // Learning twice must refresh rather than duplicate, or the corpus grows
@@ -308,4 +330,65 @@ func TestLearnKeepsUnhealthyAndUnreachableApartInTheCorpus(t *testing.T) {
 
 	assert.Len(t, corpus(t, pitfalls), 2,
 		"one of each is two lessons, and neither may overwrite the other")
+}
+
+// Evidence sufficient on its own must not be discarded by unrelated
+// evidence from another cloud. The gate runs per cloud, so a Scaleway
+// deployment that reproduced a failure teaches its lesson whatever a GCP
+// deployment happened to observe.
+func TestLearnPerCloudSoOneCloudDoesNotSuppressAnother(t *testing.T) {
+	rt, store, pitfalls := learnRuntime(t)
+	now := time.Now()
+
+	for _, spec := range []struct{ id, cloud, resource string }{
+		{"dep-scw", "scaleway", "scaleway_lb_ip"},
+		{"dep-gcp", "gcp", "google_compute_address"},
+	} {
+		d := livestore.Deployment{
+			ID: spec.id, Scenario: "web-live", Cloud: spec.cloud,
+			ProjectID:       "7c98d82e-ad6d-4f4c-99ea-d1886b0f38e5",
+			AddressResource: spec.resource,
+			State:           livestore.StateLive,
+			CreatedAt:       now.Add(-time.Hour), ExpiresAt: now.Add(time.Hour),
+		}
+		for i := 0; i < 3; i++ {
+			d.RecordObservation(livestore.Observation{
+				At: now, Status: livestore.ObservationUnhealthy, Detail: "HTTP 503 from the health path",
+			})
+		}
+		require.NoError(t, store.Put(d))
+	}
+
+	require.NoError(t, runLearn(t, rt, &strings.Builder{}))
+
+	for _, cloud := range []string{"scaleway", "gcp"} {
+		entries := corpusFor(t, pitfalls, cloud)
+		assert.Len(t, entries, 1, "%s reproduced on its own and must teach its own lesson", cloud)
+	}
+}
+
+// A first live lesson against a corpus that does not exist yet is a
+// normal thing to happen -- a reader treats a missing file as an empty
+// corpus, so a writer must be able to create one.
+func TestLearnBootstrapsAPitfallsDirectoryThatDoesNotExistYet(t *testing.T) {
+	rt, store, pitfalls := learnRuntime(t)
+	require.NoError(t, os.RemoveAll(pitfalls))
+
+	now := time.Now()
+	d := livestore.Deployment{
+		ID: "dep-first", Scenario: "web-live-paris", Cloud: "scaleway",
+		ProjectID:       "7c98d82e-ad6d-4f4c-99ea-d1886b0f38e5",
+		AddressResource: "scaleway_lb_ip",
+		State:           livestore.StateLive,
+		CreatedAt:       now.Add(-time.Hour), ExpiresAt: now.Add(time.Hour),
+	}
+	for i := 0; i < 3; i++ {
+		d.RecordObservation(livestore.Observation{
+			At: now, Status: livestore.ObservationUnhealthy, Detail: "HTTP 503 from the health path",
+		})
+	}
+	require.NoError(t, store.Put(d))
+
+	require.NoError(t, runLearn(t, rt, &strings.Builder{}))
+	assert.Len(t, corpus(t, pitfalls), 1, "the first lesson has nowhere to go unless the writer makes it")
 }
