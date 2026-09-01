@@ -164,3 +164,27 @@ func TestMergeKeepsTheBetterLastSeen(t *testing.T) {
 		})
 	}
 }
+
+// entryKey is (resource, rule) and ignores source, so the same rule can
+// be `descriptive` in pre and `live` in post. Copying the live timestamp
+// onto the descriptive entry would attach a lifetime to something that
+// has none -- and only live entries are ever retired, so the timestamp
+// would sit there meaning nothing while the live record vanished as a
+// duplicate.
+func TestMergeDoesNotRefreshAcrossSources(t *testing.T) {
+	const rule = "the same rule, learned twice"
+	pre := generator.PitfallsFile{Pitfalls: []generator.PitfallEntry{
+		{Resource: "scaleway_lb", Rule: rule, Source: "descriptive"},
+	}}
+	post := generator.PitfallsFile{Pitfalls: []generator.PitfallEntry{
+		{Resource: "scaleway_lb", Rule: rule, Source: "live", LastSeen: "2026-09-01T00:00:00Z"},
+	}}
+
+	got, added, refreshed := merge(pre, post, map[string]bool{"live": true})
+
+	assert.Zero(t, refreshed, "a live timestamp must not land on a descriptive entry")
+	assert.Zero(t, added, "and the pre-existing duplicate rule still wins, as it always did")
+	require.Len(t, got.Pitfalls, 1)
+	assert.Equal(t, "descriptive", got.Pitfalls[0].Source)
+	assert.Empty(t, got.Pitfalls[0].LastSeen, "a source with no lifetime gains no timestamp")
+}

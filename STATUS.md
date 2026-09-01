@@ -66,6 +66,17 @@ Last updated: 2026-08-31
   mechanism is already enforced. Adding `LiveSource` was three lines; the work was
   the four places that had to learn about it.
 
+  **Pass 63**: the refresh crossed source boundaries. `entryKey` ignores `source`,
+  so a live timestamp could land on a `descriptive` entry — attaching a lifetime
+  to a source that has none, while the live record vanished as a duplicate. Now
+  like-with-like.
+
+  Passes 59, 60 and 63 all landed on the same **fifteen lines** of merge code,
+  each fix correct and each too narrow. What S156a actually teaches is not about
+  slice size, since this slice is small: **a change to a data model lands in every
+  place that reads it**, and the reliable way to find those is to enumerate the
+  readers before the first edit rather than after each review.
+
   `--dry-run` and the real thing share one rule by construction: a dry-run that
   can disagree with the real thing is worse than no dry-run. And `TouchLivePitfall`
   refreshes rather than appends, which is what makes retention mean *last

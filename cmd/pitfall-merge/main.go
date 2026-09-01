@@ -101,7 +101,17 @@ func merge(pre, post generator.PitfallsFile, keepSet map[string]bool) (generator
 			continue
 		}
 		if i, seen := preIdx[entryKey(p)]; seen {
-			if newerLastSeen(out.Pitfalls[i].LastSeen, p.LastSeen) {
+			// Only refresh LIKE with LIKE. entryKey is (resource, rule)
+			// and deliberately ignores source, so the same rule can
+			// exist as `descriptive` in pre and `live` in post --
+			// and copying the live timestamp onto the descriptive entry
+			// would attach a lifetime to something that has none, while
+			// the live record disappeared as a duplicate. Two errors from
+			// one line.
+			//
+			// A source mismatch keeps the pre-existing behaviour: skip it,
+			// exactly as this merge did before timestamps existed.
+			if out.Pitfalls[i].Source == p.Source && newerLastSeen(out.Pitfalls[i].LastSeen, p.LastSeen) {
 				out.Pitfalls[i].LastSeen = p.LastSeen
 				refreshed++
 			}
