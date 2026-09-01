@@ -246,3 +246,45 @@ func TestMergeReportsKeptCountsPerSource(t *testing.T) {
 func TestMergeRendersNothingWhenNothingWasKept(t *testing.T) {
 	assert.Empty(t, perSourceCounts(map[string]int{}))
 }
+
+// A live rule states its evidence, and that evidence grows. Keying the
+// merge on the text would make one lesson look new on every sweep, so the
+// corpus would gain a copy per merge.
+func TestMergeIdentifiesLiveEntriesByObservedKeyNotRuleText(t *testing.T) {
+	const key = "health path returned HTTP 503"
+	pre := generator.PitfallsFile{Pitfalls: []generator.PitfallEntry{{
+		Resource: "scaleway_lb_ip", Source: "live", ObservedKey: key,
+		Rule:     "Observed: 503. Evidence: across 1 deployment(s).",
+		LastSeen: "2026-08-01T00:00:00Z",
+	}}}
+	post := generator.PitfallsFile{Pitfalls: []generator.PitfallEntry{{
+		Resource: "scaleway_lb_ip", Source: "live", ObservedKey: key,
+		Rule:     "Observed: 503. Evidence: across 4 deployment(s).",
+		LastSeen: "2026-09-01T00:00:00Z",
+	}}}
+
+	got, added, refreshed, _ := merge(pre, post, map[string]bool{"live": true})
+
+	assert.Zero(t, added, "more evidence for one failure is not a second lesson")
+	assert.Equal(t, 1, refreshed)
+	require.Len(t, got.Pitfalls, 1)
+	assert.Contains(t, got.Pitfalls[0].Rule, "4 deployment(s)",
+		"the text travels with the timestamp: a later observation carries better evidence")
+}
+
+// Entries written before observed_key existed fall back to the text. No
+// key is worse than a stale one, but treating a keyless entry as brand
+// new on every sweep would be worse still.
+func TestMergeFallsBackToTheTextForKeylessLiveEntries(t *testing.T) {
+	entry := generator.PitfallEntry{
+		Resource: "scaleway_lb_ip", Source: "live", Rule: "an old keyless rule",
+		LastSeen: "2026-08-01T00:00:00Z",
+	}
+	pre := generator.PitfallsFile{Pitfalls: []generator.PitfallEntry{entry}}
+	post := generator.PitfallsFile{Pitfalls: []generator.PitfallEntry{entry}}
+
+	got, added, _, _ := merge(pre, post, map[string]bool{"live": true})
+
+	assert.Zero(t, added)
+	assert.Len(t, got.Pitfalls, 1)
+}

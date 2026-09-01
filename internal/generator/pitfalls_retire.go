@@ -264,3 +264,93 @@ func TouchLivePitfall(pitfallsDir, cloud, resource, rule string, now time.Time) 
 
 	return fmt.Errorf("no live pitfall for %s matching that rule", resource)
 }
+
+// AppendLivePitfall records a lesson learned from a running service,
+// stamped so it can later be retired.
+//
+// The stamp is not optional. S156a never retires an entry with no
+// `last_seen` -- absence means nobody recorded when the rule was last
+// true, which is not evidence it stopped being true -- so a live entry
+// written without one would be **immortal**, which is precisely what the
+// retirement path exists to prevent. Writing the inflow without the
+// timestamp would quietly undo the slice built to bound it.
+//
+// A rule seen again REFRESHES rather than duplicates, which is what makes
+// retention mean "last observed" rather than "first observed".
+func AppendLivePitfall(pitfallsDir, cloud, observedKey string, pitfall LearnedPitfall, now time.Time) error {
+	pitfall.Source = LiveSource
+	if observedKey == "" {
+		return fmt.Errorf("a live pitfall needs an observed key, or it can never be recognised again")
+	}
+
+	// Already known: this is a re-observation, not a new lesson.
+	//
+	// Matched on the KEY rather than the rule text, because the text
+	// states its evidence and that evidence grows. Refreshing updates the
+	// text too, so the corpus carries the strongest evidence seen rather
+	// than the first.
+	if refreshed, err := refreshLivePitfall(pitfallsDir, cloud, observedKey, pitfall, now); err != nil {
+		return err
+	} else if refreshed {
+		return nil
+	}
+
+	// Appended directly rather than through AppendPitfall, whose
+	// deduplication is deliberately FUZZY -- it matches on significant
+	// word overlap, which is right for provider diagnostics that vary in
+	// phrasing between runs.
+	//
+	// Live rules are the opposite: generated from a template, so two
+	// genuinely different failures on the same resource share nearly
+	// every word ("Observed on a RUNNING deployment, after the apply
+	// reported success: ... Evidence: ..."). Fuzzy matching would drop
+	// the second as a duplicate of the first and the corpus would keep
+	// whichever happened to be observed earliest, silently.
+	//
+	// Exact identity is also SOUND here in a way it is not for the fuzzy
+	// path: the text is derived deterministically from the candidate, so
+	// the same candidate always produces the same string, and a different
+	// string means a different candidate.
+	pf, filePath, err := loadCloudPitfalls(pitfallsDir, cloud)
+	if err != nil {
+		return err
+	}
+	if pf == nil {
+		pf = &PitfallsFile{Provider: cloud}
+	}
+
+	pf.Pitfalls = append(pf.Pitfalls, PitfallEntry{
+		Resource:       pitfall.Resource,
+		Rule:           pitfall.Rule,
+		Source:         LiveSource,
+		DiscoveredFrom: pitfall.DiscoveredFrom,
+		ObservedKey:    observedKey,
+		LastSeen:       now.UTC().Format(time.RFC3339),
+	})
+	return writePitfallsFile(pitfallsDir, filePath, cloud, pf)
+}
+
+// refreshLivePitfall updates an existing live entry in place, reporting
+// whether it found one.
+//
+// The rule text is rewritten as well as the timestamp: a candidate seen
+// on more deployments is the same lesson with better evidence, and the
+// corpus should carry the better version rather than whichever was
+// written first.
+func refreshLivePitfall(pitfallsDir, cloud, observedKey string, pitfall LearnedPitfall, now time.Time) (bool, error) {
+	pf, filePath, err := loadCloudPitfalls(pitfallsDir, cloud)
+	if err != nil || pf == nil {
+		return false, err
+	}
+
+	for i, entry := range pf.Pitfalls {
+		if entry.Source != LiveSource || entry.Resource != pitfall.Resource || entry.ObservedKey != observedKey {
+			continue
+		}
+		pf.Pitfalls[i].Rule = pitfall.Rule
+		pf.Pitfalls[i].DiscoveredFrom = pitfall.DiscoveredFrom
+		pf.Pitfalls[i].LastSeen = now.UTC().Format(time.RFC3339)
+		return true, writePitfallsFile(pitfallsDir, filePath, cloud, pf)
+	}
+	return false, nil
+}

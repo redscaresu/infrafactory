@@ -120,3 +120,61 @@ is a falsehood — so the fact travels with the candidate and the extractor deci
 The gate produces candidates and not pitfalls, deliberately: it can then be
 judged on whether it promotes the right things without simultaneously arguing
 about rule text, which is the harder and far more subjective half.
+
+## Amendment, 2026-09-01 (S156c): a live lesson is attributed to what was probed
+
+The corpus is keyed by resource. A live observation names none — *"the thing at
+this address returned 503"* is about an endpoint — and
+`ExtractDescriptivePitfall` refuses such a detail on purpose: **skip rather than
+fabricate**.
+
+The resource a live lesson belongs to is **the one the probed address was
+resolved from**. `LiveEndpointResource` reports it and `deploy` records it, at
+the only moment it is a fact rather than an inference. Where it cannot be
+established, or where the deployments exhibiting a candidate disagree about it,
+nothing is written and the operator is told — a corpus that looks complete when
+it is not is worse than one that admits a gap.
+
+Two further rules follow from the corpus's own shape:
+
+- **A candidate spanning two clouds writes nothing.** The corpus is per-cloud, so
+  either choice files half the evidence where it does not apply.
+- **Every live entry is stamped with `last_seen`.** S156a never retires an
+  unstamped entry, so writing one without a timestamp would make it immortal —
+  the inflow silently undoing the outflow. Re-learning refreshes rather than
+  duplicates.
+
+And the rule text stays descriptive: it states what was observed and what the
+evidence was, and does not invent a remedy. A descriptive rule that fabricates a
+fix is worse than one admitting it has none; the prescriptive form comes from an
+upgrade diff (S156d).
+
+A `source: live` entry's identity is its **`observed_key`** — the normalized
+detail the promotion gate grouped by — and not its rule text.
+
+The text is unstable by design: a live rule states its evidence, and the evidence
+grows as the same failure keeps being observed. Identifying an entry by its text
+therefore makes one lesson look new on every pass, so the corpus gains a copy per
+cron tick while appearing to refresh. Everything that identifies a live entry —
+the append path and the sweep merge — keys on `observed_key`, and a refresh
+rewrites the text so the corpus carries the strongest evidence rather than
+whichever was written first.
+
+The key is the **whole** of the gate's identity — status, version drift, and the
+normalized detail — and not the detail alone. The gate keeps `unhealthy` apart
+from `unreachable`, and a health failure apart from a version mismatch, because
+they are different facts with different fixes; a corpus keyed more narrowly would
+collapse distinctions the gate had just been careful to preserve, and one
+reproduced failure would overwrite another. It is therefore derived by the gate
+(`Candidate.Key()`) rather than reassembled by whatever persists it, so the two
+cannot drift apart.
+
+An entry without a key is refused: it could never be recognised again, and
+writing something unmaintainable is worse than writing nothing.
+
+Because the corpus is per-cloud, the **cloud is part of the identity too**, and
+the partition happens before promotion rather than as a filter afterwards. A
+filter would discard evidence that was sufficient on its own merely because
+another cloud observed the same words, and — in the other direction — would let a
+breadth threshold count deployments across clouds, promoting a coincidence of
+wording that is a fact about neither.

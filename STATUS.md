@@ -4,6 +4,82 @@ Last updated: 2026-08-31
 
 ## Current phase
 
+- 🔄 **S156c: the loop closes — reproduced observations become pitfalls
+  (2026-09-01)** — `live learn` writes promoted candidates into the corpus as
+  `source: live`, and the generator sees them on the next run.
+
+  **The hard part was not writing; it was attribution.** The corpus is keyed by
+  resource and the generator steers on it — but a live observation names none:
+  *"the thing at this address returned 503"* is about an endpoint.
+  `ExtractDescriptivePitfall` already refuses to invent a resource
+  (*"skip rather than fabricate"*), and inventing one here would have been the
+  same mistake with a new name.
+
+  The honest answer is **the resource the address was resolved from**.
+  `LiveEndpointResource` now reports it alongside the address, and `deploy`
+  records it — at the only moment it is a fact rather than an inference.
+
+  Four refusals, each preferring silence to a guess:
+
+  - **No resource, nothing written** — and the operator is told, so the corpus
+    does not look complete when it is not.
+  - **Deployments that disagree on the resource write nothing.** If one served
+    from an `scaleway_lb_ip` and another from an `scaleway_instance_ip`, the
+    failure they share is a fact about neither.
+  - **Deployments that disagree on the cloud write nothing**, because the corpus
+    is per-cloud and either choice files half the evidence where it does not apply.
+  - **No remedy is invented.** A descriptive rule states what was seen and stops;
+    the prescriptive form comes from an upgrade diff in S156d.
+
+  **Pass 76 caught the slice's main behaviour being defeated by reuse.**
+  `AppendPitfall` dedupes on *word overlap* — right for provider diagnostics that
+  vary in phrasing, wrong for live rules generated from a template, where two
+  genuinely different failures on one resource share nearly every word. The second
+  lesson was dropped as a duplicate, silently. Live entries append on **exact
+  identity** now, which is sound precisely because the text is derived
+  deterministically from the candidate.
+
+  Third time in this arc that reusing an existing mechanism was the mistake rather
+  than the shortcut. **A mechanism's semantics travel with it.**
+
+  **Pass 77 caught pass 76's consequence.** Exact-text identity is unstable,
+  because a live rule *states its evidence* and that evidence grows — so the
+  corpus gained an entry every time the counters ticked, while appearing to
+  refresh. `ObservedKey` now holds the normalized detail the gate grouped by:
+  identity separated from presentation, so a refresh rewrites the text and the
+  corpus carries the **strongest** evidence rather than the first written.
+
+  Then the same bug one layer out, found by **enumerating the readers before the
+  next review** rather than after: `pitfall-merge` keyed live entries on rule text
+  too, so a sweep would have duplicated every refreshed lesson.
+
+  **Pass 85 then caught the other half of the same identity question.** The key
+  was the normalized detail, but the gate groups on *(status, drift, detail)* —
+  `unhealthy` apart from `unreachable`, a health failure apart from a version
+  mismatch. Persisting anything narrower let one reproduced failure overwrite
+  another. `Candidate.Key()` now lives beside the gate and is what gets
+  persisted: derived rather than reassembled, so the two identities cannot drift.
+
+  **Pass 86 found the grouping wrong one dimension further out.** The gate ran
+  over every deployment and filtered cross-cloud candidates afterwards, which
+  both discarded sufficient single-cloud evidence and counted breadth *across*
+  clouds — one observation apiece promoting a coincidence of wording. The corpus
+  is per-cloud, so the partition belongs before the gate; the old test had
+  encoded the bug by relying on cross-cloud breadth to promote. Same pass: the
+  first live write could not create its own corpus, because `MkdirAll` was an
+  obligation on callers rather than on the writer that needs the directory.
+
+  **Converged on pass 87.** Three of the four passes were one question at
+  widening scope — *what is the identity of a live lesson?* — and each answer was
+  correct and incomplete in a way visible from the one before. What ended it was
+  not a better answer but a structural move: stop restating the identity at the
+  persistence layer and derive it from the gate that defines it.
+
+  **Every entry is stamped**, and that is a hard coupling rather than a nicety:
+  S156a never retires an entry without `last_seen`, so an unstamped live entry
+  would be **immortal** — the inflow quietly undoing the slice built to bound it.
+  Learning the same lesson twice refreshes rather than duplicates.
+
 - 🎯 **S156b: the promotion gate — when is an observation a lesson? (2026-09-01)**
   — `live candidates` reports observations that have **reproduced**, and says
   what promoted each one and why.

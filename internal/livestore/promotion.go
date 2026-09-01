@@ -95,6 +95,26 @@ type Candidate struct {
 	Reason PromotionReason
 }
 
+// Key is the candidate's identity, and the identity anything persisting
+// it must use.
+//
+// The gate groups on (status, drift, normalized detail) and deliberately
+// keeps `unhealthy` apart from `unreachable`, and a health failure apart
+// from version drift. A store that keyed on the detail alone would
+// collapse distinctions the gate had just been careful to preserve, and
+// one reproduced failure would overwrite another.
+//
+// Derived here rather than reassembled by callers so the two identities
+// cannot drift apart — the same reason the dry-run and the real
+// retirement share one rule.
+func (c Candidate) Key() string {
+	drift := "health"
+	if c.VersionDrift {
+		drift = "version"
+	}
+	return string(c.Status) + "\x00" + drift + "\x00" + c.Detail
+}
+
 // PromotionReason is why a candidate cleared the gate.
 type PromotionReason string
 

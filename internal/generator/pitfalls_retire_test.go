@@ -227,3 +227,104 @@ func TestRetireRefusesACloudNameThatEscapesTheCorpus(t *testing.T) {
 		assert.Error(t, err, "touch must refuse it too: %q", cloud)
 	}
 }
+
+// AppendPitfall's deduplication is deliberately FUZZY: it matches on
+// significant word overlap, which is right for provider diagnostics that
+// vary in phrasing between runs.
+//
+// Live rules are the opposite — generated from a template, so two
+// genuinely different failures on one resource share nearly every word.
+// Routing them through the fuzzy path would keep whichever was observed
+// first and discard the rest, silently.
+func TestAppendLiveKeepsDistinctLessonsForOneResource(t *testing.T) {
+	dir := writeCorpus(t)
+	now := time.Now()
+
+	const preamble = "Observed on a RUNNING deployment, after the apply reported success: "
+	for _, detail := range []string{
+		preamble + "health path returned HTTP 503. Evidence: persistent, across 1 deployment(s).",
+		preamble + "health path is unreachable. Evidence: persistent, across 1 deployment(s).",
+	} {
+		require.NoError(t, AppendLivePitfall(dir, "scaleway", detail,
+			LearnedPitfall{Resource: "scaleway_lb_ip", Rule: detail}, now))
+	}
+
+	entries := readCorpus(t, dir)
+	require.Len(t, entries, 2, "two different failures are two lessons, however alike the wording")
+	for _, e := range entries {
+		assert.Equal(t, LiveSource, e.Source)
+		assert.NotEmpty(t, e.LastSeen, "or it could never be retired")
+	}
+}
+
+// The same lesson twice is one lesson, refreshed.
+func TestAppendLiveRefreshesAnIdenticalLesson(t *testing.T) {
+	dir := writeCorpus(t)
+	learned := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
+	seen := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	p := LearnedPitfall{Resource: "scaleway_lb_ip", Rule: "the same words exactly"}
+
+	require.NoError(t, AppendLivePitfall(dir, "scaleway", "the-key", p, learned))
+	require.NoError(t, AppendLivePitfall(dir, "scaleway", "the-key", p, seen))
+
+	entries := readCorpus(t, dir)
+	require.Len(t, entries, 1)
+	assert.Equal(t, seen.UTC().Format(time.RFC3339), entries[0].LastSeen,
+		"retention means last observed, not first")
+}
+
+// A cloud with no corpus yet must gain one rather than fail: the first
+// live lesson for a provider should not need a file to exist already.
+func TestAppendLiveCreatesACorpusThatDoesNotExistYet(t *testing.T) {
+	dir := t.TempDir()
+
+	require.NoError(t, AppendLivePitfall(dir, "scaleway", "first-key",
+		LearnedPitfall{Resource: "scaleway_lb_ip", Rule: "first lesson"}, time.Now()))
+
+	entries := readCorpus(t, dir)
+	require.Len(t, entries, 1)
+	assert.Equal(t, "first lesson", entries[0].Rule)
+}
+
+// A live rule states its evidence -- how many deployments, how long a
+// run -- and that evidence GROWS as the same failure keeps being
+// observed. Matching on the text would append a new entry every time the
+// counters ticked, so the corpus would grow once per cron tick while
+// looking like it was refreshing.
+func TestAppendLiveRefreshesWhenTheEvidenceChangesButTheFailureDoesNot(t *testing.T) {
+	dir := writeCorpus(t)
+	learned := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
+	seen := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	const key = "health path returned HTTP 503"
+
+	require.NoError(t, AppendLivePitfall(dir, "scaleway", key, LearnedPitfall{
+		Resource: "scaleway_lb_ip",
+		Rule:     "Observed: HTTP 503. Evidence: persistent, across 1 deployment(s), longest run 3.",
+	}, learned))
+
+	// Same failure, more evidence, so a different rule text.
+	require.NoError(t, AppendLivePitfall(dir, "scaleway", key, LearnedPitfall{
+		Resource: "scaleway_lb_ip",
+		Rule:     "Observed: HTTP 503. Evidence: persistent, across 4 deployment(s), longest run 9.",
+	}, seen))
+
+	entries := readCorpus(t, dir)
+	require.Len(t, entries, 1, "more evidence for one failure is not a second lesson")
+	assert.Contains(t, entries[0].Rule, "across 4 deployment(s)",
+		"and the corpus carries the stronger evidence, not the first written")
+	assert.Equal(t, seen.UTC().Format(time.RFC3339), entries[0].LastSeen)
+}
+
+// Without a key an entry can never be recognised again, so it would
+// duplicate on every pass. Refusing is better than writing something
+// unmaintainable.
+func TestAppendLiveRefusesWithoutAnObservedKey(t *testing.T) {
+	dir := writeCorpus(t)
+
+	err := AppendLivePitfall(dir, "scaleway", "",
+		LearnedPitfall{Resource: "scaleway_lb_ip", Rule: "r"}, time.Now())
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "never be recognised again")
+	assert.Empty(t, readCorpus(t, dir))
+}

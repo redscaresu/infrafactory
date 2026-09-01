@@ -835,10 +835,8 @@ func AppendPitfall(pitfallsDir, cloud string, pitfall LearnedPitfall) error {
 
 	filePath := filepath.Join(pitfallsDir, cloud+".yaml")
 
-	// Ensure directory exists.
-	if err := os.MkdirAll(pitfallsDir, 0o755); err != nil {
-		return fmt.Errorf("create pitfalls directory: %w", err)
-	}
+	// The directory is created by writePitfallsFile, which is the thing
+	// that needs it.
 
 	// Load existing file or start fresh.
 	var pf PitfallsFile
@@ -919,6 +917,15 @@ func writePitfallsFile(pitfallsDir, filePath, cloud string, pf *PitfallsFile) er
 	out, err := yaml.Marshal(pf)
 	if err != nil {
 		return fmt.Errorf("marshal pitfalls: %w", err)
+	}
+	// Here rather than in each caller. Every write needs the directory,
+	// the temp file below is created INSIDE it, and a reader is a missing
+	// file away from an empty corpus -- so a first write against a fresh
+	// corpus is a normal thing to do, not an error. It was an obligation
+	// each caller had to remember, and AppendLivePitfall did not (S156c,
+	// pass 86).
+	if err := os.MkdirAll(pitfallsDir, 0o755); err != nil {
+		return fmt.Errorf("create pitfalls directory: %w", err)
 	}
 	// Use os.CreateTemp so two concurrent learn-paths racing on the
 	// same provider can't clobber each other's tmp file before either

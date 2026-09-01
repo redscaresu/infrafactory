@@ -233,7 +233,11 @@ func runLiveUpgradeCommand(cmd *cobra.Command, args []string, runtime *CommandRu
 		// balancer. Verifying against the address captured at first
 		// deploy would probe infrastructure this deployment no longer
 		// owns, and leave every later observation pointed there too.
-		if address, addrErr := harness.LiveEndpoint(d.WorkDir, "load_balancer"); addrErr == nil && address != "" {
+		// The resource type moves with the address. Replacement HCL can
+		// serve the same deployment from a different resource, and a
+		// stale type would attribute every later live lesson to
+		// something the deployment no longer has.
+		if address, resource, addrErr := harness.LiveEndpointResource(d.WorkDir, "load_balancer"); addrErr == nil && address != "" {
 			if address != d.Address {
 				stages = append(stages, StageSummary{
 					Layer: "live", Stage: "upgrade_address", Status: StageStatusPass,
@@ -241,6 +245,7 @@ func runLiveUpgradeCommand(cmd *cobra.Command, args []string, runtime *CommandRu
 				})
 			}
 			d.Address = address
+			d.AddressResource = resource
 		} else if d.Address != "" {
 			// Said out loud rather than assumed unchanged: everything
 			// after this probes an address nothing just confirmed.
@@ -624,11 +629,12 @@ func assertRunProjectOurs(ctx context.Context, runtime *CommandRuntime, projectI
 // losing them does not corrupt the record -- it quietly weakens the
 // learning signal, which is harder to notice.
 //
-// An allow-list of three fields, not a blanket copy: anything an upgrade
-// does not own belongs to whoever wrote it last.
+// An allow-list of the four fields an upgrade owns, not a blanket copy:
+// anything else belongs to whoever wrote it last.
 func mergeUpgradeOntoFresh(fresh, upgraded livestore.Deployment) livestore.Deployment {
 	fresh.Tag = upgraded.Tag
 	fresh.UpgradedAt = upgraded.UpgradedAt
 	fresh.Address = upgraded.Address
+	fresh.AddressResource = upgraded.AddressResource
 	return fresh
 }

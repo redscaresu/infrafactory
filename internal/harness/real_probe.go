@@ -287,24 +287,46 @@ func loadLiveTerraformState(path string) (terraformState, error) {
 // the live deployment so `live ls` can say where the service actually
 // answers -- an estate you cannot reach is one nobody will check on.
 func LiveEndpoint(workDir, target string) (string, error) {
+	host, _, err := LiveEndpointResource(workDir, target)
+	return host, err
+}
+
+// LiveEndpointResource is LiveEndpoint plus the Terraform resource type
+// the address came from.
+//
+// The type is what makes a live observation attributable. An observation
+// says "the thing at this address returned 503" and names no resource --
+// `ExtractDescriptivePitfall` skips such a detail rather than fabricate
+// one, correctly. But the address was not arbitrary: it was resolved from
+// a specific resource in state, and that resource is what the lesson is
+// legitimately about (S156c).
+//
+// Reporting it here rather than guessing later keeps the attribution at
+// the only point where it is a fact rather than an inference.
+func LiveEndpointResource(workDir, target string) (string, string, error) {
 	state, err := loadLiveTerraformState(filepath.Join(workDir, LiveStateFilename))
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	return resolveProbeHost(state, target)
+	return resolveProbeHostResource(state, target)
 }
 
 func resolveProbeHost(state terraformState, target string) (string, error) {
+	host, _, err := resolveProbeHostResource(state, target)
+	return host, err
+}
+
+func resolveProbeHostResource(state terraformState, target string) (string, string, error) {
 	resourceTypes := probeTargetResourceTypes(target)
 	if len(resourceTypes) == 0 {
-		return "", fmt.Errorf("no live endpoint mapping for target %q", target)
+		return "", "", fmt.Errorf("no live endpoint mapping for target %q", target)
 	}
 	for _, resourceType := range resourceTypes {
 		if host := findHostForResourceType(state, resourceType); host != "" {
-			return host, nil
+			return host, resourceType, nil
 		}
 	}
-	return "", fmt.Errorf("could not resolve live endpoint for target %q", target)
+	return "", "", fmt.Errorf("could not resolve live endpoint for target %q", target)
 }
 
 // probeTargetResourceTypes returns the Terraform resource types whose live

@@ -120,6 +120,14 @@ func merge(pre, post generator.PitfallsFile, keepSet map[string]bool) (generator
 			// exactly as this merge did before timestamps existed.
 			if out.Pitfalls[i].Source == p.Source && newerLastSeen(out.Pitfalls[i].LastSeen, p.LastSeen) {
 				out.Pitfalls[i].LastSeen = p.LastSeen
+				// The text travels with the timestamp for live entries:
+				// a later observation of the same failure carries better
+				// evidence, and keeping the older wording would preserve
+				// the weaker claim.
+				if p.Source == generator.LiveSource {
+					out.Pitfalls[i].Rule = p.Rule
+					out.Pitfalls[i].DiscoveredFrom = p.DiscoveredFrom
+				}
 				refreshed++
 			}
 			continue
@@ -192,10 +200,24 @@ func entryKey(p generator.PitfallEntry) string {
 // rebuild. That asymmetry is the reason for the special case, and the
 // reason it is not applied to everything.
 func mergeKey(p generator.PitfallEntry) string {
-	if p.Source == generator.LiveSource {
-		return entryKey(p) + "\x00" + p.Source
+	if p.Source != generator.LiveSource {
+		return entryKey(p)
 	}
-	return entryKey(p)
+	// Live entries are identified by their OBSERVED KEY, not their rule
+	// text. The text states its evidence -- how many deployments, how
+	// long a run -- and that evidence grows as the same failure keeps
+	// being observed, so keying on the text would make one lesson look
+	// like a new one on every sweep and the corpus would gain a copy per
+	// merge (S156c, pass 77).
+	//
+	// Falls back to the text for entries written before observed_key
+	// existed: no key is worse than a stale one, but treating a
+	// keyless entry as brand new every sweep would be worse still.
+	identity := p.ObservedKey
+	if identity == "" {
+		identity = p.Rule
+	}
+	return p.Resource + "\x00" + identity + "\x00" + p.Source
 }
 
 func loadPitfalls(path string) (generator.PitfallsFile, error) {
