@@ -87,6 +87,15 @@ Last updated: 2026-08-31
   preservation list, the merge's freshness handling, the merge's source
   semantics, the metric reading the merge, and the new command's path guard.
 
+  **Pass 65 was declined** — the first decline in the slice. The sweep omits
+  genesys from its pitfall handling, and so do all three ratchets, consistently
+  and since long before this arc; `LiveSource` neither created that gap nor widens
+  it. Bringing genesys in means deciding whether it joins the ratchets and what
+  `AVOID_EMISSIONS` means for a cloud with no avoid entries — its own scope, and
+  folding it in is how a small slice becomes S155b. Recorded in the plan as a
+  prerequisite for **S156c**, the first slice that will actually produce live
+  entries.
+
   `--dry-run` and the real thing share one rule by construction: a dry-run that
   can disagree with the real thing is worse than no dry-run. And `TouchLivePitfall`
   refreshes rather than appends, which is what makes retention mean *last
