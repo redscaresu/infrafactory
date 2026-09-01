@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/redscaresu/infrafactory/internal/generator"
 	"gopkg.in/yaml.v3"
@@ -66,39 +67,71 @@ func main() {
 		die("read post: %v", err)
 	}
 
-	merged, added := merge(pre, post, keepSet)
+	merged, added, refreshed := merge(pre, post, keepSet)
 
 	if err := savePitfalls(*outFile, merged); err != nil {
 		die("write out: %v", err)
 	}
 
-	fmt.Printf("pitfall-merge: pre=%d post=%d kept_new=%d (sources: %s)\n",
-		len(pre.Pitfalls), len(post.Pitfalls), added, strings.Join(sortedKeys(keepSet), ","))
+	fmt.Printf("pitfall-merge: pre=%d post=%d kept_new=%d refreshed=%d (sources: %s)\n",
+		len(pre.Pitfalls), len(post.Pitfalls), added, refreshed, strings.Join(sortedKeys(keepSet), ","))
 }
 
 // merge returns pre + any post entries whose source is in keepSet and
-// whose (resource, rule) is not already in pre. Returns the count of
-// preserved-new entries.
-func merge(pre, post generator.PitfallsFile, keepSet map[string]bool) (generator.PitfallsFile, int) {
-	preKeys := map[string]bool{}
-	for _, p := range pre.Pitfalls {
-		preKeys[entryKey(p)] = true
+// whose (resource, rule) is not already in pre, and carries forward a
+// newer last_seen for the ones that are. Returns the counts of
+// preserved-new and refreshed entries.
+//
+// The refresh half matters as much as the append half. A live entry
+// re-observed during the sweep exists in BOTH files, so skipping it as a
+// duplicate keeps pre's older timestamp -- which makes retention mean
+// "first observed" instead of "last observed", exactly what
+// TouchLivePitfall exists to prevent. The entry then retires early, and
+// a rule that is still true is deleted.
+func merge(pre, post generator.PitfallsFile, keepSet map[string]bool) (generator.PitfallsFile, int, int) {
+	preIdx := map[string]int{}
+	for i, p := range pre.Pitfalls {
+		preIdx[entryKey(p)] = i
 	}
 
 	out := pre
-	added := 0
+	added, refreshed := 0, 0
 	for _, p := range post.Pitfalls {
 		if !keepSet[p.Source] {
 			continue
 		}
-		if preKeys[entryKey(p)] {
+		if i, seen := preIdx[entryKey(p)]; seen {
+			if newerLastSeen(out.Pitfalls[i].LastSeen, p.LastSeen) {
+				out.Pitfalls[i].LastSeen = p.LastSeen
+				refreshed++
+			}
 			continue
 		}
 		out.Pitfalls = append(out.Pitfalls, p)
-		preKeys[entryKey(p)] = true
+		preIdx[entryKey(p)] = len(out.Pitfalls) - 1
 		added++
 	}
-	return out, added
+	return out, added, refreshed
+}
+
+// newerLastSeen reports whether candidate is a later timestamp than
+// current.
+//
+// An unparseable or absent candidate never wins: the existing value is
+// evidence somebody recorded, and replacing it with something unreadable
+// would make the entry look never-seen and retire it.
+func newerLastSeen(current, candidate string) bool {
+	next, err := time.Parse(time.RFC3339, candidate)
+	if err != nil {
+		return false
+	}
+	prev, err := time.Parse(time.RFC3339, current)
+	if err != nil {
+		// Current is missing or malformed and candidate is valid, so
+		// candidate is strictly more information.
+		return true
+	}
+	return next.After(prev)
 }
 
 func entryKey(p generator.PitfallEntry) string {

@@ -40,6 +40,14 @@ Last updated: 2026-08-31
   silently deleted every live entry** — the exact thing this slice exists to
   prevent. Now `avoid,live`.
 
+  **Pass 60** then caught the incomplete half of that: preserving live entries
+  through a sweep preserved the *entries* but not their *freshness*, so a rule
+  re-observed during a sweep kept the older timestamp — retention silently
+  reverting to *first observed* and retiring a rule that was still true.
+  `pitfall-merge` carries forward a newer `last_seen` now and reports
+  `refreshed=N`. **Preserving a record is not the same as preserving what the
+  record says.**
+
   `--dry-run` and the real thing share one rule by construction: a dry-run that
   can disagree with the real thing is worse than no dry-run. And `TouchLivePitfall`
   refreshes rather than appends, which is what makes retention mean *last

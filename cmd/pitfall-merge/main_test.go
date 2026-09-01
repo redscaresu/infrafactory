@@ -1,6 +1,8 @@
 package main
 
 import (
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"testing"
 
 	"github.com/redscaresu/infrafactory/internal/generator"
@@ -24,7 +26,7 @@ func TestMerge_KeepsLearnedFromDiffAvoid(t *testing.T) {
 		mk("google_sql_database_instance", "descriptive failure echo", "descriptive"), // should drop
 	}}
 
-	got, added := merge(pre, post, map[string]bool{"avoid": true})
+	got, added, _ := merge(pre, post, map[string]bool{"avoid": true})
 
 	if added != 1 {
 		t.Fatalf("expected 1 added, got %d", added)
@@ -55,7 +57,7 @@ func TestMerge_SkipsDuplicates(t *testing.T) {
 		mk("google_service_account", "do NOT use X", "avoid"), // duplicate
 	}}
 
-	got, added := merge(pre, post, map[string]bool{"avoid": true})
+	got, added, _ := merge(pre, post, map[string]bool{"avoid": true})
 
 	if added != 0 {
 		t.Errorf("expected 0 added (dup), got %d", added)
@@ -78,7 +80,7 @@ func TestMerge_EmptyKeepSet(t *testing.T) {
 		mk("b", "new N13 entry", "avoid"),
 	}}
 
-	got, added := merge(pre, post, map[string]bool{})
+	got, added, _ := merge(pre, post, map[string]bool{})
 
 	if added != 0 {
 		t.Errorf("empty keep-set: expected 0 added, got %d", added)
@@ -100,7 +102,7 @@ func TestMerge_MultipleKeepSources(t *testing.T) {
 		mk("c", "descriptive", "descriptive"),
 	}}
 
-	got, added := merge(pre, post, map[string]bool{
+	got, added, _ := merge(pre, post, map[string]bool{
 		"fix":   true,
 		"avoid": true,
 	})
@@ -110,5 +112,55 @@ func TestMerge_MultipleKeepSources(t *testing.T) {
 	}
 	if len(got.Pitfalls) != 2 {
 		t.Errorf("expected 2 total, got %d", len(got.Pitfalls))
+	}
+}
+
+// A live entry re-observed during the sweep exists in BOTH files.
+// Skipping it as a duplicate keeps pre's older timestamp, which makes
+// retention mean "first observed" instead of "last observed" -- and the
+// rule then retires early while it is still true.
+func TestMergeCarriesForwardARefreshedLastSeen(t *testing.T) {
+	const rule = "a live rule"
+	pre := generator.PitfallsFile{Provider: "scaleway", Pitfalls: []generator.PitfallEntry{
+		{Resource: "scaleway_lb", Rule: rule, Source: "live", LastSeen: "2026-08-01T00:00:00Z"},
+	}}
+	post := generator.PitfallsFile{Provider: "scaleway", Pitfalls: []generator.PitfallEntry{
+		{Resource: "scaleway_lb", Rule: rule, Source: "live", LastSeen: "2026-09-01T00:00:00Z"},
+	}}
+
+	got, added, refreshed := merge(pre, post, map[string]bool{"live": true})
+
+	assert.Zero(t, added, "it is the same entry, not a new one")
+	assert.Equal(t, 1, refreshed)
+	require.Len(t, got.Pitfalls, 1)
+	assert.Equal(t, "2026-09-01T00:00:00Z", got.Pitfalls[0].LastSeen)
+}
+
+// Older or unreadable timestamps never win: the existing value is
+// evidence somebody recorded, and replacing it with something unreadable
+// would make the entry look never-seen and retire it.
+func TestMergeKeepsTheBetterLastSeen(t *testing.T) {
+	const rule = "a live rule"
+	cases := map[string]struct{ pre, post, want string }{
+		"older post":       {"2026-09-01T00:00:00Z", "2026-08-01T00:00:00Z", "2026-09-01T00:00:00Z"},
+		"unparseable post": {"2026-09-01T00:00:00Z", "sometime", "2026-09-01T00:00:00Z"},
+		"empty post":       {"2026-09-01T00:00:00Z", "", "2026-09-01T00:00:00Z"},
+		"empty pre":        {"", "2026-09-01T00:00:00Z", "2026-09-01T00:00:00Z"},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			pre := generator.PitfallsFile{Pitfalls: []generator.PitfallEntry{
+				{Resource: "r", Rule: rule, Source: "live", LastSeen: tc.pre},
+			}}
+			post := generator.PitfallsFile{Pitfalls: []generator.PitfallEntry{
+				{Resource: "r", Rule: rule, Source: "live", LastSeen: tc.post},
+			}}
+
+			got, _, _ := merge(pre, post, map[string]bool{"live": true})
+
+			require.Len(t, got.Pitfalls, 1)
+			assert.Equal(t, tc.want, got.Pitfalls[0].LastSeen)
+		})
 	}
 }
