@@ -2,6 +2,41 @@
 
 Last updated: 2026-08-31
 
+## 2026-09-01 — S157a: reconcile against the API
+
+ADR-0024 called this "the largest remaining hole" in it, and the hole was worse
+than "not built yet". `livestore.go` stated **as fact** that the reaper
+"reconciles against the API rather than trusting this file alone." Nothing did:
+`live reap` calls `store.Reapable()` and never contacts Scaleway. A comment
+asserting a guard that does not exist is worse than no comment, because it makes
+the hole invisible to the next person reading for it.
+
+The failure is quiet and expensive. `.infrafactory/live` sits **inside** the
+working directory — wipe it, switch branches, or run from a fresh clone, and the
+records are gone while the load balancer, the instance and the public IPv4s keep
+running with a TTL nobody will ever enforce. Every signal reports clean, because
+every signal reads the store. That is the shape of D6.
+
+`live reconcile` reports both directions and **never destroys anything**: an
+unrecorded project is by definition something the records cannot explain, and
+destroying what you cannot explain is how a reconciler becomes the incident.
+
+It is precise rather than heuristic because of ADR-0025's stamp, using the *same*
+`IsInfrafactoryRunProject` predicate that guards teardown — one definition of
+ownership rather than one here and another in the guard. Unstamped projects are
+never considered in either direction.
+
+**Three refusals, all the same failure mode.** Missing credentials, an
+unreachable API, and a >50-page estate each render as "nothing unaccounted for"
+if handled the easy way — the false green S139 exists to prevent. All three fail
+instead.
+
+**Verified against real Scaleway, not a fake.** An empty stamped project was
+created, left unregistered, confirmed in `List`, confirmed flagged by `Reconcile`
+against an empty store, and deleted. Cost: nothing, since projects are free.
+The baseline is worth recording — **3 projects in the organization, 0 stamped**,
+so the account holds no leaked run projects and the D6 fix is holding.
+
 ## 2026-09-01 — S160b: real cloud is decided at start time, not on the wire
 
 S160a stopped a page the server did not serve from reaching the API. This closes

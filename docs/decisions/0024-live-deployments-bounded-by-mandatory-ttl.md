@@ -589,3 +589,59 @@ This matters beyond readability: the promotion gate groups on that detail, so
 without it the most dangerous shape live observation can find — the service and
 the record disagreeing while every other signal reports success — could never
 become a candidate lesson.
+
+## Amendment, 2026-09-01 (S157a): reconcile-against-API, delivered
+
+Rule 3's outstanding promise is kept. `live reconcile` compares the
+organization's projects against the live store and reports both directions:
+stamped projects no record explains, and records naming projects the API says do
+not exist.
+
+**The gap was worse than "not built yet".** `livestore.go` stated, as fact, that
+the reaper "reconciles against the API rather than trusting this file alone."
+Nothing did — `live reap` calls `store.Reapable()` and never contacts Scaleway.
+A comment asserting a guard that does not exist is worse than no comment: it
+makes the hole invisible to the next person who reads for it. That comment now
+describes what is true, and says explicitly that the reaper is store-driven.
+
+### It reports; it never destroys
+
+An unrecorded project is *by definition* something this system's records do not
+explain, and destroying what you cannot explain is how a reconciler becomes the
+incident. The command prints project ids and a human decides.
+
+### Precise rather than heuristic, because of the stamp
+
+Since ADR-0025 every deployment owns a project named `if-run-…` and carrying a
+fixed description. Reconciliation is therefore a set difference over a stamp
+infrafactory itself wrote, using `IsInfrafactoryRunProject` — the *same*
+predicate that guards teardown, so "infrafactory created this" has one definition
+rather than one here and another in the guard. A project without the stamp is
+never considered in either direction.
+
+### Three ways it refuses rather than reporting clean
+
+Every one of these renders as "nothing unaccounted for" if handled the easy way,
+which is the false green S139 exists to prevent:
+
+- **missing credentials** — the cloud would read as empty and every deployment
+  would look accounted for;
+- **an unreachable API** — same, and an error is not an empty organization;
+- **more than 50 pages** — a truncated estate is a partial answer presented as a
+  complete one, so `List` fails instead of returning what it got.
+
+A **released** deployment still accounts for its project. Teardown records the
+release, but this ADR's unreclaimable case is exactly a project that outlives it,
+so ignoring released records would send an operator to investigate something the
+store already explains.
+
+### Verified against real Scaleway
+
+Not against a fake. An empty stamped project was created through the Account API,
+left unregistered, confirmed present in `List` with the stamp read correctly,
+confirmed flagged as unrecorded by `Reconcile` against an empty store, and
+deleted. **Cost: nothing** — Scaleway projects are free; only resources bill.
+
+The baseline that run printed is worth recording: **3 projects in the
+organization, 0 carrying infrafactory's stamp.** The account holds no leaked run
+projects, so the D6 fix is holding.
