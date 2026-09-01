@@ -9,7 +9,7 @@ Last updated: 2026-08-31
   warned that **S156 must not merge without a retirement path for `source: live`
   pitfalls**, and nothing was scheduled to build one. It is now **S156a**, and it
   is the only one of the five with no dependency — so it was the slice to build
-  while S155b waited on its canary. **S156a has since shipped** (below).
+  while S155b waited on its canary. **Both have since shipped** (below).
 
   Doing the outflow before the inflow is deliberate: every other slice *adds* to
   the corpus. A pitfall that steers generation away from something no longer
