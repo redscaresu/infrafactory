@@ -116,3 +116,40 @@ func TestRetireDryRunRefusesTheSameThresholds(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "every live pitfall would be retired")
 }
+
+// Corpus maintenance must not depend on the LLM being configured.
+// buildRuntime constructs the Claude transport by default and that
+// construction can fail -- a missing binary, an unreadable prompts
+// directory -- which would make housekeeping impossible on exactly the
+// machine doing housekeeping rather than generation.
+func TestRetireDoesNotRequireAGenerator(t *testing.T) {
+	h := newCommandTestHarness(t)
+	require.NoError(t, os.MkdirAll(h.PitfallsDir(), 0o755))
+	payload, err := yaml.Marshal(generator.PitfallsFile{Provider: "scaleway"})
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(h.PitfallsDir(), "scaleway.yaml"), payload, 0o644))
+
+	// The agent points at a binary that does not exist, which is what
+	// makes this a test rather than a tautology: buildRuntime would
+	// otherwise construct a working transport and prove nothing.
+	raw, err := os.ReadFile(h.ConfigPath)
+	require.NoError(t, err)
+	patched := strings.Replace(string(raw), "type: claude-code",
+		"type: claude-code\n  claude:\n    command: /nonexistent/claude", 1)
+	require.NotEqual(t, string(raw), patched, "the harness config must declare a claude-code agent")
+	require.NoError(t, os.WriteFile(h.ConfigPath, []byte(patched), 0o644))
+
+	cmd := &cobra.Command{Use: "retire"}
+	cmd.Flags().Duration("older-than", generator.DefaultLiveRetention, "")
+	cmd.Flags().Bool("dry-run", false, "")
+	cmd.Flags().String("output", string(OutputModeHuman), "")
+	cmd.Flags().String("config", h.ConfigPath, "")
+	var out strings.Builder
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+
+	handler := (&rootConfig{}).withRuntimeNoGenerator("pitfalls retire", runPitfallsRetireCommand)
+
+	assert.NoError(t, handler(cmd, []string{"scaleway"}),
+		"corpus maintenance must not fail because the agent is unconfigured")
+}

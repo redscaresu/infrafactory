@@ -21,7 +21,7 @@ func newPitfallsCmd(cfg *rootConfig) *cobra.Command {
 		Use:   "retire <cloud>",
 		Short: "Remove live-sourced pitfalls that have not been seen for a while",
 		Args:  cobra.ExactArgs(1),
-		RunE:  cfg.withRuntime("pitfalls retire", runPitfallsRetireCommand),
+		RunE:  cfg.withRuntimeNoGenerator("pitfalls retire", runPitfallsRetireCommand),
 	}
 	retire.Flags().Duration("older-than", generator.DefaultLiveRetention,
 		"Retire live pitfalls last seen longer ago than this")

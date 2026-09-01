@@ -48,6 +48,12 @@ Last updated: 2026-08-31
   `refreshed=N`. **Preserving a record is not the same as preserving what the
   record says.**
 
+  **Pass 61**: the command was wired through the full runtime, which builds the
+  Claude transport — so corpus maintenance would fail because the *agent* was
+  unconfigured, on exactly the machine doing housekeeping.
+  `withRuntimeNoGenerator` keeps the logging and substitutes a generator that
+  **refuses**, since this command must never generate.
+
   `--dry-run` and the real thing share one rule by construction: a dry-run that
   can disagree with the real thing is worse than no dry-run. And `TouchLivePitfall`
   refreshes rather than appends, which is what makes retention mean *last

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -8,6 +9,7 @@ import (
 	"path/filepath"
 
 	"github.com/redscaresu/infrafactory/internal/config"
+	"github.com/redscaresu/infrafactory/internal/generator"
 	"github.com/spf13/cobra"
 )
 
@@ -46,6 +48,32 @@ func (cfg *rootConfig) withRuntime(op string, next runtimeHandler) func(*cobra.C
 	}
 	opts := defaultRuntimeOptions()
 	opts.deps = cfg.deps
+	return withRuntimeWithOptions(op, opts, next)
+}
+
+// withRuntimeNoGenerator is for commands that never generate.
+//
+// buildRuntime constructs the Claude transport by default, and that
+// construction can fail -- a missing `claude` binary, an unreadable
+// prompts directory. `pitfalls retire` reads and rewrites a YAML file;
+// making corpus maintenance impossible because the LLM is not configured
+// is a dependency nobody asked for, and it would bite hardest on exactly
+// the machine doing housekeeping rather than generation.
+//
+// The stub refuses rather than returning empty output: this command must
+// never generate, so a call is a bug that should say so loudly rather
+// than silently produce nothing.
+func (cfg *rootConfig) withRuntimeNoGenerator(op string, next runtimeHandler) func(*cobra.Command, []string) error {
+	opts := defaultRuntimeOptions()
+	if cfg != nil && cfg.depsSet {
+		opts.deps = cfg.deps
+	}
+	if opts.deps.Generator == nil {
+		opts.deps.Generator = generator.SeedGeneratorFunc(
+			func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
+				return nil, errors.New("this command does not generate")
+			})
+	}
 	return withRuntimeWithOptions(op, opts, next)
 }
 
