@@ -434,3 +434,23 @@ delete already used, and it lives inside `ensureRunProject` so `test`'s path get
 it without being told.
 
 **Losing the id is worse than the extra second: the id is the handle.**
+
+### Follow-up, S155b: the rule applies to applying, not only to destroying
+
+This ADR's guard was written for teardown, and `live upgrade` needed the same two
+checks for the opposite operation. It took three review passes to get there —
+first the marker, then the marker *required*, then finally the API — because each
+step looked complete on its own.
+
+It should not have. **The marker and the deployment record are both local files**,
+so choosing between them only ever proves that two local files agree. This ADR
+already said the marker gives identity and API provenance gives class, and that
+neither alone is sufficient *because provenance is the half that cannot be forged
+locally*. Editing two files was enough to point a real apply at somebody's
+production project.
+
+One asymmetry, deliberate: the deletion guard treats a project the API reports
+**gone** as fine, because gone is the outcome it wants. Applying is the opposite —
+a project that does not exist, or exists without the stamp, is one to refuse. So
+`live upgrade` uses its own check rather than reusing `AssertRunProjectDeletable`,
+whose message also describes the wrong operation.

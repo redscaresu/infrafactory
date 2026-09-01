@@ -49,6 +49,10 @@ type fakeSandboxDeployHarness struct {
 	err     error
 	calls   int
 	lastCtx context.Context
+	// onRun fires during the apply, so a test can move the world at the
+	// moment a real apply would -- an upgrade's version changes because
+	// the apply changed it, not before.
+	onRun func()
 }
 
 // Run writes a minimal terraform-live.tfstate, because a real apply
@@ -63,6 +67,11 @@ func (f *fakeSandboxDeployHarness) Run(ctx context.Context, workDir string, _ ma
 		_ = os.MkdirAll(workDir, 0o755)
 		_ = os.WriteFile(filepath.Join(workDir, harness.LiveStateFilename), []byte(
 			`{"resources":[{"type":"scaleway_account_project","instances":[{"attributes":{"id":"test-run-project"}}]}]}`), 0o600)
+	}
+	// Last, so a hook that writes its own state is not overwritten by the
+	// default one above.
+	if f.onRun != nil {
+		f.onRun()
 	}
 	return f.result, f.err
 }

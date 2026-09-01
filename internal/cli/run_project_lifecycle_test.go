@@ -22,11 +22,14 @@ type fakeRunProject struct {
 	deleteErrs   []error
 	describeErr  error
 	describeGone bool
-	creates      int
-	deletes      int
-	lastOrg      string
-	lastScen     string
-	deletedID    string
+	// describeUnstamped returns a real project that is NOT one of
+	// infrafactory's -- what editing local files would point an apply at.
+	describeUnstamped bool
+	creates           int
+	deletes           int
+	lastOrg           string
+	lastScen          string
+	deletedID         string
 }
 
 func (f *fakeRunProject) Create(_ context.Context, _, organizationID, scenario, _ string) (harness.RunProject, error) {
@@ -44,6 +47,9 @@ func (f *fakeRunProject) Describe(_ context.Context, _, projectID string) (harne
 	}
 	if f.describeGone {
 		return harness.ProjectProvenance{Exists: false}, nil
+	}
+	if f.describeUnstamped {
+		return harness.ProjectProvenance{Exists: true, Name: "openclaw-prod", Description: "real infrastructure"}, nil
 	}
 	return harness.ProjectProvenance{
 		Exists: true, Name: harness.RunProjectNamePrefix + "x", Description: harness.RunProjectDescription,

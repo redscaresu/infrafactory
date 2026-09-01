@@ -257,7 +257,7 @@ func checkRunningVersion(ctx context.Context, runtime *CommandRuntime, d livesto
 	}
 
 	// Finding the tag proves it is there, whatever else was cut off.
-	if strings.Contains(result.Body, d.Tag) {
+	if mentionsVersion(result.Body, d.Tag) {
 		return livestore.VersionConfirmed, ""
 	}
 
@@ -292,3 +292,36 @@ func missingProbeTarget(d livestore.Deployment) string {
 	}
 	return ""
 }
+
+// mentionsVersion reports whether body names this exact version.
+//
+// Not strings.Contains: a plain substring match confirms tag "1.2"
+// against a service reporting "nginx/1.27.4", which is a service running
+// something other than what the record claims -- the precise drift this
+// check exists to catch, passed off as confirmation.
+//
+// A match must not be flanked by digits, and must not directly follow a
+// dot. So "1.27" is confirmed by "1.27.4" (a patch of the same version)
+// and "1.2" is not, and "1.27" is not confirmed by "11.27".
+func mentionsVersion(body, tag string) bool {
+	if tag == "" {
+		return false
+	}
+	for offset := 0; ; {
+		idx := strings.Index(body[offset:], tag)
+		if idx < 0 {
+			return false
+		}
+		start := offset + idx
+		end := start + len(tag)
+
+		leftOK := start == 0 || (!isVersionDigit(body[start-1]) && body[start-1] != '.')
+		rightOK := end == len(body) || !isVersionDigit(body[end])
+		if leftOK && rightOK {
+			return true
+		}
+		offset = start + 1
+	}
+}
+
+func isVersionDigit(b byte) bool { return b >= '0' && b <= '9' }

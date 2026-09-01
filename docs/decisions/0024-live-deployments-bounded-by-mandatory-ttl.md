@@ -448,3 +448,106 @@ response is `unchecked`, and only a complete one can produce `unconfirmed`.
 Every `unchecked` carries the reason it was not checked — "no version_path
 declared" is a lie for a declared path that could not be reached, and that
 distinction is the whole point of having three states.
+
+## Amendment, 2026-08-31 (S155b): an apply is not an upgrade
+
+`live upgrade` rolls a deployment onto new configuration in place — same project,
+same workdir, so the address survives.
+
+**infrafactory does not produce the new HCL.** It owns applying it safely: into
+the project the deployment already owns, under the same deny-by-default checks a
+first deploy runs, and with proof afterwards that the version changed. This
+composes with however the configuration was produced, and keeps the generator out
+of the live path.
+
+Not parameterised through `TF_VAR`, deliberately. `SandboxStripEnv` removes
+`TF_VAR_*` because the cost bounds read a variable's **default** to decide blast
+radius; an injected variable would make those checks vouch for a number that never
+reaches the API. Handing over whole HCL keeps every check applying to the
+configuration actually applied.
+
+Three rules:
+
+- **A successful apply is not an upgrade.** Terraform reaching its desired state
+  says nothing about whether the service restarted, pulled the image, or ran its
+  user data. Reporting an upgrade on the strength of the apply is the same error
+  as trusting the record over the service, one step later.
+- **An upgrade refuses to start from a contradicted version.** Rolling forward
+  from a version the service denies would record a transition that never happened.
+  Unchecked is permitted and stated; contradicted is not.
+- **The superseded configuration is kept** in `.infrafactory-previous/`, one
+  generation deep. `ExtractFixPitfall` produces prescriptive rules by diffing a
+  failing configuration against a passing one, and a live failure has no "next
+  iteration that fixed it" — but an upgrade has a before and an after, which is
+  the same shape. Discarding it would leave live signals at the weakest class of
+  lesson.
+
+Two corrections from pass 50. The record advances onto the new tag only when the
+apply **ran**: a failure during apply may have changed a great deal, but a failure
+at init or plan changed nothing, and advancing there would make the record claim a
+version that was never deployed. And the address is re-read from state after the
+apply, because replacement HCL can recreate the load balancer — verifying against
+the address captured at first deploy would probe infrastructure the deployment no
+longer owns, and leave every later observation pointed there too.
+
+Pass 51 added two more consequences of the same question. `--from` may not name
+the deployment's own workdir or anything inside it: the superseded configuration
+is removed before the new one is read, so that would leave the workdir empty while
+the infrastructure kept running. And when nothing reached the cloud, the rejected
+configuration is reverted from `.infrafactory-previous/` — otherwise the workdir
+describes something that was never applied.
+
+The tag, the address and the workdir contents all hang off one predicate: **did
+anything reach the cloud?** Three separate answers to that question is how the
+first version got two of them wrong.
+
+`live upgrade` requires `validation.layers.sandbox_deploy.enabled`, as `deploy`
+does. A gate on one entry point into real infrastructure and not the other guards
+nothing.
+
+And the ordering is load-bearing: every fallible step that does not touch the
+workdir runs **before** the destructive swap. Three review passes each found a
+different early return leaving unapplied configuration behind; the fix is not a
+fourth rollback path but removing the opportunity for one. **Ordering beats
+compensating.**
+
+The project an upgrade applies into comes from the **marker**, not the deployment
+record, and a disagreement between them is refused. The record is the half a stale
+or edited file can change, and this call applies real infrastructure into whatever
+it names — applying deserves at least the care destroying gets (pass 37 for
+teardown, pass 53 for upgrade).
+
+Verification distinguishes an upgrade from a no-op. Without a new tag the record
+still names the old version, so confirming it shows the service is unchanged
+rather than upgraded; reporting otherwise would be a green built from checking
+that nothing changed.
+
+The marker is **required** for an upgrade, not merely preferred: falling back to
+the record when it cannot be read leaves the editable half deciding where real
+infrastructure is applied. `live teardown` does fall back, deliberately — refusing
+there strands a pre-cutover record whose resources are real, and destroy is bounded
+by the state in its own workdir. Neither argument holds when applying, and an
+operator who cannot upgrade can still tear down and deploy again.
+
+The version comparison respects version boundaries. A plain substring match
+confirms tag `1.2` against a service reporting `nginx/1.27.4` — a service running
+something other than what the record claims, reported as confirmation, which is
+the precise drift this check exists to catch. A match may not be flanked by digits
+and may not directly follow a dot: `1.27` is confirmed by `1.27.4`, `1.2` is not,
+and `11.27` does not confirm `1.27`.
+
+`live upgrade` also re-reads its record before writing, as `observe` does. It
+holds that record across a real apply — minutes, not the microseconds a probe
+takes — so a teardown finishing in that window would otherwise be overwritten and
+the deployment resurrected. A record released mid-apply produces a loud failure
+naming the project, because whatever the apply created is not tracked by a
+released record. The window is narrowed, not closed: the store has no
+compare-and-swap.
+
+Re-reading a record before writing is only half the rule: the write must go onto
+the **fresh** copy, not the one loaded earlier. `live upgrade` holds its record
+across an apply that takes minutes, and `live observe` on a cron appends
+observations in exactly that window. Writing back the stale copy discarded them —
+which does not corrupt the record, it quietly weakens the learning signal S156's
+promotion gate counts. An upgrade merges only the three fields it owns (`Tag`,
+`UpgradedAt`, `Address`); anything else belongs to whoever wrote it last.

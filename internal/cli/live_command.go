@@ -54,6 +54,16 @@ func newLiveCmd(cfg *rootConfig) *cobra.Command {
 		RunE:  cfg.withRuntime("live observe", runLiveObserveCommand),
 	})
 
+	upgrade := &cobra.Command{
+		Use:   "upgrade <deployment-id>",
+		Short: "Roll a live deployment onto new configuration in place, and prove the version changed",
+		Args:  cobra.ExactArgs(1),
+		RunE:  cfg.withRuntime("live upgrade", runLiveUpgradeCommand),
+	}
+	upgrade.Flags().String("from", "", "Directory holding the new HCL to apply (required)")
+	upgrade.Flags().String("tag", "", "Tag the deployment now claims to run; recorded and verified against the service")
+	cmd.AddCommand(upgrade)
+
 	reap := &cobra.Command{
 		Use:   "reap",
 		Short: "Destroy every live deployment whose TTL has run out",

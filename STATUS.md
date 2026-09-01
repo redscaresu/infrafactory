@@ -4,6 +4,123 @@ Last updated: 2026-08-31
 
 ## Current phase
 
+- ✅ **S155b canary: the thesis, demonstrated on real infrastructure (2026-09-01)** —
+  deployed v1, confirmed the service was serving `nginx:1.27`, upgraded to 1.28,
+  and **`sandbox_deploy/apply` passed while `upgrade_verify` failed.** Confirmed
+  by hand: `curl` returned `nginx/1.27.0` while the workdir held the 1.28 config.
+
+  The mechanism is mundane, which is the point — changing `user_data` on a running
+  Scaleway instance does not re-run cloud-init. Terraform updated the resource,
+  reported success, and the machine kept serving what it already served.
+
+  **That upgrade was green everywhere else**: the apply passed, the sweep would
+  have reported the account clean because it was, a cost check would have found
+  nothing because there was nothing. Only the check that asked *the service*
+  disagreed. Same shape as D6, same lesson.
+
+  It also produced, by accident, exactly what S156 wants: a **failed upgrade with
+  both configurations preserved** — the before/after pair `ExtractFixPitfall`
+  needs, from a real failure rather than a constructed one. Full record:
+  [docs/status/s155b-upgrade-canary.md](status/s155b-upgrade-canary.md).
+
+- 🚀 **S155b: `live upgrade` — an apply is not an upgrade (2026-08-31)** —
+  rolls a live deployment onto new configuration **in place**: same project, same
+  workdir, so the load balancer and its address survive.
+
+  **infrafactory does not invent the new HCL.** It owns the part that is hard to
+  get right — applying it into the project the deployment already owns, under the
+  same deny-by-default checks a first deploy runs, and proving afterwards that the
+  version actually changed. That composes with however the HCL was produced.
+
+  **Deliberately not parameterised through `TF_VAR`.** `SandboxStripEnv` removes
+  `TF_VAR_*` because the cost bounds read a variable's *default* to decide blast
+  radius, so an injected variable would make those checks vouch for a number that
+  never reaches the API. Handing over whole HCL keeps every existing check
+  applying to the configuration that is actually applied.
+
+  Three properties worth naming:
+
+  - **A successful apply is not an upgrade.** Terraform reaching its desired state
+    does not mean the service is running the new version — the instance may not
+    have restarted, the image may not have been pulled, the user data may never
+    have run. `upgrade_verify` fails on exactly that, and it is the whole point.
+  - **It refuses to start from a version the service contradicts**, because that
+    would record a v1→v2 transition that never happened. Unchecked is allowed and
+    said out loud; contradicted is not.
+  Pass 50 corrected two of them. The tag advanced even when the apply never ran —
+  right for a failure *during* apply, wrong at init or plan where nothing reached
+  the cloud, and there it made the record claim a version that was never deployed.
+  And the address could go stale: replacement HCL can recreate the load balancer,
+  so verification would probe infrastructure the deployment no longer owns. It is
+  re-read after the apply now, reported when it moves, and when it cannot be
+  re-read the old one is kept **and said out loud**.
+
+  Pass 51 found two more, both data-safety: `--from` naming the deployment's own
+  workdir **emptied it** (the superseded files are removed before the new ones are
+  read), and a rejected configuration was left in place after an init or plan
+  failure, so every later operation would plan against something never applied.
+  Both now hang off the same `applyRan` predicate as the tag — *did anything reach
+  the cloud?* — which is the real fix: one question answered consistently rather
+  than three patches.
+
+  Pass 52 closed it: `upgrade` never checked the `sandbox_deploy.enabled` opt-in,
+  so Layer 3 could be off and an upgrade would still apply to the real project —
+  a gate on one entry point and not the other guards nothing. And an environment
+  failure could still leave unapplied configuration behind, which was **fixed by
+  reordering rather than another rollback**: everything that can fail without
+  touching the workdir now happens before the part that does. Ordering beats
+  compensating — one rollback path instead of one per early return.
+
+  Pass 53: the project id came from the **record** rather than the marker — the
+  half a stale file can change — on a call that applies real infrastructure.
+  `live teardown` learned that in pass 37 and I did not carry it into new code;
+  a disagreement is refused now. **Applying deserves at least the care destroying
+  gets.** Also, with no `--tag` the verification compared the *old* tag and
+  trivially passed, reporting a transition that was never attempted — a green
+  built from checking that nothing changed.
+
+  Pass 54 finished it: the marker was *preferred*, not required, so an unreadable
+  one fell back to the editable record — a guard that degrades to the thing it was
+  guarding against. Required now, and the contrast with `live teardown` (which
+  does fall back, deliberately) is written down: refusing there strands real
+  pre-cutover resources and destroy is bounded by its own state; neither holds
+  when applying.
+
+  Pass 55 finished the second thread: the marker and the record are **both local
+  files**, so trusting either only proves two local files agree. ADR-0025 never
+  said "use the marker" — it said *two checks that must both pass*, the marker for
+  identity and **API provenance** for class, because the second cannot be forged
+  locally. Editing two files was enough to point a real apply at a production
+  project. The API is asked now, and deliberately not through the deletion guard,
+  which treats "gone" as success.
+
+  Pass 56: a prefix match confirmed tag `1.2` against a service reporting
+  `nginx/1.27.4` — a **false confirmation**, the exact drift S155a exists to
+  catch. `mentionsVersion` requires version boundaries now. And the upgrade could
+  overwrite a concurrent teardown: the same race fixed in `observe`, worse here
+  because an upgrade holds its record across a real apply — minutes, not the
+  microseconds a probe takes.
+
+  Pass 57: the pass-56 re-read was used for the released check and then
+  **discarded**, writing back the stale copy — so observations `live observe`
+  appended during a minutes-long apply were silently dropped. Those are the input
+  S156's promotion gate counts, so it weakens the learning signal rather than
+  breaking anything visibly. Now an allow-list merge of the three fields an
+  upgrade owns onto the fresh record.
+
+  **The shape of this slice**: eight passes, fourteen findings, and ten of them are
+  one incomplete answer rather than eleven mistakes — "did anything reach the
+  cloud?" answered four times, "which project do we trust?" three, and three
+  separate fixes that **already existed elsewhere in the codebase** and were not
+  carried to a new path. The lesson is not "review harder": new code touching an
+  existing mechanism should start by reading how that mechanism is already used,
+  rather than reimplementing the parts of it that seem needed.
+
+  - **The previous HCL is kept** in `.infrafactory-previous/`. That pair either
+    side of one change is the diff `ExtractFixPitfall` needs and cannot
+    reconstruct — it is what lets S156 produce prescriptive rules rather than the
+    weakest class of lesson.
+
 - 🔍 **S155a: the record states intent; only the service states fact (2026-08-31)** —
   `deploy` records the **declared** image and tag, and the canary showed how far
   that drifts: the record said `nginx:1.27` while the instance served
