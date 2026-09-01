@@ -106,4 +106,59 @@ test.describe('Visual regression baselines', () => {
       fullPage: true,
     });
   });
+
+  // The estate page's job is to make three states visually distinct:
+  // healthy, failing, and NOBODY LOOKED. A regression that renders the
+  // third as a quiet neutral row beside the first is exactly the failure
+  // this page exists to prevent, and it is a visual failure -- the text
+  // assertions in deployments.spec.ts would still pass.
+  //
+  // Served from a fixed payload so the baseline is stable: real
+  // deployments have moving TTLs and timestamps.
+  test('deployments estate page', async ({ page }) => {
+    await page.route('**/api/deployments', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          schema: 'infrafactory.api.deployments.v1',
+          deployments: [
+            {
+              id: 'dep-drift', scenario: 'web-live-paris', state: 'live', address: '51.15.0.1',
+              unreadable: false, expired: false, upgraded: true,
+              upgraded_at: '2026-09-02T09:00:00Z', upgrade_started_at: '2026-09-02T08:58:00Z',
+              time_to_live_seconds: 1800,
+              health: { status: 'healthy', version: 'unconfirmed', at: '2026-09-02T10:00:00Z', observations: 4 },
+            },
+            {
+              id: 'dep-silent', scenario: 'lb-serving-paris', state: 'live', address: '',
+              unreadable: false, expired: false, upgraded: false,
+              upgraded_at: null, upgrade_started_at: null,
+              time_to_live_seconds: 3600,
+              health: { status: 'unobserved', version: 'unchecked', at: null, observations: 0 },
+            },
+            {
+              id: 'dep-ok', scenario: 'block-paris', state: 'live', address: '51.15.0.9',
+              unreadable: false, expired: false, upgraded: false,
+              upgraded_at: null, upgrade_started_at: null,
+              time_to_live_seconds: 7200,
+              health: { status: 'healthy', version: 'confirmed', at: '2026-09-02T10:00:00Z', observations: 9 },
+            },
+          ],
+          unreadable: [],
+        }),
+      })
+    );
+    await page.goto('/deployments');
+    await expect(page.getByTestId('deployment-health-dep-silent')).toHaveText('never observed');
+    await expect(page).toHaveScreenshot('deployments-estate.png', {
+      // The last-observed column renders a locale timestamp, which is
+      // stable here only because the payload is fixed -- but the
+      // formatting still depends on the runner's locale.
+      mask: VOLATILE_SELECTORS.map((sel) => page.locator(sel)).concat([
+        page.locator('[data-testid^="deployment-observed-"]'),
+      ]),
+      fullPage: true,
+    });
+  });
 });

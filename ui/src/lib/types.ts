@@ -119,3 +119,47 @@ export interface SavePitfallsResponse {
   provider: string;
   count: number;
 }
+
+export interface DeploymentHealth {
+  status: string;
+  // Always spelled out -- "confirmed" | "unconfirmed" | "unchecked".
+  // Never an empty string: the API sends the word so this UI cannot
+  // render nobody-looked as a blank cell (ADR-0024, S159a).
+  version: string;
+  // null when never observed, rather than a zero time that would render
+  // as a date in the year 1.
+  at: string | null;
+  detail?: string;
+  observations: number;
+}
+
+export interface Deployment {
+  id: string;
+  scenario?: string;
+  cloud?: string;
+  project_id?: string;
+  state?: string;
+  image?: string;
+  tag?: string;
+  address?: string;
+  // The service port snapshotted at deploy time. `live observe` probes
+  // address:port, so a link that drops it points somewhere the system
+  // never checked.
+  port?: number;
+  unreadable: boolean;
+  health: DeploymentHealth;
+  expired: boolean;
+  time_to_live_seconds: number;
+  upgraded: boolean;
+  upgraded_at: string | null;
+  upgrade_started_at: string | null;
+}
+
+export interface DeploymentsResponse {
+  schema: string;
+  deployments: Deployment[];
+  // Records the store could not decode. They may describe running,
+  // billing infrastructure, so the page must show them rather than
+  // letting "we could not check" look like "nothing is running".
+  unreadable: string[];
+}

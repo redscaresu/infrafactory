@@ -149,3 +149,27 @@ this arc succeeds, so it closes first.
 Authentication and multi-user access, remote (non-loopback) serving, deploying
 anything but Scaleway, and editing a live deployment in place. Upgrade is S155's
 job in the live-services arc, not this one's.
+
+## Progress, 2026-09-02
+
+**S159 split.** As planned it bundled a read path, five mutating endpoints and a
+seam extraction — several questions in one slice, which is the shape S156d cost
+seven review passes to learn. The read path carries no guards and the mutating
+ones carry all of them.
+
+- **S159a (shipped)** — `GET /api/deployments`, read-only. Refuses every mutating
+  method. `Deployment.Health()` moved onto the record so `live ls` and the API
+  cannot disagree about what silence means.
+- **S159b (next)** — the mutating endpoints, which need `runDeployCommand`
+  callable without a `*cobra.Command`. This is where the guards live and where
+  getting it wrong spends money.
+
+**S161 (shipped)** — the estate page, ahead of S159b because it depends only on
+the read endpoint and spends nothing.
+
+One correction to this plan's own warning, learned the hard way in S159a: the
+plan says a UI must not render `unobserved`/`unchecked` as blank cells. The
+**zero value delivers exactly that by default** — `VersionUnchecked` is the empty
+string, and `omitempty` does nothing on a `time.Time`, so an unobserved
+deployment reported being observed in the year 1. Three review findings, all the
+same defect, closed by a test asserting the class rather than the fields.
