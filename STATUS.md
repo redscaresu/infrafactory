@@ -4,6 +4,25 @@ Last updated: 2026-08-31
 
 ## Current phase
 
+- ✅ **S155b canary: the thesis, demonstrated on real infrastructure (2026-09-01)** —
+  deployed v1, confirmed the service was serving `nginx:1.27`, upgraded to 1.28,
+  and **`sandbox_deploy/apply` passed while `upgrade_verify` failed.** Confirmed
+  by hand: `curl` returned `nginx/1.27.0` while the workdir held the 1.28 config.
+
+  The mechanism is mundane, which is the point — changing `user_data` on a running
+  Scaleway instance does not re-run cloud-init. Terraform updated the resource,
+  reported success, and the machine kept serving what it already served.
+
+  **That upgrade was green everywhere else**: the apply passed, the sweep would
+  have reported the account clean because it was, a cost check would have found
+  nothing because there was nothing. Only the check that asked *the service*
+  disagreed. Same shape as D6, same lesson.
+
+  It also produced, by accident, exactly what S156 wants: a **failed upgrade with
+  both configurations preserved** — the before/after pair `ExtractFixPitfall`
+  needs, from a real failure rather than a constructed one. Full record:
+  [docs/status/s155b-upgrade-canary.md](status/s155b-upgrade-canary.md).
+
 - 🚀 **S155b: `live upgrade` — an apply is not an upgrade (2026-08-31)** —
   rolls a live deployment onto new configuration **in place**: same project, same
   workdir, so the load balancer and its address survive.
