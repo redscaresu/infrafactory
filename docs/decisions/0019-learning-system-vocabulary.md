@@ -148,3 +148,17 @@ And the rule text stays descriptive: it states what was observed and what the
 evidence was, and does not invent a remedy. A descriptive rule that fabricates a
 fix is worse than one admitting it has none; the prescriptive form comes from an
 upgrade diff (S156d).
+
+A `source: live` entry's identity is its **`observed_key`** — the normalized
+detail the promotion gate grouped by — and not its rule text.
+
+The text is unstable by design: a live rule states its evidence, and the evidence
+grows as the same failure keeps being observed. Identifying an entry by its text
+therefore makes one lesson look new on every pass, so the corpus gains a copy per
+cron tick while appearing to refresh. Everything that identifies a live entry —
+the append path and the sweep merge — keys on `observed_key`, and a refresh
+rewrites the text so the corpus carries the strongest evidence rather than
+whichever was written first.
+
+An entry without a key is refused: it could never be recognised again, and
+writing something unmaintainable is worse than writing nothing.

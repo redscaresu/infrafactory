@@ -18,6 +18,20 @@ type PitfallEntry struct {
 	Source         string `yaml:"source"`
 	DiscoveredFrom string `yaml:"discovered_from,omitempty"`
 
+	// ObservedKey is the stable identity of a `source: live` entry: the
+	// normalized detail the observation was grouped by.
+	//
+	// It exists because the rule TEXT is not stable. A live rule states
+	// its evidence — how many deployments, how long a run — and those
+	// numbers grow as the same failure keeps being observed. Matching on
+	// the text would therefore append a new entry every time the counters
+	// ticked, so the corpus would grow once per cron tick while looking
+	// like it was refreshing (S156c, pass 77).
+	//
+	// The key is what does not change: the same failure, however much
+	// evidence accumulates for it.
+	ObservedKey string `yaml:"observed_key,omitempty"`
+
 	// LastSeen is when the signal behind this rule was last observed,
 	// RFC3339. Only `source: live` entries carry it, and only they are
 	// retired for going stale (S156a).

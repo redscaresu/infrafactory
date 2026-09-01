@@ -277,11 +277,21 @@ func TouchLivePitfall(pitfallsDir, cloud, resource, rule string, now time.Time) 
 //
 // A rule seen again REFRESHES rather than duplicates, which is what makes
 // retention mean "last observed" rather than "first observed".
-func AppendLivePitfall(pitfallsDir, cloud string, pitfall LearnedPitfall, now time.Time) error {
+func AppendLivePitfall(pitfallsDir, cloud, observedKey string, pitfall LearnedPitfall, now time.Time) error {
 	pitfall.Source = LiveSource
+	if observedKey == "" {
+		return fmt.Errorf("a live pitfall needs an observed key, or it can never be recognised again")
+	}
 
 	// Already known: this is a re-observation, not a new lesson.
-	if err := TouchLivePitfall(pitfallsDir, cloud, pitfall.Resource, pitfall.Rule, now); err == nil {
+	//
+	// Matched on the KEY rather than the rule text, because the text
+	// states its evidence and that evidence grows. Refreshing updates the
+	// text too, so the corpus carries the strongest evidence seen rather
+	// than the first.
+	if refreshed, err := refreshLivePitfall(pitfallsDir, cloud, observedKey, pitfall, now); err != nil {
+		return err
+	} else if refreshed {
 		return nil
 	}
 
@@ -314,7 +324,33 @@ func AppendLivePitfall(pitfallsDir, cloud string, pitfall LearnedPitfall, now ti
 		Rule:           pitfall.Rule,
 		Source:         LiveSource,
 		DiscoveredFrom: pitfall.DiscoveredFrom,
+		ObservedKey:    observedKey,
 		LastSeen:       now.UTC().Format(time.RFC3339),
 	})
 	return writePitfallsFile(pitfallsDir, filePath, cloud, pf)
+}
+
+// refreshLivePitfall updates an existing live entry in place, reporting
+// whether it found one.
+//
+// The rule text is rewritten as well as the timestamp: a candidate seen
+// on more deployments is the same lesson with better evidence, and the
+// corpus should carry the better version rather than whichever was
+// written first.
+func refreshLivePitfall(pitfallsDir, cloud, observedKey string, pitfall LearnedPitfall, now time.Time) (bool, error) {
+	pf, filePath, err := loadCloudPitfalls(pitfallsDir, cloud)
+	if err != nil || pf == nil {
+		return false, err
+	}
+
+	for i, entry := range pf.Pitfalls {
+		if entry.Source != LiveSource || entry.Resource != pitfall.Resource || entry.ObservedKey != observedKey {
+			continue
+		}
+		pf.Pitfalls[i].Rule = pitfall.Rule
+		pf.Pitfalls[i].DiscoveredFrom = pitfall.DiscoveredFrom
+		pf.Pitfalls[i].LastSeen = now.UTC().Format(time.RFC3339)
+		return true, writePitfallsFile(pitfallsDir, filePath, cloud, pf)
+	}
+	return false, nil
 }

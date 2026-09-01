@@ -42,6 +42,17 @@ Last updated: 2026-08-31
   Third time in this arc that reusing an existing mechanism was the mistake rather
   than the shortcut. **A mechanism's semantics travel with it.**
 
+  **Pass 77 caught pass 76's consequence.** Exact-text identity is unstable,
+  because a live rule *states its evidence* and that evidence grows — so the
+  corpus gained an entry every time the counters ticked, while appearing to
+  refresh. `ObservedKey` now holds the normalized detail the gate grouped by:
+  identity separated from presentation, so a refresh rewrites the text and the
+  corpus carries the **strongest** evidence rather than the first written.
+
+  Then the same bug one layer out, found by **enumerating the readers before the
+  next review** rather than after: `pitfall-merge` keyed live entries on rule text
+  too, so a sweep would have duplicated every refreshed lesson.
+
   **Every entry is stamped**, and that is a hard coupling rather than a nicety:
   S156a never retires an entry without `last_seen`, so an unstamped live entry
   would be **immortal** — the inflow quietly undoing the slice built to bound it.

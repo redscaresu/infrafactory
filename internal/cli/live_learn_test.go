@@ -221,11 +221,22 @@ func TestLearnTwiceRefreshesRatherThanDuplicating(t *testing.T) {
 	})
 
 	require.NoError(t, runLearn(t, rt, &strings.Builder{}))
-	first := corpus(t, pitfalls)
-	require.Len(t, first, 1)
+	require.Len(t, corpus(t, pitfalls), 1)
+
+	// A second deployment exhibits the SAME failure, so the evidence
+	// grows and the rule text changes with it. Identity must survive
+	// that, or the corpus gains an entry every time the counters tick.
+	seedLearnDeployment(t, store, learnDeployment{
+		id: "dep-2", detail: "health path returned HTTP 503",
+		resource: "scaleway_lb_ip", cloud: "scaleway", observations: 3,
+	})
 
 	require.NoError(t, runLearn(t, rt, &strings.Builder{}))
-	assert.Len(t, corpus(t, pitfalls), 1, "the same lesson twice is one lesson")
+
+	entries := corpus(t, pitfalls)
+	require.Len(t, entries, 1, "more evidence for one failure is not a second lesson")
+	assert.Contains(t, entries[0].Rule, "2 deployment(s)",
+		"and the corpus carries the stronger evidence")
 }
 
 // The version-drift rule says the thing that is actually surprising: the

@@ -108,7 +108,10 @@ func runLiveLearnCommand(cmd *cobra.Command, _ []string, runtime *CommandRuntime
 			Source:         generator.LiveSource,
 			DiscoveredFrom: strings.Join(c.Scenarios, ", "),
 		}
-		if err := generator.AppendLivePitfall(runtime.Config.Paths.Pitfalls, cloud, pitfall, now); err != nil {
+		// c.Detail is the NORMALIZED form the gate grouped by, and it is
+		// what stays the same as evidence accumulates -- unlike the rule
+		// text, which states that evidence.
+		if err := generator.AppendLivePitfall(runtime.Config.Paths.Pitfalls, cloud, c.Detail, pitfall, now); err != nil {
 			failures = append(failures, FailureSummary{
 				Layer: "live", Stage: "learn", Check: "append",
 				Command: "live learn",
