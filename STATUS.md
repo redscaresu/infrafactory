@@ -4,6 +4,41 @@ Last updated: 2026-08-31
 
 ## Current phase
 
+- 🔗 **Doc links are now ratcheted (2026-09-01)** — `STATUS.md` lives at the repo
+  **root** while what it points at lives under `docs/`, so `](plans/x.md)` looks
+  right and resolves to nothing. **All four** of its relative links were broken;
+  a reviewer caught one and I had written three of the others the same session.
+  `TestDocLinksResolve` now walks `docs/` plus the root documents, verified
+  against synthetic drift, and refuses to pass if it finds fewer than two files —
+  because pass 34 showed an audit that narrows its own scope reads as coverage
+  while the defect lands elsewhere.
+
+- 📋 **S158 planned: the live lifecycle has no end-to-end test (2026-09-01)** —
+  `internal/e2e/` holds twelve files and none mentions `deploy`, `live observe`,
+  `live upgrade` or `livestore`. Every S151–S156a guarantee is unit tests plus a
+  real-cloud run driven by hand, one command at a time. **Nothing re-runs the
+  sequence.**
+
+  The live commands are coupled through a **record**, not through function calls,
+  and each command's unit tests build their own. That is exactly the shape that
+  hides defects, and this session produced three: `observe` failing on a record
+  `deploy` legitimately wrote without an address; `upgrade` discarding
+  observations appended during its apply; the record and marker disagreeing about
+  which project an apply may touch. **No unit test could have caught any of
+  them.**
+
+  Plan: [docs/plans/live-lifecycle-e2e-plan.md](docs/plans/live-lifecycle-e2e-plan.md).
+  One test driving the real commands in sequence against mockway, plus one real
+  pass — the mock proves the commands agree with each other, only Scaleway proves
+  they agree with the world.
+
+  **The UI arc was refreshed to match.** S164 held the only journey coverage, at
+  the end of an arc that has not started, so it moves out to S158 and keeps its
+  Playwright half. And S161's estate page predates observation: it must render
+  `unobserved` and `unchecked` **distinctly**, because a blank cell rebuilds the
+  falsehood the three-state design exists to prevent — that nobody having looked
+  is the same as nothing being wrong.
+
 - 🗂️ **S156 broken into five slices, and its unscheduled prerequisite scheduled
   (2026-09-01)** — `docs/plans/live-learning-loop-plan.md`. The plan already
   warned that **S156 must not merge without a retirement path for `source: live`
@@ -143,7 +178,7 @@ Last updated: 2026-08-31
   It also produced, by accident, exactly what S156 wants: a **failed upgrade with
   both configurations preserved** — the before/after pair `ExtractFixPitfall`
   needs, from a real failure rather than a constructed one. Full record:
-  [docs/status/s155b-upgrade-canary.md](status/s155b-upgrade-canary.md).
+  [docs/status/s155b-upgrade-canary.md](docs/status/s155b-upgrade-canary.md).
 
 - 🚀 **S155b: `live upgrade` — an apply is not an upgrade (2026-08-31)** —
   rolls a live deployment onto new configuration **in place**: same project, same
@@ -303,7 +338,7 @@ Last updated: 2026-08-31
 
   Next slice is small and named: `POST`/`GET`/`DELETE` for
   `private-network-interfaces` in mockway. Detail:
-  [docs/layer3-coverage.md](layer3-coverage.md).
+  [docs/layer3-coverage.md](docs/layer3-coverage.md).
 
 - 🌱 **S154 SHIPPED — `live observe`, the first post-apply signal (2026-08-31)** —
   probes every live deployment's health path once and records what it saw on that
@@ -353,7 +388,7 @@ Last updated: 2026-08-31
   cutover canary named: `deploy` and `live teardown` had never run for real.
   deploy → HTTP 200 → observe healthy → observe again → teardown → account clean.
   Only the healthy path ran for real; `unhealthy`/`unreachable` are unit-covered.
-  [docs/status/s168-cutover-canary.md](status/s168-cutover-canary.md).
+  [docs/status/s168-cutover-canary.md](docs/status/s168-cutover-canary.md).
 
 - ⚠️ **The `layer3-gate` cannot validate this change before it merges (2026-08-31)** —
   it builds its binary from **base**, deliberately (S144-T5a: otherwise a same-repo
@@ -393,7 +428,7 @@ Last updated: 2026-08-31
   Account verified against the API afterwards, not from the sweep's own verdict:
   **zero `if-run-*` projects**, and the only server and volume in the org are
   `openclaw-prod` and its root volume from 2026-02-21. Full record:
-  [docs/status/s168-cutover-canary.md](status/s168-cutover-canary.md).
+  [docs/status/s168-cutover-canary.md](docs/status/s168-cutover-canary.md).
 
 - 🔧 **Pass 41: creation is uncancellable now (2026-08-31)** — pass 40 put
   `ensureRunProject` inside the signal guard and thereby handed it a cancellable

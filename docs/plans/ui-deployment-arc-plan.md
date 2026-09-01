@@ -75,6 +75,49 @@ than a CLI that never mentioned it, because the CLI at least required typing.
 **S159 → S160 → S162 is the ordered spine.** S161 depends only on S159. S163 can
 land any time after S162. S164 is last by definition.
 
+## Refresh, 2026-09-01: what S154–S156a changed
+
+This plan was written on 2026-08-30, before live observation and upgrade existed.
+Two changes, and the first matters more than the arc's own contents.
+
+### S164's e2e moves out, into S158
+
+S164 is *"Playwright e2e over the whole journey, then one real run."* That was
+the **only** end-to-end coverage of the live lifecycle anywhere, and it sat at
+the end of an arc that has not started — so every CLI command shipped in
+S151–S156a has no journey test underneath it.
+
+Pulled forward as **S158** (`docs/plans/live-lifecycle-e2e-plan.md`), which
+covers the CLI journey against mockway plus one real pass. S164 keeps its
+Playwright half: the UI journey still needs testing, and now it can sit on top of
+a CLI journey that is already pinned rather than being the first thing to pin it.
+
+### The estate page has more to show than TTL and address
+
+S161 was specified before a deployment could be **observed**. A page built to the
+original description would show what is running and stay silent on whether it is
+actually serving — the exact gap S154 and S155a exist to close, reproduced in the
+UI.
+
+`livestore.Deployment` now carries observations, and `live ls` already renders a
+`HEALTH` column. S161 should show, per deployment:
+
+| field | why the UI specifically needs it |
+|---|---|
+| last observation status | `healthy` / `unhealthy` / `unreachable`, and **`unobserved`** — silence must not read as healthy |
+| version check | `confirmed` / `unconfirmed` / `unchecked`, distinctly. A record claiming `nginx:1.27` while the service says otherwise is the more dangerous state *because it looks fine* |
+| `upgraded_at` | a deployment that was rolled forward is a different thing from one that never moved |
+
+**`unobserved` and `unchecked` are the load-bearing states.** A UI that renders
+them as blank cells rebuilds the falsehood the three-state design exists to
+prevent — that nobody having looked is the same as nothing being wrong.
+
+### Not added: a deploy-time version_path field
+
+`service.version_path` is opt-in and belongs in the scenario, which the UI
+already edits as YAML. Adding a dedicated control would be a second place to set
+one thing.
+
 ### Why reconcile-against-API moves into S159
 
 ADR-0024 always promised it and S153 did not deliver it: the reaper trusts the
