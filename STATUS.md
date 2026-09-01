@@ -77,6 +77,16 @@ Last updated: 2026-08-31
   place that reads it**, and the reliable way to find those is to enumerate the
   readers before the first edit rather than after each review.
 
+  **Pass 64**: the sweep parses `kept_new` into `AVOID_EMISSIONS`, a ratchet on
+  whether the avoid extractor still works — so preserving live entries could have
+  made a sweep with **zero** avoid pitfalls report a healthy number. `pitfall-merge`
+  prints per-source counts now and the sweep ratchets on `kept_avoid`.
+
+  Five passes, five findings, all downstream of adding **one constant**. The
+  places that had to learn about `live`: two corpus ratchets, the sweep's
+  preservation list, the merge's freshness handling, the merge's source
+  semantics, the metric reading the merge, and the new command's path guard.
+
   `--dry-run` and the real thing share one rule by construction: a dry-run that
   can disagree with the real thing is worse than no dry-run. And `TouchLivePitfall`
   refreshes rather than appends, which is what makes retention mean *last

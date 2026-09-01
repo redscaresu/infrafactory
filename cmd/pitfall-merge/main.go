@@ -67,14 +67,20 @@ func main() {
 		die("read post: %v", err)
 	}
 
-	merged, added, refreshed := merge(pre, post, keepSet)
+	merged, added, refreshed, addedBySource := merge(pre, post, keepSet)
 
 	if err := savePitfalls(*outFile, merged); err != nil {
 		die("write out: %v", err)
 	}
 
-	fmt.Printf("pitfall-merge: pre=%d post=%d kept_new=%d refreshed=%d (sources: %s)\n",
-		len(pre.Pitfalls), len(post.Pitfalls), added, refreshed, strings.Join(sortedKeys(keepSet), ","))
+	// Per-source counts as well as the total. AVOID_EMISSIONS in
+	// scripts/sweep_39.sh is a ratchet on whether the avoid extractor
+	// still works, and a combined kept_new would let preserved `live`
+	// entries mask an avoid-learning regression -- a metric that reads
+	// healthy while the thing it measures is broken.
+	fmt.Printf("pitfall-merge: pre=%d post=%d kept_new=%d refreshed=%d %s(sources: %s)\n",
+		len(pre.Pitfalls), len(post.Pitfalls), added, refreshed,
+		perSourceCounts(addedBySource), strings.Join(sortedKeys(keepSet), ","))
 }
 
 // merge returns pre + any post entries whose source is in keepSet and
@@ -88,7 +94,7 @@ func main() {
 // "first observed" instead of "last observed", exactly what
 // TouchLivePitfall exists to prevent. The entry then retires early, and
 // a rule that is still true is deleted.
-func merge(pre, post generator.PitfallsFile, keepSet map[string]bool) (generator.PitfallsFile, int, int) {
+func merge(pre, post generator.PitfallsFile, keepSet map[string]bool) (generator.PitfallsFile, int, int, map[string]int) {
 	preIdx := map[string]int{}
 	for i, p := range pre.Pitfalls {
 		preIdx[entryKey(p)] = i
@@ -96,6 +102,7 @@ func merge(pre, post generator.PitfallsFile, keepSet map[string]bool) (generator
 
 	out := pre
 	added, refreshed := 0, 0
+	addedBySource := map[string]int{}
 	for _, p := range post.Pitfalls {
 		if !keepSet[p.Source] {
 			continue
@@ -120,8 +127,31 @@ func merge(pre, post generator.PitfallsFile, keepSet map[string]bool) (generator
 		out.Pitfalls = append(out.Pitfalls, p)
 		preIdx[entryKey(p)] = len(out.Pitfalls) - 1
 		added++
+		addedBySource[p.Source]++
 	}
-	return out, added, refreshed
+	return out, added, refreshed, addedBySource
+}
+
+// perSourceCounts renders `kept_avoid=2 kept_live=1 `, or nothing when a
+// merge preserved nothing, so a caller can ratchet on one source without
+// parsing a combined total.
+func perSourceCounts(bySource map[string]int) string {
+	if len(bySource) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for _, src := range sortedKeys(toBoolSet(bySource)) {
+		fmt.Fprintf(&b, "kept_%s=%d ", src, bySource[src])
+	}
+	return b.String()
+}
+
+func toBoolSet(counts map[string]int) map[string]bool {
+	set := make(map[string]bool, len(counts))
+	for k := range counts {
+		set[k] = true
+	}
+	return set
 }
 
 // newerLastSeen reports whether candidate is a later timestamp than

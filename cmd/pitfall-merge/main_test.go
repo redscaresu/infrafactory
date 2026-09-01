@@ -26,7 +26,7 @@ func TestMerge_KeepsLearnedFromDiffAvoid(t *testing.T) {
 		mk("google_sql_database_instance", "descriptive failure echo", "descriptive"), // should drop
 	}}
 
-	got, added, _ := merge(pre, post, map[string]bool{"avoid": true})
+	got, added, _, _ := merge(pre, post, map[string]bool{"avoid": true})
 
 	if added != 1 {
 		t.Fatalf("expected 1 added, got %d", added)
@@ -57,7 +57,7 @@ func TestMerge_SkipsDuplicates(t *testing.T) {
 		mk("google_service_account", "do NOT use X", "avoid"), // duplicate
 	}}
 
-	got, added, _ := merge(pre, post, map[string]bool{"avoid": true})
+	got, added, _, _ := merge(pre, post, map[string]bool{"avoid": true})
 
 	if added != 0 {
 		t.Errorf("expected 0 added (dup), got %d", added)
@@ -80,7 +80,7 @@ func TestMerge_EmptyKeepSet(t *testing.T) {
 		mk("b", "new N13 entry", "avoid"),
 	}}
 
-	got, added, _ := merge(pre, post, map[string]bool{})
+	got, added, _, _ := merge(pre, post, map[string]bool{})
 
 	if added != 0 {
 		t.Errorf("empty keep-set: expected 0 added, got %d", added)
@@ -102,7 +102,7 @@ func TestMerge_MultipleKeepSources(t *testing.T) {
 		mk("c", "descriptive", "descriptive"),
 	}}
 
-	got, added, _ := merge(pre, post, map[string]bool{
+	got, added, _, _ := merge(pre, post, map[string]bool{
 		"fix":   true,
 		"avoid": true,
 	})
@@ -128,7 +128,7 @@ func TestMergeCarriesForwardARefreshedLastSeen(t *testing.T) {
 		{Resource: "scaleway_lb", Rule: rule, Source: "live", LastSeen: "2026-09-01T00:00:00Z"},
 	}}
 
-	got, added, refreshed := merge(pre, post, map[string]bool{"live": true})
+	got, added, refreshed, _ := merge(pre, post, map[string]bool{"live": true})
 
 	assert.Zero(t, added, "it is the same entry, not a new one")
 	assert.Equal(t, 1, refreshed)
@@ -157,7 +157,7 @@ func TestMergeKeepsTheBetterLastSeen(t *testing.T) {
 				{Resource: "r", Rule: rule, Source: "live", LastSeen: tc.post},
 			}}
 
-			got, _, _ := merge(pre, post, map[string]bool{"live": true})
+			got, _, _, _ := merge(pre, post, map[string]bool{"live": true})
 
 			require.Len(t, got.Pitfalls, 1)
 			assert.Equal(t, tc.want, got.Pitfalls[0].LastSeen)
@@ -180,11 +180,43 @@ func TestMergeDoesNotRefreshAcrossSources(t *testing.T) {
 		{Resource: "scaleway_lb", Rule: rule, Source: "live", LastSeen: "2026-09-01T00:00:00Z"},
 	}}
 
-	got, added, refreshed := merge(pre, post, map[string]bool{"live": true})
+	got, added, refreshed, _ := merge(pre, post, map[string]bool{"live": true})
 
 	assert.Zero(t, refreshed, "a live timestamp must not land on a descriptive entry")
 	assert.Zero(t, added, "and the pre-existing duplicate rule still wins, as it always did")
 	require.Len(t, got.Pitfalls, 1)
 	assert.Equal(t, "descriptive", got.Pitfalls[0].Source)
 	assert.Empty(t, got.Pitfalls[0].LastSeen, "a source with no lifetime gains no timestamp")
+}
+
+// AVOID_EMISSIONS in scripts/sweep_39.sh ratchets on whether the avoid
+// extractor still works. A combined kept_new would let preserved `live`
+// entries mask an avoid-learning regression -- a metric that reads
+// healthy while the thing it measures is broken.
+func TestMergeReportsKeptCountsPerSource(t *testing.T) {
+	pre := generator.PitfallsFile{}
+	post := generator.PitfallsFile{Pitfalls: []generator.PitfallEntry{
+		{Resource: "a", Rule: "1", Source: "avoid"},
+		{Resource: "b", Rule: "2", Source: "live", LastSeen: "2026-09-01T00:00:00Z"},
+		{Resource: "c", Rule: "3", Source: "live", LastSeen: "2026-09-01T00:00:00Z"},
+		{Resource: "d", Rule: "4", Source: "descriptive"},
+	}}
+
+	_, added, _, bySource := merge(pre, post, map[string]bool{"avoid": true, "live": true})
+
+	assert.Equal(t, 3, added)
+	assert.Equal(t, 1, bySource["avoid"], "the avoid ratchet must be readable on its own")
+	assert.Equal(t, 2, bySource["live"])
+	assert.Zero(t, bySource["descriptive"], "not in keepSet, so not preserved")
+
+	rendered := perSourceCounts(bySource)
+	assert.Contains(t, rendered, "kept_avoid=1")
+	assert.Contains(t, rendered, "kept_live=2")
+}
+
+// A sweep that preserved nothing must still print a parseable line: the
+// script greps for kept_avoid and treats a miss as zero, so an absent
+// field is fine but a malformed one is not.
+func TestMergeRendersNothingWhenNothingWasKept(t *testing.T) {
+	assert.Empty(t, perSourceCounts(map[string]int{}))
 }
