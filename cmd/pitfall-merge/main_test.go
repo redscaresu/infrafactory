@@ -183,10 +183,36 @@ func TestMergeDoesNotRefreshAcrossSources(t *testing.T) {
 	got, added, refreshed, _ := merge(pre, post, map[string]bool{"live": true})
 
 	assert.Zero(t, refreshed, "a live timestamp must not land on a descriptive entry")
-	assert.Zero(t, added, "and the pre-existing duplicate rule still wins, as it always did")
-	require.Len(t, got.Pitfalls, 1)
+
+	// And the live entry is KEPT rather than swallowed as a duplicate.
+	// Pass 63 dropped it to preserve the historical dedup; pass 66
+	// reversed that, because live is the only source carrying state that
+	// cannot be rebuilt -- losing it loses the timestamp retirement runs
+	// on, silently.
+	assert.Equal(t, 1, added)
+	require.Len(t, got.Pitfalls, 2)
 	assert.Equal(t, "descriptive", got.Pitfalls[0].Source)
 	assert.Empty(t, got.Pitfalls[0].LastSeen, "a source with no lifetime gains no timestamp")
+	assert.Equal(t, "live", got.Pitfalls[1].Source)
+	assert.Equal(t, "2026-09-01T00:00:00Z", got.Pitfalls[1].LastSeen)
+}
+
+// The asymmetry is deliberate and only live gets it: dropping a duplicate
+// `avoid` loses a rule the corpus already states in other words, while
+// dropping a duplicate `live` loses information nothing can rebuild.
+func TestMergeKeepsHistoricalIdentityForNonLiveSources(t *testing.T) {
+	const rule = "the same rule"
+	pre := generator.PitfallsFile{Pitfalls: []generator.PitfallEntry{
+		{Resource: "scaleway_lb", Rule: rule, Source: "descriptive"},
+	}}
+	post := generator.PitfallsFile{Pitfalls: []generator.PitfallEntry{
+		{Resource: "scaleway_lb", Rule: rule, Source: "avoid"},
+	}}
+
+	got, added, _, _ := merge(pre, post, map[string]bool{"avoid": true})
+
+	assert.Zero(t, added, "avoid keeps the historical (resource, rule) identity")
+	assert.Len(t, got.Pitfalls, 1)
 }
 
 // AVOID_EMISSIONS in scripts/sweep_39.sh ratchets on whether the avoid

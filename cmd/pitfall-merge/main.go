@@ -97,7 +97,7 @@ func main() {
 func merge(pre, post generator.PitfallsFile, keepSet map[string]bool) (generator.PitfallsFile, int, int, map[string]int) {
 	preIdx := map[string]int{}
 	for i, p := range pre.Pitfalls {
-		preIdx[entryKey(p)] = i
+		preIdx[mergeKey(p)] = i
 	}
 
 	out := pre
@@ -107,7 +107,7 @@ func merge(pre, post generator.PitfallsFile, keepSet map[string]bool) (generator
 		if !keepSet[p.Source] {
 			continue
 		}
-		if i, seen := preIdx[entryKey(p)]; seen {
+		if i, seen := preIdx[mergeKey(p)]; seen {
 			// Only refresh LIKE with LIKE. entryKey is (resource, rule)
 			// and deliberately ignores source, so the same rule can
 			// exist as `descriptive` in pre and `live` in post --
@@ -125,7 +125,7 @@ func merge(pre, post generator.PitfallsFile, keepSet map[string]bool) (generator
 			continue
 		}
 		out.Pitfalls = append(out.Pitfalls, p)
-		preIdx[entryKey(p)] = len(out.Pitfalls) - 1
+		preIdx[mergeKey(p)] = len(out.Pitfalls) - 1
 		added++
 		addedBySource[p.Source]++
 	}
@@ -176,6 +176,26 @@ func newerLastSeen(current, candidate string) bool {
 
 func entryKey(p generator.PitfallEntry) string {
 	return p.Resource + "\x00" + p.Rule
+}
+
+// mergeKey adds the source for entries that carry a LIFETIME.
+//
+// `live` is the only source with state that cannot be reconstructed: its
+// last_seen is the whole basis of retirement. Keying it on (resource,
+// rule) alone means an older `descriptive` entry with the same text
+// swallows it as a duplicate, and the observation -- along with the
+// timestamp that decides when it retires -- is silently gone.
+//
+// Every other source keeps the historical (resource, rule) identity.
+// Dropping a duplicate `avoid` loses a rule the corpus already states in
+// other words; dropping a duplicate `live` loses information nothing can
+// rebuild. That asymmetry is the reason for the special case, and the
+// reason it is not applied to everything.
+func mergeKey(p generator.PitfallEntry) string {
+	if p.Source == generator.LiveSource {
+		return entryKey(p) + "\x00" + p.Source
+	}
+	return entryKey(p)
 }
 
 func loadPitfalls(path string) (generator.PitfallsFile, error) {

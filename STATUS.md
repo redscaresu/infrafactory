@@ -87,6 +87,13 @@ Last updated: 2026-08-31
   preservation list, the merge's freshness handling, the merge's source
   semantics, the metric reading the merge, and the new command's path guard.
 
+  **Pass 66 reversed pass 63.** Skipping a source-mismatched duplicate preserved
+  the old dedup and silently dropped the *live* entry whenever an older
+  `descriptive` rule shared its `(resource, rule)` — losing the `last_seen` that
+  retirement runs on. `mergeKey` includes the source for `live` only: dropping a
+  duplicate `avoid` loses a rule the corpus already states in other words;
+  dropping a duplicate `live` loses information nothing can rebuild.
+
   **Pass 65 was declined** — the first decline in the slice. The sweep omits
   genesys from its pitfall handling, and so do all three ratchets, consistently
   and since long before this arc; `LiveSource` neither created that gap nor widens
