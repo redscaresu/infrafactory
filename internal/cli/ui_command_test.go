@@ -10,6 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/redscaresu/infrafactory/internal/api"
 	"github.com/redscaresu/infrafactory/internal/config"
 	"github.com/redscaresu/infrafactory/internal/generator"
@@ -144,4 +147,68 @@ func TestUIRunStarterPreflightResolvesClaudeToAbsolutePath(t *testing.T) {
 	if starter.resolvedClaude != claudePath {
 		t.Fatalf("expected resolved claude path %q, got %q", claudePath, starter.resolvedClaude)
 	}
+}
+
+// The flag is the ONLY way a UI server does real-cloud apply, and it is
+// read once when the server starts (ADR-0026, S160b).
+func TestUICommandRegistersAllowLayer3OffByDefault(t *testing.T) {
+	cmd := newUICmd(nil)
+
+	flag := cmd.Flags().Lookup("allow-layer3")
+	require.NotNil(t, flag, "without this flag a UI server has no way to be told it may spend money")
+	assert.Equal(t, "false", flag.DefValue, "spending money is never the default")
+}
+
+// The stricter half of the rule, and the one with a live failure mode.
+//
+// The per-run config is RE-READ from disk on every run, so editing
+// infrafactory.yaml takes effect without a restart. That means a file
+// saying `sandbox_deploy.enabled: true` would walk real-cloud apply back
+// in on a server the operator started without --allow-layer3 -- silently,
+// and on every run after it.
+func TestUIRunConfigCannotReEnableRealCloudFromTheConfigFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "infrafactory.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(`version: "1.0"
+agent:
+  type: claude-code
+mockway:
+  url: http://localhost:8080
+validation:
+  layers:
+    sandbox_deploy:
+      enabled: true
+`), 0o600))
+
+	serverCfg := config.Default()
+	serverCfg.Validation.Layers.SandboxDeploy.Enabled = false
+	starter := &uiRunStarter{cfg: serverCfg}
+
+	loaded, err := starter.configLoader()(path)
+	require.NoError(t, err)
+
+	assert.False(t, loaded.Validation.Layers.SandboxDeploy.Enabled,
+		"a checked-in config file must not be able to start spending money on a server nobody authorised")
+}
+
+// And the same seam carries the decision the other way, so --allow-layer3
+// is not quietly ignored.
+func TestUIRunConfigCarriesTheOperatorsPermissionThrough(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "infrafactory.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(`version: "1.0"
+agent:
+  type: claude-code
+mockway:
+  url: http://localhost:8080
+`), 0o600))
+
+	serverCfg := config.Default()
+	serverCfg.Validation.Layers.SandboxDeploy.Enabled = true
+	starter := &uiRunStarter{cfg: serverCfg}
+
+	loaded, err := starter.configLoader()(path)
+	require.NoError(t, err)
+
+	assert.True(t, loaded.Validation.Layers.SandboxDeploy.Enabled)
 }

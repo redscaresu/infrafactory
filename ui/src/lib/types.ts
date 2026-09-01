@@ -48,7 +48,10 @@ export interface ScenarioDetail {
 export interface StartRunOptions {
   clean?: boolean;
   no_destroy?: boolean;
-  layer3_enabled?: boolean;
+  // No layer3_enabled. Real-cloud apply is settled when the server starts
+  // (`infrafactory ui --allow-layer3`), so a request cannot ask for it --
+  // see ADR-0026. The server ignores the field; the type omits it so
+  // nobody writes code that believes otherwise.
 }
 
 export interface ScenarioRunModeResponse {
@@ -68,7 +71,8 @@ export interface ScenarioLayer3StatusResponse {
   name: string;
   path: string;
   cloud?: string;
-  config_default_enabled: boolean;
+  // What the server WILL do, not a default this page may override.
+  server_allows_layer3: boolean;
   credentials_ready: boolean;
   missing_credentials: string[];
   ready: boolean;

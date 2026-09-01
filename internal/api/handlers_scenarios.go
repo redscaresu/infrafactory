@@ -328,14 +328,21 @@ func handleGetScenarioLayer3Status(w http.ResponseWriter, state *serverState, re
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"name":                   filepath.Base(relPath),
-		"path":                   relPath,
-		"cloud":                  sc.Cloud,
-		"config_default_enabled": state.cfg.Validation.Layers.SandboxDeploy.Enabled,
-		"credentials_ready":      ready,
-		"missing_credentials":    missing,
-		"ready":                  ready,
-		"detail":                 detail,
+		"name":  filepath.Base(relPath),
+		"path":  relPath,
+		"cloud": sc.Cloud,
+		// Renamed from `config_default_enabled`, because that name
+		// described a DEFAULT the client could then override -- and it
+		// no longer can. Real-cloud apply is settled when the server
+		// starts (`--allow-layer3`), so this reports what the server
+		// will do rather than what it suggests. A field named for an
+		// overridable default, serving a value nothing can override,
+		// is a lie the next reader has to discover for themselves.
+		"server_allows_layer3": state.cfg.Validation.Layers.SandboxDeploy.Enabled,
+		"credentials_ready":    ready,
+		"missing_credentials":  missing,
+		"ready":                ready,
+		"detail":               detail,
 	})
 }
 

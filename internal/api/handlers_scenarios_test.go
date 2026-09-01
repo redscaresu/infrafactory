@@ -232,7 +232,7 @@ func TestScenarioLayer3StatusHandlerReportsReadiness(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		t.Fatalf("decode layer3 payload: %v", err)
 	}
-	if payload["ready"] != true || payload["config_default_enabled"] != true {
+	if payload["ready"] != true || payload["server_allows_layer3"] != true {
 		t.Fatalf("expected ready/config enabled payload, got %+v", payload)
 	}
 }

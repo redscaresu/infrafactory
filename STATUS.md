@@ -2,6 +2,35 @@
 
 Last updated: 2026-08-31
 
+## 2026-09-01 — S160b: real cloud is decided at start time, not on the wire
+
+S160a stopped a page the server did not serve from reaching the API. This closes
+the separate idea that a **request** can escalate the server into spending money.
+Different properties: the second survives a bug in the first.
+
+`layer3_enabled` is gone from `StartRunRequest`. Real-cloud apply for UI-started
+runs is settled by `infrafactory ui --allow-layer3`, read once at startup — in
+the shell that already holds the credentials, by the person who typed it.
+
+**The config file does not get a vote either, and that half had a live failure
+mode.** The per-run config is re-read from disk on every run, which is what lets
+an operator edit `infrafactory.yaml` without restarting. So a file saying
+`sandbox_deploy.enabled: true` would have walked real-cloud apply back in on a
+server started *without* the flag — silently, on every run after it. The seam
+that re-applies the server's decision is now `uiRunStarter.configLoader`,
+extracted so a test can hold it rather than being a closure buried in the middle
+of starting a run.
+
+The scenario page's Layer 3 checkbox becomes a report of what the server decided,
+plus how to change it. `config_default_enabled` was renamed `server_allows_layer3`
+— the old name described a *default* a client could override, and no client can.
+
+`run.json` keeps its own `layer3_enabled`: that is a record of what a run **did**,
+not a request for what it should do. Same word, two different things, and only the
+request side is removed.
+
+ADR-0026 amended.
+
 ## 2026-09-01 — S160a: the UI API answers only loopback origins
 
 The UI arc plan schedules its safety model as *"decided before the capability

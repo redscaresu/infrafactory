@@ -24,6 +24,7 @@ import (
 
 func newUICmd(assets fs.FS) *cobra.Command {
 	var addr string
+	var allowLayer3 bool
 
 	cmd := &cobra.Command{
 		Use:   "ui",
@@ -38,6 +39,19 @@ func newUICmd(assets fs.FS) *cobra.Command {
 			if err != nil {
 				return formatCommandError("ui", err)
 			}
+
+			// Real-cloud apply is decided HERE, at start time, by the
+			// person typing the command in the shell that already holds
+			// the credentials -- and nowhere else (ADR-0026, S160b).
+			//
+			// The config FILE is not allowed to decide it either, which
+			// is the stricter half of this rule. `sandbox_deploy.enabled`
+			// is a checked-in setting; it says what this repository does
+			// when someone runs a scenario deliberately. It should not
+			// also mean "and the web server may spend money on its own",
+			// because nobody re-reads a config file at the moment they
+			// start a UI.
+			cfg.Validation.Layers.SandboxDeploy.Enabled = allowLayer3
 
 			hub := api.NewHub()
 			go hub.Run(cmd.Context())
@@ -83,6 +97,8 @@ func newUICmd(assets fs.FS) *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&addr, "addr", "127.0.0.1:4173", "Address to bind UI server")
+	cmd.Flags().BoolVar(&allowLayer3, "allow-layer3", false,
+		"Permit runs started from this UI to apply to real infrastructure and spend money")
 
 	return cmd
 }
@@ -182,20 +198,7 @@ func (s *uiRunStarter) executeRun(ctx context.Context, req api.StartRunRequest, 
 	runCmd.SetContext(ctx)
 
 	opts := defaultRuntimeOptions()
-	resolved := strings.TrimSpace(s.resolvedClaude)
-	opts.configLoader = func(path string) (config.Config, error) {
-		cfg, err := config.Load(path)
-		if err != nil {
-			return config.Config{}, err
-		}
-		if s.cfg.Agent.Type == generator.AgentTypeClaudeCode && resolved != "" {
-			cfg.Agent.Claude.Command = resolved
-		}
-		if req.Layer3Enabled != nil {
-			cfg.Validation.Layers.SandboxDeploy.Enabled = *req.Layer3Enabled
-		}
-		return cfg, nil
-	}
+	opts.configLoader = s.configLoader()
 
 	runtime, err := buildRuntime(runCmd, opts)
 	if err != nil {
@@ -209,6 +212,36 @@ func (s *uiRunStarter) executeRun(ctx context.Context, req api.StartRunRequest, 
 	}
 	targetPath = filepath.Join(s.cfg.Paths.Scenarios, filepath.FromSlash(targetPath))
 	return runRunCommand(runCmd, []string{targetPath}, runtime)
+}
+
+// configLoader builds the per-run configuration for a run this UI server
+// starts.
+//
+// It re-reads the file on every run, which is what makes editing
+// `infrafactory.yaml` take effect without a restart. That is also why the
+// real-cloud decision has to be re-applied here: a freshly loaded file
+// would otherwise bring `sandbox_deploy.enabled: true` back with it and
+// quietly re-enable spending on a server the operator started WITHOUT
+// `--allow-layer3` (ADR-0026).
+//
+// Extracted so this is a seam a test can hold, rather than a closure
+// buried in the middle of starting a run.
+func (s *uiRunStarter) configLoader() func(string) (config.Config, error) {
+	resolved := strings.TrimSpace(s.resolvedClaude)
+	return func(path string) (config.Config, error) {
+		cfg, err := config.Load(path)
+		if err != nil {
+			return config.Config{}, err
+		}
+		if s.cfg.Agent.Type == generator.AgentTypeClaudeCode && resolved != "" {
+			cfg.Agent.Claude.Command = resolved
+		}
+		// The server's start-time decision wins over the file, for
+		// every run. There is deliberately no request field that can
+		// reach this.
+		cfg.Validation.Layers.SandboxDeploy.Enabled = s.cfg.Validation.Layers.SandboxDeploy.Enabled
+		return cfg, nil
+	}
 }
 
 func (s *uiRunStarter) runContext(requestCtx context.Context) context.Context {

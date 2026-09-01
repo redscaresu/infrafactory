@@ -689,8 +689,17 @@ func TestRunsStartPassesCleanAndNoDestroyFlags(t *testing.T) {
 	if !starter.lastReq.Clean || starter.lastReq.NoDestroy {
 		t.Fatalf("unexpected start request: %+v", starter.lastReq)
 	}
-	if starter.lastReq.Layer3Enabled == nil || !*starter.lastReq.Layer3Enabled {
-		t.Fatalf("expected layer3_enabled to be forwarded, got %+v", starter.lastReq)
+	// The request asked for real-cloud apply and there is nowhere for
+	// that to land: StartRunRequest has no such field, so the decoder
+	// discards it. Real-cloud apply is settled when the server starts
+	// (`infrafactory ui --allow-layer3`), and this asserts the request
+	// cannot reopen it -- see ADR-0026 (S160b).
+	//
+	// Reaching the starter at all is what matters: the run is accepted,
+	// so a caller cannot tell whether the field did anything, which is
+	// exactly why it must be pinned here rather than assumed.
+	if starter.lastReq.Clean != true {
+		t.Fatalf("the run itself must still start: %+v", starter.lastReq)
 	}
 	if starter.lastReq.ScenarioName != "web-app-paris" || starter.lastReq.ScenarioPath != "training/web" {
 		t.Fatalf("unexpected scenario mapping: %+v", starter.lastReq)
@@ -798,4 +807,52 @@ func (f *fakeStarter) StartRun(_ context.Context, req StartRunRequest) (string, 
 		go f.hub.Broadcast([]byte(`{"type":"log","data":{"event":"run_start"}}`))
 	}
 	return "run-1", nil
+}
+
+// A request cannot ask this server to spend money.
+//
+// The origin guard (S160a) stops a page it did not serve from reaching
+// this endpoint at all. This is the separate property underneath it: even
+// a request that legitimately arrives cannot escalate the server into
+// real-cloud apply, because there is no field for it to set. The second
+// survives a bug in the first (ADR-0026, S160b).
+func TestRunsStartCannotBeAskedForRealCloudApply(t *testing.T) {
+	scenariosDir := filepath.Join(t.TempDir(), "scenarios")
+	if err := os.MkdirAll(filepath.Join(scenariosDir, "training"), 0o755); err != nil {
+		t.Fatalf("mkdir scenarios: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(scenariosDir, "training", "web.yaml"),
+		[]byte(validScenarioYAML("web-app-paris", "test")), 0o644); err != nil {
+		t.Fatalf("write scenario: %v", err)
+	}
+
+	cfg := config.Default()
+	cfg.Paths.Scenarios = scenariosDir
+	starter := &fakeStarter{}
+	srv := NewServer(ServerConfig{Config: cfg, RunStarter: starter})
+	ts := httptest.NewServer(srv.Handler)
+	defer ts.Close()
+
+	body := `{"layer3_enabled":true,"sandbox_deploy":true,"validation":{"layers":{"sandbox_deploy":{"enabled":true}}}}`
+	resp, err := http.Post(ts.URL+"/api/runs/web-app-paris/start", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("post start: %v", err)
+	}
+	resp.Body.Close()
+
+	// Accepted, and that is the point: nothing about the response tells a
+	// caller their escalation was dropped, so the guarantee has to live
+	// in the type rather than in an error message.
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d", resp.StatusCode)
+	}
+
+	payload, err := json.Marshal(starter.lastReq)
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	if strings.Contains(strings.ToLower(string(payload)), "layer3") ||
+		strings.Contains(strings.ToLower(string(payload)), "sandbox") {
+		t.Fatalf("a request reached the run starter carrying a real-cloud instruction: %s", payload)
+	}
 }
