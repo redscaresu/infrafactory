@@ -1,8 +1,99 @@
-# S157a, S156d, S160 — a block of work (planned 2026-09-01)
+# S160a, S160b, S157a, S156d — a block of work (planned 2026-09-01)
 
-Three slices, ordered by what it costs to not do them. Sized deliberately small:
+Four slices, ordered by what it costs to not do them. Sized deliberately small:
 S155b's seven passes were a slice-size problem, not a review-effort problem, and
 S156c converged in four passes on a slice with one question in it.
+
+## Revised the same day, before any of it was built
+
+The block was written as S157a → S156d → S160, with S160 ("decide the deploy
+safety model before the capability exists") last because the deploy button does
+not exist yet.
+
+**The button already exists. It is spelled `layer3_enabled`.**
+
+`POST /api/runs/<scenario>/start` accepts a `layer3_enabled` field, and
+`ui_command.go:194` uses it to *set* `Validation.Layers.SandboxDeploy.Enabled` —
+so that request triggers a real Scaleway apply. Nothing guards it:
+
+- the **websocket** handler checks `Origin` (`server.go:238`); the **POST**
+  handlers check nothing — no origin, no CSRF token;
+- `startRunHandler` decodes the body without inspecting `Content-Type`, so a
+  cross-origin `fetch` with `Content-Type: text/plain` is a CORS *simple*
+  request and never triggers a preflight;
+- credentials come from `os.Getenv("SCW_SECRET_KEY")`, so the UI process holds
+  live Scaleway keys whenever it was started from a shell that sourced
+  `layer3.env` — which is the state an operator is in while rehearsing a Layer 3
+  demo.
+
+The attacker cannot read the response. They do not need to: the side effect is
+the attack, and the side effect is real infrastructure and real money.
+
+Chrome's Private Network Access work blocks some public→private requests, so this
+is not universally exploitable today. That is a mitigation to note and not one to
+depend on — it is neither universal nor something this repo controls.
+
+So the safety model is not a prerequisite for a future arc. It is a live hole,
+and it moves to the front.
+
+### What this changed about the UI arc's readiness
+
+Asked "how much more before the UI?", the honest answer is **less than this plan
+originally proposed, plus one thing it did not contain**:
+
+- **S156d does not block the UI at all.** It is the live-learning arc.
+- **S157a does not strictly block it either** — the reconcile hole simply gets
+  worse when the UI succeeds.
+- **S160 does block it**, and now blocks everything, for the reason above.
+
+Two things the UI arc plan does not name and should:
+
+1. **S159 needs a cobra-free seam.** It reads as "add `/api/deployments`
+   handlers", but `runDeployCommand` takes a `*cobra.Command`: it reads the TTL
+   from flags and writes through `writeCommandOutput(cmd, …)`. Something must
+   become callable without one, mirroring how `uiRunStarter` implements the API's
+   interface from `internal/cli`. That extraction is probably the largest part of
+   S159.
+2. **Concurrency.** `uiRunStarter` serialises with a `busy` mutex — one run at a
+   time. Deployments are many and long-lived, and `RecordObservation` is a
+   read-modify-write with no locking, so two concurrent observers lose an
+   observation. Rare from a CLI; not rare from a page that polls.
+
+## S160a — an origin guard on state-changing requests
+
+**The one question: what makes a state-changing request safe on an
+unauthenticated localhost server?**
+
+Not "what makes the deploy endpoint safe". The guard belongs at the **mux seam**,
+wrapping every handler, so an endpoint added later cannot forget it. An audit
+that lists today's mutating endpoints and guards each one reads as coverage while
+being a snapshot — and the next handler is written by someone who never saw the
+list.
+
+The rule:
+
+- a state-changing method (anything but GET/HEAD/OPTIONS) with an `Origin` that
+  is not the server's own is **rejected**;
+- an `Origin` that is absent is **allowed**, and that is deliberate rather than a
+  gap. Browsers always send `Origin` on cross-origin state-changing requests, so
+  absence means a non-browser client — curl, a test, a script — and a non-browser
+  attacker is not the threat model here. The threat is a page in the operator's
+  browser. Refusing absent origins would break every script and prove nothing;
+- the allowlist derives from the **configured bind address** plus loopback, so
+  `--addr` on a tailnet or a LAN address does not silently lock the operator out
+  of their own UI.
+
+## S160b — real cloud is decided at start time, not on the wire
+
+**The one question: who decides to spend money?**
+
+The `layer3_enabled` field is removed. Real-cloud apply becomes
+`infrafactory ui --allow-layer3`: a decision the operator makes in the shell that
+already holds the credentials, rather than a field any request can set.
+
+An origin guard closes the drive-by. This closes something else — the idea that a
+*request* can escalate a server into spending money. Those are different
+properties, and the second survives a bug in the first.
 
 ## S157a — reconcile against the API (report-only)
 
@@ -97,5 +188,9 @@ is the user's call rather than something to slot into a work block.
 
 ## Order
 
-S157a first: it is the only one where *not* doing it costs money silently, and
-the only one whose absence is currently documented as a presence.
+**S160a, S160b, S157a, S156d.**
+
+The guard first, because it is the only one of the four that is open right now
+rather than latent. Then S157a, which is the only one where *not* doing it costs
+money silently and whose absence is currently documented as a presence. S156d
+last: it is the only one with no safety content at all.
