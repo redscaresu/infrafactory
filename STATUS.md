@@ -2,6 +2,39 @@
 
 Last updated: 2026-08-31
 
+## 2026-09-01 — S160a: the UI API answers only loopback origins
+
+The UI arc plan schedules its safety model as *"decided before the capability
+exists, not after."* **The capability already existed.** It is spelled
+`layer3_enabled`: `POST /api/runs/<scenario>/start` accepts that field and
+`ui_command.go` uses it to set `SandboxDeploy.Enabled`, so the request starts a
+real Scaleway apply — with credentials from the process environment, which holds
+live keys whenever the server was started from a shell that sourced `layer3.env`.
+
+The websocket handler checked `Origin`. The POST handlers checked nothing, and
+decode the body without inspecting `Content-Type`, so a cross-origin `fetch` with
+`text/plain` is a CORS *simple* request that never preflights. The attacker
+cannot read the response and does not need to: the side effect is the goal.
+
+**Loopback is a boundary against processes, not against pages.**
+
+The guard wraps the mux rather than the endpoints that mutate — a list of today's
+mutating handlers is a snapshot, and the next one is written by someone who never
+saw it. Every method, not only the unsafe ones, so the guard does not rest on "no
+GET handler ever mutates", which nothing enforces.
+
+**The rule is loopback, not same-origin, and the weaker rule announced itself.**
+Comparing `Origin` to the request's own `Host` looks stricter and is defeated by
+DNS rebinding: a domain that flips to `127.0.0.1` sends an Origin and a Host that
+*agree*, so equality passes them. It also broke three existing websocket tests,
+because the Vite dev server serves the UI on `:5173` and calls the API on `:4173`
+— cross-origin and entirely loopback. One rule handles rebinding, the drive-by,
+and development.
+
+Recorded in ADR-0026. This is one layer and not the safety model: S160b removes
+the wire field so a *request* cannot escalate the server into spending money,
+which is a different property that survives a bug in this one.
+
 ## Current phase
 
 - 🔄 **S156c: the loop closes — reproduced observations become pitfalls
