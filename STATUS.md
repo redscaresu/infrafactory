@@ -4,6 +4,32 @@ Last updated: 2026-08-31
 
 ## Current phase
 
+- 📋 **S158 planned: the live lifecycle has no end-to-end test (2026-09-01)** —
+  `internal/e2e/` holds twelve files and none mentions `deploy`, `live observe`,
+  `live upgrade` or `livestore`. Every S151–S156a guarantee is unit tests plus a
+  real-cloud run driven by hand, one command at a time. **Nothing re-runs the
+  sequence.**
+
+  The live commands are coupled through a **record**, not through function calls,
+  and each command's unit tests build their own. That is exactly the shape that
+  hides defects, and this session produced three: `observe` failing on a record
+  `deploy` legitimately wrote without an address; `upgrade` discarding
+  observations appended during its apply; the record and marker disagreeing about
+  which project an apply may touch. **No unit test could have caught any of
+  them.**
+
+  Plan: [docs/plans/live-lifecycle-e2e-plan.md](plans/live-lifecycle-e2e-plan.md).
+  One test driving the real commands in sequence against mockway, plus one real
+  pass — the mock proves the commands agree with each other, only Scaleway proves
+  they agree with the world.
+
+  **The UI arc was refreshed to match.** S164 held the only journey coverage, at
+  the end of an arc that has not started, so it moves out to S158 and keeps its
+  Playwright half. And S161's estate page predates observation: it must render
+  `unobserved` and `unchecked` **distinctly**, because a blank cell rebuilds the
+  falsehood the three-state design exists to prevent — that nobody having looked
+  is the same as nothing being wrong.
+
 - 🗂️ **S156 broken into five slices, and its unscheduled prerequisite scheduled
   (2026-09-01)** — `docs/plans/live-learning-loop-plan.md`. The plan already
   warned that **S156 must not merge without a retirement path for `source: live`
