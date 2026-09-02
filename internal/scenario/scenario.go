@@ -147,6 +147,22 @@ type LoadBalancer struct {
 	Backends []LBBackend `json:"backends"`
 }
 
+// LoadBalancerExposurePublic is the exposure that gives a load balancer
+// a public IP. The schema's description is exactly that, and two things
+// turn on it: whether a public IPv4 is billed, and whether a deploy
+// confirmation must warn that the shape is reachable from the internet.
+const LoadBalancerExposurePublic = "public"
+
+// Public reports whether this load balancer gets a public IP.
+//
+// A method rather than a comparison at each call site, because the two
+// callers must agree: a cost estimate that bills a public address while
+// the confirmation says the shape is private would be two answers to one
+// question.
+func (l *LoadBalancer) Public() bool {
+	return l != nil && l.Exposure == LoadBalancerExposurePublic
+}
+
 type LBBackend struct {
 	Port     int    `json:"port"`
 	Protocol string `json:"protocol"`
