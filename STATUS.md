@@ -2,6 +2,36 @@
 
 Last updated: 2026-08-31
 
+## 2026-09-02 — S159b: teardown and reap over the API
+
+The mutating half of the deployments endpoint, and the seam turned out to be much
+thinner than the plan expected: `tearDownDeployment` already took a context, a
+runtime and a store, so `LiveActions` translates its staged output and does
+nothing else. **None of the guards are restated at the seam** — teardown still
+refuses unless a run-owned marker and the API's own provenance both say the
+project is infrafactory's, because a second implementation of a guard is a second
+thing that can be wrong.
+
+**Deploy is deliberately not here.** Teardown and reap reduce cost; deploy
+creates it, and the deploy button still needs its safety model.
+
+**The capability does not exist without `--allow-teardown`.** Nil actor, 404
+routes — not "exists and refuses", so a request cannot talk this server into
+destroying infrastructure even if the origin guard has a bug. Same rule as
+`--allow-layer3`, applied to the other direction of harm: teardown is not safe
+merely because it removes rather than creates. It is irreversible.
+
+404 rather than 501, because announcing "not implemented" advertises a capability
+the operator declined. And if `--allow-teardown` IS given and the runtime cannot
+be built, the server refuses to start rather than coming up silently without it.
+
+A teardown that cannot prove the account clean answers **409**, not 200.
+
+Both review findings were rules **already written in this codebase, next to the
+code that follows them** — `withRuntimeNoGenerator` on requiring the LLM for
+housekeeping, and `ensureRunProject` on not letting a caller cancel a change to
+real infrastructure. That is four findings in two days of the same shape.
+
 ## 2026-09-02 — S161: the estate page
 
 `/deployments` renders what is running, built on S159a's read endpoint. It reads;

@@ -212,3 +212,56 @@ mockway:
 
 	assert.True(t, loaded.Validation.Layers.SandboxDeploy.Enabled)
 }
+
+// Destroying infrastructure is not a capability a request may confer.
+// Without the flag the actor is nil, which means the endpoints do not
+// exist rather than existing and refusing (S159b).
+func TestUICommandBuildsNoTeardownActorWithoutTheFlag(t *testing.T) {
+	cmd := newUICmd(nil)
+
+	flag := cmd.Flags().Lookup("allow-teardown")
+	require.NotNil(t, flag, "without this flag there is no way to ask for the capability")
+	assert.Equal(t, "false", flag.DefValue, "destroying infrastructure is never the default")
+
+	actor, err := teardownActor(cmd, false)
+	require.NoError(t, err)
+	assert.Nil(t, actor, "nothing to bypass if it does not exist")
+}
+
+// A guard that stops without saying why is half a guard. If the operator
+// ASKED for teardown and it cannot be built, starting anyway would hand
+// them a UI silently missing the capability they requested.
+func TestUICommandRefusesToStartWhenRequestedTeardownCannotBeBuilt(t *testing.T) {
+	cmd := newUICmd(nil)
+	cmd.Flags().String("config", filepath.Join(t.TempDir(), "does-not-exist.yaml"), "")
+
+	_, err := teardownActor(cmd, true)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--allow-teardown was requested")
+}
+
+// Requiring LLM credentials in order to DESTROY infrastructure would
+// make the recovery capability unavailable in exactly the situation that
+// needs it: real resources running on a machine where the generator is
+// not configured. Same reasoning as `pitfalls retire`.
+func TestUITeardownActorDoesNotNeedTheGenerator(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "infrafactory.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(`version: "1.0"
+agent:
+  type: claude-code
+  claude:
+    command: /nonexistent/claude-binary
+mockway:
+  url: http://localhost:8080
+`), 0o600))
+
+	cmd := newUICmd(nil)
+	cmd.Flags().String("config", path, "")
+
+	actor, err := teardownActor(cmd, true)
+
+	require.NoError(t, err, "a missing claude binary must not stop an operator tearing down real infrastructure")
+	assert.NotNil(t, actor)
+}
