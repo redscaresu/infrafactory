@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -261,4 +263,35 @@ func TestDeployerAcceptsANilProgressWriter(t *testing.T) {
 	// takes it. The point is that nil did not panic on the way.
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not building a real runtime")
+}
+
+// The nil-progress path, reached directly.
+//
+// The previous attempt at this asserted through Deploy() with a runtime
+// factory that always failed, so it returned before `progress` was ever
+// touched: deleting the nil guard entirely still passed, while
+// production would panic on the first write for exactly the caller the
+// test named.
+func TestDeployStderrHandlesANilProgressWriter(t *testing.T) {
+	var copy strings.Builder
+
+	w := deployStderr(nil, &copy)
+
+	require.NotNil(t, w)
+	_, err := io.WriteString(w, "a line\n")
+	require.NoError(t, err, "io.MultiWriter would store the nil writer and panic here")
+	assert.Equal(t, "a line\n", copy.String())
+}
+
+// And with a writer, both destinations get it: the stream goes out live
+// AND is kept, so a failure producing no structured output can still be
+// explained.
+func TestDeployStderrTeesToBoth(t *testing.T) {
+	var live, copy strings.Builder
+
+	_, err := io.WriteString(deployStderr(&live, &copy), "a line\n")
+
+	require.NoError(t, err)
+	assert.Equal(t, "a line\n", live.String())
+	assert.Equal(t, "a line\n", copy.String())
 }

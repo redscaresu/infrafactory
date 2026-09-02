@@ -2,41 +2,47 @@
 
 Last updated: 2026-08-31
 
-## 2026-09-02 — S163: streaming a deploy
+## 2026-09-02 — S163: streaming a deploy, and the first version that did not
 
 A deploy runs for minutes, and **minutes of silence reads as broken**: a reader
 cannot tell a long apply from a hung one, and the difference matters when the
-thing running is creating billable infrastructure. The command's progress now
-goes to the websocket as it happens.
+thing running is creating billable infrastructure.
 
-**Lines, not writes.** The existing `WebSocketSink` broadcasts each `Write`, so a
-command using several `Fprintf` calls produces fragments and a page appending them
-shows half a word followed by the rest of it on the next row. `ProgressSink`
-buffers to a newline, and flushes on close — a command's last line often has no
-trailing newline and is frequently the one that matters.
+**The first version of this slice did not deliver that, and its tests passed
+anyway.** It tee'd the deploy command's stderr — written twice *before* any cloud
+work and once *after* the apply returns. Nothing in between touches that stream:
+`CommandRunner.Run` returns a fully buffered `CommandResult`, so `tofu`'s output
+does not exist until each process exits. Shipped behaviour would have been two
+lines, silence for the whole apply, one line — **worse than before**, because a
+terminal-styled log pane that has stopped moving is a stronger "hung" signal than
+the button label beside it.
 
-**Every event names its subject**, which is the S162c lesson applied before it
-could cost anything: a deploy outlives the page it was started from, so these
-arrive on whatever is open. The page discards lines whose subject is not the
-deploy it is showing, rather than appending them under the wrong heading.
+Codex was out of quota, so three fresh-context agents reviewed instead. Two found
+it independently, and one *demonstrated* it by replacing the live tee with
+buffer-then-dump and watching the suite stay green.
 
-The writer is passed in by the API rather than the deployer reaching for a hub, so
-`internal/cli` still does not know a websocket exists. stderr is tee'd rather than
-redirected: the stream goes out live *and* is kept, so a failure that produced no
-structured output can still be explained.
+**The harness is the only thing that knows a stage has begun**, so it reports.
+`SandboxDeployHarnessRunner.Run` takes an `io.Writer` — a parameter, not a field,
+because the harness is shared and two deploys must not write into each other's
+stream. Stage granularity rather than raw tofu output: it is what the plan asked
+for, and it does not drown a terminal. **Retries are visible now**, because a
+silent retry is indistinguishable from a slow stage.
 
-Leaving the page closes the socket and does not touch the deploy — it is detached
-from the request on the server, so it finishes whether or not anybody is watching.
+`TestProgressIsVisibleWhileTheApplyIsStillRunning` asserts what a watcher sees
+**from inside the apply**, which buffer-then-dump cannot satisfy — verified by
+mutation.
 
-**The first version of that claim was false**, and review caught it. `onDestroy`
-does not fire when SvelteKit reuses the route component, which is every
-client-side move between scenarios — so the stream survived, and the
-subject filter was checking against a `deployingScenario` that still held the old
-one. The reset was a hand-written list twenty lines from the state it covered, and
-S163 added stream state without adding it to the list; it is one
-`resetDeployState()` now, called from both paths. The progress panel was also
-gated on `deploying`, a bare boolean about no particular thing: **state without a
-subject cannot be filtered by subject.**
+Six further confirmed findings fixed, the worst being a regression the slice
+itself introduced: clearing `deploying` on navigation re-enabled the button, so
+navigating away mid-deploy and back allowed a **second real deploy** of the same
+scenario — two projects, double billing. Also: an earlier deploy's completion
+clobbering a later one's state; the `Deployed as dep-…` line losing a race with
+the HTTP response; a dropped socket rendering as "Starting…"; the progress filter
+having no test at all; and a `Close()` comment claiming a bug it does not fix.
+
+The event subject is the **scenario**, not the deployment id — that id is minted
+inside the command. Two concurrent deploys of one scenario share a stream. Stated
+in the code rather than implied away.
 
 ## 2026-09-02 — S162c: the deploy button, and a correction to S161
 

@@ -5,6 +5,7 @@
   import { api } from "$lib/api";
   import { connectWS } from "$lib/ws";
   import {
+    acceptProgressEvent,
     deployConfirmation,
     deployWarnings,
     teardownOutcome
@@ -168,18 +169,25 @@
   // appended under the wrong heading.
   let deployProgress: string[] = [];
   let disconnectWS: (() => void) | undefined;
+  // Whether we are actually receiving. A dropped socket and "nothing has
+  // happened yet" both produce an empty log, and rendering them the same
+  // way tells the reader an apply is quiet when the truth is that it is
+  // UNOBSERVED -- the same falsehood the estate page exists to avoid.
+  let streamConnected = false;
 
   function onSocketMessage(msg: unknown) {
-    const event = msg as { type?: string; data?: { subject?: string; line?: string } };
-    if (event?.type !== "deploy_progress" || !event.data?.line) return;
-    if (event.data.subject !== deployingScenario) return;
-    deployProgress = [...deployProgress, event.data.line];
+    if (!acceptProgressEvent(msg, deployingScenario)) return;
+    const line = (msg as { data: { line: string } }).data.line;
+    deployProgress = [...deployProgress, line];
   }
 
   // The scenario whose progress this page is currently showing. Held
   // separately from `preview` because `preview` is cleared on
   // navigation while a deploy keeps running.
   let deployingScenario = "";
+  // Monotonic, so a finishing deploy can tell whether it is still the
+  // one this page is showing.
+  let deployGeneration = 0;
 
   /**
    * resetDeployState puts this page back to knowing nothing about a
@@ -196,14 +204,27 @@
    * component across scenario routes, so leaving a scenario page for
    * another one destroys nothing.
    *
-   * The deploy itself is untouched. It is detached from the request on
-   * the server, so it finishes whether or not this page is watching.
+   * `deploying` is deliberately NOT reset here. It is the only thing
+   * that stops a second deploy being started, and the apply is detached
+   * from the request on the server -- so clearing it on navigation let a
+   * reader move away, come back, find the button enabled, and start a
+   * SECOND apply while the first was still creating billable
+   * infrastructure. Two run-owned projects and two sets of resources for
+   * one scenario, from a page reporting that nothing was running.
+   *
+   * That is the exact harm ADR-0027's streaming amendment names -- "a
+   * reader who cannot tell a long apply from a hung one will do one of
+   * two harmful things: kill it, or start another" -- reachable through
+   * the code added to prevent it.
+   *
+   * The deploy itself is untouched either way. It finishes whether or
+   * not this page is watching.
    */
   function resetDeployState() {
     disconnectWS?.();
     disconnectWS = undefined;
+    streamConnected = false;
     deployingScenario = "";
-    deploying = false;
     deployProgress = [];
     confirmingDeploy = false;
     preview = null;
@@ -255,11 +276,23 @@
 
     deploying = true;
     deployingScenario = target;
+    // Which deploy this call owns. An earlier deploy finishing must not
+    // clear a LATER one's state: without this, deploying A, navigating
+    // away, deploying B, and then A's request resolving first would
+    // freeze B's log mid-stream, unlock the button, and put a green
+    // success message belonging to A directly beneath it.
+    const owned = ++deployGeneration;
     deployProgress = [];
-    if (!disconnectWS) disconnectWS = connectWS(onSocketMessage);
+    if (!disconnectWS) {
+      disconnectWS = connectWS(onSocketMessage, (connected) => (streamConnected = connected));
+    }
     try {
       const result = await api.deployScenario(target);
       const outcome = teardownOutcome(result);
+      // The outcome is always shown -- it names its scenario, so it is
+      // true wherever it lands -- but it must not overwrite a NEWER
+      // deploy's outcome.
+      if (owned !== deployGeneration) return;
       deployOk = outcome.ok;
       // NAMED, always. An apply takes minutes and the reader can
       // navigate during it, so this message can land on a different
@@ -273,15 +306,28 @@
         ? `${target}: deployed. It is listed on the Deployments page until its TTL expires.`
         : `${target}: ${outcome.message}`;
     } catch (err) {
+      if (owned !== deployGeneration) return;
       deployOk = false;
       deployOutcomeMessage =
         err instanceof Error
           ? `${target}: deploy could not be completed: ${err.message}`
           : `${target}: deploy failed.`;
     } finally {
-      deploying = false;
-      confirmingDeploy = false;
-      deployingScenario = "";
+      if (owned === deployGeneration) {
+        deploying = false;
+        confirmingDeploy = false;
+      }
+      // `deployingScenario` is NOT cleared here.
+      //
+      // The last progress line -- "Deployed as dep-…", the id an
+      // operator needs for `live teardown` -- is broadcast before the
+      // HTTP response but delivered by a separate goroutine on a
+      // separate connection. It routinely arrives after this promise
+      // resolves, and clearing the subject synchronously made the
+      // filter discard exactly the line that mattered.
+      //
+      // It is cleared on navigation instead, which is when the page
+      // genuinely stops being about this deploy.
     }
   }
 
@@ -497,7 +543,11 @@
       data-testid="scenario-deploy"
       on:click={openDeployConfirmation}
       disabled={deploying || previewing}
-      >{deploying ? "Deploying…" : previewing ? "Checking…" : "Deploy…"}</button
+      >{deploying
+        ? `Deploying ${deployingScenario || "…"}`
+        : previewing
+          ? "Checking…"
+          : "Deploy…"}</button
     >
   </div>
 
@@ -557,7 +607,14 @@
       class="mt-3 rounded border border-slate-300 bg-slate-900 px-3 py-2 font-mono text-xs text-slate-100"
       data-testid="deploy-progress"
     >
-      {#if deployProgress.length === 0}
+      {#if deployProgress.length === 0 && !streamConnected}
+        <!-- Not "Starting…": we are not receiving, so we do not know
+             whether anything has happened. The apply is unaffected --
+             it is detached from this page entirely. -->
+        <p class="text-amber-300" data-testid="deploy-progress-disconnected">
+          Not receiving progress — the apply is still running, but this page cannot see it.
+        </p>
+      {:else if deployProgress.length === 0}
         <p class="text-slate-400">Starting…</p>
       {:else}
         {#each deployProgress as line}

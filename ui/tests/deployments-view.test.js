@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  acceptProgressEvent,
   addressHref,
   deployConfirmation,
   deployWarnings,
@@ -303,4 +304,44 @@ test("deployConfirmation admits when it does not know what will be created", () 
     previewFixture({ cost: { components: [], eur_per_hour: 0, unpriced: [], complete: false, modelled: false } })
   );
   assert.match(lines[0], /unknown/);
+});
+
+// This filter had NO test while it lived inline in the component: the
+// e2e tests intercept the POST in the browser, so the server never
+// broadcasts and the filter was never invoked. Typo-ing the event type,
+// which kills the entire stream, passed the whole suite.
+test("acceptProgressEvent takes only progress for the scenario on screen", () => {
+  const event = (subject, line = "tofu apply: running") => ({
+    type: "deploy_progress",
+    data: { subject, line }
+  });
+
+  assert.equal(acceptProgressEvent(event("web-app-paris"), "web-app-paris"), true);
+  assert.equal(acceptProgressEvent(event("lb-serving-paris"), "web-app-paris"), false);
+});
+
+test("acceptProgressEvent ignores every other event type", () => {
+  assert.equal(
+    acceptProgressEvent({ type: "log", data: { subject: "a", line: "x" } }, "a"),
+    false
+  );
+  // The typo that silently killed the stream and passed the suite.
+  assert.equal(
+    acceptProgressEvent({ type: "deploy-progress", data: { subject: "a", line: "x" } }, "a"),
+    false
+  );
+});
+
+test("acceptProgressEvent ignores malformed events rather than rendering blanks", () => {
+  assert.equal(acceptProgressEvent(undefined, "a"), false);
+  assert.equal(acceptProgressEvent({ type: "deploy_progress" }, "a"), false);
+  assert.equal(acceptProgressEvent({ type: "deploy_progress", data: { subject: "a" } }, "a"), false);
+});
+
+// Nothing is on screen, so nothing belongs to it.
+test("acceptProgressEvent takes nothing when no deploy is being shown", () => {
+  assert.equal(
+    acceptProgressEvent({ type: "deploy_progress", data: { subject: "a", line: "x" } }, ""),
+    false
+  );
 });

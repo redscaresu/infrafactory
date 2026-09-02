@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -299,7 +300,7 @@ func TestDeployRecordsTheProjectEvenWhenTheApplyCreatedNothing(t *testing.T) {
 // resources already created: an error AND a state file naming them.
 type partialApplyHarness struct{ calls int }
 
-func (p *partialApplyHarness) Run(_ context.Context, workDir string, _ map[string]string) (*harness.SandboxDeployResult, error) {
+func (p *partialApplyHarness) Run(_ context.Context, workDir string, _ map[string]string, _ io.Writer) (*harness.SandboxDeployResult, error) {
 	p.calls++
 	_ = os.MkdirAll(workDir, 0o755)
 	_ = os.WriteFile(filepath.Join(workDir, harness.LiveStateFilename), []byte(

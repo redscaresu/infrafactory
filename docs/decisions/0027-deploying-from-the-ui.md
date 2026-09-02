@@ -157,6 +157,21 @@ A deploy runs for minutes. Minutes of silence reads as broken, and a reader who
 cannot tell a long apply from a hung one will do one of two harmful things: kill
 it, or start another.
 
+**The harness reports, because it is the only thing that can.** The first attempt
+tee'd the deploy command's stderr, which is written twice before any cloud work
+and once after the apply returns — and `CommandRunner.Run` returns a fully
+buffered result, so `tofu`'s own output does not exist until each process exits.
+There is no stream to tee. `SandboxDeployHarnessRunner.Run` therefore takes an
+`io.Writer` and announces each stage as it begins, including **retries**, since a
+silent retry is indistinguishable from a stage that is merely slow.
+
+Stage granularity rather than raw provider output: it answers the reader's actual
+question — *where is it up to?* — in a predictable handful of lines.
+
+The progress writer is a parameter rather than a field on the harness, because the
+harness is constructed once and shared, and two deploys running at once must not
+write into each other's stream.
+
 The command's progress is streamed to the websocket, one **line** per event.
 Lines rather than writes, because a command using several `Fprintf` calls
 otherwise produces fragments, and the last line — often the one that matters — is
@@ -170,3 +185,9 @@ statement about something the reader may not be looking at.
 
 Watching is never required. The apply is detached from the request, so closing the
 tab stops the stream and not the deploy.
+
+**The subject is the scenario, not the deployment id**, and that is a limit rather
+than a choice: the id is minted inside the command, after the request is accepted.
+Two concurrent deploys of one scenario therefore share a stream and a reader sees
+both. Recorded here rather than left to be discovered, because the id is the
+argument to `live teardown` and taking the wrong one has consequences.

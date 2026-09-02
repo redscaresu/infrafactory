@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -64,7 +65,7 @@ type fakeSandboxDeployHarness struct {
 // destroy, so a fake apply that leaves no state makes every Layer 3 test
 // fail at capture -- which is correct fail-closed behaviour, just not
 // what these tests are exercising.
-func (f *fakeSandboxDeployHarness) Run(ctx context.Context, workDir string, _ map[string]string) (*harness.SandboxDeployResult, error) {
+func (f *fakeSandboxDeployHarness) Run(ctx context.Context, workDir string, _ map[string]string, _ io.Writer) (*harness.SandboxDeployResult, error) {
 	f.calls++
 	f.lastCtx = ctx
 	if f.err == nil && workDir != "" {

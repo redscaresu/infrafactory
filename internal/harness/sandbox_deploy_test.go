@@ -18,7 +18,7 @@ func TestSandboxDeployHarnessRunSuccess(t *testing.T) {
 	}
 
 	h := NewSandboxDeployHarness(runner)
-	out, err := h.Run(context.Background(), "/tmp/workdir", map[string]string{"SCW_ACCESS_KEY": "real"})
+	out, err := h.Run(context.Background(), "/tmp/workdir", map[string]string{"SCW_ACCESS_KEY": "real"}, nil)
 	if err != nil {
 		t.Fatalf("run sandbox deploy harness: %v", err)
 	}
@@ -81,7 +81,7 @@ func TestSandboxDeployHarnessRunFailures(t *testing.T) {
 			t.Parallel()
 
 			h := NewSandboxDeployHarness(&fakeRunner{responses: tc.responses})
-			_, err := h.Run(context.Background(), "/tmp/workdir", nil)
+			_, err := h.Run(context.Background(), "/tmp/workdir", nil, nil)
 			if err == nil {
 				t.Fatal("expected error")
 			}

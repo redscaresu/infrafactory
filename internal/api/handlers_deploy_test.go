@@ -253,8 +253,14 @@ func TestDeployStreamsItsProgressToWatchers(t *testing.T) {
 	}
 }
 
-// A deploy must not depend on anybody watching.
-func TestDeployWorksWithNoHubConfigured(t *testing.T) {
+// A deploy must not depend on anybody LISTENING: the hub exists but has
+// no clients, which is the ordinary case.
+//
+// Note this does not exercise the sink's nil-hub branch -- NewServer
+// substitutes a hub when ServerConfig.Hub is nil, so `state.hub` is
+// never nil here. That branch is covered directly by
+// TestProgressSinkWithNoHubIsHarmless.
+func TestDeployWorksWithNobodyListening(t *testing.T) {
 	srv := NewServer(ServerConfig{
 		Config: config.Default(), Deployments: &fakeDeployments{},
 		Deployer: &fakeDeployer{result: ActionResult{Clean: true}, progressLines: "working\n"},

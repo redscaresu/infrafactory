@@ -320,3 +320,27 @@ export function deployWarnings(preview) {
 
   return warnings;
 }
+
+/**
+ * acceptProgressEvent decides whether a websocket event belongs to the
+ * deploy a page is currently showing.
+ *
+ * Extracted from the component so it can be tested. While it was inline
+ * in `+page.svelte` it had NO test at all: the e2e tests intercept the
+ * POST in the browser, so the server never broadcasts and the filter was
+ * never invoked. Typo-ing the event type — which kills the entire
+ * stream — passed the whole suite.
+ *
+ * The subject is the SCENARIO, which is what the request carries. It
+ * cannot be the deployment id: that id is minted inside the command,
+ * after the request is accepted. So two concurrent deploys of the same
+ * scenario share a stream, and a reader sees both. That is a real limit
+ * and it is written down rather than implied away.
+ */
+export function acceptProgressEvent(event, showingScenario) {
+  if (!showingScenario) return false;
+  if (event?.type !== "deploy_progress") return false;
+  const data = event?.data;
+  if (!data?.line) return false;
+  return data.subject === showingScenario;
+}

@@ -215,11 +215,7 @@ func (d *LiveDeployer) Deploy(ctx context.Context, scenarioName, ttl string, pro
 	// no structured output can still be explained.
 	var out, progressCopy strings.Builder
 	cmd.SetOut(&out)
-	if progress != nil {
-		cmd.SetErr(io.MultiWriter(progress, &progressCopy))
-	} else {
-		cmd.SetErr(&progressCopy)
-	}
+	cmd.SetErr(deployStderr(progress, &progressCopy))
 	cmd.SetContext(ctx)
 
 	deployErr := runDeployCommand(cmd, []string{path}, runtime)
@@ -235,6 +231,23 @@ func (d *LiveDeployer) Deploy(ctx context.Context, scenarioName, ttl string, pro
 		result.Clean = false
 	}
 	return result, nil
+}
+
+// deployStderr builds the command's stderr: live to the caller if there
+// is one, and always into a copy.
+//
+// Split out because it is the only place a nil progress writer is
+// handled, and a test that never gets past building a runtime cannot
+// reach it -- which is exactly what the first attempt at covering this
+// did.
+//
+// io.MultiWriter would store a nil io.Writer and panic on the first
+// write, so the nil case must not reach it.
+func deployStderr(progress io.Writer, copy io.Writer) io.Writer {
+	if progress == nil {
+		return copy
+	}
+	return io.MultiWriter(progress, copy)
 }
 
 // deployOutcome turns the command's JSON output into the neutral shape.

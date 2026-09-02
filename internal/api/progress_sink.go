@@ -68,9 +68,13 @@ func (s *ProgressSink) Write(p []byte) (int, error) {
 
 // Close flushes whatever did not end in a newline.
 //
-// A command's last line often has no trailing newline, and it is
-// frequently the one that matters -- "Deployed as dep-…". Dropping it
-// would end the stream one line short of the conclusion.
+// Worth being precise about, because an earlier version of this comment
+// was not: `deploy` terminates every line it writes, so for TODAY'S
+// caller Close has nothing to flush in any state. It is not dead code —
+// a writer that buffers to newlines drops a trailing partial line by
+// construction, and the next caller to write one would lose it silently,
+// which is the failure this whole file exists to avoid. It is a
+// guarantee about the type, not a fix for an observed bug.
 func (s *ProgressSink) Close() error {
 	if s == nil {
 		return nil

@@ -156,3 +156,15 @@ func TestProgressSinkIsSafeUnderConcurrentWrites(t *testing.T) {
 		assert.Equal(t, "aaaa", e.Data["line"], "a line must not be interleaved with another")
 	}
 }
+
+// The nil-HUB branch, which the server-level test cannot reach because
+// NewServer substitutes a hub when none is configured.
+func TestProgressSinkWithNoHubIsHarmless(t *testing.T) {
+	sink := NewProgressSink(nil, "deploy_progress", "lb-serving-paris")
+
+	n, err := sink.Write([]byte("a line\n"))
+
+	require.NoError(t, err)
+	assert.Equal(t, len("a line\n"), n, "the writer must still consume everything")
+	require.NoError(t, sink.Close())
+}
