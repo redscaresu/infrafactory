@@ -2,6 +2,31 @@
 
 Last updated: 2026-08-31
 
+## 2026-09-02 — S160c: the deploy safety model, decided before the button
+
+ADR-0027. Mostly a record of what is already true — the origin guard, start-time
+capability gates, a named confirmation — plus the decisions specific to
+**creating** infrastructure rather than running against it or destroying it.
+
+**`--allow-deploy` is its own flag, implied by neither of the others**, and both
+would have been tempting shorthands. `--allow-layer3` permits an *ephemeral*
+apply the run destroys before it finishes: minutes of blast radius, and the
+account ends as it started. `--allow-deploy` permits infrastructure that is
+**kept**, bills by the hour and serves the internet until something reaps it. An
+operator who agreed to the first has not agreed to the second. `--allow-teardown`
+is the opposite direction of harm and implies nothing about this at all.
+
+Three flags gating three distinct kinds of harm is deliberate rather than untidy:
+collapsing them into one `--unsafe` would make the cheapest carry the weight of
+the most expensive, and people would enable it for the cheap reason.
+
+The confirmation must state cost at **list price and say that it is an estimate**
+— ADR-0024's figures are read off a pricing page, not measured, and a confidently
+wrong number is worse than an admitted one. Expiry is shown as wall-clock, not a
+duration, because "4h" is a number people agree to without arithmetic.
+
+The default `infrafactory ui` can do none of the three.
+
 ## 2026-09-02 — S161b: teardown from the estate page
 
 The estate page can now destroy what it lists, using S159b's endpoint. Three
