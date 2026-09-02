@@ -3,10 +3,34 @@
   import { onDestroy } from "svelte";
   import { page } from "$app/stores";
   import { api } from "$lib/api";
+  import {
+    deployConfirmation,
+    deployWarnings,
+    teardownOutcome
+  } from "$lib/deployments-view.js";
   import { modeSummary, normalizeRunOptions } from "$lib/scenario-run.js";
-  import type { ScenarioLayer3StatusResponse, ScenarioRunModeResponse } from "$lib/types";
+  import type { DeployPreview, ScenarioLayer3StatusResponse, ScenarioRunModeResponse } from "$lib/types";
 
   let scenarioPath = "";
+
+  // Every async response on this page belongs to a navigation, and this
+  // is how one is identified.
+  //
+  // Comparing `scenarioPath` is not enough: A → B → A leaves the path
+  // equal to what an in-flight request for the FIRST A captured, so a
+  // response that is genuinely stale passes the check. The counter is
+  // monotonic, so it cannot collide that way.
+  //
+  // It exists because the alternative was found six times in four review
+  // passes: a confirmation describing one scenario while the page had
+  // moved to another, an in-flight preview reopening a dialog, a deploy
+  // result landing on the wrong page, and route loads resolving out of
+  // order. Guarding each occurrence produced the next one. This guards
+  // the shape.
+  let navigation = 0;
+
+  /** current reports whether a response still belongs to the page. */
+  const current = (token: number) => token === navigation;
   let detail: any = null;
   let rawYAML = "";
   let status = "";
@@ -91,27 +115,124 @@
 
   async function loadDetail() {
     if (!scenarioPath) return;
-    detail = await api.getScenario(scenarioPath);
-    rawYAML = detail.raw_yaml;
+    const token = navigation;
+    const loaded = await api.getScenario(scenarioPath);
+    if (!current(token)) return;
+    detail = loaded;
+    rawYAML = loaded.raw_yaml;
   }
 
   async function loadRunMode() {
     if (!scenarioPath) return;
+    const token = navigation;
     runModeError = "";
     try {
-      runMode = await api.getScenarioRunMode(scenarioPath);
+      const loaded = await api.getScenarioRunMode(scenarioPath);
+      if (!current(token)) return;
+      runMode = loaded;
     } catch (err) {
+      if (!current(token)) return;
       runMode = null;
       runModeError = err instanceof Error ? err.message : "Run mode detection failed";
     }
   }
 
+  // Deploy is a DISTINCT verb from run (ADR-0027 section 4). S153 split
+  // them so that keeping infrastructure could not be reached by accident
+  // from the verb that proves a change is safe, and merging them into
+  // one "go" button here would undo that.
+  let preview: DeployPreview | null = null;
+  let previewError = "";
+  let confirmingDeploy = false;
+  // Only one preview may be in flight. Two clicks on Deploy left two
+  // responses racing, and an older one could reopen a dialog the reader
+  // had already dismissed.
+  //
+  // Disabling the button removes that state rather than guarding it,
+  // which is the move pass 126 argued for and pass 127 had to learn
+  // twice. It also gives the reader feedback that the click landed.
+  let previewing = false;
+  let deploying = false;
+  let deployOutcomeMessage = "";
+  let deployOk = false;
+
+  async function openDeployConfirmation() {
+    previewError = "";
+    deployOutcomeMessage = "";
+
+    // A preview takes a round trip and the reader can navigate during
+    // it, so the response is discarded if it arrives after the page has
+    // moved on.
+    const token = navigation;
+    const requestedName = detail?.name;
+    if (!requestedName || previewing) return;
+
+    previewing = true;
+    try {
+      const fetched = await api.getDeployPreview(requestedName);
+      if (!current(token)) return;
+      preview = fetched;
+      confirmingDeploy = true;
+    } catch (err) {
+      if (!current(token)) return;
+      preview = null;
+      previewError = err instanceof Error ? err.message : "Could not read what this would deploy";
+    } finally {
+      previewing = false;
+    }
+  }
+
+  async function confirmDeploy() {
+    // The scenario from the PREVIEW, never the one the page currently
+    // shows. This component is reused across scenario routes, so an
+    // open confirmation can outlive the page it was opened on -- and
+    // posting `detail.name` would let somebody read scenario A's cost,
+    // lifetime and blast radius and create scenario B's infrastructure.
+    //
+    // A confirmation that describes one thing and does another is worse
+    // than no confirmation at all: it converts a careful person into a
+    // confident one.
+    const target = preview?.scenario;
+    if (!target) return;
+
+    deploying = true;
+    try {
+      const result = await api.deployScenario(target);
+      const outcome = teardownOutcome(result);
+      deployOk = outcome.ok;
+      // NAMED, always. An apply takes minutes and the reader can
+      // navigate during it, so this message can land on a different
+      // scenario's page -- and an unattributed "Deployed." there is a
+      // claim about the wrong thing.
+      //
+      // Attributed rather than discarded: the deploy really did create
+      // infrastructure, and throwing the news away because the reader
+      // moved is the worse of the two failures.
+      deployOutcomeMessage = outcome.ok
+        ? `${target}: deployed. It is listed on the Deployments page until its TTL expires.`
+        : `${target}: ${outcome.message}`;
+    } catch (err) {
+      deployOk = false;
+      deployOutcomeMessage =
+        err instanceof Error
+          ? `${target}: deploy could not be completed: ${err.message}`
+          : `${target}: deploy failed.`;
+    } finally {
+      deploying = false;
+      confirmingDeploy = false;
+    }
+  }
+
   async function loadLayer3Status() {
     if (!scenarioPath) return;
+    const token = navigation;
     layer3Error = "";
     try {
-      layer3Status = await api.getScenarioLayer3Status(scenarioPath);
+      const loaded = await api.getScenarioLayer3Status(scenarioPath);
+      if (!current(token)) return;
+      layer3Status = loaded;
     } catch (err) {
+      if (!current(token)) return;
       layer3Status = null;
       layer3Error = err instanceof Error ? err.message : "Layer 3 status lookup failed";
     }
@@ -159,7 +280,32 @@
   // SvelteKit reuses the component for [...path] route changes.
   // afterNavigate fires on both initial load and subsequent navigations.
   afterNavigate(() => {
+    // Every response in flight now belongs to a page that no longer
+    // exists.
+    navigation += 1;
     scenarioPath = ($page.params.path || "").toString();
+    // Belt and braces with confirmDeploy reading preview.scenario: a
+    // confirmation describing the page you just left must not still be
+    // on screen, even though accepting it would now be harmless.
+    // Leaving it visible invites the reader to trust a dialog about
+    // something they are no longer looking at.
+    confirmingDeploy = false;
+    preview = null;
+    previewError = "";
+    deployOutcomeMessage = "";
+    // `detail` is cleared too, and that is the STRUCTURAL half of this.
+    //
+    // The whole page is inside `{#if detail}`, so clearing it means
+    // nothing is rendered until the new scenario loads -- including the
+    // Deploy button. Without this there is a window after the route
+    // changes where `detail` still holds the PREVIOUS scenario, and
+    // clicking Deploy in it previews and deploys that one from a URL
+    // that says otherwise.
+    //
+    // The cost is a blink of empty page during navigation. That is a
+    // fair price for making it impossible to act on a scenario the
+    // address bar no longer names.
+    detail = null;
     loadDetail();
     loadRunMode();
     loadLayer3Status();
@@ -284,7 +430,72 @@
       {running ? "Starting..." : "Run"}
     </button>
     <button class="rounded border border-slate-400 px-3 py-1.5 text-xs text-slate-900" on:click={saveScenario}>Save</button>
+    <!-- Deliberately a separate button, and deliberately not next to Run
+         in colour or weight. `run` proves a change is safe; `deploy`
+         keeps it. Merging them would undo the split S153 made. -->
+    <button
+      class="rounded border border-sky-500 px-3 py-1.5 text-xs font-semibold text-sky-900 disabled:opacity-50"
+      data-testid="scenario-deploy"
+      on:click={openDeployConfirmation}
+      disabled={deploying || previewing}
+      >{deploying ? "Deploying…" : previewing ? "Checking…" : "Deploy…"}</button
+    >
   </div>
+
+  {#if previewError}
+    <p class="mt-3 text-sm text-rose-800" data-testid="deploy-preview-error">{previewError}</p>
+  {/if}
+
+  {#if confirmingDeploy && preview}
+    <div
+      class="mt-3 rounded border border-sky-300 bg-sky-50 px-4 py-3 text-sm"
+      data-testid="deploy-confirm"
+    >
+      <p class="font-semibold text-slate-900">Deploy {preview.scenario}?</p>
+
+      <ul class="mt-2 list-disc space-y-1 pl-5 text-slate-800">
+        {#each deployConfirmation(preview) as line}
+          <li>{line}</li>
+        {/each}
+      </ul>
+
+      {#each deployWarnings(preview) as warning}
+        <p class="mt-2 font-semibold text-rose-900" data-testid="deploy-warning">{warning}</p>
+      {/each}
+
+      {#if !preview.deployable}
+        <p class="mt-2 text-rose-900" data-testid="deploy-not-deployable">{preview.reason}</p>
+      {:else if !preview.deploy_allowed}
+        <p class="mt-2 text-slate-700" data-testid="deploy-not-allowed">
+          This server cannot deploy. Restart it with
+          <code>infrafactory ui --allow-deploy</code>.
+        </p>
+      {/if}
+
+      <div class="mt-3 flex gap-2">
+        <button
+          class="rounded bg-sky-700 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40"
+          data-testid="deploy-confirm-go"
+          disabled={!preview.deployable || !preview.deploy_allowed || deploying}
+          on:click={confirmDeploy}>Deploy and keep it running</button
+        >
+        <button
+          class="rounded border border-slate-300 px-3 py-1.5 text-xs text-slate-700"
+          data-testid="deploy-cancel"
+          on:click={() => (confirmingDeploy = false)}>Cancel</button
+        >
+      </div>
+    </div>
+  {/if}
+
+  {#if deployOutcomeMessage}
+    <p
+      class={`mt-3 text-sm ${deployOk ? "text-emerald-800" : "font-semibold text-rose-800"}`}
+      data-testid="deploy-outcome"
+    >
+      {deployOutcomeMessage}
+    </p>
+  {/if}
   {#if status}<p class="mt-3 text-sm text-slate-700">{status}</p>{/if}
   <textarea
     class="mt-4 h-[460px] w-full rounded border border-slate-300 p-3 font-mono text-sm"
