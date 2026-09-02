@@ -206,8 +206,14 @@ test.describe('Deploy from the scenario page', () => {
     await page.getByTestId('scenario-deploy').click();
     await page.getByTestId('deploy-confirm-go').click();
 
-    await expect(page.getByTestId('deploy-outcome')).toBeVisible();
-    expect(posted).toBe('the-previewed-one');
+    // The confirmation closing is what marks the POST as sent. The
+    // OUTCOME deliberately does not appear here: outcomes are keyed by
+    // the scenario deployed, and this fixture makes that differ from the
+    // page's scenario to prove the POST follows the preview. A deploy of
+    // one scenario must not report on another's page.
+    await expect(page.getByTestId('deploy-confirm')).toHaveCount(0);
+    await expect.poll(() => posted).toBe('the-previewed-one');
+    await expect(page.getByTestId('deploy-outcome')).toHaveCount(0);
   });
 
   // afterNavigate clearing the dialog is not enough on its own: a
@@ -354,7 +360,9 @@ test.describe('Deploy from the scenario page', () => {
   });
 
   test('the outcome names the scenario it is about', async ({ page }) => {
-    await servePreview(page, { scenario: 'the-deployed-one' });
+    // Same scenario as the page, which is the only shape the real flow
+    // produces: the preview is fetched for the scenario on screen.
+    await servePreview(page, { scenario: 'web-app-paris' });
     await page.route('**/api/deployments', (route) =>
       route.request().method() === 'POST'
         ? route.fulfill({
@@ -368,11 +376,11 @@ test.describe('Deploy from the scenario page', () => {
     await page.getByTestId('scenario-deploy').click();
     await page.getByTestId('deploy-confirm-go').click();
 
-    await expect(page.getByTestId('deploy-outcome')).toContainText('the-deployed-one');
+    await expect(page.getByTestId('deploy-outcome')).toContainText('web-app-paris');
   });
 
   test('a failed outcome names its scenario too', async ({ page }) => {
-    await servePreview(page, { scenario: 'the-failed-one' });
+    await servePreview(page, { scenario: 'web-app-paris' });
     await page.route('**/api/deployments', (route) =>
       route.request().method() === 'POST'
         ? route.fulfill({
@@ -391,7 +399,7 @@ test.describe('Deploy from the scenario page', () => {
     await page.getByTestId('deploy-confirm-go').click();
 
     const outcome = page.getByTestId('deploy-outcome');
-    await expect(outcome).toContainText('the-failed-one');
+    await expect(outcome).toContainText('web-app-paris');
     await expect(outcome).toContainText('7c98d82e');
   });
 });
@@ -473,5 +481,111 @@ test.describe('Deploy progress', () => {
     release();
     // And the finished deploy must not paint its result here either.
     await expect(page.getByTestId('deploy-progress')).toHaveCount(0);
+  });
+});
+
+test.describe('Deploy state outlives the page', () => {
+  // Component state died with the component. Navigating away and back
+  // during a deploy left a real, billable apply rendered as an
+  // unlabelled disabled button with no log and no warning; leaving the
+  // section entirely let a SECOND deploy of the same scenario start,
+  // because the server has no in-flight lock.
+  test('a running deploy is still shown after navigating away and back', async ({ page }) => {
+    await page.route('**/api/deployments/preview**', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          scenario: 'web-app-paris',
+          deployable: true,
+          expires_at: null,
+          internet_facing: false,
+          deploy_allowed: true,
+          cost: { components: [], eur_per_hour: 0, unpriced: [], complete: true, modelled: true }
+        })
+      })
+    );
+
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    await page.route('**/api/deployments', async (route) => {
+      if (route.request().method() !== 'POST') return route.continue();
+      await held;
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ clean: true, steps: [], failures: [] })
+      });
+    });
+
+    await page.goto('/scenarios/training/web-app-paris');
+    await page.getByTestId('scenario-deploy').click();
+    await page.getByTestId('deploy-confirm-go').click();
+    await expect(page.getByTestId('deploy-progress')).toBeVisible();
+
+    // Away — the other scenario shows nothing about this deploy...
+    await page.getByTestId('sidebar-scenario-training/lb-serving-paris').click();
+    await expect(page.locator('main h1')).toContainText('lb-serving-paris');
+    await expect(page.getByTestId('deploy-progress')).toHaveCount(0);
+    await expect(page.getByTestId('scenario-deploy')).toBeEnabled();
+
+    // ...and back — the running deploy is visible again, and cannot be
+    // started a second time.
+    await page.getByTestId('sidebar-scenario-training/web-app-paris').click();
+    await expect(page.locator('main h1')).toContainText('web-app-paris');
+    await expect(page.getByTestId('deploy-progress')).toBeVisible();
+    await expect(page.getByTestId('scenario-deploy')).toBeDisabled();
+
+    release();
+    await expect(page.getByTestId('deploy-outcome')).toBeVisible();
+  });
+
+  // Leaving the section unmounts the component entirely, which is what
+  // made the second deploy reachable.
+  test('a running deploy survives leaving the scenarios section', async ({ page }) => {
+    await page.route('**/api/deployments/preview**', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          scenario: 'web-app-paris',
+          deployable: true,
+          expires_at: null,
+          internet_facing: false,
+          deploy_allowed: true,
+          cost: { components: [], eur_per_hour: 0, unpriced: [], complete: true, modelled: true }
+        })
+      })
+    );
+
+    let posts = 0;
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    await page.route('**/api/deployments', async (route) => {
+      if (route.request().method() !== 'POST') return route.continue();
+      posts += 1;
+      await held;
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ clean: true, steps: [], failures: [] })
+      });
+    });
+
+    await page.goto('/scenarios/training/web-app-paris');
+    await page.getByTestId('scenario-deploy').click();
+    await page.getByTestId('deploy-confirm-go').click();
+    await expect(page.getByTestId('deploy-progress')).toBeVisible();
+
+    await page.getByRole('link', { name: 'Deployments' }).click();
+    await expect(page).toHaveURL(/\/deployments/);
+
+    await page.getByTestId('sidebar-scenario-training/web-app-paris').click();
+    await expect(page.locator('main h1')).toContainText('web-app-paris');
+
+    await expect(page.getByTestId('scenario-deploy')).toBeDisabled();
+    expect(posts).toBe(1);
+
+    release();
   });
 });

@@ -44,6 +44,30 @@ The event subject is the **scenario**, not the deployment id — that id is mint
 inside the command. Two concurrent deploys of one scenario share a stream. Stated
 in the code rather than implied away.
 
+**A second fresh-context review found five more, four of them in the fix.** A
+stage that FAILED was reported as `done` — a failure rendered as completion,
+followed by silence, in the code written to prevent exactly that; and
+`TestEveryStageReportsItself` actively pinned the wrong behaviour.
+
+The other three shared a cause: **in-flight state died with the component.**
+Navigating away and back mid-deploy left a real, billable apply rendered as an
+unlabelled disabled button with no log — the "cannot see it" warning was itself
+unreachable, gated on state that had just been cleared. Leaving the *section*
+unmounted the component entirely, so returning gave a fresh one that believed
+nothing was running and would start a **second deploy of the same scenario**.
+
+That last one was created by the previous round's fix: removing state on
+navigation is right for the confirmation dialog and wrong for the deploy stream,
+and I applied it to both because two passes earlier they had been folded into one
+function. **State that must outlive the page cannot live in the page** — it is a
+module-level store keyed by scenario now, owning the socket, with two e2e tests
+pinning both journeys including a full unmount.
+
+**Named rather than claimed done:** `run`/`test` still applies silently. Its
+progress goes through `runtime.Logger` rather than a writer, so the Layer 3 apply
+on the Live Run page — the more commonly watched screen — has the same defect this
+slice fixes for `deploy`.
+
 ## 2026-09-02 — S162c: the deploy button, and a correction to S161
 
 The scenario page can deploy. Deliberately a **separate button from Run**, and

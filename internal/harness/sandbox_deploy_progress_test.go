@@ -130,3 +130,43 @@ func TestEveryStageReportsItself(t *testing.T) {
 		assert.Contains(t, joined, stage+": done", "%s must report completion", stage)
 	}
 }
+
+// A stage that FAILED must not be reported as done.
+//
+// An earlier version called `done` unconditionally, before inspecting
+// the error, so the last line a watcher saw on a failed deploy was
+// "init: done in 2s" followed by silence -- a failure rendered as
+// completion, and a stream that stops without saying why.
+//
+// TestEveryStageReportsItself actively pinned that wrong behaviour,
+// which is why it is not enough on its own.
+func TestAFailedStageIsNotReportedAsDone(t *testing.T) {
+	for _, failing := range []string{"init", "plan", "apply"} {
+		t.Run(failing, func(t *testing.T) {
+			writer := &recordingWriter{}
+			runner := &stageFailingRunner{failStage: failing}
+
+			_, err := NewSandboxDeployHarness(runner).Run(
+				context.Background(), t.TempDir(), map[string]string{}, writer)
+			require.Error(t, err)
+
+			joined := strings.Join(writer.snapshot(), "\n")
+			assert.Contains(t, joined, failing+": FAILED",
+				"the stage that failed must say so")
+			assert.NotContains(t, joined, failing+": done",
+				"a failure must never be rendered as completion")
+		})
+	}
+}
+
+// stageFailingRunner fails one named stage.
+type stageFailingRunner struct {
+	failStage string
+}
+
+func (r *stageFailingRunner) Run(_ context.Context, cmd Command) (CommandResult, error) {
+	if len(cmd.Args) > 0 && cmd.Args[0] == r.failStage {
+		return CommandResult{Stderr: []byte("boom")}, assertProviderError{}
+	}
+	return CommandResult{Stdout: []byte("ok")}, nil
+}

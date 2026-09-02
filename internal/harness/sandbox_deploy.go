@@ -138,10 +138,24 @@ func (p stageProgress) start(stage string) time.Time {
 	return time.Now()
 }
 
-func (p stageProgress) done(stage string, started time.Time) {
-	if p.out != nil {
-		_, _ = fmt.Fprintf(p.out, "  %s: done in %s\n", stage, time.Since(started).Round(time.Second))
+// finished reports how a stage ENDED, which is not the same as that it
+// ended.
+//
+// Reporting every stage as "done" regardless of its error made the last
+// line a watcher saw on a failed deploy `init: done in 2s`, followed by
+// silence -- a failure rendered as completion, and a stream that stops
+// without saying why. Both are the specific sins this project holds
+// itself against.
+func (p stageProgress) finished(stage string, started time.Time, err error) {
+	if p.out == nil {
+		return
 	}
+	elapsed := time.Since(started).Round(time.Second)
+	if err != nil {
+		_, _ = fmt.Fprintf(p.out, "  %s: FAILED after %s: %v\n", stage, elapsed, err)
+		return
+	}
+	_, _ = fmt.Fprintf(p.out, "  %s: done in %s\n", stage, elapsed)
 }
 
 // retrying is reported because a silent retry is indistinguishable from
@@ -166,7 +180,7 @@ func (h *SandboxDeployHarness) Run(ctx context.Context, workDir string, env map[
 	}
 	initStarted := report.start("init")
 	initResult, err := h.runner.Run(ctx, initCmd)
-	report.done("init", initStarted)
+	report.finished("init", initStarted, err)
 	initStage := StageResult{
 		Stage:  "init",
 		Cmd:    []string{"tofu", "init"},
@@ -190,7 +204,7 @@ func (h *SandboxDeployHarness) Run(ctx context.Context, workDir string, env map[
 	}
 	planStarted := report.start("plan")
 	planResult, err := h.runner.Run(ctx, planCmd)
-	report.done("plan", planStarted)
+	report.finished("plan", planStarted, err)
 	planStage := StageResult{
 		Stage:  "plan",
 		Cmd:    []string{"tofu", "plan", "-state=" + LiveStateFilename},
@@ -220,7 +234,7 @@ func (h *SandboxDeployHarness) Run(ctx context.Context, workDir string, env map[
 		applyStarted := report.start("apply")
 		var applyResult CommandResult
 		applyResult, err = h.runner.Run(ctx, applyCmd)
-		report.done("apply", applyStarted)
+		report.finished("apply", applyStarted, err)
 		applyStage = StageResult{
 			Stage:  "apply",
 			Cmd:    []string{"tofu", "apply", "-auto-approve", "-state=" + LiveStateFilename},

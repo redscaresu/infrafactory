@@ -1,15 +1,23 @@
 <script lang="ts">
   import { afterNavigate } from "$app/navigation";
-  import { onDestroy } from "svelte";
+  import { onDestroy, onMount } from "svelte";
   import { page } from "$app/stores";
   import { api } from "$lib/api";
   import { connectWS } from "$lib/ws";
   import {
-    acceptProgressEvent,
     deployConfirmation,
     deployWarnings,
     teardownOutcome
   } from "$lib/deployments-view.js";
+  import {
+    beginDeploy,
+    deploys,
+    finishDeploy,
+    isConnected,
+    isRunning,
+    useConnector,
+    watch as watchDeploys
+  } from "$lib/deploy-store.js";
   import { modeSummary, normalizeRunOptions } from "$lib/scenario-run.js";
   import type { DeployPreview, ScenarioLayer3StatusResponse, ScenarioRunModeResponse } from "$lib/types";
 
@@ -81,11 +89,13 @@
   // Clear the debounce timer on destroy so navigating away during the
   // 500ms window doesn't fire a stale validation against a torn-down
   // component (the validationVersion guard is per-instance).
+  // The shared socket stays open while this page is mounted, and the
+  // store keeps it open beyond that if a deploy is still running -- so
+  // leaving and returning finds the log intact rather than frozen.
+  onMount(() => watchDeploys());
+
   onDestroy(() => {
     if (validationTimer) clearTimeout(validationTimer);
-    // Leaving the page must not leave a socket open. The deploy itself
-    // is unaffected: it is detached from the request on the server, so
-    // it finishes whether or not anybody is watching.
     resetDeployState();
   });
 
@@ -164,80 +174,51 @@
   // difference matters when the thing running is creating billable
   // infrastructure (S163).
   //
-  // Every line names the scenario it belongs to, so lines from a deploy
-  // the reader has navigated away from are DISCARDED here rather than
-  // appended under the wrong heading.
-  let deployProgress: string[] = [];
-  let disconnectWS: (() => void) | undefined;
-  // Whether we are actually receiving. A dropped socket and "nothing has
-  // happened yet" both produce an empty log, and rendering them the same
-  // way tells the reader an apply is quiet when the truth is that it is
-  // UNOBSERVED -- the same falsehood the estate page exists to avoid.
-  let streamConnected = false;
+  // The in-flight state lives in a MODULE-LEVEL store, not here.
+  //
+  // This component is reused between scenarios and destroyed outright
+  // when you leave the section, while a deploy runs for minutes on a
+  // server that has no in-flight lock. Holding it here produced two
+  // review findings: navigating away and back showed a real, billable
+  // apply as an unlabelled disabled button with no log and no warning,
+  // and leaving the section entirely let a SECOND deploy of the same
+  // scenario be started.
+  //
+  // Everything below is scoped to the scenario ON SCREEN, so another
+  // scenario's deploy never renders here and this scenario's deploy
+  // renders whether or not this component was alive when it began.
+  useConnector(connectWS);
 
-  function onSocketMessage(msg: unknown) {
-    if (!acceptProgressEvent(msg, deployingScenario)) return;
-    const line = (msg as { data: { line: string } }).data.line;
-    deployProgress = [...deployProgress, line];
-  }
-
-  // The scenario whose progress this page is currently showing. Held
-  // separately from `preview` because `preview` is cleared on
-  // navigation while a deploy keeps running.
-  let deployingScenario = "";
-  // Monotonic, so a finishing deploy can tell whether it is still the
-  // one this page is showing.
-  let deployGeneration = 0;
+  $: deployEntry = detail?.name ? $deploys[detail.name] : undefined;
+  $: deployProgress = deployEntry?.progress ?? [];
+  $: deploying = detail?.name ? isRunning($deploys, detail.name) : false;
+  $: deployOutcome = deployEntry?.outcome ?? null;
+  // A dropped socket and "nothing has happened yet" both produce an
+  // empty log, and rendering them the same way tells the reader an apply
+  // is quiet when the truth is that it is UNOBSERVED.
+  $: streamConnected = isConnected($deploys);
 
   /**
-   * resetDeployState puts this page back to knowing nothing about a
-   * deploy.
+   * resetDeployState clears what belongs to THIS page's confirmation
+   * dialog, and nothing else.
    *
-   * ONE function, called from both navigation and destroy, because the
-   * reset used to be a hand-written list in `afterNavigate` -- and the
-   * moment S163 added stream state, the list did not grow with it. The
-   * websocket, `deployingScenario` and `deployProgress` survived a
-   * client-side route change, so progress for the previous scenario
-   * kept rendering under the new one.
+   * It deliberately does not touch the deploy stream. That lives in the
+   * store, survives navigation and component destruction, and is scoped
+   * by scenario -- so a page showing B reads nothing for B while A keeps
+   * applying, and coming back to A finds its log still there.
    *
-   * `onDestroy` does not cover that: SvelteKit REUSES this `[...path]`
-   * component across scenario routes, so leaving a scenario page for
-   * another one destroys nothing.
-   *
-   * `deploying` is deliberately NOT reset here. It is the only thing
-   * that stops a second deploy being started, and the apply is detached
-   * from the request on the server -- so clearing it on navigation let a
-   * reader move away, come back, find the button enabled, and start a
-   * SECOND apply while the first was still creating billable
-   * infrastructure. Two run-owned projects and two sets of resources for
-   * one scenario, from a page reporting that nothing was running.
-   *
-   * That is the exact harm ADR-0027's streaming amendment names -- "a
-   * reader who cannot tell a long apply from a hung one will do one of
-   * two harmful things: kill it, or start another" -- reachable through
-   * the code added to prevent it.
-   *
-   * The deploy itself is untouched either way. It finishes whether or
-   * not this page is watching.
+   * The previous version cleared it here, which is what produced the
+   * "running apply rendered as an unlabelled disabled button" and
+   * "second deploy startable" findings.
    */
   function resetDeployState() {
-    disconnectWS?.();
-    disconnectWS = undefined;
-    streamConnected = false;
-    deployingScenario = "";
-    deployProgress = [];
     confirmingDeploy = false;
     preview = null;
     previewError = "";
-    deployOutcomeMessage = "";
   }
-  let deploying = false;
-  let deployOutcomeMessage = "";
-  let deployOk = false;
 
   async function openDeployConfirmation() {
     previewError = "";
-    deployOutcomeMessage = "";
 
     // A preview takes a round trip and the reader can navigate during
     // it, so the response is discarded if it arrives after the page has
@@ -274,60 +255,20 @@
     const target = preview?.scenario;
     if (!target) return;
 
-    deploying = true;
-    deployingScenario = target;
-    // Which deploy this call owns. An earlier deploy finishing must not
-    // clear a LATER one's state: without this, deploying A, navigating
-    // away, deploying B, and then A's request resolving first would
-    // freeze B's log mid-stream, unlock the button, and put a green
-    // success message belonging to A directly beneath it.
-    const owned = ++deployGeneration;
-    deployProgress = [];
-    if (!disconnectWS) {
-      disconnectWS = connectWS(onSocketMessage, (connected) => (streamConnected = connected));
-    }
+    // The store owns everything about an in-flight deploy, so it
+    // survives this component being reused or destroyed. It is keyed by
+    // scenario, which is what the progress events carry.
+    beginDeploy(target);
+    confirmingDeploy = false;
+
     try {
-      const result = await api.deployScenario(target);
-      const outcome = teardownOutcome(result);
-      // The outcome is always shown -- it names its scenario, so it is
-      // true wherever it lands -- but it must not overwrite a NEWER
-      // deploy's outcome.
-      if (owned !== deployGeneration) return;
-      deployOk = outcome.ok;
-      // NAMED, always. An apply takes minutes and the reader can
-      // navigate during it, so this message can land on a different
-      // scenario's page -- and an unattributed "Deployed." there is a
-      // claim about the wrong thing.
-      //
-      // Attributed rather than discarded: the deploy really did create
-      // infrastructure, and throwing the news away because the reader
-      // moved is the worse of the two failures.
-      deployOutcomeMessage = outcome.ok
-        ? `${target}: deployed. It is listed on the Deployments page until its TTL expires.`
-        : `${target}: ${outcome.message}`;
+      finishDeploy(target, teardownOutcome(await api.deployScenario(target)));
     } catch (err) {
-      if (owned !== deployGeneration) return;
-      deployOk = false;
-      deployOutcomeMessage =
-        err instanceof Error
-          ? `${target}: deploy could not be completed: ${err.message}`
-          : `${target}: deploy failed.`;
-    } finally {
-      if (owned === deployGeneration) {
-        deploying = false;
-        confirmingDeploy = false;
-      }
-      // `deployingScenario` is NOT cleared here.
-      //
-      // The last progress line -- "Deployed as dep-…", the id an
-      // operator needs for `live teardown` -- is broadcast before the
-      // HTTP response but delivered by a separate goroutine on a
-      // separate connection. It routinely arrives after this promise
-      // resolves, and clearing the subject synchronously made the
-      // filter discard exactly the line that mattered.
-      //
-      // It is cleared on navigation instead, which is when the page
-      // genuinely stops being about this deploy.
+      finishDeploy(target, {
+        ok: false,
+        message:
+          err instanceof Error ? `deploy could not be completed: ${err.message}` : "deploy failed."
+      });
     }
   }
 
@@ -544,7 +485,7 @@
       on:click={openDeployConfirmation}
       disabled={deploying || previewing}
       >{deploying
-        ? `Deploying ${deployingScenario || "…"}`
+        ? `Deploying ${detail?.name ?? "…"}`
         : previewing
           ? "Checking…"
           : "Deploy…"}</button
@@ -597,12 +538,10 @@
     </div>
   {/if}
 
-  <!-- Gated on `deployingScenario`, not on `deploying`.
-       `deploying` is a bare boolean about no particular thing, so it
-       survives navigation and would keep this panel open on a page that
-       has nothing to do with the deploy still running. The
-       subject-bearing state is the one to ask. -->
-  {#if deployingScenario || deployProgress.length > 0}
+  <!-- Read from the store, scoped to the scenario on screen. Another
+       scenario's deploy never renders here, and this scenario's deploy
+       renders whether or not this component was alive when it began. -->
+  {#if deploying || deployProgress.length > 0}
     <div
       class="mt-3 rounded border border-slate-300 bg-slate-900 px-3 py-2 font-mono text-xs text-slate-100"
       data-testid="deploy-progress"
@@ -624,12 +563,18 @@
     </div>
   {/if}
 
-  {#if deployOutcomeMessage}
+  <!-- Named, always. An apply takes minutes and the reader can navigate
+       during it, so an unattributed "deployed." is a claim about the
+       wrong thing. The store keys outcomes by scenario, so this one is
+       this scenario's by construction. -->
+  {#if deployOutcome}
     <p
-      class={`mt-3 text-sm ${deployOk ? "text-emerald-800" : "font-semibold text-rose-800"}`}
+      class={`mt-3 text-sm ${deployOutcome.ok ? "text-emerald-800" : "font-semibold text-rose-800"}`}
       data-testid="deploy-outcome"
     >
-      {deployOutcomeMessage}
+      {detail?.name}: {deployOutcome.ok
+        ? "deployed. It is listed on the Deployments page until its TTL expires."
+        : deployOutcome.message}
     </p>
   {/if}
   {#if status}<p class="mt-3 text-sm text-slate-700">{status}</p>{/if}
