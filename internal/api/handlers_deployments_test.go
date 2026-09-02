@@ -171,3 +171,22 @@ func TestDeploymentPayloadNeverCarriesAYearOneTimestamp(t *testing.T) {
 	assert.NotContains(t, rec.Body.String(), "0001-01-01",
 		"an absent moment must serialise as null; a page renders a date and a reader trusts it")
 }
+
+// A page should not offer a button it knows will 404. The safety is that
+// the endpoint does not exist; this only stops the UI advertising it.
+func TestDeploymentsReportWhetherTeardownIsAllowed(t *testing.T) {
+	_, off := getDeployments(t, &fakeDeployments{})
+	assert.False(t, off.TeardownAllowed)
+
+	srv := NewServer(ServerConfig{
+		Config: config.Default(), Deployments: &fakeDeployments{},
+		DeploymentActor: &fakeActor{},
+	})
+	req := httptest.NewRequest(http.MethodGet, "/api/deployments", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler.ServeHTTP(rec, req)
+
+	var on deploymentsResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &on))
+	assert.True(t, on.TeardownAllowed)
+}

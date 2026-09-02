@@ -214,3 +214,44 @@ export function addressLabel(deployment) {
   const href = addressHref(deployment);
   return href ? href.replace(/^http:\/\//, "") : "";
 }
+
+/**
+ * teardownPrompt is what a person must read before destroying something.
+ *
+ * It names the scenario, the project and the address, because "are you
+ * sure?" is not a safeguard -- it is a speed bump that people learn to
+ * click through. What makes a confirmation real is that it states WHICH
+ * thing is about to be destroyed, so a misclick on the wrong row is
+ * visible before it is irreversible.
+ */
+export function teardownPrompt(deployment) {
+  const parts = [`Destroy ${deployment?.scenario || deployment?.id || "this deployment"}?`];
+  if (deployment?.project_id) parts.push(`Project ${deployment.project_id}`);
+  if (deployment?.address) parts.push(`serving ${deployment.address}`);
+  parts.push("This deletes real infrastructure and cannot be undone.");
+  return parts.join(" · ");
+}
+
+/**
+ * teardownOutcome turns an ActionResult into the one thing to say.
+ *
+ * `clean` is read rather than `failures.length`, because they are
+ * different claims and ADR-0024 turns on the difference: a teardown that
+ * cannot PROVE the account clean must not report success, and a green
+ * tick over "the state file has vanished and the resources may still be
+ * running" is exactly the false green this project exists to avoid.
+ */
+export function teardownOutcome(result) {
+  if (!result) return { ok: false, message: "Teardown returned nothing." };
+  if (result.clean) {
+    return { ok: true, message: "Destroyed. The account is provably clean." };
+  }
+  const reasons = (result.failures || []).map((f) => f.detail).filter(Boolean);
+  return {
+    ok: false,
+    message:
+      reasons.length > 0
+        ? `Not provably clean — resources may still be running. ${reasons.join(" ")}`
+        : "Not provably clean — resources may still be running."
+  };
+}

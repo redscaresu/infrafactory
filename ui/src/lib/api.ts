@@ -5,6 +5,7 @@ import type {
   SavePitfallsResponse,
   ScenarioLayer3StatusResponse,
   ScenarioRunModeResponse,
+  ActionResult,
   DeploymentsResponse,
   StartRunOptions
 } from "$lib/types";
@@ -40,6 +41,25 @@ export const api = {
   getScenario: (path: string) => request(`/api/scenarios/${path}`),
   getScenarioRunMode: (path: string) => request<ScenarioRunModeResponse>(`/api/scenarios/${path}/run-mode`),
   getDeployments: () => request<DeploymentsResponse>("/api/deployments"),
+  // Not `request`, deliberately. A teardown that could not prove the
+  // account clean answers 409 WITH a full ActionResult -- the per-stage
+  // failures are the whole point, and `request` would throw them away
+  // and leave the page showing a generic message instead of "the state
+  // file has vanished and the resources may still be running".
+  tearDownDeployment: async (id: string): Promise<ActionResult> => {
+    const res = await fetch(`${base}/api/deployments/${encodeURIComponent(id)}`, {
+      method: "DELETE"
+    });
+    const ctype = res.headers.get("content-type") || "";
+    if ((res.ok || res.status === 409) && ctype.includes("application/json")) {
+      return (await res.json()) as ActionResult;
+    }
+    if (ctype.includes("application/json")) {
+      const payload = (await res.json()) as { error?: string };
+      throw new Error(payload.error || `teardown failed: ${res.status}`);
+    }
+    throw new Error((await res.text()) || `teardown failed: ${res.status}`);
+  },
   getScenarioLayer3Status: (path: string) => request<ScenarioLayer3StatusResponse>(`/api/scenarios/${path}/layer3-status`),
   putScenario: (path: string, rawYAML: string) =>
     request(`/api/scenarios/${path}`, {

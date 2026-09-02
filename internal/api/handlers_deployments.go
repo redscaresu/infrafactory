@@ -80,6 +80,15 @@ type deploymentsResponse struct {
 	// `live ls` exits non-zero for this; a GET cannot, so the payload
 	// has to carry it where a page will see it.
 	Unreadable []string `json:"unreadable"`
+
+	// TeardownAllowed reports whether this server was started with
+	// --allow-teardown.
+	//
+	// Carried so a page does not offer a button it knows will 404. That
+	// is a UI nicety; the SAFETY is that the endpoint does not exist,
+	// and this field cannot make it exist. A client that sets it locally
+	// gets a button that 404s.
+	TeardownAllowed bool `json:"teardown_allowed"`
 }
 
 // deploymentsHandler serves the live estate, read-only.
@@ -108,9 +117,10 @@ func deploymentsHandler(state *serverState) http.HandlerFunc {
 
 		now := time.Now()
 		payload := deploymentsResponse{
-			Schema:      "infrafactory.api.deployments.v1",
-			Deployments: make([]deploymentJSON, 0, len(deployments)),
-			Unreadable:  make([]string, 0, len(unreadable)),
+			Schema:          "infrafactory.api.deployments.v1",
+			Deployments:     make([]deploymentJSON, 0, len(deployments)),
+			Unreadable:      make([]string, 0, len(unreadable)),
+			TeardownAllowed: state.deploymentActor != nil,
 		}
 		for _, d := range deployments {
 			payload.Deployments = append(payload.Deployments, deploymentJSON{

@@ -9,6 +9,8 @@
     knownEmpty,
     needsAttention,
     observedLabel,
+    teardownOutcome,
+    teardownPrompt,
     ttlLabel,
     versionBadge
   } from "$lib/deployments-view.js";
@@ -16,6 +18,14 @@
 
   let deployments: Deployment[] = [];
   let unreadable: string[] = [];
+  let teardownAllowed = false;
+
+  // Confirming is a SECOND deliberate action on a named row, not a
+  // dialog that appears everywhere at once. A click cannot destroy
+  // anything on its own.
+  let confirming = "";
+  let destroying = "";
+  let outcomes: Record<string, { ok: boolean; message: string }> = {};
   let loadError = "";
   let loaded = false;
   let timer: ReturnType<typeof setInterval> | undefined;
@@ -25,6 +35,7 @@
       const payload: DeploymentsResponse = await api.getDeployments();
       deployments = payload?.deployments || [];
       unreadable = payload?.unreadable || [];
+      teardownAllowed = payload?.teardown_allowed === true;
       loadError = "";
     } catch (err) {
       // The previous rows are KEPT on error rather than cleared. An
@@ -34,6 +45,33 @@
       loadError = err instanceof Error ? err.message : "Could not read the live estate";
     } finally {
       loaded = true;
+    }
+  }
+
+  async function destroy(d: Deployment) {
+    confirming = "";
+    destroying = d.id;
+    try {
+      const result = await api.tearDownDeployment(d.id);
+      outcomes = { ...outcomes, [d.id]: teardownOutcome(result) };
+    } catch (err) {
+      outcomes = {
+        ...outcomes,
+        [d.id]: {
+          ok: false,
+          message:
+            err instanceof Error
+              ? `Teardown could not be completed: ${err.message}`
+              : "Teardown could not be completed."
+        }
+      };
+    } finally {
+      destroying = "";
+      // Reload whatever the outcome. A failed teardown changes the
+      // record too -- ADR-0024 keeps an unreclaimable deployment
+      // reapable rather than released -- so the table must not keep
+      // showing what was true before the attempt.
+      await load();
     }
   }
 
@@ -126,6 +164,7 @@
             <th class="px-3 py-2">Last observed</th>
             <th class="px-3 py-2">TTL</th>
             <th class="px-3 py-2">Address</th>
+            {#if teardownAllowed}<th class="px-3 py-2">Actions</th>{/if}
           </tr>
         </thead>
         <tbody class="divide-y divide-slate-200">
@@ -179,6 +218,51 @@
                   <span class="text-xs text-slate-500">no address recorded</span>
                 {/if}
               </td>
+              {#if teardownAllowed}
+                <td class="px-3 py-2">
+                  {#if destroying === d.id}
+                    <span class="text-xs text-slate-600" data-testid={`deployment-destroying-${d.id}`}>
+                      Destroying…
+                    </span>
+                  {:else if confirming === d.id}
+                    <!-- The confirmation NAMES what is about to go. "Are
+                         you sure?" is a speed bump people learn to click
+                         through; stating which project and address makes
+                         a misclick on the wrong row visible while it is
+                         still reversible. -->
+                    <div class="space-y-2" data-testid={`deployment-confirm-${d.id}`}>
+                      <p class="text-xs text-rose-900">{teardownPrompt(d)}</p>
+                      <div class="flex gap-2">
+                        <button
+                          class="rounded bg-rose-700 px-2 py-1 text-xs font-semibold text-white"
+                          data-testid={`deployment-destroy-${d.id}`}
+                          on:click={() => destroy(d)}>Destroy</button
+                        >
+                        <button
+                          class="rounded border border-slate-300 px-2 py-1 text-xs text-slate-700"
+                          data-testid={`deployment-cancel-${d.id}`}
+                          on:click={() => (confirming = "")}>Cancel</button
+                        >
+                      </div>
+                    </div>
+                  {:else}
+                    <button
+                      class="rounded border border-rose-300 px-2 py-1 text-xs font-semibold text-rose-800"
+                      data-testid={`deployment-teardown-${d.id}`}
+                      on:click={() => (confirming = d.id)}>Tear down</button
+                    >
+                  {/if}
+
+                  {#if outcomes[d.id]}
+                    <p
+                      class={`mt-2 text-xs ${outcomes[d.id].ok ? "text-emerald-800" : "text-rose-800 font-semibold"}`}
+                      data-testid={`deployment-outcome-${d.id}`}
+                    >
+                      {outcomes[d.id].message}
+                    </p>
+                  {/if}
+                </td>
+              {/if}
             </tr>
           {/each}
         </tbody>
@@ -186,8 +270,15 @@
     </div>
   {/if}
 
-  <p class="text-xs text-slate-500">
-    Read-only. Tear down with <code>infrafactory live teardown &lt;id&gt;</code> or reap expired
-    deployments with <code>infrafactory live reap</code>.
-  </p>
+  {#if !teardownAllowed}
+    <p class="text-xs text-slate-500" data-testid="estate-readonly-note">
+      Read-only. Start the server with <code>infrafactory ui --allow-teardown</code> to destroy
+      deployments from here, or use <code>infrafactory live teardown &lt;id&gt;</code>.
+    </p>
+  {:else}
+    <p class="text-xs text-slate-500">
+      Teardown deletes real infrastructure and cannot be undone. Expired deployments can be
+      cleared in one go with <code>infrafactory live reap</code>.
+    </p>
+  {/if}
 </section>

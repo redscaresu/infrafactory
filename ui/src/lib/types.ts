@@ -162,4 +162,23 @@ export interface DeploymentsResponse {
   // billing infrastructure, so the page must show them rather than
   // letting "we could not check" look like "nothing is running".
   unreadable: string[];
+  // Whether the server was started with --allow-teardown. A page should
+  // not offer a button it knows will 404; the SAFETY is that the
+  // endpoint does not exist, and this field cannot make it exist.
+  teardown_allowed: boolean;
+}
+
+export interface ActionStep {
+  stage: string;
+  status: string;
+  detail?: string;
+}
+
+export interface ActionResult {
+  // Its own field, not the absence of failures: ADR-0024's rule is that
+  // a teardown which cannot PROVE the account clean must not report
+  // success.
+  clean: boolean;
+  steps: ActionStep[];
+  failures: ActionStep[];
 }
