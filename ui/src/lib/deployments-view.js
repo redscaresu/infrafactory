@@ -255,3 +255,68 @@ export function teardownOutcome(result) {
         : "Not provably clean — resources may still be running."
   };
 }
+
+/**
+ * deployConfirmation is what a person must read before creating
+ * infrastructure (ADR-0027 §2).
+ *
+ * Returns an ordered list of lines rather than a sentence, because each
+ * one is a separate thing they might object to and a paragraph is a
+ * thing people skim.
+ */
+export function deployConfirmation(preview) {
+  if (!preview) return [];
+
+  const lines = [];
+
+  const shapes = (preview.cost?.components || [])
+    .map((c) => (c.count > 1 ? `${c.count} × ${c.name}` : c.name))
+    .join(", ");
+  lines.push(shapes ? `Creates: ${shapes}` : "Creates: unknown — see below");
+
+  // The cost line always says list price, and always says when it is a
+  // floor rather than a total.
+  lines.push(preview.cost_summary || "Cost unknown.");
+
+  if (preview.expires_at_wall_clock) {
+    lines.push(`Expires ${preview.expires_at_wall_clock} — after that, reap destroys it.`);
+  }
+
+  if (preview.internet_facing) {
+    lines.push("Reachable from the public internet.");
+  }
+
+  if (preview.image) lines.push(`Running ${preview.image}.`);
+
+  return lines;
+}
+
+/**
+ * deployWarnings are the things that should stop somebody, separated
+ * from the descriptive lines so a page can render them differently.
+ *
+ * `modelled === false` is first because it is the one that invalidates
+ * everything above it: an unmodelled scenario's empty component list and
+ * €0.00 mean "unknown", not "nothing".
+ */
+export function deployWarnings(preview) {
+  const warnings = [];
+  if (!preview) return warnings;
+
+  if (preview.cost && preview.cost.modelled === false) {
+    warnings.push(
+      "This scenario's resources are not modelled here, so what it creates and what it costs are both unknown. Do not read the figures above as complete."
+    );
+  } else if (preview.cost && preview.cost.complete === false) {
+    const unpriced = (preview.cost.unpriced || []).join(", ");
+    warnings.push(
+      `The cost is a floor, not a total: ${unpriced || "some components"} have no list price here.`
+    );
+  }
+
+  if (preview.internet_facing) {
+    warnings.push("This will be reachable from the public internet for its whole lifetime.");
+  }
+
+  return warnings;
+}

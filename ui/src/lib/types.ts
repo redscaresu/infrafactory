@@ -182,3 +182,42 @@ export interface ActionResult {
   steps: ActionStep[];
   failures: ActionStep[];
 }
+
+export interface CostComponent {
+  name: string;
+  count: number;
+  eur_per_hour: number;
+  // Free and unknown are different facts. `false` means this project has
+  // no list price for the shape, not that it is free.
+  priced: boolean;
+  source?: string;
+}
+
+export interface CostEstimate {
+  components: CostComponent[];
+  eur_per_hour: number;
+  unpriced: string[];
+  // Every component priced. When false, eur_per_hour is a LOWER BOUND.
+  complete: boolean;
+  // False when this scenario's resource shape is not modelled at all —
+  // an empty component list then means "unknown", not "nothing".
+  modelled: boolean;
+}
+
+export interface DeployPreview {
+  scenario: string;
+  cloud?: string;
+  deployable: boolean;
+  reason?: string;
+  image?: string;
+  ttl?: string;
+  ttl_seconds?: number;
+  // null when the scenario cannot be deployed, rather than a zero time
+  // that would render as a date in the year 1.
+  expires_at: string | null;
+  expires_at_wall_clock?: string;
+  cost: CostEstimate;
+  cost_summary?: string;
+  internet_facing: boolean;
+  deploy_allowed: boolean;
+}

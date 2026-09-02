@@ -6,6 +6,7 @@ import type {
   ScenarioLayer3StatusResponse,
   ScenarioRunModeResponse,
   ActionResult,
+  DeployPreview,
   DeploymentsResponse,
   StartRunOptions
 } from "$lib/types";
@@ -41,6 +42,30 @@ export const api = {
   getScenario: (path: string) => request(`/api/scenarios/${path}`),
   getScenarioRunMode: (path: string) => request<ScenarioRunModeResponse>(`/api/scenarios/${path}/run-mode`),
   getDeployments: () => request<DeploymentsResponse>("/api/deployments"),
+  getDeployPreview: (scenario: string, ttl = "") =>
+    request<DeployPreview>(
+      `/api/deployments/preview?scenario=${encodeURIComponent(scenario)}` +
+        (ttl ? `&ttl=${encodeURIComponent(ttl)}` : "")
+    ),
+  // Like teardown, this reads a 409 body rather than throwing it away: a
+  // deploy that could not prove itself carries the per-stage failures,
+  // and those name the leaked project id and how to remove it by hand.
+  deployScenario: async (scenario: string, ttl = ""): Promise<ActionResult> => {
+    const res = await fetch(`${base}/api/deployments`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(ttl ? { scenario, ttl } : { scenario })
+    });
+    const ctype = res.headers.get("content-type") || "";
+    if ((res.ok || res.status === 409) && ctype.includes("application/json")) {
+      return (await res.json()) as ActionResult;
+    }
+    if (ctype.includes("application/json")) {
+      const payload = (await res.json()) as { error?: string };
+      throw new Error(payload.error || `deploy failed: ${res.status}`);
+    }
+    throw new Error((await res.text()) || `deploy failed: ${res.status}`);
+  },
   // Not `request`, deliberately. A teardown that could not prove the
   // account clean answers 409 WITH a full ActionResult -- the per-stage
   // failures are the whole point, and `request` would throw them away

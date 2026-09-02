@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 
 import {
   addressHref,
+  deployConfirmation,
+  deployWarnings,
   teardownOutcome,
   teardownPrompt,
   knownEmpty,
@@ -216,4 +218,89 @@ test("teardownOutcome reports a proven teardown as done", () => {
 
 test("teardownOutcome treats a missing result as a failure", () => {
   assert.equal(teardownOutcome(undefined).ok, false);
+});
+
+const previewFixture = (over = {}) => ({
+  scenario: "lb-serving-paris",
+  deployable: true,
+  image: "nginx:1.27",
+  ttl: "4h0m0s",
+  expires_at: "2026-09-03T03:47:00Z",
+  expires_at_wall_clock: "Wed 3 Sep 03:47 UTC",
+  cost_summary: "about €0.04/hour at list price, €0.17 for 4h0m0s",
+  internet_facing: true,
+  deploy_allowed: true,
+  cost: {
+    components: [
+      { name: "DEV1-S instance", count: 1, eur_per_hour: 0.00898, priced: true },
+      { name: "public IPv4 address", count: 2, eur_per_hour: 0.005, priced: true }
+    ],
+    eur_per_hour: 0.042,
+    unpriced: [],
+    complete: true,
+    modelled: true,
+    ...over.cost
+  },
+  ...over
+});
+
+// Each line is a separate thing somebody might object to. A paragraph is
+// a thing people skim.
+test("deployConfirmation states shape, cost, expiry and exposure", () => {
+  const lines = deployConfirmation(previewFixture());
+
+  assert.match(lines[0], /DEV1-S instance/);
+  assert.match(lines[0], /2 × public IPv4 address/);
+  assert.match(lines.join(" "), /list price/);
+  assert.match(lines.join(" "), /Wed 3 Sep 03:47/);
+  assert.match(lines.join(" "), /public internet/);
+  assert.match(lines.join(" "), /nginx:1\.27/);
+});
+
+// An unmodelled scenario's empty component list and €0.00 mean
+// "unknown", not "nothing" — and that invalidates everything above it.
+test("deployWarnings leads with an unmodelled scenario", () => {
+  const warnings = deployWarnings(
+    previewFixture({ cost: { components: [], eur_per_hour: 0, unpriced: [], complete: false, modelled: false } })
+  );
+
+  assert.match(warnings[0], /not modelled/);
+  assert.match(warnings[0], /Do not read the figures above as complete/);
+});
+
+test("deployWarnings says when the cost is a floor rather than a total", () => {
+  const warnings = deployWarnings(
+    previewFixture({
+      internet_facing: false,
+      cost: {
+        components: [],
+        eur_per_hour: 0.042,
+        unpriced: ["Kubernetes cluster"],
+        complete: false,
+        modelled: true
+      }
+    })
+  );
+
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /floor, not a total/);
+  assert.match(warnings[0], /Kubernetes cluster/);
+});
+
+test("deployWarnings warns about internet exposure", () => {
+  const warnings = deployWarnings(previewFixture());
+  assert.ok(warnings.some((w) => /public internet/.test(w)));
+});
+
+// A complete, private, modelled estimate has nothing to warn about, and
+// a warning that always fires is one people stop reading.
+test("deployWarnings stays silent when there is nothing to warn about", () => {
+  assert.deepEqual(deployWarnings(previewFixture({ internet_facing: false })), []);
+});
+
+test("deployConfirmation admits when it does not know what will be created", () => {
+  const lines = deployConfirmation(
+    previewFixture({ cost: { components: [], eur_per_hour: 0, unpriced: [], complete: false, modelled: false } })
+  );
+  assert.match(lines[0], /unknown/);
 });

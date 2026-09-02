@@ -298,6 +298,60 @@ test.describe('Deployments estate page', () => {
     await expect(outcome).toContainText('state file has vanished');
   });
 
+  // The property S161 claimed a visual baseline would protect. It does
+  // not: `maxDiffPixelRatio: 0.02` means a change confined to three
+  // small badges on a full-page screenshot passes comfortably, and a
+  // Deploy button added to another page proved it by not failing one.
+  //
+  // Asserted directly instead, which is both stricter and not subject to
+  // font-rendering flake: the three states must be visually distinct
+  // from each other, because a reader tells them apart by colour before
+  // they read a word.
+  test('healthy, failing and never-observed are visually distinct', async ({ page }) => {
+    await serveEstate(page, {
+      deployments: [
+        HEALTHY,
+        { ...HEALTHY, id: 'dep-bad', health: { status: 'unhealthy', version: 'confirmed', at: '2026-09-02T10:00:00Z', observations: 3 } },
+        NEVER_OBSERVED
+      ],
+      unreadable: []
+    });
+    await page.goto('/deployments');
+
+    const colourOf = async (id: string) =>
+      page.getByTestId(`deployment-health-${id}`).evaluate(
+        (el) => getComputedStyle(el).backgroundColor
+      );
+
+    const healthy = await colourOf('dep-healthy');
+    const unhealthy = await colourOf('dep-bad');
+    const unobserved = await colourOf('dep-silent');
+
+    expect(new Set([healthy, unhealthy, unobserved]).size).toBe(3);
+  });
+
+  // And the version axis, where the dangerous state is the one that
+  // looks fine on the health axis.
+  test('an unconfirmed version is visually distinct from a confirmed one', async ({ page }) => {
+    await serveEstate(page, {
+      deployments: [
+        HEALTHY,
+        { ...HEALTHY, id: 'dep-drifted', health: { status: 'healthy', version: 'unconfirmed', at: '2026-09-02T10:00:00Z', observations: 3 } }
+      ],
+      unreadable: []
+    });
+    await page.goto('/deployments');
+
+    const confirmed = await page
+      .getByTestId('deployment-version-dep-healthy')
+      .evaluate((el) => getComputedStyle(el).backgroundColor);
+    const unconfirmed = await page
+      .getByTestId('deployment-version-dep-drifted')
+      .evaluate((el) => getComputedStyle(el).backgroundColor);
+
+    expect(confirmed).not.toBe(unconfirmed);
+  });
+
   test('the page is reachable from the sidebar', async ({ page }) => {
     await page.goto('/');
     await page.getByRole('link', { name: 'Deployments' }).click();

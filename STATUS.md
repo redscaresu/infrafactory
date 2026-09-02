@@ -2,6 +2,37 @@
 
 Last updated: 2026-08-31
 
+## 2026-09-02 — S162c: the deploy button, and a correction to S161
+
+The scenario page can deploy. Deliberately a **separate button from Run**, and
+deliberately not matched to it in colour or weight: S153 split the verbs so that
+keeping infrastructure could not be reached by accident from the one that proves a
+change is safe, and ADR-0027 §4 says the UI must not re-merge them.
+
+The confirmation is S162a's preview rendered as **a list rather than a paragraph**,
+because each line is a separate thing somebody might object to and a paragraph is a
+thing people skim: what will be created, the cost with "list price" in it, expiry
+as wall-clock, the image, and — separated out and styled differently — the
+warnings that should actually stop somebody.
+
+`modelled === false` leads the warnings, because it is the one that invalidates
+everything above it: an unmodelled scenario's empty component list and €0.00 mean
+*unknown*, not *nothing*.
+
+### A correction: S161's visual-baseline claim was overstated
+
+S161 said a visual baseline pinned the three health states being distinguishable,
+and that "a regression making them look alike would pass every text assertion".
+The first half is not true. `maxDiffPixelRatio: 0.02` means a change confined to
+three small badges on a full-page screenshot passes comfortably — and **adding a
+whole Deploy button to the scenario page did not fail its baseline either**, which
+is what surfaced it.
+
+The property is now asserted directly, which is both stricter and immune to
+font-rendering flake: the three health badges must have pairwise-different
+computed background colours, and an unconfirmed version must differ from a
+confirmed one. A reader tells those apart by colour before they read a word.
+
 ## 2026-09-02 — S162b: the deploy endpoint
 
 `POST /api/deployments` creates a live deployment, behind

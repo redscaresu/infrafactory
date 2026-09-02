@@ -57,6 +57,15 @@ type deployPreview struct {
 
 	// InternetFacing is true when the shape includes a public address.
 	InternetFacing bool `json:"internet_facing"`
+
+	// Allowed reports whether this server would accept the deploy.
+	//
+	// Carried here rather than fetched separately because the preview is
+	// meant to be everything a person needs in order to decide, and
+	// "this server will refuse" is part of that. It stops the page
+	// offering a button that 404s; the SAFETY is that the endpoint does
+	// not exist, and this field cannot make it exist.
+	Allowed bool `json:"deploy_allowed"`
 }
 
 // deployPreviewHandler answers what a deploy would do. It is a GET
@@ -103,7 +112,9 @@ func deployPreviewHandler(state *serverState) http.HandlerFunc {
 			return
 		}
 
-		writeJSON(w, http.StatusOK, previewFor(&sc, r.URL.Query().Get("ttl"), time.Now()))
+		preview := previewFor(&sc, r.URL.Query().Get("ttl"), time.Now())
+		preview.Allowed = state.deployer != nil
+		writeJSON(w, http.StatusOK, preview)
 	}
 }
 
