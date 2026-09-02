@@ -2,6 +2,33 @@
 
 Last updated: 2026-08-31
 
+## 2026-09-02 — S161b: teardown from the estate page
+
+The estate page can now destroy what it lists, using S159b's endpoint. Three
+things make that a deliberate act rather than a click:
+
+**The control does not appear unless the server allows it.** The listing reports
+`teardown_allowed`, so the page does not offer a button it knows will 404 — and
+says how to enable it rather than silently omitting the capability. The *safety*
+is still that the endpoint does not exist; a client setting the field locally gets
+a button that 404s.
+
+**The confirmation names what is about to go** — scenario, project, address. "Are
+you sure?" is a speed bump people learn to click through; stating which project is
+about to be deleted makes a misclick on the wrong row visible while it is still
+reversible.
+
+**A teardown that cannot prove the account clean is never shown as success.** The
+409 carries the per-stage failures, and the shared `request` helper would have
+thrown them away — leaving a generic error where *"the state file has vanished and
+the resources may still be running"* belongs. `teardownOutcome` reads `clean`
+rather than counting failures, because they are different claims and ADR-0024
+turns on the difference.
+
+The table reloads whatever the outcome: a failed teardown changes the record too,
+since an unreclaimable deployment stays reapable rather than released, so the page
+must not keep showing what was true before the attempt.
+
 ## 2026-09-02 — S159b: teardown and reap over the API
 
 The mutating half of the deployments endpoint, and the seam turned out to be much

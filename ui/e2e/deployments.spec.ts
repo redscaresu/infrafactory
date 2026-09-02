@@ -40,7 +40,11 @@ async function serveEstate(page, payload) {
     route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ schema: 'infrafactory.api.deployments.v1', ...payload })
+      body: JSON.stringify({
+        schema: 'infrafactory.api.deployments.v1',
+        teardown_allowed: false,
+        ...payload
+      })
     })
   );
 }
@@ -195,6 +199,104 @@ test.describe('Deployments estate page', () => {
       await expect(page.locator('body')).not.toContainText('No live deployments.');
     });
   }
+
+  // A page must not offer a button it knows will 404, and must say why
+  // rather than silently omitting the capability.
+  test('no teardown control when the server did not allow it', async ({ page }) => {
+    await serveEstate(page, { deployments: [HEALTHY], unreadable: [] });
+    await page.goto('/deployments');
+
+    await expect(page.getByTestId('deployment-teardown-dep-healthy')).toHaveCount(0);
+    await expect(page.getByTestId('estate-readonly-note')).toContainText('--allow-teardown');
+  });
+
+  // A click must not destroy anything on its own, and the confirmation
+  // must NAME what is about to go -- "are you sure?" is a speed bump
+  // people learn to click through.
+  test('teardown needs a second, named confirmation', async ({ page }) => {
+    let deleted = 0;
+    await serveEstate(page, {
+      deployments: [{ ...HEALTHY, project_id: 'proj-abc' }],
+      unreadable: [],
+      teardown_allowed: true
+    });
+    await page.route('**/api/deployments/dep-healthy', (route) => {
+      deleted += 1;
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ clean: true, steps: [], failures: [] })
+      });
+    });
+    await page.goto('/deployments');
+
+    await page.getByTestId('deployment-teardown-dep-healthy').click();
+    const confirm = page.getByTestId('deployment-confirm-dep-healthy');
+    await expect(confirm).toContainText('web-live-paris');
+    await expect(confirm).toContainText('proj-abc');
+    await expect(confirm).toContainText('cannot be undone');
+    expect(deleted).toBe(0);
+
+    await page.getByTestId('deployment-cancel-dep-healthy').click();
+    await expect(page.getByTestId('deployment-confirm-dep-healthy')).toHaveCount(0);
+    expect(deleted).toBe(0);
+  });
+
+  test('confirming destroys and reports a proven-clean teardown', async ({ page }) => {
+    await serveEstate(page, {
+      deployments: [HEALTHY],
+      unreadable: [],
+      teardown_allowed: true
+    });
+    await page.route('**/api/deployments/dep-healthy', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ clean: true, steps: [], failures: [] })
+      })
+    );
+    await page.goto('/deployments');
+
+    await page.getByTestId('deployment-teardown-dep-healthy').click();
+    await page.getByTestId('deployment-destroy-dep-healthy').click();
+
+    await expect(page.getByTestId('deployment-outcome-dep-healthy')).toContainText(
+      'provably clean'
+    );
+  });
+
+  // ADR-0024: a teardown that cannot PROVE the account clean must not
+  // report success. The 409 carries the per-stage failures, and losing
+  // them would leave a generic error where "resources may still be
+  // running" belongs.
+  test('a teardown that cannot prove clean is not shown as success', async ({ page }) => {
+    await serveEstate(page, {
+      deployments: [HEALTHY],
+      unreadable: [],
+      teardown_allowed: true
+    });
+    await page.route('**/api/deployments/dep-healthy', (route) =>
+      route.fulfill({
+        status: 409,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          clean: false,
+          steps: [],
+          failures: [
+            { stage: 'teardown', status: 'fail', detail: 'state file has vanished' }
+          ]
+        })
+      })
+    );
+    await page.goto('/deployments');
+
+    await page.getByTestId('deployment-teardown-dep-healthy').click();
+    await page.getByTestId('deployment-destroy-dep-healthy').click();
+
+    const outcome = page.getByTestId('deployment-outcome-dep-healthy');
+    await expect(outcome).toContainText('may still be running');
+    await expect(outcome).toContainText('state file has vanished');
+  });
 
   test('the page is reachable from the sidebar', async ({ page }) => {
     await page.goto('/');

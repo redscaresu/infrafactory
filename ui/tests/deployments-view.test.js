@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 
 import {
   addressHref,
+  teardownOutcome,
+  teardownPrompt,
   knownEmpty,
   addressLabel,
   estateSummary,
@@ -170,4 +172,48 @@ test("addressHref leaves an already-bracketed address alone", () => {
 test("addressHref does not bracket IPv4 or a hostname", () => {
   assert.equal(addressHref({ address: "51.15.0.1", port: 8080 }), "http://51.15.0.1:8080");
   assert.equal(addressHref({ address: "example.test", port: 8080 }), "http://example.test:8080");
+});
+
+// "Are you sure?" is a speed bump people learn to click through. What
+// makes a confirmation real is that it names WHICH thing is about to be
+// destroyed, so a misclick on the wrong row is visible beforehand.
+test("teardownPrompt names the scenario, project and address", () => {
+  const prompt = teardownPrompt({
+    id: "dep-1",
+    scenario: "web-live-paris",
+    project_id: "proj-abc",
+    address: "51.15.0.1"
+  });
+  assert.match(prompt, /web-live-paris/);
+  assert.match(prompt, /proj-abc/);
+  assert.match(prompt, /51\.15\.0\.1/);
+  assert.match(prompt, /cannot be undone/);
+});
+
+// ADR-0024: a teardown that cannot PROVE the account clean must not
+// report success. A green tick over "resources may still be running" is
+// the false green this project exists to avoid.
+test("teardownOutcome refuses to call an unproven teardown a success", () => {
+  const outcome = teardownOutcome({
+    clean: false,
+    steps: [],
+    failures: [{ stage: "teardown", status: "fail", detail: "state file has vanished" }]
+  });
+  assert.equal(outcome.ok, false);
+  assert.match(outcome.message, /may still be running/);
+  assert.match(outcome.message, /state file has vanished/);
+});
+
+test("teardownOutcome reads clean rather than counting failures", () => {
+  // No failures listed, but not clean. These are different claims.
+  const outcome = teardownOutcome({ clean: false, steps: [], failures: [] });
+  assert.equal(outcome.ok, false);
+});
+
+test("teardownOutcome reports a proven teardown as done", () => {
+  assert.equal(teardownOutcome({ clean: true, steps: [], failures: [] }).ok, true);
+});
+
+test("teardownOutcome treats a missing result as a failure", () => {
+  assert.equal(teardownOutcome(undefined).ok, false);
 });

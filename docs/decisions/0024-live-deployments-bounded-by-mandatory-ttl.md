@@ -681,3 +681,24 @@ So `Deployment.Health()` always spells them out, and lives on the record rather
 than being assembled by each caller. `live ls` and `GET /api/deployments` must
 agree about what silence means; two implementations of "the last observation,
 unless there are none" is how one of them eventually gets it wrong.
+
+## Amendment, 2026-09-02 (S161b): what a teardown control must show
+
+A teardown offered from a page needs three things this ADR did not previously
+spell out, because a CLI supplies them for free and a UI does not.
+
+**It must name what is about to be destroyed.** Scenario, project and address, in
+the confirmation itself. "Are you sure?" is a speed bump people learn to click
+through; a misclick on the wrong row is only visible if the row's identity is on
+screen at the moment of confirming.
+
+**It must be a second, separate action.** A click cannot destroy real
+infrastructure on its own.
+
+**It must never render an unproven teardown as success.** The rule above — that a
+teardown which cannot prove the account clean is not a success — has to survive
+the trip through HTTP. The endpoint answers 409 *with the full result*, and the
+client must read the body rather than treating a non-2xx as a generic error: the
+per-stage failures are the whole message, and losing them substitutes "something
+went wrong" for "the state file has vanished and the resources may still be
+running".
