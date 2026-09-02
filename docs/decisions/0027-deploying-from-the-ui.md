@@ -150,3 +150,23 @@ A parse that cannot fail is worse than one that does: there is nothing to notice
 The envelope is now required, and output that is not it is reported as a failure
 saying *whether infrastructure was created is unknown* — because the apply may
 well have created some, and an empty result would say the opposite.
+
+## Amendment, 2026-09-02 (S163): a long action reports as it goes
+
+A deploy runs for minutes. Minutes of silence reads as broken, and a reader who
+cannot tell a long apply from a hung one will do one of two harmful things: kill
+it, or start another.
+
+The command's progress is streamed to the websocket, one **line** per event.
+Lines rather than writes, because a command using several `Fprintf` calls
+otherwise produces fragments, and the last line — often the one that matters — is
+flushed on close even without a trailing newline.
+
+**Every event names its subject.** A deploy outlives the page it was started from,
+so its events arrive on whatever page is open. This is the same rule S162c arrived
+at for outcome messages, applied to progress before it could cost anything: a
+client can filter, label or ignore, but it is never handed an unattributed
+statement about something the reader may not be looking at.
+
+Watching is never required. The apply is detached from the request, so closing the
+tab stops the stream and not the deploy.

@@ -3,6 +3,7 @@
   import { onDestroy } from "svelte";
   import { page } from "$app/stores";
   import { api } from "$lib/api";
+  import { connectWS } from "$lib/ws";
   import {
     deployConfirmation,
     deployWarnings,
@@ -81,6 +82,10 @@
   // component (the validationVersion guard is per-instance).
   onDestroy(() => {
     if (validationTimer) clearTimeout(validationTimer);
+    // Leaving the page must not leave a socket open. The deploy itself
+    // is unaffected: it is detached from the request on the server, so
+    // it finishes whether or not anybody is watching.
+    resetDeployState();
   });
 
   $: scenarioPath = ($page.params.path || "").toString();
@@ -152,6 +157,59 @@
   // which is the move pass 126 argued for and pass 127 had to learn
   // twice. It also gives the reader feedback that the click landed.
   let previewing = false;
+
+  // A deploy runs for minutes, and minutes of silence reads as broken:
+  // a reader cannot tell a long apply from a hung one, and the
+  // difference matters when the thing running is creating billable
+  // infrastructure (S163).
+  //
+  // Every line names the scenario it belongs to, so lines from a deploy
+  // the reader has navigated away from are DISCARDED here rather than
+  // appended under the wrong heading.
+  let deployProgress: string[] = [];
+  let disconnectWS: (() => void) | undefined;
+
+  function onSocketMessage(msg: unknown) {
+    const event = msg as { type?: string; data?: { subject?: string; line?: string } };
+    if (event?.type !== "deploy_progress" || !event.data?.line) return;
+    if (event.data.subject !== deployingScenario) return;
+    deployProgress = [...deployProgress, event.data.line];
+  }
+
+  // The scenario whose progress this page is currently showing. Held
+  // separately from `preview` because `preview` is cleared on
+  // navigation while a deploy keeps running.
+  let deployingScenario = "";
+
+  /**
+   * resetDeployState puts this page back to knowing nothing about a
+   * deploy.
+   *
+   * ONE function, called from both navigation and destroy, because the
+   * reset used to be a hand-written list in `afterNavigate` -- and the
+   * moment S163 added stream state, the list did not grow with it. The
+   * websocket, `deployingScenario` and `deployProgress` survived a
+   * client-side route change, so progress for the previous scenario
+   * kept rendering under the new one.
+   *
+   * `onDestroy` does not cover that: SvelteKit REUSES this `[...path]`
+   * component across scenario routes, so leaving a scenario page for
+   * another one destroys nothing.
+   *
+   * The deploy itself is untouched. It is detached from the request on
+   * the server, so it finishes whether or not this page is watching.
+   */
+  function resetDeployState() {
+    disconnectWS?.();
+    disconnectWS = undefined;
+    deployingScenario = "";
+    deploying = false;
+    deployProgress = [];
+    confirmingDeploy = false;
+    preview = null;
+    previewError = "";
+    deployOutcomeMessage = "";
+  }
   let deploying = false;
   let deployOutcomeMessage = "";
   let deployOk = false;
@@ -196,6 +254,9 @@
     if (!target) return;
 
     deploying = true;
+    deployingScenario = target;
+    deployProgress = [];
+    if (!disconnectWS) disconnectWS = connectWS(onSocketMessage);
     try {
       const result = await api.deployScenario(target);
       const outcome = teardownOutcome(result);
@@ -220,6 +281,7 @@
     } finally {
       deploying = false;
       confirmingDeploy = false;
+      deployingScenario = "";
     }
   }
 
@@ -289,10 +351,7 @@
     // on screen, even though accepting it would now be harmless.
     // Leaving it visible invites the reader to trust a dialog about
     // something they are no longer looking at.
-    confirmingDeploy = false;
-    preview = null;
-    previewError = "";
-    deployOutcomeMessage = "";
+    resetDeployState();
     // `detail` is cleared too, and that is the STRUCTURAL half of this.
     //
     // The whole page is inside `{#if detail}`, so clearing it means
@@ -485,6 +544,26 @@
           on:click={() => (confirmingDeploy = false)}>Cancel</button
         >
       </div>
+    </div>
+  {/if}
+
+  <!-- Gated on `deployingScenario`, not on `deploying`.
+       `deploying` is a bare boolean about no particular thing, so it
+       survives navigation and would keep this panel open on a page that
+       has nothing to do with the deploy still running. The
+       subject-bearing state is the one to ask. -->
+  {#if deployingScenario || deployProgress.length > 0}
+    <div
+      class="mt-3 rounded border border-slate-300 bg-slate-900 px-3 py-2 font-mono text-xs text-slate-100"
+      data-testid="deploy-progress"
+    >
+      {#if deployProgress.length === 0}
+        <p class="text-slate-400">Starting…</p>
+      {:else}
+        {#each deployProgress as line}
+          <p>{line}</p>
+        {/each}
+      {/if}
     </div>
   {/if}
 

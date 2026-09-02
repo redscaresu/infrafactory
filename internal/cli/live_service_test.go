@@ -201,7 +201,7 @@ func TestDeployerBuildsAFreshRuntimeForEachDeploy(t *testing.T) {
 	})
 
 	for _, name := range []string{"first-scenario", "second-scenario"} {
-		_, err := deployer.Deploy(context.Background(), name, "")
+		_, err := deployer.Deploy(context.Background(), name, "", nil)
 		require.Error(t, err)
 	}
 
@@ -218,7 +218,7 @@ func TestDeployerRefusesAnUnknownScenarioBeforeBuildingAnything(t *testing.T) {
 		return nil, errors.New("should not be reached")
 	})
 
-	_, err := deployer.Deploy(context.Background(), "no-such-scenario", "")
+	_, err := deployer.Deploy(context.Background(), "no-such-scenario", "", nil)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no scenario named")
@@ -246,4 +246,19 @@ acceptance_criteria:
 		require.NoError(t, os.WriteFile(filepath.Join(root, name+".yaml"), body, 0o644))
 	}
 	return root
+}
+
+// A deploy must not depend on anybody watching: a nil progress writer is
+// the ordinary case for a caller that has no hub.
+func TestDeployerAcceptsANilProgressWriter(t *testing.T) {
+	deployer := NewLiveDeployer(twoScenarios(t), func() (*CommandRuntime, error) {
+		return nil, errors.New("not building a real runtime in a unit test")
+	})
+
+	_, err := deployer.Deploy(context.Background(), "first-scenario", "", nil)
+
+	// It reaches the runtime factory, which is as far as a unit test
+	// takes it. The point is that nil did not panic on the way.
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not building a real runtime")
 }

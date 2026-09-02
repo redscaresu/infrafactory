@@ -1,6 +1,9 @@
 package api
 
-import "context"
+import (
+	"context"
+	"io"
+)
 
 // ActionStep is one thing an action did, in the shape a page can render.
 //
@@ -36,6 +39,17 @@ type ActionResult struct {
 // persists are different kinds of harm, gated by different flags. A
 // server holding one of these interfaces cannot be talked into the
 // other.
+//
+// # Streaming
+//
+// Deploy takes an `io.Writer` for progress. A deploy runs for minutes,
+// and minutes of silence reads as broken -- the reader cannot tell a
+// long apply from a hung one, and the difference matters when the thing
+// running is creating billable infrastructure.
+//
+// The writer is supplied by the caller rather than the deployer reaching
+// for a hub, so this package keeps deciding what goes on the wire and
+// `internal/cli` keeps not knowing there is one.
 type DeploymentDeployer interface {
 	// Deploy applies a scenario and leaves it running under a TTL.
 	//
@@ -43,7 +57,7 @@ type DeploymentDeployer interface {
 	// deliberately cannot be told which project to use -- run-owned
 	// projects are created by the harness (ADR-0025), and a request that
 	// could name one is a request that could name somebody else's.
-	Deploy(ctx context.Context, scenarioName, ttl string) (ActionResult, error)
+	Deploy(ctx context.Context, scenarioName, ttl string, progress io.Writer) (ActionResult, error)
 }
 
 // DeploymentActor performs the destructive half of live management.

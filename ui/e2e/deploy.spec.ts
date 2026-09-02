@@ -395,3 +395,83 @@ test.describe('Deploy from the scenario page', () => {
     await expect(outcome).toContainText('7c98d82e');
   });
 });
+
+test.describe('Deploy progress', () => {
+  // Minutes of silence reads as broken. The reader cannot tell a long
+  // apply from a hung one, and the difference matters when the thing
+  // running is creating billable infrastructure.
+  test('a deploy in flight shows something is happening', async ({ page }) => {
+    await page.route('**/api/deployments/preview**', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          scenario: 'web-app-paris',
+          deployable: true,
+          expires_at: null,
+          internet_facing: false,
+          deploy_allowed: true,
+          cost: { components: [], eur_per_hour: 0, unpriced: [], complete: true, modelled: true }
+        })
+      })
+    );
+
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    await page.route('**/api/deployments', async (route) => {
+      if (route.request().method() !== 'POST') return route.continue();
+      await held;
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ clean: true, steps: [], failures: [] })
+      });
+    });
+
+    await page.goto('/scenarios/training/web-app-paris');
+    await page.getByTestId('scenario-deploy').click();
+    await page.getByTestId('deploy-confirm-go').click();
+
+    // Before any line arrives, the page still says it is working.
+    await expect(page.getByTestId('deploy-progress')).toContainText('Starting…');
+
+    release();
+    await expect(page.getByTestId('deploy-outcome')).toBeVisible();
+  });
+
+  // SvelteKit REUSES the [...path] component across scenario routes, so
+  // leaving one scenario page for another destroys nothing and
+  // `onDestroy` never fires. Without resetting from the navigation path
+  // too, a previous scenario's progress keeps rendering under the new
+  // one.
+  test('progress does not follow you to another scenario', async ({ page }) => {
+    await servePreview(page);
+
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    await page.route('**/api/deployments', async (route) => {
+      if (route.request().method() !== 'POST') return route.continue();
+      await held;
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ clean: true, steps: [], failures: [] })
+      });
+    });
+
+    await page.goto('/scenarios/training/web-app-paris');
+    await page.getByTestId('scenario-deploy').click();
+    await page.getByTestId('deploy-confirm-go').click();
+    await expect(page.getByTestId('deploy-progress')).toBeVisible();
+
+    // Client-side navigation, which reuses the component.
+    await page.getByTestId('sidebar-scenario-training/lb-serving-paris').click();
+    await expect(page.locator('main h1')).toContainText('lb-serving-paris');
+
+    await expect(page.getByTestId('deploy-progress')).toHaveCount(0);
+
+    release();
+    // And the finished deploy must not paint its result here either.
+    await expect(page.getByTestId('deploy-progress')).toHaveCount(0);
+  });
+});

@@ -2,6 +2,42 @@
 
 Last updated: 2026-08-31
 
+## 2026-09-02 — S163: streaming a deploy
+
+A deploy runs for minutes, and **minutes of silence reads as broken**: a reader
+cannot tell a long apply from a hung one, and the difference matters when the
+thing running is creating billable infrastructure. The command's progress now
+goes to the websocket as it happens.
+
+**Lines, not writes.** The existing `WebSocketSink` broadcasts each `Write`, so a
+command using several `Fprintf` calls produces fragments and a page appending them
+shows half a word followed by the rest of it on the next row. `ProgressSink`
+buffers to a newline, and flushes on close — a command's last line often has no
+trailing newline and is frequently the one that matters.
+
+**Every event names its subject**, which is the S162c lesson applied before it
+could cost anything: a deploy outlives the page it was started from, so these
+arrive on whatever is open. The page discards lines whose subject is not the
+deploy it is showing, rather than appending them under the wrong heading.
+
+The writer is passed in by the API rather than the deployer reaching for a hub, so
+`internal/cli` still does not know a websocket exists. stderr is tee'd rather than
+redirected: the stream goes out live *and* is kept, so a failure that produced no
+structured output can still be explained.
+
+Leaving the page closes the socket and does not touch the deploy — it is detached
+from the request on the server, so it finishes whether or not anybody is watching.
+
+**The first version of that claim was false**, and review caught it. `onDestroy`
+does not fire when SvelteKit reuses the route component, which is every
+client-side move between scenarios — so the stream survived, and the
+subject filter was checking against a `deployingScenario` that still held the old
+one. The reset was a hand-written list twenty lines from the state it covered, and
+S163 added stream state without adding it to the list; it is one
+`resetDeployState()` now, called from both paths. The progress panel was also
+gated on `deploying`, a bare boolean about no particular thing: **state without a
+subject cannot be filtered by subject.**
+
 ## 2026-09-02 — S162c: the deploy button, and a correction to S161
 
 The scenario page can deploy. Deliberately a **separate button from Run**, and

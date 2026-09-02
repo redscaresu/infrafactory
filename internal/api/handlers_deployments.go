@@ -336,7 +336,13 @@ func deployHandler(state *serverState) http.HandlerFunc {
 		ctx, cancel := destructiveContext(r)
 		defer cancel()
 
-		result, err := state.deployer.Deploy(ctx, req.Scenario, req.TTL)
+		// Named with the scenario, so a line arriving on a page the
+		// reader has since navigated to says what it is about -- the
+		// rule S162c cost seven findings to learn.
+		progress := NewProgressSink(state.hub, "deploy_progress", req.Scenario)
+		defer progress.Close()
+
+		result, err := state.deployer.Deploy(ctx, req.Scenario, req.TTL, progress)
 		if errors.Is(err, os.ErrNotExist) {
 			// The caller named something that is not here. A client
 			// typo or a stale scenario list is not a server fault, and
