@@ -111,6 +111,7 @@ func NewServer(cfg ServerConfig) *http.Server {
 	mux.HandleFunc("/api/pitfalls", pitfallsHandler(state))
 	mux.HandleFunc("/api/pitfalls/", pitfallsHandler(state))
 	mux.HandleFunc("/api/deployments", deploymentsHandler(state))
+	mux.HandleFunc("/api/deployments/preview", deployPreviewHandler(state))
 	mux.HandleFunc("/api/deployments/", deploymentActionHandler(state))
 	mux.HandleFunc("/api/ws", websocketHandler(state))
 

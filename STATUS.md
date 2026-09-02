@@ -2,6 +2,40 @@
 
 Last updated: 2026-08-31
 
+## 2026-09-02 — S162a: what a person must be told before they spend money
+
+ADR-0027 §2 made real: `GET /api/deployments/preview` answers what a deploy would
+create, cost, expose and when it would expire. A GET, because it does nothing —
+and available whether or not `--allow-deploy` was given, since knowing what a
+deployment would cost is information rather than a capability, and a page that can
+explain a greyed-out button beats one that silently omits it.
+
+**The hard part was the cost, and the honest answer was to admit what it does not
+know.** ADR-0024's figures were read off Scaleway's pricing pages by hand for *one
+shape*. Any scenario declaring a database, a Kubernetes cluster or object storage
+has components this project has never priced.
+
+A total that quietly omitted them would be **wrong in the reassuring direction**,
+and a confidently wrong number shown at the moment somebody decides to spend is
+worse than no number. So `CostEstimate` carries `Priced` per component and
+`Complete` overall: unpriced components are counted, named, and the summary says
+*"AT LEAST … because N component(s) have no list price here"*. `Priced` is a
+separate field from `EurPerHour == 0` because **free and unknown are different
+facts**, and summing them as if both were zero is how a total understates itself.
+
+An overridden compute offer is named and marked unpriced rather than billed as a
+DEV1-S because that is the only number to hand. A non-Scaleway scenario is not
+priced from Scaleway's list at all — it still says what will be created.
+
+**Expiry is wall-clock**, not a duration: "4h" is a number people agree to without
+doing the arithmetic; "expires Wed 3 Sep 03:47 UTC" is one they check against
+whether they will still be awake. A TTL that will not parse makes the scenario
+undeployable rather than defaulting, since guessing a lifetime is how a deployment
+outlives everyone's memory of it.
+
+A test pins the estimate against ADR-0024's own €0.042/hour, so the document and
+the code cannot drift about what the demo costs.
+
 ## 2026-09-02 — S160c: the deploy safety model, decided before the button
 
 ADR-0027. Mostly a record of what is already true — the origin guard, start-time
