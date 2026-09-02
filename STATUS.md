@@ -27,6 +27,11 @@ be built, the server refuses to start rather than coming up silently without it.
 
 A teardown that cannot prove the account clean answers **409**, not 200.
 
+Both review findings were rules **already written in this codebase, next to the
+code that follows them** — `withRuntimeNoGenerator` on requiring the LLM for
+housekeeping, and `ensureRunProject` on not letting a caller cancel a change to
+real infrastructure. That is four findings in two days of the same shape.
+
 ## 2026-09-02 — S161: the estate page
 
 `/deployments` renders what is running, built on S159a's read endpoint. It reads;
