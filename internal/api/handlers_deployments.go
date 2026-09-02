@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"os"
@@ -81,6 +82,12 @@ type deploymentsResponse struct {
 	// has to carry it where a page will see it.
 	Unreadable []string `json:"unreadable"`
 
+	// DeployAllowed reports whether this server was started with
+	// --allow-deploy. Same purpose and same non-guarantee as
+	// TeardownAllowed: it stops the page offering a button that 404s,
+	// and it cannot make the endpoint exist.
+	DeployAllowed bool `json:"deploy_allowed"`
+
 	// TeardownAllowed reports whether this server was started with
 	// --allow-teardown.
 	//
@@ -100,6 +107,14 @@ type deploymentsResponse struct {
 // guards being reimplemented in a hurry.
 func deploymentsHandler(state *serverState) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			// Creating shares the collection URL with listing, as REST
+			// expects. The capability gate lives in deployHandler, so a
+			// server without --allow-deploy answers 404 here rather than
+			// 405 -- "no such thing" rather than "wrong verb".
+			deployHandler(state)(w, r)
+			return
+		}
 		if r.Method != http.MethodGet {
 			writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
@@ -121,6 +136,7 @@ func deploymentsHandler(state *serverState) http.HandlerFunc {
 			Deployments:     make([]deploymentJSON, 0, len(deployments)),
 			Unreadable:      make([]string, 0, len(unreadable)),
 			TeardownAllowed: state.deploymentActor != nil,
+			DeployAllowed:   state.deployer != nil,
 		}
 		for _, d := range deployments {
 			payload.Deployments = append(payload.Deployments, deploymentJSON{
@@ -263,4 +279,72 @@ const destructiveTimeout = 30 * time.Minute
 // upstream) while its cancellation is dropped.
 func destructiveContext(r *http.Request) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.WithoutCancel(r.Context()), destructiveTimeout)
+}
+
+// deployRequest is everything a caller may decide.
+//
+// Two fields, and the absences are the design. There is no project: a
+// request that could name one could name somebody else's, and run-owned
+// projects are the harness's to create (ADR-0025, ADR-0027). There is no
+// "skip validation", no image override, and no way to ask for an
+// unbounded lifetime.
+type deployRequest struct {
+	Scenario string `json:"scenario"`
+
+	// TTL overrides the scenario's own. Empty means the scenario's,
+	// which the schema already bounds -- there is deliberately no value
+	// meaning "forever".
+	TTL string `json:"ttl,omitempty"`
+}
+
+// deployHandler creates a live deployment.
+//
+// Absent unless the server was started with `--allow-deploy`, which is
+// implied by neither `--allow-layer3` nor `--allow-teardown`: an
+// ephemeral apply the run destroys, destroying what exists, and creating
+// what persists are three different kinds of harm (ADR-0027).
+func deployHandler(state *serverState) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if state.deployer == nil {
+			writeJSONError(w, http.StatusNotFound,
+				"this server was not started with --allow-deploy, so it cannot create deployments")
+			return
+		}
+		if r.Method != http.MethodPost {
+			writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+
+		var req deployRequest
+		if r.Body != nil {
+			defer r.Body.Close()
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				writeJSONError(w, http.StatusBadRequest, "invalid json body")
+				return
+			}
+		}
+		if strings.TrimSpace(req.Scenario) == "" {
+			writeJSONError(w, http.StatusBadRequest, "scenario is required")
+			return
+		}
+
+		// Detached, exactly as teardown is. An apply takes minutes and
+		// creates infrastructure as it goes; a client disconnecting
+		// halfway would leave resources with no completed record of what
+		// was made -- the leak D6 taught this project to fear, arriving
+		// by a different route (ADR-0027).
+		ctx, cancel := destructiveContext(r)
+		defer cancel()
+
+		result, err := state.deployer.Deploy(ctx, req.Scenario, req.TTL)
+		if errors.Is(err, os.ErrNotExist) {
+			// The caller named something that is not here. A client
+			// typo or a stale scenario list is not a server fault, and
+			// answering 500 teaches operators that 500 means nothing in
+			// particular. Matches the teardown handler.
+			writeJSONError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		writeActionResult(w, result, err)
+	}
 }
