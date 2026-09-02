@@ -2,6 +2,43 @@
 
 Last updated: 2026-08-31
 
+## 2026-09-02 — S162b: the deploy endpoint
+
+`POST /api/deployments` creates a live deployment, behind
+`infrafactory ui --allow-deploy` — implied by neither `--allow-layer3` nor
+`--allow-teardown`, because ADR-0027 says an ephemeral apply the run destroys,
+destroying what exists, and creating what persists are three different kinds of
+harm. `DeploymentDeployer` is a separate interface from `DeploymentActor` so the
+separation lives in the type system rather than in a comment.
+
+**The seam drives the real command rather than reimplementing it**, the way
+`uiRunStarter` already drives `runRunCommand`. Between the request and the apply
+sit a deny-by-default Layer 3 HCL preflight, a credentials check, a
+per-deployment workdir so two deployments cannot share one state file, a
+run-owned project created inside an interrupt guard, and a registration step that
+writes the record **even when the apply fails** — because a half-finished apply
+leaves real resources and the record is the only thing that brings the reaper back
+to them. Every one is a guard, and every one is the kind of thing a second
+implementation gets subtly wrong.
+
+**A name, never a path.** `deploy` takes a filesystem path; accepting one over
+HTTP would let a request name any YAML on the machine, including one the layers
+have never seen. Resolution walks the scenarios tree matching the declared
+`scenario:` field.
+
+That resolver reads **only the name** — using `scenario.Load` would validate
+against `DefaultSchemaPath`, which resolves relative to the working directory, so
+in a server process every file would fail validation and be skipped and the API
+would report "no scenario named X" for a scenario sitting right there. Silently.
+Validation is deferred, not skipped: the command loads the path through the
+runtime's own loader.
+
+**The request has two fields, and the absences are the design.** No project — one
+that could name a project could name somebody else's. No skip-validation. No
+value meaning "forever". A deploy whose result cannot be read is reported as a
+FAILURE, since the apply may well have created infrastructure and an empty result
+would say the opposite.
+
 ## 2026-09-02 — S162a: what a person must be told before they spend money
 
 ADR-0027 §2 made real: `GET /api/deployments/preview` answers what a deploy would

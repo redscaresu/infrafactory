@@ -265,3 +265,39 @@ mockway:
 	require.NoError(t, err, "a missing claude binary must not stop an operator tearing down real infrastructure")
 	assert.NotNil(t, actor)
 }
+
+// ADR-0027: three flags, three kinds of harm, and none implies another.
+// An operator who accepted an ephemeral apply, or accepted cleanup, has
+// not accepted infrastructure that persists and bills hourly.
+func TestUICapabilityFlagsDoNotImplyEachOther(t *testing.T) {
+	cmd := newUICmd(nil)
+
+	for _, name := range []string{"allow-layer3", "allow-teardown", "allow-deploy"} {
+		flag := cmd.Flags().Lookup(name)
+		require.NotNil(t, flag, "--%s must exist", name)
+		assert.Equal(t, "false", flag.DefValue, "--%s must never default on", name)
+	}
+
+	// Teardown on, deploy off: the destructive capability confers no
+	// creative one.
+	deployer, err := deployActor(cmd, false)
+	require.NoError(t, err)
+	assert.Nil(t, deployer)
+
+	actor, err := teardownActor(cmd, false)
+	require.NoError(t, err)
+	assert.Nil(t, actor)
+}
+
+// A guard that stops without saying why is half a guard. If the operator
+// asked for deploy and it cannot be built, starting anyway would hand
+// them a UI silently missing the capability they requested.
+func TestUIRefusesToStartWhenRequestedDeployCannotBeBuilt(t *testing.T) {
+	cmd := newUICmd(nil)
+	cmd.Flags().String("config", filepath.Join(t.TempDir(), "missing.yaml"), "")
+
+	_, err := deployActor(cmd, true)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--allow-deploy was requested")
+}

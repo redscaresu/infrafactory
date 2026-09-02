@@ -36,7 +36,12 @@ type ServerConfig struct {
 	// --allow-teardown. Nil means the destructive endpoints do not
 	// exist, rather than existing and refusing.
 	DeploymentActor DeploymentActor
-	RuntimeErrors   chan error
+
+	// Deployer is nil unless the operator started the server with
+	// --allow-deploy. A separate field from DeploymentActor because they
+	// gate different kinds of harm (ADR-0027).
+	Deployer      DeploymentDeployer
+	RuntimeErrors chan error
 }
 
 type StartRunRequest struct {
@@ -76,6 +81,7 @@ func NewServer(cfg ServerConfig) *http.Server {
 		deployments:  cfg.Deployments,
 
 		deploymentActor: cfg.DeploymentActor,
+		deployer:        cfg.Deployer,
 		sessionID:       fmt.Sprintf("%d-%d", os.Getpid(), time.Now().UTC().UnixNano()),
 		startedAt:       time.Now().UTC(),
 	}
@@ -144,6 +150,7 @@ type serverState struct {
 	deployments  DeploymentLister
 
 	deploymentActor DeploymentActor
+	deployer        DeploymentDeployer
 	sessionID       string
 	startedAt       time.Time
 }

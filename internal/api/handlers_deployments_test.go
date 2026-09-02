@@ -112,17 +112,31 @@ func TestDeploymentsMarkOnesThatWereUpgraded(t *testing.T) {
 	assert.True(t, payload.Deployments[0].Upgraded)
 }
 
-// Read-only, deliberately: deploy, teardown and reap carry guards that
-// live in internal/cli and are not reachable from here.
-func TestDeploymentsRefuseEveryMutatingMethod(t *testing.T) {
+// A server given no capability flags creates nothing, whatever it is
+// asked.
+//
+// POST answers 404 rather than 405 since S162b, and the distinction is
+// deliberate: POST is a real verb on this collection when the server was
+// started with --allow-deploy. Without it the capability does not exist,
+// which is "no such thing" rather than "wrong verb" -- the same answer
+// teardown gives. The property under test is unchanged: nothing here
+// mutates.
+func TestDeploymentsCreateNothingWithoutACapabilityFlag(t *testing.T) {
 	srv := NewServer(ServerConfig{Config: config.Default(), Deployments: &fakeDeployments{}})
 
-	for _, method := range []string{http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete} {
+	for method, want := range map[string]int{
+		http.MethodPost:   http.StatusNotFound,
+		http.MethodPut:    http.StatusMethodNotAllowed,
+		http.MethodPatch:  http.StatusMethodNotAllowed,
+		http.MethodDelete: http.StatusMethodNotAllowed,
+	} {
 		req := httptest.NewRequest(method, "/api/deployments", nil)
 		rec := httptest.NewRecorder()
 		srv.Handler.ServeHTTP(rec, req)
 
-		assert.Equal(t, http.StatusMethodNotAllowed, rec.Code, "%s must not be served", method)
+		assert.Equal(t, want, rec.Code, "%s must not create anything", method)
+		assert.NotContains(t, rec.Body.String(), "clean",
+			"%s must not have produced a deployment result", method)
 	}
 }
 

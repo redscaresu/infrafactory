@@ -108,3 +108,45 @@ infrastructure or real money is off until somebody says otherwise in a shell.
 **This ADR is a gate, not an implementation.** S162 builds the button against it;
 if S162 needs to weaken anything here, that is a change to this document and its
 own argument, not a detail of the pull request that happens to need it.
+
+## Amendment, 2026-09-02 (S162b): the endpoint, and what it may be told
+
+`POST /api/deployments` creates a deployment. `DeploymentDeployer` is a separate
+interface from `DeploymentActor`, so §1's argument — that creating and destroying
+are different kinds of harm — lives in the type system rather than only in this
+document. A server holding one cannot be talked into the other.
+
+**The request carries a scenario name and an optional TTL, and nothing else.** The
+absences are the decision: no project, because a request that could name one could
+name somebody else's; no skip-validation; and no value meaning "forever".
+
+**A name, never a path.** `deploy` takes a filesystem path, and accepting one over
+HTTP would let a request name any YAML on the machine, including one outside the
+scenarios tree that the layers have never seen. Resolution walks the tree matching
+the declared `scenario:` field.
+
+That resolver reads **only the name**. Loading each candidate through
+`scenario.Load` would validate it against `DefaultSchemaPath`, which resolves
+relative to the working directory — so in a server process started anywhere else,
+every file would fail validation, be skipped, and the API would report "no
+scenario named X" for a scenario sitting right there. Validation is deferred, not
+skipped: the command loads the path through the runtime's own loader.
+
+**The seam drives the command rather than reimplementing it.** Between the request
+and the apply sit a deny-by-default Layer 3 HCL preflight, a credentials check, a
+per-deployment workdir, a run-owned project created inside an interrupt guard, and
+a registration step that writes the record *even when the apply fails*. A second
+implementation of that sequence is a second thing that can be wrong, on the path
+that spends money.
+
+### A result that cannot be read is a failure
+
+The command emits `{"schema": ..., "result": {...}}`. Unmarshalling that into the
+inner `OutputResult` **succeeds with every field zero**, because unknown keys are
+ignored — so a successful deploy read as unclean, with no steps and no failures,
+and the endpoint would have answered 409 after creating infrastructure.
+
+A parse that cannot fail is worse than one that does: there is nothing to notice.
+The envelope is now required, and output that is not it is reported as a failure
+saying *whether infrastructure was created is unknown* — because the apply may
+well have created some, and an empty result would say the opposite.

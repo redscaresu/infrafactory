@@ -29,6 +29,23 @@ type ActionResult struct {
 	Failures []ActionStep `json:"failures"`
 }
 
+// DeploymentDeployer creates a live deployment.
+//
+// Separate from DeploymentActor, and that separation is ADR-0027's whole
+// argument in the type system: destroying what exists and creating what
+// persists are different kinds of harm, gated by different flags. A
+// server holding one of these interfaces cannot be talked into the
+// other.
+type DeploymentDeployer interface {
+	// Deploy applies a scenario and leaves it running under a TTL.
+	//
+	// It takes the scenario NAME and a TTL string, and nothing else. It
+	// deliberately cannot be told which project to use -- run-owned
+	// projects are created by the harness (ADR-0025), and a request that
+	// could name one is a request that could name somebody else's.
+	Deploy(ctx context.Context, scenarioName, ttl string) (ActionResult, error)
+}
+
 // DeploymentActor performs the destructive half of live management.
 //
 // Separate from DeploymentLister on purpose. Reading the estate is safe

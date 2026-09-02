@@ -27,6 +27,7 @@ func newUICmd(assets fs.FS) *cobra.Command {
 	var addr string
 	var allowLayer3 bool
 	var allowTeardown bool
+	var allowDeploy bool
 
 	cmd := &cobra.Command{
 		Use:   "ui",
@@ -60,6 +61,11 @@ func newUICmd(assets fs.FS) *cobra.Command {
 				return formatCommandError("ui", err)
 			}
 
+			deployer, err := deployActor(cmd, allowDeploy)
+			if err != nil {
+				return formatCommandError("ui", err)
+			}
+
 			hub := api.NewHub()
 			go hub.Run(cmd.Context())
 			starter := &uiRunStarter{
@@ -82,6 +88,7 @@ func newUICmd(assets fs.FS) *cobra.Command {
 				// destroying it, and that property survives a bug in
 				// the origin guard (S159b, ADR-0026).
 				DeploymentActor: actor,
+				Deployer:        deployer,
 			})
 
 			errCh := make(chan error, 1)
@@ -114,6 +121,8 @@ func newUICmd(assets fs.FS) *cobra.Command {
 		"Permit runs started from this UI to apply to real infrastructure and spend money")
 	cmd.Flags().BoolVar(&allowTeardown, "allow-teardown", false,
 		"Permit this UI to destroy live deployments (irreversible)")
+	cmd.Flags().BoolVar(&allowDeploy, "allow-deploy", false,
+		"Permit this UI to create live deployments that persist, bill hourly, and serve the internet")
 
 	return cmd
 }
@@ -155,6 +164,39 @@ func teardownActor(cmd *cobra.Command, allowTeardown bool) (api.DeploymentActor,
 		return nil, fmt.Errorf("--allow-teardown was requested but the teardown path could not be built: %w", err)
 	}
 	return NewLiveActions(runtime), nil
+}
+
+// deployActor builds the deployer, or nil when the operator did not ask.
+//
+// Deliberately NOT derived from allowLayer3 or allowTeardown. ADR-0027:
+// an ephemeral apply the run destroys, destroying what exists, and
+// creating what persists are three different kinds of harm, and an
+// operator who accepted one has not accepted another.
+//
+// Unlike teardown, this one keeps the generator. A deploy runs the Layer
+// 3 HCL preflight and applies real infrastructure, and building its
+// runtime the same way the CLI does is the point of the whole seam --
+// stubbing a dependency out here to make startup easier would be
+// changing what deploy is, on the path that spends money.
+func deployActor(cmd *cobra.Command, allowDeploy bool) (api.DeploymentDeployer, error) {
+	if !allowDeploy {
+		return nil, nil
+	}
+	// Built once here to FAIL LOUDLY at startup: an operator who asked
+	// for deploy and cannot have it should learn so from the command
+	// they typed, not from a click minutes later.
+	probe, err := buildRuntime(cmd, defaultRuntimeOptions())
+	if err != nil {
+		return nil, fmt.Errorf("--allow-deploy was requested but the deploy path could not be built: %w", err)
+	}
+
+	// And rebuilt per deploy, because CommandRuntime.LoadScenario caches
+	// a scenario and refuses a different one. Handing the probe runtime
+	// to the deployer would deploy whatever was asked for first and fail
+	// everything after it.
+	return NewLiveDeployer(probe.Config.Paths.Scenarios, func() (*CommandRuntime, error) {
+		return buildRuntime(cmd, defaultRuntimeOptions())
+	}), nil
 }
 
 type uiRunStarter struct {
