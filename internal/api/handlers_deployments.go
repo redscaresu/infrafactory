@@ -349,28 +349,15 @@ func deployHandler(state *serverState) http.HandlerFunc {
 		// reader has since navigated to says what it is about -- the
 		// rule S162c cost seven findings to learn.
 		progress := NewProgressSink(state.hub, "deploy_progress", req.Scenario)
+		// Deferred, so a panic inside Deploy still flushes the buffered
+		// trailing line. An earlier version called it explicitly to
+		// order it before a terminal broadcast; that broadcast is gone,
+		// and the panic guarantee is worth more than the ordering was.
+		defer progress.Close()
 
 		result, err := state.deployer.Deploy(ctx, req.Scenario, req.TTL, progress)
 
-		// Flushed BEFORE the terminal event, not deferred after it.
-		//
-		// `deploy_complete` is terminal by design -- a client stops
-		// listening on it -- so broadcasting it first meant the last
-		// line of a failed apply arrived after everyone had gone. That
-		// trailing line is the entire reason Close exists.
-		_ = progress.Close()
-
 		if errors.Is(err, ErrDeployInProgress) {
-			// NO terminal event here. This deploy never started; the
-			// one that DID is still applying, and announcing its
-			// completion would stop every watcher's log, re-enable
-			// their button and report a running apply as finished.
-			//
-			// The broadcast is subject-scoped, so it cannot distinguish
-			// "the refused one" from "the running one" -- they share a
-			// scenario. It must only be sent by a call that actually
-			// ran.
-			//
 			// 423 Locked, NOT 409.
 			//
 			// 409 is already taken on this endpoint by
@@ -393,8 +380,6 @@ func deployHandler(state *serverState) http.HandlerFunc {
 			return
 		}
 		if errors.Is(err, os.ErrNotExist) {
-			// Also no terminal event: nothing ran.
-			//
 			// The caller named something that is not here. A client
 			// typo or a stale scenario list is not a server fault, and
 			// answering 500 teaches operators that 500 means nothing in
@@ -403,8 +388,6 @@ func deployHandler(state *serverState) http.HandlerFunc {
 			return
 		}
 
-		// Reached only when the deploy actually RAN, however it ended.
-		broadcastDeployComplete(state.hub, req.Scenario, result, err)
 		writeActionResult(w, result, err)
 	}
 }
@@ -423,36 +406,4 @@ func deployingScenarios(state *serverState) []string {
 		return inFlight
 	}
 	return []string{}
-}
-
-// broadcastDeployComplete tells every watcher that a deploy ended, and
-// how.
-//
-// Sent even on error: a tab watching a deploy it did not start must
-// learn that it stopped, and "it failed" is information the estate
-// cannot provide -- a failed apply may still have created resources, so
-// the record exists either way and looks much like a successful one.
-func broadcastDeployComplete(hub *Hub, scenario string, result ActionResult, err error) {
-	if hub == nil {
-		return
-	}
-	payload, marshalErr := json.Marshal(map[string]any{
-		"type": "deploy_complete",
-		"data": map[string]any{
-			"subject": scenario,
-			"clean":   err == nil && result.Clean,
-			"error":   errorText(err),
-		},
-	})
-	if marshalErr != nil {
-		return
-	}
-	hub.Broadcast(payload)
-}
-
-func errorText(err error) string {
-	if err == nil {
-		return ""
-	}
-	return err.Error()
 }

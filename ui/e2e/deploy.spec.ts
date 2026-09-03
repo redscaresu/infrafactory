@@ -921,9 +921,15 @@ test('a refused deploy does not claim resources may be running', async ({ page }
   await page.getByTestId('scenario-deploy').click();
   await page.getByTestId('deploy-confirm-go').click();
 
-  const outcome = page.getByTestId('deploy-outcome');
-  await expect(outcome).toContainText('already deploying');
-  await expect(outcome).not.toContainText('may still be running');
+  // A refused deploy started nothing, so nothing is shown as running --
+  // and no store entry is created, because the store's progress handler
+  // matches on scenario and would otherwise adopt another tab's live
+  // stream into it.
+  const refusal = page.getByTestId('deploy-refusal');
+  await expect(refusal).toContainText('already deploying');
+  await expect(refusal).not.toContainText('may still be running');
+  await expect(page.getByTestId('deploy-progress')).toHaveCount(0);
+  await expect(page.getByTestId('deploy-outcome')).toHaveCount(0);
 });
 
 // The server computed already_live and nothing read it: the guard the

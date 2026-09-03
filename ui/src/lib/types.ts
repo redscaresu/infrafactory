@@ -166,9 +166,9 @@ export interface DeploymentsResponse {
   // not offer a button it knows will 404; the SAFETY is that the
   // endpoint does not exist, and this field cannot make it exist.
   teardown_allowed: boolean;
-  // Scenarios currently applying, so a reloaded page can restore what it
-  // was showing. The guard against a second deploy is server-side; this
-  // only stops the UI offering a button that would be refused.
+  // Scenarios currently applying. They have no record yet, so they
+  // cannot appear in `deployments` -- the estate page renders this to
+  // avoid being silent about the most active thing in the estate.
   deploying: string[];
 }
 
@@ -228,6 +228,9 @@ export interface DeployPreview {
   // stops the accidental duplicate; this is what warns about the
   // deliberate one.
   already_live: string[];
+  // Applying right now, which the estate cannot see: registration runs
+  // after the apply returns.
+  already_deploying: boolean;
   // True when the estate could not be fully read. An empty already_live
   // is a claim; this says when it cannot be made.
   already_live_unknown: boolean;

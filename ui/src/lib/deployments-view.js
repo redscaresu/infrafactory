@@ -136,13 +136,24 @@ export function observedLabel(health) {
  * undecodable record is not an absence of infrastructure; it is an
  * absence of knowledge.
  */
-export function knownEmpty(deployments, unreadable, state = "loaded") {
-  return state === "loaded" && (deployments?.length || 0) === 0 && (unreadable?.length || 0) === 0;
+export function knownEmpty(deployments, unreadable, state = "loaded", deploying = []) {
+  return (
+    state === "loaded" &&
+    (deployments?.length || 0) === 0 &&
+    (unreadable?.length || 0) === 0 &&
+    // A deploy that is APPLYING has no record yet, so it is absent from
+    // `deployments` while being the most active thing in the estate.
+    // Without this the page said "Nothing is deployed." directly under a
+    // banner naming a billable apply in flight -- a third copy of the
+    // emptiness question that neither of the other two knew about.
+    (deploying?.length || 0) === 0
+  );
 }
 
-export function estateSummary(deployments, unreadable, state = "loaded") {
+export function estateSummary(deployments, unreadable, state = "loaded", deploying = []) {
   const total = deployments?.length || 0;
   const unread = unreadable?.length || 0;
+  const applying = deploying?.length || 0;
 
   if (state === "loading") return "Reading the live estate…";
 
@@ -153,8 +164,12 @@ export function estateSummary(deployments, unreadable, state = "loaded") {
     return `${describe(deployments, unreadable)} — read before the error, and possibly out of date.`;
   }
 
-  if (knownEmpty(deployments, unreadable, state)) return "Nothing is deployed.";
-  return describe(deployments, unreadable);
+  if (knownEmpty(deployments, unreadable, state, deploying)) return "Nothing is deployed.";
+
+  const described = describe(deployments, unreadable);
+  if (applying === 0) return described;
+  const applyingText = `${applying} deploy${applying === 1 ? "" : "s"} in progress`;
+  return total === 0 && unread === 0 ? applyingText : `${described}, ${applyingText}`;
 }
 
 function describe(deployments, unreadable) {
@@ -329,20 +344,6 @@ export function deployWarnings(preview) {
   return warnings;
 }
 
-/**
- * acceptCompleteEvent recognises the terminal event for a deploy.
- *
- * Its existence is what lets a tab that ADOPTED a deploy -- one that did
- * not issue the POST, because the page was reloaded mid-apply -- learn
- * that it finished and whether it worked. The first attempt polled the
- * estate instead, which could answer "it stopped" and never "it
- * succeeded".
- */
-export function acceptCompleteEvent(event, showingScenario) {
-  if (!showingScenario) return false;
-  if (event?.type !== "deploy_complete") return false;
-  return event?.data?.subject === showingScenario;
-}
 
 /**
  * acceptProgressEvent decides whether a websocket event belongs to the
@@ -386,6 +387,13 @@ export function acceptProgressEvent(event, showingScenario) {
  * server, and absent from the screen it was for.
  */
 export function alreadyLiveWarning(preview) {
+  // An applying deploy has no record, so the estate cannot see it. It is
+  // also the case where a reader is most likely duplicating, and the
+  // second attempt would simply be refused.
+  if (preview?.already_deploying) {
+    return "This scenario is being deployed right now. A second deploy will be refused until it finishes.";
+  }
+
   const live = Array.isArray(preview?.already_live) ? preview.already_live : [];
 
   // "Could not look" is not "nothing is there", and this guard is about

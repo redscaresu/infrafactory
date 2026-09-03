@@ -87,15 +87,10 @@
 
   $: if (rawYAML !== undefined) scheduleValidation(rawYAML);
 
-  // Clear the debounce timer on destroy so navigating away during the
-  // 500ms window doesn't fire a stale validation against a torn-down
-  // component (the validationVersion guard is per-instance).
-  // The shared socket stays open while this page is mounted, and the
-  // store keeps it open beyond that if a deploy is still running -- so
-  // leaving and returning finds the log intact rather than frozen.
   // The shared socket stays open while this page is mounted, and the
   // store keeps it open beyond that if a deploy this tab started is
-  // still running.
+  // still running -- so leaving and returning finds the log intact
+  // rather than frozen.
   //
   // Nothing here asks the server what else might be deploying. An
   // earlier version did -- adoption, terminal-event recovery, reconnect
@@ -108,6 +103,9 @@
   onMount(() => watchDeploys());
 
   onDestroy(() => {
+    // Clear the debounce timer so navigating away during the 500ms
+    // window does not fire a stale validation against a torn-down
+    // component (the validationVersion guard is per-instance).
     if (validationTimer) clearTimeout(validationTimer);
     resetDeployState();
     // Also here, not only in afterNavigate.
@@ -196,6 +194,9 @@
   // which is the move pass 126 argued for and pass 127 had to learn
   // twice. It also gives the reader feedback that the click landed.
   let previewing = false;
+  // A deploy that never started. Held separately from the store, which
+  // only ever contains deploys this tab actually began.
+  let deployRefusal = "";
 
   // A deploy runs for minutes, and minutes of silence reads as broken:
   // a reader cannot tell a long apply from a hung one, and the
@@ -248,6 +249,7 @@
     confirmingDeploy = false;
     preview = null;
     previewError = "";
+    deployRefusal = "";
   }
 
   async function openDeployConfirmation() {
@@ -288,20 +290,28 @@
     const target = preview?.scenario;
     if (!target) return;
 
-    // The store owns everything about an in-flight deploy, so it
-    // survives this component being reused or destroyed. It is keyed by
-    // scenario, which is what the progress events carry.
-    beginDeploy(target);
     confirmingDeploy = false;
+
+    // The entry is created BEFORE the POST, because streaming progress
+    // during the apply is the entire point and the response does not
+    // arrive for minutes.
+    //
+    // It is REMOVED on refusal. Leaving it meant a rejected deploy kept
+    // an entry, and the store matches progress by scenario -- so another
+    // tab's still-streaming lines appended into it and the page showed a
+    // red "already deploying" banner on top of a live, growing log of an
+    // apply it never started. That is the adoption this slice removed,
+    // arriving through the back door.
+    beginDeploy(target);
 
     try {
       finishDeploy(target, teardownOutcome(await api.deployScenario(target)));
     } catch (err) {
-      finishDeploy(target, {
-        ok: false,
-        message:
-          err instanceof Error ? `deploy could not be completed: ${err.message}` : "deploy failed."
-      });
+      // Nothing was started, so nothing is shown as running. The
+      // message says why on its own.
+      forgetDeploy(target);
+      deployRefusal =
+        err instanceof Error ? `${target}: ${err.message}` : `${target}: deploy failed.`;
     }
   }
 
@@ -615,6 +625,12 @@
        during it, so an unattributed "deployed." is a claim about the
        wrong thing. The store keys outcomes by scenario, so this one is
        this scenario's by construction. -->
+  {#if deployRefusal}
+    <p class="mt-3 text-sm font-semibold text-rose-800" data-testid="deploy-refusal">
+      {deployRefusal}
+    </p>
+  {/if}
+
   {#if deployOutcome}
     <p
       class={`mt-3 text-sm ${deployOutcome.ok ? "text-emerald-800" : "font-semibold text-rose-800"}`}

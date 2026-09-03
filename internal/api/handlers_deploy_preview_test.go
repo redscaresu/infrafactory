@@ -435,3 +435,46 @@ acceptance_criteria:
 	assert.True(t, got.AlreadyLiveUnknown)
 	assert.Empty(t, got.AlreadyLive)
 }
+
+// A deploy that is APPLYING has no record yet -- registration runs after
+// the apply returns -- so the estate cannot see the one case where the
+// reader is most likely duplicating.
+func TestPreviewWarnsWhenTheScenarioIsApplyingRightNow(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "sc.yaml"), []byte(`scenario: previewable
+version: "1.0"
+cloud: scaleway
+description: x
+resources:
+  compute:
+    purpose: web-server
+    size: small
+acceptance_criteria:
+  - type: destruction
+    expect: no_orphans
+`), 0o644))
+
+	cfg := config.Default()
+	cfg.Paths.Scenarios = dir
+	srv := NewServer(ServerConfig{
+		Config: cfg, Deployments: &fakeDeployments{},
+		Deployer: &fakeDeployer{inFlight: []string{"previewable"}},
+	})
+
+	rec := httptest.NewRecorder()
+	srv.Handler.ServeHTTP(rec,
+		httptest.NewRequest(http.MethodGet, "/api/deployments/preview?scenario=previewable", nil))
+
+	var got deployPreview
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	assert.True(t, got.AlreadyDeploying)
+	assert.Empty(t, got.AlreadyLive, "it has no record yet, which is the point")
+}
+
+// A blank scenario name never looked, so it must not claim it did.
+func TestPreviewWithABlankScenarioNameMakesNoClaim(t *testing.T) {
+	got, unknown := liveDeploymentsOf(&serverState{deployments: &fakeDeployments{}}, "")
+
+	assert.Empty(t, got)
+	assert.True(t, unknown, "returning (empty, false) is the claim the flag exists to forbid")
+}

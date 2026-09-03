@@ -242,13 +242,17 @@ func TestDeployStreamsItsProgressToWatchers(t *testing.T) {
 			// It is what lets a tab that did not issue the POST learn
 			// the deploy finished; only the progress lines are under
 			// test here.
-			if e.Type != "deploy_progress" {
-				assert.Equal(t, "deploy_complete", e.Type, "no other event kind belongs on this stream")
-				subjects = append(subjects, e.Data["subject"].(string))
-				continue
-			}
-			lines = append(lines, e.Data["line"].(string))
-			subjects = append(subjects, e.Data["subject"].(string))
+			require.Equal(t, "deploy_progress", e.Type, "no other event kind belongs on this stream")
+			// Comma-ok, not a bare assertion: a regression that drops
+			// `subject` or nests it would panic the whole test binary
+			// and report as a panic rather than as the assertion that
+			// names the missing field.
+			line, ok := e.Data["line"].(string)
+			require.True(t, ok, "every progress event carries a line")
+			subject, ok := e.Data["subject"].(string)
+			require.True(t, ok, "every progress event names its subject")
+			lines = append(lines, line)
+			subjects = append(subjects, subject)
 		default:
 			// Indentation is PRESERVED. The deploy command indents
 			// sub-steps on purpose, and flattening them here would
@@ -333,90 +337,6 @@ func TestTheListingReportsAnEmptyDeployingListRatherThanNull(t *testing.T) {
 
 			assert.Contains(t, rec.Body.String(), `"deploying":[]`)
 			assert.NotContains(t, rec.Body.String(), `"deploying":null`)
-		})
-	}
-}
-
-// The terminal event exists so a tab that did NOT issue the POST -- one
-// that adopted the deploy after a reload -- can learn it finished and
-// whether it worked.
-//
-// Polling the estate was the first answer and could only ever say "it
-// stopped", because the estate does not carry success.
-func TestADeployBroadcastsHowItEnded(t *testing.T) {
-	for name, tc := range map[string]struct {
-		result    ActionResult
-		err       error
-		wantClean bool
-	}{
-		"clean":   {result: ActionResult{Clean: true}, wantClean: true},
-		"unclean": {result: ActionResult{Clean: false}, wantClean: false},
-		"errored": {result: ActionResult{}, err: errors.New("the runtime could not be built"), wantClean: false},
-	} {
-		t.Run(name, func(t *testing.T) {
-			hub := NewHub()
-			client := NewTestClient(64)
-			hub.Register(client)
-
-			srv := NewServer(ServerConfig{
-				Config: config.Default(), Deployments: &fakeDeployments{}, Hub: hub,
-				Deployer: &fakeDeployer{result: tc.result, err: tc.err},
-			})
-			postDeploy(t, srv, `{"scenario":"web-app-paris"}`)
-
-			var completions []map[string]any
-			for {
-				raw, ok := client.TryReceive()
-				if !ok {
-					break
-				}
-				var e struct {
-					Type string         `json:"type"`
-					Data map[string]any `json:"data"`
-				}
-				require.NoError(t, json.Unmarshal(raw, &e))
-				if e.Type == "deploy_complete" {
-					completions = append(completions, e.Data)
-				}
-			}
-
-			require.Len(t, completions, 1, "a deploy must announce that it ended, however it ended")
-			assert.Equal(t, "web-app-paris", completions[0]["subject"])
-			assert.Equal(t, tc.wantClean, completions[0]["clean"])
-		})
-	}
-}
-
-// A REFUSED deploy must not announce a completion.
-//
-// The broadcast is subject-scoped, so it cannot tell "the one I just
-// refused" from "the one still applying" -- they share a scenario.
-// Sending it stopped every watcher's log, re-enabled their button, and
-// reported a running apply as finished.
-func TestARefusedDeployDoesNotAnnounceACompletion(t *testing.T) {
-	for name, deployer := range map[string]DeploymentDeployer{
-		"already deploying": &fakeDeployer{err: ErrDeployInProgress},
-		"unknown scenario":  &fakeDeployer{err: fmt.Errorf("no scenario named %q: %w", "x", os.ErrNotExist)},
-	} {
-		t.Run(name, func(t *testing.T) {
-			hub := NewHub()
-			client := NewTestClient(64)
-			hub.Register(client)
-
-			srv := NewServer(ServerConfig{
-				Config: config.Default(), Deployments: &fakeDeployments{}, Hub: hub,
-				Deployer: deployer,
-			})
-			postDeploy(t, srv, `{"scenario":"web-app-paris"}`)
-
-			for {
-				raw, ok := client.TryReceive()
-				if !ok {
-					return
-				}
-				assert.NotContains(t, string(raw), "deploy_complete",
-					"nothing ran, so nothing finished — and a watcher would read this as the running apply ending")
-			}
 		})
 	}
 }

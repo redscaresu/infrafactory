@@ -99,11 +99,11 @@
   // The three states are distinct on purpose: an empty list means
   // "nothing is deployed" ONLY when the read succeeded.
   $: estateState = !loaded ? "loading" : loadError ? "failed" : "loaded";
-  $: summary = estateSummary(deployments, unreadable, estateState);
+  $: summary = estateSummary(deployments, unreadable, estateState, deploying);
   // The one condition under which this page may say nothing is running.
   // Shared with the summary rather than re-derived, because two copies
   // is how one of them ends up contradicting the other.
-  $: estateKnownEmpty = knownEmpty(deployments, unreadable, estateState);
+  $: estateKnownEmpty = knownEmpty(deployments, unreadable, estateState, deploying);
 </script>
 
 <svelte:head><title>Deployments · InfraFactory</title></svelte:head>

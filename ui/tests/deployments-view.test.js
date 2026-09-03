@@ -2,7 +2,6 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  acceptCompleteEvent,
   acceptProgressEvent,
   alreadyLiveWarning,
   addressHref,
@@ -376,19 +375,6 @@ test("alreadyLiveWarning is silent when nothing is live", () => {
   assert.equal(alreadyLiveWarning(undefined), "");
 });
 
-// The terminal event is what lets an ADOPTED deploy finish and report.
-test("acceptCompleteEvent takes only the completion for the scenario on screen", () => {
-  const done = (subject) => ({ type: "deploy_complete", data: { subject, clean: true } });
-
-  assert.equal(acceptCompleteEvent(done("web-app-paris"), "web-app-paris"), true);
-  assert.equal(acceptCompleteEvent(done("other"), "web-app-paris"), false);
-  assert.equal(acceptCompleteEvent({ type: "deploy_progress", data: { subject: "a" } }, "a"), false);
-  assert.equal(acceptCompleteEvent(undefined, "a"), false);
-  assert.equal(acceptCompleteEvent(done("a"), ""), false);
-});
-
-// "Could not look" is not "nothing is there", and this guard is about
-// billable infrastructure.
 test("alreadyLiveWarning says so when the estate could not be read", () => {
   const warning = alreadyLiveWarning({ already_live: [], already_live_unknown: true });
   assert.match(warning, /could not be fully read/);
@@ -408,4 +394,34 @@ test("alreadyLiveWarning keeps the concrete list even when the estate is partly 
   assert.match(warning, /dep-existing/, "what was found must not be discarded");
   assert.match(warning, /SECOND project/);
   assert.match(warning, /may be more than this/, "and the gap is still stated");
+});
+
+// A deploy that is APPLYING has no record yet, so it is absent from
+// `deployments` while being the most active thing in the estate. The
+// page said "Nothing is deployed." directly under a banner naming a
+// billable apply in flight.
+test("knownEmpty is false while something is deploying", () => {
+  assert.equal(knownEmpty([], [], "loaded", ["web-app-paris"]), false);
+  assert.equal(knownEmpty([], [], "loaded", []), true);
+});
+
+test("estateSummary counts deploys in progress", () => {
+  assert.equal(estateSummary([], [], "loaded", ["web-app-paris"]), "1 deploy in progress");
+  assert.equal(
+    estateSummary(
+      [{ health: { status: "healthy", version: "confirmed" } }],
+      [],
+      "loaded",
+      ["web-app-paris"]
+    ),
+    "1 deployment, 1 deploy in progress"
+  );
+});
+
+// An applying deploy has no record, so the estate cannot see it — and it
+// is exactly the case where a reader is most likely duplicating.
+test("alreadyLiveWarning leads with a deploy that is applying right now", () => {
+  const warning = alreadyLiveWarning({ already_deploying: true, already_live: [] });
+  assert.match(warning, /being deployed right now/);
+  assert.match(warning, /will be refused/);
 });

@@ -27,8 +27,27 @@ actually cares about. After a reload it does not know, and says so.
 **Net −192 lines.** The estate page had a real gap that this exposed: a deploy
 that is *applying* has no record yet, so it could not appear in the table. The
 listing already reported `deploying`; the page now renders it and says those have
-no record yet — which also stopped that field being computed-and-never-read, the
-defect this review round kept catching.
+no record yet.
+
+**A fourth review round found fifteen more, and their shape is the lesson: the cut
+removed consumers and left producers behind.** `broadcastDeployComplete` was still
+broadcasting to every browser with zero readers, `acceptCompleteEvent` was
+exported and tested with no caller and a docstring describing deleted machinery,
+and a type comment still promised reload-restoration. I checked the callers of what
+I deleted and not the callees.
+
+Two real defects came with it. **The estate page contradicted itself** — with a
+deploy applying and no records, "Nothing is deployed." rendered directly under "1
+deploy in progress", because `deploying` was a third copy of the emptiness question
+that `knownEmpty` did not know about. And **a refused deploy adopted another tab's
+stream**: `beginDeploy` ran before the POST, so a rejected attempt kept an entry
+and the store's scenario-keyed handler appended the other tab's live lines into it.
+My first fix moved `beginDeploy` after the POST and broke live progress entirely —
+three DOM tests caught it.
+
+The cut also created a gap it had to fill: `already_live` reads the estate, and an
+applying deploy has no record, so the confirmation was silent in the very case a
+reader is most likely duplicating. The preview consults the in-flight list now.
 
 ## 2026-09-03 — S163d: nine findings from `/code-review`
 

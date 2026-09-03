@@ -60,6 +60,13 @@ type deployPreview struct {
 	// InternetFacing is true when the shape includes a public address.
 	InternetFacing bool `json:"internet_facing"`
 
+	// AlreadyDeploying is true when this scenario is applying right now.
+	//
+	// Separate from AlreadyLive because it is a different fact with a
+	// different consequence: that deploy has no record yet, and a second
+	// attempt will be refused rather than duplicating anything.
+	AlreadyDeploying bool `json:"already_deploying"`
+
 	// AlreadyLiveUnknown is true when the estate could not be read.
 	//
 	// An empty AlreadyLive is a CLAIM -- "checked, and nothing exists" --
@@ -142,6 +149,15 @@ func deployPreviewHandler(state *serverState) http.HandlerFunc {
 		preview := previewFor(&sc, r.URL.Query().Get("ttl"), time.Now())
 		preview.Allowed = state.deployer != nil
 		preview.AlreadyLive, preview.AlreadyLiveUnknown = liveDeploymentsOf(state, sc.Name)
+		// A deploy that is APPLYING has no record yet -- registration
+		// runs after the apply returns -- so the estate cannot see the
+		// one case where the reader is most likely to be duplicating.
+		// The in-flight list can.
+		for _, deploying := range deployingScenarios(state) {
+			if deploying == sc.Name {
+				preview.AlreadyDeploying = true
+			}
+		}
 		writeJSON(w, http.StatusOK, preview)
 	}
 }
@@ -254,15 +270,19 @@ func previewFor(sc *scenario.Scenario, ttlOverride string, now time.Time) deploy
 }
 
 // liveDeploymentsOf names the deployments of a scenario that have not
-// been released.
+// been released, and reports whether the answer is complete.
 //
-// Unreadable records are ignored rather than reported here: `live ls`
-// and the estate page already surface them, and a confirmation dialog is
-// the wrong place to raise a problem the reader cannot act on from it.
+// The second return is not a detail: an empty list is a CLAIM -- checked,
+// and nothing exists -- and a guard whose job is warning about existing
+// billable infrastructure must not make it without having looked. Every
+// path that did not look says so.
 func liveDeploymentsOf(state *serverState, name string) ([]string, bool) {
 	out := []string{}
 	if name == "" {
-		return out, false
+		// Never looked, so no claim. A scenario whose `scenario:` key is
+		// blank still resolves to a file, and the confirmation would
+		// otherwise render with no warning and no caveat.
+		return out, true
 	}
 	if state.deployments == nil {
 		// No lister, so nothing was checked. Returning (empty, false)
