@@ -8,10 +8,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/redscaresu/infrafactory/internal/api"
 )
 
 // A NAME, resolved here, never a path from the caller. `deploy` takes a
@@ -294,4 +297,89 @@ func TestDeployStderrTeesToBoth(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "a line\n", live.String())
 	assert.Equal(t, "a line\n", copy.String())
+}
+
+// The lock lives on the server because the page cannot hold it: a
+// refresh wipes client state, a second tab never had it, and a `curl`
+// never consulted it.
+func TestDeployerRefusesASecondDeployOfTheSameScenario(t *testing.T) {
+	root := twoScenarios(t)
+
+	// Blocks inside the runtime factory, so the first deploy is
+	// genuinely in flight while the second is attempted.
+	//
+	// Only the FIRST call blocks. Every later one returns at once.
+	//
+	// If the factory blocked unconditionally, a regression that removes
+	// the lock would make the second Deploy reach it and wait for a
+	// release that the test has not sent yet -- deadlocking for Go's
+	// full timeout instead of failing. A test that hangs on regression
+	// is barely better than one that passes, and this test exists to
+	// catch exactly that regression.
+	entered := make(chan struct{}, 8)
+	release := make(chan struct{})
+	var calls atomic.Int32
+	deployer := NewLiveDeployer(root, func() (*CommandRuntime, error) {
+		entered <- struct{}{}
+		if calls.Add(1) == 1 {
+			<-release
+		}
+		return nil, errors.New("stop here; the lock is what is under test")
+	})
+
+	go func() {
+		_, _ = deployer.Deploy(context.Background(), "first-scenario", "", nil)
+	}()
+	<-entered
+
+	assert.Equal(t, []string{"first-scenario"}, deployer.InFlight())
+
+	_, err := deployer.Deploy(context.Background(), "first-scenario", "", nil)
+	require.ErrorIs(t, err, api.ErrDeployInProgress,
+		"a second deploy of a scenario already in flight must be refused")
+
+	// A DIFFERENT scenario is ordinary and must not be blocked. It
+	// returns immediately, so wait for it to appear rather than racing.
+	go func() {
+		_, _ = deployer.Deploy(context.Background(), "second-scenario", "", nil)
+	}()
+	<-entered
+
+	close(release)
+}
+
+// A scenario stuck marked-as-deploying could never be deployed again
+// without restarting the server -- a worse failure than the one the lock
+// prevents.
+func TestTheLockIsReleasedWhenADeployFails(t *testing.T) {
+	deployer := NewLiveDeployer(twoScenarios(t), func() (*CommandRuntime, error) {
+		return nil, errors.New("the runtime could not be built")
+	})
+
+	_, err := deployer.Deploy(context.Background(), "first-scenario", "", nil)
+	require.Error(t, err)
+
+	assert.Empty(t, deployer.InFlight(), "a failed deploy must not hold the name forever")
+
+	// And the scenario is deployable again.
+	_, err = deployer.Deploy(context.Background(), "first-scenario", "", nil)
+	require.Error(t, err)
+	require.NotErrorIs(t, err, api.ErrDeployInProgress)
+}
+
+// A name that resolves to nothing must leave no lock behind.
+//
+// Note what this does NOT pin: mutation testing showed that claiming
+// before resolution also passes, because the deferred release fires on
+// the resolution failure too. The ordering is tidiness; the RELEASE is
+// the thing that matters, and that is what this catches.
+func TestAnUnknownScenarioDoesNotHoldTheLock(t *testing.T) {
+	deployer := NewLiveDeployer(twoScenarios(t), func() (*CommandRuntime, error) {
+		return nil, errors.New("should not be reached")
+	})
+
+	_, err := deployer.Deploy(context.Background(), "no-such-scenario", "", nil)
+	require.Error(t, err)
+
+	assert.Empty(t, deployer.InFlight())
 }

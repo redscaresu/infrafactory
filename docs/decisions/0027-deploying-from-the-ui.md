@@ -191,3 +191,48 @@ than a choice: the id is minted inside the command, after the request is accepte
 Two concurrent deploys of one scenario therefore share a stream and a reader sees
 both. Recorded here rather than left to be discovered, because the id is the
 argument to `live teardown` and taking the wrong one has consequences.
+
+## Amendment, 2026-09-03 (S163c): the guard against a second deploy is server-side
+
+Two deploys of one scenario produce **two run-owned projects and two sets of
+billable resources for one thing**, and until now the only thing preventing it was
+client-side state.
+
+A page is exactly the wrong place for that guard. A refresh wipes it, a second tab
+never had it, and `curl` never consulted it. Three review findings across two
+rounds were variants of the same hole, and each fix moved the client state around
+without addressing that it was client state.
+
+`LiveDeployer` holds the lock. A second `Deploy` of a scenario already in flight
+returns `ErrDeployInProgress`, which the endpoint answers **409** — naming the
+scenario, because a bare "conflict" leaves a reader wondering which of their tabs
+is responsible.
+
+**Per scenario, not global.** Two different scenarios deploying at once is
+ordinary, and blocking it would make the UI worse for no safety gain.
+
+**Released on every exit, including failure.** A scenario stuck marked-as-deploying
+could never be deployed again without restarting the server — a worse failure than
+the one being prevented.
+
+The claim happens after name resolution, and that ordering is **tidiness rather
+than safety**. An earlier version of this ADR said a typo could otherwise "lock a
+name nothing will ever deploy"; mutation testing disproved it, because the
+deferred release fires on the resolution failure too. Recorded because a false
+safety claim is what the next reader reasons from — the release is the guarantee,
+the ordering is not.
+
+### The listing says what is deploying, and that is advisory only
+
+`GET /api/deployments` reports `deploying: []`, so a reloaded page can restore
+what it was showing rather than presenting an enabled button that the server will
+refuse. The refusal is the guard; this only stops the reader being invited to trip
+it. A client that ignores the field still cannot start two.
+
+The field is always a list, never `null`: an unconfigured deployer and an idle one
+are both "nothing is deploying" to a reader.
+
+### A finished deploy's banner is forgotten when its page is left
+
+It used to reappear on every later visit for the rest of the session — a success
+message for infrastructure whose TTL may long since have expired.

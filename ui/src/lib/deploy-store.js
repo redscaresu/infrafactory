@@ -91,6 +91,31 @@ export function watch() {
   };
 }
 
+/**
+ * adoptInFlight seeds the store from what the SERVER says is deploying.
+ *
+ * A page reload wipes this module along with everything else, so without
+ * it a refresh mid-deploy showed an enabled Deploy button and no log --
+ * and the second click was only refused once it reached the server. The
+ * refusal is the guard; this is what stops the reader being invited to
+ * trip it.
+ *
+ * Existing entries are left alone: a deploy this tab started already has
+ * its progress, and replacing it would throw the log away.
+ */
+export function adoptInFlight(scenarios) {
+  if (!Array.isArray(scenarios) || scenarios.length === 0) return;
+  ensureSocket();
+  deploys.update((all) => {
+    const next = { ...all };
+    for (const scenario of scenarios) {
+      if (next[scenario]) continue;
+      next[scenario] = { running: true, progress: [], outcome: null, adopted: true };
+    }
+    return next;
+  });
+}
+
 export function beginDeploy(scenario) {
   ensureSocket();
   deploys.update((all) => ({

@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"io"
 )
 
@@ -58,7 +59,29 @@ type DeploymentDeployer interface {
 	// projects are created by the harness (ADR-0025), and a request that
 	// could name one is a request that could name somebody else's.
 	Deploy(ctx context.Context, scenarioName, ttl string, progress io.Writer) (ActionResult, error)
+
+	// InFlight names the scenarios currently deploying.
+	//
+	// Reported so a page that has just been RELOADED can know what is
+	// running. Until this existed the only thing preventing a second
+	// deploy of one scenario was client-side state, which a refresh
+	// wipes -- and the server had no lock, so the second click went
+	// through and created a second run-owned project.
+	//
+	// The list is advisory to the UI and load-bearing nowhere: the
+	// refusal happens in Deploy, so a client that ignores this still
+	// cannot start two.
+	InFlight() []string
 }
+
+// ErrDeployInProgress is returned when a scenario is already deploying.
+//
+// Per scenario rather than globally: two different scenarios deploying
+// at once is ordinary, and blocking it would make the UI worse for no
+// safety gain. Two deploys of the SAME scenario produce two run-owned
+// projects and two sets of billable resources for one thing, which is
+// never what was meant.
+var ErrDeployInProgress = errors.New("a deploy of this scenario is already running")
 
 // DeploymentActor performs the destructive half of live management.
 //

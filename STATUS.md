@@ -2,6 +2,47 @@
 
 Last updated: 2026-08-31
 
+## 2026-09-03 — S163c: the deploy guard moves to the server
+
+Two deploys of one scenario mean **two run-owned projects and two sets of billable
+resources for one thing**. Until now the only thing preventing that was
+client-side state — and three review findings across two rounds were variants of
+the same hole, each fix moving the client state around rather than noticing it was
+client state. A refresh wipes it, a second tab never had it, `curl` never
+consulted it.
+
+`LiveDeployer` holds a per-scenario lock. A second deploy of one already in flight
+returns `ErrDeployInProgress`, answered **409** and naming the scenario, because a
+bare "conflict" leaves a reader wondering which of their tabs is responsible.
+
+Per scenario rather than global — two different scenarios at once is ordinary.
+Claimed *after* name resolution so a typo cannot lock a name nothing will deploy,
+and released on every exit including failure: a scenario stuck marked-as-deploying
+could never be deployed again without restarting the server, which is worse than
+what the lock prevents.
+
+`GET /api/deployments` now reports `deploying: []` so a reloaded page can restore
+what it was showing. **Advisory only** — the refusal is the guard, and a client
+that ignores the field still cannot start two. Always a list, never `null`: an
+unconfigured deployer and an idle one are both "nothing is deploying" to a reader.
+
+**Mutation testing disproved a claim rather than finding a bug.** Moving the
+claim before name resolution passes every test, because the deferred release fires
+on the resolution failure too — so the comment asserting "a typo cannot lock a name
+nothing will ever deploy" was false. The lock is self-correcting either way; the
+*release* is load-bearing and the ordering is tidiness. Both the comment and the
+test's docstring now say so.
+
+Also fixed: the test **deadlocked** under the no-lock mutation rather than failing,
+because its fake runtime factory blocked unconditionally. A test that hangs on
+regression is barely better than one that passes — CI reports a timeout, and nobody
+reads a timeout as "the lock is gone". Only the first call blocks now, and the
+mutation fails in half a second.
+
+Also closed: a finished deploy's success banner used to reappear on every later
+visit to that scenario for the rest of the session — a claim about infrastructure
+whose TTL may long since have expired.
+
 ## 2026-09-02 — S163: streaming a deploy, and the first version that did not
 
 A deploy runs for minutes, and **minutes of silence reads as broken**: a reader
