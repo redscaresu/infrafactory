@@ -211,10 +211,16 @@ is responsible.
 **Per scenario, not global.** Two different scenarios deploying at once is
 ordinary, and blocking it would make the UI worse for no safety gain.
 
-**Claimed after resolution and released on every exit.** A typo must not lock a
-name nothing will ever deploy, and a scenario stuck marked-as-deploying could
-never be deployed again without restarting the server — a worse failure than the
-one being prevented.
+**Released on every exit, including failure.** A scenario stuck marked-as-deploying
+could never be deployed again without restarting the server — a worse failure than
+the one being prevented.
+
+The claim happens after name resolution, and that ordering is **tidiness rather
+than safety**. An earlier version of this ADR said a typo could otherwise "lock a
+name nothing will ever deploy"; mutation testing disproved it, because the
+deferred release fires on the resolution failure too. Recorded because a false
+safety claim is what the next reader reasons from — the release is the guarantee,
+the ordering is not.
 
 ### The listing says what is deploying, and that is advisory only
 

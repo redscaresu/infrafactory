@@ -239,8 +239,16 @@ func (d *LiveDeployer) Deploy(ctx context.Context, scenarioName, ttl string, pro
 		return api.ActionResult{}, err
 	}
 
-	// Claimed AFTER resolution, so a typo cannot lock a name nothing
-	// will ever deploy, and BEFORE anything touches the cloud.
+	// Claimed after resolution and before anything touches the cloud.
+	//
+	// The ordering is tidiness, not safety, and an earlier version of
+	// this comment claimed otherwise: "a typo cannot lock a name nothing
+	// will ever deploy". Mutation testing showed that claiming BEFORE
+	// resolution passes every test, because the deferred release fires
+	// on the resolution failure too. The lock is self-correcting either
+	// way.
+	//
+	// What IS load-bearing is the release, not the ordering.
 	if !d.claim(scenarioName) {
 		return api.ActionResult{}, api.ErrDeployInProgress
 	}
