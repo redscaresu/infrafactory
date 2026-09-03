@@ -57,6 +57,11 @@ export const api = {
       body: JSON.stringify(ttl ? { scenario, ttl } : { scenario })
     });
     const ctype = res.headers.get("content-type") || "";
+    // 409 carries an ActionResult from a deploy that RAN and could not
+    // prove itself clean. 423 is a refusal -- nothing ran -- and carries
+    // an error, so it must NOT be parsed as a result: doing so found no
+    // `clean` field and told the reader resources might still be
+    // running after a request that never touched the cloud.
     if ((res.ok || res.status === 409) && ctype.includes("application/json")) {
       return (await res.json()) as ActionResult;
     }

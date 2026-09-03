@@ -775,6 +775,12 @@ test.describe('A reload cannot start a second deploy', () => {
     // The button is not offered, because the server would refuse it.
     await expect(page.getByTestId('scenario-deploy')).toBeDisabled();
     await expect(page.getByTestId('deploy-progress')).toBeVisible();
+
+    // Adopted: it was already running when this page loaded, so its
+    // earlier output is gone. "Starting…" would claim nothing has
+    // happened yet when minutes of it has.
+    await expect(page.getByTestId('deploy-progress-adopted')).toBeVisible();
+    await expect(page.getByTestId('deploy-progress')).not.toContainText('Starting…');
   });
 
   // And a scenario the server is NOT deploying stays available.
@@ -836,6 +842,49 @@ test('a finished deploy does not haunt the scenario page', async ({ page }) => {
 
   await page.getByTestId('sidebar-scenario-training/lb-serving-paris').click();
   await expect(page.locator('main h1')).toContainText('lb-serving-paris');
+
+  await page.getByTestId('sidebar-scenario-training/web-app-paris').click();
+  await expect(page.locator('main h1')).toContainText('web-app-paris');
+  await expect(page.getByTestId('deploy-outcome')).toHaveCount(0);
+});
+
+// afterNavigate does not fire for a component being DESTROYED, so
+// leaving the scenarios SECTION -- the case the store's own doc names --
+// left the banner to reappear on the next visit.
+test('a finished deploy does not survive leaving the scenarios section', async ({ page }) => {
+  await page.route('**/api/deployments/preview**', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        scenario: 'web-app-paris',
+        deployable: true,
+        expires_at: null,
+        internet_facing: false,
+        deploy_allowed: true,
+        already_live: [],
+        cost: { components: [], eur_per_hour: 0, unpriced: [], complete: true, modelled: true }
+      })
+    })
+  );
+  await page.route('**/api/deployments', (route) =>
+    route.request().method() === 'POST'
+      ? route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ clean: true, steps: [], failures: [] })
+        })
+      : route.continue()
+  );
+
+  await page.goto('/scenarios/training/web-app-paris');
+  await page.getByTestId('scenario-deploy').click();
+  await page.getByTestId('deploy-confirm-go').click();
+  await expect(page.getByTestId('deploy-outcome')).toBeVisible();
+
+  // Leave the SECTION, which destroys the component.
+  await page.getByRole('link', { name: 'Deployments' }).click();
+  await expect(page).toHaveURL(/\/deployments/);
 
   await page.getByTestId('sidebar-scenario-training/web-app-paris').click();
   await expect(page.locator('main h1')).toContainText('web-app-paris');

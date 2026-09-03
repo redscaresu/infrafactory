@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/redscaresu/infrafactory/internal/config"
+	"github.com/redscaresu/infrafactory/internal/livestore"
 	"github.com/redscaresu/infrafactory/internal/scenario"
 )
 
@@ -300,4 +301,67 @@ acceptance_criteria:
 			assert.Equal(t, deployer != nil, got.Allowed)
 		})
 	}
+}
+
+// The lock stops the accidental duplicate. It does nothing about
+// deploy → wait → deploy again, which produces a second run-owned
+// project just the same. A lock cannot tell "I forgot" from "I meant
+// it", so the confirmation says what already exists and the reader
+// decides.
+func TestPreviewNamesDeploymentsOfThisScenarioThatAlreadyExist(t *testing.T) {
+	live := livestore.Deployment{
+		ID: "dep-existing", Scenario: "previewable", Cloud: "scaleway",
+		ProjectID: "proj-1", State: livestore.StateLive,
+		CreatedAt: time.Now().Add(-time.Hour), ExpiresAt: time.Now().Add(time.Hour),
+	}
+	released := live
+	released.ID = "dep-gone"
+	released.State = livestore.StateReleased
+	other := live
+	other.ID = "dep-other"
+	other.Scenario = "something-else"
+
+	got := previewWithEstate(t, []livestore.Deployment{live, released, other})
+
+	assert.Equal(t, []string{"dep-existing"}, got.AlreadyLive,
+		"a released deployment is not still running, and another scenario is not this one")
+}
+
+func TestPreviewReportsNoExistingDeploymentsAsAnEmptyList(t *testing.T) {
+	got := previewWithEstate(t, nil)
+
+	assert.NotNil(t, got.AlreadyLive, "null would read as unknown")
+	assert.Empty(t, got.AlreadyLive)
+}
+
+func previewWithEstate(t *testing.T, deployments []livestore.Deployment) deployPreview {
+	t.Helper()
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "sc.yaml"), []byte(`scenario: previewable
+version: "1.0"
+cloud: scaleway
+description: x
+resources:
+  compute:
+    purpose: web-server
+    size: small
+acceptance_criteria:
+  - type: destruction
+    expect: no_orphans
+`), 0o644))
+
+	cfg := config.Default()
+	cfg.Paths.Scenarios = dir
+	srv := NewServer(ServerConfig{
+		Config: cfg, Deployments: &fakeDeployments{deployments: deployments},
+	})
+
+	rec := httptest.NewRecorder()
+	srv.Handler.ServeHTTP(rec,
+		httptest.NewRequest(http.MethodGet, "/api/deployments/preview?scenario=previewable", nil))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	var got deployPreview
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	return got
 }

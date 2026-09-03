@@ -353,11 +353,24 @@ func deployHandler(state *serverState) http.HandlerFunc {
 
 		result, err := state.deployer.Deploy(ctx, req.Scenario, req.TTL, progress)
 		if errors.Is(err, ErrDeployInProgress) {
-			// 409, not 500: the caller asked for something reasonable at
-			// an unreasonable moment. Naming the scenario matters -- a
-			// bare "conflict" leaves a reader wondering which of their
-			// tabs is responsible.
-			writeJSONError(w, http.StatusConflict,
+			// 423 Locked, NOT 409.
+			//
+			// 409 is already taken on this endpoint by
+			// `writeActionResult`, for a deploy that RAN and could not
+			// prove itself clean -- and that response carries an
+			// ActionResult. Two 409s with incompatible bodies and no
+			// discriminator meant a client parsing the refusal as an
+			// ActionResult found no `clean` field and told the reader
+			// "resources may still be running" for a request that never
+			// touched the cloud.
+			//
+			// Saying infrastructure might be leaking when nothing
+			// happened is the most alarming way to be wrong here, so
+			// the two cases get two statuses.
+			//
+			// Naming the scenario matters: a bare refusal leaves a
+			// reader wondering which of their tabs is responsible.
+			writeJSONError(w, http.StatusLocked,
 				fmt.Sprintf("%s is already deploying; wait for it to finish or tear it down", req.Scenario))
 			return
 		}

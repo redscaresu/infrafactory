@@ -2,6 +2,42 @@
 
 Last updated: 2026-08-31
 
+## 2026-09-03 — S163d: nine findings from `/code-review`
+
+The review harness, now run on every PR, on the merged in-flight-lock slice.
+
+**The worst was two 409s with incompatible bodies.** `writeActionResult` answers
+409 for a deploy that *ran* and could not prove itself clean, carrying an
+`ActionResult`; the "already deploying" refusal answered 409 carrying an error.
+The client special-cases 409 as a result — so a refusal was parsed as one, found no
+`clean` field, and rendered **"resources may still be running"** for a request that
+never touched the cloud. The refusal is **423** now.
+
+**The claim I had just corrected elsewhere was still wrong here.**
+`deploy-store.js` said *"the server has no in-flight lock, so this is the only
+thing standing between a reader and that second deploy"* — false as of the very PR
+it sits in. Pass 134 was about that exact defect class, and I fixed the comment in
+`live_service.go` and the ADR and left the one naming the missing lock *by name*.
+
+**The lock's scope was overstated.** It prevents *concurrent* duplicates only;
+deploy → wait → deploy again still makes a second project. A lock cannot tell "I
+forgot" from "I meant it", so the preview reports `already_live` and the
+confirmation says what exists. The ADR now says what it does and does not close.
+
+**An adopted deploy could never finish** — no terminal websocket event, and only
+the tab that issued the POST calls `finishDeploy` — so after a reload the button
+stayed disabled for the rest of the session. It polls now, and an entry this tab
+*owns* is never cleared by a listing that has not caught up.
+
+Also: the stale-banner fix did not cover leaving the *section* (`afterNavigate`
+does not fire on destroy — the case the store's own doc names); the `adopted` flag
+was written and never read, so a reload mid-apply said "Starting…"; and
+`adoptInFlight` had no test at all, its "leave owned entries alone" branch
+deletable with everything still green.
+
+**Recorded, not fixed:** every scenario-page mount fetches the whole estate to read
+one string array.
+
 ## 2026-09-03 — S163c: the deploy guard moves to the server
 
 Two deploys of one scenario mean **two run-owned projects and two sets of billable

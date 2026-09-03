@@ -5,8 +5,10 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
+	"github.com/redscaresu/infrafactory/internal/livestore"
 	"github.com/redscaresu/infrafactory/internal/scenario"
 )
 
@@ -57,6 +59,22 @@ type deployPreview struct {
 
 	// InternetFacing is true when the shape includes a public address.
 	InternetFacing bool `json:"internet_facing"`
+
+	// AlreadyLive names deployments of this scenario that are already
+	// running.
+	//
+	// The in-flight lock stops the ACCIDENTAL duplicate -- the reload,
+	// the second tab, the double click. It does nothing about the
+	// deliberate one: deploy, wait for it to finish, deploy again, and
+	// there are two run-owned projects and two sets of billable
+	// resources for one scenario.
+	//
+	// That is not a lock's job. A lock cannot tell "I forgot" from "I
+	// meant it", and refusing outright would break redeploying after a
+	// teardown. So the confirmation says what already exists and the
+	// reader decides -- which is the same shape as every other decision
+	// on that screen.
+	AlreadyLive []string `json:"already_live"`
 
 	// Allowed reports whether this server would accept the deploy.
 	//
@@ -114,6 +132,7 @@ func deployPreviewHandler(state *serverState) http.HandlerFunc {
 
 		preview := previewFor(&sc, r.URL.Query().Get("ttl"), time.Now())
 		preview.Allowed = state.deployer != nil
+		preview.AlreadyLive = liveDeploymentsOf(state, sc.Name)
 		writeJSON(w, http.StatusOK, preview)
 	}
 }
@@ -223,4 +242,33 @@ func previewFor(sc *scenario.Scenario, ttlOverride string, now time.Time) deploy
 	preview.CostSummary = preview.Cost.Summary(ttl)
 
 	return preview
+}
+
+// liveDeploymentsOf names the deployments of a scenario that have not
+// been released.
+//
+// Unreadable records are ignored rather than reported here: `live ls`
+// and the estate page already surface them, and a confirmation dialog is
+// the wrong place to raise a problem the reader cannot act on from it.
+func liveDeploymentsOf(state *serverState, scenario string) []string {
+	out := []string{}
+	if state.deployments == nil || scenario == "" {
+		return out
+	}
+	deployments, _, err := state.deployments.List()
+	if err != nil {
+		// The estate could not be read, so this cannot say there is
+		// nothing. Returning an empty list is a claim; the caller
+		// distinguishes it from "checked and found none" only because
+		// the deploy itself will still work either way, and a preview
+		// that failed to load is already reported.
+		return out
+	}
+	for _, d := range deployments {
+		if d.Scenario == scenario && d.State != livestore.StateReleased {
+			out = append(out, d.ID)
+		}
+	}
+	sort.Strings(out)
+	return out
 }

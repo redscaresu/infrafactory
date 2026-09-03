@@ -24,8 +24,15 @@ import { acceptProgressEvent } from "./deployments-view.js";
  *     run-owned projects, double billing, one of which the operator does
  *     not know exists.
  *
- * The server has no in-flight lock, so this is the only thing standing
- * between a reader and that second deploy. It has to outlive the page.
+ * This store is ADVISORY, and saying otherwise here would be the same
+ * false-explanation defect the rest of this work keeps finding. The
+ * refusal lives on the server: `LiveDeployer` holds a per-scenario lock
+ * and answers 423 to a second deploy, so a reader who bypasses this
+ * module entirely still cannot start two.
+ *
+ * What this buys is that the reader is not INVITED to try -- the button
+ * is not offered for something the server would refuse -- and that a log
+ * survives a page they navigated away from.
  *
  * Keyed by SCENARIO because that is what the progress events carry: the
  * deployment id is minted inside the command, after the request is
@@ -104,16 +111,69 @@ export function watch() {
  * its progress, and replacing it would throw the log away.
  */
 export function adoptInFlight(scenarios) {
-  if (!Array.isArray(scenarios) || scenarios.length === 0) return;
-  ensureSocket();
+  if (!Array.isArray(scenarios)) return;
+  const names = new Set(scenarios);
+
   deploys.update((all) => {
     const next = { ...all };
-    for (const scenario of scenarios) {
+
+    for (const scenario of names) {
+      // An entry this tab OWNS is left alone. Replacing it would throw
+      // away the log of a running billable apply, and the owner is the
+      // only thing that can mark it finished.
       if (next[scenario]) continue;
       next[scenario] = { running: true, progress: [], outcome: null, adopted: true };
     }
+
+    // An ADOPTED entry the server no longer reports has finished, and
+    // nothing else can tell us: the only websocket event kind is a
+    // progress line, so there is no terminal event, and the tab that
+    // issued the POST is the only one that calls finishDeploy.
+    //
+    // Without this an adopted entry stayed `running` for the rest of
+    // the session -- a permanently disabled Deploy button, a progress
+    // panel that never resolved, and a socket that could never close.
+    for (const scenario of Object.keys(next)) {
+      if (scenario === "__connected") continue;
+      const entry = next[scenario];
+      if (entry?.adopted && entry.running && !names.has(scenario)) {
+        next[scenario] = { ...entry, running: false, outcome: null, finishedElsewhere: true };
+      }
+    }
     return next;
   });
+
+  if (names.size > 0) ensureSocket();
+  releaseSocket();
+}
+
+/**
+ * pollInFlight re-asks the server what is running, on an interval.
+ *
+ * Adopted entries need it: this tab did not issue their POST, so it
+ * never sees a response, and there is no terminal websocket event to
+ * wait for. Without polling an adopted deploy is `running` forever.
+ *
+ * Only runs while something adopted is in flight -- a scenario page
+ * sitting idle should not poll the estate.
+ */
+export function pollInFlight(fetchDeploying, intervalMs = 5000) {
+  const tick = async () => {
+    const current = get(deploys);
+    const adoptedRunning = Object.keys(current).some(
+      (k) => k !== "__connected" && current[k]?.adopted && current[k]?.running
+    );
+    if (!adoptedRunning) return;
+    try {
+      adoptInFlight(await fetchDeploying());
+    } catch {
+      // Leave the state as it is. An unreachable estate is not evidence
+      // that the deploy finished.
+    }
+  };
+
+  const timer = setInterval(tick, intervalMs);
+  return () => clearInterval(timer);
 }
 
 export function beginDeploy(scenario) {

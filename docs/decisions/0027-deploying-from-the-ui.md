@@ -188,9 +188,11 @@ tab stops the stream and not the deploy.
 
 **The subject is the scenario, not the deployment id**, and that is a limit rather
 than a choice: the id is minted inside the command, after the request is accepted.
-Two concurrent deploys of one scenario therefore share a stream and a reader sees
-both. Recorded here rather than left to be discovered, because the id is the
-argument to `live teardown` and taking the wrong one has consequences.
+
+*(Superseded in part by S163c below: the per-scenario lock makes two concurrent
+deploys of one scenario impossible within a process, so the "a reader sees both
+streams" consequence originally recorded here can no longer occur. The keying is
+still by scenario, for the reason above.)*
 
 ## Amendment, 2026-09-03 (S163c): the guard against a second deploy is server-side
 
@@ -210,6 +212,15 @@ is responsible.
 
 **Per scenario, not global.** Two different scenarios deploying at once is
 ordinary, and blocking it would make the UI worse for no safety gain.
+
+**It prevents CONCURRENT duplicates only, and that is a real limit.** Deploying a
+scenario, waiting for it to finish, and deploying it again still produces a second
+run-owned project — the lock is released when the first completes, and nothing
+consults the live estate. The ADR previously stated the harm without that
+qualification, which overstated what this closes. What it does close is the
+accidental duplicate: the reload, the second tab, the double click. Warning about
+an *existing* live deployment is a different guard, and it belongs in the
+confirmation rather than in a lock.
 
 **Released on every exit, including failure.** A scenario stuck marked-as-deploying
 could never be deployed again without restarting the server — a worse failure than

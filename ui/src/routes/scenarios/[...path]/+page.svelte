@@ -17,6 +17,7 @@
     finishDeploy,
     isConnected,
     isRunning,
+    pollInFlight,
     useConnector,
     watch as watchDeploys
   } from "$lib/deploy-store.js";
@@ -95,24 +96,50 @@
   // store keeps it open beyond that if a deploy is still running -- so
   // leaving and returning finds the log intact rather than frozen.
   onMount(() => {
+    const fetchDeploying = async () => (await api.getDeployments())?.deploying;
+
     // A reload wipes the store, so ask the server what is running. The
     // refusal is server-side either way; this stops the reader being
     // shown a button that would be refused.
-    void api
-      .getDeployments()
-      .then((payload) => adoptInFlight(payload?.deploying))
+    void fetchDeploying()
+      .then(adoptInFlight)
       .catch(() => {
         // Unreachable estate. The Deploy button stays enabled and the
         // server refuses if it must -- better than blocking deploys
         // because a listing call failed.
       });
-    return watchDeploys();
+
+    // An adopted deploy has no other way to finish: this tab did not
+    // issue its POST, and the only websocket event kind is a progress
+    // line. Polls only while something adopted is running.
+    const stopPolling = pollInFlight(fetchDeploying);
+    const stopWatching = watchDeploys();
+
+    return () => {
+      stopPolling();
+      stopWatching();
+    };
   });
 
   onDestroy(() => {
     if (validationTimer) clearTimeout(validationTimer);
     resetDeployState();
+    // Also here, not only in afterNavigate.
+    //
+    // afterNavigate does not fire for a component being DESTROYED, so
+    // leaving the scenarios section entirely -- the case the store's own
+    // doc names -- left a finished deploy's success banner to reappear
+    // on the next visit. A claim about infrastructure whose TTL may have
+    // expired.
+    forgetFinishedDeploy();
   });
+
+  /** forgetFinishedDeploy drops a completed deploy's banner. */
+  function forgetFinishedDeploy() {
+    if (detail?.name && deployEntry && !deployEntry.running) {
+      forgetDeploy(detail.name);
+    }
+  }
 
   $: scenarioPath = ($page.params.path || "").toString();
   $: runModeCard = modeSummary(runMode);
@@ -208,6 +235,12 @@
   $: deployProgress = deployEntry?.progress ?? [];
   $: deploying = detail?.name ? isRunning($deploys, detail.name) : false;
   $: deployOutcome = deployEntry?.outcome ?? null;
+  // An ADOPTED deploy was already running when this page loaded, so its
+  // earlier output is unrecoverable -- the hub does not replay. Saying
+  // "Starting…" would claim nothing has happened yet when minutes of it
+  // has, which is the same falsehood the disconnected banner exists to
+  // avoid one state over.
+  $: deployAdopted = deployEntry?.adopted === true;
   // A dropped socket and "nothing has happened yet" both produce an
   // empty log, and rendering them the same way tells the reader an apply
   // is quiet when the truth is that it is UNOBSERVED.
@@ -351,9 +384,7 @@
     // scenario it belongs to. Without this it reappeared on every later
     // visit for the rest of the session, long after the TTL had expired
     // -- a success message for something that may no longer exist.
-    if (detail?.name && deployEntry && !deployEntry.running) {
-      forgetDeploy(detail.name);
-    }
+    forgetFinishedDeploy();
     scenarioPath = ($page.params.path || "").toString();
     // Belt and braces with confirmDeploy reading preview.scenario: a
     // confirmation describing the page you just left must not still be
@@ -568,7 +599,15 @@
       class="mt-3 rounded border border-slate-300 bg-slate-900 px-3 py-2 font-mono text-xs text-slate-100"
       data-testid="deploy-progress"
     >
-      {#if deployProgress.length === 0 && !streamConnected}
+      {#if deployProgress.length === 0 && deployAdopted && streamConnected}
+        <!-- Adopted: it was already running when this page loaded, so
+             its earlier output is gone. Saying "Starting…" would claim
+             nothing has happened yet. -->
+        <p class="text-slate-300" data-testid="deploy-progress-adopted">
+          Already running when this page loaded — earlier output is not recoverable. New lines
+          will appear here.
+        </p>
+      {:else if deployProgress.length === 0 && !streamConnected}
         <!-- Not "Starting…": we are not receiving, so we do not know
              whether anything has happened. The apply is unaffected --
              it is detached from this page entirely. -->

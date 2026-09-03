@@ -283,9 +283,15 @@ func TestASecondDeployOfTheSameScenarioIsRefused(t *testing.T) {
 
 	rec := postDeploy(t, srv, `{"scenario":"web-app-paris"}`)
 
-	assert.Equal(t, http.StatusConflict, rec.Code, "reasonable request, unreasonable moment")
+	// 423, not 409: 409 on this endpoint carries an ActionResult from a
+	// deploy that RAN. A refusal that shares its status is parsed as
+	// one, and the reader is told resources may be leaking after a
+	// request that touched nothing.
+	assert.Equal(t, http.StatusLocked, rec.Code, "reasonable request, unreasonable moment")
 	assert.Contains(t, rec.Body.String(), "web-app-paris",
-		"a bare conflict leaves a reader wondering which of their tabs is responsible")
+		"a bare refusal leaves a reader wondering which of their tabs is responsible")
+	assert.NotContains(t, rec.Body.String(), `"clean"`,
+		"a refusal is not an action result and must not be mistakable for one")
 }
 
 // So a page that has just been reloaded can restore what it was showing.
