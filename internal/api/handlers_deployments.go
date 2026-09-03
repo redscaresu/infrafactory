@@ -352,6 +352,20 @@ func deployHandler(state *serverState) http.HandlerFunc {
 		defer progress.Close()
 
 		result, err := state.deployer.Deploy(ctx, req.Scenario, req.TTL, progress)
+
+		// A TERMINAL event, carrying the outcome.
+		//
+		// Without one, a tab that did not issue this POST -- one that
+		// adopted the deploy after a reload -- has no way to learn it
+		// finished. Polling the estate was the first answer and it was
+		// the wrong altitude: it added a filesystem walk every few
+		// seconds, a race between the listing and the owning tab, and
+		// still could not say whether the deploy SUCCEEDED, because the
+		// estate does not carry that.
+		//
+		// The hub is already here and already subject-scoped. Five
+		// lines beat a poll.
+		broadcastDeployComplete(state.hub, req.Scenario, result, err)
 		if errors.Is(err, ErrDeployInProgress) {
 			// 423 Locked, NOT 409.
 			//
@@ -400,4 +414,36 @@ func deployingScenarios(state *serverState) []string {
 		return inFlight
 	}
 	return []string{}
+}
+
+// broadcastDeployComplete tells every watcher that a deploy ended, and
+// how.
+//
+// Sent even on error: a tab watching a deploy it did not start must
+// learn that it stopped, and "it failed" is information the estate
+// cannot provide -- a failed apply may still have created resources, so
+// the record exists either way and looks much like a successful one.
+func broadcastDeployComplete(hub *Hub, scenario string, result ActionResult, err error) {
+	if hub == nil {
+		return
+	}
+	payload, marshalErr := json.Marshal(map[string]any{
+		"type": "deploy_complete",
+		"data": map[string]any{
+			"subject": scenario,
+			"clean":   err == nil && result.Clean,
+			"error":   errorText(err),
+		},
+	})
+	if marshalErr != nil {
+		return
+	}
+	hub.Broadcast(payload)
+}
+
+func errorText(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }

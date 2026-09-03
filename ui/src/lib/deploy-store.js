@@ -1,5 +1,5 @@
 import { writable, get } from "svelte/store";
-import { acceptProgressEvent } from "./deployments-view.js";
+import { acceptCompleteEvent, acceptProgressEvent } from "./deployments-view.js";
 
 /**
  * Deploys in flight, keyed by scenario name.
@@ -64,13 +64,43 @@ function ensureSocket() {
     (msg) => {
       const current = get(deploys);
       for (const scenario of Object.keys(current)) {
-        if (!acceptProgressEvent(msg, scenario)) continue;
-        const line = msg.data.line;
-        deploys.update((all) => {
-          const entry = all[scenario];
-          if (!entry) return all;
-          return { ...all, [scenario]: { ...entry, progress: [...entry.progress, line] } };
-        });
+        if (scenario === "__connected") continue;
+
+        if (acceptProgressEvent(msg, scenario)) {
+          const line = msg.data.line;
+          deploys.update((all) => {
+            const entry = all[scenario];
+            if (!entry) return all;
+            return { ...all, [scenario]: { ...entry, progress: [...entry.progress, line] } };
+          });
+          continue;
+        }
+
+        // The terminal event. Only an ADOPTED deploy needs it -- the
+        // tab that issued the POST learns from its own response, and
+        // that response carries the full ActionResult, which is richer.
+        if (acceptCompleteEvent(msg, scenario)) {
+          deploys.update((all) => {
+            const entry = all[scenario];
+            if (!entry || !entry.adopted) return all;
+            return {
+              ...all,
+              [scenario]: {
+                ...entry,
+                running: false,
+                outcome: msg.data.clean
+                  ? { ok: true, message: "deployed. It is listed on the Deployments page until its TTL expires." }
+                  : {
+                      ok: false,
+                      message:
+                        msg.data.error ||
+                        "did not finish cleanly — resources may exist. Check the Deployments page."
+                    }
+              }
+            };
+          });
+          releaseSocket();
+        }
       }
     },
     (connected) => deploys.update((all) => ({ ...all, __connected: connected }))
@@ -118,10 +148,16 @@ export function adoptInFlight(scenarios) {
     const next = { ...all };
 
     for (const scenario of names) {
-      // An entry this tab OWNS is left alone. Replacing it would throw
-      // away the log of a running billable apply, and the owner is the
-      // only thing that can mark it finished.
-      if (next[scenario]) continue;
+      // A RUNNING entry is left alone -- replacing it would throw away
+      // the log of a live apply, and its owner is the only thing that
+      // can mark it finished.
+      //
+      // A FINISHED one is not: skipping those meant a tab whose own
+      // deploy had been refused (423) held a stale entry forever, so
+      // every later listing was ignored, the button stayed enabled, and
+      // the reader was invited to click again for the whole apply --
+      // precisely what adoption exists to prevent.
+      if (next[scenario]?.running) continue;
       next[scenario] = { running: true, progress: [], outcome: null, adopted: true };
     }
 
@@ -148,33 +184,18 @@ export function adoptInFlight(scenarios) {
 }
 
 /**
- * pollInFlight re-asks the server what is running, on an interval.
+ * pollInFlight is gone.
  *
- * Adopted entries need it: this tab did not issue their POST, so it
- * never sees a response, and there is no terminal websocket event to
- * wait for. Without polling an adopted deploy is `running` forever.
+ * It existed because "there is no terminal websocket event", which was
+ * true and was not a fixed constraint -- the hub was already here and
+ * already subject-scoped, and `deploy_complete` was five lines in the
+ * handler this same work touches.
  *
- * Only runs while something adopted is in flight -- a scenario page
- * sitting idle should not poll the estate.
+ * Polling was the wrong altitude: a filesystem walk of the estate every
+ * few seconds, a race between the listing and the owning tab, and an
+ * answer that could say "it stopped" but never "it succeeded", because
+ * the estate does not carry that.
  */
-export function pollInFlight(fetchDeploying, intervalMs = 5000) {
-  const tick = async () => {
-    const current = get(deploys);
-    const adoptedRunning = Object.keys(current).some(
-      (k) => k !== "__connected" && current[k]?.adopted && current[k]?.running
-    );
-    if (!adoptedRunning) return;
-    try {
-      adoptInFlight(await fetchDeploying());
-    } catch {
-      // Leave the state as it is. An unreachable estate is not evidence
-      // that the deploy finished.
-    }
-  };
-
-  const timer = setInterval(tick, intervalMs);
-  return () => clearInterval(timer);
-}
 
 export function beginDeploy(scenario) {
   ensureSocket();

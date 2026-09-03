@@ -2,7 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  acceptCompleteEvent,
   acceptProgressEvent,
+  alreadyLiveWarning,
   addressHref,
   deployConfirmation,
   deployWarnings,
@@ -344,4 +346,51 @@ test("acceptProgressEvent takes nothing when no deploy is being shown", () => {
     acceptProgressEvent({ type: "deploy_progress", data: { subject: "a", line: "x" } }, ""),
     false
   );
+});
+
+// The server computed already_live and NOTHING read it: the guard the
+// ADR described was documented, tested on the server, and absent from
+// the screen it was for.
+test("deployWarnings leads with an existing deployment of the same scenario", () => {
+  const warnings = deployWarnings(
+    previewFixture({ internet_facing: false, already_live: ["dep-existing"] })
+  );
+
+  assert.match(warnings[0], /dep-existing/);
+  assert.match(warnings[0], /SECOND project/);
+  assert.match(warnings[0], /does not replace it/);
+});
+
+test("deployWarnings counts several existing deployments", () => {
+  const warnings = deployWarnings(
+    previewFixture({ internet_facing: false, already_live: ["dep-a", "dep-b"] })
+  );
+
+  assert.match(warnings[0], /2 deployments/);
+  assert.match(warnings[0], /dep-a, dep-b/);
+});
+
+test("alreadyLiveWarning is silent when nothing is live", () => {
+  assert.equal(alreadyLiveWarning({ already_live: [] }), "");
+  assert.equal(alreadyLiveWarning({}), "");
+  assert.equal(alreadyLiveWarning(undefined), "");
+});
+
+// The terminal event is what lets an ADOPTED deploy finish and report.
+test("acceptCompleteEvent takes only the completion for the scenario on screen", () => {
+  const done = (subject) => ({ type: "deploy_complete", data: { subject, clean: true } });
+
+  assert.equal(acceptCompleteEvent(done("web-app-paris"), "web-app-paris"), true);
+  assert.equal(acceptCompleteEvent(done("other"), "web-app-paris"), false);
+  assert.equal(acceptCompleteEvent({ type: "deploy_progress", data: { subject: "a" } }, "a"), false);
+  assert.equal(acceptCompleteEvent(undefined, "a"), false);
+  assert.equal(acceptCompleteEvent(done("a"), ""), false);
+});
+
+// "Could not look" is not "nothing is there", and this guard is about
+// billable infrastructure.
+test("alreadyLiveWarning says so when the estate could not be read", () => {
+  const warning = alreadyLiveWarning({ already_live: [], already_live_unknown: true });
+  assert.match(warning, /could not be fully read/);
+  assert.match(warning, /unknown/);
 });

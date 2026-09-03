@@ -60,6 +60,15 @@ type deployPreview struct {
 	// InternetFacing is true when the shape includes a public address.
 	InternetFacing bool `json:"internet_facing"`
 
+	// AlreadyLiveUnknown is true when the estate could not be read.
+	//
+	// An empty AlreadyLive is a CLAIM -- "checked, and nothing exists" --
+	// and a guard whose job is warning about existing billable
+	// infrastructure must not make that claim when it failed to look.
+	// The deployments listing already carries `unreadable` for exactly
+	// this; this is the same idea at the preview.
+	AlreadyLiveUnknown bool `json:"already_live_unknown"`
+
 	// AlreadyLive names deployments of this scenario that are already
 	// running.
 	//
@@ -132,7 +141,7 @@ func deployPreviewHandler(state *serverState) http.HandlerFunc {
 
 		preview := previewFor(&sc, r.URL.Query().Get("ttl"), time.Now())
 		preview.Allowed = state.deployer != nil
-		preview.AlreadyLive = liveDeploymentsOf(state, sc.Name)
+		preview.AlreadyLive, preview.AlreadyLiveUnknown = liveDeploymentsOf(state, sc.Name)
 		writeJSON(w, http.StatusOK, preview)
 	}
 }
@@ -250,25 +259,28 @@ func previewFor(sc *scenario.Scenario, ttlOverride string, now time.Time) deploy
 // Unreadable records are ignored rather than reported here: `live ls`
 // and the estate page already surface them, and a confirmation dialog is
 // the wrong place to raise a problem the reader cannot act on from it.
-func liveDeploymentsOf(state *serverState, scenario string) []string {
+func liveDeploymentsOf(state *serverState, name string) ([]string, bool) {
 	out := []string{}
-	if state.deployments == nil || scenario == "" {
-		return out
+	if state.deployments == nil || name == "" {
+		return out, false
 	}
-	deployments, _, err := state.deployments.List()
+
+	deployments, unreadable, err := state.deployments.List()
 	if err != nil {
-		// The estate could not be read, so this cannot say there is
-		// nothing. Returning an empty list is a claim; the caller
-		// distinguishes it from "checked and found none" only because
-		// the deploy itself will still work either way, and a preview
-		// that failed to load is already reported.
-		return out
+		// Could not look. Saying "nothing exists" here would be a
+		// false negative on a guard about billable infrastructure.
+		return out, true
 	}
+
 	for _, d := range deployments {
-		if d.Scenario == scenario && d.State != livestore.StateReleased {
+		if d.Scenario == name && d.State != livestore.StateReleased {
 			out = append(out, d.ID)
 		}
 	}
 	sort.Strings(out)
-	return out
+
+	// A record that will not decode has no Scenario to match on, so it
+	// could be a deployment of THIS scenario and would never appear
+	// above. That is a gap in the answer, not a complete one.
+	return out, len(unreadable) > 0
 }

@@ -35,8 +35,37 @@ was written and never read, so a reload mid-apply said "Starting…"; and
 `adoptInFlight` had no test at all, its "leave owned entries alone" branch
 deletable with everything still green.
 
-**Recorded, not fixed:** every scenario-page mount fetches the whole estate to read
-one string array.
+**Then `/code-review` on the fix PR found thirteen more, and three were the same
+defect the PR existed to fix.** `already_live` was computed on the server,
+documented in the ADR, in STATUS, in a handler comment, and covered by a server
+test — and **the UI never read it**, so the guard I had written down did not
+exist. The ADR still said the refusal answers 409 nine lines above the amendment I
+edited. And the "server has no in-flight lock" claim was also in `+page.svelte`, a
+file that diff touched.
+
+The pattern is not carelessness about one line: **I write a claim in every place at
+once and then correct it in one place at a time.**
+
+**The altitude finding was right too.** I treated "there is no terminal websocket
+event" as a fixed constraint and built polling around it — an estate walk every
+five seconds, a race with the owning tab, and an answer that could say "it stopped"
+but never "it succeeded". The hub was already subject-scoped; `deploy_complete` is
+five lines and removes the poll, the race and the missing-outcome gap together.
+
+Also fixed: `adoptInFlight` skipped finished entries as well as running ones, so a
+tab whose deploy had been refused ignored every later listing; an adopted deploy
+that completed rendered nothing at all; and `liveDeploymentsOf` failed open, so a
+guard about billable infrastructure said "nothing exists" when it had failed to
+look.
+
+**Recorded honestly:** the lock is an in-memory map in one process — the CLI
+`deploy` command never touches it, so `infrafactory deploy` alongside a UI deploy
+still makes two projects. A bigger hole than the sequential one, and the PR that
+existed to stop the ADR overstating the lock was still overstating it.
+
+**Left open:** `api.ts` decides how to parse a body from its status code, and
+`tearDownDeployment` has the same shape. A discriminator in the body closes the
+class; a second status only closed this instance.
 
 ## 2026-09-03 — S163c: the deploy guard moves to the server
 
@@ -48,8 +77,10 @@ client state. A refresh wipes it, a second tab never had it, `curl` never
 consulted it.
 
 `LiveDeployer` holds a per-scenario lock. A second deploy of one already in flight
-returns `ErrDeployInProgress`, answered **409** and naming the scenario, because a
-bare "conflict" leaves a reader wondering which of their tabs is responsible.
+returns `ErrDeployInProgress`, answered **423 Locked** and naming the scenario,
+because a bare refusal leaves a reader wondering which of their tabs is
+responsible. (409 was the first choice and was wrong: it already means "a deploy
+ran and could not prove itself clean" on this endpoint — see S163d.)
 
 Per scenario rather than global — two different scenarios at once is ordinary.
 Claimed *after* name resolution so a typo cannot lock a name nothing will deploy,

@@ -890,3 +890,73 @@ test('a finished deploy does not survive leaving the scenarios section', async (
   await expect(page.locator('main h1')).toContainText('web-app-paris');
   await expect(page.getByTestId('deploy-outcome')).toHaveCount(0);
 });
+
+// The client's 423 handling was a comment only: nothing tested that a
+// refusal is thrown rather than parsed as an ActionResult. A revert to
+// 409, or adding 423 to the special case, would restore "resources may
+// still be running" on a request that touched nothing, with every suite
+// green.
+test('a refused deploy does not claim resources may be running', async ({ page }) => {
+  await page.route('**/api/deployments/preview**', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        scenario: 'web-app-paris',
+        deployable: true,
+        expires_at: null,
+        internet_facing: false,
+        deploy_allowed: true,
+        already_live: [],
+        already_live_unknown: false,
+        cost: { components: [], eur_per_hour: 0, unpriced: [], complete: true, modelled: true }
+      })
+    })
+  );
+  await page.route('**/api/deployments', (route) =>
+    route.request().method() === 'POST'
+      ? route.fulfill({
+          status: 423,
+          contentType: 'application/json',
+          body: JSON.stringify({ error: 'web-app-paris is already deploying; wait for it to finish or tear it down' })
+        })
+      : route.continue()
+  );
+
+  await page.goto('/scenarios/training/web-app-paris');
+  await page.getByTestId('scenario-deploy').click();
+  await page.getByTestId('deploy-confirm-go').click();
+
+  const outcome = page.getByTestId('deploy-outcome');
+  await expect(outcome).toContainText('already deploying');
+  await expect(outcome).not.toContainText('may still be running');
+});
+
+// The server computed already_live and nothing read it: the guard the
+// ADR described was documented, tested on the server, and absent from
+// the screen it was for.
+test('the confirmation warns about a deployment that already exists', async ({ page }) => {
+  await page.route('**/api/deployments/preview**', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        scenario: 'web-app-paris',
+        deployable: true,
+        expires_at: null,
+        internet_facing: false,
+        deploy_allowed: true,
+        already_live: ['dep-existing'],
+        already_live_unknown: false,
+        cost: { components: [], eur_per_hour: 0, unpriced: [], complete: true, modelled: true }
+      })
+    })
+  );
+
+  await page.goto('/scenarios/training/web-app-paris');
+  await page.getByTestId('scenario-deploy').click();
+
+  const warning = page.getByTestId('deploy-warning').first();
+  await expect(warning).toContainText('dep-existing');
+  await expect(warning).toContainText('SECOND project');
+});

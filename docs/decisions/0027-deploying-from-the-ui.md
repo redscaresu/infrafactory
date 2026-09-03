@@ -189,10 +189,13 @@ tab stops the stream and not the deploy.
 **The subject is the scenario, not the deployment id**, and that is a limit rather
 than a choice: the id is minted inside the command, after the request is accepted.
 
-*(Superseded in part by S163c below: the per-scenario lock makes two concurrent
-deploys of one scenario impossible within a process, so the "a reader sees both
-streams" consequence originally recorded here can no longer occur. The keying is
-still by scenario, for the reason above.)*
+Two concurrent deploys of one scenario are now prevented **within a process** by
+S163c's lock, so a reader will not see two streams interleaved that way. The
+hazard the keying creates is not retired, only narrowed: **sequential** deploys
+produce several live deployments of one scenario — which is why `already_live`
+returns a list — and a reader watching a scenario-keyed stream with two ids live
+still cannot tell which one they are watching. That matters because the id is the
+argument to `live teardown`, and taking the wrong one has consequences.
 
 ## Amendment, 2026-09-03 (S163c): the guard against a second deploy is server-side
 
@@ -206,14 +209,27 @@ rounds were variants of the same hole, and each fix moved the client state aroun
 without addressing that it was client state.
 
 `LiveDeployer` holds the lock. A second `Deploy` of a scenario already in flight
-returns `ErrDeployInProgress`, which the endpoint answers **409** — naming the
-scenario, because a bare "conflict" leaves a reader wondering which of their tabs
+returns `ErrDeployInProgress`, which the endpoint answers **423 Locked** — naming
+the scenario, because a bare refusal leaves a reader wondering which of their tabs
 is responsible.
+
+**423 and not 409**, because 409 on this endpoint already means something else: a
+deploy that *ran* and could not prove itself clean, carrying an `ActionResult`. A
+refusal sharing that status was parsed as a result, found no `clean` field, and
+told the reader *"resources may still be running"* after a request that never
+touched the cloud.
 
 **Per scenario, not global.** Two different scenarios deploying at once is
 ordinary, and blocking it would make the UI worse for no safety gain.
 
-**It prevents CONCURRENT duplicates only, and that is a real limit.** Deploying a
+**The lock is an in-memory map in ONE process, and that is the larger limit.**
+The CLI `deploy` command goes straight to `runDeployCommand` and never touches
+`LiveDeployer`, so `infrafactory deploy` run alongside a UI deploy of the same
+scenario produces two run-owned projects — as would a second server instance. What
+the lock closes is duplicate deploys *from one UI*, which is where the accidental
+ones come from.
+
+**It also prevents CONCURRENT duplicates only.** Deploying a
 scenario, waiting for it to finish, and deploying it again still produces a second
 run-owned project — the lock is released when the first completes, and nothing
 consults the live estate. The ADR previously stated the harm without that

@@ -234,13 +234,21 @@ func TestDeployStreamsItsProgressToWatchers(t *testing.T) {
 		select {
 		case raw := <-client.send:
 			var e struct {
-				Type string            `json:"type"`
-				Data map[string]string `json:"data"`
+				Type string         `json:"type"`
+				Data map[string]any `json:"data"`
 			}
 			require.NoError(t, json.Unmarshal(raw, &e))
-			assert.Equal(t, "deploy_progress", e.Type)
-			lines = append(lines, e.Data["line"])
-			subjects = append(subjects, e.Data["subject"])
+			// A `deploy_complete` also arrives, carrying the outcome.
+			// It is what lets a tab that did not issue the POST learn
+			// the deploy finished; only the progress lines are under
+			// test here.
+			if e.Type != "deploy_progress" {
+				assert.Equal(t, "deploy_complete", e.Type, "no other event kind belongs on this stream")
+				subjects = append(subjects, e.Data["subject"].(string))
+				continue
+			}
+			lines = append(lines, e.Data["line"].(string))
+			subjects = append(subjects, e.Data["subject"].(string))
 		default:
 			// Indentation is PRESERVED. The deploy command indents
 			// sub-steps on purpose, and flattening them here would
@@ -325,6 +333,56 @@ func TestTheListingReportsAnEmptyDeployingListRatherThanNull(t *testing.T) {
 
 			assert.Contains(t, rec.Body.String(), `"deploying":[]`)
 			assert.NotContains(t, rec.Body.String(), `"deploying":null`)
+		})
+	}
+}
+
+// The terminal event exists so a tab that did NOT issue the POST -- one
+// that adopted the deploy after a reload -- can learn it finished and
+// whether it worked.
+//
+// Polling the estate was the first answer and could only ever say "it
+// stopped", because the estate does not carry success.
+func TestADeployBroadcastsHowItEnded(t *testing.T) {
+	for name, tc := range map[string]struct {
+		result    ActionResult
+		err       error
+		wantClean bool
+	}{
+		"clean":   {result: ActionResult{Clean: true}, wantClean: true},
+		"unclean": {result: ActionResult{Clean: false}, wantClean: false},
+		"errored": {result: ActionResult{}, err: errors.New("the runtime could not be built"), wantClean: false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			hub := NewHub()
+			client := NewTestClient(64)
+			hub.Register(client)
+
+			srv := NewServer(ServerConfig{
+				Config: config.Default(), Deployments: &fakeDeployments{}, Hub: hub,
+				Deployer: &fakeDeployer{result: tc.result, err: tc.err},
+			})
+			postDeploy(t, srv, `{"scenario":"web-app-paris"}`)
+
+			var completions []map[string]any
+			for {
+				raw, ok := client.TryReceive()
+				if !ok {
+					break
+				}
+				var e struct {
+					Type string         `json:"type"`
+					Data map[string]any `json:"data"`
+				}
+				require.NoError(t, json.Unmarshal(raw, &e))
+				if e.Type == "deploy_complete" {
+					completions = append(completions, e.Data)
+				}
+			}
+
+			require.Len(t, completions, 1, "a deploy must announce that it ended, however it ended")
+			assert.Equal(t, "web-app-paris", completions[0]["subject"])
+			assert.Equal(t, tc.wantClean, completions[0]["clean"])
 		})
 	}
 }

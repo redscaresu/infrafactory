@@ -303,6 +303,11 @@ export function deployWarnings(preview) {
   const warnings = [];
   if (!preview) return warnings;
 
+  // First, because it is the one a reader is most likely to have simply
+  // forgotten -- and the only one whose cost is a whole second bill.
+  const alreadyLive = alreadyLiveWarning(preview);
+  if (alreadyLive) warnings.push(alreadyLive);
+
   if (preview.cost && preview.cost.modelled === false) {
     warnings.push(
       "This scenario's resources are not modelled here, so what it creates and what it costs are both unknown. Do not read the figures above as complete."
@@ -337,10 +342,55 @@ export function deployWarnings(preview) {
  * scenario share a stream, and a reader sees both. That is a real limit
  * and it is written down rather than implied away.
  */
+/**
+ * acceptCompleteEvent recognises the terminal event for a deploy.
+ *
+ * Its existence is what lets a tab that ADOPTED a deploy -- one that did
+ * not issue the POST, because the page was reloaded mid-apply -- learn
+ * that it finished and whether it worked. The first attempt polled the
+ * estate instead, which could answer "it stopped" and never "it
+ * succeeded".
+ */
+export function acceptCompleteEvent(event, showingScenario) {
+  if (!showingScenario) return false;
+  if (event?.type !== "deploy_complete") return false;
+  return event?.data?.subject === showingScenario;
+}
+
 export function acceptProgressEvent(event, showingScenario) {
   if (!showingScenario) return false;
   if (event?.type !== "deploy_progress") return false;
   const data = event?.data;
   if (!data?.line) return false;
   return data.subject === showingScenario;
+}
+
+
+/**
+ * alreadyLiveWarning names deployments of this scenario that already
+ * exist.
+ *
+ * The in-flight lock stops the accidental duplicate. It does nothing
+ * about deploy → wait → deploy again, and a lock is the wrong tool for
+ * that: it cannot tell "I forgot" from "I meant it", and refusing
+ * outright would break redeploying after a teardown.
+ *
+ * So the confirmation says what exists and the reader decides. The
+ * server computed this list before this function existed and NOTHING
+ * read it -- the guard the ADR described was documented, tested on the
+ * server, and absent from the screen it was for.
+ */
+export function alreadyLiveWarning(preview) {
+  // "Could not look" is not "nothing is there", and this guard is about
+  // billable infrastructure.
+  if (preview?.already_live_unknown) {
+    return "The live estate could not be fully read, so whether this scenario is already deployed is unknown. Check the Deployments page before continuing.";
+  }
+
+  const live = preview?.already_live;
+  if (!Array.isArray(live) || live.length === 0) return "";
+  const ids = live.join(", ");
+  return live.length === 1
+    ? `${ids} is already deployed from this scenario. Deploying again creates a SECOND project and a second bill; it does not replace it.`
+    : `${live.length} deployments from this scenario are already live (${ids}). Deploying again adds another.`;
 }

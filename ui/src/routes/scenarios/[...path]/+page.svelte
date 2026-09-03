@@ -17,7 +17,6 @@
     finishDeploy,
     isConnected,
     isRunning,
-    pollInFlight,
     useConnector,
     watch as watchDeploys
   } from "$lib/deploy-store.js";
@@ -109,16 +108,9 @@
         // because a listing call failed.
       });
 
-    // An adopted deploy has no other way to finish: this tab did not
-    // issue its POST, and the only websocket event kind is a progress
-    // line. Polls only while something adopted is running.
-    const stopPolling = pollInFlight(fetchDeploying);
-    const stopWatching = watchDeploys();
-
-    return () => {
-      stopPolling();
-      stopWatching();
-    };
+    // An adopted deploy finishes on the `deploy_complete` event the
+    // server broadcasts, so nothing here polls.
+    return watchDeploys();
   });
 
   onDestroy(() => {
@@ -219,12 +211,17 @@
   // The in-flight state lives in a MODULE-LEVEL store, not here.
   //
   // This component is reused between scenarios and destroyed outright
-  // when you leave the section, while a deploy runs for minutes on a
-  // server that has no in-flight lock. Holding it here produced two
-  // review findings: navigating away and back showed a real, billable
-  // apply as an unlabelled disabled button with no log and no warning,
-  // and leaving the section entirely let a SECOND deploy of the same
-  // scenario be started.
+  // when you leave the section, while a deploy runs for minutes on the
+  // server. Holding the state here produced two review findings:
+  // navigating away and back showed a real, billable apply as an
+  // unlabelled disabled button with no log and no warning, and leaving
+  // the section entirely let a second deploy be started.
+  //
+  // The REFUSAL is server-side -- `LiveDeployer` holds a per-scenario
+  // lock and answers 423 -- so this store is advisory. An earlier
+  // version of this comment said the server had no lock, which was
+  // false from the moment it was written and is exactly the
+  // false-explanation defect this work keeps finding.
   //
   // Everything below is scoped to the scenario ON SCREEN, so another
   // scenario's deploy never renders here and this scenario's deploy

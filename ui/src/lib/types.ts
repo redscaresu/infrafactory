@@ -224,4 +224,11 @@ export interface DeployPreview {
   cost_summary?: string;
   internet_facing: boolean;
   deploy_allowed: boolean;
+  // Deployments of this scenario that are already running. The lock
+  // stops the accidental duplicate; this is what warns about the
+  // deliberate one.
+  already_live: string[];
+  // True when the estate could not be fully read. An empty already_live
+  // is a claim; this says when it cannot be made.
+  already_live_unknown: boolean;
 }
