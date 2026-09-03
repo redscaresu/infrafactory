@@ -10,7 +10,6 @@
     teardownOutcome
   } from "$lib/deployments-view.js";
   import {
-    adoptInFlight,
     beginDeploy,
     deploys,
     forgetDeploy,
@@ -18,7 +17,6 @@
     isConnected,
     isRunning,
     useConnector,
-    useResync,
     watch as watchDeploys
   } from "$lib/deploy-store.js";
   import { modeSummary, normalizeRunOptions } from "$lib/scenario-run.js";
@@ -95,35 +93,19 @@
   // The shared socket stays open while this page is mounted, and the
   // store keeps it open beyond that if a deploy is still running -- so
   // leaving and returning finds the log intact rather than frozen.
-  onMount(() => {
-    const fetchDeploying = async () => (await api.getDeployments())?.deploying;
-
-    // Recovery when a terminal event is missed -- a dropped message, a
-    // reconnect gap, or one arriving before this tab adopted anything.
-    // Runs on (re)connect, not on a timer.
-    useResync(async () => {
-      try {
-        adoptInFlight(await fetchDeploying());
-      } catch {
-        // An unreachable estate is not evidence that a deploy finished.
-      }
-    });
-
-    // A reload wipes the store, so ask the server what is running. The
-    // refusal is server-side either way; this stops the reader being
-    // shown a button that would be refused.
-    void fetchDeploying()
-      .then(adoptInFlight)
-      .catch(() => {
-        // Unreachable estate. The Deploy button stays enabled and the
-        // server refuses if it must -- better than blocking deploys
-        // because a listing call failed.
-      });
-
-    // An adopted deploy finishes on the `deploy_complete` event the
-    // server broadcasts, so nothing here polls.
-    return watchDeploys();
-  });
+  // The shared socket stays open while this page is mounted, and the
+  // store keeps it open beyond that if a deploy this tab started is
+  // still running.
+  //
+  // Nothing here asks the server what else might be deploying. An
+  // earlier version did -- adoption, terminal-event recovery, reconnect
+  // resynchronisation -- and three review rounds produced 36 findings,
+  // almost all of them in that machinery. It was a browser mirror of
+  // server state, and every bug was the mirror disagreeing with the
+  // thing it mirrored.
+  //
+  // A reloaded page simply does not know, and says so.
+  onMount(() => watchDeploys());
 
   onDestroy(() => {
     if (validationTimer) clearTimeout(validationTimer);
@@ -244,12 +226,6 @@
   $: deployProgress = deployEntry?.progress ?? [];
   $: deploying = detail?.name ? isRunning($deploys, detail.name) : false;
   $: deployOutcome = deployEntry?.outcome ?? null;
-  // An ADOPTED deploy was already running when this page loaded, so its
-  // earlier output is unrecoverable -- the hub does not replay. Saying
-  // "Starting…" would claim nothing has happened yet when minutes of it
-  // has, which is the same falsehood the disconnected banner exists to
-  // avoid one state over.
-  $: deployAdopted = deployEntry?.adopted === true;
   // A dropped socket and "nothing has happened yet" both produce an
   // empty log, and rendering them the same way tells the reader an apply
   // is quiet when the truth is that it is UNOBSERVED.
@@ -554,6 +530,16 @@
     >
   </div>
 
+  <!-- This page only knows about a deploy IT started. After a reload it
+       does not, and the estate page is the thing that does -- from the
+       server, correctly, by construction. Saying so is less convenient
+       than mirroring server state here and it cannot be wrong; mirroring
+       it produced 36 review findings across three rounds. -->
+  <p class="mt-2 text-xs text-slate-500" data-testid="deploy-scope-note">
+    This page shows deploys started from it. <a class="underline" href="/deployments">Deployments</a>
+    lists everything that is running.
+  </p>
+
   {#if previewError}
     <p class="mt-3 text-sm text-rose-800" data-testid="deploy-preview-error">{previewError}</p>
   {/if}
@@ -608,15 +594,7 @@
       class="mt-3 rounded border border-slate-300 bg-slate-900 px-3 py-2 font-mono text-xs text-slate-100"
       data-testid="deploy-progress"
     >
-      {#if deployProgress.length === 0 && deployAdopted && streamConnected}
-        <!-- Adopted: it was already running when this page loaded, so
-             its earlier output is gone. Saying "Starting…" would claim
-             nothing has happened yet. -->
-        <p class="text-slate-300" data-testid="deploy-progress-adopted">
-          Already running when this page loaded — earlier output is not recoverable. New lines
-          will appear here.
-        </p>
-      {:else if deployProgress.length === 0 && !streamConnected}
+      {#if deployProgress.length === 0 && !streamConnected}
         <!-- Not "Starting…": we are not receiving, so we do not know
              whether anything has happened. The apply is unaffected --
              it is detached from this page entirely. -->

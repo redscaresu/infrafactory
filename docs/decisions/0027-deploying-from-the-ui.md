@@ -263,3 +263,40 @@ are both "nothing is deploying" to a reader.
 
 It used to reappear on every later visit for the rest of the session — a success
 message for infrastructure whose TTL may long since have expired.
+
+## Amendment, 2026-09-03 (S163e): the page knows only what it did
+
+The scenario page tracked deploys started anywhere — another tab, the CLI, itself
+before a reload — by adopting them from the server, recovering from missed
+terminal events, and resynchronising on reconnect.
+
+**That machinery produced 36 review findings across three rounds**, and twice a fix
+introduced a defect of the class it was fixing. It is removed.
+
+The argument for removing it rather than continuing to repair it is the one that
+prompted the review: *there is no difference between `terraform apply` to a mock
+and to a real cloud.* That is true, and it locates the problem. What is genuinely
+hard about real infrastructure is what an **incomplete** apply leaves behind, and
+which record still points at it — which is what ADR-0024's TTL, ADR-0025's
+run-owned project, `live reconcile` and the write-the-record-on-failure rule all
+exist for. Those are small and have been stable.
+
+None of the 36 findings were about that. They were a browser state machine
+mirroring server state, and every one of them was the mirror disagreeing with the
+thing it mirrored.
+
+**So the page knows only what it did.** It shows the deploy it started, its log,
+and how it ended — which survives navigation between scenarios, the case where a
+reader is watching something they began moments ago. After a reload it does not
+know, and it says so, pointing at the estate.
+
+### The estate page had a gap, and it is closed
+
+Calling it the source of truth required it to be one. A deploy that is *applying*
+has no record yet — `registerDeployment` runs after the apply returns — so it
+could not appear in the table. `GET /api/deployments` already reported `deploying`,
+and the page now shows it, saying explicitly that those have no record yet.
+
+That field was computed and unread after the cut, which is the defect this review
+round kept finding. Rendering it where it belongs was the alternative to deleting
+it, and the gap it fills is real.

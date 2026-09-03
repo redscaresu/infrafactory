@@ -352,6 +352,27 @@ test.describe('Deployments estate page', () => {
     expect(confirmed).not.toBe(unconfirmed);
   });
 
+  // A deploy that is applying has no record yet -- registerDeployment
+  // runs after the apply returns -- so it cannot appear in the table.
+  // Without this the page meant to answer "what is running" is silent
+  // about the thing most actively running.
+  test('a deploy in progress is shown even though it has no record yet', async ({ page }) => {
+    await serveEstate(page, { deployments: [], unreadable: [], deploying: ['web-app-paris'] });
+    await page.goto('/deployments');
+
+    const banner = page.getByTestId('estate-deploying');
+    await expect(banner).toContainText('1 deploy in progress');
+    await expect(banner).toContainText('web-app-paris');
+    await expect(banner).toContainText('no record yet');
+  });
+
+  test('nothing deploying shows no banner', async ({ page }) => {
+    await serveEstate(page, { deployments: [], unreadable: [], deploying: [] });
+    await page.goto('/deployments');
+
+    await expect(page.getByTestId('estate-deploying')).toHaveCount(0);
+  });
+
   test('the page is reachable from the sidebar', async ({ page }) => {
     await page.goto('/');
     await page.getByRole('link', { name: 'Deployments' }).click();

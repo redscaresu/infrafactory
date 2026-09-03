@@ -577,7 +577,7 @@ test.describe('Deploy state outlives the page', () => {
     await page.getByTestId('deploy-confirm-go').click();
     await expect(page.getByTestId('deploy-progress')).toBeVisible();
 
-    await page.getByRole('link', { name: 'Deployments' }).click();
+    await page.getByRole('navigation').getByRole('link', { name: 'Deployments' }).click();
     await expect(page).toHaveURL(/\/deployments/);
 
     await page.getByTestId('sidebar-scenario-training/web-app-paris').click();
@@ -739,22 +739,14 @@ test.describe('A reload cannot start a second deploy', () => {
   // The page was the only guard, and a page is exactly the wrong place
   // for one: a refresh wipes it, a second tab never had it, and a curl
   // never consulted it.
-  test('a reloaded page shows the deploy the server says is running', async ({ page }) => {
-    await page.route('**/api/deployments', (route) => {
-      if (route.request().method() !== 'GET') return route.continue();
-      return route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          schema: 'infrafactory.api.deployments.v1',
-          deployments: [],
-          unreadable: [],
-          teardown_allowed: false,
-          deploy_allowed: true,
-          deploying: ['web-app-paris']
-        })
-      });
-    });
+  // The page no longer mirrors server state. It knows about deploys IT
+  // started, and after a reload it does not know — so it says so and
+  // points at the thing that does.
+  //
+  // Mirroring produced 36 review findings across three rounds, none of
+  // which were about applying to a real cloud rather than a mock. This
+  // is less convenient and it cannot be wrong.
+  test('a reloaded page says what it does and does not know', async ({ page }) => {
     await page.route('**/api/deployments/preview**', (route) =>
       route.fulfill({
         status: 200,
@@ -765,6 +757,8 @@ test.describe('A reload cannot start a second deploy', () => {
           expires_at: null,
           internet_facing: false,
           deploy_allowed: true,
+          already_live: ['dep-existing'],
+          already_live_unknown: false,
           cost: { components: [], eur_per_hour: 0, unpriced: [], complete: true, modelled: true }
         })
       })
@@ -772,15 +766,15 @@ test.describe('A reload cannot start a second deploy', () => {
 
     await page.goto('/scenarios/training/web-app-paris');
 
-    // The button is not offered, because the server would refuse it.
-    await expect(page.getByTestId('scenario-deploy')).toBeDisabled();
-    await expect(page.getByTestId('deploy-progress')).toBeVisible();
+    // It does not pretend to know, and it does not block the button on
+    // a guess -- the server refuses if it must.
+    await expect(page.getByTestId('deploy-scope-note')).toContainText('deploys started from it');
+    await expect(page.getByTestId('deploy-progress')).toHaveCount(0);
 
-    // Adopted: it was already running when this page loaded, so its
-    // earlier output is gone. "Starting…" would claim nothing has
-    // happened yet when minutes of it has.
-    await expect(page.getByTestId('deploy-progress-adopted')).toBeVisible();
-    await expect(page.getByTestId('deploy-progress')).not.toContainText('Starting…');
+    // And the thing that DOES know is named in the confirmation, from
+    // the server, where the answer is correct.
+    await page.getByTestId('scenario-deploy').click();
+    await expect(page.getByTestId('deploy-warning').first()).toContainText('dep-existing');
   });
 
   // And a scenario the server is NOT deploying stays available.
@@ -883,7 +877,7 @@ test('a finished deploy does not survive leaving the scenarios section', async (
   await expect(page.getByTestId('deploy-outcome')).toBeVisible();
 
   // Leave the SECTION, which destroys the component.
-  await page.getByRole('link', { name: 'Deployments' }).click();
+  await page.getByRole('navigation').getByRole('link', { name: 'Deployments' }).click();
   await expect(page).toHaveURL(/\/deployments/);
 
   await page.getByTestId('sidebar-scenario-training/web-app-paris').click();

@@ -19,6 +19,14 @@
   let deployments: Deployment[] = [];
   let unreadable: string[] = [];
   let teardownAllowed = false;
+  // Scenarios applying right now.
+  //
+  // They have NO record yet -- registerDeployment runs after the apply
+  // returns -- so they cannot appear in the table below. Without this
+  // the page that is meant to answer "what is running" is silent about
+  // the thing most actively running, and a reader who has just clicked
+  // Deploy elsewhere sees nothing at all.
+  let deploying: string[] = [];
 
   // Confirming is a SECOND deliberate action on a named row, not a
   // dialog that appears everywhere at once. A click cannot destroy
@@ -36,6 +44,7 @@
       deployments = payload?.deployments || [];
       unreadable = payload?.unreadable || [];
       teardownAllowed = payload?.teardown_allowed === true;
+      deploying = payload?.deploying || [];
       loadError = "";
     } catch (err) {
       // The previous rows are KEPT on error rather than cleared. An
@@ -119,6 +128,21 @@
       <p class="mt-1">
         Anything below was read earlier and may be out of date. This is not evidence that
         nothing is running.
+      </p>
+    </div>
+  {/if}
+
+  {#if deploying.length > 0}
+    <div
+      class="rounded border border-sky-300 bg-sky-50 px-4 py-3 text-sm text-sky-900"
+      data-testid="estate-deploying"
+    >
+      <p class="font-semibold">
+        {deploying.length} deploy{deploying.length === 1 ? "" : "s"} in progress.
+      </p>
+      <p class="mt-1">
+        Applying now, so {deploying.length === 1 ? "it has" : "they have"} no record yet and
+        {deploying.length === 1 ? "does" : "do"} not appear below: {deploying.join(", ")}.
       </p>
     </div>
   {/if}

@@ -2,6 +2,34 @@
 
 Last updated: 2026-08-31
 
+## 2026-09-03 — S163e: deleting the machinery instead of repairing it
+
+Three `/code-review` rounds on the deploy UI produced **9, then 13, then 14
+findings** — and twice a fix introduced a defect of the class it was fixing. The
+user's question is what settled it: *why is this so hard, when there is no
+difference between `terraform apply` to a mock and to a real cloud?*
+
+There isn't. Same binary, same HCL, same provider protocol. What differs is what
+an **incomplete** apply leaves behind and which record still points at it — and
+that is exactly what the TTL, the run-owned project, `live reconcile` and
+write-the-record-on-failure exist for. Those are small and have been stable all
+along.
+
+**None of the 36 findings were about that.** They were a browser state machine
+mirroring server state — adoption, terminal-event recovery, reconnect
+resynchronisation, ownership races — and every bug was the mirror disagreeing with
+the thing it mirrored.
+
+So it is gone. The scenario page shows the deploy **it** started, its log and how
+it ended; that survives navigation between scenarios, which is the case a reader
+actually cares about. After a reload it does not know, and says so.
+
+**Net −192 lines.** The estate page had a real gap that this exposed: a deploy
+that is *applying* has no record yet, so it could not appear in the table. The
+listing already reported `deploying`; the page now renders it and says those have
+no record yet — which also stopped that field being computed-and-never-read, the
+defect this review round kept catching.
+
 ## 2026-09-03 — S163d: nine findings from `/code-review`
 
 The review harness, now run on every PR, on the merged in-flight-lock slice.
