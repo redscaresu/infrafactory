@@ -99,6 +99,48 @@ func TestAnApplyRetryIsReported(t *testing.T) {
 		"a frozen log during a silent retry reads as hung")
 }
 
+// "retrying" on the LAST attempt is a promise the code does not keep:
+// the log's final line would say work continues after the deploy has
+// given up.
+func TestTheFinalFailedAttemptDoesNotPromiseARetry(t *testing.T) {
+	writer := &recordingWriter{}
+	runner := &stageFailingRunner{failStage: "apply"}
+
+	_, err := NewSandboxDeployHarness(runner).Run(
+		context.Background(), t.TempDir(), map[string]string{}, writer)
+	require.Error(t, err)
+
+	lines := writer.snapshot()
+	last := lines[len(lines)-1]
+	assert.Contains(t, last, "giving up",
+		"the last line must say the deploy stopped, not that it continues")
+	assert.NotContains(t, last, "retrying")
+}
+
+// The interrupt path is the one where the operator has asked us to stop
+// touching the API. A final line announcing a retry says the opposite of
+// what is about to happen.
+func TestACancelledApplyDoesNotPromiseARetry(t *testing.T) {
+	writer := &recordingWriter{}
+	ctx, cancel := context.WithCancel(context.Background())
+
+	runner := CommandRunnerFunc(func(_ context.Context, cmd Command) (CommandResult, error) {
+		if len(cmd.Args) > 0 && cmd.Args[0] == "apply" {
+			cancel()
+			return CommandResult{}, assertProviderError{}
+		}
+		return CommandResult{Stdout: []byte("ok")}, nil
+	})
+
+	_, err := NewSandboxDeployHarness(runner).Run(ctx, t.TempDir(), map[string]string{}, writer)
+	require.Error(t, err)
+
+	joined := strings.Join(writer.snapshot(), "\n")
+	assert.NotContains(t, joined, "retrying",
+		"the operator asked us to stop; promising a retry says the opposite")
+	assert.Contains(t, joined, "giving up")
+}
+
 type assertProviderError struct{}
 
 func (assertProviderError) Error() string { return "transient provider error" }
@@ -153,6 +195,8 @@ func TestAFailedStageIsNotReportedAsDone(t *testing.T) {
 			joined := strings.Join(writer.snapshot(), "\n")
 			assert.Contains(t, joined, failing+": FAILED",
 				"the stage that failed must say so")
+			assert.Contains(t, joined, "transient provider error",
+				"and WHY -- a stream that stops without saying why is half a stream")
 			assert.NotContains(t, joined, failing+": done",
 				"a failure must never be rendered as completion")
 		})

@@ -589,3 +589,148 @@ test.describe('Deploy state outlives the page', () => {
     release();
   });
 });
+
+// Progress that is actually RENDERED.
+//
+// Every earlier test in this file intercepts the POST in the browser, so
+// the Go server never broadcasts and no progress event is ever produced.
+// A review demonstrated the cost: replacing the whole `{#each}` block
+// with a constant string, and separately hiding the disconnected banner
+// entirely, both passed the full suite. Behaviours 1, 2 and 3 were
+// invisible in the browser.
+//
+// `routeWebSocket` lets the test be the server for the socket, so real
+// frames reach the real filter and the real DOM.
+test.describe('Deploy progress in the DOM', () => {
+  const preview = {
+    scenario: 'web-app-paris',
+    deployable: true,
+    expires_at: null,
+    internet_facing: false,
+    deploy_allowed: true,
+    cost: { components: [], eur_per_hour: 0, unpriced: [], complete: true, modelled: true }
+  };
+
+  async function startDeploy(page, { holdPost = true } = {}) {
+    await page.route('**/api/deployments/preview**', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(preview) })
+    );
+
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    await page.route('**/api/deployments', async (route) => {
+      if (route.request().method() !== 'POST') return route.continue();
+      if (holdPost) await held;
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ clean: true, steps: [], failures: [] })
+      });
+    });
+
+    await page.goto('/scenarios/training/web-app-paris');
+    await page.getByTestId('scenario-deploy').click();
+    await page.getByTestId('deploy-confirm-go').click();
+    return release;
+  }
+
+  test('stage lines are rendered as they arrive', async ({ page }) => {
+    let send: (data: string) => void = () => {};
+    await page.routeWebSocket('**/api/ws', (ws) => {
+      send = (data) => ws.send(data);
+    });
+
+    const release = await startDeploy(page);
+    await expect(page.getByTestId('deploy-progress')).toBeVisible();
+
+    const line = (text: string) =>
+      JSON.stringify({ type: 'deploy_progress', data: { subject: 'web-app-paris', line: text } });
+
+    send(line('init: running'));
+    await expect(page.getByTestId('deploy-progress')).toContainText('init: running');
+
+    send(line('apply: FAILED after 3s: transient provider error'));
+    await expect(page.getByTestId('deploy-progress')).toContainText('apply: FAILED');
+    await expect(page.getByTestId('deploy-progress')).toContainText('transient provider error');
+
+    // Each line is its own row, not a single blob.
+    await expect(page.getByTestId('deploy-progress').locator('p')).toHaveCount(2);
+
+    release();
+  });
+
+  test('a line for another scenario is not rendered here', async ({ page }) => {
+    let send: (data: string) => void = () => {};
+    await page.routeWebSocket('**/api/ws', (ws) => {
+      send = (data) => ws.send(data);
+    });
+
+    const release = await startDeploy(page);
+    await expect(page.getByTestId('deploy-progress')).toBeVisible();
+
+    send(
+      JSON.stringify({
+        type: 'deploy_progress',
+        data: { subject: 'lb-serving-paris', line: 'belongs elsewhere' }
+      })
+    );
+    send(
+      JSON.stringify({
+        type: 'deploy_progress',
+        data: { subject: 'web-app-paris', line: 'init: running' }
+      })
+    );
+
+    await expect(page.getByTestId('deploy-progress')).toContainText('init: running');
+    await expect(page.getByTestId('deploy-progress')).not.toContainText('belongs elsewhere');
+
+    release();
+  });
+
+  // A dropped socket and "nothing has happened yet" both produce an
+  // empty log. Rendering them the same way tells the reader an apply is
+  // quiet when the truth is that it is UNOBSERVED.
+  test('a socket that never connects says so rather than "Starting"', async ({ page }) => {
+    // Accept and immediately close, so onStatus(false) fires and no
+    // reconnect ever succeeds either.
+    await page.routeWebSocket('**/api/ws', (ws) => ws.close());
+
+    const release = await startDeploy(page);
+
+    await expect(page.getByTestId('deploy-progress-disconnected')).toBeVisible();
+    await expect(page.getByTestId('deploy-progress')).not.toContainText('Starting…');
+
+    release();
+  });
+});
+
+// Deploy progress is broadcast to every client. The Live Run page
+// renders whatever arrives and refetches run state per message, so
+// without a filter a deploy in one tab fills an unrelated run's log with
+// raw JSON and hammers the API.
+test('deploy progress does not leak into the Live Run page', async ({ page }) => {
+  let send: (data: string) => void = () => {};
+  // The socket connects asynchronously, so the test must wait for it
+  // rather than sending into a handler that has not run yet -- otherwise
+  // it would pass by delivering nothing at all.
+  let connected: () => void = () => {};
+  const socketReady = new Promise<void>((resolve) => (connected = resolve));
+  await page.routeWebSocket('**/api/ws', (ws) => {
+    send = (data) => ws.send(data);
+    connected();
+  });
+
+  await page.goto('/live');
+  await socketReady;
+
+  send(
+    JSON.stringify({
+      type: 'deploy_progress',
+      data: { subject: 'web-app-paris', line: 'apply: running' }
+    })
+  );
+  send(JSON.stringify({ type: 'log', data: 'a genuine run log line' }));
+
+  await expect(page.locator('body')).toContainText('a genuine run log line');
+  await expect(page.locator('body')).not.toContainText('deploy_progress');
+});

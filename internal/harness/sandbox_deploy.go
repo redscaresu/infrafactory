@@ -168,6 +168,18 @@ func (p stageProgress) retrying(stage string, attempt, of int, err error) {
 	}
 }
 
+// givingUp is the other half, and it exists because "retrying" said on
+// the last attempt is a promise the code does not keep.
+//
+// The interrupt path is worse: there the operator has asked us to stop
+// touching the API, and a stream whose final line announces a retry says
+// the opposite of what is about to happen.
+func (p stageProgress) givingUp(stage string, attempts int) {
+	if p.out != nil {
+		_, _ = fmt.Fprintf(p.out, "  %s: giving up after %d attempt(s)\n", stage, attempts)
+	}
+}
+
 func (h *SandboxDeployHarness) Run(ctx context.Context, workDir string, env map[string]string, progress io.Writer) (*SandboxDeployResult, error) {
 	report := stageProgress{out: progress}
 
@@ -249,11 +261,16 @@ func (h *SandboxDeployHarness) Run(ctx context.Context, workDir string, env map[
 		// retry here would create exactly what the operator asked us to
 		// stop creating.
 		if ctx.Err() != nil {
+			// Cancelled. Announcing a retry here would promise exactly
+			// what the operator asked us to stop doing.
+			report.givingUp("apply", attempts)
 			break
 		}
 		if attempts < sandboxApplyAttempts {
 			report.retrying("apply", attempts, sandboxApplyAttempts, err)
+			continue
 		}
+		report.givingUp("apply", attempts)
 	}
 	if err != nil {
 		return nil, &SandboxDeployError{

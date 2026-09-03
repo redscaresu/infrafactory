@@ -54,7 +54,7 @@ acceptance_criteria:
 
 // deployTestRuntime wires a Layer-3-enabled runtime with fakes and
 // workspace-scoped output and live-store roots.
-func deployTestRuntime(t *testing.T, scenarioYAML string, deploy *fakeSandboxDeployHarness) (*CommandRuntime, *livestore.FilesystemStore, string) {
+func deployTestRuntime(t *testing.T, scenarioYAML string, deploy SandboxDeployHarnessRunner) (*CommandRuntime, *livestore.FilesystemStore, string) {
 	t.Helper()
 	h := newCommandTestHarness(t)
 

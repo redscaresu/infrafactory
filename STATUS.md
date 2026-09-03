@@ -63,6 +63,31 @@ function. **State that must outlive the page cannot live in the page** — it is
 module-level store keyed by scenario now, owning the socket, with two e2e tests
 pinning both journeys including a full unmount.
 
+**A third review, adversarial on the tests, found nine more — every one verified
+by mutation.** The shape of most of them: *the units were tested and the wiring
+between them was not.* Dropping the tee, and passing `nil` to the harness at the
+call site, each broke the feature completely while the whole Go suite stayed
+green — because `deployStderr` was tested in isolation and every test calling
+`Deploy` used a runtime that failed before the writer was touched.
+
+One test closes all three of those: `LiveDeployer.Deploy` → `runDeployCommand` →
+the real harness → sink → hub → what a websocket client receives, with only the
+subprocess faked. **My first attempt at it skipped both broken points**, going
+harness→sink directly — it looked like coverage and would have closed nothing.
+
+Also: `retrying` was pinned as a substring, so the stream could promise a retry on
+the final attempt *and on the interrupt path* — where the operator has asked us to
+stop touching the API. It says `giving up` now. And the UI had **no test that
+rendered a progress line at all**: replacing the whole `{#each}` with a constant
+string passed the full suite. `page.routeWebSocket` lets the tests be the socket
+server, so real frames reach the real DOM.
+
+**Two recorded rather than fixed.** `forgetDeploy` has no production caller, so a
+finished deploy's banner reappears on every later visit for the rest of the
+session. And a **page reload defeats the in-flight guard** — the store is module
+state with no server-side lock, so refreshing during a deploy re-enables the
+button. That one wants a server-side in-flight lock, which is a design decision.
+
 **Named rather than claimed done:** `run`/`test` still applies silently. Its
 progress goes through `runtime.Logger` rather than a writer, so the Layer 3 apply
 on the Live Run page — the more commonly watched screen — has the same defect this

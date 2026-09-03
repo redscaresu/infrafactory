@@ -197,15 +197,10 @@
 
     const disconnect = connectWS((msg) => {
       // Deploy progress is broadcast to every client, and this page
-
-      // renders whatever arrives. Without this filter a deploy in one tab
-
-      // interleaves raw JSON into an unrelated RUN's event log and fires a
-
-      // run-state fetch per line. Noise rather than a falsehood, but the
-
-      // log is meant to be that run's.
-
+      // renders whatever arrives. Without this filter a deploy in one
+      // tab interleaves raw JSON into an unrelated RUN's event log and
+      // fires a run-state fetch per line. Noise rather than a falsehood,
+      // but the log is meant to be that run's.
       if ((msg as { type?: string })?.type === "deploy_progress") return;
 
       lines = [...lines.slice(-999), JSON.stringify(msg)];
