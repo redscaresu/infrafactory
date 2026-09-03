@@ -84,3 +84,40 @@ test("the socket stays open while a deploy is in flight and nobody is watching",
 
   forgetDeploy("web-app-paris");
 });
+
+// A finished entry stays on screen until the reader navigates away, and
+// the stream is keyed by SCENARIO -- so without this, a second deploy of
+// the same scenario started anywhere else (another tab, the CLI)
+// appended into it, and the page rendered a live, growing log of an
+// apply it did not start underneath a completed-outcome banner.
+//
+// That is the adoption this arc removed, arriving through the door the
+// store's own comments name.
+test("a finished deploy stops absorbing progress for its scenario", async () => {
+  const { deploys, useConnector, watch, beginDeploy, finishDeploy, forgetDeploy } = await import(
+    "../src/lib/deploy-store.js"
+  );
+
+  let onMessage;
+  useConnector((handler) => {
+    onMessage = handler;
+    return () => {};
+  });
+
+  const stop = watch();
+  beginDeploy("web-app-paris");
+  onMessage({ type: "deploy_progress", data: { subject: "web-app-paris", line: "apply: running" } });
+  finishDeploy("web-app-paris", { ok: true, message: "Deployed." });
+
+  onMessage({
+    type: "deploy_progress",
+    data: { subject: "web-app-paris", line: "apply: somebody else's run" }
+  });
+
+  const entry = get(deploys)["web-app-paris"];
+  assert.deepEqual(entry.progress, ["apply: running"], "only what this tab was watching");
+  assert.equal(entry.running, false);
+
+  forgetDeploy("web-app-paris");
+  stop();
+});

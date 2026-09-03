@@ -358,3 +358,72 @@ to pay for, and a cached index would be a second source of truth that can
 disagree with the store — the exact class this arc spent three rounds removing.
 Worth a lighter endpoint when an estate is big enough to notice; not worth an
 index.
+
+
+## Amendment, 2026-09-03 (round six): what the corrections got wrong
+
+### The preview reads what is applying before it reads the estate
+
+The two reads cover each other in one direction only. A deploy has no record until
+registration, which runs *after* the apply returns — so reading the estate first
+leaves a window in which a deploy that finishes in between is in **neither**
+answer, and the confirmation renders with no warning and an explicit "checked, and
+nothing exists" claim at the exact moment the scenario goes live.
+
+The other order has no such window: anything that leaves the in-flight list after
+the first read has necessarily registered before the second. The order is a
+guarantee, and there is a test that fails when it is swapped.
+
+### The in-flight list is as stale as the rows beside it
+
+The previous amendment had the estate page keep `deploying` across a failed
+refresh. Correct, but it was then stated in the present tense, while the rows read
+in the same request said "read before the error" about themselves. Surviving an
+error does not make a fact current. It is now qualified, from a single shared
+builder that the summary line and the banner both use — they sit two lines apart
+and had been wording the same count independently.
+
+### Only a deploy still being watched absorbs its stream
+
+Progress events are keyed by scenario, and a finished entry stays on screen until
+the reader leaves. Without a running check, a second deploy of the same scenario
+from another tab or the CLI appended into it — a live log of an apply this tab did
+not start, underneath a completed-outcome banner. That is the adoption this ADR
+removed, reachable through the one door left open.
+
+### Every ending is an outcome
+
+A refusal used to be held outside the store, and that single difference in scoping
+produced three defects in three rounds: rendering on whichever scenario the reader
+had navigated to, outliving the attempt that caused it, and — once guarded by a
+navigation token — deleting the entry while reporting nothing at all, so the button
+silently reverted to "Deploy…" as though the click had never landed.
+
+Outcomes are keyed by scenario, which scopes them by construction. There is no
+token and no clearing rule. This was only available once the running-only filter
+above removed the reason refusals were forgotten, which is the general shape: when
+the third instance of a class arrives, delete the state that permits it rather than
+guarding the path again.
+
+### The body decides whether a response is a result
+
+The client special-cased a bare 409 as an `ActionResult` because
+`writeActionResult` produces one. So does anything else that answers 409 — a proxy,
+an intermediary, the next refusal somebody adds — and such a body has no `clean`
+field, so it rendered "resources may still be running" for a request that never
+reached the deployer. Moving the "already deploying" refusal to 423 fixed that for
+one producer; checking for `clean` fixes it for all of them.
+
+`startedNothing` remains a client-side allowlist of pre-apply statuses, now
+including the origin guard's 403. It is an allowlist deliberately: erring in this
+direction sends a reader to check the Deployments page for infrastructure that was
+never created, and erring the other way tells them nothing happened while a project
+is being created and billed. A discriminator in the response body would close the
+class; it is not built.
+
+### A deploy does not speak in teardown's vocabulary
+
+`teardownOutcome` was reused for deploy results, so a failed deploy could render
+"Teardown returned nothing." next to a Deploy button. Only the failure branch was
+affected, because the template overrides the success text — which is exactly why it
+went unnoticed, and exactly where a reader can least afford a confusing message.

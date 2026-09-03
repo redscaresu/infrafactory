@@ -150,40 +150,73 @@ export function knownEmpty(deployments, unreadable, state = "loaded", deploying 
   );
 }
 
+/**
+ * deployingLabel is the ONE phrase that says how many deploys are
+ * applying, and whether that count is current.
+ *
+ * Exported and shared because the estate page states it twice -- in the
+ * summary line and in the banner two lines below it -- and two copies of
+ * one claim is the shape `knownEmpty` was extracted to remove. They can
+ * silently diverge on wording, on pluralisation, and on the staleness
+ * qualifier, while sitting next to each other on screen.
+ *
+ * `stale` matters more than it looks. The in-flight list is kept across
+ * a failed refresh on purpose, but that does NOT make it current: it is
+ * exactly as old as the rows beside it, which do say they were "read
+ * before the error". An unqualified "1 deploy in progress" asserts as
+ * present-tense fact something that may have finished a minute ago, and
+ * keeps asserting it for as long as polling fails.
+ */
+export function deployingLabel(deploying, stale = false) {
+  const applying = deploying?.length || 0;
+  if (applying === 0) return "";
+  const count = `${applying} deploy${applying === 1 ? "" : "s"} in progress`;
+  return stale ? `${count} when the estate was last read` : count;
+}
+
 export function estateSummary(deployments, unreadable, state = "loaded", deploying = []) {
   const total = deployments?.length || 0;
   const unread = unreadable?.length || 0;
   const applying = deploying?.length || 0;
-  const applyingText = applying === 0 ? "" : `${applying} deploy${applying === 1 ? "" : "s"} in progress`;
 
   if (state === "loading") return "Reading the live estate…";
 
   if (state === "failed") {
-    // A failed read says nothing about what is APPLYING. That list is
-    // kept from the last successful poll precisely so it survives an
-    // error, and it is the one thing here still known -- so the failed
-    // branch has to carry it too.
+    // A failed read says nothing about what is APPLYING, and the list
+    // is kept across the error rather than cleared -- so the failed
+    // branch has to carry it too. Without this the summary read
+    // "Whether anything is running is unknown." directly above the
+    // banner naming a billable apply in flight. `knownEmpty` was
+    // extracted so two derived claims about emptiness could not
+    // contradict each other; this branch was a third claim that neither
+    // of them knew about.
     //
-    // Without this the summary read "Whether anything is running is
-    // unknown." directly above the banner naming a billable apply in
-    // flight. `knownEmpty` was extracted so two derived claims about
-    // emptiness could not contradict each other; this branch was a
-    // third claim that neither of them knew about.
+    // Carried as STALE, though. Surviving the error does not make it
+    // current: it was read at the same moment as the rows, and they say
+    // so about themselves.
+    const staleApplying = deployingLabel(deploying, true);
     if (total === 0 && unread === 0) {
-      if (!applyingText) {
+      if (!staleApplying) {
         return "The live estate could not be read. Whether anything is running is unknown.";
       }
-      return `${applyingText}. The live estate could not be read, so whether anything else is running is unknown.`;
+      return `${staleApplying}. The live estate could not be read since, so what is running now is unknown.`;
     }
     const read = `${describe(deployments, unreadable)} — read before the error, and possibly out of date.`;
-    return applyingText ? `${applyingText}. ${read}` : read;
+    return staleApplying ? `${staleApplying}. ${read}` : read;
   }
 
   if (knownEmpty(deployments, unreadable, state, deploying)) return "Nothing is deployed.";
 
   const described = describe(deployments, unreadable);
+  const applyingText = deployingLabel(deploying);
   if (applying === 0) return described;
-  return total === 0 && unread === 0 ? applyingText : `${described}, ${applyingText}`;
+  // A successful read that found nothing still has to SAY it found
+  // nothing. Returning the in-flight count alone left the reader with
+  // no statement at all about the estate: the empty-state panel is
+  // suppressed here (`knownEmpty` is false) and the table does not
+  // render, so this line is the only thing that speaks.
+  if (total === 0 && unread === 0) return `${applyingText}. Nothing else is deployed.`;
+  return `${described}, ${applyingText}`;
 }
 
 function describe(deployments, unreadable) {
@@ -283,6 +316,31 @@ export function teardownOutcome(result) {
         ? `Not provably clean — resources may still be running. ${reasons.join(" ")}`
         : "Not provably clean — resources may still be running."
   };
+}
+
+/**
+ * deployOutcome is `teardownOutcome`'s sibling, and exists because the
+ * two verbs are not interchangeable.
+ *
+ * Reusing `teardownOutcome` for a deploy put teardown's words on the
+ * deploy screen: a 409 rendered "Not provably clean — resources may
+ * still be running", and a malformed body rendered "Teardown returned
+ * nothing." next to a Deploy button. The success case was masked
+ * because the template overrides it with deploy-specific text, so the
+ * wrong-verb strings were reachable only on the failure branch -- where
+ * a reader is least equipped to discount them.
+ *
+ * `ok` still means the same thing it means everywhere here: PROVEN. A
+ * deploy that cannot prove its account clean is not a success (ADR-0024).
+ */
+export function deployOutcome(result) {
+  if (!result) return { ok: false, message: "The deploy returned nothing, so what it created is unknown." };
+  if (result.clean) {
+    return { ok: true, message: "Deployed." };
+  }
+  const reasons = (result.failures || []).map((f) => f.detail).filter(Boolean);
+  const base = "The deploy did not finish cleanly — it may have created resources that are still running.";
+  return { ok: false, message: reasons.length > 0 ? `${base} ${reasons.join(" ")}` : base };
 }
 
 /**

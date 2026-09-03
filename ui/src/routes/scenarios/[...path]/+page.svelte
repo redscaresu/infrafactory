@@ -7,7 +7,7 @@
   import {
     deployConfirmation,
     deployWarnings,
-    teardownOutcome
+    deployOutcome as toDeployOutcome
   } from "$lib/deployments-view.js";
   import {
     beginDeploy,
@@ -194,10 +194,6 @@
   // which is the move pass 126 argued for and pass 127 had to learn
   // twice. It also gives the reader feedback that the click landed.
   let previewing = false;
-  // A deploy that never started. Held separately from the store, which
-  // only ever contains deploys this tab actually began.
-  let deployRefusal = "";
-
   // A deploy runs for minutes, and minutes of silence reads as broken:
   // a reader cannot tell a long apply from a hung one, and the
   // difference matters when the thing running is creating billable
@@ -249,7 +245,6 @@
     confirmingDeploy = false;
     preview = null;
     previewError = "";
-    deployRefusal = "";
   }
 
   async function openDeployConfirmation() {
@@ -290,56 +285,51 @@
     const target = preview?.scenario;
     if (!target) return;
 
-    // The POST takes minutes and the reader can navigate during it, so
-    // the response belongs to a navigation like every other async
-    // response on this page. Without this a failed deploy of A rendered
-    // its red banner on B's page: the refusal lives in a component
-    // variable rather than in the scenario-keyed store, so nothing else
-    // scopes it.
-    const token = navigation;
-
     confirmingDeploy = false;
-    // A refusal from the PREVIOUS attempt is not about this one. Left
-    // set, a retry that succeeded rendered "already deploying" and
-    // "deployed" at the same time; only navigating away cleared it.
-    deployRefusal = "";
 
     // The entry is created BEFORE the POST, because streaming progress
     // during the apply is the entire point and the response does not
     // arrive for minutes.
-    //
-    // It is REMOVED only when the server SAID nothing started. Leaving
-    // it on a refusal meant a rejected deploy kept an entry, and the
-    // store matches progress by scenario -- so another tab's
-    // still-streaming lines appended into it and the page showed a red
-    // "already deploying" banner on top of a live, growing log of an
-    // apply it never started. That is the adoption this slice removed,
-    // arriving through the back door.
     beginDeploy(target);
 
     try {
-      finishDeploy(target, teardownOutcome(await api.deployScenario(target)));
+      finishDeploy(target, toDeployOutcome(await api.deployScenario(target)));
     } catch (err) {
-      const message = err instanceof Error ? err.message : "deploy failed.";
+      const message = err instanceof Error ? err.message : "The deploy failed.";
 
-      // A rejected promise does NOT mean nothing happened.
+      // EVERY ending goes into the store, including a refusal.
       //
-      // The server detaches the apply from the request that started it,
-      // so a dropped connection -- a sleeping laptop, a wifi hop, a
-      // proxy timeout -- leaves it running and creating billable
-      // infrastructure. Only `DeployError.startedNothing` is the
-      // server's own word that it refused before anything ran.
+      // The refusal used to be a component variable, and that one
+      // difference produced three defects: it rendered on whichever
+      // scenario the reader had navigated to, it outlived the attempt
+      // that caused it so a successful retry showed "already deploying"
+      // and "deployed" together, and once it was guarded by a
+      // navigation token a refusal arriving after any navigation
+      // deleted the entry and said nothing at all -- the button
+      // silently reverting to "Deploy…" as though the click had never
+      // happened.
       //
-      // Forgetting the deploy in the other case deleted the progress
-      // log of a live apply and told the reader it did not exist.
-      if (err instanceof DeployError && err.startedNothing) {
-        forgetDeploy(target);
-        if (current(token)) deployRefusal = `${target}: ${message}`;
-        return;
-      }
+      // An outcome is keyed by scenario, so it lands on the right page
+      // and only that page, with no token and no clearing rule. Two
+      // scopings of one request's two possible answers was the defect;
+      // one scoping is the fix.
+      //
+      // Nothing is forgotten here. A refused entry used to be removed
+      // so it could not adopt another tab's stream, and the socket
+      // handler now ignores every entry that is not running -- which
+      // closes that for finished deploys too, not just refused ones.
+      //
+      // A rejected promise does NOT mean nothing happened: the server
+      // detaches the apply from the request, so a dropped connection
+      // leaves it running and creating billable infrastructure. Only
+      // `DeployError.startedNothing` is the server's own word that it
+      // refused before anything ran.
+      const startedNothing = err instanceof DeployError && err.startedNothing;
       finishDeploy(target, {
         ok: false,
-        message: `${message} The deploy may still be running on the server — check the Deployments page before starting another.`
+        message: startedNothing
+          ? message
+          : `${message} The deploy may still be running on the server — check the Deployments page before starting another.`
       });
     }
   }
@@ -662,12 +652,6 @@
        during it, so an unattributed "deployed." is a claim about the
        wrong thing. The store keys outcomes by scenario, so this one is
        this scenario's by construction. -->
-  {#if deployRefusal}
-    <p class="mt-3 text-sm font-semibold text-rose-800" data-testid="deploy-refusal">
-      {deployRefusal}
-    </p>
-  {/if}
-
   {#if deployOutcome}
     <p
       class={`mt-3 text-sm ${deployOutcome.ok ? "text-emerald-800" : "font-semibold text-rose-800"}`}

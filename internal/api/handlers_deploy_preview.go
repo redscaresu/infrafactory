@@ -149,12 +149,25 @@ func deployPreviewHandler(state *serverState) http.HandlerFunc {
 
 		preview := previewFor(&sc, r.URL.Query().Get("ttl"), time.Now())
 		preview.Allowed = state.deployer != nil
-		preview.AlreadyLive, preview.AlreadyLiveUnknown = liveDeploymentsOf(state, sc.Name)
+		// The in-flight list is read BEFORE the estate, and the order is
+		// the guarantee rather than a style choice.
+		//
 		// A deploy that is APPLYING has no record yet -- registration
-		// runs after the apply returns -- so the estate cannot see the
-		// one case where the reader is most likely to be duplicating.
-		// The in-flight list can.
+		// runs after the apply returns -- so the two reads cover each
+		// other only in one direction. Read the estate first and a
+		// deploy that finishes in between is in NEITHER answer: absent
+		// from the estate because it had not registered, absent from
+		// the in-flight list because it had already released. The
+		// confirmation would then render with no warning and an
+		// explicit "checked, and nothing exists" claim at the exact
+		// moment the scenario went live.
+		//
+		// Read in this order, anything that leaves the in-flight list
+		// after the first read has necessarily registered before the
+		// second, so it appears as `already_live` instead. The window
+		// closes rather than moving.
 		preview.AlreadyDeploying = slices.Contains(deployingScenarios(state), sc.Name)
+		preview.AlreadyLive, preview.AlreadyLiveUnknown = liveDeploymentsOf(state, sc.Name)
 		writeJSON(w, http.StatusOK, preview)
 	}
 }
@@ -284,9 +297,17 @@ func previewFor(sc *scenario.Scenario, ttlOverride string, now time.Time) deploy
 func liveDeploymentsOf(state *serverState, name string) ([]string, bool) {
 	out := []string{}
 	if name == "" {
-		// Never looked, so no claim. A scenario whose `scenario:` key is
-		// blank still resolves to a file, and the confirmation would
-		// otherwise render with no warning and no caveat.
+		// Never looked, so no claim.
+		//
+		// Not reachable from the handler: an empty `?scenario=` is
+		// refused with 400, and a file whose `scenario:` key does not
+		// match what was asked for 404s. This is a type-level guard on
+		// a function whose empty answer is a CLAIM about billable
+		// infrastructure, so it refuses to make one it did not check --
+		// it is not defending a path that exists today.
+		//
+		// (It previously claimed a blank `scenario:` key reached here.
+		// It cannot; corrected 2026-09-03.)
 		return out, true
 	}
 	if state.deployments == nil {

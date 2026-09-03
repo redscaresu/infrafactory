@@ -5,6 +5,7 @@
     addressHref,
     addressLabel,
     estateSummary,
+    deployingLabel,
     healthBadge,
     knownEmpty,
     needsAttention,
@@ -100,6 +101,11 @@
   // "nothing is deployed" ONLY when the read succeeded.
   $: estateState = !loaded ? "loading" : loadError ? "failed" : "loaded";
   $: summary = estateSummary(deployments, unreadable, estateState, deploying);
+  // The in-flight list survives a failed refresh along with the rows,
+  // and is exactly as old as they are. The rows say so about
+  // themselves; this says so about the banner, from the same builder
+  // the summary line uses so the two cannot word it differently.
+  $: applyingLabel = deployingLabel(deploying, Boolean(loadError));
   // The one condition under which this page may say nothing is running.
   // Shared with the summary rather than re-derived, because two copies
   // is how one of them ends up contradicting the other.
@@ -137,12 +143,17 @@
       class="rounded border border-sky-300 bg-sky-50 px-4 py-3 text-sm text-sky-900"
       data-testid="estate-deploying"
     >
-      <p class="font-semibold">
-        {deploying.length} deploy{deploying.length === 1 ? "" : "s"} in progress.
-      </p>
+      <p class="font-semibold">{applyingLabel}.</p>
       <p class="mt-1">
-        Applying now, so {deploying.length === 1 ? "it has" : "they have"} no record yet and
-        {deploying.length === 1 ? "does" : "do"} not appear below: {deploying.join(", ")}.
+        {#if loadError}
+          {deploying.length === 1 ? "It had" : "They had"} no record yet, so {deploying.length === 1
+            ? "it does"
+            : "they do"} not appear below. Whether {deploying.length === 1 ? "it is" : "they are"}
+          still applying is unknown — the estate has not been readable since: {deploying.join(", ")}.
+        {:else}
+          Applying now, so {deploying.length === 1 ? "it has" : "they have"} no record yet and
+          {deploying.length === 1 ? "does" : "do"} not appear below: {deploying.join(", ")}.
+        {/if}
       </p>
     </div>
   {/if}

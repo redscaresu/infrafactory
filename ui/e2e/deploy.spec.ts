@@ -899,15 +899,14 @@ test('a refused deploy does not claim resources may be running', async ({ page }
   await page.getByTestId('scenario-deploy').click();
   await page.getByTestId('deploy-confirm-go').click();
 
-  // A refused deploy started nothing, so nothing is shown as running --
-  // and no store entry is created, because the store's progress handler
-  // matches on scenario and would otherwise adopt another tab's live
-  // stream into it.
-  const refusal = page.getByTestId('deploy-refusal');
-  await expect(refusal).toContainText('already deploying');
-  await expect(refusal).not.toContainText('may still be running');
+  // A refused deploy started nothing, so nothing is shown as running,
+  // and the message says only what the server said. It is recorded as
+  // an OUTCOME like every other ending -- the store keys those by
+  // scenario, which is what scopes it to this page.
+  const outcome = page.getByTestId('deploy-outcome');
+  await expect(outcome).toContainText('already deploying');
+  await expect(outcome).not.toContainText('may still be running');
   await expect(page.getByTestId('deploy-progress')).toHaveCount(0);
-  await expect(page.getByTestId('deploy-outcome')).toHaveCount(0);
 });
 
 // The server computed already_live and nothing read it: the guard the
@@ -980,9 +979,10 @@ test('a deploy whose connection drops is not called a deploy that never ran', as
   await expect(outcome).toContainText('may still be running');
   await expect(outcome).toContainText('Deployments page');
 
-  // And it is NOT reported as a refusal. That banner means the server
-  // said nothing started, which it did not say here.
-  await expect(page.getByTestId('deploy-refusal')).toHaveCount(0);
+  // And it does NOT say the server refused. The entry and its log
+  // survive, which is what an outcome rendering at all demonstrates:
+  // the replaced code deleted both and showed a bare failure message.
+  await expect(outcome).not.toContainText('already deploying');
 });
 
 // Three different questions — one is applying, some are already live,
@@ -1061,11 +1061,67 @@ test('a refusal does not outlive the attempt that caused it', async ({ page }) =
   await page.goto('/scenarios/training/web-app-paris');
   await page.getByTestId('scenario-deploy').click();
   await page.getByTestId('deploy-confirm-go').click();
-  await expect(page.getByTestId('deploy-refusal')).toContainText('already deploying');
+  await expect(page.getByTestId('deploy-outcome')).toContainText('already deploying');
 
   await page.getByTestId('scenario-deploy').click();
   await page.getByTestId('deploy-confirm-go').click();
 
-  await expect(page.getByTestId('deploy-outcome')).toContainText('deployed. It is listed');
-  await expect(page.getByTestId('deploy-refusal')).toHaveCount(0);
+  const outcome = page.getByTestId('deploy-outcome');
+  await expect(outcome).toContainText('deployed. It is listed');
+  await expect(outcome).not.toContainText('already deploying');
+});
+
+// The two possible answers to one request used to be scoped two
+// different ways: an outcome lived in the scenario-keyed store and
+// survived navigation, while a refusal was a component variable. Once
+// the refusal was guarded by a navigation token, one arriving after any
+// navigation deleted the entry and reported nothing at all -- the button
+// silently reverting to "Deploy…" as though the click had never landed.
+test('a refusal that arrives after a detour is still reported', async ({ page }) => {
+  await page.route('**/api/deployments/preview**', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        scenario: 'web-app-paris',
+        deployable: true,
+        expires_at: null,
+        internet_facing: false,
+        deploy_allowed: true,
+        already_live: [],
+        already_live_unknown: false,
+        cost: { components: [], eur_per_hour: 0, unpriced: [], complete: true, modelled: true }
+      })
+    })
+  );
+
+  let release: () => void = () => {};
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await page.route('**/api/deployments', async (route) => {
+    if (route.request().method() !== 'POST') return route.continue();
+    await held;
+    return route.fulfill({
+      status: 423,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        error: 'web-app-paris is already deploying; wait for it to finish or tear it down'
+      })
+    });
+  });
+
+  await page.goto('/scenarios/training/web-app-paris');
+  await page.getByTestId('scenario-deploy').click();
+  await page.getByTestId('deploy-confirm-go').click();
+
+  // Away and back while the POST is outstanding, so the response
+  // belongs to an earlier navigation than the one on screen. Sidebar
+  // clicks, not page.goto: a reload would destroy the store along with
+  // the request, which is a different case entirely.
+  await page.getByTestId('sidebar-scenario-training/lb-serving-paris').click();
+  await expect(page.locator('main h1')).toContainText('lb-serving-paris');
+  await page.getByTestId('sidebar-scenario-training/web-app-paris').click();
+  await expect(page.locator('main h1')).toContainText('web-app-paris');
+  release();
+
+  await expect(page.getByTestId('deploy-outcome')).toContainText('already deploying');
 });

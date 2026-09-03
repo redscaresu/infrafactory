@@ -55,10 +55,20 @@ function ensureSocket() {
       const current = get(deploys);
       for (const scenario of Object.keys(current)) {
         if (scenario === "__connected") continue;
+        // Only a deploy this tab is still WATCHING absorbs lines.
+        //
+        // A finished entry stays until the reader navigates away, and
+        // the stream is keyed by scenario -- so without this, a second
+        // deploy of the same scenario from anywhere else (another tab,
+        // the CLI) appended into it, and the page rendered a live,
+        // growing log of an apply it did not start underneath a
+        // completed-outcome banner. That is the adoption this slice
+        // removed, arriving through the door its own comments name.
+        if (!current[scenario]?.running) continue;
         if (!acceptProgressEvent(msg, scenario)) continue;
         deploys.update((all) => {
           const entry = all[scenario];
-          if (!entry) return all;
+          if (!entry?.running) return all;
           return { ...all, [scenario]: { ...entry, progress: [...entry.progress, msg.data.line] } };
         });
       }
@@ -105,7 +115,19 @@ export function finishDeploy(scenario, outcome) {
   releaseSocket();
 }
 
-/** forget clears a finished deploy once the reader has left its page. */
+/**
+ * forget clears a finished deploy once the reader has left its page.
+ *
+ * Not used for a refusal any more. A refused deploy is now recorded as
+ * an OUTCOME like any other ending, because an outcome is keyed by
+ * scenario and therefore survives navigation -- and a refusal that was
+ * dropped whenever the reader had moved left the button silently
+ * reverting to "Deploy…" with no log, no message and no explanation.
+ *
+ * Forgetting was there to stop a refused entry adopting another tab's
+ * stream; the socket handler now ignores entries that are not running,
+ * which closes that for every finished entry rather than for this one.
+ */
 export function forgetDeploy(scenario) {
   deploys.update((all) => {
     const next = { ...all };

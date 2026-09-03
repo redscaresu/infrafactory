@@ -44,10 +44,42 @@ export class DeployError extends Error {
   }
 }
 
-// Statuses the deploy handler can only produce BEFORE the apply begins.
+// Statuses that can only be produced BEFORE the apply begins.
+//
+// 400/404/405/423 come from `deployHandler` before it calls `Deploy`;
+// 403 comes from `guardCrossOriginRequests`, which wraps the whole mux
+// and answers before any handler is entered at all.
+//
 // 500 is deliberately absent: `writeActionResult` returns it for a
-// deploy that ran and errored, which may have created resources.
-const startedNothingStatuses = new Set([400, 404, 405, 423]);
+// deploy that RAN and errored, which may have created resources.
+//
+// An ALLOWLIST rather than a denylist, and the asymmetry is the point.
+// Getting it wrong in this direction says "the deploy may still be
+// running" about a request that never touched the cloud -- a wasted
+// look at the Deployments page. Getting it wrong the other way says
+// "nothing happened" while a project is being created and billed. So a
+// status nobody has classified is treated as unknown.
+//
+// It is still a client mirroring one layer's semantics, and it degrades
+// silently when a new pre-flight status appears. The durable fix is a
+// discriminator in the response body; recorded in ADR-0027 and not done
+// here.
+const startedNothingStatuses = new Set([400, 403, 404, 405, 423]);
+
+// isActionResult decides whether a body is a result or an error.
+//
+// The `clean` field is the discriminator, and checking it closes a
+// class rather than an instance. The deploy path special-cased a bare
+// 409 as an ActionResult because `writeActionResult` produces one --
+// but so can a reverse proxy, an intermediary, or the next refusal
+// somebody adds. A `{"error": ...}` body parsed as a result has no
+// `clean` field, so it rendered "resources may still be running" for a
+// request that never reached the deployer. That is the exact defect
+// moving the "already deploying" refusal to 423 fixed for ONE producer;
+// this fixes it for all of them.
+function isActionResult(body: unknown): body is ActionResult {
+  return typeof body === "object" && body !== null && "clean" in body;
+}
 
 function withFormat(path: string): string {
   const sep = path.includes("?") ? "&" : "?";
@@ -93,18 +125,17 @@ export const api = {
       body: JSON.stringify(ttl ? { scenario, ttl } : { scenario })
     });
     const ctype = res.headers.get("content-type") || "";
-    // 409 carries an ActionResult from a deploy that RAN and could not
-    // prove itself clean. 423 is a refusal -- nothing ran -- and carries
-    // an error, so it must NOT be parsed as a result: doing so found no
-    // `clean` field and told the reader resources might still be
-    // running after a request that never touched the cloud.
-    if ((res.ok || res.status === 409) && ctype.includes("application/json")) {
-      return (await res.json()) as ActionResult;
-    }
     const startedNothing = startedNothingStatuses.has(res.status);
+    // 409 carries an ActionResult from a deploy that RAN and could not
+    // prove itself clean. A refusal carries an error and must NOT be
+    // parsed as one -- the body decides, not the status.
     if (ctype.includes("application/json")) {
-      const payload = (await res.json()) as { error?: string };
-      throw new DeployError(payload.error || `deploy failed: ${res.status}`, startedNothing);
+      const body = await res.json();
+      if ((res.ok || res.status === 409) && isActionResult(body)) return body;
+      throw new DeployError(
+        (body as { error?: string })?.error || `deploy failed: ${res.status}`,
+        startedNothing
+      );
     }
     throw new DeployError((await res.text()) || `deploy failed: ${res.status}`, startedNothing);
   },
@@ -118,12 +149,14 @@ export const api = {
       method: "DELETE"
     });
     const ctype = res.headers.get("content-type") || "";
-    if ((res.ok || res.status === 409) && ctype.includes("application/json")) {
-      return (await res.json()) as ActionResult;
-    }
+    // Same discriminator as deploy, for the same reason: a 409 that did
+    // not come from `writeActionResult` has no `clean` field, and
+    // parsing it as a result renders "resources may still be running"
+    // over a request that never reached the store.
     if (ctype.includes("application/json")) {
-      const payload = (await res.json()) as { error?: string };
-      throw new Error(payload.error || `teardown failed: ${res.status}`);
+      const body = await res.json();
+      if ((res.ok || res.status === 409) && isActionResult(body)) return body;
+      throw new Error((body as { error?: string })?.error || `teardown failed: ${res.status}`);
     }
     throw new Error((await res.text()) || `teardown failed: ${res.status}`);
   },

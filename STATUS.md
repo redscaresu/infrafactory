@@ -2,6 +2,49 @@
 
 Last updated: 2026-09-03
 
+## 2026-09-03 — S163e-fixes (round six): the corrections had their own defects
+
+**12 findings, 11 accepted.** Four are on pass 139's fixes, which is the value of
+running the harness again rather than declaring convergence.
+
+**A race created by read order.** The preview read the estate and then the
+in-flight list, so a deploy finishing between the two was in neither answer, and
+the confirmation claimed "nothing exists" at the moment the scenario went live.
+Reversed — anything leaving the in-flight list after the first read has registered
+before the second. Pinned by a test that records which read came first.
+
+**My own justification was the defect.** Pass 139 made the failed-read summary
+carry `deploying` because it was "the one thing still known". It is not: it is read
+in the same request as the rows, so it is exactly as stale as they are — and the
+rows say so about themselves while the deploy count asserted the present tense, for
+as long as polling kept failing. `deployingLabel(deploying, stale)` carries the
+qualifier and is shared with the estate banner, which had been rebuilding the same
+count and pluralisation two lines below.
+
+**The last adoption door.** Progress matched on scenario without checking whether
+the entry was still running, so a finished deploy kept absorbing lines — a second
+deploy of the same scenario from another tab or the CLI rendered as a live, growing
+log underneath a completed-outcome banner.
+
+**One request, two answers, two scopings.** An outcome was scenario-keyed and
+survived navigation; a refusal was a component variable. Adding a navigation token
+to the refusal made it worse: `forgetDeploy` ran unconditionally while the message
+was gated, so a refusal after any navigation deleted the entry and said nothing at
+all. `deployRefusal` is deleted; every ending is an outcome. That removal was only
+available because the running-only filter landed first and took away the reason
+refusals were forgotten.
+
+Also: the 409-is-an-ActionResult special case is closed for every producer, not
+just the one found — the body's `clean` field decides now, in teardown too; 403
+joins the pre-apply statuses (the origin guard answers before any handler), and the
+allowlist's direction is documented as deliberate; `deployOutcome` stops a deploy
+speaking in teardown's vocabulary ("Teardown returned nothing." next to a Deploy
+button); the loaded summary says the estate was read when it holds zero records and
+something is applying; and a guard comment describing an unreachable path is gone.
+
+**Declined:** `slices.Contains` allocates and sorts under the deployer mutex. A
+handful of strings, against widening the deployer interface to avoid it.
+
 ## 2026-09-03 — S163e-fixes: a rejected fetch is not "nothing happened"
 
 The fifth `/code-review` round on the deploy UI. **13 findings, 12 accepted.**

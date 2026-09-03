@@ -7,6 +7,8 @@ import {
   addressHref,
   deployConfirmation,
   deployWarnings,
+  deployOutcome,
+  deployingLabel,
   teardownOutcome,
   teardownPrompt,
   knownEmpty,
@@ -406,7 +408,13 @@ test("knownEmpty is false while something is deploying", () => {
 });
 
 test("estateSummary counts deploys in progress", () => {
-  assert.equal(estateSummary([], [], "loaded", ["web-app-paris"]), "1 deploy in progress");
+  // A successful read that found nothing still has to say so: the
+  // empty-state panel is suppressed here and the table does not render,
+  // so this line is the only thing that speaks about the estate.
+  assert.equal(
+    estateSummary([], [], "loaded", ["web-app-paris"]),
+    "1 deploy in progress. Nothing else is deployed."
+  );
   assert.equal(
     estateSummary(
       [{ health: { status: "healthy", version: "confirmed" } }],
@@ -461,7 +469,58 @@ test("alreadyLiveWarning still reports an unreadable estate while something is a
 test("estateSummary does not call a running deploy unknown when the read fails", () => {
   const summary = estateSummary([], [], "failed", ["web-app-paris"]);
   assert.match(summary, /1 deploy in progress/);
-  assert.match(summary, /anything else is running is unknown/);
+  assert.match(summary, /what is running now is unknown/);
+});
+
+// Surviving the error does not make it current. It was read at the same
+// moment as the rows, and they say "read before the error" about
+// themselves; an unqualified "1 deploy in progress" asserts as
+// present-tense a deploy that may have finished a minute ago, and keeps
+// asserting it for as long as polling fails.
+test("estateSummary does not present a stale in-flight list as current", () => {
+  const summary = estateSummary([], [], "failed", ["web-app-paris"]);
+  assert.match(summary, /when the estate was last read/);
+});
+
+test("deployingLabel is silent when nothing is applying", () => {
+  assert.equal(deployingLabel([]), "");
+  assert.equal(deployingLabel(undefined, true), "");
+});
+
+test("deployingLabel says whether the count is current", () => {
+  assert.equal(deployingLabel(["a"]), "1 deploy in progress");
+  assert.equal(deployingLabel(["a", "b"]), "2 deploys in progress");
+  assert.equal(deployingLabel(["a"], true), "1 deploy in progress when the estate was last read");
+});
+
+// A deploy must not speak in teardown's vocabulary. Reusing
+// teardownOutcome put "Teardown returned nothing." next to a Deploy
+// button, reachable only on the failure branch -- where a reader is
+// least equipped to discount it.
+test("deployOutcome never describes a deploy as a teardown", () => {
+  for (const outcome of [
+    deployOutcome(null),
+    deployOutcome({ clean: false, failures: [] }),
+    deployOutcome({ clean: false, failures: [{ detail: "project delete failed" }] }),
+    deployOutcome({ clean: true, failures: [] })
+  ]) {
+    assert.doesNotMatch(outcome.message, /[Tt]eardown|[Dd]estroyed/);
+  }
+});
+
+test("deployOutcome refuses to call an unproven deploy a success", () => {
+  assert.equal(deployOutcome({ clean: false, failures: [] }).ok, false);
+  assert.equal(deployOutcome(null).ok, false);
+  assert.equal(deployOutcome({ clean: true, failures: [] }).ok, true);
+});
+
+test("deployOutcome carries the per-stage failures, which name what leaked", () => {
+  const outcome = deployOutcome({
+    clean: false,
+    failures: [{ detail: "project if-run-abc could not be deleted" }]
+  });
+  assert.match(outcome.message, /if-run-abc/);
+  assert.match(outcome.message, /may have created resources/);
 });
 
 test("estateSummary still admits total ignorance when nothing is applying", () => {

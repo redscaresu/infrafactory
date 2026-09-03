@@ -492,3 +492,75 @@ func TestPreviewWithABlankScenarioNameMakesNoClaim(t *testing.T) {
 	assert.Empty(t, got)
 	assert.True(t, unknown, "returning (empty, false) is the claim the flag exists to forbid")
 }
+
+// orderRecordingDeployer notes when its in-flight list was read.
+type orderRecordingDeployer struct {
+	fakeDeployer
+	read *bool
+}
+
+func (d *orderRecordingDeployer) InFlight() []string {
+	*d.read = true
+	return d.fakeDeployer.inFlight
+}
+
+// orderRecordingLister notes whether the in-flight list had already been
+// read by the time the estate was.
+type orderRecordingLister struct {
+	inFlightRead     *bool
+	sawInFlightFirst bool
+}
+
+func (l *orderRecordingLister) List() ([]livestore.Deployment, []error, error) {
+	l.sawInFlightFirst = *l.inFlightRead
+	return nil, nil, nil
+}
+
+// The two reads cover each other in ONE direction only, so their order
+// is a guarantee rather than a style choice.
+//
+// A deploy has no record until registration, which runs after the apply
+// returns. Read the estate first and a deploy that finishes in between
+// is in neither answer -- not in the estate, because it had not
+// registered; not in the in-flight list, because it had already
+// released -- and the confirmation renders with no warning at all and
+// an explicit "checked, and nothing exists" claim, at the exact moment
+// the scenario went live.
+//
+// The other order has no such window: anything that leaves the
+// in-flight list after the first read has registered before the second.
+func TestThePreviewReadsWhatIsApplyingBeforeItReadsTheEstate(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "sc.yaml"), []byte(`scenario: previewable
+version: "1.0"
+cloud: scaleway
+description: x
+resources:
+  compute:
+    purpose: web-server
+    size: small
+acceptance_criteria:
+  - type: destruction
+    expect: no_orphans
+`), 0o644))
+
+	inFlightRead := false
+	lister := &orderRecordingLister{inFlightRead: &inFlightRead}
+
+	cfg := config.Default()
+	cfg.Paths.Scenarios = dir
+	srv := NewServer(ServerConfig{
+		Config:      cfg,
+		Deployments: lister,
+		Deployer:    &orderRecordingDeployer{read: &inFlightRead},
+	})
+
+	rec := httptest.NewRecorder()
+	srv.Handler.ServeHTTP(rec,
+		httptest.NewRequest(http.MethodGet, "/api/deployments/preview?scenario=previewable", nil))
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	assert.True(t, lister.sawInFlightFirst,
+		"reading the estate first leaves a window where a deploy finishing in between "+
+			"is invisible to both reads, and the confirmation claims nothing exists")
+}
