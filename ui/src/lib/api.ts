@@ -13,6 +13,42 @@ import type {
 
 const base = "";
 
+/**
+ * DeployError says whether the apply STARTED, which is the only thing a
+ * caller can safely conclude from a failed deploy request.
+ *
+ * The deploy is deliberately detached from the request that starts it
+ * (`destructiveContext`: "a client disconnecting halfway would leave
+ * resources with no completed record"). So a rejected promise has two
+ * completely different meanings:
+ *
+ *   - The SERVER answered, and its answer was a refusal issued before
+ *     anything ran -- 423 while another deploy holds the lock, 404 for
+ *     an unknown scenario or a server without `--allow-deploy`, 400 for
+ *     a malformed request. Nothing was created. `startedNothing`.
+ *   - Anything else -- a sleeping laptop, a wifi hop, a proxy timeout,
+ *     a 500 from a deploy that ran and failed. The apply may be running
+ *     right now, creating a project and a bill.
+ *
+ * Collapsing the second into the first is how a page came to delete the
+ * progress log of a live apply and tell the reader nothing had
+ * happened.
+ */
+export class DeployError extends Error {
+  readonly startedNothing: boolean;
+
+  constructor(message: string, startedNothing: boolean) {
+    super(message);
+    this.name = "DeployError";
+    this.startedNothing = startedNothing;
+  }
+}
+
+// Statuses the deploy handler can only produce BEFORE the apply begins.
+// 500 is deliberately absent: `writeActionResult` returns it for a
+// deploy that ran and errored, which may have created resources.
+const startedNothingStatuses = new Set([400, 404, 405, 423]);
+
 function withFormat(path: string): string {
   const sep = path.includes("?") ? "&" : "?";
   return `${path}${sep}format=1`;
@@ -65,11 +101,12 @@ export const api = {
     if ((res.ok || res.status === 409) && ctype.includes("application/json")) {
       return (await res.json()) as ActionResult;
     }
+    const startedNothing = startedNothingStatuses.has(res.status);
     if (ctype.includes("application/json")) {
       const payload = (await res.json()) as { error?: string };
-      throw new Error(payload.error || `deploy failed: ${res.status}`);
+      throw new DeployError(payload.error || `deploy failed: ${res.status}`, startedNothing);
     }
-    throw new Error((await res.text()) || `deploy failed: ${res.status}`);
+    throw new DeployError((await res.text()) || `deploy failed: ${res.status}`, startedNothing);
   },
   // Not `request`, deliberately. A teardown that could not prove the
   // account clean answers 409 WITH a full ActionResult -- the per-stage

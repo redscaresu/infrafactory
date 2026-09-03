@@ -91,9 +91,15 @@ type deploymentsResponse struct {
 
 	// Deploying names the scenarios currently applying.
 	//
-	// Carried so a page that has just been reloaded can restore what it
-	// was showing. The guard itself is server-side; this only stops the
-	// UI offering a button that would be refused.
+	// An applying deploy has no record yet, so it is absent from
+	// `deployments` while being the most active thing in the estate; the
+	// page renders this as its own banner so an estate busy creating
+	// something is never described as empty.
+	//
+	// What it is NOT: a complete answer to "what is running". It is one
+	// process's in-memory lock, so a CLI deploy or one that was in
+	// flight across a restart is missing from it. The guard against a
+	// second deploy is server-side and does not depend on this field.
 	Deploying []string `json:"deploying"`
 
 	// TeardownAllowed reports whether this server was started with

@@ -2,7 +2,7 @@
   import { afterNavigate } from "$app/navigation";
   import { onDestroy, onMount } from "svelte";
   import { page } from "$app/stores";
-  import { api } from "$lib/api";
+  import { api, DeployError } from "$lib/api";
   import { connectWS } from "$lib/ws";
   import {
     deployConfirmation,
@@ -290,16 +290,29 @@
     const target = preview?.scenario;
     if (!target) return;
 
+    // The POST takes minutes and the reader can navigate during it, so
+    // the response belongs to a navigation like every other async
+    // response on this page. Without this a failed deploy of A rendered
+    // its red banner on B's page: the refusal lives in a component
+    // variable rather than in the scenario-keyed store, so nothing else
+    // scopes it.
+    const token = navigation;
+
     confirmingDeploy = false;
+    // A refusal from the PREVIOUS attempt is not about this one. Left
+    // set, a retry that succeeded rendered "already deploying" and
+    // "deployed" at the same time; only navigating away cleared it.
+    deployRefusal = "";
 
     // The entry is created BEFORE the POST, because streaming progress
     // during the apply is the entire point and the response does not
     // arrive for minutes.
     //
-    // It is REMOVED on refusal. Leaving it meant a rejected deploy kept
-    // an entry, and the store matches progress by scenario -- so another
-    // tab's still-streaming lines appended into it and the page showed a
-    // red "already deploying" banner on top of a live, growing log of an
+    // It is REMOVED only when the server SAID nothing started. Leaving
+    // it on a refusal meant a rejected deploy kept an entry, and the
+    // store matches progress by scenario -- so another tab's
+    // still-streaming lines appended into it and the page showed a red
+    // "already deploying" banner on top of a live, growing log of an
     // apply it never started. That is the adoption this slice removed,
     // arriving through the back door.
     beginDeploy(target);
@@ -307,11 +320,27 @@
     try {
       finishDeploy(target, teardownOutcome(await api.deployScenario(target)));
     } catch (err) {
-      // Nothing was started, so nothing is shown as running. The
-      // message says why on its own.
-      forgetDeploy(target);
-      deployRefusal =
-        err instanceof Error ? `${target}: ${err.message}` : `${target}: deploy failed.`;
+      const message = err instanceof Error ? err.message : "deploy failed.";
+
+      // A rejected promise does NOT mean nothing happened.
+      //
+      // The server detaches the apply from the request that started it,
+      // so a dropped connection -- a sleeping laptop, a wifi hop, a
+      // proxy timeout -- leaves it running and creating billable
+      // infrastructure. Only `DeployError.startedNothing` is the
+      // server's own word that it refused before anything ran.
+      //
+      // Forgetting the deploy in the other case deleted the progress
+      // log of a live apply and told the reader it did not exist.
+      if (err instanceof DeployError && err.startedNothing) {
+        forgetDeploy(target);
+        if (current(token)) deployRefusal = `${target}: ${message}`;
+        return;
+      }
+      finishDeploy(target, {
+        ok: false,
+        message: `${message} The deploy may still be running on the server — check the Deployments page before starting another.`
+      });
     }
   }
 
@@ -542,12 +571,20 @@
 
   <!-- This page only knows about a deploy IT started. After a reload it
        does not, and the estate page is the thing that does -- from the
-       server, correctly, by construction. Saying so is less convenient
-       than mirroring server state here and it cannot be wrong; mirroring
-       it produced 36 review findings across three rounds. -->
+       live store, which every finished deploy writes to whatever
+       started it. Saying so is less convenient than mirroring server
+       state here; mirroring it produced 36 review findings across three
+       rounds.
+
+       "Everything RECORDED" rather than "everything running", and the
+       difference is real: the in-progress banner there comes from one
+       process's in-memory lock, so a `infrafactory deploy` in a
+       terminal, or an apply that was in flight when the server
+       restarted, appears in neither the table nor the banner until it
+       finishes and writes its record. -->
   <p class="mt-2 text-xs text-slate-500" data-testid="deploy-scope-note">
     This page shows deploys started from it. <a class="underline" href="/deployments">Deployments</a>
-    lists everything that is running.
+    lists every deployment that has been recorded.
   </p>
 
   {#if previewError}

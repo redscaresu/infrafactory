@@ -425,3 +425,59 @@ test("alreadyLiveWarning leads with a deploy that is applying right now", () => 
   assert.match(warning, /being deployed right now/);
   assert.match(warning, /will be refused/);
 });
+
+// Three separate questions, all of which can be true at once. Returning
+// on the first dropped the strongest and most actionable of them --
+// "dep-x is already deployed; deploying again creates a SECOND project
+// and a second bill" -- exactly when the reader was most likely to be
+// duplicating something.
+test("alreadyLiveWarning keeps every warning rather than choosing between them", () => {
+  const warning = alreadyLiveWarning({
+    already_deploying: true,
+    already_live: ["dep-existing"],
+    already_live_unknown: true
+  });
+  assert.match(warning, /being deployed right now/);
+  assert.match(warning, /dep-existing/);
+  assert.match(warning, /SECOND project/);
+  assert.match(warning, /could not be read/);
+});
+
+test("alreadyLiveWarning still reports an unreadable estate while something is applying", () => {
+  const warning = alreadyLiveWarning({
+    already_deploying: true,
+    already_live: [],
+    already_live_unknown: true
+  });
+  assert.match(warning, /being deployed right now/);
+  assert.match(warning, /could not be fully read/);
+});
+
+// `deploying` is kept from the last successful poll precisely so it
+// survives a failed one, and the banner beneath the summary renders it.
+// A summary that said "whether anything is running is unknown" directly
+// above "1 deploy in progress" was a third claim about emptiness that
+// neither knownEmpty nor the banner knew about.
+test("estateSummary does not call a running deploy unknown when the read fails", () => {
+  const summary = estateSummary([], [], "failed", ["web-app-paris"]);
+  assert.match(summary, /1 deploy in progress/);
+  assert.match(summary, /anything else is running is unknown/);
+});
+
+test("estateSummary still admits total ignorance when nothing is applying", () => {
+  assert.equal(
+    estateSummary([], [], "failed", []),
+    "The live estate could not be read. Whether anything is running is unknown."
+  );
+});
+
+test("estateSummary carries deploys in progress alongside a partial read", () => {
+  const summary = estateSummary(
+    [{ id: "dep-1", state: "live", health: { status: "healthy", version: "confirmed" } }],
+    [],
+    "failed",
+    ["web-app-paris"]
+  );
+  assert.match(summary, /1 deploy in progress/);
+  assert.match(summary, /read before the error/);
+});

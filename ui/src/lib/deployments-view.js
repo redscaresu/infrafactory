@@ -154,21 +154,35 @@ export function estateSummary(deployments, unreadable, state = "loaded", deployi
   const total = deployments?.length || 0;
   const unread = unreadable?.length || 0;
   const applying = deploying?.length || 0;
+  const applyingText = applying === 0 ? "" : `${applying} deploy${applying === 1 ? "" : "s"} in progress`;
 
   if (state === "loading") return "Reading the live estate…";
 
   if (state === "failed") {
+    // A failed read says nothing about what is APPLYING. That list is
+    // kept from the last successful poll precisely so it survives an
+    // error, and it is the one thing here still known -- so the failed
+    // branch has to carry it too.
+    //
+    // Without this the summary read "Whether anything is running is
+    // unknown." directly above the banner naming a billable apply in
+    // flight. `knownEmpty` was extracted so two derived claims about
+    // emptiness could not contradict each other; this branch was a
+    // third claim that neither of them knew about.
     if (total === 0 && unread === 0) {
-      return "The live estate could not be read. Whether anything is running is unknown.";
+      if (!applyingText) {
+        return "The live estate could not be read. Whether anything is running is unknown.";
+      }
+      return `${applyingText}. The live estate could not be read, so whether anything else is running is unknown.`;
     }
-    return `${describe(deployments, unreadable)} — read before the error, and possibly out of date.`;
+    const read = `${describe(deployments, unreadable)} — read before the error, and possibly out of date.`;
+    return applyingText ? `${applyingText}. ${read}` : read;
   }
 
   if (knownEmpty(deployments, unreadable, state, deploying)) return "Nothing is deployed.";
 
   const described = describe(deployments, unreadable);
   if (applying === 0) return described;
-  const applyingText = `${applying} deploy${applying === 1 ? "" : "s"} in progress`;
   return total === 0 && unread === 0 ? applyingText : `${described}, ${applyingText}`;
 }
 
@@ -387,11 +401,25 @@ export function acceptProgressEvent(event, showingScenario) {
  * server, and absent from the screen it was for.
  */
 export function alreadyLiveWarning(preview) {
+  // Every warning this function can produce is ACCUMULATED, never
+  // chosen between. They answer different questions -- "one is applying
+  // right now", "some are already live", "we could not finish looking"
+  // -- and all three can be true at once.
+  //
+  // An earlier version returned early on `already_deploying`, which
+  // dropped the strongest and most actionable warning of the three
+  // ("dep-x is already deployed; deploying again creates a SECOND
+  // project and a second bill") exactly when the reader was most likely
+  // to be duplicating something. That is the same "must not DISCARD
+  // what was found" rule stated below, broken twelve lines above where
+  // it is written.
+  const parts = [];
+
   // An applying deploy has no record, so the estate cannot see it. It is
   // also the case where a reader is most likely duplicating, and the
   // second attempt would simply be refused.
   if (preview?.already_deploying) {
-    return "This scenario is being deployed right now. A second deploy will be refused until it finishes.";
+    parts.push("This scenario is being deployed right now. A second deploy will be refused until it finishes.");
   }
 
   const live = Array.isArray(preview?.already_live) ? preview.already_live : [];
@@ -409,12 +437,18 @@ export function alreadyLiveWarning(preview) {
     : "";
 
   if (live.length === 0) {
-    return preview?.already_live_unknown
-      ? "The live estate could not be fully read, so whether this scenario is already deployed is unknown. Check the Deployments page before continuing."
-      : "";
+    if (preview?.already_live_unknown) {
+      parts.push(
+        "The live estate could not be fully read, so whether this scenario is already deployed is unknown. Check the Deployments page before continuing."
+      );
+    }
+    return parts.join(" ");
   }
   const ids = live.join(", ");
-  return live.length === 1
-    ? `${ids} is already deployed from this scenario. Deploying again creates a SECOND project and a second bill; it does not replace it.${caveat}`
-    : `${live.length} deployments from this scenario are already live (${ids}). Deploying again adds another.${caveat}`;
+  parts.push(
+    live.length === 1
+      ? `${ids} is already deployed from this scenario. Deploying again creates a SECOND project and a second bill; it does not replace it.${caveat}`
+      : `${live.length} deployments from this scenario are already live (${ids}). Deploying again adds another.${caveat}`
+  );
+  return parts.join(" ");
 }

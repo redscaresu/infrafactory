@@ -251,10 +251,15 @@ the ordering is not.
 
 ### The listing says what is deploying, and that is advisory only
 
-`GET /api/deployments` reports `deploying: []`, so a reloaded page can restore
-what it was showing rather than presenting an enabled button that the server will
-refuse. The refusal is the guard; this only stops the reader being invited to trip
-it. A client that ignores the field still cannot start two.
+`GET /api/deployments` reports `deploying: []`. An applying deploy has no record
+yet, so it cannot appear in `deployments`, and a listing of records alone would
+describe an estate as empty while it was busy creating one. The refusal is the
+guard; this is what stops the reader being invited to trip it. A client that
+ignores the field still cannot start two.
+
+(Written as "so a reloaded page can restore what it was showing". That consumer
+was deleted in the S163e amendment below and the sentence outlived it —
+corrected 2026-09-03.)
 
 The field is always a list, never `null`: an unconfigured deployer and an idle one
 are both "nothing is deploying" to a reader.
@@ -300,3 +305,56 @@ and the page now shows it, saying explicitly that those have no record yet.
 That field was computed and unread after the cut, which is the defect this review
 round kept finding. Rendering it where it belongs was the alternative to deleting
 it, and the gap it fills is real.
+
+
+## Amendment, 2026-09-03 (S163e-fixes): only the server can say nothing started
+
+A fifth review round, and its findings are what a cut leaves behind.
+
+### A rejected request is not evidence that nothing happened
+
+`POST /api/deployments` is deliberately detached from the request that starts it
+(`destructiveContext`), for the reason the whole ADR exists: an apply that keeps
+running after the client goes away ends with a record describing what was made,
+and one that is cancelled halfway does not.
+
+The consequence had not been carried through to the client. The page treated
+**every** failed request as "nothing was started" — deleting the deploy's entry
+and its progress log. A dropped connection mid-apply therefore erased the log of
+a live apply and told the reader it did not exist, while a project was being
+created and billed.
+
+**The server is the only thing that can say nothing started, so it is now the
+only thing that does.** `DeployError.startedNothing` is true for exactly the
+statuses `deployHandler` can produce *before* `Deploy` is called: 400, 404, 405,
+and 423. `500` is deliberately excluded — `writeActionResult` returns it for a
+deploy that ran and errored, which may have created resources.
+
+Everything else keeps the entry, keeps the log, and says the deploy may still be
+running.
+
+### Warnings accumulate; they are never chosen between
+
+"One is applying right now", "some are already live" and "the estate could not be
+fully read" are three different facts, and all three can hold at once. Returning
+the first discarded the most actionable of them — that a second deploy creates a
+second project and a second bill — precisely when the reader was most likely to be
+duplicating something.
+
+### What the estate page can and cannot promise
+
+It cannot be *wrong* about a record that exists; that is the argument for
+deleting the browser-side mirror, and it holds. It is not omniscient: the
+in-progress list is one process's in-memory lock, so a CLI deploy, or an apply in
+flight when the server restarted, is invisible until it finishes and writes its
+record. The scenario page's scope note now says "everything recorded" rather than
+"everything that is running".
+
+### Known cost, accepted
+
+The preview endpoint reads the whole estate on every Deploy click. It is one read
+per deliberate human click against an estate bounded by what somebody is willing
+to pay for, and a cached index would be a second source of truth that can
+disagree with the store — the exact class this arc spent three rounds removing.
+Worth a lighter endpoint when an estate is big enough to notice; not worth an
+index.

@@ -1,6 +1,69 @@
 # STATUS
 
-Last updated: 2026-08-31
+Last updated: 2026-09-03
+
+## 2026-09-03 — S163e-fixes: a rejected fetch is not "nothing happened"
+
+The fifth `/code-review` round on the deploy UI. **13 findings, 12 accepted.**
+They cluster in one place: the cut in S163e removed a browser mirror of server
+state, and the survivors kept describing the machinery that had gone.
+
+**The one that mattered.** `confirmDeploy`'s catch called `forgetDeploy` on
+every rejection, under a comment asserting "Nothing was started". But the
+server deliberately DETACHES the apply from the request that starts it
+(`destructiveContext`), so a sleeping laptop, a wifi hop or a proxy timeout
+leaves the apply running and creating billable infrastructure — and the page
+deleted its progress log and told the reader it did not exist. Only the server
+can say nothing started, so now it does: `DeployError.startedNothing` is set
+for the statuses the handler can only produce *before* the apply begins (400,
+404, 405, 423). Everything else — including a 500 from a deploy that ran and
+failed — keeps the entry and says "may still be running; check the Deployments
+page". Both directions are mutation-checked: forgetting always fails the
+dropped-connection test, forgetting never fails the 423 test.
+
+**A rule broken twelve lines above where it was written.**
+`alreadyLiveWarning` returned early on `already_deploying`, discarding
+`already_live` — directly above its own comment saying it "must not DISCARD
+what was found". The three warnings answer different questions and can all be
+true at once, so they accumulate now. The dropped one is the strongest:
+"dep-existing is already deployed; deploying again creates a SECOND project and
+a second bill".
+
+**The third copy of the emptiness question.** S163e closed this class in
+`knownEmpty`; `estateSummary`'s `failed` branch was a third claim neither knew
+about, so a failed refresh rendered "whether anything is running is unknown"
+directly above the banner naming a billable apply in flight. `deploying`
+survives a failed read on purpose — it is the one thing still known — so the
+failed branch carries it too.
+
+Also: a refusal from a previous attempt outlived it, so a successful retry
+rendered "already deploying" and "deployed" together; `confirmDeploy` was the
+only async path on the page with no `navigation` token, so a failure could
+render on another scenario's page; `liveDeploymentsOf`'s docstring described
+its bool as "complete" when it means the inverse, on the flag that exists to
+prevent a false "nothing is deployed"; three comments and a test docstring
+still described `deploy_complete` and reload-restoration, both deleted in
+S163e; an e2e test was vacuous (the page no longer fetches `/api/deployments`
+on mount, so its route mock was never hit and its assertion was the
+unconditional default); and a preview test asserted `AlreadyLive` was empty
+against a lister that held nothing, so it passed for the wrong reason and would
+pass with the feature removed.
+
+**Overclaims corrected.** The scope note said the Deployments page "lists
+everything that is running". It cannot: the in-progress banner comes from one
+process's in-memory lock, so a CLI deploy, or one in flight across a server
+restart, is invisible until it finishes and writes its record. It now says it
+lists everything *recorded*, and `deploy-store.js`'s "it cannot be wrong" is
+narrowed to what it can actually promise — it cannot disagree with the live
+store the way a mirror can.
+
+**One finding declined.** The preview endpoint does a full estate `List()` per
+Deploy click — a filesystem walk plus a decode per record. Real, and left
+alone: it is one read per deliberate human click, against an estate bounded by
+what a person is willing to pay for, and the alternative is a second index that
+can disagree with the store. Recording the cost here is the fix; a lighter
+endpoint is worth building when the estate is big enough to notice, which is
+the same note S162c left about the mount fetch that has since been deleted.
 
 ## 2026-09-03 — S163e: deleting the machinery instead of repairing it
 

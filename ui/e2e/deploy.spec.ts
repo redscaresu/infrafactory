@@ -735,10 +735,7 @@ test('deploy progress does not leak into the Live Run page', async ({ page }) =>
   await expect(page.locator('body')).not.toContainText('deploy_progress');
 });
 
-test.describe('A reload cannot start a second deploy', () => {
-  // The page was the only guard, and a page is exactly the wrong place
-  // for one: a refresh wipes it, a second tab never had it, and a curl
-  // never consulted it.
+test.describe('What a reloaded page knows', () => {
   // The page no longer mirrors server state. It knows about deploys IT
   // started, and after a reload it does not know — so it says so and
   // points at the thing that does.
@@ -746,6 +743,11 @@ test.describe('A reload cannot start a second deploy', () => {
   // Mirroring produced 36 review findings across three rounds, none of
   // which were about applying to a real cloud rather than a mock. This
   // is less convenient and it cannot be wrong.
+  //
+  // The guard against a second deploy is entirely server-side, which is
+  // why there is no test here for the page refusing one: a refresh
+  // wipes a page-side guard, a second tab never had it, and a curl
+  // never consulted it.
   test('a reloaded page says what it does and does not know', async ({ page }) => {
     await page.route('**/api/deployments/preview**', (route) =>
       route.fulfill({
@@ -775,30 +777,6 @@ test.describe('A reload cannot start a second deploy', () => {
     // the server, where the answer is correct.
     await page.getByTestId('scenario-deploy').click();
     await expect(page.getByTestId('deploy-warning').first()).toContainText('dep-existing');
-  });
-
-  // And a scenario the server is NOT deploying stays available.
-  test('a reload does not disable deploy for an idle scenario', async ({ page }) => {
-    await page.route('**/api/deployments', (route) => {
-      if (route.request().method() !== 'GET') return route.continue();
-      return route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          schema: 'infrafactory.api.deployments.v1',
-          deployments: [],
-          unreadable: [],
-          teardown_allowed: false,
-          deploy_allowed: true,
-          deploying: ['some-other-scenario']
-        })
-      });
-    });
-
-    await page.goto('/scenarios/training/web-app-paris');
-
-    await expect(page.getByTestId('scenario-deploy')).toBeEnabled();
-    await expect(page.getByTestId('deploy-progress')).toHaveCount(0);
   });
 });
 
@@ -959,4 +937,135 @@ test('the confirmation warns about a deployment that already exists', async ({ p
   const warning = page.getByTestId('deploy-warning').first();
   await expect(warning).toContainText('dep-existing');
   await expect(warning).toContainText('SECOND project');
+});
+
+// The server detaches the apply from the request that starts it, so a
+// rejected fetch does NOT mean nothing happened. A sleeping laptop, a
+// wifi hop or a proxy timeout leaves the apply running and creating
+// billable infrastructure.
+//
+// The page used to call forgetDeploy here — deleting the entry and every
+// progress line collected so far — under a comment asserting "Nothing
+// was started". It told the reader a project that was being created did
+// not exist.
+test('a deploy whose connection drops is not called a deploy that never ran', async ({ page }) => {
+  await page.route('**/api/deployments/preview**', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        scenario: 'web-app-paris',
+        deployable: true,
+        expires_at: null,
+        internet_facing: false,
+        deploy_allowed: true,
+        already_live: [],
+        already_live_unknown: false,
+        cost: { components: [], eur_per_hour: 0, unpriced: [], complete: true, modelled: true }
+      })
+    })
+  );
+  // Not a status code: the request never gets an answer at all, which
+  // is what a dropped connection looks like to fetch.
+  await page.route('**/api/deployments', (route) =>
+    route.request().method() === 'POST' ? route.abort('failed') : route.continue()
+  );
+
+  await page.goto('/scenarios/training/web-app-paris');
+  await page.getByTestId('scenario-deploy').click();
+  await page.getByTestId('deploy-confirm-go').click();
+
+  // It reports the truth: we lost track, and the apply may be running.
+  const outcome = page.getByTestId('deploy-outcome');
+  await expect(outcome).toContainText('may still be running');
+  await expect(outcome).toContainText('Deployments page');
+
+  // And it is NOT reported as a refusal. That banner means the server
+  // said nothing started, which it did not say here.
+  await expect(page.getByTestId('deploy-refusal')).toHaveCount(0);
+});
+
+// Three different questions — one is applying, some are already live,
+// the estate could not be fully read — and all three can be true at
+// once. An earlier version returned on the first and dropped the rest.
+test('a scenario that is both live and applying warns about both', async ({ page }) => {
+  await page.route('**/api/deployments/preview**', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        scenario: 'web-app-paris',
+        deployable: true,
+        expires_at: null,
+        internet_facing: false,
+        deploy_allowed: true,
+        already_live: ['dep-existing'],
+        already_live_unknown: false,
+        already_deploying: true,
+        cost: { components: [], eur_per_hour: 0, unpriced: [], complete: true, modelled: true }
+      })
+    })
+  );
+
+  await page.goto('/scenarios/training/web-app-paris');
+  await page.getByTestId('scenario-deploy').click();
+
+  const warning = page.getByTestId('deploy-warning').first();
+  await expect(warning).toContainText('being deployed right now');
+  // The strongest and most actionable of the three, and the one the
+  // early return discarded exactly when the reader was most likely to
+  // be duplicating something.
+  await expect(warning).toContainText('dep-existing');
+  await expect(warning).toContainText('SECOND project');
+});
+
+// A refusal describes the attempt it came from. Left on screen, a retry
+// that SUCCEEDED rendered "already deploying" and "deployed" together.
+test('a refusal does not outlive the attempt that caused it', async ({ page }) => {
+  await page.route('**/api/deployments/preview**', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        scenario: 'web-app-paris',
+        deployable: true,
+        expires_at: null,
+        internet_facing: false,
+        deploy_allowed: true,
+        already_live: [],
+        already_live_unknown: false,
+        cost: { components: [], eur_per_hour: 0, unpriced: [], complete: true, modelled: true }
+      })
+    })
+  );
+
+  let attempt = 0;
+  await page.route('**/api/deployments', (route) => {
+    if (route.request().method() !== 'POST') return route.continue();
+    attempt += 1;
+    return attempt === 1
+      ? route.fulfill({
+          status: 423,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            error: 'web-app-paris is already deploying; wait for it to finish or tear it down'
+          })
+        })
+      : route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ clean: true, failures: [] })
+        });
+  });
+
+  await page.goto('/scenarios/training/web-app-paris');
+  await page.getByTestId('scenario-deploy').click();
+  await page.getByTestId('deploy-confirm-go').click();
+  await expect(page.getByTestId('deploy-refusal')).toContainText('already deploying');
+
+  await page.getByTestId('scenario-deploy').click();
+  await page.getByTestId('deploy-confirm-go').click();
+
+  await expect(page.getByTestId('deploy-outcome')).toContainText('deployed. It is listed');
+  await expect(page.getByTestId('deploy-refusal')).toHaveCount(0);
 });

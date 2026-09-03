@@ -18,10 +18,16 @@ import { acceptProgressEvent } from "./deployments-view.js";
  * machine mirroring server state, and every bug came from the mirror
  * disagreeing with the thing it mirrored.
  *
- * **The estate page already answers "what is running", from the server,
- * correctly, and survives a reload by construction.** A page that has
- * lost track says so and points there. That is less convenient and it
- * cannot be wrong.
+ * **The estate page already answers "what has been deployed", from the
+ * server, and survives a reload by construction.** A page that has lost
+ * track says so and points there. That is less convenient, and it
+ * cannot disagree with the live store the way a mirror can.
+ *
+ * It is not omniscient, and the scope note on the scenario page says
+ * so: a deploy still applying is held in ONE process's in-memory lock,
+ * so a CLI deploy, or one that was in flight when the server restarted,
+ * is invisible until it finishes and writes its record. What the estate
+ * page cannot do is be WRONG about a record that exists.
  *
  * What survives here is only what a tab genuinely knows because it did
  * it: the deploy it started, its log, and how it ended. That outlives

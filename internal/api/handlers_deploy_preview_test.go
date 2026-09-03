@@ -456,8 +456,18 @@ acceptance_criteria:
 
 	cfg := config.Default()
 	cfg.Paths.Scenarios = dir
+
+	// The estate is NOT empty. An empty lister would make the
+	// `AlreadyLive` assertion below pass for the wrong reason -- there
+	// was nothing to find -- and it would keep passing with the
+	// in-flight warning removed entirely. A live record for a DIFFERENT
+	// scenario proves the lister was consulted and answered, and that
+	// the applying scenario is still absent from what it returned.
 	srv := NewServer(ServerConfig{
-		Config: cfg, Deployments: &fakeDeployments{},
+		Config: cfg,
+		Deployments: &fakeDeployments{deployments: []livestore.Deployment{
+			{ID: "dep-other", Scenario: "something-else", State: livestore.StateLive},
+		}},
 		Deployer: &fakeDeployer{inFlight: []string{"previewable"}},
 	})
 
@@ -467,8 +477,12 @@ acceptance_criteria:
 
 	var got deployPreview
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
-	assert.True(t, got.AlreadyDeploying)
-	assert.Empty(t, got.AlreadyLive, "it has no record yet, which is the point")
+	assert.True(t, got.AlreadyDeploying,
+		"the estate cannot see an apply in progress; the in-flight list is the only thing that can")
+	assert.False(t, got.AlreadyLiveUnknown, "the estate was read in full")
+	assert.Empty(t, got.AlreadyLive,
+		"a readable estate that holds another scenario's deployment, and no record of this one -- "+
+			"registration runs after the apply returns")
 }
 
 // A blank scenario name never looked, so it must not claim it did.

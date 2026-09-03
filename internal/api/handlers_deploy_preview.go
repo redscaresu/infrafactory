@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"time"
 
@@ -153,11 +154,7 @@ func deployPreviewHandler(state *serverState) http.HandlerFunc {
 		// runs after the apply returns -- so the estate cannot see the
 		// one case where the reader is most likely to be duplicating.
 		// The in-flight list can.
-		for _, deploying := range deployingScenarios(state) {
-			if deploying == sc.Name {
-				preview.AlreadyDeploying = true
-			}
-		}
+		preview.AlreadyDeploying = slices.Contains(deployingScenarios(state), sc.Name)
 		writeJSON(w, http.StatusOK, preview)
 	}
 }
@@ -270,12 +267,20 @@ func previewFor(sc *scenario.Scenario, ttlOverride string, now time.Time) deploy
 }
 
 // liveDeploymentsOf names the deployments of a scenario that have not
-// been released, and reports whether the answer is complete.
+// been released, and reports whether the answer is UNKNOWN -- that is,
+// whether something might be missing from it.
 //
-// The second return is not a detail: an empty list is a CLAIM -- checked,
-// and nothing exists -- and a guard whose job is warning about existing
-// billable infrastructure must not make it without having looked. Every
-// path that did not look says so.
+// The polarity is worth stating because it is the opposite of the one a
+// reader guesses from the name of the caller's field. `true` means "do
+// not trust this list to be everything"; it feeds
+// `DeployPreview.AlreadyLiveUnknown`, and every `return out, true`
+// below is a path that did not, or could not, finish looking.
+//
+// The second return is not a detail: an empty list is a CLAIM --
+// checked, and nothing exists -- and a guard whose job is warning about
+// existing billable infrastructure must not make it without having
+// looked. Inverting this flag would let an estate with a corrupt record
+// claim it had been read in full.
 func liveDeploymentsOf(state *serverState, name string) ([]string, bool) {
 	out := []string{}
 	if name == "" {

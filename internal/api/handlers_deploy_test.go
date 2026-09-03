@@ -238,10 +238,11 @@ func TestDeployStreamsItsProgressToWatchers(t *testing.T) {
 				Data map[string]any `json:"data"`
 			}
 			require.NoError(t, json.Unmarshal(raw, &e))
-			// A `deploy_complete` also arrives, carrying the outcome.
-			// It is what lets a tab that did not issue the POST learn
-			// the deploy finished; only the progress lines are under
-			// test here.
+			// Progress lines are the ONLY thing on this stream.
+			// There is no terminal event: S163e deleted it along with
+			// the machinery that consumed it, because a tab that did
+			// not issue the POST has no business inferring an outcome
+			// from a broadcast -- the estate page reads the record.
 			require.Equal(t, "deploy_progress", e.Type, "no other event kind belongs on this stream")
 			// Comma-ok, not a bare assertion: a regression that drops
 			// `subject` or nests it would panic the whole test binary
@@ -306,7 +307,13 @@ func TestASecondDeployOfTheSameScenarioIsRefused(t *testing.T) {
 		"a refusal is not an action result and must not be mistakable for one")
 }
 
-// So a page that has just been reloaded can restore what it was showing.
+// An applying deploy has no record yet, so it cannot appear in
+// `deployments` -- and a listing that showed only records would call an
+// estate empty while it was busy creating one. The estate page renders
+// this list as its own banner.
+//
+// Not for restoring a reloaded page: that consumer was deleted in
+// S163e, and the field outlived it.
 func TestTheListingNamesWhatIsCurrentlyDeploying(t *testing.T) {
 	srv := NewServer(ServerConfig{
 		Config: config.Default(), Deployments: &fakeDeployments{},
