@@ -92,3 +92,59 @@ func drainProgress(client *api.Client) []string {
 		}
 	}
 }
+
+// The same wiring question for `test`, which is the Layer 3 path the
+// Live Run page watches.
+//
+// S163 gave `deploy` live stage progress and left this one passing
+// `nil`, so a PR gate's apply was silent for minutes on the screen
+// somebody is actually looking at. Asserting it from INSIDE the apply,
+// because "arrives eventually" is what the silent version also did.
+func TestStageProgressReachesTheRunConsoleWhileTheApplyIsRunning(t *testing.T) {
+	hub := api.NewHub()
+	client := api.NewTestClient(256)
+	hub.Register(client)
+
+	logger := NewAppLogger(api.NewWebSocketSink(hub))
+	stageLog := newStageLogWriter(logger, "test")
+
+	var duringApply []string
+	runner := harness.CommandRunnerFunc(func(_ context.Context, cmd harness.Command) (harness.CommandResult, error) {
+		if len(cmd.Args) > 0 && cmd.Args[0] == "apply" {
+			duringApply = drainLogDetails(client)
+		}
+		return harness.CommandResult{Stdout: []byte("ok")}, nil
+	})
+
+	_, err := harness.NewSandboxDeployHarness(runner).Run(
+		context.Background(), t.TempDir(), map[string]string{}, stageLog)
+	require.NoError(t, err)
+	require.NoError(t, stageLog.Close())
+
+	seen := strings.Join(duringApply, "\n")
+	assert.Contains(t, seen, "init: running",
+		"a watcher must learn init happened before the apply finishes")
+	assert.Contains(t, seen, "apply: running",
+		"and that the apply is what is taking the time")
+}
+
+// drainLogDetails reads the `log` events a run-console client receives.
+func drainLogDetails(client *api.Client) []string {
+	var out []string
+	for {
+		raw, ok := client.TryReceive()
+		if !ok {
+			return out
+		}
+		var envelope struct {
+			Type string   `json:"type"`
+			Data LogEntry `json:"data"`
+		}
+		if err := json.Unmarshal(raw, &envelope); err != nil {
+			continue
+		}
+		if envelope.Type == "log" && envelope.Data.Detail != "" {
+			out = append(out, envelope.Data.Detail)
+		}
+	}
+}

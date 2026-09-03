@@ -640,7 +640,14 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 			// HCL comes from a pull request, which is precisely where an
 			// unvetted resource type would arrive from.
 			{
-				sandboxResult, sandboxErr := runtime.Deps.SandboxDeploy.Run(ctx, outputDir, sandboxEnv, nil)
+				// Stage progress goes to the structured log, which is
+				// what the Live Run page renders. Without it the Layer 3
+				// apply is silent for minutes on the screen somebody is
+				// actually watching while a PR gate runs -- the failure
+				// S163 fixed for `deploy` and left here.
+				stageLog := newStageLogWriter(runtime.Logger, "test")
+				sandboxResult, sandboxErr := runtime.Deps.SandboxDeploy.Run(ctx, outputDir, sandboxEnv, stageLog)
+				_ = stageLog.Close()
 				stages, failures = appendSandboxDeployResult(stages, failures, sandboxResult, sandboxErr)
 				if sandboxResult != nil && len(sandboxResult.Plan.Stdout) > 0 {
 					planLiveText = []byte(sandboxResult.Plan.Stdout)

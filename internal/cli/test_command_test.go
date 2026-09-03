@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/redscaresu/infrafactory/internal/config"
 	"github.com/redscaresu/infrafactory/internal/feedback"
 	"github.com/redscaresu/infrafactory/internal/harness"
@@ -46,10 +48,11 @@ func (f *fakeDestroyHarness) Run(ctx context.Context, _ string, _ map[string]str
 }
 
 type fakeSandboxDeployHarness struct {
-	result  *harness.SandboxDeployResult
-	err     error
-	calls   int
-	lastCtx context.Context
+	gotProgress bool
+	result      *harness.SandboxDeployResult
+	err         error
+	calls       int
+	lastCtx     context.Context
 	// onRun fires during the apply, so a test can move the world at the
 	// moment a real apply would -- an upgrade's version changes because
 	// the apply changed it, not before.
@@ -65,7 +68,12 @@ type fakeSandboxDeployHarness struct {
 // destroy, so a fake apply that leaves no state makes every Layer 3 test
 // fail at capture -- which is correct fail-closed behaviour, just not
 // what these tests are exercising.
-func (f *fakeSandboxDeployHarness) Run(ctx context.Context, workDir string, _ map[string]string, _ io.Writer) (*harness.SandboxDeployResult, error) {
+func (f *fakeSandboxDeployHarness) Run(ctx context.Context, workDir string, _ map[string]string, progress io.Writer) (*harness.SandboxDeployResult, error) {
+	// Recorded so a test can assert the call site actually HANDS the
+	// harness somewhere to report. Dropping that argument makes the
+	// Layer 3 apply silent for minutes on the Live Run page, and a test
+	// that builds the harness itself cannot notice.
+	f.gotProgress = progress != nil
 	f.calls++
 	f.lastCtx = ctx
 	if f.err == nil && workDir != "" {
@@ -864,6 +872,16 @@ func TestTestCommandRunsSandboxLayerWhenEnabled(t *testing.T) {
 	if !strings.Contains(stdout.String(), "- sandbox_deploy/destroy: pass") {
 		t.Fatalf("expected sandbox destroy stage, got:\n%s", stdout.String())
 	}
+
+	// The harness must be HANDED somewhere to report, or the Layer 3
+	// apply is silent for minutes on the Live Run page -- the screen a
+	// PR gate is watched on. S163 gave `deploy` this and left `test`
+	// passing nil.
+	//
+	// Asserted at the CALL SITE, because a test that builds the harness
+	// itself cannot notice the argument being dropped here.
+	assert.True(t, sandboxDeploy.gotProgress,
+		"the sandbox apply must report its stages, or the run console shows nothing for minutes")
 }
 
 func TestTestCommandAutoDestroysSandboxResourcesAfterProbeFailure(t *testing.T) {
