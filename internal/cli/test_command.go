@@ -640,7 +640,7 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 			// HCL comes from a pull request, which is precisely where an
 			// unvetted resource type would arrive from.
 			{
-				sandboxResult, sandboxErr := runtime.Deps.SandboxDeploy.Run(ctx, outputDir, sandboxEnv)
+				sandboxResult, sandboxErr := runtime.Deps.SandboxDeploy.Run(ctx, outputDir, sandboxEnv, nil)
 				stages, failures = appendSandboxDeployResult(stages, failures, sandboxResult, sandboxErr)
 				if sandboxResult != nil && len(sandboxResult.Plan.Stdout) > 0 {
 					planLiveText = []byte(sandboxResult.Plan.Stdout)

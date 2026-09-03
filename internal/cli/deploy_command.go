@@ -144,7 +144,10 @@ func runDeployCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime
 			return nil, envErr
 		}
 
-		return runtime.Deps.SandboxDeploy.Run(applyCtx, workDir, sandboxEnv)
+		// `progress` is the caller's stream -- the terminal for a CLI
+		// deploy, and the websocket for a UI one. Without it the apply
+		// is silent for minutes, which reads as hung (S163).
+		return runtime.Deps.SandboxDeploy.Run(applyCtx, workDir, sandboxEnv, progress)
 	})
 
 	stages := append([]StageSummary{}, runProjectStages...)

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -180,7 +181,7 @@ func NewLiveDeployer(scenarioRoot string, newRuntime func() (*CommandRuntime, er
 }
 
 // Deploy applies a scenario and leaves it running under a TTL.
-func (d *LiveDeployer) Deploy(ctx context.Context, scenarioName, ttl string) (api.ActionResult, error) {
+func (d *LiveDeployer) Deploy(ctx context.Context, scenarioName, ttl string, progress io.Writer) (api.ActionResult, error) {
 	// A NAME, resolved here, never a path from the caller. `deploy`
 	// takes a filesystem path, and accepting one over HTTP would let a
 	// request name any YAML on the machine -- including one outside the
@@ -206,16 +207,20 @@ func (d *LiveDeployer) Deploy(ctx context.Context, scenarioName, ttl string) (ap
 		}
 	}
 
-	// Output is captured rather than printed: this is an API call, and
-	// the command's stdout contract is not the response body.
-	var out, progress strings.Builder
+	// stdout is CAPTURED -- it carries the machine-output contract that
+	// deployOutcome parses, and is not the response body.
+	//
+	// stderr is TEE'd: the command's human progress goes to the caller's
+	// writer as it happens, and is also kept so a failure that produced
+	// no structured output can still be explained.
+	var out, progressCopy strings.Builder
 	cmd.SetOut(&out)
-	cmd.SetErr(&progress)
+	cmd.SetErr(deployStderr(progress, &progressCopy))
 	cmd.SetContext(ctx)
 
 	deployErr := runDeployCommand(cmd, []string{path}, runtime)
 
-	result := deployOutcome(out.String(), progress.String(), deployErr)
+	result := deployOutcome(out.String(), progressCopy.String(), deployErr)
 	if deployErr != nil && result.Failures == nil {
 		// The command failed before it produced structured output --
 		// a usage error, a missing scenario. Surfacing the raw error
@@ -226,6 +231,23 @@ func (d *LiveDeployer) Deploy(ctx context.Context, scenarioName, ttl string) (ap
 		result.Clean = false
 	}
 	return result, nil
+}
+
+// deployStderr builds the command's stderr: live to the caller if there
+// is one, and always into a copy.
+//
+// Split out because it is the only place a nil progress writer is
+// handled, and a test that never gets past building a runtime cannot
+// reach it -- which is exactly what the first attempt at covering this
+// did.
+//
+// io.MultiWriter would store a nil io.Writer and panic on the first
+// write, so the nil case must not reach it.
+func deployStderr(progress io.Writer, copy io.Writer) io.Writer {
+	if progress == nil {
+		return copy
+	}
+	return io.MultiWriter(progress, copy)
 }
 
 // deployOutcome turns the command's JSON output into the neutral shape.

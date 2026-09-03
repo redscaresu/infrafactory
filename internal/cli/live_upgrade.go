@@ -191,7 +191,7 @@ func runLiveUpgradeCommand(cmd *cobra.Command, args []string, runtime *CommandRu
 	}
 
 	applyResult, applyErr := runDeployApply(cmd, ctx, signal.NotifyContext, func(applyCtx context.Context) (*harness.SandboxDeployResult, error) {
-		return runtime.Deps.SandboxDeploy.Run(applyCtx, d.WorkDir, sandboxEnv)
+		return runtime.Deps.SandboxDeploy.Run(applyCtx, d.WorkDir, sandboxEnv, progress)
 	})
 	stages, failures = appendSandboxDeployResult(stages, failures, applyResult, applyErr)
 

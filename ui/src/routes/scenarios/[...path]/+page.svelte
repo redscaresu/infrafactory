@@ -1,13 +1,23 @@
 <script lang="ts">
   import { afterNavigate } from "$app/navigation";
-  import { onDestroy } from "svelte";
+  import { onDestroy, onMount } from "svelte";
   import { page } from "$app/stores";
   import { api } from "$lib/api";
+  import { connectWS } from "$lib/ws";
   import {
     deployConfirmation,
     deployWarnings,
     teardownOutcome
   } from "$lib/deployments-view.js";
+  import {
+    beginDeploy,
+    deploys,
+    finishDeploy,
+    isConnected,
+    isRunning,
+    useConnector,
+    watch as watchDeploys
+  } from "$lib/deploy-store.js";
   import { modeSummary, normalizeRunOptions } from "$lib/scenario-run.js";
   import type { DeployPreview, ScenarioLayer3StatusResponse, ScenarioRunModeResponse } from "$lib/types";
 
@@ -79,8 +89,14 @@
   // Clear the debounce timer on destroy so navigating away during the
   // 500ms window doesn't fire a stale validation against a torn-down
   // component (the validationVersion guard is per-instance).
+  // The shared socket stays open while this page is mounted, and the
+  // store keeps it open beyond that if a deploy is still running -- so
+  // leaving and returning finds the log intact rather than frozen.
+  onMount(() => watchDeploys());
+
   onDestroy(() => {
     if (validationTimer) clearTimeout(validationTimer);
+    resetDeployState();
   });
 
   $: scenarioPath = ($page.params.path || "").toString();
@@ -152,13 +168,57 @@
   // which is the move pass 126 argued for and pass 127 had to learn
   // twice. It also gives the reader feedback that the click landed.
   let previewing = false;
-  let deploying = false;
-  let deployOutcomeMessage = "";
-  let deployOk = false;
+
+  // A deploy runs for minutes, and minutes of silence reads as broken:
+  // a reader cannot tell a long apply from a hung one, and the
+  // difference matters when the thing running is creating billable
+  // infrastructure (S163).
+  //
+  // The in-flight state lives in a MODULE-LEVEL store, not here.
+  //
+  // This component is reused between scenarios and destroyed outright
+  // when you leave the section, while a deploy runs for minutes on a
+  // server that has no in-flight lock. Holding it here produced two
+  // review findings: navigating away and back showed a real, billable
+  // apply as an unlabelled disabled button with no log and no warning,
+  // and leaving the section entirely let a SECOND deploy of the same
+  // scenario be started.
+  //
+  // Everything below is scoped to the scenario ON SCREEN, so another
+  // scenario's deploy never renders here and this scenario's deploy
+  // renders whether or not this component was alive when it began.
+  useConnector(connectWS);
+
+  $: deployEntry = detail?.name ? $deploys[detail.name] : undefined;
+  $: deployProgress = deployEntry?.progress ?? [];
+  $: deploying = detail?.name ? isRunning($deploys, detail.name) : false;
+  $: deployOutcome = deployEntry?.outcome ?? null;
+  // A dropped socket and "nothing has happened yet" both produce an
+  // empty log, and rendering them the same way tells the reader an apply
+  // is quiet when the truth is that it is UNOBSERVED.
+  $: streamConnected = isConnected($deploys);
+
+  /**
+   * resetDeployState clears what belongs to THIS page's confirmation
+   * dialog, and nothing else.
+   *
+   * It deliberately does not touch the deploy stream. That lives in the
+   * store, survives navigation and component destruction, and is scoped
+   * by scenario -- so a page showing B reads nothing for B while A keeps
+   * applying, and coming back to A finds its log still there.
+   *
+   * The previous version cleared it here, which is what produced the
+   * "running apply rendered as an unlabelled disabled button" and
+   * "second deploy startable" findings.
+   */
+  function resetDeployState() {
+    confirmingDeploy = false;
+    preview = null;
+    previewError = "";
+  }
 
   async function openDeployConfirmation() {
     previewError = "";
-    deployOutcomeMessage = "";
 
     // A preview takes a round trip and the reader can navigate during
     // it, so the response is discarded if it arrives after the page has
@@ -195,31 +255,20 @@
     const target = preview?.scenario;
     if (!target) return;
 
-    deploying = true;
+    // The store owns everything about an in-flight deploy, so it
+    // survives this component being reused or destroyed. It is keyed by
+    // scenario, which is what the progress events carry.
+    beginDeploy(target);
+    confirmingDeploy = false;
+
     try {
-      const result = await api.deployScenario(target);
-      const outcome = teardownOutcome(result);
-      deployOk = outcome.ok;
-      // NAMED, always. An apply takes minutes and the reader can
-      // navigate during it, so this message can land on a different
-      // scenario's page -- and an unattributed "Deployed." there is a
-      // claim about the wrong thing.
-      //
-      // Attributed rather than discarded: the deploy really did create
-      // infrastructure, and throwing the news away because the reader
-      // moved is the worse of the two failures.
-      deployOutcomeMessage = outcome.ok
-        ? `${target}: deployed. It is listed on the Deployments page until its TTL expires.`
-        : `${target}: ${outcome.message}`;
+      finishDeploy(target, teardownOutcome(await api.deployScenario(target)));
     } catch (err) {
-      deployOk = false;
-      deployOutcomeMessage =
-        err instanceof Error
-          ? `${target}: deploy could not be completed: ${err.message}`
-          : `${target}: deploy failed.`;
-    } finally {
-      deploying = false;
-      confirmingDeploy = false;
+      finishDeploy(target, {
+        ok: false,
+        message:
+          err instanceof Error ? `deploy could not be completed: ${err.message}` : "deploy failed."
+      });
     }
   }
 
@@ -289,10 +338,7 @@
     // on screen, even though accepting it would now be harmless.
     // Leaving it visible invites the reader to trust a dialog about
     // something they are no longer looking at.
-    confirmingDeploy = false;
-    preview = null;
-    previewError = "";
-    deployOutcomeMessage = "";
+    resetDeployState();
     // `detail` is cleared too, and that is the STRUCTURAL half of this.
     //
     // The whole page is inside `{#if detail}`, so clearing it means
@@ -438,7 +484,11 @@
       data-testid="scenario-deploy"
       on:click={openDeployConfirmation}
       disabled={deploying || previewing}
-      >{deploying ? "Deploying…" : previewing ? "Checking…" : "Deploy…"}</button
+      >{deploying
+        ? `Deploying ${detail?.name ?? "…"}`
+        : previewing
+          ? "Checking…"
+          : "Deploy…"}</button
     >
   </div>
 
@@ -488,12 +538,43 @@
     </div>
   {/if}
 
-  {#if deployOutcomeMessage}
+  <!-- Read from the store, scoped to the scenario on screen. Another
+       scenario's deploy never renders here, and this scenario's deploy
+       renders whether or not this component was alive when it began. -->
+  {#if deploying || deployProgress.length > 0}
+    <div
+      class="mt-3 rounded border border-slate-300 bg-slate-900 px-3 py-2 font-mono text-xs text-slate-100"
+      data-testid="deploy-progress"
+    >
+      {#if deployProgress.length === 0 && !streamConnected}
+        <!-- Not "Starting…": we are not receiving, so we do not know
+             whether anything has happened. The apply is unaffected --
+             it is detached from this page entirely. -->
+        <p class="text-amber-300" data-testid="deploy-progress-disconnected">
+          Not receiving progress — the apply is still running, but this page cannot see it.
+        </p>
+      {:else if deployProgress.length === 0}
+        <p class="text-slate-400">Starting…</p>
+      {:else}
+        {#each deployProgress as line}
+          <p>{line}</p>
+        {/each}
+      {/if}
+    </div>
+  {/if}
+
+  <!-- Named, always. An apply takes minutes and the reader can navigate
+       during it, so an unattributed "deployed." is a claim about the
+       wrong thing. The store keys outcomes by scenario, so this one is
+       this scenario's by construction. -->
+  {#if deployOutcome}
     <p
-      class={`mt-3 text-sm ${deployOk ? "text-emerald-800" : "font-semibold text-rose-800"}`}
+      class={`mt-3 text-sm ${deployOutcome.ok ? "text-emerald-800" : "font-semibold text-rose-800"}`}
       data-testid="deploy-outcome"
     >
-      {deployOutcomeMessage}
+      {detail?.name}: {deployOutcome.ok
+        ? "deployed. It is listed on the Deployments page until its TTL expires."
+        : deployOutcome.message}
     </p>
   {/if}
   {#if status}<p class="mt-3 text-sm text-slate-700">{status}</p>{/if}

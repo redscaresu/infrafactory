@@ -68,3 +68,24 @@ func (h *Hub) Run(ctx context.Context) {
 		close(c.send)
 	}
 }
+
+// NewTestClient builds a hub client with no connection.
+//
+// Broadcast never touches the socket, so a test can observe exactly what
+// a browser would receive without one. Exported because the wiring this
+// supports crosses package boundaries: `internal/cli` needs to assert
+// that stage progress reaches a websocket subscriber, and that path was
+// broken twice while every unit test passed.
+func NewTestClient(buffer int) *Client {
+	return &Client{send: make(chan []byte, buffer)}
+}
+
+// TryReceive takes the next queued message, if any.
+func (c *Client) TryReceive() ([]byte, bool) {
+	select {
+	case msg := <-c.send:
+		return msg, true
+	default:
+		return nil, false
+	}
+}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -27,14 +28,20 @@ type fakeDeployer struct {
 	deadline time.Time
 	hadDl    bool
 	ctxErr   error
+	// progressLines is written to the progress writer, so a test can
+	// assert what a watching client would have seen.
+	progressLines string
 }
 
-func (f *fakeDeployer) Deploy(ctx context.Context, name, ttl string) (ActionResult, error) {
+func (f *fakeDeployer) Deploy(ctx context.Context, name, ttl string, progress io.Writer) (ActionResult, error) {
 	f.calls = append(f.calls, name)
 	f.ttls = append(f.ttls, ttl)
 	f.sawCtx = ctx
 	f.ctxErr = ctx.Err()
 	f.deadline, f.hadDl = ctx.Deadline()
+	if progress != nil && f.progressLines != "" {
+		_, _ = io.WriteString(progress, f.progressLines)
+	}
 	return f.result, f.err
 }
 
@@ -197,4 +204,69 @@ func TestDeployStillReportsARealFailureAsAServerError(t *testing.T) {
 	rec := postDeploy(t, srv, `{"scenario":"lb-serving-paris"}`)
 
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+}
+
+// Minutes of silence reads as broken: a reader cannot tell a long apply
+// from a hung one, and the difference matters when the thing running is
+// creating billable infrastructure.
+func TestDeployStreamsItsProgressToWatchers(t *testing.T) {
+	hub := NewHub()
+	client := &Client{send: make(chan []byte, 256)}
+	hub.Register(client)
+
+	srv := NewServer(ServerConfig{
+		Config: config.Default(), Deployments: &fakeDeployments{}, Hub: hub,
+		Deployer: &fakeDeployer{
+			result:        ActionResult{Clean: true},
+			progressLines: "Deploying lb-serving-paris\n  workdir: /tmp/x\n",
+		},
+	})
+
+	rec := postDeploy(t, srv, `{"scenario":"lb-serving-paris"}`)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var lines []string
+	var subjects []string
+	for {
+		select {
+		case raw := <-client.send:
+			var e struct {
+				Type string            `json:"type"`
+				Data map[string]string `json:"data"`
+			}
+			require.NoError(t, json.Unmarshal(raw, &e))
+			assert.Equal(t, "deploy_progress", e.Type)
+			lines = append(lines, e.Data["line"])
+			subjects = append(subjects, e.Data["subject"])
+		default:
+			// Indentation is PRESERVED. The deploy command indents
+			// sub-steps on purpose, and flattening them here would
+			// throw away structure the reader uses to see where they
+			// are in a multi-minute apply.
+			require.Equal(t, []string{"Deploying lb-serving-paris", "  workdir: /tmp/x"}, lines)
+			for _, s := range subjects {
+				assert.Equal(t, "lb-serving-paris", s,
+					"a line arriving on a page the reader moved to must say what it is about")
+			}
+			return
+		}
+	}
+}
+
+// A deploy must not depend on anybody LISTENING: the hub exists but has
+// no clients, which is the ordinary case.
+//
+// Note this does not exercise the sink's nil-hub branch -- NewServer
+// substitutes a hub when ServerConfig.Hub is nil, so `state.hub` is
+// never nil here. That branch is covered directly by
+// TestProgressSinkWithNoHubIsHarmless.
+func TestDeployWorksWithNobodyListening(t *testing.T) {
+	srv := NewServer(ServerConfig{
+		Config: config.Default(), Deployments: &fakeDeployments{},
+		Deployer: &fakeDeployer{result: ActionResult{Clean: true}, progressLines: "working\n"},
+	})
+
+	rec := postDeploy(t, srv, `{"scenario":"lb-serving-paris"}`)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
 }

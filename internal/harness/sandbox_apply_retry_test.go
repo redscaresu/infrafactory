@@ -51,7 +51,7 @@ func TestSandboxApplyRetriesOnceAfterTransientFailure(t *testing.T) {
 		okResp(),  // apply #2 -- succeeds
 	}}
 
-	result, err := NewSandboxDeployHarness(runner).Run(context.Background(), t.TempDir(), nil)
+	result, err := NewSandboxDeployHarness(runner).Run(context.Background(), t.TempDir(), nil, nil)
 
 	if err != nil {
 		t.Fatalf("expected the retry to recover the apply, got %v", err)
@@ -74,7 +74,7 @@ func TestSandboxApplyStopsAfterBoundedAttempts(t *testing.T) {
 		errResp(), // apply #2
 	}}
 
-	_, err := NewSandboxDeployHarness(runner).Run(context.Background(), t.TempDir(), nil)
+	_, err := NewSandboxDeployHarness(runner).Run(context.Background(), t.TempDir(), nil, nil)
 
 	if err == nil {
 		t.Fatal("expected the deploy to fail after both attempts")
@@ -109,7 +109,7 @@ func TestSandboxApplyDoesNotRetryAfterCancellation(t *testing.T) {
 		cancelFunc: cancel,
 	}
 
-	_, err := NewSandboxDeployHarness(runner).Run(ctx, t.TempDir(), nil)
+	_, err := NewSandboxDeployHarness(runner).Run(ctx, t.TempDir(), nil, nil)
 
 	if err == nil {
 		t.Fatal("expected a cancelled apply to fail")
@@ -122,7 +122,7 @@ func TestSandboxApplyDoesNotRetryAfterCancellation(t *testing.T) {
 func TestSandboxApplyRecordsSingleAttemptOnFirstTrySuccess(t *testing.T) {
 	runner := &scriptedRunner{responses: []runnerResponse{okResp(), okResp(), okResp()}}
 
-	result, err := NewSandboxDeployHarness(runner).Run(context.Background(), t.TempDir(), nil)
+	result, err := NewSandboxDeployHarness(runner).Run(context.Background(), t.TempDir(), nil, nil)
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

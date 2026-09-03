@@ -162,3 +162,15 @@ func validateJSON(payload []byte) error {
 	var body any
 	return json.Unmarshal(payload, &body)
 }
+
+// CommandRunnerFunc adapts a function to CommandRunner.
+//
+// Exported so a test outside this package can supply a fake subprocess
+// while using the REAL harness. That distinction matters: the harness is
+// where stage reporting lives, and a test that fakes the harness cannot
+// notice the harness being handed no writer.
+type CommandRunnerFunc func(context.Context, Command) (CommandResult, error)
+
+func (f CommandRunnerFunc) Run(ctx context.Context, cmd Command) (CommandResult, error) {
+	return f(ctx, cmd)
+}

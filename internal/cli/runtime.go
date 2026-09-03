@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -29,7 +30,14 @@ type DestroyHarnessRunner interface {
 }
 
 type SandboxDeployHarnessRunner interface {
-	Run(context.Context, string, map[string]string) (*harness.SandboxDeployResult, error)
+	// The io.Writer receives STAGE progress as the apply proceeds.
+	//
+	// It is a parameter rather than a field on the harness because the
+	// harness is built once and shared, and two deploys running at once
+	// must not write into each other's stream.
+	//
+	// nil is the ordinary case for a caller with nowhere to send it.
+	Run(context.Context, string, map[string]string, io.Writer) (*harness.SandboxDeployResult, error)
 }
 
 type SandboxDestroyHarnessRunner interface {

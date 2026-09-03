@@ -92,7 +92,7 @@ func TestSandboxHarnessesDeclareStripEnv(t *testing.T) {
 	}
 
 	recorder := &recordingRunner{}
-	if _, err := harness.NewSandboxDeployHarness(recorder).Run(context.Background(), t.TempDir(), map[string]string{}); err != nil {
+	if _, err := harness.NewSandboxDeployHarness(recorder).Run(context.Background(), t.TempDir(), map[string]string{}, nil); err != nil {
 		t.Fatalf("sandbox deploy: %v", err)
 	}
 	if _, err := harness.NewSandboxDestroyHarness(recorder).Run(context.Background(), t.TempDir(), map[string]string{}); err != nil {

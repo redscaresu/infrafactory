@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"time"
 )
 
 const LiveStateFilename = "terraform-live.tfstate"
@@ -107,7 +109,80 @@ func (e *SandboxDeployError) Is(target error) bool {
 	return target == ErrSandboxDeployFailed
 }
 
-func (h *SandboxDeployHarness) Run(ctx context.Context, workDir string, env map[string]string) (*SandboxDeployResult, error) {
+// stageProgress reports what the harness is doing, as it does it.
+//
+// # Why the harness has to be the one reporting
+//
+// A Layer 3 apply takes minutes, and until this existed the only thing
+// written to a caller's progress stream during all of it was nothing.
+// `CommandRunner.Run` returns a fully buffered `CommandResult`, so
+// `tofu`'s own output does not exist until each process exits -- there
+// is no stream to tee. The harness is the only place that knows a stage
+// has BEGUN.
+//
+// Stage granularity rather than raw tofu output, deliberately: it is
+// what a reader needs ("where is it up to?"), it is a predictable
+// handful of lines rather than a wall of provider chatter, and it does
+// not change what `infrafactory deploy` prints beyond a few lines.
+//
+// A nil writer is the ordinary case for callers that have nowhere to
+// send it, and must cost nothing.
+type stageProgress struct {
+	out io.Writer
+}
+
+func (p stageProgress) start(stage string) time.Time {
+	if p.out != nil {
+		_, _ = fmt.Fprintf(p.out, "  %s: running\n", stage)
+	}
+	return time.Now()
+}
+
+// finished reports how a stage ENDED, which is not the same as that it
+// ended.
+//
+// Reporting every stage as "done" regardless of its error made the last
+// line a watcher saw on a failed deploy `init: done in 2s`, followed by
+// silence -- a failure rendered as completion, and a stream that stops
+// without saying why. Both are the specific sins this project holds
+// itself against.
+func (p stageProgress) finished(stage string, started time.Time, err error) {
+	if p.out == nil {
+		return
+	}
+	elapsed := time.Since(started).Round(time.Second)
+	if err != nil {
+		_, _ = fmt.Fprintf(p.out, "  %s: FAILED after %s: %v\n", stage, elapsed, err)
+		return
+	}
+	_, _ = fmt.Fprintf(p.out, "  %s: done in %s\n", stage, elapsed)
+}
+
+// retrying is reported because a silent retry is indistinguishable from
+// a stage that is simply slow -- and a Layer 3 apply really does retry
+// after a transient provider error, which a reader watching a frozen log
+// would otherwise read as hung.
+func (p stageProgress) retrying(stage string, attempt, of int, err error) {
+	if p.out != nil {
+		_, _ = fmt.Fprintf(p.out, "  %s: attempt %d of %d failed (%v); retrying\n", stage, attempt, of, err)
+	}
+}
+
+// givingUp is the other half, and it exists because "retrying" said on
+// the last attempt is a promise the code does not keep.
+//
+// The interrupt path is worse: there the operator has asked us to stop
+// touching the API, and a stream whose final line announces a retry says
+// the opposite of what is about to happen.
+func (p stageProgress) givingUp(stage string, attempts int) {
+	if p.out != nil {
+		_, _ = fmt.Fprintf(p.out, "  %s: giving up after %d attempt(s)\n", stage, attempts)
+	}
+}
+
+func (h *SandboxDeployHarness) Run(ctx context.Context, workDir string, env map[string]string, progress io.Writer) (*SandboxDeployResult, error) {
+	report := stageProgress{out: progress}
+
 	initCmd := Command{
 		Name:     "tofu",
 		Args:     []string{"init"},
@@ -115,7 +190,9 @@ func (h *SandboxDeployHarness) Run(ctx context.Context, workDir string, env map[
 		Env:      env,
 		StripEnv: SandboxStripEnv,
 	}
+	initStarted := report.start("init")
 	initResult, err := h.runner.Run(ctx, initCmd)
+	report.finished("init", initStarted, err)
 	initStage := StageResult{
 		Stage:  "init",
 		Cmd:    []string{"tofu", "init"},
@@ -137,7 +214,9 @@ func (h *SandboxDeployHarness) Run(ctx context.Context, workDir string, env map[
 		Env:      env,
 		StripEnv: SandboxStripEnv,
 	}
+	planStarted := report.start("plan")
 	planResult, err := h.runner.Run(ctx, planCmd)
+	report.finished("plan", planStarted, err)
 	planStage := StageResult{
 		Stage:  "plan",
 		Cmd:    []string{"tofu", "plan", "-state=" + LiveStateFilename},
@@ -164,8 +243,10 @@ func (h *SandboxDeployHarness) Run(ctx context.Context, workDir string, env map[
 	attempts := 0
 	for attempts < sandboxApplyAttempts {
 		attempts++
+		applyStarted := report.start("apply")
 		var applyResult CommandResult
 		applyResult, err = h.runner.Run(ctx, applyCmd)
+		report.finished("apply", applyStarted, err)
 		applyStage = StageResult{
 			Stage:  "apply",
 			Cmd:    []string{"tofu", "apply", "-auto-approve", "-state=" + LiveStateFilename},
@@ -180,8 +261,16 @@ func (h *SandboxDeployHarness) Run(ctx context.Context, workDir string, env map[
 		// retry here would create exactly what the operator asked us to
 		// stop creating.
 		if ctx.Err() != nil {
+			// Cancelled. Announcing a retry here would promise exactly
+			// what the operator asked us to stop doing.
+			report.givingUp("apply", attempts)
 			break
 		}
+		if attempts < sandboxApplyAttempts {
+			report.retrying("apply", attempts, sandboxApplyAttempts, err)
+			continue
+		}
+		report.givingUp("apply", attempts)
 	}
 	if err != nil {
 		return nil, &SandboxDeployError{

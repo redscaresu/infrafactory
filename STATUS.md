@@ -2,6 +2,97 @@
 
 Last updated: 2026-08-31
 
+## 2026-09-02 — S163: streaming a deploy, and the first version that did not
+
+A deploy runs for minutes, and **minutes of silence reads as broken**: a reader
+cannot tell a long apply from a hung one, and the difference matters when the
+thing running is creating billable infrastructure.
+
+**The first version of this slice did not deliver that, and its tests passed
+anyway.** It tee'd the deploy command's stderr — written twice *before* any cloud
+work and once *after* the apply returns. Nothing in between touches that stream:
+`CommandRunner.Run` returns a fully buffered `CommandResult`, so `tofu`'s output
+does not exist until each process exits. Shipped behaviour would have been two
+lines, silence for the whole apply, one line — **worse than before**, because a
+terminal-styled log pane that has stopped moving is a stronger "hung" signal than
+the button label beside it.
+
+Codex was out of quota, so three fresh-context agents reviewed instead. Two found
+it independently, and one *demonstrated* it by replacing the live tee with
+buffer-then-dump and watching the suite stay green.
+
+**The harness is the only thing that knows a stage has begun**, so it reports.
+`SandboxDeployHarnessRunner.Run` takes an `io.Writer` — a parameter, not a field,
+because the harness is shared and two deploys must not write into each other's
+stream. Stage granularity rather than raw tofu output: it is what the plan asked
+for, and it does not drown a terminal. **Retries are visible now**, because a
+silent retry is indistinguishable from a slow stage.
+
+`TestProgressIsVisibleWhileTheApplyIsStillRunning` asserts what a watcher sees
+**from inside the apply**, which buffer-then-dump cannot satisfy — verified by
+mutation.
+
+Six further confirmed findings fixed, the worst being a regression the slice
+itself introduced: clearing `deploying` on navigation re-enabled the button, so
+navigating away mid-deploy and back allowed a **second real deploy** of the same
+scenario — two projects, double billing. Also: an earlier deploy's completion
+clobbering a later one's state; the `Deployed as dep-…` line losing a race with
+the HTTP response; a dropped socket rendering as "Starting…"; the progress filter
+having no test at all; and a `Close()` comment claiming a bug it does not fix.
+
+The event subject is the **scenario**, not the deployment id — that id is minted
+inside the command. Two concurrent deploys of one scenario share a stream. Stated
+in the code rather than implied away.
+
+**A second fresh-context review found five more, four of them in the fix.** A
+stage that FAILED was reported as `done` — a failure rendered as completion,
+followed by silence, in the code written to prevent exactly that; and
+`TestEveryStageReportsItself` actively pinned the wrong behaviour.
+
+The other three shared a cause: **in-flight state died with the component.**
+Navigating away and back mid-deploy left a real, billable apply rendered as an
+unlabelled disabled button with no log — the "cannot see it" warning was itself
+unreachable, gated on state that had just been cleared. Leaving the *section*
+unmounted the component entirely, so returning gave a fresh one that believed
+nothing was running and would start a **second deploy of the same scenario**.
+
+That last one was created by the previous round's fix: removing state on
+navigation is right for the confirmation dialog and wrong for the deploy stream,
+and I applied it to both because two passes earlier they had been folded into one
+function. **State that must outlive the page cannot live in the page** — it is a
+module-level store keyed by scenario now, owning the socket, with two e2e tests
+pinning both journeys including a full unmount.
+
+**A third review, adversarial on the tests, found nine more — every one verified
+by mutation.** The shape of most of them: *the units were tested and the wiring
+between them was not.* Dropping the tee, and passing `nil` to the harness at the
+call site, each broke the feature completely while the whole Go suite stayed
+green — because `deployStderr` was tested in isolation and every test calling
+`Deploy` used a runtime that failed before the writer was touched.
+
+One test closes all three of those: `LiveDeployer.Deploy` → `runDeployCommand` →
+the real harness → sink → hub → what a websocket client receives, with only the
+subprocess faked. **My first attempt at it skipped both broken points**, going
+harness→sink directly — it looked like coverage and would have closed nothing.
+
+Also: `retrying` was pinned as a substring, so the stream could promise a retry on
+the final attempt *and on the interrupt path* — where the operator has asked us to
+stop touching the API. It says `giving up` now. And the UI had **no test that
+rendered a progress line at all**: replacing the whole `{#each}` with a constant
+string passed the full suite. `page.routeWebSocket` lets the tests be the socket
+server, so real frames reach the real DOM.
+
+**Two recorded rather than fixed.** `forgetDeploy` has no production caller, so a
+finished deploy's banner reappears on every later visit for the rest of the
+session. And a **page reload defeats the in-flight guard** — the store is module
+state with no server-side lock, so refreshing during a deploy re-enables the
+button. That one wants a server-side in-flight lock, which is a design decision.
+
+**Named rather than claimed done:** `run`/`test` still applies silently. Its
+progress goes through `runtime.Logger` rather than a writer, so the Layer 3 apply
+on the Live Run page — the more commonly watched screen — has the same defect this
+slice fixes for `deploy`.
+
 ## 2026-09-02 — S162c: the deploy button, and a correction to S161
 
 The scenario page can deploy. Deliberately a **separate button from Run**, and
