@@ -295,9 +295,12 @@ export function deployConfirmation(preview) {
  * deployWarnings are the things that should stop somebody, separated
  * from the descriptive lines so a page can render them differently.
  *
- * `modelled === false` is first because it is the one that invalidates
- * everything above it: an unmodelled scenario's empty component list and
- * €0.00 mean "unknown", not "nothing".
+ * Order matters and is asserted by tests that read the first warning.
+ * An EXISTING deployment of this scenario comes first: it is the one a
+ * reader is most likely to have simply forgotten, and the only one whose
+ * cost is a second bill. `modelled === false` follows, because it
+ * invalidates the figures above it -- an unmodelled scenario's empty
+ * component list and €0.00 mean "unknown", not "nothing".
  */
 export function deployWarnings(preview) {
   const warnings = [];
@@ -327,22 +330,6 @@ export function deployWarnings(preview) {
 }
 
 /**
- * acceptProgressEvent decides whether a websocket event belongs to the
- * deploy a page is currently showing.
- *
- * Extracted from the component so it can be tested. While it was inline
- * in `+page.svelte` it had NO test at all: the e2e tests intercept the
- * POST in the browser, so the server never broadcasts and the filter was
- * never invoked. Typo-ing the event type — which kills the entire
- * stream — passed the whole suite.
- *
- * The subject is the SCENARIO, which is what the request carries. It
- * cannot be the deployment id: that id is minted inside the command,
- * after the request is accepted. So two concurrent deploys of the same
- * scenario share a stream, and a reader sees both. That is a real limit
- * and it is written down rather than implied away.
- */
-/**
  * acceptCompleteEvent recognises the terminal event for a deploy.
  *
  * Its existence is what lets a tab that ADOPTED a deploy -- one that did
@@ -357,6 +344,24 @@ export function acceptCompleteEvent(event, showingScenario) {
   return event?.data?.subject === showingScenario;
 }
 
+/**
+ * acceptProgressEvent decides whether a websocket event belongs to the
+ * deploy a page is currently showing.
+ *
+ * Extracted from the component so it can be tested. While it was inline
+ * in `+page.svelte` it had NO test at all: the e2e tests intercept the
+ * POST in the browser, so the server never broadcasts and the filter was
+ * never invoked. Typo-ing the event type — which kills the entire
+ * stream — passed the whole suite.
+ *
+ * The subject is the SCENARIO, which is what the request carries. It
+ * cannot be the deployment id: that id is minted inside the command,
+ * after the request is accepted. The per-scenario lock now rules out two
+ * CONCURRENT deploys of one scenario, but sequential ones leave several
+ * live deployments sharing a stream -- so a reader still cannot tell
+ * which id they are watching, and that id is the argument to
+ * `live teardown`.
+ */
 export function acceptProgressEvent(event, showingScenario) {
   if (!showingScenario) return false;
   if (event?.type !== "deploy_progress") return false;
@@ -381,16 +386,27 @@ export function acceptProgressEvent(event, showingScenario) {
  * server, and absent from the screen it was for.
  */
 export function alreadyLiveWarning(preview) {
+  const live = Array.isArray(preview?.already_live) ? preview.already_live : [];
+
   // "Could not look" is not "nothing is there", and this guard is about
   // billable infrastructure.
-  if (preview?.already_live_unknown) {
-    return "The live estate could not be fully read, so whether this scenario is already deployed is unknown. Check the Deployments page before continuing.";
-  }
+  //
+  // But it must not DISCARD what was found. The unreadable flag is
+  // estate-global -- one corrupt record anywhere sets it -- so returning
+  // early replaced the strongest, most actionable warning ("dep-x is
+  // already deployed") with the vaguest one, for every scenario, until
+  // somebody found the bad file.
+  const caveat = preview?.already_live_unknown
+    ? " Some live records could not be read, so there may be more than this."
+    : "";
 
-  const live = preview?.already_live;
-  if (!Array.isArray(live) || live.length === 0) return "";
+  if (live.length === 0) {
+    return preview?.already_live_unknown
+      ? "The live estate could not be fully read, so whether this scenario is already deployed is unknown. Check the Deployments page before continuing."
+      : "";
+  }
   const ids = live.join(", ");
   return live.length === 1
-    ? `${ids} is already deployed from this scenario. Deploying again creates a SECOND project and a second bill; it does not replace it.`
-    : `${live.length} deployments from this scenario are already live (${ids}). Deploying again adds another.`;
+    ? `${ids} is already deployed from this scenario. Deploying again creates a SECOND project and a second bill; it does not replace it.${caveat}`
+    : `${live.length} deployments from this scenario are already live (${ids}). Deploying again adds another.${caveat}`;
 }

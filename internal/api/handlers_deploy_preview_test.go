@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -364,4 +365,73 @@ acceptance_criteria:
 	var got deployPreview
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
 	return got
+}
+
+// The unreadable branch is the whole reason AlreadyLiveUnknown exists,
+// and it had no server-side test: changing `len(unreadable) > 0` to
+// `false` restored the exact false negative its docstring calls out,
+// with the whole Go suite green.
+func TestPreviewSaysWhenTheEstateCouldNotBeFullyRead(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "sc.yaml"), []byte(`scenario: previewable
+version: "1.0"
+cloud: scaleway
+description: x
+resources:
+  compute:
+    purpose: web-server
+    size: small
+acceptance_criteria:
+  - type: destruction
+    expect: no_orphans
+`), 0o644))
+
+	cfg := config.Default()
+	cfg.Paths.Scenarios = dir
+	srv := NewServer(ServerConfig{
+		Config: cfg,
+		Deployments: &fakeDeployments{
+			unreadable: []error{errors.New("dep-broken.json: unexpected end of JSON input")},
+		},
+	})
+
+	rec := httptest.NewRecorder()
+	srv.Handler.ServeHTTP(rec,
+		httptest.NewRequest(http.MethodGet, "/api/deployments/preview?scenario=previewable", nil))
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var got deployPreview
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	assert.True(t, got.AlreadyLiveUnknown,
+		"an undecodable record could be a deployment of THIS scenario and would never match")
+}
+
+// A server with no lister never looked, so it must not claim it did.
+func TestPreviewWithNoListerDoesNotClaimNothingIsDeployed(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "sc.yaml"), []byte(`scenario: previewable
+version: "1.0"
+cloud: scaleway
+description: x
+resources:
+  compute:
+    purpose: web-server
+    size: small
+acceptance_criteria:
+  - type: destruction
+    expect: no_orphans
+`), 0o644))
+
+	cfg := config.Default()
+	cfg.Paths.Scenarios = dir
+	srv := NewServer(ServerConfig{Config: cfg})
+
+	rec := httptest.NewRecorder()
+	srv.Handler.ServeHTTP(rec,
+		httptest.NewRequest(http.MethodGet, "/api/deployments/preview?scenario=previewable", nil))
+
+	var got deployPreview
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	assert.True(t, got.AlreadyLiveUnknown)
+	assert.Empty(t, got.AlreadyLive)
 }

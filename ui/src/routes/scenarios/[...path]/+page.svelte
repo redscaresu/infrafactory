@@ -18,6 +18,7 @@
     isConnected,
     isRunning,
     useConnector,
+    useResync,
     watch as watchDeploys
   } from "$lib/deploy-store.js";
   import { modeSummary, normalizeRunOptions } from "$lib/scenario-run.js";
@@ -96,6 +97,17 @@
   // leaving and returning finds the log intact rather than frozen.
   onMount(() => {
     const fetchDeploying = async () => (await api.getDeployments())?.deploying;
+
+    // Recovery when a terminal event is missed -- a dropped message, a
+    // reconnect gap, or one arriving before this tab adopted anything.
+    // Runs on (re)connect, not on a timer.
+    useResync(async () => {
+      try {
+        adoptInFlight(await fetchDeploying());
+      } catch {
+        // An unreachable estate is not evidence that a deploy finished.
+      }
+    });
 
     // A reload wipes the store, so ask the server what is running. The
     // refusal is server-side either way; this stops the reader being

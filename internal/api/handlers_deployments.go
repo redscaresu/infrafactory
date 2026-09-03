@@ -349,24 +349,28 @@ func deployHandler(state *serverState) http.HandlerFunc {
 		// reader has since navigated to says what it is about -- the
 		// rule S162c cost seven findings to learn.
 		progress := NewProgressSink(state.hub, "deploy_progress", req.Scenario)
-		defer progress.Close()
 
 		result, err := state.deployer.Deploy(ctx, req.Scenario, req.TTL, progress)
 
-		// A TERMINAL event, carrying the outcome.
+		// Flushed BEFORE the terminal event, not deferred after it.
 		//
-		// Without one, a tab that did not issue this POST -- one that
-		// adopted the deploy after a reload -- has no way to learn it
-		// finished. Polling the estate was the first answer and it was
-		// the wrong altitude: it added a filesystem walk every few
-		// seconds, a race between the listing and the owning tab, and
-		// still could not say whether the deploy SUCCEEDED, because the
-		// estate does not carry that.
-		//
-		// The hub is already here and already subject-scoped. Five
-		// lines beat a poll.
-		broadcastDeployComplete(state.hub, req.Scenario, result, err)
+		// `deploy_complete` is terminal by design -- a client stops
+		// listening on it -- so broadcasting it first meant the last
+		// line of a failed apply arrived after everyone had gone. That
+		// trailing line is the entire reason Close exists.
+		_ = progress.Close()
+
 		if errors.Is(err, ErrDeployInProgress) {
+			// NO terminal event here. This deploy never started; the
+			// one that DID is still applying, and announcing its
+			// completion would stop every watcher's log, re-enable
+			// their button and report a running apply as finished.
+			//
+			// The broadcast is subject-scoped, so it cannot distinguish
+			// "the refused one" from "the running one" -- they share a
+			// scenario. It must only be sent by a call that actually
+			// ran.
+			//
 			// 423 Locked, NOT 409.
 			//
 			// 409 is already taken on this endpoint by
@@ -389,6 +393,8 @@ func deployHandler(state *serverState) http.HandlerFunc {
 			return
 		}
 		if errors.Is(err, os.ErrNotExist) {
+			// Also no terminal event: nothing ran.
+			//
 			// The caller named something that is not here. A client
 			// typo or a stale scenario list is not a server fault, and
 			// answering 500 teaches operators that 500 means nothing in
@@ -396,6 +402,9 @@ func deployHandler(state *serverState) http.HandlerFunc {
 			writeJSONError(w, http.StatusNotFound, err.Error())
 			return
 		}
+
+		// Reached only when the deploy actually RAN, however it ended.
+		broadcastDeployComplete(state.hub, req.Scenario, result, err)
 		writeActionResult(w, result, err)
 	}
 }

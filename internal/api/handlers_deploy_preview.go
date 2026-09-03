@@ -261,8 +261,15 @@ func previewFor(sc *scenario.Scenario, ttlOverride string, now time.Time) deploy
 // the wrong place to raise a problem the reader cannot act on from it.
 func liveDeploymentsOf(state *serverState, name string) ([]string, bool) {
 	out := []string{}
-	if state.deployments == nil || name == "" {
+	if name == "" {
 		return out, false
+	}
+	if state.deployments == nil {
+		// No lister, so nothing was checked. Returning (empty, false)
+		// would be the claim this flag exists to forbid -- and the
+		// err != nil branch below gets it right, which is the whole
+		// argument.
+		return out, true
 	}
 
 	deployments, unreadable, err := state.deployments.List()

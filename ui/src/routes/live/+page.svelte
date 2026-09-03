@@ -201,7 +201,11 @@
       // tab interleaves raw JSON into an unrelated RUN's event log and
       // fires a run-state fetch per line. Noise rather than a falsehood,
       // but the log is meant to be that run's.
-      if ((msg as { type?: string })?.type === "deploy_progress") return;
+      // Every deploy_* kind, not a list of the ones that existed when
+      // this was written. Adding `deploy_complete` reintroduced the
+      // exact defect this filter was added for, because the filter
+      // named one event instead of the family.
+      if ((msg as { type?: string })?.type?.startsWith("deploy_")) return;
 
       lines = [...lines.slice(-999), JSON.stringify(msg)];
       void loadRunState();

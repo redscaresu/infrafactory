@@ -386,3 +386,37 @@ func TestADeployBroadcastsHowItEnded(t *testing.T) {
 		})
 	}
 }
+
+// A REFUSED deploy must not announce a completion.
+//
+// The broadcast is subject-scoped, so it cannot tell "the one I just
+// refused" from "the one still applying" -- they share a scenario.
+// Sending it stopped every watcher's log, re-enabled their button, and
+// reported a running apply as finished.
+func TestARefusedDeployDoesNotAnnounceACompletion(t *testing.T) {
+	for name, deployer := range map[string]DeploymentDeployer{
+		"already deploying": &fakeDeployer{err: ErrDeployInProgress},
+		"unknown scenario":  &fakeDeployer{err: fmt.Errorf("no scenario named %q: %w", "x", os.ErrNotExist)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			hub := NewHub()
+			client := NewTestClient(64)
+			hub.Register(client)
+
+			srv := NewServer(ServerConfig{
+				Config: config.Default(), Deployments: &fakeDeployments{}, Hub: hub,
+				Deployer: deployer,
+			})
+			postDeploy(t, srv, `{"scenario":"web-app-paris"}`)
+
+			for {
+				raw, ok := client.TryReceive()
+				if !ok {
+					return
+				}
+				assert.NotContains(t, string(raw), "deploy_complete",
+					"nothing ran, so nothing finished — and a watcher would read this as the running apply ending")
+			}
+		})
+	}
+}

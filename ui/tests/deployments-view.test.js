@@ -394,3 +394,18 @@ test("alreadyLiveWarning says so when the estate could not be read", () => {
   assert.match(warning, /could not be fully read/);
   assert.match(warning, /unknown/);
 });
+
+// The unreadable flag is estate-global -- one corrupt record anywhere
+// sets it -- so returning early replaced the strongest, most actionable
+// warning with the vaguest one, for every scenario, until somebody found
+// the bad file.
+test("alreadyLiveWarning keeps the concrete list even when the estate is partly unreadable", () => {
+  const warning = alreadyLiveWarning({
+    already_live: ["dep-existing"],
+    already_live_unknown: true
+  });
+
+  assert.match(warning, /dep-existing/, "what was found must not be discarded");
+  assert.match(warning, /SECOND project/);
+  assert.match(warning, /may be more than this/, "and the gap is still stated");
+});

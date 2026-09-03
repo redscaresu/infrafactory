@@ -89,7 +89,10 @@ function ensureSocket() {
                 ...entry,
                 running: false,
                 outcome: msg.data.clean
-                  ? { ok: true, message: "deployed. It is listed on the Deployments page until its TTL expires." }
+                  ? // The page renders its own text for ok:true, so
+                    // duplicating it here would be a second copy that
+                    // silently diverges. Left empty on purpose.
+                    { ok: true, message: "" }
                   : {
                       ok: false,
                       message:
@@ -103,7 +106,22 @@ function ensureSocket() {
         }
       }
     },
-    (connected) => deploys.update((all) => ({ ...all, __connected: connected }))
+    (connected) => {
+      deploys.update((all) => ({ ...all, __connected: connected }));
+      // A terminal event can be MISSED: the hub drops messages for a
+      // client whose buffer filled, a reconnect loses everything sent
+      // in the gap, and an event arriving before this tab has adopted
+      // anything matches no entry.
+      //
+      // Without a recovery path an adopted entry stays running for the
+      // rest of the session -- a permanently disabled button and a
+      // panel that never resolves, which is the failure the terminal
+      // event was introduced to fix.
+      //
+      // Re-asking on (re)connect is that path, and it costs one request
+      // per connection rather than one every few seconds.
+      if (connected) void resync();
+    }
   );
 }
 
@@ -116,6 +134,15 @@ function releaseSocket() {
   if (inFlight || watchers > 0) return;
   socket?.();
   socket = undefined;
+}
+
+// resync re-asks the server what is deploying. Installed by the page,
+// because this module does not own the API client.
+let resync = async () => {};
+
+/** useResync installs the recovery fetch. */
+export function useResync(fn) {
+  resync = fn;
 }
 
 /** watch keeps the shared socket alive while a page is mounted. */
@@ -173,7 +200,19 @@ export function adoptInFlight(scenarios) {
       if (scenario === "__connected") continue;
       const entry = next[scenario];
       if (entry?.adopted && entry.running && !names.has(scenario)) {
-        next[scenario] = { ...entry, running: false, outcome: null, finishedElsewhere: true };
+        // An outcome, not a bare `running: false`. Without one the
+        // panel's `{#if deploying || progress.length}` goes false and
+        // the whole thing VANISHES -- the page ends up identical to one
+        // where nothing ever ran, for an apply that just created
+        // billable infrastructure.
+        next[scenario] = {
+          ...entry,
+          running: false,
+          outcome: {
+            ok: false,
+            message: "finished while this page was not watching — check the Deployments page for what it left."
+          }
+        };
       }
     }
     return next;
@@ -182,20 +221,6 @@ export function adoptInFlight(scenarios) {
   if (names.size > 0) ensureSocket();
   releaseSocket();
 }
-
-/**
- * pollInFlight is gone.
- *
- * It existed because "there is no terminal websocket event", which was
- * true and was not a fixed constraint -- the hub was already here and
- * already subject-scoped, and `deploy_complete` was five lines in the
- * handler this same work touches.
- *
- * Polling was the wrong altitude: a filesystem walk of the estate every
- * few seconds, a race between the listing and the owning tab, and an
- * answer that could say "it stopped" but never "it succeeded", because
- * the estate does not carry that.
- */
 
 export function beginDeploy(scenario) {
   ensureSocket();

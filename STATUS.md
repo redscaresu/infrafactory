@@ -26,8 +26,10 @@ confirmation says what exists. The ADR now says what it does and does not close.
 
 **An adopted deploy could never finish** — no terminal websocket event, and only
 the tab that issued the POST calls `finishDeploy` — so after a reload the button
-stayed disabled for the rest of the session. It polls now, and an entry this tab
-*owns* is never cleared by a listing that has not caught up.
+stayed disabled for the rest of the session. The server broadcasts a terminal
+`deploy_complete` event now — an entry this tab *owns* is never cleared by a
+listing that has not caught up, and a missed event is recovered on reconnect
+rather than by polling.
 
 Also: the stale-banner fix did not cover leaving the *section* (`afterNavigate`
 does not fire on destroy — the case the store's own doc names); the `adopted` flag
@@ -63,9 +65,26 @@ look.
 still makes two projects. A bigger hole than the sequential one, and the PR that
 existed to stop the ADR overstating the lock was still overstating it.
 
+**And a third round found fourteen more, one of them introduced by the second.**
+`broadcastDeployComplete` sat *before* the refusal branch, so a **rejected** second
+deploy announced completion for the apply that was still running — stopping every
+watcher's log, re-enabling their button, and reporting live infrastructure as
+finished. It is sent only by a call that actually ran now.
+
+The live-run page filtered `deploy_progress` by name, so adding a second event kind
+walked straight back into the defect that filter exists for; it matches the whole
+`deploy_*` family now. `progress.Close()` was deferred *after* the terminal event,
+so the last line of a failed apply arrived once clients had stopped listening.
+`alreadyLiveWarning` discarded a concrete list whenever the estate-global
+unreadable flag was set — replacing the strongest warning with the vaguest, for
+every scenario. And `finishedElsewhere` was written and never read *again*, leaving
+the panel to vanish entirely rather than say what happened.
+
 **Left open:** `api.ts` decides how to parse a body from its status code, and
 `tearDownDeployment` has the same shape. A discriminator in the body closes the
-class; a second status only closed this instance.
+class; a second status only closed this instance. Also: the deploy preview now
+walks the whole estate on every click, a second instance of a cost already recorded
+for the page mount.
 
 ## 2026-09-03 — S163c: the deploy guard moves to the server
 
