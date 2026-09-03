@@ -10,8 +10,10 @@
     teardownOutcome
   } from "$lib/deployments-view.js";
   import {
+    adoptInFlight,
     beginDeploy,
     deploys,
+    forgetDeploy,
     finishDeploy,
     isConnected,
     isRunning,
@@ -92,7 +94,20 @@
   // The shared socket stays open while this page is mounted, and the
   // store keeps it open beyond that if a deploy is still running -- so
   // leaving and returning finds the log intact rather than frozen.
-  onMount(() => watchDeploys());
+  onMount(() => {
+    // A reload wipes the store, so ask the server what is running. The
+    // refusal is server-side either way; this stops the reader being
+    // shown a button that would be refused.
+    void api
+      .getDeployments()
+      .then((payload) => adoptInFlight(payload?.deploying))
+      .catch(() => {
+        // Unreachable estate. The Deploy button stays enabled and the
+        // server refuses if it must -- better than blocking deploys
+        // because a listing call failed.
+      });
+    return watchDeploys();
+  });
 
   onDestroy(() => {
     if (validationTimer) clearTimeout(validationTimer);
@@ -332,6 +347,13 @@
     // Every response in flight now belongs to a page that no longer
     // exists.
     navigation += 1;
+    // A FINISHED deploy's banner is dropped when the reader leaves the
+    // scenario it belongs to. Without this it reappeared on every later
+    // visit for the rest of the session, long after the TTL had expired
+    // -- a success message for something that may no longer exist.
+    if (detail?.name && deployEntry && !deployEntry.running) {
+      forgetDeploy(detail.name);
+    }
     scenarioPath = ($page.params.path || "").toString();
     // Belt and braces with confirmDeploy reading preview.scenario: a
     // confirmation describing the page you just left must not still be

@@ -734,3 +734,110 @@ test('deploy progress does not leak into the Live Run page', async ({ page }) =>
   await expect(page.locator('body')).toContainText('a genuine run log line');
   await expect(page.locator('body')).not.toContainText('deploy_progress');
 });
+
+test.describe('A reload cannot start a second deploy', () => {
+  // The page was the only guard, and a page is exactly the wrong place
+  // for one: a refresh wipes it, a second tab never had it, and a curl
+  // never consulted it.
+  test('a reloaded page shows the deploy the server says is running', async ({ page }) => {
+    await page.route('**/api/deployments', (route) => {
+      if (route.request().method() !== 'GET') return route.continue();
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          schema: 'infrafactory.api.deployments.v1',
+          deployments: [],
+          unreadable: [],
+          teardown_allowed: false,
+          deploy_allowed: true,
+          deploying: ['web-app-paris']
+        })
+      });
+    });
+    await page.route('**/api/deployments/preview**', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          scenario: 'web-app-paris',
+          deployable: true,
+          expires_at: null,
+          internet_facing: false,
+          deploy_allowed: true,
+          cost: { components: [], eur_per_hour: 0, unpriced: [], complete: true, modelled: true }
+        })
+      })
+    );
+
+    await page.goto('/scenarios/training/web-app-paris');
+
+    // The button is not offered, because the server would refuse it.
+    await expect(page.getByTestId('scenario-deploy')).toBeDisabled();
+    await expect(page.getByTestId('deploy-progress')).toBeVisible();
+  });
+
+  // And a scenario the server is NOT deploying stays available.
+  test('a reload does not disable deploy for an idle scenario', async ({ page }) => {
+    await page.route('**/api/deployments', (route) => {
+      if (route.request().method() !== 'GET') return route.continue();
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          schema: 'infrafactory.api.deployments.v1',
+          deployments: [],
+          unreadable: [],
+          teardown_allowed: false,
+          deploy_allowed: true,
+          deploying: ['some-other-scenario']
+        })
+      });
+    });
+
+    await page.goto('/scenarios/training/web-app-paris');
+
+    await expect(page.getByTestId('scenario-deploy')).toBeEnabled();
+    await expect(page.getByTestId('deploy-progress')).toHaveCount(0);
+  });
+});
+
+// A success banner that reappears on every later visit is a claim about
+// something that may no longer exist -- the TTL may well have expired.
+test('a finished deploy does not haunt the scenario page', async ({ page }) => {
+  await page.route('**/api/deployments/preview**', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        scenario: 'web-app-paris',
+        deployable: true,
+        expires_at: null,
+        internet_facing: false,
+        deploy_allowed: true,
+        cost: { components: [], eur_per_hour: 0, unpriced: [], complete: true, modelled: true }
+      })
+    })
+  );
+  await page.route('**/api/deployments', (route) =>
+    route.request().method() === 'POST'
+      ? route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ clean: true, steps: [], failures: [] })
+        })
+      : route.continue()
+  );
+
+  await page.goto('/scenarios/training/web-app-paris');
+  await page.getByTestId('scenario-deploy').click();
+  await page.getByTestId('deploy-confirm-go').click();
+  await expect(page.getByTestId('deploy-outcome')).toBeVisible();
+
+  await page.getByTestId('sidebar-scenario-training/lb-serving-paris').click();
+  await expect(page.locator('main h1')).toContainText('lb-serving-paris');
+
+  await page.getByTestId('sidebar-scenario-training/web-app-paris').click();
+  await expect(page.locator('main h1')).toContainText('web-app-paris');
+  await expect(page.getByTestId('deploy-outcome')).toHaveCount(0);
+});

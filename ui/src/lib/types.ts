@@ -166,6 +166,10 @@ export interface DeploymentsResponse {
   // not offer a button it knows will 404; the SAFETY is that the
   // endpoint does not exist, and this field cannot make it exist.
   teardown_allowed: boolean;
+  // Scenarios currently applying, so a reloaded page can restore what it
+  // was showing. The guard against a second deploy is server-side; this
+  // only stops the UI offering a button that would be refused.
+  deploying: string[];
 }
 
 export interface ActionStep {

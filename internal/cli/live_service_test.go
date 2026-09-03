@@ -12,6 +12,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/redscaresu/infrafactory/internal/api"
 )
 
 // A NAME, resolved here, never a path from the caller. `deploy` takes a
@@ -294,4 +296,72 @@ func TestDeployStderrTeesToBoth(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "a line\n", live.String())
 	assert.Equal(t, "a line\n", copy.String())
+}
+
+// The lock lives on the server because the page cannot hold it: a
+// refresh wipes client state, a second tab never had it, and a `curl`
+// never consulted it.
+func TestDeployerRefusesASecondDeployOfTheSameScenario(t *testing.T) {
+	root := twoScenarios(t)
+
+	// Blocks inside the runtime factory, so the first deploy is
+	// genuinely in flight while the second is attempted.
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	deployer := NewLiveDeployer(root, func() (*CommandRuntime, error) {
+		entered <- struct{}{}
+		<-release
+		return nil, errors.New("stop here; the lock is what is under test")
+	})
+
+	go func() {
+		_, _ = deployer.Deploy(context.Background(), "first-scenario", "", nil)
+	}()
+	<-entered
+
+	assert.Equal(t, []string{"first-scenario"}, deployer.InFlight())
+
+	_, err := deployer.Deploy(context.Background(), "first-scenario", "", nil)
+	require.ErrorIs(t, err, api.ErrDeployInProgress)
+
+	// A DIFFERENT scenario is ordinary and must not be blocked.
+	go func() {
+		_, _ = deployer.Deploy(context.Background(), "second-scenario", "", nil)
+	}()
+	<-entered
+	assert.Equal(t, []string{"first-scenario", "second-scenario"}, deployer.InFlight())
+
+	close(release)
+}
+
+// A scenario stuck marked-as-deploying could never be deployed again
+// without restarting the server -- a worse failure than the one the lock
+// prevents.
+func TestTheLockIsReleasedWhenADeployFails(t *testing.T) {
+	deployer := NewLiveDeployer(twoScenarios(t), func() (*CommandRuntime, error) {
+		return nil, errors.New("the runtime could not be built")
+	})
+
+	_, err := deployer.Deploy(context.Background(), "first-scenario", "", nil)
+	require.Error(t, err)
+
+	assert.Empty(t, deployer.InFlight(), "a failed deploy must not hold the name forever")
+
+	// And the scenario is deployable again.
+	_, err = deployer.Deploy(context.Background(), "first-scenario", "", nil)
+	require.Error(t, err)
+	require.NotErrorIs(t, err, api.ErrDeployInProgress)
+}
+
+// Claimed after resolution, so a typo cannot lock a name nothing will
+// ever deploy.
+func TestAnUnknownScenarioDoesNotHoldTheLock(t *testing.T) {
+	deployer := NewLiveDeployer(twoScenarios(t), func() (*CommandRuntime, error) {
+		return nil, errors.New("should not be reached")
+	})
+
+	_, err := deployer.Deploy(context.Background(), "no-such-scenario", "", nil)
+	require.Error(t, err)
+
+	assert.Empty(t, deployer.InFlight())
 }

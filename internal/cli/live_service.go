@@ -9,7 +9,9 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -171,13 +173,59 @@ type LiveDeployer struct {
 	// scenarioRoot is where a scenario NAME is resolved from. Held so a
 	// caller cannot pass a path.
 	scenarioRoot string
+
+	// inFlight is the server-side guard against deploying one scenario
+	// twice at once.
+	//
+	// It lives HERE, not in the browser. The page used to be the only
+	// thing stopping a second deploy, and a page is exactly the wrong
+	// place for that: a refresh wipes it, a second tab never had it, and
+	// a `curl` never consulted it. Two deploys of one scenario mean two
+	// run-owned projects and two sets of billable resources for one
+	// thing.
+	mu        sync.Mutex
+	deploying map[string]bool
 }
 
 // NewLiveDeployer builds the deployer from a runtime factory.
 //
 // A factory rather than a runtime: see the caching note above.
 func NewLiveDeployer(scenarioRoot string, newRuntime func() (*CommandRuntime, error)) *LiveDeployer {
-	return &LiveDeployer{newRuntime: newRuntime, scenarioRoot: scenarioRoot}
+	return &LiveDeployer{
+		newRuntime:   newRuntime,
+		scenarioRoot: scenarioRoot,
+		deploying:    map[string]bool{},
+	}
+}
+
+// InFlight names the scenarios currently deploying, sorted.
+func (d *LiveDeployer) InFlight() []string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	out := make([]string, 0, len(d.deploying))
+	for scenario := range d.deploying {
+		out = append(out, scenario)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// claim reserves a scenario, reporting whether it was free.
+func (d *LiveDeployer) claim(scenario string) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.deploying[scenario] {
+		return false
+	}
+	d.deploying[scenario] = true
+	return true
+}
+
+func (d *LiveDeployer) release(scenario string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	delete(d.deploying, scenario)
 }
 
 // Deploy applies a scenario and leaves it running under a TTL.
@@ -190,6 +238,17 @@ func (d *LiveDeployer) Deploy(ctx context.Context, scenarioName, ttl string, pro
 	if err != nil {
 		return api.ActionResult{}, err
 	}
+
+	// Claimed AFTER resolution, so a typo cannot lock a name nothing
+	// will ever deploy, and BEFORE anything touches the cloud.
+	if !d.claim(scenarioName) {
+		return api.ActionResult{}, api.ErrDeployInProgress
+	}
+	// Released whatever happens, including a panic in the command: a
+	// scenario stuck marked-as-deploying can never be deployed again
+	// without restarting the server, which is a worse failure than the
+	// one this prevents.
+	defer d.release(scenarioName)
 
 	// Fresh per deploy. A reused runtime has a scenario cached in it and
 	// refuses every other one.

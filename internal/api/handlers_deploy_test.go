@@ -31,7 +31,10 @@ type fakeDeployer struct {
 	// progressLines is written to the progress writer, so a test can
 	// assert what a watching client would have seen.
 	progressLines string
+	inFlight      []string
 }
+
+func (f *fakeDeployer) InFlight() []string { return f.inFlight }
 
 func (f *fakeDeployer) Deploy(ctx context.Context, name, ttl string, progress io.Writer) (ActionResult, error) {
 	f.calls = append(f.calls, name)
@@ -269,4 +272,53 @@ func TestDeployWorksWithNobodyListening(t *testing.T) {
 	rec := postDeploy(t, srv, `{"scenario":"lb-serving-paris"}`)
 
 	assert.Equal(t, http.StatusOK, rec.Code)
+}
+
+// The page cannot be the guard: a refresh wipes its state, a second tab
+// never had it, and a `curl` never consulted it. Two deploys of one
+// scenario are two run-owned projects and two sets of billable resources
+// for one thing.
+func TestASecondDeployOfTheSameScenarioIsRefused(t *testing.T) {
+	srv := deployServer(t, &fakeDeployer{err: ErrDeployInProgress})
+
+	rec := postDeploy(t, srv, `{"scenario":"web-app-paris"}`)
+
+	assert.Equal(t, http.StatusConflict, rec.Code, "reasonable request, unreasonable moment")
+	assert.Contains(t, rec.Body.String(), "web-app-paris",
+		"a bare conflict leaves a reader wondering which of their tabs is responsible")
+}
+
+// So a page that has just been reloaded can restore what it was showing.
+func TestTheListingNamesWhatIsCurrentlyDeploying(t *testing.T) {
+	srv := NewServer(ServerConfig{
+		Config: config.Default(), Deployments: &fakeDeployments{},
+		Deployer: &fakeDeployer{inFlight: []string{"web-app-paris"}},
+	})
+
+	rec := httptest.NewRecorder()
+	srv.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/deployments", nil))
+
+	var payload deploymentsResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &payload))
+	assert.Equal(t, []string{"web-app-paris"}, payload.Deploying)
+}
+
+// A nil slice marshals as `null`, which a client reads as unknown or
+// crashes on.
+func TestTheListingReportsAnEmptyDeployingListRatherThanNull(t *testing.T) {
+	for name, deployer := range map[string]DeploymentDeployer{
+		"no deployer configured":       nil,
+		"deployer with none in flight": &fakeDeployer{inFlight: nil},
+	} {
+		t.Run(name, func(t *testing.T) {
+			srv := NewServer(ServerConfig{
+				Config: config.Default(), Deployments: &fakeDeployments{}, Deployer: deployer,
+			})
+			rec := httptest.NewRecorder()
+			srv.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/deployments", nil))
+
+			assert.Contains(t, rec.Body.String(), `"deploying":[]`)
+			assert.NotContains(t, rec.Body.String(), `"deploying":null`)
+		})
+	}
 }

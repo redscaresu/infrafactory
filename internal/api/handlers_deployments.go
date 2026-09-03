@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"sort"
@@ -88,6 +89,13 @@ type deploymentsResponse struct {
 	// and it cannot make the endpoint exist.
 	DeployAllowed bool `json:"deploy_allowed"`
 
+	// Deploying names the scenarios currently applying.
+	//
+	// Carried so a page that has just been reloaded can restore what it
+	// was showing. The guard itself is server-side; this only stops the
+	// UI offering a button that would be refused.
+	Deploying []string `json:"deploying"`
+
 	// TeardownAllowed reports whether this server was started with
 	// --allow-teardown.
 	//
@@ -137,6 +145,7 @@ func deploymentsHandler(state *serverState) http.HandlerFunc {
 			Unreadable:      make([]string, 0, len(unreadable)),
 			TeardownAllowed: state.deploymentActor != nil,
 			DeployAllowed:   state.deployer != nil,
+			Deploying:       deployingScenarios(state),
 		}
 		for _, d := range deployments {
 			payload.Deployments = append(payload.Deployments, deploymentJSON{
@@ -343,6 +352,15 @@ func deployHandler(state *serverState) http.HandlerFunc {
 		defer progress.Close()
 
 		result, err := state.deployer.Deploy(ctx, req.Scenario, req.TTL, progress)
+		if errors.Is(err, ErrDeployInProgress) {
+			// 409, not 500: the caller asked for something reasonable at
+			// an unreasonable moment. Naming the scenario matters -- a
+			// bare "conflict" leaves a reader wondering which of their
+			// tabs is responsible.
+			writeJSONError(w, http.StatusConflict,
+				fmt.Sprintf("%s is already deploying; wait for it to finish or tear it down", req.Scenario))
+			return
+		}
 		if errors.Is(err, os.ErrNotExist) {
 			// The caller named something that is not here. A client
 			// typo or a stale scenario list is not a server fault, and
@@ -353,4 +371,20 @@ func deployHandler(state *serverState) http.HandlerFunc {
 		}
 		writeActionResult(w, result, err)
 	}
+}
+
+// deployingScenarios asks the deployer what is in flight, and always
+// answers with a list rather than nil.
+//
+// A nil slice marshals as `null`, which a client reads as "unknown" or
+// crashes on. An empty estate and an unconfigured deployer are both
+// "nothing is deploying" from a reader's point of view.
+func deployingScenarios(state *serverState) []string {
+	if state.deployer == nil {
+		return []string{}
+	}
+	if inFlight := state.deployer.InFlight(); inFlight != nil {
+		return inFlight
+	}
+	return []string{}
 }
