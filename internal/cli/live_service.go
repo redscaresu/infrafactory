@@ -375,8 +375,14 @@ func (e noSuchScenarioError) Error() string {
 	return fmt.Sprintf("no scenario named %q", e.name)
 }
 
-// Is matches both the API-level sentinel and os.ErrNotExist, so callers
-// that only know the standard library still get a sensible answer.
+// Is matches the API-level sentinels and os.ErrNotExist.
+//
+// `errors.Is` only. `os.IsNotExist` does NOT consult a custom `Is`: it
+// unwraps *fs.PathError, *os.LinkError and *os.SyscallError and then
+// compares by ==, so it answers false for this type. Stated because the
+// difference is invisible at the call site, and the API package's
+// preview handler uses `os.IsNotExist` on its own paths -- a caller
+// that routed one of these through it would get a 500 for a typo.
 func (e noSuchScenarioError) Is(target error) bool {
 	return target == api.ErrNoSuchScenario || target == api.ErrNothingStarted || target == os.ErrNotExist
 }

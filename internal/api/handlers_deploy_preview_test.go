@@ -477,4 +477,9 @@ func TestAPreviewNeverCarriesANullAlreadyLive(t *testing.T) {
 	require.NoError(t, json.Unmarshal(raw, &wire))
 	assert.NotNil(t, wire["already_live"],
 		"null reads as \"we could not look\", which is the opposite of what this preview knows")
+	// And the mirror image: `false` is the positive claim "checked, and
+	// nothing exists". A preview that never consulted the live store
+	// must not make it, so the cautious value is the zero one.
+	assert.Equal(t, true, wire["already_live_unknown"],
+		"a preview built without looking must not report a silent all-clear")
 }

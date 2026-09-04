@@ -335,9 +335,19 @@ export function dismissReport(scenario, id) {
     return next;
   });
 
-  // An outcome that IS a report is not rendered anywhere once its
-  // report is gone -- the page shows a pointer at it instead -- so the
-  // entry would be a finished deploy with its ending stated nowhere.
+  // Only once the scenario has NO reports left.
+  //
+  // An outcome that is itself a report is not rendered anywhere on its
+  // own -- the page shows a pointer at the report instead -- so an
+  // entry whose last report has gone would be a finished deploy with
+  // its ending stated nowhere. But dismissing ONE of several deleted
+  // the pointer and the whole apply log while a sibling report, naming
+  // a project that is still live, was on screen beside it.
+  const left = get(reports)[scenario]?.length ?? 0;
+  if (left > 0) {
+    releaseSocket();
+    return;
+  }
   deploys.update((all) => {
     const entry = all[scenario];
     if (!entry || entry.running || !entry.outcome?.mayHaveCreated) return all;

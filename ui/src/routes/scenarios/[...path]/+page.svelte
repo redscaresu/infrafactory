@@ -516,15 +516,31 @@
   // Reload data on every navigation (including client-side), since
   // SvelteKit reuses the component for [...path] route changes.
   // afterNavigate fires on both initial load and subsequent navigations.
-  afterNavigate(() => {
+  afterNavigate(({ from, to }) => {
     // Every response in flight now belongs to a page that no longer
     // exists.
     navigation += 1;
-    // A FINISHED deploy's banner is dropped when the reader leaves the
+    // A FINISHED deploy's banner is dropped when the reader LEAVES the
     // scenario it belongs to. Without this it reappeared on every later
     // visit for the rest of the session, long after the TTL had expired
     // -- a success message for something that may no longer exist.
-    retireOnLeave();
+    //
+    // Only when the route actually CHANGED. `afterNavigate` also fires
+    // for a navigation to the page you are already on -- clicking the
+    // current scenario in the sidebar, which a probe confirmed does
+    // reach this hook -- and retiring there discards the banner and the
+    // apply log of a deploy the reader never left.
+    //
+    // From the hook's own `from`/`to`, not from `scenarioPath`: that is
+    // assigned by a reactive statement on `$page`, which has already
+    // run by the time this callback fires, so comparing against it said
+    // "unchanged" every time.
+    //
+    // Every hop optional-chained. `from?.url.pathname` threw on a
+    // navigation whose `from` carries a null `url`, and a throw inside
+    // this hook aborts it -- so `loadDetail` never ran and the whole
+    // page rendered blank.
+    if (from?.url?.pathname !== to?.url?.pathname) retireOnLeave();
     scenarioPath = ($page.params.path || "").toString();
     // Belt and braces with confirmDeploy reading preview.scenario: a
     // confirmation describing the page you just left must not still be

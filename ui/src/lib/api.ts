@@ -86,8 +86,19 @@ export const api = {
       // the startedNothing classification the STATUS had already
       // settled and shows a JavaScript parser message on the screen
       // this whole slice exists to make trustworthy.
-      const body = (await readJSON(res)).value;
+      const parsed = await readJSON(res);
+      const body = parsed.value;
       if ((res.ok || res.status === 409) && isActionResult(body)) return body;
+      // A 2xx whose body will not parse is not a failed deploy. Saying
+      // "deploy failed: 200" names a success status as a failure, on
+      // the screen this slice exists to make trustworthy -- and it is
+      // the exact case `readJSON` was added for.
+      if (res.ok) {
+        throw new DeployError(
+          "the deploy finished, but its result could not be read — check the Deployments page for what it left",
+          false
+        );
+      }
       throw new DeployError(
         (body as { error?: string })?.error || `deploy failed: ${res.status}`,
         startedNothing(body)

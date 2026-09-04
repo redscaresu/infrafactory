@@ -232,7 +232,21 @@ func previewFor(sc *scenario.Scenario, ttlOverride string, now time.Time) deploy
 	// `liveDeploymentsOf` emitted `already_live: null`, which the client
 	// correctly reads as "we could not look", so a server whose estate
 	// read perfectly warned that it had not.
-	preview := deployPreview{Scenario: sc.Name, Cloud: sc.Cloud, AlreadyLive: []string{}}
+	// Both fields start at the CAUTIOUS value, not the zero one.
+	//
+	// `AlreadyLive: []string{}` because `null` reads as "we could not
+	// look" -- and `AlreadyLiveUnknown: true` for the mirror-image
+	// reason: `false` is the positive claim "checked, and nothing
+	// exists", which a preview built without consulting the live store
+	// has no right to make. Every non-looking path of
+	// `liveDeploymentsOf` returns `(out, true)`; the struct's zero value
+	// was the one place that said the opposite.
+	preview := deployPreview{
+		Scenario:           sc.Name,
+		Cloud:              sc.Cloud,
+		AlreadyLive:        []string{},
+		AlreadyLiveUnknown: true,
+	}
 
 	// The cost and shape are worth knowing even for a scenario that
 	// cannot be deployed -- that is exactly what explains the greyed-out

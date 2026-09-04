@@ -2030,3 +2030,51 @@ test('an unclean deploy that was recorded points at the record, not at an unknow
   // And NOT a permanent alarm: the estate already tracks it.
   await expect(page.getByTestId('pending-deploy-report')).toHaveCount(0);
 });
+
+// `afterNavigate` fires for a navigation to the page you are already
+// on. Retiring there destroyed the banner and the whole apply log of a
+// deploy the reader never left — clicking the current scenario in the
+// sidebar, or anything else resolving to the same route.
+test('re-selecting the scenario you are on does not discard its deploy', async ({ page }) => {
+  await page.route('**/api/deployments/preview**', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        scenario: 'web-app-paris',
+        deployable: true,
+        expires_at: null,
+        internet_facing: false,
+        deploy_allowed: true,
+        already_live: [],
+        already_live_unknown: false,
+        cost: { components: [], eur_per_hour: 0, unpriced: [], complete: true, modelled: true }
+      })
+    })
+  );
+  await page.route('**/api/deployments', (route) =>
+    route.request().method() === 'POST'
+      ? route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ clean: true, steps: [], failures: [] })
+        })
+      : route.continue()
+  );
+
+  await page.goto('/scenarios/training/web-app-paris');
+  await page.getByTestId('scenario-deploy').click();
+  await page.getByTestId('deploy-confirm-go').click();
+  await expect(page.getByTestId('deploy-outcome')).toContainText('Deployed. It is listed');
+
+  // The scenario already on screen.
+  await page.getByTestId('sidebar-scenario-training/web-app-paris').click();
+  await expect(page.locator('main h1')).toContainText('web-app-paris');
+
+  // Settled FIRST. The navigation refetches detail, run mode and Layer
+  // 3 status, and asserting straight away passed on the first poll --
+  // before the retire it is meant to catch had run. A test that green
+  // -lights the bug is worse than none.
+  await page.waitForLoadState('networkidle');
+  await expect(page.getByTestId('deploy-outcome')).toContainText('Deployed. It is listed');
+});

@@ -745,3 +745,27 @@ They change twice a session; the deploy store is written once per progress line.
 Holding them together subscribed every route to thousands of notifications for data
 that had not changed, and coupled two things with different lifetimes: a banner
 that goes stale, and a statement that infrastructure may exist unrecorded.
+
+
+## Amendment, 2026-09-04 (round nineteen): retiring is for leaving
+
+`afterNavigate` fires for a navigation to the page you are already on. Retiring
+there discards the banner and the apply log of a deploy the reader never left, so
+the hook compares the navigation's own `from` and `to` — not `scenarioPath`, which
+a reactive statement has already updated by the time the callback runs.
+
+Every hop is optional-chained. A `from` carrying a null `url` made the expression
+throw, and a throw inside `afterNavigate` aborts it: `loadDetail` never ran, and
+every scenario page rendered blank.
+
+### A report is dismissed one at a time
+
+The entry survives while any of its scenario's reports stand. Its outcome is the
+pointer the page renders at them, and its log is the only account of the apply.
+
+### The cautious value is the zero value
+
+`AlreadyLive` starts as an empty list so it cannot read as null; `AlreadyLiveUnknown`
+starts as `true` for the same reason, because `false` is the positive claim
+"checked, and nothing exists". A preview built without consulting the live store has
+no right to make it.

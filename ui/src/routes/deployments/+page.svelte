@@ -27,16 +27,20 @@
   // the page that is meant to answer "what is running" is silent about
   // the thing most actively running, and a reader who has just clicked
   // Deploy elsewhere sees nothing at all.
-  // Tri-state: a list, or `null` for "the payload never said what was
-  // applying". Absence is not emptiness, and carrying it in the value
-  // rather than in a parallel boolean means no caller can pass one
-  // without the other.
   // Tri-state: a list, or `undefined` for "the payload never said what
   // was applying". Absence is not emptiness, and `undefined` is the
   // sentinel because it is what an absent field actually IS -- a
-  // separate `null` left the natural mistake, passing the field
-  // straight through, landing on a default that claimed emptiness.
-  let deploying: string[] | undefined = [];
+  // separate `null` left the natural mistake available, passing the
+  // field straight through and landing on a default that claimed
+  // emptiness.
+  //
+  // Initialised to `undefined`, not `[]`. Nothing has been read yet, so
+  // the honest value is "not told" -- `[]` is an ANSWER, and it is only
+  // masked today by `estateState` being `loading` until the first read
+  // returns. A reordering that set `loaded` earlier would land
+  // `knownEmpty` on "Nothing is deployed." for a server that had said
+  // nothing at all.
+  let deploying: string[] | undefined = undefined;
 
   // Confirming is a SECOND deliberate action on a named row, not a
   // dialog that appears everywhere at once. A click cannot destroy
@@ -54,8 +58,8 @@
       deployments = payload?.deployments || [];
       unreadable = payload?.unreadable || [];
       teardownAllowed = payload?.teardown_allowed === true;
-      // `null` for "the payload never said", carried in the value so
-      // no caller can forget to pass a second flag along with it.
+      // `undefined` for "the payload never said", carried in the value
+      // so no caller can forget to pass a second flag along with it.
       deploying = Array.isArray(payload?.deploying) ? payload.deploying : undefined;
       loadError = "";
     } catch (err) {

@@ -357,6 +357,12 @@ export function teardownPrompt(deployment) {
  * running" is exactly the false green this project exists to avoid.
  */
 export function teardownOutcome(result) {
+  // `mayHaveCreated` comes back on this too, from the shared rule, and
+  // the estate page does not yet read it -- so an unprovable teardown
+  // gets a transient row banner where an unprovable deploy gets a
+  // persistent, dismissible report. Same class, different verb, store
+  // shape and page; named as a follow-up in STATUS rather than bolted
+  // on here. Said out loud so the producer is not silently unread.
   return actionOutcome(result, {
     nothing: "Teardown returned nothing.",
     proven: "Destroyed. The account is provably clean.",

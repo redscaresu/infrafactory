@@ -2,6 +2,44 @@
 
 Last updated: 2026-09-04
 
+## 2026-09-04 — S163e-fixes (round nineteen): the test that walked past the bug
+
+**10 findings, 9 accepted, 1 declined.**
+
+**Dismissing one report destroyed a sibling's account.** `dismissReport` deleted the
+scenario's whole entry whenever its outcome was a report, without checking whether
+the dismissed one was the last. Two failed deploys, two reports: clearing the first
+took the pointer and the entire apply log with it while the second, naming a project
+still live, sat in the layout. The unit test walked exactly that path, destructured
+`deploys`, and never asserted on it — the unused binding was the tell.
+
+**Zero values that make claims.** `AlreadyLiveUnknown` defaults to `false`, the
+positive claim "checked, and nothing exists", from a preview that never consulted
+the live store — the mirror of the `AlreadyLive: []` fix two rounds ago. And the
+estate page initialised its tri-state to `[]`, an ANSWER, masked only by
+`estateState` being `loading` until the first read.
+
+**Retiring on a navigation that never left.** `retireOnLeave` ran on every
+`afterNavigate`, including a click on the scenario already shown — a probe confirmed
+that reaches the hook — discarding the banner and log of a deploy the reader had not
+left. Two false starts: comparing against `scenarioPath` never fired, because a
+reactive statement updates it before the hook runs; and `from?.url.pathname` THREW on
+a navigation whose `from` carries a null `url`, which aborts the hook, so
+`loadDetail` never ran and every scenario page rendered blank. A two-second console
+probe found that after two full suite runs had not. The test needed the same care:
+asserting immediately after the click passed on the first poll, before the retire it
+exists to catch.
+
+Also: `noSuchScenarioError.Is` promised `os.ErrNotExist` compatibility that
+`os.IsNotExist` does not honour (it never consults custom `Is`); an unparseable 2xx
+reported "deploy failed: 200"; and three comments in one file disagreed about the
+tri-state sentinel.
+
+**Declined:** the teardown half of `mayHaveCreated` — real, same class, different
+verb and page, and still the named follow-up below. What changed is that
+`teardownOutcome` now says the flag is computed and not yet consumed, rather than
+producing it silently.
+
 ## 2026-09-04 — S163e-fixes (round eighteen): half a guard, and a vacuous truth
 
 **10 findings, all accepted.**

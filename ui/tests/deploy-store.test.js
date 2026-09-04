@@ -414,9 +414,15 @@ test("a report can be dismissed once the operator has dealt with it", async () =
   const after = mine(get(reports));
   assert.equal(after.length, 1);
   assert.match(after[0].message, /bbb/, "the one that was dealt with is the one that went");
+  // And the ENTRY survives while a sibling report stands: its outcome
+  // is the pointer the page renders at that report, and its log is the
+  // only account of the apply. Destructuring `deploys` and never
+  // asserting on it is why deleting them shipped.
+  assert.notEqual(get(deploys)["dismiss-two"], undefined, "a sibling report still stands");
 
   dismissReport("dismiss-two", after[0].id);
   assert.equal(mine(get(reports)).length, 0);
+  assert.equal(get(deploys)["dismiss-two"], undefined, "and goes with the last of them");
   stop();
 });
 
