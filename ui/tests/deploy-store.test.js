@@ -289,7 +289,11 @@ test("a long log keeps its opening and says how much it dropped", async () => {
   const entry = get(deploys)["web-app-paris"];
   assert.match(entry.progress[0], /workdir/, "the identifying half of the log survives");
   assert.ok(entry.dropped > 0, "and the reader is told something is missing");
-  assert.ok(entry.progress.length <= 999, "while memory stays bounded");
+  // Bounded, not exact: trimming happens in batches, so the log may sit
+  // a little over the cap between trims. Doing it on every line past
+  // the cap only bounds the stall the cap exists to remove.
+  assert.ok(entry.progress.length <= 1099, "while memory stays bounded");
+  assert.ok(entry.progress.length >= 999, "and the cap is not over-trimmed");
   assert.match(entry.progress.at(-1), /line 2999/, "the tail is still the last thing that happened");
 
   finishDeploy("web-app-paris", { ok: true, mayHaveCreated: false, message: "Deployed." });

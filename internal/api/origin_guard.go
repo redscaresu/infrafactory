@@ -61,11 +61,18 @@ func guardCrossOriginRequests(next http.Handler) http.Handler {
 		// Deliberately says nothing about what the endpoint would have
 		// done, or whether it exists. The refusal is the whole message.
 		//
-		// `writeRefusal`, because this runs before any handler: nothing
-		// was created, and a deploy client that could not tell this from
-		// a lost connection would send the reader hunting for
-		// infrastructure that never existed.
-		writeRefusal(w, http.StatusForbidden,
+		// A plain error, NOT `writeRefusal`.
+		//
+		// This middleware wraps every endpoint, and `started_nothing` is
+		// a claim about whether an APPLY created cloud infrastructure.
+		// Stamping it on a refused `GET /api/runs` is meaningless, and
+		// on a refused teardown it is a claim about the wrong verb.
+		//
+		// The cost is that a deploy client reads a cross-origin 403 as
+		// "we do not know", which errs in the safe direction -- and the
+		// case barely arises, since a page the server did not serve is
+		// not one whose reader is watching a deploy.
+		writeJSONError(w, http.StatusForbidden,
 			"cross-origin request refused: this server is reachable only from a page served on loopback")
 	})
 }

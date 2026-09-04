@@ -104,7 +104,12 @@
   // thing it mirrored.
   //
   // A reloaded page simply does not know, and says so.
-  onMount(() => watchDeploys());
+  onMount(() => {
+    // `afterNavigate` does not fire when the component is created by a
+    // direct load, so the snapshot is taken here too.
+    retirableOnArrival = finishedNow();
+    return watchDeploys();
+  });
 
   onDestroy(() => {
     // Clear the debounce timer so navigating away during the 500ms
@@ -133,14 +138,11 @@
    * before registration has no live record either, so nothing on the
    * estate page replaces it.
    *
-   * Same predicate as the arrival hook, deliberately: one rule about
-   * what may be forgotten, applied at both ends. A stale success is a
+   * Same rule as the arrival hook, deliberately: one predicate about
+   * what may be dropped, applied at both ends. A stale success is a
    * false claim about infrastructure whose TTL may have expired; a
-   * failure is an unread report, and it survives until the tab does.
-   *
-   * Reads the store directly rather than the reactive `deployEntry`,
-   * whose freshness inside `afterNavigate` depends on `detail` not yet
-   * having been nulled -- a coupling with no reason to exist.
+   * report is unread news, and it survives until somebody says
+   * otherwise.
    */
   function forgetFinishedDeploy() {
     if (!detail?.name) return;
@@ -193,10 +195,31 @@
   // Keyed on the navigation counter rather than on `detail`, because
   // `loadDetail` also runs after a save and a banner must not vanish
   // mid-visit.
+  // Only what was ALREADY finished when the navigation began.
+  //
+  // `loadDetail` is a round trip, and a deploy started just before it
+  // can END during that window -- a 423 lock refusal returns at once.
+  // Retiring by "is it finished when detail arrives?" then deleted a
+  // refusal before it had ever rendered, and the button reverted to
+  // "Deploy…" as though the click had not landed. That is the defect
+  // moving refusals into the store was supposed to close, reopened by
+  // the hook that cleans them up.
+  //
+  // The snapshot is taken synchronously in `afterNavigate`, before any
+  // response can arrive.
+  let retirableOnArrival = new Set<string>();
   let arrivalHandled = -1;
   $: if (detail?.name && arrivalHandled !== navigation) {
     arrivalHandled = navigation;
-    forgetReportlessDeploy(detail.name);
+    if (retirableOnArrival.has(detail.name)) forgetReportlessDeploy(detail.name);
+  }
+
+  /** finishedNow names the deploys that have already ended. */
+  function finishedNow(): Set<string> {
+    const all = get(deploys);
+    return new Set(
+      Object.keys(all).filter((k) => k !== "__connected" && all[k] && !all[k].running)
+    );
   }
 
   $: scenarioPath = ($page.params.path || "").toString();
@@ -545,6 +568,7 @@
     // Every response in flight now belongs to a page that no longer
     // exists.
     navigation += 1;
+    retirableOnArrival = finishedNow();
     // A FINISHED deploy's banner is dropped when the reader leaves the
     // scenario it belongs to. Without this it reappeared on every later
     // visit for the rest of the session, long after the TTL had expired

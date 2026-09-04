@@ -141,9 +141,17 @@ export function nothingRecorded(deployments, unreadable) {
  * had just been moved to fix for `estateSummary`. Moved, and the count
  * corrected from three, 2026-09-04.)
  */
-export function knownEmpty(deployments, unreadable, state = "loaded", deploying = []) {
+export function knownEmpty(deployments, unreadable, state = "loaded", deploying = [], deployingKnown = true) {
   return (
     state === "loaded" &&
+    // An absent `deploying` field is not an empty one. The server
+    // always sends it; one that predates the field, or a body trimmed
+    // by an intermediary, does not -- and reading that as "nothing is
+    // applying" licenses the page's only permitted emptiness claim on
+    // an estate that may be busy creating something. The same
+    // absent-vs-empty distinction `already_live` is given two files
+    // away, on the same wire contract.
+    deployingKnown &&
     nothingRecorded(deployments, unreadable) &&
     // A deploy that is APPLYING has no record yet, so it is absent from
     // `deployments` while being the most active thing in the estate.

@@ -603,3 +603,13 @@ test("isProgressEvent checks the shape and not the scenario", () => {
   assert.equal(isProgressEvent({ type: "deploy_progress", data: { subject: "a" } }), false);
   assert.equal(isProgressEvent(undefined), false);
 });
+
+// The server always sends `deploying`. One that predates the field, or
+// a body trimmed by an intermediary, does not — and reading that as
+// "nothing is applying" licenses the page's only permitted emptiness
+// claim on an estate that may be busy creating something. The same
+// absent-vs-empty distinction `already_live` is given.
+test("knownEmpty will not call an estate empty without being told what is applying", () => {
+  assert.equal(knownEmpty([], [], "loaded", [], true), true);
+  assert.equal(knownEmpty([], [], "loaded", [], false), false, "asked, and not told");
+});

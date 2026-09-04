@@ -2,6 +2,44 @@
 
 Last updated: 2026-09-04
 
+## 2026-09-04 — S163e-fixes (round fifteen): the cleanup raced the page it cleaned for
+
+**10 findings, 7 accepted, 3 declined.** Two accepts are round fourteen's fixes; one
+is a claim I put on middleware that had no business making it.
+
+**A refusal deleted before it rendered.** `loadDetail` is a round trip, and a 423
+answers at once — so a deploy started just before a navigation ends *during* it, and
+the arrival hook ("is this finished now that detail has arrived?") swept it away.
+The button reverted to "Deploy…" as though the click had not landed, which is the
+defect moving refusals into the store was meant to close. The hook now retires only
+what was already finished when the navigation began, from a snapshot taken in
+`afterNavigate`. The first test I wrote for it passed against the broken code and
+proved nothing; reproducing it needed the POST and the scenario fetch interleaved by
+hand.
+
+**Dismissing took a success banner with it.** Round fourteen deleted the entry when
+the last report went, arguing the outcome behind it renders nowhere — true only for
+outcomes that ARE reports. Fail, retry, succeed, dismiss, and the retry's "Deployed."
+vanished with the leak the reader had just dealt with.
+
+**A deploy claim on middleware that refuses everything.** `guardCrossOriginRequests`
+wraps every endpoint, so making it a refusal stamped `started_nothing` — a claim
+about whether an apply created infrastructure — onto a refused `GET /api/runs` and
+onto a refused teardown, where it is about the wrong verb. Reverted; a cross-origin
+403 now reads as "we do not know", which errs safe.
+
+Also: `readJSON` was applied to `request`'s error branch only, leaving "Unexpected
+end of JSON input" reachable on every 2xx; `deploying` was read as `payload?.deploying
+|| []`, so a server predating the field licensed the page's only permitted emptiness
+claim (`knownEmpty` takes `deployingKnown` now); trimming past the log cap rebuilt the
+whole array per line rather than in batches; and a leftover import with a docstring
+describing a replaced implementation.
+
+**Declined:** `knownEmpty`'s `deploying = []` default (the wire half is fixed; a
+caller omitting the argument is a programming error, and every current caller passes
+it); the teardown half of `mayHaveCreated`, still the named follow-up below; and
+`estateSummary` deriving the applying count twice.
+
 ## 2026-09-04 — S163e-fixes (round fourteen): one path got the promise, its siblings did not
 
 **12 findings, 8 accepted, 4 declined.** Every accept is the same shape: "nothing

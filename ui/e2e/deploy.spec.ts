@@ -1826,3 +1826,134 @@ test('a log that ends in a report still has a terminal line', async ({ page }) =
   await expect(page.getByTestId('pending-deploy-report')).toHaveCount(0);
   await expect(page.getByTestId('deploy-outcome-pointer')).toHaveCount(0);
 });
+
+// `loadDetail` is a round trip, and a deploy started before a
+// navigation can END while that fetch is still in flight. Retiring by
+// "is it finished when detail arrives?" deleted the refusal before it
+// had ever rendered, and the button reverted to "Deploy…" as though the
+// click had not landed.
+//
+// The snapshot of what was already finished is taken synchronously in
+// afterNavigate, before any response can arrive.
+test('a refusal that lands mid-navigation is not swept up by the cleanup', async ({ page }) => {
+  await page.route('**/api/deployments/preview**', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        scenario: 'web-app-paris',
+        deployable: true,
+        expires_at: null,
+        internet_facing: false,
+        deploy_allowed: true,
+        already_live: [],
+        already_live_unknown: false,
+        cost: { components: [], eur_per_hour: 0, unpriced: [], complete: true, modelled: true }
+      })
+    })
+  );
+
+  let releasePost: () => void = () => {};
+  const heldPost = new Promise<void>((resolve) => (releasePost = resolve));
+  await page.route('**/api/deployments', async (route) => {
+    if (route.request().method() !== 'POST') return route.continue();
+    await heldPost;
+    return route.fulfill({
+      status: 423,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        error: 'web-app-paris is already deploying; wait for it to finish or tear it down',
+        started_nothing: true
+      })
+    });
+  });
+
+  // The return trip's scenario read is held open, which is the window
+  // the refusal has to land in.
+  let holdDetail = false;
+  let releaseDetail: () => void = () => {};
+  const heldDetail = new Promise<void>((resolve) => (releaseDetail = resolve));
+  await page.route('**/api/scenarios/training/web-app-paris', async (route) => {
+    if (holdDetail) await heldDetail;
+    return route.continue();
+  });
+
+  await page.goto('/scenarios/training/web-app-paris');
+  await page.getByTestId('scenario-deploy').click();
+  await page.getByTestId('deploy-confirm-go').click();
+  // Still RUNNING when the navigation starts: the POST has not answered.
+  await expect(page.getByTestId('deploy-progress')).toBeVisible();
+
+  await page.getByTestId('sidebar-scenario-training/lb-serving-paris').click();
+  await expect(page.locator('main h1')).toContainText('lb-serving-paris');
+
+  holdDetail = true;
+  await page.getByTestId('sidebar-scenario-training/web-app-paris').click();
+
+  // The refusal arrives while the detail fetch is still outstanding, so
+  // the entry is finished by the time the arrival hook runs.
+  releasePost();
+  await page.waitForTimeout(200);
+  releaseDetail();
+
+  await expect(page.locator('main h1')).toContainText('web-app-paris');
+  await expect(page.getByTestId('deploy-outcome')).toContainText('already deploying');
+});
+
+// Dismissing the report must not take the success banner with it. The
+// retry's outcome is on screen and is not a report; deleting the whole
+// entry removed a message the reader had not finished with.
+test('dismissing a report leaves the retry that succeeded still reported', async ({ page }) => {
+  await page.route('**/api/deployments/preview**', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        scenario: 'web-app-paris',
+        deployable: true,
+        expires_at: null,
+        internet_facing: false,
+        deploy_allowed: true,
+        already_live: [],
+        already_live_unknown: false,
+        cost: { components: [], eur_per_hour: 0, unpriced: [], complete: true, modelled: true }
+      })
+    })
+  );
+
+  let attempt = 0;
+  await page.route('**/api/deployments', (route) => {
+    if (route.request().method() !== 'POST') return route.continue();
+    attempt += 1;
+    return attempt === 1
+      ? route.fulfill({
+          status: 409,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            clean: false,
+            steps: [],
+            failures: [{ detail: 'project 7c98d82e is live' }]
+          })
+        })
+      : route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ clean: true, steps: [], failures: [] })
+        });
+  });
+
+  await page.goto('/scenarios/training/web-app-paris');
+  await page.getByTestId('scenario-deploy').click();
+  await page.getByTestId('deploy-confirm-go').click();
+  await expect(page.getByTestId('pending-deploy-report')).toContainText('7c98d82e');
+
+  await page.getByTestId('scenario-deploy').click();
+  await page.getByTestId('deploy-confirm-go').click();
+  await expect(page.getByTestId('deploy-outcome')).toContainText('Deployed. It is listed');
+
+  // No navigation: the success banner is still the current ending.
+  await page.getByTestId('dismiss-deploy-report').click();
+
+  await expect(page.getByTestId('pending-deploy-report')).toHaveCount(0);
+  await expect(page.getByTestId('deploy-outcome')).toContainText('Deployed. It is listed');
+});

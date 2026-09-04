@@ -36,6 +36,7 @@
   let destroying = "";
   let outcomes: Record<string, { ok: boolean; message: string }> = {};
   let loadError = "";
+  let deployingKnown = true;
   let loaded = false;
   let timer: ReturnType<typeof setInterval> | undefined;
 
@@ -45,7 +46,11 @@
       deployments = payload?.deployments || [];
       unreadable = payload?.unreadable || [];
       teardownAllowed = payload?.teardown_allowed === true;
-      deploying = payload?.deploying || [];
+      // Absence is recorded, not smoothed over: `knownEmpty` may not
+      // claim the estate is empty on a payload that never said what was
+      // applying.
+      deployingKnown = Array.isArray(payload?.deploying);
+      deploying = deployingKnown ? payload.deploying : [];
       loadError = "";
     } catch (err) {
       // The previous rows are KEPT on error rather than cleared. An
@@ -113,7 +118,7 @@
   // The one condition under which this page may say nothing is running.
   // Shared with the summary rather than re-derived, because two copies
   // is how one of them ends up contradicting the other.
-  $: estateKnownEmpty = knownEmpty(deployments, unreadable, estateState, deploying);
+  $: estateKnownEmpty = knownEmpty(deployments, unreadable, estateState, deploying, deployingKnown);
 </script>
 
 <svelte:head><title>Deployments · InfraFactory</title></svelte:head>

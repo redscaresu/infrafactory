@@ -118,7 +118,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
   const ctype = res.headers.get("content-type") || "";
   if (ctype.includes("application/json")) {
-    return (await res.json()) as T;
+    // Guarded on the SUCCESS path too. Hardening only the error branch
+    // left the defect the comment above describes alive on every 2xx: a
+    // truncated 200 threw a SyntaxError that surfaced as the estate
+    // page's load error and the scenario page's preview error, reading
+    // "Unexpected end of JSON input" where it meant to say what went
+    // wrong.
+    const body = await readJSON(res);
+    if (body === null) throw new Error(`${path}: the response could not be read as JSON`);
+    return body as T;
   }
   return (await res.text()) as T;
 }

@@ -639,3 +639,26 @@ A report renders in the layout and not in the page's outcome slot, so the page
 carries a terminal line pointing at it: a log that stops with nothing said reads as
 a deploy still running. Dismissing the last report removes the entry, so nothing is
 left holding an ending the page will not render.
+
+
+## Amendment, 2026-09-04 (round fifteen): cleanup is scoped to what it can see
+
+A deploy can END while the page that would show it is still loading. The hook that
+retires finished deploys therefore acts on a SNAPSHOT taken when the navigation
+began, not on the state it finds when the detail arrives — otherwise a refusal that
+landed in between is deleted before it has ever been rendered, and the button
+reverts to "Deploy…" as though the click had not landed.
+
+Dismissing a report likewise removes the entry only when nothing renderable is
+left. A non-report outcome — the success of a retry, sitting beside an earlier
+attempt's leak report — is on screen, and deleting the entry took it down with the
+report the reader had just dealt with.
+
+### `started_nothing` is not a middleware concern
+
+The cross-origin guard wraps every endpoint. Marking its 403 as a refusal stamped a
+claim about whether an APPLY created cloud infrastructure onto refused reads and
+onto refused teardowns, where it is a claim about the wrong verb. It is a plain
+error again; a deploy client reads that as "we do not know", which is the safe
+direction, and a page this server did not serve is not one whose reader is watching
+a deploy.

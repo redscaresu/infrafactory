@@ -52,6 +52,11 @@ const MAX_PROGRESS_LINES = 999;
 // front discarded exactly the identifying half of the log.
 export const KEPT_OPENING_LINES = 20;
 
+// How far past the cap the log may grow before it is trimmed. Trimming
+// costs a full array rebuild, so doing it once per slack rather than
+// once per line makes it amortised.
+const TRIM_SLACK = 100;
+
 // Injected rather than imported: `ws.ts` is TypeScript and the unit
 // tests run under `node --test`, which resolves plain JS only.
 let connect = () => () => {};
@@ -132,7 +137,12 @@ export function watch() {
  */
 function appendProgress(entry, line) {
   const progress = [...entry.progress, line];
-  if (progress.length <= MAX_PROGRESS_LINES) return { ...entry, progress };
+  if (progress.length <= MAX_PROGRESS_LINES + TRIM_SLACK) return { ...entry, progress };
+  // Trimmed in BATCHES, down to the cap, so the rebuild happens once
+  // per TRIM_SLACK lines rather than on every line past the cap. The
+  // cap exists for responsiveness during a long apply, and trimming a
+  // thousand-element array on each of several thousand lines only
+  // bounds the stall it was meant to remove.
   const keptTail = MAX_PROGRESS_LINES - KEPT_OPENING_LINES;
   return {
     ...entry,
@@ -270,10 +280,16 @@ export function dismissReport(scenario, index) {
     const entry = all[scenario];
     if (!entry) return all;
     const reports = (entry.reports ?? []).filter((_, i) => i !== index);
-    // Nothing left to say: the outcome that produced this report is not
-    // rendered anywhere once the report is gone, so keeping the entry
-    // leaves a finished deploy with an ending stated nowhere at all.
-    if (!reports.length && !entry.running) {
+    // Dropped only when nothing RENDERABLE is left.
+    //
+    // An outcome that is itself a report is not shown anywhere once the
+    // report goes, so keeping the entry would leave a finished deploy
+    // with its ending stated nowhere. But a NON-report outcome -- the
+    // success of a retry, sitting beside the earlier attempt's leak
+    // report -- is on screen, and deleting the entry took the success
+    // banner down with the report the reader had just dealt with.
+    const rendersSomething = entry.outcome && !entry.outcome.mayHaveCreated;
+    if (!reports.length && !entry.running && !rendersSomething) {
       const next = { ...all };
       delete next[scenario];
       return next;
