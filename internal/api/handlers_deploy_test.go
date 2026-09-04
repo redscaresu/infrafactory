@@ -234,13 +234,26 @@ func TestDeployStreamsItsProgressToWatchers(t *testing.T) {
 		select {
 		case raw := <-client.send:
 			var e struct {
-				Type string            `json:"type"`
-				Data map[string]string `json:"data"`
+				Type string         `json:"type"`
+				Data map[string]any `json:"data"`
 			}
 			require.NoError(t, json.Unmarshal(raw, &e))
-			assert.Equal(t, "deploy_progress", e.Type)
-			lines = append(lines, e.Data["line"])
-			subjects = append(subjects, e.Data["subject"])
+			// Progress lines are the ONLY thing on this stream.
+			// There is no terminal event: S163e deleted it along with
+			// the machinery that consumed it, because a tab that did
+			// not issue the POST has no business inferring an outcome
+			// from a broadcast -- the estate page reads the record.
+			require.Equal(t, "deploy_progress", e.Type, "no other event kind belongs on this stream")
+			// Comma-ok, not a bare assertion: a regression that drops
+			// `subject` or nests it would panic the whole test binary
+			// and report as a panic rather than as the assertion that
+			// names the missing field.
+			line, ok := e.Data["line"].(string)
+			require.True(t, ok, "every progress event carries a line")
+			subject, ok := e.Data["subject"].(string)
+			require.True(t, ok, "every progress event names its subject")
+			lines = append(lines, line)
+			subjects = append(subjects, subject)
 		default:
 			// Indentation is PRESERVED. The deploy command indents
 			// sub-steps on purpose, and flattening them here would
@@ -283,12 +296,24 @@ func TestASecondDeployOfTheSameScenarioIsRefused(t *testing.T) {
 
 	rec := postDeploy(t, srv, `{"scenario":"web-app-paris"}`)
 
-	assert.Equal(t, http.StatusConflict, rec.Code, "reasonable request, unreasonable moment")
+	// 423, not 409: 409 on this endpoint carries an ActionResult from a
+	// deploy that RAN. A refusal that shares its status is parsed as
+	// one, and the reader is told resources may be leaking after a
+	// request that touched nothing.
+	assert.Equal(t, http.StatusLocked, rec.Code, "reasonable request, unreasonable moment")
 	assert.Contains(t, rec.Body.String(), "web-app-paris",
-		"a bare conflict leaves a reader wondering which of their tabs is responsible")
+		"a bare refusal leaves a reader wondering which of their tabs is responsible")
+	assert.NotContains(t, rec.Body.String(), `"clean"`,
+		"a refusal is not an action result and must not be mistakable for one")
 }
 
-// So a page that has just been reloaded can restore what it was showing.
+// An applying deploy has no record yet, so it cannot appear in
+// `deployments` -- and a listing that showed only records would call an
+// estate empty while it was busy creating one. The estate page renders
+// this list as its own banner.
+//
+// Not for restoring a reloaded page: that consumer was deleted in
+// S163e, and the field outlived it.
 func TestTheListingNamesWhatIsCurrentlyDeploying(t *testing.T) {
 	srv := NewServer(ServerConfig{
 		Config: config.Default(), Deployments: &fakeDeployments{},
@@ -321,4 +346,297 @@ func TestTheListingReportsAnEmptyDeployingListRatherThanNull(t *testing.T) {
 			assert.NotContains(t, rec.Body.String(), `"deploying":null`)
 		})
 	}
+}
+
+// responseTimingRecorder notes what had been broadcast by the time the
+// response headers were written.
+type responseTimingRecorder struct {
+	*httptest.ResponseRecorder
+	send            chan []byte
+	broadcastFirst  bool
+	wroteHeaderOnce bool
+}
+
+func (w *responseTimingRecorder) WriteHeader(code int) {
+	if !w.wroteHeaderOnce {
+		w.wroteHeaderOnce = true
+		w.broadcastFirst = len(w.send) > 0
+	}
+	w.ResponseRecorder.WriteHeader(code)
+}
+
+// The trailing partial line has to be flushed BEFORE the response, and
+// the ordering is a property of the client rather than of this handler.
+//
+// A page stops accepting progress for a deploy the moment its request
+// resolves -- an entry that is no longer running must not absorb
+// somebody else's stream. So a line emitted after the response is a line
+// the browser discards: the tail of a billable apply's log, dropped
+// silently, by the very flush that exists to guarantee it is not.
+//
+// A deferred Close alone put the flush after `writeActionResult`. It is
+// still deferred, for panics; it is also called explicitly, and Close is
+// idempotent so the two do not fight.
+func TestTheLastLineOfAnApplyIsBroadcastBeforeTheResponse(t *testing.T) {
+	hub := NewHub()
+	client := &Client{send: make(chan []byte, 256)}
+	hub.Register(client)
+
+	srv := NewServer(ServerConfig{
+		Config: config.Default(), Deployments: &fakeDeployments{}, Hub: hub,
+		Deployer: &fakeDeployer{
+			result: ActionResult{Clean: true},
+			// No trailing newline: this is the line only Close emits.
+			progressLines: "  destroy: done",
+		},
+	})
+
+	rec := &responseTimingRecorder{ResponseRecorder: httptest.NewRecorder(), send: client.send}
+	srv.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/deployments",
+		strings.NewReader(`{"scenario":"lb-serving-paris"}`)))
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	assert.True(t, rec.broadcastFirst,
+		"a line emitted after the response is one the page has already stopped accepting")
+
+	var e struct {
+		Data map[string]any `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(<-client.send, &e))
+	assert.Equal(t, "  destroy: done", e.Data["line"])
+}
+
+// `clean` must always be on the wire, including when it is false.
+//
+// The browser uses that key as the DISCRIMINATOR between a result and
+// an error: a 409 carrying `clean` is a deploy that ran and could not
+// prove itself, and its per-stage failures name the project that has to
+// be removed by hand. `omitempty` on a bool is the natural instinct,
+// and adding it here would make exactly the unprovable case serialise
+// without the key -- so the client would classify the richest, most
+// urgent response as a bare error and discard the project id.
+//
+// Go tests unmarshal into ActionResult and would not notice; this
+// asserts the JSON.
+func TestAnUnprovenResultStillCarriesTheCleanFlag(t *testing.T) {
+	raw, err := json.Marshal(ActionResult{
+		Clean:    false,
+		Failures: []ActionStep{{Detail: "project 7c98d82e is live and could not be deleted"}},
+	})
+	require.NoError(t, err)
+
+	var wire map[string]any
+	require.NoError(t, json.Unmarshal(raw, &wire))
+
+	_, ok := wire["clean"]
+	assert.True(t, ok,
+		"the client reads `clean` to tell a result from an error; without it the failures are discarded")
+	assert.Equal(t, false, wire["clean"])
+}
+
+// Only a refusal may claim nothing was created, and only the paths that
+// run BEFORE the apply may call themselves refusals.
+//
+// The client used to decide this from the status code, which was a copy
+// of these semantics living in another language -- and it was already
+// wrong, because 404 is answered both here (no such scenario, before
+// the apply) and below (an os.ErrNotExist RETURNED by Deploy, after it).
+// Reading the second as "nothing started" discards the log of a live
+// apply and tells the reader nothing happened.
+func TestOnlyPreApplyRefusalsSayNothingWasStarted(t *testing.T) {
+	startedNothing := func(t *testing.T, body []byte) (bool, bool) {
+		t.Helper()
+		var payload map[string]any
+		require.NoError(t, json.Unmarshal(body, &payload))
+		v, present := payload["started_nothing"]
+		return v == true, present
+	}
+
+	t.Run("the lock refusal says so", func(t *testing.T) {
+		srv := deployServer(t, &fakeDeployer{err: ErrDeployInProgress})
+		rec := postDeploy(t, srv, `{"scenario":"web-app-paris"}`)
+
+		require.Equal(t, http.StatusLocked, rec.Code)
+		claimed, present := startedNothing(t, rec.Body.Bytes())
+		require.True(t, present, "the client cannot infer this and must not have to")
+		assert.True(t, claimed)
+	})
+
+	t.Run("a malformed request says so", func(t *testing.T) {
+		srv := deployServer(t, &fakeDeployer{})
+		rec := postDeploy(t, srv, `{`)
+
+		require.Equal(t, http.StatusBadRequest, rec.Code)
+		claimed, _ := startedNothing(t, rec.Body.Bytes())
+		assert.True(t, claimed)
+	})
+
+	t.Run("a not-found returned BY the deployer does not", func(t *testing.T) {
+		// This 404 is read off the error Deploy RETURNED, so it runs
+		// after the apply. An implementation whose post-apply error
+		// wraps os.ErrNotExist would answer 404 for a deploy that
+		// created a project.
+		srv := deployServer(t, &fakeDeployer{err: os.ErrNotExist})
+		rec := postDeploy(t, srv, `{"scenario":"web-app-paris"}`)
+
+		require.Equal(t, http.StatusNotFound, rec.Code)
+		_, present := startedNothing(t, rec.Body.Bytes())
+		assert.False(t, present,
+			"claiming nothing was created here would discard the record of one that was")
+	})
+
+	t.Run("a genuine failure does not", func(t *testing.T) {
+		srv := deployServer(t, &fakeDeployer{err: errors.New("the provider gave up")})
+		rec := postDeploy(t, srv, `{"scenario":"web-app-paris"}`)
+
+		require.Equal(t, http.StatusInternalServerError, rec.Code)
+		_, present := startedNothing(t, rec.Body.Bytes())
+		assert.False(t, present)
+	})
+}
+
+// A name that did not resolve is a REFUSAL, and the real deployer
+// resolves before it claims the lock or touches the cloud.
+//
+// Answering it as a plain 404 made the client keep a red "it may have
+// created resources that are still running — check the Deployments
+// page" pinned for the rest of the session, for a scenario that never
+// existed. The handler could not tell that from an os.ErrNotExist
+// surfacing out of an apply already under way, so the deployer says
+// which it means.
+func TestAnUnresolvedScenarioNameIsARefusal(t *testing.T) {
+	srv := deployServer(t, &fakeDeployer{
+		err: fmt.Errorf("no scenario named %q: %w: %w", "typo", ErrNoSuchScenario, os.ErrNotExist),
+	})
+
+	rec := postDeploy(t, srv, `{"scenario":"typo"}`)
+
+	require.Equal(t, http.StatusNotFound, rec.Code)
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &payload))
+	assert.Equal(t, true, payload["started_nothing"],
+		"resolution runs before the lock and before the cloud; nothing was created")
+}
+
+// Everything the deployer can fail at before the apply has to say so.
+//
+// ErrNoSuchScenario closed one path; its siblings -- rebuilding the
+// runtime, parsing the flags, a walk over a misconfigured scenario root
+// -- answered 500 or a bare 404, and the client read those as "we do
+// not know what happened". So a misconfigured server pinned a permanent
+// red "it may have created resources that are still running" for a
+// request that never reached Scaleway.
+func TestEveryPreApplyFailureSaysNothingWasStarted(t *testing.T) {
+	for name, tc := range map[string]struct {
+		err    error
+		status int
+	}{
+		"the name did not resolve": {
+			err:    fmt.Errorf("no scenario named %q: %w", "typo", ErrNoSuchScenario),
+			status: http.StatusNotFound,
+		},
+		"the runtime could not be rebuilt": {
+			err:    fmt.Errorf("%w: %w", ErrNothingStarted, errors.New("config is unreadable")),
+			status: http.StatusInternalServerError,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			srv := deployServer(t, &fakeDeployer{err: tc.err})
+			rec := postDeploy(t, srv, `{"scenario":"web-app-paris"}`)
+
+			require.Equal(t, tc.status, rec.Code)
+			var payload map[string]any
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &payload))
+			assert.Equal(t, true, payload["started_nothing"],
+				"the apply had not begun, so no project exists to warn about")
+		})
+	}
+}
+
+// Any path that answers before a deploy could begin may say so.
+//
+// This wavered twice. The objection was that `started_nothing` is a
+// claim about an apply, so it is meaningless on a shared route and on
+// middleware that refuses every endpoint. But meaningless is not false:
+// nothing WAS started, whatever the request was for, because no handler
+// ran. Withholding a true claim is not neutral -- a refused deploy POST
+// then read as "we do not know what happened", and the page pinned a
+// permanent "it may have created resources that are still running" for
+// a request that never reached the deployer.
+//
+// A vacuous truth on a PUT costs nothing. A missing one manufactures a
+// false alarm.
+func TestEveryRefusalBeforeDispatchSaysNothingWasStarted(t *testing.T) {
+	claimed := func(t *testing.T, body []byte) bool {
+		t.Helper()
+		var payload map[string]any
+		require.NoError(t, json.Unmarshal(body, &payload))
+		return payload["started_nothing"] == true
+	}
+
+	t.Run("the collection's method check", func(t *testing.T) {
+		srv := deployServer(t, &fakeDeployer{})
+		rec := httptest.NewRecorder()
+		srv.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPut, "/api/deployments", nil))
+
+		require.Equal(t, http.StatusMethodNotAllowed, rec.Code)
+		assert.True(t, claimed(t, rec.Body.Bytes()))
+	})
+
+	t.Run("the cross-origin guard", func(t *testing.T) {
+		srv := deployServer(t, &fakeDeployer{})
+		req := httptest.NewRequest(http.MethodPost, "/api/deployments",
+			strings.NewReader(`{"scenario":"web-app-paris"}`))
+		req.Header.Set("Origin", "https://evil.example")
+		rec := httptest.NewRecorder()
+		srv.Handler.ServeHTTP(rec, req)
+
+		require.Equal(t, http.StatusForbidden, rec.Code)
+		assert.True(t, claimed(t, rec.Body.Bytes()),
+			"no handler ran, so a reader must not be sent hunting for a project")
+	})
+}
+
+// A sentinel is for `errors.Is`; a message is for a person.
+//
+// `DeploymentDeployer` is an interface and these are exported, so an
+// implementer signalling the documented way -- `return
+// api.ErrNoSuchScenario` -- has its Error() written straight into the
+// refusal body by the handler and rendered by the page. Composing the
+// sentinel with `%w` gave it the text "no such scenario: nothing was
+// started": a self-contradicting sentence, in front of an operator.
+func TestTheSentinelsReadAsMessagesAndStillMatch(t *testing.T) {
+	assert.True(t, errors.Is(ErrNoSuchScenario, ErrNothingStarted),
+		"the refinement still has to be machine-readable")
+	assert.Equal(t, "no such scenario", ErrNoSuchScenario.Error())
+	assert.Equal(t, "nothing was started", ErrNothingStarted.Error())
+
+	wrapped := fmt.Errorf("no scenario named %q: %w", "typo", ErrNoSuchScenario)
+	assert.True(t, errors.Is(wrapped, ErrNoSuchScenario))
+	assert.True(t, errors.Is(wrapped, ErrNothingStarted))
+}
+
+// `deployHandler` is a package-level constructor, so the invariant that
+// it only ever sees POST is a property of one call site -- not of the
+// type. Registering it directly would otherwise let a GET run a real
+// apply, which is why the guard is code rather than a docstring.
+func TestDeployHandlerRefusesANonPostEvenWhenRegisteredDirectly(t *testing.T) {
+	// THE deployer the handler was given, not a fresh one. Asserting on
+	// `(&fakeDeployer{}).calls` allocates a value whose `calls` is
+	// always nil, so the test passed for any implementation -- including
+	// one that ran the apply and then wrote 405, which is the outcome
+	// this guard exists to prevent.
+	deployer := &fakeDeployer{}
+	state := &serverState{deployer: deployer}
+
+	for _, method := range []string{http.MethodGet, http.MethodDelete, http.MethodPut} {
+		rec := httptest.NewRecorder()
+		deployHandler(state)(rec, httptest.NewRequest(method, "/anywhere", nil))
+
+		assert.Equal(t, http.StatusMethodNotAllowed, rec.Code, method)
+		var payload map[string]any
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &payload))
+		assert.Equal(t, true, payload["started_nothing"], method)
+	}
+	assert.Empty(t, deployer.calls, "and nothing was applied")
 }

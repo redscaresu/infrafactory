@@ -2,23 +2,22 @@
   import { afterNavigate } from "$app/navigation";
   import { onDestroy, onMount } from "svelte";
   import { page } from "$app/stores";
-  import { api } from "$lib/api";
+  import { api, DeployError } from "$lib/api";
   import { connectWS } from "$lib/ws";
   import {
     deployConfirmation,
     deployWarnings,
-    teardownOutcome
+    deployOutcome as toDeployOutcome
   } from "$lib/deployments-view.js";
   import {
-    adoptInFlight,
     beginDeploy,
     deploys,
-    forgetDeploy,
-    finishDeploy,
+    endDeploy,
     isConnected,
     isRunning,
     useConnector,
-    watch as watchDeploys
+    watch as watchDeploys,
+    KEPT_OPENING_LINES
   } from "$lib/deploy-store.js";
   import { modeSummary, normalizeRunOptions } from "$lib/scenario-run.js";
   import type { DeployPreview, ScenarioLayer3StatusResponse, ScenarioRunModeResponse } from "$lib/types";
@@ -44,6 +43,7 @@
   /** current reports whether a response still belongs to the page. */
   const current = (token: number) => token === navigation;
   let detail: any = null;
+  let detailError = "";
   let rawYAML = "";
   let status = "";
   let running = false;
@@ -88,31 +88,46 @@
 
   $: if (rawYAML !== undefined) scheduleValidation(rawYAML);
 
-  // Clear the debounce timer on destroy so navigating away during the
-  // 500ms window doesn't fire a stale validation against a torn-down
-  // component (the validationVersion guard is per-instance).
   // The shared socket stays open while this page is mounted, and the
-  // store keeps it open beyond that if a deploy is still running -- so
-  // leaving and returning finds the log intact rather than frozen.
-  onMount(() => {
-    // A reload wipes the store, so ask the server what is running. The
-    // refusal is server-side either way; this stops the reader being
-    // shown a button that would be refused.
-    void api
-      .getDeployments()
-      .then((payload) => adoptInFlight(payload?.deploying))
-      .catch(() => {
-        // Unreachable estate. The Deploy button stays enabled and the
-        // server refuses if it must -- better than blocking deploys
-        // because a listing call failed.
-      });
-    return watchDeploys();
-  });
+  // store keeps it open beyond that if a deploy this tab started is
+  // still running -- so leaving and returning finds the log intact
+  // rather than frozen.
+  //
+  // Nothing here asks the server what else might be deploying. An
+  // earlier version did -- adoption, terminal-event recovery, reconnect
+  // resynchronisation -- and three review rounds produced 36 findings,
+  // almost all of them in that machinery. It was a browser mirror of
+  // server state, and every bug was the mirror disagreeing with the
+  // thing it mirrored.
+  //
+  // A reloaded page simply does not know, and says so.
+  onMount(() => watchDeploys());
 
   onDestroy(() => {
+    // Clear the debounce timer so navigating away during the 500ms
+    // window does not fire a stale validation against a torn-down
+    // component (the validationVersion guard is per-instance).
     if (validationTimer) clearTimeout(validationTimer);
     resetDeployState();
   });
+
+  // NOTHING retires a deploy here, because nothing durable is kept
+  // here.
+  //
+  // The store holds only what is RUNNING; how a deploy ended is a
+  // transient fact of the visit it ended in, and what must not be lost
+  // is a report in the layout. That deletes the retire hooks, the
+  // shown-scenario tracking, the route-change guard, the stale-claim
+  // rules, the report pointer and the cross-store dismiss coordination
+  // -- every one of them a guard on a terminal `outcome` living in a
+  // store that outlives the page, and every one of them the source of a
+  // defect in a later review round.
+  //
+  // The cost is that a deploy which finishes while the reader is on
+  // another page is not announced when they return. That is the arc's
+  // own answer: the Deployments page says what is deployed, a report
+  // says what may have been left behind, and this page says what is
+  // happening while you are watching it.
 
   $: scenarioPath = ($page.params.path || "").toString();
   $: runModeCard = modeSummary(runMode);
@@ -144,13 +159,69 @@
     window.location.href = encodeLiveURL(scenario, active.run_id);
   }
 
+  /** sentence ends a message so the next one does not run into it. */
+  function sentence(text: string): string {
+    const trimmed = text.trim();
+    return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
+  }
+
+  /**
+   * attributed is the scenario prefix, applied at RENDER time.
+   *
+   * Not baked into the stored message. The layout renders reports under
+   * a scenario heading of their own, so a prefixed message printed the
+   * name twice; this slot has no heading, so it needs one. Deciding at
+   * render lets each place ask for what it needs from one string.
+   *
+   * Skipped when the message already leads with the name. Anchored,
+   * because a bare `includes` lets a scenario named `json` match
+   * "invalid json body" and render unattributed -- the defect the
+   * prefix exists to prevent, reintroduced by the check meant to stop
+   * it doubling.
+   *
+   * Space OR colon. Only the space form is reachable today: this slot
+   * renders successes and refusals, and the one refusal that names a
+   * scenario formats it `"%s is already deploying"`. The colon arm is
+   * for the next message that leads with `"<scenario>: …"` -- a shape
+   * the deploy pipeline's own errors already use, and one that would
+   * otherwise render the name twice on the screen this slice exists to
+   * make trustworthy.
+   */
+  function attributed(scenario: string, message: string): string {
+    if (message.startsWith(`${scenario} `) || message.startsWith(`${scenario}:`)) return message;
+    return `${scenario}: ${message}`;
+  }
+
   async function loadDetail() {
+    // Cleared BEFORE the guard. Returning early on an empty path left a
+    // previous scenario's failure on screen for a page that was never
+    // asked about.
+    detailError = "";
     if (!scenarioPath) return;
     const token = navigation;
-    const loaded = await api.getScenario(scenarioPath);
-    if (!current(token)) return;
-    detail = loaded;
-    rawYAML = loaded.raw_yaml;
+    try {
+      const loaded = await api.getScenario(scenarioPath);
+      if (!current(token)) return;
+      detail = loaded;
+      rawYAML = loaded.raw_yaml;
+    } catch (err) {
+      // Its two siblings, loadRunMode and loadLayer3Status, both catch
+      // and report. This one did not, and it is called unawaited from
+      // afterNavigate -- which has just set `detail = null`, and the
+      // whole page is inside `{#if detail}`. So a 500 or a dropped
+      // connection rejected into nothing and left a blank screen with
+      // no message, no retry, and no sign that anything had failed.
+      if (!current(token)) return;
+      // `detail` is cleared only if there was nothing there. A save
+      // calls this to refresh, and nulling on a transient failure
+      // unmounted the whole `{#if detail}` block -- the title, the
+      // buttons, the "Saved" status and the textarea holding the
+      // reader's YAML -- after a PUT that had actually succeeded.
+      detailError = err instanceof Error ? err.message : "Could not read this scenario";
+      if (!detail) return;
+      status = detailError;
+      detailError = "";
+    }
   }
 
   async function loadRunMode() {
@@ -183,7 +254,6 @@
   // which is the move pass 126 argued for and pass 127 had to learn
   // twice. It also gives the reader feedback that the click landed.
   let previewing = false;
-
   // A deploy runs for minutes, and minutes of silence reads as broken:
   // a reader cannot tell a long apply from a hung one, and the
   // difference matters when the thing running is creating billable
@@ -192,12 +262,17 @@
   // The in-flight state lives in a MODULE-LEVEL store, not here.
   //
   // This component is reused between scenarios and destroyed outright
-  // when you leave the section, while a deploy runs for minutes on a
-  // server that has no in-flight lock. Holding it here produced two
-  // review findings: navigating away and back showed a real, billable
-  // apply as an unlabelled disabled button with no log and no warning,
-  // and leaving the section entirely let a SECOND deploy of the same
-  // scenario be started.
+  // when you leave the section, while a deploy runs for minutes on the
+  // server. Holding the state here produced two review findings:
+  // navigating away and back showed a real, billable apply as an
+  // unlabelled disabled button with no log and no warning, and leaving
+  // the section entirely let a second deploy be started.
+  //
+  // The REFUSAL is server-side -- `LiveDeployer` holds a per-scenario
+  // lock and answers 423 -- so this store is advisory. An earlier
+  // version of this comment said the server had no lock, which was
+  // false from the moment it was written and is exactly the
+  // false-explanation defect this work keeps finding.
   //
   // Everything below is scoped to the scenario ON SCREEN, so another
   // scenario's deploy never renders here and this scenario's deploy
@@ -205,9 +280,45 @@
   useConnector(connectWS);
 
   $: deployEntry = detail?.name ? $deploys[detail.name] : undefined;
-  $: deployProgress = deployEntry?.progress ?? [];
+  /**
+   * How the deploy this page started ended — for THIS visit only.
+   *
+   * Transient by construction, and cleared in exactly two places:
+   * `confirmDeploy` when a new attempt starts, and `afterNavigate` when
+   * the route actually changes. It renders only when its scenario is
+   * the one on screen. Those three facts are the whole scoping rule,
+   * and they replace a terminal `outcome` in a store that outlives the
+   * page — which needed retire hooks, a shown-scenario tracker, a
+   * route-change guard, stale-claim rules, a report pointer and
+   * cross-store dismiss coordination to keep it honest.
+   *
+   * It carries the log because the store drops the entry the moment the
+   * deploy ends, and a log that vanishes at the end is worse than no
+   * log at all.
+   */
+  type Ending = { ok: boolean; message: string; log?: string[]; dropped?: number };
+
+  // KEYED BY SCENARIO, because this component is reused across scenario
+  // routes and one instance can have started several deploys.
+  //
+  // A single slot lost a race with itself: deploy A, navigate, deploy
+  // B, and whichever finished LAST overwrote the other's ending and its
+  // whole log -- the progress panel and the terminal line vanishing
+  // from under a reader for a real, billable apply that had just
+  // completed, with the store entry already deleted so nothing could
+  // restore it.
+  //
+  // Keying it is not the state machine this replaced: it is still
+  // component-local, still cleared wholesale on a route change, and
+  // still has no staleness rules.
+  let endings: Record<string, Ending> = {};
+
+  // Only ever the one belonging to the page on screen.
+  $: ending = detail?.name ? (endings[detail.name] ?? null) : null;
+  // While running, the log comes from the store; after, from `ending`.
+  $: deployProgress = deployEntry?.progress ?? ending?.log ?? [];
+  $: deployDropped = deployEntry?.dropped ?? ending?.dropped ?? 0;
   $: deploying = detail?.name ? isRunning($deploys, detail.name) : false;
-  $: deployOutcome = deployEntry?.outcome ?? null;
   // A dropped socket and "nothing has happened yet" both produce an
   // empty log, and rendering them the same way tells the reader an apply
   // is quiet when the truth is that it is UNOBSERVED.
@@ -270,21 +381,108 @@
     const target = preview?.scenario;
     if (!target) return;
 
-    // The store owns everything about an in-flight deploy, so it
-    // survives this component being reused or destroyed. It is keyed by
-    // scenario, which is what the progress events carry.
-    beginDeploy(target);
     confirmingDeploy = false;
+    // THIS scenario's last ending goes now, not on the next navigation.
+    // Without this a retry on the same page kept rendering it for the
+    // whole minutes-long apply -- a green "Deployed." under a live,
+    // streaming log, or worse a red "what it may have left behind is
+    // reported at the top of the page" that a reader would take as the
+    // state of the deploy currently running.
+    endings = Object.fromEntries(Object.entries(endings).filter(([k]) => k !== target));
+
+    // The entry is created BEFORE the POST, because streaming progress
+    // during the apply is the entire point and the response does not
+    // arrive for minutes.
+    // The store's answer is BINDING. It declines to record a second
+    // start over a running one and cannot stop the POST, so a caller
+    // that ignored it sent one anyway -- and the 423 that came back was
+    // applied to the FIRST deploy.
+    if (!beginDeploy(target)) {
+      // Said, not silently abandoned: the dialog has already closed, so
+      // returning bare left the reader with a button that reverted to
+      // "Deploy…" and no account of their click.
+      //
+      // NOT written to the store. Doing that ended the running deploy
+      // it was refusing on behalf of -- the entry is running by
+      // definition here, and ending it stopped the socket handler
+      // feeding its log while the apply carried on billing.
+      endings = {
+        ...endings,
+        [target]: { ok: false, message: "A deploy of this scenario is already running here." }
+      };
+      return;
+    }
 
     try {
-      finishDeploy(target, teardownOutcome(await api.deployScenario(target)));
+      finish(target, toDeployOutcome(await api.deployScenario(target)));
     } catch (err) {
-      finishDeploy(target, {
+      const message = err instanceof Error ? err.message : "The deploy failed.";
+
+      // `DeployError.conclusion` is what may be concluded about
+      // infrastructure -- the server's own word where it has one. A
+      // rejected promise does NOT mean nothing happened: the server
+      // detaches the apply from the request, so a dropped connection
+      // leaves it running and creating billable infrastructure.
+      const conclusion = err instanceof DeployError ? err.conclusion : "unknown";
+
+      if (conclusion === "clean") {
+        // A 2xx the server was still writing when the connection went.
+        // Provably clean, so there is nothing to report.
+        finish(target, { ok: true, mayHaveCreated: false, message });
+        return;
+      }
+      if (conclusion === "refused") {
+        // Nothing of ours started, so nothing to report -- and the log
+        // is discarded for EVERY refusal, not just the lock one.
+        //
+        // The entry collects for the whole round trip, and a refusal
+        // means nothing of ours was applying during it. So any line
+        // that arrived belongs to somebody else's apply of the same
+        // scenario -- a CLI run, another tab -- whether we were refused
+        // by the lock, by the origin guard or by a malformed request.
+        // For every refusal but 423 the log is almost always empty and
+        // the discard is a no-op; the rule does not need to know which
+        // refusal it was.
+        finish(target, { ok: false, mayHaveCreated: false, message }, { keepLog: false });
+        return;
+      }
+      finish(target, {
         ok: false,
-        message:
-          err instanceof Error ? `deploy could not be completed: ${err.message}` : "deploy failed."
+        mayHaveCreated: true,
+        // Punctuated. Server error strings and `deploy failed: 502`
+        // never end in a full stop, so the two sentences ran together.
+        message: `${sentence(message)} The deploy may still be running on the server — check the Deployments page before starting another.`
       });
     }
+  }
+
+  /**
+   * finish ends a deploy in the store and keeps what the reader is
+   * watching.
+   *
+   * The store drops the entry; a report, if the outcome may describe
+   * infrastructure, goes to the layout; and the log plus a one-line
+   * ending stay here, transient, for the visit they happened in.
+   */
+  function finish(
+    scenario: string,
+    outcome: { ok: boolean; mayHaveCreated: boolean; message: string },
+    opts: { keepLog?: boolean } = {}
+  ) {
+    const { progress, dropped } = endDeploy(scenario, outcome);
+    const finished: Ending = {
+      ok: outcome.ok,
+      // A leak report is not repeated here -- the layout carries it,
+      // because it must survive the reader following its own advice to
+      // the Deployments page. This points at it, so a log does not stop
+      // with nothing said.
+      message: outcome.mayHaveCreated
+        ? "this deploy did not finish cleanly. What it may have left behind is reported at the top of the page."
+        : outcome.message,
+      log: opts.keepLog === false ? [] : progress,
+      dropped: opts.keepLog === false ? 0 : dropped
+    };
+    endings = { ...endings, [scenario]: finished };
   }
 
   async function loadLayer3Status() {
@@ -343,23 +541,30 @@
   // Reload data on every navigation (including client-side), since
   // SvelteKit reuses the component for [...path] route changes.
   // afterNavigate fires on both initial load and subsequent navigations.
-  afterNavigate(() => {
+  afterNavigate(({ from, to }) => {
     // Every response in flight now belongs to a page that no longer
     // exists.
     navigation += 1;
-    // A FINISHED deploy's banner is dropped when the reader leaves the
-    // scenario it belongs to. Without this it reappeared on every later
-    // visit for the rest of the session, long after the TTL had expired
-    // -- a success message for something that may no longer exist.
-    if (detail?.name && deployEntry && !deployEntry.running) {
-      forgetDeploy(detail.name);
-    }
+    // The ending belongs to the visit it happened in, so a route change
+    // ends it -- and ONLY a route change. `afterNavigate` also fires
+    // for a click on the scenario already on screen, and clearing there
+    // discarded the line and the log of a deploy the reader had not
+    // left. Every hop optional-chained: a `from` carrying a null `url`
+    // made this throw, and a throw here aborts the hook, so nothing
+    // below ran and the page rendered blank.
+    if (from?.url?.pathname !== to?.url?.pathname) endings = {};
     scenarioPath = ($page.params.path || "").toString();
     // Belt and braces with confirmDeploy reading preview.scenario: a
     // confirmation describing the page you just left must not still be
     // on screen, even though accepting it would now be harmless.
     // Leaving it visible invites the reader to trust a dialog about
     // something they are no longer looking at.
+    //
+    // `status` too. It carries a message about ONE scenario -- "Saved",
+    // or the read error a failed post-save refresh writes into it --
+    // and nothing cleared it, so it rendered unattributed under the
+    // next scenario's title.
+    status = "";
     resetDeployState();
     // `detail` is cleared too, and that is the STRUCTURAL half of this.
     //
@@ -514,6 +719,24 @@
     >
   </div>
 
+  <!-- This page only knows about a deploy IT started. After a reload it
+       does not, and the estate page is the thing that does -- from the
+       live store, which every finished deploy writes to whatever
+       started it. Saying so is less convenient than mirroring server
+       state here; mirroring it produced 36 review findings across three
+       rounds.
+
+       "Everything RECORDED" rather than "everything running", and the
+       difference is real: the in-progress banner there comes from one
+       process's in-memory lock, so a `infrafactory deploy` in a
+       terminal, or an apply that was in flight when the server
+       restarted, appears in neither the table nor the banner until it
+       finishes and writes its record. -->
+  <p class="mt-2 text-xs text-slate-500" data-testid="deploy-scope-note">
+    This page shows deploys started from it. <a class="underline" href="/deployments">Deployments</a>
+    lists every deployment that has been recorded.
+  </p>
+
   {#if previewError}
     <p class="mt-3 text-sm text-rose-800" data-testid="deploy-preview-error">{previewError}</p>
   {/if}
@@ -578,7 +801,15 @@
       {:else if deployProgress.length === 0}
         <p class="text-slate-400">Starting…</p>
       {:else}
-        {#each deployProgress as line}
+        {#each deployProgress as line, i}
+          {#if i === KEPT_OPENING_LINES && deployDropped > 0}
+            <!-- A truncated log with no marker reads as a whole one,
+                 so its first visible line looks like the start of the
+                 apply when it is not. -->
+            <p class="text-amber-300" data-testid="deploy-progress-truncated">
+              … {deployDropped} lines omitted …
+            </p>
+          {/if}
           <p>{line}</p>
         {/each}
       {/if}
@@ -589,16 +820,30 @@
        during it, so an unattributed "deployed." is a claim about the
        wrong thing. The store keys outcomes by scenario, so this one is
        this scenario's by construction. -->
-  {#if deployOutcome}
+  <!-- A REPORT is not repeated here -- the layout renders those, and
+       printing it twice put the scenario name on screen three times --
+       but the log must not simply stop with nothing said. A reader
+       watching it needs a terminal line, and the full account is above
+       the fold. -->
+  <!-- ONE line, for the visit the deploy ended in.
+       It renders only when its scenario is the one on screen, which is
+       the whole scoping rule -- there is no token, no clearing pass and
+       no staleness question, because it does not outlive the
+       navigation.
+
+       A leak report is NOT repeated here. The layout carries those,
+       because they have to survive the reader following their own
+       advice to the Deployments page; this line points at them so a log
+       does not simply stop with nothing said. -->
+  {#if ending}
     <p
-      class={`mt-3 text-sm ${deployOutcome.ok ? "text-emerald-800" : "font-semibold text-rose-800"}`}
+      class={`mt-3 text-sm ${ending?.ok ? "text-emerald-800" : "font-semibold text-rose-800"}`}
       data-testid="deploy-outcome"
     >
-      {detail?.name}: {deployOutcome.ok
-        ? "deployed. It is listed on the Deployments page until its TTL expires."
-        : deployOutcome.message}
+      {attributed(detail.name, ending.message)}
     </p>
   {/if}
+
   {#if status}<p class="mt-3 text-sm text-slate-700">{status}</p>{/if}
   <textarea
     class="mt-4 h-[460px] w-full rounded border border-slate-300 p-3 font-mono text-sm"
@@ -618,4 +863,14 @@
       </ul>
     {/if}
   </div>
+{:else if detailError}
+  <!-- Without this the page was simply blank: `detail` is null both
+       while loading and after a failed load, and nothing distinguished
+       them. An empty screen reads as "there is nothing here", which is
+       the one thing it must not say when the truth is "we could not
+       find out". -->
+  <p class="text-sm font-semibold text-rose-800" data-testid="scenario-load-error">
+    This scenario could not be read: {detailError}
+  </p>
+
 {/if}

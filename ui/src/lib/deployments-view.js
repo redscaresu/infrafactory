@@ -102,6 +102,109 @@ export function observedLabel(health) {
 }
 
 /**
+ * nothingRecorded is "the read returned no records, and none were
+ * undecodable" -- and nothing more.
+ *
+ * Extracted because three places asked it: `knownEmpty`, and both the
+ * failed and loaded branches of `estateSummary`. The last two were
+ * copies inside the function that CALLS knownEmpty, reachable only when
+ * it said no -- so a fourth term added to knownEmpty (as `deploying`
+ * was) would leave them still asserting emptiness without it.
+ *
+ * Deliberately NOT the whole emptiness question: it says nothing about
+ * whether the read succeeded or whether anything is applying. Those are
+ * knownEmpty's job, and keeping them apart is what stops this becoming
+ * a fourth copy of it.
+ */
+export function nothingRecorded(deployments, unreadable) {
+  return (deployments?.length || 0) === 0 && (unreadable?.length || 0) === 0;
+}
+
+/**
+ * knownEmpty is the ONLY condition under which anything on this page may
+ * claim that nothing is running.
+ *
+ * Derived once and shared, because the page makes that claim in more
+ * than one place -- a summary line and an empty-state panel -- and two
+ * copies of the condition is how one of them keeps saying "no live
+ * deployments" underneath a banner warning that unreadable records may
+ * describe running, billable infrastructure.
+ *
+ * FOUR things must all hold: the read succeeded, it returned no
+ * deployments, there is nothing the store could not decode, and nothing
+ * is applying. An undecodable record is not an absence of
+ * infrastructure; it is an absence of knowledge. An applying deploy is
+ * the most active thing in the estate and has no record at all.
+ *
+ * (This block was stranded above `nothingRecorded` when that was
+ * extracted between it and its function -- the same insertion defect it
+ * had just been moved to fix for `estateSummary`. Moved, and the count
+ * corrected from three, 2026-09-04.)
+ */
+export function knownEmpty(deployments, unreadable, state, deploying) {
+  return (
+    state === "loaded" &&
+    // `deploying` is TRI-STATE: a list, or "the payload never said". An
+    // absent field is not an empty one -- a server predating it, or a
+    // body trimmed by an intermediary, would otherwise license the
+    // page's only permitted emptiness claim on an estate that may be
+    // busy creating something.
+    //
+    // Carried in the VALUE rather than in a parallel boolean, because a
+    // parallel boolean is what an earlier round's defect was made of:
+    // this predicate got the new term and its sibling caller did not,
+    // so two emptiness claims contradicted each other on one screen.
+    //
+    // And there is NO DEFAULT -- on this or on `state` -- because a
+    // default is a third way to forget. `knownEmpty(d, u, state,
+    // payload.deploying)` written the obvious way passes `undefined`
+    // when the server omitted the key, and a `= []` default turned that
+    // straight back into the claim this guard exists to withhold; a
+    // `state = "loaded"` default did the same for "the read
+    // succeeded". Only an array counts as an answer, and only an
+    // explicit state counts as a state.
+    Array.isArray(deploying) &&
+    nothingRecorded(deployments, unreadable) &&
+    // A deploy that is APPLYING has no record yet, so it is absent from
+    // `deployments` while being the most active thing in the estate.
+    // Without this the page said "Nothing is deployed." directly under a
+    // banner naming a billable apply in flight -- a third copy of the
+    // emptiness question that neither of the other two knew about.
+    (deploying?.length || 0) === 0
+  );
+}
+
+/**
+ * deployingLabel is the ONE phrase that says how many deploys are
+ * applying, and whether that count is current.
+ *
+ * Exported and shared because the estate page states it twice -- in the
+ * summary line and in the banner two lines below it -- and two copies of
+ * one claim is the shape `knownEmpty` was extracted to remove. They can
+ * silently diverge on wording, on pluralisation, and on the staleness
+ * qualifier, while sitting next to each other on screen.
+ *
+ * `stale` matters more than it looks. The in-flight list is kept across
+ * a failed refresh on purpose, but that does NOT make it current: it is
+ * exactly as old as the rows beside it, which do say they were "read
+ * before the error". An unqualified "1 deploy in progress" asserts as
+ * present-tense fact something that may have finished a minute ago, and
+ * keeps asserting it for as long as polling fails.
+ *
+ * So it has NO DEFAULT, for the reason `knownEmpty` gives two functions
+ * up: a default is a third way to forget, and defaulting to `false`
+ * would hand out the unqualified present-tense claim to any caller who
+ * omitted the argument -- the one outcome this parameter exists to make
+ * unreachable by omission.
+ */
+export function deployingLabel(deploying, stale) {
+  const applying = deploying?.length || 0;
+  if (applying === 0) return "";
+  const count = `${applying} deploy${applying === 1 ? "" : "s"} in progress`;
+  return stale ? `${count} when the estate was last read` : count;
+}
+
+/**
  * estateSummary is the one line a person reads before the table.
  *
  * It states what was examined as well as what is wrong, for the same
@@ -120,41 +223,62 @@ export function observedLabel(health) {
  * Only the last may say "Nothing is deployed". An empty list under the
  * other two means WE DO NOT KNOW, and saying otherwise is exactly the
  * falsehood every other part of this page is built to avoid.
- */
-/**
- * knownEmpty is the ONLY condition under which anything on this page may
- * claim that nothing is running.
  *
- * Derived once and shared, because the page makes that claim in more
- * than one place -- a summary line and an empty-state panel -- and two
- * copies of the condition is how one of them keeps saying "no live
- * deployments" underneath a banner warning that unreadable records may
- * describe running, billable infrastructure.
- *
- * Three things must all hold: the read succeeded, it returned no
- * deployments, and there is nothing the store could not decode. An
- * undecodable record is not an absence of infrastructure; it is an
- * absence of knowledge.
+ * (This block sat above `knownEmpty` for two slices, because a second
+ * JSDoc comment was inserted between it and the function it describes.
+ * Moved 2026-09-03.)
  */
-export function knownEmpty(deployments, unreadable, state = "loaded") {
-  return state === "loaded" && (deployments?.length || 0) === 0 && (unreadable?.length || 0) === 0;
-}
-
-export function estateSummary(deployments, unreadable, state = "loaded") {
-  const total = deployments?.length || 0;
-  const unread = unreadable?.length || 0;
+export function estateSummary(deployments, unreadable, state, deploying) {
+  const told = Array.isArray(deploying);
+  const applying = told ? deploying.length : 0;
 
   if (state === "loading") return "Reading the live estate…";
 
   if (state === "failed") {
-    if (total === 0 && unread === 0) {
-      return "The live estate could not be read. Whether anything is running is unknown.";
+    // A failed read says nothing about what is APPLYING, and the list
+    // is kept across the error rather than cleared -- so the failed
+    // branch has to carry it too. Without this the summary read
+    // "Whether anything is running is unknown." directly above the
+    // banner naming a billable apply in flight. `knownEmpty` was
+    // extracted so two derived claims about emptiness could not
+    // contradict each other; this branch was a third claim that neither
+    // of them knew about.
+    //
+    // Carried as STALE, though. Surviving the error does not make it
+    // current: it was read at the same moment as the rows, and they say
+    // so about themselves.
+    const staleApplying = deployingLabel(deploying, true);
+    if (nothingRecorded(deployments, unreadable)) {
+      if (!staleApplying) {
+        return "The live estate could not be read. Whether anything is running is unknown.";
+      }
+      return `${staleApplying}. The live estate could not be read since, so what is running now is unknown.`;
     }
-    return `${describe(deployments, unreadable)} — read before the error, and possibly out of date.`;
+    const read = `${describe(deployments, unreadable)} — read before the error, and possibly out of date.`;
+    return staleApplying ? `${staleApplying}. ${read}` : read;
   }
 
-  if (knownEmpty(deployments, unreadable, state)) return "Nothing is deployed.";
-  return describe(deployments, unreadable);
+  if (knownEmpty(deployments, unreadable, state, deploying)) return "Nothing is deployed.";
+
+  const described = describe(deployments, unreadable);
+  const applyingText = deployingLabel(deploying, false);
+  // Not told is not "none". Falling through to `describe` alone
+  // rendered a bare "0 deployments" -- a read-derived emptiness claim
+  // with no hint that what is APPLYING was never reported, which is
+  // exactly what withholding `knownEmpty` was meant to prevent saying.
+  if (!told) {
+    return `${described} — this server did not report what is applying, so an in-progress deploy would not appear.`;
+  }
+  if (applying === 0) return described;
+  // A successful read that found nothing still has to SAY it found
+  // nothing. Returning the in-flight count alone left the reader with
+  // no statement at all about the estate: the empty-state panel is
+  // suppressed here (`knownEmpty` is false) and the table does not
+  // render, so this line is the only thing that speaks.
+  if (nothingRecorded(deployments, unreadable)) {
+    return `${applyingText}. Nothing else is deployed.`;
+  }
+  return `${described}, ${applyingText}`;
 }
 
 function describe(deployments, unreadable) {
@@ -242,17 +366,131 @@ export function teardownPrompt(deployment) {
  * running" is exactly the false green this project exists to avoid.
  */
 export function teardownOutcome(result) {
-  if (!result) return { ok: false, message: "Teardown returned nothing." };
-  if (result.clean) {
-    return { ok: true, message: "Destroyed. The account is provably clean." };
+  // No `mayHaveCreated` here at all: it is set by the caller that has a
+  // use for it, not by the shared rule. It used to be computed for both
+  // verbs and destructured away again for this one -- a value produced
+  // only to be discarded, which the next reader has to prove dead
+  // before touching either caller.
+  //
+  // Giving teardown the report path is the right answer and is a slice
+  // of its own: different verb, different store shape, different page.
+  // Named as a follow-up in STATUS.
+  return actionOutcome(result, {
+    nothing: "Teardown returned nothing.",
+    proven: "Destroyed. The account is provably clean.",
+    unproven: "Not provably clean — resources may still be running."
+  });
+}
+
+/**
+ * deployOutcome is `teardownOutcome`'s sibling, and exists because the
+ * two verbs are not interchangeable.
+ *
+ * Reusing `teardownOutcome` for a deploy put teardown's words on the
+ * deploy screen: a 409 rendered "Not provably clean — resources may
+ * still be running", and a malformed body rendered "Teardown returned
+ * nothing." next to a Deploy button. The success case was masked
+ * because the template overrides it with deploy-specific text, so the
+ * wrong-verb strings were reachable only on the failure branch -- where
+ * a reader is least equipped to discount them.
+ *
+ * `ok` still means the same thing it means everywhere here: PROVEN. A
+ * deploy that cannot prove its account clean is not a success (ADR-0024).
+ */
+export function deployOutcome(result) {
+  // A deploy that WROTE A RECORD is not an unreported leak.
+  //
+  // `deploy` registers from whatever the state shows, whether or not
+  // the apply succeeded, so a half-failed apply usually leaves a
+  // record -- with a TTL, on the estate page, reapable by `live reap`.
+  // Treating every unclean deploy as unrecorded pinned a permanent
+  // alarm for infrastructure something else already tracks, and could
+  // not even name what to tear down. That is the alarm fatigue
+  // `dismissReport` exists to avoid, manufactured on the common path.
+  return actionOutcome(result, {
+    nothing: "The deploy returned nothing, so what it created is unknown.",
+    // The whole sentence, because the template renders `message` for
+    // both branches now. It used to hardcode its own success text and
+    // ignore this field, so an edit here changed nothing on screen
+    // while every unit test asserting on it kept passing.
+    proven: "Deployed. It is listed on the Deployments page until its TTL expires.",
+    // "No record REACHED THIS PAGE", not "left no record". An empty
+    // `deployment` means one of three things: nothing was created,
+    // something was and could not be registered, or the result itself
+    // was unreadable so the id never arrived. Only the middle one is a
+    // certain leak, the client cannot tell them apart, and asserting
+    // the strongest reading contradicted the failure detail printed one
+    // sentence later.
+    unproven:
+      "The deploy did not finish cleanly, and no record of it reached this page — it may have created resources that nothing else is tracking.",
+    // The recorded case, phrased from the id the result carries. Kept
+    // inside `actionOutcome` rather than short-circuited before it,
+    // because the reason assembly below is the thing that must exist
+    // once: a change to how failure details are rendered would
+    // otherwise silently miss the common half-failed-but-recorded path.
+    recorded: (id) =>
+      `The deploy did not finish cleanly, but it was recorded as ${id} — it is on the Deployments page and expires with its TTL.`
+  });
+}
+
+/**
+ * actionOutcome is ADR-0024's rule, once.
+ *
+ * The rule is `clean`, not `failures.length`: an action that cannot
+ * PROVE its account clean is not a success, whatever else it reports.
+ * Deploy and teardown must differ in their WORDS -- "Teardown returned
+ * nothing." beside a Deploy button is its own defect -- but they must
+ * not differ in the rule, and two structural copies of it are two
+ * places a future change has to find. Applied to one and not the other,
+ * the deploy screen would report a success the teardown screen refuses.
+ *
+ * The per-stage failure details are appended because they are the
+ * useful part: they name the project that could not be deleted, which
+ * is the handle for removing it by hand.
+ *
+ * The absent-result branch is not reachable from either caller today:
+ * `api.deployScenario` and `api.tearDownDeployment` return only when
+ * `isActionResult` holds and throw otherwise. It stays because this
+ * judgement is the one place a green tick could appear over nothing at
+ * all, and the guarantee that prevents it lives in another module.
+ */
+function actionOutcome(result, words) {
+  // `mayHaveCreated` is what decides whether a banner is a REPORT that
+  // has to survive until somebody acts on it, or a claim that goes
+  // stale. It is not the same question as `ok`:
+  //
+  //   - a success is recorded on the estate page, so the banner is a
+  //     claim about a TTL that may already have expired -- droppable;
+  //   - a refusal started nothing, so there is nothing to report --
+  //     droppable, and it used to reappear on every later visit for the
+  //     rest of the session;
+  //   - an unproven action, or one whose request failed after the apply
+  //     began, may have left resources with no record anywhere. That is
+  //     the only kind that must not be forgotten.
+  //
+  // An absent result is the same case: nobody knows what it created.
+  if (!result) {
+    return { ok: false, ...(words.recorded ? { mayHaveCreated: true } : {}), message: words.nothing };
   }
+  if (result.clean) {
+    return { ok: true, ...(words.recorded ? { mayHaveCreated: false } : {}), message: words.proven };
+  }
+
+  // A failure that WROTE A RECORD is not an unreported leak. `deploy`
+  // registers from whatever the state shows, whether or not the apply
+  // succeeded, so the usual failure leaves something with a TTL that
+  // the estate page lists and `live reap` will destroy.
+  const recorded = words.recorded && result.deployment ? words.recorded(result.deployment) : "";
+  const base = recorded || words.unproven;
   const reasons = (result.failures || []).map((f) => f.detail).filter(Boolean);
   return {
     ok: false,
-    message:
-      reasons.length > 0
-        ? `Not provably clean — resources may still be running. ${reasons.join(" ")}`
-        : "Not provably clean — resources may still be running."
+    // Only when the caller asked for the distinction -- `words.recorded`
+    // is what says "this verb can tell a recorded failure from an
+    // unreported one". Teardown does not, so it gets no flag rather
+    // than one it drops.
+    ...(words.recorded ? { mayHaveCreated: recorded === "" } : {}),
+    message: reasons.length > 0 ? `${base} ${reasons.join(" ")}` : base
   };
 }
 
@@ -295,13 +533,30 @@ export function deployConfirmation(preview) {
  * deployWarnings are the things that should stop somebody, separated
  * from the descriptive lines so a page can render them differently.
  *
- * `modelled === false` is first because it is the one that invalidates
- * everything above it: an unmodelled scenario's empty component list and
- * €0.00 mean "unknown", not "nothing".
+ * Order matters and is asserted by tests that read the first warning.
+ * An EXISTING deployment of this scenario comes first: it is the one a
+ * reader is most likely to have simply forgotten, and the only one whose
+ * cost is a second bill. `modelled === false` follows, because it
+ * invalidates the figures above it -- an unmodelled scenario's empty
+ * component list and €0.00 mean "unknown", not "nothing".
  */
 export function deployWarnings(preview) {
   const warnings = [];
   if (!preview) return warnings;
+
+  // The CONCRETE ones first -- a named live deployment is the only
+  // warning whose cost is a whole second bill, and a reader is most
+  // likely to have simply forgotten it.
+  //
+  // The "could not be fully read" caveat is deliberately NOT first.
+  // `already_live_unknown` is estate-GLOBAL: one undecodable record
+  // anywhere sets it for every scenario, so a single corrupt file put
+  // an unactionable red line at the top of every Deploy confirmation
+  // until somebody found it -- ahead of `modelled === false`, whose own
+  // docstring says it invalidates the figures above it. Alarm fatigue
+  // on the common path is what `dismissReport` exists to avoid.
+  const live = alreadyLiveWarnings(preview);
+  warnings.push(...live.filter((w) => !w.startsWith(ESTATE_UNREADABLE)));
 
   if (preview.cost && preview.cost.modelled === false) {
     warnings.push(
@@ -318,12 +573,17 @@ export function deployWarnings(preview) {
     warnings.push("This will be reachable from the public internet for its whole lifetime.");
   }
 
+  // Last: true, worth saying, and about the estate rather than about
+  // this scenario.
+  warnings.push(...live.filter((w) => w.startsWith(ESTATE_UNREADABLE)));
+
   return warnings;
 }
 
+
 /**
- * acceptProgressEvent decides whether a websocket event belongs to the
- * deploy a page is currently showing.
+ * isProgressEvent decides whether a websocket message is a deploy
+ * progress line at all.
  *
  * Extracted from the component so it can be tested. While it was inline
  * in `+page.svelte` it had NO test at all: the e2e tests intercept the
@@ -331,16 +591,92 @@ export function deployWarnings(preview) {
  * never invoked. Typo-ing the event type — which kills the entire
  * stream — passed the whole suite.
  *
- * The subject is the SCENARIO, which is what the request carries. It
- * cannot be the deployment id: that id is minted inside the command,
- * after the request is accepted. So two concurrent deploys of the same
- * scenario share a stream, and a reader sees both. That is a real limit
- * and it is written down rather than implied away.
+ * SHAPE only, deliberately. The subject is the SCENARIO, which is what
+ * the request carries -- it cannot be the deployment id, because that id
+ * is minted inside the command after the request is accepted -- and the
+ * store looks its entry up BY that subject. So the predicate that used
+ * to take a "scenario on screen" was being handed the event's own
+ * subject and comparing it with itself: a guard that read as scoping
+ * while scoping nothing, which a later edit would have trusted. The real
+ * scoping is the keyed lookup and the running check, in the store.
  */
-export function acceptProgressEvent(event, showingScenario) {
-  if (!showingScenario) return false;
+export function isProgressEvent(event) {
   if (event?.type !== "deploy_progress") return false;
-  const data = event?.data;
-  if (!data?.line) return false;
-  return data.subject === showingScenario;
+  return Boolean(event?.data?.line);
+}
+
+
+/**
+ * alreadyLiveWarnings names what already exists, or might.
+ *
+ * The in-flight lock stops the accidental duplicate. It does nothing
+ * about deploy → wait → deploy again, and a lock is the wrong tool for
+ * that: it cannot tell "I forgot" from "I meant it", and refusing
+ * outright would break redeploying after a teardown.
+ *
+ * So the confirmation says what exists and the reader decides. The
+ * server computed this list before this function existed and NOTHING
+ * read it -- the guard the ADR described was documented, tested on the
+ * server, and absent from the screen it was for.
+ */
+/** ESTATE_UNREADABLE opens the one warning that is not scenario-specific. */
+export const ESTATE_UNREADABLE = "The live estate could not be fully read";
+
+export function alreadyLiveWarnings(preview) {
+  // A LIST, one entry per fact, strongest first.
+  //
+  // They answer different questions -- "some are already live", "one is
+  // applying right now", "we could not finish looking" -- and all three
+  // can be true at once, so none may be dropped. Two earlier versions
+  // dropped one: the first returned early on `already_deploying`, and
+  // the fix then concatenated all three into a single paragraph, which
+  // demoted the strongest of them to the second sentence of the first
+  // warning. Separate strings let the page render them separately, and
+  // let the order mean something.
+  const warnings = [];
+
+  // An ABSENT list is not an empty one. The server goes to some trouble
+  // to make an empty `already_live` a CHECKED claim -- `out :=
+  // []string{}`, and `(out, true)` on every path that did not look -- and
+  // reading a missing field as `[]` throws that away at the client
+  // boundary: an older server, or a body trimmed by an intermediary,
+  // would render no warning at all, indistinguishable from "we looked
+  // and there is nothing".
+  const looked = Array.isArray(preview?.already_live);
+  const live = looked ? preview.already_live : [];
+  const unknown = preview?.already_live_unknown === true || !looked;
+
+  // "Could not look" is not "nothing is there", and this guard is about
+  // billable infrastructure. It must not DISCARD what was found either:
+  // the unreadable flag is estate-global -- one corrupt record anywhere
+  // sets it -- so it qualifies the concrete list rather than replacing
+  // it.
+  const caveat = unknown
+    ? " Some live records could not be read, so there may be more than this."
+    : "";
+
+  // First: the only one whose cost is a whole second bill.
+  if (live.length > 0) {
+    const ids = live.join(", ");
+    warnings.push(
+      live.length === 1
+        ? `${ids} is already deployed from this scenario. Deploying again creates a SECOND project and a second bill; it does not replace it.${caveat}`
+        : `${live.length} deployments from this scenario are already live (${ids}). Deploying again creates ANOTHER project and another bill; it does not replace them.${caveat}`
+    );
+  } else if (unknown) {
+    warnings.push(
+      "The live estate could not be fully read, so whether this scenario is already deployed is unknown. Check the Deployments page before continuing."
+    );
+  }
+
+  // An applying deploy has no record, so the estate cannot see it. The
+  // second attempt would simply be refused, which is why this ranks
+  // below an existing deployment rather than above it.
+  if (preview?.already_deploying) {
+    warnings.push(
+      "This scenario is being deployed right now. A second deploy will be refused until it finishes."
+    );
+  }
+
+  return warnings;
 }

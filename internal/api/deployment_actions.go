@@ -31,6 +31,22 @@ type ActionResult struct {
 	// Failures are the reasons it is not clean. Carried separately so a
 	// page cannot render a partial success as a success.
 	Failures []ActionStep `json:"failures"`
+
+	// Deployment names the live record, when one was written.
+	//
+	// A failed deploy is not the same as an unrecorded one. `deploy`
+	// registers from whatever the state shows, whether or not the apply
+	// succeeded, so a half-failed apply usually DOES leave a record --
+	// with a TTL, listed on the estate page, reapable. Without this the
+	// client had to assume the worst of every unclean deploy and pin a
+	// permanent "it may have created resources that are still running"
+	// alarm for infrastructure the estate already tracks, unable even
+	// to name what to tear down.
+	//
+	// Empty means no record: either nothing was created, or something
+	// was and could not be recorded. Those are told apart by the
+	// failures, which say which.
+	Deployment string `json:"deployment,omitempty"`
 }
 
 // DeploymentDeployer creates a live deployment.
@@ -62,15 +78,22 @@ type DeploymentDeployer interface {
 
 	// InFlight names the scenarios currently deploying.
 	//
-	// Reported so a page that has just been RELOADED can know what is
-	// running. Until this existed the only thing preventing a second
-	// deploy of one scenario was client-side state, which a refresh
-	// wipes -- and the server had no lock, so the second click went
-	// through and created a second run-owned project.
+	// An applying deploy has no record until registration, which runs
+	// after the apply returns -- so it is invisible to any listing of
+	// records, and an estate busy creating something would be described
+	// as empty. This is what the estate page renders instead, and what
+	// the preview warns on.
 	//
-	// The list is advisory to the UI and load-bearing nowhere: the
-	// refusal happens in Deploy, so a client that ignores this still
-	// cannot start two.
+	// The list is advisory and load-bearing nowhere: the refusal is the
+	// lock inside Deploy, so a client that ignores this cannot start
+	// two. It is also NOT a complete answer to "what is applying" -- it
+	// is one process's memory, so a CLI deploy, or an apply in flight
+	// when the server restarted, is absent from it.
+	//
+	// (This previously said it existed so a reloaded page could restore
+	// what it was showing, and that the server had no lock. The first
+	// consumer was deleted in S163e; the second was false as of S163c.
+	// Corrected 2026-09-03.)
 	InFlight() []string
 }
 
@@ -82,6 +105,80 @@ type DeploymentDeployer interface {
 // projects and two sets of billable resources for one thing, which is
 // never what was meant.
 var ErrDeployInProgress = errors.New("a deploy of this scenario is already running")
+
+// ErrNothingStarted marks a Deploy failure that happened BEFORE
+// anything touched the cloud.
+//
+// The claim is about infrastructure, not about blame: it says no
+// project was created and no resources exist, so a client can say "that
+// request did nothing" instead of "it may have created resources that
+// are still running". Nothing else can tell -- a deploy is detached
+// from the request that starts it, and every failure mode looks the
+// same from outside.
+var ErrNothingStarted = errors.New("nothing was started")
+
+// ErrNoSuchScenario means the name did not resolve.
+//
+// A refinement of ErrNothingStarted rather than a separate fact -- it
+// answers 404 where its parent answers 500 -- and both promise the same
+// thing about the cloud.
+var ErrNoSuchScenario error = nothingStarted{message: "no such scenario", noSuchScenario: true}
+
+// NothingStarted wraps a cause with the promise, WITHOUT putting either
+// sentinel's text in front of a person.
+//
+// One shape for the whole idea. It had grown to two exported sentinels
+// and three bespoke error types across two packages, each unwrapping
+// differently -- so `errors.As`, `errors.Unwrap` and `errors.Is`
+// answered differently depending on which one a caller happened to
+// hold, for a concept that is one bit.
+//
+// The message is the caller's, because `fmt.Errorf("%w: %w",
+// ErrNothingStarted, err)` reads back as "nothing was started: config
+// is unreadable" -- a self-contradicting sentence, and the handler puts
+// `err.Error()` straight into the response body. A sentinel is for
+// `errors.Is`; a message is for a person.
+func NothingStarted(message string, cause error) error {
+	return nothingStarted{message: message, cause: cause}
+}
+
+// NoSuchScenario is NothingStarted for the one case that answers 404.
+func NoSuchScenario(message string) error {
+	return nothingStarted{message: message, noSuchScenario: true}
+}
+
+type nothingStarted struct {
+	message string
+	cause   error
+	// noSuchScenario refines the promise. A flag on the value rather
+	// than a second sentinel to match against text: the alternative was
+	// comparing the message, which is the kind of thing that breaks the
+	// day somebody rewords an error.
+	noSuchScenario bool
+}
+
+func (e nothingStarted) Error() string {
+	switch {
+	case e.cause == nil:
+		return e.message
+	case e.message == "":
+		return e.cause.Error()
+	default:
+		return e.message + ": " + e.cause.Error()
+	}
+}
+
+// Unwrap exposes the CAUSE, not the sentinel. The sentinel is matched by
+// Is; unwrapping to it would hand a caller a value whose only content is
+// the discriminator.
+func (e nothingStarted) Unwrap() error { return e.cause }
+
+func (e nothingStarted) Is(target error) bool {
+	if target == ErrNothingStarted {
+		return true
+	}
+	return e.noSuchScenario && target == ErrNoSuchScenario
+}
 
 // DeploymentActor performs the destructive half of live management.
 //

@@ -5,6 +5,7 @@
     addressHref,
     addressLabel,
     estateSummary,
+    deployingLabel,
     healthBadge,
     knownEmpty,
     needsAttention,
@@ -19,6 +20,27 @@
   let deployments: Deployment[] = [];
   let unreadable: string[] = [];
   let teardownAllowed = false;
+  // Scenarios applying right now.
+  //
+  // They have NO record yet -- registerDeployment runs after the apply
+  // returns -- so they cannot appear in the table below. Without this
+  // the page that is meant to answer "what is running" is silent about
+  // the thing most actively running, and a reader who has just clicked
+  // Deploy elsewhere sees nothing at all.
+  // Tri-state: a list, or `undefined` for "the payload never said what
+  // was applying". Absence is not emptiness, and `undefined` is the
+  // sentinel because it is what an absent field actually IS -- a
+  // separate `null` left the natural mistake available, passing the
+  // field straight through and landing on a default that claimed
+  // emptiness.
+  //
+  // Initialised to `undefined`, not `[]`. Nothing has been read yet, so
+  // the honest value is "not told" -- `[]` is an ANSWER, and it is only
+  // masked today by `estateState` being `loading` until the first read
+  // returns. A reordering that set `loaded` earlier would land
+  // `knownEmpty` on "Nothing is deployed." for a server that had said
+  // nothing at all.
+  let deploying: string[] | undefined = undefined;
 
   // Confirming is a SECOND deliberate action on a named row, not a
   // dialog that appears everywhere at once. A click cannot destroy
@@ -30,14 +52,31 @@
   let loaded = false;
   let timer: ReturnType<typeof setInterval> | undefined;
 
+  // Every read belongs to a request, and only the newest may answer.
+  //
+  // Two things drive `load()` -- a 30s interval and the `await load()`
+  // a teardown does in its `finally` -- so a slow earlier response
+  // could land last and overwrite a newer one: a destroyed row
+  // reappearing, and `deploying` resurrected to claim an apply is in
+  // flight that finished before the teardown started. That was
+  // tolerable when the payload was only a table; `deploying` now drives
+  // an alarm banner and gates the page's only emptiness claim.
+  let reads = 0;
+
   async function load() {
+    const token = ++reads;
     try {
       const payload: DeploymentsResponse = await api.getDeployments();
+      if (token !== reads) return;
       deployments = payload?.deployments || [];
       unreadable = payload?.unreadable || [];
       teardownAllowed = payload?.teardown_allowed === true;
+      // `undefined` for "the payload never said", carried in the value
+      // so no caller can forget to pass a second flag along with it.
+      deploying = Array.isArray(payload?.deploying) ? payload.deploying : undefined;
       loadError = "";
     } catch (err) {
+      if (token !== reads) return;
       // The previous rows are KEPT on error rather than cleared. An
       // empty table reads as "nothing is running", and a failed refresh
       // is not evidence that the estate is empty -- it is evidence that
@@ -90,11 +129,20 @@
   // The three states are distinct on purpose: an empty list means
   // "nothing is deployed" ONLY when the read succeeded.
   $: estateState = !loaded ? "loading" : loadError ? "failed" : "loaded";
-  $: summary = estateSummary(deployments, unreadable, estateState);
+  $: summary = estateSummary(deployments, unreadable, estateState, deploying);
+  // The in-flight list survives a failed refresh along with the rows,
+  // and is exactly as old as they are: the rows say so about
+  // themselves, and this says so about the banner.
+  //
+  // Built from `estateState` -- the same input the summary line uses --
+  // rather than from `loadError` separately, because this label exists
+  // precisely so the banner and the summary two lines above it cannot
+  // word the same claim differently.
+  $: applyingLabel = deployingLabel(deploying, estateState === "failed");
   // The one condition under which this page may say nothing is running.
   // Shared with the summary rather than re-derived, because two copies
   // is how one of them ends up contradicting the other.
-  $: estateKnownEmpty = knownEmpty(deployments, unreadable, estateState);
+  $: estateKnownEmpty = knownEmpty(deployments, unreadable, estateState, deploying);
 </script>
 
 <svelte:head><title>Deployments · InfraFactory</title></svelte:head>
@@ -119,6 +167,44 @@
       <p class="mt-1">
         Anything below was read earlier and may be out of date. This is not evidence that
         nothing is running.
+      </p>
+    </div>
+  {/if}
+
+  {#if (deploying?.length ?? 0) > 0}
+    <div
+      class="rounded border border-sky-300 bg-sky-50 px-4 py-3 text-sm text-sky-900"
+      data-testid="estate-deploying"
+    >
+      <!-- Not `applyingLabel`: the summary line two elements above
+           renders exactly that sentence, and sharing the builder
+           guaranteed the duplication it was extracted to prevent. The
+           count belongs to the summary; this banner exists to NAME what
+           is applying and say why it is not in the table. -->
+      <p class="font-semibold">Applying now</p>
+      <p class="mt-1">
+        {#if estateState === "failed"}
+          <!-- "no record of its own", like the loaded arm. Rows are
+               kept across a failed refresh on purpose, so the table can
+               still be showing an EARLIER deployment of this scenario
+               -- and "does not appear below" then denied a row the
+               reader could see. -->
+          {deploying!.length === 1 ? "It had" : "They had"} no record of {deploying!.length === 1
+            ? "its"
+            : "their"} own, so any row below with the same name is an earlier deployment. Whether
+          {deploying!.length === 1 ? "it is" : "they are"} still applying is unknown — the estate has
+          not been readable since. Applying when last read: {deploying!.join(", ")}.
+        {:else}
+          <!-- "has no record of its own" rather than "does not appear
+               below". Redeploying is allowed, so the table can hold an
+               EARLIER deployment of the same scenario -- and the old
+               wording then asserted an absence the reader could see was
+               untrue, on the one page whose whole thesis is never
+               saying something false about the estate. -->
+          Applying now, so {deploying!.length === 1 ? "it has" : "they have"} no record of
+          {deploying!.length === 1 ? "its" : "their"} own yet. Any row below with the same name is an
+          earlier deployment. Applying: {deploying!.join(", ")}.
+        {/if}
       </p>
     </div>
   {/if}

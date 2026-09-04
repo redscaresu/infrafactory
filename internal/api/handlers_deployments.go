@@ -91,9 +91,15 @@ type deploymentsResponse struct {
 
 	// Deploying names the scenarios currently applying.
 	//
-	// Carried so a page that has just been reloaded can restore what it
-	// was showing. The guard itself is server-side; this only stops the
-	// UI offering a button that would be refused.
+	// An applying deploy has no record yet, so it is absent from
+	// `deployments` while being the most active thing in the estate; the
+	// page renders this as its own banner so an estate busy creating
+	// something is never described as empty.
+	//
+	// What it is NOT: a complete answer to "what is running". It is one
+	// process's in-memory lock, so a CLI deploy or one that was in
+	// flight across a restart is missing from it. The guard against a
+	// second deploy is server-side and does not depend on this field.
 	Deploying []string `json:"deploying"`
 
 	// TeardownAllowed reports whether this server was started with
@@ -124,13 +130,34 @@ func deploymentsHandler(state *serverState) http.HandlerFunc {
 			return
 		}
 		if r.Method != http.MethodGet {
-			writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+			// A refusal: POST is delegated above, so nothing reaching
+			// this check can have started an apply.
+			//
+			// Shared with verbs that have nothing to do with deploying
+			// -- a DELETE meant for a teardown, a PATCH -- and that is
+			// fine. "Nothing was started" is TRUE of all of them, and a
+			// vacuous truth costs nothing while a missing one made a
+			// refused deploy read as "we do not know" and pin a
+			// permanent false leak report.
+			writeRefusal(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
 		if state.deployments == nil {
 			writeJSONError(w, http.StatusNotImplemented, "live deployments are not configured")
 			return
 		}
+
+		// In-flight BEFORE the estate, for the reason the preview
+		// handler states and pins with a test: the two reads cover each
+		// other in one direction only.
+		//
+		// A deploy has no record until registration, which runs after
+		// the apply returns. Read the estate first and a deploy that
+		// finishes in between is in NEITHER answer -- and this payload
+		// then says `deployments: []` and `deploying: []`, from which
+		// the page derives "Nothing is deployed." at the exact moment
+		// the scenario went live and billable.
+		deploying := deployingScenarios(state)
 
 		deployments, unreadable, err := state.deployments.List()
 		if err != nil {
@@ -145,7 +172,7 @@ func deploymentsHandler(state *serverState) http.HandlerFunc {
 			Unreadable:      make([]string, 0, len(unreadable)),
 			TeardownAllowed: state.deploymentActor != nil,
 			DeployAllowed:   state.deployer != nil,
-			Deploying:       deployingScenarios(state),
+			Deploying:       deploying,
 		}
 		for _, d := range deployments {
 			payload.Deployments = append(payload.Deployments, deploymentJSON{
@@ -308,6 +335,22 @@ type deployRequest struct {
 
 // deployHandler creates a live deployment.
 //
+// Reached only from `deploymentsHandler`, and only under POST. It keeps
+// its own method check anyway: this is a package-level constructor
+// returning an http.HandlerFunc, so registering it directly -- an alias
+// route, a test harness, a future slice -- would otherwise let a GET or
+// a DELETE run a real apply and create billable infrastructure.
+//
+// It answers with `writeRefusal`, like the collection's own method
+// check: nothing reaching it can have started an apply, so "nothing was
+// started" is true.
+//
+// An earlier round deleted this guard entirely, on the grounds that
+// making it a refusal promised something the server does not send. The
+// objection was to the wrapper, not to the guard -- and deleting an
+// invariant because its wording was wrong left the invariant to a
+// docstring, which is what this comment used to be.
+//
 // Absent unless the server was started with `--allow-deploy`, which is
 // implied by neither `--allow-layer3` nor `--allow-teardown`: an
 // ephemeral apply the run destroys, destroying what exists, and creating
@@ -315,12 +358,17 @@ type deployRequest struct {
 func deployHandler(state *serverState) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if state.deployer == nil {
-			writeJSONError(w, http.StatusNotFound,
+			writeRefusal(w, http.StatusNotFound,
 				"this server was not started with --allow-deploy, so it cannot create deployments")
 			return
 		}
 		if r.Method != http.MethodPost {
-			writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+			// A refusal, like the collection's own method check: this
+			// answers before anything is dispatched, so "nothing was
+			// started" is true. A plain error here left a client
+			// reading it as unknown and pinning a permanent leak report
+			// for a request no handler ran.
+			writeRefusal(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
 
@@ -328,12 +376,12 @@ func deployHandler(state *serverState) http.HandlerFunc {
 		if r.Body != nil {
 			defer r.Body.Close()
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-				writeJSONError(w, http.StatusBadRequest, "invalid json body")
+				writeRefusal(w, http.StatusBadRequest, "invalid json body")
 				return
 			}
 		}
 		if strings.TrimSpace(req.Scenario) == "" {
-			writeJSONError(w, http.StatusBadRequest, "scenario is required")
+			writeRefusal(w, http.StatusBadRequest, "scenario is required")
 			return
 		}
 
@@ -349,16 +397,77 @@ func deployHandler(state *serverState) http.HandlerFunc {
 		// reader has since navigated to says what it is about -- the
 		// rule S162c cost seven findings to learn.
 		progress := NewProgressSink(state.hub, "deploy_progress", req.Scenario)
+		// Deferred so a panic inside Deploy still flushes the buffered
+		// trailing line. Close is idempotent -- it resets the buffer --
+		// so the explicit call below does not make this one redundant;
+		// they cover different exits.
 		defer progress.Close()
 
 		result, err := state.deployer.Deploy(ctx, req.Scenario, req.TTL, progress)
+
+		// Flushed BEFORE the response.
+		//
+		// The page stops accepting progress for a deploy the moment its
+		// request resolves, because an entry that is no longer running
+		// must not absorb somebody else's stream. So a line emitted
+		// after the response is a line the browser discards: the tail of
+		// a billable apply's log, dropped silently, by the flush that
+		// exists to guarantee it is never dropped.
+		//
+		// This makes the tail arrive first; it does NOT guarantee it.
+		// The broadcast goes out on the websocket and the response on
+		// the HTTP connection, and two connections have no ordering
+		// between them -- an in-process test can only pin the order the
+		// server writes in, which is what
+		// TestTheLastLineOfAnApplyIsBroadcastBeforeTheResponse does.
+		//
+		// Left as the better of two orderings rather than solved,
+		// because the residual is narrow: `deploy` terminates every line
+		// it writes, so there is no tail to lose for today's producer
+		// (see ProgressSink.Close). A producer that emits a partial
+		// final line would need the line carried in the response body
+		// instead of raced against it.
+		progress.Close()
+
 		if errors.Is(err, ErrDeployInProgress) {
-			// 409, not 500: the caller asked for something reasonable at
-			// an unreasonable moment. Naming the scenario matters -- a
-			// bare "conflict" leaves a reader wondering which of their
-			// tabs is responsible.
-			writeJSONError(w, http.StatusConflict,
+			// 423 Locked, NOT 409.
+			//
+			// 409 is already taken on this endpoint by
+			// `writeActionResult`, for a deploy that RAN and could not
+			// prove itself clean -- and that response carries an
+			// ActionResult. Two 409s with incompatible bodies and no
+			// discriminator meant a client parsing the refusal as an
+			// ActionResult found no `clean` field and told the reader
+			// "resources may still be running" for a request that never
+			// touched the cloud.
+			//
+			// Saying infrastructure might be leaking when nothing
+			// happened is the most alarming way to be wrong here, so
+			// the two cases get two statuses.
+			//
+			// Naming the scenario matters: a bare refusal leaves a
+			// reader wondering which of their tabs is responsible.
+			writeRefusal(w, http.StatusLocked,
 				fmt.Sprintf("%s is already deploying; wait for it to finish or tear it down", req.Scenario))
+			return
+		}
+		if errors.Is(err, ErrNoSuchScenario) {
+			// A REFUSAL. The deployer resolves the name before it
+			// claims the lock and before anything touches the cloud, so
+			// this 404 can promise nothing was created -- and without
+			// that promise a typo'd scenario pinned a red "it may have
+			// created resources that are still running" on screen for
+			// the rest of the session.
+			writeRefusal(w, http.StatusNotFound, err.Error())
+			return
+		}
+		if errors.Is(err, ErrNothingStarted) {
+			// Every OTHER way the deployer can fail before the apply:
+			// rebuilding its runtime, parsing its flags. A server fault
+			// rather than a bad request, so 500 -- but still a promise
+			// that no project exists, which is the only thing the
+			// client needs from it.
+			writeRefusal(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		if errors.Is(err, os.ErrNotExist) {
@@ -366,9 +475,21 @@ func deployHandler(state *serverState) http.HandlerFunc {
 			// typo or a stale scenario list is not a server fault, and
 			// answering 500 teaches operators that 500 means nothing in
 			// particular. Matches the teardown handler.
+			//
+			// NOT a refusal. A bare os.ErrNotExist says a file was
+			// missing, and says nothing about WHEN: a state file or a
+			// workdir vanishing mid-apply reaches here too, and
+			// `DeploymentDeployer` is an interface, so this branch
+			// cannot know. A deployer that means "the name did not
+			// resolve" says so with ErrNoSuchScenario, above.
+			//
+			// `started_nothing` is a claim about the cloud, and a
+			// wrong one leaves a created project reported as a request
+			// that never happened.
 			writeJSONError(w, http.StatusNotFound, err.Error())
 			return
 		}
+
 		writeActionResult(w, result, err)
 	}
 }

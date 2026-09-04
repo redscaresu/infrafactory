@@ -1,6 +1,929 @@
 # STATUS
 
-Last updated: 2026-08-31
+Last updated: 2026-09-04
+
+## 2026-09-04 — S163e-fixes (round twenty-three): I called convergence too early
+
+**10 findings, 8 accepted, 2 declined.** The previous entry said the deletion had
+converged. It had not: this round found a real behaviour defect in the new design,
+and a second that round twenty-two's own "fix" introduced.
+
+**A single slot, raced by one component.** `ending` was one variable, and the
+scenario page is reused across `[...path]` routes — so one instance can have several
+deploys in flight, and whichever finished LAST overwrote the other's terminal line
+and its whole log. The panel vanished from under a reader for a real, billable apply
+that had just completed, with the store entry already deleted so nothing could
+restore it. Keyed by scenario now: still component-local, still cleared wholesale on
+a route change, still no staleness rules — it just stopped assuming one page means
+one deploy.
+
+**Manufacturing the proof ADR-0024 demands.** Round twenty-two made
+`tearDownDeployment` synthesise `{clean: true}` for a 2xx whose body could not be
+read, so `teardownOutcome` rendered "Destroyed. The account is provably clean."
+about a response the code never parsed. The symmetry with deploy was the mistake:
+for a deploy, "clean" only decides whether to raise an alarm; for a teardown it is
+ADR-0024's central claim. It reports honestly now — not a failure, not a success.
+
+Also: `deployHandler`'s docstring said "a plain error, not a refusal" above a guard
+that calls `writeRefusal`; `already_live_unknown` is estate-GLOBAL and was leading
+every Deploy confirmation, so one corrupt record put an unactionable red line ahead
+of the warning that invalidates the cost figures; the estate banner repeated the
+summary line verbatim; and `load()` had no request token while two sources drive it,
+so a slow response could resurrect a destroyed row and a finished apply.
+
+**One pushback:** the refusal branch discards the log for every refusal kind and the
+comment justified only the lock case. The CODE is right — a refusal means nothing of
+ours was applying, so any line that arrived is somebody else's whatever the refusal
+was. Comment fixed, code unchanged.
+
+**Declined:** four documented-unreachable branches said to violate YAGNI — each is a
+type-level guard on a function whose wrong answer is a false claim about billable
+infrastructure, and `previewFor`'s defaults are observable (a test marshals that
+struct, which is how the `null` they prevent was found). And the sort-to-membership
+in the preview, declined twice before.
+
+## 2026-09-04 — S163e-fixes (round twenty-two): the deletion converged
+
+**12 findings, all accepted — and the shape changed.** Reviewing round twenty found
+**seven behaviour regressions**, two severe, all in the deploy lifecycle. Reviewing
+the deletion that replaced it found **one**: `ending` was cleared only on a route
+change, so a retry on the same page rendered the previous attempt's line for the
+whole apply — a green "Deployed." under a live streaming log, or a red leak pointer
+a reader would take as the state of the deploy currently running. Cleared when a new
+attempt starts, and mutation-checked.
+
+Everything else is what a deletion leaves behind, and that class does not
+regenerate: the store's docstring still claimed to keep "how it ended" and to
+outlive navigation; `ending`'s docstring named a function that does not clear it;
+the test `cleanup` helper claimed `endDeploy` refuses to drop a running deploy; two
+tests' "action under test" was a no-op on an entry already deleted; one asserted on
+the global report store rather than filtering; seven destructured a binding they
+never used; a comment had lost its subject in a copy; and `previewFor` carried two
+merged drafts of one explanation.
+
+**Two consistency fixes worth the name.** A 2xx teardown whose body could not be
+read was reported as a failure while the identical deploy case is treated as
+provably clean — both go through the same `writeActionResult`, which answers 2xx
+only for a clean result, so a truncated 200 put a red "resources may still be
+running" over an account the server had proven clean. And `mayHaveCreated` is now
+set by the caller that uses it rather than computed for both verbs and destructured
+away again for one.
+
+**What this says about the previous twenty-one rounds:** the deletion worked. One
+behaviour defect against seven, in a lifecycle that had produced a regression per
+round for six rounds. What remains is bookkeeping after a removal, which is finite
+by construction — there is no state left to guard, so there are no guards left to
+get wrong.
+
+## 2026-09-04 — S163e-fixes (round twenty-one): the deletion, not another fix
+
+**12 findings, 7 of them regressions from round twenty's 8 fixes** — two severe, and
+both the fix performing the exact failure it was written to prevent. That is a
+fix-to-regression ratio of about 1:1 sustained for six rounds, concentrated entirely
+in the scenario page's deploy lifecycle while the Go handlers, estate page and
+preview stayed quiet.
+
+**So this round deletes rather than guards.** The `deploys` store held a terminal
+`outcome` — how the last deploy ended — in a store that outlives the page, and
+everything that kept breaking existed to keep that honest: `retireOnLeave`,
+`shownScenario`, the route-change guard, the arrival hook (added then deleted), the
+stale-success rules, `mayHaveCreated` as a forgetting predicate, the report pointer,
+`dismissReport`'s cross-store deletion, and three separate ending functions.
+
+**Three lifetimes, three homes.** What is RUNNING → the store, entries dropped the
+moment a deploy ends. What the reader JUST WATCHED → the page, one transient
+`ending` rendered only when its scenario is on screen and cleared on a route change
+(those two facts are the whole scoping rule). What MUST NOT BE LOST → `reports`, in
+the layout, durable and dismissible. Three lifecycle functions became one.
+
+**Net −82 lines** across the store and the page; the store's exported surface is
+down to eight.
+
+**The trade, stated:** a deploy that finishes while the reader is elsewhere is not
+announced when they return. Three rounds of defects came from trying to announce it,
+and the durable answers were always elsewhere — the Deployments page says what is
+deployed, a report says what may have been left behind.
+
+Also fixed from this round: `readJSON`'s `ok` flag was computed and discarded, and
+it is exactly the discriminator the 2xx case needed (a body that failed to PARSE
+means the server was cut off mid-write, so its 2xx is this server's word; a body
+that parsed into something unrecognised means something else answered);
+`deployHandler`'s restored method check answered with a plain error while its
+sibling refused; its test asserted on a freshly allocated fake, so it passed for an
+implementation that ran the apply and then wrote 405; the CLI's `if recorded` guard
+had no test that ran it — **owed since round nineteen, where I marked it accepted
+and did not implement it**; `status` was never cleared on navigation; and
+`knownEmpty`/`estateSummary` kept a `state` default three lines below a comment
+calling a default "a third way to forget".
+
+## 2026-09-04 — S163e-fixes (round twenty): three meanings, and the alarming one
+
+**10 findings, 8 accepted, 2 declined.**
+
+**An empty `deployment` means three things** — nothing created; created but not
+registered; or the result unreadable so the id never arrived — and the message
+asserted the second, one sentence before a failure detail saying the outcome was
+unknown. It says "no record of it reached this page" now, which is true of all
+three.
+
+**The one response shape that guarantees nothing leaked.** `writeActionResult`
+answers 2xx only for a provably clean result, and a 200 whose body a proxy truncated
+was thrown as an unknown failure — so the page filed a permanent leak report for the
+single response that proves the opposite, and called it "deploy failed: 200".
+`DeployError` carries a three-state `conclusion` now (refused / clean / unknown)
+rather than one boolean a caller had to combine with another.
+
+**One bit, five types.** Two exported sentinels and three bespoke error types across
+two packages, with three different unwrap behaviours, all saying "the apply had not
+begun". One shape: `api.NothingStarted(message, cause)` and
+`api.NoSuchScenario(message)`.
+
+**An invariant left to a docstring.** Round sixteen deleted `deployHandler`'s method
+check because converting it to a refusal made a false promise — but the objection
+was to the wrapper, not the guard, and the handler is a package-level constructor
+that a direct registration would let a GET run a real apply through. Restored as a
+plain error, with a test that calls it directly.
+
+Also: `recordOutcome` wrote another store from inside `deploys.update`'s updater;
+`retireOnLeave` read `detail?.name`, which is null mid-load, so leaving a scenario
+whose detail had not arrived retired nothing; the "already running" guard abandoned
+the click silently after closing the dialog; and `teardownOutcome` returned a
+`mayHaveCreated` nothing reads, now stripped.
+
+**Declined:** the `os.IsNotExist` fix, because it does not work — that function
+unwraps three concrete types and compares by `==`, consulting neither `Is` nor
+`Unwrap`, so no custom type can satisfy it without BEING an `*fs.PathError`. The
+promise is withdrawn instead. And the banner's duplicated ternaries, declined for
+the fifth time.
+
+## 2026-09-04 — S163e-fixes (round nineteen): the test that walked past the bug
+
+**10 findings, 9 accepted, 1 declined.**
+
+**Dismissing one report destroyed a sibling's account.** `dismissReport` deleted the
+scenario's whole entry whenever its outcome was a report, without checking whether
+the dismissed one was the last. Two failed deploys, two reports: clearing the first
+took the pointer and the entire apply log with it while the second, naming a project
+still live, sat in the layout. The unit test walked exactly that path, destructured
+`deploys`, and never asserted on it — the unused binding was the tell.
+
+**Zero values that make claims.** `AlreadyLiveUnknown` defaults to `false`, the
+positive claim "checked, and nothing exists", from a preview that never consulted
+the live store — the mirror of the `AlreadyLive: []` fix two rounds ago. And the
+estate page initialised its tri-state to `[]`, an ANSWER, masked only by
+`estateState` being `loading` until the first read.
+
+**Retiring on a navigation that never left.** `retireOnLeave` ran on every
+`afterNavigate`, including a click on the scenario already shown — a probe confirmed
+that reaches the hook — discarding the banner and log of a deploy the reader had not
+left. Two false starts: comparing against `scenarioPath` never fired, because a
+reactive statement updates it before the hook runs; and `from?.url.pathname` THREW on
+a navigation whose `from` carries a null `url`, which aborts the hook, so
+`loadDetail` never ran and every scenario page rendered blank. A two-second console
+probe found that after two full suite runs had not. The test needed the same care:
+asserting immediately after the click passed on the first poll, before the retire it
+exists to catch.
+
+Also: `noSuchScenarioError.Is` promised `os.ErrNotExist` compatibility that
+`os.IsNotExist` does not honour (it never consults custom `Is`); an unparseable 2xx
+reported "deploy failed: 200"; and three comments in one file disagreed about the
+tri-state sentinel.
+
+**Declined:** the teardown half of `mayHaveCreated` — real, same class, different
+verb and page, and still the named follow-up below. What changed is that
+`teardownOutcome` now says the flag is computed and not yet consumed, rather than
+producing it silently.
+
+## 2026-09-04 — S163e-fixes (round eighteen): half a guard, and a vacuous truth
+
+**10 findings, all accepted.**
+
+**Half a guard.** Round seventeen put "one deploy at a time" in the store, where the
+state lives — and `confirmDeploy` ignored the answer and POSTed anyway. The 423 that
+came back was handed to `refuseDeploy`, which cleared the FIRST deploy's log and
+marked it finished while it kept creating infrastructure: verbatim the failure the
+guard's comment says it prevents. `beginDeploy` returns whether the deploy may
+proceed, and the caller honours it.
+
+**A vacuous truth is not a falsehood.** Rounds fifteen and sixteen made the origin
+guard and the collection 405 plain errors, arguing `started_nothing` is a claim
+about an apply and so is meaningless on a read and wrong-verbed on a teardown.
+Meaningless is not false: nothing WAS started, because no handler ran. Withholding a
+true claim is not neutral — a refused deploy POST read as "we do not know", and the
+page pinned a permanent leak report for a request the middleware rejected outright.
+The rule, settled: any path that answers before a deploy could begin may say so.
+
+**`undefined` is what an absent field IS.** Round seventeen used `null` for "never
+told" and left `= []` defaults, so passing `payload.deploying` straight through —
+the obvious way — landed on a default that claimed emptiness. The comment arguing a
+value "cannot be forgotten the way an argument can" was undone by a default, which
+is a third way to forget. And the summary now says the gap rather than degrading to
+a bare "0 deployments".
+
+Also: `ErrNoSuchScenario`'s own `Error()` read "no such scenario: nothing was
+started", the sentinel-leaking message the CLI built two types to avoid;
+`loadDetail`'s catch replaced "Saved" with a read error after a PUT that had
+succeeded; `deployOutcome`'s recorded branch bypassed the one-rule function;
+`ActionResult.deployment` reached the wire but never `types.ts`; two keying comments
+described a scheme the code stopped using; and **reports now have their own store**
+— declined five times as a performance point, accepted as a structural one, because
+two lifetimes in one store is what made the root layout re-derive them per progress
+line.
+
+## 2026-09-04 — S163e-fixes (round seventeen): a permanent alarm on the common path
+
+**10 findings, 8 accepted, 2 declined.** The largest reverses a round-eight decision,
+because the reason for it no longer holds.
+
+**`mayHaveCreated` was true for every unclean deploy**, justified by "a deploy that
+fails before registration has no live record either". False for the usual case:
+`deploy` registers from whatever the state shows, whether or not the apply
+succeeded, so a half-failed apply leaves a record with a TTL, on the estate page,
+reapable — and the CLI already prints `tear it down with infrafactory live teardown
+dep-x`. Every one of those raised a red banner only a human could dismiss, for
+infrastructure something else tracks, and could not name what to tear down because
+neither `ActionResult` nor `OutputResult` carried the id. Both do now, set only when
+registration succeeded.
+
+**The arrival hook is deleted.** Round eight added it because leaving only retired
+what had already finished; leaving is unconditional now, which fixes that on its
+own. Meanwhile the hook cost two defects: it raced `loadDetail` and deleted a
+refusal before it rendered, and its snapshot could not tell "finished long ago" from
+"finished while I stepped away" — so a reader who came back precisely to see how a
+deploy went found the banner and the whole apply log gone. A banner is shown once,
+on the visit they returned for, and leaving retires it.
+
+Also: `dismissReport` identified a report by array POSITION, so two clicks before a
+re-render deleted two different reports — the second a leak nobody had read;
+`beginDeploy` overwrote a still-running entry, the only guard being the button's
+`disabled` on the page the store exists to outlive; the four functions deciding
+"nothing was created" vs "resources may still be running" lived in `api.ts`, which
+`node --test` cannot import, so inverting any of them passed the whole suite
+(extracted to `deploy-response.js` with tests); and `deploying`/`deployingKnown`
+were two variables for one tri-state — now `string[] | null`, which makes the
+omission unrepresentable.
+
+**Declined:** `pendingReports` per progress line (fifth time), and the estate walk
+per preview (recorded in ADR-0027; a `ListByScenario` on the store is the fix, and
+that is a store change rather than a review fix).
+
+## 2026-09-04 — S163e-fixes (round sixteen): the fix applied to one of its two callers
+
+**10 findings, all accepted.** Three are round fifteen's fixes applied to one site
+and not its neighbour; one is a rule I wrote and broke twenty lines away.
+
+**Two emptiness claims contradicting each other.** Round fifteen gave `knownEmpty` a
+`deployingKnown` term so a payload that never said what was applying could not
+license "Nothing is deployed." `estateSummary` calls `knownEmpty` too and did not
+get the parameter — so with the field absent, the empty-state panel was suppressed
+while the summary line above it said the estate was empty.
+
+**A closing socket marking its replacement dead.** The close handshake is
+asynchronous, so an old connection's `onclose` fired after a new socket had opened,
+writing `__connected: false` over a healthy one. Nothing re-fires `onopen`, so every
+deploy for the rest of the session rendered "Not receiving progress" over a working
+stream. Both callbacks carry a generation now.
+
+**The rule, broken twenty lines from where it is written.** `noSuchScenarioError`
+exists because wrapping a sentinel with `%w` puts it in the operator's message. Its
+three siblings did exactly that: "nothing was started: config is unreadable" — a
+self-contradicting sentence carrying an internal discriminator, straight into the
+response body.
+
+**A claim about the wrong verb, again.** Round fifteen reverted `writeRefusal` on the
+origin guard because `started_nothing` is about whether an apply created
+infrastructure. The collection's 405 has the same problem — every non-POST verb
+lands there, including a DELETE meant for a teardown — and had been converted for
+the opposite reason.
+
+Also: `readJSON` conflated a failed parse with a JSON `null` body, which run
+artifacts can legitimately be; `deploying` was typed required while the page guards
+it, making the guard provably dead; the `onMount` snapshot was justified by a false
+claim about SvelteKit (`afterNavigate` does fire on a direct load — `loadDetail` is
+called only from it); progress for an unwatched scenario still notified every
+subscriber; the race test synchronised on a 200ms sleep; and three names described
+one operation, one asserting the opposite of what the delegate does.
+
+## 2026-09-04 — S163e-fixes (round fifteen): the cleanup raced the page it cleaned for
+
+**10 findings, 7 accepted, 3 declined.** Two accepts are round fourteen's fixes; one
+is a claim I put on middleware that had no business making it.
+
+**A refusal deleted before it rendered.** `loadDetail` is a round trip, and a 423
+answers at once — so a deploy started just before a navigation ends *during* it, and
+the arrival hook ("is this finished now that detail has arrived?") swept it away.
+The button reverted to "Deploy…" as though the click had not landed, which is the
+defect moving refusals into the store was meant to close. The hook now retires only
+what was already finished when the navigation began, from a snapshot taken in
+`afterNavigate`. The first test I wrote for it passed against the broken code and
+proved nothing; reproducing it needed the POST and the scenario fetch interleaved by
+hand.
+
+**Dismissing took a success banner with it.** Round fourteen deleted the entry when
+the last report went, arguing the outcome behind it renders nowhere — true only for
+outcomes that ARE reports. Fail, retry, succeed, dismiss, and the retry's "Deployed."
+vanished with the leak the reader had just dealt with.
+
+**A deploy claim on middleware that refuses everything.** `guardCrossOriginRequests`
+wraps every endpoint, so making it a refusal stamped `started_nothing` — a claim
+about whether an apply created infrastructure — onto a refused `GET /api/runs` and
+onto a refused teardown, where it is about the wrong verb. Reverted; a cross-origin
+403 now reads as "we do not know", which errs safe.
+
+Also: `readJSON` was applied to `request`'s error branch only, leaving "Unexpected
+end of JSON input" reachable on every 2xx; `deploying` was read as `payload?.deploying
+|| []`, so a server predating the field licensed the page's only permitted emptiness
+claim (`knownEmpty` takes `deployingKnown` now); trimming past the log cap rebuilt the
+whole array per line rather than in batches; and a leftover import with a docstring
+describing a replaced implementation.
+
+**Declined:** `knownEmpty`'s `deploying = []` default (the wire half is fixed; a
+caller omitting the argument is a programming error, and every current caller passes
+it); the teardown half of `mayHaveCreated`, still the named follow-up below; and
+`estateSummary` deriving the applying count twice.
+
+## 2026-09-04 — S163e-fixes (round fourteen): one path got the promise, its siblings did not
+
+**12 findings, 8 accepted, 4 declined.** Every accept is the same shape: "nothing
+was created" was promised in one place and not in its neighbours.
+
+**Four more pre-apply exits.** Round thirteen let a mistyped name say nothing had
+been created. `LiveDeployer.Deploy` has four other exits before the apply —
+`newRuntime()` failing, a TTL flag that will not parse, a `WalkDir` over a
+misconfigured scenario root (which yields an `*fs.PathError` that satisfies
+`errors.Is(err, os.ErrNotExist)`, so it took the deliberately-cautious branch), and
+a blank name — and each pinned a permanent red "it may have created resources that
+are still running" for a request that never reached Scaleway. `ErrNothingStarted`
+is the general sentinel; `ErrNoSuchScenario` refines it.
+
+**The 405 a client can actually receive.** `deployHandler`'s method check was made
+a refusal last round and is unreachable — its only caller invokes it under `if
+r.Method == http.MethodPost` — so the promise was made about a response the server
+does not send, while the 405 that fires was left a plain error. Dead branch removed,
+live one converted.
+
+**A report that pointed at the log pointed at nothing.** `retireDeploy` and a retry
+both clear `progress`, and for a dropped connection the message is generic — the
+head of the log is the only place the run's project and workdir appear.
+`KEPT_OPENING_LINES` exists for exactly those lines and two navigation hooks deleted
+them. Reports carry their own copy now.
+
+**A log that ends in nothing.** A report outcome suppressed the page's outcome slot,
+so the log simply stopped with the explanation above the fold — and dismissing the
+report left an entry whose outcome the template refuses to render, a finished deploy
+with its ending stated nowhere.
+
+Also: `previewFor` left `AlreadyLive` nil, so a preview built without
+`liveDeploymentsOf` emitted `already_live: null` — read by the client as "we could
+not look", on the one file that argues an empty list must be a checked claim;
+`forgetDeploy` was dead and its docstring described the job `retireDeploy` took
+over, including the unconditional delete `retireDeploy` exists to stop; and the 404
+body stated the same fact three times because the sentinels were wrapped into the
+operator-facing message.
+
+**Declined:** the teardown half of `mayHaveCreated` — a real gap of the same class,
+but a different verb, store shape and page, and it wants its own slice (follow-up
+below); `pendingReports` per progress line; `isProgressEvent`'s file placement; and
+two representations of "is anything applying".
+
+**Follow-up, named:** a teardown that cannot prove the account clean loses its
+message on navigation, exactly as a deploy did before rounds twelve and thirteen.
+`teardownOutcome` already computes `mayHaveCreated`; the estate page drops it into a
+row-local map. Promoting teardown failures into the same report channel is a slice
+of its own.
+
+## 2026-09-04 — S163e-fixes (round thirteen): an alarm nobody can silence
+
+**12 findings, 8 accepted, 4 declined.** Two accepts are the previous two rounds'
+fixes — each correct about the thing it fixed and wrong about its neighbour.
+
+**The stale banner survived on the back of the report.** Round twelve made the
+forget rule read `reports`, so a successful retry could not erase what a failed
+attempt leaked — by returning early and keeping the whole entry, last outcome
+included. A failed-then-retried deploy therefore pinned "Deployed. It is listed on
+the Deployments page until its TTL expires." on every later visit for the session.
+`retireDeploy` separates them: the banner goes, the reports stay.
+
+**Nothing could ever clear a report.** `forgetDeploy` was unreachable for any entry
+holding one and there was no dismiss control, so an operator who removed the leaked
+project by hand still saw the same red banner on every page for the rest of the
+session. An alarm that cannot be acknowledged trains readers past exactly the
+message this arc says must never be lost. There is a button now, and it names which
+report — two attempts can fail identically.
+
+**A typo pinned a leak report for a scenario that never existed.** Round eleven made
+the post-`Deploy` `os.ErrNotExist` branch deliberately not a refusal, reasoning that
+an implementation could surface it after the apply. The real one resolves the name
+*before* claiming the lock, so every mistyped scenario answered a plain 404 and the
+client kept "it may have created resources that are still running" on screen.
+`ErrNoSuchScenario` says which is meant; a bare `os.ErrNotExist` keeps the cautious
+treatment, because a state file vanishing mid-apply produces one too.
+
+Also: the `failed` arm of the in-flight banner still denied a row the reader can
+see (its twin was rewritten two rounds ago); `loadDetail`'s catch nulled `detail`,
+so a transient post-save reload failure unmounted the page including the textarea
+holding the reader's YAML; the layout printed the scenario name twice because
+attribution was baked into the stored message rather than applied at render; that
+render step now anchors on a following space or colon; and `request()` — every
+endpoint except deploy — still called `res.json()` unguarded.
+
+**Declined:** discarding the in-flight list on a `List()` failure (the client
+discards non-2xx bodies for that endpoint by design); an unreachable 405 branch; a
+nil-lister configuration the CLI cannot produce (`ui_command.go` sets `Deployments`
+unconditionally); and the full estate walk per preview click, declined in round ten
+and tracked in ADR-0027.
+
+## 2026-09-04 — S163e-fixes (round twelve): the report survived the retry and died on the navigation
+
+**12 findings, 9 accepted, 3 declined.** Two accepts are round eleven's fixes undone
+by code round eleven did not touch.
+
+**Reports outlive the entry's last outcome now.** `beginDeploy` was made to carry
+them forward; `forgetReportlessDeploy` then judged the entry by its last outcome
+and deleted the whole entry. Fail, retry, succeed, navigate — and the first
+attempt's leaked project is gone, because the second attempt has nothing to report.
+The unit test could not see it: it asserts before any navigation. Pinned now by an
+e2e, because the defect was in the component while the test was on the store.
+
+**The same ordering inversion, in the other handler.** The preview reads the
+in-flight list before the estate and pins it with a test; `deploymentsHandler` did
+the opposite, so a deploy finishing between the two reads is in neither and the
+payload says `deployments: []`, `deploying: []` — from which the estate page
+derives "Nothing is deployed." at the moment the scenario went live and billable.
+
+**Two identical failures collided.** Reports accumulate because two attempts leak
+two projects, and two attempts can fail identically. The layout keyed its `{#each}`
+on `scenario + message`, so an identical pair duplicated keys: Svelte throws in a
+dev build and silently collapses them in production, showing one leak where there
+are two.
+
+**Attribution, on both branches and anchored.** `namedUnlessSelfDescribing` guarded
+only the refusal path, so a `Deploy` error whose text embeds the scenario rendered
+it twice; and the bare `includes` let a scenario named `json` match "invalid json
+body" and render unattributed.
+
+Also: the layout banner and the page's outcome slot rendered the same report (one
+sentence twice, the name three times) — reports belong to the layout, which
+outlives the page; the e2e named "a refusal that arrives after a detour" fulfilled
+423 without `started_nothing` and so never reached the refusal branch;
+`already_deploying` was declared required while its siblings are optional for a
+reason that applies to it identically; and a comment was two paragraphs making the
+same point, the first a superseded draft.
+
+**Declined:** `pendingReports` recomputing per progress line (a handful of entries,
+against a derived-store construct); two import statements from one module (merged
+in passing, not as a finding); and two representations of "is anything applying"
+inside ten lines of one function, declined last round for the same reason.
+
+## 2026-09-04 — S163e-fixes (round eleven): the server says whether anything started
+
+**10 findings, 7 accepted, 3 declined.** One overturned a decline from round ten.
+
+**The reader's obvious next action deleted the leak report.** A failed deploy names
+the project that could not be deleted, and rounds nine and ten made that banner
+survive navigation because it is the only place a project with no live record is
+ever named. Then the reader clicks Deploy again: `beginDeploy` overwrote the entry,
+the retry succeeded, the banner became "Deployed.", and the next navigation dropped
+it. Reports are a list now, surviving `beginDeploy` and accumulating — two failed
+attempts leak two projects.
+
+**The status allowlist was already wrong.** Round ten declined the body
+discriminator because the harm needed a future edit. It did not: `deployHandler`
+answers 404 both for "no such scenario", before the apply, and for an
+`os.ErrNotExist` returned by `Deploy`, after it — and the client called both
+"nothing started", which discards the log of a running apply. `writeRefusal` writes
+`started_nothing: true` on the paths that reject before touching the cloud
+(including the origin guard, which is not `deployHandler`); the client reads the
+body and the allowlist is gone. Absence means unknown.
+
+**Reports were reachable by luck.** Round ten put cross-scenario reports in the
+`{:else if detailError}` branch, so visibility of an unread leak report depended on
+an unrelated GET failing. They render in the layout now — including for the reader
+who follows the message's advice to the Deployments page.
+
+Also: the 999-line cap kept the tail and dropped the head, which is where the
+workdir is named, with no marker — it drops from the middle now and says how many
+went; refusal attribution was skipped for the whole `startedNothing` class though
+only the lock refusal names the scenario; `types.ts` declared `already_live`
+required while the code treats an absent list as "we could not look"; and the
+in-flight banner's heading and body derived staleness two ways under a comment
+saying they had been unified.
+
+**Declined:** three derivations of one boolean inside ten lines of one function; an
+unreachable missing-entry branch; and copy-pasted rationale plus dated correction
+notes in comments, which are deliberate here — a false explanation is treated as a
+defect, so recording that one was found is how the next reader knows not to trust
+the old shape.
+
+## 2026-09-04 — S163e-fixes (round ten): asking the wrong question about what to forget
+
+**13 findings, 9 accepted, 4 declined.** The declines are the point: convergence is
+one pass with no finding that changes behaviour, correctness, or what a reader is
+told, and by this round most of the yield was style — import tidying, test-fixture
+duplication, allocation in a template. Several accepts are defects the previous
+round's fixes introduced.
+
+**A banner that could never be cleared.** Round nine made failures survive until the
+tab does, because they may describe unrecorded infrastructure. A REFUSAL is a
+failure — and `startedNothing` is the server's word that it created nothing — so a
+transient 423 stuck, reappearing on every later visit under an enabled Deploy
+button. The rule was asking "did it succeed?" when the question is "could this
+still describe infrastructure nobody has a record of?". That is `mayHaveCreated`,
+answered where the outcome is built.
+
+**The fix for a blank page hid the leak report.** Round nine's `{:else if
+detailError}` branch replaces the whole `{#if detail}` subtree, which contains the
+outcome banner — so a transient scenario-GET failure hid "project 7c98d82e is live
+and could not be deleted" while the store still held it. The error branch renders
+every kept report now, named individually.
+
+**Three that state something false.** "Creates a THIRD project" is true only for
+exactly two existing deployments; `Array.isArray(...) ? … : []` turned an absent
+field into the positive claim "nothing is live", throwing away at the client
+boundary the distinction the server's `(out, true)` exists to preserve; and the
+outcome prefixed the scenario onto a refusal that already named it —
+"web-app-paris: web-app-paris is already deploying".
+
+Also: the progress log grew unbounded, copying the whole array per line, so the tab
+stalls during the apply it exists to make watchable (capped at 999, like the Live
+Run page); `loadDetail` returned before clearing `detailError`, so a previous
+scenario's failure rendered for a page never asked about; the dropped-connection
+message ran two sentences together; and the in-flight staleness flag was derived
+two ways that agree only by coincidence.
+
+**Declined:** the `startedNothing` allowlist's missing body discriminator (needs a
+future edit or a misbehaving intermediary; errs safe by construction, direction
+recorded); template-call allocation; e2e stub duplication (the drift it caused was
+real and is fixed — every stub now carries `already_live`); and the `__connected`
+sentinel sharing a key namespace.
+
+## 2026-09-04 — S163e-fixes (round nine): following the advice deleted the advice
+
+**10 findings, 9 accepted.** The first is round eight's defect at the other end of
+the same rule, and this is the last round on substance — from here nits do not
+block convergence.
+
+**Leaving still deleted failure reports.** Round eight stopped *arriving* from
+doing it; leaving still did, on the reasoning that the reader had seen it. The
+message itself refutes that: it says "check the Deployments page before starting
+another", and the Deployments link sits directly beneath the button — so following
+the instruction deleted the project id the instruction was about. A deploy that
+fails before `registerDeployment` has no live record either. One predicate now,
+`forgetIfSucceeded`, at both ends: a stale success is a false claim, a failure is
+an unread report and survives until the tab does.
+
+**A claim the reader can see is untrue.** The in-flight banner said the applying
+scenario "does not appear below" — but redeploying is allowed, so the table can
+hold an earlier deployment of that same scenario, directly underneath.
+
+**Two sources for one sentence.** `deployOutcome` set `proven: "Deployed."` and the
+template hardcoded its own success text, so an edit to the builder changed nothing
+on screen while its unit tests kept passing.
+
+Also: ADR-0027 and STATUS enumerated `startedNothing` as "exactly 400, 404, 405,
+423" while the code also has 403 — and reconciling the other way would turn an
+origin-guard refusal back into "may still be running"; `knownEmpty`'s docstring was
+stranded by the previous round's extraction, the same defect that extraction had
+just fixed elsewhere, and still said "three things" after `deploying` made it four;
+`acceptProgressEvent` was dead with five tests covering it; the plural
+`already_live` warning dropped the cost language exactly where the cost was
+largest; `ActionResult.Clean` gaining `omitempty` would make the unprovable case
+lose its discriminator and discard the leaked project id, now pinned on the JSON;
+and `loadDetail` had no catch, leaving a blank page on a failed fetch.
+
+**Declined in part:** `actionOutcome`'s absent-result branch is unreachable from
+both callers. Kept — it is the one place a green tick could appear over nothing —
+but the tests no longer imply screen coverage they do not have.
+
+## 2026-09-04 — S163e-fixes (round eight): the cleanup that swallowed the leak report
+
+**11 findings, all accepted.** The first is round seven's fix eating the message it
+most needed to keep.
+
+**Arriving at a scenario dropped every finished deploy**, so a success banner could
+not greet a reader long after the TTL had gone. It dropped failures too — including
+*"it may have created resources that are still running. project 7c98d82e is live
+and could not be deleted"*. A deploy that fails before `registerDeployment` has no
+live record either, so that banner is the ONLY place it is ever said, and it was
+deleted before rendering because the reader happened to look away. The failure this
+arc exists to prevent, arriving through a cleanup. Only successes are dropped now:
+a stale success is a false claim, a failure is an unread report carrying the handle
+for removing the leak by hand.
+
+**A guarantee across two connections is not a guarantee.** Round seven's flush
+ordering was written up as settling the matter. The broadcast goes out on the
+websocket and the response on the HTTP connection, and an in-process test can only
+pin the order the server *writes* in. Kept as the better ordering, claim reduced to
+what it is, and the residual stated: `deploy` newline-terminates every line, so
+there is no tail to lose for today's producer.
+
+**Three copies of one rule, twice over.** `estateSummary` re-derived the emptiness
+condition in both branches, inside the function that calls `knownEmpty` — whose
+docstring says two copies are how one comes to contradict the other. Extracted as
+`nothingRecorded`, scoped narrowly so it cannot become a fourth copy of the whole
+question. And `deployOutcome` was a structural copy of `teardownOutcome`: the words
+must differ, ADR-0024's rule must not, and applied to one and not the other the
+deploy screen would report a success the teardown screen refuses.
+
+**An inert guard.** `acceptProgressEvent(msg, msg.data.subject)` compared the
+subject with itself — reading as scoping while scoping nothing. Split into
+`isProgressEvent` for the shape.
+
+Also: `refuseDeploy`'s justification was narrower than its call site;
+`forgetFinishedDeploy` read a reactive value whose freshness depended on hook
+ordering; the stale-estate banner read "not been readable since: web-app-paris";
+`?.startsWith` on `JSON.parse` output threw on a non-string `type` and froze the run
+log for the session; `previewResponse` was dead and the fifth fixture copy round
+seven claimed to have removed was still there; `slices` and `sort` both imported.
+
+## 2026-09-04 — S163e-fixes (round seven): the guard that truncated the log
+
+**11 findings, 10 accepted.** One is a regression the previous round introduced,
+which is the whole argument for running the harness again.
+
+**The fix that broke the flush.** Round six made the store ignore progress for
+entries that are no longer running. Correct — and it silently truncated the log it
+was protecting. `progress.Close()` was deferred, so the buffered trailing line
+broadcasts *after* the response; the fetch resolves first, `running` flips false,
+and the new guard drops the line. The last line of a billable apply's log,
+discarded by the flush that exists to guarantee it is never discarded. Closed
+explicitly before the response now, `defer` kept for panics, `Close` idempotent.
+Pinned by a `ResponseWriter` that records what had been broadcast when the headers
+were written.
+
+**The window the running check cannot close.** The entry is created before the
+POST, so it is running — and collecting — for the whole round trip, and when the
+answer is a refusal the *reason* is that somebody else's apply of this scenario
+holds the lock. Those lines are theirs. `refuseDeploy` discards the log and keeps
+the entry, because the refusal still has to be reported somewhere scoped to the
+right page.
+
+**A banner that outlived every hook meant to drop it.** `onDestroy` and
+`afterNavigate` drop a deploy that had already finished when the reader left.
+Neither can drop one still running then that finished afterwards — so it lived
+forever, greeting every later visit with "deployed. It is listed on the Deployments
+page until its TTL expires." for infrastructure whose TTL may have gone. Arriving
+at a scenario now drops a finished deploy too.
+
+**Demoted one layer down.** Round six fixed `alreadyLiveWarning` dropping the
+second-bill warning — by concatenating all three into one paragraph, which demoted
+it to the second sentence of the first string. `deployWarnings` documents them as
+"separated so a page can render them differently", and a test reading `.first()`
+cannot tell the arrangements apart. It returns a list now, strongest first.
+
+Also: `InFlight`'s docstring still named the deleted reload consumer and still said
+the server had no lock; "the window closes rather than moving" was half true (the
+*finishing* window closes — a deploy that starts between the reads is still in
+neither answer, with bounded harm); the socket handler scans replaced by a keyed
+lookup, which makes the `__connected` sentinel unreachable rather than skipped; an
+unguarded `res.json()` threw `SyntaxError` past the `DeployError` classification;
+the JSDoc explaining `estateSummary` sat above `knownEmpty`; and the scenario
+fixture was copy-pasted into five preview tests, now one helper.
+
+**Declined:** an `already_deploying_unknown` flag. The only state where the server
+has not looked also sets `allowed: false`, so it would carry no information — and
+the case it is really about, an apply started by the CLI or another process, is
+invisible to the server rather than unknown to the check. What guards it is the
+run-owned project per deploy and the estate page; the limit is stated in three
+places.
+
+## 2026-09-03 — S163e-fixes (round six): the corrections had their own defects
+
+**12 findings, 11 accepted.** Four are on pass 139's fixes, which is the value of
+running the harness again rather than declaring convergence.
+
+**A race created by read order.** The preview read the estate and then the
+in-flight list, so a deploy finishing between the two was in neither answer, and
+the confirmation claimed "nothing exists" at the moment the scenario went live.
+Reversed — anything leaving the in-flight list after the first read has registered
+before the second. Pinned by a test that records which read came first.
+
+**My own justification was the defect.** Pass 139 made the failed-read summary
+carry `deploying` because it was "the one thing still known". It is not: it is read
+in the same request as the rows, so it is exactly as stale as they are — and the
+rows say so about themselves while the deploy count asserted the present tense, for
+as long as polling kept failing. `deployingLabel(deploying, stale)` carries the
+qualifier and is shared with the estate banner, which had been rebuilding the same
+count and pluralisation two lines below.
+
+**The last adoption door.** Progress matched on scenario without checking whether
+the entry was still running, so a finished deploy kept absorbing lines — a second
+deploy of the same scenario from another tab or the CLI rendered as a live, growing
+log underneath a completed-outcome banner.
+
+**One request, two answers, two scopings.** An outcome was scenario-keyed and
+survived navigation; a refusal was a component variable. Adding a navigation token
+to the refusal made it worse: `forgetDeploy` ran unconditionally while the message
+was gated, so a refusal after any navigation deleted the entry and said nothing at
+all. `deployRefusal` is deleted; every ending is an outcome. That removal was only
+available because the running-only filter landed first and took away the reason
+refusals were forgotten.
+
+Also: the 409-is-an-ActionResult special case is closed for every producer, not
+just the one found — the body's `clean` field decides now, in teardown too; 403
+joins the pre-apply statuses (the origin guard answers before any handler), and the
+allowlist's direction is documented as deliberate; `deployOutcome` stops a deploy
+speaking in teardown's vocabulary ("Teardown returned nothing." next to a Deploy
+button); the loaded summary says the estate was read when it holds zero records and
+something is applying; and a guard comment describing an unreachable path is gone.
+
+**Declined:** `slices.Contains` allocates and sorts under the deployer mutex. A
+handful of strings, against widening the deployer interface to avoid it.
+
+## 2026-09-03 — S163e-fixes: a rejected fetch is not "nothing happened"
+
+The fifth `/code-review` round on the deploy UI. **13 findings, 12 accepted.**
+They cluster in one place: the cut in S163e removed a browser mirror of server
+state, and the survivors kept describing the machinery that had gone.
+
+**The one that mattered.** `confirmDeploy`'s catch called `forgetDeploy` on
+every rejection, under a comment asserting "Nothing was started". But the
+server deliberately DETACHES the apply from the request that starts it
+(`destructiveContext`), so a sleeping laptop, a wifi hop or a proxy timeout
+leaves the apply running and creating billable infrastructure — and the page
+deleted its progress log and told the reader it did not exist. Only the server
+can say nothing started, so now it does: `DeployError.startedNothing` is set
+for the statuses the handler can only produce *before* the apply begins (400,
+404, 405, 423 — and 403, from the origin guard that wraps the whole mux).
+Everything else — including a 500 from a deploy that ran and
+failed — keeps the entry and says "may still be running; check the Deployments
+page". Both directions are mutation-checked: forgetting always fails the
+dropped-connection test, forgetting never fails the 423 test.
+
+**A rule broken twelve lines above where it was written.**
+`alreadyLiveWarning` returned early on `already_deploying`, discarding
+`already_live` — directly above its own comment saying it "must not DISCARD
+what was found". The three warnings answer different questions and can all be
+true at once, so they accumulate now. The dropped one is the strongest:
+"dep-existing is already deployed; deploying again creates a SECOND project and
+a second bill".
+
+**The third copy of the emptiness question.** S163e closed this class in
+`knownEmpty`; `estateSummary`'s `failed` branch was a third claim neither knew
+about, so a failed refresh rendered "whether anything is running is unknown"
+directly above the banner naming a billable apply in flight. `deploying`
+survives a failed read on purpose — it is the one thing still known — so the
+failed branch carries it too.
+
+Also: a refusal from a previous attempt outlived it, so a successful retry
+rendered "already deploying" and "deployed" together; `confirmDeploy` was the
+only async path on the page with no `navigation` token, so a failure could
+render on another scenario's page; `liveDeploymentsOf`'s docstring described
+its bool as "complete" when it means the inverse, on the flag that exists to
+prevent a false "nothing is deployed"; three comments and a test docstring
+still described `deploy_complete` and reload-restoration, both deleted in
+S163e; an e2e test was vacuous (the page no longer fetches `/api/deployments`
+on mount, so its route mock was never hit and its assertion was the
+unconditional default); and a preview test asserted `AlreadyLive` was empty
+against a lister that held nothing, so it passed for the wrong reason and would
+pass with the feature removed.
+
+**Overclaims corrected.** The scope note said the Deployments page "lists
+everything that is running". It cannot: the in-progress banner comes from one
+process's in-memory lock, so a CLI deploy, or one in flight across a server
+restart, is invisible until it finishes and writes its record. It now says it
+lists everything *recorded*, and `deploy-store.js`'s "it cannot be wrong" is
+narrowed to what it can actually promise — it cannot disagree with the live
+store the way a mirror can.
+
+**One finding declined.** The preview endpoint does a full estate `List()` per
+Deploy click — a filesystem walk plus a decode per record. Real, and left
+alone: it is one read per deliberate human click, against an estate bounded by
+what a person is willing to pay for, and the alternative is a second index that
+can disagree with the store. Recording the cost here is the fix; a lighter
+endpoint is worth building when the estate is big enough to notice, which is
+the same note S162c left about the mount fetch that has since been deleted.
+
+## 2026-09-03 — S163e: deleting the machinery instead of repairing it
+
+Three `/code-review` rounds on the deploy UI produced **9, then 13, then 14
+findings** — and twice a fix introduced a defect of the class it was fixing. The
+user's question is what settled it: *why is this so hard, when there is no
+difference between `terraform apply` to a mock and to a real cloud?*
+
+There isn't. Same binary, same HCL, same provider protocol. What differs is what
+an **incomplete** apply leaves behind and which record still points at it — and
+that is exactly what the TTL, the run-owned project, `live reconcile` and
+write-the-record-on-failure exist for. Those are small and have been stable all
+along.
+
+**None of the 36 findings were about that.** They were a browser state machine
+mirroring server state — adoption, terminal-event recovery, reconnect
+resynchronisation, ownership races — and every bug was the mirror disagreeing with
+the thing it mirrored.
+
+So it is gone. The scenario page shows the deploy **it** started, its log and how
+it ended; that survives navigation between scenarios, which is the case a reader
+actually cares about. After a reload it does not know, and says so.
+
+**Net −192 lines.** The estate page had a real gap that this exposed: a deploy
+that is *applying* has no record yet, so it could not appear in the table. The
+listing already reported `deploying`; the page now renders it and says those have
+no record yet.
+
+**A fourth review round found fifteen more, and their shape is the lesson: the cut
+removed consumers and left producers behind.** `broadcastDeployComplete` was still
+broadcasting to every browser with zero readers, `acceptCompleteEvent` was
+exported and tested with no caller and a docstring describing deleted machinery,
+and a type comment still promised reload-restoration. I checked the callers of what
+I deleted and not the callees.
+
+Two real defects came with it. **The estate page contradicted itself** — with a
+deploy applying and no records, "Nothing is deployed." rendered directly under "1
+deploy in progress", because `deploying` was a third copy of the emptiness question
+that `knownEmpty` did not know about. And **a refused deploy adopted another tab's
+stream**: `beginDeploy` ran before the POST, so a rejected attempt kept an entry
+and the store's scenario-keyed handler appended the other tab's live lines into it.
+My first fix moved `beginDeploy` after the POST and broke live progress entirely —
+three DOM tests caught it.
+
+The cut also created a gap it had to fill: `already_live` reads the estate, and an
+applying deploy has no record, so the confirmation was silent in the very case a
+reader is most likely duplicating. The preview consults the in-flight list now.
+
+## 2026-09-03 — S163d: nine findings from `/code-review`
+
+The review harness, now run on every PR, on the merged in-flight-lock slice.
+
+**The worst was two 409s with incompatible bodies.** `writeActionResult` answers
+409 for a deploy that *ran* and could not prove itself clean, carrying an
+`ActionResult`; the "already deploying" refusal answered 409 carrying an error.
+The client special-cases 409 as a result — so a refusal was parsed as one, found no
+`clean` field, and rendered **"resources may still be running"** for a request that
+never touched the cloud. The refusal is **423** now.
+
+**The claim I had just corrected elsewhere was still wrong here.**
+`deploy-store.js` said *"the server has no in-flight lock, so this is the only
+thing standing between a reader and that second deploy"* — false as of the very PR
+it sits in. Pass 134 was about that exact defect class, and I fixed the comment in
+`live_service.go` and the ADR and left the one naming the missing lock *by name*.
+
+**The lock's scope was overstated.** It prevents *concurrent* duplicates only;
+deploy → wait → deploy again still makes a second project. A lock cannot tell "I
+forgot" from "I meant it", so the preview reports `already_live` and the
+confirmation says what exists. The ADR now says what it does and does not close.
+
+**An adopted deploy could never finish** — no terminal websocket event, and only
+the tab that issued the POST calls `finishDeploy` — so after a reload the button
+stayed disabled for the rest of the session. The server broadcasts a terminal
+`deploy_complete` event now — an entry this tab *owns* is never cleared by a
+listing that has not caught up, and a missed event is recovered on reconnect
+rather than by polling.
+
+Also: the stale-banner fix did not cover leaving the *section* (`afterNavigate`
+does not fire on destroy — the case the store's own doc names); the `adopted` flag
+was written and never read, so a reload mid-apply said "Starting…"; and
+`adoptInFlight` had no test at all, its "leave owned entries alone" branch
+deletable with everything still green.
+
+**Then `/code-review` on the fix PR found thirteen more, and three were the same
+defect the PR existed to fix.** `already_live` was computed on the server,
+documented in the ADR, in STATUS, in a handler comment, and covered by a server
+test — and **the UI never read it**, so the guard I had written down did not
+exist. The ADR still said the refusal answers 409 nine lines above the amendment I
+edited. And the "server has no in-flight lock" claim was also in `+page.svelte`, a
+file that diff touched.
+
+The pattern is not carelessness about one line: **I write a claim in every place at
+once and then correct it in one place at a time.**
+
+**The altitude finding was right too.** I treated "there is no terminal websocket
+event" as a fixed constraint and built polling around it — an estate walk every
+five seconds, a race with the owning tab, and an answer that could say "it stopped"
+but never "it succeeded". The hub was already subject-scoped; `deploy_complete` is
+five lines and removes the poll, the race and the missing-outcome gap together.
+
+Also fixed: `adoptInFlight` skipped finished entries as well as running ones, so a
+tab whose deploy had been refused ignored every later listing; an adopted deploy
+that completed rendered nothing at all; and `liveDeploymentsOf` failed open, so a
+guard about billable infrastructure said "nothing exists" when it had failed to
+look.
+
+**Recorded honestly:** the lock is an in-memory map in one process — the CLI
+`deploy` command never touches it, so `infrafactory deploy` alongside a UI deploy
+still makes two projects. A bigger hole than the sequential one, and the PR that
+existed to stop the ADR overstating the lock was still overstating it.
+
+**And a third round found fourteen more, one of them introduced by the second.**
+`broadcastDeployComplete` sat *before* the refusal branch, so a **rejected** second
+deploy announced completion for the apply that was still running — stopping every
+watcher's log, re-enabling their button, and reporting live infrastructure as
+finished. It is sent only by a call that actually ran now.
+
+The live-run page filtered `deploy_progress` by name, so adding a second event kind
+walked straight back into the defect that filter exists for; it matches the whole
+`deploy_*` family now. `progress.Close()` was deferred *after* the terminal event,
+so the last line of a failed apply arrived once clients had stopped listening.
+`alreadyLiveWarning` discarded a concrete list whenever the estate-global
+unreadable flag was set — replacing the strongest warning with the vaguest, for
+every scenario. And `finishedElsewhere` was written and never read *again*, leaving
+the panel to vanish entirely rather than say what happened.
+
+**Left open:** `api.ts` decides how to parse a body from its status code, and
+`tearDownDeployment` has the same shape. A discriminator in the body closes the
+class; a second status only closed this instance. Also: the deploy preview now
+walks the whole estate on every click, a second instance of a cost already recorded
+for the page mount.
 
 ## 2026-09-03 — S163c: the deploy guard moves to the server
 
@@ -12,8 +935,10 @@ client state. A refresh wipes it, a second tab never had it, `curl` never
 consulted it.
 
 `LiveDeployer` holds a per-scenario lock. A second deploy of one already in flight
-returns `ErrDeployInProgress`, answered **409** and naming the scenario, because a
-bare "conflict" leaves a reader wondering which of their tabs is responsible.
+returns `ErrDeployInProgress`, answered **423 Locked** and naming the scenario,
+because a bare refusal leaves a reader wondering which of their tabs is
+responsible. (409 was the first choice and was wrong: it already means "a deploy
+ran and could not prove itself clean" on this endpoint — see S163d.)
 
 Per scenario rather than global — two different scenarios at once is ordinary.
 Claimed *after* name resolution so a typo cannot lock a name nothing will deploy,

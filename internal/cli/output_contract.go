@@ -56,6 +56,19 @@ type OutputResult struct {
 	Failures       []FailureSummary        `json:"failures"`
 	Explainability []ExplainabilitySummary `json:"explainability,omitempty"`
 
+	// Deployment names the live record a deploy wrote, when it wrote
+	// one. Empty otherwise.
+	//
+	// A failed deploy is not the same as an unrecorded one: `deploy`
+	// registers from whatever the state shows, whether or not the apply
+	// succeeded, so a half-failed apply usually DOES leave a record --
+	// with a TTL, on the estate page, reapable. The CLI already
+	// distinguishes them when it prints its recovery line; this carries
+	// the same fact to any other caller, so a UI can say "tear down
+	// dep-x" instead of raising a permanent alarm about resources
+	// somebody else is already tracking.
+	Deployment string `json:"deployment,omitempty"`
+
 	// PlanLiveText holds the Layer 3 tofu plan stdout when sandbox deploy
 	// is enabled. Internal only — not serialized to command output.
 	PlanLiveText []byte `json:"-"`

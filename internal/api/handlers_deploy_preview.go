@@ -5,8 +5,10 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
+	"github.com/redscaresu/infrafactory/internal/livestore"
 	"github.com/redscaresu/infrafactory/internal/scenario"
 )
 
@@ -57,6 +59,38 @@ type deployPreview struct {
 
 	// InternetFacing is true when the shape includes a public address.
 	InternetFacing bool `json:"internet_facing"`
+
+	// AlreadyDeploying is true when this scenario is applying right now.
+	//
+	// Separate from AlreadyLive because it is a different fact with a
+	// different consequence: that deploy has no record yet, and a second
+	// attempt will be refused rather than duplicating anything.
+	AlreadyDeploying bool `json:"already_deploying"`
+
+	// AlreadyLiveUnknown is true when the estate could not be read.
+	//
+	// An empty AlreadyLive is a CLAIM -- "checked, and nothing exists" --
+	// and a guard whose job is warning about existing billable
+	// infrastructure must not make that claim when it failed to look.
+	// The deployments listing already carries `unreadable` for exactly
+	// this; this is the same idea at the preview.
+	AlreadyLiveUnknown bool `json:"already_live_unknown"`
+
+	// AlreadyLive names deployments of this scenario that are already
+	// running.
+	//
+	// The in-flight lock stops the ACCIDENTAL duplicate -- the reload,
+	// the second tab, the double click. It does nothing about the
+	// deliberate one: deploy, wait for it to finish, deploy again, and
+	// there are two run-owned projects and two sets of billable
+	// resources for one scenario.
+	//
+	// That is not a lock's job. A lock cannot tell "I forgot" from "I
+	// meant it", and refusing outright would break redeploying after a
+	// teardown. So the confirmation says what already exists and the
+	// reader decides -- which is the same shape as every other decision
+	// on that screen.
+	AlreadyLive []string `json:"already_live"`
 
 	// Allowed reports whether this server would accept the deploy.
 	//
@@ -114,6 +148,31 @@ func deployPreviewHandler(state *serverState) http.HandlerFunc {
 
 		preview := previewFor(&sc, r.URL.Query().Get("ttl"), time.Now())
 		preview.Allowed = state.deployer != nil
+		// The in-flight list is read BEFORE the estate, and the order is
+		// the guarantee rather than a style choice.
+		//
+		// A deploy that is APPLYING has no record yet -- registration
+		// runs after the apply returns -- so the two reads cover each
+		// other only in one direction. Read the estate first and a
+		// deploy that finishes in between is in NEITHER answer: absent
+		// from the estate because it had not registered, absent from
+		// the in-flight list because it had already released. The
+		// confirmation would then render with no warning and an
+		// explicit "checked, and nothing exists" claim at the exact
+		// moment the scenario went live.
+		//
+		// Read in this order, anything that leaves the in-flight list
+		// after the first read has necessarily registered before the
+		// second, so it appears as `already_live` instead.
+		//
+		// The FINISHING window closes. A deploy that STARTS between the
+		// two reads is still in neither answer, and no ordering fixes
+		// that -- but its harm is bounded in a way the other's is not:
+		// the reader's own deploy is then refused by the lock, so the
+		// worst outcome is an unwarned refusal rather than a second
+		// project and a second bill.
+		preview.AlreadyDeploying = slices.Contains(deployingScenarios(state), sc.Name)
+		preview.AlreadyLive, preview.AlreadyLiveUnknown = liveDeploymentsOf(state, sc.Name)
 		writeJSON(w, http.StatusOK, preview)
 	}
 }
@@ -164,7 +223,23 @@ func loadScenarioByRelPath(state *serverState, relPath, want string) (scenario.S
 // previewFor assembles the preview, and is separate from the handler so
 // it can be tested without HTTP.
 func previewFor(sc *scenario.Scenario, ttlOverride string, now time.Time) deployPreview {
-	preview := deployPreview{Scenario: sc.Name, Cloud: sc.Cloud}
+	// Both fields start at the CAUTIOUS value, not the zero one.
+	//
+	// `AlreadyLive: []string{}` because `null` reads as "we could not
+	// look", and `AlreadyLiveUnknown: true` because `false` is the
+	// positive claim "checked, and nothing exists" -- which a preview
+	// built without consulting the live store has no right to make.
+	//
+	// Every non-looking path of `liveDeploymentsOf` returns
+	// `(out, true)`. The struct's zero value was the one place that said
+	// the opposite, on a file whose whole argument is that an empty
+	// answer must be a CHECKED one.
+	preview := deployPreview{
+		Scenario:           sc.Name,
+		Cloud:              sc.Cloud,
+		AlreadyLive:        []string{},
+		AlreadyLiveUnknown: true,
+	}
 
 	// The cost and shape are worth knowing even for a scenario that
 	// cannot be deployed -- that is exactly what explains the greyed-out
@@ -223,4 +298,63 @@ func previewFor(sc *scenario.Scenario, ttlOverride string, now time.Time) deploy
 	preview.CostSummary = preview.Cost.Summary(ttl)
 
 	return preview
+}
+
+// liveDeploymentsOf names the deployments of a scenario that have not
+// been released, and reports whether the answer is UNKNOWN -- that is,
+// whether something might be missing from it.
+//
+// The polarity is worth stating because it is the opposite of the one a
+// reader guesses from the name of the caller's field. `true` means "do
+// not trust this list to be everything"; it feeds
+// `DeployPreview.AlreadyLiveUnknown`, and every `return out, true`
+// below is a path that did not, or could not, finish looking.
+//
+// The second return is not a detail: an empty list is a CLAIM --
+// checked, and nothing exists -- and a guard whose job is warning about
+// existing billable infrastructure must not make it without having
+// looked. Inverting this flag would let an estate with a corrupt record
+// claim it had been read in full.
+func liveDeploymentsOf(state *serverState, name string) ([]string, bool) {
+	out := []string{}
+	if name == "" {
+		// Never looked, so no claim.
+		//
+		// Not reachable from the handler: an empty `?scenario=` is
+		// refused with 400, and a file whose `scenario:` key does not
+		// match what was asked for 404s. This is a type-level guard on
+		// a function whose empty answer is a CLAIM about billable
+		// infrastructure, so it refuses to make one it did not check --
+		// it is not defending a path that exists today.
+		//
+		// (It previously claimed a blank `scenario:` key reached here.
+		// It cannot; corrected 2026-09-03.)
+		return out, true
+	}
+	if state.deployments == nil {
+		// No lister, so nothing was checked. Returning (empty, false)
+		// would be the claim this flag exists to forbid -- and the
+		// err != nil branch below gets it right, which is the whole
+		// argument.
+		return out, true
+	}
+
+	deployments, unreadable, err := state.deployments.List()
+	if err != nil {
+		// Could not look. Saying "nothing exists" here would be a
+		// false negative on a guard about billable infrastructure.
+		return out, true
+	}
+
+	for _, d := range deployments {
+		if d.Scenario == name && d.State != livestore.StateReleased {
+			out = append(out, d.ID)
+		}
+	}
+	slices.Sort(out)
+
+	// A record that will not decode has no Scenario to match on, so it
+	// could be a deployment of THIS scenario and would never appear
+	// above. That is a gap in the answer, not a complete one.
+	return out, len(unreadable) > 0
 }

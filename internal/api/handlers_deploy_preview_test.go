@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/redscaresu/infrafactory/internal/config"
+	"github.com/redscaresu/infrafactory/internal/livestore"
 	"github.com/redscaresu/infrafactory/internal/scenario"
 )
 
@@ -267,6 +269,63 @@ func TestPreviewCallsAComputeOnlyScenarioInternetFacing(t *testing.T) {
 // The preview is meant to be everything a person needs in order to
 // decide, and "this server will refuse" is part of that.
 func TestPreviewReportsWhetherTheServerWouldAcceptTheDeploy(t *testing.T) {
+	for name, deployer := range map[string]DeploymentDeployer{
+		"without the flag": nil,
+		"with the flag":    &fakeDeployer{},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := previewOf(t, ServerConfig{Deployer: deployer})
+			assert.Equal(t, deployer != nil, got.Allowed)
+		})
+	}
+}
+
+// The lock stops the accidental duplicate. It does nothing about
+// deploy → wait → deploy again, which produces a second run-owned
+// project just the same. A lock cannot tell "I forgot" from "I meant
+// it", so the confirmation says what already exists and the reader
+// decides.
+func TestPreviewNamesDeploymentsOfThisScenarioThatAlreadyExist(t *testing.T) {
+	live := livestore.Deployment{
+		ID: "dep-existing", Scenario: "previewable", Cloud: "scaleway",
+		ProjectID: "proj-1", State: livestore.StateLive,
+		CreatedAt: time.Now().Add(-time.Hour), ExpiresAt: time.Now().Add(time.Hour),
+	}
+	released := live
+	released.ID = "dep-gone"
+	released.State = livestore.StateReleased
+	other := live
+	other.ID = "dep-other"
+	other.Scenario = "something-else"
+
+	got := previewWithEstate(t, []livestore.Deployment{live, released, other})
+
+	assert.Equal(t, []string{"dep-existing"}, got.AlreadyLive,
+		"a released deployment is not still running, and another scenario is not this one")
+}
+
+func TestPreviewReportsNoExistingDeploymentsAsAnEmptyList(t *testing.T) {
+	got := previewWithEstate(t, nil)
+
+	assert.NotNil(t, got.AlreadyLive, "null would read as unknown")
+	assert.Empty(t, got.AlreadyLive)
+}
+
+func previewWithEstate(t *testing.T, deployments []livestore.Deployment) deployPreview {
+	t.Helper()
+	return previewOf(t, ServerConfig{Deployments: &fakeDeployments{deployments: deployments}})
+}
+
+// previewOf writes the one scenario every preview test previews, serves
+// a GET for it, and returns the decoded body.
+//
+// `cfg.Config` and `cfg.Paths.Scenarios` are filled in here; everything
+// else -- the lister, the deployer -- is the caller's, which is the only
+// thing these tests actually vary. The scenario document had been
+// copy-pasted into five of them, so a schema change meant editing five
+// fixtures and CI reported five unrelated failures.
+func previewOf(t *testing.T, sc ServerConfig) deployPreview {
+	t.Helper()
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "sc.yaml"), []byte(`scenario: previewable
 version: "1.0"
@@ -283,21 +342,144 @@ acceptance_criteria:
 
 	cfg := config.Default()
 	cfg.Paths.Scenarios = dir
+	sc.Config = cfg
 
-	for name, deployer := range map[string]DeploymentDeployer{
-		"without the flag": nil,
-		"with the flag":    &fakeDeployer{},
-	} {
-		t.Run(name, func(t *testing.T) {
-			srv := NewServer(ServerConfig{Config: cfg, Deployer: deployer})
-			rec := httptest.NewRecorder()
-			srv.Handler.ServeHTTP(rec,
-				httptest.NewRequest(http.MethodGet, "/api/deployments/preview?scenario=previewable", nil))
+	rec := httptest.NewRecorder()
+	NewServer(sc).Handler.ServeHTTP(rec,
+		httptest.NewRequest(http.MethodGet, "/api/deployments/preview?scenario=previewable", nil))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 
-			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-			var got deployPreview
-			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
-			assert.Equal(t, deployer != nil, got.Allowed)
-		})
-	}
+	var got deployPreview
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	return got
+}
+
+// The unreadable branch is the whole reason AlreadyLiveUnknown exists,
+// and it had no server-side test: changing `len(unreadable) > 0` to
+// `false` restored the exact false negative its docstring calls out,
+// with the whole Go suite green.
+func TestPreviewSaysWhenTheEstateCouldNotBeFullyRead(t *testing.T) {
+	got := previewOf(t, ServerConfig{
+		Deployments: &fakeDeployments{
+			unreadable: []error{errors.New("dep-broken.json: unexpected end of JSON input")},
+		},
+	})
+
+	assert.True(t, got.AlreadyLiveUnknown,
+		"an undecodable record could be a deployment of THIS scenario and would never match")
+}
+
+// A server with no lister never looked, so it must not claim it did.
+func TestPreviewWithNoListerDoesNotClaimNothingIsDeployed(t *testing.T) {
+	got := previewOf(t, ServerConfig{})
+
+	assert.True(t, got.AlreadyLiveUnknown)
+	assert.Empty(t, got.AlreadyLive)
+}
+
+// A deploy that is APPLYING has no record yet -- registration runs after
+// the apply returns -- so the estate cannot see the one case where the
+// reader is most likely duplicating.
+func TestPreviewWarnsWhenTheScenarioIsApplyingRightNow(t *testing.T) {
+	// The estate is NOT empty. An empty lister would make the
+	// `AlreadyLive` assertion below pass for the wrong reason -- there
+	// was nothing to find -- and it would keep passing with the
+	// in-flight warning removed entirely. A live record for a DIFFERENT
+	// scenario proves the lister was consulted and answered, and that
+	// the applying scenario is still absent from what it returned.
+	got := previewOf(t, ServerConfig{
+		Deployments: &fakeDeployments{deployments: []livestore.Deployment{
+			{ID: "dep-other", Scenario: "something-else", State: livestore.StateLive},
+		}},
+		Deployer: &fakeDeployer{inFlight: []string{"previewable"}},
+	})
+
+	assert.True(t, got.AlreadyDeploying,
+		"the estate cannot see an apply in progress; the in-flight list is the only thing that can")
+	assert.False(t, got.AlreadyLiveUnknown, "the estate was read in full")
+	assert.Empty(t, got.AlreadyLive,
+		"a readable estate that holds another scenario's deployment, and no record of this one -- "+
+			"registration runs after the apply returns")
+}
+
+// A blank scenario name never looked, so it must not claim it did.
+func TestPreviewWithABlankScenarioNameMakesNoClaim(t *testing.T) {
+	got, unknown := liveDeploymentsOf(&serverState{deployments: &fakeDeployments{}}, "")
+
+	assert.Empty(t, got)
+	assert.True(t, unknown, "returning (empty, false) is the claim the flag exists to forbid")
+}
+
+// orderRecordingDeployer notes when its in-flight list was read.
+type orderRecordingDeployer struct {
+	fakeDeployer
+	read *bool
+}
+
+func (d *orderRecordingDeployer) InFlight() []string {
+	*d.read = true
+	return d.fakeDeployer.inFlight
+}
+
+// orderRecordingLister notes whether the in-flight list had already been
+// read by the time the estate was.
+type orderRecordingLister struct {
+	inFlightRead     *bool
+	sawInFlightFirst bool
+}
+
+func (l *orderRecordingLister) List() ([]livestore.Deployment, []error, error) {
+	l.sawInFlightFirst = *l.inFlightRead
+	return nil, nil, nil
+}
+
+// The two reads cover each other in ONE direction only, so their order
+// is a guarantee rather than a style choice.
+//
+// A deploy has no record until registration, which runs after the apply
+// returns. Read the estate first and a deploy that finishes in between
+// is in neither answer -- not in the estate, because it had not
+// registered; not in the in-flight list, because it had already
+// released -- and the confirmation renders with no warning at all and
+// an explicit "checked, and nothing exists" claim, at the exact moment
+// the scenario went live.
+//
+// The other order has no such window: anything that leaves the
+// in-flight list after the first read has registered before the second.
+func TestThePreviewReadsWhatIsApplyingBeforeItReadsTheEstate(t *testing.T) {
+	inFlightRead := false
+	lister := &orderRecordingLister{inFlightRead: &inFlightRead}
+
+	previewOf(t, ServerConfig{
+		Deployments: lister,
+		Deployer:    &orderRecordingDeployer{read: &inFlightRead},
+	})
+
+	assert.True(t, lister.sawInFlightFirst,
+		"reading the estate first leaves a window where a deploy finishing in between "+
+			"is invisible to both reads, and the confirmation claims nothing exists")
+}
+
+// An empty list is a CHECKED claim and a null one is not, so the struct
+// must not be able to produce a null by default.
+//
+// Every path through `liveDeploymentsOf` returns `[]string{}`; the zero
+// value of the struct was the one place that guarantee did not hold, and
+// a preview built without it told the reader the estate could not be
+// read on a server that had read it perfectly.
+func TestAPreviewNeverCarriesANullAlreadyLive(t *testing.T) {
+	sc := &scenario.Scenario{Name: "previewable", Cloud: "scaleway"}
+
+	raw, err := json.Marshal(previewFor(sc, "", time.Now()))
+	require.NoError(t, err)
+
+	var wire map[string]any
+	require.NoError(t, json.Unmarshal(raw, &wire))
+	assert.NotNil(t, wire["already_live"],
+		"null reads as \"we could not look\", which is the opposite of what this preview knows")
+	// And the mirror image: `false` is the positive claim "checked, and
+	// nothing exists". A preview that never consulted the live store
+	// must not make it, so the cautious value is the zero one.
+	assert.Equal(t, true, wire["already_live_unknown"],
+		"a preview built without looking must not report a silent all-clear")
 }

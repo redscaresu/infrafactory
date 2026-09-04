@@ -262,7 +262,12 @@ func (d *LiveDeployer) Deploy(ctx context.Context, scenarioName, ttl string, pro
 	// refuses every other one.
 	runtime, err := d.newRuntime()
 	if err != nil {
-		return api.ActionResult{}, err
+		// Pre-apply, like everything above it. Unmarked, this answered
+		// 500 and the client read "we do not know what happened", so a
+		// server that could not rebuild its runtime pinned a permanent
+		// "may have created resources that are still running" for a
+		// request that never reached Scaleway.
+		return api.ActionResult{}, api.NothingStarted("", err)
 	}
 
 	cmd := &cobra.Command{Use: "deploy"}
@@ -270,7 +275,7 @@ func (d *LiveDeployer) Deploy(ctx context.Context, scenarioName, ttl string, pro
 	cmd.Flags().String("output", string(OutputModeJSON), "")
 	if ttl != "" {
 		if err := cmd.Flags().Set("ttl", ttl); err != nil {
-			return api.ActionResult{}, err
+			return api.ActionResult{}, api.NothingStarted("", err)
 		}
 	}
 
@@ -347,6 +352,9 @@ func deployOutcome(stdout, progress string, deployErr error) api.ActionResult {
 	payload := envelope.Result
 	out := actionResult(payload.Stages, payload.Failures)
 	out.Clean = payload.Status == CommandStatusSuccess && len(payload.Failures) == 0
+	// Carried through, so a caller can tell an unclean deploy that left
+	// a REAPABLE record from one that left nothing anybody is tracking.
+	out.Deployment = payload.Deployment
 	return out
 }
 
@@ -357,7 +365,12 @@ func deployOutcome(stdout, progress string, deployErr error) api.ActionResult {
 // required to agree.
 func resolveScenarioByName(root, name string) (string, error) {
 	if strings.TrimSpace(name) == "" {
-		return "", fmt.Errorf("no scenario name: %w", os.ErrNotExist)
+		// The same fact as the not-found branch below -- the name did
+		// not resolve, nothing ran -- and it has to make the same
+		// promise. One of two identical pre-resolution failures got it
+		// and its neighbour did not, so a blank name pinned a permanent
+		// leak report for a request that never got past a string trim.
+		return "", api.NoSuchScenario("no scenario name given")
 	}
 
 	var found string
@@ -397,7 +410,12 @@ func resolveScenarioByName(root, name string) (string, error) {
 		return nil
 	})
 	if err != nil {
-		return "", err
+		// A misconfigured `scenarioRoot` produces an *fs.PathError that
+		// satisfies errors.Is(err, os.ErrNotExist) -- which the handler
+		// deliberately treats as "we do not know", so the misconfigured
+		// server produced a permanent false leak report. The walk runs
+		// before anything touches the cloud, whatever went wrong in it.
+		return "", api.NothingStarted("", err)
 	}
 	if found == "" {
 		// Wrapped so the caller can tell "you asked for something that
@@ -405,7 +423,24 @@ func resolveScenarioByName(root, name string) (string, error) {
 		// a UI holding a stale scenario list, is not a 500 -- and
 		// reporting it as one teaches operators that 500 means nothing
 		// in particular.
-		return "", fmt.Errorf("no scenario named %q: %w", name, os.ErrNotExist)
+		//
+		// `api.ErrNoSuchScenario`: resolution runs before the lock is
+		// claimed and before anything touches the cloud, so this is the
+		// one 404 that can PROMISE nothing was created. A bare
+		// os.ErrNotExist cannot -- a state file vanishing mid-apply
+		// produces one too -- and the API layer answers the two
+		// differently.
+		//
+		// It no longer claims os.ErrNotExist at all. It used to, via a
+		// custom `Is`, and that promise was only half true: `errors.Is`
+		// honoured it and `os.IsNotExist` did not, because the latter
+		// unwraps three concrete types and compares by `==` and never
+		// consults `Is`. No custom type can satisfy `os.IsNotExist`
+		// short of BEING an *fs.PathError, which would put filesystem
+		// framing back into the message this 404 exists to keep out.
+		// A promise that holds for one of two idioms is worse than
+		// none, so it is withdrawn: the API layer matches the sentinel.
+		return "", api.NoSuchScenario(fmt.Sprintf("no scenario named %q", name))
 	}
 	return found, nil
 }

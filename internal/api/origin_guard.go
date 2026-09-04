@@ -60,7 +60,23 @@ func guardCrossOriginRequests(next http.Handler) http.Handler {
 
 		// Deliberately says nothing about what the endpoint would have
 		// done, or whether it exists. The refusal is the whole message.
-		writeJSONError(w, http.StatusForbidden,
+		//
+		// `writeRefusal`, because this request was never DISPATCHED.
+		//
+		// An earlier round made this a plain error, reasoning that
+		// `started_nothing` is a claim about an apply and is meaningless
+		// on a read and wrong-verbed on a teardown. Meaningless is not
+		// the same as false: nothing was started here, whatever the
+		// request was for, because no handler ran at all. Withholding a
+		// true claim is not neutral -- a refused deploy POST then read
+		// as "we do not know what happened", and the page pinned a
+		// permanent "it may have created resources that are still
+		// running" for a request the middleware rejected outright.
+		//
+		// The rule this settles on: any path that answers before a
+		// deploy could begin may say so. A vacuous truth on a GET costs
+		// nothing; a missing one manufactures a false alarm.
+		writeRefusal(w, http.StatusForbidden,
 			"cross-origin request refused: this server is reachable only from a page served on loopback")
 	})
 }

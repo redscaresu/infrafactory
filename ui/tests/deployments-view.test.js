@@ -2,10 +2,15 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  acceptProgressEvent,
+  alreadyLiveWarnings,
   addressHref,
   deployConfirmation,
   deployWarnings,
+  ESTATE_UNREADABLE,
+  deployOutcome,
+  isProgressEvent,
+  nothingRecorded,
+  deployingLabel,
   teardownOutcome,
   teardownPrompt,
   knownEmpty,
@@ -83,9 +88,9 @@ test("observedLabel says never rather than inventing a date", () => {
 // "0 needing attention" out of zero deployments and out of forty read
 // identically and mean opposite things.
 test("estateSummary states what was examined, not only what is wrong", () => {
-  assert.equal(estateSummary([], []), "Nothing is deployed.");
+  assert.equal(estateSummary([], [], "loaded", []), "Nothing is deployed.");
   assert.equal(
-    estateSummary([{ health: { status: "healthy", version: "confirmed" } }], []),
+    estateSummary([{ health: { status: "healthy", version: "confirmed" } }], [], "loaded", []),
     "1 deployment"
   );
   assert.equal(
@@ -94,7 +99,9 @@ test("estateSummary states what was examined, not only what is wrong", () => {
         { health: { status: "healthy", version: "confirmed" } },
         { health: { status: "unhealthy" } }
       ],
-      ["dep-broken.json: unexpected end of JSON input"]
+      ["dep-broken.json: unexpected end of JSON input"],
+      "loaded",
+      []
     ),
     "2 deployments, 1 needing attention, 1 record that could not be read"
   );
@@ -153,11 +160,11 @@ test("estateSummary does not answer before it has asked", () => {
 // absence of knowledge. The page may claim nothing is running only when
 // all three hold.
 test("knownEmpty requires a successful read, no deployments, and nothing unreadable", () => {
-  assert.equal(knownEmpty([], [], "loaded"), true);
-  assert.equal(knownEmpty([], ["dep-broken.json: bad"], "loaded"), false);
-  assert.equal(knownEmpty([], [], "failed"), false);
-  assert.equal(knownEmpty([], [], "loading"), false);
-  assert.equal(knownEmpty([{ id: "dep-1" }], [], "loaded"), false);
+  assert.equal(knownEmpty([], [], "loaded", []), true);
+  assert.equal(knownEmpty([], ["dep-broken.json: bad"], "loaded", []), false);
+  assert.equal(knownEmpty([], [], "failed", []), false);
+  assert.equal(knownEmpty([], [], "loading", []), false);
+  assert.equal(knownEmpty([{ id: "dep-1" }], [], "loaded", []), false);
 });
 
 // `http://2001:db8::1:8080` is not a URL. The probe path uses Go's
@@ -224,6 +231,11 @@ test("teardownOutcome treats a missing result as a failure", () => {
 const previewFixture = (over = {}) => ({
   scenario: "lb-serving-paris",
   deployable: true,
+  // The server always sends this, and an ABSENT list is deliberately
+  // not the same as an empty one -- so a fixture that omitted it was
+  // testing the "we could not look" path by accident.
+  already_live: [],
+  already_live_unknown: false,
   image: "nginx:1.27",
   ttl: "4h0m0s",
   expires_at: "2026-09-03T03:47:00Z",
@@ -310,38 +322,343 @@ test("deployConfirmation admits when it does not know what will be created", () 
 // e2e tests intercept the POST in the browser, so the server never
 // broadcasts and the filter was never invoked. Typo-ing the event type,
 // which kills the entire stream, passed the whole suite.
-test("acceptProgressEvent takes only progress for the scenario on screen", () => {
-  const event = (subject, line = "tofu apply: running") => ({
+// Its only production caller is the store's socket handler, which is
+// what makes these worth having: the e2e tests intercept the POST in the
+// browser, so the server never broadcasts and this filter is never
+// exercised there. Typo-ing the event type kills the entire stream and
+// passes the whole Playwright suite.
+test("isProgressEvent takes deploy progress and nothing else", () => {
+  const event = (over = {}) => ({
     type: "deploy_progress",
-    data: { subject, line }
+    data: { subject: "web-app-paris", line: "apply: running", ...over }
   });
 
-  assert.equal(acceptProgressEvent(event("web-app-paris"), "web-app-paris"), true);
-  assert.equal(acceptProgressEvent(event("lb-serving-paris"), "web-app-paris"), false);
+  assert.equal(isProgressEvent(event()), true);
+  assert.equal(isProgressEvent({ ...event(), type: "log" }), false);
+  assert.equal(isProgressEvent({ ...event(), type: "deploy_progres" }), false, "a typo kills the stream");
 });
 
-test("acceptProgressEvent ignores every other event type", () => {
-  assert.equal(
-    acceptProgressEvent({ type: "log", data: { subject: "a", line: "x" } }, "a"),
-    false
+test("isProgressEvent ignores malformed events rather than rendering blanks", () => {
+  assert.equal(isProgressEvent({ type: "deploy_progress" }), false);
+  assert.equal(isProgressEvent({ type: "deploy_progress", data: { subject: "a" } }), false);
+  assert.equal(isProgressEvent({ type: "deploy_progress", data: { subject: "a", line: "" } }), false);
+  assert.equal(isProgressEvent(undefined), false);
+  assert.equal(isProgressEvent(null), false);
+});
+
+test("deployWarnings leads with an existing deployment of the same scenario", () => {
+  const warnings = deployWarnings(
+    previewFixture({ internet_facing: false, already_live: ["dep-existing"] })
   );
-  // The typo that silently killed the stream and passed the suite.
+
+  assert.match(warnings[0], /dep-existing/);
+  assert.match(warnings[0], /SECOND project/);
+  assert.match(warnings[0], /does not replace it/);
+});
+
+test("deployWarnings counts several existing deployments", () => {
+  const warnings = deployWarnings(
+    previewFixture({ internet_facing: false, already_live: ["dep-a", "dep-b"] })
+  );
+
+  assert.match(warnings[0], /2 deployments/);
+  assert.match(warnings[0], /dep-a, dep-b/);
+  // The plural case is the MORE expensive one, and it used to be the
+  // only one that dropped the cost consequence -- the language
+  // disappeared exactly where it mattered most, invisibly, because this
+  // test asserted only the count and the ids.
+  assert.match(warnings[0], /another bill/);
+});
+
+test("alreadyLiveWarnings is silent when nothing is live", () => {
+  assert.deepEqual(alreadyLiveWarnings({ already_live: [] }), []);
+});
+
+// The server makes an empty list a CHECKED claim. Reading a missing
+// field as an empty one throws that away at the client boundary: an
+// older server, or a body trimmed by an intermediary, would render no
+// warning at all -- indistinguishable from "we looked and there is
+// nothing", on a guard about billable infrastructure.
+test("alreadyLiveWarnings does not read an absent list as an empty one", () => {
+  const [missing] = alreadyLiveWarnings({});
+  assert.match(missing, /could not be fully read/);
+  const [nothing] = alreadyLiveWarnings(undefined);
+  assert.match(nothing, /could not be fully read/);
+});
+
+test("alreadyLiveWarnings says so when the estate could not be read", () => {
+  const [warning] = alreadyLiveWarnings({ already_live: [], already_live_unknown: true });
+  assert.match(warning, /could not be fully read/);
+  assert.match(warning, /unknown/);
+});
+
+// The unreadable flag is estate-global -- one corrupt record anywhere
+// sets it -- so returning early replaced the strongest, most actionable
+// warning with the vaguest one, for every scenario, until somebody found
+// the bad file.
+test("alreadyLiveWarnings keeps the concrete list even when the estate is partly unreadable", () => {
+  const [warning] = alreadyLiveWarnings({
+    already_live: ["dep-existing"],
+    already_live_unknown: true
+  });
+
+  assert.match(warning, /dep-existing/, "what was found must not be discarded");
+  assert.match(warning, /SECOND project/);
+  assert.match(warning, /may be more than this/, "and the gap is still stated");
+});
+
+// A deploy that is APPLYING has no record yet, so it is absent from
+// `deployments` while being the most active thing in the estate. The
+// page said "Nothing is deployed." directly under a banner naming a
+// billable apply in flight.
+test("knownEmpty is false while something is deploying", () => {
+  assert.equal(knownEmpty([], [], "loaded", ["web-app-paris"]), false);
+  assert.equal(knownEmpty([], [], "loaded", []), true);
+});
+
+test("estateSummary counts deploys in progress", () => {
+  // A successful read that found nothing still has to say so: the
+  // empty-state panel is suppressed here and the table does not render,
+  // so this line is the only thing that speaks about the estate.
   assert.equal(
-    acceptProgressEvent({ type: "deploy-progress", data: { subject: "a", line: "x" } }, "a"),
-    false
+    estateSummary([], [], "loaded", ["web-app-paris"]),
+    "1 deploy in progress. Nothing else is deployed."
+  );
+  assert.equal(
+    estateSummary(
+      [{ health: { status: "healthy", version: "confirmed" } }],
+      [],
+      "loaded",
+      ["web-app-paris"]
+    ),
+    "1 deployment, 1 deploy in progress"
   );
 });
 
-test("acceptProgressEvent ignores malformed events rather than rendering blanks", () => {
-  assert.equal(acceptProgressEvent(undefined, "a"), false);
-  assert.equal(acceptProgressEvent({ type: "deploy_progress" }, "a"), false);
-  assert.equal(acceptProgressEvent({ type: "deploy_progress", data: { subject: "a" } }, "a"), false);
+// An applying deploy has no record, so the estate cannot see it — and it
+// is exactly the case where a reader is most likely duplicating.
+test("alreadyLiveWarnings reports a deploy that is applying right now", () => {
+  const [warning] = alreadyLiveWarnings({ already_deploying: true, already_live: [] });
+  assert.match(warning, /being deployed right now/);
+  assert.match(warning, /will be refused/);
 });
 
-// Nothing is on screen, so nothing belongs to it.
-test("acceptProgressEvent takes nothing when no deploy is being shown", () => {
+// Three separate questions, all of which can be true at once. Returning
+// on the first dropped the strongest and most actionable of them --
+// "dep-x is already deployed; deploying again creates a SECOND project
+// and a second bill" -- exactly when the reader was most likely to be
+// duplicating something.
+// One warning per fact, and the STRONGEST first. Concatenating them
+// into a paragraph demoted the second-bill warning to the second
+// sentence of the first string -- the same demotion the early return
+// caused, one layer down, and invisible to a test reading `.first()`.
+test("alreadyLiveWarnings keeps every warning rather than choosing between them", () => {
+  const warnings = alreadyLiveWarnings({
+    already_deploying: true,
+    already_live: ["dep-existing"],
+    already_live_unknown: true
+  });
+  assert.equal(warnings.length, 2, "separate warnings, so a page can render them separately");
+  assert.match(warnings[0], /dep-existing/, "the second-bill warning leads");
+  assert.match(warnings[0], /SECOND project/);
+  assert.match(warnings[0], /could not be read/, "and carries its own caveat");
+  assert.match(warnings[1], /being deployed right now/);
+});
+
+test("alreadyLiveWarnings still reports an unreadable estate while something is applying", () => {
+  const warnings = alreadyLiveWarnings({
+    already_deploying: true,
+    already_live: [],
+    already_live_unknown: true
+  });
+  assert.equal(warnings.length, 2);
+  assert.match(warnings[0], /could not be fully read/);
+  assert.match(warnings[1], /being deployed right now/);
+});
+
+// `deploying` is kept from the last successful poll precisely so it
+// survives a failed one, and the banner beneath the summary renders it.
+// A summary that said "whether anything is running is unknown" directly
+// above "1 deploy in progress" was a third claim about emptiness that
+// neither knownEmpty nor the banner knew about.
+test("estateSummary does not call a running deploy unknown when the read fails", () => {
+  const summary = estateSummary([], [], "failed", ["web-app-paris"]);
+  assert.match(summary, /1 deploy in progress/);
+  assert.match(summary, /what is running now is unknown/);
+});
+
+// Surviving the error does not make it current. It was read at the same
+// moment as the rows, and they say "read before the error" about
+// themselves; an unqualified "1 deploy in progress" asserts as
+// present-tense a deploy that may have finished a minute ago, and keeps
+// asserting it for as long as polling fails.
+test("estateSummary does not present a stale in-flight list as current", () => {
+  const summary = estateSummary([], [], "failed", ["web-app-paris"]);
+  assert.match(summary, /when the estate was last read/);
+});
+
+test("deployingLabel is silent when nothing is applying", () => {
+  assert.equal(deployingLabel([], false), "");
+  assert.equal(deployingLabel(undefined, true), "");
+});
+
+test("deployingLabel says whether the count is current", () => {
+  assert.equal(deployingLabel(["a"], false), "1 deploy in progress");
+  assert.equal(deployingLabel(["a", "b"], false), "2 deploys in progress");
+  assert.equal(deployingLabel(["a"], true), "1 deploy in progress when the estate was last read");
+});
+
+// A deploy must not speak in teardown's vocabulary. Reusing
+// teardownOutcome put "Teardown returned nothing." next to a Deploy
+// button, reachable only on the failure branch -- where a reader is
+// least equipped to discount it.
+test("deployOutcome never describes a deploy as a teardown", () => {
+  for (const outcome of [
+    deployOutcome(null),
+    deployOutcome({ clean: false, failures: [] }),
+    deployOutcome({ clean: false, failures: [{ detail: "project delete failed" }] }),
+    deployOutcome({ clean: true, failures: [] })
+  ]) {
+    assert.doesNotMatch(outcome.message, /[Tt]eardown|[Dd]estroyed/);
+  }
+});
+
+test("deployOutcome refuses to call an unproven deploy a success", () => {
+  assert.equal(deployOutcome({ clean: false, failures: [] }).ok, false);
+  assert.equal(deployOutcome({ clean: true, failures: [] }).ok, true);
+});
+
+// `api.deployScenario` returns only when `isActionResult` holds, so a
+// null cannot reach here from the app today. This asserts the TYPE's
+// behaviour, not a path a screen renders -- an exported function whose
+// caller's guarantee is not local to it, and whose worst possible
+// answer would be a green tick over nothing at all.
+test("deployOutcome does not treat an absent result as a success", () => {
+  assert.equal(deployOutcome(null).ok, false);
+  assert.equal(deployOutcome(undefined).ok, false);
+  assert.equal(teardownOutcome(null).ok, false);
+});
+
+test("deployOutcome carries the per-stage failures, which name what leaked", () => {
+  const outcome = deployOutcome({
+    clean: false,
+    failures: [{ detail: "project if-run-abc could not be deleted" }]
+  });
+  assert.match(outcome.message, /if-run-abc/);
+  assert.match(outcome.message, /may have created resources/);
+});
+
+test("estateSummary still admits total ignorance when nothing is applying", () => {
   assert.equal(
-    acceptProgressEvent({ type: "deploy_progress", data: { subject: "a", line: "x" } }, ""),
-    false
+    estateSummary([], [], "failed", []),
+    "The live estate could not be read. Whether anything is running is unknown."
   );
+});
+
+test("estateSummary carries deploys in progress alongside a partial read", () => {
+  const summary = estateSummary(
+    [{ id: "dep-1", state: "live", health: { status: "healthy", version: "confirmed" } }],
+    [],
+    "failed",
+    ["web-app-paris"]
+  );
+  assert.match(summary, /1 deploy in progress/);
+  assert.match(summary, /read before the error/);
+});
+
+// Deploy and teardown differ in their WORDS, never in the rule. Two
+// structural copies of "clean, not failures.length" are two places a
+// future change to ADR-0024's judgement has to find, and applied to one
+// and not the other, the deploy screen would report a success the
+// teardown screen refuses.
+test("deploy and teardown judge an unproven action identically", () => {
+  const cases = [
+    null,
+    { clean: false, failures: [] },
+    { clean: false, failures: [{ detail: "project 7c98d82e is live" }] },
+    { clean: true, failures: [] }
+  ];
+  for (const result of cases) {
+    assert.equal(
+      deployOutcome(result).ok,
+      teardownOutcome(result).ok,
+      "one rule, whatever the vocabulary"
+    );
+    // But teardown does not carry `mayHaveCreated`: nothing on the
+    // estate page reads it, and a flag that exists only to be dropped
+    // is data the next reader has to reason about for nothing.
+    assert.ok(!("mayHaveCreated" in teardownOutcome(result)));
+  }
+});
+
+test("nothingRecorded answers only what was recorded", () => {
+  assert.equal(nothingRecorded([], []), true);
+  assert.equal(nothingRecorded([{ id: "dep-1" }], []), false);
+  assert.equal(nothingRecorded([], ["dep-broken.json"]), false);
+  // Deliberately says nothing about whether the read succeeded, or
+  // whether anything is applying -- that is knownEmpty's job, and
+  // keeping them apart is what stops this becoming a copy of it.
+  assert.equal(nothingRecorded(undefined, undefined), true);
+});
+
+// The store looks the entry up by the event's own subject, so passing
+// that subject back in as "the scenario on screen" compared it with
+// itself -- a guard that reads as scoping while scoping nothing.
+test("isProgressEvent checks the shape and not the scenario", () => {
+  assert.equal(isProgressEvent({ type: "deploy_progress", data: { subject: "a", line: "x" } }), true);
+  assert.equal(isProgressEvent({ type: "log", data: { subject: "a", line: "x" } }), false);
+  assert.equal(isProgressEvent({ type: "deploy_progress", data: { subject: "a" } }), false);
+  assert.equal(isProgressEvent(undefined), false);
+});
+
+// The server always sends `deploying`. One that predates the field, or
+// a body trimmed by an intermediary, does not — and reading that as
+// "nothing is applying" licenses the page's only permitted emptiness
+// claim on an estate that may be busy creating something. The same
+// absent-vs-empty distinction `already_live` is given.
+test("knownEmpty will not call an estate empty without being told what is applying", () => {
+  assert.equal(knownEmpty([], [], "loaded", []), true);
+  assert.equal(knownEmpty([], [], "loaded", undefined), false, "asked, and not told");
+  assert.equal(knownEmpty([], [], "loaded"), false, "and an omitted argument is not an answer either");
+});
+
+// The summary and the empty-state panel are two derived claims about
+// the same thing, and knownEmpty exists so they cannot disagree.
+// Dropping the fifth argument re-entered it with the parameter
+// defaulting to true, so the summary said "Nothing is deployed." while
+// the panel beside it was correctly suppressed.
+// One VALUE, so there is no second argument a caller can forget. The
+// previous shape put the term on the predicate and not on its sibling
+// caller, and two emptiness claims contradicted each other on one
+// screen.
+test("estateSummary and knownEmpty agree about an unanswered deploying field", () => {
+  assert.equal(knownEmpty([], [], "loaded", undefined), false);
+  const summary = estateSummary([], [], "loaded", undefined);
+  assert.notEqual(summary, "Nothing is deployed.", "one screen, one answer");
+  // And it SAYS what is unknown rather than degrading to "0
+  // deployments", which is an emptiness claim with the caveat removed.
+  assert.match(summary, /did not report what is applying/);
+});
+
+// `already_live_unknown` is estate-GLOBAL: one undecodable record
+// anywhere sets it for every scenario. Leading with it put an
+// unactionable red line at the top of every Deploy confirmation until
+// somebody found the bad file — ahead of the unmodelled-cost warning,
+// whose own docstring says it invalidates the figures above it.
+test("the estate-wide caveat does not outrank the warnings about this scenario", () => {
+  const warnings = deployWarnings(
+    previewFixture({
+      already_live: [],
+      already_live_unknown: true,
+      internet_facing: true,
+      cost: { components: [], eur_per_hour: 0, unpriced: [], complete: false, modelled: false }
+    })
+  );
+
+  const caveat = warnings.findIndex((w) => w.startsWith(ESTATE_UNREADABLE));
+  const unmodelled = warnings.findIndex((w) => w.includes("not modelled here"));
+  assert.ok(caveat > -1, "it is still said");
+  assert.ok(unmodelled > -1);
+  assert.ok(caveat > unmodelled, "but after what invalidates the figures above it");
+  assert.equal(caveat, warnings.length - 1, "and last, being about the estate rather than this");
 });
