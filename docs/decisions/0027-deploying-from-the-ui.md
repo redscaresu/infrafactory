@@ -575,3 +575,33 @@ the apply returns, so reading the estate first leaves a window in which a deploy
 that finishes in between is in neither answer. For the listing that window produced
 `deployments: []` with `deploying: []`, from which the page concludes "Nothing is
 deployed." at the exact moment a scenario went live.
+
+
+## Amendment, 2026-09-04 (round thirteen): a report has to be silenceable
+
+The previous amendment separated a report from an outcome. It did not say what
+happens to the outcome once a report exists, and the answer turned out to be
+"nothing" — the entry survived because it held a report, and the stale success
+banner survived with it.
+
+`retireDeploy` drops the banner and keeps the reports. They are different claims
+with different lifetimes, and only now do they have different mechanisms.
+
+**And a report can be dismissed.** Nothing else can retire it: the deploy failed
+before registration, so there is no live record for `live reap` or the estate
+listing to clear. The operator reads the project id, removes the project by hand,
+and says so. Without that, the banner stays on every page for the session — and an
+alarm nobody can silence is one everybody learns to ignore, which loses the message
+just as thoroughly as deleting it did.
+
+### Only the deployer knows whether a name resolved
+
+`os.ErrNotExist` answers 404 but says nothing about WHEN. `LiveDeployer` resolves
+the scenario before it claims the lock and before anything touches the cloud, so it
+wraps `api.ErrNoSuchScenario` too, and the handler answers that with `writeRefusal`.
+A bare `os.ErrNotExist` — a state file or a workdir vanishing mid-apply — keeps the
+cautious treatment.
+
+Without the distinction, a mistyped scenario name pinned "it may have created
+resources that are still running" for the rest of the session, for a scenario that
+never existed.

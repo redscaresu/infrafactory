@@ -13,7 +13,7 @@
   import {
     beginDeploy,
     deploys,
-    forgetDeploy,
+    retireDeploy,
     finishDeploy,
     refuseDeploy,
     isConnected,
@@ -161,16 +161,16 @@
    * built rather than inferred from `ok` here.
    */
   function forgetReportlessDeploy(scenario: string) {
-    const entry = get(deploys)[scenario];
-    if (!entry || entry.running) return;
-    // `reports`, not just the LAST outcome. Judging by the last one and
-    // then deleting the whole entry undid the accumulation it was built
-    // for: fail, retry, succeed, navigate -- and the leaked project the
-    // first attempt reported is gone, because the second attempt's
-    // outcome says there is nothing to report.
-    if (entry.reports?.length) return;
-    if (entry.outcome?.mayHaveCreated) return;
-    forgetDeploy(scenario);
+    // `retireDeploy` splits the two things this used to conflate: the
+    // stale-able BANNER goes, the REPORTS stay.
+    //
+    // Judging by the last outcome and deleting the whole entry threw
+    // reports away on a successful retry. Returning early whenever an
+    // entry held a report then kept the stale banner too, so a
+    // failed-then-retried deploy showed "Deployed. It is listed on the
+    // Deployments page until its TTL expires." on every later visit for
+    // the rest of the session.
+    retireDeploy(scenario);
   }
 
   // Arriving drops a finished deploy that has nothing left to report.
@@ -236,34 +236,30 @@
   }
 
   /**
-   * named prefixes the scenario, because an apply takes minutes and an
-   * unattributed "deployed." is a claim about the wrong thing.
+   * attributed is the scenario prefix, applied at RENDER time.
    *
-   * Done here rather than in the template so that the ONE message that
-   * already names its own scenario -- the server's refusal -- can skip
-   * it. Two layers independently solving the same attribution problem
-   * rendered the name twice.
-   */
-  function named(scenario: string, outcome: { ok: boolean; mayHaveCreated: boolean; message: string }) {
-    return { ...outcome, message: `${scenario}: ${outcome.message}` };
-  }
-
-  /**
-   * namedUnlessSelfDescribing skips the prefix the server supplied.
+   * Not baked into the stored message. The layout renders reports under
+   * a scenario heading of their own, so a prefixed message printed the
+   * name twice; this slot has no heading, so it needs one. Deciding at
+   * render lets each place ask for what it needs from one string.
    *
-   * Anchored at the START rather than a bare `includes`. The one server
-   * message that names the scenario formats it as `"%s is already
-   * deploying…"`, so the name leads -- while a substring test anywhere
-   * in the prose lets a scenario called `json` match "invalid json
-   * body" and render unattributed, in a slot shared with every scenario
-   * the reader visits. That is the defect the prefix exists to prevent,
-   * reintroduced by the check meant to avoid doubling it.
+   * Skipped when the message already leads with the name. Anchored,
+   * because a bare `includes` lets a scenario named `json` match
+   * "invalid json body" and render unattributed -- the defect the
+   * prefix exists to prevent, reintroduced by the check meant to stop
+   * it doubling.
+   *
+   * Space OR colon. Only the space form is reachable today: this slot
+   * renders successes and refusals, and the one refusal that names a
+   * scenario formats it `"%s is already deploying"`. The colon arm is
+   * for the next message that leads with `"<scenario>: …"` -- a shape
+   * the deploy pipeline's own errors already use, and one that would
+   * otherwise render the name twice on the screen this slice exists to
+   * make trustworthy.
    */
-  function namedUnlessSelfDescribing(
-    scenario: string,
-    outcome: { ok: boolean; mayHaveCreated: boolean; message: string }
-  ) {
-    return outcome.message.startsWith(`${scenario} `) ? outcome : named(scenario, outcome);
+  function attributed(scenario: string, message: string): string {
+    if (message.startsWith(`${scenario} `) || message.startsWith(`${scenario}:`)) return message;
+    return `${scenario}: ${message}`;
   }
 
   async function loadDetail() {
@@ -286,8 +282,15 @@
       // connection rejected into nothing and left a blank screen with
       // no message, no retry, and no sign that anything had failed.
       if (!current(token)) return;
-      detail = null;
+      // `detail` is cleared only if there was nothing there. A save
+      // calls this to refresh, and nulling on a transient failure
+      // unmounted the whole `{#if detail}` block -- the title, the
+      // buttons, the "Saved" status and the textarea holding the
+      // reader's YAML -- after a PUT that had actually succeeded.
       detailError = err instanceof Error ? err.message : "Could not read this scenario";
+      if (!detail) return;
+      status = detailError;
+      detailError = "";
     }
   }
 
@@ -421,10 +424,7 @@
     beginDeploy(target);
 
     try {
-      finishDeploy(
-        target,
-        namedUnlessSelfDescribing(target, toDeployOutcome(await api.deployScenario(target)))
-      );
+      finishDeploy(target, toDeployOutcome(await api.deployScenario(target)));
     } catch (err) {
       const message = err instanceof Error ? err.message : "The deploy failed.";
 
@@ -469,12 +469,12 @@
         // the no---allow-deploy 404 do not. Keying the skip off the
         // whole refusal class prefixed none of them, so four of the five
         // rendered unattributed in a slot shared with every scenario.
-        refuseDeploy(target, namedUnlessSelfDescribing(target, { ok: false, mayHaveCreated: false, message }));
+        refuseDeploy(target, { ok: false, mayHaveCreated: false, message });
         return;
       }
       finishDeploy(
         target,
-        namedUnlessSelfDescribing(target, {
+        ({
           ok: false,
           mayHaveCreated: true,
           // Punctuated. Server error strings and `deploy failed: 502`
@@ -820,7 +820,7 @@
       class={`mt-3 text-sm ${deployOutcome.ok ? "text-emerald-800" : "font-semibold text-rose-800"}`}
       data-testid="deploy-outcome"
     >
-      {deployOutcome.message}
+      {attributed(detail.name, deployOutcome.message)}
     </p>
   {/if}
   {#if status}<p class="mt-3 text-sm text-slate-700">{status}</p>{/if}

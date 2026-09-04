@@ -90,6 +90,20 @@ type DeploymentDeployer interface {
 // never what was meant.
 var ErrDeployInProgress = errors.New("a deploy of this scenario is already running")
 
+// ErrNoSuchScenario means the name did not resolve, BEFORE anything ran.
+//
+// Distinct from a bare `os.ErrNotExist`, and the distinction is the
+// whole point. Both answer 404, but only this one can promise nothing
+// was created -- and that promise is what the client uses to decide
+// whether to keep a "may have created resources that are still running"
+// report pinned on screen.
+//
+// Without it, a typo'd scenario name pinned exactly that report for the
+// rest of the session, for a scenario that never existed: the handler
+// could not tell a name that failed to resolve before the apply from an
+// os.ErrNotExist surfacing out of one that had already begun.
+var ErrNoSuchScenario = errors.New("no such scenario")
+
 // DeploymentActor performs the destructive half of live management.
 //
 // Separate from DeploymentLister on purpose. Reading the estate is safe

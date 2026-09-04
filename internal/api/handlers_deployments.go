@@ -421,19 +421,32 @@ func deployHandler(state *serverState) http.HandlerFunc {
 				fmt.Sprintf("%s is already deploying; wait for it to finish or tear it down", req.Scenario))
 			return
 		}
+		if errors.Is(err, ErrNoSuchScenario) {
+			// A REFUSAL. The deployer resolves the name before it
+			// claims the lock and before anything touches the cloud, so
+			// this 404 can promise nothing was created -- and without
+			// that promise a typo'd scenario pinned a red "it may have
+			// created resources that are still running" on screen for
+			// the rest of the session.
+			writeRefusal(w, http.StatusNotFound, err.Error())
+			return
+		}
 		if errors.Is(err, os.ErrNotExist) {
 			// The caller named something that is not here. A client
 			// typo or a stale scenario list is not a server fault, and
 			// answering 500 teaches operators that 500 means nothing in
 			// particular. Matches the teardown handler.
 			//
-			// NOT a refusal, deliberately, even though it usually is
-			// one. This branch reads an error that `Deploy` RETURNED --
-			// it runs after the apply, and `DeploymentDeployer` is an
-			// interface, so an implementation whose post-apply error
-			// wraps os.ErrNotExist would answer 404 for a deploy that
-			// created a project. `started_nothing` is a claim about the
-			// cloud, and only the paths above can make it.
+			// NOT a refusal. A bare os.ErrNotExist says a file was
+			// missing, and says nothing about WHEN: a state file or a
+			// workdir vanishing mid-apply reaches here too, and
+			// `DeploymentDeployer` is an interface, so this branch
+			// cannot know. A deployer that means "the name did not
+			// resolve" says so with ErrNoSuchScenario, above.
+			//
+			// `started_nothing` is a claim about the cloud, and a
+			// wrong one leaves a created project reported as a request
+			// that never happened.
 			writeJSONError(w, http.StatusNotFound, err.Error())
 			return
 		}

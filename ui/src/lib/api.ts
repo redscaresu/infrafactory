@@ -104,8 +104,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (!res.ok) {
     const ctype = res.headers.get("content-type") || "";
     if (ctype.includes("application/json")) {
-      const payload = (await res.json()) as { error?: string };
-      throw new Error(payload.error || `request failed: ${res.status}`);
+      // `readJSON`, not `res.json()`. A truncated body -- a proxy
+      // giving up, a server killed mid-write -- throws a SyntaxError
+      // that escapes as the error message, so a page renders
+      // "Unexpected end of JSON input" where it means to render what
+      // went wrong. The deploy path was hardened for this and left the
+      // helper every other endpoint uses unguarded.
+      const payload = (await readJSON(res)) as { error?: string } | null;
+      throw new Error(payload?.error || `request failed: ${res.status}`);
     }
     const text = await res.text();
     throw new Error(text || `request failed: ${res.status}`);

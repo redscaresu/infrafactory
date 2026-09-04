@@ -299,3 +299,96 @@ test("a report outlives the entry's last outcome", async () => {
   forgetDeploy("web-app-paris");
   stop();
 });
+
+// Two things were conflated: the BANNER for how the last attempt ended,
+// which goes stale, and the REPORT that infrastructure may exist with no
+// record, which does not. Returning early whenever an entry held a
+// report kept both, so a failed-then-retried deploy showed "Deployed. It
+// is listed on the Deployments page until its TTL expires." on every
+// later visit for the rest of the session.
+test("retiring a deploy drops the stale banner and keeps the report", async () => {
+  const {
+    deploys,
+    useConnector,
+    watch,
+    beginDeploy,
+    finishDeploy,
+    retireDeploy,
+    dismissReport,
+    pendingReports
+  } = await import("../src/lib/deploy-store.js");
+
+  useConnector(() => () => {});
+  const stop = watch();
+
+  beginDeploy("retire-keeps-report");
+  finishDeploy("retire-keeps-report", {
+    ok: false,
+    mayHaveCreated: true,
+    message: "project 7c98d82e is live and could not be deleted"
+  });
+  beginDeploy("retire-keeps-report");
+  finishDeploy("retire-keeps-report", { ok: true, mayHaveCreated: false, message: "Deployed." });
+
+  retireDeploy("retire-keeps-report");
+
+  const entry = get(deploys)["retire-keeps-report"];
+  assert.equal(entry.outcome, null, "the stale success claim goes");
+  assert.deepEqual(entry.progress, []);
+  const mine = pendingReports(get(deploys)).filter((r) => r.scenario === "retire-keeps-report");
+  assert.equal(mine.length, 1, "the leak report stays");
+
+  dismissReport("retire-keeps-report", mine[0].index);
+  stop();
+});
+
+test("retiring a deploy with nothing to report removes it entirely", async () => {
+  const { deploys, useConnector, watch, beginDeploy, finishDeploy, retireDeploy } = await import(
+    "../src/lib/deploy-store.js"
+  );
+
+  useConnector(() => () => {});
+  const stop = watch();
+
+  beginDeploy("retire-clean");
+  finishDeploy("retire-clean", { ok: true, mayHaveCreated: false, message: "Deployed." });
+  retireDeploy("retire-clean");
+
+  assert.equal(get(deploys)["retire-clean"], undefined);
+  stop();
+});
+
+// An alarm nobody can silence is an alarm everybody learns to ignore.
+// Nothing else can retire this: the deploy failed before registration,
+// so there is no live record for a reaper or a listing to clear.
+test("a report can be dismissed once the operator has dealt with it", async () => {
+  const { deploys, useConnector, watch, beginDeploy, finishDeploy, dismissReport, pendingReports } =
+    await import("../src/lib/deploy-store.js");
+
+  useConnector(() => () => {});
+  const stop = watch();
+
+  for (const project of ["aaa", "bbb"]) {
+    beginDeploy("dismiss-two");
+    finishDeploy("dismiss-two", {
+      ok: false,
+      mayHaveCreated: true,
+      message: `project ${project} is live`
+    });
+  }
+
+  const mine = (all) => pendingReports(all).filter((r) => r.scenario === "dismiss-two");
+  const before = mine(get(deploys));
+  assert.equal(before.length, 2);
+
+  // Dismissing one names WHICH: two attempts can fail identically.
+  dismissReport("dismiss-two", before[0].index);
+
+  const after = mine(get(deploys));
+  assert.equal(after.length, 1);
+  assert.match(after[0].message, /bbb/, "the one that was dealt with is the one that went");
+
+  dismissReport("dismiss-two", after[0].index);
+  assert.equal(mine(get(deploys)).length, 0);
+  stop();
+});

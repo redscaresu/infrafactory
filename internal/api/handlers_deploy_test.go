@@ -494,3 +494,26 @@ func TestOnlyPreApplyRefusalsSayNothingWasStarted(t *testing.T) {
 		assert.False(t, present)
 	})
 }
+
+// A name that did not resolve is a REFUSAL, and the real deployer
+// resolves before it claims the lock or touches the cloud.
+//
+// Answering it as a plain 404 made the client keep a red "it may have
+// created resources that are still running — check the Deployments
+// page" pinned for the rest of the session, for a scenario that never
+// existed. The handler could not tell that from an os.ErrNotExist
+// surfacing out of an apply already under way, so the deployer says
+// which it means.
+func TestAnUnresolvedScenarioNameIsARefusal(t *testing.T) {
+	srv := deployServer(t, &fakeDeployer{
+		err: fmt.Errorf("no scenario named %q: %w: %w", "typo", ErrNoSuchScenario, os.ErrNotExist),
+	})
+
+	rec := postDeploy(t, srv, `{"scenario":"typo"}`)
+
+	require.Equal(t, http.StatusNotFound, rec.Code)
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &payload))
+	assert.Equal(t, true, payload["started_nothing"],
+		"resolution runs before the lock and before the cloud; nothing was created")
+}

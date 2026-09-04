@@ -215,6 +215,61 @@ export function refuseDeploy(scenario, outcome) {
 }
 
 /**
+ * retireDeploy drops a finished deploy but KEEPS what it has to report.
+ *
+ * Two things were being conflated. The banner describing how the last
+ * attempt ended is a claim that goes stale -- "Deployed. It is listed
+ * on the Deployments page until its TTL expires." is false once the TTL
+ * has passed. A report is a statement that infrastructure may exist
+ * with no record of it, and it stays until somebody says otherwise.
+ *
+ * Returning early whenever an entry held a report kept BOTH, so a
+ * failed-then-retried deploy pinned a stale success banner on every
+ * later visit for the rest of the session.
+ */
+export function retireDeploy(scenario) {
+  deploys.update((all) => {
+    const entry = all[scenario];
+    if (!entry || entry.running) return all;
+    if (!entry.reports?.length) {
+      const next = { ...all };
+      delete next[scenario];
+      return next;
+    }
+    return {
+      ...all,
+      [scenario]: { running: false, progress: [], dropped: 0, outcome: null, reports: entry.reports }
+    };
+  });
+  releaseSocket();
+}
+
+/**
+ * dismissReport drops one report, because an alarm nobody can silence
+ * is an alarm everybody learns to ignore.
+ *
+ * The operator reads the project id, removes the project by hand, and
+ * says so. Nothing else can: the deploy failed before registration, so
+ * there is no live record for a reaper or a listing to retire. Keeping
+ * it on screen for the rest of the session trains the reader past
+ * exactly the message this arc says must never be lost.
+ */
+export function dismissReport(scenario, index) {
+  deploys.update((all) => {
+    const entry = all[scenario];
+    if (!entry) return all;
+    const reports = (entry.reports ?? []).filter((_, i) => i !== index);
+    if (!reports.length && !entry.running && !entry.outcome) {
+      const next = { ...all };
+      delete next[scenario];
+      return next;
+    }
+    return { ...all, [scenario]: { ...entry, reports } };
+  });
+  releaseSocket();
+}
+
+/**
  * forget clears a finished deploy once the reader has left its page.
  *
  * Not used for a refusal any more. A refused deploy is now recorded as
@@ -265,7 +320,10 @@ export function pendingReports(all) {
   const out = [];
   for (const [scenario, entry] of Object.entries(all || {})) {
     if (scenario === "__connected") continue;
-    for (const message of entry?.reports ?? []) out.push({ scenario, message });
+    // The INDEX travels with the report, because dismissing one of
+    // several identical failures has to name which -- two attempts can
+    // fail the same way, and they leak two projects.
+    (entry?.reports ?? []).forEach((message, index) => out.push({ scenario, message, index }));
   }
   return out;
 }

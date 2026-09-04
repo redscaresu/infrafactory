@@ -2,6 +2,47 @@
 
 Last updated: 2026-09-04
 
+## 2026-09-04 — S163e-fixes (round thirteen): an alarm nobody can silence
+
+**12 findings, 8 accepted, 4 declined.** Two accepts are the previous two rounds'
+fixes — each correct about the thing it fixed and wrong about its neighbour.
+
+**The stale banner survived on the back of the report.** Round twelve made the
+forget rule read `reports`, so a successful retry could not erase what a failed
+attempt leaked — by returning early and keeping the whole entry, last outcome
+included. A failed-then-retried deploy therefore pinned "Deployed. It is listed on
+the Deployments page until its TTL expires." on every later visit for the session.
+`retireDeploy` separates them: the banner goes, the reports stay.
+
+**Nothing could ever clear a report.** `forgetDeploy` was unreachable for any entry
+holding one and there was no dismiss control, so an operator who removed the leaked
+project by hand still saw the same red banner on every page for the rest of the
+session. An alarm that cannot be acknowledged trains readers past exactly the
+message this arc says must never be lost. There is a button now, and it names which
+report — two attempts can fail identically.
+
+**A typo pinned a leak report for a scenario that never existed.** Round eleven made
+the post-`Deploy` `os.ErrNotExist` branch deliberately not a refusal, reasoning that
+an implementation could surface it after the apply. The real one resolves the name
+*before* claiming the lock, so every mistyped scenario answered a plain 404 and the
+client kept "it may have created resources that are still running" on screen.
+`ErrNoSuchScenario` says which is meant; a bare `os.ErrNotExist` keeps the cautious
+treatment, because a state file vanishing mid-apply produces one too.
+
+Also: the `failed` arm of the in-flight banner still denied a row the reader can
+see (its twin was rewritten two rounds ago); `loadDetail`'s catch nulled `detail`,
+so a transient post-save reload failure unmounted the page including the textarea
+holding the reader's YAML; the layout printed the scenario name twice because
+attribution was baked into the stored message rather than applied at render; that
+render step now anchors on a following space or colon; and `request()` — every
+endpoint except deploy — still called `res.json()` unguarded.
+
+**Declined:** discarding the in-flight list on a `List()` failure (the client
+discards non-2xx bodies for that endpoint by design); an unreachable 405 branch; a
+nil-lister configuration the CLI cannot produce (`ui_command.go` sets `Deployments`
+unconditionally); and the full estate walk per preview click, declined in round ten
+and tracked in ADR-0027.
+
 ## 2026-09-04 — S163e-fixes (round twelve): the report survived the retry and died on the navigation
 
 **12 findings, 9 accepted, 3 declined.** Two accepts are round eleven's fixes undone

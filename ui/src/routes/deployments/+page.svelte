@@ -150,11 +150,16 @@
       <p class="font-semibold">{applyingLabel}.</p>
       <p class="mt-1">
         {#if estateState === "failed"}
-          {deploying.length === 1 ? "It had" : "They had"} no record yet, so {deploying.length === 1
-            ? "it does"
-            : "they do"} not appear below. Whether {deploying.length === 1 ? "it is" : "they are"}
-          still applying is unknown — the estate has not been readable since. Applying when last
-          read: {deploying.join(", ")}.
+          <!-- "no record of its own", like the loaded arm. Rows are
+               kept across a failed refresh on purpose, so the table can
+               still be showing an EARLIER deployment of this scenario
+               -- and "does not appear below" then denied a row the
+               reader could see. -->
+          {deploying.length === 1 ? "It had" : "They had"} no record of {deploying.length === 1
+            ? "its"
+            : "their"} own, so any row below with the same name is an earlier deployment. Whether
+          {deploying.length === 1 ? "it is" : "they are"} still applying is unknown — the estate has
+          not been readable since. Applying when last read: {deploying.join(", ")}.
         {:else}
           <!-- "has no record of its own" rather than "does not appear
                below". Redeploying is allowed, so the table can hold an

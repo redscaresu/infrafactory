@@ -405,7 +405,14 @@ func resolveScenarioByName(root, name string) (string, error) {
 		// a UI holding a stale scenario list, is not a 500 -- and
 		// reporting it as one teaches operators that 500 means nothing
 		// in particular.
-		return "", fmt.Errorf("no scenario named %q: %w", name, os.ErrNotExist)
+		//
+		// `api.ErrNoSuchScenario` as well as os.ErrNotExist: resolution
+		// runs before the lock is claimed and before anything touches
+		// the cloud, so this is the one 404 that can PROMISE nothing
+		// was created. A bare os.ErrNotExist cannot -- a state file
+		// vanishing mid-apply produces one too -- and the API layer
+		// answers the two differently.
+		return "", fmt.Errorf("no scenario named %q: %w: %w", name, api.ErrNoSuchScenario, os.ErrNotExist)
 	}
 	return found, nil
 }

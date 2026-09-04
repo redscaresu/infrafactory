@@ -1615,3 +1615,114 @@ test('a successful retry does not erase what the failed attempt leaked', async (
   await expect(page.locator('main h1')).toContainText('lb-serving-paris');
   await expect(page.getByTestId('pending-deploy-report')).toContainText('7c98d82e');
 });
+
+// The report has to be silenceable, and the banner it sits under has to
+// go stale. Keeping the whole entry alive because it held a report
+// pinned "Deployed. It is listed on the Deployments page until its TTL
+// expires." on every later visit for the rest of the session.
+test('a dealt-with report can be silenced, and the stale banner goes on its own', async ({
+  page
+}) => {
+  await page.route('**/api/deployments/preview**', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        scenario: 'web-app-paris',
+        deployable: true,
+        expires_at: null,
+        internet_facing: false,
+        deploy_allowed: true,
+        already_live: [],
+        already_live_unknown: false,
+        cost: { components: [], eur_per_hour: 0, unpriced: [], complete: true, modelled: true }
+      })
+    })
+  );
+
+  let attempt = 0;
+  await page.route('**/api/deployments', (route) => {
+    if (route.request().method() !== 'POST') return route.continue();
+    attempt += 1;
+    return attempt === 1
+      ? route.fulfill({
+          status: 409,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            clean: false,
+            steps: [],
+            failures: [{ detail: 'project 7c98d82e is live and could not be deleted' }]
+          })
+        })
+      : route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ clean: true, steps: [], failures: [] })
+        });
+  });
+
+  await page.goto('/scenarios/training/web-app-paris');
+  await page.getByTestId('scenario-deploy').click();
+  await page.getByTestId('deploy-confirm-go').click();
+  await expect(page.getByTestId('pending-deploy-report')).toContainText('7c98d82e');
+
+  await page.getByTestId('scenario-deploy').click();
+  await page.getByTestId('deploy-confirm-go').click();
+  await expect(page.getByTestId('deploy-outcome')).toContainText('Deployed. It is listed');
+
+  // Away and back: the success claim is about a TTL that may have
+  // passed, so it goes. The leak report is not a claim, so it stays.
+  await page.getByTestId('sidebar-scenario-training/lb-serving-paris').click();
+  await expect(page.locator('main h1')).toContainText('lb-serving-paris');
+  await page.getByTestId('sidebar-scenario-training/web-app-paris').click();
+  await expect(page.locator('main h1')).toContainText('web-app-paris');
+
+  await expect(page.getByTestId('deploy-outcome')).toHaveCount(0);
+  await expect(page.getByTestId('pending-deploy-report')).toContainText('7c98d82e');
+
+  // The operator removes the project by hand and says so.
+  await page.getByTestId('dismiss-deploy-report').click();
+  await expect(page.getByTestId('pending-deploy-report')).toHaveCount(0);
+});
+
+// The name appears once. The layout gives reports a heading of their
+// own, so a message that had been prefixed printed it twice.
+test('a report names its scenario once', async ({ page }) => {
+  await page.route('**/api/deployments/preview**', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        scenario: 'web-app-paris',
+        deployable: true,
+        expires_at: null,
+        internet_facing: false,
+        deploy_allowed: true,
+        already_live: [],
+        already_live_unknown: false,
+        cost: { components: [], eur_per_hour: 0, unpriced: [], complete: true, modelled: true }
+      })
+    })
+  );
+  await page.route('**/api/deployments', (route) =>
+    route.request().method() === 'POST'
+      ? route.fulfill({
+          status: 409,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            clean: false,
+            steps: [],
+            failures: [{ detail: 'project 7c98d82e is live' }]
+          })
+        })
+      : route.continue()
+  );
+
+  await page.goto('/scenarios/training/web-app-paris');
+  await page.getByTestId('scenario-deploy').click();
+  await page.getByTestId('deploy-confirm-go').click();
+
+  const report = page.getByTestId('pending-deploy-report');
+  await expect(report).toContainText('7c98d82e');
+  await expect(report).not.toContainText('web-app-paris: The deploy');
+});

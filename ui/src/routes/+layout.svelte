@@ -2,7 +2,7 @@
   import "../app.css";
   import { onMount } from "svelte";
   import { api } from "$lib/api";
-  import { deploys, pendingReports } from "$lib/deploy-store.js";
+  import { deploys, dismissReport, pendingReports } from "$lib/deploy-store.js";
   import type { ConfigResponse, ScenarioGroup, Scenario } from "$lib/types";
 
   type CloudGroup = { cloud: string; label: string; scenarios: Scenario[] };
@@ -125,13 +125,25 @@
          collides: Svelte throws in a dev build and silently collapses
          the pair in a production one, showing one leak where there are
          two. -->
-    {#each pendingReports($deploys) as report, i (`${i}:${report.scenario}:${report.message}`)}
+    {#each pendingReports($deploys) as report (`${report.scenario}:${report.index}`)}
       <div
         class="mb-4 rounded border border-rose-300 bg-rose-50 px-4 py-3 text-sm text-rose-900"
         data-testid="pending-deploy-report"
       >
         <p class="font-semibold">{report.scenario}</p>
         <p class="mt-1">{report.message}</p>
+        <!-- An alarm nobody can silence is an alarm everybody learns to
+             ignore. Nothing else can retire this: the deploy failed
+             before registration, so there is no live record for a
+             reaper or a listing to clear. The operator removes the
+             project by hand and says so. -->
+        <button
+          class="mt-2 rounded border border-rose-400 px-2 py-1 text-xs font-semibold text-rose-900 hover:bg-rose-100"
+          data-testid="dismiss-deploy-report"
+          on:click={() => dismissReport(report.scenario, report.index)}
+        >
+          I have dealt with this
+        </button>
       </div>
     {/each}
     <slot />
