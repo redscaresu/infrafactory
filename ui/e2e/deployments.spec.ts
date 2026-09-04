@@ -363,7 +363,34 @@ test.describe('Deployments estate page', () => {
     const banner = page.getByTestId('estate-deploying');
     await expect(banner).toContainText('1 deploy in progress');
     await expect(banner).toContainText('web-app-paris');
-    await expect(banner).toContainText('no record yet');
+    await expect(banner).toContainText('no record of its own yet');
+  });
+
+  // Redeploying is deliberately allowed, so the table can hold an
+  // EARLIER deployment of the scenario that is applying. The banner
+  // used to say it "does not appear below" -- an absence the reader
+  // could see was untrue, on the page whose whole thesis is never
+  // saying something false about the estate.
+  test('the in-flight banner does not deny a row the reader can see', async ({ page }) => {
+    await serveEstate(page, {
+      deployments: [
+        {
+          id: 'dep-old',
+          scenario: 'web-app-paris',
+          state: 'live',
+          project_id: 'p-1',
+          health: { status: 'healthy', version: 'confirmed' },
+          time_to_live_seconds: 3600
+        }
+      ],
+      unreadable: [],
+      deploying: ['web-app-paris']
+    });
+    await page.goto('/deployments');
+
+    const banner = page.getByTestId('estate-deploying');
+    await expect(banner).not.toContainText('does not appear below');
+    await expect(banner).toContainText('earlier deployment');
   });
 
   test('nothing deploying shows no banner', async ({ page }) => {

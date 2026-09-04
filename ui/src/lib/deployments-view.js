@@ -102,21 +102,6 @@ export function observedLabel(health) {
 }
 
 /**
- * knownEmpty is the ONLY condition under which anything on this page may
- * claim that nothing is running.
- *
- * Derived once and shared, because the page makes that claim in more
- * than one place -- a summary line and an empty-state panel -- and two
- * copies of the condition is how one of them keeps saying "no live
- * deployments" underneath a banner warning that unreadable records may
- * describe running, billable infrastructure.
- *
- * Three things must all hold: the read succeeded, it returned no
- * deployments, and there is nothing the store could not decode. An
- * undecodable record is not an absence of infrastructure; it is an
- * absence of knowledge.
- */
-/**
  * nothingRecorded is "the read returned no records, and none were
  * undecodable" -- and nothing more.
  *
@@ -135,6 +120,27 @@ export function nothingRecorded(deployments, unreadable) {
   return (deployments?.length || 0) === 0 && (unreadable?.length || 0) === 0;
 }
 
+/**
+ * knownEmpty is the ONLY condition under which anything on this page may
+ * claim that nothing is running.
+ *
+ * Derived once and shared, because the page makes that claim in more
+ * than one place -- a summary line and an empty-state panel -- and two
+ * copies of the condition is how one of them keeps saying "no live
+ * deployments" underneath a banner warning that unreadable records may
+ * describe running, billable infrastructure.
+ *
+ * FOUR things must all hold: the read succeeded, it returned no
+ * deployments, there is nothing the store could not decode, and nothing
+ * is applying. An undecodable record is not an absence of
+ * infrastructure; it is an absence of knowledge. An applying deploy is
+ * the most active thing in the estate and has no record at all.
+ *
+ * (This block was stranded above `nothingRecorded` when that was
+ * extracted between it and its function -- the same insertion defect it
+ * had just been moved to fix for `estateSummary`. Moved, and the count
+ * corrected from three, 2026-09-04.)
+ */
 export function knownEmpty(deployments, unreadable, state = "loaded", deploying = []) {
   return (
     state === "loaded" &&
@@ -351,7 +357,11 @@ export function teardownOutcome(result) {
 export function deployOutcome(result) {
   return actionOutcome(result, {
     nothing: "The deploy returned nothing, so what it created is unknown.",
-    proven: "Deployed.",
+    // The whole sentence, because the template renders `message` for
+    // both branches now. It used to hardcode its own success text and
+    // ignore this field, so an edit here changed nothing on screen
+    // while every unit test asserting on it kept passing.
+    proven: "Deployed. It is listed on the Deployments page until its TTL expires.",
     unproven:
       "The deploy did not finish cleanly — it may have created resources that are still running."
   });
@@ -371,6 +381,12 @@ export function deployOutcome(result) {
  * The per-stage failure details are appended because they are the
  * useful part: they name the project that could not be deleted, which
  * is the handle for removing it by hand.
+ *
+ * The absent-result branch is not reachable from either caller today:
+ * `api.deployScenario` and `api.tearDownDeployment` return only when
+ * `isActionResult` holds and throw otherwise. It stays because this
+ * judgement is the one place a green tick could appear over nothing at
+ * all, and the guarantee that prevents it lives in another module.
  */
 function actionOutcome(result, words) {
   if (!result) return { ok: false, message: words.nothing };
@@ -457,8 +473,8 @@ export function deployWarnings(preview) {
 
 
 /**
- * acceptProgressEvent decides whether a websocket event belongs to the
- * deploy a page is currently showing.
+ * isProgressEvent decides whether a websocket message is a deploy
+ * progress line at all.
  *
  * Extracted from the component so it can be tested. While it was inline
  * in `+page.svelte` it had NO test at all: the e2e tests intercept the
@@ -466,29 +482,14 @@ export function deployWarnings(preview) {
  * never invoked. Typo-ing the event type — which kills the entire
  * stream — passed the whole suite.
  *
- * The subject is the SCENARIO, which is what the request carries. It
- * cannot be the deployment id: that id is minted inside the command,
- * after the request is accepted. The per-scenario lock now rules out two
- * CONCURRENT deploys of one scenario, but sequential ones leave several
- * live deployments sharing a stream -- so a reader still cannot tell
- * which id they are watching, and that id is the argument to
- * `live teardown`.
- */
-export function acceptProgressEvent(event, showingScenario) {
-  if (!showingScenario) return false;
-  if (!isProgressEvent(event)) return false;
-  return event.data.subject === showingScenario;
-}
-
-/**
- * isProgressEvent is the SHAPE half of the question, without the
- * scoping half.
- *
- * The store looks the entry up by the event's own subject, so asking
- * `acceptProgressEvent(msg, msg.data.subject)` compared the subject
- * with itself -- a guard that reads as scoping while scoping nothing,
- * and which a later edit would trust. The real scoping there is the
- * keyed lookup and the running check.
+ * SHAPE only, deliberately. The subject is the SCENARIO, which is what
+ * the request carries -- it cannot be the deployment id, because that id
+ * is minted inside the command after the request is accepted -- and the
+ * store looks its entry up BY that subject. So the predicate that used
+ * to take a "scenario on screen" was being handed the event's own
+ * subject and comparing it with itself: a guard that read as scoping
+ * while scoping nothing, which a later edit would have trusted. The real
+ * scoping is the keyed lookup and the running check, in the store.
  */
 export function isProgressEvent(event) {
   if (event?.type !== "deploy_progress") return false;
@@ -539,7 +540,7 @@ export function alreadyLiveWarnings(preview) {
     warnings.push(
       live.length === 1
         ? `${ids} is already deployed from this scenario. Deploying again creates a SECOND project and a second bill; it does not replace it.${caveat}`
-        : `${live.length} deployments from this scenario are already live (${ids}). Deploying again adds another.${caveat}`
+        : `${live.length} deployments from this scenario are already live (${ids}). Deploying again creates a THIRD project and another bill; it does not replace them.${caveat}`
     );
   } else if (preview?.already_live_unknown) {
     warnings.push(

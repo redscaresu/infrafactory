@@ -152,8 +152,15 @@
           still applying is unknown — the estate has not been readable since. Applying when last
           read: {deploying.join(", ")}.
         {:else}
-          Applying now, so {deploying.length === 1 ? "it has" : "they have"} no record yet and
-          {deploying.length === 1 ? "does" : "do"} not appear below: {deploying.join(", ")}.
+          <!-- "has no record of its own" rather than "does not appear
+               below". Redeploying is allowed, so the table can hold an
+               EARLIER deployment of the same scenario -- and the old
+               wording then asserted an absence the reader could see was
+               untrue, on the one page whose whole thesis is never
+               saying something false about the estate. -->
+          Applying now, so {deploying.length === 1 ? "it has" : "they have"} no record of
+          {deploying.length === 1 ? "its" : "their"} own yet. Any row below with the same name is an
+          earlier deployment. Applying: {deploying.join(", ")}.
         {/if}
       </p>
     </div>

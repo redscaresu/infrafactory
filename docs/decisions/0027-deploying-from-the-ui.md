@@ -326,8 +326,9 @@ created and billed.
 
 **The server is the only thing that can say nothing started, so it is now the
 only thing that does.** `DeployError.startedNothing` is true for exactly the
-statuses `deployHandler` can produce *before* `Deploy` is called: 400, 404, 405,
-and 423. `500` is deliberately excluded — `writeActionResult` returns it for a
+statuses that can be produced *before* `Deploy` is called: 400, 404, 405 and 423
+from `deployHandler`, plus 403 from `guardCrossOriginRequests`, which wraps the
+whole mux and answers before any handler is entered. `500` is deliberately excluded — `writeActionResult` returns it for a
 deploy that ran and errored, which may have created resources.
 
 Everything else keeps the entry, keeps the log, and says the deploy may still be
@@ -471,6 +472,13 @@ the project id somebody has to remove by hand — and a deploy that fails before
 `registerDeployment` has no live record either, so that banner is the only place
 it is ever said. Dropping it because the reader looked away is how the leak goes
 unnoticed.
+
+The same rule applies on LEAVING, and that half took a second correction. "The
+reader saw it, so it can go" sounds reasonable until you read what the message
+tells them to do: *check the Deployments page before starting another*. The
+Deployments link is directly beneath the button, so following the instruction was
+what deleted the project id the instruction was about. One predicate,
+`forgetIfSucceeded`, at both ends — a failure survives until the tab does.
 
 ### What `already_deploying: false` does and does not mean
 

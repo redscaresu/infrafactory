@@ -2,7 +2,6 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  acceptProgressEvent,
   alreadyLiveWarnings,
   addressHref,
   deployConfirmation,
@@ -315,45 +314,30 @@ test("deployConfirmation admits when it does not know what will be created", () 
 // e2e tests intercept the POST in the browser, so the server never
 // broadcasts and the filter was never invoked. Typo-ing the event type,
 // which kills the entire stream, passed the whole suite.
-test("acceptProgressEvent takes only progress for the scenario on screen", () => {
-  const event = (subject, line = "tofu apply: running") => ({
+// Its only production caller is the store's socket handler, which is
+// what makes these worth having: the e2e tests intercept the POST in the
+// browser, so the server never broadcasts and this filter is never
+// exercised there. Typo-ing the event type kills the entire stream and
+// passes the whole Playwright suite.
+test("isProgressEvent takes deploy progress and nothing else", () => {
+  const event = (over = {}) => ({
     type: "deploy_progress",
-    data: { subject, line }
+    data: { subject: "web-app-paris", line: "apply: running", ...over }
   });
 
-  assert.equal(acceptProgressEvent(event("web-app-paris"), "web-app-paris"), true);
-  assert.equal(acceptProgressEvent(event("lb-serving-paris"), "web-app-paris"), false);
+  assert.equal(isProgressEvent(event()), true);
+  assert.equal(isProgressEvent({ ...event(), type: "log" }), false);
+  assert.equal(isProgressEvent({ ...event(), type: "deploy_progres" }), false, "a typo kills the stream");
 });
 
-test("acceptProgressEvent ignores every other event type", () => {
-  assert.equal(
-    acceptProgressEvent({ type: "log", data: { subject: "a", line: "x" } }, "a"),
-    false
-  );
-  // The typo that silently killed the stream and passed the suite.
-  assert.equal(
-    acceptProgressEvent({ type: "deploy-progress", data: { subject: "a", line: "x" } }, "a"),
-    false
-  );
+test("isProgressEvent ignores malformed events rather than rendering blanks", () => {
+  assert.equal(isProgressEvent({ type: "deploy_progress" }), false);
+  assert.equal(isProgressEvent({ type: "deploy_progress", data: { subject: "a" } }), false);
+  assert.equal(isProgressEvent({ type: "deploy_progress", data: { subject: "a", line: "" } }), false);
+  assert.equal(isProgressEvent(undefined), false);
+  assert.equal(isProgressEvent(null), false);
 });
 
-test("acceptProgressEvent ignores malformed events rather than rendering blanks", () => {
-  assert.equal(acceptProgressEvent(undefined, "a"), false);
-  assert.equal(acceptProgressEvent({ type: "deploy_progress" }, "a"), false);
-  assert.equal(acceptProgressEvent({ type: "deploy_progress", data: { subject: "a" } }, "a"), false);
-});
-
-// Nothing is on screen, so nothing belongs to it.
-test("acceptProgressEvent takes nothing when no deploy is being shown", () => {
-  assert.equal(
-    acceptProgressEvent({ type: "deploy_progress", data: { subject: "a", line: "x" } }, ""),
-    false
-  );
-});
-
-// The server computed already_live and NOTHING read it: the guard the
-// ADR described was documented, tested on the server, and absent from
-// the screen it was for.
 test("deployWarnings leads with an existing deployment of the same scenario", () => {
   const warnings = deployWarnings(
     previewFixture({ internet_facing: false, already_live: ["dep-existing"] })
@@ -371,6 +355,11 @@ test("deployWarnings counts several existing deployments", () => {
 
   assert.match(warnings[0], /2 deployments/);
   assert.match(warnings[0], /dep-a, dep-b/);
+  // The plural case is the MORE expensive one, and it used to be the
+  // only one that dropped the cost consequence -- the language
+  // disappeared exactly where it mattered most, invisibly, because this
+  // test asserted only the count and the ids.
+  assert.match(warnings[0], /another bill/);
 });
 
 test("alreadyLiveWarnings is silent when nothing is live", () => {
@@ -518,8 +507,18 @@ test("deployOutcome never describes a deploy as a teardown", () => {
 
 test("deployOutcome refuses to call an unproven deploy a success", () => {
   assert.equal(deployOutcome({ clean: false, failures: [] }).ok, false);
-  assert.equal(deployOutcome(null).ok, false);
   assert.equal(deployOutcome({ clean: true, failures: [] }).ok, true);
+});
+
+// `api.deployScenario` returns only when `isActionResult` holds, so a
+// null cannot reach here from the app today. This asserts the TYPE's
+// behaviour, not a path a screen renders -- an exported function whose
+// caller's guarantee is not local to it, and whose worst possible
+// answer would be a green tick over nothing at all.
+test("deployOutcome does not treat an absent result as a success", () => {
+  assert.equal(deployOutcome(null).ok, false);
+  assert.equal(deployOutcome(undefined).ok, false);
+  assert.equal(teardownOutcome(null).ok, false);
 });
 
 test("deployOutcome carries the per-stage failures, which name what leaked", () => {

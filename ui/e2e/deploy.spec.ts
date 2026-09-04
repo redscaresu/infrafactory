@@ -1069,7 +1069,7 @@ test('a refusal does not outlive the attempt that caused it', async ({ page }) =
   await page.getByTestId('deploy-confirm-go').click();
 
   const outcome = page.getByTestId('deploy-outcome');
-  await expect(outcome).toContainText('deployed. It is listed');
+  await expect(outcome).toContainText('Deployed. It is listed');
   await expect(outcome).not.toContainText('already deploying');
 });
 
@@ -1243,4 +1243,99 @@ test('a deploy that FAILS while you are away still reports when you return', asy
   await expect(outcome).toContainText('may have created resources that are still running');
   // The project id is the handle for removing it by hand.
   await expect(outcome).toContainText('7c98d82e');
+});
+
+// The failure message says "check the Deployments page before starting
+// another", and the Deployments link sits directly beneath the button.
+// Following that instruction used to DELETE the project id the
+// instruction was about: leaving forgot any finished deploy, and a
+// deploy that fails before registration has no live record either, so
+// nothing on the estate page replaced it.
+test('following the advice in a failure message does not destroy the failure message', async ({
+  page
+}) => {
+  await page.route('**/api/deployments/preview**', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        scenario: 'web-app-paris',
+        deployable: true,
+        expires_at: null,
+        internet_facing: false,
+        deploy_allowed: true,
+        already_live: [],
+        already_live_unknown: false,
+        cost: { components: [], eur_per_hour: 0, unpriced: [], complete: true, modelled: true }
+      })
+    })
+  );
+  await page.route('**/api/deployments', (route) =>
+    route.request().method() === 'POST'
+      ? route.fulfill({
+          status: 409,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            clean: false,
+            steps: [],
+            failures: [{ detail: 'project 7c98d82e is live and could not be deleted' }]
+          })
+        })
+      : route.continue()
+  );
+
+  await page.goto('/scenarios/training/web-app-paris');
+  await page.getByTestId('scenario-deploy').click();
+  await page.getByTestId('deploy-confirm-go').click();
+  await expect(page.getByTestId('deploy-outcome')).toContainText('7c98d82e');
+
+  // Leave the scenarios section entirely, exactly as the message says.
+  await page.getByTestId('sidebar-scenario-training/lb-serving-paris').click();
+  await expect(page.locator('main h1')).toContainText('lb-serving-paris');
+
+  await page.getByTestId('sidebar-scenario-training/web-app-paris').click();
+  await expect(page.locator('main h1')).toContainText('web-app-paris');
+  await expect(page.getByTestId('deploy-outcome')).toContainText('7c98d82e');
+});
+
+// A successful one still goes, because it is a claim about
+// infrastructure whose TTL may have expired rather than a report.
+test('a successful deploy banner does not follow you back', async ({ page }) => {
+  await page.route('**/api/deployments/preview**', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        scenario: 'web-app-paris',
+        deployable: true,
+        expires_at: null,
+        internet_facing: false,
+        deploy_allowed: true,
+        already_live: [],
+        already_live_unknown: false,
+        cost: { components: [], eur_per_hour: 0, unpriced: [], complete: true, modelled: true }
+      })
+    })
+  );
+  await page.route('**/api/deployments', (route) =>
+    route.request().method() === 'POST'
+      ? route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ clean: true, steps: [], failures: [] })
+        })
+      : route.continue()
+  );
+
+  await page.goto('/scenarios/training/web-app-paris');
+  await page.getByTestId('scenario-deploy').click();
+  await page.getByTestId('deploy-confirm-go').click();
+  await expect(page.getByTestId('deploy-outcome')).toContainText('Deployed. It is listed');
+
+  await page.getByTestId('sidebar-scenario-training/lb-serving-paris').click();
+  await expect(page.locator('main h1')).toContainText('lb-serving-paris');
+  await page.getByTestId('sidebar-scenario-training/web-app-paris').click();
+  await expect(page.locator('main h1')).toContainText('web-app-paris');
+
+  await expect(page.getByTestId('deploy-outcome')).toHaveCount(0);
 });

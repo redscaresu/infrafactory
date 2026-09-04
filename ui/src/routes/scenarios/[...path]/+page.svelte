@@ -45,6 +45,7 @@
   /** current reports whether a response still belongs to the page. */
   const current = (token: number) => token === navigation;
   let detail: any = null;
+  let detailError = "";
   let rawYAML = "";
   let status = "";
   let running = false;
@@ -121,18 +122,34 @@
   });
 
   /**
-   * forgetFinishedDeploy drops a completed deploy's banner on LEAVING.
+   * forgetFinishedDeploy drops a SUCCESSFUL deploy's banner on LEAVING.
    *
-   * Any ending, success or failure: the reader was on the page while it
-   * was displayed, so it has been read. Reads the store directly rather
-   * than the reactive `deployEntry`, whose freshness inside
-   * `afterNavigate` depends on `detail` not yet having been nulled --
-   * a coupling with no reason to exist.
+   * "The reader saw it, so it can go" was the rule, and it is wrong for
+   * a failure. The failure message says "check the Deployments page
+   * before starting another", and the Deployments link sits directly
+   * beneath the button -- so following the instruction was what deleted
+   * the project id the instruction was about. A deploy that fails
+   * before registration has no live record either, so nothing on the
+   * estate page replaces it.
+   *
+   * Same predicate as the arrival hook, deliberately: one rule about
+   * what may be forgotten, applied at both ends. A stale success is a
+   * false claim about infrastructure whose TTL may have expired; a
+   * failure is an unread report, and it survives until the tab does.
+   *
+   * Reads the store directly rather than the reactive `deployEntry`,
+   * whose freshness inside `afterNavigate` depends on `detail` not yet
+   * having been nulled -- a coupling with no reason to exist.
    */
   function forgetFinishedDeploy() {
     if (!detail?.name) return;
-    const entry = get(deploys)[detail.name];
-    if (entry && !entry.running) forgetDeploy(detail.name);
+    forgetIfSucceeded(detail.name);
+  }
+
+  /** forgetIfSucceeded is the one rule about what may be forgotten. */
+  function forgetIfSucceeded(scenario: string) {
+    const entry = get(deploys)[scenario];
+    if (entry && !entry.running && entry.outcome?.ok) forgetDeploy(scenario);
   }
 
   // Arriving drops a SUCCESS that finished while the reader was away.
@@ -158,8 +175,7 @@
   let arrivalHandled = -1;
   $: if (detail?.name && arrivalHandled !== navigation) {
     arrivalHandled = navigation;
-    const arriving = get(deploys)[detail.name];
-    if (arriving && !arriving.running && arriving.outcome?.ok) forgetDeploy(detail.name);
+    forgetIfSucceeded(detail.name);
   }
 
   $: scenarioPath = ($page.params.path || "").toString();
@@ -195,10 +211,23 @@
   async function loadDetail() {
     if (!scenarioPath) return;
     const token = navigation;
-    const loaded = await api.getScenario(scenarioPath);
-    if (!current(token)) return;
-    detail = loaded;
-    rawYAML = loaded.raw_yaml;
+    detailError = "";
+    try {
+      const loaded = await api.getScenario(scenarioPath);
+      if (!current(token)) return;
+      detail = loaded;
+      rawYAML = loaded.raw_yaml;
+    } catch (err) {
+      // Its two siblings, loadRunMode and loadLayer3Status, both catch
+      // and report. This one did not, and it is called unawaited from
+      // afterNavigate -- which has just set `detail = null`, and the
+      // whole page is inside `{#if detail}`. So a 500 or a dropped
+      // connection rejected into nothing and left a blank screen with
+      // no message, no retry, and no sign that anything had failed.
+      if (!current(token)) return;
+      detail = null;
+      detailError = err instanceof Error ? err.message : "Could not read this scenario";
+    }
   }
 
   async function loadRunMode() {
@@ -701,9 +730,7 @@
       class={`mt-3 text-sm ${deployOutcome.ok ? "text-emerald-800" : "font-semibold text-rose-800"}`}
       data-testid="deploy-outcome"
     >
-      {detail?.name}: {deployOutcome.ok
-        ? "deployed. It is listed on the Deployments page until its TTL expires."
-        : deployOutcome.message}
+      {detail?.name}: {deployOutcome.message}
     </p>
   {/if}
   {#if status}<p class="mt-3 text-sm text-slate-700">{status}</p>{/if}
@@ -725,4 +752,13 @@
       </ul>
     {/if}
   </div>
+{:else if detailError}
+  <!-- Without this the page was simply blank: `detail` is null both
+       while loading and after a failed load, and nothing distinguished
+       them. An empty screen reads as "there is nothing here", which is
+       the one thing it must not say when the truth is "we could not
+       find out". -->
+  <p class="text-sm font-semibold text-rose-800" data-testid="scenario-load-error">
+    This scenario could not be read: {detailError}
+  </p>
 {/if}

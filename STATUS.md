@@ -2,6 +2,44 @@
 
 Last updated: 2026-09-04
 
+## 2026-09-04 — S163e-fixes (round nine): following the advice deleted the advice
+
+**10 findings, 9 accepted.** The first is round eight's defect at the other end of
+the same rule, and this is the last round on substance — from here nits do not
+block convergence.
+
+**Leaving still deleted failure reports.** Round eight stopped *arriving* from
+doing it; leaving still did, on the reasoning that the reader had seen it. The
+message itself refutes that: it says "check the Deployments page before starting
+another", and the Deployments link sits directly beneath the button — so following
+the instruction deleted the project id the instruction was about. A deploy that
+fails before `registerDeployment` has no live record either. One predicate now,
+`forgetIfSucceeded`, at both ends: a stale success is a false claim, a failure is
+an unread report and survives until the tab does.
+
+**A claim the reader can see is untrue.** The in-flight banner said the applying
+scenario "does not appear below" — but redeploying is allowed, so the table can
+hold an earlier deployment of that same scenario, directly underneath.
+
+**Two sources for one sentence.** `deployOutcome` set `proven: "Deployed."` and the
+template hardcoded its own success text, so an edit to the builder changed nothing
+on screen while its unit tests kept passing.
+
+Also: ADR-0027 and STATUS enumerated `startedNothing` as "exactly 400, 404, 405,
+423" while the code also has 403 — and reconciling the other way would turn an
+origin-guard refusal back into "may still be running"; `knownEmpty`'s docstring was
+stranded by the previous round's extraction, the same defect that extraction had
+just fixed elsewhere, and still said "three things" after `deploying` made it four;
+`acceptProgressEvent` was dead with five tests covering it; the plural
+`already_live` warning dropped the cost language exactly where the cost was
+largest; `ActionResult.Clean` gaining `omitempty` would make the unprovable case
+lose its discriminator and discard the leaked project id, now pinned on the JSON;
+and `loadDetail` had no catch, leaving a blank page on a failed fetch.
+
+**Declined in part:** `actionOutcome`'s absent-result branch is unreachable from
+both callers. Kept — it is the one place a green tick could appear over nothing —
+but the tests no longer imply screen coverage they do not have.
+
 ## 2026-09-04 — S163e-fixes (round eight): the cleanup that swallowed the leak report
 
 **11 findings, all accepted.** The first is round seven's fix eating the message it
@@ -151,7 +189,8 @@ leaves the apply running and creating billable infrastructure — and the page
 deleted its progress log and told the reader it did not exist. Only the server
 can say nothing started, so now it does: `DeployError.startedNothing` is set
 for the statuses the handler can only produce *before* the apply begins (400,
-404, 405, 423). Everything else — including a 500 from a deploy that ran and
+404, 405, 423 — and 403, from the origin guard that wraps the whole mux).
+Everything else — including a 500 from a deploy that ran and
 failed — keeps the entry and says "may still be running; check the Deployments
 page". Both directions are mutation-checked: forgetting always fails the
 dropped-connection test, forgetting never fails the 423 test.

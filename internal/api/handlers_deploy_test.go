@@ -405,3 +405,31 @@ func TestTheLastLineOfAnApplyIsBroadcastBeforeTheResponse(t *testing.T) {
 	require.NoError(t, json.Unmarshal(<-client.send, &e))
 	assert.Equal(t, "  destroy: done", e.Data["line"])
 }
+
+// `clean` must always be on the wire, including when it is false.
+//
+// The browser uses that key as the DISCRIMINATOR between a result and
+// an error: a 409 carrying `clean` is a deploy that ran and could not
+// prove itself, and its per-stage failures name the project that has to
+// be removed by hand. `omitempty` on a bool is the natural instinct,
+// and adding it here would make exactly the unprovable case serialise
+// without the key -- so the client would classify the richest, most
+// urgent response as a bare error and discard the project id.
+//
+// Go tests unmarshal into ActionResult and would not notice; this
+// asserts the JSON.
+func TestAnUnprovenResultStillCarriesTheCleanFlag(t *testing.T) {
+	raw, err := json.Marshal(ActionResult{
+		Clean:    false,
+		Failures: []ActionStep{{Detail: "project 7c98d82e is live and could not be deleted"}},
+	})
+	require.NoError(t, err)
+
+	var wire map[string]any
+	require.NoError(t, json.Unmarshal(raw, &wire))
+
+	_, ok := wire["clean"]
+	assert.True(t, ok,
+		"the client reads `clean` to tell a result from an error; without it the failures are discarded")
+	assert.Equal(t, false, wire["clean"])
+}
