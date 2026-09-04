@@ -102,26 +102,6 @@ export function observedLabel(health) {
 }
 
 /**
- * estateSummary is the one line a person reads before the table.
- *
- * It states what was examined as well as what is wrong, for the same
- * reason `live reconcile` does: "0 needing attention" out of zero
- * deployments and out of forty read identically and mean opposite
- * things.
- *
- * `state` distinguishes the three situations that all produce an empty
- * list, and getting this wrong is the page's whole thesis violated in
- * the page itself:
- *
- *   - "loading"  -- we have not asked yet
- *   - "failed"   -- we asked and could not find out
- *   - "loaded"   -- we asked, and the answer is what you see
- *
- * Only the last may say "Nothing is deployed". An empty list under the
- * other two means WE DO NOT KNOW, and saying otherwise is exactly the
- * falsehood every other part of this page is built to avoid.
- */
-/**
  * knownEmpty is the ONLY condition under which anything on this page may
  * claim that nothing is running.
  *
@@ -174,6 +154,30 @@ export function deployingLabel(deploying, stale = false) {
   return stale ? `${count} when the estate was last read` : count;
 }
 
+/**
+ * estateSummary is the one line a person reads before the table.
+ *
+ * It states what was examined as well as what is wrong, for the same
+ * reason `live reconcile` does: "0 needing attention" out of zero
+ * deployments and out of forty read identically and mean opposite
+ * things.
+ *
+ * `state` distinguishes the three situations that all produce an empty
+ * list, and getting this wrong is the page's whole thesis violated in
+ * the page itself:
+ *
+ *   - "loading"  -- we have not asked yet
+ *   - "failed"   -- we asked and could not find out
+ *   - "loaded"   -- we asked, and the answer is what you see
+ *
+ * Only the last may say "Nothing is deployed". An empty list under the
+ * other two means WE DO NOT KNOW, and saying otherwise is exactly the
+ * falsehood every other part of this page is built to avoid.
+ *
+ * (This block sat above `knownEmpty` for two slices, because a second
+ * JSDoc comment was inserted between it and the function it describes.
+ * Moved 2026-09-03.)
+ */
 export function estateSummary(deployments, unreadable, state = "loaded", deploying = []) {
   const total = deployments?.length || 0;
   const unread = unreadable?.length || 0;
@@ -393,10 +397,10 @@ export function deployWarnings(preview) {
   const warnings = [];
   if (!preview) return warnings;
 
-  // First, because it is the one a reader is most likely to have simply
-  // forgotten -- and the only one whose cost is a whole second bill.
-  const alreadyLive = alreadyLiveWarning(preview);
-  if (alreadyLive) warnings.push(alreadyLive);
+  // First, because they are the ones a reader is most likely to have
+  // simply forgotten -- and the only ones whose cost is a whole second
+  // bill. Pushed individually so each renders as its own warning.
+  warnings.push(...alreadyLiveWarnings(preview));
 
   if (preview.cost && preview.cost.modelled === false) {
     warnings.push(
@@ -445,8 +449,7 @@ export function acceptProgressEvent(event, showingScenario) {
 
 
 /**
- * alreadyLiveWarning names deployments of this scenario that already
- * exist.
+ * alreadyLiveWarnings names what already exists, or might.
  *
  * The in-flight lock stops the accidental duplicate. It does nothing
  * about deploy → wait → deploy again, and a lock is the wrong tool for
@@ -458,55 +461,52 @@ export function acceptProgressEvent(event, showingScenario) {
  * read it -- the guard the ADR described was documented, tested on the
  * server, and absent from the screen it was for.
  */
-export function alreadyLiveWarning(preview) {
-  // Every warning this function can produce is ACCUMULATED, never
-  // chosen between. They answer different questions -- "one is applying
-  // right now", "some are already live", "we could not finish looking"
-  // -- and all three can be true at once.
+export function alreadyLiveWarnings(preview) {
+  // A LIST, one entry per fact, strongest first.
   //
-  // An earlier version returned early on `already_deploying`, which
-  // dropped the strongest and most actionable warning of the three
-  // ("dep-x is already deployed; deploying again creates a SECOND
-  // project and a second bill") exactly when the reader was most likely
-  // to be duplicating something. That is the same "must not DISCARD
-  // what was found" rule stated below, broken twelve lines above where
-  // it is written.
-  const parts = [];
-
-  // An applying deploy has no record, so the estate cannot see it. It is
-  // also the case where a reader is most likely duplicating, and the
-  // second attempt would simply be refused.
-  if (preview?.already_deploying) {
-    parts.push("This scenario is being deployed right now. A second deploy will be refused until it finishes.");
-  }
+  // They answer different questions -- "some are already live", "one is
+  // applying right now", "we could not finish looking" -- and all three
+  // can be true at once, so none may be dropped. Two earlier versions
+  // dropped one: the first returned early on `already_deploying`, and
+  // the fix then concatenated all three into a single paragraph, which
+  // demoted the strongest of them to the second sentence of the first
+  // warning. Separate strings let the page render them separately, and
+  // let the order mean something.
+  const warnings = [];
 
   const live = Array.isArray(preview?.already_live) ? preview.already_live : [];
 
   // "Could not look" is not "nothing is there", and this guard is about
-  // billable infrastructure.
-  //
-  // But it must not DISCARD what was found. The unreadable flag is
-  // estate-global -- one corrupt record anywhere sets it -- so returning
-  // early replaced the strongest, most actionable warning ("dep-x is
-  // already deployed") with the vaguest one, for every scenario, until
-  // somebody found the bad file.
+  // billable infrastructure. It must not DISCARD what was found either:
+  // the unreadable flag is estate-global -- one corrupt record anywhere
+  // sets it -- so it qualifies the concrete list rather than replacing
+  // it.
   const caveat = preview?.already_live_unknown
     ? " Some live records could not be read, so there may be more than this."
     : "";
 
-  if (live.length === 0) {
-    if (preview?.already_live_unknown) {
-      parts.push(
-        "The live estate could not be fully read, so whether this scenario is already deployed is unknown. Check the Deployments page before continuing."
-      );
-    }
-    return parts.join(" ");
+  // First: the only one whose cost is a whole second bill.
+  if (live.length > 0) {
+    const ids = live.join(", ");
+    warnings.push(
+      live.length === 1
+        ? `${ids} is already deployed from this scenario. Deploying again creates a SECOND project and a second bill; it does not replace it.${caveat}`
+        : `${live.length} deployments from this scenario are already live (${ids}). Deploying again adds another.${caveat}`
+    );
+  } else if (preview?.already_live_unknown) {
+    warnings.push(
+      "The live estate could not be fully read, so whether this scenario is already deployed is unknown. Check the Deployments page before continuing."
+    );
   }
-  const ids = live.join(", ");
-  parts.push(
-    live.length === 1
-      ? `${ids} is already deployed from this scenario. Deploying again creates a SECOND project and a second bill; it does not replace it.${caveat}`
-      : `${live.length} deployments from this scenario are already live (${ids}). Deploying again adds another.${caveat}`
-  );
-  return parts.join(" ");
+
+  // An applying deploy has no record, so the estate cannot see it. The
+  // second attempt would simply be refused, which is why this ranks
+  // below an existing deployment rather than above it.
+  if (preview?.already_deploying) {
+    warnings.push(
+      "This scenario is being deployed right now. A second deploy will be refused until it finishes."
+    );
+  }
+
+  return warnings;
 }

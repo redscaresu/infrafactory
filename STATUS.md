@@ -1,6 +1,57 @@
 # STATUS
 
-Last updated: 2026-09-03
+Last updated: 2026-09-04
+
+## 2026-09-04 — S163e-fixes (round seven): the guard that truncated the log
+
+**11 findings, 10 accepted.** One is a regression the previous round introduced,
+which is the whole argument for running the harness again.
+
+**The fix that broke the flush.** Round six made the store ignore progress for
+entries that are no longer running. Correct — and it silently truncated the log it
+was protecting. `progress.Close()` was deferred, so the buffered trailing line
+broadcasts *after* the response; the fetch resolves first, `running` flips false,
+and the new guard drops the line. The last line of a billable apply's log,
+discarded by the flush that exists to guarantee it is never discarded. Closed
+explicitly before the response now, `defer` kept for panics, `Close` idempotent.
+Pinned by a `ResponseWriter` that records what had been broadcast when the headers
+were written.
+
+**The window the running check cannot close.** The entry is created before the
+POST, so it is running — and collecting — for the whole round trip, and when the
+answer is a refusal the *reason* is that somebody else's apply of this scenario
+holds the lock. Those lines are theirs. `refuseDeploy` discards the log and keeps
+the entry, because the refusal still has to be reported somewhere scoped to the
+right page.
+
+**A banner that outlived every hook meant to drop it.** `onDestroy` and
+`afterNavigate` drop a deploy that had already finished when the reader left.
+Neither can drop one still running then that finished afterwards — so it lived
+forever, greeting every later visit with "deployed. It is listed on the Deployments
+page until its TTL expires." for infrastructure whose TTL may have gone. Arriving
+at a scenario now drops a finished deploy too.
+
+**Demoted one layer down.** Round six fixed `alreadyLiveWarning` dropping the
+second-bill warning — by concatenating all three into one paragraph, which demoted
+it to the second sentence of the first string. `deployWarnings` documents them as
+"separated so a page can render them differently", and a test reading `.first()`
+cannot tell the arrangements apart. It returns a list now, strongest first.
+
+Also: `InFlight`'s docstring still named the deleted reload consumer and still said
+the server had no lock; "the window closes rather than moving" was half true (the
+*finishing* window closes — a deploy that starts between the reads is still in
+neither answer, with bounded harm); the socket handler scans replaced by a keyed
+lookup, which makes the `__connected` sentinel unreachable rather than skipped; an
+unguarded `res.json()` threw `SyntaxError` past the `DeployError` classification;
+the JSDoc explaining `estateSummary` sat above `knownEmpty`; and the scenario
+fixture was copy-pasted into five preview tests, now one helper.
+
+**Declined:** an `already_deploying_unknown` flag. The only state where the server
+has not looked also sets `allowed: false`, so it would carry no information — and
+the case it is really about, an apply started by the CLI or another process, is
+invisible to the server rather than unknown to the check. What guards it is the
+run-owned project per deploy and the estate page; the limit is stated in three
+places.
 
 ## 2026-09-03 — S163e-fixes (round six): the corrections had their own defects
 

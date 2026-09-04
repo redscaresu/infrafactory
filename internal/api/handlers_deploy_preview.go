@@ -164,8 +164,14 @@ func deployPreviewHandler(state *serverState) http.HandlerFunc {
 		//
 		// Read in this order, anything that leaves the in-flight list
 		// after the first read has necessarily registered before the
-		// second, so it appears as `already_live` instead. The window
-		// closes rather than moving.
+		// second, so it appears as `already_live` instead.
+		//
+		// The FINISHING window closes. A deploy that STARTS between the
+		// two reads is still in neither answer, and no ordering fixes
+		// that -- but its harm is bounded in a way the other's is not:
+		// the reader's own deploy is then refused by the lock, so the
+		// worst outcome is an unwarned refusal rather than a second
+		// project and a second bill.
 		preview.AlreadyDeploying = slices.Contains(deployingScenarios(state), sc.Name)
 		preview.AlreadyLive, preview.AlreadyLiveUnknown = liveDeploymentsOf(state, sc.Name)
 		writeJSON(w, http.StatusOK, preview)

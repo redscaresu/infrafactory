@@ -52,9 +52,16 @@ function ensureSocket() {
   if (socket) return;
   socket = connect(
     (msg) => {
-      const current = get(deploys);
-      for (const scenario of Object.keys(current)) {
-        if (scenario === "__connected") continue;
+      // The event names its own subject, so this is a lookup rather
+      // than a scan. Asking every key "is this yours?" needed a skip for
+      // the `__connected` sentinel; a keyed read makes it unreachable
+      // by construction instead, because the sentinel is a boolean and
+      // has no `running`.
+      const scenario = msg?.data?.subject;
+      if (!scenario || !acceptProgressEvent(msg, scenario)) return;
+
+      deploys.update((all) => {
+        const entry = all[scenario];
         // Only a deploy this tab is still WATCHING absorbs lines.
         //
         // A finished entry stays until the reader navigates away, and
@@ -64,14 +71,9 @@ function ensureSocket() {
         // growing log of an apply it did not start underneath a
         // completed-outcome banner. That is the adoption this slice
         // removed, arriving through the door its own comments name.
-        if (!current[scenario]?.running) continue;
-        if (!acceptProgressEvent(msg, scenario)) continue;
-        deploys.update((all) => {
-          const entry = all[scenario];
-          if (!entry?.running) return all;
-          return { ...all, [scenario]: { ...entry, progress: [...entry.progress, msg.data.line] } };
-        });
-      }
+        if (!entry?.running) return all;
+        return { ...all, [scenario]: { ...entry, progress: [...entry.progress, msg.data.line] } };
+      });
     },
     (connected) => deploys.update((all) => ({ ...all, __connected: connected }))
   );
@@ -111,6 +113,30 @@ export function finishDeploy(scenario, outcome) {
     const entry = all[scenario];
     if (!entry) return all;
     return { ...all, [scenario]: { ...entry, running: false, outcome } };
+  });
+  releaseSocket();
+}
+
+/**
+ * refuseDeploy records an ending that never began, and DISCARDS the log.
+ *
+ * `running` is true from `beginDeploy` until the POST resolves, and for
+ * a deploy that is about to be REFUSED that flag is true and wrong: the
+ * refusal means somebody else holds the lock, so every line matching
+ * this scenario during the round trip belongs to their apply. Keeping
+ * them rendered another tab's live log underneath an "already
+ * deploying" banner -- the adoption this store exists to refuse,
+ * through the one window where the running check cannot help.
+ *
+ * The entry is kept rather than deleted, because the refusal itself has
+ * to be reported somewhere the reader will see it, and an outcome is
+ * keyed by scenario so it lands on the right page and only that page.
+ */
+export function refuseDeploy(scenario, outcome) {
+  deploys.update((all) => {
+    const entry = all[scenario];
+    if (!entry) return all;
+    return { ...all, [scenario]: { ...entry, running: false, progress: [], outcome } };
   });
   releaseSocket();
 }

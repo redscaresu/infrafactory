@@ -427,3 +427,42 @@ class; it is not built.
 "Teardown returned nothing." next to a Deploy button. Only the failure branch was
 affected, because the template overrides the success text — which is exactly why it
 went unnoticed, and exactly where a reader can least afford a confusing message.
+
+
+## Amendment, 2026-09-04 (round seven): the flush, and what the server cannot see
+
+### The last line is broadcast before the response
+
+The page stops accepting progress for a deploy the moment its request resolves — an
+entry that is no longer running must not absorb somebody else's stream. That makes
+the ordering between the sink's final flush and the HTTP response load-bearing: a
+line emitted after the response is a line the browser discards.
+
+`ProgressSink.Close` is therefore called explicitly before `writeActionResult`, and
+still deferred for panics. It is idempotent, so the two do not fight.
+
+### A refusal discards the log it collected
+
+The store entry is created before the POST so that progress can stream during the
+apply. For a deploy that is about to be REFUSED, that means it was running — and
+collecting — during the round trip, and the refusal's own reason is that another
+apply of the same scenario holds the lock. Those lines belong to that apply, and
+are dropped.
+
+### A finished deploy's banner belongs to the visit it finished in
+
+Dropping it on leaving is not enough: a deploy still running when the reader left
+finishes afterwards, and nothing was left to drop it. Arriving at a scenario drops
+a finished deploy too.
+
+### What `already_deploying: false` does and does not mean
+
+It means this server is not applying that scenario. It does not mean nobody is.
+The in-flight list is one process's memory, so an `infrafactory deploy` in a
+terminal, or an apply in flight when the server restarted, is absent from it — and
+no field this server sets can say otherwise, which is why there is no
+`already_deploying_unknown` to mirror `already_live_unknown`.
+
+The guard for that case is not in the preview. It is the run-owned project
+(ADR-0025), which contains a duplicate rather than merging it into an existing one,
+and the estate page, where both appear once recorded.

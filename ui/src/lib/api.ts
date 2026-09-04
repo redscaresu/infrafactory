@@ -81,6 +81,22 @@ function isActionResult(body: unknown): body is ActionResult {
   return typeof body === "object" && body !== null && "clean" in body;
 }
 
+/**
+ * readJSON returns null instead of throwing on an unparseable body.
+ *
+ * A body that will not parse is not an ActionResult and carries no
+ * error message, which is exactly what `null` says. Letting the
+ * SyntaxError escape instead discarded the status the caller had
+ * already used to decide whether anything had been started.
+ */
+async function readJSON(res: Response): Promise<unknown> {
+  try {
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
 function withFormat(path: string): string {
   const sep = path.includes("?") ? "&" : "?";
   return `${path}${sep}format=1`;
@@ -130,7 +146,13 @@ export const api = {
     // prove itself clean. A refusal carries an error and must NOT be
     // parsed as one -- the body decides, not the status.
     if (ctype.includes("application/json")) {
-      const body = await res.json();
+      // Parsed defensively. A truncated body -- a proxy giving up, a
+      // server killed mid-write -- makes `res.json()` throw a
+      // SyntaxError, which is not a DeployError, so the caller loses
+      // the startedNothing classification the STATUS had already
+      // settled and shows a JavaScript parser message on the screen
+      // this whole slice exists to make trustworthy.
+      const body = await readJSON(res);
       if ((res.ok || res.status === 409) && isActionResult(body)) return body;
       throw new DeployError(
         (body as { error?: string })?.error || `deploy failed: ${res.status}`,
@@ -154,7 +176,7 @@ export const api = {
     // parsing it as a result renders "resources may still be running"
     // over a request that never reached the store.
     if (ctype.includes("application/json")) {
-      const body = await res.json();
+      const body = await readJSON(res);
       if ((res.ok || res.status === 409) && isActionResult(body)) return body;
       throw new Error((body as { error?: string })?.error || `teardown failed: ${res.status}`);
     }

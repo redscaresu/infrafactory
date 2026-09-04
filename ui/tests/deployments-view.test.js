@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   acceptProgressEvent,
-  alreadyLiveWarning,
+  alreadyLiveWarnings,
   addressHref,
   deployConfirmation,
   deployWarnings,
@@ -371,14 +371,14 @@ test("deployWarnings counts several existing deployments", () => {
   assert.match(warnings[0], /dep-a, dep-b/);
 });
 
-test("alreadyLiveWarning is silent when nothing is live", () => {
-  assert.equal(alreadyLiveWarning({ already_live: [] }), "");
-  assert.equal(alreadyLiveWarning({}), "");
-  assert.equal(alreadyLiveWarning(undefined), "");
+test("alreadyLiveWarnings is silent when nothing is live", () => {
+  assert.deepEqual(alreadyLiveWarnings({ already_live: [] }), []);
+  assert.deepEqual(alreadyLiveWarnings({}), []);
+  assert.deepEqual(alreadyLiveWarnings(undefined), []);
 });
 
-test("alreadyLiveWarning says so when the estate could not be read", () => {
-  const warning = alreadyLiveWarning({ already_live: [], already_live_unknown: true });
+test("alreadyLiveWarnings says so when the estate could not be read", () => {
+  const [warning] = alreadyLiveWarnings({ already_live: [], already_live_unknown: true });
   assert.match(warning, /could not be fully read/);
   assert.match(warning, /unknown/);
 });
@@ -387,8 +387,8 @@ test("alreadyLiveWarning says so when the estate could not be read", () => {
 // sets it -- so returning early replaced the strongest, most actionable
 // warning with the vaguest one, for every scenario, until somebody found
 // the bad file.
-test("alreadyLiveWarning keeps the concrete list even when the estate is partly unreadable", () => {
-  const warning = alreadyLiveWarning({
+test("alreadyLiveWarnings keeps the concrete list even when the estate is partly unreadable", () => {
+  const [warning] = alreadyLiveWarnings({
     already_live: ["dep-existing"],
     already_live_unknown: true
   });
@@ -428,8 +428,8 @@ test("estateSummary counts deploys in progress", () => {
 
 // An applying deploy has no record, so the estate cannot see it — and it
 // is exactly the case where a reader is most likely duplicating.
-test("alreadyLiveWarning leads with a deploy that is applying right now", () => {
-  const warning = alreadyLiveWarning({ already_deploying: true, already_live: [] });
+test("alreadyLiveWarnings reports a deploy that is applying right now", () => {
+  const [warning] = alreadyLiveWarnings({ already_deploying: true, already_live: [] });
   assert.match(warning, /being deployed right now/);
   assert.match(warning, /will be refused/);
 });
@@ -439,26 +439,32 @@ test("alreadyLiveWarning leads with a deploy that is applying right now", () => 
 // "dep-x is already deployed; deploying again creates a SECOND project
 // and a second bill" -- exactly when the reader was most likely to be
 // duplicating something.
-test("alreadyLiveWarning keeps every warning rather than choosing between them", () => {
-  const warning = alreadyLiveWarning({
+// One warning per fact, and the STRONGEST first. Concatenating them
+// into a paragraph demoted the second-bill warning to the second
+// sentence of the first string -- the same demotion the early return
+// caused, one layer down, and invisible to a test reading `.first()`.
+test("alreadyLiveWarnings keeps every warning rather than choosing between them", () => {
+  const warnings = alreadyLiveWarnings({
     already_deploying: true,
     already_live: ["dep-existing"],
     already_live_unknown: true
   });
-  assert.match(warning, /being deployed right now/);
-  assert.match(warning, /dep-existing/);
-  assert.match(warning, /SECOND project/);
-  assert.match(warning, /could not be read/);
+  assert.equal(warnings.length, 2, "separate warnings, so a page can render them separately");
+  assert.match(warnings[0], /dep-existing/, "the second-bill warning leads");
+  assert.match(warnings[0], /SECOND project/);
+  assert.match(warnings[0], /could not be read/, "and carries its own caveat");
+  assert.match(warnings[1], /being deployed right now/);
 });
 
-test("alreadyLiveWarning still reports an unreadable estate while something is applying", () => {
-  const warning = alreadyLiveWarning({
+test("alreadyLiveWarnings still reports an unreadable estate while something is applying", () => {
+  const warnings = alreadyLiveWarnings({
     already_deploying: true,
     already_live: [],
     already_live_unknown: true
   });
-  assert.match(warning, /being deployed right now/);
-  assert.match(warning, /could not be fully read/);
+  assert.equal(warnings.length, 2);
+  assert.match(warnings[0], /could not be fully read/);
+  assert.match(warnings[1], /being deployed right now/);
 });
 
 // `deploying` is kept from the last successful poll precisely so it

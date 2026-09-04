@@ -1,6 +1,7 @@
 <script lang="ts">
   import { afterNavigate } from "$app/navigation";
   import { onDestroy, onMount } from "svelte";
+  import { get } from "svelte/store";
   import { page } from "$app/stores";
   import { api, DeployError } from "$lib/api";
   import { connectWS } from "$lib/ws";
@@ -14,6 +15,7 @@
     deploys,
     forgetDeploy,
     finishDeploy,
+    refuseDeploy,
     isConnected,
     isRunning,
     useConnector,
@@ -123,6 +125,26 @@
     if (detail?.name && deployEntry && !deployEntry.running) {
       forgetDeploy(detail.name);
     }
+  }
+
+  // A finished deploy's banner belongs to the visit it finished in.
+  //
+  // `onDestroy` and `afterNavigate` drop one that had ALREADY finished
+  // when the reader left. Neither can drop one that was still RUNNING
+  // then and finished afterwards -- and that entry lived forever,
+  // re-rendering "deployed. It is listed on the Deployments page until
+  // its TTL expires." on every later visit, for infrastructure whose
+  // TTL may long since have gone. Which is the defect those two hooks
+  // exist to prevent, reached by waiting a few seconds longer.
+  //
+  // So ARRIVING at a scenario drops a finished deploy too. Keyed on the
+  // navigation counter rather than on `detail`, because `loadDetail`
+  // also runs after a save, and a banner must not vanish mid-visit.
+  let arrivalHandled = -1;
+  $: if (detail?.name && arrivalHandled !== navigation) {
+    arrivalHandled = navigation;
+    const arriving = get(deploys)[detail.name];
+    if (arriving && !arriving.running) forgetDeploy(detail.name);
   }
 
   $: scenarioPath = ($page.params.path || "").toString();
@@ -325,11 +347,18 @@
       // `DeployError.startedNothing` is the server's own word that it
       // refused before anything ran.
       const startedNothing = err instanceof DeployError && err.startedNothing;
+      if (startedNothing) {
+        // The log goes with it. The entry was created before the POST,
+        // so it was running -- and therefore collecting -- for the whole
+        // round trip, while the reason for the refusal is that somebody
+        // else's apply of this scenario holds the lock. Those lines are
+        // theirs.
+        refuseDeploy(target, { ok: false, message });
+        return;
+      }
       finishDeploy(target, {
         ok: false,
-        message: startedNothing
-          ? message
-          : `${message} The deploy may still be running on the server — check the Deployments page before starting another.`
+        message: `${message} The deploy may still be running on the server — check the Deployments page before starting another.`
       });
     }
   }

@@ -62,15 +62,22 @@ type DeploymentDeployer interface {
 
 	// InFlight names the scenarios currently deploying.
 	//
-	// Reported so a page that has just been RELOADED can know what is
-	// running. Until this existed the only thing preventing a second
-	// deploy of one scenario was client-side state, which a refresh
-	// wipes -- and the server had no lock, so the second click went
-	// through and created a second run-owned project.
+	// An applying deploy has no record until registration, which runs
+	// after the apply returns -- so it is invisible to any listing of
+	// records, and an estate busy creating something would be described
+	// as empty. This is what the estate page renders instead, and what
+	// the preview warns on.
 	//
-	// The list is advisory to the UI and load-bearing nowhere: the
-	// refusal happens in Deploy, so a client that ignores this still
-	// cannot start two.
+	// The list is advisory and load-bearing nowhere: the refusal is the
+	// lock inside Deploy, so a client that ignores this cannot start
+	// two. It is also NOT a complete answer to "what is applying" -- it
+	// is one process's memory, so a CLI deploy, or an apply in flight
+	// when the server restarted, is absent from it.
+	//
+	// (This previously said it existed so a reloaded page could restore
+	// what it was showing, and that the server had no lock. The first
+	// consumer was deleted in S163e; the second was false as of S163c.
+	// Corrected 2026-09-03.)
 	InFlight() []string
 }
 

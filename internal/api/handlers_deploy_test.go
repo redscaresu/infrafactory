@@ -347,3 +347,61 @@ func TestTheListingReportsAnEmptyDeployingListRatherThanNull(t *testing.T) {
 		})
 	}
 }
+
+// responseTimingRecorder notes what had been broadcast by the time the
+// response headers were written.
+type responseTimingRecorder struct {
+	*httptest.ResponseRecorder
+	send            chan []byte
+	broadcastFirst  bool
+	wroteHeaderOnce bool
+}
+
+func (w *responseTimingRecorder) WriteHeader(code int) {
+	if !w.wroteHeaderOnce {
+		w.wroteHeaderOnce = true
+		w.broadcastFirst = len(w.send) > 0
+	}
+	w.ResponseRecorder.WriteHeader(code)
+}
+
+// The trailing partial line has to be flushed BEFORE the response, and
+// the ordering is a property of the client rather than of this handler.
+//
+// A page stops accepting progress for a deploy the moment its request
+// resolves -- an entry that is no longer running must not absorb
+// somebody else's stream. So a line emitted after the response is a line
+// the browser discards: the tail of a billable apply's log, dropped
+// silently, by the very flush that exists to guarantee it is not.
+//
+// A deferred Close alone put the flush after `writeActionResult`. It is
+// still deferred, for panics; it is also called explicitly, and Close is
+// idempotent so the two do not fight.
+func TestTheLastLineOfAnApplyIsBroadcastBeforeTheResponse(t *testing.T) {
+	hub := NewHub()
+	client := &Client{send: make(chan []byte, 256)}
+	hub.Register(client)
+
+	srv := NewServer(ServerConfig{
+		Config: config.Default(), Deployments: &fakeDeployments{}, Hub: hub,
+		Deployer: &fakeDeployer{
+			result: ActionResult{Clean: true},
+			// No trailing newline: this is the line only Close emits.
+			progressLines: "  destroy: done",
+		},
+	})
+
+	rec := &responseTimingRecorder{ResponseRecorder: httptest.NewRecorder(), send: client.send}
+	srv.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/deployments",
+		strings.NewReader(`{"scenario":"lb-serving-paris"}`)))
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	assert.True(t, rec.broadcastFirst,
+		"a line emitted after the response is one the page has already stopped accepting")
+
+	var e struct {
+		Data map[string]any `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(<-client.send, &e))
+	assert.Equal(t, "  destroy: done", e.Data["line"])
+}

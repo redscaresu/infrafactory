@@ -355,13 +355,24 @@ func deployHandler(state *serverState) http.HandlerFunc {
 		// reader has since navigated to says what it is about -- the
 		// rule S162c cost seven findings to learn.
 		progress := NewProgressSink(state.hub, "deploy_progress", req.Scenario)
-		// Deferred, so a panic inside Deploy still flushes the buffered
-		// trailing line. An earlier version called it explicitly to
-		// order it before a terminal broadcast; that broadcast is gone,
-		// and the panic guarantee is worth more than the ordering was.
+		// Deferred so a panic inside Deploy still flushes the buffered
+		// trailing line. Close is idempotent -- it resets the buffer --
+		// so the explicit call below does not make this one redundant;
+		// they cover different exits.
 		defer progress.Close()
 
 		result, err := state.deployer.Deploy(ctx, req.Scenario, req.TTL, progress)
+
+		// Flushed BEFORE the response, and the ordering is load-bearing
+		// again -- for a different reason than the one that was removed.
+		//
+		// The page stops accepting progress for a deploy the moment its
+		// request resolves, because an entry that is no longer running
+		// must not absorb somebody else's stream. So a line emitted
+		// after the response is a line the browser discards: the tail of
+		// a billable apply's log, dropped silently, by the flush that
+		// exists to guarantee it is never dropped.
+		progress.Close()
 
 		if errors.Is(err, ErrDeployInProgress) {
 			// 423 Locked, NOT 409.

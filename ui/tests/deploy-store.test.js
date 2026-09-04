@@ -121,3 +121,61 @@ test("a finished deploy stops absorbing progress for its scenario", async () => 
   forgetDeploy("web-app-paris");
   stop();
 });
+
+// The window the `running` check cannot close on its own.
+//
+// The entry is created BEFORE the POST, so it is running -- and
+// collecting -- for the whole round trip. When the answer is a refusal,
+// the reason is that somebody else's apply of this scenario holds the
+// lock, which makes every line collected in that window theirs. Keeping
+// them rendered another tab's live log underneath an "already deploying"
+// banner.
+test("a refused deploy discards the lines it collected while waiting", async () => {
+  const { deploys, useConnector, watch, beginDeploy, refuseDeploy, forgetDeploy } = await import(
+    "../src/lib/deploy-store.js"
+  );
+
+  let onMessage;
+  useConnector((handler) => {
+    onMessage = handler;
+    return () => {};
+  });
+
+  const stop = watch();
+  beginDeploy("web-app-paris");
+  onMessage({
+    type: "deploy_progress",
+    data: { subject: "web-app-paris", line: "apply: somebody else's run" }
+  });
+
+  refuseDeploy("web-app-paris", { ok: false, message: "already deploying" });
+
+  const entry = get(deploys)["web-app-paris"];
+  assert.deepEqual(entry.progress, [], "those lines were never ours");
+  assert.equal(entry.running, false);
+  assert.equal(entry.outcome.message, "already deploying", "the refusal still has to be reported");
+
+  forgetDeploy("web-app-paris");
+  stop();
+});
+
+// The sentinel is a boolean, not an entry. A keyed lookup makes it
+// unreachable by construction; the scan needed an explicit skip.
+test("the connection sentinel is never mistaken for a deploy", async () => {
+  const { deploys, useConnector, watch } = await import("../src/lib/deploy-store.js");
+
+  let onMessage;
+  let onConnected;
+  useConnector((handler, connected) => {
+    onMessage = handler;
+    onConnected = connected;
+    return () => {};
+  });
+
+  const stop = watch();
+  onConnected(true);
+  onMessage({ type: "deploy_progress", data: { subject: "__connected", line: "x" } });
+
+  assert.equal(get(deploys).__connected, true, "still a boolean, not an entry with a log");
+  stop();
+});

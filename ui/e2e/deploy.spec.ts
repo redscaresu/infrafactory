@@ -1010,13 +1010,15 @@ test('a scenario that is both live and applying warns about both', async ({ page
   await page.goto('/scenarios/training/web-app-paris');
   await page.getByTestId('scenario-deploy').click();
 
-  const warning = page.getByTestId('deploy-warning').first();
-  await expect(warning).toContainText('being deployed right now');
-  // The strongest and most actionable of the three, and the one the
-  // early return discarded exactly when the reader was most likely to
-  // be duplicating something.
-  await expect(warning).toContainText('dep-existing');
-  await expect(warning).toContainText('SECOND project');
+  // Separate warnings, so the page can render them separately -- and
+  // the strongest LEADS. The early return dropped it; concatenating the
+  // three into one paragraph then demoted it to the second sentence of
+  // the first, which a test reading `.first()` cannot tell apart.
+  const warnings = page.getByTestId('deploy-warning');
+  await expect(warnings.first()).toContainText('dep-existing');
+  await expect(warnings.first()).toContainText('SECOND project');
+  await expect(warnings.first()).not.toContainText('being deployed right now');
+  await expect(warnings.nth(1)).toContainText('being deployed right now');
 });
 
 // A refusal describes the attempt it came from. Left on screen, a retry
@@ -1124,4 +1126,61 @@ test('a refusal that arrives after a detour is still reported', async ({ page })
   release();
 
   await expect(page.getByTestId('deploy-outcome')).toContainText('already deploying');
+});
+
+
+// The two hooks that drop a finished banner run when the reader LEAVES.
+// Neither can drop a deploy that was still running then and finished
+// afterwards -- and that entry lived forever, greeting every later visit
+// with "deployed. It is listed on the Deployments page until its TTL
+// expires." for infrastructure whose TTL may have gone.
+test('a deploy that finishes after you leave does not greet you on your return', async ({
+  page
+}) => {
+  await page.route('**/api/deployments/preview**', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        scenario: 'web-app-paris',
+        deployable: true,
+        expires_at: null,
+        internet_facing: false,
+        deploy_allowed: true,
+        already_live: [],
+        already_live_unknown: false,
+        cost: { components: [], eur_per_hour: 0, unpriced: [], complete: true, modelled: true }
+      })
+    })
+  );
+
+  let release: () => void = () => {};
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await page.route('**/api/deployments', async (route) => {
+    if (route.request().method() !== 'POST') return route.continue();
+    await held;
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ clean: true, steps: [], failures: [] })
+    });
+  });
+
+  await page.goto('/scenarios/training/web-app-paris');
+  await page.getByTestId('scenario-deploy').click();
+  await page.getByTestId('deploy-confirm-go').click();
+  await expect(page.getByTestId('deploy-progress')).toBeVisible();
+
+  // Leave while it is STILL RUNNING, so neither leave-hook can drop it,
+  // and only then let it finish.
+  await page.getByTestId('sidebar-scenario-training/lb-serving-paris').click();
+  await expect(page.locator('main h1')).toContainText('lb-serving-paris');
+  release();
+
+  await page.getByTestId('sidebar-scenario-training/web-app-paris').click();
+  await expect(page.locator('main h1')).toContainText('web-app-paris');
+  await expect(page.getByTestId('deploy-outcome')).toHaveCount(0);
+
+  // And the button works, rather than being stuck behind a ghost.
+  await expect(page.getByTestId('scenario-deploy')).toBeEnabled();
 });

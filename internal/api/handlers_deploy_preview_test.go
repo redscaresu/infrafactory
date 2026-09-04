@@ -337,29 +337,20 @@ func TestPreviewReportsNoExistingDeploymentsAsAnEmptyList(t *testing.T) {
 
 func previewWithEstate(t *testing.T, deployments []livestore.Deployment) deployPreview {
 	t.Helper()
-	dir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "sc.yaml"), []byte(`scenario: previewable
-version: "1.0"
-cloud: scaleway
-description: x
-resources:
-  compute:
-    purpose: web-server
-    size: small
-acceptance_criteria:
-  - type: destruction
-    expect: no_orphans
-`), 0o644))
+	return previewOf(t, ServerConfig{Deployments: &fakeDeployments{deployments: deployments}})
+}
 
-	cfg := config.Default()
-	cfg.Paths.Scenarios = dir
-	srv := NewServer(ServerConfig{
-		Config: cfg, Deployments: &fakeDeployments{deployments: deployments},
-	})
-
-	rec := httptest.NewRecorder()
-	srv.Handler.ServeHTTP(rec,
-		httptest.NewRequest(http.MethodGet, "/api/deployments/preview?scenario=previewable", nil))
+// previewOf writes the one scenario every preview test previews, serves
+// a GET for it, and returns the decoded body.
+//
+// `cfg.Config` and `cfg.Paths.Scenarios` are filled in here; everything
+// else -- the lister, the deployer -- is the caller's, which is the only
+// thing these tests actually vary. The scenario document had been
+// copy-pasted into five of them, so a schema change meant editing five
+// fixtures and CI reported five unrelated failures.
+func previewOf(t *testing.T, sc ServerConfig) deployPreview {
+	t.Helper()
+	rec := previewResponse(t, sc)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 
 	var got deployPreview
@@ -367,11 +358,10 @@ acceptance_criteria:
 	return got
 }
 
-// The unreadable branch is the whole reason AlreadyLiveUnknown exists,
-// and it had no server-side test: changing `len(unreadable) > 0` to
-// `false` restored the exact false negative its docstring calls out,
-// with the whole Go suite green.
-func TestPreviewSaysWhenTheEstateCouldNotBeFullyRead(t *testing.T) {
+// previewResponse is previewOf without the status assertion, for the
+// tests that are about the status.
+func previewResponse(t *testing.T, sc ServerConfig) *httptest.ResponseRecorder {
+	t.Helper()
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "sc.yaml"), []byte(`scenario: previewable
 version: "1.0"
@@ -388,50 +378,33 @@ acceptance_criteria:
 
 	cfg := config.Default()
 	cfg.Paths.Scenarios = dir
-	srv := NewServer(ServerConfig{
-		Config: cfg,
+	sc.Config = cfg
+
+	rec := httptest.NewRecorder()
+	NewServer(sc).Handler.ServeHTTP(rec,
+		httptest.NewRequest(http.MethodGet, "/api/deployments/preview?scenario=previewable", nil))
+	return rec
+}
+
+// The unreadable branch is the whole reason AlreadyLiveUnknown exists,
+// and it had no server-side test: changing `len(unreadable) > 0` to
+// `false` restored the exact false negative its docstring calls out,
+// with the whole Go suite green.
+func TestPreviewSaysWhenTheEstateCouldNotBeFullyRead(t *testing.T) {
+	got := previewOf(t, ServerConfig{
 		Deployments: &fakeDeployments{
 			unreadable: []error{errors.New("dep-broken.json: unexpected end of JSON input")},
 		},
 	})
 
-	rec := httptest.NewRecorder()
-	srv.Handler.ServeHTTP(rec,
-		httptest.NewRequest(http.MethodGet, "/api/deployments/preview?scenario=previewable", nil))
-	require.Equal(t, http.StatusOK, rec.Code)
-
-	var got deployPreview
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
 	assert.True(t, got.AlreadyLiveUnknown,
 		"an undecodable record could be a deployment of THIS scenario and would never match")
 }
 
 // A server with no lister never looked, so it must not claim it did.
 func TestPreviewWithNoListerDoesNotClaimNothingIsDeployed(t *testing.T) {
-	dir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "sc.yaml"), []byte(`scenario: previewable
-version: "1.0"
-cloud: scaleway
-description: x
-resources:
-  compute:
-    purpose: web-server
-    size: small
-acceptance_criteria:
-  - type: destruction
-    expect: no_orphans
-`), 0o644))
+	got := previewOf(t, ServerConfig{})
 
-	cfg := config.Default()
-	cfg.Paths.Scenarios = dir
-	srv := NewServer(ServerConfig{Config: cfg})
-
-	rec := httptest.NewRecorder()
-	srv.Handler.ServeHTTP(rec,
-		httptest.NewRequest(http.MethodGet, "/api/deployments/preview?scenario=previewable", nil))
-
-	var got deployPreview
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
 	assert.True(t, got.AlreadyLiveUnknown)
 	assert.Empty(t, got.AlreadyLive)
 }
@@ -440,43 +413,19 @@ acceptance_criteria:
 // the apply returns -- so the estate cannot see the one case where the
 // reader is most likely duplicating.
 func TestPreviewWarnsWhenTheScenarioIsApplyingRightNow(t *testing.T) {
-	dir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "sc.yaml"), []byte(`scenario: previewable
-version: "1.0"
-cloud: scaleway
-description: x
-resources:
-  compute:
-    purpose: web-server
-    size: small
-acceptance_criteria:
-  - type: destruction
-    expect: no_orphans
-`), 0o644))
-
-	cfg := config.Default()
-	cfg.Paths.Scenarios = dir
-
 	// The estate is NOT empty. An empty lister would make the
 	// `AlreadyLive` assertion below pass for the wrong reason -- there
 	// was nothing to find -- and it would keep passing with the
 	// in-flight warning removed entirely. A live record for a DIFFERENT
 	// scenario proves the lister was consulted and answered, and that
 	// the applying scenario is still absent from what it returned.
-	srv := NewServer(ServerConfig{
-		Config: cfg,
+	got := previewOf(t, ServerConfig{
 		Deployments: &fakeDeployments{deployments: []livestore.Deployment{
 			{ID: "dep-other", Scenario: "something-else", State: livestore.StateLive},
 		}},
 		Deployer: &fakeDeployer{inFlight: []string{"previewable"}},
 	})
 
-	rec := httptest.NewRecorder()
-	srv.Handler.ServeHTTP(rec,
-		httptest.NewRequest(http.MethodGet, "/api/deployments/preview?scenario=previewable", nil))
-
-	var got deployPreview
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
 	assert.True(t, got.AlreadyDeploying,
 		"the estate cannot see an apply in progress; the in-flight list is the only thing that can")
 	assert.False(t, got.AlreadyLiveUnknown, "the estate was read in full")
@@ -530,35 +479,13 @@ func (l *orderRecordingLister) List() ([]livestore.Deployment, []error, error) {
 // The other order has no such window: anything that leaves the
 // in-flight list after the first read has registered before the second.
 func TestThePreviewReadsWhatIsApplyingBeforeItReadsTheEstate(t *testing.T) {
-	dir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "sc.yaml"), []byte(`scenario: previewable
-version: "1.0"
-cloud: scaleway
-description: x
-resources:
-  compute:
-    purpose: web-server
-    size: small
-acceptance_criteria:
-  - type: destruction
-    expect: no_orphans
-`), 0o644))
-
 	inFlightRead := false
 	lister := &orderRecordingLister{inFlightRead: &inFlightRead}
 
-	cfg := config.Default()
-	cfg.Paths.Scenarios = dir
-	srv := NewServer(ServerConfig{
-		Config:      cfg,
+	previewOf(t, ServerConfig{
 		Deployments: lister,
 		Deployer:    &orderRecordingDeployer{read: &inFlightRead},
 	})
-
-	rec := httptest.NewRecorder()
-	srv.Handler.ServeHTTP(rec,
-		httptest.NewRequest(http.MethodGet, "/api/deployments/preview?scenario=previewable", nil))
-	require.Equal(t, http.StatusOK, rec.Code)
 
 	assert.True(t, lister.sawInFlightFirst,
 		"reading the estate first leaves a window where a deploy finishing in between "+
