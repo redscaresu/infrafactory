@@ -433,3 +433,64 @@ func TestAnUnprovenResultStillCarriesTheCleanFlag(t *testing.T) {
 		"the client reads `clean` to tell a result from an error; without it the failures are discarded")
 	assert.Equal(t, false, wire["clean"])
 }
+
+// Only a refusal may claim nothing was created, and only the paths that
+// run BEFORE the apply may call themselves refusals.
+//
+// The client used to decide this from the status code, which was a copy
+// of these semantics living in another language -- and it was already
+// wrong, because 404 is answered both here (no such scenario, before
+// the apply) and below (an os.ErrNotExist RETURNED by Deploy, after it).
+// Reading the second as "nothing started" discards the log of a live
+// apply and tells the reader nothing happened.
+func TestOnlyPreApplyRefusalsSayNothingWasStarted(t *testing.T) {
+	startedNothing := func(t *testing.T, body []byte) (bool, bool) {
+		t.Helper()
+		var payload map[string]any
+		require.NoError(t, json.Unmarshal(body, &payload))
+		v, present := payload["started_nothing"]
+		return v == true, present
+	}
+
+	t.Run("the lock refusal says so", func(t *testing.T) {
+		srv := deployServer(t, &fakeDeployer{err: ErrDeployInProgress})
+		rec := postDeploy(t, srv, `{"scenario":"web-app-paris"}`)
+
+		require.Equal(t, http.StatusLocked, rec.Code)
+		claimed, present := startedNothing(t, rec.Body.Bytes())
+		require.True(t, present, "the client cannot infer this and must not have to")
+		assert.True(t, claimed)
+	})
+
+	t.Run("a malformed request says so", func(t *testing.T) {
+		srv := deployServer(t, &fakeDeployer{})
+		rec := postDeploy(t, srv, `{`)
+
+		require.Equal(t, http.StatusBadRequest, rec.Code)
+		claimed, _ := startedNothing(t, rec.Body.Bytes())
+		assert.True(t, claimed)
+	})
+
+	t.Run("a not-found returned BY the deployer does not", func(t *testing.T) {
+		// This 404 is read off the error Deploy RETURNED, so it runs
+		// after the apply. An implementation whose post-apply error
+		// wraps os.ErrNotExist would answer 404 for a deploy that
+		// created a project.
+		srv := deployServer(t, &fakeDeployer{err: os.ErrNotExist})
+		rec := postDeploy(t, srv, `{"scenario":"web-app-paris"}`)
+
+		require.Equal(t, http.StatusNotFound, rec.Code)
+		_, present := startedNothing(t, rec.Body.Bytes())
+		assert.False(t, present,
+			"claiming nothing was created here would discard the record of one that was")
+	})
+
+	t.Run("a genuine failure does not", func(t *testing.T) {
+		srv := deployServer(t, &fakeDeployer{err: errors.New("the provider gave up")})
+		rec := postDeploy(t, srv, `{"scenario":"web-app-paris"}`)
+
+		require.Equal(t, http.StatusInternalServerError, rec.Code)
+		_, present := startedNothing(t, rec.Body.Bytes())
+		assert.False(t, present)
+	})
+}

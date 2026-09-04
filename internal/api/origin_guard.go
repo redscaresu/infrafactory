@@ -60,7 +60,12 @@ func guardCrossOriginRequests(next http.Handler) http.Handler {
 
 		// Deliberately says nothing about what the endpoint would have
 		// done, or whether it exists. The refusal is the whole message.
-		writeJSONError(w, http.StatusForbidden,
+		//
+		// `writeRefusal`, because this runs before any handler: nothing
+		// was created, and a deploy client that could not tell this from
+		// a lost connection would send the reader hunting for
+		// infrastructure that never existed.
+		writeRefusal(w, http.StatusForbidden,
 			"cross-origin request refused: this server is reachable only from a page served on loopback")
 	})
 }

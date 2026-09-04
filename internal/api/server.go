@@ -247,6 +247,28 @@ func writeJSONError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]string{"error": message})
 }
 
+// writeRefusal answers a request that was rejected BEFORE it could do
+// anything, and says so in the body.
+//
+// The client has to distinguish "the server refused, nothing was
+// created" from "we do not know what happened", because a deploy is
+// detached from the request that starts it: a dropped connection leaves
+// the apply running and billing. It used to make that distinction by
+// mirroring a list of status codes, which is a client-side copy of
+// server semantics -- the class this whole arc spent nine rounds
+// deleting -- and the copy was already WRONG: `deployHandler` answers
+// 404 both for "no such scenario" (before the apply) and for an
+// `os.ErrNotExist` returned by Deploy (after it), and the client called
+// both of them "nothing started".
+//
+// So the server says it, in the body, exactly as `clean` already
+// discriminates an ActionResult from an error. A response without the
+// field means unknown, which is the safe default for anything older or
+// anything in the way.
+func writeRefusal(w http.ResponseWriter, status int, message string) {
+	writeJSON(w, status, map[string]any{"error": message, "started_nothing": true})
+}
+
 func websocketNotConfiguredHandler(w http.ResponseWriter, _ *http.Request) {
 	writeJSONError(w, http.StatusNotImplemented, "websocket not configured")
 }

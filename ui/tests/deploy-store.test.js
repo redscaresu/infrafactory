@@ -179,3 +179,94 @@ test("the connection sentinel is never mistaken for a deploy", async () => {
   assert.equal(get(deploys).__connected, true, "still a boolean, not an entry with a log");
   stop();
 });
+
+// The reader's obvious next action after a failed deploy is to try
+// again — and that used to delete the project id the failure was about.
+// If the retry then succeeded, the banner became "Deployed." and the
+// next navigation dropped it, so a leaked project with no live record
+// was named nowhere at all.
+test("a retry does not delete the report of what the last attempt leaked", async () => {
+  const { deploys, useConnector, watch, beginDeploy, finishDeploy, forgetDeploy, pendingReports } =
+    await import("../src/lib/deploy-store.js");
+
+  useConnector(() => () => {});
+  const stop = watch();
+
+  beginDeploy("web-app-paris");
+  finishDeploy("web-app-paris", {
+    ok: false,
+    mayHaveCreated: true,
+    message: "web-app-paris: project 7c98d82e is live and could not be deleted"
+  });
+
+  beginDeploy("web-app-paris");
+  finishDeploy("web-app-paris", { ok: true, mayHaveCreated: false, message: "Deployed." });
+
+  const reports = pendingReports(get(deploys));
+  assert.equal(reports.length, 1, "the leak did not stop existing because the retry worked");
+  assert.match(reports[0].message, /7c98d82e/);
+  assert.equal(reports[0].scenario, "web-app-paris");
+
+  forgetDeploy("web-app-paris");
+  stop();
+});
+
+test("two failed attempts leak two projects and report both", async () => {
+  const { deploys, useConnector, watch, beginDeploy, finishDeploy, forgetDeploy, pendingReports } =
+    await import("../src/lib/deploy-store.js");
+
+  useConnector(() => () => {});
+  const stop = watch();
+
+  for (const project of ["aaa", "bbb"]) {
+    beginDeploy("web-app-paris");
+    finishDeploy("web-app-paris", {
+      ok: false,
+      mayHaveCreated: true,
+      message: `project ${project} is live and could not be deleted`
+    });
+  }
+
+  const messages = pendingReports(get(deploys)).map((r) => r.message);
+  assert.equal(messages.length, 2);
+  assert.match(messages[0], /aaa/);
+  assert.match(messages[1], /bbb/);
+
+  forgetDeploy("web-app-paris");
+  stop();
+});
+
+// A plain slice(-N) keeps the last thing that happened and loses the
+// first — and `deploy` writes the scenario, its ref, its TTL and its
+// workdir first, which is the only place those appear when the request
+// never returns an ActionResult.
+test("a long log keeps its opening and says how much it dropped", async () => {
+  const { deploys, useConnector, watch, beginDeploy, forgetDeploy, finishDeploy } = await import(
+    "../src/lib/deploy-store.js"
+  );
+
+  let onMessage;
+  useConnector((handler) => {
+    onMessage = handler;
+    return () => {};
+  });
+
+  const stop = watch();
+  beginDeploy("web-app-paris");
+  for (let i = 0; i < 3000; i += 1) {
+    onMessage({
+      type: "deploy_progress",
+      data: { subject: "web-app-paris", line: i === 0 ? "  workdir: /tmp/if-run-abc" : `line ${i}` }
+    });
+  }
+
+  const entry = get(deploys)["web-app-paris"];
+  assert.match(entry.progress[0], /workdir/, "the identifying half of the log survives");
+  assert.ok(entry.dropped > 0, "and the reader is told something is missing");
+  assert.ok(entry.progress.length <= 999, "while memory stays bounded");
+  assert.match(entry.progress.at(-1), /line 2999/, "the tail is still the last thing that happened");
+
+  finishDeploy("web-app-paris", { ok: true, mayHaveCreated: false, message: "Deployed." });
+  forgetDeploy("web-app-paris");
+  stop();
+});

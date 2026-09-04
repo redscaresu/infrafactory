@@ -149,7 +149,7 @@
     >
       <p class="font-semibold">{applyingLabel}.</p>
       <p class="mt-1">
-        {#if loadError}
+        {#if estateState === "failed"}
           {deploying.length === 1 ? "It had" : "They had"} no record yet, so {deploying.length === 1
             ? "it does"
             : "they do"} not appear below. Whether {deploying.length === 1 ? "it is" : "they are"}

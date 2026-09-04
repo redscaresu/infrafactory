@@ -44,6 +44,14 @@ let watchers = 0;
 // hard would lose the stage boundaries a reader navigates by.
 const MAX_PROGRESS_LINES = 999;
 
+// The opening lines are kept whatever else is dropped: `deploy` writes
+// the scenario, its ref, its TTL and its workdir first, and they are the
+// only place those appear when the request never returns an
+// ActionResult -- a dropped connection mid-apply leaves the generic
+// "may still be running" message and nothing else. Truncating from the
+// front discarded exactly the identifying half of the log.
+export const KEPT_OPENING_LINES = 20;
+
 // Injected rather than imported: `ws.ts` is TypeScript and the unit
 // tests run under `node --test`, which resolves plain JS only.
 let connect = () => () => {};
@@ -78,18 +86,7 @@ function ensureSocket() {
         // completed-outcome banner. That is the adoption this slice
         // removed, arriving through the door its own comments name.
         if (!entry?.running) return all;
-        // Capped, like the Live Run page one file away. A real Scaleway
-        // apply emits thousands of lines over minutes, and every one of
-        // them copies the whole array, notifies the store and re-renders
-        // the whole `{#each}` -- so the log grows quadratically and the
-        // tab stalls during the apply it exists to make watchable.
-        //
-        // The tail is what a reader wants: the last thing that happened.
-        const progress = [...entry.progress, msg.data.line];
-        return {
-          ...all,
-          [scenario]: { ...entry, progress: progress.slice(-MAX_PROGRESS_LINES) }
-        };
+        return { ...all, [scenario]: appendProgress(entry, msg.data.line) };
       });
     },
     (connected) => deploys.update((all) => ({ ...all, __connected: connected }))
@@ -117,20 +114,76 @@ export function watch() {
   };
 }
 
+/**
+ * appendProgress adds one line, dropping from the MIDDLE when capped.
+ *
+ * Capped at all because a real Scaleway apply emits thousands of lines
+ * over minutes, and every one of them copies the whole array, notifies
+ * the store and re-renders the whole `{#each}` -- so an uncapped log
+ * grows quadratically and the tab stalls during the apply it exists to
+ * make watchable.
+ *
+ * One array, so a short log is exactly what arrived. When it grows past
+ * the cap what goes is the MIDDLE: the opening names the scenario, its
+ * ref, its TTL and its workdir, and the tail is the last thing that
+ * happened. A plain `slice(-N)` keeps only the second. `dropped` counts
+ * what went so the panel can say so, rather than presenting a truncated
+ * log as a whole one.
+ */
+function appendProgress(entry, line) {
+  const progress = [...entry.progress, line];
+  if (progress.length <= MAX_PROGRESS_LINES) return { ...entry, progress };
+  const keptTail = MAX_PROGRESS_LINES - KEPT_OPENING_LINES;
+  return {
+    ...entry,
+    progress: [...progress.slice(0, KEPT_OPENING_LINES), ...progress.slice(-keptTail)],
+    dropped: (entry.dropped || 0) + (progress.length - MAX_PROGRESS_LINES)
+  };
+}
+
 export function beginDeploy(scenario) {
   ensureSocket();
-  deploys.update((all) => ({
+  deploys.update((all) => {
+    // Reports SURVIVE a retry.
+    //
+    // Overwriting the entry deleted an unread "it may have created
+    // resources that are still running -- project 7c98d82e is live" the
+    // moment the reader did the obvious next thing and clicked Deploy
+    // again. If that retry then succeeded, the banner became
+    // "Deployed." and the next navigation dropped it, so a leaked
+    // project with no live record was named nowhere at all.
+    //
+    // They accumulate rather than replace, because two failed attempts
+    // leak two projects.
+    const reports = all[scenario]?.reports ?? [];
+    return {
+      ...all,
+      [scenario]: { running: true, progress: [], dropped: 0, outcome: null, reports }
+    };
+  });
+}
+
+/** recordOutcome ends a deploy, keeping anything it has to report. */
+function recordOutcome(all, scenario, outcome, keepProgress) {
+  const entry = all[scenario];
+  if (!entry) return all;
+  const reports = outcome?.mayHaveCreated
+    ? [...(entry.reports ?? []), outcome.message]
+    : (entry.reports ?? []);
+  return {
     ...all,
-    [scenario]: { running: true, progress: [], outcome: null }
-  }));
+    [scenario]: {
+      ...entry,
+      running: false,
+      outcome,
+      reports,
+      ...(keepProgress ? {} : { progress: [], dropped: 0 })
+    }
+  };
 }
 
 export function finishDeploy(scenario, outcome) {
-  deploys.update((all) => {
-    const entry = all[scenario];
-    if (!entry) return all;
-    return { ...all, [scenario]: { ...entry, running: false, outcome } };
-  });
+  deploys.update((all) => recordOutcome(all, scenario, outcome, true));
   releaseSocket();
 }
 
@@ -157,11 +210,7 @@ export function finishDeploy(scenario, outcome) {
  * keyed by scenario so it lands on the right page and only that page.
  */
 export function refuseDeploy(scenario, outcome) {
-  deploys.update((all) => {
-    const entry = all[scenario];
-    if (!entry) return all;
-    return { ...all, [scenario]: { ...entry, running: false, progress: [], outcome } };
-  });
+  deploys.update((all) => recordOutcome(all, scenario, outcome, false));
   releaseSocket();
 }
 
@@ -195,4 +244,28 @@ export function isRunning(all, scenario) {
 /** isConnected distinguishes "no output yet" from "we cannot see it". */
 export function isConnected(all) {
   return all?.__connected === true;
+}
+
+/**
+ * pendingReports lists every deploy report this tab is still holding.
+ *
+ * A report is an outcome that MAY DESCRIBE INFRASTRUCTURE nobody has a
+ * record of — "it may have created resources that are still running",
+ * carrying the project id somebody has to remove by hand. A deploy that
+ * fails before registration has no live record either, so this is the
+ * only place it is ever said.
+ *
+ * Exported so it can be rendered somewhere that outlives one scenario's
+ * page. It used to be visible only on the page it belonged to, which
+ * meant navigating away hid the one message the code says must not be
+ * lost — and briefly it was visible only when an UNRELATED scenario
+ * fetch happened to fail, which made it a matter of luck.
+ */
+export function pendingReports(all) {
+  const out = [];
+  for (const [scenario, entry] of Object.entries(all || {})) {
+    if (scenario === "__connected") continue;
+    for (const message of entry?.reports ?? []) out.push({ scenario, message });
+  }
+  return out;
 }

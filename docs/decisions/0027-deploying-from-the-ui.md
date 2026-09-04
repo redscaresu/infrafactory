@@ -522,3 +522,31 @@ The server makes an empty `already_live` a checked claim, returning `(out, true)
 on every path that did not look. Reading a missing field as `[]` discarded that at
 the client boundary — an older server, or a body trimmed by an intermediary, would
 render no warning at all, indistinguishable from "we looked and there is nothing".
+
+
+## Amendment, 2026-09-04 (round eleven): the server says whether anything started
+
+`started_nothing: true` in the response body, written by `writeRefusal` on the
+paths that reject a request before it can touch the cloud. The client reads that
+field; it no longer keeps a list of status codes.
+
+The list was not merely fragile, it was already wrong. `deployHandler` answers
+**404 in two places**: for a scenario that does not exist, before the apply, and
+for an `os.ErrNotExist` returned by `Deploy`, after it. `DeploymentDeployer` is an
+interface, so any implementation whose post-apply error wraps `os.ErrNotExist`
+produces the second — and a client reading the status called it "nothing started",
+discarding the progress log of a live apply and telling the reader nothing
+happened. The origin guard's 403 sat outside `deployHandler` entirely.
+
+Absence of the field means unknown, which is the safe direction: it sends a reader
+to check the Deployments page for infrastructure that may not exist, rather than
+telling them nothing happened while a project is being billed.
+
+### A report survives a retry
+
+The obvious next action after a failed deploy is to try again, and that overwrote
+the entry holding "project 7c98d82e is live and could not be deleted". If the retry
+succeeded, the banner became "Deployed." and the next navigation dropped it — a
+leaked project with no live record, named nowhere. Reports accumulate on the entry
+instead, because two failed attempts leak two projects, and they are rendered in
+the LAYOUT so following the message's own advice does not hide it.

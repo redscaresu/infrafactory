@@ -902,7 +902,10 @@ test('a refused deploy does not claim resources may be running', async ({ page }
       ? route.fulfill({
           status: 423,
           contentType: 'application/json',
-          body: JSON.stringify({ error: 'web-app-paris is already deploying; wait for it to finish or tear it down' })
+          body: JSON.stringify({
+            error: 'web-app-paris is already deploying; wait for it to finish or tear it down',
+            started_nothing: true
+          })
         })
       : route.continue()
   );
@@ -1062,7 +1065,8 @@ test('a refusal does not outlive the attempt that caused it', async ({ page }) =
           status: 423,
           contentType: 'application/json',
           body: JSON.stringify({
-            error: 'web-app-paris is already deploying; wait for it to finish or tear it down'
+            error: 'web-app-paris is already deploying; wait for it to finish or tear it down',
+            started_nothing: true
           })
         })
       : route.fulfill({
@@ -1381,7 +1385,8 @@ test('a refusal does not haunt the page after the reader gives up', async ({ pag
           status: 423,
           contentType: 'application/json',
           body: JSON.stringify({
-            error: 'web-app-paris is already deploying; wait for it to finish or tear it down'
+            error: 'web-app-paris is already deploying; wait for it to finish or tear it down',
+            started_nothing: true
           })
         })
       : route.continue()
@@ -1452,5 +1457,97 @@ test('a failed scenario load does not hide a leaked project', async ({ page }) =
   await page.getByTestId('sidebar-scenario-training/lb-serving-paris').click();
 
   await expect(page.getByTestId('scenario-load-error')).toContainText('disk went away');
-  await expect(page.getByTestId('deploy-outcome-orphaned')).toContainText('7c98d82e');
+  await expect(page.getByTestId('pending-deploy-report')).toContainText('7c98d82e');
+});
+
+// The report is rendered in the LAYOUT, so it does not depend on which
+// page the reader is on -- least of all on an unrelated fetch failing,
+// which is how it was briefly reachable.
+test('a leaked project stays named wherever the reader goes', async ({ page }) => {
+  await page.route('**/api/deployments/preview**', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        scenario: 'web-app-paris',
+        deployable: true,
+        expires_at: null,
+        internet_facing: false,
+        deploy_allowed: true,
+        already_live: [],
+        already_live_unknown: false,
+        cost: { components: [], eur_per_hour: 0, unpriced: [], complete: true, modelled: true }
+      })
+    })
+  );
+  await page.route('**/api/deployments', (route) =>
+    route.request().method() === 'POST'
+      ? route.fulfill({
+          status: 409,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            clean: false,
+            steps: [],
+            failures: [{ detail: 'project 7c98d82e is live and could not be deleted' }]
+          })
+        })
+      : route.continue()
+  );
+
+  await page.goto('/scenarios/training/web-app-paris');
+  await page.getByTestId('scenario-deploy').click();
+  await page.getByTestId('deploy-confirm-go').click();
+  await expect(page.getByTestId('pending-deploy-report')).toContainText('7c98d82e');
+
+  // Following the message's own advice.
+  await page.getByTestId('sidebar-scenario-training/lb-serving-paris').click();
+  await expect(page.locator('main h1')).toContainText('lb-serving-paris');
+  await expect(page.getByTestId('pending-deploy-report')).toContainText('7c98d82e');
+  await expect(page.getByTestId('pending-deploy-report')).toContainText('web-app-paris');
+});
+
+// Only the LOCK refusal names the scenario. "invalid json body",
+// "method not allowed", the origin guard's message and the
+// no---allow-deploy 404 do not — and the outcome slot is shared with
+// every scenario the reader visits, so an unattributed refusal there is
+// the attribution defect the prefix exists to prevent.
+test('a refusal the server did not attribute is attributed here', async ({ page }) => {
+  await page.route('**/api/deployments/preview**', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        scenario: 'web-app-paris',
+        deployable: true,
+        expires_at: null,
+        internet_facing: false,
+        deploy_allowed: true,
+        already_live: [],
+        already_live_unknown: false,
+        cost: { components: [], eur_per_hour: 0, unpriced: [], complete: true, modelled: true }
+      })
+    })
+  );
+  await page.route('**/api/deployments', (route) =>
+    route.request().method() === 'POST'
+      ? route.fulfill({
+          status: 403,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            error:
+              'cross-origin request refused: this server is reachable only from a page served on loopback',
+            started_nothing: true
+          })
+        })
+      : route.continue()
+  );
+
+  await page.goto('/scenarios/training/web-app-paris');
+  await page.getByTestId('scenario-deploy').click();
+  await page.getByTestId('deploy-confirm-go').click();
+
+  const outcome = page.getByTestId('deploy-outcome');
+  await expect(outcome).toContainText('web-app-paris: cross-origin request refused');
+  // And it is not a report of infrastructure: nothing was created.
+  await expect(page.getByTestId('pending-deploy-report')).toHaveCount(0);
 });

@@ -21,6 +21,7 @@
     useConnector,
     watch as watchDeploys
   } from "$lib/deploy-store.js";
+  import { KEPT_OPENING_LINES } from "$lib/deploy-store.js";
   import { modeSummary, normalizeRunOptions } from "$lib/scenario-run.js";
   import type { DeployPreview, ScenarioLayer3StatusResponse, ScenarioRunModeResponse } from "$lib/types";
 
@@ -239,6 +240,14 @@
     return { ...outcome, message: `${scenario}: ${outcome.message}` };
   }
 
+  /** namedUnlessSelfDescribing skips the prefix the server supplied. */
+  function namedUnlessSelfDescribing(
+    scenario: string,
+    outcome: { ok: boolean; mayHaveCreated: boolean; message: string }
+  ) {
+    return outcome.message.includes(scenario) ? outcome : named(scenario, outcome);
+  }
+
   async function loadDetail() {
     // Cleared BEFORE the guard. Returning early on an empty path left a
     // previous scenario's failure on screen for a page that was never
@@ -321,6 +330,7 @@
 
   $: deployEntry = detail?.name ? $deploys[detail.name] : undefined;
   $: deployProgress = deployEntry?.progress ?? [];
+  $: deployDropped = deployEntry?.dropped ?? 0;
   $: deploying = detail?.name ? isRunning($deploys, detail.name) : false;
   $: deployOutcome = deployEntry?.outcome ?? null;
   // A dropped socket and "nothing has happened yet" both produce an
@@ -431,11 +441,14 @@
         // round trip, while the reason for the refusal is that somebody
         // else's apply of this scenario holds the lock. Those lines are
         // theirs.
-        // NOT re-prefixed with the scenario. The server names it
-        // deliberately ("a bare refusal leaves a reader wondering which
-        // of their tabs is responsible"), and prefixing produced
-        // "web-app-paris: web-app-paris is already deploying".
-        refuseDeploy(target, { ok: false, mayHaveCreated: false, message });
+        // Attributed unless the server already did it. Only the lock
+        // refusal names the scenario ("a bare refusal leaves a reader
+        // wondering which of their tabs is responsible"); "invalid json
+        // body", "method not allowed", the origin guard's message and
+        // the no---allow-deploy 404 do not. Keying the skip off the
+        // whole refusal class prefixed none of them, so four of the five
+        // rendered unattributed in a slot shared with every scenario.
+        refuseDeploy(target, namedUnlessSelfDescribing(target, { ok: false, mayHaveCreated: false, message }));
         return;
       }
       finishDeploy(
@@ -758,7 +771,15 @@
       {:else if deployProgress.length === 0}
         <p class="text-slate-400">Starting…</p>
       {:else}
-        {#each deployProgress as line}
+        {#each deployProgress as line, i}
+          {#if i === KEPT_OPENING_LINES && deployDropped > 0}
+            <!-- A truncated log with no marker reads as a whole one,
+                 so its first visible line looks like the start of the
+                 apply when it is not. -->
+            <p class="text-amber-300" data-testid="deploy-progress-truncated">
+              … {deployDropped} lines omitted …
+            </p>
+          {/if}
           <p>{line}</p>
         {/each}
       {/if}
@@ -806,21 +827,4 @@
     This scenario could not be read: {detailError}
   </p>
 
-  <!-- Every kept report, not just this scenario's.
-
-       The outcome banner lives inside `{#if detail}`, so a transient
-       scenario-load failure hid it -- and the store only keeps outcomes
-       that MAY DESCRIBE INFRASTRUCTURE nobody has a record of, carrying
-       the project id somebody has to remove by hand. Losing those
-       because an unrelated GET returned 500 is the same
-       report-destroyed-by-a-cleanup defect, arriving through the fix
-       for a blank page.
-
-       Named individually, because without `detail` this page cannot
-       say which scenario it is. -->
-  {#each Object.entries($deploys).filter(([k, e]) => k !== "__connected" && e?.outcome?.mayHaveCreated) as [scenario, entry] (scenario)}
-    <p class="mt-3 text-sm font-semibold text-rose-800" data-testid="deploy-outcome-orphaned">
-      {entry.outcome.message}
-    </p>
-  {/each}
 {/if}

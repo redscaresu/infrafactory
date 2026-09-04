@@ -321,12 +321,12 @@ type deployRequest struct {
 func deployHandler(state *serverState) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if state.deployer == nil {
-			writeJSONError(w, http.StatusNotFound,
+			writeRefusal(w, http.StatusNotFound,
 				"this server was not started with --allow-deploy, so it cannot create deployments")
 			return
 		}
 		if r.Method != http.MethodPost {
-			writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+			writeRefusal(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
 
@@ -334,12 +334,12 @@ func deployHandler(state *serverState) http.HandlerFunc {
 		if r.Body != nil {
 			defer r.Body.Close()
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-				writeJSONError(w, http.StatusBadRequest, "invalid json body")
+				writeRefusal(w, http.StatusBadRequest, "invalid json body")
 				return
 			}
 		}
 		if strings.TrimSpace(req.Scenario) == "" {
-			writeJSONError(w, http.StatusBadRequest, "scenario is required")
+			writeRefusal(w, http.StatusBadRequest, "scenario is required")
 			return
 		}
 
@@ -405,7 +405,7 @@ func deployHandler(state *serverState) http.HandlerFunc {
 			//
 			// Naming the scenario matters: a bare refusal leaves a
 			// reader wondering which of their tabs is responsible.
-			writeJSONError(w, http.StatusLocked,
+			writeRefusal(w, http.StatusLocked,
 				fmt.Sprintf("%s is already deploying; wait for it to finish or tear it down", req.Scenario))
 			return
 		}
@@ -414,6 +414,14 @@ func deployHandler(state *serverState) http.HandlerFunc {
 			// typo or a stale scenario list is not a server fault, and
 			// answering 500 teaches operators that 500 means nothing in
 			// particular. Matches the teardown handler.
+			//
+			// NOT a refusal, deliberately, even though it usually is
+			// one. This branch reads an error that `Deploy` RETURNED --
+			// it runs after the apply, and `DeploymentDeployer` is an
+			// interface, so an implementation whose post-apply error
+			// wraps os.ErrNotExist would answer 404 for a deploy that
+			// created a project. `started_nothing` is a claim about the
+			// cloud, and only the paths above can make it.
 			writeJSONError(w, http.StatusNotFound, err.Error())
 			return
 		}

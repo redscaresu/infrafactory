@@ -2,6 +2,7 @@
   import "../app.css";
   import { onMount } from "svelte";
   import { api } from "$lib/api";
+  import { deploys, pendingReports } from "$lib/deploy-store.js";
   import type { ConfigResponse, ScenarioGroup, Scenario } from "$lib/types";
 
   type CloudGroup = { cloud: string; label: string; scenarios: Scenario[] };
@@ -106,6 +107,27 @@
     </div>
   </aside>
   <main class="p-6">
+    <!-- Here, not on the scenario page, because these OUTLIVE one
+         scenario.
+
+         A deploy report says "it may have created resources that are
+         still running" and carries the project id somebody has to
+         remove by hand; a deploy that fails before registration has no
+         live record either, so this is the only place it is ever said.
+         Rendered on the scenario page alone, it vanished the moment the
+         reader followed its own advice and went to the Deployments
+         page. For one round it was visible only when an UNRELATED
+         scenario fetch happened to fail, which made the one message the
+         code says must not be lost a matter of luck. -->
+    {#each pendingReports($deploys) as report (report.scenario + report.message)}
+      <div
+        class="mb-4 rounded border border-rose-300 bg-rose-50 px-4 py-3 text-sm text-rose-900"
+        data-testid="pending-deploy-report"
+      >
+        <p class="font-semibold">{report.scenario}</p>
+        <p class="mt-1">{report.message}</p>
+      </div>
+    {/each}
     <slot />
   </main>
 </div>

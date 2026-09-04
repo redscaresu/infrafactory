@@ -44,27 +44,24 @@ export class DeployError extends Error {
   }
 }
 
-// Statuses that can only be produced BEFORE the apply begins.
+// startedNothing reads the SERVER's word for it.
 //
-// 400/404/405/423 come from `deployHandler` before it calls `Deploy`;
-// 403 comes from `guardCrossOriginRequests`, which wraps the whole mux
-// and answers before any handler is entered at all.
+// `started_nothing: true` is written by `writeRefusal`, on the paths
+// that reject a request before it can touch the cloud. Absence means
+// unknown, which is the safe default: erring this way sends a reader to
+// check the Deployments page for infrastructure that was never created,
+// and erring the other way tells them nothing happened while a project
+// is being created and billed.
 //
-// 500 is deliberately absent: `writeActionResult` returns it for a
-// deploy that RAN and errored, which may have created resources.
-//
-// An ALLOWLIST rather than a denylist, and the asymmetry is the point.
-// Getting it wrong in this direction says "the deploy may still be
-// running" about a request that never touched the cloud -- a wasted
-// look at the Deployments page. Getting it wrong the other way says
-// "nothing happened" while a project is being created and billed. So a
-// status nobody has classified is treated as unknown.
-//
-// It is still a client mirroring one layer's semantics, and it degrades
-// silently when a new pre-flight status appears. The durable fix is a
-// discriminator in the response body; recorded in ADR-0027 and not done
-// here.
-const startedNothingStatuses = new Set([400, 403, 404, 405, 423]);
+// This replaced a client-side allowlist of status codes, which was a
+// copy of server semantics -- the class this arc spent nine rounds
+// deleting -- and the copy was already wrong: `deployHandler` answers
+// 404 both for "no such scenario", before the apply, and for an
+// os.ErrNotExist returned by Deploy, after it. The allowlist called
+// both of them "nothing started".
+function startedNothing(body: unknown): boolean {
+  return typeof body === "object" && body !== null && (body as { started_nothing?: unknown }).started_nothing === true;
+}
 
 // isActionResult decides whether a body is a result or an error.
 //
@@ -141,7 +138,6 @@ export const api = {
       body: JSON.stringify(ttl ? { scenario, ttl } : { scenario })
     });
     const ctype = res.headers.get("content-type") || "";
-    const startedNothing = startedNothingStatuses.has(res.status);
     // 409 carries an ActionResult from a deploy that RAN and could not
     // prove itself clean. A refusal carries an error and must NOT be
     // parsed as one -- the body decides, not the status.
@@ -156,10 +152,11 @@ export const api = {
       if ((res.ok || res.status === 409) && isActionResult(body)) return body;
       throw new DeployError(
         (body as { error?: string })?.error || `deploy failed: ${res.status}`,
-        startedNothing
+        startedNothing(body)
       );
     }
-    throw new DeployError((await res.text()) || `deploy failed: ${res.status}`, startedNothing);
+    // No JSON body at all, so no claim: unknown.
+    throw new DeployError((await res.text()) || `deploy failed: ${res.status}`, false);
   },
   // Not `request`, deliberately. A teardown that could not prove the
   // account clean answers 409 WITH a full ActionResult -- the per-stage

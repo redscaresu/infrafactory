@@ -2,6 +2,46 @@
 
 Last updated: 2026-09-04
 
+## 2026-09-04 — S163e-fixes (round eleven): the server says whether anything started
+
+**10 findings, 7 accepted, 3 declined.** One overturned a decline from round ten.
+
+**The reader's obvious next action deleted the leak report.** A failed deploy names
+the project that could not be deleted, and rounds nine and ten made that banner
+survive navigation because it is the only place a project with no live record is
+ever named. Then the reader clicks Deploy again: `beginDeploy` overwrote the entry,
+the retry succeeded, the banner became "Deployed.", and the next navigation dropped
+it. Reports are a list now, surviving `beginDeploy` and accumulating — two failed
+attempts leak two projects.
+
+**The status allowlist was already wrong.** Round ten declined the body
+discriminator because the harm needed a future edit. It did not: `deployHandler`
+answers 404 both for "no such scenario", before the apply, and for an
+`os.ErrNotExist` returned by `Deploy`, after it — and the client called both
+"nothing started", which discards the log of a running apply. `writeRefusal` writes
+`started_nothing: true` on the paths that reject before touching the cloud
+(including the origin guard, which is not `deployHandler`); the client reads the
+body and the allowlist is gone. Absence means unknown.
+
+**Reports were reachable by luck.** Round ten put cross-scenario reports in the
+`{:else if detailError}` branch, so visibility of an unread leak report depended on
+an unrelated GET failing. They render in the layout now — including for the reader
+who follows the message's advice to the Deployments page.
+
+Also: the 999-line cap kept the tail and dropped the head, which is where the
+workdir is named, with no marker — it drops from the middle now and says how many
+went; refusal attribution was skipped for the whole `startedNothing` class though
+only the lock refusal names the scenario; `types.ts` declared `already_live`
+required while the code treats an absent list as "we could not look"; and the
+in-flight banner's heading and body derived staleness two ways under a comment
+saying they had been unified.
+
+**Declined:** three derivations of one boolean inside ten lines of one function; an
+unreachable missing-entry branch; and copy-pasted rationale plus dated correction
+notes in comments, which are deliberate here — a false explanation is treated as a
+defect, so recording that one was found is how the next reader knows not to trust
+the old shape.
+
 ## 2026-09-04 — S163e-fixes (round ten): asking the wrong question about what to forget
 
 **13 findings, 9 accepted, 4 declined.** The declines are the point: convergence is

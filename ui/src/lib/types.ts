@@ -227,11 +227,17 @@ export interface DeployPreview {
   // Deployments of this scenario that are already running. The lock
   // stops the accidental duplicate; this is what warns about the
   // deliberate one.
-  already_live: string[];
+  // OPTIONAL, and the `?` is load-bearing. `alreadyLiveWarnings`
+  // treats an absent list as "we could not look" rather than as "there
+  // is nothing" -- an older server, or a body trimmed by an
+  // intermediary, must not be able to produce a silent all-clear on a
+  // guard about billable infrastructure. Declaring it required would
+  // make that branch provably dead and invite its deletion.
+  already_live?: string[];
   // Applying right now, which the estate cannot see: registration runs
   // after the apply returns.
   already_deploying: boolean;
   // True when the estate could not be fully read. An empty already_live
   // is a claim; this says when it cannot be made.
-  already_live_unknown: boolean;
+  already_live_unknown?: boolean;
 }
