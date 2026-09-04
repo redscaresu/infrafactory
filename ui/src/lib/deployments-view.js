@@ -190,8 +190,14 @@ export function knownEmpty(deployments, unreadable, state, deploying) {
  * before the error". An unqualified "1 deploy in progress" asserts as
  * present-tense fact something that may have finished a minute ago, and
  * keeps asserting it for as long as polling fails.
+ *
+ * So it has NO DEFAULT, for the reason `knownEmpty` gives two functions
+ * up: a default is a third way to forget, and defaulting to `false`
+ * would hand out the unqualified present-tense claim to any caller who
+ * omitted the argument -- the one outcome this parameter exists to make
+ * unreachable by omission.
  */
-export function deployingLabel(deploying, stale = false) {
+export function deployingLabel(deploying, stale) {
   const applying = deploying?.length || 0;
   if (applying === 0) return "";
   const count = `${applying} deploy${applying === 1 ? "" : "s"} in progress`;
@@ -255,7 +261,7 @@ export function estateSummary(deployments, unreadable, state, deploying) {
   if (knownEmpty(deployments, unreadable, state, deploying)) return "Nothing is deployed.";
 
   const described = describe(deployments, unreadable);
-  const applyingText = deployingLabel(deploying);
+  const applyingText = deployingLabel(deploying, false);
   // Not told is not "none". Falling through to `describe` alone
   // rendered a bare "0 deployments" -- a read-derived emptiness claim
   // with no hint that what is APPLYING was never reported, which is
@@ -360,23 +366,20 @@ export function teardownPrompt(deployment) {
  * running" is exactly the false green this project exists to avoid.
  */
 export function teardownOutcome(result) {
-  // `mayHaveCreated` is STRIPPED. The shared rule computes it, nothing
-  // on the estate page reads it, and a flag that exists only to be
-  // dropped is data with a note attached -- the next reader has to
-  // establish that an unprovable teardown really does report the same
-  // thing a deploy uses to file a permanent report, and that nothing
-  // acts on it.
+  // No `mayHaveCreated` here at all: it is set by the caller that has a
+  // use for it, not by the shared rule. It used to be computed for both
+  // verbs and destructured away again for this one -- a value produced
+  // only to be discarded, which the next reader has to prove dead
+  // before touching either caller.
   //
   // Giving teardown the report path is the right answer and is a slice
   // of its own: different verb, different store shape, different page.
-  // It is named as a follow-up in STATUS. Until then this produces only
-  // what it can keep.
-  const { mayHaveCreated: _unused, ...outcome } = actionOutcome(result, {
+  // Named as a follow-up in STATUS.
+  return actionOutcome(result, {
     nothing: "Teardown returned nothing.",
     proven: "Destroyed. The account is provably clean.",
     unproven: "Not provably clean — resources may still be running."
   });
-  return outcome;
 }
 
 /**
@@ -466,8 +469,12 @@ function actionOutcome(result, words) {
   //     the only kind that must not be forgotten.
   //
   // An absent result is the same case: nobody knows what it created.
-  if (!result) return { ok: false, mayHaveCreated: true, message: words.nothing };
-  if (result.clean) return { ok: true, mayHaveCreated: false, message: words.proven };
+  if (!result) {
+    return { ok: false, ...(words.recorded ? { mayHaveCreated: true } : {}), message: words.nothing };
+  }
+  if (result.clean) {
+    return { ok: true, ...(words.recorded ? { mayHaveCreated: false } : {}), message: words.proven };
+  }
 
   // A failure that WROTE A RECORD is not an unreported leak. `deploy`
   // registers from whatever the state shows, whether or not the apply
@@ -478,7 +485,11 @@ function actionOutcome(result, words) {
   const reasons = (result.failures || []).map((f) => f.detail).filter(Boolean);
   return {
     ok: false,
-    mayHaveCreated: recorded === "",
+    // Only when the caller asked for the distinction -- `words.recorded`
+    // is what says "this verb can tell a recorded failure from an
+    // unreported one". Teardown does not, so it gets no flag rather
+    // than one it drops.
+    ...(words.recorded ? { mayHaveCreated: recorded === "" } : {}),
     message: reasons.length > 0 ? `${base} ${reasons.join(" ")}` : base
   };
 }

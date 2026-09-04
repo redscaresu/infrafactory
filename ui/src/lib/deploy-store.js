@@ -29,10 +29,16 @@ import { isProgressEvent } from "./deployments-view.js";
  * is invisible until it finishes and writes its record. What the estate
  * page cannot do is be WRONG about a record that exists.
  *
- * What survives here is only what a tab genuinely knows because it did
- * it: the deploy it started, its log, and how it ended. That outlives
- * navigation between scenarios, which is the one case worth keeping,
- * because the reader is watching something they started moments ago.
+ * What survives here is one thing: the deploy this tab started, while
+ * it is still RUNNING, and its log. That outlives navigation between
+ * scenarios, which is the one case worth keeping — the reader is
+ * watching something they began moments ago.
+ *
+ * How a deploy ENDED does not live here. It used to, and every guard
+ * needed to keep a terminal outcome honest in a store that outlives the
+ * page produced a defect in a later review round. The ending is a
+ * transient fact of the visit it happened in and belongs to the page;
+ * anything that must not be lost is a `report`, below.
  */
 export const deploys = writable({});
 

@@ -497,13 +497,13 @@ test("estateSummary does not present a stale in-flight list as current", () => {
 });
 
 test("deployingLabel is silent when nothing is applying", () => {
-  assert.equal(deployingLabel([]), "");
+  assert.equal(deployingLabel([], false), "");
   assert.equal(deployingLabel(undefined, true), "");
 });
 
 test("deployingLabel says whether the count is current", () => {
-  assert.equal(deployingLabel(["a"]), "1 deploy in progress");
-  assert.equal(deployingLabel(["a", "b"]), "2 deploys in progress");
+  assert.equal(deployingLabel(["a"], false), "1 deploy in progress");
+  assert.equal(deployingLabel(["a", "b"], false), "2 deploys in progress");
   assert.equal(deployingLabel(["a"], true), "1 deploy in progress when the estate was last read");
 });
 

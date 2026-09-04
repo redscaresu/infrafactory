@@ -11,9 +11,9 @@ import {
 
 // The store is module-level and shared by every test in this file, so a
 // test that leaves an entry RUNNING keeps the socket open for the next
-// one. `endDeploy` deliberately refuses to drop a running deploy --
-// that is what makes a log survive navigation -- so teardown has to end
-// it first.
+// one. `endDeploy` drops the entry whatever its state, and `reports`
+// deliberately survive it, so teardown ends the deploy and then
+// dismisses what it filed -- the way an operator would.
 function cleanup(...scenarios) {
   for (const scenario of scenarios) {
     endForCleanup(scenario, { ok: true, mayHaveCreated: false, message: "cleanup" });
@@ -181,7 +181,11 @@ test("a refused deploy hands its borrowed lines back rather than filing them", a
 
   assert.deepEqual(ended.progress, ["apply: somebody else's run"]);
   assert.equal(get(deploys)["web-app-paris"], undefined);
-  assert.deepEqual(pendingReports(get(reports)), [], "a refusal started nothing, so nothing to report");
+  assert.deepEqual(
+    pendingReports(get(reports)).filter((r) => r.scenario === "web-app-paris"),
+    [],
+    "a refusal started nothing, so nothing to report"
+  );
 
   stop();
 });
@@ -213,7 +217,7 @@ test("the connection sentinel is never mistaken for a deploy", async () => {
 // next navigation dropped it, so a leaked project with no live record
 // was named nowhere at all.
 test("a retry does not delete the report of what the last attempt leaked", async () => {
-  const { deploys, useConnector, watch, beginDeploy, endDeploy, pendingReports, reports } = await import("../src/lib/deploy-store.js");
+  const { useConnector, watch, beginDeploy, endDeploy, pendingReports, reports } = await import("../src/lib/deploy-store.js");
 
   useConnector(() => () => {});
   const stop = watch();
@@ -238,7 +242,7 @@ test("a retry does not delete the report of what the last attempt leaked", async
 });
 
 test("two failed attempts leak two projects and report both", async () => {
-  const { deploys, useConnector, watch, beginDeploy, endDeploy, pendingReports, reports } = await import("../src/lib/deploy-store.js");
+  const { watch, useConnector, beginDeploy, endDeploy, pendingReports, reports } = await import("../src/lib/deploy-store.js");
 
   useConnector(() => () => {});
   const stop = watch();
@@ -352,10 +356,7 @@ test("retiring a deploy drops the stale banner and keeps the report", async () =
   beginDeploy("retire-keeps-report");
   endDeploy("retire-keeps-report", { ok: true, mayHaveCreated: false, message: "Deployed." });
 
-  // The action under test, not teardown.
-  endDeploy("retire-keeps-report");
-
-  assert.equal(get(deploys)["retire-keeps-report"], undefined, "the stale banner goes entirely");
+  assert.equal(get(deploys)["retire-keeps-report"], undefined, "the entry goes entirely");
   const mine = pendingReports(get(reports)).filter((r) => r.scenario === "retire-keeps-report");
   assert.equal(mine.length, 1, "the leak report stays");
 
@@ -373,7 +374,6 @@ test("retiring a deploy with nothing to report removes it entirely", async () =>
 
   beginDeploy("retire-clean");
   endDeploy("retire-clean", { ok: true, mayHaveCreated: false, message: "Deployed." });
-  endDeploy("retire-clean");
 
   assert.equal(get(deploys)["retire-clean"], undefined);
   stop();
@@ -383,7 +383,7 @@ test("retiring a deploy with nothing to report removes it entirely", async () =>
 // Nothing else can retire this: the deploy failed before registration,
 // so there is no live record for a reaper or a listing to clear.
 test("a report can be dismissed once the operator has dealt with it", async () => {
-  const { deploys, useConnector, watch, beginDeploy, endDeploy, dismissReport, pendingReports, reports } = await import("../src/lib/deploy-store.js");
+  const { beginDeploy, watch, useConnector, endDeploy, dismissReport, pendingReports, reports } = await import("../src/lib/deploy-store.js");
 
   useConnector(() => () => {});
   const stop = watch();
@@ -486,7 +486,7 @@ test("a closing socket cannot mark its replacement disconnected", async () => {
 // landing before a re-render deleted two different reports — the second
 // one a leak the operator had never read.
 test("dismissing names a report, not a position", async () => {
-  const { deploys, useConnector, watch, beginDeploy, endDeploy, dismissReport, pendingReports, reports } = await import("../src/lib/deploy-store.js");
+  const { beginDeploy, watch, useConnector, endDeploy, dismissReport, pendingReports, reports } = await import("../src/lib/deploy-store.js");
 
   useConnector(() => () => {});
   const stop = watch();

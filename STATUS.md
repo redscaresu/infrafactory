@@ -2,6 +2,39 @@
 
 Last updated: 2026-09-04
 
+## 2026-09-04 — S163e-fixes (round twenty-two): the deletion converged
+
+**12 findings, all accepted — and the shape changed.** Reviewing round twenty found
+**seven behaviour regressions**, two severe, all in the deploy lifecycle. Reviewing
+the deletion that replaced it found **one**: `ending` was cleared only on a route
+change, so a retry on the same page rendered the previous attempt's line for the
+whole apply — a green "Deployed." under a live streaming log, or a red leak pointer
+a reader would take as the state of the deploy currently running. Cleared when a new
+attempt starts, and mutation-checked.
+
+Everything else is what a deletion leaves behind, and that class does not
+regenerate: the store's docstring still claimed to keep "how it ended" and to
+outlive navigation; `ending`'s docstring named a function that does not clear it;
+the test `cleanup` helper claimed `endDeploy` refuses to drop a running deploy; two
+tests' "action under test" was a no-op on an entry already deleted; one asserted on
+the global report store rather than filtering; seven destructured a binding they
+never used; a comment had lost its subject in a copy; and `previewFor` carried two
+merged drafts of one explanation.
+
+**Two consistency fixes worth the name.** A 2xx teardown whose body could not be
+read was reported as a failure while the identical deploy case is treated as
+provably clean — both go through the same `writeActionResult`, which answers 2xx
+only for a clean result, so a truncated 200 put a red "resources may still be
+running" over an account the server had proven clean. And `mayHaveCreated` is now
+set by the caller that uses it rather than computed for both verbs and destructured
+away again for one.
+
+**What this says about the previous twenty-one rounds:** the deletion worked. One
+behaviour defect against seven, in a lifecycle that had produced a regression per
+round for six rounds. What remains is bookkeeping after a removal, which is finite
+by construction — there is no state left to guard, so there are no guards left to
+get wrong.
+
 ## 2026-09-04 — S163e-fixes (round twenty-one): the deletion, not another fix
 
 **12 findings, 7 of them regressions from round twenty's 8 fixes** — two severe, and

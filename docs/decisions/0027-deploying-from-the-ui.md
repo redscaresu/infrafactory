@@ -827,3 +827,22 @@ reader was watching.
 **The trade.** A deploy that finishes while the reader is on another page is not
 announced when they return. Three rounds of defects came from trying to announce it,
 and the durable answers were always elsewhere — which is this ADR's own thesis.
+
+
+## Amendment, 2026-09-04 (round twenty-two): what clears the ending
+
+Two places, and only two: `confirmDeploy` when a new attempt starts, and
+`afterNavigate` when the route actually changes. Clearing only on navigation left a
+retry rendering the previous attempt's line for the whole apply — including a leak
+pointer a reader would take as the state of the deploy currently running.
+
+The three lifetimes hold: the retry clears the previous ENDING and does not touch
+the previous REPORT, because a leak the first attempt left does not stop existing
+because the second attempt worked.
+
+### Both verbs read a 2xx the same way
+
+`writeActionResult` answers 2xx only for a provably clean result, so a body that
+failed to parse means the server was cut off mid-write — for teardown exactly as
+for deploy. Reporting it as a failure put a red "resources may still be running"
+over an account the server had already proven clean.

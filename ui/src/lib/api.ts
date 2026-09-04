@@ -142,6 +142,16 @@ export const api = {
       const parsed = await readJSON(res);
       const body = parsed.value;
       if ((res.ok || res.status === 409) && isActionResult(body)) return body;
+      // The SAME `writeActionResult` answers both verbs, so the same
+      // reasoning applies: a 2xx is only written for a provably clean
+      // result, and a body that failed to PARSE means the server was
+      // cut off mid-write. Reporting that as a failure put a red
+      // "resources may still be running" over an account the server had
+      // already proven clean -- the false alarm this arc spent rounds
+      // removing, left alive on the sibling verb.
+      if (res.ok && !parsed.ok) {
+        return { clean: true, steps: [], failures: [] };
+      }
       if (!parsed.ok) {
         throw new Error(`teardown answered ${res.status}, but its result could not be read`);
       }

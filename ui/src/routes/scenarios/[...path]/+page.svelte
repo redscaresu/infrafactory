@@ -108,11 +108,6 @@
     // window does not fire a stale validation against a torn-down
     // component (the validationVersion guard is per-instance).
     if (validationTimer) clearTimeout(validationTimer);
-    //  too. It carries a message about ONE scenario -- "Saved",
-    // or the read error a failed post-save refresh writes into it --
-    // and nothing cleared it, so it rendered unattributed under the
-    // next scenario's title.
-    status = "";
     resetDeployState();
   });
 
@@ -288,11 +283,12 @@
   /**
    * How the deploy this page started ended — for THIS visit only.
    *
-   * Transient by construction: `resetDeployState` clears it on every
-   * navigation, and it renders only when its scenario is the one on
-   * screen. Those two facts together are the whole scoping rule, and
-   * they replace a terminal `outcome` in a store that outlives the page
-   * — which needed retire hooks, a shown-scenario tracker, a
+   * Transient by construction, and cleared in exactly two places:
+   * `confirmDeploy` when a new attempt starts, and `afterNavigate` when
+   * the route actually changes. It renders only when its scenario is
+   * the one on screen. Those three facts are the whole scoping rule,
+   * and they replace a terminal `outcome` in a store that outlives the
+   * page — which needed retire hooks, a shown-scenario tracker, a
    * route-change guard, stale-claim rules, a report pointer and
    * cross-store dismiss coordination to keep it honest.
    *
@@ -377,6 +373,13 @@
     if (!target) return;
 
     confirmingDeploy = false;
+    // The last attempt's ending goes NOW, not on the next navigation.
+    // Without this a retry on the same page kept rendering it for the
+    // whole minutes-long apply -- a green "Deployed." under a live,
+    // streaming log, or worse a red "what it may have left behind is
+    // reported at the top of the page" that a reader would take as the
+    // state of the deploy currently running.
+    ending = null;
 
     // The entry is created BEFORE the POST, because streaming progress
     // during the apply is the entire point and the response does not
