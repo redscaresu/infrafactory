@@ -2,6 +2,48 @@
 
 Last updated: 2026-09-04
 
+## 2026-09-04 — S163e-fixes (round twelve): the report survived the retry and died on the navigation
+
+**12 findings, 9 accepted, 3 declined.** Two accepts are round eleven's fixes undone
+by code round eleven did not touch.
+
+**Reports outlive the entry's last outcome now.** `beginDeploy` was made to carry
+them forward; `forgetReportlessDeploy` then judged the entry by its last outcome
+and deleted the whole entry. Fail, retry, succeed, navigate — and the first
+attempt's leaked project is gone, because the second attempt has nothing to report.
+The unit test could not see it: it asserts before any navigation. Pinned now by an
+e2e, because the defect was in the component while the test was on the store.
+
+**The same ordering inversion, in the other handler.** The preview reads the
+in-flight list before the estate and pins it with a test; `deploymentsHandler` did
+the opposite, so a deploy finishing between the two reads is in neither and the
+payload says `deployments: []`, `deploying: []` — from which the estate page
+derives "Nothing is deployed." at the moment the scenario went live and billable.
+
+**Two identical failures collided.** Reports accumulate because two attempts leak
+two projects, and two attempts can fail identically. The layout keyed its `{#each}`
+on `scenario + message`, so an identical pair duplicated keys: Svelte throws in a
+dev build and silently collapses them in production, showing one leak where there
+are two.
+
+**Attribution, on both branches and anchored.** `namedUnlessSelfDescribing` guarded
+only the refusal path, so a `Deploy` error whose text embeds the scenario rendered
+it twice; and the bare `includes` let a scenario named `json` match "invalid json
+body" and render unattributed.
+
+Also: the layout banner and the page's outcome slot rendered the same report (one
+sentence twice, the name three times) — reports belong to the layout, which
+outlives the page; the e2e named "a refusal that arrives after a detour" fulfilled
+423 without `started_nothing` and so never reached the refusal branch;
+`already_deploying` was declared required while its siblings are optional for a
+reason that applies to it identically; and a comment was two paragraphs making the
+same point, the first a superseded draft.
+
+**Declined:** `pendingReports` recomputing per progress line (a handful of entries,
+against a derived-store construct); two import statements from one module (merged
+in passing, not as a finding); and two representations of "is anything applying"
+inside ten lines of one function, declined last round for the same reason.
+
 ## 2026-09-04 — S163e-fixes (round eleven): the server says whether anything started
 
 **10 findings, 7 accepted, 3 declined.** One overturned a decline from round ten.

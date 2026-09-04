@@ -270,3 +270,32 @@ test("a long log keeps its opening and says how much it dropped", async () => {
   forgetDeploy("web-app-paris");
   stop();
 });
+
+// The round-eleven fix accumulated reports on the entry; forgetting the
+// entry threw them away again. Fail, retry, succeed, navigate — and the
+// project the first attempt leaked is named nowhere, because the second
+// attempt's outcome says there is nothing to report.
+test("a report outlives the entry's last outcome", async () => {
+  const { deploys, useConnector, watch, beginDeploy, finishDeploy, forgetDeploy, pendingReports } =
+    await import("../src/lib/deploy-store.js");
+
+  useConnector(() => () => {});
+  const stop = watch();
+
+  beginDeploy("web-app-paris");
+  finishDeploy("web-app-paris", {
+    ok: false,
+    mayHaveCreated: true,
+    message: "project 7c98d82e is live and could not be deleted"
+  });
+  beginDeploy("web-app-paris");
+  finishDeploy("web-app-paris", { ok: true, mayHaveCreated: false, message: "Deployed." });
+
+  const entry = get(deploys)["web-app-paris"];
+  assert.equal(entry.outcome.mayHaveCreated, false, "the LAST outcome has nothing to report");
+  assert.equal(entry.reports.length, 1, "but the entry still does, and that is what decides");
+  assert.match(pendingReports(get(deploys))[0].message, /7c98d82e/);
+
+  forgetDeploy("web-app-paris");
+  stop();
+});

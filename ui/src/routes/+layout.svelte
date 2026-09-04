@@ -119,7 +119,13 @@
          page. For one round it was visible only when an UNRELATED
          scenario fetch happened to fail, which made the one message the
          code says must not be lost a matter of luck. -->
-    {#each pendingReports($deploys) as report (report.scenario + report.message)}
+    <!-- Keyed by INDEX as well as content. Two attempts can fail
+         identically -- the same dropped connection, the same message --
+         and reports accumulate deliberately, so a content-only key
+         collides: Svelte throws in a dev build and silently collapses
+         the pair in a production one, showing one leak where there are
+         two. -->
+    {#each pendingReports($deploys) as report, i (`${i}:${report.scenario}:${report.message}`)}
       <div
         class="mb-4 rounded border border-rose-300 bg-rose-50 px-4 py-3 text-sm text-rose-900"
         data-testid="pending-deploy-report"

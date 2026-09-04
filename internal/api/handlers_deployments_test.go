@@ -204,3 +204,29 @@ func TestDeploymentsReportWhetherTeardownIsAllowed(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &on))
 	assert.True(t, on.TeardownAllowed)
 }
+
+// The listing has the same ordering obligation as the preview, and for
+// the same reason: a deploy has no record until registration, which runs
+// after the apply returns.
+//
+// Read the estate first and a deploy that finishes in between is in
+// neither answer -- so the payload says `deployments: []` and
+// `deploying: []`, and the page derives "Nothing is deployed." from it
+// at the exact moment the scenario went live and billable.
+func TestTheListingReadsWhatIsApplyingBeforeItReadsTheEstate(t *testing.T) {
+	inFlightRead := false
+	lister := &orderRecordingLister{inFlightRead: &inFlightRead}
+
+	srv := NewServer(ServerConfig{
+		Config:      config.Default(),
+		Deployments: lister,
+		Deployer:    &orderRecordingDeployer{read: &inFlightRead},
+	})
+
+	rec := httptest.NewRecorder()
+	srv.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/deployments", nil))
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	assert.True(t, lister.sawInFlightFirst,
+		"a deploy finishing between the two reads must not be invisible to both")
+}

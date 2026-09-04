@@ -550,3 +550,28 @@ succeeded, the banner became "Deployed." and the next navigation dropped it — 
 leaked project with no live record, named nowhere. Reports accumulate on the entry
 instead, because two failed attempts leak two projects, and they are rendered in
 the LAYOUT so following the message's own advice does not hide it.
+
+
+## Amendment, 2026-09-04 (round twelve): a report is not an outcome
+
+They had been treated as the same thing, and three rounds of defects came from it.
+
+An **outcome** is how the last attempt ended. A **report** is a statement that
+infrastructure may exist with no record of it anywhere. An entry can hold one
+outcome and several reports: two failed attempts leak two projects, and a
+successful third does not un-leak them.
+
+So the rule for forgetting an entry reads `reports`, not the last outcome — judging
+by the outcome and then deleting the whole entry destroyed the reports the previous
+amendment existed to accumulate. And reports render in the LAYOUT, not on the
+scenario page: they have to outlive the page they came from, including when the
+reader follows the message's own advice to the Deployments page.
+
+### Both listings read what is applying before they read the estate
+
+`GET /api/deployments/preview` and `GET /api/deployments` have the same obligation
+for the same reason: a deploy has no record until registration, which runs after
+the apply returns, so reading the estate first leaves a window in which a deploy
+that finishes in between is in neither answer. For the listing that window produced
+`deployments: []` with `deploying: []`, from which the page concludes "Nothing is
+deployed." at the exact moment a scenario went live.

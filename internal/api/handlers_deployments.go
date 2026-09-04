@@ -138,6 +138,18 @@ func deploymentsHandler(state *serverState) http.HandlerFunc {
 			return
 		}
 
+		// In-flight BEFORE the estate, for the reason the preview
+		// handler states and pins with a test: the two reads cover each
+		// other in one direction only.
+		//
+		// A deploy has no record until registration, which runs after
+		// the apply returns. Read the estate first and a deploy that
+		// finishes in between is in NEITHER answer -- and this payload
+		// then says `deployments: []` and `deploying: []`, from which
+		// the page derives "Nothing is deployed." at the exact moment
+		// the scenario went live and billable.
+		deploying := deployingScenarios(state)
+
 		deployments, unreadable, err := state.deployments.List()
 		if err != nil {
 			writeJSONError(w, http.StatusInternalServerError, err.Error())
@@ -151,7 +163,7 @@ func deploymentsHandler(state *serverState) http.HandlerFunc {
 			Unreadable:      make([]string, 0, len(unreadable)),
 			TeardownAllowed: state.deploymentActor != nil,
 			DeployAllowed:   state.deployer != nil,
-			Deploying:       deployingScenarios(state),
+			Deploying:       deploying,
 		}
 		for _, d := range deployments {
 			payload.Deployments = append(payload.Deployments, deploymentJSON{

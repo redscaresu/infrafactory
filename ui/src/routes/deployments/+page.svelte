@@ -102,13 +102,13 @@
   $: estateState = !loaded ? "loading" : loadError ? "failed" : "loaded";
   $: summary = estateSummary(deployments, unreadable, estateState, deploying);
   // The in-flight list survives a failed refresh along with the rows,
-  // and is exactly as old as they are. The rows say so about
-  // themselves; this says so about the banner, from the same builder
-  // the summary line uses so the two cannot word it differently.
-  // Derived from the same `estateState` the summary line uses, not from
-  // `loadError` separately. They agree today only by coincidence, and
-  // this label exists precisely so the banner and the summary two lines
-  // above it cannot word the same claim differently.
+  // and is exactly as old as they are: the rows say so about
+  // themselves, and this says so about the banner.
+  //
+  // Built from `estateState` -- the same input the summary line uses --
+  // rather than from `loadError` separately, because this label exists
+  // precisely so the banner and the summary two lines above it cannot
+  // word the same claim differently.
   $: applyingLabel = deployingLabel(deploying, estateState === "failed");
   // The one condition under which this page may say nothing is running.
   // Shared with the summary rather than re-derived, because two copies

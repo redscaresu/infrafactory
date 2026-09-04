@@ -236,7 +236,13 @@ export interface DeployPreview {
   already_live?: string[];
   // Applying right now, which the estate cannot see: registration runs
   // after the apply returns.
-  already_deploying: boolean;
+  // Optional for the same wire reason as its siblings: a server that
+  // predates this field simply omits it. Unlike `already_live` it has
+  // no unknown state to fall back to -- the server cannot see an apply
+  // started by the CLI or by another process either, so absence and
+  // "nothing is applying here" are already indistinguishable, and that
+  // limit is stated in `InFlight`'s docstring and in ADR-0027.
+  already_deploying?: boolean;
   // True when the estate could not be fully read. An empty already_live
   // is a claim; this says when it cannot be made.
   already_live_unknown?: boolean;

@@ -166,9 +166,9 @@ test.describe('Deploy from the scenario page', () => {
     await page.getByTestId('scenario-deploy').click();
     await page.getByTestId('deploy-confirm-go').click();
 
-    const outcome = page.getByTestId('deploy-outcome');
-    await expect(outcome).toContainText('7c98d82e');
-    await expect(outcome).not.toContainText('Deployed.');
+    const report = page.getByTestId('pending-deploy-report');
+    await expect(report).toContainText('7c98d82e');
+    await expect(report).not.toContainText('Deployed.');
   });
 
   // A confirmation that describes one thing and does another is worse
@@ -400,9 +400,12 @@ test.describe('Deploy from the scenario page', () => {
     await page.getByTestId('scenario-deploy').click();
     await page.getByTestId('deploy-confirm-go').click();
 
-    const outcome = page.getByTestId('deploy-outcome');
-    await expect(outcome).toContainText('web-app-paris');
-    await expect(outcome).toContainText('7c98d82e');
+    // A REPORT, so it renders in the layout rather than in this
+    // page's outcome slot -- it has to survive leaving the page.
+    const report = page.getByTestId('pending-deploy-report');
+    await expect(report).toContainText('web-app-paris');
+    await expect(report).toContainText('7c98d82e');
+    await expect(page.getByTestId('deploy-outcome')).toHaveCount(0);
   });
 });
 
@@ -990,7 +993,8 @@ test('a deploy whose connection drops is not called a deploy that never ran', as
   await page.getByTestId('deploy-confirm-go').click();
 
   // It reports the truth: we lost track, and the apply may be running.
-  const outcome = page.getByTestId('deploy-outcome');
+  // A report, so the layout carries it -- it must outlive this page.
+  const outcome = page.getByTestId('pending-deploy-report');
   await expect(outcome).toContainText('may still be running');
   await expect(outcome).toContainText('Deployments page');
 
@@ -1122,7 +1126,8 @@ test('a refusal that arrives after a detour is still reported', async ({ page })
       status: 423,
       contentType: 'application/json',
       body: JSON.stringify({
-        error: 'web-app-paris is already deploying; wait for it to finish or tear it down'
+        error: 'web-app-paris is already deploying; wait for it to finish or tear it down',
+        started_nothing: true
       })
     });
   });
@@ -1255,7 +1260,7 @@ test('a deploy that FAILS while you are away still reports when you return', asy
   await page.getByTestId('sidebar-scenario-training/web-app-paris').click();
   await expect(page.locator('main h1')).toContainText('web-app-paris');
 
-  const outcome = page.getByTestId('deploy-outcome');
+  const outcome = page.getByTestId('pending-deploy-report');
   await expect(outcome).toContainText('may have created resources that are still running');
   // The project id is the handle for removing it by hand.
   await expect(outcome).toContainText('7c98d82e');
@@ -1303,7 +1308,7 @@ test('following the advice in a failure message does not destroy the failure mes
   await page.goto('/scenarios/training/web-app-paris');
   await page.getByTestId('scenario-deploy').click();
   await page.getByTestId('deploy-confirm-go').click();
-  await expect(page.getByTestId('deploy-outcome')).toContainText('7c98d82e');
+  await expect(page.getByTestId('pending-deploy-report')).toContainText('7c98d82e');
 
   // Leave the scenarios section entirely, exactly as the message says.
   await page.getByTestId('sidebar-scenario-training/lb-serving-paris').click();
@@ -1311,7 +1316,7 @@ test('following the advice in a failure message does not destroy the failure mes
 
   await page.getByTestId('sidebar-scenario-training/web-app-paris').click();
   await expect(page.locator('main h1')).toContainText('web-app-paris');
-  await expect(page.getByTestId('deploy-outcome')).toContainText('7c98d82e');
+  await expect(page.getByTestId('pending-deploy-report')).toContainText('7c98d82e');
 });
 
 // A successful one still goes, because it is a claim about
@@ -1447,7 +1452,7 @@ test('a failed scenario load does not hide a leaked project', async ({ page }) =
   await page.goto('/scenarios/training/web-app-paris');
   await page.getByTestId('scenario-deploy').click();
   await page.getByTestId('deploy-confirm-go').click();
-  await expect(page.getByTestId('deploy-outcome')).toContainText('7c98d82e');
+  await expect(page.getByTestId('pending-deploy-report')).toContainText('7c98d82e');
 
   // The next scenario read fails, so the page cannot render its usual
   // body -- and used to render nothing else either.
@@ -1550,4 +1555,63 @@ test('a refusal the server did not attribute is attributed here', async ({ page 
   await expect(outcome).toContainText('web-app-paris: cross-origin request refused');
   // And it is not a report of infrastructure: nothing was created.
   await expect(page.getByTestId('pending-deploy-report')).toHaveCount(0);
+});
+
+// Fail, retry, succeed, navigate — and the project the FIRST attempt
+// leaked used to be gone, because the forget rule judged the entry by
+// its last outcome and then deleted the whole entry, reports included.
+test('a successful retry does not erase what the failed attempt leaked', async ({ page }) => {
+  await page.route('**/api/deployments/preview**', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        scenario: 'web-app-paris',
+        deployable: true,
+        expires_at: null,
+        internet_facing: false,
+        deploy_allowed: true,
+        already_live: [],
+        already_live_unknown: false,
+        cost: { components: [], eur_per_hour: 0, unpriced: [], complete: true, modelled: true }
+      })
+    })
+  );
+
+  let attempt = 0;
+  await page.route('**/api/deployments', (route) => {
+    if (route.request().method() !== 'POST') return route.continue();
+    attempt += 1;
+    return attempt === 1
+      ? route.fulfill({
+          status: 409,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            clean: false,
+            steps: [],
+            failures: [{ detail: 'project 7c98d82e is live and could not be deleted' }]
+          })
+        })
+      : route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ clean: true, steps: [], failures: [] })
+        });
+  });
+
+  await page.goto('/scenarios/training/web-app-paris');
+  await page.getByTestId('scenario-deploy').click();
+  await page.getByTestId('deploy-confirm-go').click();
+  await expect(page.getByTestId('pending-deploy-report')).toContainText('7c98d82e');
+
+  // The obvious next action, and it works this time.
+  await page.getByTestId('scenario-deploy').click();
+  await page.getByTestId('deploy-confirm-go').click();
+  await expect(page.getByTestId('deploy-outcome')).toContainText('Deployed. It is listed');
+
+  // The second attempt succeeding does not un-leak the first one's
+  // project, and navigating away must not be what deletes the record.
+  await page.getByTestId('sidebar-scenario-training/lb-serving-paris').click();
+  await expect(page.locator('main h1')).toContainText('lb-serving-paris');
+  await expect(page.getByTestId('pending-deploy-report')).toContainText('7c98d82e');
 });

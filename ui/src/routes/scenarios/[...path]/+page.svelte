@@ -19,9 +19,9 @@
     isConnected,
     isRunning,
     useConnector,
-    watch as watchDeploys
+    watch as watchDeploys,
+    KEPT_OPENING_LINES
   } from "$lib/deploy-store.js";
-  import { KEPT_OPENING_LINES } from "$lib/deploy-store.js";
   import { modeSummary, normalizeRunOptions } from "$lib/scenario-run.js";
   import type { DeployPreview, ScenarioLayer3StatusResponse, ScenarioRunModeResponse } from "$lib/types";
 
@@ -162,7 +162,15 @@
    */
   function forgetReportlessDeploy(scenario: string) {
     const entry = get(deploys)[scenario];
-    if (entry && !entry.running && !entry.outcome?.mayHaveCreated) forgetDeploy(scenario);
+    if (!entry || entry.running) return;
+    // `reports`, not just the LAST outcome. Judging by the last one and
+    // then deleting the whole entry undid the accumulation it was built
+    // for: fail, retry, succeed, navigate -- and the leaked project the
+    // first attempt reported is gone, because the second attempt's
+    // outcome says there is nothing to report.
+    if (entry.reports?.length) return;
+    if (entry.outcome?.mayHaveCreated) return;
+    forgetDeploy(scenario);
   }
 
   // Arriving drops a finished deploy that has nothing left to report.
@@ -240,12 +248,22 @@
     return { ...outcome, message: `${scenario}: ${outcome.message}` };
   }
 
-  /** namedUnlessSelfDescribing skips the prefix the server supplied. */
+  /**
+   * namedUnlessSelfDescribing skips the prefix the server supplied.
+   *
+   * Anchored at the START rather than a bare `includes`. The one server
+   * message that names the scenario formats it as `"%s is already
+   * deploying…"`, so the name leads -- while a substring test anywhere
+   * in the prose lets a scenario called `json` match "invalid json
+   * body" and render unattributed, in a slot shared with every scenario
+   * the reader visits. That is the defect the prefix exists to prevent,
+   * reintroduced by the check meant to avoid doubling it.
+   */
   function namedUnlessSelfDescribing(
     scenario: string,
     outcome: { ok: boolean; mayHaveCreated: boolean; message: string }
   ) {
-    return outcome.message.includes(scenario) ? outcome : named(scenario, outcome);
+    return outcome.message.startsWith(`${scenario} `) ? outcome : named(scenario, outcome);
   }
 
   async function loadDetail() {
@@ -403,7 +421,10 @@
     beginDeploy(target);
 
     try {
-      finishDeploy(target, named(target, toDeployOutcome(await api.deployScenario(target))));
+      finishDeploy(
+        target,
+        namedUnlessSelfDescribing(target, toDeployOutcome(await api.deployScenario(target)))
+      );
     } catch (err) {
       const message = err instanceof Error ? err.message : "The deploy failed.";
 
@@ -453,7 +474,7 @@
       }
       finishDeploy(
         target,
-        named(target, {
+        namedUnlessSelfDescribing(target, {
           ok: false,
           mayHaveCreated: true,
           // Punctuated. Server error strings and `deploy failed: 502`
@@ -790,7 +811,11 @@
        during it, so an unattributed "deployed." is a claim about the
        wrong thing. The store keys outcomes by scenario, so this one is
        this scenario's by construction. -->
-  {#if deployOutcome}
+  <!-- Not when it is a REPORT: the layout renders those, so showing it
+       here too printed the same sentence twice with the scenario name
+       three times. This slot is for the ending that is not a report --
+       a success, or a refusal. -->
+  {#if deployOutcome && !deployOutcome.mayHaveCreated}
     <p
       class={`mt-3 text-sm ${deployOutcome.ok ? "text-emerald-800" : "font-semibold text-rose-800"}`}
       data-testid="deploy-outcome"
