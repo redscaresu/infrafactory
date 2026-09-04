@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"sort"
 	"time"
 
 	"github.com/redscaresu/infrafactory/internal/livestore"
@@ -336,7 +335,7 @@ func liveDeploymentsOf(state *serverState, name string) ([]string, bool) {
 			out = append(out, d.ID)
 		}
 	}
-	sort.Strings(out)
+	slices.Sort(out)
 
 	// A record that will not decode has no Scenario to match on, so it
 	// could be a deployment of THIS scenario and would never appear

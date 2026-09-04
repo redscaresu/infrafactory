@@ -149,7 +149,8 @@
           {deploying.length === 1 ? "It had" : "They had"} no record yet, so {deploying.length === 1
             ? "it does"
             : "they do"} not appear below. Whether {deploying.length === 1 ? "it is" : "they are"}
-          still applying is unknown — the estate has not been readable since: {deploying.join(", ")}.
+          still applying is unknown — the estate has not been readable since. Applying when last
+          read: {deploying.join(", ")}.
         {:else}
           Applying now, so {deploying.length === 1 ? "it has" : "they have"} no record yet and
           {deploying.length === 1 ? "does" : "do"} not appear below: {deploying.join(", ")}.

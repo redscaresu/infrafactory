@@ -8,6 +8,8 @@ import {
   deployConfirmation,
   deployWarnings,
   deployOutcome,
+  isProgressEvent,
+  nothingRecorded,
   deployingLabel,
   teardownOutcome,
   teardownPrompt,
@@ -545,4 +547,45 @@ test("estateSummary carries deploys in progress alongside a partial read", () =>
   );
   assert.match(summary, /1 deploy in progress/);
   assert.match(summary, /read before the error/);
+});
+
+// Deploy and teardown differ in their WORDS, never in the rule. Two
+// structural copies of "clean, not failures.length" are two places a
+// future change to ADR-0024's judgement has to find, and applied to one
+// and not the other, the deploy screen would report a success the
+// teardown screen refuses.
+test("deploy and teardown judge an unproven action identically", () => {
+  const cases = [
+    null,
+    { clean: false, failures: [] },
+    { clean: false, failures: [{ detail: "project 7c98d82e is live" }] },
+    { clean: true, failures: [] }
+  ];
+  for (const result of cases) {
+    assert.equal(
+      deployOutcome(result).ok,
+      teardownOutcome(result).ok,
+      "one rule, whatever the vocabulary"
+    );
+  }
+});
+
+test("nothingRecorded answers only what was recorded", () => {
+  assert.equal(nothingRecorded([], []), true);
+  assert.equal(nothingRecorded([{ id: "dep-1" }], []), false);
+  assert.equal(nothingRecorded([], ["dep-broken.json"]), false);
+  // Deliberately says nothing about whether the read succeeded, or
+  // whether anything is applying -- that is knownEmpty's job, and
+  // keeping them apart is what stops this becoming a copy of it.
+  assert.equal(nothingRecorded(undefined, undefined), true);
+});
+
+// The store looks the entry up by the event's own subject, so passing
+// that subject back in as "the scenario on screen" compared it with
+// itself -- a guard that reads as scoping while scoping nothing.
+test("isProgressEvent checks the shape and not the scenario", () => {
+  assert.equal(isProgressEvent({ type: "deploy_progress", data: { subject: "a", line: "x" } }), true);
+  assert.equal(isProgressEvent({ type: "log", data: { subject: "a", line: "x" } }), false);
+  assert.equal(isProgressEvent({ type: "deploy_progress", data: { subject: "a" } }), false);
+  assert.equal(isProgressEvent(undefined), false);
 });

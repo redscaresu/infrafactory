@@ -2,6 +2,47 @@
 
 Last updated: 2026-09-04
 
+## 2026-09-04 — S163e-fixes (round eight): the cleanup that swallowed the leak report
+
+**11 findings, all accepted.** The first is round seven's fix eating the message it
+most needed to keep.
+
+**Arriving at a scenario dropped every finished deploy**, so a success banner could
+not greet a reader long after the TTL had gone. It dropped failures too — including
+*"it may have created resources that are still running. project 7c98d82e is live
+and could not be deleted"*. A deploy that fails before `registerDeployment` has no
+live record either, so that banner is the ONLY place it is ever said, and it was
+deleted before rendering because the reader happened to look away. The failure this
+arc exists to prevent, arriving through a cleanup. Only successes are dropped now:
+a stale success is a false claim, a failure is an unread report carrying the handle
+for removing the leak by hand.
+
+**A guarantee across two connections is not a guarantee.** Round seven's flush
+ordering was written up as settling the matter. The broadcast goes out on the
+websocket and the response on the HTTP connection, and an in-process test can only
+pin the order the server *writes* in. Kept as the better ordering, claim reduced to
+what it is, and the residual stated: `deploy` newline-terminates every line, so
+there is no tail to lose for today's producer.
+
+**Three copies of one rule, twice over.** `estateSummary` re-derived the emptiness
+condition in both branches, inside the function that calls `knownEmpty` — whose
+docstring says two copies are how one comes to contradict the other. Extracted as
+`nothingRecorded`, scoped narrowly so it cannot become a fourth copy of the whole
+question. And `deployOutcome` was a structural copy of `teardownOutcome`: the words
+must differ, ADR-0024's rule must not, and applied to one and not the other the
+deploy screen would report a success the teardown screen refuses.
+
+**An inert guard.** `acceptProgressEvent(msg, msg.data.subject)` compared the
+subject with itself — reading as scoping while scoping nothing. Split into
+`isProgressEvent` for the shape.
+
+Also: `refuseDeploy`'s justification was narrower than its call site;
+`forgetFinishedDeploy` read a reactive value whose freshness depended on hook
+ordering; the stale-estate banner read "not been readable since: web-app-paris";
+`?.startsWith` on `JSON.parse` output threw on a non-string `type` and froze the run
+log for the session; `previewResponse` was dead and the fifth fixture copy round
+seven claimed to have removed was still there; `slices` and `sort` both imported.
+
 ## 2026-09-04 — S163e-fixes (round seven): the guard that truncated the log
 
 **11 findings, 10 accepted.** One is a regression the previous round introduced,

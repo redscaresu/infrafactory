@@ -120,31 +120,46 @@
     forgetFinishedDeploy();
   });
 
-  /** forgetFinishedDeploy drops a completed deploy's banner. */
+  /**
+   * forgetFinishedDeploy drops a completed deploy's banner on LEAVING.
+   *
+   * Any ending, success or failure: the reader was on the page while it
+   * was displayed, so it has been read. Reads the store directly rather
+   * than the reactive `deployEntry`, whose freshness inside
+   * `afterNavigate` depends on `detail` not yet having been nulled --
+   * a coupling with no reason to exist.
+   */
   function forgetFinishedDeploy() {
-    if (detail?.name && deployEntry && !deployEntry.running) {
-      forgetDeploy(detail.name);
-    }
+    if (!detail?.name) return;
+    const entry = get(deploys)[detail.name];
+    if (entry && !entry.running) forgetDeploy(detail.name);
   }
 
-  // A finished deploy's banner belongs to the visit it finished in.
+  // Arriving drops a SUCCESS that finished while the reader was away.
   //
-  // `onDestroy` and `afterNavigate` drop one that had ALREADY finished
-  // when the reader left. Neither can drop one that was still RUNNING
-  // then and finished afterwards -- and that entry lived forever,
-  // re-rendering "deployed. It is listed on the Deployments page until
-  // its TTL expires." on every later visit, for infrastructure whose
-  // TTL may long since have gone. Which is the defect those two hooks
-  // exist to prevent, reached by waiting a few seconds longer.
+  // The leave-hooks cannot: a deploy still running when the reader left
+  // finishes afterwards, and nothing was left to drop it -- so it lived
+  // forever, greeting every later visit with "deployed. It is listed on
+  // the Deployments page until its TTL expires." for infrastructure
+  // whose TTL may long since have gone.
   //
-  // So ARRIVING at a scenario drops a finished deploy too. Keyed on the
-  // navigation counter rather than on `detail`, because `loadDetail`
-  // also runs after a save, and a banner must not vanish mid-visit.
+  // Only a success. A FAILURE is not a stale claim, it is an unread
+  // report: "it may have created resources that are still running",
+  // carrying the project id that has to be removed by hand. A deploy
+  // that fails before registration has no live record either, so this
+  // banner is the ONLY place it is ever said. Dropping it because the
+  // reader happened to look away is how the leak goes unnoticed --
+  // which is the failure this whole arc exists to prevent, arriving
+  // through a cleanup.
+  //
+  // Keyed on the navigation counter rather than on `detail`, because
+  // `loadDetail` also runs after a save and a banner must not vanish
+  // mid-visit.
   let arrivalHandled = -1;
   $: if (detail?.name && arrivalHandled !== navigation) {
     arrivalHandled = navigation;
     const arriving = get(deploys)[detail.name];
-    if (arriving && !arriving.running) forgetDeploy(detail.name);
+    if (arriving && !arriving.running && arriving.outcome?.ok) forgetDeploy(detail.name);
   }
 
   $: scenarioPath = ($page.params.path || "").toString();

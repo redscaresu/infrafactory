@@ -116,11 +116,29 @@ export function observedLabel(health) {
  * undecodable record is not an absence of infrastructure; it is an
  * absence of knowledge.
  */
+/**
+ * nothingRecorded is "the read returned no records, and none were
+ * undecodable" -- and nothing more.
+ *
+ * Extracted because three places asked it: `knownEmpty`, and both the
+ * failed and loaded branches of `estateSummary`. The last two were
+ * copies inside the function that CALLS knownEmpty, reachable only when
+ * it said no -- so a fourth term added to knownEmpty (as `deploying`
+ * was) would leave them still asserting emptiness without it.
+ *
+ * Deliberately NOT the whole emptiness question: it says nothing about
+ * whether the read succeeded or whether anything is applying. Those are
+ * knownEmpty's job, and keeping them apart is what stops this becoming
+ * a fourth copy of it.
+ */
+export function nothingRecorded(deployments, unreadable) {
+  return (deployments?.length || 0) === 0 && (unreadable?.length || 0) === 0;
+}
+
 export function knownEmpty(deployments, unreadable, state = "loaded", deploying = []) {
   return (
     state === "loaded" &&
-    (deployments?.length || 0) === 0 &&
-    (unreadable?.length || 0) === 0 &&
+    nothingRecorded(deployments, unreadable) &&
     // A deploy that is APPLYING has no record yet, so it is absent from
     // `deployments` while being the most active thing in the estate.
     // Without this the page said "Nothing is deployed." directly under a
@@ -179,8 +197,6 @@ export function deployingLabel(deploying, stale = false) {
  * Moved 2026-09-03.)
  */
 export function estateSummary(deployments, unreadable, state = "loaded", deploying = []) {
-  const total = deployments?.length || 0;
-  const unread = unreadable?.length || 0;
   const applying = deploying?.length || 0;
 
   if (state === "loading") return "Reading the live estate…";
@@ -199,7 +215,7 @@ export function estateSummary(deployments, unreadable, state = "loaded", deployi
     // current: it was read at the same moment as the rows, and they say
     // so about themselves.
     const staleApplying = deployingLabel(deploying, true);
-    if (total === 0 && unread === 0) {
+    if (nothingRecorded(deployments, unreadable)) {
       if (!staleApplying) {
         return "The live estate could not be read. Whether anything is running is unknown.";
       }
@@ -219,7 +235,9 @@ export function estateSummary(deployments, unreadable, state = "loaded", deployi
   // no statement at all about the estate: the empty-state panel is
   // suppressed here (`knownEmpty` is false) and the table does not
   // render, so this line is the only thing that speaks.
-  if (total === 0 && unread === 0) return `${applyingText}. Nothing else is deployed.`;
+  if (nothingRecorded(deployments, unreadable)) {
+    return `${applyingText}. Nothing else is deployed.`;
+  }
   return `${described}, ${applyingText}`;
 }
 
@@ -308,18 +326,11 @@ export function teardownPrompt(deployment) {
  * running" is exactly the false green this project exists to avoid.
  */
 export function teardownOutcome(result) {
-  if (!result) return { ok: false, message: "Teardown returned nothing." };
-  if (result.clean) {
-    return { ok: true, message: "Destroyed. The account is provably clean." };
-  }
-  const reasons = (result.failures || []).map((f) => f.detail).filter(Boolean);
-  return {
-    ok: false,
-    message:
-      reasons.length > 0
-        ? `Not provably clean — resources may still be running. ${reasons.join(" ")}`
-        : "Not provably clean — resources may still be running."
-  };
+  return actionOutcome(result, {
+    nothing: "Teardown returned nothing.",
+    proven: "Destroyed. The account is provably clean.",
+    unproven: "Not provably clean — resources may still be running."
+  });
 }
 
 /**
@@ -338,13 +349,37 @@ export function teardownOutcome(result) {
  * deploy that cannot prove its account clean is not a success (ADR-0024).
  */
 export function deployOutcome(result) {
-  if (!result) return { ok: false, message: "The deploy returned nothing, so what it created is unknown." };
-  if (result.clean) {
-    return { ok: true, message: "Deployed." };
-  }
+  return actionOutcome(result, {
+    nothing: "The deploy returned nothing, so what it created is unknown.",
+    proven: "Deployed.",
+    unproven:
+      "The deploy did not finish cleanly — it may have created resources that are still running."
+  });
+}
+
+/**
+ * actionOutcome is ADR-0024's rule, once.
+ *
+ * The rule is `clean`, not `failures.length`: an action that cannot
+ * PROVE its account clean is not a success, whatever else it reports.
+ * Deploy and teardown must differ in their WORDS -- "Teardown returned
+ * nothing." beside a Deploy button is its own defect -- but they must
+ * not differ in the rule, and two structural copies of it are two
+ * places a future change has to find. Applied to one and not the other,
+ * the deploy screen would report a success the teardown screen refuses.
+ *
+ * The per-stage failure details are appended because they are the
+ * useful part: they name the project that could not be deleted, which
+ * is the handle for removing it by hand.
+ */
+function actionOutcome(result, words) {
+  if (!result) return { ok: false, message: words.nothing };
+  if (result.clean) return { ok: true, message: words.proven };
   const reasons = (result.failures || []).map((f) => f.detail).filter(Boolean);
-  const base = "The deploy did not finish cleanly — it may have created resources that are still running.";
-  return { ok: false, message: reasons.length > 0 ? `${base} ${reasons.join(" ")}` : base };
+  return {
+    ok: false,
+    message: reasons.length > 0 ? `${words.unproven} ${reasons.join(" ")}` : words.unproven
+  };
 }
 
 /**
@@ -441,10 +476,23 @@ export function deployWarnings(preview) {
  */
 export function acceptProgressEvent(event, showingScenario) {
   if (!showingScenario) return false;
+  if (!isProgressEvent(event)) return false;
+  return event.data.subject === showingScenario;
+}
+
+/**
+ * isProgressEvent is the SHAPE half of the question, without the
+ * scoping half.
+ *
+ * The store looks the entry up by the event's own subject, so asking
+ * `acceptProgressEvent(msg, msg.data.subject)` compared the subject
+ * with itself -- a guard that reads as scoping while scoping nothing,
+ * and which a later edit would trust. The real scoping there is the
+ * keyed lookup and the running check.
+ */
+export function isProgressEvent(event) {
   if (event?.type !== "deploy_progress") return false;
-  const data = event?.data;
-  if (!data?.line) return false;
-  return data.subject === showingScenario;
+  return Boolean(event?.data?.line);
 }
 
 

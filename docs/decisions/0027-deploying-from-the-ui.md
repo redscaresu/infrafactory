@@ -441,6 +441,15 @@ line emitted after the response is a line the browser discards.
 `ProgressSink.Close` is therefore called explicitly before `writeActionResult`, and
 still deferred for panics. It is idempotent, so the two do not fight.
 
+This makes the tail arrive first; it does not GUARANTEE it (corrected 2026-09-04).
+The broadcast goes out on the websocket and the response on the HTTP connection,
+and two connections have no ordering between them — an in-process test can only pin
+the order the server writes in. It is kept as the better of two orderings rather
+than presented as a solution. The residual is narrow: `deploy` newline-terminates
+every line it writes, so there is no tail to lose for today's producer. One that
+emitted a partial final line would need it carried in the response body rather than
+raced against it.
+
 ### A refusal discards the log it collected
 
 The store entry is created before the POST so that progress can stream during the
@@ -454,6 +463,14 @@ are dropped.
 Dropping it on leaving is not enough: a deploy still running when the reader left
 finishes afterwards, and nothing was left to drop it. Arriving at a scenario drops
 a finished deploy too.
+
+**A SUCCESS only** (corrected 2026-09-04). A stale success is a false claim about
+infrastructure whose TTL may have expired. A failure is not a claim at all, it is
+an unread report — "it may have created resources that are still running", with
+the project id somebody has to remove by hand — and a deploy that fails before
+`registerDeployment` has no live record either, so that banner is the only place
+it is ever said. Dropping it because the reader looked away is how the leak goes
+unnoticed.
 
 ### What `already_deploying: false` does and does not mean
 

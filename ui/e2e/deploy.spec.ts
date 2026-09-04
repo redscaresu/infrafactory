@@ -1184,3 +1184,63 @@ test('a deploy that finishes after you leave does not greet you on your return',
   // And the button works, rather than being stuck behind a ghost.
   await expect(page.getByTestId('scenario-deploy')).toBeEnabled();
 });
+
+// The mirror image of the test above, and the more important half.
+//
+// A failure is not a stale claim, it is an UNREAD REPORT: "it may have
+// created resources that are still running", carrying the project id
+// somebody has to remove by hand. A deploy that fails before
+// registration has no live record either, so this banner is the only
+// place it is ever said -- and dropping it because the reader looked
+// away is how the leak goes unnoticed.
+test('a deploy that FAILS while you are away still reports when you return', async ({ page }) => {
+  await page.route('**/api/deployments/preview**', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        scenario: 'web-app-paris',
+        deployable: true,
+        expires_at: null,
+        internet_facing: false,
+        deploy_allowed: true,
+        already_live: [],
+        already_live_unknown: false,
+        cost: { components: [], eur_per_hour: 0, unpriced: [], complete: true, modelled: true }
+      })
+    })
+  );
+
+  let release: () => void = () => {};
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await page.route('**/api/deployments', async (route) => {
+    if (route.request().method() !== 'POST') return route.continue();
+    await held;
+    return route.fulfill({
+      status: 409,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        clean: false,
+        steps: [],
+        failures: [{ detail: 'project 7c98d82e is live and could not be deleted' }]
+      })
+    });
+  });
+
+  await page.goto('/scenarios/training/web-app-paris');
+  await page.getByTestId('scenario-deploy').click();
+  await page.getByTestId('deploy-confirm-go').click();
+  await expect(page.getByTestId('deploy-progress')).toBeVisible();
+
+  await page.getByTestId('sidebar-scenario-training/lb-serving-paris').click();
+  await expect(page.locator('main h1')).toContainText('lb-serving-paris');
+  release();
+
+  await page.getByTestId('sidebar-scenario-training/web-app-paris').click();
+  await expect(page.locator('main h1')).toContainText('web-app-paris');
+
+  const outcome = page.getByTestId('deploy-outcome');
+  await expect(outcome).toContainText('may have created resources that are still running');
+  // The project id is the handle for removing it by hand.
+  await expect(outcome).toContainText('7c98d82e');
+});

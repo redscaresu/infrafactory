@@ -1,5 +1,5 @@
 import { writable, get } from "svelte/store";
-import { acceptProgressEvent } from "./deployments-view.js";
+import { isProgressEvent } from "./deployments-view.js";
 
 /**
  * The deploy this tab started, if any.
@@ -57,8 +57,9 @@ function ensureSocket() {
       // the `__connected` sentinel; a keyed read makes it unreachable
       // by construction instead, because the sentinel is a boolean and
       // has no `running`.
-      const scenario = msg?.data?.subject;
-      if (!scenario || !acceptProgressEvent(msg, scenario)) return;
+      if (!isProgressEvent(msg)) return;
+      const scenario = msg.data.subject;
+      if (!scenario) return;
 
       deploys.update((all) => {
         const entry = all[scenario];
@@ -121,12 +122,19 @@ export function finishDeploy(scenario, outcome) {
  * refuseDeploy records an ending that never began, and DISCARDS the log.
  *
  * `running` is true from `beginDeploy` until the POST resolves, and for
- * a deploy that is about to be REFUSED that flag is true and wrong: the
- * refusal means somebody else holds the lock, so every line matching
- * this scenario during the round trip belongs to their apply. Keeping
- * them rendered another tab's live log underneath an "already
- * deploying" banner -- the adoption this store exists to refuse,
- * through the one window where the running check cannot help.
+ * a deploy the server REFUSED that flag was true and wrong for the
+ * whole round trip. Nothing of ours started, so no line collected in
+ * that window was ours.
+ *
+ * It matters most for the lock refusal, because that is the one where
+ * lines actually arrive: the refusal's own reason is that another apply
+ * of this scenario is running and broadcasting. Keeping them rendered
+ * that apply's live log underneath an "already deploying" banner -- the
+ * adoption this store exists to refuse, through the one window where
+ * the running check cannot help. For the other pre-flight refusals
+ * (no such scenario, no --allow-deploy, a malformed request) the log is
+ * empty and discarding it is a no-op; the rule is stated once rather
+ * than conditioned on which refusal arrived.
  *
  * The entry is kept rather than deleted, because the refusal itself has
  * to be reported somewhere the reader will see it, and an outcome is

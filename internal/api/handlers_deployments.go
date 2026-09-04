@@ -363,8 +363,7 @@ func deployHandler(state *serverState) http.HandlerFunc {
 
 		result, err := state.deployer.Deploy(ctx, req.Scenario, req.TTL, progress)
 
-		// Flushed BEFORE the response, and the ordering is load-bearing
-		// again -- for a different reason than the one that was removed.
+		// Flushed BEFORE the response.
 		//
 		// The page stops accepting progress for a deploy the moment its
 		// request resolves, because an entry that is no longer running
@@ -372,6 +371,20 @@ func deployHandler(state *serverState) http.HandlerFunc {
 		// after the response is a line the browser discards: the tail of
 		// a billable apply's log, dropped silently, by the flush that
 		// exists to guarantee it is never dropped.
+		//
+		// This makes the tail arrive first; it does NOT guarantee it.
+		// The broadcast goes out on the websocket and the response on
+		// the HTTP connection, and two connections have no ordering
+		// between them -- an in-process test can only pin the order the
+		// server writes in, which is what
+		// TestTheLastLineOfAnApplyIsBroadcastBeforeTheResponse does.
+		//
+		// Left as the better of two orderings rather than solved,
+		// because the residual is narrow: `deploy` terminates every line
+		// it writes, so there is no tail to lose for today's producer
+		// (see ProgressSink.Close). A producer that emits a partial
+		// final line would need the line carried in the response body
+		// instead of raced against it.
 		progress.Close()
 
 		if errors.Is(err, ErrDeployInProgress) {

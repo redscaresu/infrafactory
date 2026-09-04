@@ -205,7 +205,13 @@
       // this was written. Adding `deploy_complete` reintroduced the
       // exact defect this filter was added for, because the filter
       // named one event instead of the family.
-      if ((msg as { type?: string })?.type?.startsWith("deploy_")) return;
+      // `typeof` first: this is JSON.parse output, so the cast is a
+      // compile-time claim about untrusted wire data. A frame whose
+      // `type` is a number used to fail the old `===` comparison
+      // harmlessly; calling `.startsWith` on it throws inside the socket
+      // handler and freezes the run log for the rest of the session.
+      const kind = (msg as { type?: unknown })?.type;
+      if (typeof kind === "string" && kind.startsWith("deploy_")) return;
 
       lines = [...lines.slice(-999), JSON.stringify(msg)];
       void loadRunState();

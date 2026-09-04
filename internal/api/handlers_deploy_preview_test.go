@@ -269,36 +269,12 @@ func TestPreviewCallsAComputeOnlyScenarioInternetFacing(t *testing.T) {
 // The preview is meant to be everything a person needs in order to
 // decide, and "this server will refuse" is part of that.
 func TestPreviewReportsWhetherTheServerWouldAcceptTheDeploy(t *testing.T) {
-	dir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "sc.yaml"), []byte(`scenario: previewable
-version: "1.0"
-cloud: scaleway
-description: x
-resources:
-  compute:
-    purpose: web-server
-    size: small
-acceptance_criteria:
-  - type: destruction
-    expect: no_orphans
-`), 0o644))
-
-	cfg := config.Default()
-	cfg.Paths.Scenarios = dir
-
 	for name, deployer := range map[string]DeploymentDeployer{
 		"without the flag": nil,
 		"with the flag":    &fakeDeployer{},
 	} {
 		t.Run(name, func(t *testing.T) {
-			srv := NewServer(ServerConfig{Config: cfg, Deployer: deployer})
-			rec := httptest.NewRecorder()
-			srv.Handler.ServeHTTP(rec,
-				httptest.NewRequest(http.MethodGet, "/api/deployments/preview?scenario=previewable", nil))
-
-			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-			var got deployPreview
-			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+			got := previewOf(t, ServerConfig{Deployer: deployer})
 			assert.Equal(t, deployer != nil, got.Allowed)
 		})
 	}
@@ -350,18 +326,6 @@ func previewWithEstate(t *testing.T, deployments []livestore.Deployment) deployP
 // fixtures and CI reported five unrelated failures.
 func previewOf(t *testing.T, sc ServerConfig) deployPreview {
 	t.Helper()
-	rec := previewResponse(t, sc)
-	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-
-	var got deployPreview
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
-	return got
-}
-
-// previewResponse is previewOf without the status assertion, for the
-// tests that are about the status.
-func previewResponse(t *testing.T, sc ServerConfig) *httptest.ResponseRecorder {
-	t.Helper()
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "sc.yaml"), []byte(`scenario: previewable
 version: "1.0"
@@ -383,7 +347,11 @@ acceptance_criteria:
 	rec := httptest.NewRecorder()
 	NewServer(sc).Handler.ServeHTTP(rec,
 		httptest.NewRequest(http.MethodGet, "/api/deployments/preview?scenario=previewable", nil))
-	return rec
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	var got deployPreview
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	return got
 }
 
 // The unreadable branch is the whole reason AlreadyLiveUnknown exists,
