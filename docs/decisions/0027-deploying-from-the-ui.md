@@ -491,3 +491,34 @@ no field this server sets can say otherwise, which is why there is no
 The guard for that case is not in the preview. It is the run-owned project
 (ADR-0025), which contains a duplicate rather than merging it into an existing one,
 and the estate page, where both appear once recorded.
+
+
+## Amendment, 2026-09-04 (round ten): what a banner is FOR decides when it goes
+
+Three rounds circled one rule and got it wrong twice, because the predicate was
+about the wrong property.
+
+A finished deploy's banner is dropped when it has nothing left to report — not
+when it succeeded. `outcome.mayHaveCreated` is that question, decided where the
+outcome is built:
+
+  - **success** — recorded on the estate page, so the banner is a claim about a TTL
+    that may already have expired. Droppable.
+  - **refusal** — `startedNothing` is the server's own word that nothing was
+    created. Nothing to report. Droppable, and keeping it made a transient "already
+    deploying" reappear on every visit for the rest of the session.
+  - **unproven, or a request that failed after the apply began** — may have left
+    resources with no record anywhere, and carries the project id somebody has to
+    remove by hand. Kept until the tab closes.
+
+A report that is kept also has to be REACHABLE. The outcome banner lives inside the
+page's `{#if detail}` guard, so a scenario read that happens to fail hides it; the
+load-error branch renders every kept report instead, named individually, because
+without `detail` the page cannot say which scenario it is.
+
+### An absent field is not an empty one, on the client either
+
+The server makes an empty `already_live` a checked claim, returning `(out, true)`
+on every path that did not look. Reading a missing field as `[]` discarded that at
+the client boundary — an older server, or a body trimmed by an intermediary, would
+render no warning at all, indistinguishable from "we looked and there is nothing".

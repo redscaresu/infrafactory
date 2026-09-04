@@ -105,7 +105,11 @@
   // and is exactly as old as they are. The rows say so about
   // themselves; this says so about the banner, from the same builder
   // the summary line uses so the two cannot word it differently.
-  $: applyingLabel = deployingLabel(deploying, Boolean(loadError));
+  // Derived from the same `estateState` the summary line uses, not from
+  // `loadError` separately. They agree today only by coincidence, and
+  // this label exists precisely so the banner and the summary two lines
+  // above it cannot word the same claim differently.
+  $: applyingLabel = deployingLabel(deploying, estateState === "failed");
   // The one condition under which this page may say nothing is running.
   // Shared with the summary rather than re-derived, because two copies
   // is how one of them ends up contradicting the other.

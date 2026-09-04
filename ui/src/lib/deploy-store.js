@@ -39,6 +39,11 @@ export const deploys = writable({});
 let socket;
 let watchers = 0;
 
+// Matches the Live Run page's cap. Deliberately generous: a deploy log
+// is read to find out what a long apply is doing, and truncating it
+// hard would lose the stage boundaries a reader navigates by.
+const MAX_PROGRESS_LINES = 999;
+
 // Injected rather than imported: `ws.ts` is TypeScript and the unit
 // tests run under `node --test`, which resolves plain JS only.
 let connect = () => () => {};
@@ -73,7 +78,18 @@ function ensureSocket() {
         // completed-outcome banner. That is the adoption this slice
         // removed, arriving through the door its own comments name.
         if (!entry?.running) return all;
-        return { ...all, [scenario]: { ...entry, progress: [...entry.progress, msg.data.line] } };
+        // Capped, like the Live Run page one file away. A real Scaleway
+        // apply emits thousands of lines over minutes, and every one of
+        // them copies the whole array, notifies the store and re-renders
+        // the whole `{#each}` -- so the log grows quadratically and the
+        // tab stalls during the apply it exists to make watchable.
+        //
+        // The tail is what a reader wants: the last thing that happened.
+        const progress = [...entry.progress, msg.data.line];
+        return {
+          ...all,
+          [scenario]: { ...entry, progress: progress.slice(-MAX_PROGRESS_LINES) }
+        };
       });
     },
     (connected) => deploys.update((all) => ({ ...all, __connected: connected }))

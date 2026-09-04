@@ -143,16 +143,28 @@
    */
   function forgetFinishedDeploy() {
     if (!detail?.name) return;
-    forgetIfSucceeded(detail.name);
+    forgetReportlessDeploy(detail.name);
   }
 
-  /** forgetIfSucceeded is the one rule about what may be forgotten. */
-  function forgetIfSucceeded(scenario: string) {
+  /**
+   * forgetReportlessDeploy is the one rule about what may be forgotten.
+   *
+   * The question is not "did it succeed?" -- it is "could this still
+   * describe infrastructure nobody has a record of?". A REFUSAL is a
+   * failure and started nothing, so keeping it made a transient "already
+   * deploying" banner reappear on every later visit for the rest of the
+   * session, under an enabled Deploy button, long after the apply it
+   * referred to had finished.
+   *
+   * `mayHaveCreated` is that question, answered where the outcome is
+   * built rather than inferred from `ok` here.
+   */
+  function forgetReportlessDeploy(scenario: string) {
     const entry = get(deploys)[scenario];
-    if (entry && !entry.running && entry.outcome?.ok) forgetDeploy(scenario);
+    if (entry && !entry.running && !entry.outcome?.mayHaveCreated) forgetDeploy(scenario);
   }
 
-  // Arriving drops a SUCCESS that finished while the reader was away.
+  // Arriving drops a finished deploy that has nothing left to report.
   //
   // The leave-hooks cannot: a deploy still running when the reader left
   // finishes afterwards, and nothing was left to drop it -- so it lived
@@ -175,7 +187,7 @@
   let arrivalHandled = -1;
   $: if (detail?.name && arrivalHandled !== navigation) {
     arrivalHandled = navigation;
-    forgetIfSucceeded(detail.name);
+    forgetReportlessDeploy(detail.name);
   }
 
   $: scenarioPath = ($page.params.path || "").toString();
@@ -208,10 +220,32 @@
     window.location.href = encodeLiveURL(scenario, active.run_id);
   }
 
+  /** sentence ends a message so the next one does not run into it. */
+  function sentence(text: string): string {
+    const trimmed = text.trim();
+    return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
+  }
+
+  /**
+   * named prefixes the scenario, because an apply takes minutes and an
+   * unattributed "deployed." is a claim about the wrong thing.
+   *
+   * Done here rather than in the template so that the ONE message that
+   * already names its own scenario -- the server's refusal -- can skip
+   * it. Two layers independently solving the same attribution problem
+   * rendered the name twice.
+   */
+  function named(scenario: string, outcome: { ok: boolean; mayHaveCreated: boolean; message: string }) {
+    return { ...outcome, message: `${scenario}: ${outcome.message}` };
+  }
+
   async function loadDetail() {
+    // Cleared BEFORE the guard. Returning early on an empty path left a
+    // previous scenario's failure on screen for a page that was never
+    // asked about.
+    detailError = "";
     if (!scenarioPath) return;
     const token = navigation;
-    detailError = "";
     try {
       const loaded = await api.getScenario(scenarioPath);
       if (!current(token)) return;
@@ -359,7 +393,7 @@
     beginDeploy(target);
 
     try {
-      finishDeploy(target, toDeployOutcome(await api.deployScenario(target)));
+      finishDeploy(target, named(target, toDeployOutcome(await api.deployScenario(target))));
     } catch (err) {
       const message = err instanceof Error ? err.message : "The deploy failed.";
 
@@ -397,13 +431,23 @@
         // round trip, while the reason for the refusal is that somebody
         // else's apply of this scenario holds the lock. Those lines are
         // theirs.
-        refuseDeploy(target, { ok: false, message });
+        // NOT re-prefixed with the scenario. The server names it
+        // deliberately ("a bare refusal leaves a reader wondering which
+        // of their tabs is responsible"), and prefixing produced
+        // "web-app-paris: web-app-paris is already deploying".
+        refuseDeploy(target, { ok: false, mayHaveCreated: false, message });
         return;
       }
-      finishDeploy(target, {
-        ok: false,
-        message: `${message} The deploy may still be running on the server — check the Deployments page before starting another.`
-      });
+      finishDeploy(
+        target,
+        named(target, {
+          ok: false,
+          mayHaveCreated: true,
+          // Punctuated. Server error strings and `deploy failed: 502`
+          // never end in a full stop, so the two sentences ran together.
+          message: `${sentence(message)} The deploy may still be running on the server — check the Deployments page before starting another.`
+        })
+      );
     }
   }
 
@@ -730,7 +774,7 @@
       class={`mt-3 text-sm ${deployOutcome.ok ? "text-emerald-800" : "font-semibold text-rose-800"}`}
       data-testid="deploy-outcome"
     >
-      {detail?.name}: {deployOutcome.message}
+      {deployOutcome.message}
     </p>
   {/if}
   {#if status}<p class="mt-3 text-sm text-slate-700">{status}</p>{/if}
@@ -761,4 +805,22 @@
   <p class="text-sm font-semibold text-rose-800" data-testid="scenario-load-error">
     This scenario could not be read: {detailError}
   </p>
+
+  <!-- Every kept report, not just this scenario's.
+
+       The outcome banner lives inside `{#if detail}`, so a transient
+       scenario-load failure hid it -- and the store only keeps outcomes
+       that MAY DESCRIBE INFRASTRUCTURE nobody has a record of, carrying
+       the project id somebody has to remove by hand. Losing those
+       because an unrelated GET returned 500 is the same
+       report-destroyed-by-a-cleanup defect, arriving through the fix
+       for a blank page.
+
+       Named individually, because without `detail` this page cannot
+       say which scenario it is. -->
+  {#each Object.entries($deploys).filter(([k, e]) => k !== "__connected" && e?.outcome?.mayHaveCreated) as [scenario, entry] (scenario)}
+    <p class="mt-3 text-sm font-semibold text-rose-800" data-testid="deploy-outcome-orphaned">
+      {entry.outcome.message}
+    </p>
+  {/each}
 {/if}

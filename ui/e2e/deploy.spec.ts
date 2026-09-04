@@ -15,6 +15,8 @@ const PREVIEW = {
   cost_summary: 'about €0.04/hour at list price, €0.17 for 4h0m0s',
   internet_facing: true,
   deploy_allowed: true,
+  already_live: [],
+  already_live_unknown: false,
   cost: {
     components: [
       { name: 'DEV1-S instance', count: 1, eur_per_hour: 0.00898, priced: true },
@@ -419,6 +421,8 @@ test.describe('Deploy progress', () => {
           expires_at: null,
           internet_facing: false,
           deploy_allowed: true,
+          already_live: [],
+          already_live_unknown: false,
           cost: { components: [], eur_per_hour: 0, unpriced: [], complete: true, modelled: true }
         })
       })
@@ -501,6 +505,8 @@ test.describe('Deploy state outlives the page', () => {
           expires_at: null,
           internet_facing: false,
           deploy_allowed: true,
+          already_live: [],
+          already_live_unknown: false,
           cost: { components: [], eur_per_hour: 0, unpriced: [], complete: true, modelled: true }
         })
       })
@@ -553,6 +559,8 @@ test.describe('Deploy state outlives the page', () => {
           expires_at: null,
           internet_facing: false,
           deploy_allowed: true,
+          already_live: [],
+          already_live_unknown: false,
           cost: { components: [], eur_per_hour: 0, unpriced: [], complete: true, modelled: true }
         })
       })
@@ -608,6 +616,8 @@ test.describe('Deploy progress in the DOM', () => {
     expires_at: null,
     internet_facing: false,
     deploy_allowed: true,
+    already_live: [],
+    already_live_unknown: false,
     cost: { components: [], eur_per_hour: 0, unpriced: [], complete: true, modelled: true }
   };
 
@@ -793,6 +803,8 @@ test('a finished deploy does not haunt the scenario page', async ({ page }) => {
         expires_at: null,
         internet_facing: false,
         deploy_allowed: true,
+        already_live: [],
+        already_live_unknown: false,
         cost: { components: [], eur_per_hour: 0, unpriced: [], complete: true, modelled: true }
       })
     })
@@ -1338,4 +1350,107 @@ test('a successful deploy banner does not follow you back', async ({ page }) => 
   await expect(page.locator('main h1')).toContainText('web-app-paris');
 
   await expect(page.getByTestId('deploy-outcome')).toHaveCount(0);
+});
+
+// A refusal started NOTHING, which is what `startedNothing` proves. So
+// it is not a report of infrastructure and must not outlive the visit
+// the way a real failure does -- keeping it made a transient "already
+// deploying" banner reappear on every later visit for the rest of the
+// session, under an enabled Deploy button, long after the apply it
+// referred to had finished.
+test('a refusal does not haunt the page after the reader gives up', async ({ page }) => {
+  await page.route('**/api/deployments/preview**', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        scenario: 'web-app-paris',
+        deployable: true,
+        expires_at: null,
+        internet_facing: false,
+        deploy_allowed: true,
+        already_live: [],
+        already_live_unknown: false,
+        cost: { components: [], eur_per_hour: 0, unpriced: [], complete: true, modelled: true }
+      })
+    })
+  );
+  await page.route('**/api/deployments', (route) =>
+    route.request().method() === 'POST'
+      ? route.fulfill({
+          status: 423,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            error: 'web-app-paris is already deploying; wait for it to finish or tear it down'
+          })
+        })
+      : route.continue()
+  );
+
+  await page.goto('/scenarios/training/web-app-paris');
+  await page.getByTestId('scenario-deploy').click();
+  await page.getByTestId('deploy-confirm-go').click();
+
+  const outcome = page.getByTestId('deploy-outcome');
+  await expect(outcome).toContainText('already deploying');
+  // The server names the scenario deliberately, so the page must not
+  // name it again: "web-app-paris: web-app-paris is already deploying".
+  await expect(outcome).not.toContainText('web-app-paris: web-app-paris');
+
+  await page.getByTestId('sidebar-scenario-training/lb-serving-paris').click();
+  await expect(page.locator('main h1')).toContainText('lb-serving-paris');
+  await page.getByTestId('sidebar-scenario-training/web-app-paris').click();
+  await expect(page.locator('main h1')).toContainText('web-app-paris');
+
+  await expect(page.getByTestId('deploy-outcome')).toHaveCount(0);
+});
+
+// The outcome banner lives inside `{#if detail}`, so a transient
+// scenario-load failure hid it -- taking with it the project id somebody
+// has to remove by hand.
+test('a failed scenario load does not hide a leaked project', async ({ page }) => {
+  await page.route('**/api/deployments/preview**', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        scenario: 'web-app-paris',
+        deployable: true,
+        expires_at: null,
+        internet_facing: false,
+        deploy_allowed: true,
+        already_live: [],
+        already_live_unknown: false,
+        cost: { components: [], eur_per_hour: 0, unpriced: [], complete: true, modelled: true }
+      })
+    })
+  );
+  await page.route('**/api/deployments', (route) =>
+    route.request().method() === 'POST'
+      ? route.fulfill({
+          status: 409,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            clean: false,
+            steps: [],
+            failures: [{ detail: 'project 7c98d82e is live and could not be deleted' }]
+          })
+        })
+      : route.continue()
+  );
+
+  await page.goto('/scenarios/training/web-app-paris');
+  await page.getByTestId('scenario-deploy').click();
+  await page.getByTestId('deploy-confirm-go').click();
+  await expect(page.getByTestId('deploy-outcome')).toContainText('7c98d82e');
+
+  // The next scenario read fails, so the page cannot render its usual
+  // body -- and used to render nothing else either.
+  await page.route('**/api/scenarios/training/lb-serving-paris', (route) =>
+    route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"disk went away"}' })
+  );
+  await page.getByTestId('sidebar-scenario-training/lb-serving-paris').click();
+
+  await expect(page.getByTestId('scenario-load-error')).toContainText('disk went away');
+  await expect(page.getByTestId('deploy-outcome-orphaned')).toContainText('7c98d82e');
 });

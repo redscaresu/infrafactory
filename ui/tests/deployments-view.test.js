@@ -228,6 +228,11 @@ test("teardownOutcome treats a missing result as a failure", () => {
 const previewFixture = (over = {}) => ({
   scenario: "lb-serving-paris",
   deployable: true,
+  // The server always sends this, and an ABSENT list is deliberately
+  // not the same as an empty one -- so a fixture that omitted it was
+  // testing the "we could not look" path by accident.
+  already_live: [],
+  already_live_unknown: false,
   image: "nginx:1.27",
   ttl: "4h0m0s",
   expires_at: "2026-09-03T03:47:00Z",
@@ -364,8 +369,18 @@ test("deployWarnings counts several existing deployments", () => {
 
 test("alreadyLiveWarnings is silent when nothing is live", () => {
   assert.deepEqual(alreadyLiveWarnings({ already_live: [] }), []);
-  assert.deepEqual(alreadyLiveWarnings({}), []);
-  assert.deepEqual(alreadyLiveWarnings(undefined), []);
+});
+
+// The server makes an empty list a CHECKED claim. Reading a missing
+// field as an empty one throws that away at the client boundary: an
+// older server, or a body trimmed by an intermediary, would render no
+// warning at all -- indistinguishable from "we looked and there is
+// nothing", on a guard about billable infrastructure.
+test("alreadyLiveWarnings does not read an absent list as an empty one", () => {
+  const [missing] = alreadyLiveWarnings({});
+  assert.match(missing, /could not be fully read/);
+  const [nothing] = alreadyLiveWarnings(undefined);
+  assert.match(nothing, /could not be fully read/);
 });
 
 test("alreadyLiveWarnings says so when the estate could not be read", () => {

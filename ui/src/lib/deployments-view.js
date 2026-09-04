@@ -389,11 +389,26 @@ export function deployOutcome(result) {
  * all, and the guarantee that prevents it lives in another module.
  */
 function actionOutcome(result, words) {
-  if (!result) return { ok: false, message: words.nothing };
-  if (result.clean) return { ok: true, message: words.proven };
+  // `mayHaveCreated` is what decides whether a banner is a REPORT that
+  // has to survive until somebody acts on it, or a claim that goes
+  // stale. It is not the same question as `ok`:
+  //
+  //   - a success is recorded on the estate page, so the banner is a
+  //     claim about a TTL that may already have expired -- droppable;
+  //   - a refusal started nothing, so there is nothing to report --
+  //     droppable, and it used to reappear on every later visit for the
+  //     rest of the session;
+  //   - an unproven action, or one whose request failed after the apply
+  //     began, may have left resources with no record anywhere. That is
+  //     the only kind that must not be forgotten.
+  //
+  // An absent result is the same case: nobody knows what it created.
+  if (!result) return { ok: false, mayHaveCreated: true, message: words.nothing };
+  if (result.clean) return { ok: true, mayHaveCreated: false, message: words.proven };
   const reasons = (result.failures || []).map((f) => f.detail).filter(Boolean);
   return {
     ok: false,
+    mayHaveCreated: true,
     message: reasons.length > 0 ? `${words.unproven} ${reasons.join(" ")}` : words.unproven
   };
 }
@@ -523,14 +538,23 @@ export function alreadyLiveWarnings(preview) {
   // let the order mean something.
   const warnings = [];
 
-  const live = Array.isArray(preview?.already_live) ? preview.already_live : [];
+  // An ABSENT list is not an empty one. The server goes to some trouble
+  // to make an empty `already_live` a CHECKED claim -- `out :=
+  // []string{}`, and `(out, true)` on every path that did not look -- and
+  // reading a missing field as `[]` throws that away at the client
+  // boundary: an older server, or a body trimmed by an intermediary,
+  // would render no warning at all, indistinguishable from "we looked
+  // and there is nothing".
+  const looked = Array.isArray(preview?.already_live);
+  const live = looked ? preview.already_live : [];
+  const unknown = preview?.already_live_unknown === true || !looked;
 
   // "Could not look" is not "nothing is there", and this guard is about
   // billable infrastructure. It must not DISCARD what was found either:
   // the unreadable flag is estate-global -- one corrupt record anywhere
   // sets it -- so it qualifies the concrete list rather than replacing
   // it.
-  const caveat = preview?.already_live_unknown
+  const caveat = unknown
     ? " Some live records could not be read, so there may be more than this."
     : "";
 
@@ -540,9 +564,9 @@ export function alreadyLiveWarnings(preview) {
     warnings.push(
       live.length === 1
         ? `${ids} is already deployed from this scenario. Deploying again creates a SECOND project and a second bill; it does not replace it.${caveat}`
-        : `${live.length} deployments from this scenario are already live (${ids}). Deploying again creates a THIRD project and another bill; it does not replace them.${caveat}`
+        : `${live.length} deployments from this scenario are already live (${ids}). Deploying again creates ANOTHER project and another bill; it does not replace them.${caveat}`
     );
-  } else if (preview?.already_live_unknown) {
+  } else if (unknown) {
     warnings.push(
       "The live estate could not be fully read, so whether this scenario is already deployed is unknown. Check the Deployments page before continuing."
     );

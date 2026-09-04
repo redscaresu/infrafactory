@@ -2,6 +2,48 @@
 
 Last updated: 2026-09-04
 
+## 2026-09-04 — S163e-fixes (round ten): asking the wrong question about what to forget
+
+**13 findings, 9 accepted, 4 declined.** The declines are the point: convergence is
+one pass with no finding that changes behaviour, correctness, or what a reader is
+told, and by this round most of the yield was style — import tidying, test-fixture
+duplication, allocation in a template. Several accepts are defects the previous
+round's fixes introduced.
+
+**A banner that could never be cleared.** Round nine made failures survive until the
+tab does, because they may describe unrecorded infrastructure. A REFUSAL is a
+failure — and `startedNothing` is the server's word that it created nothing — so a
+transient 423 stuck, reappearing on every later visit under an enabled Deploy
+button. The rule was asking "did it succeed?" when the question is "could this
+still describe infrastructure nobody has a record of?". That is `mayHaveCreated`,
+answered where the outcome is built.
+
+**The fix for a blank page hid the leak report.** Round nine's `{:else if
+detailError}` branch replaces the whole `{#if detail}` subtree, which contains the
+outcome banner — so a transient scenario-GET failure hid "project 7c98d82e is live
+and could not be deleted" while the store still held it. The error branch renders
+every kept report now, named individually.
+
+**Three that state something false.** "Creates a THIRD project" is true only for
+exactly two existing deployments; `Array.isArray(...) ? … : []` turned an absent
+field into the positive claim "nothing is live", throwing away at the client
+boundary the distinction the server's `(out, true)` exists to preserve; and the
+outcome prefixed the scenario onto a refusal that already named it —
+"web-app-paris: web-app-paris is already deploying".
+
+Also: the progress log grew unbounded, copying the whole array per line, so the tab
+stalls during the apply it exists to make watchable (capped at 999, like the Live
+Run page); `loadDetail` returned before clearing `detailError`, so a previous
+scenario's failure rendered for a page never asked about; the dropped-connection
+message ran two sentences together; and the in-flight staleness flag was derived
+two ways that agree only by coincidence.
+
+**Declined:** the `startedNothing` allowlist's missing body discriminator (needs a
+future edit or a misbehaving intermediary; errs safe by construction, direction
+recorded); template-call allocation; e2e stub duplication (the drift it caused was
+real and is fixed — every stub now carries `already_live`); and the `__connected`
+sentinel sharing a key namespace.
+
 ## 2026-09-04 — S163e-fixes (round nine): following the advice deleted the advice
 
 **10 findings, 9 accepted.** The first is round eight's defect at the other end of
