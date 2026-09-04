@@ -52,9 +52,22 @@
   let loaded = false;
   let timer: ReturnType<typeof setInterval> | undefined;
 
+  // Every read belongs to a request, and only the newest may answer.
+  //
+  // Two things drive `load()` -- a 30s interval and the `await load()`
+  // a teardown does in its `finally` -- so a slow earlier response
+  // could land last and overwrite a newer one: a destroyed row
+  // reappearing, and `deploying` resurrected to claim an apply is in
+  // flight that finished before the teardown started. That was
+  // tolerable when the payload was only a table; `deploying` now drives
+  // an alarm banner and gates the page's only emptiness claim.
+  let reads = 0;
+
   async function load() {
+    const token = ++reads;
     try {
       const payload: DeploymentsResponse = await api.getDeployments();
+      if (token !== reads) return;
       deployments = payload?.deployments || [];
       unreadable = payload?.unreadable || [];
       teardownAllowed = payload?.teardown_allowed === true;
@@ -63,6 +76,7 @@
       deploying = Array.isArray(payload?.deploying) ? payload.deploying : undefined;
       loadError = "";
     } catch (err) {
+      if (token !== reads) return;
       // The previous rows are KEPT on error rather than cleared. An
       // empty table reads as "nothing is running", and a failed refresh
       // is not evidence that the estate is empty -- it is evidence that
@@ -162,7 +176,12 @@
       class="rounded border border-sky-300 bg-sky-50 px-4 py-3 text-sm text-sky-900"
       data-testid="estate-deploying"
     >
-      <p class="font-semibold">{applyingLabel}.</p>
+      <!-- Not `applyingLabel`: the summary line two elements above
+           renders exactly that sentence, and sharing the builder
+           guaranteed the duplication it was extracted to prevent. The
+           count belongs to the summary; this banner exists to NAME what
+           is applying and say why it is not in the table. -->
+      <p class="font-semibold">Applying now</p>
       <p class="mt-1">
         {#if estateState === "failed"}
           <!-- "no record of its own", like the loaded arm. Rows are

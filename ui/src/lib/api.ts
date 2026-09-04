@@ -142,15 +142,25 @@ export const api = {
       const parsed = await readJSON(res);
       const body = parsed.value;
       if ((res.ok || res.status === 409) && isActionResult(body)) return body;
-      // The SAME `writeActionResult` answers both verbs, so the same
-      // reasoning applies: a 2xx is only written for a provably clean
-      // result, and a body that failed to PARSE means the server was
-      // cut off mid-write. Reporting that as a failure put a red
-      // "resources may still be running" over an account the server had
-      // already proven clean -- the false alarm this arc spent rounds
-      // removing, left alive on the sibling verb.
-      if (res.ok && !parsed.ok) {
-        return { clean: true, steps: [], failures: [] };
+      // NOT treated as clean, and the asymmetry with `deployScenario`
+      // is deliberate -- an earlier round made them symmetrical and it
+      // was wrong.
+      //
+      // "Clean" means different things for the two verbs. For a deploy
+      // it means nothing was left behind, and the client uses it only
+      // to decide NOT to raise a leak alarm. For a teardown it is
+      // ADR-0024's central claim: the account is provably empty. That
+      // must never be asserted about a body this code has not read --
+      // synthesising `{clean: true}` from a status manufactures exactly
+      // the proof the rule exists to demand.
+      //
+      // So it is reported honestly: not a failure, not a success.
+      if (res.ok) {
+        throw new Error(
+          parsed.ok
+            ? "the teardown reported success in a form this page does not recognise, so the account is not proven clean"
+            : "the teardown reported success, but its result could not be read, so the account is not proven clean"
+        );
       }
       if (!parsed.ok) {
         throw new Error(`teardown answered ${res.status}, but its result could not be read`);

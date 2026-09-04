@@ -365,8 +365,13 @@ test.describe('Deployments estate page', () => {
     await serveEstate(page, { deployments: [], unreadable: [], deploying: ['web-app-paris'] });
     await page.goto('/deployments');
 
+    // The COUNT belongs to the summary line; the banner names what is
+    // applying and says why it is not in the table. Rendering the count
+    // in both put the same sentence on screen twice.
+    await expect(page.getByTestId('estate-summary')).toContainText('1 deploy in progress');
+
     const banner = page.getByTestId('estate-deploying');
-    await expect(banner).toContainText('1 deploy in progress');
+    await expect(banner).toContainText('Applying now');
     await expect(banner).toContainText('web-app-paris');
     await expect(banner).toContainText('no record of its own yet');
   });

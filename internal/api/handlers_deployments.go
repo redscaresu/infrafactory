@@ -341,11 +341,15 @@ type deployRequest struct {
 // route, a test harness, a future slice -- would otherwise let a GET or
 // a DELETE run a real apply and create billable infrastructure.
 //
-// A plain error, not a refusal. An earlier round deleted the check
-// because converting it to `writeRefusal` made a promise about a
-// response the server does not send; the objection was to the wrapper,
-// not to the guard, and deleting an invariant because its wording was
-// wrong left the invariant to a docstring.
+// It answers with `writeRefusal`, like the collection's own method
+// check: nothing reaching it can have started an apply, so "nothing was
+// started" is true.
+//
+// An earlier round deleted this guard entirely, on the grounds that
+// making it a refusal promised something the server does not send. The
+// objection was to the wrapper, not to the guard -- and deleting an
+// invariant because its wording was wrong left the invariant to a
+// docstring, which is what this comment used to be.
 //
 // Absent unless the server was started with `--allow-deploy`, which is
 // implied by neither `--allow-layer3` nor `--allow-teardown`: an

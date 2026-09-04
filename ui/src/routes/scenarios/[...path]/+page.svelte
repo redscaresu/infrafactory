@@ -296,19 +296,28 @@
    * deploy ends, and a log that vanishes at the end is worse than no
    * log at all.
    */
-  let ending: {
-    scenario: string;
-    ok: boolean;
-    message: string;
-    log?: string[];
-    dropped?: number;
-  } | null = null;
+  type Ending = { ok: boolean; message: string; log?: string[]; dropped?: number };
 
+  // KEYED BY SCENARIO, because this component is reused across scenario
+  // routes and one instance can have started several deploys.
+  //
+  // A single slot lost a race with itself: deploy A, navigate, deploy
+  // B, and whichever finished LAST overwrote the other's ending and its
+  // whole log -- the progress panel and the terminal line vanishing
+  // from under a reader for a real, billable apply that had just
+  // completed, with the store entry already deleted so nothing could
+  // restore it.
+  //
+  // Keying it is not the state machine this replaced: it is still
+  // component-local, still cleared wholesale on a route change, and
+  // still has no staleness rules.
+  let endings: Record<string, Ending> = {};
+
+  // Only ever the one belonging to the page on screen.
+  $: ending = detail?.name ? (endings[detail.name] ?? null) : null;
   // While running, the log comes from the store; after, from `ending`.
-  $: deployProgress = deployEntry?.progress ?? (showEnding ? (ending?.log ?? []) : []);
-  $: deployDropped = deployEntry?.dropped ?? (showEnding ? (ending?.dropped ?? 0) : 0);
-  // Only ever on the page it belongs to.
-  $: showEnding = ending !== null && ending.scenario === detail?.name;
+  $: deployProgress = deployEntry?.progress ?? ending?.log ?? [];
+  $: deployDropped = deployEntry?.dropped ?? ending?.dropped ?? 0;
   $: deploying = detail?.name ? isRunning($deploys, detail.name) : false;
   // A dropped socket and "nothing has happened yet" both produce an
   // empty log, and rendering them the same way tells the reader an apply
@@ -373,13 +382,13 @@
     if (!target) return;
 
     confirmingDeploy = false;
-    // The last attempt's ending goes NOW, not on the next navigation.
+    // THIS scenario's last ending goes now, not on the next navigation.
     // Without this a retry on the same page kept rendering it for the
     // whole minutes-long apply -- a green "Deployed." under a live,
     // streaming log, or worse a red "what it may have left behind is
     // reported at the top of the page" that a reader would take as the
     // state of the deploy currently running.
-    ending = null;
+    endings = Object.fromEntries(Object.entries(endings).filter(([k]) => k !== target));
 
     // The entry is created BEFORE the POST, because streaming progress
     // during the apply is the entire point and the response does not
@@ -397,7 +406,10 @@
       // it was refusing on behalf of -- the entry is running by
       // definition here, and ending it stopped the socket handler
       // feeding its log while the apply carried on billing.
-      ending = { scenario: target, ok: false, message: "A deploy of this scenario is already running here." };
+      endings = {
+        ...endings,
+        [target]: { ok: false, message: "A deploy of this scenario is already running here." }
+      };
       return;
     }
 
@@ -421,10 +433,16 @@
       }
       if (conclusion === "refused") {
         // Nothing of ours started, so nothing to report -- and the log
-        // is discarded, because the entry was collecting for the whole
-        // round trip while the reason for the refusal is that somebody
-        // else's apply of this scenario holds the lock. Those lines are
-        // theirs.
+        // is discarded for EVERY refusal, not just the lock one.
+        //
+        // The entry collects for the whole round trip, and a refusal
+        // means nothing of ours was applying during it. So any line
+        // that arrived belongs to somebody else's apply of the same
+        // scenario -- a CLI run, another tab -- whether we were refused
+        // by the lock, by the origin guard or by a malformed request.
+        // For every refusal but 423 the log is almost always empty and
+        // the discard is a no-op; the rule does not need to know which
+        // refusal it was.
         finish(target, { ok: false, mayHaveCreated: false, message }, { keepLog: false });
         return;
       }
@@ -452,8 +470,7 @@
     opts: { keepLog?: boolean } = {}
   ) {
     const { progress, dropped } = endDeploy(scenario, outcome);
-    ending = {
-      scenario,
+    const finished: Ending = {
       ok: outcome.ok,
       // A leak report is not repeated here -- the layout carries it,
       // because it must survive the reader following its own advice to
@@ -465,6 +482,7 @@
       log: opts.keepLog === false ? [] : progress,
       dropped: opts.keepLog === false ? 0 : dropped
     };
+    endings = { ...endings, [scenario]: finished };
   }
 
   async function loadLayer3Status() {
@@ -534,7 +552,7 @@
     // left. Every hop optional-chained: a `from` carrying a null `url`
     // made this throw, and a throw here aborts the hook, so nothing
     // below ran and the page rendered blank.
-    if (from?.url?.pathname !== to?.url?.pathname) ending = null;
+    if (from?.url?.pathname !== to?.url?.pathname) endings = {};
     scenarioPath = ($page.params.path || "").toString();
     // Belt and braces with confirmDeploy reading preview.scenario: a
     // confirmation describing the page you just left must not still be
@@ -817,12 +835,12 @@
        because they have to survive the reader following their own
        advice to the Deployments page; this line points at them so a log
        does not simply stop with nothing said. -->
-  {#if showEnding}
+  {#if ending}
     <p
       class={`mt-3 text-sm ${ending?.ok ? "text-emerald-800" : "font-semibold text-rose-800"}`}
       data-testid="deploy-outcome"
     >
-      {attributed(ending?.scenario ?? "", ending?.message ?? "")}
+      {attributed(detail.name, ending.message)}
     </p>
   {/if}
 

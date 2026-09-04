@@ -2220,3 +2220,63 @@ test('a retry does not render the last attempt of it over the new one', async ({
   release();
   await expect(page.getByTestId('deploy-outcome')).toContainText('Deployed. It is listed');
 });
+
+// The component is reused across scenario routes, so one instance can
+// have several deploys in flight. A single `ending` slot lost a race
+// with itself: whichever finished LAST overwrote the other's terminal
+// line and its whole log — the panel vanishing from under a reader for
+// a real, billable apply that had just completed, with the store entry
+// already deleted so nothing could restore it.
+test('two deploys in flight do not overwrite each other endings', async ({ page }) => {
+  await page.route('**/api/deployments/preview**', (route) => {
+    const url = new URL(route.request().url());
+    const scenario = url.searchParams.get('scenario') ?? 'web-app-paris';
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        scenario,
+        deployable: true,
+        expires_at: null,
+        internet_facing: false,
+        deploy_allowed: true,
+        already_live: [],
+        already_live_unknown: false,
+        cost: { components: [], eur_per_hour: 0, unpriced: [], complete: true, modelled: true }
+      })
+    });
+  });
+
+  // The FIRST scenario's POST is held until after the second finishes,
+  // so the second's ending lands while the first is still outstanding.
+  let releaseFirst: () => void = () => {};
+  const heldFirst = new Promise<void>((resolve) => (releaseFirst = resolve));
+  await page.route('**/api/deployments', async (route) => {
+    if (route.request().method() !== 'POST') return route.continue();
+    const body = JSON.parse(route.request().postData() ?? '{}');
+    if (body.scenario === 'lb-serving-paris') await heldFirst;
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ clean: true, steps: [], failures: [] })
+    });
+  });
+
+  await page.goto('/scenarios/training/lb-serving-paris');
+  await page.getByTestId('scenario-deploy').click();
+  await page.getByTestId('deploy-confirm-go').click();
+  await expect(page.getByTestId('deploy-progress')).toBeVisible();
+
+  await page.getByTestId('sidebar-scenario-training/web-app-paris').click();
+  await expect(page.locator('main h1')).toContainText('web-app-paris');
+  await page.getByTestId('scenario-deploy').click();
+  await page.getByTestId('deploy-confirm-go').click();
+  await expect(page.getByTestId('deploy-outcome')).toContainText('Deployed. It is listed');
+
+  // The first one finishes now, on a page the reader is not looking at.
+  releaseFirst();
+  await page.waitForLoadState('networkidle');
+
+  // It must not have taken this page's ending with it.
+  await expect(page.getByTestId('deploy-outcome')).toContainText('Deployed. It is listed');
+});

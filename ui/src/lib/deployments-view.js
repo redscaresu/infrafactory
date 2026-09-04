@@ -544,10 +544,19 @@ export function deployWarnings(preview) {
   const warnings = [];
   if (!preview) return warnings;
 
-  // First, because they are the ones a reader is most likely to have
-  // simply forgotten -- and the only ones whose cost is a whole second
-  // bill. Pushed individually so each renders as its own warning.
-  warnings.push(...alreadyLiveWarnings(preview));
+  // The CONCRETE ones first -- a named live deployment is the only
+  // warning whose cost is a whole second bill, and a reader is most
+  // likely to have simply forgotten it.
+  //
+  // The "could not be fully read" caveat is deliberately NOT first.
+  // `already_live_unknown` is estate-GLOBAL: one undecodable record
+  // anywhere sets it for every scenario, so a single corrupt file put
+  // an unactionable red line at the top of every Deploy confirmation
+  // until somebody found it -- ahead of `modelled === false`, whose own
+  // docstring says it invalidates the figures above it. Alarm fatigue
+  // on the common path is what `dismissReport` exists to avoid.
+  const live = alreadyLiveWarnings(preview);
+  warnings.push(...live.filter((w) => !w.startsWith(ESTATE_UNREADABLE)));
 
   if (preview.cost && preview.cost.modelled === false) {
     warnings.push(
@@ -563,6 +572,10 @@ export function deployWarnings(preview) {
   if (preview.internet_facing) {
     warnings.push("This will be reachable from the public internet for its whole lifetime.");
   }
+
+  // Last: true, worth saying, and about the estate rather than about
+  // this scenario.
+  warnings.push(...live.filter((w) => w.startsWith(ESTATE_UNREADABLE)));
 
   return warnings;
 }
@@ -606,6 +619,9 @@ export function isProgressEvent(event) {
  * read it -- the guard the ADR described was documented, tested on the
  * server, and absent from the screen it was for.
  */
+/** ESTATE_UNREADABLE opens the one warning that is not scenario-specific. */
+export const ESTATE_UNREADABLE = "The live estate could not be fully read";
+
 export function alreadyLiveWarnings(preview) {
   // A LIST, one entry per fact, strongest first.
   //

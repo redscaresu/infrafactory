@@ -846,3 +846,26 @@ because the second attempt worked.
 failed to parse means the server was cut off mid-write — for teardown exactly as
 for deploy. Reporting it as a failure put a red "resources may still be running"
 over an account the server had already proven clean.
+
+
+## Amendment, 2026-09-04 (round twenty-three): one page, several deploys
+
+The scenario page is reused across `[...path]` routes, so one component instance can
+have started more than one deploy. The transient ending is therefore keyed by
+scenario, not held in a single slot — a slot lost a race with itself, and whichever
+deploy finished last erased the other's terminal line and its whole log.
+
+Keying it does not reintroduce what the previous amendment deleted: it is still
+component-local, still cleared wholesale on a route change, and still has no
+staleness rules.
+
+### "Clean" is not the same claim for both verbs
+
+For a DEPLOY it means nothing was left behind, and the client uses it only to decide
+not to raise an alarm. For a TEARDOWN it is ADR-0024's central claim — the account
+is provably empty.
+
+So a 2xx whose body cannot be read may be treated as clean for a deploy and must not
+be for a teardown. Synthesising `{clean: true}` from a status manufactures exactly
+the proof the rule exists to demand; the teardown path reports it as neither a
+failure nor a success.

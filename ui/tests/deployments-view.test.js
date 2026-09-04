@@ -6,6 +6,7 @@ import {
   addressHref,
   deployConfirmation,
   deployWarnings,
+  ESTATE_UNREADABLE,
   deployOutcome,
   isProgressEvent,
   nothingRecorded,
@@ -637,4 +638,27 @@ test("estateSummary and knownEmpty agree about an unanswered deploying field", (
   // And it SAYS what is unknown rather than degrading to "0
   // deployments", which is an emptiness claim with the caveat removed.
   assert.match(summary, /did not report what is applying/);
+});
+
+// `already_live_unknown` is estate-GLOBAL: one undecodable record
+// anywhere sets it for every scenario. Leading with it put an
+// unactionable red line at the top of every Deploy confirmation until
+// somebody found the bad file — ahead of the unmodelled-cost warning,
+// whose own docstring says it invalidates the figures above it.
+test("the estate-wide caveat does not outrank the warnings about this scenario", () => {
+  const warnings = deployWarnings(
+    previewFixture({
+      already_live: [],
+      already_live_unknown: true,
+      internet_facing: true,
+      cost: { components: [], eur_per_hour: 0, unpriced: [], complete: false, modelled: false }
+    })
+  );
+
+  const caveat = warnings.findIndex((w) => w.startsWith(ESTATE_UNREADABLE));
+  const unmodelled = warnings.findIndex((w) => w.includes("not modelled here"));
+  assert.ok(caveat > -1, "it is still said");
+  assert.ok(unmodelled > -1);
+  assert.ok(caveat > unmodelled, "but after what invalidates the figures above it");
+  assert.equal(caveat, warnings.length - 1, "and last, being about the estate rather than this");
 });

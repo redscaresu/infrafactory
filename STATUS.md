@@ -2,6 +2,46 @@
 
 Last updated: 2026-09-04
 
+## 2026-09-04 — S163e-fixes (round twenty-three): I called convergence too early
+
+**10 findings, 8 accepted, 2 declined.** The previous entry said the deletion had
+converged. It had not: this round found a real behaviour defect in the new design,
+and a second that round twenty-two's own "fix" introduced.
+
+**A single slot, raced by one component.** `ending` was one variable, and the
+scenario page is reused across `[...path]` routes — so one instance can have several
+deploys in flight, and whichever finished LAST overwrote the other's terminal line
+and its whole log. The panel vanished from under a reader for a real, billable apply
+that had just completed, with the store entry already deleted so nothing could
+restore it. Keyed by scenario now: still component-local, still cleared wholesale on
+a route change, still no staleness rules — it just stopped assuming one page means
+one deploy.
+
+**Manufacturing the proof ADR-0024 demands.** Round twenty-two made
+`tearDownDeployment` synthesise `{clean: true}` for a 2xx whose body could not be
+read, so `teardownOutcome` rendered "Destroyed. The account is provably clean."
+about a response the code never parsed. The symmetry with deploy was the mistake:
+for a deploy, "clean" only decides whether to raise an alarm; for a teardown it is
+ADR-0024's central claim. It reports honestly now — not a failure, not a success.
+
+Also: `deployHandler`'s docstring said "a plain error, not a refusal" above a guard
+that calls `writeRefusal`; `already_live_unknown` is estate-GLOBAL and was leading
+every Deploy confirmation, so one corrupt record put an unactionable red line ahead
+of the warning that invalidates the cost figures; the estate banner repeated the
+summary line verbatim; and `load()` had no request token while two sources drive it,
+so a slow response could resurrect a destroyed row and a finished apply.
+
+**One pushback:** the refusal branch discards the log for every refusal kind and the
+comment justified only the lock case. The CODE is right — a refusal means nothing of
+ours was applying, so any line that arrived is somebody else's whatever the refusal
+was. Comment fixed, code unchanged.
+
+**Declined:** four documented-unreachable branches said to violate YAGNI — each is a
+type-level guard on a function whose wrong answer is a false claim about billable
+infrastructure, and `previewFor`'s defaults are observable (a test marshals that
+struct, which is how the `null` they prevent was found). And the sort-to-membership
+in the preview, declined twice before.
+
 ## 2026-09-04 — S163e-fixes (round twenty-two): the deletion converged
 
 **12 findings, all accepted — and the shape changed.** Reviewing round twenty found
