@@ -22,10 +22,29 @@
  * and tell the reader nothing had happened.
  */
 export class DeployError extends Error {
-  constructor(message, startedNothing) {
+  /**
+   * `conclusion` is what the caller may conclude about infrastructure:
+   *
+   *   - "refused"   -- the server said it rejected the request before
+   *                    anything ran. Nothing exists, and any progress
+   *                    lines collected while waiting were somebody
+   *                    else's apply.
+   *   - "clean"     -- the server answered a success status whose body
+   *                    could not be read. `writeActionResult` answers
+   *                    2xx only for a PROVABLY clean deploy, so nothing
+   *                    was left behind; the log is still ours.
+   *   - "unknown"   -- anything else. The apply may be running right
+   *                    now, and a report has to be filed.
+   *
+   * One value, three states, because two booleans is what this kept
+   * turning into: "did the server refuse?" and "may this have created
+   * something?" are different questions, and a caller that has to
+   * combine them gets one of them wrong.
+   */
+  constructor(message, conclusion) {
     super(message);
     this.name = "DeployError";
-    this.startedNothing = startedNothing;
+    this.conclusion = conclusion;
   }
 }
 

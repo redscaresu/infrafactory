@@ -226,32 +226,44 @@ export function beginDeploy(scenario) {
   return true;
 }
 
-/** recordOutcome ends a deploy, and files anything it has to report. */
-function recordOutcome(all, scenario, outcome, keepProgress) {
+/**
+ * fileReport records what a deploy may have left behind.
+ *
+ * Called BESIDE `deploys.update`, never inside its updater. An updater
+ * is contracted to be a pure value producer; writing another store from
+ * within one notifies that store's subscribers while `deploys` still
+ * holds the previous value -- so the layout rendered a new report
+ * against an entry that was still marked running -- and any retry of
+ * the updater would file the report twice.
+ */
+function fileReport(scenario, outcome, progress) {
+  if (!outcome?.mayHaveCreated) return;
+  reports.update((all) => ({
+    ...all,
+    [scenario]: [
+      ...(all[scenario] ?? []),
+      {
+        // A stable ID, minted here. Dismissing used to name a POSITION,
+        // and positions move: two clicks landing before a re-render
+        // deleted two different reports, the second of them a leak the
+        // operator had never read.
+        id: nextReportID(),
+        message: outcome.message,
+        // A report carries its own OPENING LINES. When the request
+        // never returns an ActionResult -- a dropped connection
+        // mid-apply -- the message is generic and the head of the log
+        // is the only thing naming the run's project and workdir, while
+        // `retireDeploy` and a retry both clear it.
+        opening: (progress ?? []).slice(0, KEPT_OPENING_LINES)
+      }
+    ]
+  }));
+}
+
+/** endDeploy marks a deploy finished, keeping or clearing its log. */
+function endDeploy(all, scenario, outcome, keepProgress) {
   const entry = all[scenario];
   if (!entry) return all;
-
-  if (outcome?.mayHaveCreated) {
-    // A report carries its own OPENING LINES.
-    //
-    // When the request never returns an ActionResult -- a dropped
-    // connection mid-apply -- the message is the generic "may still be
-    // running", and the only thing naming the run's project and workdir
-    // is the head of the log. `retireDeploy` and a retry both clear
-    // `progress`, so a report that pointed at the log pointed at
-    // nothing. It takes a copy instead, and is self-contained.
-    const filed = {
-      // A stable ID, minted here. Dismissing used to name a POSITION,
-      // and positions move: two clicks landing before a re-render
-      // deleted two different reports, the second of them a leak the
-      // operator had never read.
-      id: nextReportID(),
-      message: outcome.message,
-      opening: (entry.progress ?? []).slice(0, KEPT_OPENING_LINES)
-    };
-    reports.update((all) => ({ ...all, [scenario]: [...(all[scenario] ?? []), filed] }));
-  }
-
   return {
     ...all,
     [scenario]: {
@@ -264,7 +276,8 @@ function recordOutcome(all, scenario, outcome, keepProgress) {
 }
 
 export function finishDeploy(scenario, outcome) {
-  deploys.update((all) => recordOutcome(all, scenario, outcome, true));
+  fileReport(scenario, outcome, get(deploys)[scenario]?.progress);
+  deploys.update((all) => endDeploy(all, scenario, outcome, true));
   releaseSocket();
 }
 
@@ -291,7 +304,8 @@ export function finishDeploy(scenario, outcome) {
  * keyed by scenario so it lands on the right page and only that page.
  */
 export function refuseDeploy(scenario, outcome) {
-  deploys.update((all) => recordOutcome(all, scenario, outcome, false));
+  fileReport(scenario, outcome, get(deploys)[scenario]?.progress);
+  deploys.update((all) => endDeploy(all, scenario, outcome, false));
   releaseSocket();
 }
 

@@ -50,11 +50,17 @@ test("readJSON separates a failed parse from a null document", async () => {
   assert.deepEqual(failed, { ok: false, value: null });
 });
 
-test("DeployError carries the server's word about what started", () => {
-  const refused = new DeployError("already deploying", true);
-  assert.equal(refused.startedNothing, true);
+// One value, three states. Two booleans is what this kept turning into
+// -- "did the server refuse?" and "may this have created something?" --
+// and a caller that has to combine them gets one of them wrong.
+test("DeployError carries what may be concluded about infrastructure", () => {
+  const refused = new DeployError("already deploying", "refused");
+  assert.equal(refused.conclusion, "refused");
   assert.equal(refused.message, "already deploying");
   assert.ok(refused instanceof Error, "so a caller that only knows Error still sees it");
 
-  assert.equal(new DeployError("Failed to fetch", false).startedNothing, false);
+  assert.equal(new DeployError("Failed to fetch", "unknown").conclusion, "unknown");
+  // A 2xx whose body will not parse: the status proved it clean, so
+  // there is nothing to report even though the result was unreadable.
+  assert.equal(new DeployError("unreadable", "clean").conclusion, "clean");
 });

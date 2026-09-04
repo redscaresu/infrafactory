@@ -769,3 +769,35 @@ pointer the page renders at them, and its log is the only account of the apply.
 starts as `true` for the same reason, because `false` is the positive claim
 "checked, and nothing exists". A preview built without consulting the live store has
 no right to make it.
+
+
+## Amendment, 2026-09-04 (round twenty): one shape for "nothing started"
+
+`api.NothingStarted(message, cause)` and `api.NoSuchScenario(message)`. The message
+is the caller's, the sentinel is matched by `Is`, the cause is exposed by `Unwrap`.
+It had grown to two exported sentinels and three bespoke error types across two
+packages, each unwrapping differently — for a concept that is one bit.
+
+The type no longer claims `os.ErrNotExist`. It did, through a custom `Is`, and that
+promise held for `errors.Is` and not for `os.IsNotExist` — which unwraps three
+concrete types and compares by `==`, consulting neither `Is` nor `Unwrap`. No custom
+type can satisfy it short of being an `*fs.PathError`, which would put filesystem
+framing back into the message this 404 exists to keep out. A promise that holds for
+one of two idioms is worse than none.
+
+### What a client may conclude from a failed deploy request
+
+Three states, not two booleans:
+
+  - **refused** — the server said it rejected the request before anything ran.
+  - **clean** — a 2xx whose body could not be read. `writeActionResult` answers 2xx
+    only for a provably clean result, so nothing was left behind and the log is
+    still the reader's.
+  - **unknown** — anything else. The apply may be running, and a report is filed.
+
+### An empty `deployment` is not proof of a leak
+
+It means one of three things: nothing was created, something was and could not be
+registered, or the result was unreadable so the id never arrived. The page says "no
+record of it reached this page", which is true of all three, rather than asserting
+the one it cannot distinguish.

@@ -115,40 +115,70 @@ var ErrDeployInProgress = errors.New("a deploy of this scenario is already runni
 // are still running". Nothing else can tell -- a deploy is detached
 // from the request that starts it, and every failure mode looks the
 // same from outside.
-//
-// Only the deployer knows. It resolves the name, rebuilds its runtime
-// and parses its flags before the apply begins, and each of those can
-// fail; without a way to say so, every one of them pinned a permanent
-// false leak report for a request that never reached Scaleway.
 var ErrNothingStarted = errors.New("nothing was started")
 
 // ErrNoSuchScenario means the name did not resolve.
 //
 // A refinement of ErrNothingStarted rather than a separate fact -- it
 // answers 404 where its parent answers 500 -- and both promise the same
-// thing about the cloud. Distinct from a bare `os.ErrNotExist`, which
-// says a file was missing and says nothing about WHEN: a state file or
-// a workdir vanishing mid-apply produces one of those too.
-var ErrNoSuchScenario error = nothingStartedSentinel{msg: "no such scenario"}
+// thing about the cloud.
+var ErrNoSuchScenario error = nothingStarted{message: "no such scenario", noSuchScenario: true}
 
-// nothingStartedSentinel is a sentinel that refines ErrNothingStarted
-// WITHOUT concatenating its text.
+// NothingStarted wraps a cause with the promise, WITHOUT putting either
+// sentinel's text in front of a person.
 //
-// `fmt.Errorf("no such scenario: %w", ErrNothingStarted)` gives the
-// sentinel an Error() of "no such scenario: nothing was started" -- and
-// the handler writes err.Error() straight into the refusal body for a
-// page to render. `LiveDeployer` escapes it only because it returns its
-// own error type; the interface is exported, and an implementer that
-// signals the documented way (`return api.ErrNoSuchScenario`) would put
-// a self-contradicting sentence in front of an operator.
+// One shape for the whole idea. It had grown to two exported sentinels
+// and three bespoke error types across two packages, each unwrapping
+// differently -- so `errors.As`, `errors.Unwrap` and `errors.Is`
+// answered differently depending on which one a caller happened to
+// hold, for a concept that is one bit.
 //
-// Same rule the CLI's own wrappers follow: a sentinel is for
+// The message is the caller's, because `fmt.Errorf("%w: %w",
+// ErrNothingStarted, err)` reads back as "nothing was started: config
+// is unreadable" -- a self-contradicting sentence, and the handler puts
+// `err.Error()` straight into the response body. A sentinel is for
 // `errors.Is`; a message is for a person.
-type nothingStartedSentinel struct{ msg string }
+func NothingStarted(message string, cause error) error {
+	return nothingStarted{message: message, cause: cause}
+}
 
-func (e nothingStartedSentinel) Error() string { return e.msg }
+// NoSuchScenario is NothingStarted for the one case that answers 404.
+func NoSuchScenario(message string) error {
+	return nothingStarted{message: message, noSuchScenario: true}
+}
 
-func (e nothingStartedSentinel) Is(target error) bool { return target == ErrNothingStarted }
+type nothingStarted struct {
+	message string
+	cause   error
+	// noSuchScenario refines the promise. A flag on the value rather
+	// than a second sentinel to match against text: the alternative was
+	// comparing the message, which is the kind of thing that breaks the
+	// day somebody rewords an error.
+	noSuchScenario bool
+}
+
+func (e nothingStarted) Error() string {
+	switch {
+	case e.cause == nil:
+		return e.message
+	case e.message == "":
+		return e.cause.Error()
+	default:
+		return e.message + ": " + e.cause.Error()
+	}
+}
+
+// Unwrap exposes the CAUSE, not the sentinel. The sentinel is matched by
+// Is; unwrapping to it would hand a caller a value whose only content is
+// the discriminator.
+func (e nothingStarted) Unwrap() error { return e.cause }
+
+func (e nothingStarted) Is(target error) bool {
+	if target == ErrNothingStarted {
+		return true
+	}
+	return e.noSuchScenario && target == ErrNoSuchScenario
+}
 
 // DeploymentActor performs the destructive half of live management.
 //

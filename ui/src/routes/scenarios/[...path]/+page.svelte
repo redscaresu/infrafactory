@@ -139,8 +139,19 @@
    * the project id the instruction was about.
    */
   function retireOnLeave() {
-    if (detail?.name) retireDeploy(detail.name);
+    if (shownScenario) retireDeploy(shownScenario);
   }
+
+  // The last scenario whose detail actually LOADED.
+  //
+  // `retireOnLeave` used to read `detail?.name`, which `afterNavigate`
+  // nulls and reloads asynchronously -- so leaving a scenario whose
+  // detail had not finished loading retired nothing, and the stale
+  // banner the hook exists to drop survived to greet the next visit.
+  // The route's path is not a substitute: discovery matches on the
+  // scenario's declared NAME, which need not match its filename.
+  let shownScenario = "";
+  $: if (detail?.name) shownScenario = detail.name;
 
   // There is NO arrival hook. Leaving is the only thing that retires a
   // deploy, and that is enough.
@@ -396,7 +407,19 @@
     // unit test on `beginDeploy`'s return value is what pins it -- a
     // mutation removing this line is not caught by the suite, and that
     // is stated rather than left to be discovered.
-    if (!beginDeploy(target)) return;
+    if (!beginDeploy(target)) {
+      // SAID, not silently abandoned. `confirmingDeploy = false` has
+      // already closed the dialog, so returning here left the reader
+      // with a button that reverted to "Deploy…" and no account of
+      // what happened to their click -- the same defect the refusal
+      // path below was rewritten to remove.
+      finishDeploy(target, {
+        ok: false,
+        mayHaveCreated: false,
+        message: `${target}: a deploy of this scenario is already running here.`
+      });
+      return;
+    }
 
     try {
       finishDeploy(target, toDeployOutcome(await api.deployScenario(target)));
@@ -428,10 +451,17 @@
       // A rejected promise does NOT mean nothing happened: the server
       // detaches the apply from the request, so a dropped connection
       // leaves it running and creating billable infrastructure. Only
-      // `DeployError.startedNothing` is the server's own word that it
-      // refused before anything ran.
-      const startedNothing = err instanceof DeployError && err.startedNothing;
-      if (startedNothing) {
+      // `DeployError.conclusion` is what may be concluded about
+      // infrastructure -- the server's own word where it has one.
+      const conclusion = err instanceof DeployError ? err.conclusion : "unknown";
+
+      if (conclusion === "clean") {
+        // The status proved it clean, and only the BODY was unreadable.
+        // The log is ours and there is nothing to report.
+        finishDeploy(target, { ok: true, mayHaveCreated: false, message: `${target}: ${message}` });
+        return;
+      }
+      if (conclusion === "refused") {
         // The log goes with it. The entry was created before the POST,
         // so it was running -- and therefore collecting -- for the whole
         // round trip, while the reason for the refusal is that somebody

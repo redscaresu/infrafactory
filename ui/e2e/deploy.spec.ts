@@ -1275,7 +1275,7 @@ test('a deploy that FAILS while you are away still reports when you return', asy
   await expect(page.locator('main h1')).toContainText('web-app-paris');
 
   const outcome = page.getByTestId('pending-deploy-report');
-  await expect(outcome).toContainText('may have created resources that are still running');
+  await expect(outcome).toContainText('may have created resources that nothing else is tracking');
   // The project id is the handle for removing it by hand.
   await expect(outcome).toContainText('7c98d82e');
 });
@@ -2077,4 +2077,43 @@ test('re-selecting the scenario you are on does not discard its deploy', async (
   // -lights the bug is worse than none.
   await page.waitForLoadState('networkidle');
   await expect(page.getByTestId('deploy-outcome')).toContainText('Deployed. It is listed');
+});
+
+// `writeActionResult` answers 2xx only for a PROVABLY clean deploy, so
+// a 200 whose body a proxy truncated is not an unknown outcome — it is
+// a clean one whose details were lost. Treating it as unknown filed a
+// permanent, hand-dismissible leak report for the single response shape
+// that guarantees nothing was left behind, and called it "deploy
+// failed: 200".
+test('a clean deploy whose body is unreadable does not raise a leak report', async ({ page }) => {
+  await page.route('**/api/deployments/preview**', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        scenario: 'web-app-paris',
+        deployable: true,
+        expires_at: null,
+        internet_facing: false,
+        deploy_allowed: true,
+        already_live: [],
+        already_live_unknown: false,
+        cost: { components: [], eur_per_hour: 0, unpriced: [], complete: true, modelled: true }
+      })
+    })
+  );
+  await page.route('**/api/deployments', (route) =>
+    route.request().method() === 'POST'
+      ? route.fulfill({ status: 200, contentType: 'application/json', body: '{"clean": tr' })
+      : route.continue()
+  );
+
+  await page.goto('/scenarios/training/web-app-paris');
+  await page.getByTestId('scenario-deploy').click();
+  await page.getByTestId('deploy-confirm-go').click();
+
+  const outcome = page.getByTestId('deploy-outcome');
+  await expect(outcome).toContainText('could not be read');
+  await expect(outcome).not.toContainText('failed: 200');
+  await expect(page.getByTestId('pending-deploy-report')).toHaveCount(0);
 });

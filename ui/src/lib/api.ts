@@ -89,23 +89,26 @@ export const api = {
       const parsed = await readJSON(res);
       const body = parsed.value;
       if ((res.ok || res.status === 409) && isActionResult(body)) return body;
-      // A 2xx whose body will not parse is not a failed deploy. Saying
-      // "deploy failed: 200" names a success status as a failure, on
-      // the screen this slice exists to make trustworthy -- and it is
-      // the exact case `readJSON` was added for.
+      // A 2xx whose body will not parse is not a failed deploy, and it
+      // is not an unknown one either: `writeActionResult` answers 2xx
+      // ONLY for a provably clean result, so the status the code has
+      // already read carries the answer. Throwing it as unknown filed a
+      // permanent leak report for the one response shape that
+      // guarantees nothing was left behind -- and saying "deploy
+      // failed: 200" named a success status as a failure.
       if (res.ok) {
         throw new DeployError(
-          "the deploy finished, but its result could not be read — check the Deployments page for what it left",
-          false
+          "the deploy succeeded, but its result could not be read — see the Deployments page for what it created",
+          "clean"
         );
       }
       throw new DeployError(
         (body as { error?: string })?.error || `deploy failed: ${res.status}`,
-        startedNothing(body)
+        startedNothing(body) ? "refused" : "unknown"
       );
     }
     // No JSON body at all, so no claim: unknown.
-    throw new DeployError((await res.text()) || `deploy failed: ${res.status}`, false);
+    throw new DeployError((await res.text()) || `deploy failed: ${res.status}`, "unknown");
   },
   // Not `request`, deliberately. A teardown that could not prove the
   // account clean answers 409 WITH a full ActionResult -- the per-stage

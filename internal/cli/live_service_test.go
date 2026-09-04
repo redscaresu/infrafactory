@@ -393,9 +393,9 @@ func TestAnUnknownScenarioDoesNotHoldTheLock(t *testing.T) {
 // internal discriminator.
 func TestPreApplyErrorsDoNotLeakTheirSentinelIntoTheMessage(t *testing.T) {
 	for name, err := range map[string]error{
-		"a general pre-apply failure": nothingStarted(errors.New("config is unreadable")),
-		"an unresolved name":          noSuchScenario("typo"),
-		"a blank name":                noSuchScenario(""),
+		"a general pre-apply failure": api.NothingStarted("", errors.New("config is unreadable")),
+		"an unresolved name":          api.NoSuchScenario(`no scenario named "typo"`),
+		"a blank name":                api.NoSuchScenario("no scenario name given"),
 	} {
 		t.Run(name, func(t *testing.T) {
 			assert.True(t, errors.Is(err, api.ErrNothingStarted),

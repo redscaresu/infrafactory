@@ -267,7 +267,7 @@ func (d *LiveDeployer) Deploy(ctx context.Context, scenarioName, ttl string, pro
 		// server that could not rebuild its runtime pinned a permanent
 		// "may have created resources that are still running" for a
 		// request that never reached Scaleway.
-		return api.ActionResult{}, nothingStarted(err)
+		return api.ActionResult{}, api.NothingStarted("", err)
 	}
 
 	cmd := &cobra.Command{Use: "deploy"}
@@ -275,7 +275,7 @@ func (d *LiveDeployer) Deploy(ctx context.Context, scenarioName, ttl string, pro
 	cmd.Flags().String("output", string(OutputModeJSON), "")
 	if ttl != "" {
 		if err := cmd.Flags().Set("ttl", ttl); err != nil {
-			return api.ActionResult{}, nothingStarted(err)
+			return api.ActionResult{}, api.NothingStarted("", err)
 		}
 	}
 
@@ -358,55 +358,6 @@ func deployOutcome(stdout, progress string, deployErr error) api.ActionResult {
 	return out
 }
 
-// noSuchScenario is the error a caller sees when a name did not
-// resolve, and the sentinels it matches are kept OUT of its text.
-//
-// Wrapping with `%w` twice put the machine-readable discriminators into
-// the operator-facing body: `no scenario named "typo": no such
-// scenario: nothing was started: file does not exist`, which the page
-// then prefixed with the scenario name a fourth time. A sentinel is for
-// `errors.Is`; a message is for a person.
-type noSuchScenarioError struct{ name string }
-
-func (e noSuchScenarioError) Error() string {
-	if e.name == "" {
-		return "no scenario name given"
-	}
-	return fmt.Sprintf("no scenario named %q", e.name)
-}
-
-// Is matches the API-level sentinels and os.ErrNotExist.
-//
-// `errors.Is` only. `os.IsNotExist` does NOT consult a custom `Is`: it
-// unwraps *fs.PathError, *os.LinkError and *os.SyscallError and then
-// compares by ==, so it answers false for this type. Stated because the
-// difference is invisible at the call site, and the API package's
-// preview handler uses `os.IsNotExist` on its own paths -- a caller
-// that routed one of these through it would get a 500 for a typo.
-func (e noSuchScenarioError) Is(target error) bool {
-	return target == api.ErrNoSuchScenario || target == api.ErrNothingStarted || target == os.ErrNotExist
-}
-
-func noSuchScenario(name string) error { return noSuchScenarioError{name: name} }
-
-// nothingStarted marks a pre-apply failure without putting the sentinel
-// in front of the reason.
-//
-// `fmt.Errorf("%w: %w", api.ErrNothingStarted, err)` reads back as
-// "nothing was started: config is unreadable" -- a sentence that both
-// contradicts itself and hands an internal discriminator to an
-// operator, since the handler puts `err.Error()` straight into the
-// response body and the page renders it. Same rule as
-// `noSuchScenarioError`: a sentinel is for `errors.Is`; a message is
-// for a person.
-type nothingStartedError struct{ err error }
-
-func (e nothingStartedError) Error() string        { return e.err.Error() }
-func (e nothingStartedError) Unwrap() error        { return e.err }
-func (e nothingStartedError) Is(target error) bool { return target == api.ErrNothingStarted }
-
-func nothingStarted(err error) error { return nothingStartedError{err: err} }
-
 // resolveScenarioByName finds a scenario file by its declared name.
 //
 // The walk matches on the scenario's `scenario:` field rather than its
@@ -419,7 +370,7 @@ func resolveScenarioByName(root, name string) (string, error) {
 		// promise. One of two identical pre-resolution failures got it
 		// and its neighbour did not, so a blank name pinned a permanent
 		// leak report for a request that never got past a string trim.
-		return "", noSuchScenario("")
+		return "", api.NoSuchScenario("no scenario name given")
 	}
 
 	var found string
@@ -464,7 +415,7 @@ func resolveScenarioByName(root, name string) (string, error) {
 		// deliberately treats as "we do not know", so the misconfigured
 		// server produced a permanent false leak report. The walk runs
 		// before anything touches the cloud, whatever went wrong in it.
-		return "", nothingStarted(err)
+		return "", api.NothingStarted("", err)
 	}
 	if found == "" {
 		// Wrapped so the caller can tell "you asked for something that
@@ -473,13 +424,23 @@ func resolveScenarioByName(root, name string) (string, error) {
 		// reporting it as one teaches operators that 500 means nothing
 		// in particular.
 		//
-		// `api.ErrNoSuchScenario` as well as os.ErrNotExist: resolution
-		// runs before the lock is claimed and before anything touches
-		// the cloud, so this is the one 404 that can PROMISE nothing
-		// was created. A bare os.ErrNotExist cannot -- a state file
-		// vanishing mid-apply produces one too -- and the API layer
-		// answers the two differently.
-		return "", noSuchScenario(name)
+		// `api.ErrNoSuchScenario`: resolution runs before the lock is
+		// claimed and before anything touches the cloud, so this is the
+		// one 404 that can PROMISE nothing was created. A bare
+		// os.ErrNotExist cannot -- a state file vanishing mid-apply
+		// produces one too -- and the API layer answers the two
+		// differently.
+		//
+		// It no longer claims os.ErrNotExist at all. It used to, via a
+		// custom `Is`, and that promise was only half true: `errors.Is`
+		// honoured it and `os.IsNotExist` did not, because the latter
+		// unwraps three concrete types and compares by `==` and never
+		// consults `Is`. No custom type can satisfy `os.IsNotExist`
+		// short of BEING an *fs.PathError, which would put filesystem
+		// framing back into the message this 404 exists to keep out.
+		// A promise that holds for one of two idioms is worse than
+		// none, so it is withdrawn: the API layer matches the sentinel.
+		return "", api.NoSuchScenario(fmt.Sprintf("no scenario named %q", name))
 	}
 	return found, nil
 }

@@ -357,17 +357,23 @@ export function teardownPrompt(deployment) {
  * running" is exactly the false green this project exists to avoid.
  */
 export function teardownOutcome(result) {
-  // `mayHaveCreated` comes back on this too, from the shared rule, and
-  // the estate page does not yet read it -- so an unprovable teardown
-  // gets a transient row banner where an unprovable deploy gets a
-  // persistent, dismissible report. Same class, different verb, store
-  // shape and page; named as a follow-up in STATUS rather than bolted
-  // on here. Said out loud so the producer is not silently unread.
-  return actionOutcome(result, {
+  // `mayHaveCreated` is STRIPPED. The shared rule computes it, nothing
+  // on the estate page reads it, and a flag that exists only to be
+  // dropped is data with a note attached -- the next reader has to
+  // establish that an unprovable teardown really does report the same
+  // thing a deploy uses to file a permanent report, and that nothing
+  // acts on it.
+  //
+  // Giving teardown the report path is the right answer and is a slice
+  // of its own: different verb, different store shape, different page.
+  // It is named as a follow-up in STATUS. Until then this produces only
+  // what it can keep.
+  const { mayHaveCreated: _unused, ...outcome } = actionOutcome(result, {
     nothing: "Teardown returned nothing.",
     proven: "Destroyed. The account is provably clean.",
     unproven: "Not provably clean — resources may still be running."
   });
+  return outcome;
 }
 
 /**
@@ -402,8 +408,15 @@ export function deployOutcome(result) {
     // ignore this field, so an edit here changed nothing on screen
     // while every unit test asserting on it kept passing.
     proven: "Deployed. It is listed on the Deployments page until its TTL expires.",
+    // "No record REACHED THIS PAGE", not "left no record". An empty
+    // `deployment` means one of three things: nothing was created,
+    // something was and could not be registered, or the result itself
+    // was unreadable so the id never arrived. Only the middle one is a
+    // certain leak, the client cannot tell them apart, and asserting
+    // the strongest reading contradicted the failure detail printed one
+    // sentence later.
     unproven:
-      "The deploy did not finish cleanly and left no record — it may have created resources that are still running, and nothing else is tracking them.",
+      "The deploy did not finish cleanly, and no record of it reached this page — it may have created resources that nothing else is tracking.",
     // The recorded case, phrased from the id the result carries. Kept
     // inside `actionOutcome` rather than short-circuited before it,
     // because the reason assembly below is the thing that must exist

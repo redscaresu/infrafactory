@@ -583,6 +583,10 @@ test("deploy and teardown judge an unproven action identically", () => {
       teardownOutcome(result).ok,
       "one rule, whatever the vocabulary"
     );
+    // But teardown does not carry `mayHaveCreated`: nothing on the
+    // estate page reads it, and a flag that exists only to be dropped
+    // is data the next reader has to reason about for nothing.
+    assert.ok(!("mayHaveCreated" in teardownOutcome(result)));
   }
 });
 

@@ -335,10 +335,17 @@ type deployRequest struct {
 
 // deployHandler creates a live deployment.
 //
-// Reached only from `deploymentsHandler`, and only under POST -- which
-// is why it has no method check of its own. It had one; it could never
-// fire, and converting it to a refusal made a promise about a response
-// the server does not send.
+// Reached only from `deploymentsHandler`, and only under POST. It keeps
+// its own method check anyway: this is a package-level constructor
+// returning an http.HandlerFunc, so registering it directly -- an alias
+// route, a test harness, a future slice -- would otherwise let a GET or
+// a DELETE run a real apply and create billable infrastructure.
+//
+// A plain error, not a refusal. An earlier round deleted the check
+// because converting it to `writeRefusal` made a promise about a
+// response the server does not send; the objection was to the wrapper,
+// not to the guard, and deleting an invariant because its wording was
+// wrong left the invariant to a docstring.
 //
 // Absent unless the server was started with `--allow-deploy`, which is
 // implied by neither `--allow-layer3` nor `--allow-teardown`: an
@@ -351,6 +358,11 @@ func deployHandler(state *serverState) http.HandlerFunc {
 				"this server was not started with --allow-deploy, so it cannot create deployments")
 			return
 		}
+		if r.Method != http.MethodPost {
+			writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+
 		var req deployRequest
 		if r.Body != nil {
 			defer r.Body.Close()

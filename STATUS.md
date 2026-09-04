@@ -2,6 +2,46 @@
 
 Last updated: 2026-09-04
 
+## 2026-09-04 — S163e-fixes (round twenty): three meanings, and the alarming one
+
+**10 findings, 8 accepted, 2 declined.**
+
+**An empty `deployment` means three things** — nothing created; created but not
+registered; or the result unreadable so the id never arrived — and the message
+asserted the second, one sentence before a failure detail saying the outcome was
+unknown. It says "no record of it reached this page" now, which is true of all
+three.
+
+**The one response shape that guarantees nothing leaked.** `writeActionResult`
+answers 2xx only for a provably clean result, and a 200 whose body a proxy truncated
+was thrown as an unknown failure — so the page filed a permanent leak report for the
+single response that proves the opposite, and called it "deploy failed: 200".
+`DeployError` carries a three-state `conclusion` now (refused / clean / unknown)
+rather than one boolean a caller had to combine with another.
+
+**One bit, five types.** Two exported sentinels and three bespoke error types across
+two packages, with three different unwrap behaviours, all saying "the apply had not
+begun". One shape: `api.NothingStarted(message, cause)` and
+`api.NoSuchScenario(message)`.
+
+**An invariant left to a docstring.** Round sixteen deleted `deployHandler`'s method
+check because converting it to a refusal made a false promise — but the objection
+was to the wrapper, not the guard, and the handler is a package-level constructor
+that a direct registration would let a GET run a real apply through. Restored as a
+plain error, with a test that calls it directly.
+
+Also: `recordOutcome` wrote another store from inside `deploys.update`'s updater;
+`retireOnLeave` read `detail?.name`, which is null mid-load, so leaving a scenario
+whose detail had not arrived retired nothing; the "already running" guard abandoned
+the click silently after closing the dialog; and `teardownOutcome` returned a
+`mayHaveCreated` nothing reads, now stripped.
+
+**Declined:** the `os.IsNotExist` fix, because it does not work — that function
+unwraps three concrete types and compares by `==`, consulting neither `Is` nor
+`Unwrap`, so no custom type can satisfy it without BEING an `*fs.PathError`. The
+promise is withdrawn instead. And the banner's duplicated ternaries, declined for
+the fifth time.
+
 ## 2026-09-04 — S163e-fixes (round nineteen): the test that walked past the bug
 
 **10 findings, 9 accepted, 1 declined.**
