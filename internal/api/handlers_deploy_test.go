@@ -553,13 +553,20 @@ func TestEveryPreApplyFailureSaysNothingWasStarted(t *testing.T) {
 	}
 }
 
-// And the 405 a client can actually receive is a refusal too.
+// The collection's 405 is NOT a refusal, and that is deliberate.
 //
-// `deployHandler` had its own method check, converted to a refusal in an
-// earlier round -- and unreachable, because its only caller invokes it
-// under `if r.Method == http.MethodPost`. The check that fires is the
-// collection handler's, which was the one left behind.
-func TestTheMethodRefusalAClientCanReceiveSaysNothingWasStarted(t *testing.T) {
+// `/api/deployments` is shared: POST is delegated to the deploy path
+// and every other verb lands on this check -- a DELETE meant for a
+// teardown, a PATCH, anything. `started_nothing` is a claim about
+// whether an APPLY created cloud infrastructure, so putting it there is
+// the same category error the origin guard was reverted for: a claim
+// about the wrong verb, made by a route that does not know which verb
+// it refused.
+//
+// There is consequently no deploy-specific 405. `deployHandler` had one
+// and it was unreachable, because its only caller invokes it under
+// `if r.Method == http.MethodPost`.
+func TestTheCollectionMethodErrorMakesNoClaimAboutTheCloud(t *testing.T) {
 	srv := deployServer(t, &fakeDeployer{})
 
 	rec := httptest.NewRecorder()
@@ -568,5 +575,6 @@ func TestTheMethodRefusalAClientCanReceiveSaysNothingWasStarted(t *testing.T) {
 	require.Equal(t, http.StatusMethodNotAllowed, rec.Code)
 	var payload map[string]any
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &payload))
-	assert.Equal(t, true, payload["started_nothing"])
+	_, present := payload["started_nothing"]
+	assert.False(t, present, "this route does not know which verb it refused")
 }

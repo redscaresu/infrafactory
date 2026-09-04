@@ -613,3 +613,17 @@ test("knownEmpty will not call an estate empty without being told what is applyi
   assert.equal(knownEmpty([], [], "loaded", [], true), true);
   assert.equal(knownEmpty([], [], "loaded", [], false), false, "asked, and not told");
 });
+
+// The summary and the empty-state panel are two derived claims about
+// the same thing, and knownEmpty exists so they cannot disagree.
+// Dropping the fifth argument re-entered it with the parameter
+// defaulting to true, so the summary said "Nothing is deployed." while
+// the panel beside it was correctly suppressed.
+test("estateSummary and knownEmpty agree about an unanswered deploying field", () => {
+  assert.equal(knownEmpty([], [], "loaded", [], false), false);
+  assert.notEqual(
+    estateSummary([], [], "loaded", [], false),
+    "Nothing is deployed.",
+    "one screen, one answer"
+  );
+});

@@ -43,6 +43,11 @@ async function serveEstate(page, payload) {
       body: JSON.stringify({
         schema: 'infrafactory.api.deployments.v1',
         teardown_allowed: false,
+        // The server always sends this. An absent field means "we were
+        // not told what is applying", which deliberately withholds the
+        // page's only permitted emptiness claim -- so a fixture that
+        // omitted it was testing that path by accident.
+        deploying: [],
         ...payload
       })
     })
@@ -405,4 +410,28 @@ test.describe('Deployments estate page', () => {
     await page.getByRole('link', { name: 'Deployments' }).click();
     await expect(page).toHaveURL(/\/deployments/);
   });
+});
+
+
+// The server always sends `deploying`. One that predates the field, or a
+// body trimmed by an intermediary, does not -- and reading that as
+// "nothing is applying" would license "Nothing is deployed." on an
+// estate that may be busy creating something.
+test('an estate that did not say what is applying is not called empty', async ({ page }) => {
+  await page.route('**/api/deployments', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        schema: 'infrafactory.api.deployments.v1',
+        teardown_allowed: false,
+        deployments: [],
+        unreadable: []
+      })
+    })
+  );
+  await page.goto('/deployments');
+
+  await expect(page.getByTestId('estate-summary')).not.toHaveText('Nothing is deployed.');
+  await expect(page.getByTestId('estate-empty')).toHaveCount(0);
 });

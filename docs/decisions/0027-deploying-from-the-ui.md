@@ -662,3 +662,24 @@ onto refused teardowns, where it is a claim about the wrong verb. It is a plain
 error again; a deploy client reads that as "we do not know", which is the safe
 direction, and a page this server did not serve is not one whose reader is watching
 a deploy.
+
+
+## Amendment, 2026-09-04 (round sixteen): `started_nothing` is a deploy claim only
+
+Two routes had it stamped on them by generalisation rather than by meaning: the
+cross-origin guard, which refuses every endpoint, and the `/api/deployments`
+collection's 405, which every non-POST verb reaches — including a DELETE meant for
+a teardown. Both are plain errors. The claim is made only where the deploy path
+knows it is true.
+
+A sentinel also stays out of the message. `fmt.Errorf("%w: %w",
+api.ErrNothingStarted, err)` reads back as "nothing was started: config is
+unreadable", and the handler puts that string into the response body for a page to
+render. Wrapper types carry the sentinel for `errors.Is` and leave the text alone.
+
+### One emptiness question, one answer
+
+`knownEmpty` takes `deployingKnown`, and every caller passes it — including
+`estateSummary`, which asks the same question for the line above the panel. A
+parameter added to the predicate and not to its callers puts the two claims back in
+disagreement, which is what having a shared predicate was for.

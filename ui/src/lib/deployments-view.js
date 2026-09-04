@@ -210,7 +210,13 @@ export function deployingLabel(deploying, stale = false) {
  * JSDoc comment was inserted between it and the function it describes.
  * Moved 2026-09-03.)
  */
-export function estateSummary(deployments, unreadable, state = "loaded", deploying = []) {
+export function estateSummary(
+  deployments,
+  unreadable,
+  state = "loaded",
+  deploying = [],
+  deployingKnown = true
+) {
   const applying = deploying?.length || 0;
 
   if (state === "loading") return "Reading the live estate…";
@@ -239,7 +245,15 @@ export function estateSummary(deployments, unreadable, state = "loaded", deployi
     return staleApplying ? `${staleApplying}. ${read}` : read;
   }
 
-  if (knownEmpty(deployments, unreadable, state, deploying)) return "Nothing is deployed.";
+  // `deployingKnown` passed THROUGH. Dropping it here re-entered
+  // knownEmpty with the parameter defaulting to true, so the summary
+  // line said "Nothing is deployed." while the empty-state panel beside
+  // it was correctly suppressed -- two derived emptiness claims
+  // contradicting each other on one screen, which is the defect the
+  // extraction exists to prevent.
+  if (knownEmpty(deployments, unreadable, state, deploying, deployingKnown)) {
+    return "Nothing is deployed.";
+  }
 
   const described = describe(deployments, unreadable);
   const applyingText = deployingLabel(deploying);

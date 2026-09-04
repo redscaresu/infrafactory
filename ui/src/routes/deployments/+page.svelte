@@ -105,7 +105,7 @@
   // The three states are distinct on purpose: an empty list means
   // "nothing is deployed" ONLY when the read succeeded.
   $: estateState = !loaded ? "loading" : loadError ? "failed" : "loaded";
-  $: summary = estateSummary(deployments, unreadable, estateState, deploying);
+  $: summary = estateSummary(deployments, unreadable, estateState, deploying, deployingKnown);
   // The in-flight list survives a failed refresh along with the rows,
   // and is exactly as old as they are: the rows say so about
   // themselves, and this says so about the banner.

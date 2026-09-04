@@ -462,3 +462,35 @@ test("a report carries the opening lines that identify its run", async () => {
   cleanup("carries-opening");
   stop();
 });
+
+// Disposing a socket does not silence it: the close handshake is
+// asynchronous, so an old connection's `onclose` can fire after a
+// replacement has opened. It then wrote `__connected: false` over a
+// healthy socket, and nothing ever re-fires `onopen` — so every deploy
+// for the rest of the session rendered "Not receiving progress" over a
+// stream that was working.
+test("a closing socket cannot mark its replacement disconnected", async () => {
+  const { deploys, useConnector, watch, isConnected } = await import(
+    "../src/lib/deploy-store.js"
+  );
+
+  const statuses = [];
+  useConnector((_onMessage, onStatus) => {
+    statuses.push(onStatus);
+    return () => {};
+  });
+
+  const first = watch();
+  statuses[0](true);
+  first(); // watchers → 0, nothing running, so the socket is disposed
+
+  const second = watch();
+  statuses[1](true);
+  assert.equal(isConnected(get(deploys)), true);
+
+  // The old connection's close handshake completes late.
+  statuses[0](false);
+
+  assert.equal(isConnected(get(deploys)), true, "the live socket is still live");
+  second();
+});

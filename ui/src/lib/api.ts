@@ -86,11 +86,16 @@ function isActionResult(body: unknown): body is ActionResult {
  * SyntaxError escape instead discarded the status the caller had
  * already used to decide whether anything had been started.
  */
-async function readJSON(res: Response): Promise<unknown> {
+async function readJSON(res: Response): Promise<{ ok: boolean; value: unknown }> {
   try {
-    return await res.json();
+    // `{ok, value}`, not a bare null. `null` is a perfectly good JSON
+    // document -- run artifacts are served verbatim with a JSON content
+    // type and one of them can be exactly that -- so returning null for
+    // both "the parse failed" and "the value is null" turned a valid
+    // response into "could not be read".
+    return { ok: true, value: await res.json() };
   } catch {
-    return null;
+    return { ok: false, value: null };
   }
 }
 
@@ -110,7 +115,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       // "Unexpected end of JSON input" where it means to render what
       // went wrong. The deploy path was hardened for this and left the
       // helper every other endpoint uses unguarded.
-      const payload = (await readJSON(res)) as { error?: string } | null;
+      const payload = (await readJSON(res)).value as { error?: string } | null;
       throw new Error(payload?.error || `request failed: ${res.status}`);
     }
     const text = await res.text();
@@ -124,9 +129,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     // page's load error and the scenario page's preview error, reading
     // "Unexpected end of JSON input" where it meant to say what went
     // wrong.
-    const body = await readJSON(res);
-    if (body === null) throw new Error(`${path}: the response could not be read as JSON`);
-    return body as T;
+    const parsed = await readJSON(res);
+    if (!parsed.ok) throw new Error(`${path}: the response could not be read as JSON`);
+    return parsed.value as T;
   }
   return (await res.text()) as T;
 }
@@ -162,7 +167,7 @@ export const api = {
       // the startedNothing classification the STATUS had already
       // settled and shows a JavaScript parser message on the screen
       // this whole slice exists to make trustworthy.
-      const body = await readJSON(res);
+      const body = (await readJSON(res)).value;
       if ((res.ok || res.status === 409) && isActionResult(body)) return body;
       throw new DeployError(
         (body as { error?: string })?.error || `deploy failed: ${res.status}`,
@@ -187,7 +192,7 @@ export const api = {
     // parsing it as a result renders "resources may still be running"
     // over a request that never reached the store.
     if (ctype.includes("application/json")) {
-      const body = await readJSON(res);
+      const body = (await readJSON(res)).value;
       if ((res.ok || res.status === 409) && isActionResult(body)) return body;
       throw new Error((body as { error?: string })?.error || `teardown failed: ${res.status}`);
     }

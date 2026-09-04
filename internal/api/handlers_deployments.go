@@ -130,10 +130,15 @@ func deploymentsHandler(state *serverState) http.HandlerFunc {
 			return
 		}
 		if r.Method != http.MethodGet {
-			// A REFUSAL, and the one a client can actually receive:
-			// POST is delegated above, so `deployHandler`'s own 405 is
-			// unreachable and this is the method check that fires.
-			writeRefusal(w, http.StatusMethodNotAllowed, "method not allowed")
+			// A plain error, NOT a refusal.
+			//
+			// This route is shared: POST is delegated above, and every
+			// other verb lands here -- a DELETE meant for a teardown, a
+			// PATCH, anything. `started_nothing` is a claim about
+			// whether an APPLY created cloud infrastructure, and
+			// stamping it on those is the same category error the
+			// origin guard was reverted for.
+			writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
 		if state.deployments == nil {

@@ -38,6 +38,7 @@ export const deploys = writable({});
 
 let socket;
 let watchers = 0;
+let generation = 0;
 
 // Matches the Live Run page's cap. Deliberately generous: a deploy log
 // is read to find out what a long apply is doing, and truncating it
@@ -68,8 +69,21 @@ export function useConnector(fn) {
 
 function ensureSocket() {
   if (socket) return;
+  // Every connection gets a generation, and both its callbacks check
+  // theirs before touching the store.
+  //
+  // Disposing a socket does not silence it: the close handshake is
+  // asynchronous, so an old connection's `onclose` can fire AFTER a
+  // replacement has opened. It then wrote `__connected: false` over a
+  // healthy socket, nothing re-fired `onopen`, and every deploy for the
+  // rest of the session rendered "Not receiving progress -- the apply
+  // is still running, but this page cannot see it." over a stream that
+  // was working.
+  generation += 1;
+  const mine = generation;
   socket = connect(
     (msg) => {
+      if (mine !== generation) return;
       // The event names its own subject, so this is a lookup rather
       // than a scan. Asking every key "is this yours?" needed a skip for
       // the `__connected` sentinel; a keyed read makes it unreachable
@@ -78,6 +92,13 @@ function ensureSocket() {
       if (!isProgressEvent(msg)) return;
       const scenario = msg.data.subject;
       if (!scenario) return;
+
+      // Checked BEFORE `update`, because `writable.update` notifies
+      // every subscriber whether or not the value changed. Returning
+      // `all` unchanged from inside it still re-ran the scenario page's
+      // derivations and the layout's `pendingReports` -- thousands of
+      // times, for a foreign apply whose lines this store discards.
+      if (!get(deploys)[scenario]?.running) return;
 
       deploys.update((all) => {
         const entry = all[scenario];
@@ -94,7 +115,10 @@ function ensureSocket() {
         return { ...all, [scenario]: appendProgress(entry, msg.data.line) };
       });
     },
-    (connected) => deploys.update((all) => ({ ...all, __connected: connected }))
+    (connected) => {
+      if (mine !== generation) return;
+      deploys.update((all) => ({ ...all, __connected: connected }));
+    }
   );
 }
 

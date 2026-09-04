@@ -1892,8 +1892,14 @@ test('a refusal that lands mid-navigation is not swept up by the cleanup', async
 
   // The refusal arrives while the detail fetch is still outstanding, so
   // the entry is finished by the time the arrival hook runs.
+  //
+  // Synchronised on an observable condition rather than a sleep: on a
+  // loaded machine a fixed wait lets `releaseDetail` land first, and
+  // the test then reports as a flake instead of as the regression it
+  // exists to catch. The button leaving its "Deploying …" label is the
+  // POST having been answered.
   releasePost();
-  await page.waitForTimeout(200);
+  await expect(page.getByTestId('scenario-deploy')).not.toHaveText(/Deploying/);
   releaseDetail();
 
   await expect(page.locator('main h1')).toContainText('web-app-paris');

@@ -2,6 +2,43 @@
 
 Last updated: 2026-09-04
 
+## 2026-09-04 — S163e-fixes (round sixteen): the fix applied to one of its two callers
+
+**10 findings, all accepted.** Three are round fifteen's fixes applied to one site
+and not its neighbour; one is a rule I wrote and broke twenty lines away.
+
+**Two emptiness claims contradicting each other.** Round fifteen gave `knownEmpty` a
+`deployingKnown` term so a payload that never said what was applying could not
+license "Nothing is deployed." `estateSummary` calls `knownEmpty` too and did not
+get the parameter — so with the field absent, the empty-state panel was suppressed
+while the summary line above it said the estate was empty.
+
+**A closing socket marking its replacement dead.** The close handshake is
+asynchronous, so an old connection's `onclose` fired after a new socket had opened,
+writing `__connected: false` over a healthy one. Nothing re-fires `onopen`, so every
+deploy for the rest of the session rendered "Not receiving progress" over a working
+stream. Both callbacks carry a generation now.
+
+**The rule, broken twenty lines from where it is written.** `noSuchScenarioError`
+exists because wrapping a sentinel with `%w` puts it in the operator's message. Its
+three siblings did exactly that: "nothing was started: config is unreadable" — a
+self-contradicting sentence carrying an internal discriminator, straight into the
+response body.
+
+**A claim about the wrong verb, again.** Round fifteen reverted `writeRefusal` on the
+origin guard because `started_nothing` is about whether an apply created
+infrastructure. The collection's 405 has the same problem — every non-POST verb
+lands there, including a DELETE meant for a teardown — and had been converted for
+the opposite reason.
+
+Also: `readJSON` conflated a failed parse with a JSON `null` body, which run
+artifacts can legitimately be; `deploying` was typed required while the page guards
+it, making the guard provably dead; the `onMount` snapshot was justified by a false
+claim about SvelteKit (`afterNavigate` does fire on a direct load — `loadDetail` is
+called only from it); progress for an unwatched scenario still notified every
+subscriber; the race test synchronised on a 200ms sleep; and three names described
+one operation, one asserting the opposite of what the delegate does.
+
 ## 2026-09-04 — S163e-fixes (round fifteen): the cleanup raced the page it cleaned for
 
 **10 findings, 7 accepted, 3 declined.** Two accepts are round fourteen's fixes; one

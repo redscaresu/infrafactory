@@ -383,3 +383,25 @@ func TestAnUnknownScenarioDoesNotHoldTheLock(t *testing.T) {
 
 	assert.Empty(t, deployer.InFlight())
 }
+
+// A sentinel is for `errors.Is`; a message is for a person.
+//
+// `fmt.Errorf("%w: %w", api.ErrNothingStarted, err)` reads back as
+// "nothing was started: config is unreadable" -- and the handler puts
+// `err.Error()` straight into the response body, which the page then
+// renders. The reader got a self-contradicting sentence carrying an
+// internal discriminator.
+func TestPreApplyErrorsDoNotLeakTheirSentinelIntoTheMessage(t *testing.T) {
+	for name, err := range map[string]error{
+		"a general pre-apply failure": nothingStarted(errors.New("config is unreadable")),
+		"an unresolved name":          noSuchScenario("typo"),
+		"a blank name":                noSuchScenario(""),
+	} {
+		t.Run(name, func(t *testing.T) {
+			assert.True(t, errors.Is(err, api.ErrNothingStarted),
+				"the promise still has to be machine-readable")
+			assert.NotContains(t, err.Error(), "nothing was started")
+			assert.NotContains(t, err.Error(), "no such scenario")
+		})
+	}
+}

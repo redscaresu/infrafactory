@@ -169,7 +169,13 @@ export interface DeploymentsResponse {
   // Scenarios currently applying. They have no record yet, so they
   // cannot appear in `deployments` -- the estate page renders this to
   // avoid being silent about the most active thing in the estate.
-  deploying: string[];
+  // Optional for the same reason `already_live` is, and the `?` is
+  // load-bearing: the estate page guards it with `Array.isArray` and
+  // `knownEmpty` takes a `deployingKnown` term, because reading an
+  // absent field as "nothing is applying" licenses the page's only
+  // permitted emptiness claim. Declaring it required makes that guard
+  // provably dead and invites its deletion.
+  deploying?: string[];
 }
 
 export interface ActionStep {

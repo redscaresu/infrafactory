@@ -104,12 +104,7 @@
   // thing it mirrored.
   //
   // A reloaded page simply does not know, and says so.
-  onMount(() => {
-    // `afterNavigate` does not fire when the component is created by a
-    // direct load, so the snapshot is taken here too.
-    retirableOnArrival = finishedNow();
-    return watchDeploys();
-  });
+  onMount(() => watchDeploys());
 
   onDestroy(() => {
     // Clear the debounce timer so navigating away during the 500ms
@@ -124,55 +119,28 @@
     // doc names -- left a finished deploy's success banner to reappear
     // on the next visit. A claim about infrastructure whose TTL may have
     // expired.
-    forgetFinishedDeploy();
+    retireOnLeave();
   });
 
   /**
-   * forgetFinishedDeploy drops a SUCCESSFUL deploy's banner on LEAVING.
+   * retireOnLeave ends this scenario's deploy display when the reader
+   * goes.
    *
-   * "The reader saw it, so it can go" was the rule, and it is wrong for
-   * a failure. The failure message says "check the Deployments page
-   * before starting another", and the Deployments link sits directly
-   * beneath the button -- so following the instruction was what deleted
-   * the project id the instruction was about. A deploy that fails
-   * before registration has no live record either, so nothing on the
-   * estate page replaces it.
+   * "Retire", not "forget", because `retireDeploy` KEEPS what the
+   * deploy has to report -- three names for one operation, one of them
+   * asserting the opposite of what the delegate does, sent a reader
+   * tracing a surviving report through two functions that both claimed
+   * it had been forgotten.
    *
-   * Same rule as the arrival hook, deliberately: one predicate about
-   * what may be dropped, applied at both ends. A stale success is a
-   * false claim about infrastructure whose TTL may have expired; a
-   * report is unread news, and it survives until somebody says
-   * otherwise.
+   * What goes is the BANNER, and only ever the banner. "The reader saw
+   * it, so it can go" was once the rule for everything, and it is wrong
+   * for a report: the failure message says "check the Deployments page
+   * before starting another", the Deployments link sits directly
+   * beneath the button, and following the instruction was what deleted
+   * the project id the instruction was about.
    */
-  function forgetFinishedDeploy() {
-    if (!detail?.name) return;
-    forgetReportlessDeploy(detail.name);
-  }
-
-  /**
-   * forgetReportlessDeploy is the one rule about what may be forgotten.
-   *
-   * The question is not "did it succeed?" -- it is "could this still
-   * describe infrastructure nobody has a record of?". A REFUSAL is a
-   * failure and started nothing, so keeping it made a transient "already
-   * deploying" banner reappear on every later visit for the rest of the
-   * session, under an enabled Deploy button, long after the apply it
-   * referred to had finished.
-   *
-   * `mayHaveCreated` is that question, answered where the outcome is
-   * built rather than inferred from `ok` here.
-   */
-  function forgetReportlessDeploy(scenario: string) {
-    // `retireDeploy` splits the two things this used to conflate: the
-    // stale-able BANNER goes, the REPORTS stay.
-    //
-    // Judging by the last outcome and deleting the whole entry threw
-    // reports away on a successful retry. Returning early whenever an
-    // entry held a report then kept the stale banner too, so a
-    // failed-then-retried deploy showed "Deployed. It is listed on the
-    // Deployments page until its TTL expires." on every later visit for
-    // the rest of the session.
-    retireDeploy(scenario);
+  function retireOnLeave() {
+    if (detail?.name) retireDeploy(detail.name);
   }
 
   // Arriving drops a finished deploy that has nothing left to report.
@@ -211,7 +179,7 @@
   let arrivalHandled = -1;
   $: if (detail?.name && arrivalHandled !== navigation) {
     arrivalHandled = navigation;
-    if (retirableOnArrival.has(detail.name)) forgetReportlessDeploy(detail.name);
+    if (retirableOnArrival.has(detail.name)) retireDeploy(detail.name);
   }
 
   /** finishedNow names the deploys that have already ended. */
@@ -573,7 +541,7 @@
     // scenario it belongs to. Without this it reappeared on every later
     // visit for the rest of the session, long after the TTL had expired
     // -- a success message for something that may no longer exist.
-    forgetFinishedDeploy();
+    retireOnLeave();
     scenarioPath = ($page.params.path || "").toString();
     // Belt and braces with confirmDeploy reading preview.scenario: a
     // confirmation describing the page you just left must not still be

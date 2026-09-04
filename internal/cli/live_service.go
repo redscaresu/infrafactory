@@ -267,7 +267,7 @@ func (d *LiveDeployer) Deploy(ctx context.Context, scenarioName, ttl string, pro
 		// server that could not rebuild its runtime pinned a permanent
 		// "may have created resources that are still running" for a
 		// request that never reached Scaleway.
-		return api.ActionResult{}, fmt.Errorf("%w: %w", api.ErrNothingStarted, err)
+		return api.ActionResult{}, nothingStarted(err)
 	}
 
 	cmd := &cobra.Command{Use: "deploy"}
@@ -275,7 +275,7 @@ func (d *LiveDeployer) Deploy(ctx context.Context, scenarioName, ttl string, pro
 	cmd.Flags().String("output", string(OutputModeJSON), "")
 	if ttl != "" {
 		if err := cmd.Flags().Set("ttl", ttl); err != nil {
-			return api.ActionResult{}, fmt.Errorf("%w: %w", api.ErrNothingStarted, err)
+			return api.ActionResult{}, nothingStarted(err)
 		}
 	}
 
@@ -380,6 +380,24 @@ func (e noSuchScenarioError) Is(target error) bool {
 
 func noSuchScenario(name string) error { return noSuchScenarioError{name: name} }
 
+// nothingStarted marks a pre-apply failure without putting the sentinel
+// in front of the reason.
+//
+// `fmt.Errorf("%w: %w", api.ErrNothingStarted, err)` reads back as
+// "nothing was started: config is unreadable" -- a sentence that both
+// contradicts itself and hands an internal discriminator to an
+// operator, since the handler puts `err.Error()` straight into the
+// response body and the page renders it. Same rule as
+// `noSuchScenarioError`: a sentinel is for `errors.Is`; a message is
+// for a person.
+type nothingStartedError struct{ err error }
+
+func (e nothingStartedError) Error() string        { return e.err.Error() }
+func (e nothingStartedError) Unwrap() error        { return e.err }
+func (e nothingStartedError) Is(target error) bool { return target == api.ErrNothingStarted }
+
+func nothingStarted(err error) error { return nothingStartedError{err: err} }
+
 // resolveScenarioByName finds a scenario file by its declared name.
 //
 // The walk matches on the scenario's `scenario:` field rather than its
@@ -437,7 +455,7 @@ func resolveScenarioByName(root, name string) (string, error) {
 		// deliberately treats as "we do not know", so the misconfigured
 		// server produced a permanent false leak report. The walk runs
 		// before anything touches the cloud, whatever went wrong in it.
-		return "", fmt.Errorf("%w: %w", api.ErrNothingStarted, err)
+		return "", nothingStarted(err)
 	}
 	if found == "" {
 		// Wrapped so the caller can tell "you asked for something that
