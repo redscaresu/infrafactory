@@ -801,3 +801,29 @@ It means one of three things: nothing was created, something was and could not b
 registered, or the result was unreadable so the id never arrived. The page says "no
 record of it reached this page", which is true of all three, rather than asserting
 the one it cannot distinguish.
+
+
+## Amendment, 2026-09-04 (round twenty-one): three lifetimes, three homes
+
+The store held a terminal `outcome` — how the last deploy ended — and it outlives
+the page. Six review rounds of defects were guards on that one fact: retire hooks,
+a shown-scenario tracker, a route-change guard, an arrival hook added and then
+deleted, stale-success rules, a report pointer, cross-store dismiss coordination,
+and three separate ending functions.
+
+It is deleted. What remains is three things with three lifetimes, in three places:
+
+  - **running** → the `deploys` store. An entry exists only while a deploy is in
+    flight, so it can be dropped the moment one ends.
+  - **just watched** → the page, transient. One `ending`, rendered only when its
+    scenario is the one on screen and cleared on a route change. Those two facts
+    are the entire scoping rule: no token, no clearing pass, no staleness question.
+  - **must not be lost** → `reports`, in the layout, durable and dismissible.
+
+`endDeploy(scenario, outcome)` is the only ending: it files a report if there is one
+to file, drops the entry, and returns the log so the page can keep showing what the
+reader was watching.
+
+**The trade.** A deploy that finishes while the reader is on another page is not
+announced when they return. Three rounds of defects came from trying to announce it,
+and the durable answers were always elsewhere — which is this ADR's own thesis.

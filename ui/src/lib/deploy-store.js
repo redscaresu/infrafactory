@@ -205,13 +205,12 @@ export function beginDeploy(scenario) {
   // can decline to record a second start but cannot stop the POST, and
   // the 423 that came back was then applied to the FIRST deploy.
   //
-  // Starting over a live apply reset its log and its outcome; the
-  // second POST was then refused with 423, `refuseDeploy` marked the
-  // entry finished and cleared the log, and the socket handler began
-  // discarding the ORIGINAL apply's lines because the entry was no
-  // longer running -- a deploy still creating billable infrastructure
-  // with its log and its ending both lost. The store is the thing that
-  // outlives the page, so the rule belongs in it.
+  // Starting over a live apply reset its log; the second POST was then
+  // refused with 423, that refusal was applied to the FIRST deploy, and
+  // the socket handler began discarding the original apply's lines
+  // because its entry was no longer running -- a deploy still creating
+  // billable infrastructure with its log lost. The store is the thing
+  // that outlives the page, so the rule belongs in it.
   if (get(deploys)[scenario]?.running) return false;
   ensureSocket();
   deploys.update((all) => {
@@ -220,7 +219,7 @@ export function beginDeploy(scenario) {
     // attempts accumulate two of them.
     return {
       ...all,
-      [scenario]: { running: true, progress: [], dropped: 0, outcome: null }
+      [scenario]: { running: true, progress: [], dropped: 0 }
     };
   });
   return true;
@@ -253,81 +252,46 @@ function fileReport(scenario, outcome, progress) {
         // never returns an ActionResult -- a dropped connection
         // mid-apply -- the message is generic and the head of the log
         // is the only thing naming the run's project and workdir, while
-        // `retireDeploy` and a retry both clear it.
+        // the entry goes when the deploy ends, and a retry starts a
+        // fresh one.
         opening: (progress ?? []).slice(0, KEPT_OPENING_LINES)
       }
     ]
   }));
 }
 
-/** endDeploy marks a deploy finished, keeping or clearing its log. */
-function endDeploy(all, scenario, outcome, keepProgress) {
-  const entry = all[scenario];
-  if (!entry) return all;
-  return {
-    ...all,
-    [scenario]: {
-      ...entry,
-      running: false,
-      outcome,
-      ...(keepProgress ? {} : { progress: [], dropped: 0 })
-    }
-  };
-}
-
-export function finishDeploy(scenario, outcome) {
-  fileReport(scenario, outcome, get(deploys)[scenario]?.progress);
-  deploys.update((all) => endDeploy(all, scenario, outcome, true));
-  releaseSocket();
-}
-
 /**
- * refuseDeploy records an ending that never began, and DISCARDS the log.
+ * endDeploy finishes a deploy: files anything it has to report, and
+ * removes the entry.
  *
- * `running` is true from `beginDeploy` until the POST resolves, and for
- * a deploy the server REFUSED that flag was true and wrong for the
- * whole round trip. Nothing of ours started, so no line collected in
- * that window was ours.
+ * ONE function where there were three — `finishDeploy`, `refuseDeploy`
+ * and `retireDeploy` — because this store now holds only what is
+ * RUNNING. Everything about how a deploy ended lives elsewhere:
  *
- * It matters most for the lock refusal, because that is the one where
- * lines actually arrive: the refusal's own reason is that another apply
- * of this scenario is running and broadcasting. Keeping them rendered
- * that apply's live log underneath an "already deploying" banner -- the
- * adoption this store exists to refuse, through the one window where
- * the running check cannot help. For the other pre-flight refusals
- * (no such scenario, no --allow-deploy, a malformed request) the log is
- * empty and discarding it is a no-op; the rule is stated once rather
- * than conditioned on which refusal arrived.
+ *   - what must not be lost -> `reports`, durable and dismissible
+ *   - what the reader just watched -> the page, transient
+ *   - what is actually deployed -> the estate page, from the server
  *
- * The entry is kept rather than deleted, because the refusal itself has
- * to be reported somewhere the reader will see it, and an outcome is
- * keyed by scenario so it lands on the right page and only that page.
+ * Holding a terminal `outcome` here was what generated the retire
+ * hooks, the shown-scenario tracking, the route-change guard, the
+ * stale-claim rules, the report pointer and the cross-store dismiss
+ * coordination -- and six review rounds of defects in them. It is the
+ * state, not the guards, that was the problem.
+ *
+ * Returns the log as it stood, so the caller can keep showing it.
  */
-export function refuseDeploy(scenario, outcome) {
-  fileReport(scenario, outcome, get(deploys)[scenario]?.progress);
-  deploys.update((all) => endDeploy(all, scenario, outcome, false));
-  releaseSocket();
-}
+export function endDeploy(scenario, outcome) {
+  const entry = get(deploys)[scenario];
+  fileReport(scenario, outcome, entry?.progress);
 
-/**
- * retireDeploy drops a finished deploy's banner and log.
- *
- * Reports are untouched, because they are not in this store. The banner
- * describing how the last attempt ended goes stale -- "Deployed. It is
- * listed on the Deployments page until its TTL expires." is false once
- * the TTL has passed. A report is a statement that infrastructure may
- * exist with no record of it, and it stays until somebody says
- * otherwise. Two lifetimes, two stores.
- */
-export function retireDeploy(scenario) {
   deploys.update((all) => {
-    const entry = all[scenario];
-    if (!entry || entry.running) return all;
     const next = { ...all };
     delete next[scenario];
     return next;
   });
   releaseSocket();
+
+  return { progress: entry?.progress ?? [], dropped: entry?.dropped ?? 0 };
 }
 
 /**
@@ -349,27 +313,10 @@ export function dismissReport(scenario, id) {
     return next;
   });
 
-  // Only once the scenario has NO reports left.
-  //
-  // An outcome that is itself a report is not rendered anywhere on its
-  // own -- the page shows a pointer at the report instead -- so an
-  // entry whose last report has gone would be a finished deploy with
-  // its ending stated nowhere. But dismissing ONE of several deleted
-  // the pointer and the whole apply log while a sibling report, naming
-  // a project that is still live, was on screen beside it.
-  const left = get(reports)[scenario]?.length ?? 0;
-  if (left > 0) {
-    releaseSocket();
-    return;
-  }
-  deploys.update((all) => {
-    const entry = all[scenario];
-    if (!entry || entry.running || !entry.outcome?.mayHaveCreated) return all;
-    const next = { ...all };
-    delete next[scenario];
-    return next;
-  });
-  releaseSocket();
+  // No second store to coordinate with. `deploys` holds only running
+  // deploys now, so dismissing a report cannot orphan an entry, and the
+  // rules about which one to keep -- which cost two rounds -- are gone
+  // with the state that needed them.
 }
 
 /** isRunning answers the one question the Deploy button needs. */

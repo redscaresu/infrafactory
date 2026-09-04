@@ -89,6 +89,14 @@ export const api = {
       const parsed = await readJSON(res);
       const body = parsed.value;
       if ((res.ok || res.status === 409) && isActionResult(body)) return body;
+      // `parsed.ok` is the discriminator, and it is the reason
+      // `readJSON` returns a pair. A body that FAILED TO PARSE means
+      // the server was cut off mid-write, so the 2xx it had already
+      // committed to is this server's word and the result was clean. A
+      // body that parsed into something that is not an ActionResult
+      // means something ELSE answered -- a captive portal, a proxy, a
+      // dev-server fallback -- and its status proves nothing about a
+      // deploy that may never have been dispatched.
       // A 2xx whose body will not parse is not a failed deploy, and it
       // is not an unknown one either: `writeActionResult` answers 2xx
       // ONLY for a provably clean result, so the status the code has
@@ -96,10 +104,16 @@ export const api = {
       // permanent leak report for the one response shape that
       // guarantees nothing was left behind -- and saying "deploy
       // failed: 200" named a success status as a failure.
-      if (res.ok) {
+      if (res.ok && !parsed.ok) {
         throw new DeployError(
           "the deploy succeeded, but its result could not be read — see the Deployments page for what it created",
           "clean"
+        );
+      }
+      if (res.ok) {
+        throw new DeployError(
+          "the server answered success with something this page does not recognise, so what happened is unknown",
+          "unknown"
         );
       }
       throw new DeployError(
@@ -125,8 +139,12 @@ export const api = {
     // parsing it as a result renders "resources may still be running"
     // over a request that never reached the store.
     if (ctype.includes("application/json")) {
-      const body = (await readJSON(res)).value;
+      const parsed = await readJSON(res);
+      const body = parsed.value;
       if ((res.ok || res.status === 409) && isActionResult(body)) return body;
+      if (!parsed.ok) {
+        throw new Error(`teardown answered ${res.status}, but its result could not be read`);
+      }
       throw new Error((body as { error?: string })?.error || `teardown failed: ${res.status}`);
     }
     throw new Error((await res.text()) || `teardown failed: ${res.status}`);

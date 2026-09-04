@@ -400,12 +400,14 @@ test.describe('Deploy from the scenario page', () => {
     await page.getByTestId('scenario-deploy').click();
     await page.getByTestId('deploy-confirm-go').click();
 
-    // A REPORT, so it renders in the layout rather than in this
-    // page's outcome slot -- it has to survive leaving the page.
+    // The detail lives in the LAYOUT report, which survives leaving the
+    // page; the page says the deploy did not finish cleanly and points
+    // at it, so a log does not stop with nothing said.
     const report = page.getByTestId('pending-deploy-report');
     await expect(report).toContainText('web-app-paris');
     await expect(report).toContainText('7c98d82e');
-    await expect(page.getByTestId('deploy-outcome')).toHaveCount(0);
+    await expect(page.getByTestId('deploy-outcome')).toContainText('did not finish cleanly');
+    await expect(page.getByTestId('deploy-outcome')).not.toContainText('7c98d82e');
   });
 });
 
@@ -1150,18 +1152,20 @@ test('a refusal that arrives after a detour is still reported', async ({ page })
 });
 
 
-// A deploy that finishes while the reader is away is shown ONCE, on the
-// visit they came back for, and then goes.
+// A SUCCESS that lands while the reader is elsewhere is not announced
+// when they come back, and that is the deliberate trade.
 //
-// Both halves matter. An earlier version dropped it on arrival, so a
-// reader who navigated back precisely to see how it went found the
-// banner and the whole apply log already deleted. An earlier one still
-// never dropped it at all, because leaving only retired what had
-// already finished when the reader left -- so it greeted every later
-// visit for the rest of the session, long after the TTL it names may
-// have passed. Leaving is unconditional now, and nothing acts on
-// arrival.
-test('a deploy that finishes after you leave is reported once, then goes', async ({
+// Three rounds of defects came from trying to announce it: a retire
+// hook that raced the detail fetch and deleted a refusal before it
+// rendered; a snapshot that could not tell "finished long ago" from
+// "finished while I stepped away"; a banner that outlived its TTL. All
+// of them were guards on a terminal outcome living in a store that
+// outlives the page.
+//
+// The durable answers are elsewhere and always were: the Deployments
+// page says what is deployed, and a report says what may have been left
+// behind. This page says what is happening while you are watching it.
+test('a success that lands while you are away is left to the Deployments page', async ({
   page
 }) => {
   await page.route('**/api/deployments/preview**', (route) =>
@@ -1198,26 +1202,21 @@ test('a deploy that finishes after you leave is reported once, then goes', async
   await page.getByTestId('deploy-confirm-go').click();
   await expect(page.getByTestId('deploy-progress')).toBeVisible();
 
-  // Leave while it is STILL RUNNING, so neither leave-hook can drop it,
-  // and only then let it finish.
+  // Leave while it is STILL RUNNING, then let it finish elsewhere.
   await page.getByTestId('sidebar-scenario-training/lb-serving-paris').click();
   await expect(page.locator('main h1')).toContainText('lb-serving-paris');
   release();
 
   await page.getByTestId('sidebar-scenario-training/web-app-paris').click();
   await expect(page.locator('main h1')).toContainText('web-app-paris');
+  await page.waitForLoadState('networkidle');
 
-  // Shown: this is the visit the reader came back for.
-  await expect(page.getByTestId('deploy-outcome')).toContainText('Deployed. It is listed');
-  await expect(page.getByTestId('scenario-deploy')).toBeEnabled();
-
-  // And gone after that, so it cannot become a claim about a TTL that
-  // has since passed.
-  await page.getByTestId('sidebar-scenario-training/lb-serving-paris').click();
-  await expect(page.locator('main h1')).toContainText('lb-serving-paris');
-  await page.getByTestId('sidebar-scenario-training/web-app-paris').click();
-  await expect(page.locator('main h1')).toContainText('web-app-paris');
+  // Nothing is claimed on the page, and nothing is claimed anywhere
+  // else either: a clean deploy leaves no report, because there is
+  // nothing that needs a human.
   await expect(page.getByTestId('deploy-outcome')).toHaveCount(0);
+  await expect(page.getByTestId('pending-deploy-report')).toHaveCount(0);
+  await expect(page.getByTestId('scenario-deploy')).toBeEnabled();
 });
 
 // The mirror image of the test above, and the more important half.
@@ -1827,18 +1826,10 @@ test('a log that ends in a report still has a terminal line', async ({ page }) =
   await page.getByTestId('scenario-deploy').click();
   await page.getByTestId('deploy-confirm-go').click();
 
-  await expect(page.getByTestId('deploy-outcome-pointer')).toContainText('did not finish cleanly');
+  await expect(page.getByTestId('deploy-outcome')).toContainText('did not finish cleanly');
   await expect(page.getByTestId('pending-deploy-report')).toContainText('7c98d82e');
   // And the full account is not printed twice.
-  await expect(page.getByTestId('deploy-outcome')).toHaveCount(0);
-
-  // Dismissing takes the pointer with it. Otherwise the page keeps a
-  // line saying "reported at the top of the page" above a report that
-  // is no longer there -- a finished deploy whose ending is stated
-  // nowhere at all.
-  await page.getByTestId('dismiss-deploy-report').click();
-  await expect(page.getByTestId('pending-deploy-report')).toHaveCount(0);
-  await expect(page.getByTestId('deploy-outcome-pointer')).toHaveCount(0);
+  await expect(page.getByTestId('deploy-outcome')).not.toContainText('7c98d82e');
 });
 
 // `loadDetail` is a round trip, and a deploy started before a
@@ -2116,4 +2107,48 @@ test('a clean deploy whose body is unreadable does not raise a leak report', asy
   await expect(outcome).toContainText('could not be read');
   await expect(outcome).not.toContainText('failed: 200');
   await expect(page.getByTestId('pending-deploy-report')).toHaveCount(0);
+});
+
+// A 2xx that PARSED into something unrecognised did not come from
+// `writeActionResult` — a captive portal, a proxy, a dev-server
+// fallback — so its status proves nothing about a deploy that may never
+// have been dispatched. Reading it as clean rendered a green tick for a
+// request that may not have reached the handler.
+test('a success status from something that is not this server is not a clean deploy', async ({
+  page
+}) => {
+  await page.route('**/api/deployments/preview**', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        scenario: 'web-app-paris',
+        deployable: true,
+        expires_at: null,
+        internet_facing: false,
+        deploy_allowed: true,
+        already_live: [],
+        already_live_unknown: false,
+        cost: { components: [], eur_per_hour: 0, unpriced: [], complete: true, modelled: true }
+      })
+    })
+  );
+  await page.route('**/api/deployments', (route) =>
+    route.request().method() === 'POST'
+      ? route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ status: 'ok' })
+        })
+      : route.continue()
+  );
+
+  await page.goto('/scenarios/training/web-app-paris');
+  await page.getByTestId('scenario-deploy').click();
+  await page.getByTestId('deploy-confirm-go').click();
+
+  // Not a green tick, and it says the outcome is unknown.
+  const outcome = page.getByTestId('deploy-outcome');
+  await expect(outcome).toContainText('did not finish cleanly');
+  await expect(page.getByTestId('pending-deploy-report')).toContainText('does not recognise');
 });

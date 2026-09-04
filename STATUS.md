@@ -2,6 +2,47 @@
 
 Last updated: 2026-09-04
 
+## 2026-09-04 — S163e-fixes (round twenty-one): the deletion, not another fix
+
+**12 findings, 7 of them regressions from round twenty's 8 fixes** — two severe, and
+both the fix performing the exact failure it was written to prevent. That is a
+fix-to-regression ratio of about 1:1 sustained for six rounds, concentrated entirely
+in the scenario page's deploy lifecycle while the Go handlers, estate page and
+preview stayed quiet.
+
+**So this round deletes rather than guards.** The `deploys` store held a terminal
+`outcome` — how the last deploy ended — in a store that outlives the page, and
+everything that kept breaking existed to keep that honest: `retireOnLeave`,
+`shownScenario`, the route-change guard, the arrival hook (added then deleted), the
+stale-success rules, `mayHaveCreated` as a forgetting predicate, the report pointer,
+`dismissReport`'s cross-store deletion, and three separate ending functions.
+
+**Three lifetimes, three homes.** What is RUNNING → the store, entries dropped the
+moment a deploy ends. What the reader JUST WATCHED → the page, one transient
+`ending` rendered only when its scenario is on screen and cleared on a route change
+(those two facts are the whole scoping rule). What MUST NOT BE LOST → `reports`, in
+the layout, durable and dismissible. Three lifecycle functions became one.
+
+**Net −82 lines** across the store and the page; the store's exported surface is
+down to eight.
+
+**The trade, stated:** a deploy that finishes while the reader is elsewhere is not
+announced when they return. Three rounds of defects came from trying to announce it,
+and the durable answers were always elsewhere — the Deployments page says what is
+deployed, a report says what may have been left behind.
+
+Also fixed from this round: `readJSON`'s `ok` flag was computed and discarded, and
+it is exactly the discriminator the 2xx case needed (a body that failed to PARSE
+means the server was cut off mid-write, so its 2xx is this server's word; a body
+that parsed into something unrecognised means something else answered);
+`deployHandler`'s restored method check answered with a plain error while its
+sibling refused; its test asserted on a freshly allocated fake, so it passed for an
+implementation that ran the apply and then wrote 405; the CLI's `if recorded` guard
+had no test that ran it — **owed since round nineteen, where I marked it accepted
+and did not implement it**; `status` was never cleared on navigation; and
+`knownEmpty`/`estateSummary` kept a `state` default three lines below a comment
+calling a default "a third way to forget".
+
 ## 2026-09-04 — S163e-fixes (round twenty): three meanings, and the alarming one
 
 **10 findings, 8 accepted, 2 declined.**

@@ -621,13 +621,22 @@ func TestTheSentinelsReadAsMessagesAndStillMatch(t *testing.T) {
 // type. Registering it directly would otherwise let a GET run a real
 // apply, which is why the guard is code rather than a docstring.
 func TestDeployHandlerRefusesANonPostEvenWhenRegisteredDirectly(t *testing.T) {
-	state := &serverState{deployer: &fakeDeployer{}}
+	// THE deployer the handler was given, not a fresh one. Asserting on
+	// `(&fakeDeployer{}).calls` allocates a value whose `calls` is
+	// always nil, so the test passed for any implementation -- including
+	// one that ran the apply and then wrote 405, which is the outcome
+	// this guard exists to prevent.
+	deployer := &fakeDeployer{}
+	state := &serverState{deployer: deployer}
 
 	for _, method := range []string{http.MethodGet, http.MethodDelete, http.MethodPut} {
 		rec := httptest.NewRecorder()
 		deployHandler(state)(rec, httptest.NewRequest(method, "/anywhere", nil))
 
 		assert.Equal(t, http.StatusMethodNotAllowed, rec.Code, method)
+		var payload map[string]any
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &payload))
+		assert.Equal(t, true, payload["started_nothing"], method)
 	}
-	assert.Empty(t, (&fakeDeployer{}).calls, "and nothing was applied")
+	assert.Empty(t, deployer.calls, "and nothing was applied")
 }

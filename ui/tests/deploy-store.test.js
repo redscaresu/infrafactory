@@ -5,25 +5,23 @@ import { get } from "svelte/store";
 
 import {
   dismissReport as dismissForCleanup,
-  finishDeploy as finishForCleanup,
-  reports as sharedReports,
-  retireDeploy as retireForCleanup
+  endDeploy as endForCleanup,
+  reports as sharedReports
 } from "../src/lib/deploy-store.js";
 
 // The store is module-level and shared by every test in this file, so a
 // test that leaves an entry RUNNING keeps the socket open for the next
-// one. `retireDeploy` deliberately refuses to drop a running deploy --
+// one. `endDeploy` deliberately refuses to drop a running deploy --
 // that is what makes a log survive navigation -- so teardown has to end
 // it first.
 function cleanup(...scenarios) {
   for (const scenario of scenarios) {
-    finishForCleanup(scenario, { ok: true, mayHaveCreated: false, message: "cleanup" });
-    // Reports deliberately survive `retireDeploy`, so teardown has to
+    endForCleanup(scenario, { ok: true, mayHaveCreated: false, message: "cleanup" });
+    // Reports deliberately survive the deploy, so teardown has to
     // dismiss them the way an operator would.
     while (get(sharedReports)[scenario]?.length) {
       dismissForCleanup(scenario, get(sharedReports)[scenario][0].id);
     }
-    retireForCleanup(scenario);
   }
 }
 
@@ -53,7 +51,7 @@ test("isConnected reports the socket rather than the absence of lines", () => {
 // The socket wiring, which is the part most worth testing and was the
 // reason this module could not import ws.ts directly.
 test("progress lines are routed to the scenario they name", async () => {
-  const { deploys, useConnector, watch, beginDeploy, finishDeploy } = await import(
+  const { deploys, useConnector, watch, beginDeploy, endDeploy } = await import(
     "../src/lib/deploy-store.js"
   );
 
@@ -76,11 +74,13 @@ test("progress lines are routed to the scenario they name", async () => {
   assert.deepEqual(all["lb-serving-paris"].progress, ["plan: running"]);
   assert.equal(all["not-deployed"], undefined, "a scenario with no deploy gains no state");
 
-  finishDeploy("web-app-paris", { ok: true, message: "done" });
-  assert.equal(get(deploys)["web-app-paris"].running, false);
-  assert.deepEqual(get(deploys)["web-app-paris"].progress, ["init: running"], "the log survives");
+  // The entry goes, and the log comes BACK to the caller: the store
+  // holds only what is running, and the page keeps what the reader was
+  // watching for the visit it happened in.
+  const ended = endDeploy("web-app-paris", { ok: true, mayHaveCreated: false, message: "done" });
+  assert.equal(get(deploys)["web-app-paris"], undefined);
+  assert.deepEqual(ended.progress, ["init: running"], "handed to the caller, not dropped");
 
-  cleanup("web-app-paris");
   cleanup("lb-serving-paris");
   stop();
 });
@@ -88,7 +88,7 @@ test("progress lines are routed to the scenario they name", async () => {
 // A deploy that is still running must keep its stream open even if the
 // reader wandered off, or coming back shows a frozen log.
 test("the socket stays open while a deploy is in flight and nobody is watching", async () => {
-  const { useConnector, watch, beginDeploy, finishDeploy } = await import(
+  const { useConnector, watch, beginDeploy, endDeploy } = await import(
     "../src/lib/deploy-store.js"
   );
 
@@ -103,22 +103,19 @@ test("the socket stays open while a deploy is in flight and nobody is watching",
   stop();
   assert.equal(closed, 0, "the deploy is still running; the stream must not be closed");
 
-  finishDeploy("web-app-paris", { ok: true, message: "done" });
+  endDeploy("web-app-paris", { ok: true, mayHaveCreated: false, message: "done" });
   assert.equal(closed, 1, "nothing running and nobody watching, so it closes");
-
-  cleanup("web-app-paris");
 });
 
-// A finished entry stays on screen until the reader navigates away, and
-// the stream is keyed by SCENARIO -- so without this, a second deploy of
-// the same scenario started anywhere else (another tab, the CLI)
-// appended into it, and the page rendered a live, growing log of an
-// apply it did not start underneath a completed-outcome banner.
+// The stream is keyed by SCENARIO, so a second deploy of the same one
+// started anywhere else -- another tab, the CLI -- would append into a
+// log this tab is no longer collecting. That is the adoption this arc
+// removed, arriving through the door the store's own comments name.
 //
-// That is the adoption this arc removed, arriving through the door the
-// store's own comments name.
+// The entry going away on end closes it by construction now; this pins
+// that the lines do not reappear if it ever comes back.
 test("a finished deploy stops absorbing progress for its scenario", async () => {
-  const { deploys, useConnector, watch, beginDeploy, finishDeploy } = await import(
+  const { deploys, useConnector, watch, beginDeploy, endDeploy } = await import(
     "../src/lib/deploy-store.js"
   );
 
@@ -131,18 +128,20 @@ test("a finished deploy stops absorbing progress for its scenario", async () => 
   const stop = watch();
   beginDeploy("web-app-paris");
   onMessage({ type: "deploy_progress", data: { subject: "web-app-paris", line: "apply: running" } });
-  finishDeploy("web-app-paris", { ok: true, message: "Deployed." });
+  const ended = endDeploy("web-app-paris", {
+    ok: true,
+    mayHaveCreated: false,
+    message: "Deployed."
+  });
 
   onMessage({
     type: "deploy_progress",
     data: { subject: "web-app-paris", line: "apply: somebody else's run" }
   });
 
-  const entry = get(deploys)["web-app-paris"];
-  assert.deepEqual(entry.progress, ["apply: running"], "only what this tab was watching");
-  assert.equal(entry.running, false);
+  assert.deepEqual(ended.progress, ["apply: running"], "only what this tab was watching");
+  assert.equal(get(deploys)["web-app-paris"], undefined, "and nothing for a later line to land in");
 
-  cleanup("web-app-paris");
   stop();
 });
 
@@ -154,8 +153,8 @@ test("a finished deploy stops absorbing progress for its scenario", async () => 
 // lock, which makes every line collected in that window theirs. Keeping
 // them rendered another tab's live log underneath an "already deploying"
 // banner.
-test("a refused deploy discards the lines it collected while waiting", async () => {
-  const { deploys, useConnector, watch, beginDeploy, refuseDeploy } = await import(
+test("a refused deploy hands its borrowed lines back rather than filing them", async () => {
+  const { deploys, useConnector, watch, beginDeploy, endDeploy, pendingReports, reports } = await import(
     "../src/lib/deploy-store.js"
   );
 
@@ -172,14 +171,18 @@ test("a refused deploy discards the lines it collected while waiting", async () 
     data: { subject: "web-app-paris", line: "apply: somebody else's run" }
   });
 
-  refuseDeploy("web-app-paris", { ok: false, message: "already deploying" });
+  // The lines come back to the caller, which decides to discard them:
+  // the store's job is to end the deploy, not to judge whose log it is.
+  const ended = endDeploy("web-app-paris", {
+    ok: false,
+    mayHaveCreated: false,
+    message: "already deploying"
+  });
 
-  const entry = get(deploys)["web-app-paris"];
-  assert.deepEqual(entry.progress, [], "those lines were never ours");
-  assert.equal(entry.running, false);
-  assert.equal(entry.outcome.message, "already deploying", "the refusal still has to be reported");
+  assert.deepEqual(ended.progress, ["apply: somebody else's run"]);
+  assert.equal(get(deploys)["web-app-paris"], undefined);
+  assert.deepEqual(pendingReports(get(reports)), [], "a refusal started nothing, so nothing to report");
 
-  cleanup("web-app-paris");
   stop();
 });
 
@@ -210,20 +213,20 @@ test("the connection sentinel is never mistaken for a deploy", async () => {
 // next navigation dropped it, so a leaked project with no live record
 // was named nowhere at all.
 test("a retry does not delete the report of what the last attempt leaked", async () => {
-  const { deploys, useConnector, watch, beginDeploy, finishDeploy, pendingReports, reports } = await import("../src/lib/deploy-store.js");
+  const { deploys, useConnector, watch, beginDeploy, endDeploy, pendingReports, reports } = await import("../src/lib/deploy-store.js");
 
   useConnector(() => () => {});
   const stop = watch();
 
   beginDeploy("web-app-paris");
-  finishDeploy("web-app-paris", {
+  endDeploy("web-app-paris", {
     ok: false,
     mayHaveCreated: true,
     message: "web-app-paris: project 7c98d82e is live and could not be deleted"
   });
 
   beginDeploy("web-app-paris");
-  finishDeploy("web-app-paris", { ok: true, mayHaveCreated: false, message: "Deployed." });
+  endDeploy("web-app-paris", { ok: true, mayHaveCreated: false, message: "Deployed." });
 
   const filed = pendingReports(get(reports)).filter((r) => r.scenario === "web-app-paris");
   assert.equal(filed.length, 1, "the leak did not stop existing because the retry worked");
@@ -235,14 +238,14 @@ test("a retry does not delete the report of what the last attempt leaked", async
 });
 
 test("two failed attempts leak two projects and report both", async () => {
-  const { deploys, useConnector, watch, beginDeploy, finishDeploy, pendingReports, reports } = await import("../src/lib/deploy-store.js");
+  const { deploys, useConnector, watch, beginDeploy, endDeploy, pendingReports, reports } = await import("../src/lib/deploy-store.js");
 
   useConnector(() => () => {});
   const stop = watch();
 
   for (const project of ["aaa", "bbb"]) {
     beginDeploy("web-app-paris");
-    finishDeploy("web-app-paris", {
+    endDeploy("web-app-paris", {
       ok: false,
       mayHaveCreated: true,
       message: `project ${project} is live and could not be deleted`
@@ -265,7 +268,7 @@ test("two failed attempts leak two projects and report both", async () => {
 // workdir first, which is the only place those appear when the request
 // never returns an ActionResult.
 test("a long log keeps its opening and says how much it dropped", async () => {
-  const { deploys, useConnector, watch, beginDeploy, finishDeploy } = await import(
+  const { deploys, useConnector, watch, beginDeploy, endDeploy } = await import(
     "../src/lib/deploy-store.js"
   );
 
@@ -294,32 +297,32 @@ test("a long log keeps its opening and says how much it dropped", async () => {
   assert.ok(entry.progress.length >= 999, "and the cap is not over-trimmed");
   assert.match(entry.progress.at(-1), /line 2999/, "the tail is still the last thing that happened");
 
-  finishDeploy("web-app-paris", { ok: true, mayHaveCreated: false, message: "Deployed." });
+  endDeploy("web-app-paris", { ok: true, mayHaveCreated: false, message: "Deployed." });
   cleanup("web-app-paris");
   stop();
 });
 
-// The round-eleven fix accumulated reports on the entry; forgetting the
-// entry threw them away again. Fail, retry, succeed, navigate — and the
-// project the first attempt leaked is named nowhere, because the second
-// attempt's outcome says there is nothing to report.
-test("a report outlives the entry's last outcome", async () => {
-  const { deploys, useConnector, watch, beginDeploy, finishDeploy, pendingReports, reports } = await import("../src/lib/deploy-store.js");
+// Fail, retry, succeed — and the project the first attempt leaked must
+// still be named. Reports are in their own store precisely so no
+// property of the second attempt can decide the first one's fate; when
+// they shared an entry, two rounds of fixes each deleted them a
+// different way.
+test("a report outlives the deploy that filed it", async () => {
+  const { deploys, useConnector, watch, beginDeploy, endDeploy, pendingReports, reports } = await import("../src/lib/deploy-store.js");
 
   useConnector(() => () => {});
   const stop = watch();
 
   beginDeploy("web-app-paris");
-  finishDeploy("web-app-paris", {
+  endDeploy("web-app-paris", {
     ok: false,
     mayHaveCreated: true,
     message: "project 7c98d82e is live and could not be deleted"
   });
   beginDeploy("web-app-paris");
-  finishDeploy("web-app-paris", { ok: true, mayHaveCreated: false, message: "Deployed." });
+  endDeploy("web-app-paris", { ok: true, mayHaveCreated: false, message: "Deployed." });
 
-  const entry = get(deploys)["web-app-paris"];
-  assert.equal(entry.outcome.mayHaveCreated, false, "the LAST outcome has nothing to report");
+  assert.equal(get(deploys)["web-app-paris"], undefined, "no entry survives either attempt");
   assert.equal(get(reports)["web-app-paris"].length, 1, "the report is filed separately");
   const mine = pendingReports(get(reports)).filter((r) => r.scenario === "web-app-paris");
   assert.match(mine[0].message, /7c98d82e/);
@@ -335,32 +338,22 @@ test("a report outlives the entry's last outcome", async () => {
 // is listed on the Deployments page until its TTL expires." on every
 // later visit for the rest of the session.
 test("retiring a deploy drops the stale banner and keeps the report", async () => {
-  const {
-    deploys,
-    useConnector,
-    watch,
-    beginDeploy,
-    finishDeploy,
-    retireDeploy,
-    dismissReport,
-    pendingReports,
-    reports
-  } = await import("../src/lib/deploy-store.js");
+  const { deploys, useConnector, watch, beginDeploy, endDeploy, dismissReport, pendingReports, reports } = await import("../src/lib/deploy-store.js");
 
   useConnector(() => () => {});
   const stop = watch();
 
   beginDeploy("retire-keeps-report");
-  finishDeploy("retire-keeps-report", {
+  endDeploy("retire-keeps-report", {
     ok: false,
     mayHaveCreated: true,
     message: "project 7c98d82e is live and could not be deleted"
   });
   beginDeploy("retire-keeps-report");
-  finishDeploy("retire-keeps-report", { ok: true, mayHaveCreated: false, message: "Deployed." });
+  endDeploy("retire-keeps-report", { ok: true, mayHaveCreated: false, message: "Deployed." });
 
   // The action under test, not teardown.
-  retireDeploy("retire-keeps-report");
+  endDeploy("retire-keeps-report");
 
   assert.equal(get(deploys)["retire-keeps-report"], undefined, "the stale banner goes entirely");
   const mine = pendingReports(get(reports)).filter((r) => r.scenario === "retire-keeps-report");
@@ -371,7 +364,7 @@ test("retiring a deploy drops the stale banner and keeps the report", async () =
 });
 
 test("retiring a deploy with nothing to report removes it entirely", async () => {
-  const { deploys, useConnector, watch, beginDeploy, finishDeploy, retireDeploy } = await import(
+  const { deploys, useConnector, watch, beginDeploy, endDeploy } = await import(
     "../src/lib/deploy-store.js"
   );
 
@@ -379,8 +372,8 @@ test("retiring a deploy with nothing to report removes it entirely", async () =>
   const stop = watch();
 
   beginDeploy("retire-clean");
-  finishDeploy("retire-clean", { ok: true, mayHaveCreated: false, message: "Deployed." });
-  retireDeploy("retire-clean");
+  endDeploy("retire-clean", { ok: true, mayHaveCreated: false, message: "Deployed." });
+  endDeploy("retire-clean");
 
   assert.equal(get(deploys)["retire-clean"], undefined);
   stop();
@@ -390,14 +383,14 @@ test("retiring a deploy with nothing to report removes it entirely", async () =>
 // Nothing else can retire this: the deploy failed before registration,
 // so there is no live record for a reaper or a listing to clear.
 test("a report can be dismissed once the operator has dealt with it", async () => {
-  const { deploys, useConnector, watch, beginDeploy, finishDeploy, dismissReport, pendingReports, reports } = await import("../src/lib/deploy-store.js");
+  const { deploys, useConnector, watch, beginDeploy, endDeploy, dismissReport, pendingReports, reports } = await import("../src/lib/deploy-store.js");
 
   useConnector(() => () => {});
   const stop = watch();
 
   for (const project of ["aaa", "bbb"]) {
     beginDeploy("dismiss-two");
-    finishDeploy("dismiss-two", {
+    endDeploy("dismiss-two", {
       ok: false,
       mayHaveCreated: true,
       message: `project ${project} is live`
@@ -414,25 +407,19 @@ test("a report can be dismissed once the operator has dealt with it", async () =
   const after = mine(get(reports));
   assert.equal(after.length, 1);
   assert.match(after[0].message, /bbb/, "the one that was dealt with is the one that went");
-  // And the ENTRY survives while a sibling report stands: its outcome
-  // is the pointer the page renders at that report, and its log is the
-  // only account of the apply. Destructuring `deploys` and never
-  // asserting on it is why deleting them shipped.
-  assert.notEqual(get(deploys)["dismiss-two"], undefined, "a sibling report still stands");
 
   dismissReport("dismiss-two", after[0].id);
   assert.equal(mine(get(reports)).length, 0);
-  assert.equal(get(deploys)["dismiss-two"], undefined, "and goes with the last of them");
   stop();
 });
 
-// A report that pointed at the log pointed at nothing: `retireDeploy`
+// A report that pointed at the log pointed at nothing: `endDeploy`
 // and a retry both clear `progress`. When the request never returned an
 // ActionResult the message is generic — "may still be running" — and
 // the head of the log is the only place the run's workdir is named, so
 // the report takes a copy.
 test("a report carries the opening lines that identify its run", async () => {
-  const { deploys, useConnector, watch, beginDeploy, finishDeploy, retireDeploy, pendingReports, reports } = await import("../src/lib/deploy-store.js");
+  const { deploys, useConnector, watch, beginDeploy, endDeploy, pendingReports, reports } = await import("../src/lib/deploy-store.js");
 
   let onMessage;
   useConnector((handler) => {
@@ -445,15 +432,14 @@ test("a report carries the opening lines that identify its run", async () => {
   for (const line of ["Deploying carries-opening (abc123) for 4h0m0s", "  workdir: /tmp/if-run-xyz"]) {
     onMessage({ type: "deploy_progress", data: { subject: "carries-opening", line } });
   }
-  finishDeploy("carries-opening", {
+  endDeploy("carries-opening", {
     ok: false,
     mayHaveCreated: true,
     message: "The deploy may still be running on the server."
   });
 
-  // Leaving drops the entry and its log entirely, exactly as navigating
-  // away does. The report is in its own store and is untouched.
-  retireDeploy("carries-opening");
+  // The entry and its log are gone; the report is in its own store and
+  // carries its own copy of the identifying lines.
   assert.equal(get(deploys)["carries-opening"], undefined);
 
   const [report] = pendingReports(get(reports)).filter((r) => r.scenario === "carries-opening");
@@ -500,14 +486,14 @@ test("a closing socket cannot mark its replacement disconnected", async () => {
 // landing before a re-render deleted two different reports — the second
 // one a leak the operator had never read.
 test("dismissing names a report, not a position", async () => {
-  const { deploys, useConnector, watch, beginDeploy, finishDeploy, dismissReport, pendingReports, reports } = await import("../src/lib/deploy-store.js");
+  const { deploys, useConnector, watch, beginDeploy, endDeploy, dismissReport, pendingReports, reports } = await import("../src/lib/deploy-store.js");
 
   useConnector(() => () => {});
   const stop = watch();
 
   for (const project of ["aaa", "bbb", "ccc"]) {
     beginDeploy("stable-ids");
-    finishDeploy("stable-ids", {
+    endDeploy("stable-ids", {
       ok: false,
       mayHaveCreated: true,
       message: `project ${project} is live`
@@ -535,7 +521,7 @@ test("dismissing names a report, not a position", async () => {
 // 423 that followed marked the original finished — so the socket
 // handler discarded its lines while it kept creating infrastructure.
 test("a second start cannot orphan a running deploy", async () => {
-  const { deploys, useConnector, watch, beginDeploy, finishDeploy } = await import(
+  const { deploys, useConnector, watch, beginDeploy, endDeploy } = await import(
     "../src/lib/deploy-store.js"
   );
 
@@ -558,7 +544,7 @@ test("a second start cannot orphan a running deploy", async () => {
   assert.deepEqual(entry.progress, ["  workdir: /tmp/if-run-abc"], "the live log is untouched");
   assert.equal(entry.running, true);
 
-  finishDeploy("no-double-start", { ok: true, mayHaveCreated: false, message: "Deployed." });
+  endDeploy("no-double-start", { ok: true, mayHaveCreated: false, message: "Deployed." });
   cleanup("no-double-start");
   stop();
 });
@@ -568,7 +554,7 @@ test("a second start cannot orphan a running deploy", async () => {
 // 423 that comes back is applied to the first deploy, clearing its log
 // and marking it finished while it keeps creating infrastructure.
 test("beginDeploy reports whether the deploy may proceed", async () => {
-  const { useConnector, watch, beginDeploy, finishDeploy } = await import(
+  const { useConnector, watch, beginDeploy, endDeploy } = await import(
     "../src/lib/deploy-store.js"
   );
 
@@ -578,10 +564,10 @@ test("beginDeploy reports whether the deploy may proceed", async () => {
   assert.equal(beginDeploy("binding-answer"), true);
   assert.equal(beginDeploy("binding-answer"), false, "one is already running");
 
-  finishDeploy("binding-answer", { ok: true, mayHaveCreated: false, message: "Deployed." });
+  endDeploy("binding-answer", { ok: true, mayHaveCreated: false, message: "Deployed." });
   assert.equal(beginDeploy("binding-answer"), true, "and a retry is allowed once it ends");
 
-  finishDeploy("binding-answer", { ok: true, mayHaveCreated: false, message: "Deployed." });
+  endDeploy("binding-answer", { ok: true, mayHaveCreated: false, message: "Deployed." });
   cleanup("binding-answer");
   stop();
 });

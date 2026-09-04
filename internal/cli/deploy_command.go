@@ -190,10 +190,7 @@ func runDeployCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime
 	// same condition the recovery line below keys off. A record that
 	// does not exist cannot be torn down, and naming one would send an
 	// operator to a "no such file or directory".
-	recordedID := ""
-	if recorded {
-		recordedID = deploymentID
-	}
+	recordedID := recordedDeploymentID(recorded, deploymentID)
 	if err := writeCommandOutput(cmd, OutputResult{
 		Command:    "deploy",
 		Scenario:   sc.Name,
@@ -443,6 +440,24 @@ func hasDeployableExtension(name string) bool {
 // between "a deployment record" and "a deployment's Terraform state".
 func deploymentWorkDir(root, deploymentID string) string {
 	return filepath.Join(root, "workdirs", deploymentID)
+}
+
+// recordedDeploymentID names the record only if one was written.
+//
+// Its own function so the rule can be tested. Inline, the only test of
+// it marshalled two hand-built structs and proved `omitempty` works --
+// so deleting the condition and naming the id unconditionally left the
+// suite green, while the CLI would point an operator at
+// `live teardown dep-x` for a record registration had failed to write.
+//
+// Keyed off whether registration SUCCEEDED, the same condition the
+// recovery line uses: a record that does not exist cannot be torn down,
+// and naming one sends somebody to a "no such file or directory".
+func recordedDeploymentID(recorded bool, deploymentID string) string {
+	if !recorded {
+		return ""
+	}
+	return deploymentID
 }
 
 // newDeploymentID is scenario-scoped, timestamped, and carries random

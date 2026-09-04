@@ -141,7 +141,7 @@ export function nothingRecorded(deployments, unreadable) {
  * had just been moved to fix for `estateSummary`. Moved, and the count
  * corrected from three, 2026-09-04.)
  */
-export function knownEmpty(deployments, unreadable, state = "loaded", deploying) {
+export function knownEmpty(deployments, unreadable, state, deploying) {
   return (
     state === "loaded" &&
     // `deploying` is TRI-STATE: a list, or "the payload never said". An
@@ -155,11 +155,14 @@ export function knownEmpty(deployments, unreadable, state = "loaded", deploying)
     // this predicate got the new term and its sibling caller did not,
     // so two emptiness claims contradicted each other on one screen.
     //
-    // And there is NO DEFAULT, because a default is a third way to
-    // forget. `knownEmpty(d, u, state, payload.deploying)` written the
-    // obvious way passes `undefined` when the server omitted the key,
-    // and a `= []` default turned that straight back into the claim
-    // this guard exists to withhold. Only an array counts as an answer.
+    // And there is NO DEFAULT -- on this or on `state` -- because a
+    // default is a third way to forget. `knownEmpty(d, u, state,
+    // payload.deploying)` written the obvious way passes `undefined`
+    // when the server omitted the key, and a `= []` default turned that
+    // straight back into the claim this guard exists to withhold; a
+    // `state = "loaded"` default did the same for "the read
+    // succeeded". Only an array counts as an answer, and only an
+    // explicit state counts as a state.
     Array.isArray(deploying) &&
     nothingRecorded(deployments, unreadable) &&
     // A deploy that is APPLYING has no record yet, so it is absent from
@@ -219,7 +222,7 @@ export function deployingLabel(deploying, stale = false) {
  * JSDoc comment was inserted between it and the function it describes.
  * Moved 2026-09-03.)
  */
-export function estateSummary(deployments, unreadable, state = "loaded", deploying) {
+export function estateSummary(deployments, unreadable, state, deploying) {
   const told = Array.isArray(deploying);
   const applying = told ? deploying.length : 0;
 

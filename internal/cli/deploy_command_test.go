@@ -556,15 +556,21 @@ func TestDeployCreatesTheProjectInsideTheInterruptGuard(t *testing.T) {
 // the recovery line keys off: naming a record that does not exist sends
 // an operator to a "no such file or directory".
 func TestDeployOutputNamesTheRecordOnlyWhenOneWasWritten(t *testing.T) {
-	var withRecord, withoutRecord OutputResult
-	withRecord.Deployment = "dep-web-app-paris-1"
+	// The RULE, not `omitempty`. The previous version of this test
+	// marshalled two hand-built structs, so deleting the condition and
+	// naming the id unconditionally left it green -- and the CLI would
+	// then point an operator at `live teardown dep-x` for a record that
+	// registration had failed to write.
+	assert.Equal(t, "dep-web-app-paris-1",
+		recordedDeploymentID(true, "dep-web-app-paris-1"))
+	assert.Equal(t, "", recordedDeploymentID(false, "dep-web-app-paris-1"),
+		"a record that does not exist cannot be torn down, and naming it sends somebody to a 'no such file'")
 
-	raw, err := json.Marshal(MachineOutput{Schema: "x", Result: withRecord})
+	// And an empty id must not reach the wire as a field a client could
+	// read as a deployment.
+	raw, err := json.Marshal(MachineOutput{Schema: "x", Result: OutputResult{
+		Deployment: recordedDeploymentID(false, "dep-web-app-paris-1"),
+	}})
 	require.NoError(t, err)
-	assert.Contains(t, string(raw), `"deployment":"dep-web-app-paris-1"`)
-
-	raw, err = json.Marshal(MachineOutput{Schema: "x", Result: withoutRecord})
-	require.NoError(t, err)
-	assert.NotContains(t, string(raw), `"deployment"`,
-		"an absent id must not read as an empty one somebody could try to tear down")
+	assert.NotContains(t, string(raw), `"deployment"`)
 }

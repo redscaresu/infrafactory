@@ -359,7 +359,12 @@ func deployHandler(state *serverState) http.HandlerFunc {
 			return
 		}
 		if r.Method != http.MethodPost {
-			writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+			// A refusal, like the collection's own method check: this
+			// answers before anything is dispatched, so "nothing was
+			// started" is true. A plain error here left a client
+			// reading it as unknown and pinning a permanent leak report
+			// for a request no handler ran.
+			writeRefusal(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
 
