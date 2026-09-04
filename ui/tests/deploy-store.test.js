@@ -21,7 +21,7 @@ function cleanup(...scenarios) {
     // Reports deliberately survive `retireDeploy`, so teardown has to
     // dismiss them the way an operator would.
     while (get(sharedDeploys)[scenario]?.reports?.length) {
-      dismissForCleanup(scenario, 0);
+      dismissForCleanup(scenario, get(sharedDeploys)[scenario].reports[0].id);
     }
     retireForCleanup(scenario);
   }
@@ -370,7 +370,7 @@ test("retiring a deploy drops the stale banner and keeps the report", async () =
   const mine = pendingReports(get(deploys)).filter((r) => r.scenario === "retire-keeps-report");
   assert.equal(mine.length, 1, "the leak report stays");
 
-  dismissReport("retire-keeps-report", mine[0].index);
+  dismissReport("retire-keeps-report", mine[0].id);
   stop();
 });
 
@@ -414,13 +414,13 @@ test("a report can be dismissed once the operator has dealt with it", async () =
   assert.equal(before.length, 2);
 
   // Dismissing one names WHICH: two attempts can fail identically.
-  dismissReport("dismiss-two", before[0].index);
+  dismissReport("dismiss-two", before[0].id);
 
   const after = mine(get(deploys));
   assert.equal(after.length, 1);
   assert.match(after[0].message, /bbb/, "the one that was dealt with is the one that went");
 
-  dismissReport("dismiss-two", after[0].index);
+  dismissReport("dismiss-two", after[0].id);
   assert.equal(mine(get(deploys)).length, 0);
   stop();
 });
@@ -493,4 +493,72 @@ test("a closing socket cannot mark its replacement disconnected", async () => {
 
   assert.equal(isConnected(get(deploys)), true, "the live socket is still live");
   second();
+});
+
+// Dismissing used to name a POSITION, and positions move. Two clicks
+// landing before a re-render deleted two different reports — the second
+// one a leak the operator had never read.
+test("dismissing names a report, not a position", async () => {
+  const { deploys, useConnector, watch, beginDeploy, finishDeploy, dismissReport, pendingReports } =
+    await import("../src/lib/deploy-store.js");
+
+  useConnector(() => () => {});
+  const stop = watch();
+
+  for (const project of ["aaa", "bbb", "ccc"]) {
+    beginDeploy("stable-ids");
+    finishDeploy("stable-ids", {
+      ok: false,
+      mayHaveCreated: true,
+      message: `project ${project} is live`
+    });
+  }
+
+  const mine = () => pendingReports(get(deploys)).filter((r) => r.scenario === "stable-ids");
+  const middle = mine()[1];
+
+  // The same handle twice, as a double-click would.
+  dismissReport("stable-ids", middle.id);
+  dismissReport("stable-ids", middle.id);
+
+  const left = mine().map((r) => r.message);
+  assert.equal(left.length, 2, "the second click removed nothing that was not already gone");
+  assert.match(left[0], /aaa/);
+  assert.match(left[1], /ccc/);
+
+  cleanup("stable-ids");
+  stop();
+});
+
+// The button's `disabled` lives on a page; the store outlives it. A
+// second start over a live apply reset its log and its outcome, and the
+// 423 that followed marked the original finished — so the socket
+// handler discarded its lines while it kept creating infrastructure.
+test("a second start cannot orphan a running deploy", async () => {
+  const { deploys, useConnector, watch, beginDeploy, finishDeploy } = await import(
+    "../src/lib/deploy-store.js"
+  );
+
+  let onMessage;
+  useConnector((handler) => {
+    onMessage = handler;
+    return () => {};
+  });
+
+  const stop = watch();
+  beginDeploy("no-double-start");
+  onMessage({
+    type: "deploy_progress",
+    data: { subject: "no-double-start", line: "  workdir: /tmp/if-run-abc" }
+  });
+
+  beginDeploy("no-double-start");
+
+  const entry = get(deploys)["no-double-start"];
+  assert.deepEqual(entry.progress, ["  workdir: /tmp/if-run-abc"], "the live log is untouched");
+  assert.equal(entry.running, true);
+
+  finishDeploy("no-double-start", { ok: true, mayHaveCreated: false, message: "Deployed." });
+  cleanup("no-double-start");
+  stop();
 });

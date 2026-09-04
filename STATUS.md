@@ -2,6 +2,43 @@
 
 Last updated: 2026-09-04
 
+## 2026-09-04 — S163e-fixes (round seventeen): a permanent alarm on the common path
+
+**10 findings, 8 accepted, 2 declined.** The largest reverses a round-eight decision,
+because the reason for it no longer holds.
+
+**`mayHaveCreated` was true for every unclean deploy**, justified by "a deploy that
+fails before registration has no live record either". False for the usual case:
+`deploy` registers from whatever the state shows, whether or not the apply
+succeeded, so a half-failed apply leaves a record with a TTL, on the estate page,
+reapable — and the CLI already prints `tear it down with infrafactory live teardown
+dep-x`. Every one of those raised a red banner only a human could dismiss, for
+infrastructure something else tracks, and could not name what to tear down because
+neither `ActionResult` nor `OutputResult` carried the id. Both do now, set only when
+registration succeeded.
+
+**The arrival hook is deleted.** Round eight added it because leaving only retired
+what had already finished; leaving is unconditional now, which fixes that on its
+own. Meanwhile the hook cost two defects: it raced `loadDetail` and deleted a
+refusal before it rendered, and its snapshot could not tell "finished long ago" from
+"finished while I stepped away" — so a reader who came back precisely to see how a
+deploy went found the banner and the whole apply log gone. A banner is shown once,
+on the visit they returned for, and leaving retires it.
+
+Also: `dismissReport` identified a report by array POSITION, so two clicks before a
+re-render deleted two different reports — the second a leak nobody had read;
+`beginDeploy` overwrote a still-running entry, the only guard being the button's
+`disabled` on the page the store exists to outlive; the four functions deciding
+"nothing was created" vs "resources may still be running" lived in `api.ts`, which
+`node --test` cannot import, so inverting any of them passed the whole suite
+(extracted to `deploy-response.js` with tests); and `deploying`/`deployingKnown`
+were two variables for one tri-state — now `string[] | null`, which makes the
+omission unrepresentable.
+
+**Declined:** `pendingReports` per progress line (fifth time), and the estate walk
+per preview (recorded in ADR-0027; a `ListByScenario` on the store is the fix, and
+that is a store change rather than a review fix).
+
 ## 2026-09-04 — S163e-fixes (round sixteen): the fix applied to one of its two callers
 
 **10 findings, all accepted.** Three are round fifteen's fixes applied to one site

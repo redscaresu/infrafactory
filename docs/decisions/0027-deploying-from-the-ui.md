@@ -683,3 +683,35 @@ render. Wrapper types carry the sentinel for `errors.Is` and leave the text alon
 `estateSummary`, which asks the same question for the line above the panel. A
 parameter added to the predicate and not to its callers puts the two claims back in
 disagreement, which is what having a shared predicate was for.
+
+
+## Amendment, 2026-09-04 (round seventeen): a failed deploy is not an unrecorded one
+
+`deploy` registers from whatever the state shows, whether or not the apply
+succeeded. So the usual failed deploy leaves a live record — with a TTL, on the
+estate page, reapable — and treating every unclean result as an unreported leak
+raised a permanent, human-only-dismissible alarm for infrastructure the system
+already tracks.
+
+`ActionResult.Deployment` and `OutputResult.Deployment` carry the id, set only when
+registration SUCCEEDED, which is the condition the CLI's own recovery line uses. A
+recorded failure names its record; an unrecorded one keeps the alarm, because it is
+the only place that infrastructure is ever mentioned.
+
+### Leaving retires a deploy. Nothing else does.
+
+A banner is shown at most once — on the visit the reader came back for — and
+leaving the scenario retires it. There is no arrival hook.
+
+One existed because leaving used to retire only what had already finished, so a
+deploy that finished afterwards greeted every later visit. Leaving is unconditional
+now, and the arrival hook had become the destructive half: it raced the detail
+fetch, deleting a refusal before it rendered, and it could not distinguish a deploy
+that finished long ago from one that finished moments before the reader returned to
+look at it.
+
+### Identity, not position
+
+A report is dismissed by an id minted when it is recorded. Positions move: two
+clicks landing before a re-render deleted two different reports, and the second was
+a leak nobody had read.

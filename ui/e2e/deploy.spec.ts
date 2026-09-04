@@ -1150,12 +1150,18 @@ test('a refusal that arrives after a detour is still reported', async ({ page })
 });
 
 
-// The two hooks that drop a finished banner run when the reader LEAVES.
-// Neither can drop a deploy that was still running then and finished
-// afterwards -- and that entry lived forever, greeting every later visit
-// with "deployed. It is listed on the Deployments page until its TTL
-// expires." for infrastructure whose TTL may have gone.
-test('a deploy that finishes after you leave does not greet you on your return', async ({
+// A deploy that finishes while the reader is away is shown ONCE, on the
+// visit they came back for, and then goes.
+//
+// Both halves matter. An earlier version dropped it on arrival, so a
+// reader who navigated back precisely to see how it went found the
+// banner and the whole apply log already deleted. An earlier one still
+// never dropped it at all, because leaving only retired what had
+// already finished when the reader left -- so it greeted every later
+// visit for the rest of the session, long after the TTL it names may
+// have passed. Leaving is unconditional now, and nothing acts on
+// arrival.
+test('a deploy that finishes after you leave is reported once, then goes', async ({
   page
 }) => {
   await page.route('**/api/deployments/preview**', (route) =>
@@ -1200,10 +1206,18 @@ test('a deploy that finishes after you leave does not greet you on your return',
 
   await page.getByTestId('sidebar-scenario-training/web-app-paris').click();
   await expect(page.locator('main h1')).toContainText('web-app-paris');
-  await expect(page.getByTestId('deploy-outcome')).toHaveCount(0);
 
-  // And the button works, rather than being stuck behind a ghost.
+  // Shown: this is the visit the reader came back for.
+  await expect(page.getByTestId('deploy-outcome')).toContainText('Deployed. It is listed');
   await expect(page.getByTestId('scenario-deploy')).toBeEnabled();
+
+  // And gone after that, so it cannot become a claim about a TTL that
+  // has since passed.
+  await page.getByTestId('sidebar-scenario-training/lb-serving-paris').click();
+  await expect(page.locator('main h1')).toContainText('lb-serving-paris');
+  await page.getByTestId('sidebar-scenario-training/web-app-paris').click();
+  await expect(page.locator('main h1')).toContainText('web-app-paris');
+  await expect(page.getByTestId('deploy-outcome')).toHaveCount(0);
 });
 
 // The mirror image of the test above, and the more important half.
@@ -1962,4 +1976,57 @@ test('dismissing a report leaves the retry that succeeded still reported', async
 
   await expect(page.getByTestId('pending-deploy-report')).toHaveCount(0);
   await expect(page.getByTestId('deploy-outcome')).toContainText('Deployed. It is listed');
+});
+
+// `deploy` registers from whatever the state shows, whether or not the
+// apply succeeded — so a half-failed apply usually DOES leave a record,
+// with a TTL, on the estate page, reapable. Treating every unclean
+// deploy as an unreported leak pinned a permanent alarm for
+// infrastructure something else already tracks, and could not name what
+// to tear down.
+test('an unclean deploy that was recorded points at the record, not at an unknown leak', async ({
+  page
+}) => {
+  await page.route('**/api/deployments/preview**', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        scenario: 'web-app-paris',
+        deployable: true,
+        expires_at: null,
+        internet_facing: false,
+        deploy_allowed: true,
+        already_live: [],
+        already_live_unknown: false,
+        cost: { components: [], eur_per_hour: 0, unpriced: [], complete: true, modelled: true }
+      })
+    })
+  );
+  await page.route('**/api/deployments', (route) =>
+    route.request().method() === 'POST'
+      ? route.fulfill({
+          status: 409,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            clean: false,
+            steps: [],
+            failures: [{ detail: 'probe never confirmed the version' }],
+            deployment: 'dep-web-app-paris-20260904'
+          })
+        })
+      : route.continue()
+  );
+
+  await page.goto('/scenarios/training/web-app-paris');
+  await page.getByTestId('scenario-deploy').click();
+  await page.getByTestId('deploy-confirm-go').click();
+
+  // Named, so the reader knows what to tear down.
+  const outcome = page.getByTestId('deploy-outcome');
+  await expect(outcome).toContainText('dep-web-app-paris-20260904');
+  await expect(outcome).toContainText('did not finish cleanly');
+
+  // And NOT a permanent alarm: the estate already tracks it.
+  await expect(page.getByTestId('pending-deploy-report')).toHaveCount(0);
 });

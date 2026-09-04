@@ -352,6 +352,9 @@ func deployOutcome(stdout, progress string, deployErr error) api.ActionResult {
 	payload := envelope.Result
 	out := actionResult(payload.Stages, payload.Failures)
 	out.Clean = payload.Status == CommandStatusSuccess && len(payload.Failures) == 0
+	// Carried through, so a caller can tell an unclean deploy that left
+	// a REAPABLE record from one that left nothing anybody is tracking.
+	out.Deployment = payload.Deployment
 	return out
 }
 

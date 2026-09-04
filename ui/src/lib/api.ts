@@ -1,4 +1,9 @@
 import { fetchPitfalls, fetchSavePitfalls } from "$lib/pitfalls-api.js";
+// Plain JS, so `node --test` can reach them. These four decide whether
+// a reader is told "nothing was created" or "resources may still be
+// running" -- the most consequential judgement in this slice -- and
+// living in a .ts file put them beyond every unit test.
+import { DeployError, isActionResult, readJSON, startedNothing } from "$lib/deploy-response.js";
 import type {
   Pitfall,
   PitfallsResponse,
@@ -12,92 +17,6 @@ import type {
 } from "$lib/types";
 
 const base = "";
-
-/**
- * DeployError says whether the apply STARTED, which is the only thing a
- * caller can safely conclude from a failed deploy request.
- *
- * The deploy is deliberately detached from the request that starts it
- * (`destructiveContext`: "a client disconnecting halfway would leave
- * resources with no completed record"). So a rejected promise has two
- * completely different meanings:
- *
- *   - The SERVER answered, and its answer was a refusal issued before
- *     anything ran -- 423 while another deploy holds the lock, 404 for
- *     an unknown scenario or a server without `--allow-deploy`, 400 for
- *     a malformed request. Nothing was created. `startedNothing`.
- *   - Anything else -- a sleeping laptop, a wifi hop, a proxy timeout,
- *     a 500 from a deploy that ran and failed. The apply may be running
- *     right now, creating a project and a bill.
- *
- * Collapsing the second into the first is how a page came to delete the
- * progress log of a live apply and tell the reader nothing had
- * happened.
- */
-export class DeployError extends Error {
-  readonly startedNothing: boolean;
-
-  constructor(message: string, startedNothing: boolean) {
-    super(message);
-    this.name = "DeployError";
-    this.startedNothing = startedNothing;
-  }
-}
-
-// startedNothing reads the SERVER's word for it.
-//
-// `started_nothing: true` is written by `writeRefusal`, on the paths
-// that reject a request before it can touch the cloud. Absence means
-// unknown, which is the safe default: erring this way sends a reader to
-// check the Deployments page for infrastructure that was never created,
-// and erring the other way tells them nothing happened while a project
-// is being created and billed.
-//
-// This replaced a client-side allowlist of status codes, which was a
-// copy of server semantics -- the class this arc spent nine rounds
-// deleting -- and the copy was already wrong: `deployHandler` answers
-// 404 both for "no such scenario", before the apply, and for an
-// os.ErrNotExist returned by Deploy, after it. The allowlist called
-// both of them "nothing started".
-function startedNothing(body: unknown): boolean {
-  return typeof body === "object" && body !== null && (body as { started_nothing?: unknown }).started_nothing === true;
-}
-
-// isActionResult decides whether a body is a result or an error.
-//
-// The `clean` field is the discriminator, and checking it closes a
-// class rather than an instance. The deploy path special-cased a bare
-// 409 as an ActionResult because `writeActionResult` produces one --
-// but so can a reverse proxy, an intermediary, or the next refusal
-// somebody adds. A `{"error": ...}` body parsed as a result has no
-// `clean` field, so it rendered "resources may still be running" for a
-// request that never reached the deployer. That is the exact defect
-// moving the "already deploying" refusal to 423 fixed for ONE producer;
-// this fixes it for all of them.
-function isActionResult(body: unknown): body is ActionResult {
-  return typeof body === "object" && body !== null && "clean" in body;
-}
-
-/**
- * readJSON returns null instead of throwing on an unparseable body.
- *
- * A body that will not parse is not an ActionResult and carries no
- * error message, which is exactly what `null` says. Letting the
- * SyntaxError escape instead discarded the status the caller had
- * already used to decide whether anything had been started.
- */
-async function readJSON(res: Response): Promise<{ ok: boolean; value: unknown }> {
-  try {
-    // `{ok, value}`, not a bare null. `null` is a perfectly good JSON
-    // document -- run artifacts are served verbatim with a JSON content
-    // type and one of them can be exactly that -- so returning null for
-    // both "the parse failed" and "the value is null" turned a valid
-    // response into "could not be read".
-    return { ok: true, value: await res.json() };
-  } catch {
-    return { ok: false, value: null };
-  }
-}
 
 function withFormat(path: string): string {
   const sep = path.includes("?") ? "&" : "?";
@@ -243,3 +162,5 @@ export const api = {
   savePitfalls: (provider: string, pitfalls: Pitfall[]): Promise<SavePitfallsResponse> =>
     fetchSavePitfalls(provider, pitfalls) as Promise<SavePitfallsResponse>
 };
+
+export { DeployError };

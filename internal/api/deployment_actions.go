@@ -32,6 +32,22 @@ type ActionResult struct {
 	// Failures are the reasons it is not clean. Carried separately so a
 	// page cannot render a partial success as a success.
 	Failures []ActionStep `json:"failures"`
+
+	// Deployment names the live record, when one was written.
+	//
+	// A failed deploy is not the same as an unrecorded one. `deploy`
+	// registers from whatever the state shows, whether or not the apply
+	// succeeded, so a half-failed apply usually DOES leave a record --
+	// with a TTL, listed on the estate page, reapable. Without this the
+	// client had to assume the worst of every unclean deploy and pin a
+	// permanent "it may have created resources that are still running"
+	// alarm for infrastructure the estate already tracks, unable even
+	// to name what to tear down.
+	//
+	// Empty means no record: either nothing was created, or something
+	// was and could not be recorded. Those are told apart by the
+	// failures, which say which.
+	Deployment string `json:"deployment,omitempty"`
 }
 
 // DeploymentDeployer creates a live deployment.

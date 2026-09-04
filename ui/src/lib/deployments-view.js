@@ -141,17 +141,21 @@ export function nothingRecorded(deployments, unreadable) {
  * had just been moved to fix for `estateSummary`. Moved, and the count
  * corrected from three, 2026-09-04.)
  */
-export function knownEmpty(deployments, unreadable, state = "loaded", deploying = [], deployingKnown = true) {
+export function knownEmpty(deployments, unreadable, state = "loaded", deploying = []) {
   return (
     state === "loaded" &&
-    // An absent `deploying` field is not an empty one. The server
-    // always sends it; one that predates the field, or a body trimmed
-    // by an intermediary, does not -- and reading that as "nothing is
-    // applying" licenses the page's only permitted emptiness claim on
-    // an estate that may be busy creating something. The same
-    // absent-vs-empty distinction `already_live` is given two files
-    // away, on the same wire contract.
-    deployingKnown &&
+    // `deploying` is TRI-STATE: a list, or `null` for "the payload
+    // never said". An absent field is not an empty one -- a server
+    // predating it, or a body trimmed by an intermediary, would
+    // otherwise license the page's only permitted emptiness claim on an
+    // estate that may be busy creating something.
+    //
+    // Carried in the value rather than in a parallel boolean, because a
+    // parallel boolean is what the last round's defect was made of:
+    // this predicate got the new term and its sibling caller did not,
+    // so two emptiness claims contradicted each other on one screen. A
+    // null cannot be forgotten the way an argument can.
+    deploying !== null &&
     nothingRecorded(deployments, unreadable) &&
     // A deploy that is APPLYING has no record yet, so it is absent from
     // `deployments` while being the most active thing in the estate.
@@ -210,13 +214,7 @@ export function deployingLabel(deploying, stale = false) {
  * JSDoc comment was inserted between it and the function it describes.
  * Moved 2026-09-03.)
  */
-export function estateSummary(
-  deployments,
-  unreadable,
-  state = "loaded",
-  deploying = [],
-  deployingKnown = true
-) {
+export function estateSummary(deployments, unreadable, state = "loaded", deploying = []) {
   const applying = deploying?.length || 0;
 
   if (state === "loading") return "Reading the live estate…";
@@ -245,15 +243,7 @@ export function estateSummary(
     return staleApplying ? `${staleApplying}. ${read}` : read;
   }
 
-  // `deployingKnown` passed THROUGH. Dropping it here re-entered
-  // knownEmpty with the parameter defaulting to true, so the summary
-  // line said "Nothing is deployed." while the empty-state panel beside
-  // it was correctly suppressed -- two derived emptiness claims
-  // contradicting each other on one screen, which is the defect the
-  // extraction exists to prevent.
-  if (knownEmpty(deployments, unreadable, state, deploying, deployingKnown)) {
-    return "Nothing is deployed.";
-  }
+  if (knownEmpty(deployments, unreadable, state, deploying)) return "Nothing is deployed.";
 
   const described = describe(deployments, unreadable);
   const applyingText = deployingLabel(deploying);
@@ -377,6 +367,24 @@ export function teardownOutcome(result) {
  * deploy that cannot prove its account clean is not a success (ADR-0024).
  */
 export function deployOutcome(result) {
+  // A deploy that WROTE A RECORD is not an unreported leak.
+  //
+  // `deploy` registers from whatever the state shows, whether or not
+  // the apply succeeded, so a half-failed apply usually leaves a
+  // record -- with a TTL, on the estate page, reapable by `live reap`.
+  // Treating every unclean deploy as unrecorded pinned a permanent
+  // alarm for infrastructure something else already tracks, and could
+  // not even name what to tear down. That is the alarm fatigue
+  // `dismissReport` exists to avoid, manufactured on the common path.
+  if (result && !result.clean && result.deployment) {
+    const reasons = (result.failures || []).map((f) => f.detail).filter(Boolean);
+    const base = `The deploy did not finish cleanly, but it was recorded as ${result.deployment} — it is on the Deployments page and expires with its TTL.`;
+    return {
+      ok: false,
+      mayHaveCreated: false,
+      message: reasons.length > 0 ? `${base} ${reasons.join(" ")}` : base
+    };
+  }
   return actionOutcome(result, {
     nothing: "The deploy returned nothing, so what it created is unknown.",
     // The whole sentence, because the template renders `message` for
@@ -385,7 +393,7 @@ export function deployOutcome(result) {
     // while every unit test asserting on it kept passing.
     proven: "Deployed. It is listed on the Deployments page until its TTL expires.",
     unproven:
-      "The deploy did not finish cleanly — it may have created resources that are still running."
+      "The deploy did not finish cleanly and left no record — it may have created resources that are still running, and nothing else is tracking them."
   });
 }
 

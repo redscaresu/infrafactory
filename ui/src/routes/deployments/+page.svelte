@@ -27,7 +27,11 @@
   // the page that is meant to answer "what is running" is silent about
   // the thing most actively running, and a reader who has just clicked
   // Deploy elsewhere sees nothing at all.
-  let deploying: string[] = [];
+  // Tri-state: a list, or `null` for "the payload never said what was
+  // applying". Absence is not emptiness, and carrying it in the value
+  // rather than in a parallel boolean means no caller can pass one
+  // without the other.
+  let deploying: string[] | null = [];
 
   // Confirming is a SECOND deliberate action on a named row, not a
   // dialog that appears everywhere at once. A click cannot destroy
@@ -36,7 +40,6 @@
   let destroying = "";
   let outcomes: Record<string, { ok: boolean; message: string }> = {};
   let loadError = "";
-  let deployingKnown = true;
   let loaded = false;
   let timer: ReturnType<typeof setInterval> | undefined;
 
@@ -46,11 +49,9 @@
       deployments = payload?.deployments || [];
       unreadable = payload?.unreadable || [];
       teardownAllowed = payload?.teardown_allowed === true;
-      // Absence is recorded, not smoothed over: `knownEmpty` may not
-      // claim the estate is empty on a payload that never said what was
-      // applying.
-      deployingKnown = Array.isArray(payload?.deploying);
-      deploying = deployingKnown ? payload.deploying : [];
+      // `null` for "the payload never said", carried in the value so
+      // no caller can forget to pass a second flag along with it.
+      deploying = Array.isArray(payload?.deploying) ? payload.deploying : null;
       loadError = "";
     } catch (err) {
       // The previous rows are KEPT on error rather than cleared. An
@@ -105,7 +106,7 @@
   // The three states are distinct on purpose: an empty list means
   // "nothing is deployed" ONLY when the read succeeded.
   $: estateState = !loaded ? "loading" : loadError ? "failed" : "loaded";
-  $: summary = estateSummary(deployments, unreadable, estateState, deploying, deployingKnown);
+  $: summary = estateSummary(deployments, unreadable, estateState, deploying);
   // The in-flight list survives a failed refresh along with the rows,
   // and is exactly as old as they are: the rows say so about
   // themselves, and this says so about the banner.
@@ -118,7 +119,7 @@
   // The one condition under which this page may say nothing is running.
   // Shared with the summary rather than re-derived, because two copies
   // is how one of them ends up contradicting the other.
-  $: estateKnownEmpty = knownEmpty(deployments, unreadable, estateState, deploying, deployingKnown);
+  $: estateKnownEmpty = knownEmpty(deployments, unreadable, estateState, deploying);
 </script>
 
 <svelte:head><title>Deployments · InfraFactory</title></svelte:head>
@@ -147,7 +148,7 @@
     </div>
   {/if}
 
-  {#if deploying.length > 0}
+  {#if (deploying?.length ?? 0) > 0}
     <div
       class="rounded border border-sky-300 bg-sky-50 px-4 py-3 text-sm text-sky-900"
       data-testid="estate-deploying"
@@ -160,11 +161,11 @@
                still be showing an EARLIER deployment of this scenario
                -- and "does not appear below" then denied a row the
                reader could see. -->
-          {deploying.length === 1 ? "It had" : "They had"} no record of {deploying.length === 1
+          {deploying!.length === 1 ? "It had" : "They had"} no record of {deploying!.length === 1
             ? "its"
             : "their"} own, so any row below with the same name is an earlier deployment. Whether
-          {deploying.length === 1 ? "it is" : "they are"} still applying is unknown — the estate has
-          not been readable since. Applying when last read: {deploying.join(", ")}.
+          {deploying!.length === 1 ? "it is" : "they are"} still applying is unknown — the estate has
+          not been readable since. Applying when last read: {deploying!.join(", ")}.
         {:else}
           <!-- "has no record of its own" rather than "does not appear
                below". Redeploying is allowed, so the table can hold an
@@ -172,9 +173,9 @@
                wording then asserted an absence the reader could see was
                untrue, on the one page whose whole thesis is never
                saying something false about the estate. -->
-          Applying now, so {deploying.length === 1 ? "it has" : "they have"} no record of
-          {deploying.length === 1 ? "its" : "their"} own yet. Any row below with the same name is an
-          earlier deployment. Applying: {deploying.join(", ")}.
+          Applying now, so {deploying!.length === 1 ? "it has" : "they have"} no record of
+          {deploying!.length === 1 ? "its" : "their"} own yet. Any row below with the same name is an
+          earlier deployment. Applying: {deploying!.join(", ")}.
         {/if}
       </p>
     </div>

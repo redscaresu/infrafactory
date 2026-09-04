@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -541,4 +542,29 @@ func TestDeployCreatesTheProjectInsideTheInterruptGuard(t *testing.T) {
 	require.NotNil(t, sawCtx)
 	assert.Error(t, sawCtx.Err(),
 		"project creation is handed the guarded context, so an interrupt reaches it")
+}
+
+// A failed deploy is not the same as an unrecorded one.
+//
+// `deploy` registers from whatever the state shows, whether or not the
+// apply succeeded, so a half-failed apply usually leaves a record --
+// with a TTL, on the estate page, reapable. The id travels in the
+// output so a caller can say "tear down dep-x" instead of raising a
+// permanent alarm about resources something else already tracks.
+//
+// Carried only when registration SUCCEEDED, which is the same condition
+// the recovery line keys off: naming a record that does not exist sends
+// an operator to a "no such file or directory".
+func TestDeployOutputNamesTheRecordOnlyWhenOneWasWritten(t *testing.T) {
+	var withRecord, withoutRecord OutputResult
+	withRecord.Deployment = "dep-web-app-paris-1"
+
+	raw, err := json.Marshal(MachineOutput{Schema: "x", Result: withRecord})
+	require.NoError(t, err)
+	assert.Contains(t, string(raw), `"deployment":"dep-web-app-paris-1"`)
+
+	raw, err = json.Marshal(MachineOutput{Schema: "x", Result: withoutRecord})
+	require.NoError(t, err)
+	assert.NotContains(t, string(raw), `"deployment"`,
+		"an absent id must not read as an empty one somebody could try to tear down")
 }

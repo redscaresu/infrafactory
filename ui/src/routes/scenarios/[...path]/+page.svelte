@@ -1,7 +1,6 @@
 <script lang="ts">
   import { afterNavigate } from "$app/navigation";
   import { onDestroy, onMount } from "svelte";
-  import { get } from "svelte/store";
   import { page } from "$app/stores";
   import { api, DeployError } from "$lib/api";
   import { connectWS } from "$lib/ws";
@@ -143,52 +142,22 @@
     if (detail?.name) retireDeploy(detail.name);
   }
 
-  // Arriving drops a finished deploy that has nothing left to report.
+  // There is NO arrival hook. Leaving is the only thing that retires a
+  // deploy, and that is enough.
   //
-  // The leave-hooks cannot: a deploy still running when the reader left
-  // finishes afterwards, and nothing was left to drop it -- so it lived
-  // forever, greeting every later visit with "deployed. It is listed on
-  // the Deployments page until its TTL expires." for infrastructure
-  // whose TTL may long since have gone.
+  // One existed because `retireOnLeave` used to drop only what had
+  // ALREADY finished when the reader left, so a deploy finishing
+  // afterwards was never dropped and greeted every later visit. Leaving
+  // is unconditional now, so a banner is shown at most once and then
+  // goes -- and the arrival hook had become the thing destroying it.
   //
-  // Only a success. A FAILURE is not a stale claim, it is an unread
-  // report: "it may have created resources that are still running",
-  // carrying the project id that has to be removed by hand. A deploy
-  // that fails before registration has no live record either, so this
-  // banner is the ONLY place it is ever said. Dropping it because the
-  // reader happened to look away is how the leak goes unnoticed --
-  // which is the failure this whole arc exists to prevent, arriving
-  // through a cleanup.
-  //
-  // Keyed on the navigation counter rather than on `detail`, because
-  // `loadDetail` also runs after a save and a banner must not vanish
-  // mid-visit.
-  // Only what was ALREADY finished when the navigation began.
-  //
-  // `loadDetail` is a round trip, and a deploy started just before it
-  // can END during that window -- a 423 lock refusal returns at once.
-  // Retiring by "is it finished when detail arrives?" then deleted a
-  // refusal before it had ever rendered, and the button reverted to
-  // "Deploy…" as though the click had not landed. That is the defect
-  // moving refusals into the store was supposed to close, reopened by
-  // the hook that cleans them up.
-  //
-  // The snapshot is taken synchronously in `afterNavigate`, before any
-  // response can arrive.
-  let retirableOnArrival = new Set<string>();
-  let arrivalHandled = -1;
-  $: if (detail?.name && arrivalHandled !== navigation) {
-    arrivalHandled = navigation;
-    if (retirableOnArrival.has(detail.name)) retireDeploy(detail.name);
-  }
-
-  /** finishedNow names the deploys that have already ended. */
-  function finishedNow(): Set<string> {
-    const all = get(deploys);
-    return new Set(
-      Object.keys(all).filter((k) => k !== "__connected" && all[k] && !all[k].running)
-    );
-  }
+  // It cost two defects on its own. It raced `loadDetail`, deleting a
+  // refusal that landed during the fetch before it had ever rendered;
+  // and it could not tell "finished long ago" from "finished five
+  // seconds ago while I stepped away", so a reader who navigated back
+  // precisely to see how a deploy went found the banner and the whole
+  // apply log already gone. Both were guards on state; removing the
+  // state removes them.
 
   $: scenarioPath = ($page.params.path || "").toString();
   $: runModeCard = modeSummary(runMode);
@@ -536,7 +505,6 @@
     // Every response in flight now belongs to a page that no longer
     // exists.
     navigation += 1;
-    retirableOnArrival = finishedNow();
     // A FINISHED deploy's banner is dropped when the reader leaves the
     // scenario it belongs to. Without this it reappeared on every later
     // visit for the rest of the session, long after the TTL had expired

@@ -186,12 +186,21 @@ func runDeployCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime
 		status = CommandStatusFailed
 	}
 
+	// The id is carried only when registration SUCCEEDED, which is the
+	// same condition the recovery line below keys off. A record that
+	// does not exist cannot be torn down, and naming one would send an
+	// operator to a "no such file or directory".
+	recordedID := ""
+	if recorded {
+		recordedID = deploymentID
+	}
 	if err := writeCommandOutput(cmd, OutputResult{
-		Command:  "deploy",
-		Scenario: sc.Name,
-		Status:   status,
-		Stages:   stages,
-		Failures: failures,
+		Command:    "deploy",
+		Scenario:   sc.Name,
+		Status:     status,
+		Stages:     stages,
+		Failures:   failures,
+		Deployment: recordedID,
 	}); err != nil {
 		return err
 	}

@@ -39,6 +39,13 @@ export const deploys = writable({});
 let socket;
 let watchers = 0;
 let generation = 0;
+let reportSeq = 0;
+
+/** nextReportID mints an identity that does not move when a sibling goes. */
+function nextReportID() {
+  reportSeq += 1;
+  return `report-${reportSeq}`;
+}
 
 // Matches the Live Run page's cap. Deliberately generous: a deploy log
 // is read to find out what a long apply is doing, and truncating it
@@ -176,6 +183,17 @@ function appendProgress(entry, line) {
 }
 
 export function beginDeploy(scenario) {
+  // Refused if one is already running, and the refusal lives HERE
+  // rather than only in the button's `disabled`.
+  //
+  // Starting over a live apply reset its log and its outcome; the
+  // second POST was then refused with 423, `refuseDeploy` marked the
+  // entry finished and cleared the log, and the socket handler began
+  // discarding the ORIGINAL apply's lines because the entry was no
+  // longer running -- a deploy still creating billable infrastructure
+  // with its log and its ending both lost. The store is the thing that
+  // outlives the page, so the rule belongs in it.
+  if (get(deploys)[scenario]?.running) return;
   ensureSocket();
   deploys.update((all) => {
     // Reports SURVIVE a retry.
@@ -212,7 +230,15 @@ function recordOutcome(all, scenario, outcome, keepProgress) {
   const reports = outcome?.mayHaveCreated
     ? [
         ...(entry.reports ?? []),
-        { message: outcome.message, opening: (entry.progress ?? []).slice(0, KEPT_OPENING_LINES) }
+        {
+          // A stable ID, minted here. Dismissing used to name a
+          // POSITION, and positions move: two clicks landing before a
+          // re-render deleted two different reports, the second of them
+          // a leak the operator had never read.
+          id: nextReportID(),
+          message: outcome.message,
+          opening: (entry.progress ?? []).slice(0, KEPT_OPENING_LINES)
+        }
       ]
     : (entry.reports ?? []);
   return {
@@ -299,11 +325,11 @@ export function retireDeploy(scenario) {
  * it on screen for the rest of the session trains the reader past
  * exactly the message this arc says must never be lost.
  */
-export function dismissReport(scenario, index) {
+export function dismissReport(scenario, id) {
   deploys.update((all) => {
     const entry = all[scenario];
     if (!entry) return all;
-    const reports = (entry.reports ?? []).filter((_, i) => i !== index);
+    const reports = (entry.reports ?? []).filter((r) => r.id !== id);
     // Dropped only when nothing RENDERABLE is left.
     //
     // An outcome that is itself a report is not shown anywhere once the
@@ -355,9 +381,9 @@ export function pendingReports(all) {
     // The INDEX travels with the report, because dismissing one of
     // several identical failures has to name which -- two attempts can
     // fail the same way, and they leak two projects.
-    (entry?.reports ?? []).forEach((report, index) =>
-      out.push({ scenario, message: report.message, opening: report.opening ?? [], index })
-    );
+    for (const report of entry?.reports ?? []) {
+      out.push({ scenario, id: report.id, message: report.message, opening: report.opening ?? [] });
+    }
   }
   return out;
 }

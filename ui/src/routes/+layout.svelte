@@ -125,7 +125,7 @@
          collides: Svelte throws in a dev build and silently collapses
          the pair in a production one, showing one leak where there are
          two. -->
-    {#each pendingReports($deploys) as report (`${report.scenario}:${report.index}`)}
+    {#each pendingReports($deploys) as report (report.id)}
       <div
         class="mb-4 rounded border border-rose-300 bg-rose-50 px-4 py-3 text-sm text-rose-900"
         data-testid="pending-deploy-report"
@@ -156,7 +156,7 @@
         <button
           class="mt-2 rounded border border-rose-400 px-2 py-1 text-xs font-semibold text-rose-900 hover:bg-rose-100"
           data-testid="dismiss-deploy-report"
-          on:click={() => dismissReport(report.scenario, report.index)}
+          on:click={() => dismissReport(report.scenario, report.id)}
         >
           I have dealt with this
         </button>

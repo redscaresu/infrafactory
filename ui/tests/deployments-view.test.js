@@ -610,8 +610,8 @@ test("isProgressEvent checks the shape and not the scenario", () => {
 // claim on an estate that may be busy creating something. The same
 // absent-vs-empty distinction `already_live` is given.
 test("knownEmpty will not call an estate empty without being told what is applying", () => {
-  assert.equal(knownEmpty([], [], "loaded", [], true), true);
-  assert.equal(knownEmpty([], [], "loaded", [], false), false, "asked, and not told");
+  assert.equal(knownEmpty([], [], "loaded", []), true);
+  assert.equal(knownEmpty([], [], "loaded", null), false, "asked, and not told");
 });
 
 // The summary and the empty-state panel are two derived claims about
@@ -619,10 +619,14 @@ test("knownEmpty will not call an estate empty without being told what is applyi
 // Dropping the fifth argument re-entered it with the parameter
 // defaulting to true, so the summary said "Nothing is deployed." while
 // the panel beside it was correctly suppressed.
+// One VALUE, so there is no second argument a caller can forget. The
+// previous shape put the term on the predicate and not on its sibling
+// caller, and two emptiness claims contradicted each other on one
+// screen.
 test("estateSummary and knownEmpty agree about an unanswered deploying field", () => {
-  assert.equal(knownEmpty([], [], "loaded", [], false), false);
+  assert.equal(knownEmpty([], [], "loaded", null), false);
   assert.notEqual(
-    estateSummary([], [], "loaded", [], false),
+    estateSummary([], [], "loaded", null),
     "Nothing is deployed.",
     "one screen, one answer"
   );
