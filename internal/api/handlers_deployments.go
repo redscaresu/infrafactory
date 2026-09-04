@@ -130,7 +130,10 @@ func deploymentsHandler(state *serverState) http.HandlerFunc {
 			return
 		}
 		if r.Method != http.MethodGet {
-			writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+			// A REFUSAL, and the one a client can actually receive:
+			// POST is delegated above, so `deployHandler`'s own 405 is
+			// unreachable and this is the method check that fires.
+			writeRefusal(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
 		if state.deployments == nil {
@@ -326,6 +329,11 @@ type deployRequest struct {
 
 // deployHandler creates a live deployment.
 //
+// Reached only from `deploymentsHandler`, and only under POST -- which
+// is why it has no method check of its own. It had one; it could never
+// fire, and converting it to a refusal made a promise about a response
+// the server does not send.
+//
 // Absent unless the server was started with `--allow-deploy`, which is
 // implied by neither `--allow-layer3` nor `--allow-teardown`: an
 // ephemeral apply the run destroys, destroying what exists, and creating
@@ -337,11 +345,6 @@ func deployHandler(state *serverState) http.HandlerFunc {
 				"this server was not started with --allow-deploy, so it cannot create deployments")
 			return
 		}
-		if r.Method != http.MethodPost {
-			writeRefusal(w, http.StatusMethodNotAllowed, "method not allowed")
-			return
-		}
-
 		var req deployRequest
 		if r.Body != nil {
 			defer r.Body.Close()
@@ -429,6 +432,15 @@ func deployHandler(state *serverState) http.HandlerFunc {
 			// created resources that are still running" on screen for
 			// the rest of the session.
 			writeRefusal(w, http.StatusNotFound, err.Error())
+			return
+		}
+		if errors.Is(err, ErrNothingStarted) {
+			// Every OTHER way the deployer can fail before the apply:
+			// rebuilding its runtime, parsing its flags. A server fault
+			// rather than a bad request, so 500 -- but still a promise
+			// that no project exists, which is the only thing the
+			// client needs from it.
+			writeRefusal(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		if errors.Is(err, os.ErrNotExist) {

@@ -1726,3 +1726,103 @@ test('a report names its scenario once', async ({ page }) => {
   await expect(report).toContainText('7c98d82e');
   await expect(report).not.toContainText('web-app-paris: The deploy');
 });
+
+// A dropped connection returns no ActionResult, so the message is
+// generic and the report is the only thing left. It must not depend on
+// the log, which the next retire or retry clears — the copy of the
+// opening lines it carries is covered by the store's own tests.
+test('a report survives the log it was made from', async ({ page }) => {
+  await page.route('**/api/deployments/preview**', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        scenario: 'web-app-paris',
+        deployable: true,
+        expires_at: null,
+        internet_facing: false,
+        deploy_allowed: true,
+        already_live: [],
+        already_live_unknown: false,
+        cost: { components: [], eur_per_hour: 0, unpriced: [], complete: true, modelled: true }
+      })
+    })
+  );
+
+  let release: () => void = () => {};
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await page.route('**/api/deployments', async (route) => {
+    if (route.request().method() !== 'POST') return route.continue();
+    await held;
+    return route.abort('failed');
+  });
+
+  await page.goto('/scenarios/training/web-app-paris');
+  await page.getByTestId('scenario-deploy').click();
+  await page.getByTestId('deploy-confirm-go').click();
+  await expect(page.getByTestId('deploy-progress')).toBeVisible();
+
+  release();
+
+  // The connection dropped, so there is no ActionResult and the message
+  // is generic — the report is what has to carry the identity.
+  const report = page.getByTestId('pending-deploy-report');
+  await expect(report).toContainText('may still be running');
+
+  // Leaving clears the log; the report does not depend on it.
+  await page.getByTestId('sidebar-scenario-training/lb-serving-paris').click();
+  await expect(page.locator('main h1')).toContainText('lb-serving-paris');
+  await expect(page.getByTestId('pending-deploy-report')).toContainText('may still be running');
+  await expect(page.getByTestId('deploy-progress')).toHaveCount(0);
+});
+
+// A report is not repeated in the page's outcome slot, but the log must
+// not just stop with nothing said.
+test('a log that ends in a report still has a terminal line', async ({ page }) => {
+  await page.route('**/api/deployments/preview**', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        scenario: 'web-app-paris',
+        deployable: true,
+        expires_at: null,
+        internet_facing: false,
+        deploy_allowed: true,
+        already_live: [],
+        already_live_unknown: false,
+        cost: { components: [], eur_per_hour: 0, unpriced: [], complete: true, modelled: true }
+      })
+    })
+  );
+  await page.route('**/api/deployments', (route) =>
+    route.request().method() === 'POST'
+      ? route.fulfill({
+          status: 409,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            clean: false,
+            steps: [],
+            failures: [{ detail: 'project 7c98d82e is live' }]
+          })
+        })
+      : route.continue()
+  );
+
+  await page.goto('/scenarios/training/web-app-paris');
+  await page.getByTestId('scenario-deploy').click();
+  await page.getByTestId('deploy-confirm-go').click();
+
+  await expect(page.getByTestId('deploy-outcome-pointer')).toContainText('did not finish cleanly');
+  await expect(page.getByTestId('pending-deploy-report')).toContainText('7c98d82e');
+  // And the full account is not printed twice.
+  await expect(page.getByTestId('deploy-outcome')).toHaveCount(0);
+
+  // Dismissing takes the pointer with it. Otherwise the page keeps a
+  // line saying "reported at the top of the page" above a report that
+  // is no longer there -- a finished deploy whose ending is stated
+  // nowhere at all.
+  await page.getByTestId('dismiss-deploy-report').click();
+  await expect(page.getByTestId('pending-deploy-report')).toHaveCount(0);
+  await expect(page.getByTestId('deploy-outcome-pointer')).toHaveCount(0);
+});

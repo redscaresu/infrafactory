@@ -132,6 +132,22 @@
       >
         <p class="font-semibold">{report.scenario}</p>
         <p class="mt-1">{report.message}</p>
+        {#if report.opening.length > 0}
+          <!-- The head of the log, copied onto the report when it was
+               made. When the request never returned an ActionResult --
+               a dropped connection mid-apply -- the message is generic
+               and these lines are the only place the run's project and
+               workdir are named. The log itself is cleared by the next
+               retire or retry. -->
+          <div
+            class="mt-2 rounded bg-rose-100 px-2 py-1 font-mono text-xs text-rose-900"
+            data-testid="report-opening"
+          >
+            {#each report.opening as line}
+              <p>{line}</p>
+            {/each}
+          </div>
+        {/if}
         <!-- An alarm nobody can silence is an alarm everybody learns to
              ignore. Nothing else can retire this: the deploy failed
              before registration, so there is no live record for a

@@ -262,7 +262,12 @@ func (d *LiveDeployer) Deploy(ctx context.Context, scenarioName, ttl string, pro
 	// refuses every other one.
 	runtime, err := d.newRuntime()
 	if err != nil {
-		return api.ActionResult{}, err
+		// Pre-apply, like everything above it. Unmarked, this answered
+		// 500 and the client read "we do not know what happened", so a
+		// server that could not rebuild its runtime pinned a permanent
+		// "may have created resources that are still running" for a
+		// request that never reached Scaleway.
+		return api.ActionResult{}, fmt.Errorf("%w: %w", api.ErrNothingStarted, err)
 	}
 
 	cmd := &cobra.Command{Use: "deploy"}
@@ -270,7 +275,7 @@ func (d *LiveDeployer) Deploy(ctx context.Context, scenarioName, ttl string, pro
 	cmd.Flags().String("output", string(OutputModeJSON), "")
 	if ttl != "" {
 		if err := cmd.Flags().Set("ttl", ttl); err != nil {
-			return api.ActionResult{}, err
+			return api.ActionResult{}, fmt.Errorf("%w: %w", api.ErrNothingStarted, err)
 		}
 	}
 
@@ -350,6 +355,31 @@ func deployOutcome(stdout, progress string, deployErr error) api.ActionResult {
 	return out
 }
 
+// noSuchScenario is the error a caller sees when a name did not
+// resolve, and the sentinels it matches are kept OUT of its text.
+//
+// Wrapping with `%w` twice put the machine-readable discriminators into
+// the operator-facing body: `no scenario named "typo": no such
+// scenario: nothing was started: file does not exist`, which the page
+// then prefixed with the scenario name a fourth time. A sentinel is for
+// `errors.Is`; a message is for a person.
+type noSuchScenarioError struct{ name string }
+
+func (e noSuchScenarioError) Error() string {
+	if e.name == "" {
+		return "no scenario name given"
+	}
+	return fmt.Sprintf("no scenario named %q", e.name)
+}
+
+// Is matches both the API-level sentinel and os.ErrNotExist, so callers
+// that only know the standard library still get a sensible answer.
+func (e noSuchScenarioError) Is(target error) bool {
+	return target == api.ErrNoSuchScenario || target == api.ErrNothingStarted || target == os.ErrNotExist
+}
+
+func noSuchScenario(name string) error { return noSuchScenarioError{name: name} }
+
 // resolveScenarioByName finds a scenario file by its declared name.
 //
 // The walk matches on the scenario's `scenario:` field rather than its
@@ -357,7 +387,12 @@ func deployOutcome(stdout, progress string, deployErr error) api.ActionResult {
 // required to agree.
 func resolveScenarioByName(root, name string) (string, error) {
 	if strings.TrimSpace(name) == "" {
-		return "", fmt.Errorf("no scenario name: %w", os.ErrNotExist)
+		// The same fact as the not-found branch below -- the name did
+		// not resolve, nothing ran -- and it has to make the same
+		// promise. One of two identical pre-resolution failures got it
+		// and its neighbour did not, so a blank name pinned a permanent
+		// leak report for a request that never got past a string trim.
+		return "", noSuchScenario("")
 	}
 
 	var found string
@@ -397,7 +432,12 @@ func resolveScenarioByName(root, name string) (string, error) {
 		return nil
 	})
 	if err != nil {
-		return "", err
+		// A misconfigured `scenarioRoot` produces an *fs.PathError that
+		// satisfies errors.Is(err, os.ErrNotExist) -- which the handler
+		// deliberately treats as "we do not know", so the misconfigured
+		// server produced a permanent false leak report. The walk runs
+		// before anything touches the cloud, whatever went wrong in it.
+		return "", fmt.Errorf("%w: %w", api.ErrNothingStarted, err)
 	}
 	if found == "" {
 		// Wrapped so the caller can tell "you asked for something that
@@ -412,7 +452,7 @@ func resolveScenarioByName(root, name string) (string, error) {
 		// was created. A bare os.ErrNotExist cannot -- a state file
 		// vanishing mid-apply produces one too -- and the API layer
 		// answers the two differently.
-		return "", fmt.Errorf("no scenario named %q: %w: %w", name, api.ErrNoSuchScenario, os.ErrNotExist)
+		return "", noSuchScenario(name)
 	}
 	return found, nil
 }

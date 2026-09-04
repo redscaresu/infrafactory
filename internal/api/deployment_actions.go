@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 )
 
@@ -90,19 +91,30 @@ type DeploymentDeployer interface {
 // never what was meant.
 var ErrDeployInProgress = errors.New("a deploy of this scenario is already running")
 
-// ErrNoSuchScenario means the name did not resolve, BEFORE anything ran.
+// ErrNothingStarted marks a Deploy failure that happened BEFORE
+// anything touched the cloud.
 //
-// Distinct from a bare `os.ErrNotExist`, and the distinction is the
-// whole point. Both answer 404, but only this one can promise nothing
-// was created -- and that promise is what the client uses to decide
-// whether to keep a "may have created resources that are still running"
-// report pinned on screen.
+// The claim is about infrastructure, not about blame: it says no
+// project was created and no resources exist, so a client can say "that
+// request did nothing" instead of "it may have created resources that
+// are still running". Nothing else can tell -- a deploy is detached
+// from the request that starts it, and every failure mode looks the
+// same from outside.
 //
-// Without it, a typo'd scenario name pinned exactly that report for the
-// rest of the session, for a scenario that never existed: the handler
-// could not tell a name that failed to resolve before the apply from an
-// os.ErrNotExist surfacing out of one that had already begun.
-var ErrNoSuchScenario = errors.New("no such scenario")
+// Only the deployer knows. It resolves the name, rebuilds its runtime
+// and parses its flags before the apply begins, and each of those can
+// fail; without a way to say so, every one of them pinned a permanent
+// false leak report for a request that never reached Scaleway.
+var ErrNothingStarted = errors.New("nothing was started")
+
+// ErrNoSuchScenario means the name did not resolve.
+//
+// A refinement of ErrNothingStarted rather than a separate fact -- it
+// answers 404 where its parent answers 500 -- and both promise the same
+// thing about the cloud. Distinct from a bare `os.ErrNotExist`, which
+// says a file was missing and says nothing about WHEN: a state file or
+// a workdir vanishing mid-apply produces one of those too.
+var ErrNoSuchScenario = fmt.Errorf("no such scenario: %w", ErrNothingStarted)
 
 // DeploymentActor performs the destructive half of live management.
 //

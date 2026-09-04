@@ -459,3 +459,22 @@ func TestThePreviewReadsWhatIsApplyingBeforeItReadsTheEstate(t *testing.T) {
 		"reading the estate first leaves a window where a deploy finishing in between "+
 			"is invisible to both reads, and the confirmation claims nothing exists")
 }
+
+// An empty list is a CHECKED claim and a null one is not, so the struct
+// must not be able to produce a null by default.
+//
+// Every path through `liveDeploymentsOf` returns `[]string{}`; the zero
+// value of the struct was the one place that guarantee did not hold, and
+// a preview built without it told the reader the estate could not be
+// read on a server that had read it perfectly.
+func TestAPreviewNeverCarriesANullAlreadyLive(t *testing.T) {
+	sc := &scenario.Scenario{Name: "previewable", Cloud: "scaleway"}
+
+	raw, err := json.Marshal(previewFor(sc, "", time.Now()))
+	require.NoError(t, err)
+
+	var wire map[string]any
+	require.NoError(t, json.Unmarshal(raw, &wire))
+	assert.NotNil(t, wire["already_live"],
+		"null reads as \"we could not look\", which is the opposite of what this preview knows")
+}

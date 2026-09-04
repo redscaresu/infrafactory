@@ -605,3 +605,37 @@ cautious treatment.
 Without the distinction, a mistyped scenario name pinned "it may have created
 resources that are still running" for the rest of the session, for a scenario that
 never existed.
+
+
+## Amendment, 2026-09-04 (round fourteen): only the deployer can promise nothing ran
+
+`ErrNothingStarted` is the general form of the promise; `ErrNoSuchScenario` is a
+refinement that answers 404 where its parent answers 500. Every exit from
+`LiveDeployer.Deploy` that happens before the apply wraps one of them — resolving
+the name, rebuilding the runtime, parsing the flags, walking the scenario root.
+
+The claim is about infrastructure, not blame. Nothing outside the deployer can make
+it: a deploy is detached from the request that starts it, and from outside, a
+config error and a half-finished apply look identical. Every unmarked pre-apply
+failure pinned a permanent "it may have created resources that are still running"
+for a request that never reached Scaleway.
+
+The sentinels stay OUT of the operator-facing message. Wrapping them with `%w` put
+the discriminators in the body — `no scenario named "typo": no such scenario:
+nothing was started: file does not exist` — which the page then prefixed with the
+scenario name a fourth time. A sentinel is for `errors.Is`; a message is for a
+person.
+
+### A report is self-contained
+
+It carries a copy of the log's opening lines. When the request never returns an
+ActionResult the message is generic, and the head of the log is the only place the
+run's project and workdir are named — while the log itself is cleared by the next
+retire or retry.
+
+### Every ending is stated somewhere
+
+A report renders in the layout and not in the page's outcome slot, so the page
+carries a terminal line pointing at it: a log that stops with nothing said reads as
+a deploy still running. Dismissing the last report removes the entry, so nothing is
+left holding an ending the page will not render.

@@ -167,8 +167,19 @@ export function beginDeploy(scenario) {
 function recordOutcome(all, scenario, outcome, keepProgress) {
   const entry = all[scenario];
   if (!entry) return all;
+  // A report carries its own OPENING LINES.
+  //
+  // When the request never returns an ActionResult -- a dropped
+  // connection mid-apply -- the message is the generic "may still be
+  // running", and the only thing naming the run's project and workdir
+  // is the head of the log. `retireDeploy` and a retry both clear
+  // `progress`, so a report that pointed at the log pointed at nothing.
+  // It takes a copy instead, and is self-contained.
   const reports = outcome?.mayHaveCreated
-    ? [...(entry.reports ?? []), outcome.message]
+    ? [
+        ...(entry.reports ?? []),
+        { message: outcome.message, opening: (entry.progress ?? []).slice(0, KEPT_OPENING_LINES) }
+      ]
     : (entry.reports ?? []);
   return {
     ...all,
@@ -259,34 +270,15 @@ export function dismissReport(scenario, index) {
     const entry = all[scenario];
     if (!entry) return all;
     const reports = (entry.reports ?? []).filter((_, i) => i !== index);
-    if (!reports.length && !entry.running && !entry.outcome) {
+    // Nothing left to say: the outcome that produced this report is not
+    // rendered anywhere once the report is gone, so keeping the entry
+    // leaves a finished deploy with an ending stated nowhere at all.
+    if (!reports.length && !entry.running) {
       const next = { ...all };
       delete next[scenario];
       return next;
     }
     return { ...all, [scenario]: { ...entry, reports } };
-  });
-  releaseSocket();
-}
-
-/**
- * forget clears a finished deploy once the reader has left its page.
- *
- * Not used for a refusal any more. A refused deploy is now recorded as
- * an OUTCOME like any other ending, because an outcome is keyed by
- * scenario and therefore survives navigation -- and a refusal that was
- * dropped whenever the reader had moved left the button silently
- * reverting to "Deploy…" with no log, no message and no explanation.
- *
- * Forgetting was there to stop a refused entry adopting another tab's
- * stream; the socket handler now ignores entries that are not running,
- * which closes that for every finished entry rather than for this one.
- */
-export function forgetDeploy(scenario) {
-  deploys.update((all) => {
-    const next = { ...all };
-    delete next[scenario];
-    return next;
   });
   releaseSocket();
 }
@@ -323,7 +315,9 @@ export function pendingReports(all) {
     // The INDEX travels with the report, because dismissing one of
     // several identical failures has to name which -- two attempts can
     // fail the same way, and they leak two projects.
-    (entry?.reports ?? []).forEach((message, index) => out.push({ scenario, message, index }));
+    (entry?.reports ?? []).forEach((report, index) =>
+      out.push({ scenario, message: report.message, opening: report.opening ?? [], index })
+    );
   }
   return out;
 }

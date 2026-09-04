@@ -223,7 +223,16 @@ func loadScenarioByRelPath(state *serverState, relPath, want string) (scenario.S
 // previewFor assembles the preview, and is separate from the handler so
 // it can be tested without HTTP.
 func previewFor(sc *scenario.Scenario, ttlOverride string, now time.Time) deployPreview {
-	preview := deployPreview{Scenario: sc.Name, Cloud: sc.Cloud}
+	// AlreadyLive starts as an empty list, not nil.
+	//
+	// The whole file argues that an empty list must be a CHECKED claim
+	// -- `out := []string{}` on every path, a type-level guard for an
+	// unreachable blank name -- and the struct's zero value was the one
+	// place it was not. A preview marshalled without going through
+	// `liveDeploymentsOf` emitted `already_live: null`, which the client
+	// correctly reads as "we could not look", so a server whose estate
+	// read perfectly warned that it had not.
+	preview := deployPreview{Scenario: sc.Name, Cloud: sc.Cloud, AlreadyLive: []string{}}
 
 	// The cost and shape are worth knowing even for a scenario that
 	// cannot be deployed -- that is exactly what explains the greyed-out

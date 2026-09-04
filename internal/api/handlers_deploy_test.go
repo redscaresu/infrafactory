@@ -517,3 +517,56 @@ func TestAnUnresolvedScenarioNameIsARefusal(t *testing.T) {
 	assert.Equal(t, true, payload["started_nothing"],
 		"resolution runs before the lock and before the cloud; nothing was created")
 }
+
+// Everything the deployer can fail at before the apply has to say so.
+//
+// ErrNoSuchScenario closed one path; its siblings -- rebuilding the
+// runtime, parsing the flags, a walk over a misconfigured scenario root
+// -- answered 500 or a bare 404, and the client read those as "we do
+// not know what happened". So a misconfigured server pinned a permanent
+// red "it may have created resources that are still running" for a
+// request that never reached Scaleway.
+func TestEveryPreApplyFailureSaysNothingWasStarted(t *testing.T) {
+	for name, tc := range map[string]struct {
+		err    error
+		status int
+	}{
+		"the name did not resolve": {
+			err:    fmt.Errorf("no scenario named %q: %w", "typo", ErrNoSuchScenario),
+			status: http.StatusNotFound,
+		},
+		"the runtime could not be rebuilt": {
+			err:    fmt.Errorf("%w: %w", ErrNothingStarted, errors.New("config is unreadable")),
+			status: http.StatusInternalServerError,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			srv := deployServer(t, &fakeDeployer{err: tc.err})
+			rec := postDeploy(t, srv, `{"scenario":"web-app-paris"}`)
+
+			require.Equal(t, tc.status, rec.Code)
+			var payload map[string]any
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &payload))
+			assert.Equal(t, true, payload["started_nothing"],
+				"the apply had not begun, so no project exists to warn about")
+		})
+	}
+}
+
+// And the 405 a client can actually receive is a refusal too.
+//
+// `deployHandler` had its own method check, converted to a refusal in an
+// earlier round -- and unreachable, because its only caller invokes it
+// under `if r.Method == http.MethodPost`. The check that fires is the
+// collection handler's, which was the one left behind.
+func TestTheMethodRefusalAClientCanReceiveSaysNothingWasStarted(t *testing.T) {
+	srv := deployServer(t, &fakeDeployer{})
+
+	rec := httptest.NewRecorder()
+	srv.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPut, "/api/deployments", nil))
+
+	require.Equal(t, http.StatusMethodNotAllowed, rec.Code)
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &payload))
+	assert.Equal(t, true, payload["started_nothing"])
+}

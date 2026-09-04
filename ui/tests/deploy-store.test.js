@@ -3,6 +3,30 @@ import assert from "node:assert/strict";
 
 import { get } from "svelte/store";
 
+import {
+  deploys as sharedDeploys,
+  dismissReport as dismissForCleanup,
+  finishDeploy as finishForCleanup,
+  retireDeploy as retireForCleanup
+} from "../src/lib/deploy-store.js";
+
+// The store is module-level and shared by every test in this file, so a
+// test that leaves an entry RUNNING keeps the socket open for the next
+// one. `retireDeploy` deliberately refuses to drop a running deploy --
+// that is what makes a log survive navigation -- so teardown has to end
+// it first.
+function cleanup(...scenarios) {
+  for (const scenario of scenarios) {
+    finishForCleanup(scenario, { ok: true, mayHaveCreated: false, message: "cleanup" });
+    // Reports deliberately survive `retireDeploy`, so teardown has to
+    // dismiss them the way an operator would.
+    while (get(sharedDeploys)[scenario]?.reports?.length) {
+      dismissForCleanup(scenario, 0);
+    }
+    retireForCleanup(scenario);
+  }
+}
+
 import { isConnected, isRunning } from "../src/lib/deploy-store.js";
 
 // The two questions the page asks, answered from state that outlives it.
@@ -29,7 +53,7 @@ test("isConnected reports the socket rather than the absence of lines", () => {
 // The socket wiring, which is the part most worth testing and was the
 // reason this module could not import ws.ts directly.
 test("progress lines are routed to the scenario they name", async () => {
-  const { deploys, useConnector, watch, beginDeploy, finishDeploy, forgetDeploy } = await import(
+  const { deploys, useConnector, watch, beginDeploy, finishDeploy } = await import(
     "../src/lib/deploy-store.js"
   );
 
@@ -56,15 +80,15 @@ test("progress lines are routed to the scenario they name", async () => {
   assert.equal(get(deploys)["web-app-paris"].running, false);
   assert.deepEqual(get(deploys)["web-app-paris"].progress, ["init: running"], "the log survives");
 
-  forgetDeploy("web-app-paris");
-  forgetDeploy("lb-serving-paris");
+  cleanup("web-app-paris");
+  cleanup("lb-serving-paris");
   stop();
 });
 
 // A deploy that is still running must keep its stream open even if the
 // reader wandered off, or coming back shows a frozen log.
 test("the socket stays open while a deploy is in flight and nobody is watching", async () => {
-  const { useConnector, watch, beginDeploy, finishDeploy, forgetDeploy } = await import(
+  const { useConnector, watch, beginDeploy, finishDeploy } = await import(
     "../src/lib/deploy-store.js"
   );
 
@@ -82,7 +106,7 @@ test("the socket stays open while a deploy is in flight and nobody is watching",
   finishDeploy("web-app-paris", { ok: true, message: "done" });
   assert.equal(closed, 1, "nothing running and nobody watching, so it closes");
 
-  forgetDeploy("web-app-paris");
+  cleanup("web-app-paris");
 });
 
 // A finished entry stays on screen until the reader navigates away, and
@@ -94,7 +118,7 @@ test("the socket stays open while a deploy is in flight and nobody is watching",
 // That is the adoption this arc removed, arriving through the door the
 // store's own comments name.
 test("a finished deploy stops absorbing progress for its scenario", async () => {
-  const { deploys, useConnector, watch, beginDeploy, finishDeploy, forgetDeploy } = await import(
+  const { deploys, useConnector, watch, beginDeploy, finishDeploy } = await import(
     "../src/lib/deploy-store.js"
   );
 
@@ -118,7 +142,7 @@ test("a finished deploy stops absorbing progress for its scenario", async () => 
   assert.deepEqual(entry.progress, ["apply: running"], "only what this tab was watching");
   assert.equal(entry.running, false);
 
-  forgetDeploy("web-app-paris");
+  cleanup("web-app-paris");
   stop();
 });
 
@@ -131,7 +155,7 @@ test("a finished deploy stops absorbing progress for its scenario", async () => 
 // them rendered another tab's live log underneath an "already deploying"
 // banner.
 test("a refused deploy discards the lines it collected while waiting", async () => {
-  const { deploys, useConnector, watch, beginDeploy, refuseDeploy, forgetDeploy } = await import(
+  const { deploys, useConnector, watch, beginDeploy, refuseDeploy } = await import(
     "../src/lib/deploy-store.js"
   );
 
@@ -155,7 +179,7 @@ test("a refused deploy discards the lines it collected while waiting", async () 
   assert.equal(entry.running, false);
   assert.equal(entry.outcome.message, "already deploying", "the refusal still has to be reported");
 
-  forgetDeploy("web-app-paris");
+  cleanup("web-app-paris");
   stop();
 });
 
@@ -186,7 +210,7 @@ test("the connection sentinel is never mistaken for a deploy", async () => {
 // next navigation dropped it, so a leaked project with no live record
 // was named nowhere at all.
 test("a retry does not delete the report of what the last attempt leaked", async () => {
-  const { deploys, useConnector, watch, beginDeploy, finishDeploy, forgetDeploy, pendingReports } =
+  const { deploys, useConnector, watch, beginDeploy, finishDeploy, pendingReports } =
     await import("../src/lib/deploy-store.js");
 
   useConnector(() => () => {});
@@ -202,17 +226,17 @@ test("a retry does not delete the report of what the last attempt leaked", async
   beginDeploy("web-app-paris");
   finishDeploy("web-app-paris", { ok: true, mayHaveCreated: false, message: "Deployed." });
 
-  const reports = pendingReports(get(deploys));
+  const reports = pendingReports(get(deploys)).filter((r) => r.scenario === "web-app-paris");
   assert.equal(reports.length, 1, "the leak did not stop existing because the retry worked");
   assert.match(reports[0].message, /7c98d82e/);
   assert.equal(reports[0].scenario, "web-app-paris");
 
-  forgetDeploy("web-app-paris");
+  cleanup("web-app-paris");
   stop();
 });
 
 test("two failed attempts leak two projects and report both", async () => {
-  const { deploys, useConnector, watch, beginDeploy, finishDeploy, forgetDeploy, pendingReports } =
+  const { deploys, useConnector, watch, beginDeploy, finishDeploy, pendingReports } =
     await import("../src/lib/deploy-store.js");
 
   useConnector(() => () => {});
@@ -227,12 +251,14 @@ test("two failed attempts leak two projects and report both", async () => {
     });
   }
 
-  const messages = pendingReports(get(deploys)).map((r) => r.message);
+  const messages = pendingReports(get(deploys))
+    .filter((r) => r.scenario === "web-app-paris")
+    .map((r) => r.message);
   assert.equal(messages.length, 2);
   assert.match(messages[0], /aaa/);
   assert.match(messages[1], /bbb/);
 
-  forgetDeploy("web-app-paris");
+  cleanup("web-app-paris");
   stop();
 });
 
@@ -241,7 +267,7 @@ test("two failed attempts leak two projects and report both", async () => {
 // workdir first, which is the only place those appear when the request
 // never returns an ActionResult.
 test("a long log keeps its opening and says how much it dropped", async () => {
-  const { deploys, useConnector, watch, beginDeploy, forgetDeploy, finishDeploy } = await import(
+  const { deploys, useConnector, watch, beginDeploy, finishDeploy } = await import(
     "../src/lib/deploy-store.js"
   );
 
@@ -267,7 +293,7 @@ test("a long log keeps its opening and says how much it dropped", async () => {
   assert.match(entry.progress.at(-1), /line 2999/, "the tail is still the last thing that happened");
 
   finishDeploy("web-app-paris", { ok: true, mayHaveCreated: false, message: "Deployed." });
-  forgetDeploy("web-app-paris");
+  cleanup("web-app-paris");
   stop();
 });
 
@@ -276,7 +302,7 @@ test("a long log keeps its opening and says how much it dropped", async () => {
 // project the first attempt leaked is named nowhere, because the second
 // attempt's outcome says there is nothing to report.
 test("a report outlives the entry's last outcome", async () => {
-  const { deploys, useConnector, watch, beginDeploy, finishDeploy, forgetDeploy, pendingReports } =
+  const { deploys, useConnector, watch, beginDeploy, finishDeploy, pendingReports } =
     await import("../src/lib/deploy-store.js");
 
   useConnector(() => () => {});
@@ -294,9 +320,10 @@ test("a report outlives the entry's last outcome", async () => {
   const entry = get(deploys)["web-app-paris"];
   assert.equal(entry.outcome.mayHaveCreated, false, "the LAST outcome has nothing to report");
   assert.equal(entry.reports.length, 1, "but the entry still does, and that is what decides");
-  assert.match(pendingReports(get(deploys))[0].message, /7c98d82e/);
+  const mine = pendingReports(get(deploys)).filter((r) => r.scenario === "web-app-paris");
+  assert.match(mine[0].message, /7c98d82e/);
 
-  forgetDeploy("web-app-paris");
+  cleanup("web-app-paris");
   stop();
 });
 
@@ -330,6 +357,7 @@ test("retiring a deploy drops the stale banner and keeps the report", async () =
   beginDeploy("retire-keeps-report");
   finishDeploy("retire-keeps-report", { ok: true, mayHaveCreated: false, message: "Deployed." });
 
+  // The action under test, not teardown.
   retireDeploy("retire-keeps-report");
 
   const entry = get(deploys)["retire-keeps-report"];
@@ -390,5 +418,43 @@ test("a report can be dismissed once the operator has dealt with it", async () =
 
   dismissReport("dismiss-two", after[0].index);
   assert.equal(mine(get(deploys)).length, 0);
+  stop();
+});
+
+// A report that pointed at the log pointed at nothing: `retireDeploy`
+// and a retry both clear `progress`. When the request never returned an
+// ActionResult the message is generic — "may still be running" — and
+// the head of the log is the only place the run's workdir is named, so
+// the report takes a copy.
+test("a report carries the opening lines that identify its run", async () => {
+  const { deploys, useConnector, watch, beginDeploy, finishDeploy, retireDeploy, pendingReports } =
+    await import("../src/lib/deploy-store.js");
+
+  let onMessage;
+  useConnector((handler) => {
+    onMessage = handler;
+    return () => {};
+  });
+
+  const stop = watch();
+  beginDeploy("carries-opening");
+  for (const line of ["Deploying carries-opening (abc123) for 4h0m0s", "  workdir: /tmp/if-run-xyz"]) {
+    onMessage({ type: "deploy_progress", data: { subject: "carries-opening", line } });
+  }
+  finishDeploy("carries-opening", {
+    ok: false,
+    mayHaveCreated: true,
+    message: "The deploy may still be running on the server."
+  });
+
+  // Leaving clears the log, exactly as navigating away does.
+  retireDeploy("carries-opening");
+  assert.deepEqual(get(deploys)["carries-opening"].progress, []);
+
+  const [report] = pendingReports(get(deploys)).filter((r) => r.scenario === "carries-opening");
+  assert.match(report.opening.join("\n"), /workdir: \/tmp\/if-run-xyz/,
+    "the generic message names nothing; these lines are all there is");
+
+  cleanup("carries-opening");
   stop();
 });

@@ -2,6 +2,56 @@
 
 Last updated: 2026-09-04
 
+## 2026-09-04 — S163e-fixes (round fourteen): one path got the promise, its siblings did not
+
+**12 findings, 8 accepted, 4 declined.** Every accept is the same shape: "nothing
+was created" was promised in one place and not in its neighbours.
+
+**Four more pre-apply exits.** Round thirteen let a mistyped name say nothing had
+been created. `LiveDeployer.Deploy` has four other exits before the apply —
+`newRuntime()` failing, a TTL flag that will not parse, a `WalkDir` over a
+misconfigured scenario root (which yields an `*fs.PathError` that satisfies
+`errors.Is(err, os.ErrNotExist)`, so it took the deliberately-cautious branch), and
+a blank name — and each pinned a permanent red "it may have created resources that
+are still running" for a request that never reached Scaleway. `ErrNothingStarted`
+is the general sentinel; `ErrNoSuchScenario` refines it.
+
+**The 405 a client can actually receive.** `deployHandler`'s method check was made
+a refusal last round and is unreachable — its only caller invokes it under `if
+r.Method == http.MethodPost` — so the promise was made about a response the server
+does not send, while the 405 that fires was left a plain error. Dead branch removed,
+live one converted.
+
+**A report that pointed at the log pointed at nothing.** `retireDeploy` and a retry
+both clear `progress`, and for a dropped connection the message is generic — the
+head of the log is the only place the run's project and workdir appear.
+`KEPT_OPENING_LINES` exists for exactly those lines and two navigation hooks deleted
+them. Reports carry their own copy now.
+
+**A log that ends in nothing.** A report outcome suppressed the page's outcome slot,
+so the log simply stopped with the explanation above the fold — and dismissing the
+report left an entry whose outcome the template refuses to render, a finished deploy
+with its ending stated nowhere.
+
+Also: `previewFor` left `AlreadyLive` nil, so a preview built without
+`liveDeploymentsOf` emitted `already_live: null` — read by the client as "we could
+not look", on the one file that argues an empty list must be a checked claim;
+`forgetDeploy` was dead and its docstring described the job `retireDeploy` took
+over, including the unconditional delete `retireDeploy` exists to stop; and the 404
+body stated the same fact three times because the sentinels were wrapped into the
+operator-facing message.
+
+**Declined:** the teardown half of `mayHaveCreated` — a real gap of the same class,
+but a different verb, store shape and page, and it wants its own slice (follow-up
+below); `pendingReports` per progress line; `isProgressEvent`'s file placement; and
+two representations of "is anything applying".
+
+**Follow-up, named:** a teardown that cannot prove the account clean loses its
+message on navigation, exactly as a deploy did before rounds twelve and thirteen.
+`teardownOutcome` already computes `mayHaveCreated`; the estate page drops it into a
+row-local map. Promoting teardown failures into the same report channel is a slice
+of its own.
+
 ## 2026-09-04 — S163e-fixes (round thirteen): an alarm nobody can silence
 
 **12 findings, 8 accepted, 4 declined.** Two accepts are the previous two rounds'

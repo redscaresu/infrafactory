@@ -811,10 +811,18 @@
        during it, so an unattributed "deployed." is a claim about the
        wrong thing. The store keys outcomes by scenario, so this one is
        this scenario's by construction. -->
-  <!-- Not when it is a REPORT: the layout renders those, so showing it
-       here too printed the same sentence twice with the scenario name
-       three times. This slot is for the ending that is not a report --
-       a success, or a refusal. -->
+  <!-- A REPORT is not repeated here -- the layout renders those, and
+       printing it twice put the scenario name on screen three times --
+       but the log must not simply stop with nothing said. A reader
+       watching it needs a terminal line, and the full account is above
+       the fold. -->
+  {#if deployOutcome?.mayHaveCreated}
+    <p class="mt-3 text-sm font-semibold text-rose-800" data-testid="deploy-outcome-pointer">
+      This deploy did not finish cleanly. What it may have left behind is reported at the top of the
+      page.
+    </p>
+  {/if}
+
   {#if deployOutcome && !deployOutcome.mayHaveCreated}
     <p
       class={`mt-3 text-sm ${deployOutcome.ok ? "text-emerald-800" : "font-semibold text-rose-800"}`}
