@@ -2,7 +2,7 @@
   import "../app.css";
   import { onMount } from "svelte";
   import { api } from "$lib/api";
-  import { deploys, dismissReport, pendingReports } from "$lib/deploy-store.js";
+  import { dismissReport, pendingReports, reports } from "$lib/deploy-store.js";
   import type { ConfigResponse, ScenarioGroup, Scenario } from "$lib/types";
 
   type CloudGroup = { cloud: string; label: string; scenarios: Scenario[] };
@@ -119,13 +119,13 @@
          page. For one round it was visible only when an UNRELATED
          scenario fetch happened to fail, which made the one message the
          code says must not be lost a matter of luck. -->
-    <!-- Keyed by INDEX as well as content. Two attempts can fail
+    <!-- Keyed by the report's own ID. Two attempts can fail
          identically -- the same dropped connection, the same message --
-         and reports accumulate deliberately, so a content-only key
+         and reports accumulate deliberately, so a content-derived key
          collides: Svelte throws in a dev build and silently collapses
          the pair in a production one, showing one leak where there are
-         two. -->
-    {#each pendingReports($deploys) as report (report.id)}
+         two. A position works until a sibling is dismissed. -->
+    {#each pendingReports($reports) as report (report.id)}
       <div
         class="mb-4 rounded border border-rose-300 bg-rose-50 px-4 py-3 text-sm text-rose-900"
         data-testid="pending-deploy-report"

@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 )
 
@@ -130,7 +129,26 @@ var ErrNothingStarted = errors.New("nothing was started")
 // thing about the cloud. Distinct from a bare `os.ErrNotExist`, which
 // says a file was missing and says nothing about WHEN: a state file or
 // a workdir vanishing mid-apply produces one of those too.
-var ErrNoSuchScenario = fmt.Errorf("no such scenario: %w", ErrNothingStarted)
+var ErrNoSuchScenario error = nothingStartedSentinel{msg: "no such scenario"}
+
+// nothingStartedSentinel is a sentinel that refines ErrNothingStarted
+// WITHOUT concatenating its text.
+//
+// `fmt.Errorf("no such scenario: %w", ErrNothingStarted)` gives the
+// sentinel an Error() of "no such scenario: nothing was started" -- and
+// the handler writes err.Error() straight into the refusal body for a
+// page to render. `LiveDeployer` escapes it only because it returns its
+// own error type; the interface is exported, and an implementer that
+// signals the documented way (`return api.ErrNoSuchScenario`) would put
+// a self-contradicting sentence in front of an operator.
+//
+// Same rule the CLI's own wrappers follow: a sentinel is for
+// `errors.Is`; a message is for a person.
+type nothingStartedSentinel struct{ msg string }
+
+func (e nothingStartedSentinel) Error() string { return e.msg }
+
+func (e nothingStartedSentinel) Is(target error) bool { return target == ErrNothingStarted }
 
 // DeploymentActor performs the destructive half of live management.
 //

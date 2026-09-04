@@ -87,9 +87,9 @@ test("observedLabel says never rather than inventing a date", () => {
 // "0 needing attention" out of zero deployments and out of forty read
 // identically and mean opposite things.
 test("estateSummary states what was examined, not only what is wrong", () => {
-  assert.equal(estateSummary([], []), "Nothing is deployed.");
+  assert.equal(estateSummary([], [], "loaded", []), "Nothing is deployed.");
   assert.equal(
-    estateSummary([{ health: { status: "healthy", version: "confirmed" } }], []),
+    estateSummary([{ health: { status: "healthy", version: "confirmed" } }], [], "loaded", []),
     "1 deployment"
   );
   assert.equal(
@@ -98,7 +98,9 @@ test("estateSummary states what was examined, not only what is wrong", () => {
         { health: { status: "healthy", version: "confirmed" } },
         { health: { status: "unhealthy" } }
       ],
-      ["dep-broken.json: unexpected end of JSON input"]
+      ["dep-broken.json: unexpected end of JSON input"],
+      "loaded",
+      []
     ),
     "2 deployments, 1 needing attention, 1 record that could not be read"
   );
@@ -157,11 +159,11 @@ test("estateSummary does not answer before it has asked", () => {
 // absence of knowledge. The page may claim nothing is running only when
 // all three hold.
 test("knownEmpty requires a successful read, no deployments, and nothing unreadable", () => {
-  assert.equal(knownEmpty([], [], "loaded"), true);
-  assert.equal(knownEmpty([], ["dep-broken.json: bad"], "loaded"), false);
-  assert.equal(knownEmpty([], [], "failed"), false);
-  assert.equal(knownEmpty([], [], "loading"), false);
-  assert.equal(knownEmpty([{ id: "dep-1" }], [], "loaded"), false);
+  assert.equal(knownEmpty([], [], "loaded", []), true);
+  assert.equal(knownEmpty([], ["dep-broken.json: bad"], "loaded", []), false);
+  assert.equal(knownEmpty([], [], "failed", []), false);
+  assert.equal(knownEmpty([], [], "loading", []), false);
+  assert.equal(knownEmpty([{ id: "dep-1" }], [], "loaded", []), false);
 });
 
 // `http://2001:db8::1:8080` is not a URL. The probe path uses Go's
@@ -611,7 +613,8 @@ test("isProgressEvent checks the shape and not the scenario", () => {
 // absent-vs-empty distinction `already_live` is given.
 test("knownEmpty will not call an estate empty without being told what is applying", () => {
   assert.equal(knownEmpty([], [], "loaded", []), true);
-  assert.equal(knownEmpty([], [], "loaded", null), false, "asked, and not told");
+  assert.equal(knownEmpty([], [], "loaded", undefined), false, "asked, and not told");
+  assert.equal(knownEmpty([], [], "loaded"), false, "and an omitted argument is not an answer either");
 });
 
 // The summary and the empty-state panel are two derived claims about
@@ -624,10 +627,10 @@ test("knownEmpty will not call an estate empty without being told what is applyi
 // caller, and two emptiness claims contradicted each other on one
 // screen.
 test("estateSummary and knownEmpty agree about an unanswered deploying field", () => {
-  assert.equal(knownEmpty([], [], "loaded", null), false);
-  assert.notEqual(
-    estateSummary([], [], "loaded", null),
-    "Nothing is deployed.",
-    "one screen, one answer"
-  );
+  assert.equal(knownEmpty([], [], "loaded", undefined), false);
+  const summary = estateSummary([], [], "loaded", undefined);
+  assert.notEqual(summary, "Nothing is deployed.", "one screen, one answer");
+  // And it SAYS what is unknown rather than degrading to "0
+  // deployments", which is an emptiness claim with the caveat removed.
+  assert.match(summary, /did not report what is applying/);
 });

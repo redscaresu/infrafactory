@@ -130,15 +130,16 @@ func deploymentsHandler(state *serverState) http.HandlerFunc {
 			return
 		}
 		if r.Method != http.MethodGet {
-			// A plain error, NOT a refusal.
+			// A refusal: POST is delegated above, so nothing reaching
+			// this check can have started an apply.
 			//
-			// This route is shared: POST is delegated above, and every
-			// other verb lands here -- a DELETE meant for a teardown, a
-			// PATCH, anything. `started_nothing` is a claim about
-			// whether an APPLY created cloud infrastructure, and
-			// stamping it on those is the same category error the
-			// origin guard was reverted for.
-			writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+			// Shared with verbs that have nothing to do with deploying
+			// -- a DELETE meant for a teardown, a PATCH -- and that is
+			// fine. "Nothing was started" is TRUE of all of them, and a
+			// vacuous truth costs nothing while a missing one made a
+			// refused deploy read as "we do not know" and pin a
+			// permanent false leak report.
+			writeRefusal(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
 		if state.deployments == nil {

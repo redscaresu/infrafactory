@@ -2,6 +2,42 @@
 
 Last updated: 2026-09-04
 
+## 2026-09-04 — S163e-fixes (round eighteen): half a guard, and a vacuous truth
+
+**10 findings, all accepted.**
+
+**Half a guard.** Round seventeen put "one deploy at a time" in the store, where the
+state lives — and `confirmDeploy` ignored the answer and POSTed anyway. The 423 that
+came back was handed to `refuseDeploy`, which cleared the FIRST deploy's log and
+marked it finished while it kept creating infrastructure: verbatim the failure the
+guard's comment says it prevents. `beginDeploy` returns whether the deploy may
+proceed, and the caller honours it.
+
+**A vacuous truth is not a falsehood.** Rounds fifteen and sixteen made the origin
+guard and the collection 405 plain errors, arguing `started_nothing` is a claim
+about an apply and so is meaningless on a read and wrong-verbed on a teardown.
+Meaningless is not false: nothing WAS started, because no handler ran. Withholding a
+true claim is not neutral — a refused deploy POST read as "we do not know", and the
+page pinned a permanent leak report for a request the middleware rejected outright.
+The rule, settled: any path that answers before a deploy could begin may say so.
+
+**`undefined` is what an absent field IS.** Round seventeen used `null` for "never
+told" and left `= []` defaults, so passing `payload.deploying` straight through —
+the obvious way — landed on a default that claimed emptiness. The comment arguing a
+value "cannot be forgotten the way an argument can" was undone by a default, which
+is a third way to forget. And the summary now says the gap rather than degrading to
+a bare "0 deployments".
+
+Also: `ErrNoSuchScenario`'s own `Error()` read "no such scenario: nothing was
+started", the sentinel-leaking message the CLI built two types to avoid;
+`loadDetail`'s catch replaced "Saved" with a read error after a PUT that had
+succeeded; `deployOutcome`'s recorded branch bypassed the one-rule function;
+`ActionResult.deployment` reached the wire but never `types.ts`; two keying comments
+described a scheme the code stopped using; and **reports now have their own store**
+— declined five times as a performance point, accepted as a structural one, because
+two lifetimes in one store is what made the root layout re-derive them per progress
+line.
+
 ## 2026-09-04 — S163e-fixes (round seventeen): a permanent alarm on the common path
 
 **10 findings, 8 accepted, 2 declined.** The largest reverses a round-eight decision,

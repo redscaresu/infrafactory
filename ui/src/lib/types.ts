@@ -191,6 +191,16 @@ export interface ActionResult {
   clean: boolean;
   steps: ActionStep[];
   failures: ActionStep[];
+
+  // The live record a deploy wrote, when it wrote one.
+  //
+  // A failed deploy is not the same as an unrecorded one: `deploy`
+  // registers from whatever the state shows, so the usual failure
+  // leaves something with a TTL that the estate lists. `deployOutcome`
+  // reads this to choose between naming the record and raising a
+  // permanent leak report, so the field has to be declared or that
+  // whole branch reads as unreachable.
+  deployment?: string;
 }
 
 export interface CostComponent {

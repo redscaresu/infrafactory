@@ -31,7 +31,12 @@
   // applying". Absence is not emptiness, and carrying it in the value
   // rather than in a parallel boolean means no caller can pass one
   // without the other.
-  let deploying: string[] | null = [];
+  // Tri-state: a list, or `undefined` for "the payload never said what
+  // was applying". Absence is not emptiness, and `undefined` is the
+  // sentinel because it is what an absent field actually IS -- a
+  // separate `null` left the natural mistake, passing the field
+  // straight through, landing on a default that claimed emptiness.
+  let deploying: string[] | undefined = [];
 
   // Confirming is a SECOND deliberate action on a named row, not a
   // dialog that appears everywhere at once. A click cannot destroy
@@ -51,7 +56,7 @@
       teardownAllowed = payload?.teardown_allowed === true;
       // `null` for "the payload never said", carried in the value so
       // no caller can forget to pass a second flag along with it.
-      deploying = Array.isArray(payload?.deploying) ? payload.deploying : null;
+      deploying = Array.isArray(payload?.deploying) ? payload.deploying : undefined;
       loadError = "";
     } catch (err) {
       // The previous rows are KEPT on error rather than cleared. An

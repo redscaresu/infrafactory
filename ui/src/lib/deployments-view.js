@@ -141,21 +141,26 @@ export function nothingRecorded(deployments, unreadable) {
  * had just been moved to fix for `estateSummary`. Moved, and the count
  * corrected from three, 2026-09-04.)
  */
-export function knownEmpty(deployments, unreadable, state = "loaded", deploying = []) {
+export function knownEmpty(deployments, unreadable, state = "loaded", deploying) {
   return (
     state === "loaded" &&
-    // `deploying` is TRI-STATE: a list, or `null` for "the payload
-    // never said". An absent field is not an empty one -- a server
-    // predating it, or a body trimmed by an intermediary, would
-    // otherwise license the page's only permitted emptiness claim on an
-    // estate that may be busy creating something.
+    // `deploying` is TRI-STATE: a list, or "the payload never said". An
+    // absent field is not an empty one -- a server predating it, or a
+    // body trimmed by an intermediary, would otherwise license the
+    // page's only permitted emptiness claim on an estate that may be
+    // busy creating something.
     //
-    // Carried in the value rather than in a parallel boolean, because a
-    // parallel boolean is what the last round's defect was made of:
+    // Carried in the VALUE rather than in a parallel boolean, because a
+    // parallel boolean is what an earlier round's defect was made of:
     // this predicate got the new term and its sibling caller did not,
-    // so two emptiness claims contradicted each other on one screen. A
-    // null cannot be forgotten the way an argument can.
-    deploying !== null &&
+    // so two emptiness claims contradicted each other on one screen.
+    //
+    // And there is NO DEFAULT, because a default is a third way to
+    // forget. `knownEmpty(d, u, state, payload.deploying)` written the
+    // obvious way passes `undefined` when the server omitted the key,
+    // and a `= []` default turned that straight back into the claim
+    // this guard exists to withhold. Only an array counts as an answer.
+    Array.isArray(deploying) &&
     nothingRecorded(deployments, unreadable) &&
     // A deploy that is APPLYING has no record yet, so it is absent from
     // `deployments` while being the most active thing in the estate.
@@ -214,8 +219,9 @@ export function deployingLabel(deploying, stale = false) {
  * JSDoc comment was inserted between it and the function it describes.
  * Moved 2026-09-03.)
  */
-export function estateSummary(deployments, unreadable, state = "loaded", deploying = []) {
-  const applying = deploying?.length || 0;
+export function estateSummary(deployments, unreadable, state = "loaded", deploying) {
+  const told = Array.isArray(deploying);
+  const applying = told ? deploying.length : 0;
 
   if (state === "loading") return "Reading the live estate…";
 
@@ -247,6 +253,13 @@ export function estateSummary(deployments, unreadable, state = "loaded", deployi
 
   const described = describe(deployments, unreadable);
   const applyingText = deployingLabel(deploying);
+  // Not told is not "none". Falling through to `describe` alone
+  // rendered a bare "0 deployments" -- a read-derived emptiness claim
+  // with no hint that what is APPLYING was never reported, which is
+  // exactly what withholding `knownEmpty` was meant to prevent saying.
+  if (!told) {
+    return `${described} — this server did not report what is applying, so an in-progress deploy would not appear.`;
+  }
   if (applying === 0) return described;
   // A successful read that found nothing still has to SAY it found
   // nothing. Returning the in-flight count alone left the reader with
@@ -376,15 +389,6 @@ export function deployOutcome(result) {
   // alarm for infrastructure something else already tracks, and could
   // not even name what to tear down. That is the alarm fatigue
   // `dismissReport` exists to avoid, manufactured on the common path.
-  if (result && !result.clean && result.deployment) {
-    const reasons = (result.failures || []).map((f) => f.detail).filter(Boolean);
-    const base = `The deploy did not finish cleanly, but it was recorded as ${result.deployment} — it is on the Deployments page and expires with its TTL.`;
-    return {
-      ok: false,
-      mayHaveCreated: false,
-      message: reasons.length > 0 ? `${base} ${reasons.join(" ")}` : base
-    };
-  }
   return actionOutcome(result, {
     nothing: "The deploy returned nothing, so what it created is unknown.",
     // The whole sentence, because the template renders `message` for
@@ -393,7 +397,14 @@ export function deployOutcome(result) {
     // while every unit test asserting on it kept passing.
     proven: "Deployed. It is listed on the Deployments page until its TTL expires.",
     unproven:
-      "The deploy did not finish cleanly and left no record — it may have created resources that are still running, and nothing else is tracking them."
+      "The deploy did not finish cleanly and left no record — it may have created resources that are still running, and nothing else is tracking them.",
+    // The recorded case, phrased from the id the result carries. Kept
+    // inside `actionOutcome` rather than short-circuited before it,
+    // because the reason assembly below is the thing that must exist
+    // once: a change to how failure details are rendered would
+    // otherwise silently miss the common half-failed-but-recorded path.
+    recorded: (id) =>
+      `The deploy did not finish cleanly, but it was recorded as ${id} — it is on the Deployments page and expires with its TTL.`
   });
 }
 
@@ -435,11 +446,18 @@ function actionOutcome(result, words) {
   // An absent result is the same case: nobody knows what it created.
   if (!result) return { ok: false, mayHaveCreated: true, message: words.nothing };
   if (result.clean) return { ok: true, mayHaveCreated: false, message: words.proven };
+
+  // A failure that WROTE A RECORD is not an unreported leak. `deploy`
+  // registers from whatever the state shows, whether or not the apply
+  // succeeded, so the usual failure leaves something with a TTL that
+  // the estate page lists and `live reap` will destroy.
+  const recorded = words.recorded && result.deployment ? words.recorded(result.deployment) : "";
+  const base = recorded || words.unproven;
   const reasons = (result.failures || []).map((f) => f.detail).filter(Boolean);
   return {
     ok: false,
-    mayHaveCreated: true,
-    message: reasons.length > 0 ? `${words.unproven} ${reasons.join(" ")}` : words.unproven
+    mayHaveCreated: recorded === "",
+    message: reasons.length > 0 ? `${base} ${reasons.join(" ")}` : base
   };
 }
 

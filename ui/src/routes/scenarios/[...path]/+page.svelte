@@ -381,7 +381,22 @@
     // The entry is created BEFORE the POST, because streaming progress
     // during the apply is the entire point and the response does not
     // arrive for minutes.
-    beginDeploy(target);
+    // The store's answer is BINDING.
+    //
+    // It declines to record a second start over a running one, and it
+    // cannot stop the POST -- so a caller that ignored the answer sent
+    // one anyway, and the 423 that came back was handed to
+    // `refuseDeploy`, which cleared the FIRST deploy's log and marked
+    // it finished while it kept creating infrastructure. Half a guard
+    // is worse than none: it made the store look protected.
+    //
+    // Not reachable from this page today: `confirmingDeploy = false`
+    // runs synchronously above, so the dialog is gone before a second
+    // confirm can land. It is the contract for the next caller, and the
+    // unit test on `beginDeploy`'s return value is what pins it -- a
+    // mutation removing this line is not caught by the suite, and that
+    // is stated rather than left to be discovered.
+    if (!beginDeploy(target)) return;
 
     try {
       finishDeploy(target, toDeployOutcome(await api.deployScenario(target)));

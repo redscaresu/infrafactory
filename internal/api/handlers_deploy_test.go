@@ -553,28 +553,65 @@ func TestEveryPreApplyFailureSaysNothingWasStarted(t *testing.T) {
 	}
 }
 
-// The collection's 405 is NOT a refusal, and that is deliberate.
+// Any path that answers before a deploy could begin may say so.
 //
-// `/api/deployments` is shared: POST is delegated to the deploy path
-// and every other verb lands on this check -- a DELETE meant for a
-// teardown, a PATCH, anything. `started_nothing` is a claim about
-// whether an APPLY created cloud infrastructure, so putting it there is
-// the same category error the origin guard was reverted for: a claim
-// about the wrong verb, made by a route that does not know which verb
-// it refused.
+// This wavered twice. The objection was that `started_nothing` is a
+// claim about an apply, so it is meaningless on a shared route and on
+// middleware that refuses every endpoint. But meaningless is not false:
+// nothing WAS started, whatever the request was for, because no handler
+// ran. Withholding a true claim is not neutral -- a refused deploy POST
+// then read as "we do not know what happened", and the page pinned a
+// permanent "it may have created resources that are still running" for
+// a request that never reached the deployer.
 //
-// There is consequently no deploy-specific 405. `deployHandler` had one
-// and it was unreachable, because its only caller invokes it under
-// `if r.Method == http.MethodPost`.
-func TestTheCollectionMethodErrorMakesNoClaimAboutTheCloud(t *testing.T) {
-	srv := deployServer(t, &fakeDeployer{})
+// A vacuous truth on a PUT costs nothing. A missing one manufactures a
+// false alarm.
+func TestEveryRefusalBeforeDispatchSaysNothingWasStarted(t *testing.T) {
+	claimed := func(t *testing.T, body []byte) bool {
+		t.Helper()
+		var payload map[string]any
+		require.NoError(t, json.Unmarshal(body, &payload))
+		return payload["started_nothing"] == true
+	}
 
-	rec := httptest.NewRecorder()
-	srv.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPut, "/api/deployments", nil))
+	t.Run("the collection's method check", func(t *testing.T) {
+		srv := deployServer(t, &fakeDeployer{})
+		rec := httptest.NewRecorder()
+		srv.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPut, "/api/deployments", nil))
 
-	require.Equal(t, http.StatusMethodNotAllowed, rec.Code)
-	var payload map[string]any
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &payload))
-	_, present := payload["started_nothing"]
-	assert.False(t, present, "this route does not know which verb it refused")
+		require.Equal(t, http.StatusMethodNotAllowed, rec.Code)
+		assert.True(t, claimed(t, rec.Body.Bytes()))
+	})
+
+	t.Run("the cross-origin guard", func(t *testing.T) {
+		srv := deployServer(t, &fakeDeployer{})
+		req := httptest.NewRequest(http.MethodPost, "/api/deployments",
+			strings.NewReader(`{"scenario":"web-app-paris"}`))
+		req.Header.Set("Origin", "https://evil.example")
+		rec := httptest.NewRecorder()
+		srv.Handler.ServeHTTP(rec, req)
+
+		require.Equal(t, http.StatusForbidden, rec.Code)
+		assert.True(t, claimed(t, rec.Body.Bytes()),
+			"no handler ran, so a reader must not be sent hunting for a project")
+	})
+}
+
+// A sentinel is for `errors.Is`; a message is for a person.
+//
+// `DeploymentDeployer` is an interface and these are exported, so an
+// implementer signalling the documented way -- `return
+// api.ErrNoSuchScenario` -- has its Error() written straight into the
+// refusal body by the handler and rendered by the page. Composing the
+// sentinel with `%w` gave it the text "no such scenario: nothing was
+// started": a self-contradicting sentence, in front of an operator.
+func TestTheSentinelsReadAsMessagesAndStillMatch(t *testing.T) {
+	assert.True(t, errors.Is(ErrNoSuchScenario, ErrNothingStarted),
+		"the refinement still has to be machine-readable")
+	assert.Equal(t, "no such scenario", ErrNoSuchScenario.Error())
+	assert.Equal(t, "nothing was started", ErrNothingStarted.Error())
+
+	wrapped := fmt.Errorf("no scenario named %q: %w", "typo", ErrNoSuchScenario)
+	assert.True(t, errors.Is(wrapped, ErrNoSuchScenario))
+	assert.True(t, errors.Is(wrapped, ErrNothingStarted))
 }

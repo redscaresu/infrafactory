@@ -36,6 +36,22 @@ import { isProgressEvent } from "./deployments-view.js";
  */
 export const deploys = writable({});
 
+/**
+ * Deploy reports, in their OWN store.
+ *
+ * A report says infrastructure may exist with no record of it. It
+ * changes twice a session — when a deploy ends badly, and when somebody
+ * dismisses it — while `deploys` is written once per progress line,
+ * thousands of times during a real apply. Reading reports out of
+ * `deploys` subscribed the root layout, mounted on every route, to all
+ * of that: a fresh array and a keyed re-diff per line, for data that had
+ * not changed.
+ *
+ * Separating them removes the coupling rather than optimising it. Shape:
+ * `{ [scenario]: [{ id, message, opening }] }`.
+ */
+export const reports = writable({});
+
 let socket;
 let watchers = 0;
 let generation = 0;
@@ -184,7 +200,10 @@ function appendProgress(entry, line) {
 
 export function beginDeploy(scenario) {
   // Refused if one is already running, and the refusal lives HERE
-  // rather than only in the button's `disabled`.
+  // rather than only in the button's `disabled`. Returns whether the
+  // deploy may proceed -- the caller MUST honour it, because the store
+  // can decline to record a second start but cannot stop the POST, and
+  // the 423 that came back was then applied to the FIRST deploy.
   //
   // Starting over a live apply reset its log and its outcome; the
   // second POST was then refused with 423, `refuseDeploy` marked the
@@ -193,61 +212,52 @@ export function beginDeploy(scenario) {
   // longer running -- a deploy still creating billable infrastructure
   // with its log and its ending both lost. The store is the thing that
   // outlives the page, so the rule belongs in it.
-  if (get(deploys)[scenario]?.running) return;
+  if (get(deploys)[scenario]?.running) return false;
   ensureSocket();
   deploys.update((all) => {
-    // Reports SURVIVE a retry.
-    //
-    // Overwriting the entry deleted an unread "it may have created
-    // resources that are still running -- project 7c98d82e is live" the
-    // moment the reader did the obvious next thing and clicked Deploy
-    // again. If that retry then succeeded, the banner became
-    // "Deployed." and the next navigation dropped it, so a leaked
-    // project with no live record was named nowhere at all.
-    //
-    // They accumulate rather than replace, because two failed attempts
-    // leak two projects.
-    const reports = all[scenario]?.reports ?? [];
+    // Reports are untouched: they live in their own store, so a retry
+    // cannot delete what the last attempt leaked, and two failed
+    // attempts accumulate two of them.
     return {
       ...all,
-      [scenario]: { running: true, progress: [], dropped: 0, outcome: null, reports }
+      [scenario]: { running: true, progress: [], dropped: 0, outcome: null }
     };
   });
+  return true;
 }
 
-/** recordOutcome ends a deploy, keeping anything it has to report. */
+/** recordOutcome ends a deploy, and files anything it has to report. */
 function recordOutcome(all, scenario, outcome, keepProgress) {
   const entry = all[scenario];
   if (!entry) return all;
-  // A report carries its own OPENING LINES.
-  //
-  // When the request never returns an ActionResult -- a dropped
-  // connection mid-apply -- the message is the generic "may still be
-  // running", and the only thing naming the run's project and workdir
-  // is the head of the log. `retireDeploy` and a retry both clear
-  // `progress`, so a report that pointed at the log pointed at nothing.
-  // It takes a copy instead, and is self-contained.
-  const reports = outcome?.mayHaveCreated
-    ? [
-        ...(entry.reports ?? []),
-        {
-          // A stable ID, minted here. Dismissing used to name a
-          // POSITION, and positions move: two clicks landing before a
-          // re-render deleted two different reports, the second of them
-          // a leak the operator had never read.
-          id: nextReportID(),
-          message: outcome.message,
-          opening: (entry.progress ?? []).slice(0, KEPT_OPENING_LINES)
-        }
-      ]
-    : (entry.reports ?? []);
+
+  if (outcome?.mayHaveCreated) {
+    // A report carries its own OPENING LINES.
+    //
+    // When the request never returns an ActionResult -- a dropped
+    // connection mid-apply -- the message is the generic "may still be
+    // running", and the only thing naming the run's project and workdir
+    // is the head of the log. `retireDeploy` and a retry both clear
+    // `progress`, so a report that pointed at the log pointed at
+    // nothing. It takes a copy instead, and is self-contained.
+    const filed = {
+      // A stable ID, minted here. Dismissing used to name a POSITION,
+      // and positions move: two clicks landing before a re-render
+      // deleted two different reports, the second of them a leak the
+      // operator had never read.
+      id: nextReportID(),
+      message: outcome.message,
+      opening: (entry.progress ?? []).slice(0, KEPT_OPENING_LINES)
+    };
+    reports.update((all) => ({ ...all, [scenario]: [...(all[scenario] ?? []), filed] }));
+  }
+
   return {
     ...all,
     [scenario]: {
       ...entry,
       running: false,
       outcome,
-      reports,
       ...(keepProgress ? {} : { progress: [], dropped: 0 })
     }
   };
@@ -286,31 +296,22 @@ export function refuseDeploy(scenario, outcome) {
 }
 
 /**
- * retireDeploy drops a finished deploy but KEEPS what it has to report.
+ * retireDeploy drops a finished deploy's banner and log.
  *
- * Two things were being conflated. The banner describing how the last
- * attempt ended is a claim that goes stale -- "Deployed. It is listed
- * on the Deployments page until its TTL expires." is false once the TTL
- * has passed. A report is a statement that infrastructure may exist
- * with no record of it, and it stays until somebody says otherwise.
- *
- * Returning early whenever an entry held a report kept BOTH, so a
- * failed-then-retried deploy pinned a stale success banner on every
- * later visit for the rest of the session.
+ * Reports are untouched, because they are not in this store. The banner
+ * describing how the last attempt ended goes stale -- "Deployed. It is
+ * listed on the Deployments page until its TTL expires." is false once
+ * the TTL has passed. A report is a statement that infrastructure may
+ * exist with no record of it, and it stays until somebody says
+ * otherwise. Two lifetimes, two stores.
  */
 export function retireDeploy(scenario) {
   deploys.update((all) => {
     const entry = all[scenario];
     if (!entry || entry.running) return all;
-    if (!entry.reports?.length) {
-      const next = { ...all };
-      delete next[scenario];
-      return next;
-    }
-    return {
-      ...all,
-      [scenario]: { running: false, progress: [], dropped: 0, outcome: null, reports: entry.reports }
-    };
+    const next = { ...all };
+    delete next[scenario];
+    return next;
   });
   releaseSocket();
 }
@@ -326,25 +327,23 @@ export function retireDeploy(scenario) {
  * exactly the message this arc says must never be lost.
  */
 export function dismissReport(scenario, id) {
+  reports.update((all) => {
+    const left = (all[scenario] ?? []).filter((r) => r.id !== id);
+    const next = { ...all };
+    if (left.length) next[scenario] = left;
+    else delete next[scenario];
+    return next;
+  });
+
+  // An outcome that IS a report is not rendered anywhere once its
+  // report is gone -- the page shows a pointer at it instead -- so the
+  // entry would be a finished deploy with its ending stated nowhere.
   deploys.update((all) => {
     const entry = all[scenario];
-    if (!entry) return all;
-    const reports = (entry.reports ?? []).filter((r) => r.id !== id);
-    // Dropped only when nothing RENDERABLE is left.
-    //
-    // An outcome that is itself a report is not shown anywhere once the
-    // report goes, so keeping the entry would leave a finished deploy
-    // with its ending stated nowhere. But a NON-report outcome -- the
-    // success of a retry, sitting beside the earlier attempt's leak
-    // report -- is on screen, and deleting the entry took the success
-    // banner down with the report the reader had just dealt with.
-    const rendersSomething = entry.outcome && !entry.outcome.mayHaveCreated;
-    if (!reports.length && !entry.running && !rendersSomething) {
-      const next = { ...all };
-      delete next[scenario];
-      return next;
-    }
-    return { ...all, [scenario]: { ...entry, reports } };
+    if (!entry || entry.running || !entry.outcome?.mayHaveCreated) return all;
+    const next = { ...all };
+    delete next[scenario];
+    return next;
   });
   releaseSocket();
 }
@@ -376,12 +375,12 @@ export function isConnected(all) {
  */
 export function pendingReports(all) {
   const out = [];
-  for (const [scenario, entry] of Object.entries(all || {})) {
-    if (scenario === "__connected") continue;
-    // The INDEX travels with the report, because dismissing one of
-    // several identical failures has to name which -- two attempts can
-    // fail the same way, and they leak two projects.
-    for (const report of entry?.reports ?? []) {
+  for (const [scenario, filed] of Object.entries(all || {})) {
+    // The ID travels with the report, because dismissing one of several
+    // identical failures has to name which -- two attempts can fail the
+    // same way, and they leak two projects. A position would move when
+    // a sibling went.
+    for (const report of filed ?? []) {
       out.push({ scenario, id: report.id, message: report.message, opening: report.opening ?? [] });
     }
   }

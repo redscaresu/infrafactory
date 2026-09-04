@@ -715,3 +715,33 @@ look at it.
 A report is dismissed by an id minted when it is recorded. Positions move: two
 clicks landing before a re-render deleted two different reports, and the second was
 a leak nobody had read.
+
+
+## Amendment, 2026-09-04 (round eighteen): who may say nothing was started
+
+**Any path that answers before a deploy could begin.** That includes the
+cross-origin guard and the collection's method check, neither of which knows which
+verb it refused.
+
+Two earlier amendments said the opposite, on the grounds that `started_nothing` is
+a claim about an apply and is therefore meaningless on a read and about the wrong
+verb on a teardown. Meaningless is not false — nothing was started, because no
+handler ran — and withholding a true claim is not neutral. A refused deploy POST
+read as "we do not know what happened", and the page pinned a permanent "it may
+have created resources that are still running" for a request that never reached the
+deployer. A vacuous truth on a PUT costs nothing; a missing one manufactures a
+false alarm.
+
+### A guard the caller can ignore is not a guard
+
+The store refuses to record a second start over a running deploy. It cannot stop
+the POST, so it returns whether the deploy may proceed and the caller must honour
+it — otherwise the 423 that comes back is applied to the FIRST deploy, clearing its
+log and marking it finished while it keeps creating infrastructure.
+
+### Reports live in their own store
+
+They change twice a session; the deploy store is written once per progress line.
+Holding them together subscribed every route to thousands of notifications for data
+that had not changed, and coupled two things with different lifetimes: a banner
+that goes stale, and a statement that infrastructure may exist unrecorded.
