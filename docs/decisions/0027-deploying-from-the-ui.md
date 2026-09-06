@@ -186,6 +186,30 @@ statement about something the reader may not be looking at.
 Watching is never required. The apply is detached from the request, so closing the
 tab stops the stream and not the deploy.
 
+### S163f: `run` and `test` report too, into the structured log
+
+This decision was written for `deploy` and left the other two Layer 3 callers
+passing `nil`. That was the wrong half to finish: `deploy` is watched from the
+scenario page, while `run` and `test` are what a **PR gate** executes, and the
+Live Run page is the screen a demo is pointed at. Their apply was silent for
+minutes on it.
+
+The adaptation, not a second sink: the Live Run console renders `LogEntry`
+records, so raw bytes aimed at the websocket would arrive as an unparsed blob
+beside well-formed events. `stageLogWriter` line-buffers the harness's writer into
+`sandbox_deploy_progress` entries, recovering the stage into its own field because
+a reader scanning a long apply looks for *which stage* before they read the words.
+
+**A nil logger yields a nil `*stageLogWriter`, and the caller must not hand that
+straight to the `io.Writer` parameter.** Doing so makes a non-nil interface
+wrapping a nil pointer, `stageProgress`'s `p.out != nil` guard passes, and every
+stage line is formatted and dropped — the exact cost that guard exists to avoid,
+and invisible because nothing errors. `executeTestWithScenario` tests the concrete
+pointer and leaves the interface unset. It is an interface-boundary defence rather
+than an observed path: `CommandRuntime` always builds a logger, so the branch is
+asserted as a property of the type instead of through a command that cannot reach
+it.
+
 **The subject is the scenario, not the deployment id**, and that is a limit rather
 than a choice: the id is minted inside the command, after the request is accepted.
 

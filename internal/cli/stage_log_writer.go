@@ -32,9 +32,15 @@ type stageLogWriter struct {
 	partial bytes.Buffer
 }
 
-// newStageLogWriter adapts a logger. A nil logger yields nil, so the
-// harness receives no writer at all rather than one that discards --
-// there is nothing to gain from formatting lines nobody will read.
+// newStageLogWriter adapts a logger, or returns nil if there is none.
+//
+// The nil is a *stageLogWriter, and callers must NOT hand it straight to
+// an io.Writer parameter: that produces a non-nil interface wrapping a
+// nil pointer, the harness's `p.out != nil` check passes, and every
+// stage line gets formatted and dropped. Check the concrete pointer and
+// leave the interface unset. `Write` and `Close` tolerate a nil receiver
+// anyway, so a caller that gets this wrong loses efficiency rather than
+// correctness -- which is why it went unnoticed.
 func newStageLogWriter(logger *AppLogger, command string) *stageLogWriter {
 	if logger == nil {
 		return nil

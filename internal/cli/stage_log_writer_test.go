@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"io"
 	"strings"
 	"sync"
 	"testing"
@@ -87,8 +88,7 @@ func TestStageProgressFlushesATrailingLineOnClose(t *testing.T) {
 		"the reason a failed apply gives is the line that matters most")
 }
 
-// A nil logger yields a nil writer, so the harness gets no writer rather
-// than one that formats lines nobody will read.
+// A nil logger yields a nil writer, and one that survives being used.
 func TestStageLogWriterIsNilWithoutALogger(t *testing.T) {
 	w := newStageLogWriter(nil, "test")
 
@@ -97,6 +97,43 @@ func TestStageLogWriterIsNilWithoutALogger(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, len("anything\n"), n)
 	require.NoError(t, w.Close())
+}
+
+// ...and the nil must be recognisable AS nil after it becomes an
+// io.Writer, which is the part that does not come for free.
+//
+// `newStageLogWriter` returns a *stageLogWriter. Assigning a nil one of
+// those straight into an io.Writer parameter yields a NON-nil interface
+// wrapping a nil pointer, so `SandboxDeployHarness`'s `p.out != nil`
+// guard passes and every stage line is formatted and dropped -- the
+// exact cost that guard exists to avoid. Callers must test the concrete
+// pointer and leave the interface unset, which `executeTestWithScenario`
+// now does.
+//
+// Stated as a property of the type rather than driven through the
+// command, because `CommandRuntime` always builds a logger: this branch
+// is an interface-boundary defence, and a test claiming the command
+// exercises it would be claiming something false.
+func TestANilStageLogWriterIsNotAUsableWriter(t *testing.T) {
+	// The RAW comparison, deliberately, because that is the one the
+	// production guard makes -- `stageProgress.start` does `p.out !=
+	// nil` and nothing cleverer. testify's assert.Nil reflects into the
+	// interface and reports a typed nil as nil, which papers over the
+	// entire trap: it would pass here and still leave the harness
+	// formatting lines into a discarder.
+
+	// The trap, demonstrated.
+	var careless io.Writer = newStageLogWriter(nil, "test")
+	assert.True(t, careless != nil,
+		"a nil *stageLogWriter in an io.Writer is not a nil interface")
+
+	// The rule that avoids it.
+	var careful io.Writer
+	if w := newStageLogWriter(nil, "test"); w != nil {
+		careful = w
+	}
+	assert.True(t, careful == nil,
+		"checking the concrete pointer leaves the interface genuinely unset")
 }
 
 // A line with no stage prefix is still reported: silence is worse than

@@ -1013,6 +1013,36 @@ can disagree with the store. Recording the cost here is the fix; a lighter
 endpoint is worth building when the estate is big enough to notice, which is
 the same note S162c left about the mount fetch that has since been deleted.
 
+## 2026-09-06 — S163f: the run console shows the apply's stages while it runs
+
+S163 gave `deploy` live stage progress and left `run` and `test` passing `nil`,
+so a Layer 3 apply was silent for minutes on the **Live Run page** — the screen a
+PR gate is watched on, and the one a demo is pointed at. Both share
+`executeTestWithScenario`, so one wiring covers them.
+
+`stageLogWriter` adapts the harness's `io.Writer` into `LogEntry` records rather
+than adding a second sink: the run console is built from the structured log, and
+raw bytes would arrive there as an unparsed blob beside well-formed events. It is
+line-buffered for the same reason `ProgressSink` is, and recovers the stage into
+its own field so a reader can find *where it is up to* before reading the words.
+
+**The typed-nil trap, found by mutation testing before the PR opened.**
+`newStageLogWriter` returns a `*stageLogWriter`, and the first version handed it
+straight to the `io.Writer` parameter. A nil one of those becomes a *non-nil*
+interface wrapping a nil pointer, so `stageProgress`'s `p.out != nil` guard passed
+and every stage line was formatted and handed to a discarder — precisely the cost
+that guard exists to avoid, and silent, because `Write` tolerates a nil receiver
+and returns success. The call site now tests the concrete pointer and leaves the
+interface unset.
+
+Two things that made it worth writing down. The function's own comment asserted
+the opposite ("the harness receives no writer at all rather than one that
+discards"), so the code was documented as doing what it did not do. And
+`assert.NotNil` **passes** for a typed nil — testify reflects into the interface —
+so the contract test compares the interface raw, the way the production guard
+does.
+
+
 ## 2026-09-03 — S163e: deleting the machinery instead of repairing it
 
 Three `/code-review` rounds on the deploy UI produced **9, then 13, then 14

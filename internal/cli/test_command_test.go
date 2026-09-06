@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -47,6 +48,26 @@ func (f *fakeDestroyHarness) Run(ctx context.Context, _ string, _ map[string]str
 	return f.result, f.err
 }
 
+// liveWriter reports a writer that can actually carry a line.
+//
+// Go's typed-nil trap makes this necessary: `newStageLogWriter` returns
+// a *stageLogWriter, and a nil one of those placed in an io.Writer
+// parameter compares != nil. Every `p.out != nil` guard downstream then
+// passes for a writer that discards, which is indistinguishable from
+// working until somebody watches the screen.
+func liveWriter(w io.Writer) bool {
+	if w == nil {
+		return false
+	}
+	v := reflect.ValueOf(w)
+	switch v.Kind() {
+	case reflect.Ptr, reflect.Interface, reflect.Map, reflect.Slice, reflect.Func, reflect.Chan:
+		return !v.IsNil()
+	default:
+		return true
+	}
+}
+
 type fakeSandboxDeployHarness struct {
 	gotProgress bool
 	result      *harness.SandboxDeployResult
@@ -73,7 +94,13 @@ func (f *fakeSandboxDeployHarness) Run(ctx context.Context, workDir string, _ ma
 	// harness somewhere to report. Dropping that argument makes the
 	// Layer 3 apply silent for minutes on the Live Run page, and a test
 	// that builds the harness itself cannot notice.
-	f.gotProgress = progress != nil
+	//
+	// `progress != nil` is NOT ENOUGH on its own. A nil *stageLogWriter
+	// assigned into an io.Writer is a non-nil interface, and the harness
+	// then formats every stage line and hands it to something whose only
+	// job is to drop it -- passing this assertion while the run console
+	// stays blank. `liveWriter` refuses that case.
+	f.gotProgress = liveWriter(progress)
 	f.calls++
 	f.lastCtx = ctx
 	if f.err == nil && workDir != "" {
@@ -882,6 +909,7 @@ func TestTestCommandRunsSandboxLayerWhenEnabled(t *testing.T) {
 	// itself cannot notice the argument being dropped here.
 	assert.True(t, sandboxDeploy.gotProgress,
 		"the sandbox apply must report its stages, or the run console shows nothing for minutes")
+
 }
 
 func TestTestCommandAutoDestroysSandboxResourcesAfterProbeFailure(t *testing.T) {
