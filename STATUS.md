@@ -45,6 +45,45 @@ failed the `http_probe` criterion — a terraform-visible failure, not the live-
 class. Established by reading `real_probe.go` and `loadbalancer.tf` rather than by
 running it.
 
+**Review corrections (11 findings, all accepted).** The first fix was too narrow
+and the write-up overclaimed:
+
+- Skipping released records made them invisible to the summary's count, so after
+  any teardown `live reconcile` said **"0 record(s)"** for a store that held one —
+  indistinguishable from an empty or unreadable store, which is the false signal
+  that summary exists to prevent. My own evidence quoted it as success. There is an
+  `Examined()` now, and a `Retired` count behind it.
+- A released record whose project still EXISTS was counted as agreement. But `live
+  forget` releases "WITHOUT destroying anything and WITHOUT verifying the account",
+  so that project may be a load balancer and an instance still billing with nothing
+  that will reap them — the D6 shape this command exists to catch. Reported as
+  `Released` now: visible in the summary, still not a failure, because forget is a
+  deliberate act and failing every later reconcile for it would be the permanent-red
+  defect just removed.
+- **The falsification claim was wrong.** The write-up said the result met
+  pre-registered conditions 2 and 3. Condition 2 was "writes a rule with no
+  resource, or refuses" — the run wrote a rule WITH a resource, just the wrong one,
+  which the pre-registration never contemplated. Condition 3 belongs to step 4,
+  which was never run. Stretching criteria written in advance to fit an
+  unanticipated outcome is what pre-registration exists to prevent. Recorded as a
+  new mode: **attributed to a resource the remedy cannot reach** — worse than a
+  refusal, because a refusal is visible.
+- **The design swap cost something.** The plan chose the health-path shape *because*
+  a generator can be told to serve a declared path. The substituted version-mismatch
+  shape has its only remedy in `user_data`, which the address-based probe can never
+  attribute — so this run does not distinguish "attribution is broken" from
+  "attribution cannot reach THIS remedy". A second run should.
+- **The scenario never went through the LLM pipeline**: `scenario-gate` passed in
+  26s because `OPENROUTER_API_KEY` is unconfigured and every step is gated on it —
+  the absent-secret-implies-skip-green pattern the arc flagged. The HCL was
+  hand-staged from the S146 canary. The scenario is **not** kept in the training
+  corpus (one field different from `web-live-paris`, identical generated HCL, an
+  extra LLM generation per gate run for no coverage); it is recorded in full in the
+  write-up instead.
+- Plus: ADR-0024 amended for the three fates of a released record, `Reconcile`'s
+  "Two rules" contract docstring extended to three, a CLI-level test for the symptom
+  as observed, and the fixture helper used instead of three shapes for one literal.
+
 **Cost:** one DEV1-S and one LB-S for about four minutes, under €0.01. Teardown
 clean, including an `auto_created_purge` that removed the `project_default` security
 group Scaleway creates and Terraform never owns — D6, caught and named.

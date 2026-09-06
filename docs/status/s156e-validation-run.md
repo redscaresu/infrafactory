@@ -13,12 +13,28 @@ The manufactured failure is **healthy-but-unconfirmed-version**, which
 `promotion.go` calls "the most dangerous shape live observation can find, because
 every other signal reports it as healthy".
 
-An earlier draft manufactured a *missing health path* instead, and it was wrong:
+### The design was changed, and the change cost something
+
+The plan specifies a different failure: "a service whose **health path does not
+exist**", justified as "deliberately a shape the generator *can* get right when
+told, which is what makes step 4 meaningful".
+
+That design is wrong for a different reason —
 the generated load balancer polls `service_health_path` with `health_check_http`,
 so a path the service does not serve marks the backend DOWN and fails the
 `http_probe` criterion. That is a terraform-visible failure, not the live-only
-class — it would have proved nothing, and it was caught by reading `real_probe.go`
-and `loadbalancer.tf` before spending anything.
+class, and it would have proved nothing. Caught by reading `real_probe.go` and
+`loadbalancer.tf` before spending anything.
+
+**But the substitution has a consequence the plan's reasoning warns about.** The
+health-path shape was chosen *because* a generator can be told to serve a declared
+path. The version-mismatch shape has its only remedy in `user_data` on a resource
+the address-based probe can never attribute — so the attribution failure at step 3
+is partly a property of the substituted shape, not only of the machinery. A
+health-path experiment that avoided the LB health check (by declaring a
+`version_path` the LB does not poll, say) would test the same question without
+that confound. **This run does not distinguish "attribution is broken" from
+"attribution cannot reach THIS remedy", and a second run should.**
 
 | signal | result |
 | --- | --- |
@@ -42,7 +58,7 @@ Three consecutive probes on one deployment cleared the gate:
 
 The S155a attributability guard fired exactly as designed.
 
-## Step 3 — attribution: FAILED (falsification condition 2)
+## Step 3 — attribution: FAILED, in a way the pre-registration did not name
 
 `live learn` wrote a rule, and filed it under **`scaleway_lb_ip`**.
 
@@ -59,7 +75,29 @@ remedy could go.
 
 It is also **descriptive, not prescriptive**: "An apply reaching its desired state
 does not mean the service restarted or picked up the new configuration." There is
-no instruction a generator can follow. That is falsification condition 3 as well.
+no instruction a generator can follow.
+
+### This is a NEW falsification mode, and saying otherwise would be cheating
+
+An earlier draft of this document claimed the result met pre-registered conditions
+2 and 3. It does not, and stretching criteria written in advance to fit an
+unanticipated outcome is the exact thing pre-registration exists to prevent.
+
+- **Condition 2** was "`live learn` writes a rule with no resource, **or refuses**
+  because the deployments do not agree on one." The run did neither: it wrote a
+  rule *with* a resource. The resource is wrong, which the condition never
+  contemplated.
+- **Condition 3** was about the step-4 upgrade producing no attributable diff.
+  Step 4 was never run, so nothing can have met it.
+
+The honest report is a mode the plan did not anticipate:
+
+> **Attributed to a resource the remedy cannot reach.** The gate promotes, `live
+> learn` writes, the rule names a resource — and it is the one the probe's address
+> resolved from rather than the one whose configuration could fix it.
+
+That is worse than a refusal, because a refusal is visible. A rule filed under the
+wrong key looks like a success and is inert.
 
 Steps 4–7 (upgrade, re-learn, the generation A/B) were not run: the plan says stop
 and report if step 3 is not attributable, and an A/B on a rule filed under the wrong
@@ -103,3 +141,36 @@ leak, caught and named rather than silently succeeded.
 
 `live reconcile` after the fix: *examined 3 project(s) and 0 live record(s); the
 cloud and the store agree.*
+
+
+## What did NOT validate this run
+
+**The scenario never went through the LLM pipeline.** `scenario-gate` reported pass
+in 26 seconds because `OPENROUTER_API_KEY` is unconfigured, and every step after
+the credential check is gated on it — so `scripts/scenario_change_gate.sh` never
+ran. That gate exists because "scenarios could ship that schema-validate but the
+LLM can't satisfy", and this is the absent-secret-implies-skip-green pattern the
+presentable-arc plan flagged as the same false green S139 exists to prevent.
+
+The HCL applied here was **hand-staged from the S146 canary**, not generated. So
+this run proves the deploy/observe/promote/learn path against real infrastructure
+and proves nothing about whether a generator can produce this scenario at all.
+
+**The scenario is not kept in the training corpus.** It differed from
+`web-live-paris` by one field, generated identical HCL, and its acceptance criteria
+all pass by design — the version gap is visible only to `live observe`, which the
+criteria never invoke. As a permanent training scenario it added an LLM generation
+to every gate run for no generation coverage. It is recorded here instead, in full,
+so the run is reproducible:
+
+```yaml
+# scenarios/training/web-unversioned-paris.yaml, as run 2026-09-06
+service:
+  image: nginx
+  tag: "1.27"
+  port: 80
+  health_path: /       # the LB polls this with health_check_http; must be served
+  version_path: /      # the experiment: served, and never names the tag
+  ttl: 1h
+# resources and acceptance_criteria identical to web-live-paris
+```

@@ -29,7 +29,32 @@ type Reconciliation struct {
 	// is gone is the success path.
 	Vanished []Deployment
 
-	// Accounted is how many records matched a project that exists. Worth
+	// Released are released records whose project STILL EXISTS.
+	//
+	// Not a disagreement and not agreement either. `live forget` marks a
+	// record released "WITHOUT destroying anything and WITHOUT verifying
+	// the account" -- it is the escape hatch for a record teardown
+	// cannot act on -- so a surviving project may be an empty shell left
+	// by a partial teardown, or it may be a load balancer and an
+	// instance still billing with nothing that will ever reap them.
+	//
+	// Reconcile cannot tell those apart; what it must not do is call
+	// either of them "the cloud and the store agree". Counting them as
+	// Accounted did exactly that, which is the D6 shape this command
+	// exists to catch.
+	Released []Deployment
+
+	// Retired is how many released records named a project that is gone
+	// -- the success path, and the steady state after every teardown.
+	//
+	// A count rather than a list because there is nothing to report
+	// about them; it exists so `Examined` can say they were looked at.
+	// Without it the summary said "0 record(s)" for a store holding
+	// one, which reads exactly like an empty or unreadable store.
+	Retired int
+
+	// Accounted is how many LIVE records matched a project that exists.
+	// Worth
 	// reporting rather than implying, because "0 unrecorded" out of zero
 	// projects examined and out of forty are different results and read
 	// identically.
@@ -59,18 +84,27 @@ type StampedProject struct {
 
 // Reconcile compares the cloud's projects against the store's records.
 //
-// Two rules, and each is a way this could be wrong rather than merely
+// Three rules, and each is a way this could be wrong rather than merely
 // incomplete:
 //
 //   - **A project without the stamp is never considered**, in either
 //     direction. infrafactory does not reason about projects it did not
 //     create, and an unstamped project appearing in this report would
 //     invite someone to delete it.
-//   - **A released deployment still accounts for its project.** Teardown
+//   - **A released deployment still explains its project.** Teardown
 //     records the release but the project can outlive it -- ADR-0024's
-//     unreclaimable case is exactly that. Ignoring released records would
-//     report those projects as unrecorded, sending an operator to
-//     investigate something the store already explains.
+//     unreclaimable case, and `live forget`, are exactly that. Ignoring
+//     released records would report those projects as unrecorded,
+//     sending an operator to investigate something the store already
+//     explains. Explained is not AGREED, though: they are reported as
+//     `Released`, because forget destroys nothing and a surviving
+//     project may still be billing.
+//   - **A released deployment whose project is GONE is the success
+//     path**, not a disagreement: teardown destroys the project and
+//     then marks the record released. Counting it as Vanished left
+//     `live reconcile` permanently non-zero after every successful
+//     teardown. It is still counted by `Examined`, because a record
+//     nobody counts reads as a store with nothing in it.
 func Reconcile(projects []StampedProject, deployments []Deployment) Reconciliation {
 	known := map[string]bool{}
 	for _, d := range deployments {
@@ -103,15 +137,18 @@ func Reconcile(projects []StampedProject, deployments []Deployment) Reconciliati
 			continue
 		}
 		if live[d.ProjectID] {
-			// Counted whatever its state. A RELEASED record whose
-			// project still exists is ADR-0024's unreclaimable case --
-			// teardown said released and the project outlived it -- and
-			// the store explains that project, so it must not be
-			// reported as unrecorded.
+			if d.State == StateReleased {
+				// Explained, so never Unrecorded -- but not agreement.
+				// See the field comment: `live forget` releases without
+				// destroying, so this project may still be billing.
+				out.Released = append(out.Released, d)
+				continue
+			}
 			out.Accounted++
 			continue
 		}
 		if d.State == StateReleased {
+			out.Retired++
 			// Gone, and SUPPOSED to be gone: teardown destroys the
 			// project and then marks the record released, so this is
 			// the success path rather than a disagreement.
@@ -132,11 +169,28 @@ func Reconcile(projects []StampedProject, deployments []Deployment) Reconciliati
 		out.Vanished = append(out.Vanished, d)
 	}
 	sort.Slice(out.Vanished, func(i, j int) bool { return out.Vanished[i].ID < out.Vanished[j].ID })
+	sort.Slice(out.Released, func(i, j int) bool { return out.Released[i].ID < out.Released[j].ID })
 
 	return out
 }
 
 // Clean reports whether the store and the cloud agree.
 func (r Reconciliation) Clean() bool {
+	// `Released` is deliberately NOT a disagreement. `live forget` is a
+	// deliberate operator act that already prints what it is doing, and
+	// failing every later reconcile because somebody used it would be
+	// the permanent-red defect this command just had. It is REPORTED
+	// instead -- visible in the summary, silent in the exit code.
 	return len(r.Unrecorded) == 0 && len(r.Vanished) == 0
+}
+
+// Examined is how many records were looked at, whatever became of them.
+//
+// Summed here rather than at the call site, because the call site
+// summed `Accounted + Vanished` and a third bucket then made records
+// invisible: after any successful teardown the summary said "0 live
+// record(s)" for a store that held one, which is the false-signal shape
+// this command's own docstring exists to prevent.
+func (r Reconciliation) Examined() int {
+	return r.Accounted + len(r.Vanished) + len(r.Released) + r.Retired
 }

@@ -144,3 +144,44 @@ func TestReconcileReportsARecordWhoseProjectIsGone(t *testing.T) {
 	assert.Contains(t, out.String(), "dep-ghost")
 	assert.Contains(t, out.String(), "does not exist")
 }
+
+// The defect exactly as it was observed: `live reconcile` returned a
+// CLIError and "the cloud and the store disagree" for a deployment that
+// had just been torn down correctly.
+//
+// Teardown destroys the project and THEN marks the record released, so
+// this is the steady state after every successful teardown -- and the
+// livestore tests could not catch it, because the symptom was the
+// command's exit status and its summary line.
+func TestReconcileIsCleanAfterASuccessfulTeardown(t *testing.T) {
+	rt, store := reconcileRuntime(t, &fakeRunProject{})
+	seedReconcileDeployment(t, store, "dep-torn-down", "proj-destroyed")
+	require.NoError(t, store.MarkReleased("dep-torn-down"))
+
+	var out strings.Builder
+	err := runReconcile(t, rt, &out)
+
+	require.NoError(t, err, "a destroyed project is what teardown is for")
+	assert.Contains(t, out.String(), "the cloud and the store agree")
+	// And it is still COUNTED. Reporting "0 record(s)" for a store that
+	// holds one reads exactly like an empty or unreadable store.
+	assert.Contains(t, out.String(), "1 record(s)")
+}
+
+// `live forget` releases a record WITHOUT destroying its project, so a
+// released record whose project still exists may be a load balancer and
+// an instance still billing with nothing that will ever reap them.
+// Reported -- not a disagreement, and not silence either.
+func TestReconcileSaysWhenAReleasedRecordsProjectIsStillAlive(t *testing.T) {
+	rt, store := reconcileRuntime(t, &fakeRunProject{
+		listed: []harness.ListedProject{stampedListing("proj-forgotten", "if-run-web-live-paris-1")},
+	})
+	seedReconcileDeployment(t, store, "dep-forgotten", "proj-forgotten")
+	require.NoError(t, store.MarkReleased("dep-forgotten"))
+
+	var out strings.Builder
+	err := runReconcile(t, rt, &out)
+
+	require.NoError(t, err, "forget is a deliberate act, not a disagreement")
+	assert.Contains(t, out.String(), "nothing will reap them")
+}

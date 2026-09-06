@@ -126,7 +126,16 @@ at Layer 1 or Layer 3, and `deploy` is the only route to a real NIC.
 | `web-app-paris` | allowlist + key | slow + expensive | DomainsDNS, IPAM, RDB, VPCGateway |
 | `full-stack-paris` | allowlist + key | slow + expensive | IAM, Kubernetes, RDB, Redis, Registry |
 
-**Current: 3 have run, 0 ungated but unrun, 6 are blocked by the key alone, 9 by both.** As
+**Current: 3 have run, 0 ungated but unrun, 6 are blocked by the key alone, 9 by both.**
+
+One real-money run is deliberately NOT in this table: S156e (2026-09-06) deployed a
+one-off `web-unversioned-paris` shape with hand-staged HCL to manufacture a
+healthy-but-unconfirmed-version failure. It was not added to the training corpus --
+it differed from `web-live-paris` by one field and generated identical HCL -- so it
+changes no number here. Recorded because this file is read to decide what to spend
+next, and "18 scenarios, 3 have run" should not be read as "3 applies have
+happened". See `docs/status/s156e-validation-run.md`.
+ As
 first audited on 2026-08-23 it was 2 runnable, 1 blocked by the allowlist
 alone, 4 by the key alone and 9 by both; `lb-serving-paris` did not exist
 yet, and `incremental-project-paris` has since moved from the allowlist

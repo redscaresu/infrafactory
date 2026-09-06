@@ -67,8 +67,13 @@ func TestReconcileLetsAReleasedRecordAccountForItsProject(t *testing.T) {
 	got := Reconcile(projects, deployments)
 
 	assert.Empty(t, got.Unrecorded, "the store explains this project; it is not unaccounted for")
-	assert.Equal(t, 1, got.Accounted)
+	// Surfaced rather than counted as agreement: see Released's field
+	// comment. Still Clean(), because `live forget` is a deliberate act
+	// and failing every later reconcile for it would be the
+	// permanent-red defect this command just had.
+	require.Len(t, got.Released, 1)
 	assert.True(t, got.Clean())
+	assert.Equal(t, 1, got.Examined(), "and it is still a record that was looked at")
 }
 
 // A record with no project id is reported elsewhere (ADR-0024 calls it
@@ -118,29 +123,24 @@ func TestReconcileReportsBothDirectionsInAStableOrder(t *testing.T) {
 // end to end: no unit test covered a released record, because none of
 // them tore one down first.
 func TestAReleasedRecordIsNotAVanishedOne(t *testing.T) {
-	released := Deployment{
-		ID: "dep-released", Scenario: "web-unversioned-paris",
-		ProjectID: "45d19551-73b4-4e56-b9af-d8653546a65e", State: StateReleased,
-	}
-	stillLive := Deployment{
-		ID: "dep-live", Scenario: "web-unversioned-paris",
-		ProjectID: "11111111-2222-3333-4444-555555555555", State: StateLive,
-	}
-
 	// Neither project exists any more: one because teardown destroyed
 	// it, one because something else did.
-	got := Reconcile(nil, []Deployment{released, stillLive})
+	got := Reconcile(nil, []Deployment{
+		reconcileDeployment("dep-released", "proj-destroyed", StateReleased),
+		reconcileDeployment("dep-live", "proj-vanished", StateLive),
+	})
 
 	require.Len(t, got.Vanished, 1,
+		"only the LIVE record is a disagreement")
+	assert.Equal(t, "dep-live", got.Vanished[0].ID,
 		"a released record's project is supposed to be gone")
-	assert.Equal(t, "dep-live", got.Vanished[0].ID)
 	assert.False(t, got.Clean(), "the live one is still a real disagreement")
 }
 
 func TestAReleasedRecordAloneReconcilesClean(t *testing.T) {
-	got := Reconcile(nil, []Deployment{{
-		ID: "dep-released", ProjectID: "45d19551", State: StateReleased,
-	}})
+	got := Reconcile(nil, []Deployment{
+		reconcileDeployment("dep-released", "proj-destroyed", StateReleased),
+	})
 
 	assert.True(t, got.Clean(),
 		"a torn-down deployment must not leave reconcile red for the rest of time")
@@ -159,6 +159,31 @@ func TestAReleasedRecordWhoseProjectSurvivedIsStillAccountedFor(t *testing.T) {
 	})
 
 	assert.Empty(t, got.Vanished, "a destroyed project is not a disagreement")
-	assert.Equal(t, 1, got.Accounted, "but a surviving one is still explained by its record")
-	assert.Empty(t, got.Unrecorded, "so it is not reported as an unexplained project")
+	assert.Empty(t, got.Unrecorded, "and a surviving one is still explained by its record")
+	// Explained is not the same as agreed. `live forget` releases
+	// WITHOUT destroying, so a surviving project may be billing with
+	// nothing that will reap it -- reported, not counted as agreement.
+	require.Len(t, got.Released, 1)
+	assert.Equal(t, "dep-released-alive", got.Released[0].ID)
+	assert.Zero(t, got.Accounted, "Accounted is for LIVE records")
+}
+
+// After any successful teardown the store holds a released record whose
+// project is gone. It belongs in neither Accounted nor Vanished, so the
+// summary's `Accounted + Vanished` total reported "0 record(s)" for a
+// store that held one -- indistinguishable from an empty or unreadable
+// store, which is the false signal reconcileSummary exists to prevent.
+func TestExaminedCountsEveryRecordItLookedAt(t *testing.T) {
+	projects := []StampedProject{{ID: "proj-alive", Name: "if-run-x", Ours: true}}
+
+	got := Reconcile(projects, []Deployment{
+		reconcileDeployment("dep-live", "proj-alive", StateLive),
+		reconcileDeployment("dep-torn-down", "proj-gone", StateReleased),
+		reconcileDeployment("dep-forgotten", "proj-alive", StateReleased),
+	})
+
+	assert.Equal(t, 3, got.Examined(), "every record was looked at, whatever became of it")
+	assert.Equal(t, 1, got.Accounted)
+	assert.Len(t, got.Released, 1)
+	assert.Empty(t, got.Vanished)
 }

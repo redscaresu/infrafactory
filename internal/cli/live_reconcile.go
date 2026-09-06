@@ -144,8 +144,23 @@ func stampedProjects(listed []harness.ListedProject) []livestore.StampedProject 
 // and mean opposite things, and the first is what a broken credential or
 // a wrong organization looks like.
 func reconcileSummary(r livestore.Reconciliation, projectsSeen int) string {
-	base := fmt.Sprintf("examined %d project(s) in the organization and %d live record(s)",
-		projectsSeen, r.Accounted+len(r.Vanished))
+	// `Examined()`, not `Accounted + Vanished`. A released record whose
+	// project is gone is in neither of those, so after any successful
+	// teardown this said "0 record(s)" for a store that held one --
+	// indistinguishable from an empty or unreadable store, which is the
+	// exact false signal this function exists to prevent.
+	base := fmt.Sprintf("examined %d project(s) in the organization and %d record(s)",
+		projectsSeen, r.Examined())
+
+	// Reported whether or not anything disagrees. `live forget`
+	// releases a record WITHOUT destroying its project, so a surviving
+	// one may still be billing with nothing that will reap it -- not a
+	// disagreement, and not something to say nothing about.
+	if len(r.Released) > 0 {
+		base = fmt.Sprintf("%s, %d released record(s) whose project still exists (nothing will reap them)",
+			base, len(r.Released))
+	}
+
 	if r.Clean() {
 		return base + "; the cloud and the store agree"
 	}
