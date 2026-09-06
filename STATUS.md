@@ -2,6 +2,104 @@
 
 Last updated: 2026-09-06
 
+## 2026-09-06 — S156e: the validation run, and what it found
+
+**The experiment reached step 3 of 7 and stopped there, as the plan said it should.**
+Negative on the bar the arc set itself, which the plan is explicit closes it as
+honestly as a positive result. Full write-up:
+[docs/status/s156e-validation-run.md](docs/status/s156e-validation-run.md).
+
+`web-unversioned-paris` deployed to real Scaleway: apply succeeded in 33s, the run
+created its own project before the apply (ADR-0025 is live on main), the load
+balancer served, the `http_probe` criterion PASSED, the orphan sweep was clean —
+and `live observe` reported the record claims `nginx:1.27` while `/` never mentions
+it. Every signal short of the live probe called it green, which is the class the
+arc exists for.
+
+**Promotion passed.** Three consecutive probes cleared the gate, and it correctly
+noted "version UNCONFIRMED, so nothing may be blamed on a tag".
+
+**Attribution failed.** `live learn` filed the rule under `scaleway_lb_ip` — by
+design, since attribution uses the resource the probed ADDRESS resolved from, and
+the address is the load balancer's. So a lesson about a container image is keyed to
+a load balancer IP: the generator will surface it for LB IPs and never for the
+instance whose `user_data` is the only place a remedy could go. It is also
+descriptive, not prescriptive. The gap is structural — a live probe observes an
+address, and attribution by address cannot reach the resource that caused what was
+observed — so anything built on "live observation feeds the corpus" should assume it
+is open. The rule was deliberately NOT committed to the corpus.
+
+**A defect the run found that no review would.** `live teardown` destroys the
+project and then marks the record released, so **every successful teardown left
+`live reconcile` permanently non-zero** — reporting "the record outlived its
+infrastructure" about the one case where that is exactly what should happen. Fixed,
+with the ordering that keeps the two released cases apart: one whose project is GONE
+is the success path and is counted as `Retired`; one whose project still EXISTS is
+ADR-0024's unreclaimable case and gets its own `Released` bucket. An existing test
+caught the first version of the fix, which skipped released records outright and
+would have silenced the expensive case.
+
+**An earlier design for the run was wrong and was caught before spending anything.**
+Manufacturing a missing *health path* would have marked the LB backend down and
+failed the `http_probe` criterion — a terraform-visible failure, not the live-only
+class. Established by reading `real_probe.go` and `loadbalancer.tf` rather than by
+running it.
+
+**Review corrections (11 findings then, 8 more on the second round).** The first
+fix was too narrow and the write-up overclaimed; the second round found that the
+corrections had reintroduced the same shape one level up:
+
+- Skipping released records made them invisible to the summary's count, so after
+  any teardown `live reconcile` said **"0 record(s)"** for a store that held one —
+  indistinguishable from an empty or unreadable store, which is the false signal
+  that summary exists to prevent. My own evidence quoted it as success. There is an
+  `Examined()` now, and a `Retired` count behind it.
+- A released record whose project still EXISTS was counted as agreement. But `live
+  forget` releases "WITHOUT destroying anything and WITHOUT verifying the account",
+  so that project may be a load balancer and an instance still billing with nothing
+  that will reap them — the D6 shape this command exists to catch. Reported as
+  `Released` now: visible in the summary, still not a failure, because forget is a
+  deliberate act and failing every later reconcile for it would be the permanent-red
+  defect just removed.
+- **Round two: the correction had the same defect it corrected.** The `Released`
+  warning was concatenated onto "; the cloud and the store agree", and the stage
+  still reported `pass` with an empty failures array — so the one line both raised
+  the alarm and withdrew it, and a machine reading the JSON saw success. The
+  summary now says "nothing is unaccounted for, but the above will not be reaped
+  without a human", and names the ids instead of counting them.
+- **Round two: a record with no project id was counted nowhere.** That is the shape
+  `MarkReleased` writes when a record's bytes will not decode, so `live forget` on a
+  damaged record reaches it — and the abandoned infrastructure keeps billing. It was
+  skipped before every bucket, and `Examined()` sums buckets, so a store of one
+  reported as a store of none: the *same* "0 record(s)" false signal, one level up
+  from where it was just fixed. It has a `Damaged` bucket now, and is named.
+- **The falsification claim was wrong.** The write-up said the result met
+  pre-registered conditions 2 and 3. Condition 2 was "writes a rule with no
+  resource, or refuses" — the run wrote a rule WITH a resource, just the wrong one,
+  which the pre-registration never contemplated. Condition 3 belongs to step 4,
+  which was never run. Stretching criteria written in advance to fit an
+  unanticipated outcome is what pre-registration exists to prevent. Recorded as a
+  new mode: **attributed to a resource the remedy cannot reach** — worse than a
+  refusal, because a refusal is visible.
+- **The design swap cost something.** The plan chose the health-path shape *because*
+  a generator can be told to serve a declared path. The substituted version-mismatch
+  shape has its only remedy in `user_data`, which the address-based probe can never
+  attribute — so this run does not distinguish "attribution is broken" from
+  "attribution cannot reach THIS remedy". A second run should.
+- **The scenario never went through the LLM pipeline**: `scenario-gate` passed in
+  26s because `OPENROUTER_API_KEY` is unconfigured and every step is gated on it —
+  the absent-secret-implies-skip-green pattern the arc flagged. The HCL was
+  hand-staged from the S146 canary. The scenario is **not** kept in the training
+  corpus (one field different from `web-live-paris`, identical generated HCL, an
+  extra LLM generation per gate run for no coverage); it is recorded in full in the
+  write-up instead.
+- Plus: ADR-0024 amended for the three fates of a released record, `Reconcile`'s
+  "Two rules" contract docstring extended to three, a CLI-level test for the symptom
+  as observed, and the fixture helper used instead of three shapes for one literal.
+
+**Cost:** one DEV1-S and one LB-S for about four minutes, under €0.01. Teardown
+clean, including an `auto_created_purge` that removed the `project_default` security
+group Scaleway creates and Terraform never owns — D6, caught and named.
 ## 2026-09-06 — S163e-fixes (round twenty-six): the fake was wrong about the thing it faked
 
 **10 findings, 8 accepted, 2 declined** (`docs/review-passes/pass161.md`).

@@ -2,6 +2,8 @@ package cli
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -143,4 +145,95 @@ func TestReconcileReportsARecordWhoseProjectIsGone(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, out.String(), "dep-ghost")
 	assert.Contains(t, out.String(), "does not exist")
+}
+
+// The defect exactly as it was observed: `live reconcile` returned a
+// CLIError and "the cloud and the store disagree" for a deployment that
+// had just been torn down correctly.
+//
+// Teardown destroys the project and THEN marks the record released, so
+// this is the steady state after every successful teardown -- and the
+// livestore tests could not catch it, because the symptom was the
+// command's exit status and its summary line.
+func TestReconcileIsCleanAfterASuccessfulTeardown(t *testing.T) {
+	rt, store := reconcileRuntime(t, &fakeRunProject{})
+	seedReconcileDeployment(t, store, "dep-torn-down", "proj-destroyed")
+	require.NoError(t, store.MarkReleased("dep-torn-down"))
+
+	var out strings.Builder
+	err := runReconcile(t, rt, &out)
+
+	require.NoError(t, err, "a destroyed project is what teardown is for")
+	assert.Contains(t, out.String(), "the cloud and the store agree")
+	// And it is still COUNTED. Reporting "0 record(s)" for a store that
+	// holds one reads exactly like an empty or unreadable store.
+	assert.Contains(t, out.String(), "1 record(s)")
+}
+
+// `live forget` releases a record WITHOUT destroying its project, so a
+// released record whose project still exists may be a load balancer and
+// an instance still billing with nothing that will ever reap them.
+// Reported -- not a disagreement, and not silence either.
+func TestReconcileSaysWhenAReleasedRecordsProjectIsStillAlive(t *testing.T) {
+	rt, store := reconcileRuntime(t, &fakeRunProject{
+		listed: []harness.ListedProject{stampedListing("proj-forgotten", "if-run-web-live-paris-1")},
+	})
+	seedReconcileDeployment(t, store, "dep-forgotten", "proj-forgotten")
+	require.NoError(t, store.MarkReleased("dep-forgotten"))
+
+	var out strings.Builder
+	err := runReconcile(t, rt, &out)
+
+	require.NoError(t, err, "forget is a deliberate act, not a disagreement")
+	assert.Contains(t, out.String(), "nothing will reap")
+
+	// The id, so the operator does not have to cross-read `live ls`
+	// against the project listing to find out which record it was.
+	assert.Contains(t, out.String(), "dep-forgotten")
+
+	// And it must NOT also say they agree.
+	//
+	// The warning was concatenated onto "; the cloud and the store
+	// agree", so one line raised the alarm and withdrew it, and the JSON
+	// reported pass with an empty failures array. An operator scanning
+	// for the green sentence found it. That is the false-green shape
+	// this command exists to prevent, produced by the command itself.
+	assert.NotContains(t, out.String(), "the cloud and the store agree",
+		"a project nothing will reap is not agreement")
+}
+
+// A record with no project id is COUNTED, and named.
+//
+// `MarkReleased` writes exactly this shape as its fallback when a
+// record's bytes will not decode, so `live forget` on a damaged record
+// reaches it. Skipping it silently put the "0 record(s)" false signal
+// back: a store holding one reported holding none, which is
+// indistinguishable from an empty or unreadable store.
+func TestReconcileCountsARecordWithNoProjectID(t *testing.T) {
+	h := newCommandTestHarness(t)
+	rt := &CommandRuntime{livestoreRoot: h.LivestoreRoot()}
+	rt.Deps.RunProject = &fakeRunProject{}
+	t.Setenv("SCW_SECRET_KEY", "test-secret")
+	t.Setenv("SCW_DEFAULT_ORGANIZATION_ID", "org-1")
+	store := livestore.NewFilesystemStore(h.LivestoreRoot())
+
+	// The real path, not a hand-built record: bytes that will not
+	// decode, then `live forget`. MarkReleased preserves the originals
+	// alongside and writes `{id, state: released}` with NO project id,
+	// which is the shape reconcile was dropping on the floor.
+	require.NoError(t, os.MkdirAll(h.LivestoreRoot(), 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(h.LivestoreRoot(), "dep-damaged.json"), []byte("{not json"), 0o644))
+	require.NoError(t, store.MarkReleased("dep-damaged"))
+
+	var out strings.Builder
+	err := runReconcile(t, rt, &out)
+
+	require.NoError(t, err, "unreconcilable is not a disagreement")
+	assert.Contains(t, out.String(), "and 1 record(s)",
+		"a store of one must not report as a store of none")
+	assert.Contains(t, out.String(), "no project id")
+	assert.Contains(t, out.String(), "dep-damaged")
+	assert.NotContains(t, out.String(), "the cloud and the store agree",
+		"reconcile cannot check this record, so it cannot claim agreement")
 }

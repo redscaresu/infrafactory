@@ -702,3 +702,48 @@ client must read the body rather than treating a non-2xx as a generic error: the
 per-stage failures are the whole message, and losing them substitutes "something
 went wrong" for "the state file has vanished and the resources may still be
 running".
+
+
+## Amendment, 2026-09-06 (S156e): the three fates of a released record
+
+The S157a amendment said a released deployment still accounts for its project, and
+said nothing about one whose project is GONE. That gap made `live reconcile` report
+every successful teardown as a disagreement — "the record outlived its
+infrastructure" about the one case where that is exactly what should have happened.
+Found by running the S156e validation deploy end to end.
+
+A released record now has three fates, and the order they are tested in is what
+keeps them apart:
+
+  - **Project gone** — the success path. `live teardown` destroys the project and
+    then marks the record released, so this is the steady state after every
+    teardown. Not a disagreement. Counted by `Examined`, because a record nobody
+    counts reads as a store with nothing in it.
+  - **Project alive** — reported as `Released`, not as agreement. `live forget`
+    releases a record "WITHOUT destroying anything and WITHOUT verifying the
+    account", so a surviving project may be an empty shell from a partial teardown
+    — or a load balancer and an instance still billing with nothing that will ever
+    reap them. Reconcile cannot tell those apart; what it must not do is call
+    either one "the cloud and the store agree".
+  - Either way the project is **explained**, so it is never `Unrecorded`. That is
+    the S157a rule and it still holds.
+
+`Released` is deliberately not a failure. `live forget` is a deliberate operator
+act that already prints what it is doing, and failing every later reconcile because
+somebody used it would be the permanent-red defect this amendment removes.
+
+**Not a failure is not the same as agreement**, and the first version of this
+amendment conflated them. `Released` was reported by appending it to the summary
+line that then ended "; the cloud and the store agree", with the stage still
+`pass` and an empty failures array — so a project nothing will reap was announced
+inside a sentence promising there was nothing left to do. The exit code is still
+0, deliberately; what changed is that the summary no longer claims agreement when
+anything needs a human, and it names the record ids rather than counting them.
+
+**A record with no project id is `Damaged`, and is counted.** `MarkReleased`'s
+fallback writes `{id, state: released}` with no project id when a record's bytes
+will not decode, so `live forget` on a damaged record produces exactly this shape
+— and whatever it named keeps billing. Reconciliation cannot chase it in either
+direction, but it must not imply it looked: skipping it silently made a store of
+one report as a store of none, which is the "0 record(s)" signal this amendment
+was written to remove, reappearing one level up in the count itself.
