@@ -42,6 +42,48 @@ test.describe('Visual regression baselines', () => {
   });
 
   test('runs page', async ({ page }) => {
+    // The runs list is STUBBED, so this baseline stops depending on
+    // whether the developer's `.infrafactory/runs` happens to be empty.
+    //
+    // It did, and it cost a wrong review verdict. The masks below cover
+    // `main table`, which does not EXIST in the empty state -- so a
+    // populated store and an empty one produce genuinely different
+    // images, and the baseline silently encoded whichever the capturing
+    // machine had. A checkout with runs then failed against a baseline
+    // captured without them (56% of pixels), and a worktree without runs
+    // passed against it, which is how a real defect was verified as
+    // absent.
+    //
+    // Two rows rather than zero: the empty state is a different layout,
+    // and pinning the populated one is what the page normally shows.
+    await page.route('**/api/runs', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          runs: [
+            {
+              scenario: 'web-app-paris',
+              run_id: 'run-visual-1',
+              status: 'target_reached',
+              cloud: 'scaleway',
+              iterations: 1,
+              started_at: '2026-01-01T00:00:00Z',
+              finished_at: '2026-01-01T00:01:00Z'
+            },
+            {
+              scenario: 'lb-serving-paris',
+              run_id: 'run-visual-2',
+              status: 'failed',
+              cloud: 'scaleway',
+              iterations: 2,
+              started_at: '2026-01-01T00:02:00Z',
+              finished_at: '2026-01-01T00:03:00Z'
+            }
+          ]
+        })
+      })
+    );
     await page.goto('/runs');
     await expect(page.locator('main')).toBeVisible();
     // The runs table grows by one row on every `infrafactory run`, so
