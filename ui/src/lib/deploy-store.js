@@ -160,6 +160,16 @@ function releaseSocket() {
   if (running || watchers > 0) return;
   socket?.();
   socket = undefined;
+  // Disposed means NOT connected, said now rather than awaited.
+  //
+  // `connectWS`'s dispose only calls `socket.close()`; `onStatus(false)`
+  // arrives later via `onclose`, and the next `ensureSocket` bumps the
+  // generation, which silences that late callback deliberately. So
+  // `__connected` kept its stale `true` across the gap, and a deploy
+  // started before the new socket opened rendered "Starting…" instead
+  // of "Not receiving progress" -- the exact conflation the flag exists
+  // to remove.
+  deploys.update((all) => ({ ...all, __connected: false }));
 }
 
 /** watch keeps the shared socket alive while a page is mounted. */
@@ -234,12 +244,12 @@ export function beginDeploy(scenario) {
 /**
  * fileReport records what a deploy may have left behind.
  *
- * Called BESIDE `deploys.update`, never inside its updater. An updater
- * is contracted to be a pure value producer; writing another store from
- * within one notifies that store's subscribers while `deploys` still
- * holds the previous value -- so the layout rendered a new report
- * against an entry that was still marked running -- and any retry of
- * the updater would file the report twice.
+ * Called AFTER `deploys.update`, never inside its updater. An updater
+ * is contracted to be a pure value producer, and a retry of one that
+ * wrote another store would file the report twice. Calling it before
+ * the update is no better: `reports` subscribers then fire while
+ * `deploys` still holds a running entry, which is the state this
+ * ordering exists to prevent anyone observing.
  */
 function fileReport(scenario, outcome, progress) {
   if (!outcome?.mayHaveCreated) return;
@@ -288,13 +298,22 @@ function fileReport(scenario, outcome, progress) {
  */
 export function endDeploy(scenario, outcome) {
   const entry = get(deploys)[scenario];
-  fileReport(scenario, outcome, entry?.progress);
 
+  // The entry goes FIRST, then the report is filed.
+  //
+  // Filing first notified `reports` subscribers while `deploys` still
+  // held a running entry -- which is the property `fileReport`'s
+  // docstring says the call was moved out of the updater to avoid, and
+  // moving it merely one line earlier did not achieve it. Harmless only
+  // because the layout reads `reports` and not `deploys`; ordering it
+  // properly means the next reader who adds a `$deploys` read there
+  // does not reintroduce it.
   deploys.update((all) => {
     const next = { ...all };
     delete next[scenario];
     return next;
   });
+  fileReport(scenario, outcome, entry?.progress);
   releaseSocket();
 
   return { progress: entry?.progress ?? [], dropped: entry?.dropped ?? 0 };

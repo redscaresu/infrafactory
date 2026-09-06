@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"sort"
@@ -463,11 +464,22 @@ func deployHandler(state *serverState) http.HandlerFunc {
 		}
 		if errors.Is(err, ErrNothingStarted) {
 			// Every OTHER way the deployer can fail before the apply:
-			// rebuilding its runtime, parsing its flags. A server fault
-			// rather than a bad request, so 500 -- but still a promise
-			// that no project exists, which is the only thing the
-			// client needs from it.
-			writeRefusal(w, http.StatusInternalServerError, err.Error())
+			// rebuilding its runtime, parsing its flags, walking the
+			// scenario root. A server fault rather than a bad request,
+			// so 500 -- but still a promise that no project exists,
+			// which is the only thing the client needs from it.
+			//
+			// A STABLE message, not `err.Error()`. The cause is an
+			// internal one: `resolveScenarioByName`'s walk failure
+			// carries an *fs.PathError, so the body would have read
+			// `lstat /Users/<name>/go/src/.../scenarios: permission
+			// denied` -- rendered verbatim on the scenario page.
+			// "Return meaningful errors without exposing internals":
+			// the operator needs to know their request did nothing, and
+			// the path is for the server's log.
+			log.Printf("deploy refused before the apply: %v", err)
+			writeRefusal(w, http.StatusInternalServerError,
+				"this server could not start the deploy, so nothing was created; see the server log")
 			return
 		}
 		if errors.Is(err, os.ErrNotExist) {

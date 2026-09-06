@@ -536,7 +536,7 @@ func TestEveryPreApplyFailureSaysNothingWasStarted(t *testing.T) {
 			status: http.StatusNotFound,
 		},
 		"the runtime could not be rebuilt": {
-			err:    fmt.Errorf("%w: %w", ErrNothingStarted, errors.New("config is unreadable")),
+			err:    NothingStarted("", errors.New("/Users/someone/go/src/scenarios: permission denied")),
 			status: http.StatusInternalServerError,
 		},
 	} {
@@ -549,6 +549,11 @@ func TestEveryPreApplyFailureSaysNothingWasStarted(t *testing.T) {
 			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &payload))
 			assert.Equal(t, true, payload["started_nothing"],
 				"the apply had not begun, so no project exists to warn about")
+			// "Return meaningful errors without exposing internals":
+			// the walk failure carries an *fs.PathError, and the body
+			// is rendered verbatim on the scenario page.
+			assert.NotContains(t, rec.Body.String(), "/Users/",
+				"an internal path must not reach a page")
 		})
 	}
 }

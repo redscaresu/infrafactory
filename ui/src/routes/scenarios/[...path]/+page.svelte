@@ -315,6 +315,12 @@
 
   // Only ever the one belonging to the page on screen.
   $: ending = detail?.name ? (endings[detail.name] ?? null) : null;
+  // Derived once per preview rather than re-invoked in the `{#each}`
+  // heads: Svelte re-runs those on any dirty dependency of the block,
+  // so both rebuilt whenever `status`, `validationState` or `previewing`
+  // changed while the dialog was open.
+  $: confirmationLines = preview ? deployConfirmation(preview) : [];
+  $: previewWarnings = preview ? deployWarnings(preview) : [];
   // While running, the log comes from the store; after, from `ending`.
   $: deployProgress = deployEntry?.progress ?? ending?.log ?? [];
   $: deployDropped = deployEntry?.dropped ?? ending?.dropped ?? 0;
@@ -425,12 +431,6 @@
       // leaves it running and creating billable infrastructure.
       const conclusion = err instanceof DeployError ? err.conclusion : "unknown";
 
-      if (conclusion === "clean") {
-        // A 2xx the server was still writing when the connection went.
-        // Provably clean, so there is nothing to report.
-        finish(target, { ok: true, mayHaveCreated: false, message });
-        return;
-      }
       if (conclusion === "refused") {
         // Nothing of ours started, so nothing to report -- and the log
         // is discarded for EVERY refusal, not just the lock one.
@@ -749,12 +749,12 @@
       <p class="font-semibold text-slate-900">Deploy {preview.scenario}?</p>
 
       <ul class="mt-2 list-disc space-y-1 pl-5 text-slate-800">
-        {#each deployConfirmation(preview) as line}
+        {#each confirmationLines as line}
           <li>{line}</li>
         {/each}
       </ul>
 
-      {#each deployWarnings(preview) as warning}
+      {#each previewWarnings as warning}
         <p class="mt-2 font-semibold text-rose-900" data-testid="deploy-warning">{warning}</p>
       {/each}
 
@@ -768,10 +768,23 @@
       {/if}
 
       <div class="mt-3 flex gap-2">
+        <!-- Disabled on `already_deploying` too, not just this tab's
+             `deploying`. The warning promises the click "will be
+             refused", and it would be -- but the round trip is not
+             free: `beginDeploy` succeeds because THIS tab has no entry,
+             so for its whole duration the store absorbs the other
+             apply's progress lines (same scenario subject, entry
+             running) and the panel labelled as this deploy streams
+             somebody else's output. The 423 then arrives and the log is
+             discarded, so the reader watched minutes of output
+             attributed to a deploy that never started. -->
         <button
           class="rounded bg-sky-700 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40"
           data-testid="deploy-confirm-go"
-          disabled={!preview.deployable || !preview.deploy_allowed || deploying}
+          disabled={!preview.deployable ||
+            !preview.deploy_allowed ||
+            preview.already_deploying === true ||
+            deploying}
           on:click={confirmDeploy}>Deploy and keep it running</button
         >
         <button

@@ -1,6 +1,40 @@
 # STATUS
 
-Last updated: 2026-09-04
+Last updated: 2026-09-06
+
+## 2026-09-06 — S163e-fixes (round twenty-four): never assert clean about a body you did not read
+
+**10 findings, 8 accepted, 2 declined.** One behaviour defect, and it settles a
+question I had flip-flopped on twice.
+
+An unparseable 2xx was classified `"clean"` — no report, emerald banner — on the
+argument that `writeActionResult` answers 2xx only for a provably clean result, so a
+truncated body meant this server was cut off mid-write. **A proxy or a captive
+portal can answer 2xx with an unparseable body too**, and nothing here tells them
+apart. `tearDownDeployment` had already been fixed to refuse that synthesis, so the
+two verbs disagreed — and the classification got safer as the evidence got worse: a
+body that parsed into something unrecognised was `"unknown"`, one that parsed into
+nothing was `"clean"`. Both are `"unknown"` now, and the `"clean"` state is deleted
+rather than left unreachable.
+
+Also: `releaseSocket` disposed the socket without clearing `__connected`, so a
+deploy started before the replacement opened rendered "Starting…" instead of "Not
+receiving progress"; `estateSummary`'s failed branch dropped the "did not report
+what is applying" caveat its sibling treats as mandatory; `applyingLabel` was dead;
+`deployWarnings` ordered the estate-wide caveat by matching its opening words, so
+rewording it would have promoted it above the cost warning that invalidates the
+figures (each warning carries a `kind` now); `fileReport` ran one line before
+`deploys.update` and so did not achieve what its docstring claimed; the confirm
+button ignored `already_deploying`, letting a doomed click stream another apply's
+output into this tab's panel for a whole round trip; and `writeRefusal(w, 500,
+err.Error())` put an `*fs.PathError` with absolute paths into a body the page
+renders verbatim.
+
+**Declined:** the unreachable `os.ErrNotExist` branch and its order-dependent guard
+chain — the ordering is load-bearing and documented, and making it structural means
+a typed switch over an interface implemented outside the package; and renaming
+`writeRefusal` to encode its positional promise, which would say the rule more
+loudly without making it structural.
 
 ## 2026-09-04 — S163e-fixes (round twenty-three): I called convergence too early
 

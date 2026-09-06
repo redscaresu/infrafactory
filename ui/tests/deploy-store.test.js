@@ -571,3 +571,31 @@ test("beginDeploy reports whether the deploy may proceed", async () => {
   cleanup("binding-answer");
   stop();
 });
+
+// Disposing a socket does not synchronously report the disconnection:
+// `connectWS`'s dispose calls `close()`, and `onStatus(false)` arrives
+// later via `onclose` — by which time the generation guard has silenced
+// it. So `__connected` kept a stale `true` across the gap, and a deploy
+// started before the replacement opened rendered "Starting…" instead of
+// "Not receiving progress", which is the conflation the flag exists to
+// remove.
+test("disposing the socket reports the disconnection immediately", async () => {
+  const { deploys, useConnector, watch, isConnected } = await import(
+    "../src/lib/deploy-store.js"
+  );
+
+  const statuses = [];
+  useConnector((_onMessage, onStatus) => {
+    statuses.push(onStatus);
+    // A dispose that never calls back, exactly like `connectWS`.
+    return () => {};
+  });
+
+  const stop = watch();
+  statuses[0](true);
+  assert.equal(isConnected(get(deploys)), true);
+
+  stop(); // nothing running, nobody watching -> disposed
+
+  assert.equal(isConnected(get(deploys)), false, "no socket means not connected");
+});

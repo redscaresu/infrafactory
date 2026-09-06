@@ -60,7 +60,4 @@ test("DeployError carries what may be concluded about infrastructure", () => {
   assert.ok(refused instanceof Error, "so a caller that only knows Error still sees it");
 
   assert.equal(new DeployError("Failed to fetch", "unknown").conclusion, "unknown");
-  // A 2xx whose body will not parse: the status proved it clean, so
-  // there is nothing to report even though the result was unreadable.
-  assert.equal(new DeployError("unreadable", "clean").conclusion, "clean");
 });

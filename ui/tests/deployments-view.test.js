@@ -374,6 +374,18 @@ test("alreadyLiveWarnings is silent when nothing is live", () => {
   assert.deepEqual(alreadyLiveWarnings({ already_live: [] }), []);
 });
 
+// Each warning carries a KIND, so `deployWarnings` can order the
+// estate-wide caveat below the scenario-specific ones without matching
+// its opening words -- a prefix match made the ordering depend on prose.
+test("alreadyLiveWarnings tags what each warning is about", () => {
+  const [scenario] = alreadyLiveWarnings({ already_live: ["dep-a"] });
+  assert.equal(scenario.kind, "scenario");
+
+  const [estate] = alreadyLiveWarnings({ already_live: [], already_live_unknown: true });
+  assert.equal(estate.kind, "estate");
+  assert.ok(estate.text.startsWith(ESTATE_UNREADABLE), "and the constant builds the text");
+});
+
 // The server makes an empty list a CHECKED claim. Reading a missing
 // field as an empty one throws that away at the client boundary: an
 // older server, or a body trimmed by an intermediary, would render no
@@ -381,13 +393,13 @@ test("alreadyLiveWarnings is silent when nothing is live", () => {
 // nothing", on a guard about billable infrastructure.
 test("alreadyLiveWarnings does not read an absent list as an empty one", () => {
   const [missing] = alreadyLiveWarnings({});
-  assert.match(missing, /could not be fully read/);
+  assert.match(missing.text, /could not be fully read/);
   const [nothing] = alreadyLiveWarnings(undefined);
-  assert.match(nothing, /could not be fully read/);
+  assert.match(nothing.text, /could not be fully read/);
 });
 
 test("alreadyLiveWarnings says so when the estate could not be read", () => {
-  const [warning] = alreadyLiveWarnings({ already_live: [], already_live_unknown: true });
+  const [{ text: warning }] = alreadyLiveWarnings({ already_live: [], already_live_unknown: true });
   assert.match(warning, /could not be fully read/);
   assert.match(warning, /unknown/);
 });
@@ -397,7 +409,7 @@ test("alreadyLiveWarnings says so when the estate could not be read", () => {
 // warning with the vaguest one, for every scenario, until somebody found
 // the bad file.
 test("alreadyLiveWarnings keeps the concrete list even when the estate is partly unreadable", () => {
-  const [warning] = alreadyLiveWarnings({
+  const [{ text: warning }] = alreadyLiveWarnings({
     already_live: ["dep-existing"],
     already_live_unknown: true
   });
@@ -438,7 +450,7 @@ test("estateSummary counts deploys in progress", () => {
 // An applying deploy has no record, so the estate cannot see it — and it
 // is exactly the case where a reader is most likely duplicating.
 test("alreadyLiveWarnings reports a deploy that is applying right now", () => {
-  const [warning] = alreadyLiveWarnings({ already_deploying: true, already_live: [] });
+  const [{ text: warning }] = alreadyLiveWarnings({ already_deploying: true, already_live: [] });
   assert.match(warning, /being deployed right now/);
   assert.match(warning, /will be refused/);
 });
@@ -459,10 +471,10 @@ test("alreadyLiveWarnings keeps every warning rather than choosing between them"
     already_live_unknown: true
   });
   assert.equal(warnings.length, 2, "separate warnings, so a page can render them separately");
-  assert.match(warnings[0], /dep-existing/, "the second-bill warning leads");
-  assert.match(warnings[0], /SECOND project/);
-  assert.match(warnings[0], /could not be read/, "and carries its own caveat");
-  assert.match(warnings[1], /being deployed right now/);
+  assert.match(warnings[0].text, /dep-existing/, "the second-bill warning leads");
+  assert.match(warnings[0].text, /SECOND project/);
+  assert.match(warnings[0].text, /could not be read/, "and carries its own caveat");
+  assert.match(warnings[1].text, /being deployed right now/);
 });
 
 test("alreadyLiveWarnings still reports an unreadable estate while something is applying", () => {
@@ -472,8 +484,8 @@ test("alreadyLiveWarnings still reports an unreadable estate while something is 
     already_live_unknown: true
   });
   assert.equal(warnings.length, 2);
-  assert.match(warnings[0], /could not be fully read/);
-  assert.match(warnings[1], /being deployed right now/);
+  assert.match(warnings[0].text, /could not be fully read/);
+  assert.match(warnings[1].text, /being deployed right now/);
 });
 
 // `deploying` is kept from the last successful poll precisely so it

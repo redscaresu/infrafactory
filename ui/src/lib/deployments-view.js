@@ -255,7 +255,16 @@ export function estateSummary(deployments, unreadable, state, deploying) {
       return `${staleApplying}. The live estate could not be read since, so what is running now is unknown.`;
     }
     const read = `${describe(deployments, unreadable)} — read before the error, and possibly out of date.`;
-    return staleApplying ? `${staleApplying}. ${read}` : read;
+    if (staleApplying) return `${staleApplying}. ${read}`;
+    // "Not told" is not "nothing applying" on THIS branch either. The
+    // loaded branch says so and this one silently dropped it, which put
+    // the emptiness question back in two divergent copies -- and a
+    // reader whose server omits `deploying` AND whose refresh failed
+    // got no hint that in-flight deploys were never reported at all.
+    if (!told) {
+      return `${read} This server did not report what is applying, so an in-progress deploy would not appear.`;
+    }
+    return read;
   }
 
   if (knownEmpty(deployments, unreadable, state, deploying)) return "Nothing is deployed.";
@@ -556,7 +565,7 @@ export function deployWarnings(preview) {
   // docstring says it invalidates the figures above it. Alarm fatigue
   // on the common path is what `dismissReport` exists to avoid.
   const live = alreadyLiveWarnings(preview);
-  warnings.push(...live.filter((w) => !w.startsWith(ESTATE_UNREADABLE)));
+  warnings.push(...live.filter((w) => w.kind !== "estate").map((w) => w.text));
 
   if (preview.cost && preview.cost.modelled === false) {
     warnings.push(
@@ -574,8 +583,11 @@ export function deployWarnings(preview) {
   }
 
   // Last: true, worth saying, and about the estate rather than about
-  // this scenario.
-  warnings.push(...live.filter((w) => w.startsWith(ESTATE_UNREADABLE)));
+  // this scenario. Selected by its KIND, not by its opening words -- a
+  // prefix match made the ordering depend on prose, so rewording the
+  // warning (or adding a second estate-wide one) would silently sort it
+  // above the unmodelled-cost line that invalidates the figures.
+  warnings.push(...live.filter((w) => w.kind === "estate").map((w) => w.text));
 
   return warnings;
 }
@@ -631,8 +643,15 @@ export function alreadyLiveWarnings(preview) {
   // dropped one: the first returned early on `already_deploying`, and
   // the fix then concatenated all three into a single paragraph, which
   // demoted the strongest of them to the second sentence of the first
-  // warning. Separate strings let the page render them separately, and
+  // warning. Separate entries let the page render them separately, and
   // let the order mean something.
+  //
+  // Each carries a KIND. `deployWarnings` sorts the estate-wide caveat
+  // below the warnings about this scenario, and it used to select it by
+  // matching the opening words -- so rewording the sentence, or adding
+  // a second estate-wide one, silently moved it above the cost warning
+  // that invalidates the figures. A tag on the value cannot drift from
+  // the prose the way a prefix match can.
   const warnings = [];
 
   // An ABSENT list is not an empty one. The server goes to some trouble
@@ -659,23 +678,29 @@ export function alreadyLiveWarnings(preview) {
   if (live.length > 0) {
     const ids = live.join(", ");
     warnings.push(
-      live.length === 1
-        ? `${ids} is already deployed from this scenario. Deploying again creates a SECOND project and a second bill; it does not replace it.${caveat}`
-        : `${live.length} deployments from this scenario are already live (${ids}). Deploying again creates ANOTHER project and another bill; it does not replace them.${caveat}`
+      {
+        kind: "scenario",
+        text:
+          live.length === 1
+            ? `${ids} is already deployed from this scenario. Deploying again creates a SECOND project and a second bill; it does not replace it.${caveat}`
+            : `${live.length} deployments from this scenario are already live (${ids}). Deploying again creates ANOTHER project and another bill; it does not replace them.${caveat}`
+      }
     );
   } else if (unknown) {
-    warnings.push(
-      "The live estate could not be fully read, so whether this scenario is already deployed is unknown. Check the Deployments page before continuing."
-    );
+    warnings.push({
+      kind: "estate",
+      text: `${ESTATE_UNREADABLE}, so whether this scenario is already deployed is unknown. Check the Deployments page before continuing.`
+    });
   }
 
   // An applying deploy has no record, so the estate cannot see it. The
   // second attempt would simply be refused, which is why this ranks
   // below an existing deployment rather than above it.
   if (preview?.already_deploying) {
-    warnings.push(
-      "This scenario is being deployed right now. A second deploy will be refused until it finishes."
-    );
+    warnings.push({
+      kind: "scenario",
+      text: "This scenario is being deployed right now. A second deploy will be refused until it finishes."
+    });
   }
 
   return warnings;

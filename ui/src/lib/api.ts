@@ -97,22 +97,28 @@ export const api = {
       // means something ELSE answered -- a captive portal, a proxy, a
       // dev-server fallback -- and its status proves nothing about a
       // deploy that may never have been dispatched.
-      // A 2xx whose body will not parse is not a failed deploy, and it
-      // is not an unknown one either: `writeActionResult` answers 2xx
-      // ONLY for a provably clean result, so the status the code has
-      // already read carries the answer. Throwing it as unknown filed a
-      // permanent leak report for the one response shape that
-      // guarantees nothing was left behind -- and saying "deploy
-      // failed: 200" named a success status as a failure.
-      if (res.ok && !parsed.ok) {
-        throw new DeployError(
-          "the deploy succeeded, but its result could not be read — see the Deployments page for what it created",
-          "clean"
-        );
-      }
+      // A 2xx this page cannot read is UNKNOWN, whether the body failed
+      // to parse or parsed into something unrecognised.
+      //
+      // This wavered twice. The argument for calling the unparseable
+      // case "clean" was that `writeActionResult` answers 2xx only for
+      // a provably clean result, so a truncated body means this server
+      // was cut off mid-write. But a proxy, a captive portal or a TLS
+      // interceptor can answer 2xx with an unparseable body too, and
+      // nothing here can tell those apart -- so "the parse failed,
+      // therefore it was our server" does not hold.
+      //
+      // The rule that settles it is the one `tearDownDeployment`
+      // already follows: never assert clean about a body this code has
+      // not read. Erring this way files a report for a deploy that was
+      // fine, which is a wasted look at the Deployments page. Erring
+      // the other way is a green tick over an apply that may be running
+      // and billing, with no report anywhere.
       if (res.ok) {
         throw new DeployError(
-          "the server answered success with something this page does not recognise, so what happened is unknown",
+          parsed.ok
+            ? "the server answered success with something this page does not recognise, so what happened is unknown"
+            : "the server answered success but its result could not be read, so what happened is unknown",
           "unknown"
         );
       }

@@ -5,7 +5,6 @@
     addressHref,
     addressLabel,
     estateSummary,
-    deployingLabel,
     healthBadge,
     knownEmpty,
     needsAttention,
@@ -130,15 +129,6 @@
   // "nothing is deployed" ONLY when the read succeeded.
   $: estateState = !loaded ? "loading" : loadError ? "failed" : "loaded";
   $: summary = estateSummary(deployments, unreadable, estateState, deploying);
-  // The in-flight list survives a failed refresh along with the rows,
-  // and is exactly as old as they are: the rows say so about
-  // themselves, and this says so about the banner.
-  //
-  // Built from `estateState` -- the same input the summary line uses --
-  // rather than from `loadError` separately, because this label exists
-  // precisely so the banner and the summary two lines above it cannot
-  // word the same claim differently.
-  $: applyingLabel = deployingLabel(deploying, estateState === "failed");
   // The one condition under which this page may say nothing is running.
   // Shared with the summary rather than re-derived, because two copies
   // is how one of them ends up contradicting the other.
@@ -176,11 +166,11 @@
       class="rounded border border-sky-300 bg-sky-50 px-4 py-3 text-sm text-sky-900"
       data-testid="estate-deploying"
     >
-      <!-- Not `applyingLabel`: the summary line two elements above
-           renders exactly that sentence, and sharing the builder
-           guaranteed the duplication it was extracted to prevent. The
-           count belongs to the summary; this banner exists to NAME what
-           is applying and say why it is not in the table. -->
+      <!-- No count here: the summary line two elements above renders
+           it, and rendering it twice was the duplication that sharing
+           the builder guaranteed. The count belongs to the summary;
+           this banner exists to NAME what is applying and say why it is
+           not in the table. -->
       <p class="font-semibold">Applying now</p>
       <p class="mt-1">
         {#if estateState === "failed"}

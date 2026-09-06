@@ -869,3 +869,29 @@ So a 2xx whose body cannot be read may be treated as clean for a deploy and must
 be for a teardown. Synthesising `{clean: true}` from a status manufactures exactly
 the proof the rule exists to demand; the teardown path reports it as neither a
 failure nor a success.
+
+
+## Amendment, 2026-09-06 (round twenty-four): never assert clean about an unread body
+
+A 2xx this page cannot read is **unknown**, whether the body failed to parse or
+parsed into something unrecognised. Both verbs, one rule.
+
+The argument for calling the unparseable case clean was that `writeActionResult`
+answers 2xx only for a provably clean result, so a truncated body meant this server
+was cut off mid-write. A proxy, a captive portal or a TLS interceptor can answer
+2xx with an unparseable body too, and nothing on the client tells them apart — so
+the inference does not hold, and the classification was getting *safer as the
+evidence got worse*: a body that parsed into something unrecognised was already
+treated as unknown.
+
+Erring this way files a report for a deploy that was fine, which costs a wasted
+look at the Deployments page. Erring the other way is a green tick over an apply
+that may be running and billing, with no report anywhere.
+
+### The confirmation refuses a click it knows will be refused
+
+`preview.already_deploying` disables the confirm button, not only this tab's own
+`deploying`. The 423 would have come back regardless — but the round trip is not
+free: `beginDeploy` succeeds because this tab has no entry, so for its whole
+duration the panel labelled as this deploy streams the other apply's progress, and
+the refusal then discards it.

@@ -2070,13 +2070,12 @@ test('re-selecting the scenario you are on does not discard its deploy', async (
   await expect(page.getByTestId('deploy-outcome')).toContainText('Deployed. It is listed');
 });
 
-// `writeActionResult` answers 2xx only for a PROVABLY clean deploy, so
-// a 200 whose body a proxy truncated is not an unknown outcome — it is
-// a clean one whose details were lost. Treating it as unknown filed a
-// permanent, hand-dismissible leak report for the single response shape
-// that guarantees nothing was left behind, and called it "deploy
-// failed: 200".
-test('a clean deploy whose body is unreadable does not raise a leak report', async ({ page }) => {
+// A 2xx whose body cannot be read proves nothing: `writeActionResult`
+// answers 2xx only for a clean result, but a proxy or a captive portal
+// can answer 2xx too, and nothing here tells them apart. What it must
+// NOT do is call it "deploy failed: 200" — naming a success status as a
+// failure — or assert clean about a body it never parsed.
+test('an unreadable success is reported as unknown, not as clean', async ({ page }) => {
   await page.route('**/api/deployments/preview**', (route) =>
     route.fulfill({
       status: 200,
@@ -2103,10 +2102,15 @@ test('a clean deploy whose body is unreadable does not raise a leak report', asy
   await page.getByTestId('scenario-deploy').click();
   await page.getByTestId('deploy-confirm-go').click();
 
+  // A 2xx this page cannot read is UNKNOWN, not clean: a proxy can
+  // answer 2xx with an unparseable body too, so "the parse failed,
+  // therefore it was our server mid-write" does not hold. Erring here
+  // costs a wasted look at the Deployments page; erring the other way
+  // is a green tick over an apply that may be running and billing.
   const outcome = page.getByTestId('deploy-outcome');
-  await expect(outcome).toContainText('could not be read');
+  await expect(outcome).toContainText('did not finish cleanly');
   await expect(outcome).not.toContainText('failed: 200');
-  await expect(page.getByTestId('pending-deploy-report')).toHaveCount(0);
+  await expect(page.getByTestId('pending-deploy-report')).toContainText('could not be read');
 });
 
 // A 2xx that PARSED into something unrecognised did not come from
@@ -2279,4 +2283,38 @@ test('two deploys in flight do not overwrite each other endings', async ({ page 
 
   // It must not have taken this page's ending with it.
   await expect(page.getByTestId('deploy-outcome')).toContainText('Deployed. It is listed');
+});
+
+// The warning says a second deploy "will be refused", and it would be —
+// but the round trip is not free. `beginDeploy` succeeds because THIS
+// tab has no entry, so for its whole duration the store absorbs the
+// other apply's progress lines and the panel labelled as this deploy
+// streams somebody else's output; the 423 then arrives and the log is
+// discarded. The reader watched minutes of output attributed to a
+// deploy that never started.
+test('the confirm button is refused when another deploy is already applying', async ({ page }) => {
+  await page.route('**/api/deployments/preview**', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        scenario: 'web-app-paris',
+        deployable: true,
+        expires_at: null,
+        internet_facing: false,
+        deploy_allowed: true,
+        already_live: [],
+        already_live_unknown: false,
+        already_deploying: true,
+        cost: { components: [], eur_per_hour: 0, unpriced: [], complete: true, modelled: true }
+      })
+    })
+  );
+
+  await page.goto('/scenarios/training/web-app-paris');
+  await page.getByTestId('scenario-deploy').click();
+
+  // The warning is shown, and the button does not invite the click.
+  await expect(page.getByTestId('deploy-warning').first()).toContainText('being deployed right now');
+  await expect(page.getByTestId('deploy-confirm-go')).toBeDisabled();
 });

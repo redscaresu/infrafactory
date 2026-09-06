@@ -29,14 +29,19 @@ export class DeployError extends Error {
    *                    anything ran. Nothing exists, and any progress
    *                    lines collected while waiting were somebody
    *                    else's apply.
-   *   - "clean"     -- the server answered a success status whose body
-   *                    could not be read. `writeActionResult` answers
-   *                    2xx only for a PROVABLY clean deploy, so nothing
-   *                    was left behind; the log is still ours.
-   *   - "unknown"   -- anything else. The apply may be running right
+   *   - "unknown"   -- anything else, INCLUDING a 2xx whose body this
+   *                    page cannot read. The apply may be running right
    *                    now, and a report has to be filed.
    *
-   * One value, three states, because two booleans is what this kept
+   * There was briefly a third state, "clean", for a 2xx whose body
+   * failed to parse -- on the argument that `writeActionResult` answers
+   * 2xx only for a provably clean result, so a truncated body meant
+   * this server was cut off mid-write. A proxy can answer 2xx with an
+   * unparseable body too, and nothing here can tell them apart, so it
+   * asserted clean about a body it had not read. Removed rather than
+   * left as a state nothing produces.
+   *
+   * One value rather than two booleans, because that is what this kept
    * turning into: "did the server refuse?" and "may this have created
    * something?" are different questions, and a caller that has to
    * combine them gets one of them wrong.
