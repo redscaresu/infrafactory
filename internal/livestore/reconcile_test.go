@@ -106,3 +106,59 @@ func TestReconcileReportsBothDirectionsInAStableOrder(t *testing.T) {
 		[]string{got.Vanished[0].ID, got.Vanished[1].ID})
 	assert.Equal(t, 1, got.Accounted)
 }
+
+// `live teardown` destroys the project and THEN marks the record
+// released, so a released record naming a project the API no longer
+// knows is the success path -- not a disagreement.
+//
+// Without this, every successful teardown left `live reconcile`
+// permanently non-zero, reporting "the record outlived its
+// infrastructure" about the one case where that is precisely what
+// should have happened. Found by running the S156e validation deploy
+// end to end: no unit test covered a released record, because none of
+// them tore one down first.
+func TestAReleasedRecordIsNotAVanishedOne(t *testing.T) {
+	released := Deployment{
+		ID: "dep-released", Scenario: "web-unversioned-paris",
+		ProjectID: "45d19551-73b4-4e56-b9af-d8653546a65e", State: StateReleased,
+	}
+	stillLive := Deployment{
+		ID: "dep-live", Scenario: "web-unversioned-paris",
+		ProjectID: "11111111-2222-3333-4444-555555555555", State: StateLive,
+	}
+
+	// Neither project exists any more: one because teardown destroyed
+	// it, one because something else did.
+	got := Reconcile(nil, []Deployment{released, stillLive})
+
+	require.Len(t, got.Vanished, 1,
+		"a released record's project is supposed to be gone")
+	assert.Equal(t, "dep-live", got.Vanished[0].ID)
+	assert.False(t, got.Clean(), "the live one is still a real disagreement")
+}
+
+func TestAReleasedRecordAloneReconcilesClean(t *testing.T) {
+	got := Reconcile(nil, []Deployment{{
+		ID: "dep-released", ProjectID: "45d19551", State: StateReleased,
+	}})
+
+	assert.True(t, got.Clean(),
+		"a torn-down deployment must not leave reconcile red for the rest of time")
+}
+
+// The two released cases are opposites and the ordering is what keeps
+// them apart: project GONE is the success path, project ALIVE is
+// ADR-0024's unreclaimable case. Skipping released records outright
+// would silence the expensive one.
+func TestAReleasedRecordWhoseProjectSurvivedIsStillAccountedFor(t *testing.T) {
+	projects := []StampedProject{{ID: "proj-a", Name: "if-run-x", Ours: true}}
+
+	got := Reconcile(projects, []Deployment{
+		reconcileDeployment("dep-released-gone", "proj-vanished", StateReleased),
+		reconcileDeployment("dep-released-alive", "proj-a", StateReleased),
+	})
+
+	assert.Empty(t, got.Vanished, "a destroyed project is not a disagreement")
+	assert.Equal(t, 1, got.Accounted, "but a surviving one is still explained by its record")
+	assert.Empty(t, got.Unrecorded, "so it is not reported as an unexplained project")
+}

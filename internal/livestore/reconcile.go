@@ -20,9 +20,13 @@ type Reconciliation struct {
 	// running and nothing is going to reap it.
 	Unrecorded []UnrecordedProject
 
-	// Vanished are records naming projects the API says do not exist.
-	// Harmless to the bill, and not harmless: they make `live ls` a lie,
-	// and a teardown against one can only fail.
+	// Vanished are LIVE records naming projects the API says do not
+	// exist. Harmless to the bill, and not harmless: they make `live ls`
+	// a lie, and a teardown against one can only fail.
+	//
+	// Released records are excluded: teardown destroys the project and
+	// then marks the record released, so a released record whose project
+	// is gone is the success path.
 	Vanished []Deployment
 
 	// Accounted is how many records matched a project that exists. Worth
@@ -99,7 +103,30 @@ func Reconcile(projects []StampedProject, deployments []Deployment) Reconciliati
 			continue
 		}
 		if live[d.ProjectID] {
+			// Counted whatever its state. A RELEASED record whose
+			// project still exists is ADR-0024's unreclaimable case --
+			// teardown said released and the project outlived it -- and
+			// the store explains that project, so it must not be
+			// reported as unrecorded.
 			out.Accounted++
+			continue
+		}
+		if d.State == StateReleased {
+			// Gone, and SUPPOSED to be gone: teardown destroys the
+			// project and then marks the record released, so this is
+			// the success path rather than a disagreement.
+			//
+			// Without it every successful teardown left `live
+			// reconcile` permanently red, reporting "the record
+			// outlived its infrastructure" about the one case where
+			// that is exactly what should have happened. Found by
+			// running the S156e validation deploy end to end; no unit
+			// test reached it, because none of them tore one down
+			// first.
+			//
+			// Ordered AFTER the accounted check on purpose: skipping
+			// released records outright would drop the unreclaimable
+			// case above, which is the expensive one.
 			continue
 		}
 		out.Vanished = append(out.Vanished, d)

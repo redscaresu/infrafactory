@@ -2,6 +2,52 @@
 
 Last updated: 2026-09-06
 
+## 2026-09-06 — S156e: the validation run, and what it found
+
+**The experiment reached step 3 of 7 and stopped there, as the plan said it should.**
+Negative on the bar the arc set itself, which the plan is explicit closes it as
+honestly as a positive result. Full write-up:
+[docs/status/s156e-validation-run.md](docs/status/s156e-validation-run.md).
+
+`web-unversioned-paris` deployed to real Scaleway: apply succeeded in 33s, the run
+created its own project before the apply (ADR-0025 is live on main), the load
+balancer served, the `http_probe` criterion PASSED, the orphan sweep was clean —
+and `live observe` reported the record claims `nginx:1.27` while `/` never mentions
+it. Every signal short of the live probe called it green, which is the class the
+arc exists for.
+
+**Promotion passed.** Three consecutive probes cleared the gate, and it correctly
+noted "version UNCONFIRMED, so nothing may be blamed on a tag".
+
+**Attribution failed.** `live learn` filed the rule under `scaleway_lb_ip` — by
+design, since attribution uses the resource the probed ADDRESS resolved from, and
+the address is the load balancer's. So a lesson about a container image is keyed to
+a load balancer IP: the generator will surface it for LB IPs and never for the
+instance whose `user_data` is the only place a remedy could go. It is also
+descriptive, not prescriptive. The gap is structural — a live probe observes an
+address, and attribution by address cannot reach the resource that caused what was
+observed — so anything built on "live observation feeds the corpus" should assume it
+is open. The rule was deliberately NOT committed to the corpus.
+
+**A defect the run found that no review would.** `live teardown` destroys the
+project and then marks the record released, so **every successful teardown left
+`live reconcile` permanently non-zero** — reporting "the record outlived its
+infrastructure" about the one case where that is exactly what should happen. Fixed,
+with the ordering that keeps the two released cases apart: a released record whose
+project still EXISTS is ADR-0024's unreclaimable case and stays Accounted; only one
+whose project is GONE is the success path. An existing test caught the first version
+of the fix, which skipped released records outright and would have silenced the
+expensive case.
+
+**An earlier design for the run was wrong and was caught before spending anything.**
+Manufacturing a missing *health path* would have marked the LB backend down and
+failed the `http_probe` criterion — a terraform-visible failure, not the live-only
+class. Established by reading `real_probe.go` and `loadbalancer.tf` rather than by
+running it.
+
+**Cost:** one DEV1-S and one LB-S for about four minutes, under €0.01. Teardown
+clean, including an `auto_created_purge` that removed the `project_default` security
+group Scaleway creates and Terraform never owns — D6, caught and named.
 ## 2026-09-06 — S163e-fixes (round twenty-six): the fake was wrong about the thing it faked
 
 **10 findings, 8 accepted, 2 declined** (`docs/review-passes/pass161.md`).
