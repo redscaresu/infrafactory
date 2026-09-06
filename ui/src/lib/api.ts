@@ -1,4 +1,9 @@
 import { fetchPitfalls, fetchSavePitfalls } from "$lib/pitfalls-api.js";
+// Plain JS, so `node --test` can reach them. These four decide whether
+// a reader is told "nothing was created" or "resources may still be
+// running" -- the most consequential judgement in this slice -- and
+// living in a .ts file put them beyond every unit test.
+import { DeployError, isActionResult, readJSON, startedNothing } from "$lib/deploy-response.js";
 import type {
   Pitfall,
   PitfallsResponse,
@@ -23,15 +28,29 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (!res.ok) {
     const ctype = res.headers.get("content-type") || "";
     if (ctype.includes("application/json")) {
-      const payload = (await res.json()) as { error?: string };
-      throw new Error(payload.error || `request failed: ${res.status}`);
+      // `readJSON`, not `res.json()`. A truncated body -- a proxy
+      // giving up, a server killed mid-write -- throws a SyntaxError
+      // that escapes as the error message, so a page renders
+      // "Unexpected end of JSON input" where it means to render what
+      // went wrong. The deploy path was hardened for this and left the
+      // helper every other endpoint uses unguarded.
+      const payload = (await readJSON(res)).value as { error?: string } | null;
+      throw new Error(payload?.error || `request failed: ${res.status}`);
     }
     const text = await res.text();
     throw new Error(text || `request failed: ${res.status}`);
   }
   const ctype = res.headers.get("content-type") || "";
   if (ctype.includes("application/json")) {
-    return (await res.json()) as T;
+    // Guarded on the SUCCESS path too. Hardening only the error branch
+    // left the defect the comment above describes alive on every 2xx: a
+    // truncated 200 threw a SyntaxError that surfaced as the estate
+    // page's load error and the scenario page's preview error, reading
+    // "Unexpected end of JSON input" where it meant to say what went
+    // wrong.
+    const parsed = await readJSON(res);
+    if (!parsed.ok) throw new Error(`${path}: the response could not be read as JSON`);
+    return parsed.value as T;
   }
   return (await res.text()) as T;
 }
@@ -57,14 +76,59 @@ export const api = {
       body: JSON.stringify(ttl ? { scenario, ttl } : { scenario })
     });
     const ctype = res.headers.get("content-type") || "";
-    if ((res.ok || res.status === 409) && ctype.includes("application/json")) {
-      return (await res.json()) as ActionResult;
-    }
+    // 409 carries an ActionResult from a deploy that RAN and could not
+    // prove itself clean. A refusal carries an error and must NOT be
+    // parsed as one -- the body decides, not the status.
     if (ctype.includes("application/json")) {
-      const payload = (await res.json()) as { error?: string };
-      throw new Error(payload.error || `deploy failed: ${res.status}`);
+      // Parsed defensively. A truncated body -- a proxy giving up, a
+      // server killed mid-write -- makes `res.json()` throw a
+      // SyntaxError, which is not a DeployError, so the caller loses
+      // the startedNothing classification the STATUS had already
+      // settled and shows a JavaScript parser message on the screen
+      // this whole slice exists to make trustworthy.
+      const parsed = await readJSON(res);
+      const body = parsed.value;
+      if ((res.ok || res.status === 409) && isActionResult(body)) return body;
+      // `parsed.ok` is the discriminator, and it is the reason
+      // `readJSON` returns a pair. A body that FAILED TO PARSE means
+      // the server was cut off mid-write, so the 2xx it had already
+      // committed to is this server's word and the result was clean. A
+      // body that parsed into something that is not an ActionResult
+      // means something ELSE answered -- a captive portal, a proxy, a
+      // dev-server fallback -- and its status proves nothing about a
+      // deploy that may never have been dispatched.
+      // A 2xx this page cannot read is UNKNOWN, whether the body failed
+      // to parse or parsed into something unrecognised.
+      //
+      // This wavered twice. The argument for calling the unparseable
+      // case "clean" was that `writeActionResult` answers 2xx only for
+      // a provably clean result, so a truncated body means this server
+      // was cut off mid-write. But a proxy, a captive portal or a TLS
+      // interceptor can answer 2xx with an unparseable body too, and
+      // nothing here can tell those apart -- so "the parse failed,
+      // therefore it was our server" does not hold.
+      //
+      // The rule that settles it is the one `tearDownDeployment`
+      // already follows: never assert clean about a body this code has
+      // not read. Erring this way files a report for a deploy that was
+      // fine, which is a wasted look at the Deployments page. Erring
+      // the other way is a green tick over an apply that may be running
+      // and billing, with no report anywhere.
+      if (res.ok) {
+        throw new DeployError(
+          parsed.ok
+            ? "the server answered success with something this page does not recognise, so what happened is unknown"
+            : "the server answered success but its result could not be read, so what happened is unknown",
+          "unknown"
+        );
+      }
+      throw new DeployError(
+        (body as { error?: string })?.error || `deploy failed: ${res.status}`,
+        startedNothing(body) ? "refused" : "unknown"
+      );
     }
-    throw new Error((await res.text()) || `deploy failed: ${res.status}`);
+    // No JSON body at all, so no claim: unknown.
+    throw new DeployError((await res.text()) || `deploy failed: ${res.status}`, "unknown");
   },
   // Not `request`, deliberately. A teardown that could not prove the
   // account clean answers 409 WITH a full ActionResult -- the per-stage
@@ -76,12 +140,38 @@ export const api = {
       method: "DELETE"
     });
     const ctype = res.headers.get("content-type") || "";
-    if ((res.ok || res.status === 409) && ctype.includes("application/json")) {
-      return (await res.json()) as ActionResult;
-    }
+    // Same discriminator as deploy, for the same reason: a 409 that did
+    // not come from `writeActionResult` has no `clean` field, and
+    // parsing it as a result renders "resources may still be running"
+    // over a request that never reached the store.
     if (ctype.includes("application/json")) {
-      const payload = (await res.json()) as { error?: string };
-      throw new Error(payload.error || `teardown failed: ${res.status}`);
+      const parsed = await readJSON(res);
+      const body = parsed.value;
+      if ((res.ok || res.status === 409) && isActionResult(body)) return body;
+      // NOT treated as clean, and the asymmetry with `deployScenario`
+      // is deliberate -- an earlier round made them symmetrical and it
+      // was wrong.
+      //
+      // "Clean" means different things for the two verbs. For a deploy
+      // it means nothing was left behind, and the client uses it only
+      // to decide NOT to raise a leak alarm. For a teardown it is
+      // ADR-0024's central claim: the account is provably empty. That
+      // must never be asserted about a body this code has not read --
+      // synthesising `{clean: true}` from a status manufactures exactly
+      // the proof the rule exists to demand.
+      //
+      // So it is reported honestly: not a failure, not a success.
+      if (res.ok) {
+        throw new Error(
+          parsed.ok
+            ? "the teardown reported success in a form this page does not recognise, so the account is not proven clean"
+            : "the teardown reported success, but its result could not be read, so the account is not proven clean"
+        );
+      }
+      if (!parsed.ok) {
+        throw new Error(`teardown answered ${res.status}, but its result could not be read`);
+      }
+      throw new Error((body as { error?: string })?.error || `teardown failed: ${res.status}`);
     }
     throw new Error((await res.text()) || `teardown failed: ${res.status}`);
   },
@@ -130,3 +220,5 @@ export const api = {
   savePitfalls: (provider: string, pitfalls: Pitfall[]): Promise<SavePitfallsResponse> =>
     fetchSavePitfalls(provider, pitfalls) as Promise<SavePitfallsResponse>
 };
+
+export { DeployError };

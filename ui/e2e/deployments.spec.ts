@@ -43,6 +43,11 @@ async function serveEstate(page, payload) {
       body: JSON.stringify({
         schema: 'infrafactory.api.deployments.v1',
         teardown_allowed: false,
+        // The server always sends this. An absent field means "we were
+        // not told what is applying", which deliberately withholds the
+        // page's only permitted emptiness claim -- so a fixture that
+        // omitted it was testing that path by accident.
+        deploying: [],
         ...payload
       })
     })
@@ -352,9 +357,86 @@ test.describe('Deployments estate page', () => {
     expect(confirmed).not.toBe(unconfirmed);
   });
 
+  // A deploy that is applying has no record yet -- registerDeployment
+  // runs after the apply returns -- so it cannot appear in the table.
+  // Without this the page meant to answer "what is running" is silent
+  // about the thing most actively running.
+  test('a deploy in progress is shown even though it has no record yet', async ({ page }) => {
+    await serveEstate(page, { deployments: [], unreadable: [], deploying: ['web-app-paris'] });
+    await page.goto('/deployments');
+
+    // The COUNT belongs to the summary line; the banner names what is
+    // applying and says why it is not in the table. Rendering the count
+    // in both put the same sentence on screen twice.
+    await expect(page.getByTestId('estate-summary')).toContainText('1 deploy in progress');
+
+    const banner = page.getByTestId('estate-deploying');
+    await expect(banner).toContainText('Applying now');
+    await expect(banner).toContainText('web-app-paris');
+    await expect(banner).toContainText('no record of its own yet');
+  });
+
+  // Redeploying is deliberately allowed, so the table can hold an
+  // EARLIER deployment of the scenario that is applying. The banner
+  // used to say it "does not appear below" -- an absence the reader
+  // could see was untrue, on the page whose whole thesis is never
+  // saying something false about the estate.
+  test('the in-flight banner does not deny a row the reader can see', async ({ page }) => {
+    await serveEstate(page, {
+      deployments: [
+        {
+          id: 'dep-old',
+          scenario: 'web-app-paris',
+          state: 'live',
+          project_id: 'p-1',
+          health: { status: 'healthy', version: 'confirmed' },
+          time_to_live_seconds: 3600
+        }
+      ],
+      unreadable: [],
+      deploying: ['web-app-paris']
+    });
+    await page.goto('/deployments');
+
+    const banner = page.getByTestId('estate-deploying');
+    await expect(banner).not.toContainText('does not appear below');
+    await expect(banner).toContainText('earlier deployment');
+  });
+
+  test('nothing deploying shows no banner', async ({ page }) => {
+    await serveEstate(page, { deployments: [], unreadable: [], deploying: [] });
+    await page.goto('/deployments');
+
+    await expect(page.getByTestId('estate-deploying')).toHaveCount(0);
+  });
+
   test('the page is reachable from the sidebar', async ({ page }) => {
     await page.goto('/');
     await page.getByRole('link', { name: 'Deployments' }).click();
     await expect(page).toHaveURL(/\/deployments/);
   });
+});
+
+
+// The server always sends `deploying`. One that predates the field, or a
+// body trimmed by an intermediary, does not -- and reading that as
+// "nothing is applying" would license "Nothing is deployed." on an
+// estate that may be busy creating something.
+test('an estate that did not say what is applying is not called empty', async ({ page }) => {
+  await page.route('**/api/deployments', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        schema: 'infrafactory.api.deployments.v1',
+        teardown_allowed: false,
+        deployments: [],
+        unreadable: []
+      })
+    })
+  );
+  await page.goto('/deployments');
+
+  await expect(page.getByTestId('estate-summary')).not.toHaveText('Nothing is deployed.');
+  await expect(page.getByTestId('estate-empty')).toHaveCount(0);
 });

@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -541,4 +542,35 @@ func TestDeployCreatesTheProjectInsideTheInterruptGuard(t *testing.T) {
 	require.NotNil(t, sawCtx)
 	assert.Error(t, sawCtx.Err(),
 		"project creation is handed the guarded context, so an interrupt reaches it")
+}
+
+// A failed deploy is not the same as an unrecorded one.
+//
+// `deploy` registers from whatever the state shows, whether or not the
+// apply succeeded, so a half-failed apply usually leaves a record --
+// with a TTL, on the estate page, reapable. The id travels in the
+// output so a caller can say "tear down dep-x" instead of raising a
+// permanent alarm about resources something else already tracks.
+//
+// Carried only when registration SUCCEEDED, which is the same condition
+// the recovery line keys off: naming a record that does not exist sends
+// an operator to a "no such file or directory".
+func TestDeployOutputNamesTheRecordOnlyWhenOneWasWritten(t *testing.T) {
+	// The RULE, not `omitempty`. The previous version of this test
+	// marshalled two hand-built structs, so deleting the condition and
+	// naming the id unconditionally left it green -- and the CLI would
+	// then point an operator at `live teardown dep-x` for a record that
+	// registration had failed to write.
+	assert.Equal(t, "dep-web-app-paris-1",
+		recordedDeploymentID(true, "dep-web-app-paris-1"))
+	assert.Equal(t, "", recordedDeploymentID(false, "dep-web-app-paris-1"),
+		"a record that does not exist cannot be torn down, and naming it sends somebody to a 'no such file'")
+
+	// And an empty id must not reach the wire as a field a client could
+	// read as a deployment.
+	raw, err := json.Marshal(MachineOutput{Schema: "x", Result: OutputResult{
+		Deployment: recordedDeploymentID(false, "dep-web-app-paris-1"),
+	}})
+	require.NoError(t, err)
+	assert.NotContains(t, string(raw), `"deployment"`)
 }
