@@ -369,12 +369,40 @@ func TestPreviewSaysWhenTheEstateCouldNotBeFullyRead(t *testing.T) {
 		"an undecodable record could be a deployment of THIS scenario and would never match")
 }
 
-// A server with no lister never looked, so it must not claim it did.
+// A server with no lister never looked, so it must not claim it did --
+// and must not claim it TRIED and failed either.
+//
+// `AlreadyLiveUnknown: true` was the first answer, and it is the wrong
+// half-truth: the client renders that as "The live estate could not be
+// fully read", blaming a read failure on a server that never had a live
+// store, and pointing at a Deployments page that answers 501. An absent
+// `already_live` is the honest signal, and the client tells the two
+// apart -- see ESTATE_NOT_REPORTED beside ESTATE_UNREADABLE.
 func TestPreviewWithNoListerDoesNotClaimNothingIsDeployed(t *testing.T) {
 	got := previewOf(t, ServerConfig{})
 
-	assert.True(t, got.AlreadyLiveUnknown)
-	assert.Empty(t, got.AlreadyLive)
+	assert.Nil(t, got.AlreadyLive,
+		"absent, not empty: an empty list is the claim 'we looked and found none'")
+	assert.False(t, got.AlreadyLiveUnknown,
+		"nothing failed to be read, because nothing was read")
+}
+
+// The two causes must not produce the same body.
+//
+// Both end at "unknown" for the reader, and only one of them is a fault.
+func TestAnUnreadableEstateIsNotTheSameAsNoEstateAtAll(t *testing.T) {
+	failed := previewOf(t, ServerConfig{
+		Deployments: &fakeDeployments{
+			unreadable: []error{errors.New("dep-broken.json: unexpected end of JSON input")},
+		},
+	})
+	absent := previewOf(t, ServerConfig{})
+
+	assert.True(t, failed.AlreadyLiveUnknown, "this server tried and could not")
+	assert.NotNil(t, failed.AlreadyLive, "and it still reports what it did read")
+
+	assert.False(t, absent.AlreadyLiveUnknown, "this server never tried")
+	assert.Nil(t, absent.AlreadyLive)
 }
 
 // A deploy that is APPLYING has no record yet -- registration runs after

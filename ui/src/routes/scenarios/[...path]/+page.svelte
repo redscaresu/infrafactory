@@ -13,7 +13,7 @@
     beginDeploy,
     deploys,
     endDeploy,
-    isDisconnected,
+    connected,
     isRunning,
     useConnector,
     watch as watchDeploys,
@@ -337,10 +337,10 @@
   // A dropped socket and "nothing has happened yet" both produce an
   // empty log, and rendering them the same way tells the reader an apply
   // is quiet when the truth is that it is UNOBSERVED.
-  // `isDisconnected`, not `!isConnected`. A socket that has not opened
-  // yet is neither, and alarming on the negation put the amber warning
-  // over the ordinary connect window.
-  $: streamLost = isDisconnected($deploys);
+  // `=== false`, not falsy. `undefined` is "no claim" -- no socket yet,
+  // or one still opening -- and treating it as lost put the amber
+  // warning over the ordinary connect window.
+  $: streamLost = $connected === false;
 
   /**
    * resetDeployState clears what belongs to THIS page's confirmation

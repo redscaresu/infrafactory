@@ -58,6 +58,25 @@ export const deploys = writable({});
  */
 export const reports = writable({});
 
+/**
+ * connected is the shared socket's state, in a store of its OWN.
+ *
+ * Three states: `undefined` is no claim (no socket, or one still
+ * opening), `true` is open, `false` is a connection this tab had and
+ * lost. Only `false` is worth alarming about — a page that treats "not
+ * yet open" as "cannot see it" tells the reader an apply is unobserved
+ * during the ordinary connect window.
+ *
+ * It used to be a `__connected` key inside `deploys`, which put a
+ * boolean in a map of deploy entries keyed by scenario name. Scenario
+ * names come from YAML, so `beginDeploy("__connected")` overwrote the
+ * flag with a deploy entry — and `releaseSocket`'s "is anything
+ * running?" scan skipped that key, so the socket closed under a deploy
+ * that was still running and its log froze. A separate store removes
+ * the collision rather than reserving a name against it.
+ */
+export const connected = writable(undefined);
+
 let socket;
 let watchers = 0;
 let generation = 0;
@@ -144,9 +163,9 @@ function ensureSocket() {
         return { ...all, [scenario]: appendProgress(entry, msg.data.line) };
       });
     },
-    (connected) => {
+    (connectedFlag) => {
       if (mine !== generation) return;
-      deploys.update((all) => ({ ...all, __connected: connected }));
+      connected.set(connectedFlag);
     }
   );
 }
@@ -156,32 +175,30 @@ function releaseSocket() {
   // nobody is looking at its page — otherwise returning to it finds a
   // frozen log.
   const current = get(deploys);
-  const running = Object.keys(current).some((k) => k !== "__connected" && current[k]?.running);
+  const running = Object.keys(current).some((k) => current[k]?.running);
   if (running || watchers > 0) return;
   socket?.();
   socket = undefined;
-  // The key is REMOVED, not set to false.
+  // The generation is bumped HERE too, not only in `ensureSocket`.
   //
   // `connectWS`'s dispose only calls `socket.close()`; `onStatus(false)`
-  // arrives later via `onclose`, and the next `ensureSocket` bumps the
-  // generation, which silences that late callback deliberately. So
-  // `__connected` kept its stale `true` across the gap, and a deploy
-  // started before the new socket opened rendered "Starting…" over a
-  // stream nothing was reading.
+  // arrives later via `onclose`. Without a bump that late callback is
+  // still the current generation, so it wrote `false` immediately after
+  // the reset below and put the state back exactly where it should not
+  // be. Bumping makes disposal silence its own socket, which is what
+  // "disposed" has to mean.
+  generation += 1;
+
+  // Reset to "no claim", NOT to false.
   //
-  // Setting `false` here fixed that and broke the mirror image: leaving
-  // the section and coming back put a deploy started before `onopen`
-  // under "Not receiving progress — this page cannot see it", over a
-  // stream that was about to work. Disposing is OUR choice, not a lost
-  // connection, and the flag has three states for that reason: absent
-  // is "no claim" (no socket, or one still opening), `true` is open,
-  // and `false` is a connection we HAD and lost. Only the last one is
-  // worth alarming about.
-  deploys.update((all) => {
-    const next = { ...all };
-    delete next.__connected;
-    return next;
-  });
+  // Three states, because two cannot carry this: `undefined` is no
+  // claim (no socket, or one still opening), `true` is open, `false` is
+  // a connection we HAD and lost. Only the last is worth alarming
+  // about. Keeping a stale `true` made a fresh deploy render "Starting…"
+  // over a stream nothing was reading; setting `false` made the ordinary
+  // reconnect window render as a lost connection. Disposing is our own
+  // choice and claims neither.
+  connected.set(undefined);
 }
 
 /** watch keeps the shared socket alive while a page is mounted. */
@@ -361,21 +378,7 @@ export function isRunning(all, scenario) {
   return all?.[scenario]?.running === true;
 }
 
-/** isConnected distinguishes "no output yet" from "we cannot see it". */
-export function isConnected(all) {
-  return all?.__connected === true;
-}
 
-/**
- * isDisconnected reports a connection this tab HAD and lost.
- *
- * Not the negation of `isConnected`: a socket that has not opened yet
- * is neither. Alarming on the negation told the reader an apply was
- * unobserved during the ordinary connect window.
- */
-export function isDisconnected(all) {
-  return all?.__connected === false;
-}
 
 /**
  * pendingReports lists every deploy report this tab is still holding.

@@ -161,7 +161,12 @@ func deploymentsHandler(state *serverState) http.HandlerFunc {
 
 		deployments, unreadable, err := state.deployments.List()
 		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, err.Error())
+			// A STABLE message: an unreadable store root yields an
+			// *fs.PathError, and this body is rendered verbatim on the
+			// Deployments page.
+			state.logDetail("live estate could not be listed: %v", err)
+			writeJSONError(w, http.StatusInternalServerError,
+				"this server could not read its live deployments; see the server log")
 			return
 		}
 
@@ -239,7 +244,7 @@ func deploymentActionHandler(state *serverState) http.HandlerFunc {
 			ctx, cancel := destructiveContext(r)
 			defer cancel()
 			result, err := state.deploymentActor.Reap(ctx)
-			writeActionResult(w, result, err)
+			writeActionResult(w, state, result, err)
 			return
 		}
 
@@ -265,7 +270,7 @@ func deploymentActionHandler(state *serverState) http.HandlerFunc {
 			writeJSONError(w, http.StatusNotFound, "no such deployment")
 			return
 		}
-		writeActionResult(w, result, err)
+		writeActionResult(w, state, result, err)
 	}
 }
 
@@ -277,9 +282,27 @@ func deploymentActionHandler(state *serverState) http.HandlerFunc {
 // and a page rendering a green tick over "the state file has vanished
 // and the resources may still be running" is exactly the false green
 // this project exists to avoid.
-func writeActionResult(w http.ResponseWriter, result ActionResult, err error) {
+func writeActionResult(w http.ResponseWriter, state *serverState, result ActionResult, err error) {
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		// The RESULT wins when there is one, even alongside an error.
+		//
+		// Discarding it threw away the `deployment` id, so a body with
+		// no `clean` key reached the client, which reads that as "not an
+		// ActionResult" and files a permanent "it may have created
+		// resources that nothing else is tracking" report -- for a
+		// deployment that WAS registered and is reapable from the estate
+		// page. The stronger claim is the one carrying an id.
+		if result.Deployment != "" || len(result.Steps) > 0 || len(result.Failures) > 0 {
+			state.logDetail("action returned a result alongside an error: %v", err)
+			writeJSON(w, http.StatusConflict, result)
+			return
+		}
+		// A STABLE message otherwise, for the same reason as every other
+		// branch on this route: an *fs.PathError here puts an absolute
+		// server path into a body a page renders verbatim.
+		state.logDetail("action failed: %v", err)
+		writeJSONError(w, http.StatusInternalServerError,
+			"this server could not complete the action; see the server log")
 		return
 	}
 	status := http.StatusOK
@@ -511,7 +534,7 @@ func deployHandler(state *serverState) http.HandlerFunc {
 			return
 		}
 
-		writeActionResult(w, result, err)
+		writeActionResult(w, state, result, err)
 	}
 }
 

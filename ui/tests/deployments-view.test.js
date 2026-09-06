@@ -377,13 +377,37 @@ test("alreadyLiveWarnings is silent when nothing is live", () => {
 // Each warning carries a KIND, so `deployWarnings` can order the
 // estate-wide caveat below the scenario-specific ones without matching
 // its opening words -- a prefix match made the ordering depend on prose.
+// THREE kinds, because `deployWarnings` has three ranks.
+//
+// A two-way scenario/estate split could not place the in-flight note:
+// filtering `!== "estate"` hoisted it above the unmodelled-cost warning
+// that invalidates every figure printed above it, even though a second
+// deploy is simply refused and costs nothing.
 test("alreadyLiveWarnings tags what each warning is about", () => {
-  const [scenario] = alreadyLiveWarnings({ already_live: ["dep-a"] });
-  assert.equal(scenario.kind, "scenario");
+  const [existing] = alreadyLiveWarnings({ already_live: ["dep-a"] });
+  assert.equal(existing.kind, "live");
 
   const [estate] = alreadyLiveWarnings({ already_live: [], already_live_unknown: true });
   assert.equal(estate.kind, "estate");
   assert.ok(estate.text.startsWith(ESTATE_UNREADABLE), "and the constant builds the text");
+
+  const [inFlight] = alreadyLiveWarnings({ already_live: [], already_deploying: true });
+  assert.equal(inFlight.kind, "deploying");
+});
+
+// The rank that the two-way split got wrong.
+test("an in-flight deploy is warned about BELOW the unmodelled cost", () => {
+  const warnings = deployWarnings({
+    already_live: [],
+    already_live_unknown: false,
+    already_deploying: true,
+    cost: { components: [], eur_per_hour: 0, unpriced: [], complete: true, modelled: false }
+  });
+
+  const cost = warnings.findIndex((w) => w.includes("not modelled here"));
+  const inFlight = warnings.findIndex((w) => w.includes("was being deployed"));
+  assert.ok(cost >= 0 && inFlight >= 0, "both are present");
+  assert.ok(cost < inFlight, "the warning that invalidates the figures comes first");
 });
 
 // The server makes an empty list a CHECKED claim. Reading a missing

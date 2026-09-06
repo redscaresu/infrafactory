@@ -128,7 +128,14 @@ func deployPreviewHandler(state *serverState) http.HandlerFunc {
 				writeJSONError(w, http.StatusNotFound, "scenario not found")
 				return
 			}
-			writeJSONError(w, http.StatusInternalServerError, err.Error())
+			// A STABLE message. The walk carries an *fs.PathError, so
+			// `err.Error()` put an absolute server path into a body the
+			// scenario page renders verbatim as `previewError`. The
+			// deploy handler was hardened for exactly this; the preview
+			// beside it was not.
+			state.logDetail("deploy preview could not resolve %q: %v", name, err)
+			writeJSONError(w, http.StatusInternalServerError,
+				"this server could not read its scenarios; see the server log")
 			return
 		}
 
@@ -142,7 +149,9 @@ func deployPreviewHandler(state *serverState) http.HandlerFunc {
 				writeJSONError(w, http.StatusNotFound, "scenario not found")
 				return
 			}
-			writeJSONError(w, http.StatusInternalServerError, err.Error())
+			state.logDetail("deploy preview could not load %q: %v", name, err)
+			writeJSONError(w, http.StatusInternalServerError,
+				"this server could not read that scenario; see the server log")
 			return
 		}
 
@@ -332,11 +341,18 @@ func liveDeploymentsOf(state *serverState, name string) ([]string, bool) {
 		return out, true
 	}
 	if state.deployments == nil {
-		// No lister, so nothing was checked. Returning (empty, false)
-		// would be the claim this flag exists to forbid -- and the
-		// err != nil branch below gets it right, which is the whole
-		// argument.
-		return out, true
+		// No lister, so nothing was checked -- and the CLIENT is told
+		// that the field is absent rather than that a read failed.
+		//
+		// Returning (empty, false) would be the claim this flag exists
+		// to forbid. But `already_live_unknown: true` is a different
+		// wrong answer: the client renders it as "The live estate could
+		// not be fully read", blaming a failure on a server that never
+		// had a live store, and pointing at a Deployments page that
+		// answers 501. Omitting `already_live` entirely is the honest
+		// signal, and the client already distinguishes it -- see
+		// ESTATE_NOT_REPORTED.
+		return nil, false
 	}
 
 	deployments, unreadable, err := state.deployments.List()

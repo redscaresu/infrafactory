@@ -565,7 +565,14 @@ export function deployWarnings(preview) {
   // docstring says it invalidates the figures above it. Alarm fatigue
   // on the common path is what `dismissReport` exists to avoid.
   const live = alreadyLiveWarnings(preview);
-  warnings.push(...live.filter((w) => w.kind !== "estate").map((w) => w.text));
+  // `kind === "live"` only. `!== "estate"` also hoisted the
+  // already-deploying note, which is the cheapest warning here -- a
+  // second attempt is simply refused -- above the unmodelled-cost line
+  // whose own docstring says it invalidates everything printed above it.
+  // Three ranks need three kinds; the two-way split could not say this,
+  // and the ordering the tests assert held only when `already_live` was
+  // non-empty.
+  warnings.push(...live.filter((w) => w.kind === "live").map((w) => w.text));
 
   if (preview.cost && preview.cost.modelled === false) {
     warnings.push(
@@ -587,7 +594,9 @@ export function deployWarnings(preview) {
   // prefix match made the ordering depend on prose, so rewording the
   // warning (or adding a second estate-wide one) would silently sort it
   // above the unmodelled-cost line that invalidates the figures.
-  warnings.push(...live.filter((w) => w.kind === "estate").map((w) => w.text));
+  warnings.push(
+    ...live.filter((w) => w.kind === "deploying" || w.kind === "estate").map((w) => w.text)
+  );
 
   return warnings;
 }
@@ -696,7 +705,7 @@ export function alreadyLiveWarnings(preview) {
     const ids = live.join(", ");
     warnings.push(
       {
-        kind: "scenario",
+        kind: "live",
         text:
           live.length === 1
             ? `${ids} is already deployed from this scenario. Deploying again creates a SECOND project and a second bill; it does not replace it.${caveat}`
@@ -720,7 +729,7 @@ export function alreadyLiveWarnings(preview) {
   // below an existing deployment rather than above it.
   if (preview?.already_deploying) {
     warnings.push({
-      kind: "scenario",
+      kind: "deploying",
       // Phrased AS OF THE READ. Nothing refreshes this preview while
       // the dialog is open, so the present tense outlived the apply it
       // described -- and the button is no longer disabled on it, which

@@ -2,6 +2,47 @@
 
 Last updated: 2026-09-06
 
+## 2026-09-06 — S163e-fixes (round twenty-six): the fake was wrong about the thing it faked
+
+**10 findings, 8 accepted, 2 declined** (`docs/review-passes/pass161.md`).
+
+Round twenty-five reset the connection flag on disposal so the reconnect
+window would stop rendering as a lost connection. It did not bump
+`generation`. `connectWS`'s dispose only calls `socket.close()`; the
+browser fires `onclose` **on a later task**, and `onclose` calls
+`onStatus(false)` unconditionally — so that late callback was still the
+current generation and wrote `false` back over the reset, reinstating the
+false "Not receiving progress" alarm one task afterwards.
+
+The test could not see it, and its comment said why without noticing: *"A
+dispose that never calls back, exactly like `connectWS`."* The real dispose
+does call back, and it calls back late. Even a synchronous fake would have
+passed, because the reset runs after the dispose returns. The fake now
+defers through `queueMicrotask`, the test awaits, and removing the bump
+fails it.
+
+**The flag also stopped living in the deploys map.** It was a `__connected`
+key among entries keyed by scenario name, and scenario names come from
+YAML — so `beginDeploy("__connected")` overwrote the boolean with a deploy
+entry, while `releaseSocket`'s "is anything running?" scan skipped that key
+and closed the socket under a deploy that was still running. A `connected`
+store of its own removes the collision instead of reserving a name against
+it, and takes both predicates with it.
+
+Three more leaks of the same shape as last round's: the two 500s in
+`deployPreviewHandler` and the estate listing's 500 all wrote `err.Error()`
+into bodies pages render verbatim. And `writeActionResult`'s error branch
+discarded a non-nil result — including the `deployment` id — so a
+registered, reapable deploy reached the client as an unknown that "may have
+created resources nothing is tracking". The result wins now when it carries
+anything.
+
+Declined: persisting `reports` across a reload. Real, but it is a
+durability decision with an ADR behind it — `localStorage` survives a
+reload and not a different machine, and the case that matters has no live
+record by construction. Recorded as a follow-up rather than half-solved in
+a review round.
+
 ## 2026-09-06 — S163e-fixes (round twenty-five): a guard reasoned about, not measured
 
 **11 findings, 9 accepted, 2 declined** (`docs/review-passes/pass159.md`).

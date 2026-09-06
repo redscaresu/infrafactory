@@ -734,3 +734,40 @@ func TestWithheldDetailIsLogged(t *testing.T) {
 		})
 	}
 }
+
+// A result alongside an error is still a result.
+//
+// `writeActionResult` discarded it and answered `{"error": ...}`. That
+// body has no `clean` key, so the client's `isActionResult` is false, so
+// the deploy is reported as "unknown" and a permanent leak report is
+// filed saying it "may have created resources that nothing else is
+// tracking" -- for a deployment that WAS registered, has a TTL, and is
+// reapable from the estate page. The id is the stronger claim.
+func TestAResultSurvivesAnErrorBesideIt(t *testing.T) {
+	srv := deployServer(t, &fakeDeployer{
+		result: ActionResult{Clean: false, Deployment: "dep-x"},
+		err:    errors.New("/Users/someone/live: permission denied"),
+	})
+	rec := postDeploy(t, srv, `{"scenario":"web-app-paris"}`)
+
+	require.Equal(t, http.StatusConflict, rec.Code)
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &payload))
+	_, isResult := payload["clean"]
+	assert.True(t, isResult, "the client discriminates on this key")
+	assert.Equal(t, "dep-x", payload["deployment"],
+		"the id names what to tear down, and nothing else carries it")
+	assert.NotContains(t, rec.Body.String(), "/Users/")
+}
+
+// And a bare error still withholds its internals.
+func TestABareActionErrorDoesNotLeakItsPath(t *testing.T) {
+	srv := deployServer(t, &fakeDeployer{
+		err: errors.New("open /Users/someone/live/dep-x.json: permission denied"),
+	})
+	rec := postDeploy(t, srv, `{"scenario":"web-app-paris"}`)
+
+	require.Equal(t, http.StatusInternalServerError, rec.Code)
+	assert.NotContains(t, rec.Body.String(), "/Users/")
+	assert.Contains(t, rec.Body.String(), "see the server log")
+}

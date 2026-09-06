@@ -25,7 +25,7 @@ function cleanup(...scenarios) {
   }
 }
 
-import { isConnected, isRunning } from "../src/lib/deploy-store.js";
+import { isRunning } from "../src/lib/deploy-store.js";
 
 // The two questions the page asks, answered from state that outlives it.
 test("isRunning is true only while a deploy of that scenario is in flight", () => {
@@ -42,10 +42,23 @@ test("isRunning is false once a deploy has finished", () => {
 });
 
 // "No output yet" and "we cannot see it" must not render the same way.
-test("isConnected reports the socket rather than the absence of lines", () => {
-  assert.equal(isConnected({ __connected: true }), true);
-  assert.equal(isConnected({ __connected: false }), false);
-  assert.equal(isConnected({}), false, "unknown is not connected");
+// The three states, at the boundary the amber warning is read from.
+//
+// `undefined` is not "disconnected". A socket that has not opened yet is
+// neither open nor lost, and rendering the connect window as a lost
+// connection is what the third state exists to prevent.
+test("the connection has three states, and only one of them alarms", async () => {
+  const { connected } = await import("../src/lib/deploy-store.js");
+
+  connected.set(undefined);
+  assert.equal(get(connected) === true, false, "not open");
+  assert.equal(get(connected) === false, false, "and not lost either");
+
+  connected.set(true);
+  assert.equal(get(connected) === true, true);
+
+  connected.set(false);
+  assert.equal(get(connected) === false, true, "had one and lost it");
 });
 
 // The socket wiring, which is the part most worth testing and was the
@@ -192,22 +205,37 @@ test("a refused deploy hands its borrowed lines back rather than filing them", a
 
 // The sentinel is a boolean, not an entry. A keyed lookup makes it
 // unreachable by construction; the scan needed an explicit skip.
-test("the connection sentinel is never mistaken for a deploy", async () => {
-  const { deploys, useConnector, watch } = await import("../src/lib/deploy-store.js");
+// A scenario may be CALLED `__connected`, and nothing special happens.
+//
+// The connection flag used to live in this map under that key, so
+// `beginDeploy("__connected")` overwrote a boolean with a deploy entry
+// -- and `releaseSocket`'s "is anything running?" scan skipped the key,
+// so the socket closed under a deploy that was still running and its log
+// froze. Scenario names come from YAML, so this was operator-reachable.
+// The flag has its own store now, which removes the collision instead of
+// reserving a name against it.
+test("a scenario named like the old sentinel is just a deploy", async () => {
+  const { deploys, connected, useConnector, watch, beginDeploy, endDeploy } = await import(
+    "../src/lib/deploy-store.js"
+  );
 
   let onMessage;
   let onConnected;
-  useConnector((handler, connected) => {
+  useConnector((handler, status) => {
     onMessage = handler;
-    onConnected = connected;
+    onConnected = status;
     return () => {};
   });
 
   const stop = watch();
   onConnected(true);
+  assert.equal(beginDeploy("__connected"), true);
   onMessage({ type: "deploy_progress", data: { subject: "__connected", line: "x" } });
 
-  assert.equal(get(deploys).__connected, true, "still a boolean, not an entry with a log");
+  assert.deepEqual(get(deploys).__connected.progress, ["x"], "an ordinary deploy entry");
+  assert.equal(get(connected), true, "and the connection is untouched by it");
+
+  endDeploy("__connected", { ok: true, mayHaveCreated: false, message: "done" });
   stop();
 });
 
@@ -457,7 +485,7 @@ test("a report carries the opening lines that identify its run", async () => {
 // for the rest of the session rendered "Not receiving progress" over a
 // stream that was working.
 test("a closing socket cannot mark its replacement disconnected", async () => {
-  const { deploys, useConnector, watch, isConnected } = await import(
+  const { deploys, useConnector, watch, connected } = await import(
     "../src/lib/deploy-store.js"
   );
 
@@ -473,12 +501,12 @@ test("a closing socket cannot mark its replacement disconnected", async () => {
 
   const second = watch();
   statuses[1](true);
-  assert.equal(isConnected(get(deploys)), true);
+  assert.equal(get(connected), true);
 
   // The old connection's close handshake completes late.
   statuses[0](false);
 
-  assert.equal(isConnected(get(deploys)), true, "the live socket is still live");
+  assert.equal(get(connected), true, "the live socket is still live");
   second();
 });
 
@@ -580,50 +608,46 @@ test("beginDeploy reports whether the deploy may proceed", async () => {
 // "Not receiving progress", which is the conflation the flag exists to
 // remove.
 test("disposing the socket reports the disconnection immediately", async () => {
-  const { deploys, useConnector, watch, isConnected, isDisconnected } = await import(
+  const { deploys, useConnector, watch, connected } = await import(
     "../src/lib/deploy-store.js"
   );
 
   const statuses = [];
   useConnector((_onMessage, onStatus) => {
     statuses.push(onStatus);
-    // A dispose that never calls back, exactly like `connectWS`.
-    return () => {};
+    // A dispose that calls back LATE, exactly like `connectWS`.
+    //
+    // The fake used to return `() => {}` with a comment claiming that
+    // matched `connectWS`. It does not, in two ways that both matter:
+    // `connectWS`'s dispose calls `socket.close()`, the browser fires
+    // `onclose` on a LATER TASK, and `onclose` calls `onStatus(false)`
+    // unconditionally. Modelling the dispose as silent -- or as
+    // synchronous, which `releaseSocket`'s own reset would then paper
+    // over -- hides the defect entirely.
+    return () => queueMicrotask(() => onStatus(false));
   });
 
   const stop = watch();
   statuses[0](true);
-  assert.equal(isConnected(get(deploys)), true);
+  assert.equal(get(connected), true);
 
   stop(); // nothing running, nobody watching -> disposed
+  await Promise.resolve(); // let the late onclose land
 
-  assert.equal(isConnected(get(deploys)), false, "no socket means not connected");
-  // ...and NOT a connection we lost. Setting `false` here cured the
-  // stale `true` and caused its mirror image: leaving the section and
-  // coming back put a deploy started before `onopen` under "Not
-  // receiving progress -- this page cannot see it", over a stream that
-  // was about to work. Disposing is our own choice, so it makes no
-  // claim at all.
-  assert.equal(
-    isDisconnected(get(deploys)),
-    false,
-    "disposing on purpose is not a lost connection"
-  );
+  // Reset to "no claim": neither open, nor a connection we lost.
+  //
+  // Setting `false` here cured the stale `true` and caused its mirror
+  // image -- leaving the section and coming back put a deploy started
+  // before `onopen` under "Not receiving progress", over a stream that
+  // was about to work. Disposing is our own choice and claims neither.
+  //
+  // The await is the point. `releaseSocket` bumps the generation so the
+  // disposed socket's late `onclose` is silenced; without that bump it
+  // writes `false` back over this reset a task later, and every
+  // reconnect renders as a lost connection.
+  assert.equal(get(connected) === true, false, "no socket means not connected");
+  assert.equal(get(connected) === false, false, "disposing on purpose is not a loss");
 });
 
 // The three states, at the boundary the amber warning is read from.
-test("isDisconnected is not the negation of isConnected", async () => {
-  const { isConnected, isDisconnected } = await import("../src/lib/deploy-store.js");
 
-  // Never opened: neither. This is the connect window, and alarming on
-  // `!isConnected` covered it with "this page cannot see it".
-  assert.equal(isConnected({}), false);
-  assert.equal(isDisconnected({}), false);
-
-  assert.equal(isConnected({ __connected: true }), true);
-  assert.equal(isDisconnected({ __connected: true }), false);
-
-  // Had one and lost it: the only state worth alarming about.
-  assert.equal(isConnected({ __connected: false }), false);
-  assert.equal(isDisconnected({ __connected: false }), true);
-});

@@ -82,7 +82,14 @@
       // we do not know. The banner says which.
       loadError = err instanceof Error ? err.message : "Could not read the live estate";
     } finally {
-      loaded = true;
+      // GUARDED like its siblings. A superseded read must not announce
+      // that the page has loaded on behalf of a result it just threw
+      // away: if the first read outlives the 30s poll, its `finally`
+      // flipped `loaded` while `deployments` was still `[]` and
+      // `deploying` still `undefined`, so the page rendered "0
+      // deployments — this server did not report what is applying" about
+      // a server that had not answered yet.
+      if (token === reads) loaded = true;
     }
   }
 
