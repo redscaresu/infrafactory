@@ -34,6 +34,9 @@ func runTestCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) 
 		result, err := executeTest(ctx, runtime, args[0], testExecutionOptions{
 			MockDeployMode: harness.MockDeployModeClean,
 			SkipDestroy:    noDestroy,
+			// Progress on stderr, the same stream and the same bytes
+			// `deploy` produces. stdout carries the output contract.
+			Progress: cmd.ErrOrStderr(),
 		})
 		if err != nil {
 			if writeErr := writeCommandOutput(cmd, result); writeErr != nil {
@@ -454,6 +457,27 @@ func appendSandboxDestroyResult(stages []StageSummary, failures []FailureSummary
 type testExecutionOptions struct {
 	MockDeployMode harness.MockDeployMode
 	SkipDestroy    bool
+
+	// LogScope stamps the stage-progress entries this execution emits.
+	//
+	// `run` reaches here through `executeTest`, and `runIteration`
+	// stamps every entry it writes with `Command:"run"`, a RunID and an
+	// Iteration. Stage progress hardcoded `Command:"test"` and neither
+	// of the others, so under `infrafactory run` iteration 2's
+	// `apply: running` was byte-identical to iteration 1's in app.log
+	// -- and on the websocket, which is broadcast globally, a `test`
+	// running elsewhere injected indistinguishable lines into an
+	// unrelated run's console.
+	//
+	// Zero value means a plain `infrafactory test`, which is stamped
+	// below.
+	LogScope LogEntry
+
+	// Progress is where the READABLE stage lines go -- the same stream
+	// `deploy` writes to. nil means stderr rather than nothing, because
+	// "nothing" is the silent-apply failure this slice exists to fix and
+	// a caller that forgets should not reintroduce it.
+	Progress io.Writer
 }
 
 func executeTest(ctx context.Context, runtime *CommandRuntime, scenarioPath string, opts testExecutionOptions) (OutputResult, error) {
@@ -645,24 +669,24 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 				// apply is silent for minutes on the screen somebody is
 				// actually watching while a PR gate runs -- the failure
 				// S163 fixed for `deploy` and left here.
-				// Held as an io.Writer that is GENUINELY nil when there
-				// is no logger.
-				//
-				// `newStageLogWriter` returns a *stageLogWriter, and a
-				// nil one of those assigned straight into an io.Writer
-				// parameter makes a NON-nil interface holding a nil
-				// pointer. The harness checks `p.out != nil` before
-				// formatting each stage line, so passing it directly
-				// defeated exactly the thing that check is for: every
-				// stage was rendered and handed to a writer whose only
-				// job was to drop it.
-				var stageLog io.Writer
-				writer := newStageLogWriter(runtime.Logger, "test")
-				if writer != nil {
-					stageLog = writer
+				// A TEE: the readable line to stderr, exactly where
+				// `deploy` sends it, and the structured entry to the
+				// log for the run console. Sending only the structured
+				// one made `infrafactory test` print a JSON object
+				// where `infrafactory deploy` prints `  apply: running`
+				// -- and the S144 PR gate runs `test`, so the human
+				// reading the gate's job log got the worse rendering.
+				progressOut := opts.Progress
+				if progressOut == nil {
+					progressOut = os.Stderr
 				}
+				scope := opts.LogScope
+				if scope.Command == "" {
+					scope.Command = "test"
+				}
+				stageLog := newStageLogWriter(runtime.Logger, progressOut, scope)
 				sandboxResult, sandboxErr := runtime.Deps.SandboxDeploy.Run(ctx, outputDir, sandboxEnv, stageLog)
-				_ = writer.Close()
+				_ = stageLog.Close()
 				stages, failures = appendSandboxDeployResult(stages, failures, sandboxResult, sandboxErr)
 				if sandboxResult != nil && len(sandboxResult.Plan.Stdout) > 0 {
 					planLiveText = []byte(sandboxResult.Plan.Stdout)

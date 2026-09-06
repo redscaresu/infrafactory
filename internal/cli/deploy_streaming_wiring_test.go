@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -93,20 +94,22 @@ func drainProgress(client *api.Client) []string {
 	}
 }
 
-// The same wiring question for `test`, which is the Layer 3 path the
-// Live Run page watches.
+// The stage lines reach a watching client DURING the apply, not after.
 //
-// S163 gave `deploy` live stage progress and left this one passing
-// `nil`, so a PR gate's apply was silent for minutes on the screen
-// somebody is actually looking at. Asserting it from INSIDE the apply,
-// because "arrives eventually" is what the silent version also did.
+// NOT a wiring test, and it used to say it was: it builds the writer
+// itself and calls the harness directly, so reverting the call site to
+// `nil` left it green. The wiring is asserted where the call site is --
+// `TestTestCommandRunsSandboxLayerWhenEnabled` -- and this one is about
+// TIMING, which that test cannot see. Both are needed; neither
+// substitutes for the other, and the docstring claiming otherwise was
+// how a test advertised coverage it did not have.
 func TestStageProgressReachesTheRunConsoleWhileTheApplyIsRunning(t *testing.T) {
 	hub := api.NewHub()
 	client := api.NewTestClient(256)
 	hub.Register(client)
 
 	logger := NewAppLogger(api.NewWebSocketSink(hub))
-	stageLog := newStageLogWriter(logger, "test")
+	stageLog := newStageLogWriter(logger, io.Discard, LogEntry{Command: "test"})
 
 	var duringApply []string
 	runner := harness.CommandRunnerFunc(func(_ context.Context, cmd harness.Command) (harness.CommandResult, error) {

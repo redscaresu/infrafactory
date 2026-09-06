@@ -41,12 +41,16 @@ func (r *recordedLog) snapshot() []LogEntry {
 	return out
 }
 
-// The Live Run page renders LogEntry records, not raw text, so writing
-// bytes at it would arrive as an unparsed blob beside properly formed
-// events.
+// The structured half of the tee.
+//
+// This comment used to justify the design with "the Live Run page renders
+// LogEntry records, not raw text". It does not -- `live/+page.svelte`
+// appends `JSON.stringify(msg)` for every frame. The entries are worth
+// emitting because app.log is grep-able and the websocket carries them,
+// not because the console parses them.
 func TestStageProgressBecomesStructuredLogEntries(t *testing.T) {
 	rec := &recordedLog{}
-	w := newStageLogWriter(rec.capture(), "test")
+	w := newStageLogWriter(rec.capture(), io.Discard, LogEntry{Command: "test"})
 
 	_, err := w.Write([]byte("  init: running\n  apply: done in 141s\n"))
 	require.NoError(t, err)
@@ -56,7 +60,8 @@ func TestStageProgressBecomesStructuredLogEntries(t *testing.T) {
 
 	assert.Equal(t, "test", entries[0].Command)
 	assert.Equal(t, "sandbox_deploy_progress", entries[0].Event)
-	assert.Equal(t, "init", entries[0].Stage, "the console groups by stage")
+	assert.Equal(t, "init", entries[0].Stage,
+		"so app.log can be filtered by stage; the console does not group by it")
 	assert.Equal(t, "init: running", entries[0].Detail)
 	assert.Equal(t, "apply", entries[1].Stage)
 }
@@ -65,7 +70,7 @@ func TestStageProgressBecomesStructuredLogEntries(t *testing.T) {
 // a console appending fragments shows half a word.
 func TestStageProgressEmitsWholeLinesNotWrites(t *testing.T) {
 	rec := &recordedLog{}
-	w := newStageLogWriter(rec.capture(), "test")
+	w := newStageLogWriter(rec.capture(), io.Discard, LogEntry{Command: "test"})
 
 	_, _ = w.Write([]byte("  ini"))
 	_, _ = w.Write([]byte("t: running\n"))
@@ -77,7 +82,7 @@ func TestStageProgressEmitsWholeLinesNotWrites(t *testing.T) {
 
 func TestStageProgressFlushesATrailingLineOnClose(t *testing.T) {
 	rec := &recordedLog{}
-	w := newStageLogWriter(rec.capture(), "test")
+	w := newStageLogWriter(rec.capture(), io.Discard, LogEntry{Command: "test"})
 
 	_, _ = w.Write([]byte("  apply: FAILED after 3s: transient provider error"))
 	require.NoError(t, w.Close())
@@ -88,64 +93,118 @@ func TestStageProgressFlushesATrailingLineOnClose(t *testing.T) {
 		"the reason a failed apply gives is the line that matters most")
 }
 
-// A nil logger yields a nil writer, and one that survives being used.
-func TestStageLogWriterIsNilWithoutALogger(t *testing.T) {
-	w := newStageLogWriter(nil, "test")
-
-	require.Nil(t, w)
-	n, err := w.Write([]byte("anything\n"))
-	require.NoError(t, err)
-	assert.Equal(t, len("anything\n"), n)
-	require.NoError(t, w.Close())
-}
-
-// ...and the nil must be recognisable AS nil after it becomes an
-// io.Writer, which is the part that does not come for free.
+// The READABLE half. `deploy` prints these lines and `test` must too.
 //
-// `newStageLogWriter` returns a *stageLogWriter. Assigning a nil one of
-// those straight into an io.Writer parameter yields a NON-nil interface
-// wrapping a nil pointer, so `SandboxDeployHarness`'s `p.out != nil`
-// guard passes and every stage line is formatted and dropped -- the
-// exact cost that guard exists to avoid. Callers must test the concrete
-// pointer and leave the interface unset, which `executeTestWithScenario`
-// now does.
-//
-// Stated as a property of the type rather than driven through the
-// command, because `CommandRuntime` always builds a logger: this branch
-// is an interface-boundary defence, and a test claiming the command
-// exercises it would be claiming something false.
-func TestANilStageLogWriterIsNotAUsableWriter(t *testing.T) {
-	// The RAW comparison, deliberately, because that is the one the
-	// production guard makes -- `stageProgress.start` does `p.out !=
-	// nil` and nothing cleverer. testify's assert.Nil reflects into the
-	// interface and reports a typed nil as nil, which papers over the
-	// entire trap: it would pass here and still leave the harness
-	// formatting lines into a discarder.
-
-	// The trap, demonstrated.
-	var careless io.Writer = newStageLogWriter(nil, "test")
-	assert.True(t, careless != nil,
-		"a nil *stageLogWriter in an io.Writer is not a nil interface")
-
-	// The rule that avoids it.
-	var careful io.Writer
-	if w := newStageLogWriter(nil, "test"); w != nil {
-		careful = w
-	}
-	assert.True(t, careful == nil,
-		"checking the concrete pointer leaves the interface genuinely unset")
-}
-
-// A line with no stage prefix is still reported: silence is worse than
-// an unlabelled line.
-func TestStageProgressKeepsALineWithNoStage(t *testing.T) {
+// Sending stage progress only to the structured log made `infrafactory
+// test` print a JSON object where `infrafactory deploy` prints
+// `  apply: running` for the identical event -- and the S144 PR gate
+// runs `test`, so the human reading the gate's job log got the worse
+// rendering. The bytes here are the harness's own, unaltered.
+func TestStageProgressStillPrintsTheReadableLine(t *testing.T) {
 	rec := &recordedLog{}
-	w := newStageLogWriter(rec.capture(), "test")
+	var text strings.Builder
+	w := newStageLogWriter(rec.capture(), &text, LogEntry{Command: "test"})
 
-	_, _ = w.Write([]byte("something the harness said\n"))
+	_, err := w.Write([]byte("  apply: running\n"))
+	require.NoError(t, err)
+
+	assert.Equal(t, "  apply: running\n", text.String(),
+		"byte for byte what deploy writes, indent and all")
+	require.Len(t, rec.snapshot(), 1, "and the structured entry as well")
+}
+
+// A failed apply is an error, like every other failure in the run log.
+//
+// Everything was `info` with no status, so `apply: FAILED` sat at the
+// same level as `apply: running`. An operator grepping app.log for
+// `"level":"error"` to find why a gate run failed missed the Layer 3
+// apply failure -- the one line that says why.
+func TestAFailedStageIsLoggedAsAnError(t *testing.T) {
+	for name, tc := range map[string]struct {
+		line  string
+		level string
+	}{
+		"a failure":  {line: "  apply: FAILED after 141s: exit status 1\n", level: logLevelError},
+		"giving up":  {line: "  apply: giving up after 2 attempt(s)\n", level: logLevelError},
+		"an advance": {line: "  apply: running\n", level: logLevelInfo},
+	} {
+		t.Run(name, func(t *testing.T) {
+			rec := &recordedLog{}
+			w := newStageLogWriter(rec.capture(), io.Discard, LogEntry{Command: "test"})
+			_, _ = w.Write([]byte(tc.line))
+
+			entries := rec.snapshot()
+			require.Len(t, entries, 1)
+			assert.Equal(t, tc.level, entries[0].Level)
+			if tc.level == logLevelError {
+				assert.Equal(t, "failed", entries[0].Status,
+					"and a status, so the failure is findable both ways")
+			}
+		})
+	}
+}
+
+// The stage is the harness's token, or nothing -- never a guess.
+//
+// It was the text before the first colon of any line. A provider error
+// rendered by `stageProgress.finished`'s `%v` is routinely multi-line, so
+// `Error: creating instance` became stage "Error" and a continuation like
+// `on main.tf line 12:` became stage "on main.tf line 12" -- garbage in a
+// field a reader is meant to scan.
+func TestTheStageIsNeverGuessedFromArbitraryText(t *testing.T) {
+	rec := &recordedLog{}
+	w := newStageLogWriter(rec.capture(), io.Discard, LogEntry{Command: "test"})
+
+	_, _ = w.Write([]byte("  apply: FAILED after 3s: boom\n"))
+	_, _ = w.Write([]byte("Error: creating instance\n"))
+	_, _ = w.Write([]byte("  on main.tf line 12:\n"))
+
+	entries := rec.snapshot()
+	require.Len(t, entries, 3)
+	assert.Equal(t, "apply", entries[0].Stage, "the harness's own shape")
+	assert.Empty(t, entries[1].Stage, "not indented by the harness, so not a stage")
+	assert.Empty(t, entries[2].Stage, "a sentence, not a token")
+
+	// The LINE still gets through in every case. Refusing to name a
+	// stage must never mean dropping the text.
+	assert.Contains(t, entries[1].Detail, "creating instance")
+	assert.Contains(t, entries[2].Detail, "main.tf line 12")
+}
+
+// A run stamps its scope, so two iterations are distinguishable.
+//
+// The command was hardcoded to "test" and RunID/Iteration never set, so
+// under `infrafactory run` iteration 2's `apply: running` was
+// byte-identical to iteration 1's in app.log -- and on the websocket,
+// which is broadcast globally, a `test` running elsewhere injected
+// indistinguishable lines into an unrelated run's console.
+func TestStageProgressCarriesTheRunsScope(t *testing.T) {
+	rec := &recordedLog{}
+	w := newStageLogWriter(rec.capture(), io.Discard,
+		LogEntry{Command: "run", RunID: "run-7", Iteration: 2})
+
+	_, _ = w.Write([]byte("  apply: running\n"))
 
 	entries := rec.snapshot()
 	require.Len(t, entries, 1)
-	assert.Empty(t, entries[0].Stage)
-	assert.Equal(t, "something the harness said", entries[0].Detail)
+	assert.Equal(t, "run", entries[0].Command)
+	assert.Equal(t, "run-7", entries[0].RunID)
+	assert.Equal(t, 2, entries[0].Iteration)
+}
+
+// An empty command silently discards everything, so it is refused.
+//
+// `AppLogger.Log` drops any entry whose Command is empty -- no error, no
+// panic, and `Write` still reports success. That is the same
+// silent-discard failure this slice exists to fix, one layer down.
+func TestAnEmptyCommandDoesNotSilentlyDiscard(t *testing.T) {
+	rec := &recordedLog{}
+	w := newStageLogWriter(rec.capture(), io.Discard, LogEntry{})
+
+	_, _ = w.Write([]byte("  apply: running\n"))
+
+	entries := rec.snapshot()
+	require.Len(t, entries, 1, "the line must not vanish")
+	assert.NotEmpty(t, entries[0].Command,
+		"a writer with no command would drop every line it was given")
 }

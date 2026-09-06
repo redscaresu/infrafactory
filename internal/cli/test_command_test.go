@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/redscaresu/infrafactory/internal/config"
 	"github.com/redscaresu/infrafactory/internal/feedback"
@@ -59,9 +60,14 @@ func liveWriter(w io.Writer) bool {
 	if w == nil {
 		return false
 	}
+	// `reflect.Interface` is deliberately NOT listed. `reflect.ValueOf`
+	// unwraps the interface and reports the DYNAMIC type's kind, so it
+	// can never be Interface here -- and listing an impossible case in a
+	// helper written to be precise about the interface/pointer
+	// distinction teaches the next reader the wrong model of reflect.
 	v := reflect.ValueOf(w)
 	switch v.Kind() {
-	case reflect.Ptr, reflect.Interface, reflect.Map, reflect.Slice, reflect.Func, reflect.Chan:
+	case reflect.Ptr, reflect.Map, reflect.Slice, reflect.Func, reflect.Chan:
 		return !v.IsNil()
 	default:
 		return true
@@ -70,6 +76,7 @@ func liveWriter(w io.Writer) bool {
 
 type fakeSandboxDeployHarness struct {
 	gotProgress bool
+	stageLog    *stageLogWriter
 	result      *harness.SandboxDeployResult
 	err         error
 	calls       int
@@ -101,6 +108,18 @@ func (f *fakeSandboxDeployHarness) Run(ctx context.Context, workDir string, _ ma
 	// job is to drop it -- passing this assertion while the run console
 	// stays blank. `liveWriter` refuses that case.
 	f.gotProgress = liveWriter(progress)
+	// Held so the call site's `Close` can be asserted after the command
+	// returns. The harness is the only thing positioned to see the
+	// writer it was handed.
+	if w, ok := progress.(*stageLogWriter); ok {
+		f.stageLog = w
+	}
+	// The fake ANNOUNCES a stage, like the real harness does. Recording
+	// that a writer was handed over proves less than it looks: the two
+	// halves of the tee are only observable once something writes.
+	if progress != nil {
+		_, _ = io.WriteString(progress, "  apply: running\n")
+	}
 	f.calls++
 	f.lastCtx = ctx
 	if f.err == nil && workDir != "" {
@@ -872,7 +891,8 @@ func TestTestCommandRunsSandboxLayerWhenEnabled(t *testing.T) {
 	cmd := newTestCommandForTest(opts)
 	stdout := &bytes.Buffer{}
 	cmd.SetOut(stdout)
-	cmd.SetErr(&bytes.Buffer{})
+	stderr := &bytes.Buffer{}
+	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{scenarioPath, "--config", h.ConfigPath})
 
 	if err := cmd.Execute(); err != nil {
@@ -909,6 +929,24 @@ func TestTestCommandRunsSandboxLayerWhenEnabled(t *testing.T) {
 	// itself cannot notice the argument being dropped here.
 	assert.True(t, sandboxDeploy.gotProgress,
 		"the sandbox apply must report its stages, or the run console shows nothing for minutes")
+
+	// And the writer is CLOSED. Close is the only thing that flushes a
+	// trailing line with no newline -- the last line of a failed apply,
+	// which is the one that says why -- and removing the call left the
+	// whole package green.
+	require.NotNil(t, sandboxDeploy.stageLog)
+	assert.True(t, sandboxDeploy.stageLog.closed,
+		"an unclosed writer silently drops the final line of a failed apply")
+
+	// The READABLE line reached stderr, which is where `deploy` puts it
+	// and what the S144 PR gate's job log shows a human.
+	//
+	// Asserted at the call site, not just on the writer: routing the
+	// text half to io.Discard here left every other test green, so the
+	// regression this rework exists to undo -- `test` printing a JSON
+	// blob where `deploy` prints a sentence -- could return unnoticed.
+	assert.Contains(t, stderr.String(), "apply: running",
+		"the gate's job log must show the stage, not only app.log")
 
 }
 

@@ -967,6 +967,12 @@ func runIteration(
 			testResult, err = executeTest(ctx, runtime, scenarioPath, testExecutionOptions{
 				MockDeployMode: mockDeployModeForRunMode(mode),
 				SkipDestroy:    noDestroy,
+				// Stage progress carries the run's scope, like every
+				// other entry this iteration writes. Without it two
+				// iterations' `apply: running` lines are byte-identical
+				// in app.log, and a `test` running elsewhere is
+				// indistinguishable from this run on the websocket.
+				LogScope: LogEntry{Command: "run", RunID: runID, Iteration: iteration},
 			})
 			if len(testResult.PlanLiveText) > 0 {
 				writeErr := store.WriteIterationArtifact(scenarioName, runID, iteration, "plan-live.txt", testResult.PlanLiveText)
