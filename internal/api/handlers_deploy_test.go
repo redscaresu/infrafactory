@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -52,6 +53,16 @@ func deployServer(t *testing.T, d DeploymentDeployer) *http.Server {
 	t.Helper()
 	return NewServer(ServerConfig{
 		Config: config.Default(), Deployments: &fakeDeployments{}, Deployer: d,
+	})
+}
+
+// deployServerWithLog is deployServer with the withheld-detail sink
+// captured, so a test can assert the operator was told.
+func deployServerWithLog(t *testing.T, d DeploymentDeployer, logf func(string, ...any)) *http.Server {
+	t.Helper()
+	return NewServer(ServerConfig{
+		Config: config.Default(), Deployments: &fakeDeployments{}, Deployer: d,
+		Logf: logf,
 	})
 }
 
@@ -190,8 +201,16 @@ func TestDeployDoesNotBreakTheListing(t *testing.T) {
 // A client typo, or a UI holding a stale scenario list, is not a server
 // fault. Answering 500 teaches operators that 500 means nothing in
 // particular.
+//
+// The name IS echoed here, and is not "exposing internals": the message
+// is one this package composed out of what the client sent, so the 404
+// can be specific. A deployer says so with ErrNoSuchScenario -- which
+// also promises nothing was created. A deployer that reports a missing
+// scenario as a bare os.ErrNotExist gets the same 404 with a withheld
+// body, because that error names a FILE and nothing else can be told
+// from it (see TestAMissingFileIsReportedWithoutItsPath).
 func TestDeployOfAnUnknownScenarioIsNotFound(t *testing.T) {
-	srv := deployServer(t, &fakeDeployer{err: fmt.Errorf("no scenario named %q: %w", "gone", os.ErrNotExist)})
+	srv := deployServer(t, &fakeDeployer{err: fmt.Errorf("no scenario named %q: %w", "gone", ErrNoSuchScenario)})
 
 	rec := postDeploy(t, srv, `{"scenario":"gone"}`)
 
@@ -644,4 +663,74 @@ func TestDeployHandlerRefusesANonPostEvenWhenRegisteredDirectly(t *testing.T) {
 		assert.Equal(t, true, payload["started_nothing"], method)
 	}
 	assert.Empty(t, deployer.calls, "and nothing was applied")
+}
+
+// The 404 for a missing FILE withholds the path, like the 500 above it.
+//
+// This branch answered with `err.Error()` while its sibling twenty lines
+// earlier suppressed exactly that, with a test. An *fs.PathError there
+// put an absolute server path into a body the scenario page renders
+// verbatim -- and the branch's own comment named a vanishing state file
+// as the case it exists for, which is precisely an *fs.PathError.
+//
+// The 404 stays: `os.ErrNotExist` says a file was missing and says
+// nothing about WHEN, so unlike its sibling this response makes no
+// promise about the cloud.
+func TestAMissingFileIsReportedWithoutItsPath(t *testing.T) {
+	srv := deployServer(t, &fakeDeployer{
+		err: fmt.Errorf("open state: %w", &fs.PathError{
+			Op:   "open",
+			Path: "/Users/someone/go/src/github.com/redscaresu/infrafactory/.infrafactory/live/terraform.tfstate",
+			Err:  os.ErrNotExist,
+		}),
+	})
+	rec := postDeploy(t, srv, `{"scenario":"web-app-paris"}`)
+
+	require.Equal(t, http.StatusNotFound, rec.Code)
+	assert.NotContains(t, rec.Body.String(), "/Users/",
+		"an internal path must not reach a page")
+	assert.Contains(t, rec.Body.String(), "see the server log",
+		"the operator needs somewhere to go for the detail")
+
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &payload))
+	_, claimed := payload["started_nothing"]
+	assert.False(t, claimed,
+		"a missing file says nothing about whether the apply began")
+}
+
+// The withheld detail must actually reach somebody.
+//
+// Both branches now answer with a stable sentence that points at "the
+// server log". If nothing writes to it, that sentence sends the operator
+// to a log with no entry -- so the seam exists to make the telling
+// assertable rather than a matter of trusting stderr.
+func TestWithheldDetailIsLogged(t *testing.T) {
+	for name, tc := range map[string]struct {
+		err  error
+		want string
+	}{
+		"a pre-apply failure": {
+			err:  NothingStarted("", errors.New("/Users/someone/scenarios: permission denied")),
+			want: "permission denied",
+		},
+		"a missing file": {
+			err:  fmt.Errorf("open state: %w", os.ErrNotExist),
+			want: "file does not exist",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var logged []string
+			srv := deployServerWithLog(t, &fakeDeployer{err: tc.err}, func(format string, args ...any) {
+				logged = append(logged, fmt.Sprintf(format, args...))
+			})
+			rec := postDeploy(t, srv, `{"scenario":"web-app-paris"}`)
+
+			assert.NotContains(t, rec.Body.String(), "/Users/")
+			require.Len(t, logged, 1, "the withheld cause is logged exactly once")
+			assert.Contains(t, logged[0], tc.want,
+				"the log is the only surviving copy of the cause")
+			_ = rec
+		})
+	}
 }

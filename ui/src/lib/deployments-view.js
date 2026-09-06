@@ -631,8 +631,21 @@ export function isProgressEvent(event) {
  * read it -- the guard the ADR described was documented, tested on the
  * server, and absent from the screen it was for.
  */
-/** ESTATE_UNREADABLE opens the one warning that is not scenario-specific. */
+/** ESTATE_UNREADABLE opens the estate-wide warning for a FAILED read. */
 export const ESTATE_UNREADABLE = "The live estate could not be fully read";
+
+/**
+ * ESTATE_NOT_REPORTED opens the estate-wide warning for a read that was
+ * never attempted, as far as this client can tell.
+ *
+ * A separate sentence from ESTATE_UNREADABLE because the conclusion is
+ * shared and the CAUSE is not. Both end at "unknown", but one of them
+ * says the server tried and failed. Saying that about a server whose
+ * estate reads perfectly -- one that predates the field, or a body a
+ * proxy trimmed -- invents a fault, which is the same class of false
+ * explanation the comments in this file were corrected for.
+ */
+export const ESTATE_NOT_REPORTED = "This server did not report what is already deployed";
 
 export function alreadyLiveWarnings(preview) {
   // A LIST, one entry per fact, strongest first.
@@ -663,14 +676,18 @@ export function alreadyLiveWarnings(preview) {
   // and there is nothing".
   const looked = Array.isArray(preview?.already_live);
   const live = looked ? preview.already_live : [];
-  const unknown = preview?.already_live_unknown === true || !looked;
+  // TWO causes, one conclusion. Kept apart so neither warning states
+  // the other's reason: `unreadable` is the server telling us a read
+  // failed, `notReported` is the field never arriving at all.
+  const unreadable = preview?.already_live_unknown === true;
+  const notReported = !looked;
 
   // "Could not look" is not "nothing is there", and this guard is about
   // billable infrastructure. It must not DISCARD what was found either:
   // the unreadable flag is estate-global -- one corrupt record anywhere
   // sets it -- so it qualifies the concrete list rather than replacing
   // it.
-  const caveat = unknown
+  const caveat = unreadable
     ? " Some live records could not be read, so there may be more than this."
     : "";
 
@@ -686,10 +703,15 @@ export function alreadyLiveWarnings(preview) {
             : `${live.length} deployments from this scenario are already live (${ids}). Deploying again creates ANOTHER project and another bill; it does not replace them.${caveat}`
       }
     );
-  } else if (unknown) {
+  } else if (unreadable) {
     warnings.push({
       kind: "estate",
       text: `${ESTATE_UNREADABLE}, so whether this scenario is already deployed is unknown. Check the Deployments page before continuing.`
+    });
+  } else if (notReported) {
+    warnings.push({
+      kind: "estate",
+      text: `${ESTATE_NOT_REPORTED}, so whether this scenario is already deployed is unknown. Check the Deployments page before continuing.`
     });
   }
 
@@ -699,7 +721,11 @@ export function alreadyLiveWarnings(preview) {
   if (preview?.already_deploying) {
     warnings.push({
       kind: "scenario",
-      text: "This scenario is being deployed right now. A second deploy will be refused until it finishes."
+      // Phrased AS OF THE READ. Nothing refreshes this preview while
+      // the dialog is open, so the present tense outlived the apply it
+      // described -- and the button is no longer disabled on it, which
+      // makes the tense the only thing left to get right.
+      text: "This scenario was being deployed when this was checked. If it still is, a second deploy will be refused until it finishes."
     });
   }
 

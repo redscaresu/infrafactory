@@ -13,7 +13,7 @@
     beginDeploy,
     deploys,
     endDeploy,
-    isConnected,
+    isDisconnected,
     isRunning,
     useConnector,
     watch as watchDeploys,
@@ -44,6 +44,8 @@
   const current = (token: number) => token === navigation;
   let detail: any = null;
   let detailError = "";
+  // A refresh that failed while the page still holds a readable scenario.
+  let refreshError = "";
   let rawYAML = "";
   let status = "";
   let running = false;
@@ -197,6 +199,7 @@
     // previous scenario's failure on screen for a page that was never
     // asked about.
     detailError = "";
+    refreshError = "";
     if (!scenarioPath) return;
     const token = navigation;
     try {
@@ -217,10 +220,16 @@
       // unmounted the whole `{#if detail}` block -- the title, the
       // buttons, the "Saved" status and the textarea holding the
       // reader's YAML -- after a PUT that had actually succeeded.
-      detailError = err instanceof Error ? err.message : "Could not read this scenario";
-      if (!detail) return;
-      status = detailError;
-      detailError = "";
+      const failure = err instanceof Error ? err.message : "Could not read this scenario";
+      if (!detail) {
+        detailError = failure;
+        return;
+      }
+      // NOT `status`. That slot is the save-succeeded notice and renders
+      // grey, so a refresh that failed after a PUT that landed read as
+      // an ordinary notice in the same colour as "Saved" -- and replaced
+      // it, taking away the confirmation the save had worked.
+      refreshError = failure;
     }
   }
 
@@ -328,7 +337,10 @@
   // A dropped socket and "nothing has happened yet" both produce an
   // empty log, and rendering them the same way tells the reader an apply
   // is quiet when the truth is that it is UNOBSERVED.
-  $: streamConnected = isConnected($deploys);
+  // `isDisconnected`, not `!isConnected`. A socket that has not opened
+  // yet is neither, and alarming on the negation put the amber warning
+  // over the ordinary connect window.
+  $: streamLost = isDisconnected($deploys);
 
   /**
    * resetDeployState clears what belongs to THIS page's confirmation
@@ -472,13 +484,20 @@
     const { progress, dropped } = endDeploy(scenario, outcome);
     const finished: Ending = {
       ok: outcome.ok,
-      // A leak report is not repeated here -- the layout carries it,
-      // because it must survive the reader following its own advice to
-      // the Deployments page. This points at it, so a log does not stop
-      // with nothing said.
-      message: outcome.mayHaveCreated
-        ? "this deploy did not finish cleanly. What it may have left behind is reported at the top of the page."
-        : outcome.message,
+      // The outcome's OWN words, whatever they are.
+      //
+      // This used to replace every `mayHaveCreated` message with the
+      // flat claim "this deploy did not finish cleanly", which asserted
+      // a negative the page had not observed: a dropped connection
+      // concludes "unknown", and its message says the apply may still
+      // be running. The overwrite contradicted that, and contradicted
+      // the report banner it then pointed the reader at.
+      //
+      // It no longer points at the report either. The banner sits at the
+      // top of the page and says the same thing in its own words, and
+      // prose naming it went stale the moment the reader dismissed it --
+      // a sentence directing them to a banner that was gone.
+      message: outcome.message,
       log: opts.keepLog === false ? [] : progress,
       dropped: opts.keepLog === false ? 0 : dropped
     };
@@ -768,23 +787,22 @@
       {/if}
 
       <div class="mt-3 flex gap-2">
-        <!-- Disabled on `already_deploying` too, not just this tab's
-             `deploying`. The warning promises the click "will be
-             refused", and it would be -- but the round trip is not
-             free: `beginDeploy` succeeds because THIS tab has no entry,
-             so for its whole duration the store absorbs the other
-             apply's progress lines (same scenario subject, entry
-             running) and the panel labelled as this deploy streams
-             somebody else's output. The 423 then arrives and the log is
-             discarded, so the reader watched minutes of output
-             attributed to a deploy that never started. -->
+        <!-- NOT disabled on `already_deploying`. The server is the
+             authority on that lock and refuses in milliseconds --
+             `claim` is taken before anything touches the cloud -- and
+             the refusal path already discards the log, so no foreign
+             output is attributed to a deploy that never started.
+             `already_deploying` is a snapshot taken when this dialog
+             opened and nothing refreshes it, so disabling on it left
+             the button dead for the rest of the dialog's life after the
+             other apply finished, with no hint that reopening was the
+             fix. The warning below still says what was true when it was
+             read. This tab's own `deploying` IS live, and still
+             disables. -->
         <button
           class="rounded bg-sky-700 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40"
           data-testid="deploy-confirm-go"
-          disabled={!preview.deployable ||
-            !preview.deploy_allowed ||
-            preview.already_deploying === true ||
-            deploying}
+          disabled={!preview.deployable || !preview.deploy_allowed || deploying}
           on:click={confirmDeploy}>Deploy and keep it running</button
         >
         <button
@@ -804,7 +822,7 @@
       class="mt-3 rounded border border-slate-300 bg-slate-900 px-3 py-2 font-mono text-xs text-slate-100"
       data-testid="deploy-progress"
     >
-      {#if deployProgress.length === 0 && !streamConnected}
+      {#if deployProgress.length === 0 && streamLost}
         <!-- Not "Starting…": we are not receiving, so we do not know
              whether anything has happened. The apply is unaffected --
              it is detached from this page entirely. -->
@@ -858,6 +876,11 @@
   {/if}
 
   {#if status}<p class="mt-3 text-sm text-slate-700">{status}</p>{/if}
+  {#if refreshError}
+    <p class="mt-3 text-sm text-rose-700" data-testid="scenario-refresh-error">
+      This page could not be refreshed: {refreshError}
+    </p>
+  {/if}
   <textarea
     class="mt-4 h-[460px] w-full rounded border border-slate-300 p-3 font-mono text-sm"
     data-testid="scenario-yaml"

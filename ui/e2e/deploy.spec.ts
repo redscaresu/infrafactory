@@ -401,13 +401,18 @@ test.describe('Deploy from the scenario page', () => {
     await page.getByTestId('deploy-confirm-go').click();
 
     // The detail lives in the LAYOUT report, which survives leaving the
-    // page; the page says the deploy did not finish cleanly and points
-    // at it, so a log does not stop with nothing said.
+    // page -- and the ending says the same thing in its own right.
+    //
+    // It used to say only "did not finish cleanly" and point at the
+    // report. Both halves of that were wrong: the pointer went stale
+    // the moment the reader dismissed the report, and the fixed phrase
+    // overwrote outcomes that had concluded something quite different.
+    // Saying the id twice is the cost, and it is not one.
     const report = page.getByTestId('pending-deploy-report');
     await expect(report).toContainText('web-app-paris');
     await expect(report).toContainText('7c98d82e');
     await expect(page.getByTestId('deploy-outcome')).toContainText('did not finish cleanly');
-    await expect(page.getByTestId('deploy-outcome')).not.toContainText('7c98d82e');
+    await expect(page.getByTestId('deploy-outcome')).toContainText('7c98d82e');
   });
 });
 
@@ -1038,8 +1043,8 @@ test('a scenario that is both live and applying warns about both', async ({ page
   const warnings = page.getByTestId('deploy-warning');
   await expect(warnings.first()).toContainText('dep-existing');
   await expect(warnings.first()).toContainText('SECOND project');
-  await expect(warnings.first()).not.toContainText('being deployed right now');
-  await expect(warnings.nth(1)).toContainText('being deployed right now');
+  await expect(warnings.first()).not.toContainText('was being deployed when this was checked');
+  await expect(warnings.nth(1)).toContainText('was being deployed when this was checked');
 });
 
 // A refusal describes the attempt it came from. Left on screen, a retry
@@ -1829,7 +1834,7 @@ test('a log that ends in a report still has a terminal line', async ({ page }) =
   await expect(page.getByTestId('deploy-outcome')).toContainText('did not finish cleanly');
   await expect(page.getByTestId('pending-deploy-report')).toContainText('7c98d82e');
   // And the full account is not printed twice.
-  await expect(page.getByTestId('deploy-outcome')).not.toContainText('7c98d82e');
+  await expect(page.getByTestId('deploy-outcome')).toContainText('7c98d82e');
 });
 
 // `loadDetail` is a round trip, and a deploy started before a
@@ -2108,7 +2113,13 @@ test('an unreadable success is reported as unknown, not as clean', async ({ page
   // costs a wasted look at the Deployments page; erring the other way
   // is a green tick over an apply that may be running and billing.
   const outcome = page.getByTestId('deploy-outcome');
-  await expect(outcome).toContainText('did not finish cleanly');
+  // NOT "did not finish cleanly". The page did not observe that: an
+  // unreadable body concludes UNKNOWN, and the apply may have succeeded
+  // and registered normally. Asserting the failure also contradicted
+  // the report this line sits beside, which says it may still be
+  // running.
+  await expect(outcome).toContainText('unknown');
+  await expect(outcome).toContainText('may still be running');
   await expect(outcome).not.toContainText('failed: 200');
   await expect(page.getByTestId('pending-deploy-report')).toContainText('could not be read');
 });
@@ -2153,7 +2164,9 @@ test('a success status from something that is not this server is not a clean dep
 
   // Not a green tick, and it says the outcome is unknown.
   const outcome = page.getByTestId('deploy-outcome');
-  await expect(outcome).toContainText('did not finish cleanly');
+  // Unknown, for the same reason as the unreadable case above.
+  await expect(outcome).toContainText('unknown');
+  await expect(outcome).toContainText('may still be running');
   await expect(page.getByTestId('pending-deploy-report')).toContainText('does not recognise');
 });
 
@@ -2292,7 +2305,14 @@ test('two deploys in flight do not overwrite each other endings', async ({ page 
 // streams somebody else's output; the 423 then arrives and the log is
 // discarded. The reader watched minutes of output attributed to a
 // deploy that never started.
-test('the confirm button is refused when another deploy is already applying', async ({ page }) => {
+// NOT disabled on `already_deploying`. That flag is a snapshot taken
+// when the dialog opened and nothing refreshes it, so disabling on it
+// left the button dead for the rest of the dialog's life once the other
+// apply finished. The server owns the lock, refuses in milliseconds --
+// `claim` is taken before anything touches the cloud -- and the refusal
+// path discards the log, so nothing foreign is attributed to a deploy
+// that never started.
+test('a deploy already applying warns but leaves the refusal to the server', async ({ page }) => {
   await page.route('**/api/deployments/preview**', (route) =>
     route.fulfill({
       status: 200,
@@ -2314,7 +2334,31 @@ test('the confirm button is refused when another deploy is already applying', as
   await page.goto('/scenarios/training/web-app-paris');
   await page.getByTestId('scenario-deploy').click();
 
-  // The warning is shown, and the button does not invite the click.
-  await expect(page.getByTestId('deploy-warning').first()).toContainText('being deployed right now');
-  await expect(page.getByTestId('deploy-confirm-go')).toBeDisabled();
+  // The warning is shown, phrased AS OF THE READ...
+  await expect(page.getByTestId('deploy-warning').first()).toContainText(
+    'was being deployed when this was checked'
+  );
+  // ...and the button is live, because the flag behind the warning may
+  // already be false by the time it is read.
+  await expect(page.getByTestId('deploy-confirm-go')).toBeEnabled();
+
+  // The click reaches the server, which refuses it -- and a refusal is
+  // reported as a refusal, with nothing claimed about infrastructure.
+  await page.route('**/api/deployments', (route) =>
+    route.request().method() === 'POST'
+      ? route.fulfill({
+          status: 423,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            error: 'a deploy of this scenario is already running',
+            started_nothing: true
+          })
+        })
+      : route.continue()
+  );
+  await page.getByTestId('deploy-confirm-go').click();
+
+  const ending = page.getByTestId('deploy-outcome');
+  await expect(ending).toContainText('already running');
+  await expect(ending).not.toContainText('may have created');
 });

@@ -171,7 +171,15 @@
            the builder guaranteed. The count belongs to the summary;
            this banner exists to NAME what is applying and say why it is
            not in the table. -->
-      <p class="font-semibold">Applying now</p>
+      <!-- The heading follows the body's tense. It was a hardcoded
+           "Applying now" while the sentence beneath it withdrew exactly
+           that claim ("whether it is still applying is unknown"), in
+           the largest and boldest text in the banner. The summary line
+           had already been qualified for this case; the heading had
+           not. -->
+      <p class="font-semibold">
+        {estateState === "failed" ? "Was applying when last read" : "Applying now"}
+      </p>
       <p class="mt-1">
         {#if estateState === "failed"}
           <!-- "no record of its own", like the loaded arm. Rows are

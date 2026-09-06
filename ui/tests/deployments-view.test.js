@@ -391,11 +391,27 @@ test("alreadyLiveWarnings tags what each warning is about", () => {
 // older server, or a body trimmed by an intermediary, would render no
 // warning at all -- indistinguishable from "we looked and there is
 // nothing", on a guard about billable infrastructure.
+// The CONCLUSION is shared with the unreadable case and the CAUSE is
+// not. An absent field means this client never learned what is live; it
+// does not mean the server tried to read the estate and failed, and
+// saying so invented a fault on a server whose estate reads perfectly.
 test("alreadyLiveWarnings does not read an absent list as an empty one", () => {
   const [missing] = alreadyLiveWarnings({});
-  assert.match(missing.text, /could not be fully read/);
+  assert.match(missing.text, /did not report what is already deployed/);
+  assert.match(missing.text, /unknown/);
+  assert.doesNotMatch(missing.text, /could not be fully read/);
   const [nothing] = alreadyLiveWarnings(undefined);
-  assert.match(nothing.text, /could not be fully read/);
+  assert.match(nothing.text, /did not report what is already deployed/);
+  assert.doesNotMatch(nothing.text, /could not be fully read/);
+});
+
+// Both arms reach "unknown"; only one of them blames a failed read.
+test("alreadyLiveWarnings tells a failed estate read from one that never arrived", () => {
+  const [failed] = alreadyLiveWarnings({ already_live: [], already_live_unknown: true });
+  const [absent] = alreadyLiveWarnings({});
+  assert.notEqual(failed.text, absent.text);
+  assert.equal(failed.kind, "estate");
+  assert.equal(absent.kind, "estate");
 });
 
 test("alreadyLiveWarnings says so when the estate could not be read", () => {
@@ -451,7 +467,7 @@ test("estateSummary counts deploys in progress", () => {
 // is exactly the case where a reader is most likely duplicating.
 test("alreadyLiveWarnings reports a deploy that is applying right now", () => {
   const [{ text: warning }] = alreadyLiveWarnings({ already_deploying: true, already_live: [] });
-  assert.match(warning, /being deployed right now/);
+  assert.match(warning, /was being deployed when this was checked/);
   assert.match(warning, /will be refused/);
 });
 
@@ -474,7 +490,7 @@ test("alreadyLiveWarnings keeps every warning rather than choosing between them"
   assert.match(warnings[0].text, /dep-existing/, "the second-bill warning leads");
   assert.match(warnings[0].text, /SECOND project/);
   assert.match(warnings[0].text, /could not be read/, "and carries its own caveat");
-  assert.match(warnings[1].text, /being deployed right now/);
+  assert.match(warnings[1].text, /was being deployed when this was checked/);
 });
 
 test("alreadyLiveWarnings still reports an unreadable estate while something is applying", () => {
@@ -485,7 +501,7 @@ test("alreadyLiveWarnings still reports an unreadable estate while something is 
   });
   assert.equal(warnings.length, 2);
   assert.match(warnings[0].text, /could not be fully read/);
-  assert.match(warnings[1].text, /being deployed right now/);
+  assert.match(warnings[1].text, /was being deployed when this was checked/);
 });
 
 // `deploying` is kept from the last successful poll precisely so it

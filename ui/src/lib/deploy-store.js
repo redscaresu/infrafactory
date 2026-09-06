@@ -160,16 +160,28 @@ function releaseSocket() {
   if (running || watchers > 0) return;
   socket?.();
   socket = undefined;
-  // Disposed means NOT connected, said now rather than awaited.
+  // The key is REMOVED, not set to false.
   //
   // `connectWS`'s dispose only calls `socket.close()`; `onStatus(false)`
   // arrives later via `onclose`, and the next `ensureSocket` bumps the
   // generation, which silences that late callback deliberately. So
   // `__connected` kept its stale `true` across the gap, and a deploy
-  // started before the new socket opened rendered "Starting…" instead
-  // of "Not receiving progress" -- the exact conflation the flag exists
-  // to remove.
-  deploys.update((all) => ({ ...all, __connected: false }));
+  // started before the new socket opened rendered "Starting…" over a
+  // stream nothing was reading.
+  //
+  // Setting `false` here fixed that and broke the mirror image: leaving
+  // the section and coming back put a deploy started before `onopen`
+  // under "Not receiving progress — this page cannot see it", over a
+  // stream that was about to work. Disposing is OUR choice, not a lost
+  // connection, and the flag has three states for that reason: absent
+  // is "no claim" (no socket, or one still opening), `true` is open,
+  // and `false` is a connection we HAD and lost. Only the last one is
+  // worth alarming about.
+  deploys.update((all) => {
+    const next = { ...all };
+    delete next.__connected;
+    return next;
+  });
 }
 
 /** watch keeps the shared socket alive while a page is mounted. */
@@ -352,6 +364,17 @@ export function isRunning(all, scenario) {
 /** isConnected distinguishes "no output yet" from "we cannot see it". */
 export function isConnected(all) {
   return all?.__connected === true;
+}
+
+/**
+ * isDisconnected reports a connection this tab HAD and lost.
+ *
+ * Not the negation of `isConnected`: a socket that has not opened yet
+ * is neither. Alarming on the negation told the reader an apply was
+ * unobserved during the ordinary connect window.
+ */
+export function isDisconnected(all) {
+  return all?.__connected === false;
 }
 
 /**

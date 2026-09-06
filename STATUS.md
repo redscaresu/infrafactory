@@ -2,6 +2,52 @@
 
 Last updated: 2026-09-06
 
+## 2026-09-06 — S163e-fixes (round twenty-five): a guard reasoned about, not measured
+
+**11 findings, 9 accepted, 2 declined** (`docs/review-passes/pass159.md`).
+
+I first read this as another one-for-one round and was wrong. `git log -S`
+on each finding puts **two** behaviour defects on round twenty-four; six of
+the nine had survived between ten and nineteen earlier rounds, and the
+path leak below predates the review loop entirely. The loop is going
+deeper, not in circles — and that cuts against "one clean pass" as a
+correctness signal, since the same sampling walked past a raw `err.Error()`
+leak nineteen times.
+
+Both of round twenty-four's two were **mirror images of the fix that
+produced them**. Round
+twenty-four cured "the socket flag reads a stale `true` across disposal"
+by writing `false`, which made the ordinary reconnect window render as a
+lost connection — an amber "this page cannot see it" over a stream that
+was about to work. `__connected` now has three states: absent is *no
+claim* (no socket, or one still opening), `true` is open, `false` is a
+connection we had and lost. Only the last one alarms, via a new
+`isDisconnected` that is deliberately not the negation of `isConnected`.
+
+The sharpest finding was a guard whose own comment was wrong on the
+facts. The confirm button was disabled on `already_deploying` to avoid
+"minutes of output attributed to a deploy that never started" — but
+`claim` is taken before anything touches the cloud, so the server refuses
+in milliseconds and the refusal path already discards the log. The cost
+it was guarding against could not occur, and the guard itself was a
+dialog-open snapshot nothing refreshed, so the button stayed dead for the
+rest of the dialog's life once the other apply finished. Removed; the
+server owns the lock, and the warning is now phrased as of when it was
+read.
+
+Also: `finish()` stopped overwriting every unclean outcome with the flat
+"this deploy did not finish cleanly", which asserted a negative the page
+had not observed — a dropped connection concludes *unknown*, and its own
+message says the apply may still be running. The ending now uses the
+outcome's own words and no longer points at a layout report the reader
+can dismiss out from under it.
+
+Server side: the `os.ErrNotExist` branch was writing `err.Error()` into
+the body — the same absolute-path leak the branch twenty lines above
+suppresses with a test. It now answers with a stable sentence and logs
+the cause through a new `ServerConfig.Logf` seam, so a test can assert
+the operator was actually told rather than trusting stderr.
+
 ## 2026-09-06 — S163e-fixes (round twenty-four): never assert clean about a body you did not read
 
 **10 findings, 8 accepted, 2 declined.** One behaviour defect, and it settles a

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -42,6 +43,10 @@ type ServerConfig struct {
 	// gate different kinds of harm (ADR-0027).
 	Deployer      DeploymentDeployer
 	RuntimeErrors chan error
+
+	// Logf receives causes the responses deliberately withhold. Nil
+	// falls back to the standard logger.
+	Logf func(format string, args ...any)
 }
 
 type StartRunRequest struct {
@@ -82,6 +87,7 @@ func NewServer(cfg ServerConfig) *http.Server {
 
 		deploymentActor: cfg.DeploymentActor,
 		deployer:        cfg.Deployer,
+		logf:            cfg.Logf,
 		sessionID:       fmt.Sprintf("%d-%d", os.Getpid(), time.Now().UTC().UnixNano()),
 		startedAt:       time.Now().UTC(),
 	}
@@ -153,6 +159,25 @@ type serverState struct {
 	deployer        DeploymentDeployer
 	sessionID       string
 	startedAt       time.Time
+
+	// logf is where detail goes that must NOT travel in a response.
+	//
+	// Some failures name an internal path -- an *fs.PathError from a
+	// scenario-root walk -- and the body says only that nothing was
+	// created. That leaves the server's log as the sole copy of the
+	// cause, so it is a seam rather than a bare `log.Printf`: a test
+	// can assert the operator was actually told, and an embedder can
+	// route it somewhere a detached `infrafactory ui` will not discard.
+	logf func(format string, args ...any)
+}
+
+// logDetail records a cause the response deliberately withholds.
+func (s *serverState) logDetail(format string, args ...any) {
+	if s == nil || s.logf == nil {
+		log.Printf(format, args...)
+		return
+	}
+	s.logf(format, args...)
 }
 
 // mockStateForCloud picks the mock-state reader appropriate for the

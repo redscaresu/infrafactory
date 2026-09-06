@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"sort"
@@ -477,7 +476,7 @@ func deployHandler(state *serverState) http.HandlerFunc {
 			// "Return meaningful errors without exposing internals":
 			// the operator needs to know their request did nothing, and
 			// the path is for the server's log.
-			log.Printf("deploy refused before the apply: %v", err)
+			state.logDetail("deploy refused before the apply: %v", err)
 			writeRefusal(w, http.StatusInternalServerError,
 				"this server could not start the deploy, so nothing was created; see the server log")
 			return
@@ -488,17 +487,27 @@ func deployHandler(state *serverState) http.HandlerFunc {
 			// answering 500 teaches operators that 500 means nothing in
 			// particular. Matches the teardown handler.
 			//
-			// NOT a refusal. A bare os.ErrNotExist says a file was
-			// missing, and says nothing about WHEN: a state file or a
-			// workdir vanishing mid-apply reaches here too, and
-			// `DeploymentDeployer` is an interface, so this branch
-			// cannot know. A deployer that means "the name did not
-			// resolve" says so with ErrNoSuchScenario, above.
+			// NOT a refusal. `started_nothing` is a claim about the
+			// cloud, and a wrong one leaves a created project reported
+			// as a request that never happened.
 			//
-			// `started_nothing` is a claim about the cloud, and a
-			// wrong one leaves a created project reported as a request
-			// that never happened.
-			writeJSONError(w, http.StatusNotFound, err.Error())
+			// This is an INTERFACE CONTRACT, not an observed path.
+			// `LiveDeployer` cannot reach it -- it says "the name did
+			// not resolve" with ErrNoSuchScenario and folds command
+			// failures into `result.Failures` -- and an earlier comment
+			// here justified the branch with a mid-apply vanishing
+			// state file, which that deployer never produces. It stays
+			// because `DeploymentDeployer` is an interface and a bare
+			// os.ErrNotExist says nothing about WHEN the file went
+			// missing, so no promise about the cloud can be made for an
+			// implementation this package does not own.
+			//
+			// A STABLE message, for the same reason as the branch
+			// above: `err.Error()` on an *fs.PathError puts an absolute
+			// server path in a body the scenario page renders verbatim.
+			state.logDetail("deploy failed with a missing file: %v", err)
+			writeJSONError(w, http.StatusNotFound,
+				"this server could not find something the deploy needed; see the server log")
 			return
 		}
 

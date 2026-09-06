@@ -580,7 +580,7 @@ test("beginDeploy reports whether the deploy may proceed", async () => {
 // "Not receiving progress", which is the conflation the flag exists to
 // remove.
 test("disposing the socket reports the disconnection immediately", async () => {
-  const { deploys, useConnector, watch, isConnected } = await import(
+  const { deploys, useConnector, watch, isConnected, isDisconnected } = await import(
     "../src/lib/deploy-store.js"
   );
 
@@ -598,4 +598,32 @@ test("disposing the socket reports the disconnection immediately", async () => {
   stop(); // nothing running, nobody watching -> disposed
 
   assert.equal(isConnected(get(deploys)), false, "no socket means not connected");
+  // ...and NOT a connection we lost. Setting `false` here cured the
+  // stale `true` and caused its mirror image: leaving the section and
+  // coming back put a deploy started before `onopen` under "Not
+  // receiving progress -- this page cannot see it", over a stream that
+  // was about to work. Disposing is our own choice, so it makes no
+  // claim at all.
+  assert.equal(
+    isDisconnected(get(deploys)),
+    false,
+    "disposing on purpose is not a lost connection"
+  );
+});
+
+// The three states, at the boundary the amber warning is read from.
+test("isDisconnected is not the negation of isConnected", async () => {
+  const { isConnected, isDisconnected } = await import("../src/lib/deploy-store.js");
+
+  // Never opened: neither. This is the connect window, and alarming on
+  // `!isConnected` covered it with "this page cannot see it".
+  assert.equal(isConnected({}), false);
+  assert.equal(isDisconnected({}), false);
+
+  assert.equal(isConnected({ __connected: true }), true);
+  assert.equal(isDisconnected({ __connected: true }), false);
+
+  // Had one and lost it: the only state worth alarming about.
+  assert.equal(isConnected({ __connected: false }), false);
+  assert.equal(isDisconnected({ __connected: false }), true);
 });
