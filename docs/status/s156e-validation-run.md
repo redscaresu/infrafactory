@@ -126,11 +126,27 @@ touched.
 **every successful teardown left `live reconcile` permanently non-zero**. The check
 could not tell "gone because we destroyed it" from "gone unexpectedly".
 
-Fixed, with the ordering that keeps the two released cases apart: a released record
-whose project **still exists** is ADR-0024's unreclaimable case and must stay
-Accounted; only a released record whose project is **gone** is the success path. An
-existing test caught the first version of the fix, which skipped released records
-outright and would have silenced the expensive case.
+Fixed, with the ordering that keeps the two released cases apart. A released record
+whose project is **gone** is the success path and is counted as `Retired`. A
+released record whose project **still exists** is ADR-0024's unreclaimable case and
+gets its own `Released` bucket — *not* `Accounted`, which is for live records that
+matched a project, and not silence. An existing test caught the first version of the
+fix, which skipped released records outright and would have silenced the expensive
+case.
+
+Two further defects came out of review, both of them false-green shapes this command
+exists to prevent:
+
+- The `Released` warning was **concatenated onto "the cloud and the store agree"**,
+  and the stage still reported `pass` with no failures. One line raised the alarm and
+  withdrew it. The summary now says "nothing is unaccounted for, but the above will
+  not be reaped without a human", and names the record ids rather than counting them.
+- A record with **no project id** — the shape `MarkReleased` writes when a record's
+  bytes will not decode, so `live forget` on a damaged record produces it — was
+  skipped before every bucket. `Examined()` sums buckets, so a store holding one
+  reported holding none: the same "0 record(s)" signal, indistinguishable from an
+  empty or unreadable store, that this fix was written to remove. It now has a
+  `Damaged` bucket and is named in the summary.
 
 ## Cost
 
@@ -139,8 +155,15 @@ Teardown clean: destroy, orphan sweep, and a `auto_created_purge` that removed t
 `project_default` security group Scaleway creates and Terraform never owns — the D6
 leak, caught and named rather than silently succeeded.
 
-`live reconcile` after the fix: *examined 3 project(s) and 0 live record(s); the
-cloud and the store agree.*
+`live reconcile` as it stood during the run: *examined 3 project(s) and 0 live
+record(s); the cloud and the store agree.*
+
+**That line is the bug, not the evidence.** It is quoted here as what the run
+actually printed, because the store held one torn-down record at the time and this
+said it held none. After the fix the same state reads *examined 3 project(s) in the
+organization and 1 record(s); the cloud and the store agree* — the record is counted
+via `Retired`, and "live record(s)" is gone from the format string because the
+distinction it implied was never the one being made.
 
 
 ## What did NOT validate this run

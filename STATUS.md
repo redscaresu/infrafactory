@@ -33,11 +33,11 @@ is open. The rule was deliberately NOT committed to the corpus.
 project and then marks the record released, so **every successful teardown left
 `live reconcile` permanently non-zero** — reporting "the record outlived its
 infrastructure" about the one case where that is exactly what should happen. Fixed,
-with the ordering that keeps the two released cases apart: a released record whose
-project still EXISTS is ADR-0024's unreclaimable case and stays Accounted; only one
-whose project is GONE is the success path. An existing test caught the first version
-of the fix, which skipped released records outright and would have silenced the
-expensive case.
+with the ordering that keeps the two released cases apart: one whose project is GONE
+is the success path and is counted as `Retired`; one whose project still EXISTS is
+ADR-0024's unreclaimable case and gets its own `Released` bucket. An existing test
+caught the first version of the fix, which skipped released records outright and
+would have silenced the expensive case.
 
 **An earlier design for the run was wrong and was caught before spending anything.**
 Manufacturing a missing *health path* would have marked the LB backend down and
@@ -45,8 +45,9 @@ failed the `http_probe` criterion — a terraform-visible failure, not the live-
 class. Established by reading `real_probe.go` and `loadbalancer.tf` rather than by
 running it.
 
-**Review corrections (11 findings, all accepted).** The first fix was too narrow
-and the write-up overclaimed:
+**Review corrections (11 findings then, 8 more on the second round).** The first
+fix was too narrow and the write-up overclaimed; the second round found that the
+corrections had reintroduced the same shape one level up:
 
 - Skipping released records made them invisible to the summary's count, so after
   any teardown `live reconcile` said **"0 record(s)"** for a store that held one —
@@ -60,6 +61,18 @@ and the write-up overclaimed:
   `Released` now: visible in the summary, still not a failure, because forget is a
   deliberate act and failing every later reconcile for it would be the permanent-red
   defect just removed.
+- **Round two: the correction had the same defect it corrected.** The `Released`
+  warning was concatenated onto "; the cloud and the store agree", and the stage
+  still reported `pass` with an empty failures array — so the one line both raised
+  the alarm and withdrew it, and a machine reading the JSON saw success. The
+  summary now says "nothing is unaccounted for, but the above will not be reaped
+  without a human", and names the ids instead of counting them.
+- **Round two: a record with no project id was counted nowhere.** That is the shape
+  `MarkReleased` writes when a record's bytes will not decode, so `live forget` on a
+  damaged record reaches it — and the abandoned infrastructure keeps billing. It was
+  skipped before every bucket, and `Examined()` sums buckets, so a store of one
+  reported as a store of none: the *same* "0 record(s)" false signal, one level up
+  from where it was just fixed. It has a `Damaged` bucket now, and is named.
 - **The falsification claim was wrong.** The write-up said the result met
   pre-registered conditions 2 and 3. Condition 2 was "writes a rule with no
   resource, or refuses" — the run wrote a rule WITH a resource, just the wrong one,

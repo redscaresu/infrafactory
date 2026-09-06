@@ -138,6 +138,15 @@ func stampedProjects(listed []harness.ListedProject) []livestore.StampedProject 
 	return out
 }
 
+// joinDeploymentIDs lists record ids for a summary line.
+func joinDeploymentIDs(records []livestore.Deployment) string {
+	ids := make([]string, 0, len(records))
+	for _, d := range records {
+		ids = append(ids, d.ID)
+	}
+	return strings.Join(ids, ", ")
+}
+
 // reconcileSummary states what was EXAMINED as well as what was found.
 //
 // "0 unrecorded" out of zero projects and out of forty read identically
@@ -156,13 +165,33 @@ func reconcileSummary(r livestore.Reconciliation, projectsSeen int) string {
 	// releases a record WITHOUT destroying its project, so a surviving
 	// one may still be billing with nothing that will reap it -- not a
 	// disagreement, and not something to say nothing about.
+	//
+	// NAMED, not counted. "3 released record(s) whose project still
+	// exists" told an operator to go and find out which three by hand,
+	// cross-reading `live ls` against the project listing -- and every
+	// other warning this command emits names its ids.
 	if len(r.Released) > 0 {
-		base = fmt.Sprintf("%s, %d released record(s) whose project still exists (nothing will reap them)",
-			base, len(r.Released))
+		base = fmt.Sprintf("%s, %d released record(s) whose project still exists and nothing will reap (%s)",
+			base, len(r.Released), joinDeploymentIDs(r.Released))
+	}
+	if len(r.Damaged) > 0 {
+		base = fmt.Sprintf("%s, %d record(s) with no project id, which cannot be checked either way (%s)",
+			base, len(r.Damaged), joinDeploymentIDs(r.Damaged))
 	}
 
-	if r.Clean() {
+	// `Reapable`, NOT `Clean`. Nothing here is a disagreement, so the
+	// exit code stays 0 -- `live forget` is a deliberate act and failing
+	// every later reconcile because somebody used it is the permanent-red
+	// defect this command just had. But "the cloud and the store agree"
+	// promises there is nothing left to do, and a project nothing will
+	// reap is exactly something left to do. The warning was being
+	// concatenated onto that sentence, so the line both raised the alarm
+	// and withdrew it, and the JSON said pass with no failures.
+	if r.Clean() && r.Reapable() {
 		return base + "; the cloud and the store agree"
+	}
+	if r.Clean() {
+		return base + "; nothing is unaccounted for, but the above will not be reaped without a human"
 	}
 	return fmt.Sprintf("%s; %d unrecorded project(s), %d record(s) whose project is gone",
 		base, len(r.Unrecorded), len(r.Vanished))

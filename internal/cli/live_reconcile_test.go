@@ -2,6 +2,8 @@ package cli
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -183,5 +185,55 @@ func TestReconcileSaysWhenAReleasedRecordsProjectIsStillAlive(t *testing.T) {
 	err := runReconcile(t, rt, &out)
 
 	require.NoError(t, err, "forget is a deliberate act, not a disagreement")
-	assert.Contains(t, out.String(), "nothing will reap them")
+	assert.Contains(t, out.String(), "nothing will reap")
+
+	// The id, so the operator does not have to cross-read `live ls`
+	// against the project listing to find out which record it was.
+	assert.Contains(t, out.String(), "dep-forgotten")
+
+	// And it must NOT also say they agree.
+	//
+	// The warning was concatenated onto "; the cloud and the store
+	// agree", so one line raised the alarm and withdrew it, and the JSON
+	// reported pass with an empty failures array. An operator scanning
+	// for the green sentence found it. That is the false-green shape
+	// this command exists to prevent, produced by the command itself.
+	assert.NotContains(t, out.String(), "the cloud and the store agree",
+		"a project nothing will reap is not agreement")
+}
+
+// A record with no project id is COUNTED, and named.
+//
+// `MarkReleased` writes exactly this shape as its fallback when a
+// record's bytes will not decode, so `live forget` on a damaged record
+// reaches it. Skipping it silently put the "0 record(s)" false signal
+// back: a store holding one reported holding none, which is
+// indistinguishable from an empty or unreadable store.
+func TestReconcileCountsARecordWithNoProjectID(t *testing.T) {
+	h := newCommandTestHarness(t)
+	rt := &CommandRuntime{livestoreRoot: h.LivestoreRoot()}
+	rt.Deps.RunProject = &fakeRunProject{}
+	t.Setenv("SCW_SECRET_KEY", "test-secret")
+	t.Setenv("SCW_DEFAULT_ORGANIZATION_ID", "org-1")
+	store := livestore.NewFilesystemStore(h.LivestoreRoot())
+
+	// The real path, not a hand-built record: bytes that will not
+	// decode, then `live forget`. MarkReleased preserves the originals
+	// alongside and writes `{id, state: released}` with NO project id,
+	// which is the shape reconcile was dropping on the floor.
+	require.NoError(t, os.MkdirAll(h.LivestoreRoot(), 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(h.LivestoreRoot(), "dep-damaged.json"), []byte("{not json"), 0o644))
+	require.NoError(t, store.MarkReleased("dep-damaged"))
+
+	var out strings.Builder
+	err := runReconcile(t, rt, &out)
+
+	require.NoError(t, err, "unreconcilable is not a disagreement")
+	assert.Contains(t, out.String(), "and 1 record(s)",
+		"a store of one must not report as a store of none")
+	assert.Contains(t, out.String(), "no project id")
+	assert.Contains(t, out.String(), "dep-damaged")
+	assert.NotContains(t, out.String(), "the cloud and the store agree",
+		"reconcile cannot check this record, so it cannot claim agreement")
 }

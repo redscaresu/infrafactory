@@ -54,11 +54,27 @@ type Reconciliation struct {
 	Retired int
 
 	// Accounted is how many LIVE records matched a project that exists.
-	// Worth
-	// reporting rather than implying, because "0 unrecorded" out of zero
-	// projects examined and out of forty are different results and read
-	// identically.
+	// Worth reporting rather than implying, because "0 unrecorded" out
+	// of zero projects examined and out of forty are different results
+	// and read identically.
 	Accounted int
+
+	// Damaged is records carrying no project id, which cannot be
+	// reconciled in either direction.
+	//
+	// They were skipped silently and counted NOWHERE, which put the
+	// "0 record(s)" false signal back one level up: `Examined` sums the
+	// buckets, so a store holding one of these reported that it held
+	// none -- indistinguishable from an empty or unreadable store, the
+	// exact shape this type exists to prevent.
+	//
+	// Not merely a bookkeeping gap. `MarkReleased` writes this record
+	// shape as its fallback when the original bytes will not decode, so
+	// the case is reached by `live forget` on a damaged record -- and
+	// the infrastructure that record named keeps billing with nothing
+	// left pointing at it. Reconcile cannot chase it, and must not
+	// imply it looked.
+	Damaged []Deployment
 }
 
 // UnrecordedProject is a stamped project with no record behind it.
@@ -131,9 +147,15 @@ func Reconcile(projects []StampedProject, deployments []Deployment) Reconciliati
 
 	for _, d := range deployments {
 		if d.ProjectID == "" {
-			// A record with no project id cannot be reconciled either
-			// way. ADR-0024 already reports it as reapable-but-damaged,
-			// so it is not this command's to re-report.
+			// Cannot be reconciled either way -- but COUNTED, and named.
+			//
+			// This used to `continue` before any bucket on the grounds
+			// that ADR-0024 reports it elsewhere. That is true of the
+			// record's own damage and irrelevant to this summary: the
+			// count here is what tells an operator whether the store was
+			// read at all, and a skipped record made a store of one
+			// report as a store of none.
+			out.Damaged = append(out.Damaged, d)
 			continue
 		}
 		if live[d.ProjectID] {
@@ -170,6 +192,7 @@ func Reconcile(projects []StampedProject, deployments []Deployment) Reconciliati
 	}
 	sort.Slice(out.Vanished, func(i, j int) bool { return out.Vanished[i].ID < out.Vanished[j].ID })
 	sort.Slice(out.Released, func(i, j int) bool { return out.Released[i].ID < out.Released[j].ID })
+	sort.Slice(out.Damaged, func(i, j int) bool { return out.Damaged[i].ID < out.Damaged[j].ID })
 
 	return out
 }
@@ -192,5 +215,17 @@ func (r Reconciliation) Clean() bool {
 // record(s)" for a store that held one, which is the false-signal shape
 // this command's own docstring exists to prevent.
 func (r Reconciliation) Examined() int {
-	return r.Accounted + len(r.Vanished) + len(r.Released) + r.Retired
+	return r.Accounted + len(r.Vanished) + len(r.Released) + r.Retired + len(r.Damaged)
+}
+
+// Reapable reports whether anything found will be cleaned up by
+// something other than a human.
+//
+// Separate from `Clean`, which is about AGREEMENT: a released record
+// whose project survives, and a record with no project id, are both
+// fully explained and neither is a disagreement. What they are not is
+// "the cloud and the store agree" -- that sentence promises there is
+// nothing left to do, and for these there is.
+func (r Reconciliation) Reapable() bool {
+	return len(r.Released) == 0 && len(r.Damaged) == 0
 }
