@@ -2,6 +2,30 @@
 
 Last updated: 2026-09-07
 
+## 2026-09-07 — S171: a warning must not outlive the condition it described
+
+The gate rehearsal left the PR saying two contradictory things at once: a green
+"✅ Layer 3 gate: pass" summary, and below it a "⚠️ real Scaleway resources may
+still exist" warning from the earlier failed run. Both from the same gate, on the
+same PR, minutes apart.
+
+The stage summary is an upserted marker comment, so a re-run updates it. The
+cleanup warning was a bare `POST` with no marker — nothing could find it again, so
+repeated failures stacked and a later success never retracted it. A false alarm
+that cannot be withdrawn is the same class of defect as a missing one, and this is
+the gate whose entire value is that its output can be trusted.
+
+The warning is now marked and upserted, and a run that verifies cleanup **supersedes
+it** — edited in place, not deleted. Erasing a notice that said real infrastructure
+might exist would remove the record that anybody ever had to check; the retraction
+says a later run at a named commit completed teardown and the sweep, and leaves the
+history intact.
+
+Found by rehearsing the demo rather than by reading the workflow. The two comments
+had never coexisted before, because nobody had made the gate fail and then succeed
+on one PR.
+
+
 ## 2026-09-07 — S170: the gate catches it, and now generation learns it
 
 S168 added a preflight refusing an index into a resource attribute. Run against the

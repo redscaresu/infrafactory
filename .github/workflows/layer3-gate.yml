@@ -487,15 +487,68 @@ jobs:
           # reason -- and this comment matters more, because without it a
           # green summary stays the last word on a run that did not clean
           # up.
+          # MARKED and upserted, like the stage summary.
+          #
+          # It used to POST a fresh comment every time, so nothing could
+          # find it again: repeated failures stacked, and -- worse -- a
+          # later run that cleaned up successfully left the old "real
+          # Scaleway resources may still exist" sitting under a green
+          # summary. A contradictory pair on the PR is the false signal
+          # this gate exists to remove, produced by the gate itself.
+          marker="<!-- layer3-gate-cleanup -->"
           body=$(printf '%s\n' \
+            "$marker" \
             "### ⚠️ Layer 3 cleanup did not verify" \
             "" \
             "The stage summary above was posted before teardown finished. Cleanup then failed, so **real Scaleway resources may still exist**." \
             "" \
-            "Check the account before relying on that summary.")
+            "Commit \`${{ github.event.pull_request.head.sha }}\`. Check the account before relying on that summary.")
           jq -n --arg b "$body" '{body: $b}' > /tmp/layer3-gate/cleanup-warning.json
-          gh api -X POST "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
-            --input /tmp/layer3-gate/cleanup-warning.json
+          existing=$(gh api "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
+            --jq "[.[] | select(.body | startswith(\"$marker\"))] | .[0].id // empty")
+          if [ -n "$existing" ]; then
+            gh api -X PATCH "repos/${{ github.repository }}/issues/comments/$existing" \
+              --input /tmp/layer3-gate/cleanup-warning.json --silent
+            echo "updated cleanup warning $existing"
+          else
+            gh api -X POST "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
+              --input /tmp/layer3-gate/cleanup-warning.json --silent
+            echo "created cleanup warning"
+          fi
+
+      - name: Retract a stale cleanup warning
+        # A warning from an earlier run must not outlive the condition it
+        # described. If THIS run verified cleanup, an existing warning is
+        # now false, and leaving it makes the PR say both things at once.
+        #
+        # SUPERSEDED, not deleted. The warning said real infrastructure
+        # might exist; erasing that silently is the same class of harm as
+        # leaving it -- it removes the record that anyone ever needed to
+        # check. Editing keeps the history and makes the resolution
+        # explicit.
+        if: always() && steps.reap.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          marker="<!-- layer3-gate-cleanup -->"
+          existing=$(gh api "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
+            --jq "[.[] | select(.body | startswith(\"$marker\"))] | .[0].id // empty")
+          if [ -z "$existing" ]; then
+            echo "no cleanup warning to retract"; exit 0
+          fi
+          body=$(printf '%s\n' \
+            "$marker" \
+            "### ✅ Cleanup verified — the warning above is superseded" \
+            "" \
+            "An earlier run on this PR could not verify cleanup and warned that real Scaleway resources might still exist." \
+            "" \
+            "A later run at commit \`${{ github.event.pull_request.head.sha }}\` completed teardown and the orphan sweep. That warning no longer applies." \
+            "" \
+            "_Kept rather than deleted: the record that somebody once had to check the account is worth more than a tidy thread._")
+          jq -n --arg b "$body" '{body: $b}' > /tmp/layer3-gate/cleanup-retraction.json
+          gh api -X PATCH "repos/${{ github.repository }}/issues/comments/$existing" \
+            --input /tmp/layer3-gate/cleanup-retraction.json --silent
+          echo "retracted stale cleanup warning $existing"
 
       - name: Verdict
         # Last, so it can account for cleanup as well as the run.
