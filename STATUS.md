@@ -2,6 +2,55 @@
 
 Last updated: 2026-09-06
 
+## 2026-09-07 — S169: facts go in tests, decisions go in prose
+
+Every serious defect found this week was a **confident claim about another
+component, written into a comment and never checked**. Not broken code — wrong
+reasons:
+
+- "the YAML error names the file it was read from" — it does not, and acting on it
+  stripped a line number from the page that exists to fix that file
+- "the cause is on the command's stderr" — `runDeployCommand` is called directly,
+  so cobra printed nothing, and withholding the detail left the reader with nothing
+- "there is no spelling that does not call `.Error()`" — `%v` is one, and the audit
+  built on that claim had a hole for two rounds
+- "the console groups by stage" — nothing reads that field; a whole design rested
+  on it
+- "a dispose that never calls back, exactly like `connectWS`" — wrong twice, and
+  the test written on it could not see a real defect
+
+A rule that is wrong fails once. A rule that is wrong and carries a confident
+rationale keeps failing until somebody runs it — a rich comment reads as something
+already checked, so it survives review, and this codebase's comments are
+deliberately rich.
+
+**The fix could not be another convention.** S167's own thesis is that writing a
+rule down produced sixty-five violations and only a failing test held. So:
+
+> **A factual claim about another component may not be written as a comment. It is
+> written as a test, and the comment cites it by name.**
+
+Three `assumptions_test.go` files, seeded with the five claims above plus the two
+Go traps that caused real bugs — a typed nil in an interface (which `assert.NotNil`
+hides), and `hclsyntax.Walk` copying the walker by value. Each is a handful of
+lines. Each would have caught one of this week's defects on the day the comment was
+written.
+
+Why this cuts rather than restates: asserting used to be cheaper than checking, and
+now the check IS the artifact — you cannot cite a test you did not write, and
+writing it runs it. It also catches **drift**, which prose never could: when
+`gopkg.in/yaml.v3` changes its error format the test fails, where the comment would
+quietly become wrong. That is how four defects reached already-merged slices.
+
+Verified by mutation: changing `deriveCurrentStage` to read any start event fails
+the assumption that says it does not.
+
+The limit, stated rather than hidden: facts about real Scaleway are expensive to
+test and stay prose — today's teardown finding is exactly that kind. And the
+reverse citations for S167/S168's comments land when those PRs do; they are on
+branches this one is not built from.
+
+
 ## 2026-09-06 — S164: the journey, and a decline that was wrong
 
 **The handoff between the two pages had never been tested.** 78 deploy and
