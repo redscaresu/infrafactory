@@ -183,9 +183,9 @@ Verified by mutation: changing `deriveCurrentStage` to read any start event fail
 the assumption that says it does not.
 
 The limit, stated rather than hidden: facts about real Scaleway are expensive to
-test and stay prose — today's teardown finding is exactly that kind. And the
-reverse citations for S167/S168's comments land when those PRs do; they are on
-branches this one is not built from.
+test and stay prose — today's teardown finding is exactly that kind. The reverse citations are wired: the four comments
+that rest on these claims now name the test that proves them, so the link is
+navigable in both directions.
 
 
 ## 2026-09-06 — S164: the journey, and a decline that was wrong
