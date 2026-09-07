@@ -46,7 +46,11 @@ the wrong paragraph. A dangling `// Worth` fragment in the `Accounted` comment.
 ## Declined
 
 **4 — the `runs.png` baseline cannot be reproduced from a clean checkout.**
-Refuted by running it. `git log` does confirm the structural half: `runs.png` was
+
+> **This decline was WRONG, and was reversed in S164.** The finding was
+> correct. See the correction at the end of this file.
+
+Declined at the time on the grounds below, which were refuted by running it. `git log` does confirm the structural half: `runs.png` was
 captured in the first commit and the other four were re-captured in the second. But
 the conclusion does not follow, and the visual suite passes 8/8 on a clean worktree
 of the PR head, with `make test` including `ui-test-e2e`.
@@ -65,3 +69,33 @@ answers one question — *was the store read at all* — and that is the questio
 "0 record(s)" defect was about; the discriminating detail is already in the
 `Released` and `Damaged` clauses, which now name ids. A four-way breakdown on every
 run would bury those. Declined as a rewording without a defect behind it.
+
+
+## Correction (S164): finding 4 was right and the decline was wrong
+
+The decline rested on "the visual suite passes 8/8 on a clean worktree of
+the PR head". It does — and that worktree had no `.infrafactory/runs`.
+
+That is the state which decides this image. The masks cover `main table`,
+and **in the empty state there is no table to mask**, so a populated run
+store and an empty one produce genuinely different pages. The `runs.png`
+captured in the first S156e commit encoded an empty store, so:
+
+- a checkout *with* runs fails against it — 56% of pixels differ, and
+  `make test` runs `ui-test-e2e`;
+- a worktree *without* runs passes against it, which is exactly the
+  environment the decline was verified in.
+
+Confirmed after the fact by restoring the pre-S156e baseline (`07eeaca`)
+and running it against a populated checkout: it passes, where the S156e
+one does not.
+
+The sidebar/`fullPage` reasoning in the decline was accurate and
+irrelevant — it explained away a 28px measurement while the real
+difference was the table. **A correct sub-argument is not a verdict.**
+
+Fixed at the root rather than by swapping the file: the runs visual test
+now stubs `/api/runs`, so the baseline no longer depends on undeclared
+local state. Verified in both environments — a checkout with 46 runs and
+a fresh worktree with none — which is the check the original decline
+should have run and did not.

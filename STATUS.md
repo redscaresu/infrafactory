@@ -2,6 +2,44 @@
 
 Last updated: 2026-09-06
 
+## 2026-09-06 — S164: the journey, and a decline that was wrong
+
+**The handoff between the two pages had never been tested.** 78 deploy and
+estate tests existed, and every one of them mocked a single endpoint with a
+fixed body, so each page was checked against a world that agreed with it by
+construction. The deploy outcome tells the reader to "check the Deployments
+page"; nothing verified that what they find there is the deploy they just
+made, or that tearing it down there is visible back on the scenario page.
+
+`ui/e2e/journey.spec.ts` puts one mutable estate behind all four routes: a
+deploy appends to it, a teardown removes from it, and both the estate page
+and the preview read it. `already_live` — the guard that exists to stop a
+second bill — is computed from that array the way the server computes it,
+so the test can fail the way the system fails. Two mutations confirm it:
+making `alreadyLiveWarnings` ignore the estate, and dropping the
+post-teardown refresh, each fail a different test.
+
+**A wrong decline, corrected.** The S156e review said the `runs.png` visual
+baseline could not be reproduced from a clean checkout. I declined it,
+having run the suite 8/8 green in a worktree — and that worktree had no
+`.infrafactory/runs`, which is the state that decides the image. The masks
+cover `main table`, and in the empty state there is no table to mask, so
+the two states render differently. A checkout with runs fails against that
+baseline by 56% of pixels; a worktree without them passes. The decline was
+verified in the one environment that could not detect the defect.
+
+Fixed at the root: the runs visual test now stubs `/api/runs`, so the
+baseline stops depending on undeclared local state. Verified in both — a
+checkout with 46 runs and a fresh worktree with none.
+
+**Four times today the same mistake:** a mutation test scoped by `-run` to
+a set that excluded the assertion; an attribution asserted from memory that
+`git log -S` inverted; a mutation against `ui/src` while the server serves
+the embedded build; and this. Every one was a real check run against the
+wrong artifact, and every one read as evidence. Recorded in
+`feedback_narrow_sample_wrong_conclusion.md`.
+
+
 ## 2026-09-06 — S156e: the validation run, and what it found
 
 **The experiment reached step 3 of 7 and stopped there, as the plan said it should.**
