@@ -2,6 +2,27 @@
 
 Last updated: 2026-09-07
 
+## 2026-09-07 — S175: a warning about an apply that cannot happen
+
+Spotted while rehearsing the demo, on the screen the talk projects. Opening the deploy
+confirmation for an infrastructure-only scenario rendered, in this order: the heading, what the
+scenario creates, two **bold warnings**, and only then the reason it could not be deployed at all.
+
+So `web-app-paris` was told *"This will be reachable from the public internet for its whole
+lifetime"* — asserted, in bold, about a deployment the same dialog was refusing to allow.
+
+Those warnings are true **of a deployment**. With no deployment possible they are not merely
+noise; they are false, which is the one thing this dialog exists not to be. It is the same class
+this arc has spent its rounds removing — a confident statement about something that is not
+happening — sitting on the most-looked-at screen in the product.
+
+The blocking reason now leads and suppresses the warnings. `confirmationLines` stays, because what
+the scenario *describes* is still worth reading and claims nothing about an apply.
+
+Found by looking at the thing rather than the code, which is becoming a pattern worth noticing:
+the ordering was plainly wrong on screen and entirely unremarkable in the template.
+
+
 ## 2026-09-07 — S174: the API saying "wait" is not the tool saying "broken"
 
 The first live UI deploy of `web-live-paris` worked — 69 seconds, and a real HTTP 200 through a
