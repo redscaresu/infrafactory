@@ -2,6 +2,32 @@
 
 Last updated: 2026-09-07
 
+## 2026-09-07 — S174: the API saying "wait" is not the tool saying "broken"
+
+The first live UI deploy of `web-live-paris` worked — 69 seconds, and a real HTTP 200 through a
+real load balancer. The teardown destroyed every resource and then could not delete the run's
+project: Scaleway answered **412**, `precondition is not respected`, with its own advice to retry
+later. The auto-created security group purge fired and did not unblock it.
+
+The project was verified empty by hand — no instances, load balancers, IPs or VPCs — and deleted
+cleanly on a later attempt with nothing else changed. **Roughly twenty minutes.** Scaleway's
+resource check lags its own deletions.
+
+So the failure was real and the message was misleading. It read as *something is wrong*, and sent
+the operator hunting for a leak that did not exist, when it meant *not yet*. A 412 is now marked
+with `ErrRunProjectNotYetDeletable` and reported as a timing answer: the account is clean, nothing
+is billing, run `infrafactory reap` shortly or delete it in the console.
+
+**Keyed on the HTTP status, not the message text** — matching Scaleway's prose would break the
+first time they reword it, and this package has spent enough rounds removing that coupling. The
+purge is skipped on this path too: nothing is blocking the delete except bookkeeping, so removing
+resources the API never complained about would be a guess dressed as a fix.
+
+Still a `fail`, deliberately. The project exists, so the pass cannot claim the account is clean and
+ADR-0024 does not bend for a hopeful guess. And it does **not** retry internally: twenty minutes
+would hold the teardown open for the whole window, so it reports and hands over.
+
+
 ## 2026-09-07 — S172: dependabot proposed a vulnerable stdlib, again
 
 `#211` bumped `go 1.25.13` → **`go 1.26.0`**, and CI's govulncheck failed with three

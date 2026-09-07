@@ -3,6 +3,7 @@ package harness
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -240,4 +241,62 @@ func TestListRefusesWithoutCredentials(t *testing.T) {
 
 	_, err = client.List(context.Background(), "secret", "")
 	require.Error(t, err)
+}
+
+// A 412 is a TIMING answer and is marked as one.
+//
+// Scaleway checks whether a project still holds resources before
+// deleting it, and that check lags its own deletions: immediately after
+// a successful destroy it answers `precondition is not respected` and
+// tells you to retry. Observed 2026-09-07 on a project verified empty by
+// hand — it refused for about twenty minutes, then deleted with nothing
+// else changed.
+//
+// The sentinel is keyed on the STATUS, deliberately. Matching the
+// message text would break the first time Scaleway rewords it.
+func TestDeleteMarksAPreconditionFailureAsNotYet(t *testing.T) {
+	p := NewScalewayRunProjectWithDoer("https://api.example",
+		func(*http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusPreconditionFailed,
+				Body: io.NopCloser(strings.NewReader(
+					`{"message":"precondition is not respected","precondition":"resource_not_usable"}`)),
+			}, nil
+		})
+
+	err := p.Delete(context.Background(), "sk", "proj-1")
+
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrRunProjectNotYetDeletable),
+		"a 412 means wait, not that something is broken")
+	assert.Contains(t, err.Error(), "proj-1", "and it still names the project")
+}
+
+// Every other failure stays an ordinary failure.
+//
+// Without this the sentinel could widen to swallow real errors, which is
+// the opposite of what it is for: a genuine block must not be reported
+// as "try again shortly".
+func TestDeleteDoesNotMarkOtherFailuresAsNotYet(t *testing.T) {
+	for name, status := range map[string]int{
+		"forbidden": http.StatusForbidden,
+		"conflict":  http.StatusConflict,
+		"server":    http.StatusInternalServerError,
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := NewScalewayRunProjectWithDoer("https://api.example",
+				func(*http.Request) (*http.Response, error) {
+					return &http.Response{
+						StatusCode: status,
+						Body:       io.NopCloser(strings.NewReader(`{"message":"nope"}`)),
+					}, nil
+				})
+
+			err := p.Delete(context.Background(), "sk", "proj-1")
+
+			require.Error(t, err)
+			assert.False(t, errors.Is(err, ErrRunProjectNotYetDeletable),
+				"only 412 is a timing answer")
+		})
+	}
 }
