@@ -1013,6 +1013,56 @@ can disagree with the store. Recording the cost here is the fix; a lighter
 endpoint is worth building when the estate is big enough to notice, which is
 the same note S162c left about the mount fetch that has since been deleted.
 
+## 2026-09-06 — S163f: a design justified by a claim about another layer
+
+S163 gave `deploy` live stage progress and left `run` and `test` passing `nil`, so
+a Layer 3 apply was silent for minutes on the **Live Run page** — the screen a PR
+gate is watched on. Both share `executeTestWithScenario`, so one wiring covers them.
+
+**The first design was justified by a claim that was false, and review caught it.**
+The adapter sent stage lines *only* to the structured log, because — said the
+comment, the ADR, the PR body and a test message — the Live Run console renders
+`LogEntry` records and groups by stage, so raw bytes would arrive as an unparsed
+blob. Neither half is true: `live/+page.svelte` appends `JSON.stringify(msg)` for
+every frame, so the console renders a blob for everything, and `deriveCurrentStage`
+matches only `stage_start`, so the recovered stage fed nothing.
+
+**And it made its own audience worse off.** `AppLogger`'s default sink is stderr, so
+`infrafactory test` printed a JSON object where `infrafactory deploy` prints
+`  apply: running` for the identical event — and the S144 gate runs `test`. The
+human reading the gate's job log got the degraded rendering, which is the opposite
+of what the slice is for.
+
+Reworked into a **tee**: the readable line to stderr, byte for byte what `deploy`
+writes, and the structured entry to the log as well. Three things follow from the
+entry being a real log entry rather than a decoration — a failed stage is `error`
+with `status: failed` (grepping `"level":"error"` used to miss the one line saying
+why a gate run failed); the run's `Command`/`RunID`/`Iteration` are stamped on it
+(two iterations' `apply: running` were byte-identical, and a foreign `test`
+injected indistinguishable lines into an unrelated run's console); and the stage is
+the harness's own token or nothing (it was the text before the first colon of *any*
+line, so a multi-line provider error made `Error: creating instance` into stage
+"Error").
+
+**The typed-nil trap is gone rather than defended.** The previous round found it and
+guarded it with an interface dance at the call site, an ADR paragraph and two
+tests — for a branch `CommandRuntime` makes unreachable, since it always builds a
+logger and `AppLogger.Log` already no-ops on a nil receiver. Removing the branch
+removed the hazard and everything written to contain it. What remains is a guard
+with a reachable cause: an empty `Command` makes `AppLogger.Log` discard every
+entry silently.
+
+Three call-site mutations now fail: reverting the wiring to `nil`, removing
+`Close()`, and routing the readable half to `io.Discard`. The third survived the
+first attempt at this rework — the unit test covered the writer, and nothing
+covered the call site passing it a real stderr.
+
+**The lesson worth keeping**: three of the eleven accepted findings were false
+*explanations* rather than broken code. The code worked; the reasons given for it
+were fiction, and the fiction is what stopped anyone noticing the CLI output had
+got worse. Checking `live/+page.svelte` would have taken two minutes and changed
+the slice before it was written.
+
 ## 2026-09-03 — S163e: deleting the machinery instead of repairing it
 
 Three `/code-review` rounds on the deploy UI produced **9, then 13, then 14

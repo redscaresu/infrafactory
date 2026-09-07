@@ -7,8 +7,12 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/redscaresu/infrafactory/internal/config"
 	"github.com/redscaresu/infrafactory/internal/feedback"
@@ -45,11 +49,38 @@ func (f *fakeDestroyHarness) Run(ctx context.Context, _ string, _ map[string]str
 	return f.result, f.err
 }
 
+// liveWriter reports a writer that can actually carry a line.
+//
+// Go's typed-nil trap makes this necessary: `newStageLogWriter` returns
+// a *stageLogWriter, and a nil one of those placed in an io.Writer
+// parameter compares != nil. Every `p.out != nil` guard downstream then
+// passes for a writer that discards, which is indistinguishable from
+// working until somebody watches the screen.
+func liveWriter(w io.Writer) bool {
+	if w == nil {
+		return false
+	}
+	// `reflect.Interface` is deliberately NOT listed. `reflect.ValueOf`
+	// unwraps the interface and reports the DYNAMIC type's kind, so it
+	// can never be Interface here -- and listing an impossible case in a
+	// helper written to be precise about the interface/pointer
+	// distinction teaches the next reader the wrong model of reflect.
+	v := reflect.ValueOf(w)
+	switch v.Kind() {
+	case reflect.Ptr, reflect.Map, reflect.Slice, reflect.Func, reflect.Chan:
+		return !v.IsNil()
+	default:
+		return true
+	}
+}
+
 type fakeSandboxDeployHarness struct {
-	result  *harness.SandboxDeployResult
-	err     error
-	calls   int
-	lastCtx context.Context
+	gotProgress bool
+	stageLog    *stageLogWriter
+	result      *harness.SandboxDeployResult
+	err         error
+	calls       int
+	lastCtx     context.Context
 	// onRun fires during the apply, so a test can move the world at the
 	// moment a real apply would -- an upgrade's version changes because
 	// the apply changed it, not before.
@@ -65,7 +96,30 @@ type fakeSandboxDeployHarness struct {
 // destroy, so a fake apply that leaves no state makes every Layer 3 test
 // fail at capture -- which is correct fail-closed behaviour, just not
 // what these tests are exercising.
-func (f *fakeSandboxDeployHarness) Run(ctx context.Context, workDir string, _ map[string]string, _ io.Writer) (*harness.SandboxDeployResult, error) {
+func (f *fakeSandboxDeployHarness) Run(ctx context.Context, workDir string, _ map[string]string, progress io.Writer) (*harness.SandboxDeployResult, error) {
+	// Recorded so a test can assert the call site actually HANDS the
+	// harness somewhere to report. Dropping that argument makes the
+	// Layer 3 apply silent for minutes on the Live Run page, and a test
+	// that builds the harness itself cannot notice.
+	//
+	// `progress != nil` is NOT ENOUGH on its own. A nil *stageLogWriter
+	// assigned into an io.Writer is a non-nil interface, and the harness
+	// then formats every stage line and hands it to something whose only
+	// job is to drop it -- passing this assertion while the run console
+	// stays blank. `liveWriter` refuses that case.
+	f.gotProgress = liveWriter(progress)
+	// Held so the call site's `Close` can be asserted after the command
+	// returns. The harness is the only thing positioned to see the
+	// writer it was handed.
+	if w, ok := progress.(*stageLogWriter); ok {
+		f.stageLog = w
+	}
+	// The fake ANNOUNCES a stage, like the real harness does. Recording
+	// that a writer was handed over proves less than it looks: the two
+	// halves of the tee are only observable once something writes.
+	if progress != nil {
+		_, _ = io.WriteString(progress, "  apply: running\n")
+	}
 	f.calls++
 	f.lastCtx = ctx
 	if f.err == nil && workDir != "" {
@@ -837,7 +891,8 @@ func TestTestCommandRunsSandboxLayerWhenEnabled(t *testing.T) {
 	cmd := newTestCommandForTest(opts)
 	stdout := &bytes.Buffer{}
 	cmd.SetOut(stdout)
-	cmd.SetErr(&bytes.Buffer{})
+	stderr := &bytes.Buffer{}
+	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{scenarioPath, "--config", h.ConfigPath})
 
 	if err := cmd.Execute(); err != nil {
@@ -864,6 +919,35 @@ func TestTestCommandRunsSandboxLayerWhenEnabled(t *testing.T) {
 	if !strings.Contains(stdout.String(), "- sandbox_deploy/destroy: pass") {
 		t.Fatalf("expected sandbox destroy stage, got:\n%s", stdout.String())
 	}
+
+	// The harness must be HANDED somewhere to report, or the Layer 3
+	// apply is silent for minutes on the Live Run page -- the screen a
+	// PR gate is watched on. S163 gave `deploy` this and left `test`
+	// passing nil.
+	//
+	// Asserted at the CALL SITE, because a test that builds the harness
+	// itself cannot notice the argument being dropped here.
+	assert.True(t, sandboxDeploy.gotProgress,
+		"the sandbox apply must report its stages, or the run console shows nothing for minutes")
+
+	// And the writer is CLOSED. Close is the only thing that flushes a
+	// trailing line with no newline -- the last line of a failed apply,
+	// which is the one that says why -- and removing the call left the
+	// whole package green.
+	require.NotNil(t, sandboxDeploy.stageLog)
+	assert.True(t, sandboxDeploy.stageLog.closed,
+		"an unclosed writer silently drops the final line of a failed apply")
+
+	// The READABLE line reached stderr, which is where `deploy` puts it
+	// and what the S144 PR gate's job log shows a human.
+	//
+	// Asserted at the call site, not just on the writer: routing the
+	// text half to io.Discard here left every other test green, so the
+	// regression this rework exists to undo -- `test` printing a JSON
+	// blob where `deploy` prints a sentence -- could return unnoticed.
+	assert.Contains(t, stderr.String(), "apply: running",
+		"the gate's job log must show the stage, not only app.log")
+
 }
 
 func TestTestCommandAutoDestroysSandboxResourcesAfterProbeFailure(t *testing.T) {

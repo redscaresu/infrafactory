@@ -186,68 +186,64 @@ statement about something the reader may not be looking at.
 Watching is never required. The apply is detached from the request, so closing the
 tab stops the stream and not the deploy.
 
-**The subject is the scenario, not the deployment id**, and that is a limit rather
-than a choice: the id is minted inside the command, after the request is accepted.
+### S163f: `run` and `test` report too, as a tee
 
-Two concurrent deploys of one scenario are now prevented **within a process** by
-S163c's lock, so a reader will not see two streams interleaved that way. The
-hazard the keying creates is not retired, only narrowed: **sequential** deploys
-produce several live deployments of one scenario — which is why `already_live`
-returns a list — and a reader watching a scenario-keyed stream with two ids live
-still cannot tell which one they are watching. That matters because the id is the
-argument to `live teardown`, and taking the wrong one has consequences.
+This decision was written for `deploy` and left the other two Layer 3 callers
+passing `nil`. That was the wrong half to finish: `deploy` is watched from the
+scenario page, while `run` and `test` are what a **PR gate** executes, and the
+Live Run page is the screen a demo is pointed at. Their apply was silent for
+minutes on it.
 
-## Amendment, 2026-09-03 (S163c): the guard against a second deploy is server-side
+**The first version of this section was wrong, and review caught it.** It said the
+lines should go *only* to the structured log, because the Live Run console renders
+`LogEntry` records and groups by stage, so raw bytes would arrive as an unparsed
+blob. Both halves of that are false:
 
-Two deploys of one scenario produce **two run-owned projects and two sets of
-billable resources for one thing**, and until now the only thing preventing it was
-client-side state.
+- `live/+page.svelte` appends `JSON.stringify(msg)` for **every** frame, so the
+  console renders a blob for everything. There was no well-formed rendering to be
+  inconsistent with.
+- `deriveCurrentStage` matches only `event == "stage_start"`, so the recovered
+  stage fed no grouping, no badge and no filter.
 
-A page is exactly the wrong place for that guard. A refresh wipes it, a second tab
-never had it, and `curl` never consulted it. Three review findings across two
-rounds were variants of the same hole, and each fix moved the client state around
-without addressing that it was client state.
+And it made the common case worse. `AppLogger`'s default sink is stderr, so
+`infrafactory test` printed a JSON object where `infrafactory deploy` prints
+`  apply: running` for the identical event — and the S144 gate runs `test`, so the
+human reading the gate's job log got the degraded rendering. The slice's own
+audience was the one it hurt.
 
-`LiveDeployer` holds the lock. A second `Deploy` of a scenario already in flight
-returns `ErrDeployInProgress`, which the endpoint answers **423 Locked** — naming
-the scenario, because a bare refusal leaves a reader wondering which of their tabs
-is responsible.
+**So it is a tee.** The readable line goes to stderr, byte for byte what `deploy`
+writes; the structured entry goes to the log, where it is grep-able and reaches the
+websocket. Neither audience is traded for the other, and the justification is now
+what is actually true of each: app.log can be filtered by stage and level, the
+console cannot group by anything.
 
-**423 and not 409**, because 409 on this endpoint already means something else: a
-deploy that *ran* and could not prove itself clean, carrying an `ActionResult`. A
-refusal sharing that status was parsed as a result, found no `clean` field, and
-told the reader *"resources may still be running"* after a request that never
-touched the cloud.
+Three consequences that follow from the entry being a real log entry rather than a
+decoration:
 
-**Per scenario, not global.** Two different scenarios deploying at once is
-ordinary, and blocking it would make the UI worse for no safety gain.
+- **A failed stage is `error` with `status: failed`.** Everything was `info`, so
+  `apply: FAILED after 141s` sat at the same level as `apply: running`, and an
+  operator grepping for `"level":"error"` to find why a gate run failed missed the
+  one line that says why.
+- **The run's scope is stamped on it.** `runIteration` stamps `Command`, `RunID`
+  and `Iteration` on every other entry; these carried a hardcoded `"test"` and
+  neither of the others, so iteration 2's `apply: running` was byte-identical to
+  iteration 1's, and a `test` running elsewhere injected indistinguishable lines
+  into an unrelated run's console over the globally-broadcast socket.
+- **The stage is the harness's token or nothing.** It was the text before the first
+  colon of any line, and a provider error rendered by `%v` is routinely multi-line,
+  so `Error: creating instance` became stage "Error". An empty stage is a better
+  answer than a wrong one; the line itself always gets through.
 
-**The lock is an in-memory map in ONE process, and that is the larger limit.**
-The CLI `deploy` command goes straight to `runDeployCommand` and never touches
-`LiveDeployer`, so `infrafactory deploy` run alongside a UI deploy of the same
-scenario produces two run-owned projects — as would a second server instance. What
-the lock closes is duplicate deploys *from one UI*, which is where the accidental
-ones come from.
-
-**It also prevents CONCURRENT duplicates only.** Deploying a
-scenario, waiting for it to finish, and deploying it again still produces a second
-run-owned project — the lock is released when the first completes, and nothing
-consults the live estate. The ADR previously stated the harm without that
-qualification, which overstated what this closes. What it does close is the
-accidental duplicate: the reload, the second tab, the double click. Warning about
-an *existing* live deployment is a different guard, and it belongs in the
-confirmation rather than in a lock.
-
-**Released on every exit, including failure.** A scenario stuck marked-as-deploying
-could never be deployed again without restarting the server — a worse failure than
-the one being prevented.
-
-The claim happens after name resolution, and that ordering is **tidiness rather
-than safety**. An earlier version of this ADR said a typo could otherwise "lock a
-name nothing will ever deploy"; mutation testing disproved it, because the
-deferred release fires on the resolution failure too. Recorded because a false
-safety claim is what the next reader reasons from — the release is the guarantee,
-the ordering is not.
+The typed-nil trap the first version documented is **gone rather than defended**.
+`newStageLogWriter` used to return a nil `*stageLogWriter` when there was no
+logger, which callers had to keep out of an `io.Writer` by hand — a nil one becomes
+a non-nil interface, `p.out != nil` passes, and every line is formatted and
+dropped. That branch cannot be reached, because `CommandRuntime` always builds a
+logger, and `AppLogger.Log` already no-ops on a nil receiver. Removing the branch
+removed the hazard, the interface dance at the call site, and the two tests written
+to keep it safe. What remains is a guard with a reachable cause: an empty
+`Command` makes `AppLogger.Log` discard every entry silently, so the constructor
+refuses it.
 
 ### The listing says what is deploying, and that is advisory only
 
