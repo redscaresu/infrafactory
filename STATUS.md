@@ -2,6 +2,35 @@
 
 Last updated: 2026-09-07
 
+## 2026-09-07 — S170: the gate catches it, and now generation learns it
+
+S168 added a preflight refusing an index into a resource attribute. Run against the
+whole corpus it refused **eight Scaleway scenarios** — `web-app-paris`,
+`web-app-paris-pinned`, `private-lb-db-paris`, `compute-lb-multi-paris`,
+`incremental-project-paris`, `web-live-paris` and two more — every one carrying the
+same `private_ips[0]` / `private_network[0]` shape that stranded real infrastructure.
+The stack that bit us was not special; it was the first one to be run.
+
+**The learning cycle had already seen it and could not act.** `pitfalls/scaleway.yaml`
+holds a `scaleway_lb_backend` entry discovered from `incremental-project-paris` whose
+rule is a raw stderr dump — `Error: Invalid index ... private_ips[0].address` — with
+`source: descriptive`. A symptom, not a remedy. Five of the seven Scaleway pitfalls
+are that shape. It told the generator what went wrong and nothing about what to write
+instead, which is why the shape kept being generated.
+
+So the loop closes with a prescriptive `source: avoid` rule: write
+`try(EXPR[0].address, "")` or `one(EXPR)`, and the reason — destroy evaluates the
+configuration, so an unevaluable expression breaks the escape hatch, not just the
+apply. Kept under the 1000-byte ratchet the corpus enforces (770).
+
+Both halves matter and neither substitutes for the other. The preflight is the guard
+that holds, because it does not depend on the LLM having learned anything. The
+pitfall is what stops the guard from simply blocking eight scenarios forever.
+
+**The demo is unaffected**, checked rather than assumed: `block-paris` and
+`lb-serving-paris` carry no indexed expressions, so nothing shipped this week changed
+what the gate does on stage.
+
 ## 2026-09-07 — S168: a stack that cannot be destroyed must not reach apply
 
 The S164 canary created real infrastructure that **its own teardown could not

@@ -16,6 +16,23 @@ pitfalls:
       rule: "exit status 1 | stderr: ╷\n│ Error: Invalid index\n│ \n│   on loadbalancer.tf line 19, in resource \"scaleway_lb_backend\" \"web\":\n│   19:     scaleway_instance_server.web_1.private_ips[0].address,\n│     ├────────────────\n│     │ scaleway_instance_serve..."
       source: descriptive
       discovered_from: incremental-project-paris
+    - resource: scaleway_lb_backend
+      rule: |-
+        NEVER index a resource attribute directly. Write
+        `try(scaleway_instance_private_nic.web.private_ips[0].address, "")` or
+        `one(...)`, not `scaleway_instance_private_nic.web.private_ips[0].address`.
+
+        Not just about apply failing: `tofu destroy` EVALUATES THE CONFIGURATION
+        rather than replaying state, so an expression that cannot be evaluated
+        breaks destroy too -- what the half-finished apply created cannot be
+        removed, and deleting the run project does not help because Scaleway
+        refuses to delete a project holding resources. Recovery is manual.
+
+        `private_ips` and `private_network` are empty until after apply. `var.` and
+        `local.` are known at plan time and safe to index. The Layer 3 preflight
+        refuses the unguarded form, so generating it fails before anything exists.
+      source: avoid
+      discovered_from: web-live-paris
     - resource: scaleway_domain_record
       rule: "exit status 1 | stderr: ╷\n│ Error: scaleway-sdk-go: resource  with ID  is not found\n│ \n│   with scaleway_domain_record.app,\n│   on dns.tf line 1, in resource \"scaleway_domain_record\" \"app\":\n│    1: resource \"scaleway_domain_record\" \"app\" {\n│ \n╵"
       source: descriptive
