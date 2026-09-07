@@ -481,7 +481,15 @@ func deployHandler(state *serverState) http.HandlerFunc {
 			// that promise a typo'd scenario pinned a red "it may have
 			// created resources that are still running" on screen for
 			// the rest of the session.
-			writeRefusal(w, http.StatusNotFound, err.Error())
+			//
+			// Composed from what the CALLER sent, not from `err.Error()`.
+			// The error's text happens to be safe -- this package builds
+			// it -- but "happens to be safe" is what the other
+			// sixty-five sites also were until one of them wrapped an
+			// *fs.PathError. A deployer is an interface, so what it puts
+			// in that error is not this handler's to promise.
+			writeRefusal(w, http.StatusNotFound,
+				fmt.Sprintf("no scenario named %q", req.Scenario))
 			return
 		}
 		if errors.Is(err, ErrNothingStarted) {

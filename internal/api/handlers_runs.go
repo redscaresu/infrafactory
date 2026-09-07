@@ -28,14 +28,14 @@ func listAllRunsHandler(state *serverState) http.HandlerFunc {
 		}
 		scenarios, err := state.store.ListScenarios()
 		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, err.Error())
+			writeInternalError(w, state, http.StatusInternalServerError, "this server could not read its runs", err)
 			return
 		}
 		all := make([]runstore.RunMetadata, 0)
 		for _, scenarioName := range scenarios {
 			runs, err := state.store.ListRuns(scenarioName)
 			if err != nil {
-				writeJSONError(w, http.StatusInternalServerError, err.Error())
+				writeInternalError(w, state, http.StatusInternalServerError, "this server could not read its runs", err)
 				return
 			}
 			all = append(all, runs...)
@@ -86,7 +86,7 @@ func runsByScenarioHandler(state *serverState) http.HandlerFunc {
 			}
 			runs, err := state.store.ListRuns(scenarioName)
 			if err != nil {
-				writeJSONError(w, http.StatusInternalServerError, err.Error())
+				writeInternalError(w, state, http.StatusInternalServerError, "this server could not read the runs for that scenario", err)
 				return
 			}
 			writeJSON(w, http.StatusOK, response{Runs: runs})
@@ -104,7 +104,7 @@ func runsByScenarioHandler(state *serverState) http.HandlerFunc {
 					writeJSONError(w, http.StatusNotFound, "run not found")
 					return
 				}
-				writeJSONError(w, http.StatusInternalServerError, err.Error())
+				writeInternalError(w, state, http.StatusInternalServerError, "this server could not read the runs for that scenario", err)
 				return
 			}
 			writeJSON(w, http.StatusOK, meta)
@@ -194,7 +194,7 @@ func handleRunIterations(state *serverState, w http.ResponseWriter, scenarioName
 
 	iterations, err := state.store.ListIterations(scenarioName, runID)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		writeInternalError(w, state, http.StatusInternalServerError, "this server could not read the iterations for that run", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, response{Iterations: iterations})
@@ -214,7 +214,7 @@ func handleRunIterationSubresource(state *serverState, w http.ResponseWriter, r 
 				writeJSONError(w, http.StatusNotFound, "iteration not found")
 				return
 			}
-			writeJSONError(w, http.StatusInternalServerError, err.Error())
+			writeInternalError(w, state, http.StatusInternalServerError, "this server could not read that iteration", err)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -243,7 +243,7 @@ func handleIterationFiles(state *serverState, w http.ResponseWriter, r *http.Req
 				writeJSONError(w, http.StatusNotFound, "iteration generated files not found")
 				return
 			}
-			writeJSONError(w, http.StatusInternalServerError, err.Error())
+			writeInternalError(w, state, http.StatusInternalServerError, "this server could not read the files for that iteration", err)
 			return
 		}
 		writeJSON(w, http.StatusOK, listResponse{Files: files})
@@ -266,13 +266,13 @@ func handleIterationFiles(state *serverState, w http.ResponseWriter, r *http.Req
 			writeJSONError(w, http.StatusForbidden, "path traversal is not allowed")
 			return
 		}
-		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		writeInternalError(w, state, http.StatusInternalServerError, "this server could not read the files for that iteration", err)
 		return
 	}
 	if shouldFormatRequest(r, relPath) {
 		payload, err = state.formatter.Format(r.Context(), relPath, payload)
 		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, err.Error())
+			writeInternalError(w, state, http.StatusInternalServerError, "this server could not read the files for that iteration", err)
 			return
 		}
 	}
@@ -287,24 +287,24 @@ func handleRunBundle(state *serverState, w http.ResponseWriter, scenarioName, ru
 
 	finalFiles, err := state.store.ListGeneratedFiles(scenarioName, runID)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		writeInternalError(w, state, http.StatusInternalServerError, "this server could not build the run bundle", err)
 		return
 	}
 	for _, file := range finalFiles {
 		payload, err := state.store.ReadGeneratedFile(scenarioName, runID, file)
 		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, err.Error())
+			writeInternalError(w, state, http.StatusInternalServerError, "this server could not build the run bundle", err)
 			return
 		}
 		if err := addZipFile(zw, filepath.ToSlash(filepath.Join("generated", file)), payload); err != nil {
-			writeJSONError(w, http.StatusInternalServerError, err.Error())
+			writeInternalError(w, state, http.StatusInternalServerError, "this server could not build the run bundle", err)
 			return
 		}
 	}
 
 	iterations, err := state.store.ListIterations(scenarioName, runID)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		writeInternalError(w, state, http.StatusInternalServerError, "this server could not build the run bundle", err)
 		return
 	}
 	for _, iteration := range iterations {
@@ -313,7 +313,7 @@ func handleRunBundle(state *serverState, w http.ResponseWriter, scenarioName, ru
 			if errors.Is(err, os.ErrNotExist) {
 				continue
 			}
-			writeJSONError(w, http.StatusInternalServerError, err.Error())
+			writeInternalError(w, state, http.StatusInternalServerError, "this server could not build the run bundle", err)
 			return
 		}
 		for _, file := range files {
@@ -324,14 +324,14 @@ func handleRunBundle(state *serverState, w http.ResponseWriter, scenarioName, ru
 			}
 			zipPath := filepath.ToSlash(filepath.Join("iterations", strconv.Itoa(iteration), "generated", file))
 			if err := addZipFile(zw, zipPath, payload); err != nil {
-				writeJSONError(w, http.StatusInternalServerError, err.Error())
+				writeInternalError(w, state, http.StatusInternalServerError, "this server could not build the run bundle", err)
 				return
 			}
 		}
 	}
 
 	if err := zw.Close(); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		writeInternalError(w, state, http.StatusInternalServerError, "this server could not build the run bundle", err)
 		return
 	}
 
@@ -348,7 +348,7 @@ func handleRunLog(state *serverState, w http.ResponseWriter, scenarioName, runID
 			writeJSONError(w, http.StatusNotFound, "run log not found")
 			return
 		}
-		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		writeInternalError(w, state, http.StatusInternalServerError, "this server could not read the run log", err)
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -367,7 +367,7 @@ func handleRunArtifact(state *serverState, w http.ResponseWriter, scenarioName, 
 			writeJSONError(w, http.StatusForbidden, "path traversal is not allowed")
 			return
 		}
-		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		writeInternalError(w, state, http.StatusInternalServerError, "this server could not read that artifact", err)
 		return
 	}
 	w.Header().Set("Content-Type", contentType)
@@ -381,7 +381,7 @@ func handleRunArtifactsArchive(state *serverState, w http.ResponseWriter, scenar
 			writeJSONError(w, http.StatusNotFound, "run not found")
 			return
 		}
-		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		writeInternalError(w, state, http.StatusInternalServerError, "this server could not build the artifact archive", err)
 		return
 	}
 
@@ -410,11 +410,11 @@ func handleRunArtifactsArchive(state *serverState, w http.ResponseWriter, scenar
 		return addZipFile(zw, rel, payload)
 	})
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		writeInternalError(w, state, http.StatusInternalServerError, "this server could not build the artifact archive", err)
 		return
 	}
 	if err := zw.Close(); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		writeInternalError(w, state, http.StatusInternalServerError, "this server could not build the artifact archive", err)
 		return
 	}
 
@@ -447,7 +447,7 @@ func handleRunFiles(state *serverState, w http.ResponseWriter, r *http.Request, 
 				writeJSONError(w, http.StatusNotFound, "generated files not found")
 				return
 			}
-			writeJSONError(w, http.StatusInternalServerError, err.Error())
+			writeInternalError(w, state, http.StatusInternalServerError, "this server could not read the files for that run", err)
 			return
 		}
 		writeJSON(w, http.StatusOK, listResponse{Files: files})
@@ -470,13 +470,13 @@ func handleRunFiles(state *serverState, w http.ResponseWriter, r *http.Request, 
 			writeJSONError(w, http.StatusForbidden, "path traversal is not allowed")
 			return
 		}
-		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		writeInternalError(w, state, http.StatusInternalServerError, "this server could not read the files for that run", err)
 		return
 	}
 	if shouldFormatRequest(r, relPath) {
 		payload, err = state.formatter.Format(r.Context(), relPath, payload)
 		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, err.Error())
+			writeInternalError(w, state, http.StatusInternalServerError, "this server could not read the files for that run", err)
 			return
 		}
 	}
@@ -497,7 +497,7 @@ func startRunHandler(state *serverState, w http.ResponseWriter, r *http.Request,
 			writeJSONError(w, http.StatusNotFound, "scenario not found")
 			return
 		}
-		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		writeInternalError(w, state, http.StatusInternalServerError, "this server could not start the run", err)
 		return
 	}
 
@@ -527,7 +527,7 @@ func startRunHandler(state *serverState, w http.ResponseWriter, r *http.Request,
 			writeJSONError(w, http.StatusConflict, "run already in progress")
 			return
 		}
-		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		writeInternalError(w, state, http.StatusInternalServerError, "this server could not start the run", err)
 		return
 	}
 

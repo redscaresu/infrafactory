@@ -2,6 +2,56 @@
 
 Last updated: 2026-09-06
 
+## 2026-09-07 — S167: the path-leak class, closed at the seam
+
+Review round twenty-six found four handlers writing `err.Error()` into a response
+body, in `handlers_deployments.go`. I fixed those four. That was whack-a-mole: the
+same shape existed at **sixty-five more sites** across `internal/api` — runs,
+scenarios, pitfalls, output, compare — and four of the original four were in code
+that had already been through a code review of its own.
+
+**It is a real leak, verified rather than inferred.** Pointing an unreadable run
+store at four endpoints put the store's absolute path in all four bodies:
+`{"error":"read scenario runs: open /var/.../Usersprobe/runs/web-app-paris:
+permission denied"}`. Every error body in this package is rendered verbatim by the
+UI. The *not-found* paths were always clean — they have explicit stable branches —
+so it is the fallback for unexpected errors that leaks, which is why nobody
+noticed.
+
+**Not a status-code rule, which is the trap I nearly fell into.** It would be
+convenient if 5xx meant hide and 4xx meant show. `handlePutScenarioByPath` answers
+**400** for malformed YAML, and that error carries the schema path because the
+parse runs against a temp file — confirmed by calling `loadScenarioFile` directly
+rather than guessing. Safety is about where the error came from, not what the
+status says about blame.
+
+Three functions now, and only two of them may see an error:
+
+- `writeJSONError` — a message this package composed. Never an error.
+- `writeInternalError` — logs the cause through the `Logf` seam and answers with a
+  stable sentence. Sixty of the sites.
+- `writeRequestError` — the one deliberate echo, for errors describing the
+  *caller's own payload*: a body that would not read, JSON that would not decode.
+  Five sites.
+
+**The part that stops it regrowing is the audit**, not the conversion.
+`error_body_audit_test.go` parses every non-test file in the package and fails the
+build if an error's text reaches a body-writer — catching all three shapes that
+were present (`err.Error()`, `fmt.Sprintf("...%v", err)`, and `"prefix: "+err`).
+Same pattern as `cloud_prefix_lockstep_test.go` and `handlers/contract_audit_test.go`:
+a convention nobody can drift from because drift is a failed `go test`.
+
+It audits **every** body-writer, not just the obvious one. Writing it for
+`writeJSONError` alone left `writeRefusal` echoing an error two hundred lines from
+a fix for exactly that — safe by construction at the time, and one wrapped
+`*fs.PathError` away from not being.
+
+Verified four ways: all five previously-leaking endpoints are clean at runtime with
+the cause reaching the log; the audit fails on each of the three leak shapes
+reintroduced; it fails on `writeRefusal` too; and it refuses to pass vacuously if
+it finds no files to read.
+
+
 ## 2026-09-06 — S164: the journey, and a decline that was wrong
 
 **The handoff between the two pages had never been tested.** 78 deploy and

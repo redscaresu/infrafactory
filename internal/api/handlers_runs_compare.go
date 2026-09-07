@@ -71,7 +71,7 @@ func handleRunCompare(state *serverState, w http.ResponseWriter, r *http.Request
 				writeJSONError(w, http.StatusNotFound, "run "+id+" not found")
 				return
 			}
-			writeJSONError(w, http.StatusInternalServerError, err.Error())
+			writeInternalError(w, state, http.StatusInternalServerError, "this server could not compare those runs", err)
 			return
 		}
 	}
@@ -82,7 +82,7 @@ func handleRunCompare(state *serverState, w http.ResponseWriter, r *http.Request
 			writeJSONError(w, http.StatusNotFound, "run1 generated files not found")
 			return
 		}
-		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		writeInternalError(w, state, http.StatusInternalServerError, "this server could not compare those runs", err)
 		return
 	}
 	files2, err := state.store.ListGeneratedFiles(scenarioName, run2)
@@ -91,7 +91,7 @@ func handleRunCompare(state *serverState, w http.ResponseWriter, r *http.Request
 			writeJSONError(w, http.StatusNotFound, "run2 generated files not found")
 			return
 		}
-		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		writeInternalError(w, state, http.StatusInternalServerError, "this server could not compare those runs", err)
 		return
 	}
 
@@ -123,14 +123,14 @@ func handleRunCompare(state *serverState, w http.ResponseWriter, r *http.Request
 		if in1Ok {
 			content1, err = state.store.ReadGeneratedFile(scenarioName, run1, name)
 			if err != nil {
-				writeJSONError(w, http.StatusInternalServerError, "read run1 "+name+": "+err.Error())
+				writeInternalError(w, state, http.StatusInternalServerError, "read run1 "+name, err)
 				return
 			}
 		}
 		if in2Ok {
 			content2, err = state.store.ReadGeneratedFile(scenarioName, run2, name)
 			if err != nil {
-				writeJSONError(w, http.StatusInternalServerError, "read run2 "+name+": "+err.Error())
+				writeInternalError(w, state, http.StatusInternalServerError, "read run2 "+name, err)
 				return
 			}
 		}
@@ -149,7 +149,7 @@ func handleRunCompare(state *serverState, w http.ResponseWriter, r *http.Request
 		if entry.Status != "unchanged" {
 			diff, derr := unifiedDiff(name, run1, run2, content1, content2)
 			if derr != nil {
-				writeJSONError(w, http.StatusInternalServerError, "diff "+name+": "+derr.Error())
+				writeInternalError(w, state, http.StatusInternalServerError, "diff "+name, derr)
 				return
 			}
 			entry.UnifiedDiff = diff

@@ -101,7 +101,7 @@ func listScenariosHandler(state *serverState) http.HandlerFunc {
 			return nil
 		})
 		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, err.Error())
+			writeInternalError(w, state, http.StatusInternalServerError, "this server could not list its scenarios", err)
 			return
 		}
 
@@ -154,7 +154,7 @@ func validateScenarioHandler(state *serverState) http.HandlerFunc {
 		const maxValidatePayloadBytes = 1 << 20 // 1 MB
 		body, err := io.ReadAll(io.LimitReader(r.Body, maxValidatePayloadBytes+1))
 		if err != nil {
-			writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("read request body: %v", err))
+			writeRequestError(w, http.StatusBadRequest, "the request body could not be read", err)
 			return
 		}
 		if len(body) > maxValidatePayloadBytes {
@@ -166,7 +166,7 @@ func validateScenarioHandler(state *serverState) http.HandlerFunc {
 		dec := json.NewDecoder(bytes.NewReader(body))
 		dec.DisallowUnknownFields()
 		if err := dec.Decode(&req); err != nil {
-			writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("decode request body: %v", err))
+			writeRequestError(w, http.StatusBadRequest, "the request body is not valid JSON", err)
 			return
 		}
 		// Reject trailing JSON so a body like `{"yaml":"x"}{"yaml":"y"}`
@@ -182,7 +182,7 @@ func validateScenarioHandler(state *serverState) http.HandlerFunc {
 
 		schemaPath, err := selectSchemaPath(state.scenarioSchemaPathCandidates())
 		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, err.Error())
+			writeInternalError(w, state, http.StatusInternalServerError, "this server could not validate that scenario", err)
 			return
 		}
 
@@ -215,7 +215,7 @@ func validateScenarioHandler(state *serverState) http.HandlerFunc {
 			return
 		}
 
-		writeJSONError(w, http.StatusInternalServerError, validateErr.Error())
+		writeInternalError(w, state, http.StatusInternalServerError, "this server could not validate that scenario", validateErr)
 	}
 }
 
@@ -276,7 +276,7 @@ func scenarioByPathHandler(state *serverState) http.HandlerFunc {
 
 		scenarioFile, err := resolveScenarioFile(state.cfg.Paths.Scenarios, relPath)
 		if err != nil {
-			writeJSONError(w, http.StatusForbidden, err.Error())
+			writeInternalError(w, state, http.StatusForbidden, "that scenario path is not allowed", err)
 			return
 		}
 
@@ -310,7 +310,7 @@ func handleGetScenarioLayer3Status(w http.ResponseWriter, state *serverState, re
 			writeJSONError(w, http.StatusNotFound, "scenario not found")
 			return
 		}
-		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		writeInternalError(w, state, http.StatusInternalServerError, "this server could not read the Layer 3 status for that scenario", err)
 		return
 	}
 
@@ -368,7 +368,7 @@ func handleGetScenarioByPath(w http.ResponseWriter, state *serverState, relPath,
 			writeJSONError(w, http.StatusNotFound, "scenario not found")
 			return
 		}
-		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		writeInternalError(w, state, http.StatusInternalServerError, "this server could not read that scenario", err)
 		return
 	}
 
@@ -387,7 +387,7 @@ func handlePutScenarioByPath(w http.ResponseWriter, r *http.Request, state *serv
 	const maxScenarioPayloadBytes = 1 << 20 // 1 MB
 	payload, err := io.ReadAll(io.LimitReader(r.Body, maxScenarioPayloadBytes+1))
 	if err != nil {
-		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("read request body: %v", err))
+		writeRequestError(w, http.StatusBadRequest, "the request body could not be read", err)
 		return
 	}
 	if len(payload) > maxScenarioPayloadBytes {
@@ -397,14 +397,14 @@ func handlePutScenarioByPath(w http.ResponseWriter, r *http.Request, state *serv
 
 	tmpFile, err := os.CreateTemp("", "scenario-validate-*.yaml")
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("create temp file: %v", err))
+		writeInternalError(w, state, http.StatusInternalServerError, "this server could not save that scenario", err)
 		return
 	}
 	tmpPath := tmpFile.Name()
 	tmpFile.Close()
 	defer os.Remove(tmpPath)
 	if err := os.WriteFile(tmpPath, payload, 0o600); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("write temp scenario: %v", err))
+		writeInternalError(w, state, http.StatusInternalServerError, "this server could not save that scenario", err)
 		return
 	}
 
@@ -418,15 +418,15 @@ func handlePutScenarioByPath(w http.ResponseWriter, r *http.Request, state *serv
 			return
 		}
 		if errors.Is(err, scenario.ErrMalformedScenario) {
-			writeJSONError(w, http.StatusBadRequest, err.Error())
+			writeInternalError(w, state, http.StatusBadRequest, "this server could not save that scenario", err)
 			return
 		}
-		writeJSONError(w, http.StatusBadRequest, err.Error())
+		writeInternalError(w, state, http.StatusBadRequest, "this server could not save that scenario", err)
 		return
 	}
 
 	if err := os.WriteFile(scenarioFile, payload, 0o644); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("write scenario file: %v", err))
+		writeInternalError(w, state, http.StatusInternalServerError, "this server could not save that scenario", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
@@ -457,7 +457,7 @@ func handleGetScenarioRunMode(w http.ResponseWriter, ctx context.Context, state 
 			writeJSONError(w, http.StatusNotFound, "scenario not found")
 			return
 		}
-		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		writeInternalError(w, state, http.StatusInternalServerError, "this server could not determine the run mode", err)
 		return
 	}
 	mockReader, mockName := state.mockStateForCloud(sc.Cloud)
@@ -468,18 +468,18 @@ func handleGetScenarioRunMode(w http.ResponseWriter, ctx context.Context, state 
 
 	statePayload, err := mockReader.State(ctx)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		writeInternalError(w, state, http.StatusInternalServerError, "this server could not determine the run mode", err)
 		return
 	}
 	hasMockResources, err := apiMockStateHasResources(statePayload)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("decode mock state for run mode detection: %v", err))
+		writeInternalError(w, state, http.StatusInternalServerError, "this server could not determine the run mode", err)
 		return
 	}
 	hasTFState := apiTFStateExists(filepath.Join(state.cfg.Paths.Output, sc.Name))
 	previousRunID, err := state.store.LatestSuccessfulRunID(sc.Name)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		writeInternalError(w, state, http.StatusInternalServerError, "this server could not determine the run mode", err)
 		return
 	}
 
