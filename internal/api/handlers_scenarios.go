@@ -101,7 +101,7 @@ func listScenariosHandler(state *serverState) http.HandlerFunc {
 			return nil
 		})
 		if err != nil {
-			writeInternalError(w, state, http.StatusInternalServerError, "this server could not list its scenarios", err)
+			state.writeInternalError(w, http.StatusInternalServerError, "this server could not list its scenarios", err)
 			return
 		}
 
@@ -182,7 +182,7 @@ func validateScenarioHandler(state *serverState) http.HandlerFunc {
 
 		schemaPath, err := selectSchemaPath(state.scenarioSchemaPathCandidates())
 		if err != nil {
-			writeInternalError(w, state, http.StatusInternalServerError, "this server could not validate that scenario", err)
+			state.writeInternalError(w, http.StatusInternalServerError, "this server could not validate that scenario", err)
 			return
 		}
 
@@ -215,7 +215,7 @@ func validateScenarioHandler(state *serverState) http.HandlerFunc {
 			return
 		}
 
-		writeInternalError(w, state, http.StatusInternalServerError, "this server could not validate that scenario", validateErr)
+		state.writeInternalError(w, http.StatusInternalServerError, "this server could not validate that scenario", validateErr)
 	}
 }
 
@@ -230,6 +230,17 @@ func validateScenarioHandler(state *serverState) http.HandlerFunc {
 // matched the colon inside `yaml: line 5: did not find expected key`,
 // truncating the helpful `line 5:` context. Splitting on the wrapper's
 // closing `": ` instead keeps the full yaml-side message.
+// errScenarioRootUnresolved marks the ONE rejection that wraps something
+// of ours rather than something the caller sent.
+//
+// `resolveScenarioFile`'s other three refusals are literals it composed
+// -- a traversal, a bad path, bad percent-encoding -- and telling the
+// caller which one fired costs nothing and saves them a guess. This one
+// carries an *fs.PathError from resolving the configured root, so it is
+// the only one withheld. A sentinel rather than a string match, because
+// the audit exists to stop exactly that kind of coupling.
+var errScenarioRootUnresolved = errors.New("that scenario path is not allowed")
+
 func extractYAMLSyntaxDetail(message string) string {
 	const wrapperOpen = `parse scenario "`
 	if idx := strings.Index(message, wrapperOpen); idx != -1 {
@@ -276,7 +287,23 @@ func scenarioByPathHandler(state *serverState) http.HandlerFunc {
 
 		scenarioFile, err := resolveScenarioFile(state.cfg.Paths.Scenarios, relPath)
 		if err != nil {
-			writeInternalError(w, state, http.StatusForbidden, "that scenario path is not allowed", err)
+			// A composed message, not a withheld one. `resolveScenarioFile`
+			// rejects for four distinct reasons and three of them are
+			// safe literals it wrote itself -- "path traversal is not
+			// allowed", "invalid scenario path", "invalid scenario path
+			// encoding". Answering all four with "see the server log"
+			// told a caller to consult a log they cannot read about a
+			// fault they caused and could fix, which is what
+			// handlers_runs.go does NOT do for the same class.
+			//
+			// Only `resolve scenarios root: %w` wraps something of ours,
+			// so that one alone is withheld.
+			if errors.Is(err, errScenarioRootUnresolved) {
+				state.writeInternalError(w, http.StatusForbidden, "that scenario path is not allowed", err)
+				return
+			}
+			state.logDetail("scenario path refused: %v", err)
+			writeJSONError(w, http.StatusForbidden, err.Error())
 			return
 		}
 
@@ -310,7 +337,7 @@ func handleGetScenarioLayer3Status(w http.ResponseWriter, state *serverState, re
 			writeJSONError(w, http.StatusNotFound, "scenario not found")
 			return
 		}
-		writeInternalError(w, state, http.StatusInternalServerError, "this server could not read the Layer 3 status for that scenario", err)
+		state.writeInternalError(w, http.StatusInternalServerError, "this server could not read the Layer 3 status for that scenario", err)
 		return
 	}
 
@@ -368,7 +395,7 @@ func handleGetScenarioByPath(w http.ResponseWriter, state *serverState, relPath,
 			writeJSONError(w, http.StatusNotFound, "scenario not found")
 			return
 		}
-		writeInternalError(w, state, http.StatusInternalServerError, "this server could not read that scenario", err)
+		state.writeInternalError(w, http.StatusInternalServerError, "this server could not read that scenario", err)
 		return
 	}
 
@@ -397,14 +424,14 @@ func handlePutScenarioByPath(w http.ResponseWriter, r *http.Request, state *serv
 
 	tmpFile, err := os.CreateTemp("", "scenario-validate-*.yaml")
 	if err != nil {
-		writeInternalError(w, state, http.StatusInternalServerError, "this server could not save that scenario", err)
+		state.writeInternalError(w, http.StatusInternalServerError, "this server could not save that scenario", err)
 		return
 	}
 	tmpPath := tmpFile.Name()
 	tmpFile.Close()
 	defer os.Remove(tmpPath)
 	if err := os.WriteFile(tmpPath, payload, 0o600); err != nil {
-		writeInternalError(w, state, http.StatusInternalServerError, "this server could not save that scenario", err)
+		state.writeInternalError(w, http.StatusInternalServerError, "this server could not save that scenario", err)
 		return
 	}
 
@@ -418,15 +445,31 @@ func handlePutScenarioByPath(w http.ResponseWriter, r *http.Request, state *serv
 			return
 		}
 		if errors.Is(err, scenario.ErrMalformedScenario) {
-			writeInternalError(w, state, http.StatusBadRequest, "this server could not save that scenario", err)
+			// The SYNTAX DETAIL survives, stripped of its wrapper.
+			//
+			// Withholding it entirely was a regression I introduced
+			// closing the leak class: a reader who mistyped their YAML
+			// got "see the server log" for their own typo, on a page
+			// that exists to edit that YAML, with no access to the log.
+			// `extractYAMLSyntaxDetail` already solves this twelve lines
+			// away -- `validateScenarioHandler` uses it for the same
+			// error -- by dropping the `parse scenario "<path>": `
+			// prefix and keeping `line 5: did not find expected key`.
+			state.logDetail("scenario save rejected as malformed: %v", err)
+			writeJSONError(w, http.StatusBadRequest,
+				"yaml syntax: "+extractYAMLSyntaxDetail(err.Error()))
 			return
 		}
-		writeInternalError(w, state, http.StatusBadRequest, "this server could not save that scenario", err)
+		// Anything else that stopped the parse is ours, not theirs: the
+		// schema path, an unreadable temp file. Distinct from the branch
+		// above, which the conversion had flattened into a duplicate of
+		// this line.
+		state.writeInternalError(w, http.StatusBadRequest, "this server could not save that scenario", err)
 		return
 	}
 
 	if err := os.WriteFile(scenarioFile, payload, 0o644); err != nil {
-		writeInternalError(w, state, http.StatusInternalServerError, "this server could not save that scenario", err)
+		state.writeInternalError(w, http.StatusInternalServerError, "this server could not save that scenario", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
@@ -457,7 +500,7 @@ func handleGetScenarioRunMode(w http.ResponseWriter, ctx context.Context, state 
 			writeJSONError(w, http.StatusNotFound, "scenario not found")
 			return
 		}
-		writeInternalError(w, state, http.StatusInternalServerError, "this server could not determine the run mode", err)
+		state.writeInternalError(w, http.StatusInternalServerError, "this server could not determine the run mode", err)
 		return
 	}
 	mockReader, mockName := state.mockStateForCloud(sc.Cloud)
@@ -468,18 +511,18 @@ func handleGetScenarioRunMode(w http.ResponseWriter, ctx context.Context, state 
 
 	statePayload, err := mockReader.State(ctx)
 	if err != nil {
-		writeInternalError(w, state, http.StatusInternalServerError, "this server could not determine the run mode", err)
+		state.writeInternalError(w, http.StatusInternalServerError, "this server could not determine the run mode", err)
 		return
 	}
 	hasMockResources, err := apiMockStateHasResources(statePayload)
 	if err != nil {
-		writeInternalError(w, state, http.StatusInternalServerError, "this server could not determine the run mode", err)
+		state.writeInternalError(w, http.StatusInternalServerError, "this server could not determine the run mode", err)
 		return
 	}
 	hasTFState := apiTFStateExists(filepath.Join(state.cfg.Paths.Output, sc.Name))
 	previousRunID, err := state.store.LatestSuccessfulRunID(sc.Name)
 	if err != nil {
-		writeInternalError(w, state, http.StatusInternalServerError, "this server could not determine the run mode", err)
+		state.writeInternalError(w, http.StatusInternalServerError, "this server could not determine the run mode", err)
 		return
 	}
 
@@ -573,7 +616,7 @@ func resolveScenarioFile(root, relPath string) (string, error) {
 
 	absRoot, err := filepath.Abs(root)
 	if err != nil {
-		return "", fmt.Errorf("resolve scenarios root: %w", err)
+		return "", fmt.Errorf("%w: %w", errScenarioRootUnresolved, err)
 	}
 	absTarget, err := filepath.Abs(filepath.Join(absRoot, filePath))
 	if err != nil {

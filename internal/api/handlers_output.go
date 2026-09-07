@@ -65,7 +65,7 @@ func outputHandler(state *serverState) http.HandlerFunc {
 					writeJSONError(w, http.StatusNotFound, "output not found")
 					return
 				}
-				writeInternalError(w, state, http.StatusInternalServerError, "this server could not read the run output", err)
+				state.writeInternalError(w, http.StatusInternalServerError, "this server could not read the run output", err)
 				return
 			}
 			sort.Strings(files)
@@ -106,13 +106,13 @@ func outputHandler(state *serverState) http.HandlerFunc {
 				writeJSONError(w, http.StatusNotFound, "file not found")
 				return
 			}
-			writeInternalError(w, state, http.StatusInternalServerError, "this server could not read the run output", err)
+			state.writeInternalError(w, http.StatusInternalServerError, "this server could not read the run output", err)
 			return
 		}
 		if shouldFormatRequest(r, relFile) {
 			payload, err = state.formatter.Format(r.Context(), relFile, payload)
 			if err != nil {
-				writeInternalError(w, state, http.StatusInternalServerError, "this server could not read the run output", err)
+				state.writeInternalError(w, http.StatusInternalServerError, "this server could not read the run output", err)
 				return
 			}
 		}

@@ -291,8 +291,16 @@ func writeJSONError(w http.ResponseWriter, status int, message string) {
 //
 // This is not hypothetical tidiness. Pointing an unreadable run store at
 // four endpoints put the store's absolute path in all four bodies, and
-// the same shape existed at forty-three call sites across this package,
+// the same shape existed at SIXTY-FIVE call sites across this package,
 // four of which had already survived a code review each.
+//
+// It is not a remote-disclosure defence either: the server binds
+// 127.0.0.1 and answers loopback origins only (ADR-0026), so the reader
+// is the operator looking at their own machine's paths. What it buys is
+// a body a reader can act on, and a habit that does not depend on how
+// the server happens to be bound today.
+// -----------------------------------------------------------------------
+//
 // writeRequestError answers a fault in the REQUEST, and echoes it.
 //
 // The ONE place an error's text is deliberately shown. It is safe here
@@ -310,8 +318,8 @@ func writeRequestError(w http.ResponseWriter, status int, message string, err er
 	writeJSONError(w, status, message+": "+err.Error())
 }
 
-func writeInternalError(w http.ResponseWriter, state *serverState, status int, message string, err error) {
-	state.logDetail("%s: %v", message, err)
+func (s *serverState) writeInternalError(w http.ResponseWriter, status int, message string, err error) {
+	s.logDetail("%s: %v", message, err)
 	writeJSONError(w, status, message+"; see the server log")
 }
 

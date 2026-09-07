@@ -13,42 +13,70 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// No handler may put an error's TEXT into a response body.
+// allowedErrorText is every place this package may touch an error's text,
+// each with the reason it is allowed.
 //
-// # Why this is a test and not a convention
+// An entry is a deliberate, review-visible act. Adding one is how a new
+// exception gets made; the alternative -- a rule in a comment -- is what
+// produced sixty-five violations.
+var allowedErrorText = map[string]string{
+	"deployment_actions.go:Error":                   "implements the error interface; this IS the text",
+	"server.go:writeRequestError":                   "the one deliberate echo, for the caller's own payload",
+	"handlers_runs.go:handleIterationFiles":         "matches on the text to classify a sentinel; nothing is written",
+	"handlers_runs.go:handleRunArtifact":            "as above",
+	"handlers_runs.go:handleRunFiles":               "as above",
+	"handlers_scenarios.go:validateScenarioHandler": "extractYAMLSyntaxDetail strips the leaky prefix and keeps the syntax detail",
+	"handlers_scenarios.go:handlePutScenarioByPath": "same, for the save path: a reader editing YAML needs their own syntax error",
+	"handlers_scenarios.go:scenarioByPathHandler":   "resolveScenarioFile's refusals are literals it composed; the one that wraps ours is sentinel-checked and withheld",
+}
+
+// An error's TEXT may not be handled outside the places named above.
 //
-// A Go error from the filesystem carries an absolute path.
-// `*fs.PathError` renders as `open /Users/<name>/.infrafactory/runs/x:
-// permission denied`, and every error body in this package is rendered
-// verbatim by the UI -- `previewError`, `loadError`, `detailError` and
-// the deploy outcome all print what the server sent.
+// # Why the rule is about the text and not about a function
 //
-// Writing that down as a rule did not work. A review round found four
-// instances in `handlers_deployments.go`, each in code that had already
-// been through a review of its own; fixing those four left SIXTY-ONE
-// more of the same shape elsewhere in the package, in handlers nobody
-// had thought to look at. The convention was known and the drift was
-// invisible, which is what an audit is for -- the same reason this
-// project has `cloud_prefix_lockstep_test.go` and
-// `handlers/contract_audit_test.go`.
+// The first version of this audit asked "was `writeJSONError` called with
+// an error?" and its own comment claimed it covered every body-writer. It
+// did not, and the claim was the giveaway: `writeJSON` is the bigger door,
+// and error text reaches a response through it as a STRUCT FIELD --
+// `payload.Unreadable = append(..., e.Error())` and `ParseError:
+// err.Error()` both sailed past while the audit reported green. A local
+// variable defeated it just as easily: `msg := "read: " + err.Error()`
+// then `writeJSONError(w, status, msg)`.
 //
-// # What is allowed instead
+// Asking about the text instead makes the door irrelevant. There is no
+// spelling of "put this error in a response" that does not first call
+// `.Error()` somewhere in the package.
 //
-//   - `writeJSONError` — a message this package composed. Literals, and
-//     values like a file's base name. Never an error.
-//   - `writeInternalError` — logs the cause through the injected sink
-//     and answers with a stable sentence. For anything a caller cannot
-//     be shown.
-//   - `writeRequestError` — the ONE deliberate echo, for errors that
-//     describe the caller's own payload.
+// # What to do instead
+//
+//   - `state.writeInternalError(w, status, message, err)` -- logs the
+//     cause and answers with a stable sentence.
+//   - `writeRequestError` -- echoes, for errors describing the caller's
+//     own payload.
+//   - `state.logDetail` -- anywhere else the cause needs recording.
+//
+// # What this is and is not about
+//
+// It is NOT a remote information-disclosure defence. The server binds
+// `127.0.0.1` and answers loopback origins only (ADR-0026), so the reader
+// of these bodies is the operator, on their own machine, looking at their
+// own paths.
+//
+// It is two other things. `open /Users/x/.infrafactory/live/dep-1.json:
+// permission denied` in a red banner is noise the reader cannot act on,
+// where "dep-1 could not be read; see the server log" names the record and
+// puts the cause where it belongs. And loopback is a DEPLOYMENT default --
+// `--addr` overrides it -- so a code-level habit of composing what we
+// send is worth having independently of how it happens to be served
+// today.
 //
 // # Not a status-code rule
 //
-// It would be convenient if 5xx meant "hide" and 4xx meant "show", and
-// it is wrong: `handlePutScenarioByPath` answers **400** for malformed
-// YAML from an error that carries the schema path, because the parse
-// runs against a temp file. Safety is about where the error came from,
-// not what the response says about blame.
+// It would be convenient if 5xx meant hide and 4xx meant show.
+// `handlePutScenarioByPath` answers 400 for malformed YAML from an error
+// carrying the schema path, because the parse runs against a temp file.
+// Where the error came from is what matters, not what the status says
+// about blame.
 func TestNoHandlerPutsAnErrorIntoAResponseBody(t *testing.T) {
 	fset := token.NewFileSet()
 	entries, err := os.ReadDir(".")
@@ -62,134 +90,67 @@ func TestNoHandlerPutsAnErrorIntoAResponseBody(t *testing.T) {
 		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
 			continue
 		}
-		// server.go DEFINES the two helpers that legitimately touch an
-		// error's text. Auditing their bodies would forbid the very
-		// seam this rule points callers at.
-		if name == "server.go" {
-			continue
-		}
 
 		file, parseErr := parser.ParseFile(fset, filepath.Join(".", name), nil, parser.ParseComments)
 		require.NoError(t, parseErr, name)
 		audited++
 
-		ast.Inspect(file, func(n ast.Node) bool {
-			call, ok := n.(*ast.CallExpr)
+		// Walked per top-level declaration so the enclosing function is
+		// known: the allowlist is keyed by it, which keeps an exception
+		// to the site that earned it rather than the whole file. Skipping
+		// all of server.go to spare one helper left every handler
+		// defined there unaudited.
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
 			if !ok {
-				return true
+				continue
 			}
-			fn, ok := call.Fun.(*ast.Ident)
-			// EVERY body-writer, not just the obvious one.
-			//
-			// Auditing `writeJSONError` alone left `writeRefusal`
-			// echoing an error two hundred lines from a fix for exactly
-			// that -- safe by construction at the time, and one wrapped
-			// *fs.PathError away from not being. A rule that covers one
-			// door is a rule about that door.
-			if !ok || !bodyWriters[fn.Name] {
-				return true
+			key := name + ":" + fn.Name.Name
+			if _, allowed := allowedErrorText[key]; allowed {
+				continue
 			}
-			for _, arg := range call.Args {
-				if leaked := errorTextIn(arg); leaked != "" {
-					offenders = append(offenders, formatOffence(fset, call.Pos(), name, fn.Name, leaked))
-					break
+			ast.Inspect(fn, func(n ast.Node) bool {
+				call, ok := n.(*ast.CallExpr)
+				if !ok {
+					return true
 				}
-			}
-			return true
-		})
+				sel, ok := call.Fun.(*ast.SelectorExpr)
+				if !ok || sel.Sel.Name != "Error" || len(call.Args) != 0 {
+					return true
+				}
+				// `logDetail(..., err)` is where a cause is SUPPOSED to
+				// go, and passing `err` rather than `err.Error()` is the
+				// idiom -- so an explicit `.Error()` inside one is still
+				// worth flagging as an oddity rather than silently fine.
+				offenders = append(offenders,
+					"  "+fset.Position(call.Pos()).String()+"  in "+fn.Name.Name+
+						"  ("+render(sel.X)+".Error())")
+				return true
+			})
+		}
 	}
 
 	require.Greater(t, audited, 0, "the audit found no files to read, which is not a pass")
 
 	assert.Empty(t, offenders, strings.Join(append([]string{
-		"An error's text is being written into a response body.",
+		"An error's text is being handled outside the places allowed to.",
 		"",
-		"Use writeInternalError(w, state, status, message, err) instead: it logs the",
-		"cause and answers with a stable sentence. If the error describes the CALLER's",
-		"own payload -- a body that would not read, or JSON that would not decode --",
-		"use writeRequestError, which echoes it deliberately.",
+		"Use state.writeInternalError(w, status, message, err): it logs the cause and",
+		"answers with a stable sentence. If the error describes the CALLER's own payload,",
+		"use writeRequestError. If it just needs recording, use state.logDetail.",
+		"",
+		"If this really is a legitimate exception, add it to allowedErrorText with the",
+		"reason -- which is a thing a reviewer can see and argue with.",
 		"",
 	}, offenders...), "\n"))
-}
-
-// bodyWriters are the functions that put a caller-supplied message into
-// a response. `writeInternalError` and `writeRequestError` are absent
-// deliberately: they TAKE an error, which is the point of them.
-var bodyWriters = map[string]bool{
-	"writeJSONError": true,
-	"writeRefusal":   true,
-}
-
-// errorTextIn reports the offending expression, or "".
-//
-// It looks for two shapes: a call to `.Error()`, and a `%v`/`%s`/`%q`
-// verb applied to something named like an error. Both were present in
-// the package -- 50 of the first, 15 of the second -- and a rule that
-// caught only the obvious one would have left a third of the class
-// standing while reporting success.
-func errorTextIn(expr ast.Expr) string {
-	var found string
-	ast.Inspect(expr, func(n ast.Node) bool {
-		if found != "" {
-			return false
-		}
-		switch e := n.(type) {
-		case *ast.CallExpr:
-			if sel, ok := e.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "Error" && len(e.Args) == 0 {
-				found = render(sel.X) + ".Error()"
-				return false
-			}
-			// fmt.Sprintf("...%v", err) and friends.
-			if sel, ok := e.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "Sprintf" {
-				for _, a := range e.Args[1:] {
-					if id, ok := a.(*ast.Ident); ok && looksLikeError(id.Name) {
-						found = "fmt.Sprintf(..., " + id.Name + ")"
-						return false
-					}
-				}
-			}
-		case *ast.Ident:
-			// A bare error identifier concatenated in, e.g. "x: "+err.
-			if looksLikeError(e.Name) {
-				found = e.Name
-				return false
-			}
-		}
-		return true
-	})
-	return found
-}
-
-// looksLikeError matches the naming this package actually uses: `err`,
-// `derr`, `validateErr`, `parseErr`. Deliberately a name check rather
-// than a type check -- resolving types here would need the full
-// type-checker for a rule whose whole value is being cheap enough that
-// nobody is tempted to skip it.
-func looksLikeError(name string) bool {
-	lower := strings.ToLower(name)
-	return lower == "err" || strings.HasSuffix(lower, "err")
 }
 
 func render(expr ast.Expr) string {
 	if id, ok := expr.(*ast.Ident); ok {
 		return id.Name
 	}
+	if sel, ok := expr.(*ast.SelectorExpr); ok {
+		return render(sel.X) + "." + sel.Sel.Name
+	}
 	return "<expr>"
-}
-
-func formatOffence(fset *token.FileSet, pos token.Pos, file, fnName, leaked string) string {
-	p := fset.Position(pos)
-	return "  " + file + ":" + itoa(p.Line) + "  " + fnName + "(... " + leaked + " ...)"
-}
-
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	var b []byte
-	for n > 0 {
-		b = append([]byte{byte('0' + n%10)}, b...)
-		n /= 10
-	}
-	return string(b)
 }

@@ -102,7 +102,7 @@ func listPitfalls(state *serverState, w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusOK, pitfallsResponse{Providers: []pitfallsProviderGroup{}})
 			return
 		}
-		writeInternalError(w, state, http.StatusInternalServerError, "read pitfalls directory", err)
+		state.writeInternalError(w, http.StatusInternalServerError, "read pitfalls directory", err)
 		return
 	}
 
@@ -138,13 +138,13 @@ func listPitfalls(state *serverState, w http.ResponseWriter, r *http.Request) {
 		const maxPitfallsFileBytes = 1 << 20
 		f, err := os.Open(path)
 		if err != nil {
-			writeInternalError(w, state, http.StatusInternalServerError, "open pitfalls file "+name, err)
+			state.writeInternalError(w, http.StatusInternalServerError, "open pitfalls file "+name, err)
 			return
 		}
 		data, err := io.ReadAll(io.LimitReader(f, maxPitfallsFileBytes+1))
 		_ = f.Close()
 		if err != nil {
-			writeInternalError(w, state, http.StatusInternalServerError, "read pitfalls file "+name, err)
+			state.writeInternalError(w, http.StatusInternalServerError, "read pitfalls file "+name, err)
 			return
 		}
 		if len(data) > maxPitfallsFileBytes {
@@ -159,10 +159,16 @@ func listPitfalls(state *serverState, w http.ResponseWriter, r *http.Request) {
 		if err := yaml.Unmarshal(data, &file); err != nil {
 			// One bad file shouldn't blank the whole pitfalls page; surface
 			// it as a per-provider parse_error and continue with the rest.
+			// A STABLE sentence. The YAML error names the file it was
+			// read from, and this field is rendered on the pitfalls
+			// page -- so the parse error put a server path on screen.
+			// The provider is already in the payload, which is the part
+			// a reader can act on.
+			state.logDetail("pitfalls file %s could not be parsed: %v", name, err)
 			groups = append(groups, pitfallsProviderGroup{
 				Provider:   provider,
 				Pitfalls:   []pitfallsResponseEntry{},
-				ParseError: err.Error(),
+				ParseError: "this file could not be parsed; see the server log",
 			})
 			continue
 		}
@@ -253,7 +259,7 @@ func editPitfalls(state *serverState, w http.ResponseWriter, r *http.Request, pr
 	}
 
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		writeInternalError(w, state, http.StatusInternalServerError, "create pitfalls directory", err)
+		state.writeInternalError(w, http.StatusInternalServerError, "create pitfalls directory", err)
 		return
 	}
 
@@ -276,7 +282,7 @@ func editPitfalls(state *serverState, w http.ResponseWriter, r *http.Request, pr
 
 	out, err := yaml.Marshal(&pf)
 	if err != nil {
-		writeInternalError(w, state, http.StatusInternalServerError, "marshal pitfalls", err)
+		state.writeInternalError(w, http.StatusInternalServerError, "marshal pitfalls", err)
 		return
 	}
 
@@ -287,7 +293,7 @@ func editPitfalls(state *serverState, w http.ResponseWriter, r *http.Request, pr
 	// silently overwrite the winner's.
 	tmp, err := os.CreateTemp(dir, provider+"-*.yaml.tmp")
 	if err != nil {
-		writeInternalError(w, state, http.StatusInternalServerError, "create temp pitfalls", err)
+		state.writeInternalError(w, http.StatusInternalServerError, "create temp pitfalls", err)
 		return
 	}
 	tmpPath := tmp.Name()
@@ -303,22 +309,22 @@ func editPitfalls(state *serverState, w http.ResponseWriter, r *http.Request, pr
 	}()
 	if _, err := tmp.Write(out); err != nil {
 		_ = tmp.Close()
-		writeInternalError(w, state, http.StatusInternalServerError, "write temp pitfalls", err)
+		state.writeInternalError(w, http.StatusInternalServerError, "write temp pitfalls", err)
 		return
 	}
 	// CreateTemp lands at 0600 by default; pitfalls files in the repo are
 	// 0644, so make the in-place mode match what users expect.
 	if err := tmp.Chmod(0o644); err != nil {
 		_ = tmp.Close()
-		writeInternalError(w, state, http.StatusInternalServerError, "chmod temp pitfalls", err)
+		state.writeInternalError(w, http.StatusInternalServerError, "chmod temp pitfalls", err)
 		return
 	}
 	if err := tmp.Close(); err != nil {
-		writeInternalError(w, state, http.StatusInternalServerError, "close temp pitfalls", err)
+		state.writeInternalError(w, http.StatusInternalServerError, "close temp pitfalls", err)
 		return
 	}
 	if err := os.Rename(tmpPath, target); err != nil {
-		writeInternalError(w, state, http.StatusInternalServerError, "rename pitfalls", err)
+		state.writeInternalError(w, http.StatusInternalServerError, "rename pitfalls", err)
 		return
 	}
 	// Rename succeeded — disarm the cleanup defer so it doesn't unlink

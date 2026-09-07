@@ -192,8 +192,41 @@ func deploymentsHandler(state *serverState) http.HandlerFunc {
 				UpgradeStartedAt: optionalTime(d.UpgradeStartedAt),
 			})
 		}
+		// The RECORD is named; the reason goes to the log.
+		//
+		// This appended `e.Error()`, and `FilesystemStore.Get` wraps
+		// with `read deployment %s: %w` -- so a permission-denied record
+		// put `open /Users/<name>/.infrafactory/live/dep-x.json:
+		// permission denied` into a list the estate page renders
+		// verbatim, thirty lines below a fix for the identical
+		// *fs.PathError on the same handler.
+		//
+		// The id is what the reader can act on and is safe: it comes
+		// from the filename, which the store composed. The rest is a
+		// stable sentence, so an operator learns WHICH record is bad
+		// without learning where the store lives.
+		// One entry per error, so the COUNT cannot silently shrink, and
+		// the cause to the log.
+		//
+		// This appended `e.Error()`, and `FilesystemStore.Get` wraps with
+		// `read deployment %s: %w` -- so a permission-denied record put
+		// `open /Users/<name>/.infrafactory/live/dep-x.json: permission
+		// denied` into a list the estate page renders verbatim, thirty
+		// lines below a fix for the identical *fs.PathError.
+		//
+		// Deriving the list from the Undecodable deployments instead
+		// would read better -- it could name each id -- and would drop
+		// any error the store reported WITHOUT a matching record. The
+		// filesystem store always pairs them; `DeploymentLister` is an
+		// interface and does not have to. A record nobody can read going
+		// unmentioned is the failure this field exists to prevent.
+		//
+		// The ids are not lost: each undecodable record is already a row
+		// with `unreadable: true`.
 		for _, e := range unreadable {
-			payload.Unreadable = append(payload.Unreadable, e.Error())
+			state.logDetail("live record could not be read: %v", e)
+			payload.Unreadable = append(payload.Unreadable,
+				"a live record could not be read; see the server log")
 		}
 
 		// Soonest to expire first: the estate page's job is to show what
@@ -488,6 +521,7 @@ func deployHandler(state *serverState) http.HandlerFunc {
 			// sixty-five sites also were until one of them wrapped an
 			// *fs.PathError. A deployer is an interface, so what it puts
 			// in that error is not this handler's to promise.
+			state.logDetail("deploy refused, no such scenario: %v", err)
 			writeRefusal(w, http.StatusNotFound,
 				fmt.Sprintf("no scenario named %q", req.Scenario))
 			return

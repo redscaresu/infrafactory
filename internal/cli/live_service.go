@@ -295,10 +295,26 @@ func (d *LiveDeployer) Deploy(ctx context.Context, scenarioName, ttl string, pro
 	result := deployOutcome(out.String(), progressCopy.String(), deployErr)
 	if deployErr != nil && result.Failures == nil {
 		// The command failed before it produced structured output --
-		// a usage error, a missing scenario. Surfacing the raw error
-		// beats an empty result that reads like nothing went wrong.
+		// a usage error, a missing scenario. Saying so beats an empty
+		// result that reads like nothing went wrong.
+		//
+		// The error's own text is NOT used. `runDeployCommand` can fail
+		// with an *fs.PathError -- an unreadable scenario root, a
+		// vanished workdir -- and this Detail is rendered verbatim on
+		// the scenario page. `internal/api` withholds that shape at
+		// every one of its own call sites; a value crossing the package
+		// boundary into the same response should not be the exception,
+		// and the audit over there cannot see this far.
+		//
+		// The cause still reaches the operator: it is on the command's
+		// stderr, which `deployStderr` has already streamed and copied.
+		runtime.Logger.Log(LogEntry{
+			Level: logLevelError, Command: "deploy", Event: "deploy_failed",
+			Status: "failed", Detail: deployErr.Error(),
+		})
 		result.Failures = []api.ActionStep{{
-			Stage: "deploy", Status: string(StageStatusFail), Detail: deployErr.Error(),
+			Stage: "deploy", Status: string(StageStatusFail),
+			Detail: "the deploy could not be started; see the server log",
 		}}
 		result.Clean = false
 	}
