@@ -747,3 +747,26 @@ will not decode, so `live forget` on a damaged record produces exactly this shap
 direction, but it must not imply it looked: skipping it silently made a store of
 one report as a store of none, which is the "0 record(s)" signal this amendment
 was written to remove, reappearing one level up in the count itself.
+
+## Amendment (2026-09-07, S168): destroy evaluates the configuration
+
+This ADR says an action that cannot prove the account clean must not report
+success. S164 found the case it does not cover: an action that cannot **get** the
+account clean at all.
+
+`tofu destroy` is not a replay of state — it evaluates the configuration. So an
+expression that fails to evaluate does not merely fail the apply; it disables the
+escape hatch. `web-live-paris` indexed a private NIC's `private_ips[0]`, the list
+was empty, apply failed on "Invalid index", and teardown failed with the identical
+error. `run_project_delete` could not help: Scaleway will not delete a project that
+still holds resources. The only recovery was hand-editing the workdir's HCL.
+
+The guarantee this ADR rests on is that infrastructure created by a run can always
+be removed by the same run. That guarantee has a **precondition nobody had stated**:
+the configuration must remain evaluable. It is now enforced in the Layer 3
+preflight, which refuses an index into a resource attribute that is not made total
+by `try()` or `one()` — before anything is created, rather than after.
+
+Stated as a rule for anything added later: **a stack that could fail to evaluate
+must not reach apply**, because evaluation is what destroy needs and destroy is the
+only thing standing between a failed apply and a bill.
