@@ -133,9 +133,7 @@ func deployPreviewHandler(state *serverState) http.HandlerFunc {
 			// scenario page renders verbatim as `previewError`. The
 			// deploy handler was hardened for exactly this; the preview
 			// beside it was not.
-			state.logDetail("deploy preview could not resolve %q: %v", name, err)
-			writeJSONError(w, http.StatusInternalServerError,
-				"this server could not read its scenarios; see the server log")
+			state.writeInternalError(w, http.StatusInternalServerError, "this server could not read its scenarios", err)
 			return
 		}
 
@@ -149,9 +147,7 @@ func deployPreviewHandler(state *serverState) http.HandlerFunc {
 				writeJSONError(w, http.StatusNotFound, "scenario not found")
 				return
 			}
-			state.logDetail("deploy preview could not load %q: %v", name, err)
-			writeJSONError(w, http.StatusInternalServerError,
-				"this server could not read that scenario; see the server log")
+			state.writeInternalError(w, http.StatusInternalServerError, "this server could not read that scenario", err)
 			return
 		}
 

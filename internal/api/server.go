@@ -280,6 +280,23 @@ func writeJSONError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]string{"error": message})
 }
 
+// writeRequestError answers a fault in the REQUEST, and echoes it.
+//
+// The ONE place an error's text is deliberately shown. It is safe here
+// because the error describes the caller's own payload -- `json: unknown
+// field "clod"` is exactly what the caller needs and names nothing of
+// ours -- and useless to withhold, since the caller can already see what
+// they sent.
+//
+// Only for errors produced by reading or decoding the request body.
+// Anything touching the filesystem, a provider or the run store goes to
+// `writeInternalError`, whatever its status code: `loadScenarioFile`
+// answers 400 for malformed YAML and its error carries the schema path,
+// so status is not a proxy for safety.
+func writeRequestError(w http.ResponseWriter, status int, message string, err error) {
+	writeJSONError(w, status, message+": "+err.Error())
+}
+
 // writeInternalError answers a fault WITHOUT describing it, and records
 // the cause where an operator can reach it.
 //
@@ -299,25 +316,6 @@ func writeJSONError(w http.ResponseWriter, status int, message string) {
 // is the operator looking at their own machine's paths. What it buys is
 // a body a reader can act on, and a habit that does not depend on how
 // the server happens to be bound today.
-// -----------------------------------------------------------------------
-//
-// writeRequestError answers a fault in the REQUEST, and echoes it.
-//
-// The ONE place an error's text is deliberately shown. It is safe here
-// because the error describes the caller's own payload -- `json: unknown
-// field "clod"` is exactly what the caller needs and names nothing of
-// ours -- and useless to withhold, since the caller can already see what
-// they sent.
-//
-// Only for errors produced by reading or decoding the request body.
-// Anything touching the filesystem, a provider or the run store goes to
-// `writeInternalError`, whatever its status code: `loadScenarioFile`
-// answers 400 for malformed YAML and its error carries the schema path,
-// so status is not a proxy for safety.
-func writeRequestError(w http.ResponseWriter, status int, message string, err error) {
-	writeJSONError(w, status, message+": "+err.Error())
-}
-
 func (s *serverState) writeInternalError(w http.ResponseWriter, status int, message string, err error) {
 	s.logDetail("%s: %v", message, err)
 	writeJSONError(w, status, message+"; see the server log")

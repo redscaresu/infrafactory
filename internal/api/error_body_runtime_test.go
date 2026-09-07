@@ -27,6 +27,17 @@ func TestNoResponseBodyNamesAServerPath(t *testing.T) {
 	require.NoError(t, os.Chmod(filepath.Join(root, "web-app-paris"), 0o000))
 	t.Cleanup(func() { _ = os.Chmod(filepath.Join(root, "web-app-paris"), 0o755) })
 
+	// SKIP where the chmod does not actually deny, rather than fail.
+	//
+	// Root has DAC_OVERRIDE and Windows ignores the mode bits, so in a
+	// container, a devcontainer or under `sudo make test` every endpoint
+	// succeeds, nothing calls logf, and the final assertion fails
+	// pointing at a logging bug that does not exist. The probe asks the
+	// filesystem instead of trusting the chmod.
+	if _, probeErr := os.ReadDir(filepath.Join(root, "web-app-paris")); probeErr == nil {
+		t.Skip("this filesystem does not enforce the mode bits, so nothing here can fail")
+	}
+
 	var logged int
 	srv := NewServer(ServerConfig{
 		Config: config.Default(),

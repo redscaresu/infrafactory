@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -123,6 +124,22 @@ var layer3ProjectExemptTypes = map[string]bool{}
 //
 // Checked by suffix, longest-first: ".tf.json" also ends in ".json", and
 // a plain ".tf" must stay readable.
+// ErrLayer3RefusesConfiguration marks a preflight refusal whose text is
+// SAFE TO SHOW and worth showing.
+//
+// Every problem in that message is composed here, names a file by its
+// base name, and says exactly what to remove -- "main.tf: scaleway_lb
+// main sets project_id ... Remove the attribute". It is the most
+// actionable error on the deploy path.
+//
+// It needs a sentinel because the deploy path now withholds an error's
+// text by default, which was right for `*fs.PathError` and wrong for
+// this: a real run refused here and the operator was told only "see the
+// server log", for a fault they could have fixed in thirty seconds from
+// the message the server was hiding.
+
+var ErrLayer3RefusesConfiguration = errors.New("layer 3 refuses this configuration")
+
 func layer3UnreadableConfigExt(name string) bool {
 	if name == "terraform.tfvars" || name == "terraform.tfvars.json" {
 		return true
@@ -223,7 +240,7 @@ func validateLayer3HCLShape(outputDir string, allowedResourceTypes []string) err
 	}
 	if len(problems) > 0 {
 		sort.Strings(problems)
-		return fmt.Errorf("layer 3 refuses this configuration: %s", strings.Join(problems, "; "))
+		return fmt.Errorf("%w: %s", ErrLayer3RefusesConfiguration, strings.Join(problems, "; "))
 	}
 	return nil
 }

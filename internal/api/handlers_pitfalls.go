@@ -159,16 +159,22 @@ func listPitfalls(state *serverState, w http.ResponseWriter, r *http.Request) {
 		if err := yaml.Unmarshal(data, &file); err != nil {
 			// One bad file shouldn't blank the whole pitfalls page; surface
 			// it as a per-provider parse_error and continue with the rest.
-			// A STABLE sentence. The YAML error names the file it was
-			// read from, and this field is rendered on the pitfalls
-			// page -- so the parse error put a server path on screen.
-			// The provider is already in the payload, which is the part
-			// a reader can act on.
+			// The parse detail is SHOWN, and withholding it was a
+			// mistake built on a false premise.
+			//
+			// I wrote that "the YAML error names the file it was read
+			// from". It does not: `yaml.Unmarshal` receives bytes and
+			// has no filename, so the text is `yaml: line 2: mapping
+			// values are not allowed in this context` -- a line number,
+			// nothing of ours. Hiding it stripped the one useful fact
+			// from the page that exists to edit this file, which is the
+			// identical regression I caught and reverted for the
+			// scenario editor twelve lines away.
 			state.logDetail("pitfalls file %s could not be parsed: %v", name, err)
 			groups = append(groups, pitfallsProviderGroup{
 				Provider:   provider,
 				Pitfalls:   []pitfallsResponseEntry{},
-				ParseError: "this file could not be parsed; see the server log",
+				ParseError: err.Error(),
 			})
 			continue
 		}

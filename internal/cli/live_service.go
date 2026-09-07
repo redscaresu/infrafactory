@@ -306,15 +306,44 @@ func (d *LiveDeployer) Deploy(ctx context.Context, scenarioName, ttl string, pro
 		// boundary into the same response should not be the exception,
 		// and the audit over there cannot see this far.
 		//
-		// The cause still reaches the operator: it is on the command's
-		// stderr, which `deployStderr` has already streamed and copied.
+		// The cause reaches the operator through the log, NOT through
+		// stderr. An earlier version of this comment said stderr, and
+		// that was wrong: `runDeployCommand` is called directly rather
+		// than through `cmd.Execute()`, and cobra only prints a returned
+		// error on the latter. Nothing was written to the tee.
 		runtime.Logger.Log(LogEntry{
 			Level: logLevelError, Command: "deploy", Event: "deploy_failed",
 			Status: "failed", Detail: deployErr.Error(),
 		})
+		// A PREFLIGHT REFUSAL is shown. It is composed here, names files
+		// by base name, and says what to remove -- "main.tf: scaleway_lb
+		// main sets project_id ... Remove the attribute". Withholding it
+		// cost a real run: the operator saw "see the server log" for a
+		// fault the server could have told them how to fix.
+		//
+		// Everything else is still withheld, because `runDeployCommand`
+		// can fail with an *fs.PathError and this Detail is rendered
+		// verbatim on the scenario page.
+		// A CLIError's text is OURS and is shown.
+		//
+		// Withholding everything destroyed the most useful errors on
+		// this path: "scenario %q declares no service: block, so there
+		// is no versioned application to deploy. Use `infrafactory run`
+		// for infrastructure-only scenarios" is composed here, names
+		// nothing of the server's, and tells the reader exactly what to
+		// do. I hit that exact refusal during the S164 canary and was
+		// told only "see the server log".
+		//
+		// The bare-error case is still withheld: `runDeployCommand` can
+		// fail with an *fs.PathError, and this Detail is rendered
+		// verbatim on the scenario page.
+		detail := "the deploy could not be started; see the server log"
+		var cliErr *CLIError
+		if errors.As(deployErr, &cliErr) || errors.Is(deployErr, ErrLayer3RefusesConfiguration) {
+			detail = deployErr.Error()
+		}
 		result.Failures = []api.ActionStep{{
-			Stage: "deploy", Status: string(StageStatusFail),
-			Detail: "the deploy could not be started; see the server log",
+			Stage: "deploy", Status: string(StageStatusFail), Detail: detail,
 		}}
 		result.Clean = false
 	}

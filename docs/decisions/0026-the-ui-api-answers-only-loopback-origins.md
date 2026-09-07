@@ -220,3 +220,17 @@ error's text at all rather than which function received it. The first version as
 the latter and missed three live instances — error text reaches a response as a
 struct field through `writeJSON` just as easily as through `writeJSONError`, and
 that is the door a function-shaped rule cannot see.
+
+**"The text" has two spellings, and the second cost another round.**
+`fmt.Sprintf("%v", err)` renders an error without ever calling `.Error()`, so an
+audit that looks only for `.Error()` misses it — while its comment claimed no such
+spelling existed. Both are checked now.
+
+**Withholding has a cost, and three of these went too far.** An error composed by
+this codebase, naming nothing of the server's, is the most useful thing a reader
+can be given: `yaml: line 2: mapping values are not allowed`, `tag "latest" is a
+moving tag: pin an immutable version`, `scenario %q declares no service: block`.
+Each was withheld on a premise that turned out to be false — that a yaml error
+names its file, that cobra had already printed the cause, that a 400 must be the
+server's fault. The rule is not "hide errors"; it is **compose what you send**, and
+a message this package wrote is already composed.

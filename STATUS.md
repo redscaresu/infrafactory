@@ -1,6 +1,6 @@
 # STATUS
 
-Last updated: 2026-09-06
+Last updated: 2026-09-07
 
 ## 2026-09-07 — S167: the leak class, and an audit that made the same mistake it forbade
 
@@ -65,6 +65,28 @@ permission denied` in a red banner is noise where "a live record could not be re
 see the server log" is actionable — plus defence in depth, since `--addr` overrides
 the binding. It is not a remote-disclosure vulnerability, and the archive should
 not imply it was.
+
+**Round three found the rule still wrong, and two of my fixes built on false
+premises.** `fmt.Sprintf("%v", err)` renders an error without calling `.Error()`,
+so the audit missed it while its own comment claimed no such spelling existed —
+verified by reintroducing it. The cause is worth recording: round two called the
+`Sprintf` branch redundant, which was true of the implementation it reviewed, and
+I deleted it while rewriting the rule to only walk for `.Error()`. A finding
+applied to code it was no longer true of.
+
+And I withheld two errors on premises I never checked. The pitfalls parse error,
+on the claim that "the YAML error names the file" — `yaml.Unmarshal` receives
+bytes and has no filename, so I stripped a line number from the page that exists
+to fix that file, the identical regression I had reverted for the scenario editor
+twelve lines earlier. And the deploy failure detail, on the claim that the cause
+"is on the command's stderr" — `runDeployCommand` is called directly, not through
+`cmd.Execute()`, so cobra printed nothing. That one destroyed `scenario %q
+declares no service: block ... Use infrafactory run`, which I had personally hit
+during the S164 canary and been told nothing about.
+
+The corrected rule is **compose what you send**, not "hide errors". A message this
+package wrote is already composed: `*CLIError` text, scenario-rule violations and
+yaml syntax details are all shown again.
 
 Two regressions of my own, caught in the same round: the scenario editor stopped
 showing YAML syntax errors, so a reader got "see the server log" for their own typo

@@ -239,8 +239,22 @@ func validateScenarioHandler(state *serverState) http.HandlerFunc {
 // carries an *fs.PathError from resolving the configured root, so it is
 // the only one withheld. A sentinel rather than a string match, because
 // the audit exists to stop exactly that kind of coupling.
-var errScenarioRootUnresolved = errors.New("that scenario path is not allowed")
+// Its message is deliberately NOT the client-facing sentence: wrapping
+// produced `that scenario path is not allowed: that scenario path is not
+// allowed: <cause>` in the log when the two matched.
+var errScenarioRootUnresolved = errors.New("scenarios root could not be resolved")
 
+// extractYAMLSyntaxDetail strips the wrapper prefix added by parseAndValidate
+// (e.g. `malformed scenario: parse scenario "<label>": <detail>`) so the
+// message surfaces just the underlying parser error. Also strips the
+// redundant `yaml: ` prefix the underlying gopkg.in/yaml.v3 library
+// prepends, so the response message doesn't end up doubled as
+// `yaml syntax: yaml: ...`.
+//
+// The previous implementation used strings.LastIndex(": ") which also
+// matched the colon inside `yaml: line 5: did not find expected key`,
+// truncating the helpful `line 5:` context. Splitting on the wrapper's
+// closing `": ` instead keeps the full yaml-side message.
 func extractYAMLSyntaxDetail(message string) string {
 	const wrapperOpen = `parse scenario "`
 	if idx := strings.Index(message, wrapperOpen); idx != -1 {
@@ -287,19 +301,31 @@ func scenarioByPathHandler(state *serverState) http.HandlerFunc {
 
 		scenarioFile, err := resolveScenarioFile(state.cfg.Paths.Scenarios, relPath)
 		if err != nil {
-			// A composed message, not a withheld one. `resolveScenarioFile`
-			// rejects for four distinct reasons and three of them are
-			// safe literals it wrote itself -- "path traversal is not
-			// allowed", "invalid scenario path", "invalid scenario path
-			// encoding". Answering all four with "see the server log"
-			// told a caller to consult a log they cannot read about a
-			// fault they caused and could fix, which is what
-			// handlers_runs.go does NOT do for the same class.
+			// A composed message, not a withheld one.
 			//
-			// Only `resolve scenarios root: %w` wraps something of ours,
-			// so that one alone is withheld.
+			// `resolveScenarioFile` returns SEVEN errors, not the four an
+			// earlier version of this comment claimed. Four are literals
+			// it wrote itself -- "path traversal is not allowed" twice,
+			// "invalid scenario path", "invalid scenario path encoding"
+			// -- and telling a caller which one fired costs nothing and
+			// saves them a guess. Answering all of them with "see the
+			// server log" sent them to a log they cannot read about a
+			// fault they caused and could fix.
+			//
+			// The other THREE wrap an OS error and are marked with
+			// errScenarioRootUnresolved. Two of them (`filepath.Abs`,
+			// `filepath.Rel`) were still echoed verbatim after the first
+			// pass, on the one path this file's allowlist blesses --
+			// unreachable on POSIX today, and exactly the class this
+			// slice exists to close.
+			// 500, not 403. If the configured scenarios root cannot be
+			// resolved, the SERVER is broken and the caller's path was
+			// never the problem -- answering 403 blames them for a fault
+			// they cannot fix, which is the status/blame confusion this
+			// slice's own docs argue against.
 			if errors.Is(err, errScenarioRootUnresolved) {
-				state.writeInternalError(w, http.StatusForbidden, "that scenario path is not allowed", err)
+				state.writeInternalError(w, http.StatusInternalServerError,
+					"this server could not resolve its scenarios directory", err)
 				return
 			}
 			state.logDetail("scenario path refused: %v", err)
@@ -620,11 +646,11 @@ func resolveScenarioFile(root, relPath string) (string, error) {
 	}
 	absTarget, err := filepath.Abs(filepath.Join(absRoot, filePath))
 	if err != nil {
-		return "", fmt.Errorf("resolve scenario path: %w", err)
+		return "", fmt.Errorf("%w: resolve scenario path: %w", errScenarioRootUnresolved, err)
 	}
 	rel, err := filepath.Rel(absRoot, absTarget)
 	if err != nil {
-		return "", fmt.Errorf("resolve scenario relative path: %w", err)
+		return "", fmt.Errorf("%w: resolve scenario relative path: %w", errScenarioRootUnresolved, err)
 	}
 	if strings.HasPrefix(rel, "..") || rel == "." {
 		return "", fmt.Errorf("path traversal is not allowed")

@@ -27,7 +27,13 @@ var allowedErrorText = map[string]string{
 	"handlers_runs.go:handleRunFiles":               "as above",
 	"handlers_scenarios.go:validateScenarioHandler": "extractYAMLSyntaxDetail strips the leaky prefix and keeps the syntax detail",
 	"handlers_scenarios.go:handlePutScenarioByPath": "same, for the save path: a reader editing YAML needs their own syntax error",
-	"handlers_scenarios.go:scenarioByPathHandler":   "resolveScenarioFile's refusals are literals it composed; the one that wraps ours is sentinel-checked and withheld",
+	// The TTL comes from the caller's own query string, so its parse
+	// error describes what they sent -- the `writeRequestError` case,
+	// reached through a struct field instead of a helper.
+	"handlers_pitfalls.go:listPitfalls":               "yaml.Unmarshal gets bytes, not a filename: the text is `yaml: line 2: ...` and the page exists to fix it",
+	"handlers_deploy_preview.go:deployPreviewHandler": "ttl parse errors describe the caller's own query parameter",
+	"handlers_deploy_preview.go:previewFor":           "same",
+	"handlers_scenarios.go:scenarioByPathHandler":     "resolveScenarioFile's refusals are literals it composed; the one that wraps ours is sentinel-checked and withheld",
 }
 
 // An error's TEXT may not be handled outside the places named above.
@@ -43,9 +49,18 @@ var allowedErrorText = map[string]string{
 // variable defeated it just as easily: `msg := "read: " + err.Error()`
 // then `writeJSONError(w, status, msg)`.
 //
-// Asking about the text instead makes the door irrelevant. There is no
-// spelling of "put this error in a response" that does not first call
-// `.Error()` somewhere in the package.
+// Asking about the text instead makes the door irrelevant -- but "the
+// text" has TWO spellings, and the first version of this rewrite only
+// knew one. `fmt.Sprintf("%v", err)` renders an error without ever
+// calling `.Error()` syntactically, and it was one of the shapes
+// actually present before the sweep. A previous round called the
+// Sprintf branch redundant, which was true of the implementation it
+// reviewed -- that one walked for bare error identifiers too -- and
+// false of this one. Accepting it without re-checking against the
+// rewrite put the hole back.
+//
+// So: an `.Error()` call, OR an error-named identifier handed to a
+// formatting call.
 //
 // # What to do instead
 //
@@ -115,7 +130,26 @@ func TestNoHandlerPutsAnErrorIntoAResponseBody(t *testing.T) {
 					return true
 				}
 				sel, ok := call.Fun.(*ast.SelectorExpr)
-				if !ok || sel.Sel.Name != "Error" || len(call.Args) != 0 {
+				if !ok {
+					return true
+				}
+				// fmt.Sprintf("...%v", err) -- the second spelling.
+				// `Errorf` is deliberately absent: wrapping one error in
+				// another is how errors are BUILT, not how they are
+				// shown.
+				if sel.Sel.Name == "Sprintf" {
+					for _, a := range call.Args {
+						id, ok := a.(*ast.Ident)
+						if ok && looksLikeError(id.Name) {
+							offenders = append(offenders,
+								"  "+fset.Position(call.Pos()).String()+"  in "+fn.Name.Name+
+									"  (Sprintf ... "+id.Name+")")
+							return false
+						}
+					}
+					return true
+				}
+				if sel.Sel.Name != "Error" || len(call.Args) != 0 {
 					return true
 				}
 				// `logDetail(..., err)` is where a cause is SUPPOSED to
@@ -153,4 +187,13 @@ func render(expr ast.Expr) string {
 		return render(sel.X) + "." + sel.Sel.Name
 	}
 	return "<expr>"
+}
+
+// looksLikeError matches the naming this package uses: `err`, `derr`,
+// `validateErr`. A name check rather than a type check, deliberately:
+// resolving types needs the full type-checker, for a rule whose value is
+// being cheap enough that nobody skips it.
+func looksLikeError(name string) bool {
+	lower := strings.ToLower(name)
+	return lower == "err" || strings.HasSuffix(lower, "err")
 }

@@ -44,7 +44,7 @@ verified by reintroducing them.
   leak, and invisible to the audit because there is no error text to find.
 - **`ErrNoSuchScenario` stopped logging** when I composed its message, alone among
   its neighbours.
-- **The doc comment was glued to its neighbour**, so `writeInternalError` had none.
+- **The doc comment was glued to its neighbour**, so `writeInternalError` had none. **Recorded as fixed here and was not** — a dashed separator inside one comment block is still one comment block. Actually fixed in round 164, which also caught that the sentinel I added had displaced `extractYAMLSyntaxDetail`'s doc the same way.
 - **The count appeared as 43, 61 and 65** across my own files. It is 65.
 
 Also taken rather than argued: `strconv`/`token.Position` instead of a hand-rolled

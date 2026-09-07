@@ -164,9 +164,7 @@ func deploymentsHandler(state *serverState) http.HandlerFunc {
 			// A STABLE message: an unreadable store root yields an
 			// *fs.PathError, and this body is rendered verbatim on the
 			// Deployments page.
-			state.logDetail("live estate could not be listed: %v", err)
-			writeJSONError(w, http.StatusInternalServerError,
-				"this server could not read its live deployments; see the server log")
+			state.writeInternalError(w, http.StatusInternalServerError, "this server could not read its live deployments", err)
 			return
 		}
 
@@ -192,21 +190,7 @@ func deploymentsHandler(state *serverState) http.HandlerFunc {
 				UpgradeStartedAt: optionalTime(d.UpgradeStartedAt),
 			})
 		}
-		// The RECORD is named; the reason goes to the log.
-		//
-		// This appended `e.Error()`, and `FilesystemStore.Get` wraps
-		// with `read deployment %s: %w` -- so a permission-denied record
-		// put `open /Users/<name>/.infrafactory/live/dep-x.json:
-		// permission denied` into a list the estate page renders
-		// verbatim, thirty lines below a fix for the identical
-		// *fs.PathError on the same handler.
-		//
-		// The id is what the reader can act on and is safe: it comes
-		// from the filename, which the store composed. The rest is a
-		// stable sentence, so an operator learns WHICH record is bad
-		// without learning where the store lives.
-		// One entry per error, so the COUNT cannot silently shrink, and
-		// the cause to the log.
+		// One entry per unreadable record, NAMED, with the reason logged.
 		//
 		// This appended `e.Error()`, and `FilesystemStore.Get` wraps with
 		// `read deployment %s: %w` -- so a permission-denied record put
@@ -214,17 +198,28 @@ func deploymentsHandler(state *serverState) http.HandlerFunc {
 		// denied` into a list the estate page renders verbatim, thirty
 		// lines below a fix for the identical *fs.PathError.
 		//
-		// Deriving the list from the Undecodable deployments instead
-		// would read better -- it could name each id -- and would drop
-		// any error the store reported WITHOUT a matching record. The
-		// filesystem store always pairs them; `DeploymentLister` is an
-		// interface and does not have to. A record nobody can read going
-		// unmentioned is the failure this field exists to prevent.
+		// The ids come from the paired records rather than from the
+		// error text: `List` appends a `Deployment{ID: id, Undecodable:
+		// true}` for every error it reports. An earlier fix emitted one
+		// constant sentence per error instead, which rendered as N
+		// identical bullets under a heading that already said N -- a
+		// list conveying nothing beyond its own length.
 		//
-		// The ids are not lost: each undecodable record is already a row
-		// with `unreadable: true`.
-		for _, e := range unreadable {
+		// The COUNT still comes from `unreadable`, so an error reported
+		// without a matching record cannot go unmentioned.
+		undecodable := make([]string, 0, len(unreadable))
+		for _, d := range deployments {
+			if d.Undecodable {
+				undecodable = append(undecodable, d.ID)
+			}
+		}
+		for i, e := range unreadable {
 			state.logDetail("live record could not be read: %v", e)
+			if i < len(undecodable) {
+				payload.Unreadable = append(payload.Unreadable,
+					undecodable[i]+" could not be read; see the server log")
+				continue
+			}
 			payload.Unreadable = append(payload.Unreadable,
 				"a live record could not be read; see the server log")
 		}
@@ -333,9 +328,7 @@ func writeActionResult(w http.ResponseWriter, state *serverState, result ActionR
 		// A STABLE message otherwise, for the same reason as every other
 		// branch on this route: an *fs.PathError here puts an absolute
 		// server path into a body a page renders verbatim.
-		state.logDetail("action failed: %v", err)
-		writeJSONError(w, http.StatusInternalServerError,
-			"this server could not complete the action; see the server log")
+		state.writeInternalError(w, http.StatusInternalServerError, "this server could not complete the action", err)
 		return
 	}
 	status := http.StatusOK
@@ -570,9 +563,7 @@ func deployHandler(state *serverState) http.HandlerFunc {
 			// A STABLE message, for the same reason as the branch
 			// above: `err.Error()` on an *fs.PathError puts an absolute
 			// server path in a body the scenario page renders verbatim.
-			state.logDetail("deploy failed with a missing file: %v", err)
-			writeJSONError(w, http.StatusNotFound,
-				"this server could not find something the deploy needed; see the server log")
+			state.writeInternalError(w, http.StatusNotFound, "this server could not find something the deploy needed", err)
 			return
 		}
 
