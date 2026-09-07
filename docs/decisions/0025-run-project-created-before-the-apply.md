@@ -482,3 +482,22 @@ destroyed, project empty, nothing billing, run `reap` shortly. Three properties 
 - **No internal retry.** Twenty minutes would hold the teardown open for the whole window. It
   reports and hands over, which is also why `live reconcile` gained a `Released` bucket in S167 —
   the two together are how a project that outlives its run stays visible instead of forgotten.
+
+## Correction (2026-09-07, S177): purge before judging the 412
+
+The amendment above was right that a 412 can mean "not yet" and wrong that it always does.
+
+Scaleway returns at least two preconditions behind that status: `resource_not_usable` with "please
+retry later", which is the lagging check, and `resource_still_in_use` with "all resources are not
+deleted", which means precisely what it says. S174 short-circuited on the sentinel before
+`purgeAutoCreated` ran — so a project held open by the API-created default security group, the D6
+case that purge exists for, was reported to the operator as empty and not billing.
+
+That is worse than the failure it replaced: it skipped the fix and then reassured them.
+
+**The purge always runs first.** Only a 412 that survives it is a timing answer, and even then the
+message says what was done rather than what is presumed true — resources destroyed, nothing left to
+purge, API still refusing, retry and then look in the console.
+
+The general rule this arc keeps relearning: a status code is a category, not a diagnosis. Keying on
+it is right; concluding from one observation of it is not.

@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -448,4 +449,68 @@ func (f *fakeRunProject) List(_ context.Context, _, organizationID string) ([]ha
 	f.lists++
 	f.lastOrg = organizationID
 	return f.listed, f.listErr
+}
+
+// A 412 does NOT mean "wait" until the purge has had its turn.
+//
+// Scaleway returns at least two preconditions behind a 412:
+//
+//	resource_not_usable    "please retry later"            -- lagging check
+//	resource_still_in_use  "all resources are not deleted"  -- really still there
+//
+// The second one means exactly what it says, and the thing saying it is
+// usually the `Default security group` the API creates on the first
+// Instance and Terraform never owns -- the D6 case `purgeAutoCreated`
+// exists for.
+//
+// S174 short-circuited on the sentinel BEFORE the purge, on the reasoning
+// that "a timing answer needs no purge". That skipped the fix and then
+// told the operator the project was empty and nothing was billing.
+// Observed the same evening on a real teardown: the group was sitting
+// there holding the project open, and deleting it unblocked the project
+// immediately.
+func TestA412StillPurgesBeforeGivingUp(t *testing.T) {
+	notYet := fmt.Errorf("delete project: http 412: resource_still_in_use: %w",
+		harness.ErrRunProjectNotYetDeletable)
+
+	rp := &fakeRunProject{deleteErrs: []error{notYet, nil}}
+	purge := &fakePurge{removed: []string{"security_group 19e815eb (Default security group) in fr-par-1"}}
+	rt := &CommandRuntime{Deps: RuntimeDependencies{RunProject: rp, AutoCreated: purge}}
+
+	stages, failures := releaseRunProject(
+		context.Background(), rt, purgeWorkDir(t), purgeProjectID, destroyEnv)
+
+	assert.Equal(t, 1, purge.calls, "the purge must run even for a 412")
+	assert.Equal(t, 2, rp.deletes, "and the delete must be retried after it")
+	assert.Empty(t, failures, "the retry succeeded, so this is not a failure")
+
+	var stageNames []string
+	for _, s := range stages {
+		stageNames = append(stageNames, s.Stage)
+	}
+	assert.Contains(t, stageNames, "auto_created_purge",
+		"and the operator is told what was removed")
+}
+
+// Only once the purge finds nothing is a 412 safely a timing answer.
+func TestA412WithNothingToPurgeReportsWaitNotFailure(t *testing.T) {
+	notYet := fmt.Errorf("delete project: http 412: %w", harness.ErrRunProjectNotYetDeletable)
+
+	rp := &fakeRunProject{deleteErr: notYet}
+	rt := &CommandRuntime{Deps: RuntimeDependencies{
+		RunProject: rp, AutoCreated: &fakePurge{removed: nil},
+	}}
+
+	_, failures := releaseRunProject(
+		context.Background(), rt, purgeWorkDir(t), purgeProjectID, destroyEnv)
+
+	require.Len(t, failures, 1)
+	assert.Equal(t, "delete_not_yet", failures[0].Check)
+
+	// It must NOT claim the project is empty or that nothing is billing.
+	// The first version did, on an account where a security group was
+	// still holding the project open.
+	assert.NotContains(t, failures[0].Detail, "is empty")
+	assert.NotContains(t, failures[0].Detail, "Nothing is billing")
+	assert.Contains(t, failures[0].Detail, "reap")
 }
