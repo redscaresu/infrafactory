@@ -106,9 +106,7 @@ mockway-up: $(MOCKS_RUN_DIR)
 		echo "starting mockway on $(MOCKWAY_URL) ($(MOCKWAY_REPO))"; \
 		cd $(MOCKWAY_REPO) && $(GO) run ./cmd/mockway --port $(MOCKWAY_PORT) > $(MOCKS_RUN_DIR)/mockway.log 2>&1 & \
 		echo $$! > $(MOCKS_RUN_DIR)/mockway.pid; \
-		until curl -sSf $(MOCKWAY_URL)/mock/state >/dev/null 2>&1; do \
-			sleep 1; \
-		done; \
+		bash scripts/wait_for.sh $(MOCKWAY_URL)/mock/state mockway $(MOCKS_RUN_DIR)/mockway.log || exit 1; \
 		echo "mockway ready on $(MOCKWAY_URL) (pid=$$(cat $(MOCKS_RUN_DIR)/mockway.pid))"; \
 	fi
 
@@ -119,9 +117,7 @@ fakegcp-up: $(MOCKS_RUN_DIR)
 		echo "starting fakegcp on $(FAKEGCP_URL) ($(FAKEGCP_REPO))"; \
 		cd $(FAKEGCP_REPO) && $(GO) run ./cmd/fakegcp --port $(FAKEGCP_PORT) > $(MOCKS_RUN_DIR)/fakegcp.log 2>&1 & \
 		echo $$! > $(MOCKS_RUN_DIR)/fakegcp.pid; \
-		until curl -sSf $(FAKEGCP_URL)/mock/state >/dev/null 2>&1; do \
-			sleep 1; \
-		done; \
+		bash scripts/wait_for.sh $(FAKEGCP_URL)/mock/state fakegcp $(MOCKS_RUN_DIR)/fakegcp.log || exit 1; \
 		echo "fakegcp ready on $(FAKEGCP_URL) (pid=$$(cat $(MOCKS_RUN_DIR)/fakegcp.pid))"; \
 	fi
 
@@ -169,9 +165,7 @@ fakeaws-up: $(MOCKS_RUN_DIR)
 		echo "starting fakeaws on $(FAKEAWS_URL) ($(FAKEAWS_REPO))"; \
 		cd $(FAKEAWS_REPO) && $(GO) run ./cmd/fakeaws --port $(FAKEAWS_PORT) > $(MOCKS_RUN_DIR)/fakeaws.log 2>&1 & \
 		echo $$! > $(MOCKS_RUN_DIR)/fakeaws.pid; \
-		until curl -sSf $(FAKEAWS_URL)/mock/state >/dev/null 2>&1; do \
-			sleep 1; \
-		done; \
+		bash scripts/wait_for.sh $(FAKEAWS_URL)/mock/state fakeaws $(MOCKS_RUN_DIR)/fakeaws.log || exit 1; \
 		echo "fakeaws ready on $(FAKEAWS_URL) (pid=$$(cat $(MOCKS_RUN_DIR)/fakeaws.pid))"; \
 	fi
 
@@ -201,9 +195,7 @@ fakegenesys-up: $(MOCKS_RUN_DIR)
 		echo "starting fakegenesys on $(FAKEGENESYS_URL) ($(FAKEGENESYS_REPO))"; \
 		cd $(FAKEGENESYS_REPO) && $(GO) run ./cmd/fakegenesys --port $(FAKEGENESYS_PORT) > $(MOCKS_RUN_DIR)/fakegenesys.log 2>&1 & \
 		echo $$! > $(MOCKS_RUN_DIR)/fakegenesys.pid; \
-		until curl -sSf $(FAKEGENESYS_URL)/healthz >/dev/null 2>&1; do \
-			sleep 1; \
-		done; \
+		bash scripts/wait_for.sh $(FAKEGENESYS_URL)/healthz fakegenesys $(MOCKS_RUN_DIR)/fakegenesys.log || exit 1; \
 		echo "fakegenesys ready on $(FAKEGENESYS_URL) (pid=$$(cat $(MOCKS_RUN_DIR)/fakegenesys.pid))"; \
 	fi
 
@@ -272,7 +264,7 @@ seaweedfs-up:
 		docker run -d --name $(SEAWEEDFS_CONTAINER) --rm \
 			-p 127.0.0.1:$(SEAWEEDFS_PORT):8333 \
 			$(SEAWEEDFS_IMAGE) server -s3 -s3.port=8333 -s3.allowEmptyFolder=true >/dev/null; \
-		until curl -sSf http://127.0.0.1:$(SEAWEEDFS_PORT)/ >/dev/null 2>&1; do sleep 1; done; \
+		bash scripts/wait_for.sh http://127.0.0.1:$(SEAWEEDFS_PORT)/ seaweedfs "" 45 || exit 1; \
 		echo "seaweedfs ready on http://127.0.0.1:$(SEAWEEDFS_PORT)"; \
 	fi
 
@@ -300,7 +292,7 @@ s3router-up: $(MOCKS_RUN_DIR)
 			--seaweed-url http://127.0.0.1:$(SEAWEEDFS_PORT) \
 			--fakeaws-url $(FAKEAWS_URL) > $(MOCKS_RUN_DIR)/s3router.log 2>&1 & \
 		echo $$! > $(MOCKS_RUN_DIR)/s3router.pid; \
-		until curl -sSf $(S3ROUTER_URL)/healthz >/dev/null 2>&1 || nc -z 127.0.0.1 $(S3ROUTER_PORT) 2>/dev/null; do sleep 0.2; done; \
+		bash scripts/wait_for.sh tcp://127.0.0.1:$(S3ROUTER_PORT) s3router $(MOCKS_RUN_DIR)/s3router.log 30 || exit 1; \
 		echo "s3router ready on $(S3ROUTER_URL) (pid=$$(cat $(MOCKS_RUN_DIR)/s3router.pid))"; \
 	fi
 
@@ -509,10 +501,7 @@ smoke-validate:
 	INFRAFACTORY_ENABLE_REALTOOL_SMOKE=1 $(GO) test ./internal/cli -run TestValidateCommandRealToolSmoke
 
 smoke-mockway: mockway-up
-	@until curl -sSf $(MOCKWAY_URL)/mock/state >/dev/null; do \
-		echo "waiting for mockway at $(MOCKWAY_URL) ..."; \
-		sleep 1; \
-	done
+	@bash scripts/wait_for.sh $(MOCKWAY_URL)/mock/state mockway $(MOCKS_RUN_DIR)/mockway.log || exit 1
 	INFRAFACTORY_ENABLE_REALTOOL_MOCKWAY=1 INFRAFACTORY_MOCKWAY_URL=$(MOCKWAY_URL) $(GO) test ./internal/cli -run TestTestCommandRealToolMockwaySmoke
 
 smoke-mockway-manual:
@@ -527,10 +516,7 @@ smoke-mockway-local:
 	$(MOCKWAY_BIN) > /tmp/infrafactory-mockway.log 2>&1 & \
 	pid=$$!; \
 	trap 'kill $$pid >/dev/null 2>&1 || true; wait $$pid 2>/dev/null || true' EXIT; \
-	until curl -sSf http://127.0.0.1:8080/mock/state >/dev/null 2>&1; do \
-		echo "waiting for mockway binary at http://127.0.0.1:8080 ..."; \
-		sleep 1; \
-	done; \
+	bash scripts/wait_for.sh http://127.0.0.1:8080/mock/state "mockway binary" || exit 1; \
 	INFRAFACTORY_ENABLE_REALTOOL_MOCKWAY=1 INFRAFACTORY_MOCKWAY_URL=http://127.0.0.1:8080 $(GO) test ./internal/cli -run TestTestCommandRealToolMockwaySmoke
 
 smoke: smoke-validate smoke-mockway
@@ -614,7 +600,7 @@ up: mocks-up build $(MOCKS_RUN_DIR)
 		echo "==> starting infrafactory UI on http://127.0.0.1:4173"; \
 		nohup ./bin/infrafactory ui > $(MOCKS_RUN_DIR)/ui.log 2>&1 & \
 		echo $$! > $(MOCKS_RUN_DIR)/ui.pid; \
-		until curl -sSf http://127.0.0.1:4173/ >/dev/null 2>&1; do sleep 1; done; \
+		bash scripts/wait_for.sh http://127.0.0.1:4173/ ui $(MOCKS_RUN_DIR)/ui.log || exit 1; \
 	fi
 	@echo "==> all up: mockway :8080, fakegcp :8081, fakeaws :8082, seaweedfs :9090, ui :4173"
 	@echo "    make status   # check"
