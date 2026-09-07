@@ -454,3 +454,31 @@ One asymmetry, deliberate: the deletion guard treats a project the API reports
 a project that does not exist, or exists without the stamp, is one to refuse. So
 `live upgrade` uses its own check rather than reusing `AssertRunProjectDeletable`,
 whose message also describes the wrong operation.
+
+## Amendment (2026-09-07, S174): the delete has a timing answer
+
+This ADR moved the run's project outside Terraform: created through the Account API before the
+apply, deleted through it afterwards. That is the right call precisely *because* Terraform never
+knows the project exists — `tofu destroy` will never remove it, so if infrafactory does not, every
+run leaks one. Things outside Terraform's state are the things nothing else cleans up.
+
+What the original decision did not anticipate is that the delete has **three** outcomes, not two.
+
+Scaleway checks whether a project still holds resources before deleting it, and that check lags
+its own deletions. Immediately after a successful destroy it answers **412 `precondition is not
+respected`** with its own advice to retry later. Observed 2026-09-07: a project verified empty by
+hand — no instances, load balancers, IPs or VPCs — refused deletion for roughly twenty minutes,
+then deleted on the next attempt with nothing else changed.
+
+Reporting that as a plain failure was honest and misleading at once. It reads as *something is
+wrong*, and sends the operator looking for a leak that is not there.
+
+So a 412 is marked with `ErrRunProjectNotYetDeletable` and reported as a timing answer: resources
+destroyed, project empty, nothing billing, run `reap` shortly. Three properties are load-bearing:
+
+- **Keyed on the status, not the prose.** Scaleway's wording is theirs to change.
+- **Still a `fail`.** The project exists, so the pass cannot claim the account is clean, and
+  ADR-0024 does not bend for a hopeful guess. Only the operator's next action changes.
+- **No internal retry.** Twenty minutes would hold the teardown open for the whole window. It
+  reports and hands over, which is also why `live reconcile` gained a `Released` bucket in S167 —
+  the two together are how a project that outlives its run stays visible instead of forgotten.

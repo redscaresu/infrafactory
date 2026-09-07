@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -206,6 +207,16 @@ func (p *ScalewayRunProject) Describe(ctx context.Context, secretKey, projectID 
 // the same place destroySandbox already purges what the API auto-created.
 //
 // A 404 is success: the project is gone, which is the outcome asked for.
+// ErrRunProjectNotYetDeletable marks a delete the API refused because
+// its own resource check has not caught up -- a TIMING answer, not a
+// fault.
+//
+// It exists so a teardown can say "not yet" rather than "something is
+// wrong". The distinction matters: the account is genuinely clean, the
+// empty project costs nothing, and the operator's next action is to wait
+// and run `live reap` -- not to go hunting for a leak that isn't there.
+var ErrRunProjectNotYetDeletable = errors.New("the API's resource check has not caught up yet")
+
 func (p *ScalewayRunProject) Delete(ctx context.Context, secretKey, projectID string) error {
 	if strings.TrimSpace(secretKey) == "" {
 		return fmt.Errorf("delete run project: no secret key")
@@ -232,6 +243,25 @@ func (p *ScalewayRunProject) Delete(ctx context.Context, secretKey, projectID st
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
+		// 412 means NOT YET, not broken.
+		//
+		// Scaleway checks whether the project still holds resources
+		// before deleting it, and that check lags the deletions
+		// themselves. Immediately after a successful destroy it answers
+		// `precondition is not respected` with its own advice to retry
+		// later. Observed 2026-09-07: an empty project -- verified by
+		// hand as holding no instances, load balancers, IPs or VPCs --
+		// refused deletion for roughly twenty minutes, then deleted on
+		// the next attempt with no other change.
+		//
+		// Keyed on the STATUS, not on the message. Matching Scaleway's
+		// prose would break the moment they reword it, and this package
+		// has spent enough rounds removing that kind of coupling.
+		if resp.StatusCode == http.StatusPreconditionFailed {
+			return fmt.Errorf("delete project %s: http %d: %s: %w",
+				projectID, resp.StatusCode, strings.TrimSpace(string(body)),
+				ErrRunProjectNotYetDeletable)
+		}
 		return fmt.Errorf("delete project %s: http %d: %s",
 			projectID, resp.StatusCode, strings.TrimSpace(string(body)))
 	}
