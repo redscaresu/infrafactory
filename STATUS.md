@@ -2,6 +2,27 @@
 
 Last updated: 2026-09-07
 
+## 2026-09-07 — S172: dependabot proposed a vulnerable stdlib, again
+
+`#211` bumped `go 1.25.13` → **`go 1.26.0`**, and CI's govulncheck failed with three
+stdlib advisories carrying *reachable* traces — `GO-2026-6218` (net/url),
+`GO-2026-6090` and `GO-2026-6089` (crypto/tls) — all fixed in **1.26.6**.
+
+This is S150's finding recurring by a different route. The `go` directive selects the
+stdlib that every binary links, so pinning a `.0` release links the vulnerabilities
+that release shipped with. Dependabot proposes the *minor*, not the patched line, so
+this will happen on every future Go minor unless somebody looks.
+
+Taken with the dependency bumps intact and pinned to **1.26.8** instead. Verified the
+way S150's lesson requires: `GOTOOLCHAIN=go1.26.8` on every command, because
+`golang.org/x/vuln` otherwise switches to a newer toolchain and scans *that* stdlib —
+reporting clean while CI, which pins `GOTOOLCHAIN: local`, still fails. Result: **0
+vulnerabilities**, `go vet` clean, full suite green.
+
+No workflow changes needed: every job reads `go-version-file: go.mod`, so the pin
+propagates.
+
+
 ## 2026-09-07 — S171: a warning must not outlive the condition it described
 
 The gate rehearsal left the PR saying two contradictory things at once: a green
