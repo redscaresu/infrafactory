@@ -940,6 +940,18 @@ func (w layer3IndexWalker) Enter(node hclsyntax.Node) hcl.Diagnostics {
 	case *hclsyntax.RelativeTraversalExpr:
 		if ref := layer3IndexedResourceIn(e.Traversal); ref != "" {
 			*w.found = append(*w.found, ref)
+			break
+		}
+		// `(a.b.c)[0].d` -- the ROOT is in Source, and the traversal
+		// begins with the index itself, so `layer3IndexedResourceIn`
+		// finds no TraverseRoot and returns "". Parenthesising the
+		// reference bypassed this check entirely; found by review.
+		if len(e.Traversal) > 0 {
+			if _, indexed := e.Traversal[0].(hcl.TraverseIndex); indexed {
+				if ref := layer3ResourceReference(layer3Unparen(e.Source)); ref != "" {
+					*w.found = append(*w.found, ref)
+				}
+			}
 		}
 	case *hclsyntax.IndexExpr:
 		if ref := layer3ResourceReference(e.Collection); ref != "" {
@@ -989,6 +1001,18 @@ func (w layer3IndexWalker) Exit(node hclsyntax.Node) hcl.Diagnostics {
 var layer3TotalisingFunctions = map[string]bool{
 	"try": true,
 	"one": true,
+}
+
+// layer3Unparen strips redundant parentheses, which are invisible to
+// evaluation and must be invisible to this check too.
+func layer3Unparen(expr hclsyntax.Expression) hclsyntax.Expression {
+	for {
+		paren, ok := expr.(*hclsyntax.ParenthesesExpr)
+		if !ok {
+			return expr
+		}
+		expr = paren.Expression
+	}
 }
 
 // layer3ResourceReference renders a traversal that names a RESOURCE

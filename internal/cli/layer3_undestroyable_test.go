@@ -134,3 +134,21 @@ func TestTheStackThatStrandedIsRefused(t *testing.T) {
 		"both sites, not just the first: I had to patch both by hand")
 	assert.Contains(t, err.Error(), "private_ips")
 }
+
+// Parentheses are invisible to evaluation and must be invisible here.
+//
+// `(a.b.c)[0].d` parses as a RelativeTraversalExpr whose Traversal BEGINS
+// with the index and whose root sits in `.Source`, so the first version
+// found no TraverseRoot, returned "", and let the shape straight through.
+// Found by review; the plain form was caught and this one was not.
+func TestLayer3SeesThroughParentheses(t *testing.T) {
+	err := validateLayer3HCLShape(writeLayer3Stack(t, `
+resource "scaleway_lb_backend" "main" {
+  lb_id      = scaleway_lb.main.id
+  server_ips = [(scaleway_instance_private_nic.web.private_ips)[0].address]
+}
+`), []string{"scaleway_lb*", "scaleway_instance*"})
+
+	require.Error(t, err, "parenthesising a reference must not evade the check")
+	assert.Contains(t, err.Error(), "private_ips")
+}
