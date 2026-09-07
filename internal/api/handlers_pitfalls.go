@@ -163,7 +163,8 @@ func listPitfalls(state *serverState, w http.ResponseWriter, r *http.Request) {
 			// mistake built on a false premise.
 			//
 			// I wrote that "the YAML error names the file it was read
-			// from". It does not: `yaml.Unmarshal` receives bytes and
+			// from". It does not (TestAssumption_YAMLErrorsCannotNameTheFile):
+			// `yaml.Unmarshal` receives bytes and
 			// has no filename, so the text is `yaml: line 2: mapping
 			// values are not allowed in this context` -- a line number,
 			// nothing of ours. Hiding it stripped the one useful fact

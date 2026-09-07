@@ -47,6 +47,12 @@ belongs in a comment or an ADR, which is what those are for.
 Assumption tests live in `assumptions_test.go` per package, named
 `TestAssumption_<claim>`, and each names the site that relies on it.
 
+**The citation runs both ways**, and both directions earn their keep. The test
+names its relying site, so deleting the site is visibly the moment the test stops
+mattering. The site names its test, so a reader who doubts the claim verifies it
+with one grep instead of reconstructing an argument — which is precisely what
+nobody did for the five claims that failed.
+
 ## Why not a convention
 
 Because S167 is the counter-example. "Do not put an error's text in a response body"

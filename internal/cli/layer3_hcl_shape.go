@@ -897,7 +897,8 @@ func layer3UnguardedResourceIndexes(expr hclsyntax.Expression) []string {
 	var found []string
 	guard := 0
 	// Both fields are pointers because hclsyntax.Walk takes the walker by
-	// VALUE and calls Enter/Exit on copies. A lazily-initialised counter
+	// VALUE and calls Enter/Exit on copies
+	// (TestAssumption_HCLWalkCopiesTheWalker). A lazily-initialised counter
 	// inside Enter silently reset on every node.
 	_ = hclsyntax.Walk(expr, layer3IndexWalker{found: &found, guard: &guard})
 	return found
@@ -925,7 +926,8 @@ func (w layer3IndexWalker) Enter(node hclsyntax.Node) hcl.Diagnostics {
 	//
 	// `a.b.c[0].d` is one ScopeTraversalExpr whose Traversal holds
 	// TraverseRoot, TraverseAttr, TraverseIndex, TraverseAttr -- there is
-	// no IndexExpr node anywhere in it. Looking for IndexExpr found
+	// no IndexExpr node anywhere in it
+	// (TestAssumption_HCLIndexesAreTraversalStepsNotIndexExprs). Looking for IndexExpr found
 	// nothing at all and the check passed everything, which is how the
 	// first version of this reported clean on the exact HCL that stranded
 	// a stack.

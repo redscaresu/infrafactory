@@ -310,7 +310,9 @@ func (d *LiveDeployer) Deploy(ctx context.Context, scenarioName, ttl string, pro
 		// stderr. An earlier version of this comment said stderr, and
 		// that was wrong: `runDeployCommand` is called directly rather
 		// than through `cmd.Execute()`, and cobra only prints a returned
-		// error on the latter. Nothing was written to the tee.
+		// error on the latter -- see
+		// TestAssumption_CobraOnlyPrintsErrorsFromExecute. Nothing was
+		// written to the tee.
 		runtime.Logger.Log(LogEntry{
 			Level: logLevelError, Command: "deploy", Event: "deploy_failed",
 			Status: "failed", Detail: deployErr.Error(),
