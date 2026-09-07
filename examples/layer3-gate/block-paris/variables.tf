@@ -31,5 +31,5 @@ variable "volume_iops" {
 variable "volume_tags" {
   description = "Tags applied to the application data block volume"
   type        = list(string)
-  default     = ["infrafactory", "block-paris", "app-data"]
+  default     = ["infrafactory", "block-paris", "app-data", "gate-rehearsal"]
 }
