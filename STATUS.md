@@ -2,6 +2,49 @@
 
 Last updated: 2026-09-07
 
+## 2026-09-07 — S168: a stack that cannot be destroyed must not reach apply
+
+The S164 canary created real infrastructure that **its own teardown could not
+remove**. `web-live-paris` indexed
+`scaleway_instance_private_nic.web.private_ips[0].address`; the list was empty at
+apply time, so apply failed with "Invalid index" — and then teardown failed with
+the *same* error, because `tofu destroy` evaluates the configuration rather than
+replaying state. `run_project_delete` could not rescue it either: Scaleway refuses
+to delete a project that still holds resources. Recovery meant hand-editing the
+live workdir and running `tofu destroy` manually.
+
+ADR-0024 held — teardown correctly refused to claim success — but there was **no
+path back to a clean account inside the product**. An operator without terraform
+and shell access would have had stranded, billing infrastructure and a red banner.
+
+So the defect to prevent is not "apply failed". It is *"we let a stack reach apply
+that we could not have destroyed"*, and that is checkable before anything is
+created. The Layer 3 preflight now refuses an index into a **resource attribute**
+that is not wrapped in `try()` or `one()`. `var.x[0]` and `local.y[0]` are
+untouched: they are known at plan time and cannot strand a destroy.
+
+**Why the preflight rather than the pitfall learner.** The learner is wired only
+into `run_command.go`'s self-correcting loop, where a wrong pitfall shows up as the
+next iteration failing again. A deploy is one-shot, so a pitfall extracted from it
+is never validated by anything — and S156e already showed attribution is the weak
+point. This hazard is a *static* property of the HCL, so it belongs where ADR-0025's
+checks live: deterministic, no attribution problem, and it fails before money is
+spent. A pitfall as well is worth having, but the preflight is the guard that holds
+because it does not depend on the LLM having learned anything.
+
+**Two bugs in the check, both found by running it.** The first version looked for
+`hclsyntax.IndexExpr` — but `a.b.c[0].d` is a *single traversal* with a
+`TraverseIndex` step and contains no `IndexExpr` at all, so the check reported clean
+on the exact stack that stranded. And the `try()`-guard counter was lazily
+initialised inside `Enter` on a **value** receiver, so it reset on every node;
+`hclsyntax.Walk` copies the walker. Both are the class this week has been about: a
+plausible model of another component, asserted rather than run.
+
+Verified against the real thing: `internal/cli/testdata/undestroyable-stack` is
+`output/web-live-paris` as it stood that morning, and the preflight names both
+`loadbalancer.tf` and `outputs.tf` — the two files I had to patch by hand.
+
+
 ## 2026-09-07 — S167: the leak class, and an audit that made the same mistake it forbade
 
 Review round twenty-six found four handlers writing `err.Error()` into a response

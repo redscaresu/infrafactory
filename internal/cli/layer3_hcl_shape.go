@@ -283,6 +283,7 @@ func layer3BlockProblems(body *hclsyntax.Body, file string, allowedResourceTypes
 		}
 		problems = append(problems, layer3NestedProblems(block, file)...)
 		problems = append(problems, layer3FunctionCallProblems(block, file)...)
+		problems = append(problems, layer3UndestroyableProblems(block, file)...)
 	}
 	return problems, sawCanonicalProvider, projectResources
 }
@@ -613,6 +614,11 @@ func layer3CallsIn(expr hclsyntax.Expression) []string {
 // not "is it useful?" but "can its result depend on anything outside its
 // arguments?"
 var layer3PureFunctions = map[string]bool{
+	// `try` is already below; `one` is added because it is the other way
+	// an index is made total, and refusing it would refuse the fix this
+	// preflight recommends.
+	"one": true,
+
 	// collections
 	"concat": true, "merge": true, "lookup": true, "element": true,
 	"length": true, "keys": true, "values": true, "flatten": true,
@@ -833,4 +839,183 @@ func layer3NestedCostProblems(block *hclsyntax.Block, file, owner string, varDef
 		problems = append(problems, layer3NestedCostProblems(inner, file, owner, varDefaults)...)
 	}
 	return problems
+}
+
+// layer3UndestroyableProblems refuses an index into a resource attribute
+// that is not made total by try() or one().
+//
+// # This is a teardown check, not an apply check
+//
+// `tofu destroy` EVALUATES THE CONFIGURATION. It is not a replay of
+// state. So an expression that cannot be evaluated does not merely fail
+// the apply -- it disables the escape hatch, and the infrastructure the
+// half-finished apply created cannot be removed by the tool that created
+// it.
+//
+// Found by running it (S164, 2026-09-07). `web-live-paris` indexed
+// `scaleway_instance_private_nic.web.private_ips[0].address`; the list
+// was empty at apply time, so apply failed with "Invalid index" --
+// and then teardown failed with the SAME error, and `run_project_delete`
+// could not rescue it either, because Scaleway refuses to delete a
+// project that still holds resources. Recovery meant hand-editing the
+// workdir's HCL and running `tofu destroy` by hand. An operator without
+// terraform and shell access would have had stranded, billing
+// infrastructure and a red banner.
+//
+// ADR-0024 held -- teardown correctly refused to claim success -- but
+// there was no path back to a clean account inside the product. So the
+// defect to prevent is not "apply failed"; it is "we let a stack reach
+// apply that we could not have destroyed", and that is checkable here,
+// before anything is created.
+//
+// # Why resource attributes specifically
+//
+// `var.x[0]` and `local.y[0]` are known at plan time and cannot surprise
+// a destroy. A resource attribute can be unknown or empty until after
+// apply, which is exactly the case that strands things. Indexing one is
+// refused unless it is wrapped: `try(...)` and `one(...)` both make the
+// expression total, so destroy can always evaluate it.
+func layer3UndestroyableProblems(block *hclsyntax.Block, file string) []string {
+	problems := make([]string, 0)
+	if block.Body == nil {
+		return problems
+	}
+	for name, attr := range block.Body.Attributes {
+		for _, ref := range layer3UnguardedResourceIndexes(attr.Expr) {
+			problems = append(problems, fmt.Sprintf(
+				"%s: %s indexes %s, and a resource attribute can be empty until after apply; `tofu destroy` evaluates the configuration, so if this index fails the stack cannot be destroyed either. Wrap it in try() or one()",
+				file, name, ref))
+		}
+	}
+	for _, inner := range block.Body.Blocks {
+		problems = append(problems, layer3UndestroyableProblems(inner, file)...)
+	}
+	return problems
+}
+
+func layer3UnguardedResourceIndexes(expr hclsyntax.Expression) []string {
+	var found []string
+	guard := 0
+	// Both fields are pointers because hclsyntax.Walk takes the walker by
+	// VALUE and calls Enter/Exit on copies. A lazily-initialised counter
+	// inside Enter silently reset on every node.
+	_ = hclsyntax.Walk(expr, layer3IndexWalker{found: &found, guard: &guard})
+	return found
+}
+
+// layer3IndexWalker collects indexes into resource attributes, skipping
+// anything already inside a total-making call.
+type layer3IndexWalker struct {
+	found *[]string
+	// guard counts enclosing try()/one() calls. Walk is depth-first with
+	// matched Enter/Exit, so a counter tracks "am I inside one" without
+	// carrying a stack.
+	guard *int
+}
+
+func (w layer3IndexWalker) Enter(node hclsyntax.Node) hcl.Diagnostics {
+	if call, ok := node.(*hclsyntax.FunctionCallExpr); ok && layer3TotalisingFunctions[call.Name] {
+		*w.guard++
+		return nil
+	}
+	if *w.guard > 0 {
+		return nil
+	}
+	// A TRAVERSAL step, not an IndexExpr.
+	//
+	// `a.b.c[0].d` is one ScopeTraversalExpr whose Traversal holds
+	// TraverseRoot, TraverseAttr, TraverseIndex, TraverseAttr -- there is
+	// no IndexExpr node anywhere in it. Looking for IndexExpr found
+	// nothing at all and the check passed everything, which is how the
+	// first version of this reported clean on the exact HCL that stranded
+	// a stack.
+	//
+	// IndexExpr does exist for the `x[expr]` form on a non-traversal, so
+	// both are handled.
+	switch e := node.(type) {
+	case *hclsyntax.ScopeTraversalExpr:
+		if ref := layer3IndexedResourceIn(e.Traversal); ref != "" {
+			*w.found = append(*w.found, ref)
+		}
+	case *hclsyntax.RelativeTraversalExpr:
+		if ref := layer3IndexedResourceIn(e.Traversal); ref != "" {
+			*w.found = append(*w.found, ref)
+		}
+	case *hclsyntax.IndexExpr:
+		if ref := layer3ResourceReference(e.Collection); ref != "" {
+			*w.found = append(*w.found, ref)
+		}
+	}
+	return nil
+}
+
+// layer3IndexedResourceIn reports the resource attribute an indexed
+// traversal reaches into, or "".
+func layer3IndexedResourceIn(traversal hcl.Traversal) string {
+	if len(traversal) < 2 {
+		return ""
+	}
+	root, ok := traversal[0].(hcl.TraverseRoot)
+	if !ok {
+		return ""
+	}
+	switch root.Name {
+	case "var", "local", "each", "count", "path", "terraform":
+		return ""
+	}
+	name := root.Name
+	for _, step := range traversal[1:] {
+		switch t := step.(type) {
+		case hcl.TraverseAttr:
+			name += "." + t.Name
+		case hcl.TraverseIndex:
+			// The index is what makes it a hazard; everything before it
+			// is the attribute being indexed.
+			return name
+		}
+	}
+	return ""
+}
+
+func (w layer3IndexWalker) Exit(node hclsyntax.Node) hcl.Diagnostics {
+	if call, ok := node.(*hclsyntax.FunctionCallExpr); ok && layer3TotalisingFunctions[call.Name] && *w.guard > 0 {
+		*w.guard--
+	}
+	return nil
+}
+
+// layer3TotalisingFunctions make an expression evaluable whatever the
+// collection holds, which is the whole property destroy needs.
+var layer3TotalisingFunctions = map[string]bool{
+	"try": true,
+	"one": true,
+}
+
+// layer3ResourceReference renders a traversal that names a RESOURCE
+// attribute, or "" for anything else.
+//
+// `var.`, `local.`, `each.` and `count.` are excluded deliberately: they
+// are known before apply, so indexing them cannot strand a stack.
+func layer3ResourceReference(expr hclsyntax.Expression) string {
+	scope, ok := expr.(*hclsyntax.ScopeTraversalExpr)
+	if !ok || len(scope.Traversal) < 2 {
+		return ""
+	}
+	root, ok := scope.Traversal[0].(hcl.TraverseRoot)
+	if !ok {
+		return ""
+	}
+	switch root.Name {
+	case "var", "local", "each", "count", "path", "terraform":
+		return ""
+	}
+	parts := root.Name
+	for _, step := range scope.Traversal[1:] {
+		attr, ok := step.(hcl.TraverseAttr)
+		if !ok {
+			break
+		}
+		parts += "." + attr.Name
+	}
+	return parts
 }
