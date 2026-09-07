@@ -192,3 +192,45 @@ deadline. This is the same rule `ensureRunProject` applies to creating a run's
 project: **once an operation begins changing real infrastructure, the caller
 going away must not stop it.** Whoever asked can leave; the destroy finishes and
 the record ends up describing what is actually there.
+
+## Amendment (2026-09-07, S167): what loopback does and does not excuse
+
+Sixty-five handlers in `internal/api` wrote an error's text straight into a
+response body, so an unreadable run store answered `{"error":"read scenario runs:
+open /Users/<name>/.infrafactory/runs/x: permission denied"}` — rendered verbatim
+by the UI.
+
+**Loopback means this is not a disclosure vulnerability.** The reader is the
+operator, on their own machine, looking at their own paths. Anyone tempted to file
+it as one should stop here.
+
+**It is still wrong, for two reasons that survive the loopback binding.** A raw
+`*fs.PathError` in a red banner is noise the reader cannot act on, where "a live
+record could not be read; see the server log" names the problem and puts the cause
+where an operator can search it. And `--addr` is a flag: loopback is a deployment
+default, not a property of the code, so composing what we send is a habit worth
+having independently of how the server happens to be bound.
+
+The rule is therefore about *where the error came from*, never about the status
+code. `handlePutScenarioByPath` answers **400** for malformed YAML from an error
+carrying the schema path, because the parse runs against a temp file.
+
+Enforced by `error_body_audit_test.go`, which asks whether the package touches an
+error's text at all rather than which function received it. The first version asked
+the latter and missed three live instances — error text reaches a response as a
+struct field through `writeJSON` just as easily as through `writeJSONError`, and
+that is the door a function-shaped rule cannot see.
+
+**"The text" has two spellings, and the second cost another round.**
+`fmt.Sprintf("%v", err)` renders an error without ever calling `.Error()`, so an
+audit that looks only for `.Error()` misses it — while its comment claimed no such
+spelling existed. Both are checked now.
+
+**Withholding has a cost, and three of these went too far.** An error composed by
+this codebase, naming nothing of the server's, is the most useful thing a reader
+can be given: `yaml: line 2: mapping values are not allowed`, `tag "latest" is a
+moving tag: pin an immutable version`, `scenario %q declares no service: block`.
+Each was withheld on a premise that turned out to be false — that a yaml error
+names its file, that cobra had already printed the cause, that a 400 must be the
+server's fault. The rule is not "hide errors"; it is **compose what you send**, and
+a message this package wrote is already composed.

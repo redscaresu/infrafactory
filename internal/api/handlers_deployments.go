@@ -164,9 +164,7 @@ func deploymentsHandler(state *serverState) http.HandlerFunc {
 			// A STABLE message: an unreadable store root yields an
 			// *fs.PathError, and this body is rendered verbatim on the
 			// Deployments page.
-			state.logDetail("live estate could not be listed: %v", err)
-			writeJSONError(w, http.StatusInternalServerError,
-				"this server could not read its live deployments; see the server log")
+			state.writeInternalError(w, http.StatusInternalServerError, "this server could not read its live deployments", err)
 			return
 		}
 
@@ -192,8 +190,38 @@ func deploymentsHandler(state *serverState) http.HandlerFunc {
 				UpgradeStartedAt: optionalTime(d.UpgradeStartedAt),
 			})
 		}
-		for _, e := range unreadable {
-			payload.Unreadable = append(payload.Unreadable, e.Error())
+		// One entry per unreadable record, NAMED, with the reason logged.
+		//
+		// This appended `e.Error()`, and `FilesystemStore.Get` wraps with
+		// `read deployment %s: %w` -- so a permission-denied record put
+		// `open /Users/<name>/.infrafactory/live/dep-x.json: permission
+		// denied` into a list the estate page renders verbatim, thirty
+		// lines below a fix for the identical *fs.PathError.
+		//
+		// The ids come from the paired records rather than from the
+		// error text: `List` appends a `Deployment{ID: id, Undecodable:
+		// true}` for every error it reports. An earlier fix emitted one
+		// constant sentence per error instead, which rendered as N
+		// identical bullets under a heading that already said N -- a
+		// list conveying nothing beyond its own length.
+		//
+		// The COUNT still comes from `unreadable`, so an error reported
+		// without a matching record cannot go unmentioned.
+		undecodable := make([]string, 0, len(unreadable))
+		for _, d := range deployments {
+			if d.Undecodable {
+				undecodable = append(undecodable, d.ID)
+			}
+		}
+		for i, e := range unreadable {
+			state.logDetail("live record could not be read: %v", e)
+			if i < len(undecodable) {
+				payload.Unreadable = append(payload.Unreadable,
+					undecodable[i]+" could not be read; see the server log")
+				continue
+			}
+			payload.Unreadable = append(payload.Unreadable,
+				"a live record could not be read; see the server log")
 		}
 
 		// Soonest to expire first: the estate page's job is to show what
@@ -300,9 +328,7 @@ func writeActionResult(w http.ResponseWriter, state *serverState, result ActionR
 		// A STABLE message otherwise, for the same reason as every other
 		// branch on this route: an *fs.PathError here puts an absolute
 		// server path into a body a page renders verbatim.
-		state.logDetail("action failed: %v", err)
-		writeJSONError(w, http.StatusInternalServerError,
-			"this server could not complete the action; see the server log")
+		state.writeInternalError(w, http.StatusInternalServerError, "this server could not complete the action", err)
 		return
 	}
 	status := http.StatusOK
@@ -481,7 +507,16 @@ func deployHandler(state *serverState) http.HandlerFunc {
 			// that promise a typo'd scenario pinned a red "it may have
 			// created resources that are still running" on screen for
 			// the rest of the session.
-			writeRefusal(w, http.StatusNotFound, err.Error())
+			//
+			// Composed from what the CALLER sent, not from `err.Error()`.
+			// The error's text happens to be safe -- this package builds
+			// it -- but "happens to be safe" is what the other
+			// sixty-five sites also were until one of them wrapped an
+			// *fs.PathError. A deployer is an interface, so what it puts
+			// in that error is not this handler's to promise.
+			state.logDetail("deploy refused, no such scenario: %v", err)
+			writeRefusal(w, http.StatusNotFound,
+				fmt.Sprintf("no scenario named %q", req.Scenario))
 			return
 		}
 		if errors.Is(err, ErrNothingStarted) {
@@ -528,9 +563,7 @@ func deployHandler(state *serverState) http.HandlerFunc {
 			// A STABLE message, for the same reason as the branch
 			// above: `err.Error()` on an *fs.PathError puts an absolute
 			// server path in a body the scenario page renders verbatim.
-			state.logDetail("deploy failed with a missing file: %v", err)
-			writeJSONError(w, http.StatusNotFound,
-				"this server could not find something the deploy needed; see the server log")
+			state.writeInternalError(w, http.StatusNotFound, "this server could not find something the deploy needed", err)
 			return
 		}
 

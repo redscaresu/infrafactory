@@ -268,8 +268,57 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 	_ = json.NewEncoder(w).Encode(payload)
 }
 
+// writeJSONError answers with a message this package COMPOSED.
+//
+// The message must never be an error's text. A Go error from the
+// filesystem carries an absolute path -- `*fs.PathError` renders as
+// `open /Users/<name>/.infrafactory/runs/x: permission denied` -- and
+// every one of these bodies is rendered verbatim by the UI. Use
+// `writeInternalError` for anything derived from an error; the audit in
+// `error_body_audit_test.go` fails the build otherwise.
 func writeJSONError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]string{"error": message})
+}
+
+// writeRequestError answers a fault in the REQUEST, and echoes it.
+//
+// The ONE place an error's text is deliberately shown. It is safe here
+// because the error describes the caller's own payload -- `json: unknown
+// field "clod"` is exactly what the caller needs and names nothing of
+// ours -- and useless to withhold, since the caller can already see what
+// they sent.
+//
+// Only for errors produced by reading or decoding the request body.
+// Anything touching the filesystem, a provider or the run store goes to
+// `writeInternalError`, whatever its status code: `loadScenarioFile`
+// answers 400 for malformed YAML and its error carries the schema path,
+// so status is not a proxy for safety.
+func writeRequestError(w http.ResponseWriter, status int, message string, err error) {
+	writeJSONError(w, status, message+": "+err.Error())
+}
+
+// writeInternalError answers a fault WITHOUT describing it, and records
+// the cause where an operator can reach it.
+//
+// Two audiences, two channels. The client is told what it needs to
+// decide what to do next -- that this failed, and that it was the
+// server's fault rather than the request's -- and the cause goes to the
+// log, which is the only place an absolute path, a provider message or
+// a stack of wrapped context belongs.
+//
+// This is not hypothetical tidiness. Pointing an unreadable run store at
+// four endpoints put the store's absolute path in all four bodies, and
+// the same shape existed at SIXTY-FIVE call sites across this package,
+// four of which had already survived a code review each.
+//
+// It is not a remote-disclosure defence either: the server binds
+// 127.0.0.1 and answers loopback origins only (ADR-0026), so the reader
+// is the operator looking at their own machine's paths. What it buys is
+// a body a reader can act on, and a habit that does not depend on how
+// the server happens to be bound today.
+func (s *serverState) writeInternalError(w http.ResponseWriter, status int, message string, err error) {
+	s.logDetail("%s: %v", message, err)
+	writeJSONError(w, status, message+"; see the server log")
 }
 
 // writeRefusal answers a request that was rejected BEFORE it could do

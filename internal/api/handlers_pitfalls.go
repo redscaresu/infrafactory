@@ -102,7 +102,7 @@ func listPitfalls(state *serverState, w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusOK, pitfallsResponse{Providers: []pitfallsProviderGroup{}})
 			return
 		}
-		writeJSONError(w, http.StatusInternalServerError, "read pitfalls directory: "+err.Error())
+		state.writeInternalError(w, http.StatusInternalServerError, "read pitfalls directory", err)
 		return
 	}
 
@@ -138,13 +138,13 @@ func listPitfalls(state *serverState, w http.ResponseWriter, r *http.Request) {
 		const maxPitfallsFileBytes = 1 << 20
 		f, err := os.Open(path)
 		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, "open pitfalls file "+name+": "+err.Error())
+			state.writeInternalError(w, http.StatusInternalServerError, "open pitfalls file "+name, err)
 			return
 		}
 		data, err := io.ReadAll(io.LimitReader(f, maxPitfallsFileBytes+1))
 		_ = f.Close()
 		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, "read pitfalls file "+name+": "+err.Error())
+			state.writeInternalError(w, http.StatusInternalServerError, "read pitfalls file "+name, err)
 			return
 		}
 		if len(data) > maxPitfallsFileBytes {
@@ -159,6 +159,18 @@ func listPitfalls(state *serverState, w http.ResponseWriter, r *http.Request) {
 		if err := yaml.Unmarshal(data, &file); err != nil {
 			// One bad file shouldn't blank the whole pitfalls page; surface
 			// it as a per-provider parse_error and continue with the rest.
+			// The parse detail is SHOWN, and withholding it was a
+			// mistake built on a false premise.
+			//
+			// I wrote that "the YAML error names the file it was read
+			// from". It does not: `yaml.Unmarshal` receives bytes and
+			// has no filename, so the text is `yaml: line 2: mapping
+			// values are not allowed in this context` -- a line number,
+			// nothing of ours. Hiding it stripped the one useful fact
+			// from the page that exists to edit this file, which is the
+			// identical regression I caught and reverted for the
+			// scenario editor twelve lines away.
+			state.logDetail("pitfalls file %s could not be parsed: %v", name, err)
 			groups = append(groups, pitfallsProviderGroup{
 				Provider:   provider,
 				Pitfalls:   []pitfallsResponseEntry{},
@@ -218,7 +230,7 @@ func editPitfalls(state *serverState, w http.ResponseWriter, r *http.Request, pr
 	const maxEditPayloadBytes = 1 << 20
 	bodyBytes, err := io.ReadAll(io.LimitReader(r.Body, maxEditPayloadBytes+1))
 	if err != nil {
-		writeJSONError(w, http.StatusBadRequest, "read request body: "+err.Error())
+		writeRequestError(w, http.StatusBadRequest, "read request body", err)
 		return
 	}
 	if len(bodyBytes) > maxEditPayloadBytes {
@@ -230,7 +242,7 @@ func editPitfalls(state *serverState, w http.ResponseWriter, r *http.Request, pr
 	dec := json.NewDecoder(bytes.NewReader(bodyBytes))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&req); err != nil {
-		writeJSONError(w, http.StatusBadRequest, "decode body: "+err.Error())
+		writeRequestError(w, http.StatusBadRequest, "decode body", err)
 		return
 	}
 	// Reject trailing JSON so a body like `{"pitfalls":[]}{"pitfalls":[…]}`
@@ -253,7 +265,7 @@ func editPitfalls(state *serverState, w http.ResponseWriter, r *http.Request, pr
 	}
 
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "create pitfalls directory: "+err.Error())
+		state.writeInternalError(w, http.StatusInternalServerError, "create pitfalls directory", err)
 		return
 	}
 
@@ -276,7 +288,7 @@ func editPitfalls(state *serverState, w http.ResponseWriter, r *http.Request, pr
 
 	out, err := yaml.Marshal(&pf)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "marshal pitfalls: "+err.Error())
+		state.writeInternalError(w, http.StatusInternalServerError, "marshal pitfalls", err)
 		return
 	}
 
@@ -287,7 +299,7 @@ func editPitfalls(state *serverState, w http.ResponseWriter, r *http.Request, pr
 	// silently overwrite the winner's.
 	tmp, err := os.CreateTemp(dir, provider+"-*.yaml.tmp")
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "create temp pitfalls: "+err.Error())
+		state.writeInternalError(w, http.StatusInternalServerError, "create temp pitfalls", err)
 		return
 	}
 	tmpPath := tmp.Name()
@@ -303,22 +315,22 @@ func editPitfalls(state *serverState, w http.ResponseWriter, r *http.Request, pr
 	}()
 	if _, err := tmp.Write(out); err != nil {
 		_ = tmp.Close()
-		writeJSONError(w, http.StatusInternalServerError, "write temp pitfalls: "+err.Error())
+		state.writeInternalError(w, http.StatusInternalServerError, "write temp pitfalls", err)
 		return
 	}
 	// CreateTemp lands at 0600 by default; pitfalls files in the repo are
 	// 0644, so make the in-place mode match what users expect.
 	if err := tmp.Chmod(0o644); err != nil {
 		_ = tmp.Close()
-		writeJSONError(w, http.StatusInternalServerError, "chmod temp pitfalls: "+err.Error())
+		state.writeInternalError(w, http.StatusInternalServerError, "chmod temp pitfalls", err)
 		return
 	}
 	if err := tmp.Close(); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "close temp pitfalls: "+err.Error())
+		state.writeInternalError(w, http.StatusInternalServerError, "close temp pitfalls", err)
 		return
 	}
 	if err := os.Rename(tmpPath, target); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "rename pitfalls: "+err.Error())
+		state.writeInternalError(w, http.StatusInternalServerError, "rename pitfalls", err)
 		return
 	}
 	// Rename succeeded — disarm the cleanup defer so it doesn't unlink

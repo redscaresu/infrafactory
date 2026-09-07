@@ -1,6 +1,100 @@
 # STATUS
 
-Last updated: 2026-09-06
+Last updated: 2026-09-07
+
+## 2026-09-07 — S167: the leak class, and an audit that made the same mistake it forbade
+
+Review round twenty-six found four handlers writing `err.Error()` into a response
+body, in `handlers_deployments.go`. I fixed those four. That was whack-a-mole: the
+same shape existed at **sixty-five more sites** across `internal/api` — runs,
+scenarios, pitfalls, output, compare — and four of the original four were in code
+that had already been through a code review of its own.
+
+**It is a real leak, verified rather than inferred.** Pointing an unreadable run
+store at four endpoints put the store's absolute path in all four bodies:
+`{"error":"read scenario runs: open /var/.../Usersprobe/runs/web-app-paris:
+permission denied"}`. Every error body in this package is rendered verbatim by the
+UI. The *not-found* paths were always clean — they have explicit stable branches —
+so it is the fallback for unexpected errors that leaks, which is why nobody
+noticed.
+
+**Not a status-code rule, which is the trap I nearly fell into.** It would be
+convenient if 5xx meant hide and 4xx meant show. `handlePutScenarioByPath` answers
+**400** for malformed YAML, and that error carries the schema path because the
+parse runs against a temp file — confirmed by calling `loadScenarioFile` directly
+rather than guessing. Safety is about where the error came from, not what the
+status says about blame.
+
+Three functions now, and only two of them may see an error:
+
+- `writeJSONError` — a message this package composed. Never an error.
+- `writeInternalError` — logs the cause through the `Logf` seam and answers with a
+  stable sentence. Sixty of the sites.
+- `writeRequestError` — the one deliberate echo, for errors describing the
+  *caller's own payload*: a body that would not read, JSON that would not decode.
+  Five sites.
+
+**The audit is the part that stops it regrowing — and my first one repeated the
+defect it was written to prevent.** It asked "was `writeJSONError` called with an
+error?", and its own comment claimed it covered every body-writer. Review showed
+the claim was false and the rule was the reason: `writeJSON` is the bigger door,
+and error text reaches a response through it as a *struct field*.
+`payload.Unreadable = append(..., e.Error())` and `ParseError: err.Error()` both
+sailed past while the audit reported green. A local variable defeated it just as
+easily — `msg := "read: " + err.Error()`.
+
+So the rule changed from *which function was called* to **whether the package
+touches an error's text at all**, outside a named allowlist that carries a reason
+per entry. There is no spelling of "put this error in a response" that does not
+first call `.Error()` somewhere. Both escapes are now caught; both were verified by
+reintroducing them.
+
+Three live instances remained after the first pass, all inside the package I had
+declared closed. One is reproduced in a test: `{"unreadable":["read deployment
+dep-locked: open /var/.../secret-live-dir/dep-locked.json: permission denied"]}`,
+rendered verbatim by the estate page. A fourth sat in `internal/cli`, where
+`live_service.go` put a raw `deployErr.Error()` into an `ActionResult` the scenario
+page renders — outside the audited package, which is the boundary version of the
+same mistake.
+
+**A correction to my own framing.** I called this a leak without qualification. The
+server binds `127.0.0.1` and answers loopback origins only (ADR-0026), so the
+reader of these bodies is the operator, on their own machine, looking at their own
+paths. It is a CLAUDE.md violation and a usability defect — `open /Users/...:
+permission denied` in a red banner is noise where "a live record could not be read;
+see the server log" is actionable — plus defence in depth, since `--addr` overrides
+the binding. It is not a remote-disclosure vulnerability, and the archive should
+not imply it was.
+
+**Round three found the rule still wrong, and two of my fixes built on false
+premises.** `fmt.Sprintf("%v", err)` renders an error without calling `.Error()`,
+so the audit missed it while its own comment claimed no such spelling existed —
+verified by reintroducing it. The cause is worth recording: round two called the
+`Sprintf` branch redundant, which was true of the implementation it reviewed, and
+I deleted it while rewriting the rule to only walk for `.Error()`. A finding
+applied to code it was no longer true of.
+
+And I withheld two errors on premises I never checked. The pitfalls parse error,
+on the claim that "the YAML error names the file" — `yaml.Unmarshal` receives
+bytes and has no filename, so I stripped a line number from the page that exists
+to fix that file, the identical regression I had reverted for the scenario editor
+twelve lines earlier. And the deploy failure detail, on the claim that the cause
+"is on the command's stderr" — `runDeployCommand` is called directly, not through
+`cmd.Execute()`, so cobra printed nothing. That one destroyed `scenario %q
+declares no service: block ... Use infrafactory run`, which I had personally hit
+during the S164 canary and been told nothing about.
+
+The corrected rule is **compose what you send**, not "hide errors". A message this
+package wrote is already composed: `*CLIError` text, scenario-rule violations and
+yaml syntax details are all shown again.
+
+Two regressions of my own, caught in the same round: the scenario editor stopped
+showing YAML syntax errors, so a reader got "see the server log" for their own typo
+on the page that exists to fix it — `extractYAMLSyntaxDetail` already solved that
+twelve lines away. And the 403 traversal answer lost the specific safe reason that
+`resolveScenarioFile` composes, three of whose four refusals are its own literals;
+only the one wrapping an `*fs.PathError` is now withheld, via a sentinel.
+
 
 ## 2026-09-06 — S164: the journey, and a decline that was wrong
 

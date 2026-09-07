@@ -69,8 +69,17 @@ func TestDeploymentsCarryRecordsTheStoreCouldNotRead(t *testing.T) {
 		unreadable: []error{errors.New("dep-broken.json: unexpected end of JSON input")},
 	})
 
+	// The COUNT survives; the reason does not travel.
+	//
+	// It asserted the filename appeared, which is how the leak was
+	// tolerated: the store wraps with `read deployment %s: %w`, so a
+	// permission error carried the store's absolute path into a list the
+	// estate page renders verbatim. Which record is unreadable is still
+	// visible -- each one is a row with `unreadable: true`.
 	require.Len(t, payload.Unreadable, 1)
-	assert.Contains(t, payload.Unreadable[0], "dep-broken.json")
+	assert.NotContains(t, payload.Unreadable[0], "dep-broken.json",
+		"the store's own words about its files stay in the log")
+	assert.Contains(t, payload.Unreadable[0], "see the server log")
 }
 
 // Healthy-but-on-the-wrong-version is the most dangerous state the system
