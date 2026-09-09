@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { selectLatestRun } from "$lib/run-view.js";
   import { afterNavigate } from "$app/navigation";
   import { onDestroy, onMount } from "svelte";
   import { page } from "$app/stores";
@@ -151,13 +152,10 @@
 
   async function redirectToLatestRun(scenario: string) {
     const resp = await api.getRunsForScenario(scenario);
-    const runs = ((resp.runs as any[]) || []).slice();
-    if (runs.length === 0) {
+    const active = selectLatestRun((resp.runs as any[]) || [], scenario);
+    if (!active) {
       throw new Error("run already in progress, but no run metadata was found");
     }
-
-    runs.sort((a, b) => (a.run_id < b.run_id ? 1 : -1));
-    const active = runs.find((run) => run.status === "running") || runs[0];
     window.location.href = encodeLiveURL(scenario, active.run_id);
   }
 

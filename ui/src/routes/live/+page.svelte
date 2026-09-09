@@ -102,7 +102,13 @@
     scenario = active.scenario || "";
     runID = active.run_id || "";
     if (scenario && runID) {
-      const url = `/live?scenario=${encodeURIComponent(scenario)}&run_id=${encodeURIComponent(runID)}`;
+      // Scenario only. Writing the auto-selected run_id back into the URL
+      // turned a "show me the latest" visit into a permanent pin on one run:
+      // onMount reads run_id first and then never looks for a newer one, so
+      // the tab stayed on whatever it happened to land on across every
+      // reload. An explicit /live?...&run_id=... from the runs list is still
+      // honoured -- that pin is the one somebody actually asked for.
+      const url = `/live?scenario=${encodeURIComponent(scenario)}`;
       window.history.replaceState({}, "", url);
       statusMessage = "";
     }
