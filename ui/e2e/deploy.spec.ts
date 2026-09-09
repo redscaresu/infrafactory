@@ -2362,3 +2362,54 @@ test('a deploy already applying warns but leaves the refusal to the server', asy
   await expect(ending).toContainText('already running');
   await expect(ending).not.toContainText('may have created');
 });
+
+// A blocking reason LEADS, and silences warnings about an apply that
+// cannot happen.
+//
+// The dialog used to render the heading, what the scenario creates, the
+// bold warnings, and only then the reason it could not be deployed. So
+// an infrastructure-only scenario was told, in bold, "this will be
+// reachable from the public internet for its whole lifetime" — asserted
+// about a deployment the same dialog was refusing. True of a deployment;
+// false here, which is the one thing this dialog exists not to be.
+test('a scenario that cannot be deployed says so first, and warns about nothing', async ({
+  page
+}) => {
+  await page.route('**/api/deployments/preview**', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        scenario: 'web-app-paris',
+        deployable: false,
+        reason:
+          'this scenario declares no service: block, so there is nothing to deploy. Use a run to validate infrastructure-only scenarios',
+        expires_at: null,
+        internet_facing: true,
+        deploy_allowed: true,
+        already_live: [],
+        already_live_unknown: false,
+        already_deploying: false,
+        cost: { components: [], eur_per_hour: 0, unpriced: ['managed database'], complete: false, modelled: true }
+      })
+    })
+  );
+
+  await page.goto('/scenarios/training/web-app-paris');
+  await page.getByTestId('scenario-deploy').click();
+
+  const reason = page.getByTestId('deploy-not-deployable');
+  await expect(reason).toContainText('nothing to deploy');
+
+  // Nothing asserts anything about an apply that cannot occur.
+  await expect(page.getByTestId('deploy-warning')).toHaveCount(0);
+  await expect(page.getByTestId('deploy-confirm')).not.toContainText(
+    'reachable from the public internet for its whole lifetime'
+  );
+
+  // ...and the reason comes BEFORE the list of what it would create.
+  const dialog = await page.getByTestId('deploy-confirm').innerText();
+  expect(dialog.indexOf('nothing to deploy')).toBeLessThan(dialog.indexOf('Creates'));
+
+  await expect(page.getByTestId('deploy-confirm-go')).toBeDisabled();
+});

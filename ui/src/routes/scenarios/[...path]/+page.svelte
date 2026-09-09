@@ -767,19 +767,40 @@
     >
       <p class="font-semibold text-slate-900">Deploy {preview.scenario}?</p>
 
+      <!-- A BLOCKING REASON LEADS, and suppresses the warnings.
+           
+           This used to render heading, then what it creates, then the
+           bold warnings, and only THEN the reason it cannot be deployed
+           at all. So an infrastructure-only scenario was told "this will
+           be reachable from the public internet for its whole lifetime"
+           -- asserted, in bold, about a deployment that cannot happen.
+           
+           The warnings are true OF A DEPLOYMENT. With no deployment
+           possible they are not merely noise, they are false, which is
+           the one thing this dialog exists not to be. The reason is what
+           the reader needs, so it goes first and the rest goes away.
+           
+           `confirmationLines` stays: what the scenario describes is
+           still worth reading, and it claims nothing about an apply. -->
+      {#if !preview.deployable}
+        <p class="mt-2 font-semibold text-rose-900" data-testid="deploy-not-deployable">
+          {preview.reason}
+        </p>
+      {/if}
+
       <ul class="mt-2 list-disc space-y-1 pl-5 text-slate-800">
         {#each confirmationLines as line}
           <li>{line}</li>
         {/each}
       </ul>
 
-      {#each previewWarnings as warning}
-        <p class="mt-2 font-semibold text-rose-900" data-testid="deploy-warning">{warning}</p>
-      {/each}
+      {#if preview.deployable}
+        {#each previewWarnings as warning}
+          <p class="mt-2 font-semibold text-rose-900" data-testid="deploy-warning">{warning}</p>
+        {/each}
+      {/if}
 
-      {#if !preview.deployable}
-        <p class="mt-2 text-rose-900" data-testid="deploy-not-deployable">{preview.reason}</p>
-      {:else if !preview.deploy_allowed}
+      {#if preview.deployable && !preview.deploy_allowed}
         <p class="mt-2 text-slate-700" data-testid="deploy-not-allowed">
           This server cannot deploy. Restart it with
           <code>infrafactory ui --allow-deploy</code>.
