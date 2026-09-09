@@ -134,9 +134,20 @@ validation:
         #      the ADR-0010 containment project, while the server lives in
         #      the run's own project.
         #
-        # So Layer 1 REQUIRES the NIC and Layer 3 CANNOT apply it: no
-        # Scaleway compute scenario satisfies both gates today. Unresolved;
-        # see ADR-0024.
+        # That contradiction -- Layer 1 requiring a NIC Layer 3 could not
+        # apply -- was RESOLVED 2026-08-31 by the ADR-0025 cutover: the run's
+        # project is created before the apply and is the provider default, so
+        # the NIC lands with its server. The paragraph above is kept as the
+        # record of the diagnosis, not as current state.
+        #
+        # 2026-09-09 replaced it with a narrower one, found by finally running
+        # the thing: a STANDALONE NIC applies and then cannot be DESTROYED
+        # ("Can't delete a private network interface attached to a server"),
+        # because destroy runs in reverse dependency order and deletes the NIC
+        # while its server is still running. Attach through the server's inline
+        # `private_network` block instead; `vpc_required.rego` accepts either
+        # shape and the pitfall prescribes the inline one. This entry stays
+        # allowlisted so the standalone form still applies where it is used.
         - scaleway_instance_ip
         - scaleway_instance_server
         - scaleway_instance_private_nic
@@ -152,7 +163,20 @@ validation:
       enabled: true
   real_probes:
     timeout_seconds: 5
-    retries: 6
+    # 24 attempts. A 503 answers immediately, so the wall clock is the
+    # delays: ~120s, sized to a real cold boot rather than to a guess. A
+    # black-holed endpoint pays the timeout as well -- 24 x (5s + 5s) ~= 235s.
+    #
+    # 30s (the old 6 x 5s) is shorter than a Scaleway instance takes to boot and
+    # start serving, so an `http_probe` failed while the stack was still coming
+    # up -- and it failed as a 503 from a healthy load balancer with no healthy
+    # backend, which is indistinguishable from a broken app. Against real
+    # Scaleway that false negative is expensive: the repair loop regenerates and
+    # applies again, so every wrong verdict costs another real apply and destroy.
+    #
+    # A probe window is a claim about how long real infrastructure takes. Ours
+    # was wrong by 3x on 2026-09-09 (web-live-paris, two iterations lost).
+    retries: 24
     retry_delay_seconds: 5
 
 constraint_policies:

@@ -5,9 +5,27 @@ pitfalls:
       source: descriptive
       discovered_from: web-app-paris-pinned
     - resource: scaleway_instance_server
-      rule: 'Always declare a `scaleway_vpc_private_network` AND a `scaleway_instance_private_nic` for EACH `scaleway_instance_server`. The `vpc_required` policy fails any instance without this attachment, and it IS evaluated for Scaleway: `filterPolicyPathsByCloud` drops only other clouds, so every `policies/scaleway/*.rego` runs. The private NIC has the shape: `resource "scaleway_instance_private_nic" "NAME" { server_id = scaleway_instance_server.SERVER.id; private_network_id = scaleway_vpc_private_network.PN.id }`. Add one NIC per instance (use `count` to mirror the `count` on the instance) — do NOT rely on the instance''s `routed_ip_enabled` flag, which the provider doesn''t accept. The NIC takes no `project_id` and does not need one: infrafactory creates the run''s project before the apply and hands it to the provider as the default, so the NIC and the server land in the same project (ADR-0025). This was a hard conflict until the cutover — Layer 1 required a NIC that Layer 3 could not apply — and it is resolved; do not add a `project_id` trying to fix it, which the shape gate now refuses.'
-      source: descriptive
-      discovered_from: web-app-paris
+      rule: |-
+        Attach a `scaleway_instance_server` to its private network with the
+        provider's INLINE block, not a standalone `scaleway_instance_private_nic`:
+
+          resource "scaleway_instance_server" "web" {
+            private_network { pn_id = scaleway_vpc_private_network.main.id }
+          }
+
+        `vpc_required` accepts either shape and IS evaluated for Scaleway. Use the
+        inline one because it can be DESTROYED. A standalone NIC applies and then
+        fails teardown on real Scaleway -- "Can't delete a private network interface
+        attached to a server" -- because destroy runs in reverse dependency order and
+        deletes the NIC while its server is still running -- a NIC is deletable only
+        when its server is POWERED OFF. Deleting the server takes its NICs with it,
+        because the provider powers it off first, so the inline block has no
+        separate delete to fail.
+        (web-live-paris 2026-09-09.)
+
+        Up to 8 blocks; with `count` the block comes too. No `project_id`.
+      source: fix
+      discovered_from: web-live-paris
     - resource: scaleway_k8s_cluster
       rule: 'Version and auto_upgrade MUST be consistent: WITHOUT auto_upgrade use a full patch version like "1.31.2"; WITH auto_upgrade enabled use ONLY a minor version like "1.31".'
       source: descriptive
@@ -68,17 +86,44 @@ pitfalls:
         to add a second.
       source: avoid
       discovered_from: web-live-paris
+    - resource: scaleway_instance_server
+      rule: |-
+        When the scenario declares a `service:` (a container), boot Scaleway's
+        `docker` image and only RUN the container -- do not install a runtime in
+        `user_data`:
+
+          variable "instance_image" { default = "docker" }
+          # cloud-init: wait for the daemon, then `docker run -d --restart always`
+
+        `apt-get install docker.io` on a cold instance takes 2-4 MINUTES, and an
+        `http_probe` has a bounded retry window, so such a stack fails the probe
+        every time -- as a 503 from a healthy load balancer with no healthy backend,
+        which reads like a broken app rather than one still installing.
+        (web-live-paris 2026-09-09: two iterations, both 503, nothing serving yet.)
+        `docker` is a real marketplace label, compatible with DEV1-S in fr-par-1.
+      source: fix
+      discovered_from: web-live-paris
     # Left DESCRIPTIVE on purpose, and it is worth saying why.
     #
     # The obvious remedy -- "the model invented an image, use ubuntu_jammy" -- is
-    # WRONG. `docker` is a real Scaleway marketplace label, it is what this
-    # scenario's own variables.tf defaults to, and a deploy using it on DEV1-S in
-    # fr-par-1 succeeded the previous evening. Why the same combination failed the
-    # next day is not understood.
+    # WRONG. `docker` is a real Scaleway marketplace label and it is what this
+    # scenario's own variables.tf defaults to.
     #
-    # Writing a confident remedy for a cause nobody has diagnosed is how a symptom
-    # becomes a wrong instruction the generator then follows. Until somebody knows,
-    # this stays a record of what happened.
+    # 2026-09-09, asked the public marketplace API directly:
+    #
+    #   GET /marketplace/v2/local-images?image_label=docker&zone=fr-par-1
+    #   -> 4 local images, x86_64, every one listing DEV1-S in
+    #      compatible_commercial_types
+    #
+    # So the label, the zone and the commercial type ARE compatible, which means
+    # the failure below was TRANSIENT -- a moment when fr-par-1 had no local image
+    # to hand -- not a wrong image name. That is why there is still no prescriptive
+    # remedy: "avoid `docker`" would teach the generator to route around a stock
+    # blip, and `docker` is exactly the image a container workload should use (see
+    # the pitfall above it).
+    #
+    # Writing a confident remedy for a symptom is how a symptom becomes a wrong
+    # instruction the generator then follows.
     - resource: scaleway_instance_server
       rule: "exit status 1 | stderr: ╷\n│ Error: could not get image 'fr-par-1/docker': scaleway-sdk-go: couldn't find a local image for the given zone (fr-par-1) and commercial type (DEV1-S)\n│ \n│   with scaleway_instance_server.web,\n│   on compute.tf line 7, in resource \"scaleway_instance_server\" \"web\""
       source: descriptive
