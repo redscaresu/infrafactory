@@ -169,17 +169,36 @@ func releaseRunProject(
 		}}, nil
 	}
 
-	// A timing answer needs no purge: nothing is blocking the delete
-	// except the API's own bookkeeping, so removing resources it did not
-	// complain about would be a guess dressed as a fix.
-	if errors.Is(err, harness.ErrRunProjectNotYetDeletable) {
-		return runProjectDeleteNotYet(projectID, err.Error())
-	}
-
+	// PURGE FIRST, always. The 412 short-circuit that used to sit here
+	// was wrong twice over.
+	//
+	// It read "a timing answer needs no purge: nothing is blocking the
+	// delete except the API's own bookkeeping" -- which assumed every 412
+	// was the lagging-check kind. It is not. Scaleway returns at least
+	// two:
+	//
+	//   resource_not_usable   "please retry later"           -- lagging
+	//   resource_still_in_use "all resources are not deleted" -- REAL
+	//
+	// The second one means exactly what it says. Observed 2026-09-07: a
+	// teardown reported "the project is empty, nothing is billing" while
+	// the API-created `Default security group` was still there holding
+	// the project open -- the D6 case this purge exists for. Deleting
+	// that one group unblocked the project immediately.
+	//
+	// So the short-circuit skipped the fix and then reassured the
+	// operator about it, turning a self-healing case into a permanent
+	// failure with a comforting message. Purge, retry, and only then
+	// decide what kind of failure this is.
 	removed, purgeErr := purgeAutoCreated(cleanupCtx, runtime, projectID, secretKey)
 	if purgeErr != nil || len(removed) == 0 {
 		// Nothing was auto-created, so the delete failed for its own
-		// reasons. Report that error, not a retry's.
+		// reasons. Report that error, not a retry's -- and only NOW is a
+		// 412 safely a timing answer: there was nothing to remove, so
+		// there is nothing left holding the project.
+		if errors.Is(err, harness.ErrRunProjectNotYetDeletable) {
+			return runProjectDeleteNotYet(projectID, err.Error())
+		}
 		return runProjectDeleteFailure(projectID, err.Error())
 	}
 
@@ -228,30 +247,40 @@ func runProjectDeleteFailure(projectID, detail string) ([]StageSummary, []Failur
 		}}
 }
 
-// runProjectDeleteNotYet answers the case where the API said WAIT.
+// runProjectDeleteNotYet answers a 412 that SURVIVED the purge.
 //
 // Still a failure -- the project exists, so this pass cannot claim the
 // account is clean, and ADR-0024 does not bend for a hopeful guess. What
-// changes is what the operator is told to DO. The previous wording sent
-// them looking for a leak that is not there: the destroy succeeded, the
-// project is empty, and Scaleway's own resource check simply lags behind
-// its own deletions.
+// changes is what the operator is told to do next.
 //
-// Observed 2026-09-07: roughly twenty minutes, then it deleted on the
-// next attempt with nothing else changed. Long enough that retrying
-// inside the teardown would hold the command open for the whole window,
-// which is why this reports and hands over rather than blocking.
+// It no longer claims the project is EMPTY or that nothing is billing.
+// The first version did, and was caught being wrong the same evening: a
+// 412 carrying `resource_still_in_use` meant exactly what it said -- an
+// API-created security group was holding the project open -- while this
+// message reassured the operator that there was nothing there. A
+// comforting sentence about someone else's account is worse than no
+// sentence.
+//
+// What can honestly be said is what we did: the run's resources were
+// destroyed, the purge found nothing more to remove, and the API still
+// refuses. That is a wait-and-retry, and if retrying does not clear it
+// the operator is pointed at the console rather than told to relax.
+//
+// Observed 2026-09-07: the lagging-check variant cleared in about twenty
+// minutes with nothing else changed. Long enough that retrying inside
+// the teardown would hold the command open for the whole window, which
+// is why this reports and hands over rather than blocking.
 func runProjectDeleteNotYet(projectID, detail string) ([]StageSummary, []FailureSummary) {
 	return []StageSummary{{Layer: "sandbox_deploy", Stage: "run_project_delete", Status: StageStatusFail}},
 		[]FailureSummary{{
 			Layer: "sandbox_deploy", Stage: "run_project_delete", Check: "delete_not_yet",
 			Command: "delete run project",
 			Detail: fmt.Sprintf(
-				"the run's resources were destroyed and project %s is empty, but the API will not "+
-					"delete it yet: its resource check lags behind the deletions. This usually "+
-					"clears within minutes and has taken up to twenty. Nothing is billing. Run "+
-					"`infrafactory reap` shortly to finish the job, or delete the project in the "+
-					"console. Detail: %s", projectID, detail),
+				"the run's resources were destroyed and nothing auto-created was left to purge, "+
+					"but the API will not delete project %s yet. Its resource check can lag its "+
+					"own deletions; that usually clears within minutes and has taken up to twenty. "+
+					"Run `infrafactory reap` shortly, and if it still refuses, open the project in "+
+					"the console and look for what it is holding. Detail: %s", projectID, detail),
 		}}
 }
 

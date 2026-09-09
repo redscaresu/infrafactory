@@ -51,6 +51,39 @@ Two things caught by running it rather than reading it:
 Deliberately unchanged: `make up` still starts the UI with **no** deploy flags. That is the safe
 default, not an oversight — creating something that bills hourly should be a deliberate act, and
 the dialog already tells an operator to restart with `--allow-deploy`.
+## 2026-09-07 — S177: S174 skipped the fix and then reassured the operator about it
+
+Caught the same evening, on a real teardown, by the operator it misled.
+
+S174 marked a 412 from the project delete as a timing answer and short-circuited **before**
+`purgeAutoCreated`, reasoning that "a timing answer needs no purge: nothing is blocking the delete
+except the API's own bookkeeping". That was a confident explanation of an API I had observed once.
+
+Scaleway returns at least two preconditions behind a 412:
+
+| precondition | help_message | means |
+|---|---|---|
+| `resource_not_usable` | "please retry later" | the check is lagging |
+| `resource_still_in_use` | "all resources are not deleted" | **there really is something there** |
+
+The second one means exactly what it says. The teardown reported *"the project is empty… Nothing is
+billing"* while the API-created `Default security group` sat there holding the project open — the D6
+case `purgeAutoCreated` exists for, skipped by the short-circuit that ran instead of it. Deleting
+that one group unblocked the project immediately.
+
+So S174 turned a **self-healing** case (purge → retry → deleted) into a permanent failure carrying a
+comforting message. Strictly worse than the wording it replaced.
+
+The purge now always runs first, and only a 412 that *survives* it is reported as wait-and-retry.
+The message no longer claims the project is empty or that nothing is billing — it says what was
+actually done (resources destroyed, nothing left to purge, API still refusing) and points at the
+console if a retry does not clear it.
+
+**The lesson is the week's, again, and I had already written it down.** Facts about the real cloud
+are the class ADR-0028 explicitly cannot reach: too expensive to pin in a test, so they live in
+prose and stay risky. I observed one 412 in the afternoon, generalised it to all 412s, and wrote the
+generalisation into a comment as though it were established. Two tests now hold the shape that
+matters, and neither could have been written without seeing the second variant.
 
 
 ## 2026-09-07 — S174: the API saying "wait" is not the tool saying "broken"
