@@ -17,7 +17,19 @@ export function selectLatestRun(runs, scenario = "") {
     return null;
   }
   filtered.sort((a, b) => compareRunIDs(a.run_id, b.run_id));
-  return filtered.find((run) => run.status === "running") || filtered[0];
+
+  // Newest wins, full stop. This used to scan the WHOLE sorted list for
+  // anything marked "running" and prefer it, which can only ever disagree
+  // with filtered[0] when an OLDER run claims to be running -- exactly the
+  // case that is always a lie. A run id is a UTC timestamp, so a genuinely
+  // live run is already first.
+  //
+  // Found 2026-09-09: a run interrupted on 30 August still said
+  // status:"running" on disk, so the live page showed a ten-day-old corpse
+  // with a frozen elapsed timer instead of the run just started. 21 records
+  // going back to May were in that state -- nothing marks a run terminal when
+  // its process dies, so this scan had a growing supply of stale winners.
+  return filtered[0];
 }
 
 export function filterRuns(runs, search, statusFilter) {

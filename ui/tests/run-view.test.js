@@ -26,7 +26,7 @@ test("buildRunBaselineURL encodes scenario and run id", () => {
   assert.equal(buildRunBaselineURL("web app", "run/1"), "/api/runs/web%20app/run%2F1/baseline");
 });
 
-test("selectLatestRun prefers running run within a scenario", () => {
+test("selectLatestRun takes the newest run in the scenario, ignoring other scenarios", () => {
   const runs = [
     { scenario: "web-app-paris", run_id: "20260228T100000Z", status: "failed" },
     { scenario: "web-app-paris", run_id: "20260228T110000Z", status: "running" },
@@ -35,6 +35,34 @@ test("selectLatestRun prefers running run within a scenario", () => {
 
   const selected = selectLatestRun(runs, "web-app-paris");
   assert.equal(selected?.run_id, "20260228T110000Z");
+});
+
+// The case the suite could not see. Its predecessor was named "prefers
+// running run", but its running fixture was ALSO the newest, so it passed
+// whether the implementation preferred running runs or simply took the
+// newest -- and the implementation preferred running runs, scanning the
+// entire history to do it. A run interrupted on 30 August still said
+// "running" on disk and beat the run started ten days later.
+//
+// Ordering the fixture the other way is the whole test.
+test("selectLatestRun ignores an older run still claiming to be running", () => {
+  const runs = [
+    { scenario: "web-live-paris", run_id: "20260830T201451Z", status: "running" },
+    { scenario: "web-live-paris", run_id: "20260909T093610Z", status: "failed" }
+  ];
+
+  const selected = selectLatestRun(runs, "web-live-paris");
+  assert.equal(selected?.run_id, "20260909T093610Z");
+});
+
+test("selectLatestRun still returns a genuinely live newest run", () => {
+  const runs = [
+    { scenario: "web-live-paris", run_id: "20260909T093610Z", status: "failed" },
+    { scenario: "web-live-paris", run_id: "20260909T101500Z", status: "running" }
+  ];
+
+  const selected = selectLatestRun(runs, "web-live-paris");
+  assert.equal(selected?.run_id, "20260909T101500Z");
 });
 
 test("selectLatestRun falls back to newest run when none are running", () => {
