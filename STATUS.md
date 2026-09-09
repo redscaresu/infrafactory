@@ -21,6 +21,36 @@ the scenario *describes* is still worth reading and claims nothing about an appl
 
 Found by looking at the thing rather than the code, which is becoming a pattern worth noticing:
 the ordering was plainly wrong on screen and entirely unremarkable in the template.
+## 2026-09-07 — S176: a bring-up that hangs forever tells you nothing
+
+`make up` hung with no output and no timeout. Docker Desktop was not running, so `docker run`
+failed, SeaweedFS never listened, and `until curl ...; do sleep 1; done` spun until the terminal
+was killed. Nothing on screen said which of six services it was waiting for — and SeaweedFS is
+only needed for AWS S3 scenarios, so the whole stack was blocked on a service most runs never
+touch.
+
+**Nine unbounded waits, not one.** Every bring-up target ended the same way, so any service that
+fails to start hangs its target silently: a port already bound, a build error, a daemon that is
+not running. Docker was simply the one that happened first.
+
+`scripts/wait_for.sh` bounds the wait and fails **loudly** — naming the service, tailing its log,
+and calling out the Docker case by name, because that is the cause least visible from a log that
+does not exist. It is the CLI's own lesson from the Layer 3 arc applied to the Makefile: a guard
+that stops without saying why is half a guard.
+
+Two things caught by running it rather than reading it:
+
+- **The first version said why and still exited 0.** Each recipe is one `;`-joined `if/else`, so a
+  failing wait did not stop the chain, and `make` saw the trailing `echo` succeed. It printed the
+  error *and* "seaweedfs ready". Every call now ends `|| exit 1`.
+- **Closing the class dropped a special case.** s3router serves no `/healthz`; its original loop
+  fell back to `nc -z`, which looked like noise and was load-bearing. Replacing it with an
+  HTTP-only wait turned a working bring-up into a thirty-second failure. The helper now takes
+  `tcp://host:port` for services that have a listener and no health endpoint.
+
+Deliberately unchanged: `make up` still starts the UI with **no** deploy flags. That is the safe
+default, not an oversight — creating something that bills hourly should be a deliberate act, and
+the dialog already tells an operator to restart with `--allow-deploy`.
 
 
 ## 2026-09-07 — S174: the API saying "wait" is not the tool saying "broken"
