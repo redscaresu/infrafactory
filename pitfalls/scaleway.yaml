@@ -47,3 +47,39 @@ pitfalls:
         }
       source: fix
       discovered_from: full-stack-paris
+    - resource: scaleway_vpc_private_network
+      rule: "exit status 1 | stderr: ╷\n│ Error: scaleway-sdk-go: resource  with ID  is not found\n│ \n│   with scaleway_vpc_private_network.main,\n│   on network.tf line 1, in resource \"scaleway_vpc_private_network\" \"main\":\n│    1: resource \"scaleway_vpc_private_network\" \"main\" {\n│ \n╵"
+      source: descriptive
+      discovered_from: web-live-paris
+    - resource: scaleway_instance_security_group
+      rule: |-
+        NEVER declare a `scaleway_instance_security_group`. It is not in
+        `allow_resource_types`, so Layer 3 refuses the whole configuration before
+        anything is applied and the run loses an iteration to it.
+
+        You do not need one. Scaleway CREATES a "Default security group" in every
+        project on the first instance, and it permits what these scenarios need.
+        Declaring your own adds a resource the allowlist rejects to solve a problem
+        that does not exist.
+
+        The API-created one is also why teardown has a purge step: Terraform never
+        owns it, so `destroy` never removes it, and an undeleted security group
+        blocks the run project from being deleted afterwards. One more reason not
+        to add a second.
+      source: avoid
+      discovered_from: web-live-paris
+    # Left DESCRIPTIVE on purpose, and it is worth saying why.
+    #
+    # The obvious remedy -- "the model invented an image, use ubuntu_jammy" -- is
+    # WRONG. `docker` is a real Scaleway marketplace label, it is what this
+    # scenario's own variables.tf defaults to, and a deploy using it on DEV1-S in
+    # fr-par-1 succeeded the previous evening. Why the same combination failed the
+    # next day is not understood.
+    #
+    # Writing a confident remedy for a cause nobody has diagnosed is how a symptom
+    # becomes a wrong instruction the generator then follows. Until somebody knows,
+    # this stays a record of what happened.
+    - resource: scaleway_instance_server
+      rule: "exit status 1 | stderr: ╷\n│ Error: could not get image 'fr-par-1/docker': scaleway-sdk-go: couldn't find a local image for the given zone (fr-par-1) and commercial type (DEV1-S)\n│ \n│   with scaleway_instance_server.web,\n│   on compute.tf line 7, in resource \"scaleway_instance_server\" \"web\""
+      source: descriptive
+      discovered_from: web-live-paris

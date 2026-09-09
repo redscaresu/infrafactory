@@ -84,6 +84,39 @@ are the class ADR-0028 explicitly cannot reach: too expensive to pin in a test, 
 prose and stay risky. I observed one 412 in the afternoon, generalised it to all 412s, and wrote the
 generalisation into a comment as though it were established. Two tests now hold the shape that
 matters, and neither could have been written without seeing the second variant.
+## 2026-09-08 — S178: the loop learned three things and could act on one
+
+A real Layer 3 run of `web-live-paris` failed at `repair_budget_exhausted` (5/5) and appended
+three pitfalls to the corpus. All three `source: descriptive` — raw stderr dumps. The corpus went
+from five-of-seven symptom-only to eight-of-ten, which is S170's finding happening live rather
+than in retrospect.
+
+Only **one** could be responsibly converted.
+
+**`scaleway_instance_security_group` → `avoid`.** The generator declared one, the allowlist refused
+the whole configuration, and an iteration was lost. The remedy is concrete and verifiable: do not
+declare one, because Scaleway creates a "Default security group" per project on the first instance
+and it already permits what these scenarios need. Worth stating twice over, since that same
+API-created group is what the teardown purge exists to remove — it blocks the project delete.
+
+**The image error stays descriptive, deliberately.** The obvious remedy — *"the model invented an
+image, use ubuntu_jammy"* — is **wrong**. `docker` is a real Scaleway marketplace label, it is what
+this scenario's own `variables.tf` defaults to with a comment explaining why, and a deploy using it
+on DEV1-S in fr-par-1 **succeeded the previous evening**. Why the same combination failed the next
+day is not understood. I had written that remedy in my head before checking, which is the third
+time in two days.
+
+**The private-network error stays descriptive too** — `resource with ID is not found` with an empty
+ID is undiagnosed.
+
+The truncation was repaired: the extractor had cut the third rule mid-word (`\"w...`), so even as a
+record of what happened it was damaged.
+
+**What the run says about the tool, separately.** Two of the five iterations were spent on
+`http_probe … 503`. The probe retries 6 times at 5s = about 30 seconds of patience; a hand
+measurement of the same stack the previous morning showed the load balancer needs 40–60 seconds
+before it serves. Those two iterations were a false negative, not a failure, and with a probe that
+waits long enough the run plausibly passes.
 
 
 ## 2026-09-07 — S174: the API saying "wait" is not the tool saying "broken"
