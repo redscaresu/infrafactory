@@ -1,7 +1,8 @@
 # ADR-0029: A policy may not mandate a shape that cannot be destroyed
 
 ## Status
-Accepted
+Accepted — **with its central mechanism claim REFUTED on 2026-09-10. Read the
+"Refutation" section before relying on anything here.**
 
 ## Context
 
@@ -126,3 +127,56 @@ next run is told, silently, with no record in the run's own metadata — which i
 how a run on 2026-09-10 came to be judged against a pitfall file it had never
 read. Recording the commit a run was generated under would close that, and is
 not done here.
+
+
+## Refutation, 2026-09-10
+
+**The inline block does not destroy either.** Run `20260910T104418Z`, iteration
+4, generated exactly the shape this ADR prescribes —
+
+```hcl
+resource "scaleway_instance_server" "web" {
+  private_network { pn_id = scaleway_vpc_private_network.main.id }
+}
+```
+
+— applied it to real Scaleway, and failed teardown with the identical error:
+
+```
+Can't delete a private network interface attached to a server
+```
+
+So the reasoning in "Decision" is wrong where it matters. *"Deleting the server
+takes its NICs with it, because the provider powers the server off first"* is
+not what the provider does. It detaches the NIC as its own API call whether the
+attachment was declared inline or as a standalone resource, and that call fails
+while the server is running.
+
+What survives, and what does not:
+
+- **Survives.** The standalone `scaleway_instance_private_nic` genuinely cannot
+  be destroyed, and a policy genuinely should not mandate a shape that cannot be
+  torn down. The gate and the amended `vpc_required` stay.
+- **Does not survive.** The claim that the inline block *solves* it. It does not.
+  It is a smaller, tidier stack with the same teardown failure.
+- **Unchanged.** The precondition is power state. Both hand recoveries worked the
+  same way: `scw instance server stop`, then delete.
+
+**The consequence is that no HCL shape can express a destroyable private-network
+attachment on a running Scaleway instance.** When no configuration works, the
+configuration is not where the fix goes. The teardown path has to power the run's
+instances off before `tofu destroy` — which is precisely the move this ADR
+dismissed as "teaching the tool to work around HCL nobody should be generating".
+That dismissal assumed a working alternative existed. It does not.
+
+Superseding decision to be recorded separately; this section exists so nobody
+reads the Decision above and believes the problem is solved.
+
+### Why this was believed
+
+The mechanism was inferred from one true observation — a NIC deletes cleanly once
+its server is stopped — and never tested against the inline shape, because
+testing it costs a real apply. The Layer 2 verification that *was* run passed
+(`7 added`, `7 destroyed`) because mockway does not enforce the precondition. A
+mock that is more permissive than reality cannot refute a claim about reality,
+and this ADR shipped a claim it had only mock evidence for.

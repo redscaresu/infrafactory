@@ -13,16 +13,14 @@ pitfalls:
             private_network { pn_id = scaleway_vpc_private_network.main.id }
           }
 
-        `vpc_required` accepts either shape and IS evaluated for Scaleway. Use the
-        inline one because it can be DESTROYED. A standalone NIC applies and then
-        fails teardown on real Scaleway -- "Can't delete a private network interface
-        attached to a server" -- because destroy runs in reverse dependency order and
-        deletes the NIC while its server is still running -- a NIC is deletable only
-        when its server is POWERED OFF. Deleting the server takes its NICs with it,
-        because the provider powers it off first. The Layer 3 gate REFUSES a
-        standalone NIC, so this is not a preference. (web-live-paris 2026-09-09.)
+        `vpc_required` accepts either shape, and the Layer 3 gate REFUSES the
+        standalone NIC, so this is not a preference. Up to 8 blocks; with `count`
+        the block comes too. No `project_id`.
 
-        Up to 8 blocks; with `count` the block comes too. No `project_id`.
+        Neither shape destroys cleanly: a private NIC is deletable only while its
+        server is POWERED OFF, and that precondition is the API's, not the HCL's
+        (measured 2026-09-09 and 2026-09-10). Use the inline block because it is
+        the smaller stack the gate accepts -- not because it solves teardown.
       source: fix
       discovered_from: web-live-paris
     - resource: scaleway_k8s_cluster
@@ -85,23 +83,29 @@ pitfalls:
         to add a second.
       source: avoid
       discovered_from: web-live-paris
-    - resource: scaleway_instance_server
-      rule: |-
-        When the scenario declares a `service:` (a container), boot Scaleway's
-        `docker` image and only RUN the container -- do not install a runtime in
-        `user_data`:
-
-          variable "instance_image" { default = "docker" }
-          # cloud-init: wait for the daemon, then `docker run -d --restart always`
-
-        `apt-get install docker.io` on a cold instance takes 2-4 MINUTES, and an
-        `http_probe` has a bounded retry window, so such a stack fails the probe
-        every time -- as a 503 from a healthy load balancer with no healthy backend,
-        which reads like a broken app rather than one still installing.
-        (web-live-paris 2026-09-09: two iterations, both 503, nothing serving yet.)
-        `docker` is a real marketplace label, compatible with DEV1-S in fr-par-1.
-      source: fix
-      discovered_from: web-live-paris
+    # RETRACTED 2026-09-10, one day after it was written. It said: when a
+    # scenario declares a `service:`, boot Scaleway's `docker` image instead of
+    # apt-installing a runtime, and it cited the marketplace API as proof the
+    # image was compatible with DEV1-S in fr-par-1.
+    #
+    # The generator took the advice and the apply FAILED:
+    #
+    #   could not get image 'fr-par-1/docker': couldn't find a local image for
+    #   the given zone (fr-par-1) and commercial type (DEV1-M)
+    #
+    # The marketplace API still says the opposite -- all four fr-par-1 `docker`
+    # local images list DEV1-M in compatible_commercial_types. So
+    # `compatible_commercial_types` is NOT what the provider resolves against,
+    # and it cannot be used to settle this question.
+    #
+    # That is the second time this exact failure has been recorded, and the
+    # pitfall below already warned against writing a remedy for it. Overriding
+    # that warning turned an honest "not understood" into a prescription that
+    # cost a real apply. The warning stands; no remedy is offered.
+    #
+    # What IS supported by evidence: `ubuntu_jammy` plus an apt install serves
+    # inside a 120s probe window (web-live-paris, 2026-09-10 09:35, probe
+    # passed). Slower, and it works.
     # Left DESCRIPTIVE on purpose, and it is worth saying why.
     #
     # The obvious remedy -- "the model invented an image, use ubuntu_jammy" -- is
