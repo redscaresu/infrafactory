@@ -347,10 +347,19 @@ func layer3UndestroyableResourceProblems(block *hclsyntax.Block, file string) []
 		return nil
 	}
 	// Prescriptive on purpose: this string is fed back to the generator as
-	// the reason to fix. "Not permitted" would send it looking for another
-	// way to say the same wrong thing.
+	// the reason to fix, and since 2026-09-10 it is recorded VERBATIM as a
+	// pitfall. "Not permitted" would send the next iteration looking for
+	// another way to say the same wrong thing.
+	//
+	// It used to end "...which is removed with the server". That was the
+	// refuted half of ADR-0029: the inline block does not destroy cleanly
+	// either, and teardown succeeds because ADR-0030 powers the server off
+	// first. Being recorded verbatim is exactly why the sentence has to be
+	// true -- a wrong justification here becomes a durable wrong pitfall,
+	// and the reason to prefer the inline block is that the gate accepts
+	// it and it is the smaller stack, not that it solves teardown.
 	return []string{fmt.Sprintf(
-		"%s: `scaleway_instance_private_nic` applies but cannot be destroyed -- a private NIC is deletable only while its server is powered off, and `tofu destroy` deletes the NIC before the server. Attach the network on the server instead: `private_network { pn_id = scaleway_vpc_private_network.NAME.id }`, which is removed with the server",
+		"%s: `scaleway_instance_private_nic` is refused -- a private NIC is deletable only while its server is powered off, and `tofu destroy` deletes the NIC before the server. Declare the attachment on the server instead: `private_network { pn_id = scaleway_vpc_private_network.NAME.id }`",
 		file)}
 }
 
@@ -400,12 +409,12 @@ func layer3InlinePrivateNetworkProblems(resource *hclsyntax.Block, file string) 
 		attr, ok := inner.Body.Attributes["pn_id"]
 		if !ok {
 			problems = append(problems, fmt.Sprintf(
-				"%s: %s has a private_network block with no pn_id, so nothing ties it to a network this run created", file, name))
+				"%s: scaleway_instance_server %s has a private_network block with no pn_id, so nothing ties it to a network this run created", file, name))
 			continue
 		}
 		if !layer3IsPrivateNetworkIDRef(attr.Expr) {
 			problems = append(problems, fmt.Sprintf(
-				"%s: %s must set private_network.pn_id to scaleway_vpc_private_network.<name>.id in this stack; a literal id or any other reference names a network the run does not own and will not destroy",
+				"%s: scaleway_instance_server %s must set private_network.pn_id to scaleway_vpc_private_network.<name>.id in this stack; a literal id or any other reference names a network the run does not own and will not destroy",
 				file, name))
 		}
 	}
@@ -606,7 +615,7 @@ func layer3ContainmentProblems(resource *hclsyntax.Block, file string) []string 
 
 	if parentAttrs, isChild := layer3ChildScopedTypes[resourceType]; isChild {
 		for _, parentAttr := range parentAttrs {
-			problems = append(problems, layer3ParentBindingProblems(resource, file, name, parentAttr)...)
+			problems = append(problems, layer3ParentBindingProblems(resource, file, resourceType, name, parentAttr)...)
 		}
 		return problems
 	}
@@ -633,23 +642,27 @@ func layer3ContainmentProblems(resource *hclsyntax.Block, file string) []string 
 // layer3ParentBindingProblems requires a child resource's parent id to be
 // a reference to a resource in this stack, for the same reason project_id
 // must be: a literal UUID names infrastructure the run does not own.
-func layer3ParentBindingProblems(resource *hclsyntax.Block, file, name, parentAttr string) []string {
+// resourceType is threaded in so every refusal NAMES it. These strings
+// are pitfall material since 2026-09-10 and pitfalls are keyed by type;
+// a message carrying only the block label ("web sets no server_id")
+// cannot be filed and is silently dropped by the extractor.
+func layer3ParentBindingProblems(resource *hclsyntax.Block, file, resourceType, name, parentAttr string) []string {
 	problems := make([]string, 0)
 	attr, ok := resource.Body.Attributes[parentAttr]
 	if !ok {
 		return append(problems, fmt.Sprintf(
-			"%s: %s sets no %s, so nothing ties it to a resource this run created", file, name, parentAttr))
+			"%s: %s %s sets no %s, so nothing ties it to a resource this run created", file, resourceType, name, parentAttr))
 	}
 	traversal, ok := attr.Expr.(*hclsyntax.ScopeTraversalExpr)
 	if !ok || !strings.HasPrefix(traversal.Traversal.RootName(), "scaleway_") {
 		return append(problems, fmt.Sprintf(
-			"%s: %s must set %s to a reference to a resource in this stack; a literal id names infrastructure the run does not own and will not destroy",
-			file, name, parentAttr))
+			"%s: %s %s must set %s to a reference to a resource in this stack; a literal id names infrastructure the run does not own and will not destroy",
+			file, resourceType, name, parentAttr))
 	}
 	last, isAttr := traversal.Traversal[len(traversal.Traversal)-1].(hcl.TraverseAttr)
 	if len(traversal.Traversal) < 3 || !isAttr || last.Name != "id" {
 		problems = append(problems, fmt.Sprintf(
-			"%s: %s must set %s to <resource>.<name>.id", file, name, parentAttr))
+			"%s: %s %s must set %s to <resource>.<name>.id", file, resourceType, name, parentAttr))
 	}
 	return problems
 }
@@ -918,12 +931,12 @@ func layer3CostProblems(resource *hclsyntax.Block, file string, varDefaults map[
 		}
 		val, resolved := layer3ResolveConstant(attr.Expr, varDefaults)
 		if !resolved || val.Type() != cty.Number {
-			problems = append(problems, fmt.Sprintf("%s: %s sets %s to something this check cannot resolve to a constant, so its cost cannot be bounded", file, name, attrName))
+			problems = append(problems, fmt.Sprintf("%s: %s %s sets %s to something this check cannot resolve to a constant, so its cost cannot be bounded", file, resourceType, name, attrName))
 			continue
 		}
 		f, _ := val.AsBigFloat().Float64()
 		if f > max {
-			problems = append(problems, fmt.Sprintf("%s: %s sets %s to %g; the gate caps it at %g because it applies to real, billed infrastructure", file, name, attrName, f, max))
+			problems = append(problems, fmt.Sprintf("%s: %s %s sets %s to %g; the gate caps it at %g because it applies to real, billed infrastructure", file, resourceType, name, attrName, f, max))
 		}
 	}
 
@@ -941,11 +954,17 @@ func layer3CostProblems(resource *hclsyntax.Block, file string, varDefaults map[
 		}
 		val, resolved := layer3ResolveConstant(attr.Expr, varDefaults)
 		if !resolved || val.Type() != cty.String {
-			problems = append(problems, fmt.Sprintf("%s: %s sets %s to something this check cannot resolve to a constant, so its cost cannot be bounded", file, name, attrName))
+			problems = append(problems, fmt.Sprintf("%s: %s %s sets %s to something this check cannot resolve to a constant, so its cost cannot be bounded", file, resourceType, name, attrName))
 			continue
 		}
 		if !slices.Contains(allowed, val.AsString()) {
-			problems = append(problems, fmt.Sprintf("%s: %s sets %s to %q; the gate permits only %v", file, name, attrName, val.AsString(), allowed))
+			// The resource TYPE is in the message because this string is
+			// repair-loop input and, since 2026-09-10, pitfall material:
+			// pitfalls are keyed by type, and "web sets type to
+			// PLAY2-NANO" names only the block label. One run proposed a
+			// refused instance type three times in five iterations
+			// without anything durable being recorded.
+			problems = append(problems, fmt.Sprintf("%s: %s %s sets %s to %q; the gate permits only %v", file, resourceType, name, attrName, val.AsString(), allowed))
 		}
 	}
 	return problems

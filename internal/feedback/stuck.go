@@ -44,19 +44,42 @@ func FailureSignatures(failures []Failure) []FailureSignature {
 	return signatures
 }
 
-func IsStuck(previous, current []Failure) bool {
+// IsStuck reports whether this iteration produced nothing the run has not
+// already seen -- every current signature has appeared in some EARLIER
+// iteration, not merely the immediately previous one.
+//
+// It used to compare against the previous iteration alone, and that misses
+// oscillation, which is the shape a repair loop actually gets stuck in. Run
+// 20260910T104418Z went:
+//
+//	1  gate refusal (instance type)
+//	2  apply failure (image)
+//	3  gate refusal (instance type)
+//	4  destroy failure (private NIC)
+//	5  gate refusal (instance type)
+//
+// No two CONSECUTIVE iterations matched, so the check never fired and the run
+// spent its whole budget -- and iterations 2 and 4 were real applies against
+// real Scaleway. Alternating between two known failures is not progress; it is
+// the classic form of not making any.
+//
+// Deliberately eager. A signature the run has seen and returned to means it is
+// going in circles, and at Layer 3 stopping one iteration early costs a
+// regeneration while continuing costs an apply and a destroy. When the two
+// errors are priced that differently, the cheap one is the one to make.
+func IsStuck(history []FailureSignature, current []Failure) bool {
 	currentSigs := FailureSignatures(current)
 	if len(currentSigs) == 0 {
 		return false
 	}
 
-	previousSet := make(map[FailureSignature]struct{})
-	for _, sig := range FailureSignatures(previous) {
-		previousSet[sig] = struct{}{}
+	seen := make(map[FailureSignature]struct{}, len(history))
+	for _, sig := range history {
+		seen[sig] = struct{}{}
 	}
 
 	for _, sig := range currentSigs {
-		if _, ok := previousSet[sig]; !ok {
+		if _, ok := seen[sig]; !ok {
 			return false
 		}
 	}

@@ -85,8 +85,19 @@ func TestRunCommandLearnsPitfallFromOscillation(t *testing.T) {
 		t.Fatal("expected run failure when budget is exhausted")
 	}
 
-	if !strings.Contains(stdout.String(), "run/terminal_reason: pass (repair_budget_exhausted)") {
-		t.Fatalf("expected repair_budget_exhausted terminal reason, got:\n%s", stdout.String())
+	// `stuck`, not `repair_budget_exhausted`. These fixtures alternate
+	// A/B/A/B, and since 2026-09-10 IsStuck compares against every earlier
+	// iteration rather than only the previous one -- so the third iteration,
+	// which returns to A, is recognised as going in circles and stops the
+	// run one lap early. That is the point of the change: against real
+	// Scaleway each extra lap is an apply and a destroy.
+	//
+	// What this test is actually about is unchanged: the harvest runs for
+	// `stuck` exactly as it does for `repair_budget_exhausted`, and the
+	// assertions below still require the extractable failure to be learned
+	// and the generic one to be skipped.
+	if !strings.Contains(stdout.String(), "run/terminal_reason: pass (stuck)") {
+		t.Fatalf("expected stuck terminal reason, got:\n%s", stdout.String())
 	}
 
 	// Scenario default cloud is scaleway, so pitfalls file lands at
@@ -197,8 +208,13 @@ func TestRunCommandLearnsRecurringPitfallWhenLastIterationDiffers(t *testing.T) 
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("expected run failure when budget is exhausted")
 	}
-	if !strings.Contains(stdout.String(), "repair_budget_exhausted") {
-		t.Fatalf("expected repair_budget_exhausted terminal reason, got:\n%s", stdout.String())
+	// `stuck` since 2026-09-10 -- see the note in the test above. The
+	// sequence revisits an earlier failure, which is now recognised as
+	// circling instead of being allowed to run out the budget. The subject
+	// of this test, that a RECURRING failure is learned even when the last
+	// iteration differs, is unaffected and asserted below.
+	if !strings.Contains(stdout.String(), "run/terminal_reason: pass (stuck)") {
+		t.Fatalf("expected stuck terminal reason, got:\n%s", stdout.String())
 	}
 
 	pitfallsPath := filepath.Join(pitfallsDir, "scaleway.yaml")

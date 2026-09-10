@@ -1040,3 +1040,42 @@ func TestLayer3ShapeCatchesAnObfuscatedProjectResource(t *testing.T) {
 	require.Error(t, err, "a comment must not hide a declared project from the gate")
 	assert.Contains(t, err.Error(), "second project nothing tracks or destroys")
 }
+
+// Refusals about a RESOURCE name its type, not just the block label.
+// These strings are pitfall material since 2026-09-10 and pitfalls are
+// keyed by type, so ExtractGatePitfall silently drops any refusal it
+// cannot file -- "web sets no server_id" is one the loop can never learn
+// from.
+//
+// Three concrete messages rather than a source audit. An audit was tried
+// and removed: `name` means the block label in some of these functions
+// and an ATTRIBUTE name in others (`pn_id indexes ...`), and a check that
+// fires on correct code is a check somebody deletes.
+func TestLayer3RefusalsNameTheResourceType(t *testing.T) {
+	allow := append(gateAllowlist, "scaleway_vpc_private_network", "scaleway_instance_server")
+
+	cases := []struct{ name, hcl, want string }{
+		{
+			name: "cost bound",
+			hcl:  `resource "scaleway_instance_server" "web" { type = "GPU-3070-S" }`,
+			want: "scaleway_instance_server web sets type",
+		},
+		{
+			name: "inline attachment with a literal id",
+			hcl: `resource "scaleway_instance_server" "web" {
+  private_network {
+    pn_id = "11111111-1111-1111-1111-111111111111"
+  }
+}`,
+			want: "scaleway_instance_server web must set private_network.pn_id",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateLayer3HCLShape(writeShapeHCL(t, shapeProject+"\n"+tc.hcl), allow)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.want,
+				"the refusal must name the resource type so it can be filed as a pitfall")
+		})
+	}
+}

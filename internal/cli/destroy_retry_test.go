@@ -72,7 +72,7 @@ func TestDestroyRetriesAfterPurgingAutoCreatedResources(t *testing.T) {
 	destroy := &sequencedDestroy{errs: []error{errors.New("precondition failed: resource is still in use")}}
 	purge := &fakePurge{removed: []string{"security_group 142eef7b (Default security group) in fr-par-1"}}
 
-	result, purged, err := destroySandbox(context.Background(), retryRuntime(t, destroy, purge), purgeWorkDir(t), destroyEnv, purgeProjectID)
+	result, purged, _, err := destroySandbox(context.Background(), retryRuntime(t, destroy, purge), purgeWorkDir(t), destroyEnv, purgeProjectID)
 
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -94,7 +94,7 @@ func TestDestroyDoesNotRetryWhenNothingWasPurged(t *testing.T) {
 	destroy := &sequencedDestroy{errs: []error{wantErr, nil}}
 	purge := &fakePurge{}
 
-	_, _, err := destroySandbox(context.Background(), retryRuntime(t, destroy, purge), purgeWorkDir(t), destroyEnv, purgeProjectID)
+	_, _, _, err := destroySandbox(context.Background(), retryRuntime(t, destroy, purge), purgeWorkDir(t), destroyEnv, purgeProjectID)
 
 	require.ErrorIs(t, err, wantErr)
 	assert.Equal(t, 1, destroy.calls)
@@ -104,7 +104,7 @@ func TestDestroySkipsPurgeWhenItSucceeds(t *testing.T) {
 	destroy := &sequencedDestroy{}
 	purge := &fakePurge{}
 
-	_, _, err := destroySandbox(context.Background(), retryRuntime(t, destroy, purge), purgeWorkDir(t), destroyEnv, purgeProjectID)
+	_, _, _, err := destroySandbox(context.Background(), retryRuntime(t, destroy, purge), purgeWorkDir(t), destroyEnv, purgeProjectID)
 
 	require.NoError(t, err)
 	assert.Equal(t, 1, destroy.calls)
@@ -118,7 +118,7 @@ func TestDestroyWithoutProjectIDDoesNotPurge(t *testing.T) {
 	destroy := &sequencedDestroy{errs: []error{wantErr, nil}}
 	purge := &fakePurge{}
 
-	_, _, err := destroySandbox(context.Background(), retryRuntime(t, destroy, purge), purgeWorkDir(t), destroyEnv, "")
+	_, _, _, err := destroySandbox(context.Background(), retryRuntime(t, destroy, purge), purgeWorkDir(t), destroyEnv, "")
 
 	require.ErrorIs(t, err, wantErr)
 	assert.Zero(t, purge.calls)
@@ -131,7 +131,7 @@ func TestDestroyReportsSecondFailure(t *testing.T) {
 	destroy := &sequencedDestroy{errs: []error{errors.New("first"), second}}
 	purge := &fakePurge{removed: []string{"security_group 142eef7b"}}
 
-	_, _, err := destroySandbox(context.Background(), retryRuntime(t, destroy, purge), purgeWorkDir(t), destroyEnv, purgeProjectID)
+	_, _, _, err := destroySandbox(context.Background(), retryRuntime(t, destroy, purge), purgeWorkDir(t), destroyEnv, purgeProjectID)
 
 	require.ErrorIs(t, err, second)
 	assert.Equal(t, 2, destroy.calls)
@@ -188,11 +188,57 @@ func TestDestroyRefusesToPurgeTheOrganizationDefaultProject(t *testing.T) {
 		"SCW_DEFAULT_ORGANIZATION_ID": purgeProjectID,
 	}
 
-	_, purged, err := destroySandbox(
+	_, purged, _, err := destroySandbox(
 		context.Background(), retryRuntime(t, destroy, purge), "/work", env, purgeProjectID)
 
 	require.ErrorIs(t, err, wantErr)
 	assert.Zero(t, purge.calls, "the organization default project must never be purged")
 	assert.Empty(t, purged)
 	assert.Equal(t, 1, destroy.calls, "and no retry should follow a refused purge")
+}
+
+// The poweroff must authorise against the workdir it was GIVEN. `live
+// teardown` passes the deployment's directory and need not have loaded a
+// scenario, so reading runtime.OutputDir() guards against an empty or
+// unrelated state file -- and silently skips the poweroff on exactly the
+// paths that tear down long-lived infrastructure.
+func TestPowerOffAuthorisesAgainstTheCallersWorkDir(t *testing.T) {
+	stop := &recordingPowerOff{}
+	destroy := &sequencedDestroy{}
+	rt := retryRuntime(t, destroy, &fakePurge{})
+	rt.Deps.InstanceStop = stop
+	// The runtime's own output dir is deliberately somewhere with no
+	// state at all, which is what `live teardown` looks like.
+	rt.outputDir = t.TempDir()
+
+	_, _, stopped, _ := destroySandbox(context.Background(), rt, purgeWorkDir(t), destroyEnv, purgeProjectID)
+
+	require.True(t, stop.called, "the poweroff must run for a caller-supplied workdir that authorises")
+	require.NotEmpty(t, stopped)
+}
+
+type recordingPowerOff struct{ called bool }
+
+func (r *recordingPowerOff) Run(ctx context.Context, projectID, secretKey string) ([]string, error) {
+	r.called = true
+	return []string{"server srv-1 (web) in fr-par-1"}, nil
+}
+
+// A server that would not stop must not be reported inside a PASSING
+// stage headed "powered off N instance(s)". It is the case where the
+// destroy is about to fail, so the summary would be asserting the
+// opposite of what is true.
+func TestPowerOffStageFailsWhenAServerNeverStopped(t *testing.T) {
+	ok := instancePowerOffStage([]string{"server a (web) in fr-par-1"})
+	require.Equal(t, StageStatusPass, ok.Status)
+	assert.Contains(t, ok.Detail, "powered off 1 instance(s)")
+
+	bad := instancePowerOffStage([]string{
+		"server a (web) in fr-par-1",
+		"server b (db) in fr-par-1 " + harness.PowerOffNotStoppedMarker + ": still not stopped after 40 checks",
+	})
+	assert.Equal(t, StageStatusFail, bad.Status,
+		"one server still running is enough to make the destroy fail")
+	assert.NotContains(t, bad.Detail, "powered off 2 instance(s)",
+		"and the summary must not claim it powered off what it did not")
 }

@@ -44,6 +44,15 @@ type SandboxDestroyHarnessRunner interface {
 	Run(context.Context, string, map[string]string) (*harness.SandboxDestroyResult, error)
 }
 
+// InstancePowerOffRunner stops a run project's Instances so the destroy
+// that follows can delete their private NICs, which Scaleway refuses
+// while the server is running. See harness.ScalewayInstancePowerOff --
+// the reason this cannot be fixed in the HCL is recorded there and in
+// ADR-0029's refutation.
+type InstancePowerOffRunner interface {
+	Run(ctx context.Context, projectID, secretKey string) ([]string, error)
+}
+
 // AutoCreatedPurgeRunner removes resources the cloud API created inside
 // a run's project without being asked -- which Terraform therefore never
 // destroys, and which keep the disposable project undeletable.
@@ -110,6 +119,7 @@ type RuntimeDependencies struct {
 	SandboxDeploy  SandboxDeployHarnessRunner
 	SandboxDestroy SandboxDestroyHarnessRunner
 	AutoCreated    AutoCreatedPurgeRunner
+	InstanceStop   InstancePowerOffRunner
 	OrphanSweep    OrphanSweepRunner
 	RunProject     RunProjectManager
 	ServiceProbe   ServiceProbeRunner
@@ -427,6 +437,9 @@ func buildRuntime(cmd *cobra.Command, opts runtimeOptions) (*CommandRuntime, err
 	}
 	if deps.SandboxDestroy == nil {
 		deps.SandboxDestroy = harness.NewSandboxDestroyHarness(execCommandRunner{})
+	}
+	if deps.InstanceStop == nil {
+		deps.InstanceStop = harness.NewScalewayInstancePowerOff(instancePowerOffTimeout)
 	}
 	if deps.AutoCreated == nil {
 		deps.AutoCreated = harness.NewScalewayAutoCreatedPurge(autoCreatedPurgeTimeout)
