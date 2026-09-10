@@ -709,7 +709,7 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 		// is the mock doing its job, and the reason Layer 2 stopped
 		// tearing down the moment it started telling the truth. Same
 		// workaround, pointed at the mock.
-		stages = append(stages, detachMockPrivateNICs(ctx, runtime, env)...)
+		stages = append(stages, detachMockPrivateNICs(ctx, runtime, sc.Cloud, env)...)
 
 		destroyResult, destroyErr := runtime.Deps.Destroy.Run(ctx, outputDir, env)
 		stages, failures = appendDestroyResult(stages, failures, destroyResult, destroyErr)
@@ -1433,7 +1433,14 @@ func appendOrphanSweepResult(ctx context.Context, stages []StageSummary, failure
 // Best-effort and silent on absence: a scenario with no private
 // networking has nothing to detach, and Layer 2 costs nothing to retry,
 // so a failure here must not stop a destroy that may well succeed.
-func detachMockPrivateNICs(ctx context.Context, runtime *CommandRuntime, env map[string]string) []StageSummary {
+func detachMockPrivateNICs(ctx context.Context, runtime *CommandRuntime, cloud string, env map[string]string) []StageSummary {
+	// Scaleway only. cloudEnv sets SCW_* for every scenario regardless of
+	// cloud, so without this a GCP or AWS teardown would call mockway --
+	// a mock holding none of its resources -- and could emit a Scaleway
+	// stage on a run that never touched Scaleway.
+	if !strings.EqualFold(strings.TrimSpace(cloud), "scaleway") {
+		return nil
+	}
 	base := strings.TrimSpace(env["SCW_API_URL"])
 	project := strings.TrimSpace(env["SCW_DEFAULT_PROJECT_ID"])
 	if base == "" || project == "" {
