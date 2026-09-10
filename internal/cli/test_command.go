@@ -1444,11 +1444,24 @@ func detachMockPrivateNICs(ctx context.Context, runtime *CommandRuntime, env map
 	if err != nil || len(detached) == 0 {
 		return nil
 	}
+	// FAILS when any entry reports a NIC it could not remove. Emitting a
+	// pass headed "removed N" while one is still attached would assert
+	// the opposite of what is true, in the case where the destroy is
+	// about to fail for exactly that reason.
+	status := StageStatusPass
+	verb := "removed"
+	for _, d := range detached {
+		if strings.Contains(d, "could NOT be deleted") {
+			status = StageStatusFail
+			verb = "could not remove every private NIC from the mock; the destroy that follows is expected to fail. Attempted"
+			break
+		}
+	}
 	return []StageSummary{{
 		Layer:  "destruction",
 		Stage:  "private_nic_detach",
-		Status: StageStatusPass,
-		Detail: fmt.Sprintf("removed %d private NIC(s) from the mock via v1, which the provider cannot do for itself: %s",
-			len(detached), strings.Join(detached, "; ")),
+		Status: status,
+		Detail: fmt.Sprintf("%s %d private NIC(s) from the mock via v1, which the provider cannot do for itself: %s",
+			verb, len(detached), strings.Join(detached, "; ")),
 	}}
 }

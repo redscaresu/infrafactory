@@ -98,11 +98,19 @@ func (d *ScalewayPrivateNICDetach) Run(ctx context.Context, projectID, secretKey
 	for _, zone := range InstanceZones {
 		servers, err := d.listServers(ctx, zone, projectID, secretKey)
 		if err != nil {
+			// Reported, not swallowed. A silent `continue` made an auth
+			// failure or a changed route look identical to "this project
+			// has no servers" -- and the caller then logs "no private
+			// NICs to remove" and proceeds into a destroy that is about
+			// to fail. That is the failure mode this whole arc was
+			// about; it does not get to reappear in the fix for it.
+			removed = append(removed, fmt.Sprintf("could NOT be deleted: listing servers in %s failed: %v", zone, err))
 			continue
 		}
 		for _, s := range servers {
 			nics, err := d.listNICs(ctx, zone, s.ID, secretKey)
 			if err != nil {
+				removed = append(removed, fmt.Sprintf("could NOT be deleted: listing NICs for server %s in %s failed: %v", s.ID, zone, err))
 				continue
 			}
 			for _, nic := range nics {

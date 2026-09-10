@@ -2,6 +2,46 @@
 
 Last updated: 2026-09-10
 
+## 2026-09-10 — S183: two curl calls, and the first green end-to-end run
+
+`web-live-paris` reached **`target_reached` in one iteration from the UI**, every stage green in
+both layers, real HTTP 200 through a real load balancer, and the account clean afterwards with no
+manual cleanup. First time all day.
+
+**The teardown defect was the ENDPOINT.** Same NIC, same server, seconds apart:
+
+```
+DELETE /instance/v2alpha1/.../private-network-interfaces/{id}  -> 412
+DELETE /instance/v1/zones/{z}/servers/{s}/private_nics/{id}    -> 204
+```
+
+A private NIC is by definition attached to a server, so v2alpha1's precondition can never be
+satisfied — and provider 2.81.0 destroys through v2alpha1, so it can never destroy one. No HCL
+shape changes that. infrafactory now removes NICs through v1 before `tofu destroy`, at both layers
+(ADR-0031).
+
+**Three wrong answers preceded it, and all three were "verified".** The inline block (verified
+against mockway, which did not model the refusal and reported `7 added, 7 destroyed`); the poweroff
+(verified against reasoning; a run whose poweroff reached `stopped` failed identically); eventual
+consistency (three retries, sixty seconds, unchanged). The manual recovery that started it stopped
+the server **and** used `scw`, which calls v1 — two variables, and the wrong one got the credit for
+two days.
+
+Deleted with the theory: `ScalewayInstancePowerOff`, its settle-retry, and ~45s per teardown.
+
+**Also fixed:** the auto-created default VPC no longer counts as an orphan — API-created, Terraform
+never owns it, same class as the `Default security group`. And the NIC list comes from
+`GET /servers/{id}/private_nics` rather than the server object's embedded field, which real
+Scaleway has and mockway does not; depending on it made the Layer 2 detach silently find nothing.
+
+**mockway#28** moved its refusal to v2alpha1 and made it unconditional. The test that had asserted
+204 there — on the reasoning *"the provider uses this route, so it must work"* — is inverted. That
+assumption is what let the mock certify a wrong fix.
+
+**Still open:** nothing reconciles stray `if-run-*` projects. Eight accumulated over two days
+because a failed run leaves one per applied iteration and only a *successful* run cleans up.
+`live reconcile` exists and nothing calls it.
+
 ## 2026-09-10 — S182: the guard that would not say why, and a rule frozen against its own enforcement
 
 Run `20260910T141427Z` was the first on the new binary. Two things worked and two were broken, both

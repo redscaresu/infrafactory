@@ -110,3 +110,20 @@ func TestPrivateNICDetachRefusesAnEmptyProject(t *testing.T) {
 	_, err := d.Run(context.Background(), "", "secret")
 	require.Error(t, err)
 }
+
+// A list failure is not an empty project. Swallowing it made an auth
+// error or a changed route look identical to "nothing to detach", and
+// the caller then logged "no private NICs to remove" before a destroy
+// that was about to fail for exactly that reason.
+func TestPrivateNICDetachReportsAListFailure(t *testing.T) {
+	const project = "11111111-1111-1111-1111-111111111111"
+	d := NewScalewayPrivateNICDetachWithDoer("https://api.example", func(req *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusUnauthorized, Body: io.NopCloser(strings.NewReader("{}"))}, nil
+	})
+
+	removed, err := d.Run(context.Background(), project, "secret")
+
+	require.NoError(t, err, "best-effort: the destroy still runs and reports for itself")
+	require.NotEmpty(t, removed, "but the failure must be visible, not silence")
+	assert.Contains(t, removed[0], "could NOT be deleted")
+}

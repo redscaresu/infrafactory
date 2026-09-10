@@ -1,7 +1,13 @@
 # ADR-0030: Teardown powers the run's instances off before `tofu destroy`
 
 ## Status
-Accepted. Supersedes the Decision in ADR-0029 on the question of *where* the
+**SUPERSEDED by ADR-0031 on the same day.** Its central claim — that powering the
+server off lets the destroy delete the NIC — is refuted: a run whose poweroff
+verifiably reached `stopped` failed the destroy identically. The real cause is
+the endpoint (v2alpha1 refuses every NIC; v1 does not), and the poweroff has been
+deleted. Kept as the record of the second of three wrong answers.
+
+Previously: Accepted. Supersedes the Decision in ADR-0029 on the question of *where* the
 private-NIC teardown failure is fixed.
 
 ## Context
