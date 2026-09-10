@@ -770,3 +770,26 @@ by `try()` or `one()` — before anything is created, rather than after.
 Stated as a rule for anything added later: **a stack that could fail to evaluate
 must not reach apply**, because evaluation is what destroy needs and destroy is the
 only thing standing between a failed apply and a bill.
+
+## Amendment, 2026-09-10 — the reconciliation now runs
+
+"A run that cannot prove the account is clean must not report success" held for
+the run's OWN project and nothing else. A failed run keeps its project on
+purpose — the id is the handle to whatever survived — the orphan sweep only ever
+inspects the current run's project, and `reap` needs a state file the next
+iteration has already overwritten. Every individual decision is right and the
+aggregate leaks.
+
+**Eight stray run projects accumulated over two days, four still running an
+instance.** They surfaced only because a human ran `scw account project list` on
+a hunch. `live reconcile` had done exactly the right comparison since S157a and
+was invoked by hand, which is to say never.
+
+Every Layer 3 run now performs that reconciliation at the end and **fails when a
+stamped project is unexplained** — including strays it inherited from earlier
+runs. It reports and never destroys, for the reason `live reconcile` does not:
+a project the records cannot explain is by definition not understood, and the
+blast radius is somebody's running infrastructure.
+
+A run that leaves no stray is unaffected. A run that inherits one finds out at
+the only moment anyone is watching.

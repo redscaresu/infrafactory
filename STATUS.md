@@ -2,6 +2,24 @@
 
 Last updated: 2026-09-10
 
+## 2026-09-10 — S184: every Layer 3 run now reconciles the projects it did not clean up
+
+Eight stray `if-run-*` projects accumulated over two days, **four still running an instance**, and
+they surfaced only because a human ran `scw account project list` on a hunch.
+
+The leak is structural, not incidental. A failed run KEEPS its project deliberately — the id is the
+handle to whatever survived. The orphan sweep only inspects the current run's project. `reap` needs
+a state file the next iteration has already overwritten. Each decision is right; the aggregate
+leaks one project per applied iteration and shows up only on the bill.
+
+`live reconcile` has done exactly the right comparison since S157a and is invoked by hand, which is
+to say never. Every Layer 3 run now runs it at the end and **fails on an unexplained stamped
+project**, including ones inherited from earlier runs — ADR-0024's promise finally has a mechanism.
+
+Reports, never destroys: a project the records cannot explain is by definition not understood, and
+deleting what you do not understand is how a reconciler becomes the incident. A run that leaves no
+stray is unaffected.
+
 ## 2026-09-10 — S183: two curl calls, and the first green end-to-end run
 
 `web-live-paris` reached **`target_reached` in one iteration from the UI**, every stage green in
