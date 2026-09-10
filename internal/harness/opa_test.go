@@ -149,6 +149,114 @@ func TestScalewayPoliciesPlanEvaluation(t *testing.T) {
 			expectedCount: 0,
 		},
 		{
+			// The shape that can actually be destroyed. Verified against
+			// provider 2.81.0's own schema (scaleway_instance_server has
+			// a `private_network` block, list, max 8) and against a real
+			// plan: the reference lands in
+			// configuration.expressions.private_network[].pn_id.references.
+			name:   "vpc required passes for an inline private_network block on the server",
+			policy: filepath.Join(policiesRoot, "vpc_required.rego"),
+			planJSON: `{
+  "planned_values": {"root_module": {"resources": [
+    {"address":"scaleway_instance_server.web","type":"scaleway_instance_server","values":{"private_network":[{}]}}
+  ]}},
+  "configuration": {"root_module": {"resources": [
+    {"address":"scaleway_instance_server.web","type":"scaleway_instance_server",
+     "expressions":{"private_network":[{"pn_id":{"references":["scaleway_vpc_private_network.main.id","scaleway_vpc_private_network.main"]}}]}}
+  ]}}
+}`,
+			expectedCount: 0,
+		},
+		{
+			// planned_values renders the inline block as `[{}]` when the
+			// private network is itself being created -- present, and
+			// empty, because every value is unknown at plan time. An
+			// empty block proves nothing, so the policy reads the
+			// configuration expression instead. This fixture is that
+			// block with NO pn_id reference, and it must still deny.
+			name:   "vpc required fails for an inline block with no pn_id reference",
+			policy: filepath.Join(policiesRoot, "vpc_required.rego"),
+			planJSON: `{
+  "planned_values": {"root_module": {"resources": [
+    {"address":"scaleway_instance_server.web","type":"scaleway_instance_server","values":{"private_network":[{}]}}
+  ]}},
+  "configuration": {"root_module": {"resources": [
+    {"address":"scaleway_instance_server.web","type":"scaleway_instance_server","expressions":{}}
+  ]}}
+}`,
+			expectedCount: 1,
+		},
+		{
+			// A block that is present, wrong, and would otherwise be
+			// discovered only at apply. `pn_id` must name a private
+			// NETWORK -- pointing it at the server itself is the exact
+			// mistyped-reference class this whole layer exists to catch.
+			name:   "vpc required fails when pn_id references something other than a private network",
+			policy: filepath.Join(policiesRoot, "vpc_required.rego"),
+			planJSON: `{
+  "planned_values": {"root_module": {"resources": [
+    {"address":"scaleway_instance_server.web","type":"scaleway_instance_server","values":{}}
+  ]}},
+  "configuration": {"root_module": {"resources": [
+    {"address":"scaleway_instance_server.web","type":"scaleway_instance_server",
+     "expressions":{"private_network":[{"pn_id":{"references":["scaleway_instance_server.web.id"]}}]}}
+  ]}}
+}`,
+			expectedCount: 1,
+		},
+		{
+			// tofu records BOTH "…main.id" and the bare "…main" for one
+			// expression, so a prefix-only check also accepts `.name` --
+			// a real private network, and not its id.
+			name:   "vpc required fails when pn_id references a private network attribute other than id",
+			policy: filepath.Join(policiesRoot, "vpc_required.rego"),
+			planJSON: `{
+  "planned_values": {"root_module": {"resources": [
+    {"address":"scaleway_instance_server.web","type":"scaleway_instance_server","values":{}}
+  ]}},
+  "configuration": {"root_module": {"resources": [
+    {"address":"scaleway_instance_server.web","type":"scaleway_instance_server",
+     "expressions":{"private_network":[{"pn_id":{"references":["scaleway_vpc_private_network.main.name","scaleway_vpc_private_network.main"]}}]}}
+  ]}}
+}`,
+			expectedCount: 1,
+		},
+		{
+			// Under count, tofu records the BARE reference plus
+			// "count.index" and no ".id" at all. Demanding the suffix
+			// would refuse every multi-instance scenario.
+			name:   "vpc required passes for a count-indexed inline private_network block",
+			policy: filepath.Join(policiesRoot, "vpc_required.rego"),
+			planJSON: `{
+  "planned_values": {"root_module": {"resources": [
+    {"address":"scaleway_instance_server.web[0]","type":"scaleway_instance_server","values":{}},
+    {"address":"scaleway_instance_server.web[1]","type":"scaleway_instance_server","values":{}}
+  ]}},
+  "configuration": {"root_module": {"resources": [
+    {"address":"scaleway_instance_server.web","type":"scaleway_instance_server",
+     "expressions":{"private_network":[{"pn_id":{"references":["scaleway_vpc_private_network.main","count.index"]}}]}}
+  ]}}
+}`,
+			expectedCount: 0,
+		},
+		{
+			// The inline block belongs to a DIFFERENT server. Address
+			// matching is what stops one attached instance vouching for
+			// an unattached one.
+			name:   "vpc required fails when only another server carries the inline block",
+			policy: filepath.Join(policiesRoot, "vpc_required.rego"),
+			planJSON: `{
+  "planned_values": {"root_module": {"resources": [
+    {"address":"scaleway_instance_server.lonely","type":"scaleway_instance_server","values":{}}
+  ]}},
+  "configuration": {"root_module": {"resources": [
+    {"address":"scaleway_instance_server.web","type":"scaleway_instance_server",
+     "expressions":{"private_network":[{"pn_id":{"references":["scaleway_vpc_private_network.main.id"]}}]}}
+  ]}}
+}`,
+			expectedCount: 1,
+		},
+		{
 			name:   "vpc required fails without private nic references",
 			policy: filepath.Join(policiesRoot, "vpc_required.rego"),
 			planJSON: `{

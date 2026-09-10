@@ -115,6 +115,157 @@ func TestLayer3ShapeRefusesUnparseableHCL(t *testing.T) {
 }
 
 // It must accept what Layer 3 actually generates, or it blocks every run.
+// The shape that applies and then cannot be torn down. Refused here so it
+// costs nothing; the alternative is four real applies and two hand
+// recoveries, which is what it cost before this check existed.
+func TestLayer3ShapeRefusesStandalonePrivateNIC(t *testing.T) {
+	dir := writeShapeHCL(t, shapeProject+`
+resource "scaleway_vpc_private_network" "main" { name = "pn" }
+resource "scaleway_instance_private_nic" "web" {
+  server_id          = scaleway_instance_server.web.id
+  private_network_id = scaleway_vpc_private_network.main.id
+}`)
+
+	err := validateLayer3HCLShape(dir, append(gateAllowlist,
+		"scaleway_vpc_private_network", "scaleway_instance_private_nic", "scaleway_instance_server"))
+	require.Error(t, err, "a standalone private NIC must be refused before anything is created")
+	// The message is repair-loop input, so it has to name the replacement.
+	// "Not permitted" would send the next iteration looking for another way
+	// to say the same wrong thing.
+	assert.Contains(t, err.Error(), "private_network { pn_id =",
+		"the refusal must prescribe the inline block, not just deny")
+}
+
+// Allowlisted and refused are different questions. The NIC stays in
+// allow_resource_types -- its cost is fine -- so this must be refused by
+// SHAPE, and removing it from the allowlist must not be what does the work.
+func TestLayer3ShapeAcceptsTheInlinePrivateNetworkBlock(t *testing.T) {
+	dir := writeShapeHCL(t, shapeProject+`
+resource "scaleway_vpc_private_network" "main" { name = "pn" }
+resource "scaleway_instance_server" "web" {
+  name = "web"
+  private_network {
+    pn_id = scaleway_vpc_private_network.main.id
+  }
+}`)
+
+	err := validateLayer3HCLShape(dir, append(gateAllowlist,
+		"scaleway_vpc_private_network", "scaleway_instance_private_nic", "scaleway_instance_server"))
+	assert.NoError(t, err, "the destroyable attachment must be accepted")
+}
+
+// Refusing the standalone NIC moved the attachment into a nested block, and
+// the containment rule that guarded the old shape read TOP-LEVEL attributes
+// only. Without this, the replacement trades an undestroyable stack for an
+// uncontained one: a server in the run's project wired to somebody else's
+// network, which no teardown touches.
+func TestLayer3ShapeRefusesInlinePrivateNetworkWithLiteralID(t *testing.T) {
+	dir := writeShapeHCL(t, shapeProject+`
+resource "scaleway_instance_server" "web" {
+  name = "web"
+  private_network {
+    pn_id = "11111111-1111-1111-1111-111111111111"
+  }
+}`)
+
+	err := validateLayer3HCLShape(dir, append(gateAllowlist,
+		"scaleway_vpc_private_network", "scaleway_instance_server"))
+	require.Error(t, err, "a literal pn_id names a network the run does not own")
+	assert.Contains(t, err.Error(), "will not destroy")
+}
+
+func TestLayer3ShapeRefusesInlinePrivateNetworkPointingAtAnotherResource(t *testing.T) {
+	dir := writeShapeHCL(t, shapeProject+`
+resource "scaleway_instance_server" "web" {
+  name = "web"
+  private_network {
+    pn_id = scaleway_block_volume.data.id
+  }
+}`)
+
+	err := validateLayer3HCLShape(dir, append(gateAllowlist,
+		"scaleway_vpc_private_network", "scaleway_instance_server"))
+	require.Error(t, err, "pn_id must name a private network, not any scaleway_ resource")
+}
+
+// `private_network` is a block on several types and they do not agree on the
+// key: scaleway_lb uses `private_network_id`, redis uses `id`, only the server
+// and rdb use `pn_id`. A check that ran on all of them would refuse a valid
+// load balancer for having the right shape.
+func TestLayer3ShapeAcceptsAnLBPrivateNetworkBlock(t *testing.T) {
+	dir := writeShapeHCL(t, shapeProject+`
+resource "scaleway_vpc_private_network" "main" { name = "pn" }
+resource "scaleway_lb" "main" {
+  name = "lb"
+  private_network {
+    private_network_id = scaleway_vpc_private_network.main.id
+  }
+}`)
+
+	err := validateLayer3HCLShape(dir, append(gateAllowlist, "scaleway_vpc_private_network"))
+	assert.NoError(t, err, "an LB private_network block uses private_network_id and must not be judged by pn_id")
+}
+
+// The containment check understands all three forms HCL parses
+// `x.main[...].id` into, including RelativeTraversalExpr. It is not what
+// decides the indexed cases, though, and the test says so rather than
+// implying coverage it does not have.
+func TestLayer3ShapeInlinePrivateNetworkReferenceForms(t *testing.T) {
+	allow := append(gateAllowlist, "scaleway_vpc_private_network", "scaleway_instance_server")
+	stack := func(ref string) string {
+		return shapeProject + `
+resource "scaleway_vpc_private_network" "main" { name = "pn" }
+resource "scaleway_instance_server" "web" {
+  name = "web"
+  private_network { pn_id = ` + ref + ` }
+}`
+	}
+
+	assert.NoError(t,
+		validateLayer3HCLShape(writeShapeHCL(t, stack("scaleway_vpc_private_network.main.id")), allow),
+		"the singleton reference is the shape the gate prescribes and must be accepted")
+
+	// Both INDEXED forms are refused -- by S168's index rule, which fires on
+	// any `resource[index].attr` anywhere in a Layer 3 stack, on any resource
+	// type, and long predates this check. Verified by pointing an unrelated
+	// resource at a counted reference and getting the same refusal.
+	//
+	// So counted stacks cannot reach a real apply today at all. That is a
+	// pre-existing constraint and arguably too broad -- a count-instance
+	// selector is not a list-attribute index -- but narrowing it is a
+	// separate decision. The containment check handles RelativeTraversalExpr
+	// so that IF the index rule is ever narrowed, containment is not the
+	// thing that breaks counted scenarios next.
+	for _, ref := range []string{
+		"scaleway_vpc_private_network.main[0].id",
+		"scaleway_vpc_private_network.main[count.index].id",
+	} {
+		err := validateLayer3HCLShape(writeShapeHCL(t, stack(ref)), allow)
+		require.Error(t, err, "pn_id = %s", ref)
+		assert.Contains(t, err.Error(), "Wrap it in try() or one()",
+			"the refusal must come from the index rule, not from containment")
+	}
+}
+
+// `dynamic` defeats every nested-block rule in the gate, because they all
+// match on block TYPE and a dynamic block's type is "dynamic". Refused
+// wholesale rather than taught to each rule one at a time.
+func TestLayer3ShapeRefusesDynamicBlocks(t *testing.T) {
+	dir := writeShapeHCL(t, shapeProject+`
+resource "scaleway_instance_server" "web" {
+  name = "web"
+  dynamic "private_network" {
+    for_each = ["11111111-1111-1111-1111-111111111111"]
+    content {
+      pn_id = private_network.value
+    }
+  }
+}`)
+
+	err := validateLayer3HCLShape(dir, append(gateAllowlist, "scaleway_instance_server"))
+	require.Error(t, err, "a dynamic block hides its contents from every other rule here")
+}
+
 func TestLayer3ShapeAcceptsRealGeneratedStack(t *testing.T) {
 	dir := writeShapeHCL(t, `
 terraform {

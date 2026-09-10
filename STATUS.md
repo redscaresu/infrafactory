@@ -1,6 +1,65 @@
 # STATUS
 
-Last updated: 2026-09-07
+Last updated: 2026-09-09
+
+## 2026-09-09 — S179: the scenario the docs said could not run, and the two defects it was hiding
+
+`web-live-paris` was listed as blocked on private networking. It had not been blocked since
+2026-08-31 — the same document said **RESOLVED** fifteen lines above the table that still said
+otherwise, and the `allow_resource_types` comment in `infrafactory.yaml` agreed with the table.
+Three sources, one stale fact copied three times, reading as corroboration.
+
+Running it found two defects, both of which needed a real apply to see.
+
+**The teardown could not run.** Two iterations applied to real Scaleway (43s, 49s) and both failed
+to destroy:
+
+```
+Can't delete a private network interface attached to a server
+```
+
+Terraform destroys in reverse dependency order, so a standalone `scaleway_instance_private_nic` is
+deleted while its server is still running, and Scaleway refuses — a NIC is deletable only when its
+server is powered off, confirmed by hand during the recovery. Auto-destroy failed too, so the
+run left real infrastructure up. **Layer 1 was mandating the shape that causes this** — the
+`vpc_required` pitfall prescribed a standalone NIC — which is the S168 defect class with the policy
+on the wrong side of it.
+
+Attachment moves to the server's inline `private_network` block (present in provider 2.81.0's
+schema: list, max 8). Deleting the server takes its NICs with it because the provider powers it off
+first, so there is no separate delete to fail. `vpc_required.rego` accepts either shape: the
+property it defends is "the server is on a private network", not "one resource type appears". The
+rule reads `configuration.expressions`, not `planned_values` — for a private network created in the
+same plan the block renders as `[{}]`, present and empty, which proves nothing.
+
+**The probe was measuring the wrong thing.** `http_probe` returned 503 both times. The load
+balancer was healthy and had no healthy backend, because the generated `user_data` ran `apt-get
+install docker.io` on a cold instance: two to four minutes against a 30-second window. A 503 from a
+healthy load balancer is indistinguishable from a broken app, so the repair loop concluded the
+stack was wrong and paid for another real apply to reach the same verdict.
+
+Fixed at both ends — the window is 120s, sized to a cold boot; and a scenario declaring a
+`service:` now boots Scaleway's `docker` image and only runs the container. The marketplace API
+confirms `docker` is compatible with DEV1-S in fr-par-1, which also retires the "cause not
+understood" note on the image pitfall: that failure was a stock blip, not a wrong image name.
+
+**The pitfall was not enough, and the Layer 3 preflight now refuses a standalone NIC outright.** A
+pitfall is advice to a model; a gate is a guarantee, and it costs nothing when it never fires. The
+refusal names the replacement, because that string is fed back to the generator as the reason to
+fix. It is a shape check, not an allowlist entry: `allow_resource_types` answers "may this cost
+money" and the NIC's cost is fine; this answers "can this be undone".
+
+Worth recording separately: the run that prompted the gate was judged against a pitfall file it had
+never read. The repository was switched to a branch without the new pitfalls **33 seconds** before
+the run started, and `paths.pitfalls` is read from the working tree, so the generator was still
+being told to write the standalone NIC. The first conclusion drawn — "the model ignored the advice"
+— was wrong, and the ADR records that rather than quietly taking the credit. A run does not record
+the commit it was generated under; that gap is now known and open.
+
+Verified as far as money-free verification goes — provider schema, marketplace API, and a full
+Layer 2 apply and destroy of the rewritten shape. The scenario is marked **unproven**, not
+runnable. "No known blocker" is not "works", and this entry exists because conflating them cost
+two real applies and a manual reap.
 
 ## 2026-09-07 — S175: a warning about an apply that cannot happen
 

@@ -110,7 +110,7 @@ at Layer 1 or Layer 3, and `deploy` is the only route to a real NIC.
 | `block-paris` | **runnable** | instant | — (run 2026-08-22) |
 | `lb-paris` | **runnable** | hourly | — (run 2026-08-23) |
 | `lb-serving-paris` | **runnable** | hourly | — (added 2026-08-24; the first `http_probe` against real Scaleway) |
-| `web-live-paris` | key only | hourly | private networking (generation emits `scaleway_instance_private_nic`; canary 2026-08-30) |
+| `web-live-paris` | runnable, unrun | hourly | nothing known — see "web-live-paris, 2026-09-09" below |
 | `incremental-project-paris` | key only | hourly | private networking (allowlist cleared 2026-08-24; see the retraction at the top) |
 | `registry-paris` | key only | instant | Registry |
 | `iam-policies-paris` | key only | instant | IAM |
@@ -126,7 +126,7 @@ at Layer 1 or Layer 3, and `deploy` is the only route to a real NIC.
 | `web-app-paris` | allowlist + key | slow + expensive | DomainsDNS, IPAM, RDB, VPCGateway |
 | `full-stack-paris` | allowlist + key | slow + expensive | IAM, Kubernetes, RDB, Redis, Registry |
 
-**Current: 3 have run, 0 ungated but unrun, 6 are blocked by the key alone, 9 by both.**
+**Current: 3 have run, 1 ungated but unrun, 5 are blocked by the key alone, 9 by both.**
 As first audited on 2026-08-23 it was 2 runnable, 1 blocked by the allowlist
 alone, 4 by the key alone and 9 by both; `lb-serving-paris` did not exist
 yet, and `incremental-project-paris` has since moved from the allowlist
@@ -309,8 +309,9 @@ actually blocked `web-live-paris` and every other compute scenario equally.
 created before the apply and is the provider default, so the NIC lands with its
 server. The counts below are from before that and are stale in their *reason* —
 what remains for each compute scenario is cost, not a contradiction. Ungated is
-3 of 18, not 4; have-run is 3 of 18. The `runnable, unrun` bucket now has no
-members and is kept because the state is real and will recur.
+3 of 18, not 4; have-run is 3 of 18. The `runnable, unrun` bucket had no
+members when this was written and has one again as of 2026-09-09
+(`web-live-paris`) — which is why it was kept.
 
 Two things are worth keeping from how this was found. The claim came from reading
 the allowlist and concluding nothing blocked it; the correction came from
@@ -328,7 +329,7 @@ the two gates, not a permission and not the pitfall.
 
 `lb-serving-paris` is the first scenario to satisfy an `http_probe` against real Scaleway. It goes green end to end in **144 seconds** — apply, HTTP 200 through the load balancer frontend, destroy, orphan sweep — and it is the scenario that surfaced the auto-created security group defect (ADR-0023, second amendment of this date).
 
-Fifteen scenarios remain gated, and what gates them is unchanged and
+Fourteen scenarios remain gated, and what gates them is unchanged and
 unchanged deliberately:
 
 - **Cost/time.** `scaleway_k8s_*`, `scaleway_rdb_instance`, `scaleway_redis_cluster` stay commented out. They take minutes to create *and* minutes to destroy, on every iteration of the repair loop.
@@ -338,3 +339,58 @@ unchanged deliberately:
 `scaleway_instance_private_nic` is allowlisted alongside the server, because `policies/scaleway/vpc_required.rego` denies any instance server without one — admitting the server but not the NIC would leave static policy demanding a resource the allowlist forbids, and no generated HCL could satisfy both. It sits in the "allowed locally, refused by the API" group permanently, not pending a grant: see the retraction at the top.
 
 That distinction matters for reading the count above. `lb-serving-paris` is runnable **through the gate**, which uses `infrafactory test` against fixed HCL and does not run the static layer. Driving the same scenario through `infrafactory run` — generate, then validate — additionally needs private networking, which is unresolvable today (see the retraction at the top).
+
+
+## `web-live-paris`, 2026-09-09 — two defects, both fixed, still unproven
+
+This row said "key only — private networking" for ten days after the blocker it
+named had been fixed. The prose fifteen lines above the table already said
+**RESOLVED 2026-08-31**; the table did not, and the `allow_resource_types`
+comment in `infrafactory.yaml` agreed with the table. Three sources, one stale
+fact copied three times, and it reads as corroboration. Anyone planning a demo
+off this table was told the scenario could not run.
+
+It ran. `20260909T105808Z` applied to real Scaleway twice — 43s and 49s — and
+found two defects nothing had seen before, because nobody had got this far.
+
+**1. The teardown could not run.** Destroy failed both times with
+
+```
+Can't delete a private network interface attached to a server
+```
+
+Terraform destroys in reverse dependency order, so a standalone
+`scaleway_instance_private_nic` is deleted while its server is still RUNNING, and
+Scaleway refuses that. The auto-destroy then failed too, so the run left real
+infrastructure up — an apply that works and a destroy that cannot is the S168
+defect class, and Layer 1 was *mandating* the shape that causes it.
+
+Fixed by attaching through the provider's inline `private_network` block on the
+server (verified in provider 2.81.0's schema: list, max 8). Deleting the server
+takes its NICs with it, because the provider powers the server off first, so
+there is no separate delete to fail. `vpc_required.rego` now accepts either
+shape — the property it defends is "the server is on a private network", not
+"one particular resource type appears" — and the pitfall prescribes the inline
+one.
+
+**2. The probe was measuring the wrong thing.** `http_probe` returned 503 both
+times. The load balancer was healthy; it had no healthy backend, because the
+generated `user_data` ran `apt-get install docker.io` on a cold instance. That is
+two to four minutes against a 30-second probe window.
+
+A 503 from a healthy load balancer is indistinguishable from a broken app, which
+is what makes this expensive: the repair loop believed the stack was wrong,
+regenerated it, and paid for another real apply and destroy to reach the same
+verdict.
+
+Fixed at both ends. The window is 120s, sized to a cold boot rather than to a
+guess. And a scenario declaring a `service:` now boots Scaleway's `docker` image
+and only runs the container — the marketplace API confirms `docker` is
+compatible with DEV1-S in fr-par-1, which also retires the "cause not understood"
+note on the image pitfall: that failure was a stock blip, not a wrong image.
+
+**Status is `unproven`, deliberately.** Both fixes are verified as far as they
+can be without spending money — provider schema, marketplace API, a full Layer 2
+apply and destroy of the rewritten shape — and neither has been through a real
+apply. "No known blocker" is not "works", and this document has just demonstrated
+what happens when the two get conflated.
