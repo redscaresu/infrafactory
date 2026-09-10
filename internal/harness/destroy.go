@@ -174,21 +174,49 @@ const mockwayDefaultProjectID = "00000000-0000-0000-0000-000000000000"
 // created and failed to destroy is a real orphan and still counts --
 // which matters more now that Layer 3 has stacks creating their own
 // projects.
+// The default VPC is auto-created, not declared.
+//
+// Scaleway gives a project a default VPC and puts a private network there
+// when the request names no vpc_id; mockway models that (mockway#26). Like
+// the "Default security group" that ADR-0023's purge exists for, Terraform
+// never creates it and never destroys it -- so counting it fails
+// `destruction: no_orphans` for every scenario with private networking,
+// which is every scenario with compute, because vpc_required demands it.
+//
+// Matched on the name the API assigns, not on absence-from-state: a VPC a
+// scenario actually declared and failed to destroy is a real orphan and
+// must still count. A stack that names its own VPC "default" would be
+// exempted wrongly, which is the known edge of this rule and cheaper than
+// the alternative of trusting state to be complete.
+const autoCreatedVPCName = "default"
+
 func countOrphanItems(root, collection string, items []any) int {
-	if root != "account" || collection != "projects" {
+	switch {
+	case root == "account" && collection == "projects":
+		return countExcept(items, func(e map[string]any) bool {
+			id, _ := e["id"].(string)
+			return id == mockwayDefaultProjectID
+		})
+	case root == "vpc" && collection == "vpcs":
+		return countExcept(items, func(e map[string]any) bool {
+			name, _ := e["name"].(string)
+			return name == autoCreatedVPCName
+		})
+	default:
 		return len(items)
 	}
+}
+
+// countExcept counts items, skipping the ones exempt says are fixtures
+// rather than anything a scenario created. An entry that will not parse
+// counts, because an unreadable row is not evidence of a clean teardown.
+func countExcept(items []any, exempt func(map[string]any) bool) int {
 	count := 0
 	for _, item := range items {
 		entry, ok := item.(map[string]any)
-		if !ok {
+		if !ok || !exempt(entry) {
 			count++
-			continue
 		}
-		if id, _ := entry["id"].(string); id == mockwayDefaultProjectID {
-			continue
-		}
-		count++
 	}
 	return count
 }

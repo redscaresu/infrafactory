@@ -3,6 +3,8 @@ package harness
 import (
 	"context"
 	"errors"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"testing"
 )
 
@@ -170,4 +172,33 @@ func TestCountOrphansCountsPreviouslyUnknownCollections(t *testing.T) {
 	if count != 4 {
 		t.Fatalf("expected 4 orphans including unknown collections, got %d", count)
 	}
+}
+
+// The default VPC is auto-created by the API when a private network names
+// no vpc_id -- Terraform never owns it and never destroys it, exactly like
+// the "Default security group". Counting it failed no_orphans for every
+// scenario with private networking, which is every scenario with compute.
+func TestCountOrphansIgnoresTheAutoCreatedDefaultVPC(t *testing.T) {
+	state := []byte(`{
+      "account": {"projects": [{"id": "00000000-0000-0000-0000-000000000000", "name": "default"}]},
+      "vpc": {"vpcs": [{"id": "v-1", "name": "default"}]}
+    }`)
+
+	count, err := countOrphans(state)
+	require.NoError(t, err)
+	assert.Equal(t, 0, count, "the seeded project and the auto-created default VPC are both fixtures")
+}
+
+// ...but a VPC the scenario declared and failed to destroy is a real
+// orphan. Without this the exemption would hide the leak it is meant to
+// distinguish itself from.
+func TestCountOrphansStillCountsADeclaredVPC(t *testing.T) {
+	state := []byte(`{
+      "account": {"projects": [{"id": "00000000-0000-0000-0000-000000000000", "name": "default"}]},
+      "vpc": {"vpcs": [{"id": "v-1", "name": "default"}, {"id": "v-2", "name": "web-live-paris-vpc"}]}
+    }`)
+
+	count, err := countOrphans(state)
+	require.NoError(t, err)
+	assert.Equal(t, 1, count, "a VPC the stack named is the stack's to destroy")
 }

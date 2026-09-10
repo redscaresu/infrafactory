@@ -165,7 +165,7 @@ func tearDownDeployment(
 		ctx, runtime, d.WorkDir, sandboxEnv, sweepTargetProjectID(sweepTarget))
 	stages, failures = appendSandboxDestroyResult(stages, failures, destroyResult, destroyErr)
 	if len(stopped) > 0 {
-		stages = append(stages, instancePowerOffStage(stopped))
+		stages = append(stages, privateNICDetachStage(stopped))
 	}
 	if len(purged) > 0 {
 		stages = append(stages, autoCreatedPurgeStage(purged))

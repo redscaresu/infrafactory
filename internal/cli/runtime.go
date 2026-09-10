@@ -44,12 +44,13 @@ type SandboxDestroyHarnessRunner interface {
 	Run(context.Context, string, map[string]string) (*harness.SandboxDestroyResult, error)
 }
 
-// InstancePowerOffRunner stops a run project's Instances so the destroy
-// that follows can delete their private NICs, which Scaleway refuses
-// while the server is running. See harness.ScalewayInstancePowerOff --
-// the reason this cannot be fixed in the HCL is recorded there and in
-// ADR-0029's refutation.
-type InstancePowerOffRunner interface {
+// PrivateNICDetachRunner deletes a run project's private NICs through
+// the Instance v1 API before `tofu destroy` runs, because provider
+// 2.81.0 deletes them through v2alpha1 and THAT endpoint refuses every
+// time -- "Can't delete a private network interface attached to a
+// server", which is true of every NIC there is. See
+// harness.ScalewayPrivateNICDetach and ADR-0031.
+type PrivateNICDetachRunner interface {
 	Run(ctx context.Context, projectID, secretKey string) ([]string, error)
 }
 
@@ -119,7 +120,7 @@ type RuntimeDependencies struct {
 	SandboxDeploy  SandboxDeployHarnessRunner
 	SandboxDestroy SandboxDestroyHarnessRunner
 	AutoCreated    AutoCreatedPurgeRunner
-	InstanceStop   InstancePowerOffRunner
+	NICDetach      PrivateNICDetachRunner
 	OrphanSweep    OrphanSweepRunner
 	RunProject     RunProjectManager
 	ServiceProbe   ServiceProbeRunner
@@ -438,8 +439,8 @@ func buildRuntime(cmd *cobra.Command, opts runtimeOptions) (*CommandRuntime, err
 	if deps.SandboxDestroy == nil {
 		deps.SandboxDestroy = harness.NewSandboxDestroyHarness(execCommandRunner{})
 	}
-	if deps.InstanceStop == nil {
-		deps.InstanceStop = harness.NewScalewayInstancePowerOff(instancePowerOffTimeout)
+	if deps.NICDetach == nil {
+		deps.NICDetach = harness.NewScalewayPrivateNICDetach(privateNICDetachTimeout)
 	}
 	if deps.AutoCreated == nil {
 		deps.AutoCreated = harness.NewScalewayAutoCreatedPurge(autoCreatedPurgeTimeout)

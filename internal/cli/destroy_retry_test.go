@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -227,45 +228,51 @@ func TestDestroyRefusesToPurgeTheOrganizationDefaultProject(t *testing.T) {
 // scenario, so reading runtime.OutputDir() guards against an empty or
 // unrelated state file -- and silently skips the poweroff on exactly the
 // paths that tear down long-lived infrastructure.
-func TestPowerOffAuthorisesAgainstTheCallersWorkDir(t *testing.T) {
-	stop := &recordingPowerOff{}
+func TestNICDetachAuthorisesAgainstTheCallersWorkDir(t *testing.T) {
+	stop := &recordingNICDetach{}
 	destroy := &sequencedDestroy{}
 	rt := retryRuntime(t, destroy, &fakePurge{})
-	rt.Deps.InstanceStop = stop
+	rt.Deps.NICDetach = stop
 	// The runtime's own output dir is deliberately somewhere with no
 	// state at all, which is what `live teardown` looks like.
 	rt.outputDir = t.TempDir()
 
 	_, _, stopped, _ := destroySandbox(context.Background(), rt, purgeWorkDir(t), destroyEnv, purgeProjectID)
 
-	require.True(t, stop.called, "the poweroff must run for a caller-supplied workdir that authorises")
+	require.True(t, stop.called, "the detach must run for a caller-supplied workdir that authorises")
 	require.NotEmpty(t, stopped)
 }
 
-type recordingPowerOff struct{ called bool }
+type recordingNICDetach struct {
+	called  bool
+	returns []string
+}
 
-func (r *recordingPowerOff) Run(ctx context.Context, projectID, secretKey string) ([]string, error) {
+func (r *recordingNICDetach) Run(ctx context.Context, projectID, secretKey string) ([]string, error) {
 	r.called = true
-	return []string{"server srv-1 (web) in fr-par-1"}, nil
+	if r.returns != nil {
+		return r.returns, nil
+	}
+	return []string{"private nic n-1 on server srv-1 in fr-par-1"}, nil
 }
 
 // A server that would not stop must not be reported inside a PASSING
 // stage headed "powered off N instance(s)". It is the case where the
 // destroy is about to fail, so the summary would be asserting the
 // opposite of what is true.
-func TestPowerOffStageFailsWhenAServerNeverStopped(t *testing.T) {
-	ok := instancePowerOffStage([]string{"server a (web) in fr-par-1"})
+func TestNICDetachStageFailsWhenANICCouldNotBeDeleted(t *testing.T) {
+	ok := privateNICDetachStage([]string{"private nic n-1 on server a in fr-par-1"})
 	require.Equal(t, StageStatusPass, ok.Status)
-	assert.Contains(t, ok.Detail, "powered off 1 instance(s)")
+	assert.Contains(t, ok.Detail, "removed 1 private NIC(s)")
 
-	bad := instancePowerOffStage([]string{
-		"server a (web) in fr-par-1",
-		"server b (db) in fr-par-1 " + harness.PowerOffNotStoppedMarker + ": still not stopped after 40 checks",
+	bad := privateNICDetachStage([]string{
+		"private nic n-1 on server a in fr-par-1",
+		"private nic n-2 on server b in fr-par-1 could NOT be deleted: status 412",
 	})
 	assert.Equal(t, StageStatusFail, bad.Status,
-		"one server still running is enough to make the destroy fail")
-	assert.NotContains(t, bad.Detail, "powered off 2 instance(s)",
-		"and the summary must not claim it powered off what it did not")
+		"one NIC left behind is enough to make the destroy fail")
+	assert.NotContains(t, bad.Detail, "removed 2 private NIC(s)",
+		"and the summary must not claim it removed what it did not")
 }
 
 // A guard that stops without saying why is half a guard -- the Layer 3
@@ -274,19 +281,19 @@ func TestPowerOffStageFailsWhenAServerNeverStopped(t *testing.T) {
 // destroy with no poweroff stage at all, the log could not tell "no
 // project id" from "guard refused" from "found nothing". That cost a
 // real apply to learn nothing.
-func TestPowerOffSaysWhyItSkipped(t *testing.T) {
+func TestNICDetachSaysWhyItSkipped(t *testing.T) {
 	rt := retryRuntime(t, &sequencedDestroy{}, &fakePurge{})
-	rt.Deps.InstanceStop = nil
+	rt.Deps.NICDetach = nil
 
-	_, reason := powerOffRunInstances(context.Background(), rt, purgeWorkDir(t), purgeProjectID, destroyEnv)
+	_, reason := detachRunProjectNICs(context.Background(), rt, purgeWorkDir(t), purgeProjectID, destroyEnv)
 
 	require.NotEmpty(t, reason, "a skip must carry its reason")
-	assert.Contains(t, reason, "poweroff dependency")
+	assert.Contains(t, reason, "detach dependency")
 
-	stage := instancePowerOffStage([]string{powerOffSkipReasonPrefix + reason})
+	stage := privateNICDetachStage([]string{nicDetachSkipReasonPrefix + reason})
 	assert.Equal(t, StageStatusSkip, stage.Status,
-		"a skip is not a pass -- nothing was powered off")
-	assert.Contains(t, stage.Detail, "poweroff dependency",
+		"a skip is not a pass -- nothing was removed")
+	assert.Contains(t, stage.Detail, "detach dependency",
 		"and the reason has to reach the stage summary, which is where an operator looks")
 }
 
@@ -295,10 +302,10 @@ func TestPowerOffSaysWhyItSkipped(t *testing.T) {
 // disabled BOTH remediations, leaving neither a purge stage nor a
 // poweroff stage to say so. The marker is the same provenance the
 // deletable check reads anyway.
-func TestPowerOffFallsBackToTheRunProjectMarker(t *testing.T) {
-	stop := &recordingPowerOff{}
+func TestNICDetachFallsBackToTheRunProjectMarker(t *testing.T) {
+	stop := &recordingNICDetach{}
 	rt := retryRuntime(t, &sequencedDestroy{}, &fakePurge{})
-	rt.Deps.InstanceStop = stop
+	rt.Deps.NICDetach = stop
 
 	dir := purgeWorkDir(t)
 	// Recovery lives in destroySandbox now, so BOTH remediations get it;
@@ -308,9 +315,84 @@ func TestPowerOffFallsBackToTheRunProjectMarker(t *testing.T) {
 	assert.Empty(t, resolveRunProjectID(t.TempDir(), ""),
 		"and with no marker there is nothing to recover")
 
-	stopped, reason := powerOffRunInstances(context.Background(), rt, dir, resolveRunProjectID(dir, ""), destroyEnv)
+	stopped, reason := detachRunProjectNICs(context.Background(), rt, dir, resolveRunProjectID(dir, ""), destroyEnv)
 
 	assert.Empty(t, reason, "the marker names a project, so there is nothing to skip: %s", reason)
-	require.True(t, stop.called, "an empty caller-supplied id must not disable the poweroff")
+	require.True(t, stop.called, "an empty caller-supplied id must not disable the detach")
 	require.NotEmpty(t, stopped)
+}
+
+// The reason has to reach a channel somebody reads.
+//
+// The previous attempt put skip reasons in a StageSummary, and `run`
+// does not persist sandbox stages -- so a real run produced the string
+// "poweroff" ZERO times anywhere on disk, and answering "did it run?"
+// took a live API probe. A guard that explains itself into a channel
+// with no reader is worse than a silent one, because it looks fixed.
+func TestNICDetachAndPurgeReachTheLog(t *testing.T) {
+	var sink bytes.Buffer
+	rt := retryRuntime(t, &sequencedDestroy{errs: []error{errors.New("boom")}}, &fakePurge{})
+	rt.Logger = NewAppLogger(&sink)
+	rt.Deps.NICDetach = nil // force a skip with a known reason
+
+	_, _, _, _ = destroySandbox(context.Background(), rt, purgeWorkDir(t), destroyEnv, purgeProjectID)
+
+	out := sink.String()
+	assert.Contains(t, out, "layer3_private_nic_detach",
+		"the detach outcome must be logged, not only staged")
+	assert.Contains(t, out, "detach dependency",
+		"and the log must carry the REASON, which is the whole point")
+	assert.Contains(t, out, "layer3_auto_created_purge",
+		"the purge decision must be on the record too -- it was equally invisible")
+}
+
+// A stack with no compute has nothing to stop. That must be
+// distinguishable from a skip, which is exactly the distinction that
+// could not be made before.
+func TestNICDetachLogsTheEmptyCaseDistinctly(t *testing.T) {
+	var sink bytes.Buffer
+	rt := retryRuntime(t, &sequencedDestroy{}, &fakePurge{})
+	rt.Logger = NewAppLogger(&sink)
+	rt.Deps.NICDetach = &recordingNICDetach{returns: []string{}}
+
+	_, _, _, _ = destroySandbox(context.Background(), rt, purgeWorkDir(t), destroyEnv, purgeProjectID)
+
+	out := sink.String()
+	assert.Contains(t, out, "no_instances")
+	assert.NotContains(t, out, `"status":"skipped"`,
+		"nothing to remove is not the same as never ran")
+}
+
+// ...but a SKIP is not a state change. The skip reason travels in the
+// same slice as the stopped list, and counting it as "something was
+// stopped" made every skipped run retry as though the world had moved.
+func TestDestroyDoesNotRetryWhenTheNICDetachOnlySkipped(t *testing.T) {
+	wantErr := errors.New("genuine destroy bug")
+	destroy := &sequencedDestroy{errs: []error{wantErr, nil}}
+	rt := retryRuntime(t, destroy, &fakePurge{})
+	rt.Deps.NICDetach = nil // skips, with a reason
+
+	_, _, _, err := destroySandbox(context.Background(), rt, purgeWorkDir(t), destroyEnv, purgeProjectID)
+
+	require.ErrorIs(t, err, wantErr)
+	assert.Equal(t, 1, destroy.calls, "a skip changed nothing, so there is nothing to retry into")
+}
+
+// `status` is the machine-readable field. Logging a failure as success
+// is the same false green as a passing stage that reports a NIC it
+// could not delete -- and it is the field a filter would read.
+func TestNICDetachLogsAFailedEntryAsFailed(t *testing.T) {
+	var sink bytes.Buffer
+	rt := retryRuntime(t, &sequencedDestroy{}, &fakePurge{})
+	rt.Logger = NewAppLogger(&sink)
+	rt.Deps.NICDetach = &recordingNICDetach{
+		returns: []string{"could NOT be deleted: listing servers in fr-par-1 failed: 401"},
+	}
+
+	_, _, _, _ = destroySandbox(context.Background(), rt, purgeWorkDir(t), destroyEnv, purgeProjectID)
+
+	out := sink.String()
+	assert.Contains(t, out, "layer3_private_nic_detach")
+	assert.NotContains(t, out, `"event":"layer3_private_nic_detach","status":"success"`,
+		"a detach that could not delete a NIC is not a success")
 }
