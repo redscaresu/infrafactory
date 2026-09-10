@@ -871,8 +871,26 @@ var layer3NumericBounds = map[string]map[string]float64{
 	},
 }
 
+// Play2 admitted 2026-09-10, and NOT because it is cheaper -- it is dearer.
+// Retail EUR/hour in fr-par-1, from Scaleway's public product catalog:
+//
+//	DEV1-S       0.00898
+//	PLAY2-PICO   0.01428   (+59%)
+//	DEV1-M       0.02020   (+125%)
+//	PLAY2-NANO   0.02754   (+207%)
+//	PLAY2-MICRO  0.05508   (+513%)   <- deliberately NOT admitted
+//
+// The reason is iteration cost, not instance cost. DEV1 is the superseded
+// range and Play2 is what a model reaches for when asked for a small
+// instance; one run spent THREE of its five iterations proposing PLAY2-NANO
+// and PLAY2-PICO and being refused, then exhausted its budget. At demo
+// durations the difference is fractions of a penny -- a five-minute
+// PLAY2-PICO is about EUR 0.001 -- and a wasted iteration costs a real apply.
+//
+// MICRO is left out to keep the ceiling near 3x DEV1-S. The gate is still
+// deny-by-default; this widens it by two named values, not by a family.
 var layer3EnumBounds = map[string]map[string][]string{
-	"scaleway_instance_server": {"type": {"DEV1-S", "DEV1-M"}},
+	"scaleway_instance_server": {"type": {"DEV1-S", "DEV1-M", "PLAY2-PICO", "PLAY2-NANO"}},
 	"scaleway_lb":              {"type": {"LB-S"}},
 }
 

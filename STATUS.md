@@ -1,6 +1,45 @@
 # STATUS
 
-Last updated: 2026-09-09
+Last updated: 2026-09-10
+
+## 2026-09-10 — S180: three retractions, and the fix moves out of the HCL
+
+Yesterday's fixes were run against real Scaleway. One worked, two were wrong, and the wrong ones
+were mine.
+
+**The inline `private_network` block does not destroy either.** Run `20260910T104418Z` iteration 4
+generated exactly the prescribed shape and failed teardown with the identical
+`Can't delete a private network interface attached to a server`. ADR-0029's mechanism claim — the
+provider powers the server off first, so its NICs go with it — is refuted and marked as such. What
+survives is that a standalone NIC genuinely cannot be destroyed and a policy should not mandate it;
+what does not survive is that the inline block fixes anything.
+
+**So no HCL shape works, and the fix leaves the configuration.** Both hand recoveries succeeded the
+same way: power the server off, then delete. The teardown path has to do that before
+`tofu destroy`. ADR-0029 dismissed exactly this as "teaching the tool to work around HCL nobody
+should be generating" — a dismissal that assumed a working alternative existed.
+
+Worth naming: the Layer 2 verification of the inline shape **passed** (`7 added`, `7 destroyed`),
+because mockway does not enforce the power-off precondition. A mock more permissive than reality
+cannot refute a claim about reality, and the claim shipped on mock evidence alone.
+
+**The `docker` image pitfall is retracted one day after being written.** It steered the generator to
+an image whose apply fails (`couldn't find a local image for zone fr-par-1 and commercial type
+DEV1-M`) — while the marketplace API continues to insist that combination is compatible. So
+`compatible_commercial_types` is not what the provider resolves against and cannot settle the
+question. The pitfall it overrode had explicitly warned against writing a remedy for this symptom.
+The warning is restored, and no remedy is offered.
+
+**Play2 admitted, and not for the reason first given.** `PLAY2-PICO` and `PLAY2-NANO` are now
+allowed instance types. The claim that motivated it — that they are cheaper than DEV1-S — was
+wrong: they are 59% and 207% dearer (Scaleway public catalog). The real argument is iteration cost.
+DEV1 is the superseded range, Play2 is what a model reaches for, and one run spent three of five
+iterations proposing Play2 and being refused before exhausting its budget. `PLAY2-MICRO` (+513%)
+stays out.
+
+**And the stuck detector missed an oscillation.** `IsStuck` compares only the immediately previous
+iteration, so an alternating gate-refusal / apply-failure / gate-refusal sequence never repeats
+consecutively and runs to the full budget — paying for two real applies on the way. Open.
 
 ## 2026-09-09 — S179: the scenario the docs said could not run, and the two defects it was hiding
 
