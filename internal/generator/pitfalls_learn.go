@@ -670,7 +670,22 @@ func matchScalewayMissingPrivateNic(detail, scenario string) *LearnedPitfall {
 		// caller's detail mentions only `scaleway_instance_private_nic`.
 		resource = "scaleway_instance_server"
 	}
-	rule := "Always declare a `scaleway_vpc_private_network` AND a `scaleway_instance_private_nic` for EACH `scaleway_instance_server`. The private NIC has the shape: `resource \"scaleway_instance_private_nic\" \"NAME\" { server_id = scaleway_instance_server.SERVER.id; private_network_id = scaleway_vpc_private_network.PN.id }`. The `vpc_required` policy fails any instance without this attachment. Add one NIC per instance (use `count` to mirror the `count` on the instance) — do NOT rely on the instance's `routed_ip_enabled` flag, which the provider doesn't accept."
+	// Prescribes the INLINE attachment. It used to prescribe a standalone
+	// `scaleway_instance_private_nic`, and by 2026-09-10 that had become
+	// a rule this repository refuses three separate ways: the Layer 3
+	// gate rejects the resource, `vpc_required`'s denial argues against
+	// it, and a real teardown cannot delete one. The learning loop was
+	// still teaching it -- run 20260910T141427Z recorded it as a fresh
+	// pitfall while the same run's Layer 1 was telling the generator the
+	// opposite.
+	//
+	// The general lesson, and the reason this string is a liability: a
+	// prescriptive rule frozen into Go cannot be reviewed alongside the
+	// thing that enforces it, so it drifts silently and then teaches the
+	// drift. Refusals extracted by ExtractGatePitfall do not have this
+	// failure mode -- they are emitted by the enforcing code itself.
+	// Prefer adding enforcement over adding another one of these.
+	rule := "Attach every `scaleway_instance_server` to a private network with the provider's INLINE block: `private_network { pn_id = scaleway_vpc_private_network.NAME.id }`. Declare the `scaleway_vpc_private_network` too. Do NOT use a standalone `scaleway_instance_private_nic`: the Layer 3 gate refuses it. With `count` on the server the block comes with it. Do not set `project_id`, and do not use `routed_ip_enabled`, which the provider does not accept."
 	return &LearnedPitfall{Resource: resource, Rule: rule, DiscoveredFrom: scenario}
 }
 

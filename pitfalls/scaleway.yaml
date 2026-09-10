@@ -83,51 +83,14 @@ pitfalls:
         to add a second.
       source: avoid
       discovered_from: web-live-paris
-    # RETRACTED 2026-09-10, one day after it was written. It said: when a
-    # scenario declares a `service:`, boot Scaleway's `docker` image instead of
-    # apt-installing a runtime, and it cited the marketplace API as proof the
-    # image was compatible with DEV1-S in fr-par-1.
+    # A pitfall this run LEARNED on 2026-09-10 and that had to be deleted the
+    # same day: "Always declare ... a scaleway_instance_private_nic". It came
+    # from ExtractDescriptivePitfall's hardcoded VPC fallback, which still
+    # prescribed a resource the Layer 3 gate refuses, `vpc_required` argues
+    # against, and a real teardown cannot delete.
     #
-    # The generator took the advice and the apply FAILED:
-    #
-    #   could not get image 'fr-par-1/docker': couldn't find a local image for
-    #   the given zone (fr-par-1) and commercial type (DEV1-M)
-    #
-    # The marketplace API still says the opposite -- all four fr-par-1 `docker`
-    # local images list DEV1-M in compatible_commercial_types. So
-    # `compatible_commercial_types` is NOT what the provider resolves against,
-    # and it cannot be used to settle this question.
-    #
-    # That is the second time this exact failure has been recorded, and the
-    # pitfall below already warned against writing a remedy for it. Overriding
-    # that warning turned an honest "not understood" into a prescription that
-    # cost a real apply. The warning stands; no remedy is offered.
-    #
-    # What IS supported by evidence: `ubuntu_jammy` plus an apt install serves
-    # inside a 120s probe window (web-live-paris, 2026-09-10 09:35, probe
-    # passed). Slower, and it works.
-    # Left DESCRIPTIVE on purpose, and it is worth saying why.
-    #
-    # The obvious remedy -- "the model invented an image, use ubuntu_jammy" -- is
-    # WRONG. `docker` is a real Scaleway marketplace label and it is what this
-    # scenario's own variables.tf defaults to.
-    #
-    # 2026-09-09, asked the public marketplace API directly:
-    #
-    #   GET /marketplace/v2/local-images?image_label=docker&zone=fr-par-1
-    #   -> 4 local images, x86_64, every one listing DEV1-S in
-    #      compatible_commercial_types
-    #
-    # So the label, the zone and the commercial type ARE compatible, which means
-    # the failure below was TRANSIENT -- a moment when fr-par-1 had no local image
-    # to hand -- not a wrong image name. That is why there is still no prescriptive
-    # remedy: "avoid `docker`" would teach the generator to route around a stock
-    # blip, and `docker` is exactly the image a container workload should use (see
-    # the pitfall above it).
-    #
-    # Writing a confident remedy for a symptom is how a symptom becomes a wrong
-    # instruction the generator then follows.
-    - resource: scaleway_instance_server
-      rule: "exit status 1 | stderr: ╷\n│ Error: could not get image 'fr-par-1/docker': scaleway-sdk-go: couldn't find a local image for the given zone (fr-par-1) and commercial type (DEV1-S)\n│ \n│   with scaleway_instance_server.web,\n│   on compute.tf line 7, in resource \"scaleway_instance_server\" \"web\""
-      source: descriptive
-      discovered_from: web-live-paris
+    # Kept as a comment because the mechanism is worth remembering: the loop
+    # wrote a durable rule contradicting its own enforcement, in the same run
+    # whose Layer 1 was telling the generator the opposite. The fallback is
+    # fixed and audited (TestVPCFallbackPrescribesTheShapeTheGateAccepts), and
+    # the attachment rule the corpus should carry is the one above.

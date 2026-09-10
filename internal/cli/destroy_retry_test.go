@@ -111,17 +111,42 @@ func TestDestroySkipsPurgeWhenItSucceeds(t *testing.T) {
 	assert.Zero(t, purge.calls, "a successful destroy must not touch the API")
 }
 
-// Without a project id there is no blast radius to scope a purge to, so
-// deleting anything would be guessing.
-func TestDestroyWithoutProjectIDDoesNotPurge(t *testing.T) {
+// Without a project id AND without a marker there is no blast radius to
+// scope a purge to, so deleting anything would be guessing.
+//
+// The empty-id case alone no longer stops it, and that boundary moved
+// deliberately on 2026-09-10. An empty id is not a caller saying "do
+// nothing" -- every caller derives it from CaptureSweepTarget, so it
+// means that capture failed, and treating it as a refusal silently
+// disabled the purge and the poweroff together on a run that needed
+// both. The marker is the same provenance assertRunProjectDeletable
+// reads, and that check still runs, so recovery is scoped by the guard
+// rather than by an accident of capture.
+func TestDestroyWithoutProjectIDOrMarkerDoesNotPurge(t *testing.T) {
 	wantErr := errors.New("destroy failed")
 	destroy := &sequencedDestroy{errs: []error{wantErr, nil}}
 	purge := &fakePurge{}
 
-	_, _, _, err := destroySandbox(context.Background(), retryRuntime(t, destroy, purge), purgeWorkDir(t), destroyEnv, "")
+	// t.TempDir(), not purgeWorkDir: no marker, so nothing to recover.
+	_, _, _, err := destroySandbox(context.Background(), retryRuntime(t, destroy, purge), t.TempDir(), destroyEnv, "")
 
 	require.ErrorIs(t, err, wantErr)
 	assert.Zero(t, purge.calls)
+}
+
+// ...and with a marker, an empty caller id recovers rather than
+// disabling remediation. This is the outage: no purge stage and no
+// poweroff stage on a run whose destroy failed for a reason both would
+// have cleared.
+func TestDestroyRecoversTheProjectFromTheMarkerWhenTheCallerHasNone(t *testing.T) {
+	destroy := &sequencedDestroy{errs: []error{errors.New("precondition failed: resource is still in use")}}
+	purge := &fakePurge{removed: []string{"security_group 142eef7b (Default security group) in fr-par-1"}}
+
+	_, purged, _, err := destroySandbox(context.Background(), retryRuntime(t, destroy, purge), purgeWorkDir(t), destroyEnv, "")
+
+	require.NoError(t, err, "the retry should succeed once the blocker is purged")
+	assert.Equal(t, 1, purge.calls, "an empty caller id must not disable the purge when the marker names a project")
+	assert.NotEmpty(t, purged)
 }
 
 // A destroy that fails twice is a real failure, and the second error is
@@ -241,4 +266,51 @@ func TestPowerOffStageFailsWhenAServerNeverStopped(t *testing.T) {
 		"one server still running is enough to make the destroy fail")
 	assert.NotContains(t, bad.Detail, "powered off 2 instance(s)",
 		"and the summary must not claim it powered off what it did not")
+}
+
+// A guard that stops without saying why is half a guard -- the Layer 3
+// arc's durable finding, and one the first version of this code broke.
+// It had three silent `return nil` paths, so when a real run failed its
+// destroy with no poweroff stage at all, the log could not tell "no
+// project id" from "guard refused" from "found nothing". That cost a
+// real apply to learn nothing.
+func TestPowerOffSaysWhyItSkipped(t *testing.T) {
+	rt := retryRuntime(t, &sequencedDestroy{}, &fakePurge{})
+	rt.Deps.InstanceStop = nil
+
+	_, reason := powerOffRunInstances(context.Background(), rt, purgeWorkDir(t), purgeProjectID, destroyEnv)
+
+	require.NotEmpty(t, reason, "a skip must carry its reason")
+	assert.Contains(t, reason, "poweroff dependency")
+
+	stage := instancePowerOffStage([]string{powerOffSkipReasonPrefix + reason})
+	assert.Equal(t, StageStatusSkip, stage.Status,
+		"a skip is not a pass -- nothing was powered off")
+	assert.Contains(t, stage.Detail, "poweroff dependency",
+		"and the reason has to reach the stage summary, which is where an operator looks")
+}
+
+// The caller's project id comes from CaptureSweepTarget, which is empty
+// whenever that capture failed -- and on 2026-09-10 that silently
+// disabled BOTH remediations, leaving neither a purge stage nor a
+// poweroff stage to say so. The marker is the same provenance the
+// deletable check reads anyway.
+func TestPowerOffFallsBackToTheRunProjectMarker(t *testing.T) {
+	stop := &recordingPowerOff{}
+	rt := retryRuntime(t, &sequencedDestroy{}, &fakePurge{})
+	rt.Deps.InstanceStop = stop
+
+	dir := purgeWorkDir(t)
+	// Recovery lives in destroySandbox now, so BOTH remediations get it;
+	// see TestDestroyRecoversTheProjectFromTheMarkerWhenTheCallerHasNone.
+	require.Equal(t, purgeProjectID, resolveRunProjectID(dir, ""),
+		"the marker is the fallback source, and it is the same provenance the deletable check reads")
+	assert.Empty(t, resolveRunProjectID(t.TempDir(), ""),
+		"and with no marker there is nothing to recover")
+
+	stopped, reason := powerOffRunInstances(context.Background(), rt, dir, resolveRunProjectID(dir, ""), destroyEnv)
+
+	assert.Empty(t, reason, "the marker names a project, so there is nothing to skip: %s", reason)
+	require.True(t, stop.called, "an empty caller-supplied id must not disable the poweroff")
+	require.NotEmpty(t, stopped)
 }

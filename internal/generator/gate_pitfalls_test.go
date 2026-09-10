@@ -115,3 +115,25 @@ func TestExtractGatePitfallSkipsAPluralAllowlistRefusal(t *testing.T) {
 	detail := "layer 3 refuses to apply resource type(s) scaleway_k8s_cluster, scaleway_rdb_instance: not in validation.layers.sandbox_deploy.allow_resource_types (scaleway_lb*)"
 	assert.Nil(t, ExtractGatePitfall(detail, "full-stack-paris"))
 }
+
+// The hardcoded VPC fallback must agree with what the repository
+// actually enforces. It prescribed a standalone
+// `scaleway_instance_private_nic` until 2026-09-10, by which time the
+// Layer 3 gate refused that resource, `vpc_required`'s denial argued
+// against it, and a real teardown could not delete one -- and the
+// learning loop recorded it as a fresh pitfall anyway, in the same run
+// whose Layer 1 was saying the opposite.
+//
+// This is an audit rather than a spelling check: a prescriptive rule
+// frozen in Go cannot be reviewed next to the code that enforces it, so
+// the only defence is a test that fails when they diverge.
+func TestVPCFallbackPrescribesTheShapeTheGateAccepts(t *testing.T) {
+	got := ExtractDescriptivePitfall(
+		"scaleway_instance_server.web is not attached to a private network via scaleway_instance_private_nic", "s")
+	require.NotNil(t, got, "the VPC fallback must still fire for the policy's own wording")
+
+	assert.Contains(t, got.Rule, "private_network { pn_id =",
+		"the fallback must prescribe the inline attachment")
+	assert.NotContains(t, got.Rule, "The private NIC has the shape",
+		"it must not hand the generator a standalone NIC the Layer 3 gate refuses")
+}

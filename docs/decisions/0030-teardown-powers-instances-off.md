@@ -79,3 +79,29 @@ Best-effort otherwise. The authoritative "did we leak?" answer stays with
   not be expressed, and three attempts to write it as a rule produced two
   retracted pitfalls and one refuted ADR before the constraint was located
   correctly.
+
+## Amendment, 2026-09-10 — it has to say why it did nothing
+
+The first implementation had three silent `return nil` paths. Run
+`20260910T141427Z` then failed its destroy with **no `instance_poweroff` stage at
+all**, and the log could not distinguish "no project id" from "guard refused"
+from "found nothing to stop". A real apply bought no information.
+
+That is the finding the Layer 3 arc closed with — *a guard that stops without
+saying why is half a guard* — reproduced inside the change whose own ADR quotes
+it. Every skip now carries its reason into the stage summary, rendered as a
+**skip**, never as a pass.
+
+**And the likely cause is fixed, not merely reported.** Callers pass
+`sweepTargetProjectID(...)`, which is empty whenever `CaptureSweepTarget` failed.
+Both remediations are scoped by that id, so one failed capture disabled the purge
+and the poweroff *together* — which is why that run shows neither stage. The
+project id is now resolved once, in `destroySandbox`, falling back to the
+run-project marker: the same provenance `AssertProjectDeletable` reads, one step
+earlier, and that check still runs.
+
+The boundary this moves was previously asserted as a safety property ("without a
+project id, do not purge"). It was not one. An empty id is not a caller declining
+to act; it is a capture that failed, and treating it as a refusal turned a
+recoverable teardown into a leak. The guard that makes purging safe is
+`AssertProjectDeletable`, and it is untouched.
