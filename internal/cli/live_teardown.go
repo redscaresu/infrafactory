@@ -161,9 +161,12 @@ func tearDownDeployment(
 	// all, which is the opposite of what the guard is for.
 
 	sweepTarget, sweepTargetErr := harness.CaptureSweepTarget(d.WorkDir)
-	destroyResult, purged, destroyErr := destroySandbox(
+	destroyResult, purged, stopped, destroyErr := destroySandbox(
 		ctx, runtime, d.WorkDir, sandboxEnv, sweepTargetProjectID(sweepTarget))
 	stages, failures = appendSandboxDestroyResult(stages, failures, destroyResult, destroyErr)
+	if len(stopped) > 0 {
+		stages = append(stages, instancePowerOffStage(stopped))
+	}
 	if len(purged) > 0 {
 		stages = append(stages, autoCreatedPurgeStage(purged))
 	}

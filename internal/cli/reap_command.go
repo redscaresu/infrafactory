@@ -90,8 +90,11 @@ func runReapCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) 
 	}
 
 	sweepTarget, sweepTargetErr := harness.CaptureSweepTarget(workDir)
-	destroyResult, purged, destroyErr := destroySandbox(ctx, runtime, workDir, sandboxEnv, sweepTargetProjectID(sweepTarget))
+	destroyResult, purged, stopped, destroyErr := destroySandbox(ctx, runtime, workDir, sandboxEnv, sweepTargetProjectID(sweepTarget))
 	stages, failures := appendSandboxDestroyResult(nil, nil, destroyResult, destroyErr)
+	if len(stopped) > 0 {
+		stages = append(stages, instancePowerOffStage(stopped))
+	}
 	if len(purged) > 0 {
 		stages = append(stages, autoCreatedPurgeStage(purged))
 	}
@@ -217,7 +220,7 @@ func withSandboxInterruptGuard(
 		// can fail here -- the state may be mid-write -- and an empty
 		// project id just means no purge, never a skipped destroy.
 		cleanupTarget, _ := harness.CaptureSweepTarget(workDir)
-		_, purged, destroyErr := destroySandbox(
+		_, purged, _, destroyErr := destroySandbox(
 			context.Background(), runtime, workDir, sandboxEnv, sweepTargetProjectID(cleanupTarget))
 		if destroyErr != nil {
 			reportAbandonedResources(out, statePath, destroyErr)

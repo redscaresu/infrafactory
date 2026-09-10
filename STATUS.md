@@ -2,6 +2,46 @@
 
 Last updated: 2026-09-10
 
+## 2026-09-10 — S181: the fix leaves the HCL, and the loop starts learning from its own gates
+
+Five changes, four here and one in mockway, all from the same run.
+
+**Teardown powers the run's instances off before `tofu destroy` (ADR-0030).** The private-NIC
+precondition belongs to the API, not to the configuration: no HCL shape expresses a destroyable
+private-network attachment on a running instance, which ADR-0029 discovered the expensive way. It
+runs *before* the first destroy rather than as a retry — the security-group purge reacts to a
+surprise, this one is known in advance for every compute stack — behind the same
+`AssertProjectDeletable` guard, checking the project on every server it touches, and **waiting for
+`stopped`**, because `poweroff` returns when the task is accepted and a destroy started then hits
+the very precondition being cleared.
+
+**`IsStuck` compares against every earlier iteration, not just the previous one.** Run
+`20260910T104418Z` alternated gate-refusal / apply-failure / gate-refusal and never repeated
+*consecutively*, so it ran the full budget — and two of those five iterations were real applies.
+Deliberately eager: at Layer 3 stopping a lap early costs a regeneration, continuing costs an apply
+and a destroy.
+
+**Gate and policy refusals now become `fix` pitfalls.** They were the best signal in the system and
+the one class the learning loop ignored — machine-generated, exact, already prescriptive — and they
+died with the run. The same run proposed a refused instance type in iterations 1, 3 and 5 and would
+have started the next run doing it again. The refusal text is used *verbatim*: it is emitted by the
+code that does the refusing, so unlike a hand-written pitfall it cannot drift from what is actually
+enforced — and the two hand-written ones added on 2026-09-09 were both retracted within a day. Cost
+gate messages now name the resource *type*, because pitfalls are keyed by it and "web sets type to
+PLAY2-NANO" names only the block label.
+
+**Runs record the commit they were generated under**, with `-dirty` when the tree has uncommitted
+changes. Read from the *pitfalls* path, not the process's cwd, because the pitfalls tree is the
+input whose provenance is in question. A branch switch 33 seconds before a run left it judged
+against a pitfall file it had never read, and the run record held nothing that could have revealed
+it.
+
+**mockway now refuses a NIC delete while the server runs** (mockway#27). The gap was not harmless:
+the ADR-0029 fix was *verified against mockway* — `7 added, 7 destroyed` — and was wrong. **A mock
+more permissive than reality does not merely miss bugs, it certifies wrong fixes**, because a green
+run reads as proof. Both delete routes enforce it, and the contract test asserts both directions,
+since refused-while-running alone would also pass against a mock that refuses unconditionally.
+
 ## 2026-09-10 — S180: three retractions, and the fix moves out of the HCL
 
 Yesterday's fixes were run against real Scaleway. One worked, two were wrong, and the wrong ones

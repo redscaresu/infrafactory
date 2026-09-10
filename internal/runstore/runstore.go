@@ -22,16 +22,31 @@ const (
 )
 
 type RunMetadata struct {
-	Schema              string    `json:"schema,omitempty"`
-	Scenario            string    `json:"scenario"`
-	RunID               string    `json:"run_id"`
-	Status              string    `json:"status"`
-	TerminalReason      string    `json:"terminal_reason,omitempty"`
-	Incremental         bool      `json:"incremental,omitempty"`
-	Layer3Enabled       bool      `json:"layer3_enabled,omitempty"`
-	PreviousRunID       string    `json:"previous_run_id,omitempty"`
-	RepairIterationsMax int       `json:"repair_iterations_max,omitempty"`
-	StartedAt           time.Time `json:"started_at"`
+	Schema              string `json:"schema,omitempty"`
+	Scenario            string `json:"scenario"`
+	RunID               string `json:"run_id"`
+	Status              string `json:"status"`
+	TerminalReason      string `json:"terminal_reason,omitempty"`
+	Incremental         bool   `json:"incremental,omitempty"`
+	Layer3Enabled       bool   `json:"layer3_enabled,omitempty"`
+	PreviousRunID       string `json:"previous_run_id,omitempty"`
+	RepairIterationsMax int    `json:"repair_iterations_max,omitempty"`
+	// Commit is the git revision of the working tree the run was
+	// generated from, with "-dirty" appended for uncommitted changes.
+	//
+	// `paths.policies` and `paths.pitfalls` are read from the WORKING
+	// TREE at run time, so switching branches silently changes what the
+	// generator is told and what the plan is judged against. On
+	// 2026-09-10 a branch switch 33 seconds before a run left it being
+	// evaluated against a pitfall file it had never read, and the run
+	// record contained nothing that could have revealed it -- the
+	// resulting diagnosis was confident and wrong.
+	//
+	// Empty when the revision cannot be read. A run outside a git
+	// checkout is legitimate; a silent wrong answer is not, so this
+	// records what it knows and says nothing when it knows nothing.
+	Commit    string    `json:"commit,omitempty"`
+	StartedAt time.Time `json:"started_at"`
 }
 
 type FilesystemStore struct {

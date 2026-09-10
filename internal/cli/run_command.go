@@ -130,11 +130,23 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 		RunID:   runID,
 		Detail:  fmt.Sprintf("repair_iterations_max=%d run_mode=%s no_destroy=%t previous_run_id=%s", repairIterationsMax, mode.Mode, controls.NoDestroy, mode.PreviousRunID),
 	})
+	// Read once, before generation. Both metadata writes record the same
+	// value, so a branch switch mid-run cannot make the closing record
+	// disagree with the one the generation actually used.
+	//
+	// Resolved from the PITFALLS path rather than the process's working
+	// directory, because the pitfalls tree is the input whose provenance
+	// is in question -- it is read from disk at run time, and its content
+	// decides what the generator is told. Pointing this at cwd would
+	// record the revision of whatever directory the operator happened to
+	// be standing in.
+	runCommit := runstore.CurrentCommit(runtime.Config.Paths.Pitfalls)
 	if err := store.WriteRunMetadata(runstore.RunMetadata{
 		Schema:              runstore.RunMetadataSchemaVersion,
 		Scenario:            sc.Name,
 		RunID:               runID,
 		Status:              "running",
+		Commit:              runCommit,
 		Incremental:         mode.Mode == runModeIncremental,
 		Layer3Enabled:       runtime.Config.Validation.Layers.SandboxDeploy.Enabled,
 		PreviousRunID:       mode.PreviousRunID,
@@ -148,7 +160,10 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 		{Layer: "run", Stage: "mode", Status: StageStatusPass, Detail: fmt.Sprintf("%s (%s)", mode.Mode, mode.Reason)},
 	}
 	allFailures := make([]FailureSummary, 0)
-	var previousFailures []feedback.Failure
+	// Every failure signature the run has produced, in any iteration.
+	// A per-iteration "previous" cannot see oscillation, which is the
+	// shape a repair loop actually gets stuck in.
+	var failureHistory []feedback.FailureSignature
 	var previousIterationFailures []FailureSummary
 	var iterationHistory []feedback.IterationResult
 	holdoutBlocked := false
@@ -223,7 +238,17 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 						}
 						continue
 					}
-					learned := generator.ExtractDescriptivePitfall(failure.Detail, sc.Name)
+					// Refusals first, exactly as in the terminal harvest.
+					// Without this the SUCCESS path never learns from a
+					// gate -- iteration 1 is refused, iteration 2 fixes it,
+					// the run reaches target_reached and the terminal
+					// harvest is skipped, so the best signal in the run is
+					// discarded precisely when the loop worked. The next
+					// run then starts by making the same proposal.
+					learned := generator.ExtractGatePitfall(failure.Detail, sc.Name)
+					if learned == nil {
+						learned = generator.ExtractDescriptivePitfall(failure.Detail, sc.Name)
+					}
 					if learned == nil {
 						continue
 					}
@@ -251,7 +276,6 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 				}
 			}
 			lastIterationFailed = false
-			previousFailures = nil
 			previousIterationFailures = previousIterationFailures[:0]
 			terminalReason = "target_reached"
 			// Record the passing iteration in iterationHistory so the
@@ -309,9 +333,11 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 			})
 			break
 		}
-		// Stop early when the failure signature is unchanged/subset-equivalent;
-		// further iterations are unlikely to produce new signal.
-		if feedback.IsStuck(previousFailures, currentFailures) {
+		// Stop early when this iteration produced nothing the run has not
+		// already seen -- in ANY earlier iteration, not just the last one.
+		// Alternating between two known failures is the shape a repair loop
+		// actually gets stuck in, and at Layer 3 each lap is a real apply.
+		if feedback.IsStuck(failureHistory, currentFailures) {
 			terminalReason = "stuck"
 			allFailures = append(allFailures, FailureSummary{
 				Layer:   "run",
@@ -322,7 +348,7 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 			})
 			break
 		}
-		previousFailures = currentFailures
+		failureHistory = append(failureHistory, feedback.FailureSignatures(currentFailures)...)
 		previousIterationFailures = append(previousIterationFailures[:0], failures...)
 
 		if failedIterations >= repairIterationsMax {
@@ -418,7 +444,16 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 				}
 				continue
 			}
-			learned := generator.ExtractDescriptivePitfall(f.Detail, sc.Name)
+			// Refusals first. A gate or policy refusal is machine-generated,
+			// exact and already prescriptive -- it names the permitted
+			// values or the block to add -- where provider stderr is a
+			// symptom that says nothing about what to write instead. Asking
+			// the descriptive extractor first would file the better signal
+			// under the worse tag.
+			learned := generator.ExtractGatePitfall(f.Detail, sc.Name)
+			if learned == nil {
+				learned = generator.ExtractDescriptivePitfall(f.Detail, sc.Name)
+			}
 			if learned == nil {
 				continue
 			}
@@ -742,9 +777,12 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 				// empties terraform-live.tfstate, and the strays it names
 				// go with it. Same ordering the success path learned the
 				// hard way in the first canary run.
-				destroyResult, purged, destroyErr := destroySandbox(cmd.Context(), runtime, runtime.OutputDir(), sandboxEnv, sweepTargetProjectID(sweepTarget))
+				destroyResult, purged, stopped, destroyErr := destroySandbox(cmd.Context(), runtime, runtime.OutputDir(), sandboxEnv, sweepTargetProjectID(sweepTarget))
 				destroyStages, destroyFailures := appendSandboxDestroyResult(nil, nil, destroyResult, destroyErr)
 				allStages = append(allStages, destroyStages...)
+				if len(stopped) > 0 {
+					allStages = append(allStages, instancePowerOffStage(stopped))
+				}
 				if len(purged) > 0 {
 					allStages = append(allStages, autoCreatedPurgeStage(purged))
 				}
@@ -825,6 +863,7 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 		RunID:               runID,
 		Status:              string(status),
 		TerminalReason:      terminalReason,
+		Commit:              runCommit,
 		Incremental:         mode.Mode == runModeIncremental,
 		Layer3Enabled:       runtime.Config.Validation.Layers.SandboxDeploy.Enabled,
 		PreviousRunID:       mode.PreviousRunID,
