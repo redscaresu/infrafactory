@@ -377,3 +377,22 @@ func TestDestroyDoesNotRetryWhenTheNICDetachOnlySkipped(t *testing.T) {
 	require.ErrorIs(t, err, wantErr)
 	assert.Equal(t, 1, destroy.calls, "a skip changed nothing, so there is nothing to retry into")
 }
+
+// `status` is the machine-readable field. Logging a failure as success
+// is the same false green as a passing stage that reports a NIC it
+// could not delete -- and it is the field a filter would read.
+func TestNICDetachLogsAFailedEntryAsFailed(t *testing.T) {
+	var sink bytes.Buffer
+	rt := retryRuntime(t, &sequencedDestroy{}, &fakePurge{})
+	rt.Logger = NewAppLogger(&sink)
+	rt.Deps.NICDetach = &recordingNICDetach{
+		returns: []string{"could NOT be deleted: listing servers in fr-par-1 failed: 401"},
+	}
+
+	_, _, _, _ = destroySandbox(context.Background(), rt, purgeWorkDir(t), destroyEnv, purgeProjectID)
+
+	out := sink.String()
+	assert.Contains(t, out, "layer3_private_nic_detach")
+	assert.NotContains(t, out, `"event":"layer3_private_nic_detach","status":"success"`,
+		"a detach that could not delete a NIC is not a success")
+}

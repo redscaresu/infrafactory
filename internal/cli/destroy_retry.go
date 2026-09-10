@@ -139,7 +139,14 @@ func destroySandbox(
 		return result, nil, detached, err
 	}
 	removed, purgeErr := runtime.Deps.AutoCreated.Run(ctx, projectID, secretKey)
-	logPurgeOutcome(runtime, "success", fmt.Sprintf("project=%s removed=%d err=%v", projectID, len(removed), purgeErr))
+	purgeStatus := "success"
+	if purgeErr != nil {
+		// The status field is what a filter reads. Logging a failed
+		// purge as success made the one path that gives up without
+		// retrying look like the one that worked.
+		purgeStatus = "failed"
+	}
+	logPurgeOutcome(runtime, purgeStatus, fmt.Sprintf("project=%s removed=%d err=%v", projectID, len(removed), purgeErr))
 
 	if purgeErr != nil || len(removed) == 0 {
 		// Nothing was auto-created, so the destroy failed for its own
@@ -303,7 +310,18 @@ func logNICDetachOutcome(runtime *CommandRuntime, projectID string, detached []s
 		entry.Status = "no_instances"
 		entry.Detail = fmt.Sprintf("project=%s: no private NICs to remove", projectID)
 	default:
+		// A "could NOT be deleted" entry is a FAILURE riding in the
+		// result slice, and status is the machine-readable field --
+		// anything filtering on status:success would have counted this
+		// as a clean detach while a NIC was still attached.
 		entry.Detail = fmt.Sprintf("project=%s removed %d private NIC(s): %s", projectID, len(detached), strings.Join(detached, "; "))
+		for _, d := range detached {
+			if strings.Contains(d, "could NOT be deleted") {
+				entry.Level = logLevelError
+				entry.Status = "failed"
+				break
+			}
+		}
 	}
 	runtime.Logger.Log(entry)
 }
@@ -317,7 +335,7 @@ func logPurgeOutcome(runtime *CommandRuntime, status, detail string) {
 		return
 	}
 	level := logLevelInfo
-	if status == "skipped" {
+	if status != "success" {
 		level = logLevelError
 	}
 	runtime.Logger.Log(LogEntry{
