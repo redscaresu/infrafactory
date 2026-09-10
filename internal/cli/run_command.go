@@ -852,10 +852,31 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 		allStages = append(allStages, StageSummary{Layer: "holdout", Stage: "skipped", Status: StageStatusSkip, Detail: "skipped by --no-destroy"})
 	}
 
-	status := CommandStatusSuccess
-	if terminalReason != "target_reached" || holdoutBlocked {
-		status = CommandStatusFailed
+	// Every Layer 3 run checks the organization for run projects nothing
+	// explains -- its own and, more importantly, earlier runs'.
+	//
+	// A run that SUCCEEDS deletes its project. A run that fails keeps it,
+	// deliberately, because the id is the handle to what survived.
+	// Nothing ever looks again: the orphan sweep only inspects the
+	// current run's project, and `reap` needs a state file the next
+	// iteration has already overwritten. The leak compounds one project
+	// per applied iteration and shows up only on the bill -- eight over
+	// two days by 2026-09-10, four still running an instance, found
+	// because a human listed projects on a hunch.
+	//
+	// BEFORE `status` is computed, deliberately. Appending these
+	// failures afterwards would let a target_reached run report success
+	// with a stray outstanding, which is the false green this check
+	// exists to remove.
+	strayBlocked := false
+	if sandboxRunEnabled(runtime) {
+		strayStages, strayFailures := reportStrayRunProjects(cmd.Context(), runtime)
+		allStages = append(allStages, strayStages...)
+		allFailures = append(allFailures, strayFailures...)
+		strayBlocked = len(strayFailures) > 0
 	}
+
+	status := runCommandStatus(terminalReason, holdoutBlocked, strayBlocked)
 
 	if err := store.WriteRunMetadata(runstore.RunMetadata{
 		Schema:              runstore.RunMetadataSchemaVersion,
@@ -899,10 +920,18 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 		return err
 	}
 
-	if terminalReason != "target_reached" || holdoutBlocked {
+	// The same three clauses as runCommandStatus, because the JSON saying
+	// `failed` while the process exits 0 is a false green for every
+	// caller that is a script -- the PR gate included. `strayBlocked`
+	// was missing here when it was added above, so a target_reached run
+	// with an unexplained project wrote "failed" and returned success.
+	if runCommandStatus(terminalReason, holdoutBlocked, strayBlocked) == CommandStatusFailed {
 		errDetail := fmt.Errorf("run stopped with terminal reason %q after %d iteration(s)", terminalReason, completed)
 		if holdoutBlocked {
 			errDetail = fmt.Errorf("holdout checks failed after training convergence")
+		}
+		if strayBlocked {
+			errDetail = fmt.Errorf("run projects remain that nothing explains; they have no TTL and nothing will reap them")
 		}
 		return &CLIError{
 			Op:   "run",
@@ -1521,4 +1550,25 @@ func logLayer3RecoveryHint(runtime *CommandRuntime, runID, scenarioPath, reason 
 		Detail: fmt.Sprintf("%s: real Scaleway resources may still exist; run `%s` to tear them down and verify",
 			reason, reapCommand(runtime.ConfigPath, scenarioPath)),
 	})
+}
+
+// runCommandStatus decides whether a run reports success.
+//
+// A function rather than an inline expression because each clause is a
+// promise this project has broken before, and an expression cannot be
+// tested without driving the whole command:
+//
+//   - terminalReason: the loop reached its target.
+//   - holdoutBlocked: the holdout check proved the change survives.
+//   - strayBlocked: no run project is left that nothing explains
+//     (ADR-0024). Added 2026-09-10 after eight accumulated unseen; the
+//     first version of that check appended its failures AFTER this
+//     decision, so a target_reached run would still have reported
+//     success with a stray outstanding -- the exact false green the
+//     check exists to remove.
+func runCommandStatus(terminalReason string, holdoutBlocked, strayBlocked bool) CommandStatus {
+	if terminalReason != "target_reached" || holdoutBlocked || strayBlocked {
+		return CommandStatusFailed
+	}
+	return CommandStatusSuccess
 }
