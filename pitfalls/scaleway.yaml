@@ -19,9 +19,8 @@ pitfalls:
         attached to a server" -- because destroy runs in reverse dependency order and
         deletes the NIC while its server is still running -- a NIC is deletable only
         when its server is POWERED OFF. Deleting the server takes its NICs with it,
-        because the provider powers it off first, so the inline block has no
-        separate delete to fail.
-        (web-live-paris 2026-09-09.)
+        because the provider powers it off first. The Layer 3 gate REFUSES a
+        standalone NIC, so this is not a preference. (web-live-paris 2026-09-09.)
 
         Up to 8 blocks; with `count` the block comes too. No `project_id`.
       source: fix

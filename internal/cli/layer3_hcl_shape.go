@@ -65,6 +65,19 @@ var layer3DeniedNestedBlocks = map[string]bool{
 	// sweep decision reads.
 	"backend": true,
 	"cloud":   true,
+	// `dynamic` is a bypass for every OTHER rule in this file, not a rule of
+	// its own. Each nested-block check matches on block TYPE, and
+	//
+	//	dynamic "private_network" { content { pn_id = "<someone-else's-id>" } }
+	//
+	// parses as a block of type "dynamic" labelled "private_network", so the
+	// containment check for private_network never sees it -- and the same
+	// trick hides a root_volume, or any nested block a future rule guards.
+	// Generating one block type from a loop is a convenience; being unable
+	// to see inside a Layer 3 stack is not a trade worth making for it.
+	//
+	// Free to refuse: zero generated stacks in the whole run corpus use one.
+	"dynamic": true,
 }
 
 // layer3SafeProviderAttrs are the only settings a PR may put in the
@@ -263,6 +276,8 @@ func layer3BlockProblems(body *hclsyntax.Body, file string, allowedResourceTypes
 			}
 			problems = append(problems, layer3ContainmentProblems(block, file)...)
 			problems = append(problems, layer3MultiplicityProblems(block, file)...)
+			problems = append(problems, layer3UndestroyableResourceProblems(block, file)...)
+			problems = append(problems, layer3InlinePrivateNetworkProblems(block, file)...)
 		case block.Type == "provider":
 			if len(block.Labels) > 0 && block.Labels[0] != "scaleway" {
 				problems = append(problems, fmt.Sprintf("%s: provider %q is not permitted", file, block.Labels[0]))
@@ -286,6 +301,157 @@ func layer3BlockProblems(body *hclsyntax.Body, file string, allowedResourceTypes
 		problems = append(problems, layer3UndestroyableProblems(block, file)...)
 	}
 	return problems, sawCanonicalProvider, projectResources
+}
+
+// layer3UndestroyableResourceProblems refuses resource TYPES that cannot be
+// destroyed, as opposed to expressions that cannot be evaluated.
+//
+// `scaleway_instance_private_nic` is the whole list today.
+//
+// # Why a standalone NIC cannot be torn down
+//
+// A private NIC is deletable only while its server is POWERED OFF. Terraform
+// destroys in reverse dependency order, so the NIC -- which references the
+// server -- is deleted FIRST, with the server still running, and Scaleway
+// refuses:
+//
+//	Can't delete a private network interface attached to a server
+//
+// Measured against real Scaleway on 2026-09-09 and again on 2026-09-10:
+// four applies, four failed destroys, two manual recoveries. The recovery is
+// `scw instance server stop` followed by `scw instance private-nic delete`,
+// which needs a human with shell access and cloud credentials -- exactly the
+// operator the auto-destroy exists so nobody has to be.
+//
+// The provider's inline block on the server does not have this problem: the
+// server's own delete powers it off first, so its NICs go with it.
+//
+//	resource "scaleway_instance_server" "web" {
+//	  private_network { pn_id = scaleway_vpc_private_network.main.id }
+//	}
+//
+// # Why this is a gate and not a pitfall
+//
+// It WAS a pitfall first, tagged `fix`, naming the shape and the failure. The
+// very next generation ignored it and emitted the standalone NIC again, which
+// cost another real apply and another hand recovery. A pitfall is advice to a
+// model; only a gate is a guarantee. Same lesson as S167 -- a convention that
+// relies on being followed is not a control.
+//
+// This is deliberately NOT the allowlist. `allow_resource_types` answers "may
+// this cost money"; this answers "can this be destroyed". The NIC stays
+// allowlisted because its cost is fine, and is refused here because its
+// teardown is not.
+func layer3UndestroyableResourceProblems(block *hclsyntax.Block, file string) []string {
+	if len(block.Labels) == 0 || block.Labels[0] != "scaleway_instance_private_nic" {
+		return nil
+	}
+	// Prescriptive on purpose: this string is fed back to the generator as
+	// the reason to fix. "Not permitted" would send it looking for another
+	// way to say the same wrong thing.
+	return []string{fmt.Sprintf(
+		"%s: `scaleway_instance_private_nic` applies but cannot be destroyed -- a private NIC is deletable only while its server is powered off, and `tofu destroy` deletes the NIC before the server. Attach the network on the server instead: `private_network { pn_id = scaleway_vpc_private_network.NAME.id }`, which is removed with the server",
+		file)}
+}
+
+// layer3InlinePrivateNetworkProblems contains the attachment this gate now
+// prescribes.
+//
+// Refusing the standalone NIC pushed the attachment into a nested block, and
+// nested blocks are invisible to layer3ContainmentProblems, which reads a
+// resource's top-level attributes. So
+//
+//	private_network { pn_id = "11111111-1111-1111-1111-111111111111" }
+//
+// would have attached this run's server to a private network the run does not
+// own, in a project it does not own, and no teardown would touch it. The rule
+// being replaced had exactly this guard on the standalone NIC's
+// `private_network_id`; moving the shape without moving the guard would have
+// traded an undestroyable stack for an uncontained one.
+//
+// Same reference test as layer3ParentBindingProblems: the expression must BE a
+// traversal ending `.id` and rooted in a stack-local scaleway_ resource, not
+// merely mention one.
+func layer3InlinePrivateNetworkProblems(resource *hclsyntax.Block, file string) []string {
+	problems := make([]string, 0)
+	// scaleway_instance_server ONLY. `private_network` is a block on several
+	// types and they do not agree on the key: scaleway_lb uses
+	// `private_network_id`, scaleway_redis_cluster uses `id`, and only
+	// scaleway_instance_server and scaleway_rdb_instance use `pn_id`
+	// (provider 2.81.0 schema). Running this on all of them would demand
+	// `pn_id` from a perfectly valid load balancer attachment and refuse a
+	// stack for having the right shape.
+	//
+	// KNOWN GAP, stated rather than implied: those other nested attachments
+	// are not containment-checked either -- layer3ContainmentProblems reads
+	// top-level attributes, so a literal id in an LB's private_network block
+	// passes today. That gap predates this check; this one does not widen it.
+	if resource.Body == nil || len(resource.Labels) == 0 || resource.Labels[0] != "scaleway_instance_server" {
+		return problems
+	}
+	name := "<unnamed>"
+	if len(resource.Labels) > 1 {
+		name = resource.Labels[1]
+	}
+	for _, inner := range resource.Body.Blocks {
+		if inner.Type != "private_network" || inner.Body == nil {
+			continue
+		}
+		attr, ok := inner.Body.Attributes["pn_id"]
+		if !ok {
+			problems = append(problems, fmt.Sprintf(
+				"%s: %s has a private_network block with no pn_id, so nothing ties it to a network this run created", file, name))
+			continue
+		}
+		if !layer3IsPrivateNetworkIDRef(attr.Expr) {
+			problems = append(problems, fmt.Sprintf(
+				"%s: %s must set private_network.pn_id to scaleway_vpc_private_network.<name>.id in this stack; a literal id or any other reference names a network the run does not own and will not destroy",
+				file, name))
+		}
+	}
+	return problems
+}
+
+// layer3IsPrivateNetworkIDRef reports whether an expression IS
+// `scaleway_vpc_private_network.<name>.id`, in any of the three forms HCL
+// parses it into. Verified by parsing each one rather than reasoned about:
+//
+//	x.main.id             ScopeTraversalExpr,    root=x, len 3
+//	x.main[0].id          ScopeTraversalExpr,    root=x, len 4  (literal index folds in)
+//	x.main[count.index].id RelativeTraversalExpr, Source=IndexExpr{Collection: x.main}, Traversal=[.id]
+//
+// The third form is why this is a function and not an inline type assertion.
+// A counted server takes `[count.index]`, and a check that only understood
+// ScopeTraversalExpr would refuse every multi-instance scenario -- the same
+// count-shaped blind spot PR #8 fixed in vpc_required.rego.
+func layer3IsPrivateNetworkIDRef(expr hclsyntax.Expression) bool {
+	const wantRoot = "scaleway_vpc_private_network"
+
+	endsInID := func(t hcl.Traversal) bool {
+		if len(t) == 0 {
+			return false
+		}
+		last, ok := t[len(t)-1].(hcl.TraverseAttr)
+		return ok && last.Name == "id"
+	}
+
+	switch e := expr.(type) {
+	case *hclsyntax.ScopeTraversalExpr:
+		return e.Traversal.RootName() == wantRoot && len(e.Traversal) >= 3 && endsInID(e.Traversal)
+	case *hclsyntax.RelativeTraversalExpr:
+		index, ok := e.Source.(*hclsyntax.IndexExpr)
+		if !ok {
+			return false
+		}
+		collection, ok := index.Collection.(*hclsyntax.ScopeTraversalExpr)
+		if !ok {
+			return false
+		}
+		return collection.Traversal.RootName() == wantRoot &&
+			len(collection.Traversal) >= 2 && endsInID(e.Traversal)
+	default:
+		return false
+	}
 }
 
 // layer3NestedProblems walks the whole tree: a provisioner is nested inside

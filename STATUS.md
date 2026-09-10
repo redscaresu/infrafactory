@@ -43,6 +43,19 @@ Fixed at both ends — the window is 120s, sized to a cold boot; and a scenario 
 confirms `docker` is compatible with DEV1-S in fr-par-1, which also retires the "cause not
 understood" note on the image pitfall: that failure was a stock blip, not a wrong image name.
 
+**The pitfall was not enough, and the Layer 3 preflight now refuses a standalone NIC outright.** A
+pitfall is advice to a model; a gate is a guarantee, and it costs nothing when it never fires. The
+refusal names the replacement, because that string is fed back to the generator as the reason to
+fix. It is a shape check, not an allowlist entry: `allow_resource_types` answers "may this cost
+money" and the NIC's cost is fine; this answers "can this be undone".
+
+Worth recording separately: the run that prompted the gate was judged against a pitfall file it had
+never read. The repository was switched to a branch without the new pitfalls **33 seconds** before
+the run started, and `paths.pitfalls` is read from the working tree, so the generator was still
+being told to write the standalone NIC. The first conclusion drawn — "the model ignored the advice"
+— was wrong, and the ADR records that rather than quietly taking the credit. A run does not record
+the commit it was generated under; that gap is now known and open.
+
 Verified as far as money-free verification goes — provider schema, marketplace API, and a full
 Layer 2 apply and destroy of the rewritten shape. The scenario is marked **unproven**, not
 runnable. "No known blocker" is not "works", and this entry exists because conflating them cost

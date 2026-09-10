@@ -62,8 +62,37 @@ pitfall must prescribe that shape.** Concretely:
    already made the policy accept both singleton and count-based NIC references.
 2. The pitfall prescribes the inline block and says why, so generated HCL takes
    the destroyable path by default.
-3. The standalone shape stays allowlisted and stays accepted. It is not wrong to
-   apply; it is wrong to *mandate*.
+3. The Layer 3 HCL preflight **refuses** a standalone
+   `scaleway_instance_private_nic` before anything is created, with a message
+   that names the replacement.
+
+Point 3 is an amendment, and the reasoning matters more than the rule. This ADR
+first left the standalone shape accepted — "not wrong to apply; wrong to
+*mandate*" — on the theory that the pitfall would steer generation away from it.
+
+That theory is **untested**, not disproven. The run that followed did emit a
+standalone NIC, but the repository had been switched to a branch without the new
+pitfall thirty-three seconds earlier, so the generator was still being told to
+write one. (Recorded because the obvious reading — "the model ignored the
+advice" — was the first conclusion drawn, and it was wrong.)
+
+The gate is added anyway, on grounds that do not depend on that question:
+
+- **The cost is asymmetric.** A gate that never fires costs nothing. A pitfall
+  that is not followed costs a real apply, a failed destroy, and a hand recovery
+  needing `scw instance server stop` plus `scw instance private-nic delete` from
+  someone holding cloud credentials.
+- **Advice is not a control.** Whether or not the model would have complied, a
+  pitfall cannot be relied on to make it comply — S167's finding about
+  conventions, applied to the generator instead of to contributors.
+- **The preflight covers `deploy` too**, which never evaluates a pitfall at all.
+
+The refusal is deliberately not done by removing the type from
+`allow_resource_types`. Those are different questions —
+`allow_resource_types` answers *"may this cost money"*, and the NIC's cost is
+fine; the shape check answers *"can this be undone"*, and its teardown is not.
+Conflating them would make the allowlist lie about its purpose and let a config
+edit quietly re-enable an undestroyable stack.
 
 The rule is read from `configuration.expressions`, not `planned_values`. When the
 private network is created in the same plan, the block renders in planned values
@@ -77,6 +106,8 @@ private network.
   depends on actually opens.
 - One fewer resource per instance, and no parallel `count` to keep in step with
   the server's.
+- Generation that does not take the pitfall's advice now fails at the gate, for
+  free, with the correct shape in the error.
 - The policy is looser in shape and identical in guarantee. A server with no
   private network is still denied; both fixtures asserting that were kept, and a
   third was added for an inline block belonging to a *different* server.
@@ -85,3 +116,13 @@ private network.
   torn down. Layer 1 runs before anything exists, so a policy that gets this wrong
   is not a gate — it is a generator of the exact defect Layer 3 will later charge
   money to discover.
+
+
+## Postscript: the working tree decides what a run believes
+
+`paths.policies` and `paths.pitfalls` are `./policies` and `./pitfalls`, read
+from the working tree at run time. Switching branches therefore changes what the
+next run is told, silently, with no record in the run's own metadata — which is
+how a run on 2026-09-10 came to be judged against a pitfall file it had never
+read. Recording the commit a run was generated under would close that, and is
+not done here.

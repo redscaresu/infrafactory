@@ -205,6 +205,41 @@ func TestScalewayPoliciesPlanEvaluation(t *testing.T) {
 			expectedCount: 1,
 		},
 		{
+			// tofu records BOTH "…main.id" and the bare "…main" for one
+			// expression, so a prefix-only check also accepts `.name` --
+			// a real private network, and not its id.
+			name:   "vpc required fails when pn_id references a private network attribute other than id",
+			policy: filepath.Join(policiesRoot, "vpc_required.rego"),
+			planJSON: `{
+  "planned_values": {"root_module": {"resources": [
+    {"address":"scaleway_instance_server.web","type":"scaleway_instance_server","values":{}}
+  ]}},
+  "configuration": {"root_module": {"resources": [
+    {"address":"scaleway_instance_server.web","type":"scaleway_instance_server",
+     "expressions":{"private_network":[{"pn_id":{"references":["scaleway_vpc_private_network.main.name","scaleway_vpc_private_network.main"]}}]}}
+  ]}}
+}`,
+			expectedCount: 1,
+		},
+		{
+			// Under count, tofu records the BARE reference plus
+			// "count.index" and no ".id" at all. Demanding the suffix
+			// would refuse every multi-instance scenario.
+			name:   "vpc required passes for a count-indexed inline private_network block",
+			policy: filepath.Join(policiesRoot, "vpc_required.rego"),
+			planJSON: `{
+  "planned_values": {"root_module": {"resources": [
+    {"address":"scaleway_instance_server.web[0]","type":"scaleway_instance_server","values":{}},
+    {"address":"scaleway_instance_server.web[1]","type":"scaleway_instance_server","values":{}}
+  ]}},
+  "configuration": {"root_module": {"resources": [
+    {"address":"scaleway_instance_server.web","type":"scaleway_instance_server",
+     "expressions":{"private_network":[{"pn_id":{"references":["scaleway_vpc_private_network.main","count.index"]}}]}}
+  ]}}
+}`,
+			expectedCount: 0,
+		},
+		{
 			// The inline block belongs to a DIFFERENT server. Address
 			// matching is what stops one attached instance vouching for
 			// an unattached one.
