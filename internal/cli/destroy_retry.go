@@ -23,6 +23,12 @@ const runProjectTimeout = 20 * time.Second
 // tens of seconds while each individual request should not.
 const instancePowerOffTimeout = 15 * time.Second
 
+// powerOffSkipReasonPrefix marks a result entry that is a REASON NOTHING
+// HAPPENED rather than a server that was stopped. Carried in the same
+// slice so no call site changes; marked so the stage cannot render it as
+// an accomplishment.
+const powerOffSkipReasonPrefix = "skipped: "
+
 // destroySandbox runs the sandbox destroy, and on failure clears
 // API-auto-created resources out of the run's project and tries once
 // more.
@@ -65,7 +71,22 @@ func destroySandbox(
 	// has done anything. Unlike the purge below, this is known in advance
 	// for every stack that declares compute, so it runs first rather than
 	// after a failure nobody could have predicted.
-	stopped := powerOffRunInstances(ctx, runtime, workDir, projectID, sandboxEnv)
+	// Resolved ONCE, and used by both remediations. Callers pass
+	// sweepTargetProjectID(...), which is empty whenever
+	// CaptureSweepTarget failed -- and on 2026-09-10 that silently
+	// disabled the purge AND the poweroff together, leaving a run with
+	// neither stage to say so. Recovering it inside only one of them
+	// would have fixed half the outage.
+	projectID = resolveRunProjectID(workDir, projectID)
+
+	stopped, powerOffSkipped := powerOffRunInstances(ctx, runtime, workDir, projectID, sandboxEnv)
+
+	if powerOffSkipped != "" && len(stopped) == 0 {
+		// Carried in the same slice so no call site has to change, and
+		// marked so instancePowerOffStage renders it as a SKIP rather
+		// than claiming instances were stopped.
+		stopped = []string{powerOffSkipReasonPrefix + powerOffSkipped}
+	}
 
 	result, err := runtime.Deps.SandboxDestroy.Run(ctx, workDir, sandboxEnv)
 	if err == nil || projectID == "" {
@@ -111,24 +132,44 @@ func destroySandbox(
 // other run's. Guarding against the wrong state file would have skipped
 // the poweroff on exactly the paths that tear down long-lived
 // infrastructure -- the ones where a failed destroy costs the most.
-func powerOffRunInstances(ctx context.Context, runtime *CommandRuntime, workDir, projectID string, sandboxEnv map[string]string) []string {
-	if projectID == "" || runtime.Deps.InstanceStop == nil {
-		return nil
+func powerOffRunInstances(ctx context.Context, runtime *CommandRuntime, workDir, projectID string, sandboxEnv map[string]string) (stopped []string, skipped string) {
+	if projectID == "" {
+		return nil, fmt.Sprintf("no project id from the caller and no usable run-project marker in %s, so there is nothing safe to scope a poweroff to", workDir)
+	}
+	if runtime.Deps.InstanceStop == nil {
+		return nil, "no poweroff dependency is wired into this runtime"
 	}
 	secretKey := sandboxEnv["SCW_SECRET_KEY"]
 	if secretKey == "" {
-		return nil
+		return nil, "no SCW_SECRET_KEY in the sandbox environment"
 	}
 	if err := assertRunProjectDeletable(ctx, runtime, workDir, projectID, sandboxEnv); err != nil {
-		return nil
+		return nil, fmt.Sprintf("project %s did not pass the deletable check (%v), so its servers are not this run's to stop", projectID, err)
 	}
 	stopped, err := runtime.Deps.InstanceStop.Run(ctx, projectID, secretKey)
 	if err != nil {
 		// Best-effort by design. The destroy runs regardless and reports
 		// for itself; the sweep is what fails closed.
-		return stopped
+		return stopped, fmt.Sprintf("poweroff reported %v", err)
 	}
-	return stopped
+	return stopped, ""
+}
+
+// instancePowerOffSkippedStage says WHY nothing was powered off.
+//
+// A guard that stops without saying why is half a guard -- the durable
+// finding of the Layer 3 arc, and one this function was written in
+// violation of. The first version had three silent `return nil` paths,
+// so when a real run failed its destroy with no poweroff stage at all,
+// the log could not distinguish "no project id" from "guard refused"
+// from "found nothing to stop". That cost a real apply to learn nothing.
+func instancePowerOffSkippedStage(reason string) StageSummary {
+	return StageSummary{
+		Layer:  "sandbox_deploy",
+		Stage:  "instance_poweroff",
+		Status: StageStatusSkip,
+		Detail: fmt.Sprintf("no instance was powered off before the destroy: %s", reason),
+	}
 }
 
 // instancePowerOffStage records what was stopped. Only emitted when
@@ -150,6 +191,9 @@ func powerOffRunInstances(ctx context.Context, runtime *CommandRuntime, workDir,
 // path exists to remove false statements in both directions, not to
 // trade one for the other.
 func instancePowerOffStage(stopped []string) StageSummary {
+	if len(stopped) == 1 && strings.HasPrefix(stopped[0], powerOffSkipReasonPrefix) {
+		return instancePowerOffSkippedStage(strings.TrimPrefix(stopped[0], powerOffSkipReasonPrefix))
+	}
 	status := StageStatusPass
 	verb := "powered off"
 	for _, s := range stopped {
@@ -187,4 +231,24 @@ func sweepTargetProjectID(target *harness.SweepTarget) string {
 		return ""
 	}
 	return target.ProjectID
+}
+
+// resolveRunProjectID falls back to the run-project marker when the
+// caller has no project id.
+//
+// The marker is the same provenance assertRunProjectDeletable reads, so
+// this is not a weaker source -- it is the source, one step earlier.
+// Callers derive their id from CaptureSweepTarget, which yields nothing
+// when the live state is unreadable, and both remediations are scoped by
+// that id, so one failed capture disables the purge and the poweroff at
+// once.
+func resolveRunProjectID(workDir, projectID string) string {
+	if projectID != "" {
+		return projectID
+	}
+	marker, err := harness.ReadRunProjectMarker(workDir)
+	if err != nil {
+		return ""
+	}
+	return marker.ProjectID
 }

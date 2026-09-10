@@ -2,6 +2,38 @@
 
 Last updated: 2026-09-10
 
+## 2026-09-10 — S182: the guard that would not say why, and a rule frozen against its own enforcement
+
+Run `20260910T141427Z` was the first on the new binary. Two things worked and two were broken, both
+of the broken ones mine, both from the same day.
+
+**Worked:** the rewritten `vpc_required` denial named the fix and the generator *applied it* —
+iteration 1 failed validate, iteration 2 emitted the inline `private_network` block and passed. The
+denial text as repair-loop input did exactly what it was changed to do.
+
+**The poweroff never ran, and the log could not say why.** No `instance_poweroff` stage anywhere.
+The first version had three silent `return nil` paths, so a real apply bought no information at
+all — the exact failure the Layer 3 arc closed with ("a guard that stops without saying why is half
+a guard"), written into code whose own ADR quotes that lesson. Every skip now carries its reason
+into the stage summary.
+
+The likely cause is also fixed rather than only reported: callers pass
+`sweepTargetProjectID(...)`, which is empty whenever `CaptureSweepTarget` failed — and that
+silently disabled **both** remediations, which is why the run shows no purge stage either. The
+poweroff now falls back to the run-project marker, the same provenance the deletable check reads
+anyway.
+
+**The learning loop was teaching the shape three layers refuse.** `ExtractDescriptivePitfall`'s VPC
+fallback is a prescriptive rule frozen into Go, and it still said *"Always declare … a
+`scaleway_instance_private_nic`"* — a resource the Layer 3 gate now rejects, that `vpc_required`
+now argues against, and that a real teardown cannot delete. The same run recorded it as a fresh
+pitfall while its own Layer 1 was saying the opposite.
+
+The general point, and the reason it is a liability rather than a typo: **a prescriptive rule
+frozen in source cannot be reviewed next to the thing that enforces it**, so it drifts silently and
+then teaches the drift. Refusals extracted by `ExtractGatePitfall` cannot fail this way — they are
+emitted by the enforcing code itself. An audit test now fails if the fallback and the gate diverge.
+
 ## 2026-09-10 — S181: the fix leaves the HCL, and the loop starts learning from its own gates
 
 Five changes, four here and one in mockway, all from the same run.
