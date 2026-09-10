@@ -93,7 +93,7 @@ func runReapCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) 
 	destroyResult, purged, stopped, destroyErr := destroySandbox(ctx, runtime, workDir, sandboxEnv, sweepTargetProjectID(sweepTarget))
 	stages, failures := appendSandboxDestroyResult(nil, nil, destroyResult, destroyErr)
 	if len(stopped) > 0 {
-		stages = append(stages, instancePowerOffStage(stopped))
+		stages = append(stages, privateNICDetachStage(stopped))
 	}
 	if len(purged) > 0 {
 		stages = append(stages, autoCreatedPurgeStage(purged))

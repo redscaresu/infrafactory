@@ -781,7 +781,7 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 				destroyStages, destroyFailures := appendSandboxDestroyResult(nil, nil, destroyResult, destroyErr)
 				allStages = append(allStages, destroyStages...)
 				if len(stopped) > 0 {
-					allStages = append(allStages, instancePowerOffStage(stopped))
+					allStages = append(allStages, privateNICDetachStage(stopped))
 				}
 				if len(purged) > 0 {
 					allStages = append(allStages, autoCreatedPurgeStage(purged))

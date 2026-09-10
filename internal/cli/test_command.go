@@ -704,6 +704,13 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 		stages = append(stages, criteriaStages...)
 		failures = append(failures, criteriaFailures...)
 
+		// The mock destroy hits the same wall as the real one. mockway
+		// reproduces the v2alpha1 refusal faithfully (mockway#28) -- which
+		// is the mock doing its job, and the reason Layer 2 stopped
+		// tearing down the moment it started telling the truth. Same
+		// workaround, pointed at the mock.
+		stages = append(stages, detachMockPrivateNICs(ctx, runtime, env)...)
+
 		destroyResult, destroyErr := runtime.Deps.Destroy.Run(ctx, outputDir, env)
 		stages, failures = appendDestroyResult(stages, failures, destroyResult, destroyErr)
 		// Clean up whenever real resources MIGHT exist, not only when the
@@ -748,7 +755,7 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 				sandboxDestroyResult, purged, stopped, sandboxDestroyErr := destroySandbox(ctx, runtime, outputDir, sandboxEnv, sweepTargetProjectID(sweepTarget))
 				stages, failures = appendSandboxDestroyResult(stages, failures, sandboxDestroyResult, sandboxDestroyErr)
 				if len(stopped) > 0 {
-					stages = append(stages, instancePowerOffStage(stopped))
+					stages = append(stages, privateNICDetachStage(stopped))
 				}
 				if len(purged) > 0 {
 					stages = append(stages, autoCreatedPurgeStage(purged))
@@ -1413,4 +1420,35 @@ func appendOrphanSweepResult(ctx context.Context, stages []StageSummary, failure
 		})
 	}
 	return stages, failures
+}
+
+// detachMockPrivateNICs removes private NICs from the MOCK before the
+// Layer 2 destroy, for the same reason detachRunProjectNICs does it
+// before the real one: provider 2.81.0 deletes NICs through v2alpha1,
+// that endpoint refuses every NIC there is, and mockway now models it.
+//
+// Scoped by the mock's project, which cloudEnv fixes -- there is no run
+// project here, and nothing else shares the mock.
+//
+// Best-effort and silent on absence: a scenario with no private
+// networking has nothing to detach, and Layer 2 costs nothing to retry,
+// so a failure here must not stop a destroy that may well succeed.
+func detachMockPrivateNICs(ctx context.Context, runtime *CommandRuntime, env map[string]string) []StageSummary {
+	base := strings.TrimSpace(env["SCW_API_URL"])
+	project := strings.TrimSpace(env["SCW_DEFAULT_PROJECT_ID"])
+	if base == "" || project == "" {
+		return nil
+	}
+	detached, err := harness.NewScalewayPrivateNICDetachAt(base, privateNICDetachTimeout).
+		Run(ctx, project, env["SCW_SECRET_KEY"])
+	if err != nil || len(detached) == 0 {
+		return nil
+	}
+	return []StageSummary{{
+		Layer:  "destruction",
+		Stage:  "private_nic_detach",
+		Status: StageStatusPass,
+		Detail: fmt.Sprintf("removed %d private NIC(s) from the mock via v1, which the provider cannot do for itself: %s",
+			len(detached), strings.Join(detached, "; ")),
+	}}
 }
