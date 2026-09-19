@@ -176,29 +176,28 @@ cloud, in seconds, without credentials. **Layer 3 applies the generated stack
 to real Scaleway, probes it, destroys it, and then asks the API whether
 anything survived.**
 
-Layer 3 runs two ways.
+Layer 3 is driven by hand, from the CLI or the UI. There is **no
+pull-request gate**: nothing in this repository applies to a real cloud on a
+push, a label, or a schedule.
 
 From the CLI: set `validation.layers.sandbox_deploy.enabled`, supply real
 credentials, and `infrafactory test` or `infrafactory run` will apply, probe,
 destroy and sweep.
 
-And as a pull-request gate. `.github/workflows/layer3-gate.yml` is triggered
-by applying the `layer3-gate` label to a PR: it applies that PR's
-infrastructure code to real Scaleway, probes it, destroys it, sweeps the
-account, and comments the stage-by-stage result back onto the pull request.
-A proposed infrastructure change is therefore deployed for real while it is
-still a proposal.
+From the UI: start it with `--allow-layer3`. Real-cloud apply is decided at
+start time, by the person typing the command in the shell that already holds
+the credentials, and nowhere else — the config file is not allowed to turn it
+on (ADR-0026). `docs/demo-runbook.md` walks a full run end to end.
 
-Two things about that workflow are worth knowing before you copy it:
-
-- **It requires a deployment approval.** The `layer3` environment has
-  required reviewers, so applying the label does not start an apply — a human
-  approving the deployment does. That is deliberate: the approval is the
-  control, not friction to engineer away.
-- **A maintainer label is not a security boundary.** A PR can be updated
-  after it is labelled, so the workflow builds the binary and reads the
-  harness from the **base** branch and takes only the HCL from the PR, and
-  that HCL is parsed and shape-checked before any `tofu` runs.
+A `pull_request_target` workflow did this until 2026-09-19, triggered by a
+label and posting the result back as a PR comment. It was removed rather than
+disabled, for two reasons. A screenshot of a green check is weak evidence
+compared to watching an apply and a teardown happen; and a
+`pull_request_target` workflow is a standing security surface — it grants
+secrets to a pull request's context, and a label is not a security boundary
+because a PR can be updated after it is applied. Neither cost is worth paying
+for a capability that is better demonstrated live. `git log
+.github/workflows/layer3-gate.yml` has it if you want it back.
 
 ### What it proves
 
