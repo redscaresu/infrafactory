@@ -1,9 +1,23 @@
 provider: scaleway
 pitfalls:
     - resource: scaleway_instance_server
-      rule: '`scaleway_instance_server` has no attribute `private_ip` — use `private_ips` instead. The provider error suggested this directly: `Did you mean "private_ips"?`. Update every reference (`server_ips`, outputs, depends_on, etc.) to the suggested attribute name.'
-      source: descriptive
-      discovered_from: web-app-paris-pinned
+      rule: |
+        scaleway_instance_server.web is not attached to a private network. Add `private_network { pn_id = scaleway_vpc_private_network.NAME.id }` to the server. Do not use a standalone scaleway_instance_private_nic: it cannot be destroyed and th... Fix observed in scenario "web-live-paris": add the following HCL.
+        resource "scaleway_instance_server" "web" {
+          name  = "web-live-paris-web"
+          private_network {
+            pn_id = scaleway_vpc_private_network.main.id
+              package_update: true
+              packages:
+                - docker.io
+              runcmd:
+                - systemctl enable --now docker
+                - [ sh, -c, "for i in $(seq 1 60); do docker info >/dev/null 2>&1 && break; sleep 2; done" ]
+                - docker run -d --restart=always --name web -p ${var.service_port}:80 ${var.service_image}:${var.service_tag}
+        }
+        # ... (truncated)
+      source: fix
+      discovered_from: web-live-paris
     - resource: scaleway_instance_server
       rule: |-
         Attach a `scaleway_instance_server` to its private network with the
@@ -83,14 +97,3 @@ pitfalls:
         to add a second.
       source: avoid
       discovered_from: web-live-paris
-    # A pitfall this run LEARNED on 2026-09-10 and that had to be deleted the
-    # same day: "Always declare ... a scaleway_instance_private_nic". It came
-    # from ExtractDescriptivePitfall's hardcoded VPC fallback, which still
-    # prescribed a resource the Layer 3 gate refuses, `vpc_required` argues
-    # against, and a real teardown cannot delete.
-    #
-    # Kept as a comment because the mechanism is worth remembering: the loop
-    # wrote a durable rule contradicting its own enforcement, in the same run
-    # whose Layer 1 was telling the generator the opposite. The fallback is
-    # fixed and audited (TestVPCFallbackPrescribesTheShapeTheGateAccepts), and
-    # the attachment rule the corpus should carry is the one above.
