@@ -102,6 +102,13 @@ jobs:
       - name: Install Playwright browsers
         run: cd ui && npx playwright install --with-deps chromium
 
+      # Playwright starts the app with `go run ./cmd/infrafactory`, which
+      # compiles it. Building first puts the artifacts in the cache so
+      # that start is a link rather than a full build -- otherwise the
+      # 180s webServer timeout is spent compiling instead of testing.
+      - name: Warm the Go build cache for the test server
+        run: go build -o /dev/null ./cmd/infrafactory
+
       - name: Run UI end-to-end tests
         # No credential stubbing needed: the runner has none, and
         # `reuseExistingServer: !process.env.CI` means CI always starts
