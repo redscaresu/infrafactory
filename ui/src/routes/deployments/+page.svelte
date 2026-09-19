@@ -315,6 +315,16 @@
                     <span class="text-xs text-slate-600" data-testid={`deployment-destroying-${d.id}`}>
                       Destroying…
                     </span>
+                  {:else if d.state === "released"}
+                    <!-- Checked BEFORE the confirmation branch, not after.
+                         The table refreshes every 30s, so a row can be torn
+                         down -- by this page, by another tab, by the CLI --
+                         while its confirmation is open. Ordering this second
+                         left `confirming === d.id` winning and offering
+                         Destroy on infrastructure that is already gone. -->
+                    <span class="text-xs text-slate-500" data-testid={`deployment-released-${d.id}`}>
+                      released
+                    </span>
                   {:else if confirming === d.id}
                     <!-- The confirmation NAMES what is about to go. "Are
                          you sure?" is a speed bump people learn to click
