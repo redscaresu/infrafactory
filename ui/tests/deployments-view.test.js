@@ -2,23 +2,24 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  alreadyLiveWarnings,
-  addressHref,
-  deployConfirmation,
-  deployWarnings,
   ESTATE_UNREADABLE,
-  deployOutcome,
-  isProgressEvent,
-  nothingRecorded,
-  deployingLabel,
-  teardownOutcome,
-  teardownPrompt,
-  knownEmpty,
+  addressHref,
   addressLabel,
+  alreadyLiveWarnings,
+  deployConfirmation,
+  deployOutcome,
+  deployWarnings,
+  deployingLabel,
   estateSummary,
   healthBadge,
+  isProgressEvent,
+  knownEmpty,
   needsAttention,
+  nothingRecorded,
   observedLabel,
+  reapable,
+  teardownOutcome,
+  teardownPrompt,
   ttlLabel,
   versionBadge
 } from "../src/lib/deployments-view.js";
@@ -754,4 +755,40 @@ test("estateSummary counts only what actually needs attention", () => {
     [],
   );
   assert.ok(line.includes("1 needing attention"), `got: ${line}`);
+});
+
+// A released deployment's health is HISTORY. The service is gone; a 503
+// recorded weeks ago is a fact about something that no longer exists,
+// and alarm red says a problem is outstanding when none is.
+test("healthBadge mutes the alarm on a released deployment, keeping the label", () => {
+  const live = healthBadge({ status: "unhealthy" }, "live");
+  const gone = healthBadge({ status: "unhealthy" }, "released");
+
+  assert.equal(live.label, "unhealthy");
+  assert.equal(gone.label, "unhealthy", "what was last seen is worth keeping");
+  assert.ok(live.tone.includes("rose"), "a live unhealthy service is an alarm");
+  assert.ok(!gone.tone.includes("rose"), "a released one is not");
+});
+
+test("versionBadge mutes the alarm on a released deployment", () => {
+  const gone = versionBadge({ version: "unconfirmed" }, "released");
+  assert.equal(gone.label, "version NOT confirmed");
+  assert.ok(!gone.tone.includes("rose"));
+});
+
+// `live reap` acts on Reapable records — expired AND NOT released.
+// Offering it when every row is released points the reader at a command
+// that does nothing, and implies cleanup is outstanding when it is not.
+test("reapable counts only what live reap would act on", () => {
+  assert.equal(
+    reapable([
+      { state: "released", expired: true },
+      { state: "released", expired: true },
+      { state: "live", expired: true },
+      { state: "live", expired: false },
+    ]),
+    1,
+  );
+  assert.equal(reapable([]), 0);
+  assert.equal(reapable(undefined), 0);
 });

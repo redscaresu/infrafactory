@@ -20,12 +20,22 @@ export const HEALTH_TONES = {
  * this UI has not heard of is a fact about the system, and hiding it
  * would turn a new backend state into an invisible one.
  */
-export function healthBadge(health) {
+export function healthBadge(health, state) {
   const status = health?.status || "unobserved";
-  return {
-    label: status === "unobserved" ? "never observed" : status,
-    tone: HEALTH_TONES[status] || "bg-slate-200 text-slate-700"
-  };
+  const label = status === "unobserved" ? "never observed" : status;
+
+  // A RELEASED deployment's health is HISTORY. The service was torn
+  // down; a 503 recorded weeks ago is a fact about something that no
+  // longer exists, and rendering it in alarm red says a problem is
+  // outstanding when none is.
+  //
+  // The label is kept -- deleting it would lose what was last seen,
+  // which is occasionally the only record of why something was torn
+  // down. Only the alarm goes.
+  if (state === "released") {
+    return { label, tone: "bg-slate-200 text-slate-700" };
+  }
+  return { label, tone: HEALTH_TONES[status] || "bg-slate-200 text-slate-700" };
 }
 
 /**
@@ -37,8 +47,18 @@ export function healthBadge(health) {
  * report the version this record claims. Those are opposite meanings and
  * a UI that rendered either as an empty cell would merge them.
  */
-export function versionBadge(health) {
+export function versionBadge(health, state) {
   const version = health?.version || "unchecked";
+  // Released: history, not an alarm. Same reasoning as healthBadge.
+  if (state === "released") {
+    const label =
+      version === "confirmed"
+        ? "version confirmed"
+        : version === "unconfirmed"
+          ? "version NOT confirmed"
+          : "version unchecked";
+    return { label, tone: "bg-slate-200 text-slate-700" };
+  }
   if (version === "confirmed") {
     return { label: "version confirmed", tone: "bg-emerald-100 text-emerald-900" };
   }
@@ -753,4 +773,16 @@ export function alreadyLiveWarnings(preview) {
   }
 
   return warnings;
+}
+
+/**
+ * reapable counts what `infrafactory live reap` would actually act on.
+ *
+ * Mirrors livestore.Deployment.Reapable: expired AND NOT released. The
+ * footer used to offer the command unconditionally, so a page of ten
+ * released records told the reader there was cleanup outstanding and
+ * pointed them at a command that would do nothing.
+ */
+export function reapable(deployments) {
+  return (deployments || []).filter((d) => d?.state !== "released" && d?.expired).length;
 }
