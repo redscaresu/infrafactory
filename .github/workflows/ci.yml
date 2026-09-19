@@ -39,7 +39,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '24'
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v4
@@ -90,6 +90,13 @@ jobs:
       # This project's whole discipline is that drift becomes a failed
       # test. A suite outside CI is a suite that drifts.
       - name: Run UI unit tests
+        # Needs Node >= 22.18 (pinned in ui/package.json engines).
+        # `tests/ws.test.js` imports `../src/lib/ws.ts` directly, and
+        # native TypeScript type-stripping is what makes that work --
+        # Node 20 cannot import a .ts file at all. The suite therefore
+        # only ever passed on a developer's modern local Node, and CI
+        # pinned 20, which is one reason nobody noticed the UI tests
+        # were not running here.
         run: cd ui && npm test
 
       - name: Install Playwright browsers
@@ -201,7 +208,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '24'
 
       - name: Build UI (embedded via go:embed)
         run: |
