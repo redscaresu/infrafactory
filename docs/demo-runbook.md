@@ -8,6 +8,40 @@ minutes because the LLM phases vary and the repair loop may take a second pass.
 
 ---
 
+## From a fresh clone
+
+Only needed on a machine that has never built this. `make build` pulls
+`npm install` in behind it, which is the slow part — minutes, not the 8.5
+seconds a warm build takes. Do it well before the day.
+
+```bash
+# go, node/npm, tofu, and the scw CLI must be on PATH
+git clone https://github.com/redscaresu/infrafactory && cd infrafactory
+
+# npm install + vite build + three Go binaries into bin/
+make build
+
+# the sibling mocks live NEXT TO this repo, not inside it. `make mocks-up`
+# starts all of them, so it wants all four clones present.
+cd ..
+for r in mockway fakegcp fakeaws fakegenesys; do
+  git clone https://github.com/redscaresu/$r
+done
+cd infrafactory
+```
+
+This demo only ever talks to **mockway** — the scenario is Scaleway. The other
+three are there because `make mocks-up` brings the whole family up, and
+SeaweedFS additionally wants Docker running. `make mockway-up` starts just the
+one, which is lighter, but `mocks-up` is the path that has been exercised all
+week and the one the rest of this file assumes.
+
+Credentials are not in the repo. `~/.config/infrafactory/layer3.env` holds the
+Scaleway key, and `~/.config/infrafactory/layer3-on.yaml` is the config with
+`sandbox_deploy.enabled`. Neither is committed and neither should be.
+
+---
+
 ## Green room — before you go on
 
 ```bash
