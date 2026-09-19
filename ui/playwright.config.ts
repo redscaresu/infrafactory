@@ -32,7 +32,12 @@ export default defineConfig({
   webServer: {
     command: 'cd .. && go run ./cmd/infrafactory ui --addr 127.0.0.1:4173',
     url: 'http://127.0.0.1:4173/api/config',
-    timeout: 30_000,
+    // 30s is a warm-laptop number. `go run` COMPILES the binary, and on
+    // a cold CI runner with an empty build cache that alone exceeded it:
+    // the first run of this suite in CI failed with "Timed out waiting
+    // 30000ms from config.webServer" having never reached a test.
+    // Anyone on a fresh clone hits the same wall.
+    timeout: 180_000,
     reuseExistingServer: !process.env.CI,
   },
 });

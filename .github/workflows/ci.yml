@@ -39,7 +39,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '24'
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v4
@@ -75,6 +75,78 @@ jobs:
         # parallel subtests collided on the relative-path `./output`
         # default).
         run: go test -race -count=2 ./...
+
+      # The UI suites were guarded by a local pre-commit hook and nothing
+      # else, so they were exactly as strong as the discipline of whoever
+      # was committing -- and `--no-verify` is one flag away.
+      #
+      # On 2026-09-19 the Deployments page was found announcing "10
+      # deployments, 10 needing attention" for ten records the system
+      # itself classified as released, while the account was empty. 153
+      # unit tests and 135 browser tests existed. None of them ran on a
+      # pull request, and a Playwright failure had been sitting on main
+      # unnoticed.
+      #
+      # This project's whole discipline is that drift becomes a failed
+      # test. A suite outside CI is a suite that drifts.
+      - name: Run UI unit tests
+        # Needs Node >= 22.18 (pinned in ui/package.json engines).
+        # `tests/ws.test.js` imports `../src/lib/ws.ts` directly, and
+        # native TypeScript type-stripping is what makes that work --
+        # Node 20 cannot import a .ts file at all. The suite therefore
+        # only ever passed on a developer's modern local Node, and CI
+        # pinned 20, which is one reason nobody noticed the UI tests
+        # were not running here.
+        run: cd ui && npm test
+
+      - name: Install Playwright browsers
+        run: cd ui && npx playwright install --with-deps chromium
+
+      # Playwright starts the app with `go run ./cmd/infrafactory`, which
+      # compiles it. Building first puts the artifacts in the cache so
+      # that start is a link rather than a full build -- otherwise the
+      # 180s webServer timeout is spent compiling instead of testing.
+      - name: Warm the Go build cache for the test server
+        run: go build -o /dev/null ./cmd/infrafactory
+
+      - name: Run UI end-to-end tests
+        # No credential stubbing needed: the runner has none, and
+        # `reuseExistingServer: !process.env.CI` means CI always starts
+        # its own server rather than adopting whatever is on :4173.
+        #
+        # That reuse is why this suite fails LOCALLY for anyone with the
+        # demo UI running -- it adopts a server started with real
+        # Scaleway credentials, and `scenario page shows Layer 3
+        # section` correctly reports "credentials ready" where it
+        # expected "credentials missing". The test is right; the local
+        # environment is contaminated. Stop the UI on :4173 before
+        # running `make test`.
+        #
+        # Visual regression is EXCLUDED, and that is a limitation rather
+        # than a preference. `toHaveScreenshot()` baselines are
+        # platform-specific: the repository has 8 `*-chromium-darwin.png`
+        # and no `*-chromium-linux.png`, so on ubuntu-latest every one of
+        # them fails on a missing baseline.
+        #
+        # Generating Linux baselines is not a one-liner: the config's
+        # webServer is `go run ./cmd/infrafactory ui`, so the official
+        # Playwright container -- which has Node and no Go -- cannot
+        # start the app under test. Doing it properly needs an image with
+        # both, and that is worth a separate change.
+        #
+        # So visual regression stays a local, macOS-only check, and the
+        # 127 FUNCTIONAL end-to-end tests run here. That is the trade:
+        # the pixels are still only as good as whoever last ran `make
+        # test`, but behaviour is now gated.
+        run: cd ui && npx playwright test --grep-invert "Visual regression"
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: ui/playwright-report/
+          retention-days: 7
 
   govulncheck:
     # S150-T1. Nothing scanned Go dependencies for known vulnerabilities
@@ -143,7 +215,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '24'
 
       - name: Build UI (embedded via go:embed)
         run: |
