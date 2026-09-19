@@ -433,7 +433,15 @@ test-ci-parity:
 ui-test:
 	cd ui && npm test
 
+# STOP ANY UI ON :4173 FIRST. playwright.config.ts sets
+# `reuseExistingServer: !process.env.CI`, so locally Playwright ADOPTS a
+# server already on that port instead of starting a clean one. A UI
+# started with real Scaleway credentials makes `scenario page shows
+# Layer 3 section` fail, because the page correctly reports "credentials
+# ready" where the test expects "credentials missing". The test is
+# right; the environment is contaminated. CI always starts its own.
 ui-test-e2e: ui-build
+	@if lsof -tnP -iTCP:4173 -sTCP:LISTEN >/dev/null 2>&1; then 		echo "ERROR: something is already listening on :4173."; 		echo "  Playwright will adopt it, and a credential-bearing UI fails the"; 		echo "  Layer 3 scenario test. Stop it, then re-run."; 		exit 1; 	fi
 	cd ui && npx playwright test
 
 # demo-ui records a fresh docs/demo/ui-walkthrough.webm by driving the
