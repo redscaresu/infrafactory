@@ -59,6 +59,20 @@ export function versionBadge(health) {
  */
 export function needsAttention(deployment) {
   if (deployment?.unreadable) return true;
+
+  // A RELEASED deployment is already gone. Its TTL expiring afterwards
+  // means nothing -- there is nothing left to act on.
+  //
+  // This is livestore.Reapable's predicate, which is `!released &&
+  // expired`; the UI had only the second half. With ten torn-down
+  // records in the store the page announced "10 deployments, 10 needing
+  // attention" and offered Tear down on each, while `live reconcile`
+  // reported the cloud and the store in agreement and the account was
+  // empty. "Already gone" and "needs attention" must not look alike,
+  // for the same reason "we could not check" and "nothing leaked" must
+  // not.
+  if (deployment?.state === "released") return false;
+
   if (deployment?.expired) return true;
 
   const health = deployment?.health || {};

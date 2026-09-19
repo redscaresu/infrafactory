@@ -714,3 +714,44 @@ test("the estate-wide caveat does not outrank the warnings about this scenario",
   assert.ok(caveat > unmodelled, "but after what invalidates the figures above it");
   assert.equal(caveat, warnings.length - 1, "and last, being about the estate rather than this");
 });
+
+// A released deployment is already gone; its TTL expiring afterwards
+// means nothing. This is livestore.Reapable's predicate — `!released &&
+// expired` — and the UI had only the second half.
+//
+// With ten torn-down records in the store the page announced "10
+// deployments, 10 needing attention" and offered Tear down on each,
+// while `live reconcile` reported the cloud and the store in agreement
+// and the account was empty.
+test("needsAttention ignores a released deployment whose TTL has passed", () => {
+  assert.equal(needsAttention({ state: "released", expired: true }), false);
+});
+
+test("needsAttention still flags a LIVE deployment past its TTL", () => {
+  assert.equal(needsAttention({ state: "live", expired: true }), true,
+    "that one is real: infrastructure past its deadline that nothing has reaped");
+});
+
+// Unreadable wins over everything. A record that cannot be parsed might
+// be a live deployment, and "could not read it" must never render as
+// "nothing to do".
+test("needsAttention flags an unreadable record even if it looks released", () => {
+  assert.equal(needsAttention({ unreadable: true, state: "released", expired: true }), true);
+});
+
+// The headline is the number a person reads first. Ten finished records
+// rendering as "10 needing attention" is the page shouting about work
+// that does not exist.
+test("estateSummary counts only what actually needs attention", () => {
+  const line = estateSummary(
+    [
+      { state: "released", expired: true },
+      { state: "released", expired: true },
+      { state: "live", expired: true },
+    ],
+    [],
+    { known_empty: false },
+    [],
+  );
+  assert.ok(line.includes("1 needing attention"), `got: ${line}`);
+});
