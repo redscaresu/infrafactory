@@ -8,6 +8,40 @@ minutes because the LLM phases vary and the repair loop may take a second pass.
 
 ---
 
+## From a fresh clone
+
+Only needed on a machine that has never built this. `make build` pulls
+`npm install` in behind it, which is the slow part — minutes, not the 8.5
+seconds a warm build takes. Do it well before the day.
+
+```bash
+# go, node/npm, tofu, and the scw CLI must be on PATH
+git clone https://github.com/redscaresu/infrafactory && cd infrafactory
+
+# npm install + vite build + three Go binaries into bin/
+make build
+
+# mockway lives NEXT TO this repo, not inside it
+cd .. && git clone https://github.com/redscaresu/mockway && cd infrafactory
+```
+
+**mockway is the only mock this demo needs.** The mock-state client is a router
+keyed by the scenario's `cloud`, so a Scaleway scenario never contacts fakegcp,
+fakeaws or fakegenesys. `make mocks-up` starts the whole family and wants all
+four clones plus Docker for SeaweedFS; `make mockway-up` starts the one.
+
+Credentials are not in the repo: `~/.config/infrafactory/layer3.env` holds the
+Scaleway key, and is not committed.
+
+There is also a `~/.config/infrafactory/layer3-on.yaml`, which is the repo's
+`infrafactory.yaml` with one line changed — `sandbox_deploy.enabled: true`. The
+demo does **not** need it. `--allow-layer3` overwrites that exact field at
+startup, deliberately: a config file is not allowed to decide that a UI may
+spend money (ADR-0026). Only `reap` needs the file, because it has no such
+flag.
+
+---
+
 ## Green room — before you go on
 
 ```bash
@@ -16,12 +50,12 @@ cd ~/go/src/github.com/redscaresu/infrafactory
 # never switch branches after this point
 git checkout main && git pull
 
-# mockway and friends, started in YOUR terminal (they die with an agent session)
-make mocks-up
+# the only mock this demo needs, started in YOUR terminal
+# (anything started from an agent session dies with it)
+make mockway-up
 
-# real Scaleway credentials, and the shorthand the rest of this file uses
+# real Scaleway credentials
 set -a; source ~/.config/infrafactory/layer3.env; set +a
-alias if3='./bin/infrafactory --config ~/.config/infrafactory/layer3-on.yaml'
 
 # must list ONLY: default, openclaw, infrafactory
 scw account project list
@@ -39,12 +73,12 @@ Deploy needs — `deploy` does not generate.
 # 1 — build the UI and both binaries. 8.5s.
 make build
 
-# 2 — credentials and shorthand into this shell
+# 2 — credentials into this shell
 set -a; source ~/.config/infrafactory/layer3.env; set +a
-alias if3='./bin/infrafactory --config ~/.config/infrafactory/layer3-on.yaml'
 
-# 3 — start it. The three flags are the consent; the config file cannot grant it.
-if3 ui --allow-deploy --allow-teardown --allow-layer3
+# 3 — start it. The three flags are the consent; no --config needed, because
+#     --allow-layer3 overwrites sandbox_deploy.enabled at startup anyway.
+./bin/infrafactory ui --allow-deploy --allow-teardown --allow-layer3
 ```
 
 **4 — in the browser:** http://127.0.0.1:4173 → `web-live-paris` → **Run**,
@@ -53,15 +87,15 @@ both boxes unticked. *Real Scaleway: apply, probe, destroy, sweep. 2–5 min.*
 **5 — same page:** **Deploy**. *Applies the same HCL and leaves it up under the
 scenario's 4h TTL.* Open the load balancer URL — that is the nginx page.
 
-The UI holds that terminal. **Open a second one** for what follows, and run
-the two `set -a; source …` / `alias` lines in it first.
+The UI holds that terminal. **Open a second one** for what follows, and run the
+`set -a; source …` line in it first.
 
 ```bash
 # 6 — the live deployment and its remaining TTL
-if3 live ls
+./bin/infrafactory live ls
 
 # 7 — destroy it, sweep the account, release the record
-if3 live teardown <id>
+./bin/infrafactory live teardown <id>
 
 # 8 — prove it. Only default, openclaw, infrafactory.
 scw account project list
@@ -118,7 +152,10 @@ with nginx on screen and the account provably empty.
 The supported path first:
 
 ```bash
-if3 reap scenarios/training/web-live-paris.yaml
+# reap is the ONE command here that needs the config: unlike the UI it has
+# no --allow-layer3 flag, so it reads sandbox_deploy.enabled from the file.
+./bin/infrafactory --config ~/.config/infrafactory/layer3-on.yaml \
+  reap scenarios/training/web-live-paris.yaml
 ```
 
 `reap` needs the live state file. If the next iteration has already overwritten
