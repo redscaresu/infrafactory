@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"github.com/redscaresu/infrafactory/internal/config"
 	"os"
 	"path/filepath"
 	"strings"
@@ -596,12 +597,13 @@ resource "scaleway_lb_backend" "web" {
 }
 
 func TestRealGateFixturesPassTheirOwnPreflight(t *testing.T) {
-	// Read the allowlist the workflow actually writes, rather than
-	// restating it here. A hardcoded copy passes while the gate fails --
-	// which is exactly what happened: this test widened its own list for
-	// the lb-serving-paris fixture and the workflow kept the narrow one,
-	// so the scenario would have been refused before applying anything.
-	allow := gateWorkflowAllowlist(t)
+	// Read the allowlist the CLI actually enforces, rather than
+	// restating it here. A hardcoded copy passes while the real thing
+	// fails -- which is exactly what happened when there were two copies:
+	// this test widened its own list for the lb-serving-paris fixture and
+	// the other copy kept the narrow one, so the scenario would have been
+	// refused before applying anything.
+	allow := configuredAllowlist(t)
 	for _, scenario := range []string{"block-paris", "lb-serving-paris"} {
 		t.Run(scenario, func(t *testing.T) {
 			dir := filepath.Join("..", "..", "examples", "layer3-gate", scenario)
@@ -653,42 +655,27 @@ func TestScalewayPromptPinsTheProviderVersionTheCheckerRequires(t *testing.T) {
 		"prompts/scaleway/phase2_generate_hcl.md must tell the model to emit the version layer3ScalewayProviderVersion requires")
 }
 
-// gateWorkflowAllowlist extracts allow_resource_types from the config
-// heredoc in .github/workflows/layer3-gate.yml.
+// configuredAllowlist reads allow_resource_types from infrafactory.yaml
+// through the same loader the CLI uses.
 //
-// The workflow writes its config with `cat > ... <<CFG`, so the list is
-// YAML nested inside a shell script inside YAML. Pulling it out is ugly;
-// trusting a second copy of it is worse.
-func gateWorkflowAllowlist(t *testing.T) []string {
+// It used to scrape the list out of a heredoc in
+// .github/workflows/layer3-gate.yml, because that workflow carried a
+// SECOND copy of the allowlist and a hardcoded third copy here would
+// have passed while the gate failed -- which had already happened once.
+//
+// The workflow was removed on 2026-09-19 (real-cloud validation is
+// driven from the UI now), so there is only one allowlist left and this
+// reads it. Still not restated here: a copy in a test is a copy that can
+// drift from the thing it claims to check.
+func configuredAllowlist(t *testing.T) []string {
 	t.Helper()
 
-	raw, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "layer3-gate.yml"))
+	cfg, err := config.Load(filepath.Join("..", "..", "infrafactory.yaml"))
 	require.NoError(t, err)
 
-	lines := strings.Split(string(raw), "\n")
-	var allow []string
-	collecting := false
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "allow_resource_types:") {
-			collecting = true
-			continue
-		}
-		if !collecting {
-			continue
-		}
-		// Comments and blank lines sit inside the list; only a
-		// non-comment, non-item line ends it.
-		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
-			continue
-		}
-		if !strings.HasPrefix(trimmed, "- ") {
-			break
-		}
-		allow = append(allow, strings.TrimSpace(strings.TrimPrefix(trimmed, "- ")))
-	}
-
-	require.NotEmpty(t, allow, "could not read allow_resource_types out of the gate workflow")
+	allow := cfg.Validation.Layers.SandboxDeploy.AllowResourceTypes
+	require.NotEmpty(t, allow,
+		"allow_resource_types is empty, so this test would assert nothing -- the gate denies by default")
 	return allow
 }
 
@@ -973,7 +960,7 @@ func TestRecordedGenerationPassesPreflight(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, recorded, "no recorded generation; make demo-gate has nothing to replay")
 
-	allow := gateWorkflowAllowlist(t)
+	allow := configuredAllowlist(t)
 	for _, dir := range recorded {
 		info, statErr := os.Stat(dir)
 		if statErr != nil || !info.IsDir() {

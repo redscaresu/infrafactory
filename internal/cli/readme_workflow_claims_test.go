@@ -33,8 +33,22 @@ func TestReadmeLayer3GateClaimMatchesWorkflows(t *testing.T) {
 	// nothing to do with what it guards.
 	text := strings.Join(strings.Fields(string(readme)), " ")
 
-	// The disclaimer is what makes the absence honest.
-	disclaimed := strings.Contains(text, "not yet merged")
+	// The disclaimer is what makes the absence honest -- and there are
+	// two honest absences, which is why this is not one phrase.
+	//
+	// "not yet merged" was the only accepted wording while the gate was
+	// unbuilt. On 2026-09-19 the workflow was DELETED: real-cloud
+	// validation is driven from the UI now, and a `pull_request_target`
+	// workflow is a standing security surface not worth keeping for a
+	// capability better demonstrated live. Requiring "not yet merged"
+	// there would force the README to imply the gate is forthcoming,
+	// which is a different false statement from the one this guard
+	// exists to prevent.
+	//
+	// Both accepted phrasings say the same operative thing: this
+	// repository does not gate a pull request on a real-cloud apply.
+	disclaimed := strings.Contains(text, "not yet merged") ||
+		strings.Contains(text, "no pull-request gate")
 
 	if gateExists {
 		assert.False(t, disclaimed,

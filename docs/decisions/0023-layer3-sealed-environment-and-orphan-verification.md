@@ -197,3 +197,39 @@ The rule is now an allowlist of **pure** functions — ones whose result cannot 
 Two things worth keeping from how this was found. The rule was **verified against the generator rather than against the tests** — 40 review passes and a full suite all agreed the blanket ban was fine, and a single real `infrafactory generate` disagreed. And a check that runs on two paths needs exercising on both: this one was written for untrusted input and silently applied to trusted input, where its cost was invisible until something real ran through it.
 
 **Related, and recorded here because it constrains the demo:** a real generation of `lb-serving-paris` is refused by the gate for a different reason — it emits `scaleway_instance_security_group` and private networking, which need `IPAMFullAccess` and are not allowlisted. That is the two gates working as designed, not a defect. `block-paris` generates cleanly and is therefore the demo scenario. Widening the allowlist to accommodate a richer generated stack remains a blast-radius decision, unchanged by the demo's convenience.
+
+## Amendment, 2026-09-19 — the pull-request gate is removed
+
+`.github/workflows/layer3-gate.yml` is deleted. Real-cloud validation is driven
+by hand, from the CLI or the UI; **nothing in this repository applies to a real
+cloud on a push, a label, or a schedule.**
+
+Everything this ADR governs is unchanged and now has exactly one enforcement
+path instead of two: the sealed environment, the deny-by-default
+`allow_resource_types`, the disposable per-run project, and the fail-closed
+orphan sweep all live in the CLI, which is what both the terminal and the UI
+drive.
+
+Two reasons for removing rather than keeping it dormant:
+
+1. **The evidence is weaker.** A green check on a pull request is the easiest
+   artefact in the world to fabricate. Watching an apply, a probe and a
+   teardown happen is not, and that is what the demo does now
+   (`docs/demo-runbook.md`).
+2. **`pull_request_target` is a standing security surface.** It grants secrets
+   to a pull request's context. The workflow mitigated that carefully — base
+   branch for the harness, PR for the HCL only, head SHA re-verified at run
+   time — but the mitigation existed because the trigger is dangerous. The
+   safest version of a dangerous trigger is not having one.
+
+The label was never a security boundary and the workflow said so: a PR can be
+updated after it is labelled. That reasoning is preserved here because it is
+the part worth remembering if anyone restores it.
+
+**Consequence worth stating:** this repository no longer proves a change
+against a real cloud automatically. It proves it when somebody asks. That is a
+real reduction in coverage, taken deliberately, and the honest framing is that
+the gate was opt-in per pull request anyway — it never ran on a change nobody
+labelled.
+
+`git log .github/workflows/layer3-gate.yml` restores it.

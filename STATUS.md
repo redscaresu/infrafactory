@@ -1,6 +1,36 @@
 # STATUS
 
-Last updated: 2026-09-10
+Last updated: 2026-09-19
+
+## 2026-09-19 — S185: the pull-request gate is removed
+
+`.github/workflows/layer3-gate.yml` is deleted. Real-cloud validation is driven by hand now, from
+the CLI or the UI, and **nothing in this repository applies to a real cloud on a push, a label, or
+a schedule.**
+
+Two reasons. A green check on a pull request is weak evidence next to watching an apply and a
+teardown happen — which is what the talk now does, and `docs/demo-runbook.md` is the runbook for
+it. And `pull_request_target` is a standing security surface: it grants secrets to a pull request's
+context, and the label guarding it was never a security boundary, because a PR can be updated after
+it is applied. Neither cost is worth paying for a capability better demonstrated live.
+
+Removed rather than disabled. Converting it to `workflow_dispatch` looked like a six-line change
+and is not: the body is built around `github.event.pull_request` — base and head checkouts, the
+head-SHA re-verification, and both comment-posting steps. Gutting a hundred lines to keep a
+workflow nobody will run is worse than deleting it, and `git log` is the undo.
+
+**Two audits caught the fallout, which is the system working.** `TestReadmeLayer3GateClaim` refused
+a README still advertising the gate. And the fixture tests scraped their allowlist out of the
+workflow's heredoc — deliberately, to avoid a second copy that could drift — so they now read
+`infrafactory.yaml` through the same loader the CLI uses. That is a better source: it is the list
+the demo actually runs against.
+
+The audit's vocabulary widened with a reason. It accepted only "not yet merged", written while the
+gate was unbuilt; requiring that now would force the README to imply the gate is forthcoming, which
+is a different false statement from the one the guard exists to prevent.
+
+`examples/layer3-gate/` stays — those are HCL shape-gate fixtures and have nothing to do with pull
+requests.
 
 ## 2026-09-10 — S184: every Layer 3 run now reconciles the projects it did not clean up
 

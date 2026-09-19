@@ -253,27 +253,22 @@ clears.
 
 ---
 
-## This is NOT the PR gate — know which one you are showing
+## There is no PR gate any more
 
-The slide's terminal output ("Layer 3 gate: pass … 9s") is a **different
-artifact** from this demo, and it is easy to conflate them on stage.
+A `pull_request_target` workflow used to do this on a labelled pull request,
+applying `block-paris` (no compute, ~9s) and posting the stage list back as a
+comment. It was **removed on 2026-09-19**.
 
-| | the PR gate | this runbook |
-|---|---|---|
-| trigger | a `layer3-gate` label on a pull request | a button in the UI |
-| where | `.github/workflows/layer3-gate.yml` | your laptop |
-| scenario | `block-paris` — **no compute** | `web-live-paris` — instance + LB |
-| duration | **9s** | 2–5 min |
-| result | a comment posted on the PR | the Live Run panel |
+Two reasons, and both matter on stage. A screenshot of a green check is the
+weakest evidence in the room — it is the easiest thing in the world to fake,
+and an audience of platform engineers knows that. And a `pull_request_target`
+workflow grants secrets to a pull request's context, which is a standing
+security surface to carry for a capability that is better demonstrated live.
 
-The gate is opt-in per PR by label because it spends real money, and it runs
-under `pull_request_target` with `pull-requests: write` and nothing more.
-
-They work best together: the PR comment states the claim, and this demo makes
-it undeniable, because a screenshot of a green check is the easiest thing in
-the world to fake. If you plan to show the comment, make sure you have a PR
-where the label was actually applied — without it the check reports `SKIPPED`
-and there is no comment to point at.
+So if a slide still shows `Layer 3 gate: pass … 9s`, replace it. The numbers
+do not describe this demo either: that was a scenario with no compute.
+`git log .github/workflows/layer3-gate.yml` has the workflow if it is ever
+wanted back.
 
 ---
 
