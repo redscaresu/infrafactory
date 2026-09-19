@@ -8,6 +8,7 @@
     healthBadge,
     knownEmpty,
     needsAttention,
+    reapable,
     observedLabel,
     teardownOutcome,
     teardownPrompt,
@@ -134,6 +135,7 @@
 
   // The three states are distinct on purpose: an empty list means
   // "nothing is deployed" ONLY when the read succeeded.
+  $: reapableCount = reapable(deployments);
   $: estateState = !loaded ? "loading" : loadError ? "failed" : "loaded";
   $: summary = estateSummary(deployments, unreadable, estateState, deploying);
   // The one condition under which this page may say nothing is running.
@@ -277,8 +279,8 @@
               </td>
               <td class="px-3 py-2">
                 <span
-                  class={`inline-block rounded-full px-2 py-1 text-xs font-semibold ${healthBadge(d.health).tone}`}
-                  data-testid={`deployment-health-${d.id}`}>{healthBadge(d.health).label}</span
+                  class={`inline-block rounded-full px-2 py-1 text-xs font-semibold ${healthBadge(d.health, d.state).tone}`}
+                  data-testid={`deployment-health-${d.id}`}>{healthBadge(d.health, d.state).label}</span
                 >
                 {#if d.health?.detail}
                   <p class="mt-1 text-xs text-slate-600">{d.health.detail}</p>
@@ -286,8 +288,8 @@
               </td>
               <td class="px-3 py-2">
                 <span
-                  class={`inline-block rounded-full px-2 py-1 text-xs font-semibold ${versionBadge(d.health).tone}`}
-                  data-testid={`deployment-version-${d.id}`}>{versionBadge(d.health).label}</span
+                  class={`inline-block rounded-full px-2 py-1 text-xs font-semibold ${versionBadge(d.health, d.state).tone}`}
+                  data-testid={`deployment-version-${d.id}`}>{versionBadge(d.health, d.state).label}</span
                 >
               </td>
               <td class="px-3 py-2 text-slate-700" data-testid={`deployment-observed-${d.id}`}>
@@ -377,9 +379,17 @@
       deployments from here, or use <code>infrafactory live teardown &lt;id&gt;</code>.
     </p>
   {:else}
+    <!-- Only claims what is true of the rows on screen. `live reap`
+         acts on Reapable records -- expired AND NOT released -- so
+         offering it when every row is released sends someone to run a
+         command that does nothing, and implies there is cleanup
+         outstanding when there is none. -->
     <p class="text-xs text-slate-500">
-      Teardown deletes real infrastructure and cannot be undone. Expired deployments can be
-      cleared in one go with <code>infrafactory live reap</code>.
+      Teardown deletes real infrastructure and cannot be undone.{#if reapableCount > 0}
+        {reapableCount}
+        {reapableCount === 1 ? "deployment is" : "deployments are"} past their TTL and can be
+        cleared in one go with <code>infrafactory live reap</code>.{:else}
+        Nothing here is awaiting a reap.{/if}
     </p>
   {/if}
 </section>
