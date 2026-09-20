@@ -458,6 +458,19 @@ type testExecutionOptions struct {
 	MockDeployMode harness.MockDeployMode
 	SkipDestroy    bool
 
+	// KeepSandbox preserves the REAL infrastructure while still
+	// destroying the mock.
+	//
+	// Distinct from SkipDestroy, which skips both. Layer 2 teardown is
+	// free and proves something, so a run that keeps its cloud resources
+	// has no reason to skip it -- and skipping it would leave the mock
+	// dirty for the next run as well.
+	//
+	// The run registers what it kept as a live deployment, so it has a
+	// TTL, a row on the estate page and a one-command teardown. Without
+	// that registration this would just be a leak with better manners.
+	KeepSandbox bool
+
 	// LogScope stamps the stage-progress entries this execution emits.
 	//
 	// `run` reaches here through `executeTest`, and `runIteration`
@@ -699,6 +712,11 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 			}
 		}
 	}
+	// Refined inside the destroy block below, where this iteration's
+	// criteria results are known. Declared out here because the
+	// run-project switch, which must agree with it, sits outside that
+	// block on purpose.
+	keepingSandbox := opts.KeepSandbox
 	if deployErr == nil && runtime.Config.Validation.Layers.Destruction.Enabled && !opts.SkipDestroy {
 		criteriaStages, criteriaFailures := evaluateSupportedCriteria(ctx, sc, runtime, deployResult)
 		stages = append(stages, criteriaStages...)
@@ -730,7 +748,30 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 		// up there would destroy nothing and then report an unverifiable
 		// sweep, telling the operator to chase a leak that cannot exist.
 		// run_command.go uses the same signal.
-		if sandboxEnabled && liveStateMayHoldResources(outputDir) {
+		// --keep keeps a SUCCESSFUL stack, and only the run's final
+		// iteration can be that.
+		//
+		// Skipping the destroy on a FAILING iteration would be a leak
+		// with no record at all: the repair loop generates again, and
+		// generation does os.RemoveAll on the output directory --
+		// taking the live state AND the run-project marker with it --
+		// so the resources that iteration applied become untraceable
+		// before anything registers them. The run loop registers only
+		// on target_reached, which is precisely an iteration that
+		// ended with no failures, so the two decisions agree by
+		// construction rather than by coincidence.
+		//
+		// Read as late as possible: `failures` here already carries the
+		// criteria checks and the mock destroy, so anything that will
+		// stop this run being a success has landed.
+		keepingSandbox = opts.KeepSandbox && len(failures) == 0
+		if sandboxEnabled && keepingSandbox {
+			stages = append(stages, StageSummary{
+				Layer: "sandbox_deploy", Stage: "destroy", Status: StageStatusSkip,
+				Detail: "kept by --keep; the run registers it as a live deployment with a TTL",
+			})
+		}
+		if sandboxEnabled && !keepingSandbox && liveStateMayHoldResources(outputDir) {
 			// The SAME project the apply used. Destroy refreshes and
 			// removes resources that carry no project_id of their own,
 			// so pointing the provider back at the shared fallback here
@@ -834,6 +875,15 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 			deleteStages, deleteFailures := releaseRunProject(ctx, runtime, outputDir, runProjectID, cleanupEnv)
 			stages = append(stages, deleteStages...)
 			failures = append(failures, deleteFailures...)
+		case keepingSandbox:
+			// Deliberate, not a leak. Saying "destroy them by hand" here
+			// would describe an intentional keep as an incident.
+			stages = append(stages, StageSummary{
+				Layer: "sandbox_deploy", Stage: "run_project_delete", Status: StageStatusSkip,
+				Detail: fmt.Sprintf(
+					"kept %s on purpose (--keep); it is registered as a live deployment and `live teardown` removes it",
+					runProjectID),
+			})
 		default:
 			stages = append(stages, StageSummary{
 				Layer: "sandbox_deploy", Stage: "run_project_delete", Status: StageStatusSkip,

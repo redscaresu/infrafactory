@@ -440,9 +440,14 @@ ui-test:
 # Layer 3 section` fail, because the page correctly reports "credentials
 # ready" where the test expects "credentials missing". The test is
 # right; the environment is contaminated. CI always starts its own.
+# PLAYWRIGHT_PORT moves the whole suite off the default, for running it
+# while a real UI holds :4173. The guard below follows it, so the check
+# and the suite can never disagree about which port matters.
+PLAYWRIGHT_PORT ?= 4173
+
 ui-test-e2e: ui-build
-	@if lsof -tnP -iTCP:4173 -sTCP:LISTEN >/dev/null 2>&1; then 		echo "ERROR: something is already listening on :4173."; 		echo "  Playwright will adopt it, and a credential-bearing UI fails the"; 		echo "  Layer 3 scenario test. Stop it, then re-run."; 		exit 1; 	fi
-	cd ui && npx playwright test
+	@if lsof -tnP -iTCP:$(PLAYWRIGHT_PORT) -sTCP:LISTEN >/dev/null 2>&1; then 		echo "ERROR: something is already listening on :$(PLAYWRIGHT_PORT)."; 		echo "  Playwright will adopt it, and a credential-bearing UI fails the"; 		echo "  Layer 3 scenario test. Stop it, or re-run with"; 		echo "  PLAYWRIGHT_PORT=<free port>."; 		exit 1; 	fi
+	cd ui && PLAYWRIGHT_PORT=$(PLAYWRIGHT_PORT) npx playwright test
 
 # demo-ui records a fresh docs/demo/ui-walkthrough.webm by driving the
 # embedded UI through the full-stack-paris scenario via Playwright. No

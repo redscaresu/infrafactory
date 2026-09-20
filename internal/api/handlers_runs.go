@@ -526,6 +526,21 @@ func startRunHandler(state *serverState, w http.ResponseWriter, r *http.Request,
 		writeJSONError(w, http.StatusUnprocessableEntity, "clean and no_destroy are mutually exclusive")
 		return
 	}
+	if req.Keep && req.NoDestroy {
+		writeJSONError(w, http.StatusUnprocessableEntity,
+			"keep and no_destroy are mutually exclusive: keep registers what it leaves running, no_destroy leaves it untracked")
+		return
+	}
+	// Refused HERE as well as in the CLI, because this is the boundary
+	// the browser reaches. A disabled checkbox is a hint; this is the
+	// guard. Leaving a stack running is the same grant as deploying one
+	// (ADR-0027), so a server started with --allow-layer3 alone gets
+	// runs that always destroy, which is what makes it the safer flag.
+	if req.Keep && state.deployer == nil {
+		writeJSONError(w, http.StatusForbidden,
+			"keep leaves real infrastructure running: start the server with --allow-deploy")
+		return
+	}
 
 	runID, err := state.runStarter.StartRun(r.Context(), req)
 	if err != nil {

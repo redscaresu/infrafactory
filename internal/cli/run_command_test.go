@@ -974,10 +974,7 @@ func TestResolveRunControlsUsesConfigDefaultsWhenFlagsUnset(t *testing.T) {
 	t.Parallel()
 
 	cmd := &cobra.Command{Use: "run"}
-	cmd.Flags().Int("repair-iterations-max", 0, "")
-	cmd.Flags().Bool("clean", false, "")
-	cmd.Flags().Bool("no-destroy", false, "")
-	cmd.Flags().Bool("reset-mocks", false, "")
+	registerRunFlags(cmd, false)
 
 	cfg := config.Default()
 	cfg.Agent.RepairIterationsMax = 7
@@ -995,10 +992,7 @@ func TestResolveRunControlsUsesFlagOverridesWhenProvided(t *testing.T) {
 	t.Parallel()
 
 	cmd := &cobra.Command{Use: "run"}
-	cmd.Flags().Int("repair-iterations-max", 0, "")
-	cmd.Flags().Bool("clean", false, "")
-	cmd.Flags().Bool("no-destroy", false, "")
-	cmd.Flags().Bool("reset-mocks", false, "")
+	registerRunFlags(cmd, false)
 	if err := cmd.Flags().Set("repair-iterations-max", "2"); err != nil {
 		t.Fatalf("set flag: %v", err)
 	}
@@ -1050,10 +1044,7 @@ func TestResolveRunControlsRejectsInvalidValues(t *testing.T) {
 			t.Parallel()
 
 			cmd := &cobra.Command{Use: "run"}
-			cmd.Flags().Int("repair-iterations-max", 0, "")
-			cmd.Flags().Bool("clean", false, "")
-			cmd.Flags().Bool("no-destroy", false, "")
-			cmd.Flags().Bool("reset-mocks", false, "")
+			registerRunFlags(cmd, false)
 			tc.configureCmd(cmd)
 
 			_, err := resolveRunControls(cmd, &CommandRuntime{Config: tc.cfg})
@@ -1071,10 +1062,7 @@ func TestResolveRunControlsRejectsMutuallyExclusiveCleanAndNoDestroy(t *testing.
 	t.Parallel()
 
 	cmd := &cobra.Command{Use: "run"}
-	cmd.Flags().Int("repair-iterations-max", 0, "")
-	cmd.Flags().Bool("clean", false, "")
-	cmd.Flags().Bool("no-destroy", false, "")
-	cmd.Flags().Bool("reset-mocks", false, "")
+	registerRunFlags(cmd, false)
 	_ = cmd.Flags().Set("clean", "true")
 	_ = cmd.Flags().Set("no-destroy", "true")
 
@@ -1444,10 +1432,7 @@ func newRunCommandForTest(opts runtimeOptions) *cobra.Command {
 	}
 	cmd.Flags().String("config", config.DefaultPath, "")
 	cmd.Flags().String("output", string(OutputModeHuman), "")
-	cmd.Flags().Int("repair-iterations-max", 0, "")
-	cmd.Flags().Bool("clean", false, "")
-	cmd.Flags().Bool("no-destroy", false, "")
-	cmd.Flags().Bool("reset-mocks", false, "")
+	registerRunFlags(cmd, false)
 	return cmd
 }
 

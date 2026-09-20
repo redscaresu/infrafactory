@@ -73,6 +73,9 @@ export interface ScenarioLayer3StatusResponse {
   cloud?: string;
   // What the server WILL do, not a default this page may override.
   server_allows_layer3: boolean;
+  // Keeping a stack is a separate grant from applying one: `--allow-deploy`,
+  // not `--allow-layer3`.
+  server_allows_keep: boolean;
   credentials_ready: boolean;
   missing_credentials: string[];
   ready: boolean;

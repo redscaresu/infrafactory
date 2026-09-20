@@ -241,12 +241,28 @@ func newRunCmd(cfg *rootConfig) *cobra.Command {
 		RunE:  cfg.withRuntime("run", runRunCommand),
 	}
 
+	registerRunFlags(cmd, true)
+
+	return cmd
+}
+
+// registerRunFlags defines every flag resolveRunControls reads.
+//
+// One definition because resolveRunControls treats an undefined flag as
+// a usage error, so a command built without one of these fails before
+// it does anything -- and the test builders used to hand-roll their own
+// copy of this list. Adding --keep there turned a whole golden run into
+// a usage dump, which is the cheap version of the same bug shipping.
+//
+// resetMocksDefault differs by caller on purpose: the real command
+// resets the mocks, and unit tests must not reach for an HTTP mock that
+// is not running.
+func registerRunFlags(cmd *cobra.Command, resetMocksDefault bool) {
 	cmd.Flags().Int("repair-iterations-max", 0, "Override failure-triggered retry budget for run loop (0 uses config)")
 	cmd.Flags().Bool("clean", false, "Force a clean run by resetting mock state and discarding prior Terraform state")
 	cmd.Flags().Bool("no-destroy", false, "Skip destruction after a successful run to preserve state for incremental follow-up runs")
-	cmd.Flags().Bool("reset-mocks", true, "POST /mock/reset to every configured mock before iter 1 on a clean run; ignored when run_mode=incremental")
-
-	return cmd
+	cmd.Flags().Bool("keep", false, "On success, leave the real infrastructure running and register it as a live deployment under the scenario's service.ttl")
+	cmd.Flags().Bool("reset-mocks", resetMocksDefault, "POST /mock/reset to every configured mock before iter 1 on a clean run; ignored when run_mode=incremental")
 }
 
 func newMockCmd(cfg *rootConfig) *cobra.Command {

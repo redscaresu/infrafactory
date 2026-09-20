@@ -54,6 +54,15 @@ type StartRunRequest struct {
 	ScenarioPath string `json:"-"`
 	Clean        bool   `json:"clean"`
 	NoDestroy    bool   `json:"no_destroy"`
+
+	// Keep leaves the real infrastructure running and registers it as
+	// a live deployment under the scenario's TTL.
+	//
+	// Gated on --allow-deploy, not --allow-layer3. Leaving a stack up
+	// is the same class of harm as deploying one (ADR-0027): what
+	// makes `run` safe on a layer3-only server is that it always
+	// destroys, and --keep is precisely the removal of that.
+	Keep bool `json:"keep"`
 }
 
 type RunStarter interface {

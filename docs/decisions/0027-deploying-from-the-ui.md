@@ -891,3 +891,51 @@ that may be running and billing, with no report anywhere.
 free: `beginDeploy` succeeds because this tab has no entry, so for its whole
 duration the panel labelled as this deploy streams the other apply's progress, and
 the refusal then discards it.
+
+
+## Amendment, 2026-09-20 (S186): `run --keep` is the deploy grant, not the layer3 one
+
+`run --keep` leaves a successful run's real infrastructure standing and registers it
+as a live deployment. It is gated on **`--allow-deploy`**, the same grant as `deploy`.
+
+The tempting reading is that `--keep` is a *run* option and therefore belongs behind
+`--allow-layer3`, which already permits real applies. That reading misses what makes
+a layer3-only server the safer one. It is not that its applies are smaller; it is that
+**every run destroys what it made in the same run.** An operator who granted
+`--allow-layer3` consented to spending money for the duration of a run, not to leaving
+a load balancer and an instance running afterwards. `--keep` removes exactly the
+property that consent was given against, so it needs the grant that covers infrastructure
+outliving the request — which is what ADR-0027 defined `--allow-deploy` to mean.
+
+Refused at the HTTP boundary (`403`), not only in the UI. The checkbox being disabled
+is a hint; `state.deployer == nil` is the guard, and it holds for a request this page
+did not send.
+
+### What keeps it from being a leak with better manners
+
+Three things, all of which `deploy` already had, which is why `--keep` reuses
+`registerDeployment` rather than growing its own path:
+
+- **A deadline.** The record carries `service.ttl`, so `live reap` retires it (ADR-0024).
+  A scenario with no `service:` block therefore cannot be kept, and the run refuses
+  **before generation** rather than after an apply — a `--keep` discovered to be
+  impossible at the end would destroy the stack it was asked to preserve.
+- **A handle.** The run project is not deleted, and the deployment record names it,
+  so the stray-project check has something that explains it. Registration happens
+  *before* that check for exactly this reason.
+- **Its own state.** The next run of the same scenario regenerates into the run's
+  output directory and overwrites the state in place; the state is the only thing that
+  can destroy these resources. So the keep copies the whole working tree — state,
+  run-project marker and the initialised `.terraform` that `tofu destroy` needs,
+  since nothing re-runs `init` before a teardown.
+
+### `--keep` and `--no-destroy` are mutually exclusive
+
+Both skip a destroy, and they mean opposite things about what happens next.
+`--no-destroy` preserves state for an incremental follow-up run and leaves the
+infrastructure **untracked** — no record, no TTL, nothing for `live reap` to find.
+`--keep` leaves it tracked. Accepting both would make it ambiguous which was meant,
+on the one flag pair where being wrong costs money.
+
+Layer 2 is destroyed either way under `--keep`. Tearing down the mock is free, proves
+something, and skipping it would only leave mockway dirty for the next run.

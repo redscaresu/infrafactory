@@ -106,11 +106,12 @@ Usage:
   run <scenario> [flags]
 
 Flags:
-      --clean                       
+      --clean                       Force a clean run by resetting mock state and discarding prior Terraform state
       --config string                (default "./infrafactory.yaml")
   -h, --help                        help for run
-      --no-destroy                  
+      --keep                        On success, leave the real infrastructure running and register it as a live deployment under the scenario's service.ttl
+      --no-destroy                  Skip destruction after a successful run to preserve state for incremental follow-up runs
       --output string                (default "human")
-      --repair-iterations-max int   
-      --reset-mocks
+      --repair-iterations-max int   Override failure-triggered retry budget for run loop (0 uses config)
+      --reset-mocks                 POST /mock/reset to every configured mock before iter 1 on a clean run; ignored when run_mode=incremental
 
