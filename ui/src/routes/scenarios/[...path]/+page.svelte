@@ -58,6 +58,7 @@
   let noDestroy = false;
   let keep = false;
   let continueOnDrift = false;
+  let holdout = false;
   // Reflects what the SERVER decided at start time. This page reports it;
   // it cannot change it (ADR-0026).
   $: layer3Enabled = layer3Status?.server_allows_layer3 === true;
@@ -75,6 +76,7 @@
   // Ticking Keep and then ticking no-destroy must not leave a stale
   // `keep: true` on the request.
   $: if (keepDisabled && keep) keep = false;
+  $: if (!layer3Enabled && holdout) holdout = false;
   let validationErrors: { path: string; message: string }[] = [];
   let validationState: "idle" | "checking" | "valid" | "invalid" = "idle";
   let validationTimer: ReturnType<typeof setTimeout> | null = null;
@@ -446,7 +448,7 @@
     }
 
     try {
-      finish(target, toDeployOutcome(await api.deployScenario(target)));
+      finish(target, toDeployOutcome(await api.deployScenario(target, "", holdout)));
     } catch (err) {
       const message = err instanceof Error ? err.message : "The deploy failed.";
 
@@ -551,7 +553,7 @@
     running = true;
     status = "Starting run...";
     try {
-      const resp = await api.startRun(detail.name, normalizeRunOptions({ clean, no_destroy: noDestroy, keep, continue_on_drift: continueOnDrift }));
+      const resp = await api.startRun(detail.name, normalizeRunOptions({ clean, no_destroy: noDestroy, keep, continue_on_drift: continueOnDrift, holdout }));
       status = `Run started: ${resp.run_id}`;
       window.location.href = encodeLiveURL(detail.name, resp.run_id);
     } catch (err) {
@@ -747,7 +749,24 @@
       <input type="checkbox" bind:checked={continueOnDrift} data-testid="scenario-continue-on-drift" />
       <span>Continue on drift (`--continue-on-drift`)</span>
     </label>
+    <!-- Applies to Run and to Deploy: both end with a stack the
+         holdout can probe. Untickable without Layer 3, because there
+         is then no real stack and the server refuses the flag. -->
+    <label
+      class="flex items-center gap-2 rounded border px-3 py-2 text-xs {layer3Enabled
+        ? 'border-slate-300 bg-white text-slate-800'
+        : 'border-slate-200 bg-slate-50 text-slate-400'}"
+    >
+      <input type="checkbox" bind:checked={holdout} disabled={!layer3Enabled} data-testid="scenario-holdout" />
+      <span>Check holdouts (`--holdout`)</span>
+    </label>
   </div>
+  {#if holdout}
+    <p class="mt-2 text-xs text-slate-600" data-testid="scenario-holdout-note">
+      Probes the running stack with criteria the generator was never shown. A failure ends the run
+      without a repair — fixing against a holdout is the overfitting it exists to measure.
+    </p>
+  {/if}
   <p class="mt-2 text-xs text-slate-600" data-testid="scenario-drift-note">
     {#if continueOnDrift}
       If the second plan is not empty, the run carries on and the repair loop is told about it — which

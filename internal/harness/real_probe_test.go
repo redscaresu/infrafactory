@@ -12,6 +12,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestRealProbeHarnessConnectivityAndHTTP(t *testing.T) {
@@ -176,4 +179,42 @@ func splitHostPort(t *testing.T, address string) (string, int) {
 		t.Fatalf("lookup port %q: %v", portStr, err)
 	}
 	return host, port
+}
+
+// `blocked` is asked once. Retrying waits for a condition to arrive,
+// which is right for `success` and meaningless here: an open port does
+// not close itself while you wait. All the retry buys is the full
+// window's delay before reporting what the first dial already knew --
+// and the one place this runs is a holdout, where the value is a fast
+// clear answer.
+func TestConnectivityProbeAsksBlockedOnce(t *testing.T) {
+	dials := 0
+	h := NewRealProbeHarness(ProbeConfig{Timeout: time.Second, Retries: 60})
+	h.dialFunc = func(context.Context, string, string) (net.Conn, error) {
+		dials++
+		// The port IS open, so `blocked` is not satisfied. The old
+		// code retried this 60 times.
+		return &net.TCPConn{}, nil
+	}
+
+	err := h.runConnectivityProbe(context.Background(), "203.0.113.1", 22, "blocked")
+
+	require.Error(t, err, "an open port fails a blocked check")
+	assert.Equal(t, 1, dials, "a blocked check that fails must report immediately, not after the full retry window")
+}
+
+// ...and `success` keeps retrying, because that one really is waiting
+// for infrastructure to come up.
+func TestConnectivityProbeStillRetriesSuccess(t *testing.T) {
+	dials := 0
+	h := NewRealProbeHarness(ProbeConfig{Timeout: time.Millisecond, Retries: 3})
+	h.dialFunc = func(context.Context, string, string) (net.Conn, error) {
+		dials++
+		return nil, errors.New("connection refused")
+	}
+
+	err := h.runConnectivityProbe(context.Background(), "203.0.113.1", 80, "success")
+
+	require.Error(t, err)
+	assert.Equal(t, 3, dials, "waiting for a stack to come up is what retries are for")
 }

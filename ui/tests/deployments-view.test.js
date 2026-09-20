@@ -21,7 +21,8 @@ import {
   teardownOutcome,
   teardownPrompt,
   ttlLabel,
-  versionBadge
+  versionBadge,
+  holdoutBadge
 } from "../src/lib/deployments-view.js";
 
 // The whole reason this page is specified the way it is: a blank cell
@@ -791,4 +792,23 @@ test("reapable counts only what live reap would act on", () => {
   );
   assert.equal(reapable([]), 0);
   assert.equal(reapable(undefined), 0);
+});
+
+// Three states, and the distinction between two of them is the point:
+// "not run" is not "passed". A green badge on an unchecked deployment
+// would manufacture the false confidence a holdout exists to remove.
+test("holdoutBadge keeps unchecked distinct from passed", () => {
+  assert.equal(holdoutBadge("pass").label, "unseen checks passed");
+  assert.equal(holdoutBadge("fail").label, "unseen check FAILED");
+  assert.equal(holdoutBadge("").label, "not checked");
+  assert.equal(holdoutBadge(undefined).label, "not checked");
+  assert.notEqual(holdoutBadge("").tone, holdoutBadge("pass").tone);
+});
+
+// Unlike health, a holdout failure keeps its alarm after release:
+// health describes a service that no longer exists, but "this
+// configuration was fitted to its visible checks" describes the
+// configuration, which outlives the deployment.
+test("holdoutBadge does not mute a failure", () => {
+  assert.match(holdoutBadge("fail").tone, /rose/);
 });

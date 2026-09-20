@@ -42,9 +42,22 @@ func newDeployCmd(cfg *rootConfig) *cobra.Command {
 		RunE:  cfg.withRuntime("deploy", runDeployCommand),
 	}
 
-	cmd.Flags().String("ttl", "", "Override the scenario's service.ttl (e.g. 2h). Still bounded by the schema maximum")
+	registerDeployFlags(cmd)
 
 	return cmd
+}
+
+// registerDeployFlags defines every flag runDeployCommand reads.
+//
+// One definition because an undefined flag is a USAGE ERROR at read
+// time, not a zero value -- so a caller that builds its own cobra
+// command and misses one turns every deploy into "flag accessed but not
+// defined". There are four such callers (the real command, the UI
+// deployer, and two test builders), and adding --holdout broke three of
+// them at once. The same fix registerRunFlags made for `run`.
+func registerDeployFlags(cmd *cobra.Command) {
+	cmd.Flags().String("ttl", "", "Override the scenario's service.ttl (e.g. 2h). Still bounded by the schema maximum")
+	cmd.Flags().Bool("holdout", false, "Probe the deployed stack with criteria the generator was never shown (scenarios/holdout/)")
 }
 
 func runDeployCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) error {
@@ -71,6 +84,10 @@ func runDeployCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime
 	ttl, err := deployTTL(cmd, *sc.Service)
 	if err != nil {
 		return &CLIError{Op: "deploy", Code: errorCodeUsage, Err: err}
+	}
+	holdout, err := cmd.Flags().GetBool("holdout")
+	if err != nil {
+		return &CLIError{Op: "deploy", Code: errorCodeUsage, Err: fmt.Errorf("read --holdout flag: %w", err)}
 	}
 
 	if !runtime.Config.Validation.Layers.SandboxDeploy.Enabled {
@@ -171,12 +188,36 @@ func runDeployCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime
 
 	stages, failures = appendSandboxDeployResult(stages, failures, deployResult, deployErr)
 
+	// Probed only when the apply worked. A holdout is mostly
+	// `expect: blocked`, and a blocked check passes trivially against a
+	// stack that does not exist -- so running it after a failed apply
+	// would report the strongest possible pass for the weakest possible
+	// reason.
+	holdoutResult := ""
+	if holdout && deployErr == nil {
+		holdoutStages, holdoutFailures, probed := runHoldouts(cmd.Context(), runtime, sc.Name, workDir)
+		stages = append(stages, holdoutStages...)
+		failures = append(failures, holdoutFailures...)
+		// Recorded only when a check actually RAN. A scenario with no
+		// holdout files produces a clean discovery and no failures, and
+		// storing "pass" for that would make the estate page say the
+		// unseen checks passed for a deployment nothing ever probed --
+		// exactly the false coverage the three-state badge exists to
+		// prevent.
+		switch {
+		case len(holdoutFailures) > 0:
+			holdoutResult = livestore.HoldoutFail
+		case probed:
+			holdoutResult = livestore.HoldoutPass
+		}
+	}
+
 	// Registered from whatever the state shows, whether or not the apply
 	// succeeded. A half-finished apply leaves real resources behind, and
 	// the record is the only thing that will bring the reaper back to
 	// them -- so it is written on the failure path too, not just the
 	// happy one.
-	registerStages, registerFailures := registerDeployment(store, sc, deploymentID, workDir, runProjectID, ttl)
+	registerStages, registerFailures := registerDeployment(store, sc, deploymentID, workDir, runProjectID, ttl, holdoutResult)
 	stages = append(stages, registerStages...)
 	failures = append(failures, registerFailures...)
 	recorded := len(registerFailures) == 0 && len(registerStages) > 0 && registerStages[0].Status == StageStatusPass
@@ -281,6 +322,7 @@ func registerDeployment(
 	sc scenario.Scenario,
 	deploymentID, workDir, runProjectID string,
 	ttl time.Duration,
+	holdoutResult string,
 ) ([]StageSummary, []FailureSummary) {
 	// Deliberately NOT gated on live state existing. Since ADR-0025 the
 	// project is created before the apply, so an apply that fails at
@@ -328,6 +370,7 @@ func registerDeployment(
 		AddressResource: addressResource,
 		Cloud:           sc.Cloud,
 		State:           livestore.StateLive,
+		Holdout:         holdoutResult,
 		WorkDir:         workDir,
 		CreatedAt:       now,
 		ExpiresAt:       now.Add(ttl),

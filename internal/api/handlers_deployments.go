@@ -380,6 +380,11 @@ type deployRequest struct {
 	// which the schema already bounds -- there is deliberately no value
 	// meaning "forever".
 	TTL string `json:"ttl,omitempty"`
+
+	// Holdout probes the deployed stack with criteria the generator was
+	// never shown. Not gated on a grant of its own: it only reads, and
+	// the deploy it accompanies already needed --allow-deploy.
+	Holdout bool `json:"holdout,omitempty"`
 }
 
 // deployHandler creates a live deployment.
@@ -452,7 +457,7 @@ func deployHandler(state *serverState) http.HandlerFunc {
 		// they cover different exits.
 		defer progress.Close()
 
-		result, err := state.deployer.Deploy(ctx, req.Scenario, req.TTL, progress)
+		result, err := state.deployer.Deploy(ctx, req.Scenario, req.TTL, req.Holdout, progress)
 
 		// Flushed BEFORE the response.
 		//

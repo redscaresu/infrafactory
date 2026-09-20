@@ -61,7 +61,7 @@ func TestStageProgressReachesTheWebsocketThroughTheRealChain(t *testing.T) {
 	})
 
 	sink := api.NewProgressSink(hub, "deploy_progress", "web-live-paris")
-	_, err := deployer.Deploy(context.Background(), "web-live-paris", "", sink)
+	_, err := deployer.Deploy(context.Background(), "web-live-paris", "", false, sink)
 	require.NoError(t, err)
 	require.NoError(t, sink.Close())
 

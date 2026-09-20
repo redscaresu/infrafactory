@@ -8,7 +8,8 @@ test("normalizeRunOptions keeps no_destroy when set alone", () => {
     clean: false,
     no_destroy: true,
     keep: false,
-    continue_on_drift: false
+    continue_on_drift: false,
+    holdout: false
   });
 });
 
@@ -17,7 +18,8 @@ test("normalizeRunOptions drops no_destroy when clean is also set", () => {
     clean: true,
     no_destroy: false,
     keep: false,
-    continue_on_drift: false
+    continue_on_drift: false,
+    holdout: false
   });
 });
 
@@ -29,7 +31,8 @@ test("normalizeRunOptions refuses to carry a layer3 request", () => {
     clean: false,
     no_destroy: false,
     keep: false,
-    continue_on_drift: false
+    continue_on_drift: false,
+    holdout: false
   });
 });
 
@@ -38,7 +41,8 @@ test("normalizeRunOptions carries keep", () => {
     clean: false,
     no_destroy: false,
     keep: true,
-    continue_on_drift: false
+    continue_on_drift: false,
+    holdout: false
   });
 });
 
@@ -51,7 +55,8 @@ test("normalizeRunOptions drops no_destroy when keep is also set", () => {
     clean: false,
     no_destroy: false,
     keep: true,
-    continue_on_drift: false
+    continue_on_drift: false,
+    holdout: false
   });
 });
 
@@ -62,7 +67,8 @@ test("normalizeRunOptions allows clean alongside keep", () => {
     clean: true,
     no_destroy: false,
     keep: true,
-    continue_on_drift: false
+    continue_on_drift: false,
+    holdout: false
   });
 });
 
@@ -95,10 +101,27 @@ test("normalizeRunOptions carries continue_on_drift alongside keep", () => {
     clean: false,
     no_destroy: false,
     keep: true,
-    continue_on_drift: true
+    continue_on_drift: true,
+    holdout: false
   });
 });
 
 test("normalizeRunOptions defaults continue_on_drift to false", () => {
   assert.equal(normalizeRunOptions({}).continue_on_drift, false);
+});
+
+// A holdout can run under any combination of the others, so the flag
+// has to survive them all.
+test("normalizeRunOptions carries holdout alongside keep", () => {
+  assert.deepEqual(normalizeRunOptions({ keep: true, holdout: true }), {
+    clean: false,
+    no_destroy: false,
+    keep: true,
+    continue_on_drift: false,
+    holdout: true
+  });
+});
+
+test("normalizeRunOptions defaults holdout to false", () => {
+  assert.equal(normalizeRunOptions({}).holdout, false);
 });

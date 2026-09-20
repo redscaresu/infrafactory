@@ -229,7 +229,7 @@ func (d *LiveDeployer) release(scenario string) {
 }
 
 // Deploy applies a scenario and leaves it running under a TTL.
-func (d *LiveDeployer) Deploy(ctx context.Context, scenarioName, ttl string, progress io.Writer) (api.ActionResult, error) {
+func (d *LiveDeployer) Deploy(ctx context.Context, scenarioName, ttl string, holdout bool, progress io.Writer) (api.ActionResult, error) {
 	// A NAME, resolved here, never a path from the caller. `deploy`
 	// takes a filesystem path, and accepting one over HTTP would let a
 	// request name any YAML on the machine -- including one outside the
@@ -271,10 +271,15 @@ func (d *LiveDeployer) Deploy(ctx context.Context, scenarioName, ttl string, pro
 	}
 
 	cmd := &cobra.Command{Use: "deploy"}
-	cmd.Flags().String("ttl", "", "")
+	registerDeployFlags(cmd)
 	cmd.Flags().String("output", string(OutputModeJSON), "")
 	if ttl != "" {
 		if err := cmd.Flags().Set("ttl", ttl); err != nil {
+			return api.ActionResult{}, api.NothingStarted("", err)
+		}
+	}
+	if holdout {
+		if err := cmd.Flags().Set("holdout", "true"); err != nil {
 			return api.ActionResult{}, api.NothingStarted("", err)
 		}
 	}

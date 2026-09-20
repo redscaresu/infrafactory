@@ -1,0 +1,43 @@
+scenario: web-live-paris-unseen
+type: holdout
+references: web-live-paris
+version: "1.0"
+cloud: scaleway
+# WHY EVERY CHECK HERE IS A NEGATIVE ONE
+#
+# The training scenario's criteria are all POSITIVE -- the load balancer
+# serves on port 80, the region is fr-par. The generator sees them and
+# the repair loop feeds their failures back, so it optimises against
+# them. Nothing in that set punishes a configuration that is merely too
+# permissive: the cheapest way to be reachable on 80 is to be reachable
+# on everything.
+#
+# So for each thing the scenario asks for, this asserts that the
+# sloppiest configuration which would still satisfy it is absent.
+#
+# `description` is deliberately ONE LINE: the scenario listing walks
+# this directory too, so it renders on a dashboard card.
+description: Checks web-live-paris never saw, probed against the running stack.
+
+acceptance_criteria:
+  # Nothing in web-live-paris mentions SSH. An instance reachable on 22
+  # from the public internet satisfies every visible criterion and is
+  # still wrong.
+  - type: connectivity
+    from: public_internet
+    to: compute
+    port: 22
+    expect: blocked
+
+  # The scenario asks for one frontend, on 80. A load balancer also
+  # answering on 443 is scope the generator invented, and no positive
+  # check would notice.
+  #
+  # Expected to PASS. That is deliberate: a holdout whose every check
+  # fails cannot be told from a broken holdout, so one check here exists
+  # to prove the probe reaches the stack and can return a clean answer.
+  - type: connectivity
+    from: public_internet
+    to: load_balancer
+    port: 443
+    expect: blocked

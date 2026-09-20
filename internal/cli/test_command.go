@@ -506,6 +506,11 @@ type testExecutionOptions struct {
 	// possibly contorting a correct config to satisfy a lying mock.
 	ContinueOnDrift bool
 
+	// Holdout probes the running stack with criteria the generator was
+	// never shown. Off by default: it costs a round of real probes, and
+	// a scenario with no holdout gets nothing from it.
+	Holdout bool
+
 	// LogScope stamps the stage-progress entries this execution emits.
 	//
 	// `run` reaches here through `executeTest`, and `runIteration`
@@ -828,31 +833,13 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 		stages = append(stages, criteriaStages...)
 		failures = append(failures, criteriaFailures...)
 
-		// The mock destroy hits the same wall as the real one. mockway
-		// reproduces the v2alpha1 refusal faithfully (mockway#28) -- which
-		// is the mock doing its job, and the reason Layer 2 stopped
-		// tearing down the moment it started telling the truth. Same
-		// workaround, pointed at the mock.
+		holdoutStages, holdoutFailures := holdoutAfterCriteria(ctx, runtime, sc, opts, failures)
+		stages = append(stages, holdoutStages...)
+		failures = append(failures, holdoutFailures...)
 
 		destroyResult, destroyErr := runtime.Deps.Destroy.Run(ctx, outputDir, env)
 		stages, failures = appendDestroyResult(stages, failures, destroyResult, destroyErr)
-		// Clean up whenever real resources MIGHT exist, not only when the
-		// apply succeeded. tofu creates resources one at a time and writes
-		// each to state as it goes, so an apply that dies partway is
-		// precisely the case that has left infrastructure behind -- the
-		// lb-paris canary leaked a real project and load-balancer IP
-		// exactly this way, because cleanup was gated on success.
-		//
-		// The live state is the ONLY gate, deliberately. Keying off "did
-		// this run attempt an apply" was both redundant and wrong: the
-		// pre-apply validations can refuse before any attempt while an
-		// earlier run's resources are still recorded, and those still need
-		// destroying. What matters is whether resources may exist, not who
-		// created them. a failure in init or plan happens
-		// before any resource exists and writes no live state, so cleaning
-		// up there would destroy nothing and then report an unverifiable
-		// sweep, telling the operator to chase a leak that cannot exist.
-		// run_command.go uses the same signal.
+
 		// --keep keeps a SUCCESSFUL stack, and only the run's final
 		// iteration can be that.
 		//
@@ -929,6 +916,13 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 		criteriaStages, criteriaFailures := evaluateSupportedCriteria(ctx, sc, runtime, deployResult)
 		stages = append(stages, criteriaStages...)
 		failures = append(failures, criteriaFailures...)
+
+		// The SAME call as the destroy path above. --holdout is accepted
+		// on every run, so a run that skips destruction must not also
+		// silently skip the holdout and still report target_reached.
+		holdoutStages, holdoutFailures := holdoutAfterCriteria(ctx, runtime, sc, opts, failures)
+		stages = append(stages, holdoutStages...)
+		failures = append(failures, holdoutFailures...)
 		detail := ""
 		if opts.SkipDestroy {
 			detail = "skipped by --no-destroy"

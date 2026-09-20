@@ -182,13 +182,30 @@ type fakeRealProbeHarness struct {
 	lastCtx  context.Context
 	lastName string
 	lastDir  string
+
+	// failWhen lets one harness answer differently for the scenario's
+	// own probe and for a holdout's, which is the only way to test that
+	// a holdout fails while every visible check passes.
+	//
+	// Keyed on the CHECKS, not the scenario name: since holdouts probe
+	// under the TRAINING scenario's name -- so `{{scenario_name}}`
+	// resolves against the stack that exists -- the name no longer
+	// distinguishes the two callers.
+	failWhen   func([]harness.ProbeCheck) *harness.RealProbeResult
+	lastChecks []harness.ProbeCheck
 }
 
-func (f *fakeRealProbeHarness) Run(ctx context.Context, workDir string, scenarioName string, _ []harness.ProbeCheck) (*harness.RealProbeResult, error) {
+func (f *fakeRealProbeHarness) Run(ctx context.Context, workDir string, scenarioName string, checks []harness.ProbeCheck) (*harness.RealProbeResult, error) {
 	f.calls++
 	f.lastCtx = ctx
 	f.lastName = scenarioName
 	f.lastDir = workDir
+	f.lastChecks = append([]harness.ProbeCheck(nil), checks...)
+	if f.failWhen != nil {
+		if res := f.failWhen(checks); res != nil {
+			return res, nil
+		}
+	}
 	return f.result, f.err
 }
 

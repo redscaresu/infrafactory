@@ -137,23 +137,39 @@ func (h *RealProbeHarness) runConnectivityProbe(ctx context.Context, host string
 		return fmt.Errorf("connectivity probe requires port between 1 and 65535")
 	}
 	address := net.JoinHostPort(host, strconv.Itoa(port))
-	err := h.retry(ctx, func(ctx context.Context) error {
+	expectedSuccess := expect == "success"
+
+	probe := func(ctx context.Context) error {
 		conn, err := h.dialFunc(ctx, "tcp", address)
 		if err == nil {
 			_ = conn.Close()
 		}
-		expectedSuccess := expect == "success"
 		if expectedSuccess && err != nil {
 			return fmt.Errorf("tcp connect %s: %w", address, err)
 		}
 		if !expectedSuccess && err == nil {
 			return fmt.Errorf("tcp connect %s unexpectedly succeeded", address)
 		}
-		if !expectedSuccess {
-			return nil
-		}
 		return nil
-	})
+	}
+
+	// `blocked` is asked ONCE. Retrying waits for a condition to
+	// arrive, which is right for `success` -- a load balancer takes
+	// time to come up -- and meaningless here: an open port does not
+	// close itself while you wait. All the retry buys is the full
+	// window's delay (60 x 5s = five minutes) before reporting
+	// something the first dial already knew.
+	//
+	// It is also the wrong kind of wrong. A `blocked` check that is
+	// slow to fail reads as a hang, and the one place this runs is a
+	// holdout, where the whole value is a fast clear answer about a
+	// port nobody asked to be open.
+	var err error
+	if expectedSuccess {
+		err = h.retry(ctx, probe)
+	} else {
+		err = probe(ctx)
+	}
 	if err != nil {
 		return fmt.Errorf("connectivity probe %s: %w", address, err)
 	}

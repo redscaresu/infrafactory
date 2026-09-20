@@ -105,7 +105,7 @@ func TestRegisterKeptRunRecordsTheProjectAndCopiesTheStateOut(t *testing.T) {
 	require.NoError(t, os.WriteFile(
 		filepath.Join(runtime.OutputDir(), ".terraform", "providers", "plugin"), []byte("binary"), 0o755))
 
-	stages, failures := registerKeptRun(runtime, scenarioWithService(t))
+	stages, failures := registerKeptRun(runtime, scenarioWithService(t), nil)
 	assert.Empty(t, failures)
 
 	store := livestore.NewFilesystemStore(h.LivestoreRoot())
@@ -140,7 +140,7 @@ func TestRegisterKeptRunFailsLoudlyWhenNoProjectWasRecorded(t *testing.T) {
 	runtime := keepRuntime(t, h, true)
 	require.NoError(t, os.MkdirAll(runtime.OutputDir(), 0o755))
 
-	_, failures := registerKeptRun(runtime, scenarioWithService(t))
+	_, failures := registerKeptRun(runtime, scenarioWithService(t), nil)
 
 	require.Len(t, failures, 1)
 	assert.Contains(t, failures[0].Detail, "cannot be reaped")
@@ -164,7 +164,7 @@ func TestRegisterKeptRunStillRecordsAStackItCouldNotCopy(t *testing.T) {
 		t.Skip("running as a user that can read a 0000 directory")
 	}
 
-	stages, failures := registerKeptRun(runtime, scenarioWithService(t))
+	stages, failures := registerKeptRun(runtime, scenarioWithService(t), nil)
 
 	store := livestore.NewFilesystemStore(h.LivestoreRoot())
 	deployments, _, err := store.List()
@@ -330,12 +330,10 @@ func TestRunKeepLeavesTheStackUpAndRegistersIt(t *testing.T) {
 	assert.Zero(t, sandboxDestroy.calls, "--keep exists to leave the stack running")
 	assert.Zero(t, runProject.deletes, "deleting the project would take the kept stack with it")
 
-	// A holdout runs against the SAME output directory: with Layer 3
-	// on it would create its own project, overwrite the marker, apply
-	// over this run's state and destroy -- taking the kept stack with
-	// it and recording the wrong project.
-	assert.Contains(t, stdout.String(), "holdout/skipped: skip")
-	assert.Contains(t, stdout.String(), "would destroy the kept stack")
+	// No holdout was asked for, so none ran. Holdouts are probe-only
+	// now and read the running stack rather than re-applying over it,
+	// so `--keep` no longer has to skip them.
+	assert.NotContains(t, stdout.String(), "holdout/discovery")
 
 	deployments, _, err := livestore.NewFilesystemStore(h.LivestoreRoot()).List()
 	require.NoError(t, err)

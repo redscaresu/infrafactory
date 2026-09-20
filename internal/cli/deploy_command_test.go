@@ -108,7 +108,7 @@ resource "scaleway_block_volume" "data" {
 func runDeploy(t *testing.T, rt *CommandRuntime, scenarioPath string, out *strings.Builder, args ...string) error {
 	t.Helper()
 	cmd := &cobra.Command{Use: "deploy"}
-	cmd.Flags().String("ttl", "", "")
+	registerDeployFlags(cmd)
 	cmd.Flags().String("output", string(OutputModeHuman), "")
 	require.NoError(t, cmd.ParseFlags(args))
 	cmd.SetOut(out)
@@ -357,7 +357,7 @@ func TestRegisterDeploymentFailsWhenStateNamesNoProject(t *testing.T) {
 		[]byte(`{"resources":[]}`), 0o600))
 
 	sc := scenarioWithService(t)
-	stages, failures := registerDeployment(store, sc, "dep-x", workDir, "", time.Hour)
+	stages, failures := registerDeployment(store, sc, "dep-x", workDir, "", time.Hour, "")
 
 	require.Len(t, failures, 1)
 	assert.Contains(t, failures[0].Detail, "cannot be reaped")
@@ -371,7 +371,7 @@ func TestRegisterDeploymentRecordsTheProjectWithoutState(t *testing.T) {
 	workDir := filepath.Join(h.WorkspaceDir, "empty")
 	require.NoError(t, os.MkdirAll(workDir, 0o755))
 
-	stages, failures := registerDeployment(store, scenarioWithService(t), "dep-y", workDir, "run-proj-1", time.Hour)
+	stages, failures := registerDeployment(store, scenarioWithService(t), "dep-y", workDir, "run-proj-1", time.Hour, "")
 
 	assert.Empty(t, failures)
 	require.Len(t, stages, 1)
