@@ -236,7 +236,21 @@ test.describe('Deploy from the scenario page', () => {
     });
 
     await page.goto('/scenarios/training/web-app-paris');
+
+    // The request must be IN FLIGHT before we navigate, and the test has
+    // to pin that rather than hope for it. `click()` is a floating
+    // promise and Playwright runs actionability checks before
+    // dispatching, so the goto below can win the race -- and the second
+    // scenario's Deploy button carries the same test id. The click then
+    // lands on the page we moved TO, `release()` opens its confirmation
+    // legitimately, and the test fails having proved nothing about the
+    // guard. That flake blocked CI on two consecutive PRs.
+    const previewRequested = page.waitForRequest((req) =>
+      req.url().includes('/api/deployments/preview')
+    );
     const clicked = page.getByTestId('scenario-deploy').click();
+    const request = await previewRequested;
+    expect(request.url()).toContain('web-app-paris');
 
     await page.goto('/scenarios/training/lb-serving-paris');
     release();
