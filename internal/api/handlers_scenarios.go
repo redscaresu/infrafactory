@@ -392,10 +392,19 @@ func handleGetScenarioLayer3Status(w http.ResponseWriter, state *serverState, re
 		// overridable default, serving a value nothing can override,
 		// is a lie the next reader has to discover for themselves.
 		"server_allows_layer3": state.cfg.Validation.Layers.SandboxDeploy.Enabled,
-		"credentials_ready":    ready,
-		"missing_credentials":  missing,
-		"ready":                ready,
-		"detail":               detail,
+		// Reported beside layer3 because the run page offers both, and
+		// carried here rather than on a new endpoint because this one
+		// is already fetched on page load and already answers "what
+		// will this server let me do".
+		//
+		// A SEPARATE grant from layer3 on purpose (ADR-0027): what
+		// makes a layer3-only server safe is that every run destroys
+		// what it made, and --keep is exactly the removal of that.
+		"server_allows_keep":  state.deployer != nil,
+		"credentials_ready":   ready,
+		"missing_credentials": missing,
+		"ready":               ready,
+		"detail":              detail,
 	})
 }
 

@@ -72,6 +72,20 @@ test.describe('Scenario navigation', () => {
     await expect(page.getByText('Force clean')).toBeVisible();
   });
 
+  // The one run option that leaves something running and costing money.
+  // This server was started without --allow-deploy, so the box has to be
+  // there (otherwise nobody learns the capability exists) and has to be
+  // untickable.
+  test('keep is offered but untickable without the deploy grant', async ({ page }) => {
+    await page.goto('/scenarios/training/web-app-paris');
+    await expect(page.locator('main h1')).toContainText('web-app-paris');
+
+    const keep = page.getByTestId('scenario-keep');
+    await expect(keep).toBeVisible();
+    await expect(keep).toBeDisabled();
+    await expect(keep).not.toBeChecked();
+  });
+
   test('scenario page textarea is editable', async ({ page }) => {
     await page.goto('/scenarios/training/web-app-paris');
     await expect(page.locator('main h1')).toContainText('web-app-paris');

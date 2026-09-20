@@ -115,11 +115,13 @@ func TestStrayRunProjectsCountsOnlyStampedProjects(t *testing.T) {
 // been decided, so a green run could carry an unexplained project --
 // billing infrastructure with no TTL, reported as success.
 func TestRunReportsFailureWhenAStrayProjectSurvives(t *testing.T) {
-	assert.Equal(t, CommandStatusSuccess, runCommandStatus("target_reached", false, false))
-	assert.Equal(t, CommandStatusFailed, runCommandStatus("target_reached", false, true),
+	assert.Equal(t, CommandStatusSuccess, runCommandStatus("target_reached", false, false, false))
+	assert.Equal(t, CommandStatusFailed, runCommandStatus("target_reached", false, true, false),
 		"a stray run project is billing infrastructure nothing will reap")
-	assert.Equal(t, CommandStatusFailed, runCommandStatus("target_reached", true, false))
-	assert.Equal(t, CommandStatusFailed, runCommandStatus("stuck", false, false))
+	assert.Equal(t, CommandStatusFailed, runCommandStatus("target_reached", true, false, false))
+	assert.Equal(t, CommandStatusFailed, runCommandStatus("stuck", false, false, false))
+	assert.Equal(t, CommandStatusFailed, runCommandStatus("target_reached", false, false, true),
+		"a kept stack recorded against state the next run overwrites is not a success")
 }
 
 // An unreadable live record cannot be told from a clean estate unless it

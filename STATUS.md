@@ -1,6 +1,46 @@
 # STATUS
 
-Last updated: 2026-09-19
+Last updated: 2026-09-20
+
+## 2026-09-20 — S186: a run can keep what it built
+
+`infrafactory run --keep`, and a **Keep it running** checkbox on the scenario page. On
+`target_reached` the Layer 3 destroy is skipped, the run project is kept, and what is left
+running is registered as a **live deployment** — so it has a TTL, a row on the Deployments
+page and `infrafactory live teardown <id>`.
+
+This closes the gap the demo kept walking into. "Keep state (`--no-destroy`)" looks like the
+way to leave nginx up and is not: it leaves real infrastructure with **nothing tracking it** —
+no record, no deadline, nothing for `live reap` to find — and `service.ttl` bound `deploy`
+only. The two are now mutually exclusive, in the CLI and at the HTTP boundary, because both
+skip a destroy and mean opposite things about what happens next.
+
+**Gated on `--allow-deploy`, not `--allow-layer3`** (ADR-0027 amended). What makes a
+layer3-only server the safer one is not that its applies are smaller — it is that every run
+destroys what it made. `--keep` removes precisely that property, so it needs the grant that
+covers infrastructure outliving the request. The UI reports the two grants separately
+(`server_allows_keep` beside `server_allows_layer3`) and the checkbox says why it is
+untickable.
+
+**Refused before generation, not after the apply.** No service block, no usable `service.ttl`,
+or Layer 3 off, and the run stops immediately. Discovering at the end that `--keep` cannot be
+honoured would destroy the stack it was asked to preserve, having already spent the LLM time
+and the money — so the guard is worth nothing unless it runs first, and there is a test at the
+call site asserting the generator was never invoked.
+
+**The kept stack gets its own working tree.** The next run of the same scenario regenerates
+into the output directory and overwrites the state in place, and that state is the only thing
+that can destroy these resources — so the whole tree is copied, including the run-project
+marker and the initialised `.terraform`, because teardown runs `destroy` without an `init`.
+If the copy fails the deployment is still recorded (the project id alone is enough to delete
+the project and sweep) and the run says so rather than reporting a clean keep.
+
+**Two duplications removed on the way, both of which had already caused a bug.** The run flag
+list was hand-rolled in three places — `root.go`, the test builders and `ui_command.go` — and
+`resolveRunControls` treats an undefined flag as a usage error, so adding `--keep` turned a
+whole golden run into a usage dump. One `registerRunFlags` now. And the Playwright port is
+overridable (`PLAYWRIGHT_PORT`), because `reuseExistingServer` had silently adopted a
+credentialed UI on :4173 and its failures read as product bugs.
 
 ## 2026-09-19 — S185: the pull-request gate is removed
 

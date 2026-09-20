@@ -51,6 +51,16 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 		return fmt.Errorf("load scenario %q: %w", scenarioPath, err)
 	}
 
+	// Refused HERE, before generation, rather than at the end where the
+	// keep happens. By then the run has spent several minutes of LLM
+	// time and applied real resources -- and a --keep the run cannot
+	// honour would then destroy them anyway, which is the opposite of
+	// what was asked for. A flag that cannot be honoured is a usage
+	// error, and usage errors are cheap only while they are early.
+	if err := assertKeepable(controls.Keep, runtime, sc); err != nil {
+		return err
+	}
+
 	// M81 test-only isolation guard. Under `go test`, both the
 	// output dir and run-store root must be absolute so parallel
 	// subtests can't collide on shared relative-path defaults
@@ -128,7 +138,7 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 		Event:   "run_start",
 		Status:  "start",
 		RunID:   runID,
-		Detail:  fmt.Sprintf("repair_iterations_max=%d run_mode=%s no_destroy=%t previous_run_id=%s", repairIterationsMax, mode.Mode, controls.NoDestroy, mode.PreviousRunID),
+		Detail:  fmt.Sprintf("repair_iterations_max=%d run_mode=%s no_destroy=%t keep=%t previous_run_id=%s", repairIterationsMax, mode.Mode, controls.NoDestroy, controls.Keep, mode.PreviousRunID),
 	})
 	// Read once, before generation. Both metadata writes record the same
 	// value, so a branch switch mid-run cannot make the closing record
@@ -184,7 +194,7 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 			Iteration: iteration,
 		})
 		completed = iteration
-		stages, failures := runIteration(cmd.Context(), runID, iteration, sc.Name, scenarioPath, runtime, store, captureLLMRaw, previousIterationFailures, mode.Mode, controls.NoDestroy)
+		stages, failures := runIteration(cmd.Context(), runID, iteration, sc.Name, scenarioPath, runtime, store, captureLLMRaw, previousIterationFailures, mode.Mode, controls)
 		allStages = append(allStages, stages...)
 
 		if err := persistRunIteration(store, sc.Name, runID, iteration, stages, failures); err != nil {
@@ -840,7 +850,25 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 		}
 	}
 
-	if terminalReason == "target_reached" && !controls.NoDestroy {
+	// Skipped for --keep as well as --no-destroy, and for the same
+	// reason: a holdout runs `executeTestWithScenario` against
+	// `runtime.OutputDir()` -- the SAME directory -- so with Layer 3 on
+	// it creates its own run project, overwrites the marker, applies,
+	// and destroys. Against a kept stack that would destroy the
+	// resources this run was told to preserve and then register the
+	// holdout's project instead of the real one. Keeping a stack and
+	// re-applying over its state in the same directory cannot both
+	// happen; the run says which it did rather than doing half of each.
+	switch {
+	case terminalReason != "target_reached":
+	case controls.NoDestroy:
+		allStages = append(allStages, StageSummary{Layer: "holdout", Stage: "skipped", Status: StageStatusSkip, Detail: "skipped by --no-destroy"})
+	case controls.Keep:
+		allStages = append(allStages, StageSummary{
+			Layer: "holdout", Stage: "skipped", Status: StageStatusSkip,
+			Detail: "skipped by --keep: a holdout re-applies over this run's state and would destroy the kept stack",
+		})
+	default:
 		holdoutStages, holdoutFailures, err := runCriteriaOnlyHoldouts(cmd.Context(), runtime, scenarioPath)
 		if err != nil {
 			return fmt.Errorf("run holdout checks: %w", err)
@@ -848,8 +876,6 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 		allStages = append(allStages, holdoutStages...)
 		allFailures = append(allFailures, holdoutFailures...)
 		holdoutBlocked = len(holdoutFailures) > 0
-	} else if terminalReason == "target_reached" && controls.NoDestroy {
-		allStages = append(allStages, StageSummary{Layer: "holdout", Stage: "skipped", Status: StageStatusSkip, Detail: "skipped by --no-destroy"})
 	}
 
 	// Every Layer 3 run checks the organization for run projects nothing
@@ -868,6 +894,18 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 	// failures afterwards would let a target_reached run report success
 	// with a stray outstanding, which is the false green this check
 	// exists to remove.
+	// BEFORE the stray-project check, deliberately. That check reports
+	// every run project the store cannot explain, and a kept project is
+	// only explained once its deployment record exists. Registering
+	// afterwards would make every --keep run fail on its own keep.
+	keepBlocked := false
+	if controls.Keep && terminalReason == "target_reached" {
+		keepStages, keepFailures := registerKeptRun(runtime, sc)
+		allStages = append(allStages, keepStages...)
+		allFailures = append(allFailures, keepFailures...)
+		keepBlocked = len(keepFailures) > 0
+	}
+
 	strayBlocked := false
 	if sandboxRunEnabled(runtime) {
 		strayStages, strayFailures := reportStrayRunProjects(cmd.Context(), runtime)
@@ -876,7 +914,7 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 		strayBlocked = len(strayFailures) > 0
 	}
 
-	status := runCommandStatus(terminalReason, holdoutBlocked, strayBlocked)
+	status := runCommandStatus(terminalReason, holdoutBlocked, strayBlocked, keepBlocked)
 
 	if err := store.WriteRunMetadata(runstore.RunMetadata{
 		Schema:              runstore.RunMetadataSchemaVersion,
@@ -925,7 +963,7 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 	// caller that is a script -- the PR gate included. `strayBlocked`
 	// was missing here when it was added above, so a target_reached run
 	// with an unexplained project wrote "failed" and returned success.
-	if runCommandStatus(terminalReason, holdoutBlocked, strayBlocked) == CommandStatusFailed {
+	if runCommandStatus(terminalReason, holdoutBlocked, strayBlocked, keepBlocked) == CommandStatusFailed {
 		errDetail := fmt.Errorf("run stopped with terminal reason %q after %d iteration(s)", terminalReason, completed)
 		if holdoutBlocked {
 			errDetail = fmt.Errorf("holdout checks failed after training convergence")
@@ -1002,7 +1040,7 @@ func runIteration(
 	captureLLMRaw bool,
 	previousIterationFailures []FailureSummary,
 	mode runMode,
-	noDestroy bool,
+	controls runControls,
 ) ([]StageSummary, []FailureSummary) {
 	stages := make([]StageSummary, 0, 3)
 	failures := make([]FailureSummary, 0)
@@ -1034,7 +1072,8 @@ func runIteration(
 		if step.name == "test" {
 			testResult, err = executeTest(ctx, runtime, scenarioPath, testExecutionOptions{
 				MockDeployMode: mockDeployModeForRunMode(mode),
-				SkipDestroy:    noDestroy,
+				SkipDestroy:    controls.NoDestroy,
+				KeepSandbox:    controls.Keep,
 				// Stage progress carries the run's scope, like every
 				// other entry this iteration writes. Without it two
 				// iterations' `apply: running` lines are byte-identical
@@ -1205,6 +1244,7 @@ type runControls struct {
 	RepairIterationsMax int
 	Clean               bool
 	NoDestroy           bool
+	Keep                bool
 	ResetMocks          bool
 }
 
@@ -1227,8 +1267,22 @@ func resolveRunControls(cmd *cobra.Command, runtime *CommandRuntime) (runControl
 	if err != nil {
 		return runControls{}, &CLIError{Op: "run", Code: errorCodeUsage, Err: fmt.Errorf("read --reset-mocks flag: %w", err)}
 	}
+	keep, err := cmd.Flags().GetBool("keep")
+	if err != nil {
+		return runControls{}, &CLIError{Op: "run", Code: errorCodeUsage, Err: fmt.Errorf("read --keep flag: %w", err)}
+	}
 	if clean && noDestroy {
 		return runControls{}, &CLIError{Op: "run", Code: errorCodeUsage, Err: fmt.Errorf("clean and no-destroy are mutually exclusive")}
+	}
+	// Both skip a destroy, and they mean opposite things about what
+	// happens next. --no-destroy leaves infrastructure that NOTHING
+	// tracks: no record, no TTL, nothing for `live reap` to find.
+	// --keep leaves it registered, with a deadline and a teardown
+	// command. Allowing both would leave it ambiguous which one the
+	// operator wanted, on the flag pair where being wrong costs money.
+	if keep && noDestroy {
+		return runControls{}, &CLIError{Op: "run", Code: errorCodeUsage, Err: fmt.Errorf(
+			"keep and no-destroy are mutually exclusive: --keep registers what it leaves running, --no-destroy leaves it untracked")}
 	}
 
 	if repairMax == 0 {
@@ -1243,6 +1297,7 @@ func resolveRunControls(cmd *cobra.Command, runtime *CommandRuntime) (runControl
 		RepairIterationsMax: repairMax,
 		Clean:               clean,
 		NoDestroy:           noDestroy,
+		Keep:                keep,
 		ResetMocks:          resetMocks,
 	}, nil
 }
@@ -1566,8 +1621,13 @@ func logLayer3RecoveryHint(runtime *CommandRuntime, runID, scenarioPath, reason 
 //     decision, so a target_reached run would still have reported
 //     success with a stray outstanding -- the exact false green the
 //     check exists to remove.
-func runCommandStatus(terminalReason string, holdoutBlocked, strayBlocked bool) CommandStatus {
-	if terminalReason != "target_reached" || holdoutBlocked || strayBlocked {
+//   - keepBlocked: what `--keep` left running was recorded in a form
+//     that can actually destroy it. The fallback record points at the
+//     run's own output directory, which the NEXT run of the scenario
+//     overwrites -- so reporting success there would invite exactly the
+//     re-run that destroys the only teardown state the kept stack has.
+func runCommandStatus(terminalReason string, holdoutBlocked, strayBlocked, keepBlocked bool) CommandStatus {
+	if terminalReason != "target_reached" || holdoutBlocked || strayBlocked || keepBlocked {
 		return CommandStatusFailed
 	}
 	return CommandStatusSuccess

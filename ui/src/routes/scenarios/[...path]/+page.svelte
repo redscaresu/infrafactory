@@ -56,9 +56,24 @@
   let layer3Error = "";
   let clean = false;
   let noDestroy = false;
+  let keep = false;
   // Reflects what the SERVER decided at start time. This page reports it;
   // it cannot change it (ADR-0026).
   $: layer3Enabled = layer3Status?.server_allows_layer3 === true;
+  // A separate grant from layer3: keeping a stack is the same class of
+  // harm as deploying one, so it needs --allow-deploy (ADR-0027).
+  $: keepAllowed = layer3Status?.server_allows_keep === true;
+  // A kept stack needs a deadline, and service.ttl is where it lives
+  // (ADR-0024). Read from the editor buffer so it tracks an unsaved
+  // edit rather than the last save.
+  $: detailHasService = /^service:/m.test(rawYAML || "");
+  // Untickable rather than merely rejected: on a server that would
+  // refuse it, or a scenario with no service.ttl to bound it, or
+  // alongside the option that means the opposite.
+  $: keepDisabled = !layer3Enabled || !keepAllowed || !detailHasService || noDestroy;
+  // Ticking Keep and then ticking no-destroy must not leave a stale
+  // `keep: true` on the request.
+  $: if (keepDisabled && keep) keep = false;
   let validationErrors: { path: string; message: string }[] = [];
   let validationState: "idle" | "checking" | "valid" | "invalid" = "idle";
   let validationTimer: ReturnType<typeof setTimeout> | null = null;
@@ -535,7 +550,7 @@
     running = true;
     status = "Starting run...";
     try {
-      const resp = await api.startRun(detail.name, normalizeRunOptions({ clean, no_destroy: noDestroy }));
+      const resp = await api.startRun(detail.name, normalizeRunOptions({ clean, no_destroy: noDestroy, keep }));
       status = `Run started: ${resp.run_id}`;
       window.location.href = encodeLiveURL(detail.name, resp.run_id);
     } catch (err) {
@@ -714,7 +729,36 @@
       <input type="checkbox" bind:checked={clean} disabled={noDestroy} />
       <span>Force clean (`--clean`)</span>
     </label>
+    <!-- The one option here that leaves something running and costing
+         money, so it says so rather than naming the flag alone. -->
+    <label
+      class="flex items-center gap-2 rounded border px-3 py-2 text-xs {keepDisabled
+        ? 'border-slate-200 bg-slate-50 text-slate-400'
+        : 'border-amber-400 bg-amber-50 text-amber-900'}"
+      data-testid="scenario-keep-label"
+    >
+      <input type="checkbox" bind:checked={keep} disabled={keepDisabled} data-testid="scenario-keep" />
+      <span>Keep it running (`--keep`)</span>
+    </label>
   </div>
+  {#if keep}
+    <p class="mt-2 text-xs text-amber-900" data-testid="scenario-keep-note">
+      This run will not destroy what it builds. It is recorded as a live deployment, expires at the
+      scenario's <code>service.ttl</code>, and <code>infrafactory live teardown</code> removes it.
+    </p>
+  {:else if keepDisabled && layer3Enabled}
+    <p class="mt-2 text-xs text-slate-600" data-testid="scenario-keep-why-disabled">
+      {#if !keepAllowed}
+        Keeping a stack running needs <code>infrafactory ui --allow-deploy</code> — a separate grant from
+        <code>--allow-layer3</code>, because every other run destroys what it made.
+      {:else if !detailHasService}
+        This scenario declares no <code>service:</code> block, so a kept stack would have no TTL and
+        nothing would reap it.
+      {:else}
+        Unavailable alongside <code>--no-destroy</code>, which leaves the same resources untracked.
+      {/if}
+    </p>
+  {/if}
   <div class="mt-4 flex gap-2">
     <button class="rounded bg-slate-900 px-3 py-1.5 text-xs text-white disabled:opacity-60" on:click={runScenario} disabled={running}>
       {running ? "Starting..." : "Run"}

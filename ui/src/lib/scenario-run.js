@@ -6,14 +6,25 @@
 export function normalizeRunOptions(options = {}) {
   const clean = options.clean === true;
   const noDestroy = options.no_destroy === true;
+  const keep = options.keep === true;
+
+  // keep wins over no_destroy. Both skip a destroy, and they mean
+  // opposite things about what happens next: keep registers what it
+  // leaves running, under a TTL, with a teardown command; no_destroy
+  // leaves it with nothing tracking it at all. Sending both would let
+  // the server pick, on the pair where being wrong costs money.
+  if (keep) {
+    return { clean, no_destroy: false, keep: true };
+  }
 
   if (clean && noDestroy) {
-    return { clean: true, no_destroy: false };
+    return { clean: true, no_destroy: false, keep: false };
   }
 
   return {
     clean,
-    no_destroy: noDestroy
+    no_destroy: noDestroy,
+    keep: false
   };
 }
 

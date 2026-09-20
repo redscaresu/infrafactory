@@ -1,5 +1,12 @@
 import { defineConfig } from '@playwright/test';
 
+// Overridable so the suite can run while a real UI holds the default
+// port. It has adopted one before: reuseExistingServer means a
+// credentialed server the operator started gets treated as the fixture,
+// and the failures that produces look like product bugs.
+const PORT = process.env.PLAYWRIGHT_PORT || '4173';
+const ORIGIN = `http://127.0.0.1:${PORT}`;
+
 export default defineConfig({
   testDir: './e2e',
   timeout: 30_000,
@@ -13,7 +20,7 @@ export default defineConfig({
   workers: 1,
   fullyParallel: false,
   use: {
-    baseURL: 'http://127.0.0.1:4173',
+    baseURL: ORIGIN,
     headless: true,
   },
   // S40-T2 visual-regression threshold: small pixel-diff tolerance keeps
@@ -30,8 +37,8 @@ export default defineConfig({
     { name: 'chromium', use: { browserName: 'chromium' } },
   ],
   webServer: {
-    command: 'cd .. && go run ./cmd/infrafactory ui --addr 127.0.0.1:4173',
-    url: 'http://127.0.0.1:4173/api/config',
+    command: `cd .. && go run ./cmd/infrafactory ui --addr 127.0.0.1:${PORT}`,
+    url: `${ORIGIN}/api/config`,
     // 30s is a warm-laptop number. `go run` COMPILES the binary, and on
     // a cold CI runner with an empty build cache that alone exceeded it:
     // the first run of this suite in CI failed with "Timed out waiting

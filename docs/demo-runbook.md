@@ -82,10 +82,16 @@ set -a; source ~/.config/infrafactory/layer3.env; set +a
 ```
 
 **4 — in the browser:** http://127.0.0.1:4173 → `web-live-paris` → **Run**,
-both boxes unticked. *Real Scaleway: apply, probe, destroy, sweep. 2–5 min.*
+all boxes unticked. *Real Scaleway: apply, probe, destroy, sweep. 2–5 min.*
 
 **5 — same page:** **Deploy**. *Applies the same HCL and leaves it up under the
 scenario's 4h TTL.* Open the load balancer URL — that is the nginx page.
+
+*Or, instead of 4 and 5:* tick **Keep it running (`--keep`)** before Run. One pass
+— generate, mock, apply, probe — and it stops before the destroy, registering what
+it left as a live deployment on the same 4h TTL. Same nginx page, one button, and
+`live ls` finds it. Slower than Deploy and it can fail on the way; Deploy is the
+safe path if the clock is tight.
 
 The UI holds that terminal. **Open a second one** for what follows, and run the
 `set -a; source …` line in it first.
@@ -105,9 +111,10 @@ scw account project list
 
 ## The three things that will bite
 
-- **Do not tick "Keep state".** It looks like the way to keep nginx alive. It
-  makes the run report failure and **nothing reaps it** — `service.ttl` binds
-  `deploy`, not `run`. Deploy is the supported path.
+- **Do not tick "Keep state (`--no-destroy`)".** It is the wrong one, and it sits
+  next to the right one. It leaves real infrastructure with **nothing tracking
+  it**: no record, no TTL, nothing `live reap` will find. The box you want is
+  **"Keep it running (`--keep`)"**, which registers what it leaves.
 - **Do not switch git branches while anything runs.** Policies and pitfalls are
   read from the working tree; a switch silently changes what the generator is
   told.
@@ -127,6 +134,7 @@ Optional. The commands above are the runbook; this is the narration.
 | `real_probe` | "HTTP 200 through a real load balancer. Not a plan assertion." |
 | `orphan_sweep` | "That's the run checking the account, not trusting its own destroy." |
 | Deploy vs Run | "Run proves a change is safe and destroys it. Deploy keeps it. Two buttons, deliberately." |
+| Keep it running | "Same run, minus the destroy — and it registers what it left, so it still has a deadline and a teardown command. Keeping something untracked is the failure mode, not the feature." |
 | the nginx page | "Nobody wrote that Terraform." |
 | teardown | "And it's gone. The account is empty, and the run checked." |
 

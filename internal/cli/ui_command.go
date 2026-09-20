@@ -279,10 +279,10 @@ func (s *uiRunStarter) executeRun(ctx context.Context, req api.StartRunRequest, 
 	runCmd.SetErr(io.Discard)
 	runCmd.Flags().String("config", config.DefaultPath, "")
 	runCmd.Flags().String("output", string(OutputModeJSON), "")
-	runCmd.Flags().Int("repair-iterations-max", 0, "")
-	runCmd.Flags().Bool("clean", false, "")
-	runCmd.Flags().Bool("no-destroy", false, "")
-	runCmd.Flags().Bool("reset-mocks", true, "")
+	// The same registration the real command uses: resolveRunControls
+	// treats an undefined flag as a usage error, so a hand-rolled copy
+	// here turns every UI run into one the moment a flag is added.
+	registerRunFlags(runCmd, true)
 	_ = runCmd.Flags().Set("config", s.configPath)
 	_ = runCmd.Flags().Set("output", string(OutputModeJSON))
 	if req.Clean {
@@ -290,6 +290,9 @@ func (s *uiRunStarter) executeRun(ctx context.Context, req api.StartRunRequest, 
 	}
 	if req.NoDestroy {
 		_ = runCmd.Flags().Set("no-destroy", "true")
+	}
+	if req.Keep {
+		_ = runCmd.Flags().Set("keep", "true")
 	}
 	runCmd.SetContext(ctx)
 
