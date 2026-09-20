@@ -310,9 +310,15 @@ func Default() Config {
 			// healthy backend, which is indistinguishable from a broken
 			// app. Against real Scaleway each false negative costs the
 			// repair loop another apply and destroy.
+			// 60 x 5s ~= 300s, MEASURED on 2026-09-20 rather than
+			// guessed: six real web-live-paris boots needed 0s, 0s,
+			// 20s, 45s and 66s from the apply returning to the first
+			// HTTP 200, and one earlier probe never served inside the
+			// old 120s at all. Sized to that failure, not to the
+			// successes. See infrafactory.yaml for the full numbers.
 			RealProbes: RealProbeConfig{
 				TimeoutSeconds:    5,
-				Retries:           24,
+				Retries:           60,
 				RetryDelaySeconds: 5,
 			},
 		},

@@ -46,3 +46,55 @@ Enable Layer 3 real Scaleway deployment as an optional validation layer, superse
 - ADR-0003 is superseded. `S9-T8` is unblocked.
 - `validation.layers.sandbox_deploy.enabled` defaults to `false` — existing workflows unchanged.
 - CI/regression scenarios continue to run against mockway only unless explicitly configured.
+
+
+## Amendment, 2026-09-20 (S190): the probe window is measured, and sized to the tail
+
+`real_probes.retries` 24 → 60 (~120s → ~300s), in `infrafactory.yaml` and in the Go
+default so a config omitting the key agrees with the one that sets it.
+
+### What was measured
+
+Six real `web-live-paris` boots against Scaleway (fr-par-1, DEV1-S, cloud-init installing
+docker then running `nginx:1.27`): deploy, poll the load balancer until the first HTTP
+200, tear down. The interval timed is from **the apply returning** to **the page
+serving**, because that is the interval the probe window actually has to outlast — and it
+covers cloud-init *and* the load balancer marking the backend healthy. A 503 from a
+healthy LB with no healthy backend is indistinguishable from a broken app, which is the
+false negative this window exists to prevent.
+
+```
+0s, 0s, 20s, 45s, 66s     five successes
+>120s                     one FAILURE, never served inside the old window
+```
+
+The two zeroes are not fast boots: those applies took 103s and 73s, long enough that
+cloud-init finished during them. **Total** time to serve was 73–109s across the five, and
+how much of it falls after the apply is close to arbitrary. So a window sized from the
+median measures the wrong thing.
+
+### Why 60, and why widening is nearly free
+
+Sized to the failure, not the successes. The worst success needed 66s; 120s was
+insufficient at least once in eight observed probes.
+
+The probe returns on the **first** success. A longer window therefore costs a healthy
+stack nothing — it changes only what happens in the tail. The real cost is a slower
+verdict when a stack is genuinely broken: 300s instead of 120s before a true failure is
+reported. That is the right trade here, because a false negative sends the repair loop
+into another real apply and destroy, while a slow true negative costs only wall clock.
+
+### Recorded as a small sample, deliberately
+
+Six boots, with the tail characterised by exactly one observation. The config comment
+says so and says to measure again rather than double the number if this fires. A window
+is a claim about how long real infrastructure takes, and this project has already been
+wrong about it by 3x once (2026-09-09) — by guessing.
+
+### Unrelated finding, recorded because nothing else records it
+
+Three `deploy`s fired ~6s apart all failed within seconds:
+`scaleway-sdk-go: insufficient permissions: read loadbalancer`. Each `deploy` creates a
+fresh project (ADR-0025) and IAM had not propagated to it. Spacing them 90s apart fixed
+it, three for three. There is no pitfall and no retry for this, so anything running
+scenarios back-to-back or in parallel will hit it.
