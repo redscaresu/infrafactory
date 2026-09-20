@@ -7,12 +7,19 @@ deny contains msg if {
 	resource.type == "scaleway_instance_server"
 	not has_private_nic(resource.address)
 	# The denial text is repair-loop INPUT, not just a log line: it is fed
-	# back to the generator as the reason to fix. Naming the standalone NIC
-	# here would send the next iteration straight back to the shape this
-	# policy was just changed to stop mandating -- the fix undone by its own
-	# error message.
+	# back to the generator as the reason to fix. Every claim in it is
+	# therefore a claim this system teaches the model, and a false one is
+	# taught on every iteration.
+	#
+	# It used to say the standalone NIC "cannot be destroyed". That was
+	# true of provider 2.81.0 and is FALSE on 2.83.0: a standalone
+	# scaleway_instance_private_nic applied and destroyed cleanly against
+	# real Scaleway on 2026-09-20 (4 added, 4 destroyed, exit 0), because
+	# upstream #4354 moved the teardown to a detach route that does not
+	# refuse. The remaining reason is the true one and no more: the Layer 3
+	# gate still refuses the shape.
 	msg := sprintf(
-		"%s is not attached to a private network. Add `private_network { pn_id = scaleway_vpc_private_network.NAME.id }` to the server. Do not use a standalone scaleway_instance_private_nic: it cannot be destroyed and the Layer 3 gate refuses it",
+		"%s is not attached to a private network. Add `private_network { pn_id = scaleway_vpc_private_network.NAME.id }` to the server. The Layer 3 gate refuses a standalone scaleway_instance_private_nic, so use the inline block",
 		[resource.address],
 	)
 }
@@ -57,18 +64,30 @@ has_private_nic(server_address) if {
 # The property this policy defends is "the server is on a private
 # network", not "a particular resource type appears". A standalone
 # `scaleway_instance_private_nic` is one way to say it; the provider's
-# own inline block (schema 2.81.0: list, max 8) is another, and it is the
-# one that can be DESTROYED.
+# own inline block (schema: list, max 8) is another. This rule accepts
+# BOTH, and always should have -- the invariant is the attachment.
 #
-# 2026-09-09, real Scaleway, web-live-paris: apply succeeded and destroy
-# failed with `Can't delete a private network interface attached to a
-# server`. Terraform destroys in reverse dependency order, so a
-# standalone NIC is deleted while its server is still RUNNING, and
-# Scaleway refuses that. Deleting the server takes its NICs with it --
-# the provider powers the server off first -- so the inline block has no
-# separate delete to fail. Requiring only the standalone shape meant
-# Layer 1 mandating a stack that could not be torn down, which is the
-# S168 defect class exactly.
+# HISTORY, because the reason written here was wrong twice and the
+# wrongness outlived both corrections:
+#
+#   - 2026-09-09: destroy failed with `Can't delete a private network
+#     interface attached to a server`, and this comment concluded the
+#     inline block was "the one that can be DESTROYED" because "the
+#     provider powers the server off first".
+#   - 2026-09-10: REFUTED (ADR-0029 Refutation). The inline block failed
+#     identically. The provider does not power anything off; it detaches
+#     the NIC as its own call either way.
+#   - 2026-09-10: the real cause was the ENDPOINT (ADR-0031) -- provider
+#     2.81.0 deleted NICs through v2alpha1, which refuses every NIC there
+#     is.
+#   - 2026-09-20: upstream #4354 fixed it by changing the endpoint, and
+#     a standalone NIC now applies and destroys cleanly against real
+#     Scaleway on 2.83.0 (4 added, 4 destroyed, exit 0).
+#
+# So neither shape is undestroyable any more, and the destroyability
+# argument for preferring the inline block is gone. What remains is the
+# Layer 3 gate, which still refuses the standalone resource -- now as a
+# standardisation choice rather than a safety one. See ADR-0031.
 #
 # Checked against `configuration`, not `planned_values`: for a new
 # private network the block's values are all unknown at plan time and
