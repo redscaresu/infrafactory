@@ -37,8 +37,18 @@ did not run. `run` without `--keep` is unchanged.
 `TestRunKeepLeavesTheStackUpAndRegistersIt` now asserts the skip and its reason;
 deleting the `case controls.Keep:` arm fails it.
 
-## Note on scope
+## Note on scope: no holdout is discovered today
 
-`scenarios/holdout/web-app-paris-pinned.yaml` is a holdout for `web-app-paris`, not
-`web-live-paris`, so the demo scenario never hit this. It would have bitten the first
-person to add a holdout for a keepable scenario, and silently.
+`scenarios/holdout/` holds one file, `web-app-paris-pinned.yaml`, and
+`DiscoverCriteriaOnlyHoldouts` never returns it: discovery requires `type: holdout`
+AND `references: <training scenario path>`, and that file declares **neither**. Every
+run currently logs `holdout/discovery: pass (0 holdouts)`.
+
+So the cost of skipping holdouts under `--keep` is presently zero — it skips nothing
+that runs. The guard is still right: the day someone adds those two keys to a
+keepable scenario, the holdout would re-apply over the kept stack's state and destroy
+it, and nothing would have warned them.
+
+Worth recording separately that the holdout machinery is built and unwired. Passing
+the training criteria proves only that the generator satisfied the checks it was
+shown; the holdout is the half that tests otherwise, and it is not running.
