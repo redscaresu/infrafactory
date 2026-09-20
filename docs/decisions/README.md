@@ -37,6 +37,7 @@ Use ADRs for decisions that affect long-term behavior, interfaces, or contributo
 - `0029-a-policy-may-not-mandate-an-undestroyable-shape.md`: `vpc_required` accepts the inline `private_network` block; a static policy must accept at least one shape that can be destroyed, and the pitfall must prescribe it.
 - `0030-teardown-powers-instances-off.md`: the private-NIC precondition belongs to the API, not the HCL — teardown powers the run's instances off before `tofu destroy`. Supersedes ADR-0029 on where the fix goes.
 - `0031-the-nic-delete-defect-is-the-endpoint.md`: the private-NIC teardown failure is v2alpha1 refusing every NIC, not power state — delete through v1 before `tofu destroy`. Supersedes ADR-0030; replaces ADR-0029's mechanism.
+- `0032-apply-succeeding-is-not-convergence.md`: Layer 2 runs a second plan (`-detailed-exitcode`) and a non-empty one fails the run. Drift is ambiguous between a lying mock and unconvergeable HCL, so both hypotheses are named and the mode (`--continue-on-drift`) decides who is asked to fix it. Detects drift, NOT a permissive mock.
 - `DECISION_RUBRIC.md`: yes/no gate for deciding when ADR is required.
 - `ADR_TEMPLATE.md`: copy/paste template for new ADRs.
 

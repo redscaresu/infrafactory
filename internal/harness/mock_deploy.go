@@ -41,13 +41,36 @@ type MockDeployResult struct {
 	Init          StageResult
 	Apply         StageResult
 	StateSnapshot []byte
+
+	// Converge is the second plan, run immediately after the apply.
+	Converge StageResult
+
+	// Drifted reports that the second plan was NOT empty.
+	//
+	// After a successful apply, the config, the state and what the API
+	// reports should all agree -- so a non-empty plan means one of them
+	// is lying, and against a mock the mock is the likely candidate. The
+	// classic shape is a mock that accepts a field on write and returns
+	// a different one on read: the apply succeeds, and every plan from
+	// then on proposes the same change to a resource nobody touched.
+	//
+	// Reported, never acted on here. Whether a drifting stack stops the
+	// run is policy, and policy belongs to the caller -- the harness's
+	// job is to answer the question, which nothing in this pipeline
+	// previously asked.
+	Drifted bool
 }
 
+// driftDetectedExitCode is `tofu plan -detailed-exitcode` reporting that
+// the plan is not empty. 0 is no changes, 1 is an error.
+const driftDetectedExitCode = 2
+
 type MockDeployError struct {
-	Stage string
-	Init  StageResult
-	Apply StageResult
-	Err   error
+	Stage    string
+	Converge StageResult
+	Init     StageResult
+	Apply    StageResult
+	Err      error
 }
 
 func (e *MockDeployError) Error() string {
@@ -130,6 +153,38 @@ func (h *MockDeployHarness) Run(ctx context.Context, workDir string, env map[str
 		}
 	}
 
+	convergeArgs := []string{"plan", "-detailed-exitcode", "-input=false", "-no-color"}
+	convergeResult, convergeErr := h.runner.Run(ctx, Command{
+		Name: "tofu",
+		Args: convergeArgs,
+		Dir:  workDir,
+		Env:  env,
+	})
+	convergeStage := StageResult{
+		Stage:  "converge",
+		Cmd:    append([]string{"tofu"}, convergeArgs...),
+		Stdout: string(convergeResult.Stdout),
+		Stderr: string(convergeResult.Stderr),
+	}
+	// Exit 2 is the FINDING, not a failure to produce one: the plan ran
+	// and reported changes. Exit 1 (or anything else non-zero) means the
+	// plan itself broke, and reporting that as drift would claim an
+	// observation the run never made.
+	drifted := false
+	switch {
+	case convergeErr == nil:
+	case convergeResult.ExitCode == driftDetectedExitCode:
+		drifted = true
+	default:
+		return nil, &MockDeployError{
+			Stage:    "converge",
+			Init:     initStage,
+			Apply:    stage,
+			Converge: convergeStage,
+			Err:      convergeErr,
+		}
+	}
+
 	stateSnapshot, err := h.mock.State(ctx)
 	if err != nil {
 		return nil, &MockDeployError{
@@ -144,5 +199,7 @@ func (h *MockDeployHarness) Run(ctx context.Context, workDir string, env map[str
 		Init:          initStage,
 		Apply:         stage,
 		StateSnapshot: stateSnapshot,
+		Converge:      convergeStage,
+		Drifted:       drifted,
 	}, nil
 }

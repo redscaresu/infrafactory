@@ -57,6 +57,7 @@
   let clean = false;
   let noDestroy = false;
   let keep = false;
+  let continueOnDrift = false;
   // Reflects what the SERVER decided at start time. This page reports it;
   // it cannot change it (ADR-0026).
   $: layer3Enabled = layer3Status?.server_allows_layer3 === true;
@@ -550,7 +551,7 @@
     running = true;
     status = "Starting run...";
     try {
-      const resp = await api.startRun(detail.name, normalizeRunOptions({ clean, no_destroy: noDestroy, keep }));
+      const resp = await api.startRun(detail.name, normalizeRunOptions({ clean, no_destroy: noDestroy, keep, continue_on_drift: continueOnDrift }));
       status = `Run started: ${resp.run_id}`;
       window.location.href = encodeLiveURL(detail.name, resp.run_id);
     } catch (err) {
@@ -740,7 +741,22 @@
       <input type="checkbox" bind:checked={keep} disabled={keepDisabled} data-testid="scenario-keep" />
       <span>Keep it running (`--keep`)</span>
     </label>
+    <!-- Unticked stops on drift. Framed as the opt-OUT so the safe
+         behaviour is what you get by not thinking about it. -->
+    <label class="flex items-center gap-2 rounded border border-slate-300 bg-white px-3 py-2 text-xs text-slate-800">
+      <input type="checkbox" bind:checked={continueOnDrift} data-testid="scenario-continue-on-drift" />
+      <span>Continue on drift (`--continue-on-drift`)</span>
+    </label>
   </div>
+  <p class="mt-2 text-xs text-slate-600" data-testid="scenario-drift-note">
+    {#if continueOnDrift}
+      If the second plan is not empty, the run carries on and the repair loop is told about it — which
+      rewrites HCL that may never have been wrong, because the cause might be the mock. The run still fails.
+    {:else}
+      If the apply succeeds but the next plan is not empty, the run stops there. That means the mock and
+      the config disagree, and infrafactory cannot tell which one is wrong.
+    {/if}
+  </p>
   {#if keep}
     <p class="mt-2 text-xs text-amber-900" data-testid="scenario-keep-note">
       This run will not destroy what it builds. It is recorded as a live deployment, expires at the

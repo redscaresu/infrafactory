@@ -29,6 +29,18 @@ type Command struct {
 type CommandResult struct {
 	Stdout []byte
 	Stderr []byte
+
+	// ExitCode is the process's exit status, needed where the CODE is
+	// the answer rather than merely success-or-not. `tofu plan
+	// -detailed-exitcode` returns 2 for "changes present" and 1 for "the
+	// plan failed", and those are different findings: one says the stack
+	// does not converge, the other says nothing could be determined.
+	// Collapsing them into the error would report a drift the run never
+	// actually observed.
+	//
+	// Zero when the runner does not set it, which is correct for the
+	// success path every other caller cares about.
+	ExitCode int
 }
 
 type CommandRunner interface {

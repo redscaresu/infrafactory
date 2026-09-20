@@ -132,6 +132,7 @@ Optional. The commands above are the runbook; this is the narration.
 | the three flags | "Real-cloud apply is decided here, by the person typing the command. The config file isn't allowed to turn it on." |
 | `allowlist` | "Refused before anything is created. A refusal costs nothing." |
 | `real_probe` | "HTTP 200 through a real load balancer. Not a plan assertion." |
+| `converge` | "Second plan, straight after the apply. Empty means config, state and the API agree — apply succeeding doesn't prove that on its own." |
 | `orphan_sweep` | "That's the run checking the account, not trusting its own destroy." |
 | Deploy vs Run | "Run proves a change is safe and destroys it. Deploy keeps it. Two buttons, deliberately." |
 | Keep it running | "Same run, minus the destroy — and it registers what it left, so it still has a deadline and a teardown command. Keeping something untracked is the failure mode, not the feature." |

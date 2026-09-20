@@ -7,7 +7,8 @@ test("normalizeRunOptions keeps no_destroy when set alone", () => {
   assert.deepEqual(normalizeRunOptions({ no_destroy: true }), {
     clean: false,
     no_destroy: true,
-    keep: false
+    keep: false,
+    continue_on_drift: false
   });
 });
 
@@ -15,7 +16,8 @@ test("normalizeRunOptions drops no_destroy when clean is also set", () => {
   assert.deepEqual(normalizeRunOptions({ clean: true, no_destroy: true }), {
     clean: true,
     no_destroy: false,
-    keep: false
+    keep: false,
+    continue_on_drift: false
   });
 });
 
@@ -26,7 +28,8 @@ test("normalizeRunOptions refuses to carry a layer3 request", () => {
   assert.deepEqual(normalizeRunOptions({ layer3_enabled: true }), {
     clean: false,
     no_destroy: false,
-    keep: false
+    keep: false,
+    continue_on_drift: false
   });
 });
 
@@ -34,7 +37,8 @@ test("normalizeRunOptions carries keep", () => {
   assert.deepEqual(normalizeRunOptions({ keep: true }), {
     clean: false,
     no_destroy: false,
-    keep: true
+    keep: true,
+    continue_on_drift: false
   });
 });
 
@@ -46,7 +50,8 @@ test("normalizeRunOptions drops no_destroy when keep is also set", () => {
   assert.deepEqual(normalizeRunOptions({ keep: true, no_destroy: true }), {
     clean: false,
     no_destroy: false,
-    keep: true
+    keep: true,
+    continue_on_drift: false
   });
 });
 
@@ -56,7 +61,8 @@ test("normalizeRunOptions allows clean alongside keep", () => {
   assert.deepEqual(normalizeRunOptions({ clean: true, keep: true }), {
     clean: true,
     no_destroy: false,
-    keep: true
+    keep: true,
+    continue_on_drift: false
   });
 });
 
@@ -80,4 +86,19 @@ test("modeSummary reports clean fallback when mode is missing", () => {
     detail: "Mode detection has not completed yet.",
     tone: "neutral"
   });
+});
+
+// Orthogonal to the others: drift can occur under any combination, so
+// the mode has to survive them all.
+test("normalizeRunOptions carries continue_on_drift alongside keep", () => {
+  assert.deepEqual(normalizeRunOptions({ keep: true, continue_on_drift: true }), {
+    clean: false,
+    no_destroy: false,
+    keep: true,
+    continue_on_drift: true
+  });
+});
+
+test("normalizeRunOptions defaults continue_on_drift to false", () => {
+  assert.equal(normalizeRunOptions({}).continue_on_drift, false);
 });

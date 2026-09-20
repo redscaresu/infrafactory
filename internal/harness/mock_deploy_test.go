@@ -13,6 +13,7 @@ func TestMockDeployHarnessRunSuccess(t *testing.T) {
 		responses: []runnerResponse{
 			{result: CommandResult{Stdout: []byte("init complete")}},
 			{result: CommandResult{Stdout: []byte("apply complete")}},
+			{result: CommandResult{Stdout: []byte("No changes.")}},
 		},
 	}
 	mockClient := &fakeMockStateClient{
@@ -28,8 +29,8 @@ func TestMockDeployHarnessRunSuccess(t *testing.T) {
 	if !mockClient.resetCalled {
 		t.Fatal("expected reset to be called")
 	}
-	if len(runner.calls) != 2 {
-		t.Fatalf("expected init+apply command calls, got %d", len(runner.calls))
+	if len(runner.calls) != 3 {
+		t.Fatalf("expected init+apply+converge command calls, got %d", len(runner.calls))
 	}
 	gotInit := append([]string{runner.calls[0].Name}, runner.calls[0].Args...)
 	expectedInit := []string{"tofu", "init"}
@@ -45,8 +46,82 @@ func TestMockDeployHarnessRunSuccess(t *testing.T) {
 			t.Fatalf("unexpected apply command: got %v want %v", gotApply, expectedApply)
 		}
 	}
+	gotConverge := append([]string{runner.calls[2].Name}, runner.calls[2].Args...)
+	expectedConverge := []string{"tofu", "plan", "-detailed-exitcode", "-input=false", "-no-color"}
+	for i := range expectedConverge {
+		if gotConverge[i] != expectedConverge[i] {
+			t.Fatalf("unexpected converge command: got %v want %v", gotConverge, expectedConverge)
+		}
+	}
+	if out.Drifted {
+		t.Fatal("an empty plan is not drift")
+	}
 	if string(out.StateSnapshot) != `{"state":"ok"}` {
 		t.Fatalf("unexpected state snapshot: %s", string(out.StateSnapshot))
+	}
+}
+
+// Exit 2 is the FINDING -- the plan ran and reported changes -- so it
+// must come back as a result the caller can act on, not an error.
+// Reporting it as an error would make a drifting stack indistinguishable
+// from a plan that could not run.
+func TestMockDeployHarnessReportsDriftWithoutFailing(t *testing.T) {
+	t.Parallel()
+
+	runner := &fakeRunner{
+		responses: []runnerResponse{
+			{result: CommandResult{Stdout: []byte("init complete")}},
+			{result: CommandResult{Stdout: []byte("apply complete")}},
+			{
+				result: CommandResult{
+					Stdout:   []byte("# scaleway_lb.main will be updated in-place"),
+					ExitCode: 2,
+				},
+				err: errors.New("exit status 2"),
+			},
+		},
+	}
+	mockClient := &fakeMockStateClient{statePayload: []byte(`{"state":"ok"}`)}
+
+	h := NewMockDeployHarness(runner, mockClient)
+	out, err := h.Run(context.Background(), "/tmp/workdir", nil, MockDeployModeClean)
+	if err != nil {
+		t.Fatalf("drift is a result, not an error: %v", err)
+	}
+	if !out.Drifted {
+		t.Fatal("expected Drifted")
+	}
+	if out.Converge.Stdout == "" {
+		t.Fatal("the plan output is the only thing that says WHICH attribute drifts")
+	}
+}
+
+// Exit 1 means the plan itself broke. Calling that drift would claim an
+// observation the run never made.
+func TestMockDeployHarnessDistinguishesABrokenPlanFromDrift(t *testing.T) {
+	t.Parallel()
+
+	runner := &fakeRunner{
+		responses: []runnerResponse{
+			{result: CommandResult{Stdout: []byte("init complete")}},
+			{result: CommandResult{Stdout: []byte("apply complete")}},
+			{
+				result: CommandResult{Stderr: []byte("Error: connection refused"), ExitCode: 1},
+				err:    errors.New("exit status 1"),
+			},
+		},
+	}
+	mockClient := &fakeMockStateClient{statePayload: []byte(`{"state":"ok"}`)}
+
+	h := NewMockDeployHarness(runner, mockClient)
+	_, err := h.Run(context.Background(), "/tmp/workdir", nil, MockDeployModeClean)
+
+	var deployErr *MockDeployError
+	if !errors.As(err, &deployErr) {
+		t.Fatalf("expected *MockDeployError, got %T", err)
+	}
+	if deployErr.Stage != "converge" {
+		t.Fatalf("expected converge stage, got %q", deployErr.Stage)
 	}
 }
 
@@ -98,6 +173,7 @@ func TestMockDeployHarnessRunFailures(t *testing.T) {
 						result: CommandResult{Stdout: []byte("apply"), Stderr: []byte("stderr")},
 						err:    tc.runnerErr,
 					},
+					{result: CommandResult{Stdout: []byte("No changes.")}},
 				},
 			}
 			mockClient := &fakeMockStateClient{
@@ -132,6 +208,7 @@ func TestMockDeployHarnessRunIncrementalUsesRestore(t *testing.T) {
 		responses: []runnerResponse{
 			{result: CommandResult{Stdout: []byte("init complete")}},
 			{result: CommandResult{Stdout: []byte("apply complete")}},
+			{result: CommandResult{Stdout: []byte("No changes.")}},
 		},
 	}
 	mockClient := &fakeMockStateClient{

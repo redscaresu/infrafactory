@@ -332,6 +332,18 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 			Iteration: iteration,
 			Failures:  currentFailures,
 		})
+		// A drifting stack under the default mode ends the run here.
+		//
+		// Not a repair failure, so it must not reach the repair loop:
+		// the cause may be the mock, and the loop can only ever change
+		// the HCL. Its own terminal reason keeps it out of the pitfall
+		// harvest too -- which fires on "stuck" and
+		// "repair_budget_exhausted" -- because a lesson learned from an
+		// ambiguous signal is a lesson aimed at the wrong component.
+		if !controls.ContinueOnDrift && hasConvergeFailure(failures) {
+			terminalReason = "drift"
+			break
+		}
 		if consecutiveTransportFailures >= transportFailureRetryBudget {
 			terminalReason = "repair_budget_exhausted"
 			allFailures = append(allFailures, FailureSummary{
@@ -1071,9 +1083,10 @@ func runIteration(
 		)
 		if step.name == "test" {
 			testResult, err = executeTest(ctx, runtime, scenarioPath, testExecutionOptions{
-				MockDeployMode: mockDeployModeForRunMode(mode),
-				SkipDestroy:    controls.NoDestroy,
-				KeepSandbox:    controls.Keep,
+				MockDeployMode:  mockDeployModeForRunMode(mode),
+				SkipDestroy:     controls.NoDestroy,
+				KeepSandbox:     controls.Keep,
+				ContinueOnDrift: controls.ContinueOnDrift,
 				// Stage progress carries the run's scope, like every
 				// other entry this iteration writes. Without it two
 				// iterations' `apply: running` lines are byte-identical
@@ -1245,6 +1258,7 @@ type runControls struct {
 	Clean               bool
 	NoDestroy           bool
 	Keep                bool
+	ContinueOnDrift     bool
 	ResetMocks          bool
 }
 
@@ -1270,6 +1284,10 @@ func resolveRunControls(cmd *cobra.Command, runtime *CommandRuntime) (runControl
 	keep, err := cmd.Flags().GetBool("keep")
 	if err != nil {
 		return runControls{}, &CLIError{Op: "run", Code: errorCodeUsage, Err: fmt.Errorf("read --keep flag: %w", err)}
+	}
+	continueOnDrift, err := cmd.Flags().GetBool("continue-on-drift")
+	if err != nil {
+		return runControls{}, &CLIError{Op: "run", Code: errorCodeUsage, Err: fmt.Errorf("read --continue-on-drift flag: %w", err)}
 	}
 	if clean && noDestroy {
 		return runControls{}, &CLIError{Op: "run", Code: errorCodeUsage, Err: fmt.Errorf("clean and no-destroy are mutually exclusive")}
@@ -1298,6 +1316,7 @@ func resolveRunControls(cmd *cobra.Command, runtime *CommandRuntime) (runControl
 		Clean:               clean,
 		NoDestroy:           noDestroy,
 		Keep:                keep,
+		ContinueOnDrift:     continueOnDrift,
 		ResetMocks:          resetMocks,
 	}, nil
 }
@@ -1631,4 +1650,23 @@ func runCommandStatus(terminalReason string, holdoutBlocked, strayBlocked, keepB
 		return CommandStatusFailed
 	}
 	return CommandStatusSuccess
+}
+
+// hasConvergeFailure reports whether an iteration failed the Layer 2
+// converge check -- an apply that succeeded followed by a plan that was
+// not empty.
+//
+// Matched on Check, not Layer/Stage. runIteration REWRITES every
+// failure it passes up as `Layer: "run", Stage: "iteration_N_test"`,
+// so the layer a failure came from is not visible here; Check is the
+// field that survives. A first version of this matched
+// `mock_deploy`/`converge` and therefore never fired, which the
+// run-level test caught by counting iterations.
+func hasConvergeFailure(failures []FailureSummary) bool {
+	for _, f := range failures {
+		if f.Check == convergeCheckName {
+			return true
+		}
+	}
+	return false
 }
