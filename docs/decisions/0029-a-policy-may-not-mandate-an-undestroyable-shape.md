@@ -180,3 +180,53 @@ testing it costs a real apply. The Layer 2 verification that *was* run passed
 (`7 added`, `7 destroyed`) because mockway does not enforce the precondition. A
 mock that is more permissive than reality cannot refute a claim about reality,
 and this ADR shipped a claim it had only mock evidence for.
+
+
+## Amendment, 2026-09-20 (S191): the premise is gone; the principle stands
+
+The Refutation above says the standalone `scaleway_instance_private_nic` "genuinely
+cannot be destroyed". **That is no longer true.** On provider 2.83.0, applied and
+destroyed against real Scaleway on 2026-09-20: `4 added`, `4 destroyed`, exit 0, with a
+standalone NIC attached to a running server. Upstream #4354 moved teardown to a detach
+route that does not refuse (ADR-0031, S188 amendment).
+
+Every claim about power state in this ADR is history. The precondition was never power;
+it was the endpoint.
+
+**What that changes.** The destroyability argument for preferring the inline block is
+gone. Two things were resting on it and have been corrected:
+
+- `vpc_required.rego`'s denial message told the generator the standalone NIC "cannot be
+  destroyed". That text is repair-loop INPUT — fed to the model as the reason to fix —
+  so a false claim there was taught on every iteration. It now gives the one true
+  reason: the Layer 3 gate refuses the shape.
+- The Layer 3 gate's own refusal cited "deletable only while its server is powered off",
+  which this ADR's Refutation had already disproven and which survived the correction
+  anyway. It now says the gate standardises on the inline block, which is what it
+  actually does.
+
+**What does not change.** The gate still refuses the standalone resource, and
+`vpc_required` still accepts both shapes — it always did; only the message claimed
+otherwise. The refusal is now a **standardisation** choice rather than a safety one, and
+it is stated as such. One way to declare an attachment is easier to reason about than
+two, and nothing here argues that is worth much; it is worth saying honestly rather than
+defending with a reason that has expired.
+
+**And the title still holds.** A policy may not mandate a shape that cannot be
+destroyed. That principle was right when it was written, survived its own mechanism
+being refuted twice, and is unaffected by the shape in question now being destroyable.
+What this amendment removes is a fact, not the rule.
+
+### The pattern worth keeping
+
+This claim was wrong three times and each correction left part of it standing:
+
+1. written as "the NIC cannot be destroyed, power state is the precondition"
+2. refuted on mechanism — the inline block failed identically
+3. diagnosed properly — the endpoint (ADR-0031)
+4. and only now removed as a fact, because upstream fixed the endpoint
+
+At step 2 and step 3 the *message shipped to the generator* was never updated. A
+prescriptive rule frozen in source outlives the fact that justified it, silently,
+because nothing re-tests a sentence. ADR-0028's rule — factual claims are tests, not
+comments — is the answer, and this ADR is the case study for why.

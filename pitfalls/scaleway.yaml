@@ -1,21 +1,15 @@
 provider: scaleway
 pitfalls:
     - resource: scaleway_instance_server
-      rule: |
-        scaleway_instance_server.web is not attached to a private network. Add `private_network { pn_id = scaleway_vpc_private_network.NAME.id }` to the server. Do not use a standalone scaleway_instance_private_nic: it cannot be destroyed and th... Fix observed in scenario "web-live-paris": add the following HCL.
-        resource "scaleway_instance_server" "web" {
-          name  = "web-live-paris-web"
-          private_network {
-            pn_id = scaleway_vpc_private_network.main.id
-              package_update: true
-              packages:
-                - docker.io
-              runcmd:
-                - systemctl enable --now docker
-                - [ sh, -c, "for i in $(seq 1 60); do docker info >/dev/null 2>&1 && break; sleep 2; done" ]
-                - docker run -d --restart=always --name web -p ${var.service_port}:80 ${var.service_image}:${var.service_tag}
-        }
-        # ... (truncated)
+      rule: |-
+        Attach `scaleway_instance_server` to its private network with the
+        provider's INLINE block:
+
+          resource "scaleway_instance_server" "web" {
+            private_network { pn_id = scaleway_vpc_private_network.main.id }
+          }
+
+        Up to 8 blocks; with `count` the block comes too. No `project_id`.
       source: fix
       discovered_from: web-live-paris
     - resource: scaleway_instance_server
@@ -31,10 +25,10 @@ pitfalls:
         standalone NIC, so this is not a preference. Up to 8 blocks; with `count`
         the block comes too. No `project_id`.
 
-        Neither shape destroys cleanly: a private NIC is deletable only while its
-        server is POWERED OFF, and that precondition is the API's, not the HCL's
-        (measured 2026-09-09 and 2026-09-10). Use the inline block because it is
-        the smaller stack the gate accepts -- not because it solves teardown.
+        Both shapes destroy cleanly on provider 2.83.0 (measured against real
+        Scaleway 2026-09-20: standalone NIC, 4 added, 4 destroyed). Use the
+        inline block because the gate standardises on it, not because the other
+        one breaks teardown -- it no longer does.
       source: fix
       discovered_from: web-live-paris
     - resource: scaleway_k8s_cluster

@@ -303,32 +303,43 @@ func layer3BlockProblems(body *hclsyntax.Body, file string, allowedResourceTypes
 	return problems, sawCanonicalProvider, projectResources
 }
 
-// layer3UndestroyableResourceProblems refuses resource TYPES that cannot be
-// destroyed, as opposed to expressions that cannot be evaluated.
+// layer3UndestroyableResourceProblems refuses resource TYPES this project
+// does not allow at Layer 3, as opposed to expressions that cannot be
+// evaluated.
 //
 // `scaleway_instance_private_nic` is the whole list today.
 //
-// # Why a standalone NIC cannot be torn down
+// # Why the standalone NIC is refused
 //
-// A private NIC is deletable only while its server is POWERED OFF. Terraform
-// destroys in reverse dependency order, so the NIC -- which references the
-// server -- is deleted FIRST, with the server still running, and Scaleway
-// refuses:
+// STANDARDISATION, not safety -- and that is a demotion, recorded here
+// deliberately.
+//
+// It was a safety rule. Provider 2.81.0 deleted private NICs through Instance
+// v2alpha1, an endpoint that refuses every NIC there is:
 //
 //	Can't delete a private network interface attached to a server
 //
-// Measured against real Scaleway on 2026-09-09 and again on 2026-09-10:
-// four applies, four failed destroys, two manual recoveries. The recovery is
-// `scw instance server stop` followed by `scw instance private-nic delete`,
-// which needs a human with shell access and cloud credentials -- exactly the
-// operator the auto-destroy exists so nobody has to be.
+// That cost four applies, four failed destroys and two manual recoveries
+// across 2026-09-09 and 2026-09-10.
 //
-// The provider's inline block on the server does not have this problem: the
-// server's own delete powers it off first, so its NICs go with it.
+// Provider 2.83.0 fixed it upstream (#4354) by moving teardown to a detach
+// route that does not refuse. Measured against real Scaleway on 2026-09-20: a
+// standalone NIC on a running server, 4 added, 4 destroyed, exit 0. **Both
+// shapes destroy cleanly now.**
+//
+// So what is left is a preference -- one way to declare an attachment is
+// easier to reason about than two -- and the refusal stays only because
+// nothing has argued for removing it. If someone wants the standalone shape,
+// that is a conversation, not a safety violation.
 //
 //	resource "scaleway_instance_server" "web" {
 //	  private_network { pn_id = scaleway_vpc_private_network.main.id }
 //	}
+//
+// Do not restore the power-state explanation. It was wrong on 2026-09-10
+// (ADR-0029 Refutation: the inline block failed identically) and survived that
+// correction anyway, because a comment is not re-tested when the fact under it
+// changes. See ADR-0031 for the real mechanism.
 //
 // # Why this is a gate and not a pitfall
 //
@@ -339,9 +350,13 @@ func layer3BlockProblems(body *hclsyntax.Body, file string, allowedResourceTypes
 // relies on being followed is not a control.
 //
 // This is deliberately NOT the allowlist. `allow_resource_types` answers "may
-// this cost money"; this answers "can this be destroyed". The NIC stays
-// allowlisted because its cost is fine, and is refused here because its
-// teardown is not.
+// this cost money"; this answers "is this the shape the project uses". The NIC
+// stays allowlisted because its cost is fine, and is refused here because the
+// project declares attachments on the server instead.
+//
+// The function name still says "undestroyable", which is now historical. It is
+// left alone because renaming it touches the audit tests and this slice is a
+// correction, not a refactor -- but the name is not evidence of anything.
 func layer3UndestroyableResourceProblems(block *hclsyntax.Block, file string) []string {
 	if len(block.Labels) == 0 || block.Labels[0] != "scaleway_instance_private_nic" {
 		return nil
@@ -359,7 +374,7 @@ func layer3UndestroyableResourceProblems(block *hclsyntax.Block, file string) []
 	// and the reason to prefer the inline block is that the gate accepts
 	// it and it is the smaller stack, not that it solves teardown.
 	return []string{fmt.Sprintf(
-		"%s: `scaleway_instance_private_nic` is refused -- a private NIC is deletable only while its server is powered off, and `tofu destroy` deletes the NIC before the server. Declare the attachment on the server instead: `private_network { pn_id = scaleway_vpc_private_network.NAME.id }`",
+		"%s: `scaleway_instance_private_nic` is refused -- this project declares private network attachments on the server. Use `private_network { pn_id = scaleway_vpc_private_network.NAME.id }` instead",
 		file)}
 }
 

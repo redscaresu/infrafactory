@@ -2,6 +2,37 @@
 
 Last updated: 2026-09-20
 
+## 2026-09-20 — S191: a standalone private NIC destroys fine now, so stop saying it does not
+
+Two messages corrected. Both told the generator something that stopped being true when the
+provider was bumped to 2.83.0.
+
+**The canary** (issue #249): a standalone `scaleway_instance_private_nic` attached to a
+running server, applied and destroyed against real Scaleway on 2.83.0 —
+`4 added`, `4 destroyed`, exit 0. Zero occurrences of
+`Can't delete a private network interface attached to a server`. Upstream #4354 moved
+teardown to a detach route that does not refuse.
+
+**Why it mattered more than a stale comment.** `vpc_required.rego`'s denial text is
+**repair-loop input** — it is fed back to the model as the reason to fix — so
+*"it cannot be destroyed"* was a false premise taught on every single iteration. It now
+gives the one reason that is still true: the Layer 3 gate refuses the shape.
+
+The gate's own message was worse. It said the NIC is *"deletable only while its server is
+powered off"* — a claim ADR-0029's own Refutation had **already disproven on 2026-09-10**,
+and which survived that correction anyway because nothing re-tests a sentence. It now says
+the project standardises on the inline block, which is what the gate actually does.
+
+**The rule's logic never needed changing.** `vpc_required` has accepted both the standalone
+and inline shapes all along — three `has_private_nic` implementations. Only the prose
+claimed otherwise, which is the whole point: the code was right and the sentence was wrong,
+and the sentence is what the model reads.
+
+**The refusal is now standardisation, not safety**, and is written as such. Neither shape is
+undestroyable any more; one way to declare an attachment is simply easier to reason about
+than two. ADR-0029 amended with the case study — the claim was wrong three times and each
+correction left part of it standing.
+
 ## 2026-09-20 — S190: the probe window, measured
 
 `real_probes.retries` 24 → **60** (~120s → ~300s), in `infrafactory.yaml` and in the Go
