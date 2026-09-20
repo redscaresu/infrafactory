@@ -387,7 +387,7 @@ func layer3InlinePrivateNetworkProblems(resource *hclsyntax.Block, file string) 
 	// types and they do not agree on the key: scaleway_lb uses
 	// `private_network_id`, scaleway_redis_cluster uses `id`, and only
 	// scaleway_instance_server and scaleway_rdb_instance use `pn_id`
-	// (provider 2.81.0 schema). Running this on all of them would demand
+	// (provider 2.83.0 schema). Running this on all of them would demand
 	// `pn_id` from a perfectly valid load balancer attachment and refuse a
 	// stack for having the right shape.
 	//
@@ -487,14 +487,14 @@ const layer3ScalewayProviderSource = "scaleway/scaleway"
 // the BASE branch -- precisely so a pull request cannot change it.
 //
 // A constraint is not a pin. The gate fixtures carried `~> 2.57` and
-// resolved to 2.81.0, because a range means "whatever the registry is
+// resolved to 2.83.0, because a range means "whatever the registry is
 // serving when init runs". The provider is an executable that runs with
 // SCW_ACCESS_KEY and SCW_SECRET_KEY in its environment, so which build of
 // it executes should be a decision someone made, not a decision the
 // registry makes at 3am.
 //
 // Bumping this is a base-branch change, reviewed like any other.
-const layer3ScalewayProviderVersion = "2.81.0"
+const layer3ScalewayProviderVersion = "2.83.0"
 
 // layer3ProviderSourceProblems refuses any required_providers entry that is
 // not the real Scaleway provider.

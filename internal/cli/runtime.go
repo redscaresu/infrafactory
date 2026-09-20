@@ -44,16 +44,6 @@ type SandboxDestroyHarnessRunner interface {
 	Run(context.Context, string, map[string]string) (*harness.SandboxDestroyResult, error)
 }
 
-// PrivateNICDetachRunner deletes a run project's private NICs through
-// the Instance v1 API before `tofu destroy` runs, because provider
-// 2.81.0 deletes them through v2alpha1 and THAT endpoint refuses every
-// time -- "Can't delete a private network interface attached to a
-// server", which is true of every NIC there is. See
-// harness.ScalewayPrivateNICDetach and ADR-0031.
-type PrivateNICDetachRunner interface {
-	Run(ctx context.Context, projectID, secretKey string) ([]string, error)
-}
-
 // AutoCreatedPurgeRunner removes resources the cloud API created inside
 // a run's project without being asked -- which Terraform therefore never
 // destroys, and which keep the disposable project undeletable.
@@ -120,7 +110,6 @@ type RuntimeDependencies struct {
 	SandboxDeploy  SandboxDeployHarnessRunner
 	SandboxDestroy SandboxDestroyHarnessRunner
 	AutoCreated    AutoCreatedPurgeRunner
-	NICDetach      PrivateNICDetachRunner
 	OrphanSweep    OrphanSweepRunner
 	RunProject     RunProjectManager
 	ServiceProbe   ServiceProbeRunner
@@ -438,9 +427,6 @@ func buildRuntime(cmd *cobra.Command, opts runtimeOptions) (*CommandRuntime, err
 	}
 	if deps.SandboxDestroy == nil {
 		deps.SandboxDestroy = harness.NewSandboxDestroyHarness(execCommandRunner{})
-	}
-	if deps.NICDetach == nil {
-		deps.NICDetach = harness.NewScalewayPrivateNICDetach(privateNICDetachTimeout)
 	}
 	if deps.AutoCreated == nil {
 		deps.AutoCreated = harness.NewScalewayAutoCreatedPurge(autoCreatedPurgeTimeout)

