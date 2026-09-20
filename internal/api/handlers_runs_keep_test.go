@@ -114,3 +114,30 @@ func TestLayer3StatusReportsTheKeepGrantSeparately(t *testing.T) {
 		})
 	}
 }
+
+// Not gated on any grant: both modes cost the same and the run fails
+// either way. What the flag changes is who is asked to fix it.
+func TestRunsStartCarriesContinueOnDrift(t *testing.T) {
+	t.Parallel()
+
+	starter := &fakeStarter{}
+	ts := keepServer(t, starter, nil)
+
+	resp := postStart(t, ts, `{"continue_on_drift":true}`)
+
+	require.Equal(t, http.StatusAccepted, resp.StatusCode)
+	assert.True(t, starter.lastReq.ContinueOnDrift)
+}
+
+func TestRunsStartDefaultsToStoppingOnDrift(t *testing.T) {
+	t.Parallel()
+
+	starter := &fakeStarter{}
+	ts := keepServer(t, starter, nil)
+
+	resp := postStart(t, ts, `{}`)
+
+	require.Equal(t, http.StatusAccepted, resp.StatusCode)
+	assert.False(t, starter.lastReq.ContinueOnDrift,
+		"stopping is the default because continuing feeds an ambiguous signal to the repair loop")
+}

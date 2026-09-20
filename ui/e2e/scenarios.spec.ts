@@ -72,6 +72,21 @@ test.describe('Scenario navigation', () => {
     await expect(page.getByText('Force clean')).toBeVisible();
   });
 
+  // Unticked means stop. The note beside it has to say which mode is
+  // active, because the consequence differs and neither is obvious.
+  test('drift mode defaults to stopping and says so', async ({ page }) => {
+    await page.goto('/scenarios/training/web-app-paris');
+    await expect(page.locator('main h1')).toContainText('web-app-paris');
+
+    const box = page.getByTestId('scenario-continue-on-drift');
+    await expect(box).toBeVisible();
+    await expect(box).not.toBeChecked();
+    await expect(page.getByTestId('scenario-drift-note')).toContainText('the run stops there');
+
+    await box.check();
+    await expect(page.getByTestId('scenario-drift-note')).toContainText('repair loop');
+  });
+
   // The one run option that leaves something running and costing money.
   // This server was started without --allow-deploy, so the box has to be
   // there (otherwise nobody learns the capability exists) and has to be

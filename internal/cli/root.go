@@ -213,6 +213,10 @@ func newTestCmd(cfg *rootConfig) *cobra.Command {
 	}
 
 	cmd.Flags().Bool("no-destroy", false, "Skip destruction after a successful test run to preserve state for incremental follow-up runs")
+	// Registered here as well as on `run` because the drift failure
+	// tells the operator to pass it, and advice naming a flag the
+	// command does not have is worse than no advice.
+	cmd.Flags().Bool("continue-on-drift", false, "Keep going after the Layer 2 converge check finds a non-empty plan, instead of stopping. The result still fails")
 
 	return cmd
 }
@@ -262,6 +266,7 @@ func registerRunFlags(cmd *cobra.Command, resetMocksDefault bool) {
 	cmd.Flags().Bool("clean", false, "Force a clean run by resetting mock state and discarding prior Terraform state")
 	cmd.Flags().Bool("no-destroy", false, "Skip destruction after a successful run to preserve state for incremental follow-up runs")
 	cmd.Flags().Bool("keep", false, "On success, leave the real infrastructure running and register it as a live deployment under the scenario's service.ttl")
+	cmd.Flags().Bool("continue-on-drift", false, "Keep going after the Layer 2 converge check finds a non-empty plan, instead of stopping. The run still fails; the drift is fed to the repair loop")
 	cmd.Flags().Bool("reset-mocks", resetMocksDefault, "POST /mock/reset to every configured mock before iter 1 on a clean run; ignored when run_mode=incremental")
 }
 

@@ -63,6 +63,15 @@ type StartRunRequest struct {
 	// makes `run` safe on a layer3-only server is that it always
 	// destroys, and --keep is precisely the removal of that.
 	Keep bool `json:"keep"`
+
+	// ContinueOnDrift keeps the run going when the Layer 2 converge
+	// check finds a non-empty plan, instead of stopping there.
+	//
+	// Not gated on any grant: both modes cost the same, and the run
+	// fails either way. The choice is about who is being asked to fix
+	// it -- stop sends you to look at the mock, continue hands it to the
+	// repair loop as if it were the HCL.
+	ContinueOnDrift bool `json:"continue_on_drift"`
 }
 
 type RunStarter interface {

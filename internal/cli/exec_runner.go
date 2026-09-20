@@ -148,9 +148,17 @@ func (execCommandRunner) Run(ctx context.Context, cmd harness.Command) (harness.
 	execCmd.Stderr = &stderr
 
 	err := execCmd.Run()
+	// ProcessState is nil when the command never started (binary not on
+	// PATH, bad working directory). -1 keeps that distinguishable from a
+	// real exit status, and from the 0 a zero-value struct would carry.
+	exitCode := -1
+	if execCmd.ProcessState != nil {
+		exitCode = execCmd.ProcessState.ExitCode()
+	}
 	return harness.CommandResult{
-		Stdout: stdout.Bytes(),
-		Stderr: stderr.Bytes(),
+		Stdout:   stdout.Bytes(),
+		Stderr:   stderr.Bytes(),
+		ExitCode: exitCode,
 	}, err
 }
 

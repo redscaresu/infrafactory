@@ -294,6 +294,9 @@ func (s *uiRunStarter) executeRun(ctx context.Context, req api.StartRunRequest, 
 	if req.Keep {
 		_ = runCmd.Flags().Set("keep", "true")
 	}
+	if req.ContinueOnDrift {
+		_ = runCmd.Flags().Set("continue-on-drift", "true")
+	}
 	runCmd.SetContext(ctx)
 
 	opts := defaultRuntimeOptions()

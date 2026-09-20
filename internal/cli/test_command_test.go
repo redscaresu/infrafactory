@@ -1151,6 +1151,7 @@ func newTestCommandForTest(opts runtimeOptions) *cobra.Command {
 	cmd.Flags().String("config", config.DefaultPath, "")
 	cmd.Flags().String("output", string(OutputModeHuman), "")
 	cmd.Flags().Bool("no-destroy", false, "")
+	cmd.Flags().Bool("continue-on-drift", false, "")
 	return cmd
 }
 

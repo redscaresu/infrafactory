@@ -26,14 +26,19 @@ func runTestCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) 
 	if err != nil {
 		return &CLIError{Op: "test", Code: errorCodeUsage, Err: fmt.Errorf("read --no-destroy flag: %w", err)}
 	}
+	continueOnDrift, err := cmd.Flags().GetBool("continue-on-drift")
+	if err != nil {
+		return &CLIError{Op: "test", Code: errorCodeUsage, Err: fmt.Errorf("read --continue-on-drift flag: %w", err)}
+	}
 
 	// The guard only engages when Layer 3 is on. Interrupting a
 	// mock-only run costs nothing; interrupting one that has already
 	// applied to real Scaleway leaves billable resources behind.
 	return withSandboxInterruptGuard(cmd, runtime, signal.NotifyContext, func(ctx context.Context) error {
 		result, err := executeTest(ctx, runtime, args[0], testExecutionOptions{
-			MockDeployMode: harness.MockDeployModeClean,
-			SkipDestroy:    noDestroy,
+			MockDeployMode:  harness.MockDeployModeClean,
+			SkipDestroy:     noDestroy,
+			ContinueOnDrift: continueOnDrift,
 			// Progress on stderr, the same stream and the same bytes
 			// `deploy` produces. stdout carries the output contract.
 			Progress: cmd.ErrOrStderr(),
@@ -215,6 +220,12 @@ func appendMockDeployResult(stages []StageSummary, failures []FailureSummary, re
 		if result != nil && result.Apply.Stage != "" {
 			stages = append(stages, StageSummary{Layer: "mock_deploy", Stage: "apply", Status: StageStatusPass})
 		}
+		if result != nil && result.Converge.Stage != "" && !result.Drifted {
+			stages = append(stages, StageSummary{
+				Layer: "mock_deploy", Stage: "converge", Status: StageStatusPass,
+				Detail: "second plan is empty: config, state and the mock agree",
+			})
+		}
 		stages = append(stages, StageSummary{Layer: "mock_deploy", Stage: "state", Status: StageStatusPass})
 		return stages, failures
 	}
@@ -236,6 +247,8 @@ func appendMockDeployResult(stages []StageSummary, failures []FailureSummary, re
 		} else {
 			stages[len(stages)-1].Status = StageStatusFail
 		}
+	case "converge":
+		stages = append(stages, StageSummary{Layer: "mock_deploy", Stage: "converge", Status: StageStatusFail})
 	case "state":
 		stages = append(stages, StageSummary{Layer: "mock_deploy", Stage: "state", Status: StageStatusFail})
 	}
@@ -255,12 +268,19 @@ func mockDeployFailureDetail(err *harness.MockDeployError) string {
 	if err == nil {
 		return ""
 	}
+	// Every stage that runs tofu has to hand its stderr over. A guard
+	// that stops without saying why is half a guard (ADR-0023), and a
+	// converge plan that dies on exit 1 reports a bare "exit status 1"
+	// without this -- discarding the provider message that is the only
+	// thing saying what broke.
 	var stderr string
 	switch err.Stage {
 	case "init":
 		stderr = err.Init.Stderr
 	case "apply":
 		stderr = err.Apply.Stderr
+	case "converge":
+		stderr = err.Converge.Stderr
 	}
 	return stderrFailureDetail(err.Err, stderr)
 }
@@ -471,6 +491,21 @@ type testExecutionOptions struct {
 	// that registration this would just be a leak with better manners.
 	KeepSandbox bool
 
+	// ContinueOnDrift keeps the run going after the Layer 2 converge
+	// check finds a non-empty plan. Default (false) stops.
+	//
+	// The two modes exist because drift at Layer 2 is AMBIGUOUS and
+	// infrafactory cannot resolve it: either the mock does not echo back
+	// what the provider sent, or the HCL genuinely cannot converge. The
+	// only reference for "what should the API have returned" is the
+	// mock itself, and a mock cannot certify its own fidelity.
+	//
+	// Stopping is the default because continuing feeds the drift to the
+	// repair loop, and if the cause is the mock the model then rewrites
+	// HCL that was never wrong -- burning the repair budget, and quite
+	// possibly contorting a correct config to satisfy a lying mock.
+	ContinueOnDrift bool
+
 	// LogScope stamps the stage-progress entries this execution emits.
 	//
 	// `run` reaches here through `executeTest`, and `runIteration`
@@ -614,6 +649,78 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 
 	deployResult, deployErr := runtime.Deps.MockDeploy.Run(ctx, outputDir, env, deployMode)
 	stages, failures = appendMockDeployResult(stages, failures, deployResult, deployErr)
+
+	// A stack that applied but does not converge is a defect either way,
+	// so this always fails. What the mode chooses is WHEN you find out,
+	// and who is asked to fix it.
+	if deployErr == nil && deployResult != nil && deployResult.Drifted {
+		// Logged, not only staged. `run` does not persist StageSummary
+		// anywhere a human reads during the run, so a finding that
+		// exists solely as a stage is invisible on the Live Run page
+		// for however long the rest of the iteration takes -- and under
+		// --continue-on-drift that can be several more minutes and a
+		// real apply. Saying WHICH mode was taken is the point: "drift
+		// found" and "drift found, and here is what I did about it" are
+		// different messages, and only the second one lets a watcher
+		// decide whether to interrupt.
+		driftScope := opts.LogScope
+		if driftScope.Command == "" {
+			driftScope.Command = "test"
+		}
+		driftScope.Level = logLevelError
+		driftScope.Event = "mock_deploy_drift"
+		driftScope.Stage = "converge"
+		if opts.ContinueOnDrift {
+			driftScope.Status = "continuing"
+			driftScope.Detail = "drift detected: the second plan is not empty. Continuing by request " +
+				"(--continue-on-drift); the repair loop will be told, which rewrites HCL that may never have been wrong"
+		} else {
+			driftScope.Status = "stopping"
+			driftScope.Detail = "drift detected: the second plan is not empty. Stopping the run; " +
+				"pass --continue-on-drift to carry on anyway"
+		}
+		runtime.Logger.Log(driftScope)
+
+		stages = append(stages, StageSummary{Layer: "mock_deploy", Stage: "converge", Status: StageStatusFail})
+		failures = append(failures, FailureSummary{
+			Layer: "mock_deploy", Stage: "converge", Check: convergeCheckName,
+			Command: "tofu plan -detailed-exitcode",
+			Detail:  driftFailureDetail(deployResult.Converge.Stdout, opts.ContinueOnDrift),
+		})
+		if !opts.ContinueOnDrift {
+			// Tear the MOCK down on the way out. Stopping here skips the
+			// destruction branch, and leaving the stack up satisfies two
+			// of detectRunMode's three incremental conditions -- mock
+			// resources present, terraform.tfstate present -- so the
+			// next run of a scenario with any earlier success would
+			// silently build on a state already known to disagree with
+			// its config.
+			//
+			// Same reasoning as --keep: Layer 2 teardown is free and
+			// proves something, so nothing is bought by skipping it. The
+			// evidence is not lost either, because the plan output is
+			// already in the failure detail and Layer 2 reproduces in
+			// seconds for nothing.
+			if runtime.Config.Validation.Layers.Destruction.Enabled && !opts.SkipDestroy {
+				stages = append(stages, detachMockPrivateNICs(ctx, runtime, sc.Cloud, env)...)
+				destroyResult, destroyErr := runtime.Deps.Destroy.Run(ctx, outputDir, env)
+				stages, failures = appendDestroyResult(stages, failures, destroyResult, destroyErr)
+			}
+			// Nothing else downstream can be trusted: every later check
+			// reads a state that does not describe the config.
+			// Continuing would spend real iterations -- and real money
+			// at Layer 3 -- against a conclusion already known to be
+			// unsound.
+			return OutputResult{
+				Command:  "test",
+				Scenario: sc.Name,
+				Status:   CommandStatusFailed,
+				Stages:   stages,
+				Failures: failures,
+			}, &CLIError{Op: "test", Code: errorCodeCommandFailed, Err: errors.New("test checks failed")}
+		}
+	}
+
 	// Declared out here because the destroy path below has to delete what
 	// the apply path created, and they are separate branches.
 	var runProjectID string
@@ -1521,4 +1628,47 @@ func detachMockPrivateNICs(ctx context.Context, runtime *CommandRuntime, cloud s
 		Detail: fmt.Sprintf("%s %d private NIC(s) from the mock via v1, which the provider cannot do for itself: %s",
 			verb, len(detached), strings.Join(detached, "; ")),
 	}}
+}
+
+// driftFailureDetail explains a non-empty second plan, and says how to
+// tell the two possible causes apart.
+//
+// Both hypotheses are named because infrafactory genuinely cannot
+// choose between them: its only reference for "what should the API have
+// returned" is the mock, and a mock cannot certify its own fidelity.
+// Asserting one cause would be the confident-wrong-diagnosis this
+// project has paid for before.
+// convergeCheckName identifies the drift failure across the rewrite
+// runIteration performs on its way up to the run loop, which discards
+// the originating layer and stage.
+const convergeCheckName = "idempotent"
+
+func driftFailureDetail(planOutput string, continuing bool) string {
+	var b strings.Builder
+	b.WriteString("the apply succeeded but the next plan is NOT empty, so this stack does not converge. ")
+	b.WriteString("Two possible causes, and this run cannot tell them apart: ")
+	b.WriteString("(1) the mock does not return what the provider sent, so state disagrees with config; ")
+	b.WriteString("(2) the HCL genuinely cannot converge. ")
+	b.WriteString("Run the same HCL at Layer 3: drift there too means the HCL, drift only here means the mock")
+	if continuing {
+		b.WriteString(". Continuing by request (--continue-on-drift): the repair loop will be told about this, " +
+			"which rewrites HCL that may never have been wrong")
+	}
+	if trimmed := strings.TrimSpace(planOutput); trimmed != "" {
+		b.WriteString("\n\nplan:\n")
+		b.WriteString(truncatePlanOutput(trimmed))
+	}
+	return b.String()
+}
+
+// truncatePlanOutput keeps the detail readable. The head is kept rather
+// than the tail: tofu prints the changing resources first and the
+// summary last, and it is the resource names that say which attribute
+// is drifting.
+func truncatePlanOutput(out string) string {
+	const maxPlanDetail = 4000
+	if len(out) <= maxPlanDetail {
+		return out
+	}
+	return out[:maxPlanDetail] + fmt.Sprintf("\n... (%d more bytes)", len(out)-maxPlanDetail)
 }

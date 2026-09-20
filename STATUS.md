@@ -2,6 +2,51 @@
 
 Last updated: 2026-09-20
 
+## 2026-09-20 — S187: an apply that succeeds is not a stack that converges
+
+Layer 2 now runs `tofu plan -detailed-exitcode` after its apply, and a non-empty plan
+fails the run. **No layer previously asked this question** — Layer 2 was `init` + `apply`
+and stopped — so an entire class of defect was invisible to every one of them.
+
+The class is real and already documented one repo over. mockway's
+`CRITICAL[lb-ip-ids-array]` says a mock shipping the deprecated singular `ip_id` would make
+"every LB-with-static-IP apply diff every plan". mockway catches that in **its own** CI;
+infrafactory, whose job is deciding whether generated HCL is safe, did not. The guarantee
+was inherited rather than verified in place.
+
+**Two modes, because the signal is ambiguous and infrafactory cannot resolve it.** Drift
+means either the mock does not return what the provider sent, or the HCL genuinely cannot
+converge — and the only reference for "what should the API have returned" is the mock,
+which cannot certify its own fidelity. So the failure names both hypotheses and the
+experiment that separates them: run the same HCL at Layer 3, drift there too means the HCL.
+Default **stops** (nothing downstream runs, and the pitfall harvest never fires, because a
+lesson from an ambiguous signal is aimed at the wrong component). `--continue-on-drift`
+carries on and hands the drift to the repair loop — which is the point of continuing and
+also its risk, stated wherever it is offered: if the cause is the mock, the model rewrites
+HCL that was never wrong. Checkbox on the scenario page, and the note beside it changes to
+say which mode is active.
+
+**What it does not buy, and this is the half worth remembering.** It does not detect a
+*permissive* mock. One that allows what real Scaleway refuses produces an empty plan and a
+green run — exactly ADR-0031's NIC delete, where Layer 2 said `7 added, 7 destroyed` and
+certified a wrong fix. Convergence and fidelity are different properties.
+
+**Four review findings, all accepted, one theme: the check was right and its edges were
+not.** A failed converge plan dropped the provider's stderr and reported a bare `exit
+status 1` — the exact half-a-guard defect ADR-0023 was amended for. The failure told the
+operator to pass `--continue-on-drift` to `test`, where the flag did not exist. And the
+stop path skipped the destruction branch, leaving a mock up that satisfies two of
+`detectRunMode`'s three incremental conditions — so the next run would silently build on
+state already known to disagree with its config.
+
+**One bug the tests caught and the reviewer did not.** `hasConvergeFailure` first matched
+on `Layer == "mock_deploy"`, and never fired: `runIteration` **rewrites** every failure it
+passes up as `Layer: "run", Stage: "iteration_N_test"`, so only `Check` survives. Every
+unit test passed, because they call `executeTest` directly and never cross the rewrite; the
+run-level test caught it by counting iterations. A mutation check also survived at first —
+the assertion read a stage's `Detail`, and a passing stage has an empty detail too, so it
+could not tell "did not run" from "ran fine".
+
 ## 2026-09-20 — S186: a run can keep what it built
 
 `infrafactory run --keep`, and a **Keep it running** checkbox on the scenario page. On
