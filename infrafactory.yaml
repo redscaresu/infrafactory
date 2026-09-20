@@ -176,7 +176,37 @@ validation:
     #
     # A probe window is a claim about how long real infrastructure takes. Ours
     # was wrong by 3x on 2026-09-09 (web-live-paris, two iterations lost).
-    retries: 24
+    #
+    # MEASURED on 2026-09-20, six real web-live-paris boots against Scaleway
+    # (fr-par-1, DEV1-S, cloud-init installing docker then running nginx:1.27).
+    # Time from the apply returning to the first HTTP 200 through the load
+    # balancer -- which covers cloud-init AND the LB marking the backend
+    # healthy, since a 503 from a healthy LB with no healthy backend is what
+    # this window actually has to outlast:
+    #
+    #     0s, 0s, 20s, 45s, 66s   (five successes)
+    #     >120s                    (one FAILURE: never served inside 24 x 5s)
+    #
+    # The two zeroes are not fast boots -- they are applies that took 103s and
+    # 73s, long enough that cloud-init had already finished. So the quantity
+    # that varies is total time to serve (73-109s across the five), and how
+    # much of it lands after the apply is close to arbitrary.
+    #
+    # 60 attempts, ~300s. Sized to the FAILURE, not the successes: the worst
+    # success needed 66s, and 120s was not enough at least once in eight
+    # observed probes. A 1-in-8 false negative costs a real apply and destroy
+    # every time, and on a stage it looks like the product is broken.
+    #
+    # Widening is close to free and that asymmetry is the argument: the probe
+    # returns on the FIRST success, so a longer window changes nothing for a
+    # healthy stack and only buys time for the tail. What it costs is a slower
+    # verdict when something is genuinely broken -- 300s instead of 120s before
+    # a real failure is reported, which is a fair price for not mistaking a
+    # slow boot for a broken app.
+    #
+    # Six boots is a small sample and the tail is characterised by exactly one
+    # observation. If this fires again, measure rather than double it.
+    retries: 60
     retry_delay_seconds: 5
 
 constraint_policies:

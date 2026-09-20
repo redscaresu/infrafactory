@@ -2,6 +2,48 @@
 
 Last updated: 2026-09-20
 
+## 2026-09-20 — S190: the probe window, measured
+
+`real_probes.retries` 24 → **60** (~120s → ~300s), in `infrafactory.yaml` and in the Go
+default, so a config that omits the key gets the same number.
+
+**Measured, not padded.** Six real `web-live-paris` boots against Scaleway — deploy, poll
+the load balancer until the first HTTP 200, tear down — timing the gap between the apply
+returning and the page serving, which is what this window actually has to outlast:
+
+```
+0s, 0s, 20s, 45s, 66s     five successes
+>120s                     one FAILURE, never served inside the old window
+```
+
+The two zeroes are not fast boots. They are applies that took 103s and 73s — long enough
+that cloud-init had already finished. The quantity that varies is **total** time to serve
+(73–109s across the five); how much of it lands after the apply is close to arbitrary,
+which is why a window sized from the median is the wrong instrument.
+
+Sized to the failure. The worst success needed 66s, and 120s was not enough at least once
+in eight observed probes. **The asymmetry is the argument**: the probe returns on the
+first success, so a longer window costs a healthy stack nothing and only buys time for the
+tail. What it does cost is a slower verdict on a genuinely broken stack — 300s instead of
+120s — which is a fair price for not mistaking a slow boot for a broken app, given each
+false negative costs the repair loop a real apply and destroy.
+
+**Recorded as a small sample.** Six boots, and the tail is characterised by exactly one
+observation. The config comment says so, and says to measure again rather than double it
+if it fires.
+
+### An unrelated finding the measurement produced
+
+Three `deploy`s fired ~6s apart all failed in seconds with
+`scaleway-sdk-go: insufficient permissions: read loadbalancer`. Each creates a fresh
+project, and IAM had not propagated to it yet. Spacing them 90s apart fixed it, three for
+three. Nothing in the repo knows about this — no pitfall, no retry — and anyone running
+scenarios back-to-back or in parallel will hit it.
+
+The recovery path worked unprompted, which is the reassuring half: each failed `deploy`
+named the exact `live teardown` to run, all three tore down cleanly, and the account went
+back to its three projects.
+
 ## 2026-09-20 — S189: the private-NIC workaround is gone
 
 `ScalewayPrivateNICDetach`, the `PrivateNICDetachRunner` dependency, `detachRunProjectNICs`,
