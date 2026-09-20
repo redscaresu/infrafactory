@@ -44,25 +44,6 @@ type SandboxDestroyHarnessRunner interface {
 	Run(context.Context, string, map[string]string) (*harness.SandboxDestroyResult, error)
 }
 
-// PrivateNICDetachRunner deletes a run project's private NICs through
-// the Instance v1 API before `tofu destroy` runs, because provider
-// 2.81.0 deleted them through v2alpha1 and THAT endpoint refuses every
-// time -- "Can't delete a private network interface attached to a
-// server", which is true of every NIC there is. See
-// harness.ScalewayPrivateNICDetach and ADR-0031.//
-// RETAINED across the 2.83.0 bump, deliberately. Upstream
-// scaleway/terraform-provider-scaleway#4354 is reported fixed in
-// v2.83.0, but that is a changelog claim and nothing here has watched
-// 2.83.0 tear a private NIC down against real Scaleway. Removing a
-// teardown guard on the strength of a release note is the shape of
-// mistake that cost this project three retracted fixes in one day, and
-// the cost of being wrong is real infrastructure that cannot be
-// destroyed. The detach is idempotent and cheap: if the provider now
-// handles it, this finds nothing to remove.
-type PrivateNICDetachRunner interface {
-	Run(ctx context.Context, projectID, secretKey string) ([]string, error)
-}
-
 // AutoCreatedPurgeRunner removes resources the cloud API created inside
 // a run's project without being asked -- which Terraform therefore never
 // destroys, and which keep the disposable project undeletable.
@@ -129,7 +110,6 @@ type RuntimeDependencies struct {
 	SandboxDeploy  SandboxDeployHarnessRunner
 	SandboxDestroy SandboxDestroyHarnessRunner
 	AutoCreated    AutoCreatedPurgeRunner
-	NICDetach      PrivateNICDetachRunner
 	OrphanSweep    OrphanSweepRunner
 	RunProject     RunProjectManager
 	ServiceProbe   ServiceProbeRunner
@@ -447,9 +427,6 @@ func buildRuntime(cmd *cobra.Command, opts runtimeOptions) (*CommandRuntime, err
 	}
 	if deps.SandboxDestroy == nil {
 		deps.SandboxDestroy = harness.NewSandboxDestroyHarness(execCommandRunner{})
-	}
-	if deps.NICDetach == nil {
-		deps.NICDetach = harness.NewScalewayPrivateNICDetach(privateNICDetachTimeout)
 	}
 	if deps.AutoCreated == nil {
 		deps.AutoCreated = harness.NewScalewayAutoCreatedPurge(autoCreatedPurgeTimeout)

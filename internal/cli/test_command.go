@@ -702,7 +702,6 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 			// already in the failure detail and Layer 2 reproduces in
 			// seconds for nothing.
 			if runtime.Config.Validation.Layers.Destruction.Enabled && !opts.SkipDestroy {
-				stages = append(stages, detachMockPrivateNICs(ctx, runtime, sc.Cloud, env)...)
 				destroyResult, destroyErr := runtime.Deps.Destroy.Run(ctx, outputDir, env)
 				stages, failures = appendDestroyResult(stages, failures, destroyResult, destroyErr)
 			}
@@ -834,7 +833,6 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 		// is the mock doing its job, and the reason Layer 2 stopped
 		// tearing down the moment it started telling the truth. Same
 		// workaround, pointed at the mock.
-		stages = append(stages, detachMockPrivateNICs(ctx, runtime, sc.Cloud, env)...)
 
 		destroyResult, destroyErr := runtime.Deps.Destroy.Run(ctx, outputDir, env)
 		stages, failures = appendDestroyResult(stages, failures, destroyResult, destroyErr)
@@ -900,11 +898,8 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 				// terraform-live.tfstate, taking the project id with it.
 				// The first canary run failed exactly here.
 				sweepTarget, sweepTargetErr := harness.CaptureSweepTarget(outputDir)
-				sandboxDestroyResult, purged, stopped, sandboxDestroyErr := destroySandbox(ctx, runtime, outputDir, sandboxEnv, sweepTargetProjectID(sweepTarget))
+				sandboxDestroyResult, purged, sandboxDestroyErr := destroySandbox(ctx, runtime, outputDir, sandboxEnv, sweepTargetProjectID(sweepTarget))
 				stages, failures = appendSandboxDestroyResult(stages, failures, sandboxDestroyResult, sandboxDestroyErr)
-				if len(stopped) > 0 {
-					stages = append(stages, privateNICDetachStage(stopped))
-				}
 				if len(purged) > 0 {
 					stages = append(stages, autoCreatedPurgeStage(purged))
 				}
@@ -1577,57 +1572,6 @@ func appendOrphanSweepResult(ctx context.Context, stages []StageSummary, failure
 		})
 	}
 	return stages, failures
-}
-
-// detachMockPrivateNICs removes private NICs from the MOCK before the
-// Layer 2 destroy, for the same reason detachRunProjectNICs does it
-// before the real one: provider 2.81.0 deleted NICs through v2alpha1,
-// that endpoint refuses every NIC there is, and mockway now models it.
-//
-// Scoped by the mock's project, which cloudEnv fixes -- there is no run
-// project here, and nothing else shares the mock.
-//
-// Best-effort and silent on absence: a scenario with no private
-// networking has nothing to detach, and Layer 2 costs nothing to retry,
-// so a failure here must not stop a destroy that may well succeed.
-func detachMockPrivateNICs(ctx context.Context, runtime *CommandRuntime, cloud string, env map[string]string) []StageSummary {
-	// Scaleway only. cloudEnv sets SCW_* for every scenario regardless of
-	// cloud, so without this a GCP or AWS teardown would call mockway --
-	// a mock holding none of its resources -- and could emit a Scaleway
-	// stage on a run that never touched Scaleway.
-	if !strings.EqualFold(strings.TrimSpace(cloud), "scaleway") {
-		return nil
-	}
-	base := strings.TrimSpace(env["SCW_API_URL"])
-	project := strings.TrimSpace(env["SCW_DEFAULT_PROJECT_ID"])
-	if base == "" || project == "" {
-		return nil
-	}
-	detached, err := harness.NewScalewayPrivateNICDetachAt(base, privateNICDetachTimeout).
-		Run(ctx, project, env["SCW_SECRET_KEY"])
-	if err != nil || len(detached) == 0 {
-		return nil
-	}
-	// FAILS when any entry reports a NIC it could not remove. Emitting a
-	// pass headed "removed N" while one is still attached would assert
-	// the opposite of what is true, in the case where the destroy is
-	// about to fail for exactly that reason.
-	status := StageStatusPass
-	verb := "removed"
-	for _, d := range detached {
-		if strings.Contains(d, "could NOT be deleted") {
-			status = StageStatusFail
-			verb = "could not remove every private NIC from the mock; the destroy that follows is expected to fail. Attempted"
-			break
-		}
-	}
-	return []StageSummary{{
-		Layer:  "destruction",
-		Stage:  "private_nic_detach",
-		Status: status,
-		Detail: fmt.Sprintf("%s %d private NIC(s) from the mock via v1, which the provider cannot do for itself: %s",
-			verb, len(detached), strings.Join(detached, "; ")),
-	}}
 }
 
 // driftFailureDetail explains a non-empty second plan, and says how to

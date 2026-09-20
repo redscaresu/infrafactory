@@ -799,12 +799,9 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 				// empties terraform-live.tfstate, and the strays it names
 				// go with it. Same ordering the success path learned the
 				// hard way in the first canary run.
-				destroyResult, purged, stopped, destroyErr := destroySandbox(cmd.Context(), runtime, runtime.OutputDir(), sandboxEnv, sweepTargetProjectID(sweepTarget))
+				destroyResult, purged, destroyErr := destroySandbox(cmd.Context(), runtime, runtime.OutputDir(), sandboxEnv, sweepTargetProjectID(sweepTarget))
 				destroyStages, destroyFailures := appendSandboxDestroyResult(nil, nil, destroyResult, destroyErr)
 				allStages = append(allStages, destroyStages...)
-				if len(stopped) > 0 {
-					allStages = append(allStages, privateNICDetachStage(stopped))
-				}
 				if len(purged) > 0 {
 					allStages = append(allStages, autoCreatedPurgeStage(purged))
 				}

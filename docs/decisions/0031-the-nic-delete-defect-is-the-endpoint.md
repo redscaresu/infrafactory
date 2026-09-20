@@ -119,7 +119,7 @@ and, once mockway implemented it (mockway#29), tears the same stack down cleanly
 So this ADR's diagnosis holds exactly as written — the defect was the endpoint — and
 upstream's fix is the same conclusion reached from the other side.
 
-### The workaround stays, for now
+### The workaround stayed until it was tested, then went (S189)
 
 `ScalewayPrivateNICDetach` and the `private_nic_detach` stage are retained. What has
 been demonstrated is that 2.83.0 tears down cleanly **against mockway**. mockway is a
@@ -131,3 +131,24 @@ provider now handles it, the stage finds nothing to remove and says so.
 Removing it needs a real-cloud canary: `web-live-paris` applied and destroyed against
 Scaleway with the stage disabled, and the account verified empty afterwards. That is a
 separate decision and belongs with the evidence.
+
+
+## Amendment, 2026-09-20 (S189): the workaround is removed
+
+The previous amendment said removing it needed a real-cloud canary. It got three.
+
+Two full `run`s of `web-live-paris` against real Scaleway and one `deploy` +
+`live teardown`, all with the detach deleted: every destroy passed, every orphan sweep
+passed, every run project was deleted, and the account finished on exactly the three
+projects it started with. `Can't delete a private network interface attached to a
+server` appears **zero** times across all of it.
+
+So this ADR's mechanism is now history rather than active defence: the defect was the
+endpoint, upstream changed the endpoint, and the code that routed around it is gone.
+
+**What this does not license.** `vpc_required.rego` still refuses a standalone
+`scaleway_instance_private_nic` on the grounds that it "cannot be destroyed". Nothing
+here tested that shape on 2.83.0 — every canary used the inline `private_network` block.
+The rule therefore stands, and its stated reason is now suspect rather than disproven.
+Testing it is one canary; rewriting the rule without one would repeat the mistake the
+Refutation section above documents.

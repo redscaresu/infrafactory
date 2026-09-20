@@ -2,6 +2,41 @@
 
 Last updated: 2026-09-20
 
+## 2026-09-20 — S189: the private-NIC workaround is gone
+
+`ScalewayPrivateNICDetach`, the `PrivateNICDetachRunner` dependency, `detachRunProjectNICs`,
+`detachMockPrivateNICs`, `privateNICDetachStage` and the `private_nic_detach` stage are
+**deleted**. `destroySandbox` drops from four return values to three.
+
+Provider 2.83.0 tears private NICs down by itself, so the code that did it for it is dead
+weight — and a teardown path nobody exercises is a teardown path nobody can trust.
+
+**Removed on evidence, not on a release note.** Three real-Scaleway confirmations, all with
+the code deleted rather than disabled:
+
+| run | result |
+|---|---|
+| canary 1 (detach runner nil'd) | `target_reached`, 3 applies + 3 destroys, account back to 3 projects |
+| canary 2 (code actually deleted) | `target_reached`, account clean |
+| deploy + `live teardown` | `destroy: pass`, `orphan_sweep: pass`, project deleted |
+
+**Zero occurrences** of `Can't delete a private network interface attached to a server`
+across all of it. That string is the entire reason the workaround existed.
+
+The Layer 2 detach goes too: mockway now implements the detach route (mockway#29), so the
+mock reproduces the provider's real teardown path rather than needing help around it.
+
+**Migration note.** A deployment whose workdir pins **2.81.0** must be torn down before or
+with a binary that still has this code — 2.81.0 calls the DELETE that always refuses, and
+nothing removes the NIC for it now. The live store held one record at removal time and it
+was already `released`.
+
+**Not done, and deliberately left open**: `vpc_required.rego` still tells the model *"Do not
+use a standalone `scaleway_instance_private_nic`: it cannot be destroyed"*. That was true of
+2.81.0 and is probably false now — the same detach route should handle it. Untested, so the
+rule stands until a canary says otherwise. A prescriptive rule outliving the fact that
+justified it is the exact drift ADR-0029's refutation warned about.
+
 ## 2026-09-20 — S188: provider 2.83.0, and four mock gaps found on the way
 
 `layer3ScalewayProviderVersion` moves 2.81.0 → **2.83.0**, with the trusted
