@@ -2,6 +2,41 @@
 
 Last updated: 2026-09-20
 
+## 2026-09-20 — S188: provider 2.83.0, and four mock gaps found on the way
+
+`layer3ScalewayProviderVersion` moves 2.81.0 → **2.83.0**, with the trusted
+`.terraform.lock.hcl` files regenerated and the prompt, fixtures and recorded generation
+moved with it (one const, three audit tests keeping them in step).
+
+**Why 2.83.0**: upstream scaleway/terraform-provider-scaleway#4354, the private-NIC
+teardown failure of ADR-0031. **Verified rather than taken from the changelog** — driving
+raw `tofu destroy` at both pins against mockway shows the fix is a CHANGE OF ENDPOINT:
+
+| provider | calls | result |
+|---|---|---|
+| 2.81.0 | `DELETE .../private-network-interfaces/{id}` | 412 "Can't delete a private network interface attached to a server" |
+| 2.83.0 | `POST .../servers/{id}/detach-private-network-interface` | works |
+
+**The bump exposed four mockway gaps**, three of them pre-existing and caught by S187's
+converge check on its first real run: the root volume's `boot` flag returned `true` where
+the spec says `default: false`; an LB backend is written with `server_ip` and read back as
+`pool`, which mockway never emitted; and `user_data` was discarded on write — so a
+scenario whose whole point is "the instance serves a page" was validated against a mock
+that threw the startup script away. The fourth is the new detach route, which mockway
+answered 501 to. All four fixed in mockway#29 with paired contract tests.
+
+**The detach contract took three attempts, each of which passed its own test**, and is
+worth recording: reading `private_network_id` passed only because the handler fell back to
+detaching everything; answering 204 passed only because 2.83.0 ignores the result the SDK
+decodes; answering the stored v1 server failed outright, because v2alpha1's `Server` keys
+volumes as an array where v1 uses an object. There is no published v2alpha1 spec, so the
+provider was the only source.
+
+**The v1 detach workaround is RETAINED in this change.** Nothing here has watched 2.83.0
+tear a NIC down against real Scaleway, and removing a teardown guard on a release note is
+the shape that cost three retracted fixes in one day. Its removal is a separate decision
+with a real-cloud canary as its evidence.
+
 ## 2026-09-20 — S187: an apply that succeeds is not a stack that converges
 
 Layer 2 now runs `tofu plan -detailed-exitcode` after its apply, and a non-empty plan

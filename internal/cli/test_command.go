@@ -1581,7 +1581,7 @@ func appendOrphanSweepResult(ctx context.Context, stages []StageSummary, failure
 
 // detachMockPrivateNICs removes private NICs from the MOCK before the
 // Layer 2 destroy, for the same reason detachRunProjectNICs does it
-// before the real one: provider 2.81.0 deletes NICs through v2alpha1,
+// before the real one: provider 2.81.0 deleted NICs through v2alpha1,
 // that endpoint refuses every NIC there is, and mockway now models it.
 //
 // Scoped by the mock's project, which cloudEnv fixes -- there is no run

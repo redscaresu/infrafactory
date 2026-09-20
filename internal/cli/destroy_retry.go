@@ -65,12 +65,13 @@ func destroySandbox(
 	sandboxEnv map[string]string,
 	projectID string,
 ) (*harness.SandboxDestroyResult, []string, []string, error) {
-	// PRECONDITION, not remediation. Provider 2.81.0 deletes a private
+	// PRECONDITION, not remediation. Provider 2.81.0 deleted a private
 	// NIC through Instance v2alpha1, and that endpoint answers 412 "Can't
 	// delete a private network interface attached to a server" -- which
-	// is true of every NIC there is, so the provider can never destroy
+	// is true of every NIC there is, so the provider could never destroy
 	// one. Removing them here through v1 first leaves the provider's own
-	// delete nothing to fail on. See ADR-0031.
+	// delete nothing to fail on. See ADR-0031, and ADR-0033 for why this
+	// survived the bump to 2.83.0 that reportedly fixes it upstream.
 	//
 	// Unlike the purge below, this is known in advance for every stack
 	// that declares private networking, so it runs first rather than
@@ -229,7 +230,7 @@ func privateNICDetachStage(detached []string) StageSummary {
 	for _, d := range detached {
 		if strings.Contains(d, "could NOT be deleted") {
 			status = StageStatusFail
-			verb = "could not remove every private NIC; the destroy that follows is expected to fail, because provider 2.81.0 deletes them through v2alpha1 and that endpoint refuses every time. Attempted"
+			verb = "could not remove every private NIC; the destroy that follows may fail, because the provider has historically deleted them through v2alpha1 and that endpoint refuses every time. Attempted"
 			break
 		}
 	}

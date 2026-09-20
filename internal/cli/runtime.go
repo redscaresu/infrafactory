@@ -46,10 +46,19 @@ type SandboxDestroyHarnessRunner interface {
 
 // PrivateNICDetachRunner deletes a run project's private NICs through
 // the Instance v1 API before `tofu destroy` runs, because provider
-// 2.81.0 deletes them through v2alpha1 and THAT endpoint refuses every
+// 2.81.0 deleted them through v2alpha1 and THAT endpoint refuses every
 // time -- "Can't delete a private network interface attached to a
 // server", which is true of every NIC there is. See
-// harness.ScalewayPrivateNICDetach and ADR-0031.
+// harness.ScalewayPrivateNICDetach and ADR-0031.//
+// RETAINED across the 2.83.0 bump, deliberately. Upstream
+// scaleway/terraform-provider-scaleway#4354 is reported fixed in
+// v2.83.0, but that is a changelog claim and nothing here has watched
+// 2.83.0 tear a private NIC down against real Scaleway. Removing a
+// teardown guard on the strength of a release note is the shape of
+// mistake that cost this project three retracted fixes in one day, and
+// the cost of being wrong is real infrastructure that cannot be
+// destroyed. The detach is idempotent and cheap: if the provider now
+// handles it, this finds nothing to remove.
 type PrivateNICDetachRunner interface {
 	Run(ctx context.Context, projectID, secretKey string) ([]string, error)
 }

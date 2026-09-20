@@ -13,7 +13,7 @@ import (
 //
 // # The defect this works around
 //
-// Provider 2.81.0 deletes a private NIC through Instance **v2alpha1**, and
+// Provider 2.81.0 deleted a private NIC through Instance **v2alpha1**, and
 // that endpoint refuses:
 //
 //	DELETE /instance/v2alpha1/zones/fr-par-1/private-network-interfaces/{id}

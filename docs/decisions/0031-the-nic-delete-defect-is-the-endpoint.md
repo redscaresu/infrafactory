@@ -102,3 +102,32 @@ built, shipped and retracted on the wrong one. Each was "verified" — against a
 mock, against a sibling API, against reasoning — and none against the thing
 itself. The cheapest possible experiment, two `curl` calls differing in one
 variable, was available on day one.
+
+
+## Amendment, 2026-09-20 (S188): upstream fixed it by changing the endpoint
+
+Provider **2.83.0** no longer deletes the interface. It calls
+`POST /instance/v2alpha1/zones/{zone}/servers/{id}/detach-private-network-interface`,
+naming the interface in `private_network_interface_id`
+(scaleway/terraform-provider-scaleway#4354).
+
+Confirmed by running both pins against mockway rather than by reading the release
+note. 2.81.0 still fails with the 412 this ADR documents; 2.83.0 calls the new route
+and, once mockway implemented it (mockway#29), tears the same stack down cleanly with
+**no workaround**.
+
+So this ADR's diagnosis holds exactly as written — the defect was the endpoint — and
+upstream's fix is the same conclusion reached from the other side.
+
+### The workaround stays, for now
+
+`ScalewayPrivateNICDetach` and the `private_nic_detach` stage are retained. What has
+been demonstrated is that 2.83.0 tears down cleanly **against mockway**. mockway is a
+better witness than it was — it models the 412 refusal, and now the detach route — but
+it is still the cheaper stand-in, and this project has a documented habit of retracting
+fixes that were verified against one. The detach is idempotent and cheap: if the
+provider now handles it, the stage finds nothing to remove and says so.
+
+Removing it needs a real-cloud canary: `web-live-paris` applied and destroyed against
+Scaleway with the stage disabled, and the account verified empty afterwards. That is a
+separate decision and belongs with the evidence.
