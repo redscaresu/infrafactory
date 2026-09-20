@@ -267,6 +267,7 @@ func registerRunFlags(cmd *cobra.Command, resetMocksDefault bool) {
 	cmd.Flags().Bool("no-destroy", false, "Skip destruction after a successful run to preserve state for incremental follow-up runs")
 	cmd.Flags().Bool("keep", false, "On success, leave the real infrastructure running and register it as a live deployment under the scenario's service.ttl")
 	cmd.Flags().Bool("continue-on-drift", false, "Keep going after the Layer 2 converge check finds a non-empty plan, instead of stopping. The run still fails; the drift is fed to the repair loop")
+	cmd.Flags().Bool("holdout", false, "Probe the running stack with criteria the generator was never shown (scenarios/holdout/). A failure ends the run without a repair")
 	cmd.Flags().Bool("reset-mocks", resetMocksDefault, "POST /mock/reset to every configured mock before iter 1 on a clean run; ignored when run_mode=incremental")
 }
 

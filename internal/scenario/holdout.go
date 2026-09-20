@@ -17,7 +17,20 @@ type HoldoutScenario struct {
 	References   string
 }
 
-func DiscoverCriteriaOnlyHoldouts(holdoutDir string, trainingScenarioPath string) ([]HoldoutScenario, error) {
+// DiscoverCriteriaOnlyHoldouts finds the holdouts belonging to one
+// training scenario.
+//
+// Matched on the scenario NAME, not its path. The path form varies by
+// caller -- the CLI passes whatever the operator typed, the UI server
+// builds one by joining its configured scenarios dir -- and a mismatch
+// here is SILENT: discovery simply returns nothing and the run reports
+// "0 holdouts", which is indistinguishable from having none. A holdout
+// that quietly checks nothing is worse than no holdout, because it
+// reads as coverage.
+//
+// The name is the scenario's own identity and does not depend on how it
+// was invoked.
+func DiscoverCriteriaOnlyHoldouts(holdoutDir string, trainingScenarioName string) ([]HoldoutScenario, error) {
 	holdouts := make([]HoldoutScenario, 0)
 
 	err := filepath.WalkDir(holdoutDir, func(path string, d fs.DirEntry, walkErr error) error {
@@ -57,7 +70,7 @@ func DiscoverCriteriaOnlyHoldouts(holdoutDir string, trainingScenarioPath string
 		if doc.Type != "holdout" {
 			return nil
 		}
-		if filepath.Clean(doc.References) != filepath.Clean(trainingScenarioPath) {
+		if doc.References != trainingScenarioName {
 			return nil
 		}
 		if hasMappingKey(rootNode, "resources") {

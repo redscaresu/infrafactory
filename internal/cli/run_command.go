@@ -17,7 +17,6 @@ import (
 	"github.com/redscaresu/infrafactory/internal/generator"
 	"github.com/redscaresu/infrafactory/internal/harness"
 	"github.com/redscaresu/infrafactory/internal/runstore"
-	"github.com/redscaresu/infrafactory/internal/scenario"
 	"github.com/spf13/cobra"
 )
 
@@ -58,6 +57,9 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 	// what was asked for. A flag that cannot be honoured is a usage
 	// error, and usage errors are cheap only while they are early.
 	if err := assertKeepable(controls.Keep, runtime, sc); err != nil {
+		return err
+	}
+	if err := assertHoldoutRunnable(controls.Holdout, runtime); err != nil {
 		return err
 	}
 
@@ -176,7 +178,6 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 	var failureHistory []feedback.FailureSignature
 	var previousIterationFailures []FailureSummary
 	var iterationHistory []feedback.IterationResult
-	holdoutBlocked := false
 	completed := 0
 	terminalReason := ""
 	lastIterationFailed := false
@@ -332,6 +333,22 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 			Iteration: iteration,
 			Failures:  currentFailures,
 		})
+		// A failed holdout ends the run here, without a repair.
+		//
+		// Feeding it back would make the holdout SEEN -- the generator
+		// would be told the unseen check and fix against it, which is
+		// precisely the overfitting a holdout exists to measure. The
+		// number would still look good and would have stopped meaning
+		// anything.
+		//
+		// It also costs: at Layer 3 every repair iteration is a real
+		// apply and destroy, spent chasing a check the loop was never
+		// meant to optimise.
+		if hasHoldoutFailure(failures) {
+			terminalReason = "holdout_failed"
+			break
+		}
+
 		// A drifting stack under the default mode ends the run here.
 		//
 		// Not a repair failure, so it must not reach the repair loop:
@@ -859,34 +876,6 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 		}
 	}
 
-	// Skipped for --keep as well as --no-destroy, and for the same
-	// reason: a holdout runs `executeTestWithScenario` against
-	// `runtime.OutputDir()` -- the SAME directory -- so with Layer 3 on
-	// it creates its own run project, overwrites the marker, applies,
-	// and destroys. Against a kept stack that would destroy the
-	// resources this run was told to preserve and then register the
-	// holdout's project instead of the real one. Keeping a stack and
-	// re-applying over its state in the same directory cannot both
-	// happen; the run says which it did rather than doing half of each.
-	switch {
-	case terminalReason != "target_reached":
-	case controls.NoDestroy:
-		allStages = append(allStages, StageSummary{Layer: "holdout", Stage: "skipped", Status: StageStatusSkip, Detail: "skipped by --no-destroy"})
-	case controls.Keep:
-		allStages = append(allStages, StageSummary{
-			Layer: "holdout", Stage: "skipped", Status: StageStatusSkip,
-			Detail: "skipped by --keep: a holdout re-applies over this run's state and would destroy the kept stack",
-		})
-	default:
-		holdoutStages, holdoutFailures, err := runCriteriaOnlyHoldouts(cmd.Context(), runtime, scenarioPath)
-		if err != nil {
-			return fmt.Errorf("run holdout checks: %w", err)
-		}
-		allStages = append(allStages, holdoutStages...)
-		allFailures = append(allFailures, holdoutFailures...)
-		holdoutBlocked = len(holdoutFailures) > 0
-	}
-
 	// Every Layer 3 run checks the organization for run projects nothing
 	// explains -- its own and, more importantly, earlier runs'.
 	//
@@ -909,7 +898,7 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 	// afterwards would make every --keep run fail on its own keep.
 	keepBlocked := false
 	if controls.Keep && terminalReason == "target_reached" {
-		keepStages, keepFailures := registerKeptRun(runtime, sc)
+		keepStages, keepFailures := registerKeptRun(runtime, sc, allStages)
 		allStages = append(allStages, keepStages...)
 		allFailures = append(allFailures, keepFailures...)
 		keepBlocked = len(keepFailures) > 0
@@ -923,7 +912,7 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 		strayBlocked = len(strayFailures) > 0
 	}
 
-	status := runCommandStatus(terminalReason, holdoutBlocked, strayBlocked, keepBlocked)
+	status := runCommandStatus(terminalReason, strayBlocked, keepBlocked)
 
 	if err := store.WriteRunMetadata(runstore.RunMetadata{
 		Schema:              runstore.RunMetadataSchemaVersion,
@@ -972,10 +961,11 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 	// caller that is a script -- the PR gate included. `strayBlocked`
 	// was missing here when it was added above, so a target_reached run
 	// with an unexplained project wrote "failed" and returned success.
-	if runCommandStatus(terminalReason, holdoutBlocked, strayBlocked, keepBlocked) == CommandStatusFailed {
+	if runCommandStatus(terminalReason, strayBlocked, keepBlocked) == CommandStatusFailed {
 		errDetail := fmt.Errorf("run stopped with terminal reason %q after %d iteration(s)", terminalReason, completed)
-		if holdoutBlocked {
-			errDetail = fmt.Errorf("holdout checks failed after training convergence")
+		if terminalReason == "holdout_failed" {
+			errDetail = fmt.Errorf(
+				"a holdout check failed: every criterion the generator was SHOWN passed, and one it was not shown did not")
 		}
 		if strayBlocked {
 			errDetail = fmt.Errorf("run projects remain that nothing explains; they have no TTL and nothing will reap them")
@@ -1084,6 +1074,7 @@ func runIteration(
 				SkipDestroy:     controls.NoDestroy,
 				KeepSandbox:     controls.Keep,
 				ContinueOnDrift: controls.ContinueOnDrift,
+				Holdout:         controls.Holdout,
 				// Stage progress carries the run's scope, like every
 				// other entry this iteration writes. Without it two
 				// iterations' `apply: running` lines are byte-identical
@@ -1126,6 +1117,7 @@ func runIteration(
 		}
 		if err != nil {
 			stages = append(stages, StageSummary{Layer: "run", Stage: stageName, Status: StageStatusFail})
+			stages = append(stages, holdoutStages(testResult.Stages)...)
 			if (step.name == "test" || step.name == "validate") && len(testResult.Failures) > 0 {
 				for _, failure := range testResult.Failures {
 					failures = append(failures, FailureSummary{
@@ -1161,6 +1153,14 @@ func runIteration(
 			break
 		}
 		stages = append(stages, StageSummary{Layer: "run", Stage: stageName, Status: StageStatusPass})
+		// Holdout stages are carried up verbatim. Everything else
+		// executeTest produces is collapsed into the single
+		// `iteration_N_test` line above, which is fine for a check
+		// whose failure speaks for itself -- but a holdout that PASSED
+		// would then leave no trace at all, and "the unseen checks
+		// passed" is exactly the claim somebody needs to see to believe
+		// the run proved anything.
+		stages = append(stages, holdoutStages(testResult.Stages)...)
 		runtime.Logger.Log(LogEntry{
 			Level:     logLevelInfo,
 			Command:   "run",
@@ -1175,87 +1175,13 @@ func runIteration(
 	return stages, failures
 }
 
-func runCriteriaOnlyHoldouts(ctx context.Context, runtime *CommandRuntime, trainingScenarioPath string) ([]StageSummary, []FailureSummary, error) {
-	holdoutDir := filepath.Join(runtime.Config.Paths.Scenarios, "holdout")
-	holdouts, err := scenario.DiscoverCriteriaOnlyHoldouts(holdoutDir, trainingScenarioPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return []StageSummary{{Layer: "holdout", Stage: "discovery", Status: StageStatusPass, Detail: "0 holdouts"}}, nil, nil
-		}
-		return nil, nil, err
-	}
-
-	stages := []StageSummary{
-		{
-			Layer:  "holdout",
-			Stage:  "discovery",
-			Status: StageStatusPass,
-			Detail: fmt.Sprintf("%d holdouts", len(holdouts)),
-		},
-	}
-	failures := make([]FailureSummary, 0)
-	for _, holdout := range holdouts {
-		sc, err := runtime.scenarioLoader(holdout.Path)
-		if err != nil {
-			stages = append(stages, StageSummary{Layer: "holdout", Stage: holdout.ScenarioName, Status: StageStatusFail})
-			failures = append(failures, FailureSummary{
-				Layer:   "holdout",
-				Stage:   holdout.ScenarioName,
-				Check:   "load",
-				Command: "scenario loader",
-				Detail:  err.Error(),
-			})
-			continue
-		}
-
-		// Criteria-only holdouts validate against the generated code of the
-		// already-converged training scenario, not their own output path.
-		result, err := executeTestWithScenario(ctx, runtime, sc, runtime.OutputDir(), testExecutionOptions{MockDeployMode: harness.MockDeployModeClean})
-		if err != nil {
-			stages = append(stages, StageSummary{Layer: "holdout", Stage: holdout.ScenarioName, Status: StageStatusFail})
-			if len(result.Failures) == 0 {
-				failures = append(failures, FailureSummary{
-					Layer:   "holdout",
-					Stage:   holdout.ScenarioName,
-					Check:   "test",
-					Command: "test",
-					Detail:  err.Error(),
-				})
-				continue
-			}
-			for _, failure := range result.Failures {
-				failures = append(failures, FailureSummary{
-					Layer:    "holdout",
-					Stage:    holdout.ScenarioName,
-					Check:    failure.Check,
-					Policy:   failure.Policy,
-					Command:  "test",
-					Resource: failure.Resource,
-					Detail:   failure.Detail,
-				})
-			}
-			continue
-		}
-
-		stage := StageSummary{Layer: "holdout", Stage: holdout.ScenarioName, Status: StageStatusPass}
-		for _, testStage := range result.Stages {
-			if testStage.Layer == "criteria" && testStage.Stage == "support_matrix" && testStage.Detail != "" {
-				stage.Detail = testStage.Detail
-				break
-			}
-		}
-		stages = append(stages, stage)
-	}
-
-	return stages, failures, nil
-}
-
 type runControls struct {
 	RepairIterationsMax int
 	Clean               bool
 	NoDestroy           bool
 	Keep                bool
 	ContinueOnDrift     bool
+	Holdout             bool
 	ResetMocks          bool
 }
 
@@ -1286,6 +1212,10 @@ func resolveRunControls(cmd *cobra.Command, runtime *CommandRuntime) (runControl
 	if err != nil {
 		return runControls{}, &CLIError{Op: "run", Code: errorCodeUsage, Err: fmt.Errorf("read --continue-on-drift flag: %w", err)}
 	}
+	holdout, err := cmd.Flags().GetBool("holdout")
+	if err != nil {
+		return runControls{}, &CLIError{Op: "run", Code: errorCodeUsage, Err: fmt.Errorf("read --holdout flag: %w", err)}
+	}
 	if clean && noDestroy {
 		return runControls{}, &CLIError{Op: "run", Code: errorCodeUsage, Err: fmt.Errorf("clean and no-destroy are mutually exclusive")}
 	}
@@ -1314,6 +1244,7 @@ func resolveRunControls(cmd *cobra.Command, runtime *CommandRuntime) (runControl
 		NoDestroy:           noDestroy,
 		Keep:                keep,
 		ContinueOnDrift:     continueOnDrift,
+		Holdout:             holdout,
 		ResetMocks:          resetMocks,
 	}, nil
 }
@@ -1630,7 +1561,6 @@ func logLayer3RecoveryHint(runtime *CommandRuntime, runID, scenarioPath, reason 
 // tested without driving the whole command:
 //
 //   - terminalReason: the loop reached its target.
-//   - holdoutBlocked: the holdout check proved the change survives.
 //   - strayBlocked: no run project is left that nothing explains
 //     (ADR-0024). Added 2026-09-10 after eight accumulated unseen; the
 //     first version of that check appended its failures AFTER this
@@ -1642,8 +1572,8 @@ func logLayer3RecoveryHint(runtime *CommandRuntime, runID, scenarioPath, reason 
 //     run's own output directory, which the NEXT run of the scenario
 //     overwrites -- so reporting success there would invite exactly the
 //     re-run that destroys the only teardown state the kept stack has.
-func runCommandStatus(terminalReason string, holdoutBlocked, strayBlocked, keepBlocked bool) CommandStatus {
-	if terminalReason != "target_reached" || holdoutBlocked || strayBlocked || keepBlocked {
+func runCommandStatus(terminalReason string, strayBlocked, keepBlocked bool) CommandStatus {
+	if terminalReason != "target_reached" || strayBlocked || keepBlocked {
 		return CommandStatusFailed
 	}
 	return CommandStatusSuccess

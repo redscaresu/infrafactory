@@ -72,6 +72,10 @@ type StartRunRequest struct {
 	// it -- stop sends you to look at the mock, continue hands it to the
 	// repair loop as if it were the HCL.
 	ContinueOnDrift bool `json:"continue_on_drift"`
+
+	// Holdout probes the running stack with criteria the generator was
+	// never shown. A failure ends the run without a repair.
+	Holdout bool `json:"holdout"`
 }
 
 type RunStarter interface {

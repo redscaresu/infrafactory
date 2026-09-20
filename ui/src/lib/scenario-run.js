@@ -11,6 +11,9 @@ export function normalizeRunOptions(options = {}) {
   // second plan is not empty, which can occur under any combination of
   // the others.
   const continueOnDrift = options.continue_on_drift === true;
+  // Orthogonal to the rest: a holdout can run under any combination,
+  // and its failure ends the run on its own terms.
+  const holdout = options.holdout === true;
 
   // keep wins over no_destroy. Both skip a destroy, and they mean
   // opposite things about what happens next: keep registers what it
@@ -18,18 +21,19 @@ export function normalizeRunOptions(options = {}) {
   // leaves it with nothing tracking it at all. Sending both would let
   // the server pick, on the pair where being wrong costs money.
   if (keep) {
-    return { clean, no_destroy: false, keep: true, continue_on_drift: continueOnDrift };
+    return { clean, no_destroy: false, keep: true, continue_on_drift: continueOnDrift, holdout };
   }
 
   if (clean && noDestroy) {
-    return { clean: true, no_destroy: false, keep: false, continue_on_drift: continueOnDrift };
+    return { clean: true, no_destroy: false, keep: false, continue_on_drift: continueOnDrift, holdout };
   }
 
   return {
     clean,
     no_destroy: noDestroy,
     keep: false,
-    continue_on_drift: continueOnDrift
+    continue_on_drift: continueOnDrift,
+    holdout
   };
 }
 

@@ -786,3 +786,28 @@ export function alreadyLiveWarnings(preview) {
 export function reapable(deployments) {
   return (deployments || []).filter((d) => d?.state !== "released" && d?.expired).length;
 }
+
+/**
+ * holdoutBadge renders how a deployment fared against criteria the
+ * generator was never shown.
+ *
+ * Three states, and the distinction between two of them is the point:
+ * "not run" is NOT "passed". Rendering an unchecked deployment as green
+ * would manufacture exactly the false confidence a holdout exists to
+ * remove -- the estate page would say the unseen checks passed for a
+ * deployment nobody ever probed.
+ *
+ * A failure keeps its alarm even when released, unlike health: health
+ * is a fact about a service that no longer exists, but "this
+ * configuration was fitted to its visible checks" is a fact about the
+ * configuration, and that outlives the deployment.
+ */
+export function holdoutBadge(holdout) {
+  if (holdout === "pass") {
+    return { label: "unseen checks passed", tone: "bg-emerald-100 text-emerald-900" };
+  }
+  if (holdout === "fail") {
+    return { label: "unseen check FAILED", tone: "bg-rose-100 text-rose-900" };
+  }
+  return { label: "not checked", tone: "bg-slate-100 text-slate-600" };
+}

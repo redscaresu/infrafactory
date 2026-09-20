@@ -152,7 +152,7 @@ func (r *lifecycleRig) run(args ...string) (string, error) {
 	r.t.Helper()
 	cmd := &cobra.Command{Use: args[0]}
 	cmd.Flags().String("output", string(OutputModeHuman), "")
-	cmd.Flags().String("ttl", "", "")
+	registerDeployFlags(cmd)
 	cmd.Flags().String("from", "", "")
 	cmd.Flags().String("tag", "", "")
 	cmd.Flags().Bool("dry-run", false, "")

@@ -2,6 +2,89 @@
 
 Last updated: 2026-09-20
 
+## 2026-09-20 — S192: the holdout, rebuilt as a negative check against the running stack
+
+`--holdout` on `run` and `deploy`, a checkbox on the scenario page, and a **Holdout**
+column on the estate page.
+
+**It was dead before this.** `scenarios/holdout/` held one file that discovery could never
+return — no `type: holdout`, no `references:`, and a `resources:` block that disqualifies
+it three ways over. Every run logged `holdout/discovery: pass (0 holdouts)`, which reads as
+coverage and was not.
+
+**Every criterion is now a negative one**, and that is the design rather than a detail.
+Every visible criterion on `web-live-paris` is positive — serves on 80, region fr-par — and
+the generator optimises against exactly those. Nothing in that set punishes a configuration
+that is merely too permissive: the cheapest way to be reachable on 80 is to be reachable on
+everything. So the new holdout asserts SSH is **not** open from the internet (nothing in the
+scenario mentions it, and Scaleway's default security group permits it) and that the load
+balancer answers on 80 only. One check is expected to pass, deliberately — a holdout whose
+every check fails cannot be told from a broken one.
+
+**It probes instead of re-running.** The old mechanism called `executeTestWithScenario`
+against the same output directory: a whole mock reset, apply and destroy, plus a real apply
+and destroy at Layer 3 — re-applying over the state of the stack it was meant to judge, and
+under `--keep` destroying the stack the operator asked to preserve. The replacement reads.
+One insertion point — after the scenario's own criteria, before any teardown — covers all
+three modes.
+
+**A holdout failure ends the run WITHOUT a repair**, with its own terminal reason. This is
+the property the idea rests on: feeding it back would make the unseen check *seen*, the
+generator would fix against it, and the number would keep looking good while meaning
+nothing.
+
+**Five review findings, all accepted, and three were the same bug class:** a holdout that
+did not run being indistinguishable from one that passed. Recording `pass` for a scenario
+with no holdout files; keying the estate column off the `--holdout` request rather than the
+result; and accepting `--holdout` without Layer 3 and silently skipping it. Also a DNS
+placeholder resolving under the holdout's own name instead of the training scenario's, and
+the schema still documenting `references` as a path after matching moved to the name.
+
+**One near-miss the tests caught and review did not**: a botched edit deleted the Layer 2
+mock destroy entirely. Three tests failed immediately.
+
+**And a false-clean I reported**: an early mutation run showed "6 failing / 7 failing" and
+looked like good coverage. Those were the three broken tests, not the mutants. Re-run
+against an honest base, two mutants **survived** and needed new tests. A mutation count is
+only evidence if the base is green — and I also misread a `grep -c` returning 1 as clean.
+
+**The canary answered it, on real Scaleway.** `web-live-paris` converged — region correct,
+load balancer serving, teardown clean, **every criterion the generator was shown passed** —
+and then:
+
+```
+holdout/web-live-paris-unseen: fail (1 of 2 check(s) failed)
+connectivity probe 163.172.164.126:22: tcp connect unexpectedly succeeded
+```
+
+Port 22 open to the internet. Nothing in the scenario mentions SSH. **1 of 2, not 2 of 2**,
+which matters: the 443 check passed, so the probe reached the stack and returned a real
+answer rather than failing for a structural reason.
+
+**No other layer can see this.** Not the rego — Scaleway auto-creates the security group and
+Terraform never owns it, so it is not in the plan and no static check on generated HCL could
+find it. Not the visible criteria — they are all positive. Not the mock — it has no firewall.
+The defect is not "the model wrote something sloppy"; it is "the cloud granted something
+nobody asked for".
+
+`terminal_reason: holdout_failed`, one generation after convergence, no repair, account back
+to its three projects.
+
+**Also fixed while sizing the port question**: `runConnectivityProbe` retried `expect:
+blocked` the same as `expect: success`. Retrying waits for a condition to arrive, which is
+right for a load balancer coming up and meaningless for a port — an open port does not close
+itself while you wait. The only thing it bought was the full retry window (up to five
+minutes) before reporting what the first dial already knew, and a blocked check that is slow
+to fail reads as a hang. `success` still retries; `blocked` is asked once.
+
+**Deliberately NOT built**: a check that reads the security group rules and asserts the
+complete permitted port set. Two sampled ports are a sample, not a proof that only 80 is
+open. The exhaustive version is a live-API criterion type, not a rego one, and belongs on its
+own slice with its own canary. Scanning all 65535 ports was considered and rejected: serial
+dials, filtered ports paying the full timeout, and it is a port scan whatever the intent.
+
+ADR-0033.
+
 ## 2026-09-20 — S191: a standalone private NIC destroys fine now, so stop saying it does not
 
 Two messages corrected. Both told the generator something that stopped being true when the

@@ -74,7 +74,7 @@ type DeploymentDeployer interface {
 	// deliberately cannot be told which project to use -- run-owned
 	// projects are created by the harness (ADR-0025), and a request that
 	// could name one is a request that could name somebody else's.
-	Deploy(ctx context.Context, scenarioName, ttl string, progress io.Writer) (ActionResult, error)
+	Deploy(ctx context.Context, scenarioName, ttl string, holdout bool, progress io.Writer) (ActionResult, error)
 
 	// InFlight names the scenarios currently deploying.
 	//

@@ -42,7 +42,7 @@
     },
     "references": {
       "type": "string",
-      "description": "Path to the training scenario this criteria-only holdout validates against (e.g., 'scenarios/training/web-app-paris.yaml'). Only valid when type=holdout."
+      "description": "NAME of the training scenario this criteria-only holdout validates against (e.g. 'web-live-paris'), matching that scenario's `scenario:` field. Not a path: the path form varies by caller, and a mismatch is silent -- reported as zero holdouts, which is indistinguishable from having none. Only valid when type=holdout."
     },
     "service": {
       "$ref": "#/$defs/service_spec",

@@ -206,7 +206,7 @@ func TestDeployerBuildsAFreshRuntimeForEachDeploy(t *testing.T) {
 	})
 
 	for _, name := range []string{"first-scenario", "second-scenario"} {
-		_, err := deployer.Deploy(context.Background(), name, "", nil)
+		_, err := deployer.Deploy(context.Background(), name, "", false, nil)
 		require.Error(t, err)
 	}
 
@@ -223,7 +223,7 @@ func TestDeployerRefusesAnUnknownScenarioBeforeBuildingAnything(t *testing.T) {
 		return nil, errors.New("should not be reached")
 	})
 
-	_, err := deployer.Deploy(context.Background(), "no-such-scenario", "", nil)
+	_, err := deployer.Deploy(context.Background(), "no-such-scenario", "", false, nil)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no scenario named")
@@ -260,7 +260,7 @@ func TestDeployerAcceptsANilProgressWriter(t *testing.T) {
 		return nil, errors.New("not building a real runtime in a unit test")
 	})
 
-	_, err := deployer.Deploy(context.Background(), "first-scenario", "", nil)
+	_, err := deployer.Deploy(context.Background(), "first-scenario", "", false, nil)
 
 	// It reaches the runtime factory, which is as far as a unit test
 	// takes it. The point is that nil did not panic on the way.
@@ -328,20 +328,20 @@ func TestDeployerRefusesASecondDeployOfTheSameScenario(t *testing.T) {
 	})
 
 	go func() {
-		_, _ = deployer.Deploy(context.Background(), "first-scenario", "", nil)
+		_, _ = deployer.Deploy(context.Background(), "first-scenario", "", false, nil)
 	}()
 	<-entered
 
 	assert.Equal(t, []string{"first-scenario"}, deployer.InFlight())
 
-	_, err := deployer.Deploy(context.Background(), "first-scenario", "", nil)
+	_, err := deployer.Deploy(context.Background(), "first-scenario", "", false, nil)
 	require.ErrorIs(t, err, api.ErrDeployInProgress,
 		"a second deploy of a scenario already in flight must be refused")
 
 	// A DIFFERENT scenario is ordinary and must not be blocked. It
 	// returns immediately, so wait for it to appear rather than racing.
 	go func() {
-		_, _ = deployer.Deploy(context.Background(), "second-scenario", "", nil)
+		_, _ = deployer.Deploy(context.Background(), "second-scenario", "", false, nil)
 	}()
 	<-entered
 
@@ -356,13 +356,13 @@ func TestTheLockIsReleasedWhenADeployFails(t *testing.T) {
 		return nil, errors.New("the runtime could not be built")
 	})
 
-	_, err := deployer.Deploy(context.Background(), "first-scenario", "", nil)
+	_, err := deployer.Deploy(context.Background(), "first-scenario", "", false, nil)
 	require.Error(t, err)
 
 	assert.Empty(t, deployer.InFlight(), "a failed deploy must not hold the name forever")
 
 	// And the scenario is deployable again.
-	_, err = deployer.Deploy(context.Background(), "first-scenario", "", nil)
+	_, err = deployer.Deploy(context.Background(), "first-scenario", "", false, nil)
 	require.Error(t, err)
 	require.NotErrorIs(t, err, api.ErrDeployInProgress)
 }
@@ -378,7 +378,7 @@ func TestAnUnknownScenarioDoesNotHoldTheLock(t *testing.T) {
 		return nil, errors.New("should not be reached")
 	})
 
-	_, err := deployer.Deploy(context.Background(), "no-such-scenario", "", nil)
+	_, err := deployer.Deploy(context.Background(), "no-such-scenario", "", false, nil)
 	require.Error(t, err)
 
 	assert.Empty(t, deployer.InFlight())

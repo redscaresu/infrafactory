@@ -69,11 +69,16 @@ export const api = {
   // Like teardown, this reads a 409 body rather than throwing it away: a
   // deploy that could not prove itself carries the per-stage failures,
   // and those name the leaked project id and how to remove it by hand.
-  deployScenario: async (scenario: string, ttl = ""): Promise<ActionResult> => {
+  deployScenario: async (scenario: string, ttl = "", holdout = false): Promise<ActionResult> => {
+    const body: Record<string, unknown> = { scenario };
+    if (ttl) body.ttl = ttl;
+    // Omitted when false so the request keeps its previous shape for a
+    // deploy that does not want holdouts.
+    if (holdout) body.holdout = true;
     const res = await fetch(`${base}/api/deployments`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(ttl ? { scenario, ttl } : { scenario })
+      body: JSON.stringify(body)
     });
     const ctype = res.headers.get("content-type") || "";
     // 409 carries an ActionResult from a deploy that RAN and could not

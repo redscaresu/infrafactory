@@ -21,6 +21,7 @@ import (
 )
 
 type fakeDeployer struct {
+	holdout  bool
 	result   ActionResult
 	err      error
 	calls    []string
@@ -37,7 +38,8 @@ type fakeDeployer struct {
 
 func (f *fakeDeployer) InFlight() []string { return f.inFlight }
 
-func (f *fakeDeployer) Deploy(ctx context.Context, name, ttl string, progress io.Writer) (ActionResult, error) {
+func (f *fakeDeployer) Deploy(ctx context.Context, name, ttl string, holdout bool, progress io.Writer) (ActionResult, error) {
+	f.holdout = holdout
 	f.calls = append(f.calls, name)
 	f.ttls = append(f.ttls, ttl)
 	f.sawCtx = ctx

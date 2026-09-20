@@ -74,6 +74,16 @@ type Deployment struct {
 	CreatedAt time.Time `json:"created_at"`
 	ExpiresAt time.Time `json:"expires_at"`
 
+	// Holdout records how this deployment fared against criteria the
+	// generator was never shown: "pass", "fail", or empty for a run that
+	// did not ask for them.
+	//
+	// Three states, not a bool, because "no holdout was run" and "the
+	// holdout passed" are different facts and a bool would render them
+	// the same on the estate page -- which is the false-coverage
+	// reading a holdout exists to prevent.
+	Holdout string `json:"holdout,omitempty"`
+
 	// SweepVerificationFailed records that an orphan sweep for this
 	// deployment has failed at least once. It is sticky: once a sweep has
 	// reported strays, no later pass may release the record on the
@@ -567,3 +577,10 @@ func fileExists(path string) bool {
 func (s *FilesystemStore) path(id string) string {
 	return filepath.Join(s.Root, id+".json")
 }
+
+// Holdout result values. Empty means no holdout was run, which is a
+// third state and not a synonym for "passed".
+const (
+	HoldoutPass = "pass"
+	HoldoutFail = "fail"
+)

@@ -56,13 +56,23 @@ func assertKeepable(keep bool, runtime *CommandRuntime, sc scenario.Scenario) er
 // Without the record this would be indistinguishable from the leak the
 // stray-project check exists to catch -- a real project, really
 // billing, that nothing knows about.
-func registerKeptRun(runtime *CommandRuntime, sc scenario.Scenario) ([]StageSummary, []FailureSummary) {
+// The holdout outcome is read from the run's STAGES, not from the
+// --holdout flag: the flag says what was asked for, and a scenario with
+// no holdout files would otherwise be recorded as having passed checks
+// that never ran. Only "pass" or empty is reachable here in practice --
+// a holdout FAILURE ends the run with terminalReason "holdout_failed",
+// which never reaches registration, and it also clears keepingSandbox
+// so the stack is torn down rather than kept. Keeping infrastructure
+// that failed a check it was never shown would be the wrong default.
+func registerKeptRun(runtime *CommandRuntime, sc scenario.Scenario, runStages []StageSummary) ([]StageSummary, []FailureSummary) {
 	ttl, err := sc.Service.TimeToLive()
 	if err != nil {
 		// assertKeepable already parsed this before the run started, so
 		// reaching here means the scenario changed underneath us.
 		return keepFailed(runtime, "", fmt.Sprintf("service.ttl became unusable mid-run: %v", err))
 	}
+
+	holdoutResult := holdoutOutcome(runStages)
 
 	store := livestore.NewFilesystemStore(runtime.LiveStoreRoot())
 	deploymentID := newDeploymentID(sc.Name, time.Now())
@@ -93,7 +103,7 @@ func registerKeptRun(runtime *CommandRuntime, sc scenario.Scenario) ([]StageSumm
 		workDir = runtime.OutputDir()
 	}
 
-	stages, failures := registerDeployment(store, sc, deploymentID, workDir, runProjectID, ttl)
+	stages, failures := registerDeployment(store, sc, deploymentID, workDir, runProjectID, ttl, holdoutResult)
 	if len(failures) > 0 {
 		return stages, failures
 	}

@@ -6,6 +6,7 @@
     addressLabel,
     estateSummary,
     healthBadge,
+    holdoutBadge,
     knownEmpty,
     needsAttention,
     reapable,
@@ -255,6 +256,7 @@
             <th class="px-3 py-2">Health</th>
             <th class="px-3 py-2">Version</th>
             <th class="px-3 py-2">Last observed</th>
+            <th class="px-3 py-2">Holdout</th>
             <th class="px-3 py-2">TTL</th>
             <th class="px-3 py-2">Address</th>
             {#if teardownAllowed}<th class="px-3 py-2">Actions</th>{/if}
@@ -294,6 +296,12 @@
               </td>
               <td class="px-3 py-2 text-slate-700" data-testid={`deployment-observed-${d.id}`}>
                 {observedLabel(d.health)}
+              </td>
+              <td class="px-3 py-2">
+                <span
+                  class={`inline-block rounded-full px-2 py-1 text-xs font-semibold ${holdoutBadge(d.holdout).tone}`}
+                  data-testid={`deployment-holdout-${d.id}`}>{holdoutBadge(d.holdout).label}</span
+                >
               </td>
               <td class="px-3 py-2 text-slate-700" data-testid={`deployment-ttl-${d.id}`}>
                 {ttlLabel(d.time_to_live_seconds, d.expired)}
