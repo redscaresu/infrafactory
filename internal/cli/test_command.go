@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -1318,7 +1319,8 @@ func evaluateSupportedCriteria(ctx context.Context, sc scenario.Scenario, runtim
 	failures := make([]FailureSummary, 0)
 
 	if len(policySpecs) > 0 {
-		policyFailures := evaluateStatePolicyCriteria(ctx, runtime, sc.Cloud, deployResult.StateSnapshot, policySpecs)
+		policyStages, policyFailures, evaluatedStatePolicies := evaluateStatePolicyCriteria(ctx, runtime, sc.Cloud, deployResult.StateSnapshot, policySpecs)
+		stages = append(stages, policyStages...)
 		if len(policyFailures) > 0 {
 			stages = append(stages, StageSummary{
 				Layer:  "mock_deploy",
@@ -1327,9 +1329,11 @@ func evaluateSupportedCriteria(ctx context.Context, sc scenario.Scenario, runtim
 				Detail: fmt.Sprintf("%d policy failures", len(policyFailures)),
 			})
 			failures = append(failures, policyFailures...)
-		} else {
-			stages = append(stages, StageSummary{Layer: "mock_deploy", Stage: "state_policy", Status: StageStatusPass})
 		}
+		// No pass stage here: evaluateStatePolicyCriteria emits exactly
+		// one stage for this check, so a partial result cannot be
+		// reported as green by a second one.
+		_ = evaluatedStatePolicies
 	}
 
 	if sandboxEnabled && len(realProbeChecks) > 0 {
@@ -1423,8 +1427,24 @@ var cloudConstraintPolicies = map[string]map[string]string{
 	},
 }
 
-func evaluateStatePolicyCriteria(ctx context.Context, runtime *CommandRuntime, cloud string, stateSnapshot []byte, specs []scenario.ExecutableCheckSpec) []FailureSummary {
+// Returns the number of policies actually EVALUATED alongside the
+// stages, counted where the evaluation happens. Two earlier versions
+// derived it instead -- once by parsing the skip message's prose, once
+// by subtracting the skip count from the spec count -- and both were
+// wrong, because a criterion can leave this loop without being
+// evaluated and without being skipped.
+func evaluateStatePolicyCriteria(ctx context.Context, runtime *CommandRuntime, cloud string, stateSnapshot []byte, specs []scenario.ExecutableCheckSpec) ([]StageSummary, []FailureSummary, int) {
 	failures := make([]FailureSummary, 0)
+	// Policies named by a criterion that have no deployed-state rule.
+	// Collected rather than reported one by one so the stage list
+	// carries a single readable line.
+	statePolicySkips := make([]string, 0)
+	// Counted where the evaluator actually runs, not derived from
+	// len(specs) - len(skips): a criterion can also leave without
+	// being evaluated by failing outright (an `expect: fail` against a
+	// plan-only policy, an unreadable file), and subtracting only the
+	// skips counted those as evaluated.
+	evaluated := 0
 
 	for _, spec := range specs {
 		if spec.Policy == nil {
@@ -1461,7 +1481,71 @@ func evaluateStatePolicyCriteria(ctx context.Context, runtime *CommandRuntime, c
 		if spec.Policy.Target != "" {
 			extraInput["target"] = spec.Policy.Target
 		}
+		// The criterion's params, exactly as the PLAN evaluator gets
+		// them. Without this a state rule cannot be parameterised at
+		// all -- `input.params.region` is undefined, the rule never
+		// fires, and it reports a pass. That is why
+		// region_restriction had a plan rule and no state rule: the
+		// state rule was not writable, not merely unwritten.
+		if len(spec.Policy.Params) > 0 {
+			extraInput["params"] = spec.Policy.Params
+		}
 
+		// A policy with no `deny_state` rule is REPORTED, not passed.
+		//
+		// Rego rules are undefined rather than false when absent, and
+		// an undefined rule returns zero results -- identical to a
+		// defined rule that found nothing wrong. So without this the
+		// run says `state_policy: pass` for a criterion the operator
+		// explicitly asked for and nothing evaluated.
+		//
+		// A SKIP rather than a failure: some policies are legitimately
+		// plan-only, and failing them would refuse scenarios that are
+		// not wrong. The point is that the gap is visible.
+		defined, defErr := harness.PolicyFileDefinesRule(policyPath, "deny_state")
+		if defErr != nil {
+			failures = append(failures, FailureSummary{
+				Layer:   "mock_deploy",
+				Stage:   "state_policy",
+				Check:   "policy",
+				Policy:  spec.Policy.Check,
+				Command: "state policy evaluator",
+				Detail: fmt.Sprintf(
+					"could not read %s, so it is unknown whether this policy checks deployed state: %v", policyPath, defErr),
+			})
+			continue
+		}
+		if !defined {
+			// `expect: fail` is the exception, and it must FAIL rather
+			// than skip.
+			//
+			// A negative criterion asks the policy to deny. A policy
+			// with no state rule cannot deny, so skipping lets the run
+			// report success for an assertion nothing could ever have
+			// satisfied -- and it is strictly worse than the old
+			// behaviour, where the absent rule returned zero denials
+			// and the expectation switch below caught it.
+			//
+			// `expect: pass` is genuinely a skip: the policy did not
+			// deny, but only because it was never asked.
+			if spec.Expect == "fail" {
+				failures = append(failures, FailureSummary{
+					Layer:   "mock_deploy",
+					Stage:   "state_policy",
+					Check:   "policy",
+					Policy:  spec.Policy.Check,
+					Command: "state policy evaluator",
+					Detail: fmt.Sprintf(
+						"expected %s to deny the deployed state, but it is plan-only: it has no deny_state rule and can never deny. "+
+							"Write one, or move this criterion to a policy that checks state", spec.Policy.Check),
+				})
+				continue
+			}
+			statePolicySkips = append(statePolicySkips, spec.Policy.Check)
+			continue
+		}
+
+		evaluated++
 		evaluatedFailures, err := harness.EvaluateStatePoliciesWithInput(ctx, stateSnapshot, extraInput, []string{policyPath})
 		if err != nil {
 			failures = append(failures, FailureSummary{
@@ -1505,7 +1589,50 @@ func evaluateStatePolicyCriteria(ctx context.Context, runtime *CommandRuntime, c
 		}
 	}
 
-	return failures
+	// ONE stage, so the list cannot carry two statuses for the same
+	// thing. A `skip` beside a `pass` is two contradictory claims, and
+	// the green one is the one people read -- which is how a scenario
+	// with a mix of evaluated and plan-only policies would look
+	// entirely checked.
+	//
+	// Anything skipped means the stage is not a pass. Green here has
+	// to mean "every policy this scenario named was evaluated against
+	// deployed state, and none of them denied"; nothing weaker is
+	// worth a green.
+	stages := make([]StageSummary, 0, 1)
+	switch {
+	case len(failures) > 0:
+		// The caller reports the failure stage; adding one here would
+		// duplicate it.
+	case len(statePolicySkips) > 0:
+		sort.Strings(statePolicySkips)
+		detail := fmt.Sprintf(
+			"%s: plan-only, no deny_state rule -- deployed state was NOT checked against %s",
+			strings.Join(statePolicySkips, ", "),
+			pluralPolicy(len(statePolicySkips)))
+		if evaluated > 0 {
+			detail = fmt.Sprintf("%d of %d evaluated; %s", evaluated, len(specs), detail)
+		}
+		stages = append(stages, StageSummary{
+			Layer: "mock_deploy", Stage: "state_policy", Status: StageStatusSkip,
+			Detail: detail,
+		})
+	case evaluated > 0:
+		stages = append(stages, StageSummary{
+			Layer: "mock_deploy", Stage: "state_policy", Status: StageStatusPass,
+			Detail: fmt.Sprintf("%d policy/policies evaluated against deployed state", evaluated),
+		})
+	}
+
+	return stages, failures, evaluated
+}
+
+// pluralPolicy keeps the skip line readable for one policy or several.
+func pluralPolicy(n int) string {
+	if n == 1 {
+		return "it"
+	}
+	return "them"
 }
 
 func resolveConstraintPolicyPath(baseDir, policyPath string) string {
