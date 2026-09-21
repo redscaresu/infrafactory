@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -17,6 +18,7 @@ import (
 	"github.com/redscaresu/infrafactory/internal/generator"
 	"github.com/redscaresu/infrafactory/internal/harness"
 	"github.com/redscaresu/infrafactory/internal/livestore"
+	"github.com/redscaresu/infrafactory/internal/scenario"
 )
 
 const unseenHoldoutYAML = `scenario: web-live-paris-unseen
@@ -501,4 +503,163 @@ func TestHoldoutIsRefusedWithoutLayer3(t *testing.T) {
 
 	rt.Config.Validation.Layers.SandboxDeploy.Enabled = true
 	assert.NoError(t, assertHoldoutRunnable(true, rt))
+}
+
+// The whole point of the state-policy path: a criterion named in
+// acceptance_criteria must actually be evaluated against what the
+// provider created, not merely routed somewhere and dropped.
+func TestStatePolicyEvaluatesTheNamedPolicyAgainstMockState(t *testing.T) {
+	h := newCommandTestHarness(t)
+	rt := holdoutRuntime(t, h, &fakeRealProbeHarness{result: &harness.RealProbeResult{}})
+	rt.Config.Paths.Policies = filepath.Join("..", "..", "policies")
+	// The same mappings infrafactory.yaml carries. Declared here
+	// rather than inherited, so the test states what it depends on.
+	rt.Config.ConstraintPolicies = map[string]string{
+		"region_restriction": "scaleway/region_restriction.rego",
+		"encryption_at_rest": "scaleway/encryption_at_rest.rego",
+	}
+
+	// A VPC the provider placed outside the requested region. The PLAN
+	// said fr-par; this is what came back.
+	state, err := json.Marshal(map[string]any{
+		"vpc": map[string]any{"vpcs": []any{map[string]any{"name": "stray", "region": "nl-ams"}}},
+	})
+	require.NoError(t, err)
+
+	specs := []scenario.ExecutableCheckSpec{{
+		Type:   "policy",
+		Expect: "pass",
+		Policy: &scenario.PolicyCheckSpec{
+			Check:  "region_restriction",
+			Params: map[string]any{"region": "fr-par"},
+		},
+	}}
+
+	stages, failures, _ := evaluateStatePolicyCriteria(context.Background(), rt, "scaleway", state, specs)
+
+	require.Len(t, failures, 1, "the criterion must be evaluated against deployed state")
+	assert.Contains(t, failures[0].Detail, "stray")
+	assert.Contains(t, failures[0].Detail, "nl-ams")
+	assert.Empty(t, stages, "it has a state rule, so nothing is skipped")
+}
+
+// A plan-only policy is REPORTED as such. Rego rules are undefined
+// rather than false when absent and return zero results, identical to
+// a rule that found nothing -- so without this the run says "pass" for
+// a criterion nothing evaluated.
+func TestStatePolicyReportsAPlanOnlyPolicyInsteadOfPassingIt(t *testing.T) {
+	h := newCommandTestHarness(t)
+	rt := holdoutRuntime(t, h, &fakeRealProbeHarness{result: &harness.RealProbeResult{}})
+	rt.Config.Paths.Policies = filepath.Join("..", "..", "policies")
+	rt.Config.ConstraintPolicies = map[string]string{
+		"encryption_at_rest": "scaleway/encryption_at_rest.rego",
+	}
+
+	state, err := json.Marshal(map[string]any{"vpc": map[string]any{"vpcs": []any{}}})
+	require.NoError(t, err)
+
+	specs := []scenario.ExecutableCheckSpec{{
+		Type:   "policy",
+		Expect: "pass",
+		// Mapped, and plan-only: it has `deny` and no `deny_state`.
+		Policy: &scenario.PolicyCheckSpec{Check: "encryption_at_rest"},
+	}}
+
+	stages, failures, _ := evaluateStatePolicyCriteria(context.Background(), rt, "scaleway", state, specs)
+
+	assert.Empty(t, failures, "a plan-only policy is not a failure")
+	require.Len(t, stages, 1)
+	assert.Equal(t, StageStatusSkip, stages[0].Status)
+	assert.Contains(t, stages[0].Detail, "encryption_at_rest")
+	assert.Contains(t, stages[0].Detail, "NOT checked")
+}
+
+// `expect: fail` asks the policy to DENY. A plan-only policy can never
+// deny, so skipping it would let the run report success for an
+// assertion nothing could ever satisfy -- strictly worse than the old
+// behaviour, where the absent rule returned zero denials and the
+// expectation check caught it.
+func TestStatePolicyFailsAnExpectFailAgainstAPlanOnlyPolicy(t *testing.T) {
+	h := newCommandTestHarness(t)
+	rt := holdoutRuntime(t, h, &fakeRealProbeHarness{result: &harness.RealProbeResult{}})
+	rt.Config.Paths.Policies = filepath.Join("..", "..", "policies")
+	rt.Config.ConstraintPolicies = map[string]string{
+		"encryption_at_rest": "scaleway/encryption_at_rest.rego",
+	}
+
+	state, err := json.Marshal(map[string]any{"vpc": map[string]any{"vpcs": []any{}}})
+	require.NoError(t, err)
+
+	specs := []scenario.ExecutableCheckSpec{{
+		Type:   "policy",
+		Expect: "fail",
+		Policy: &scenario.PolicyCheckSpec{Check: "encryption_at_rest"},
+	}}
+
+	stages, failures, evaluated := evaluateStatePolicyCriteria(context.Background(), rt, "scaleway", state, specs)
+
+	require.Len(t, failures, 1, "an expectation nothing can satisfy is a failure, not a skip")
+	assert.Contains(t, failures[0].Detail, "can never deny")
+	assert.Empty(t, stages, "it failed; it was not skipped")
+	assert.Zero(t, evaluated)
+}
+
+// A skip beside a pass is two contradictory claims about one check,
+// and the green one is what people read -- so a scenario mixing an
+// evaluated policy with a plan-only one would look entirely checked.
+// Green has to mean every named policy was evaluated.
+func TestStatePolicyEmitsOneStageForAMixedSet(t *testing.T) {
+	h := newCommandTestHarness(t)
+	rt := holdoutRuntime(t, h, &fakeRealProbeHarness{result: &harness.RealProbeResult{}})
+	rt.Config.Paths.Policies = filepath.Join("..", "..", "policies")
+	rt.Config.ConstraintPolicies = map[string]string{
+		"region_restriction": "scaleway/region_restriction.rego", // has deny_state
+		"encryption_at_rest": "scaleway/encryption_at_rest.rego", // plan-only
+	}
+
+	state, err := json.Marshal(map[string]any{
+		"instance": map[string]any{"servers": []any{map[string]any{"name": "web", "zone": "fr-par-1"}}},
+	})
+	require.NoError(t, err)
+
+	specs := []scenario.ExecutableCheckSpec{
+		{Type: "policy", Expect: "pass", Policy: &scenario.PolicyCheckSpec{
+			Check: "region_restriction", Params: map[string]any{"region": "fr-par"}}},
+		{Type: "policy", Expect: "pass", Policy: &scenario.PolicyCheckSpec{Check: "encryption_at_rest"}},
+	}
+
+	stages, failures, evaluated := evaluateStatePolicyCriteria(context.Background(), rt, "scaleway", state, specs)
+
+	assert.Empty(t, failures, "the evaluated policy passed and the other was not run")
+	assert.Equal(t, 1, evaluated)
+	require.Len(t, stages, 1, "one check, one stage")
+	assert.Equal(t, StageStatusSkip, stages[0].Status,
+		"anything unchecked means this is not a pass")
+	assert.Contains(t, stages[0].Detail, "1 of 2 evaluated")
+	assert.Contains(t, stages[0].Detail, "encryption_at_rest")
+}
+
+// ...and when everything named really was evaluated, it is green.
+func TestStatePolicyIsGreenOnlyWhenEverythingWasChecked(t *testing.T) {
+	h := newCommandTestHarness(t)
+	rt := holdoutRuntime(t, h, &fakeRealProbeHarness{result: &harness.RealProbeResult{}})
+	rt.Config.Paths.Policies = filepath.Join("..", "..", "policies")
+	rt.Config.ConstraintPolicies = map[string]string{
+		"region_restriction": "scaleway/region_restriction.rego",
+	}
+
+	state, err := json.Marshal(map[string]any{
+		"instance": map[string]any{"servers": []any{map[string]any{"name": "web", "zone": "fr-par-1"}}},
+	})
+	require.NoError(t, err)
+
+	specs := []scenario.ExecutableCheckSpec{{Type: "policy", Expect: "pass",
+		Policy: &scenario.PolicyCheckSpec{Check: "region_restriction", Params: map[string]any{"region": "fr-par"}}}}
+
+	stages, failures, evaluated := evaluateStatePolicyCriteria(context.Background(), rt, "scaleway", state, specs)
+
+	assert.Empty(t, failures)
+	assert.Equal(t, 1, evaluated)
+	require.Len(t, stages, 1)
+	assert.Equal(t, StageStatusPass, stages[0].Status)
 }

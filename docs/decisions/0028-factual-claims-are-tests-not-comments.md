@@ -74,3 +74,54 @@ action, with no gap for good intentions.
 - **It does not reach everything.** Facts about real Scaleway are expensive to test
   and stay prose — the S168 teardown finding is exactly that kind, and remains a
   risk this ADR does not cover.
+
+
+## Amendment, 2026-09-21 (S193): an undefined rego rule is not a passing one
+
+Rego rules are **undefined** rather than false when they do not exist, and an undefined
+rule evaluates to zero results — which is exactly what a defined rule that found nothing
+wrong returns. The evaluator cannot tell the two apart, so both render green.
+
+That turned a scenario's `acceptance_criteria` into a claim nobody was checking.
+`web-live-paris` names `check: region_restriction`; the run reported
+`state_policy: pass`; and `region_restriction.rego` had no `deny_state` rule, so nothing
+was evaluated against deployed state at all.
+
+### Decision
+
+**A policy named by a criterion that has no `deny_state` rule is reported, not passed.**
+Rule existence is answered from the **AST** (`ast.ParseModule`), not by grepping the file
+— a rule named in a comment or inside a string is not a definition.
+
+It is a **skip**, not a failure: some policies are legitimately plan-only, and failing
+them would refuse scenarios that are not wrong. The requirement is that the gap is
+visible.
+
+**Except for `expect: fail`,** which is a failure. A negative criterion asks the policy to
+deny; a policy with no state rule can never deny, so skipping would report success for an
+assertion nothing could satisfy.
+
+**And the check emits exactly one stage.** A skip beside a pass is two contradictory
+claims about the same thing, and the green one is the one people read. Green here means
+*every policy this scenario named was evaluated against deployed state and none denied* —
+nothing weaker earns it.
+
+### The enabling fix
+
+The state evaluator forwarded only `target`, never the criterion's `params`. So
+`input.params.region` was undefined and **any** parameterised state rule would have
+silently never fired. The rule was not merely unwritten; it was not writable. Params now
+go through exactly as the plan evaluator passes them.
+
+### Why this belongs to ADR-0028
+
+The rule here is *factual claims are tests, not comments*. This is the same failure one
+level down: a claim encoded as a **criterion** rather than a comment, which the system
+accepted, displayed, and never evaluated. An assertion that cannot fail is documentation
+wearing a test's clothes.
+
+Two counting bugs while implementing it made the same mistake in miniature — "how many
+were evaluated" was derived first by parsing the skip message's prose, then by subtracting
+the skip count from the spec count. Both derive a structured fact from something shaped
+for humans, inside the function that exists to stop a check being reported as run when it
+was not. It is counted where the evaluation happens now.

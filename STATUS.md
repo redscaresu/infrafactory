@@ -1,6 +1,42 @@
 # STATUS
 
-Last updated: 2026-09-20
+Last updated: 2026-09-21
+
+## 2026-09-21 — S193: the state-side policy check actually runs
+
+`region_restriction` now has a `deny_state` rule, so the same policy file asks its question
+twice: of the **plan** at Layer 1, and of **what the provider actually created** at Layer 2.
+Verified both directions against a real Layer 2 run — `fr-par` passes, and the same stack
+against `nl-ams` produces eight denials naming the deployed resources.
+
+**Why it had never been written.** Not oversight: the state evaluator forwarded only
+`target`, never the criterion's `params`. So `input.params.region` was undefined and any
+parameterised state rule would have silently never fired. The rule was not writable, and
+nothing said so.
+
+**A plan-only policy is now reported, not passed.** Rego rules are UNDEFINED rather than
+false when absent, and an undefined rule returns zero results — identical to a defined rule
+that found nothing. So a scenario naming `check: encryption_at_rest` got
+`state_policy: pass` with nothing evaluated. Detected from the AST (a rule named in a
+comment does not count) and reported as a skip that says what was not checked.
+
+**One stage, not two.** A skip beside a pass is two contradictory claims about one check,
+and the green one is what people read. Anything unchecked means the stage is not green.
+
+**Three review findings, all accepted**: `expect: fail` against a plan-only policy was
+skipped rather than failed, though nothing could ever satisfy it; the state rule missed the
+plan rule's stricter exact-match `zone`; and the mixed evaluated/skipped case still emitted
+both statuses.
+
+**Two counting bugs of my own, the same shape twice.** "How many were evaluated" was first
+derived by parsing the skip message's prose, then by subtracting the skip count from the
+spec count — which counts a criterion that failed outright as evaluated. Both are deriving
+a structured fact from something shaped for humans, inside the function whose purpose is to
+stop a check being reported as run when it was not. Counted at the point of evaluation now.
+
+**And one only a real run could find.** The AST lookup took a package name and was handed
+the criterion's `check:` value — `region_restriction` against `scaleway.region_restriction`
+— so it never matched and every policy reported as plan-only. The unit tests passed.
 
 ## 2026-09-20 — S192: the holdout, rebuilt as a negative check against the running stack
 

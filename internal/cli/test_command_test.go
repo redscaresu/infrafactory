@@ -673,7 +673,7 @@ deny_state contains msg if {
 		},
 	}
 
-	failures := evaluateStatePolicyCriteria(context.Background(), runtime, "scaleway", []byte(`{"rdb":{"instances":[]}}`), specs)
+	_, failures, _ := evaluateStatePolicyCriteria(context.Background(), runtime, "scaleway", []byte(`{"rdb":{"instances":[]}}`), specs)
 	if len(failures) != 0 {
 		t.Fatalf("expected no failures, got %+v", failures)
 	}
@@ -716,7 +716,7 @@ deny_state contains msg if {
 		Policy: &scenario.PolicyCheckSpec{Check: "encryption_at_rest"},
 	}}
 
-	failures := evaluateStatePolicyCriteria(context.Background(), runtime, "aws", []byte(`{"iam":{},"s3":{}}`), specs)
+	_, failures, _ := evaluateStatePolicyCriteria(context.Background(), runtime, "aws", []byte(`{"iam":{},"s3":{}}`), specs)
 	if len(failures) != 1 {
 		t.Fatalf("expected aws encryption policy to fire (proving aws map was hit), got %d failures: %+v", len(failures), failures)
 	}
