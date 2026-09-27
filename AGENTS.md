@@ -164,8 +164,9 @@ weaken them.
 
 ## Epics, stories and the board
 
-`docs/` is an Obsidian vault: `docs/Board.base` shows stories by status and by epic. Scope an epic
-into stories with `/plan-epic <slug>` (`docs/operations.md` § Scoping an epic). Keep links as
+`docs/` is an Obsidian vault: `docs/Board.base` shows stories by status and by epic. Work is
+planned HLD → epics → stories → built in parallel: `/hld`, `/plan-hld`, `/plan-epic`, then
+`scripts/swarm.sh story` (`docs/operations.md` § The planning chain). Keep links as
 markdown links, never `[[wikilinks]]`, so the link test can check them.
 
 ## Parallel agents

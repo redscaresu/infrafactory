@@ -144,6 +144,24 @@ for epic_file in docs/epics/*.md; do
     echo "Doc hygiene check failed: ${epic_file} needs 'status: active|later' in its front matter."
     exit 1
   fi
+  hld="$(sed -n 's/^hld: *//p' "${epic_file}" | head -1)"
+  if [[ -n "${hld}" && ! -f "docs/hld/${hld}.md" ]]; then
+    echo "Doc hygiene check failed: ${epic_file} names HLD '${hld}', but docs/hld/${hld}.md does not exist."
+    exit 1
+  fi
+done
+
+for hld_file in docs/hld/*.md; do
+  [[ -e "${hld_file}" ]] || continue
+  [[ "$(basename "${hld_file}")" == "README.md" ]] && continue
+  if [[ ! "$(basename "${hld_file}")" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}-[a-z0-9-]+\.md$ ]]; then
+    echo "Doc hygiene check failed: ${hld_file} must be named YYYY-MM-DD-<slug>.md (no spaces: links must resolve)."
+    exit 1
+  fi
+  if ! grep -qE '^status: (draft|agreed|superseded)$' "${hld_file}"; then
+    echo "Doc hygiene check failed: ${hld_file} needs 'status: draft|agreed|superseded' in its front matter."
+    exit 1
+  fi
 done
 
 # A decision-impacting PATH does not always carry a decision: repointing a

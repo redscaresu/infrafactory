@@ -19,10 +19,14 @@ die() { echo "swarm: $*" >&2; exit 1; }
 
 # The model and effort for each role. This is the one place the policy lives
 # (docs/operations.md § Model and effort explains the reasoning).
+#   design:    hld, hld-review, hld-lead
 #   planning:  survey, lead, skeptic, critic, codex
 #   building:  code, code-risky, docs, chore, verify
 policy() {
   case "$1" in
+    hld)        echo "claude fable high" ;;    # co-writes the HLD with the user, who waits on every turn
+    hld-review) echo "claude fable xhigh" ;;   # attacks the finished draft before it is agreed
+    hld-lead)   echo "claude fable xhigh" ;;   # HLD into epics: one call that shapes everything below it
     survey)     echo "claude sonnet high" ;;   # reads and cites; feeds the lead, so not low
     lead)       echo "claude opus xhigh" ;;    # one decomposition decides the whole epic
     skeptic)    echo "claude opus high" ;;     # the only gate a story passes before it is built
@@ -33,7 +37,7 @@ policy() {
     docs|chore) echo "claude sonnet medium" ;;
     verify)     echo "claude sonnet medium" ;; # run tests or commands and report
     escalate)   echo "claude fable xhigh" ;;   # only after a story failed twice, or an unreconcilable epic
-    *) die "unknown role '$1' (survey lead skeptic critic codex code code-risky docs chore verify escalate)" ;;
+    *) die "unknown role '$1' (hld hld-review hld-lead survey lead skeptic critic codex code code-risky docs chore verify escalate)" ;;
   esac
 }
 

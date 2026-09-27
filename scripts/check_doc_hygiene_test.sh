@@ -138,6 +138,31 @@ EPIC='---\nstatus: active\n---\n\n# e\n' \
   run_story_case "a story naming an existing epic is accepted" pass '---\nstatus: ready\nepic: e\n---\n\n# x\n'
 EPIC='---\ntitle: e\n---\n\n# e\n' \
   run_story_case "an epic with no status is rejected" fail '---\nstatus: ready\nepic: e\n---\n\n# x\n'
+run_hld_case() {
+  # run_hld_case <name> <expected> <hld-file-name> <hld-body> [epic-body]
+  local name="$1" expected="$2" file="$3" body="$4" epic="${5:-}" dir rc actual
+  dir="$(mktemp -d)"
+  (
+    cd "${dir}" || exit 1
+    git init -q . && git config user.email t@t.t && git config user.name t
+    echo baseline > README.md && git add -A && git commit -qm baseline
+    base="$(git rev-parse HEAD)"
+    mkdir -p docs/hld docs/epics && printf '%b' "${body}" > "docs/hld/${file}"
+    [[ -n "${epic}" ]] && printf '%b' "${epic}" > docs/epics/e.md
+    git add -A && git commit -qm change
+    bash "${SCRIPT}" "${base}" "$(git rev-parse HEAD)" > /dev/null 2>&1
+  )
+  rc=$?; rm -rf "${dir}"
+  actual="pass"; [[ ${rc} -ne 0 ]] && actual="fail"
+  if [[ "${actual}" == "${expected}" ]]; then echo "  ok    ${name}"
+  else echo "  FAIL  ${name}: expected ${expected}, got ${actual}"; FAILURES=$((FAILURES + 1)); fi
+}
+HLD_OK='---\ntitle: T\ndate: 2026-09-27\nstatus: draft\n---\n\n# T\n'
+run_hld_case "a well-formed HLD is accepted"            pass "2026-09-27-t.md" "${HLD_OK}"
+run_hld_case "an HLD name with spaces is rejected"      fail "2026-09-27 - T.md" "${HLD_OK}"
+run_hld_case "an HLD with no status is rejected"        fail "2026-09-27-t.md" '---\ntitle: T\n---\n\n# T\n'
+run_hld_case "an epic naming an existing HLD is accepted" pass "2026-09-27-t.md" "${HLD_OK}" '---\nstatus: active\nhld: 2026-09-27-t\n---\n\n# e\n'
+run_hld_case "an epic naming a missing HLD is rejected"   fail "2026-09-27-t.md" "${HLD_OK}" '---\nstatus: active\nhld: 2026-01-01-gone\n---\n\n# e\n'
 run_two_commits "one commit's trailer does not waive another commit" fail \
   "ADR: none — comment-only, repoints a doc link" internal/cli/a.go \
   "change the CLI contract" internal/cli/b.go
