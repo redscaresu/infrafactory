@@ -131,7 +131,8 @@ Rules: read AGENTS.md first. Delete docs/stories/${slug}.md in your PR, and noth
 docs/stories/. Never merge (the lead merges). Never touch real cloud or credentials: do not source
 ~/.config/infrafactory/*.env, and do not run deploy or anything with sandbox_deploy enabled. Run
 \`codex exec review --base main\` before committing; fix real findings, decline nits with a reason,
-converge on one clean pass, and record the loop in the PR body. If you touch internal/cli without a
+converge on one clean pass, and record the loop in the PR body. If codex reports a usage limit, do
+not wait for it to reset: carry on without it and write "codex skipped: usage limit" in the PR body. If you touch internal/cli without a
 real decision, put \`ADR: none — <reason>\` on your final commit. End commit messages with
 "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>" and PR bodies with
 "🤖 Generated with [Claude Code](https://claude.com/claude-code)". When CI is green, reply with the
