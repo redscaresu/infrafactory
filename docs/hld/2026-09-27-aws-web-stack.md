@@ -465,4 +465,22 @@ fixed by running apply, destroy, sweep and `reap`; the probe window.
 
 ## Epics
 
-Filled in by `/plan-hld` once this HLD is agreed.
+- [fakeaws-step-one-surfaces](../epics/fakeaws-step-one-surfaces.md)
+- [aws-layer3-seal-and-dispatch](../epics/aws-layer3-seal-and-dispatch.md)
+- [aws-layer3-claim-sweep-reap](../epics/aws-layer3-claim-sweep-reap.md)
+- [aws-layer-neutral-hcl](../epics/aws-layer-neutral-hcl.md)
+- [aws-ingress-policy-and-holdout](../epics/aws-ingress-policy-and-holdout.md)
+- [aws-layer3-gate](../epics/aws-layer3-gate.md)
+- [avoid-pitfall-retirement](../epics/avoid-pitfall-retirement.md)
+- [aws-layer3-wiring-proof](../epics/aws-layer3-wiring-proof.md)
+- [aws-web-live-on-real-aws](../epics/aws-web-live-on-real-aws.md)
+- [aws-web-stack-load-balancer](../epics/aws-web-stack-load-balancer.md)
+
+Order:
+
+1. Wave 1 (parallel, swarm): fakeaws-step-one-surfaces (first story picks the exact pin; infrafactory parity exemptions before sts/ssm land); aws-layer3-seal-and-dispatch; policy-correctness (existing, active).
+2. Wave 2 (parallel): aws-layer-neutral-hcl [swarm; topology derivation story may start after fakeaws items 4 and 8]; aws-ingress-policy-and-holdout [swarm; after policy-correctness's harness and fakeaws item 8]; avoid-pitfall-retirement [swarm; after fakeaws item 5]; aws-layer3-claim-sweep-reap [lead pre-builds the fake-doer code; user does hand setup and the planted-leak proof].
+3. Wave 3: aws-layer3-gate [swarm], after seal-and-dispatch, layer-neutral and fakeaws.
+4. Wave 4: aws-layer3-wiring-proof [swarm + one lead-triggered LLM run], after every wave-2/3 epic's code has landed.
+5. Wave 5: aws-web-live-on-real-aws [user]. Closes Rollout 2.
+6. Wave 6: aws-web-stack-load-balancer [mixed]; its fakeaws ELBv2 stories may start any time after wave 1.

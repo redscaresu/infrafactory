@@ -1,18 +1,22 @@
 filters:
   and:
-    - file.inFolder("stories")
     - file.ext == "md"
-    - file.path != "stories/README.md"
+    - file.name != "README"
 properties:
   note.status:
     displayName: Status
   note.epic:
     displayName: Epic
+  note.hld:
+    displayName: HLD
   note.depends_on:
     displayName: Depends on
 views:
   - type: table
     name: Board
+    filters:
+      and:
+        - file.inFolder("stories")
     groupBy:
       property: status
       direction: ASC
@@ -20,8 +24,13 @@ views:
       - file.name
       - epic
       - depends_on
+    columnSize:
+      file.name: 252
   - type: table
     name: By epic
+    filters:
+      and:
+        - file.inFolder("stories")
     groupBy:
       property: epic
       direction: ASC
@@ -29,3 +38,17 @@ views:
       - file.name
       - status
       - depends_on
+  - type: table
+    name: Epics
+    filters:
+      and:
+        - file.inFolder("epics")
+    groupBy:
+      property: status
+      direction: ASC
+    order:
+      - file.name
+      - hld
+      - depends_on
+    columnSize:
+      file.name: 280
