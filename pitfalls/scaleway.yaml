@@ -76,18 +76,30 @@ pitfalls:
       discovered_from: web-live-paris
     - resource: scaleway_instance_security_group
       rule: |-
-        NEVER declare a `scaleway_instance_security_group`. It is not in
-        `allow_resource_types`, so Layer 3 refuses the whole configuration before
-        anything is applied and the run loses an iteration to it.
+        A Scaleway security group defaults to `inbound_default_policy = "accept"`.
+        Declaring one and leaving that unset closes NOTHING: it permits every
+        inbound port, exactly like the API-created "Default security group".
 
-        You do not need one. Scaleway CREATES a "Default security group" in every
-        project on the first instance, and it permits what these scenarios need.
-        Declaring your own adds a resource the allowlist rejects to solve a problem
-        that does not exist.
+        So when a server must not be reachable on every port, set the policy and
+        open only what is used:
 
-        The API-created one is also why teardown has a purge step: Terraform never
-        owns it, so `destroy` never removes it, and an undeleted security group
-        blocks the run project from being deleted afterwards. One more reason not
-        to add a second.
+        resource "scaleway_instance_security_group" "web" {
+          name                   = "web"
+          inbound_default_policy = "drop"
+
+          inbound_rule {
+            action = "accept"
+            port   = 80
+          }
+        }
+
+        resource "scaleway_instance_server" "web" {
+          security_group_id = scaleway_instance_security_group.web.id
+        }
+
+        All three parts carry weight. Without `drop` the group changes nothing;
+        without `security_group_id` the server keeps the project default; without
+        an `inbound_rule` per port in use the load balancer cannot reach its
+        backend.
       source: avoid
       discovered_from: web-live-paris
