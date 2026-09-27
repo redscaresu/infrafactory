@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 )
 
@@ -263,11 +265,10 @@ func TestExtractDescriptivePitfall_M97_UnsupportedArgument(t *testing.T) {
 	}
 }
 
-// TestAppendPitfall_VerbatimUpgrade pins the
-// verbatim→prescriptive upgrade path. When a same-resource entry
-// exists as a raw stderr dump and a later prescriptive rule arrives,
-// AppendPitfall REPLACES the verbatim entry rather than dedup-skipping.
-func TestAppendPitfall_VerbatimUpgrade(t *testing.T) {
+// TestAppendPitfall_PrescriptiveBesideVerbatim pins that a prescriptive
+// rule is learned beside a same-resource raw stderr dump: not dropped as
+// a duplicate of it, and not written over it.
+func TestAppendPitfall_PrescriptiveBesideVerbatim(t *testing.T) {
 	dir := t.TempDir()
 
 	// Seed with a verbatim fallback entry (real shape from gcp.yaml).
@@ -290,9 +291,9 @@ func TestAppendPitfall_VerbatimUpgrade(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Append a prescriptive rule for the same resource — should REPLACE,
-	// not dedup-skip, even though the verbatim entry shares many
-	// significant words with the prescriptive form.
+	// Append a prescriptive rule for the same resource. It shares many
+	// significant words with the verbatim entry, so this must not
+	// dedup-skip.
 	prescriptive := LearnedPitfall{
 		Resource:       "google_cloud_run_v2_service",
 		Rule:           "`google_cloud_run_v2_service` does NOT accept the argument `deletion_protection` — Remove the line from every block.",
@@ -310,25 +311,16 @@ func TestAppendPitfall_VerbatimUpgrade(t *testing.T) {
 	if err := yaml.Unmarshal(result, &pf); err != nil {
 		t.Fatal(err)
 	}
-	if len(pf.Pitfalls) != 1 {
-		t.Fatalf("expected 1 pitfall after upgrade, got %d", len(pf.Pitfalls))
-	}
-	if isVerbatimFallback(pf.Pitfalls[0].Rule) {
-		t.Errorf("expected prescriptive rule after upgrade, still verbatim: %q", pf.Pitfalls[0].Rule)
-	}
-	if !strings.Contains(pf.Pitfalls[0].Rule, "Remove") {
-		t.Errorf("rule lost prescription on write: %q", pf.Pitfalls[0].Rule)
-	}
+	require.Len(t, pf.Pitfalls, 2)
+	assert.Equal(t, initial.Pitfalls[0], pf.Pitfalls[0], "the verbatim entry must survive")
+	assert.Equal(t, prescriptive.Rule, pf.Pitfalls[1].Rule)
 }
 
-// TestAppendPitfall_LearnedToPrescriptiveUpgrade pins the
-// learned → fix replacement path. A descriptive
-// `source: learned` symptom-only rule shares enough significant words
-// with N10's prescriptive HCL-snippet rule for the same resource that
-// isDuplicate would silently drop the new entry. The fix is an
-// explicit upgrade: when a FixSource candidate sees any
-// same-resource non-prescriptive entry, REPLACE in place.
-func TestAppendPitfall_LearnedToPrescriptiveUpgrade(t *testing.T) {
+// TestAppendPitfall_FixBesideDescriptive pins that N10's HCL-snippet rule
+// is learned beside a same-resource symptom-only rule. The two share
+// enough significant words that a plain word-share dedup would drop the
+// fix; it must not, and it must not write over the older rule either.
+func TestAppendPitfall_FixBesideDescriptive(t *testing.T) {
 	dir := t.TempDir()
 
 	// Seed with a learned (descriptive, not verbatim) entry — real
@@ -371,24 +363,67 @@ func TestAppendPitfall_LearnedToPrescriptiveUpgrade(t *testing.T) {
 	if err := yaml.Unmarshal(result, &pf); err != nil {
 		t.Fatal(err)
 	}
-	if len(pf.Pitfalls) != 1 {
-		t.Fatalf("expected 1 pitfall after upgrade, got %d", len(pf.Pitfalls))
+	require.Len(t, pf.Pitfalls, 2)
+	assert.Equal(t, initial.Pitfalls[0], pf.Pitfalls[0], "the descriptive entry must survive")
+	assert.Equal(t, PitfallEntry{
+		Resource:       prescriptive.Resource,
+		Rule:           prescriptive.Rule,
+		Source:         FixSource,
+		DiscoveredFrom: "gcp-full-stack",
+	}, pf.Pitfalls[1])
+}
+
+// TestAppendPitfall_WebLiveParisKeepsCuratedEntries replays the learning
+// event of run 20260927T171147Z against the pitfalls file as it stood
+// before the run. Two failures differing only in a retry suffix both
+// cleared, so the run appended the same fix (and the same avoid) twice.
+// The old fix-upgrade path replaced a same-resource non-fix entry each
+// time: first the verbatim `descriptive` one, then the reviewed
+// `source: avoid` destroy-safety guardrail.
+func TestAppendPitfall_WebLiveParisKeepsCuratedEntries(t *testing.T) {
+	before, err := os.ReadFile(filepath.Join("testdata", "pitfalls-before-web-live-paris", "scaleway.yaml"))
+	require.NoError(t, err)
+	var want PitfallsFile
+	require.NoError(t, yaml.Unmarshal(before, &want))
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "scaleway.yaml"), before, 0o644))
+
+	fix := LearnedPitfall{
+		Resource:       "scaleway_lb_backend",
+		Rule:           "exit status 1 | stderr: ╷ Fix observed in scenario \"web-live-paris\": add the following HCL.\nresource \"scaleway_lb_backend\" \"web\" {\n  server_ips       = [scaleway_instance_ip.web.address]\n  health_check_port        = var.service_port\n    code = 200\n  depends_on = [scaleway_instance_server.web]\n}",
+		Source:         FixSource,
+		DiscoveredFrom: "web-live-paris",
 	}
-	if pf.Pitfalls[0].Source != FixSource {
-		t.Errorf("expected source=%q after upgrade, got %q", FixSource, pf.Pitfalls[0].Source)
+	avoid := LearnedPitfall{
+		Resource:       "scaleway_lb_backend",
+		Rule:           "exit status 1 | stderr: ╷ Do NOT use attribute `server_ips` on `scaleway_lb_backend` — observed in scenario \"web-live-paris\" to cause the failure above.",
+		Source:         AvoidSource,
+		DiscoveredFrom: "web-live-paris",
 	}
-	if !strings.Contains(pf.Pitfalls[0].Rule, "default_kms_key_name = google_kms_crypto_key") {
-		t.Errorf("rule lost prescriptive HCL on write: %q", pf.Pitfalls[0].Rule)
+	for _, p := range []LearnedPitfall{fix, avoid, fix, avoid} {
+		require.NoError(t, AppendPitfall(dir, "scaleway", p))
 	}
-	if pf.Pitfalls[0].DiscoveredFrom != "gcp-full-stack" {
-		t.Errorf("expected DiscoveredFrom=gcp-full-stack, got %q", pf.Pitfalls[0].DiscoveredFrom)
+
+	after, err := os.ReadFile(filepath.Join(dir, "scaleway.yaml"))
+	require.NoError(t, err)
+	var got PitfallsFile
+	require.NoError(t, yaml.Unmarshal(after, &got))
+	require.GreaterOrEqual(t, len(got.Pitfalls), len(want.Pitfalls))
+	assert.Equal(t, want.Pitfalls, got.Pitfalls[:len(want.Pitfalls)], "every pre-run entry must survive, in place")
+
+	rules := map[string]int{}
+	for _, e := range got.Pitfalls {
+		rules[e.Resource+"|"+e.Rule]++
 	}
+	for rule, n := range rules {
+		assert.Equal(t, 1, n, "written %d times: %s", n, rule)
+	}
+	assert.Equal(t, 1, rules[fix.Resource+"|"+fix.Rule], "the fix must be learned once")
 }
 
 // TestAppendPitfall_LearnedFromDiffDuplicatesDedupe pins that two
-// FixSource entries for the same resource still dedupe — the
-// upgrade path only replaces non-prescriptive predecessors. Without
-// this guard, every iter-pair would re-write the same snippet.
+// FixSource entries for the same resource still dedupe. Without this
+// guard, every iter-pair would re-write the same snippet.
 func TestAppendPitfall_LearnedFromDiffDuplicatesDedupe(t *testing.T) {
 	dir := t.TempDir()
 
