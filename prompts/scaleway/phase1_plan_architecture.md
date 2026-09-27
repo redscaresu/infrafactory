@@ -21,9 +21,9 @@ The following resource overrides MUST be used exactly as specified:
 {{end}}
 
 {{if .FeedbackJSON}}
-## Previous Iteration Feedback
+## Earlier Iteration Feedback
 
-The previous iteration's generated code failed validation. Analyze these failures and account for them in your architecture plan. Re-derive your solution from scratch — do not patch the previous attempt.
+Every failure this run has produced so far, from every earlier iteration; `stage` names the iteration. A failure from an earlier iteration may already have been fixed by a later attempt that then failed elsewhere: keep that fix, or the failure comes back. Analyze these failures and account for them in your architecture plan. Re-derive your solution from scratch — do not patch the previous attempt.
 
 ```json
 {{.FeedbackJSON}}

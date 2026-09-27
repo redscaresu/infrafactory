@@ -23,7 +23,9 @@ You are reviewing AWS Terraform/OpenTofu HCL for correctness against the scenari
 {{.Pitfalls}}
 
 {{if .FeedbackJSON}}
-## Previous Iteration Feedback
+## Earlier Iteration Feedback
+
+Every failure this run has produced so far, from every earlier iteration; `stage` names the iteration. A failure from an earlier iteration may already have been fixed by a later attempt that then failed elsewhere: keep that fix, or the failure comes back.
 
 ```json
 {{.FeedbackJSON}}
