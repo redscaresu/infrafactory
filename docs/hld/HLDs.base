@@ -1,0 +1,20 @@
+filters:
+  and:
+    - file.inFolder("hld")
+    - file.ext == "md"
+    - file.path != "hld/README.md"
+properties:
+  note.status:
+    displayName: Status
+  note.date:
+    displayName: Started
+views:
+  - type: table
+    name: HLDs
+    groupBy:
+      property: status
+      direction: ASC
+    order:
+      - file.name
+      - date
+      - status
