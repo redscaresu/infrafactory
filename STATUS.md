@@ -20,10 +20,6 @@ No arc in flight. The process-efficiency arc (ADR-0035, S195–S198) is complete
   The two earlier phases complete. Its stderr warns about three allow rules in the local
   `.claude/settings.local.json` that match nothing. That is suspected, not proven, to be the
   cause. Correcting them would grant access they do not grant today.
-- **Tie `vpc_required.rego`'s claim about the Layer 3 gate to the gate.** Its denial text says
-  the gate refuses a standalone `scaleway_instance_private_nic`; nothing checks that against
-  `layer3_hcl_shape.go`, and the same claim has gone stale in three places. Use a lockstep test
-  in the shape of `TestCloudPrefixLockstep`.
 - **M100: mockway's gated examples 501 on the v2alpha1 NIC route.** Probably fixed by the
   v2alpha1 work in S188–S189. Re-run with `MOCKWAY_ENABLE_E2E=1` to confirm, or close it.
 - Later:
@@ -38,6 +34,7 @@ No arc in flight. The process-efficiency arc (ADR-0035, S195–S198) is complete
 ## Recent
 
 - 2026-09-27 S202 — `destruction: no_orphans` is refused as a criterion; teardown is the destruction layer (ADR-0036)
+- 2026-09-27 S201 — `vpc_required.rego`'s claim about the Layer 3 gate is checked against the gate (#263)
 - 2026-09-27 S200 — the pre-rotation `scw-layer3.env` is deleted; docs no longer mention it
 - 2026-09-27 S199 — `AGENTS.md` holds only always-on rules; task detail moved to `docs/operations.md`, three stale Layer 3 claims corrected (#261)
 - 2026-09-27 S198 — each change is written down once; review-pass files only for declined findings (#260)
