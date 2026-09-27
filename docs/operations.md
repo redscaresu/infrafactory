@@ -87,14 +87,31 @@ How each sibling fake decides what wire shape a handler SHOULD return (the smoke
 
 Detail in each sibling's `AGENTS.md` § "Fidelity strategy".
 
+## The planning chain
+
+Work is planned top-down, and the user approves each level before the next is made:
+
+1. **HLD** — `/hld <title>` opens a pane on the most capable model (Fable), where the user writes
+   `docs/hld/YYYY-MM-DD-<slug>.md` with it; a reviewer attacks the draft before it is `agreed`.
+2. **Epics** — `/plan-hld <hld>`: a swarm, led by Fable, splits the HLD into epics that each
+   have a **Done when** that could fail, and skeptics and codex check for gaps and overlaps.
+3. **Stories** — `/plan-epic <epic>`: a swarm, led by Opus, splits each epic into one-PR stories.
+4. **Build** — `scripts/swarm.sh story <slug>`: `ready` stories built in parallel panes.
+
+Every agent at every level runs in its own herdr pane. The session that runs the chain supervises,
+decides model and effort by role, reviews, and merges; it does not do the agents' work itself.
+
 ## Model and effort
 
 Every agent's model and effort come from its role, set in one place: `policy()` in
 `scripts/swarm.sh` (`scripts/swarm.sh policy <role>` prints it). The principle is to spend on
 judgment and save on reading:
 
-- **Judgment is Opus.** The epic's decomposition is one call that decides everything after it, so
-  it runs at `xhigh`. Skeptics and the critic run at `high`, because a skeptic is the only gate a
+- **Design is Fable.** The HLD is co-written at `high`, because the user waits on every turn, and
+  attacked at `xhigh` before it is agreed. Splitting an HLD into epics is the one call that shapes
+  all the work below it, so it runs on Fable at `xhigh`.
+- **Judgment is Opus.** An epic's decomposition into stories decides everything after it, so it
+  runs at `xhigh`. Skeptics and the critic run at `high`, because a skeptic is the only gate a
   story passes before it is built.
 - **Reading and running is Sonnet.** Surveys read and cite at `high`, since they feed the lead;
   verification that runs tests and reports runs at `medium`, as do docs and chores.
@@ -102,8 +119,8 @@ judgment and save on reading:
   teardown, safety, hygiene).
 - **Codex is the cross-model check**, read-only, because a different model family shares fewer
   blind spots with the one that wrote the plan.
-- **Fable is escalation only**: a story that failed twice, or an epic whose contradictions no one
-  can reconcile.
+- **Below the design level, Fable is escalation only**: a story that failed twice, or an epic whose
+  contradictions no one can reconcile.
 
 A story's `kind` (and `risk`) chooses its role; `kind: lead` (real cloud, credentials) and
 `kind: operator` (a human step) are refused by the swarm.
