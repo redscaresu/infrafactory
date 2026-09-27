@@ -49,9 +49,9 @@ reviewers=$(gh api repos/{owner}/{repo}/environments/layer3 2>/dev/null \
   || bad "no required reviewers on the layer3 environment — a label alone would apply"
 
 head_ "The account is clean before we start"
-if [ -f "$HOME/.config/infrafactory/scw-layer3.env" ]; then
+if [ -f "$HOME/.config/infrafactory/layer3.env" ]; then
   # shellcheck disable=SC1090
-  set -a; . "$HOME/.config/infrafactory/scw-layer3.env"; set +a
+  set -a; . "$HOME/.config/infrafactory/layer3.env"; set +a
   strays=$(python3 - <<'PY' 2>/dev/null
 import json,os,urllib.request as u
 tok=os.environ.get('SCW_SECRET_KEY',''); org=os.environ.get('SCW_DEFAULT_ORGANIZATION_ID','')
@@ -71,7 +71,7 @@ PY
     *)           bad "stray projects from an earlier run: $strays (reap them first)" ;;
   esac
 else
-  warn "no ~/.config/infrafactory/scw-layer3.env — cannot check the account from here"
+  warn "no ~/.config/infrafactory/layer3.env — cannot check the account from here"
 fi
 
 head_ "Fallback"

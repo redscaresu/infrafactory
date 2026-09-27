@@ -29,13 +29,13 @@ Additional references:
 
 ## Planning a New Arc
 
-Arcs are **goal-named** and **variable-length** (typically 2-4 slices, sometimes up to 6 — but driven by the goal, not by a slice-count template). Adopted 2026-06-03 after the S89–S93 close-out (`docs/status/ARCHIVE.md` § "2026-06-03 S89–S93" → "Scaffold question").
+Arcs are **goal-named** and **variable-length** (typically 2-4 slices, sometimes up to 6 — but driven by the goal, not by a slice-count template).
 
 The shape:
 
 1. **Name the arc by goal**, not by slice numbers — e.g. "39/39 sustain validation", "fakegcp panic audit". Filename: `docs/plans/<arc-name>-plan.md` (kebab-case). The arc still numbers its slices sequentially (S94, S95, …) for cross-reference into commits / ARCHIVE entries.
 2. **Write the plan**: Big picture (what + why), Slices table (as many as the goal needs, including any sweep / audit / investigation steps), Standing rules (inherit from prior arcs), per-slice motivation + tickets + exit criteria, autonomous-execution loop prompt, fresh-context checklist.
-3. **No padding.** If the goal naturally fits in 2 slices, the plan is 2 slices. The 5-slice template from S54–S93 is retired.
+3. **No padding.** If the goal naturally fits in 2 slices, the plan is 2 slices.
 4. **Close-out**: an arc that ran several slices ends with a short `docs/status/ARCHIVE.md` section. The PR bodies carry the detail.
 5. **Point** `STATUS.md` § Now at the new plan.
 6. **Get approval** from the user before kicking off the autonomous loop.
@@ -85,9 +85,8 @@ If either fails, restore the repo to a green baseline before starting a new tick
 - Visual baselines under `ui/e2e/visual.spec.ts-snapshots/` render live UI state — adding scenario YAMLs OR completing runs (which add rows to the Runs page) drifts them. Pre-commit hook auto-refreshes when `scenarios/training/*.yaml` changes (M56); for other drift, run `make ui-baseline-update` manually.
 - `make run` builds everything and starts the UI at `http://127.0.0.1:4173`.
 - `make up` is the one-shot bring-up: mockway + fakegcp + fakeaws + fakegenesys + SeaweedFS + UI in one command. `make down` tears down the mocks (Ctrl-C stops the UI).
-- **Sweep protocol** (see `feedback_sweep_protocol.md` memory): treat failures as either (a) mock-server gaps → fix at source in `fakeaws`/`fakegcp`/`mockway`, never seed `pitfalls/*.yaml`; or (b) LLM-generated HCL mistakes → let auto-learning capture a pitfall. Four CI ratchets enforce pitfall purity: `TestPitfallsNoHumanSeeding` rejects `source: seed`/`static`; `TestPitfallsNoMockServerBugSeeds` rejects mock-actionable substrings (the entries belong in `docs/mock-gaps.md`); `TestPitfallsNoOPADuplication` rejects verbatim OPA-msg duplication; `TestPitfallsSourceEnum` fences the allowed source-field values to `descriptive` / `fix` / `avoid` only. After-sweep cleanup: `scripts/sweep_39.sh` runs `bin/pitfall-merge` to selectively restore — `avoid` entries (deletion-as-fix, grounded in a confirmed successful run) are preserved; `fix` + `descriptive` discarded as sweep noise. The sweep harness also classifies + retries transport failures: in-loop, if a scenario hits the transport shape (`terminal in {repair_budget_exhausted, stuck}` + `dur_s < 60` + only `_generate` or `_validate` stage failures, no `_test`) — Claude CLI rate-limit OR OpenTofu provider-registry blip — it retries ONCE. Emits `RETRY_TRANSPORT=N` (attempted) and `RETRY_RECOVERED=M` (succeeded on retry). End-of-sweep classifier re-applies the same predicate as a fallback for cases where the retry also failed → `transport_failed` distinct from `repair_budget_exhausted` so the deterministic pass count is uncontaminated. **mock-gaps drainage**: `docs/mock-gaps.md` accumulates entries from the classifier but never self-prunes. Drain it after each major sustain arc (or when it grows past ~10 entries): replay each `discovered_from` scenario; delete entries whose failure no longer reproduces; ship sibling-mock fixes for entries that still fail. Protocol detail in `docs/auto-learning-loop.md` § "mock-gaps drainage".
+- **Sweeps**: mock-server gaps are fixed at source in the sibling mock, never seeded into `pitfalls/*.yaml`; HCL mistakes are left for auto-learning. Full protocol, ratchets and mock-gaps drainage: `docs/auto-learning-loop.md`.
 - **Cross-repo cascade commits**: lifecycle-parity work spans infrafactory + a sibling mock. Commit the mock-side change first (it's the dependency), then update infrafactory's e2e test or call sites that depend on the new mock behavior. All four repos use origin/main; push order matters.
-- **Demo recording tooling**: `asciinema` (CLI demo via `./docs/demo/record.sh`) → `.cast` → `agg` → `.gif`; Playwright (UI demo via `make demo-ui`) → `.webm` → `gifski` → `.gif`. Build-time dep only; never advertised in user-facing docs.
 
 ## Execution Loop (mandatory)
 1. Frame task with `docs/process/TICKET_TEMPLATE.md`.
@@ -101,37 +100,10 @@ If either fails, restore the repo to a green baseline before starting a new tick
 
 ## Sibling Mock Repos
 
-Three first-party HTTP-level mocks + one third-party backend live alongside infrafactory:
-
-- **mockway** (`../mockway`, github.com/redscaresu/mockway) — Scaleway mock; 280+ tests; runs on `:8080`. Apache-2.0, public.
-- **fakegcp** (`../fakegcp`, github.com/redscaresu/fakegcp) — GCP mock; runs on `:8081`. Mockway-level test parity reached 2026-05-23 (881-line repository_test.go, FK violation tests, cascade delete tests). Memorystore + Cloud SQL + GKE + IAM + Storage + DNS + Pub/Sub + Secret Manager + Cloud Run + Cloud KMS (added 2026-05-31 in fakegcp@c7999b5).
-- **fakeaws** (`../fakeaws`, github.com/redscaresu/fakeaws) — AWS mock; runs on `:8082`. Ships 10 services across 5 wire formats (IAM, S3, EC2, RDS, DynamoDB, EKS, SQS, Route53, Secrets Manager, KMS); aggregate handler coverage 82.4%; 17 codex review passes archived under `../fakeaws/docs/review-passes/`. EC2/IAM/Route53/DynamoDB substantially broadened 2026-05-30 → 2026-05-31 from a self-learning sweep (see fakeaws@348322d).
-- **fakegenesys** (`../fakegenesys`, github.com/redscaresu/fakegenesys) — Genesys Cloud CCaaS mock; runs on `:8083`. Ships 15 resources across identity (user, group, location, auth_role, oauth_client), routing (queue + members + skill + wrapupcode + language + utilization singleton), and architect (datatable + rows + user_prompt + flow with multipart + lock/publish state machine + responsemanagement_response + idp_generic singleton). 4 codex review passes archived under `../fakegenesys/docs/review-passes/` (S112/S113 + S124's passes 3/4 closing on 2× NOTHING_TO_IMPROVE). Spec-driven fidelity via `specs/genesys-openapi.json`. Added 2026-06-06 (arc S108-S115); hardened in arc S123-S127 + sibling rollout S128-S130 (v0.2.0).
-- **SeaweedFS** (`chrislusf/seaweedfs` container) — third-party S3 backend for `aws_s3_bucket` reads (`terraform-provider-aws` needs the full management surface; fakeaws's stripped S3 handler isn't enough). Runs on `:9090` via `docker-compose.mocks.yml`. Anonymous-mode `ListAllMyBuckets` returns empty even when buckets exist — use HEAD-by-name as the assertion path. Empirical evaluation log in `CONCEPT.md` § "Third-Party Mock Integration" (rejects Adobe S3Mock + Garage + LocalStack + MinIO).
-- **s3router** (`cmd/s3router/`, S80) — in-repo reverse-proxy shim that listens on `:9091` and fans S3 traffic across SeaweedFS and fakeaws. `?publicAccessBlock` → fakeaws (SeaweedFS uniquely 501s on that subresource); everything else → SeaweedFS; `PUT/DELETE /<bucket>` fans out to both. `infrafactory.yaml` `s3.url` points at the shim, not SeaweedFS directly. Add a subresource to `fakeawsSubresources` in `main.go` only when a new SeaweedFS 501 surfaces. ADR-0015 § "S80 — S3 backend router" carries the rationale.
-
-All four sibling repos are independent public OSS repos on origin/main; cross-repo work cascades (see "operational caveats" above). The s3router is part of the infrafactory repo, not a sibling.
-
-When extending a sibling mock, mirror the per-bundle PR rule in `../fakeaws/concepts.md` — handler + tests + examples + scenario anchors + coverage_matrix.yaml + `LandedServices` flip all in one slice. The `TestFullCoverageAudit` + `TestRegressionSeedAuditManifestMatchesHandlers` audits in each mock repo enforce this.
-
-**Provider smoke-harness pattern (canonical)**: every sibling fake uses the same `examples/provider_smoke_test.go` pattern — `examples/{working,misconfigured,updates}/<svc>/` directories auto-discovered, real provider binary run against the fake (no real-cloud credentials needed; the provider IS the wire-format validator). Gating is per-repo env var (`MOCKWAY_ENABLE_E2E` / `FAKEGCP_ENABLE_E2E` / `INFRAFACTORY_ENABLE_E2E` / `FAKEGENESYS_ENABLE_E2E`). When spawning a new sibling, copy this harness as-is — it's the cheapest correctness gate we have. Detail in each sibling's `AGENTS.md` § "Provider smoke harness".
-
-**Contract-coverage convention (canonical)**: every sibling fake ships a `handlers/contract_audit_test.go` that enforces the `CRITICAL[<id>]:` / `MUST[<id>]:` docstring → `TestContract_<id>` test pairing. A wire-shape invariant the consuming provider depends on must NOT live as a comment alone — drift becomes a failed `go test`, not a missed code review. New sibling fakes inherit the file as part of the day-one OSS checklist (see `feedback_oss_mature_day_one.md` item 14). Reference impl: `../fakegenesys/handlers/contract_audit_test.go`. Convention rolled out across all 4 siblings in S127 (5th instance of the 4-PR cross-repo doc/code sweep pattern); existing wire-shape invariants in mockway/fakegcp/fakeaws bridged into the convention in S128–S130 (27 paired contracts across the family).
-
-### Sibling-fake fidelity strategies
-
-How each sibling fake decides what wire shape a handler SHOULD return (the smoke harness above is the correctness *gate*, not the discovery *source*). Quick reference for fresh agents:
-
-| Fake | Strategy | Source of truth | Cost per new handler |
-|---|---|---|---|
-| **mockway** | Spec-driven | `specs/` tree (downloaded Scaleway OpenAPI YAML) | Low — spec gives shape upfront |
-| **fakegcp** | Hybrid | GCP discovery docs (referenced ad-hoc, no `specs/` tree) | Medium — semi-discovered per handler |
-| **fakeaws** | Reactive | `terraform-provider-aws` source + `TF_LOG=DEBUG` capture | High — ~1-2hr per service before handler is confident |
-| **fakegenesys** | Spec-driven (mirrors mockway) | `specs/genesys-openapi.json` (filtered Genesys Swagger 2.0, ~200KB) | Low |
-
-**Recommendation for new fakes**: prefer spec-driven if the target cloud publishes an OpenAPI / Swagger / discovery doc. For sibling extensions: opportunistic upgrade — existing handlers stable, new ones can adopt spec-driven if a spec is available.
-
-Detail in each sibling's `AGENTS.md` § "Fidelity strategy".
+mockway (`../mockway`, Scaleway, `:8080`), fakegcp (`../fakegcp`, `:8081`), fakeaws
+(`../fakeaws`, `:8082`), fakegenesys (`../fakegenesys`, `:8083`), plus SeaweedFS (`:9090`) behind
+the in-repo `s3router` (`:9091`). Before changing a mock or anything that dispatches to one, read
+`docs/operations.md` § Sibling mocks.
 
 ## ADR Trigger Threshold
 A change under `internal/cli/`, `cmd/infrafactory/` or `infrafactory.yaml` that crosses none of the lines below carries `ADR: none — <reason>` in its commit message instead of an ADR edit (ADR-0035).
@@ -176,47 +148,16 @@ copy of a story is another place for it to go stale.
 
 ## The auto-learning pipeline is load-bearing — never excuse its silence
 
-When `infrafactory run` exits with `repair_budget_exhausted` or `stuck` on a failure that is NOT `IsMockServerBug`-classified, the dynamic loop's pipeline failed to extract a pitfall. Treat that as a real bug to investigate, NOT as "expected cold-start", "first run is allowed to fail", or "sweep 2 will fix it". Those framings hide systemic gaps.
+A run that ends `repair_budget_exhausted` or `stuck` on a failure that is not mock-classified
+means the pipeline failed to learn. Treat it as a bug, never as a cold start. Diagnostic protocol:
+`docs/auto-learning-loop.md` § When a run learns nothing.
 
-Why this matters: 2026-06-06 sustain sweep 1 surfaced `genesys-architect-flow` exhausting its budget after 5 oscillating iterations. The "expected cold start" framing nearly let it pass — investigation revealed `resourceNameRe` had been hardcoded to `(scaleway|google|aws)_\w+` since the regex was written, so every Genesys failure produced an empty Resource, `ExtractDescriptivePitfall` returned nil, and **zero pitfalls had ever been auto-learned from Genesys runs**. Fixed in infrafactory#96.
+## Layer 3 (real Scaleway)
 
-Diagnostic protocol when a run exits without learning:
-1. Grep the run's `app.log` for `pitfall_emitted`, `oscillation_pitfall_*`, `self_correction_pitfall_*`, `mock_gap_recorded`. None firing + failure not mock-classified ⇒ pipeline silently no-op'd.
-2. Drop a scratch `_test.go` next to `internal/generator/pitfalls_learn.go`, call `IsMockServerBug`, `ExtractResourceFromDetail`, `ExtractDescriptivePitfall` against the failure detail. Empty Resource + nil pitfall ⇒ the regex or classifier doesn't recognise this resource family.
-3. When adding a new cloud (or any new resource-name prefix), there are three sites to update: `resourceNameRe`, `addressRe`, `pitfallResourceMatchesCloud`. Miss one and the learner breaks silently. **Enforced**: `internal/cli/cloud_prefix_lockstep_test.go::TestCloudPrefixLockstep` parses all three sites and fails CI if they disagree on the cloud-prefix set (per ADR-0021).
-
-## Scaleway Bootstrap (Layer 3 Prerequisites)
-
-Layer 3 spends real money. It applies to `api.scaleway.com` — first proven end-to-end on 2026-08-22 (S143), including with LLM-generated HCL. Read ADR-0023 before changing anything on this path; it defines what a passing Layer 3 result *means*.
-
-Self-managed project lifecycle per ADR-0010: generated HCL includes `scaleway_account_project`, so each run creates and destroys its own project. No pre-existing sandbox required, and that project-per-run is what keeps the blast radius to one disposable project.
-
-**Credentials — use the dedicated application key, not your own:**
-
-Layer 3 authenticates as the `infrafactory-layer3` IAM **application**, whose key lives in `~/.config/infrafactory/scw-layer3.env` (mode `0600`):
-
-```bash
-set -a; . ~/.config/infrafactory/scw-layer3.env; set +a
-```
-
-Do **not** fall back to the default `scw` profile. On a normal developer machine that is a personal key, and here it was the organization **owner** — full rights over every project, including live infrastructure. S139 strips `SCW_PROFILE`/`SCW_CONFIG_PATH` to stop a profile redirecting the endpoint, which also forces the default profile, so "just use the default profile" silently means "run as whoever that is".
-
-The application's policy grants `ProjectManager`, `BlockStorageFullAccess`, `LoadBalancersFullAccess`, `VPCFullAccess` and — since 2026-08-23 — `InstancesFullAccess`. IAM, registry, serverless, object storage, domains and billing are absent.
-
-**Do not rely on the API to protect `openclaw-prod`.** It did until Instances was granted; it does not now. That project is protected by software again — the deny-by-default allowlist (which still excludes `scaleway_instance_*`), `AssertProjectDeletable`, the orphan sweep, and project-per-run. Two gates remain and only one moved, but treat the remaining ones as load-bearing rather than belt-and-braces. Widening either is a blast-radius decision; see ADR-0023.
-
-**User must also provide:**
-1. `SCW_DEFAULT_ORGANIZATION_ID` — required, since a project has to be created somewhere. Preflight fails closed without it. (The env file above sets it.)
-2. Enable Layer 3: `validation.layers.sandbox_deploy.enabled: true` in `infrafactory.yaml`.
-3. `validation.layers.sandbox_deploy.allow_resource_types` — **deny-by-default**. Empty or absent denies everything. Checked after generation and before apply, so a denied type costs nothing.
-4. `scaleway.fallback_project_id` — a dedicated disposable project. A generated resource that omits `project_id` lands wherever the provider resolves the default, which on a normal account sits next to real infrastructure. Refused if set to the organization id.
-
-**Operational notes:**
-- The sandbox subprocess environment is *sealed*, not merely overridden (`harness.SandboxStripEnv`). An inherited `SCW_API_URL` cannot retarget a "real" apply at mockway — that false-green was the arc's opening blocker.
-- `infrafactory reap <scenario>` destroys what an interrupted run left behind, gated by `AssertProjectDeletable` and verified by the same real-API sweep. A reap that cannot prove the account is clean fails.
-- Layer 3 stays opt-in and off by default, and must never be wired into a scheduled CI job (cost-sensitive-CI standing rule).
-- Real-vs-mock behavioural deltas live in `docs/layer3-real-vs-mock-deltas.md`. Real Scaleway can return a create error *after* the resource exists; apply retries once (`sandboxApplyAttempts`) to absorb it, never on a cancelled context.
-- A **failed** run auto-destroys and then sweeps to prove it worked. If the sweep cannot confirm the account is clean, the failure detail names `infrafactory reap <scenario>` — act on it, don't assume the destroy was enough.
+Layer 3 spends real money. Before any Layer 3 work, read `docs/operations.md` § Layer 3 and
+ADR-0023. Always: it is never wired into scheduled CI; generated HCL never declares a project or
+sets `project_id` (ADR-0025); and `openclaw-prod` is protected only by software guards — do not
+weaken them.
 
 ## Codex review loop (required on every PR)
 
@@ -248,23 +189,16 @@ than implementing it to make the reviewer quiet.
 substantive finding resets it, so a fix is always followed by at least one more
 pass. Only then may the PR merge.
 
-Reduced from two consecutive passes on 2026-08-31, deliberately and for cost:
-the cutover arc spent fourteen passes converging, and codex hit its usage limit
-three times in one afternoon. The trade is real and worth stating rather than
-pretending otherwise — the second pass is what caught the pass-41 regression,
-where a fix introduced a new defect. The mitigation is to treat *your own* fix
-as the thing most likely to be wrong: after acting on a finding, re-read the
-change against the defect class it belongs to before calling the pass.
+One pass trades away the second look that used to catch a fix introducing a new
+defect, so treat your own fix as the most likely thing to be wrong: re-read it
+against the defect class before calling the pass. If review keeps finding holes
+in the same mechanism, replace the mechanism rather than patching it again.
 
 **Record the loop in the PR body**: how many passes, each finding, and what was
 done about it. Write `docs/review-passes/passN.md` only when a finding was
 **declined** — the reasoning behind a decline is what a future reader needs and
 cannot get from the diff.
 
-Worked example: `docs/review-passes/pass1.md` (Layer 3 arc, converged in 5
-passes). Both of its findings were in the operator-facing recovery string
-rather than the logic that had tests — a useful reminder of where this loop
-earns its keep.
 
 ## Secrets
 - Never commit `.env`, credentials, API keys, or private keys.
