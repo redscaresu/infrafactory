@@ -180,11 +180,6 @@ constraints:
   region: fr-par
 
 acceptance_criteria:
-  - type: policy
-    check: region_restriction
-    params:
-      region: fr-par
-    expect: pass
   # Keep at least one criterion. Add more as needed.
   - type: policy
     check: region_restriction
