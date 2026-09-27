@@ -120,15 +120,22 @@ deliver_prompt() {
 
 # The brief every story builder gets. The story file is the task; these are the rules.
 story_brief() {
-  local slug="$1"
+  local slug="$1" repo="$2" story_ref cleanup
+  story_ref="docs/stories/${slug}.md"
+  cleanup="Delete docs/stories/${slug}.md in your PR, and nothing else under
+docs/stories/."
+  if [[ -n "${repo}" ]]; then
+    # The story lives in infrafactory, the work in a sibling repo: read it there, leave it for the lead.
+    story_ref="${REPO_ROOT}/docs/stories/${slug}.md (this worktree is ../${repo})"
+    cleanup="Do not touch the story file; the lead deletes it after your PR merges."
+  fi
   cat <<EOF
-Implement docs/stories/${slug}.md. Its **Done when** is the acceptance.
+Implement ${story_ref}. Its **Done when** is the acceptance.
 
 Title your commit and PR with a plain description of the change, and no slice number: slice
 numbers (S###) belong to the lead, and two agents choosing one produce duplicates in the log.
 
-Rules: read AGENTS.md first. Delete docs/stories/${slug}.md in your PR, and nothing else under
-docs/stories/. Never merge (the lead merges). Never touch real cloud or credentials: do not source
+Rules: read AGENTS.md first. ${cleanup} Never merge (the lead merges). Never touch real cloud or credentials: do not source
 ~/.config/infrafactory/*.env, and do not run deploy or anything with sandbox_deploy enabled. Run
 \`codex exec review --base main\` before committing; fix real findings, decline nits with a reason,
 converge on one clean pass, and record the loop in the PR body. If codex reports a usage limit, do
@@ -141,7 +148,7 @@ EOF
 }
 
 build_story() {
-  local slug="$1" story="${REPO_ROOT}/docs/stories/$1.md" kind risk role wt branch prompt
+  local slug="$1" story="${REPO_ROOT}/docs/stories/$1.md" kind risk repo src role wt branch prompt
   [[ -f "${story}" ]] || die "no story ${story}"
   grep -q '^status: ready$' "${story}" || die "${slug} is not status: ready"
   kind=$(sed -n 's/^kind: *//p' "${story}" | head -1); kind="${kind:-code}"
@@ -150,13 +157,20 @@ build_story() {
     operator) die "${slug} is kind: operator — a human step, not an agent's" ;;
   esac
   risk=$(sed -n 's/^risk: *//p' "${story}" | head -1)
+  repo=$(sed -n 's/^repo: *//p' "${story}" | head -1)   # a sibling repo (fakeaws, mockway, ...); empty is infrafactory
   role="${kind}"; [[ "${kind}" == code && "${risk}" == high ]] && role=code-risky
   policy "${role}" >/dev/null
-  branch="story/${slug}"; wt="$(dirname "${REPO_ROOT}")/infrafactory-wt/${slug}"
-  git -C "${REPO_ROOT}" fetch -q origin main
-  git -C "${REPO_ROOT}" worktree add -q -b "${branch}" "${wt}" origin/main
+  src="${REPO_ROOT}"
+  if [[ -n "${repo}" ]]; then
+    [[ "${repo}" =~ ^[a-z0-9-]+$ ]] || die "${slug}: bad repo '${repo}'"
+    src="$(dirname "${REPO_ROOT}")/${repo}"
+    [[ -d "${src}/.git" ]] || die "${slug}: no repo at ${src}"
+  fi
+  branch="story/${slug}"; wt="$(dirname "${REPO_ROOT}")/$(basename "${src}")-wt/${slug}"
+  git -C "${src}" fetch -q origin main
+  git -C "${src}" worktree add -q -b "${branch}" "${wt}" origin/main
   prompt="${REPO_ROOT}/.swarm/briefs/${slug}.md"; mkdir -p "$(dirname "${prompt}")"
-  story_brief "${slug}" > "${prompt}"
+  story_brief "${slug}" "${repo}" > "${prompt}"
   start_agent "build" "${slug}" "${wt}" "${role}" "${prompt}"
 }
 
