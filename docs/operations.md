@@ -20,8 +20,7 @@ Layer 3 HCL gate refuses both.
 set -a; . ~/.config/infrafactory/layer3.env; set +a
 ```
 
-An older `~/.config/infrafactory/scw-layer3.env` holds a different key; do not use it. Do not
-fall back to the default `scw` profile either: on a developer machine that is a personal key,
+Do not fall back to the default `scw` profile: on a developer machine that is a personal key,
 here the organization owner's. The sandbox strips `SCW_PROFILE`/`SCW_CONFIG_PATH`, which also
 forces the default profile, so "just use the default profile" silently means "run as whoever
 that is". The application's policy set is recorded in ADR-0023's credential amendments.
