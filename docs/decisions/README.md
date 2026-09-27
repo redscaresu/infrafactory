@@ -6,40 +6,45 @@ Use ADRs for decisions that affect long-term behavior, interfaces, or contributo
 
 ## Index
 
-- `0001-foundations.md`: base stack and execution model.
-- `0002-cli-command-contract.md`: frozen Slice 7 CLI args/flags/exit-code contract.
-- `0003-permanent-sandbox-live-deploy-block.md`: superseded by ADR-0010. Previously: permanent governance policy to keep real sandbox/live deploy out-of-scope.
-- `0004-generator-transport-contract.md`: Slice 11 transport/config contract for claude/openrouter selection and phase semantics.
-- `0005-dual-iteration-controls.md`: superseded by ADR-0006.
-- `0006-run-failure-only-retry-control.md`: run-loop contract uses one retry control (`repair_iterations_max`) and stops on first success.
-- `0007-scenario-schema-resource-expansion.md`: Slice 18 schema extension adding kubernetes, iam, registry, redis resource definitions.
-- `0008-ui-command-and-noui-api-mode.md`: Slice 21 CLI/UI wiring with always-registered `ui` command and `noui` API-only behavior.
-- `0009-incremental-deployment-model.md`: Incremental deployment support — single evolving scenario, mockway state persistence, snapshot/restore for feedback iterations, auto-detection.
-- `0010-layer3-real-scaleway-deploy.md`: Enable Layer 3 real Scaleway deploy — Layer 2 gates Layer 3, dual-apply with separate tfstate, project bootstrap in HCL, auto-destroy on failure.
-- `0011-topology-derivation-layer.md`: Derive topology (connectivity, http_probe) from raw mock state in infrafactory instead of requiring pre-computed maps from mockway/fakegcp.
-- `0012-dynamic-pitfalls.md`: Externalize provider pitfalls into `pitfalls/{cloud}.yaml` with auto-learning from run feedback.
-- `0013-cross-repo-e2e-and-multi-cloud.md`: Cross-repo E2E test strategy (mockway from source) and GCP multi-cloud architecture (per-cloud prompts, topology derivation, pitfalls).
-- `0014-provider-endpoint-flag-discipline.md`: Three rules for terraform-provider-google v5 endpoint-flag work — host-only default, binary-strings ground truth, dual-prefix mock routes when CREATE/READ paths split.
-- `0015-classifier-routing.md`: Three classifier hooks (mock-actionable, orphan sub-shapes, policy_pitfall_conflict) before stuck/budget termination, routing matched failures to `docs/mock-gaps.md` or `docs/policy-gaps.md` instead of `pitfalls/<cloud>.yaml`.
-- `0016-orphan-subshape-classification.md`: Five sub-shapes of post-destroy orphan-check failures with a `(cloud, resource)` lookup table; each sub-shape routes to a different fix surface.
-- `0017-policy-pitfall-conflict.md`: Detector that fires when the LLM's HCL contains every backticked keyword of a matching prescriptive pitfall AND a rego policy still rejects it — routes to `docs/policy-gaps.md` rather than seeding an unhelpful pitfall.
-- `0018-n11-retirement-criteria.md`: Three-category framework for retiring prescriptive prompt rules — A: redundant (auto-correction carries it), B: replaced by `learned_from_diff` pitfall, C: load-bearing system/contract/scenario-bound rule kept.
-- `0019-learning-system-vocabulary.md`: Atomic rename of the auto-learning vocabulary from slice IDs (N3/N10/N13/M97) to concept names (Fix/Avoid/Descriptive). Source enum: `learned`/`learned_from_diff`/`learned_from_diff_avoid` → `descriptive`/`fix`/`avoid`.
-- `0020-fakegenesys-fourth-cloud.md`: Genesys Cloud CCaaS registered as the 4th cloud peer of scaleway/gcp/aws. Dispatch wiring + schema additions + topology deriver + cold-start auto-learning test. fakegenesys sibling-mock at `../fakegenesys` (S108-S115 arc).
-- `0021-cloud-prefix-set-in-auto-learning.md`: The cloud-prefix set in `resourceNameRe` / `addressRe` / `pitfallResourceMatchesCloud` is load-bearing — a missed prefix silently disables learning for that cloud. Adding a new cloud requires updating all three sites in lockstep. Codifies the diagnostic protocol surfaced when sweep 1 caught the S114-era Genesys gap.
-- `0022-genesys-flow-harness-asset.md`: `genesyscloud_flow.filepath` is read at PLAN time via the provider's `CustomizeDiff`, so no Terraform pattern can place the file. The harness pre-places a stub `flow.yaml` in the workdir alongside the generated `.tf` files whenever a `genesyscloud_flow` resource is declared. Generalising the mechanism (an `assets:` section in scenario YAML) is queued as future work.
-- `0023-layer3-sealed-environment-and-orphan-verification.md`: Layer 3 was code-complete for months without ever calling `api.scaleway.com`, and an inherited `SCW_API_URL` would have silently retargeted the "real" apply at mockway while reporting pass. Seals the sandbox subprocess environment (`Command.StripEnv`), asserts the endpoint against the resolved scw config and not just the env, redefines `no_orphans` for Layer 3 as a real-API sweep, and confines blast radius to one purpose-created project that is the only thing any destroy path may delete. Amends ADR-0010.
-- `0024-live-deployments-bounded-by-mandatory-ttl.md`: Live services deliberately outlive the run that created them, contradicting the `destroy → sweep` invariant every blast-radius claim rests on. Scopes rather than weakens it: live deployments get their own kept project while ephemeral per-run projects are still destroyed and swept, so the orphan sweep's meaning is unchanged. An expiry is mandatory with no unbounded form, and every unsafe state fails toward teardown — a record that will not decode, or that lacks an expiry or a project id, is reported as expired and reapable rather than assumed healthy. Releasing bypasses validation so a damaged record's teardown is still recordable.
-- `0025-run-project-created-before-the-apply.md`: `scaleway_instance_private_nic` has no `project_id` attribute, so it is created in the provider's DEFAULT project -- the shared containment project -- while its server is in the run's own, and the API refuses the mismatch. Since `vpc_required.rego` denies any instance server without a NIC, Layer 1 required a resource Layer 3 could not create and no Scaleway compute scenario satisfied both gates. infrafactory now creates the run's project through the Account API before the apply and passes it as `SCW_DEFAULT_PROJECT_ID`; the HCL no longer declares `scaleway_account_project`. Proven on real Scaleway before the ADR was written. Tightens blast radius -- an omitted `project_id` now lands in a disposable project rather than a shared one -- and replaces `AssertProjectDeletable`'s state-derived cross-check with a run-owned marker plus an API-side provenance check, both required. Amends ADR-0010.
-- `0026-the-ui-api-answers-only-loopback-origins.md`: The UI is an unauthenticated server on loopback, and `POST /api/runs/<scenario>/start` accepts a `layer3_enabled` field that sets `SandboxDeploy.Enabled` -- so the request starts a real Scaleway apply, with credentials from the process environment. Nothing guarded it: the websocket checked `Origin`, the POST handlers checked nothing, and the body is decoded without inspecting `Content-Type`, so a cross-origin `fetch` with `text/plain` is a CORS simple request that never preflights. The attacker cannot read the response and does not need to. Loopback is a boundary against processes, not against pages. A request carrying an `Origin` is now served only if that origin is loopback, checked above routing so a handler cannot be unguarded by omission, on every method so the guard does not rest on "no GET mutates". Loopback rather than same-origin because DNS rebinding makes Origin and Host agree -- and because the Vite dev server is cross-origin and entirely loopback. One layer, not the safety model: S160b removes the wire field so a request cannot escalate the server into spending money.
-- `0027-deploying-from-the-ui.md`: What it takes to let a web page create infrastructure that outlives the request, costs money by the hour, and is reachable from the internet. `--allow-deploy` is its own start-time flag, implied by neither `--allow-layer3` (ephemeral, destroyed before the run ends) nor `--allow-teardown` (the opposite direction of harm) -- an operator who agreed to either has not agreed to this. Confirmation must state what will be created, list-price cost per hour and at the chosen TTL, expiry as wall-clock rather than a duration, and internet reachability; the cost figure must admit it is an estimate. TTL stays mandatory with no unbounded option to click, `run` and `deploy` stay distinct verbs, an apply is not cancellable by the caller, and deploy may not choose the project or extend an existing lifetime. Three flags gate three distinct kinds of harm, deliberately: collapsing them would make the cheapest carry the weight of the most expensive.
-- `0028-factual-claims-are-tests-not-comments.md`: Every serious defect found in the week of 2026-09-01 was a confident claim about another component, written into a comment and never checked -- `yaml.Unmarshal` naming a file it never sees, cobra printing an error it never prints, `%v` calling an `.Error()` it never calls. The code was fine; the reasons were fiction, and a rich comment reads as something already verified, so it survives review and propagates into ADRs and PR bodies. A factual claim about another component is therefore written as a test and CITED by the comment; decisions, which cannot be tested, stay prose. Not another convention: S167 proved a written-down rule produced sixty-five violations and only a failing `go test` held. This works by inverting the cost -- you cannot cite a test you did not write, and writing it runs it.
-- `0029-a-policy-may-not-mandate-an-undestroyable-shape.md`: `vpc_required` accepts the inline `private_network` block; a static policy must accept at least one shape that can be destroyed, and the pitfall must prescribe it.
-- `0030-teardown-powers-instances-off.md`: the private-NIC precondition belongs to the API, not the HCL — teardown powers the run's instances off before `tofu destroy`. Supersedes ADR-0029 on where the fix goes.
-- `0031-the-nic-delete-defect-is-the-endpoint.md`: the private-NIC teardown failure is v2alpha1 refusing every NIC, not power state — delete through v1 before `tofu destroy`. Supersedes ADR-0030; replaces ADR-0029's mechanism.
-- `0032-apply-succeeding-is-not-convergence.md`: Layer 2 runs a second plan (`-detailed-exitcode`) and a non-empty one fails the run. Drift is ambiguous between a lying mock and unconvergeable HCL, so both hypotheses are named and the mode (`--continue-on-drift`) decides who is asked to fix it. Detects drift, NOT a permissive mock.
-- `0033-a-holdout-is-a-negative-check-against-the-running-stack.md`: holdout criteria are withheld from the generator and probed against the RUNNING stack, not re-applied. All negative ("must not be true"), because every visible criterion is positive and nothing punishes over-permission. A failure ends the run without a repair — feeding it back would make the unseen check seen.
-- `0034-a-prohibition-is-a-specification.md`: the holdout's open SSH port was not the generator being sloppy — a pitfall told it NEVER to declare a security group, because the allowlist would refuse one, justified by "the API-created default group permits what these scenarios need". True, and the bug: it permits every other port too. A pitfall that forbids a resource type is reviewed like a policy that requires one, because it removes the shape from the space the model draws from and nothing downstream can recover it. Security groups are allowlisted (free, Terraform-owned, verified destroyed); `default_deny_ingress.rego` denies any group that does not set `inbound_default_policy = "drop"`, since a bare group applies as accept-everything and is no firewall at all. The API-created group is excluded because no generated HCL can repair it — so the policy checks that a DECLARED group is real, not that a server has one, and the holdout still owns that gap.
+<!-- adr-index:start -->
+- [0001](0001-foundations.md) Foundations — Accepted
+- [0002](0002-cli-command-contract.md) CLI Command Contract Freeze for Slice 7 — Accepted
+- [0003](0003-permanent-sandbox-live-deploy-block.md) Permanent Sandbox/Live Deploy Block — **Superseded by ADR-0010**
+- [0004](0004-generator-transport-contract.md) Generator Transport Contract in Config and Runtime — Accepted
+- [0005](0005-dual-iteration-controls.md) Dual Iteration Controls for Run Loop — **Superseded by ADR-0006**
+- [0006](0006-run-failure-only-retry-control.md) Run Loop Uses Failure-Only Retry Control — Accepted
+- [0007](0007-scenario-schema-resource-expansion.md) Scenario Schema Resource Expansion (Slice 18) — Accepted
+- [0008](0008-ui-command-and-noui-api-mode.md) UI Command and `noui` API-Only Mode — Accepted
+- [0009](0009-incremental-deployment-model.md) Incremental Deployment Model — Accepted
+- [0010](0010-layer3-real-scaleway-deploy.md) Layer 3 Real Scaleway Deploy — Accepted; supersedes ADR-0003
+- [0011](0011-topology-derivation-layer.md) Topology Derivation Layer — Accepted
+- [0012](0012-dynamic-pitfalls.md) Dynamic Pitfalls by Cloud Provider — Accepted
+- [0013](0013-cross-repo-e2e-and-multi-cloud.md) Cross-Repo E2E Testing and GCP Multi-Cloud Support — Proposed
+- [0014](0014-provider-endpoint-flag-discipline.md) Provider-Endpoint Flag Discipline for v5 GCP Provider — Accepted
+- [0015](0015-classifier-routing.md) Classifier-routed failure handling at stuck/budget termination — Accepted
+- [0016](0016-orphan-subshape-classification.md) Orphan-check sub-shape classification — Accepted
+- [0017](0017-policy-pitfall-conflict.md) policy_pitfall_conflict detection — Accepted
+- [0018](0018-n11-retirement-criteria.md) N11 prompt-rule retirement criteria — Accepted
+- [0019](0019-learning-system-vocabulary.md) Learning-system vocabulary — concept names over slice IDs — Accepted
+- [0020](0020-fakegenesys-fourth-cloud.md) fakegenesys — Genesys Cloud CCaaS as the 4th cloud — Accepted
+- [0021](0021-cloud-prefix-set-in-auto-learning.md) Cloud-prefix set in the auto-learning pipeline — Accepted
+- [0022](0022-genesys-flow-harness-asset.md) Pre-place `flow.yaml` in the workdir for `genesyscloud_flow` scenarios — Accepted
+- [0023](0023-layer3-sealed-environment-and-orphan-verification.md) Layer 3 Sealed Environment and Real-Orphan Verification — Accepted; amends ADR-0010
+- [0024](0024-live-deployments-bounded-by-mandatory-ttl.md) Live deployments are bounded by a mandatory TTL, and unreadable means expired — Accepted
+- [0025](0025-run-project-created-before-the-apply.md) The run's project is created before the apply, not by it — Accepted
+- [0026](0026-the-ui-api-answers-only-loopback-origins.md) the UI API answers only loopback origins — Accepted
+- [0027](0027-deploying-from-the-ui.md) deploying from the UI — Accepted
+- [0028](0028-factual-claims-are-tests-not-comments.md) a factual claim about another component is a test, not a comment — Accepted
+- [0029](0029-a-policy-may-not-mandate-an-undestroyable-shape.md) A policy may not mandate a shape that cannot be destroyed — Accepted, mechanism refuted
+- [0030](0030-teardown-powers-instances-off.md) Teardown powers the run's instances off before `tofu destroy` — **Superseded by ADR-0031**
+- [0031](0031-the-nic-delete-defect-is-the-endpoint.md) The private-NIC teardown defect is the endpoint, not the power state — Accepted; supersedes ADR-0030
+- [0032](0032-apply-succeeding-is-not-convergence.md) An apply that succeeds is not a stack that converges — Accepted
+- [0033](0033-a-holdout-is-a-negative-check-against-the-running-stack.md) A holdout is a negative check, probed against the running stack — Accepted
+- [0034](0034-a-prohibition-is-a-specification.md) A prohibition is a specification — Accepted
+<!-- adr-index:end -->
+
+Generated from the ADR files by `make adr-index`; CI fails if it is stale. Do not edit between the markers.
+
 - `DECISION_RUBRIC.md`: yes/no gate for deciding when ADR is required.
 - `ADR_TEMPLATE.md`: copy/paste template for new ADRs.
 
@@ -53,6 +58,8 @@ Add an ADR when a change affects one or more of:
 - irreversible or expensive-to-revert implementation choices
 
 If unsure, run the rubric in `DECISION_RUBRIC.md`.
+
+A new ADR needs a `# ADR-NNNN: Title` heading and a status (`## Status` section or `Status:` line). Then run `make adr-index`.
 
 ## ADR template
 
