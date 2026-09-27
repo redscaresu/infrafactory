@@ -95,6 +95,18 @@ Entries accumulate across sweeps and don't self-prune. If a mock-source bug is f
 
 The 2026-06-04 `mock-gaps-and-rename` arc drained 13 stale entries that had accumulated across the 2026-06-01 / 02 sweeps. All 13 `discovered_from` scenarios passed in the contemporaneous probe sweep — the entries were artifacts of mock fixes shipped in S77, S96, S100, etc. that nobody had pruned.
 
+## When a run learns nothing
+
+`repair_budget_exhausted` or `stuck` on a failure that is not `IsMockServerBug`-classified means
+the pipeline failed to extract a pitfall. That is a bug, not a cold start. It once hid the fact
+that no pitfall had ever been learned from a Genesys run, because a resource-name regex did not
+know the prefix.
+
+Diagnostic protocol when a run exits without learning:
+1. Grep the run's `app.log` for `pitfall_emitted`, `oscillation_pitfall_*`, `self_correction_pitfall_*`, `mock_gap_recorded`. None firing + failure not mock-classified ⇒ pipeline silently no-op'd.
+2. Drop a scratch `_test.go` next to `internal/generator/pitfalls_learn.go`, call `IsMockServerBug`, `ExtractResourceFromDetail`, `ExtractDescriptivePitfall` against the failure detail. Empty Resource + nil pitfall ⇒ the regex or classifier doesn't recognise this resource family.
+3. When adding a new cloud (or any new resource-name prefix), there are three sites to update: `resourceNameRe`, `addressRe`, `pitfallResourceMatchesCloud`. Miss one and the learner breaks silently. **Enforced**: `internal/cli/cloud_prefix_lockstep_test.go::TestCloudPrefixLockstep` parses all three sites and fails CI if they disagree on the cloud-prefix set (per ADR-0021).
+
 ## Worked example: aws-subnet `map_public_ip_on_launch`
 
 The first organic `avoid` entry, captured 2026-06-04 during sustain re-validation sweep 1/3.
