@@ -41,19 +41,21 @@ pitfalls:
       discovered_from: incremental-project-paris
     - resource: scaleway_lb_backend
       rule: |-
-        NEVER index a resource attribute directly. Write
-        `try(scaleway_instance_private_nic.web.private_ips[0].address, "")` or
-        `one(...)`, not `scaleway_instance_private_nic.web.private_ips[0].address`.
+        `server_ips` needs an address that is valid WHENEVER it is evaluated:
 
-        Not just about apply failing: `tofu destroy` EVALUATES THE CONFIGURATION
-        rather than replaying state, so an expression that cannot be evaluated
-        breaks destroy too -- what the half-finished apply created cannot be
-        removed, and deleting the run project does not help because Scaleway
-        refuses to delete a project holding resources. Recovery is manual.
+          server_ips = [scaleway_instance_ip.web.address]  # server: ip_id = scaleway_instance_ip.web.id
 
-        `private_ips` and `private_network` are empty until after apply. `var.` and
-        `local.` are known at plan time and safe to index. The Layer 3 preflight
-        refuses the unguarded form, so generating it fails before anything exists.
+        or, for a backend that must stay private, a splat (an empty list, never a bad element):
+
+          server_ips = scaleway_instance_server.web.private_ips[*].address
+
+        NEVER index a resource attribute (`private_ips[0]`), and NEVER
+        `try(..., "")` in an IP field: `private_ips` is empty until after
+        apply, and "" is not an IP. `tofu
+        destroy` EVALUATES THE CONFIGURATION rather than replaying state, so
+        either one fails destroy as well as apply, and what the apply created
+        is stranded. The Layer 3 preflight refuses both. `var.` and `local.`
+        are known at plan time and safe to index.
       source: avoid
       discovered_from: web-live-paris
     - resource: scaleway_domain_record
