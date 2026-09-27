@@ -165,10 +165,34 @@ if [[ "${status_required}" == "true" ]] && ! contains_file "STATUS.md"; then
   exit 1
 fi
 
+# A decision-impacting PATH does not always carry a decision: repointing a
+# comment in internal/cli changes no contract, and forcing an ADR edit for it
+# turned ADR amendments into changelogs (ADR-0035). The trailer keeps the
+# forcing function -- someone classifies the change and says why -- without
+# the edit.
+#
+# The trailer must be on the LATEST commit of the range, so it is declared with
+# the whole change in view. Honouring it anywhere in the range let a trailer on
+# an early comment-only commit waive a later contract change; checking each
+# commit instead missed decision-path edits carried by merge commits. A tip
+# that does not declare it -- a merge commit included -- fails closed. Read
+# from the commit message, so it is honoured in CI; in --staged mode there is
+# no message yet, so it can only be a note there.
+adr_declared_none() {
+  [[ -n "${HEAD_SHA}" ]] || return 1
+  git log -1 --format=%B "${HEAD_SHA}" | grep -qE '^ADR: none ?(—|--|-) ?.{10,}'
+}
+
 if [[ "${decision_required}" == "true" ]]; then
   if ! any_changed_matching_regex '^docs/decisions/[0-9]{4}-.*\.md$'; then
-    echo "Doc hygiene check failed: decision-impacting changes require ADR update in docs/decisions/NNNN-title.md."
-    exit 1
+    if adr_declared_none; then
+      echo "Decision-impacting paths changed; declared implementation-only by an 'ADR: none' trailer."
+    elif [[ "${MODE}" == "--staged" ]]; then
+      echo "Note: decision-impacting paths changed and no ADR is staged. Add one, or put 'ADR: none — <reason>' in the commit message; CI enforces it on the PR."
+    else
+      echo "Doc hygiene check failed: decision-impacting changes require an ADR update in docs/decisions/NNNN-title.md, or an 'ADR: none — <reason>' trailer in a commit message."
+      exit 1
+    fi
   fi
 fi
 

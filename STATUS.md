@@ -2,6 +2,12 @@
 
 Last updated: 2026-09-27
 
+## 2026-09-27 — S196: pre-commit is fast, and a decision path no longer forces an ADR edit
+
+Pre-commit tests only the touched Go packages (`PRECOMMIT_FULL=1` for all); CI still runs the full
+suite and blocks merge. A decision-path change that crosses no ADR threshold carries
+`ADR: none — <reason>` instead of an ADR edit. ADR-0035 records the arc (S195-S198).
+
 ## 2026-09-27 — S195: the ADR index is generated
 
 `docs/decisions/README.md`'s index is now built from the ADR files by `make adr-index`

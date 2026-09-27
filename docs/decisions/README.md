@@ -41,6 +41,7 @@ Use ADRs for decisions that affect long-term behavior, interfaces, or contributo
 - [0032](0032-apply-succeeding-is-not-convergence.md) An apply that succeeds is not a stack that converges — Accepted
 - [0033](0033-a-holdout-is-a-negative-check-against-the-running-stack.md) A holdout is a negative check, probed against the running stack — Accepted
 - [0034](0034-a-prohibition-is-a-specification.md) A prohibition is a specification — Accepted
+- [0035](0035-process-weight-follows-value.md) Process weight follows value — Accepted
 <!-- adr-index:end -->
 
 Generated from the ADR files by `make adr-index`; CI fails if it is stale. Do not edit between the markers.
