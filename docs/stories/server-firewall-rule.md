@@ -1,4 +1,6 @@
 ---
+kind: code
+epic: firewall-end-to-end
 status: later
 blocked_by: generator-writes-firewall
 ---

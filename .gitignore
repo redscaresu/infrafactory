@@ -38,7 +38,15 @@ service-account.json
 token.json
 
 # Claude Code
-.claude/
+# Local Claude Code state stays local; shared commands are committed.
+.claude/*
+!.claude/commands/
+# swarm.sh's pane records, briefs and agent outputs.
+.swarm/
+# docs/ is an Obsidian vault. Per-user UI state churns on every click; only the
+# link settings are shared, so links stay markdown and CI can check them.
+docs/.obsidian/*
+!docs/.obsidian/app.json
 
 # Web UI
 ui/node_modules/

@@ -129,6 +129,21 @@ for story in docs/stories/*.md; do
     echo "Doc hygiene check failed: ${story} needs 'status: ready|blocked|later' in its front matter."
     exit 1
   fi
+  # An epic reference that names no epic is the stale pointer this layout exists to prevent.
+  epic="$(sed -n 's/^epic: *//p' "${story}" | head -1)"
+  if [[ -n "${epic}" && ! -f "docs/epics/${epic}.md" ]]; then
+    echo "Doc hygiene check failed: ${story} names epic '${epic}', but docs/epics/${epic}.md does not exist."
+    exit 1
+  fi
+done
+
+for epic_file in docs/epics/*.md; do
+  [[ -e "${epic_file}" ]] || continue
+  [[ "$(basename "${epic_file}")" == "README.md" ]] && continue
+  if ! grep -qE '^status: (active|later)$' "${epic_file}"; then
+    echo "Doc hygiene check failed: ${epic_file} needs 'status: active|later' in its front matter."
+    exit 1
+  fi
 done
 
 # A decision-impacting PATH does not always carry a decision: repointing a

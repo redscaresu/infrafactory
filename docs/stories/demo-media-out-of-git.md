@@ -1,4 +1,5 @@
 ---
+kind: chore
 status: later
 ---
 

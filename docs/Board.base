@@ -1,0 +1,31 @@
+filters:
+  and:
+    - file.inFolder("stories")
+    - file.ext == "md"
+    - 'file.path != "stories/README.md"'
+properties:
+  note.status:
+    displayName: Status
+  note.epic:
+    displayName: Epic
+  note.depends_on:
+    displayName: Depends on
+views:
+  - type: table
+    name: Board
+    groupBy:
+      property: note.status
+      direction: ASC
+    order:
+      - file.name
+      - note.epic
+      - note.depends_on
+  - type: table
+    name: By epic
+    groupBy:
+      property: note.epic
+      direction: ASC
+    order:
+      - file.name
+      - note.status
+      - note.depends_on

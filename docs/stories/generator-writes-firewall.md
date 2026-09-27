@@ -1,4 +1,6 @@
 ---
+kind: lead
+epic: firewall-end-to-end
 status: blocked
 blocked_by: generator-self-review-hang
 ---

@@ -43,6 +43,7 @@ Use ADRs for decisions that affect long-term behavior, interfaces, or contributo
 - [0034](0034-a-prohibition-is-a-specification.md) A prohibition is a specification — Accepted
 - [0035](0035-process-weight-follows-value.md) Process weight follows value — Accepted
 - [0036](0036-destruction-is-a-layer-not-a-criterion.md) Destruction is a layer, not a criterion — Accepted
+- [0037](0037-docs-is-the-planning-vault.md) docs/ is the planning vault, and epics are scoped and built by a visible swarm — Accepted
 <!-- adr-index:end -->
 
 Generated from the ADR files by `make adr-index`; CI fails if it is stale. Do not edit between the markers.

@@ -1,4 +1,5 @@
 ---
+kind: operator
 status: later
 ---
 

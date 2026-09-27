@@ -87,34 +87,55 @@ How each sibling fake decides what wire shape a handler SHOULD return (the smoke
 
 Detail in each sibling's `AGENTS.md` § "Fidelity strategy".
 
+## Model and effort
+
+Every agent's model and effort come from its role, set in one place: `policy()` in
+`scripts/swarm.sh` (`scripts/swarm.sh policy <role>` prints it). The principle is to spend on
+judgment and save on reading:
+
+- **Judgment is Opus.** The epic's decomposition is one call that decides everything after it, so
+  it runs at `xhigh`. Skeptics and the critic run at `high`, because a skeptic is the only gate a
+  story passes before it is built.
+- **Reading and running is Sonnet.** Surveys read and cite at `high`, since they feed the lead;
+  verification that runs tests and reports runs at `medium`, as do docs and chores.
+- **Building code is Opus at `high`**, and at `xhigh` for a story marked `risk: high` (Layer 3,
+  teardown, safety, hygiene).
+- **Codex is the cross-model check**, read-only, because a different model family shares fewer
+  blind spots with the one that wrote the plan.
+- **Fable is escalation only**: a story that failed twice, or an epic whose contradictions no one
+  can reconcile.
+
+A story's `kind` (and `risk`) chooses its role; `kind: lead` (real cloud, credentials) and
+`kind: operator` (a human step) are refused by the swarm.
+
+## Scoping an epic
+
+An epic (`docs/epics/<slug>.md`: goal, **Done when**, out of scope, constraints) becomes stories
+with `/plan-epic <slug>` (`.claude/commands/plan-epic.md`). It runs as a herdr swarm, every agent
+in its own pane: three surveys (where it lands, what constrains it, what overlaps it), one lead
+decomposition into one-PR stories with `kind`, `touches` and `depends_on`, a skeptic per story
+(capped at five, the rest logged) and a codex pass, then a critic. Agents write their answers to
+`.swarm/<epic>/`. The user sees refuted stories and contradictions first and approves before any
+story file is written. About ten agents per run, so scope deliberately.
+
 ## Parallel agents (herdr)
 
-A wave runs several `ready` stories at once, one Claude agent per herdr pane, each in its own git
-worktree. The lead session dispatches, reviews and merges; the agents never merge.
+A wave builds several `ready` stories at once, one agent per herdr pane, each in its own git
+worktree; up to four panes a tab. The lead dispatches, reviews and merges; agents never merge.
 
-**Pick the wave.** Only `ready` stories, and only ones whose changes do not overlap. Never give
-a shared file to two agents at once — `AGENTS.md`, `infrafactory.yaml`, the hygiene scripts, the
-schema. Work that edits those is done by the lead, alone.
+**Pick the wave.** Only `ready` stories whose `touches` do not overlap. Work that edits a shared
+file (`AGENTS.md`, `infrafactory.yaml`, the schema, the hygiene scripts) is done by the lead, alone.
 
-**Set it up** (from the lead's pane; herdr needs `HERDR_ENV=1`):
+**Start each story** from the lead's pane:
 
 ```bash
-git worktree add -b <branch> ../infrafactory-wt/<story> main
-herdr tab create --workspace "$HERDR_WORKSPACE_ID" --cwd ../infrafactory-wt/<story> --label agents --no-focus
-herdr pane split <pane-id> --direction right --cwd ../infrafactory-wt/<next-story> --no-focus
-herdr agent start <story> --kind claude --pane <pane-id> -- --permission-mode auto
+scripts/swarm.sh story <slug>      # worktree on story/<slug>, a pane, the agent, its brief
+scripts/swarm.sh wait <slug>       # in the background: returns when it settles
 ```
 
-Read every pane ID from the JSON a command returns. `auto` keeps the safety classifier on;
-never use `bypassPermissions` for an agent.
-
-**Brief each agent** with `herdr agent prompt <story> "…"`: implement `docs/stories/<story>.md`,
-whose **Done when** is the acceptance; delete that file in the PR; never merge; never touch real
-cloud or credentials; run the codex loop; reply with the PR URL once CI is green.
-
-**Supervise.** Run `herdr agent wait <story>` in the background per agent, so the lead is told
-when each settles (`idle`, `done` or `blocked`) instead of polling. `herdr agent read <story>
---source recent-unwrapped` shows what an agent is doing.
+The brief is the story file plus the standing rules (never merge, no real cloud, codex loop, reply
+with the PR URL when CI is green). `herdr agent read <slug> --source recent-unwrapped` shows what an
+agent is doing.
 
 **Merge one at a time.** After each merge, merge `main` into every other open wave branch before
 trusting its CI; a branch that conflicts gets no CI at all, which looks like a hang.
@@ -122,9 +143,8 @@ trusting its CI; a branch that conflicts gets no CI at all, which looks like a h
 **Keep with the lead:** real-cloud runs (a restart mid-apply leaves resources behind),
 credentials, and anything that changes permissions.
 
-**Clean up.** After each merge, `git worktree remove ../infrafactory-wt/<story>` (a no-op error if
-it is already gone), then `git worktree prune`; a stale worktree keeps its branch checked out and
-blocks reusing the name. Close the agents tab when the wave is done.
+**Clean up.** After each merge, `git worktree remove ../infrafactory-wt/<slug>` (an error if it is
+already gone), then `git worktree prune`. `scripts/swarm.sh close build` closes the wave's tabs.
 
 ## Demo recording
 
