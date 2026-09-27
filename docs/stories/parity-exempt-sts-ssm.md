@@ -13,4 +13,4 @@ Add sts and ssm, each with a non-empty reason, to the fakeaws exempt map (intern
 **Done when:**
 - A new table test in the required test job, with no sibling needed, feeds today's fakeaws LandedServices plus sts and ssm and gets nothing missing; with either exemption removed, or given an empty reason, it fails naming that service
 - The existing TestCrossRepoParity_EveryLandedServiceHasScenario behaves the same (it calls the extracted function)
-- The diff touches only internal/e2e/cross_repo_parity_test.go; pitfalls/aws.yaml is unchanged
+- The diff touches only internal/e2e/cross_repo_parity_test.go (and deletes this story file); pitfalls/aws.yaml is unchanged
