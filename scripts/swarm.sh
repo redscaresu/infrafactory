@@ -157,14 +157,21 @@ for t in json.load(sys.stdin)['result']['tabs']:
   done
 }
 
-cmd="${1:-}"; shift || true
-case "${cmd}" in
-  policy) policy "${1:?role}" ;;
-  agent)  require_herdr; start_agent "$@" ;;
-  story)  require_herdr; build_story "${1:?slug}" ;;
-  close)  require_herdr; close_tabs "${1:?tab}" ;;
-  _name)  agent_name "${1:?slug}"; echo ;;                      # test hook: the agent name for a slug
-  _pane)  require_herdr; next_pane "${1:?tab}" "${2:?cwd}" ;;   # layout test hook: a pane, no agent
-  wait)   require_herdr; herdr agent wait "$(agent_name "${1:?name}")" --timeout "${2:-3600000}" | json "d['result']['agent']['agent_status']" ;;
-  *) sed -n '2,12p' "$0"; exit 2 ;;
-esac
+# Everything runs from main, called on the last line with `exit` beside it: bash reads a
+# script as it executes, so a `git pull` that rewrites this file during a long `wait` would
+# otherwise make it resume reading the new file mid-line.
+main() {
+  cmd="${1:-}"; shift || true
+  case "${cmd}" in
+    policy) policy "${1:?role}" ;;
+    agent)  require_herdr; start_agent "$@" ;;
+    story)  require_herdr; build_story "${1:?slug}" ;;
+    close)  require_herdr; close_tabs "${1:?tab}" ;;
+    _name)  agent_name "${1:?slug}"; echo ;;                      # test hook: the agent name for a slug
+    _pane)  require_herdr; next_pane "${1:?tab}" "${2:?cwd}" ;;   # layout test hook: a pane, no agent
+    wait)   require_herdr; herdr agent wait "$(agent_name "${1:?name}")" --timeout "${2:-3600000}" | json "d['result']['agent']['agent_status']" ;;
+    *) sed -n '2,12p' "$0"; exit 2 ;;
+  esac
+}
+
+main "$@"; exit

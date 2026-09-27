@@ -76,12 +76,9 @@ pitfalls:
       discovered_from: web-live-paris
     - resource: scaleway_instance_security_group
       rule: |-
-        A Scaleway security group defaults to `inbound_default_policy = "accept"`.
-        Declaring one and leaving that unset closes NOTHING: it permits every
-        inbound port, exactly like the API-created "Default security group".
-
-        So when a server must not be reachable on every port, set the policy and
-        open only what is used:
+        A Scaleway security group defaults to `inbound_default_policy = "accept"`,
+        so declaring one without it closes NOTHING. Set the policy and open only
+        what is used:
 
         resource "scaleway_instance_security_group" "web" {
           name                   = "web"
@@ -95,6 +92,8 @@ pitfalls:
 
         resource "scaleway_instance_server" "web" {
           security_group_id = scaleway_instance_security_group.web.id
+          # keep its other attachments, e.g. the private network:
+          private_network { pn_id = scaleway_vpc_private_network.main.id }
         }
 
         All three parts carry weight. Without `drop` the group changes nothing;
