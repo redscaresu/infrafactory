@@ -78,7 +78,7 @@ If either fails, restore the repo to a green baseline before starting a new tick
 - Port 8080 conflicts are common — check for stale containers before `mock start`.
 - Debug iterative behavior from `.infrafactory/runs/<scenario>/<run-id>/iterations/<n>/iteration.json`.
 - `output/<scenario>/` is mutable (overwritten each run); immutable snapshots live under `.infrafactory/runs/<scenario>/<run-id>/generated/`.
-- `CLAUDECODE` env var blocks nested claude — `unset CLAUDECODE` before `go run ./cmd/infrafactory run`.
+- No `unset CLAUDECODE` is needed before running infrafactory from a Claude Code session: `claude_adapter.go` strips the parent session's `CLAUDECODE` and `CLAUDE_CODE_*` variables. A separate `self_review` hang is still open (`STATUS.md` § Open).
 - Mock rebuild required after any sibling-mock code change: `pkill -f <mock-bin>; cd ../<mock> && go build && ./<bin> --port <port> &`. For containerised runs use `make mocks-down-containers && make mocks-up-containers`.
 - Build tag: `-tags noui` required when `ui/build/` doesn't exist. The `!noui` build requires `ui/build/`.
 - Playwright e2e tests live in `ui/e2e/`. `make test` runs Go unit + UI unit + Playwright. The pre-commit hook tests only the Go packages a commit touches (`PRECOMMIT_FULL=1` for everything); CI runs the full suite and blocks merge (ADR-0035).
@@ -142,6 +142,24 @@ Create/update ADR when change affects:
 - schema semantics (`scenario.schema.json`, `infrafactory.yaml`)
 - external dependency strategy (tofu/mockway/opa integration model)
 - durable workflow governance
+
+## Writing it down once
+
+Each change is described in one place, and everything else points there
+(ADR-0035). Prose is the most expensive thing this workflow produces, and every
+copy of a story is another place for it to go stale.
+
+- **The PR body** is the full account: what changed, why, and the evidence.
+  The squash commit is its first paragraph.
+- **`STATUS.md`** gets one line in § Recent, and § Open changes only when an
+  item opens or closes.
+- **An ADR** only for a decision that crosses the threshold above. Evidence and
+  verification runs belong in the PR, not appended to the ADR.
+- **Code comments** say what the rule is and why, in a few lines. How it got
+  that way belongs to `git log` and the ADR. A claim about another component is
+  a test, not a comment (ADR-0028).
+- **No counts or measurements in comments or committed docs** unless dated and
+  scoped. This file said "51 Playwright tests" long after there were 136.
 
 ## Engineering Rules
 - Keep command handlers thin; put logic in `internal/*` packages.
@@ -238,9 +256,10 @@ where a fix introduced a new defect. The mitigation is to treat *your own* fix
 as the thing most likely to be wrong: after acting on a finding, re-read the
 change against the defect class it belongs to before calling the pass.
 
-**Record every loop** in `docs/review-passes/passN.md`: each finding, its
-severity, and accepted-vs-declined with the reasoning. Future readers need to
-see why something was declined, not just that it was.
+**Record the loop in the PR body**: how many passes, each finding, and what was
+done about it. Write `docs/review-passes/passN.md` only when a finding was
+**declined** — the reasoning behind a decline is what a future reader needs and
+cannot get from the diff.
 
 Worked example: `docs/review-passes/pass1.md` (Layer 3 arc, converged in 5
 passes). Both of its findings were in the operator-facing recovery string

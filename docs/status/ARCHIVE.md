@@ -2,6 +2,17 @@
 
 Historical snapshots and older session notes can be moved here to keep `STATUS.md` concise.
 
+
+## 2026-09-27 S195–S198: process weight follows value (ADR-0035)
+
+Four slices cut the cost of the workflow and left the gates alone. The ADR index is generated
+(S195). Pre-commit tests only the packages a commit touches, and a decision-path change that
+decides nothing carries `ADR: none — <reason>` on its tip commit (S196). `STATUS.md` became the
+single, capped entry point; `NEXT_SESSION.md` and `BACKLOG.md` were removed (S197). Each change is
+written down once (S198). A fresh session's mandatory reading went from about 80k tokens to under
+10k. A kanban board was prototyped and dropped: for about ten open items, a list does the job.
+PRs #257–#259 and S198's.
+
 ## 2026-08-22 Layer 3 real-Scaleway arc (S139–S143) — CLOSED
 
 `docs/plans/layer3-real-scaleway-plan.md`. Goal: get one scenario
