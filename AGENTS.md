@@ -80,7 +80,7 @@ If either fails, restore the repo to a green baseline before starting a new tick
 - Port 8080 conflicts are common — check for stale containers before `mock start`.
 - Debug iterative behavior from `.infrafactory/runs/<scenario>/<run-id>/iterations/<n>/iteration.json`.
 - `output/<scenario>/` is mutable (overwritten each run); immutable snapshots live under `.infrafactory/runs/<scenario>/<run-id>/generated/`.
-- No `unset CLAUDECODE` is needed before running infrafactory from a Claude Code session: `claude_adapter.go` strips the parent session's `CLAUDECODE` and `CLAUDE_CODE_*` variables. A separate `self_review` hang is still open (`docs/stories/generator-self-review-hang.md`).
+- No `unset CLAUDECODE` is needed before running infrafactory from a Claude Code session: `claude_adapter.go` strips the parent session's `CLAUDECODE` and `CLAUDE_CODE_*` variables.
 - Mock rebuild required after any sibling-mock code change: `pkill -f <mock-bin>; cd ../<mock> && go build && ./<bin> --port <port> &`. For containerised runs use `make mocks-down-containers && make mocks-up-containers`.
 - Build tag: `-tags noui` required when `ui/build/` doesn't exist. The `!noui` build requires `ui/build/`.
 - Playwright e2e tests live in `ui/e2e/`. `make test` runs Go unit + UI unit + Playwright. The pre-commit hook tests only the Go packages a commit touches (`PRECOMMIT_FULL=1` for everything); CI runs the full suite and blocks merge (ADR-0035).
