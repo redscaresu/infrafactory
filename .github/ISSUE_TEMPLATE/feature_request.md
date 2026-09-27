@@ -17,7 +17,7 @@ today, a workflow that's awkward, a capability that's missing.
 
 <!--
 Concrete description of what you'd like to see. If you're proposing a new
-slice, the BACKLOG.md format is preferred (id, title, deps, acceptance).
+slice, say what it changes, what it depends on, and how we will know it works.
 -->
 
 ## Why this over the alternatives

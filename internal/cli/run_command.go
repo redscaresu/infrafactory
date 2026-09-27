@@ -539,7 +539,7 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 		// names no resource (only a count). Route through
 		// generator.ClassifyOrphans which cross-references the live
 		// /mock/state to identify lingering resources and classify
-		// each across the 5 sub-shapes (see N9 doc in NEXT_SESSION.md).
+		// each across the 5 sub-shapes (ADR-0016).
 		//
 		// Fires only when stuck-detection or budget-exhaustion caught
 		// us on an orphan_check failure — the live mock state at that
@@ -667,7 +667,7 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 	// system learns WHAT failed; with N10 it also learns the HCL
 	// pattern that FIXED it.
 	//
-	// See `docs/NEXT_SESSION.md` § N10 for the design rationale and
+	// See `docs/auto-learning-loop.md` for the design rationale and
 	// `internal/generator/prescriptive_extractor.go` for the diff logic.
 	if terminalReason == "target_reached" && len(iterationHistory) > 1 {
 		for i := 1; i < len(iterationHistory); i++ {

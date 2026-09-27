@@ -1,7 +1,7 @@
 package generator
 
 // N9 — orphan_check extractor. Classifies post-destroy orphaned
-// resources across five sub-shapes (see docs/NEXT_SESSION.md § N9):
+// resources across five sub-shapes (ADR-0016):
 //
 //	#1 LLM-side soft-delete       → emit LearnedPitfall
 //	#2 Mock-side auto-seeded      → emit MockGap

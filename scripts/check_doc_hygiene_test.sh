@@ -100,6 +100,26 @@ MSG="ADR: none — ok" \
   run_case "a token reason is not a reason"                  fail internal/cli/x.go STATUS.md
 MSG="ADR: none — comment-only, repoints a doc link" \
   run_case "the trailer does not waive STATUS.md"            fail internal/cli/x.go
+run_status_cap_case() {
+  local name="$1" expected="$2" lines="$3" dir rc actual
+  dir="$(mktemp -d)"
+  (
+    cd "${dir}" || exit 1
+    git init -q . && git config user.email t@t.t && git config user.name t
+    echo baseline > README.md && git add -A && git commit -qm baseline
+    base="$(git rev-parse HEAD)"
+    mkdir -p internal/harness && echo x > internal/harness/x.go
+    for _ in $(seq 1 "${lines}"); do echo line; done > STATUS.md
+    git add -A && git commit -qm change
+    bash "${SCRIPT}" "${base}" "$(git rev-parse HEAD)" > /dev/null 2>&1
+  )
+  rc=$?; rm -rf "${dir}"
+  actual="pass"; [[ ${rc} -ne 0 ]] && actual="fail"
+  if [[ "${actual}" == "${expected}" ]]; then echo "  ok    ${name}"
+  else echo "  FAIL  ${name}: expected ${expected}, got ${actual}"; FAILURES=$((FAILURES + 1)); fi
+}
+run_status_cap_case "STATUS.md at the cap is accepted"   pass 150
+run_status_cap_case "STATUS.md over the cap is rejected" fail 151
 run_two_commits "one commit's trailer does not waive another commit" fail \
   "ADR: none — comment-only, repoints a doc link" internal/cli/a.go \
   "change the CLI contract" internal/cli/b.go

@@ -17,7 +17,7 @@ package generator
 // the LLM's added resources / attributes correlate with a cleared
 // failure, the diff becomes a prescriptive pitfall rule.
 //
-// See `docs/NEXT_SESSION.md` § N10 for the design rationale and
+// See `docs/auto-learning-loop.md` for the design rationale and
 // validation plan.
 
 import (

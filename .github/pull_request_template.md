@@ -19,8 +19,7 @@ PR template. Delete sections that aren't relevant. Keep the test plan.
 
 ## Docs touched
 
-- [ ] `STATUS.md` updated
-- [ ] `BACKLOG.md` ticket status flipped
+- [ ] `STATUS.md` updated (one line in Recent; Open if an item opened or closed)
 - [ ] `CONCEPT.md` updated (if architecture/contract changed)
 - [ ] ADR added/updated under `docs/decisions/` (if decision-impacting)
 - [ ] N/A — pure refactor / dependency bump

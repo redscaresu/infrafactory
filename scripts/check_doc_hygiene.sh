@@ -160,6 +160,15 @@ if [[ "${status_required}" == "true" ]] && only_dependency_manifests; then
   status_required=false
 fi
 
+# STATUS.md is the entry point every session reads, so its size is a cost paid
+# on every session. It holds current state only (ADR-0035); history lives in
+# docs/status/. The cap forces pruning instead of letting it grow back.
+STATUS_MAX_LINES=150
+if [[ -f STATUS.md ]] && (( $(wc -l < STATUS.md) > STATUS_MAX_LINES )); then
+  echo "Doc hygiene check failed: STATUS.md is over ${STATUS_MAX_LINES} lines. Drop the oldest Recent lines; history belongs in docs/status/."
+  exit 1
+fi
+
 if [[ "${status_required}" == "true" ]] && ! contains_file "STATUS.md"; then
   echo "Doc hygiene check failed: code/config changes require STATUS.md update."
   exit 1
