@@ -22,7 +22,8 @@ echo ""
 
 # ---------- 2. go vet ----------
 echo "Running go vet..."
-go vet ./...
+# -tags noui: a fresh clone or worktree has no built UI to embed.
+go vet -tags noui ./...
 echo "go vet clean."
 echo ""
 

@@ -34,6 +34,15 @@ cost came mostly from prose and duplicated runs. So the cuts go there and the ga
    `STATUS.md` gets a line; an ADR only for a decision; a review-pass file only when findings
    were declined; comments state the current rule and its reason, not its history. (S198)
 
+## Amendment — 2026-09-27 (S203)
+
+Two PRs from the first parallel wave both edited `STATUS.md` (each added a Recent line and closed
+an Open item) and conflicted. §3 is therefore narrowed: **Recent is `git log`**, since the squash
+titles already are that list, and **open work is one file per item in `docs/stories/`**, deleted
+by the PR that finishes it. No per-PR edit to a shared file remains, so the hygiene check no longer
+requires `STATUS.md` on code changes; it checks each story's `status` instead. A `ready` story is
+also the brief an agent works from, so briefs are reviewable files rather than prompt text.
+
 ## Consequences
 
 - A broken change in one package can pass pre-commit and fail in CI. That is where it was

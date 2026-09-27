@@ -87,6 +87,45 @@ How each sibling fake decides what wire shape a handler SHOULD return (the smoke
 
 Detail in each sibling's `AGENTS.md` § "Fidelity strategy".
 
+## Parallel agents (herdr)
+
+A wave runs several `ready` stories at once, one Claude agent per herdr pane, each in its own git
+worktree. The lead session dispatches, reviews and merges; the agents never merge.
+
+**Pick the wave.** Only `ready` stories, and only ones whose changes do not overlap. Never give
+a shared file to two agents at once — `AGENTS.md`, `infrafactory.yaml`, the hygiene scripts, the
+schema. Work that edits those is done by the lead, alone.
+
+**Set it up** (from the lead's pane; herdr needs `HERDR_ENV=1`):
+
+```bash
+git worktree add -b <branch> ../infrafactory-wt/<story> main
+herdr tab create --workspace "$HERDR_WORKSPACE_ID" --cwd ../infrafactory-wt/<story> --label agents --no-focus
+herdr pane split <pane-id> --direction right --cwd ../infrafactory-wt/<next-story> --no-focus
+herdr agent start <story> --kind claude --pane <pane-id> -- --permission-mode auto
+```
+
+Read every pane ID from the JSON a command returns. `auto` keeps the safety classifier on;
+never use `bypassPermissions` for an agent.
+
+**Brief each agent** with `herdr agent prompt <story> "…"`: implement `docs/stories/<story>.md`,
+whose **Done when** is the acceptance; delete that file in the PR; never merge; never touch real
+cloud or credentials; run the codex loop; reply with the PR URL once CI is green.
+
+**Supervise.** Run `herdr agent wait <story>` in the background per agent, so the lead is told
+when each settles (`idle`, `done` or `blocked`) instead of polling. `herdr agent read <story>
+--source recent-unwrapped` shows what an agent is doing.
+
+**Merge one at a time.** After each merge, merge `main` into every other open wave branch before
+trusting its CI; a branch that conflicts gets no CI at all, which looks like a hang.
+
+**Keep with the lead:** real-cloud runs (a restart mid-apply leaves resources behind),
+credentials, and anything that changes permissions.
+
+**Clean up.** After each merge, `git worktree remove ../infrafactory-wt/<story>` (a no-op error if
+it is already gone), then `git worktree prune`; a stale worktree keeps its branch checked out and
+blocks reusing the name. Close the agents tab when the wave is done.
+
 ## Demo recording
 
 `asciinema` (CLI demo via `./docs/demo/record.sh`) → `.cast` → `agg` → `.gif`; Playwright (UI demo

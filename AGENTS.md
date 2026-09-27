@@ -15,7 +15,7 @@ Additional references:
 - ADRs: `docs/decisions/*.md`
 - Prompts: `prompts/*.md`
 - Pitfalls: `pitfalls/{cloud}.yaml` — provider-specific rules loaded at runtime by scenario `cloud` field
-- Current state and open work: `STATUS.md`
+- Current state: `STATUS.md`. Open work: one file per item in `docs/stories/`
 
 ## Project File Ecosystem
 
@@ -23,7 +23,8 @@ Additional references:
 |---|---|---|
 | `docs/plans/<arc-name>-plan.md` | Goal-named variable-length arc plan (typically 2-4 slices). Tickets, exit criteria, autonomous-execution prompt. | When planning the next arc |
 | `docs/status/ARCHIVE.md` | Per-arc close-out narratives — durable history | At arc close-out |
-| `STATUS.md` | The entry point: now, open items, the last ten slices. Under 150 lines, CI-enforced. | Every PR: one line in Recent, drop the oldest; update Open |
+| `STATUS.md` | The entry point: what is in flight now. Recent is `git log`, not stored. Under 150 lines, CI-enforced. | Only when Now changes |
+| `docs/stories/*.md` | One open item each, `status: ready\|blocked\|later`; a `ready` story is an agent's brief. | Open an item by adding a file; the PR that finishes it deletes the file |
 | `CONCEPT.md` | Durable architecture, contracts, design decisions | Only for major architecture/design shifts |
 | `docs/decisions/*.md` | ADRs for decision-impacting changes | When change crosses ADR trigger threshold (see below) |
 
@@ -40,7 +41,7 @@ The shape:
 5. **Point** `STATUS.md` § Now at the new plan.
 6. **Get approval** from the user before kicking off the autonomous loop.
 
-ADRs only when crossing the threshold below. Plan files hold an arc's slices; one-off work is a line in `STATUS.md` § Open.
+ADRs only when crossing the threshold below. Plan files hold an arc's slices; one-off work is a file in `docs/stories/`.
 
 ## Fresh Context
 
@@ -48,7 +49,7 @@ When starting a new conversation, follow this checklist:
 
 ### 1) Load minimal context
 1. `AGENTS.md` (this file)
-2. `STATUS.md` — now, open items, recent slices
+2. `STATUS.md` — what is in flight, and where open work and history live
 3. The active arc's plan, if `STATUS.md` § Now names one
 
 On demand only: `README.md`, `CONCEPT.md` (major design context), `docs/decisions/README.md`
@@ -63,7 +64,7 @@ git branch --show-current
 git log -1 --oneline
 ```
 - If unexpected local changes appear, stop and ask the user.
-- Take the active arc and blockers from `STATUS.md` § Now and § Open.
+- Take the active arc from `STATUS.md` § Now, and the queue from the `ready` stories in `docs/stories/`.
 
 ### 3) Startup verification
 ```bash
@@ -78,7 +79,7 @@ If either fails, restore the repo to a green baseline before starting a new tick
 - Port 8080 conflicts are common — check for stale containers before `mock start`.
 - Debug iterative behavior from `.infrafactory/runs/<scenario>/<run-id>/iterations/<n>/iteration.json`.
 - `output/<scenario>/` is mutable (overwritten each run); immutable snapshots live under `.infrafactory/runs/<scenario>/<run-id>/generated/`.
-- No `unset CLAUDECODE` is needed before running infrafactory from a Claude Code session: `claude_adapter.go` strips the parent session's `CLAUDECODE` and `CLAUDE_CODE_*` variables. A separate `self_review` hang is still open (`STATUS.md` § Open).
+- No `unset CLAUDECODE` is needed before running infrafactory from a Claude Code session: `claude_adapter.go` strips the parent session's `CLAUDECODE` and `CLAUDE_CODE_*` variables. A separate `self_review` hang is still open (`docs/stories/generator-self-review-hang.md`).
 - Mock rebuild required after any sibling-mock code change: `pkill -f <mock-bin>; cd ../<mock> && go build && ./<bin> --port <port> &`. For containerised runs use `make mocks-down-containers && make mocks-up-containers`.
 - Build tag: `-tags noui` required when `ui/build/` doesn't exist. The `!noui` build requires `ui/build/`.
 - Playwright e2e tests live in `ui/e2e/`. `make test` runs Go unit + UI unit + Playwright. The pre-commit hook tests only the Go packages a commit touches (`PRECOMMIT_FULL=1` for everything); CI runs the full suite and blocks merge (ADR-0035).
@@ -95,7 +96,7 @@ If either fails, restore the repo to a green baseline before starting a new tick
 4. Implement smallest runnable vertical slice.
 5. Add/update focused tests.
 6. Run `go test ./...` (or report why not possible).
-7. Sync docs: one line in `STATUS.md` § Recent, and § Open if the PR opens or closes an item. `CONCEPT.md` for major shifts; `AGENTS.md` only when workflow changes.
+7. Sync docs: delete the story file the PR finishes, add one for work it opens. `STATUS.md` only if Now changes; `CONCEPT.md` for major shifts; `AGENTS.md` only when workflow changes.
 8. Run hygiene check: `bash scripts/check_all.sh`.
 
 ## Sibling Mock Repos
@@ -123,8 +124,9 @@ copy of a story is another place for it to go stale.
 
 - **The PR body** is the full account: what changed, why, and the evidence.
   The squash commit is its first paragraph.
-- **`STATUS.md`** gets one line in § Recent, and § Open changes only when an
-  item opens or closes.
+- **Recent work is `git log`**: the squash-commit title is the line. Open work is a
+  file in `docs/stories/`, deleted by the PR that finishes it. No shared list is
+  edited per PR, so parallel PRs do not conflict on it.
 - **An ADR** only for a decision that crosses the threshold above. Evidence and
   verification runs belong in the PR, not appended to the ADR.
 - **Code comments** say what the rule is and why, in a few lines. How it got
@@ -158,6 +160,11 @@ Layer 3 spends real money. Before any Layer 3 work, read `docs/operations.md` §
 ADR-0023. Always: it is never wired into scheduled CI; generated HCL never declares a project or
 sets `project_id` (ADR-0025); and `openclaw-prod` is protected only by software guards — do not
 weaken them.
+
+## Parallel agents
+
+Several `ready` stories can run at once as herdr panes, one agent and one git worktree each.
+Before starting a wave, read `docs/operations.md` § Parallel agents (herdr).
 
 ## Codex review loop (required on every PR)
 

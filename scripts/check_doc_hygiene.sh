@@ -91,38 +91,10 @@ any_changed_matching_regex() {
   return 1
 }
 
-STATUS_REQUIRED_PREFIXES=("cmd/" "internal/" "prompts/" "policies/" "scenarios/" "testdata/")
-STATUS_REQUIRED_FILES=("go.mod" "go.sum" "scenario.schema.json" "infrafactory.yaml")
-
-# Dependency manifests are exempt from the STATUS.md rule -- but only when
-# they are the ONLY thing that changed.
-#
-# The rule exists so a human records what a code change means. A dependabot
-# bump has no such meaning to record, and dependabot cannot edit STATUS.md,
-# so requiring it made every Go dependency PR permanently red -- and with
-# required status checks on main, permanently unmergeable. Eight of them had
-# piled up, the oldest three weeks old, which is the opposite of the
-# "keep dependencies updated" posture this repo wants.
-#
-# The exemption is deliberately all-or-nothing: a PR that bumps go.mod AND
-# edits internal/ still needs STATUS.md, so a real change cannot smuggle
-# itself in behind a lockfile.
-DEPENDENCY_MANIFESTS=("go.mod" "go.sum" "ui/package.json" "ui/package-lock.json")
-
 DECISION_PREFIXES=("cmd/infrafactory/" "internal/cli/")
 DECISION_FILES=("scenario.schema.json" "infrafactory.yaml" "docs/architecture.md")
 
-status_required=false
 decision_required=false
-
-if any_changed_in_prefixes "${STATUS_REQUIRED_PREFIXES[@]}"; then
-  status_required=true
-fi
-for f in "${STATUS_REQUIRED_FILES[@]}"; do
-  if contains_file "${f}"; then
-    status_required=true
-  fi
-done
 
 for f in "${DECISION_FILES[@]}"; do
   if contains_file "${f}"; then
@@ -139,40 +111,25 @@ if any_changed_in_prefixes "${DECISION_PREFIXES[@]}"; then
   done
 fi
 
-only_dependency_manifests() {
-  for f in "${CHANGED[@]}"; do
-    local matched=false
-    for manifest in "${DEPENDENCY_MANIFESTS[@]}"; do
-      if [[ "${f}" == "${manifest}" ]]; then
-        matched=true
-        break
-      fi
-    done
-    if [[ "${matched}" == "false" ]]; then
-      return 1
-    fi
-  done
-  return 0
-}
-
-if [[ "${status_required}" == "true" ]] && only_dependency_manifests; then
-  echo "Dependency-manifest-only change: STATUS.md not required."
-  status_required=false
-fi
-
 # STATUS.md is the entry point every session reads, so its size is a cost paid
-# on every session. It holds current state only (ADR-0035); history lives in
-# docs/status/. The cap forces pruning instead of letting it grow back.
+# on every session. It holds current state only (ADR-0035); open work lives in
+# docs/stories/ and history in git. The cap stops it growing back into a log.
 STATUS_MAX_LINES=150
 if [[ -f STATUS.md ]] && (( $(wc -l < STATUS.md) > STATUS_MAX_LINES )); then
   echo "Doc hygiene check failed: STATUS.md is over ${STATUS_MAX_LINES} lines. Drop the oldest Recent lines; history belongs in docs/status/."
   exit 1
 fi
 
-if [[ "${status_required}" == "true" ]] && ! contains_file "STATUS.md"; then
-  echo "Doc hygiene check failed: code/config changes require STATUS.md update."
-  exit 1
-fi
+# Every story states whether it can be picked up. A file without a valid
+# status is invisible to anyone choosing the next item (ADR-0035 amendment).
+for story in docs/stories/*.md; do
+  [[ -e "${story}" ]] || continue
+  [[ "$(basename "${story}")" == "README.md" ]] && continue
+  if ! grep -qE '^status: (ready|blocked|later)$' "${story}"; then
+    echo "Doc hygiene check failed: ${story} needs 'status: ready|blocked|later' in its front matter."
+    exit 1
+  fi
+done
 
 # A decision-impacting PATH does not always carry a decision: repointing a
 # comment in internal/cli changes no contract, and forcing an ADR edit for it
