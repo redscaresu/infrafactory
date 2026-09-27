@@ -35,12 +35,12 @@ No arc in flight. The process-efficiency arc (ADR-0035, S195–S198) is complete
     2026-08-31;
   - move `docs/demo/` recordings to release assets;
   - fakegenesys public visibility and branch protection (operator click-ops);
-  - delete `~/.config/infrafactory/scw-layer3.env`, which holds the pre-2026-09-07 key (operator);
   - pitfall-pruning automation, shelved (`docs/plans/pitfall-pruning-automation-plan.md`).
 
 ## Recent
 
-- 2026-09-27 S199 — `AGENTS.md` holds only always-on rules; task detail moved to `docs/operations.md`, three stale Layer 3 claims corrected
+- 2026-09-27 S200 — the pre-rotation `scw-layer3.env` is deleted; docs no longer mention it
+- 2026-09-27 S199 — `AGENTS.md` holds only always-on rules; task detail moved to `docs/operations.md`, three stale Layer 3 claims corrected (#261)
 - 2026-09-27 S198 — each change is written down once; review-pass files only for declined findings (#260)
 - 2026-09-27 S197 — one entry point: this file, current state only; `NEXT_SESSION.md` and `BACKLOG.md` removed (#259)
 - 2026-09-27 S196 — pre-commit is fast, and a decision path no longer forces an ADR edit (#258)
@@ -49,4 +49,3 @@ No arc in flight. The process-efficiency arc (ADR-0035, S195–S198) is complete
 - 2026-09-21 S193 — the state-side policy check actually runs (#253)
 - 2026-09-20 S192 — the holdout, rebuilt as a negative check against the running stack (#252)
 - 2026-09-20 S191 — a standalone private NIC destroys fine now (#251)
-- 2026-09-20 S190 — the probe window, measured (#250)
