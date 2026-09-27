@@ -927,6 +927,22 @@ resource "scaleway_block_volume" "data" {
 	assert.NoError(t, validateLayer3HCLShape(dir, gateAllowlist))
 }
 
+// strcontains is strings.Contains over its two arguments. Refusing it cost
+// a generated stack a whole iteration on a load balancer's server_ips.
+func TestLayer3ShapeAllowsStrcontains(t *testing.T) {
+	dir := writeShapeHCL(t, shapeProject+`
+variable "ips" {
+  type    = list(string)
+  default = ["10.0.0.1", "fd00::1"]
+}
+resource "scaleway_block_volume" "data" {
+  size_in_gb = 1
+  tags       = [for ip in var.ips : ip if !strcontains(ip, ":")]
+}`)
+
+	assert.NoError(t, validateLayer3HCLShape(dir, gateAllowlist))
+}
+
 // ...and anything not on it is still refused, including functions that
 // merely look harmless. The question is whether the result can depend on
 // something outside the arguments.
