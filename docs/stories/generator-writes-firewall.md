@@ -1,8 +1,7 @@
 ---
 kind: lead
 epic: firewall-end-to-end
-status: blocked
-blocked_by: repair-loop-loses-earlier-fix, layer3-allows-strcontains
+status: ready
 ---
 
 # Does the generator now write a locked-down security group?
@@ -13,9 +12,10 @@ service port only, and `security_group_id` on the server — in both iterations 
 with no criterion asking for it. Earlier the same day a seeded `test` run proved that shape holds
 against real Scaleway: port 22 and 443 blocked, HTTP served.
 
-**Remaining:** a generated `run --holdout` that converges and applies. That run ended `stuck`
-before Layer 3: the generator left out the private network (iterations 1 and 3) and used
-`strcontains()` (iteration 2). Both are now stories.
+**Remaining:** a generated `run --holdout` that converges and applies. The first attempt ended
+`stuck` before Layer 3: the generator left out the private network (iterations 1 and 3) and used
+`strcontains()` (iteration 2). Both are fixed (#271, #272), and the security-group pitfall's example
+now shows the private network beside `security_group_id`.
 
 **Done when:** a generated `run --holdout` of `web-live-paris` passes the holdout against real
 Scaleway. The lead runs it: real cloud.
