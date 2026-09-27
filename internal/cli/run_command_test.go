@@ -600,6 +600,50 @@ func TestRunCommandPassesPreviousIterationFailuresAsGenerateFeedback(t *testing.
 	}
 }
 
+// Run 20260927T163652Z: iteration 1 omits the private network, iteration 2
+// fails elsewhere (a Layer 3 refusal at generate), and iteration 3 must still
+// be told about iteration 1, or it re-derives the omission from scratch.
+func TestRunCommandKeepsEarlierIterationFailuresInGenerateFeedback(t *testing.T) {
+	h := newCommandTestHarness(t)
+
+	const vpcDetail = "scaleway_instance_server.web is not attached to a private network"
+	const refusal = "layer 3 refuses this configuration: server_ips calls strcontains()"
+	var requests []generator.Request
+	opts := isolatedRunOpts(h, func(cfg config.Config) config.Config {
+		cfg.Agent.RepairIterationsMax = 3
+		return cfg
+	})
+	opts.deps = RuntimeDependencies{
+		Generator: generator.SeedGeneratorFunc(func(_ context.Context, req generator.Request) (*generator.GeneratedCode, error) {
+			requests = append(requests, req)
+			if req.Iteration == 2 {
+				return nil, errors.New(refusal)
+			}
+			return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte("terraform {}\n")}}, nil
+		}),
+		Static: &fakeStaticHarness{
+			err: &harness.StageError{
+				StageResult: harness.StageResult{Stage: "validate", Cmd: []string{"tofu", "validate"}},
+				Err:         errors.New(vpcDetail),
+			},
+		},
+		MockDeploy: &fakeMockDeployHarness{},
+		Destroy:    &fakeDestroyHarness{},
+	}
+
+	cmd := newRunCommandForTest(opts)
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{h.ScenarioPath, "--config", h.ConfigPath})
+
+	require.Error(t, cmd.Execute())
+	require.Len(t, requests, 3)
+	assert.Contains(t, string(requests[1].FeedbackJSON), vpcDetail)
+	third := string(requests[2].FeedbackJSON)
+	assert.Contains(t, third, "strcontains()", "iteration 2's failure must reach iteration 3")
+	assert.Contains(t, third, vpcDetail, "iteration 1's failure must still reach iteration 3")
+}
+
 func TestRunCommandDefaultRuntimeUsesConcreteGeneratorDependency(t *testing.T) {
 	h := newCommandTestHarness(t)
 	opts := isolatedRunOpts(h, nil)

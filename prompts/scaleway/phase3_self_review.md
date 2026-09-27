@@ -25,9 +25,9 @@ The following are the EXACT resource schemas from the Scaleway OpenTofu provider
 {{end}}
 
 {{if .FeedbackJSON}}
-## Previous Iteration Feedback
+## Earlier Iteration Feedback
 
-The previous iteration's generated code failed validation. Pay special attention to these failures during your review.
+Every failure this run has produced so far, from every earlier iteration; `stage` names the iteration. A failure from an earlier iteration may already have been fixed by a later attempt that then failed elsewhere: keep that fix, or the failure comes back. Pay special attention to these failures during your review.
 
 ```json
 {{.FeedbackJSON}}

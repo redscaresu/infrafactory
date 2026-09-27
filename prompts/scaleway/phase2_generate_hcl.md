@@ -27,9 +27,9 @@ The following are the EXACT resource schemas from the Scaleway OpenTofu provider
 {{end}}
 
 {{if .FeedbackJSON}}
-## Previous Iteration Feedback
+## Earlier Iteration Feedback
 
-The previous iteration's generated code failed validation. These failures indicate what went wrong — fix the root causes in your generated HCL. Re-derive from scratch — do not patch.
+Every failure this run has produced so far, from every earlier iteration; `stage` names the iteration. A failure from an earlier iteration may already have been fixed by a later attempt that then failed elsewhere: keep that fix, or the failure comes back. These failures indicate what went wrong — fix the root causes in your generated HCL. Re-derive from scratch — do not patch.
 
 ```json
 {{.FeedbackJSON}}

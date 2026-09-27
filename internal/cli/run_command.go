@@ -177,6 +177,11 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 	// shape a repair loop actually gets stuck in.
 	var failureHistory []feedback.FailureSignature
 	var previousIterationFailures []FailureSummary
+	// Every distinct failure of the run so far, fed to each regeneration.
+	// The generator re-derives from scratch, so a correction iteration N
+	// made is lost the moment N+1 fails elsewhere unless N's failure is
+	// still in the prompt.
+	var repairFeedback []FailureSummary
 	var iterationHistory []feedback.IterationResult
 	completed := 0
 	terminalReason := ""
@@ -195,7 +200,7 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 			Iteration: iteration,
 		})
 		completed = iteration
-		stages, failures := runIteration(cmd.Context(), runID, iteration, sc.Name, scenarioPath, runtime, store, captureLLMRaw, previousIterationFailures, mode.Mode, controls)
+		stages, failures := runIteration(cmd.Context(), runID, iteration, sc.Name, scenarioPath, runtime, store, captureLLMRaw, repairFeedback, mode.Mode, controls)
 		allStages = append(allStages, stages...)
 
 		if err := persistRunIteration(store, sc.Name, runID, iteration, stages, failures); err != nil {
@@ -389,6 +394,7 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 		}
 		failureHistory = append(failureHistory, feedback.FailureSignatures(currentFailures)...)
 		previousIterationFailures = append(previousIterationFailures[:0], failures...)
+		repairFeedback = appendDistinctFailures(repairFeedback, failures)
 
 		if failedIterations >= repairIterationsMax {
 			terminalReason = "repair_budget_exhausted"
@@ -1037,7 +1043,7 @@ func runIteration(
 	runtime *CommandRuntime,
 	store *runstore.FilesystemStore,
 	captureLLMRaw bool,
-	previousIterationFailures []FailureSummary,
+	feedbackFailures []FailureSummary,
 	mode runMode,
 	controls runControls,
 ) ([]StageSummary, []FailureSummary) {
@@ -1092,7 +1098,7 @@ func runIteration(
 			switch step.name {
 			case "generate":
 				var generated *generator.GeneratedCode
-				_, generated, err = generateAndWriteFilesWithResult(ctx, runtime, scenarioPath, iteration, previousIterationFailures, generatedFileWriteModeForRunMode(mode))
+				_, generated, err = generateAndWriteFilesWithResult(ctx, runtime, scenarioPath, iteration, feedbackFailures, generatedFileWriteModeForRunMode(mode))
 				if err == nil {
 					err = store.WriteGeneratedFiles(scenarioName, runID, generated.Files)
 				}
@@ -1362,6 +1368,26 @@ func pitfallResourceMatchesCloud(resource, cloud string) bool {
 	default:
 		return true
 	}
+}
+
+// appendDistinctFailures adds the failures history has not seen, keyed
+// like the terminal harvest so a cosmetic shift in detail is not new.
+func appendDistinctFailures(history, failures []FailureSummary) []FailureSummary {
+	seen := make(map[string]struct{}, len(history))
+	key := func(f FailureSummary) string {
+		return f.Check + "|" + f.Resource + "|" + feedback.NormalizeDetail(f.Detail)
+	}
+	for _, f := range history {
+		seen[key(f)] = struct{}{}
+	}
+	for _, f := range failures {
+		if _, ok := seen[key(f)]; ok {
+			continue
+		}
+		seen[key(f)] = struct{}{}
+		history = append(history, f)
+	}
+	return history
 }
 
 func toFeedbackFailures(failures []FailureSummary) []feedback.Failure {
