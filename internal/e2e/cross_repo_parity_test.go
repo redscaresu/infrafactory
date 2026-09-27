@@ -1,12 +1,16 @@
 package e2e
 
 import (
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestCrossRepoParity_EveryLandedServiceHasScenario asserts that every
@@ -64,31 +68,86 @@ func TestCrossRepoParity_EveryLandedServiceHasScenario(t *testing.T) {
 				t.Fatalf("LandedServices is empty in %s — manifest parse likely broken", manifestPath)
 			}
 
-			var missing []string
-			for _, service := range landed {
-				if reason, exempt := fake.exempt[service]; exempt {
-					if reason == "" {
-						t.Errorf("service %q is in exempt list with empty reason — every exemption must explain why no scenario exists", service)
-					}
-					continue
-				}
-				scenarios, mapped := fake.mapping[service]
-				if !mapped {
-					missing = append(missing, service+" (no entry in cloudParityMap — add a scenario or an exemption)")
-					continue
-				}
-				for _, scenario := range scenarios {
-					if _, err := os.Stat(filepath.Join(scenariosDir, scenario)); err != nil {
-						missing = append(missing, service+" → "+scenario+" (mapped but file missing)")
-					}
-				}
-			}
-			if len(missing) > 0 {
-				sort.Strings(missing)
+			if missing := parityGaps(fake, landed, scenariosDir); len(missing) > 0 {
 				t.Fatalf("%s landed services without infrafactory scenario coverage:\n  - %s\n\nFix by adding scenarios/training/<cloud>-<service>.yaml AND a cloudParityMap entry, OR by adding the service to exemptServices with a reason.", fake.name, strings.Join(missing, "\n  - "))
 			}
 		})
 	}
+}
+
+// TestCrossRepoParity_FakeawsStepOneServices runs the fakeaws parity
+// check without a sibling checkout, so CI proves the sts and ssm
+// exemptions exist, with reasons, before fakeaws lands either service.
+func TestCrossRepoParity_FakeawsStepOneServices(t *testing.T) {
+	t.Parallel()
+
+	scenariosDir := filepath.Join(RepoRoot(t), "scenarios", "training")
+	var fakeaws fakeRepoSpec
+	for _, spec := range fakeRepoSpecs() {
+		if spec.name == "fakeaws" {
+			fakeaws = spec
+		}
+	}
+	require.NotNil(t, fakeaws.exempt, "fakeRepoSpecs has no fakeaws entry")
+
+	// fakeaws LandedServices as of this test, plus the two step-one services.
+	landed := []string{"dynamodb", "ec2", "eks", "iam", "kms", "rds", "route53", "s3", "secretsmanager", "sqs", "sts", "ssm"}
+
+	cases := []struct {
+		name    string
+		mutate  func(exempt map[string]string)
+		wantGap string
+	}{
+		{name: "exemptions as written", mutate: func(map[string]string) {}},
+		{name: "sts exemption removed", mutate: func(e map[string]string) { delete(e, "sts") }, wantGap: "sts"},
+		{name: "ssm exemption removed", mutate: func(e map[string]string) { delete(e, "ssm") }, wantGap: "ssm"},
+		{name: "sts reason empty", mutate: func(e map[string]string) { e["sts"] = "" }, wantGap: "sts"},
+		{name: "ssm reason empty", mutate: func(e map[string]string) { e["ssm"] = "" }, wantGap: "ssm"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			spec := fakeaws
+			spec.exempt = maps.Clone(fakeaws.exempt)
+			tc.mutate(spec.exempt)
+
+			gaps := parityGaps(spec, landed, scenariosDir)
+			if tc.wantGap == "" {
+				assert.Empty(t, gaps)
+				return
+			}
+			require.Len(t, gaps, 1)
+			assert.True(t, strings.HasPrefix(gaps[0], tc.wantGap+" "), "gap %q does not name %s", gaps[0], tc.wantGap)
+		})
+	}
+}
+
+// parityGaps returns, sorted, every landed service that has neither an
+// exemption with a reason nor a mapping whose scenario files exist
+// under scenariosDir.
+func parityGaps(spec fakeRepoSpec, landed []string, scenariosDir string) []string {
+	var missing []string
+	for _, service := range landed {
+		if reason, exempt := spec.exempt[service]; exempt {
+			if reason == "" {
+				missing = append(missing, service+" (exempt with an empty reason — every exemption must explain why no scenario exists)")
+			}
+			continue
+		}
+		scenarios, mapped := spec.mapping[service]
+		if !mapped {
+			missing = append(missing, service+" (no entry in cloudParityMap — add a scenario or an exemption)")
+			continue
+		}
+		for _, scenario := range scenarios {
+			if _, err := os.Stat(filepath.Join(scenariosDir, scenario)); err != nil {
+				missing = append(missing, service+" → "+scenario+" (mapped but file missing)")
+			}
+		}
+	}
+	sort.Strings(missing)
+	return missing
 }
 
 type fakeRepoSpec struct {
@@ -121,6 +180,15 @@ func fakeRepoSpecs() []fakeRepoSpec {
 				// the aws_kms_key resource that the LLM declares to
 				// satisfy the encryption policy. No standalone scenario.
 				"kms": "exercised transitively by aws-full-stack and other encryption-required scenarios",
+				// sts backs the provider's own GetCallerIdentity call, made when
+				// it configures to learn the account id; no scenario declares an
+				// STS resource.
+				"sts": "provider-internal GetCallerIdentity exercised transitively by every AWS scenario; no STS resource to declare",
+				// ssm backs the public-parameter AMI lookup
+				// (data "aws_ssm_parameter") the AWS web stack resolves its
+				// AL2023 image through; it is a data source, not a scenario
+				// subject.
+				"ssm": "read through data aws_ssm_parameter to resolve the AL2023 AMI; a lookup, not a scenario subject",
 			},
 		},
 		{
