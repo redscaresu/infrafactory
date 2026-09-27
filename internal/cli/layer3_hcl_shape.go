@@ -14,6 +14,8 @@ import (
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/hclsyntax"
 	"github.com/zclconf/go-cty/cty"
+
+	"github.com/redscaresu/infrafactory/internal/harness"
 )
 
 // Layer 3 applies HCL that can arrive from a pull request (the S144 gate
@@ -108,13 +110,9 @@ var layer3SafeProviderAttrs = map[string]bool{
 // checking only the server lets a literal private_network_id attach the
 // run's server to a network the run does not own and will not sweep.
 // Same for a frontend, which names a backend as well as a load balancer.
-var layer3ChildScopedTypes = map[string][]string{
-	"scaleway_lb_backend":           {"lb_id"},
-	"scaleway_lb_frontend":          {"lb_id", "backend_id"},
-	"scaleway_lb_route":             {"frontend_id", "backend_id"},
-	"scaleway_lb_certificate":       {"lb_id"},
-	"scaleway_instance_private_nic": {"server_id", "private_network_id"},
-}
+//
+// Shared with the config-free destroy, which admits these by type.
+var layer3ChildScopedTypes = harness.ChildScopedTypes
 
 // layer3ProjectExemptTypes carry no project binding of any kind.
 //

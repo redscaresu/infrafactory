@@ -277,7 +277,9 @@ type terraformState struct {
 }
 
 type terraformResource struct {
+	Mode      string                      `json:"mode"`
 	Type      string                      `json:"type"`
+	Provider  string                      `json:"provider"`
 	Instances []terraformResourceInstance `json:"instances"`
 }
 

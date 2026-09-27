@@ -217,7 +217,7 @@ func withSandboxInterruptGuard(
 		// can fail here -- the state may be mid-write -- and an empty
 		// project id just means no purge, never a skipped destroy.
 		cleanupTarget, _ := harness.CaptureSweepTarget(workDir)
-		_, purged, destroyErr := destroySandbox(
+		destroyResult, purged, destroyErr := destroySandbox(
 			context.Background(), runtime, workDir, sandboxEnv, sweepTargetProjectID(cleanupTarget))
 		if destroyErr != nil {
 			reportAbandonedResources(out, statePath, destroyErr)
@@ -225,6 +225,9 @@ func withSandboxInterruptGuard(
 		}
 		if len(purged) > 0 {
 			_, _ = fmt.Fprintf(out, "%s\n", autoCreatedPurgeStage(purged).Detail)
+		}
+		if destroyResult != nil && destroyResult.WithoutConfig != "" {
+			_, _ = fmt.Fprintf(out, "%s\n", withoutConfigStage(destroyResult.WithoutConfig).Detail)
 		}
 		_, _ = fmt.Fprintf(out, "Cleanup destroy completed.\n")
 	}

@@ -139,14 +139,24 @@ func (f *fakeSandboxDeployHarness) Run(ctx context.Context, workDir string, _ ma
 }
 
 type fakeSandboxDestroyHarness struct {
-	result  *harness.SandboxDestroyResult
-	err     error
-	calls   int
-	lastCtx context.Context
+	result             *harness.SandboxDestroyResult
+	err                error
+	calls              int
+	withoutConfigCalls int
+	lastCtx            context.Context
 }
 
 func (f *fakeSandboxDestroyHarness) Run(ctx context.Context, _ string, _ map[string]string) (*harness.SandboxDestroyResult, error) {
 	f.calls++
+	f.lastCtx = ctx
+	return f.result, f.err
+}
+
+// RunWithoutConfig has the same outcome as Run: a stand-in whose destroy
+// fails fails every way. destroy_retry_test's sequencedDestroy is the
+// fake that separates the two.
+func (f *fakeSandboxDestroyHarness) RunWithoutConfig(ctx context.Context, _, _ string, _ map[string]string) (*harness.SandboxDestroyResult, error) {
+	f.withoutConfigCalls++
 	f.lastCtx = ctx
 	return f.result, f.err
 }

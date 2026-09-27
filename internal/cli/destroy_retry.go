@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -41,6 +42,9 @@ const runProjectTimeout = 20 * time.Second
 // is stale, hand-edited, or names the organization's default project as
 // its scaleway_account_project gets no purge at all.
 //
+// When both fail, it destroys from the state without the configuration
+// (see below), under the same guard.
+//
 // When projectID is empty -- nothing to scope to -- the first result
 // stands.
 // The returned slice names what the purge removed, so callers can put it
@@ -61,6 +65,44 @@ func destroySandbox(
 	// would have fixed half the outage.
 	projectID = resolveRunProjectID(workDir, projectID)
 
+	result, removed, err := destroyAndPurge(ctx, runtime, workDir, sandboxEnv, projectID)
+	if err == nil || projectID == "" {
+		return result, removed, err
+	}
+
+	// Last resort: destroy what the state records without the
+	// configuration. `tofu destroy` evaluates the whole configuration
+	// first, so one that cannot evaluate fails the destroy -- and the
+	// retry above -- exactly as it failed the apply. Run
+	// 20260927T171147Z applied a full stack, failed on an expression,
+	// and kept all of it that way. The purge's guard, for the purge's
+	// reason: this deletes with the configuration nowhere in the loop.
+	if assertErr := assertRunProjectDeletable(ctx, runtime, workDir, projectID, sandboxEnv); assertErr != nil {
+		logLayer3Remediation(runtime, "layer3_destroy_without_config", "skipped",
+			fmt.Sprintf("project %s did not pass the deletable check: %v", projectID, assertErr))
+		return result, removed, withFallbackFailure(err, assertErr)
+	}
+	fallback, fallbackErr := runtime.Deps.SandboxDestroy.RunWithoutConfig(ctx, workDir, projectID, sandboxEnv)
+	if fallbackErr != nil {
+		logLayer3Remediation(runtime, "layer3_destroy_without_config", "failed",
+			fmt.Sprintf("project=%s err=%v", projectID, fallbackErr))
+		return result, removed, withFallbackFailure(err, fallbackErr)
+	}
+	fallback.WithoutConfig = sandboxDestroyErrDetail(err)
+	logLayer3Remediation(runtime, "layer3_destroy_without_config", "success",
+		fmt.Sprintf("project=%s; the ordinary destroy had failed: %s", projectID, fallback.WithoutConfig))
+	return fallback, removed, nil
+}
+
+// destroyAndPurge is the ordinary destroy, plus the auto-created purge
+// and one retry when the purge removed something.
+func destroyAndPurge(
+	ctx context.Context,
+	runtime *CommandRuntime,
+	workDir string,
+	sandboxEnv map[string]string,
+	projectID string,
+) (*harness.SandboxDestroyResult, []string, error) {
 	// Logged, not just staged.
 	result, err := runtime.Deps.SandboxDestroy.Run(ctx, workDir, sandboxEnv)
 	if err == nil || projectID == "" {
@@ -118,6 +160,16 @@ func autoCreatedPurgeStage(removed []string) StageSummary {
 	}
 }
 
+// withoutConfigStage records that the destroy had to bypass the
+// configuration, and why.
+func withoutConfigStage(reason string) StageSummary {
+	return StageSummary{
+		Layer: "sandbox_deploy", Stage: harness.WithoutConfigStage, Status: StageStatusPass,
+		Detail: "tofu destroy failed, so everything " + harness.LiveStateFilename +
+			" recorded was destroyed without evaluating the configuration. It failed with: " + reason,
+	}
+}
+
 // sweepTargetProjectID is nil-safe: capture can fail, and a failed
 // capture must not stop the destroy it precedes.
 func sweepTargetProjectID(target *harness.SweepTarget) string {
@@ -152,6 +204,10 @@ func resolveRunProjectID(workDir, projectID string) string {
 // stages -- so after a failed teardown the record could not say whether
 // either remediation had even been attempted.
 func logPurgeOutcome(runtime *CommandRuntime, status, detail string) {
+	logLayer3Remediation(runtime, "layer3_auto_created_purge", status, detail)
+}
+
+func logLayer3Remediation(runtime *CommandRuntime, event, status, detail string) {
 	if runtime == nil || runtime.Logger == nil {
 		return
 	}
@@ -162,8 +218,33 @@ func logPurgeOutcome(runtime *CommandRuntime, status, detail string) {
 	runtime.Logger.Log(LogEntry{
 		Level:   level,
 		Command: "run",
-		Event:   "layer3_auto_created_purge",
+		Event:   event,
 		Status:  status,
 		Detail:  detail,
 	})
+}
+
+// withFallbackFailure keeps the ordinary destroy's error -- it names what
+// the configuration got wrong -- and adds why destroying without the
+// configuration did not remove the stack either, so the record shows the
+// fallback was tried or refused.
+func withFallbackFailure(err, fallbackErr error) error {
+	note := "destroying from the state without the configuration did not work either [" + sandboxDestroyErrDetail(fallbackErr) + "]"
+	var destroyErr *harness.SandboxDestroyError
+	if !errors.As(err, &destroyErr) {
+		return fmt.Errorf("%w; %s", err, note)
+	}
+	return &harness.SandboxDestroyError{
+		Stage:   destroyErr.Stage,
+		Destroy: destroyErr.Destroy,
+		Err:     fmt.Errorf("%w; %s", destroyErr.Err, note),
+	}
+}
+
+func sandboxDestroyErrDetail(err error) string {
+	var destroyErr *harness.SandboxDestroyError
+	if errors.As(err, &destroyErr) {
+		return stderrFailureDetail(destroyErr.Err, destroyErr.Destroy.Stderr)
+	}
+	return err.Error()
 }
