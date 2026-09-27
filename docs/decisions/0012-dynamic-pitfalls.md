@@ -330,3 +330,14 @@ Together with the existing `TestPitfallsNoHumanSeeding` (M91) and
 `TestPitfallsNoMockActionableSeeds` (S55+), the pitfalls files are
 now ratcheted on three orthogonal invariants: no human-authored
 seeds, no mock-actionable seeds, no OPA-duplication.
+
+## Amendment (2026-09-27) — a learned entry never replaces one
+
+`AppendPitfall` used to replace an entry in place when the new rule was a better form of it:
+a prescriptive rule over a same-resource stderr dump, or an N10 fix over any same-resource
+non-fix entry. The second path also caught reviewed `source: avoid` guardrails, and it ran
+before any dedup, so a run that cleared two near-identical failures wrote the same fix twice
+over two different entries. It now only appends. The better form lands beside the older one:
+the word-share dedup skips entries the candidate supersedes, and an identical rule is never
+written twice. The S69 note above that the fix "replaces" the earlier template entry no longer
+holds; both stay.
