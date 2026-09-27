@@ -88,7 +88,7 @@ If either fails, restore the repo to a green baseline before starting a new tick
 - `CLAUDECODE` env var blocks nested claude — `unset CLAUDECODE` before `go run ./cmd/infrafactory run`.
 - Mock rebuild required after any sibling-mock code change: `pkill -f <mock-bin>; cd ../<mock> && go build && ./<bin> --port <port> &`. For containerised runs use `make mocks-down-containers && make mocks-up-containers`.
 - Build tag: `-tags noui` required when `ui/build/` doesn't exist. The `!noui` build requires `ui/build/`.
-- Playwright e2e tests live in `ui/e2e/` (currently 51 tests, growing). Run with `make test` (Go unit + UI unit + Playwright).
+- Playwright e2e tests live in `ui/e2e/`. `make test` runs Go unit + UI unit + Playwright. The pre-commit hook tests only the Go packages a commit touches (`PRECOMMIT_FULL=1` for everything); CI runs the full suite and blocks merge (ADR-0035).
 - Visual baselines under `ui/e2e/visual.spec.ts-snapshots/` render live UI state — adding scenario YAMLs OR completing runs (which add rows to the Runs page) drifts them. Pre-commit hook auto-refreshes when `scenarios/training/*.yaml` changes (M56); for other drift, run `make ui-baseline-update` manually.
 - `make run` builds everything and starts the UI at `http://127.0.0.1:4173`.
 - `make up` is the one-shot bring-up: mockway + fakegcp + fakeaws + fakegenesys + SeaweedFS + UI in one command. `make down` tears down the mocks (Ctrl-C stops the UI).
@@ -141,6 +141,8 @@ How each sibling fake decides what wire shape a handler SHOULD return (the smoke
 Detail in each sibling's `AGENTS.md` § "Fidelity strategy".
 
 ## ADR Trigger Threshold
+A change under `internal/cli/`, `cmd/infrafactory/` or `infrafactory.yaml` that crosses none of the lines below carries `ADR: none — <reason>` in its commit message instead of an ADR edit (ADR-0035).
+
 Create/update ADR when change affects:
 - public CLI contract/wiring
 - cross-package architecture boundaries

@@ -7,7 +7,7 @@
 #   5. large-file     — reject accidentally-staged binaries > 5MB
 #   6. yaml/json      — syntax-check staged config files
 #   7. visual baseline auto-refresh — if scenarios/training/*.yaml changed
-#   8. make test      — full suite (Go unit + UI unit + Playwright), last
+#   8. go test        — the packages this commit touches (PRECOMMIT_FULL=1: make test)
 #
 # Wired via `git config core.hooksPath .githooks` — run `make install-hooks`
 # once per clone.
@@ -121,7 +121,28 @@ if [ -n "$SCENARIO_CHANGES" ]; then
   echo ""
 fi
 
-# ---------- 8. make test ----------
-echo "Running make test..."
-make test
-echo "All tests passed."
+# ---------- 8. tests for the packages this commit touches ----------
+# The full suite (Go -race, UI unit, Playwright) is a required CI check and
+# a red PR cannot merge, so running it here too only doubled the wait --
+# three to four minutes per commit -- and collided with any UI already on
+# :4173. Here: the Go packages with staged files, plus UI unit tests when
+# ui/src changed. PRECOMMIT_FULL=1 runs `make test` as before.
+if [ "${PRECOMMIT_FULL:-0}" = "1" ]; then
+  echo "Running make test (PRECOMMIT_FULL=1)..."
+  make test
+else
+  # --no-renames lists a rename as delete + add, so a package that only
+  # LOST a file is still tested; directories that no longer exist are dropped.
+  PKGS=$(git diff --cached --name-only --no-renames | grep -E '\.go$' | xargs -n1 dirname 2>/dev/null | sort -u | while read -r d; do [ -d "$d" ] && echo "./$d"; done || true)
+  if [ -n "$PKGS" ]; then
+    echo "Running go test for touched packages:"
+    echo "$PKGS" | sed 's/^/  /'
+    # shellcheck disable=SC2086
+    go test -tags noui $PKGS
+  fi
+  if git diff --cached --name-only | grep -q '^ui/src/'; then
+    echo "Running UI unit tests..."
+    (cd ui && npm test --silent)
+  fi
+fi
+echo "Pre-commit checks passed. The full suite runs in CI."
