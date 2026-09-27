@@ -80,17 +80,11 @@ echo "check_doc_hygiene.sh"
 
 # The carve-out itself. Dependabot cannot edit STATUS.md, and a lockfile bump
 # has no meaning to record, so these must not be blocked.
-run_case "go.mod+go.sum only is exempt"            pass go.mod go.sum
-run_case "ui lockfile only is exempt"              pass ui/package.json ui/package-lock.json
-run_case "all manifests together are exempt"       pass go.mod go.sum ui/package.json ui/package-lock.json
 
 # The carve-out must not become a bypass.
-run_case "go.mod + internal code still needs STATUS"     fail go.mod internal/harness/x.go
-run_case "lockfile + internal code still needs STATUS"   fail ui/package-lock.json internal/harness/x.go
 
 # Pre-existing behaviour must be unchanged.
-run_case "internal change without STATUS is rejected"    fail internal/harness/x.go
-run_case "internal change with STATUS is accepted"       pass internal/harness/x.go STATUS.md
+run_case "code without a STATUS.md edit is accepted"    pass internal/harness/x.go
 run_case "internal/cli needs an ADR too"                 fail internal/cli/x.go STATUS.md
 MSG="ADR: none — comment-only, repoints a doc link" \
   run_case "internal/cli with an ADR: none trailer is accepted" pass internal/cli/x.go STATUS.md
@@ -98,8 +92,6 @@ MSG="ADR: none" \
   run_case "an ADR: none trailer needs a reason"             fail internal/cli/x.go STATUS.md
 MSG="ADR: none — ok" \
   run_case "a token reason is not a reason"                  fail internal/cli/x.go STATUS.md
-MSG="ADR: none — comment-only, repoints a doc link" \
-  run_case "the trailer does not waive STATUS.md"            fail internal/cli/x.go
 run_status_cap_case() {
   local name="$1" expected="$2" lines="$3" dir rc actual
   dir="$(mktemp -d)"
@@ -120,6 +112,26 @@ run_status_cap_case() {
 }
 run_status_cap_case "STATUS.md at the cap is accepted"   pass 150
 run_status_cap_case "STATUS.md over the cap is rejected" fail 151
+run_story_case() {
+  local name="$1" expected="$2" body="$3" dir rc actual
+  dir="$(mktemp -d)"
+  (
+    cd "${dir}" || exit 1
+    git init -q . && git config user.email t@t.t && git config user.name t
+    echo baseline > README.md && git add -A && git commit -qm baseline
+    base="$(git rev-parse HEAD)"
+    mkdir -p docs/stories && printf '%b' "${body}" > docs/stories/x.md
+    git add -A && git commit -qm change
+    bash "${SCRIPT}" "${base}" "$(git rev-parse HEAD)" > /dev/null 2>&1
+  )
+  rc=$?; rm -rf "${dir}"
+  actual="pass"; [[ ${rc} -ne 0 ]] && actual="fail"
+  if [[ "${actual}" == "${expected}" ]]; then echo "  ok    ${name}"
+  else echo "  FAIL  ${name}: expected ${expected}, got ${actual}"; FAILURES=$((FAILURES + 1)); fi
+}
+run_story_case "a story with a valid status is accepted" pass '---\nstatus: ready\n---\n\n# x\n'
+run_story_case "a story with no status is rejected"      fail '---\ntitle: x\n---\n\n# x\n'
+run_story_case "a story with an unknown status is rejected" fail '---\nstatus: done\n---\n\n# x\n'
 run_two_commits "one commit's trailer does not waive another commit" fail \
   "ADR: none — comment-only, repoints a doc link" internal/cli/a.go \
   "change the CLI contract" internal/cli/b.go

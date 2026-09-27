@@ -8,14 +8,14 @@ Thanks for considering a contribution! This document is the human contributor's 
 2. **Pick a focused change.** Mixing a feature + refactor + dependency bump in one PR is the fastest way to get blocked on review.
 3. **Add tests** with behavior changes. Coverage is enforced (`make test` runs Go unit + UI unit + Playwright e2e).
 4. **CI runs the full suite** and blocks merge; `make test` runs it locally. The pre-commit hook runs `gitleaks`, `go vet` and the tests of the packages you touched.
-5. **Update `STATUS.md`**: one line in § Recent, and § Open if your change opens or closes an item.
+5. **If your change finishes an item in `docs/stories/`, delete its file** in the same PR. Your PR title is the change log.
 
 ## First-time contributors
 
 If this is your first PR:
 
 - Read `README.md` (architecture + quickstart).
-- Read `STATUS.md` § Open for what is being worked on.
+- Browse `docs/stories/` for open work; `status: ready` items can be picked up.
 - Look for issues labelled `good first issue` on GitHub. They're scoped to land in one focused PR each.
 - Run `make up` to bring up the four-mock stack (mockway, fakegcp, fakeaws, SeaweedFS) plus the UI in one shot, then `infrafactory run scenarios/training/web-app-paris.yaml` to see the run loop end-to-end. `make down` tears it all down.
 
@@ -50,7 +50,6 @@ make run             # builds + starts the UI at http://127.0.0.1:4173
 5. **Keep errors explicit and actionable.** Wrapped with `fmt.Errorf("%w: %v", sentinel, cause)` where appropriate.
 6. **If the change is decision-impacting** (CLI surface, schema, cross-package boundary, dependency-strategy), add or update an ADR under `docs/decisions/`.
 7. **If a major architecture/contract shifted**, update `CONCEPT.md`.
-8. **Update `STATUS.md`** at the end of a meaningful session.
 10. **Open a PR** with a clear summary + test plan (see PR template).
 
 ## Commit messages
