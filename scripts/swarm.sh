@@ -106,6 +106,9 @@ story_brief() {
   cat <<EOF
 Implement docs/stories/${slug}.md. Its **Done when** is the acceptance.
 
+Title your commit and PR with a plain description of the change, and no slice number: slice
+numbers (S###) belong to the lead, and two agents choosing one produce duplicates in the log.
+
 Rules: read AGENTS.md first. Delete docs/stories/${slug}.md in your PR, and nothing else under
 docs/stories/. Never merge (the lead merges). Never touch real cloud or credentials: do not source
 ~/.config/infrafactory/*.env, and do not run deploy or anything with sandbox_deploy enabled. Run
