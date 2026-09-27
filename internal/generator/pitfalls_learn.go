@@ -841,8 +841,11 @@ func pitfallSource(p LearnedPitfall) string {
 	return p.Source
 }
 
-// AppendPitfall appends a learned pitfall to the YAML file if it doesn't
-// already exist (deduplication by resource + similar rule text).
+// AppendPitfall appends a learned pitfall to the YAML file unless an
+// equivalent one is already there. It never replaces or removes an
+// existing entry: the file also holds reviewed rules (`source: avoid`
+// guardrails, hand edits) that a learned rule has no standing to
+// overwrite. A better form arrives beside the older one instead.
 func AppendPitfall(pitfallsDir, cloud string, pitfall LearnedPitfall) error {
 	if pitfallsDir == "" || cloud == "" {
 		return nil
@@ -867,48 +870,6 @@ func AppendPitfall(pitfallsDir, cloud string, pitfall LearnedPitfall) error {
 		}
 	}
 
-	// Verbatim → prescriptive upgrade: when the new candidate is a
-	// prescriptive rule (no terraform box-drawing chars, no raw stderr
-	// prefix) and a same-resource entry is the old descriptive fallback
-	// (verbatim diagnostic dump), REPLACE the verbatim entry rather than
-	// dedup-skipping. The old shape would otherwise permanently shadow
-	// the prescriptive form because isDuplicate matches on shared words
-	// — and a verbatim dump shares the resource type / argument name
-	// with any subsequent prescriptive rule about the same failure.
-	if !isVerbatimFallback(pitfall.Rule) {
-		for i, entry := range pf.Pitfalls {
-			if entry.Resource == pitfall.Resource && isVerbatimFallback(entry.Rule) {
-				pf.Pitfalls[i] = PitfallEntry{
-					Resource:       pitfall.Resource,
-					Rule:           pitfall.Rule,
-					Source:         pitfallSource(pitfall),
-					DiscoveredFrom: pitfall.DiscoveredFrom,
-				}
-				return writePitfallsFile(pitfallsDir, filePath, cloud, &pf)
-			}
-		}
-	}
-
-	// learned → fix upgrade: a prescriptive HCL-snippet
-	// rule (N10's FixSource) strictly dominates a same-resource
-	// symptom-only `descriptive` entry. Without this, the older descriptive
-	// rule's significant-word overlap with the prescriptive snippet trips
-	// isDuplicate and the diff entry is silently dropped. Replace in
-	// place: keeps the YAML file flat and surfaces the actionable form.
-	if pitfall.Source == FixSource {
-		for i, entry := range pf.Pitfalls {
-			if entry.Resource == pitfall.Resource && entry.Source != FixSource {
-				pf.Pitfalls[i] = PitfallEntry{
-					Resource:       pitfall.Resource,
-					Rule:           pitfall.Rule,
-					Source:         pitfallSource(pitfall),
-					DiscoveredFrom: pitfall.DiscoveredFrom,
-				}
-				return writePitfallsFile(pitfallsDir, filePath, cloud, &pf)
-			}
-		}
-	}
-
 	// Deduplication: check if a similar pitfall already exists.
 	if isDuplicate(pf.Pitfalls, pitfall) {
 		return nil
@@ -926,8 +887,7 @@ func AppendPitfall(pitfallsDir, cloud string, pitfall LearnedPitfall) error {
 }
 
 // writePitfallsFile marshals the pitfalls file and writes it atomically
-// via a same-directory temp + rename. Used by AppendPitfall on both the
-// append path and the verbatim→prescriptive upgrade path.
+// via a same-directory temp + rename.
 func writePitfallsFile(pitfallsDir, filePath, cloud string, pf *PitfallsFile) error {
 	out, err := yaml.Marshal(pf)
 	if err != nil {
@@ -977,22 +937,27 @@ func writePitfallsFile(pitfallsDir, filePath, cloud string, pf *PitfallsFile) er
 // isVerbatimFallback returns true if a rule is a raw terraform stderr
 // dump (the descriptive fallback ExtractDescriptivePitfall returns when no
 // M97 template fires). Detection signals: terraform box-drawing chars
-// or the "exit status 1 | stderr:" envelope prefix. AppendPitfall uses
-// this to allow a later prescriptive rule to UPGRADE an older verbatim
-// entry rather than dedup-skipping. Without this, once a verbatim entry
-// is in the file for a resource, the same-3-word-share dedup keeps
-// blocking the prescriptive form forever.
+// or the "exit status 1 | stderr:" envelope prefix.
 func isVerbatimFallback(rule string) bool {
 	return strings.ContainsAny(rule, "│╷╵─") ||
 		strings.Contains(rule, "exit status 1 | stderr:")
 }
 
-// isDuplicate returns true if any existing pitfall has the same resource
-// and shares 3+ significant words with the new rule.
+// isDuplicate returns true if an existing same-resource pitfall has the
+// candidate's exact rule, or shares 3+ significant words with it. The
+// word-share check skips entries the candidate supersedes: they always
+// share words with it, so without the skip the better form is never
+// learned.
 func isDuplicate(existing []PitfallEntry, candidate LearnedPitfall) bool {
 	candidateWords := significantWords(candidate.Rule)
 	for _, entry := range existing {
 		if entry.Resource != candidate.Resource {
+			continue
+		}
+		if entry.Rule == candidate.Rule {
+			return true
+		}
+		if supersedes(candidate, entry) {
 			continue
 		}
 		existingWords := significantWords(entry.Rule)
@@ -1007,6 +972,16 @@ func isDuplicate(existing []PitfallEntry, candidate LearnedPitfall) bool {
 		}
 	}
 	return false
+}
+
+// supersedes reports whether candidate is a better form of entry: a
+// prescriptive rule beside a raw stderr dump, or an HCL fix (N10's
+// FixSource) beside a symptom-only rule.
+func supersedes(candidate LearnedPitfall, entry PitfallEntry) bool {
+	if !isVerbatimFallback(candidate.Rule) && isVerbatimFallback(entry.Rule) {
+		return true
+	}
+	return candidate.Source == FixSource && entry.Source != FixSource
 }
 
 // significantWords extracts lowercase words of 4+ characters from text,

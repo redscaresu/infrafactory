@@ -96,8 +96,26 @@ start_agent() {
     herdr agent start "${name}" --kind claude --pane "${pane}" --timeout 60000 -- \
       --model "${model}" --effort "${effort}" --permission-mode auto >/dev/null
   fi
-  herdr agent prompt "${name}" "$(cat "${prompt_file}")" >/dev/null
+  deliver_prompt "${name}" "${prompt_file}"
   echo "${name} ${pane} ${kind}:${model}:${effort}"
+}
+
+# deliver_prompt <name> <prompt-file> — submit the brief and confirm the agent acted on it.
+# `agent start` returns once the agent is ready, but a slow starter (Fable at xhigh) could
+# still drop a prompt sent at once, leaving it idle at an empty prompt while every later
+# `wait` returned immediately. So the submission waits until herdr sees the agent working
+# (or blocked on a question), retries once, and fails loudly rather than reporting success.
+deliver_prompt() {
+  local name="$1" prompt_file="$2" attempt status
+  for attempt in 1 2; do
+    status=$(herdr agent prompt "${name}" "$(cat "${prompt_file}")" --wait --until working --until blocked \
+      --timeout 60000 2>/dev/null | json "d.get('result',{}).get('agent',{}).get('agent_status','')" 2>/dev/null || true)
+    case "${status}" in
+      working|blocked) return 0 ;;
+    esac
+    sleep 5
+  done
+  die "${name}: the brief was not taken up after 2 attempts (status '${status:-none}'); see herdr agent read ${name}"
 }
 
 # The brief every story builder gets. The story file is the task; these are the rules.

@@ -77,6 +77,51 @@ resource "scaleway_lb_backend" "main" {
 	}
 }
 
+// Run 20260927T171147Z, iteration 1, verbatim: the index was guarded, so
+// the old rule passed it, but "" is not an IP. The provider rejected it at
+// apply and again at destroy, and a full stack leaked.
+func TestLayer3RefusesAnEmptyTryFallbackInAnIPField(t *testing.T) {
+	for name, serverIPs := range map[string]string{
+		"verbatim":      `[try(scaleway_instance_server.web.private_ips[0].address, "")]`,
+		"list fallback": `try(scaleway_instance_server.web.private_ips[*].address, [""])`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := validateLayer3HCLShape(writeLayer3Stack(t, `
+resource "scaleway_lb_backend" "web" {
+  lb_id      = scaleway_lb.main.id
+  server_ips = `+serverIPs+`
+}
+`), []string{"scaleway_lb*", "scaleway_instance*"})
+
+			require.Error(t, err, "this shape leaked a real stack")
+			assert.Contains(t, err.Error(), `server_ips falls back to "" inside try(), which is not an IP address`)
+			assert.Contains(t, err.Error(), "scaleway_instance_ip.NAME.address", "and what to do instead")
+		})
+	}
+}
+
+// The two addresses the pitfall prescribes pass, and so does "" where any
+// string is valid: iteration 1's output used it and was not the problem.
+func TestLayer3AcceptsTheAddressesThePitfallPrescribes(t *testing.T) {
+	err := validateLayer3HCLShape(writeLayer3Stack(t, `
+resource "scaleway_lb_backend" "public" {
+  lb_id      = scaleway_lb.main.id
+  server_ips = [scaleway_instance_ip.web.address]
+}
+
+resource "scaleway_lb_backend" "private" {
+  lb_id      = scaleway_lb.main.id
+  server_ips = scaleway_instance_server.web.private_ips[*].address
+}
+
+output "web_private_ip" {
+  value = try(scaleway_instance_server.web.private_ips[0].address, "")
+}
+`), []string{"scaleway_lb*", "scaleway_instance*"})
+
+	assert.NoError(t, err)
+}
+
 // Indexing something known before apply is not the hazard.
 //
 // A rule that refused `var.subnets[0]` would be refused by its users

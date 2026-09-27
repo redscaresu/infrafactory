@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"net"
 	"os"
 	"path/filepath"
 	"slices"
@@ -1092,6 +1093,21 @@ func layer3NestedCostProblems(block *hclsyntax.Block, file, owner string, varDef
 // apply, which is exactly the case that strands things. Indexing one is
 // refused unless it is wrapped: `try(...)` and `one(...)` both make the
 // expression total, so destroy can always evaluate it.
+//
+// # A total expression can still be invalid
+//
+// try() only moves the failure if its fallback is not a value the field
+// accepts. Run 20260927T171147Z wrote
+// `server_ips = [try(scaleway_instance_server.web.private_ips[0].address, "")]`:
+// plan passed while the address was unknown, then the list came back empty,
+// the provider rejected "" as an IP at apply AND again at destroy, and a
+// full stack leaked. So in an IP field a constant try() fallback must be an
+// IP.
+//
+// That catches the shape a generator writes, not every expression that
+// yields a non-IP after apply: `[replace(scaleway_instance_ip.web.address,
+// "/.*/", "")]` does it with no try() at all, and no parse of the HCL can
+// rule that out. Surviving it is teardown's job, not this check's.
 func layer3UndestroyableProblems(block *hclsyntax.Block, file string) []string {
 	problems := make([]string, 0)
 	if block.Body == nil {
@@ -1103,11 +1119,68 @@ func layer3UndestroyableProblems(block *hclsyntax.Block, file string) []string {
 				"%s: %s indexes %s, and a resource attribute can be empty until after apply; `tofu destroy` evaluates the configuration, so if this index fails the stack cannot be destroyed either. Wrap it in try() or one()",
 				file, name, ref))
 		}
+		if !layer3IPField(name) {
+			continue
+		}
+		for _, fallback := range layer3NonIPTryFallbacks(attr.Expr) {
+			problems = append(problems, fmt.Sprintf(
+				"%s: %s falls back to %q inside try(), which is not an IP address; the provider rejects it at apply and again at `tofu destroy`, so the stack cannot be destroyed either. Use an address that exists whenever it is read, such as [scaleway_instance_ip.NAME.address], or a splat like scaleway_instance_server.NAME.private_ips[*].address",
+				file, name, fallback))
+		}
 	}
 	for _, inner := range block.Body.Blocks {
 		problems = append(problems, layer3UndestroyableProblems(inner, file)...)
 	}
 	return problems
+}
+
+// layer3IPField reports whether an attribute holds IP addresses, by name:
+// server_ips, private_ip, ip_address and the like.
+func layer3IPField(name string) bool {
+	return name == "ip" || strings.HasSuffix(name, "_ip") || strings.HasSuffix(name, "_ips") || strings.HasSuffix(name, "ip_address")
+}
+
+// layer3NonIPTryFallbacks reports the constant strings in the fallbacks of
+// every try() in expr that do not parse as an IP address -- whether the
+// fallback is `""` or a collection holding one, like `[""]`.
+func layer3NonIPTryFallbacks(expr hclsyntax.Expression) []string {
+	var found []string
+	_ = hclsyntax.VisitAll(expr, func(node hclsyntax.Node) hcl.Diagnostics {
+		call, ok := node.(*hclsyntax.FunctionCallExpr)
+		if !ok || call.Name != "try" || len(call.Args) < 2 {
+			return nil
+		}
+		for _, arg := range call.Args[1:] {
+			// A nil context evaluates constants only; a reference fails to
+			// evaluate and is not this check's business.
+			if v, diags := arg.Value(nil); !diags.HasErrors() {
+				found = append(found, layer3NonIPStrings(v)...)
+			}
+		}
+		return nil
+	})
+	return found
+}
+
+func layer3NonIPStrings(v cty.Value) []string {
+	if !v.IsWhollyKnown() || v.IsNull() {
+		return nil
+	}
+	if v.Type() == cty.String {
+		if net.ParseIP(v.AsString()) == nil {
+			return []string{v.AsString()}
+		}
+		return nil
+	}
+	if !v.CanIterateElements() {
+		return nil
+	}
+	var found []string
+	for it := v.ElementIterator(); it.Next(); {
+		_, el := it.Element()
+		found = append(found, layer3NonIPStrings(el)...)
+	}
+	return found
 }
 
 func layer3UnguardedResourceIndexes(expr hclsyntax.Expression) []string {
