@@ -177,8 +177,10 @@ effort, § Scoping an epic and § Parallel agents (herdr).
 
 ## Codex review loop (required on every PR)
 
-Every PR gets a codex review loop before merge. No exceptions, including
-docs-only and "obvious" changes.
+Every PR gets a codex review loop before merge, including docs-only and "obvious" changes — with
+one exception: when codex reports a usage limit, the change goes ahead without it rather than
+waiting for the reset. The PR body then says "codex skipped: usage limit", and the lead reviews that
+diff before merging.
 
 ```bash
 codex exec review --base main      # from the PR branch
