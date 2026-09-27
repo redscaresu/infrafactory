@@ -1,0 +1,45 @@
+{
+  "schema": "infrafactory.output.v1",
+  "result": {
+    "command": "run",
+    "scenario": "web-live-paris",
+    "status": "success",
+    "stages": [
+      {
+        "layer": "holdout",
+        "stage": "iteration_1_discovery",
+        "status": "pass",
+        "detail": "1 holdout(s) for web-live-paris"
+      },
+      {
+        "layer": "holdout",
+        "stage": "iteration_1_skipped",
+        "status": "skip",
+        "detail": "earlier checks failed"
+      },
+      {
+        "layer": "holdout",
+        "stage": "iteration_2_discovery",
+        "status": "pass",
+        "detail": "1 holdout(s) for web-live-paris"
+      },
+      {
+        "layer": "holdout",
+        "stage": "iteration_2_web-live-paris-unseen",
+        "status": "pass",
+        "detail": "1 unseen check(s) passed"
+      },
+      {
+        "layer": "run",
+        "stage": "iteration_1_test",
+        "status": "fail"
+      },
+      {
+        "layer": "run",
+        "stage": "iteration_2_test",
+        "status": "pass"
+      }
+    ],
+    "failures": []
+  }
+}

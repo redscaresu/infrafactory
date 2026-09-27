@@ -1,0 +1,104 @@
+provider: scaleway
+pitfalls:
+    - resource: scaleway_instance_server
+      rule: |-
+        Attach `scaleway_instance_server` to its private network with the
+        provider's INLINE block:
+
+          resource "scaleway_instance_server" "web" {
+            private_network { pn_id = scaleway_vpc_private_network.main.id }
+          }
+
+        Up to 8 blocks; with `count` the block comes too. No `project_id`.
+      source: fix
+      discovered_from: web-live-paris
+    - resource: scaleway_instance_server
+      rule: |-
+        Attach a `scaleway_instance_server` to its private network with the
+        provider's INLINE block, not a standalone `scaleway_instance_private_nic`:
+
+          resource "scaleway_instance_server" "web" {
+            private_network { pn_id = scaleway_vpc_private_network.main.id }
+          }
+
+        `vpc_required` accepts either shape, and the Layer 3 gate REFUSES the
+        standalone NIC, so this is not a preference. Up to 8 blocks; with `count`
+        the block comes too. No `project_id`.
+
+        Both shapes destroy cleanly on provider 2.83.0 (measured against real
+        Scaleway 2026-09-20: standalone NIC, 4 added, 4 destroyed). Use the
+        inline block because the gate standardises on it, not because the other
+        one breaks teardown -- it no longer does.
+      source: fix
+      discovered_from: web-live-paris
+    - resource: scaleway_k8s_cluster
+      rule: 'Version and auto_upgrade MUST be consistent: WITHOUT auto_upgrade use a full patch version like "1.31.2"; WITH auto_upgrade enabled use ONLY a minor version like "1.31".'
+      source: descriptive
+      discovered_from: full-stack-paris
+    - resource: scaleway_lb_backend
+      rule: "exit status 1 | stderr: ╷\n│ Error: Invalid index\n│ \n│   on loadbalancer.tf line 19, in resource \"scaleway_lb_backend\" \"web\":\n│   19:     scaleway_instance_server.web_1.private_ips[0].address,\n│     ├────────────────\n│     │ scaleway_instance_serve..."
+      source: descriptive
+      discovered_from: incremental-project-paris
+    - resource: scaleway_lb_backend
+      rule: |-
+        NEVER index a resource attribute directly. Write
+        `try(scaleway_instance_private_nic.web.private_ips[0].address, "")` or
+        `one(...)`, not `scaleway_instance_private_nic.web.private_ips[0].address`.
+
+        Not just about apply failing: `tofu destroy` EVALUATES THE CONFIGURATION
+        rather than replaying state, so an expression that cannot be evaluated
+        breaks destroy too -- what the half-finished apply created cannot be
+        removed, and deleting the run project does not help because Scaleway
+        refuses to delete a project holding resources. Recovery is manual.
+
+        `private_ips` and `private_network` are empty until after apply. `var.` and
+        `local.` are known at plan time and safe to index. The Layer 3 preflight
+        refuses the unguarded form, so generating it fails before anything exists.
+      source: avoid
+      discovered_from: web-live-paris
+    - resource: scaleway_domain_record
+      rule: "exit status 1 | stderr: ╷\n│ Error: scaleway-sdk-go: resource  with ID  is not found\n│ \n│   with scaleway_domain_record.app,\n│   on dns.tf line 1, in resource \"scaleway_domain_record\" \"app\":\n│    1: resource \"scaleway_domain_record\" \"app\" {\n│ \n╵"
+      source: descriptive
+      discovered_from: web-app-paris
+    - resource: scaleway_rdb_instance
+      rule: |-
+        exit status 1 | stderr: ╷ Fix observed in scenario "full-stack-paris": add the following HCL.
+        resource "scaleway_rdb_instance" "postgres" {
+          name               = "postgres-db"
+          user_name          = "admin"
+            enable_ipam = true
+        }
+      source: fix
+      discovered_from: full-stack-paris
+    - resource: scaleway_vpc_private_network
+      rule: "exit status 1 | stderr: ╷\n│ Error: scaleway-sdk-go: resource  with ID  is not found\n│ \n│   with scaleway_vpc_private_network.main,\n│   on network.tf line 1, in resource \"scaleway_vpc_private_network\" \"main\":\n│    1: resource \"scaleway_vpc_private_network\" \"main\" {\n│ \n╵"
+      source: descriptive
+      discovered_from: web-live-paris
+    - resource: scaleway_instance_security_group
+      rule: |-
+        A Scaleway security group defaults to `inbound_default_policy = "accept"`,
+        so declaring one without it closes NOTHING. Set the policy and open only
+        what is used:
+
+        resource "scaleway_instance_security_group" "web" {
+          name                   = "web"
+          inbound_default_policy = "drop"
+
+          inbound_rule {
+            action = "accept"
+            port   = 80
+          }
+        }
+
+        resource "scaleway_instance_server" "web" {
+          security_group_id = scaleway_instance_security_group.web.id
+          # keep its other attachments, e.g. the private network:
+          private_network { pn_id = scaleway_vpc_private_network.main.id }
+        }
+
+        All three parts carry weight. Without `drop` the group changes nothing;
+        without `security_group_id` the server keeps the project default; without
+        an `inbound_rule` per port in use the load balancer cannot reach its
+        backend.
+      source: avoid
+      discovered_from: web-live-paris

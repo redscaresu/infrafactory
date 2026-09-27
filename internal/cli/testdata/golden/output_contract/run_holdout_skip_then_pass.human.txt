@@ -1,0 +1,11 @@
+Command: run
+Scenario: web-live-paris
+Status: success
+
+Stages:
+- holdout/iteration_1_discovery: pass (1 holdout(s) for web-live-paris)
+- holdout/iteration_1_skipped: skip (earlier checks failed)
+- holdout/iteration_2_discovery: pass (1 holdout(s) for web-live-paris)
+- holdout/iteration_2_web-live-paris-unseen: pass (1 unseen check(s) passed)
+- run/iteration_1_test: fail
+- run/iteration_2_test: pass
