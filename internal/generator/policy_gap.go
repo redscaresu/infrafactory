@@ -223,7 +223,7 @@ func AppendPolicyGap(docsDir string, gap PolicyGap) error {
 			"bug, not an LLM bug — the policy disagrees with its own\n" +
 			"pitfall.\n\n" +
 			"Entries belong to `policies/<cloud>/*.rego`, NOT to\n" +
-			"`pitfalls/<cloud>.yaml`. See N8 in `docs/NEXT_SESSION.md`\n" +
+			"`pitfalls/<cloud>.yaml`. See ADR-0017 (`docs/decisions/0017-policy-pitfall-conflict.md`)\n" +
 			"and `internal/generator/policy_gap.go::DetectPolicyConflict`\n" +
 			"for the detection mechanism.\n\n"
 	}

@@ -7,26 +7,17 @@ Thanks for considering a contribution! This document is the human contributor's 
 1. **Open an issue first** for anything non-trivial. We'd rather discuss the approach than discard a finished PR.
 2. **Pick a focused change.** Mixing a feature + refactor + dependency bump in one PR is the fastest way to get blocked on review.
 3. **Add tests** with behavior changes. Coverage is enforced (`make test` runs Go unit + UI unit + Playwright e2e).
-4. **Run `make test` locally** before pushing. The pre-commit hook also runs `gitleaks` + `go test`.
-5. **Update `BACKLOG.md` and `STATUS.md`** when your change closes or opens a ticket. Keep the BACKLOG honest.
+4. **CI runs the full suite** and blocks merge; `make test` runs it locally. The pre-commit hook runs `gitleaks`, `go vet` and the tests of the packages you touched.
+5. **Update `STATUS.md`**: one line in § Recent, and § Open if your change opens or closes an item.
 
 ## First-time contributors
 
 If this is your first PR:
 
 - Read `README.md` (architecture + quickstart).
-- Skim `BACKLOG.md` — see the "How to read this BACKLOG" note below.
+- Read `STATUS.md` § Open for what is being worked on.
 - Look for issues labelled `good first issue` on GitHub. They're scoped to land in one focused PR each.
 - Run `make up` to bring up the four-mock stack (mockway, fakegcp, fakeaws, SeaweedFS) plus the UI in one shot, then `infrafactory run scenarios/training/web-app-paris.yaml` to see the run loop end-to-end. `make down` tears it all down.
-
-## How to read this BACKLOG
-
-`BACKLOG.md` is intentionally dense — each row is the *complete* spec for a slice or ticket, including acceptance criteria, dependencies, and historical commit hashes. It's the working document the team and AI agents iterate on. For a first-time contributor:
-
-- **Don't try to read the whole table.** It's ~250 rows of layered history.
-- Filter by `status: todo` (column 5) to see what's open.
-- The `deps` column tells you what has to land before a given ticket can start — most open rows have one dependency edge inward.
-- A row like `S51-T4` is "Slice 51, Ticket 4". Slices group related work; tickets are the unit of one PR.
 
 ## Setup
 
@@ -60,7 +51,6 @@ make run             # builds + starts the UI at http://127.0.0.1:4173
 6. **If the change is decision-impacting** (CLI surface, schema, cross-package boundary, dependency-strategy), add or update an ADR under `docs/decisions/`.
 7. **If a major architecture/contract shifted**, update `CONCEPT.md`.
 8. **Update `STATUS.md`** at the end of a meaningful session.
-9. **Update `BACKLOG.md`** ticket status when your PR closes one.
 10. **Open a PR** with a clear summary + test plan (see PR template).
 
 ## Commit messages

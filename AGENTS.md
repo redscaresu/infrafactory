@@ -15,18 +15,15 @@ Additional references:
 - ADRs: `docs/decisions/*.md`
 - Prompts: `prompts/*.md`
 - Pitfalls: `pitfalls/{cloud}.yaml` — provider-specific rules loaded at runtime by scenario `cloud` field
-- Progress log: `STATUS.md`
-- Backlog source of truth: `BACKLOG.md`
+- Current state and open work: `STATUS.md`
 
 ## Project File Ecosystem
 
 | File | Purpose | When to update |
 |---|---|---|
 | `docs/plans/<arc-name>-plan.md` | Goal-named variable-length arc plan (typically 2-4 slices). Tickets, exit criteria, autonomous-execution prompt. | When planning the next arc |
-| `docs/NEXT_SESSION.md` | Fresh-context handoff — points at the active arc + open follow-ups | At end of each meaningful coding session |
 | `docs/status/ARCHIVE.md` | Per-arc close-out narratives — durable history | At arc close-out |
-| `STATUS.md` | Current phase + recent arc summaries | At end of each meaningful coding session |
-| `BACKLOG.md` | M-ticket maintenance backlog (cross-arc work that doesn't fit the active arc). Stub today — no active M-tickets. Historical entries in `BACKLOG_ARCHIVE.md`. | When a maintenance need surfaces that doesn't belong in the active arc plan |
+| `STATUS.md` | The entry point: now, open items, the last ten slices. Under 150 lines, CI-enforced. | Every PR: one line in Recent, drop the oldest; update Open |
 | `CONCEPT.md` | Durable architecture, contracts, design decisions | Only for major architecture/design shifts |
 | `docs/decisions/*.md` | ADRs for decision-impacting changes | When change crosses ADR trigger threshold (see below) |
 
@@ -39,25 +36,23 @@ The shape:
 1. **Name the arc by goal**, not by slice numbers — e.g. "39/39 sustain validation", "fakegcp panic audit". Filename: `docs/plans/<arc-name>-plan.md` (kebab-case). The arc still numbers its slices sequentially (S94, S95, …) for cross-reference into commits / ARCHIVE entries.
 2. **Write the plan**: Big picture (what + why), Slices table (as many as the goal needs, including any sweep / audit / investigation steps), Standing rules (inherit from prior arcs), per-slice motivation + tickets + exit criteria, autonomous-execution loop prompt, fresh-context checklist.
 3. **No padding.** If the goal naturally fits in 2 slices, the plan is 2 slices. The 5-slice template from S54–S93 is retired.
-4. **Mandatory close-out**: every arc, regardless of length, ends with a `docs/status/ARCHIVE.md` per-arc section + `docs/NEXT_SESSION.md` update. The close-out can be the last slice or folded into the last substantive PR — but it has to happen. (The ARCHIVE entries are the project's institutional memory and the only thing that makes a fresh session bootable.)
-5. **Repoint** `STATUS.md` "Next arc planned" line + `docs/NEXT_SESSION.md` at the new plan.
+4. **Close-out**: an arc that ran several slices ends with a short `docs/status/ARCHIVE.md` section. The PR bodies carry the detail.
+5. **Point** `STATUS.md` § Now at the new plan.
 6. **Get approval** from the user before kicking off the autonomous loop.
 
-ADRs only when crossing the threshold below. Plan files are the slice ticket source — `BACKLOG.md` is only for cross-arc maintenance work (M-tickets).
+ADRs only when crossing the threshold below. Plan files hold an arc's slices; one-off work is a line in `STATUS.md` § Open.
 
 ## Fresh Context
 
 When starting a new conversation, follow this checklist:
 
 ### 1) Load minimal context
-1. `README.md`
-2. `AGENTS.md` (this file)
-3. `docs/NEXT_SESSION.md` (open follow-ups from prior session — read FIRST when starting work)
-4. `STATUS.md`
-5. `docs/plans/slices-*.md` for the active arc — see `docs/NEXT_SESSION.md` for the current arc pointer
-6. `BACKLOG.md` (M-ticket maintenance backlog; slice tickets live in plan files)
-7. `CONCEPT.md` (if major design context is needed)
-8. `docs/decisions/README.md` (+ relevant ADRs)
+1. `AGENTS.md` (this file)
+2. `STATUS.md` — now, open items, recent slices
+3. The active arc's plan, if `STATUS.md` § Now names one
+
+On demand only: `README.md`, `CONCEPT.md` (major design context), `docs/decisions/README.md`
+(the generated ADR index) and the ADRs it points at.
 
 Slice work is organised as goal-named arcs (variable-length, typically 2-4 slices). Each arc lives in `docs/plans/<arc-name>-plan.md` with an autonomous-execution loop prompt at the bottom. `docs/status/ARCHIVE.md` has per-arc close-out narratives. Historical 5-slice arcs (S54–S93) live under `docs/plans/slices-<a>-<b>-plan.md`; the naming convention shifted at the S94 boundary.
 
@@ -68,9 +63,7 @@ git branch --show-current
 git log -1 --oneline
 ```
 - If unexpected local changes appear, stop and ask the user.
-- Confirm active arc in `docs/NEXT_SESSION.md` § "Suggested next arc" or "READ FIRST"; blockers in `STATUS.md`.
-- Pick next uncompleted slice from the active `docs/plans/slices-*-plan.md`.
-- For maintenance work not tied to an arc, see `BACKLOG.md` M-tickets.
+- Take the active arc and blockers from `STATUS.md` § Now and § Open.
 
 ### 3) Startup verification
 ```bash
@@ -103,7 +96,7 @@ If either fails, restore the repo to a green baseline before starting a new tick
 4. Implement smallest runnable vertical slice.
 5. Add/update focused tests.
 6. Run `go test ./...` (or report why not possible).
-7. Sync docs: update `STATUS.md`, `BACKLOG.md` ticket status. Update `CONCEPT.md` for major shifts. Update `AGENTS.md` only when workflow changes.
+7. Sync docs: one line in `STATUS.md` § Recent, and § Open if the PR opens or closes an item. `CONCEPT.md` for major shifts; `AGENTS.md` only when workflow changes.
 8. Run hygiene check: `bash scripts/check_all.sh`.
 
 ## Sibling Mock Repos
