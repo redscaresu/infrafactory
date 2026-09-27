@@ -1,4 +1,6 @@
 ---
+kind: code
+touches: [internal/cli/test_command.go, internal/cli/testdata/golden/commands]
 status: ready
 ---
 

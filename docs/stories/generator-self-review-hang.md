@@ -1,4 +1,6 @@
 ---
+kind: code
+epic: firewall-end-to-end
 status: blocked
 blocked_by: operator decision on local permission rules
 ---

@@ -24,6 +24,7 @@ Additional references:
 | `docs/plans/<arc-name>-plan.md` | Goal-named variable-length arc plan (typically 2-4 slices). Tickets, exit criteria, autonomous-execution prompt. | When planning the next arc |
 | `docs/status/ARCHIVE.md` | Per-arc close-out narratives — durable history | At arc close-out |
 | `STATUS.md` | The entry point: what is in flight now. Recent is `git log`, not stored. Under 150 lines, CI-enforced. | Only when Now changes |
+| `docs/epics/*.md` | A goal bigger than one PR: **Done when**, out of scope, constraints. Stories join it with `epic:`. | Scope with `/plan-epic <slug>`; the last story's PR deletes it |
 | `docs/stories/*.md` | One open item each, `status: ready\|blocked\|later`; a `ready` story is an agent's brief. | Open an item by adding a file; the PR that finishes it deletes the file |
 | `CONCEPT.md` | Durable architecture, contracts, design decisions | Only for major architecture/design shifts |
 | `docs/decisions/*.md` | ADRs for decision-impacting changes | When change crosses ADR trigger threshold (see below) |
@@ -161,10 +162,17 @@ ADR-0023. Always: it is never wired into scheduled CI; generated HCL never decla
 sets `project_id` (ADR-0025); and `openclaw-prod` is protected only by software guards — do not
 weaken them.
 
+## Epics, stories and the board
+
+`docs/` is an Obsidian vault: `docs/Board.base` shows stories by status and by epic. Scope an epic
+into stories with `/plan-epic <slug>` (`docs/operations.md` § Scoping an epic). Keep links as
+markdown links, never `[[wikilinks]]`, so the link test can check them.
+
 ## Parallel agents
 
-Several `ready` stories can run at once as herdr panes, one agent and one git worktree each.
-Before starting a wave, read `docs/operations.md` § Parallel agents (herdr).
+Every agent runs in its own herdr pane via `scripts/swarm.sh`, which also picks its model and
+effort by role. Before scoping or building with agents, read `docs/operations.md` § Model and
+effort, § Scoping an epic and § Parallel agents (herdr).
 
 ## Codex review loop (required on every PR)
 

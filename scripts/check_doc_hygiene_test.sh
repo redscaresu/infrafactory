@@ -120,7 +120,8 @@ run_story_case() {
     git init -q . && git config user.email t@t.t && git config user.name t
     echo baseline > README.md && git add -A && git commit -qm baseline
     base="$(git rev-parse HEAD)"
-    mkdir -p docs/stories && printf '%b' "${body}" > docs/stories/x.md
+    mkdir -p docs/stories docs/epics && printf '%b' "${body}" > docs/stories/x.md
+    [[ -n "${EPIC:-}" ]] && printf '%b' "${EPIC}" > docs/epics/e.md
     git add -A && git commit -qm change
     bash "${SCRIPT}" "${base}" "$(git rev-parse HEAD)" > /dev/null 2>&1
   )
@@ -132,6 +133,11 @@ run_story_case() {
 run_story_case "a story with a valid status is accepted" pass '---\nstatus: ready\n---\n\n# x\n'
 run_story_case "a story with no status is rejected"      fail '---\ntitle: x\n---\n\n# x\n'
 run_story_case "a story with an unknown status is rejected" fail '---\nstatus: done\n---\n\n# x\n'
+run_story_case "a story naming a missing epic is rejected" fail '---\nstatus: ready\nepic: e\n---\n\n# x\n'
+EPIC='---\nstatus: active\n---\n\n# e\n' \
+  run_story_case "a story naming an existing epic is accepted" pass '---\nstatus: ready\nepic: e\n---\n\n# x\n'
+EPIC='---\ntitle: e\n---\n\n# e\n' \
+  run_story_case "an epic with no status is rejected" fail '---\nstatus: ready\nepic: e\n---\n\n# x\n'
 run_two_commits "one commit's trailer does not waive another commit" fail \
   "ADR: none — comment-only, repoints a doc link" internal/cli/a.go \
   "change the CLI contract" internal/cli/b.go
