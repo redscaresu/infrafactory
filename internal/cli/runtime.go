@@ -42,6 +42,9 @@ type SandboxDeployHarnessRunner interface {
 
 type SandboxDestroyHarnessRunner interface {
 	Run(context.Context, string, map[string]string) (*harness.SandboxDestroyResult, error)
+	// RunWithoutConfig destroys what the workdir's state records without
+	// evaluating its configuration, scoped to the given run project.
+	RunWithoutConfig(ctx context.Context, workDir, projectID string, env map[string]string) (*harness.SandboxDestroyResult, error)
 }
 
 // AutoCreatedPurgeRunner removes resources the cloud API created inside

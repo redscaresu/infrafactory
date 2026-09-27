@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -19,6 +21,19 @@ import (
 type sequencedDestroy struct {
 	errs  []error
 	calls int
+
+	withoutConfigErr     error
+	withoutConfigCalls   int
+	withoutConfigProject string
+}
+
+func (s *sequencedDestroy) RunWithoutConfig(_ context.Context, _, projectID string, _ map[string]string) (*harness.SandboxDestroyResult, error) {
+	s.withoutConfigCalls++
+	s.withoutConfigProject = projectID
+	if s.withoutConfigErr != nil {
+		return nil, s.withoutConfigErr
+	}
+	return &harness.SandboxDestroyResult{Destroy: harness.StageResult{Stage: harness.WithoutConfigStage}}, nil
 }
 
 func (s *sequencedDestroy) Run(context.Context, string, map[string]string) (*harness.SandboxDestroyResult, error) {
@@ -92,7 +107,7 @@ func TestDestroyRetriesAfterPurgingAutoCreatedResources(t *testing.T) {
 // first one's diagnostics.
 func TestDestroyDoesNotRetryWhenNothingWasPurged(t *testing.T) {
 	wantErr := errors.New("genuine destroy bug")
-	destroy := &sequencedDestroy{errs: []error{wantErr, nil}}
+	destroy := &sequencedDestroy{errs: []error{wantErr, nil}, withoutConfigErr: errors.New("fails without config too")}
 	purge := &fakePurge{}
 
 	_, _, err := destroySandbox(context.Background(), retryRuntime(t, destroy, purge), purgeWorkDir(t), destroyEnv, purgeProjectID)
@@ -133,6 +148,7 @@ func TestDestroyWithoutProjectIDOrMarkerDoesNotPurge(t *testing.T) {
 
 	require.ErrorIs(t, err, wantErr)
 	assert.Zero(t, purge.calls)
+	assert.Zero(t, destroy.withoutConfigCalls, "no marker, no project to scope a config-free destroy to")
 }
 
 // ...and with a marker, an empty caller id recovers rather than
@@ -154,13 +170,63 @@ func TestDestroyRecoversTheProjectFromTheMarkerWhenTheCallerHasNone(t *testing.T
 // the one that describes the account's actual state.
 func TestDestroyReportsSecondFailure(t *testing.T) {
 	second := errors.New("still stuck")
-	destroy := &sequencedDestroy{errs: []error{errors.New("first"), second}}
+	destroy := &sequencedDestroy{errs: []error{errors.New("first"), second}, withoutConfigErr: errors.New("stuck without config too")}
 	purge := &fakePurge{removed: []string{"security_group 142eef7b"}}
 
 	_, _, err := destroySandbox(context.Background(), retryRuntime(t, destroy, purge), purgeWorkDir(t), destroyEnv, purgeProjectID)
 
 	require.ErrorIs(t, err, second)
 	assert.Equal(t, 2, destroy.calls)
+	// The fallback's failure is on the record too, not only in a log.
+	assert.Contains(t, err.Error(), "stuck without config too")
+}
+
+// Run 20260927T171147Z: the apply created a full stack and then failed
+// on an expression, and `tofu destroy` evaluated the same expression and
+// failed identically -- so every resource outlived the run. The destroy
+// must fall back to the state alone, scoped to the run's project, and
+// say that it did.
+func TestDestroyFallsBackToTheStateWhenTheConfigCannotEvaluate(t *testing.T) {
+	configErr := &harness.SandboxDestroyError{
+		Stage: "destroy", Err: errors.New("exit status 1"),
+		Destroy: harness.StageResult{Stderr: "Error: expected server_ips.0 to contain a valid IP, got: "},
+	}
+	destroy := &sequencedDestroy{errs: []error{configErr, configErr}}
+	purge := &fakePurge{}
+
+	result, _, err := destroySandbox(context.Background(), retryRuntime(t, destroy, purge), purgeWorkDir(t), destroyEnv, purgeProjectID)
+
+	require.NoError(t, err, "the stack must not outlive a config the destroy cannot evaluate")
+	require.NotNil(t, result)
+	assert.Equal(t, 1, destroy.withoutConfigCalls)
+	assert.Equal(t, purgeProjectID, destroy.withoutConfigProject, "scoped to the run's own project")
+
+	stages, failures := appendSandboxDestroyResult(nil, nil, result, err)
+	assert.Empty(t, failures, "the stack is gone, so the teardown did not fail")
+	require.Len(t, stages, 2)
+	assert.Equal(t, StageSummary{Layer: "sandbox_deploy", Stage: "destroy", Status: StageStatusFail}, stages[0],
+		"the ordinary destroy failed; recording it as a pass would be a false audit trail")
+	assert.Equal(t, harness.WithoutConfigStage, stages[1].Stage)
+	assert.Equal(t, StageStatusPass, stages[1].Status)
+	assert.Contains(t, stages[1].Detail, "expected server_ips.0 to contain a valid IP",
+		"a fallback that does not say why it ran reads exactly like a destroy that never needed one")
+}
+
+// The config-free destroy deletes with nothing in the configuration
+// consulted, so it is refused for any project the run did not create --
+// here, a real project without infrafactory's stamp (ADR-0023, ADR-0025).
+func TestDestroyWithoutConfigRefusesAProjectTheRunDidNotCreate(t *testing.T) {
+	wantErr := errors.New("config cannot evaluate")
+	destroy := &sequencedDestroy{errs: []error{wantErr}}
+	runtime := &CommandRuntime{Deps: RuntimeDependencies{
+		SandboxDestroy: destroy, AutoCreated: &fakePurge{}, RunProject: &fakeRunProject{describeUnstamped: true},
+	}}
+
+	_, _, err := destroySandbox(context.Background(), runtime, purgeWorkDir(t), destroyEnv, purgeProjectID)
+
+	require.ErrorIs(t, err, wantErr)
+	assert.Zero(t, destroy.withoutConfigCalls)
+	assert.Contains(t, err.Error(), harness.ErrProtectedProject.Error(), "a refusal that does not say so reads as never tried")
 }
 
 const purgeProjectID = "6c4390c9-664e-4289-a34f-cdc865653fc7"
@@ -240,4 +306,43 @@ func TestThePurgeDecisionReachesTheLog(t *testing.T) {
 	assert.Contains(t, sink.String(), "layer3_auto_created_purge",
 		"the purge decision must be on the record: `run` does not persist sandbox stages, "+
 			"so a decision that exists only as a stage is invisible on disk")
+}
+
+// The incident against real tofu rather than a stand-in. The apply
+// creates a resource, then fails on an expression that only fails once
+// that resource exists; `tofu destroy` evaluates the same expression and
+// fails the same way. Hermetic: terraform_data is built into tofu, so
+// nothing is downloaded and no cloud is involved.
+func TestDestroySandboxRemovesAStackWhoseConfigCannotEvaluate(t *testing.T) {
+	if _, err := exec.LookPath("tofu"); err != nil {
+		t.Skip("tofu is required to reproduce the config failure")
+	}
+	ctx := context.Background()
+	dir := purgeWorkDir(t)
+	mustWriteFile(t, filepath.Join(dir, "main.tf"), `
+resource "terraform_data" "created" {
+  input = "not-a-number"
+}
+
+resource "terraform_data" "broken" {
+  input = tonumber(terraform_data.created.output)
+}
+`)
+	runtime := &CommandRuntime{Deps: RuntimeDependencies{
+		SandboxDestroy: harness.NewSandboxDestroyHarness(execCommandRunner{}),
+		AutoCreated:    &fakePurge{},
+		RunProject:     &fakeRunProject{},
+	}}
+
+	_, applyErr := harness.NewSandboxDeployHarness(execCommandRunner{}).Run(ctx, dir, destroyEnv, nil)
+	require.Error(t, applyErr, "the apply must fail on the config")
+	require.True(t, liveStateMayHoldResources(dir), "...after it created something")
+	_, plainErr := runtime.Deps.SandboxDestroy.Run(ctx, dir, destroyEnv)
+	require.Error(t, plainErr, "the ordinary destroy must fail on the same config")
+
+	result, _, err := destroySandbox(ctx, runtime, dir, destroyEnv, purgeProjectID)
+
+	require.NoError(t, err)
+	assert.Contains(t, result.WithoutConfig, "tonumber")
+	assert.False(t, liveStateMayHoldResources(dir), "everything the apply created is gone")
 }

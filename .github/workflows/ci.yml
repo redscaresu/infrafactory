@@ -44,6 +44,13 @@ jobs:
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v4
 
+      # Layer 3 teardown runs tofu, and the test that reproduces a stack
+      # whose config cannot evaluate skips without it.
+      - name: Setup OpenTofu
+        uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2
+        with:
+          tofu_wrapper: false
+
       - name: Prepare Terraform plugin cache directory
         run: mkdir -p "$TF_PLUGIN_CACHE_DIR"
 

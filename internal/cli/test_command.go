@@ -453,6 +453,13 @@ func sandboxDeployFailureDetail(err *harness.SandboxDeployError) string {
 
 func appendSandboxDestroyResult(stages []StageSummary, failures []FailureSummary, result *harness.SandboxDestroyResult, runErr error) ([]StageSummary, []FailureSummary) {
 	if runErr == nil {
+		// The ordinary destroy failed even though the stack is gone; the
+		// stage list says both rather than a pass that never happened.
+		if result != nil && result.WithoutConfig != "" {
+			return append(stages,
+				StageSummary{Layer: "sandbox_deploy", Stage: "destroy", Status: StageStatusFail},
+				withoutConfigStage(result.WithoutConfig)), failures
+		}
 		if result != nil && result.Destroy.Stage != "" {
 			stages = append(stages, StageSummary{Layer: "sandbox_deploy", Stage: "destroy", Status: StageStatusPass})
 		}
