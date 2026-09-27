@@ -18,4 +18,4 @@ status: active | later
 A story joins an epic with `epic: <epic-file-name-without-.md>` in its front matter; an epic made
 from an HLD links back with `hld: <hld-file-name-without-.md>`. Scope a new
 epic with `/plan-epic <slug>` (`docs/operations.md` § Scoping an epic). In Obsidian,
-`docs/Board.base` shows the board by status and by epic.
+`docs/Board.base` shows the board by status and by epic, and the epics themselves.
