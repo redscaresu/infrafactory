@@ -63,8 +63,11 @@ resources:
     purpose: smoke
     size: small
 acceptance_criteria:
-  - type: destruction
-    expect: no_orphans
+  - type: policy
+    check: region_restriction
+    params:
+      region: fr-par
+    expect: pass
 `))
 	WriteFile(t, outputDir+"/main.tf", []byte("terraform {}\n"))
 	WriteFile(t, configPath, []byte(`version: "1.0"

@@ -35,5 +35,3 @@ acceptance_criteria:
     port: 6379
     expect: success
     description: "App server must reach the Redis cluster via private network"
-  - type: destruction
-    expect: no_orphans

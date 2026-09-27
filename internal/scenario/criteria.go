@@ -40,7 +40,6 @@ type ExecutableCheckSpec struct {
 	Connectivity  *ConnectivityCheckSpec
 	HTTPProbe     *HTTPProbeCheckSpec
 	Policy        *PolicyCheckSpec
-	Destruction   *DestructionCheckSpec
 	DNSResolution *DNSResolutionCheckSpec
 }
 
@@ -63,8 +62,6 @@ type PolicyCheckSpec struct {
 	// after S51.
 	Params map[string]any
 }
-
-type DestructionCheckSpec struct{}
 
 type DNSResolutionCheckSpec struct {
 	Domain string
@@ -157,8 +154,6 @@ func ParseAcceptanceCriteria(criteria []AcceptanceCriterion) ([]ExecutableCheckS
 				Target: criterion.Target,
 				Params: criterion.Params,
 			}
-		case "destruction":
-			spec.Destruction = &DestructionCheckSpec{}
 		case "dns_resolution":
 			if criterion.Domain == "" {
 				return nil, &CriterionSpecError{

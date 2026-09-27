@@ -81,8 +81,7 @@ func TestE2E_FullStackParis(t *testing.T) {
 	}
 
 	// Final destroy run cleans up. Asserting target_reached on the destroy
-	// pass also exercises the destruction acceptance criterion in the
-	// scenario (no_orphans).
+	// pass also exercises the destruction layer's orphan check.
 	final := RunInfrafactory(t, InfrafactoryRunOptions{
 		Args: []string{
 			"run", scenarioPath,

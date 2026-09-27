@@ -24,8 +24,6 @@ No arc in flight. The process-efficiency arc (ADR-0035, S195–S198) is complete
   the gate refuses a standalone `scaleway_instance_private_nic`; nothing checks that against
   `layer3_hcl_shape.go`, and the same claim has gone stale in three places. Use a lockstep test
   in the shape of `TestCloudPrefixLockstep`.
-- **`destruction: no_orphans` is accepted as a criterion but never evaluated as one.** Evaluate
-  it, or refuse it at parse time.
 - **M100: mockway's gated examples 501 on the v2alpha1 NIC route.** Probably fixed by the
   v2alpha1 work in S188–S189. Re-run with `MOCKWAY_ENABLE_E2E=1` to confirm, or close it.
 - Later:
@@ -39,6 +37,7 @@ No arc in flight. The process-efficiency arc (ADR-0035, S195–S198) is complete
 
 ## Recent
 
+- 2026-09-27 S202 — `destruction: no_orphans` is refused as a criterion; teardown is the destruction layer (ADR-0036)
 - 2026-09-27 S200 — the pre-rotation `scw-layer3.env` is deleted; docs no longer mention it
 - 2026-09-27 S199 — `AGENTS.md` holds only always-on rules; task detail moved to `docs/operations.md`, three stale Layer 3 claims corrected (#261)
 - 2026-09-27 S198 — each change is written down once; review-pass files only for declined findings (#260)
@@ -48,4 +47,3 @@ No arc in flight. The process-efficiency arc (ADR-0035, S195–S198) is complete
 - 2026-09-27 S194 — the pitfall that forbade a firewall (#256)
 - 2026-09-21 S193 — the state-side policy check actually runs (#253)
 - 2026-09-20 S192 — the holdout, rebuilt as a negative check against the running stack (#252)
-- 2026-09-20 S191 — a standalone private NIC destroys fine now (#251)

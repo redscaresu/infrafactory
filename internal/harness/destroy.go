@@ -167,8 +167,8 @@ const mockwayDefaultProjectID = "00000000-0000-0000-0000-000000000000"
 //
 // mockway seeds a default project so scenarios that never declare one
 // still have a valid project_id to send (S140). That row is present on
-// every clean teardown, so counting it would fail `destruction:
-// no_orphans` for every scenario in the suite.
+// every clean teardown, so counting it would fail the orphan check
+// for every scenario in the suite.
 //
 // Only the seeded default is exempt. A project a scenario actually
 // created and failed to destroy is a real orphan and still counts --
@@ -179,8 +179,8 @@ const mockwayDefaultProjectID = "00000000-0000-0000-0000-000000000000"
 // Scaleway gives a project a default VPC and puts a private network there
 // when the request names no vpc_id; mockway models that (mockway#26). Like
 // the "Default security group" that ADR-0023's purge exists for, Terraform
-// never creates it and never destroys it -- so counting it fails
-// `destruction: no_orphans` for every scenario with private networking,
+// never creates it and never destroys it -- so counting it fails the
+// orphan check for every scenario with private networking,
 // which is every scenario with compute, because vpc_required demands it.
 //
 // Matched on the name the API assigns, not on absence-from-state: a VPC a

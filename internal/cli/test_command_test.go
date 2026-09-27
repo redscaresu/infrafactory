@@ -1220,8 +1220,6 @@ acceptance_criteria:
     check: encryption_at_rest
     target: database
     expect: ` + policyExpect + `
-  - type: destruction
-    expect: no_orphans
 `
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatalf("mkdir scenario dir: %v", err)

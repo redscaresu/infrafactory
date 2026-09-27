@@ -51,8 +51,8 @@ func TestLoadWithSchemaPaths(t *testing.T) {
 				if sc.References != "scenarios/training/web-app-paris.yaml" {
 					t.Fatalf("unexpected references: %q", sc.References)
 				}
-				if len(sc.AcceptanceCriteria) != 5 {
-					t.Fatalf("expected 5 acceptance criteria, got %d", len(sc.AcceptanceCriteria))
+				if len(sc.AcceptanceCriteria) != 4 {
+					t.Fatalf("expected 4 acceptance criteria, got %d", len(sc.AcceptanceCriteria))
 				}
 				// S51: region constraint moved into a region_restriction
 				// criterion's params; encryption_at_rest decorative
@@ -81,11 +81,6 @@ func TestLoadWithSchemaPaths(t *testing.T) {
 				dns := sc.AcceptanceCriteria[3]
 				if dns.Type != "dns_resolution" || dns.Domain != "{{scenario_name}}.example.com" {
 					t.Fatalf("unexpected dns criterion: %+v", dns)
-				}
-
-				destruction := sc.AcceptanceCriteria[4]
-				if destruction.Type != "destruction" || destruction.Expect != "no_orphans" {
-					t.Fatalf("unexpected destruction criterion: %+v", destruction)
 				}
 			},
 		},
@@ -187,6 +182,14 @@ func TestLoadWithSchemaPaths(t *testing.T) {
 			scenarioPath:        filepath.Join("testdata", "invalid-schema.yaml"),
 			expectedErr:         ErrInvalidScenario,
 			expectedProblemPath: "/acceptance_criteria/0/expect",
+		},
+		{
+			// The destroy and orphan check run for every scenario, so a
+			// criterion for them could only ever look like coverage.
+			name:                "destruction criterion refused",
+			scenarioPath:        filepath.Join("testdata", "destruction-criterion.yaml"),
+			expectedErr:         ErrInvalidScenario,
+			expectedProblemPath: "/acceptance_criteria/1/type",
 		},
 		{
 			name:         "malformed yaml",

@@ -36,8 +36,10 @@ resources:
     purpose: web-server
     size: small
 acceptance_criteria:
-  - type: destruction
-    expect: no_orphans
+  - type: connectivity
+    from: public_internet
+    to: compute
+    expect: blocked
 `
 
 const infraOnlyScenarioYAML = `scenario: block-paris
@@ -49,8 +51,10 @@ resources:
     purpose: web-server
     size: small
 acceptance_criteria:
-  - type: destruction
-    expect: no_orphans
+  - type: connectivity
+    from: public_internet
+    to: compute
+    expect: blocked
 `
 
 // deployTestRuntime wires a Layer-3-enabled runtime with fakes and

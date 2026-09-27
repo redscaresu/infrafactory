@@ -1,0 +1,14 @@
+scenario: web-app-paris
+version: "1.0"
+cloud: scaleway
+description: destruction is a validation layer, not a criterion (ADR-0036)
+resources:
+  compute:
+    purpose: web-server
+    size: small
+acceptance_criteria:
+  - type: policy
+    check: encryption_at_rest
+    expect: pass
+  - type: destruction
+    expect: no_orphans

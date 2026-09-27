@@ -106,8 +106,10 @@ resources:
     purpose: web-server
     size: small
 acceptance_criteria:
-  - type: destruction
-    expect: no_orphans
+  - type: connectivity
+    from: public_internet
+    to: compute
+    expect: blocked
 `)
 
 	// Layer 3 validates the configuration before any tofu runs, so a

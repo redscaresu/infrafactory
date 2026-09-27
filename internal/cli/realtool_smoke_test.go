@@ -42,8 +42,10 @@ resources:
     purpose: smoke
     size: small
 acceptance_criteria:
-  - type: destruction
-    expect: no_orphans
+  - type: connectivity
+    from: public_internet
+    to: compute
+    expect: blocked
 `)
 	mustWriteFile(t, filepath.Join(outputDir, "main.tf"), `terraform {}
 `)
@@ -105,8 +107,10 @@ resources:
     purpose: smoke
     size: small
 acceptance_criteria:
-  - type: destruction
-    expect: no_orphans
+  - type: connectivity
+    from: public_internet
+    to: compute
+    expect: blocked
 `)
 	mustWriteFile(t, filepath.Join(outputDir, "main.tf"), `terraform {}
 `)
@@ -317,8 +321,10 @@ resources:
         - port: 80
           protocol: http
 acceptance_criteria:
-  - type: destruction
-    expect: no_orphans
+  - type: connectivity
+    from: public_internet
+    to: compute
+    expect: blocked
 `)
 	mustWriteFile(t, configPath, `version: "1.0"
 agent:
@@ -459,8 +465,10 @@ resources:
         - port: 80
           protocol: http
 acceptance_criteria:
-  - type: destruction
-    expect: no_orphans
+  - type: connectivity
+    from: public_internet
+    to: compute
+    expect: blocked
 `
 
 const incrementalScenarioStage2YAML = `scenario: incremental-project-paris
@@ -484,8 +492,10 @@ resources:
     engine: postgresql
     size: small
 acceptance_criteria:
-  - type: destruction
-    expect: no_orphans
+  - type: connectivity
+    from: public_internet
+    to: compute
+    expect: blocked
 `
 
 const incrementalScenarioStage3YAML = `scenario: incremental-project-paris
@@ -512,8 +522,10 @@ resources:
     purpose: cache
     size: small
 acceptance_criteria:
-  - type: destruction
-    expect: no_orphans
+  - type: connectivity
+    from: public_internet
+    to: compute
+    expect: blocked
 `
 
 func writeIncrementalScenarioStage(t *testing.T, path, content string) {

@@ -61,7 +61,7 @@ func unsupportedCriteriaResult(sc scenario.Scenario, sandboxEnabled bool) ([]Sta
 
 func criteriaSupportReason(criterionType string, sandboxEnabled bool) (reason string, supported bool, autoPass bool) {
 	switch criterionType {
-	case "policy", "destruction", "connectivity", "http_probe":
+	case "policy", "connectivity", "http_probe":
 		return "", true, false
 	case "dns_resolution":
 		if sandboxEnabled {

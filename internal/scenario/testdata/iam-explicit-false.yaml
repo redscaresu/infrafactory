@@ -9,5 +9,8 @@ resources:
     api_key: false
     policy: true
 acceptance_criteria:
-  - type: destruction
-    expect: no_orphans
+  - type: policy
+    check: region_restriction
+    params:
+      region: fr-par
+    expect: pass
