@@ -164,7 +164,7 @@ build_story() {
   if [[ -n "${repo}" ]]; then
     [[ "${repo}" =~ ^[a-z0-9-]+$ ]] || die "${slug}: bad repo '${repo}'"
     src="$(dirname "${REPO_ROOT}")/${repo}"
-    [[ -d "${src}/.git" ]] || die "${slug}: no repo at ${src}"
+    [[ -e "${src}/.git" ]] || die "${slug}: no repo at ${src}"
   fi
   branch="story/${slug}"; wt="$(dirname "${REPO_ROOT}")/$(basename "${src}")-wt/${slug}"
   git -C "${src}" fetch -q origin main
