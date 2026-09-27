@@ -37,6 +37,14 @@ acceptance_criteria:
     params:
       region: fr-par
     expect: pass
+  # Named as a criterion so the deny_state half runs at Layer 2 against
+  # the mock's security groups, not only `deny` against the plan. It
+  # checks that a group this configuration DECLARES is a real firewall;
+  # it does not check that the server has one, which is the holdout's
+  # job (scenarios/holdout/web-live-paris-unseen.yaml).
+  - type: policy
+    check: default_deny_ingress
+    expect: pass
   # Satisfied only if the instance booted, the container started, and the
   # load balancer health check marked the backend up -- the same bar
   # lb-serving-paris set, now against a named version.

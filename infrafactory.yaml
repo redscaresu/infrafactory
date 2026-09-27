@@ -140,17 +140,41 @@ validation:
         # the NIC lands with its server. The paragraph above is kept as the
         # record of the diagnosis, not as current state.
         #
-        # 2026-09-09 replaced it with a narrower one, found by finally running
-        # the thing: a STANDALONE NIC applies and then cannot be DESTROYED
-        # ("Can't delete a private network interface attached to a server"),
-        # because destroy runs in reverse dependency order and deletes the NIC
-        # while its server is still running. Attach through the server's inline
-        # `private_network` block instead; `vpc_required.rego` accepts either
-        # shape and the pitfall prescribes the inline one. This entry stays
-        # allowlisted so the standalone form still applies where it is used.
+        # 2026-09-09 replaced it with a narrower one: a STANDALONE NIC applied
+        # and then could not be DESTROYED ("Can't delete a private network
+        # interface attached to a server"). The cause was diagnosed to the
+        # ENDPOINT rather than the shape (ADR-0031) -- provider 2.81.0 deleted
+        # NICs through a v2alpha1 route that refuses every NIC there is.
+        #
+        # RETRACTED 2026-09-20 by upstream #4354, released in 2.83.0: a
+        # standalone NIC now applies and destroys cleanly against real
+        # Scaleway (4 added, 4 destroyed, exit 0). S191 corrected this same
+        # stale claim in vpc_required.rego's denial text and missed this copy
+        # of it -- the third site the claim was written down.
+        #
+        # Attach through the server's inline `private_network` block anyway:
+        # `vpc_required.rego` accepts either shape and the Layer 3 HCL gate
+        # refuses the standalone one, now as a standardisation choice rather
+        # than a safety one. This entry stays allowlisted so the standalone
+        # form still applies where it is used.
         - scaleway_instance_ip
         - scaleway_instance_server
         - scaleway_instance_private_nic
+        # security_group added 2026-09-27, for the same
+        # policy-demands-what-the-list-forbids reason as private_nic:
+        # policies/scaleway/default_deny_ingress.rego denies a group that
+        # does not set `inbound_default_policy = "drop"`.
+        #
+        # Its absence was not neutral. pitfalls/scaleway.yaml told the
+        # generator NEVER to declare a security group, because this list
+        # would refuse it, and justified that with "the API-created default
+        # group permits what these scenarios need". It does -- along with
+        # every other port. web-live-paris shipped with SSH open to the
+        # public internet, the holdout caught it, and the fix was forbidden.
+        #
+        # Free, and Terraform-owned: applied and destroyed cleanly against
+        # real Scaleway on 2026-09-27 with the project left empty.
+        - scaleway_instance_security_group
         # Uncommenting any of these opts into slow, genuinely costly
         # provisioning against real Scaleway. Clusters and HA database
         # instances take minutes to create AND minutes to destroy, on
@@ -221,6 +245,11 @@ constraint_policies:
   region_restriction: scaleway/region_restriction.rego
   region: scaleway/region_restriction.rego
   zone: scaleway/region_restriction.rego
+  # Mapped so a scenario can name it as a criterion and get the
+  # deny_state half evaluated at Layer 2. Its `deny` half already runs
+  # against every Scaleway plan without being mapped, because
+  # filterPolicyPathsByCloud loads the whole policies/scaleway directory.
+  default_deny_ingress: scaleway/default_deny_ingress.rego
 
 paths:
   scenarios: ./scenarios

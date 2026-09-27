@@ -280,6 +280,23 @@ func Default() Config {
 					// any instance server without one -- omitting it would
 					// leave static policy demanding a resource this list
 					// forbids, which no generated HCL could satisfy.
+					//
+					// security_group is here for the same reason, added
+					// 2026-09-27: default_deny_ingress.rego denies a group
+					// that does not set inbound_default_policy = "drop".
+					// Until then it was absent AND a pitfall told the
+					// generator never to declare one, on the justification
+					// that Scaleway's API-created default group "permits what
+					// these scenarios need". True -- and it also permits
+					// everything else. web-live-paris shipped with port 22
+					// open to the public internet and only the holdout caught
+					// it. The prohibition was the cause, not a missing
+					// instruction.
+					//
+					// It costs nothing and Terraform owns it: applied and
+					// destroyed cleanly against real Scaleway on 2026-09-27,
+					// project left empty. This list asks "may this cost
+					// money"; for a security group the answer is no.
 					AllowResourceTypes: []string{
 						"scaleway_account_project",
 						"scaleway_block_volume",
@@ -293,6 +310,7 @@ func Default() Config {
 						"scaleway_instance_ip",
 						"scaleway_instance_server",
 						"scaleway_instance_private_nic",
+						"scaleway_instance_security_group",
 					},
 				},
 				Destruction: LayerConfig{

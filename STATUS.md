@@ -1,6 +1,46 @@
 # STATUS
 
-Last updated: 2026-09-21
+Last updated: 2026-09-27
+
+## 2026-09-27 — S194: the pitfall that forbade a firewall
+
+The holdout's open SSH port (ADR-0033) was not the generator forgetting a firewall. It was
+told not to write one. `pitfalls/scaleway.yaml` said **"NEVER declare a
+`scaleway_instance_security_group` ... you do not need one, Scaleway CREATES a Default
+security group and it permits what these scenarios need"** — learned from `web-live-paris`,
+reinforced on every iteration, and true. Permitting what the scenario needs also permits
+every other port.
+
+**The prohibition had a real cause.** The type was absent from `allow_resource_types`, so
+declaring one cost the run an iteration to a Layer 3 refusal. A correct optimisation
+against a real cost that quietly made an all-accept firewall mandatory.
+
+**Adding a security group would not have fixed it either.** A group declaring only a name
+applies with inbound AND outbound `accept` — identical in effect to having none. Verified
+against real Scaleway: the provider schema does not publish that default and the API spec
+calls it `unknown_policy`, so only an apply reveals it. `inbound_default_policy = "drop"`
+is the load-bearing line.
+
+Shipped: the type allowlisted (free, Terraform-owned, applied and destroyed cleanly with
+the project left empty), the pitfall inverted to prescribe the three-part shape, and
+`policies/scaleway/default_deny_ingress.rego` with both `deny` and `deny_state` so a
+declared group is checked against the plan AND against what was created.
+
+**Scope, stated rather than left to be found.** The API-created group is excluded from
+`deny_state` — Terraform never owns it and no repair iteration could fix it, so denying it
+would fail every run forever. The policy therefore checks that a group the configuration
+DECLARES is a real firewall, not that a server has one. A configuration declaring no group
+still passes, and the holdout remains the only thing that catches it.
+
+**Not yet run.** Removing a prohibition is not creating a requirement. Nothing in
+`web-live-paris`'s visible criteria mentions a firewall, so whether the generator now
+writes a locked-down group is an open empirical question. ADR-0034 §"What this does not
+prove".
+
+**A third copy of the refuted "standalone NIC cannot be destroyed" claim** turned up in
+`infrafactory.yaml` and was corrected. S191 fixed the same sentence in `vpc_required.rego`
+and missed this one; three slices, three sites. Next action: give it the
+`TestCloudPrefixLockstep` treatment instead of another careful edit.
 
 ## 2026-09-21 — S193: the state-side policy check actually runs
 

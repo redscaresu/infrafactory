@@ -54,7 +54,7 @@ A scenario reaches the real API only if **both** allow it:
    `scaleway_vpc`, `scaleway_vpc_private_network`, `scaleway_lb*`,
    `scaleway_domain*`, `scaleway_iam*`, `scaleway_registry_namespace`,
    `scaleway_instance_ip`, `scaleway_instance_server`,
-   `scaleway_instance_private_nic`.
+   `scaleway_instance_private_nic`, `scaleway_instance_security_group`.
 2. **The `infrafactory-layer3` IAM policy** — `ProjectManager`,
    `BlockStorageFullAccess`, `LoadBalancersFullAccess`, `VPCFullAccess`,
    `InstancesFullAccess`. Nothing else (ADR-0023, credential amendments).
