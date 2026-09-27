@@ -2,7 +2,7 @@ filters:
   and:
     - file.inFolder("stories")
     - file.ext == "md"
-    - 'file.path != "stories/README.md"'
+    - file.path != "stories/README.md"
 properties:
   note.status:
     displayName: Status
@@ -14,18 +14,18 @@ views:
   - type: table
     name: Board
     groupBy:
-      property: note.status
+      property: status
       direction: ASC
     order:
       - file.name
-      - note.epic
-      - note.depends_on
+      - epic
+      - depends_on
   - type: table
     name: By epic
     groupBy:
-      property: note.epic
+      property: epic
       direction: ASC
     order:
       - file.name
-      - note.status
-      - note.depends_on
+      - status
+      - depends_on

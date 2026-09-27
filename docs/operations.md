@@ -50,6 +50,10 @@ widening any is a blast-radius decision (ADR-0023).
 - Real-vs-mock deltas: `docs/layer3-real-vs-mock-deltas.md`. Real Scaleway can return a create
   error after the resource exists; apply retries once (`sandboxApplyAttempts`), never on a
   cancelled context.
+- A `run` writes auto-learned pitfalls into `pitfalls/*.yaml` **in the checkout it runs from**. Run
+  generated and real-cloud runs from a throwaway worktree, not the lead's working copy, and never
+  `git add -A` after one: a learned entry once replaced a curated safety pitfall and nearly merged
+  inside an unrelated PR.
 - A failed run auto-destroys and then sweeps. If the sweep cannot confirm the account clean, the
   failure names `infrafactory reap <scenario>`; act on it.
 
