@@ -13,7 +13,9 @@ and with which model (`docs/operations.md` § Model and effort); `lead` and `ope
 never given to a swarm agent.
 
 A story may belong to an epic (`epic: <slug>`, see `docs/epics/`) and list the files it
-`touches`, which is how a wave avoids two agents editing the same file.
+`touches`, which is how a wave avoids two agents editing the same file. A story whose work lands
+in a sibling repo says so with `repo: <name>` (`fakeaws`, `mockway`, ...): its agent builds in a
+worktree of `../<name>`, and the lead deletes the story file once that PR merges.
 
-Running several at once: `docs/operations.md` § Parallel agents (herdr). In Obsidian, open the
-repository as a vault and add a Bases view over this folder grouped by `status`.
+Running several at once: `docs/operations.md` § Parallel agents (herdr). In Obsidian, `docs/` is
+the vault and `docs/Board.base` is the board.
