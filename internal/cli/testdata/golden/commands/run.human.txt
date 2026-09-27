@@ -15,17 +15,13 @@ Stages:
 
 Failures:
 - run/iteration_1_test check=credentials command="test" detail="sandbox deploy requires SCW_ACCESS_KEY in the environment"
-- run/iteration_1_test check=real_probe command="test" detail="read live terraform state: open <WORKSPACE>/output/example-scenario/terraform-live.tfstate: no such file or directory"
 - run/iteration_2 check=stuck command="run loop" detail="stopped due to stuck detection"
 - run/iteration_2_test check=credentials command="test" detail="sandbox deploy requires SCW_ACCESS_KEY in the environment"
-- run/iteration_2_test check=real_probe command="test" detail="read live terraform state: open <WORKSPACE>/output/example-scenario/terraform-live.tfstate: no such file or directory"
 
 Explainability:
 - run/iteration_1_test check=credentials summary="Layer 3 real Scaleway deploy is enabled but credentials are unavailable" action="set SCW_ACCESS_KEY and SCW_SECRET_KEY before enabling sandbox_deploy"
-- run/iteration_1_test check=real_probe summary="real probe harness failed before probe evaluation completed" action="inspect terraform-live.tfstate and probe target resolution for the requested criteria"
 - run/iteration_2 check=stuck summary="criteria check failed and requires scenario/harness inspection" action="review failure detail and criteria definition for this check"
 - run/iteration_2_test check=credentials summary="Layer 3 real Scaleway deploy is enabled but credentials are unavailable" action="set SCW_ACCESS_KEY and SCW_SECRET_KEY before enabling sandbox_deploy"
-- run/iteration_2_test check=real_probe summary="real probe harness failed before probe evaluation completed" action="inspect terraform-live.tfstate and probe target resolution for the requested criteria"
 Usage:
   run <scenario> [flags]
 

@@ -64,13 +64,6 @@
       },
       {
         "layer": "run",
-        "stage": "iteration_1_test",
-        "check": "real_probe",
-        "command": "test",
-        "detail": "read live terraform state: open <WORKSPACE>/output/example-scenario/terraform-live.tfstate: no such file or directory"
-      },
-      {
-        "layer": "run",
         "stage": "iteration_2",
         "check": "stuck",
         "command": "run loop",
@@ -82,13 +75,6 @@
         "check": "credentials",
         "command": "test",
         "detail": "sandbox deploy requires SCW_ACCESS_KEY in the environment"
-      },
-      {
-        "layer": "run",
-        "stage": "iteration_2_test",
-        "check": "real_probe",
-        "command": "test",
-        "detail": "read live terraform state: open <WORKSPACE>/output/example-scenario/terraform-live.tfstate: no such file or directory"
       }
     ],
     "explainability": [
@@ -98,13 +84,6 @@
         "check": "credentials",
         "summary": "Layer 3 real Scaleway deploy is enabled but credentials are unavailable",
         "action": "set SCW_ACCESS_KEY and SCW_SECRET_KEY before enabling sandbox_deploy"
-      },
-      {
-        "layer": "run",
-        "stage": "iteration_1_test",
-        "check": "real_probe",
-        "summary": "real probe harness failed before probe evaluation completed",
-        "action": "inspect terraform-live.tfstate and probe target resolution for the requested criteria"
       },
       {
         "layer": "run",
@@ -119,13 +98,6 @@
         "check": "credentials",
         "summary": "Layer 3 real Scaleway deploy is enabled but credentials are unavailable",
         "action": "set SCW_ACCESS_KEY and SCW_SECRET_KEY before enabling sandbox_deploy"
-      },
-      {
-        "layer": "run",
-        "stage": "iteration_2_test",
-        "check": "real_probe",
-        "summary": "real probe harness failed before probe evaluation completed",
-        "action": "inspect terraform-live.tfstate and probe target resolution for the requested criteria"
       }
     ]
   }

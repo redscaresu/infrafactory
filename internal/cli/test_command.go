@@ -729,6 +729,10 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 	// Declared out here because the destroy path below has to delete what
 	// the apply path created, and they are separate branches.
 	var runProjectID string
+	// Real probes read the stack the Layer 3 apply built. Without a
+	// successful apply there is nothing to probe, and running them anyway
+	// buries the real cause under a missing-state failure.
+	sandboxApplied := false
 
 	if deployErr == nil && sandboxEnabled {
 		// Validate the sealed environment BEFORE creating anything. The
@@ -812,6 +816,7 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 				stageLog := newStageLogWriter(runtime.Logger, progressOut, scope)
 				sandboxResult, sandboxErr := runtime.Deps.SandboxDeploy.Run(ctx, outputDir, sandboxEnv, stageLog)
 				_ = stageLog.Close()
+				sandboxApplied = sandboxErr == nil
 				stages, failures = appendSandboxDeployResult(stages, failures, sandboxResult, sandboxErr)
 				if sandboxResult != nil && len(sandboxResult.Plan.Stdout) > 0 {
 					planLiveText = []byte(sandboxResult.Plan.Stdout)
@@ -830,7 +835,7 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 	// block on purpose.
 	keepingSandbox := opts.KeepSandbox
 	if deployErr == nil && runtime.Config.Validation.Layers.Destruction.Enabled && !opts.SkipDestroy {
-		criteriaStages, criteriaFailures := evaluateSupportedCriteria(ctx, sc, runtime, deployResult)
+		criteriaStages, criteriaFailures := evaluateSupportedCriteria(ctx, sc, runtime, deployResult, sandboxApplied)
 		stages = append(stages, criteriaStages...)
 		failures = append(failures, criteriaFailures...)
 
@@ -914,7 +919,7 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 		}
 		// One cleanup for every exit from the sandbox block, not just the
 	} else if deployErr == nil {
-		criteriaStages, criteriaFailures := evaluateSupportedCriteria(ctx, sc, runtime, deployResult)
+		criteriaStages, criteriaFailures := evaluateSupportedCriteria(ctx, sc, runtime, deployResult, sandboxApplied)
 		stages = append(stages, criteriaStages...)
 		failures = append(failures, criteriaFailures...)
 
@@ -1237,7 +1242,7 @@ func scwConfigFileAPIURL() (string, error) {
 	return strings.TrimSpace(parsed.APIURL), nil
 }
 
-func evaluateSupportedCriteria(ctx context.Context, sc scenario.Scenario, runtime *CommandRuntime, deployResult *harness.MockDeployResult) ([]StageSummary, []FailureSummary) {
+func evaluateSupportedCriteria(ctx context.Context, sc scenario.Scenario, runtime *CommandRuntime, deployResult *harness.MockDeployResult, sandboxApplied bool) ([]StageSummary, []FailureSummary) {
 	if deployResult == nil {
 		return nil, nil
 	}
@@ -1336,7 +1341,12 @@ func evaluateSupportedCriteria(ctx context.Context, sc scenario.Scenario, runtim
 		_ = evaluatedStatePolicies
 	}
 
-	if sandboxEnabled && len(realProbeChecks) > 0 {
+	if sandboxEnabled && len(realProbeChecks) > 0 && !sandboxApplied {
+		stages = append(stages, StageSummary{
+			Layer: "sandbox_deploy", Stage: "real_probe", Status: StageStatusSkip,
+			Detail: "not run: the Layer 3 apply did not succeed, so there is no real stack to probe",
+		})
+	} else if sandboxEnabled && len(realProbeChecks) > 0 {
 		probeResult, err := runtime.Deps.RealProbe.Run(ctx, runtime.OutputDir(), sc.Name, realProbeChecks)
 		if err != nil {
 			stages = append(stages, StageSummary{Layer: "sandbox_deploy", Stage: "real_probe", Status: StageStatusFail})
