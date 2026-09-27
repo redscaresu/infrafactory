@@ -2,6 +2,14 @@
 
 Last updated: 2026-09-27
 
+## 2026-09-27 — S195: the ADR index is generated
+
+`docs/decisions/README.md`'s index is now built from the ADR files by `make adr-index`
+(`cmd/adr-index`), and `TestADRIndexIsCurrent` fails CI when it is stale. The hand-written
+paragraphs were a second copy of every decision; the index is now title + status, with
+supersession derived from the status line (3.2k → 1.3k tokens on every fresh session). An ADR
+with no status now fails the build instead of entering the index silently.
+
 ## 2026-09-27 — S194: the pitfall that forbade a firewall
 
 The holdout's open SSH port (ADR-0033) was not the generator forgetting a firewall. It was
