@@ -37,18 +37,14 @@ func TestParseAcceptanceCriteria(t *testing.T) {
 			Domain: "{{scenario_name}}.example.com",
 			Expect: "resolves",
 		},
-		{
-			Type:   "destruction",
-			Expect: "no_orphans",
-		},
 	}
 
 	specs, err := ParseAcceptanceCriteria(criteria)
 	if err != nil {
 		t.Fatalf("parse acceptance criteria: %v", err)
 	}
-	if len(specs) != 5 {
-		t.Fatalf("expected 5 specs, got %d", len(specs))
+	if len(specs) != 4 {
+		t.Fatalf("expected 4 specs, got %d", len(specs))
 	}
 
 	if specs[0].Connectivity == nil || specs[0].Connectivity.Port != 5432 {
@@ -62,9 +58,6 @@ func TestParseAcceptanceCriteria(t *testing.T) {
 	}
 	if specs[3].DNSResolution == nil || specs[3].DNSResolution.Domain != "{{scenario_name}}.example.com" {
 		t.Fatalf("unexpected dns_resolution spec: %+v", specs[3])
-	}
-	if specs[4].Destruction == nil {
-		t.Fatalf("unexpected destruction spec: %+v", specs[4])
 	}
 }
 

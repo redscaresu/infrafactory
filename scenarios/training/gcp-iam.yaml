@@ -18,5 +18,3 @@ acceptance_criteria:
     params:
       region: us-central1
     expect: pass
-  - type: destruction
-    expect: no_orphans

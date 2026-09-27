@@ -52,5 +52,3 @@ acceptance_criteria:
     target: load_balancer
     port: 80
     expect: reachable
-  - type: destruction
-    expect: no_orphans

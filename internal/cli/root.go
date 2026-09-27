@@ -181,8 +181,11 @@ constraints:
 
 acceptance_criteria:
   # Keep at least one criterion. Add more as needed.
-  - type: destruction
-    expect: no_orphans
+  - type: policy
+    check: region_restriction
+    params:
+      region: fr-par
+    expect: pass
 `
 }
 

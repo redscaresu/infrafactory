@@ -19,5 +19,3 @@ acceptance_criteria:
     params:
       region: fr-par
     expect: pass
-  - type: destruction
-    expect: no_orphans

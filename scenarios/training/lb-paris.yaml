@@ -39,5 +39,3 @@ acceptance_criteria:
     port: 80
     expect: success
     description: "The load balancer frontend must accept TCP from the internet"
-  - type: destruction
-    expect: no_orphans

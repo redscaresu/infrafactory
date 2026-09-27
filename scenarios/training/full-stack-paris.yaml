@@ -42,5 +42,3 @@ acceptance_criteria:
   - type: policy
     check: encryption_at_rest
     expect: pass
-  - type: destruction
-    expect: no_orphans

@@ -1650,7 +1650,7 @@ func resolveConstraintPolicyPath(baseDir, policyPath string) string {
 
 // appendOrphanSweepResult asks the real API whether the run leaked.
 //
-// Before this, `destruction: no_orphans` was evaluated against mockway
+// Before this, the orphan check was evaluated against mockway
 // state even for Layer 3 runs, so a destroy that half-worked reported
 // clean while real resources kept billing. A destroy exiting 0 is not
 // evidence that nothing survived.

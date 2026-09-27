@@ -60,6 +60,4 @@ acceptance_criteria:
   - type: dns_resolution
     domain: "{{scenario_name}}.example.com"
     expect: resolves
-  - type: destruction
-    expect: no_orphans
 

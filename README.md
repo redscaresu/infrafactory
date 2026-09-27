@@ -65,7 +65,7 @@ You should see `Status: success` and `run/terminal_reason: pass (target_reached)
 after step 3. The LLM generated a Scaleway Block Storage volume in HCL,
 the static validator + mockway apply + topology test + destroy/orphan-check
 all passed. The default `run` tears the resources down at the end of the
-test cycle (the scenario's `destruction: no_orphans` acceptance criterion),
+test cycle (the destruction layer, which every scenario gets),
 so `http://127.0.0.1:8080/mock/state` reports empty collections. To inspect
 the post-apply state, add `--no-destroy` to the run command.
 
@@ -280,7 +280,8 @@ Key flags for `run`: `--clean` (fresh start), `--no-destroy` (keep resources for
 
 ## Acceptance criteria
 
-Scenario YAML declares criteria that gate run success:
+Scenario YAML declares criteria that gate run success. Destroy and the orphan check are not a
+criterion: they run for every scenario unless `--no-destroy` or the layer is disabled (ADR-0036).
 
 | Type | Layer 2 (mock) | Layer 3 (real) |
 |---|---|---|
@@ -288,7 +289,6 @@ Scenario YAML declares criteria that gate run success:
 | `http_probe` | Topology graph query | HTTP GET, expect 2xx/3xx |
 | `dns_resolution` | Auto-pass (informational) | DNS A/AAAA lookup with retry |
 | `policy` | OPA rules on plan + state | Same |
-| `destruction` | Orphan check after destroy | Same + real destroy |
 
 ## Repository layout
 

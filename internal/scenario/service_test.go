@@ -127,8 +127,11 @@ resources:
     purpose: web-server
     size: small
 acceptance_criteria:
-  - type: destruction
-    expect: no_orphans
+  - type: policy
+    check: region_restriction
+    params:
+      region: fr-par
+    expect: pass
 `)
 
 	_, err := LoadWithSchema(path, filepath.Join("..", "..", "scenario.schema.json"))
@@ -158,8 +161,11 @@ resources:
     purpose: web-server
     size: small
 acceptance_criteria:
-  - type: destruction
-    expect: no_orphans
+  - type: policy
+    check: region_restriction
+    params:
+      region: fr-par
+    expect: pass
 `)
 
 	_, err := LoadWithSchema(path, filepath.Join("..", "..", "scenario.schema.json"))

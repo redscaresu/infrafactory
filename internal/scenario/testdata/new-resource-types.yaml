@@ -22,5 +22,8 @@ resources:
     override:
       node_type: RED1-S
 acceptance_criteria:
-  - type: destruction
-    expect: no_orphans
+  - type: policy
+    check: region_restriction
+    params:
+      region: fr-par
+    expect: pass

@@ -491,7 +491,7 @@
       "properties": {
         "type": {
           "type": "string",
-          "enum": ["connectivity", "http_probe", "destruction", "policy", "dns_resolution"]
+          "enum": ["connectivity", "http_probe", "policy", "dns_resolution"]
         },
         "expect": { "type": "string" },
         "description": { "type": "string" }
@@ -540,17 +540,6 @@
                 "minimum": 1,
                 "maximum": 65535
               }
-            },
-            "additionalProperties": false
-          }
-        },
-        {
-          "if": { "properties": { "type": { "const": "destruction" } }, "required": ["type"] },
-          "then": {
-            "properties": {
-              "type": true,
-              "expect": { "enum": ["no_orphans"] },
-              "description": true
             },
             "additionalProperties": false
           }

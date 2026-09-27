@@ -64,7 +64,7 @@ Rule: if a change alters architecture, interfaces, or long-term workflow, create
 | Testing | Unit + Integration + E2E | Full coverage. E2E uses mock agent for determinism. |
 | Target users | Platform engineers + developers | Shapes the CLI UX and scenario complexity. |
 | Scenario composition | Flat now, mixins later | Self-contained scenarios to start. Add mixins when duplication emerges (~15+ scenarios). |
-| Acceptance criteria | Structured objects | Machine-parseable. 5 check types: connectivity, http_probe, destruction, policy, dns_resolution. |
+| Acceptance criteria | Structured objects | Machine-parseable. 4 check types: connectivity, http_probe, policy, dns_resolution. Destruction is a validation layer run for every scenario, not a criterion (ADR-0036). |
 | Resource definitions | Intent-driven default, prescriptive override | Developers use `size: small`; platform engineers can pin `offer: DEV1-S` via `override:`. |
 | Size mapping | Config-driven (`mappings.yaml`) | Users customise size-to-offering mappings. Updated independently of CLI releases. |
 | Validation chaining | Fail-fast with skip | Stop if hard dependency fails; run independent checks in parallel within a layer. |
@@ -344,8 +344,6 @@ acceptance_criteria:
     target: load_balancer
     port: 80
     expect: reachable
-  - type: destruction
-    expect: no_orphans
 ```
 
 ```yaml
@@ -389,8 +387,6 @@ acceptance_criteria:
     to: database
     port: 5432
     expect: blocked
-  - type: destruction
-    expect: no_orphans
 ```
 
 ```yaml
@@ -442,8 +438,6 @@ acceptance_criteria:
     to: redis                         # ← added
     port: 6379                        # ← added
     expect: success                   # ← added
-  - type: destruction
-    expect: no_orphans
 ```
 
 ### Mockway snapshot/restore API
@@ -755,7 +749,6 @@ Missing new fields/artifacts must not change run ordering or filter behavior in 
 |------|---------|-------|-----------------|
 | `connectivity` | Test network reachability between resources | Mock (graph query) + Sandbox (real probe) | **Mock**: TopologyEvaluator queries resource graph — do source and target share a private network path? Does target have a public endpoint? **Sandbox**: actual `nc`/`curl` probe. |
 | `http_probe` | Test HTTP endpoint responds on port | Mock (graph query) + Sandbox (real probe) | **Mock**: Does LB exist with frontend on specified port, backends configured, and a public IP? **Sandbox**: actual HTTP request. |
-| `destruction` | Verify `tofu destroy` leaves no orphans | Mock + Sandbox | After `tofu destroy`, query `GET /mock/state` — all resource lists must be empty. |
 | `policy` | OPA/Rego policy checks (encryption, public access, etc.) | Static (plan JSON) + Mock (deployed state) | Layer 1: OPA evaluates plan JSON. Layer 2: OPA evaluates mock state JSON. |
 | `dns_resolution` | Verify DNS records resolve correctly | Sandbox only | Real `dig`/`nslookup` against configured DNS. Not evaluatable against mock. |
 
@@ -824,8 +817,6 @@ acceptance_criteria:
   - type: dns_resolution
     domain: "{{scenario_name}}.example.com"
     expect: resolves
-  - type: destruction
-    expect: no_orphans
 ```
 
 ### Prescriptive override example (platform engineer)
@@ -883,8 +874,6 @@ acceptance_criteria:
     to: database
     port: 5432
     expect: success
-  - type: destruction
-    expect: no_orphans
 ```
 
 ### Holdout scenarios
@@ -1032,7 +1021,6 @@ Pre-S51 scenarios used a top-level `constraints:` map for this. The map was empi
 |------|----------------|----------------|-------|
 | `connectivity` | `from`, `to` | `success`, `blocked` | Mock (graph) + Sandbox (probe) |
 | `http_probe` | `target`, `port` | `reachable`, `unreachable` | Mock (graph) + Sandbox (probe) |
-| `destruction` | — | `no_orphans` | Mock + Sandbox |
 | `policy` | `check` | `pass`, `fail` | Static (plan) + Mock (state) |
 | `dns_resolution` | `domain` | `resolves`, `not_resolves` | Sandbox only |
 

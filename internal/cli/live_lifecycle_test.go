@@ -136,8 +136,10 @@ resources:
     size: small
     count: 1
 acceptance_criteria:
-  - type: destruction
-    expect: no_orphans
+  - type: connectivity
+    from: public_internet
+    to: compute
+    expect: blocked
 `
 
 func writeLifecycleHCL(t *testing.T, dir string, sizeGB int) {

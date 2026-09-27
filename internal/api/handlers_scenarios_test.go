@@ -257,8 +257,11 @@ resources:
     purpose: web-server
     size: small
 acceptance_criteria:
-  - type: destruction
-    expect: no_orphans
+  - type: policy
+    check: region_restriction
+    params:
+      region: fr-par
+    expect: pass
 `
 }
 
@@ -324,8 +327,11 @@ resources:
     purpose: web-server
     size: small
 acceptance_criteria:
-  - type: destruction
-    expect: no_orphans
+  - type: policy
+    check: region_restriction
+    params:
+      region: fr-par
+    expect: pass
 `
 	body, _ := json.Marshal(map[string]string{"yaml": invalid})
 	resp, err := http.Post(ts.URL+"/api/scenarios/validate", "application/json", bytes.NewReader(body))

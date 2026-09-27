@@ -262,8 +262,10 @@ resources:
     purpose: web-server
     size: small
 acceptance_criteria:
-  - type: destruction
-    expect: no_orphans
+  - type: connectivity
+    from: public_internet
+    to: compute
+    expect: blocked
 `
 			if err := os.WriteFile(h.ScenarioPath, []byte(scenarioYAML), 0o644); err != nil {
 				t.Fatalf("rewrite scenario: %v", err)

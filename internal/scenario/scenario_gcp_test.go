@@ -26,8 +26,11 @@ resources:
     purpose: app-assets
     size: small
 acceptance_criteria:
-  - type: destruction
-    expect: no_orphans
+  - type: policy
+    check: region_restriction
+    params:
+      region: fr-par
+    expect: pass
 `), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -132,8 +135,11 @@ resources:
 constraints:
   region: europe-west1
 acceptance_criteria:
-  - type: destruction
-    expect: no_orphans
+  - type: policy
+    check: region_restriction
+    params:
+      region: fr-par
+    expect: pass
 `,
 			expectedErr: nil,
 		},
@@ -157,8 +163,11 @@ resources:
     purpose: app-role
     api_key: false
 acceptance_criteria:
-  - type: destruction
-    expect: no_orphans
+  - type: policy
+    check: region_restriction
+    params:
+      region: fr-par
+    expect: pass
 `,
 			expectedErr: nil,
 		},

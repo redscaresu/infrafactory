@@ -143,8 +143,11 @@ resources:
     purpose: web-server
     size: small
 acceptance_criteria:
-  - type: destruction
-    expect: no_orphans
+  - type: policy
+    check: region_restriction
+    params:
+      region: fr-par
+    expect: pass
 `)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "yml-scenario.yml"), body, 0o644))
 
@@ -231,8 +234,11 @@ resources:
     purpose: web-server
     size: small
 acceptance_criteria:
-  - type: destruction
-    expect: no_orphans
+  - type: policy
+    check: region_restriction
+    params:
+      region: fr-par
+    expect: pass
 `)
 		require.NoError(t, os.WriteFile(filepath.Join(dir, file), body, 0o644))
 	}
@@ -336,8 +342,11 @@ resources:
     purpose: web-server
     size: small
 acceptance_criteria:
-  - type: destruction
-    expect: no_orphans
+  - type: policy
+    check: region_restriction
+    params:
+      region: fr-par
+    expect: pass
 `), 0o644))
 
 	cfg := config.Default()

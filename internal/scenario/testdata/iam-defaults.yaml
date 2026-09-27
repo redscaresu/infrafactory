@@ -6,5 +6,8 @@ resources:
   iam:
     purpose: service-account
 acceptance_criteria:
-  - type: destruction
-    expect: no_orphans
+  - type: policy
+    check: region_restriction
+    params:
+      region: fr-par
+    expect: pass

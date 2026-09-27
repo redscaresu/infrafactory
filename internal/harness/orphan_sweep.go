@@ -27,7 +27,7 @@ var ErrOrphanSweepFailed = errors.New("orphan sweep failed")
 // ScalewayOrphanSweep answers "did this run leave anything billable
 // behind?" against the real API.
 //
-// Before this existed, `destruction: no_orphans` was evaluated against
+// Before this existed, the orphan check was evaluated against
 // mockway state even for Layer 3 runs -- so a destroy that half-worked
 // reported clean while real resources kept billing. Nothing ever asked
 // Scaleway what survived.

@@ -34,8 +34,10 @@ resources:
     purpose: web-server
     size: small
 acceptance_criteria:
-  - type: destruction
-    expect: no_orphans
+  - type: connectivity
+    from: public_internet
+    to: compute
+    expect: blocked
 `), 0o644))
 
 	got, err := resolveScenarioByName(root, "the-declared-name")
@@ -66,8 +68,10 @@ resources:
     purpose: web-server
     size: small
 acceptance_criteria:
-  - type: destruction
-    expect: no_orphans
+  - type: connectivity
+    from: public_internet
+    to: compute
+    expect: blocked
 `), 0o644))
 
 	for _, attempt := range []string{
@@ -96,8 +100,10 @@ resources:
     purpose: web-server
     size: small
 acceptance_criteria:
-  - type: destruction
-    expect: no_orphans
+  - type: connectivity
+    from: public_internet
+    to: compute
+    expect: blocked
 `), 0o644))
 
 	got, err := resolveScenarioByName(root, "still-findable")
@@ -245,8 +251,10 @@ resources:
     purpose: web-server
     size: small
 acceptance_criteria:
-  - type: destruction
-    expect: no_orphans
+  - type: connectivity
+    from: public_internet
+    to: compute
+    expect: blocked
 `)
 		require.NoError(t, os.WriteFile(filepath.Join(root, name+".yaml"), body, 0o644))
 	}

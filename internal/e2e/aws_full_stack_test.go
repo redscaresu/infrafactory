@@ -109,8 +109,8 @@ func TestE2E_AWSFullStack(t *testing.T) {
 		t.Errorf("expected fs-assets-bucket to exist in s3 backend after apply")
 	}
 
-	// Final destroy run cleans up and exercises the destruction
-	// acceptance criterion (no_orphans).
+	// Final destroy run cleans up and exercises the destruction layer's
+	// orphan check.
 	final := RunInfrafactory(t, InfrafactoryRunOptions{
 		Args:           []string{"run", scenarioPath, "--config", configPath},
 		GeneratorFiles: files,

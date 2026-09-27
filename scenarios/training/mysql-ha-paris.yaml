@@ -45,5 +45,3 @@ acceptance_criteria:
     check: no_public_endpoints
     target: database
     expect: pass
-  - type: destruction
-    expect: no_orphans
