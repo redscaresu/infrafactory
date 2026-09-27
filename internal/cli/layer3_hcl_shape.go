@@ -824,6 +824,7 @@ var layer3PureFunctions = map[string]bool{
 	"replace": true, "substr": true, "trimspace": true, "trim": true,
 	"trimprefix": true, "trimsuffix": true, "lower": true, "upper": true,
 	"title": true, "chomp": true, "regex": true, "regexall": true,
+	"strcontains": true,
 	// numbers and types
 	"max": true, "min": true, "abs": true, "ceil": true, "floor": true,
 	"tostring": true, "tonumber": true, "tobool": true,

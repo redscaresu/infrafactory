@@ -1107,6 +1107,78 @@ func TestTestCommandFailsSandboxPreflightWithoutCredentials(t *testing.T) {
 	}
 }
 
+// Real probes read the stack the Layer 3 apply built. When nothing was
+// applied they must be reported as not run, not as a second failure for
+// a missing terraform-live.tfstate that buries the real cause.
+func TestTestCommandSkipsRealProbesWhenNothingWasApplied(t *testing.T) {
+	tests := map[string]struct {
+		creds     bool
+		deployErr error
+		cause     string
+	}{
+		"preflight failed": {cause: "- sandbox_deploy/preflight: fail"},
+		"apply failed":     {creds: true, deployErr: errors.New("apply exploded"), cause: "apply exploded"},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			h := newCommandTestHarness(t)
+			scenarioPath := writeCriteriaScenario(t, h.WorkspaceDir, "success", "pass")
+			if tc.creds {
+				sandboxCredsForTest(t)
+			} else {
+				t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+				t.Setenv("SCW_ACCESS_KEY", "")
+				t.Setenv("SCW_SECRET_KEY", "")
+			}
+			realProbe := &fakeRealProbeHarness{result: &harness.RealProbeResult{}}
+			opts := runtimeOptions{
+				configLoader: func(path string) (config.Config, error) {
+					cfg, err := config.Load(path)
+					if err != nil {
+						return config.Config{}, err
+					}
+					cfg.Validation.Layers.SandboxDeploy.Enabled = true
+					cfg.Paths.Output = h.OutputDir()
+					return cfg, nil
+				},
+				scenarioLoader: defaultScenarioLoader,
+				deps: RuntimeDependencies{
+					MockDeploy: &fakeMockDeployHarness{
+						result: &harness.MockDeployResult{
+							Apply:         harness.StageResult{Stage: "apply"},
+							StateSnapshot: []byte(`{}`),
+						},
+					},
+					Destroy: &fakeDestroyHarness{
+						result: &harness.DestroyResult{
+							Destroy:       harness.StageResult{Stage: "destroy"},
+							StateSnapshot: []byte(`{"instance":{"servers":[]}}`),
+						},
+					},
+					RunProject:     &fakeRunProject{created: harness.RunProject{ID: "run-proj-1", Name: "if-run-t"}},
+					SandboxDeploy:  &fakeSandboxDeployHarness{err: tc.deployErr},
+					SandboxDestroy: &fakeSandboxDestroyHarness{},
+					OrphanSweep:    &fakeOrphanSweep{},
+					RealProbe:      realProbe,
+				},
+			}
+
+			cmd := newTestCommandForTest(opts)
+			stdout := &bytes.Buffer{}
+			cmd.SetOut(stdout)
+			cmd.SetErr(&bytes.Buffer{})
+			cmd.SetArgs([]string{scenarioPath, "--config", h.ConfigPath})
+
+			require.Error(t, cmd.Execute())
+			assert.Zero(t, realProbe.calls, "nothing was applied, so there is nothing to probe")
+			assert.Contains(t, stdout.String(), tc.cause)
+			assert.Contains(t, stdout.String(), "- sandbox_deploy/real_probe: skip")
+			assert.NotContains(t, stdout.String(), "check=real_probe")
+			assert.NotContains(t, stdout.String(), harness.LiveStateFilename)
+		})
+	}
+}
+
 func TestTestCommandPropagatesCommandContext(t *testing.T) {
 	t.Parallel()
 
