@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strconv"
+	"strings"
 
 	"github.com/redscaresu/infrafactory/internal/harness"
 	"github.com/redscaresu/infrafactory/internal/livestore"
@@ -231,14 +233,33 @@ func hasHoldoutFailure(failures []FailureSummary) bool {
 // holdout that PASSED would otherwise leave no trace in the run
 // summary, and "the checks it was never shown also passed" is the
 // entire claim. A result nobody can see is not evidence.
-func holdoutStages(stages []StageSummary) []StageSummary {
+//
+// Each is renamed `iteration_N_<stage>` like every other per-iteration
+// stage: a run can skip the holdout on one lap and pass it on the next,
+// and unnumbered the two lines read as a contradiction.
+func holdoutStages(stages []StageSummary, iteration int) []StageSummary {
 	var out []StageSummary
 	for _, s := range stages {
 		if s.Layer == "holdout" {
+			s.Stage = fmt.Sprintf("iteration_%d_%s", iteration, s.Stage)
 			out = append(out, s)
 		}
 	}
 	return out
+}
+
+// holdoutStageName undoes the `iteration_N_` prefix holdoutStages adds,
+// so a run's stages and a single test's can be read the same way.
+func holdoutStageName(stage string) string {
+	rest, ok := strings.CutPrefix(stage, "iteration_")
+	if !ok {
+		return stage
+	}
+	n, name, ok := strings.Cut(rest, "_")
+	if _, err := strconv.Atoi(n); !ok || err != nil {
+		return stage
+	}
+	return name
 }
 
 // holdoutAfterCriteria probes the running stack, if this run asked for
@@ -300,7 +321,10 @@ func holdoutAfterCriteria(
 func holdoutOutcome(stages []StageSummary) string {
 	outcome := ""
 	for _, s := range stages {
-		if s.Layer != "holdout" || s.Stage == "discovery" || s.Stage == "skipped" {
+		if s.Layer != "holdout" {
+			continue
+		}
+		if name := holdoutStageName(s.Stage); name == "discovery" || name == "skipped" {
 			continue
 		}
 		if s.Status == StageStatusFail {

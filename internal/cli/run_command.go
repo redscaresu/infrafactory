@@ -1123,7 +1123,7 @@ func runIteration(
 		}
 		if err != nil {
 			stages = append(stages, StageSummary{Layer: "run", Stage: stageName, Status: StageStatusFail})
-			stages = append(stages, holdoutStages(testResult.Stages)...)
+			stages = append(stages, holdoutStages(testResult.Stages, iteration)...)
 			if (step.name == "test" || step.name == "validate") && len(testResult.Failures) > 0 {
 				for _, failure := range testResult.Failures {
 					failures = append(failures, FailureSummary{
@@ -1166,7 +1166,7 @@ func runIteration(
 		// would then leave no trace at all, and "the unseen checks
 		// passed" is exactly the claim somebody needs to see to believe
 		// the run proved anything.
-		stages = append(stages, holdoutStages(testResult.Stages)...)
+		stages = append(stages, holdoutStages(testResult.Stages, iteration)...)
 		runtime.Logger.Log(LogEntry{
 			Level:     logLevelInfo,
 			Command:   "run",

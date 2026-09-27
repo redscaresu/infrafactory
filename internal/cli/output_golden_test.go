@@ -135,6 +135,22 @@ func TestOutputContractGoldenSnapshots(t *testing.T) {
 			},
 		},
 		{
+			name: "run_holdout_skip_then_pass",
+			result: OutputResult{
+				Command:  "run",
+				Scenario: "web-live-paris",
+				Status:   CommandStatusSuccess,
+				Stages: []StageSummary{
+					{Layer: "run", Stage: "iteration_1_test", Status: StageStatusFail},
+					{Layer: "holdout", Stage: "iteration_1_discovery", Status: StageStatusPass, Detail: "1 holdout(s) for web-live-paris"},
+					{Layer: "holdout", Stage: "iteration_1_skipped", Status: StageStatusSkip, Detail: "earlier checks failed"},
+					{Layer: "run", Stage: "iteration_2_test", Status: StageStatusPass},
+					{Layer: "holdout", Stage: "iteration_2_discovery", Status: StageStatusPass, Detail: "1 holdout(s) for web-live-paris"},
+					{Layer: "holdout", Stage: "iteration_2_web-live-paris-unseen", Status: StageStatusPass, Detail: "1 unseen check(s) passed"},
+				},
+			},
+		},
+		{
 			name: "mock_start_success",
 			result: OutputResult{
 				Command:  "mock start",
