@@ -7,8 +7,8 @@ PR merges. History: `docs/status/ARCHIVE.md` (per-arc close-outs),
 
 ## Now
 
-Process-efficiency arc (ADR-0035). S195–S197 merged or in review. Last: S198, the one-story
-convention in `AGENTS.md`. Multi-slice arcs still get a plan in `docs/plans/<arc>-plan.md`.
+No arc in flight. The process-efficiency arc (ADR-0035, S195–S198) is complete. Pick from
+§ Open. Multi-slice arcs get a plan in `docs/plans/<arc>-plan.md`.
 
 ## Open
 
@@ -39,7 +39,8 @@ convention in `AGENTS.md`. Multi-slice arcs still get a plan in `docs/plans/<arc
 
 ## Recent
 
-- 2026-09-27 S197 — one entry point: this file, current state only; `NEXT_SESSION.md` and `BACKLOG.md` removed
+- 2026-09-27 S198 — each change is written down once; review-pass files only for declined findings
+- 2026-09-27 S197 — one entry point: this file, current state only; `NEXT_SESSION.md` and `BACKLOG.md` removed (#259)
 - 2026-09-27 S196 — pre-commit is fast, and a decision path no longer forces an ADR edit (#258)
 - 2026-09-27 S195 — the ADR index is generated (#257)
 - 2026-09-27 S194 — the pitfall that forbade a firewall (#256)
@@ -48,4 +49,3 @@ convention in `AGENTS.md`. Multi-slice arcs still get a plan in `docs/plans/<arc
 - 2026-09-20 S191 — a standalone private NIC destroys fine now (#251)
 - 2026-09-20 S190 — the probe window, measured (#250)
 - 2026-09-20 S188 — provider 2.83.0 (#248)
-- 2026-09-20 S187 — an apply that succeeds is not a stack that converges (#247)
