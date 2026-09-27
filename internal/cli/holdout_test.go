@@ -152,15 +152,73 @@ func TestHoldoutFailsWhenItCannotReadTheDirectory(t *testing.T) {
 // fixes against it, and the number keeps looking good while meaning
 // nothing. At Layer 3 it also costs a real apply per lap.
 func TestHoldoutFailureEndsTheRunWithoutARepair(t *testing.T) {
+	generated := 0
+	// The scenario's own probe passes; the holdout's does not.
+	// That is the whole shape of overfitting.
+	probe := &fakeRealProbeHarness{
+		result: &harness.RealProbeResult{},
+		// Keyed on the check, not the scenario name: the holdout
+		// probes under the TRAINING name so `{{scenario_name}}`
+		// resolves against the stack that exists, which means the
+		// name no longer tells the two callers apart.
+		failWhen: func(checks []harness.ProbeCheck) *harness.RealProbeResult {
+			for _, c := range checks {
+				if c.Type == "connectivity" && c.Port == 22 {
+					return &harness.RealProbeResult{Failures: []feedback.Failure{{
+						Check:  "connectivity",
+						Detail: "public_internet->compute:22 expected false got true",
+					}}}
+				}
+			}
+			return nil
+		},
+	}
+
+	stdout, err := runWithHoldout(t, probe, &generated)
+
+	require.Error(t, err, "a failed holdout fails the run")
+	assert.Contains(t, err.Error(), "was not shown")
+	assert.Equal(t, 1, generated,
+		"the repair loop must never be given the holdout: fixing against it is exactly the overfitting being measured")
+	assert.Contains(t, stdout, "holdout/iteration_1_web-live-paris-unseen: fail")
+}
+
+// A lap whose own checks fail skips the holdout; the repaired lap runs
+// it. Both lines land in one run summary, so each must say which lap it
+// belongs to or "skipped" beside "pass" reads as a contradiction.
+func TestHoldoutStagesNameTheirIteration(t *testing.T) {
+	generated := 0
+	probe := &fakeRealProbeHarness{result: &harness.RealProbeResult{}}
+	probe.failWhen = func([]harness.ProbeCheck) *harness.RealProbeResult {
+		if probe.calls > 1 {
+			return nil
+		}
+		return &harness.RealProbeResult{Failures: []feedback.Failure{{
+			Check:  "connectivity",
+			Detail: "public_internet->compute expected false got true",
+		}}}
+	}
+
+	stdout, err := runWithHoldout(t, probe, &generated)
+
+	require.NoError(t, err, stdout)
+	assert.Equal(t, 2, generated)
+	assert.Contains(t, stdout, "holdout/iteration_1_skipped: skip")
+	assert.Contains(t, stdout, "holdout/iteration_2_web-live-paris-unseen: pass")
+	assert.NotContains(t, stdout, "holdout/skipped")
+}
+
+// runWithHoldout runs `run --holdout` on web-live-paris with the
+// unseen holdout, every harness faked but the real probe, and returns
+// what it printed.
+func runWithHoldout(t *testing.T, probe *fakeRealProbeHarness, generated *int) (string, error) {
+	t.Helper()
 	h := newCommandTestHarness(t)
 	sandboxCredsForTest(t)
 
-	scenarioPath := filepath.Join(h.WorkspaceDir, "scenarios", "training", "web-live-paris.yaml")
-	require.NoError(t, os.MkdirAll(filepath.Dir(scenarioPath), 0o755))
-	require.NoError(t, os.WriteFile(scenarioPath, []byte(liveServiceScenarioYAML), 0o600))
+	scenarioPath := writeLiveServiceScenario(t, h)
 	writeHoldout(t, h, unseenHoldoutYAML)
 
-	generated := 0
 	opts := isolatedRunOpts(h, func(cfg config.Config) config.Config {
 		cfg.Paths.Scenarios = filepath.Join(h.WorkspaceDir, "scenarios")
 		cfg.Validation.Layers.SandboxDeploy.Enabled = true
@@ -169,7 +227,7 @@ func TestHoldoutFailureEndsTheRunWithoutARepair(t *testing.T) {
 	})
 	opts.deps = RuntimeDependencies{
 		Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
-			generated++
+			*generated++
 			// A real provider pin: the Layer 3 shape gate refuses HCL
 			// that would resolve the provider binary implicitly, and
 			// it runs before anything this test is about.
@@ -200,26 +258,7 @@ func TestHoldoutFailureEndsTheRunWithoutARepair(t *testing.T) {
 		SandboxDeploy:  &fakeSandboxDeployHarness{result: &harness.SandboxDeployResult{Apply: harness.StageResult{Stage: "apply"}}},
 		SandboxDestroy: &fakeSandboxDestroyHarness{result: &harness.SandboxDestroyResult{}},
 		OrphanSweep:    &fakeOrphanSweep{},
-		// The scenario's own probe passes; the holdout's does not.
-		// That is the whole shape of overfitting.
-		RealProbe: &fakeRealProbeHarness{
-			result: &harness.RealProbeResult{},
-			// Keyed on the check, not the scenario name: the holdout
-			// probes under the TRAINING name so `{{scenario_name}}`
-			// resolves against the stack that exists, which means the
-			// name no longer tells the two callers apart.
-			failWhen: func(checks []harness.ProbeCheck) *harness.RealProbeResult {
-				for _, c := range checks {
-					if c.Type == "connectivity" && c.Port == 22 {
-						return &harness.RealProbeResult{Failures: []feedback.Failure{{
-							Check:  "connectivity",
-							Detail: "public_internet->compute:22 expected false got true",
-						}}}
-					}
-				}
-				return nil
-			},
-		},
+		RealProbe:      probe,
 	}
 
 	cmd := newRunCommandForTest(opts)
@@ -229,12 +268,7 @@ func TestHoldoutFailureEndsTheRunWithoutARepair(t *testing.T) {
 	cmd.SetArgs([]string{scenarioPath, "--config", h.ConfigPath, "--holdout"})
 
 	err := cmd.Execute()
-
-	require.Error(t, err, "a failed holdout fails the run")
-	assert.Contains(t, err.Error(), "was not shown")
-	assert.Equal(t, 1, generated,
-		"the repair loop must never be given the holdout: fixing against it is exactly the overfitting being measured")
-	assert.Contains(t, stdout.String(), "holdout/web-live-paris-unseen: fail")
+	return stdout.String(), err
 }
 
 // Both commands that can run a holdout have to accept the flag, or the
@@ -305,6 +339,15 @@ func TestHoldoutOutcomeDistinguishesRanFromRequested(t *testing.T) {
 	failed := append([]StageSummary{}, passed...)
 	failed = append(failed, StageSummary{Layer: "holdout", Stage: "other", Status: StageStatusFail})
 	assert.Equal(t, livestore.HoldoutFail, holdoutOutcome(failed), "one failure outranks any number of passes")
+
+	// A run's stages carry the iteration prefix; it names the lap, not the kind of stage.
+	runSkipped := []StageSummary{
+		{Layer: "holdout", Stage: "iteration_1_discovery", Status: StageStatusPass},
+		{Layer: "holdout", Stage: "iteration_1_skipped", Status: StageStatusSkip},
+	}
+	assert.Equal(t, "", holdoutOutcome(runSkipped), "a numbered discovery is still not a pass")
+	runPassed := append(runSkipped, StageSummary{Layer: "holdout", Stage: "iteration_2_unseen", Status: StageStatusPass})
+	assert.Equal(t, livestore.HoldoutPass, holdoutOutcome(runPassed))
 
 	assert.Equal(t, "", holdoutOutcome([]StageSummary{{Layer: "sandbox_deploy", Stage: "apply", Status: StageStatusPass}}),
 		"only holdout stages count")
