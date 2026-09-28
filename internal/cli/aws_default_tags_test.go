@@ -44,13 +44,20 @@ acceptance_criteria:
 `
 
 // The run's id, and only the run's id, reaches default_tags: not the
-// model's provider block, not the scenario YAML.
+// model's provider block, not the scenario YAML. Every dependency is a
+// fake and every mock URL a closed port, so the run touches no real mock,
+// and Layer 3 is off.
 func TestRunWritesItsOwnIDIntoAWSDefaultTags(t *testing.T) {
 	h := newCommandTestHarness(t)
 	scenarioPath := filepath.Join(h.WorkspaceDir, "scenarios", "training", "aws-run-id.yaml")
 	mustWriteFile(t, scenarioPath, runIDScenarioYAML)
 
-	opts := isolatedRunOpts(h, nil)
+	const closed = "http://127.0.0.1:1"
+	opts := isolatedRunOpts(h, func(cfg config.Config) config.Config {
+		cfg.Mockway.URL, cfg.Fakeaws.URL, cfg.Fakegcp.URL, cfg.S3.URL = closed, closed, closed, closed
+		cfg.Validation.Layers.SandboxDeploy.Enabled = false
+		return cfg
+	})
 	opts.deps = RuntimeDependencies{
 		Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
 			return &generator.GeneratedCode{Files: map[string][]byte{
@@ -61,6 +68,7 @@ func TestRunWritesItsOwnIDIntoAWSDefaultTags(t *testing.T) {
 		Static:     &fakeStaticHarness{result: &harness.StaticResult{PlanJSON: []byte(`{}`)}},
 		MockDeploy: &fakeMockDeployHarness{result: &harness.MockDeployResult{StateSnapshot: []byte(`{}`)}},
 		Destroy:    &fakeDestroyHarness{result: &harness.DestroyResult{StateSnapshot: []byte(`{}`)}},
+		MockState:  &fakeRunMockStateClient{statePayload: []byte(`{}`)},
 	}
 	cmd := newRunCommandForTest(opts)
 	cmd.RunE = withRuntimeWithOptions("run", opts, sealedHandler(io.Discard, runRunCommand))
@@ -68,10 +76,12 @@ func TestRunWritesItsOwnIDIntoAWSDefaultTags(t *testing.T) {
 	cmd.SetErr(&bytes.Buffer{})
 	cmd.SetArgs([]string{scenarioPath, "--config", h.ConfigPath, "--repair-iterations-max", "1"})
 
-	_ = cmd.ExecuteContext(context.WithValue(context.Background(), runIDContextKey{}, testRunID))
+	// The run fails later, on the fake harnesses' empty plan; only
+	// generation matters here.
+	runErr := cmd.ExecuteContext(context.WithValue(context.Background(), runIDContextKey{}, testRunID))
 
 	providers, err := os.ReadFile(filepath.Join(h.RunstoreRoot(), "aws-run-id", testRunID, "generated", "providers.tf"))
-	require.NoError(t, err)
+	require.NoError(t, err, "the run generated nothing; it ended with: %v", runErr)
 	assert.Contains(t, string(providers), `"infrafactory-run-id" = "`+testRunID+`"`)
 	assert.NotContains(t, string(providers), "model-chosen")
 	assert.NotContains(t, string(providers), "scenario-chosen")
@@ -103,6 +113,19 @@ resource "aws_sqs_queue" "jobs" {
 		assert.Contains(t, err.Error(), "main.tf", name)
 		assert.Contains(t, err.Error(), `"infrafactory-run-id"`, name)
 		assert.NotContains(t, files, "providers.tf", "%s: nothing is written for refused HCL", name)
+	}
+
+	// Every file tofu loads can carry it: JSON configuration, and variable
+	// values that a resource's tags = var.tags would take.
+	for file, content := range map[string]string{
+		"tags.tf.json":     `{"locals": {"tags": {"infrafactory-run-id": "model-chosen"}}}`,
+		"terraform.tfvars": `tags = { "infrafactory-run-id" = "model-chosen" }`,
+	} {
+		files := map[string][]byte{"main.tf": []byte(sqsQueueTF), file: []byte(content)}
+		err := ensureAwsProviderWiring(files, config.Config{}, testRunID)
+		require.Error(t, err, file)
+		assert.Contains(t, err.Error(), file)
+		assert.NotContains(t, files, "providers.tf", "%s: nothing is written for refused HCL", file)
 	}
 
 	commented := map[string][]byte{"main.tf": []byte(`# infrafactory-run-id comes from default_tags.

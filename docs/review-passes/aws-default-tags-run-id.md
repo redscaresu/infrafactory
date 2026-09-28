@@ -7,7 +7,7 @@ One finding partly declined across the loop; the rest are in the PR body.
 
 ## Partly declined: [P2] "Inspect actual tag assignments before refusing the run-id key"
 
-The claim: `refuseAwsRunIDTag` refuses a `.tf` file that mentions `infrafactory-run-id`
+The claim: `refuseAwsRunIDTag` refuses a generated file that mentions `infrafactory-run-id`
 anywhere, so a comment, output or explanatory string that echoes the key fails a valid
 generation. Codex asked for an HCL parse that checks only `tags` keys.
 

@@ -371,15 +371,16 @@ func ensureAwsProviderWiring(files map[string][]byte, cfg config.Config, runID s
 	return nil
 }
 
-// refuseAwsRunIDTag refuses a .tf file that names awsRunIDTagKey outside
-// a comment, once the model's provider blocks are gone: a resource's own
-// tag of that key overrides default_tags, so the model would choose which
-// run the resource belongs to. Any mention counts, not just a tags
-// attribute, because the key can reach one through a local, a variable
-// default or merge().
+// refuseAwsRunIDTag refuses any generated file that names awsRunIDTagKey,
+// once the model's provider blocks are gone: a resource's own tag of that
+// key overrides default_tags, so the model would choose which run the
+// resource belongs to. Any mention counts, not just a tags attribute,
+// because the key can reach one through a local, a variable default,
+// merge(), a .tfvars value or a .tf.json file. Comments in HCL files
+// are not mentions.
 func refuseAwsRunIDTag(files map[string][]byte) error {
 	for _, name := range slices.Sorted(maps.Keys(files)) {
-		if strings.HasSuffix(name, ".tf") && namesOutsideComments(files[name], awsRunIDTagKey) {
+		if namesOutsideComments(name, files[name], awsRunIDTagKey) {
 			return fmt.Errorf("%s names the %q tag, which infrafactory sets from the run's id: remove it", name, awsRunIDTagKey)
 		}
 	}
@@ -387,9 +388,13 @@ func refuseAwsRunIDTag(files map[string][]byte) error {
 }
 
 // namesOutsideComments reports whether word appears in content other than
-// in a comment. HCL that does not lex counts every mention.
-func namesOutsideComments(content []byte, word string) bool {
-	tokens, diags := hclsyntax.LexConfig(content, "", hcl.InitialPos)
+// in a comment. Only .tf and .tfvars files are read as HCL; any other
+// file, or HCL that does not lex, counts every mention.
+func namesOutsideComments(name string, content []byte, word string) bool {
+	if !strings.HasSuffix(name, ".tf") && !strings.HasSuffix(name, ".tfvars") {
+		return strings.Contains(string(content), word)
+	}
+	tokens, diags := hclsyntax.LexConfig(content, name, hcl.InitialPos)
 	if diags.HasErrors() {
 		return strings.Contains(string(content), word)
 	}
