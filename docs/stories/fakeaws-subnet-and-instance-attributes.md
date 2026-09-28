@@ -1,7 +1,6 @@
 ---
 kind: code
-status: blocked
-blocked_by: [fakeaws-instance-eni-and-ips]
+status: ready
 epic: fakeaws-step-one-surfaces
 repo: fakeaws
 depends_on: [fakeaws-instance-eni-and-ips]
@@ -11,6 +10,10 @@ touches: ["handlers/ec2.go", "handlers/ec2_test.go", "repository/ec2.go", "repos
 # Items 5 + 6: ModifySubnetAttribute persists MapPublicIpOnLaunch; RunInstances persists UserData
 
 MapPublicIpOnLaunch.Value replaces the no-op (ec2.go:63-70); other attributes keep the documented no-op. EC2Subnet gains the field (repository/ec2.go:160-169) and DescribeSubnets echoes mapPublicIpOnLaunch. A top-level launch into such a subnet gets a public IP and association from the story-F allocator. RunInstances persists UserData (repository/ec2_compute.go:85-96) and DescribeInstanceAttribute userData returns it (today "", ec2.go:1888-1889). The coverage_matrix aws_subnet row moves from updates_exempt, whose 'Subnet immutable' reason becomes false (coverage_matrix.yaml:158-159), to updates_dir_name. basic_instance leaves knownRed.
+
+Note (fakeaws #27): `DescribeInstanceAttribute userData` already returns an empty `<userData/>` for an
+instance without user data, and `working/basic_instance` left `knownRed`. What remains of item 6 is
+persisting UserData from `RunInstances` and returning it base64.
 
 **Done when:**
 - Handler tests: MapPublicIpOnLaunch true then false flips DescribeSubnets; a top-level launch into a flagged subnet has ipAddress and one into an unflagged subnet does not; UserData base64 round-trips and a missing UserData returns an empty value. Each fails on today's code
