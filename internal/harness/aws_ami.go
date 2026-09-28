@@ -2,6 +2,7 @@ package harness
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 
@@ -22,26 +23,33 @@ const AWSAL2023AMIParameter = "/aws/service/ami-amazon-linux-latest/al2023-ami-k
 // is written into the prompt verbatim, so nothing else gets through.
 var awsAMIIDRe = regexp.MustCompile(`^ami-[0-9a-z]+$`)
 
-// ResolveAWSAMIFromSSM reads AWSAL2023AMIParameter through an SSM client
-// built as NewAWSSTSClient builds its STS one: the sealed env's static key
-// and region, never the SDK default chain. endpoint "" means real SSM in
-// that region. doer is required, so no caller reaches SSM through a client
-// it did not choose.
-func ResolveAWSAMIFromSSM(ctx context.Context, env map[string]string, doer ssm.HTTPClient, endpoint string) (string, error) {
+// newAWSSSMClient builds an SSM client as NewAWSSTSClient builds its STS
+// one: the sealed env's static key and region, never the SDK default
+// chain. endpoint "" means real SSM in that region. doer is required, so
+// no caller reaches SSM through a client it did not choose.
+func newAWSSSMClient(env map[string]string, doer ssm.HTTPClient, endpoint string) (*ssm.Client, error) {
 	if doer == nil {
-		return "", fmt.Errorf("aws ami: reading %s needs an HTTP client, and none was given", AWSAL2023AMIParameter)
+		return nil, errors.New("aws ssm client: needs an HTTP client, and none was given")
 	}
 	cfg, err := sealedAWSConfig(env, "aws ssm client")
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if endpoint == "" {
 		endpoint = "https://ssm." + cfg.Region + ".amazonaws.com"
 	}
-	client := ssm.NewFromConfig(cfg, func(o *ssm.Options) {
+	return ssm.NewFromConfig(cfg, func(o *ssm.Options) {
 		o.BaseEndpoint = aws.String(endpoint)
 		o.HTTPClient = doer
-	})
+	}), nil
+}
+
+// ResolveAWSAMIFromSSM reads AWSAL2023AMIParameter through newAWSSSMClient.
+func ResolveAWSAMIFromSSM(ctx context.Context, env map[string]string, doer ssm.HTTPClient, endpoint string) (string, error) {
+	client, err := newAWSSSMClient(env, doer, endpoint)
+	if err != nil {
+		return "", fmt.Errorf("aws ami: reading %s: %w", AWSAL2023AMIParameter, err)
+	}
 
 	out, err := client.GetParameter(ctx, &ssm.GetParameterInput{Name: aws.String(AWSAL2023AMIParameter)})
 	if err != nil {
