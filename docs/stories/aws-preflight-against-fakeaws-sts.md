@@ -1,7 +1,6 @@
 ---
 kind: code
-status: blocked
-blocked_by: [aws-preflight-sts, fakeaws-sts-caller-identity]
+status: ready
 epic: aws-layer3-seal-and-dispatch
 depends_on: [aws-preflight-sts, fakeaws-sts-caller-identity]
 touches: [".github/workflows/ci.yml", "internal/e2e/aws_preflight_fakeaws_test.go (new)", "docs/stories/aws-preflight-against-fakeaws-sts.md (delete)"]
