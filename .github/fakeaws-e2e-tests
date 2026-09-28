@@ -1,0 +1,15 @@
+# Tests the "AWS against fakeaws" CI step runs by name; each must print its own PASS line.
+# One per line, sorted: two stories adding a test land on different lines instead of one.
+TestAWSAMIParityAgainstFakeaws
+TestAWSPreflightAgainstFakeaws
+TestAWSScopeClaimAgainstFakeaws
+TestAWSSweepAgainstFakeaws
+TestE2E_AWSAllowlistPlaceable
+TestE2E_AWSEnvOnlyEveryService
+TestE2E_AWSLayer2CatchAllFailsClosed
+TestE2E_AWSLayer2IgnoresShellAWS
+TestE2E_AWSValidateNeedsFakeawsSTS
+TestE2E_AWSWebStepOne
+TestE2E_AWSWebStepOneUnattachedGroup
+TestE2E_CheckAvoidAgainstFakeaws
+TestE2E_RetiredAvoidPitfallsStayContradicted
