@@ -13,7 +13,8 @@ deny contains msg if {
 	)
 }
 
-# Layer 2: check against ScalewayMock state
+# Layer 2: check against the Layer 2 mock's state (mockway), never a
+# cloud's (ADR-0034 section 4).
 deny_state contains msg if {
 	instance := input.rdb.instances[_]
 	endpoint := instance.endpoints[_]

@@ -33,9 +33,10 @@ deny contains msg if {
 	)
 }
 
-# Same property against deployed state, so it is checked at Layer 2 and
-# Layer 3 rather than only against the plan. A plan-only policy cannot
-# see a group the API created, changed, or ignored.
+# Same property against the Layer 2 mock's state after the mock apply.
+# It reads the mock's record, never a cloud's, even on a run that also
+# applied to a sandbox: the holdout is what checks the deployed stack
+# for an open port (ADR-0034 section 4).
 deny_state contains msg if {
 	group := input.instance.security_groups[_]
 	not is_api_default(group)

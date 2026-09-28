@@ -48,7 +48,8 @@ deny contains msg if {
 	)
 }
 
-# Layer 2 — fakeaws state surface. AWS bucket region lives on
+# Layer 2 — reads the Layer 2 mock's state (fakeaws), never a cloud's
+# (ADR-0034 section 4). AWS bucket region lives on
 # state.s3.buckets[].region.
 deny_state contains msg if {
 	bucket := input.s3.buckets[_]
