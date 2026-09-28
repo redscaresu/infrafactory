@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -54,4 +55,51 @@ func TestDenyStateReadsTheMockSnapshotAfterALayer3Apply(t *testing.T) {
 	assert.Equal(t, "mock_deploy", failures[0].Layer)
 	assert.Equal(t, "default_deny_ingress", failures[0].Policy)
 	assert.Contains(t, failures[0].Detail, "sg-mock")
+}
+
+// The same claim for AWS, through the checked-in configuration: its flat
+// map sends default_deny_ingress to the Scaleway policy, which reads no
+// AWS state, so this fails if cloudConstraintPolicies loses the aws entry.
+// The snapshot is fakeaws's captured /mock/state with public SSH on web.
+func TestDenyStateReadsTheMockSnapshotAfterALayer3ApplyAWS(t *testing.T) {
+	cfg, err := config.Load(filepath.Join("..", "..", "infrafactory.yaml"))
+	require.NoError(t, err)
+	cfg.Validation.Layers.SandboxDeploy.Enabled = true
+	cfg.Paths.Policies = filepath.Join("..", "..", "policies")
+	rt := &CommandRuntime{Config: cfg}
+
+	sc := scenario.Scenario{
+		Name:  "aws-web-live",
+		Cloud: "aws",
+		AcceptanceCriteria: []scenario.AcceptanceCriterion{
+			{Type: "policy", Expect: "pass", Check: "default_deny_ingress"},
+		},
+	}
+	snapshot, err := os.ReadFile(filepath.Join("..", "harness", "testdata", "ingress", "aws", "state_deny_ssh_ipv4.json"))
+	require.NoError(t, err)
+	var state struct {
+		EC2 struct {
+			SecurityGroups []struct {
+				ID        string `json:"id"`
+				GroupName string `json:"group_name"`
+			} `json:"security_groups"`
+		} `json:"ec2"`
+	}
+	require.NoError(t, json.Unmarshal(snapshot, &state))
+	web := ""
+	for _, group := range state.EC2.SecurityGroups {
+		if group.GroupName == "web" {
+			web = group.ID
+		}
+	}
+	require.NotEmpty(t, web)
+
+	const sandboxApplied = true
+	_, failures := evaluateSupportedCriteria(context.Background(), sc, rt,
+		&harness.MockDeployResult{StateSnapshot: snapshot}, sandboxApplied)
+
+	require.Len(t, failures, 1)
+	assert.Equal(t, "mock_deploy", failures[0].Layer)
+	assert.Equal(t, "default_deny_ingress", failures[0].Policy)
+	assert.Contains(t, failures[0].Detail, web)
 }

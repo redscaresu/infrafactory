@@ -1,0 +1,3929 @@
+{
+  "resource_changes": [
+    {
+      "address": "aws_default_security_group.open[\"all_minus1\"]",
+      "mode": "managed",
+      "type": "aws_default_security_group",
+      "name": "open",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "ingress": [
+            {
+              "cidr_blocks": [
+                "0.0.0.0/0"
+              ],
+              "description": "",
+              "from_port": 0,
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "protocol": "-1",
+              "security_groups": [],
+              "self": false,
+              "to_port": 0
+            }
+          ],
+          "revoke_rules_on_delete": false,
+          "tags": null
+        },
+        "after_unknown": {
+          "arn": true,
+          "description": true,
+          "egress": true,
+          "id": true,
+          "ingress": [
+            {
+              "cidr_blocks": [
+                false
+              ],
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "security_groups": []
+            }
+          ],
+          "name": true,
+          "name_prefix": true,
+          "owner_id": true,
+          "tags_all": true,
+          "vpc_id": true
+        }
+      }
+    },
+    {
+      "address": "aws_default_security_group.open[\"all_word\"]",
+      "mode": "managed",
+      "type": "aws_default_security_group",
+      "name": "open",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "ingress": [
+            {
+              "cidr_blocks": [
+                "0.0.0.0/0"
+              ],
+              "description": "",
+              "from_port": 0,
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "protocol": "-1",
+              "security_groups": [],
+              "self": false,
+              "to_port": 0
+            }
+          ],
+          "revoke_rules_on_delete": false,
+          "tags": null
+        },
+        "after_unknown": {
+          "arn": true,
+          "description": true,
+          "egress": true,
+          "id": true,
+          "ingress": [
+            {
+              "cidr_blocks": [
+                false
+              ],
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "security_groups": []
+            }
+          ],
+          "name": true,
+          "name_prefix": true,
+          "owner_id": true,
+          "tags_all": true,
+          "vpc_id": true
+        }
+      }
+    },
+    {
+      "address": "aws_default_security_group.open[\"ports_0_0\"]",
+      "mode": "managed",
+      "type": "aws_default_security_group",
+      "name": "open",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "ingress": [
+            {
+              "cidr_blocks": [
+                "0.0.0.0/0"
+              ],
+              "description": "",
+              "from_port": 0,
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "protocol": "tcp",
+              "security_groups": [],
+              "self": false,
+              "to_port": 0
+            }
+          ],
+          "revoke_rules_on_delete": false,
+          "tags": null
+        },
+        "after_unknown": {
+          "arn": true,
+          "description": true,
+          "egress": true,
+          "id": true,
+          "ingress": [
+            {
+              "cidr_blocks": [
+                false
+              ],
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "security_groups": []
+            }
+          ],
+          "name": true,
+          "name_prefix": true,
+          "owner_id": true,
+          "tags_all": true,
+          "vpc_id": true
+        }
+      }
+    },
+    {
+      "address": "aws_default_security_group.open[\"ssh_halves\"]",
+      "mode": "managed",
+      "type": "aws_default_security_group",
+      "name": "open",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "ingress": [
+            {
+              "cidr_blocks": [
+                "0.0.0.0/1",
+                "128.0.0.0/1"
+              ],
+              "description": "",
+              "from_port": 22,
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "protocol": "tcp",
+              "security_groups": [],
+              "self": false,
+              "to_port": 22
+            }
+          ],
+          "revoke_rules_on_delete": false,
+          "tags": null
+        },
+        "after_unknown": {
+          "arn": true,
+          "description": true,
+          "egress": true,
+          "id": true,
+          "ingress": [
+            {
+              "cidr_blocks": [
+                false,
+                false
+              ],
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "security_groups": []
+            }
+          ],
+          "name": true,
+          "name_prefix": true,
+          "owner_id": true,
+          "tags_all": true,
+          "vpc_id": true
+        }
+      }
+    },
+    {
+      "address": "aws_default_security_group.open[\"ssh_host\"]",
+      "mode": "managed",
+      "type": "aws_default_security_group",
+      "name": "open",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "ingress": [
+            {
+              "cidr_blocks": [
+                "203.0.113.7/32"
+              ],
+              "description": "",
+              "from_port": 22,
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "protocol": "tcp",
+              "security_groups": [],
+              "self": false,
+              "to_port": 22
+            }
+          ],
+          "revoke_rules_on_delete": false,
+          "tags": null
+        },
+        "after_unknown": {
+          "arn": true,
+          "description": true,
+          "egress": true,
+          "id": true,
+          "ingress": [
+            {
+              "cidr_blocks": [
+                false
+              ],
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "security_groups": []
+            }
+          ],
+          "name": true,
+          "name_prefix": true,
+          "owner_id": true,
+          "tags_all": true,
+          "vpc_id": true
+        }
+      }
+    },
+    {
+      "address": "aws_default_security_group.open[\"ssh_ipv4\"]",
+      "mode": "managed",
+      "type": "aws_default_security_group",
+      "name": "open",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "ingress": [
+            {
+              "cidr_blocks": [
+                "0.0.0.0/0"
+              ],
+              "description": "",
+              "from_port": 22,
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "protocol": "tcp",
+              "security_groups": [],
+              "self": false,
+              "to_port": 22
+            }
+          ],
+          "revoke_rules_on_delete": false,
+          "tags": null
+        },
+        "after_unknown": {
+          "arn": true,
+          "description": true,
+          "egress": true,
+          "id": true,
+          "ingress": [
+            {
+              "cidr_blocks": [
+                false
+              ],
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "security_groups": []
+            }
+          ],
+          "name": true,
+          "name_prefix": true,
+          "owner_id": true,
+          "tags_all": true,
+          "vpc_id": true
+        }
+      }
+    },
+    {
+      "address": "aws_default_security_group.open[\"ssh_ipv6\"]",
+      "mode": "managed",
+      "type": "aws_default_security_group",
+      "name": "open",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "ingress": [
+            {
+              "cidr_blocks": [],
+              "description": "",
+              "from_port": 22,
+              "ipv6_cidr_blocks": [
+                "::/0"
+              ],
+              "prefix_list_ids": [],
+              "protocol": "tcp",
+              "security_groups": [],
+              "self": false,
+              "to_port": 22
+            }
+          ],
+          "revoke_rules_on_delete": false,
+          "tags": null
+        },
+        "after_unknown": {
+          "arn": true,
+          "description": true,
+          "egress": true,
+          "id": true,
+          "ingress": [
+            {
+              "cidr_blocks": [],
+              "ipv6_cidr_blocks": [
+                false
+              ],
+              "prefix_list_ids": [],
+              "security_groups": []
+            }
+          ],
+          "name": true,
+          "name_prefix": true,
+          "owner_id": true,
+          "tags_all": true,
+          "vpc_id": true
+        }
+      }
+    },
+    {
+      "address": "aws_default_security_group.open[\"ssh_six\"]",
+      "mode": "managed",
+      "type": "aws_default_security_group",
+      "name": "open",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "ingress": [
+            {
+              "cidr_blocks": [
+                "0.0.0.0/0"
+              ],
+              "description": "",
+              "from_port": 22,
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "protocol": "tcp",
+              "security_groups": [],
+              "self": false,
+              "to_port": 22
+            }
+          ],
+          "revoke_rules_on_delete": false,
+          "tags": null
+        },
+        "after_unknown": {
+          "arn": true,
+          "description": true,
+          "egress": true,
+          "id": true,
+          "ingress": [
+            {
+              "cidr_blocks": [
+                false
+              ],
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "security_groups": []
+            }
+          ],
+          "name": true,
+          "name_prefix": true,
+          "owner_id": true,
+          "tags_all": true,
+          "vpc_id": true
+        }
+      }
+    },
+    {
+      "address": "aws_default_security_group.open[\"tcp_full\"]",
+      "mode": "managed",
+      "type": "aws_default_security_group",
+      "name": "open",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "ingress": [
+            {
+              "cidr_blocks": [
+                "0.0.0.0/0"
+              ],
+              "description": "",
+              "from_port": 0,
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "protocol": "tcp",
+              "security_groups": [],
+              "self": false,
+              "to_port": 65535
+            }
+          ],
+          "revoke_rules_on_delete": false,
+          "tags": null
+        },
+        "after_unknown": {
+          "arn": true,
+          "description": true,
+          "egress": true,
+          "id": true,
+          "ingress": [
+            {
+              "cidr_blocks": [
+                false
+              ],
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "security_groups": []
+            }
+          ],
+          "name": true,
+          "name_prefix": true,
+          "owner_id": true,
+          "tags_all": true,
+          "vpc_id": true
+        }
+      }
+    },
+    {
+      "address": "aws_default_security_group.open_prefix_list",
+      "mode": "managed",
+      "type": "aws_default_security_group",
+      "name": "open_prefix_list",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "ingress": [
+            {
+              "cidr_blocks": [],
+              "description": "",
+              "from_port": 443,
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [
+                "pl-12345678"
+              ],
+              "protocol": "tcp",
+              "security_groups": [],
+              "self": false,
+              "to_port": 443
+            }
+          ],
+          "revoke_rules_on_delete": false,
+          "tags": null
+        },
+        "after_unknown": {
+          "arn": true,
+          "description": true,
+          "egress": true,
+          "id": true,
+          "ingress": [
+            {
+              "cidr_blocks": [],
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [
+                false
+              ],
+              "security_groups": []
+            }
+          ],
+          "name": true,
+          "name_prefix": true,
+          "owner_id": true,
+          "tags_all": true,
+          "vpc_id": true
+        }
+      }
+    },
+    {
+      "address": "aws_default_security_group.open_unknown[\"eip_source\"]",
+      "mode": "managed",
+      "type": "aws_default_security_group",
+      "name": "open_unknown",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "ingress": [
+            {
+              "description": "",
+              "from_port": 22,
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "protocol": "tcp",
+              "security_groups": [],
+              "self": false,
+              "to_port": 22
+            }
+          ],
+          "revoke_rules_on_delete": false,
+          "tags": null
+        },
+        "after_unknown": {
+          "arn": true,
+          "description": true,
+          "egress": true,
+          "id": true,
+          "ingress": [
+            {
+              "cidr_blocks": true,
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "security_groups": []
+            }
+          ],
+          "name": true,
+          "name_prefix": true,
+          "owner_id": true,
+          "tags_all": true,
+          "vpc_id": true
+        }
+      }
+    },
+    {
+      "address": "aws_default_security_group.open_unknown[\"from_port\"]",
+      "mode": "managed",
+      "type": "aws_default_security_group",
+      "name": "open_unknown",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "ingress": [
+            {
+              "cidr_blocks": [
+                "0.0.0.0/0"
+              ],
+              "description": "",
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "protocol": "tcp",
+              "security_groups": [],
+              "self": false,
+              "to_port": 80
+            }
+          ],
+          "revoke_rules_on_delete": false,
+          "tags": null
+        },
+        "after_unknown": {
+          "arn": true,
+          "description": true,
+          "egress": true,
+          "id": true,
+          "ingress": [
+            {
+              "cidr_blocks": [
+                false
+              ],
+              "from_port": true,
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "security_groups": []
+            }
+          ],
+          "name": true,
+          "name_prefix": true,
+          "owner_id": true,
+          "tags_all": true,
+          "vpc_id": true
+        }
+      }
+    },
+    {
+      "address": "aws_default_security_group.open_unknown[\"protocol\"]",
+      "mode": "managed",
+      "type": "aws_default_security_group",
+      "name": "open_unknown",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "ingress": [
+            {
+              "cidr_blocks": [
+                "0.0.0.0/0"
+              ],
+              "description": "",
+              "from_port": 80,
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "security_groups": [],
+              "self": false,
+              "to_port": 80
+            }
+          ],
+          "revoke_rules_on_delete": false,
+          "tags": null
+        },
+        "after_unknown": {
+          "arn": true,
+          "description": true,
+          "egress": true,
+          "id": true,
+          "ingress": [
+            {
+              "cidr_blocks": [
+                false
+              ],
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "protocol": true,
+              "security_groups": []
+            }
+          ],
+          "name": true,
+          "name_prefix": true,
+          "owner_id": true,
+          "tags_all": true,
+          "vpc_id": true
+        }
+      }
+    },
+    {
+      "address": "aws_default_security_group.open_unknown[\"to_port\"]",
+      "mode": "managed",
+      "type": "aws_default_security_group",
+      "name": "open_unknown",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "ingress": [
+            {
+              "cidr_blocks": [
+                "0.0.0.0/0"
+              ],
+              "description": "",
+              "from_port": 80,
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "protocol": "tcp",
+              "security_groups": [],
+              "self": false
+            }
+          ],
+          "revoke_rules_on_delete": false,
+          "tags": null
+        },
+        "after_unknown": {
+          "arn": true,
+          "description": true,
+          "egress": true,
+          "id": true,
+          "ingress": [
+            {
+              "cidr_blocks": [
+                false
+              ],
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "security_groups": [],
+              "to_port": true
+            }
+          ],
+          "name": true,
+          "name_prefix": true,
+          "owner_id": true,
+          "tags_all": true,
+          "vpc_id": true
+        }
+      }
+    },
+    {
+      "address": "aws_default_security_group.ssh_from_group",
+      "mode": "managed",
+      "type": "aws_default_security_group",
+      "name": "ssh_from_group",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "ingress": [
+            {
+              "cidr_blocks": [],
+              "description": "",
+              "from_port": 0,
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "protocol": "-1",
+              "security_groups": [],
+              "self": true,
+              "to_port": 0
+            },
+            {
+              "cidr_blocks": [],
+              "description": "",
+              "from_port": 22,
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "protocol": "tcp",
+              "self": false,
+              "to_port": 22
+            }
+          ],
+          "revoke_rules_on_delete": false,
+          "tags": null
+        },
+        "after_unknown": {
+          "arn": true,
+          "description": true,
+          "egress": true,
+          "id": true,
+          "ingress": [
+            {
+              "cidr_blocks": [],
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "security_groups": []
+            },
+            {
+              "cidr_blocks": [],
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "security_groups": true
+            }
+          ],
+          "name": true,
+          "name_prefix": true,
+          "owner_id": true,
+          "tags_all": true,
+          "vpc_id": true
+        }
+      }
+    },
+    {
+      "address": "aws_security_group.open[\"all_minus1\"]",
+      "mode": "managed",
+      "type": "aws_security_group",
+      "name": "open",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "description": "Managed by Terraform",
+          "ingress": [
+            {
+              "cidr_blocks": [
+                "0.0.0.0/0"
+              ],
+              "description": "",
+              "from_port": 0,
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "protocol": "-1",
+              "security_groups": [],
+              "self": false,
+              "to_port": 0
+            }
+          ],
+          "name": "open-all_minus1",
+          "revoke_rules_on_delete": false,
+          "tags": null,
+          "timeouts": null
+        },
+        "after_unknown": {
+          "arn": true,
+          "egress": true,
+          "id": true,
+          "ingress": [
+            {
+              "cidr_blocks": [
+                false
+              ],
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "security_groups": []
+            }
+          ],
+          "name_prefix": true,
+          "owner_id": true,
+          "tags_all": true,
+          "vpc_id": true
+        }
+      }
+    },
+    {
+      "address": "aws_security_group.open[\"all_word\"]",
+      "mode": "managed",
+      "type": "aws_security_group",
+      "name": "open",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "description": "Managed by Terraform",
+          "ingress": [
+            {
+              "cidr_blocks": [
+                "0.0.0.0/0"
+              ],
+              "description": "",
+              "from_port": 0,
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "protocol": "-1",
+              "security_groups": [],
+              "self": false,
+              "to_port": 0
+            }
+          ],
+          "name": "open-all_word",
+          "revoke_rules_on_delete": false,
+          "tags": null,
+          "timeouts": null
+        },
+        "after_unknown": {
+          "arn": true,
+          "egress": true,
+          "id": true,
+          "ingress": [
+            {
+              "cidr_blocks": [
+                false
+              ],
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "security_groups": []
+            }
+          ],
+          "name_prefix": true,
+          "owner_id": true,
+          "tags_all": true,
+          "vpc_id": true
+        }
+      }
+    },
+    {
+      "address": "aws_security_group.open[\"ports_0_0\"]",
+      "mode": "managed",
+      "type": "aws_security_group",
+      "name": "open",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "description": "Managed by Terraform",
+          "ingress": [
+            {
+              "cidr_blocks": [
+                "0.0.0.0/0"
+              ],
+              "description": "",
+              "from_port": 0,
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "protocol": "tcp",
+              "security_groups": [],
+              "self": false,
+              "to_port": 0
+            }
+          ],
+          "name": "open-ports_0_0",
+          "revoke_rules_on_delete": false,
+          "tags": null,
+          "timeouts": null
+        },
+        "after_unknown": {
+          "arn": true,
+          "egress": true,
+          "id": true,
+          "ingress": [
+            {
+              "cidr_blocks": [
+                false
+              ],
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "security_groups": []
+            }
+          ],
+          "name_prefix": true,
+          "owner_id": true,
+          "tags_all": true,
+          "vpc_id": true
+        }
+      }
+    },
+    {
+      "address": "aws_security_group.open[\"ssh_halves\"]",
+      "mode": "managed",
+      "type": "aws_security_group",
+      "name": "open",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "description": "Managed by Terraform",
+          "ingress": [
+            {
+              "cidr_blocks": [
+                "0.0.0.0/1",
+                "128.0.0.0/1"
+              ],
+              "description": "",
+              "from_port": 22,
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "protocol": "tcp",
+              "security_groups": [],
+              "self": false,
+              "to_port": 22
+            }
+          ],
+          "name": "open-ssh_halves",
+          "revoke_rules_on_delete": false,
+          "tags": null,
+          "timeouts": null
+        },
+        "after_unknown": {
+          "arn": true,
+          "egress": true,
+          "id": true,
+          "ingress": [
+            {
+              "cidr_blocks": [
+                false,
+                false
+              ],
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "security_groups": []
+            }
+          ],
+          "name_prefix": true,
+          "owner_id": true,
+          "tags_all": true,
+          "vpc_id": true
+        }
+      }
+    },
+    {
+      "address": "aws_security_group.open[\"ssh_host\"]",
+      "mode": "managed",
+      "type": "aws_security_group",
+      "name": "open",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "description": "Managed by Terraform",
+          "ingress": [
+            {
+              "cidr_blocks": [
+                "203.0.113.7/32"
+              ],
+              "description": "",
+              "from_port": 22,
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "protocol": "tcp",
+              "security_groups": [],
+              "self": false,
+              "to_port": 22
+            }
+          ],
+          "name": "open-ssh_host",
+          "revoke_rules_on_delete": false,
+          "tags": null,
+          "timeouts": null
+        },
+        "after_unknown": {
+          "arn": true,
+          "egress": true,
+          "id": true,
+          "ingress": [
+            {
+              "cidr_blocks": [
+                false
+              ],
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "security_groups": []
+            }
+          ],
+          "name_prefix": true,
+          "owner_id": true,
+          "tags_all": true,
+          "vpc_id": true
+        }
+      }
+    },
+    {
+      "address": "aws_security_group.open[\"ssh_ipv4\"]",
+      "mode": "managed",
+      "type": "aws_security_group",
+      "name": "open",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "description": "Managed by Terraform",
+          "ingress": [
+            {
+              "cidr_blocks": [
+                "0.0.0.0/0"
+              ],
+              "description": "",
+              "from_port": 22,
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "protocol": "tcp",
+              "security_groups": [],
+              "self": false,
+              "to_port": 22
+            }
+          ],
+          "name": "open-ssh_ipv4",
+          "revoke_rules_on_delete": false,
+          "tags": null,
+          "timeouts": null
+        },
+        "after_unknown": {
+          "arn": true,
+          "egress": true,
+          "id": true,
+          "ingress": [
+            {
+              "cidr_blocks": [
+                false
+              ],
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "security_groups": []
+            }
+          ],
+          "name_prefix": true,
+          "owner_id": true,
+          "tags_all": true,
+          "vpc_id": true
+        }
+      }
+    },
+    {
+      "address": "aws_security_group.open[\"ssh_ipv6\"]",
+      "mode": "managed",
+      "type": "aws_security_group",
+      "name": "open",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "description": "Managed by Terraform",
+          "ingress": [
+            {
+              "cidr_blocks": [],
+              "description": "",
+              "from_port": 22,
+              "ipv6_cidr_blocks": [
+                "::/0"
+              ],
+              "prefix_list_ids": [],
+              "protocol": "tcp",
+              "security_groups": [],
+              "self": false,
+              "to_port": 22
+            }
+          ],
+          "name": "open-ssh_ipv6",
+          "revoke_rules_on_delete": false,
+          "tags": null,
+          "timeouts": null
+        },
+        "after_unknown": {
+          "arn": true,
+          "egress": true,
+          "id": true,
+          "ingress": [
+            {
+              "cidr_blocks": [],
+              "ipv6_cidr_blocks": [
+                false
+              ],
+              "prefix_list_ids": [],
+              "security_groups": []
+            }
+          ],
+          "name_prefix": true,
+          "owner_id": true,
+          "tags_all": true,
+          "vpc_id": true
+        }
+      }
+    },
+    {
+      "address": "aws_security_group.open[\"ssh_six\"]",
+      "mode": "managed",
+      "type": "aws_security_group",
+      "name": "open",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "description": "Managed by Terraform",
+          "ingress": [
+            {
+              "cidr_blocks": [
+                "0.0.0.0/0"
+              ],
+              "description": "",
+              "from_port": 22,
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "protocol": "tcp",
+              "security_groups": [],
+              "self": false,
+              "to_port": 22
+            }
+          ],
+          "name": "open-ssh_six",
+          "revoke_rules_on_delete": false,
+          "tags": null,
+          "timeouts": null
+        },
+        "after_unknown": {
+          "arn": true,
+          "egress": true,
+          "id": true,
+          "ingress": [
+            {
+              "cidr_blocks": [
+                false
+              ],
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "security_groups": []
+            }
+          ],
+          "name_prefix": true,
+          "owner_id": true,
+          "tags_all": true,
+          "vpc_id": true
+        }
+      }
+    },
+    {
+      "address": "aws_security_group.open[\"tcp_full\"]",
+      "mode": "managed",
+      "type": "aws_security_group",
+      "name": "open",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "description": "Managed by Terraform",
+          "ingress": [
+            {
+              "cidr_blocks": [
+                "0.0.0.0/0"
+              ],
+              "description": "",
+              "from_port": 0,
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "protocol": "tcp",
+              "security_groups": [],
+              "self": false,
+              "to_port": 65535
+            }
+          ],
+          "name": "open-tcp_full",
+          "revoke_rules_on_delete": false,
+          "tags": null,
+          "timeouts": null
+        },
+        "after_unknown": {
+          "arn": true,
+          "egress": true,
+          "id": true,
+          "ingress": [
+            {
+              "cidr_blocks": [
+                false
+              ],
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "security_groups": []
+            }
+          ],
+          "name_prefix": true,
+          "owner_id": true,
+          "tags_all": true,
+          "vpc_id": true
+        }
+      }
+    },
+    {
+      "address": "aws_security_group.open_attribute",
+      "mode": "managed",
+      "type": "aws_security_group",
+      "name": "open_attribute",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "description": "Managed by Terraform",
+          "ingress": [
+            {
+              "description": "",
+              "from_port": 22,
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "protocol": "tcp",
+              "security_groups": [],
+              "self": false,
+              "to_port": 22
+            }
+          ],
+          "name": "open-attribute",
+          "revoke_rules_on_delete": false,
+          "tags": null,
+          "timeouts": null
+        },
+        "after_unknown": {
+          "arn": true,
+          "egress": true,
+          "id": true,
+          "ingress": [
+            {
+              "cidr_blocks": true,
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "security_groups": []
+            }
+          ],
+          "name_prefix": true,
+          "owner_id": true,
+          "tags_all": true,
+          "vpc_id": true
+        }
+      }
+    },
+    {
+      "address": "aws_security_group.open_attribute_collection",
+      "mode": "managed",
+      "type": "aws_security_group",
+      "name": "open_attribute_collection",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "description": "Managed by Terraform",
+          "name": "open-attribute-collection",
+          "revoke_rules_on_delete": false,
+          "tags": null,
+          "timeouts": null
+        },
+        "after_unknown": {
+          "arn": true,
+          "egress": true,
+          "id": true,
+          "ingress": true,
+          "name_prefix": true,
+          "owner_id": true,
+          "tags_all": true,
+          "vpc_id": true
+        }
+      }
+    },
+    {
+      "address": "aws_security_group.open_dynamic",
+      "mode": "managed",
+      "type": "aws_security_group",
+      "name": "open_dynamic",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "description": "Managed by Terraform",
+          "ingress": [
+            {
+              "description": "",
+              "from_port": 22,
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "protocol": "tcp",
+              "security_groups": [],
+              "self": false,
+              "to_port": 22
+            }
+          ],
+          "name": "open-dynamic",
+          "revoke_rules_on_delete": false,
+          "tags": null,
+          "timeouts": null
+        },
+        "after_unknown": {
+          "arn": true,
+          "egress": true,
+          "id": true,
+          "ingress": [
+            {
+              "cidr_blocks": true,
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "security_groups": []
+            }
+          ],
+          "name_prefix": true,
+          "owner_id": true,
+          "tags_all": true,
+          "vpc_id": true
+        }
+      }
+    },
+    {
+      "address": "aws_security_group.open_dynamic_collection",
+      "mode": "managed",
+      "type": "aws_security_group",
+      "name": "open_dynamic_collection",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "description": "Managed by Terraform",
+          "ingress": [
+            {
+              "description": "",
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "security_groups": [],
+              "self": false
+            }
+          ],
+          "name": "open-dynamic-collection",
+          "revoke_rules_on_delete": false,
+          "tags": null,
+          "timeouts": null
+        },
+        "after_unknown": {
+          "arn": true,
+          "egress": true,
+          "id": true,
+          "ingress": [
+            {
+              "cidr_blocks": true,
+              "from_port": true,
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "protocol": true,
+              "security_groups": [],
+              "to_port": true
+            }
+          ],
+          "name_prefix": true,
+          "owner_id": true,
+          "tags_all": true,
+          "vpc_id": true
+        }
+      }
+    },
+    {
+      "address": "aws_security_group.open_prefix_list",
+      "mode": "managed",
+      "type": "aws_security_group",
+      "name": "open_prefix_list",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "description": "Managed by Terraform",
+          "ingress": [
+            {
+              "cidr_blocks": [],
+              "description": "",
+              "from_port": 443,
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [
+                "pl-12345678"
+              ],
+              "protocol": "tcp",
+              "security_groups": [],
+              "self": false,
+              "to_port": 443
+            }
+          ],
+          "name": "open-prefix-list",
+          "revoke_rules_on_delete": false,
+          "tags": null,
+          "timeouts": null
+        },
+        "after_unknown": {
+          "arn": true,
+          "egress": true,
+          "id": true,
+          "ingress": [
+            {
+              "cidr_blocks": [],
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [
+                false
+              ],
+              "security_groups": []
+            }
+          ],
+          "name_prefix": true,
+          "owner_id": true,
+          "tags_all": true,
+          "vpc_id": true
+        }
+      }
+    },
+    {
+      "address": "aws_security_group.open_unknown[\"eip_source\"]",
+      "mode": "managed",
+      "type": "aws_security_group",
+      "name": "open_unknown",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "description": "Managed by Terraform",
+          "ingress": [
+            {
+              "description": "",
+              "from_port": 22,
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "protocol": "tcp",
+              "security_groups": [],
+              "self": false,
+              "to_port": 22
+            }
+          ],
+          "name": "open-unknown-eip_source",
+          "revoke_rules_on_delete": false,
+          "tags": null,
+          "timeouts": null
+        },
+        "after_unknown": {
+          "arn": true,
+          "egress": true,
+          "id": true,
+          "ingress": [
+            {
+              "cidr_blocks": true,
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "security_groups": []
+            }
+          ],
+          "name_prefix": true,
+          "owner_id": true,
+          "tags_all": true,
+          "vpc_id": true
+        }
+      }
+    },
+    {
+      "address": "aws_security_group.open_unknown[\"from_port\"]",
+      "mode": "managed",
+      "type": "aws_security_group",
+      "name": "open_unknown",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "description": "Managed by Terraform",
+          "ingress": [
+            {
+              "cidr_blocks": [
+                "0.0.0.0/0"
+              ],
+              "description": "",
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "protocol": "tcp",
+              "security_groups": [],
+              "self": false,
+              "to_port": 80
+            }
+          ],
+          "name": "open-unknown-from_port",
+          "revoke_rules_on_delete": false,
+          "tags": null,
+          "timeouts": null
+        },
+        "after_unknown": {
+          "arn": true,
+          "egress": true,
+          "id": true,
+          "ingress": [
+            {
+              "cidr_blocks": [
+                false
+              ],
+              "from_port": true,
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "security_groups": []
+            }
+          ],
+          "name_prefix": true,
+          "owner_id": true,
+          "tags_all": true,
+          "vpc_id": true
+        }
+      }
+    },
+    {
+      "address": "aws_security_group.open_unknown[\"protocol\"]",
+      "mode": "managed",
+      "type": "aws_security_group",
+      "name": "open_unknown",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "description": "Managed by Terraform",
+          "ingress": [
+            {
+              "cidr_blocks": [
+                "0.0.0.0/0"
+              ],
+              "description": "",
+              "from_port": 80,
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "security_groups": [],
+              "self": false,
+              "to_port": 80
+            }
+          ],
+          "name": "open-unknown-protocol",
+          "revoke_rules_on_delete": false,
+          "tags": null,
+          "timeouts": null
+        },
+        "after_unknown": {
+          "arn": true,
+          "egress": true,
+          "id": true,
+          "ingress": [
+            {
+              "cidr_blocks": [
+                false
+              ],
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "protocol": true,
+              "security_groups": []
+            }
+          ],
+          "name_prefix": true,
+          "owner_id": true,
+          "tags_all": true,
+          "vpc_id": true
+        }
+      }
+    },
+    {
+      "address": "aws_security_group.open_unknown[\"to_port\"]",
+      "mode": "managed",
+      "type": "aws_security_group",
+      "name": "open_unknown",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "description": "Managed by Terraform",
+          "ingress": [
+            {
+              "cidr_blocks": [
+                "0.0.0.0/0"
+              ],
+              "description": "",
+              "from_port": 80,
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "protocol": "tcp",
+              "security_groups": [],
+              "self": false
+            }
+          ],
+          "name": "open-unknown-to_port",
+          "revoke_rules_on_delete": false,
+          "tags": null,
+          "timeouts": null
+        },
+        "after_unknown": {
+          "arn": true,
+          "egress": true,
+          "id": true,
+          "ingress": [
+            {
+              "cidr_blocks": [
+                false
+              ],
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "security_groups": [],
+              "to_port": true
+            }
+          ],
+          "name_prefix": true,
+          "owner_id": true,
+          "tags_all": true,
+          "vpc_id": true
+        }
+      }
+    },
+    {
+      "address": "aws_security_group.pass[\"ssh_private\"]",
+      "mode": "managed",
+      "type": "aws_security_group",
+      "name": "pass",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "description": "Managed by Terraform",
+          "egress": [
+            {
+              "cidr_blocks": [
+                "0.0.0.0/0"
+              ],
+              "description": "",
+              "from_port": 0,
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "protocol": "-1",
+              "security_groups": [],
+              "self": false,
+              "to_port": 0
+            }
+          ],
+          "ingress": [
+            {
+              "cidr_blocks": [
+                "10.0.0.0/16",
+                "172.16.0.0/12",
+                "192.168.1.0/24"
+              ],
+              "description": "",
+              "from_port": 22,
+              "ipv6_cidr_blocks": [
+                "fd00::/8"
+              ],
+              "prefix_list_ids": [],
+              "protocol": "tcp",
+              "security_groups": [],
+              "self": false,
+              "to_port": 22
+            }
+          ],
+          "name": "pass-ssh_private",
+          "revoke_rules_on_delete": false,
+          "tags": null,
+          "timeouts": null
+        },
+        "after_unknown": {
+          "arn": true,
+          "egress": [
+            {
+              "cidr_blocks": [
+                false
+              ],
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "security_groups": []
+            }
+          ],
+          "id": true,
+          "ingress": [
+            {
+              "cidr_blocks": [
+                false,
+                false,
+                false
+              ],
+              "ipv6_cidr_blocks": [
+                false
+              ],
+              "prefix_list_ids": [],
+              "security_groups": []
+            }
+          ],
+          "name_prefix": true,
+          "owner_id": true,
+          "tags_all": true,
+          "vpc_id": true
+        }
+      }
+    },
+    {
+      "address": "aws_security_group.pass[\"web\"]",
+      "mode": "managed",
+      "type": "aws_security_group",
+      "name": "pass",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "description": "Managed by Terraform",
+          "egress": [
+            {
+              "cidr_blocks": [
+                "0.0.0.0/0"
+              ],
+              "description": "",
+              "from_port": 0,
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "protocol": "-1",
+              "security_groups": [],
+              "self": false,
+              "to_port": 0
+            }
+          ],
+          "ingress": [
+            {
+              "cidr_blocks": [
+                "0.0.0.0/0"
+              ],
+              "description": "",
+              "from_port": 80,
+              "ipv6_cidr_blocks": [
+                "::/0"
+              ],
+              "prefix_list_ids": [],
+              "protocol": "tcp",
+              "security_groups": [],
+              "self": false,
+              "to_port": 80
+            }
+          ],
+          "name": "pass-web",
+          "revoke_rules_on_delete": false,
+          "tags": null,
+          "timeouts": null
+        },
+        "after_unknown": {
+          "arn": true,
+          "egress": [
+            {
+              "cidr_blocks": [
+                false
+              ],
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "security_groups": []
+            }
+          ],
+          "id": true,
+          "ingress": [
+            {
+              "cidr_blocks": [
+                false
+              ],
+              "ipv6_cidr_blocks": [
+                false
+              ],
+              "prefix_list_ids": [],
+              "security_groups": []
+            }
+          ],
+          "name_prefix": true,
+          "owner_id": true,
+          "tags_all": true,
+          "vpc_id": true
+        }
+      }
+    },
+    {
+      "address": "aws_security_group.peer",
+      "mode": "managed",
+      "type": "aws_security_group",
+      "name": "peer",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "description": "Managed by Terraform",
+          "name": "peer",
+          "revoke_rules_on_delete": false,
+          "tags": null,
+          "timeouts": null
+        },
+        "after_unknown": {
+          "arn": true,
+          "egress": true,
+          "id": true,
+          "ingress": true,
+          "name_prefix": true,
+          "owner_id": true,
+          "tags_all": true,
+          "vpc_id": true
+        }
+      }
+    },
+    {
+      "address": "aws_security_group.ssh_from_group",
+      "mode": "managed",
+      "type": "aws_security_group",
+      "name": "ssh_from_group",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "description": "Managed by Terraform",
+          "ingress": [
+            {
+              "cidr_blocks": [],
+              "description": "",
+              "from_port": 0,
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "protocol": "-1",
+              "security_groups": [],
+              "self": true,
+              "to_port": 0
+            },
+            {
+              "cidr_blocks": [],
+              "description": "",
+              "from_port": 22,
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "protocol": "tcp",
+              "self": false,
+              "to_port": 22
+            }
+          ],
+          "name": "ssh-from-group",
+          "revoke_rules_on_delete": false,
+          "tags": null,
+          "timeouts": null
+        },
+        "after_unknown": {
+          "arn": true,
+          "egress": true,
+          "id": true,
+          "ingress": [
+            {
+              "cidr_blocks": [],
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "security_groups": []
+            },
+            {
+              "cidr_blocks": [],
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "security_groups": true
+            }
+          ],
+          "name_prefix": true,
+          "owner_id": true,
+          "tags_all": true,
+          "vpc_id": true
+        }
+      }
+    },
+    {
+      "address": "aws_security_group.ssh_from_vpc",
+      "mode": "managed",
+      "type": "aws_security_group",
+      "name": "ssh_from_vpc",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "description": "Managed by Terraform",
+          "ingress": [
+            {
+              "cidr_blocks": [
+                "10.0.0.0/16"
+              ],
+              "description": "",
+              "from_port": 22,
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "protocol": "tcp",
+              "security_groups": [],
+              "self": false,
+              "to_port": 22
+            },
+            {
+              "cidr_blocks": [
+                "10.1.0.0/16"
+              ],
+              "description": "",
+              "from_port": 22,
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "protocol": "tcp",
+              "security_groups": [],
+              "self": false,
+              "to_port": 22
+            }
+          ],
+          "name": "ssh-from-vpc",
+          "revoke_rules_on_delete": false,
+          "tags": null,
+          "timeouts": null
+        },
+        "after_unknown": {
+          "arn": true,
+          "egress": true,
+          "id": true,
+          "ingress": [
+            {
+              "cidr_blocks": [
+                false
+              ],
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "security_groups": []
+            },
+            {
+              "cidr_blocks": [
+                false
+              ],
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "security_groups": []
+            }
+          ],
+          "name_prefix": true,
+          "owner_id": true,
+          "tags_all": true,
+          "vpc_id": true
+        }
+      }
+    },
+    {
+      "address": "aws_security_group_rule.all_from_self",
+      "mode": "managed",
+      "type": "aws_security_group_rule",
+      "name": "all_from_self",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "cidr_blocks": null,
+          "description": null,
+          "from_port": 0,
+          "ipv6_cidr_blocks": null,
+          "prefix_list_ids": null,
+          "protocol": "-1",
+          "security_group_id": "sg-0123456789abcdef0",
+          "self": true,
+          "timeouts": null,
+          "to_port": 0,
+          "type": "ingress"
+        },
+        "after_unknown": {
+          "id": true,
+          "security_group_rule_id": true,
+          "source_security_group_id": true
+        }
+      }
+    },
+    {
+      "address": "aws_security_group_rule.egress_all",
+      "mode": "managed",
+      "type": "aws_security_group_rule",
+      "name": "egress_all",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "cidr_blocks": [
+            "0.0.0.0/0"
+          ],
+          "description": null,
+          "from_port": 0,
+          "ipv6_cidr_blocks": null,
+          "prefix_list_ids": null,
+          "protocol": "-1",
+          "security_group_id": "sg-0123456789abcdef0",
+          "self": false,
+          "timeouts": null,
+          "to_port": 0,
+          "type": "egress"
+        },
+        "after_unknown": {
+          "cidr_blocks": [
+            false
+          ],
+          "id": true,
+          "security_group_rule_id": true,
+          "source_security_group_id": true
+        }
+      }
+    },
+    {
+      "address": "aws_security_group_rule.open[\"all_minus1\"]",
+      "mode": "managed",
+      "type": "aws_security_group_rule",
+      "name": "open",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "cidr_blocks": [
+            "0.0.0.0/0"
+          ],
+          "description": null,
+          "from_port": 0,
+          "ipv6_cidr_blocks": [],
+          "prefix_list_ids": null,
+          "protocol": "-1",
+          "security_group_id": "sg-0123456789abcdef0",
+          "self": false,
+          "timeouts": null,
+          "to_port": 0,
+          "type": "ingress"
+        },
+        "after_unknown": {
+          "cidr_blocks": [
+            false
+          ],
+          "id": true,
+          "ipv6_cidr_blocks": [],
+          "security_group_rule_id": true,
+          "source_security_group_id": true
+        }
+      }
+    },
+    {
+      "address": "aws_security_group_rule.open[\"all_word\"]",
+      "mode": "managed",
+      "type": "aws_security_group_rule",
+      "name": "open",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "cidr_blocks": [
+            "0.0.0.0/0"
+          ],
+          "description": null,
+          "from_port": 0,
+          "ipv6_cidr_blocks": [],
+          "prefix_list_ids": null,
+          "protocol": "-1",
+          "security_group_id": "sg-0123456789abcdef0",
+          "self": false,
+          "timeouts": null,
+          "to_port": 0,
+          "type": "ingress"
+        },
+        "after_unknown": {
+          "cidr_blocks": [
+            false
+          ],
+          "id": true,
+          "ipv6_cidr_blocks": [],
+          "security_group_rule_id": true,
+          "source_security_group_id": true
+        }
+      }
+    },
+    {
+      "address": "aws_security_group_rule.open[\"ports_0_0\"]",
+      "mode": "managed",
+      "type": "aws_security_group_rule",
+      "name": "open",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "cidr_blocks": [
+            "0.0.0.0/0"
+          ],
+          "description": null,
+          "from_port": 0,
+          "ipv6_cidr_blocks": [],
+          "prefix_list_ids": null,
+          "protocol": "tcp",
+          "security_group_id": "sg-0123456789abcdef0",
+          "self": false,
+          "timeouts": null,
+          "to_port": 0,
+          "type": "ingress"
+        },
+        "after_unknown": {
+          "cidr_blocks": [
+            false
+          ],
+          "id": true,
+          "ipv6_cidr_blocks": [],
+          "security_group_rule_id": true,
+          "source_security_group_id": true
+        }
+      }
+    },
+    {
+      "address": "aws_security_group_rule.open[\"ssh_halves\"]",
+      "mode": "managed",
+      "type": "aws_security_group_rule",
+      "name": "open",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "cidr_blocks": [
+            "0.0.0.0/1",
+            "128.0.0.0/1"
+          ],
+          "description": null,
+          "from_port": 22,
+          "ipv6_cidr_blocks": [],
+          "prefix_list_ids": null,
+          "protocol": "tcp",
+          "security_group_id": "sg-0123456789abcdef0",
+          "self": false,
+          "timeouts": null,
+          "to_port": 22,
+          "type": "ingress"
+        },
+        "after_unknown": {
+          "cidr_blocks": [
+            false,
+            false
+          ],
+          "id": true,
+          "ipv6_cidr_blocks": [],
+          "security_group_rule_id": true,
+          "source_security_group_id": true
+        }
+      }
+    },
+    {
+      "address": "aws_security_group_rule.open[\"ssh_host\"]",
+      "mode": "managed",
+      "type": "aws_security_group_rule",
+      "name": "open",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "cidr_blocks": [
+            "203.0.113.7/32"
+          ],
+          "description": null,
+          "from_port": 22,
+          "ipv6_cidr_blocks": [],
+          "prefix_list_ids": null,
+          "protocol": "tcp",
+          "security_group_id": "sg-0123456789abcdef0",
+          "self": false,
+          "timeouts": null,
+          "to_port": 22,
+          "type": "ingress"
+        },
+        "after_unknown": {
+          "cidr_blocks": [
+            false
+          ],
+          "id": true,
+          "ipv6_cidr_blocks": [],
+          "security_group_rule_id": true,
+          "source_security_group_id": true
+        }
+      }
+    },
+    {
+      "address": "aws_security_group_rule.open[\"ssh_ipv4\"]",
+      "mode": "managed",
+      "type": "aws_security_group_rule",
+      "name": "open",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "cidr_blocks": [
+            "0.0.0.0/0"
+          ],
+          "description": null,
+          "from_port": 22,
+          "ipv6_cidr_blocks": [],
+          "prefix_list_ids": null,
+          "protocol": "tcp",
+          "security_group_id": "sg-0123456789abcdef0",
+          "self": false,
+          "timeouts": null,
+          "to_port": 22,
+          "type": "ingress"
+        },
+        "after_unknown": {
+          "cidr_blocks": [
+            false
+          ],
+          "id": true,
+          "ipv6_cidr_blocks": [],
+          "security_group_rule_id": true,
+          "source_security_group_id": true
+        }
+      }
+    },
+    {
+      "address": "aws_security_group_rule.open[\"ssh_ipv6\"]",
+      "mode": "managed",
+      "type": "aws_security_group_rule",
+      "name": "open",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "cidr_blocks": [],
+          "description": null,
+          "from_port": 22,
+          "ipv6_cidr_blocks": [
+            "::/0"
+          ],
+          "prefix_list_ids": null,
+          "protocol": "tcp",
+          "security_group_id": "sg-0123456789abcdef0",
+          "self": false,
+          "timeouts": null,
+          "to_port": 22,
+          "type": "ingress"
+        },
+        "after_unknown": {
+          "cidr_blocks": [],
+          "id": true,
+          "ipv6_cidr_blocks": [
+            false
+          ],
+          "security_group_rule_id": true,
+          "source_security_group_id": true
+        }
+      }
+    },
+    {
+      "address": "aws_security_group_rule.open[\"ssh_six\"]",
+      "mode": "managed",
+      "type": "aws_security_group_rule",
+      "name": "open",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "cidr_blocks": [
+            "0.0.0.0/0"
+          ],
+          "description": null,
+          "from_port": 22,
+          "ipv6_cidr_blocks": [],
+          "prefix_list_ids": null,
+          "protocol": "tcp",
+          "security_group_id": "sg-0123456789abcdef0",
+          "self": false,
+          "timeouts": null,
+          "to_port": 22,
+          "type": "ingress"
+        },
+        "after_unknown": {
+          "cidr_blocks": [
+            false
+          ],
+          "id": true,
+          "ipv6_cidr_blocks": [],
+          "security_group_rule_id": true,
+          "source_security_group_id": true
+        }
+      }
+    },
+    {
+      "address": "aws_security_group_rule.open[\"tcp_full\"]",
+      "mode": "managed",
+      "type": "aws_security_group_rule",
+      "name": "open",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "cidr_blocks": [
+            "0.0.0.0/0"
+          ],
+          "description": null,
+          "from_port": 0,
+          "ipv6_cidr_blocks": [],
+          "prefix_list_ids": null,
+          "protocol": "tcp",
+          "security_group_id": "sg-0123456789abcdef0",
+          "self": false,
+          "timeouts": null,
+          "to_port": 65535,
+          "type": "ingress"
+        },
+        "after_unknown": {
+          "cidr_blocks": [
+            false
+          ],
+          "id": true,
+          "ipv6_cidr_blocks": [],
+          "security_group_rule_id": true,
+          "source_security_group_id": true
+        }
+      }
+    },
+    {
+      "address": "aws_security_group_rule.open_prefix_list",
+      "mode": "managed",
+      "type": "aws_security_group_rule",
+      "name": "open_prefix_list",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "cidr_blocks": null,
+          "description": null,
+          "from_port": 443,
+          "ipv6_cidr_blocks": null,
+          "prefix_list_ids": [
+            "pl-12345678"
+          ],
+          "protocol": "tcp",
+          "security_group_id": "sg-0123456789abcdef0",
+          "self": false,
+          "timeouts": null,
+          "to_port": 443,
+          "type": "ingress"
+        },
+        "after_unknown": {
+          "id": true,
+          "prefix_list_ids": [
+            false
+          ],
+          "security_group_rule_id": true,
+          "source_security_group_id": true
+        }
+      }
+    },
+    {
+      "address": "aws_security_group_rule.open_unknown[\"eip_source\"]",
+      "mode": "managed",
+      "type": "aws_security_group_rule",
+      "name": "open_unknown",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "description": null,
+          "from_port": 22,
+          "ipv6_cidr_blocks": null,
+          "prefix_list_ids": null,
+          "protocol": "tcp",
+          "security_group_id": "sg-0123456789abcdef0",
+          "self": false,
+          "timeouts": null,
+          "to_port": 22,
+          "type": "ingress"
+        },
+        "after_unknown": {
+          "cidr_blocks": true,
+          "id": true,
+          "security_group_rule_id": true,
+          "source_security_group_id": true
+        }
+      }
+    },
+    {
+      "address": "aws_security_group_rule.open_unknown[\"from_port\"]",
+      "mode": "managed",
+      "type": "aws_security_group_rule",
+      "name": "open_unknown",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "cidr_blocks": [
+            "0.0.0.0/0"
+          ],
+          "description": null,
+          "ipv6_cidr_blocks": null,
+          "prefix_list_ids": null,
+          "protocol": "tcp",
+          "security_group_id": "sg-0123456789abcdef0",
+          "self": false,
+          "timeouts": null,
+          "to_port": 80,
+          "type": "ingress"
+        },
+        "after_unknown": {
+          "cidr_blocks": [
+            false
+          ],
+          "from_port": true,
+          "id": true,
+          "security_group_rule_id": true,
+          "source_security_group_id": true
+        }
+      }
+    },
+    {
+      "address": "aws_security_group_rule.open_unknown[\"protocol\"]",
+      "mode": "managed",
+      "type": "aws_security_group_rule",
+      "name": "open_unknown",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "cidr_blocks": [
+            "0.0.0.0/0"
+          ],
+          "description": null,
+          "from_port": 80,
+          "ipv6_cidr_blocks": null,
+          "prefix_list_ids": null,
+          "security_group_id": "sg-0123456789abcdef0",
+          "self": false,
+          "timeouts": null,
+          "to_port": 80,
+          "type": "ingress"
+        },
+        "after_unknown": {
+          "cidr_blocks": [
+            false
+          ],
+          "id": true,
+          "protocol": true,
+          "security_group_rule_id": true,
+          "source_security_group_id": true
+        }
+      }
+    },
+    {
+      "address": "aws_security_group_rule.open_unknown[\"to_port\"]",
+      "mode": "managed",
+      "type": "aws_security_group_rule",
+      "name": "open_unknown",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "cidr_blocks": [
+            "0.0.0.0/0"
+          ],
+          "description": null,
+          "from_port": 80,
+          "ipv6_cidr_blocks": null,
+          "prefix_list_ids": null,
+          "protocol": "tcp",
+          "security_group_id": "sg-0123456789abcdef0",
+          "self": false,
+          "timeouts": null,
+          "type": "ingress"
+        },
+        "after_unknown": {
+          "cidr_blocks": [
+            false
+          ],
+          "id": true,
+          "security_group_rule_id": true,
+          "source_security_group_id": true,
+          "to_port": true
+        }
+      }
+    },
+    {
+      "address": "aws_security_group_rule.open_unknown_type",
+      "mode": "managed",
+      "type": "aws_security_group_rule",
+      "name": "open_unknown_type",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "cidr_blocks": [
+            "0.0.0.0/0"
+          ],
+          "description": null,
+          "from_port": 22,
+          "ipv6_cidr_blocks": null,
+          "prefix_list_ids": null,
+          "protocol": "tcp",
+          "security_group_id": "sg-0123456789abcdef0",
+          "self": false,
+          "timeouts": null,
+          "to_port": 22
+        },
+        "after_unknown": {
+          "cidr_blocks": [
+            false
+          ],
+          "id": true,
+          "security_group_rule_id": true,
+          "source_security_group_id": true,
+          "type": true
+        }
+      }
+    },
+    {
+      "address": "aws_security_group_rule.pass[\"ssh_private\"]",
+      "mode": "managed",
+      "type": "aws_security_group_rule",
+      "name": "pass",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "cidr_blocks": [
+            "10.0.0.0/16",
+            "172.16.0.0/12",
+            "192.168.1.0/24"
+          ],
+          "description": null,
+          "from_port": 22,
+          "ipv6_cidr_blocks": [
+            "fd00::/8"
+          ],
+          "prefix_list_ids": null,
+          "protocol": "tcp",
+          "security_group_id": "sg-0123456789abcdef0",
+          "self": false,
+          "timeouts": null,
+          "to_port": 22,
+          "type": "ingress"
+        },
+        "after_unknown": {
+          "cidr_blocks": [
+            false,
+            false,
+            false
+          ],
+          "id": true,
+          "ipv6_cidr_blocks": [
+            false
+          ],
+          "security_group_rule_id": true,
+          "source_security_group_id": true
+        }
+      }
+    },
+    {
+      "address": "aws_security_group_rule.pass[\"web\"]",
+      "mode": "managed",
+      "type": "aws_security_group_rule",
+      "name": "pass",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "cidr_blocks": [
+            "0.0.0.0/0"
+          ],
+          "description": null,
+          "from_port": 80,
+          "ipv6_cidr_blocks": [
+            "::/0"
+          ],
+          "prefix_list_ids": null,
+          "protocol": "tcp",
+          "security_group_id": "sg-0123456789abcdef0",
+          "self": false,
+          "timeouts": null,
+          "to_port": 80,
+          "type": "ingress"
+        },
+        "after_unknown": {
+          "cidr_blocks": [
+            false
+          ],
+          "id": true,
+          "ipv6_cidr_blocks": [
+            false
+          ],
+          "security_group_rule_id": true,
+          "source_security_group_id": true
+        }
+      }
+    },
+    {
+      "address": "aws_security_group_rule.ssh_from_group",
+      "mode": "managed",
+      "type": "aws_security_group_rule",
+      "name": "ssh_from_group",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "cidr_blocks": null,
+          "description": null,
+          "from_port": 22,
+          "ipv6_cidr_blocks": null,
+          "prefix_list_ids": null,
+          "protocol": "tcp",
+          "security_group_id": "sg-0123456789abcdef0",
+          "self": false,
+          "timeouts": null,
+          "to_port": 22,
+          "type": "ingress"
+        },
+        "after_unknown": {
+          "id": true,
+          "security_group_rule_id": true,
+          "source_security_group_id": true
+        }
+      }
+    },
+    {
+      "address": "aws_security_group_rule.ssh_from_vpc",
+      "mode": "managed",
+      "type": "aws_security_group_rule",
+      "name": "ssh_from_vpc",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "cidr_blocks": [
+            "10.1.0.0/16"
+          ],
+          "description": null,
+          "from_port": 22,
+          "ipv6_cidr_blocks": null,
+          "prefix_list_ids": null,
+          "protocol": "tcp",
+          "security_group_id": "sg-0123456789abcdef0",
+          "self": false,
+          "timeouts": null,
+          "to_port": 22,
+          "type": "ingress"
+        },
+        "after_unknown": {
+          "cidr_blocks": [
+            false
+          ],
+          "id": true,
+          "security_group_rule_id": true,
+          "source_security_group_id": true
+        }
+      }
+    },
+    {
+      "address": "aws_vpc_security_group_egress_rule.all",
+      "mode": "managed",
+      "type": "aws_vpc_security_group_egress_rule",
+      "name": "all",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "cidr_ipv4": "0.0.0.0/0",
+          "cidr_ipv6": null,
+          "description": null,
+          "from_port": null,
+          "ip_protocol": "-1",
+          "prefix_list_id": null,
+          "referenced_security_group_id": null,
+          "security_group_id": "sg-0123456789abcdef0",
+          "tags": null,
+          "tags_all": {},
+          "to_port": null
+        },
+        "after_unknown": {
+          "arn": true,
+          "id": true,
+          "security_group_rule_id": true,
+          "tags_all": {}
+        }
+      }
+    },
+    {
+      "address": "aws_vpc_security_group_ingress_rule.open[\"all_minus1_0\"]",
+      "mode": "managed",
+      "type": "aws_vpc_security_group_ingress_rule",
+      "name": "open",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "cidr_ipv4": "0.0.0.0/0",
+          "cidr_ipv6": null,
+          "description": null,
+          "from_port": null,
+          "ip_protocol": "-1",
+          "prefix_list_id": null,
+          "referenced_security_group_id": null,
+          "security_group_id": "sg-0123456789abcdef0",
+          "tags": null,
+          "tags_all": {},
+          "to_port": null
+        },
+        "after_unknown": {
+          "arn": true,
+          "id": true,
+          "security_group_rule_id": true,
+          "tags_all": {}
+        }
+      }
+    },
+    {
+      "address": "aws_vpc_security_group_ingress_rule.open[\"all_word_0\"]",
+      "mode": "managed",
+      "type": "aws_vpc_security_group_ingress_rule",
+      "name": "open",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "cidr_ipv4": "0.0.0.0/0",
+          "cidr_ipv6": null,
+          "description": null,
+          "from_port": null,
+          "ip_protocol": "all",
+          "prefix_list_id": null,
+          "referenced_security_group_id": null,
+          "security_group_id": "sg-0123456789abcdef0",
+          "tags": null,
+          "tags_all": {},
+          "to_port": null
+        },
+        "after_unknown": {
+          "arn": true,
+          "id": true,
+          "security_group_rule_id": true,
+          "tags_all": {}
+        }
+      }
+    },
+    {
+      "address": "aws_vpc_security_group_ingress_rule.open[\"ports_0_0_0\"]",
+      "mode": "managed",
+      "type": "aws_vpc_security_group_ingress_rule",
+      "name": "open",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "cidr_ipv4": "0.0.0.0/0",
+          "cidr_ipv6": null,
+          "description": null,
+          "from_port": 0,
+          "ip_protocol": "tcp",
+          "prefix_list_id": null,
+          "referenced_security_group_id": null,
+          "security_group_id": "sg-0123456789abcdef0",
+          "tags": null,
+          "tags_all": {},
+          "to_port": 0
+        },
+        "after_unknown": {
+          "arn": true,
+          "id": true,
+          "security_group_rule_id": true,
+          "tags_all": {}
+        }
+      }
+    },
+    {
+      "address": "aws_vpc_security_group_ingress_rule.open[\"ssh_halves_0\"]",
+      "mode": "managed",
+      "type": "aws_vpc_security_group_ingress_rule",
+      "name": "open",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "cidr_ipv4": "0.0.0.0/1",
+          "cidr_ipv6": null,
+          "description": null,
+          "from_port": 22,
+          "ip_protocol": "tcp",
+          "prefix_list_id": null,
+          "referenced_security_group_id": null,
+          "security_group_id": "sg-0123456789abcdef0",
+          "tags": null,
+          "tags_all": {},
+          "to_port": 22
+        },
+        "after_unknown": {
+          "arn": true,
+          "id": true,
+          "security_group_rule_id": true,
+          "tags_all": {}
+        }
+      }
+    },
+    {
+      "address": "aws_vpc_security_group_ingress_rule.open[\"ssh_halves_1\"]",
+      "mode": "managed",
+      "type": "aws_vpc_security_group_ingress_rule",
+      "name": "open",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "cidr_ipv4": "128.0.0.0/1",
+          "cidr_ipv6": null,
+          "description": null,
+          "from_port": 22,
+          "ip_protocol": "tcp",
+          "prefix_list_id": null,
+          "referenced_security_group_id": null,
+          "security_group_id": "sg-0123456789abcdef0",
+          "tags": null,
+          "tags_all": {},
+          "to_port": 22
+        },
+        "after_unknown": {
+          "arn": true,
+          "id": true,
+          "security_group_rule_id": true,
+          "tags_all": {}
+        }
+      }
+    },
+    {
+      "address": "aws_vpc_security_group_ingress_rule.open[\"ssh_host_0\"]",
+      "mode": "managed",
+      "type": "aws_vpc_security_group_ingress_rule",
+      "name": "open",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "cidr_ipv4": "203.0.113.7/32",
+          "cidr_ipv6": null,
+          "description": null,
+          "from_port": 22,
+          "ip_protocol": "tcp",
+          "prefix_list_id": null,
+          "referenced_security_group_id": null,
+          "security_group_id": "sg-0123456789abcdef0",
+          "tags": null,
+          "tags_all": {},
+          "to_port": 22
+        },
+        "after_unknown": {
+          "arn": true,
+          "id": true,
+          "security_group_rule_id": true,
+          "tags_all": {}
+        }
+      }
+    },
+    {
+      "address": "aws_vpc_security_group_ingress_rule.open[\"ssh_ipv4_0\"]",
+      "mode": "managed",
+      "type": "aws_vpc_security_group_ingress_rule",
+      "name": "open",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "cidr_ipv4": "0.0.0.0/0",
+          "cidr_ipv6": null,
+          "description": null,
+          "from_port": 22,
+          "ip_protocol": "tcp",
+          "prefix_list_id": null,
+          "referenced_security_group_id": null,
+          "security_group_id": "sg-0123456789abcdef0",
+          "tags": null,
+          "tags_all": {},
+          "to_port": 22
+        },
+        "after_unknown": {
+          "arn": true,
+          "id": true,
+          "security_group_rule_id": true,
+          "tags_all": {}
+        }
+      }
+    },
+    {
+      "address": "aws_vpc_security_group_ingress_rule.open[\"ssh_ipv6_0\"]",
+      "mode": "managed",
+      "type": "aws_vpc_security_group_ingress_rule",
+      "name": "open",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "cidr_ipv4": null,
+          "cidr_ipv6": "::/0",
+          "description": null,
+          "from_port": 22,
+          "ip_protocol": "tcp",
+          "prefix_list_id": null,
+          "referenced_security_group_id": null,
+          "security_group_id": "sg-0123456789abcdef0",
+          "tags": null,
+          "tags_all": {},
+          "to_port": 22
+        },
+        "after_unknown": {
+          "arn": true,
+          "id": true,
+          "security_group_rule_id": true,
+          "tags_all": {}
+        }
+      }
+    },
+    {
+      "address": "aws_vpc_security_group_ingress_rule.open[\"ssh_six_0\"]",
+      "mode": "managed",
+      "type": "aws_vpc_security_group_ingress_rule",
+      "name": "open",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "cidr_ipv4": "0.0.0.0/0",
+          "cidr_ipv6": null,
+          "description": null,
+          "from_port": 22,
+          "ip_protocol": "6",
+          "prefix_list_id": null,
+          "referenced_security_group_id": null,
+          "security_group_id": "sg-0123456789abcdef0",
+          "tags": null,
+          "tags_all": {},
+          "to_port": 22
+        },
+        "after_unknown": {
+          "arn": true,
+          "id": true,
+          "security_group_rule_id": true,
+          "tags_all": {}
+        }
+      }
+    },
+    {
+      "address": "aws_vpc_security_group_ingress_rule.open[\"tcp_full_0\"]",
+      "mode": "managed",
+      "type": "aws_vpc_security_group_ingress_rule",
+      "name": "open",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "cidr_ipv4": "0.0.0.0/0",
+          "cidr_ipv6": null,
+          "description": null,
+          "from_port": 0,
+          "ip_protocol": "tcp",
+          "prefix_list_id": null,
+          "referenced_security_group_id": null,
+          "security_group_id": "sg-0123456789abcdef0",
+          "tags": null,
+          "tags_all": {},
+          "to_port": 65535
+        },
+        "after_unknown": {
+          "arn": true,
+          "id": true,
+          "security_group_rule_id": true,
+          "tags_all": {}
+        }
+      }
+    },
+    {
+      "address": "aws_vpc_security_group_ingress_rule.open_prefix_list",
+      "mode": "managed",
+      "type": "aws_vpc_security_group_ingress_rule",
+      "name": "open_prefix_list",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "cidr_ipv4": null,
+          "cidr_ipv6": null,
+          "description": null,
+          "from_port": 443,
+          "ip_protocol": "tcp",
+          "prefix_list_id": "pl-12345678",
+          "referenced_security_group_id": null,
+          "security_group_id": "sg-0123456789abcdef0",
+          "tags": null,
+          "tags_all": {},
+          "to_port": 443
+        },
+        "after_unknown": {
+          "arn": true,
+          "id": true,
+          "security_group_rule_id": true,
+          "tags_all": {}
+        }
+      }
+    },
+    {
+      "address": "aws_vpc_security_group_ingress_rule.open_unknown[\"eip_source\"]",
+      "mode": "managed",
+      "type": "aws_vpc_security_group_ingress_rule",
+      "name": "open_unknown",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "cidr_ipv6": null,
+          "description": null,
+          "from_port": 22,
+          "ip_protocol": "tcp",
+          "prefix_list_id": null,
+          "referenced_security_group_id": null,
+          "security_group_id": "sg-0123456789abcdef0",
+          "tags": null,
+          "tags_all": {},
+          "to_port": 22
+        },
+        "after_unknown": {
+          "arn": true,
+          "cidr_ipv4": true,
+          "id": true,
+          "security_group_rule_id": true,
+          "tags_all": {}
+        }
+      }
+    },
+    {
+      "address": "aws_vpc_security_group_ingress_rule.open_unknown[\"from_port\"]",
+      "mode": "managed",
+      "type": "aws_vpc_security_group_ingress_rule",
+      "name": "open_unknown",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "cidr_ipv4": "0.0.0.0/0",
+          "cidr_ipv6": null,
+          "description": null,
+          "ip_protocol": "tcp",
+          "prefix_list_id": null,
+          "referenced_security_group_id": null,
+          "security_group_id": "sg-0123456789abcdef0",
+          "tags": null,
+          "tags_all": {},
+          "to_port": 80
+        },
+        "after_unknown": {
+          "arn": true,
+          "from_port": true,
+          "id": true,
+          "security_group_rule_id": true,
+          "tags_all": {}
+        }
+      }
+    },
+    {
+      "address": "aws_vpc_security_group_ingress_rule.open_unknown[\"protocol\"]",
+      "mode": "managed",
+      "type": "aws_vpc_security_group_ingress_rule",
+      "name": "open_unknown",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "cidr_ipv4": "0.0.0.0/0",
+          "cidr_ipv6": null,
+          "description": null,
+          "from_port": 80,
+          "prefix_list_id": null,
+          "referenced_security_group_id": null,
+          "security_group_id": "sg-0123456789abcdef0",
+          "tags": null,
+          "tags_all": {},
+          "to_port": 80
+        },
+        "after_unknown": {
+          "arn": true,
+          "id": true,
+          "ip_protocol": true,
+          "security_group_rule_id": true,
+          "tags_all": {}
+        }
+      }
+    },
+    {
+      "address": "aws_vpc_security_group_ingress_rule.open_unknown[\"to_port\"]",
+      "mode": "managed",
+      "type": "aws_vpc_security_group_ingress_rule",
+      "name": "open_unknown",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "cidr_ipv4": "0.0.0.0/0",
+          "cidr_ipv6": null,
+          "description": null,
+          "from_port": 80,
+          "ip_protocol": "tcp",
+          "prefix_list_id": null,
+          "referenced_security_group_id": null,
+          "security_group_id": "sg-0123456789abcdef0",
+          "tags": null,
+          "tags_all": {}
+        },
+        "after_unknown": {
+          "arn": true,
+          "id": true,
+          "security_group_rule_id": true,
+          "tags_all": {},
+          "to_port": true
+        }
+      }
+    },
+    {
+      "address": "aws_vpc_security_group_ingress_rule.pass[\"ssh_private_0\"]",
+      "mode": "managed",
+      "type": "aws_vpc_security_group_ingress_rule",
+      "name": "pass",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "cidr_ipv4": "10.0.0.0/16",
+          "cidr_ipv6": null,
+          "description": null,
+          "from_port": 22,
+          "ip_protocol": "tcp",
+          "prefix_list_id": null,
+          "referenced_security_group_id": null,
+          "security_group_id": "sg-0123456789abcdef0",
+          "tags": null,
+          "tags_all": {},
+          "to_port": 22
+        },
+        "after_unknown": {
+          "arn": true,
+          "id": true,
+          "security_group_rule_id": true,
+          "tags_all": {}
+        }
+      }
+    },
+    {
+      "address": "aws_vpc_security_group_ingress_rule.pass[\"ssh_private_1\"]",
+      "mode": "managed",
+      "type": "aws_vpc_security_group_ingress_rule",
+      "name": "pass",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "cidr_ipv4": "172.16.0.0/12",
+          "cidr_ipv6": null,
+          "description": null,
+          "from_port": 22,
+          "ip_protocol": "tcp",
+          "prefix_list_id": null,
+          "referenced_security_group_id": null,
+          "security_group_id": "sg-0123456789abcdef0",
+          "tags": null,
+          "tags_all": {},
+          "to_port": 22
+        },
+        "after_unknown": {
+          "arn": true,
+          "id": true,
+          "security_group_rule_id": true,
+          "tags_all": {}
+        }
+      }
+    },
+    {
+      "address": "aws_vpc_security_group_ingress_rule.pass[\"ssh_private_2\"]",
+      "mode": "managed",
+      "type": "aws_vpc_security_group_ingress_rule",
+      "name": "pass",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "cidr_ipv4": "192.168.1.0/24",
+          "cidr_ipv6": null,
+          "description": null,
+          "from_port": 22,
+          "ip_protocol": "tcp",
+          "prefix_list_id": null,
+          "referenced_security_group_id": null,
+          "security_group_id": "sg-0123456789abcdef0",
+          "tags": null,
+          "tags_all": {},
+          "to_port": 22
+        },
+        "after_unknown": {
+          "arn": true,
+          "id": true,
+          "security_group_rule_id": true,
+          "tags_all": {}
+        }
+      }
+    },
+    {
+      "address": "aws_vpc_security_group_ingress_rule.pass[\"ssh_private_3\"]",
+      "mode": "managed",
+      "type": "aws_vpc_security_group_ingress_rule",
+      "name": "pass",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "cidr_ipv4": null,
+          "cidr_ipv6": "fd00::/8",
+          "description": null,
+          "from_port": 22,
+          "ip_protocol": "tcp",
+          "prefix_list_id": null,
+          "referenced_security_group_id": null,
+          "security_group_id": "sg-0123456789abcdef0",
+          "tags": null,
+          "tags_all": {},
+          "to_port": 22
+        },
+        "after_unknown": {
+          "arn": true,
+          "id": true,
+          "security_group_rule_id": true,
+          "tags_all": {}
+        }
+      }
+    },
+    {
+      "address": "aws_vpc_security_group_ingress_rule.pass[\"web_0\"]",
+      "mode": "managed",
+      "type": "aws_vpc_security_group_ingress_rule",
+      "name": "pass",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "cidr_ipv4": "0.0.0.0/0",
+          "cidr_ipv6": null,
+          "description": null,
+          "from_port": 80,
+          "ip_protocol": "tcp",
+          "prefix_list_id": null,
+          "referenced_security_group_id": null,
+          "security_group_id": "sg-0123456789abcdef0",
+          "tags": null,
+          "tags_all": {},
+          "to_port": 80
+        },
+        "after_unknown": {
+          "arn": true,
+          "id": true,
+          "security_group_rule_id": true,
+          "tags_all": {}
+        }
+      }
+    },
+    {
+      "address": "aws_vpc_security_group_ingress_rule.pass[\"web_1\"]",
+      "mode": "managed",
+      "type": "aws_vpc_security_group_ingress_rule",
+      "name": "pass",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "cidr_ipv4": null,
+          "cidr_ipv6": "::/0",
+          "description": null,
+          "from_port": 80,
+          "ip_protocol": "tcp",
+          "prefix_list_id": null,
+          "referenced_security_group_id": null,
+          "security_group_id": "sg-0123456789abcdef0",
+          "tags": null,
+          "tags_all": {},
+          "to_port": 80
+        },
+        "after_unknown": {
+          "arn": true,
+          "id": true,
+          "security_group_rule_id": true,
+          "tags_all": {}
+        }
+      }
+    },
+    {
+      "address": "aws_vpc_security_group_ingress_rule.ping",
+      "mode": "managed",
+      "type": "aws_vpc_security_group_ingress_rule",
+      "name": "ping",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "cidr_ipv4": "0.0.0.0/0",
+          "cidr_ipv6": null,
+          "description": null,
+          "from_port": null,
+          "ip_protocol": "icmp",
+          "prefix_list_id": null,
+          "referenced_security_group_id": null,
+          "security_group_id": "sg-0123456789abcdef0",
+          "tags": null,
+          "tags_all": {},
+          "to_port": null
+        },
+        "after_unknown": {
+          "arn": true,
+          "id": true,
+          "security_group_rule_id": true,
+          "tags_all": {}
+        }
+      }
+    },
+    {
+      "address": "aws_vpc_security_group_ingress_rule.ssh_from_group",
+      "mode": "managed",
+      "type": "aws_vpc_security_group_ingress_rule",
+      "name": "ssh_from_group",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "cidr_ipv4": null,
+          "cidr_ipv6": null,
+          "description": null,
+          "from_port": 22,
+          "ip_protocol": "tcp",
+          "prefix_list_id": null,
+          "security_group_id": "sg-0123456789abcdef0",
+          "tags": null,
+          "tags_all": {},
+          "to_port": 22
+        },
+        "after_unknown": {
+          "arn": true,
+          "id": true,
+          "referenced_security_group_id": true,
+          "security_group_rule_id": true,
+          "tags_all": {}
+        }
+      }
+    },
+    {
+      "address": "module.child[0].aws_security_group.bare",
+      "mode": "managed",
+      "type": "aws_security_group",
+      "name": "bare",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "description": "Managed by Terraform",
+          "name": "child-bare",
+          "revoke_rules_on_delete": false,
+          "tags": null,
+          "timeouts": null
+        },
+        "after_unknown": {
+          "arn": true,
+          "egress": true,
+          "id": true,
+          "ingress": true,
+          "name_prefix": true,
+          "owner_id": true,
+          "tags_all": true,
+          "vpc_id": true
+        }
+      },
+      "module_address": "module.child[0]"
+    },
+    {
+      "address": "module.child[0].aws_security_group.open",
+      "mode": "managed",
+      "type": "aws_security_group",
+      "name": "open",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "description": "Managed by Terraform",
+          "ingress": [
+            {
+              "cidr_blocks": [
+                "0.0.0.0/0"
+              ],
+              "description": "",
+              "from_port": 22,
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "protocol": "tcp",
+              "security_groups": [],
+              "self": false,
+              "to_port": 22
+            }
+          ],
+          "name": "child-open",
+          "revoke_rules_on_delete": false,
+          "tags": null,
+          "timeouts": null
+        },
+        "after_unknown": {
+          "arn": true,
+          "egress": true,
+          "id": true,
+          "ingress": [
+            {
+              "cidr_blocks": [
+                false
+              ],
+              "ipv6_cidr_blocks": [],
+              "prefix_list_ids": [],
+              "security_groups": []
+            }
+          ],
+          "name_prefix": true,
+          "owner_id": true,
+          "tags_all": true,
+          "vpc_id": true
+        }
+      },
+      "module_address": "module.child[0]"
+    },
+    {
+      "address": "module.child[0].module.grandchild.aws_security_group.bare",
+      "mode": "managed",
+      "type": "aws_security_group",
+      "name": "bare",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "description": "Managed by Terraform",
+          "name": "grandchild-bare",
+          "revoke_rules_on_delete": false,
+          "tags": null,
+          "timeouts": null
+        },
+        "after_unknown": {
+          "arn": true,
+          "egress": true,
+          "id": true,
+          "ingress": true,
+          "name_prefix": true,
+          "owner_id": true,
+          "tags_all": true,
+          "vpc_id": true
+        }
+      },
+      "module_address": "module.child[0].module.grandchild"
+    },
+    {
+      "address": "module.child[0].module.grandchild.aws_security_group.open",
+      "mode": "managed",
+      "type": "aws_security_group",
+      "name": "open",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "description": "Managed by Terraform",
+          "ingress": [
+            {
+              "cidr_blocks": [],
+              "description": "",
+              "from_port": 22,
+              "ipv6_cidr_blocks": [
+                "::/0"
+              ],
+              "prefix_list_ids": [],
+              "protocol": "tcp",
+              "security_groups": [],
+              "self": false,
+              "to_port": 22
+            }
+          ],
+          "name": "grandchild-open",
+          "revoke_rules_on_delete": false,
+          "tags": null,
+          "timeouts": null
+        },
+        "after_unknown": {
+          "arn": true,
+          "egress": true,
+          "id": true,
+          "ingress": [
+            {
+              "cidr_blocks": [],
+              "ipv6_cidr_blocks": [
+                false
+              ],
+              "prefix_list_ids": [],
+              "security_groups": []
+            }
+          ],
+          "name_prefix": true,
+          "owner_id": true,
+          "tags_all": true,
+          "vpc_id": true
+        }
+      },
+      "module_address": "module.child[0].module.grandchild"
+    }
+  ],
+  "configuration": {
+    "root_module": {
+      "resources": [
+        {
+          "address": "aws_default_security_group.open",
+          "expressions": {
+            "ingress": {
+              "references": [
+                "each.value.from",
+                "each.value",
+                "each.value.cidrs",
+                "each.value",
+                "each.value.to",
+                "each.value",
+                "each.value.protocol",
+                "each.value",
+                "each.value.cidrs",
+                "each.value"
+              ]
+            }
+          }
+        },
+        {
+          "address": "aws_default_security_group.open_prefix_list",
+          "expressions": {
+            "ingress": {
+              "constant_value": [
+                {
+                  "cidr_blocks": null,
+                  "description": null,
+                  "from_port": 443,
+                  "ipv6_cidr_blocks": null,
+                  "prefix_list_ids": [
+                    "pl-12345678"
+                  ],
+                  "protocol": "tcp",
+                  "security_groups": null,
+                  "self": null,
+                  "to_port": 443
+                }
+              ]
+            }
+          }
+        },
+        {
+          "address": "aws_default_security_group.open_unknown",
+          "expressions": {
+            "ingress": {
+              "references": [
+                "each.value.protocol",
+                "each.value",
+                "each.value.from",
+                "each.value",
+                "each.value.to",
+                "each.value",
+                "each.value.cidr",
+                "each.value"
+              ]
+            }
+          }
+        },
+        {
+          "address": "aws_default_security_group.ssh_from_group",
+          "expressions": {
+            "ingress": {
+              "references": [
+                "aws_security_group.peer.id",
+                "aws_security_group.peer"
+              ]
+            }
+          }
+        },
+        {
+          "address": "aws_security_group.open",
+          "expressions": {
+            "ingress": {
+              "references": [
+                "each.value.protocol",
+                "each.value",
+                "each.value.to",
+                "each.value",
+                "each.value.from",
+                "each.value",
+                "each.value.cidrs",
+                "each.value",
+                "each.value.cidrs",
+                "each.value"
+              ]
+            }
+          }
+        },
+        {
+          "address": "aws_security_group.open_attribute",
+          "expressions": {
+            "ingress": {
+              "references": [
+                "aws_eip.x.public_ip",
+                "aws_eip.x"
+              ]
+            }
+          }
+        },
+        {
+          "address": "aws_security_group.open_attribute_collection",
+          "expressions": {
+            "ingress": {
+              "references": [
+                "local.later_22"
+              ]
+            }
+          }
+        },
+        {
+          "address": "aws_security_group.open_dynamic"
+        },
+        {
+          "address": "aws_security_group.open_dynamic_collection"
+        },
+        {
+          "address": "aws_security_group.open_prefix_list",
+          "expressions": {
+            "ingress": {
+              "constant_value": [
+                {
+                  "cidr_blocks": null,
+                  "description": null,
+                  "from_port": 443,
+                  "ipv6_cidr_blocks": null,
+                  "prefix_list_ids": [
+                    "pl-12345678"
+                  ],
+                  "protocol": "tcp",
+                  "security_groups": null,
+                  "self": null,
+                  "to_port": 443
+                }
+              ]
+            }
+          }
+        },
+        {
+          "address": "aws_security_group.open_unknown",
+          "expressions": {
+            "ingress": {
+              "references": [
+                "each.value.from",
+                "each.value",
+                "each.value.cidr",
+                "each.value",
+                "each.value.to",
+                "each.value",
+                "each.value.protocol",
+                "each.value"
+              ]
+            }
+          }
+        },
+        {
+          "address": "aws_security_group.pass",
+          "expressions": {
+            "ingress": {
+              "references": [
+                "each.value.cidrs",
+                "each.value",
+                "each.value.protocol",
+                "each.value",
+                "each.value.from",
+                "each.value",
+                "each.value.cidrs",
+                "each.value",
+                "each.value.to",
+                "each.value"
+              ]
+            }
+          }
+        },
+        {
+          "address": "aws_security_group.peer"
+        },
+        {
+          "address": "aws_security_group.ssh_from_group",
+          "expressions": {
+            "ingress": {
+              "references": [
+                "aws_security_group.peer.id",
+                "aws_security_group.peer"
+              ]
+            }
+          }
+        },
+        {
+          "address": "aws_security_group.ssh_from_vpc",
+          "expressions": {
+            "ingress": {
+              "references": [
+                "aws_vpc.literal.cidr_block",
+                "aws_vpc.literal",
+                "aws_vpc.var_default.cidr_block",
+                "aws_vpc.var_default"
+              ]
+            }
+          }
+        },
+        {
+          "address": "aws_security_group_rule.all_from_self"
+        },
+        {
+          "address": "aws_security_group_rule.egress_all"
+        },
+        {
+          "address": "aws_security_group_rule.open"
+        },
+        {
+          "address": "aws_security_group_rule.open_prefix_list"
+        },
+        {
+          "address": "aws_security_group_rule.open_unknown"
+        },
+        {
+          "address": "aws_security_group_rule.open_unknown_type"
+        },
+        {
+          "address": "aws_security_group_rule.pass"
+        },
+        {
+          "address": "aws_security_group_rule.ssh_from_group"
+        },
+        {
+          "address": "aws_security_group_rule.ssh_from_vpc"
+        },
+        {
+          "address": "aws_vpc_security_group_egress_rule.all"
+        },
+        {
+          "address": "aws_vpc_security_group_ingress_rule.open"
+        },
+        {
+          "address": "aws_vpc_security_group_ingress_rule.open_prefix_list"
+        },
+        {
+          "address": "aws_vpc_security_group_ingress_rule.open_unknown"
+        },
+        {
+          "address": "aws_vpc_security_group_ingress_rule.pass"
+        },
+        {
+          "address": "aws_vpc_security_group_ingress_rule.ping"
+        },
+        {
+          "address": "aws_vpc_security_group_ingress_rule.ssh_from_group"
+        }
+      ],
+      "module_calls": {
+        "child": {
+          "module": {
+            "resources": [
+              {
+                "address": "aws_security_group.bare"
+              },
+              {
+                "address": "aws_security_group.open",
+                "expressions": {
+                  "ingress": {
+                    "constant_value": [
+                      {
+                        "cidr_blocks": [
+                          "0.0.0.0/0"
+                        ],
+                        "description": null,
+                        "from_port": 22,
+                        "ipv6_cidr_blocks": null,
+                        "prefix_list_ids": null,
+                        "protocol": "tcp",
+                        "security_groups": null,
+                        "self": null,
+                        "to_port": 22
+                      }
+                    ]
+                  }
+                }
+              }
+            ],
+            "module_calls": {
+              "grandchild": {
+                "module": {
+                  "resources": [
+                    {
+                      "address": "aws_security_group.bare"
+                    },
+                    {
+                      "address": "aws_security_group.open",
+                      "expressions": {
+                        "ingress": {
+                          "constant_value": [
+                            {
+                              "cidr_blocks": null,
+                              "description": null,
+                              "from_port": 22,
+                              "ipv6_cidr_blocks": [
+                                "::/0"
+                              ],
+                              "prefix_list_ids": null,
+                              "protocol": "tcp",
+                              "security_groups": null,
+                              "self": null,
+                              "to_port": 22
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
