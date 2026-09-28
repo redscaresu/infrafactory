@@ -59,6 +59,9 @@ func TestRegoTestProblems_Fixtures(t *testing.T) {
 		{fixture("notests"), []string{
 			filepath.Join(fixture("notests"), "policy_test.rego") + ": no test_ rule, so it tests nothing",
 		}},
+		{fixture("untested"), []string{
+			filepath.Join(fixture("untested"), "aws", "policy.rego") + ": no policy_test.rego beside it, and policies here require one",
+		}},
 	}
 	for _, tc := range cases {
 		t.Run(filepath.Base(tc.dir), func(t *testing.T) {
@@ -73,8 +76,10 @@ func TestRegoTestProblems_Fixtures(t *testing.T) {
 // opa/v1/tester, and returns the files it loaded and every problem:
 //   - a test that fails or errors;
 //   - a *_test.rego with no test_ rule, which checks nothing;
+//   - a policy under one of regoTestRequiredDirs with no sibling
+//     <name>_test.rego;
 //   - a deny or deny_state body that no test kills, in a policy with a
-//     sibling <name>_test.rego. Opt-in per file until policy-tests-required.
+//     sibling <name>_test.rego.
 func regoTestProblems(ctx context.Context, root string) (loaded, problems []string) {
 	modules, store, err := tester.Load([]string{root}, nil)
 	if err != nil {
@@ -98,6 +103,10 @@ func regoTestProblems(ctx context.Context, root string) (loaded, problems []stri
 		if strings.HasSuffix(file, "_test.rego") && !hasRegoTestRule(modules[file]) {
 			problems = append(problems, fmt.Sprintf("%s: no %s rule, so it tests nothing", file, tester.TestPrefix))
 		}
+		if regoTestRequired(root, file) && modules[regoTestFile(file)] == nil {
+			problems = append(problems, fmt.Sprintf("%s: no %s beside it, and policies here require one",
+				file, filepath.Base(regoTestFile(file))))
+		}
 	}
 	problems = append(problems, unkilledDenyBodies(ctx, modules, store)...)
 	slices.Sort(problems)
@@ -115,7 +124,7 @@ func regoTestProblems(ctx context.Context, root string) (loaded, problems []stri
 func unkilledDenyBodies(ctx context.Context, modules map[string]*ast.Module, store storage.Store) []string {
 	var problems []string
 	for file, module := range modules {
-		if strings.HasSuffix(file, "_test.rego") || modules[strings.TrimSuffix(file, ".rego")+"_test.rego"] == nil {
+		if strings.HasSuffix(file, "_test.rego") || modules[regoTestFile(file)] == nil {
 			continue
 		}
 		for i, rule := range module.Rules {
@@ -135,6 +144,24 @@ func unkilledDenyBodies(ctx context.Context, modules map[string]*ast.Module, sto
 		}
 	}
 	return problems
+}
+
+// regoTestRequiredDirs are the directories under the policies root whose
+// every policy must have a sibling _test.rego. GCP and Genesys are out of
+// scope (docs/epics/policy-correctness.md).
+var regoTestRequiredDirs = []string{"aws", "common", "scaleway"}
+
+func regoTestRequired(root, file string) bool {
+	rel, err := filepath.Rel(root, file)
+	if err != nil || strings.HasSuffix(file, "_test.rego") {
+		return false
+	}
+	top, _, _ := strings.Cut(filepath.ToSlash(rel), "/")
+	return slices.Contains(regoTestRequiredDirs, top)
+}
+
+func regoTestFile(policy string) string {
+	return strings.TrimSuffix(policy, ".rego") + "_test.rego"
 }
 
 // falsifyRuleBody returns a copy of module whose i-th rule body starts
