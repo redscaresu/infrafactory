@@ -1,7 +1,6 @@
 ---
 kind: code
-status: blocked
-blocked_by: [layer3-gate-shared-rules, aws-web-live-scenario]
+status: ready
 epic: aws-layer3-gate
 depends_on: [layer3-gate-shared-rules, aws-web-live-scenario]
 touches: ["internal/config/config.go", "infrafactory.yaml", "docs/layer3-coverage.md", "internal/cli/layer3_coverage_doc_test.go", "internal/cli/layer3_allowlist_test.go", "internal/e2e/aws_allowlist_schema_test.go (new)", ".github/workflows/ci.yml", "docs/stories/aws-layer3-allowlist-entries.md (delete)"]

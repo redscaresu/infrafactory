@@ -1,7 +1,6 @@
 ---
 kind: code
-status: blocked
-blocked_by: [layer3-gate-shared-rules]
+status: ready
 epic: aws-layer3-gate
 depends_on: [layer3-gate-shared-rules]
 touches: ["internal/cli/layer3_aws_attrs.go (new)", "internal/cli/layer3_aws_attrs_test.go (new)", "docs/stories/aws-gate-attribute-allowlists.md (delete)"]
