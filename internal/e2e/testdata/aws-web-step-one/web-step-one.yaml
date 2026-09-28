@@ -1,0 +1,45 @@
+scenario: aws-web-step-one
+version: "1.0"
+cloud: aws
+description: >
+  One EC2 instance running nginx behind a public security group,
+  reachable on port 80. The fixed fixture (VPC, subnet, internet
+  gateway, route table, route, association, one security group, one
+  instance) is applied, converged and destroyed on fakeaws by
+  TestE2E_AWSWebStepOne. http_probe compute:80 derives from fakeaws's
+  EC2 state (internal/harness/topology_derive_aws.go).
+
+aws_resource_anchors:
+  - aws_vpc
+  - aws_subnet
+  - aws_internet_gateway
+  - aws_route_table
+  - aws_route
+  - aws_route_table_association
+  - aws_security_group
+  - aws_instance
+
+service:
+  image: nginx
+  tag: "1.27"
+  port: 80
+  health_path: /
+  ttl: 4h
+
+resources:
+  compute:
+    purpose: web-server
+    size: small
+  networking:
+    vpc: true
+
+acceptance_criteria:
+  - type: policy
+    check: region_restriction
+    params:
+      region: us-east-1
+    expect: pass
+  - type: http_probe
+    target: compute
+    port: 80
+    expect: reachable

@@ -1,0 +1,44 @@
+scenario: aws-web-step-one-unattached
+version: "1.0"
+cloud: aws
+description: >
+  Same fixed fixture as web-step-one.tf, except the port-80 ingress
+  rule lives on a security group the instance never attaches. Proves
+  http_probe compute:80 fails closed with the unattached-group
+  diagnostic (internal/harness/topology_derive_aws.go) rather than
+  reading "reachable" from a group that exists but isn't in effect.
+
+aws_resource_anchors:
+  - aws_vpc
+  - aws_subnet
+  - aws_internet_gateway
+  - aws_route_table
+  - aws_route
+  - aws_route_table_association
+  - aws_security_group
+  - aws_instance
+
+service:
+  image: nginx
+  tag: "1.27"
+  port: 80
+  health_path: /
+  ttl: 4h
+
+resources:
+  compute:
+    purpose: web-server
+    size: small
+  networking:
+    vpc: true
+
+acceptance_criteria:
+  - type: policy
+    check: region_restriction
+    params:
+      region: us-east-1
+    expect: pass
+  - type: http_probe
+    target: compute
+    port: 80
+    expect: reachable

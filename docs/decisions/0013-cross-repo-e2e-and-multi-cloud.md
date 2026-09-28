@@ -41,3 +41,19 @@ Two architectural decisions span multiple slices and affect long-term project st
 - E2E tests are slower (compile + start mockway + full run loop) — gated behind opt-in flag.
 - GCP prompt templates duplicate some structure from Scaleway templates — acceptable since provider-specific guidance dominates.
 - fakegcp must exist and be sufficiently complete before GCP scenarios can pass.
+
+### AWS note (aws-web-step-one-e2e)
+
+`TestE2E_AWSWebStepOne` (`internal/e2e/aws_web_step_one_test.go`) is the AWS analogue of the
+cross-repo pattern above, run against fakeaws instead of mockway: a fixed step-one fixture (VPC,
+subnet, IGW, route table, route, association, one security group, one EC2 instance running the
+scenario's `service:` block) is applied, converged and destroyed on fakeaws in CI, with
+`http_probe compute:80` derived from fakeaws's live EC2 state
+(`internal/harness/topology_derive_aws.go`). It additionally reads back fakeaws's
+`DescribeInstanceAttribute(userData)` for the applied instance and compares it byte for byte
+against the renderer's golden script — the bytes that reached the instance, not the file
+generation wrote to disk. `TestE2E_AWSWebStepOneUnattachedGroup` is the fail-closed
+counterpart: the same fixture with the ingress rule moved to a security group the instance never
+attaches, asserting the run fails on `http_probe` with the unattached-group diagnostic rather
+than reading "reachable" from a group with no effect. Both run in CI against fakeaws pinned to a
+fixed commit (`.github/workflows/ci.yml`'s `FAKEAWS_SHA`), alongside the other AWS e2e tests.
