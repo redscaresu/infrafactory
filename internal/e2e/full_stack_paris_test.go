@@ -208,7 +208,8 @@ const fullStackParisSecurityTF = `resource "scaleway_instance_security_group" "w
 // scenario definition — the web server lives on the private network only.
 // Avoiding a public scaleway_instance_ip also keeps the static
 // no_public_endpoints policy green on incremental re-runs (the policy
-// matches IPs whose server binding becomes non-null in state).
+// denies an IP whose server_id is known in the plan, after a prior
+// apply bound it).
 const fullStackParisComputeTF = `resource "scaleway_instance_server" "web" {
   name              = "web-server"
   type              = "DEV1-S"
