@@ -19,8 +19,9 @@ import (
 //
 // The four affected policies (GCP + AWS encryption + vpc_required)
 // have M98 fixes in place since 2026-05-23 / S60. This ratchet
-// fails CI if a future edit drops the `after_unknown` branch from
-// any of them.
+// fails CI if a future edit drops the fix from any of them. AWS
+// encryption reads the reference from `configuration` rather than
+// `after_unknown`, because it must know which bucket is named.
 //
 // Policies that inspect literal fields (region restrictions, plain
 // booleans like `encryption_at_rest`, block presence) don't need
@@ -61,8 +62,8 @@ func TestOPAPoliciesM98KnownAfterApplyBranches(t *testing.T) {
 		{
 			path: "policies/aws/encryption.rego",
 			wantTokens: []string{
-				"after_unknown",
-				"bucket", // S3 / RDS / etc.
+				"references", // M98 fix: SSE config's bucket reference
+				"bucket",     // S3 / RDS / etc.
 			},
 		},
 	}
@@ -80,8 +81,8 @@ func TestOPAPoliciesM98KnownAfterApplyBranches(t *testing.T) {
 			for _, want := range tc.wantTokens {
 				if !strings.Contains(body, want) {
 					t.Errorf("%s missing required token %q — M98 fix regression?\n"+
-						"This policy reads reference-typed attributes from planned_values, so it MUST also have an "+
-						"`after_unknown.X == true` branch to accept known-after-apply references. See ADR-0012 "+
+						"This policy reads reference-typed attributes, so it MUST also accept known-after-apply references "+
+						"(an `after_unknown.X == true` branch, or the reference read from `configuration`). See ADR-0012 "+
 						"§ M98 amendment for the pattern.", tc.path, want)
 				}
 			}
