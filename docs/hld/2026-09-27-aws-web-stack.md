@@ -474,7 +474,7 @@ fixed by running apply, destroy, sweep and `reap`; the probe window.
 - aws-layer-neutral-hcl — done (#329-#342; ADR-0039)
 - aws-ingress-policy-and-holdout — done (#345-#347, #349, #350; this PR)
 - [aws-layer3-gate](../epics/aws-layer3-gate.md)
-- [avoid-pitfall-retirement](../epics/avoid-pitfall-retirement.md)
+- avoid-pitfall-retirement — done (#364, #367, #371; this PR)
 - [aws-layer3-wiring-proof](../epics/aws-layer3-wiring-proof.md)
 - [aws-web-live-on-real-aws](../epics/aws-web-live-on-real-aws.md)
 - [aws-web-stack-load-balancer](../epics/aws-web-stack-load-balancer.md)

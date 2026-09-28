@@ -44,6 +44,9 @@ func TestE2E_CheckAvoidAgainstFakeaws(t *testing.T) {
 	}}})
 	require.NoError(t, err)
 	WriteFile(t, filepath.Join(cfg.Paths.Pitfalls, "aws.yaml"), corpus)
+	// WriteConfigMultiCloud copies the repo's pitfalls/, ledger included;
+	// this test's ledger starts empty so it sees only its own record.
+	require.NoError(t, os.RemoveAll(filepath.Join(cfg.Paths.Pitfalls, "avoid-checks")))
 
 	from := t.TempDir()
 	hcl, err := os.ReadFile(filepath.Join(RepoRoot(t), "internal", "e2e", "testdata", awsWebStepOneDir, awsWebStepOneName+".tf"))
