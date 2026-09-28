@@ -167,6 +167,48 @@ func TestLayer3AllowlistDoesNotContradictStaticPolicy(t *testing.T) {
 			"without admitting NICs makes the two gates unsatisfiable together")
 }
 
+// Every entry names a cloud with a Layer 3 gate. An entry for any other
+// prefix, or none, is one no gate was written for.
+func TestLayer3DefaultAllowlistEntriesNameAGatedCloud(t *testing.T) {
+	t.Parallel()
+
+	assert.Empty(t, allowlistEntriesWithoutGatedPrefix(defaultSandboxAllowlistForTest(t)))
+	assert.Equal(t, []string{"gcp_compute_instance", "google_compute_instance", "instance_server"},
+		allowlistEntriesWithoutGatedPrefix([]string{"aws_vpc", "gcp_compute_instance", "google_compute_instance", "instance_server", "scaleway_lb*"}),
+		"the check must name an entry for an ungated cloud and an unprefixed one")
+}
+
+// AWS entries are exact names. A glob admits every type the provider adds
+// later, each unproven against the placement check.
+func TestLayer3DefaultAllowlistHasNoAWSGlob(t *testing.T) {
+	t.Parallel()
+
+	assert.Empty(t, awsAllowlistGlobs(defaultSandboxAllowlistForTest(t)))
+	assert.Equal(t, []string{"aws_*", "aws_route*"},
+		awsAllowlistGlobs([]string{"aws_*", "aws_vpc", "aws_route*", "scaleway_lb*"}),
+		"the check must name every aws_ entry carrying a *")
+}
+
+func allowlistEntriesWithoutGatedPrefix(allow []string) []string {
+	var bad []string
+	for _, entry := range allow {
+		if !strings.HasPrefix(entry, "scaleway_") && !strings.HasPrefix(entry, "aws_") {
+			bad = append(bad, entry)
+		}
+	}
+	return bad
+}
+
+func awsAllowlistGlobs(allow []string) []string {
+	var bad []string
+	for _, entry := range allow {
+		if strings.HasPrefix(entry, "aws_") && strings.Contains(entry, "*") {
+			bad = append(bad, entry)
+		}
+	}
+	return bad
+}
+
 func defaultSandboxAllowlistForTest(t *testing.T) []string {
 	t.Helper()
 	return config.Default().Validation.Layers.SandboxDeploy.AllowResourceTypes

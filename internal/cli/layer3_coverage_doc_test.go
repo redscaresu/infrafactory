@@ -32,8 +32,9 @@ func layer3CoverageDoc(t *testing.T) string {
 // allowlistEntryRe must accept digits: scaleway_k8s_cluster is a real
 // candidate for admission and [a-z_*]+ drops it silently, which would
 // make the sync test compare an incomplete documented set against the
-// config and fail for the wrong reason.
-var allowlistEntryRe = regexp.MustCompile("`(scaleway_[a-z0-9_*]+)`")
+// config and fail for the wrong reason. The same holds for a cloud it
+// does not name: the list carries aws_ entries too.
+var allowlistEntryRe = regexp.MustCompile("`((?:scaleway|aws)_[a-z0-9_*]+)`")
 
 var coverageRowRe = regexp.MustCompile(`(?m)^\| ` + "`" + `([a-z0-9-]+)` + "`" + ` \| ([^|]+) \|`)
 
@@ -155,13 +156,13 @@ func TestAllowlistEntryRegexAcceptsDigits(t *testing.T) {
 	t.Parallel()
 
 	found := allowlistEntryRe.FindAllStringSubmatch(
-		"`scaleway_k8s_cluster`, `scaleway_lb*` and `scaleway_block_volume`", -1)
+		"`scaleway_k8s_cluster`, `scaleway_lb*`, `scaleway_block_volume` and `aws_route_table_association`", -1)
 
 	var got []string
 	for _, m := range found {
 		got = append(got, m[1])
 	}
-	assert.Equal(t, []string{"scaleway_k8s_cluster", "scaleway_lb*", "scaleway_block_volume"}, got,
+	assert.Equal(t, []string{"scaleway_k8s_cluster", "scaleway_lb*", "scaleway_block_volume", "aws_route_table_association"}, got,
 		"dropping a digit-bearing type would silently shrink the documented set")
 }
 

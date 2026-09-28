@@ -325,6 +325,21 @@ func Default() Config {
 						"scaleway_instance_server",
 						"scaleway_instance_private_nic",
 						"scaleway_instance_security_group",
+						// AWS step one, per docs/hld/2026-09-27-aws-web-stack.md
+						// § The gate: exact names, never a glob. Each is
+						// placeable in the run's account by its arn or
+						// owner_id, or as a harness.AWSChildScopedTypes
+						// child; TestE2E_AWSAllowlistPlaceable proves it
+						// against the pinned provider's schema.
+						"aws_vpc",
+						"aws_subnet",
+						"aws_internet_gateway",
+						"aws_route_table",
+						"aws_route",
+						"aws_route_table_association",
+						"aws_security_group",
+						"aws_instance",
+						"aws_eip",
 					},
 				},
 				Destruction: LayerConfig{

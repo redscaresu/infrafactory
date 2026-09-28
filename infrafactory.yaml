@@ -175,6 +175,21 @@ validation:
         # Free, and Terraform-owned: applied and destroyed cleanly against
         # real Scaleway on 2026-09-27 with the project left empty.
         - scaleway_instance_security_group
+        # AWS step one, per docs/hld/2026-09-27-aws-web-stack.md § The gate:
+        # exact names, never a glob. Each is placeable in the run's account by
+        # its arn or owner_id, or as a harness.AWSChildScopedTypes child;
+        # TestE2E_AWSAllowlistPlaceable proves it against the pinned
+        # provider's schema. The Scaleway gate refuses every aws_ type by
+        # prefix whatever this list says.
+        - aws_vpc
+        - aws_subnet
+        - aws_internet_gateway
+        - aws_route_table
+        - aws_route
+        - aws_route_table_association
+        - aws_security_group
+        - aws_instance
+        - aws_eip
         # Uncommenting any of these opts into slow, genuinely costly
         # provisioning against real Scaleway. Clusters and HA database
         # instances take minutes to create AND minutes to destroy, on

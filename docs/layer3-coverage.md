@@ -1,4 +1,4 @@
-# Layer 3 coverage: which Scaleway scenarios can run against the real API
+# Layer 3 coverage: which Scaleway and AWS scenarios can run against the real API
 
 > **Retraction, 2026-08-30 — read before the IPAM references below.**
 > This document repeatedly names `IPAMFullAccess` as what gates private
@@ -54,7 +54,12 @@ A scenario reaches the real API only if **both** allow it:
    `scaleway_vpc`, `scaleway_vpc_private_network`, `scaleway_lb*`,
    `scaleway_domain*`, `scaleway_iam*`, `scaleway_registry_namespace`,
    `scaleway_instance_ip`, `scaleway_instance_server`,
-   `scaleway_instance_private_nic`, `scaleway_instance_security_group`.
+   `scaleway_instance_private_nic`, `scaleway_instance_security_group`, and
+   for AWS step one (HLD 2026-09-27 § The gate) `aws_vpc`, `aws_subnet`,
+   `aws_internet_gateway`, `aws_route_table`, `aws_route`,
+   `aws_route_table_association`, `aws_security_group`, `aws_instance`,
+   `aws_eip`. Each stack's gate refuses the other cloud's prefix whatever
+   this list says.
 2. **The `infrafactory-layer3` IAM policy** — `ProjectManager`,
    `BlockStorageFullAccess`, `LoadBalancersFullAccess`, `VPCFullAccess`,
    `InstancesFullAccess`. Nothing else (ADR-0023, credential amendments).
@@ -111,6 +116,7 @@ at Layer 1 or Layer 3, and `deploy` is the only route to a real NIC.
 | `lb-paris` | **runnable** | hourly | — (run 2026-08-23) |
 | `lb-serving-paris` | **runnable** | hourly | — (added 2026-08-24; the first `http_probe` against real Scaleway) |
 | `web-live-paris` | runnable, unrun | hourly | nothing known — see "web-live-paris, 2026-09-09" below |
+| `aws-web-live` | runnable, unrun | hourly | **the AWS HCL gate, not yet built**: allowlisted 2026-09-28, but Layer 3 refuses every AWS stack until epic `aws-layer3-gate` lands (`TestTestCommandRefusesANonScalewayCloudAtTheGate`) |
 | `incremental-project-paris` | key only | hourly | private networking (allowlist cleared 2026-08-24; see the retraction at the top) |
 | `registry-paris` | key only | instant | Registry |
 | `iam-policies-paris` | key only | instant | IAM |
@@ -126,7 +132,9 @@ at Layer 1 or Layer 3, and `deploy` is the only route to a real NIC.
 | `web-app-paris` | allowlist + key | slow + expensive | DomainsDNS, IPAM, RDB, VPCGateway |
 | `full-stack-paris` | allowlist + key | slow + expensive | IAM, Kubernetes, RDB, Redis, Registry |
 
-**Current: 3 have run, 1 ungated but unrun, 5 are blocked by the key alone, 9 by both.**
+**Current: 3 have run, 2 ungated but unrun, 5 are blocked by the key alone, 9 by both.**
+`aws-web-live` counts as ungated by the allowlist and the key only; it cannot reach the
+real API until the AWS HCL gate exists (its row).
 As first audited on 2026-08-23 it was 2 runnable, 1 blocked by the allowlist
 alone, 4 by the key alone and 9 by both; `lb-serving-paris` did not exist
 yet, and `incremental-project-paris` has since moved from the allowlist
@@ -137,7 +145,7 @@ one-off `web-unversioned-paris` shape with hand-staged HCL to manufacture a
 healthy-but-unconfirmed-version failure. It was not added to the training corpus --
 it differed from `web-live-paris` by one field and generated identical HCL -- so it
 changes no number here. Recorded because this file is read to decide what to spend
-next, and "18 scenarios, 3 have run" should not be read as "3 applies have
+next, and "19 scenarios, 3 have run" should not be read as "3 applies have
 happened". See `docs/status/s156e-validation-run.md`.
 
 `incremental-project-paris` has swapped blockers rather than lost one.
