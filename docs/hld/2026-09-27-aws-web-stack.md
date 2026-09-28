@@ -108,9 +108,12 @@ shows it. `cloudEnv` sets `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REG
 `AWS_*` variable (`internal/harness/sandbox_deploy.go`, `internal/cli/exec_runner.go`). The AWS
 provider documents that endpoints may come from `AWS_ENDPOINT_URL_<SERVICE>` environment
 variables or the shared config file's `services` section, with the provider block taking
-precedence over both (provider guide "Custom service endpoints", read 2026-09-27); which `5.x`
-minor introduced the environment form is confirmed against the pinned `~> 5.70` binary in the
-first story.
+precedence over both (provider guide "Custom service endpoints", read 2026-09-27). **The
+provider is pinned to exactly `hashicorp/aws 5.100.0`** (the binary `~> 5.70` already resolved
+to), and that binary honours the environment form: fakeaws `examples/working/env_endpoints`
+applies, plans clean and destroys with no endpoints block, and `TestSmokeEnvFailsClosed` shows an
+apply with `AWS_ENDPOINT_URL_EC2` removed fails at a dead proxy instead of reaching AWS
+(fakeaws #25).
 
 **Layer 2 derives nothing for AWS.** `deriveTopologyAWS` returns empty `http_probe` and
 `connectivity` maps (`internal/harness/topology_derive.go:114-124`), so every `http_probe` on an
@@ -459,8 +462,8 @@ layer-neutral provider configuration.
 ## Open questions
 
 All the user's decisions are recorded in Design, including the mock: fakeaws, which we own.
-Story-level: config shape (a sibling `aws:` block and the one allowlist); the `~> 5.70` binary's
-support for `AWS_ENDPOINT_URL_<SERVICE>`; the AWS size table's source; the exact IAM actions,
+Story-level: config shape (a sibling `aws:` block and the one allowlist); the AWS size table's
+source; the exact IAM actions,
 fixed by running apply, destroy, sweep and `reap`; the probe window.
 
 ## Epics
