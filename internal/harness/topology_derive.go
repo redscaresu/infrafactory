@@ -103,26 +103,6 @@ func detectCloud(stateJSON []byte) string {
 	return "scaleway"
 }
 
-// deriveTopologyAWS is the AWS-specific topology emitter. At S43-T9
-// this returns an empty-but-valid topology (IAM + S3 don't
-// contribute to the connectivity/probe graph). Service tickets in
-// S44+ extend this when EC2/RDS/EKS land — that's where load_balancer
-// probes and connectivity entries get populated.
-//
-// Returns (topologyJSON, diagnostics, error). Diagnostics is non-nil
-// (may be empty) for parity with the GCP/Scaleway derivers.
-func deriveTopologyAWS(stateJSON []byte) ([]byte, map[string]string, error) {
-	out := map[string]any{
-		"http_probe":   map[string]any{},
-		"connectivity": map[string]any{},
-	}
-	body, err := json.Marshal(out)
-	if err != nil {
-		return nil, nil, err
-	}
-	return body, map[string]string{}, nil
-}
-
 func deriveTopologyScaleway(stateJSON []byte) ([]byte, map[string]string, error) {
 	var state rawMockState
 	if err := json.Unmarshal(stateJSON, &state); err != nil {
