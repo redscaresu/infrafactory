@@ -1,0 +1,15 @@
+---
+kind: docs
+status: ready
+epic: aws-layer-neutral-hcl
+depends_on: []
+touches: ["docs/decisions/00NN-layer-neutral-aws-generated-hcl.md (new)", "docs/decisions/0014-provider-endpoint-flag-discipline.md", "docs/decisions/README.md", "docs/epics/aws-layer-neutral-hcl.md", "docs/epics/aws-layer3-wiring-proof.md", "docs/epics/aws-layer3-claim-sweep-reap.md", "docs/stories/aws-default-tags-run-id.md (new)", "docs/stories/fakeaws-tags-every-service.md (new)"]
+---
+
+# One ADR records the epic's decisions, and the epics that inherit declined work say so
+
+The only story that edits docs/decisions. It adds a new ADR (next free number): layer-neutral AWS generated HCL. The ADR records these decisions. (1) cloudEnv is Layer 2's complete AWS env: 12 AWS_ENDPOINT_URL_<SVC> vars, a dead-loopback AWS_ENDPOINT_URL catch-all, shared-config paths that do not exist, and every endpoint dead when fakeaws.url is empty. (2) Every Layer 2 tofu command strips inherited AWS_*. (3) The provider block is exactly region and s3_use_path_style; s3_use_path_style is the one attribute with no env form. The region comes from one awsRegion(cfg) at both layers. (4) required_providers pins exactly 5.100.0 at both layers and overrides the model. (5) Without skip_*, AWS Layer 1 and `validate` need fakeaws STS up. (6) infrafactory renders infrafactory-user-data.sh and refuses a model-written one. (7) Layer 2 gets the AMI fixture ami-0al2023x8664; Layer 3 reads SSM through the sealed SDK construction (aws_client.go:28-52), never the default chain. (8) The size table is literal in prompts/aws. (9) default_tags is deferred, with the reason. The ADR also carries the ADR-0014 AWS analog, enumerating what the provider reads: env, shared config `services`, IMDS. ADR-0014 gains a pointer to it; ADR-0013's note lands with aws-web-step-one-e2e. Amendments: docs/epics/aws-layer-neutral-hcl.md Done when, where the plan diverges: bullets 1 (no default_tags), 3 (the CI e2e set and full-stack opt-in), 5 (fixture id; the Layer 3 call site moves), 7 (shared window justified). docs/epics/aws-layer3-wiring-proof.md Done when: its 'AMI resolved' stage calls ResolveAWSAMIFromSSM once per run after preflight, and deploy writes infrafactory-user-data.sh into the workdir, since deploy copies only .tf and .hcl (deploy_command.go:27). docs/epics/aws-layer3-claim-sweep-reap.md Constraints: the run-id tag arrives only with aws-default-tags-run-id. New story files: aws-default-tags-run-id (blocked) and fakeaws-tags-every-service (repo fakeaws; round-trip tags on sqs, iam, rds, route53, dynamodb and eks). Every code story below carries `ADR: none — implements <this ADR>` where it touches a decision path (AGENTS.md:111).
+
+**Done when:**
+- make doc-hygiene passes in CI. It fails if the new ADR is missing from docs/decisions/README.md (scripts/check_doc_hygiene.sh:198) or if a new story names an epic that does not exist (:134-135)
+- The two new story files parse with the story front-matter the hygiene check reads. fakeaws-tags-every-service names repo fakeaws, and aws-default-tags-run-id depends on it

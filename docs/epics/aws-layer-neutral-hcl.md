@@ -1,5 +1,5 @@
 ---
-status: later
+status: active
 hld: 2026-09-27-aws-web-stack
 depends_on: [fakeaws-step-one-surfaces, aws-layer3-seal-and-dispatch]
 ---
