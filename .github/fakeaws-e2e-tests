@@ -2,6 +2,7 @@
 # One per line, sorted: two stories adding a test land on different lines instead of one.
 TestAWSAMIParityAgainstFakeaws
 TestAWSPreflightAgainstFakeaws
+TestAWSReapAgainstFakeaws
 TestAWSScopeClaimAgainstFakeaws
 TestAWSSweepAgainstFakeaws
 TestE2E_AWSAllowlistPlaceable
