@@ -1,0 +1,51 @@
+scenario: aws-web-live
+version: "1.0"
+cloud: aws
+description: >
+  One small EC2 instance running a pinned nginx image, reachable from the
+  internet on port 80 and on nothing else. The AWS counterpart of
+  web-live-paris, step one of the AWS web stack HLD
+  (docs/hld/2026-09-27-aws-web-stack.md): no load balancer yet.
+
+aws_resource_anchors:
+  - aws_vpc
+  - aws_subnet
+  - aws_internet_gateway
+  - aws_route_table
+  - aws_route
+  - aws_route_table_association
+  - aws_security_group
+  - aws_instance
+
+# The application. infrafactory renders the boot script from this block;
+# the model only references it (ADR-0039).
+service:
+  image: nginx
+  tag: "1.27"
+  port: 80
+  health_path: /
+  ttl: 4h
+
+resources:
+  compute:
+    purpose: web-server
+    size: small
+    count: 1
+  networking:
+    vpc: true
+
+acceptance_criteria:
+  - type: policy
+    check: region_restriction
+    params:
+      region: us-east-1
+    expect: pass
+  # Named as a criterion so its deny_state half runs at Layer 2 against
+  # fakeaws's security groups (ADR-0034).
+  - type: policy
+    check: default_deny_ingress
+    expect: pass
+  - type: http_probe
+    target: compute
+    port: 80
+    expect: reachable
