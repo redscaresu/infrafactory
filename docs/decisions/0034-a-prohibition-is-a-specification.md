@@ -220,5 +220,29 @@ the API's PUT, pitfall-merge). It fails CI on a malformed ledger, a stored shape
 differs from its record, and any non-live entry naming a retired attribute with no later
 non-mock `relearned` record.
 
-This does not yet re-run the evidence: a retirement rests on the exits its caller recorded,
-and the shape it stored.
+**The evidence is produced by a replay with no LLM.** `infrafactory pitfalls check-avoid
+<cloud> --resource R --attribute A --from DIR` (`internal/cli/pitfalls_avoid_check.go`) is the
+only caller. It is built with `withRuntimeNoGenerator`, so a generate call errors. Before any
+tofu call it refuses, writing nothing, when: the cloud is not `aws` (the only cloud wired) or
+has no mock URL; the ledger is malformed; the corpus holds no retirable entry; an entry with no
+`learned_layer` has no layer established from its run artifacts; or no `R` block in `DIR` sets
+every attribute, or one sets it to a literal false, null or `""`.
+
+- The shape is every `R` block in `DIR` that sets every attribute, plus the resource blocks
+  those reference (`CutAvoidShape`). It is stored under `shapes/<id>/` before the replay, and
+  the replay applies the stored bytes.
+- A legacy layer is established only when `DIR` is a run's `<scenario>/<run>/iterations/<n>/
+  generated` with `<scenario>` equal to `discovered_from`, every `provider "aws"` endpoint
+  there is on a loopback host, and `../iteration.json` holds an apply failure naming `R` and
+  every attribute (`EstablishLegacyLayer`).
+- The replay is a clean Layer 2 mock deploy over fakeaws's own state client, never the
+  scenario router, which falls back to mockway when no scenario is loaded. Providers come from
+  `ensureAwsProviderWiring` with no run id; the env is `awsLayer2Env` with `Layer2StripEnv`.
+- apply 0 and plan 0 is `contradicted`. A failed apply, a failed plan or a drifting plan whose
+  output names `R` or an attribute is `recurred`; anything else is `inconclusive`. A reset,
+  init or state failure records nothing: the check never answered.
+
+**CI re-runs the evidence.** `TestE2E_RetiredAvoidPitfallsStayContradicted` replays every
+retired record's stored shape against fakeaws at the CI pin, through the same constructor, and
+fails naming the record unless it is still contradicted. A retired record for a cloud with no
+CI mock fails it.

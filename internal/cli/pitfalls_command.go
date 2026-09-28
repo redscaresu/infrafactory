@@ -26,7 +26,7 @@ func newPitfallsCmd(cfg *rootConfig) *cobra.Command {
 	retire.Flags().Duration("older-than", generator.DefaultLiveRetention,
 		"Retire live pitfalls last seen longer ago than this")
 	retire.Flags().Bool("dry-run", false, "Report what would be retired without changing the corpus")
-	cmd.AddCommand(retire)
+	cmd.AddCommand(retire, newPitfallsCheckAvoidCmd(cfg))
 
 	return cmd
 }

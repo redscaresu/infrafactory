@@ -54,6 +54,10 @@ widening any is a blast-radius decision (ADR-0023).
   generated and real-cloud runs from a throwaway worktree, not the lead's working copy, and never
   `git add -A` after one: a learned entry once replaced a curated safety pitfall and nearly merged
   inside an unrelated PR.
+- `infrafactory pitfalls check-avoid aws --resource R --attribute A --from DIR` is the only way a
+  `source: avoid` rule leaves the corpus: it replays the shape cut from `DIR` on fakeaws, with no
+  LLM, and retires the rule only on a clean apply and plan (ADR-0034). It writes
+  `pitfalls/avoid-checks/`; commit exactly what it wrote, from a throwaway worktree.
 - A failed run auto-destroys and then sweeps. If the sweep cannot confirm the account clean, the
   failure names `infrafactory reap <scenario>`; act on it.
 

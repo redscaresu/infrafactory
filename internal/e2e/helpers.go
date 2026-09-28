@@ -242,12 +242,13 @@ func StartFakegcp(t *testing.T) *MockwayInstance {
 // clouds. The returned URL goes into Config.Fakeaws.URL via the
 // helper's config-writer (extended in S43-T9 to include the
 // fakeaws block + 'aws' in policy_paths).
-func StartFakeaws(t *testing.T) *MockwayInstance {
+// Extra args go to fakeaws: `--echo` logs every request's method and path.
+func StartFakeaws(t *testing.T, args ...string) *MockwayInstance {
 	t.Helper()
-	return startSiblingMock(t, "fakeaws", "../fakeaws", "./cmd/fakeaws")
+	return startSiblingMock(t, "fakeaws", "../fakeaws", "./cmd/fakeaws", args...)
 }
 
-func startSiblingMock(t *testing.T, name, repoRel, cmdPath string) *MockwayInstance {
+func startSiblingMock(t *testing.T, name, repoRel, cmdPath string, args ...string) *MockwayInstance {
 	t.Helper()
 
 	port := pickFreePort(t)
@@ -260,7 +261,7 @@ func startSiblingMock(t *testing.T, name, repoRel, cmdPath string) *MockwayInsta
 		t.Fatalf("create %s log file: %v", name, err)
 	}
 
-	cmd := exec.Command("go", "run", cmdPath, "--port", fmt.Sprintf("%d", port), "--db", dbPath)
+	cmd := exec.Command("go", append([]string{"run", cmdPath, "--port", fmt.Sprintf("%d", port), "--db", dbPath}, args...)...)
 	cmd.Dir = repoRoot
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
