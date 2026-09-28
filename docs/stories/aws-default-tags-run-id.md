@@ -1,7 +1,6 @@
 ---
 kind: code
-status: blocked
-blocked_by: [fakeaws-tags-every-service]
+status: ready
 epic: aws-layer-neutral-hcl
 depends_on: [fakeaws-tags-every-service]
 touches: ["internal/cli/generate_command.go", "internal/cli/cloud_parity_test.go", "internal/cli/aws_default_tags_test.go (new)", "prompts/aws/phase2_generate_hcl.md", "docs/decisions/0039-layer-neutral-aws-generated-hcl.md", "docs/stories/aws-default-tags-run-id.md (delete)"]
