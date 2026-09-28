@@ -16,6 +16,30 @@ import (
 // renders no line.
 func TestPhase2PromptCarriesUserDataLineOnlyWhenSet(t *testing.T) {
 	root := findRepoRoot(t)
+	awsInstance, err := os.ReadFile(filepath.Join(root, "scenarios", "training", "aws-instance.yaml"))
+	require.NoError(t, err)
+
+	for name, render := range phase2Renderers(t, root) {
+		t.Run(name, func(t *testing.T) {
+			noService := Request{Cloud: "aws", ScenarioYAML: awsInstance}
+			prompt, err := render(noService)
+			require.NoError(t, err)
+			assert.NotContains(t, prompt, AWSUserDataLine)
+			assert.NotContains(t, prompt, AWSUserDataFile)
+
+			withService := noService
+			withService.UserDataLine = AWSUserDataLine
+			prompt, err = render(withService)
+			require.NoError(t, err)
+			assert.Contains(t, prompt, AWSUserDataLine)
+		})
+	}
+}
+
+// phase2Renderers renders phase 2 through each adapter: each builds its own
+// PromptContext, so a field one of them forgets to copy renders nothing.
+func phase2Renderers(t *testing.T, root string) map[string]func(Request) (string, error) {
+	t.Helper()
 	promptsDir := filepath.Join(root, "prompts")
 	pitfallsDir := filepath.Join(root, "pitfalls")
 	phases := []string{PhaseGenerateHCL}
@@ -30,30 +54,12 @@ func TestPhase2PromptCarriesUserDataLineOnlyWhenSet(t *testing.T) {
 	}, nil)
 	require.NoError(t, err)
 
-	awsInstance, err := os.ReadFile(filepath.Join(root, "scenarios", "training", "aws-instance.yaml"))
-	require.NoError(t, err)
-
-	renderers := map[string]func(Request) (string, error){
+	return map[string]func(Request) (string, error){
 		"claude": func(req Request) (string, error) {
 			return claude.renderPhasePrompt(PhaseGenerateHCL, req, nil, nil, "")
 		},
 		"openrouter": func(req Request) (string, error) {
 			return openRouter.renderPhasePrompt(PhaseGenerateHCL, req, nil, nil, "")
 		},
-	}
-	for name, render := range renderers {
-		t.Run(name, func(t *testing.T) {
-			noService := Request{Cloud: "aws", ScenarioYAML: awsInstance}
-			prompt, err := render(noService)
-			require.NoError(t, err)
-			assert.NotContains(t, prompt, AWSUserDataLine)
-			assert.NotContains(t, prompt, AWSUserDataFile)
-
-			withService := noService
-			withService.UserDataLine = AWSUserDataLine
-			prompt, err = render(withService)
-			require.NoError(t, err)
-			assert.Contains(t, prompt, AWSUserDataLine)
-		})
 	}
 }
