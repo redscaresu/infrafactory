@@ -17,7 +17,7 @@ depends_on: [aws-layer3-seal-and-dispatch]
 
 **Out of scope:** The seams and the sealed environment (aws-layer3-seal-and-dispatch); the IAM action list; generated HCL, the gate, the scenario; scope-per-run; role assumption via STS; account creation or closure from code; tags as a gate.
 
-**Constraints:** ADR-0023 rules 3 and 4 for AWS, fail-closed (Risks: real money, third cloud's guards). ADR-0025's ordering lesson. Least privilege: the credential is an IAM user inside the account. Serial runs. Tags report, never gate. €5 cap; never merge red; make doc-hygiene before push; AGENTS.md:158 read operations.md § Layer 3 first. Claim and sweep tests use fake doers; fakeaws SSM is used only by aws-layer3-wiring-proof and the AMI resolver.
+**Constraints:** ADR-0023 rules 3 and 4 for AWS, fail-closed (Risks: real money, third cloud's guards). ADR-0025's ordering lesson. Least privilege: the credential is an IAM user inside the account. Serial runs. Tags report, never gate; the run-id tag itself arrives only with aws-default-tags-run-id (blocked on fakeaws-tags-every-service, ADR-0039 decision 9) — until then this epic's sweep and reap identify resources by the collection list, not by tag. €5 cap; never merge red; make doc-hygiene before push; AGENTS.md:158 read operations.md § Layer 3 first. Claim and sweep tests use fake doers; fakeaws SSM is used only by aws-layer3-wiring-proof and the AMI resolver.
 
 **Built by:** the lead (real account or real cloud) — not for swarm builders. NOT for swarm builders as an epic: hand setup and the planted-leak proof are the user's. The Go stories (claim, sweep, reap, failure/interrupt branches) are fake-doer-tested and may be pre-built under the lead once aws-layer3-seal-and-dispatch has landed the seams.
 
