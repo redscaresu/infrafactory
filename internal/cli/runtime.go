@@ -5,11 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/redscaresu/infrafactory/internal/config"
 	"github.com/redscaresu/infrafactory/internal/generator"
 	"github.com/redscaresu/infrafactory/internal/harness"
@@ -122,6 +124,10 @@ type RuntimeDependencies struct {
 	MockStop       MockStopper
 	MockStatus     MockStatuser
 	MockLogs       MockLogger
+
+	// AWSSTS carries the AWS Layer 3 preflight's sts:GetCallerIdentity.
+	// Only the transport is injectable: the endpoint is always real STS.
+	AWSSTS sts.HTTPClient
 }
 
 type CommandRuntime struct {
@@ -451,6 +457,9 @@ func buildRuntime(cmd *cobra.Command, opts runtimeOptions) (*CommandRuntime, err
 			Retries:    cfg.Validation.RealProbes.Retries,
 			RetryDelay: time.Duration(cfg.Validation.RealProbes.RetryDelaySeconds) * time.Second,
 		})
+	}
+	if deps.AWSSTS == nil {
+		deps.AWSSTS = &http.Client{Timeout: awsSTSTimeout}
 	}
 	if deps.MockStart == nil {
 		deps.MockStart = &dockerMockStarter{}
