@@ -1,0 +1,15 @@
+scenario: aws-layer2-env-vpc-subnet
+version: "1.0"
+cloud: aws
+description: >
+  A VPC and a subnet, applied, converged and destroyed on fakeaws by
+  TestE2E_AWSLayer2IgnoresShellAWS with the shell's AWS_* planted.
+resources:
+  networking:
+    vpc: true
+acceptance_criteria:
+  - type: policy
+    check: region_restriction
+    params:
+      region: us-east-1
+    expect: pass

@@ -1,9 +1,14 @@
 package cli
 
 import (
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/redscaresu/infrafactory/internal/config"
 	"github.com/redscaresu/infrafactory/internal/harness"
@@ -31,7 +36,8 @@ func TestCloudEnvCoversAllThreeClouds(t *testing.T) {
 	required := map[string][]string{
 		"scaleway": {"SCW_API_URL", "SCW_ACCESS_KEY", "SCW_SECRET_KEY", "SCW_DEFAULT_PROJECT_ID"},
 		"gcp":      {"GOOGLE_OAUTH_ACCESS_TOKEN", "GOOGLE_PROJECT"},
-		"aws":      {"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_REGION"},
+		"aws": append([]string{"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_REGION",
+			"AWS_EC2_METADATA_DISABLED", "AWS_CONFIG_FILE", "AWS_SHARED_CREDENTIALS_FILE"}, layer2AWSEndpointKeys...),
 	}
 
 	for cloud, keys := range required {
@@ -212,4 +218,26 @@ func TestLayer2AndLayer3ScalewayEnvsAreInverses(t *testing.T) {
 	if !slices.Contains(harness.SandboxStripEnv, "SCW_API_URL") {
 		t.Fatal("Layer 3 must strip an inherited SCW_API_URL; omitting it from the override map is not enough")
 	}
+}
+
+// The AWS form of the invariant above: Layer 2 names an endpoint for
+// every service, Layer 3 names none and strips any it inherits, so the
+// provider falls through to real AWS only at Layer 3.
+func TestLayer2AndLayer3AWSEnvsAreInverses(t *testing.T) {
+	t.Parallel()
+
+	layer2 := cloudEnv(&CommandRuntime{Config: config.Config{Fakeaws: config.FakeawsConfig{URL: "http://127.0.0.1:8082"}}})
+	for _, key := range layer2AWSEndpointKeys {
+		assert.NotEmpty(t, layer2[key], "Layer 2 must set %s", key)
+	}
+
+	credFile := filepath.Join(t.TempDir(), "layer3-aws.env")
+	require.NoError(t, os.WriteFile(credFile, []byte("AWS_ACCESS_KEY_ID=AKIAFROMTHEFILE00001\nAWS_SECRET_ACCESS_KEY=s\n"), 0o600))
+	layer3, err := harness.AWSSealedEnv(credFile, "eu-west-2")
+	require.NoError(t, err)
+	for key := range layer3 {
+		assert.False(t, strings.HasPrefix(key, "AWS_ENDPOINT_URL"), "Layer 3 must not set %s", key)
+	}
+
+	assert.Contains(t, harness.SandboxStripEnv, "AWS_*", "Layer 3 must strip an inherited AWS_ENDPOINT_URL*")
 }

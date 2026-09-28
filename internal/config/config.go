@@ -132,10 +132,11 @@ type ScalewayConfig struct {
 	FallbackProjectID string `yaml:"fallback_project_id"`
 }
 
-// AWSConfig is the real AWS account a Layer 3 run may act on; Layer 2
-// uses Fakeaws and never reads it. The values are the operator's, from
-// the account's hand setup, so there are no defaults: the Layer 3
-// preflight refuses any empty value or a malformed region, and refuses
+// AWSConfig is the real AWS account a Layer 3 run may act on. Layer 2
+// uses Fakeaws and reads only Region, for AWS_REGION and fakeaws's
+// regional paths, taking us-east-1 when it is empty. The values are the
+// operator's, from the account's hand setup, so there are no defaults:
+// the Layer 3 preflight refuses any empty value or a malformed region, and refuses
 // unless sts:GetCallerIdentity answers exactly AccountID and
 // PrincipalARN for the key in layer3-aws.env.
 type AWSConfig struct {

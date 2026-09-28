@@ -40,8 +40,8 @@ func TestAWSSealedEnvHasExactlyTheSixKeys(t *testing.T) {
 		"AWS_SECRET_ACCESS_KEY":       testAWSSecret,
 		"AWS_REGION":                  "eu-west-2",
 		"AWS_EC2_METADATA_DISABLED":   "true",
-		"AWS_SHARED_CREDENTIALS_FILE": awsSealedSharedCredentialsFile,
-		"AWS_CONFIG_FILE":             awsSealedConfigFile,
+		"AWS_SHARED_CREDENTIALS_FILE": AWSSealedSharedCredentialsFile,
+		"AWS_CONFIG_FILE":             AWSSealedConfigFile,
 	}, env)
 
 	// The file paths only seal ~/.aws if nothing can ever exist there.
@@ -63,7 +63,7 @@ func TestAWSSealedEnvIgnoresTheProcessEnv(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, testAWSKeyID, env["AWS_ACCESS_KEY_ID"])
 	assert.Equal(t, "eu-west-2", env["AWS_REGION"])
-	assert.Equal(t, awsSealedConfigFile, env["AWS_CONFIG_FILE"])
+	assert.Equal(t, AWSSealedConfigFile, env["AWS_CONFIG_FILE"])
 }
 
 func TestAWSSealedEnvRefuses(t *testing.T) {
