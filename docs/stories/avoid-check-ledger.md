@@ -1,7 +1,6 @@
 ---
 kind: code
-status: blocked
-blocked_by: [avoid-learned-layer]
+status: ready
 epic: avoid-pitfall-retirement
 depends_on: [avoid-learned-layer]
 touches: ["internal/generator/pitfalls_avoid_retire.go", "internal/generator/pitfalls_avoid_retire_test.go", "internal/generator/pitfalls_avoid_ledger_ratchet_test.go", "internal/generator/pitfalls_learn.go", "internal/generator/pitfalls_learn_test.go", "docs/decisions/0034-a-prohibition-is-a-specification.md", "docs/decisions/README.md"]
