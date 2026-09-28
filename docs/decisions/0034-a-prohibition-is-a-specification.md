@@ -106,6 +106,35 @@ configuration declaring no security group at all leaves its server on the API de
 passes. That gap is named in the rego, asserted by a test, and stated here rather than
 left to be discovered.
 
+### 6. On AWS the prohibition is on openings, in every shape that makes one
+
+An AWS security group has no inbound default to set: it admits exactly what its rules say. So
+`policies/aws/default_deny_ingress.rego` prohibits openings. No rule from a public source may
+admit all traffic (protocol `-1` or `all`), ports 0-0, or tcp covering 22 (0-65535 included),
+and no rule may name a prefix list, on any port, because its CIDRs are not in the
+configuration. Public means outside 10/8, 172.16/12, 192.168/16 and fc00::/7, so `::/0`, the
+two halves of `0.0.0.0/0` and a public /32 all count. A security-group reference is not a
+source.
+
+Four shapes open ingress: inline `ingress` on `aws_security_group` and on
+`aws_default_security_group`, `aws_security_group_rule` with `type = "ingress"`, and
+`aws_vpc_security_group_ingress_rule`. A walk that misses one fails open on it, so the policy
+walks all four, over `resource_changes`, which is flat across modules, so a group at any
+module depth is walked. The Layer 3 allowlist cannot close a shape for it: the allowlist binds
+only when Layer 3 is enabled, and this policy runs on every AWS plan.
+
+Unknowns fail closed. An unknown source counts as public, and an unknown protocol or port as
+admitting 22. hashicorp/aws 5.100.0 plans an unknown inside an inline rule, a dynamic block
+included, as that one rule's unknown fields. Only an `ingress` list that is unknown as a whole
+plans as a single unknown value, and so does a group that declares no `ingress`. For those
+the configuration decides, and anything but a found block with no `ingress` expression is
+denied.
+
+`deny_state` reads `ec2.security_groups[].ip_permissions` in fakeaws's state, where every
+shape is folded into its group. As in section 4, it reads the Layer 2 mock's state and never
+real state (pinned for AWS too by `internal/cli/state_policy_mock_only_test.go`). A group with
+no `ip_permissions` field is denied rather than read as a group with no rules.
+
 ## Consequences
 
 **ADR-0033's "not the rego" bullet stays true.** It says a static check cannot see a

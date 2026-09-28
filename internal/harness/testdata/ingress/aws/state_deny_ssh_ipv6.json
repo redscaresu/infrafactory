@@ -1,0 +1,56 @@
+{
+  "ec2": {
+    "security_groups": [
+      {
+        "arn": "arn:aws:ec2:us-east-1:000000000000:security-group/sg-979cc6f76a89439b",
+        "description": "Managed by Terraform",
+        "group_name": "web",
+        "id": "sg-979cc6f76a89439b",
+        "ip_permissions": [
+          {
+            "from_port": 22,
+            "ip_protocol": "tcp",
+            "ip_ranges": [],
+            "ipv6_ranges": [
+              {
+                "cidr_ipv6": "::/0",
+                "description": ""
+              }
+            ],
+            "prefix_list_ids": [],
+            "to_port": 22,
+            "user_id_group_pairs": []
+          }
+        ],
+        "ip_permissions_egress": [
+          {
+            "from_port": 0,
+            "ip_protocol": "-1",
+            "ip_ranges": [
+              {
+                "cidr_ip": "0.0.0.0/0",
+                "description": ""
+              }
+            ],
+            "ipv6_ranges": [],
+            "prefix_list_ids": [],
+            "to_port": 0,
+            "user_id_group_pairs": []
+          }
+        ],
+        "region": "us-east-1",
+        "vpc_id": "vpc-99e42e4377b03472"
+      },
+      {
+        "arn": "arn:aws:ec2:us-east-1:000000000000:security-group/sg-d1dbf16cf4cbea03",
+        "description": "Managed by Terraform",
+        "group_name": "peer",
+        "id": "sg-d1dbf16cf4cbea03",
+        "ip_permissions": [],
+        "ip_permissions_egress": [],
+        "region": "us-east-1",
+        "vpc_id": "vpc-99e42e4377b03472"
+      }
+    ]
+  }
+}

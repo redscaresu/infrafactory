@@ -1534,6 +1534,9 @@ var cloudConstraintPolicies = map[string]map[string]string{
 		"vpc_required":        "aws/vpc_required.rego",
 		"region_restriction":  "aws/region_restriction.rego",
 		"region":              "aws/region_restriction.rego",
+		// Without it, AWS falls back to the flat map's Scaleway policy,
+		// which reads no AWS state and passes vacuously.
+		"default_deny_ingress": "aws/default_deny_ingress.rego",
 	},
 	// S118: genesys policy checks for the 5 genesys training scenarios.
 	// Three policies cover the CCaaS surface — region restriction
