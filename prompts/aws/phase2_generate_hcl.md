@@ -28,6 +28,18 @@ Every failure this run has produced so far, from every earlier iteration; `stage
 ```
 {{end}}
 
+{{if .UserDataLine}}
+## Service Boot Script
+
+infrafactory writes the instance's boot script into the module directory itself: it installs Docker and runs this scenario's service. On the `aws_instance` that runs the service, write exactly this line:
+
+```hcl
+{{.UserDataLine}}
+```
+
+Write nothing else that starts a server: no inline script, no `user_data_base64`, no provisioner, no `local_file`. Do not output a file with that script's name; generation refuses one.
+{{end}}
+
 ## Instructions
 
 1. Generate complete, runnable Terraform/OpenTofu HCL for the planned architecture.

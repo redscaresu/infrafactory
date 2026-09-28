@@ -174,6 +174,7 @@ func (g *OpenRouterSeedGenerator) renderPhasePrompt(phase string, req Request, o
 		ProviderSchema:     filteredSchema,
 		Layer3Guidance:     layer3Guidance(req.Layer3Enabled),
 		Pitfalls:           pitfalls,
+		UserDataLine:       req.UserDataLine,
 	}
 	return RenderPromptFile(phase, templatePath, ctx)
 }
