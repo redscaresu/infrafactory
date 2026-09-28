@@ -75,7 +75,12 @@ satisfy a check, so no generated HCL could satisfy both.
 
 `policies/scaleway/default_deny_ingress.rego` denies any
 `scaleway_instance_security_group` that does not set `inbound_default_policy = "drop"`,
-with both halves — `deny` against the plan and `deny_state` against deployed state.
+with both halves — `deny` against the plan and `deny_state` against the Layer 2 mock's state.
+
+`deny_state` reads the Layer 2 mock's state on every run, including one that also applied at
+Layer 3: criteria evaluation is handed the mock deploy's snapshot, and no policy is evaluated
+against what Layer 3 created (pinned by `internal/cli/state_policy_mock_only_test.go`). The
+holdout is the only real-state check of this property.
 
 This rule exists because the obvious fix does not work. A group declaring only a name
 applies with inbound AND outbound `accept`: indistinguishable in effect from having no

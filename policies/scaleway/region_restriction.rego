@@ -27,13 +27,12 @@ deny contains msg if {
 	)
 }
 
-# Layer 2: the same question, asked of what the provider actually
-# created.
+# Layer 2: the same question, asked of the Layer 2 mock's state.
 #
 # The plan rules above read the CONFIG's declared region. These read
-# the deployed state, which is a different claim: a provider can accept
-# `region = fr-par` and create somewhere else, and only the second
-# reading would notice.
+# the region and zone the mock recorded at apply -- the mock's record,
+# never a cloud's, even on a run that also applied to a sandbox (ADR-0034
+# section 4).
 #
 # This rule could not be written until the state evaluator passed the
 # criterion's `params` through. Before that `input.params.region` was

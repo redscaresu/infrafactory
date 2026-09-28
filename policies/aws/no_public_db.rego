@@ -13,7 +13,8 @@ deny contains msg if {
 	msg := sprintf("%s has publicly_accessible = true — RDS instances MUST NOT have public IP addresses", [resource.address])
 }
 
-# Layer 2 — fakeaws state surface. RDS instance settings live under
+# Layer 2 — reads the Layer 2 mock's state (fakeaws), never a cloud's
+# (ADR-0034 section 4). RDS instance settings live under
 # state.rds.instances[].publicly_accessible.
 deny_state contains msg if {
 	inst := input.rds.instances[_]
