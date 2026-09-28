@@ -1,14 +1,18 @@
 package cli
 
 import (
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/hashicorp/hcl/v2"
+	"github.com/hashicorp/hcl/v2/hclsyntax"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/zclconf/go-cty/cty"
 
 	"github.com/redscaresu/infrafactory/internal/config"
 	"github.com/redscaresu/infrafactory/internal/harness"
@@ -99,46 +103,49 @@ func TestEnsureProviderWiringCoverageIsSymmetric(t *testing.T) {
 	}
 }
 
-// TestEnsureAwsProviderWiringInjectsEndpoints asserts the AWS
-// counterpart of the historically-untested GCP+Scaleway injection
-// path: when AWS resources are present AND cfg.Fakeaws.URL is set,
-// the injected provider block contains skip_credentials_validation
-// = true AND an endpoints { } block. Without those, the
-// terraform-provider-aws SDK escapes to real AWS STS — the failure
-// mode this whole parity slice was built to prevent.
-func TestEnsureAwsProviderWiringInjectsEndpoints(t *testing.T) {
+// TestEnsureAwsProviderWiringWritesOnlyRegionAndPathStyle is the inverse
+// of the endpoints block this wiring used to inject: with fakeaws and S3
+// both configured, the one provider "aws" block left is region and
+// s3_use_path_style, with no endpoints, skip_*, keys or alias. Endpoints
+// come from cloudEnv at Layer 2 and from nowhere at Layer 3 (ADR-0039).
+func TestEnsureAwsProviderWiringWritesOnlyRegionAndPathStyle(t *testing.T) {
 	t.Parallel()
 	cfg := config.Config{
 		Fakeaws: config.FakeawsConfig{URL: "http://127.0.0.1:8082"},
 		S3:      config.S3Config{URL: "http://127.0.0.1:9090"},
+		AWS:     config.AWSConfig{Region: "eu-west-2"},
 	}
 	files := map[string][]byte{
-		"main.tf": []byte(`resource "aws_sqs_queue" "jobs" { name = "jobs" }`),
+		"main.tf":      []byte(`resource "aws_sqs_queue" "jobs" { name = "jobs" }` + "\n"),
+		"providers.tf": []byte(modelAWSProviderTF),
 	}
+
 	ensureAwsProviderWiring(files, cfg)
 
-	providers, ok := files["providers.tf"]
-	if !ok {
-		t.Fatal("ensureAwsProviderWiring did not produce providers.tf when an aws resource is present")
-	}
-	body := string(providers)
-	for _, must := range []string{
-		`provider "aws"`,
-		`skip_credentials_validation = true`,
-		`skip_metadata_api_check     = true`,
-		`skip_requesting_account_id  = true`,
-		`endpoints {`,
-		`http://127.0.0.1:8082/iam`,
-		`http://127.0.0.1:9090`, // S3 endpoint
-	} {
-		if !strings.Contains(body, must) {
-			t.Errorf("injected providers.tf missing required substring %q\nfull body:\n%s", must, body)
+	var blocks []*hclsyntax.Block
+	for name, content := range files {
+		file, diags := hclsyntax.ParseConfig(content, name, hcl.InitialPos)
+		require.False(t, diags.HasErrors(), "%s: %s\n%s", name, diags, content)
+		for _, block := range file.Body.(*hclsyntax.Body).Blocks {
+			if block.Type == "provider" && slices.Equal(block.Labels, []string{"aws"}) {
+				blocks = append(blocks, block)
+			}
 		}
 	}
+	require.Len(t, blocks, 1, "the wiring's block must be the only provider \"aws\" block")
+	body := blocks[0].Body
+	assert.Empty(t, body.Blocks, "no nested block: no endpoints, no default_tags")
+	assert.ElementsMatch(t, []string{"region", "s3_use_path_style"}, slices.Collect(maps.Keys(body.Attributes)))
+	region, diags := body.Attributes["region"].Expr.Value(nil)
+	require.False(t, diags.HasErrors())
+	assert.Equal(t, cty.StringVal("eu-west-2"), region)
+	pathStyle, diags := body.Attributes["s3_use_path_style"].Expr.Value(nil)
+	require.False(t, diags.HasErrors())
+	assert.Equal(t, cty.True, pathStyle)
 }
 
-// TestEnsureGoogleProviderWiringInjectsCustomEndpoints — the GCP
-// counterpart to TestEnsureAwsProviderWiringInjectsEndpoints. The
+// TestEnsureGoogleProviderWiringInjectsCustomEndpoints: unlike AWS,
+// terraform-provider-google takes its endpoints from the block. The
 // bare `provider "google" {}` injection that lived in this file
 // before the parity work was insufficient (no *_custom_endpoint
 // overrides means every API call escaped to api.googleapis.com).

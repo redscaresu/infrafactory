@@ -10,8 +10,13 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/hashicorp/hcl/v2"
+	"github.com/hashicorp/hcl/v2/hclwrite"
+	"github.com/zclconf/go-cty/cty"
+
 	"github.com/redscaresu/infrafactory/internal/config"
 	"github.com/redscaresu/infrafactory/internal/generator"
+	"github.com/redscaresu/infrafactory/internal/harness"
 	"github.com/redscaresu/infrafactory/internal/scenario"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
@@ -326,65 +331,73 @@ func validateGoogleProviderWiring(files map[string][]byte) error {
 	return nil
 }
 
-// ensureAwsProviderWiring is the AWS counterpart to
-// ensureScalewayProviderWiring / ensureGoogleProviderWiring.
-//
-// Unlike Scaleway (which gets its endpoint via SCW_API_URL env var),
-// terraform-provider-aws reads endpoint URLs from the
-// `provider "aws" { endpoints { ... } }` block. The block is also
-// where we set skip_credentials_validation / skip_metadata_api_check
-// / skip_requesting_account_id so the SDK doesn't try to call real
-// AWS STS GetCallerIdentity (which would 403 against fakeaws). Same
-// pattern internal/e2e/aws_full_stack_test.go::awsProviderTF uses
-// for hand-rolled HCL.
-//
-// Endpoint URLs come from cfg.Fakeaws.URL (per-service path prefixes
-// match fakeaws's chi router from cmd/fakeaws/main.go); S3 goes to
-// cfg.S3.URL (the SeaweedFS gateway, M59).
+// ensureAwsProviderWiring writes the AWS provider config itself, the same
+// bytes at every layer (ADR-0039): every provider "aws" block the model
+// wrote is replaced by buildAwsProviderBlock's, and required_providers aws
+// is pinned to exactly harness.AWSProviderVersion. Endpoints reach the
+// provider through the environment (cloudEnv), never the HCL, so neither
+// fakeaws.url, s3.url nor sandbox_deploy changes a byte; aws.region
+// changes the region literal.
 func ensureAwsProviderWiring(files map[string][]byte, cfg config.Config) {
-	hasAwsResource, hasRequiredProviders, hasProviderBlock := detectAwsProviderWiring(files)
-	if !hasAwsResource {
+	if hasAwsResource, _, _ := detectAwsProviderWiring(files); !hasAwsResource {
 		return
 	}
-
-	// If fakeaws is configured, ALWAYS rewrite the provider "aws" {}
-	// block to point at it — the LLM frequently emits a partial provider
-	// block (e.g. missing endpoints, missing skip_credentials_validation)
-	// that lets the provider escape to real AWS STS. Stripping +
-	// re-injecting is the only reliable way to keep apply hermetic.
-	// For required_providers, we only add when missing (the LLM-emitted
-	// version is usually correct).
-	if hasProviderBlock && strings.TrimSpace(cfg.Fakeaws.URL) != "" {
-		stripAwsProviderBlock(files)
-		hasProviderBlock = false
-	}
-
-	missingRequiredProviders := !hasRequiredProviders
-	missingProviderBlock := !hasProviderBlock
-	if !missingRequiredProviders && !missingProviderBlock {
-		return
-	}
-
-	sections := make([]string, 0, 2)
-	if missingRequiredProviders {
-		sections = append(sections, `terraform {
+	stripAwsProviderBlock(files)
+	injected := buildAwsProviderBlock(awsRegion(cfg.AWS))
+	if !pinAwsRequiredProvider(files) {
+		injected = `terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 5.70"
+      version = "` + harness.AWSProviderVersion + `"
     }
   }
-}`)
+}
+
+` + injected
 	}
-	if missingProviderBlock {
-		sections = append(sections, buildAwsProviderBlock(cfg.Fakeaws.URL, cfg.S3.URL))
-	}
-	injected := strings.Join(sections, "\n\n")
-	if existing, ok := files["providers.tf"]; ok && strings.TrimSpace(string(existing)) != "" {
-		files["providers.tf"] = []byte(strings.TrimSpace(string(existing)) + "\n\n" + injected + "\n")
-		return
+	if existing := strings.TrimSpace(string(files["providers.tf"])); existing != "" {
+		injected = existing + "\n\n" + injected
 	}
 	files["providers.tf"] = []byte(injected + "\n")
+}
+
+// pinAwsRequiredProvider sets every required_providers aws entry to
+// exactly source hashicorp/aws and version harness.AWSProviderVersion,
+// whatever the model wrote, leaving sibling providers alone. It reports
+// whether any file declared one.
+func pinAwsRequiredProvider(files map[string][]byte) bool {
+	pin := cty.ObjectVal(map[string]cty.Value{
+		"source":  cty.StringVal("hashicorp/aws"),
+		"version": cty.StringVal(harness.AWSProviderVersion),
+	})
+	pinned := false
+	for name, content := range files {
+		if !strings.HasSuffix(name, ".tf") {
+			continue
+		}
+		file, diags := hclwrite.ParseConfig(content, name, hcl.InitialPos)
+		if diags.HasErrors() {
+			continue
+		}
+		changed := false
+		for _, terraform := range file.Body().Blocks() {
+			if terraform.Type() != "terraform" {
+				continue
+			}
+			for _, required := range terraform.Body().Blocks() {
+				if required.Type() == "required_providers" && required.Body().GetAttribute("aws") != nil {
+					required.Body().SetAttributeValue("aws", pin)
+					changed = true
+				}
+			}
+		}
+		if changed {
+			files[name] = hclwrite.Format(file.Bytes())
+			pinned = true
+		}
+	}
+	return pinned
 }
 
 // stripAwsProviderBlock removes any `provider "aws" { ... }` blocks
@@ -520,44 +533,15 @@ func stripProviderBlock(files map[string][]byte, providerName string) {
 	}
 }
 
-// buildAwsProviderBlock emits the `provider "aws" {}` block with the
-// test-mode flags + endpoints map that point at fakeaws (and
-// optionally SeaweedFS for S3, M59). When fakeawsURL is empty the
-// block falls back to a bare `provider "aws" { region = "us-east-1" }`
-// so the file parses; the apply will fail at validate when the
-// provider can't auth.
-func buildAwsProviderBlock(fakeawsURL, s3URL string) string {
-	fakeawsURL = strings.TrimRight(fakeawsURL, "/")
-	if fakeawsURL == "" {
-		return `provider "aws" {
-  region = "us-east-1"
-}`
-	}
-	s3Endpoint := strings.TrimRight(s3URL, "/")
-	if s3Endpoint == "" {
-		s3Endpoint = fakeawsURL + "/s3"
-	}
+// buildAwsProviderBlock is the whole AWS provider block, at both layers
+// (ADR-0039 decision 3). s3_use_path_style is the one setting with no
+// environment form; everything else, endpoints and credentials included,
+// comes from the environment.
+func buildAwsProviderBlock(region string) string {
 	return fmt.Sprintf(`provider "aws" {
-  region                      = "us-east-1"
-  access_key                  = "test"
-  secret_key                  = "test"
-  skip_credentials_validation = true
-  skip_metadata_api_check     = true
-  skip_requesting_account_id  = true
-  s3_use_path_style           = true
-  endpoints {
-    iam            = "%[1]s/iam"
-    ec2            = "%[1]s/ec2/region/us-east-1"
-    eks            = "%[1]s/eks/region/us-east-1"
-    rds            = "%[1]s/rds/region/us-east-1"
-    sqs            = "%[1]s/sqs/region/us-east-1"
-    dynamodb       = "%[1]s/dynamodb/region/us-east-1"
-    secretsmanager = "%[1]s/secretsmanager/region/us-east-1"
-    kms            = "%[1]s/kms/region/us-east-1"
-    route53        = "%[1]s/route53"
-    s3             = "%[2]s"
-  }
-}`, fakeawsURL, s3Endpoint)
+  region            = %q
+  s3_use_path_style = true
+}`, region)
 }
 
 func validateAwsProviderWiring(files map[string][]byte) error {

@@ -156,7 +156,7 @@ Each cloud has the same set of extension points; the scenario's `cloud:` field d
 | Extension point | AWS | GCP | Scaleway | Genesys Cloud |
 |---|---|---|---|---|
 | Mock server | [`fakeaws`](https://github.com/redscaresu/fakeaws) (`:8082`) + [SeaweedFS](https://github.com/seaweedfs/seaweedfs) for S3 (`:9090`) | [`fakegcp`](https://github.com/redscaresu/fakegcp) (`:8081`) | [`mockway`](https://github.com/redscaresu/mockway) (`:8080`) | [`fakegenesys`](https://github.com/redscaresu/fakegenesys) (`:8083`) |
-| Provider pin | `hashicorp/aws ~> 5.70` | `hashicorp/google >= 5.0` (v5 for IAM SA) | `scaleway/scaleway >= 2.50` | `mypurecloud/genesyscloud ~> 1.55` |
+| Provider pin | `hashicorp/aws 5.100.0` (exact; infrafactory writes the provider config) | `hashicorp/google >= 5.0` (v5 for IAM SA) | `scaleway/scaleway >= 2.50` | `mypurecloud/genesyscloud ~> 1.55` |
 | Prompts | `prompts/aws/` | `prompts/gcp/` | `prompts/scaleway/` | `prompts/genesys/` |
 | Pitfalls | `pitfalls/aws.yaml` | `pitfalls/gcp.yaml` | `pitfalls/scaleway.yaml` | `pitfalls/genesys.yaml` |
 | OPA policies | `policies/aws/` | `policies/gcp/` | `policies/scaleway/` | `policies/genesys/` |
@@ -236,11 +236,11 @@ only one of the four clouds where that holds:
 |---|---|---|
 | **Scaleway** | `SCW_API_URL`, honoured natively by the provider | **yes** |
 | GCP | per-service `*_custom_endpoint` attributes injected **into the HCL** | no |
-| AWS | an `endpoints { … }` block injected **into the provider block** | no |
+| AWS | `AWS_ENDPOINT_URL_<SERVICE>`, honoured natively by the provider | yes, but Layer 3 is not wired for AWS yet |
 | Genesys | provider hardcodes `login.<region>.pure.cloud`; needs a TLS MITM proxy | no |
 
-For GCP and AWS the endpoint is part of the configuration, so the stack that
-passed against the mock is not the stack you would apply for real.
+For GCP the endpoint is part of the configuration, so the stack that passed
+against the mock is not the stack you would apply for real.
 
 There is a second reason, and it governs cost rather than correctness.
 Scaleway has `scaleway_account_project` — a first-class API object that

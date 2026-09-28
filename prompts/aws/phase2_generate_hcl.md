@@ -43,35 +43,18 @@ Write nothing else that starts a server: no inline script, no `user_data_base64`
 ## Instructions
 
 1. Generate complete, runnable Terraform/OpenTofu HCL for the planned architecture.
-2. Use `terraform { required_providers { aws = { source = "hashicorp/aws", version = "~> 5.70" } } }`.
+2. Do not write the provider config: no `required_providers` entry for aws and no `provider "aws"` block. infrafactory writes both into `providers.tf` — `hashicorp/aws` pinned to exactly `5.100.0`, and the run's region — and replaces any you write.
 3. **Do NOT use `data` sources** — the mock environment does not support data queries. Use literal values from the architecture plan.
 4. Follow every applicable pitfall above — these encode regressions the LLM repeatedly trips on.
 5. Use account-synthetic, run-scoped names for globally-unique resources (S3 buckets); use predictable names for VPC-scoped resources.
-6. Organise files logically (e.g., `main.tf`, `network.tf`, `iam.tf`, `outputs.tf`, `variables.tf`, `providers.tf`).
-7. Include a `providers.tf` with the `terraform { required_providers { aws = ... } }` block plus a `provider "aws" { region = "..." }` block.
-8. Include a `variables.tf` with any configurable values. Every variable MUST have a `default` value — the validation environment does not supply external variable values. Variables without defaults cause `tofu plan` to fail.
-9. Include `outputs.tf` with useful outputs (resource ids, ARNs, endpoint URLs).
-10. Ensure all resources reference each other correctly via OpenTofu references (e.g. `aws_vpc.main.id`), not hardcoded IDs.
+6. Organise files logically (e.g., `main.tf`, `network.tf`, `iam.tf`, `outputs.tf`, `variables.tf`).
+7. Include a `variables.tf` with any configurable values. Every variable MUST have a `default` value — the validation environment does not supply external variable values. Variables without defaults cause `tofu plan` to fail.
+8. Include `outputs.tf` with useful outputs (resource ids, ARNs, endpoint URLs).
+9. Ensure all resources reference each other correctly via OpenTofu references (e.g. `aws_vpc.main.id`), not hardcoded IDs.
 
 ## Output Format
 
 Output each file with a header comment indicating the filename:
-
-```hcl
-# File: providers.tf
-terraform {
-  required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = "~> 5.70"
-    }
-  }
-}
-
-provider "aws" {
-  region = "us-east-1"
-}
-```
 
 ```hcl
 # File: main.tf

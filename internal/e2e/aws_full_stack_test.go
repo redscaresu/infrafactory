@@ -1,7 +1,6 @@
 package e2e
 
 import (
-	"fmt"
 	"net/http"
 	"os/exec"
 	"path/filepath"
@@ -51,7 +50,7 @@ func TestE2E_AWSFullStack(t *testing.T) {
 
 	WriteConfigMultiCloud(t, configPath, "http://127.0.0.1:1", "", mock.URL, s3.URL, outputRoot)
 
-	files := awsFullStackFiles(mock.URL, s3.URL)
+	files := awsFullStackFiles()
 
 	// Apply with --no-destroy so we can introspect state before the
 	// final destroy stage tears everything down.
@@ -158,43 +157,10 @@ func s3BucketExists(t *testing.T, s3URL, bucket string) bool {
 	return resp.StatusCode == 200
 }
 
-// awsProviderTF returns the provider block. iam/ec2/eks point at
-// fakeaws; s3 points at the third-party S3 backend (SeaweedFS,
-// M59). s3_use_path_style is required since SeaweedFS uses
-// path-style URLs.
-func awsProviderTF(fakeawsURL, s3URL string) string {
-	return fmt.Sprintf(`terraform {
-  required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = "~> 5.70"
-    }
-  }
-}
-
-provider "aws" {
-  region                      = "us-east-1"
-  access_key                  = "fake"
-  secret_key                  = "fake"
-  skip_credentials_validation = true
-  skip_metadata_api_check     = true
-  skip_requesting_account_id  = true
-  s3_use_path_style           = true
-  endpoints {
-    iam            = "%[1]s/iam"
-    ec2            = "%[1]s/ec2/region/us-east-1"
-    eks            = "%[1]s/eks/region/us-east-1"
-    rds            = "%[1]s/rds/region/us-east-1"
-    secretsmanager = "%[1]s/secretsmanager/region/us-east-1"
-    s3             = "%[2]s"
-  }
-}
-`, fakeawsURL, s3URL)
-}
-
-func awsFullStackFiles(fakeawsURL, s3URL string) map[string][]byte {
+// awsFullStackFiles has no provider config: generation writes it, and
+// every endpoint, S3's included, comes from cloudEnv.
+func awsFullStackFiles() map[string][]byte {
 	return map[string][]byte{
-		"providers.tf": []byte(awsProviderTF(fakeawsURL, s3URL)),
 		"network.tf": []byte(`resource "aws_vpc" "main" {
   cidr_block = "10.60.0.0/16"
 }

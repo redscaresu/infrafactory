@@ -23,6 +23,7 @@ import (
 
 	"github.com/redscaresu/infrafactory/internal/cli"
 	"github.com/redscaresu/infrafactory/internal/generator"
+	"github.com/redscaresu/infrafactory/internal/harness"
 )
 
 const (
@@ -503,8 +504,8 @@ paths:
 
 const (
 	// sealedAWSProviderVersion is the hashicorp/aws release SealNetwork
-	// mirrors: the exact pin fakeaws's provider smoke harness runs.
-	sealedAWSProviderVersion = "5.100.0"
+	// mirrors: the exact pin generation writes, so a sealed init finds it.
+	sealedAWSProviderVersion = harness.AWSProviderVersion
 
 	// sealDeadProxy is a loopback port nothing listens on. It is not
 	// cloudEnv's AWS_ENDPOINT_URL catch-all, so an error says which of

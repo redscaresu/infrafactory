@@ -1,0 +1,16 @@
+scenario: aws-env-only-every-service
+version: "1.0"
+cloud: aws
+description: >
+  One resource on each service fakeaws serves without Docker, with no
+  provider block, applied, converged and destroyed on fakeaws by
+  TestE2E_AWSEnvOnlyEveryService. Every endpoint comes from cloudEnv.
+resources:
+  networking:
+    vpc: true
+acceptance_criteria:
+  - type: policy
+    check: region_restriction
+    params:
+      region: us-east-1
+    expect: pass
