@@ -88,6 +88,8 @@ jobs:
       # the network sealed (SealNetwork): every
       # service fakeaws serves without Docker, env-routed, and validate
       # needing fakeaws STS. S3 needs Docker (TestE2E_AWSFullStack).
+      # `pitfalls check-avoid` retires on fakeaws, and every retired
+      # avoid record in pitfalls/avoid-checks/ must still replay clean.
       # fakeaws is pinned to one commit, so bumping FAKEAWS_SHA is a
       # deliberate edit. -count=1: the test cache cannot see the sibling
       # checkout, so a cached PASS could replay after a bump. `go test`
@@ -102,7 +104,7 @@ jobs:
           git init -q ../fakeaws
           git -C ../fakeaws fetch -q --depth 1 https://github.com/redscaresu/fakeaws.git "$FAKEAWS_SHA"
           git -C ../fakeaws checkout -q FETCH_HEAD
-          tests='TestAWSPreflightAgainstFakeaws TestE2E_AWSLayer2IgnoresShellAWS TestE2E_AWSLayer2CatchAllFailsClosed TestE2E_AWSEnvOnlyEveryService TestE2E_AWSValidateNeedsFakeawsSTS TestE2E_AWSWebStepOne TestE2E_AWSWebStepOneUnattachedGroup TestAWSAMIParityAgainstFakeaws TestE2E_AWSAllowlistPlaceable'
+          tests='TestAWSPreflightAgainstFakeaws TestE2E_AWSLayer2IgnoresShellAWS TestE2E_AWSLayer2CatchAllFailsClosed TestE2E_AWSEnvOnlyEveryService TestE2E_AWSValidateNeedsFakeawsSTS TestE2E_AWSWebStepOne TestE2E_AWSWebStepOneUnattachedGroup TestAWSAMIParityAgainstFakeaws TestE2E_AWSAllowlistPlaceable TestE2E_CheckAvoidAgainstFakeaws TestE2E_RetiredAvoidPitfallsStayContradicted'
           go test ./internal/e2e -run "^($(echo $tests | tr ' ' '|'))\$" -count=1 -v | tee "$RUNNER_TEMP/aws-fakeaws.log"
           for test in $tests; do
             grep -q "^--- PASS: $test " "$RUNNER_TEMP/aws-fakeaws.log" || { echo "$test did not PASS"; exit 1; }

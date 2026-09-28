@@ -7,6 +7,11 @@ Shape: goal-named variable-length arc per AGENTS.md (1 slice, ~2-3 hr)
 
 > **Shelf note**: design discussion on 2026-06-05 surfaced a key issue — single-replay is a weak signal for stochastic LLM failures. If/when this arc is reactivated, the design should use **N-trial replay (N=3 or 5) + label `REMOVE` outputs as `REMOVE_CANDIDATE`** for human review, OR add the schema needed for "load-bearing hits over time" tracking, OR build a quarantine-then-delete two-step flow. See the conversation that produced this doc for the full reasoning.
 
+> **2026-09-28**: `avoid` entries no longer need this arc. A mock-learned avoid rule is retired
+> by `infrafactory pitfalls check-avoid`, which replays the forbidden shape on the mock with no
+> LLM and keeps the evidence in `pitfalls/avoid-checks/` (ADR-0034 amendment). What remains
+> shelved here is `fix` and `descriptive` pruning.
+
 ## Big picture — what this is and why
 
 `pitfalls/<cloud>.yaml` is the LLM-side learning queue. Every entry is an auto-derived rule the system has used to prevent repeat failures (see `docs/auto-learning-loop.md` for the full architecture). The auto-learning loop only **adds**; nothing ever removes entries except sweep-end teardown of `fix`/`descriptive` (S94 — preserved are `avoid` entries per the renamed vocabulary). Over time, three things make a pitfall stale:
