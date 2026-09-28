@@ -1,7 +1,6 @@
 ---
 kind: code
-status: blocked
-blocked_by: [aws-layer2-env-sealed]
+status: ready
 epic: aws-layer-neutral-hcl
 depends_on: [aws-layer2-env-sealed]
 touches: ["internal/cli/generate_command.go", "internal/cli/cloud_parity_test.go", "internal/cli/aws_provider_wiring_test.go (new)", "internal/harness/provider_schema.go", "prompts/aws/phase1_plan_architecture.md", "prompts/aws/phase2_generate_hcl.md", "prompts/aws/phase3_self_review.md", "policies/aws/region_restriction.rego", "README.md", "CHANGELOG.md", "docs/operations.md", "internal/e2e/aws_full_stack_test.go", "internal/e2e/aws_env_only_test.go (new)", "internal/e2e/testdata/aws-env-only/ (new)", ".github/workflows/ci.yml", "docs/stories/aws-provider-layer-neutral.md (delete)"]
