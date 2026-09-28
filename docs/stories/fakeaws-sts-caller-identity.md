@@ -1,7 +1,6 @@
 ---
 kind: code
-status: blocked
-blocked_by: [parity-exempt-sts-ssm, fakeaws-provider-exact-pin]
+status: ready
 epic: fakeaws-step-one-surfaces
 repo: fakeaws
 depends_on: [parity-exempt-sts-ssm, fakeaws-provider-exact-pin]
