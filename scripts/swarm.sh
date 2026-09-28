@@ -152,7 +152,9 @@ real decision, put \`ADR: none — <reason>\` on your final commit. End commit m
 "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>" and PR bodies with
 "🤖 Generated with [Claude Code](https://claude.com/claude-code)". If \`gh pr view --json mergeable\` says
 CONFLICTING, merge origin/main into your branch, resolve it (keep both sides of any list), re-run
-the tests and push: a conflicted PR runs no checks and waits forever. When CI is green, reply with the
+the tests and push: a conflicted PR runs no checks and waits forever. The merge commit becomes the
+tip, and doc hygiene reads the ADR trailer from the tip only, so repeat your \`ADR: none — <reason>\`
+line in the merge commit's message. When CI is green, reply with the
 PR URL, what changed in three lines, and the codex findings, then stop.
 EOF
 }
