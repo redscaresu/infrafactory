@@ -113,7 +113,7 @@ func runDeployCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime
 
 	// Credentials only, before the project exists. The env itself comes
 	// later, scoped to that project.
-	if err := assertSandboxCredentials(runtime); err != nil {
+	if err := assertSandboxCredentials(runtime, cloud); err != nil {
 		return &CLIError{Op: "deploy", Code: errorCodeCommandFailed, Err: err}
 	}
 
@@ -152,7 +152,7 @@ func runDeployCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime
 		sandboxEnv         map[string]string
 	)
 	deployResult, deployErr := runDeployApply(cmd, ctx, signal.NotifyContext, func(applyCtx context.Context) (*harness.SandboxDeployResult, error) {
-		runProjectID, runProjectStages, runProjectFailures = ensureRunProject(applyCtx, runtime, sc.Name, workDir)
+		runProjectID, runProjectStages, runProjectFailures = ensureRunProject(applyCtx, runtime, cloud, sc.Name, workDir)
 		if len(runProjectFailures) > 0 {
 			return nil, errors.New("no run project")
 		}
@@ -161,7 +161,7 @@ func runDeployCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime
 		// to registration below rather than returning early -- the record
 		// is what brings teardown back to it.
 		var envErr error
-		if sandboxEnv, envErr = sandboxCommandEnvForProject(runtime, runProjectID); envErr != nil {
+		if sandboxEnv, envErr = sandboxCommandEnvForProject(runtime, cloud, runProjectID); envErr != nil {
 			return nil, envErr
 		}
 

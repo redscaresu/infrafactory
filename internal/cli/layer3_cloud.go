@@ -56,3 +56,31 @@ func layer3LiveCloud(raw, livePath string) (layer3Cloud, error) {
 	}
 	return cloud, nil
 }
+
+// layer3TeardownCloud is the cloud a teardown path is keyed on. Unlike
+// parseLayer3Cloud it cannot fail: an unlisted cloud keeps its name, and
+// since every seam runs its body for Scaleway alone, the name changes
+// only what the refusal says. A run or reap has to be able to say which
+// cloud it will not tear down.
+func layer3TeardownCloud(raw string) layer3Cloud {
+	if cloud, err := parseLayer3Cloud(raw); err == nil {
+		return cloud
+	}
+	return layer3Cloud(raw)
+}
+
+// layer3SeamRefused is what a Layer 3 seam returns for any cloud but
+// Scaleway, before it calls anything. Every body behind these seams is
+// Scaleway's; pointed at another cloud it would act on, or vouch for, an
+// account it never looked at.
+func layer3SeamRefused(cloud layer3Cloud, seam string) error {
+	return fmt.Errorf("cloud %s has no Layer 3 %s, so it was not attempted", cloud, seam)
+}
+
+// layer3TeardownNotBuilt is what a run, reap or interrupt says instead of
+// tearing down a cloud with no Layer 3 teardown. It names no command:
+// reap refuses the same workdir, and Scaleway's advice does not apply.
+func layer3TeardownNotBuilt(cloud layer3Cloud, statePath string) string {
+	return fmt.Sprintf("%s Layer 3 teardown is not built; resources recorded in %s may exist: destroy them by hand",
+		cloud, statePath)
+}

@@ -88,7 +88,7 @@ func TestDestroyRetriesAfterPurgingAutoCreatedResources(t *testing.T) {
 	destroy := &sequencedDestroy{errs: []error{errors.New("precondition failed: resource is still in use")}}
 	purge := &fakePurge{removed: []string{"security_group 142eef7b (Default security group) in fr-par-1"}}
 
-	result, purged, err := destroySandbox(context.Background(), retryRuntime(t, destroy, purge), purgeWorkDir(t), destroyEnv, purgeProjectID)
+	result, purged, err := destroySandbox(context.Background(), retryRuntime(t, destroy, purge), layer3Scaleway, purgeWorkDir(t), destroyEnv, purgeProjectID)
 
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -110,7 +110,7 @@ func TestDestroyDoesNotRetryWhenNothingWasPurged(t *testing.T) {
 	destroy := &sequencedDestroy{errs: []error{wantErr, nil}, withoutConfigErr: errors.New("fails without config too")}
 	purge := &fakePurge{}
 
-	_, _, err := destroySandbox(context.Background(), retryRuntime(t, destroy, purge), purgeWorkDir(t), destroyEnv, purgeProjectID)
+	_, _, err := destroySandbox(context.Background(), retryRuntime(t, destroy, purge), layer3Scaleway, purgeWorkDir(t), destroyEnv, purgeProjectID)
 
 	require.ErrorIs(t, err, wantErr)
 	assert.Equal(t, 1, destroy.calls)
@@ -120,7 +120,7 @@ func TestDestroySkipsPurgeWhenItSucceeds(t *testing.T) {
 	destroy := &sequencedDestroy{}
 	purge := &fakePurge{}
 
-	_, _, err := destroySandbox(context.Background(), retryRuntime(t, destroy, purge), purgeWorkDir(t), destroyEnv, purgeProjectID)
+	_, _, err := destroySandbox(context.Background(), retryRuntime(t, destroy, purge), layer3Scaleway, purgeWorkDir(t), destroyEnv, purgeProjectID)
 
 	require.NoError(t, err)
 	assert.Equal(t, 1, destroy.calls)
@@ -144,7 +144,7 @@ func TestDestroyWithoutProjectIDOrMarkerDoesNotPurge(t *testing.T) {
 	purge := &fakePurge{}
 
 	// t.TempDir(), not purgeWorkDir: no marker, so nothing to recover.
-	_, _, err := destroySandbox(context.Background(), retryRuntime(t, destroy, purge), t.TempDir(), destroyEnv, "")
+	_, _, err := destroySandbox(context.Background(), retryRuntime(t, destroy, purge), layer3Scaleway, t.TempDir(), destroyEnv, "")
 
 	require.ErrorIs(t, err, wantErr)
 	assert.Zero(t, purge.calls)
@@ -159,7 +159,7 @@ func TestDestroyRecoversTheProjectFromTheMarkerWhenTheCallerHasNone(t *testing.T
 	destroy := &sequencedDestroy{errs: []error{errors.New("precondition failed: resource is still in use")}}
 	purge := &fakePurge{removed: []string{"security_group 142eef7b (Default security group) in fr-par-1"}}
 
-	_, purged, err := destroySandbox(context.Background(), retryRuntime(t, destroy, purge), purgeWorkDir(t), destroyEnv, "")
+	_, purged, err := destroySandbox(context.Background(), retryRuntime(t, destroy, purge), layer3Scaleway, purgeWorkDir(t), destroyEnv, "")
 
 	require.NoError(t, err, "the retry should succeed once the blocker is purged")
 	assert.Equal(t, 1, purge.calls, "an empty caller id must not disable the purge when the marker names a project")
@@ -173,7 +173,7 @@ func TestDestroyReportsSecondFailure(t *testing.T) {
 	destroy := &sequencedDestroy{errs: []error{errors.New("first"), second}, withoutConfigErr: errors.New("stuck without config too")}
 	purge := &fakePurge{removed: []string{"security_group 142eef7b"}}
 
-	_, _, err := destroySandbox(context.Background(), retryRuntime(t, destroy, purge), purgeWorkDir(t), destroyEnv, purgeProjectID)
+	_, _, err := destroySandbox(context.Background(), retryRuntime(t, destroy, purge), layer3Scaleway, purgeWorkDir(t), destroyEnv, purgeProjectID)
 
 	require.ErrorIs(t, err, second)
 	assert.Equal(t, 2, destroy.calls)
@@ -194,7 +194,7 @@ func TestDestroyFallsBackToTheStateWhenTheConfigCannotEvaluate(t *testing.T) {
 	destroy := &sequencedDestroy{errs: []error{configErr, configErr}}
 	purge := &fakePurge{}
 
-	result, _, err := destroySandbox(context.Background(), retryRuntime(t, destroy, purge), purgeWorkDir(t), destroyEnv, purgeProjectID)
+	result, _, err := destroySandbox(context.Background(), retryRuntime(t, destroy, purge), layer3Scaleway, purgeWorkDir(t), destroyEnv, purgeProjectID)
 
 	require.NoError(t, err, "the stack must not outlive a config the destroy cannot evaluate")
 	require.NotNil(t, result)
@@ -222,7 +222,7 @@ func TestDestroyWithoutConfigRefusesAProjectTheRunDidNotCreate(t *testing.T) {
 		SandboxDestroy: destroy, AutoCreated: &fakePurge{}, RunProject: &fakeRunProject{describeUnstamped: true},
 	}}
 
-	_, _, err := destroySandbox(context.Background(), runtime, purgeWorkDir(t), destroyEnv, purgeProjectID)
+	_, _, err := destroySandbox(context.Background(), runtime, layer3Scaleway, purgeWorkDir(t), destroyEnv, purgeProjectID)
 
 	require.ErrorIs(t, err, wantErr)
 	assert.Zero(t, destroy.withoutConfigCalls)
@@ -281,7 +281,7 @@ func TestDestroyRefusesToPurgeTheOrganizationDefaultProject(t *testing.T) {
 	}
 
 	_, purged, err := destroySandbox(
-		context.Background(), retryRuntime(t, destroy, purge), "/work", env, purgeProjectID)
+		context.Background(), retryRuntime(t, destroy, purge), layer3Scaleway, "/work", env, purgeProjectID)
 
 	require.ErrorIs(t, err, wantErr)
 	assert.Zero(t, purge.calls, "the organization default project must never be purged")
@@ -301,7 +301,7 @@ func TestThePurgeDecisionReachesTheLog(t *testing.T) {
 	rt := retryRuntime(t, &sequencedDestroy{errs: []error{errors.New("boom")}}, &fakePurge{})
 	rt.Logger = NewAppLogger(&sink)
 
-	_, _, _ = destroySandbox(context.Background(), rt, purgeWorkDir(t), destroyEnv, purgeProjectID)
+	_, _, _ = destroySandbox(context.Background(), rt, layer3Scaleway, purgeWorkDir(t), destroyEnv, purgeProjectID)
 
 	assert.Contains(t, sink.String(), "layer3_auto_created_purge",
 		"the purge decision must be on the record: `run` does not persist sandbox stages, "+
@@ -340,7 +340,7 @@ resource "terraform_data" "broken" {
 	_, plainErr := runtime.Deps.SandboxDestroy.Run(ctx, dir, destroyEnv)
 	require.Error(t, plainErr, "the ordinary destroy must fail on the same config")
 
-	result, _, err := destroySandbox(ctx, runtime, dir, destroyEnv, purgeProjectID)
+	result, _, err := destroySandbox(ctx, runtime, layer3Scaleway, dir, destroyEnv, purgeProjectID)
 
 	require.NoError(t, err)
 	assert.Contains(t, result.WithoutConfig, "tonumber")

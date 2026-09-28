@@ -23,6 +23,17 @@ import (
 )
 
 func runTestCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) error {
+	return runTestWithNotify(cmd, args, runtime, signal.NotifyContext)
+}
+
+// runTestWithNotify is runTestCommand with the signal source injectable,
+// so a test can interrupt it.
+func runTestWithNotify(
+	cmd *cobra.Command,
+	args []string,
+	runtime *CommandRuntime,
+	notify func(ctx context.Context, sigs ...os.Signal) (context.Context, context.CancelFunc),
+) error {
 	noDestroy, err := cmd.Flags().GetBool("no-destroy")
 	if err != nil {
 		return &CLIError{Op: "test", Code: errorCodeUsage, Err: fmt.Errorf("read --no-destroy flag: %w", err)}
@@ -32,10 +43,16 @@ func runTestCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) 
 		return &CLIError{Op: "test", Code: errorCodeUsage, Err: fmt.Errorf("read --continue-on-drift flag: %w", err)}
 	}
 
+	// Loaded before the guard, which is keyed on the scenario's cloud.
+	// LoadScenario caches, so executeTest reads the same scenario; a load
+	// failure is left for executeTest to report as it always has, and
+	// the zero scenario's cloud is Scaleway, the guard as it was.
+	sc, _ := runtime.LoadScenario(args[0])
+
 	// The guard only engages when Layer 3 is on. Interrupting a
 	// mock-only run costs nothing; interrupting one that has already
 	// applied to real Scaleway leaves billable resources behind.
-	return withSandboxInterruptGuard(cmd, runtime, signal.NotifyContext, func(ctx context.Context) error {
+	return withSandboxInterruptGuard(cmd, runtime, layer3TeardownCloud(sc.Cloud), notify, func(ctx context.Context) error {
 		result, err := executeTest(ctx, runtime, args[0], testExecutionOptions{
 			MockDeployMode:  harness.MockDeployModeClean,
 			SkipDestroy:     noDestroy,
@@ -611,8 +628,9 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 	// credentials to protect and the mock is the whole point.
 	sandboxEnabled := runtime.Config.Validation.Layers.SandboxDeploy.Enabled
 	hclRefused := false
+	cloud, cloudErr := parseLayer3Cloud(sc.Cloud)
 	if sandboxEnabled {
-		cloud, shapeErr := parseLayer3Cloud(sc.Cloud)
+		shapeErr := cloudErr
 		if shapeErr == nil {
 			shapeErr = layer3PreflightHCLForCloud(cloud, outputDir,
 				runtime.Config.Validation.Layers.SandboxDeploy.AllowResourceTypes)
@@ -754,13 +772,13 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 		// relying on best-effort cleanup for residue that should never
 		// have existed.
 		var sandboxEnv map[string]string
-		sandboxEnvErr := assertSandboxCredentials(runtime)
+		sandboxEnvErr := assertSandboxCredentials(runtime, cloud)
 
 		if sandboxEnvErr == nil {
 			// ADR-0025: the run's own project has to exist before the
 			// provider's environment is built, which is why it can no
 			// longer be a Terraform resource.
-			createdID, runProjectStages, runProjectFailures := ensureRunProject(ctx, runtime, sc.Name, outputDir)
+			createdID, runProjectStages, runProjectFailures := ensureRunProject(ctx, runtime, cloud, sc.Name, outputDir)
 			runProjectID = createdID
 			stages = append(stages, runProjectStages...)
 			failures = append(failures, runProjectFailures...)
@@ -771,7 +789,7 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 				// strays next to every other run's.
 				sandboxEnvErr = fmt.Errorf("run project unavailable")
 			} else if runProjectID != "" {
-				sandboxEnv, sandboxEnvErr = sandboxCommandEnvForProject(runtime, runProjectID)
+				sandboxEnv, sandboxEnvErr = sandboxCommandEnvForProject(runtime, cloud, runProjectID)
 			}
 		}
 		if sandboxEnvErr != nil {
@@ -887,7 +905,7 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 			// would look for them in the wrong project -- failing the
 			// teardown, or leaving them behind, for exactly the
 			// projectless resources this flag exists to support.
-			sandboxEnv, sandboxEnvErr := sandboxCommandEnvForProject(runtime, runProjectID)
+			sandboxEnv, sandboxEnvErr := sandboxCommandEnvForProject(runtime, cloud, runProjectID)
 			if sandboxEnvErr != nil {
 				stages = append(stages, StageSummary{Layer: "sandbox_deploy", Stage: "destroy_preflight", Status: StageStatusFail})
 				failures = append(failures, FailureSummary{
@@ -902,7 +920,7 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 				// terraform-live.tfstate, taking the project id with it.
 				// The first canary run failed exactly here.
 				sweepTarget, sweepTargetErr := harness.CaptureSweepTarget(outputDir)
-				sandboxDestroyResult, purged, sandboxDestroyErr := destroySandbox(ctx, runtime, outputDir, sandboxEnv, sweepTargetProjectID(sweepTarget))
+				sandboxDestroyResult, purged, sandboxDestroyErr := destroySandbox(ctx, runtime, cloud, outputDir, sandboxEnv, sweepTargetProjectID(sweepTarget))
 				stages, failures = appendSandboxDestroyResult(stages, failures, sandboxDestroyResult, sandboxDestroyErr)
 				if len(purged) > 0 {
 					stages = append(stages, autoCreatedPurgeStage(purged))
@@ -914,12 +932,12 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 					// sweep's job is to verify the project is gone.
 					// Deleting it afterwards would make every clean
 					// teardown report a leak.
-					deleteStages, deleteFailures := releaseRunProject(ctx, runtime, outputDir, runProjectID, sandboxEnv)
+					deleteStages, deleteFailures := releaseRunProject(ctx, runtime, cloud, outputDir, runProjectID, sandboxEnv)
 					stages = append(stages, deleteStages...)
 					failures = append(failures, deleteFailures...)
 
 					failuresBeforeSweep := len(failures)
-					stages, failures = appendOrphanSweepResult(ctx, stages, failures, runtime, sweepTarget, sweepTargetErr, sandboxEnv)
+					stages, failures = appendOrphanSweepResult(ctx, stages, failures, runtime, cloud, sweepTarget, sweepTargetErr, sandboxEnv)
 					// The teardown's own verdict, not the command's. A
 					// failure recorded earlier -- a mock criteria check,
 					// say -- says nothing about whether the account came
@@ -972,7 +990,7 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 			// Its own credentials: this sits outside the sandbox block on
 			// purpose, so it cannot borrow an env built on a path it may
 			// not have taken.
-			cleanupEnv, cleanupEnvErr := sandboxCommandEnvForProject(runtime, runProjectID)
+			cleanupEnv, cleanupEnvErr := sandboxCommandEnvForProject(runtime, cloud, runProjectID)
 			if cleanupEnvErr != nil {
 				stages = append(stages, StageSummary{
 					Layer: "sandbox_deploy", Stage: "run_project_delete", Status: StageStatusFail,
@@ -985,7 +1003,7 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 				})
 				break
 			}
-			deleteStages, deleteFailures := releaseRunProject(ctx, runtime, outputDir, runProjectID, cleanupEnv)
+			deleteStages, deleteFailures := releaseRunProject(ctx, runtime, cloud, outputDir, runProjectID, cleanupEnv)
 			stages = append(stages, deleteStages...)
 			failures = append(failures, deleteFailures...)
 		case keepingSandbox:
@@ -1084,9 +1102,13 @@ const realScalewayAPIURL = "https://api.scaleway.com"
 // Handing back nothing usable makes that misuse impossible rather than
 // merely discouraged: every caller that needs an env must now say which
 // project it is for.
-func assertSandboxCredentials(runtime *CommandRuntime) error {
-	_, err := sandboxEnvWithProjectDefault(runtime, "")
-	return err
+func assertSandboxCredentials(runtime *CommandRuntime, cloud layer3Cloud) error {
+	switch cloud {
+	case layer3Scaleway:
+		_, err := sandboxEnvWithProjectDefault(runtime, "")
+		return err
+	}
+	return layer3SeamRefused(cloud, "credentials")
 }
 
 // sandboxCommandEnvForProject is sandboxCommandEnv with an explicit
@@ -1099,7 +1121,10 @@ func assertSandboxCredentials(runtime *CommandRuntime) error {
 // somewhere disposable and swept rather than somewhere shared.
 //
 // An empty runProjectID keeps the pre-ADR-0025 behaviour exactly.
-func sandboxCommandEnvForProject(runtime *CommandRuntime, runProjectID string) (map[string]string, error) {
+func sandboxCommandEnvForProject(runtime *CommandRuntime, cloud layer3Cloud, runProjectID string) (map[string]string, error) {
+	if cloud != layer3Scaleway {
+		return nil, layer3SeamRefused(cloud, "environment")
+	}
 	// An empty project id is an error, never a fall-through. Every
 	// accidental one so far arrived as a value -- a zero-value marker, a
 	// failed sweep capture, a record field -- so the audit for a literal
@@ -1675,7 +1700,14 @@ func resolveConstraintPolicyPath(baseDir, policyPath string) string {
 // state even for Layer 3 runs, so a destroy that half-worked reported
 // clean while real resources kept billing. A destroy exiting 0 is not
 // evidence that nothing survived.
-func appendOrphanSweepResult(ctx context.Context, stages []StageSummary, failures []FailureSummary, runtime *CommandRuntime, target *harness.SweepTarget, captureErr error, sandboxEnv map[string]string) ([]StageSummary, []FailureSummary) {
+func appendOrphanSweepResult(ctx context.Context, stages []StageSummary, failures []FailureSummary, runtime *CommandRuntime, cloud layer3Cloud, target *harness.SweepTarget, captureErr error, sandboxEnv map[string]string) ([]StageSummary, []FailureSummary) {
+	if cloud != layer3Scaleway {
+		stages = append(stages, StageSummary{Layer: "sandbox_deploy", Stage: "orphan_sweep", Status: StageStatusFail})
+		return stages, append(failures, FailureSummary{
+			Layer: "sandbox_deploy", Stage: "orphan_sweep", Check: "no_orphans",
+			Command: "orphan sweep", Detail: layer3SeamRefused(cloud, "orphan sweep").Error(),
+		})
+	}
 	if captureErr != nil {
 		stages = append(stages, StageSummary{Layer: "sandbox_deploy", Stage: "orphan_sweep", Status: StageStatusFail})
 		return stages, append(failures, FailureSummary{

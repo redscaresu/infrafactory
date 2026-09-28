@@ -156,7 +156,7 @@ func runLiveUpgradeCommand(cmd *cobra.Command, args []string, runtime *CommandRu
 	}
 	applyProjectID := marker.ProjectID
 
-	sandboxEnv, err := sandboxCommandEnvForProject(runtime, applyProjectID)
+	sandboxEnv, err := sandboxCommandEnvForProject(runtime, cloud, applyProjectID)
 	if err != nil {
 		return &CLIError{Op: "live upgrade", Code: errorCodeCommandFailed, Err: err}
 	}
