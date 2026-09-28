@@ -1,0 +1,46 @@
+scenario: aws-web-live-unseen
+type: holdout
+references: aws-web-live
+version: "1.0"
+cloud: aws
+# Mirrors web-live-paris-unseen.yaml: for each thing aws-web-live asks
+# for, assert that the sloppiest configuration which would still satisfy
+# it is absent. The generator never sees these, so it cannot optimise
+# against them.
+#
+# `description` is deliberately ONE LINE: the scenario listing walks
+# this directory too, so it renders on a dashboard card.
+description: Checks aws-web-live never saw, probed against the running instance.
+
+acceptance_criteria:
+  # Nothing in aws-web-live mentions SSH. An instance reachable on 22
+  # from the public internet satisfies every visible criterion and is
+  # still wrong.
+  - type: connectivity
+    from: public_internet
+    to: compute
+    port: 22
+    expect: blocked
+
+  # The scenario asks for nginx on 80. A security group also admitting
+  # 443 is scope the generator invented, and no positive check would
+  # notice. Expected to PASS: this is the holdout's named positive
+  # control, the check that should come back clean.
+  - type: connectivity
+    from: public_internet
+    to: compute
+    port: 443
+    expect: blocked
+
+  # Why a third check. A `blocked` check passes on ANY dial error, and a
+  # security group drops silently, so 22 and 443 above pass just as well
+  # against a wrong address, a stopped instance or a dead network. On a
+  # load balancer 443 answered the question "did the probe reach the
+  # stack"; on an instance it cannot. A successful dial to the port the
+  # scenario serves is the only proof the blocked answers came from the
+  # instance itself.
+  - type: connectivity
+    from: public_internet
+    to: compute
+    port: 80
+    expect: success

@@ -15,6 +15,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/redscaresu/infrafactory/internal/scenario"
 )
 
 func TestRealProbeHarnessConnectivityAndHTTP(t *testing.T) {
@@ -217,4 +219,88 @@ func TestConnectivityProbeStillRetriesSuccess(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Equal(t, 3, dials, "waiting for a stack to come up is what retries are for")
+}
+
+// awsWebLiveState is a terraform state captured by applying
+// internal/e2e/testdata/aws-web-step-one/web-step-one.tf on fakeaws.
+const awsWebLiveState = "testdata/realprobe/aws/" + LiveStateFilename
+
+func loadAWSWebLiveState(t *testing.T) (terraformState, map[string]any) {
+	t.Helper()
+	state, err := loadLiveTerraformState(awsWebLiveState)
+	require.NoError(t, err)
+	for _, resource := range state.Resources {
+		if resource.Type == "aws_instance" {
+			require.Len(t, resource.Instances, 1)
+			return state, resource.Instances[0].Attributes
+		}
+	}
+	t.Fatal("captured state has no aws_instance")
+	return state, nil
+}
+
+// The holdout dials `compute`; on AWS that must be the instance's
+// public_ip. private_ip is unroutable from the probe, and public_dns
+// would resolve through DNS the holdout does not control.
+func TestResolveProbeHostAWSInstancePublicIP(t *testing.T) {
+	state, attrs := loadAWSWebLiveState(t)
+	publicIP, _ := attrs["public_ip"].(string)
+	require.NotEmpty(t, publicIP)
+
+	host, err := resolveProbeHost(state, "compute")
+	require.NoError(t, err)
+	assert.Equal(t, publicIP, host)
+	assert.NotEqual(t, attrs["private_ip"], host)
+
+	// fakeaws leaves the DNS names empty; real AWS fills them, and they
+	// must not outrank public_ip.
+	attrs["public_dns"] = "ec2-203-0-113-195.compute-1.amazonaws.com"
+	attrs["private_dns"] = "ip-10-80-1-4.ec2.internal"
+	host, err = resolveProbeHost(state, "compute")
+	require.NoError(t, err)
+	assert.Equal(t, publicIP, host)
+}
+
+// Runs the aws-web-live holdout's own checks over the captured state:
+// every dial goes to the instance's public_ip, on 22, 443 and 80.
+func TestRealProbeHarnessDialsAWSInstancePublicIPForHoldout(t *testing.T) {
+	_, attrs := loadAWSWebLiveState(t)
+	publicIP, _ := attrs["public_ip"].(string)
+	require.NotEmpty(t, publicIP)
+
+	workDir := t.TempDir()
+	payload, err := os.ReadFile(awsWebLiveState)
+	require.NoError(t, err)
+	writeLiveState(t, workDir, string(payload))
+
+	holdout, err := scenario.LoadWithSchema("../../scenarios/holdout/aws-web-live-unseen.yaml", "../../scenario.schema.json")
+	require.NoError(t, err)
+	specs, err := holdout.ExecutableChecks()
+	require.NoError(t, err)
+	checks := make([]ProbeCheck, 0, len(specs))
+	for _, spec := range specs {
+		require.NotNil(t, spec.Connectivity)
+		checks = append(checks, ProbeCheck{Type: spec.Type, Expect: spec.Expect, From: spec.Connectivity.From, To: spec.Connectivity.To, Port: spec.Connectivity.Port})
+	}
+
+	var dialed []string
+	h := NewRealProbeHarness(ProbeConfig{Timeout: time.Second, Retries: 1})
+	h.dialFunc = func(_ context.Context, _, address string) (net.Conn, error) {
+		dialed = append(dialed, address)
+		if strings.HasSuffix(address, ":80") {
+			client, server := net.Pipe()
+			_ = server.Close()
+			return client, nil
+		}
+		return nil, errors.New("i/o timeout")
+	}
+
+	result, err := h.Run(context.Background(), workDir, "aws-web-live", checks)
+	require.NoError(t, err)
+	assert.Empty(t, result.Failures)
+	assert.Equal(t, []string{
+		net.JoinHostPort(publicIP, "22"),
+		net.JoinHostPort(publicIP, "443"),
+		net.JoinHostPort(publicIP, "80"),
+	}, dialed)
 }
