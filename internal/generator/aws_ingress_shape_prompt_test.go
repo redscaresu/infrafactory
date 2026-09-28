@@ -35,6 +35,7 @@ func TestPhase2PromptOpensServicePortsInline(t *testing.T) {
 			prompt, err = render(withService)
 			require.NoError(t, err)
 			assert.Contains(t, prompt, awsInlineIngressSentence)
+			assert.Contains(t, prompt, "Do not set `user_data_replace_on_change`.")
 		})
 	}
 }

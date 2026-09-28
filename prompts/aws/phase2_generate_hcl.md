@@ -37,7 +37,7 @@ infrafactory writes the instance's boot script into the module directory itself:
 {{.UserDataLine}}
 ```
 
-Write nothing else that starts a server: no inline script, no `user_data_base64`, no provisioner, no `local_file`. Do not output a file with that script's name; generation refuses one.
+Write nothing else that starts a server: no inline script, no `user_data_base64`, no provisioner, no `local_file`. Do not set `user_data_replace_on_change`. Do not output a file with that script's name; generation refuses one.
 
 Open each port the service needs with an inline `ingress` block inside its `aws_security_group`, and write no `aws_security_group_rule` or `aws_vpc_security_group_ingress_rule` resources: inline blocks are the form this validation environment applies end to end.
 {{end}}
