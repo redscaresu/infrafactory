@@ -77,3 +77,8 @@ Fix: change the signature to `DetectPolicyConflict(policy, detail,
 hcl, …)` and pass `f.Policy` from the caller. The legacy
 `policy=X.Y` extraction is kept as a fall-through so the existing
 test cases stay valid. Routing rules unchanged.
+
+2026-09-28: the 2026-06-02 plumbing stopped one step short. `toFeedbackFailures` in
+`internal/cli/run_command.go` copied only Check, Resource and Detail into `feedback.Failure`,
+so `f.Policy` reached `DetectPolicyConflict` empty and the stuck path never recorded a
+policy gap. It now copies every `FailureSummary` field.
