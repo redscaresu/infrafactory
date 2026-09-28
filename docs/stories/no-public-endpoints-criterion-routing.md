@@ -18,6 +18,12 @@ the criterion to `policies/scaleway/no_public_endpoints.rego`, a server-IP polic
 scenarios. Options: route the criterion to `no_public_database`, or scope `no_public_endpoints` to
 a target and resolve the pitfall conflict.
 
+**Now visible at Layer 2 (mockway #31, 2026-09-28):** mockway now reports an IP's binding as the
+API does, so `deriveConnectivityScaleway` (`internal/harness/topology_derive.go:376-385`) sees a
+server with a public IP. `web-app-paris`'s `connectivity public_internet -> compute: blocked`
+("instances must not be directly reachable") will now fail stacks that give servers public IPs,
+as the ip_id pitfall and the `web_app_paris` e2e stub do. The decision here covers both.
+
 **Done when:** the three scenarios' `no_public_endpoints` criterion is evaluated by a policy that
 checks the database, proven by a Rego test and an e2e whose outcome is named in the PR; the
 ADR-0017 conflict with the ip_id pitfall no longer fires.
