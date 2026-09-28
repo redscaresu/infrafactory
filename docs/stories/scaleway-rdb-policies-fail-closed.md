@@ -1,7 +1,6 @@
 ---
 kind: code
-status: blocked
-blocked_by: [policy-loader-skips-test-files, rego-test-harness, deny-state-layer3-claim-removed]
+status: ready
 epic: policy-correctness
 depends_on: [policy-loader-skips-test-files, rego-test-harness, deny-state-layer3-claim-removed]
 touches: ["policies/scaleway/encryption_at_rest.rego", "policies/scaleway/encryption_at_rest_test.rego", "policies/scaleway/no_public_database.rego", "policies/scaleway/no_public_database_test.rego"]

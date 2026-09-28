@@ -1,7 +1,6 @@
 ---
 kind: code
-status: blocked
-blocked_by: [policy-loader-skips-test-files, rego-test-harness]
+status: ready
 epic: policy-correctness
 depends_on: [policy-loader-skips-test-files, rego-test-harness]
 touches: ["policies/scaleway/default_deny_ingress_test.rego", "policies/scaleway/vpc_required_test.rego", "policies/common/naming_test.rego"]

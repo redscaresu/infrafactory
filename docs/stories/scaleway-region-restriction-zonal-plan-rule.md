@@ -1,7 +1,6 @@
 ---
 kind: code
-status: blocked
-blocked_by: [policy-loader-skips-test-files, rego-test-harness, deny-state-layer3-claim-removed]
+status: ready
 epic: policy-correctness
 depends_on: [policy-loader-skips-test-files, rego-test-harness, deny-state-layer3-claim-removed]
 touches: ["policies/scaleway/region_restriction.rego", "policies/scaleway/region_restriction_test.rego"]

@@ -1,7 +1,6 @@
 ---
 kind: code
-status: blocked
-blocked_by: [policy-loader-skips-test-files, rego-test-harness]
+status: ready
 epic: policy-correctness
 depends_on: [policy-loader-skips-test-files, rego-test-harness]
 touches: ["policies/aws/vpc_required.rego", "policies/aws/vpc_required_test.rego", "internal/harness/opa_test.go"]
