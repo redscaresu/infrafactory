@@ -1,0 +1,112 @@
+{
+  "schema_version": 1,
+  "iam": {},
+  "s3": {},
+  "ec2": {
+    "instances": [
+      {
+        "ami_id": "ami-0al2023x8664",
+        "arn": "arn:aws:ec2:us-east-1:000000000000:instance/i-9fd3867bad7edc73",
+        "iam_instance_profile_name": "",
+        "id": "i-9fd3867bad7edc73",
+        "instance_type": "t3.micro",
+        "private_ip": "10.0.1.4",
+        "public_ip": "203.0.113.174",
+        "region": "us-east-1",
+        "state": "running",
+        "subnet_id": "subnet-4cffd66129b345b7",
+        "vpc_security_group_ids": [
+          "sg-d8a212c99e255a99",
+          "sg-60e957b4ebc024aa"
+        ]
+      }
+    ],
+    "security_groups": [
+      {
+        "arn": "arn:aws:ec2:us-east-1:000000000000:security-group/sg-60e957b4ebc024aa",
+        "description": "Managed by Terraform",
+        "group_name": "base",
+        "id": "sg-60e957b4ebc024aa",
+        "ip_permissions": [],
+        "ip_permissions_egress": [
+          {
+            "from_port": 0,
+            "ip_protocol": "-1",
+            "ip_ranges": [
+              {
+                "cidr_ip": "0.0.0.0/0",
+                "description": ""
+              }
+            ],
+            "ipv6_ranges": [],
+            "prefix_list_ids": [],
+            "to_port": 0,
+            "user_id_group_pairs": []
+          }
+        ],
+        "region": "us-east-1",
+        "vpc_id": "vpc-3682b2b7346dc9c9"
+      },
+      {
+        "arn": "arn:aws:ec2:us-east-1:000000000000:security-group/sg-d8a212c99e255a99",
+        "description": "Managed by Terraform",
+        "group_name": "open",
+        "id": "sg-d8a212c99e255a99",
+        "ip_permissions": [
+          {
+            "from_port": 80,
+            "ip_protocol": "tcp",
+            "ip_ranges": [
+              {
+                "cidr_ip": "0.0.0.0/0",
+                "description": ""
+              }
+            ],
+            "ipv6_ranges": [],
+            "prefix_list_ids": [],
+            "to_port": 80,
+            "user_id_group_pairs": []
+          }
+        ],
+        "ip_permissions_egress": [],
+        "region": "us-east-1",
+        "vpc_id": "vpc-3682b2b7346dc9c9"
+      }
+    ],
+    "subnets": [
+      {
+        "arn": "arn:aws:ec2:us-east-1:000000000000:subnet/subnet-4cffd66129b345b7",
+        "availability_zone": "us-east-1a",
+        "cidr_block": "10.0.1.0/24",
+        "id": "subnet-4cffd66129b345b7",
+        "map_public_ip_on_launch": true,
+        "region": "us-east-1",
+        "vpc_id": "vpc-3682b2b7346dc9c9"
+      }
+    ],
+    "internet_gateways": [
+      {
+        "arn": "arn:aws:ec2:us-east-1:000000000000:internet-gateway/igw-cd0abb01795fcd41",
+        "id": "igw-cd0abb01795fcd41",
+        "region": "us-east-1",
+        "vpc_id": "vpc-3682b2b7346dc9c9"
+      }
+    ],
+    "route_tables": [
+      {
+        "arn": "arn:aws:ec2:us-east-1:000000000000:route-table/rtb-c745dabf210f2b65",
+        "id": "rtb-c745dabf210f2b65",
+        "region": "us-east-1",
+        "vpc_id": "vpc-3682b2b7346dc9c9"
+      }
+    ],
+    "routes": [],
+    "route_table_associations": [
+      {
+        "id": "rtbassoc-191eb2f33b31e9d6",
+        "route_table_id": "rtb-c745dabf210f2b65",
+        "subnet_id": "subnet-4cffd66129b345b7"
+      }
+    ]
+  }
+}
