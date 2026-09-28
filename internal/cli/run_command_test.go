@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1308,5 +1309,119 @@ acceptance_criteria:
 	}
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("write holdout fixture: %v", err)
+	}
+}
+
+// seqMockDeployHarness fails the calls errs names, in order, then passes.
+type seqMockDeployHarness struct {
+	*fakeMockDeployHarness
+	errs []error
+}
+
+func (f *seqMockDeployHarness) Run(ctx context.Context, workDir string, env map[string]string, mode harness.MockDeployMode) (*harness.MockDeployResult, error) {
+	f.err = nil
+	if f.calls < len(f.errs) {
+		f.err = f.errs[f.calls]
+	}
+	return f.fakeMockDeployHarness.Run(ctx, workDir, env, mode)
+}
+
+type seqSandboxDeployHarness struct {
+	*fakeSandboxDeployHarness
+	errs []error
+}
+
+func (f *seqSandboxDeployHarness) Run(ctx context.Context, workDir string, env map[string]string, progress io.Writer) (*harness.SandboxDeployResult, error) {
+	f.err = nil
+	if f.calls < len(f.errs) {
+		f.err = f.errs[f.calls]
+	}
+	return f.fakeSandboxDeployHarness.Run(ctx, workDir, env, progress)
+}
+
+// An avoid rule records the layer whose failure taught it. The run
+// rewrites every failure's Layer to "run", so without the recorded
+// origin a rule learned against the mock and one learned against the
+// real cloud would be indistinguishable in the corpus.
+func TestRunCommandRecordsTheLearnedLayerOnAnAvoidPitfall(t *testing.T) {
+	const detail = `Error: Unsupported argument on scaleway_block_volume.data: An argument named "bogus_attr" is not expected here.`
+	failing := "resource \"scaleway_block_volume\" \"data\" {\n  size_in_gb = 1\n  bogus_attr = true\n}\n"
+	passing := "resource \"scaleway_block_volume\" \"data\" {\n  size_in_gb = 1\n}\n"
+
+	for _, layer := range []string{"mock_deploy", "sandbox_deploy"} {
+		t.Run(layer, func(t *testing.T) {
+			h := newCommandTestHarness(t)
+			scenarioPath := writeUnsupportedCriteriaScenario(t, h.WorkspaceDir)
+			sandbox := layer == "sandbox_deploy"
+			if sandbox {
+				sandboxCredsForTest(t)
+			}
+			opts := isolatedRunOpts(h, func(cfg config.Config) config.Config {
+				cfg.Validation.Layers.SandboxDeploy.Enabled = sandbox
+				return cfg
+			})
+			generations := 0
+			mockDeploy := &seqMockDeployHarness{fakeMockDeployHarness: &fakeMockDeployHarness{result: &harness.MockDeployResult{
+				Apply:         harness.StageResult{Stage: "apply"},
+				StateSnapshot: []byte(`{}`),
+			}}}
+			sandboxDeploy := &seqSandboxDeployHarness{fakeSandboxDeployHarness: &fakeSandboxDeployHarness{result: &harness.SandboxDeployResult{
+				Init:  harness.StageResult{Stage: "init"},
+				Apply: harness.StageResult{Stage: "apply"},
+			}}}
+			if sandbox {
+				sandboxDeploy.errs = []error{errors.New(detail)}
+			} else {
+				mockDeploy.errs = []error{errors.New(detail)}
+			}
+			opts.deps = RuntimeDependencies{
+				Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
+					generations++
+					volume := passing
+					if generations == 1 {
+						volume = failing
+					}
+					return &generator.GeneratedCode{Files: map[string][]byte{
+						"main.tf":   []byte("terraform {}\n"),
+						"volume.tf": []byte(volume),
+					}}, nil
+				}),
+				Static: &fakeStaticHarness{result: &harness.StaticResult{
+					Stages:   []harness.StageResult{{Stage: "init"}, {Stage: "validate"}, {Stage: "plan"}, {Stage: "show"}},
+					PlanJSON: []byte(`{"planned_values":{"root_module":{}}}`),
+				}},
+				MockDeploy: mockDeploy,
+				Destroy: &fakeDestroyHarness{result: &harness.DestroyResult{
+					Destroy:       harness.StageResult{Stage: "destroy"},
+					StateSnapshot: []byte(`{"instance":{"servers":[]}}`),
+				}},
+				RunProject:     &fakeRunProject{created: harness.RunProject{ID: "run-proj-1", Name: "if-run-t"}},
+				SandboxDeploy:  sandboxDeploy,
+				SandboxDestroy: &fakeSandboxDestroyHarness{result: &harness.SandboxDestroyResult{Destroy: harness.StageResult{Stage: "destroy"}}},
+				OrphanSweep:    &fakeOrphanSweep{},
+				RealProbe:      &fakeRealProbeHarness{result: &harness.RealProbeResult{}},
+			}
+
+			cmd := newRunCommandForTest(opts)
+			stdout := &bytes.Buffer{}
+			cmd.SetOut(stdout)
+			cmd.SetErr(&bytes.Buffer{})
+			cmd.SetArgs([]string{scenarioPath, "--config", h.ConfigPath})
+			require.NoError(t, cmd.Execute(), stdout.String())
+			require.Equal(t, 2, generations, "the run repairs once and passes")
+
+			entries, err := generator.LoadPitfallEntries(h.PitfallsDir(), "scaleway")
+			require.NoError(t, err)
+			var avoid []generator.PitfallEntry
+			for _, e := range entries {
+				if e.Source == generator.AvoidSource {
+					avoid = append(avoid, e)
+				}
+			}
+			require.Len(t, avoid, 1, "entries: %+v", entries)
+			assert.Equal(t, "scaleway_block_volume", avoid[0].Resource)
+			assert.Contains(t, avoid[0].Rule, "bogus_attr")
+			assert.Equal(t, layer, avoid[0].LearnedLayer)
+		})
 	}
 }

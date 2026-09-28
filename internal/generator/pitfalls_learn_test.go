@@ -919,3 +919,53 @@ func TestAppendMockGap_CreatesFileAndDedups(t *testing.T) {
 		t.Errorf("aws section missing")
 	}
 }
+
+// An avoid rule learned on a different layer is new evidence, not a
+// duplicate: a real-cloud occurrence of a mock-learned prohibition is
+// kept beside it. Every other source dedups as before.
+func TestAppendPitfall_AvoidLayerDedup(t *testing.T) {
+	const resource = "aws_subnet"
+	const rule = "Do NOT use attribute `map_public_ip_on_launch` on `aws_subnet`."
+	load := func(t *testing.T, dir string) []PitfallEntry {
+		t.Helper()
+		entries, err := LoadPitfallEntries(dir, "aws")
+		require.NoError(t, err)
+		return entries
+	}
+	appendAll := func(t *testing.T, dir string, pitfalls ...LearnedPitfall) {
+		t.Helper()
+		for _, p := range pitfalls {
+			require.NoError(t, AppendPitfall(dir, "aws", p))
+		}
+	}
+
+	t.Run("avoid on another layer is appended", func(t *testing.T) {
+		dir := t.TempDir()
+		appendAll(t, dir,
+			LearnedPitfall{Resource: resource, Rule: rule, Source: AvoidSource, LearnedLayer: "mock_deploy"},
+			LearnedPitfall{Resource: resource, Rule: rule, Source: AvoidSource, LearnedLayer: "sandbox_deploy"},
+		)
+		entries := load(t, dir)
+		require.Len(t, entries, 2)
+		assert.Equal(t, "mock_deploy", entries[0].LearnedLayer)
+		assert.Equal(t, "sandbox_deploy", entries[1].LearnedLayer)
+	})
+
+	t.Run("avoid on the same layer is deduped", func(t *testing.T) {
+		dir := t.TempDir()
+		appendAll(t, dir,
+			LearnedPitfall{Resource: resource, Rule: rule, Source: AvoidSource, LearnedLayer: "mock_deploy"},
+			LearnedPitfall{Resource: resource, Rule: rule, Source: AvoidSource, LearnedLayer: "mock_deploy"},
+		)
+		assert.Len(t, load(t, dir), 1)
+	})
+
+	t.Run("non-avoid dedup ignores the layer", func(t *testing.T) {
+		dir := t.TempDir()
+		appendAll(t, dir,
+			LearnedPitfall{Resource: resource, Rule: rule, Source: "descriptive", LearnedLayer: "mock_deploy"},
+			LearnedPitfall{Resource: resource, Rule: rule, Source: "descriptive", LearnedLayer: "sandbox_deploy"},
+		)
+		assert.Len(t, load(t, dir), 1)
+	})
+}

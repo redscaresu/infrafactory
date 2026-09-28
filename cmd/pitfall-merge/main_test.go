@@ -1,6 +1,8 @@
 package main
 
 import (
+	"path/filepath"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"testing"
@@ -287,4 +289,31 @@ func TestMergeFallsBackToTheTextForKeylessLiveEntries(t *testing.T) {
 
 	assert.Zero(t, added)
 	assert.Len(t, got.Pitfalls, 1)
+}
+
+// learned_layer survives a merge: it is what separates a mock-learned
+// avoid rule from its real-cloud occurrence, so a merge that dropped it
+// would erase the provenance the run recorded.
+func TestMergeKeepsLearnedLayer(t *testing.T) {
+	dir := t.TempDir()
+	prePath := filepath.Join(dir, "pre.yaml")
+	postPath := filepath.Join(dir, "post.yaml")
+	outPath := filepath.Join(dir, "out.yaml")
+	require.NoError(t, savePitfalls(prePath, generator.PitfallsFile{Provider: "aws"}))
+	require.NoError(t, savePitfalls(postPath, generator.PitfallsFile{Provider: "aws", Pitfalls: []generator.PitfallEntry{
+		{Resource: "aws_subnet", Rule: "do NOT use X", Source: "avoid", LearnedLayer: "sandbox_deploy"},
+	}}))
+
+	pre, err := loadPitfalls(prePath)
+	require.NoError(t, err)
+	post, err := loadPitfalls(postPath)
+	require.NoError(t, err)
+	merged, added, _, _ := merge(pre, post, map[string]bool{"avoid": true})
+	require.NoError(t, savePitfalls(outPath, merged))
+	got, err := loadPitfalls(outPath)
+	require.NoError(t, err)
+
+	assert.Equal(t, 1, added)
+	require.Len(t, got.Pitfalls, 1)
+	assert.Equal(t, "sandbox_deploy", got.Pitfalls[0].LearnedLayer)
 }
