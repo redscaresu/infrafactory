@@ -5,8 +5,7 @@ import rego.v1
 deny contains msg if {
 	allowed := input.params.region
 	resource := input.planned_values.root_module.resources[_]
-	region := resource.values.region
-	region != null
+	region := placement(resource, "region")
 	not startswith(region, allowed)
 	msg := sprintf(
 		"%s is in region %s — must be in %s",
@@ -14,17 +13,90 @@ deny contains msg if {
 	)
 }
 
+# A zone satisfies a region: `fr-par-1` is in `fr-par`. Zonal resources
+# such as scaleway_instance_server carry a zone and no region, so the
+# region rule above never sees them.
+deny contains msg if {
+	allowed := input.params.region
+	resource := input.planned_values.root_module.resources[_]
+	zone := placement(resource, "zone")
+	not startswith(zone, allowed)
+	msg := sprintf(
+		"%s is in zone %s — must be in %s",
+		[resource.address, zone, allowed],
+	)
+}
+
 deny contains msg if {
 	allowed := input.params.zone
 	allowed != null
 	resource := input.planned_values.root_module.resources[_]
-	zone := resource.values.zone
-	zone != null
+	zone := placement(resource, "zone")
 	zone != allowed
 	msg := sprintf(
 		"%s is in zone %s — must be in %s",
 		[resource.address, zone, allowed],
 	)
+}
+
+# A resource that sets no zone or region of its own takes the provider's,
+# and generated HCL usually sets the zone only there. The provider block
+# is a target in its own right, denied even when every resource overrides
+# it: the next resource added without a zone would land in that default.
+deny contains msg if {
+	allowed := input.params.region
+	some [key, attr, value] in provider_default
+	not startswith(value, allowed)
+	msg := sprintf(
+		"provider %s defaults to %s %s — must be in %s",
+		[key, attr, value, allowed],
+	)
+}
+
+deny contains msg if {
+	allowed := input.params.zone
+	allowed != null
+	some [key, "zone", zone] in provider_default
+	zone != allowed
+	msg := sprintf(
+		"provider %s defaults to zone %s — must be in %s",
+		[key, zone, allowed],
+	)
+}
+
+provider_default contains [key, attr, value] if {
+	some key, provider in input.configuration.provider_config
+	provider.name == "scaleway"
+	some attr in ["region", "zone"]
+	value := expression_value(provider.expressions[attr])
+}
+
+# placement is the zone or region a planned resource is declared in.
+# Provider 2.83.0 leaves both unknown in planned_values even when the
+# resource block sets them, so the plan's `configuration` is read when
+# the planned value is not known.
+placement(resource, attr) := value if {
+	value := resource.values[attr]
+	is_string(value)
+} else := value if {
+	block := input.configuration.root_module.resources[_]
+	block.mode == resource.mode
+	block.type == resource.type
+	block.name == resource.name
+	value := expression_value(block.expressions[attr])
+}
+
+# ponytail: a literal or a lone `var.NAME` reference. A local's value is
+# not in the plan JSON, so a zone set from one is left to deny_state at
+# Layer 2; an interpolation of one variable reads as that variable.
+expression_value(expr) := expr.constant_value if is_string(expr.constant_value)
+
+expression_value(expr) := value if {
+	[ref] := expr.references
+	name := trim_prefix(ref, "var.")
+	name != ref
+	value := input.variables[name].value
+	is_string(value)
 }
 
 # Layer 2: the same question, asked of the Layer 2 mock's state.
