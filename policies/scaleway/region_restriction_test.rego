@@ -112,6 +112,15 @@ test_provider_defaults_outside_region_deny if {
 	)
 }
 
+test_provider_zone_param_is_exact if {
+	region_restriction.deny == {"provider scaleway defaults to zone fr-par-2 — must be in fr-par-1"} with input as plan(
+		"scaleway_instance_server.web",
+		{},
+		{"region": {"constant_value": "fr-par"}, "zone": {"constant_value": "fr-par-2"}},
+		{"region": "fr-par", "zone": "fr-par-1"},
+	)
+}
+
 test_state_zone_outside_region_denies if {
 	region_restriction.deny_state == {"web is in zone nl-ams-1 in the deployed state — must be in fr-par"} with input as server_state("nl-ams-1", in_fr_par)
 }

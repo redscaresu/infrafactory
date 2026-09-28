@@ -40,18 +40,35 @@ deny contains msg if {
 }
 
 # A resource that sets no zone or region of its own takes the provider's,
-# and generated HCL usually sets the zone only there.
+# and generated HCL usually sets the zone only there. The provider block
+# is a target in its own right, denied even when every resource overrides
+# it: the next resource added without a zone would land in that default.
 deny contains msg if {
 	allowed := input.params.region
-	some key, provider in input.configuration.provider_config
-	provider.name == "scaleway"
-	some attr in ["region", "zone"]
-	value := expression_value(provider.expressions[attr])
+	some [key, attr, value] in provider_default
 	not startswith(value, allowed)
 	msg := sprintf(
 		"provider %s defaults to %s %s — must be in %s",
 		[key, attr, value, allowed],
 	)
+}
+
+deny contains msg if {
+	allowed := input.params.zone
+	allowed != null
+	some [key, "zone", zone] in provider_default
+	zone != allowed
+	msg := sprintf(
+		"provider %s defaults to zone %s — must be in %s",
+		[key, zone, allowed],
+	)
+}
+
+provider_default contains [key, attr, value] if {
+	some key, provider in input.configuration.provider_config
+	provider.name == "scaleway"
+	some attr in ["region", "zone"]
+	value := expression_value(provider.expressions[attr])
 }
 
 # placement is the zone or region a planned resource is declared in.
