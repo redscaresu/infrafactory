@@ -1,7 +1,6 @@
 ---
 kind: lead
-status: blocked
-blocked_by: [fakeaws-provider-exact-pin]
+status: ready
 epic: fakeaws-step-one-surfaces
 depends_on: [fakeaws-provider-exact-pin]
 touches: ["docs/hld/2026-09-27-aws-web-stack.md", "docs/epics/aws-layer-neutral-hcl.md"]
