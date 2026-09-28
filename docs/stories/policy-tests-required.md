@@ -1,7 +1,6 @@
 ---
 kind: code
-status: blocked
-blocked_by: [policy-loader-skips-test-files, rego-test-harness, aws-region-restriction-honours-params, aws-encryption-sse-binds-its-bucket, aws-vpc-required-fails-closed, aws-no-public-db-drops-dead-state-rule, scaleway-region-restriction-zonal-plan-rule, rego-tests-for-unchanged-policies, scaleway-rdb-policies-fail-closed, scaleway-no-public-endpoints-drops-dead-rules]
+status: ready
 epic: policy-correctness
 depends_on: [policy-loader-skips-test-files, rego-test-harness, aws-region-restriction-honours-params, aws-encryption-sse-binds-its-bucket, aws-vpc-required-fails-closed, aws-no-public-db-drops-dead-state-rule, scaleway-region-restriction-zonal-plan-rule, rego-tests-for-unchanged-policies, scaleway-rdb-policies-fail-closed, scaleway-no-public-endpoints-drops-dead-rules]
 touches: ["internal/harness/rego_policy_test.go", "internal/harness/testdata/regotest/"]
