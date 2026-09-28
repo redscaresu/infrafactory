@@ -1,5 +1,6 @@
 # One resource per service fakeaws serves without Docker. No provider
-# block: generation writes it, and every endpoint comes from cloudEnv.
+# block: generation writes it, default_tags with the run id included, and
+# every endpoint comes from cloudEnv.
 
 resource "aws_vpc" "main" {
   cidr_block = "10.80.0.0/16"
@@ -67,4 +68,14 @@ resource "aws_db_subnet_group" "main" {
 resource "aws_db_parameter_group" "main" {
   name   = "env-only-pg15"
   family = "postgres15"
+}
+
+resource "aws_eks_cluster" "main" {
+  name     = "env-only-cluster"
+  role_arn = aws_iam_role.app.arn
+  version  = "1.29"
+
+  vpc_config {
+    subnet_ids = [aws_subnet.a.id, aws_subnet.b.id]
+  }
 }

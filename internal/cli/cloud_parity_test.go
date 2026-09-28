@@ -84,7 +84,7 @@ func TestEnsureProviderWiringCoverageIsSymmetric(t *testing.T) {
 	}{
 		{"scaleway", ensureScalewayProviderWiring, validateScalewayProviderWiring},
 		{"gcp", func(f map[string][]byte) { ensureGoogleProviderWiring(f, cfg) }, validateGoogleProviderWiring},
-		{"aws", func(f map[string][]byte) { ensureAwsProviderWiring(f, cfg) }, validateAwsProviderWiring},
+		{"aws", func(f map[string][]byte) { require.NoError(t, ensureAwsProviderWiring(f, cfg, testRunID)) }, validateAwsProviderWiring},
 	}
 
 	for _, tc := range cases {
@@ -103,12 +103,13 @@ func TestEnsureProviderWiringCoverageIsSymmetric(t *testing.T) {
 	}
 }
 
-// TestEnsureAwsProviderWiringWritesOnlyRegionAndPathStyle is the inverse
-// of the endpoints block this wiring used to inject: with fakeaws and S3
-// both configured, the one provider "aws" block left is region and
-// s3_use_path_style, with no endpoints, skip_*, keys or alias. Endpoints
-// come from cloudEnv at Layer 2 and from nowhere at Layer 3 (ADR-0039).
-func TestEnsureAwsProviderWiringWritesOnlyRegionAndPathStyle(t *testing.T) {
+// TestEnsureAwsProviderWiringWritesOnlyRegionPathStyleAndRunTag is the
+// inverse of the endpoints block this wiring used to inject: with fakeaws
+// and S3 both configured, the one provider "aws" block left is region,
+// s3_use_path_style and default_tags carrying the run id, with no
+// endpoints, skip_*, keys or alias. Endpoints come from cloudEnv at
+// Layer 2 and from nowhere at Layer 3 (ADR-0039).
+func TestEnsureAwsProviderWiringWritesOnlyRegionPathStyleAndRunTag(t *testing.T) {
 	t.Parallel()
 	cfg := config.Config{
 		Fakeaws: config.FakeawsConfig{URL: "http://127.0.0.1:8082"},
@@ -120,7 +121,7 @@ func TestEnsureAwsProviderWiringWritesOnlyRegionAndPathStyle(t *testing.T) {
 		"providers.tf": []byte(modelAWSProviderTF),
 	}
 
-	ensureAwsProviderWiring(files, cfg)
+	require.NoError(t, ensureAwsProviderWiring(files, cfg, testRunID))
 
 	var blocks []*hclsyntax.Block
 	for name, content := range files {
@@ -134,7 +135,14 @@ func TestEnsureAwsProviderWiringWritesOnlyRegionAndPathStyle(t *testing.T) {
 	}
 	require.Len(t, blocks, 1, "the wiring's block must be the only provider \"aws\" block")
 	body := blocks[0].Body
-	assert.Empty(t, body.Blocks, "no nested block: no endpoints, no default_tags")
+	require.Len(t, body.Blocks, 1, "no nested block but default_tags: no endpoints")
+	defaultTags := body.Blocks[0].Body
+	assert.Equal(t, "default_tags", body.Blocks[0].Type)
+	assert.Empty(t, defaultTags.Blocks)
+	require.ElementsMatch(t, []string{"tags"}, slices.Collect(maps.Keys(defaultTags.Attributes)))
+	tags, diags := defaultTags.Attributes["tags"].Expr.Value(nil)
+	require.False(t, diags.HasErrors())
+	assert.Equal(t, cty.ObjectVal(map[string]cty.Value{"infrafactory-run-id": cty.StringVal(testRunID)}), tags)
 	assert.ElementsMatch(t, []string{"region", "s3_use_path_style"}, slices.Collect(maps.Keys(body.Attributes)))
 	region, diags := body.Attributes["region"].Expr.Value(nil)
 	require.False(t, diags.HasErrors())

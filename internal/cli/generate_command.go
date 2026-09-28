@@ -4,13 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
 	"github.com/hashicorp/hcl/v2"
+	"github.com/hashicorp/hcl/v2/hclsyntax"
 	"github.com/hashicorp/hcl/v2/hclwrite"
 	"github.com/zclconf/go-cty/cty"
 
@@ -29,7 +32,7 @@ func runGenerateCommand(cmd *cobra.Command, args []string, runtime *CommandRunti
 		return fmt.Errorf("load scenario %q: %w", scenarioPath, err)
 	}
 
-	writtenFiles, err := generateAndWriteFiles(cmd.Context(), runtime, scenarioPath, 1, nil, generatedFileWriteModeClean)
+	writtenFiles, _, err := generateAndWriteFilesWithResult(cmd.Context(), runtime, scenarioPath, "", 1, nil, generatedFileWriteModeClean)
 	if err != nil {
 		return err
 	}
@@ -337,13 +340,18 @@ func validateGoogleProviderWiring(files map[string][]byte) error {
 // is pinned to exactly harness.AWSProviderVersion. Endpoints reach the
 // provider through the environment (cloudEnv), never the HCL, so neither
 // fakeaws.url, s3.url nor sandbox_deploy changes a byte; aws.region
-// changes the region literal.
-func ensureAwsProviderWiring(files map[string][]byte, cfg config.Config) {
+// changes the region literal. A non-empty runID adds default_tags
+// carrying it, so every resource the run applies is taggable back to it;
+// model HCL that names that tag itself is refused.
+func ensureAwsProviderWiring(files map[string][]byte, cfg config.Config, runID string) error {
 	if hasAwsResource, _, _ := detectAwsProviderWiring(files); !hasAwsResource {
-		return
+		return nil
 	}
 	stripAwsProviderBlock(files)
-	injected := buildAwsProviderBlock(awsRegion(cfg.AWS))
+	if err := refuseAwsRunIDTag(files); err != nil {
+		return err
+	}
+	injected := buildAwsProviderBlock(awsRegion(cfg.AWS), runID)
 	if !pinAwsRequiredProvider(files) {
 		injected = `terraform {
   required_providers {
@@ -360,6 +368,37 @@ func ensureAwsProviderWiring(files map[string][]byte, cfg config.Config) {
 		injected = existing + "\n\n" + injected
 	}
 	files["providers.tf"] = []byte(injected + "\n")
+	return nil
+}
+
+// refuseAwsRunIDTag refuses a .tf file that names awsRunIDTagKey outside
+// a comment, once the model's provider blocks are gone: a resource's own
+// tag of that key overrides default_tags, so the model would choose which
+// run the resource belongs to. Any mention counts, not just a tags
+// attribute, because the key can reach one through a local, a variable
+// default or merge().
+func refuseAwsRunIDTag(files map[string][]byte) error {
+	for _, name := range slices.Sorted(maps.Keys(files)) {
+		if strings.HasSuffix(name, ".tf") && namesOutsideComments(files[name], awsRunIDTagKey) {
+			return fmt.Errorf("%s names the %q tag, which infrafactory sets from the run's id: remove it", name, awsRunIDTagKey)
+		}
+	}
+	return nil
+}
+
+// namesOutsideComments reports whether word appears in content other than
+// in a comment. HCL that does not lex counts every mention.
+func namesOutsideComments(content []byte, word string) bool {
+	tokens, diags := hclsyntax.LexConfig(content, "", hcl.InitialPos)
+	if diags.HasErrors() {
+		return strings.Contains(string(content), word)
+	}
+	for _, token := range tokens {
+		if token.Type != hclsyntax.TokenComment && strings.Contains(string(token.Bytes), word) {
+			return true
+		}
+	}
+	return false
 }
 
 // pinAwsRequiredProvider sets every required_providers aws entry to
@@ -533,15 +572,30 @@ func stripProviderBlock(files map[string][]byte, providerName string) {
 	}
 }
 
+// awsRunIDTagKey is the tag default_tags puts on every AWS resource a run
+// applies, valued with the run id.
+const awsRunIDTagKey = "infrafactory-run-id"
+
 // buildAwsProviderBlock is the whole AWS provider block, at both layers
-// (ADR-0039 decision 3). s3_use_path_style is the one setting with no
-// environment form; everything else, endpoints and credentials included,
-// comes from the environment.
-func buildAwsProviderBlock(region string) string {
-	return fmt.Sprintf(`provider "aws" {
+// (ADR-0039 decisions 3 and 9). s3_use_path_style is the one setting with
+// no environment form; everything else, endpoints and credentials
+// included, comes from the environment. The run id comes from the run,
+// never the model; empty (a bare `generate`) writes no default_tags.
+func buildAwsProviderBlock(region, runID string) string {
+	block := fmt.Sprintf(`provider "aws" {
   region            = %q
   s3_use_path_style = true
-}`, region)
+`, region)
+	if runID != "" {
+		block += fmt.Sprintf(`
+  default_tags {
+    tags = {
+      %q = %q
+    }
+  }
+`, awsRunIDTagKey, runID)
+	}
+	return block + "}"
 }
 
 func validateAwsProviderWiring(files map[string][]byte) error {
@@ -645,12 +699,9 @@ func toFeedbackFailuresPayload(in []FailureSummary) []feedbackFailure {
 	return out
 }
 
-func generateAndWriteFiles(ctx context.Context, runtime *CommandRuntime, scenarioPath string, iteration int, feedbackFailures []FailureSummary, writeMode generatedFileWriteMode) (int, error) {
-	written, _, err := generateAndWriteFilesWithResult(ctx, runtime, scenarioPath, iteration, feedbackFailures, writeMode)
-	return written, err
-}
-
-func generateAndWriteFilesWithResult(ctx context.Context, runtime *CommandRuntime, scenarioPath string, iteration int, feedbackFailures []FailureSummary, writeMode generatedFileWriteMode) (int, *generator.GeneratedCode, error) {
+// runID is the run's id, or "" outside a run; it reaches the generated
+// HCL only through the AWS provider block's default_tags.
+func generateAndWriteFilesWithResult(ctx context.Context, runtime *CommandRuntime, scenarioPath, runID string, iteration int, feedbackFailures []FailureSummary, writeMode generatedFileWriteMode) (int, *generator.GeneratedCode, error) {
 	scenarioPayload, err := os.ReadFile(scenarioPath)
 	if err != nil {
 		return 0, nil, fmt.Errorf("read scenario %q: %w", scenarioPath, err)
@@ -722,7 +773,9 @@ func generateAndWriteFilesWithResult(ctx context.Context, runtime *CommandRuntim
 	if err := validateGoogleProviderWiring(generated.Files); err != nil {
 		return 0, nil, fmt.Errorf("validate generated files: %w", err)
 	}
-	ensureAwsProviderWiring(generated.Files, runtime.Config)
+	if err := ensureAwsProviderWiring(generated.Files, runtime.Config, runID); err != nil {
+		return 0, nil, fmt.Errorf("validate generated files: %w", err)
+	}
 	if err := validateAwsProviderWiring(generated.Files); err != nil {
 		return 0, nil, fmt.Errorf("validate generated files: %w", err)
 	}

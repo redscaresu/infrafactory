@@ -58,9 +58,12 @@ const sqsQueueTF = `resource "aws_sqs_queue" "jobs" {
 }
 `
 
-func wireAWS(model map[string][]byte, cfg config.Config) map[string]string {
+const testRunID = "20260928T101500Z"
+
+func wireAWS(t *testing.T, model map[string][]byte, cfg config.Config, runID string) map[string]string {
+	t.Helper()
 	files := maps.Clone(model)
-	ensureAwsProviderWiring(files, cfg)
+	require.NoError(t, ensureAwsProviderWiring(files, cfg, runID))
 	out := make(map[string]string, len(files))
 	for name, content := range files {
 		out[name] = string(content)
@@ -69,23 +72,30 @@ func wireAWS(model map[string][]byte, cfg config.Config) map[string]string {
 }
 
 // Layer-neutral means the bytes the wiring writes do not depend on where
-// the run applies: not on Layer 3, not on which mocks are configured.
+// the run applies: not on Layer 3, not on which mocks are configured. The
+// run id is the one value that differs between runs, and only as the
+// default_tags value.
 func TestEnsureAwsProviderWiringIsLayerNeutral(t *testing.T) {
 	t.Parallel()
 	model := map[string][]byte{"main.tf": []byte(sqsQueueTF), "providers.tf": []byte(modelAWSProviderTF)}
-	want := wireAWS(model, config.Config{})
+	want := wireAWS(t, model, config.Config{}, testRunID)
+	require.Contains(t, want["providers.tf"], `"infrafactory-run-id" = "`+testRunID+`"`)
 
 	for _, layer3 := range []bool{false, true} {
 		for _, fakeaws := range []string{"", "http://127.0.0.1:8082"} {
 			for _, s3 := range []string{"", "http://127.0.0.1:9090"} {
 				cfg := config.Config{Fakeaws: config.FakeawsConfig{URL: fakeaws}, S3: config.S3Config{URL: s3}}
 				cfg.Validation.Layers.SandboxDeploy.Enabled = layer3
-				assert.Equal(t, want, wireAWS(model, cfg), "sandbox_deploy=%t fakeaws=%q s3=%q", layer3, fakeaws, s3)
+				assert.Equal(t, want, wireAWS(t, model, cfg, testRunID), "sandbox_deploy=%t fakeaws=%q s3=%q", layer3, fakeaws, s3)
 			}
 		}
 	}
 
-	regional := wireAWS(model, config.Config{AWS: config.AWSConfig{Region: "eu-west-2"}})
+	otherRun := maps.Clone(want)
+	otherRun["providers.tf"] = strings.Replace(want["providers.tf"], testRunID, "20260928T111500Z", 1)
+	assert.Equal(t, otherRun, wireAWS(t, model, config.Config{}, "20260928T111500Z"), "the run id changes the tag value and nothing else")
+
+	regional := wireAWS(t, model, config.Config{AWS: config.AWSConfig{Region: "eu-west-2"}}, testRunID)
 	want["providers.tf"] = strings.Replace(want["providers.tf"], `"us-east-1"`, `"eu-west-2"`, 1)
 	assert.Equal(t, want, regional, "aws.region changes the region literal and nothing else")
 }
@@ -141,7 +151,7 @@ func TestEnsureAwsProviderWiringPinsTheExactVersion(t *testing.T) {
 					entry + "\n  }\n}\n"),
 			}
 
-			ensureAwsProviderWiring(files, config.Config{})
+			require.NoError(t, ensureAwsProviderWiring(files, config.Config{}, testRunID))
 
 			assert.Equal(t, map[string][]cty.Value{"aws": {pin}, "random": {random}}, requiredProviders(t, files))
 			require.NoError(t, validateAwsProviderWiring(files))
@@ -232,7 +242,7 @@ func TestLayer2AWSRunSetsEndpointsOnEveryTofuCommand(t *testing.T) {
 	_, err := rt.LoadScenario(scenarioPath)
 	require.NoError(t, err)
 
-	_, _, err = generateAndWriteFilesWithResult(ctx, rt, scenarioPath, 1, nil, generatedFileWriteModeClean)
+	_, _, err = generateAndWriteFilesWithResult(ctx, rt, scenarioPath, "", 1, nil, generatedFileWriteModeClean)
 	require.NoError(t, err)
 	_, _, err = executeValidateWithArtifacts(ctx, rt, scenarioPath)
 	require.NoError(t, err)
