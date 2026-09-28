@@ -169,53 +169,17 @@ func layer3UnreadableConfigExt(name string) bool {
 //
 // Before, not during: `data "external"` runs its program at PLAN time, so a
 // check that waits for plan output has already lost.
+//
+// It is Scaleway's driver: it only calls named rules, so a second cloud's
+// driver can call the same ones (TestLayer3GateDriversHoldNoInlineRefusals).
 func validateLayer3HCLShape(outputDir string, allowedResourceTypes []string) error {
-	entries, err := os.ReadDir(outputDir)
+	parsed, varDefaults, err := layer3ParseDir(outputDir)
 	if err != nil {
-		return fmt.Errorf("read output directory for layer 3 HCL validation: %w", err)
+		return err
 	}
 	problems := make([]string, 0)
 	sawCanonicalProvider := false
 	projectResources := 0
-	// Variable defaults are collected across ALL files before any
-	// resource is checked, because a bound attribute in main.tf routinely
-	// reads a default declared in variables.tf. A single pass would see
-	// `size_in_gb = var.volume_size_in_gb` with no default in scope yet,
-	// call it unresolvable, and refuse a committed fixture.
-	parsed := make(map[string]*hclsyntax.Body)
-	varDefaults := make(map[string]cty.Value)
-	for _, entry := range entries {
-		// Every extension tofu loads must be one this validator reads.
-		//
-		// .tf.json is loaded exactly as .tf and would sail past a native
-		// HCL parser. OpenTofu also loads .tofu and .tofu.json, which are
-		// easier still to miss -- a .tofu file sitting beside valid .tf
-		// gets applied with cloud credentials having passed none of the
-		// checks below. Refuse rather than grow a second parser and a
-		// second dialect: no Layer 3 stack has ever needed either.
-		if !entry.IsDir() && layer3UnreadableConfigExt(entry.Name()) {
-			return fmt.Errorf("layer 3 refuses %s: tofu loads it automatically but this validator does not read it", entry.Name())
-		}
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".tf") {
-			continue
-		}
-		path := filepath.Join(outputDir, entry.Name())
-		src, readErr := os.ReadFile(path)
-		if readErr != nil {
-			return fmt.Errorf("read %s: %w", entry.Name(), readErr)
-		}
-		file, diags := hclsyntax.ParseConfig(src, entry.Name(), hcl.Pos{Line: 1, Column: 1})
-		if diags.HasErrors() {
-			// Unparseable means unknowable. Fail closed rather than apply it.
-			return fmt.Errorf("layer 3 refuses %s: cannot parse it, so cannot vouch for it (%s)", entry.Name(), diags.Error())
-		}
-		body, ok := file.Body.(*hclsyntax.Body)
-		if !ok {
-			return fmt.Errorf("layer 3 refuses %s: unexpected body type", entry.Name())
-		}
-		parsed[entry.Name()] = body
-		layer3VariableDefaults(body, varDefaults)
-	}
 	for _, name := range slices.Sorted(maps.Keys(parsed)) {
 		body := parsed[name]
 		fileProblems, sawProvider, projectsHere := layer3BlockProblems(body, name, allowedResourceTypes)
@@ -228,27 +192,11 @@ func validateLayer3HCLShape(outputDir string, allowedResourceTypes []string) err
 			}
 		}
 	}
-	// The teardown model assumes a single disposable project throughout:
-	// the marker records one project id, AssertRunProjectDeletable guards
-	// that one, and the orphan sweep asks the API about that one.
-	// Inverted by ADR-0025: the run's disposable project is created before
-	// the apply and handed to the provider, so a stack must declare NONE.
-	// Declaring one creates a second project that nothing tracks, no
-	// marker names and no teardown deletes -- which is the leak the
-	// single-project rule was written to prevent, arrived at from the
-	// other direction.
-	if projectResources > 0 {
-		problems = append(problems, fmt.Sprintf(
-			"%d scaleway_account_project resource(s) declared; the run's project is created before the apply and is the provider default, so a declared one would be a second project nothing tracks or destroys",
-			projectResources))
+	if problem := layer3ProjectCountProblem(projectResources); problem != "" {
+		problems = append(problems, problem)
 	}
-	if !sawCanonicalProvider {
-		// Omitting required_providers is not a safe default: tofu then
-		// resolves scaleway_* from the default namespace, which is a
-		// choice the configuration made implicitly rather than one this
-		// check verified. Declaring it is the only way to know which
-		// provider binary will run beside the credentials.
-		problems = append(problems, fmt.Sprintf("no terraform.required_providers entry declares source %q, so the provider binary would be resolved implicitly", layer3ScalewayProviderSource))
+	if problem := layer3MissingProviderProblem(sawCanonicalProvider, layer3ScalewayPin); problem != "" {
+		problems = append(problems, problem)
 	}
 	if len(problems) > 0 {
 		sort.Strings(problems)
@@ -257,50 +205,193 @@ func validateLayer3HCLShape(outputDir string, allowedResourceTypes []string) err
 	return nil
 }
 
+// layer3ParseDir parses every .tf file in outputDir, keyed by base name, and
+// collects variable defaults across ALL of them before any resource is
+// checked: a bound attribute in main.tf routinely reads a default declared
+// in variables.tf. A single pass would see `size_in_gb = var.volume_size_in_gb`
+// with no default in scope yet, call it unresolvable, and refuse a committed
+// fixture.
+func layer3ParseDir(outputDir string) (map[string]*hclsyntax.Body, map[string]cty.Value, error) {
+	entries, err := os.ReadDir(outputDir)
+	if err != nil {
+		return nil, nil, fmt.Errorf("read output directory for layer 3 HCL validation: %w", err)
+	}
+	parsed := make(map[string]*hclsyntax.Body)
+	varDefaults := make(map[string]cty.Value)
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		body, err := layer3ParseFile(outputDir, entry.Name())
+		if err != nil {
+			return nil, nil, err
+		}
+		if body == nil {
+			continue
+		}
+		parsed[entry.Name()] = body
+		layer3VariableDefaults(body, varDefaults)
+	}
+	return parsed, varDefaults, nil
+}
+
+// layer3ParseFile parses one file of a stack, or returns nil for a file
+// tofu does not load.
+func layer3ParseFile(outputDir, name string) (*hclsyntax.Body, error) {
+	// Every extension tofu loads must be one this validator reads.
+	//
+	// .tf.json is loaded exactly as .tf and would sail past a native
+	// HCL parser. OpenTofu also loads .tofu and .tofu.json, which are
+	// easier still to miss -- a .tofu file sitting beside valid .tf
+	// gets applied with cloud credentials having passed none of the
+	// checks below. Refuse rather than grow a second parser and a
+	// second dialect: no Layer 3 stack has ever needed either.
+	if layer3UnreadableConfigExt(name) {
+		return nil, fmt.Errorf("layer 3 refuses %s: tofu loads it automatically but this validator does not read it", name)
+	}
+	if !strings.HasSuffix(name, ".tf") {
+		return nil, nil
+	}
+	src, err := os.ReadFile(filepath.Join(outputDir, name))
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", name, err)
+	}
+	file, diags := hclsyntax.ParseConfig(src, name, hcl.Pos{Line: 1, Column: 1})
+	if diags.HasErrors() {
+		// Unparseable means unknowable. Fail closed rather than apply it.
+		return nil, fmt.Errorf("layer 3 refuses %s: cannot parse it, so cannot vouch for it (%s)", name, diags.Error())
+	}
+	body, ok := file.Body.(*hclsyntax.Body)
+	if !ok {
+		return nil, fmt.Errorf("layer 3 refuses %s: unexpected body type", name)
+	}
+	return body, nil
+}
+
+// layer3ProjectCountProblem refuses a declared scaleway_account_project.
+//
+// The teardown model assumes a single disposable project throughout:
+// the marker records one project id, AssertRunProjectDeletable guards
+// that one, and the orphan sweep asks the API about that one.
+// Inverted by ADR-0025: the run's disposable project is created before
+// the apply and handed to the provider, so a stack must declare NONE.
+// Declaring one creates a second project that nothing tracks, no
+// marker names and no teardown deletes -- which is the leak the
+// single-project rule was written to prevent, arrived at from the
+// other direction.
+func layer3ProjectCountProblem(projectResources int) string {
+	if projectResources == 0 {
+		return ""
+	}
+	return fmt.Sprintf(
+		"%d scaleway_account_project resource(s) declared; the run's project is created before the apply and is the provider default, so a declared one would be a second project nothing tracks or destroys",
+		projectResources)
+}
+
+// layer3MissingProviderProblem refuses a stack whose required_providers
+// never declared the pinned provider under its local name.
+//
+// Omitting required_providers is not a safe default: tofu then resolves
+// the provider from the default namespace, which is a choice the
+// configuration made implicitly rather than one this check verified.
+// Declaring it is the only way to know which provider binary will run
+// beside the credentials.
+func layer3MissingProviderProblem(sawPin bool, pin layer3ProviderPin) string {
+	if sawPin {
+		return ""
+	}
+	return fmt.Sprintf("no terraform.required_providers entry declares source %q, so the provider binary would be resolved implicitly", pin.source)
+}
+
 func layer3BlockProblems(body *hclsyntax.Body, file string, allowedResourceTypes []string) ([]string, bool, int) {
 	problems := make([]string, 0)
 	sawCanonicalProvider := false
 	projectResources := 0
 	for _, block := range body.Blocks {
-		switch {
-		case !layer3AllowedTopLevelBlocks[block.Type]:
-			problems = append(problems, fmt.Sprintf("%s: %q blocks are not permitted", file, block.Type))
+		if problem := layer3TopLevelBlockProblem(block, file); problem != "" {
+			problems = append(problems, problem)
 			continue
-		case block.Type == "resource":
+		}
+		switch block.Type {
+		case "resource":
 			if len(block.Labels) > 0 && block.Labels[0] == "scaleway_account_project" {
 				projectResources++
 			}
-			if len(block.Labels) > 0 && !resourceTypeAllowed(block.Labels[0], allowedResourceTypes) {
-				problems = append(problems, fmt.Sprintf("%s: resource type %q is not in allow_resource_types", file, block.Labels[0]))
+			if problem := layer3ResourceTypeProblem(block, file, layer3ScalewayResourcePrefix, allowedResourceTypes); problem != "" {
+				problems = append(problems, problem)
 			}
 			problems = append(problems, layer3ContainmentProblems(block, file)...)
 			problems = append(problems, layer3MultiplicityProblems(block, file)...)
 			problems = append(problems, layer3UndestroyableResourceProblems(block, file)...)
 			problems = append(problems, layer3InlinePrivateNetworkProblems(block, file)...)
-		case block.Type == "provider":
-			if len(block.Labels) > 0 && block.Labels[0] != "scaleway" {
-				problems = append(problems, fmt.Sprintf("%s: provider %q is not permitted", file, block.Labels[0]))
-				break
-			}
-			if block.Body != nil {
-				for name := range block.Body.Attributes {
-					if !layer3SafeProviderAttrs[name] {
-						problems = append(problems, fmt.Sprintf("%s: provider setting %q is not permitted (the endpoint and project come from the sealed environment, not from the configuration)", file, name))
-					}
-				}
-			}
-		}
-		if block.Type == "terraform" {
+		case "provider":
+			problems = append(problems, layer3ProviderBlockProblems(block, file, layer3ScalewayPin.name, layer3SafeProviderAttrs)...)
+		case "terraform":
 			problems = append(problems, layer3TerraformBlockProblems(block, file)...)
-			tfProblems, sawProvider := layer3ProviderSourceProblems(block, file)
+			tfProblems, sawProvider := layer3ProviderSourceProblems(block, file, layer3ScalewayPin)
 			problems = append(problems, tfProblems...)
 			sawCanonicalProvider = sawCanonicalProvider || sawProvider
 		}
 		problems = append(problems, layer3NestedProblems(block, file)...)
-		problems = append(problems, layer3FunctionCallProblems(block, file)...)
+		problems = append(problems, layer3FunctionCallProblems(block, file, nil)...)
 		problems = append(problems, layer3UndestroyableProblems(block, file)...)
 	}
 	return problems, sawCanonicalProvider, projectResources
+}
+
+// layer3TopLevelBlockProblem refuses a top-level block type that is not on
+// layer3AllowedTopLevelBlocks.
+func layer3TopLevelBlockProblem(block *hclsyntax.Block, file string) string {
+	if layer3AllowedTopLevelBlocks[block.Type] {
+		return ""
+	}
+	return fmt.Sprintf("%s: %q blocks are not permitted", file, block.Type)
+}
+
+// layer3ScalewayResourcePrefix is the prefix of every resource type a
+// Scaleway stack may declare.
+const layer3ScalewayResourcePrefix = "scaleway_"
+
+// layer3ResourceTypeProblem refuses a resource type outside the stack's
+// cloud, and then one outside allow_resource_types.
+//
+// The prefix is checked first and whatever the allowlist says: the
+// allowlist answers "may this cost money", and a type from another cloud
+// is one this gate's containment, cost and teardown rules were never
+// written for -- `aws_*` on the list would otherwise let an AWS resource
+// into a Scaleway stack.
+func layer3ResourceTypeProblem(block *hclsyntax.Block, file, prefix string, allowedResourceTypes []string) string {
+	if len(block.Labels) == 0 {
+		return ""
+	}
+	resourceType := block.Labels[0]
+	if !strings.HasPrefix(resourceType, prefix) {
+		return fmt.Sprintf("%s: resource type %q is not a %s* type; this stack's gate checks no other cloud's resources, whatever allow_resource_types lists", file, resourceType, prefix)
+	}
+	if !resourceTypeAllowed(resourceType, allowedResourceTypes) {
+		return fmt.Sprintf("%s: resource type %q is not in allow_resource_types", file, resourceType)
+	}
+	return ""
+}
+
+// layer3ProviderBlockProblems checks a provider block's label and its
+// ATTRIBUTES only. Nested blocks inside a provider block are not examined
+// here; the whole-tree rules (layer3NestedProblems and the function-call
+// allowlist) still see them.
+func layer3ProviderBlockProblems(block *hclsyntax.Block, file, label string, safeAttrs map[string]bool) []string {
+	problems := make([]string, 0)
+	if len(block.Labels) > 0 && block.Labels[0] != label {
+		return append(problems, fmt.Sprintf("%s: provider %q is not permitted", file, block.Labels[0]))
+	}
+	if block.Body == nil {
+		return problems
+	}
+	for name := range block.Body.Attributes {
+		if !safeAttrs[name] {
+			problems = append(problems, fmt.Sprintf("%s: provider setting %q is not permitted (the endpoint and project come from the sealed environment, not from the configuration)", file, name))
+		}
+	}
+	return problems
 }
 
 // layer3UndestroyableResourceProblems refuses resource TYPES this project
@@ -534,8 +625,38 @@ const layer3ScalewayProviderSource = "scaleway/scaleway"
 // Bumping this is a base-branch change, reviewed like any other.
 const layer3ScalewayProviderVersion = "2.83.0"
 
+// layer3ProviderPin is the one required_providers entry a stack may
+// declare: its local name, registry source and exact version.
+type layer3ProviderPin struct {
+	name, source, version string
+}
+
+var layer3ScalewayPin = layer3ProviderPin{
+	name:    "scaleway",
+	source:  layer3ScalewayProviderSource,
+	version: layer3ScalewayProviderVersion,
+}
+
+// layer3ProviderVersionProblem requires an exact version equal to the
+// trusted pin. Ranges, omissions and any other exact version are refused.
+func layer3ProviderVersionProblem(val cty.Value, file, name string, pin layer3ProviderPin) (string, bool) {
+	if !val.Type().HasAttribute("version") {
+		return fmt.Sprintf("%s: required_provider %q declares no version; it must pin exactly %q, or tofu init downloads whatever the registry is serving",
+			file, name, pin.version), false
+	}
+	version := val.GetAttr("version")
+	if version.IsNull() || version.Type() != cty.String {
+		return fmt.Sprintf("%s: required_provider %q has a version this check cannot read", file, name), false
+	}
+	if version.AsString() != pin.version {
+		return fmt.Sprintf("%s: required_provider %q pins version %q; the gate only runs provider %q. A range such as \"~> 2.57\" is not a pin -- it resolves to whatever the registry serves at init time",
+			file, name, version.AsString(), pin.version), false
+	}
+	return "", true
+}
+
 // layer3ProviderSourceProblems refuses any required_providers entry that is
-// not the real Scaleway provider.
+// not the pinned provider.
 //
 // Allowing `terraform` blocks wholesale left a hole that the block-type
 // allowlist could not see: a fixture can write
@@ -546,25 +667,7 @@ const layer3ScalewayProviderVersion = "2.83.0"
 // tofu init downloads and EXECUTES that plugin with SCW_ACCESS_KEY and
 // SCW_SECRET_KEY in the environment. The provider binary is code, and this
 // path takes it from a registry address supplied by a pull request.
-// layer3ProviderVersionProblem requires an exact version equal to the
-// trusted pin. Ranges, omissions and any other exact version are refused.
-func layer3ProviderVersionProblem(val cty.Value, file, name string) (string, bool) {
-	if !val.Type().HasAttribute("version") {
-		return fmt.Sprintf("%s: required_provider %q declares no version; it must pin exactly %q, or tofu init downloads whatever the registry is serving",
-			file, name, layer3ScalewayProviderVersion), false
-	}
-	version := val.GetAttr("version")
-	if version.IsNull() || version.Type() != cty.String {
-		return fmt.Sprintf("%s: required_provider %q has a version this check cannot read", file, name), false
-	}
-	if version.AsString() != layer3ScalewayProviderVersion {
-		return fmt.Sprintf("%s: required_provider %q pins version %q; the gate only runs provider %q. A range such as \"~> 2.57\" is not a pin -- it resolves to whatever the registry serves at init time",
-			file, name, version.AsString(), layer3ScalewayProviderVersion), false
-	}
-	return "", true
-}
-
-func layer3ProviderSourceProblems(tfBlock *hclsyntax.Block, file string) ([]string, bool) {
+func layer3ProviderSourceProblems(tfBlock *hclsyntax.Block, file string, pin layer3ProviderPin) ([]string, bool) {
 	problems := make([]string, 0)
 	sawCanonical := false
 	if tfBlock.Body == nil {
@@ -585,21 +688,21 @@ func layer3ProviderSourceProblems(tfBlock *hclsyntax.Block, file string) ([]stri
 				continue
 			}
 			src := val.GetAttr("source")
-			if src.IsNull() || src.Type() != cty.String || src.AsString() != layer3ScalewayProviderSource {
+			if src.IsNull() || src.Type() != cty.String || src.AsString() != pin.source {
 				problems = append(problems, fmt.Sprintf("%s: required_provider %q must be source %q (a provider binary is code, and this one is chosen by the PR)",
-					file, name, layer3ScalewayProviderSource))
+					file, name, pin.source))
 				continue
 			}
-			if versionProblem, ok := layer3ProviderVersionProblem(val, file, name); !ok {
+			if versionProblem, ok := layer3ProviderVersionProblem(val, file, name, pin); !ok {
 				problems = append(problems, versionProblem)
 				continue
 			}
-			// Only the `scaleway` LOCAL NAME satisfies the requirement.
+			// Only the pin's LOCAL NAME satisfies the requirement.
 			// `foo = { source = "scaleway/scaleway" }` declares a correct
 			// source under a name nothing uses, while scaleway_* resources
 			// still resolve `scaleway` implicitly -- which is the exact
 			// case this check exists to catch.
-			if name == "scaleway" {
+			if name == pin.name {
 				sawCanonical = true
 			}
 		}
@@ -607,20 +710,6 @@ func layer3ProviderSourceProblems(tfBlock *hclsyntax.Block, file string) ([]stri
 	return problems, sawCanonical
 }
 
-// layer3ProjectBindingProblems refuses a project_id that is not a reference
-// to the stack's own scaleway_account_project.
-//
-// The whole blast-radius argument (ADR-0010, ADR-0023 rule 4) is that each
-// run creates a disposable project and everything lives inside it. Checking
-// that a scaleway_account_project EXISTS is not enough: a fixture can
-// declare one to satisfy that check and then pin its actual resources
-// elsewhere with `project_id = "<some other project>"`. On this account
-// "elsewhere" includes the project holding live infrastructure.
-//
-// A literal, a variable, or a data lookup are all refused. Only a direct
-// reference to a scaleway_account_project resource in this stack is
-// accepted, because only that is provably the project the sweep will
-// destroy.
 // layer3ContainmentProblems requires every resource to be provably inside
 // the run's disposable project -- by binding project_id to it, or by
 // belonging to a parent resource in this stack that is.
@@ -705,47 +794,6 @@ func layer3ParentBindingProblems(resource *hclsyntax.Block, file, resourceType, 
 	return problems
 }
 
-func layer3ProjectBindingProblems(resource *hclsyntax.Block, file string) []string {
-	problems := make([]string, 0)
-	if resource.Body == nil {
-		return problems
-	}
-	attr, ok := resource.Body.Attributes["project_id"]
-	if !ok {
-		return problems
-	}
-	name := "<unnamed>"
-	if len(resource.Labels) > 1 {
-		name = resource.Labels[1]
-	}
-	// The expression must BE the reference, not merely contain one.
-	// Expr.Variables() reports which traversals appear, not what the
-	// expression evaluates to, so
-	//
-	//	project_id = scaleway_account_project.main.id != "" ? "prod" : "prod"
-	//
-	// mentions the disposable project and resolves to another one entirely.
-	// Requiring a bare traversal removes the whole class rather than trying
-	// to evaluate arbitrary expressions.
-	traversal, ok := attr.Expr.(*hclsyntax.ScopeTraversalExpr)
-	if !ok {
-		problems = append(problems, fmt.Sprintf("%s: %s sets project_id to an expression; it must be a direct reference to this stack's scaleway_account_project, which is the only project the sweep will destroy", file, name))
-		return problems
-	}
-	if traversal.Traversal.RootName() != "scaleway_account_project" {
-		problems = append(problems, fmt.Sprintf("%s: %s sets project_id from %q; it must reference this stack's scaleway_account_project", file, name, traversal.Traversal.RootName()))
-		return problems
-	}
-	// ...and specifically its .id. `scaleway_account_project.main.name` is
-	// also a reference to the project, but the NAME is chosen by the PR and
-	// can be set to any existing project's UUID.
-	last, ok := traversal.Traversal[len(traversal.Traversal)-1].(hcl.TraverseAttr)
-	if len(traversal.Traversal) < 3 || !ok || last.Name != "id" {
-		problems = append(problems, fmt.Sprintf("%s: %s must set project_id to scaleway_account_project.<name>.id; any other attribute is a value the PR chooses", file, name))
-	}
-	return problems
-}
-
 // layer3PreflightHCL is every structural check Layer 3 makes on a
 // configuration, in the order that matters: all of them before any tofu
 // process starts.
@@ -791,7 +839,11 @@ func layer3PreflightHCL(outputDir string, allowedResourceTypes []string) error {
 //
 // Type constraints are exempt. `type = list(string)` parses as a call and
 // is not one -- it names a type and evaluates nothing.
-func layer3FunctionCallProblems(block *hclsyntax.Block, file string) []string {
+//
+// exempt, when non-nil, skips one attribute's whole expression: it is asked
+// of every attribute in every block, nested ones included, so it must match
+// the block as well as the name. Scaleway passes nil.
+func layer3FunctionCallProblems(block *hclsyntax.Block, file string, exempt func(*hclsyntax.Block, *hclsyntax.Attribute) bool) []string {
 	problems := make([]string, 0)
 	if block.Body == nil {
 		return problems
@@ -799,6 +851,9 @@ func layer3FunctionCallProblems(block *hclsyntax.Block, file string) []string {
 	isVariable := block.Type == "variable"
 	for name, attr := range block.Body.Attributes {
 		if isVariable && name == "type" {
+			continue
+		}
+		if exempt != nil && exempt(block, attr) {
 			continue
 		}
 		for _, fn := range layer3CallsIn(attr.Expr) {
@@ -811,7 +866,7 @@ func layer3FunctionCallProblems(block *hclsyntax.Block, file string) []string {
 		}
 	}
 	for _, inner := range block.Body.Blocks {
-		problems = append(problems, layer3FunctionCallProblems(inner, file)...)
+		problems = append(problems, layer3FunctionCallProblems(inner, file, exempt)...)
 	}
 	return problems
 }
