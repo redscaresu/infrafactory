@@ -37,6 +37,11 @@ type FailureSummary struct {
 	Command  string `json:"command,omitempty"`
 	Resource string `json:"resource,omitempty"`
 	Detail   string `json:"detail"`
+	// Origin is the layer that produced the failure (mock_deploy,
+	// sandbox_deploy, ...) before a run rewrites Layer to "run". It is
+	// recorded on the pitfall learned from the failure, and kept out of
+	// the output contract.
+	Origin string `json:"-"`
 }
 
 type ExplainabilitySummary struct {

@@ -279,6 +279,7 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 						})
 						continue
 					}
+					learned.LearnedLayer = failure.Origin
 					if err := generator.AppendPitfall(runtime.Config.Paths.Pitfalls, cloud, *learned); err != nil {
 						runtime.Logger.Log(LogEntry{
 							Level:   logLevelError,
@@ -519,6 +520,7 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 				})
 				continue
 			}
+			learned.LearnedLayer = f.Origin
 			if err := generator.AppendPitfall(runtime.Config.Paths.Pitfalls, sc.Cloud, *learned); err != nil {
 				runtime.Logger.Log(LogEntry{
 					Level:   logLevelError,
@@ -551,9 +553,11 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 		// us on an orphan_check failure — the live mock state at that
 		// point reflects what destroy left behind.
 		hasOrphanCheck := false
+		orphanOrigin := ""
 		for _, f := range candidates {
 			if strings.Contains(strings.ToLower(f.Detail), "orphaned resources") {
 				hasOrphanCheck = true
+				orphanOrigin = f.Origin
 				break
 			}
 		}
@@ -574,6 +578,7 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 					if !pitfallResourceMatchesCloud(p.Resource, sc.Cloud) {
 						continue
 					}
+					p.LearnedLayer = orphanOrigin
 					if err := generator.AppendPitfall(runtime.Config.Paths.Pitfalls, sc.Cloud, p); err != nil {
 						runtime.Logger.Log(LogEntry{
 							Level:   logLevelError,
@@ -707,6 +712,7 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 						RunID: runID, Detail: err.Error(),
 					})
 				} else if entry != nil && pitfallResourceMatchesCloud(entry.Resource, sc.Cloud) {
+					entry.LearnedLayer = cleared.Origin
 					if err := generator.AppendPitfall(runtime.Config.Paths.Pitfalls, sc.Cloud, *entry); err != nil {
 						runtime.Logger.Log(LogEntry{
 							Level: logLevelError, Command: "run",
@@ -746,6 +752,7 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 				if !pitfallResourceMatchesCloud(avoidEntry.Resource, sc.Cloud) {
 					continue
 				}
+				avoidEntry.LearnedLayer = cleared.Origin
 				if err := generator.AppendPitfall(runtime.Config.Paths.Pitfalls, sc.Cloud, *avoidEntry); err != nil {
 					runtime.Logger.Log(LogEntry{
 						Level: logLevelError, Command: "run",
@@ -1155,6 +1162,7 @@ func runIteration(
 						Command:  step.command,
 						Resource: failure.Resource,
 						Detail:   failure.Detail,
+						Origin:   failure.Layer,
 					})
 				}
 			} else {
@@ -1422,6 +1430,7 @@ func toFeedbackFailures(failures []FailureSummary) []feedback.Failure {
 			Command:  failure.Command,
 			Resource: failure.Resource,
 			Detail:   failure.Detail,
+			Origin:   failure.Origin,
 		})
 	}
 	return out

@@ -17,6 +17,10 @@ type PitfallEntry struct {
 	Rule           string `yaml:"rule"`
 	Source         string `yaml:"source"`
 	DiscoveredFrom string `yaml:"discovered_from,omitempty"`
+	// LearnedLayer is the layer whose failure taught the rule
+	// (mock_deploy, sandbox_deploy, ...); empty for entries that predate
+	// it or were not learned from a layer failure.
+	LearnedLayer string `yaml:"learned_layer,omitempty"`
 
 	// ObservedKey is the stable identity of a `source: live` entry: the
 	// promotion gate's OWN key for the observation it came from — the

@@ -23,6 +23,7 @@ type LearnedPitfall struct {
 	Rule           string
 	Source         string // optional: empty defaults to "descriptive"
 	DiscoveredFrom string // scenario name
+	LearnedLayer   string // layer whose failure taught it: mock_deploy, sandbox_deploy, ...
 }
 
 var (
@@ -881,6 +882,7 @@ func AppendPitfall(pitfallsDir, cloud string, pitfall LearnedPitfall) error {
 		Rule:           pitfall.Rule,
 		Source:         pitfallSource(pitfall),
 		DiscoveredFrom: pitfall.DiscoveredFrom,
+		LearnedLayer:   pitfall.LearnedLayer,
 	})
 
 	return writePitfallsFile(pitfallsDir, filePath, cloud, &pf)
@@ -948,10 +950,17 @@ func isVerbatimFallback(rule string) bool {
 // word-share check skips entries the candidate supersedes: they always
 // share words with it, so without the skip the better form is never
 // learned.
+//
+// An avoid candidate is compared only with entries learned on the same
+// layer: a real-cloud occurrence of a mock-learned prohibition is
+// evidence the mock one cannot give, so it is kept beside it.
 func isDuplicate(existing []PitfallEntry, candidate LearnedPitfall) bool {
 	candidateWords := significantWords(candidate.Rule)
 	for _, entry := range existing {
 		if entry.Resource != candidate.Resource {
+			continue
+		}
+		if candidate.Source == AvoidSource && entry.LearnedLayer != candidate.LearnedLayer {
 			continue
 		}
 		if entry.Rule == candidate.Rule {
