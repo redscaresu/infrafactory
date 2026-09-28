@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/redscaresu/infrafactory/internal/config"
 )
 
 const maxMockwayStateResponseBytes = 8 * 1024 * 1024
@@ -124,11 +126,39 @@ type cloudMockStateRouter struct {
 	aws      *mockStateClient
 	genesys  *mockStateClient // S114-T5: Genesys Cloud CCaaS mock
 	s3       *mockStateClient // S3 carve-out for AWS scenarios (M59)
+	// s3AutoReset is config s3.auto_reset: when false, Reset and ResetAll
+	// leave the s3 backend alone, so an AWS run needs no S3 backend up.
+	s3AutoReset bool
+}
+
+// newCloudMockStateRouter wires one client per configured mock URL.
+func newCloudMockStateRouter(runtime *CommandRuntime, cfg config.Config) *cloudMockStateRouter {
+	router := &cloudMockStateRouter{
+		runtime:     runtime,
+		scaleway:    newMockStateClient(cfg.Mockway.URL),
+		s3AutoReset: cfg.S3.AutoReset,
+	}
+	if strings.TrimSpace(cfg.Fakegcp.URL) != "" {
+		router.gcp = newMockStateClient(cfg.Fakegcp.URL)
+	}
+	if strings.TrimSpace(cfg.Fakeaws.URL) != "" {
+		router.aws = newMockStateClient(cfg.Fakeaws.URL)
+	}
+	if strings.TrimSpace(cfg.Fakegenesys.URL) != "" {
+		router.genesys = newMockStateClient(cfg.Fakegenesys.URL)
+	}
+	if strings.TrimSpace(cfg.S3.URL) != "" {
+		router.s3 = newMockStateClient(cfg.S3.URL)
+	}
+	return router
 }
 
 func (r *cloudMockStateRouter) Reset(ctx context.Context) error {
 	if err := r.pick("").Reset(ctx); err != nil {
 		return err
+	}
+	if !r.s3AutoReset {
+		return nil
 	}
 	if extra := r.pick("s3"); extra != nil && extra != r.pick("") {
 		// SeaweedFS / similar third-party S3 backends have no
@@ -218,8 +248,9 @@ func (r *cloudMockStateRouter) isAWSScenario() bool {
 // ResetAll resets every configured mock backend independently of the
 // loaded scenario, so a sweep harness (or interactive `infrafactory
 // mock reset`) can drop accumulated state in one call. Hits mockway,
-// fakegcp, fakeaws (each when configured) and cascades to the s3
-// backend (SeaweedFS by default) via resetS3Backend.
+// fakegcp, fakeaws (each when configured) and, when s3.auto_reset is
+// set, cascades to the s3 backend (SeaweedFS by default) via
+// resetS3Backend.
 //
 // Motivated by the S54 SeaweedFS state-leak: bare-curl harnesses
 // hitting `/mock/reset` on fakeaws don't touch SeaweedFS, leaving
@@ -238,7 +269,7 @@ func (r *cloudMockStateRouter) ResetAll(ctx context.Context) error {
 			firstErr = err
 		}
 	}
-	if r.s3 != nil {
+	if r.s3 != nil && r.s3AutoReset {
 		if err := resetS3Backend(ctx, r.s3); err != nil && firstErr == nil {
 			firstErr = err
 		}

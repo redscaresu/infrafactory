@@ -21,22 +21,7 @@ func runMockResetCommand(cmd *cobra.Command, _ []string, runtime *CommandRuntime
 	ctx := cmd.Context()
 	cfg := runtime.Config
 
-	router := &cloudMockStateRouter{
-		runtime:  runtime,
-		scaleway: newMockStateClient(cfg.Mockway.URL),
-	}
-	if strings.TrimSpace(cfg.Fakegcp.URL) != "" {
-		router.gcp = newMockStateClient(cfg.Fakegcp.URL)
-	}
-	if strings.TrimSpace(cfg.Fakeaws.URL) != "" {
-		router.aws = newMockStateClient(cfg.Fakeaws.URL)
-	}
-	if strings.TrimSpace(cfg.Fakegenesys.URL) != "" {
-		router.genesys = newMockStateClient(cfg.Fakegenesys.URL)
-	}
-	if strings.TrimSpace(cfg.S3.URL) != "" {
-		router.s3 = newMockStateClient(cfg.S3.URL)
-	}
+	router := newCloudMockStateRouter(runtime, cfg)
 
 	resetErr := router.ResetAll(ctx)
 
@@ -87,7 +72,7 @@ func resetSummary(r *cloudMockStateRouter) string {
 	if r.genesys != nil {
 		parts = append(parts, "fakegenesys")
 	}
-	if r.s3 != nil {
+	if r.s3 != nil && r.s3AutoReset {
 		parts = append(parts, "s3")
 	}
 	return "reset " + strings.Join(parts, "+")
