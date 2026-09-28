@@ -579,8 +579,8 @@ func stripProviderBlock(files map[string][]byte, providerName string) {
 }
 
 // awsRunIDTagKey is the tag default_tags puts on every AWS resource a run
-// applies, valued with the run id.
-const awsRunIDTagKey = "infrafactory-run-id"
+// applies, valued with the run id; the scope sweep reads it back.
+const awsRunIDTagKey = harness.AWSRunIDTagKey
 
 // buildAwsProviderBlock is the whole AWS provider block, at both layers
 // (ADR-0039 decisions 3 and 9). s3_use_path_style is the one setting with

@@ -84,8 +84,8 @@ jobs:
         run: go test -race -count=2 ./...
 
       # The AWS identity preflight against fakeaws STS, the Layer 2 AMI
-      # against fakeaws SSM, the Layer 3 scope claim against fakeaws SSM
-      # and EC2, and Layer 2's AWS env through real tofu with
+      # against fakeaws SSM, the Layer 3 scope claim and sweep against
+      # fakeaws SSM and EC2, and Layer 2's AWS env through real tofu with
       # the network sealed (SealNetwork): every
       # service fakeaws serves without Docker, env-routed, and validate
       # needing fakeaws STS. S3 needs Docker (TestE2E_AWSFullStack).
@@ -96,14 +96,14 @@ jobs:
       # only on each test's own PASS line.
       - name: AWS against fakeaws
         env:
-          FAKEAWS_SHA: 6933409e1b5c41cdd16650d96106402a81873cab
+          FAKEAWS_SHA: c251719333b786106fe5d05ab2b3d7b456277574
           INFRAFACTORY_ENABLE_E2E: "1"
         run: |
           set -o pipefail
           git init -q ../fakeaws
           git -C ../fakeaws fetch -q --depth 1 https://github.com/redscaresu/fakeaws.git "$FAKEAWS_SHA"
           git -C ../fakeaws checkout -q FETCH_HEAD
-          tests='TestAWSPreflightAgainstFakeaws TestE2E_AWSLayer2IgnoresShellAWS TestE2E_AWSLayer2CatchAllFailsClosed TestE2E_AWSEnvOnlyEveryService TestE2E_AWSValidateNeedsFakeawsSTS TestE2E_AWSWebStepOne TestE2E_AWSWebStepOneUnattachedGroup TestAWSAMIParityAgainstFakeaws TestAWSScopeClaimAgainstFakeaws TestE2E_AWSAllowlistPlaceable'
+          tests='TestAWSPreflightAgainstFakeaws TestE2E_AWSLayer2IgnoresShellAWS TestE2E_AWSLayer2CatchAllFailsClosed TestE2E_AWSEnvOnlyEveryService TestE2E_AWSValidateNeedsFakeawsSTS TestE2E_AWSWebStepOne TestE2E_AWSWebStepOneUnattachedGroup TestAWSAMIParityAgainstFakeaws TestAWSScopeClaimAgainstFakeaws TestAWSSweepAgainstFakeaws TestE2E_AWSAllowlistPlaceable'
           go test ./internal/e2e -run "^($(echo $tests | tr ' ' '|'))\$" -count=1 -v | tee "$RUNNER_TEMP/aws-fakeaws.log"
           for test in $tests; do
             grep -q "^--- PASS: $test " "$RUNNER_TEMP/aws-fakeaws.log" || { echo "$test did not PASS"; exit 1; }
