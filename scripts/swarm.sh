@@ -6,6 +6,7 @@
 #   swarm.sh wait <name> [timeout-ms]                       block until the agent settles
 #   swarm.sh policy <role>                                  print the model and effort for a role
 #   swarm.sh close <tab>                                    close <tab>, <tab>-2, ... and forget them
+#   swarm.sh unblock                                        mark ready every blocked story whose blockers are all merged
 #
 # Must run inside herdr (HERDR_ENV=1). Tabs hold at most four panes (a 2x2 grid); a fifth
 # agent opens "<tab>-2", and so on, so no pane gets too small to follow.
@@ -174,6 +175,22 @@ build_story() {
   start_agent "build" "${slug}" "${wt}" "${role}" "${prompt}"
 }
 
+# unblock — a merged story's file is deleted, so a blocked story whose every blocked_by slug has no
+# file left is ready. Prints each story it flips.
+unblock() {
+  local story slug blockers b open
+  for story in "${REPO_ROOT}"/docs/stories/*.md; do
+    grep -q '^status: blocked$' "${story}" || continue
+    blockers=$(sed -n 's/^blocked_by: *\[\(.*\)\]$/\1/p' "${story}" | tr ',' ' ')
+    [[ -n "${blockers// /}" ]] || continue   # blocked for a reason no merge clears
+    open=0
+    for b in ${blockers}; do [[ -f "${REPO_ROOT}/docs/stories/${b}.md" ]] && open=1; done
+    [[ ${open} -eq 0 ]] || continue
+    sed -i.bak -e 's/^status: blocked$/status: ready/' -e '/^blocked_by:/d' "${story}" && rm -f "${story}.bak"
+    echo "ready: $(basename "${story}" .md)"
+  done
+}
+
 # close_tabs <label> — close every tab this script opened under <label>, and its state.
 close_tabs() {
   local label="$1" state tab_label id
@@ -200,10 +217,11 @@ main() {
     agent)  require_herdr; start_agent "$@" ;;
     story)  require_herdr; build_story "${1:?slug}" ;;
     close)  require_herdr; close_tabs "${1:?tab}" ;;
+    unblock) unblock ;;
     _name)  agent_name "${1:?slug}"; echo ;;                      # test hook: the agent name for a slug
     _pane)  require_herdr; next_pane "${1:?tab}" "${2:?cwd}" ;;   # layout test hook: a pane, no agent
     wait)   require_herdr; herdr agent wait "$(agent_name "${1:?name}")" --timeout "${2:-3600000}" | json "d['result']['agent']['agent_status']" ;;
-    *) sed -n '2,12p' "$0"; exit 2 ;;
+    *) sed -n '2,13p' "$0"; exit 2 ;;
   esac
 }
 
