@@ -7,11 +7,27 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strings"
 
 	"github.com/open-policy-agent/opa/ast"
+	"github.com/open-policy-agent/opa/loader"
 )
 
 var packagePattern = regexp.MustCompile(`(?m)^\s*package\s+([A-Za-z0-9_.]+)\s*$`)
+
+// isRegoTestFile reports whether path is a file `opa test` runs. Production
+// evaluation never loads one: it goes through the v0-compat rego package, so a
+// colocated v1-only test file would fail to parse and break every plan for its
+// cloud, and its package would otherwise be queried as a policy.
+func isRegoTestFile(path string) bool {
+	return strings.HasSuffix(filepath.Base(path), "_test.rego")
+}
+
+// skipRegoTestFiles is the rego.Load filter that keeps test files out of the
+// compiled policy set; discoverPolicyPackages skips the same files.
+var skipRegoTestFiles loader.Filter = func(_ string, info fs.FileInfo, _ int) bool {
+	return !info.IsDir() && isRegoTestFile(info.Name())
+}
 
 func discoverPolicyPackages(policyPaths []string) ([]string, error) {
 	seen := make(map[string]struct{})
@@ -27,7 +43,7 @@ func discoverPolicyPackages(policyPaths []string) ([]string, error) {
 				if walkErr != nil {
 					return walkErr
 				}
-				if d.IsDir() || filepath.Ext(filePath) != ".rego" {
+				if d.IsDir() || filepath.Ext(filePath) != ".rego" || isRegoTestFile(filePath) {
 					return nil
 				}
 				return addPackageFromFile(filePath, seen)
@@ -38,7 +54,7 @@ func discoverPolicyPackages(policyPaths []string) ([]string, error) {
 			continue
 		}
 
-		if filepath.Ext(path) == ".rego" {
+		if filepath.Ext(path) == ".rego" && !isRegoTestFile(path) {
 			if err := addPackageFromFile(path, seen); err != nil {
 				return nil, err
 			}

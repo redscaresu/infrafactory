@@ -55,7 +55,7 @@ func EvaluatePlanPoliciesWithParams(ctx context.Context, planJSON []byte, params
 	for _, pkg := range packages {
 		query, err := rego.New(
 			rego.Query(fmt.Sprintf("data.%s.deny", pkg)),
-			rego.Load(policyPaths, nil),
+			rego.Load(policyPaths, skipRegoTestFiles),
 			rego.Input(input),
 		).Eval(ctx)
 		if err != nil {
