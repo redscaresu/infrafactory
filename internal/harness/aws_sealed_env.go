@@ -7,14 +7,14 @@ import (
 	"strings"
 )
 
-// The shared credentials and config files the sealed env points the AWS
+// The shared credentials and config files both layers' env points the AWS
 // SDK and terraform-provider-aws at. Children of /dev/null: absolute,
 // and no user, root included, can create them, so ~/.aws/credentials,
 // ~/.aws/config and their `services` endpoint overrides are never read.
 // The SDK treats an unreadable shared file as empty.
 const (
-	awsSealedSharedCredentialsFile = "/dev/null/infrafactory-aws-credentials"
-	awsSealedConfigFile            = "/dev/null/infrafactory-aws-config"
+	AWSSealedSharedCredentialsFile = "/dev/null/infrafactory-aws-credentials"
+	AWSSealedConfigFile            = "/dev/null/infrafactory-aws-config"
 )
 
 var awsRegionPattern = regexp.MustCompile(`^[a-z]{2}(-[a-z]+)+-[0-9]+$`)
@@ -48,8 +48,8 @@ func AWSSealedEnv(credFile, region string) (map[string]string, error) {
 		"AWS_SECRET_ACCESS_KEY":       creds["AWS_SECRET_ACCESS_KEY"],
 		"AWS_REGION":                  region,
 		"AWS_EC2_METADATA_DISABLED":   "true",
-		"AWS_SHARED_CREDENTIALS_FILE": awsSealedSharedCredentialsFile,
-		"AWS_CONFIG_FILE":             awsSealedConfigFile,
+		"AWS_SHARED_CREDENTIALS_FILE": AWSSealedSharedCredentialsFile,
+		"AWS_CONFIG_FILE":             AWSSealedConfigFile,
 	}, nil
 }
 

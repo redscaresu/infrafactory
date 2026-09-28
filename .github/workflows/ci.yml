@@ -83,13 +83,14 @@ jobs:
         # default).
         run: go test -race -count=2 ./...
 
-      # The AWS identity preflight against fakeaws STS. fakeaws is pinned
-      # to one commit, so bumping FAKEAWS_SHA is a deliberate edit.
-      # -count=1: the test cache cannot see the sibling checkout, so a
-      # cached PASS could replay after a bump. `go test` exits 0 when the
-      # test skips or no longer exists, so the step passes only on the
-      # test's own PASS line.
-      - name: AWS preflight against fakeaws STS
+      # The AWS identity preflight against fakeaws STS, and Layer 2's AWS
+      # env through real tofu with the network sealed (SealNetwork).
+      # fakeaws is pinned to one commit, so bumping FAKEAWS_SHA is a
+      # deliberate edit. -count=1: the test cache cannot see the sibling
+      # checkout, so a cached PASS could replay after a bump. `go test`
+      # exits 0 when a test skips or no longer exists, so the step passes
+      # only on each test's own PASS line.
+      - name: AWS against fakeaws
         env:
           FAKEAWS_SHA: 76ea10676c739a968b541285b974084f63156d56
           INFRAFACTORY_ENABLE_E2E: "1"
@@ -98,8 +99,11 @@ jobs:
           git init -q ../fakeaws
           git -C ../fakeaws fetch -q --depth 1 https://github.com/redscaresu/fakeaws.git "$FAKEAWS_SHA"
           git -C ../fakeaws checkout -q FETCH_HEAD
-          go test ./internal/e2e -run '^TestAWSPreflightAgainstFakeaws' -count=1 -v | tee "$RUNNER_TEMP/aws-preflight.log"
-          grep -q '^--- PASS: TestAWSPreflightAgainstFakeaws ' "$RUNNER_TEMP/aws-preflight.log"
+          tests='TestAWSPreflightAgainstFakeaws TestE2E_AWSLayer2IgnoresShellAWS TestE2E_AWSLayer2CatchAllFailsClosed'
+          go test ./internal/e2e -run "^($(echo $tests | tr ' ' '|'))\$" -count=1 -v | tee "$RUNNER_TEMP/aws-fakeaws.log"
+          for test in $tests; do
+            grep -q "^--- PASS: $test " "$RUNNER_TEMP/aws-fakeaws.log" || { echo "$test did not PASS"; exit 1; }
+          done
 
       # The UI suites were guarded by a local pre-commit hook and nothing
       # else, so they were exactly as strong as the discipline of whoever

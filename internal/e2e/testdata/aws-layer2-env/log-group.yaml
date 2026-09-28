@@ -1,0 +1,17 @@
+scenario: aws-layer2-env-log-group
+version: "1.0"
+cloud: aws
+description: >
+  A CloudWatch Logs log group. Logs has no endpoint in the provider
+  block or in cloudEnv, so TestE2E_AWSLayer2CatchAllFailsClosed expects
+  its apply to die at the AWS_ENDPOINT_URL catch-all.
+resources:
+  storage:
+    purpose: logs
+    size: small
+acceptance_criteria:
+  - type: policy
+    check: region_restriction
+    params:
+      region: us-east-1
+    expect: pass

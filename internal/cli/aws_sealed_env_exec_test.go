@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/redscaresu/infrafactory/internal/config"
 	"github.com/redscaresu/infrafactory/internal/harness"
 
 	"github.com/stretchr/testify/assert"
@@ -56,15 +57,21 @@ func TestAWSSealedEnvIsAllALayer3SubprocessSees(t *testing.T) {
 		string(result.Stdout))
 }
 
-// Layer 2 points the provider at fakeaws with AWS_ENDPOINT_URL_*, so the
-// strip must stay per-command.
+// Layer 2 strips the shell's AWS_* too, and cloudEnv's own endpoints
+// survive the strip: the Env map is applied after it.
 func TestLayer2SubprocessKeepsAWSEndpointURL(t *testing.T) {
 	plantAWSShellEnv(t)
+	t.Setenv("AWS_IGNORE_CONFIGURED_ENDPOINT_URLS", "true")
+	t.Setenv("AWS_SESSION_TOKEN", "planted")
+	env := cloudEnv(&CommandRuntime{Config: config.Config{Fakeaws: config.FakeawsConfig{URL: "http://127.0.0.1:18082"}}})
 
 	result, err := execCommandRunner{}.Run(context.Background(), harness.Command{
 		Name: "sh",
-		Args: []string{"-c", `printf '%s' "${AWS_ENDPOINT_URL_EC2-UNSET}"`},
+		Args: []string{"-c", `printf 'ec2=%s profile=%s ignore=%s token=%s' "${AWS_ENDPOINT_URL_EC2-UNSET}" ` +
+			`"${AWS_PROFILE-UNSET}" "${AWS_IGNORE_CONFIGURED_ENDPOINT_URLS-UNSET}" "${AWS_SESSION_TOKEN-UNSET}"`},
+		Env:      env,
+		StripEnv: harness.Layer2StripEnv,
 	})
 	require.NoError(t, err)
-	assert.Equal(t, "http://127.0.0.1:8082", string(result.Stdout))
+	assert.Equal(t, "ec2=http://127.0.0.1:18082/ec2/region/us-east-1 profile=UNSET ignore=UNSET token=UNSET", string(result.Stdout))
 }

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
@@ -16,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/redscaresu/infrafactory/internal/config"
 	"github.com/redscaresu/infrafactory/internal/harness"
 	"github.com/redscaresu/infrafactory/internal/scenario"
 	"github.com/spf13/cobra"
@@ -90,15 +92,12 @@ func testCommandEnv(runtime *CommandRuntime) map[string]string {
 //     fakegcp. GOOGLE_OAUTH_ACCESS_TOKEN sets a static token (bypasses
 //     ADC); GOOGLE_PROJECT pins the default project so resources don't
 //     require explicit project = "..." in HCL.
-//   - AWS: AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY satisfy the SDK's
-//     credential check. AWS_REGION pins us-east-1 to match the
-//     endpoints injected by ensureAwsProviderWiring. AWS_EC2_METADATA_DISABLED
-//     stops the SDK from trying to hit IMDS.
+//   - AWS: the complete provider env, from awsLayer2Env. The commands
+//     that carry it strip every inherited AWS_* (harness.Layer2StripEnv).
 //
-// Endpoint redirection happens via the ensure*ProviderWiring functions
-// (GCP: per-service *_custom_endpoint; AWS: provider's endpoints{}
-// block) — env vars alone don't get the provider talking to the
-// right HTTP server.
+// GCP endpoint redirection happens in ensureGoogleProviderWiring
+// (per-service *_custom_endpoint); env vars alone don't get that
+// provider talking to the right HTTP server.
 func cloudEnv(runtime *CommandRuntime) map[string]string {
 	env := map[string]string{
 		// Scaleway
@@ -109,17 +108,13 @@ func cloudEnv(runtime *CommandRuntime) map[string]string {
 		// GCP
 		"GOOGLE_OAUTH_ACCESS_TOKEN": "fakegcp-mock-token",
 		"GOOGLE_PROJECT":            "infrafactory-test",
-		// AWS
-		"AWS_ACCESS_KEY_ID":         "test",
-		"AWS_SECRET_ACCESS_KEY":     "test",
-		"AWS_REGION":                "us-east-1",
-		"AWS_EC2_METADATA_DISABLED": "true",
 		// Genesys Cloud. Provider credentials must be set even when
 		// HTTPS_PROXY redirects every call to fakegenesys.
 		"GENESYSCLOUD_OAUTHCLIENT_ID":     "fake-client-id",
 		"GENESYSCLOUD_OAUTHCLIENT_SECRET": "fake-client-secret",
 		"GENESYSCLOUD_REGION":             "us-east-1",
 	}
+	maps.Copy(env, awsLayer2Env(runtime.Config))
 	// S117: route the genesyscloud provider through fakegenesys's TLS
 	// MITM CONNECT proxy (S116). The GENESYSCLOUD_GATEWAY_* env vars
 	// the SDK exposes don't override the auth subdomain — only HTTPS_PROXY
@@ -169,6 +164,66 @@ func cloudEnv(runtime *CommandRuntime) map[string]string {
 		}
 	}
 	return env
+}
+
+// awsDeadEndpointURL is the AWS_ENDPOINT_URL catch-all: a loopback port
+// nothing listens on. A service fakeaws does not serve, or every service
+// when fakeaws.url is empty, fails dialing it instead of reaching AWS.
+const awsDeadEndpointURL = "http://127.0.0.1:1"
+
+// awsFakeawsPaths maps each AWS_ENDPOINT_URL_<SVC> suffix to its fakeaws
+// path, "{region}" being the run's region. The suffixes are the SDK's
+// service ids, as fakeaws CI proves the provider reads them (fakeaws
+// examples/smoke_env_test.go); a misspelt one falls to the catch-all.
+var awsFakeawsPaths = map[string]string{
+	"EC2":             "/ec2/region/{region}",
+	"IAM":             "/iam",
+	"EKS":             "/eks/region/{region}",
+	"RDS":             "/rds/region/{region}",
+	"SQS":             "/sqs/region/{region}",
+	"DYNAMODB":        "/dynamodb/region/{region}",
+	"SECRETS_MANAGER": "/secretsmanager/region/{region}",
+	"KMS":             "/kms/region/{region}",
+	"ROUTE_53":        "/route53",
+	"S3":              "/s3",
+	"STS":             "/sts",
+	"SSM":             "/ssm/region/{region}",
+}
+
+// awsLayer2Env is the whole AWS env of a Layer 2 command: fake keys, no
+// IMDS, unreadable shared files, and an endpoint per service. S3 goes to
+// the s3.url backend when one is set.
+func awsLayer2Env(cfg config.Config) map[string]string {
+	region := awsRegion(cfg.AWS)
+	env := map[string]string{
+		"AWS_ACCESS_KEY_ID":           "test",
+		"AWS_SECRET_ACCESS_KEY":       "test",
+		"AWS_REGION":                  region,
+		"AWS_EC2_METADATA_DISABLED":   "true",
+		"AWS_CONFIG_FILE":             harness.AWSSealedConfigFile,
+		"AWS_SHARED_CREDENTIALS_FILE": harness.AWSSealedSharedCredentialsFile,
+		"AWS_ENDPOINT_URL":            awsDeadEndpointURL,
+	}
+	fakeaws := strings.TrimRight(strings.TrimSpace(cfg.Fakeaws.URL), "/")
+	for svc, path := range awsFakeawsPaths {
+		endpoint := awsDeadEndpointURL
+		if fakeaws != "" {
+			endpoint = fakeaws + strings.ReplaceAll(path, "{region}", region)
+		}
+		env["AWS_ENDPOINT_URL_"+svc] = endpoint
+	}
+	if s3 := strings.TrimRight(strings.TrimSpace(cfg.S3.URL), "/"); fakeaws != "" && s3 != "" {
+		env["AWS_ENDPOINT_URL_S3"] = s3
+	}
+	return env
+}
+
+// awsRegion is aws.region, else us-east-1.
+func awsRegion(cfg config.AWSConfig) string {
+	if region := strings.TrimSpace(cfg.Region); region != "" {
+		return region
+	}
+	return "us-east-1"
 }
 
 // genesysProxyURL derives the TLS MITM CONNECT proxy URL from

@@ -26,6 +26,13 @@ type Command struct {
 	StripEnv []string
 }
 
+// Layer2StripEnv is the StripEnv of every Layer 2 tofu command (static,
+// mock deploy, destroy). cloudEnv sets the whole AWS env those commands
+// need, so nothing AWS_* may come from the parent shell: an inherited
+// AWS_PROFILE, AWS_IGNORE_CONFIGURED_ENDPOINT_URLS or AWS_SESSION_TOKEN
+// would change where, or as whom, the provider calls.
+var Layer2StripEnv = []string{"AWS_*"}
+
 type CommandResult struct {
 	Stdout []byte
 	Stderr []byte
@@ -100,37 +107,41 @@ func (h *StaticHarness) Run(ctx context.Context, workDir string, env map[string]
 		{
 			name: "init",
 			cmd: Command{
-				Name: "tofu",
-				Args: []string{"init"},
-				Dir:  workDir,
-				Env:  env,
+				Name:     "tofu",
+				Args:     []string{"init"},
+				Dir:      workDir,
+				Env:      env,
+				StripEnv: Layer2StripEnv,
 			},
 		},
 		{
 			name: "validate",
 			cmd: Command{
-				Name: "tofu",
-				Args: []string{"validate"},
-				Dir:  workDir,
-				Env:  env,
+				Name:     "tofu",
+				Args:     []string{"validate"},
+				Dir:      workDir,
+				Env:      env,
+				StripEnv: Layer2StripEnv,
 			},
 		},
 		{
 			name: "plan",
 			cmd: Command{
-				Name: "tofu",
-				Args: []string{"plan", "-out=tfplan"},
-				Dir:  workDir,
-				Env:  env,
+				Name:     "tofu",
+				Args:     []string{"plan", "-out=tfplan"},
+				Dir:      workDir,
+				Env:      env,
+				StripEnv: Layer2StripEnv,
 			},
 		},
 		{
 			name: "show",
 			cmd: Command{
-				Name: "tofu",
-				Args: []string{"show", "-json", "tfplan"},
-				Dir:  workDir,
-				Env:  env,
+				Name:     "tofu",
+				Args:     []string{"show", "-json", "tfplan"},
+				Dir:      workDir,
+				Env:      env,
+				StripEnv: Layer2StripEnv,
 			},
 		},
 	}

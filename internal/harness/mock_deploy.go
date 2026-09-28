@@ -111,10 +111,11 @@ func (h *MockDeployHarness) Run(ctx context.Context, workDir string, env map[str
 	}
 
 	initCmd := Command{
-		Name: "tofu",
-		Args: []string{"init"},
-		Dir:  workDir,
-		Env:  env,
+		Name:     "tofu",
+		Args:     []string{"init"},
+		Dir:      workDir,
+		Env:      env,
+		StripEnv: Layer2StripEnv,
 	}
 	initResult, err := h.runner.Run(ctx, initCmd)
 	initStage := StageResult{
@@ -132,10 +133,11 @@ func (h *MockDeployHarness) Run(ctx context.Context, workDir string, env map[str
 	}
 
 	cmd := Command{
-		Name: "tofu",
-		Args: []string{"apply", "-auto-approve"},
-		Dir:  workDir,
-		Env:  env,
+		Name:     "tofu",
+		Args:     []string{"apply", "-auto-approve"},
+		Dir:      workDir,
+		Env:      env,
+		StripEnv: Layer2StripEnv,
 	}
 	applyResult, err := h.runner.Run(ctx, cmd)
 	stage := StageResult{
@@ -155,10 +157,11 @@ func (h *MockDeployHarness) Run(ctx context.Context, workDir string, env map[str
 
 	convergeArgs := []string{"plan", "-detailed-exitcode", "-input=false", "-no-color"}
 	convergeResult, convergeErr := h.runner.Run(ctx, Command{
-		Name: "tofu",
-		Args: convergeArgs,
-		Dir:  workDir,
-		Env:  env,
+		Name:     "tofu",
+		Args:     convergeArgs,
+		Dir:      workDir,
+		Env:      env,
+		StripEnv: Layer2StripEnv,
 	})
 	convergeStage := StageResult{
 		Stage:  "converge",

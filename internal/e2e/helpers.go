@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	neturl "net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -446,6 +447,12 @@ func WriteConfig(t *testing.T, configPath, mockwayURL, outputRoot string) {
 func WriteConfigMultiCloud(t *testing.T, configPath, mockwayURL, fakegcpURL, fakeawsURL, s3URL, outputRoot string) {
 	t.Helper()
 	repoRoot := RepoRoot(t)
+	// A copy: a failing run learns a pitfall, and must not write it into
+	// the repo.
+	pitfalls := t.TempDir()
+	if err := os.CopyFS(pitfalls, os.DirFS(filepath.Join(repoRoot, "pitfalls"))); err != nil {
+		t.Fatalf("copy pitfalls: %v", err)
+	}
 	WriteFile(t, configPath, fmt.Appendf(nil, `version: "1.0"
 agent:
   type: claude-code
@@ -483,15 +490,108 @@ paths:
   output: %s
   policies: %s/policies
   prompts: %s/prompts
-  pitfalls: %s/pitfalls
+  pitfalls: %s
 `,
 		mockwayURL,
 		fakegcpURL,
 		fakeawsURL,
 		s3URL,
 		repoRoot, repoRoot, repoRoot, repoRoot,
-		repoRoot, repoRoot, outputRoot, repoRoot, repoRoot, repoRoot,
+		repoRoot, repoRoot, outputRoot, repoRoot, repoRoot, pitfalls,
 	))
+}
+
+const (
+	// sealedAWSProviderVersion is the hashicorp/aws release SealNetwork
+	// mirrors: the exact pin fakeaws's provider smoke harness runs.
+	sealedAWSProviderVersion = "5.100.0"
+
+	// sealDeadProxy is a loopback port nothing listens on. It is not
+	// cloudEnv's AWS_ENDPOINT_URL catch-all, so an error says which of
+	// the two a request died at.
+	sealDeadProxy = "http://127.0.0.1:9"
+)
+
+var (
+	awsMirrorOnce sync.Once
+	awsMirrorDir  string
+	awsMirrorErr  error
+)
+
+// SealNetwork cuts the tofu a test starts off from everything but
+// loopback, as fakeaws's smokeEnv does (examples/smoke_env_test.go):
+// init installs hashicorp/aws from a filesystem mirror, filled once per
+// test binary, with direct installation of it excluded, and any other
+// request dies at a dead proxy. RunInfrafactory runs in-process, so its
+// tofu inherits this. Call it after the mocks are up; `go run` needs the
+// network.
+func SealNetwork(t *testing.T) {
+	t.Helper()
+	awsMirrorOnce.Do(func() { awsMirrorDir, awsMirrorErr = mirrorAWSProvider() })
+	if awsMirrorErr != nil {
+		t.Fatalf("mirror hashicorp/aws %s: %v", sealedAWSProviderVersion, awsMirrorErr)
+	}
+
+	cliConfig := filepath.Join(t.TempDir(), "tofurc")
+	WriteFile(t, cliConfig, fmt.Appendf(nil, `provider_installation {
+  filesystem_mirror {
+    path    = %q
+    include = ["registry.opentofu.org/hashicorp/aws"]
+  }
+  direct {
+    exclude = ["registry.opentofu.org/hashicorp/aws"]
+  }
+}
+`, awsMirrorDir))
+	t.Setenv("TF_CLI_CONFIG_FILE", cliConfig)
+
+	// http.ProxyFromEnvironment reads the proxy vars once per process.
+	// Prime it first, so the dead proxy never becomes this process's own.
+	_, _ = http.ProxyFromEnvironment(&http.Request{URL: &neturl.URL{Scheme: "https", Host: "example.invalid"}})
+	t.Setenv("HTTPS_PROXY", sealDeadProxy)
+	t.Setenv("HTTP_PROXY", sealDeadProxy)
+	t.Setenv("NO_PROXY", "127.0.0.1,localhost")
+}
+
+// mirrorAWSProvider downloads hashicorp/aws into a new directory that
+// cleanupAWSMirror removes when the test binary exits.
+func mirrorAWSProvider() (string, error) {
+	configDir, err := os.MkdirTemp("", "infrafactory-aws-mirror-config-")
+	if err != nil {
+		return "", err
+	}
+	defer os.RemoveAll(configDir)
+	required := fmt.Sprintf(`terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = %q
+    }
+  }
+}
+`, sealedAWSProviderVersion)
+	if err := os.WriteFile(filepath.Join(configDir, "main.tf"), []byte(required), 0o644); err != nil {
+		return "", err
+	}
+	mirrorDir, err := os.MkdirTemp("", "infrafactory-aws-mirror-")
+	if err != nil {
+		return "", err
+	}
+	cmd := exec.Command("tofu", "providers", "mirror", mirrorDir)
+	cmd.Dir = configDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		_ = os.RemoveAll(mirrorDir)
+		return "", fmt.Errorf("%w\n%s", err, out)
+	}
+	return mirrorDir, nil
+}
+
+// cleanupAWSMirror removes SealNetwork's mirror. TestMain calls it: the
+// mirror outlives every single test that uses it.
+func cleanupAWSMirror() {
+	if awsMirrorDir != "" {
+		_ = os.RemoveAll(awsMirrorDir)
+	}
 }
 
 // RepoRoot returns the absolute path to the infrafactory repository root,

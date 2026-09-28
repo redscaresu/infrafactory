@@ -53,10 +53,11 @@ func (e *DestroyError) Is(target error) bool {
 
 func (h *DestroyHarness) Run(ctx context.Context, workDir string, env map[string]string) (*DestroyResult, error) {
 	cmd := Command{
-		Name: "tofu",
-		Args: []string{"destroy", "-auto-approve"},
-		Dir:  workDir,
-		Env:  env,
+		Name:     "tofu",
+		Args:     []string{"destroy", "-auto-approve"},
+		Dir:      workDir,
+		Env:      env,
+		StripEnv: Layer2StripEnv,
 	}
 	destroyResult, err := h.runner.Run(ctx, cmd)
 	stage := StageResult{
