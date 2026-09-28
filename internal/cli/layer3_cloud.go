@@ -40,6 +40,15 @@ func layer3PreflightHCLForCloud(cloud layer3Cloud, outputDir string, allowedReso
 	return fmt.Errorf("cloud %s has no Layer 3 HCL gate yet, so its configuration may not reach a real account", cloud)
 }
 
+// layer3HCLGate is layer3PreflightHCLForCloud unless a test replaced it
+// through Deps.Layer3HCLGate.
+func (runtime *CommandRuntime) layer3HCLGate(cloud layer3Cloud, outputDir string, allowedResourceTypes []string) error {
+	if runtime.Deps.Layer3HCLGate != nil {
+		return runtime.Deps.Layer3HCLGate(cloud, outputDir, allowedResourceTypes)
+	}
+	return layer3PreflightHCLForCloud(cloud, outputDir, allowedResourceTypes)
+}
+
 // layer3LiveCloud parses the cloud for a live path (--keep, deploy,
 // live upgrade) and refuses every cloud but Scaleway. A live stack
 // outlives the command, and only Scaleway has the record, teardown and

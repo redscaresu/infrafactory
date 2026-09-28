@@ -22,7 +22,13 @@ import (
 // shared project: the caller asked for a run-owned project, and silently
 // applying into the shared one instead would put this run's strays next
 // to every other run's.
-func ensureRunProject(ctx context.Context, runtime *CommandRuntime, cloud layer3Cloud, scenario, workDir string) (string, []StageSummary, []FailureSummary) {
+//
+// For aws there is no project: the scope is the account, claimed for
+// awsClaimHolder (ensureAWSScopeClaim).
+func ensureRunProject(ctx context.Context, runtime *CommandRuntime, cloud layer3Cloud, scenario, workDir, awsClaimHolder string) (string, []StageSummary, []FailureSummary) {
+	if cloud == layer3AWS {
+		return ensureAWSScopeClaim(ctx, runtime, awsClaimHolder)
+	}
 	if cloud != layer3Scaleway {
 		return "", []StageSummary{{Layer: "sandbox_deploy", Stage: "run_project", Status: StageStatusFail}},
 			[]FailureSummary{{

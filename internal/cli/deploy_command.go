@@ -152,7 +152,8 @@ func runDeployCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime
 		sandboxEnv         map[string]string
 	)
 	deployResult, deployErr := runDeployApply(cmd, ctx, signal.NotifyContext, func(applyCtx context.Context) (*harness.SandboxDeployResult, error) {
-		runProjectID, runProjectStages, runProjectFailures = ensureRunProject(applyCtx, runtime, cloud, sc.Name, workDir)
+		// No aws claim holder: deploy is Scaleway-only (layer3LiveCloud).
+		runProjectID, runProjectStages, runProjectFailures = ensureRunProject(applyCtx, runtime, cloud, sc.Name, workDir, "")
 		if len(runProjectFailures) > 0 {
 			return nil, errors.New("no run project")
 		}

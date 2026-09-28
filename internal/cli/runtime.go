@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/service/ec2"
+	"github.com/aws/aws-sdk-go-v2/service/ssm"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/redscaresu/infrafactory/internal/config"
 	"github.com/redscaresu/infrafactory/internal/generator"
@@ -128,6 +130,16 @@ type RuntimeDependencies struct {
 	// AWSSTS carries the AWS Layer 3 preflight's sts:GetCallerIdentity.
 	// Only the transport is injectable: the endpoint is always real STS.
 	AWSSTS sts.HTTPClient
+	// AWSSSM and AWSEC2 carry the AWS Layer 3 scope's stamp, default-VPC
+	// check, claim and sweep, to the real endpoints.
+	AWSSSM ssm.HTTPClient
+	AWSEC2 ec2.HTTPClient
+	// AWSSweepSleep is the scope sweep's settle wait; nil is a real one.
+	AWSSweepSleep func(context.Context, time.Duration) error
+
+	// Layer3HCLGate replaces layer3PreflightHCLForCloud; nil is the real
+	// gate. Only tests set it, to drive a cloud the gate refuses past it.
+	Layer3HCLGate func(cloud layer3Cloud, outputDir string, allowedResourceTypes []string) error
 }
 
 type CommandRuntime struct {
@@ -448,7 +460,13 @@ func buildRuntime(cmd *cobra.Command, opts runtimeOptions) (*CommandRuntime, err
 		})
 	}
 	if deps.AWSSTS == nil {
-		deps.AWSSTS = &http.Client{Timeout: awsSTSTimeout}
+		deps.AWSSTS = &http.Client{Timeout: awsHTTPTimeout}
+	}
+	if deps.AWSSSM == nil {
+		deps.AWSSSM = &http.Client{Timeout: awsHTTPTimeout}
+	}
+	if deps.AWSEC2 == nil {
+		deps.AWSEC2 = &http.Client{Timeout: awsHTTPTimeout}
 	}
 	if deps.MockStart == nil {
 		deps.MockStart = &dockerMockStarter{}
