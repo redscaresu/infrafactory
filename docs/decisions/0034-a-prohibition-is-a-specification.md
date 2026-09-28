@@ -171,3 +171,54 @@ an empirical question, and the answer needs a run that has not been done.
 If it is not enough, the requirement cannot come from the holdout — feeding it back would
 make the unseen check seen (ADR-0033 §5). It would have to come from a rule about the
 server rather than the group.
+
+## Amendment 2026-09-28: an avoid rule is retired only on evidence that contradicts it
+
+§2 checks a prohibition's justification before it is kept. The same discipline applies when
+it is removed: a `source: avoid` rule may leave the corpus only on evidence that the shape it
+forbids now works, and the evidence is kept.
+
+**The layer that taught a rule is recorded.** A learned pitfall carries `learned_layer`, the
+layer whose failure taught it (`mock_deploy`, `sandbox_deploy`, ...). An avoid candidate is
+deduplicated only against entries learned at the same layer, so a real-cloud occurrence of a
+mock-learned prohibition is kept beside it.
+
+**Mock evidence retires only a mock-learned rule.** `RetireAvoidPitfall`
+(`internal/generator/pitfalls_avoid_retire.go`) retires an entry only when every one of these
+holds, and otherwise refuses with the corpus and the ledger byte-identical:
+
+- the rule parses in the extractor's attribute form (`ParseAvoidRule`); a resource-type
+  clause or free text is never retired;
+- the check's outcome is `contradicted`, with `tofu apply` exit 0 and converge plan exit 0;
+  `recurred` and `inconclusive` keep the rule and record why;
+- every check field is present, and the stored shape under
+  `pitfalls/avoid-checks/shapes/<id>/` hashes to the recorded `shape_sha256` and sets every
+  attribute the rule forbids to something other than a literal false, null or `""`;
+- the entry was learned at `mock_deploy`, or predates `learned_layer` and the caller gives
+  `layer_evidence` from the run artifacts that establish it was;
+- it is the only entry on the resource naming those attributes, snake or camel case. A
+  descriptive, fix or real-cloud entry saying the same thing would outlive the retirement.
+
+Retirement is all-or-nothing: an entry forbidding two attributes needs a shape setting both,
+and moves whole.
+
+**The ledger is append-only.** `pitfalls/avoid-checks/<cloud>.yaml` holds `retired` and
+`kept` records, each with the whole entry, its attributes, the layer and the check, and
+`relearned` records. The record is written before the entry is removed. A malformed ledger
+refuses every retirement.
+
+**A recurrence is sorted by where it failed.** `AppendPitfall` refuses whole a candidate
+learned at `mock_deploy`, or at an unknown layer, that names a retired attribute on its
+resource, whatever its source or wording, and names the retiring check and any other
+attribute it would have forbidden: the mock regressed. Learned at any other layer, it is
+appended after a `relearned` record, and it then carries a non-mock layer, so it is never
+mock-retirable. `live` entries are exempt. A malformed ledger does not stop learning: the
+candidate is appended and the error says the ledger was not checked.
+
+`TestRetiredAvoidPitfallsStayRetired` closes the paths that bypass `AppendPitfall` (hand edits,
+the API's PUT, pitfall-merge). It fails CI on a malformed ledger, a stored shape whose hash
+differs from its record, and any non-live entry naming a retired attribute with no later
+non-mock `relearned` record.
+
+This does not yet re-run the evidence: a retirement rests on the exits its caller recorded,
+and the shape it stored.

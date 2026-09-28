@@ -969,3 +969,111 @@ func TestAppendPitfall_AvoidLayerDedup(t *testing.T) {
 		assert.Len(t, load(t, dir), 1)
 	})
 }
+
+// retiredLedgerFixture returns a corpus whose aws_subnet avoid rule was
+// retired by check chk-1.
+func retiredLedgerFixture(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	writeAWSCorpus(t, dir, unrelatedEntry(), subnetAvoidEntry())
+	sha := storeShape(t, dir, "chk-1", map[string]string{"main.tf": subnetShape})
+	_, err := RetireAvoidPitfall(dir, "aws", subnetRetirement(contradictedCheck("chk-1", sha)))
+	require.NoError(t, err)
+	return dir
+}
+
+func TestAppendPitfall_RetiredAttribute(t *testing.T) {
+	avoid := func(layer string, attrs ...string) LearnedPitfall {
+		return LearnedPitfall{Resource: "aws_subnet", Rule: buildAvoidRule("aws_subnet", attrs, nil, "Error: timeout.", "aws-web"), Source: AvoidSource, DiscoveredFrom: "aws-web", LearnedLayer: layer}
+	}
+
+	refused := map[string]struct {
+		candidate LearnedPitfall
+		want      []string
+	}{
+		"mock avoid":           {avoid(MockDeployLayer, "map_public_ip_on_launch"), []string{"chk-1"}},
+		"unknown-layer avoid":  {avoid("", "map_public_ip_on_launch"), []string{"chk-1", "unknown layer"}},
+		"mock fix":             {LearnedPitfall{Resource: "aws_subnet", Rule: "Set `map_public_ip_on_launch = false`.", Source: FixSource, LearnedLayer: MockDeployLayer}, []string{"chk-1"}},
+		"mock descriptive":     {LearnedPitfall{Resource: "aws_subnet", Rule: "waiting for EC2 Subnet MapPublicIpOnLaunch update: timeout", LearnedLayer: MockDeployLayer}, []string{"chk-1"}},
+		"unparseable avoid":    {LearnedPitfall{Resource: "aws_subnet", Rule: "Never set map_public_ip_on_launch.", Source: AvoidSource, LearnedLayer: MockDeployLayer}, []string{"chk-1"}},
+		"retired plus new one": {avoid(MockDeployLayer, "map_public_ip_on_launch", "assign_ipv6_address_on_creation"), []string{"chk-1", "`assign_ipv6_address_on_creation`, which it also forbids, is not learned"}},
+	}
+	for name, tc := range refused {
+		t.Run(name, func(t *testing.T) {
+			dir := retiredLedgerFixture(t)
+			before := snapshotFiles(t, dir)
+			err := AppendPitfall(dir, "aws", tc.candidate)
+			require.Error(t, err)
+			for _, w := range tc.want {
+				assert.Contains(t, err.Error(), w)
+			}
+			assert.Equal(t, before, snapshotFiles(t, dir), "corpus and ledger unchanged")
+		})
+	}
+
+	t.Run("sandbox candidate is relearned", func(t *testing.T) {
+		dir := retiredLedgerFixture(t)
+		candidate := avoid("sandbox_deploy", "map_public_ip_on_launch")
+		require.NoError(t, AppendPitfall(dir, "aws", candidate))
+
+		records := readLedger(t, dir).Records
+		require.Len(t, records, 2)
+		relearned := records[1]
+		assert.Equal(t, AvoidRecordRelearned, relearned.Status)
+		assert.Equal(t, []string{"map_public_ip_on_launch"}, relearned.Attributes)
+		assert.Equal(t, "sandbox_deploy", relearned.LearnedLayer)
+		assert.Equal(t, candidate.Rule, relearned.Rule)
+		assert.Equal(t, "aws-web", relearned.DiscoveredFrom)
+
+		entries, err := LoadPitfallEntries(dir, "aws")
+		require.NoError(t, err)
+		assert.Equal(t, candidate.Rule, entries[len(entries)-1].Rule)
+
+		// Re-admitted: a later mock candidate is no longer refused.
+		require.NoError(t, AppendPitfall(dir, "aws", LearnedPitfall{Resource: "aws_subnet", Rule: "MapPublicIpOnLaunch drifted on refresh", LearnedLayer: MockDeployLayer}))
+	})
+
+	appended := map[string]LearnedPitfall{
+		"names no retired attribute": avoid(MockDeployLayer, "assign_ipv6_address_on_creation"),
+		"another resource":           {Resource: "aws_instance", Rule: "map_public_ip_on_launch belongs on the subnet", LearnedLayer: MockDeployLayer},
+		"live":                       {Resource: "aws_subnet", Rule: "MapPublicIpOnLaunch observed off", Source: LiveSource},
+	}
+	for name, candidate := range appended {
+		t.Run(name, func(t *testing.T) {
+			dir := retiredLedgerFixture(t)
+			ledgerBefore := snapshotFiles(t, dir)[1]
+			require.NoError(t, AppendPitfall(dir, "aws", candidate))
+			entries, err := LoadPitfallEntries(dir, "aws")
+			require.NoError(t, err)
+			assert.Equal(t, candidate.Rule, entries[len(entries)-1].Rule)
+			assert.Equal(t, ledgerBefore, snapshotFiles(t, dir)[1], "ledger unchanged")
+		})
+	}
+}
+
+func TestAppendPitfall_LedgerUnreadable(t *testing.T) {
+	candidate := LearnedPitfall{Resource: "aws_subnet", Rule: buildAvoidRule("aws_subnet", []string{"map_public_ip_on_launch"}, nil, "Error.", "aws-web"), Source: AvoidSource, LearnedLayer: MockDeployLayer}
+
+	t.Run("malformed", func(t *testing.T) {
+		dir := t.TempDir()
+		require.NoError(t, os.MkdirAll(avoidChecksDir(dir), 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(avoidChecksDir(dir), "aws.yaml"), []byte("records: [\n"), 0o644))
+
+		err := AppendPitfall(dir, "aws", candidate)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "ledger is unreadable")
+		entries, err := LoadPitfallEntries(dir, "aws")
+		require.NoError(t, err)
+		require.Len(t, entries, 1, "learning does not stop")
+		assert.Equal(t, candidate.Rule, entries[0].Rule)
+	})
+
+	t.Run("missing", func(t *testing.T) {
+		dir := t.TempDir()
+		require.NoError(t, AppendPitfall(dir, "aws", candidate))
+		entries, err := LoadPitfallEntries(dir, "aws")
+		require.NoError(t, err)
+		assert.Len(t, entries, 1)
+		assert.NoDirExists(t, avoidChecksDir(dir), "no ledger is created")
+	})
+}

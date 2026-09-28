@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -847,11 +848,35 @@ func pitfallSource(p LearnedPitfall) string {
 // existing entry: the file also holds reviewed rules (`source: avoid`
 // guardrails, hand edits) that a learned rule has no standing to
 // overwrite. A better form arrives beside the older one instead.
+//
+// A candidate naming an attribute the avoid-check ledger retired on its
+// resource is refused whole when learned at mock_deploy or an unknown
+// layer, and appended after a relearned record when learned elsewhere.
+// An unreadable ledger does not stop learning: the candidate is appended
+// and the error says the ledger was not checked.
 func AppendPitfall(pitfallsDir, cloud string, pitfall LearnedPitfall) error {
 	if pitfallsDir == "" || cloud == "" {
 		return nil
 	}
 
+	ledger, ledgerErr := ReadAvoidLedger(pitfallsDir, cloud)
+	var hits []retiredHit
+	if ledgerErr == nil && pitfall.Source != LiveSource {
+		hits = ledger.retiredAttributesNamed(pitfall.Resource, pitfall.Rule)
+	}
+	if len(hits) > 0 && (pitfall.LearnedLayer == "" || pitfall.LearnedLayer == MockDeployLayer) {
+		return recurrenceError(pitfall, hits)
+	}
+	if err := appendPitfall(pitfallsDir, cloud, pitfall, ledger, hits); err != nil {
+		return err
+	}
+	if ledgerErr != nil {
+		return fmt.Errorf("pitfall appended, but the avoid-check ledger is unreadable, so retired rules were not checked: %w", ledgerErr)
+	}
+	return nil
+}
+
+func appendPitfall(pitfallsDir, cloud string, pitfall LearnedPitfall, ledger *AvoidLedger, hits []retiredHit) error {
 	filePath := filepath.Join(pitfallsDir, cloud+".yaml")
 
 	// The directory is created by writePitfallsFile, which is the thing
@@ -876,6 +901,24 @@ func AppendPitfall(pitfallsDir, cloud string, pitfall LearnedPitfall) error {
 		return nil
 	}
 
+	if len(hits) > 0 {
+		var attrs []string
+		for _, h := range hits {
+			attrs = append(attrs, h.Attribute)
+		}
+		if err := appendAvoidLedgerRecord(pitfallsDir, cloud, ledger, AvoidLedgerRecord{
+			Status:         AvoidRecordRelearned,
+			Resource:       pitfall.Resource,
+			Attributes:     attrs,
+			LearnedLayer:   pitfall.LearnedLayer,
+			DiscoveredFrom: pitfall.DiscoveredFrom,
+			Rule:           pitfall.Rule,
+			At:             time.Now().UTC().Format(time.RFC3339),
+		}); err != nil {
+			return fmt.Errorf("record relearned avoid attributes: %w", err)
+		}
+	}
+
 	// Append the new pitfall.
 	pf.Pitfalls = append(pf.Pitfalls, PitfallEntry{
 		Resource:       pitfall.Resource,
@@ -888,10 +931,10 @@ func AppendPitfall(pitfallsDir, cloud string, pitfall LearnedPitfall) error {
 	return writePitfallsFile(pitfallsDir, filePath, cloud, &pf)
 }
 
-// writePitfallsFile marshals the pitfalls file and writes it atomically
-// via a same-directory temp + rename.
-func writePitfallsFile(pitfallsDir, filePath, cloud string, pf *PitfallsFile) error {
-	out, err := yaml.Marshal(pf)
+// writePitfallsFile marshals v (a pitfalls file or an avoid-check
+// ledger) and writes it atomically via a same-directory temp + rename.
+func writePitfallsFile(pitfallsDir, filePath, cloud string, v any) error {
+	out, err := yaml.Marshal(v)
 	if err != nil {
 		return fmt.Errorf("marshal pitfalls: %w", err)
 	}
