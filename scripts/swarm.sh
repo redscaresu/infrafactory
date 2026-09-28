@@ -211,7 +211,11 @@ unblock() {
 # blocked on a prompt also needs the lead. Each head is reported once (state in .swarm/state).
 watch_prs() {
   local repos=("$@") seen="${STATE_DIR}/watch-seen" stall="${WATCH_STALL_SECS:-600}" repo n sha br mergeable age total pending
-  [[ ${#repos[@]} -gt 0 ]] || repos=(infrafactory fakeaws mockway)
+  # Default: infrafactory plus every sibling a story names (repo: <name>), so a new sibling needs no edit here.
+  [[ ${#repos[@]} -gt 0 ]] || repos=(infrafactory $(sed -n 's/^repo: *//p' "${REPO_ROOT}"/docs/stories/*.md 2>/dev/null | sort -u) fakeaws fakegcp fakegenesys mockway)
+  local uniq=() r
+  for r in "${repos[@]}"; do [[ " ${uniq[*]-} " == *" ${r} "* ]] || uniq+=("${r}"); done
+  repos=("${uniq[@]}")
   mkdir -p "${STATE_DIR}"; touch "${seen}"
   while :; do
     for repo in "${repos[@]}"; do
