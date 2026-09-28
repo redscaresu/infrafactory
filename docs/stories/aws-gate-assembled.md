@@ -1,7 +1,6 @@
 ---
 kind: code
-status: blocked
-blocked_by: [aws-gate-provider-boundary, aws-gate-attribute-allowlists, aws-gate-user-data-and-ami, aws-layer3-allowlist-entries]
+status: ready
 epic: aws-layer3-gate
 depends_on: [aws-gate-provider-boundary, aws-gate-attribute-allowlists, aws-gate-user-data-and-ami, aws-layer3-allowlist-entries]
 touches: ["internal/cli/layer3_aws_hcl_shape.go (new)", "internal/cli/layer3_aws_hcl_shape_test.go (new)", "internal/cli/layer3_aws_parity_test.go (new)", "internal/cli/layer3_aws_policy_lockstep_test.go (new)", "docs/stories/aws-gate-assembled.md (delete)"]
