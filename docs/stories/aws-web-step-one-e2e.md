@@ -1,7 +1,6 @@
 ---
 kind: verify
-status: blocked
-blocked_by: [aws-compute-http-probe, aws-provider-layer-neutral, aws-user-data-rendered]
+status: ready
 epic: aws-layer-neutral-hcl
 depends_on: [aws-compute-http-probe, aws-provider-layer-neutral, aws-user-data-rendered]
 touches: ["internal/e2e/aws_web_step_one_test.go (new)", "internal/e2e/testdata/aws-web-step-one/ (new)", ".github/workflows/ci.yml", "docs/decisions/0013-cross-repo-e2e-and-multi-cloud.md", "docs/stories/aws-web-step-one-e2e.md (delete)"]
