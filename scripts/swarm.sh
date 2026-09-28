@@ -176,7 +176,7 @@ build_story() {
 }
 
 # unblock — a merged story's file is deleted, so a blocked story whose every blocked_by slug has no
-# file left is ready. Prints each story it flips.
+# story or epic file left, and names no operator step, is ready. Prints each story it flips.
 unblock() {
   local story slug blockers b open
   for story in "${REPO_ROOT}"/docs/stories/*.md; do
@@ -184,7 +184,11 @@ unblock() {
     blockers=$(sed -n 's/^blocked_by: *\[\(.*\)\]$/\1/p' "${story}" | tr ',' ' ')
     [[ -n "${blockers// /}" ]] || continue   # blocked for a reason no merge clears
     open=0
-    for b in ${blockers}; do [[ -f "${REPO_ROOT}/docs/stories/${b}.md" ]] && open=1; done
+    for b in ${blockers}; do
+      # Open while its story exists, its epic exists, or it is not a plain slug (an operator step such
+      # as "operator:planted-leak-proof" is cleared by hand, never by a merge).
+      if [[ -f "${REPO_ROOT}/docs/stories/${b}.md" || -f "${REPO_ROOT}/docs/epics/${b}.md" || ! "${b}" =~ ^[a-z0-9-]+$ ]]; then open=1; fi
+    done
     [[ ${open} -eq 0 ]] || continue
     sed -i.bak -e 's/^status: blocked$/status: ready/' -e '/^blocked_by:/d' "${story}" && rm -f "${story}.bak"
     echo "ready: $(basename "${story}" .md)"
