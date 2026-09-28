@@ -65,7 +65,7 @@ Every failure this run has produced so far, from every earlier iteration; `stage
 3. Apply any prescriptive overrides — these take priority over size mappings.
 4. Identify dependencies between resources. Required ordering:
    - `aws_vpc` and `aws_subnet` BEFORE any `aws_instance`, `aws_db_instance`, or `aws_eks_cluster`.
-   - `aws_iam_role` BEFORE any resource that references the role's ARN (EKS cluster, EC2 instance profile, etc.).
+   - `aws_iam_role` BEFORE any resource that references the role's ARN (EKS cluster, EKS node group, etc.).
    - No `aws_iam_instance_profile`: an instance runs with no instance profile, and a plan that gives one to `aws_instance`, a launch template or a launch configuration is refused.
    - `aws_db_subnet_group` BEFORE any `aws_db_instance` placed in a custom VPC.
    - Do NOT rely on the default VPC — always create an explicit VPC.
