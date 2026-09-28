@@ -1415,7 +1415,11 @@ func toFeedbackFailures(failures []FailureSummary) []feedback.Failure {
 	out := make([]feedback.Failure, 0, len(failures))
 	for _, failure := range failures {
 		out = append(out, feedback.Failure{
+			Layer:    failure.Layer,
+			Stage:    failure.Stage,
 			Check:    failure.Check,
+			Policy:   failure.Policy,
+			Command:  failure.Command,
 			Resource: failure.Resource,
 			Detail:   failure.Detail,
 		})
