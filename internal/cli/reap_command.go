@@ -43,6 +43,15 @@ func runReapCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) 
 
 	workDir := runtime.OutputDir()
 	statePath := filepath.Join(workDir, harness.LiveStateFilename)
+
+	// Before anything on disk is read: a marker here may be a stale
+	// Scaleway one, and acting on it would reap an account this
+	// scenario never applied to.
+	cloud := layer3TeardownCloud(sc.Cloud)
+	if cloud != layer3Scaleway {
+		return &CLIError{Op: "reap", Code: errorCodeCommandFailed, Err: errors.New(layer3TeardownNotBuilt(cloud, statePath))}
+	}
+
 	markerPath := filepath.Join(workDir, harness.RunProjectMarkerFilename)
 	_, stateErr := os.Stat(statePath)
 	_, markerErr := os.Stat(markerPath)
@@ -69,7 +78,7 @@ func runReapCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) 
 
 	// Scoped to the project the marker names: the apply ran with it as
 	// the provider default, so the destroy that inverts it must too.
-	sandboxEnv, err := sandboxCommandEnvForProject(runtime, projectID)
+	sandboxEnv, err := sandboxCommandEnvForProject(runtime, cloud, projectID)
 	if err != nil {
 		return &CLIError{Op: "reap", Code: errorCodeCommandFailed, Err: err}
 	}
@@ -77,7 +86,7 @@ func runReapCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) 
 	// reap only ever destroys the project recorded in the state file it
 	// was handed -- never one named on the command line, never the
 	// organization default.
-	if err := assertRunProjectDeletable(ctx, runtime, workDir, projectID, sandboxEnv); err != nil {
+	if err := assertRunProjectDeletable(ctx, runtime, cloud, workDir, projectID, sandboxEnv); err != nil {
 		return &CLIError{Op: "reap", Code: errorCodeCommandFailed, Err: err}
 	}
 
@@ -90,7 +99,7 @@ func runReapCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) 
 	}
 
 	sweepTarget, sweepTargetErr := harness.CaptureSweepTarget(workDir)
-	destroyResult, purged, destroyErr := destroySandbox(ctx, runtime, workDir, sandboxEnv, sweepTargetProjectID(sweepTarget))
+	destroyResult, purged, destroyErr := destroySandbox(ctx, runtime, cloud, workDir, sandboxEnv, sweepTargetProjectID(sweepTarget))
 	stages, failures := appendSandboxDestroyResult(nil, nil, destroyResult, destroyErr)
 	if len(purged) > 0 {
 		stages = append(stages, autoCreatedPurgeStage(purged))
@@ -101,11 +110,11 @@ func runReapCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) 
 		// cannot delete it -- it is not a Terraform resource -- and the
 		// sweep's whole job is to verify it is gone. Deleting it
 		// afterwards would make every clean reap report a leak.
-		projectStages, projectFailures := releaseRunProject(ctx, runtime, workDir, projectID, sandboxEnv)
+		projectStages, projectFailures := releaseRunProject(ctx, runtime, cloud, workDir, projectID, sandboxEnv)
 		stages = append(stages, projectStages...)
 		failures = append(failures, projectFailures...)
 
-		stages, failures = appendOrphanSweepResult(ctx, stages, failures, runtime, sweepTarget, sweepTargetErr, sandboxEnv)
+		stages, failures = appendOrphanSweepResult(ctx, stages, failures, runtime, cloud, sweepTarget, sweepTargetErr, sandboxEnv)
 	}
 
 	status := CommandStatusSuccess
@@ -144,6 +153,7 @@ func runReapCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) 
 func withSandboxInterruptGuard(
 	cmd *cobra.Command,
 	runtime *CommandRuntime,
+	cloud layer3Cloud,
 	notify func(ctx context.Context, sigs ...os.Signal) (context.Context, context.CancelFunc),
 	fn func(ctx context.Context) error,
 ) error {
@@ -165,6 +175,14 @@ func withSandboxInterruptGuard(
 	out := cmd.ErrOrStderr()
 	workDir := runtime.OutputDir()
 	statePath := filepath.Join(workDir, harness.LiveStateFilename)
+
+	// Before the state and marker reads, for reap's reason: a marker
+	// here may be a stale Scaleway one.
+	if cloud != layer3Scaleway {
+		_, _ = fmt.Fprintf(out, "\nInterrupted: %s.\n", layer3TeardownNotBuilt(cloud, statePath))
+		return err
+	}
+
 	_, stateErr := os.Stat(statePath)
 	hasState := !errors.Is(stateErr, os.ErrNotExist)
 
@@ -204,7 +222,7 @@ func withSandboxInterruptGuard(
 
 	// Scoped to the run's project, so the destroy runs with the same
 	// provider default the apply did.
-	sandboxEnv, envErr := sandboxCommandEnvForProject(runtime, marker.ProjectID)
+	sandboxEnv, envErr := sandboxCommandEnvForProject(runtime, cloud, marker.ProjectID)
 	if envErr != nil {
 		reportAbandonedResources(out, statePath, envErr)
 		return err
@@ -218,7 +236,7 @@ func withSandboxInterruptGuard(
 		// project id just means no purge, never a skipped destroy.
 		cleanupTarget, _ := harness.CaptureSweepTarget(workDir)
 		destroyResult, purged, destroyErr := destroySandbox(
-			context.Background(), runtime, workDir, sandboxEnv, sweepTargetProjectID(cleanupTarget))
+			context.Background(), runtime, cloud, workDir, sandboxEnv, sweepTargetProjectID(cleanupTarget))
 		if destroyErr != nil {
 			reportAbandonedResources(out, statePath, destroyErr)
 			return err
@@ -236,7 +254,7 @@ func withSandboxInterruptGuard(
 	// will: an interrupt is the one exit with no summary to report a
 	// kept project in.
 	_, projectFailures := releaseRunProject(
-		context.Background(), runtime, workDir, marker.ProjectID, sandboxEnv)
+		context.Background(), runtime, cloud, workDir, marker.ProjectID, sandboxEnv)
 	if len(projectFailures) > 0 {
 		_, _ = fmt.Fprintf(out, "%s\n", projectFailures[0].Detail)
 		return err

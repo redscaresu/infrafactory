@@ -66,7 +66,8 @@ func tearDownDeployment(
 	// Before any env is built. Only Scaleway has a Layer 3 teardown, and
 	// its destroy and sweep pointed at another cloud's state would verify
 	// an account they never looked at.
-	if !teardownBuilt(d) {
+	cloud := layer3TeardownCloud(d.Cloud)
+	if cloud != layer3Scaleway {
 		return unreclaimable(fmt.Sprintf(
 			"%s was applied to cloud %q, whose Layer 3 teardown is not built: resources recorded in %s may exist. "+
 				"Destroy them by hand, then clear the record with `infrafactory live forget %s`",
@@ -107,7 +108,7 @@ func tearDownDeployment(
 		if marker, markerErr := harness.ReadRunProjectMarker(d.WorkDir); markerErr == nil {
 			verifyProjectID = marker.ProjectID
 		}
-		sandboxEnv, envErr := sandboxCommandEnvForProject(runtime, verifyProjectID)
+		sandboxEnv, envErr := sandboxCommandEnvForProject(runtime, cloud, verifyProjectID)
 		if envErr != nil {
 			return unreclaimable(fmt.Sprintf(
 				"%s has nothing to destroy, but the account cannot be verified: %v", d.ID, envErr))
@@ -121,11 +122,11 @@ func tearDownDeployment(
 		// releaseRunProject runs the deletability guard itself, so a
 		// record with neither state nor marker fails closed here rather
 		// than releasing quietly.
-		projectStages, projectFailures := releaseRunProject(ctx, runtime, d.WorkDir, d.ProjectID, sandboxEnv)
+		projectStages, projectFailures := releaseRunProject(ctx, runtime, cloud, d.WorkDir, d.ProjectID, sandboxEnv)
 		stages = append(stages, projectStages...)
 		failures = append(failures, projectFailures...)
 
-		stages, failures = appendOrphanSweepResult(ctx, stages, failures, runtime,
+		stages, failures = appendOrphanSweepResult(ctx, stages, failures, runtime, cloud,
 			&harness.SweepTarget{ProjectID: d.ProjectID}, nil, sandboxEnv)
 		if len(failures) > 0 {
 			return stages, failures
@@ -157,7 +158,7 @@ func tearDownDeployment(
 	if marker, markerErr := harness.ReadRunProjectMarker(d.WorkDir); markerErr == nil {
 		destroyProjectID = marker.ProjectID
 	}
-	sandboxEnv, err := sandboxCommandEnvForProject(runtime, destroyProjectID)
+	sandboxEnv, err := sandboxCommandEnvForProject(runtime, cloud, destroyProjectID)
 	if err != nil {
 		return unreclaimable(fmt.Sprintf("sandbox credentials for %s: %v", d.ID, err))
 	}
@@ -172,7 +173,7 @@ func tearDownDeployment(
 
 	sweepTarget, sweepTargetErr := harness.CaptureSweepTarget(d.WorkDir)
 	destroyResult, purged, destroyErr := destroySandbox(
-		ctx, runtime, d.WorkDir, sandboxEnv, sweepTargetProjectID(sweepTarget))
+		ctx, runtime, cloud, d.WorkDir, sandboxEnv, sweepTargetProjectID(sweepTarget))
 	stages, failures = appendSandboxDestroyResult(stages, failures, destroyResult, destroyErr)
 	if len(purged) > 0 {
 		stages = append(stages, autoCreatedPurgeStage(purged))
@@ -182,12 +183,12 @@ func tearDownDeployment(
 		// sweep verifies the project is GONE, and tofu no longer deletes
 		// it. Deleting afterwards would make every clean teardown report
 		// a leak.
-		projectStages, projectFailures := releaseRunProject(ctx, runtime, d.WorkDir, d.ProjectID, sandboxEnv)
+		projectStages, projectFailures := releaseRunProject(ctx, runtime, cloud, d.WorkDir, d.ProjectID, sandboxEnv)
 		stages = append(stages, projectStages...)
 		failures = append(failures, projectFailures...)
 
 		failuresBeforeSweep := len(failures)
-		stages, failures = appendOrphanSweepResult(ctx, stages, failures, runtime, sweepTarget, sweepTargetErr, sandboxEnv)
+		stages, failures = appendOrphanSweepResult(ctx, stages, failures, runtime, cloud, sweepTarget, sweepTargetErr, sandboxEnv)
 		if len(failures) > failuresBeforeSweep {
 			// Sticky, and written before returning: the next pass sees an
 			// empty state and must not treat that as evidence of a clean

@@ -768,12 +768,28 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 	// Auto-destroy real Scaleway resources on failure to prevent orphaned billing.
 	// Contract #14: failed run without --no-destroy must destroy real resources.
 	sandboxEnabled := runtime.Config.Validation.Layers.SandboxDeploy.Enabled
+	cloud := layer3TeardownCloud(sc.Cloud)
 	if sandboxEnabled && !controls.NoDestroy && terminalReason != "target_reached" {
 		// Fails closed: unreadable or unparseable state still gets
 		// cleanup. Only a state that parses and records nothing is
 		// treated as already clean -- which is what a successful destroy
 		// leaves behind.
-		if liveStateMayHoldResources(runtime.OutputDir()) {
+		mayHoldResources := liveStateMayHoldResources(runtime.OutputDir())
+		if mayHoldResources && cloud != layer3Scaleway {
+			// Before the marker is read: one here may be a stale Scaleway
+			// one, and nothing below is written for any other cloud.
+			detail := layer3TeardownNotBuilt(cloud, filepath.Join(runtime.OutputDir(), harness.LiveStateFilename))
+			runtime.Logger.Log(LogEntry{
+				Level: logLevelError, Command: "run",
+				Event: "layer3_auto_destroy", Status: "failed",
+				RunID: runID, Detail: detail,
+			})
+			allStages = append(allStages, StageSummary{Layer: "sandbox_deploy", Stage: "auto_destroy_preflight", Status: StageStatusFail})
+			allFailures = append(allFailures, FailureSummary{
+				Layer: "sandbox_deploy", Stage: "auto_destroy_preflight", Check: "cloud",
+				Command: "auto-destroy preflight", Detail: detail,
+			})
+		} else if mayHoldResources {
 			// The env must be scoped to the run's OWN project: the apply
 			// ran with it as the provider default, and a destroy against
 			// the shared fallback is not the inverse of that apply.
@@ -790,7 +806,7 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 			sandboxEnvErr := markerErr
 			var sandboxEnv map[string]string
 			if markerErr == nil {
-				sandboxEnv, sandboxEnvErr = sandboxCommandEnvForProject(runtime, runProjectMarker.ProjectID)
+				sandboxEnv, sandboxEnvErr = sandboxCommandEnvForProject(runtime, cloud, runProjectMarker.ProjectID)
 			}
 			if sandboxEnvErr != nil {
 				runtime.Logger.Log(LogEntry{
@@ -822,7 +838,7 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 				// empties terraform-live.tfstate, and the strays it names
 				// go with it. Same ordering the success path learned the
 				// hard way in the first canary run.
-				destroyResult, purged, destroyErr := destroySandbox(cmd.Context(), runtime, runtime.OutputDir(), sandboxEnv, sweepTargetProjectID(sweepTarget))
+				destroyResult, purged, destroyErr := destroySandbox(cmd.Context(), runtime, cloud, runtime.OutputDir(), sandboxEnv, sweepTargetProjectID(sweepTarget))
 				destroyStages, destroyFailures := appendSandboxDestroyResult(nil, nil, destroyResult, destroyErr)
 				allStages = append(allStages, destroyStages...)
 				if len(purged) > 0 {
@@ -855,7 +871,7 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 					// gives it one, so the gap closes here rather than
 					// staying a known leak.
 					projectStages, projectFailures := releaseRunProject(
-						cmd.Context(), runtime, runtime.OutputDir(),
+						cmd.Context(), runtime, cloud, runtime.OutputDir(),
 						runProjectMarker.ProjectID, sandboxEnv)
 					allStages = append(allStages, projectStages...)
 					if len(projectFailures) > 0 {
@@ -871,7 +887,7 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 					// and "nothing leaked" must never look alike.
 					failuresBeforeSweep := len(allFailures)
 					allStages, allFailures = appendOrphanSweepResult(
-						cmd.Context(), allStages, allFailures, runtime, sweepTarget, sweepTargetErr, sandboxEnv)
+						cmd.Context(), allStages, allFailures, runtime, cloud, sweepTarget, sweepTargetErr, sandboxEnv)
 					if len(allFailures) > failuresBeforeSweep {
 						annotateWithRecoveryCommand(allFailures[failuresBeforeSweep:], runtime.ConfigPath, scenarioPath)
 						logLayer3RecoveryHint(runtime, runID, scenarioPath,
@@ -911,8 +927,13 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 	}
 
 	strayBlocked := false
-	if sandboxRunEnabled(runtime) {
-		strayStages, strayFailures := reportStrayRunProjects(cmd.Context(), runtime)
+	if sandboxRunEnabled(runtime) && cloud != layer3Scaleway {
+		allStages = append(allStages, StageSummary{
+			Layer: "live", Stage: "stray_run_projects", Status: StageStatusSkip,
+			Detail: fmt.Sprintf("cloud %s has no run projects to check", cloud),
+		})
+	} else if sandboxRunEnabled(runtime) {
+		strayStages, strayFailures := reportStrayRunProjects(cmd.Context(), runtime, cloud)
 		allStages = append(allStages, strayStages...)
 		allFailures = append(allFailures, strayFailures...)
 		strayBlocked = len(strayFailures) > 0

@@ -85,7 +85,7 @@ func TestEnsureRunProjectCreatesAndReportsIt(t *testing.T) {
 	fake := &fakeRunProject{created: harness.RunProject{ID: "proj-1", Name: "if-run-web-live-paris-x"}}
 	rt := &CommandRuntime{Deps: RuntimeDependencies{RunProject: fake}}
 
-	id, stages, failures := ensureRunProject(context.Background(), rt, "web-live-paris", t.TempDir())
+	id, stages, failures := ensureRunProject(context.Background(), rt, layer3Scaleway, "web-live-paris", t.TempDir())
 
 	assert.Equal(t, "proj-1", id)
 	assert.Empty(t, failures)
@@ -103,7 +103,7 @@ func TestEnsureRunProjectFailsRatherThanFallingBack(t *testing.T) {
 	fake := &fakeRunProject{createErr: errors.New("http 403: insufficient permissions")}
 	rt := &CommandRuntime{Deps: RuntimeDependencies{RunProject: fake}}
 
-	id, stages, failures := ensureRunProject(context.Background(), rt, "web-live-paris", t.TempDir())
+	id, stages, failures := ensureRunProject(context.Background(), rt, layer3Scaleway, "web-live-paris", t.TempDir())
 
 	assert.Empty(t, id)
 	require.Len(t, failures, 1)
@@ -118,7 +118,7 @@ func TestReleaseRunProjectDeletesAndReports(t *testing.T) {
 
 	workDir, env := releaseFixture(t)
 
-	stages, failures := releaseRunProject(context.Background(), rt, workDir, "proj-1", env)
+	stages, failures := releaseRunProject(context.Background(), rt, layer3Scaleway, workDir, "proj-1", env)
 
 	assert.Empty(t, failures)
 	require.Len(t, stages, 1)
@@ -132,7 +132,7 @@ func TestReleaseRunProjectIsInertWithoutAProject(t *testing.T) {
 
 	workDir, env := releaseFixture(t)
 
-	stages, failures := releaseRunProject(context.Background(), rt, workDir, "", env)
+	stages, failures := releaseRunProject(context.Background(), rt, layer3Scaleway, workDir, "", env)
 
 	assert.Empty(t, stages)
 	assert.Empty(t, failures)
@@ -147,7 +147,7 @@ func TestReleaseRunProjectReportsAFailedDelete(t *testing.T) {
 
 	workDir, env := releaseFixture(t)
 
-	stages, failures := releaseRunProject(context.Background(), rt, workDir, "proj-1", env)
+	stages, failures := releaseRunProject(context.Background(), rt, layer3Scaleway, workDir, "proj-1", env)
 
 	require.Len(t, failures, 1)
 	assert.Contains(t, failures[0].Detail, "resource_still_in_use")
@@ -241,7 +241,7 @@ func TestReleaseRunProjectSurvivesACancelledRunContext(t *testing.T) {
 
 	workDir, env := releaseFixture(t)
 
-	stages, failures := releaseRunProject(ctx, rt, workDir, "proj-1", env)
+	stages, failures := releaseRunProject(ctx, rt, layer3Scaleway, workDir, "proj-1", env)
 
 	assert.Empty(t, failures)
 	assert.Equal(t, 1, fake.deletes, "the delete still reaches the API after cancellation")
@@ -260,7 +260,7 @@ func TestNoProjectIsCreatedWhenTheSandboxEnvIsInvalid(t *testing.T) {
 	t.Setenv("SCW_ACCESS_KEY", "") // the missing piece
 
 	rt := &CommandRuntime{}
-	err := assertSandboxCredentials(rt)
+	err := assertSandboxCredentials(rt, layer3Scaleway)
 
 	require.Error(t, err, "the environment is rejected before any project could be created")
 	assert.Contains(t, err.Error(), "SCW_ACCESS_KEY")
@@ -274,7 +274,7 @@ func TestNoProjectIsCreatedWhenTheSandboxEnvIsInvalid(t *testing.T) {
 func TestSandboxEnvRefusesToBuildWithoutARunProject(t *testing.T) {
 	sandboxCredsForTest(t)
 
-	_, err := sandboxCommandEnvForProject(&CommandRuntime{}, "  ")
+	_, err := sandboxCommandEnvForProject(&CommandRuntime{}, layer3Scaleway, "  ")
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not the inverse of an apply")
@@ -293,7 +293,7 @@ func TestAssertRunProjectDeletableRefusesWhenTheAPICannotBeReached(t *testing.T)
 		RunProject: &fakeRunProject{describeErr: errors.New("dial tcp: connection refused")},
 	}}
 
-	err := assertRunProjectDeletable(context.Background(), rt, dir, "proj-1",
+	err := assertRunProjectDeletable(context.Background(), rt, layer3Scaleway, dir, "proj-1",
 		map[string]string{"SCW_SECRET_KEY": "s", "SCW_DEFAULT_ORGANIZATION_ID": "org"})
 
 	require.Error(t, err)
@@ -305,7 +305,7 @@ func TestAssertRunProjectDeletableRefusesWhenTheAPICannotBeReached(t *testing.T)
 func TestAssertRunProjectDeletableRefusesWithoutAMarkerFile(t *testing.T) {
 	rt := &CommandRuntime{Deps: RuntimeDependencies{RunProject: &fakeRunProject{}}}
 
-	err := assertRunProjectDeletable(context.Background(), rt, t.TempDir(), "proj-1",
+	err := assertRunProjectDeletable(context.Background(), rt, layer3Scaleway, t.TempDir(), "proj-1",
 		map[string]string{"SCW_SECRET_KEY": "s"})
 
 	require.Error(t, err)
@@ -320,7 +320,7 @@ func TestAssertRunProjectDeletableAllowsAnAlreadyGoneProject(t *testing.T) {
 
 	rt := &CommandRuntime{Deps: RuntimeDependencies{RunProject: &fakeRunProject{describeGone: true}}}
 
-	assert.NoError(t, assertRunProjectDeletable(context.Background(), rt, dir, "proj-1",
+	assert.NoError(t, assertRunProjectDeletable(context.Background(), rt, layer3Scaleway, dir, "proj-1",
 		map[string]string{"SCW_SECRET_KEY": "s"}))
 }
 
@@ -336,7 +336,7 @@ func TestEnsureRunProjectDeletesTheProjectIfTheMarkerCannotBeWritten(t *testing.
 	blocked := filepath.Join(t.TempDir(), "not-a-dir")
 	require.NoError(t, os.WriteFile(blocked, []byte("x"), 0o600))
 
-	id, _, failures := ensureRunProject(context.Background(), rt, "web-live-paris", blocked)
+	id, _, failures := ensureRunProject(context.Background(), rt, layer3Scaleway, "web-live-paris", blocked)
 
 	assert.Empty(t, id)
 	require.Len(t, failures, 1)
@@ -356,7 +356,7 @@ func TestReleaseRunProjectPurgesTheAutoCreatedBlockerAndRetries(t *testing.T) {
 	rt := &CommandRuntime{Deps: RuntimeDependencies{RunProject: fake, AutoCreated: purge}}
 	workDir, env := releaseFixture(t)
 
-	stages, failures := releaseRunProject(context.Background(), rt, workDir, "proj-1", env)
+	stages, failures := releaseRunProject(context.Background(), rt, layer3Scaleway, workDir, "proj-1", env)
 
 	assert.Empty(t, failures)
 	assert.Equal(t, 2, fake.deletes, "the delete is retried once the blocker is gone")
@@ -376,7 +376,7 @@ func TestReleaseRunProjectReportsTheOriginalErrorWhenNothingWasAutoCreated(t *te
 	rt := &CommandRuntime{Deps: RuntimeDependencies{RunProject: fake, AutoCreated: purge}}
 	workDir, env := releaseFixture(t)
 
-	_, failures := releaseRunProject(context.Background(), rt, workDir, "proj-1", env)
+	_, failures := releaseRunProject(context.Background(), rt, layer3Scaleway, workDir, "proj-1", env)
 
 	require.Len(t, failures, 1)
 	assert.Contains(t, failures[0].Detail, "http 500: boom")
@@ -393,7 +393,7 @@ func TestReleaseRunProjectSkipsWhenNoMarkerNamesTheProject(t *testing.T) {
 	rt := &CommandRuntime{Deps: RuntimeDependencies{RunProject: fake}}
 	_, env := releaseFixture(t)
 
-	stages, failures := releaseRunProject(context.Background(), rt, t.TempDir(), "proj-1", env)
+	stages, failures := releaseRunProject(context.Background(), rt, layer3Scaleway, t.TempDir(), "proj-1", env)
 
 	assert.Empty(t, failures, "the sweep is the judge of whether the project is gone")
 	require.Len(t, stages, 1)
@@ -410,7 +410,7 @@ func TestReleaseRunProjectRefusesAProjectTheMarkerDoesNotName(t *testing.T) {
 	rt := &CommandRuntime{Deps: RuntimeDependencies{RunProject: fake}}
 	workDir, env := releaseFixture(t)
 
-	_, failures := releaseRunProject(context.Background(), rt, workDir, "someone-elses-project", env)
+	_, failures := releaseRunProject(context.Background(), rt, layer3Scaleway, workDir, "someone-elses-project", env)
 
 	require.Len(t, failures, 1)
 	assert.Contains(t, failures[0].Detail, "refusing to delete it")
@@ -433,7 +433,7 @@ func TestEnsureRunProjectCreatesDespiteACancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	id, _, failures := ensureRunProject(ctx, rt, "web-live-paris", workDir)
+	id, _, failures := ensureRunProject(ctx, rt, layer3Scaleway, "web-live-paris", workDir)
 
 	assert.Empty(t, failures)
 	assert.Equal(t, "proj-1", id, "the id is the handle; losing it is worse than the extra second")
@@ -478,7 +478,7 @@ func TestA412StillPurgesBeforeGivingUp(t *testing.T) {
 	rt := &CommandRuntime{Deps: RuntimeDependencies{RunProject: rp, AutoCreated: purge}}
 
 	stages, failures := releaseRunProject(
-		context.Background(), rt, purgeWorkDir(t), purgeProjectID, destroyEnv)
+		context.Background(), rt, layer3Scaleway, purgeWorkDir(t), purgeProjectID, destroyEnv)
 
 	assert.Equal(t, 1, purge.calls, "the purge must run even for a 412")
 	assert.Equal(t, 2, rp.deletes, "and the delete must be retried after it")
@@ -502,7 +502,7 @@ func TestA412WithNothingToPurgeReportsWaitNotFailure(t *testing.T) {
 	}}
 
 	_, failures := releaseRunProject(
-		context.Background(), rt, purgeWorkDir(t), purgeProjectID, destroyEnv)
+		context.Background(), rt, layer3Scaleway, purgeWorkDir(t), purgeProjectID, destroyEnv)
 
 	require.Len(t, failures, 1)
 	assert.Equal(t, "delete_not_yet", failures[0].Check)

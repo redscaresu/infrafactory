@@ -22,7 +22,15 @@ import (
 // shared project: the caller asked for a run-owned project, and silently
 // applying into the shared one instead would put this run's strays next
 // to every other run's.
-func ensureRunProject(ctx context.Context, runtime *CommandRuntime, scenario, workDir string) (string, []StageSummary, []FailureSummary) {
+func ensureRunProject(ctx context.Context, runtime *CommandRuntime, cloud layer3Cloud, scenario, workDir string) (string, []StageSummary, []FailureSummary) {
+	if cloud != layer3Scaleway {
+		return "", []StageSummary{{Layer: "sandbox_deploy", Stage: "run_project", Status: StageStatusFail}},
+			[]FailureSummary{{
+				Layer: "sandbox_deploy", Stage: "run_project", Check: "cloud",
+				Command: "create run project",
+				Detail:  layer3SeamRefused(cloud, "run project").Error(),
+			}}
+	}
 	if runtime.Deps.RunProject == nil {
 		return "", []StageSummary{{Layer: "sandbox_deploy", Stage: "run_project", Status: StageStatusFail}},
 			[]FailureSummary{{
@@ -120,9 +128,18 @@ func ensureRunProject(ctx context.Context, runtime *CommandRuntime, scenario, wo
 func releaseRunProject(
 	ctx context.Context,
 	runtime *CommandRuntime,
+	cloud layer3Cloud,
 	workDir, projectID string,
 	sandboxEnv map[string]string,
 ) ([]StageSummary, []FailureSummary) {
+	if cloud != layer3Scaleway {
+		return []StageSummary{{Layer: "sandbox_deploy", Stage: "run_project_delete", Status: StageStatusFail}},
+			[]FailureSummary{{
+				Layer: "sandbox_deploy", Stage: "run_project_delete", Check: "cloud",
+				Command: "delete run project",
+				Detail:  layer3SeamRefused(cloud, "run project delete").Error(),
+			}}
+	}
 	if strings.TrimSpace(projectID) == "" || runtime.Deps.RunProject == nil {
 		return nil, nil
 	}
@@ -156,7 +173,7 @@ func releaseRunProject(
 	// destroySandbox's purge guard does: five paths reach this, it
 	// deletes a real project over HTTP with Terraform nowhere in the
 	// loop, and a check that can be forgotten will be.
-	if err := assertRunProjectDeletable(cleanupCtx, runtime, workDir, projectID, sandboxEnv); err != nil {
+	if err := assertRunProjectDeletable(cleanupCtx, runtime, cloud, workDir, projectID, sandboxEnv); err != nil {
 		return runProjectDeleteFailure(projectID, fmt.Sprintf("refusing to delete it: %v", err))
 	}
 
@@ -291,7 +308,10 @@ func runProjectDeleteNotYet(projectID, detail string) ([]StageSummary, []Failure
 //
 // An unreachable API is an error, not an absence -- refusing costs a
 // retry, proceeding wrongly costs a project nobody meant to destroy.
-func assertRunProjectDeletable(ctx context.Context, runtime *CommandRuntime, workDir, targetProjectID string, sandboxEnv map[string]string) error {
+func assertRunProjectDeletable(ctx context.Context, runtime *CommandRuntime, cloud layer3Cloud, workDir, targetProjectID string, sandboxEnv map[string]string) error {
+	if cloud != layer3Scaleway {
+		return fmt.Errorf("%w: %v", harness.ErrProtectedProject, layer3SeamRefused(cloud, "deletable check"))
+	}
 	marker, err := harness.ReadRunProjectMarker(workDir)
 	if err != nil {
 		return fmt.Errorf("%w: %v", harness.ErrProtectedProject, err)

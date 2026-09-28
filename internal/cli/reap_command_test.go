@@ -195,7 +195,7 @@ func TestInterruptGuardNoopsWithoutLiveState(t *testing.T) {
 	rt, _ := reapRuntime(t, destroy, &fakeOrphanSweep{})
 
 	out := &strings.Builder{}
-	_ = withSandboxInterruptGuard(guardCmd(out), rt, cancelledNotify(), func(context.Context) error { return nil })
+	_ = withSandboxInterruptGuard(guardCmd(out), rt, layer3Scaleway, cancelledNotify(), func(context.Context) error { return nil })
 
 	if destroy.calls != 0 {
 		t.Fatal("nothing was created, so nothing should be destroyed")
@@ -214,7 +214,7 @@ func TestInterruptGuardDestroysLiveResources(t *testing.T) {
 	writeReapLiveState(t, rt.OutputDir(), reapProjectID)
 
 	out := &strings.Builder{}
-	_ = withSandboxInterruptGuard(guardCmd(out), rt, cancelledNotify(), func(context.Context) error { return nil })
+	_ = withSandboxInterruptGuard(guardCmd(out), rt, layer3Scaleway, cancelledNotify(), func(context.Context) error { return nil })
 
 	if destroy.calls != 1 {
 		t.Fatalf("interrupt with live resources must trigger destroy, got %d", destroy.calls)
@@ -240,7 +240,7 @@ func TestInterruptGuardDeletesTheProjectWhenNothingWasApplied(t *testing.T) {
 		harness.RunProject{ID: reapProjectID, Name: harness.RunProjectNamePrefix + "interrupt"}))
 
 	out := &strings.Builder{}
-	_ = withSandboxInterruptGuard(guardCmd(out), rt, cancelledNotify(), func(context.Context) error { return nil })
+	_ = withSandboxInterruptGuard(guardCmd(out), rt, layer3Scaleway, cancelledNotify(), func(context.Context) error { return nil })
 
 	assert.Zero(t, destroy.calls, "no state means nothing for tofu to do")
 	assert.Equal(t, 1, rt.Deps.RunProject.(*fakeRunProject).deletes)
@@ -259,7 +259,7 @@ func TestInterruptGuardRefusesToDestroyWithoutAMarker(t *testing.T) {
 	require.NoError(t, os.Remove(filepath.Join(rt.OutputDir(), harness.RunProjectMarkerFilename)))
 
 	out := &strings.Builder{}
-	_ = withSandboxInterruptGuard(guardCmd(out), rt, cancelledNotify(), func(context.Context) error { return nil })
+	_ = withSandboxInterruptGuard(guardCmd(out), rt, layer3Scaleway, cancelledNotify(), func(context.Context) error { return nil })
 
 	assert.Zero(t, destroy.calls, "a destroy scoped to the wrong project is not the inverse of the apply")
 	assert.Zero(t, rt.Deps.RunProject.(*fakeRunProject).deletes)
@@ -276,7 +276,7 @@ func TestInterruptGuardReportsAbandonedResourcesOnCleanupFailure(t *testing.T) {
 	writeReapLiveState(t, rt.OutputDir(), reapProjectID)
 
 	out := &strings.Builder{}
-	_ = withSandboxInterruptGuard(guardCmd(out), rt, cancelledNotify(), func(context.Context) error { return nil })
+	_ = withSandboxInterruptGuard(guardCmd(out), rt, layer3Scaleway, cancelledNotify(), func(context.Context) error { return nil })
 
 	for _, want := range []string{"CLEANUP FAILED", "infrafactory reap", harness.LiveStateFilename} {
 		if !strings.Contains(out.String(), want) {
@@ -296,7 +296,7 @@ func TestInterruptGuardInertWhenLayer3Disabled(t *testing.T) {
 		notified = true
 		return ctx, func() {}
 	}
-	if err := withSandboxInterruptGuard(guardCmd(&strings.Builder{}), rt, notify, func(context.Context) error { return nil }); err != nil {
+	if err := withSandboxInterruptGuard(guardCmd(&strings.Builder{}), rt, layer3Scaleway, notify, func(context.Context) error { return nil }); err != nil {
 		t.Fatalf("guard: %v", err)
 	}
 	if notified {

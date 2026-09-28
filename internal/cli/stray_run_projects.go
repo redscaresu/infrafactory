@@ -48,7 +48,14 @@ func sandboxRunEnabled(runtime *CommandRuntime) bool {
 // false in the way this project keeps removing. A run that leaves no
 // stray is unaffected, and a run that inherits somebody else's stray
 // finds out at the only moment anyone is watching.
-func reportStrayRunProjects(ctx context.Context, runtime *CommandRuntime) ([]StageSummary, []FailureSummary) {
+func reportStrayRunProjects(ctx context.Context, runtime *CommandRuntime, cloud layer3Cloud) ([]StageSummary, []FailureSummary) {
+	if cloud != layer3Scaleway {
+		return []StageSummary{{Layer: "live", Stage: "stray_run_projects", Status: StageStatusFail}},
+			[]FailureSummary{{
+				Layer: "live", Stage: "stray_run_projects", Check: "cloud",
+				Command: "run", Detail: layer3SeamRefused(cloud, "stray project check").Error(),
+			}}
+	}
 	if runtime.Deps.RunProject == nil {
 		return nil, nil
 	}

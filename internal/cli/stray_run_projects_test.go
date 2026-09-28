@@ -39,7 +39,7 @@ func TestStrayRunProjectsFailsOnAnUnexplainedProject(t *testing.T) {
 		{ID: "p-1", Name: harness.RunProjectNamePrefix + "web-live-paris-20260909t110101z", Description: harness.RunProjectDescription},
 	}})
 
-	stages, failures := reportStrayRunProjects(context.Background(), rt)
+	stages, failures := reportStrayRunProjects(context.Background(), rt, layer3Scaleway)
 
 	require.Len(t, failures, 1)
 	assert.Contains(t, failures[0].Detail, "p-1")
@@ -54,7 +54,7 @@ func TestStrayRunProjectsFailsOnAnUnexplainedProject(t *testing.T) {
 func TestStrayRunProjectsPassesWhenNothingIsUnexplained(t *testing.T) {
 	rt := strayRuntime(t, &listingRunProject{projects: nil})
 
-	stages, failures := reportStrayRunProjects(context.Background(), rt)
+	stages, failures := reportStrayRunProjects(context.Background(), rt, layer3Scaleway)
 
 	assert.Empty(t, failures)
 	require.Len(t, stages, 1)
@@ -68,7 +68,7 @@ func TestStrayRunProjectsPassesWhenNothingIsUnexplained(t *testing.T) {
 func TestStrayRunProjectsFailsWhenItCannotList(t *testing.T) {
 	rt := strayRuntime(t, &listingRunProject{err: errors.New("401 unauthorized")})
 
-	stages, failures := reportStrayRunProjects(context.Background(), rt)
+	stages, failures := reportStrayRunProjects(context.Background(), rt, layer3Scaleway)
 
 	assert.Empty(t, stages)
 	require.Len(t, failures, 1)
@@ -83,7 +83,7 @@ func TestStrayRunProjectsIgnoresUnstampedProjects(t *testing.T) {
 		{ID: "p-prod", Name: "openclaw-prod", Description: "not ours"},
 	}})
 
-	_, failures := reportStrayRunProjects(context.Background(), rt)
+	_, failures := reportStrayRunProjects(context.Background(), rt, layer3Scaleway)
 
 	assert.Empty(t, failures, "an unstamped project must never be reported as infrafactory's litter")
 }
@@ -102,7 +102,7 @@ func TestStrayRunProjectsCountsOnlyStampedProjects(t *testing.T) {
 		{ID: "p-default", Name: "default", Description: ""},
 	}})
 
-	stages, failures := reportStrayRunProjects(context.Background(), rt)
+	stages, failures := reportStrayRunProjects(context.Background(), rt, layer3Scaleway)
 
 	require.Empty(t, failures)
 	require.Len(t, stages, 1)
@@ -135,7 +135,7 @@ func TestStrayRunProjectsFailsOnAnUnreadableLiveRecord(t *testing.T) {
 	require.NoError(t, os.MkdirAll(rt.livestoreRoot, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(rt.livestoreRoot, "broken.json"), []byte("{not json"), 0o600))
 
-	stages, failures := reportStrayRunProjects(context.Background(), rt)
+	stages, failures := reportStrayRunProjects(context.Background(), rt, layer3Scaleway)
 
 	require.NotEmpty(t, failures, "an unreadable record is not a clean estate")
 	assert.Contains(t, failures[0].Detail, "cannot be told from a stray")

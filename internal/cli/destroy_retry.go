@@ -53,10 +53,17 @@ const runProjectTimeout = 20 * time.Second
 func destroySandbox(
 	ctx context.Context,
 	runtime *CommandRuntime,
+	cloud layer3Cloud,
 	workDir string,
 	sandboxEnv map[string]string,
 	projectID string,
 ) (*harness.SandboxDestroyResult, []string, error) {
+	// No arm for AWS either, not even the without-config destroy:
+	// CaptureSweepTarget needs the Scaleway marker to scope it.
+	if cloud != layer3Scaleway {
+		return nil, nil, layer3SeamRefused(cloud, "destroy")
+	}
+
 	// Resolved ONCE, and used by both remediations. Callers pass
 	// sweepTargetProjectID(...), which is empty whenever
 	// CaptureSweepTarget failed -- and on 2026-09-10 that silently
@@ -65,7 +72,7 @@ func destroySandbox(
 	// would have fixed half the outage.
 	projectID = resolveRunProjectID(workDir, projectID)
 
-	result, removed, err := destroyAndPurge(ctx, runtime, workDir, sandboxEnv, projectID)
+	result, removed, err := destroyAndPurge(ctx, runtime, cloud, workDir, sandboxEnv, projectID)
 	if err == nil || projectID == "" {
 		return result, removed, err
 	}
@@ -77,7 +84,7 @@ func destroySandbox(
 	// 20260927T171147Z applied a full stack, failed on an expression,
 	// and kept all of it that way. The purge's guard, for the purge's
 	// reason: this deletes with the configuration nowhere in the loop.
-	if assertErr := assertRunProjectDeletable(ctx, runtime, workDir, projectID, sandboxEnv); assertErr != nil {
+	if assertErr := assertRunProjectDeletable(ctx, runtime, cloud, workDir, projectID, sandboxEnv); assertErr != nil {
 		logLayer3Remediation(runtime, "layer3_destroy_without_config", "skipped",
 			fmt.Sprintf("project %s did not pass the deletable check: %v", projectID, assertErr))
 		return result, removed, withFallbackFailure(err, assertErr)
@@ -99,6 +106,7 @@ func destroySandbox(
 func destroyAndPurge(
 	ctx context.Context,
 	runtime *CommandRuntime,
+	cloud layer3Cloud,
 	workDir string,
 	sandboxEnv map[string]string,
 	projectID string,
@@ -124,7 +132,7 @@ func destroyAndPurge(
 	// The marker plus API provenance, not the state file: under ADR-0025
 	// the project is not a Terraform resource, so the state never names
 	// it. Same guarantee, one forgeable half and one that is not.
-	if assertErr := assertRunProjectDeletable(ctx, runtime, workDir, projectID, sandboxEnv); assertErr != nil {
+	if assertErr := assertRunProjectDeletable(ctx, runtime, cloud, workDir, projectID, sandboxEnv); assertErr != nil {
 		logPurgeOutcome(runtime, "skipped", fmt.Sprintf("project %s did not pass the deletable check: %v", projectID, assertErr))
 		return result, nil, err
 	}
