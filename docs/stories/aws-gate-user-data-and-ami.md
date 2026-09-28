@@ -19,6 +19,10 @@ New file internal/cli/layer3_aws_user_data_gate.go. It defines the gate input ty
 
 This story makes no ADR edit. The amendment describes these controls once they take effect, in aws-layer3-gate-lift.
 
+**From the aws-web-live lead run (2026-09-28):** the model wrote `user_data_replace_on_change = true`
+unprompted. The gate refuses it (HLD), so also tell the model in `prompts/aws/phase2_generate_hcl.md`
+(beside the user-data line) not to set it, or every Layer 3 iteration pays a refusal.
+
 **Done when:**
 - The expression of generator.AWSUserDataLine, parsed from the e2e web-step-one fixture, gets true from awsUserDataExempt, nothing from awsInstanceUserDataProblems, and nothing from layer3FunctionCallProblems(block, file, awsUserDataExempt)
 - One table, two assertions per row. For each shape, awsUserDataExempt returns false, and separately awsInstanceUserDataProblems refuses it. The shapes: file("infrafactory-user-data.sh"), file("/proc/self/environ"), path.root and path.cwd prefixes, file("${path.module}/../infrafactory-user-data.sh"), a trailing space, file(local.p), file(args...), core::file(...), filebase64(...), templatefile(...), trimspace(file(...)), "${file(...)}", "${file(exact)}${file("/proc/self/environ")}", a heredoc, a literal string, var.ud. awsInstanceUserDataProblems also refuses user_data absent
