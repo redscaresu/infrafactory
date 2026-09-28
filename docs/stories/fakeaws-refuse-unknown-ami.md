@@ -1,7 +1,6 @@
 ---
 kind: code
-status: blocked
-blocked_by: [fakeaws-subnet-and-instance-attributes]
+status: ready
 epic: fakeaws-step-one-surfaces
 repo: fakeaws
 depends_on: [fakeaws-subnet-and-instance-attributes]
