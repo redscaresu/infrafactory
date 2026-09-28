@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/redscaresu/infrafactory/internal/generator"
+	"github.com/redscaresu/infrafactory/internal/harness"
 	"github.com/redscaresu/infrafactory/internal/scenario"
 )
 
@@ -43,8 +45,9 @@ docker run -d --restart=always -p 80:80 'nginx:1.27'
 // no fakeaws or tofu needed. infrafactory writes the terraform{}/
 // provider{} blocks and the user-data script itself (ADR-0039), so the
 // checked-in fixture must contain neither, must reference the script
-// with exactly generator.AWSUserDataLine, and the scenario YAML must
-// pass schema validation.
+// with exactly generator.AWSUserDataLine, boot harness.AWSLayer2AMI (the
+// id Layer 2 hands the model), and the scenario YAML must pass schema
+// validation.
 func TestAWSWebStepOneFixtureHasNoProviderBlockAndUserDataLine(t *testing.T) {
 	fixtures := filepath.Join(RepoRoot(t), "internal", "e2e", "testdata", awsWebStepOneDir)
 
@@ -55,6 +58,7 @@ func TestAWSWebStepOneFixtureHasNoProviderBlockAndUserDataLine(t *testing.T) {
 		assert.NotContains(t, content, "terraform {", "%s.tf", name)
 		assert.NotContains(t, content, `provider "aws"`, "%s.tf", name)
 		assert.Contains(t, content, generator.AWSUserDataLine, "%s.tf", name)
+		assert.Regexp(t, `ami\s+= "`+regexp.QuoteMeta(harness.AWSLayer2AMI)+`"`, content, "%s.tf", name)
 
 		schemaPath := filepath.Join(RepoRoot(t), "scenario.schema.json")
 		_, err = scenario.LoadWithSchema(filepath.Join(fixtures, name+".yaml"), schemaPath)

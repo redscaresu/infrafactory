@@ -102,7 +102,12 @@ func TestFailedRunOnAnotherCloudTearsNothingDown(t *testing.T) {
 
 			logs := &bytes.Buffer{}
 			cmd := newRunCommandForTest(opts)
-			cmd.RunE = withRuntimeWithOptions("run", opts, sealedHandler(logs, runRunCommand))
+			// The AMI stands in for the run's SSM preflight, so aws gets
+			// past generation to the gate.
+			cmd.RunE = withRuntimeWithOptions("run", opts, sealedHandler(logs, func(cmd *cobra.Command, args []string, rt *CommandRuntime) error {
+				rt.AWSLayer3AMI = "ami-0deadbeef1234567"
+				return runRunCommand(cmd, args, rt)
+			}))
 			stdout := &bytes.Buffer{}
 			cmd.SetOut(stdout)
 			cmd.SetErr(&bytes.Buffer{})

@@ -206,6 +206,7 @@ func TestAWSUserDataIsTheSameWithLayer3OnAndOff(t *testing.T) {
 			"main.tf": []byte(awsInstanceHCL),
 		})
 		h.rt.Config.Validation.Layers.SandboxDeploy.Enabled = layer3
+		h.rt.AWSLayer3AMI = "ami-0deadbeef1234567"
 		// The Layer 3 gate runs after the write and may refuse AWS; only
 		// the written script matters here.
 		_ = h.generate(generatedFileWriteModeClean)

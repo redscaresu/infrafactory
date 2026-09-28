@@ -26,22 +26,14 @@ import (
 // those would send this client somewhere other than real AWS. A test
 // audits that no non-test code imports the config module.
 func NewAWSSTSClient(env map[string]string, doer sts.HTTPClient, endpoint string) (*sts.Client, error) {
-	region := env["AWS_REGION"]
-	if !ValidAWSRegion(region) {
-		return nil, fmt.Errorf("aws sts client: region %q is not an AWS region name", region)
-	}
-	keyID, secret := env["AWS_ACCESS_KEY_ID"], env["AWS_SECRET_ACCESS_KEY"]
-	if keyID == "" || secret == "" {
-		return nil, errors.New("aws sts client: the sealed env has no AWS_ACCESS_KEY_ID or AWS_SECRET_ACCESS_KEY")
+	cfg, err := sealedAWSConfig(env, "aws sts client")
+	if err != nil {
+		return nil, err
 	}
 	if endpoint == "" {
-		endpoint = "https://sts." + region + ".amazonaws.com"
+		endpoint = "https://sts." + cfg.Region + ".amazonaws.com"
 	}
 
-	cfg := aws.Config{
-		Region:      region,
-		Credentials: aws.NewCredentialsCache(credentials.NewStaticCredentialsProvider(keyID, secret, "")),
-	}
 	return sts.NewFromConfig(cfg, func(o *sts.Options) {
 		o.BaseEndpoint = aws.String(endpoint)
 		// sts.New resolves its default client before running options, so
@@ -50,6 +42,24 @@ func NewAWSSTSClient(env map[string]string, doer sts.HTTPClient, endpoint string
 			o.HTTPClient = doer
 		}
 	}), nil
+}
+
+// sealedAWSConfig is the aws.Config every in-process AWS client is built
+// from: the sealed env's region and static key, and nothing else. client
+// prefixes its errors.
+func sealedAWSConfig(env map[string]string, client string) (aws.Config, error) {
+	region := env["AWS_REGION"]
+	if !ValidAWSRegion(region) {
+		return aws.Config{}, fmt.Errorf("%s: region %q is not an AWS region name", client, region)
+	}
+	keyID, secret := env["AWS_ACCESS_KEY_ID"], env["AWS_SECRET_ACCESS_KEY"]
+	if keyID == "" || secret == "" {
+		return aws.Config{}, fmt.Errorf("%s: the sealed env has no AWS_ACCESS_KEY_ID or AWS_SECRET_ACCESS_KEY", client)
+	}
+	return aws.Config{
+		Region:      region,
+		Credentials: aws.NewCredentialsCache(credentials.NewStaticCredentialsProvider(keyID, secret, "")),
+	}, nil
 }
 
 // ErrNonLoopbackDial is returned by NewLoopbackOnlyHTTPClient's dialer.

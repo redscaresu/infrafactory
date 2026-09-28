@@ -159,10 +159,14 @@ func TestTestCommandRefusesANonScalewayCloudAtTheGate(t *testing.T) {
 func TestGenerationGateIsKeyedOnTheScenarioCloud(t *testing.T) {
 	stack := map[string][]byte{"main.tf": []byte(shapeProject)}
 	for _, tc := range []struct {
-		name, payload, want string
+		name, payload, ami, want string
+		notGenerated             bool
 	}{
 		{name: "scaleway passes", payload: "cloud: scaleway\n"},
-		{name: "aws is refused", payload: "cloud: aws\n", want: "aws"},
+		// With its AMI resolved, aws reaches the HCL gate, which has no
+		// aws branch yet.
+		{name: "aws is refused", payload: "cloud: aws\n", ami: "ami-0deadbeef1234567", want: "has no Layer 3 HCL gate yet"},
+		{name: "aws without a resolved AMI", payload: "cloud: aws\n", want: "no resolved AMI id", notGenerated: true},
 		{name: "unreadable cloud is refused", payload: "cloud: {nested: true}\n", want: "read cloud"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -170,16 +174,24 @@ func TestGenerationGateIsKeyedOnTheScenarioCloud(t *testing.T) {
 			require.NoError(t, os.WriteFile(scenarioPath, []byte("scenario: gate\n"+tc.payload), 0o600))
 			cfg := config.Default()
 			cfg.Validation.Layers.SandboxDeploy.Enabled = true
+			var calls []generator.Request
 			rt := &CommandRuntime{
-				Config:    cfg,
-				outputDir: t.TempDir(),
+				Config:       cfg,
+				outputDir:    t.TempDir(),
+				AWSLayer3AMI: tc.ami,
 				Deps: RuntimeDependencies{Generator: generator.SeedGeneratorFunc(
-					func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
+					func(_ context.Context, req generator.Request) (*generator.GeneratedCode, error) {
+						calls = append(calls, req)
 						return &generator.GeneratedCode{Files: stack}, nil
 					})},
 			}
 
 			_, _, err := generateAndWriteFilesWithResult(context.Background(), rt, scenarioPath, "", 1, nil, generatedFileWriteModeClean)
+			if tc.notGenerated {
+				assert.Empty(t, calls, "the generator was called")
+			} else if assert.Len(t, calls, 1) {
+				assert.Equal(t, tc.ami, calls[0].AMIID)
+			}
 			if tc.want == "" {
 				assert.NoError(t, err)
 				return
@@ -188,6 +200,15 @@ func TestGenerationGateIsKeyedOnTheScenarioCloud(t *testing.T) {
 			assert.Contains(t, err.Error(), tc.want)
 		})
 	}
+}
+
+func TestGenerateHandsAWSTheLayer2AMI(t *testing.T) {
+	h := newUserDataHarness(t, awsInstanceScenarioPath, map[string][]byte{"main.tf": []byte(awsInstanceHCL)})
+
+	require.NoError(t, h.generate(generatedFileWriteModeClean))
+
+	assert.Equal(t, "ami-0al2023x8664", h.req.AMIID)
+	assert.Equal(t, harness.AWSLayer2AMI, h.req.AMIID)
 }
 
 func TestRunKeepRefusesANonScalewayCloudBeforeCredentials(t *testing.T) {

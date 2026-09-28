@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -704,6 +705,23 @@ func toFeedbackFailuresPayload(in []FailureSummary) []feedbackFailure {
 	return out
 }
 
+// awsAMIForGeneration is the AMI id an AWS model writes verbatim:
+// fakeaws's AL2023 answer at Layer 2, the id the run resolved from real
+// SSM at Layer 3. Without a resolved id a Layer 3 run stops here, before
+// any model call. Every other cloud gets "".
+func awsAMIForGeneration(runtime *CommandRuntime, cloud string) (string, error) {
+	if cloud != "aws" {
+		return "", nil
+	}
+	if !runtime.Config.Validation.Layers.SandboxDeploy.Enabled {
+		return harness.AWSLayer2AMI, nil
+	}
+	if runtime.AWSLayer3AMI == "" {
+		return "", errors.New("aws at Layer 3 has no resolved AMI id: the run reads it from SSM before generating, so nothing was generated")
+	}
+	return runtime.AWSLayer3AMI, nil
+}
+
 // runID is the run's id, or "" outside a run; it reaches the generated
 // HCL only through the AWS provider block's default_tags.
 func generateAndWriteFilesWithResult(ctx context.Context, runtime *CommandRuntime, scenarioPath, runID string, iteration int, feedbackFailures []FailureSummary, writeMode generatedFileWriteMode) (int, *generator.GeneratedCode, error) {
@@ -739,6 +757,10 @@ func generateAndWriteFilesWithResult(ctx context.Context, runtime *CommandRuntim
 		}
 		userDataLine = generator.AWSUserDataLine
 	}
+	amiID, err := awsAMIForGeneration(runtime, scenarioMeta.Cloud)
+	if err != nil {
+		return 0, nil, err
+	}
 
 	runtime.EnsureProviderSchema(ctx, scenarioMeta.Cloud)
 
@@ -763,6 +785,7 @@ func generateAndWriteFilesWithResult(ctx context.Context, runtime *CommandRuntim
 		Layer3Enabled:      runtime.Config.Validation.Layers.SandboxDeploy.Enabled,
 		Cloud:              scenarioMeta.Cloud,
 		UserDataLine:       userDataLine,
+		AMIID:              amiID,
 	})
 	if err != nil {
 		return 0, nil, fmt.Errorf("generate code: %w", err)
