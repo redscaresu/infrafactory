@@ -32,7 +32,19 @@ type Request struct {
 	ProviderSchemaJSON []byte
 	Layer3Enabled      bool
 	Cloud              string
+	// UserDataLine is set only for an AWS scenario with a service: block,
+	// whose boot script infrafactory renders itself (AWSUserDataFile).
+	UserDataLine string
 }
+
+// AWSUserDataFile is the boot script infrafactory renders from an AWS
+// scenario's service: block into the generated directory. The model never
+// writes it: it only references it, with exactly AWSUserDataLine.
+const AWSUserDataFile = "infrafactory-user-data.sh"
+
+// AWSUserDataLine is the one line the model writes on the instance that
+// runs the service.
+const AWSUserDataLine = `user_data = file("${path.module}/` + AWSUserDataFile + `")`
 
 type GeneratedCode struct {
 	Files    map[string][]byte

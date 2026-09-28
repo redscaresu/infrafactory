@@ -210,6 +210,7 @@ func (g *ClaudeSeedGenerator) renderPhasePrompt(phase string, req Request, outpu
 		ProviderSchema:     filteredSchema,
 		Layer3Guidance:     layer3Guidance(req.Layer3Enabled),
 		Pitfalls:           pitfalls,
+		UserDataLine:       req.UserDataLine,
 	}
 
 	return RenderPromptFile(phase, templatePath, ctx)

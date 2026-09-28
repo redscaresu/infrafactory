@@ -22,6 +22,7 @@ type PromptContext struct {
 	ProviderSchema     string
 	Layer3Guidance     string
 	Pitfalls           string
+	UserDataLine       string
 }
 
 func RenderPromptTemplate(phase string, templateBody string, ctx PromptContext) (string, error) {

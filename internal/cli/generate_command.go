@@ -12,6 +12,7 @@ import (
 
 	"github.com/redscaresu/infrafactory/internal/config"
 	"github.com/redscaresu/infrafactory/internal/generator"
+	"github.com/redscaresu/infrafactory/internal/scenario"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -681,8 +682,23 @@ func generateAndWriteFilesWithResult(ctx context.Context, runtime *CommandRuntim
 	// repeat visits within a single process.
 	var scenarioMeta struct {
 		Cloud string `yaml:"cloud"`
+		// ServiceSpec has no yaml tags: yaml.v3's lowercased field names
+		// match image, tag and port, which is all the script reads.
+		Service *scenario.ServiceSpec `yaml:"service"`
 	}
 	scenarioMetaErr := yaml.Unmarshal(scenarioPayload, &scenarioMeta)
+
+	// Rendered before generation so a refused image or tag costs no model
+	// call. Only AWS boots the service from a script infrafactory writes.
+	var userData []byte
+	userDataLine := ""
+	if scenarioMeta.Cloud == "aws" && scenarioMeta.Service != nil {
+		userData, err = renderAWSUserData(*scenarioMeta.Service)
+		if err != nil {
+			return 0, nil, err
+		}
+		userDataLine = generator.AWSUserDataLine
+	}
 
 	runtime.EnsureProviderSchema(ctx, scenarioMeta.Cloud)
 
@@ -706,6 +722,7 @@ func generateAndWriteFilesWithResult(ctx context.Context, runtime *CommandRuntim
 		ProviderSchemaJSON: runtime.ProviderSchemaJSON,
 		Layer3Enabled:      runtime.Config.Validation.Layers.SandboxDeploy.Enabled,
 		Cloud:              scenarioMeta.Cloud,
+		UserDataLine:       userDataLine,
 	})
 	if err != nil {
 		return 0, nil, fmt.Errorf("generate code: %w", err)
@@ -732,6 +749,9 @@ func generateAndWriteFilesWithResult(ctx context.Context, runtime *CommandRuntim
 	// constraint. The harness drops the file alongside the .tf so a
 	// bare `filepath = "${path.module}/flow.yaml"` resolves at plan.
 	ensureGenesysFlowAsset(generated.Files)
+	if err := placeAWSUserData(generated.Files, scenarioMeta.Cloud, userData); err != nil {
+		return 0, nil, fmt.Errorf("validate generated files: %w", err)
+	}
 	written, err := writeGeneratedFiles(runtime.OutputDir(), generated.Files, writeMode)
 	if err != nil {
 		return 0, nil, err
@@ -961,7 +981,11 @@ func writeGeneratedFiles(outputDir string, files map[string][]byte, mode generat
 		if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
 			return 0, fmt.Errorf("create directory for generated file %q: %w", targetPath, err)
 		}
-		if err := os.WriteFile(targetPath, files[name], 0o644); err != nil {
+		write := os.WriteFile
+		if cleanName == generator.AWSUserDataFile {
+			write = writeFileExclusive
+		}
+		if err := write(targetPath, files[name], 0o644); err != nil {
 			return 0, fmt.Errorf("write generated file %q: %w", targetPath, err)
 		}
 	}
@@ -979,11 +1003,17 @@ func resetGeneratedFilesIncremental(outputDir string) error {
 	}
 
 	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
 		name := entry.Name()
-		if !strings.HasSuffix(name, ".tf") && !strings.HasSuffix(name, ".tf.json") {
+		switch {
+		case name == generator.AWSUserDataFile:
+			// Replaced fresh every iteration; anything but a regular file
+			// is refused rather than followed or recursed into.
+			if !entry.Type().IsRegular() {
+				return fmt.Errorf("refusing %q: %s is not a regular file", filepath.Join(outputDir, name), name)
+			}
+		case entry.IsDir():
+			continue
+		case !strings.HasSuffix(name, ".tf") && !strings.HasSuffix(name, ".tf.json"):
 			continue
 		}
 		if err := os.Remove(filepath.Join(outputDir, name)); err != nil {
