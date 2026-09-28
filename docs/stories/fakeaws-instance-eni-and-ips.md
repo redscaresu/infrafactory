@@ -1,7 +1,6 @@
 ---
 kind: code
-status: blocked
-blocked_by: [fakeaws-sg-ip-permissions]
+status: ready
 epic: fakeaws-step-one-surfaces
 repo: fakeaws
 depends_on: [fakeaws-sg-ip-permissions]
