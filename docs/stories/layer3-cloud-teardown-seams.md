@@ -1,7 +1,6 @@
 ---
 kind: code
-status: blocked
-blocked_by: [layer3-cloud-entry-points]
+status: ready
 epic: aws-layer3-seal-and-dispatch
 depends_on: [layer3-cloud-entry-points]
 touches: ["internal/cli/test_command.go", "internal/cli/run_command.go", "internal/cli/reap_command.go", "internal/cli/run_project_lifecycle.go", "internal/cli/destroy_retry.go", "internal/cli/stray_run_projects.go", "internal/cli/deploy_command.go", "internal/cli/live_upgrade.go", "internal/cli/live_teardown.go", "internal/cli/destroy_retry_test.go", "internal/cli/reap_command_test.go", "internal/cli/run_project_lifecycle_test.go", "internal/cli/stray_run_projects_test.go", "internal/cli/layer3_teardown_cloud_test.go (new)", "docs/stories/layer3-cloud-teardown-seams.md (delete)"]
