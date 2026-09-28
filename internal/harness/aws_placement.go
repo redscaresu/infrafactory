@@ -18,12 +18,12 @@ var AWSChildScopedTypes = map[string][]string{
 
 // UnplacedAWSResources names every managed resource in workDir's live
 // state that it cannot place in AWS account accountID. An allowlist, like
-// unplacedResources: a resource is placed when its arn's account field and
-// its owner_id, whichever are non-empty, all equal accountID and at least
-// one is; an AWSChildScopedTypes child when every parent it names is a
-// managed resource in the same state. Everything else is refused,
-// including an arn with an empty account, which is what a provider that
-// skipped the account lookup builds client-side.
+// unplacedResources: a resource is placed when it carries an arn or an
+// owner_id and every one it carries names accountID; an
+// AWSChildScopedTypes child when every parent it names is a managed
+// resource in the same state. Everything else is refused, including an
+// arn with an empty account whatever owner_id says, which is what a
+// provider that skipped the account lookup builds client-side.
 func UnplacedAWSResources(workDir, accountID string) ([]string, error) {
 	if strings.TrimSpace(accountID) == "" {
 		return nil, errors.New("no AWS account id to place the state in")
@@ -85,9 +85,10 @@ func awsAccountRefusal(attrs map[string]any, accountID string) string {
 		if len(fields) != 6 {
 			return fmt.Sprintf("whose arn %q is not an ARN", arn)
 		}
-		if fields[4] != "" {
-			accounts = append(accounts, fields[4])
+		if fields[4] == "" {
+			return "whose arn has no account"
 		}
+		accounts = append(accounts, fields[4])
 	}
 	if owner, _ := attrs["owner_id"].(string); owner != "" {
 		accounts = append(accounts, owner)

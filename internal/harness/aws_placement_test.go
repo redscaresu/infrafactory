@@ -51,7 +51,11 @@ func TestUnplacedAWSResources(t *testing.T) {
 		// built the arn client-side.
 		"an empty arn account with no owner_id is refused": {
 			resources: []map[string]any{awsStateResource("managed", "aws_instance", map[string]any{"id": "i-1", "arn": "arn:aws:ec2:eu-west-1::instance/i-1", "owner_id": ""})},
-			want:      []string{"aws_instance (i-1) carries no account id"},
+			want:      []string{"aws_instance (i-1) whose arn has no account"},
+		},
+		"an empty arn account is refused whatever owner_id says": {
+			resources: []map[string]any{awsStateResource("managed", "aws_vpc", map[string]any{"id": "vpc-1", "arn": "arn:aws:ec2:eu-west-1::vpc/vpc-1", "owner_id": awsRunAccount})},
+			want:      []string{"aws_vpc (vpc-1) whose arn has no account"},
 		},
 		"a malformed arn is refused": {
 			resources: []map[string]any{awsStateResource("managed", "aws_vpc", map[string]any{"id": "vpc-1", "arn": "vpc-1", "owner_id": awsRunAccount})},
