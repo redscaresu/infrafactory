@@ -191,3 +191,10 @@ resources entirely, mirroring the rule-9 retirement of
 The provider-block change is templated in
 `internal/cli/generate_command.go::buildGoogleProviderBlock`. The
 prompt changes are in the three `prompts/gcp/phaseN*.md` files.
+
+## 2026-09-28 amendment — AWS analog
+
+ADR-0039 does for the v5 AWS provider what this ADR did for GCP's: it enumerates what the
+provider actually reads (environment, the shared config file's `services` block, IMDS) and the
+decisions that keep that surface identical across layers. See ADR-0039 for the AWS-specific
+rules; this ADR's rules stay GCP-scoped.
