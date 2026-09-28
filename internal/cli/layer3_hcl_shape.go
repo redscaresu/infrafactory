@@ -291,6 +291,7 @@ func layer3BlockProblems(body *hclsyntax.Body, file string, allowedResourceTypes
 			}
 		}
 		if block.Type == "terraform" {
+			problems = append(problems, layer3TerraformBlockProblems(block, file)...)
 			tfProblems, sawProvider := layer3ProviderSourceProblems(block, file)
 			problems = append(problems, tfProblems...)
 			sawCanonicalProvider = sawCanonicalProvider || sawProvider
@@ -489,6 +490,29 @@ func layer3NestedProblems(block *hclsyntax.Block, file string) []string {
 			problems = append(problems, fmt.Sprintf("%s: %q executes commands during apply, in a process holding cloud credentials", file, nested.Type))
 		}
 		problems = append(problems, layer3NestedProblems(nested, file)...)
+	}
+	return problems
+}
+
+// layer3TerraformBlockProblems is deny-by-default over the terraform {}
+// block. Its settings run before any resource does, in the process that
+// holds the cloud credentials: `encryption` takes a key_provider, and the
+// "external" key provider runs a command. A Layer 3 stack needs only its
+// provider requirements and, optionally, a tofu version constraint.
+func layer3TerraformBlockProblems(tfBlock *hclsyntax.Block, file string) []string {
+	problems := make([]string, 0)
+	if tfBlock.Body == nil {
+		return problems
+	}
+	for name := range tfBlock.Body.Attributes {
+		if name != "required_version" {
+			problems = append(problems, fmt.Sprintf("%s: terraform setting %q is not permitted in a Layer 3 stack", file, name))
+		}
+	}
+	for _, inner := range tfBlock.Body.Blocks {
+		if inner.Type != "required_providers" {
+			problems = append(problems, fmt.Sprintf("%s: terraform block %q is not permitted in a Layer 3 stack (it runs before any resource, holding the cloud credentials)", file, inner.Type))
+		}
 	}
 	return problems
 }

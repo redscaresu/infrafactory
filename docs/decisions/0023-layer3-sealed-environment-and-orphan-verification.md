@@ -233,3 +233,8 @@ the gate was opt-in per pull request anyway — it never ran on a change nobody
 labelled.
 
 `git log .github/workflows/layer3-gate.yml` restores it.
+
+2026-09-28: the gate's `terraform {}` check read only `required_providers`, so any other
+child passed, including `encryption`, whose "external" key provider runs a command before any
+resource, in the process holding the credentials. The block is now deny-by-default:
+`required_providers` and `required_version` only (`layer3TerraformBlockProblems`).
