@@ -1,9 +1,9 @@
 ---
 kind: lead
 status: blocked
-blocked_by: [aws-gate-assembled, aws-ec2-reads, aws-layer3-destroy-arm, aws-layer3-claim-sweep-reap, operator:planted-leak-proof]
+blocked_by: [aws-gate-assembled, aws-ec2-reads, aws-layer3-destroy-arm, aws-layer3-claim-sweep-reap, aws-scope-planted-leak-proof, operator:user-approval]
 epic: aws-layer3-gate
-depends_on: [aws-gate-assembled, aws-ec2-reads, aws-layer3-destroy-arm, aws-layer3-claim-sweep-reap, operator:planted-leak-proof]
+depends_on: [aws-gate-assembled, aws-ec2-reads, aws-layer3-destroy-arm, aws-layer3-claim-sweep-reap, aws-scope-planted-leak-proof, operator:user-approval]
 touches: ["internal/cli/layer3_cloud.go", "internal/cli/test_command.go", "internal/cli/generate_command.go", "internal/cli/deploy_command.go", "internal/cli/live_upgrade.go", "internal/cli/runtime.go", "internal/cli/aws_post_apply.go (new)", "internal/cli/aws_post_apply_test.go (new)", "internal/cli/layer3_cloud_test.go", "docs/decisions/0023-layer3-sealed-environment-and-orphan-verification.md", "docs/epics/aws-layer3-gate.md (delete)", "docs/stories/aws-layer3-gate-lift.md (delete)"]
 risk: high
 ---
