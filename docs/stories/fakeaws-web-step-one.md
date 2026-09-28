@@ -1,7 +1,6 @@
 ---
 kind: code
-status: blocked
-blocked_by: [fakeaws-provider-exact-pin, fakeaws-sts-caller-identity, fakeaws-sg-ip-permissions, fakeaws-instance-eni-and-ips, fakeaws-subnet-and-instance-attributes, fakeaws-refuse-unknown-ami, fakeaws-ssm-parameter-store, fakeaws-sg-ingress-validation, fakeaws-ec2-tags]
+status: ready
 epic: fakeaws-step-one-surfaces
 repo: fakeaws
 depends_on: [fakeaws-provider-exact-pin, fakeaws-sts-caller-identity, fakeaws-sg-ip-permissions, fakeaws-instance-eni-and-ips, fakeaws-subnet-and-instance-attributes, fakeaws-refuse-unknown-ami, fakeaws-ssm-parameter-store, fakeaws-sg-ingress-validation, fakeaws-ec2-tags]
