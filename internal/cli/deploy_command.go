@@ -94,6 +94,10 @@ func runDeployCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime
 		return &CLIError{Op: "deploy", Code: errorCodeCommandFailed, Err: errors.New(
 			"deploy applies to real infrastructure and requires validation.layers.sandbox_deploy.enabled")}
 	}
+	cloud, err := layer3LiveCloud(sc.Cloud, "deploy")
+	if err != nil {
+		return &CLIError{Op: "deploy", Code: errorCodeCommandFailed, Err: err}
+	}
 
 	source := runtime.OutputDir()
 	if err := assertDeployableSource(source); err != nil {
@@ -103,7 +107,7 @@ func runDeployCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime
 	// Deny-by-default on anything that may touch the cloud, exactly as
 	// the PR gate does. deploy takes already-validated HCL, but "already
 	// validated" is a claim about a previous command; this is the check.
-	if err := layer3PreflightHCL(source, runtime.Config.Validation.Layers.SandboxDeploy.AllowResourceTypes); err != nil {
+	if err := layer3PreflightHCLForCloud(cloud, source, runtime.Config.Validation.Layers.SandboxDeploy.AllowResourceTypes); err != nil {
 		return &CLIError{Op: "deploy", Code: errorCodeCommandFailed, Err: fmt.Errorf("layer 3 hcl validation: %w", err)}
 	}
 

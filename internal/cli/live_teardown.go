@@ -63,6 +63,16 @@ func tearDownDeployment(
 		return unreclaimable(detail)
 	}
 
+	// Before any env is built. Only Scaleway has a Layer 3 teardown, and
+	// its destroy and sweep pointed at another cloud's state would verify
+	// an account they never looked at.
+	if !teardownBuilt(d) {
+		return unreclaimable(fmt.Sprintf(
+			"%s was applied to cloud %q, whose Layer 3 teardown is not built: resources recorded in %s may exist. "+
+				"Destroy them by hand, then clear the record with `infrafactory live forget %s`",
+			d.ID, d.Cloud, filepath.Join(d.WorkDir, harness.LiveStateFilename), d.ID))
+	}
+
 	// No early bail on a missing state file. Since ADR-0025 the project
 	// is created BEFORE the apply, so "no state" is the ordinary shape of
 	// a deploy that failed at preflight, init or plan: nothing to destroy
@@ -294,6 +304,11 @@ func reclaimable(d livestore.Deployment) bool {
 	if d.Undecodable || d.State == livestore.StateReleased || d.WorkDir == "" {
 		return false
 	}
+	// Teardown refuses these and names `live forget`, so forget must
+	// accept them or the two commands point at each other.
+	if !teardownBuilt(d) {
+		return false
+	}
 	_, markerErr := os.Stat(filepath.Join(d.WorkDir, harness.RunProjectMarkerFilename))
 	_, stateErr := os.Stat(filepath.Join(d.WorkDir, harness.LiveStateFilename))
 	if markerErr != nil && stateErr != nil {
@@ -314,6 +329,13 @@ func reclaimable(d livestore.Deployment) bool {
 		return false
 	}
 	return true
+}
+
+// teardownBuilt reports whether the record's cloud has a Layer 3
+// teardown. Only Scaleway does.
+func teardownBuilt(d livestore.Deployment) bool {
+	cloud, err := parseLayer3Cloud(d.Cloud)
+	return err == nil && cloud == layer3Scaleway
 }
 
 func runLiveTeardownCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) error {

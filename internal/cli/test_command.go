@@ -612,8 +612,12 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 	sandboxEnabled := runtime.Config.Validation.Layers.SandboxDeploy.Enabled
 	hclRefused := false
 	if sandboxEnabled {
-		if shapeErr := layer3PreflightHCL(outputDir,
-			runtime.Config.Validation.Layers.SandboxDeploy.AllowResourceTypes); shapeErr != nil {
+		cloud, shapeErr := parseLayer3Cloud(sc.Cloud)
+		if shapeErr == nil {
+			shapeErr = layer3PreflightHCLForCloud(cloud, outputDir,
+				runtime.Config.Validation.Layers.SandboxDeploy.AllowResourceTypes)
+		}
+		if shapeErr != nil {
 			hclRefused = true
 			stages = append(stages, StageSummary{Layer: "sandbox_deploy", Stage: "allowlist", Status: StageStatusFail})
 			failures = append(failures, FailureSummary{
