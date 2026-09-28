@@ -408,22 +408,7 @@ func buildRuntime(cmd *cobra.Command, opts runtimeOptions) (*CommandRuntime, err
 		livestoreRoot:     opts.livestoreRoot,
 	}
 	if deps.MockState == nil {
-		router := &cloudMockStateRouter{
-			runtime:  runtime,
-			scaleway: newMockStateClient(cfg.Mockway.URL),
-		}
-		if strings.TrimSpace(cfg.Fakegcp.URL) != "" {
-			router.gcp = newMockStateClient(cfg.Fakegcp.URL)
-		}
-		if strings.TrimSpace(cfg.Fakeaws.URL) != "" {
-			router.aws = newMockStateClient(cfg.Fakeaws.URL)
-		}
-		if strings.TrimSpace(cfg.Fakegenesys.URL) != "" {
-			router.genesys = newMockStateClient(cfg.Fakegenesys.URL)
-		}
-		if strings.TrimSpace(cfg.S3.URL) != "" {
-			router.s3 = newMockStateClient(cfg.S3.URL)
-		}
+		router := newCloudMockStateRouter(runtime, cfg)
 		deps.MockState = router
 	}
 	if deps.Static == nil {
