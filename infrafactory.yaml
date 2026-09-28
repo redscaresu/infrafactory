@@ -187,9 +187,9 @@ validation:
       enabled: true
   real_probes:
     timeout_seconds: 5
-    # 24 attempts. A 503 answers immediately, so the wall clock is the
-    # delays: ~120s, sized to a real cold boot rather than to a guess. A
-    # black-holed endpoint pays the timeout as well -- 24 x (5s + 5s) ~= 235s.
+    # 60 attempts. A 503 answers immediately, so the wall clock is the
+    # delays: ~300s, sized to a real cold boot rather than to a guess. A
+    # black-holed endpoint pays the timeout as well -- 60 x (5s + 5s) ~= 600s.
     #
     # 30s (the old 6 x 5s) is shorter than a Scaleway instance takes to boot and
     # start serving, so an `http_probe` failed while the stack was still coming

@@ -331,10 +331,10 @@ func Default() Config {
 					Enabled: true,
 				},
 			},
-			// 24 attempts. A refused or 503 answer comes back fast, so the
-			// wall clock is the delays: ~120s, sized to a real cold boot.
-			// A BLACK-HOLED endpoint pays the timeout too -- 24 x (5s + 5s)
-			// ~= 235s -- which is the number to remember when a Layer 3
+			// 60 attempts. A refused or 503 answer comes back fast, so the
+			// wall clock is the delays: ~300s, sized to a real cold boot.
+			// A BLACK-HOLED endpoint pays the timeout too -- 60 x (5s + 5s)
+			// ~= 600s -- which is the number to remember when a Layer 3
 			// probe hangs rather than answers. The old 6 (30s)
 			// was shorter than a Scaleway instance takes to boot and
 			// serve, so an http_probe failed while the stack was still
