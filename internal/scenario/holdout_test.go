@@ -4,6 +4,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestDiscoverCriteriaOnlyHoldouts(t *testing.T) {
@@ -82,4 +85,43 @@ func writeFile(t *testing.T, path string, content string) {
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("write file %s: %v", path, err)
 	}
+}
+
+// TestAWSWebLiveHoldoutIsDiscoverable reads the real scenarios/holdout
+// directory: a holdout discovery misses is a holdout that silently
+// checks nothing (see DiscoverCriteriaOnlyHoldouts).
+func TestAWSWebLiveHoldoutIsDiscoverable(t *testing.T) {
+	repo := repoRootForAWSTest(t)
+	holdoutDir := filepath.Join(repo, "scenarios", "holdout")
+
+	holdouts, err := DiscoverCriteriaOnlyHoldouts(holdoutDir, "aws-web-live")
+	require.NoError(t, err)
+	require.Len(t, holdouts, 1)
+	assert.Equal(t, "aws-web-live-unseen.yaml", filepath.Base(holdouts[0].Path))
+
+	paris, err := DiscoverCriteriaOnlyHoldouts(holdoutDir, "web-live-paris")
+	require.NoError(t, err)
+	require.Len(t, paris, 1)
+	assert.Equal(t, "web-live-paris-unseen.yaml", filepath.Base(paris[0].Path))
+
+	sc, err := LoadWithSchema(holdouts[0].Path, filepath.Join(repo, "scenario.schema.json"))
+	require.NoError(t, err)
+	assert.Equal(t, "aws", sc.Cloud)
+	specs, err := sc.ExecutableChecks()
+	require.NoError(t, err)
+
+	type check struct {
+		Type, From, To, Expect string
+		Port                   int
+	}
+	var got []check
+	for _, spec := range specs {
+		require.NotNil(t, spec.Connectivity, "%s criterion", spec.Type)
+		got = append(got, check{spec.Type, spec.Connectivity.From, spec.Connectivity.To, spec.Expect, spec.Connectivity.Port})
+	}
+	assert.Equal(t, []check{
+		{"connectivity", "public_internet", "compute", "blocked", 22},
+		{"connectivity", "public_internet", "compute", "blocked", 443},
+		{"connectivity", "public_internet", "compute", "success", 80},
+	}, got)
 }
