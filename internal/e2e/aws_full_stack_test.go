@@ -259,18 +259,16 @@ resource "aws_eks_node_group" "default" {
 `),
 		// S3 — exercised against the third-party S3 backend
 		// (SeaweedFS, M59). SSE configuration is intentionally
-		// minimal (just AES256) since the OPA encryption-at-rest
-		// policy is satisfied by the presence of the sibling SSE-
-		// config resource alone.
+		// minimal (just AES256): the OPA encryption-at-rest policy
+		// needs only an SSE-config resource naming this bucket.
 		"storage.tf": []byte(`resource "aws_s3_bucket" "assets" {
   bucket        = "fs-assets-bucket"
   force_destroy = true
 }
 
 resource "aws_s3_bucket_server_side_encryption_configuration" "assets" {
-  # Literal bucket name (not aws_s3_bucket.assets.id) so the OPA
-  # encryption-at-rest policy can resolve cfg.values.bucket at plan
-  # time. .id is computed and shows as null in planned_values.
+  # Literal bucket name; the OPA encryption-at-rest policy accepts
+  # this or a reference such as aws_s3_bucket.assets.id.
   bucket = "fs-assets-bucket"
 
   rule {
