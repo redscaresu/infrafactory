@@ -24,7 +24,7 @@ type AWSAMIRoot struct {
 	DeleteOnTermination bool
 }
 
-// newAWSEC2Client builds an EC2 client as ResolveAWSAMIFromSSM builds its
+// newAWSEC2Client builds an EC2 client as newAWSSSMClient builds its
 // SSM one: the sealed env's static key and region, never the SDK default
 // chain. endpoint "" means real EC2 in that region. doer is required, so
 // no caller reaches EC2 through a client it did not choose.
