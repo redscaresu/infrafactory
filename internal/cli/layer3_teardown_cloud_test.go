@@ -264,6 +264,10 @@ func TestEveryTeardownSeamRefusesAnotherCloud(t *testing.T) {
 		t.Run(cloud, func(t *testing.T) {
 			rt, fakes, workDir := seamFixture(t)
 			for seam, said := range teardownSeams(rt, layer3Cloud(cloud), workDir) {
+				// aws has a destroy arm: aws_destroy_arm_test.go.
+				if cloud == "aws" && seam == "destroySandbox" {
+					continue
+				}
 				assert.Contains(t, said, cloud, seam)
 				assertNoScalewayAdvice(t, said, seam)
 			}

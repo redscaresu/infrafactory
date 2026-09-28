@@ -58,9 +58,11 @@ func destroySandbox(
 	sandboxEnv map[string]string,
 	projectID string,
 ) (*harness.SandboxDestroyResult, []string, error) {
-	// No arm for AWS either, not even the without-config destroy:
-	// CaptureSweepTarget needs the Scaleway marker to scope it.
-	if cloud != layer3Scaleway {
+	switch cloud {
+	case layer3Scaleway:
+	case layer3AWS:
+		return destroyAWSSandbox(ctx, runtime, workDir, sandboxEnv)
+	default:
 		return nil, nil, layer3SeamRefused(cloud, "destroy")
 	}
 
@@ -99,6 +101,25 @@ func destroySandbox(
 	logLayer3Remediation(runtime, "layer3_destroy_without_config", "success",
 		fmt.Sprintf("project=%s; the ordinary destroy had failed: %s", projectID, fallback.WithoutConfig))
 	return fallback, removed, nil
+}
+
+// destroyAWSSandbox is the AWS arm: one destroy with the sealed env, and
+// nothing else. The purge, the deletable check and the without-config
+// fallback are each scoped by a Scaleway run project, which an AWS run
+// does not have, and RunWithoutConfig refuses an AWS state anyway.
+func destroyAWSSandbox(
+	ctx context.Context,
+	runtime *CommandRuntime,
+	workDir string,
+	sandboxEnv map[string]string,
+) (*harness.SandboxDestroyResult, []string, error) {
+	// Without the sealed key the provider finds credentials on its own,
+	// and destroys in whatever account those name.
+	if strings.TrimSpace(sandboxEnv["AWS_ACCESS_KEY_ID"]) == "" {
+		return nil, nil, errors.New("refusing an aws Layer 3 destroy: the environment has no AWS_ACCESS_KEY_ID, so it is not the sealed one")
+	}
+	result, err := runtime.Deps.SandboxDestroy.Run(ctx, workDir, sandboxEnv)
+	return result, nil, err
 }
 
 // destroyAndPurge is the ordinary destroy, plus the auto-created purge
