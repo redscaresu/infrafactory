@@ -1,0 +1,126 @@
+{
+  "format_version": "1.2",
+  "terraform_version": "1.12.6",
+  "planned_values": {
+    "root_module": {
+      "resources": [
+        {
+          "address": "aws_launch_configuration.web",
+          "mode": "managed",
+          "type": "aws_launch_configuration",
+          "name": "web",
+          "provider_name": "registry.opentofu.org/hashicorp/aws",
+          "schema_version": 0,
+          "values": {
+            "enable_monitoring": true,
+            "ephemeral_block_device": [],
+            "iam_instance_profile": "web-profile",
+            "image_id": "ami-0al2023x8664",
+            "instance_type": "t3.micro",
+            "placement_tenancy": null,
+            "security_groups": null,
+            "spot_price": null,
+            "user_data": null,
+            "user_data_base64": null
+          },
+          "sensitive_values": {
+            "ebs_block_device": [],
+            "ephemeral_block_device": [],
+            "metadata_options": [],
+            "root_block_device": []
+          }
+        }
+      ]
+    }
+  },
+  "resource_changes": [
+    {
+      "address": "aws_launch_configuration.web",
+      "mode": "managed",
+      "type": "aws_launch_configuration",
+      "name": "web",
+      "provider_name": "registry.opentofu.org/hashicorp/aws",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "before": null,
+        "after": {
+          "enable_monitoring": true,
+          "ephemeral_block_device": [],
+          "iam_instance_profile": "web-profile",
+          "image_id": "ami-0al2023x8664",
+          "instance_type": "t3.micro",
+          "placement_tenancy": null,
+          "security_groups": null,
+          "spot_price": null,
+          "user_data": null,
+          "user_data_base64": null
+        },
+        "after_unknown": {
+          "arn": true,
+          "associate_public_ip_address": true,
+          "ebs_block_device": true,
+          "ebs_optimized": true,
+          "ephemeral_block_device": [],
+          "id": true,
+          "key_name": true,
+          "metadata_options": true,
+          "name": true,
+          "name_prefix": true,
+          "root_block_device": true
+        },
+        "before_sensitive": false,
+        "after_sensitive": {
+          "ebs_block_device": [],
+          "ephemeral_block_device": [],
+          "metadata_options": [],
+          "root_block_device": []
+        }
+      }
+    }
+  ],
+  "configuration": {
+    "provider_config": {
+      "aws": {
+        "name": "aws",
+        "full_name": "registry.opentofu.org/hashicorp/aws",
+        "version_constraint": "5.100.0",
+        "expressions": {
+          "allowed_account_ids": {
+            "constant_value": [
+              "000000000000"
+            ]
+          },
+          "region": {
+            "constant_value": "us-east-1"
+          }
+        }
+      }
+    },
+    "root_module": {
+      "resources": [
+        {
+          "address": "aws_launch_configuration.web",
+          "mode": "managed",
+          "type": "aws_launch_configuration",
+          "name": "web",
+          "provider_config_key": "aws",
+          "expressions": {
+            "iam_instance_profile": {
+              "constant_value": "web-profile"
+            },
+            "image_id": {
+              "constant_value": "ami-0al2023x8664"
+            },
+            "instance_type": {
+              "constant_value": "t3.micro"
+            }
+          },
+          "schema_version": 0
+        }
+      ]
+    }
+  },
+  "errored": false
+}

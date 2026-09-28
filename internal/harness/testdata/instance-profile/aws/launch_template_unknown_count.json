@@ -1,0 +1,281 @@
+{
+  "format_version": "1.2",
+  "terraform_version": "1.12.6",
+  "planned_values": {
+    "root_module": {
+      "resources": [
+        {
+          "address": "aws_iam_instance_profile.web",
+          "mode": "managed",
+          "type": "aws_iam_instance_profile",
+          "name": "web",
+          "provider_name": "registry.opentofu.org/hashicorp/aws",
+          "schema_version": 0,
+          "values": {
+            "path": "/",
+            "role": null,
+            "tags": null
+          },
+          "sensitive_values": {
+            "tags_all": {}
+          }
+        },
+        {
+          "address": "aws_launch_template.web",
+          "mode": "managed",
+          "type": "aws_launch_template",
+          "name": "web",
+          "provider_name": "registry.opentofu.org/hashicorp/aws",
+          "schema_version": 0,
+          "values": {
+            "block_device_mappings": [],
+            "capacity_reservation_specification": [],
+            "cpu_options": [],
+            "credit_specification": [],
+            "description": null,
+            "disable_api_stop": null,
+            "disable_api_termination": null,
+            "ebs_optimized": null,
+            "elastic_gpu_specifications": [],
+            "elastic_inference_accelerator": [],
+            "enclave_options": [],
+            "hibernation_options": [],
+            "image_id": "ami-0al2023x8664",
+            "instance_initiated_shutdown_behavior": null,
+            "instance_market_options": [],
+            "instance_requirements": [],
+            "instance_type": "t3.micro",
+            "kernel_id": null,
+            "key_name": null,
+            "license_specification": [],
+            "maintenance_options": [],
+            "monitoring": [],
+            "name": "web",
+            "network_interfaces": [],
+            "placement": [],
+            "private_dns_name_options": [],
+            "ram_disk_id": null,
+            "security_group_names": null,
+            "tag_specifications": [],
+            "tags": null,
+            "update_default_version": null,
+            "user_data": null,
+            "vpc_security_group_ids": null
+          },
+          "sensitive_values": {
+            "block_device_mappings": [],
+            "capacity_reservation_specification": [],
+            "cpu_options": [],
+            "credit_specification": [],
+            "elastic_gpu_specifications": [],
+            "elastic_inference_accelerator": [],
+            "enclave_options": [],
+            "hibernation_options": [],
+            "iam_instance_profile": [],
+            "instance_market_options": [],
+            "instance_requirements": [],
+            "license_specification": [],
+            "maintenance_options": [],
+            "metadata_options": [],
+            "monitoring": [],
+            "network_interfaces": [],
+            "placement": [],
+            "private_dns_name_options": [],
+            "tag_specifications": [],
+            "tags_all": {}
+          }
+        }
+      ]
+    }
+  },
+  "resource_changes": [
+    {
+      "address": "aws_iam_instance_profile.web",
+      "mode": "managed",
+      "type": "aws_iam_instance_profile",
+      "name": "web",
+      "provider_name": "registry.opentofu.org/hashicorp/aws",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "before": null,
+        "after": {
+          "path": "/",
+          "role": null,
+          "tags": null
+        },
+        "after_unknown": {
+          "arn": true,
+          "create_date": true,
+          "id": true,
+          "name": true,
+          "name_prefix": true,
+          "tags_all": true,
+          "unique_id": true
+        },
+        "before_sensitive": false,
+        "after_sensitive": {
+          "tags_all": {}
+        }
+      }
+    },
+    {
+      "address": "aws_launch_template.web",
+      "mode": "managed",
+      "type": "aws_launch_template",
+      "name": "web",
+      "provider_name": "registry.opentofu.org/hashicorp/aws",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "before": null,
+        "after": {
+          "block_device_mappings": [],
+          "capacity_reservation_specification": [],
+          "cpu_options": [],
+          "credit_specification": [],
+          "description": null,
+          "disable_api_stop": null,
+          "disable_api_termination": null,
+          "ebs_optimized": null,
+          "elastic_gpu_specifications": [],
+          "elastic_inference_accelerator": [],
+          "enclave_options": [],
+          "hibernation_options": [],
+          "image_id": "ami-0al2023x8664",
+          "instance_initiated_shutdown_behavior": null,
+          "instance_market_options": [],
+          "instance_requirements": [],
+          "instance_type": "t3.micro",
+          "kernel_id": null,
+          "key_name": null,
+          "license_specification": [],
+          "maintenance_options": [],
+          "monitoring": [],
+          "name": "web",
+          "network_interfaces": [],
+          "placement": [],
+          "private_dns_name_options": [],
+          "ram_disk_id": null,
+          "security_group_names": null,
+          "tag_specifications": [],
+          "tags": null,
+          "update_default_version": null,
+          "user_data": null,
+          "vpc_security_group_ids": null
+        },
+        "after_unknown": {
+          "arn": true,
+          "block_device_mappings": [],
+          "capacity_reservation_specification": [],
+          "cpu_options": [],
+          "credit_specification": [],
+          "default_version": true,
+          "elastic_gpu_specifications": [],
+          "elastic_inference_accelerator": [],
+          "enclave_options": [],
+          "hibernation_options": [],
+          "iam_instance_profile": true,
+          "id": true,
+          "instance_market_options": [],
+          "instance_requirements": [],
+          "latest_version": true,
+          "license_specification": [],
+          "maintenance_options": [],
+          "metadata_options": true,
+          "monitoring": [],
+          "name_prefix": true,
+          "network_interfaces": [],
+          "placement": [],
+          "private_dns_name_options": [],
+          "tag_specifications": [],
+          "tags_all": true
+        },
+        "before_sensitive": false,
+        "after_sensitive": {
+          "block_device_mappings": [],
+          "capacity_reservation_specification": [],
+          "cpu_options": [],
+          "credit_specification": [],
+          "elastic_gpu_specifications": [],
+          "elastic_inference_accelerator": [],
+          "enclave_options": [],
+          "hibernation_options": [],
+          "iam_instance_profile": [],
+          "instance_market_options": [],
+          "instance_requirements": [],
+          "license_specification": [],
+          "maintenance_options": [],
+          "metadata_options": [],
+          "monitoring": [],
+          "network_interfaces": [],
+          "placement": [],
+          "private_dns_name_options": [],
+          "tag_specifications": [],
+          "tags_all": {}
+        }
+      }
+    }
+  ],
+  "configuration": {
+    "provider_config": {
+      "aws": {
+        "name": "aws",
+        "full_name": "registry.opentofu.org/hashicorp/aws",
+        "version_constraint": "5.100.0",
+        "expressions": {
+          "allowed_account_ids": {
+            "constant_value": [
+              "000000000000"
+            ]
+          },
+          "region": {
+            "constant_value": "us-east-1"
+          }
+        }
+      }
+    },
+    "root_module": {
+      "resources": [
+        {
+          "address": "aws_iam_instance_profile.web",
+          "mode": "managed",
+          "type": "aws_iam_instance_profile",
+          "name": "web",
+          "provider_config_key": "aws",
+          "schema_version": 0
+        },
+        {
+          "address": "aws_launch_template.web",
+          "mode": "managed",
+          "type": "aws_launch_template",
+          "name": "web",
+          "provider_config_key": "aws",
+          "expressions": {
+            "image_id": {
+              "constant_value": "ami-0al2023x8664"
+            },
+            "instance_type": {
+              "constant_value": "t3.micro"
+            },
+            "name": {
+              "constant_value": "web"
+            }
+          },
+          "schema_version": 0
+        }
+      ]
+    }
+  },
+  "relevant_attributes": [
+    {
+      "resource": "aws_iam_instance_profile.web",
+      "attribute": [
+        "name"
+      ]
+    }
+  ],
+  "errored": false
+}
