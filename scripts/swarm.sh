@@ -221,7 +221,7 @@ main() {
     _name)  agent_name "${1:?slug}"; echo ;;                      # test hook: the agent name for a slug
     _pane)  require_herdr; next_pane "${1:?tab}" "${2:?cwd}" ;;   # layout test hook: a pane, no agent
     wait)   require_herdr; herdr agent wait "$(agent_name "${1:?name}")" --timeout "${2:-3600000}" | json "d['result']['agent']['agent_status']" ;;
-    *) sed -n '2,13p' "$0"; exit 2 ;;
+    *) sed -n '2,12p' "$0"; exit 2 ;;
   esac
 }
 
