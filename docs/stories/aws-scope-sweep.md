@@ -1,7 +1,6 @@
 ---
 kind: code
-status: blocked
-blocked_by: [fakeaws-sweep-surfaces, aws-scope-claim]
+status: ready
 epic: aws-layer3-claim-sweep-reap
 depends_on: [fakeaws-sweep-surfaces, aws-scope-claim]
 touches: ["internal/harness/aws_sweep.go (new)", "internal/harness/aws_sweep_test.go (new)", "internal/e2e/aws_sweep_fakeaws_test.go (new)", ".github/workflows/ci.yml"]
