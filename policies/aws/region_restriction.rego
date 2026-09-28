@@ -9,9 +9,10 @@ import rego.v1
 # generated resource type carries a plan-time region (aws_s3_bucket's is
 # computed-only), so each provider_config entry named aws is checked.
 #
-# A region the plan cannot read denies rather than being resolved: the
-# model's own provider block survives when no fakeaws URL is configured
-# (ensureAwsProviderWiring), and a var.X or an unset region may come from
+# A region the plan cannot read denies rather than being resolved.
+# Generation replaces every provider "aws" block with one whose region is
+# aws.region (ensureAwsProviderWiring), but HCL that reaches the plan by
+# another path keeps its own, and a var.X or an unset region may come from
 # AWS_REGION, which the plan never sees.
 deny contains msg if {
 	allowed := input.params.region
@@ -73,9 +74,9 @@ aws_provider_configured if {
 #
 # Only availability_zone there reflects the model. The region fakeaws
 # records is the one in the endpoint path (/ec2/region/<region>, read by
-# fakeaws handlers/sqs.go and ec2.go), and infrafactory injects that path
-# with us-east-1 (buildAwsProviderBlock), so a state region is the harness's
-# choice, not the model's. It is still checked: a region that disagrees
+# fakeaws handlers/sqs.go and ec2.go), and cloudEnv builds that path from
+# aws.region (AWS_ENDPOINT_URL_<SERVICE>), so a state region is the
+# harness's choice, not the model's. It is still checked: a region that disagrees
 # with params.region is a wiring defect worth failing on.
 
 # state_resource is every object in every collection of the mock's state.

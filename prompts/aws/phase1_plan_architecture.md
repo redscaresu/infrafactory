@@ -70,4 +70,4 @@ Respond with ONLY a JSON object (no markdown fences, no explanation):
 }
 ```
 
-Provider version pin: `hashicorp/aws ~> 5.70` (single source of truth: `fakeaws/coverage_matrix.yaml` header). Bumps require an explicit PR updating example required_providers + this prompt + the e2e harness together.
+The plan does not include the provider: infrafactory writes the provider config itself, with `hashicorp/aws` pinned to exactly `5.100.0` and the run's region.

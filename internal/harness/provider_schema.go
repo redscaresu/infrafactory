@@ -7,15 +7,17 @@ import (
 	"path/filepath"
 )
 
+// AWSProviderVersion is the exact hashicorp/aws release every AWS run
+// uses, at both layers (ADR-0039 decision 4): the release fakeaws's
+// provider smoke harness proves. Generation pins required_providers to
+// it whatever version the model wrote, and schema extraction reads it,
+// so a bump is one edit here once fakeaws runs the new release.
+const AWSProviderVersion = "5.100.0"
+
 // providersTFForCloud returns the providers.tf content for the given
 // cloud. Per concepts.md "Required surface" item 9 (S43-T9): the
 // extractor was scaleway-only before; now it dispatches per cloud so
 // `cloud:aws` scenarios get the AWS provider schema.
-//
-// Provider version pin per fakeaws/concepts.md "Resolved decisions"
-// item 14: hashicorp/aws ~> 5.70. Bumps require a single PR
-// updating this string + the example required_providers blocks +
-// the prompt templates together.
 func providersTFForCloud(cloud string) string {
 	switch cloud {
 	case "aws":
@@ -23,7 +25,7 @@ func providersTFForCloud(cloud string) string {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 5.70"
+      version = "` + AWSProviderVersion + `"
     }
   }
 }

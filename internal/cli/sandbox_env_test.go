@@ -111,11 +111,12 @@ func TestSandboxHarnessesDeclareStripEnv(t *testing.T) {
 
 type recordingRunner struct {
 	commands []harness.Command
+	stdout   []byte
 }
 
 func (r *recordingRunner) Run(_ context.Context, cmd harness.Command) (harness.CommandResult, error) {
 	r.commands = append(r.commands, cmd)
-	return harness.CommandResult{}, nil
+	return harness.CommandResult{Stdout: r.stdout}, nil
 }
 
 func TestSandboxPreflightRejectsNonScalewayEndpoint(t *testing.T) {

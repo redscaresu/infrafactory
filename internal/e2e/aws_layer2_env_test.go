@@ -17,9 +17,9 @@ func TestMain(m *testing.M) {
 }
 
 // startSealedAWSFixture starts fakeaws and seals the network, and returns
-// a func that runs `run` on testdata/aws-layer2-env/<name>.yaml with
-// <name>.tf as the generated HCL.
-func startSealedAWSFixture(t *testing.T, name string) (func(args ...string) InfrafactoryResult, *MockwayInstance) {
+// a func that runs `run` on testdata/<dir>/<name>.yaml with <name>.tf as
+// the generated HCL.
+func startSealedAWSFixture(t *testing.T, dir, name string) (func(args ...string) InfrafactoryResult, *MockwayInstance) {
 	t.Helper()
 	SkipUnlessEnabled(t)
 	_, err := exec.LookPath("tofu")
@@ -27,26 +27,37 @@ func startSealedAWSFixture(t *testing.T, name string) (func(args ...string) Infr
 	mock := StartFakeaws(t)
 	SealNetwork(t)
 
-	fixtures := filepath.Join(RepoRoot(t), "internal", "e2e", "testdata", "aws-layer2-env")
+	command := sealedAWSCommand(t, dir, name, mock.URL)
+	return func(args ...string) InfrafactoryResult {
+		return command("run", args...)
+	}, mock
+}
+
+// sealedAWSCommand returns a func that runs an infrafactory command on
+// testdata/<dir>/<name>.yaml, with <name>.tf as the generated HCL and
+// fakeaws.url set to fakeawsURL.
+func sealedAWSCommand(t *testing.T, dir, name, fakeawsURL string) func(command string, args ...string) InfrafactoryResult {
+	t.Helper()
+	fixtures := filepath.Join(RepoRoot(t), "internal", "e2e", "testdata", dir)
 	hcl, err := os.ReadFile(filepath.Join(fixtures, name+".tf"))
 	require.NoError(t, err)
 	workspace := t.TempDir()
 	configPath := filepath.Join(workspace, "infrafactory.yaml")
-	WriteConfigMultiCloud(t, configPath, "http://127.0.0.1:1", "", mock.URL, "", filepath.Join(workspace, "output"))
+	WriteConfigMultiCloud(t, configPath, "http://127.0.0.1:1", "", fakeawsURL, "", filepath.Join(workspace, "output"))
 
-	return func(args ...string) InfrafactoryResult {
+	return func(command string, args ...string) InfrafactoryResult {
 		return RunInfrafactory(t, InfrafactoryRunOptions{
-			Args:           append([]string{"run", filepath.Join(fixtures, name+".yaml"), "--config", configPath}, args...),
+			Args:           append([]string{command, filepath.Join(fixtures, name+".yaml"), "--config", configPath}, args...),
 			GeneratorFiles: map[string][]byte{"main.tf": hcl},
 		})
-	}, mock
+	}
 }
 
 // Layer 2 strips the shell's AWS_* from every tofu it runs. Without the
 // strip, the planted profile is one the provider cannot find, and the
 // apply fails on it.
 func TestE2E_AWSLayer2IgnoresShellAWS(t *testing.T) {
-	run, mock := startSealedAWSFixture(t, "vpc-subnet")
+	run, mock := startSealedAWSFixture(t, "aws-layer2-env", "vpc-subnet")
 	t.Setenv("AWS_PROFILE", "infrafactory-planted-missing")
 	t.Setenv("AWS_IGNORE_CONFIGURED_ENDPOINT_URLS", "true")
 	t.Setenv("AWS_ACCESS_KEY_ID", "PLANTED")
@@ -72,7 +83,7 @@ func TestE2E_AWSLayer2IgnoresShellAWS(t *testing.T) {
 // the dead proxy instead would mean the provider ignored the catch-all
 // and aimed at real AWS.
 func TestE2E_AWSLayer2CatchAllFailsClosed(t *testing.T) {
-	run, mock := startSealedAWSFixture(t, "log-group")
+	run, mock := startSealedAWSFixture(t, "aws-layer2-env", "log-group")
 
 	result := run("--repair-iterations-max", "1")
 
