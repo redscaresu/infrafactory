@@ -161,7 +161,13 @@ file (`AGENTS.md`, `infrafactory.yaml`, the schema, the hygiene scripts) is done
 ```bash
 scripts/swarm.sh story <slug>      # worktree on story/<slug>, a pane, the agent, its brief
 scripts/swarm.sh wait <slug>       # in the background: returns when it settles
+scripts/swarm.sh watch             # in the background: returns when a story PR needs the lead
 ```
+
+`wait` returns when an agent goes idle, which can be early (an agent waiting on its own
+background shell looks idle). `watch` is what the lead waits on: it exits when a story PR's checks
+finish, when it conflicts with main, when its head has had no checks for 10 minutes, or when an
+agent is blocked on a prompt.
 
 The brief is the story file plus the standing rules (never merge, no real cloud, codex loop, reply
 with the PR URL when CI is green). `herdr agent read <slug> --source recent-unwrapped` shows what an
