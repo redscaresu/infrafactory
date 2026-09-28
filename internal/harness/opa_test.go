@@ -752,7 +752,9 @@ func TestM98_EncryptionAcceptsKnownAfterApplyRefs(t *testing.T) {
 // TestM98_AWSVpcRequiredAcceptsKnownAfterApplyRefs pins the M98 fix
 // for aws/vpc_required.rego — aws_instance.subnet_id,
 // aws_db_instance.db_subnet_group_name, and aws_eks_cluster's
-// vpc_config.subnet_ids can be references.
+// vpc_config.subnet_ids can be references. An omitted attribute plans
+// the same values, so the configuration expressions are what make these
+// references.
 func TestM98_AWSVpcRequiredAcceptsKnownAfterApplyRefs(t *testing.T) {
 	t.Parallel()
 	policyPath := filepath.Join("..", "..", "policies", "aws", "vpc_required.rego")
@@ -773,7 +775,18 @@ func TestM98_AWSVpcRequiredAcceptsKnownAfterApplyRefs(t *testing.T) {
     {"address":"aws_eks_cluster.k8s","type":"aws_eks_cluster","change":{
       "after_unknown":{"vpc_config":[{"subnet_ids":true}]}
     }}
-  ]
+  ],
+  "configuration": {"root_module": {"resources": [
+    {"address":"aws_instance.web","type":"aws_instance","expressions":{
+      "subnet_id":{"references":["aws_subnet.main.id","aws_subnet.main"]}
+    }},
+    {"address":"aws_db_instance.main","type":"aws_db_instance","expressions":{
+      "db_subnet_group_name":{"references":["aws_db_subnet_group.main.name","aws_db_subnet_group.main"]}
+    }},
+    {"address":"aws_eks_cluster.k8s","type":"aws_eks_cluster","expressions":{
+      "vpc_config":[{"subnet_ids":{"references":["aws_subnet.main.id","aws_subnet.main"]}}]
+    }}
+  ]}}
 }`
 	failures, err := EvaluatePlanPolicies(context.Background(), []byte(planJSON), []string{policyPath})
 	if err != nil {

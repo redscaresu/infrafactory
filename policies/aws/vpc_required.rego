@@ -11,20 +11,11 @@ import rego.v1
 
 # EC2 instances must reference a subnet (which by definition belongs to
 # a VPC). Skipping subnet_id puts the instance in the default VPC.
-# M98: also pass when subnet_id is a known-after-apply reference.
 deny contains msg if {
 	resource := input.planned_values.root_module.resources[_]
 	resource.type == "aws_instance"
-	subnet := resource.values.subnet_id
-	subnet == null
-	not subnet_id_is_reference(resource)
+	not configures(resource, "subnet_id")
 	msg := sprintf("%s has no subnet_id — instances MUST be placed in an explicit VPC, not the default", [resource.address])
-}
-
-subnet_id_is_reference(resource) if {
-	rc := input.resource_changes[_]
-	rc.address == resource.address
-	rc.change.after_unknown.subnet_id == true
 }
 
 # RDS instances must reference a db_subnet_group_name (which is itself
@@ -33,22 +24,38 @@ subnet_id_is_reference(resource) if {
 deny contains msg if {
 	resource := input.planned_values.root_module.resources[_]
 	resource.type == "aws_db_instance"
-	subgrp := resource.values.db_subnet_group_name
-	subgrp == null
-	not db_subnet_group_is_reference(resource)
+	not configures(resource, "db_subnet_group_name")
 	msg := sprintf("%s has no db_subnet_group_name — RDS instances MUST be placed in an explicit DB subnet group", [resource.address])
 }
 
-db_subnet_group_is_reference(resource) if {
-	rc := input.resource_changes[_]
-	rc.address == resource.address
-	rc.change.after_unknown.db_subnet_group_name == true
+# Decided from configuration, not planned_values: both attributes are
+# Optional+Computed, so when omitted they are absent from values with
+# after_unknown true, exactly like a reference to a subnet not yet
+# created. Only the expression tells the two apart. `= null` is an
+# omission spelled out, so a null constant does not count, and nor does
+# `= var.x` with x null. Any other expression that comes out null (a
+# local, a conditional) plans unknown too, and passes.
+#
+# Configuration holds one entry per block, so the address drops its
+# count or for_each index (web[0], web["a"]) to join it.
+configures(resource, attr) if {
+	block_address := regex.replace(resource.address, `\[.*\]$`, "")
+	cfg := input.configuration.root_module.resources[_]
+	cfg.address == block_address
+	expr := cfg.expressions[attr]
+	expr != {"constant_value": null}
+	not null_variable(expr)
+}
+
+null_variable(expr) if {
+	[ref] := expr.references
+	startswith(ref, "var.")
+	input.variables[trim_prefix(ref, "var.")].value == null
 }
 
 # EKS clusters must list subnet_ids in their vpc_config.
-# M98: subnet_ids may be a list of references — when entirely unknown,
-# `after_unknown.vpc_config[0].subnet_ids` is `true` (whole list
-# unknown) or a list of true values; either way pass.
+# Fires only on known IDs: subnet_ids is a set, and one reference makes
+# the whole set unknown at plan time, so `[aws_subnet.a.id]` passes.
 deny contains msg if {
 	resource := input.planned_values.root_module.resources[_]
 	resource.type == "aws_eks_cluster"
