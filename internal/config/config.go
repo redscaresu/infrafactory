@@ -29,6 +29,7 @@ type Config struct {
 	Fakegenesys        FakegenesysConfig `yaml:"fakegenesys"`
 	S3                 S3Config          `yaml:"s3"`
 	Scaleway           ScalewayConfig    `yaml:"scaleway"`
+	AWS                AWSConfig         `yaml:"aws"`
 	Validation         ValidationConfig  `yaml:"validation"`
 	ConstraintPolicies map[string]string `yaml:"constraint_policies"`
 	Paths              PathsConfig       `yaml:"paths"`
@@ -129,6 +130,18 @@ type ScalewayConfig struct {
 	// as leaks (harness.strayResourceFailures). Empty means "leave the
 	// provider default alone", which preserves the old behaviour.
 	FallbackProjectID string `yaml:"fallback_project_id"`
+}
+
+// AWSConfig is the real AWS account a Layer 3 run may act on; Layer 2
+// uses Fakeaws and never reads it. The values are the operator's, from
+// the account's hand setup, so there are no defaults: the Layer 3
+// preflight refuses any empty value or a malformed region, and refuses
+// unless sts:GetCallerIdentity answers exactly AccountID and
+// PrincipalARN for the key in layer3-aws.env.
+type AWSConfig struct {
+	Region       string `yaml:"region"`
+	AccountID    string `yaml:"account_id"`
+	PrincipalARN string `yaml:"principal_arn"`
 }
 
 type ValidationConfig struct {

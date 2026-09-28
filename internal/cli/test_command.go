@@ -811,7 +811,7 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 				Layer:  "sandbox_deploy",
 				Stage:  "preflight",
 				Status: StageStatusPass,
-				Detail: "credentials present; endpoint asserted as " + realScalewayAPIURL,
+				Detail: sandboxPreflightPassDetail(runtime, cloud),
 			})
 			// Enforce the allowlist here too, not only in the generation
 			// path. ADR-0023 rule 5 denies expensive types before any API
@@ -1107,8 +1107,21 @@ func assertSandboxCredentials(runtime *CommandRuntime, cloud layer3Cloud) error 
 	case layer3Scaleway:
 		_, err := sandboxEnvWithProjectDefault(runtime, "")
 		return err
+	case layer3AWS:
+		return assertAWSCredentials(runtime)
 	}
 	return layer3SeamRefused(cloud, "credentials")
+}
+
+// sandboxPreflightPassDetail says what the passed preflight proved. For
+// AWS that is the account sts:GetCallerIdentity answered, which
+// assertAWSCredentials required to equal aws.account_id.
+func sandboxPreflightPassDetail(runtime *CommandRuntime, cloud layer3Cloud) string {
+	if cloud == layer3AWS {
+		return "credentials verified by sts:GetCallerIdentity as account " + runtime.Config.AWS.AccountID +
+			" (" + runtime.Config.AWS.PrincipalARN + ")"
+	}
+	return "credentials present; endpoint asserted as " + realScalewayAPIURL
 }
 
 // sandboxCommandEnvForProject is sandboxCommandEnv with an explicit
@@ -1121,8 +1134,14 @@ func assertSandboxCredentials(runtime *CommandRuntime, cloud layer3Cloud) error 
 // somewhere disposable and swept rather than somewhere shared.
 //
 // An empty runProjectID keeps the pre-ADR-0025 behaviour exactly.
+//
+// For AWS the scope is the account id, not a project.
 func sandboxCommandEnvForProject(runtime *CommandRuntime, cloud layer3Cloud, runProjectID string) (map[string]string, error) {
-	if cloud != layer3Scaleway {
+	switch cloud {
+	case layer3Scaleway:
+	case layer3AWS:
+		return awsCommandEnvForAccount(runtime, runProjectID)
+	default:
 		return nil, layer3SeamRefused(cloud, "environment")
 	}
 	// An empty project id is an error, never a fall-through. Every
