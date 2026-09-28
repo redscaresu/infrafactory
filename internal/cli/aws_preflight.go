@@ -13,9 +13,10 @@ import (
 	"github.com/redscaresu/infrafactory/internal/harness"
 )
 
-// awsSTSTimeout bounds each attempt of the default STS HTTP client. The
-// preflight has no command context to inherit a deadline from.
-const awsSTSTimeout = 20 * time.Second
+// awsHTTPTimeout bounds each attempt of the default AWS HTTP clients:
+// the preflight has no command context to inherit a deadline from, and
+// the scope teardown's requests ignore the command's cancellation.
+const awsHTTPTimeout = 20 * time.Second
 
 // assertAWSCredentials is assertSandboxCredentials for AWS. Every local
 // check -- the aws block, the credential file and its mode -- runs before

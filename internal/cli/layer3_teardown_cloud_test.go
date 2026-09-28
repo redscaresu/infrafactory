@@ -228,7 +228,7 @@ func teardownSeams(rt *CommandRuntime, cloud layer3Cloud, workDir string) map[st
 	}
 	_, envErr := sandboxCommandEnvForProject(rt, cloud, staleMarkerProjectID)
 	_, _, destroyErr := destroySandbox(ctx, rt, cloud, workDir, env, staleMarkerProjectID)
-	_, ensureStages, ensureFailures := ensureRunProject(ctx, rt, cloud, "stale", workDir)
+	_, ensureStages, ensureFailures := ensureRunProject(ctx, rt, cloud, "stale", workDir, "")
 	guardOut := &strings.Builder{}
 	_ = withSandboxInterruptGuard(guardCmd(guardOut), rt, cloud, cancelledNotify(), func(context.Context) error { return nil })
 
@@ -266,6 +266,13 @@ func TestEveryTeardownSeamRefusesAnotherCloud(t *testing.T) {
 			for seam, said := range teardownSeams(rt, layer3Cloud(cloud), workDir) {
 				// aws has a destroy arm: aws_destroy_arm_test.go.
 				if cloud == "aws" && seam == "destroySandbox" {
+					continue
+				}
+				// aws has a claim arm: aws_scope_lifecycle_test.go. With
+				// no aws block it refuses before building an env.
+				if cloud == "aws" && seam == "ensureRunProject" {
+					assert.Contains(t, said, "aws.region is empty in the config", seam)
+					assertNoScalewayAdvice(t, said, seam)
 					continue
 				}
 				assert.Contains(t, said, cloud, seam)

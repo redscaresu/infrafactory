@@ -85,6 +85,10 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 	if runID == "" {
 		runID = startedAt.Format("20060102T150405Z0700")
 	}
+	controls.AWSClaimHolder, err = awsClaimHolderFor(runtime, layer3TeardownCloud(sc.Cloud), runID)
+	if err != nil {
+		return err
+	}
 	store := runstore.NewFilesystemStore(runtime.RunStoreRoot())
 	mode, err := detectRunMode(cmd.Context(), runtime, store, sc.Name, runtime.OutputDir(), controls)
 	if err != nil {
@@ -1109,6 +1113,7 @@ func runIteration(
 				KeepSandbox:     controls.Keep,
 				ContinueOnDrift: controls.ContinueOnDrift,
 				Holdout:         controls.Holdout,
+				AWSClaimHolder:  controls.AWSClaimHolder,
 				// Stage progress carries the run's scope, like every
 				// other entry this iteration writes. Without it two
 				// iterations' `apply: running` lines are byte-identical
@@ -1218,6 +1223,9 @@ type runControls struct {
 	ContinueOnDrift     bool
 	Holdout             bool
 	ResetMocks          bool
+	// AWSClaimHolder is minted once per run and claims the aws scope for
+	// every iteration.
+	AWSClaimHolder string
 }
 
 const transportFailureRetryBudget = 2

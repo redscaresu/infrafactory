@@ -85,7 +85,7 @@ func TestEnsureRunProjectCreatesAndReportsIt(t *testing.T) {
 	fake := &fakeRunProject{created: harness.RunProject{ID: "proj-1", Name: "if-run-web-live-paris-x"}}
 	rt := &CommandRuntime{Deps: RuntimeDependencies{RunProject: fake}}
 
-	id, stages, failures := ensureRunProject(context.Background(), rt, layer3Scaleway, "web-live-paris", t.TempDir())
+	id, stages, failures := ensureRunProject(context.Background(), rt, layer3Scaleway, "web-live-paris", t.TempDir(), "")
 
 	assert.Equal(t, "proj-1", id)
 	assert.Empty(t, failures)
@@ -103,7 +103,7 @@ func TestEnsureRunProjectFailsRatherThanFallingBack(t *testing.T) {
 	fake := &fakeRunProject{createErr: errors.New("http 403: insufficient permissions")}
 	rt := &CommandRuntime{Deps: RuntimeDependencies{RunProject: fake}}
 
-	id, stages, failures := ensureRunProject(context.Background(), rt, layer3Scaleway, "web-live-paris", t.TempDir())
+	id, stages, failures := ensureRunProject(context.Background(), rt, layer3Scaleway, "web-live-paris", t.TempDir(), "")
 
 	assert.Empty(t, id)
 	require.Len(t, failures, 1)
@@ -336,7 +336,7 @@ func TestEnsureRunProjectDeletesTheProjectIfTheMarkerCannotBeWritten(t *testing.
 	blocked := filepath.Join(t.TempDir(), "not-a-dir")
 	require.NoError(t, os.WriteFile(blocked, []byte("x"), 0o600))
 
-	id, _, failures := ensureRunProject(context.Background(), rt, layer3Scaleway, "web-live-paris", blocked)
+	id, _, failures := ensureRunProject(context.Background(), rt, layer3Scaleway, "web-live-paris", blocked, "")
 
 	assert.Empty(t, id)
 	require.Len(t, failures, 1)
@@ -433,7 +433,7 @@ func TestEnsureRunProjectCreatesDespiteACancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	id, _, failures := ensureRunProject(ctx, rt, layer3Scaleway, "web-live-paris", workDir)
+	id, _, failures := ensureRunProject(ctx, rt, layer3Scaleway, "web-live-paris", workDir, "")
 
 	assert.Empty(t, failures)
 	assert.Equal(t, "proj-1", id, "the id is the handle; losing it is worse than the extra second")

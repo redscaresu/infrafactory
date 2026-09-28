@@ -50,15 +50,21 @@ func runTestWithNotify(
 	// failure is left for executeTest to report as it always has, and
 	// the zero scenario's cloud is Scaleway, the guard as it was.
 	sc, _ := runtime.LoadScenario(args[0])
+	cloud := layer3TeardownCloud(sc.Cloud)
+	holder, err := awsClaimHolderFor(runtime, cloud, time.Now().UTC().Format("20060102T150405Z0700"))
+	if err != nil {
+		return err
+	}
 
 	// The guard only engages when Layer 3 is on. Interrupting a
 	// mock-only run costs nothing; interrupting one that has already
 	// applied to real Scaleway leaves billable resources behind.
-	return withSandboxInterruptGuard(cmd, runtime, layer3TeardownCloud(sc.Cloud), notify, func(ctx context.Context) error {
+	return withSandboxInterruptGuard(cmd, runtime, cloud, notify, func(ctx context.Context) error {
 		result, err := executeTest(ctx, runtime, args[0], testExecutionOptions{
 			MockDeployMode:  harness.MockDeployModeClean,
 			SkipDestroy:     noDestroy,
 			ContinueOnDrift: continueOnDrift,
+			AWSClaimHolder:  holder,
 			// Progress on stderr, the same stream and the same bytes
 			// `deploy` produces. stdout carries the output contract.
 			Progress: cmd.ErrOrStderr(),
@@ -611,6 +617,15 @@ type testExecutionOptions struct {
 	// "nothing" is the silent-apply failure this slice exists to fix and
 	// a caller that forgets should not reintroduce it.
 	Progress io.Writer
+
+	// AWSClaimHolder claims the aws Layer 3 scope for this execution. It
+	// is minted once per process: by run for all its iterations, by test
+	// for its one.
+	AWSClaimHolder string
+
+	// scenarioPath is set by executeTest, for the reap command a kept
+	// aws claim names.
+	scenarioPath string
 }
 
 func executeTest(ctx context.Context, runtime *CommandRuntime, scenarioPath string, opts testExecutionOptions) (OutputResult, error) {
@@ -618,6 +633,7 @@ func executeTest(ctx context.Context, runtime *CommandRuntime, scenarioPath stri
 	if err != nil {
 		return OutputResult{}, fmt.Errorf("load scenario %q: %w", scenarioPath, err)
 	}
+	opts.scenarioPath = scenarioPath
 	return executeTestWithScenario(ctx, runtime, sc, runtime.OutputDir(), opts)
 }
 
@@ -687,7 +703,7 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 	if sandboxEnabled {
 		shapeErr := cloudErr
 		if shapeErr == nil {
-			shapeErr = layer3PreflightHCLForCloud(cloud, outputDir,
+			shapeErr = runtime.layer3HCLGate(cloud, outputDir,
 				runtime.Config.Validation.Layers.SandboxDeploy.AllowResourceTypes)
 		}
 		if shapeErr != nil {
@@ -833,17 +849,22 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 			// ADR-0025: the run's own project has to exist before the
 			// provider's environment is built, which is why it can no
 			// longer be a Terraform resource.
-			createdID, runProjectStages, runProjectFailures := ensureRunProject(ctx, runtime, cloud, sc.Name, outputDir)
+			// For aws the id is the account, and the claim on it is held
+			// whenever it is not empty, failures or not.
+			createdID, runProjectStages, runProjectFailures := ensureRunProject(ctx, runtime, cloud, sc.Name, outputDir, opts.AWSClaimHolder)
 			runProjectID = createdID
 			stages = append(stages, runProjectStages...)
 			failures = append(failures, runProjectFailures...)
 
-			if len(runProjectFailures) > 0 {
+			switch {
+			case len(runProjectFailures) > 0 && cloud == layer3AWS:
+				sandboxEnvErr = errors.New("this run could not confirm it holds the aws scope's claim")
+			case len(runProjectFailures) > 0:
 				// Creating it failed, so there is nothing to apply into.
 				// Falling back to the shared project would put this run's
 				// strays next to every other run's.
 				sandboxEnvErr = fmt.Errorf("run project unavailable")
-			} else if runProjectID != "" {
+			case runProjectID != "":
 				sandboxEnv, sandboxEnvErr = sandboxCommandEnvForProject(runtime, cloud, runProjectID)
 			}
 		}
@@ -953,7 +974,8 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 				Detail: "kept by --keep; the run registers it as a live deployment with a TTL",
 			})
 		}
-		if sandboxEnabled && !keepingSandbox && liveStateMayHoldResources(outputDir) {
+		// aws is torn down by awsScopeTeardown, below every branch.
+		if sandboxEnabled && !keepingSandbox && cloud != layer3AWS && liveStateMayHoldResources(outputDir) {
 			// The SAME project the apply used. Destroy refreshes and
 			// removes resources that carry no project_id of their own,
 			// so pointing the provider back at the shared fallback here
@@ -1039,7 +1061,11 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 	// accumulated failure list. A mock criteria failure followed by a
 	// clean destroy leaves nothing behind but would otherwise strand the
 	// empty project forever.
-	if runProjectID != "" && !runProjectReleased(stages) {
+	if cloud == layer3AWS && runProjectID != "" {
+		teardownStages, teardownFailures := awsScopeTeardown(ctx, runtime, outputDir, opts)
+		stages = append(stages, teardownStages...)
+		failures = append(failures, teardownFailures...)
+	} else if runProjectID != "" && !runProjectReleased(stages) {
 		switch {
 		case !liveStateMayHoldResources(outputDir):
 			// Its own credentials: this sits outside the sandbox block on
@@ -1170,11 +1196,12 @@ func assertSandboxCredentials(runtime *CommandRuntime, cloud layer3Cloud) error 
 
 // sandboxPreflightPassDetail says what the passed preflight proved. For
 // AWS that is the account sts:GetCallerIdentity answered, which
-// assertAWSCredentials required to equal aws.account_id.
+// assertAWSCredentials required to equal aws.account_id, and not the SCP
+// that bounds the scope, which nothing here can read.
 func sandboxPreflightPassDetail(runtime *CommandRuntime, cloud layer3Cloud) string {
 	if cloud == layer3AWS {
 		return "credentials verified by sts:GetCallerIdentity as account " + runtime.Config.AWS.AccountID +
-			" (" + runtime.Config.AWS.PrincipalARN + ")"
+			" (" + runtime.Config.AWS.PrincipalARN + "); the SCP that bounds the scope is not asserted"
 	}
 	return "credentials present; endpoint asserted as " + realScalewayAPIURL
 }

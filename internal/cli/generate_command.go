@@ -834,7 +834,7 @@ func generateAndWriteFilesWithResult(ctx context.Context, runtime *CommandRuntim
 		if err := validateLayer3ProjectResource(runtime.OutputDir()); err != nil {
 			return 0, nil, err
 		}
-		if err := layer3PreflightHCLForCloud(cloud, runtime.OutputDir(), runtime.Config.Validation.Layers.SandboxDeploy.AllowResourceTypes); err != nil {
+		if err := runtime.layer3HCLGate(cloud, runtime.OutputDir(), runtime.Config.Validation.Layers.SandboxDeploy.AllowResourceTypes); err != nil {
 			return 0, nil, err
 		}
 		if err := validateLayer3ResourceAllowlist(runtime.OutputDir(), runtime.Config.Validation.Layers.SandboxDeploy.AllowResourceTypes); err != nil {
