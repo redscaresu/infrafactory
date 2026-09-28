@@ -76,6 +76,13 @@ surface identical whether the target is fakeaws or a real AWS account.
    satisfy. `default_tags` lands only once `fakeaws-tags-every-service` closes; the blocked
    `aws-default-tags-run-id` story carries it.
 
+   **Amendment (2026-09-28): resolved.** The provider block gains `default_tags { tags = {
+   "infrafactory-run-id" = "<run id>" } }`, the id taken from the run, never the model; a bare
+   `generate` has no run and writes none. Bytes stay identical across layers except that value.
+   Model HCL that names the key is refused, since a resource's own tag overrides `default_tags`.
+   fakeaws round-trips tags on every resource it converges, so the deferral's reason is gone
+   (`aws-default-tags-run-id`'s PR carries the evidence).
+
 This ADR is also the AWS analog of ADR-0014: it enumerates what the AWS provider actually reads,
 the same way ADR-0014 enumerated it for the GCP v5 provider — environment (`AWS_ENDPOINT_URL_*`,
 `AWS_ENDPOINT_URL`, `AWS_REGION`, `AWS_PROFILE`), the shared config file's `services` block

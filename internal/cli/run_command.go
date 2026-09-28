@@ -1119,7 +1119,7 @@ func runIteration(
 			switch step.name {
 			case "generate":
 				var generated *generator.GeneratedCode
-				_, generated, err = generateAndWriteFilesWithResult(ctx, runtime, scenarioPath, iteration, feedbackFailures, generatedFileWriteModeForRunMode(mode))
+				_, generated, err = generateAndWriteFilesWithResult(ctx, runtime, scenarioPath, runID, iteration, feedbackFailures, generatedFileWriteModeForRunMode(mode))
 				if err == nil {
 					err = store.WriteGeneratedFiles(scenarioName, runID, generated.Files)
 				}

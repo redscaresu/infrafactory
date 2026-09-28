@@ -179,7 +179,7 @@ func TestGenerationGateIsKeyedOnTheScenarioCloud(t *testing.T) {
 					})},
 			}
 
-			_, _, err := generateAndWriteFilesWithResult(context.Background(), rt, scenarioPath, 1, nil, generatedFileWriteModeClean)
+			_, _, err := generateAndWriteFilesWithResult(context.Background(), rt, scenarioPath, "", 1, nil, generatedFileWriteModeClean)
 			if tc.want == "" {
 				assert.NoError(t, err)
 				return

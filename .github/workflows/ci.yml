@@ -86,7 +86,7 @@ jobs:
       # The AWS identity preflight against fakeaws STS, and Layer 2's AWS
       # env through real tofu with the network sealed (SealNetwork): every
       # service fakeaws serves without Docker, env-routed, and validate
-      # needing fakeaws STS. S3 and EKS need Docker (TestE2E_AWSFullStack).
+      # needing fakeaws STS. S3 needs Docker (TestE2E_AWSFullStack).
       # fakeaws is pinned to one commit, so bumping FAKEAWS_SHA is a
       # deliberate edit. -count=1: the test cache cannot see the sibling
       # checkout, so a cached PASS could replay after a bump. `go test`
@@ -94,7 +94,7 @@ jobs:
       # only on each test's own PASS line.
       - name: AWS against fakeaws
         env:
-          FAKEAWS_SHA: 5cf769327d9ef7b87e502b843b31e88bd4816e2d
+          FAKEAWS_SHA: 6933409e1b5c41cdd16650d96106402a81873cab
           INFRAFACTORY_ENABLE_E2E: "1"
         run: |
           set -o pipefail

@@ -43,7 +43,7 @@ Write nothing else that starts a server: no inline script, no `user_data_base64`
 ## Instructions
 
 1. Generate complete, runnable Terraform/OpenTofu HCL for the planned architecture.
-2. Do not write the provider config: no `required_providers` entry for aws and no `provider "aws"` block. infrafactory writes both into `providers.tf` — `hashicorp/aws` pinned to exactly `5.100.0`, and the run's region — and replaces any you write.
+2. Do not write the provider config: no `required_providers` entry for aws and no `provider "aws"` block. infrafactory writes both into `providers.tf` — `hashicorp/aws` pinned to exactly `5.100.0`, the run's region, and `default_tags` carrying the run's id as `infrafactory-run-id` — and replaces any you write. Do not write `default_tags` anywhere, and do not set an `infrafactory-run-id` tag on any resource: that tag is infrafactory's.
 3. **Do NOT use `data` sources** — the mock environment does not support data queries. Use literal values from the architecture plan.
 4. Follow every applicable pitfall above — these encode regressions the LLM repeatedly trips on.
 5. Use account-synthetic, run-scoped names for globally-unique resources (S3 buckets); use predictable names for VPC-scoped resources.

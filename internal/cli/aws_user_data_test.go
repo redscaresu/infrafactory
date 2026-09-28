@@ -92,7 +92,7 @@ func newUserDataHarness(t *testing.T, scenarioPath string, files map[string][]by
 }
 
 func (h *userDataHarness) generate(mode generatedFileWriteMode) error {
-	_, _, err := generateAndWriteFilesWithResult(context.Background(), h.rt, h.scenario, 1, nil, mode)
+	_, _, err := generateAndWriteFilesWithResult(context.Background(), h.rt, h.scenario, "", 1, nil, mode)
 	return err
 }
 
