@@ -56,7 +56,7 @@ func EvaluateStatePoliciesWithInput(ctx context.Context, stateJSON []byte, extra
 	for _, pkg := range packages {
 		query, err := rego.New(
 			rego.Query(fmt.Sprintf("data.%s.deny_state", pkg)),
-			rego.Load(policyPaths, nil),
+			rego.Load(policyPaths, skipRegoTestFiles),
 			rego.Input(input),
 		).Eval(ctx)
 		if err != nil {
