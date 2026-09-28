@@ -45,6 +45,12 @@ var SandboxStripEnv = []string{
 	// arbitrary flags, `-var` among them.
 	"TF_VAR_*",
 	"TF_CLI_ARGS*",
+	// AWS_* is the AWS form of SCW_API_URL and SCW_PROFILE: Layer 2 sets
+	// AWS_ENDPOINT_URL_* to point the provider at fakeaws, and
+	// AWS_PROFILE selects a ~/.aws profile with its own keys and
+	// endpoints. A Layer 3 AWS command gets its whole AWS env from
+	// AWSSealedEnv instead.
+	"AWS_*",
 }
 
 var ErrSandboxDeployFailed = errors.New("sandbox deploy failed")
