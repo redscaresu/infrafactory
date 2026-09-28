@@ -1,7 +1,6 @@
 ---
 kind: code
-status: blocked
-blocked_by: [avoid-check-ledger]
+status: ready
 epic: avoid-pitfall-retirement
 depends_on: [avoid-check-ledger]
 touches: ["internal/cli/pitfalls_command.go", "internal/cli/pitfalls_avoid_check.go", "internal/cli/pitfalls_avoid_check_test.go", "internal/generator/avoid_shape.go", "internal/generator/avoid_shape_test.go", "internal/e2e/avoid_check_test.go", ".github/workflows/ci.yml", "docs/decisions/0034-a-prohibition-is-a-specification.md", "docs/operations.md", "docs/plans/pitfall-pruning-automation-plan.md"]
