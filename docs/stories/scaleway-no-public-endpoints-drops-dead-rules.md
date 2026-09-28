@@ -1,7 +1,6 @@
 ---
 kind: code
-status: blocked
-blocked_by: [policy-loader-skips-test-files, rego-test-harness, aws-vpc-required-fails-closed]
+status: ready
 epic: policy-correctness
 depends_on: [policy-loader-skips-test-files, rego-test-harness, aws-vpc-required-fails-closed]
 touches: ["policies/scaleway/no_public_endpoints.rego", "policies/scaleway/no_public_endpoints_test.rego", "internal/harness/opa_test.go", "internal/e2e/full_stack_paris_test.go"]
