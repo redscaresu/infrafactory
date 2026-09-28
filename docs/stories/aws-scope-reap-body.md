@@ -1,16 +1,17 @@
 ---
 kind: code
-status: blocked
-blocked_by: [aws-scope-sweep]
+status: ready
 epic: aws-layer3-claim-sweep-reap
 depends_on: [aws-scope-sweep]
-touches: ["internal/harness/aws_reap.go (new)", "internal/harness/aws_reap_test.go (new)", "internal/cli/aws_scope_allowlist_test.go (new)", "internal/e2e/aws_reap_fakeaws_test.go (new)", ".github/workflows/ci.yml"]
+touches: ["internal/harness/aws_reap.go (new)", "internal/harness/aws_reap_test.go (new)", "internal/cli/aws_scope_allowlist_test.go (new)", "internal/e2e/aws_reap_fakeaws_test.go (new)", ".github/fakeaws-e2e-tests"]
 risk: high
 ---
 
 # reap's AWS body verifies account, stamp and claim at the delete site, deletes in real AWS dependency order with settles, and is proven per action against fakeaws
 
 New file internal/harness/aws_reap.go: ReapAWSScope(ctx, env, doers, endpoints, sleeper, account, principal, holder, strays). This is the AWS form of ADR-0023 rule 4 (ADR-0023:30). Before its first mutating call it runs VerifyAWSIdentity (account and principal), AssertAWSScopeStamp(account) and ReadAWSClaimHolder==holder, so a caller cannot reach the deletes without the gate. The order is real AWS dependency order. Instances are terminated, then the loop settles until they are terminated. NAT gateways are deleted, then the loop settles until they are deleted. Elastic IPs are disassociated when AssociationId is set, then released. These must precede the IGW detach, because DetachInternetGateway fails while the VPC has mapped public addresses. Launch templates follow, then images deregistered, then snapshots. Volumes are next, with a settle until available. Network interfaces are detached if attached, the loop settles until available, then they are deleted; the detach is asynchronous. Key pairs are deleted. Every non-default group's rules are revoked, then the groups are deleted. Subnets are next. Route tables are disassociated, then deleted. Internet gateways are detached, then deleted. VPCs are last. The SSM row is report-only: the key may write only the claim. A failed delete does not stop the rest. The body returns per-item errors, and the caller's sweep is the verdict. It never touches the claim. The table exports the EC2 actions it sends, for the policy test.
+
+Note: the fakeaws CI test list moved from the `tests=` line in `.github/workflows/ci.yml` into `.github/fakeaws-e2e-tests` (one per line, sorted); add tests there.
 
 **Done when:**
 - Fake doer: STS naming another account, a missing stamp, or a claim held by another holder each give zero mutating calls.
