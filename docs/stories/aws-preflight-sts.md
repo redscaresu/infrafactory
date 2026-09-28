@@ -1,7 +1,6 @@
 ---
 kind: code
-status: blocked
-blocked_by: [aws-seal, layer3-cloud-teardown-seams]
+status: ready
 epic: aws-layer3-seal-and-dispatch
 depends_on: [aws-seal, layer3-cloud-teardown-seams]
 touches: ["internal/config/config.go", "internal/cli/runtime.go", "internal/cli/test_command.go", "internal/cli/aws_preflight.go (new)", "internal/cli/aws_preflight_test.go (new)", "internal/harness/aws_identity.go (new)", "internal/harness/aws_identity_test.go (new)", "docs/stories/aws-preflight-sts.md (delete)"]
