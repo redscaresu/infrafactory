@@ -80,13 +80,19 @@ func runLiveUpgradeCommand(cmd *cobra.Command, args []string, runtime *CommandRu
 		return &CLIError{Op: "live upgrade", Code: errorCodeCommandFailed, Err: errors.New(
 			"live upgrade applies to real infrastructure and requires validation.layers.sandbox_deploy.enabled")}
 	}
+	// From the record, not the new HCL: the cloud is what the deployment
+	// was applied to, and the upgrade applies into the same place.
+	cloud, err := layer3LiveCloud(d.Cloud, "live upgrade")
+	if err != nil {
+		return &CLIError{Op: "live upgrade", Code: errorCodeCommandFailed, Err: err}
+	}
 
 	if err := assertDeployableSource(source); err != nil {
 		return &CLIError{Op: "live upgrade", Code: errorCodeUsage, Err: err}
 	}
 	// The same deny-by-default the first deploy ran. New configuration is
 	// new configuration whether it arrives through `deploy` or here.
-	if err := layer3PreflightHCL(source, runtime.Config.Validation.Layers.SandboxDeploy.AllowResourceTypes); err != nil {
+	if err := layer3PreflightHCLForCloud(cloud, source, runtime.Config.Validation.Layers.SandboxDeploy.AllowResourceTypes); err != nil {
 		return &CLIError{Op: "live upgrade", Code: errorCodeCommandFailed, Err: fmt.Errorf("layer 3 hcl validation: %w", err)}
 	}
 

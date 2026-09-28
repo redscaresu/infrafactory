@@ -1,0 +1,58 @@
+package cli
+
+import "fmt"
+
+// layer3Cloud is the cloud a Layer 3 path acts on. Every entry point
+// parses it from the string it holds -- the scenario's cloud, or a live
+// record's -- and dispatches on the result, so a cloud with no Layer 3
+// branch is refused instead of reaching code written for Scaleway.
+type layer3Cloud string
+
+const (
+	layer3Scaleway layer3Cloud = "scaleway"
+	layer3AWS      layer3Cloud = "aws"
+)
+
+// parseLayer3Cloud maps a cloud string onto a layer3Cloud.
+//
+// "" is Scaleway, and only because of where it can appear: the schema
+// requires cloud, so an empty one comes from a Go fixture or from a live
+// record written before Deployment.Cloud existed, when Scaleway was the
+// only live cloud. Anything unlisted is an error, never a default.
+func parseLayer3Cloud(raw string) (layer3Cloud, error) {
+	switch raw {
+	case "", "scaleway":
+		return layer3Scaleway, nil
+	case "aws":
+		return layer3AWS, nil
+	}
+	return "", fmt.Errorf("cloud %q has no Layer 3 support, so nothing may run against its real API", raw)
+}
+
+// layer3PreflightHCLForCloud runs the cloud's own structural gate before
+// any tofu starts. Only Scaleway has one; any other cloud is refused
+// rather than judged by Scaleway's rules, which say nothing about it.
+func layer3PreflightHCLForCloud(cloud layer3Cloud, outputDir string, allowedResourceTypes []string) error {
+	switch cloud {
+	case layer3Scaleway:
+		return layer3PreflightHCL(outputDir, allowedResourceTypes)
+	}
+	return fmt.Errorf("cloud %s has no Layer 3 HCL gate yet, so its configuration may not reach a real account", cloud)
+}
+
+// layer3LiveCloud parses the cloud for a live path (--keep, deploy,
+// live upgrade) and refuses every cloud but Scaleway. A live stack
+// outlives the command, and only Scaleway has the record, teardown and
+// reap that bound it; `run` and `test` destroy what they apply.
+func layer3LiveCloud(raw, livePath string) (layer3Cloud, error) {
+	cloud, err := parseLayer3Cloud(raw)
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", livePath, err)
+	}
+	if cloud != layer3Scaleway {
+		return "", fmt.Errorf(
+			"%s is refused for cloud %s until its live path lands: nothing could tear down or reap what it left running. "+
+				"Use `infrafactory run` or `infrafactory test`, which destroy what they apply", livePath, cloud)
+	}
+	return cloud, nil
+}

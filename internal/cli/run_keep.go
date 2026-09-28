@@ -33,6 +33,9 @@ func assertKeepable(keep bool, runtime *CommandRuntime, sc scenario.Scenario) er
 			"--keep leaves real infrastructure running and needs validation.layers.sandbox_deploy.enabled; " +
 				"without it the run only touches the mock, which there is nothing to keep")
 	}
+	if _, err := layer3LiveCloud(sc.Cloud, "--keep"); err != nil {
+		return usage("%w", err)
+	}
 
 	// A keep with no deadline is a leak with a nicer name. ADR-0024
 	// makes the TTL mandatory for exactly this reason, and service.ttl

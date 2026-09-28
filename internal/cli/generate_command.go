@@ -682,7 +682,7 @@ func generateAndWriteFilesWithResult(ctx context.Context, runtime *CommandRuntim
 	var scenarioMeta struct {
 		Cloud string `yaml:"cloud"`
 	}
-	_ = yaml.Unmarshal(scenarioPayload, &scenarioMeta)
+	scenarioMetaErr := yaml.Unmarshal(scenarioPayload, &scenarioMeta)
 
 	runtime.EnsureProviderSchema(ctx, scenarioMeta.Cloud)
 
@@ -737,10 +737,19 @@ func generateAndWriteFilesWithResult(ctx context.Context, runtime *CommandRuntim
 		return 0, nil, err
 	}
 	if runtime.Config.Validation.Layers.SandboxDeploy.Enabled {
+		// Keyed on the scenario's cloud, so a payload whose cloud cannot
+		// be read is refused rather than gated as Scaleway by default.
+		if scenarioMetaErr != nil {
+			return 0, nil, fmt.Errorf("read cloud of scenario %q for the layer 3 gate: %w", scenarioPath, scenarioMetaErr)
+		}
+		cloud, err := parseLayer3Cloud(scenarioMeta.Cloud)
+		if err != nil {
+			return 0, nil, err
+		}
 		if err := validateLayer3ProjectResource(runtime.OutputDir()); err != nil {
 			return 0, nil, err
 		}
-		if err := validateLayer3HCLShape(runtime.OutputDir(), runtime.Config.Validation.Layers.SandboxDeploy.AllowResourceTypes); err != nil {
+		if err := layer3PreflightHCLForCloud(cloud, runtime.OutputDir(), runtime.Config.Validation.Layers.SandboxDeploy.AllowResourceTypes); err != nil {
 			return 0, nil, err
 		}
 		if err := validateLayer3ResourceAllowlist(runtime.OutputDir(), runtime.Config.Validation.Layers.SandboxDeploy.AllowResourceTypes); err != nil {
