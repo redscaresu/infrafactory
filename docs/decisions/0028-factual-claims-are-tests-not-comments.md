@@ -125,3 +125,20 @@ were evaluated" was derived first by parsing the skip message's prose, then by s
 the skip count from the spec count. Both derive a structured fact from something shaped
 for humans, inside the function that exists to stop a check being reported as run when it
 was not. It is counted where the evaluation happens now.
+
+## Amendment, 2026-09-28: a policy's claim is a mutation-checked Rego test
+
+A policy is a claim too: its name, its comments and the criterion that cites it all say what it
+denies. That claim is now a Rego unit test beside the policy (`<name>_test.rego`, `test_` rules),
+which `go test` runs through `opa/v1/tester` (`TestRegoPolicyTests`,
+`internal/harness/rego_policy_test.go`).
+
+A policy test counts only when it is **mutation-checked**: each `deny`/`deny_state` body in turn
+is made unsatisfiable, and a body after which no test fails is a failure. A test that passes
+whether or not the rule exists is a comment with a green tick. Inputs are trimmed from a real
+capture, a plan from the pinned provider or the mock's `/mock/state`, never hand-shaped: a
+hand-shaped input tests the author's belief about the shape, which is the claim under test.
+
+**conftest was not adopted.** It would replace an evaluator that was not the problem, and cost
+`deny_state`, params, per-cloud routing and repair-loop feedback to rebuild. What was missing was
+tests, and the OPA library infrafactory already uses runs them.
