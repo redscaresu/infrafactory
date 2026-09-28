@@ -30,8 +30,32 @@ const (
 	// makes them too heavy for the default unit-test path.
 	EnvEnableE2E = "INFRAFACTORY_ENABLE_E2E"
 
+	// envRunStoreRoot is the run store's root override (read by
+	// cli.resolveRunStoreRoot).
+	envRunStoreRoot = "INFRAFACTORY_RUNSTORE_ROOT"
+
 	mockwayReadinessTimeout = 30 * time.Second
 )
+
+// runStoreRoots holds each test's run-store root, keyed by *testing.T.
+var runStoreRoots sync.Map
+
+// isolateRunStore points the run store at an absolute directory owned by
+// t, the same one for every run in the test: incremental mode reads the
+// previous successful run from it. `run` refuses a relative root under
+// go test (the M81 guard), and the default one is the developer's own
+// .infrafactory/runs. t.Setenv makes this unusable from a parallel test,
+// and says so by panicking.
+func isolateRunStore(t *testing.T) {
+	t.Helper()
+	root, ok := runStoreRoots.Load(t)
+	if !ok {
+		root = t.TempDir()
+		runStoreRoots.Store(t, root)
+		t.Cleanup(func() { runStoreRoots.Delete(t) })
+	}
+	t.Setenv(envRunStoreRoot, root.(string))
+}
 
 // SkipUnlessEnabled skips the test unless the e2e env gate is set.
 func SkipUnlessEnabled(t *testing.T) {
@@ -343,6 +367,7 @@ type InfrafactoryResult struct {
 // <args>` but avoids subprocess + recompile overhead.
 func RunInfrafactory(t *testing.T, opts InfrafactoryRunOptions) InfrafactoryResult {
 	t.Helper()
+	isolateRunStore(t)
 
 	gen := opts.GeneratorFunc
 	if gen == nil {

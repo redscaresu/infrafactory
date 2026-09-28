@@ -2,7 +2,11 @@ package e2e
 
 import (
 	"net/http"
+	"path/filepath"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestStartMockwayInfrastructure verifies the e2e helper can start mockway
@@ -98,4 +102,42 @@ validation:
 		t.Fatalf("validate failed: %v\nstdout:\n%s\nstderr:\n%s",
 			result.Err, result.Stdout, result.Stderr)
 	}
+}
+
+// TestRunInfrafactoryPassesRunIsolationGuard fails if the harness would
+// hand `run` a relative output dir or run-store root, which the M81 guard
+// in run_command.go refuses under go test. That refusal broke every gated
+// suite in this package at once, silently, because CI does not run them;
+// this test is ungated. With no mock listening, the run stops at run-mode
+// detection, the first step after the guard.
+func TestRunInfrafactoryPassesRunIsolationGuard(t *testing.T) {
+	workspace := t.TempDir()
+	scenarioPath := filepath.Join(workspace, "scenarios", "training", "e2e-isolation.yaml")
+	configPath := filepath.Join(workspace, "infrafactory.yaml")
+
+	WriteFile(t, scenarioPath, []byte(`scenario: e2e-isolation
+version: "1.0"
+cloud: scaleway
+description: e2e isolation guard
+resources:
+  compute:
+    purpose: smoke
+    size: small
+acceptance_criteria:
+  - type: policy
+    check: region_restriction
+    params:
+      region: fr-par
+    expect: pass
+`))
+	WriteConfig(t, configPath, "http://127.0.0.1:1", filepath.Join(workspace, "output"))
+
+	result := RunInfrafactory(t, InfrafactoryRunOptions{
+		Args: []string{"run", scenarioPath, "--config", configPath},
+	})
+
+	require.Error(t, result.Err)
+	assert.NotContains(t, result.Err.Error(), "test isolation")
+	// Proves the run got past the guard, not that it stopped before it.
+	assert.Contains(t, result.Err.Error(), "detect run mode")
 }

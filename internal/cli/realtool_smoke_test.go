@@ -191,6 +191,7 @@ validation:
 			}),
 			MockState: newMockStateClient(mockwayURL),
 		},
+		runstoreRoot: filepath.Join(workspace, "runs"),
 	}
 
 	run := func(args ...string) string {
@@ -421,6 +422,7 @@ validation:
 			}),
 			MockState: newMockStateClient(mockwayURL),
 		},
+		runstoreRoot: filepath.Join(workspace, "runs"),
 	}
 
 	run := func(args ...string) string {
