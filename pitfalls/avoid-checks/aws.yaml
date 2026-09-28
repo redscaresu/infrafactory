@@ -1,0 +1,21 @@
+provider: aws
+records:
+    - status: retired
+      resource: aws_subnet
+      attributes:
+        - map_public_ip_on_launch
+      learned_layer: mock_deploy
+      layer_evidence: 'run aws-eks/20260603T214517Z iteration 1: its apply failure names aws_subnet and map_public_ip_on_launch, and every aws endpoint was loopback'
+      entry:
+        resource: aws_subnet
+        rule: 'exit status 1 | stderr: ╷ Do NOT use attribute `map_public_ip_on_launch` on `aws_subnet` — observed in scenario "aws-eks" to cause the failure above.'
+        source: avoid
+        discovered_from: aws-eks
+      check:
+        id: 20260928T193258Z-aws_subnet
+        at: "2026-09-28T19:32:58Z"
+        from: .infrafactory/runs/aws-eks/20260603T214517Z/iterations/1/generated
+        shape_sha256: d6e6b2c6aa4da3b84ac9984bce44d5ad08134aa10ca7f6a5d0983ce6b00d6104
+        apply_exit: 0
+        plan_exit: 0
+        outcome: contradicted
