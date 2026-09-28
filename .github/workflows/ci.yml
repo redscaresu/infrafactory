@@ -94,14 +94,14 @@ jobs:
       # only on each test's own PASS line.
       - name: AWS against fakeaws
         env:
-          FAKEAWS_SHA: 76ea10676c739a968b541285b974084f63156d56
+          FAKEAWS_SHA: 5cf769327d9ef7b87e502b843b31e88bd4816e2d
           INFRAFACTORY_ENABLE_E2E: "1"
         run: |
           set -o pipefail
           git init -q ../fakeaws
           git -C ../fakeaws fetch -q --depth 1 https://github.com/redscaresu/fakeaws.git "$FAKEAWS_SHA"
           git -C ../fakeaws checkout -q FETCH_HEAD
-          tests='TestAWSPreflightAgainstFakeaws TestE2E_AWSLayer2IgnoresShellAWS TestE2E_AWSLayer2CatchAllFailsClosed TestE2E_AWSEnvOnlyEveryService TestE2E_AWSValidateNeedsFakeawsSTS'
+          tests='TestAWSPreflightAgainstFakeaws TestE2E_AWSLayer2IgnoresShellAWS TestE2E_AWSLayer2CatchAllFailsClosed TestE2E_AWSEnvOnlyEveryService TestE2E_AWSValidateNeedsFakeawsSTS TestE2E_AWSWebStepOne TestE2E_AWSWebStepOneUnattachedGroup'
           go test ./internal/e2e -run "^($(echo $tests | tr ' ' '|'))\$" -count=1 -v | tee "$RUNNER_TEMP/aws-fakeaws.log"
           for test in $tests; do
             grep -q "^--- PASS: $test " "$RUNNER_TEMP/aws-fakeaws.log" || { echo "$test did not PASS"; exit 1; }
