@@ -1,7 +1,6 @@
 ---
 kind: code
-status: blocked
-blocked_by: [aws-web-step-one-e2e]
+status: ready
 epic: aws-layer-neutral-hcl
 depends_on: [aws-web-step-one-e2e]
 touches: ["internal/harness/aws_ami.go (new)", "internal/harness/aws_ami_test.go (new)", "internal/e2e/aws_ami_fakeaws_test.go (new)", "internal/e2e/aws_web_step_one_test.go", "internal/generator/generator.go", "internal/generator/prompt.go", "internal/generator/claude_adapter.go", "internal/generator/openrouter_adapter.go", "internal/generator/aws_phase1_literals_test.go (new)", "internal/cli/generate_command.go", "internal/cli/runtime.go", "internal/cli/layer3_cloud_test.go", "prompts/aws/phase1_plan_architecture.md", "prompts/aws/phase2_generate_hcl.md", "go.mod", "go.sum", ".github/workflows/ci.yml", "docs/stories/aws-phase1-literals.md (delete)"]
