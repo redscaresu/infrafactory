@@ -6,6 +6,7 @@ require (
 	github.com/aws/aws-sdk-go-v2 v1.47.1
 	github.com/aws/aws-sdk-go-v2/config v1.33.6
 	github.com/aws/aws-sdk-go-v2/credentials v1.20.6
+	github.com/aws/aws-sdk-go-v2/service/ssm v1.78.1
 	github.com/aws/aws-sdk-go-v2/service/sts v1.51.1
 	github.com/coder/websocket v1.8.15
 	github.com/hashicorp/hcl/v2 v2.24.0

@@ -35,6 +35,9 @@ type Request struct {
 	// UserDataLine is set only for an AWS scenario with a service: block,
 	// whose boot script infrafactory renders itself (AWSUserDataFile).
 	UserDataLine string
+	// AMIID is set only for AWS: the AMI id every aws_instance is told to
+	// write verbatim, since phase 1 forbids an AMI lookup.
+	AMIID string
 }
 
 // AWSUserDataFile is the boot script infrafactory renders from an AWS

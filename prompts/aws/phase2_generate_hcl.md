@@ -40,6 +40,12 @@ infrafactory writes the instance's boot script into the module directory itself:
 Write nothing else that starts a server: no inline script, no `user_data_base64`, no provisioner, no `local_file`. Do not output a file with that script's name; generation refuses one.
 {{end}}
 
+{{if .AMIID}}
+## AMI
+
+Every `aws_instance` sets `ami = "{{.AMIID}}"`, written verbatim. infrafactory resolved this id for the run: never look an AMI up (no `data "aws_ami"` or `data "aws_ssm_parameter"`) and never write any other id.
+{{end}}
+
 ## Instructions
 
 1. Generate complete, runnable Terraform/OpenTofu HCL for the planned architecture.

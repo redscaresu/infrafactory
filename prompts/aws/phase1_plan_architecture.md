@@ -6,11 +6,28 @@ You are an infrastructure architect specialising in Amazon Web Services (AWS). Y
 {{.ScenarioYAML}}
 ```
 
-## Size Mappings (resolved)
+## Size Mappings
 
-```yaml
-{{.ResolvedMappings}}
-```
+Each resource's `size` in the scenario maps to exactly this AWS setting.
+
+| Resource | Size | AWS setting |
+|---|---|---|
+| compute | small | `aws_instance` `instance_type = "t3.micro"` |
+| compute | medium | `aws_instance` `instance_type = "t3.medium"` |
+| compute | large | `aws_instance` `instance_type = "t3.large"` |
+| compute | xlarge | `aws_instance` `instance_type = "t3.xlarge"` |
+| database | small | `aws_db_instance` `instance_class = "db.t3.micro"` |
+| database | medium | `aws_db_instance` `instance_class = "db.t3.medium"` |
+| database | large | `aws_db_instance` `instance_class = "db.t3.large"` |
+| database | xlarge | `aws_db_instance` `instance_class = "db.t3.xlarge"` |
+| kubernetes | small | `aws_eks_node_group` `instance_types = ["t3.medium"]`, 1 node |
+| kubernetes | medium | `aws_eks_node_group` `instance_types = ["t3.large"]`, 3 nodes |
+| kubernetes | large | `aws_eks_node_group` `instance_types = ["t3.xlarge"]`, 5 nodes |
+| kubernetes | xlarge | `aws_eks_node_group` `instance_types = ["t3.2xlarge"]`, 7 nodes |
+| storage | small | `aws_s3_bucket` with no size setting: S3 is not provisioned by size |
+| storage | medium | `aws_s3_bucket` with no size setting: S3 is not provisioned by size |
+| storage | large | `aws_s3_bucket` with no size setting: S3 is not provisioned by size |
+| storage | xlarge | `aws_s3_bucket` with no size setting: S3 is not provisioned by size |
 
 {{if .Overrides}}
 ## Prescriptive Overrides
@@ -38,7 +55,10 @@ Every failure this run has produced so far, from every earlier iteration; `stage
 
 ## Instructions
 
-**IMPORTANT**: Do NOT use Terraform/OpenTofu `data` sources. Use hardcoded IDs and values from the mappings and overrides above. If a data source is needed (e.g., AMI lookup), use the literal value from mappings. The mock environment does not support data source queries.
+**IMPORTANT**: Do NOT use Terraform/OpenTofu `data` sources. Use hardcoded values from the size mappings and overrides above. The mock environment does not support data source queries.
+{{if .AMIID}}
+**AMI**: every `aws_instance` sets `ami = "{{.AMIID}}"`, written verbatim. infrafactory resolved this id for the run: never look an AMI up (no `data "aws_ami"` or `data "aws_ssm_parameter"`) and never write any other id.
+{{end}}
 
 1. Analyse the scenario and identify all AWS resources needed.
 2. Map intent-driven sizes to concrete AWS offerings using ONLY the exact values in the Size Mappings table above. Do NOT invent instance types — use the mappings verbatim (e.g., compute large → `t3.large`, NOT `t3-large`).

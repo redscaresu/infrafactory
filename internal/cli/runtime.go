@@ -142,6 +142,10 @@ type CommandRuntime struct {
 	// re-extract on the second visit AND doesn't leak the scaleway
 	// schema into the aws generator request.
 	ProviderSchemaJSON []byte
+	// AWSLayer3AMI is the AL2023 AMI id a Layer 3 run resolved from real
+	// SSM (harness.ResolveAWSAMIFromSSM), once, before generation. An AWS
+	// generate at Layer 3 refuses while it is empty.
+	AWSLayer3AMI string
 
 	scenarioLoader     func(string) (scenario.Scenario, error)
 	loadedScenario     *scenario.Scenario
