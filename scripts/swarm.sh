@@ -7,6 +7,7 @@
 #   swarm.sh policy <role>                                  print the model and effort for a role
 #   swarm.sh close <tab>                                    close <tab>, <tab>-2, ... and forget them
 #   swarm.sh unblock                                        mark ready every blocked story whose blockers are all merged
+#   swarm.sh watch [repo...]                                wait until a story PR needs the lead, print why, and exit
 #
 # Must run inside herdr (HERDR_ENV=1). Tabs hold at most four panes (a 2x2 grid); a fifth
 # agent opens "<tab>-2", and so on, so no pane gets too small to follow.
@@ -90,13 +91,19 @@ start_agent() {
   [[ -f "${prompt_file}" ]] || die "no prompt file ${prompt_file}"
   read -r kind model effort <<< "$(policy "${role}")"
   pane=$(next_pane "${tab}" "${cwd}")
-  if [[ "${kind}" == codex ]]; then
-    herdr agent start "${name}" --kind codex --pane "${pane}" --timeout 60000 -- \
-      -s read-only -c "model_reasoning_effort=\"${effort}\"" >/dev/null
-  else
-    herdr agent start "${name}" --kind claude --pane "${pane}" --timeout 60000 -- \
-      --model "${model}" --effort "${effort}" --permission-mode auto >/dev/null
-  fi
+  # A freshly split pane is not always an available shell yet (agent_pane_busy): retry once.
+  local try
+  for try in 1 2; do
+    if [[ "${kind}" == codex ]]; then
+      herdr agent start "${name}" --kind codex --pane "${pane}" --timeout 60000 -- \
+        -s read-only -c "model_reasoning_effort=\"${effort}\"" >/dev/null && break
+    else
+      herdr agent start "${name}" --kind claude --pane "${pane}" --timeout 60000 -- \
+        --model "${model}" --effort "${effort}" --permission-mode auto >/dev/null && break
+    fi
+    [[ ${try} -eq 2 ]] && die "${name}: herdr could not start the agent in pane ${pane}"
+    sleep 3
+  done
   deliver_prompt "${name}" "${prompt_file}"
   echo "${name} ${pane} ${kind}:${model}:${effort}"
 }
@@ -143,7 +150,11 @@ converge on one clean pass, and record the loop in the PR body. If codex reports
 not wait for it to reset: carry on without it and write "codex skipped: usage limit" in the PR body. If you touch internal/cli without a
 real decision, put \`ADR: none — <reason>\` on your final commit. End commit messages with
 "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>" and PR bodies with
-"🤖 Generated with [Claude Code](https://claude.com/claude-code)". When CI is green, reply with the
+"🤖 Generated with [Claude Code](https://claude.com/claude-code)". If \`gh pr view --json mergeable\` says
+CONFLICTING, merge origin/main into your branch, resolve it (keep both sides of any list), re-run
+the tests and push: a conflicted PR runs no checks and waits forever. The merge commit becomes the
+tip, and doc hygiene reads the ADR trailer from the tip only, so repeat your \`ADR: none — <reason>\`
+line in the merge commit's message. When CI is green, reply with the
 PR URL, what changed in three lines, and the codex findings, then stop.
 EOF
 }
@@ -195,6 +206,49 @@ unblock() {
   done
 }
 
+# watch [repo...] — block until a story/* PR in these repos needs the lead, print one line saying
+# which and why, and exit 0. A PR needs the lead when its checks on a new head have all finished,
+# when it conflicts with main (a conflicted PR runs no checks, so waiting on checks never ends),
+# or when its head has had no check at all for WATCH_STALL_SECS (default 600). A herdr agent
+# blocked on a prompt also needs the lead. Each head is reported once (state in .swarm/state).
+watch_prs() {
+  local repos=("$@") seen="${STATE_DIR}/watch-seen" stall="${WATCH_STALL_SECS:-600}" repo n sha br mergeable age total pending
+  # Default: infrafactory plus every sibling a story names (repo: <name>), so a new sibling needs no edit here.
+  [[ ${#repos[@]} -gt 0 ]] || repos=(infrafactory $(sed -n 's/^repo: *//p' "${REPO_ROOT}"/docs/stories/*.md 2>/dev/null | sort -u) fakeaws fakegcp fakegenesys mockway)
+  local uniq=() r
+  for r in "${repos[@]}"; do [[ " ${uniq[*]-} " == *" ${r} "* ]] || uniq+=("${r}"); done
+  repos=("${uniq[@]}")
+  mkdir -p "${STATE_DIR}"; touch "${seen}"
+  while :; do
+    for repo in "${repos[@]}"; do
+      while read -r n sha br mergeable age; do
+        [[ -n "${n}" ]] || continue
+        if [[ "${mergeable}" == CONFLICTING ]] && ! grep -qx "conflict ${sha}" "${seen}"; then
+          echo "conflict ${sha}" >> "${seen}"; echo "${repo} #${n} ${br} CONFLICTS with main"; return 0
+        fi
+        grep -qx "done ${sha}" "${seen}" && continue
+        read -r total pending < <(gh api "repos/redscaresu/${repo}/commits/${sha}/check-runs" \
+          -q '"\(.check_runs|length) \([.check_runs[]|select(.status!="completed")]|length)"')
+        if [[ "${total:-0}" -gt 0 && "${pending}" == 0 ]]; then
+          echo "done ${sha}" >> "${seen}"; echo "${repo} #${n} ${br} checks finished on ${sha:0:7}"; return 0
+        fi
+        if [[ "${total:-0}" == 0 && "${age}" -gt "${stall}" ]] && ! grep -qx "stall ${sha}" "${seen}"; then
+          echo "stall ${sha}" >> "${seen}"; echo "${repo} #${n} ${br} has had no checks for ${age}s"; return 0
+        fi
+      done < <(gh pr list -R "redscaresu/${repo}" --state open --json number,headRefName,headRefOid,mergeable,updatedAt \
+        -q '.[]|select(.headRefName|startswith("story/"))|"\(.number) \(.headRefOid) \(.headRefName) \(.mergeable) \((now - (.updatedAt|fromdateiso8601))|floor)"')
+    done
+    if [[ "${HERDR_ENV:-}" == 1 ]]; then
+      local blocked
+      blocked=$(herdr agent list 2>/dev/null | json "','.join(a['name'] for a in d['result']['agents'] if a.get('agent_status')=='blocked' and a.get('name'))" 2>/dev/null || true)
+      if [[ -n "${blocked}" ]] && ! grep -qx "blocked ${blocked}" "${seen}"; then
+        echo "blocked ${blocked}" >> "${seen}"; echo "agent(s) blocked on a prompt: ${blocked}"; return 0
+      fi
+    fi
+    sleep 60
+  done
+}
+
 # close_tabs <label> — close every tab this script opened under <label>, and its state.
 close_tabs() {
   local label="$1" state tab_label id
@@ -222,10 +276,11 @@ main() {
     story)  require_herdr; build_story "${1:?slug}" ;;
     close)  require_herdr; close_tabs "${1:?tab}" ;;
     unblock) unblock ;;
+    watch)  watch_prs "$@" ;;
     _name)  agent_name "${1:?slug}"; echo ;;                      # test hook: the agent name for a slug
     _pane)  require_herdr; next_pane "${1:?tab}" "${2:?cwd}" ;;   # layout test hook: a pane, no agent
     wait)   require_herdr; herdr agent wait "$(agent_name "${1:?name}")" --timeout "${2:-3600000}" | json "d['result']['agent']['agent_status']" ;;
-    *) sed -n '2,12p' "$0"; exit 2 ;;
+    *) sed -n '2,13p' "$0"; exit 2 ;;
   esac
 }
 
