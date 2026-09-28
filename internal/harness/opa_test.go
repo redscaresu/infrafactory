@@ -328,11 +328,11 @@ func TestScalewayPoliciesPlanEvaluation(t *testing.T) {
 			expectedCount: 2,
 		},
 		{
-			name:   "no public endpoints checks server attribute",
+			name:   "no public endpoints checks server_id attribute",
 			policy: filepath.Join(policiesRoot, "no_public_endpoints.rego"),
 			planJSON: `{
   "planned_values": {"root_module": {"resources": [
-    {"address":"scaleway_instance_ip.public","type":"scaleway_instance_ip","values":{"server":"srv-id"}}
+    {"address":"scaleway_instance_ip.public","type":"scaleway_instance_ip","values":{"server_id":"srv-id"}}
   ]}}
 }`,
 			expectedCount: 1,
