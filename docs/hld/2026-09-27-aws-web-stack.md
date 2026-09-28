@@ -468,7 +468,7 @@ fixed by running apply, destroy, sweep and `reap`; the probe window.
 
 ## Epics
 
-- [fakeaws-step-one-surfaces](../epics/fakeaws-step-one-surfaces.md)
+- fakeaws-step-one-surfaces — done (fakeaws #24-#34, infrafactory #285, #300)
 - aws-layer3-seal-and-dispatch — done (#288, #289, #290, #294, #296, #303)
 - [aws-layer3-claim-sweep-reap](../epics/aws-layer3-claim-sweep-reap.md)
 - [aws-layer-neutral-hcl](../epics/aws-layer-neutral-hcl.md)
