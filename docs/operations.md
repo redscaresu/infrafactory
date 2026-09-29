@@ -305,104 +305,30 @@ How each sibling fake decides what wire shape a handler SHOULD return (the smoke
 
 Detail in each sibling's `AGENTS.md` § "Fidelity strategy".
 
-## The planning chain
+## The swarm (swarm-dev)
 
-Work is planned top-down, and the user approves each level before the next is made:
-
-1. **HLD** — `/hld <title>` opens a pane on the most capable model (Fable), where the user writes
-   `docs/hld/YYYY-MM-DD-<slug>.md` with it; a reviewer attacks the draft before it is `agreed`.
-2. **Epics** — `/plan-hld <hld>`: a swarm, led by Fable, splits the HLD into epics that each
-   have a **Done when** that could fail, and skeptics and codex check for gaps and overlaps.
-3. **Stories** — `/plan-epic <epic>`: a swarm, led by Opus, splits each epic into one-PR stories.
-4. **Build** — `scripts/swarm.sh story <slug>`: `ready` stories built in parallel panes.
-
-A story the swarm must not build says so by its `kind`: `lead` (real cloud or credentials; the
-lead runs it) or `operator` (a decision or a hand step that is the user's). An open question for
-the user is an `operator` story, not a line in `STATUS.md`, so `docs/Board.base`'s **Waiting on
-you** view lists it. An epic is done when its last story's PR deletes the epic file and marks it
-done in the HLD's `## Epics`; nothing else records the close-out.
-
-Every agent at every level runs in its own herdr pane. The session that runs the chain supervises,
-decides model and effort by role, reviews, and merges; it does not do the agents' work itself.
-
-## Model and effort
-
-Every agent's model and effort come from its role, set in one place: `policy()` in
-`scripts/swarm.sh` (`scripts/swarm.sh policy <role>` prints it). The principle is to spend on
-judgment and save on reading:
-
-- **Design is Fable.** The HLD is co-written at `high`, because the user waits on every turn, and
-  attacked at `xhigh` before it is agreed. Splitting an HLD into epics is the one call that shapes
-  all the work below it, so it runs on Fable at `xhigh`.
-- **Judgment is Opus.** An epic's decomposition into stories decides everything after it, so it
-  runs at `xhigh`. Skeptics and the critic run at `high`, because a skeptic is the only gate a
-  story passes before it is built.
-- **Reading and running is Sonnet.** Surveys read and cite at `high`, since they feed the lead;
-  verification that runs tests and reports runs at `medium`, as do docs and chores.
-- **Building code is Opus at `high`**, and at `xhigh` for a story marked `risk: high` (Layer 3,
-  teardown, safety, hygiene).
-- **Codex is the cross-model check**, read-only, because a different model family shares fewer
-  blind spots with the one that wrote the plan.
-- **Below the design level, Fable is escalation only**: a story that failed twice, or an epic whose
-  contradictions no one can reconcile.
-- **The conductor is Opus at `high`, one fresh session per epic** (`scripts/swarm.sh conduct
-  <epic>`), on the standard context window, never 1M. A conductor re-reads its whole context on every
-  turn, and one long-lived lead session was 80% of all tokens over three days (3.6B of 4.5B, at up
-  to 1M context). The board and `STATUS.md` carry the state, so a new conductor costs little.
-
-A story's `kind` (and `risk`) chooses its role; `kind: lead` (real cloud, credentials) and
-`kind: operator` (a human step) are refused by the swarm.
-
-## Scoping an epic
-
-An epic (`docs/epics/<slug>.md`: goal, **Done when**, out of scope, constraints) becomes stories
-with `/plan-epic <slug>` (`.claude/commands/plan-epic.md`). It runs as a herdr swarm, every agent
-in its own pane: three surveys (where it lands, what constrains it, what overlaps it), one lead
-decomposition into one-PR stories with `kind`, `touches` and `depends_on`, a skeptic per story
-(capped at five, the rest logged) and a codex pass, then a critic. Agents write their answers to
-`.swarm/<epic>/`. The user sees refuted stories and contradictions first and approves before any
-story file is written. About ten agents per run, so scope deliberately.
-
-## Parallel agents (herdr)
-
-A wave builds several `ready` stories at once, one agent per herdr pane, each in its own git
-worktree; up to four panes a tab. The lead dispatches, reviews and merges; agents never merge.
-
-**Pick the wave.** Only `ready` stories whose `touches` do not overlap. Work that edits a shared
-file (`AGENTS.md`, `infrafactory.yaml`, the schema, the hygiene scripts) is done by the lead, alone.
-
-**Hand an epic to a conductor.** `scripts/swarm.sh conduct <epic>` starts a fresh agent that drives
-that epic's stories to merge, then stops and reports; the session it was started from stays free.
-It runs in a herdr workspace named for the epic's HLD (its `hld:` field; every epic of that HLD
-shares it), in a tab named `conduct-<epic>`. Each story it starts gets its own tab, named for the
-story, whose panes all work on that story. Run one conductor at a time: `watch` reports every story PR, and shared
-files are the lead's alone. A conductor leaves `kind: lead` and `kind: operator` stories to the user.
-
-**Start each story** from the lead's pane:
+Work is planned and built with [swarm-dev](https://github.com/redscaresu/swarm-dev), a Claude Code
+plugin: `/hld`, `/plan-hld`, `/plan-epic`, and `swarm.sh` for panes, builds and conductors. Its
+`docs/method.md` is the method: the planning chain, the model and effort per role, scoping an epic,
+and building with a conductor. Install it once:
 
 ```bash
-scripts/swarm.sh story <slug>      # worktree on story/<slug>, a pane, the agent, its brief
-scripts/swarm.sh wait <slug>       # in the background: returns when it settles
-scripts/swarm.sh watch             # in the background: returns when a story PR needs the lead
+claude plugin marketplace add redscaresu/swarm-dev
+claude plugin install swarm-dev@swarm-dev
 ```
 
-`wait` returns when an agent goes idle, which can be early (an agent waiting on its own
-background shell looks idle). `watch` is what the lead waits on: it exits when a story PR's checks
-finish, when it conflicts with main, when its head has had no checks for 10 minutes, or when an
-agent is blocked on a prompt.
+What is infrafactory's own:
 
-The brief is the story file plus the standing rules (never merge, no real cloud, codex loop, reply
-with the PR URL when CI is green). `herdr agent read <slug> --source recent-unwrapped` shows what an
-agent is doing.
-
-**Merge one at a time.** After each merge, merge `main` into every other open wave branch before
-trusting its CI; a branch that conflicts gets no CI at all, which looks like a hang.
-
-**Keep with the lead:** real-cloud runs (a restart mid-apply leaves resources behind),
-credentials, and anything that changes permissions.
-
-**Clean up.** After each merge, `git worktree remove ../infrafactory-wt/<slug>` (an error if it is
-already gone), then `git worktree prune`. `scripts/swarm.sh close <slug>` closes the story's tab.
+- **Builder rules** are in `.claude/swarm/brief.md`, which `swarm.sh` appends to every story
+  brief: no `~/.config/infrafactory/*.env`, no deploy, the `ADR: none` trailer, commit and PR
+  trailers.
+- **Shared files** that one story at a time may touch, and only the lead: `AGENTS.md`, `STATUS.md`,
+  `infrafactory.yaml`, `scenario.schema.json` and `scripts/check_doc_hygiene*`.
+- **`risk: high`** covers Layer 3, teardown, safety and hygiene paths.
+- **Keep with the lead:** real-cloud runs (a restart mid-apply leaves resources behind),
+  credentials, and anything that changes permissions. `kind: lead` stories are these.
+- **Story repos:** a story with `repo: <name>` builds in a worktree of `../<name>` (`fakeaws`,
+  `mockway`, ...); story worktrees live in `../infrafactory-wt/<slug>`.
 
 ## Demo recording
 

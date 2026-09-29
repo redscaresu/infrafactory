@@ -9,7 +9,7 @@ what to change, and **Done when** — the acceptance. The PR that finishes a sto
 file; the PR is the record. List them with `grep -H '^status:' docs/stories/*.md`.
 
 `kind` (code | docs | chore | verify | lead | operator) and `risk: high` choose who builds it
-and with which model (`docs/operations.md` § Model and effort); `lead` and `operator` stories are
+and with which model (swarm-dev `docs/method.md` § Model and effort); `lead` and `operator` stories are
 never given to a swarm agent.
 
 A story may belong to an epic (`epic: <slug>`, see `docs/epics/`) and list the files it
@@ -17,5 +17,5 @@ A story may belong to an epic (`epic: <slug>`, see `docs/epics/`) and list the f
 in a sibling repo says so with `repo: <name>` (`fakeaws`, `mockway`, ...): its agent builds in a
 worktree of `../<name>`, and the lead deletes the story file once that PR merges.
 
-Running several at once: `docs/operations.md` § Parallel agents (herdr). In Obsidian, `docs/` is
+Running several at once: `docs/operations.md` § The swarm. In Obsidian, `docs/` is
 the vault and `docs/Board.base` is the board.

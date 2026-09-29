@@ -17,7 +17,7 @@ searches unless you are looking for history (`grep -r --exclude-dir=archive`).
 - [`ci-security-posture.md`](ci-security-posture.md) — CI and supply-chain posture.
 
 ## Running it
-- [`operations.md`](operations.md) — runbooks: planning chain, swarm, sibling mocks, Layer 3.
+- [`operations.md`](operations.md) — runbooks: the swarm (infrafactory's rules for swarm-dev), sibling mocks, Layer 3.
 - [`demo-runbook.md`](demo-runbook.md) — driving a live demo from the UI; assets in `demo/`.
 - `process/` — ticket template and reusable execution prompt.
 

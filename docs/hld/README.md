@@ -1,6 +1,6 @@
 # High-level designs
 
-The top of the planning chain: **HLD → epics → stories → built in parallel** (`docs/operations.md`
+The top of the planning chain: **HLD → epics → stories → built in parallel** (swarm-dev `docs/method.md`
 § The planning chain). An HLD is written with the user, on the most capable model, before any work
 is scoped.
 
