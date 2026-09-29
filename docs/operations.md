@@ -316,6 +316,12 @@ Work is planned top-down, and the user approves each level before the next is ma
 3. **Stories** — `/plan-epic <epic>`: a swarm, led by Opus, splits each epic into one-PR stories.
 4. **Build** — `scripts/swarm.sh story <slug>`: `ready` stories built in parallel panes.
 
+A story the swarm must not build says so by its `kind`: `lead` (real cloud or credentials; the
+lead runs it) or `operator` (a decision or a hand step that is the user's). An open question for
+the user is an `operator` story, not a line in `STATUS.md`, so `docs/Board.base`'s **Waiting on
+you** view lists it. An epic is done when its last story's PR deletes the epic file and marks it
+done in the HLD's `## Epics`; nothing else records the close-out.
+
 Every agent at every level runs in its own herdr pane. The session that runs the chain supervises,
 decides model and effort by role, reviews, and merges; it does not do the agents' work itself.
 

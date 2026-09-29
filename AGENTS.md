@@ -21,28 +21,26 @@ Additional references:
 
 | File | Purpose | When to update |
 |---|---|---|
-| `docs/plans/<arc-name>-plan.md` | Goal-named variable-length arc plan (typically 2-4 slices). Tickets, exit criteria, autonomous-execution prompt. | When planning the next arc |
-| `docs/status/ARCHIVE.md` | Per-arc close-out narratives — durable history | At arc close-out |
-| `STATUS.md` | The entry point: what is in flight now. Recent is `git log`, not stored. Under 150 lines, CI-enforced. | Only when Now changes |
+| `docs/hld/*.md` | A design agreed with the user (draft → agreed → superseded); its `## Epics` lists the epics and marks each done | Write with `/hld`, split with `/plan-hld` |
+| `STATUS.md` | The entry point: the active HLD and anything waiting on the user. Recent is `git log`, not stored. Under 150 lines, CI-enforced. | Only when Now changes |
 | `docs/epics/*.md` | A goal bigger than one PR: **Done when**, out of scope, constraints. Stories join it with `epic:`. | Scope with `/plan-epic <slug>`; the last story's PR deletes it |
-| `docs/stories/*.md` | One open item each, `status: ready\|blocked\|later`; a `ready` story is an agent's brief. | Open an item by adding a file; the PR that finishes it deletes the file |
+| `docs/stories/*.md` | One open item each, `status: ready\|blocked\|later`; a `ready` story is an agent's brief, a `kind: operator` story is the user's (a decision or a hand step). | Open an item by adding a file; the PR that finishes it deletes the file |
 | `CONCEPT.md` | Durable architecture, contracts, design decisions | Only for major architecture/design shifts |
 | `docs/decisions/*.md` | ADRs for decision-impacting changes | When change crosses ADR trigger threshold (see below) |
 
-## Planning a New Arc
+## Planning new work
 
-Arcs are **goal-named** and **variable-length** (typically 2-4 slices, sometimes up to 6 — but driven by the goal, not by a slice-count template).
+Work flows HLD → epics → stories → the board (`docs/operations.md` § The planning chain):
+`/hld` writes an HLD with the user; `/plan-hld <file>` splits an agreed HLD into epics;
+`/plan-epic <slug>` scopes an epic into stories; `scripts/swarm.sh story <slug>` builds a ready
+story. An epic is done when its last story's PR deletes the epic file and marks it done in the
+HLD's `## Epics`. One-off work is a single file in `docs/stories/`. A decision or a hand step for
+the user is a `kind: operator` story, so it shows on the board, not in prose.
 
-The shape:
+Retired (kept in git as history, not written any more): arc plans in `docs/plans/`, arc close-outs
+in `docs/status/ARCHIVE.md` and `docs/status/STATUS_HISTORY.md`, and slice numbers (`S###`).
 
-1. **Name the arc by goal**, not by slice numbers — e.g. "39/39 sustain validation", "fakegcp panic audit". Filename: `docs/plans/<arc-name>-plan.md` (kebab-case). The arc still numbers its slices sequentially (S94, S95, …) for cross-reference into commits / ARCHIVE entries.
-2. **Write the plan**: Big picture (what + why), Slices table (as many as the goal needs, including any sweep / audit / investigation steps), Standing rules (inherit from prior arcs), per-slice motivation + tickets + exit criteria, autonomous-execution loop prompt, fresh-context checklist.
-3. **No padding.** If the goal naturally fits in 2 slices, the plan is 2 slices.
-4. **Close-out**: an arc that ran several slices ends with a short `docs/status/ARCHIVE.md` section. The PR bodies carry the detail.
-5. **Point** `STATUS.md` § Now at the new plan.
-6. **Get approval** from the user before kicking off the autonomous loop.
-
-ADRs only when crossing the threshold below. Plan files hold an arc's slices; one-off work is a file in `docs/stories/`.
+ADRs only when crossing the threshold below.
 
 ## Fresh Context
 
@@ -51,12 +49,10 @@ When starting a new conversation, follow this checklist:
 ### 1) Load minimal context
 1. `AGENTS.md` (this file)
 2. `STATUS.md` — what is in flight, and where open work and history live
-3. The active arc's plan, if `STATUS.md` § Now names one
+3. The active HLD, if `STATUS.md` § Now names one, and the board: `grep -H '^status:' docs/stories/*.md`
 
 On demand only: `README.md`, `CONCEPT.md` (major design context), `docs/decisions/README.md`
 (the generated ADR index) and the ADRs it points at.
-
-Slice work is organised as goal-named arcs (variable-length, typically 2-4 slices). Each arc lives in `docs/plans/<arc-name>-plan.md` with an autonomous-execution loop prompt at the bottom. `docs/status/ARCHIVE.md` has per-arc close-out narratives. Historical 5-slice arcs (S54–S93) live under `docs/plans/slices-<a>-<b>-plan.md`; the naming convention shifted at the S94 boundary.
 
 ### 2) Preflight
 ```bash
@@ -65,7 +61,7 @@ git branch --show-current
 git log -1 --oneline
 ```
 - If unexpected local changes appear, stop and ask the user.
-- Take the active arc from `STATUS.md` § Now, and the queue from the `ready` stories in `docs/stories/`.
+- Take the active HLD from `STATUS.md` § Now, and the queue from the `ready` stories in `docs/stories/`.
 
 ### 3) Startup verification
 ```bash
@@ -145,7 +141,7 @@ copy of a story is another place for it to go stale.
 - **Assertion convention (Go tests, project-wide)**: default to `github.com/stretchr/testify` for assertions where possible. `assert.Equal` / `require.NoError` / `assert.Contains` over `if x != y { t.Fatalf(...) }`. Use `require` when a failure should stop the test (setup steps, anything whose failure would cause downstream nil-deref / panic). Use `assert` otherwise so multiple failures surface in one run. Don't bare-literal HTTP status codes — `http.StatusNoContent` not `204`. The qualifier "where possible" is real: if an if-fatalf block carries a fundamentally custom error message the assertion library can't express, leave it stdlib — don't force conversions that hurt readability. Same rule lives in every sibling fake's AGENTS.md.
 
 ## Quality Bar
-- `go test ./...` passes for completed slices.
+- `go test ./...` passes for completed stories.
 - Stubs must return explicit "not implemented" errors.
 - No hidden side effects outside project paths.
 
@@ -213,9 +209,9 @@ against the defect class before calling the pass. If review keeps finding holes
 in the same mechanism, replace the mechanism rather than patching it again.
 
 **Record the loop in the PR body**: how many passes, each finding, and what was
-done about it. Write `docs/review-passes/passN.md` only when a finding was
-**declined** — the reasoning behind a decline is what a future reader needs and
-cannot get from the diff.
+done about it. A declined finding's reasoning goes in the PR body too; add a
+`docs/review-passes/<slug>.md` only when it is too long for the body. The numbered
+`passN.md` files are history.
 
 
 ## Secrets

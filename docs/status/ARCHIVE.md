@@ -1,5 +1,7 @@
 # Status Archive
 
+> Frozen 2026-09-28: history only, not written any more. See `docs/status/README.md`.
+
 Historical snapshots and older session notes can be moved here to keep `STATUS.md` concise.
 
 

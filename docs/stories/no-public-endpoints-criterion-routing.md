@@ -1,6 +1,7 @@
 ---
 kind: code
-status: later
+status: blocked
+blocked_by: [decide-no-public-endpoints-routing]
 epic: policy-correctness
 risk: high
 ---
