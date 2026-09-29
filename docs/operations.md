@@ -81,7 +81,9 @@ What the code reads from the setup:
 
 ### Scope setup
 
-Run this once, from the repo root. The account id and the key id never enter git (the
+Run this once, from the repo root, in one terminal (later steps reuse its variables). It works in
+bash and zsh: a variable followed by a colon is written `${ACCOUNT_ID}:`, because zsh reads
+`$ACCOUNT_ID:r` as a modifier and silently drops the `:r`. The account id and the key id never enter git (the
 repo is public): they stay in shell variables and the local config, and outputs pasted into a PR
 are cut to their last four characters. No command prints the secret key.
 
@@ -101,7 +103,7 @@ assumes the role Organizations creates in every new member account:
 cat >> ~/.aws/config <<CONFIG
 
 [profile infrafactory-admin]
-role_arn = arn:aws:iam::$ACCOUNT_ID:role/OrganizationAccountAccessRole
+role_arn = arn:aws:iam::${ACCOUNT_ID}:role/OrganizationAccountAccessRole
 source_profile = $MGMT
 region = $REGION
 CONFIG
@@ -170,9 +172,9 @@ aws iam put-user-policy --user-name infrafactory-layer3 --policy-name infrafacto
 Verify with the policy simulator:
 
 ```bash
-sim() { aws iam simulate-principal-policy --policy-source-arn arn:aws:iam::$ACCOUNT_ID:user/infrafactory-layer3 \
+sim() { aws iam simulate-principal-policy --policy-source-arn arn:aws:iam::${ACCOUNT_ID}:user/infrafactory-layer3 \
   --profile infrafactory-admin --query 'EvaluationResults[].EvalDecision' --output text "$@"; }
-PARAM=arn:aws:ssm:$REGION:$ACCOUNT_ID:parameter/infrafactory/layer3
+PARAM=arn:aws:ssm:${REGION}:${ACCOUNT_ID}:parameter/infrafactory/layer3
 sim --action-names ssm:PutParameter --resource-arns $PARAM/claim                            # allowed
 sim --action-names ssm:PutParameter ssm:DeleteParameter --resource-arns $PARAM/stamp        # implicitDeny implicitDeny
 sim --action-names ssm:PutParameter ssm:DeleteParameter --resource-arns $PARAM/other        # implicitDeny implicitDeny
