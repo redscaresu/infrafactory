@@ -251,7 +251,7 @@ requirement, the prompts, the pitfalls, the fixtures and the recorded generation
 together — reviewed hard and canaried before merge, with the flag deleted.
 
 Design and the four decisions behind it:
-`docs/plans/s166-teardown-guard-design.md`.
+`docs/archive/plans/s166-teardown-guard-design.md`.
 
 ## Amendment, 2026-08-31 (S166+S167 cutover): the sweep's blast radius comes from the marker
 

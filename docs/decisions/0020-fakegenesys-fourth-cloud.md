@@ -6,7 +6,7 @@ Tags: architecture, multi-cloud, dispatch, schema
 
 ## Context
 
-After the first three clouds (Scaleway, GCP, AWS) sustain-validated at 39/39 deterministic across two arcs, the project added a 4th cloud — Genesys Cloud CCaaS via the `mypurecloud/genesyscloud` Terraform provider. The motivation is documented in `docs/plans/fakegenesys-arc-plan.md` § "Big picture":
+After the first three clouds (Scaleway, GCP, AWS) sustain-validated at 39/39 deterministic across two arcs, the project added a 4th cloud — Genesys Cloud CCaaS via the `mypurecloud/genesyscloud` Terraform provider. The motivation is documented in `docs/archive/plans/fakegenesys-arc-plan.md` § "Big picture":
 
 1. No existing OSS fake for the Genesys Terraform provider.
 2. Generalizes infrafactory beyond IaaS (proves the architecture isn't accidentally tied to networking primitives).
@@ -74,6 +74,6 @@ Implications:
 
 ## Related
 
-- `docs/plans/fakegenesys-arc-plan.md` (the arc plan).
+- `docs/archive/plans/fakegenesys-arc-plan.md` (the arc plan).
 - `docs/decisions/0019-learning-system-vocabulary.md` (the renamed pitfall vocab fakegenesys inherits).
 - fakegenesys repo: `https://github.com/redscaresu/fakegenesys` (S108-S115 archive in its own ARCHIVE).

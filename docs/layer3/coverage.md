@@ -1,0 +1,404 @@
+# Layer 3 coverage: which Scaleway and AWS scenarios can run against the real API
+
+> **Retraction, 2026-08-30 — read before the IPAM references below.**
+> This document repeatedly names `IPAMFullAccess` as what gates private
+> networking. That was wrong. A canary asked the real API, which wanted
+> `write compute_private_networks` — `PrivateNetworksFullAccess`, granted
+> 2026-08-30. Private *networks* now create. Private *NICs* still cannot, and
+> **no permission fixes it**: `scaleway_instance_private_nic` has no `project_id`
+> attribute (verified against provider 2.81.0), so it is created in the provider
+> default project — the ADR-0010 containment project — while the server lives in
+> the run's own, and the API refuses the mismatch.
+>
+> A second claim made the same day, that `vpc_required.rego` is enforced for AWS
+> only, was **also wrong and is retracted**: `filterPolicyPathsByCloud` drops only
+> *other* clouds, so all five `policies/scaleway/*.rego` run against a Scaleway
+> plan.
+>
+> The real position **at the time**: Layer 1 required a private NIC on every
+> instance server and Layer 3 could not apply one. The gates contradicted each
+> other.
+>
+> **RESOLVED 2026-08-31 by the S166+S167 cutover (ADR-0025)**, and *measured*
+> rather than assumed — see "The NIC blocker, retested" below. A private NIC now
+> applies against real Scaleway and reaches `state: available`.
+>
+> **A different, narrower blocker took its place**, and every "waits on IPAM"
+> line below is stale in its reason: `mockway` returns **501** for
+> `POST /instance/v2alpha1/zones/{zone}/private-network-interfaces`, and Layer 3
+> only runs when the mock apply succeeded. So the constraint is now a mock gap
+> with a known endpoint, not a contradiction between gates.
+
+
+Audit date: 2026-08-24. **Refreshed** after `scaleway_instance_ip` and
+`scaleway_instance_server` were admitted to the allowlist so a load
+balancer could have a backend that serves — see the allowlist amendment
+in ADR-0023. Derived from the **actually generated HCL** in
+`.infrafactory/runs/<scenario>/<run_id>/generated/*.tf`, not inferred from
+`mappings.yaml` — every one of the 16 Scaleway scenarios that existed at
+audit time has prior run artifacts. `lb-serving-paris`, added afterwards,
+has none: it is driven from fixed HCL through the gate rather than
+generated.
+
+The point of this file is to stop "let's expand Layer 3" being a vague
+ambition. Expansion is a cost-and-blast-radius decision per scenario, and
+this is the costed list.
+
+## The two gates
+
+A scenario reaches the real API only if **both** allow it:
+
+1. **`validation.layers.sandbox_deploy.allow_resource_types`** — deny-by-default,
+   checked after generation and before apply (ADR-0023 rule 5). Repo default:
+   `scaleway_account_project`, `scaleway_block_volume`, `scaleway_block_snapshot`,
+   `scaleway_vpc`, `scaleway_vpc_private_network`, `scaleway_lb*`,
+   `scaleway_domain*`, `scaleway_iam*`, `scaleway_registry_namespace`,
+   `scaleway_instance_ip`, `scaleway_instance_server`,
+   `scaleway_instance_private_nic`, `scaleway_instance_security_group`, and
+   for AWS step one (HLD 2026-09-27 § The gate) `aws_vpc`, `aws_subnet`,
+   `aws_internet_gateway`, `aws_route_table`, `aws_route`,
+   `aws_route_table_association`, `aws_security_group`, `aws_instance`,
+   `aws_eip`. Each stack's gate refuses the other cloud's prefix whatever
+   this list says.
+2. **The `infrafactory-layer3` IAM policy** — `ProjectManager`,
+   `BlockStorageFullAccess`, `LoadBalancersFullAccess`, `VPCFullAccess`,
+   `InstancesFullAccess`. Nothing else (ADR-0023, credential amendments).
+
+They do not agree, deliberately. Three allowlisted entries —
+`scaleway_iam*`, `scaleway_registry_namespace` and `scaleway_domain*` —
+pass the local check and are then refused by the API with a 403. That looks
+like a bug if you do not know it; it is the credential doing its job, and
+all three are least-privilege choices.
+
+`scaleway_instance_private_nic` **used to be a fourth** and is not any more.
+It was allowlisted only because `policies/scaleway/vpc_required.rego` denies
+any instance server without one, so omitting it would have left static
+policy demanding a resource the allowlist forbade. It now applies for real
+(below), so the allowlist entry earns its place.
+
+## The NIC blocker, retested (2026-08-31)
+
+The claim above — that a private NIC is refused with a 403 — was written
+before `PrivateNetworksFullAccess` was granted and before the cutover, and
+**nothing had ever actually applied one.** The one scenario with an instance
+(`lb-serving-paris`) declares no NIC at all, so no canary in this arc
+exercised it. Retested directly, because a claim about the API that nobody
+has asked the API is folklore.
+
+| question | answer |
+|---|---|
+| Does a private NIC apply against real Scaleway? | **Yes.** `state: available`, attached to the server, inside the run's own project |
+| Does it apply against the mock? | **No** — `501 Not Implemented: POST /instance/v2alpha1/zones/{zone}/private-network-interfaces` |
+| Can a NIC-bearing scenario reach Layer 3 via `test`? | **No.** Layer 3 runs only `if deployErr == nil && sandboxEnabled` — a failed mock apply stops it |
+| Via `deploy`? | **Yes** — `deploy` skips Layer 2 entirely, which is how the above was measured |
+
+Two corrections to earlier readings, both from inferring instead of running:
+
+- A first attempt failed with `resource with ID  is not found` on the
+  private network, and the obvious reading — "mockway has no private
+  network support" — was **wrong**. It implements the full CRUD on
+  `/vpc/v1` and `/vpc/v2`; the HCL was simply missing an explicit
+  `scaleway_vpc` for the network to sit in.
+- mockway also already answers `ListPrivateNetworkInterfacesV2`. What it
+  lacks is exactly one verb on one path: **create**.
+
+So the next slice on this path is small and well defined: implement
+`POST` (and `GET`/`DELETE`) for
+`/instance/v2alpha1/zones/{zone}/private-network-interfaces` in mockway.
+Until then, every Scaleway compute scenario is blocked at **Layer 2**, not
+at Layer 1 or Layer 3, and `deploy` is the only route to a real NIC.
+
+## Coverage
+
+| Scenario | Status | Class | Blocked on |
+|---|---|---|---|
+| `block-paris` | **runnable** | instant | — (run 2026-08-22) |
+| `lb-paris` | **runnable** | hourly | — (run 2026-08-23) |
+| `lb-serving-paris` | **runnable** | hourly | — (added 2026-08-24; the first `http_probe` against real Scaleway) |
+| `web-live-paris` | runnable, unrun | hourly | nothing known — see "web-live-paris, 2026-09-09" below |
+| `aws-web-live` | runnable, unrun | hourly | **the AWS HCL gate, not yet built**: allowlisted 2026-09-28, but Layer 3 refuses every AWS stack until epic `aws-layer3-gate` lands (`TestTestCommandRefusesANonScalewayCloudAtTheGate`) |
+| `incremental-project-paris` | key only | hourly | private networking (allowlist cleared 2026-08-24; see the retraction at the top) |
+| `registry-paris` | key only | instant | Registry |
+| `iam-policies-paris` | key only | instant | IAM |
+| `public-registry-iam-paris` | key only | instant | IAM + Registry |
+| `domain-paris` | key only | instant | DomainsDNS **+ a registered domain** |
+| `compute-lb-multi-paris` | allowlist + key | hourly | IPAM; allowlist `instance_*`, `ipam_ip` |
+| `k8s-cluster-paris` | allowlist + key | slow + expensive | Kubernetes |
+| `k8s-medium-override-paris` | allowlist + key | slow + expensive | Kubernetes |
+| `redis-paris` | allowlist + key | slow + expensive | Redis |
+| `redis-xlarge-session-paris` | allowlist + key | slow + expensive | Redis; allowlist `instance_*` |
+| `mysql-ha-paris` | allowlist + key | slow + expensive | RDB; allowlist `instance_*`, `rdb_*` |
+| `private-lb-db-paris` | allowlist + key | slow + expensive | RDB; allowlist `instance_*`, `rdb_*` |
+| `web-app-paris` | allowlist + key | slow + expensive | DomainsDNS, IPAM, RDB, VPCGateway |
+| `full-stack-paris` | allowlist + key | slow + expensive | IAM, Kubernetes, RDB, Redis, Registry |
+
+**Current: 3 have run, 2 ungated but unrun, 5 are blocked by the key alone, 9 by both.**
+`aws-web-live` counts as ungated by the allowlist and the key only; it cannot reach the
+real API until the AWS HCL gate exists (its row).
+As first audited on 2026-08-23 it was 2 runnable, 1 blocked by the allowlist
+alone, 4 by the key alone and 9 by both; `lb-serving-paris` did not exist
+yet, and `incremental-project-paris` has since moved from the allowlist
+column to the key one.
+
+One real-money run is deliberately NOT in this table: S156e (2026-09-06) deployed a
+one-off `web-unversioned-paris` shape with hand-staged HCL to manufacture a
+healthy-but-unconfirmed-version failure. It was not added to the training corpus --
+it differed from `web-live-paris` by one field and generated identical HCL -- so it
+changes no number here. Recorded because this file is read to decide what to spend
+next, and "19 scenarios, 3 have run" should not be read as "3 applies have
+happened". See `docs/archive/status/s156e-validation-run.md`.
+
+`incremental-project-paris` has swapped blockers rather than lost one.
+Admitting `instance_ip`, `instance_server` and `instance_private_nic` on
+2026-08-24 cleared its allowlist gate — and left the credential gate
+holding it, because the scenario declares `private_network: true` and its
+generated HCL creates `scaleway_instance_private_nic`, which needs
+`IPAMFullAccess`. It is the clearest illustration in this table of why
+two gates are counted separately: opening one moved the scenario sideways,
+not forward.
+
+Class is provisioning cost, not money: *instant* is seconds and negligible
+(project, block volume, VPC, registry namespace); *hourly* bills for as long as
+it exists (load balancer, instance); *slow + expensive* takes minutes to
+provision and destroy and costs materially more (RDB, Redis, k8s). No euro
+figures here on purpose — ADR-0010 deferred cost estimation because there is no
+reliable Scaleway pricing source to code against, and inventing numbers would
+be worse than none.
+
+## The finding: the cheap end of the pool is empty
+
+Every scenario marked **runnable** is one that has actually run against
+the real API — the word means has-run here, deliberately, because an
+untested claim about what the real cloud will accept is the exact thing
+this arc exists to distrust. There is no free
+expansion, and four of the five "key only" entries are not the easy wins
+they look like:
+
+- **`domain-paris` is not a permission problem.** The account holds no
+  registered public domain — only the auto-created `privatedns` zone for
+  private networks. `scaleway_domain_zone` needs a real one, so this is a
+  purchase, not a policy line.
+- **`iam-policies-paris` and `public-registry-iam-paris` should stay
+  blocked.** Granting IAM to the sandbox credential defeats the credential:
+  a sandbox that can mint API keys is not a sandbox. Keep them as Layer 2
+  scenarios.
+- **`incremental-project-paris` needs private networking** (recorded as IPAM at the time; see the retraction at the top), which is a real widening
+  rather than a formality: IPAM hands out addresses across the whole
+  organization's private networks. It is the cheapest *remaining* hourly
+  scenario, and still a blast-radius decision rather than a config line.
+- **`registry-paris` is the only defensible near-free expansion** — one
+  permission set, instant provisioning. Note it still widens org-scoped
+  registry access over the existing `funcscwblognolj7nc9` namespace, because
+  product permission sets are project-scoped and per-run projects do not exist
+  yet, so the rules must be organization-scoped.
+
+Before widening anything here, check it against
+`examples/layer3-plan-lied/`. The `iam-scope` case works precisely because
+`scaleway_domain*` is allowlisted and refused by the credential, so a grant
+that closed that gap would quietly invalidate committed evidence. Domains
+is on nobody's expansion list, which is exactly why it was chosen for the
+fixture.
+
+Everything below those needs RDB, Redis or Kubernetes — both gates widened,
+and the expensive class the allowlist exists to keep out.
+
+### Two families that are easy to miss
+
+Neither appears in any scenario's `resources:` block, and each needs its own
+permission set:
+
+- **`scaleway_ipam_ip`** → `IPAMFullAccess`. Emitted by `compute-lb-multi-paris`
+  and `web-app-paris`.
+- **`scaleway_vpc_public_gateway`, `scaleway_vpc_public_gateway_ip`,
+  `scaleway_vpc_gateway_network`** → `VPCGatewayFullAccess`, and a public
+  gateway **bills hourly**. Emitted by `web-app-paris` only.
+
+The allowlist entries are the exact strings `scaleway_vpc` and
+`scaleway_vpc_private_network`, *not* a `scaleway_vpc*` glob, so the gateway
+types are already denied locally. That is the allowlist working as intended —
+widening it to a glob would silently admit an hourly-billed resource.
+
+### The types are not stable across runs
+
+Worth internalising before trusting any row here: **10 scenarios declare
+private networking, but only 2 emitted `scaleway_ipam_ip` and only 1 emitted
+gateway resources.** Topologically similar scenarios diverge because the LLM
+writes the HCL — `mysql-ha-paris` and `private-lb-db-paris` both attach servers
+to a private network and neither pulled in IPAM, while `compute-lb-multi-paris`
+did.
+
+So this table is a snapshot of what the generator *has produced*, not a
+guarantee of what it *will* produce. A scenario currently marked runnable could
+emit a new type on its next run and be refused by the allowlist — which is the
+allowlist doing its job, and is why it is deny-by-default rather than a warning.
+Re-run the refresh command after any regeneration rather than trusting a
+months-old row.
+
+**Consequence for `http_probe`.** Proving infrastructure actually *serves*
+traffic rather than merely accepting TCP needs a backend behind the load
+balancer, so `scaleway_instance_server`, so Instances on both gates. It is not
+a tidy-up; it sits in the same bucket as everything else here.
+
+## Caveat on the data
+
+14 of the 16 artifacts date from 2026-06-07, before ADR-0010's
+`scaleway_account_project` requirement was enforced — only `block-paris` and
+`lb-paris` contain one. Regenerating those scenarios for Layer 3 would add a
+project resource, which is both allowlisted and permitted, so no classification
+changes. Their other resource types are what the generator actually produced
+and are the basis of this table.
+
+## Refreshing this
+
+```bash
+# Resource types per scenario, from real generated HCL.
+# Scans BOTH the final snapshot and per-iteration snapshots: a scenario that
+# converged on iteration 3 still generated -- and would have applied -- the
+# types from iterations 1 and 2. compute-lb-multi-paris emits
+# scaleway_ipam_ip only in an iteration snapshot, and web-app-paris does the
+# same for its VPC gateway resources, so scanning only generated/*.tf drops
+# real blockers.
+for s in $(grep -l 'cloud: scaleway' scenarios/training/*.yaml | xargs -n1 basename | sed 's/.yaml//'); do
+  echo "$s: $(grep -ho 'resource "[a-z0-9_]*"' \
+    .infrafactory/runs/$s/*/generated/*.tf \
+    .infrafactory/runs/$s/*/iterations/*/generated/*.tf 2>/dev/null \
+    | sed 's/resource "//;s/"//' | sort -u | tr '\n' ' ')"
+done
+```
+
+Re-run it after any change to the allowlist, the IAM policy, or a scenario's
+`resources:` block.
+
+## Refresh, 2026-08-24
+
+`scaleway_instance_ip` and `scaleway_instance_server` are now allowlisted, and the policy already carried `InstancesFullAccess`, so both gates admit a small compute backend.
+
+**Runnable: 3 of 17** Scaleway training scenarios — 18 counting the holdout. `block-paris`, `lb-paris`, and the new `lb-serving-paris`, all three of which have actually run. *(Denominator as of 2026-08-24. `web-live-paris` made it 18 training scenarios on 2026-08-30 — see the update below, which supersedes this line's counts.)*
+
+**Update, 2026-08-30 (S152).** `web-live-paris` brings the Scaleway training set
+to 18 — 19 counting the holdout. It needs a status this table did not previously
+have to express. Nothing gates it: every resource it declares is allowlisted and
+the key permits them, exactly as for `lb-serving-paris`. But it **has not been
+run**, and the totals line below counts `**runnable**` rows as scenarios that
+*have run*. Marking it `**runnable**` would therefore have made this document
+claim a real-cloud run that never happened, so it is recorded as
+`runnable, unrun` and is deliberately absent from the totals. The row becomes
+`**runnable**` on the day it goes green, and not before.
+
+**Corrected same day, by running it.** `web-live-paris` is *not* ungated. Its
+first generation emitted `scaleway_instance_private_nic`, because
+`pitfalls/scaleway.yaml` instructs the generator to attach a private NIC to every
+`scaleway_instance_server`, and it is recorded as **key only**.
+
+**The blocker is not `IPAMFullAccess`.** That was this document's diagnosis and it
+was wrong; a canary on 2026-08-30 asked the real API, which wanted
+`write compute_private_networks` — `PrivateNetworksFullAccess`, granted the same
+day. Private *networks* now create. Private *NICs* still do not, and no permission
+can fix it: `scaleway_instance_private_nic` takes no `project_id`, so it is created
+in the provider default project — `scaleway.fallback_project_id`, the ADR-0010
+containment project — while the server lives in the run's own project, and the API
+refuses the mismatch. **Blast-radius containment and private NICs are mutually
+exclusive as things stand.**
+
+**A second claim made the same day, that `vpc_required.rego` is "wired for AWS
+only", was also wrong and is retracted.** It is absent from
+`constraint_policies`, but that is a different mechanism:
+`filterPolicyPathsByCloud` drops only *other* clouds, so every
+`policies/scaleway/*.rego` — all five, `vpc_required` included — is evaluated
+against a Scaleway plan. A generation run the same day failed on exactly that
+rule (`scaleway_instance_server.web is not attached to a private network`).
+
+So the real position was a **contradiction between the two gates**, not a missing
+permission: Layer 1 required a private NIC on every instance server, and Layer 3
+could not apply one. No Scaleway compute scenario satisfied both, which is what
+actually blocked `web-live-paris` and every other compute scenario equally.
+
+**Resolved 2026-08-31 by the S166+S167 cutover (ADR-0025)**: the run's project is
+created before the apply and is the provider default, so the NIC lands with its
+server. The counts below are from before that and are stale in their *reason* —
+what remains for each compute scenario is cost, not a contradiction. Ungated is
+3 of 18, not 4; have-run is 3 of 18. The `runnable, unrun` bucket had no
+members when this was written and has one again as of 2026-09-09
+(`web-live-paris`) — which is why it was kept.
+
+Two things are worth keeping from how this was found. The claim came from reading
+the allowlist and concluding nothing blocked it; the correction came from
+actually generating the scenario, which is the same lesson S139–S143 paid for at
+much greater length. And the pitfall that forces the NIC cites the `vpc_required`
+policy, which is **not** in Scaleway's `constraint_policies` — it is wired for AWS
+only for the `constraint_policies` mapping — but that is a different mechanism,
+and the rego IS evaluated for Scaleway via the per-cloud directory walk. See the
+retraction at the top of this document: the blocker is the contradiction between
+the two gates, not a permission and not the pitfall.
+
+`incremental-project-paris` had looked like a fourth: admitting the Instances types cleared its allowlist gate. It is not. The scenario declares private networking and its generated HCL creates `scaleway_instance_private_nic`, so it still needs private networking, which is unresolvable today — it swapped blockers rather than losing one. (Recorded here as IPAM at the time; see the retraction at the top.)
+
+(The earlier "3 of 16" here counted `lb-serving-paris` in the numerator and not the denominator: adding it made 16 into 17.)
+
+`lb-serving-paris` is the first scenario to satisfy an `http_probe` against real Scaleway. It goes green end to end in **144 seconds** — apply, HTTP 200 through the load balancer frontend, destroy, orphan sweep — and it is the scenario that surfaced the auto-created security group defect (ADR-0023, second amendment of this date).
+
+Fourteen scenarios remain gated, and what gates them is unchanged and
+unchanged deliberately:
+
+- **Cost/time.** `scaleway_k8s_*`, `scaleway_rdb_instance`, `scaleway_redis_cluster` stay commented out. They take minutes to create *and* minutes to destroy, on every iteration of the repair loop.
+- **Policy.** `scaleway_iam*`, `scaleway_registry_namespace` and `scaleway_domain*` pass the allowlist and are refused by the API with a 403. That is the credential doing its job. `scaleway_domain*` is also, now, the `iam-scope` case in the plan-lied corpus — it is deliberately never granted.
+- **Private networking.** `PrivateNetworksFullAccess` was granted 2026-08-30 and private networks now create; `IPAMFullAccess` remains ungranted and is **not** what blocks private NICs. See the retraction at the top: no permission unblocks them.
+
+`scaleway_instance_private_nic` is allowlisted alongside the server, because `policies/scaleway/vpc_required.rego` denies any instance server without one — admitting the server but not the NIC would leave static policy demanding a resource the allowlist forbids, and no generated HCL could satisfy both. It sits in the "allowed locally, refused by the API" group permanently, not pending a grant: see the retraction at the top.
+
+That distinction matters for reading the count above. `lb-serving-paris` is runnable **through the gate**, which uses `infrafactory test` against fixed HCL and does not run the static layer. Driving the same scenario through `infrafactory run` — generate, then validate — additionally needs private networking, which is unresolvable today (see the retraction at the top).
+
+
+## `web-live-paris`, 2026-09-09 — two defects, both fixed, still unproven
+
+This row said "key only — private networking" for ten days after the blocker it
+named had been fixed. The prose fifteen lines above the table already said
+**RESOLVED 2026-08-31**; the table did not, and the `allow_resource_types`
+comment in `infrafactory.yaml` agreed with the table. Three sources, one stale
+fact copied three times, and it reads as corroboration. Anyone planning a demo
+off this table was told the scenario could not run.
+
+It ran. `20260909T105808Z` applied to real Scaleway twice — 43s and 49s — and
+found two defects nothing had seen before, because nobody had got this far.
+
+**1. The teardown could not run.** Destroy failed both times with
+
+```
+Can't delete a private network interface attached to a server
+```
+
+Terraform destroys in reverse dependency order, so a standalone
+`scaleway_instance_private_nic` is deleted while its server is still RUNNING, and
+Scaleway refuses that. The auto-destroy then failed too, so the run left real
+infrastructure up — an apply that works and a destroy that cannot is the S168
+defect class, and Layer 1 was *mandating* the shape that causes it.
+
+Fixed by attaching through the provider's inline `private_network` block on the
+server (verified in provider 2.81.0's schema: list, max 8). Deleting the server
+takes its NICs with it, because the provider powers the server off first, so
+there is no separate delete to fail. `vpc_required.rego` now accepts either
+shape — the property it defends is "the server is on a private network", not
+"one particular resource type appears" — and the pitfall prescribes the inline
+one.
+
+**2. The probe was measuring the wrong thing.** `http_probe` returned 503 both
+times. The load balancer was healthy; it had no healthy backend, because the
+generated `user_data` ran `apt-get install docker.io` on a cold instance. That is
+two to four minutes against a 30-second probe window.
+
+A 503 from a healthy load balancer is indistinguishable from a broken app, which
+is what makes this expensive: the repair loop believed the stack was wrong,
+regenerated it, and paid for another real apply and destroy to reach the same
+verdict.
+
+Fixed at both ends. The window is 120s, sized to a cold boot rather than to a
+guess. And a scenario declaring a `service:` now boots Scaleway's `docker` image
+and only runs the container — the marketplace API confirms `docker` is
+compatible with DEV1-S in fr-par-1, which also retires the "cause not understood"
+note on the image pitfall: that failure was a stock blip, not a wrong image.
+
+**Status is `unproven`, deliberately.** Both fixes are verified as far as they
+can be without spending money — provider schema, marketplace API, a full Layer 2
+apply and destroy of the rewritten shape — and neither has been through a real
+apply. "No known blocker" is not "works", and this document has just demonstrated
+what happens when the two get conflated.

@@ -29,7 +29,7 @@ cost came mostly from prose and duplicated runs. So the cuts go there and the ga
    The reason is mandatory, so the classification still has to be made and written down.
 3. **One entry point, current state only.** `STATUS.md` holds the present: the active arc,
    open items, and recent slices as one line each. It is capped, and CI enforces the cap. History
-   lives in `docs/status/ARCHIVE.md` and git. `docs/NEXT_SESSION.md` is removed. (S197)
+   lives in `docs/archive/status/ARCHIVE.md` and git. `docs/NEXT_SESSION.md` is removed. (S197)
 4. **Each story is told once.** The PR body is the full account; the commit is its summary;
    `STATUS.md` gets a line; an ADR only for a decision; a review-pass file only when findings
    were declined; comments state the current rule and its reason, not its history. (S198)

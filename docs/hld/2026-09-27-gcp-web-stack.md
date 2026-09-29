@@ -250,7 +250,7 @@ re-measured for a COS boot; the Scaleway figure, sized to a docker install, does
 
 **COS's determinism is the version check** (review R2). The existing check reads an HTTP body at
 `service.version_path` and requires it to mention the tag (`internal/scenario/service.go:49-65`,
-`live_observe.go:309`); `nginx:1.27` at `/` never names "1.27" (`docs/status/s156e-validation-run.md`),
+`live_observe.go:309`); `nginx:1.27` at `/` never names "1.27" (`docs/archive/status/s156e-validation-run.md`),
 so a body check cannot pass for the step-one stack and `web-live-paris` declares no `version_path`.
 On COS the declaration is the only thing that starts a server, so the check moves to where the
 truth is: after apply, `instances.get` on the run's instance must show a `gce-container-declaration`
@@ -477,7 +477,7 @@ bound of two `e2-small` with 20 GB balanced disks and two addresses (R7). Withou
 admits `google_compute_instance` at any machine type, disk size and `count`. Layer 3 stays opt-in
 and out of scheduled CI.
 
-**Docs and tests that gate step two** (review F20). `docs/layer3-coverage.md` is titled "which
+**Docs and tests that gate step two** (review F20). `docs/layer3/coverage.md` is titled "which
 Scaleway scenarios can run against the real API" and `TestLayer3CoverageDocAllowlistMatchesConfig`
 fails the moment a `google_*` type joins the allowlist; AGENTS.md § "Layer 3 (real Scaleway)" and
 CONCEPT.md say Layer 3 is Scaleway; ADR-0013 has been Proposed since June. Each is updated, or
@@ -524,7 +524,7 @@ All story-level; none blocks decomposition.
   block and the one allowlist (`google_*` and `scaleway_*` prefixes are disjoint), dispatched by the
   scenario's cloud; `sandboxEnvWithProjectDefault` (`test_command.go:1112`) hard-requires `SCW_*`
   today and becomes per-cloud. The tests that keep the list in step across three places
-  (`docs/layer3-coverage.md`) must cover GCP either way.
+  (`docs/layer3/coverage.md`) must cover GCP either way.
 - **Source-less ingress in the mock.** fakegcp stores it with no source; normalising to `0.0.0.0/0`
   may cause plan drift if the provider's `source_ranges` is not Computed. Verify the v5 schema
   before choosing between fixing the mock and teaching the policy (review § 1c).

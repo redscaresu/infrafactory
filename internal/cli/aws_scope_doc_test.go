@@ -26,7 +26,7 @@ func TestAWSScopeSetupRunbookNamesWhatTheCodeReads(t *testing.T) {
 		"AWSClaimParameter", harness.AWSClaimParameter,
 		"AWSStampParameter", harness.AWSStampParameter,
 		"~/" + awsCredentialFile, "0600",
-		"docs/aws-layer3/iam-policy.json", "docs/aws-layer3/scp.json",
+		"docs/layer3/aws/iam-policy.json", "docs/layer3/aws/scp.json",
 		"arn:aws:iam::*:role/OrganizationAccountAccessRole",
 	} {
 		assert.Contains(t, section, want)

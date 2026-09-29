@@ -144,7 +144,7 @@ group is now verified. The holdout remains the only thing that catches a server 
 group at all.
 
 **The allowlist is written down in three places** — `internal/config/config.go`,
-`infrafactory.yaml`, and `docs/layer3-coverage.md` — and two audit tests enforce
+`infrafactory.yaml`, and `docs/layer3/coverage.md` — and two audit tests enforce
 agreement. Both caught this change before review did, which is the intended behaviour and
 worth recording as evidence that the pattern from ADR-0028 works.
 

@@ -6,7 +6,7 @@
 # scenarios so the SeaweedFS cascade fires correctly (a bare
 # `curl -X POST /mock/reset` to fakeaws does NOT cascade — see
 # the S54 SeaweedFS state-leak post-mortem in
-# docs/status/ARCHIVE.md).
+# docs/archive/status/ARCHIVE.md).
 #
 # Output:
 #   $SWEEP_DIR/summary.tsv     — per-scenario terminal_reason / iter / dur

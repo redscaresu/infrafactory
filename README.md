@@ -224,7 +224,7 @@ for a capability that is better demonstrated live. `git log
 
 The full record — six defects real-cloud validation caught that the mock did
 not, each with its mechanism, plus measured timings and the honest limits — is
-in [`docs/layer3-evidence.md`](docs/layer3-evidence.md).
+in [`docs/layer3/evidence.md`](docs/layer3/evidence.md).
 
 ### Why only Scaleway
 
@@ -372,10 +372,10 @@ INFRAFACTORY_ENABLE_E2E=1 go test ./internal/e2e/...
 - [`docs/architecture.md`](docs/architecture.md) — component overview and validation-layer details
 - [`docs/auto-learning-loop.md`](docs/auto-learning-loop.md) — deep-dive on the mock-server-bug classifier + fix/avoid extractors + diff-pattern templates, the ratchets, the sweep-time protocol, and a worked example
 - [`docs/decisions/`](docs/decisions/) — ADRs (dynamic pitfalls, topology derivation, etc.)
-- [`docs/scenario-failure-matrix.md`](docs/scenario-failure-matrix.md) — per-scenario pass/fail snapshot + failure classification
-- [`docs/layer3-evidence.md`](docs/layer3-evidence.md) — what real-cloud validation caught that the mock did not, what it cost, and the honest limits
-- [`docs/layer3-real-vs-mock-deltas.md`](docs/layer3-real-vs-mock-deltas.md) — the observed behavioural differences between real Scaleway and mockway
-- [`docs/layer3-coverage.md`](docs/layer3-coverage.md) — which Scaleway scenarios can reach the real API, and what widening each would cost
+- [`docs/archive/sweeps/scenario-failure-matrix.md`](docs/archive/sweeps/scenario-failure-matrix.md) — per-scenario pass/fail snapshot + failure classification
+- [`docs/layer3/evidence.md`](docs/layer3/evidence.md) — what real-cloud validation caught that the mock did not, what it cost, and the honest limits
+- [`docs/layer3/real-vs-mock-deltas.md`](docs/layer3/real-vs-mock-deltas.md) — the observed behavioural differences between real Scaleway and mockway
+- [`docs/layer3/coverage.md`](docs/layer3/coverage.md) — which Scaleway scenarios can reach the real API, and what widening each would cost
 - [`AGENTS.md`](AGENTS.md) — entry point for AI agents working on this repo
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — code conventions, PR contract, quality gates
 - [`SECURITY.md`](SECURITY.md) — disclosure policy

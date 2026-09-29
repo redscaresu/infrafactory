@@ -18,8 +18,8 @@ import (
 // (docs/operations.md § Layer 3 (AWS)). REGION and ACCOUNT_ID are
 // placeholders the runbook fills in: the repo is public.
 const (
-	awsScopeIAMPolicyFile = "../../docs/aws-layer3/iam-policy.json"
-	awsScopeSCPFile       = "../../docs/aws-layer3/scp.json"
+	awsScopeIAMPolicyFile = "../../docs/layer3/aws/iam-policy.json"
+	awsScopeSCPFile       = "../../docs/layer3/aws/scp.json"
 	awsScopeExemption     = "ArnNotLike aws:PrincipalArn arn:aws:iam::*:role/OrganizationAccountAccessRole"
 	awsScopeRegionDeny    = "StringNotEquals aws:RequestedRegion REGION"
 )

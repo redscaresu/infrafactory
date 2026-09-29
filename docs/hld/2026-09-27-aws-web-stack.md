@@ -129,7 +129,7 @@ changes over time. There is no `user_data` or bootstrap guidance, as there was n
 from is confirmed in the first story.
 
 **The shape gate knows no AWS type** (`layer3_hcl_shape.go`: zero `aws` mentions), and
-`docs/layer3-coverage.md`, its test, AGENTS.md and CONCEPT.md say Layer 3 is Scaleway (GCP HLD
+`docs/layer3/coverage.md`, its test, AGENTS.md and CONCEPT.md say Layer 3 is Scaleway (GCP HLD
 review F20).
 
 ## Design

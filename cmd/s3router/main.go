@@ -24,7 +24,7 @@
 // preemptively — every added route is one more wire-shape to keep
 // in sync between two backends.
 //
-// Closes S80 from docs/plans/slices-79-83-plan.md.
+// Closes S80 from docs/archive/plans/slices-79-83-plan.md.
 package main
 
 import (

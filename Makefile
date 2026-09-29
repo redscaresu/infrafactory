@@ -348,7 +348,7 @@ mocks-restart: mocks-down mocks-up
 # previous session may have left running — sweep scripts, log tails,
 # stray mock binaries on non-canonical ports. Cheap, idempotent, safe
 # to run any time. Companion to the session-close hygiene convention
-# documented in docs/status/ARCHIVE.md.
+# documented in docs/archive/status/ARCHIVE.md.
 clean-bg:
 	@echo "stopping lingering sweep scripts + log tails..."
 	@pkill -f '^bash /tmp/sweep-.*\.sh$$' 2>/dev/null && echo "  killed sweep scripts" || echo "  no sweep scripts running"

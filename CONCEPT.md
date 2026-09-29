@@ -1555,7 +1555,7 @@ The pitfalls directory is organized by cloud provider:
 - `pitfalls/aws.yaml` — AWS/EKS pitfalls (future)
 - `pitfalls/common.yaml` — cross-provider pitfalls (future)
 
-Each pitfall has a `source` field: `static` (manually written) or `learned` (auto-discovered from run feedback). See `docs/plans/dynamic-pitfalls-plan.md` for the full design.
+Each pitfall has a `source` field: `static` (manually written) or `learned` (auto-discovered from run feedback). See `docs/archive/plans/dynamic-pitfalls-plan.md` for the full design.
 
 **Rate limit mitigation**: configurable `agent.phase_delay_seconds` (default: 0) adds a pause between `claude -p` calls. Users hitting Max plan rate limits can set this to 5-10s.
 

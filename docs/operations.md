@@ -36,7 +36,7 @@ widening any is a blast-radius decision (ADR-0023).
 3. `validation.layers.sandbox_deploy.allow_resource_types` — deny-by-default; empty or absent
    denies everything. Checked after generation and before apply, so a denied type costs nothing.
    The list lives in three places (`internal/config/config.go`, `infrafactory.yaml`,
-   `docs/layer3-coverage.md`) and tests keep them in step.
+   `docs/layer3/coverage.md`) and tests keep them in step.
 4. `scaleway.fallback_project_id` — a dedicated disposable project for anything that resolves the
    provider default. Refused if set to the organization id.
 
@@ -47,7 +47,7 @@ widening any is a blast-radius decision (ADR-0023).
   `AssertProjectDeletable` and verified by a real-API sweep. A reap that cannot prove the account
   clean fails.
 - Layer 3 is opt-in, off by default, and never wired into a scheduled CI job.
-- Real-vs-mock deltas: `docs/layer3-real-vs-mock-deltas.md`. Real Scaleway can return a create
+- Real-vs-mock deltas: `docs/layer3/real-vs-mock-deltas.md`. Real Scaleway can return a create
   error after the resource exists; apply retries once (`sandboxApplyAttempts`), never on a
   cancelled context.
 - A `run` writes auto-learned pitfalls into `pitfalls/*.yaml` **in the checkout it runs from**. Run
@@ -153,7 +153,7 @@ aws ec2 describe-instances --query 'length(Reservations)' --profile infrafactory
 ```
 
 **3. The IAM user**, before the SCP, since the SCP denies IAM. Its policy,
-`docs/aws-layer3/iam-policy.json`, covers claim, sweep and reap only; the apply's actions are epic
+`docs/layer3/aws/iam-policy.json`, covers claim, sweep and reap only; the apply's actions are epic
 [aws-web-live-on-real-aws](epics/aws-web-live-on-real-aws.md)'s. It grants
 `sts:GetCallerIdentity`; `ssm:PutParameter` and `ssm:DeleteParameter` on the claim alone;
 `ssm:GetParameter` on the claim and the stamp; and, pinned by `aws:RequestedRegion`,
@@ -162,7 +162,7 @@ exports. `internal/harness/aws_scope_policy_test.go` holds it there.
 
 ```bash
 aws iam create-user --user-name infrafactory-layer3 --profile infrafactory-admin
-sed -e "s/REGION/$REGION/g" -e "s/ACCOUNT_ID/$ACCOUNT_ID/g" docs/aws-layer3/iam-policy.json > "$TMPDIR/p.json"
+sed -e "s/REGION/$REGION/g" -e "s/ACCOUNT_ID/$ACCOUNT_ID/g" docs/layer3/aws/iam-policy.json > "$TMPDIR/p.json"
 aws iam put-user-policy --user-name infrafactory-layer3 --policy-name infrafactory-layer3-scope \
   --policy-document "file://$TMPDIR/p.json" --profile infrafactory-admin
 ```
@@ -230,7 +230,7 @@ aws ssm get-parameter --name /infrafactory/layer3/stamp --query Parameter.Value 
   --region $REGION --profile infrafactory-admin                             # ACCOUNT_ID
 ```
 
-**6. The SCP**, last, from `MGMT`. `docs/aws-layer3/scp.json` has two Deny statements: every
+**6. The SCP**, last, from `MGMT`. `docs/layer3/aws/scp.json` has two Deny statements: every
 action but `ec2:*`, `ssm:*` and `sts:*`, and every action where `aws:RequestedRegion` is not
 `REGION`. Each is exempted by `ArnNotLike` `aws:PrincipalArn`
 `arn:aws:iam::*:role/OrganizationAccountAccessRole`, the role the admin profile assumes, so the
@@ -244,7 +244,7 @@ aws organizations list-roots --profile $MGMT --output text \
 # Only if that did not print ENABLED:
 aws organizations enable-policy-type --root-id $ROOT --policy-type SERVICE_CONTROL_POLICY --profile $MGMT
 
-sed -e "s/REGION/$REGION/g" docs/aws-layer3/scp.json > "$TMPDIR/scp.json"
+sed -e "s/REGION/$REGION/g" docs/layer3/aws/scp.json > "$TMPDIR/scp.json"
 POLICY=$(aws organizations create-policy --name infrafactory-layer3-scope --type SERVICE_CONTROL_POLICY \
   --description 'infrafactory Layer 3 scope' --content "file://$TMPDIR/scp.json" \
   --query Policy.PolicySummary.Id --output text --profile $MGMT)

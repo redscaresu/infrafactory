@@ -116,7 +116,7 @@ fi
 # docs/stories/ and history in git. The cap stops it growing back into a log.
 STATUS_MAX_LINES=150
 if [[ -f STATUS.md ]] && (( $(wc -l < STATUS.md) > STATUS_MAX_LINES )); then
-  echo "Doc hygiene check failed: STATUS.md is over ${STATUS_MAX_LINES} lines. Drop the oldest Recent lines; history belongs in docs/status/."
+  echo "Doc hygiene check failed: STATUS.md is over ${STATUS_MAX_LINES} lines. Drop the oldest Recent lines; history belongs in docs/archive/status/."
   exit 1
 fi
 

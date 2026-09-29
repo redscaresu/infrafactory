@@ -6,7 +6,7 @@ The HCL in `block-paris/` was written by the LLM, not by hand:
 
 It is committed so the on-stage path does not have to make a 40–60s model
 call with real variance in front of a live audience — the decision recorded
-in `docs/plans/presentable-arc-plan.md` (keep the LLM out of the live path,
+in `docs/archive/plans/presentable-arc-plan.md` (keep the LLM out of the live path,
 run the verification half live).
 
 `make demo-gate` replays this by default. `make demo-gate GENERATE=live`

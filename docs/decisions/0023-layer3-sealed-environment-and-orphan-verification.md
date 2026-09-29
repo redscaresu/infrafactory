@@ -5,7 +5,7 @@ Accepted (amends ADR-0010)
 
 ## Context
 
-ADR-0010 enabled Layer 3 (real Scaleway deploy) and Slices 26–30 built the harness. Planning the first actual real-Scaleway run (2026-08-22, `docs/plans/layer3-real-scaleway-plan.md`) established that the harness had **never made a single call to `api.scaleway.com`** — every stage of it was validated against mockway standing in for Scaleway, and both real-tool tests are env-gated with no record of either running with credentials.
+ADR-0010 enabled Layer 3 (real Scaleway deploy) and Slices 26–30 built the harness. Planning the first actual real-Scaleway run (2026-08-22, `docs/archive/plans/layer3-real-scaleway-plan.md`) established that the harness had **never made a single call to `api.scaleway.com`** — every stage of it was validated against mockway standing in for Scaleway, and both real-tool tests are env-gated with no record of either running with credentials.
 
 Reading the code for the first time with "does this actually reach Scaleway?" as the question surfaced two structural problems and one measurement problem.
 
@@ -62,7 +62,7 @@ This is the first defect the arc found that no unit test or mock could have: it 
 
 Fail-closed is necessary but not sufficient. A guard that stops the run without saying why is only half a guard, and the asymmetry is specific to Layer 3: against a mock, reproducing `exit status 1` under a debugger is free; against a real API it costs money and a project-create round trip, so the first report has to carry the message. Layer 2 had solved this long ago in `mockDeployFailureDetail`; the shared `stderrFailureDetail` helper now backs all four paths (mock deploy, destroy, sandbox deploy, sandbox destroy), ANSI-stripped and bounded by the same `failureStderrDetailMaxChars` budget.
 
-The failure this surfaced is recorded in `docs/layer3-real-vs-mock-deltas.md` (D1): real Scaleway returned a create error *after* the block volume existed, leaving it tainted with computed fields unset. It was transient — a re-apply succeeded — and Layer 3 has no retry, so a single API blip fails an otherwise-correct run. That retry is the arc's top follow-up, not part of this decision.
+The failure this surfaced is recorded in `docs/layer3/real-vs-mock-deltas.md` (D1): real Scaleway returned a create error *after* the block volume existed, leaving it tainted with computed fields unset. It was transient — a re-apply succeeded — and Layer 3 has no retry, so a single API blip fails an otherwise-correct run. That retry is the arc's top follow-up, not part of this decision.
 
 **Amendment — verify the cleanup you just did, and tolerate a flaky API once (2026-08-22, closing the two follow-ups the canary left open).**
 
@@ -168,7 +168,7 @@ The purge is deliberately lenient where the sweep is strict. `ScalewayOrphanSwee
 
 No mock surfaces this class of defect at all. The auto-creation is a behaviour of the real API, not of the configuration, so mockway — which creates exactly what it is asked for and nothing else — deletes its project cleanly every time.
 
-**Amendment — the coverage document's counts are CI-enforced (2026-08-24).** `docs/layer3-coverage.md` is not commentary. It is the artifact someone reads to decide which scenario to point at real, billable infrastructure next, and its central claims are counts: how many scenarios have run, how many each gate blocks, which resource types are admitted locally and refused by the credential.
+**Amendment — the coverage document's counts are CI-enforced (2026-08-24).** `docs/layer3/coverage.md` is not commentary. It is the artifact someone reads to decide which scenario to point at real, billable infrastructure next, and its central claims are counts: how many scenarios have run, how many each gate blocks, which resource types are admitted locally and refused by the credential.
 
 Those counts were hand-maintained, and over a single slice they drifted four times — a scenario counted in the numerator and not the denominator, a gated remainder that no longer matched the table, a "three families" claim that had become four, and an enumerated allowlist that had fallen behind `infrafactory.yaml`. Each was a paragraph disagreeing with a table two screens away, and each hand-fix introduced the next.
 
