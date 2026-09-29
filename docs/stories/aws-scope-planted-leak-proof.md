@@ -1,7 +1,6 @@
 ---
 kind: lead
-status: blocked
-blocked_by: [aws-scope-hand-setup, aws-scope-claim, aws-scope-sweep, aws-scope-reap-body, aws-scope-test-lifecycle, aws-scope-reap-command]
+status: ready
 epic: aws-layer3-claim-sweep-reap
 depends_on: [aws-scope-hand-setup, aws-scope-claim, aws-scope-sweep, aws-scope-reap-body, aws-scope-test-lifecycle, aws-scope-reap-command]
 touches: ["docs/operations.md", "docs/layer3/real-vs-mock-deltas.md"]

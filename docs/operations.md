@@ -253,9 +253,10 @@ POLICY=$(aws organizations create-policy --name infrafactory-layer3-scope --type
 aws organizations attach-policy --policy-id $POLICY --target-id $ACCOUNT_ID --profile $MGMT
 ```
 
-Verify. The first command lists `infrafactory-layer3-scope`; with the key, S3 is denied by a
-message naming a service control policy, EC2 in `OTHER` is denied, and step 4's
-`get-caller-identity` still answers:
+Verify. The first command lists `infrafactory-layer3-scope`; with the key, S3 and EC2 in `OTHER`
+are denied. AWS words the S3 denial as "an explicit deny in an identity-based policy" even when the
+SCP denied it, and the user policy denies nothing, so the refusals alone do not prove the SCP: the
+simulator's `AllowedByOrganizations` does, after these.
 
 ```bash
 aws organizations list-policies-for-target --target-id $ACCOUNT_ID --filter SERVICE_CONTROL_POLICY \
@@ -266,6 +267,18 @@ aws organizations list-policies-for-target --target-id $ACCOUNT_ID --filter SERV
 (set -a; . ~/.config/infrafactory/layer3-aws.env; set +a
  env -u AWS_PROFILE AWS_CONFIG_FILE=/dev/null AWS_SHARED_CREDENTIALS_FILE=/dev/null \
    aws ec2 describe-vpcs --region $OTHER)
+```
+
+The SCP itself, from the simulator (`sim` from step 3); each line prints the decision, then
+whether Organizations allows it:
+
+```bash
+orgs() { sim --action-names "$1" --context-entries "ContextKeyName=aws:RequestedRegion,ContextKeyValues=$2,ContextKeyType=string" \
+  --query 'EvaluationResults[0].[EvalDecision,OrganizationsDecisionDetail.AllowedByOrganizations]'; }
+orgs ec2:DescribeVpcs $REGION        # allowed       True
+orgs ec2:DescribeVpcs $OTHER         # explicitDeny  False
+orgs s3:ListAllMyBuckets $REGION     # explicitDeny  False
+orgs iam:CreateUser $REGION          # explicitDeny  False
 ```
 
 ## Sibling mocks
