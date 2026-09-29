@@ -3,14 +3,15 @@
 #
 #   swarm.sh agent <tab> <name> <cwd> <role> <prompt-file>   start one agent in its own pane
 #   swarm.sh story <slug>                                   build one docs/stories/<slug>.md
+#   swarm.sh conduct <epic>                                 a fresh conductor for one epic, in a workspace named for its HLD
 #   swarm.sh wait <name> [timeout-ms]                       block until the agent settles
 #   swarm.sh policy <role>                                  print the model and effort for a role
 #   swarm.sh close <tab>                                    close <tab>, <tab>-2, ... and forget them
 #   swarm.sh unblock                                        mark ready every blocked story whose blockers are all merged
 #   swarm.sh watch [repo...]                                wait until a story PR needs the lead, print why, and exit
 #
-# Must run inside herdr (HERDR_ENV=1). Tabs hold at most four panes (a 2x2 grid); a fifth
-# agent opens "<tab>-2", and so on, so no pane gets too small to follow.
+# Must run inside herdr (HERDR_ENV=1). A story gets its own tab, named for the story. Tabs hold at
+# most four panes (a 2x2 grid); a fifth agent opens "<tab>-2", and so on, so no pane gets too small to follow.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -24,6 +25,7 @@ die() { echo "swarm: $*" >&2; exit 1; }
 #   design:    hld, hld-review, hld-lead
 #   planning:  survey, lead, skeptic, critic, codex
 #   building:  code, code-risky, docs, chore, verify
+#   conducting: conduct
 policy() {
   case "$1" in
     hld)        echo "claude fable high" ;;    # co-writes the HLD with the user, who waits on every turn
@@ -39,7 +41,8 @@ policy() {
     docs|chore) echo "claude sonnet medium" ;;
     verify)     echo "claude sonnet medium" ;; # run tests or commands and report
     escalate)   echo "claude fable xhigh" ;;   # only after a story failed twice, or an unreconcilable epic
-    *) die "unknown role '$1' (hld hld-review hld-lead survey lead skeptic critic codex code code-risky docs chore verify escalate)" ;;
+    conduct)    echo "claude opus high" ;;     # dispatches, reviews, merges one epic; a fresh session each time
+    *) die "unknown role '$1' (hld hld-review hld-lead survey lead skeptic critic codex code code-risky docs chore verify escalate conduct)" ;;
   esac
 }
 
@@ -183,7 +186,53 @@ build_story() {
   git -C "${src}" worktree add -q -b "${branch}" "${wt}" origin/main
   prompt="${REPO_ROOT}/.swarm/briefs/${slug}.md"; mkdir -p "$(dirname "${prompt}")"
   story_brief "${slug}" "${repo}" > "${prompt}"
-  start_agent "build" "${slug}" "${wt}" "${role}" "${prompt}"
+  start_agent "${slug}" "${slug}" "${wt}" "${role}" "${prompt}"
+}
+
+# The brief a conductor gets: one epic, from a fresh session, so its context holds only that epic.
+conduct_brief() {
+  local epic="$1"
+  cat <<EOF
+You are the conductor for the epic docs/epics/${epic}.md. Read AGENTS.md, STATUS.md,
+docs/operations.md and the epic first.
+
+Drive the epic's stories (docs/stories/*.md with \`epic: ${epic}\`) to merge, as docs/operations.md
+§ Parallel agents describes: pick waves of \`ready\` stories whose \`touches\` do not overlap,
+start each with \`scripts/swarm.sh story <slug>\`, wait with \`scripts/swarm.sh wait\` and
+\`scripts/swarm.sh watch\` in the background, review each PR, merge it only when its head is green,
+then run \`scripts/swarm.sh unblock\` and \`scripts/swarm.sh close <slug>\` to close that story's tab.
+
+Stay inside this epic: start no story outside it, and leave the HLD and other epics alone. A
+\`kind: lead\` story (real cloud, credentials) or a \`kind: operator\` one is not yours to run; list it
+for the user. Stop when the epic's **Done when** holds (delete the epic file in the last PR) or
+when nothing ready is left, and reply with what merged, what is left, and what waits on the user.
+EOF
+}
+
+# hld_workspace <label> — the herdr workspace labelled <label>, created if there is none. Every epic
+# of one HLD shares it; a new workspace's placeholder tab is closed once the caller has added its own.
+hld_workspace() {
+  local label="$1" ws
+  ws=$(herdr workspace list | json "next((w['workspace_id'] for w in d['result']['workspaces'] if w.get('label')=='${label}'),'')")
+  if [[ -z "${ws}" ]]; then
+    ws=$(herdr workspace create --label "${label}" --cwd "${REPO_ROOT}" --no-focus \
+      | json "d['result']['workspace']['workspace_id']+' '+d['result']['tab']['tab_id']")
+  fi
+  echo "${ws}"
+}
+
+start_conductor() {
+  local epic="$1" epic_file="${REPO_ROOT}/docs/epics/$1.md" hld prompt ws placeholder
+  [[ "${epic}" =~ ^[a-z0-9-]+$ ]] || die "bad epic '${epic}'"
+  [[ -f "${epic_file}" ]] || die "no epic docs/epics/${epic}.md"
+  hld=$(sed -n 's/^hld: *//p' "${epic_file}" | head -1); hld="${hld:-${epic}}"
+  [[ "${hld}" =~ ^[a-z0-9-]+$ ]] || die "${epic}: bad hld '${hld}'"
+  prompt="${REPO_ROOT}/.swarm/briefs/conduct-${epic}.md"; mkdir -p "$(dirname "${prompt}")"
+  conduct_brief "${epic}" > "${prompt}"
+  read -r ws placeholder <<< "$(hld_workspace "${hld}")"
+  HERDR_WORKSPACE_ID="${ws}" start_agent "conduct-${epic}" "conduct-${epic}" "${REPO_ROOT}" conduct "${prompt}"
+  [[ -z "${placeholder}" ]] || herdr tab close "${placeholder}" >/dev/null
+  echo "workspace ${hld} (${ws})"
 }
 
 # unblock — a merged story's file is deleted, so a blocked story whose every blocked_by slug has no
@@ -274,13 +323,14 @@ main() {
     policy) policy "${1:?role}" ;;
     agent)  require_herdr; start_agent "$@" ;;
     story)  require_herdr; build_story "${1:?slug}" ;;
+    conduct) require_herdr; start_conductor "${1:?epic}" ;;
     close)  require_herdr; close_tabs "${1:?tab}" ;;
     unblock) unblock ;;
     watch)  watch_prs "$@" ;;
     _name)  agent_name "${1:?slug}"; echo ;;                      # test hook: the agent name for a slug
     _pane)  require_herdr; next_pane "${1:?tab}" "${2:?cwd}" ;;   # layout test hook: a pane, no agent
     wait)   require_herdr; herdr agent wait "$(agent_name "${1:?name}")" --timeout "${2:-3600000}" | json "d['result']['agent']['agent_status']" ;;
-    *) sed -n '2,13p' "$0"; exit 2 ;;
+    *) sed -n '2,14p' "$0"; exit 2 ;;
   esac
 }
 
