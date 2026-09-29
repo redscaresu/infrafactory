@@ -224,18 +224,19 @@ func newTestCmd(cfg *rootConfig) *cobra.Command {
 	return cmd
 }
 
-// newReapCmd tears down real Scaleway resources an interrupted Layer 3
-// run left behind. Separate from `test`/`run` because by definition it
-// is used when those did not get to finish.
+// newReapCmd tears down real resources an interrupted Layer 3 run left
+// behind. Separate from `test`/`run` because by definition it is used
+// when those did not get to finish.
 func newReapCmd(cfg *rootConfig) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "reap <scenario>",
-		Short: "Destroy real Scaleway resources left behind by an interrupted Layer 3 run",
+		Short: "Destroy real resources left behind by an interrupted Layer 3 run",
 		Args:  requireScenarioArg,
 		RunE:  cfg.withRuntime("reap", runReapCommand),
 	}
 
 	cmd.Flags().Bool("dry-run", false, "Report what would be destroyed without destroying it")
+	cmd.Flags().String("take-over", "", "aws: take the scope's claim over from this holder, once its run has ended")
 
 	return cmd
 }

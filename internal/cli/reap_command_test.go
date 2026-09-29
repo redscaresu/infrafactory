@@ -72,6 +72,7 @@ func runReap(t *testing.T, rt *CommandRuntime, scenarioPath string, out *strings
 	t.Helper()
 	cmd := &cobra.Command{Use: "reap"}
 	cmd.Flags().Bool("dry-run", false, "")
+	cmd.Flags().String("take-over", "", "")
 	cmd.Flags().String("output", string(OutputModeHuman), "")
 	if err := cmd.ParseFlags(args); err != nil {
 		t.Fatalf("parse flags: %v", err)

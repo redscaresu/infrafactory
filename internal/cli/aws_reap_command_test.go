@@ -1,0 +1,312 @@
+package cli
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/redscaresu/infrafactory/internal/config"
+	"github.com/redscaresu/infrafactory/internal/harness"
+)
+
+const (
+	strayKeyPairs = `<keySet><item><keyPairId>key-0a</keyPairId><keyName>a</keyName></item>` +
+		`<item><keyPairId>key-0b</keyPairId><keyName>b</keyName></item></keySet>`
+	sweepKeyPairs  = "ec2:DescribeKeyPairs"
+	deleteKeyPair  = "ec2:DeleteKeyPair"
+	getStamp       = "ssm:GetParameter " + harness.AWSStampParameter
+	callerIdentity = "sts:GetCallerIdentity"
+)
+
+// awsReapRun is one `infrafactory reap` of an aws scenario whose workdir
+// holds a stale Scaleway marker, which aws must never read.
+type awsReapRun struct {
+	h      *CommandTestHarness
+	output string
+	err    error
+}
+
+func (r awsReapRun) text() string {
+	if r.err == nil {
+		return r.output
+	}
+	return r.output + r.err.Error()
+}
+
+func reapAWS(t *testing.T, lc *awsLifecycle, customize func(*config.Config), withState bool, flags ...string) awsReapRun {
+	t.Helper()
+	h := newCommandTestHarness(t)
+	setScenarioCloud(t, h.ScenarioPath, "aws")
+	outDir := filepath.Join(h.OutputDir(), "example-scenario")
+	require.NoError(t, os.MkdirAll(outDir, 0o755))
+	writeAWSStateAndStaleMarker(t, outDir, withState)
+
+	cfg, err := config.Load(h.ConfigPath)
+	require.NoError(t, err)
+	cfg.Paths.Output = h.OutputDir()
+	cfg = layer3On(cfg)
+	cfg.AWS = config.AWSConfig{Region: "eu-west-2", AccountID: preflightAWSAccount, PrincipalARN: preflightAWSPrincipal}
+	if customize != nil {
+		customize(&cfg)
+	}
+	rt := &CommandRuntime{ConfigPath: h.ConfigPath, Config: cfg, scenarioLoader: defaultScenarioLoader, Logger: NewAppLogger(&bytes.Buffer{})}
+	lc.scw.install(&rt.Deps)
+	rt.Deps.SandboxDestroy = lc.destroy
+	rt.Deps.AWSSTS, rt.Deps.AWSSSM, rt.Deps.AWSEC2 = lc, lc, lc
+	rt.Deps.AWSSweepSleep = func(context.Context, time.Duration) error { return nil }
+
+	out := &strings.Builder{}
+	err = runReap(t, rt, h.ScenarioPath, out, flags...)
+	return awsReapRun{h: h, output: out.String(), err: err}
+}
+
+// deleteKeyPairsOnDelete makes DeleteKeyPair empty the key pair listing.
+func deleteKeyPairsOnDelete(lc *awsLifecycle) {
+	lc.onEC2 = func(action string) {
+		if action == "DeleteKeyPair" {
+			delete(lc.ec2, "DescribeKeyPairs")
+		}
+	}
+}
+
+// writes is every call that changes the scope: an SSM put or delete, or
+// any EC2 action but a Describe.
+func writes(lc *awsLifecycle) []string {
+	var found []string
+	for _, call := range lc.log() {
+		if strings.HasPrefix(call, "ssm:PutParameter") || strings.HasPrefix(call, "ssm:DeleteParameter") ||
+			(strings.HasPrefix(call, "ec2:") && !strings.HasPrefix(call, "ec2:Describe")) {
+			found = append(found, call)
+		}
+	}
+	return found
+}
+
+func lastIndex(calls []string, call string) int {
+	for i := len(calls) - 1; i >= 0; i-- {
+		if calls[i] == call {
+			return i
+		}
+	}
+	return -1
+}
+
+func TestAWSReapClaimsSweepsDeletesAndReleases(t *testing.T) {
+	for name, withState := range map[string]bool{"no state, no marker read": false, "state": true} {
+		t.Run(name, func(t *testing.T) {
+			lc := newAWSLifecycle(t)
+			lc.ec2["DescribeKeyPairs"] = strayKeyPairs
+			deleteKeyPairsOnDelete(lc)
+
+			r := reapAWS(t, lc, nil, withState)
+
+			require.NoError(t, r.err, r.output)
+			calls := lc.log()
+			order := []int{
+				slices.Index(calls, callerIdentity),
+				slices.Index(calls, getStamp),
+				slices.Index(calls, putClaim),
+				slices.Index(calls, sweepKeyPairs),
+				slices.Index(calls, deleteKeyPair),
+				lastIndex(calls, sweepKeyPairs),
+				slices.Index(calls, deleteClaim),
+			}
+			assert.NotContains(t, order, -1, "every step ran: %v", calls)
+			assert.True(t, slices.IsSorted(order),
+				"GetCallerIdentity, stamp, TakeAWSClaim, sweep, delete, verdict sweep, DeleteParameter: %v", calls)
+			assert.Equal(t, 2, lc.count(deleteKeyPair), "both strays deleted")
+			assert.Equal(t, 1, lc.count(deleteClaim), "released once")
+			_, held := lc.claim()
+			assert.False(t, held, "released")
+			assert.Contains(t, lc.params, harness.AWSStampParameter, "the stamp stays")
+
+			if withState {
+				destroy := slices.Index(calls, destroyRun)
+				assert.Less(t, slices.Index(calls, putClaim), destroy, "the destroy after the claim: %v", calls)
+				assert.Less(t, destroy, slices.Index(calls, sweepKeyPairs), "the destroy before the sweep: %v", calls)
+			} else {
+				assert.Zero(t, lc.destroy.calls, "no state, nothing for tofu to destroy")
+			}
+			lc.scw.assertUntouched(t)
+		})
+	}
+}
+
+func TestAWSReapRefusesAWrongAccountOrStampWithNoWrites(t *testing.T) {
+	for name, tc := range map[string]struct {
+		customize func(*config.Config)
+		setup     func(*awsLifecycle)
+		want      string
+	}{
+		"wrong account": {
+			customize: func(cfg *config.Config) {
+				cfg.AWS.AccountID = "210987654321"
+				cfg.AWS.PrincipalARN = "arn:aws:iam::210987654321:user/infrafactory-layer3"
+			},
+			want: "210987654321",
+		},
+		"stamp names another account": {
+			setup: func(lc *awsLifecycle) { lc.params[harness.AWSStampParameter] = "210987654321" },
+			want:  `holds "210987654321"`,
+		},
+		"no stamp": {
+			setup: func(lc *awsLifecycle) { delete(lc.params, harness.AWSStampParameter) },
+			want:  harness.AWSStampParameter + " does not exist",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			lc := newAWSLifecycle(t)
+			lc.ec2["DescribeKeyPairs"] = strayKeyPairs
+			if tc.setup != nil {
+				tc.setup(lc)
+			}
+
+			r := reapAWS(t, lc, tc.customize, true)
+
+			require.Error(t, r.err)
+			assert.Contains(t, r.err.Error(), tc.want)
+			assert.Empty(t, writes(lc), "no SSM write and no EC2 mutation")
+			assert.Zero(t, lc.destroy.calls, "SandboxDestroy")
+			lc.scw.assertUntouched(t)
+		})
+	}
+}
+
+func TestAWSReapRefusesAHeldClaimUnlessTakeOverNamesItsHolder(t *testing.T) {
+	t.Run("no --take-over", func(t *testing.T) {
+		lc := newAWSLifecycle(t)
+		lc.params[harness.AWSClaimParameter] = lifecycleOtherHolder
+
+		r := reapAWS(t, lc, nil, true)
+
+		require.Error(t, r.err)
+		assert.Contains(t, r.err.Error(), reapCommand(r.h.ConfigPath, r.h.ScenarioPath)+" --take-over "+lifecycleOtherHolder)
+		assert.Empty(t, writes(lc))
+		assert.Zero(t, lc.destroy.calls, "SandboxDestroy")
+		holder, _ := lc.claim()
+		assert.Equal(t, lifecycleOtherHolder, holder)
+	})
+
+	t.Run("--take-over names someone else", func(t *testing.T) {
+		lc := newAWSLifecycle(t)
+		lc.params[harness.AWSClaimParameter] = lifecycleOtherHolder
+
+		r := reapAWS(t, lc, nil, true, "--take-over", "run-1@third-host.example:7")
+
+		require.Error(t, r.err)
+		assert.Contains(t, r.err.Error(), `by "`+lifecycleOtherHolder+`"`)
+		assert.Empty(t, writes(lc))
+		holder, _ := lc.claim()
+		assert.Equal(t, lifecycleOtherHolder, holder)
+	})
+
+	t.Run("--take-over names the holder", func(t *testing.T) {
+		lc := newAWSLifecycle(t)
+		lc.params[harness.AWSClaimParameter] = lifecycleOtherHolder
+
+		r := reapAWS(t, lc, nil, false, "--take-over", lifecycleOtherHolder)
+
+		require.NoError(t, r.err, r.output)
+		calls := lc.log()
+		assert.Less(t, slices.Index(calls, deleteClaim), slices.Index(calls, putClaim), "the old claim goes before ours: %v", calls)
+		assert.Less(t, slices.Index(calls, putClaim), slices.Index(calls, sweepKeyPairs), "claimed before the sweep: %v", calls)
+		_, held := lc.claim()
+		assert.False(t, held, "the scope was empty, so reap released it")
+	})
+}
+
+func TestAWSReapDirtyVerdictKeepsTheClaim(t *testing.T) {
+	lc := newAWSLifecycle(t)
+	// Every delete answers success, and the key pairs are still listed.
+	lc.ec2["DescribeKeyPairs"] = strayKeyPairs
+
+	r := reapAWS(t, lc, nil, false)
+
+	require.Error(t, r.err)
+	for _, stray := range []string{"key pairs key-0a", "key pairs key-0b"} {
+		assert.Contains(t, r.output, stray)
+	}
+	assert.Equal(t, 2, lc.count(deleteKeyPair))
+	assert.Zero(t, lc.count(deleteClaim), "DeleteParameter")
+	holder, held := lc.claim()
+	require.True(t, held, "the claim is kept")
+	assert.True(t, strings.HasPrefix(holder, "reap-"), "held by the reap: %s", holder)
+	assert.Contains(t, r.output, reapCommand(r.h.ConfigPath, r.h.ScenarioPath)+" --take-over "+holder)
+}
+
+// A failed destroy fails the reap, and the verdict still decides the
+// claim: an empty scope releases it, and nothing says it was kept.
+func TestAWSReapFailedDestroyStillReleasesAnEmptyScope(t *testing.T) {
+	lc := newAWSLifecycle(t)
+	lc.destroy.err = errors.New("tofu destroy failed")
+
+	r := reapAWS(t, lc, nil, true)
+
+	require.Error(t, r.err)
+	assert.Contains(t, r.output, "tofu destroy failed")
+	assert.Equal(t, 1, lc.count(deleteClaim), "released")
+	_, held := lc.claim()
+	assert.False(t, held)
+	assert.NotContains(t, r.output, "kept the aws scope's claim")
+}
+
+func TestAWSReapDryRunWritesNothing(t *testing.T) {
+	t.Run("a stray", func(t *testing.T) {
+		lc := newAWSLifecycle(t)
+		lc.ec2["DescribeKeyPairs"] = strayKeyPairs
+		lc.ec2["DescribeInstances"] = runningInstance
+
+		r := reapAWS(t, lc, nil, true, "--dry-run")
+
+		require.Error(t, r.err)
+		for _, stray := range []string{"key pairs key-0a", "key pairs key-0b", "instances i-0stray"} {
+			assert.Contains(t, r.text(), stray)
+		}
+		assert.Empty(t, writes(lc), "no Put, Delete, Terminate, Release or Revoke")
+		assert.Zero(t, lc.destroy.calls, "SandboxDestroy")
+		lc.scw.assertUntouched(t)
+	})
+
+	t.Run("an empty scope", func(t *testing.T) {
+		lc := newAWSLifecycle(t)
+
+		r := reapAWS(t, lc, nil, true, "--dry-run")
+
+		require.NoError(t, r.err)
+		assert.Contains(t, r.output, "nothing to reap")
+		assert.Empty(t, writes(lc))
+	})
+}
+
+// A partial apply that wrote no state: the case where the Scaleway guard
+// says there is nothing to clean up.
+func TestInterruptedAWSTestKeepsTheClaimAndPrintsTheReapCommand(t *testing.T) {
+	lc := newAWSLifecycle(t)
+	lc.ec2["DescribeInstances"] = runningInstance
+	lc.deploy.err = context.Canceled
+	lc.deploy.onRunDir = func(dir string) {
+		lc.record(deployRun)
+		writeAWSStateAndStaleMarker(t, dir, false)
+		lc.cancel()
+	}
+
+	run := runAWSTest(t, lc, nil, nil)
+
+	require.Error(t, run.err)
+	assert.Contains(t, run.output, "Interrupted: this run keeps the aws scope's claim")
+	assert.Contains(t, run.output, reapCommand(run.h.ConfigPath, run.h.ScenarioPath))
+	assert.NotContains(t, run.output, "nothing to clean up")
+	assert.Zero(t, lc.count(deleteClaim), "DeleteParameter")
+	_, held := lc.claim()
+	assert.True(t, held, "the claim is kept")
+	lc.scw.assertUntouched(t)
+}

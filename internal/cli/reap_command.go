@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/redscaresu/infrafactory/internal/harness"
 	"github.com/spf13/cobra"
@@ -48,6 +49,9 @@ func runReapCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) 
 	// Scaleway one, and acting on it would reap an account this
 	// scenario never applied to.
 	cloud := layer3TeardownCloud(sc.Cloud)
+	if cloud == layer3AWS {
+		return runAWSReap(cmd, runtime, sc.Name, dryRun)
+	}
 	if cloud != layer3Scaleway {
 		return &CLIError{Op: "reap", Code: errorCodeCommandFailed, Err: errors.New(layer3TeardownNotBuilt(cloud, statePath))}
 	}
@@ -137,6 +141,131 @@ func runReapCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) 
 	return nil
 }
 
+// runAWSReap is reap for the aws Layer 3 scope (ADR-0023 rule 4). It
+// needs no state and no marker: the scope is the account, and the claim
+// says who may clean it. STS proves the key, the stamp proves the
+// account is the scope, and only then is the claim read or written. What
+// state records is destroyed, the sweep's findings are deleted, and the
+// claim is released only when the verdict sweep finds the scope empty.
+func runAWSReap(cmd *cobra.Command, runtime *CommandRuntime, scenarioName string, dryRun bool) error {
+	ctx := cmd.Context()
+	takeOver, err := cmd.Flags().GetString("take-over")
+	if err != nil {
+		return &CLIError{Op: "reap", Code: errorCodeUsage, Err: fmt.Errorf("read --take-over flag: %w", err)}
+	}
+	fail := func(err error) error { return &CLIError{Op: "reap", Code: errorCodeCommandFailed, Err: err} }
+
+	if err := assertAWSCredentials(runtime); err != nil {
+		return fail(err)
+	}
+	account := runtime.Config.AWS.AccountID
+	env, err := awsCommandEnvForAccount(runtime, account)
+	if err != nil {
+		return fail(err)
+	}
+	if err := harness.AssertAWSScopeStamp(ctx, env, runtime.Deps.AWSSSM, "", account); err != nil {
+		return fail(err)
+	}
+
+	if dryRun {
+		doers := harness.AWSDoers{EC2: runtime.Deps.AWSEC2, SSM: runtime.Deps.AWSSSM}
+		if _, err := harness.SweepAWSScope(ctx, env, doers, harness.AWSEndpoints{}, awsSettleWait(ctx, runtime)); err != nil {
+			return fail(fmt.Errorf("--dry-run, nothing deleted: %w", err))
+		}
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "--dry-run: every swept collection in account %s is empty; nothing to reap.\n", account)
+		return nil
+	}
+
+	holder, err := harness.NewAWSClaimHolder("reap-" + time.Now().UTC().Format("20060102T150405Z0700"))
+	if err != nil {
+		return fail(err)
+	}
+	if err := claimAWSScopeForReap(ctx, runtime, env, holder, takeOver); err != nil {
+		return fail(err)
+	}
+	stages, failures := reapClaimedAWSScope(ctx, runtime, env, holder)
+
+	status := CommandStatusSuccess
+	if len(failures) > 0 {
+		status = CommandStatusFailed
+	}
+	result := OutputResult{Command: "reap", Scenario: scenarioName, Status: status, Stages: stages, Failures: failures}
+	if err := writeCommandOutput(cmd, result); err != nil {
+		return err
+	}
+	if status == CommandStatusFailed {
+		return fail(errors.New("reap did not leave the aws scope provably empty"))
+	}
+	return nil
+}
+
+// claimAWSScopeForReap takes the claim for holder: over from takeOver
+// when it is set, otherwise only when no one holds it. A held claim is
+// refused naming its holder and the command that takes it over, with
+// nothing written.
+func claimAWSScopeForReap(ctx context.Context, runtime *CommandRuntime, env map[string]string, holder, takeOver string) error {
+	if takeOver != "" {
+		return harness.TakeOverAWSClaim(ctx, env, runtime.Deps.AWSSSM, "", takeOver, holder)
+	}
+	current, held, err := harness.ReadAWSClaimHolder(ctx, env, runtime.Deps.AWSSSM, "")
+	switch {
+	case err != nil:
+		return err
+	case held:
+		return fmt.Errorf("refusing to reap: %w by %s. Once that run has ended, `%s` takes the claim over from it",
+			harness.ErrAWSScopeClaimed, current, awsTakeOverCommand(runtime, current))
+	}
+	return harness.TakeAWSClaim(ctx, env, runtime.Deps.AWSSSM, "", holder)
+}
+
+func awsTakeOverCommand(runtime *CommandRuntime, holder string) string {
+	return reapCommand(runtime.ConfigPath, runtime.scenarioPath) + " --take-over " + shellQuote(holder)
+}
+
+// reapClaimedAWSScope runs with holder holding the claim. Neither a
+// failed destroy nor a failed delete stops it: the verdict sweep in
+// awsReleaseAfterCleanSweep decides whether the claim is released, and
+// a kept claim names the command that takes it over.
+func reapClaimedAWSScope(ctx context.Context, runtime *CommandRuntime, env map[string]string, holder string) ([]StageSummary, []FailureSummary) {
+	cfg := runtime.Config.AWS
+	stages := []StageSummary{{Layer: "sandbox_deploy", Stage: "aws_scope_claim", Status: StageStatusPass,
+		Detail: fmt.Sprintf("claimed account %s for %s", cfg.AccountID, holder)}}
+	var failures []FailureSummary
+	if liveStateMayHoldResources(runtime.OutputDir()) {
+		result, _, destroyErr := destroyAWSSandbox(ctx, runtime, runtime.OutputDir(), env)
+		stages, failures = appendSandboxDestroyResult(stages, failures, result, destroyErr)
+	}
+
+	doers := harness.AWSDoers{EC2: runtime.Deps.AWSEC2, SSM: runtime.Deps.AWSSSM, STS: runtime.Deps.AWSSTS}
+	sleep := awsSettleWait(ctx, runtime)
+	// Its error goes unreported: the verdict sweep reports its own.
+	strays, _ := harness.SweepAWSScope(ctx, env, doers, harness.AWSEndpoints{}, sleep)
+	if len(strays) > 0 {
+		names := make([]string, len(strays))
+		for i, stray := range strays {
+			names[i] = stray.String()
+		}
+		err := harness.ReapAWSScope(ctx, env, doers, harness.AWSEndpoints{}, sleep, cfg.AccountID, cfg.PrincipalARN, holder, strays)
+		if err != nil {
+			stages = append(stages, StageSummary{Layer: "sandbox_deploy", Stage: "aws_scope_reap", Status: StageStatusFail})
+			failures = append(failures, FailureSummary{
+				Layer: "sandbox_deploy", Stage: "aws_scope_reap", Check: "delete",
+				Command: "aws scope reap", Detail: err.Error(),
+			})
+		} else {
+			stages = append(stages, StageSummary{Layer: "sandbox_deploy", Stage: "aws_scope_reap", Status: StageStatusPass,
+				Detail: "deleted " + strings.Join(names, "; ")})
+		}
+	}
+
+	releaseStages, releaseFailures := awsReleaseAfterCleanSweep(ctx, runtime, env, holder)
+	stages, failures = append(stages, releaseStages...), append(failures, releaseFailures...)
+	if len(releaseFailures) > 0 {
+		return awsScopeClaimKept(stages, failures, holder, awsTakeOverCommand(runtime, holder), "the scope was not proven empty and released")
+	}
+	return stages, failures
+}
+
 // withSandboxInterruptGuard runs fn with a SIGINT/SIGTERM handler that
 // destroys real resources before the process exits.
 //
@@ -177,7 +306,15 @@ func withSandboxInterruptGuard(
 	statePath := filepath.Join(workDir, harness.LiveStateFilename)
 
 	// Before the state and marker reads, for reap's reason: a marker
-	// here may be a stale Scaleway one.
+	// here may be a stale Scaleway one. aws tears nothing down here: the
+	// run's own teardown has already swept, and released the claim only
+	// if the scope was empty; whatever it kept is reap's.
+	if cloud == layer3AWS {
+		_, _ = fmt.Fprintf(out, "\nInterrupted: this run keeps the aws scope's claim unless its sweep proved the scope empty, "+
+			"and what it applied may still exist. `%s` sweeps the scope, destroys what is left and releases the claim.\n",
+			reapCommand(runtime.ConfigPath, runtime.scenarioPath))
+		return err
+	}
 	if cloud != layer3Scaleway {
 		_, _ = fmt.Fprintf(out, "\nInterrupted: %s.\n", layer3TeardownNotBuilt(cloud, statePath))
 		return err

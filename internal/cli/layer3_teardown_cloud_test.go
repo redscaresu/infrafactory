@@ -134,8 +134,13 @@ func TestFailedRunOnAnotherCloudTearsNothingDown(t *testing.T) {
 	}
 }
 
+// aws has a reap arm, which never reads the marker either:
+// aws_reap_command_test.go.
 func TestReapOnAnotherCloudRefusesBeforeReadingTheMarker(t *testing.T) {
 	for _, cloud := range nonTeardownClouds {
+		if cloud == "aws" {
+			continue
+		}
 		t.Run(cloud, func(t *testing.T) {
 			h := newCommandTestHarness(t)
 			sandboxCredsForTest(t)
@@ -164,8 +169,13 @@ func TestReapOnAnotherCloudRefusesBeforeReadingTheMarker(t *testing.T) {
 	}
 }
 
+// aws has an interrupt arm, which keeps the claim and names reap:
+// aws_reap_command_test.go.
 func TestInterruptedTestOnAnotherCloudTearsNothingDown(t *testing.T) {
 	for _, cloud := range nonTeardownClouds {
+		if cloud == "aws" {
+			continue
+		}
 		for _, withState := range []bool{true, false} {
 			name := cloud + "/marker only"
 			if withState {
@@ -273,6 +283,14 @@ func TestEveryTeardownSeamRefusesAnotherCloud(t *testing.T) {
 				if cloud == "aws" && seam == "ensureRunProject" {
 					assert.Contains(t, said, "aws.region is empty in the config", seam)
 					assertNoScalewayAdvice(t, said, seam)
+					continue
+				}
+				// aws has an interrupt arm: aws_reap_command_test.go. It
+				// names reap, never Scaleway's advice.
+				if cloud == "aws" && seam == "withSandboxInterruptGuard" {
+					assert.Contains(t, said, "infrafactory reap", seam)
+					assert.NotContains(t, said, "Scaleway", seam)
+					assert.NotContains(t, said, "nothing to clean up", seam)
 					continue
 				}
 				assert.Contains(t, said, cloud, seam)
