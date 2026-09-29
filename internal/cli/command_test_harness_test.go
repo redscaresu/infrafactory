@@ -84,6 +84,12 @@ type CommandRunResult struct {
 	Err    error
 }
 
+// closedMockURL is where the shared test config points the mock: a port
+// nothing listens on. A test that forgets its fake MockState/MockDeploy then
+// fails the same way on every machine, instead of passing against (and
+// resetting) whatever mockway a developer happens to be running on :8080.
+const closedMockURL = "http://127.0.0.1:1"
+
 func newCommandTestHarness(t *testing.T) *CommandTestHarness {
 	t.Helper()
 
@@ -95,7 +101,7 @@ func newCommandTestHarness(t *testing.T) *CommandTestHarness {
 agent:
   type: claude-code
 mockway:
-  url: http://localhost:8080
+  url: `+closedMockURL+`
 `)
 	mustWriteFile(t, scenarioPath, `scenario: example-scenario
 version: "1.0"

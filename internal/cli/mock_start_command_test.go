@@ -50,7 +50,7 @@ func TestMockStartCommandSuccess(t *testing.T) {
 	if starter.calls != 1 {
 		t.Fatalf("expected starter call count 1, got %d", starter.calls)
 	}
-	if starter.mockway.URL != "http://localhost:8080" {
+	if starter.mockway.URL != closedMockURL {
 		t.Fatalf("expected mockway URL from config, got %q", starter.mockway.URL)
 	}
 	if !strings.Contains(stdout.String(), "Status: success") {
