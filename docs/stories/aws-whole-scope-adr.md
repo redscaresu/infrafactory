@@ -1,7 +1,6 @@
 ---
 kind: docs
-status: blocked
-blocked_by: [aws-scope-run-failure-path, aws-scope-planted-leak-proof]
+status: ready
 epic: aws-layer3-claim-sweep-reap
 depends_on: [aws-scope-run-failure-path, aws-scope-planted-leak-proof]
 touches: ["docs/decisions/0040-aws-whole-scope-ownership.md (new)", "docs/decisions/0023-layer3-sealed-environment-and-orphan-verification.md", "docs/decisions/0025-run-project-created-before-the-apply.md", "docs/decisions/README.md", "internal/harness/aws_scope_adr_test.go (new)", "docs/epics/aws-layer3-claim-sweep-reap.md (delete)", "docs/hld/2026-09-27-aws-web-stack.md", "docs/stories/aws-layer3-gate-lift.md", "docs/epics/aws-layer3-wiring-proof.md", "docs/epics/aws-web-live-on-real-aws.md", "STATUS.md"]

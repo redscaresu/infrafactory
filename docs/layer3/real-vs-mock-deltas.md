@@ -214,3 +214,15 @@ project and retries the destroy once, reporting what it removed:
 Only groups Scaleway marks `project_default` are touched. A security group
 the run's own HCL declared is Terraform's to destroy, and purging it here
 would hide a real destroy bug.
+
+## D7 — AWS makes resources you did not ask for; fakeaws makes none
+
+Observed in the AWS scope's planted-leak proof (2026-09-29, `aws-scope-planted-leak-proof`).
+`RunInstances` on real AWS also created the instance's root EBS volume (`in-use`, deleted on
+termination) and its primary network interface, and `CreateNatGateway` created a requester-managed
+network interface for the gateway. The sweep named all three and they went with their owners
+during the reap. fakeaws models the instance's network interface (and removes it on terminate) but
+answers `DescribeVolumes` and `DescribeNatGateways` with empty lists: an instance has no root
+volume and there are no NAT gateways. So a Layer 2 test cannot see a leaked root volume or a NAT
+gateway's interface; only the real sweep can. Not a defect in reap: it deletes owners before the
+things they hold, and the real account ended empty.
