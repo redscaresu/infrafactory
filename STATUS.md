@@ -31,4 +31,4 @@ Not stored here: the squash-commit titles are the record, so this cannot go stal
 
     git log --first-parent -10 --format='%ad %s' --date=short main
 
-History: git, the HLDs' `## Epics` lists, and the frozen `docs/status/` (see its README).
+History: git, the HLDs' `## Epics` lists, and the frozen `docs/archive/status/` (see its README).

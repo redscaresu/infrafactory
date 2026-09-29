@@ -22,7 +22,7 @@ answerable per-rule: "is the rule still needed, given the auto-learning channels
 in place?"
 
 S56–S60 executed nine N11 retirements following a 7-step protocol (defined in
-`docs/plans/slices-54-62-plan.md`). The retirements covered a range of patterns:
+`docs/archive/plans/slices-54-62-plan.md`). The retirements covered a range of patterns:
 single-attribute corrections (firewall network-vs-subnetwork), cross-resource
 multi-attribute patterns (GKE single-node-pool), and high-stakes structural rules
 (VPC + subnetwork). This ADR codifies the criteria that emerged.

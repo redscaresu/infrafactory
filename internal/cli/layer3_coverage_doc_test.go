@@ -13,7 +13,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// docs/layer3-coverage.md is the file someone reads to decide what to
+// docs/layer3/coverage.md is the file someone reads to decide what to
 // spend real money on next, and its numbers are hand-maintained. Over
 // one arc they drifted four separate times -- a scenario counted in the
 // numerator and not the denominator, a gated remainder that did not
@@ -24,7 +24,7 @@ import (
 // screens away. So check the paragraphs against the table.
 func layer3CoverageDoc(t *testing.T) string {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join("..", "..", "docs", "layer3-coverage.md"))
+	raw, err := os.ReadFile(filepath.Join("..", "..", "docs", "layer3", "coverage.md"))
 	require.NoError(t, err)
 	return string(raw)
 }
@@ -117,7 +117,7 @@ func TestLayer3CoverageDocAllowlistMatchesConfig(t *testing.T) {
 	}
 
 	assert.Equal(t, actual, documented,
-		"docs/layer3-coverage.md enumerates the repo-default allowlist; it must match infrafactory.yaml exactly")
+		"docs/layer3/coverage.md enumerates the repo-default allowlist; it must match infrafactory.yaml exactly")
 }
 
 func sprintTotals(run, unrun, keyOnly, both int) string {

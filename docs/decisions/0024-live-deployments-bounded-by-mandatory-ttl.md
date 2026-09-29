@@ -12,7 +12,7 @@ rest on. It is also why the learning loop has exactly one input shape: a
 `failure.Detail` raised inside a run's stages. Infrafactory can learn *the cloud
 refused this at apply time* and nothing else.
 
-The live-services arc (`docs/plans/live-services-arc-plan.md`) needs a service
+The live-services arc (`docs/archive/plans/live-services-arc-plan.md`) needs a service
 that outlives its run, so that failures which only appear afterwards — degraded
 40 minutes in, a health check that flaps, an upgrade that drops connections —
 become producible and therefore learnable.
@@ -138,7 +138,7 @@ its own limits: it catches the common case and is not a proof of immutability. A
 numeric tag such as `1` also moves, and only a digest (`@sha256:...`) is
 genuinely fixed. Digest pinning is worth doing and is deliberately not done here.
 
-**Consequence for `docs/layer3-coverage.md`.** That document counts
+**Consequence for `docs/layer3/coverage.md`.** That document counts
 `**runnable**` rows as scenarios that *have run*. `web-live-paris` is ungated but
 has never been run, so recording it as runnable would have made the document
 claim a real-cloud run that never happened — the S147 failure class, caught by

@@ -96,7 +96,7 @@ func TestPitfallsNoHumanSeeding(t *testing.T) {
 // While M91 asserts "no human-authored pitfalls," this guard asserts
 // "no learned pitfall whose Rule matches a mock-actionable signal."
 // The two together encode the principle "mock-server gaps are
-// tickets, not pitfalls" (see docs/status/ARCHIVE.md § "Core design principle: mock quirks are tickets, not pitfalls"
+// tickets, not pitfalls" (see docs/archive/status/ARCHIVE.md § "Core design principle: mock quirks are tickets, not pitfalls"
 // principle): a learned entry whose rule echoes a 501 / Plugin-did-
 // not-respond / OAuth-escape / 404-from-Describe* failure should
 // never have made it into the file — it should have been routed to

@@ -10,7 +10,7 @@ Build `infrafactory`, a Go CLI + SvelteKit UI that generates and validates OpenT
 2. `infrafactory.yaml`
 3. `CONCEPT.md` prose
 
-Additional references:
+Additional references (map of every live doc: `docs/README.md`; `docs/archive/` is frozen history, skip it when searching):
 - Auto-learning loop deep-dive: `docs/auto-learning-loop.md` — single explainer for the mock-server-bug classifier + fix/avoid extractors + diff-pattern templates + ratchets + sweep protocol + worked example
 - ADRs: `docs/decisions/*.md`
 - Prompts: `prompts/*.md`
@@ -37,8 +37,8 @@ story. An epic is done when its last story's PR deletes the epic file and marks 
 HLD's `## Epics`. One-off work is a single file in `docs/stories/`. A decision or a hand step for
 the user is a `kind: operator` story, so it shows on the board, not in prose.
 
-Retired (kept in git as history, not written any more): arc plans in `docs/plans/`, arc close-outs
-in `docs/status/ARCHIVE.md` and `docs/status/STATUS_HISTORY.md`, and slice numbers (`S###`).
+Retired (kept in git as history, not written any more): arc plans in `docs/archive/plans/`, arc close-outs
+in `docs/archive/status/ARCHIVE.md` and `docs/archive/status/STATUS_HISTORY.md`, and slice numbers (`S###`).
 
 ADRs only when crossing the threshold below.
 

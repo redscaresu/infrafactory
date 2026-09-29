@@ -4,7 +4,7 @@ status: blocked
 blocked_by: [aws-scope-hand-setup, aws-scope-claim, aws-scope-sweep, aws-scope-reap-body, aws-scope-test-lifecycle, aws-scope-reap-command]
 epic: aws-layer3-claim-sweep-reap
 depends_on: [aws-scope-hand-setup, aws-scope-claim, aws-scope-sweep, aws-scope-reap-body, aws-scope-test-lifecycle, aws-scope-reap-command]
-touches: ["docs/operations.md", "docs/layer3-real-vs-mock-deltas.md"]
+touches: ["docs/operations.md", "docs/layer3/real-vs-mock-deltas.md"]
 risk: high
 ---
 
@@ -25,5 +25,5 @@ Run by the lead with the user after every code story and the hand setup, from a 
 - Step 4 refuses naming the holder and makes no change.
 - Step 5's output shows each delete action in the reap table sent at least once, and no AccessDenied or UnauthorizedOperation anywhere.
 - Steps 6 and 7: exit 0, every collection empty, only the stamp under the prefix. Step 8 PASSes.
-- docs/operations.md § Layer 3 (AWS) gets a dated line: the policy in force was sufficient for claim, sweep and every reap delete. Any real-vs-fake difference goes into docs/layer3-real-vs-mock-deltas.md.
+- docs/operations.md § Layer 3 (AWS) gets a dated line: the policy in force was sufficient for claim, sweep and every reap delete. Any real-vs-fake difference goes into docs/layer3/real-vs-mock-deltas.md.
 - The PR body lists what stays unproven for aws-layer3-gate-lift and the first real run to require, since the gate refuses aws before the claim (test_command.go:690 vs :836): test and run taking and releasing the claim on real AWS; a second test refused naming the holder; the failed-apply sweep; the run and test interrupt prints; tofu destroy's IAM actions. The PR body also gives the spend (NAT hour, three EIP hours, a t3.micro, under €0.20) and the date.
