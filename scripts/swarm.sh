@@ -3,6 +3,7 @@
 #
 #   swarm.sh agent <tab> <name> <cwd> <role> <prompt-file>   start one agent in its own pane
 #   swarm.sh story <slug>                                   build one docs/stories/<slug>.md
+#   swarm.sh conduct <epic>                                 a fresh conductor that drives one epic's stories to merge
 #   swarm.sh wait <name> [timeout-ms]                       block until the agent settles
 #   swarm.sh policy <role>                                  print the model and effort for a role
 #   swarm.sh close <tab>                                    close <tab>, <tab>-2, ... and forget them
@@ -24,6 +25,7 @@ die() { echo "swarm: $*" >&2; exit 1; }
 #   design:    hld, hld-review, hld-lead
 #   planning:  survey, lead, skeptic, critic, codex
 #   building:  code, code-risky, docs, chore, verify
+#   conducting: conduct
 policy() {
   case "$1" in
     hld)        echo "claude fable high" ;;    # co-writes the HLD with the user, who waits on every turn
@@ -39,7 +41,8 @@ policy() {
     docs|chore) echo "claude sonnet medium" ;;
     verify)     echo "claude sonnet medium" ;; # run tests or commands and report
     escalate)   echo "claude fable xhigh" ;;   # only after a story failed twice, or an unreconcilable epic
-    *) die "unknown role '$1' (hld hld-review hld-lead survey lead skeptic critic codex code code-risky docs chore verify escalate)" ;;
+    conduct)    echo "claude opus high" ;;     # dispatches, reviews, merges one epic; a fresh session each time
+    *) die "unknown role '$1' (hld hld-review hld-lead survey lead skeptic critic codex code code-risky docs chore verify escalate conduct)" ;;
   esac
 }
 
@@ -186,6 +189,35 @@ build_story() {
   start_agent "build" "${slug}" "${wt}" "${role}" "${prompt}"
 }
 
+# The brief a conductor gets: one epic, from a fresh session, so its context holds only that epic.
+conduct_brief() {
+  local epic="$1"
+  cat <<EOF
+You are the conductor for the epic docs/epics/${epic}.md. Read AGENTS.md, STATUS.md,
+docs/operations.md and the epic first.
+
+Drive the epic's stories (docs/stories/*.md with \`epic: ${epic}\`) to merge, as docs/operations.md
+§ Parallel agents describes: pick waves of \`ready\` stories whose \`touches\` do not overlap,
+start each with \`scripts/swarm.sh story <slug>\`, wait with \`scripts/swarm.sh wait\` and
+\`scripts/swarm.sh watch\` in the background, review each PR, merge it only when its head is green,
+then run \`scripts/swarm.sh unblock\`, and \`scripts/swarm.sh close build\` once a wave is done.
+
+Stay inside this epic: start no story outside it, and leave the HLD and other epics alone. A
+\`kind: lead\` story (real cloud, credentials) or a \`kind: operator\` one is not yours to run; list it
+for the user. Stop when the epic's **Done when** holds (delete the epic file in the last PR) or
+when nothing ready is left, and reply with what merged, what is left, and what waits on the user.
+EOF
+}
+
+start_conductor() {
+  local epic="$1" prompt
+  [[ "${epic}" =~ ^[a-z0-9-]+$ ]] || die "bad epic '${epic}'"
+  [[ -f "${REPO_ROOT}/docs/epics/${epic}.md" ]] || die "no epic docs/epics/${epic}.md"
+  prompt="${REPO_ROOT}/.swarm/briefs/conduct-${epic}.md"; mkdir -p "$(dirname "${prompt}")"
+  conduct_brief "${epic}" > "${prompt}"
+  start_agent "conduct" "conduct-${epic}" "${REPO_ROOT}" conduct "${prompt}"
+}
+
 # unblock — a merged story's file is deleted, so a blocked story whose every blocked_by slug has no
 # story or epic file left, and names no operator step, is ready. Prints each story it flips.
 unblock() {
@@ -274,13 +306,14 @@ main() {
     policy) policy "${1:?role}" ;;
     agent)  require_herdr; start_agent "$@" ;;
     story)  require_herdr; build_story "${1:?slug}" ;;
+    conduct) require_herdr; start_conductor "${1:?epic}" ;;
     close)  require_herdr; close_tabs "${1:?tab}" ;;
     unblock) unblock ;;
     watch)  watch_prs "$@" ;;
     _name)  agent_name "${1:?slug}"; echo ;;                      # test hook: the agent name for a slug
     _pane)  require_herdr; next_pane "${1:?tab}" "${2:?cwd}" ;;   # layout test hook: a pane, no agent
     wait)   require_herdr; herdr agent wait "$(agent_name "${1:?name}")" --timeout "${2:-3600000}" | json "d['result']['agent']['agent_status']" ;;
-    *) sed -n '2,13p' "$0"; exit 2 ;;
+    *) sed -n '2,14p' "$0"; exit 2 ;;
   esac
 }
 
