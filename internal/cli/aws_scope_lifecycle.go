@@ -108,7 +108,7 @@ func awsScopeClaimKept(stages []StageSummary, failures []FailureSummary, holder,
 		append(failures, FailureSummary{
 			Layer: "sandbox_deploy", Stage: StageAWSScopeClaimKept, Check: "claim",
 			Command: "release aws scope",
-			Detail: fmt.Sprintf("kept the aws scope's claim for %s: %s, so resources of this run may exist. "+
+			Detail: fmt.Sprintf("kept the aws scope's claim for %s: %s, so resources may still exist in the scope. "+
 				"`%s` destroys what is left and releases the claim", holder, reason, reap),
 		})
 }

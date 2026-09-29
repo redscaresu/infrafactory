@@ -54,13 +54,17 @@ type awsLifecycle struct {
 	putFail bool              // PutParameter, and every claim read after it, is denied
 	putSent bool
 	onPut   func()
-	sleeps  int
-	cancel  context.CancelFunc
+	// onEC2 sees each EC2 action with mu held, so it may change ec2.
+	onEC2  func(action string)
+	sleeps int
+	cancel context.CancelFunc
 	// credFile is the credential file under the test's HOME.
 	credFile string
 
 	deploy  *fakeSandboxDeployHarness
 	destroy *loggingSandboxDestroy
+	// scw is every Scaleway Layer 3 dependency, none of which aws may call.
+	scw layer3Fakes
 }
 
 func newAWSLifecycle(t *testing.T) *awsLifecycle {
@@ -74,6 +78,7 @@ func newAWSLifecycle(t *testing.T) *awsLifecycle {
 		ec2:      map[string]string{},
 		denied:   map[string]bool{},
 		credFile: filepath.Join(credDir, "layer3-aws.env"),
+		scw:      newLayer3Fakes(),
 	}
 	require.NoError(t, os.WriteFile(lc.credFile,
 		[]byte("AWS_ACCESS_KEY_ID="+preflightAWSKeyID+"\nAWS_SECRET_ACCESS_KEY="+preflightAWSSecret+"\n"), 0o600))
@@ -137,6 +142,9 @@ func (lc *awsLifecycle) Do(req *http.Request) (*http.Response, error) {
 	}
 	lc.record("ec2:" + action)
 	lc.mu.Lock()
+	if lc.onEC2 != nil {
+		lc.onEC2(action)
+	}
 	denied, items := lc.denied[action], lc.ec2[action]
 	lc.mu.Unlock()
 	if denied {
@@ -271,9 +279,9 @@ func runAWSTest(t *testing.T, lc *awsLifecycle, customize func(*config.Config), 
 		Destroy:        mockDestroy,
 		SandboxDeploy:  lc.deploy,
 		SandboxDestroy: lc.destroy,
-		RunProject:     &recordingRunProject{},
-		OrphanSweep:    &fakeOrphanSweep{},
-		AutoCreated:    &fakePurge{},
+		RunProject:     lc.scw.runProject,
+		OrphanSweep:    lc.scw.sweep,
+		AutoCreated:    lc.scw.purge,
 		AWSSTS:         lc,
 		AWSSSM:         lc,
 		AWSEC2:         lc,
