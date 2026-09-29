@@ -4,9 +4,11 @@ name: Scenario gate
 # can't converge through the LLM-driven pipeline.
 #
 # Triggers only on PRs that touch scenarios/training/*.yaml — most PRs
-# don't, so the LLM-cost bill stays bounded. The job gracefully skips
-# when OPENROUTER_API_KEY isn't configured (e.g. fork PRs without
-# secret access, or repos that haven't wired the credential yet).
+# don't, so the LLM-cost bill stays bounded. When OPENROUTER_API_KEY isn't
+# configured (fork PRs without secret access, or this repo, which keeps the
+# harness on the `claude` command) the scenario-gate job is skipped, so the
+# PR shows it as skipped rather than as a pass that ran nothing. A job-level
+# `if` cannot read `secrets`, hence the separate llm-credentials job.
 #
 # Background: the cross-repo parity harness M75 only checks that a
 # scenario file exists and is mapped; it does not run the scenario.
@@ -30,7 +32,27 @@ permissions:
   contents: read
 
 jobs:
+  llm-credentials:
+    runs-on: ubuntu-latest
+    outputs:
+      configured: ${{ steps.creds.outputs.configured }}
+    steps:
+      - name: Check LLM credentials
+        id: creds
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          if [ -z "${OPENROUTER_API_KEY:-}" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::OPENROUTER_API_KEY secret not configured — scenario-gate is skipped"
+            echo "::warning::To activate the gate: Settings → Secrets and variables → Actions → add OPENROUTER_API_KEY"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
   scenario-gate:
+    needs: llm-credentials
+    if: needs.llm-credentials.outputs.configured == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
@@ -57,27 +79,12 @@ jobs:
       - name: Setup OpenTofu
         uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2
 
-      - name: Check LLM credentials
-        id: creds
-        env:
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-        run: |
-          if [ -z "${OPENROUTER_API_KEY:-}" ]; then
-            echo "configured=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::OPENROUTER_API_KEY secret not configured — scenario-gate will skip"
-            echo "::warning::To activate the gate: Settings → Secrets and variables → Actions → add OPENROUTER_API_KEY"
-          else
-            echo "configured=true" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: List changed scenarios
-        if: steps.creds.outputs.configured == 'true'
         run: |
           echo "Changed scenarios in this PR:"
           git diff --name-only --diff-filter=AM origin/${{ github.event.pull_request.base.ref }}...HEAD -- 'scenarios/training/*.yaml' || true
 
       - name: Switch agent config to openrouter
-        if: steps.creds.outputs.configured == 'true'
         run: |
           # Default infrafactory.yaml uses agent.type=claude-code (local
           # Claude CLI). CI doesn't have the CLI, so switch to
@@ -95,21 +102,19 @@ jobs:
           PY
 
       - name: Start mocks
-        if: steps.creds.outputs.configured == 'true'
         # Builds + starts mockway/fakegcp/fakeaws as background go-run
         # subprocesses + pulls SeaweedFS via Docker (Docker is preinstalled
         # on ubuntu-latest runners).
         run: make mocks-up
 
       - name: Run scenario-change-gate
-        if: steps.creds.outputs.configured == 'true'
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           BASE_REF: origin/${{ github.event.pull_request.base.ref }}
         run: bash scripts/scenario_change_gate.sh
 
       - name: Upload scenario logs on failure
-        if: failure() && steps.creds.outputs.configured == 'true'
+        if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: scenario-gate-logs
@@ -118,5 +123,5 @@ jobs:
             /tmp/scenario_gate_results.tsv
 
       - name: Stop mocks
-        if: always() && steps.creds.outputs.configured == 'true'
+        if: always()
         run: make mocks-down
