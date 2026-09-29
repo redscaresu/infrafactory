@@ -94,6 +94,24 @@ bash and zsh: a variable followed by a colon is written `${ACCOUNT_ID}:`, becaus
 repo is public): they stay in shell variables and the local config, and outputs pasted into a PR
 are cut to their last four characters. No command prints the secret key.
 
+**Before step 0: a management account.** If you start from a fresh AWS account, it becomes the
+Organizations management account. It holds the organization, your login and the rules, and never
+runs workloads: a service control policy cannot restrict it. In the console, as root:
+
+1. Put MFA on the root user (account menu → Security credentials).
+2. AWS Organizations → **Create an organization**. The account that creates it is its management
+   account, permanently.
+3. IAM Identity Center → **Enable**, as a **Single-Region** instance (the multi-Region default adds
+   a customer-managed KMS key you do not need). Note its region.
+4. Identity Center → Users → add yourself; accept the invitation and register MFA.
+5. Permission sets → create the predefined **AdministratorAccess**; AWS accounts → assign your user
+   to the management account with it.
+6. `aws configure sso --profile mgmt`: the start URL is the access portal URL on the Identity
+   Center dashboard, the SSO region is step 3's, the default client region `us-east-1`.
+
+Then `aws organizations describe-organization --profile mgmt` should show this account as
+`MasterAccountId`. Keep root for emergencies and use this login from here on.
+
 **0. Variables and the admin profile.** `MGMT` is the CLI profile of the Organizations management
 account. `OTHER` is any region but `REGION`, for the deny checks.
 
@@ -287,6 +305,31 @@ orgs ec2:DescribeVpcs $OTHER         # explicitDeny  False
 orgs s3:ListAllMyBuckets $REGION     # explicitDeny  False
 orgs iam:CreateUser $REGION          # explicitDeny  False
 ```
+
+### Getting into the scope by hand
+
+A member account created by the organization has no users and a root user without a password.
+Organizations adds `OrganizationAccountAccessRole` (AdministratorAccess) to it, trusting the
+management account, so an admin there can assume it; it is also the SCP's one exemption. The
+`infrafactory-admin` profile uses it from the CLI. In the console, from the management login:
+
+```
+https://signin.aws.amazon.com/switchrole?account=<ACCOUNT_ID>&roleName=OrganizationAccountAccessRole&displayName=infrafactory-layer3
+```
+
+(With multi-session support on, "Switch role" is under the arrow beside **Add session**.) Switch
+the console to `REGION`. Look, do not build: anything made by hand is a leak to the next sweep.
+
+### Re-running the planted-leak proof
+
+`docs/layer3/aws/plant-leaks.sh` plants one leak per swept collection as the admin role, and
+`plant-eip-on-eni.sh` an elastic IP on a standalone interface (the one case that makes reap send
+`DisassociateAddress`). Re-run them after any change to `iam-policy.json` or the reap table, then:
+`reap --dry-run` must name every id in `planted.env`; claim the scope as another holder and `reap`
+must refuse by name; `reap --take-over <holder>` must delete all but `/leak/outside`; delete that
+as the admin and `reap --take-over` again must exit 0 with only the stamp left. CloudTrail
+(`lookup-events` by `Username=infrafactory-layer3`, events take 5-25 minutes to appear) shows which
+reap-table actions were sent and whether any was refused. Last run 2026-09-29, under EUR 0.20.
 
 ## Sibling mocks
 
