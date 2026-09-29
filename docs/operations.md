@@ -89,8 +89,8 @@ are cut to their last four characters. No command prints the secret key.
 account. `OTHER` is any region but `REGION`, for the deny checks.
 
 ```bash
-REGION=eu-west-1
-OTHER=us-east-1
+REGION=us-east-1     # aws-web-live and every AWS scenario pin us-east-1
+OTHER=eu-west-1
 MGMT=<management profile>
 ```
 
