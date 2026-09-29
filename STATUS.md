@@ -7,10 +7,10 @@ Current state, and the one place to start. It changes only when **Now** does, an
 
 **AWS web stack**: [HLD](docs/hld/2026-09-27-aws-web-stack.md); its `## Epics` shows what is done.
 The three stories the user's 2026-09-29 decisions made ready have merged (#394, #396, fakeaws #41),
-and policy-correctness is done. The AWS path waits on the user: the AWS account setup
-(`aws-scope-hand-setup`, runbook in `docs/operations.md` § Layer 3 (AWS) › Scope setup,
-`REGION=us-east-1`). After it, the lead's `aws-scope-planted-leak-proof`, then `aws-whole-scope-adr`,
-then `aws-layer3-gate-lift`, which needs the user's explicit approval.
+and policy-correctness is done. The user set up the AWS Layer 3 scope on 2026-09-29 (a member
+account in us-east-1, every step verified; runbook in `docs/operations.md` § Layer 3 (AWS) › Scope
+setup). Next is the lead's `aws-scope-planted-leak-proof`, then `aws-whole-scope-adr`, then
+`aws-layer3-gate-lift`, which needs the user's explicit approval.
 
 What waits on the user is the board's **Waiting on you** view (`kind: operator` stories); what the
 lead runs is **Lead-run**.
