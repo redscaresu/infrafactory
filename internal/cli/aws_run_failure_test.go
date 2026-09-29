@@ -105,6 +105,7 @@ func runAWSRun(t *testing.T, lc *awsLifecycle, o awsRunOptions) awsRun {
 	cmd.SetArgs(append([]string{h.ScenarioPath, "--config", h.ConfigPath, "--output", string(OutputModeJSON),
 		"--reset-mocks=false"}, o.flags...))
 	run.h, run.err, run.output = h, cmd.Execute(), stdout.String()+stderr.String()
+	require.Truef(t, strings.HasPrefix(stdout.String(), "{"), "run wrote no JSON result: %v\n%s", run.err, run.output)
 	run.result = decodeMachineOutput(t, bytes.NewBufferString(stdout.String()))
 	require.NotEqual(t, -1, loopEnd, "the loop ended: %s", run.output)
 	run.armCalls = lc.log()[loopEnd:]
