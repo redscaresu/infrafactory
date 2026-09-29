@@ -1,7 +1,6 @@
 ---
 kind: code
-status: blocked
-blocked_by: [decide-no-public-endpoints-routing]
+status: ready
 epic: policy-correctness
 risk: high
 ---
@@ -15,7 +14,15 @@ the criterion to `policies/scaleway/no_public_endpoints.rego`, a server-IP polic
 `server_id` rule also denies, on a re-plan, the pattern `pitfalls/scaleway.yaml:46` prescribes
 (`ip_id = scaleway_instance_ip.web.id`): an existing ADR-0017 policy/pitfall conflict.
 
-**Needs the user's decision before it is ready:** it changes the outcome of three proven Scaleway
+**Decided by the user (2026-09-29):** the load balancer is the only public thing. Servers get no
+public IP; the load balancer reaches them on their private addresses, and they reach the database
+over the private network. So: route the criterion to `no_public_database`, keep
+`connectivity public_internet -> compute: blocked` in `web-app-paris`, and retire the `ip_id`
+pitfall through the pipeline (never by hand-editing `pitfalls/scaleway.yaml`). A private server has
+no outbound internet without a Public Gateway; if a scenario needs egress, the connectivity checks
+should drive the stack to add one, not a public IP.
+
+**The question that was open:** it changes the outcome of three proven Scaleway
 scenarios. Options: route the criterion to `no_public_database`, or scope `no_public_endpoints` to
 a target and resolve the pitfall conflict.
 
