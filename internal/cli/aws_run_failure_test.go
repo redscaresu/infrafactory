@@ -251,6 +251,28 @@ func TestAWSRunWithNoDestroyEndsAfterOneIteration(t *testing.T) {
 	}
 }
 
+// Interrupted during the failure path's own sweep, after the loop: the
+// claim is kept, reap is named, and the result is still written.
+func TestAWSRunInterruptedDuringTheFailureArmPrintsTheReapCommand(t *testing.T) {
+	lc := newAWSLifecycle(t)
+	dirtySweep(lc)
+
+	run := runAWSRun(t, lc, awsRunOptions{repairs: 1, loopEnded: func() {
+		lc.mu.Lock()
+		defer lc.mu.Unlock()
+		lc.onEC2 = func(string) { lc.cancel() }
+	}})
+
+	require.Error(t, run.err)
+	assert.Contains(t, run.armCalls, destroyRun, "the arm reached its destroy")
+	assert.Empty(t, writesIn(run.armCalls), "nothing released")
+	_, held := lc.claim()
+	assert.True(t, held, "the claim is kept")
+	assert.Contains(t, run.output, "Interrupted: this run keeps the aws scope's claim")
+	assert.Contains(t, run.output, reapCommand(run.h.ConfigPath, run.h.ScenarioPath))
+	assert.True(t, slices.ContainsFunc(run.result.Stages, isStage(StageAWSScopeClaimKept)))
+}
+
 // Interrupted inside the apply. A dirty scope keeps the claim; a clean
 // one is released, and the loop still stops.
 func TestInterruptedAWSRunPrintsTheReapCommand(t *testing.T) {

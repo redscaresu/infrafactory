@@ -827,9 +827,14 @@ func runRunWithNotify(
 		// leaves behind.
 		mayHoldResources := liveStateMayHoldResources(runtime.OutputDir())
 		if cloud == layer3AWS {
-			awsStages, awsFailures := awsRunFailureTeardown(cmd.Context(), runtime, allStages, controls.AWSClaimHolder, scenarioPath)
-			allStages = append(allStages, awsStages...)
-			allFailures = append(allFailures, awsFailures...)
+			// Guarded like the loop: an interrupt during this destroy must
+			// still name reap, and still reach the result below.
+			_ = withSandboxInterruptGuard(cmd, runtime, cloud, notify, func(ctx context.Context) error {
+				awsStages, awsFailures := awsRunFailureTeardown(ctx, runtime, allStages, controls.AWSClaimHolder, scenarioPath)
+				allStages = append(allStages, awsStages...)
+				allFailures = append(allFailures, awsFailures...)
+				return nil
+			})
 		} else if mayHoldResources && cloud != layer3Scaleway {
 			// Before the marker is read: one here may be a stale Scaleway
 			// one, and nothing below is written for any other cloud.
