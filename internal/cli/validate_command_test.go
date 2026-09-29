@@ -78,7 +78,7 @@ func TestValidateCommandStaticSuccess(t *testing.T) {
 	if static.lastDir != filepath.Join(outputRoot, "example-scenario") {
 		t.Fatalf("unexpected static work dir: %s", static.lastDir)
 	}
-	if static.lastEnv["SCW_API_URL"] != "http://localhost:8080" {
+	if static.lastEnv["SCW_API_URL"] != closedMockURL {
 		t.Fatalf("unexpected SCW_API_URL: %q", static.lastEnv["SCW_API_URL"])
 	}
 	if static.lastEnv["SCW_ACCESS_KEY"] != "SCWMOCKACCESSKEY0000" {
