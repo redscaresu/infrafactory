@@ -41,6 +41,7 @@ token.json
 # Local Claude Code state stays local; shared commands are committed.
 .claude/*
 !.claude/commands/
+!.claude/swarm/
 # swarm.sh's pane records, briefs and agent outputs.
 .swarm/
 # docs/ is an Obsidian vault. Per-user UI state churns on every click; only the
