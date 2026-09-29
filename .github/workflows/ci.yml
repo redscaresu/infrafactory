@@ -83,35 +83,6 @@ jobs:
         # default).
         run: go test -race -count=2 ./...
 
-      # The AWS identity preflight against fakeaws STS, the Layer 2 AMI
-      # against fakeaws SSM, the Layer 3 scope claim, sweep and reap against
-      # fakeaws STS, SSM and EC2, and Layer 2's AWS env through real tofu with
-      # the network sealed (SealNetwork): every
-      # service fakeaws serves without Docker, env-routed, and validate
-      # needing fakeaws STS. S3 needs Docker (TestE2E_AWSFullStack).
-      # `pitfalls check-avoid` retires on fakeaws, and every retired
-      # avoid record in pitfalls/avoid-checks/ must still replay clean.
-      # fakeaws is pinned to one commit, so bumping FAKEAWS_SHA is a
-      # deliberate edit. -count=1: the test cache cannot see the sibling
-      # checkout, so a cached PASS could replay after a bump. `go test`
-      # exits 0 when a test skips or no longer exists, so the step passes
-      # only on each test's own PASS line.
-      - name: AWS against fakeaws
-        env:
-          FAKEAWS_SHA: ee7656a00820db216d74b089dbef5c4ef54def10
-          INFRAFACTORY_ENABLE_E2E: "1"
-        run: |
-          set -o pipefail
-          git init -q ../fakeaws
-          git -C ../fakeaws fetch -q --depth 1 https://github.com/redscaresu/fakeaws.git "$FAKEAWS_SHA"
-          git -C ../fakeaws checkout -q FETCH_HEAD
-          tests=$(grep -v '^#' .github/fakeaws-e2e-tests)
-          [ -n "$tests" ] || { echo "no tests listed in .github/fakeaws-e2e-tests"; exit 1; }
-          go test ./internal/e2e -run "^($(echo $tests | tr ' ' '|'))\$" -count=1 -v | tee "$RUNNER_TEMP/aws-fakeaws.log"
-          for test in $tests; do
-            grep -q "^--- PASS: $test " "$RUNNER_TEMP/aws-fakeaws.log" || { echo "$test did not PASS"; exit 1; }
-          done
-
       # The UI suites were guarded by a local pre-commit hook and nothing
       # else, so they were exactly as strong as the discipline of whoever
       # was committing -- and `--no-verify` is one flag away.
@@ -183,6 +154,86 @@ jobs:
           name: playwright-report
           path: ui/playwright-report/
           retention-days: 7
+
+  # AWS against fakeaws runs beside `test`, not after it: it was 506 of the
+  # test job's 865 s, so CI (and every swarm story's wait on it) took the sum.
+  # It is a required check on main in its own right.
+  aws-e2e:
+    runs-on: ubuntu-latest
+    env:
+      TF_PLUGIN_CACHE_DIR: ~/.terraform.d/plugin-cache
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v4
+
+      # Layer 3 teardown runs tofu, and the test that reproduces a stack
+      # whose config cannot evaluate skips without it.
+      - name: Setup OpenTofu
+        uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2
+        with:
+          tofu_wrapper: false
+
+      - name: Prepare Terraform plugin cache directory
+        run: mkdir -p "$TF_PLUGIN_CACHE_DIR"
+
+      - name: Cache Terraform providers
+        uses: actions/cache@v6
+        with:
+          path: ~/.terraform.d/plugin-cache
+          key: terraform-plugin-cache-${{ runner.os }}-v1
+
+      - name: Build UI (embedded via go:embed)
+        # cmd/infrafactory/embed.go requires `cmd/infrafactory/ui/build/` to
+        # exist at compile time. Both are gitignored, so CI must produce
+        # them before any `go test`/`go build` of cmd/infrafactory runs.
+        run: |
+          cd ui && npm ci && npm run build
+          cd ..
+          rm -rf cmd/infrafactory/ui/build
+          mkdir -p cmd/infrafactory/ui
+          cp -R ui/build cmd/infrafactory/ui/
+
+      # The AWS identity preflight against fakeaws STS, the Layer 2 AMI
+      # against fakeaws SSM, the Layer 3 scope claim, sweep and reap against
+      # fakeaws STS, SSM and EC2, and Layer 2's AWS env through real tofu with
+      # the network sealed (SealNetwork): every
+      # service fakeaws serves without Docker, env-routed, and validate
+      # needing fakeaws STS. S3 needs Docker (TestE2E_AWSFullStack).
+      # `pitfalls check-avoid` retires on fakeaws, and every retired
+      # avoid record in pitfalls/avoid-checks/ must still replay clean.
+      # fakeaws is pinned to one commit, so bumping FAKEAWS_SHA is a
+      # deliberate edit. -count=1: the test cache cannot see the sibling
+      # checkout, so a cached PASS could replay after a bump. `go test`
+      # exits 0 when a test skips or no longer exists, so the step passes
+      # only on each test's own PASS line.
+      - name: AWS against fakeaws
+        env:
+          FAKEAWS_SHA: ee7656a00820db216d74b089dbef5c4ef54def10
+          INFRAFACTORY_ENABLE_E2E: "1"
+        run: |
+          set -o pipefail
+          git init -q ../fakeaws
+          git -C ../fakeaws fetch -q --depth 1 https://github.com/redscaresu/fakeaws.git "$FAKEAWS_SHA"
+          git -C ../fakeaws checkout -q FETCH_HEAD
+          tests=$(grep -v '^#' .github/fakeaws-e2e-tests)
+          [ -n "$tests" ] || { echo "no tests listed in .github/fakeaws-e2e-tests"; exit 1; }
+          go test ./internal/e2e -run "^($(echo $tests | tr ' ' '|'))\$" -count=1 -v | tee "$RUNNER_TEMP/aws-fakeaws.log"
+          for test in $tests; do
+            grep -q "^--- PASS: $test " "$RUNNER_TEMP/aws-fakeaws.log" || { echo "$test did not PASS"; exit 1; }
+          done
 
   govulncheck:
     # S150-T1. Nothing scanned Go dependencies for known vulnerabilities
