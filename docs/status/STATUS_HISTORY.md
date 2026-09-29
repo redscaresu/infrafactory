@@ -1,5 +1,7 @@
 # STATUS history
 
+> Frozen 2026-09-28: history only, not written any more. See `docs/status/README.md`.
+
 `STATUS.md` as it stood before S197 (2026-09-27), newest first and unedited. The current
 state lives in `STATUS.md`; per-arc close-outs in `docs/status/ARCHIVE.md`.
 

@@ -11,6 +11,10 @@ properties:
     displayName: HLD
   note.depends_on:
     displayName: Depends on
+  note.kind:
+    displayName: Kind
+  note.blocked_by:
+    displayName: Blocked by
 views:
   - type: table
     name: Board
@@ -52,3 +56,23 @@ views:
       - depends_on
     columnSize:
       file.name: 280
+  - type: table
+    name: Waiting on you
+    filters:
+      and:
+        - file.inFolder("stories")
+        - kind == "operator"
+    order:
+      - file.name
+      - status
+      - epic
+  - type: table
+    name: Lead-run
+    filters:
+      and:
+        - file.inFolder("stories")
+        - kind == "lead"
+    order:
+      - file.name
+      - status
+      - blocked_by
