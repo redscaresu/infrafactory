@@ -6,7 +6,8 @@ Current state, and the one place to start. It changes only when **Now** does, an
 ## Now
 
 **AWS web stack**: [HLD](docs/hld/2026-09-27-aws-web-stack.md); its `## Epics` shows what is done.
-Every agent-buildable story is merged. The next step is the user's: the AWS account setup
+The user's 2026-09-29 decisions made three stories ready: `no-public-endpoints-criterion-routing`,
+`scenario-gate-skip-is-not-green` and `fakeaws-provider-smoke-fast`. The AWS path waits on the user: the AWS account setup
 (`aws-scope-hand-setup`, runbook in `docs/operations.md` § Layer 3 (AWS) › Scope setup,
 `REGION=us-east-1`). After it, the lead's `aws-scope-planted-leak-proof`, then `aws-whole-scope-adr`,
 then `aws-layer3-gate-lift`, which needs the user's explicit approval.
