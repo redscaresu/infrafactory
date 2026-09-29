@@ -86,6 +86,13 @@ func awsScopeTeardown(ctx context.Context, runtime *CommandRuntime, outputDir st
 	if err != nil {
 		return awsScopeClaimKept(nil, nil, opts.AWSClaimHolder, reap, err.Error())
 	}
+	return awsDestroyAndRelease(ctx, runtime, outputDir, env, opts.AWSClaimHolder, reap)
+}
+
+// awsDestroyAndRelease runs with holder holding the claim: it destroys
+// what the state records, then releases through awsReleaseAfterCleanSweep.
+// Anything short of a release keeps the claim and names reap.
+func awsDestroyAndRelease(ctx context.Context, runtime *CommandRuntime, outputDir string, env map[string]string, holder, reap string) ([]StageSummary, []FailureSummary) {
 	var stages []StageSummary
 	var failures []FailureSummary
 	if liveStateMayHoldResources(outputDir) {
@@ -94,11 +101,11 @@ func awsScopeTeardown(ctx context.Context, runtime *CommandRuntime, outputDir st
 		result, _, destroyErr := destroyAWSSandbox(ctx, runtime, outputDir, env)
 		stages, failures = appendSandboxDestroyResult(stages, failures, result, destroyErr)
 	}
-	releaseStages, releaseFailures := awsReleaseAfterCleanSweep(ctx, runtime, env, opts.AWSClaimHolder)
+	releaseStages, releaseFailures := awsReleaseAfterCleanSweep(ctx, runtime, env, holder)
 	stages = append(stages, releaseStages...)
 	failures = append(failures, releaseFailures...)
 	if len(releaseFailures) > 0 {
-		return awsScopeClaimKept(stages, failures, opts.AWSClaimHolder, reap, "the scope was not proven empty and released")
+		return awsScopeClaimKept(stages, failures, holder, reap, "the scope was not proven empty and released")
 	}
 	return stages, failures
 }
