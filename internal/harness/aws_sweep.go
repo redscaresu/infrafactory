@@ -10,6 +10,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
+	"github.com/aws/aws-sdk-go-v2/service/sts"
 )
 
 // AWSRunIDTagKey is the tag default_tags puts on every AWS resource a run
@@ -29,16 +30,18 @@ const (
 // any item is in one, the sweep polls again rather than failing.
 var awsSettlingStates = map[string]bool{"shutting-down": true, "deleting": true, "detaching": true}
 
-// AWSDoers carry the sweep's requests, one per service.
+// AWSDoers carry the sweep's and the reap's requests, one per service.
+// Only the reap uses STS.
 type AWSDoers struct {
 	EC2 ec2.HTTPClient
 	SSM ssm.HTTPClient
+	STS sts.HTTPClient
 }
 
 // AWSEndpoints are the services' endpoints; "" means real AWS in the
 // sealed env's region.
 type AWSEndpoints struct {
-	EC2, SSM string
+	EC2, SSM, STS string
 }
 
 // AWSStray is one thing the sweep found in the scope. RunID is its

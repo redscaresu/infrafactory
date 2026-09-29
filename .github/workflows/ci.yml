@@ -84,8 +84,8 @@ jobs:
         run: go test -race -count=2 ./...
 
       # The AWS identity preflight against fakeaws STS, the Layer 2 AMI
-      # against fakeaws SSM, the Layer 3 scope claim and sweep against
-      # fakeaws SSM and EC2, and Layer 2's AWS env through real tofu with
+      # against fakeaws SSM, the Layer 3 scope claim, sweep and reap against
+      # fakeaws STS, SSM and EC2, and Layer 2's AWS env through real tofu with
       # the network sealed (SealNetwork): every
       # service fakeaws serves without Docker, env-routed, and validate
       # needing fakeaws STS. S3 needs Docker (TestE2E_AWSFullStack).
@@ -98,7 +98,7 @@ jobs:
       # only on each test's own PASS line.
       - name: AWS against fakeaws
         env:
-          FAKEAWS_SHA: c251719333b786106fe5d05ab2b3d7b456277574
+          FAKEAWS_SHA: ee7656a00820db216d74b089dbef5c4ef54def10
           INFRAFACTORY_ENABLE_E2E: "1"
         run: |
           set -o pipefail
