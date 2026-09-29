@@ -33,7 +33,7 @@ Additional references (map of every live doc: `docs/README.md`; `docs/archive/` 
 Work flows HLD → epics → stories → the board, run by the swarm-dev plugin (`docs/operations.md` § The swarm):
 `/hld` writes an HLD with the user; `/plan-hld <file>` splits an agreed HLD into epics;
 `/plan-epic <slug>` scopes an epic into stories; `swarm.sh conduct <epic>` builds its ready
-stories. An epic is done when its last story's PR deletes the epic file and marks it done in the
+stories. After the HLD, `/swarm` runs these in turn and resumes wherever it stopped. An epic is done when its last story's PR deletes the epic file and marks it done in the
 HLD's `## Epics`. One-off work is a single file in `docs/stories/`. A decision or a hand step for
 the user is a `kind: operator` story, so it shows on the board, not in prose.
 

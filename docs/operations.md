@@ -308,7 +308,8 @@ Detail in each sibling's `AGENTS.md` § "Fidelity strategy".
 ## The swarm (swarm-dev)
 
 Work is planned and built with [swarm-dev](https://github.com/redscaresu/swarm-dev), a Claude Code
-plugin: `/hld`, `/plan-hld`, `/plan-epic`, and `swarm.sh` for panes, builds and conductors. Its
+plugin: `/hld`, `/plan-hld`, `/plan-epic`, `/swarm` (the whole chain after the HLD, resuming
+wherever it stopped), and `swarm.sh` for panes, builds and conductors. Its
 `docs/method.md` is the method: the planning chain, the model and effort per role, scoping an epic,
 and building with a conductor. Install it once:
 
