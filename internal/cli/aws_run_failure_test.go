@@ -72,6 +72,7 @@ func runAWSRun(t *testing.T, lc *awsLifecycle, o awsRunOptions) awsRun {
 			return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte("terraform {}\n")}}, nil
 		}),
 		Static:         &fakeStaticHarness{result: &harness.StaticResult{PlanJSON: []byte(`{}`)}},
+		MockState:      &fakeRunMockStateClient{statePayload: []byte(`{"instance":{"servers":[]}}`)},
 		MockDeploy:     &fakeMockDeployHarness{},
 		Destroy:        mockDestroyHook(nil),
 		SandboxDeploy:  lc.deploy,
