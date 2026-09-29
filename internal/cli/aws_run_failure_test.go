@@ -222,19 +222,33 @@ func TestAWSRunEndsWhenAnIterationKeepsTheClaimForADirtySweep(t *testing.T) {
 	}
 }
 
+// A deliberate keep is not a failure, as for test: a passing iteration
+// reaches its target and still names reap for the claim it kept.
 func TestAWSRunWithNoDestroyEndsAfterOneIteration(t *testing.T) {
-	lc := newAWSLifecycle(t)
-	applyFails(lc)
+	for name, tc := range map[string]struct {
+		setup func(*awsLifecycle)
+		want  string
+	}{
+		"failing iteration": {setup: applyFails, want: terminalReasonAWSScopeClaimKept},
+		"passing iteration": {setup: func(*awsLifecycle) {}, want: "target_reached"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			lc := newAWSLifecycle(t)
+			tc.setup(lc)
 
-	run := runAWSRun(t, lc, awsRunOptions{repairs: 2, flags: []string{"--no-destroy"}})
+			run := runAWSRun(t, lc, awsRunOptions{repairs: 2, flags: []string{"--no-destroy"}})
 
-	require.Error(t, run.err)
-	assert.Equal(t, 1, run.generates, "generate")
-	assert.Equal(t, terminalReasonAWSScopeClaimKept, run.terminalReason())
-	assert.Empty(t, run.armCalls, "--no-destroy: the failure path tears nothing down")
-	_, held := lc.claim()
-	assert.True(t, held, "the claim is kept")
-	assert.Contains(t, run.output, reapCommand(run.h.ConfigPath, run.h.ScenarioPath))
+			assert.Equal(t, tc.want == "target_reached", run.err == nil, "error: %v", run.err)
+			assert.Equal(t, 1, run.generates, "generate")
+			assert.Equal(t, tc.want, run.terminalReason())
+			assert.Empty(t, run.armCalls, "--no-destroy: the failure path tears nothing down")
+			_, held := lc.claim()
+			assert.True(t, held, "the claim is kept")
+			i := slices.IndexFunc(run.result.Stages, isStage(StageAWSScopeClaimKept))
+			require.NotEqual(t, -1, i, "the run's stages carry %s", StageAWSScopeClaimKept)
+			assert.Contains(t, run.result.Stages[i].Detail, reapCommand(run.h.ConfigPath, run.h.ScenarioPath))
+		})
+	}
 }
 
 // Interrupted inside the apply. A dirty scope keeps the claim; a clean
