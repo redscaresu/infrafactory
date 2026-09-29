@@ -50,6 +50,10 @@ func awsCommandEnvForAccount(runtime *CommandRuntime, scope string) (map[string]
 	return awsLayer3Env(runtime.Config.AWS)
 }
 
+// awsCredentialFile is the Layer 3 key file under $HOME, written at scope
+// setup (docs/operations.md § Layer 3 (AWS)).
+const awsCredentialFile = ".config/infrafactory/layer3-aws.env"
+
 // awsLayer3Env checks the aws block and builds the sealed env from the
 // credential file beside layer3.env. It makes no call.
 func awsLayer3Env(cfg config.AWSConfig) (map[string]string, error) {
@@ -69,7 +73,7 @@ func awsLayer3Env(cfg config.AWSConfig) (map[string]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("aws Layer 3 preflight: locating the credential file: %w", err)
 	}
-	env, err := harness.AWSSealedEnv(filepath.Join(home, ".config", "infrafactory", "layer3-aws.env"), cfg.Region)
+	env, err := harness.AWSSealedEnv(filepath.Join(home, awsCredentialFile), cfg.Region)
 	if err != nil {
 		return nil, fmt.Errorf("aws Layer 3 preflight: %w", err)
 	}
