@@ -1,7 +1,6 @@
 ---
 kind: operator
-status: blocked
-blocked_by: [aws-scope-claim, aws-scope-reap-body]
+status: ready
 epic: aws-layer3-claim-sweep-reap
 depends_on: [aws-scope-claim, aws-scope-reap-body]
 touches: ["docs/operations.md", "AGENTS.md", "docs/aws-layer3/iam-policy.json (new)", "docs/aws-layer3/scp.json (new)", "internal/harness/aws_scope_policy_test.go (new)", "internal/cli/aws_scope_doc_test.go (new)"]
