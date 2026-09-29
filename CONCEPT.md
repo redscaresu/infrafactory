@@ -900,10 +900,6 @@ acceptance_criteria:
     to: compute
     expect: blocked
     description: "Instances must not be directly reachable — only via LB"
-  - type: policy
-    check: no_public_endpoints
-    target: compute
-    expect: pass
 ```
 
 **Full holdout scenario** (generates independently with stricter criteria):
@@ -1011,7 +1007,7 @@ The scenario YAML is validated at parse time against `scenario.schema.json` (JSO
 | `region` | string | `policies/{cloud}/region_restriction.rego` | Required region (e.g., `fr-par`, `us-east-1`, `us-central1`). |
 | `zone` | string | `policies/scaleway/region_restriction.rego` | Required Scaleway zone (e.g., `fr-par-1`). |
 
-Other policies (`encryption_at_rest.rego`, `no_public_database.rego`, `no_public_endpoints.rego`) are *constant policies* — they assert resource-shape invariants without reading `input.params`. Listing them as a criterion (`{type: policy, check: encryption_at_rest, expect: pass}`) is enough to enforce; they don't take params.
+Other policies (`encryption_at_rest.rego`, `no_public_database.rego`) are *constant policies* — they assert resource-shape invariants without reading `input.params`. Listing them as a criterion (`{type: policy, check: encryption_at_rest, expect: pass}`) is enough to enforce; they don't take params.
 
 Pre-S51 scenarios used a top-level `constraints:` map for this. The map was empirically half-vacuous (most keys weren't read by any policy), so S51 collapsed it into per-criterion `params` — every parameter now has a visible consumer.
 
@@ -1454,7 +1450,6 @@ policies/
 ├── scaleway/                        # Scaleway-specific
 │   ├── no_public_database.rego      # RDB must use private networks
 │   ├── encryption_at_rest.rego      # Storage/DB encryption enabled
-│   ├── no_public_endpoints.rego     # No public IPs on compute
 │   ├── region_restriction.rego      # Resources in allowed regions only
 │   └── vpc_required.rego            # All resources attached to VPC
 └── custom/                          # User-added policies
@@ -1466,7 +1461,7 @@ policies/
 constraint_policies:
   no_public_database: scaleway/no_public_database.rego
   encryption_at_rest: scaleway/encryption_at_rest.rego
-  no_public_endpoints: scaleway/no_public_endpoints.rego
+  no_public_endpoints: scaleway/no_public_database.rego
   region: scaleway/region_restriction.rego
   zone: scaleway/region_restriction.rego
 ```

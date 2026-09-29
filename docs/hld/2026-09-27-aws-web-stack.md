@@ -380,7 +380,7 @@ to_port = 0`, the AWS spellings of "everything"; the instance has no instance pr
 against every AWS plan and is named as a criterion so its state half runs at Layer 2, which needs
 the mock to export `ip_permissions` (Design § Step one): today `/mock/state` carries no rules, so
 the state half would pass vacuously, the undefined-is-not-false defect
-[docs/epics/policy-correctness.md](../epics/policy-correctness.md) records for the existing AWS
+the policy-correctness epic (done) records for the existing AWS
 policies. That epic's Rego-test requirement applies to this policy on day one, and its record that
 `deny_state` never runs against real state stands: the holdout is the only real-state check.
 

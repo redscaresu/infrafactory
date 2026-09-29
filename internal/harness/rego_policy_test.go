@@ -148,7 +148,7 @@ func unkilledDenyBodies(ctx context.Context, modules map[string]*ast.Module, sto
 
 // regoTestRequiredDirs are the directories under the policies root whose
 // every policy must have a sibling _test.rego. GCP and Genesys are out of
-// scope (docs/epics/policy-correctness.md).
+// scope (the policy-correctness epic; GCP is paused).
 var regoTestRequiredDirs = []string{"aws", "common", "scaleway"}
 
 func regoTestRequired(root, file string) bool {

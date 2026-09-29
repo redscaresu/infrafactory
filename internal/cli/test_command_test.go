@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -735,6 +736,42 @@ deny_state contains msg if {
 			_, failures, _ := evaluateStatePolicyCriteria(context.Background(), runtime, "aws", []byte(`{"iam":{},"s3":{}}`), specs)
 			require.Len(t, failures, 1)
 			assert.Contains(t, failures[0].Detail, tc.pkg+" was evaluated")
+		})
+	}
+}
+
+// The Scaleway scenarios name no_public_endpoints with `target: database`,
+// so through the checked-in configuration the criterion must reach a
+// policy that checks the database's deployed state, not be skipped as
+// plan-only.
+func TestScalewayNoPublicEndpointsCriterionChecksTheDatabase(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := config.Load(filepath.Join("..", "..", "infrafactory.yaml"))
+	require.NoError(t, err)
+	cfg.Paths.Policies = filepath.Join("..", "..", "policies")
+	runtime := &CommandRuntime{Config: cfg}
+	publicDB := []byte(`{"rdb":{"instances":[{"id":"db-public","endpoints":[{"ip":"51.15.51.103","port":5432}]}]}}`)
+
+	for _, name := range []string{"web-app-paris", "mysql-ha-paris", "private-lb-db-paris"} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			sc, err := scenario.LoadWithSchema(filepath.Join("..", "..", "scenarios", "training", name+".yaml"), filepath.Join("..", "..", "scenario.schema.json"))
+			require.NoError(t, err)
+			specs, err := sc.ExecutableChecks()
+			require.NoError(t, err)
+			specs = slices.DeleteFunc(specs, func(s scenario.ExecutableCheckSpec) bool {
+				return s.Policy == nil || s.Policy.Check != "no_public_endpoints"
+			})
+			require.Len(t, specs, 1)
+			assert.Equal(t, "database", specs[0].Policy.Target)
+
+			_, failures, evaluated := evaluateStatePolicyCriteria(context.Background(), runtime, sc.Cloud, publicDB, specs)
+			assert.Equal(t, 1, evaluated)
+			require.Len(t, failures, 1)
+			assert.Equal(t, "no_public_endpoints", failures[0].Policy)
+			assert.Contains(t, failures[0].Detail, "RDB db-public has public endpoint")
 		})
 	}
 }

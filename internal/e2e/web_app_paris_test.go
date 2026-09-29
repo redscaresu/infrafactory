@@ -132,19 +132,10 @@ resource "scaleway_vpc_private_network" "main" {
 }
 `
 
-const webAppParisComputeTF = `resource "scaleway_instance_ip" "web_0" {
-  zone = var.zone
-}
-
-resource "scaleway_instance_ip" "web_1" {
-  zone = var.zone
-}
-
-resource "scaleway_instance_server" "web_0" {
+const webAppParisComputeTF = `resource "scaleway_instance_server" "web_0" {
   name  = "web-0"
   type  = "DEV1-S"
   image = "ubuntu_jammy"
-  ip_id = scaleway_instance_ip.web_0.id
   zone  = var.zone
 }
 
@@ -152,7 +143,6 @@ resource "scaleway_instance_server" "web_1" {
   name  = "web-1"
   type  = "DEV1-S"
   image = "ubuntu_jammy"
-  ip_id = scaleway_instance_ip.web_1.id
   zone  = var.zone
 }
 
