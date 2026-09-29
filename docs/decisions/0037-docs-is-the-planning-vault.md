@@ -3,6 +3,10 @@
 ## Status
 Accepted — 2026-09-27 (S204)
 
+Amended 2026-09-29: the swarm (`swarm.sh`, `/hld`, `/plan-hld`, `/plan-epic`) moved to the
+[swarm-dev](https://github.com/redscaresu/swarm-dev) plugin; the decisions below stand, and
+`scripts/swarm.sh` in them now means swarm-dev's `bin/swarm.sh`.
+
 ## Context
 
 Open work became one file per story in S203 (ADR-0035 amendment). The next need was to scope

@@ -30,10 +30,10 @@ Additional references (map of every live doc: `docs/README.md`; `docs/archive/` 
 
 ## Planning new work
 
-Work flows HLD → epics → stories → the board (`docs/operations.md` § The planning chain):
+Work flows HLD → epics → stories → the board, run by the swarm-dev plugin (`docs/operations.md` § The swarm):
 `/hld` writes an HLD with the user; `/plan-hld <file>` splits an agreed HLD into epics;
-`/plan-epic <slug>` scopes an epic into stories; `scripts/swarm.sh story <slug>` builds a ready
-story. An epic is done when its last story's PR deletes the epic file and marks it done in the
+`/plan-epic <slug>` scopes an epic into stories; `swarm.sh conduct <epic>` builds its ready
+stories. An epic is done when its last story's PR deletes the epic file and marks it done in the
 HLD's `## Epics`. One-off work is a single file in `docs/stories/`. A decision or a hand step for
 the user is a `kind: operator` story, so it shows on the board, not in prose.
 
@@ -162,14 +162,14 @@ scheduled CI; generated HCL never declares a project or sets `project_id` (ADR-0
 
 `docs/` is an Obsidian vault: `docs/Board.base` shows stories by status and by epic. Work is
 planned HLD → epics → stories → built in parallel: `/hld`, `/plan-hld`, `/plan-epic`, then
-`scripts/swarm.sh story` (`docs/operations.md` § The planning chain). Keep links as
+`swarm.sh conduct` (`docs/operations.md` § The swarm). Keep links as
 markdown links, never `[[wikilinks]]`, so the link test can check them.
 
 ## Parallel agents
 
-Every agent runs in its own herdr pane via `scripts/swarm.sh`, which also picks its model and
-effort by role. Before scoping or building with agents, read `docs/operations.md` § Model and
-effort, § Scoping an epic and § Parallel agents (herdr).
+Every agent runs in its own herdr pane via swarm-dev's `swarm.sh`, which also picks its model and
+effort by role. Before scoping or building with agents, read swarm-dev's `docs/method.md` and
+`docs/operations.md` § The swarm (infrafactory's own rules).
 
 ## Codex review loop (required on every PR)
 
