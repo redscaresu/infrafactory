@@ -82,7 +82,19 @@ func TestFailedRunOnAnotherCloudTearsNothingDown(t *testing.T) {
 			setScenarioCloud(t, h.ScenarioPath, cloud)
 
 			fakes := newLayer3Fakes()
-			opts := isolatedRunOpts(h, layer3On)
+			customize := layer3On
+			var lc *awsLifecycle
+			if cloud == "aws" {
+				// A complete aws block and doers that answer, so zero
+				// calls is the arm's choice rather than a missing config.
+				lc = newAWSLifecycle(t)
+				customize = func(cfg config.Config) config.Config {
+					cfg = layer3On(cfg)
+					cfg.AWS = config.AWSConfig{Region: "eu-west-2", AccountID: preflightAWSAccount, PrincipalARN: preflightAWSPrincipal}
+					return cfg
+				}
+			}
+			opts := isolatedRunOpts(h, customize)
 			opts.deps = RuntimeDependencies{
 				// generateAndWriteFiles persists these before the gate
 				// refuses the cloud, so the failure path finds them.
@@ -99,6 +111,9 @@ func TestFailedRunOnAnotherCloudTearsNothingDown(t *testing.T) {
 				MockState:  &fakeRunMockStateClient{statePayload: []byte(`{"instance":{"servers":[]}}`)},
 			}
 			fakes.install(&opts.deps)
+			if lc != nil {
+				opts.deps.AWSSTS, opts.deps.AWSSSM, opts.deps.AWSEC2 = lc, lc, lc
+			}
 
 			logs := &bytes.Buffer{}
 			cmd := newRunCommandForTest(opts)
@@ -115,18 +130,28 @@ func TestFailedRunOnAnotherCloudTearsNothingDown(t *testing.T) {
 			require.Error(t, cmd.Execute())
 
 			result := decodeMachineOutput(t, stdout)
-			statePath := filepath.Join(h.OutputDir(), "example-scenario", harness.LiveStateFilename)
-			want := layer3TeardownNotBuilt(layer3Cloud(cloud), statePath)
-			assert.Contains(t, result.Failures, FailureSummary{
-				Layer: "sandbox_deploy", Stage: "auto_destroy_preflight", Check: "cloud",
-				Command: "auto-destroy preflight", Detail: want,
-			})
-			assert.Contains(t, want, cloud)
+			// aws acts only on a claim an iteration took, and the gate
+			// refused before any take.
+			if cloud == "aws" {
+				assert.Empty(t, lc.log(), "AWS calls")
+				assert.Contains(t, result.Stages, StageSummary{
+					Layer: "sandbox_deploy", Stage: "auto_destroy", Status: StageStatusSkip,
+					Detail: "no iteration took the aws scope's claim, so none applied to it",
+				})
+			} else {
+				statePath := filepath.Join(h.OutputDir(), "example-scenario", harness.LiveStateFilename)
+				want := layer3TeardownNotBuilt(layer3Cloud(cloud), statePath)
+				assert.Contains(t, result.Failures, FailureSummary{
+					Layer: "sandbox_deploy", Stage: "auto_destroy_preflight", Check: "cloud",
+					Command: "auto-destroy preflight", Detail: want,
+				})
+				assert.Contains(t, want, cloud)
+				assert.Contains(t, logs.String(), `"event":"layer3_auto_destroy"`)
+			}
 			assert.Contains(t, result.Stages, StageSummary{
 				Layer: "live", Stage: "stray_run_projects", Status: StageStatusSkip,
 				Detail: "cloud " + cloud + " has no run projects to check",
 			})
-			assert.Contains(t, logs.String(), `"event":"layer3_auto_destroy"`)
 			assertNoScalewayAdvice(t, stdout.String(), "output")
 			assertNoScalewayAdvice(t, logs.String(), "logs")
 			fakes.assertUntouched(t)

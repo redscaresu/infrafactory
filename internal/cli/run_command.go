@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -37,6 +39,17 @@ type detectedRunMode struct {
 }
 
 func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) error {
+	return runRunWithNotify(cmd, args, runtime, signal.NotifyContext)
+}
+
+// runRunWithNotify is runRunCommand with the signal source injectable,
+// so a test can interrupt it.
+func runRunWithNotify(
+	cmd *cobra.Command,
+	args []string,
+	runtime *CommandRuntime,
+	notify func(ctx context.Context, sigs ...os.Signal) (context.Context, context.CancelFunc),
+) error {
 	scenarioPath := args[0]
 
 	controls, err := resolveRunControls(cmd, runtime)
@@ -85,7 +98,8 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 	if runID == "" {
 		runID = startedAt.Format("20060102T150405Z0700")
 	}
-	controls.AWSClaimHolder, err = awsClaimHolderFor(runtime, layer3TeardownCloud(sc.Cloud), runID)
+	cloud := layer3TeardownCloud(sc.Cloud)
+	controls.AWSClaimHolder, err = awsClaimHolderFor(runtime, cloud, runID)
 	if err != nil {
 		return err
 	}
@@ -194,224 +208,251 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 	consecutiveTransportFailures := 0
 	captureLLMRaw := llmRawCaptureEnabled()
 
-	for iteration := 1; ; iteration++ {
-		runtime.Logger.Log(LogEntry{
-			Level:     logLevelInfo,
-			Command:   "run",
-			Event:     "iteration_start",
-			Status:    "start",
-			RunID:     runID,
-			Iteration: iteration,
-		})
-		completed = iteration
-		stages, failures := runIteration(cmd.Context(), runID, iteration, sc.Name, scenarioPath, runtime, store, captureLLMRaw, repairFeedback, mode.Mode, controls)
-		allStages = append(allStages, stages...)
+	iterate := func(ctx context.Context) error {
+		for iteration := 1; ; iteration++ {
+			runtime.Logger.Log(LogEntry{
+				Level:     logLevelInfo,
+				Command:   "run",
+				Event:     "iteration_start",
+				Status:    "start",
+				RunID:     runID,
+				Iteration: iteration,
+			})
+			completed = iteration
+			stages, failures := runIteration(ctx, runID, iteration, sc.Name, scenarioPath, runtime, store, captureLLMRaw, repairFeedback, mode.Mode, controls)
+			allStages = append(allStages, stages...)
 
-		if err := persistRunIteration(store, sc.Name, runID, iteration, stages, failures); err != nil {
-			return fmt.Errorf("persist run iteration %d: %w", iteration, err)
-		}
+			if err := persistRunIteration(store, sc.Name, runID, iteration, stages, failures); err != nil {
+				return fmt.Errorf("persist run iteration %d: %w", iteration, err)
+			}
 
-		if len(failures) == 0 {
-			// Auto-learn pitfalls: if this is iteration 2+, a self-correction
-			// happened. Extract actionable patterns from the previous iteration's
-			// failures and persist them for future runs. Mirrors the oscillation
-			// path's cross-cloud isolation — a GCP scenario whose detail had no
-			// resource name would otherwise pick up a Scaleway-flavoured fallback
-			// from ExtractDescriptivePitfall and pollute pitfalls/gcp.yaml.
-			if iteration > 1 && len(previousIterationFailures) > 0 {
-				cloud := sc.Cloud
-				for _, failure := range previousIterationFailures {
-					// N3 / T12 classifier: mock-actionable failures
-					// (501, plugin-did-not-respond, auth escape,
-					// resource-not-found wait loops) belong in
-					// docs/mock-gaps.md, NOT pitfalls/<cloud>.yaml.
-					// Writing them as pitfalls teaches the LLM to
-					// avoid valid resources because the mock is
-					// incomplete — the system narrows over time.
-					if generator.IsMockServerBug(failure.Detail) {
-						gap := generator.MockGap{
-							Cloud:     cloud,
-							Signal:    generator.FirstMockSignal(failure.Detail),
-							Resource:  generator.ExtractResourceFromDetail(failure.Detail),
-							Scenario:  sc.Name,
-							Detail:    failure.Detail,
-							Timestamp: runID,
+			if len(failures) == 0 {
+				// Auto-learn pitfalls: if this is iteration 2+, a self-correction
+				// happened. Extract actionable patterns from the previous iteration's
+				// failures and persist them for future runs. Mirrors the oscillation
+				// path's cross-cloud isolation — a GCP scenario whose detail had no
+				// resource name would otherwise pick up a Scaleway-flavoured fallback
+				// from ExtractDescriptivePitfall and pollute pitfalls/gcp.yaml.
+				if iteration > 1 && len(previousIterationFailures) > 0 {
+					cloud := sc.Cloud
+					for _, failure := range previousIterationFailures {
+						// N3 / T12 classifier: mock-actionable failures
+						// (501, plugin-did-not-respond, auth escape,
+						// resource-not-found wait loops) belong in
+						// docs/mock-gaps.md, NOT pitfalls/<cloud>.yaml.
+						// Writing them as pitfalls teaches the LLM to
+						// avoid valid resources because the mock is
+						// incomplete — the system narrows over time.
+						if generator.IsMockServerBug(failure.Detail) {
+							gap := generator.MockGap{
+								Cloud:     cloud,
+								Signal:    generator.FirstMockSignal(failure.Detail),
+								Resource:  generator.ExtractResourceFromDetail(failure.Detail),
+								Scenario:  sc.Name,
+								Detail:    failure.Detail,
+								Timestamp: runID,
+							}
+							if err := generator.AppendMockGap(runtime.Config.Paths.Docs, gap); err != nil {
+								runtime.Logger.Log(LogEntry{
+									Level:   logLevelError,
+									Command: "run",
+									Event:   "self_correction_mock_gap_append",
+									Status:  "failed",
+									RunID:   runID,
+									Detail:  err.Error(),
+								})
+							} else {
+								runtime.Logger.Log(LogEntry{
+									Level:   logLevelInfo,
+									Command: "run",
+									Event:   "self_correction_mock_gap_recorded",
+									Status:  "success",
+									RunID:   runID,
+									Detail:  fmt.Sprintf("cloud=%s signal=%s resource=%s", gap.Cloud, gap.Signal, gap.Resource),
+								})
+							}
+							continue
 						}
-						if err := generator.AppendMockGap(runtime.Config.Paths.Docs, gap); err != nil {
+						// Refusals first, exactly as in the terminal harvest.
+						// Without this the SUCCESS path never learns from a
+						// gate -- iteration 1 is refused, iteration 2 fixes it,
+						// the run reaches target_reached and the terminal
+						// harvest is skipped, so the best signal in the run is
+						// discarded precisely when the loop worked. The next
+						// run then starts by making the same proposal.
+						learned := generator.ExtractGatePitfall(failure.Detail, sc.Name)
+						if learned == nil {
+							learned = generator.ExtractDescriptivePitfall(failure.Detail, sc.Name)
+						}
+						if learned == nil {
+							continue
+						}
+						if !pitfallResourceMatchesCloud(learned.Resource, cloud) {
+							runtime.Logger.Log(LogEntry{
+								Level:   logLevelInfo,
+								Command: "run",
+								Event:   "self_correction_pitfall_skipped",
+								Status:  "skipped",
+								RunID:   runID,
+								Detail:  fmt.Sprintf("cross-cloud resource %q for cloud=%s", learned.Resource, cloud),
+							})
+							continue
+						}
+						learned.LearnedLayer = failure.Origin
+						if err := generator.AppendPitfall(runtime.Config.Paths.Pitfalls, cloud, *learned); err != nil {
 							runtime.Logger.Log(LogEntry{
 								Level:   logLevelError,
 								Command: "run",
-								Event:   "self_correction_mock_gap_append",
+								Event:   "self_correction_pitfall_append",
 								Status:  "failed",
 								RunID:   runID,
 								Detail:  err.Error(),
 							})
-						} else {
-							runtime.Logger.Log(LogEntry{
-								Level:   logLevelInfo,
-								Command: "run",
-								Event:   "self_correction_mock_gap_recorded",
-								Status:  "success",
-								RunID:   runID,
-								Detail:  fmt.Sprintf("cloud=%s signal=%s resource=%s", gap.Cloud, gap.Signal, gap.Resource),
-							})
 						}
-						continue
-					}
-					// Refusals first, exactly as in the terminal harvest.
-					// Without this the SUCCESS path never learns from a
-					// gate -- iteration 1 is refused, iteration 2 fixes it,
-					// the run reaches target_reached and the terminal
-					// harvest is skipped, so the best signal in the run is
-					// discarded precisely when the loop worked. The next
-					// run then starts by making the same proposal.
-					learned := generator.ExtractGatePitfall(failure.Detail, sc.Name)
-					if learned == nil {
-						learned = generator.ExtractDescriptivePitfall(failure.Detail, sc.Name)
-					}
-					if learned == nil {
-						continue
-					}
-					if !pitfallResourceMatchesCloud(learned.Resource, cloud) {
-						runtime.Logger.Log(LogEntry{
-							Level:   logLevelInfo,
-							Command: "run",
-							Event:   "self_correction_pitfall_skipped",
-							Status:  "skipped",
-							RunID:   runID,
-							Detail:  fmt.Sprintf("cross-cloud resource %q for cloud=%s", learned.Resource, cloud),
-						})
-						continue
-					}
-					learned.LearnedLayer = failure.Origin
-					if err := generator.AppendPitfall(runtime.Config.Paths.Pitfalls, cloud, *learned); err != nil {
-						runtime.Logger.Log(LogEntry{
-							Level:   logLevelError,
-							Command: "run",
-							Event:   "self_correction_pitfall_append",
-							Status:  "failed",
-							RunID:   runID,
-							Detail:  err.Error(),
-						})
 					}
 				}
+				lastIterationFailed = false
+				previousIterationFailures = previousIterationFailures[:0]
+				terminalReason = "target_reached"
+				// Record the passing iteration in iterationHistory so the
+				// N10 diff-extractor sees the failed→passing pair. Without
+				// this, len(iterationHistory) stays at the count of failed
+				// iters and the simple "1 fail → 1 pass" case skips
+				// ExtractFixPitfall entirely (the loop's `len > 1`
+				// guard never fires).
+				iterationHistory = append(iterationHistory, feedback.IterationResult{
+					Iteration: iteration,
+					Failures:  nil,
+				})
+				runtime.Logger.Log(LogEntry{
+					Level:     logLevelInfo,
+					Command:   "run",
+					Event:     "iteration_end",
+					Status:    "success",
+					RunID:     runID,
+					Iteration: iteration,
+				})
+				break
 			}
-			lastIterationFailed = false
-			previousIterationFailures = previousIterationFailures[:0]
-			terminalReason = "target_reached"
-			// Record the passing iteration in iterationHistory so the
-			// N10 diff-extractor sees the failed→passing pair. Without
-			// this, len(iterationHistory) stays at the count of failed
-			// iters and the simple "1 fail → 1 pass" case skips
-			// ExtractFixPitfall entirely (the loop's `len > 1`
-			// guard never fires).
-			iterationHistory = append(iterationHistory, feedback.IterationResult{
-				Iteration: iteration,
-				Failures:  nil,
-			})
+
+			lastIterationFailed = true
+			failedIterations++
+			allFailures = append(allFailures, failures...)
+			transportDominated := failuresAreTransportDominated(failures)
+			if transportDominated {
+				consecutiveTransportFailures++
+			} else {
+				consecutiveTransportFailures = 0
+			}
 			runtime.Logger.Log(LogEntry{
-				Level:     logLevelInfo,
+				Level:     logLevelError,
 				Command:   "run",
 				Event:     "iteration_end",
-				Status:    "success",
+				Status:    "failed",
 				RunID:     runID,
 				Iteration: iteration,
+				Detail:    fmt.Sprintf("%d failure(s)", len(failures)),
 			})
-			break
-		}
+			currentFailures := toFeedbackFailures(failures)
+			iterationHistory = append(iterationHistory, feedback.IterationResult{
+				Iteration: iteration,
+				Failures:  currentFailures,
+			})
+			// A kept aws claim ends the run, whatever kept it: the next
+			// iteration's take would succeed against the run's own claim
+			// and apply into a scope not proven empty. Its own reason, so
+			// the pitfall harvest never learns from a scope left dirty.
+			if slices.ContainsFunc(stages, isStage(StageAWSScopeClaimKept)) {
+				terminalReason = terminalReasonAWSScopeClaimKept
+				break
+			}
+			// The guard swallows the signal, so the loop has to stop itself.
+			if ctx.Err() != nil {
+				terminalReason = "interrupted"
+				break
+			}
+			// A failed holdout ends the run here, without a repair.
+			//
+			// Feeding it back would make the holdout SEEN -- the generator
+			// would be told the unseen check and fix against it, which is
+			// precisely the overfitting a holdout exists to measure. The
+			// number would still look good and would have stopped meaning
+			// anything.
+			//
+			// It also costs: at Layer 3 every repair iteration is a real
+			// apply and destroy, spent chasing a check the loop was never
+			// meant to optimise.
+			if hasHoldoutFailure(failures) {
+				terminalReason = "holdout_failed"
+				break
+			}
 
-		lastIterationFailed = true
-		failedIterations++
-		allFailures = append(allFailures, failures...)
-		transportDominated := failuresAreTransportDominated(failures)
-		if transportDominated {
-			consecutiveTransportFailures++
-		} else {
-			consecutiveTransportFailures = 0
-		}
-		runtime.Logger.Log(LogEntry{
-			Level:     logLevelError,
-			Command:   "run",
-			Event:     "iteration_end",
-			Status:    "failed",
-			RunID:     runID,
-			Iteration: iteration,
-			Detail:    fmt.Sprintf("%d failure(s)", len(failures)),
-		})
-		currentFailures := toFeedbackFailures(failures)
-		iterationHistory = append(iterationHistory, feedback.IterationResult{
-			Iteration: iteration,
-			Failures:  currentFailures,
-		})
-		// A failed holdout ends the run here, without a repair.
-		//
-		// Feeding it back would make the holdout SEEN -- the generator
-		// would be told the unseen check and fix against it, which is
-		// precisely the overfitting a holdout exists to measure. The
-		// number would still look good and would have stopped meaning
-		// anything.
-		//
-		// It also costs: at Layer 3 every repair iteration is a real
-		// apply and destroy, spent chasing a check the loop was never
-		// meant to optimise.
-		if hasHoldoutFailure(failures) {
-			terminalReason = "holdout_failed"
-			break
-		}
+			// A drifting stack under the default mode ends the run here.
+			//
+			// Not a repair failure, so it must not reach the repair loop:
+			// the cause may be the mock, and the loop can only ever change
+			// the HCL. Its own terminal reason keeps it out of the pitfall
+			// harvest too -- which fires on "stuck" and
+			// "repair_budget_exhausted" -- because a lesson learned from an
+			// ambiguous signal is a lesson aimed at the wrong component.
+			if !controls.ContinueOnDrift && hasConvergeFailure(failures) {
+				terminalReason = "drift"
+				break
+			}
+			if consecutiveTransportFailures >= transportFailureRetryBudget {
+				terminalReason = "repair_budget_exhausted"
+				allFailures = append(allFailures, FailureSummary{
+					Layer:   "run",
+					Stage:   fmt.Sprintf("iteration_%d", iteration),
+					Check:   "transport_runtime_dominated",
+					Command: "run loop",
+					Detail:  fmt.Sprintf("stopped early after %d consecutive transport-runtime failures; consider adjusting agent timeouts/retries or fixing transport dependencies", consecutiveTransportFailures),
+				})
+				break
+			}
+			// Stop early when this iteration produced nothing the run has not
+			// already seen -- in ANY earlier iteration, not just the last one.
+			// Alternating between two known failures is the shape a repair loop
+			// actually gets stuck in, and at Layer 3 each lap is a real apply.
+			if feedback.IsStuck(failureHistory, currentFailures) {
+				terminalReason = "stuck"
+				allFailures = append(allFailures, FailureSummary{
+					Layer:   "run",
+					Stage:   fmt.Sprintf("iteration_%d", iteration),
+					Check:   "stuck",
+					Command: "run loop",
+					Detail:  "stopped due to stuck detection",
+				})
+				break
+			}
+			failureHistory = append(failureHistory, feedback.FailureSignatures(currentFailures)...)
+			previousIterationFailures = append(previousIterationFailures[:0], failures...)
+			repairFeedback = appendDistinctFailures(repairFeedback, failures)
 
-		// A drifting stack under the default mode ends the run here.
-		//
-		// Not a repair failure, so it must not reach the repair loop:
-		// the cause may be the mock, and the loop can only ever change
-		// the HCL. Its own terminal reason keeps it out of the pitfall
-		// harvest too -- which fires on "stuck" and
-		// "repair_budget_exhausted" -- because a lesson learned from an
-		// ambiguous signal is a lesson aimed at the wrong component.
-		if !controls.ContinueOnDrift && hasConvergeFailure(failures) {
-			terminalReason = "drift"
-			break
+			if failedIterations >= repairIterationsMax {
+				terminalReason = "repair_budget_exhausted"
+				allFailures = append(allFailures, FailureSummary{
+					Layer:   "run",
+					Stage:   fmt.Sprintf("iteration_%d", iteration),
+					Check:   "repair_budget_exhausted",
+					Command: "run loop",
+					Detail:  fmt.Sprintf("reached repair iterations max (%d)", repairIterationsMax),
+				})
+				break
+			}
 		}
-		if consecutiveTransportFailures >= transportFailureRetryBudget {
-			terminalReason = "repair_budget_exhausted"
-			allFailures = append(allFailures, FailureSummary{
-				Layer:   "run",
-				Stage:   fmt.Sprintf("iteration_%d", iteration),
-				Check:   "transport_runtime_dominated",
-				Command: "run loop",
-				Detail:  fmt.Sprintf("stopped early after %d consecutive transport-runtime failures; consider adjusting agent timeouts/retries or fixing transport dependencies", consecutiveTransportFailures),
-			})
-			break
-		}
-		// Stop early when this iteration produced nothing the run has not
-		// already seen -- in ANY earlier iteration, not just the last one.
-		// Alternating between two known failures is the shape a repair loop
-		// actually gets stuck in, and at Layer 3 each lap is a real apply.
-		if feedback.IsStuck(failureHistory, currentFailures) {
-			terminalReason = "stuck"
-			allFailures = append(allFailures, FailureSummary{
-				Layer:   "run",
-				Stage:   fmt.Sprintf("iteration_%d", iteration),
-				Check:   "stuck",
-				Command: "run loop",
-				Detail:  "stopped due to stuck detection",
-			})
-			break
-		}
-		failureHistory = append(failureHistory, feedback.FailureSignatures(currentFailures)...)
-		previousIterationFailures = append(previousIterationFailures[:0], failures...)
-		repairFeedback = appendDistinctFailures(repairFeedback, failures)
-
-		if failedIterations >= repairIterationsMax {
-			terminalReason = "repair_budget_exhausted"
-			allFailures = append(allFailures, FailureSummary{
-				Layer:   "run",
-				Stage:   fmt.Sprintf("iteration_%d", iteration),
-				Check:   "repair_budget_exhausted",
-				Command: "run loop",
-				Detail:  fmt.Sprintf("reached repair iterations max (%d)", repairIterationsMax),
-			})
-			break
-		}
+		return nil
+	}
+	// aws only: an interrupt has to name reap, because the claim may be
+	// held and nothing else says so. Other clouds run unguarded, as before.
+	var loopErr error
+	if cloud == layer3AWS {
+		loopErr = withSandboxInterruptGuard(cmd, runtime, cloud, notify, iterate)
+	} else {
+		loopErr = iterate(cmd.Context())
+	}
+	if loopErr != nil {
+		return loopErr
 	}
 
 	if terminalReason == "" && !lastIterationFailed {
@@ -779,14 +820,17 @@ func runRunCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) e
 	// Auto-destroy real Scaleway resources on failure to prevent orphaned billing.
 	// Contract #14: failed run without --no-destroy must destroy real resources.
 	sandboxEnabled := runtime.Config.Validation.Layers.SandboxDeploy.Enabled
-	cloud := layer3TeardownCloud(sc.Cloud)
 	if sandboxEnabled && !controls.NoDestroy && terminalReason != "target_reached" {
 		// Fails closed: unreadable or unparseable state still gets
 		// cleanup. Only a state that parses and records nothing is
 		// treated as already clean -- which is what a successful destroy
 		// leaves behind.
 		mayHoldResources := liveStateMayHoldResources(runtime.OutputDir())
-		if mayHoldResources && cloud != layer3Scaleway {
+		if cloud == layer3AWS {
+			awsStages, awsFailures := awsRunFailureTeardown(cmd.Context(), runtime, allStages, controls.AWSClaimHolder, scenarioPath)
+			allStages = append(allStages, awsStages...)
+			allFailures = append(allFailures, awsFailures...)
+		} else if mayHoldResources && cloud != layer3Scaleway {
 			// Before the marker is read: one here may be a stale Scaleway
 			// one, and nothing below is written for any other cloud.
 			detail := layer3TeardownNotBuilt(cloud, filepath.Join(runtime.OutputDir(), harness.LiveStateFilename))
@@ -1157,6 +1201,7 @@ func runIteration(
 		if err != nil {
 			stages = append(stages, StageSummary{Layer: "run", Stage: stageName, Status: StageStatusFail})
 			stages = append(stages, holdoutStages(testResult.Stages, iteration)...)
+			stages = append(stages, awsScopeStages(testResult.Stages)...)
 			if (step.name == "test" || step.name == "validate") && len(testResult.Failures) > 0 {
 				for _, failure := range testResult.Failures {
 					failures = append(failures, FailureSummary{
@@ -1201,6 +1246,7 @@ func runIteration(
 		// passed" is exactly the claim somebody needs to see to believe
 		// the run proved anything.
 		stages = append(stages, holdoutStages(testResult.Stages, iteration)...)
+		stages = append(stages, awsScopeStages(testResult.Stages)...)
 		runtime.Logger.Log(LogEntry{
 			Level:     logLevelInfo,
 			Command:   "run",
@@ -1664,4 +1710,55 @@ func hasConvergeFailure(failures []FailureSummary) bool {
 		}
 	}
 	return false
+}
+
+// terminalReasonAWSScopeClaimKept ends a run after an iteration kept the
+// aws scope's claim. Never repair_budget_exhausted or stuck, so the
+// pitfall harvest does not fire on it.
+const terminalReasonAWSScopeClaimKept = "aws_scope_claim_kept"
+
+func isStage(name string) func(StageSummary) bool {
+	return func(s StageSummary) bool { return s.Stage == name }
+}
+
+// awsScopeStages carries an iteration's aws scope stages up to the run,
+// which ends on a kept claim and tears down only after a take.
+func awsScopeStages(stages []StageSummary) []StageSummary {
+	var out []StageSummary
+	for _, s := range stages {
+		if strings.HasPrefix(s.Stage, "aws_scope_") {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// awsClaimTaken: a take succeeded, or an iteration kept a claim it may
+// hold (an unknown take outcome included).
+func awsClaimTaken(s StageSummary) bool {
+	return (s.Stage == "aws_scope_claim" && s.Status == StageStatusPass) || s.Stage == StageAWSScopeClaimKept
+}
+
+// awsRunFailureTeardown is the failure path's aws arm. It acts only on a
+// claim this run holds, with the env from aws.account_id and never from
+// the run-project marker, which here may be a stale Scaleway one.
+func awsRunFailureTeardown(ctx context.Context, runtime *CommandRuntime, stages []StageSummary, holder, scenarioPath string) ([]StageSummary, []FailureSummary) {
+	if !slices.ContainsFunc(stages, awsClaimTaken) {
+		return []StageSummary{{Layer: "sandbox_deploy", Stage: "auto_destroy", Status: StageStatusSkip,
+			Detail: "no iteration took the aws scope's claim, so none applied to it"}}, nil
+	}
+	reap := reapCommand(runtime.ConfigPath, scenarioPath)
+	env, err := awsCommandEnvForAccount(runtime, runtime.Config.AWS.AccountID)
+	if err != nil {
+		return awsScopeClaimKept(nil, nil, holder, reap, err.Error())
+	}
+	current, held, err := harness.ReadAWSClaimHolder(ctx, env, runtime.Deps.AWSSSM, "")
+	if err != nil {
+		return awsScopeClaimKept(nil, nil, holder, reap, err.Error())
+	}
+	if !held || current != holder {
+		return []StageSummary{{Layer: "sandbox_deploy", Stage: "auto_destroy", Status: StageStatusSkip,
+			Detail: fmt.Sprintf("the aws scope's claim is not held by this run (%s), so it tears nothing down", holder)}}, nil
+	}
+	return awsDestroyAndRelease(ctx, runtime, runtime.OutputDir(), env, holder, reap)
 }
