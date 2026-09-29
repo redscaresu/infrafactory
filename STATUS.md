@@ -15,8 +15,8 @@ then `aws-layer3-gate-lift`, which needs the user's explicit approval.
 What waits on the user is the board's **Waiting on you** view (`kind: operator` stories); what the
 lead runs is **Lead-run**.
 
-**Running the swarm:** `swarm.sh conduct <epic>` (the swarm-dev plugin) starts a fresh conductor per
-epic in the HLD's herdr workspace; it builds, merges and unblocks the epic's stories, then reports. When codex is at its usage limit, the lead reviews the PR.
+**Running the swarm:** `/swarm` (the swarm-dev plugin) reads the board, does the next step and loops,
+resuming wherever it stopped; it stops where the user decides. `swarm.sh next` shows the step. When codex is at its usage limit, the lead reviews the PR.
 
 ## Open work
 
