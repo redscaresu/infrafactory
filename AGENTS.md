@@ -158,9 +158,9 @@ means the pipeline failed to learn. Treat it as a bug, never as a cold start. Di
 ## Layer 3 (real Scaleway)
 
 Layer 3 spends real money. Before any Layer 3 work, read `docs/operations.md` § Layer 3 and
-ADR-0023. Always: it is never wired into scheduled CI; generated HCL never declares a project or
-sets `project_id` (ADR-0025); and `openclaw-prod` is protected only by software guards — do not
-weaken them.
+ADR-0023; for AWS, § Layer 3 (AWS) holds the scope's hand setup. Always: it is never wired into
+scheduled CI; generated HCL never declares a project or sets `project_id` (ADR-0025); and
+`openclaw-prod` is protected only by software guards — do not weaken them.
 
 ## Epics, stories and the board
 

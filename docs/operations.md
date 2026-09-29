@@ -61,6 +61,211 @@ widening any is a blast-radius decision (ADR-0023).
 - A failed run auto-destroys and then sweeps. If the sweep cannot confirm the account clean, the
   failure names `infrafactory reap <scenario>`; act on it.
 
+## Layer 3 (AWS)
+
+Layer 3 on AWS spends real money in one dedicated member account, the scope, built once by hand
+below. infrafactory never creates or deletes the account: a run claims it, and the sweep proves it
+empty (HLD 2026-09-27-aws-web-stack § Containment; ADR-0023). The SCP is the enforced boundary,
+and preflight cannot assert it, so it is recorded here.
+
+What the code reads from the setup:
+- The key file `~/.config/infrafactory/layer3-aws.env`, mode `0600`: exactly `AWS_ACCESS_KEY_ID`
+  and `AWS_SECRET_ACCESS_KEY`. Preflight refuses any group or other permission bit.
+- The config's `aws` block (`region`, `account_id`, `principal_arn`), which
+  `sts:GetCallerIdentity` must answer exactly.
+- Two SSM parameters. The claim, `AWSClaimParameter` (`/infrafactory/layer3/claim`), holds the
+  running holder; the key writes and deletes it and nothing else. The stamp, `AWSStampParameter`
+  (`/infrafactory/layer3/stamp`), holds the account id; the admin writes it once in step 5 and the
+  key can only read it.
+- The region's default VPC is gone.
+
+### Scope setup
+
+Run this once, from the repo root. The account id and the key id never enter git (the
+repo is public): they stay in shell variables and the local config, and outputs pasted into a PR
+are cut to their last four characters. No command prints the secret key.
+
+**0. Variables and the admin profile.** `MGMT` is the CLI profile of the Organizations management
+account. `OTHER` is any region but `REGION`, for the deny checks.
+
+```bash
+REGION=eu-west-1
+OTHER=us-east-1
+MGMT=<management profile>
+```
+
+`ACCOUNT_ID` is the member account step 1 creates. Once it is set, add the admin profile, which
+assumes the role Organizations creates in every new member account:
+
+```bash
+cat >> ~/.aws/config <<CONFIG
+
+[profile infrafactory-admin]
+role_arn = arn:aws:iam::$ACCOUNT_ID:role/OrganizationAccountAccessRole
+source_profile = $MGMT
+region = $REGION
+CONFIG
+```
+
+**1. The account.**
+
+```bash
+REQUEST=$(aws organizations create-account --email <an unused email> --account-name infrafactory-layer3 \
+  --profile $MGMT --query CreateAccountStatus.Id --output text)
+aws organizations describe-create-account-status --create-account-request-id $REQUEST \
+  --profile $MGMT --query 'CreateAccountStatus.[State,AccountId]' --output text
+```
+
+Repeat the second command until it prints `SUCCEEDED` and the id, then set `ACCOUNT_ID=<the id>`
+and add step 0's profile. Verify:
+
+```bash
+aws organizations describe-account --account-id $ACCOUNT_ID --profile $MGMT \
+  --query Account.Status --output text                                      # ACTIVE
+aws sts get-caller-identity --profile infrafactory-admin --query Account --output text   # ACCOUNT_ID
+```
+
+**2. Delete the default VPC** in `REGION`, with its subnets and internet gateway:
+
+```bash
+VPC=$(aws ec2 describe-vpcs --filters Name=isDefault,Values=true --query 'Vpcs[0].VpcId' \
+  --output text --profile infrafactory-admin --region $REGION)
+for SUBNET in $(aws ec2 describe-subnets --filters Name=vpc-id,Values=$VPC --query 'Subnets[].SubnetId' \
+  --output text --profile infrafactory-admin --region $REGION); do
+  aws ec2 delete-subnet --subnet-id $SUBNET --profile infrafactory-admin --region $REGION
+done
+IGW=$(aws ec2 describe-internet-gateways --filters Name=attachment.vpc-id,Values=$VPC \
+  --query 'InternetGateways[0].InternetGatewayId' --output text --profile infrafactory-admin --region $REGION)
+aws ec2 detach-internet-gateway --internet-gateway-id $IGW --vpc-id $VPC --profile infrafactory-admin --region $REGION
+aws ec2 delete-internet-gateway --internet-gateway-id $IGW --profile infrafactory-admin --region $REGION
+aws ec2 delete-vpc --vpc-id $VPC --profile infrafactory-admin --region $REGION
+```
+
+Verify, each printing `0`:
+
+```bash
+aws ec2 describe-vpcs --query 'length(Vpcs)' --profile infrafactory-admin --region $REGION
+aws ec2 describe-subnets --query 'length(Subnets)' --profile infrafactory-admin --region $REGION
+aws ec2 describe-internet-gateways --query 'length(InternetGateways)' --profile infrafactory-admin --region $REGION
+aws ec2 describe-network-interfaces --query 'length(NetworkInterfaces)' --profile infrafactory-admin --region $REGION
+aws ec2 describe-addresses --query 'length(Addresses)' --profile infrafactory-admin --region $REGION
+aws ec2 describe-instances --query 'length(Reservations)' --profile infrafactory-admin --region $REGION
+```
+
+**3. The IAM user**, before the SCP, since the SCP denies IAM. Its policy,
+`docs/aws-layer3/iam-policy.json`, covers claim, sweep and reap only; the apply's actions are epic
+[aws-web-live-on-real-aws](epics/aws-web-live-on-real-aws.md)'s. It grants
+`sts:GetCallerIdentity`; `ssm:PutParameter` and `ssm:DeleteParameter` on the claim alone;
+`ssm:GetParameter` on the claim and the stamp; and, pinned by `aws:RequestedRegion`,
+`ssm:DescribeParameters`, `ec2:Describe*` and exactly the EC2 actions `harness.AWSReapSteps`
+exports. `internal/harness/aws_scope_policy_test.go` holds it there.
+
+```bash
+aws iam create-user --user-name infrafactory-layer3 --profile infrafactory-admin
+sed -e "s/REGION/$REGION/g" -e "s/ACCOUNT_ID/$ACCOUNT_ID/g" docs/aws-layer3/iam-policy.json > "$TMPDIR/p.json"
+aws iam put-user-policy --user-name infrafactory-layer3 --policy-name infrafactory-layer3-scope \
+  --policy-document "file://$TMPDIR/p.json" --profile infrafactory-admin
+```
+
+Verify with the policy simulator:
+
+```bash
+sim() { aws iam simulate-principal-policy --policy-source-arn arn:aws:iam::$ACCOUNT_ID:user/infrafactory-layer3 \
+  --profile infrafactory-admin --query 'EvaluationResults[].EvalDecision' --output text "$@"; }
+PARAM=arn:aws:ssm:$REGION:$ACCOUNT_ID:parameter/infrafactory/layer3
+sim --action-names ssm:PutParameter --resource-arns $PARAM/claim                            # allowed
+sim --action-names ssm:PutParameter ssm:DeleteParameter --resource-arns $PARAM/stamp        # implicitDeny implicitDeny
+sim --action-names ssm:PutParameter ssm:DeleteParameter --resource-arns $PARAM/other        # implicitDeny implicitDeny
+sim --action-names ec2:DescribeVpcs ec2:DeleteVpc \
+  --context-entries ContextKeyName=aws:RequestedRegion,ContextKeyValues=$REGION,ContextKeyType=string   # allowed allowed
+sim --action-names ec2:DescribeVpcs \
+  --context-entries ContextKeyName=aws:RequestedRegion,ContextKeyValues=$OTHER,ContextKeyType=string    # implicitDeny
+sim --action-names ec2:RunInstances \
+  --context-entries ContextKeyName=aws:RequestedRegion,ContextKeyValues=$REGION,ContextKeyType=string   # implicitDeny
+```
+
+**4. The key file**, written without printing the key. `umask` sets the mode only on a new
+file, so if `layer3-aws.env` already exists, `chmod 600` it before running this:
+
+```bash
+mkdir -p ~/.config/infrafactory && (umask 077; aws iam create-access-key --user-name infrafactory-layer3 \
+  --profile infrafactory-admin --query 'AccessKey.[AccessKeyId,SecretAccessKey]' --output text \
+  | awk '{printf "AWS_ACCESS_KEY_ID=%s\nAWS_SECRET_ACCESS_KEY=%s\n",$1,$2}' > ~/.config/infrafactory/layer3-aws.env)
+```
+
+Verify:
+
+```bash
+stat -f %Lp ~/.config/infrafactory/layer3-aws.env   # 600 (on Linux: stat -c %a)
+cut -d= -f1 ~/.config/infrafactory/layer3-aws.env   # AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
+(set -a; . ~/.config/infrafactory/layer3-aws.env; set +a
+ env -u AWS_PROFILE AWS_CONFIG_FILE=/dev/null AWS_SHARED_CREDENTIALS_FILE=/dev/null \
+   aws sts get-caller-identity --region $REGION --query '[Account,Arn]' --output text)
+# ACCOUNT_ID  arn:aws:iam::ACCOUNT_ID:user/infrafactory-layer3
+```
+
+A new key can take a few seconds to work. Put the two values and `REGION` in the `aws` block of
+the config you pass with `--config`, kept out of git:
+
+```yaml
+aws:
+  region: REGION
+  account_id: ACCOUNT_ID
+  principal_arn: arn:aws:iam::ACCOUNT_ID:user/infrafactory-layer3
+```
+
+**5. The stamp**, written by the admin because the key cannot:
+
+```bash
+aws ssm put-parameter --name /infrafactory/layer3/stamp --type String --value $ACCOUNT_ID \
+  --region $REGION --profile infrafactory-admin
+```
+
+Verify:
+
+```bash
+aws ssm describe-parameters --query 'Parameters[].Name' --output text \
+  --region $REGION --profile infrafactory-admin                             # /infrafactory/layer3/stamp
+aws ssm get-parameter --name /infrafactory/layer3/stamp --query Parameter.Value --output text \
+  --region $REGION --profile infrafactory-admin                             # ACCOUNT_ID
+```
+
+**6. The SCP**, last, from `MGMT`. `docs/aws-layer3/scp.json` has two Deny statements: every
+action but `ec2:*`, `ssm:*` and `sts:*`, and every action where `aws:RequestedRegion` is not
+`REGION`. Each is exempted by `ArnNotLike` `aws:PrincipalArn`
+`arn:aws:iam::*:role/OrganizationAccountAccessRole`, the role the admin profile assumes, so the
+admin can rotate the key and plant the leaks the real-cloud proof needs. That is the one
+exemption; `aws_scope_policy_test.go` fails on a second, or on a fourth service.
+
+```bash
+ROOT=$(aws organizations list-roots --profile $MGMT --query 'Roots[0].Id' --output text)
+aws organizations list-roots --profile $MGMT --output text \
+  --query "Roots[0].PolicyTypes[?Type=='SERVICE_CONTROL_POLICY'].Status"
+# Only if that did not print ENABLED:
+aws organizations enable-policy-type --root-id $ROOT --policy-type SERVICE_CONTROL_POLICY --profile $MGMT
+
+sed -e "s/REGION/$REGION/g" docs/aws-layer3/scp.json > "$TMPDIR/scp.json"
+POLICY=$(aws organizations create-policy --name infrafactory-layer3-scope --type SERVICE_CONTROL_POLICY \
+  --description 'infrafactory Layer 3 scope' --content "file://$TMPDIR/scp.json" \
+  --query Policy.PolicySummary.Id --output text --profile $MGMT)
+aws organizations attach-policy --policy-id $POLICY --target-id $ACCOUNT_ID --profile $MGMT
+```
+
+Verify. The first command lists `infrafactory-layer3-scope`; with the key, S3 is denied by a
+message naming a service control policy, EC2 in `OTHER` is denied, and step 4's
+`get-caller-identity` still answers:
+
+```bash
+aws organizations list-policies-for-target --target-id $ACCOUNT_ID --filter SERVICE_CONTROL_POLICY \
+  --profile $MGMT --query 'Policies[].Name' --output text
+(set -a; . ~/.config/infrafactory/layer3-aws.env; set +a
+ env -u AWS_PROFILE AWS_CONFIG_FILE=/dev/null AWS_SHARED_CREDENTIALS_FILE=/dev/null \
+   aws s3api list-buckets --region $REGION)
+(set -a; . ~/.config/infrafactory/layer3-aws.env; set +a
+ env -u AWS_PROFILE AWS_CONFIG_FILE=/dev/null AWS_SHARED_CREDENTIALS_FILE=/dev/null \
+   aws ec2 describe-vpcs --region $OTHER)
+```
+
 ## Sibling mocks
 
 Three first-party HTTP-level mocks + one third-party backend live alongside infrafactory:
