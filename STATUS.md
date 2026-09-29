@@ -5,9 +5,28 @@ Current state, and the one place to start. It changes only when **Now** does, an
 
 ## Now
 
-No arc in flight. The queue is the `ready` stories in `docs/stories/`; several can run at once
-as a herdr wave (`docs/operations.md` § Parallel agents). Multi-slice arcs get a plan in
-`docs/plans/<arc>-plan.md`.
+**AWS web stack** ([HLD](docs/hld/2026-09-27-aws-web-stack.md)). Seven of its ten epics are done
+or built; every agent-buildable story is merged. What is left waits on the user:
+
+1. **User:** run the AWS account setup, `docs/operations.md` § Layer 3 (AWS) › Scope setup, with
+   `REGION=us-east-1` (story `aws-scope-hand-setup`, kind operator). Paste each check's output
+   into the PR with ids cut to their last four characters; never the secret key.
+2. **Lead:** `aws-scope-planted-leak-proof` on that account, then `aws-whole-scope-adr` (ADR-0040),
+   which closes `aws-layer3-claim-sweep-reap`.
+3. **Lead, with the user's explicit approval:** `aws-layer3-gate-lift`, the first time AWS is
+   admitted at Layer 3.
+4. Then scope `aws-layer3-wiring-proof` and `aws-web-live-on-real-aws`; the load balancer is last.
+
+**Decisions waiting on the user:**
+- Scaleway `no_public_endpoints` with `target: database` reaches a server-IP policy, and the ip_id
+  pitfall gives servers public IPs that `web-app-paris` forbids: story
+  `no-public-endpoints-criterion-routing`.
+- Make fakeaws's `provider-smoke` (~30 min) a required check on fakeaws `main`?
+- Add an `OPENROUTER_API_KEY` secret so `scenario-gate` runs the model (today it skips green).
+
+**Running the swarm:** `scripts/swarm.sh story <slug>` per ready story, `scripts/swarm.sh watch` to
+wait (it wakes on finished checks, conflicts, stalls and blocked agents), `scripts/swarm.sh unblock`
+after each merge. Codex is often at its usage limit: the lead reviews those PRs.
 
 ## Open work
 
