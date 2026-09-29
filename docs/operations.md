@@ -79,6 +79,13 @@ What the code reads from the setup:
   key can only read it.
 - The region's default VPC is gone.
 
+**Proven 2026-09-29** (`aws-scope-planted-leak-proof`): on the real account, the policy in force
+was sufficient for the claim, the sweep and the reap: CloudTrail shows 19 of the reap table's 20
+mutating actions sent by `infrafactory-layer3`, none refused. One leak per swept collection was
+named by the sweep, a held claim refused reap by name, reap removed them all, and the release left
+only the stamp. `DetachNetworkInterface` was never needed: reap terminates instances first, and
+a NAT gateway's interface cannot be detached, so no attached interface is left to detach.
+
 ### Scope setup
 
 Run this once, from the repo root, in one terminal (later steps reuse its variables). It works in
