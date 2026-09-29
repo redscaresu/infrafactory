@@ -251,7 +251,11 @@ validation:
 constraint_policies:
   no_public_database: scaleway/no_public_database.rego
   encryption_at_rest: scaleway/encryption_at_rest.rego
-  no_public_endpoints: scaleway/no_public_endpoints.rego
+  # Every Scaleway scenario names it with `target: database`. The load
+  # balancer is the only public thing; a scenario keeps its servers private
+  # with a connectivity check (`public_internet -> compute: blocked`), not
+  # with a policy.
+  no_public_endpoints: scaleway/no_public_database.rego
   # region_restriction is the criterion `check:` value post-S51 (the
   # migration renamed from constraint-key `region` to policy-name
   # `region_restriction` to make the criterion self-documenting).

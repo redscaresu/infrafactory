@@ -328,14 +328,18 @@ func TestScalewayPoliciesPlanEvaluation(t *testing.T) {
 			expectedCount: 2,
 		},
 		{
-			name:   "no public endpoints checks server_id attribute",
-			policy: filepath.Join(policiesRoot, "no_public_endpoints.rego"),
+			// The whole directory, as validate loads it. A re-planned IP
+			// bound by `ip_id`, the shape the scaleway_lb_backend pitfall
+			// prescribes, is denied by no plan policy (ADR-0017): a server's
+			// public IP fails web-app-paris's connectivity check instead.
+			name:   "no scaleway policy denies a server's public IP",
+			policy: policiesRoot,
 			planJSON: `{
   "planned_values": {"root_module": {"resources": [
-    {"address":"scaleway_instance_ip.public","type":"scaleway_instance_ip","values":{"server_id":"srv-id"}}
+    {"address":"scaleway_instance_ip.web","type":"scaleway_instance_ip","values":{"server_id":"fr-par-1/c3fc4298-8573-4aea-b7ef-31ed663a5a2e"}}
   ]}}
 }`,
-			expectedCount: 1,
+			expectedCount: 0,
 		},
 	}
 
