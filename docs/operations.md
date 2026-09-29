@@ -371,9 +371,11 @@ worktree; up to four panes a tab. The lead dispatches, reviews and merges; agent
 **Pick the wave.** Only `ready` stories whose `touches` do not overlap. Work that edits a shared
 file (`AGENTS.md`, `infrafactory.yaml`, the schema, the hygiene scripts) is done by the lead, alone.
 
-**Hand an epic to a conductor.** `scripts/swarm.sh conduct <epic>` opens a `conduct` tab with a
-fresh agent that drives that epic's stories to merge, then stops and reports; the session it was
-started from stays free. Run one conductor at a time: `watch` reports every story PR, and shared
+**Hand an epic to a conductor.** `scripts/swarm.sh conduct <epic>` starts a fresh agent that drives
+that epic's stories to merge, then stops and reports; the session it was started from stays free.
+It runs in a herdr workspace named for the epic's HLD (its `hld:` field; every epic of that HLD
+shares it), in a tab named `conduct-<epic>`. Each story it starts gets its own tab, named for the
+story, whose panes all work on that story. Run one conductor at a time: `watch` reports every story PR, and shared
 files are the lead's alone. A conductor leaves `kind: lead` and `kind: operator` stories to the user.
 
 **Start each story** from the lead's pane:
@@ -400,7 +402,7 @@ trusting its CI; a branch that conflicts gets no CI at all, which looks like a h
 credentials, and anything that changes permissions.
 
 **Clean up.** After each merge, `git worktree remove ../infrafactory-wt/<slug>` (an error if it is
-already gone), then `git worktree prune`. `scripts/swarm.sh close build` closes the wave's tabs.
+already gone), then `git worktree prune`. `scripts/swarm.sh close <slug>` closes the story's tab.
 
 ## Demo recording
 

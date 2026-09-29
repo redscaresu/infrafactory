@@ -3,15 +3,15 @@
 #
 #   swarm.sh agent <tab> <name> <cwd> <role> <prompt-file>   start one agent in its own pane
 #   swarm.sh story <slug>                                   build one docs/stories/<slug>.md
-#   swarm.sh conduct <epic>                                 a fresh conductor that drives one epic's stories to merge
+#   swarm.sh conduct <epic>                                 a fresh conductor for one epic, in a workspace named for its HLD
 #   swarm.sh wait <name> [timeout-ms]                       block until the agent settles
 #   swarm.sh policy <role>                                  print the model and effort for a role
 #   swarm.sh close <tab>                                    close <tab>, <tab>-2, ... and forget them
 #   swarm.sh unblock                                        mark ready every blocked story whose blockers are all merged
 #   swarm.sh watch [repo...]                                wait until a story PR needs the lead, print why, and exit
 #
-# Must run inside herdr (HERDR_ENV=1). Tabs hold at most four panes (a 2x2 grid); a fifth
-# agent opens "<tab>-2", and so on, so no pane gets too small to follow.
+# Must run inside herdr (HERDR_ENV=1). A story gets its own tab, named for the story. Tabs hold at
+# most four panes (a 2x2 grid); a fifth agent opens "<tab>-2", and so on, so no pane gets too small to follow.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -186,7 +186,7 @@ build_story() {
   git -C "${src}" worktree add -q -b "${branch}" "${wt}" origin/main
   prompt="${REPO_ROOT}/.swarm/briefs/${slug}.md"; mkdir -p "$(dirname "${prompt}")"
   story_brief "${slug}" "${repo}" > "${prompt}"
-  start_agent "build" "${slug}" "${wt}" "${role}" "${prompt}"
+  start_agent "${slug}" "${slug}" "${wt}" "${role}" "${prompt}"
 }
 
 # The brief a conductor gets: one epic, from a fresh session, so its context holds only that epic.
@@ -200,7 +200,7 @@ Drive the epic's stories (docs/stories/*.md with \`epic: ${epic}\`) to merge, as
 § Parallel agents describes: pick waves of \`ready\` stories whose \`touches\` do not overlap,
 start each with \`scripts/swarm.sh story <slug>\`, wait with \`scripts/swarm.sh wait\` and
 \`scripts/swarm.sh watch\` in the background, review each PR, merge it only when its head is green,
-then run \`scripts/swarm.sh unblock\`, and \`scripts/swarm.sh close build\` once a wave is done.
+then run \`scripts/swarm.sh unblock\` and \`scripts/swarm.sh close <slug>\` to close that story's tab.
 
 Stay inside this epic: start no story outside it, and leave the HLD and other epics alone. A
 \`kind: lead\` story (real cloud, credentials) or a \`kind: operator\` one is not yours to run; list it
@@ -209,13 +209,30 @@ when nothing ready is left, and reply with what merged, what is left, and what w
 EOF
 }
 
+# hld_workspace <label> — the herdr workspace labelled <label>, created if there is none. Every epic
+# of one HLD shares it; a new workspace's placeholder tab is closed once the caller has added its own.
+hld_workspace() {
+  local label="$1" ws
+  ws=$(herdr workspace list | json "next((w['workspace_id'] for w in d['result']['workspaces'] if w.get('label')=='${label}'),'')")
+  if [[ -z "${ws}" ]]; then
+    ws=$(herdr workspace create --label "${label}" --cwd "${REPO_ROOT}" --no-focus \
+      | json "d['result']['workspace']['workspace_id']+' '+d['result']['tab']['tab_id']")
+  fi
+  echo "${ws}"
+}
+
 start_conductor() {
-  local epic="$1" prompt
+  local epic="$1" epic_file="${REPO_ROOT}/docs/epics/$1.md" hld prompt ws placeholder
   [[ "${epic}" =~ ^[a-z0-9-]+$ ]] || die "bad epic '${epic}'"
-  [[ -f "${REPO_ROOT}/docs/epics/${epic}.md" ]] || die "no epic docs/epics/${epic}.md"
+  [[ -f "${epic_file}" ]] || die "no epic docs/epics/${epic}.md"
+  hld=$(sed -n 's/^hld: *//p' "${epic_file}" | head -1); hld="${hld:-${epic}}"
+  [[ "${hld}" =~ ^[a-z0-9-]+$ ]] || die "${epic}: bad hld '${hld}'"
   prompt="${REPO_ROOT}/.swarm/briefs/conduct-${epic}.md"; mkdir -p "$(dirname "${prompt}")"
   conduct_brief "${epic}" > "${prompt}"
-  start_agent "conduct" "conduct-${epic}" "${REPO_ROOT}" conduct "${prompt}"
+  read -r ws placeholder <<< "$(hld_workspace "${hld}")"
+  HERDR_WORKSPACE_ID="${ws}" start_agent "conduct-${epic}" "conduct-${epic}" "${REPO_ROOT}" conduct "${prompt}"
+  [[ -z "${placeholder}" ]] || herdr tab close "${placeholder}" >/dev/null
+  echo "workspace ${hld} (${ws})"
 }
 
 # unblock — a merged story's file is deleted, so a blocked story whose every blocked_by slug has no
