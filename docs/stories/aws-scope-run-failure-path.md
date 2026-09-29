@@ -1,7 +1,6 @@
 ---
 kind: code
-status: blocked
-blocked_by: [aws-scope-test-lifecycle, aws-scope-reap-command]
+status: ready
 epic: aws-layer3-claim-sweep-reap
 depends_on: [aws-scope-test-lifecycle, aws-scope-reap-command]
 touches: ["internal/cli/run_command.go", "internal/cli/aws_run_failure_test.go (new)", "internal/cli/layer3_teardown_cloud_test.go"]
