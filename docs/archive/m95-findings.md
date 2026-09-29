@@ -78,4 +78,4 @@ bash scripts/m95_multipass.sh
 # defaults: SCENARIO=gcp-full-stack PASSES=5
 ```
 
-Logs in `/tmp/m95_logs/`. Results TSV: `docs/m95-multipass-results.tsv`.
+Logs in `/tmp/m95_logs/`. Results TSV: `docs/archive/sweeps/m95-multipass-results.tsv`.
