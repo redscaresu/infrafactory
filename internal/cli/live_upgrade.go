@@ -92,7 +92,7 @@ func runLiveUpgradeCommand(cmd *cobra.Command, args []string, runtime *CommandRu
 	}
 	// The same deny-by-default the first deploy ran. New configuration is
 	// new configuration whether it arrives through `deploy` or here.
-	if err := layer3PreflightHCLForCloud(cloud, source, runtime.Config.Validation.Layers.SandboxDeploy.AllowResourceTypes); err != nil {
+	if err := layer3PreflightHCLForCloud(cloud, source, allowlistOnlyGateInputs(runtime)); err != nil {
 		return &CLIError{Op: "live upgrade", Code: errorCodeCommandFailed, Err: fmt.Errorf("layer 3 hcl validation: %w", err)}
 	}
 

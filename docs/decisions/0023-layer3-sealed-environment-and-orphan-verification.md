@@ -240,3 +240,19 @@ resource, in the process holding the credentials. The block is now deny-by-defau
 `required_providers` and `required_version` only (`layer3TerraformBlockProblems`).
 
 **Amendment — AWS is the third implementation (2026-10-06).** Rules 1-2 (the sealed environment) were implemented for AWS by `aws-layer3-seal-and-dispatch` (#288-#303); rules 3-4 (the sweep and the reap) by ADR-0040, which owns the whole-account scope, its claim and its collection table; rule 5 (the allowlist) by `aws-layer3-gate`. ADR-0025 is not carried over: AWS has no per-run project, so the scope is one dedicated account claimed for the run, and generated HCL has no project to bind.
+
+**Amendment — the AWS gate is lifted, and one `file()` call is admitted (2026-10-06).** `aws-layer3-gate-lift` replaces the refusal of aws in `layer3PreflightHCLForCloud` with the AWS gate (`validateAWSLayer3HCLShape`), at both call sites aws reaches (`test` and generation; `deploy` and `live upgrade` still refuse aws through `layer3LiveCloud`). Every control below takes effect in that PR:
+
+1. **The `file()` exception.** Rule 5's function allowlist admits exactly one impure call, and only as this line, which infrafactory writes into an AWS stack:
+
+   ```hcl
+   user_data = file("${path.module}/infrafactory-user-data.sh")
+   ```
+
+   The exact AST is `user_data` on a `resource "aws_instance"`, set to a `file` call by that name (not `core::file`), with one argument, no expansion, whose argument is a template of exactly `path.module` and the literal `/infrafactory-user-data.sh` (`awsIsUserDataExpr`). `path.root`, `path.cwd`, `..`, a heredoc, a wrapping call or template, and the same call on any other attribute or resource all stay refused. `file` stays off `layer3PureFunctions`: it is admitted by that predicate alone, never as a pure function.
+2. **The pre-tofu file check.** Before any tofu starts, the script the call reads must be a regular file (Lstat: a symlink is refused) holding byte-for-byte the script rendered for this run from the scenario's `service:` block (`awsUserDataFileProblem`). Without a rendered script the stack is refused.
+3. **The AMI root bound.** The gate takes the AMI this run resolved and its root EBS mapping, and refuses unless the root is 1-20 GiB, `gp3`, and deleted on termination (`awsAMIRootProblems`). An unresolved AMI or a zero root refuses; nothing defaults.
+4. **`account_check`.** After a successful apply on the aws path, and before any criterion, every managed resource in the live state must be placed in `aws.account_id` (`harness.UnplacedAWSResources`): an arn or owner_id naming another account, or a child whose parent is not in the state, fails the stage and names the resource.
+5. **`user_data_check`.** Then the one instance's user data, read back from EC2 through the sealed environment, must equal the rendered script byte-for-byte. A changed byte, the state's SHA1, an empty value, a denied read, or no EC2 client fails the stage.
+
+A failed `account_check` or `user_data_check` marks the apply as not applied, so no real probe runs; teardown still runs, through `destroySandbox`'s aws arm and ADR-0040's sweep and release.

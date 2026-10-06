@@ -30,23 +30,33 @@ func parseLayer3Cloud(raw string) (layer3Cloud, error) {
 }
 
 // layer3PreflightHCLForCloud runs the cloud's own structural gate before
-// any tofu starts. Only Scaleway has one; any other cloud is refused
-// rather than judged by Scaleway's rules, which say nothing about it.
-func layer3PreflightHCLForCloud(cloud layer3Cloud, outputDir string, allowedResourceTypes []string) error {
+// any tofu starts. Scaleway reads only in.AllowedResourceTypes; AWS checks
+// the stack against every field, and a zero field refuses. Any other cloud
+// is refused rather than judged by rules that say nothing about it.
+func layer3PreflightHCLForCloud(cloud layer3Cloud, outputDir string, in awsGateInputs) error {
 	switch cloud {
 	case layer3Scaleway:
-		return layer3PreflightHCL(outputDir, allowedResourceTypes)
+		return layer3PreflightHCL(outputDir, in.AllowedResourceTypes)
+	case layer3AWS:
+		return validateAWSLayer3HCLShape(outputDir, in)
 	}
 	return fmt.Errorf("cloud %s has no Layer 3 HCL gate yet, so its configuration may not reach a real account", cloud)
 }
 
 // layer3HCLGate is layer3PreflightHCLForCloud unless a test replaced it
 // through Deps.Layer3HCLGate.
-func (runtime *CommandRuntime) layer3HCLGate(cloud layer3Cloud, outputDir string, allowedResourceTypes []string) error {
+func (runtime *CommandRuntime) layer3HCLGate(cloud layer3Cloud, outputDir string, in awsGateInputs) error {
 	if runtime.Deps.Layer3HCLGate != nil {
-		return runtime.Deps.Layer3HCLGate(cloud, outputDir, allowedResourceTypes)
+		return runtime.Deps.Layer3HCLGate(cloud, outputDir, in)
 	}
-	return layer3PreflightHCLForCloud(cloud, outputDir, allowedResourceTypes)
+	return layer3PreflightHCLForCloud(cloud, outputDir, in)
+}
+
+// allowlistOnlyGateInputs is the gate input for a path aws never reaches
+// (deploy, live upgrade: layer3LiveCloud refuses aws first), so only the
+// Scaleway gate's allowlist is filled.
+func allowlistOnlyGateInputs(runtime *CommandRuntime) awsGateInputs {
+	return awsGateInputs{AllowedResourceTypes: runtime.Config.Validation.Layers.SandboxDeploy.AllowResourceTypes}
 }
 
 // layer3LiveCloud parses the cloud for a live path (--keep, deploy,

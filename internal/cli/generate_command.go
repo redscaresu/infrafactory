@@ -834,7 +834,13 @@ func generateAndWriteFilesWithResult(ctx context.Context, runtime *CommandRuntim
 		if err := validateLayer3ProjectResource(runtime.OutputDir()); err != nil {
 			return 0, nil, err
 		}
-		if err := runtime.layer3HCLGate(cloud, runtime.OutputDir(), runtime.Config.Validation.Layers.SandboxDeploy.AllowResourceTypes); err != nil {
+		gateInputs := awsGateInputs{
+			AllowedResourceTypes: runtime.Config.Validation.Layers.SandboxDeploy.AllowResourceTypes,
+			Region:               runtime.Config.AWS.Region,
+			AMI:                  awsResolvedAMI{ID: amiID, Root: runtime.AWSLayer3AMIRoot},
+			UserData:             userData,
+		}
+		if err := runtime.layer3HCLGate(cloud, runtime.OutputDir(), gateInputs); err != nil {
 			return 0, nil, err
 		}
 		if err := validateLayer3ResourceAllowlist(runtime.OutputDir(), runtime.Config.Validation.Layers.SandboxDeploy.AllowResourceTypes); err != nil {

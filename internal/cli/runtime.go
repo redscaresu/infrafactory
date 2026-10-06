@@ -139,7 +139,7 @@ type RuntimeDependencies struct {
 
 	// Layer3HCLGate replaces layer3PreflightHCLForCloud; nil is the real
 	// gate. Only tests set it, to drive a cloud the gate refuses past it.
-	Layer3HCLGate func(cloud layer3Cloud, outputDir string, allowedResourceTypes []string) error
+	Layer3HCLGate func(cloud layer3Cloud, outputDir string, in awsGateInputs) error
 }
 
 type CommandRuntime struct {
@@ -158,6 +158,9 @@ type CommandRuntime struct {
 	// SSM (harness.ResolveAWSAMIFromSSM), once, before generation. An AWS
 	// generate at Layer 3 refuses while it is empty.
 	AWSLayer3AMI string
+	// AWSLayer3AMIRoot is AWSLayer3AMI's root EBS mapping, resolved with
+	// it. The AWS gate refuses while it is zero.
+	AWSLayer3AMIRoot harness.AWSAMIRoot
 
 	scenarioLoader     func(string) (scenario.Scenario, error)
 	loadedScenario     *scenario.Scenario

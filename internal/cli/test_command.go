@@ -702,9 +702,12 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 	cloud, cloudErr := parseLayer3Cloud(sc.Cloud)
 	if sandboxEnabled {
 		shapeErr := cloudErr
+		var gateInputs awsGateInputs
 		if shapeErr == nil {
-			shapeErr = runtime.layer3HCLGate(cloud, outputDir,
-				runtime.Config.Validation.Layers.SandboxDeploy.AllowResourceTypes)
+			gateInputs, shapeErr = layer3TestGateInputs(runtime, cloud, sc)
+		}
+		if shapeErr == nil {
+			shapeErr = runtime.layer3HCLGate(cloud, outputDir, gateInputs)
 		}
 		if shapeErr != nil {
 			hclRefused = true
@@ -923,6 +926,11 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 				_ = stageLog.Close()
 				sandboxApplied = sandboxErr == nil
 				stages, failures = appendSandboxDeployResult(stages, failures, sandboxResult, sandboxErr)
+				if sandboxApplied && cloud == layer3AWS {
+					var checksPassed bool
+					stages, failures, checksPassed = appendAWSPostApplyChecks(ctx, runtime, sc, outputDir, sandboxEnv, stages, failures)
+					sandboxApplied = checksPassed
+				}
 				if sandboxResult != nil && len(sandboxResult.Plan.Stdout) > 0 {
 					planLiveText = []byte(sandboxResult.Plan.Stdout)
 				} else if sandboxErr != nil {

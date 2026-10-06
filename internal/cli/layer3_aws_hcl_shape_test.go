@@ -50,12 +50,30 @@ func awsAdmittedInputs(t *testing.T) awsGateInputs {
 	t.Helper()
 	return awsGateInputs{
 		AllowedResourceTypes: defaultSandboxAllowlistForTest(t),
-		Region:               "us-east-1",
+		Region:               awsAdmittedRegion,
 		AMI: awsResolvedAMI{
 			ID:   harness.AWSLayer2AMI,
 			Root: harness.AWSAMIRoot{SizeGiB: 8, VolumeType: "gp3", DeleteOnTermination: true},
 		},
 		UserData: awsStepOneUserData(t),
+	}
+}
+
+// awsAdmittedRegion is the region the admitted stack's provider names.
+const awsAdmittedRegion = "us-east-1"
+
+// writeAWSAdmittedStack replaces dir's contents with the admitted stack
+// after edits.
+func writeAWSAdmittedStack(t *testing.T, dir string, edits ...awsStackEdit) {
+	t.Helper()
+	stack := awsAdmittedStack(t)
+	for _, edit := range edits {
+		edit(stack)
+	}
+	require.NoError(t, os.RemoveAll(dir))
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	for name, content := range stack {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600))
 	}
 }
 
@@ -99,9 +117,7 @@ func TestValidateAWSLayer3HCLShapeAdmitsWebStepOne(t *testing.T) {
 	for name, content := range stack {
 		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600))
 	}
-	err := layer3PreflightHCLForCloud(layer3AWS, dir, defaultSandboxAllowlistForTest(t))
-	require.Error(t, err, "the AWS gate exists, but the preflight still refuses aws until aws-layer3-gate-lift")
-	assert.Contains(t, err.Error(), "cloud aws has no Layer 3 HCL gate yet")
+	assert.NoError(t, layer3PreflightHCLForCloud(layer3AWS, dir, awsAdmittedInputs(t)), "the preflight's aws arm is the AWS gate")
 }
 
 const awsSecurityGroupIngress = `  ingress {
