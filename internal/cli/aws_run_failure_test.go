@@ -54,7 +54,7 @@ func (w logEvent) Write(p []byte) (int, error) {
 func runAWSRun(t *testing.T, lc *awsLifecycle, o awsRunOptions) awsRun {
 	t.Helper()
 	h := newCommandTestHarness(t)
-	setScenarioCloud(t, h.ScenarioPath, "aws")
+	setAWSLifecycleScenario(t, h.ScenarioPath)
 	if o.notify == nil {
 		o.notify = lc.notify
 	}
@@ -84,7 +84,7 @@ func runAWSRun(t *testing.T, lc *awsLifecycle, o awsRunOptions) awsRun {
 		AWSSSM:         lc,
 		AWSEC2:         lc,
 		AWSSweepSleep:  func(context.Context, time.Duration) error { return nil },
-		Layer3HCLGate:  func(layer3Cloud, string, []string) error { return nil },
+		Layer3HCLGate:  func(layer3Cloud, string, awsGateInputs) error { return nil },
 	}
 
 	loopEnd := -1

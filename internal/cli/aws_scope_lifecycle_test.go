@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"go/ast"
@@ -26,6 +27,7 @@ import (
 
 	"github.com/redscaresu/infrafactory/internal/config"
 	"github.com/redscaresu/infrafactory/internal/harness"
+	"github.com/redscaresu/infrafactory/internal/scenario"
 )
 
 const (
@@ -87,7 +89,27 @@ func newAWSLifecycle(t *testing.T) *awsLifecycle {
 		require.NoError(t, os.WriteFile(filepath.Join(dir, harness.LiveStateFilename), []byte(awsLiveState), 0o600))
 	}}
 	lc.destroy = &loggingSandboxDestroy{lc: lc}
+	// The instance awsLiveState names runs the script rendered from
+	// awsLifecycleService, so the post-apply user_data_check passes.
+	script, err := renderAWSUserData(awsLifecycleService)
+	require.NoError(t, err)
+	lc.ec2["DescribeInstanceAttribute"] = `<instanceId>i-0abc</instanceId><userData><value>` +
+		base64.StdEncoding.EncodeToString(script) + `</value></userData>`
 	return lc
+}
+
+// awsLifecycleService is the service: block setAWSLifecycleScenario adds.
+var awsLifecycleService = scenario.ServiceSpec{Image: "nginx", Tag: "1.27", Port: 80}
+
+// setAWSLifecycleScenario makes the harness scenario an aws one with a
+// service, so the gate has a script to check and EC2 one to report.
+func setAWSLifecycleScenario(t *testing.T, path string) {
+	t.Helper()
+	setScenarioCloud(t, path, "aws")
+	raw, err := os.ReadFile(path)
+	require.NoError(t, err)
+	raw = append(raw, "service:\n  image: nginx\n  tag: \"1.27\"\n  port: 80\n  ttl: 4h\n"...)
+	require.NoError(t, os.WriteFile(path, raw, 0o600))
 }
 
 func (lc *awsLifecycle) record(call string) {
@@ -252,8 +274,8 @@ func (h mockDestroyHook) Run(context.Context, string, map[string]string) (*harne
 	return nil, nil
 }
 
-// awsTestRun is one `infrafactory test` of an aws scenario, with the gate
-// stubbed, through runTestWithNotify.
+// awsTestRun is one `infrafactory test` of an aws scenario through
+// runTestWithNotify.
 type awsTestRun struct {
 	h      *CommandTestHarness
 	result OutputResult
@@ -261,22 +283,46 @@ type awsTestRun struct {
 	err    error
 }
 
+// awsTestSetup is what an aws test run varies. With gated, the real gate
+// runs: the output directory holds the admitted web_step_one stack after
+// stackEdits, and the runtime carries its AMI and root. Otherwise the gate
+// is stubbed.
+type awsTestSetup struct {
+	customize   func(*config.Config)
+	mockDestroy mockDestroyHook
+	gated       bool
+	stackEdits  []awsStackEdit
+	// deps edits the dependencies after the defaults are set; runtime
+	// edits the runtime just before the command runs.
+	deps    func(*RuntimeDependencies)
+	runtime func(*CommandRuntime)
+	flags   []string
+}
+
 func runAWSTest(t *testing.T, lc *awsLifecycle, customize func(*config.Config), mockDestroy mockDestroyHook, flags ...string) awsTestRun {
 	t.Helper()
+	return runAWSTestWith(t, lc, awsTestSetup{customize: customize, mockDestroy: mockDestroy, flags: flags})
+}
+
+func runAWSTestWith(t *testing.T, lc *awsLifecycle, setup awsTestSetup) awsTestRun {
+	t.Helper()
 	h := newCommandTestHarness(t)
-	setScenarioCloud(t, h.ScenarioPath, "aws")
+	setAWSLifecycleScenario(t, h.ScenarioPath)
 
 	opts := isolatedRunOpts(h, func(cfg config.Config) config.Config {
 		cfg = layer3On(cfg)
 		cfg.AWS = config.AWSConfig{Region: "eu-west-2", AccountID: preflightAWSAccount, PrincipalARN: preflightAWSPrincipal}
-		if customize != nil {
-			customize(&cfg)
+		if setup.gated {
+			cfg.AWS.Region = awsAdmittedRegion
+		}
+		if setup.customize != nil {
+			setup.customize(&cfg)
 		}
 		return cfg
 	})
 	opts.deps = RuntimeDependencies{
 		MockDeploy:     &fakeMockDeployHarness{},
-		Destroy:        mockDestroy,
+		Destroy:        setup.mockDestroy,
 		SandboxDeploy:  lc.deploy,
 		SandboxDestroy: lc.destroy,
 		RunProject:     lc.scw.runProject,
@@ -291,18 +337,32 @@ func runAWSTest(t *testing.T, lc *awsLifecycle, customize func(*config.Config), 
 			lc.sleeps++
 			return nil
 		},
-		Layer3HCLGate: func(layer3Cloud, string, []string) error { return nil },
+		Layer3HCLGate: func(layer3Cloud, string, awsGateInputs) error { return nil },
+	}
+	if setup.gated {
+		opts.deps.Layer3HCLGate = nil
+		writeAWSAdmittedStack(t, filepath.Join(h.OutputDir(), "example-scenario"), setup.stackEdits...)
+	}
+	if setup.deps != nil {
+		setup.deps(&opts.deps)
 	}
 
 	cmd := newTestCommandForTest(opts)
 	cmd.RunE = withRuntimeWithOptions("test", opts, sealedHandler(io.Discard,
 		func(cmd *cobra.Command, args []string, rt *CommandRuntime) error {
+			if setup.gated {
+				in := awsAdmittedInputs(t)
+				rt.AWSLayer3AMI, rt.AWSLayer3AMIRoot = in.AMI.ID, in.AMI.Root
+			}
+			if setup.runtime != nil {
+				setup.runtime(rt)
+			}
 			return runTestWithNotify(cmd, args, rt, lc.notify)
 		}))
 	stdout, stderr := &bytes.Buffer{}, &bytes.Buffer{}
 	cmd.SetOut(stdout)
 	cmd.SetErr(stderr)
-	cmd.SetArgs(append([]string{h.ScenarioPath, "--config", h.ConfigPath, "--output", string(OutputModeJSON)}, flags...))
+	cmd.SetArgs(append([]string{h.ScenarioPath, "--config", h.ConfigPath, "--output", string(OutputModeJSON)}, setup.flags...))
 	run := awsTestRun{h: h, err: cmd.Execute(), output: stdout.String() + stderr.String()}
 	run.result = decodeMachineOutput(t, bytes.NewBufferString(stdout.String()))
 	return run

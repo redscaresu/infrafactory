@@ -163,9 +163,9 @@ func TestGenerationGateIsKeyedOnTheScenarioCloud(t *testing.T) {
 		notGenerated             bool
 	}{
 		{name: "scaleway passes", payload: "cloud: scaleway\n"},
-		// With its AMI resolved, aws reaches the HCL gate, which has no
-		// aws branch yet.
-		{name: "aws is refused", payload: "cloud: aws\n", ami: "ami-0deadbeef1234567", want: "has no Layer 3 HCL gate yet"},
+		// With its AMI resolved, aws reaches the AWS gate, which refuses a
+		// Scaleway stack.
+		{name: "aws is refused", payload: "cloud: aws\n", ami: "ami-0deadbeef1234567", want: `resource type "scaleway_block_volume" is not a aws_* type`},
 		{name: "aws without a resolved AMI", payload: "cloud: aws\n", want: "no resolved AMI id", notGenerated: true},
 		{name: "unreadable cloud is refused", payload: "cloud: {nested: true}\n", want: "read cloud"},
 	} {
