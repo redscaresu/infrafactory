@@ -238,3 +238,5 @@ labelled.
 child passed, including `encryption`, whose "external" key provider runs a command before any
 resource, in the process holding the credentials. The block is now deny-by-default:
 `required_providers` and `required_version` only (`layer3TerraformBlockProblems`).
+
+**Amendment — AWS is the third implementation (2026-10-06).** Rules 1-2 (the sealed environment) were implemented for AWS by `aws-layer3-seal-and-dispatch` (#288-#303); rules 3-4 (the sweep and the reap) by ADR-0040, which owns the whole-account scope, its claim and its collection table; rule 5 (the allowlist) by `aws-layer3-gate`. ADR-0025 is not carried over: AWS has no per-run project, so the scope is one dedicated account claimed for the run, and generated HCL has no project to bind.
