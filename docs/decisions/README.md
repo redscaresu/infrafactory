@@ -46,6 +46,7 @@ Use ADRs for decisions that affect long-term behavior, interfaces, or contributo
 - [0037](0037-docs-is-the-planning-vault.md) docs/ is the planning vault, and epics are scoped and built by a visible swarm — Accepted
 - [0038](0038-work-starts-from-an-agreed-hld.md) Work starts from an agreed high-level design — Accepted
 - [0039](0039-layer-neutral-aws-generated-hcl.md) Layer-Neutral AWS Generated HCL — Accepted
+- [0040](0040-aws-whole-scope-ownership.md) Whole-Scope Ownership for AWS Layer 3 — Accepted
 <!-- adr-index:end -->
 
 Generated from the ADR files by `make adr-index`; CI fails if it is stale. Do not edit between the markers.

@@ -501,3 +501,5 @@ purge, API still refusing, retry and then look in the console.
 
 The general rule this arc keeps relearning: a status code is a category, not a diagnosis. Keying on
 it is right; concluding from one observation of it is not.
+
+**Note (2026-10-06):** this ADR is Scaleway's. AWS does not carry it over; see ADR-0040 for whole-scope ownership.

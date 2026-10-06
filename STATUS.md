@@ -10,8 +10,8 @@ The three stories the user's 2026-09-29 decisions made ready have merged (#394, 
 and policy-correctness is done. The user set up the AWS Layer 3 scope on 2026-09-29 (a member
 account in us-east-1, every step verified; runbook in `docs/operations.md` § Layer 3 (AWS) › Scope
 setup), and the planted-leak proof passed on it the same day: the sweep names every leak, a held
-claim refuses reap, reap empties the account. Next is `aws-whole-scope-adr` (ready, a docs story),
-then `aws-layer3-gate-lift`, which needs the user's explicit approval.
+claim refuses reap, reap empties the account. Whole-scope ownership is recorded (ADR-0040; the
+claim-sweep-reap epic is done). Next is `aws-layer3-gate-lift`, which needs the user's explicit approval.
 
 What waits on the user is the board's **Waiting on you** view (`kind: operator` stories); what the
 lead runs is **Lead-run**.

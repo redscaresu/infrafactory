@@ -470,7 +470,7 @@ fixed by running apply, destroy, sweep and `reap`; the probe window.
 
 - fakeaws-step-one-surfaces — done (fakeaws #24-#34, infrafactory #285, #300)
 - aws-layer3-seal-and-dispatch — done (#288, #289, #290, #294, #296, #303)
-- [aws-layer3-claim-sweep-reap](../epics/aws-layer3-claim-sweep-reap.md)
+- aws-layer3-claim-sweep-reap — done (ADR-0040; planted-leak proof #399; this PR)
 - aws-layer-neutral-hcl — done (#329-#342; ADR-0039)
 - aws-ingress-policy-and-holdout — done (#345-#347, #349, #350; this PR)
 - [aws-layer3-gate](../epics/aws-layer3-gate.md)
