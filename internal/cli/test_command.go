@@ -55,6 +55,22 @@ func runTestWithNotify(
 	if err != nil {
 		return err
 	}
+	// Outside the guard, which names reap on any interrupt: nothing is
+	// claimed yet. Here and not in executeTest, so run resolves once.
+	resolved, err := resolveAWSLayer3AMI(cmd.Context(), runtime, cloud)
+	if err != nil {
+		result := OutputResult{
+			Command: "test", Scenario: sc.Name, Status: CommandStatusFailed, Stages: resolved,
+			Failures: []FailureSummary{{
+				Layer: "sandbox_deploy", Stage: StageAWSAMIResolve, Check: "ami",
+				Command: "resolve aws ami", Detail: err.Error(),
+			}},
+		}
+		if writeErr := writeCommandOutput(cmd, result); writeErr != nil {
+			return writeErr
+		}
+		return err
+	}
 
 	// The guard only engages when Layer 3 is on. Interrupting a
 	// mock-only run costs nothing; interrupting one that has already
@@ -69,6 +85,7 @@ func runTestWithNotify(
 			// `deploy` produces. stdout carries the output contract.
 			Progress: cmd.ErrOrStderr(),
 		})
+		result.Stages = append(resolved, result.Stages...)
 		if err != nil {
 			if writeErr := writeCommandOutput(cmd, result); writeErr != nil {
 				return writeErr

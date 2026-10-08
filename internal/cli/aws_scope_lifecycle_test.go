@@ -37,25 +37,41 @@ const (
 	deleteClaim = "ssm:DeleteParameter " + harness.AWSClaimParameter
 	deployRun   = "SandboxDeploy.Run"
 	destroyRun  = "SandboxDestroy.Run"
+	getAMI      = "ssm:GetParameter " + harness.AWSAL2023AMIParameter
+	describeAMI = "ec2:DescribeImages " + harness.AWSLayer2AMI
+	gateCall    = "Layer3HCLGate"
+	generated   = "Generator.Generate"
 
 	runningInstance = `<reservationSet><item><instancesSet><item><instanceId>i-0stray</instanceId>` +
 		`<instanceState><name>running</name></instanceState></item></instancesSet></item></reservationSet>`
 	settlingInstance = `<reservationSet><item><instancesSet><item><instanceId>i-0settling</instanceId>` +
 		`<instanceState><name>shutting-down</name></instanceState></item></instancesSet></item></reservationSet>`
+
+	// awsAMIImage is the AL2023 image the SSM parameter names, with
+	// awsAdmittedInputs' root: 8 GiB gp3, deleted on termination.
+	awsAMIImage = `<imagesSet><item><imageId>` + harness.AWSLayer2AMI + `</imageId>` +
+		`<rootDeviceType>ebs</rootDeviceType><rootDeviceName>/dev/xvda</rootDeviceName><blockDeviceMapping>` +
+		`<item><deviceName>/dev/xvda</deviceName><ebs><volumeSize>8</volumeSize><volumeType>gp3</volumeType>` +
+		`<deleteOnTermination>true</deleteOnTermination></ebs></item></blockDeviceMapping></item></imagesSet>`
 )
 
 // awsLifecycle is STS, SSM and EC2 behind one doer, with the Layer 3
 // harness fakes, all logging to one ordered call log. A request whose
 // context is done fails as a real client's would.
 type awsLifecycle struct {
-	mu      sync.Mutex
-	calls   []string
-	params  map[string]string
-	ec2     map[string]string // a Describe's result set, empty when absent
-	denied  map[string]bool   // Describes answered 403
-	putFail bool              // PutParameter, and every claim read after it, is denied
-	putSent bool
-	onPut   func()
+	mu     sync.Mutex
+	calls  []string
+	params map[string]string
+	ec2    map[string]string // a Describe's result set, empty when absent
+	// denied answers 403 to an EC2 Describe by its action, and to an
+	// SSM call by its logged name.
+	denied map[string]bool
+	// amiImage is DescribeImages' answer for an image id, the AMI
+	// resolve's call, which the sweep's Owners=self listing never gets.
+	amiImage string
+	putFail  bool // PutParameter, and every claim read after it, is denied
+	putSent  bool
+	onPut    func()
 	// onEC2 sees each EC2 action with mu held, so it may change ec2.
 	onEC2  func(action string)
 	sleeps int
@@ -76,9 +92,13 @@ func newAWSLifecycle(t *testing.T) *awsLifecycle {
 	credDir := filepath.Join(home, ".config", "infrafactory")
 	require.NoError(t, os.MkdirAll(credDir, 0o700))
 	lc := &awsLifecycle{
-		params:   map[string]string{harness.AWSStampParameter: preflightAWSAccount},
+		params: map[string]string{
+			harness.AWSStampParameter:     preflightAWSAccount,
+			harness.AWSAL2023AMIParameter: harness.AWSLayer2AMI,
+		},
 		ec2:      map[string]string{},
 		denied:   map[string]bool{},
+		amiImage: awsAMIImage,
 		credFile: filepath.Join(credDir, "layer3-aws.env"),
 		scw:      newLayer3Fakes(),
 	}
@@ -162,6 +182,13 @@ func (lc *awsLifecycle) Do(req *http.Request) (*http.Response, error) {
 		lc.record("sts:" + action)
 		return lifecycleAnswer(req, http.StatusOK, "text/xml", callerIdentityXML(preflightAWSAccount, preflightAWSPrincipal)), nil
 	}
+	if image := form.Get("ImageId.1"); action == "DescribeImages" && image != "" {
+		lc.record("ec2:" + action + " " + image)
+		lc.mu.Lock()
+		defer lc.mu.Unlock()
+		return lifecycleAnswer(req, http.StatusOK, "text/xml",
+			`<DescribeImagesResponse xmlns="http://ec2.amazonaws.com/doc/2016-11-15/">`+lc.amiImage+`</DescribeImagesResponse>`), nil
+	}
 	lc.record("ec2:" + action)
 	lc.mu.Lock()
 	if lc.onEC2 != nil {
@@ -200,6 +227,8 @@ func (lc *awsLifecycle) ssm(op string, payload []byte) (int, string) {
 	value, exists := lc.params[in.Name]
 	claimUnreadable := lc.putFail && lc.putSent && in.Name == harness.AWSClaimParameter
 	switch {
+	case lc.denied[call]:
+		return lifecycleSSMError("AccessDeniedException")
 	case op == "DescribeParameters":
 		return http.StatusOK, `{"Parameters":[]}`
 	case op == "PutParameter" && lc.putFail:
@@ -285,18 +314,16 @@ type awsTestRun struct {
 
 // awsTestSetup is what an aws test run varies. With gated, the real gate
 // runs: the output directory holds the admitted web_step_one stack after
-// stackEdits, and the runtime carries its AMI and root. Otherwise the gate
-// is stubbed.
+// stackEdits, and lc serves its AMI and root to the resolve. Otherwise
+// the gate is stubbed, logging gateCall.
 type awsTestSetup struct {
 	customize   func(*config.Config)
 	mockDestroy mockDestroyHook
 	gated       bool
 	stackEdits  []awsStackEdit
-	// deps edits the dependencies after the defaults are set; runtime
-	// edits the runtime just before the command runs.
-	deps    func(*RuntimeDependencies)
-	runtime func(*CommandRuntime)
-	flags   []string
+	// deps edits the dependencies after the defaults are set.
+	deps  func(*RuntimeDependencies)
+	flags []string
 }
 
 func runAWSTest(t *testing.T, lc *awsLifecycle, customize func(*config.Config), mockDestroy mockDestroyHook, flags ...string) awsTestRun {
@@ -337,7 +364,10 @@ func runAWSTestWith(t *testing.T, lc *awsLifecycle, setup awsTestSetup) awsTestR
 			lc.sleeps++
 			return nil
 		},
-		Layer3HCLGate: func(layer3Cloud, string, awsGateInputs) error { return nil },
+		Layer3HCLGate: func(layer3Cloud, string, awsGateInputs) error {
+			lc.record(gateCall)
+			return nil
+		},
 	}
 	if setup.gated {
 		opts.deps.Layer3HCLGate = nil
@@ -350,13 +380,6 @@ func runAWSTestWith(t *testing.T, lc *awsLifecycle, setup awsTestSetup) awsTestR
 	cmd := newTestCommandForTest(opts)
 	cmd.RunE = withRuntimeWithOptions("test", opts, sealedHandler(io.Discard,
 		func(cmd *cobra.Command, args []string, rt *CommandRuntime) error {
-			if setup.gated {
-				in := awsAdmittedInputs(t)
-				rt.AWSLayer3AMI, rt.AWSLayer3AMIRoot = in.AMI.ID, in.AMI.Root
-			}
-			if setup.runtime != nil {
-				setup.runtime(rt)
-			}
 			return runTestWithNotify(cmd, args, rt, lc.notify)
 		}))
 	stdout, stderr := &bytes.Buffer{}, &bytes.Buffer{}
@@ -741,4 +764,45 @@ func TestNoProductionCodeSetsTheLayer3HCLGate(t *testing.T) {
 			return true
 		})
 	}
+}
+
+// Only the AMI resolve sets the id the model writes and the root the gate
+// checks, so neither can come from anywhere but STS, SSM and EC2.
+func TestOnlyTheAMIResolveSetsTheLayer3AMI(t *testing.T) {
+	fields := map[string]bool{"AWSLayer3AMI": true, "AWSLayer3AMIRoot": true}
+	assigned := func(n ast.Node) []string {
+		var names []string
+		ast.Inspect(n, func(n ast.Node) bool {
+			if assign, ok := n.(*ast.AssignStmt); ok {
+				for _, lhs := range assign.Lhs {
+					if sel, ok := lhs.(*ast.SelectorExpr); ok && fields[sel.Sel.Name] {
+						names = append(names, sel.Sel.Name)
+					}
+				}
+			}
+			return true
+		})
+		return names
+	}
+	var resolveSets []string
+	for path, f := range nonTestGoFiles(t) {
+		for _, decl := range f.Decls {
+			if fn, ok := decl.(*ast.FuncDecl); ok && fn.Name.Name == "resolveAWSLayer3AMI" {
+				resolveSets = append(resolveSets, assigned(fn)...)
+				continue
+			}
+			for _, name := range assigned(decl) {
+				t.Errorf("%s assigns %s; only resolveAWSLayer3AMI sets it", path, name)
+			}
+		}
+		ast.Inspect(f, func(n ast.Node) bool {
+			if kv, ok := n.(*ast.KeyValueExpr); ok {
+				if key, ok := kv.Key.(*ast.Ident); ok && fields[key.Name] {
+					t.Errorf("%s sets %s in a literal; only resolveAWSLayer3AMI sets it", path, key.Name)
+				}
+			}
+			return true
+		})
+	}
+	assert.ElementsMatch(t, []string{"AWSLayer3AMI", "AWSLayer3AMIRoot"}, resolveSets, "the resolve sets both")
 }

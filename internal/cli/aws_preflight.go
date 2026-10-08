@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,22 +19,37 @@ import (
 // the scope teardown's requests ignore the command's cancellation.
 const awsHTTPTimeout = 20 * time.Second
 
-// assertAWSCredentials is assertSandboxCredentials for AWS. Every local
-// check -- the aws block, the credential file and its mode -- runs before
-// the one call, sts:GetCallerIdentity, which must answer exactly the
-// configured account and principal (ADR-0025 ordering, ADR-0023 rule 2).
+// newAWSHTTPClient is the real AWS transport a runtime gives each AWS
+// dependency left nil. internal/cli's TestMain replaces it, so a test
+// that forgets its fake fails instead of calling AWS.
+var newAWSHTTPClient = func() *http.Client { return &http.Client{Timeout: awsHTTPTimeout} }
+
+// assertAWSCredentials is assertSandboxCredentials for AWS.
 func assertAWSCredentials(runtime *CommandRuntime) error {
+	_, err := awsVerifiedEnv(context.Background(), runtime)
+	return err
+}
+
+// awsVerifiedEnv returns the sealed env once its key is proven. Every
+// local check -- the aws block, the credential file and its mode -- runs
+// before the one call, sts:GetCallerIdentity, which must answer exactly
+// the configured account and principal (ADR-0025 ordering, ADR-0023
+// rule 2).
+func awsVerifiedEnv(ctx context.Context, runtime *CommandRuntime) (map[string]string, error) {
 	env, err := awsLayer3Env(runtime.Config.AWS)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	// Nil would make NewAWSSTSClient use the SDK's own client; refusing
 	// keeps a runtime built without one from reaching real AWS unasked.
 	if runtime.Deps.AWSSTS == nil {
-		return errors.New("aws Layer 3 preflight: no STS HTTP client is configured")
+		return nil, errors.New("aws Layer 3 preflight: no STS HTTP client is configured")
 	}
 	cfg := runtime.Config.AWS
-	return harness.VerifyAWSIdentity(context.Background(), env, runtime.Deps.AWSSTS, "", cfg.AccountID, cfg.PrincipalARN)
+	if err := harness.VerifyAWSIdentity(ctx, env, runtime.Deps.AWSSTS, "", cfg.AccountID, cfg.PrincipalARN); err != nil {
+		return nil, err
+	}
+	return env, nil
 }
 
 // awsCommandEnvForAccount is sandboxCommandEnvForProject for AWS: the

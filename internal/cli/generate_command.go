@@ -33,6 +33,10 @@ func runGenerateCommand(cmd *cobra.Command, args []string, runtime *CommandRunti
 		return fmt.Errorf("load scenario %q: %w", scenarioPath, err)
 	}
 
+	resolved, err := resolveAWSLayer3AMI(cmd.Context(), runtime, layer3TeardownCloud(sc.Cloud))
+	if err != nil {
+		return err
+	}
 	writtenFiles, _, err := generateAndWriteFilesWithResult(cmd.Context(), runtime, scenarioPath, "", 1, nil, generatedFileWriteModeClean)
 	if err != nil {
 		return err
@@ -42,10 +46,10 @@ func runGenerateCommand(cmd *cobra.Command, args []string, runtime *CommandRunti
 		Command:  "generate",
 		Scenario: sc.Name,
 		Status:   CommandStatusSuccess,
-		Stages: []StageSummary{
-			{Layer: "generate", Stage: "seed", Status: StageStatusPass},
-			{Layer: "generate", Stage: "write_files", Status: StageStatusPass, Detail: fmt.Sprintf("%d files", writtenFiles)},
-		},
+		Stages: append(resolved,
+			StageSummary{Layer: "generate", Stage: "seed", Status: StageStatusPass},
+			StageSummary{Layer: "generate", Stage: "write_files", Status: StageStatusPass, Detail: fmt.Sprintf("%d files", writtenFiles)},
+		),
 	}
 
 	if err := writeCommandOutput(cmd, result); err != nil {

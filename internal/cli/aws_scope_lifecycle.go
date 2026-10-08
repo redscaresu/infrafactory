@@ -14,6 +14,11 @@ import (
 // command, which is the only way the claim is released from then on.
 const StageAWSScopeClaimKept = "aws_scope_claim_kept"
 
+// StageAWSAMIResolve is the stage that resolves the AL2023 AMI and its
+// root once per aws Layer 3 command, before generation or the gate. Its
+// pass detail names both.
+const StageAWSAMIResolve = "aws_ami_resolve"
+
 // awsClaimHolderFor mints this process's claim holder when it may claim
 // the aws scope: Layer 3 on and the scenario's cloud aws. Otherwise it is
 // "", and nothing is minted that could fail a run that never claims.
