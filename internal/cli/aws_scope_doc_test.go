@@ -44,7 +44,11 @@ func TestAWSRunChecklistNamesTheStagesAndTheReapCommand(t *testing.T) {
 	require.NoError(t, err)
 	_, section, found := strings.Cut(string(data), "\n### Running aws-web-live\n")
 	require.True(t, found, "docs/operations.md has no ### Running aws-web-live")
-	section, _, _ = strings.Cut(section, "\n#")
+	// Cut at the next heading, not at "\n#", which a shell comment in a
+	// fenced block would also match.
+	if i := regexp.MustCompile(`\n#{2,3} `).FindStringIndex(section); i != nil {
+		section = section[:i[0]]
+	}
 	_, inLayer3AWS, _ := strings.Cut(string(data), "\n## Layer 3 (AWS)\n")
 	inLayer3AWS, _, _ = strings.Cut(inLayer3AWS, "\n## ")
 	require.Contains(t, inLayer3AWS, "\n### Running aws-web-live\n", "the checklist must sit under ## Layer 3 (AWS)")
@@ -57,6 +61,8 @@ func TestAWSRunChecklistNamesTheStagesAndTheReapCommand(t *testing.T) {
 	} {
 		assert.Contains(t, section, want)
 	}
-	assert.Equal(t, []string{"ssm:GetParameter"}, regexp.MustCompile(`\b(?:ssm|sts|ec2|iam|s3):[A-Za-z]+`).FindAllString(section, -1),
+	// Any service:Action, so a new action of any service fails, not only
+	// of a listed few.
+	assert.Equal(t, []string{"ssm:GetParameter"}, regexp.MustCompile(`\b[a-z0-9-]+:[A-Z][A-Za-z*]+\b`).FindAllString(section, -1),
 		"the checklist names one action, in the sentence about the public parameter")
 }
