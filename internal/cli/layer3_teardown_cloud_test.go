@@ -117,12 +117,7 @@ func TestFailedRunOnAnotherCloudTearsNothingDown(t *testing.T) {
 
 			logs := &bytes.Buffer{}
 			cmd := newRunCommandForTest(opts)
-			// The AMI stands in for the run's SSM preflight, so aws gets
-			// past generation to the gate.
-			cmd.RunE = withRuntimeWithOptions("run", opts, sealedHandler(logs, func(cmd *cobra.Command, args []string, rt *CommandRuntime) error {
-				rt.AWSLayer3AMI = "ami-0deadbeef1234567"
-				return runRunCommand(cmd, args, rt)
-			}))
+			cmd.RunE = withRuntimeWithOptions("run", opts, sealedHandler(logs, runRunCommand))
 			stdout := &bytes.Buffer{}
 			cmd.SetOut(stdout)
 			cmd.SetErr(&bytes.Buffer{})
@@ -131,9 +126,10 @@ func TestFailedRunOnAnotherCloudTearsNothingDown(t *testing.T) {
 
 			result := decodeMachineOutput(t, stdout)
 			// aws acts only on a claim an iteration took, and the gate
-			// refused before any take.
+			// refused before any take: the only AWS calls are the AMI
+			// resolve's, which got aws past generation to the gate.
 			if cloud == "aws" {
-				assert.Empty(t, lc.log(), "AWS calls")
+				assert.Equal(t, []string{"sts:GetCallerIdentity", getAMI, describeAMI}, lc.log(), "AWS calls")
 				assert.Contains(t, result.Stages, StageSummary{
 					Layer: "sandbox_deploy", Stage: "auto_destroy", Status: StageStatusSkip,
 					Detail: "no iteration took the aws scope's claim, so none applied to it",

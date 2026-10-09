@@ -68,6 +68,7 @@ func runAWSRun(t *testing.T, lc *awsLifecycle, o awsRunOptions) awsRun {
 	run := awsRun{}
 	opts.deps = RuntimeDependencies{
 		Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
+			lc.record(generated)
 			run.generates++
 			return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte("terraform {}\n")}}, nil
 		}),
@@ -97,7 +98,6 @@ func runAWSRun(t *testing.T, lc *awsLifecycle, o awsRunOptions) awsRun {
 	cmd := newRunCommandForTest(opts)
 	cmd.RunE = withRuntimeWithOptions("run", opts, sealedHandler(logs,
 		func(cmd *cobra.Command, args []string, rt *CommandRuntime) error {
-			rt.AWSLayer3AMI = "ami-0deadbeef1234567"
 			return runRunWithNotify(cmd, args, rt, o.notify)
 		}))
 	stdout, stderr := &bytes.Buffer{}, &bytes.Buffer{}

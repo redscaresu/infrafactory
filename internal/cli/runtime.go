@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -463,13 +462,13 @@ func buildRuntime(cmd *cobra.Command, opts runtimeOptions) (*CommandRuntime, err
 		})
 	}
 	if deps.AWSSTS == nil {
-		deps.AWSSTS = &http.Client{Timeout: awsHTTPTimeout}
+		deps.AWSSTS = newAWSHTTPClient()
 	}
 	if deps.AWSSSM == nil {
-		deps.AWSSSM = &http.Client{Timeout: awsHTTPTimeout}
+		deps.AWSSSM = newAWSHTTPClient()
 	}
 	if deps.AWSEC2 == nil {
-		deps.AWSEC2 = &http.Client{Timeout: awsHTTPTimeout}
+		deps.AWSEC2 = newAWSHTTPClient()
 	}
 	if deps.MockStart == nil {
 		deps.MockStart = &dockerMockStarter{}

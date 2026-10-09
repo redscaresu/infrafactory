@@ -103,6 +103,13 @@ func runRunWithNotify(
 	if err != nil {
 		return err
 	}
+	// Once per run, outside the interrupt guard, which wraps only the
+	// loop. Every iteration generates against it, so each iteration.json
+	// leads with its stage; the run's own stages carry it once.
+	resolved, err := resolveAWSLayer3AMI(cmd.Context(), runtime, cloud)
+	if err != nil {
+		return err
+	}
 	store := runstore.NewFilesystemStore(runtime.RunStoreRoot())
 	mode, err := detectRunMode(cmd.Context(), runtime, store, sc.Name, runtime.OutputDir(), controls)
 	if err != nil {
@@ -186,9 +193,9 @@ func runRunWithNotify(
 		return fmt.Errorf("write initial run metadata: %w", err)
 	}
 
-	allStages := []StageSummary{
+	allStages := append([]StageSummary{
 		{Layer: "run", Stage: "mode", Status: StageStatusPass, Detail: fmt.Sprintf("%s (%s)", mode.Mode, mode.Reason)},
-	}
+	}, resolved...)
 	allFailures := make([]FailureSummary, 0)
 	// Every failure signature the run has produced, in any iteration.
 	// A per-iteration "previous" cannot see oscillation, which is the
@@ -222,7 +229,7 @@ func runRunWithNotify(
 			stages, failures := runIteration(ctx, runID, iteration, sc.Name, scenarioPath, runtime, store, captureLLMRaw, repairFeedback, mode.Mode, controls)
 			allStages = append(allStages, stages...)
 
-			if err := persistRunIteration(store, sc.Name, runID, iteration, stages, failures); err != nil {
+			if err := persistRunIteration(store, sc.Name, runID, iteration, slices.Concat(resolved, stages), failures); err != nil {
 				return fmt.Errorf("persist run iteration %d: %w", iteration, err)
 			}
 

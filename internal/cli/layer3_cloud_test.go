@@ -112,8 +112,10 @@ func withCloud(t *testing.T, yaml, cloud string) string {
 	return strings.Replace(yaml, "cloud: scaleway\n", "cloud: "+cloud+"\n", 1)
 }
 
+// aws is refused one stage earlier, at the AMI resolve: this config has
+// no aws block, which the resolve reads before any call.
 func TestTestCommandRefusesANonScalewayCloudAtTheGate(t *testing.T) {
-	for _, cloud := range []string{"aws", "gcp"} {
+	for cloud, stage := range map[string]string{"aws": StageAWSAMIResolve, "gcp": "allowlist"} {
 		t.Run(cloud, func(t *testing.T) {
 			h := newCommandTestHarness(t)
 			sandboxCredsForTest(t)
@@ -147,7 +149,7 @@ func TestTestCommandRefusesANonScalewayCloudAtTheGate(t *testing.T) {
 			result := decodeMachineOutput(t, stdout)
 			require.Len(t, result.Failures, 1)
 			assert.Equal(t, "sandbox_deploy", result.Failures[0].Layer)
-			assert.Equal(t, "allowlist", result.Failures[0].Stage)
+			assert.Equal(t, stage, result.Failures[0].Stage)
 			assert.Contains(t, result.Failures[0].Detail, cloud)
 
 			assert.Zero(t, mock.calls, "refused before any tofu")
