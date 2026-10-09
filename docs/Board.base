@@ -61,18 +61,8 @@ views:
     filters:
       and:
         - file.inFolder("stories")
-        - kind == "operator"
-    order:
-      - file.name
-      - status
-      - epic
-  - type: table
-    name: Lead-run
-    filters:
-      and:
-        - file.inFolder("stories")
         - kind == "lead"
     order:
       - file.name
       - status
-      - blocked_by
+      - epic

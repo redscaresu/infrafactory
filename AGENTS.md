@@ -24,7 +24,7 @@ Additional references (map of every live doc: `docs/README.md`; `docs/archive/` 
 | `docs/hld/*.md` | A design agreed with the user (draft → agreed → superseded); its `## Epics` lists the epics and marks each done | Write with `/hld`, split with `/plan-hld` |
 | `STATUS.md` | The entry point: the active HLD and anything waiting on the user. Recent is `git log`, not stored. Under 150 lines, CI-enforced. | Only when Now changes |
 | `docs/epics/*.md` | A goal bigger than one PR: **Done when**, out of scope, constraints. Stories join it with `epic:`. | Scope with `/plan-epic <slug>`; the last story's PR deletes it |
-| `docs/stories/*.md` | One open item each, `status: ready\|blocked\|later`; a `ready` story is an agent's brief, a `kind: operator` story is the user's (a decision or a hand step). | Open an item by adding a file; the PR that finishes it deletes the file |
+| `docs/stories/*.md` | One open item each, `status: ready\|blocked\|later`; a `ready` story is an agent's brief, a `kind: lead` story is the lead's, with the user's part (a decision or a hand step) on a **You:** line. | Open an item by adding a file; the PR that finishes it deletes the file |
 | `CONCEPT.md` | Durable architecture, contracts, design decisions | Only for major architecture/design shifts |
 | `docs/decisions/*.md` | ADRs for decision-impacting changes | When change crosses ADR trigger threshold (see below) |
 
@@ -35,7 +35,7 @@ Work flows HLD → epics → stories → the board, run by the swarm-dev plugin 
 `/plan-epic <slug>` scopes an epic into stories; `swarm.sh conduct <epic>` builds its ready
 stories. After the HLD, `/swarm` runs these in turn and resumes wherever it stopped. An epic is done when its last story's PR deletes the epic file and marks it done in the
 HLD's `## Epics`. One-off work is a single file in `docs/stories/`. A decision or a hand step for
-the user is a `kind: operator` story, so it shows on the board, not in prose.
+the user is a **You:** line in a `kind: lead` story, so it shows on the board, not in prose.
 
 Retired (kept in git as history, not written any more): arc plans in `docs/archive/plans/`, arc close-outs
 in `docs/archive/status/ARCHIVE.md` and `docs/archive/status/STATUS_HISTORY.md`, and slice numbers (`S###`).
