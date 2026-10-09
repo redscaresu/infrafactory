@@ -344,8 +344,9 @@ What refuses, in order. Generation and the gate cost an LLM call, so the checks 
 1. Before generation, once per command: the config fields (`aws.region`, `aws.account_id` and
    `aws.principal_arn` set, the region a real region name), the credentials file and its mode,
    STS answering exactly `aws.account_id` and `aws.principal_arn`, then the AMI lookup. Every one
-   of these refusals reports stage `aws_ami_resolve`, check `ami`, so read the failure's detail to
-   tell a config field, the key file, STS and the AMI apart. A refusal here ends the command
+   of these refusals is reported as stage `aws_ami_resolve`: `test` writes it as a failure with
+   check `ami`, while `run` and `generate` only return an error prefixed `aws_ami_resolve:`. Either
+   way, read the detail to tell a config field, the key file, STS and the AMI apart. A refusal here ends the command
    before any model call, takes no claim and leaves nothing to reap.
 2. After the gate, before apply: the credentials again (config fields, file, STS), then the stamp,
    the absence of a default VPC and the claim, which refuses while another holder holds it and
