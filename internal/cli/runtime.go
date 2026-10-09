@@ -166,7 +166,10 @@ type CommandRuntime struct {
 	scenarioPath   string
 	// awsClaim is what this process knows of the aws scope's claim, for
 	// the reap command a kept claim or an interrupt names.
-	awsClaim           awsClaim
+	awsClaim awsClaim
+	// awsHolder is this process's claim holder, fixed once minted, for
+	// the notice the first signal prints while awsClaim may be changing.
+	awsHolder          string
 	outputDir          string
 	runstoreRoot       string
 	livestoreRoot      string

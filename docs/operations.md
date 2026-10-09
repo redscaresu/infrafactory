@@ -365,10 +365,12 @@ and `--take-over` refuses a claim its holder does not hold, so the run names onl
 works. When it cannot tell whether it holds the claim (a claim put, read or release that failed
 without saying who holds it), it names both: `--take-over` if the run holds the claim, plain reap
 if no one does. When another run holds the claim, it names that holder and the `--take-over`
-naming it, to use once that run has ended. Ctrl-C prints the same choice once the run's own
-teardown has finished: `--take-over` while the run keeps the claim, plain reap once its sweep
-released it. A `reap --take-over` that deleted the old claim but could not take its own names the
-reap to run next.
+naming it, to use once that run has ended. The first Ctrl-C prints both forms at once, with the
+run's holder, in case the process dies before its teardown finishes; signals stay caught until
+that teardown ends, so a second Ctrl-C does not cut it short. Once it ends, the run prints the
+settled choice: `--take-over` while the run keeps the claim, plain reap once its sweep released
+it. A reap whose own claim attempt has an unknown outcome, or a `reap --take-over` that deleted
+the old claim but could not take its own, names the reap to run next.
 
 The first real AMI resolve is denied: the key's policy, `docs/layer3/aws/iam-policy.json`, does
 not yet grant ssm:GetParameter on the AL2023 public parameter, nor any action the apply needs.

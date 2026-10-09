@@ -462,7 +462,7 @@ func runRunWithNotify(
 		}
 	}()
 	if cloud == layer3AWS {
-		awsInterrupted, loopErr = runUnderSignals(cmd.Context(), runtime, notify, iterate)
+		awsInterrupted, loopErr = runUnderSignals(cmd, runtime, cloud, notify, iterate)
 	} else {
 		loopErr = iterate(cmd.Context())
 	}
@@ -844,19 +844,15 @@ func runRunWithNotify(
 		if cloud == layer3AWS {
 			// Under signals like the loop: an interrupt during this destroy
 			// must still name reap, and still reach the result below.
-			// After an interrupt in the loop, signals are back to their
-			// default, so a second Ctrl-C here abandons the process.
-			teardown := func(ctx context.Context) error {
+			// Under caught signals like the loop, even after its interrupt:
+			// a signal cuts the settle waits short and the arm finishes.
+			interrupted, _ := runUnderSignals(cmd, runtime, cloud, notify, func(ctx context.Context) error {
 				awsStages, awsFailures := awsRunFailureTeardown(ctx, runtime, allStages, controls.AWSClaimHolder)
 				allStages = append(allStages, awsStages...)
 				allFailures = append(allFailures, awsFailures...)
 				return nil
-			}
-			if awsInterrupted {
-				_ = teardown(cmd.Context())
-			} else {
-				awsInterrupted, _ = runUnderSignals(cmd.Context(), runtime, notify, teardown)
-			}
+			})
+			awsInterrupted = awsInterrupted || interrupted
 		} else if mayHoldResources && cloud != layer3Scaleway {
 			// Before the marker is read: one here may be a stale Scaleway
 			// one, and nothing below is written for any other cloud.

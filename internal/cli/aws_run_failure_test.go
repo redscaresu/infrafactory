@@ -213,7 +213,7 @@ func TestInterruptedAWSRunNamesTheClaimTheFailureArmLeaves(t *testing.T) {
 	}})
 
 	require.Error(t, run.err)
-	assert.Equal(t, 1, notifies, "the arm leaves signals at their default after the loop's")
+	assert.Equal(t, 2, notifies, "the arm runs under caught signals after the loop's interrupt")
 	assert.Contains(t, run.armCalls, deleteClaim, "the arm released the claim")
 	assertInterruptNamesTheReap(t, lc, run.output, run.h.ConfigPath, run.h.ScenarioPath, awsClaimNotHeld)
 	assert.Equal(t, 1, strings.Count(run.output, "Interrupted:"), "one notice")
@@ -240,7 +240,7 @@ func TestAWSRunFailureArmReadsTheClaimThroughASecondInterrupt(t *testing.T) {
 	require.Error(t, run.err)
 	assert.Equal(t, getClaim, run.armCalls[0], "the arm reads the claim first")
 	assert.Contains(t, run.armCalls, destroyRun, "the arm destroys")
-	assert.NotContains(t, run.output, "this run may hold the aws scope's claim")
+	assert.NotContains(t, run.output, "this run may hold the aws scope's claim for "+lc.runHolder+":", "no hedged kept-claim detail")
 	assertInterruptNamesTheReap(t, lc, run.output, run.h.ConfigPath, run.h.ScenarioPath, awsClaimHeld)
 }
 

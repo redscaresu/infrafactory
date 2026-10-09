@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -309,7 +308,7 @@ func TestInterruptGuardInertWhenLayer3Disabled(t *testing.T) {
 }
 
 func signalRuntime() *CommandRuntime {
-	rt := &CommandRuntime{}
+	rt := &CommandRuntime{ConfigPath: config.DefaultPath, scenarioPath: "scenarios/training/aws-web-live.yaml"}
 	rt.Config.Validation.Layers.SandboxDeploy.Enabled = true
 	return rt
 }
@@ -318,30 +317,125 @@ func notifyFromParent(parent context.Context, _ ...os.Signal) (context.Context, 
 	return context.WithCancel(parent)
 }
 
-// The first signal restores default handling while fn still runs, so a
-// second Ctrl-C during the teardown that follows ends the process.
-func TestRunUnderSignalsRestoresDefaultHandlingAtTheFirstSignal(t *testing.T) {
-	stopped := make(chan struct{})
-	var once sync.Once
-	var signal context.CancelFunc
-	notify := func(parent context.Context, _ ...os.Signal) (context.Context, context.CancelFunc) {
-		ctx, cancel := context.WithCancel(parent)
-		signal = cancel
-		return ctx, func() { cancel(); once.Do(func() { close(stopped) }) }
+// signalNotify is a notify whose signal the test fires, and whose stop
+// it can see: stopped is closed once signals are back to their default.
+type signalNotify struct {
+	signal  context.CancelFunc
+	stopped chan struct{}
+	once    sync.Once
+}
+
+func newSignalNotify() *signalNotify { return &signalNotify{stopped: make(chan struct{})} }
+
+func (n *signalNotify) notify(parent context.Context, _ ...os.Signal) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(parent)
+	n.signal = cancel
+	return ctx, func() { cancel(); n.once.Do(func() { close(n.stopped) }) }
+}
+
+// stoppedWithin reports whether signals went back to their default
+// within d: while fn runs they must not, or a second Ctrl-C kills the
+// process mid-teardown.
+func (n *signalNotify) stoppedWithin(d time.Duration) bool {
+	select {
+	case <-n.stopped:
+		return true
+	default:
 	}
+	select {
+	case <-n.stopped:
+		return true
+	case <-time.After(d):
+		return false
+	}
+}
 
-	interrupted, err := runUnderSignals(context.Background(), signalRuntime(), notify, func(context.Context) error {
-		signal()
-		select {
-		case <-stopped:
+const signalWait = 200 * time.Millisecond
+
+// A second signal while fn unwinds is still caught, so fn's teardown
+// and the guard's cleanup after it run; only then does handling go back
+// to the default. Scaleway destroys, aws prints the settled reap.
+func TestInterruptGuardKeepsSignalsCaughtUntilFnReturns(t *testing.T) {
+	t.Run("scaleway", func(t *testing.T) {
+		sandboxCredsForTest(t)
+		destroy := &fakeSandboxDestroyHarness{}
+		rt, _ := reapRuntime(t, destroy, &fakeOrphanSweep{})
+		writeReapLiveState(t, rt.OutputDir(), reapProjectID)
+		n := newSignalNotify()
+		stoppedDuringFn := true
+
+		_ = withSandboxInterruptGuard(guardCmd(&strings.Builder{}), rt, layer3Scaleway, n.notify, func(context.Context) error {
+			n.signal()
+			stoppedDuringFn = n.stoppedWithin(signalWait)
 			return nil
-		case <-time.After(5 * time.Second):
-			return errors.New("signals were still caught after the first one")
-		}
-	})
+		})
 
-	require.NoError(t, err)
-	assert.True(t, interrupted)
+		assert.False(t, stoppedDuringFn, "signals went back to the default while fn ran")
+		assert.Equal(t, 1, destroy.calls, "the guard still destroyed")
+		assert.True(t, n.stoppedWithin(0), "default handling is back after fn")
+	})
+	t.Run("aws", func(t *testing.T) {
+		rt := signalRuntime()
+		rt.awsClaim = awsClaim{holder: lifecycleOtherHolder, state: awsClaimHeld}
+		n := newSignalNotify()
+		stoppedDuringFn := true
+		out := &strings.Builder{}
+
+		_ = withSandboxInterruptGuard(guardCmd(out), rt, layer3AWS, n.notify, func(context.Context) error {
+			n.signal()
+			stoppedDuringFn = n.stoppedWithin(signalWait)
+			return nil
+		})
+
+		assert.False(t, stoppedDuringFn, "signals went back to the default while fn ran")
+		assert.Contains(t, out.String(), "\nInterrupted: this run keeps the aws scope's claim for "+lifecycleOtherHolder)
+	})
+}
+
+// The first signal prints the recovery command at once, while fn is
+// still running, so a process killed before its teardown finishes still
+// leaves the operator the holder and the command.
+func TestFirstSignalPrintsTheRecoveryCommandAtOnce(t *testing.T) {
+	const holder = "run-9@this-host.example:1"
+	plain := "`" + reapCommand(config.DefaultPath, "scenarios/training/aws-web-live.yaml") + "`"
+	for name, tc := range map[string]struct {
+		cloud layer3Cloud
+		want  []string
+	}{
+		"aws": {cloud: layer3AWS, want: []string{
+			"this run may hold the aws scope's claim for " + holder,
+			"`" + reapCommand(config.DefaultPath, "scenarios/training/aws-web-live.yaml") + " --take-over " + shellQuote(holder) + "`",
+			"if no one holds it, " + plain + " does",
+		}},
+		"scaleway": {cloud: layer3Scaleway, want: []string{"real resources this run applied may still exist", plain + " cleans them up"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			rt := signalRuntime()
+			rt.awsHolder = holder
+			n := newSignalNotify()
+			out := &syncWriter{w: &strings.Builder{}}
+			cmd := guardCmd(&strings.Builder{})
+			cmd.SetErr(out)
+			var during string
+
+			interrupted, err := runUnderSignals(cmd, rt, tc.cloud, n.notify, func(context.Context) error {
+				n.signal()
+				require.Eventually(t, func() bool {
+					out.mu.Lock()
+					defer out.mu.Unlock()
+					during = out.w.(*strings.Builder).String()
+					return strings.Contains(during, "Interrupted —")
+				}, 5*time.Second, 10*time.Millisecond, "no notice while fn ran")
+				return nil
+			})
+
+			require.NoError(t, err)
+			assert.True(t, interrupted)
+			for _, want := range tc.want {
+				assert.Contains(t, during, want)
+			}
+		})
+	}
 }
 
 // A parent context that ends on its own is not an interrupt, for the
@@ -349,16 +443,14 @@ func TestRunUnderSignalsRestoresDefaultHandlingAtTheFirstSignal(t *testing.T) {
 func TestRunUnderSignalsIgnoresAnEndedParent(t *testing.T) {
 	parent, cancel := context.WithCancel(context.Background())
 	cancel()
-
-	interrupted, err := runUnderSignals(parent, signalRuntime(), notifyFromParent, func(context.Context) error { return nil })
-
-	require.NoError(t, err)
-	assert.False(t, interrupted)
-
 	out := &strings.Builder{}
 	cmd := guardCmd(out)
 	cmd.SetContext(parent)
-	rt := signalRuntime()
-	require.NoError(t, withSandboxInterruptGuard(cmd, rt, layer3AWS, notifyFromParent, func(context.Context) error { return nil }))
+
+	interrupted, err := runUnderSignals(cmd, signalRuntime(), layer3AWS, notifyFromParent, func(context.Context) error { return nil })
+
+	require.NoError(t, err)
+	assert.False(t, interrupted)
+	require.NoError(t, withSandboxInterruptGuard(cmd, signalRuntime(), layer3AWS, notifyFromParent, func(context.Context) error { return nil }))
 	assert.Empty(t, out.String(), "no interrupt notice")
 }

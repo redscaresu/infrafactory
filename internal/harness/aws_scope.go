@@ -37,10 +37,10 @@ var (
 	// ErrAWSClaimOutcomeUnknown is a failed put whose read-back failed too:
 	// the claim may be ours, so the caller treats it as held.
 	ErrAWSClaimOutcomeUnknown = errors.New("the aws Layer 3 claim's outcome is unknown")
+	// ErrAWSNoClaimHeld is a release or take-over that found no claim.
+	ErrAWSNoClaimHeld = errors.New("no claim is held")
 	// ErrAWSPreviousClaimDeleted is a take-over whose own take failed
 	// after the previous holder's claim was deleted.
-	// ErrAWSNoClaimHeld is a release or take-over that found no claim.
-	ErrAWSNoClaimHeld          = errors.New("no claim is held")
 	ErrAWSPreviousClaimDeleted = errors.New("the previous holder's aws Layer 3 claim was deleted")
 )
 

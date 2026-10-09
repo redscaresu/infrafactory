@@ -58,9 +58,8 @@ func (c awsClaim) known() awsClaimState {
 // awsReapAdvice names the reap that works for what this process knows of
 // the claim: plain reap refuses a held claim, and --take-over refuses a
 // claim its holder does not hold.
-func awsReapAdvice(runtime *CommandRuntime) string {
+func awsReapAdvice(runtime *CommandRuntime, claim awsClaim) string {
 	const does = "sweeps the scope, destroys what is left and releases the claim"
-	claim := runtime.awsClaim
 	plain := reapCommand(runtime.ConfigPath, runtime.scenarioPath)
 	switch claim.known() {
 	case awsClaimHeld:
@@ -93,6 +92,23 @@ func awsClaimHead(claim awsClaim) string {
 	return "this run may hold the aws scope's claim for " + claim.holder
 }
 
+// firstSignalNotice is what the first signal prints at once, before any
+// teardown: if the process is killed before it finishes, this is what
+// the operator has. It reads only what is fixed for the process, never
+// runtime.awsClaim, which the teardown is still changing.
+func firstSignalNotice(runtime *CommandRuntime, cloud layer3Cloud) string {
+	switch cloud {
+	case layer3AWS:
+		claim := awsClaim{holder: runtime.awsHolder, state: awsClaimUnknown}
+		return fmt.Sprintf("\nInterrupted — finishing teardown before exit. Should the process die first, %s. %s.\n",
+			awsClaimHead(claim), awsReapAdvice(runtime, claim))
+	case layer3Scaleway:
+		return fmt.Sprintf("\nInterrupted — finishing cleanup before exit. Should the process die first, real resources "+
+			"this run applied may still exist: `%s` cleans them up.\n", reapCommand(runtime.ConfigPath, runtime.scenarioPath))
+	}
+	return ""
+}
+
 // awsInterruptNotice is what an interrupted aws command prints once its
 // teardown has settled the claim.
 func awsInterruptNotice(runtime *CommandRuntime) string {
@@ -104,7 +120,7 @@ func awsInterruptNotice(runtime *CommandRuntime) string {
 	case awsClaimHeldByOther:
 		tail = ""
 	}
-	return fmt.Sprintf("\nInterrupted: %s%s. %s.\n", awsClaimHead(claim), tail, awsReapAdvice(runtime))
+	return fmt.Sprintf("\nInterrupted: %s%s. %s.\n", awsClaimHead(claim), tail, awsReapAdvice(runtime, runtime.awsClaim))
 }
 
 // awsClaimHolderFor mints this process's claim holder when it may claim
@@ -117,6 +133,7 @@ func awsClaimHolderFor(runtime *CommandRuntime, cloud layer3Cloud, runID string)
 	}
 	holder, err := harness.NewAWSClaimHolder(runID)
 	if err == nil {
+		runtime.awsHolder = holder
 		runtime.awsClaim = awsClaim{holder: holder, state: awsClaimNotHeld}
 	}
 	return holder, err
@@ -215,7 +232,7 @@ func awsScopeTeardown(ctx context.Context, runtime *CommandRuntime, outputDir st
 		}
 		return []StageSummary{{
 			Layer: "sandbox_deploy", Stage: StageAWSScopeClaimKept, Status: StageStatusSkip,
-			Detail: awsClaimHead(runtime.awsClaim) + fmt.Sprintf(kept, reason, awsReapAdvice(runtime)),
+			Detail: awsClaimHead(runtime.awsClaim) + fmt.Sprintf(kept, reason, awsReapAdvice(runtime, runtime.awsClaim)),
 		}}, nil
 	}
 
@@ -255,7 +272,7 @@ func awsScopeClaimKept(runtime *CommandRuntime, stages []StageSummary, failures 
 			Layer: "sandbox_deploy", Stage: StageAWSScopeClaimKept, Check: "claim",
 			Command: "release aws scope",
 			Detail: fmt.Sprintf("%s: %s, so resources may still exist in the scope. %s",
-				awsClaimHead(runtime.awsClaim), reason, awsReapAdvice(runtime)),
+				awsClaimHead(runtime.awsClaim), reason, awsReapAdvice(runtime, runtime.awsClaim)),
 		})
 }
 

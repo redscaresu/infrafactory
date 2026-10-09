@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -206,14 +208,7 @@ func runAWSReap(cmd *cobra.Command, runtime *CommandRuntime, scenarioName string
 // nothing written.
 func claimAWSScopeForReap(ctx context.Context, runtime *CommandRuntime, env map[string]string, holder, takeOver string) error {
 	if takeOver != "" {
-		err := harness.TakeOverAWSClaim(ctx, env, runtime.Deps.AWSSSM, "", takeOver, holder)
-		if errors.Is(err, harness.ErrAWSPreviousClaimDeleted) {
-			// The old claim is gone, so --take-over of it can never work
-			// again: name what can.
-			runtime.awsClaim = awsClaimAfterTake(holder, err)
-			return fmt.Errorf("%w. %s", err, awsReapAdvice(runtime))
-		}
-		return err
+		return awsReapTakeFailure(runtime, holder, harness.TakeOverAWSClaim(ctx, env, runtime.Deps.AWSSSM, "", takeOver, holder))
 	}
 	current, held, err := harness.ReadAWSClaimHolder(ctx, env, runtime.Deps.AWSSSM, "")
 	switch {
@@ -223,7 +218,19 @@ func claimAWSScopeForReap(ctx context.Context, runtime *CommandRuntime, env map[
 		return fmt.Errorf("refusing to reap: %w by %s. Once that run has ended, `%s` takes the claim over from it",
 			harness.ErrAWSScopeClaimed, current, awsTakeOverCommand(runtime, current))
 	}
-	return harness.TakeAWSClaim(ctx, env, runtime.Deps.AWSSSM, "", holder)
+	return awsReapTakeFailure(runtime, holder, harness.TakeAWSClaim(ctx, env, runtime.Deps.AWSSSM, "", holder))
+}
+
+// awsReapTakeFailure names the next reap when reap's own take leaves the
+// claim not as it found it: a take-over that deleted the old claim (so
+// --take-over of it can never work again), or a take whose outcome is
+// unknown (so the claim may now be reap's).
+func awsReapTakeFailure(runtime *CommandRuntime, holder string, err error) error {
+	if !errors.Is(err, harness.ErrAWSPreviousClaimDeleted) && !errors.Is(err, harness.ErrAWSClaimOutcomeUnknown) {
+		return err
+	}
+	runtime.awsClaim = awsClaimAfterTake(holder, err)
+	return fmt.Errorf("%w. %s", err, awsReapAdvice(runtime, runtime.awsClaim))
 }
 
 // awsReapHolderPrefix starts every holder reap mints.
@@ -284,34 +291,65 @@ func reapClaimedAWSScope(ctx context.Context, runtime *CommandRuntime, env map[s
 }
 
 // runUnderSignals runs fn with a context a SIGINT or SIGTERM cancels,
-// when Layer 3 is on, and reports whether one arrived. The first signal
-// restores default handling, so a second one ends the process at once. A
-// parent context that ends on its own is not an interrupt.
+// when Layer 3 is on, and reports whether one fired; a parent context
+// that ends on its own is not an interrupt. Signals stay caught until fn
+// returns, so a second Ctrl-C cannot kill the process mid-teardown; once
+// it returns, default handling is back and the caller's own cleanup can
+// be abandoned. The first signal prints firstSignalNotice at once, so a
+// process killed before it finishes still leaves the recovery command.
 func runUnderSignals(
-	ctx context.Context,
+	cmd *cobra.Command,
 	runtime *CommandRuntime,
+	cloud layer3Cloud,
 	notify func(ctx context.Context, sigs ...os.Signal) (context.Context, context.CancelFunc),
 	fn func(ctx context.Context) error,
 ) (bool, error) {
+	ctx := cmd.Context()
 	if !runtime.Config.Validation.Layers.SandboxDeploy.Enabled {
 		return false, fn(ctx)
 	}
+	// fn writes progress to the same stream the watcher prints on.
+	out := &syncWriter{w: cmd.ErrOrStderr()}
+	cmd.SetErr(out)
+	defer cmd.SetErr(out.w)
+
 	sigCtx, stop := notify(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	signalled := make(chan bool, 1)
+	signal := func() bool { return sigCtx.Err() != nil && ctx.Err() == nil }
+	fnDone, watched := make(chan struct{}), make(chan bool)
 	go func() {
-		<-sigCtx.Done()
-		fired := ctx.Err() == nil
-		if fired {
-			stop()
+		select {
+		case <-sigCtx.Done():
+			fired := signal()
+			if fired {
+				_, _ = fmt.Fprint(out, firstSignalNotice(runtime, cloud))
+			}
+			watched <- fired
+		case <-fnDone:
+			watched <- false
 		}
-		signalled <- fired
 	}()
 	err := fn(sigCtx)
-	if sigCtx.Err() == nil {
-		return false, err
+	close(fnDone)
+	printed := <-watched
+	if !printed && signal() {
+		// The signal and fn's return raced; the notice still goes first.
+		_, _ = fmt.Fprint(out, firstSignalNotice(runtime, cloud))
+		printed = true
 	}
-	return <-signalled, err
+	return printed, err
+}
+
+// syncWriter serialises writes from fn and the signal watcher.
+type syncWriter struct {
+	mu sync.Mutex
+	w  io.Writer
+}
+
+func (s *syncWriter) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.w.Write(p)
 }
 
 // withSandboxInterruptGuard runs fn with a SIGINT/SIGTERM handler that
@@ -320,13 +358,15 @@ func runUnderSignals(
 // Without it, Ctrl-C between apply and destroy leaves billable resources
 // with nothing tracking them but a state file on disk. The context
 // passed to fn is cancelled on the first signal so the in-flight tofu
-// call unwinds; destroy then runs on a FRESH context, because the whole
-// point is to do work after cancellation.
+// call unwinds, and the recovery command is printed at once. Signals
+// stay caught until fn returns, so fn's own teardown always finishes;
+// then default handling is restored and destroy runs on a FRESH context,
+// because the whole point is to do work after cancellation.
 //
-// A second signal gives up immediately and tells the operator exactly
-// how to finish the job by hand -- an operator hammering Ctrl-C needs to
-// understand why the process is not exiting, and what state they are
-// being left in.
+// A signal during that cleanup gives up immediately, and the operator
+// already has the command that finishes the job by hand -- an operator
+// hammering Ctrl-C needs to understand why the process is not exiting,
+// and what state they are being left in.
 func withSandboxInterruptGuard(
 	cmd *cobra.Command,
 	runtime *CommandRuntime,
@@ -334,7 +374,7 @@ func withSandboxInterruptGuard(
 	notify func(ctx context.Context, sigs ...os.Signal) (context.Context, context.CancelFunc),
 	fn func(ctx context.Context) error,
 ) error {
-	interrupted, err := runUnderSignals(cmd.Context(), runtime, notify, fn)
+	interrupted, err := runUnderSignals(cmd, runtime, cloud, notify, fn)
 	if !interrupted {
 		return err
 	}
@@ -377,9 +417,9 @@ func withSandboxInterruptGuard(
 			marker.ProjectID)
 	}
 
-	// runUnderSignals restored default signal handling at the first
-	// signal, so a second Ctrl-C kills the process outright rather than
-	// being swallowed here.
+	// runUnderSignals restored default signal handling when fn returned,
+	// so a Ctrl-C now kills the process outright rather than being
+	// swallowed here.
 
 	// An unreadable marker with state on disk is the one shape this
 	// cannot proceed on. marker is the zero value there, so building the

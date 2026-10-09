@@ -523,3 +523,19 @@ func TestAWSTestNoDestroyHedgesAnUnknownClaim(t *testing.T) {
 	assert.Contains(t, detail, "this run may hold the aws scope's claim for "+lc.runHolder)
 	assert.Contains(t, detail, "if no one holds it, `"+reapCommand(run.h.ConfigPath, run.h.ScenarioPath)+"` does")
 }
+
+// reap's own take whose outcome is unknown may have left the claim
+// reap's: it names both reaps, each with the case it fits.
+func TestAWSReapNamesBothReapsWhenItsOwnTakeIsUnknown(t *testing.T) {
+	lc := newAWSLifecycle(t)
+	lc.putFail = true
+
+	r := reapAWS(t, lc, nil, false)
+
+	require.Error(t, r.err)
+	assert.ErrorIs(t, r.err, harness.ErrAWSClaimOutcomeUnknown)
+	plain := reapCommand(r.h.ConfigPath, r.h.ScenarioPath)
+	assert.Contains(t, r.err.Error(), "If this run holds the claim, `"+plain+" --take-over "+awsReapHolderPrefix)
+	assert.Contains(t, r.err.Error(), "if no one holds it, `"+plain+"` does")
+	assert.Zero(t, lc.destroy.calls, "SandboxDestroy")
+}
