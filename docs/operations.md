@@ -331,6 +331,34 @@ as the admin and `reap --take-over` again must exit 0 with only the stamp left. 
 (`lookup-events` by `Username=infrafactory-layer3`, events take 5-25 minutes to appear) shows which
 reap-table actions were sent and whether any was refused. Last run 2026-09-29, under EUR 0.20.
 
+### Running aws-web-live
+
+What it needs:
+- The key file `~/.config/infrafactory/layer3-aws.env`, mode `0600`. infrafactory reads it
+  itself; nothing is sourced into the shell.
+- A config, passed with `--config` and kept out of git, holding the `aws` block from scope setup
+  step 4 and `validation.layers.sandbox_deploy.enabled: true`. Off by default in
+  `infrafactory.yaml`; it is the only switch.
+
+What refuses, in order. Generation and the gate cost an LLM call, so the checks come in two phases:
+1. Before generation, once per command: the credentials file and its mode, then STS answering
+   exactly `aws.account_id` and `aws.principal_arn`, then the AMI resolve, stage
+   `aws_ami_resolve`. A refusal here ends the command before any model call, takes no claim and
+   leaves nothing to reap.
+2. After the gate, before apply: the credentials again (file, then STS), the stamp, the absence
+   of a default VPC, and the claim, which refuses while another holder holds it and names that
+   holder. A credentials refusal fails stage `preflight`; the others fail stage `aws_scope_claim`,
+   naming the check that refused.
+
+What a failure prints: once the claim is taken, any ending short of a clean sweep keeps the claim
+and adds stage `aws_scope_claim_kept`, whose detail names the reap command,
+`infrafactory reap scenarios/training/aws-web-live.yaml` (with your `--config` added when you
+passed one). That command destroys what is left and releases the claim; nothing else does.
+
+The first real AMI resolve is denied: the key's policy, `docs/layer3/aws/iam-policy.json`, does
+not yet grant ssm:GetParameter on the AL2023 public parameter. Granting it belongs to the epic
+aws-web-live-on-real-aws.
+
 ## Sibling mocks
 
 Three first-party HTTP-level mocks + one third-party backend live alongside infrafactory:
