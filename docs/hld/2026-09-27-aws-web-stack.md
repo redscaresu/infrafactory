@@ -475,7 +475,7 @@ fixed by running apply, destroy, sweep and `reap`; the probe window.
 - aws-ingress-policy-and-holdout — done (#345-#347, #349, #350; this PR)
 - aws-layer3-gate — done (#358, #361, #363, #366; the lift: this PR)
 - avoid-pitfall-retirement — done (#364, #367, #371; this PR)
-- [aws-layer3-wiring-proof](../epics/aws-layer3-wiring-proof.md)
+- aws-layer3-wiring-proof — done (#408, #410, #412; Layer 2 LLM run 20261009T213746Z: this PR)
 - [aws-web-live-on-real-aws](../epics/aws-web-live-on-real-aws.md)
 - [aws-web-stack-load-balancer](../epics/aws-web-stack-load-balancer.md)
 
