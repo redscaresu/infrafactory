@@ -261,7 +261,7 @@ func reapClaimedAWSScope(ctx context.Context, runtime *CommandRuntime, env map[s
 	releaseStages, releaseFailures := awsReleaseAfterCleanSweep(ctx, runtime, env, holder)
 	stages, failures = append(stages, releaseStages...), append(failures, releaseFailures...)
 	if len(releaseFailures) > 0 {
-		return awsScopeClaimKept(stages, failures, holder, awsTakeOverCommand(runtime, holder), "the scope was not proven empty and released")
+		return awsScopeClaimKept(runtime, stages, failures, holder, "the scope was not proven empty and released")
 	}
 	return stages, failures
 }
@@ -283,6 +283,7 @@ func withSandboxInterruptGuard(
 	cmd *cobra.Command,
 	runtime *CommandRuntime,
 	cloud layer3Cloud,
+	awsHolder string,
 	notify func(ctx context.Context, sigs ...os.Signal) (context.Context, context.CancelFunc),
 	fn func(ctx context.Context) error,
 ) error {
@@ -308,11 +309,14 @@ func withSandboxInterruptGuard(
 	// Before the state and marker reads, for reap's reason: a marker
 	// here may be a stale Scaleway one. aws tears nothing down here: the
 	// run's own teardown has already swept, and released the claim only
-	// if the scope was empty; whatever it kept is reap's.
+	// if the scope was empty; whatever it kept is reap's. Which of the two
+	// is not known here, and each reap form refuses the other case, so
+	// both are named.
 	if cloud == layer3AWS {
 		_, _ = fmt.Fprintf(out, "\nInterrupted: this run keeps the aws scope's claim unless its sweep proved the scope empty, "+
-			"and what it applied may still exist. `%s` sweeps the scope, destroys what is left and releases the claim.\n",
-			reapCommand(runtime.ConfigPath, runtime.scenarioPath))
+			"and what it applied may still exist. `%s` sweeps the scope, destroys what is left and releases the claim; "+
+			"if the claim was released, `%s` does.\n",
+			awsTakeOverCommand(runtime, awsHolder), reapCommand(runtime.ConfigPath, runtime.scenarioPath))
 		return err
 	}
 	if cloud != layer3Scaleway {

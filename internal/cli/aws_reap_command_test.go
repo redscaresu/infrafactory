@@ -287,26 +287,41 @@ func TestAWSReapDryRunWritesNothing(t *testing.T) {
 	})
 }
 
+// assertInterruptNamesBothReaps: the guard cannot tell whether the run's
+// teardown released the claim, and each reap form refuses the other
+// case, so the interrupt print names both.
+func assertInterruptNamesBothReaps(t *testing.T, lc *awsLifecycle, output, configPath, scenarioPath string) {
+	t.Helper()
+	assert.Contains(t, output, "Interrupted: this run keeps the aws scope's claim")
+	assert.Contains(t, output, "`"+lc.takeOver(configPath, scenarioPath)+"` sweeps the scope")
+	assert.Contains(t, output, "if the claim was released, `"+reapCommand(configPath, scenarioPath)+"` does")
+}
+
 // A partial apply that wrote no state: the case where the Scaleway guard
-// says there is nothing to clean up.
+// says there is nothing to clean up. A dirty scope keeps the claim; a
+// clean one is released.
 func TestInterruptedAWSTestKeepsTheClaimAndPrintsTheReapCommand(t *testing.T) {
-	lc := newAWSLifecycle(t)
-	lc.ec2["DescribeInstances"] = runningInstance
-	lc.deploy.err = context.Canceled
-	lc.deploy.onRunDir = func(dir string) {
-		lc.record(deployRun)
-		writeAWSStateAndStaleMarker(t, dir, false)
-		lc.cancel()
+	for name, dirty := range map[string]bool{"dirty scope": true, "clean scope": false} {
+		t.Run(name, func(t *testing.T) {
+			lc := newAWSLifecycle(t)
+			if dirty {
+				lc.ec2["DescribeInstances"] = runningInstance
+			}
+			lc.deploy.err = context.Canceled
+			lc.deploy.onRunDir = func(dir string) {
+				lc.record(deployRun)
+				writeAWSStateAndStaleMarker(t, dir, false)
+				lc.cancel()
+			}
+
+			run := runAWSTest(t, lc, nil, nil)
+
+			require.Error(t, run.err)
+			assertInterruptNamesBothReaps(t, lc, run.output, run.h.ConfigPath, run.h.ScenarioPath)
+			assert.NotContains(t, run.output, "nothing to clean up")
+			_, held := lc.claim()
+			assert.Equal(t, dirty, held, "the claim is kept only for a dirty scope")
+			lc.scw.assertUntouched(t)
+		})
 	}
-
-	run := runAWSTest(t, lc, nil, nil)
-
-	require.Error(t, run.err)
-	assert.Contains(t, run.output, "Interrupted: this run keeps the aws scope's claim")
-	assert.Contains(t, run.output, reapCommand(run.h.ConfigPath, run.h.ScenarioPath))
-	assert.NotContains(t, run.output, "nothing to clean up")
-	assert.Zero(t, lc.count(deleteClaim), "DeleteParameter")
-	_, held := lc.claim()
-	assert.True(t, held, "the claim is kept")
-	lc.scw.assertUntouched(t)
 }

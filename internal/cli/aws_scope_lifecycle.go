@@ -72,9 +72,8 @@ func awsScopeClaimFailed(held, check string, err error) (string, []StageSummary,
 // (ADR-0025's lesson: taken in one place, released in one place). It
 // destroys what the state records when destruction is wanted, then
 // releases through awsReleaseAfterCleanSweep. Any other ending keeps the
-// claim and names the reap command.
+// claim and names the command that takes it over.
 func awsScopeTeardown(ctx context.Context, runtime *CommandRuntime, outputDir string, opts testExecutionOptions) ([]StageSummary, []FailureSummary) {
-	reap := reapCommand(runtime.ConfigPath, opts.scenarioPath)
 	if opts.SkipDestroy || !runtime.Config.Validation.Layers.Destruction.Enabled {
 		reason := "destruction is disabled"
 		if opts.SkipDestroy {
@@ -83,21 +82,21 @@ func awsScopeTeardown(ctx context.Context, runtime *CommandRuntime, outputDir st
 		return []StageSummary{{
 			Layer: "sandbox_deploy", Stage: StageAWSScopeClaimKept, Status: StageStatusSkip,
 			Detail: fmt.Sprintf("kept the aws scope's claim for %s on purpose (%s): what this run applied is still there. "+
-				"`%s` destroys it and releases the claim", opts.AWSClaimHolder, reason, reap),
+				"`%s` destroys it and releases the claim", opts.AWSClaimHolder, reason, awsTakeOverCommand(runtime, opts.AWSClaimHolder)),
 		}}, nil
 	}
 
 	env, err := awsCommandEnvForAccount(runtime, runtime.Config.AWS.AccountID)
 	if err != nil {
-		return awsScopeClaimKept(nil, nil, opts.AWSClaimHolder, reap, err.Error())
+		return awsScopeClaimKept(runtime, nil, nil, opts.AWSClaimHolder, err.Error())
 	}
-	return awsDestroyAndRelease(ctx, runtime, outputDir, env, opts.AWSClaimHolder, reap)
+	return awsDestroyAndRelease(ctx, runtime, outputDir, env, opts.AWSClaimHolder)
 }
 
 // awsDestroyAndRelease runs with holder holding the claim: it destroys
 // what the state records, then releases through awsReleaseAfterCleanSweep.
-// Anything short of a release keeps the claim and names reap.
-func awsDestroyAndRelease(ctx context.Context, runtime *CommandRuntime, outputDir string, env map[string]string, holder, reap string) ([]StageSummary, []FailureSummary) {
+// Anything short of a release keeps the claim and names its take-over.
+func awsDestroyAndRelease(ctx context.Context, runtime *CommandRuntime, outputDir string, env map[string]string, holder string) ([]StageSummary, []FailureSummary) {
 	var stages []StageSummary
 	var failures []FailureSummary
 	if liveStateMayHoldResources(outputDir) {
@@ -110,18 +109,20 @@ func awsDestroyAndRelease(ctx context.Context, runtime *CommandRuntime, outputDi
 	stages = append(stages, releaseStages...)
 	failures = append(failures, releaseFailures...)
 	if len(releaseFailures) > 0 {
-		return awsScopeClaimKept(stages, failures, holder, reap, "the scope was not proven empty and released")
+		return awsScopeClaimKept(runtime, stages, failures, holder, "the scope was not proven empty and released")
 	}
 	return stages, failures
 }
 
-func awsScopeClaimKept(stages []StageSummary, failures []FailureSummary, holder, reap, reason string) ([]StageSummary, []FailureSummary) {
+// awsScopeClaimKept names `reap --take-over <holder>`: plain reap refuses
+// a held claim.
+func awsScopeClaimKept(runtime *CommandRuntime, stages []StageSummary, failures []FailureSummary, holder, reason string) ([]StageSummary, []FailureSummary) {
 	return append(stages, StageSummary{Layer: "sandbox_deploy", Stage: StageAWSScopeClaimKept, Status: StageStatusFail}),
 		append(failures, FailureSummary{
 			Layer: "sandbox_deploy", Stage: StageAWSScopeClaimKept, Check: "claim",
 			Command: "release aws scope",
 			Detail: fmt.Sprintf("kept the aws scope's claim for %s: %s, so resources may still exist in the scope. "+
-				"`%s` destroys what is left and releases the claim", holder, reason, reap),
+				"`%s` destroys what is left and releases the claim", holder, reason, awsTakeOverCommand(runtime, holder)),
 		})
 }
 

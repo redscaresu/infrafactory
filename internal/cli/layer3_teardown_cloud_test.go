@@ -261,7 +261,7 @@ func teardownSeams(rt *CommandRuntime, cloud layer3Cloud, workDir string) map[st
 	_, _, destroyErr := destroySandbox(ctx, rt, cloud, workDir, env, staleMarkerProjectID)
 	_, ensureStages, ensureFailures := ensureRunProject(ctx, rt, cloud, "stale", workDir, "")
 	guardOut := &strings.Builder{}
-	_ = withSandboxInterruptGuard(guardCmd(guardOut), rt, cloud, cancelledNotify(), func(context.Context) error { return nil })
+	_ = withSandboxInterruptGuard(guardCmd(guardOut), rt, cloud, "", cancelledNotify(), func(context.Context) error { return nil })
 
 	return map[string]string{
 		"assertSandboxCredentials":    errText(assertSandboxCredentials(rt, cloud)),

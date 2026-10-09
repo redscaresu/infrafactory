@@ -70,8 +70,9 @@ type awsLifecycle struct {
 	// resolve's call, which the sweep's Owners=self listing never gets.
 	amiImage string
 	putFail  bool // PutParameter, and every claim read after it, is denied
-	putSent  bool
-	onPut    func()
+	// putSent is the holder the last claim PutParameter sent, taken or not.
+	putSent string
+	onPut   func()
 	// onEC2 sees each EC2 action with mu held, so it may change ec2.
 	onEC2  func(action string)
 	sleeps int
@@ -154,6 +155,14 @@ func (lc *awsLifecycle) count(call string) int {
 	return n
 }
 
+// takeOver is the command a kept claim names: reap, taking the claim
+// over from the holder this process sent.
+func (lc *awsLifecycle) takeOver(configPath, scenarioPath string) string {
+	lc.mu.Lock()
+	defer lc.mu.Unlock()
+	return reapCommand(configPath, scenarioPath) + " --take-over " + shellQuote(lc.putSent)
+}
+
 func (lc *awsLifecycle) claim() (string, bool) {
 	lc.mu.Lock()
 	defer lc.mu.Unlock()
@@ -225,14 +234,16 @@ func (lc *awsLifecycle) ssm(op string, payload []byte) (int, string) {
 	lc.mu.Lock()
 	defer lc.mu.Unlock()
 	value, exists := lc.params[in.Name]
-	claimUnreadable := lc.putFail && lc.putSent && in.Name == harness.AWSClaimParameter
+	claimUnreadable := lc.putFail && lc.putSent != "" && in.Name == harness.AWSClaimParameter
+	if op == "PutParameter" && in.Name == harness.AWSClaimParameter {
+		lc.putSent = in.Value
+	}
 	switch {
 	case lc.denied[call]:
 		return lifecycleSSMError("AccessDeniedException")
 	case op == "DescribeParameters":
 		return http.StatusOK, `{"Parameters":[]}`
 	case op == "PutParameter" && lc.putFail:
-		lc.putSent = true
 		return lifecycleSSMError("AccessDeniedException")
 	case claimUnreadable:
 		return lifecycleSSMError("AccessDeniedException")
@@ -418,7 +429,8 @@ func assertClaimKept(t *testing.T, lc *awsLifecycle, run awsTestRun) {
 	assert.Contains(t, holder, "@", "the claim is this run's holder")
 	assert.Zero(t, lc.count(deleteClaim), "DeleteParameter")
 	assert.True(t, run.hasStage(StageAWSScopeClaimKept), "stages carry %s", StageAWSScopeClaimKept)
-	assert.Contains(t, run.output, reapCommand(run.h.ConfigPath, run.h.ScenarioPath))
+	assert.Equal(t, holder, lc.putSent)
+	assert.Contains(t, run.output, lc.takeOver(run.h.ConfigPath, run.h.ScenarioPath))
 	assertNoProjectAdvice(t, run.output)
 }
 
@@ -644,7 +656,7 @@ func TestAWSTestTreatsAnUnknownClaimOutcomeAsHeld(t *testing.T) {
 	assert.Zero(t, lc.deploy.calls, "SandboxDeploy")
 	assert.Zero(t, lc.count(deleteClaim), "DeleteParameter")
 	assert.True(t, run.hasStage(StageAWSScopeClaimKept))
-	assert.Contains(t, run.output, reapCommand(run.h.ConfigPath, run.h.ScenarioPath))
+	assert.Contains(t, run.output, lc.takeOver(run.h.ConfigPath, run.h.ScenarioPath))
 	assertNoProjectAdvice(t, run.output)
 }
 

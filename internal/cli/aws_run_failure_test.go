@@ -231,7 +231,7 @@ func TestAWSRunEndsWhenAnIterationKeepsTheClaimForADirtySweep(t *testing.T) {
 			}
 			assert.Empty(t, writesIn(run.armCalls), "nothing released")
 			assert.True(t, held, "the claim is kept")
-			assert.Contains(t, run.output, reapCommand(run.h.ConfigPath, run.h.ScenarioPath))
+			assert.Contains(t, run.output, lc.takeOver(run.h.ConfigPath, run.h.ScenarioPath))
 		})
 	}
 }
@@ -260,7 +260,7 @@ func TestAWSRunWithNoDestroyEndsAfterOneIteration(t *testing.T) {
 			assert.True(t, held, "the claim is kept")
 			i := slices.IndexFunc(run.result.Stages, isStage(StageAWSScopeClaimKept))
 			require.NotEqual(t, -1, i, "the run's stages carry %s", StageAWSScopeClaimKept)
-			assert.Contains(t, run.result.Stages[i].Detail, reapCommand(run.h.ConfigPath, run.h.ScenarioPath))
+			assert.Contains(t, run.result.Stages[i].Detail, lc.takeOver(run.h.ConfigPath, run.h.ScenarioPath))
 		})
 	}
 }
@@ -282,8 +282,7 @@ func TestAWSRunInterruptedDuringTheFailureArmPrintsTheReapCommand(t *testing.T) 
 	assert.Empty(t, writesIn(run.armCalls), "nothing released")
 	_, held := lc.claim()
 	assert.True(t, held, "the claim is kept")
-	assert.Contains(t, run.output, "Interrupted: this run keeps the aws scope's claim")
-	assert.Contains(t, run.output, reapCommand(run.h.ConfigPath, run.h.ScenarioPath))
+	assertInterruptNamesBothReaps(t, lc, run.output, run.h.ConfigPath, run.h.ScenarioPath)
 	assert.True(t, slices.ContainsFunc(run.result.Stages, isStage(StageAWSScopeClaimKept)))
 }
 
@@ -314,8 +313,7 @@ func TestInterruptedAWSRunPrintsTheReapCommand(t *testing.T) {
 			require.Error(t, run.err)
 			assert.Equal(t, 1, run.generates, "generate")
 			assert.Equal(t, tc.want, run.terminalReason())
-			assert.Contains(t, run.output, "Interrupted: this run keeps the aws scope's claim")
-			assert.Contains(t, run.output, reapCommand(run.h.ConfigPath, run.h.ScenarioPath))
+			assertInterruptNamesBothReaps(t, lc, run.output, run.h.ConfigPath, run.h.ScenarioPath)
 			assert.NotContains(t, run.output, "nothing to clean up")
 			lc.scw.assertUntouched(t)
 		})

@@ -454,7 +454,7 @@ func runRunWithNotify(
 	// held and nothing else says so. Other clouds run unguarded, as before.
 	var loopErr error
 	if cloud == layer3AWS {
-		loopErr = withSandboxInterruptGuard(cmd, runtime, cloud, notify, iterate)
+		loopErr = withSandboxInterruptGuard(cmd, runtime, cloud, controls.AWSClaimHolder, notify, iterate)
 	} else {
 		loopErr = iterate(cmd.Context())
 	}
@@ -836,8 +836,8 @@ func runRunWithNotify(
 		if cloud == layer3AWS {
 			// Guarded like the loop: an interrupt during this destroy must
 			// still name reap, and still reach the result below.
-			_ = withSandboxInterruptGuard(cmd, runtime, cloud, notify, func(ctx context.Context) error {
-				awsStages, awsFailures := awsRunFailureTeardown(ctx, runtime, allStages, controls.AWSClaimHolder, scenarioPath)
+			_ = withSandboxInterruptGuard(cmd, runtime, cloud, controls.AWSClaimHolder, notify, func(ctx context.Context) error {
+				awsStages, awsFailures := awsRunFailureTeardown(ctx, runtime, allStages, controls.AWSClaimHolder)
 				allStages = append(allStages, awsStages...)
 				allFailures = append(allFailures, awsFailures...)
 				return nil
@@ -1754,23 +1754,22 @@ func awsClaimTaken(s StageSummary) bool {
 // awsRunFailureTeardown is the failure path's aws arm. It acts only on a
 // claim this run holds, with the env from aws.account_id and never from
 // the run-project marker, which here may be a stale Scaleway one.
-func awsRunFailureTeardown(ctx context.Context, runtime *CommandRuntime, stages []StageSummary, holder, scenarioPath string) ([]StageSummary, []FailureSummary) {
+func awsRunFailureTeardown(ctx context.Context, runtime *CommandRuntime, stages []StageSummary, holder string) ([]StageSummary, []FailureSummary) {
 	if !slices.ContainsFunc(stages, awsClaimTaken) {
 		return []StageSummary{{Layer: "sandbox_deploy", Stage: "auto_destroy", Status: StageStatusSkip,
 			Detail: "no iteration took the aws scope's claim, so none applied to it"}}, nil
 	}
-	reap := reapCommand(runtime.ConfigPath, scenarioPath)
 	env, err := awsCommandEnvForAccount(runtime, runtime.Config.AWS.AccountID)
 	if err != nil {
-		return awsScopeClaimKept(nil, nil, holder, reap, err.Error())
+		return awsScopeClaimKept(runtime, nil, nil, holder, err.Error())
 	}
 	current, held, err := harness.ReadAWSClaimHolder(ctx, env, runtime.Deps.AWSSSM, "")
 	if err != nil {
-		return awsScopeClaimKept(nil, nil, holder, reap, err.Error())
+		return awsScopeClaimKept(runtime, nil, nil, holder, err.Error())
 	}
 	if !held || current != holder {
 		return []StageSummary{{Layer: "sandbox_deploy", Stage: "auto_destroy", Status: StageStatusSkip,
 			Detail: fmt.Sprintf("the aws scope's claim is not held by this run (%s), so it tears nothing down", holder)}}, nil
 	}
-	return awsDestroyAndRelease(ctx, runtime, runtime.OutputDir(), env, holder, reap)
+	return awsDestroyAndRelease(ctx, runtime, runtime.OutputDir(), env, holder)
 }
