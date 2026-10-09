@@ -289,8 +289,26 @@ func editPitfalls(state *serverState, w http.ResponseWriter, r *http.Request, pr
 		return
 	}
 
+	// The writer scrubs account ids, so the file can differ from what was
+	// submitted; say how many entries changed rather than leave the UI
+	// showing text that is not on disk.
 	writeJSON(w, http.StatusOK, map[string]any{
 		"provider": provider,
 		"count":    len(pf.Pitfalls),
+		"scrubbed": scrubbedEntries(pf.Pitfalls),
 	})
+}
+
+// scrubbedEntries counts the entries the pitfalls writer will change.
+func scrubbedEntries(entries []generator.PitfallEntry) int {
+	n := 0
+	for _, e := range entries {
+		for _, field := range []string{e.Resource, e.Rule, e.Source, e.DiscoveredFrom} {
+			if generator.ScrubAccountIDs(field) != field {
+				n++
+				break
+			}
+		}
+	}
+	return n
 }

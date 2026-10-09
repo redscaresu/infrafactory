@@ -95,12 +95,11 @@ func (c *mockStateClient) postNoBody(ctx context.Context, path string, action st
 }
 
 func truncateMockwayErrorPayload(payload []byte) string {
-	// Scrubbed before the cut; see stderrFailureDetail.
-	trimmed := generator.ScrubAccountIDs(strings.TrimSpace(string(payload)))
+	trimmed := strings.TrimSpace(string(payload))
 	if len(trimmed) <= maxMockwayErrorPayloadBytes {
 		return trimmed
 	}
-	return trimmed[:maxMockwayErrorPayloadBytes] + "..."
+	return generator.CutText(trimmed, maxMockwayErrorPayloadBytes) + "..." // see stderrFailureDetail
 }
 
 // cloudMockStateRouter dispatches MockStateClient calls between the

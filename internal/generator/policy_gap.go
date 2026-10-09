@@ -196,8 +196,6 @@ func AppendPolicyGap(docsDir string, gap PolicyGap) error {
 	if gap.Cloud == "" || gap.Policy == "" || gap.Resource == "" {
 		return fmt.Errorf("cloud, policy, and resource are required")
 	}
-	gap.Resource = ScrubAccountIDs(gap.Resource)
-	gap.Scenario = ScrubAccountIDs(gap.Scenario)
 	if err := os.MkdirAll(docsDir, 0o755); err != nil {
 		return fmt.Errorf("mkdir docs dir: %w", err)
 	}
@@ -212,7 +210,8 @@ func AppendPolicyGap(docsDir string, gap PolicyGap) error {
 	// Dedup-key combines policy + resource so the same conflict
 	// detected on multiple sweeps doesn't grow the file.
 	dedupKey := fmt.Sprintf("| `%s` | `%s` |", gap.Policy, gap.Resource)
-	if strings.Contains(content, dedupKey) {
+	// The file is stored scrubbed; compare in that form.
+	if strings.Contains(content, ScrubAccountIDs(dedupKey)) {
 		return nil
 	}
 
@@ -237,9 +236,7 @@ func AppendPolicyGap(docsDir string, gap PolicyGap) error {
 			"|---|---|---|---|---|\n"
 	}
 
-	// Scrubbed before the cut: one landing inside an id would leave up to
-	// 11 of its digits, which no later scrub can recognise.
-	detail := ellipsize(ScrubAccountIDs(strings.TrimSpace(gap.Detail)), maxGapDetailBytes)
+	detail := ellipsize(strings.TrimSpace(gap.Detail), maxGapDetailBytes)
 	detail = strings.ReplaceAll(detail, "|", "\\|")
 	detail = strings.ReplaceAll(detail, "\n", " ")
 
@@ -256,5 +253,7 @@ func AppendPolicyGap(docsDir string, gap PolicyGap) error {
 		content = content[:insertAt] + row + "\n" + content[insertAt:]
 	}
 
-	return os.WriteFile(path, []byte(content), 0o644)
+	// The whole file is scrubbed at the write, so every column and every
+	// earlier row is covered, not a chosen few.
+	return os.WriteFile(path, []byte(ScrubAccountIDs(content)), 0o644)
 }

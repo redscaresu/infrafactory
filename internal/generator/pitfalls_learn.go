@@ -8,7 +8,6 @@ import (
 	"regexp"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
 )
@@ -209,11 +208,12 @@ func AppendMockGap(docsDir string, gap MockGap) error {
 	// Markdown row format includes these three columns; substring
 	// match on the resource cell is sufficient because the cloud +
 	// signal columns are stable per row group.
-	dedupKey := fmt.Sprintf("| %s | `%s` |", ScrubAccountIDs(gap.Resource), gap.Signal)
+	dedupKey := fmt.Sprintf("| %s | `%s` |", gap.Resource, gap.Signal)
 	if gap.Resource == "" {
 		dedupKey = fmt.Sprintf("| _(none)_ | `%s` |", gap.Signal)
 	}
-	if strings.Contains(content, dedupKey) {
+	// The file is stored scrubbed; compare in that form.
+	if strings.Contains(content, ScrubAccountIDs(dedupKey)) {
 		return nil
 	}
 
@@ -238,19 +238,17 @@ func AppendMockGap(docsDir string, gap MockGap) error {
 			"|---|---|---|---|---|\n"
 	}
 
-	resourceCell := ScrubAccountIDs(gap.Resource)
+	resourceCell := gap.Resource
 	if resourceCell == "" {
 		resourceCell = "_(none)_"
 	}
-	// Scrubbed before the cut: one landing inside an id would leave up to
-	// 11 of its digits, which no later scrub can recognise.
-	detail := ellipsize(ScrubAccountIDs(strings.TrimSpace(gap.Detail)), maxGapDetailBytes)
+	detail := ellipsize(strings.TrimSpace(gap.Detail), maxGapDetailBytes)
 	// Escape pipe + newline so the markdown table doesn't break.
 	detail = strings.ReplaceAll(detail, "|", "\\|")
 	detail = strings.ReplaceAll(detail, "\n", " ")
 
 	row := fmt.Sprintf("| %s | `%s` | %s | %s | %s |\n",
-		resourceCell, gap.Signal, ScrubAccountIDs(gap.Scenario), detail, gap.Timestamp)
+		resourceCell, gap.Signal, gap.Scenario, detail, gap.Timestamp)
 
 	// Insert the row at the end of the appropriate cloud section.
 	// Sections are delimited by the `## ` heading; the row goes at
@@ -267,7 +265,9 @@ func AppendMockGap(docsDir string, gap MockGap) error {
 		content = content[:insertAt] + row + "\n" + content[insertAt:]
 	}
 
-	return os.WriteFile(path, []byte(content), 0o644)
+	// The whole file is scrubbed at the write, so every column and every
+	// earlier row is covered, not a chosen few.
+	return os.WriteFile(path, []byte(ScrubAccountIDs(content)), 0o644)
 }
 
 // FirstMockSignal returns the first mock-actionable signal that
@@ -526,8 +526,7 @@ func ExtractDescriptivePitfall(failureDetail, scenarioName string) *LearnedPitfa
 	// prior ordering silently dropped every apply-time learning).
 	resource := extractResource(failureDetail)
 	if resource != "" && len(failureDetail) > 40 {
-		// Scrubbed before the cut; see AppendPolicyGap.
-		rule := ellipsize(ScrubAccountIDs(failureDetail), maxDescriptiveRuleBytes)
+		rule := ellipsize(failureDetail, maxDescriptiveRuleBytes)
 		return &LearnedPitfall{
 			Resource:       resource,
 			Rule:           rule,
@@ -1001,8 +1000,9 @@ func marshalScrubbed(v any) ([]byte, error) {
 }
 
 // avoidEvidencePointers returns the avoid ledger's records[].layer_evidence
-// and records[].check.from nodes. They name run artifacts rather than
-// quote failure text, and scrubbing one would break the pointer. Any
+// and records[].check.{from,id,shape_sha256} nodes. They name run
+// artifacts and shapes/<id> rather than quote failure text, and scrubbing
+// one would break the pointer. Any
 // other document, or any other field, is scrubbed whatever its name.
 func avoidEvidencePointers(v any, doc *yaml.Node) map[*yaml.Node]bool {
 	skip := map[*yaml.Node]bool{}
@@ -1023,8 +1023,11 @@ func avoidEvidencePointers(v any, doc *yaml.Node) map[*yaml.Node]bool {
 		if n := mappingValue(rec, "layer_evidence"); n != nil {
 			skip[n] = true
 		}
-		if n := mappingValue(mappingValue(rec, "check"), "from"); n != nil {
-			skip[n] = true
+		check := mappingValue(rec, "check")
+		for _, key := range []string{"from", "id", "shape_sha256"} {
+			if n := mappingValue(check, key); n != nil {
+				skip[n] = true
+			}
 		}
 	}
 	return skip
@@ -1080,18 +1083,13 @@ const (
 	ellipsis                = "..."
 )
 
-// ellipsize cuts s to at most max bytes, ending in "...", on a rune
-// boundary: a cut inside a multi-byte rune (terraform's '│') leaves
-// invalid UTF-8.
+// ellipsize cuts s to at most max bytes, ending in "...". CutText picks
+// the cut: never inside a rune (terraform's '│') or a digit run.
 func ellipsize(s string, max int) string {
 	if len(s) <= max {
 		return s
 	}
-	cut := max - len(ellipsis)
-	for cut > 0 && !utf8.RuneStart(s[cut]) {
-		cut--
-	}
-	return s[:cut] + ellipsis
+	return CutText(s, max-len(ellipsis)) + ellipsis
 }
 
 // scrubbed returns p with the account ids scrubbed, so a candidate is

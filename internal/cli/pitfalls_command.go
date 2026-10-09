@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -117,16 +118,10 @@ func retirementSummary(cloud string, retired []generator.RetiredPitfall, dryRun 
 // snippets, and a stage list that scrolls for a page is one nobody reads.
 func truncateRule(rule string) string {
 	const limit = 100
-	flat := ""
-	// Scrubbed before the cut; see stderrFailureDetail.
-	for _, r := range generator.ScrubAccountIDs(rule) {
-		if r == '\n' || r == '\t' {
-			r = ' '
-		}
-		flat += string(r)
-		if len(flat) >= limit {
-			return flat + "…"
-		}
+	flat := strings.NewReplacer("\n", " ", "\t", " ").Replace(rule)
+	if len(flat) < limit {
+		return flat
 	}
-	return flat
+	// CutText never splits an account id; see stderrFailureDetail.
+	return generator.CutText(flat, limit) + "…"
 }

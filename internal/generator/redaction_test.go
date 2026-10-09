@@ -49,7 +49,11 @@ func TestScrubAccountIDs(t *testing.T) {
 		"eleven 12345678901":                         "eleven 12345678901",
 		"cloudtrail123456789012":                     "cloudtrailACCOUNT_ID",
 		"AccountId123456789012.":                     "AccountIdACCOUNT_ID.",
-		"digest ab123456789012cd":                    "digest abACCOUNT_IDcd",
+		"digest ab123456789012cd":                    "digest ab123456789012cd",
+		"snap-0a123456789012bcd":                     "snap-0a123456789012bcd",
+		"console 1234-5678-9012.":                    "console ACCOUNT_ID.",
+		"console 1234 5678 9012":                     "console ACCOUNT_ID",
+		"longer 1234-5678-90123":                     "longer 1234-5678-90123",
 		"thirteen x1234567890123y":                   "thirteen x1234567890123y",
 		"eleven x12345678901y":                       "eleven x12345678901y",
 		"id 550e8400-e29b-41d4-a716-446655440000":    "id 550e8400-e29b-41d4-a716-446655440000",
@@ -215,21 +219,27 @@ func TestTruncationKeepsValidUTF8(t *testing.T) {
 	assert.True(t, utf8.ValidString(firstSentence("x"+strings.Repeat("é", maxGapDetailBytes))))
 }
 
-func TestGapRowsScrubResourceAndScenario(t *testing.T) {
+func TestGapRowsScrubEveryColumn(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
 	require.NoError(t, AppendPolicyGap(dir, PolicyGap{
-		Cloud: "aws", Policy: "aws.iam_scoped", Resource: "role_123456789012",
+		Cloud: "aws", Policy: "arn:aws:iam::123456789012:policy/p", Resource: "role_123456789012",
 		Scenario: "web-123456789012", Detail: "d", Timestamp: "20261009T120000Z",
 	}))
-	assertAccountIDsScrubbed(t, filepath.Join(dir, "policy-gaps.md"), 2)
+	assertAccountIDsScrubbed(t, filepath.Join(dir, "policy-gaps.md"), 3)
 
 	require.NoError(t, AppendMockGap(dir, MockGap{
-		Cloud: "aws", Signal: "s", Resource: "role_123456789012",
+		Cloud: "aws", Signal: "arn:aws:iam::123456789012:root", Resource: "role_123456789012",
 		Scenario: "web-123456789012", Detail: "d", Timestamp: "20261009T120000Z",
 	}))
-	assertAccountIDsScrubbed(t, filepath.Join(dir, "mock-gaps.md"), 2)
+	assertAccountIDsScrubbed(t, filepath.Join(dir, "mock-gaps.md"), 3)
+	// Re-appending the same gap dedups against the scrubbed row.
+	require.NoError(t, AppendMockGap(dir, MockGap{
+		Cloud: "aws", Signal: "arn:aws:iam::123456789012:root", Resource: "role_123456789012",
+		Scenario: "web-123456789012", Detail: "d", Timestamp: "20261009T120000Z",
+	}))
+	assertAccountIDsScrubbed(t, filepath.Join(dir, "mock-gaps.md"), 3)
 }
 
 // The evidence-pointer exemption is the avoid ledger's alone: a field
@@ -243,4 +253,46 @@ func TestEvidencePointerExemptionIsLedgerOnly(t *testing.T) {
 	}{From: accountIDLeak, LayerEvidence: accountIDLeak})
 	require.NoError(t, err)
 	assert.False(t, twelveDigitRun.Match(out), string(out))
+}
+
+// The ledger's shape_sha256 and id name shapes/<id>; a digest that holds
+// a 12-digit run by chance must survive byte for byte.
+func TestAvoidLedgerKeepsShapeDigest(t *testing.T) {
+	t.Parallel()
+
+	digest := "ab3f123456789012c" + strings.Repeat("e", 47)
+	// Not hex, so only the explicit exemption keeps it.
+	const checkID = "20261009T120000Z-aws_iam_role-123456789012"
+	require.Len(t, digest, 64)
+	dir := t.TempDir()
+	require.NoError(t, appendAvoidLedgerRecord(dir, "aws", &AvoidLedger{Provider: "aws"}, AvoidLedgerRecord{
+		Status: AvoidRecordRelearned, Resource: "aws_iam_role", Attributes: []string{"name"},
+		LearnedLayer: "live", Rule: accountIDLeak, At: "2026-10-09T00:00:00Z",
+		Check: &AvoidCheck{ID: checkID, At: "2026-10-09T00:00:00Z", ShapeSHA256: digest},
+	}))
+	ledger, err := ReadAvoidLedger(dir, "aws")
+	require.NoError(t, err)
+	require.Len(t, ledger.Records, 1)
+	require.NotNil(t, ledger.Records[0].Check)
+	assert.Equal(t, digest, ledger.Records[0].Check.ShapeSHA256)
+	assert.Equal(t, checkID, ledger.Records[0].Check.ID)
+	// And as plain text, through the hex-token rule alone.
+	assert.Equal(t, "sha "+digest, ScrubAccountIDs("sha "+digest))
+}
+
+// No cut splits a digit run, plain or 4-4-4 grouped: an id at the cut is
+// whole or absent.
+func TestCutTextNeverSplitsADigitRun(t *testing.T) {
+	t.Parallel()
+
+	for _, id := range []string{"123456789012", "1234-5678-9012", "1234 5678 9012"} {
+		s := "lead " + id + " tail"
+		for n := 0; n <= len(s); n++ {
+			got := CutText(s, n)
+			assert.LessOrEqual(t, len(got), n)
+			if strings.HasPrefix(got, "lead ") && len(got) > len("lead ") {
+				assert.True(t, strings.HasPrefix(got, "lead "+id), "cut %d split %q: %q", n, id, got)
+			}
+		}
+	}
 }

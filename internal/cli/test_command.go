@@ -439,14 +439,14 @@ func stderrFailureDetail(baseErr error, stderr string) string {
 	if baseErr != nil {
 		detail = baseErr.Error()
 	}
-	// Scrubbed before the cut: one inside an account id leaves a shorter
-	// run the scrub no longer recognises, and pitfalls are built from this.
-	trimmedStderr := generator.ScrubAccountIDs(stripAnsi(strings.TrimSpace(stderr)))
+	trimmedStderr := stripAnsi(strings.TrimSpace(stderr))
 	if trimmedStderr == "" {
 		return detail
 	}
 	if len(trimmedStderr) > failureStderrDetailMaxChars {
-		trimmedStderr = trimmedStderr[:failureStderrDetailMaxChars] + "..."
+		// CutText never splits an account id: a partial one would escape
+		// the scrub at the pitfall writer. The id itself stays visible here.
+		trimmedStderr = generator.CutText(trimmedStderr, failureStderrDetailMaxChars) + "..."
 	}
 	return fmt.Sprintf("%s | stderr: %s", detail, trimmedStderr)
 }
@@ -1917,9 +1917,9 @@ func driftFailureDetail(planOutput string, continuing bool) string {
 // is drifting.
 func truncatePlanOutput(out string) string {
 	const maxPlanDetail = 4000
-	out = generator.ScrubAccountIDs(out) // before the cut; see stderrFailureDetail
 	if len(out) <= maxPlanDetail {
 		return out
 	}
-	return out[:maxPlanDetail] + fmt.Sprintf("\n... (%d more bytes)", len(out)-maxPlanDetail)
+	head := generator.CutText(out, maxPlanDetail) // see stderrFailureDetail
+	return head + fmt.Sprintf("\n... (%d more bytes)", len(out)-len(head))
 }

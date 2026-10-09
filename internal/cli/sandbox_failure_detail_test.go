@@ -147,17 +147,22 @@ func TestStderrFailureDetailStripsAnsiAndTruncates(t *testing.T) {
 	}
 }
 
-// A cut inside an account id leaves a shorter run the scrub no longer
-// recognises, so every cut on a failure string's way to a pitfall scrubs
-// first. Each id here straddles its cut.
-func TestFailureTextCutsScrubAccountIDsFirst(t *testing.T) {
+// A cut inside an account id leaves a shorter run the pitfall writer's
+// scrub no longer recognises, so no cut on a failure string splits a
+// digit run: an id straddling the cut is dropped whole. The run detail
+// is operator-facing and keeps a whole id as it is.
+func TestFailureTextCutsNeverSplitAnAccountID(t *testing.T) {
 	const id = "123456789012"
 	straddle := func(cut int) string {
-		return strings.Repeat("x", cut-len(id)/2) + id + strings.Repeat("y", cut)
+		return id + " " + strings.Repeat("x", cut-len(id)/2-len(id)-1) + id + strings.Repeat("y", cut)
 	}
-
-	assert.NotContains(t, stderrFailureDetail(errors.New("exit status 1"), straddle(failureStderrDetailMaxChars)), "123456")
-	assert.NotContains(t, truncateRule(straddle(100)), "123456")
-	assert.NotContains(t, truncatePlanOutput(straddle(4000)), "123456")
-	assert.NotContains(t, truncateMockwayErrorPayload([]byte(straddle(maxMockwayErrorPayloadBytes))), "123456")
+	for name, got := range map[string]string{
+		"stderr":  stderrFailureDetail(errors.New("exit status 1"), straddle(failureStderrDetailMaxChars)),
+		"rule":    truncateRule(straddle(100)),
+		"plan":    truncatePlanOutput(straddle(4000)),
+		"mockway": truncateMockwayErrorPayload([]byte(straddle(maxMockwayErrorPayloadBytes))),
+	} {
+		assert.Equal(t, 1, strings.Count(got, "123456"), "%s: the leading id whole, the straddling one absent", name)
+		assert.True(t, strings.HasPrefix(got, id) || strings.Contains(got, "stderr: "+id), "%s keeps the real id", name)
+	}
 }
