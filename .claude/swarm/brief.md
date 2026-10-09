@@ -8,3 +8,4 @@ it in any merge commit's message. End commit messages with
 Never press GitHub's "Update branch": its merge commit has no `ADR:` trailer and fails doc
 hygiene. To catch up with the base, `git merge origin/main` locally and repeat the trailer (a
 reason of at least 10 characters) in the merge commit's message.
+Every new or changed test must be shown to fail: back up the fixed file with cp, break the fix, watch the test fail, restore with cp, and record it in the PR. A reviewer sends back any test that passes with its fix removed. <!-- lesson: vacuous-test -->
