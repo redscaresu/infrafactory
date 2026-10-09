@@ -639,10 +639,6 @@ type testExecutionOptions struct {
 	// is minted once per process: by run for all its iterations, by test
 	// for its one.
 	AWSClaimHolder string
-
-	// scenarioPath is set by executeTest, for the reap command a kept
-	// aws claim names.
-	scenarioPath string
 }
 
 func executeTest(ctx context.Context, runtime *CommandRuntime, scenarioPath string, opts testExecutionOptions) (OutputResult, error) {
@@ -650,7 +646,6 @@ func executeTest(ctx context.Context, runtime *CommandRuntime, scenarioPath stri
 	if err != nil {
 		return OutputResult{}, fmt.Errorf("load scenario %q: %w", scenarioPath, err)
 	}
-	opts.scenarioPath = scenarioPath
 	return executeTestWithScenario(ctx, runtime, sc, runtime.OutputDir(), opts)
 }
 
