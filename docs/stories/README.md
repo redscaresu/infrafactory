@@ -8,8 +8,8 @@ Open work, one file per item. A file's front matter says whether it can be picke
 what to change, and **Done when** — the acceptance. The PR that finishes a story deletes its
 file; the PR is the record. List them with `grep -H '^status:' docs/stories/*.md`.
 
-`kind` (code | docs | chore | verify | lead | operator) and `risk: high` choose who builds it
-and with which model (swarm-dev `docs/method.md` § Model and effort); `lead` and `operator` stories are
+`kind` (code | docs | chore | verify | lead) and `risk: high` choose who builds it
+and with which model (swarm-dev `docs/method.md` § Model and effort); `lead` stories are
 never given to a swarm agent.
 
 A story may belong to an epic (`epic: <slug>`, see `docs/epics/`) and list the files it
