@@ -188,6 +188,55 @@ func TestAWSRunFailureArmLeavesAnotherHoldersClaimAlone(t *testing.T) {
 	assert.Equal(t, lifecycleOtherHolder, holder)
 }
 
+// Interrupted with a dirty scope that the failure arm then finds clean:
+// the notice waits for the arm, so it says the claim was released.
+func TestInterruptedAWSRunNamesTheClaimTheFailureArmLeaves(t *testing.T) {
+	lc := newAWSLifecycle(t)
+	dirtySweep(lc)
+	lc.deploy.err = context.Canceled
+	lc.deploy.onRunDir = func(dir string) {
+		lc.record(deployRun)
+		writeAWSStateAndStaleMarker(t, dir, false)
+		lc.cancel()
+	}
+
+	run := runAWSRun(t, lc, awsRunOptions{repairs: 2, loopEnded: func() {
+		lc.mu.Lock()
+		defer lc.mu.Unlock()
+		delete(lc.ec2, "DescribeInstances")
+	}})
+
+	require.Error(t, run.err)
+	assert.Contains(t, run.armCalls, deleteClaim, "the arm released the claim")
+	assertInterruptNamesTheReap(t, lc, run.output, run.h.ConfigPath, run.h.ScenarioPath, awsClaimNotHeld)
+	assert.Equal(t, 1, strings.Count(run.output, "Interrupted:"), "one notice")
+}
+
+// A second Ctrl-C before the failure arm reads the claim does not make a
+// claim this run holds unknown: the read ignores cancellation, as the
+// sweep does, and the arm still destroys.
+func TestAWSRunFailureArmReadsTheClaimThroughASecondInterrupt(t *testing.T) {
+	lc := newAWSLifecycle(t)
+	dirtySweep(lc)
+	notifies := 0
+	notify := func(parent context.Context, _ ...os.Signal) (context.Context, context.CancelFunc) {
+		ctx, cancel := context.WithCancel(parent)
+		notifies++
+		if notifies == 2 {
+			cancel() // the arm's: interrupted before it reads the claim
+		}
+		return ctx, cancel
+	}
+
+	run := runAWSRun(t, lc, awsRunOptions{repairs: 1, notify: notify})
+
+	require.Error(t, run.err)
+	assert.Equal(t, getClaim, run.armCalls[0], "the arm reads the claim first")
+	assert.Contains(t, run.armCalls, destroyRun, "the arm destroys")
+	assert.NotContains(t, run.output, "may still hold the aws scope's claim")
+	assertInterruptNamesTheReap(t, lc, run.output, run.h.ConfigPath, run.h.ScenarioPath, awsClaimHeld)
+}
+
 // The arm cannot read the claim, so it cannot tell whether this run still
 // holds it: it names both reaps, each with the case it fits.
 func TestAWSRunFailureArmNamesBothReapsWhenTheClaimIsUnreadable(t *testing.T) {

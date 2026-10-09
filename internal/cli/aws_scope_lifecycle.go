@@ -19,24 +19,40 @@ const StageAWSScopeClaimKept = "aws_scope_claim_kept"
 // pass detail names both.
 const StageAWSAMIResolve = "aws_ami_resolve"
 
-// awsClaimState is what a process knows of the aws scope's claim.
+// awsClaimState is what a process knows of the aws scope's claim. The
+// zero value is unknown, so a path that never sets it hedges.
 type awsClaimState int
 
 const (
-	// awsClaimNotHeld: never taken, refused for a reason other than a
-	// holder, or released after a clean sweep.
-	awsClaimNotHeld awsClaimState = iota
-	awsClaimHeld
 	// awsClaimUnknown: the claim may be this process's.
-	awsClaimUnknown
+	awsClaimUnknown awsClaimState = iota
+	awsClaimHeld
+	// awsClaimNotHeld: not yet taken, refused for a reason other than a
+	// holder, or released after a clean sweep.
+	awsClaimNotHeld
 	// awsClaimHeldByOther: another holder, named in awsClaim.other, has it.
 	awsClaimHeldByOther
+	// awsClaimHolderUnknown is no stored state: it is what a held or
+	// unknown claim with no holder to name reads as.
+	awsClaimHolderUnknown
 )
 
 type awsClaim struct {
 	holder string // this process's holder
 	state  awsClaimState
 	other  string // the holder that has it, for awsClaimHeldByOther
+}
+
+// known is the state the reap advice can act on: a held or unknown claim
+// with no holder to name, or another holder with no name, is
+// awsClaimHolderUnknown.
+func (c awsClaim) known() awsClaimState {
+	switch {
+	case (c.state == awsClaimHeld || c.state == awsClaimUnknown) && c.holder == "",
+		c.state == awsClaimHeldByOther && c.other == "":
+		return awsClaimHolderUnknown
+	}
+	return c.state
 }
 
 // awsReapAdvice names the reap that works for what this process knows of
@@ -46,7 +62,7 @@ func awsReapAdvice(runtime *CommandRuntime) string {
 	const does = "sweeps the scope, destroys what is left and releases the claim"
 	claim := runtime.awsClaim
 	plain := reapCommand(runtime.ConfigPath, runtime.scenarioPath)
-	switch claim.state {
+	switch claim.known() {
 	case awsClaimHeld:
 		return fmt.Sprintf("`%s` %s", awsTakeOverCommand(runtime, claim.holder), does)
 	case awsClaimUnknown:
@@ -54,36 +70,44 @@ func awsReapAdvice(runtime *CommandRuntime) string {
 			awsTakeOverCommand(runtime, claim.holder), does, plain)
 	case awsClaimHeldByOther:
 		return fmt.Sprintf("Once that run has ended, `%s` %s", awsTakeOverCommand(runtime, claim.other), does)
+	case awsClaimHolderUnknown:
+		return fmt.Sprintf("The claim's holder is unknown here: if no one holds it, `%s` %s; "+
+			"if someone does, it refuses, naming the holder and the --take-over that takes the claim over", plain, does)
 	}
 	return fmt.Sprintf("`%s` %s", plain, does)
 }
 
-// awsInterruptNotice is what an interrupted aws command prints. Nothing
-// is torn down by then that the run's own teardown did not already do.
+// awsInterruptNotice is what an interrupted aws command prints once its
+// teardown has settled the claim.
 func awsInterruptNotice(runtime *CommandRuntime) string {
 	claim := runtime.awsClaim
 	var head string
-	switch claim.state {
+	switch claim.known() {
 	case awsClaimHeld:
 		head = "this run keeps the aws scope's claim, and what it applied may still exist"
-	case awsClaimUnknown:
-		head = "this run may hold the aws scope's claim, and what it applied may still exist"
 	case awsClaimHeldByOther:
 		head = fmt.Sprintf("this run does not hold the aws scope's claim: %s does", claim.other)
-	default:
+	case awsClaimNotHeld:
 		head = "this run does not hold the aws scope's claim: it never took it, or its sweep proved the scope empty and released it"
+	default:
+		head = "this run may hold the aws scope's claim, and what it applied may still exist"
 	}
 	return fmt.Sprintf("\nInterrupted: %s. %s.\n", head, awsReapAdvice(runtime))
 }
 
 // awsClaimHolderFor mints this process's claim holder when it may claim
 // the aws scope: Layer 3 on and the scenario's cloud aws. Otherwise it is
-// "", and nothing is minted that could fail a run that never claims.
+// "", and nothing is minted that could fail a run that never claims. A
+// minted holder has not claimed yet.
 func awsClaimHolderFor(runtime *CommandRuntime, cloud layer3Cloud, runID string) (string, error) {
 	if cloud != layer3AWS || !runtime.Config.Validation.Layers.SandboxDeploy.Enabled {
 		return "", nil
 	}
-	return harness.NewAWSClaimHolder(runID)
+	holder, err := harness.NewAWSClaimHolder(runID)
+	if err == nil {
+		runtime.awsClaim = awsClaim{holder: holder, state: awsClaimNotHeld}
+	}
+	return holder, err
 }
 
 // ensureAWSScopeClaim is ensureRunProject's aws arm, run after the STS
@@ -92,6 +116,9 @@ func awsClaimHolderFor(runtime *CommandRuntime, cloud layer3Cloud, runID string)
 // for ErrAWSClaimOutcomeUnknown, and then fails with it.
 func ensureAWSScopeClaim(ctx context.Context, runtime *CommandRuntime, holder string) (string, []StageSummary, []FailureSummary) {
 	account := runtime.Config.AWS.AccountID
+	// Not held until the take below says otherwise: every early return
+	// is before any write.
+	runtime.awsClaim = awsClaim{holder: holder, state: awsClaimNotHeld}
 	env, err := awsLayer3Env(runtime.Config.AWS)
 	if err != nil {
 		return awsScopeClaimFailed("", "credentials", err)
@@ -127,7 +154,23 @@ func awsClaimAfterTake(holder string, err error) awsClaim {
 	case errors.As(err, &byOther):
 		return awsClaim{holder: holder, state: awsClaimHeldByOther, other: byOther.Holder}
 	}
-	return awsClaim{holder: holder}
+	// The put failed and no claim is stored.
+	return awsClaim{holder: holder, state: awsClaimNotHeld}
+}
+
+// awsClaimAfterRelease is what ReleaseAWSClaim's err says of the claim. A
+// release clears the holder with the state; a failed one may have landed
+// (a lost DeleteParameter response) or found no claim, so it is unknown
+// unless it names the holder that has it.
+func awsClaimAfterRelease(holder string, err error) awsClaim {
+	var byOther *harness.AWSScopeClaimedError
+	switch {
+	case err == nil:
+		return awsClaim{state: awsClaimNotHeld}
+	case errors.As(err, &byOther):
+		return awsClaim{holder: holder, state: awsClaimHeldByOther, other: byOther.Holder}
+	}
+	return awsClaim{holder: holder, state: awsClaimUnknown}
 }
 
 // awsScopeClaimFailed returns held: the account when the claim may be
@@ -154,7 +197,7 @@ func awsScopeTeardown(ctx context.Context, runtime *CommandRuntime, outputDir st
 		return []StageSummary{{
 			Layer: "sandbox_deploy", Stage: StageAWSScopeClaimKept, Status: StageStatusSkip,
 			Detail: fmt.Sprintf("kept the aws scope's claim for %s on purpose (%s): what this run applied is still there. "+
-				"%s", opts.AWSClaimHolder, reason, awsReapAdvice(runtime)),
+				"%s", runtime.awsClaim.holder, reason, awsReapAdvice(runtime)),
 		}}, nil
 	}
 
@@ -162,13 +205,13 @@ func awsScopeTeardown(ctx context.Context, runtime *CommandRuntime, outputDir st
 	if err != nil {
 		return awsScopeClaimKept(runtime, nil, nil, err.Error())
 	}
-	return awsDestroyAndRelease(ctx, runtime, outputDir, env, opts.AWSClaimHolder)
+	return awsDestroyAndRelease(ctx, runtime, outputDir, env)
 }
 
-// awsDestroyAndRelease runs with holder holding the claim: it destroys
+// awsDestroyAndRelease runs with runtime.awsClaim's holder holding the claim: it destroys
 // what the state records, then releases through awsReleaseAfterCleanSweep.
 // Anything short of a release keeps the claim and names its take-over.
-func awsDestroyAndRelease(ctx context.Context, runtime *CommandRuntime, outputDir string, env map[string]string, holder string) ([]StageSummary, []FailureSummary) {
+func awsDestroyAndRelease(ctx context.Context, runtime *CommandRuntime, outputDir string, env map[string]string) ([]StageSummary, []FailureSummary) {
 	var stages []StageSummary
 	var failures []FailureSummary
 	if liveStateMayHoldResources(outputDir) {
@@ -177,7 +220,7 @@ func awsDestroyAndRelease(ctx context.Context, runtime *CommandRuntime, outputDi
 		result, _, destroyErr := destroyAWSSandbox(ctx, runtime, outputDir, env)
 		stages, failures = appendSandboxDestroyResult(stages, failures, result, destroyErr)
 	}
-	releaseStages, releaseFailures := awsReleaseAfterCleanSweep(ctx, runtime, env, holder)
+	releaseStages, releaseFailures := awsReleaseAfterCleanSweep(ctx, runtime, env)
 	stages = append(stages, releaseStages...)
 	failures = append(failures, releaseFailures...)
 	if len(releaseFailures) > 0 {
@@ -190,16 +233,23 @@ func awsDestroyAndRelease(ctx context.Context, runtime *CommandRuntime, outputDi
 // process knows of the claim.
 func awsScopeClaimKept(runtime *CommandRuntime, stages []StageSummary, failures []FailureSummary, reason string) ([]StageSummary, []FailureSummary) {
 	claim := runtime.awsClaim
-	kept := "may still hold"
-	if claim.state == awsClaimHeld {
-		kept = "kept"
+	var head string
+	switch claim.known() {
+	case awsClaimHeld:
+		head = "kept the aws scope's claim for " + claim.holder
+	case awsClaimHeldByOther:
+		head = fmt.Sprintf("the aws scope's claim is held by %s, not by this run", claim.other)
+	case awsClaimHolderUnknown:
+		head = "may still hold the aws scope's claim"
+	default:
+		head = "may still hold the aws scope's claim for " + claim.holder
 	}
 	return append(stages, StageSummary{Layer: "sandbox_deploy", Stage: StageAWSScopeClaimKept, Status: StageStatusFail}),
 		append(failures, FailureSummary{
 			Layer: "sandbox_deploy", Stage: StageAWSScopeClaimKept, Check: "claim",
 			Command: "release aws scope",
-			Detail: fmt.Sprintf("%s the aws scope's claim for %s: %s, so resources may still exist in the scope. %s",
-				kept, claim.holder, reason, awsReapAdvice(runtime)),
+			Detail: fmt.Sprintf("%s: %s, so resources may still exist in the scope. %s",
+				head, reason, awsReapAdvice(runtime)),
 		})
 }
 
@@ -208,7 +258,7 @@ func awsScopeClaimKept(runtime *CommandRuntime, stages []StageSummary, failures 
 // it empty. Its requests ignore cancellation, so an interrupted run still
 // gets a verdict; the settle waits do not, so Ctrl-C never sits out the
 // settle loop.
-func awsReleaseAfterCleanSweep(ctx context.Context, runtime *CommandRuntime, env map[string]string, holder string) ([]StageSummary, []FailureSummary) {
+func awsReleaseAfterCleanSweep(ctx context.Context, runtime *CommandRuntime, env map[string]string) ([]StageSummary, []FailureSummary) {
 	requestCtx := context.WithoutCancel(ctx)
 	doers := harness.AWSDoers{EC2: runtime.Deps.AWSEC2, SSM: runtime.Deps.AWSSSM}
 	if _, err := harness.SweepAWSScope(requestCtx, env, doers, harness.AWSEndpoints{}, awsSettleWait(ctx, runtime)); err != nil {
@@ -222,14 +272,16 @@ func awsReleaseAfterCleanSweep(ctx context.Context, runtime *CommandRuntime, env
 		Layer: "sandbox_deploy", Stage: "aws_scope_sweep", Status: StageStatusPass,
 		Detail: "every swept collection in the scope is empty",
 	}}
-	if err := harness.ReleaseAWSClaim(requestCtx, env, runtime.Deps.AWSSSM, "", holder); err != nil {
+	holder := runtime.awsClaim.holder
+	err := harness.ReleaseAWSClaim(requestCtx, env, runtime.Deps.AWSSSM, "", holder)
+	runtime.awsClaim = awsClaimAfterRelease(holder, err)
+	if err != nil {
 		return append(stages, StageSummary{Layer: "sandbox_deploy", Stage: "aws_scope_release", Status: StageStatusFail}),
 			[]FailureSummary{{
 				Layer: "sandbox_deploy", Stage: "aws_scope_release", Check: "claim",
 				Command: "release aws scope", Detail: err.Error(),
 			}}
 	}
-	runtime.awsClaim.state = awsClaimNotHeld
 	return append(stages, StageSummary{
 		Layer: "sandbox_deploy", Stage: "aws_scope_release", Status: StageStatusPass,
 		Detail: "released the claim " + holder + " held",

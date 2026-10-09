@@ -184,7 +184,7 @@ func runAWSReap(cmd *cobra.Command, runtime *CommandRuntime, scenarioName string
 		return fail(err)
 	}
 	runtime.awsClaim = awsClaim{holder: holder, state: awsClaimHeld}
-	stages, failures := reapClaimedAWSScope(ctx, runtime, env, holder)
+	stages, failures := reapClaimedAWSScope(ctx, runtime, env)
 
 	status := CommandStatusSuccess
 	if len(failures) > 0 {
@@ -206,7 +206,14 @@ func runAWSReap(cmd *cobra.Command, runtime *CommandRuntime, scenarioName string
 // nothing written.
 func claimAWSScopeForReap(ctx context.Context, runtime *CommandRuntime, env map[string]string, holder, takeOver string) error {
 	if takeOver != "" {
-		return harness.TakeOverAWSClaim(ctx, env, runtime.Deps.AWSSSM, "", takeOver, holder)
+		err := harness.TakeOverAWSClaim(ctx, env, runtime.Deps.AWSSSM, "", takeOver, holder)
+		if errors.Is(err, harness.ErrAWSPreviousClaimDeleted) {
+			// The old claim is gone, so --take-over of it can never work
+			// again: name what can.
+			runtime.awsClaim = awsClaimAfterTake(holder, err)
+			return fmt.Errorf("%w. %s", err, awsReapAdvice(runtime))
+		}
+		return err
 	}
 	current, held, err := harness.ReadAWSClaimHolder(ctx, env, runtime.Deps.AWSSSM, "")
 	switch {
@@ -235,8 +242,9 @@ func awsTakeOverCommand(runtime *CommandRuntime, holder string) string {
 // failed destroy nor a failed delete stops it: the verdict sweep in
 // awsReleaseAfterCleanSweep decides whether the claim is released, and
 // a kept claim names the command that takes it over.
-func reapClaimedAWSScope(ctx context.Context, runtime *CommandRuntime, env map[string]string, holder string) ([]StageSummary, []FailureSummary) {
+func reapClaimedAWSScope(ctx context.Context, runtime *CommandRuntime, env map[string]string) ([]StageSummary, []FailureSummary) {
 	cfg := runtime.Config.AWS
+	holder := runtime.awsClaim.holder
 	stages := []StageSummary{{Layer: "sandbox_deploy", Stage: "aws_scope_claim", Status: StageStatusPass,
 		Detail: fmt.Sprintf("claimed account %s for %s", cfg.AccountID, holder)}}
 	var failures []FailureSummary
@@ -267,12 +275,30 @@ func reapClaimedAWSScope(ctx context.Context, runtime *CommandRuntime, env map[s
 		}
 	}
 
-	releaseStages, releaseFailures := awsReleaseAfterCleanSweep(ctx, runtime, env, holder)
+	releaseStages, releaseFailures := awsReleaseAfterCleanSweep(ctx, runtime, env)
 	stages, failures = append(stages, releaseStages...), append(failures, releaseFailures...)
 	if len(releaseFailures) > 0 {
 		return awsScopeClaimKept(runtime, stages, failures, "the scope was not proven empty and released")
 	}
 	return stages, failures
+}
+
+// runUnderSignals runs fn with a context a SIGINT or SIGTERM cancels,
+// when Layer 3 is on, and reports whether one arrived. It is the aws run
+// loop's guard: what to print waits for the run's own teardown.
+func runUnderSignals(
+	ctx context.Context,
+	runtime *CommandRuntime,
+	notify func(ctx context.Context, sigs ...os.Signal) (context.Context, context.CancelFunc),
+	fn func(ctx context.Context) error,
+) (bool, error) {
+	if !runtime.Config.Validation.Layers.SandboxDeploy.Enabled {
+		return false, fn(ctx)
+	}
+	sigCtx, stop := notify(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	err := fn(sigCtx)
+	return sigCtx.Err() != nil, err
 }
 
 // withSandboxInterruptGuard runs fn with a SIGINT/SIGTERM handler that

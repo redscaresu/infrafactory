@@ -37,6 +37,9 @@ var (
 	// ErrAWSClaimOutcomeUnknown is a failed put whose read-back failed too:
 	// the claim may be ours, so the caller treats it as held.
 	ErrAWSClaimOutcomeUnknown = errors.New("the aws Layer 3 claim's outcome is unknown")
+	// ErrAWSPreviousClaimDeleted is a take-over whose own take failed
+	// after the previous holder's claim was deleted.
+	ErrAWSPreviousClaimDeleted = errors.New("the previous holder's aws Layer 3 claim was deleted")
 )
 
 // AWSScopeClaimedError is ErrAWSScopeClaimed naming the holder, for a
@@ -177,7 +180,10 @@ func TakeOverAWSClaim(ctx context.Context, env map[string]string, doer ssm.HTTPC
 	if err := deleteAWSClaimHeldBy(deleteCtx, client, previous); err != nil {
 		return err
 	}
-	return takeAWSClaim(ctx, client, holder)
+	if err := takeAWSClaim(ctx, client, holder); err != nil {
+		return fmt.Errorf("%w: %w", ErrAWSPreviousClaimDeleted, err)
+	}
+	return nil
 }
 
 // deleteAWSClaimHeldBy deletes the claim when its value is want, and
@@ -190,7 +196,7 @@ func deleteAWSClaimHeldBy(ctx context.Context, client *ssm.Client, want string) 
 	case !found:
 		return fmt.Errorf("aws scope claim: refusing to delete %s: no claim is held, and %q expected to hold it", AWSClaimParameter, want)
 	case value != want:
-		return fmt.Errorf("aws scope claim: refusing to delete %s: %w by %q, not %q", AWSClaimParameter, ErrAWSScopeClaimed, value, want)
+		return fmt.Errorf("aws scope claim: refusing to delete %s: %w, not %q", AWSClaimParameter, &AWSScopeClaimedError{Holder: value}, want)
 	}
 	// ponytail: DeleteParameter takes only a Name, so a claim retaken
 	// between the Get above and this Delete would be deleted. SSM has no
