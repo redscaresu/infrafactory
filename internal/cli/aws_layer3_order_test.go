@@ -14,6 +14,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 
 	"github.com/redscaresu/infrafactory/internal/config"
 	"github.com/redscaresu/infrafactory/internal/generator"
@@ -30,11 +31,6 @@ const (
 	describeVPCs = "ec2:DescribeVpcs"
 	userDataRead = "ec2:DescribeInstanceAttribute"
 
-	orderCriterion = `  - type: http_probe
-    target: compute
-    port: 80
-    expect: reachable
-`
 	orderHoldout = `scenario: example-scenario-unseen
 type: holdout
 references: example-scenario
@@ -72,16 +68,18 @@ var orderForward = []orderStage{
 }
 
 // orderProbe is the real probe: it logs the scenario's http_probe and the
-// holdout's connectivity check apart, and fails the one named by fail.
+// holdout's connectivity check apart, and fails the one named by fail. A
+// call is the holdout's when it carries the holdout's own port 22 check,
+// so how many checks the scenario's probe gets cannot move it.
 type orderProbe struct {
 	lc   *awsLifecycle
 	fail string
 }
 
 func (p orderProbe) Run(_ context.Context, _, _ string, checks []harness.ProbeCheck) (*harness.RealProbeResult, error) {
-	call := probeHoldout
-	if len(checks) == 1 && checks[0].Type == "http_probe" && checks[0].Target == "compute" && checks[0].Port == 80 {
-		call = probeHTTP
+	call := probeHTTP
+	if slices.ContainsFunc(checks, func(c harness.ProbeCheck) bool { return c.Type == "connectivity" && c.Port == 22 }) {
+		call = probeHoldout
 	}
 	p.lc.record(call)
 	if call == p.fail {
@@ -154,12 +152,15 @@ func runAWSOrder(t *testing.T, lc *awsLifecycle, setup orderSetup) awsRun {
 		scenario: func(h *CommandTestHarness) {
 			raw, err := os.ReadFile(h.ScenarioPath)
 			require.NoError(t, err)
-			_, service, ok := strings.Cut(string(raw), "service:\n")
-			require.True(t, ok)
-			before, _, ok := strings.Cut(string(raw), "acceptance_criteria:\n")
-			require.True(t, ok)
-			require.NoError(t, os.WriteFile(h.ScenarioPath,
-				[]byte(before+"acceptance_criteria:\n"+orderCriterion+"service:\n"+service), 0o600))
+			var doc map[string]any
+			require.NoError(t, yaml.Unmarshal(raw, &doc))
+			require.Contains(t, doc, "service")
+			doc["acceptance_criteria"] = []map[string]any{
+				{"type": "http_probe", "target": "compute", "port": 80, "expect": "reachable"},
+			}
+			raw, err = yaml.Marshal(doc)
+			require.NoError(t, err)
+			require.NoError(t, os.WriteFile(h.ScenarioPath, raw, 0o600))
 			writeHoldout(t, h, orderHoldout)
 			scenarios = filepath.Join(h.WorkspaceDir, "scenarios")
 		},
@@ -227,32 +228,71 @@ var otherAccountState = strings.Replace(awsLiveState, preflightAWSAccount, "9999
 // Each forward stage, failed by its fake, ends the iteration there. From
 // the apply on, the teardown still destroys and sweeps, and releases the
 // claim only after a clean sweep; a dirty one keeps it and names reap.
+// Each row names the failure its fake causes, so a run that ends at the
+// right stage for another reason fails the row.
 func TestAWSRunEndsAtTheLayer3StageThatFails(t *testing.T) {
+	const testStage = "iteration_1_test"
 	rows := map[string]struct {
 		lc    func(*testing.T, *awsLifecycle)
 		setup orderSetup
+		// fails is the failure the run reports: its Stage and Check
+		// exactly, and its Detail as a substring.
+		fails FailureSummary
 	}{
-		"gate (generation)": {setup: orderSetup{gateFailsOn: 1}},
-		"gate (test)":       {setup: orderSetup{gateFailsOn: 2}},
-		"sts":               {setup: orderSetup{stsFailsOn: 2}},
-		"stamp":             {lc: func(_ *testing.T, lc *awsLifecycle) { delete(lc.params, harness.AWSStampParameter) }},
-		"default vpc": {lc: func(_ *testing.T, lc *awsLifecycle) {
-			lc.ec2["DescribeVpcs"] = `<vpcSet><item><vpcId>vpc-0default</vpcId><isDefault>true</isDefault></item></vpcSet>`
-		}},
-		"claim": {lc: func(_ *testing.T, lc *awsLifecycle) { lc.params[harness.AWSClaimParameter] = lifecycleOtherHolder }},
-		"apply": {lc: func(_ *testing.T, lc *awsLifecycle) { lc.deploy.err = errors.New("tofu apply failed") }},
-		"account_check": {lc: func(t *testing.T, lc *awsLifecycle) {
-			lc.deploy.onRunDir = func(dir string) {
-				lc.record(deployRun)
-				require.NoError(t, os.WriteFile(filepath.Join(dir, harness.LiveStateFilename), []byte(otherAccountState), 0o600))
-			}
-		}},
-		"user_data_check": {lc: func(_ *testing.T, lc *awsLifecycle) {
-			lc.ec2["DescribeInstanceAttribute"] = `<instanceId>i-0abc</instanceId><userData><value>` +
-				base64.StdEncoding.EncodeToString([]byte("#!/bin/bash\n")) + `</value></userData>`
-		}},
-		"http_probe": {setup: orderSetup{probeFails: probeHTTP}},
-		"holdout":    {setup: orderSetup{probeFails: probeHoldout}},
+		"gate (generation)": {
+			setup: orderSetup{gateFailsOn: 1},
+			fails: FailureSummary{Stage: "iteration_1_generate", Check: "generate", Detail: "refused by the gate's fake"},
+		},
+		"gate (test)": {
+			setup: orderSetup{gateFailsOn: 2},
+			fails: FailureSummary{Stage: testStage, Check: "allow_resource_types", Detail: "refused by the gate's fake"},
+		},
+		"sts": {
+			setup: orderSetup{stsFailsOn: 2},
+			fails: FailureSummary{Stage: testStage, Check: "credentials", Detail: "AccessDenied"},
+		},
+		"stamp": {
+			lc:    func(_ *testing.T, lc *awsLifecycle) { delete(lc.params, harness.AWSStampParameter) },
+			fails: FailureSummary{Stage: testStage, Check: "stamp", Detail: harness.AWSStampParameter + " does not exist"},
+		},
+		"default vpc": {
+			lc: func(_ *testing.T, lc *awsLifecycle) {
+				lc.ec2["DescribeVpcs"] = `<vpcSet><item><vpcId>vpc-0default</vpcId><isDefault>true</isDefault></item></vpcSet>`
+			},
+			fails: FailureSummary{Stage: testStage, Check: "default_vpc", Detail: "vpc-0default is the region's default VPC"},
+		},
+		"claim": {
+			lc:    func(_ *testing.T, lc *awsLifecycle) { lc.params[harness.AWSClaimParameter] = lifecycleOtherHolder },
+			fails: FailureSummary{Stage: testStage, Check: "claim", Detail: "claimed by \"" + lifecycleOtherHolder + "\""},
+		},
+		"apply": {
+			lc:    func(_ *testing.T, lc *awsLifecycle) { lc.deploy.err = errors.New("tofu apply failed") },
+			fails: FailureSummary{Stage: testStage, Detail: "tofu apply failed"},
+		},
+		"account_check": {
+			lc: func(t *testing.T, lc *awsLifecycle) {
+				lc.deploy.onRunDir = func(dir string) {
+					lc.record(deployRun)
+					require.NoError(t, os.WriteFile(filepath.Join(dir, harness.LiveStateFilename), []byte(otherAccountState), 0o600))
+				}
+			},
+			fails: FailureSummary{Stage: testStage, Check: "account_check", Detail: `in account "999999999999"`},
+		},
+		"user_data_check": {
+			lc: func(_ *testing.T, lc *awsLifecycle) {
+				lc.ec2["DescribeInstanceAttribute"] = `<instanceId>i-0abc</instanceId><userData><value>` +
+					base64.StdEncoding.EncodeToString([]byte("#!/bin/bash\n")) + `</value></userData>`
+			},
+			fails: FailureSummary{Stage: testStage, Check: "user_data_check", Detail: "does not run the rendered user data"},
+		},
+		"http_probe": {
+			setup: orderSetup{probeFails: probeHTTP},
+			fails: FailureSummary{Stage: testStage, Check: "real_probe", Detail: probeHTTP + " failed"},
+		},
+		"holdout": {
+			setup: orderSetup{probeFails: probeHoldout},
+			fails: FailureSummary{Stage: testStage, Check: "holdout", Detail: probeHoldout + " failed"},
+		},
 	}
 	applyAt := slices.IndexFunc(orderForward, func(s orderStage) bool { return s.name == "apply" })
 	for k, stage := range orderForward {
@@ -301,14 +341,10 @@ func TestAWSRunEndsAtTheLayer3StageThatFails(t *testing.T) {
 					assert.Equal(t, countOf(reached, other.call), countOf(in, other.call),
 						"%s when %s fails: %q", other.name, stage.name, calls)
 				}
-				if stage.call == "" || stage.call == userDataRead {
-					assert.True(t, slices.ContainsFunc(run.result.Failures, func(f FailureSummary) bool { return f.Check == stage.name }),
-						"the run fails on %s: %+v", stage.name, run.result.Failures)
-				}
-				if stage.name == "gate (generation)" {
-					assert.Contains(t, run.result.Stages, StageSummary{Layer: "run", Stage: "iteration_1_generate", Status: StageStatusFail})
-					assert.Contains(t, run.output, "refused by the gate's fake")
-				}
+				want := row.fails
+				assert.True(t, slices.ContainsFunc(run.result.Failures, func(f FailureSummary) bool {
+					return f.Stage == want.Stage && f.Check == want.Check && strings.Contains(f.Detail, want.Detail)
+				}), "the run fails on %s with %+v: %+v", stage.name, want, run.result.Failures)
 				if k < applyAt {
 					return
 				}
