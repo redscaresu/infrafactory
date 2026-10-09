@@ -39,6 +39,16 @@ var (
 	ErrAWSClaimOutcomeUnknown = errors.New("the aws Layer 3 claim's outcome is unknown")
 )
 
+// AWSScopeClaimedError is ErrAWSScopeClaimed naming the holder, for a
+// caller that names it in a command.
+type AWSScopeClaimedError struct{ Holder string }
+
+func (e *AWSScopeClaimedError) Error() string {
+	return fmt.Sprintf("%v by %q", ErrAWSScopeClaimed, e.Holder)
+}
+
+func (e *AWSScopeClaimedError) Unwrap() error { return ErrAWSScopeClaimed }
+
 // awsClaimHolderRe is <run id>@<host>:<pid>. A holder goes into a command
 // the operator pastes, so nothing else is accepted.
 var awsClaimHolderRe = regexp.MustCompile(`^[A-Za-z0-9._+-]+@[A-Za-z0-9.-]+:[0-9]+$`)
@@ -105,7 +115,7 @@ func takeAWSClaim(ctx context.Context, client *ssm.Client, holder string) error 
 	case found && value == holder:
 		return nil
 	case found:
-		return fmt.Errorf("%w by %q", ErrAWSScopeClaimed, value)
+		return &AWSScopeClaimedError{Holder: value}
 	}
 	return fmt.Errorf("aws scope claim: ssm:PutParameter %s failed and no claim is stored: %w", AWSClaimParameter, putErr)
 }

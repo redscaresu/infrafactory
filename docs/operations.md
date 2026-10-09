@@ -360,9 +360,13 @@ What a failure prints: once the claim is taken, any ending short of a clean swee
 and adds stage `aws_scope_claim_kept`, whose detail names the reap command that takes the claim
 over, `infrafactory reap scenarios/training/aws-web-live.yaml --take-over <holder>` (with your
 `--config` added when you passed one, and the run's holder in place of `<holder>`). That command
-destroys what is left and releases the claim; nothing else does. Plain reap refuses a held claim.
-Ctrl-C prints both forms, because the run cannot tell at that point whether its sweep released the
-claim: the `--take-over` one if the claim is still held, plain reap if it was released.
+destroys what is left and releases the claim; nothing else does. Plain reap refuses a held claim,
+and `--take-over` refuses a claim its holder does not hold, so the run names only the form that
+works. When it cannot tell whether it holds the claim (a claim put or claim read whose outcome is
+unknown), it names both: `--take-over` if the run holds the claim, plain reap if no one does.
+Ctrl-C prints the same choice: `--take-over` while the run keeps the claim, plain reap once its
+sweep released it, both when the claim's state is unknown, and, when another run holds the claim,
+that holder and the `--take-over` naming it, to use once that run has ended.
 
 The first real AMI resolve is denied: the key's policy, `docs/layer3/aws/iam-policy.json`, does
 not yet grant ssm:GetParameter on the AL2023 public parameter, nor any action the apply needs.

@@ -454,7 +454,7 @@ func runRunWithNotify(
 	// held and nothing else says so. Other clouds run unguarded, as before.
 	var loopErr error
 	if cloud == layer3AWS {
-		loopErr = withSandboxInterruptGuard(cmd, runtime, cloud, controls.AWSClaimHolder, notify, iterate)
+		loopErr = withSandboxInterruptGuard(cmd, runtime, cloud, notify, iterate)
 	} else {
 		loopErr = iterate(cmd.Context())
 	}
@@ -836,7 +836,7 @@ func runRunWithNotify(
 		if cloud == layer3AWS {
 			// Guarded like the loop: an interrupt during this destroy must
 			// still name reap, and still reach the result below.
-			_ = withSandboxInterruptGuard(cmd, runtime, cloud, controls.AWSClaimHolder, notify, func(ctx context.Context) error {
+			_ = withSandboxInterruptGuard(cmd, runtime, cloud, notify, func(ctx context.Context) error {
 				awsStages, awsFailures := awsRunFailureTeardown(ctx, runtime, allStages, controls.AWSClaimHolder)
 				allStages = append(allStages, awsStages...)
 				allFailures = append(allFailures, awsFailures...)
@@ -1761,13 +1761,18 @@ func awsRunFailureTeardown(ctx context.Context, runtime *CommandRuntime, stages 
 	}
 	env, err := awsCommandEnvForAccount(runtime, runtime.Config.AWS.AccountID)
 	if err != nil {
-		return awsScopeClaimKept(runtime, nil, nil, holder, err.Error())
+		return awsScopeClaimKept(runtime, nil, nil, err.Error())
 	}
 	current, held, err := harness.ReadAWSClaimHolder(ctx, env, runtime.Deps.AWSSSM, "")
 	if err != nil {
-		return awsScopeClaimKept(runtime, nil, nil, holder, err.Error())
+		runtime.awsClaim = awsClaim{holder: holder, state: awsClaimUnknown}
+		return awsScopeClaimKept(runtime, nil, nil, err.Error())
 	}
 	if !held || current != holder {
+		runtime.awsClaim = awsClaim{holder: holder}
+		if held {
+			runtime.awsClaim = awsClaim{holder: holder, state: awsClaimHeldByOther, other: current}
+		}
 		return []StageSummary{{Layer: "sandbox_deploy", Stage: "auto_destroy", Status: StageStatusSkip,
 			Detail: fmt.Sprintf("the aws scope's claim is not held by this run (%s), so it tears nothing down", holder)}}, nil
 	}

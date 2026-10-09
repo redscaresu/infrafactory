@@ -75,7 +75,7 @@ func runTestWithNotify(
 	// The guard only engages when Layer 3 is on. Interrupting a
 	// mock-only run costs nothing; interrupting one that has already
 	// applied to real Scaleway leaves billable resources behind.
-	return withSandboxInterruptGuard(cmd, runtime, cloud, holder, notify, func(ctx context.Context) error {
+	return withSandboxInterruptGuard(cmd, runtime, cloud, notify, func(ctx context.Context) error {
 		result, err := executeTest(ctx, runtime, args[0], testExecutionOptions{
 			MockDeployMode:  harness.MockDeployModeClean,
 			SkipDestroy:     noDestroy,

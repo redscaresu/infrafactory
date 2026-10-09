@@ -188,6 +188,26 @@ func TestAWSRunFailureArmLeavesAnotherHoldersClaimAlone(t *testing.T) {
 	assert.Equal(t, lifecycleOtherHolder, holder)
 }
 
+// The arm cannot read the claim, so it cannot tell whether this run still
+// holds it: it names both reaps, each with the case it fits.
+func TestAWSRunFailureArmNamesBothReapsWhenTheClaimIsUnreadable(t *testing.T) {
+	lc := newAWSLifecycle(t)
+	dirtySweep(lc)
+
+	run := runAWSRun(t, lc, awsRunOptions{repairs: 1, loopEnded: func() {
+		lc.mu.Lock()
+		defer lc.mu.Unlock()
+		lc.denied[getClaim] = true
+	}})
+
+	require.Error(t, run.err)
+	assert.Equal(t, []string{getClaim}, run.armCalls, "the arm only tries to read the claim")
+	details := run.output
+	assert.Contains(t, details, "may still hold the aws scope's claim for "+lc.runHolder)
+	assert.Contains(t, details, "If this run holds the claim, `"+lc.takeOver(run.h.ConfigPath, run.h.ScenarioPath)+"` sweeps the scope")
+	assert.Contains(t, details, "if no one holds it, `"+reapCommand(run.h.ConfigPath, run.h.ScenarioPath)+"` does")
+}
+
 func TestAWSRunEndsWhenAnIterationKeepsTheClaimForADirtySweep(t *testing.T) {
 	for name, tc := range map[string]struct {
 		loopEnded func(lc *awsLifecycle)
@@ -282,7 +302,7 @@ func TestAWSRunInterruptedDuringTheFailureArmPrintsTheReapCommand(t *testing.T) 
 	assert.Empty(t, writesIn(run.armCalls), "nothing released")
 	_, held := lc.claim()
 	assert.True(t, held, "the claim is kept")
-	assertInterruptNamesBothReaps(t, lc, run.output, run.h.ConfigPath, run.h.ScenarioPath)
+	assertInterruptNamesTheReap(t, lc, run.output, run.h.ConfigPath, run.h.ScenarioPath, awsClaimHeld)
 	assert.True(t, slices.ContainsFunc(run.result.Stages, isStage(StageAWSScopeClaimKept)))
 }
 
@@ -292,9 +312,10 @@ func TestInterruptedAWSRunPrintsTheReapCommand(t *testing.T) {
 	for name, tc := range map[string]struct {
 		dirty bool
 		want  string
+		state awsClaimState
 	}{
-		"dirty scope": {dirty: true, want: terminalReasonAWSScopeClaimKept},
-		"clean scope": {want: "interrupted"},
+		"dirty scope": {dirty: true, want: terminalReasonAWSScopeClaimKept, state: awsClaimHeld},
+		"clean scope": {want: "interrupted", state: awsClaimNotHeld},
 	} {
 		t.Run(name, func(t *testing.T) {
 			lc := newAWSLifecycle(t)
@@ -313,7 +334,7 @@ func TestInterruptedAWSRunPrintsTheReapCommand(t *testing.T) {
 			require.Error(t, run.err)
 			assert.Equal(t, 1, run.generates, "generate")
 			assert.Equal(t, tc.want, run.terminalReason())
-			assertInterruptNamesBothReaps(t, lc, run.output, run.h.ConfigPath, run.h.ScenarioPath)
+			assertInterruptNamesTheReap(t, lc, run.output, run.h.ConfigPath, run.h.ScenarioPath, tc.state)
 			assert.NotContains(t, run.output, "nothing to clean up")
 			lc.scw.assertUntouched(t)
 		})

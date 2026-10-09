@@ -161,9 +161,12 @@ type CommandRuntime struct {
 	// it. The AWS gate refuses while it is zero.
 	AWSLayer3AMIRoot harness.AWSAMIRoot
 
-	scenarioLoader     func(string) (scenario.Scenario, error)
-	loadedScenario     *scenario.Scenario
-	scenarioPath       string
+	scenarioLoader func(string) (scenario.Scenario, error)
+	loadedScenario *scenario.Scenario
+	scenarioPath   string
+	// awsClaim is what this process knows of the aws scope's claim, for
+	// the reap command a kept claim or an interrupt names.
+	awsClaim           awsClaim
 	outputDir          string
 	runstoreRoot       string
 	livestoreRoot      string
