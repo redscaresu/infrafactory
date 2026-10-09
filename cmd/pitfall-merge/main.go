@@ -23,12 +23,15 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/redscaresu/infrafactory/internal/config"
 	"github.com/redscaresu/infrafactory/internal/generator"
 	"gopkg.in/yaml.v3"
 )
@@ -44,7 +47,12 @@ func main() {
 	// on the floor would make the corpus untrustworthy in exactly the way
 	// the reporting was meant to fix.
 	keepFlag := flag.String("keep", "avoid,live", "comma-separated source values to preserve from post")
+	configFile := flag.String("config", config.DefaultPath, "infrafactory config whose aws.account_id is scrubbed (a missing file scrubs ARN account fields only)")
 	flag.Parse()
+
+	if err := registerScrubbedAccounts(*configFile); err != nil {
+		die("read config: %v", err)
+	}
 
 	if *preFile == "" || *postFile == "" || *outFile == "" {
 		fmt.Fprintln(os.Stderr, "usage: pitfall-merge --pre PRE --post POST --out OUT [--keep SOURCES]")
@@ -220,6 +228,8 @@ func mergeKey(p generator.PitfallEntry) string {
 	return p.Resource + "\x00" + identity + "\x00" + p.Source
 }
 
+// loadPitfalls scrubs on load, so mergeKey keys on the published form
+// and a raw legacy entry and its scrubbed copy collapse into one.
 func loadPitfalls(path string) (generator.PitfallsFile, error) {
 	var pf generator.PitfallsFile
 	body, err := os.ReadFile(path)
@@ -229,11 +239,28 @@ func loadPitfalls(path string) (generator.PitfallsFile, error) {
 	if err := yaml.Unmarshal(body, &pf); err != nil {
 		return pf, err
 	}
+	generator.ScrubStrings(&pf)
 	return pf, nil
 }
 
 func savePitfalls(path string, pf generator.PitfallsFile) error {
-	return generator.WritePitfalls(path, &pf)
+	_, err := generator.WritePitfalls(path, &pf)
+	return err
+}
+
+// registerScrubbedAccounts registers the config's account for the
+// writer's scrub. A missing config is not an error: the sweep may run
+// without one, and ARN account fields are scrubbed regardless.
+func registerScrubbedAccounts(path string) error {
+	cfg, err := config.Load(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	generator.RegisterScrubbedAccounts(cfg.AWS.AccountID)
+	return nil
 }
 
 func sortedKeys(m map[string]bool) []string {

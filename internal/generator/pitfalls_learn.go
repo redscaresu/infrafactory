@@ -1,10 +1,10 @@
 package generator
 
 import (
-	"encoding/base64"
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
 	"time"
@@ -202,7 +202,9 @@ func AppendMockGap(docsDir string, gap MockGap) error {
 	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("read mock-gaps: %w", err)
 	}
-	content := string(existing)
+	// Scrubbed before the dedup, so a raw legacy row and a scrubbed new
+	// one key the same and never both land.
+	content := ScrubAccountIDs(string(existing))
 
 	// Dedup: same (cloud, signal, resource) triple already recorded?
 	// Markdown row format includes these three columns; substring
@@ -212,8 +214,11 @@ func AppendMockGap(docsDir string, gap MockGap) error {
 	if gap.Resource == "" {
 		dedupKey = fmt.Sprintf("| _(none)_ | `%s` |", gap.Signal)
 	}
-	// The file is stored scrubbed; compare in that form.
 	if strings.Contains(content, ScrubAccountIDs(dedupKey)) {
+		// Already recorded; still rewrite a raw legacy file scrubbed.
+		if content != string(existing) {
+			return os.WriteFile(path, []byte(content), 0o644)
+		}
 		return nil
 	}
 
@@ -856,7 +861,7 @@ func AppendPitfall(pitfallsDir, cloud string, pitfall LearnedPitfall) error {
 	if pitfallsDir == "" || cloud == "" {
 		return nil
 	}
-	pitfall = pitfall.scrubbed()
+	ScrubStrings(&pitfall)
 
 	ledger, ledgerErr := ReadAvoidLedger(pitfallsDir, cloud)
 	var hits []retiredHit
@@ -894,6 +899,9 @@ func appendPitfall(pitfallsDir, cloud string, pitfall LearnedPitfall, ledger *Av
 			return fmt.Errorf("parse pitfalls file: %w", err)
 		}
 	}
+	// Scrubbed before the dedup, so a raw legacy entry and its scrubbed
+	// candidate compare equal.
+	ScrubStrings(&pf)
 
 	// Deduplication: check if a similar pitfall already exists.
 	if isDuplicate(pf.Pitfalls, pitfall) {
@@ -931,15 +939,24 @@ func appendPitfall(pitfallsDir, cloud string, pitfall LearnedPitfall, ledger *Av
 }
 
 // WritePitfalls writes pf to path through writePitfallsFile (atomic,
-// account ids scrubbed), for writers outside this package.
-func WritePitfalls(path string, pf *PitfallsFile) error {
-	return writePitfallsFile(filepath.Dir(path), path, strings.TrimSuffix(filepath.Base(path), ".yaml"), pf)
+// account ids scrubbed), for writers outside this package. It returns how
+// many strings the scrub changed, so a caller can say the file differs
+// from what it was handed.
+func WritePitfalls(path string, pf *PitfallsFile) (int, error) {
+	scrubbed := ScrubStrings(pf)
+	return scrubbed, writePitfallsFile(filepath.Dir(path), path, strings.TrimSuffix(filepath.Base(path), ".yaml"), pf)
 }
 
 // writePitfallsFile marshals v (a pitfalls file or an avoid-check
 // ledger) and writes it atomically via a same-directory temp + rename.
 func writePitfallsFile(pitfallsDir, filePath, cloud string, v any) error {
-	out, err := marshalScrubbed(v)
+	// Scrubbed in place through the pointer; a value could not be, and
+	// writing it unscrubbed would publish the account.
+	if reflect.ValueOf(v).Kind() != reflect.Pointer {
+		return fmt.Errorf("write pitfalls: need a pointer to scrub, got %T", v)
+	}
+	ScrubStrings(v)
+	out, err := yaml.Marshal(v)
 	if err != nil {
 		return fmt.Errorf("marshal pitfalls: %w", err)
 	}
@@ -984,99 +1001,6 @@ func writePitfallsFile(pitfallsDir, filePath, cloud string, v any) error {
 	return nil
 }
 
-// marshalScrubbed marshals v with the account ids scrubbed from every
-// string value. It scrubs decoded values, not the YAML text: an escaped
-// string can put a digit against the id ("\0123456789012"), and a text
-// scrub would read that as 13 digits and leave it.
-func marshalScrubbed(v any) ([]byte, error) {
-	var doc yaml.Node
-	if err := doc.Encode(v); err != nil {
-		return nil, err
-	}
-	if err := scrubStringScalars(&doc, avoidEvidencePointers(v, &doc)); err != nil {
-		return nil, err
-	}
-	return yaml.Marshal(&doc)
-}
-
-// avoidEvidencePointers returns the avoid ledger's records[].layer_evidence
-// and records[].check.{from,id,shape_sha256} nodes. They name run
-// artifacts and shapes/<id> rather than quote failure text, and scrubbing
-// one would break the pointer. Any
-// other document, or any other field, is scrubbed whatever its name.
-func avoidEvidencePointers(v any, doc *yaml.Node) map[*yaml.Node]bool {
-	skip := map[*yaml.Node]bool{}
-	switch v.(type) {
-	case *AvoidLedger, AvoidLedger:
-	default:
-		return skip
-	}
-	root := doc
-	if root.Kind == yaml.DocumentNode && len(root.Content) == 1 {
-		root = root.Content[0]
-	}
-	records := mappingValue(root, "records")
-	if records == nil {
-		return skip
-	}
-	for _, rec := range records.Content {
-		if n := mappingValue(rec, "layer_evidence"); n != nil {
-			skip[n] = true
-		}
-		check := mappingValue(rec, "check")
-		for _, key := range []string{"from", "id", "shape_sha256"} {
-			if n := mappingValue(check, key); n != nil {
-				skip[n] = true
-			}
-		}
-	}
-	return skip
-}
-
-func mappingValue(n *yaml.Node, key string) *yaml.Node {
-	if n == nil || n.Kind != yaml.MappingNode {
-		return nil
-	}
-	for i := 0; i+1 < len(n.Content); i += 2 {
-		if n.Content[i].Value == key {
-			return n.Content[i+1]
-		}
-	}
-	return nil
-}
-
-func scrubStringScalars(n *yaml.Node, skip map[*yaml.Node]bool) error {
-	if skip[n] {
-		return nil
-	}
-	if n.Kind == yaml.ScalarNode {
-		return scrubScalar(n)
-	}
-	for _, child := range n.Content {
-		if err := scrubStringScalars(child, skip); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// scrubScalar scrubs a string scalar. yaml.v3 writes a string that is not
-// valid UTF-8 as base64 !!binary, so that is decoded, scrubbed and
-// re-encoded; skipping it would publish the id.
-func scrubScalar(n *yaml.Node) error {
-	switch n.ShortTag() {
-	case "!!str":
-		n.Value = ScrubAccountIDs(n.Value)
-	case "!!binary":
-		raw, err := base64.StdEncoding.DecodeString(strings.Join(strings.Fields(n.Value), ""))
-		if err != nil {
-			return fmt.Errorf("decode binary scalar: %w", err)
-		}
-		n.Value = base64.StdEncoding.EncodeToString([]byte(ScrubAccountIDs(string(raw))))
-	}
-	return nil
-}
-
 const (
 	maxGapDetailBytes       = 240
 	maxDescriptiveRuleBytes = 300
@@ -1090,15 +1014,6 @@ func ellipsize(s string, max int) string {
 		return s
 	}
 	return CutText(s, max-len(ellipsis)) + ellipsis
-}
-
-// scrubbed returns p with the account ids scrubbed, so a candidate is
-// compared and stored in the form the writer publishes.
-func (p LearnedPitfall) scrubbed() LearnedPitfall {
-	p.Resource = ScrubAccountIDs(p.Resource)
-	p.Rule = ScrubAccountIDs(p.Rule)
-	p.DiscoveredFrom = ScrubAccountIDs(p.DiscoveredFrom)
-	return p
 }
 
 // isVerbatimFallback returns true if a rule is a raw terraform stderr

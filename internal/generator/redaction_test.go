@@ -3,7 +3,6 @@ package generator
 import (
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -33,42 +32,69 @@ func TestRedactTransportDetail(t *testing.T) {
 	}
 }
 
+// testAccountID is the account TestMain registers, as a command
+// registers aws.account_id from its config.
+const testAccountID = "123456789012"
+
 // accountIDLeak is the shape a real AccessDenied gives a learned rule.
 const accountIDLeak = "User arn:aws:iam::123456789012:user/x is not authorized to perform iam:CreateRole in account 123456789012"
 
-var twelveDigitRun = regexp.MustCompile(`[0-9]{12}`)
+func TestMain(m *testing.M) {
+	RegisterScrubbedAccounts(testAccountID)
+	os.Exit(m.Run())
+}
 
 func TestScrubAccountIDs(t *testing.T) {
 	t.Parallel()
 
+	known := knownAccountsPattern([]string{testAccountID})
 	for in, want := range map[string]string{
 		"arn:aws:iam::123456789012:user/x":           "arn:aws:iam::ACCOUNT_ID:user/x",
 		"account 123456789012":                       "account ACCOUNT_ID",
 		"role_123456789012 123456789012.dkr.ecr.aws": "role_ACCOUNT_ID ACCOUNT_ID.dkr.ecr.aws",
-		"thirteen 1234567890123":                     "thirteen 1234567890123",
-		"eleven 12345678901":                         "eleven 12345678901",
-		"cloudtrail123456789012":                     "cloudtrailACCOUNT_ID",
-		"AccountId123456789012.":                     "AccountIdACCOUNT_ID.",
-		"digest ab123456789012cd":                    "digest ab123456789012cd",
-		"snap-0a123456789012bcd":                     "snap-0a123456789012bcd",
 		"console 1234-5678-9012.":                    "console ACCOUNT_ID.",
 		"console 1234 5678 9012":                     "console ACCOUNT_ID",
-		"longer 1234-5678-90123":                     "longer 1234-5678-90123",
-		"thirteen x1234567890123y":                   "thirteen x1234567890123y",
-		"eleven x12345678901y":                       "eleven x12345678901y",
-		"id 550e8400-e29b-41d4-a716-446655440000":    "id 550e8400-e29b-41d4-a716-446655440000",
-		"bucket logs-123456789012-eu":                "bucket logs-ACCOUNT_ID-eu",
+		"bucket abcd123456789012":                    "bucket abcdACCOUNT_ID",
+		"cloudtrail123456789012":                     "cloudtrailACCOUNT_ID",
+		"9123456789012":                              "9ACCOUNT_ID",
+		"123456789012123456789012":                   "ACCOUNT_IDACCOUNT_ID",
+		"1234-5678-9012 1234-5678-9012":              "ACCOUNT_ID ACCOUNT_ID",
 		"\xffarn:aws:iam::123456789012:":             "\xffarn:aws:iam::ACCOUNT_ID:",
+		// Any ARN's account field, registered or not.
+		"arn:aws:sts::987654321098:assumed-role/x": "arn:aws:sts::ACCOUNT_ID:assumed-role/x",
+		"arn:aws-us-gov:iam::987654321098:root":    "arn:aws-us-gov:iam::ACCOUNT_ID:root",
+		"arn:aws:iam::987654321098":                "arn:aws:iam::ACCOUNT_ID",
 	} {
-		assert.Equal(t, want, ScrubAccountIDs(in), in)
+		assert.Equal(t, want, scrubWith(in, known), in)
 	}
+}
+
+// Nothing but a registered id or an ARN account field is touched: the
+// heuristic this replaced ate digests, resource ids and port lists.
+func TestScrubAccountIDsLeavesOtherDigits(t *testing.T) {
+	t.Parallel()
+
+	known := knownAccountsPattern([]string{"111122223333"})
+	digest := "ab3f123456789012c" + strings.Repeat("e", 47)
+	for _, in := range []string{
+		"sha256 " + digest,
+		"snap-0a123456789012bcd",
+		"ports 8080 8443 9090",
+		"bytes 107374182400",
+		"id 550e8400-e29b-41d4-a716-446655440000",
+		"arn:aws:s3:::logs-987654321098",
+		"arn:aws:iam::9876543210987:root",
+	} {
+		assert.Equal(t, in, scrubWith(in, known), in)
+	}
+	assert.Equal(t, "account 123456789012", scrubWith("account 123456789012", nil), "nothing registered scrubs nothing outside an ARN")
 }
 
 func assertAccountIDsScrubbed(t *testing.T, path string, wantPlaceholders int) {
 	t.Helper()
 	body, err := os.ReadFile(path)
 	require.NoError(t, err)
-	assert.False(t, twelveDigitRun.Match(body), "12-digit run in %s:\n%s", path, body)
+	assert.NotContains(t, string(body), testAccountID, path)
 	assert.Equal(t, wantPlaceholders, strings.Count(string(body), "ACCOUNT_ID"), string(body))
 }
 
@@ -162,44 +188,22 @@ func TestTruncatedFailureTextKeepsNoAccountIDDigits(t *testing.T) {
 	assert.NotContains(t, string(body), "123456")
 }
 
-// yaml.v3 writes a string that is not valid UTF-8 as base64 !!binary,
-// where a scrub of !!str scalars never looks.
+// yaml.v3 writes a string that is not valid UTF-8 as base64 !!binary; the
+// scrub runs on the Go strings first, so the encoding cannot hide an id.
 func TestPitfallWriteScrubsInvalidUTF8Rule(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	// Through the writer, not AppendPitfall: that scrubs the candidate
-	// first and would hide a writer that skips !!binary.
-	require.NoError(t, WritePitfalls(filepath.Join(dir, "aws.yaml"), &PitfallsFile{Provider: "aws", Pitfalls: []PitfallEntry{
+	scrubbed, err := WritePitfalls(filepath.Join(dir, "aws.yaml"), &PitfallsFile{Provider: "aws", Pitfalls: []PitfallEntry{
 		{Resource: "aws_iam_role", Rule: "\xff " + accountIDLeak, Source: "static"},
-	}}))
+	}})
+	require.NoError(t, err)
+	assert.Equal(t, 1, scrubbed)
 	entries, err := LoadPitfallEntries(dir, "aws")
 	require.NoError(t, err)
 	require.Len(t, entries, 1)
 	assert.NotContains(t, entries[0].Rule, "123456789012")
 	assert.Equal(t, 2, strings.Count(entries[0].Rule, accountIDPlaceholder))
-}
-
-// Evidence pointers name run artifacts; scrubbing one breaks the pointer.
-func TestAvoidLedgerKeepsEvidencePointers(t *testing.T) {
-	t.Parallel()
-
-	const pointer = "runs/20261009-123456789012/run.json"
-	dir := t.TempDir()
-	require.NoError(t, appendAvoidLedgerRecord(dir, "aws", &AvoidLedger{Provider: "aws"}, AvoidLedgerRecord{
-		Status: AvoidRecordRelearned, Resource: "aws_iam_role", Attributes: []string{"name"},
-		LearnedLayer: "live", LayerEvidence: pointer, Rule: accountIDLeak, At: "2026-10-09T00:00:00Z",
-		Check: &AvoidCheck{ID: "c1", At: "2026-10-09T00:00:00Z", From: pointer, Detail: accountIDLeak},
-	}))
-	ledger, err := ReadAvoidLedger(dir, "aws")
-	require.NoError(t, err)
-	require.Len(t, ledger.Records, 1)
-	rec := ledger.Records[0]
-	assert.Equal(t, pointer, rec.LayerEvidence)
-	require.NotNil(t, rec.Check)
-	assert.Equal(t, pointer, rec.Check.From)
-	assert.NotContains(t, rec.Rule, "123456789012")
-	assert.NotContains(t, rec.Check.Detail, "123456789012")
 }
 
 // A byte cut inside a multi-byte rune leaves invalid UTF-8.
@@ -242,28 +246,14 @@ func TestGapRowsScrubEveryColumn(t *testing.T) {
 	assertAccountIDsScrubbed(t, filepath.Join(dir, "mock-gaps.md"), 3)
 }
 
-// The evidence-pointer exemption is the avoid ledger's alone: a field
-// named `from` anywhere else is failure text like any other.
-func TestEvidencePointerExemptionIsLedgerOnly(t *testing.T) {
-	t.Parallel()
-
-	out, err := marshalScrubbed(struct {
-		From          string `yaml:"from"`
-		LayerEvidence string `yaml:"layer_evidence"`
-	}{From: accountIDLeak, LayerEvidence: accountIDLeak})
-	require.NoError(t, err)
-	assert.False(t, twelveDigitRun.Match(out), string(out))
-}
-
-// The ledger's shape_sha256 and id name shapes/<id>; a digest that holds
-// a 12-digit run by chance must survive byte for byte.
+// A digest or check id that holds a 12-digit run by chance is not an
+// account and survives a ledger write byte for byte.
 func TestAvoidLedgerKeepsShapeDigest(t *testing.T) {
 	t.Parallel()
 
-	digest := "ab3f123456789012c" + strings.Repeat("e", 47)
-	// Not hex, so only the explicit exemption keeps it.
-	const checkID = "20261009T120000Z-aws_iam_role-123456789012"
+	digest := "ab3f987654321098c" + strings.Repeat("e", 47)
 	require.Len(t, digest, 64)
+	const checkID = "20261009T120000Z-aws_iam_role-987654321098"
 	dir := t.TempDir()
 	require.NoError(t, appendAvoidLedgerRecord(dir, "aws", &AvoidLedger{Provider: "aws"}, AvoidLedgerRecord{
 		Status: AvoidRecordRelearned, Resource: "aws_iam_role", Attributes: []string{"name"},
@@ -276,23 +266,63 @@ func TestAvoidLedgerKeepsShapeDigest(t *testing.T) {
 	require.NotNil(t, ledger.Records[0].Check)
 	assert.Equal(t, digest, ledger.Records[0].Check.ShapeSHA256)
 	assert.Equal(t, checkID, ledger.Records[0].Check.ID)
-	// And as plain text, through the hex-token rule alone.
-	assert.Equal(t, "sha "+digest, ScrubAccountIDs("sha "+digest))
+	assert.NotContains(t, ledger.Records[0].Rule, testAccountID)
 }
 
-// No cut splits a digit run, plain or 4-4-4 grouped: an id at the cut is
-// whole or absent.
-func TestCutTextNeverSplitsADigitRun(t *testing.T) {
+// No cut splits the registered id (any form) or an ARN account field: it
+// is whole or absent. Other digits are cut where the cut falls.
+func TestCutTextNeverSplitsAnAccountID(t *testing.T) {
 	t.Parallel()
 
-	for _, id := range []string{"123456789012", "1234-5678-9012", "1234 5678 9012"} {
-		s := "lead " + id + " tail"
+	for _, id := range []string{testAccountID, "1234-5678-9012", "1234 5678 9012", "arn:aws:iam::987654321098"} {
+		s := "lead " + id + ":tail"
 		for n := 0; n <= len(s); n++ {
 			got := CutText(s, n)
 			assert.LessOrEqual(t, len(got), n)
-			if strings.HasPrefix(got, "lead ") && len(got) > len("lead ") {
-				assert.True(t, strings.HasPrefix(got, "lead "+id), "cut %d split %q: %q", n, id, got)
+			if strings.HasPrefix(id, "arn:") {
+				assert.True(t, len(got) <= len("lead arn:aws:iam::") || strings.HasPrefix(got, "lead "+id), "cut %d split %q: %q", n, id, got)
+				continue
 			}
+			assert.True(t, len(got) <= len("lead ") || strings.HasPrefix(got, "lead "+id), "cut %d split %q: %q", n, id, got)
 		}
 	}
+
+	ports := strings.Repeat("8080 8443 9090 ", 10)
+	for n := 0; n <= len(ports); n++ {
+		assert.Len(t, CutText(ports, n), n, "digit-heavy text is not over-cut")
+	}
+}
+
+// A raw entry written before the scrub existed keys the same as its
+// scrubbed candidate, so the two never both land.
+func TestRawLegacyEntriesDedupAgainstScrubbed(t *testing.T) {
+	t.Parallel()
+
+	t.Run("learned pitfall", func(t *testing.T) {
+		dir := t.TempDir()
+		legacy := "provider: aws\npitfalls:\n  - resource: aws_iam_role\n    rule: \"arn:aws:iam::123456789012:role/x account 123456789012\"\n    source: descriptive\n"
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "aws.yaml"), []byte(legacy), 0o644))
+		require.NoError(t, AppendPitfall(dir, "aws", LearnedPitfall{Resource: "aws_iam_role", Rule: "arn:aws:iam::123456789012:role/x account 123456789012"}))
+		entries, err := LoadPitfallEntries(dir, "aws")
+		require.NoError(t, err)
+		assert.Len(t, entries, 1)
+	})
+
+	t.Run("gap rows", func(t *testing.T) {
+		dir := t.TempDir()
+		gap := PolicyGap{Cloud: "aws", Policy: "aws.iam_scoped", Resource: "role_123456789012", Scenario: "s", Detail: "d", Timestamp: "t"}
+		require.NoError(t, AppendPolicyGap(dir, gap))
+		path := filepath.Join(dir, "policy-gaps.md")
+		body, err := os.ReadFile(path)
+		require.NoError(t, err)
+		// Put the raw id back, as a file from before the scrub would hold it.
+		raw := strings.ReplaceAll(string(body), accountIDPlaceholder, testAccountID)
+		require.NoError(t, os.WriteFile(path, []byte(raw), 0o644))
+
+		require.NoError(t, AppendPolicyGap(dir, gap))
+		body, err = os.ReadFile(path)
+		require.NoError(t, err)
+		assert.Equal(t, 1, strings.Count(string(body), "| `aws.iam_scoped` |"), string(body))
+		assert.NotContains(t, string(body), testAccountID, "the dedup hit still rewrites the legacy file scrubbed")
+	})
 }

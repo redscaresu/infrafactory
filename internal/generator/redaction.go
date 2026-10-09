@@ -1,9 +1,13 @@
 package generator
 
 import (
+	"reflect"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"unicode/utf8"
 )
 
@@ -49,56 +53,96 @@ func RedactSecretLikeText(input string) string {
 	return redactTransportDetail(input, "", nil)
 }
 
-// digitRunPattern finds the runs ScrubAccountIDs inspects. Only a digit
-// bounds a run, so an id glued to letters (`cloudtrail123456789012`, a
-// common bucket name) is still found.
-var digitRunPattern = regexp.MustCompile(`[0-9]+`)
-
-// groupedIDPattern is the console's form of an id: 1234-5678-9012, or
-// with single spaces.
-var groupedIDPattern = regexp.MustCompile(`[0-9]{4}[- ][0-9]{4}[- ][0-9]{4}`)
-
-// uuidPattern matches a UUID, whose last group can be twelve digits.
-var uuidPattern = regexp.MustCompile(`[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}`)
-
-// alnumTokenPattern and hexTokenPattern find whole hex tokens of 16+
-// characters: digests, commit shas and AWS resource ids
-// (snap-0a123456789012bcd), which hold a 12-digit run by chance.
-var (
-	alnumTokenPattern = regexp.MustCompile(`[0-9A-Za-z]+`)
-	hexTokenPattern   = regexp.MustCompile(`^[0-9a-f]{16,}$`)
-)
-
 const (
 	accountIDPlaceholder = "ACCOUNT_ID"
 	accountIDDigits      = 12
+	accountGroupDigits   = 4
 )
 
-// ScrubAccountIDs replaces every run of exactly 12 digits (not touching
-// another digit), and every 4-4-4 grouped run, with ACCOUNT_ID, the
-// placeholder iam-policy.json uses. Learned pitfalls and policy gaps copy
-// real failure text into published files, and an AWS error names the
-// account in more shapes than a list could hold, so this matches the
-// class. A UUID and a whole hex token of 16+ characters are not ids and
-// are left alone. A bare 12-digit number (a byte count) is
-// indistinguishable from an id and is scrubbed: failing closed costs a
-// number, failing open an account. It runs at the publish sinks only;
-// cuts on the way there use CutText, which never splits a digit run.
-func ScrubAccountIDs(s string) string {
-	keep := append(uuidPattern.FindAllStringIndex(s, -1), hexTokenSpans(s)...)
-	var spans [][]int
-	for _, m := range digitRunPattern.FindAllStringIndex(s, -1) {
-		if m[1]-m[0] == accountIDDigits && !insideAny(m, keep) {
-			spans = append(spans, m)
+// arnAccountPattern matches an ARN up to its account field, which is
+// group 1: arn:<partition>:<service>:<region>:<account>.
+var arnAccountPattern = regexp.MustCompile(`arn:[A-Za-z0-9-]+:[A-Za-z0-9-]+:[A-Za-z0-9-]*:([0-9]{12})`)
+
+var (
+	accountsMu          sync.Mutex
+	knownAccountIDs     []string
+	knownAccountPattern atomic.Pointer[regexp.Regexp]
+)
+
+// RegisterScrubbedAccounts adds the account ids the publish sinks scrub
+// wherever they appear, in any form. It is called once the config is
+// loaded (aws.account_id); an empty or malformed id is ignored, and ids
+// accumulate, so a later load never un-scrubs an earlier account.
+// Nothing registered means only ARN account fields are scrubbed.
+func RegisterScrubbedAccounts(ids ...string) {
+	accountsMu.Lock()
+	defer accountsMu.Unlock()
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if !isAccountID(id) || slices.Contains(knownAccountIDs, id) {
+			continue
 		}
+		knownAccountIDs = append(knownAccountIDs, id)
 	}
-	for _, m := range groupedIDPattern.FindAllStringIndex(s, -1) {
-		if !digitAt(s, m[0]-1) && !digitAt(s, m[1]) && !insideAny(m, keep) {
-			spans = append(spans, m)
+	if len(knownAccountIDs) > 0 {
+		knownAccountPattern.Store(knownAccountsPattern(knownAccountIDs))
+	}
+}
+
+func isAccountID(id string) bool {
+	return len(id) == accountIDDigits && strings.Trim(id, "0123456789") == ""
+}
+
+// knownAccountsPattern matches each id plain, in the console's 4-4-4
+// grouping with '-' or ' ', and glued to anything on either side.
+func knownAccountsPattern(ids []string) *regexp.Regexp {
+	const sep = "[- ]?"
+	alts := make([]string, len(ids))
+	for i, id := range ids {
+		alts[i] = id[:accountGroupDigits] + sep + id[accountGroupDigits:2*accountGroupDigits] + sep + id[2*accountGroupDigits:]
+	}
+	return regexp.MustCompile(strings.Join(alts, "|"))
+}
+
+// accountSpans returns the sorted, merged byte spans ScrubAccountIDs
+// replaces: every occurrence of a known id, and every ARN account field
+// (one followed by another digit is not an account and is left).
+func accountSpans(s string, known *regexp.Regexp) [][]int {
+	var spans [][]int
+	if known != nil {
+		spans = known.FindAllStringIndex(s, -1)
+	}
+	for _, m := range arnAccountPattern.FindAllStringSubmatchIndex(s, -1) {
+		if !digitAt(s, m[3]) {
+			spans = append(spans, m[2:4])
 		}
 	}
 	sort.Slice(spans, func(i, j int) bool { return spans[i][0] < spans[j][0] })
+	var merged [][]int
+	for _, sp := range spans {
+		if n := len(merged); n > 0 && sp[0] < merged[n-1][1] {
+			merged[n-1][1] = max(merged[n-1][1], sp[1])
+			continue
+		}
+		merged = append(merged, []int{sp[0], sp[1]})
+	}
+	return merged
+}
 
+// ScrubAccountIDs replaces every registered account id (any form) and the
+// account field of every ARN with ACCOUNT_ID, the placeholder
+// iam-policy.json uses. It runs at the publish sinks (pitfall and ledger
+// writers, gap writers, the pitfalls PUT); run diagnostics keep the real
+// id, and their cuts use CutText so no partial id reaches a sink.
+func ScrubAccountIDs(s string) string {
+	return scrubWith(s, knownAccountPattern.Load())
+}
+
+func scrubWith(s string, known *regexp.Regexp) string {
+	spans := accountSpans(s, known)
+	if len(spans) == 0 {
+		return s
+	}
 	var b strings.Builder
 	last := 0
 	for _, m := range spans {
@@ -110,33 +154,14 @@ func ScrubAccountIDs(s string) string {
 	return b.String()
 }
 
-func hexTokenSpans(s string) [][]int {
-	var spans [][]int
-	for _, m := range alnumTokenPattern.FindAllStringIndex(s, -1) {
-		if hexTokenPattern.MatchString(s[m[0]:m[1]]) {
-			spans = append(spans, m)
-		}
-	}
-	return spans
-}
-
 func digitAt(s string, i int) bool {
 	return i >= 0 && i < len(s) && s[i] >= '0' && s[i] <= '9'
 }
 
-func insideAny(span []int, spans [][]int) bool {
-	for _, o := range spans {
-		if span[0] >= o[0] && span[1] <= o[1] {
-			return true
-		}
-	}
-	return false
-}
-
 // CutText returns the longest prefix of s of at most n bytes that ends on
-// a rune boundary and outside any digit run (a 4-4-4 grouped run counts
-// as one). A cut inside an account id would leave a shorter run that no
-// scrub recognises, so the cut backs off to before the run instead.
+// a rune boundary and outside every span ScrubAccountIDs would replace:
+// a cut inside an account id leaves a shorter run no scrub recognises,
+// so the cut backs off to before it. Other text is cut where it falls.
 func CutText(s string, n int) string {
 	if len(s) <= n {
 		return s
@@ -145,11 +170,70 @@ func CutText(s string, n int) string {
 	for cut > 0 && !utf8.RuneStart(s[cut]) {
 		cut--
 	}
-	inRun := digitAt(s, cut) || isGroupSep(s[cut]) && digitAt(s, cut+1)
-	for inRun && cut > 0 && (digitAt(s, cut-1) || isGroupSep(s[cut-1]) && digitAt(s, cut-2)) {
-		cut--
+	for _, sp := range accountSpans(s, knownAccountPattern.Load()) {
+		if sp[0] < cut && cut < sp[1] {
+			cut = sp[0]
+		}
 	}
 	return s[:cut]
 }
 
-func isGroupSep(c byte) bool { return c == '-' || c == ' ' }
+// ScrubStrings scrubs every string reachable from v, which must be a
+// pointer, in place, and returns how many it changed. One walk covers
+// every field, so no list of fields can fall behind the types.
+func ScrubStrings(v any) int {
+	return scrubValue(reflect.ValueOf(v))
+}
+
+func scrubValue(v reflect.Value) int {
+	switch v.Kind() {
+	case reflect.Pointer:
+		if v.IsNil() {
+			return 0
+		}
+		return scrubValue(v.Elem())
+	case reflect.Interface:
+		if v.IsNil() || !v.CanSet() {
+			return 0
+		}
+		return scrubCopy(v.Elem(), v.Set)
+	case reflect.Struct:
+		n := 0
+		for i := 0; i < v.NumField(); i++ {
+			n += scrubValue(v.Field(i))
+		}
+		return n
+	case reflect.Slice, reflect.Array:
+		n := 0
+		for i := 0; i < v.Len(); i++ {
+			n += scrubValue(v.Index(i))
+		}
+		return n
+	case reflect.Map:
+		n := 0
+		for _, k := range v.MapKeys() {
+			n += scrubCopy(v.MapIndex(k), func(e reflect.Value) { v.SetMapIndex(k, e) })
+		}
+		return n
+	case reflect.String:
+		if !v.CanSet() {
+			return 0
+		}
+		if scrubbed := ScrubAccountIDs(v.String()); scrubbed != v.String() {
+			v.SetString(scrubbed)
+			return 1
+		}
+	}
+	return 0
+}
+
+// scrubCopy scrubs an unaddressable value through an addressable copy.
+func scrubCopy(e reflect.Value, set func(reflect.Value)) int {
+	c := reflect.New(e.Type()).Elem()
+	c.Set(e)
+	n := scrubValue(c)
+	if n > 0 {
+		set(c)
+	}
+	return n
+}

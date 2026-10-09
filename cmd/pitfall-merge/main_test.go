@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 
 	"github.com/stretchr/testify/assert"
@@ -328,4 +329,32 @@ func TestSavePitfallsScrubsAccountIDs(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, got.Pitfalls, 1)
 	assert.Equal(t, "arn:aws:iam::ACCOUNT_ID:role/x", got.Pitfalls[0].Rule)
+}
+
+// A raw legacy entry in pre and its scrubbed copy in post key the same,
+// so the merge keeps one, not both.
+func TestMergeCollapsesRawAndScrubbedCopies(t *testing.T) {
+	dir := t.TempDir()
+	prePath := filepath.Join(dir, "pre.yaml")
+	raw := "provider: aws\npitfalls:\n  - resource: aws_iam_role\n    rule: \"arn:aws:iam::123456789012:role/x\"\n    source: avoid\n"
+	require.NoError(t, os.WriteFile(prePath, []byte(raw), 0o644))
+	postPath := filepath.Join(dir, "post.yaml")
+	require.NoError(t, savePitfalls(postPath, generator.PitfallsFile{Provider: "aws", Pitfalls: []generator.PitfallEntry{
+		mk("aws_iam_role", "arn:aws:iam::123456789012:role/x", "avoid"),
+	}}))
+
+	pre, err := loadPitfalls(prePath)
+	require.NoError(t, err)
+	post, err := loadPitfalls(postPath)
+	require.NoError(t, err)
+	merged, added, _, _ := merge(pre, post, map[string]bool{"avoid": true})
+	assert.Zero(t, added)
+	require.Len(t, merged.Pitfalls, 1)
+	assert.Equal(t, "arn:aws:iam::ACCOUNT_ID:role/x", merged.Pitfalls[0].Rule)
+}
+
+// The sweep may run without a config; ARN account fields are still
+// scrubbed, so a missing file is not an error.
+func TestRegisterScrubbedAccountsToleratesMissingConfig(t *testing.T) {
+	assert.NoError(t, registerScrubbedAccounts(filepath.Join(t.TempDir(), "absent.yaml")))
 }

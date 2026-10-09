@@ -5,8 +5,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/redscaresu/infrafactory/internal/config"
+	"github.com/redscaresu/infrafactory/internal/generator"
 	"github.com/redscaresu/infrafactory/internal/harness"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // The S143 run 2 canary hit a transient block-volume create error against
@@ -153,6 +157,8 @@ func TestStderrFailureDetailStripsAnsiAndTruncates(t *testing.T) {
 // is operator-facing and keeps a whole id as it is.
 func TestFailureTextCutsNeverSplitAnAccountID(t *testing.T) {
 	const id = "123456789012"
+	// As buildRuntime does from aws.account_id.
+	generator.RegisterScrubbedAccounts(id)
 	straddle := func(cut int) string {
 		return id + " " + strings.Repeat("x", cut-len(id)/2-len(id)-1) + id + strings.Repeat("y", cut)
 	}
@@ -165,4 +171,22 @@ func TestFailureTextCutsNeverSplitAnAccountID(t *testing.T) {
 		assert.Equal(t, 1, strings.Count(got, "123456"), "%s: the leading id whole, the straddling one absent", name)
 		assert.True(t, strings.HasPrefix(got, id) || strings.Contains(got, "stderr: "+id), "%s keeps the real id", name)
 	}
+}
+
+// Every command builds its runtime through buildRuntime, which registers
+// the config's account with the publish sinks' scrub.
+func TestBuildRuntimeRegistersTheConfigAccount(t *testing.T) {
+	const account = "444455556666"
+	opts := defaultRuntimeOptions()
+	opts.configLoader = func(string) (config.Config, error) {
+		cfg := config.Default()
+		cfg.AWS.AccountID = account
+		cfg.Agent.Type = generator.AgentTypeClaudeCode
+		return cfg, nil
+	}
+	cmd := &cobra.Command{Use: "test"}
+	cmd.Flags().String("config", "unused.yaml", "")
+	_, err := buildRuntime(cmd, opts)
+	require.NoError(t, err)
+	assert.Equal(t, "account ACCOUNT_ID", generator.ScrubAccountIDs("account "+account))
 }

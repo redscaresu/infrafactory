@@ -284,31 +284,18 @@ func editPitfalls(state *serverState, w http.ResponseWriter, r *http.Request, pr
 
 	// Through the generator's writer, so an edit gets the same atomic
 	// write and account-id scrub as a learned entry.
-	if err := generator.WritePitfalls(filepath.Join(dir, provider+".yaml"), &pf); err != nil {
+	scrubbed, err := generator.WritePitfalls(filepath.Join(dir, provider+".yaml"), &pf)
+	if err != nil {
 		state.writeInternalError(w, http.StatusInternalServerError, "write pitfalls", err)
 		return
 	}
 
 	// The writer scrubs account ids, so the file can differ from what was
-	// submitted; say how many entries changed rather than leave the UI
+	// submitted; say how many strings changed rather than leave the UI
 	// showing text that is not on disk.
 	writeJSON(w, http.StatusOK, map[string]any{
 		"provider": provider,
 		"count":    len(pf.Pitfalls),
-		"scrubbed": scrubbedEntries(pf.Pitfalls),
+		"scrubbed": scrubbed,
 	})
-}
-
-// scrubbedEntries counts the entries the pitfalls writer will change.
-func scrubbedEntries(entries []generator.PitfallEntry) int {
-	n := 0
-	for _, e := range entries {
-		for _, field := range []string{e.Resource, e.Rule, e.Source, e.DiscoveredFrom} {
-			if generator.ScrubAccountIDs(field) != field {
-				n++
-				break
-			}
-		}
-	}
-	return n
 }

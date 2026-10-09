@@ -201,6 +201,9 @@ func loadCloudPitfalls(pitfallsDir, cloud string) (*PitfallsFile, string, error)
 	if err := yaml.Unmarshal(payload, &pf); err != nil {
 		return nil, filePath, fmt.Errorf("parse pitfalls for %s: %w", cloud, err)
 	}
+	// Scrubbed on load, so every comparison keys on the published form
+	// and a raw legacy entry matches its scrubbed candidate.
+	ScrubStrings(&pf)
 	return &pf, filePath, nil
 }
 
@@ -243,17 +246,15 @@ func TouchLivePitfall(pitfallsDir, cloud, resource, rule string, now time.Time) 
 	if err := assertCloudName(cloud); err != nil {
 		return err
 	}
-	// Stored entries are scrubbed; compare in that form.
+	// Both sides scrubbed (loadCloudPitfalls scrubs the file), so a raw
+	// rule matches its stored, scrubbed entry.
 	resource, rule = ScrubAccountIDs(resource), ScrubAccountIDs(rule)
-	filePath := filepath.Join(pitfallsDir, cloud+".yaml")
-	payload, err := os.ReadFile(filePath)
+	pf, filePath, err := loadCloudPitfalls(pitfallsDir, cloud)
 	if err != nil {
-		return fmt.Errorf("read pitfalls for %s: %w", cloud, err)
+		return err
 	}
-
-	var pf PitfallsFile
-	if err := yaml.Unmarshal(payload, &pf); err != nil {
-		return fmt.Errorf("parse pitfalls for %s: %w", cloud, err)
+	if pf == nil {
+		return fmt.Errorf("read pitfalls for %s: %w", cloud, os.ErrNotExist)
 	}
 
 	for i, entry := range pf.Pitfalls {
@@ -261,7 +262,7 @@ func TouchLivePitfall(pitfallsDir, cloud, resource, rule string, now time.Time) 
 			continue
 		}
 		pf.Pitfalls[i].LastSeen = now.UTC().Format(time.RFC3339)
-		return writePitfallsFile(pitfallsDir, filePath, cloud, &pf)
+		return writePitfallsFile(pitfallsDir, filePath, cloud, pf)
 	}
 
 	return fmt.Errorf("no live pitfall for %s matching that rule", resource)
@@ -282,7 +283,7 @@ func TouchLivePitfall(pitfallsDir, cloud, resource, rule string, now time.Time) 
 func AppendLivePitfall(pitfallsDir, cloud, observedKey string, pitfall LearnedPitfall, now time.Time) error {
 	// Stored entries are scrubbed; a raw key naming the account would
 	// never match its own entry and append on every tick.
-	pitfall = pitfall.scrubbed()
+	ScrubStrings(&pitfall)
 	observedKey = ScrubAccountIDs(observedKey)
 	pitfall.Source = LiveSource
 	if observedKey == "" {
