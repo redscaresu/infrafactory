@@ -331,6 +331,40 @@ as the admin and `reap --take-over` again must exit 0 with only the stamp left. 
 (`lookup-events` by `Username=infrafactory-layer3`, events take 5-25 minutes to appear) shows which
 reap-table actions were sent and whether any was refused. Last run 2026-09-29, under EUR 0.20.
 
+### Running aws-web-live
+
+What it needs:
+- The key file `~/.config/infrafactory/layer3-aws.env`, mode `0600`. infrafactory reads it
+  itself; nothing is sourced into the shell.
+- A config, passed with `--config` and kept out of git, holding the `aws` block from Scope setup
+  **4. The key file** and `validation.layers.sandbox_deploy.enabled: true`. Off by default in
+  `infrafactory.yaml`; it is the only switch.
+
+What refuses, in order. Generation and the gate cost an LLM call, so the checks come in two phases:
+1. Before generation, once per command: the config fields (`aws.region`, `aws.account_id` and
+   `aws.principal_arn` set, the region a real region name), the credentials file and its mode,
+   STS answering exactly `aws.account_id` and `aws.principal_arn`, then the AMI lookup. Every one
+   of these refusals is reported as stage `aws_ami_resolve`: `test` writes it as a failure with
+   check `ami`, while `run` and `generate` only return an error prefixed `aws_ami_resolve:`. Either
+   way, read the detail to tell a config field, the key file, STS and the AMI apart. A refusal here ends the command
+   before any model call, takes no claim and leaves nothing to reap.
+2. After the gate, before apply: the credentials again (config fields, file, STS), then the stamp,
+   the absence of a default VPC and the claim, which refuses while another holder holds it and
+   names that holder. A credentials refusal fails stage `preflight`, check `credentials`, alone.
+   A stamp, default VPC or claim refusal fails stage `aws_scope_claim` with the check that refused
+   (`stamp`, `default_vpc` or `claim`) and also fails stage `preflight`, check `credentials`, whose
+   detail says the run could not confirm it holds the claim. Read the `aws_scope_claim` failure
+   first: a `preflight` failure next to it is that refusal, not a key problem.
+
+What a failure prints: once the claim is taken, any ending short of a clean sweep keeps the claim
+and adds stage `aws_scope_claim_kept`, whose detail names the reap command,
+`infrafactory reap scenarios/training/aws-web-live.yaml` (with your `--config` added when you
+passed one). That command destroys what is left and releases the claim; nothing else does.
+
+The first real AMI resolve is denied: the key's policy, `docs/layer3/aws/iam-policy.json`, does
+not yet grant ssm:GetParameter on the AL2023 public parameter, nor any action the apply needs.
+Granting them belongs to the epic aws-web-live-on-real-aws.
+
 ## Sibling mocks
 
 Three first-party HTTP-level mocks + one third-party backend live alongside infrafactory:
