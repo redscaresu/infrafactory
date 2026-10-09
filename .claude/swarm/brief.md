@@ -5,3 +5,6 @@ put `ADR: none — <reason>` on your final commit; doc hygiene reads it from the
 it in any merge commit's message. End commit messages with
 "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>" and PR bodies with
 "🤖 Generated with [Claude Code](https://claude.com/claude-code)".
+Never press GitHub's "Update branch": its merge commit has no `ADR:` trailer and fails doc
+hygiene. To catch up with the base, `git merge origin/main` locally and repeat the trailer (a
+reason of at least 10 characters) in the merge commit's message.
