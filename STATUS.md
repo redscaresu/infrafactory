@@ -12,7 +12,11 @@ account in us-east-1, every step verified; runbook in `docs/operations.md` § La
 setup), and the planted-leak proof passed on it the same day: the sweep names every leak, a held
 claim refuses reap, reap empties the account. Whole-scope ownership is recorded (ADR-0040; the
 claim-sweep-reap epic is done). The gate lift (the aws-layer3-gate epic's last story) runs the AWS
-gate on the aws path and checks account and user data after apply; next is aws-layer3-wiring-proof.
+gate on the aws path and checks account and user data after apply. aws-layer3-wiring-proof is done:
+the AMI resolve is wired (#408), the whole Layer 3 order is proven against fakes (#412), the run
+checklist is in operations.md (#410), and the one Layer 2 LLM run reached its target
+(20261009T213746Z). Next is aws-web-live-on-real-aws: its wave-1 code stories are building, and
+each real-AWS run waits on the user's go.
 
 What waits on the user is the board's **Waiting on you** view: `kind: lead` stories, which the
 lead runs once the user has done the story's **You:** line.
