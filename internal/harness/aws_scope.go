@@ -39,6 +39,8 @@ var (
 	ErrAWSClaimOutcomeUnknown = errors.New("the aws Layer 3 claim's outcome is unknown")
 	// ErrAWSPreviousClaimDeleted is a take-over whose own take failed
 	// after the previous holder's claim was deleted.
+	// ErrAWSNoClaimHeld is a release or take-over that found no claim.
+	ErrAWSNoClaimHeld          = errors.New("no claim is held")
 	ErrAWSPreviousClaimDeleted = errors.New("the previous holder's aws Layer 3 claim was deleted")
 )
 
@@ -194,7 +196,7 @@ func deleteAWSClaimHeldBy(ctx context.Context, client *ssm.Client, want string) 
 	case err != nil:
 		return fmt.Errorf("aws scope claim: %w", err)
 	case !found:
-		return fmt.Errorf("aws scope claim: refusing to delete %s: no claim is held, and %q expected to hold it", AWSClaimParameter, want)
+		return fmt.Errorf("aws scope claim: refusing to delete %s: %w, and %q expected to hold it", AWSClaimParameter, ErrAWSNoClaimHeld, want)
 	case value != want:
 		return fmt.Errorf("aws scope claim: refusing to delete %s: %w, not %q", AWSClaimParameter, &AWSScopeClaimedError{Holder: value}, want)
 	}

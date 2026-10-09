@@ -2,10 +2,13 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/redscaresu/infrafactory/internal/config"
 	"github.com/redscaresu/infrafactory/internal/feedback"
@@ -303,4 +306,59 @@ func TestInterruptGuardInertWhenLayer3Disabled(t *testing.T) {
 	if notified {
 		t.Fatal("no signal handler should be installed when Layer 3 is off")
 	}
+}
+
+func signalRuntime() *CommandRuntime {
+	rt := &CommandRuntime{}
+	rt.Config.Validation.Layers.SandboxDeploy.Enabled = true
+	return rt
+}
+
+func notifyFromParent(parent context.Context, _ ...os.Signal) (context.Context, context.CancelFunc) {
+	return context.WithCancel(parent)
+}
+
+// The first signal restores default handling while fn still runs, so a
+// second Ctrl-C during the teardown that follows ends the process.
+func TestRunUnderSignalsRestoresDefaultHandlingAtTheFirstSignal(t *testing.T) {
+	stopped := make(chan struct{})
+	var once sync.Once
+	var signal context.CancelFunc
+	notify := func(parent context.Context, _ ...os.Signal) (context.Context, context.CancelFunc) {
+		ctx, cancel := context.WithCancel(parent)
+		signal = cancel
+		return ctx, func() { cancel(); once.Do(func() { close(stopped) }) }
+	}
+
+	interrupted, err := runUnderSignals(context.Background(), signalRuntime(), notify, func(context.Context) error {
+		signal()
+		select {
+		case <-stopped:
+			return nil
+		case <-time.After(5 * time.Second):
+			return errors.New("signals were still caught after the first one")
+		}
+	})
+
+	require.NoError(t, err)
+	assert.True(t, interrupted)
+}
+
+// A parent context that ends on its own is not an interrupt, for the
+// helper and for the guard built on it.
+func TestRunUnderSignalsIgnoresAnEndedParent(t *testing.T) {
+	parent, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	interrupted, err := runUnderSignals(parent, signalRuntime(), notifyFromParent, func(context.Context) error { return nil })
+
+	require.NoError(t, err)
+	assert.False(t, interrupted)
+
+	out := &strings.Builder{}
+	cmd := guardCmd(out)
+	cmd.SetContext(parent)
+	rt := signalRuntime()
+	require.NoError(t, withSandboxInterruptGuard(cmd, rt, layer3AWS, notifyFromParent, func(context.Context) error { return nil }))
+	assert.Empty(t, out.String(), "no interrupt notice")
 }

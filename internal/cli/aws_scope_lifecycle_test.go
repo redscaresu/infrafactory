@@ -660,7 +660,7 @@ func TestAWSTestTreatsAnUnknownClaimOutcomeAsHeld(t *testing.T) {
 	assert.Zero(t, lc.count(deleteClaim), "DeleteParameter")
 	assert.True(t, run.hasStage(StageAWSScopeClaimKept))
 	details := run.failureDetails()
-	assert.Contains(t, details, "may still hold the aws scope's claim for "+lc.runHolder)
+	assert.Contains(t, details, "this run may hold the aws scope's claim for "+lc.runHolder)
 	assert.Contains(t, details, "If this run holds the claim, `"+lc.takeOver(run.h.ConfigPath, run.h.ScenarioPath)+"` sweeps the scope")
 	assert.Contains(t, details, "if no one holds it, `"+reapCommand(run.h.ConfigPath, run.h.ScenarioPath)+"` does")
 	assertNoProjectAdvice(t, run.output)

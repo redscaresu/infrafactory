@@ -77,22 +77,34 @@ func awsReapAdvice(runtime *CommandRuntime) string {
 	return fmt.Sprintf("`%s` %s", plain, does)
 }
 
+// awsClaimHead says what this process knows of the claim, for every
+// message that names a reap.
+func awsClaimHead(claim awsClaim) string {
+	switch claim.known() {
+	case awsClaimHeld:
+		return "this run keeps the aws scope's claim for " + claim.holder
+	case awsClaimHeldByOther:
+		return fmt.Sprintf("this run does not hold the aws scope's claim: %s does", claim.other)
+	case awsClaimNotHeld:
+		return "this run does not hold the aws scope's claim"
+	case awsClaimHolderUnknown:
+		return "this run may hold the aws scope's claim"
+	}
+	return "this run may hold the aws scope's claim for " + claim.holder
+}
+
 // awsInterruptNotice is what an interrupted aws command prints once its
 // teardown has settled the claim.
 func awsInterruptNotice(runtime *CommandRuntime) string {
 	claim := runtime.awsClaim
-	var head string
+	tail := ", and what it applied may still exist"
 	switch claim.known() {
-	case awsClaimHeld:
-		head = "this run keeps the aws scope's claim, and what it applied may still exist"
-	case awsClaimHeldByOther:
-		head = fmt.Sprintf("this run does not hold the aws scope's claim: %s does", claim.other)
 	case awsClaimNotHeld:
-		head = "this run does not hold the aws scope's claim: it never took it, or its sweep proved the scope empty and released it"
-	default:
-		head = "this run may hold the aws scope's claim, and what it applied may still exist"
+		tail = ": it never took it, or its sweep proved the scope empty and released it"
+	case awsClaimHeldByOther:
+		tail = ""
 	}
-	return fmt.Sprintf("\nInterrupted: %s. %s.\n", head, awsReapAdvice(runtime))
+	return fmt.Sprintf("\nInterrupted: %s%s. %s.\n", awsClaimHead(claim), tail, awsReapAdvice(runtime))
 }
 
 // awsClaimHolderFor mints this process's claim holder when it may claim
@@ -117,8 +129,11 @@ func awsClaimHolderFor(runtime *CommandRuntime, cloud layer3Cloud, runID string)
 func ensureAWSScopeClaim(ctx context.Context, runtime *CommandRuntime, holder string) (string, []StageSummary, []FailureSummary) {
 	account := runtime.Config.AWS.AccountID
 	// Not held until the take below says otherwise: every early return
-	// is before any write.
-	runtime.awsClaim = awsClaim{holder: holder, state: awsClaimNotHeld}
+	// is before any write. A claim this process already holds, from an
+	// earlier iteration of run, stays held.
+	if runtime.awsClaim.state != awsClaimHeld || runtime.awsClaim.holder != holder {
+		runtime.awsClaim = awsClaim{holder: holder, state: awsClaimNotHeld}
+	}
 	env, err := awsLayer3Env(runtime.Config.AWS)
 	if err != nil {
 		return awsScopeClaimFailed("", "credentials", err)
@@ -160,12 +175,12 @@ func awsClaimAfterTake(holder string, err error) awsClaim {
 
 // awsClaimAfterRelease is what ReleaseAWSClaim's err says of the claim. A
 // release clears the holder with the state; a failed one may have landed
-// (a lost DeleteParameter response) or found no claim, so it is unknown
-// unless it names the holder that has it.
+// (a lost DeleteParameter response), so it is unknown unless it found no
+// claim or names the holder that has it.
 func awsClaimAfterRelease(holder string, err error) awsClaim {
 	var byOther *harness.AWSScopeClaimedError
 	switch {
-	case err == nil:
+	case err == nil, errors.Is(err, harness.ErrAWSNoClaimHeld):
 		return awsClaim{state: awsClaimNotHeld}
 	case errors.As(err, &byOther):
 		return awsClaim{holder: holder, state: awsClaimHeldByOther, other: byOther.Holder}
@@ -194,10 +209,13 @@ func awsScopeTeardown(ctx context.Context, runtime *CommandRuntime, outputDir st
 		if opts.SkipDestroy {
 			reason = "--no-destroy"
 		}
+		kept := " (%s): what this run applied may still be there. %s"
+		if runtime.awsClaim.known() == awsClaimHeld {
+			kept = " on purpose (%s): what this run applied is still there. %s"
+		}
 		return []StageSummary{{
 			Layer: "sandbox_deploy", Stage: StageAWSScopeClaimKept, Status: StageStatusSkip,
-			Detail: fmt.Sprintf("kept the aws scope's claim for %s on purpose (%s): what this run applied is still there. "+
-				"%s", runtime.awsClaim.holder, reason, awsReapAdvice(runtime)),
+			Detail: awsClaimHead(runtime.awsClaim) + fmt.Sprintf(kept, reason, awsReapAdvice(runtime)),
 		}}, nil
 	}
 
@@ -232,24 +250,12 @@ func awsDestroyAndRelease(ctx context.Context, runtime *CommandRuntime, outputDi
 // awsScopeClaimKept names the reap awsReapAdvice picks for what this
 // process knows of the claim.
 func awsScopeClaimKept(runtime *CommandRuntime, stages []StageSummary, failures []FailureSummary, reason string) ([]StageSummary, []FailureSummary) {
-	claim := runtime.awsClaim
-	var head string
-	switch claim.known() {
-	case awsClaimHeld:
-		head = "kept the aws scope's claim for " + claim.holder
-	case awsClaimHeldByOther:
-		head = fmt.Sprintf("the aws scope's claim is held by %s, not by this run", claim.other)
-	case awsClaimHolderUnknown:
-		head = "may still hold the aws scope's claim"
-	default:
-		head = "may still hold the aws scope's claim for " + claim.holder
-	}
 	return append(stages, StageSummary{Layer: "sandbox_deploy", Stage: StageAWSScopeClaimKept, Status: StageStatusFail}),
 		append(failures, FailureSummary{
 			Layer: "sandbox_deploy", Stage: StageAWSScopeClaimKept, Check: "claim",
 			Command: "release aws scope",
 			Detail: fmt.Sprintf("%s: %s, so resources may still exist in the scope. %s",
-				head, reason, awsReapAdvice(runtime)),
+				awsClaimHead(runtime.awsClaim), reason, awsReapAdvice(runtime)),
 		})
 }
 

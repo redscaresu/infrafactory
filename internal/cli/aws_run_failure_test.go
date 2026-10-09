@@ -200,13 +200,20 @@ func TestInterruptedAWSRunNamesTheClaimTheFailureArmLeaves(t *testing.T) {
 		lc.cancel()
 	}
 
-	run := runAWSRun(t, lc, awsRunOptions{repairs: 2, loopEnded: func() {
+	notifies := 0
+	notify := func(parent context.Context, sigs ...os.Signal) (context.Context, context.CancelFunc) {
+		notifies++
+		return lc.notify(parent, sigs...)
+	}
+
+	run := runAWSRun(t, lc, awsRunOptions{repairs: 2, notify: notify, loopEnded: func() {
 		lc.mu.Lock()
 		defer lc.mu.Unlock()
 		delete(lc.ec2, "DescribeInstances")
 	}})
 
 	require.Error(t, run.err)
+	assert.Equal(t, 1, notifies, "the arm leaves signals at their default after the loop's")
 	assert.Contains(t, run.armCalls, deleteClaim, "the arm released the claim")
 	assertInterruptNamesTheReap(t, lc, run.output, run.h.ConfigPath, run.h.ScenarioPath, awsClaimNotHeld)
 	assert.Equal(t, 1, strings.Count(run.output, "Interrupted:"), "one notice")
@@ -233,8 +240,26 @@ func TestAWSRunFailureArmReadsTheClaimThroughASecondInterrupt(t *testing.T) {
 	require.Error(t, run.err)
 	assert.Equal(t, getClaim, run.armCalls[0], "the arm reads the claim first")
 	assert.Contains(t, run.armCalls, destroyRun, "the arm destroys")
-	assert.NotContains(t, run.output, "may still hold the aws scope's claim")
+	assert.NotContains(t, run.output, "this run may hold the aws scope's claim")
 	assertInterruptNamesTheReap(t, lc, run.output, run.h.ConfigPath, run.h.ScenarioPath, awsClaimHeld)
+}
+
+// A clean release clears runtime.awsClaim's holder; the arm still knows
+// the run's own, so a claim stored under it is the run's to tear down.
+func TestAWSRunFailureArmKnowsTheRunsHolderAfterARelease(t *testing.T) {
+	lc := newAWSLifecycle(t)
+	applyFails(lc)
+
+	run := runAWSRun(t, lc, awsRunOptions{repairs: 1, loopEnded: func() {
+		lc.mu.Lock()
+		defer lc.mu.Unlock()
+		lc.params[harness.AWSClaimParameter] = lc.runHolder
+	}})
+
+	require.Error(t, run.err)
+	assert.Equal(t, []string{deleteClaim}, writesIn(run.armCalls), "the arm released the run's claim")
+	_, held := lc.claim()
+	assert.False(t, held)
 }
 
 // The arm cannot read the claim, so it cannot tell whether this run still
@@ -252,7 +277,7 @@ func TestAWSRunFailureArmNamesBothReapsWhenTheClaimIsUnreadable(t *testing.T) {
 	require.Error(t, run.err)
 	assert.Equal(t, []string{getClaim}, run.armCalls, "the arm only tries to read the claim")
 	details := run.output
-	assert.Contains(t, details, "may still hold the aws scope's claim for "+lc.runHolder)
+	assert.Contains(t, details, "this run may hold the aws scope's claim for "+lc.runHolder)
 	assert.Contains(t, details, "If this run holds the claim, `"+lc.takeOver(run.h.ConfigPath, run.h.ScenarioPath)+"` sweeps the scope")
 	assert.Contains(t, details, "if no one holds it, `"+reapCommand(run.h.ConfigPath, run.h.ScenarioPath)+"` does")
 }

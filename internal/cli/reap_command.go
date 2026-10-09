@@ -284,8 +284,9 @@ func reapClaimedAWSScope(ctx context.Context, runtime *CommandRuntime, env map[s
 }
 
 // runUnderSignals runs fn with a context a SIGINT or SIGTERM cancels,
-// when Layer 3 is on, and reports whether one arrived. It is the aws run
-// loop's guard: what to print waits for the run's own teardown.
+// when Layer 3 is on, and reports whether one arrived. The first signal
+// restores default handling, so a second one ends the process at once. A
+// parent context that ends on its own is not an interrupt.
 func runUnderSignals(
 	ctx context.Context,
 	runtime *CommandRuntime,
@@ -297,8 +298,20 @@ func runUnderSignals(
 	}
 	sigCtx, stop := notify(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	signalled := make(chan bool, 1)
+	go func() {
+		<-sigCtx.Done()
+		fired := ctx.Err() == nil
+		if fired {
+			stop()
+		}
+		signalled <- fired
+	}()
 	err := fn(sigCtx)
-	return sigCtx.Err() != nil, err
+	if sigCtx.Err() == nil {
+		return false, err
+	}
+	return <-signalled, err
 }
 
 // withSandboxInterruptGuard runs fn with a SIGINT/SIGTERM handler that
@@ -321,15 +334,8 @@ func withSandboxInterruptGuard(
 	notify func(ctx context.Context, sigs ...os.Signal) (context.Context, context.CancelFunc),
 	fn func(ctx context.Context) error,
 ) error {
-	if !runtime.Config.Validation.Layers.SandboxDeploy.Enabled {
-		return fn(cmd.Context())
-	}
-
-	sigCtx, stop := notify(cmd.Context(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	err := fn(sigCtx)
-	if sigCtx.Err() == nil {
+	interrupted, err := runUnderSignals(cmd.Context(), runtime, notify, fn)
+	if !interrupted {
 		return err
 	}
 
@@ -371,9 +377,9 @@ func withSandboxInterruptGuard(
 			marker.ProjectID)
 	}
 
-	// stop() restores default signal handling, so a second Ctrl-C kills
-	// the process outright rather than being swallowed here.
-	stop()
+	// runUnderSignals restored default signal handling at the first
+	// signal, so a second Ctrl-C kills the process outright rather than
+	// being swallowed here.
 
 	// An unreadable marker with state on disk is the one shape this
 	// cannot proceed on. marker is the zero value there, so building the
