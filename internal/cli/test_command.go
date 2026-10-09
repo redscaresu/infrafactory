@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/redscaresu/infrafactory/internal/config"
+	"github.com/redscaresu/infrafactory/internal/generator"
 	"github.com/redscaresu/infrafactory/internal/harness"
 	"github.com/redscaresu/infrafactory/internal/scenario"
 	"github.com/spf13/cobra"
@@ -438,7 +439,9 @@ func stderrFailureDetail(baseErr error, stderr string) string {
 	if baseErr != nil {
 		detail = baseErr.Error()
 	}
-	trimmedStderr := stripAnsi(strings.TrimSpace(stderr))
+	// Scrubbed before the cut: one inside an account id leaves a shorter
+	// run the scrub no longer recognises, and pitfalls are built from this.
+	trimmedStderr := generator.ScrubAccountIDs(stripAnsi(strings.TrimSpace(stderr)))
 	if trimmedStderr == "" {
 		return detail
 	}
@@ -1914,6 +1917,7 @@ func driftFailureDetail(planOutput string, continuing bool) string {
 // is drifting.
 func truncatePlanOutput(out string) string {
 	const maxPlanDetail = 4000
+	out = generator.ScrubAccountIDs(out) // before the cut; see stderrFailureDetail
 	if len(out) <= maxPlanDetail {
 		return out
 	}

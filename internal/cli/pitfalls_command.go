@@ -118,7 +118,8 @@ func retirementSummary(cloud string, retired []generator.RetiredPitfall, dryRun 
 func truncateRule(rule string) string {
 	const limit = 100
 	flat := ""
-	for _, r := range rule {
+	// Scrubbed before the cut; see stderrFailureDetail.
+	for _, r := range generator.ScrubAccountIDs(rule) {
 		if r == '\n' || r == '\t' {
 			r = ' '
 		}

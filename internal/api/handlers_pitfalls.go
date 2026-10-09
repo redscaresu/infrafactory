@@ -265,11 +265,6 @@ func editPitfalls(state *serverState, w http.ResponseWriter, r *http.Request, pr
 		}
 	}
 
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		state.writeInternalError(w, http.StatusInternalServerError, "create pitfalls directory", err)
-		return
-	}
-
 	pf := generator.PitfallsFile{Provider: provider}
 	for _, entry := range req.Pitfalls {
 		source := strings.TrimSpace(entry.Source)
@@ -289,7 +284,7 @@ func editPitfalls(state *serverState, w http.ResponseWriter, r *http.Request, pr
 
 	// Through the generator's writer, so an edit gets the same atomic
 	// write and account-id scrub as a learned entry.
-	if err := generator.WritePitfalls(dir, provider, &pf); err != nil {
+	if err := generator.WritePitfalls(filepath.Join(dir, provider+".yaml"), &pf); err != nil {
 		state.writeInternalError(w, http.StatusInternalServerError, "write pitfalls", err)
 		return
 	}

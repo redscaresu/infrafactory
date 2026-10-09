@@ -209,7 +209,7 @@ func AppendMockGap(docsDir string, gap MockGap) error {
 	// Markdown row format includes these three columns; substring
 	// match on the resource cell is sufficient because the cloud +
 	// signal columns are stable per row group.
-	dedupKey := fmt.Sprintf("| %s | `%s` |", scrubAccountIDs(gap.Resource), gap.Signal)
+	dedupKey := fmt.Sprintf("| %s | `%s` |", ScrubAccountIDs(gap.Resource), gap.Signal)
 	if gap.Resource == "" {
 		dedupKey = fmt.Sprintf("| _(none)_ | `%s` |", gap.Signal)
 	}
@@ -238,19 +238,19 @@ func AppendMockGap(docsDir string, gap MockGap) error {
 			"|---|---|---|---|---|\n"
 	}
 
-	resourceCell := scrubAccountIDs(gap.Resource)
+	resourceCell := ScrubAccountIDs(gap.Resource)
 	if resourceCell == "" {
 		resourceCell = "_(none)_"
 	}
 	// Scrubbed before the cut: one landing inside an id would leave up to
 	// 11 of its digits, which no later scrub can recognise.
-	detail := ellipsize(scrubAccountIDs(strings.TrimSpace(gap.Detail)), maxGapDetailBytes)
+	detail := ellipsize(ScrubAccountIDs(strings.TrimSpace(gap.Detail)), maxGapDetailBytes)
 	// Escape pipe + newline so the markdown table doesn't break.
 	detail = strings.ReplaceAll(detail, "|", "\\|")
 	detail = strings.ReplaceAll(detail, "\n", " ")
 
 	row := fmt.Sprintf("| %s | `%s` | %s | %s | %s |\n",
-		resourceCell, gap.Signal, scrubAccountIDs(gap.Scenario), detail, gap.Timestamp)
+		resourceCell, gap.Signal, ScrubAccountIDs(gap.Scenario), detail, gap.Timestamp)
 
 	// Insert the row at the end of the appropriate cloud section.
 	// Sections are delimited by the `## ` heading; the row goes at
@@ -527,7 +527,7 @@ func ExtractDescriptivePitfall(failureDetail, scenarioName string) *LearnedPitfa
 	resource := extractResource(failureDetail)
 	if resource != "" && len(failureDetail) > 40 {
 		// Scrubbed before the cut; see AppendPolicyGap.
-		rule := ellipsize(scrubAccountIDs(failureDetail), maxDescriptiveRuleBytes)
+		rule := ellipsize(ScrubAccountIDs(failureDetail), maxDescriptiveRuleBytes)
 		return &LearnedPitfall{
 			Resource:       resource,
 			Rule:           rule,
@@ -931,13 +931,10 @@ func appendPitfall(pitfallsDir, cloud string, pitfall LearnedPitfall, ledger *Av
 	return writePitfallsFile(pitfallsDir, filePath, cloud, &pf)
 }
 
-// WritePitfalls writes pf as pitfalls/<cloud>.yaml through
-// writePitfallsFile, for writers outside this package.
-func WritePitfalls(pitfallsDir, cloud string, pf *PitfallsFile) error {
-	if err := assertCloudName(cloud); err != nil {
-		return err
-	}
-	return writePitfallsFile(pitfallsDir, filepath.Join(pitfallsDir, cloud+".yaml"), cloud, pf)
+// WritePitfalls writes pf to path through writePitfallsFile (atomic,
+// account ids scrubbed), for writers outside this package.
+func WritePitfalls(path string, pf *PitfallsFile) error {
+	return writePitfallsFile(filepath.Dir(path), path, strings.TrimSuffix(filepath.Base(path), ".yaml"), pf)
 }
 
 // writePitfallsFile marshals v (a pitfalls file or an avoid-check
@@ -997,25 +994,63 @@ func marshalScrubbed(v any) ([]byte, error) {
 	if err := doc.Encode(v); err != nil {
 		return nil, err
 	}
-	if err := scrubStringScalars(&doc); err != nil {
+	if err := scrubStringScalars(&doc, avoidEvidencePointers(v, &doc)); err != nil {
 		return nil, err
 	}
 	return yaml.Marshal(&doc)
 }
 
-// evidencePointerKeys name fields that point at run artifacts rather than
-// quote failure text; scrubbing one would break the pointer.
-var evidencePointerKeys = map[string]bool{"from": true, "layer_evidence": true}
+// avoidEvidencePointers returns the avoid ledger's records[].layer_evidence
+// and records[].check.from nodes. They name run artifacts rather than
+// quote failure text, and scrubbing one would break the pointer. Any
+// other document, or any other field, is scrubbed whatever its name.
+func avoidEvidencePointers(v any, doc *yaml.Node) map[*yaml.Node]bool {
+	skip := map[*yaml.Node]bool{}
+	switch v.(type) {
+	case *AvoidLedger, AvoidLedger:
+	default:
+		return skip
+	}
+	root := doc
+	if root.Kind == yaml.DocumentNode && len(root.Content) == 1 {
+		root = root.Content[0]
+	}
+	records := mappingValue(root, "records")
+	if records == nil {
+		return skip
+	}
+	for _, rec := range records.Content {
+		if n := mappingValue(rec, "layer_evidence"); n != nil {
+			skip[n] = true
+		}
+		if n := mappingValue(mappingValue(rec, "check"), "from"); n != nil {
+			skip[n] = true
+		}
+	}
+	return skip
+}
 
-func scrubStringScalars(n *yaml.Node) error {
+func mappingValue(n *yaml.Node, key string) *yaml.Node {
+	if n == nil || n.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		if n.Content[i].Value == key {
+			return n.Content[i+1]
+		}
+	}
+	return nil
+}
+
+func scrubStringScalars(n *yaml.Node, skip map[*yaml.Node]bool) error {
+	if skip[n] {
+		return nil
+	}
 	if n.Kind == yaml.ScalarNode {
 		return scrubScalar(n)
 	}
-	for i, child := range n.Content {
-		if n.Kind == yaml.MappingNode && i%2 == 1 && evidencePointerKeys[n.Content[i-1].Value] {
-			continue
-		}
-		if err := scrubStringScalars(child); err != nil {
+	for _, child := range n.Content {
+		if err := scrubStringScalars(child, skip); err != nil {
 			return err
 		}
 	}
@@ -1028,13 +1063,13 @@ func scrubStringScalars(n *yaml.Node) error {
 func scrubScalar(n *yaml.Node) error {
 	switch n.ShortTag() {
 	case "!!str":
-		n.Value = scrubAccountIDs(n.Value)
+		n.Value = ScrubAccountIDs(n.Value)
 	case "!!binary":
 		raw, err := base64.StdEncoding.DecodeString(strings.Join(strings.Fields(n.Value), ""))
 		if err != nil {
 			return fmt.Errorf("decode binary scalar: %w", err)
 		}
-		n.Value = base64.StdEncoding.EncodeToString([]byte(scrubAccountIDs(string(raw))))
+		n.Value = base64.StdEncoding.EncodeToString([]byte(ScrubAccountIDs(string(raw))))
 	}
 	return nil
 }
@@ -1062,9 +1097,9 @@ func ellipsize(s string, max int) string {
 // scrubbed returns p with the account ids scrubbed, so a candidate is
 // compared and stored in the form the writer publishes.
 func (p LearnedPitfall) scrubbed() LearnedPitfall {
-	p.Resource = scrubAccountIDs(p.Resource)
-	p.Rule = scrubAccountIDs(p.Rule)
-	p.DiscoveredFrom = scrubAccountIDs(p.DiscoveredFrom)
+	p.Resource = ScrubAccountIDs(p.Resource)
+	p.Rule = ScrubAccountIDs(p.Rule)
+	p.DiscoveredFrom = ScrubAccountIDs(p.DiscoveredFrom)
 	return p
 }
 

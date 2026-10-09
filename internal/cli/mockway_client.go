@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/redscaresu/infrafactory/internal/config"
+	"github.com/redscaresu/infrafactory/internal/generator"
 )
 
 const maxMockwayStateResponseBytes = 8 * 1024 * 1024
@@ -94,7 +95,8 @@ func (c *mockStateClient) postNoBody(ctx context.Context, path string, action st
 }
 
 func truncateMockwayErrorPayload(payload []byte) string {
-	trimmed := strings.TrimSpace(string(payload))
+	// Scrubbed before the cut; see stderrFailureDetail.
+	trimmed := generator.ScrubAccountIDs(strings.TrimSpace(string(payload)))
 	if len(trimmed) <= maxMockwayErrorPayloadBytes {
 		return trimmed
 	}

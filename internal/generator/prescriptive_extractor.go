@@ -769,7 +769,7 @@ func buildRule(fix PrescriptiveFix, failureDetail string) string {
 // recurring failures.
 func firstSentence(detail string) string {
 	// Scrubbed before the line is cut; see AppendPolicyGap.
-	d := scrubAccountIDs(strings.TrimSpace(detail))
+	d := ScrubAccountIDs(strings.TrimSpace(detail))
 	if d == "" {
 		return ""
 	}

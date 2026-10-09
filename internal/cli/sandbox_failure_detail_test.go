@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/redscaresu/infrafactory/internal/harness"
+	"github.com/stretchr/testify/assert"
 )
 
 // The S143 run 2 canary hit a transient block-volume create error against
@@ -144,4 +145,19 @@ func TestStderrFailureDetailStripsAnsiAndTruncates(t *testing.T) {
 	if len(detail) >= failureStderrDetailMaxChars+100 {
 		t.Errorf("detail not bounded by the budget: len=%d", len(detail))
 	}
+}
+
+// A cut inside an account id leaves a shorter run the scrub no longer
+// recognises, so every cut on a failure string's way to a pitfall scrubs
+// first. Each id here straddles its cut.
+func TestFailureTextCutsScrubAccountIDsFirst(t *testing.T) {
+	const id = "123456789012"
+	straddle := func(cut int) string {
+		return strings.Repeat("x", cut-len(id)/2) + id + strings.Repeat("y", cut)
+	}
+
+	assert.NotContains(t, stderrFailureDetail(errors.New("exit status 1"), straddle(failureStderrDetailMaxChars)), "123456")
+	assert.NotContains(t, truncateRule(straddle(100)), "123456")
+	assert.NotContains(t, truncatePlanOutput(straddle(4000)), "123456")
+	assert.NotContains(t, truncateMockwayErrorPayload([]byte(straddle(maxMockwayErrorPayloadBytes))), "123456")
 }

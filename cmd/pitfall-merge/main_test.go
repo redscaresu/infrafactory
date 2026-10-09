@@ -317,3 +317,15 @@ func TestMergeKeepsLearnedLayer(t *testing.T) {
 	require.Len(t, got.Pitfalls, 1)
 	assert.Equal(t, "sandbox_deploy", got.Pitfalls[0].LearnedLayer)
 }
+
+// The merged file is published, so it goes through the scrubbed writer.
+func TestSavePitfallsScrubsAccountIDs(t *testing.T) {
+	outPath := filepath.Join(t.TempDir(), "aws.yaml")
+	require.NoError(t, savePitfalls(outPath, generator.PitfallsFile{Provider: "aws", Pitfalls: []generator.PitfallEntry{
+		mk("aws_iam_role", "arn:aws:iam::123456789012:role/x", "avoid"),
+	}}))
+	got, err := loadPitfalls(outPath)
+	require.NoError(t, err)
+	require.Len(t, got.Pitfalls, 1)
+	assert.Equal(t, "arn:aws:iam::ACCOUNT_ID:role/x", got.Pitfalls[0].Rule)
+}

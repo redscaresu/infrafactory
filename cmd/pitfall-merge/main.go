@@ -233,11 +233,7 @@ func loadPitfalls(path string) (generator.PitfallsFile, error) {
 }
 
 func savePitfalls(path string, pf generator.PitfallsFile) error {
-	body, err := yaml.Marshal(pf)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(path, body, 0o644)
+	return generator.WritePitfalls(path, &pf)
 }
 
 func sortedKeys(m map[string]bool) []string {

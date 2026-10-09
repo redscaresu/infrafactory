@@ -244,7 +244,7 @@ func TouchLivePitfall(pitfallsDir, cloud, resource, rule string, now time.Time) 
 		return err
 	}
 	// Stored entries are scrubbed; compare in that form.
-	resource, rule = scrubAccountIDs(resource), scrubAccountIDs(rule)
+	resource, rule = ScrubAccountIDs(resource), ScrubAccountIDs(rule)
 	filePath := filepath.Join(pitfallsDir, cloud+".yaml")
 	payload, err := os.ReadFile(filePath)
 	if err != nil {
@@ -283,7 +283,7 @@ func AppendLivePitfall(pitfallsDir, cloud, observedKey string, pitfall LearnedPi
 	// Stored entries are scrubbed; a raw key naming the account would
 	// never match its own entry and append on every tick.
 	pitfall = pitfall.scrubbed()
-	observedKey = scrubAccountIDs(observedKey)
+	observedKey = ScrubAccountIDs(observedKey)
 	pitfall.Source = LiveSource
 	if observedKey == "" {
 		return fmt.Errorf("a live pitfall needs an observed key, or it can never be recognised again")

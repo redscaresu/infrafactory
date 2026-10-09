@@ -47,12 +47,16 @@ func TestScrubAccountIDs(t *testing.T) {
 		"role_123456789012 123456789012.dkr.ecr.aws": "role_ACCOUNT_ID ACCOUNT_ID.dkr.ecr.aws",
 		"thirteen 1234567890123":                     "thirteen 1234567890123",
 		"eleven 12345678901":                         "eleven 12345678901",
-		"digest ab123456789012cd":                    "digest ab123456789012cd",
+		"cloudtrail123456789012":                     "cloudtrailACCOUNT_ID",
+		"AccountId123456789012.":                     "AccountIdACCOUNT_ID.",
+		"digest ab123456789012cd":                    "digest abACCOUNT_IDcd",
+		"thirteen x1234567890123y":                   "thirteen x1234567890123y",
+		"eleven x12345678901y":                       "eleven x12345678901y",
 		"id 550e8400-e29b-41d4-a716-446655440000":    "id 550e8400-e29b-41d4-a716-446655440000",
 		"bucket logs-123456789012-eu":                "bucket logs-ACCOUNT_ID-eu",
 		"\xffarn:aws:iam::123456789012:":             "\xffarn:aws:iam::ACCOUNT_ID:",
 	} {
-		assert.Equal(t, want, scrubAccountIDs(in), in)
+		assert.Equal(t, want, ScrubAccountIDs(in), in)
 	}
 }
 
@@ -162,7 +166,7 @@ func TestPitfallWriteScrubsInvalidUTF8Rule(t *testing.T) {
 	dir := t.TempDir()
 	// Through the writer, not AppendPitfall: that scrubs the candidate
 	// first and would hide a writer that skips !!binary.
-	require.NoError(t, WritePitfalls(dir, "aws", &PitfallsFile{Provider: "aws", Pitfalls: []PitfallEntry{
+	require.NoError(t, WritePitfalls(filepath.Join(dir, "aws.yaml"), &PitfallsFile{Provider: "aws", Pitfalls: []PitfallEntry{
 		{Resource: "aws_iam_role", Rule: "\xff " + accountIDLeak, Source: "static"},
 	}}))
 	entries, err := LoadPitfallEntries(dir, "aws")
@@ -226,4 +230,17 @@ func TestGapRowsScrubResourceAndScenario(t *testing.T) {
 		Scenario: "web-123456789012", Detail: "d", Timestamp: "20261009T120000Z",
 	}))
 	assertAccountIDsScrubbed(t, filepath.Join(dir, "mock-gaps.md"), 2)
+}
+
+// The evidence-pointer exemption is the avoid ledger's alone: a field
+// named `from` anywhere else is failure text like any other.
+func TestEvidencePointerExemptionIsLedgerOnly(t *testing.T) {
+	t.Parallel()
+
+	out, err := marshalScrubbed(struct {
+		From          string `yaml:"from"`
+		LayerEvidence string `yaml:"layer_evidence"`
+	}{From: accountIDLeak, LayerEvidence: accountIDLeak})
+	require.NoError(t, err)
+	assert.False(t, twelveDigitRun.Match(out), string(out))
 }
