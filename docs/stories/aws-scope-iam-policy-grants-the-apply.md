@@ -54,7 +54,7 @@ trailer: `ADR: none — measured-candidate grants, ADR-0040's single-owner rule 
   Adding ec2:CreateKeyPair or iam:PassRole to any statement fails it.
 - The policy has no ec2:* or ssm:* wildcard beyond the existing `ec2:Describe*`. Every new
   '*'-resource statement carries StringEquals aws:RequestedRegion REGION, and the JSON has no
-  12-digit run.
+  account id (the configured `aws.account_id` in any form, or an ARN's account field).
 - TestAWSScopeSetupRunbookNamesWhatTheCodeReads and
   TestAWSRunChecklistNamesTheStagesAndTheReapCommand pass.
   `grep -n 'epics/aws-web-live-on-real-aws' docs/operations.md` returns nothing, and step 3 names no

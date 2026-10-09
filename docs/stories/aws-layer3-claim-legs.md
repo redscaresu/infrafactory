@@ -35,4 +35,4 @@ not start without it, and tells you the run ids and the cost bound when they end
   exits 0, after which get-parameter returns ParameterNotFound and `infrafactory reap --dry-run`
   sweeps empty.
 - CloudTrail over these runs shows no refused event by infrafactory-layer3. The evidence states
-  the run ids and the dated cost bound, with no 12-digit run.
+  the run ids and the dated cost bound, with no account id (the configured `aws.account_id` in any form, or an ARN's account field).
