@@ -27,6 +27,11 @@ type awsRunOptions struct {
 	loopEnded func()
 	notify    func(context.Context, ...os.Signal) (context.Context, context.CancelFunc)
 	flags     []string
+	// scenario, customize and deps edit the scenario, the config and the
+	// dependencies after runAWSRun's defaults are set.
+	scenario  func(*CommandTestHarness)
+	customize func(*config.Config)
+	deps      func(*RuntimeDependencies)
 }
 
 // awsRun is one `infrafactory run` of an aws scenario, with the gate
@@ -55,6 +60,9 @@ func runAWSRun(t *testing.T, lc *awsLifecycle, o awsRunOptions) awsRun {
 	t.Helper()
 	h := newCommandTestHarness(t)
 	setAWSLifecycleScenario(t, h.ScenarioPath)
+	if o.scenario != nil {
+		o.scenario(h)
+	}
 	if o.notify == nil {
 		o.notify = lc.notify
 	}
@@ -63,6 +71,9 @@ func runAWSRun(t *testing.T, lc *awsLifecycle, o awsRunOptions) awsRun {
 		cfg = layer3On(cfg)
 		cfg.Agent.RepairIterationsMax = o.repairs
 		cfg.AWS = config.AWSConfig{Region: "eu-west-2", AccountID: preflightAWSAccount, PrincipalARN: preflightAWSPrincipal}
+		if o.customize != nil {
+			o.customize(&cfg)
+		}
 		return cfg
 	})
 	run := awsRun{}
@@ -86,6 +97,9 @@ func runAWSRun(t *testing.T, lc *awsLifecycle, o awsRunOptions) awsRun {
 		AWSEC2:         lc,
 		AWSSweepSleep:  func(context.Context, time.Duration) error { return nil },
 		Layer3HCLGate:  func(layer3Cloud, string, awsGateInputs) error { return nil },
+	}
+	if o.deps != nil {
+		o.deps(&opts.deps)
 	}
 
 	loopEnd := -1
