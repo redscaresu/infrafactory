@@ -280,17 +280,30 @@ func TestAWSRunEndsAtTheLayer3StageThatFails(t *testing.T) {
 				for _, s := range orderForward[:k+1] {
 					reached = append(reached, s.call)
 				}
-				for _, later := range orderForward[k+1:] {
-					if later.call == "" {
+				// Every forward call up to this stage ran as often as the
+				// happy path makes it, so the row got here; none after it
+				// ran at all, so it went no further. The sweep repeats
+				// DescribeVpcs, so the reached stages count before the
+				// destroy.
+				calls := lc.log()
+				forward := calls
+				if destroy := slices.Index(calls, destroyRun); destroy != -1 {
+					forward = calls[:destroy]
+				}
+				for j, other := range orderForward {
+					if other.call == "" {
 						continue
 					}
-					want := 0
-					for _, c := range reached {
-						if c == later.call {
-							want++
-						}
+					in := forward
+					if j > k {
+						in = calls
 					}
-					assert.Equal(t, want, lc.count(later.call), "%s after %s fails: %q", later.name, stage.name, lc.log())
+					assert.Equal(t, countOf(reached, other.call), countOf(in, other.call),
+						"%s when %s fails: %q", other.name, stage.name, calls)
+				}
+				if stage.call == "" || stage.call == userDataRead {
+					assert.True(t, slices.ContainsFunc(run.result.Failures, func(f FailureSummary) bool { return f.Check == stage.name }),
+						"the run fails on %s: %+v", stage.name, run.result.Failures)
 				}
 				if stage.name == "gate (generation)" {
 					assert.Contains(t, run.result.Stages, StageSummary{Layer: "run", Stage: "iteration_1_generate", Status: StageStatusFail})
@@ -300,7 +313,6 @@ func TestAWSRunEndsAtTheLayer3StageThatFails(t *testing.T) {
 					return
 				}
 
-				calls := lc.log()
 				destroy := slices.Index(calls, destroyRun)
 				require.NotEqual(t, -1, destroy, "the teardown destroys: %q", calls)
 				assert.Less(t, slices.Index(calls, deployRun), destroy, "%q", calls)
@@ -320,4 +332,14 @@ func TestAWSRunEndsAtTheLayer3StageThatFails(t *testing.T) {
 			})
 		}
 	}
+}
+
+func countOf(calls []string, call string) int {
+	n := 0
+	for _, c := range calls {
+		if c == call {
+			n++
+		}
+	}
+	return n
 }
