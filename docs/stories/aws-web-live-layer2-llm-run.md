@@ -1,9 +1,9 @@
 ---
 kind: lead
 status: blocked
-blocked_by: [decide-aws-web-live-llm-run]
+blocked_by: [aws-layer3-stage-order-test, aws-layer3-run-checklist]
 epic: aws-layer3-wiring-proof
-depends_on: [aws-layer3-ami-resolve-wiring, aws-layer3-stage-order-test, aws-layer3-run-checklist, decide-aws-web-live-llm-run]
+depends_on: [aws-layer3-ami-resolve-wiring, aws-layer3-stage-order-test, aws-layer3-run-checklist]
 touches: ["docs/epics/aws-layer3-wiring-proof.md (delete)", "docs/hld/2026-09-27-aws-web-stack.md", "STATUS.md"]
 ---
 
@@ -12,8 +12,8 @@ touches: ["docs/epics/aws-layer3-wiring-proof.md (delete)", "docs/hld/2026-09-27
 Lead-run, LLM cost, no real cloud: sandbox_deploy stays off, so the resolve, claim and apply
 never run.
 
-The lead does not start the run until decide-aws-web-live-llm-run records the user's go, and
-tells the user the run id when it ends.
+**You:** say go for the one LLM run, in the lead's session. The lead does not start it without
+that, and tells you the run id when it ends.
 
 The lead runs fakeaws from a clone at the CI pin (ci.yml:224, FAKEAWS_SHA; worktrees share a
 stale ../fakeaws) and `infrafactory run scenarios/training/aws-web-live.yaml` with the default

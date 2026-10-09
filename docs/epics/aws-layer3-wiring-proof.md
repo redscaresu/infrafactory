@@ -51,8 +51,7 @@ operator-invoked.
 
 **Built by:** agents. Swarm-buildable, wave 4, except the one LLM run which the lead triggers.
 Stories: aws-layer3-ami-resolve-wiring; then aws-layer3-stage-order-test and
-aws-layer3-run-checklist; then the user's go (decide-aws-web-live-llm-run); then
-aws-web-live-layer2-llm-run, whose PR records the run id and
+aws-layer3-run-checklist; then aws-web-live-layer2-llm-run (after the user's go), whose PR records the run id and
 closes the epic.
 
 **Areas:** `internal/cli/ (the AMI resolve stage in generate, run and test; the stage-order test

@@ -14,7 +14,7 @@ claim refuses reap, reap empties the account. Whole-scope ownership is recorded 
 claim-sweep-reap epic is done). The gate lift (the aws-layer3-gate epic's last story) runs the AWS
 gate on the aws path and checks account and user data after apply; next is aws-layer3-wiring-proof.
 
-What waits on the user is the board's **Waiting on you** view (`kind: operator` stories); what the
+What waits on the user is the board's **Waiting on you** view (`kind: lead` stories, the user's part on a **You:** line); what the
 lead runs is **Lead-run**.
 
 **Running the swarm:** `/swarm` (the swarm-dev plugin) reads the board, does the next step and loops,
