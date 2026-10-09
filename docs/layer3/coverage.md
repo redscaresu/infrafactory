@@ -116,7 +116,7 @@ at Layer 1 or Layer 3, and `deploy` is the only route to a real NIC.
 | `lb-paris` | **runnable** | hourly | — (run 2026-08-23) |
 | `lb-serving-paris` | **runnable** | hourly | — (added 2026-08-24; the first `http_probe` against real Scaleway) |
 | `web-live-paris` | runnable, unrun | hourly | nothing known — see "web-live-paris, 2026-09-09" below |
-| `aws-web-live` | runnable, unrun | hourly | **the AWS HCL gate, not yet built**: allowlisted 2026-09-28, but Layer 3 refuses every AWS stack until epic `aws-layer3-gate` lands (`TestTestCommandRefusesANonScalewayCloudAtTheGate`) |
+| `aws-web-live` | runnable, unrun | hourly | the real-cloud run: allowlisted 2026-09-28 and gated since #405; the key's policy cannot yet resolve the AMI (`ssm:GetParameter` on the AL2023 public parameter) and grants none of the apply's IAM actions; epic aws-web-live-on-real-aws grants both |
 | `incremental-project-paris` | key only | hourly | private networking (allowlist cleared 2026-08-24; see the retraction at the top) |
 | `registry-paris` | key only | instant | Registry |
 | `iam-policies-paris` | key only | instant | IAM |
@@ -133,8 +133,9 @@ at Layer 1 or Layer 3, and `deploy` is the only route to a real NIC.
 | `full-stack-paris` | allowlist + key | slow + expensive | IAM, Kubernetes, RDB, Redis, Registry |
 
 **Current: 3 have run, 2 ungated but unrun, 5 are blocked by the key alone, 9 by both.**
-`aws-web-live` counts as ungated by the allowlist and the key only; it cannot reach the
-real API until the AWS HCL gate exists (its row).
+`aws-web-live` counts as ungated by the allowlist and the key; the AWS HCL gate has run on the
+aws path since #405. The first real run still needs the key's policy to grant the AMI lookup and
+the apply's IAM actions, both owned by epic aws-web-live-on-real-aws.
 As first audited on 2026-08-23 it was 2 runnable, 1 blocked by the allowlist
 alone, 4 by the key alone and 9 by both; `lb-serving-paris` did not exist
 yet, and `incremental-project-paris` has since moved from the allowlist
