@@ -41,4 +41,4 @@ must print `reap --take-over <holder>`; that command releases.
 - The interrupted stub `run` prints `reap --take-over <holder>` with its own holder and leaves the
   claim held. That command exits 0, and the next sweep is empty.
 - `git -C <throwaway worktree> status --short policies/ scenarios/` shows the bypass never touched a
-  tracked file. The evidence states the run ids and the dated cost bound, with no 12-digit run.
+  tracked file. The evidence states the run ids and the dated cost bound, with no account id (the configured `aws.account_id` in any form, or an ARN's account field).
