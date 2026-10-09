@@ -768,7 +768,8 @@ func buildRule(fix PrescriptiveFix, failureDetail string) string {
 // is one human-readable sentence the LLM can match against
 // recurring failures.
 func firstSentence(detail string) string {
-	d := strings.TrimSpace(detail)
+	// Scrubbed before the line is cut; see AppendPolicyGap.
+	d := scrubAccountIDs(strings.TrimSpace(detail))
 	if d == "" {
 		return ""
 	}

@@ -235,7 +235,9 @@ func AppendPolicyGap(docsDir string, gap PolicyGap) error {
 			"|---|---|---|---|---|\n"
 	}
 
-	detail := strings.TrimSpace(gap.Detail)
+	// Scrubbed before the cut: one landing inside an id would leave up to
+	// 11 of its digits, which no later scrub can recognise.
+	detail := scrubAccountIDs(strings.TrimSpace(gap.Detail))
 	if len(detail) > 240 {
 		detail = detail[:237] + "..."
 	}

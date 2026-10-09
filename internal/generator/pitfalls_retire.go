@@ -255,7 +255,7 @@ func TouchLivePitfall(pitfallsDir, cloud, resource, rule string, now time.Time) 
 	}
 
 	for i, entry := range pf.Pitfalls {
-		if entry.Source != LiveSource || entry.Resource != resource || entry.Rule != rule {
+		if entry.Source != LiveSource || entry.Resource != resource || scrubAccountIDs(entry.Rule) != scrubAccountIDs(rule) {
 			continue
 		}
 		pf.Pitfalls[i].LastSeen = now.UTC().Format(time.RFC3339)
@@ -344,7 +344,9 @@ func refreshLivePitfall(pitfallsDir, cloud, observedKey string, pitfall LearnedP
 	}
 
 	for i, entry := range pf.Pitfalls {
-		if entry.Source != LiveSource || entry.Resource != pitfall.Resource || entry.ObservedKey != observedKey {
+		// The stored key is scrubbed (writePitfallsFile); compared raw, a
+		// key naming the account would never match and append every tick.
+		if entry.Source != LiveSource || entry.Resource != pitfall.Resource || scrubAccountIDs(entry.ObservedKey) != scrubAccountIDs(observedKey) {
 			continue
 		}
 		pf.Pitfalls[i].Rule = pitfall.Rule

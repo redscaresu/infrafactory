@@ -46,3 +46,22 @@ func redactTransportDetail(detail string, prompt string, env map[string]string, 
 func RedactSecretLikeText(input string) string {
 	return redactTransportDetail(input, "", nil)
 }
+
+// alnumRunPattern finds the tokens scrubAccountIDs inspects. Underscore
+// separates tokens, so `role_123456789012` yields the id on its own.
+var alnumRunPattern = regexp.MustCompile(`[0-9A-Za-z]+`)
+
+// scrubAccountIDs replaces every standalone run of exactly 12 digits with
+// ACCOUNT_ID, the placeholder iam-policy.json uses. Learned pitfalls and
+// policy gaps copy real failure text into published files, and an AWS
+// error names the account in more shapes than a list could hold, so this
+// matches the class. A run inside a longer token (a hex digest) is not
+// standalone and is left alone.
+func scrubAccountIDs(s string) string {
+	return alnumRunPattern.ReplaceAllStringFunc(s, func(run string) string {
+		if len(run) == 12 && strings.Trim(run, "0123456789") == "" {
+			return "ACCOUNT_ID"
+		}
+		return run
+	})
+}

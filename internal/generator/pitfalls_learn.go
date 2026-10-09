@@ -240,7 +240,9 @@ func AppendMockGap(docsDir string, gap MockGap) error {
 	if resourceCell == "" {
 		resourceCell = "_(none)_"
 	}
-	detail := strings.TrimSpace(gap.Detail)
+	// Scrubbed before the cut: one landing inside an id would leave up to
+	// 11 of its digits, which no later scrub can recognise.
+	detail := scrubAccountIDs(strings.TrimSpace(gap.Detail))
 	if len(detail) > 240 {
 		detail = detail[:237] + "..."
 	}
@@ -525,7 +527,8 @@ func ExtractDescriptivePitfall(failureDetail, scenarioName string) *LearnedPitfa
 	// prior ordering silently dropped every apply-time learning).
 	resource := extractResource(failureDetail)
 	if resource != "" && len(failureDetail) > 40 {
-		rule := failureDetail
+		// Scrubbed before the cut; see AppendPolicyGap.
+		rule := scrubAccountIDs(failureDetail)
 		if len(rule) > 300 {
 			rule = rule[:297] + "..."
 		}
@@ -934,7 +937,7 @@ func appendPitfall(pitfallsDir, cloud string, pitfall LearnedPitfall, ledger *Av
 // writePitfallsFile marshals v (a pitfalls file or an avoid-check
 // ledger) and writes it atomically via a same-directory temp + rename.
 func writePitfallsFile(pitfallsDir, filePath, cloud string, v any) error {
-	out, err := yaml.Marshal(v)
+	out, err := marshalScrubbed(v)
 	if err != nil {
 		return fmt.Errorf("marshal pitfalls: %w", err)
 	}
@@ -979,6 +982,28 @@ func writePitfallsFile(pitfallsDir, filePath, cloud string, v any) error {
 	return nil
 }
 
+// marshalScrubbed marshals v with the account ids scrubbed from every
+// string value. It scrubs decoded values, not the YAML text: an escaped
+// string can put a digit against the id ("\0123456789012"), and a text
+// scrub would read that as 13 digits and leave it.
+func marshalScrubbed(v any) ([]byte, error) {
+	var doc yaml.Node
+	if err := doc.Encode(v); err != nil {
+		return nil, err
+	}
+	scrubStringScalars(&doc)
+	return yaml.Marshal(&doc)
+}
+
+func scrubStringScalars(n *yaml.Node) {
+	if n.Kind == yaml.ScalarNode && n.ShortTag() == "!!str" {
+		n.Value = scrubAccountIDs(n.Value)
+	}
+	for _, child := range n.Content {
+		scrubStringScalars(child)
+	}
+}
+
 // isVerbatimFallback returns true if a rule is a raw terraform stderr
 // dump (the descriptive fallback ExtractDescriptivePitfall returns when no
 // M97 template fires). Detection signals: terraform box-drawing chars
@@ -1006,7 +1031,8 @@ func isDuplicate(existing []PitfallEntry, candidate LearnedPitfall) bool {
 		if candidate.Source == AvoidSource && entry.LearnedLayer != candidate.LearnedLayer {
 			continue
 		}
-		if entry.Rule == candidate.Rule {
+		// Stored rules are scrubbed (writePitfallsFile); the candidate is not.
+		if scrubAccountIDs(entry.Rule) == scrubAccountIDs(candidate.Rule) {
 			return true
 		}
 		if supersedes(candidate, entry) {
