@@ -196,6 +196,8 @@ func AppendPolicyGap(docsDir string, gap PolicyGap) error {
 	if gap.Cloud == "" || gap.Policy == "" || gap.Resource == "" {
 		return fmt.Errorf("cloud, policy, and resource are required")
 	}
+	gap.Resource = scrubAccountIDs(gap.Resource)
+	gap.Scenario = scrubAccountIDs(gap.Scenario)
 	if err := os.MkdirAll(docsDir, 0o755); err != nil {
 		return fmt.Errorf("mkdir docs dir: %w", err)
 	}
@@ -237,10 +239,7 @@ func AppendPolicyGap(docsDir string, gap PolicyGap) error {
 
 	// Scrubbed before the cut: one landing inside an id would leave up to
 	// 11 of its digits, which no later scrub can recognise.
-	detail := scrubAccountIDs(strings.TrimSpace(gap.Detail))
-	if len(detail) > 240 {
-		detail = detail[:237] + "..."
-	}
+	detail := ellipsize(scrubAccountIDs(strings.TrimSpace(gap.Detail)), maxGapDetailBytes)
 	detail = strings.ReplaceAll(detail, "|", "\\|")
 	detail = strings.ReplaceAll(detail, "\n", " ")
 

@@ -1,12 +1,14 @@
 package generator
 
 import (
+	"encoding/base64"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
 )
@@ -207,7 +209,7 @@ func AppendMockGap(docsDir string, gap MockGap) error {
 	// Markdown row format includes these three columns; substring
 	// match on the resource cell is sufficient because the cloud +
 	// signal columns are stable per row group.
-	dedupKey := fmt.Sprintf("| %s | `%s` |", gap.Resource, gap.Signal)
+	dedupKey := fmt.Sprintf("| %s | `%s` |", scrubAccountIDs(gap.Resource), gap.Signal)
 	if gap.Resource == "" {
 		dedupKey = fmt.Sprintf("| _(none)_ | `%s` |", gap.Signal)
 	}
@@ -236,22 +238,19 @@ func AppendMockGap(docsDir string, gap MockGap) error {
 			"|---|---|---|---|---|\n"
 	}
 
-	resourceCell := gap.Resource
+	resourceCell := scrubAccountIDs(gap.Resource)
 	if resourceCell == "" {
 		resourceCell = "_(none)_"
 	}
 	// Scrubbed before the cut: one landing inside an id would leave up to
 	// 11 of its digits, which no later scrub can recognise.
-	detail := scrubAccountIDs(strings.TrimSpace(gap.Detail))
-	if len(detail) > 240 {
-		detail = detail[:237] + "..."
-	}
+	detail := ellipsize(scrubAccountIDs(strings.TrimSpace(gap.Detail)), maxGapDetailBytes)
 	// Escape pipe + newline so the markdown table doesn't break.
 	detail = strings.ReplaceAll(detail, "|", "\\|")
 	detail = strings.ReplaceAll(detail, "\n", " ")
 
 	row := fmt.Sprintf("| %s | `%s` | %s | %s | %s |\n",
-		resourceCell, gap.Signal, gap.Scenario, detail, gap.Timestamp)
+		resourceCell, gap.Signal, scrubAccountIDs(gap.Scenario), detail, gap.Timestamp)
 
 	// Insert the row at the end of the appropriate cloud section.
 	// Sections are delimited by the `## ` heading; the row goes at
@@ -528,10 +527,7 @@ func ExtractDescriptivePitfall(failureDetail, scenarioName string) *LearnedPitfa
 	resource := extractResource(failureDetail)
 	if resource != "" && len(failureDetail) > 40 {
 		// Scrubbed before the cut; see AppendPolicyGap.
-		rule := scrubAccountIDs(failureDetail)
-		if len(rule) > 300 {
-			rule = rule[:297] + "..."
-		}
+		rule := ellipsize(scrubAccountIDs(failureDetail), maxDescriptiveRuleBytes)
 		return &LearnedPitfall{
 			Resource:       resource,
 			Rule:           rule,
@@ -861,6 +857,7 @@ func AppendPitfall(pitfallsDir, cloud string, pitfall LearnedPitfall) error {
 	if pitfallsDir == "" || cloud == "" {
 		return nil
 	}
+	pitfall = pitfall.scrubbed()
 
 	ledger, ledgerErr := ReadAvoidLedger(pitfallsDir, cloud)
 	var hits []retiredHit
@@ -934,6 +931,15 @@ func appendPitfall(pitfallsDir, cloud string, pitfall LearnedPitfall, ledger *Av
 	return writePitfallsFile(pitfallsDir, filePath, cloud, &pf)
 }
 
+// WritePitfalls writes pf as pitfalls/<cloud>.yaml through
+// writePitfallsFile, for writers outside this package.
+func WritePitfalls(pitfallsDir, cloud string, pf *PitfallsFile) error {
+	if err := assertCloudName(cloud); err != nil {
+		return err
+	}
+	return writePitfallsFile(pitfallsDir, filepath.Join(pitfallsDir, cloud+".yaml"), cloud, pf)
+}
+
 // writePitfallsFile marshals v (a pitfalls file or an avoid-check
 // ledger) and writes it atomically via a same-directory temp + rename.
 func writePitfallsFile(pitfallsDir, filePath, cloud string, v any) error {
@@ -991,17 +997,75 @@ func marshalScrubbed(v any) ([]byte, error) {
 	if err := doc.Encode(v); err != nil {
 		return nil, err
 	}
-	scrubStringScalars(&doc)
+	if err := scrubStringScalars(&doc); err != nil {
+		return nil, err
+	}
 	return yaml.Marshal(&doc)
 }
 
-func scrubStringScalars(n *yaml.Node) {
-	if n.Kind == yaml.ScalarNode && n.ShortTag() == "!!str" {
+// evidencePointerKeys name fields that point at run artifacts rather than
+// quote failure text; scrubbing one would break the pointer.
+var evidencePointerKeys = map[string]bool{"from": true, "layer_evidence": true}
+
+func scrubStringScalars(n *yaml.Node) error {
+	if n.Kind == yaml.ScalarNode {
+		return scrubScalar(n)
+	}
+	for i, child := range n.Content {
+		if n.Kind == yaml.MappingNode && i%2 == 1 && evidencePointerKeys[n.Content[i-1].Value] {
+			continue
+		}
+		if err := scrubStringScalars(child); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// scrubScalar scrubs a string scalar. yaml.v3 writes a string that is not
+// valid UTF-8 as base64 !!binary, so that is decoded, scrubbed and
+// re-encoded; skipping it would publish the id.
+func scrubScalar(n *yaml.Node) error {
+	switch n.ShortTag() {
+	case "!!str":
 		n.Value = scrubAccountIDs(n.Value)
+	case "!!binary":
+		raw, err := base64.StdEncoding.DecodeString(strings.Join(strings.Fields(n.Value), ""))
+		if err != nil {
+			return fmt.Errorf("decode binary scalar: %w", err)
+		}
+		n.Value = base64.StdEncoding.EncodeToString([]byte(scrubAccountIDs(string(raw))))
 	}
-	for _, child := range n.Content {
-		scrubStringScalars(child)
+	return nil
+}
+
+const (
+	maxGapDetailBytes       = 240
+	maxDescriptiveRuleBytes = 300
+	ellipsis                = "..."
+)
+
+// ellipsize cuts s to at most max bytes, ending in "...", on a rune
+// boundary: a cut inside a multi-byte rune (terraform's '│') leaves
+// invalid UTF-8.
+func ellipsize(s string, max int) string {
+	if len(s) <= max {
+		return s
 	}
+	cut := max - len(ellipsis)
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + ellipsis
+}
+
+// scrubbed returns p with the account ids scrubbed, so a candidate is
+// compared and stored in the form the writer publishes.
+func (p LearnedPitfall) scrubbed() LearnedPitfall {
+	p.Resource = scrubAccountIDs(p.Resource)
+	p.Rule = scrubAccountIDs(p.Rule)
+	p.DiscoveredFrom = scrubAccountIDs(p.DiscoveredFrom)
+	return p
 }
 
 // isVerbatimFallback returns true if a rule is a raw terraform stderr
@@ -1031,8 +1095,7 @@ func isDuplicate(existing []PitfallEntry, candidate LearnedPitfall) bool {
 		if candidate.Source == AvoidSource && entry.LearnedLayer != candidate.LearnedLayer {
 			continue
 		}
-		// Stored rules are scrubbed (writePitfallsFile); the candidate is not.
-		if scrubAccountIDs(entry.Rule) == scrubAccountIDs(candidate.Rule) {
+		if entry.Rule == candidate.Rule {
 			return true
 		}
 		if supersedes(candidate, entry) {

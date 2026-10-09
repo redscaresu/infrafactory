@@ -243,6 +243,8 @@ func TouchLivePitfall(pitfallsDir, cloud, resource, rule string, now time.Time) 
 	if err := assertCloudName(cloud); err != nil {
 		return err
 	}
+	// Stored entries are scrubbed; compare in that form.
+	resource, rule = scrubAccountIDs(resource), scrubAccountIDs(rule)
 	filePath := filepath.Join(pitfallsDir, cloud+".yaml")
 	payload, err := os.ReadFile(filePath)
 	if err != nil {
@@ -255,7 +257,7 @@ func TouchLivePitfall(pitfallsDir, cloud, resource, rule string, now time.Time) 
 	}
 
 	for i, entry := range pf.Pitfalls {
-		if entry.Source != LiveSource || entry.Resource != resource || scrubAccountIDs(entry.Rule) != scrubAccountIDs(rule) {
+		if entry.Source != LiveSource || entry.Resource != resource || entry.Rule != rule {
 			continue
 		}
 		pf.Pitfalls[i].LastSeen = now.UTC().Format(time.RFC3339)
@@ -278,6 +280,10 @@ func TouchLivePitfall(pitfallsDir, cloud, resource, rule string, now time.Time) 
 // A rule seen again REFRESHES rather than duplicates, which is what makes
 // retention mean "last observed" rather than "first observed".
 func AppendLivePitfall(pitfallsDir, cloud, observedKey string, pitfall LearnedPitfall, now time.Time) error {
+	// Stored entries are scrubbed; a raw key naming the account would
+	// never match its own entry and append on every tick.
+	pitfall = pitfall.scrubbed()
+	observedKey = scrubAccountIDs(observedKey)
 	pitfall.Source = LiveSource
 	if observedKey == "" {
 		return fmt.Errorf("a live pitfall needs an observed key, or it can never be recognised again")
@@ -344,9 +350,7 @@ func refreshLivePitfall(pitfallsDir, cloud, observedKey string, pitfall LearnedP
 	}
 
 	for i, entry := range pf.Pitfalls {
-		// The stored key is scrubbed (writePitfallsFile); compared raw, a
-		// key naming the account would never match and append every tick.
-		if entry.Source != LiveSource || entry.Resource != pitfall.Resource || scrubAccountIDs(entry.ObservedKey) != scrubAccountIDs(observedKey) {
+		if entry.Source != LiveSource || entry.Resource != pitfall.Resource || entry.ObservedKey != observedKey {
 			continue
 		}
 		pf.Pitfalls[i].Rule = pitfall.Rule

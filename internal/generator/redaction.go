@@ -51,17 +51,41 @@ func RedactSecretLikeText(input string) string {
 // separates tokens, so `role_123456789012` yields the id on its own.
 var alnumRunPattern = regexp.MustCompile(`[0-9A-Za-z]+`)
 
+// uuidPattern matches a UUID, whose last group can be twelve digits.
+var uuidPattern = regexp.MustCompile(`[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}`)
+
+const accountIDPlaceholder = "ACCOUNT_ID"
+
 // scrubAccountIDs replaces every standalone run of exactly 12 digits with
 // ACCOUNT_ID, the placeholder iam-policy.json uses. Learned pitfalls and
 // policy gaps copy real failure text into published files, and an AWS
 // error names the account in more shapes than a list could hold, so this
 // matches the class. A run inside a longer token (a hex digest) is not
-// standalone and is left alone.
+// standalone, and a UUID's last group is not an id; both are left alone.
+// A bare 12-digit number (a byte count) is indistinguishable from an id
+// and is scrubbed: failing closed costs a number, failing open an account.
 func scrubAccountIDs(s string) string {
-	return alnumRunPattern.ReplaceAllStringFunc(s, func(run string) string {
-		if len(run) == 12 && strings.Trim(run, "0123456789") == "" {
-			return "ACCOUNT_ID"
+	uuids := uuidPattern.FindAllStringIndex(s, -1)
+	var b strings.Builder
+	last := 0
+	for _, m := range alnumRunPattern.FindAllStringIndex(s, -1) {
+		run := s[m[0]:m[1]]
+		if len(run) != 12 || strings.Trim(run, "0123456789") != "" || insideAny(m, uuids) {
+			continue
 		}
-		return run
-	})
+		b.WriteString(s[last:m[0]])
+		b.WriteString(accountIDPlaceholder)
+		last = m[1]
+	}
+	b.WriteString(s[last:])
+	return b.String()
+}
+
+func insideAny(span []int, spans [][]int) bool {
+	for _, o := range spans {
+		if span[0] >= o[0] && span[1] <= o[1] {
+			return true
+		}
+	}
+	return false
 }

@@ -780,10 +780,7 @@ func firstSentence(detail string) string {
 			ln = strings.TrimSpace(strings.TrimPrefix(ln, "Error:"))
 		}
 		if ln != "" {
-			if len(ln) > 240 {
-				ln = ln[:237] + "..."
-			}
-			return ln
+			return ellipsize(ln, maxGapDetailBytes)
 		}
 	}
 	return ""
