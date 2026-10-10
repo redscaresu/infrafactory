@@ -3,7 +3,12 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/redscaresu/infrafactory/internal/generator"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestAutodiscoverIterPairPicksLastTwoIters pins the run-dir
@@ -81,4 +86,16 @@ func TestAutodiscoverIterPairIgnoresNonNumericDirs(t *testing.T) {
 	if filepath.Base(filepath.Dir(passingDir)) != "2" {
 		t.Errorf("passingDir parent = %q, want 2", filepath.Base(filepath.Dir(passingDir)))
 	}
+}
+
+// The printed fragment is appended to a published pitfalls file by hand,
+// so the account id in the failure text never reaches it.
+func TestWriteEntryScrubsAccountIDs(t *testing.T) {
+	var out strings.Builder
+	require.NoError(t, writeEntry(&out, "aws", generator.LearnedPitfall{
+		Resource: "aws_iam_role",
+		Rule:     "User arn:aws:iam::123456789012:user/x is not authorized in account 123456789012",
+	}))
+	assert.NotContains(t, out.String(), "123456789012")
+	assert.Equal(t, 2, strings.Count(out.String(), "ACCOUNT_ID"), out.String())
 }

@@ -3,6 +3,7 @@ package generator
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -278,8 +279,8 @@ func TestAvoidLedgerKeepsShapeDigest(t *testing.T) {
 // is whole or absent. Other digits are cut where the cut falls.
 func TestCutTextNeverSplitsAnAccountID(t *testing.T) {
 	// The grouped forms are layer (a) only, so this registers the id.
-	ResetScrubbedAccountsForTest(t)
-	RegisterScrubbedAccounts(testAccountID)
+	// scrubtest would be an import cycle from here; this is what it does.
+	t.Cleanup(RegisterScrubbedAccounts(testAccountID))
 
 	for _, id := range []string{testAccountID, "1234-5678-9012", "1234 5678 9012", "arn:aws:iam::987654321098"} {
 		s := "lead " + id + ":tail"
@@ -348,17 +349,45 @@ func TestWritePitfallsLeavesCallerValue(t *testing.T) {
 	assertAccountIDsScrubbed(t, path, 2)
 }
 
-func TestScrubStringsCoversMapKeysAndBytes(t *testing.T) {
+// ScrubStrings walks structs, pointers, slices and strings only. A map,
+// interface or []byte added to a written type would be skipped silently,
+// so this fails loudly instead.
+func TestScrubbedTypesHoldOnlyWalkableFields(t *testing.T) {
 	t.Parallel()
 
-	v := struct {
-		ByKey map[string]string
-		Raw   []byte
-	}{
-		ByKey: map[string]string{"role_" + testAccountID: "account " + testAccountID},
-		Raw:   []byte("arn:aws:iam::" + testAccountID + ":root"),
+	var walk func(path string, typ reflect.Type)
+	seen := map[reflect.Type]bool{}
+	walk = func(path string, typ reflect.Type) {
+		if seen[typ] {
+			return
+		}
+		seen[typ] = true
+		switch typ.Kind() {
+		case reflect.Pointer, reflect.Array:
+			walk(path, typ.Elem())
+		case reflect.Slice:
+			assert.NotEqual(t, reflect.Uint8, typ.Elem().Kind(), "%s is []byte, which ScrubStrings does not walk", path)
+			walk(path+"[]", typ.Elem())
+		case reflect.Struct:
+			for i := 0; i < typ.NumField(); i++ {
+				walk(path+"."+typ.Field(i).Name, typ.Field(i).Type)
+			}
+		case reflect.Map, reflect.Interface:
+			assert.Fail(t, "unwalkable field", "%s is a %s, which ScrubStrings does not walk", path, typ.Kind())
+		}
 	}
-	assert.Equal(t, 3, ScrubStrings(&v))
-	assert.Equal(t, map[string]string{"role_ACCOUNT_ID": "account ACCOUNT_ID"}, v.ByKey)
-	assert.Equal(t, "arn:aws:iam::ACCOUNT_ID:root", string(v.Raw))
+	walk("PitfallsFile", reflect.TypeOf(PitfallsFile{}))
+	walk("AvoidLedger", reflect.TypeOf(AvoidLedger{}))
+}
+
+// Published OS-vendor AMI owners are content: the plain-run layer leaves
+// them, so a learned owners filter stays valid. A registered id or an ARN
+// field is scrubbed even if listed.
+func TestPublicAMIOwnersSurviveOnlyThePlainRunLayer(t *testing.T) {
+	t.Parallel()
+
+	const canonical = "099720109477"
+	assert.Equal(t, `owners = ["099720109477"]`, scrubWith(`owners = ["099720109477"]`, nil))
+	assert.Equal(t, "arn:aws:iam::ACCOUNT_ID:root", scrubWith("arn:aws:iam::"+canonical+":root", nil))
+	assert.Equal(t, "owner ACCOUNT_ID", scrubWith("owner "+canonical, knownAccountsPattern([]string{canonical})))
 }

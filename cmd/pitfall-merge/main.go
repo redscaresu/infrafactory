@@ -247,12 +247,13 @@ func savePitfalls(path string, pf generator.PitfallsFile) error {
 
 // registerScrubbedAccounts registers the config's aws.account_id for the
 // writer's scrub, reading only that field. Nothing here stops the merge:
-// a missing or unreadable config falls back to the scrub's ARN and plain
-// 12-digit layers, which need no registration (a broken config only
-// warns).
+// a missing or unreadable config warns, naming the path (a run from
+// another directory is then visible), and falls back to the scrub's ARN
+// and plain 12-digit layers, which need no registration.
 func registerScrubbedAccounts(path string) {
 	body, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
+		fmt.Fprintf(os.Stderr, "pitfall-merge: WARN: config %s not found; scrubbing ARN account fields and plain 12-digit ids only\n", path)
 		return
 	}
 	var cfg struct {

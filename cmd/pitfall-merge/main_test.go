@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/redscaresu/infrafactory/internal/generator"
+	"github.com/redscaresu/infrafactory/internal/generator/scrubtest"
 )
 
 func mk(resource, rule, source string) generator.PitfallEntry {
@@ -356,7 +357,7 @@ func TestMergeCollapsesRawAndScrubbedCopies(t *testing.T) {
 // The sweep may run without a config, or with one that fails to load:
 // neither stops the merge, and only aws.account_id is read.
 func TestRegisterScrubbedAccountsIsLenient(t *testing.T) {
-	generator.ResetScrubbedAccountsForTest(t)
+	scrubtest.Register(t) // registerScrubbedAccounts registers; undo it when the test ends
 	dir := t.TempDir()
 
 	registerScrubbedAccounts(filepath.Join(dir, "absent.yaml"))

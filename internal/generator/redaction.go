@@ -73,10 +73,25 @@ var (
 // wherever they appear, in any form. It is called once the config is
 // loaded (aws.account_id); an empty or malformed id is ignored, and ids
 // accumulate, so a later load never un-scrubs an earlier account.
-// Nothing registered means only ARN account fields are scrubbed.
-func RegisterScrubbedAccounts(ids ...string) {
+// Nothing registered still scrubs ARN account fields and plain 12-digit
+// runs (accountSpans).
+//
+// It returns a func that puts the registry back as it was before this
+// call. Production callers ignore it; tests use it (via scrubtest) so a
+// registration cannot leak into the next test.
+func RegisterScrubbedAccounts(ids ...string) (restore func()) {
 	accountsMu.Lock()
 	defer accountsMu.Unlock()
+	before := slices.Clone(knownAccountIDs)
+	restore = func() {
+		accountsMu.Lock()
+		defer accountsMu.Unlock()
+		knownAccountIDs = before
+		knownAccountPattern.Store(nil)
+		if len(before) > 0 {
+			knownAccountPattern.Store(knownAccountsPattern(before))
+		}
+	}
 	for _, id := range ids {
 		id = strings.TrimSpace(id)
 		if !isAccountID(id) || slices.Contains(knownAccountIDs, id) {
@@ -87,6 +102,7 @@ func RegisterScrubbedAccounts(ids ...string) {
 	if len(knownAccountIDs) > 0 {
 		knownAccountPattern.Store(knownAccountsPattern(knownAccountIDs))
 	}
+	return restore
 }
 
 func isAccountID(id string) bool {
@@ -111,8 +127,8 @@ func knownAccountsPattern(ids []string) *regexp.Regexp {
 //	(b) every ARN account field (one followed by a digit is not one);
 //	(c) any other run of exactly 12 digits not touching another digit,
 //	    unless its whole alphanumeric token is lowercase hex of 16+
-//	    characters (a digest, a commit sha, snap-/vol-/eni- ids) or it
-//	    is a UUID's last group.
+//	    characters (a digest, a commit sha, snap-/vol-/eni- ids), it is
+//	    a UUID's last group, or it is a public AMI owner (publicAMIOwners).
 //
 // (a) and (b) are precise; (c) keeps the scrub failing closed when no
 // account is registered or an error names another account in prose. A
@@ -130,7 +146,7 @@ func accountSpans(s string, known *regexp.Regexp) [][]int {
 	}
 	notIDs := append(hexTokenSpans(s), uuidPattern.FindAllStringIndex(s, -1)...)
 	for _, m := range digitRunPattern.FindAllStringIndex(s, -1) {
-		if m[1]-m[0] == accountIDDigits && !insideAny(m, notIDs) {
+		if m[1]-m[0] == accountIDDigits && !insideAny(m, notIDs) && !publicAMIOwners[s[m[0]:m[1]]] {
 			spans = append(spans, m)
 		}
 	}
@@ -169,6 +185,18 @@ func scrubWith(s string, known *regexp.Regexp) string {
 	}
 	b.WriteString(s[last:])
 	return b.String()
+}
+
+// publicAMIOwners are the published AMI-owner accounts of OS vendors.
+// They are content, not secrets: a learned rule's `owners` filter names
+// them, and scrubbing one would break the rule. Only layer (c) honours
+// this; a registered id or an ARN account field is scrubbed even if
+// listed. Each is confirmed by the vendor's own documentation:
+var publicAMIOwners = map[string]bool{
+	"099720109477": true, // Canonical (Ubuntu); documentation.ubuntu.com "Find Ubuntu images on AWS"
+	"309956199498": true, // Red Hat (RHEL); access.redhat.com/solutions/15356
+	"136693071363": true, // Debian; wiki.debian.org/Cloud/AmazonEC2Image
+	"801119661308": true, // Amazon's Windows AMIs; AWS Tools for PowerShell user guide, "Find an AMI"
 }
 
 var (
@@ -221,10 +249,11 @@ func CutText(s string, n int) string {
 	return s[:cut]
 }
 
-// ScrubStrings scrubs, in place, every string reachable from v (a
-// pointer): string fields and elements, string map keys, and []byte
-// contents read as text. It returns how many it changed. One walk covers
-// every field, so no list of fields can fall behind the types.
+// ScrubStrings scrubs, in place, every string field and string element
+// reachable from v (a pointer) through structs, pointers, slices and
+// arrays, and returns how many it changed. It does not walk maps,
+// interfaces or []byte: the pitfalls types hold none, and
+// TestScrubbedTypesHoldOnlyWalkableFields fails the day one appears.
 func ScrubStrings(v any) int {
 	return scrubValue(reflect.ValueOf(v))
 }
@@ -236,11 +265,6 @@ func scrubValue(v reflect.Value) int {
 			return 0
 		}
 		return scrubValue(v.Elem())
-	case reflect.Interface:
-		if v.IsNil() || !v.CanSet() {
-			return 0
-		}
-		return scrubCopy(v.Elem(), v.Set)
 	case reflect.Struct:
 		n := 0
 		for i := 0; i < v.NumField(); i++ {
@@ -248,27 +272,9 @@ func scrubValue(v reflect.Value) int {
 		}
 		return n
 	case reflect.Slice, reflect.Array:
-		if v.Kind() == reflect.Slice && v.Type().Elem().Kind() == reflect.Uint8 {
-			return scrubBytes(v)
-		}
 		n := 0
 		for i := 0; i < v.Len(); i++ {
 			n += scrubValue(v.Index(i))
-		}
-		return n
-	case reflect.Map:
-		n := 0
-		for _, k := range v.MapKeys() {
-			e := v.MapIndex(k)
-			n += scrubCopy(e, func(c reflect.Value) { e = c; v.SetMapIndex(k, c) })
-			if k.Kind() != reflect.String {
-				continue
-			}
-			if key := ScrubAccountIDs(k.String()); key != k.String() {
-				v.SetMapIndex(k, reflect.Value{})
-				v.SetMapIndex(reflect.ValueOf(key).Convert(k.Type()), e)
-				n++
-			}
 		}
 		return n
 	case reflect.String:
@@ -281,26 +287,4 @@ func scrubValue(v reflect.Value) int {
 		}
 	}
 	return 0
-}
-
-func scrubBytes(v reflect.Value) int {
-	if v.IsNil() || !v.CanSet() {
-		return 0
-	}
-	if scrubbed := ScrubAccountIDs(string(v.Bytes())); scrubbed != string(v.Bytes()) {
-		v.SetBytes([]byte(scrubbed))
-		return 1
-	}
-	return 0
-}
-
-// scrubCopy scrubs an unaddressable value through an addressable copy.
-func scrubCopy(e reflect.Value, set func(reflect.Value)) int {
-	c := reflect.New(e.Type()).Elem()
-	c.Set(e)
-	n := scrubValue(c)
-	if n > 0 {
-		set(c)
-	}
-	return n
 }

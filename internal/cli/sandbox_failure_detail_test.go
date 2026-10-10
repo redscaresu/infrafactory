@@ -7,6 +7,7 @@ import (
 
 	"github.com/redscaresu/infrafactory/internal/config"
 	"github.com/redscaresu/infrafactory/internal/generator"
+	"github.com/redscaresu/infrafactory/internal/generator/scrubtest"
 	"github.com/redscaresu/infrafactory/internal/harness"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
@@ -174,7 +175,7 @@ func TestFailureTextCutsNeverSplitAnAccountID(t *testing.T) {
 // Every command builds its runtime through buildRuntime, which registers
 // the config's account with the publish sinks' scrub.
 func TestBuildRuntimeRegistersTheConfigAccount(t *testing.T) {
-	generator.ResetScrubbedAccountsForTest(t)
+	scrubtest.Register(t) // buildRuntime registers; undo it when the test ends
 	const account = "444455556666"
 	opts := defaultRuntimeOptions()
 	opts.configLoader = func(string) (config.Config, error) {
@@ -190,4 +191,13 @@ func TestBuildRuntimeRegistersTheConfigAccount(t *testing.T) {
 	// The glued form is layer (a) only: the plain-run layer would let it
 	// through, so this passes only if the account was registered.
 	assert.Equal(t, "abcdACCOUNT_ID", generator.ScrubAccountIDs("abcd"+account))
+}
+
+// The replay detail lands in the published avoid ledger, so its cut never
+// splits an account id either.
+func TestAvoidReplayDetailNeverSplitsAnAccountID(t *testing.T) {
+	const id = "987654321098"
+	detail := strings.Repeat("x", avoidCheckDetailLimit-len(id)/2) + id + strings.Repeat("y", 50)
+	got := failedReplay(1, 0, detail, "aws_iam_role", []string{"name"})
+	assert.NotContains(t, got.Detail, "987654")
 }

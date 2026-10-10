@@ -654,7 +654,7 @@ func trimSnippet(s string, max int) string {
 	}
 	cut := strings.LastIndex(s[:max], "\n")
 	if cut <= 0 {
-		cut = max
+		return CutText(s, max) + "\n# ... (truncated)"
 	}
 	return s[:cut] + "\n# ... (truncated)"
 }

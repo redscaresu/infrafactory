@@ -32,6 +32,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -103,8 +104,18 @@ func main() {
 	// Emit a single-element pitfalls-file YAML so the operator can pipe
 	// straight into `yq` or append to pitfalls/<cloud>.yaml after
 	// review.
+	if err := writeEntry(os.Stdout, *cloud, *entry); err != nil {
+		fail("encode: %v", err)
+	}
+}
+
+// writeEntry prints entry as a pitfalls YAML fragment. The operator
+// appends it to pitfalls/<cloud>.yaml by hand, outside the writer's
+// scrub, so it is scrubbed here: the rule quotes raw failure text.
+func writeEntry(w io.Writer, cloud string, entry generator.LearnedPitfall) error {
+	generator.ScrubStrings(&entry)
 	out := map[string]any{
-		"provider": *cloud,
+		"provider": cloud,
 		"pitfalls": []map[string]any{
 			{
 				"resource":        entry.Resource,
@@ -114,12 +125,12 @@ func main() {
 			},
 		},
 	}
-	enc := yaml.NewEncoder(os.Stdout)
+	enc := yaml.NewEncoder(w)
 	enc.SetIndent(2)
 	if err := enc.Encode(out); err != nil {
-		fail("encode: %v", err)
+		return err
 	}
-	_ = enc.Close()
+	return enc.Close()
 }
 
 // autodiscoverIterPair walks `<runDir>/iterations/` and returns paths
