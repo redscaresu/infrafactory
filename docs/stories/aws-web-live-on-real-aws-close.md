@@ -36,5 +36,5 @@ docs/epics/aws-web-live-on-real-aws.md, turns the HLD's `## Epics` link (:479) i
 - The PR body holds every real-cloud run id with its evidence bundle (aws-layer3-iam-measured,
   aws-layer3-claim-legs, aws-web-live-real-run, aws-web-live-holdout-mutation,
   aws-learned-pitfall-from-real-aws) and the cumulative dated cost bound, under €5. Code-only PR
-  numbers are listed separately. No 12-digit run in the PR body.
+  numbers are listed separately. No account id (the configured `aws.account_id` in any form, or an ARN's account field) in the PR body.
 - `make doc-hygiene` and `go test -tags noui ./internal/generator/ ./internal/cli/` pass.

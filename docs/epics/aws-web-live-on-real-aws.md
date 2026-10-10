@@ -46,7 +46,7 @@ held or left (`aws ssm get-parameter` on the claim parameter shows none, and
 `infrafactory reap --dry-run` sweeps empty); the cumulative cost bound plus this run's worst case,
 dated, under €5; the user's go recorded. After each run: aws_scope_sweep and aws_scope_release
 pass (else `reap --take-over <holder>` before anything else); a CloudTrail errorCode check over the
-run window; the run dir copied out of the worktree. Before each PR: no 12-digit run in the diff or
+run window; the run dir copied out of the worktree. Before each PR: no account id (the configured `aws.account_id` in any form, or an ARN's account field) in the diff or
 the PR body.
 
 **Out of scope:** The load balancer; the live path; GCP or Genesys Layer 3; scheduled or CI runs;

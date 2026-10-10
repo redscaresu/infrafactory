@@ -50,4 +50,4 @@ Any real-vs-mock delta seen is added to docs/layer3/real-vs-mock-deltas.md in th
 - TestLayer3CoverageDocTotalsMatchItsTable passes with the totals at 4 have run and 1 ungated but
   unrun. `grep -c '€\|EUR' docs/layer3/coverage.md` is unchanged.
 - The PR body states the run id and a dated cost bound, and the epic's cumulative bound is under
-  €5. No 12-digit run appears in the PR body or in any committed file.
+  €5. No account id (the configured `aws.account_id` in any form, or an ARN's account field) appears in the PR body or in any committed file.
