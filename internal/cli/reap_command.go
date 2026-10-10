@@ -182,10 +182,11 @@ func runAWSReap(cmd *cobra.Command, runtime *CommandRuntime, scenarioName string
 	if err != nil {
 		return fail(err)
 	}
-	if err := claimAWSScopeForReap(ctx, runtime, env, holder, takeOver); err != nil {
+	runtime.awsHolder = holder
+	if err := claimAWSScopeForReap(ctx, runtime, env, takeOver); err != nil {
 		return fail(err)
 	}
-	runtime.awsClaim = awsClaim{holder: holder, state: awsClaimHeld}
+	runtime.awsClaim = awsClaim{state: awsClaimHeld}
 	stages, failures := reapClaimedAWSScope(ctx, runtime, env)
 
 	status := CommandStatusSuccess
@@ -202,13 +203,14 @@ func runAWSReap(cmd *cobra.Command, runtime *CommandRuntime, scenarioName string
 	return nil
 }
 
-// claimAWSScopeForReap takes the claim for holder: over from takeOver
-// when it is set, otherwise only when no one holds it. A held claim is
-// refused naming its holder and the command that takes it over, with
-// nothing written.
-func claimAWSScopeForReap(ctx context.Context, runtime *CommandRuntime, env map[string]string, holder, takeOver string) error {
+// claimAWSScopeForReap takes the claim for runtime.awsHolder: over from
+// takeOver when it is set, otherwise only when no one holds it. A held
+// claim is refused naming its holder and the command that takes it over,
+// with nothing written.
+func claimAWSScopeForReap(ctx context.Context, runtime *CommandRuntime, env map[string]string, takeOver string) error {
+	holder := runtime.awsHolder
 	if takeOver != "" {
-		return awsReapTakeFailure(runtime, holder, harness.TakeOverAWSClaim(ctx, env, runtime.Deps.AWSSSM, "", takeOver, holder))
+		return awsReapTakeFailure(runtime, harness.TakeOverAWSClaim(ctx, env, runtime.Deps.AWSSSM, "", takeOver, holder))
 	}
 	current, held, err := harness.ReadAWSClaimHolder(ctx, env, runtime.Deps.AWSSSM, "")
 	switch {
@@ -218,18 +220,21 @@ func claimAWSScopeForReap(ctx context.Context, runtime *CommandRuntime, env map[
 		return fmt.Errorf("refusing to reap: %w by %s. Once that run has ended, `%s` takes the claim over from it",
 			harness.ErrAWSScopeClaimed, current, awsTakeOverCommand(runtime, current))
 	}
-	return awsReapTakeFailure(runtime, holder, harness.TakeAWSClaim(ctx, env, runtime.Deps.AWSSSM, "", holder))
+	return awsReapTakeFailure(runtime, harness.TakeAWSClaim(ctx, env, runtime.Deps.AWSSSM, "", holder))
 }
 
 // awsReapTakeFailure names the next reap when reap's own take leaves the
 // claim not as it found it: a take-over that deleted the old claim (so
-// --take-over of it can never work again), or a take whose outcome is
-// unknown (so the claim may now be reap's).
-func awsReapTakeFailure(runtime *CommandRuntime, holder string, err error) error {
-	if !errors.Is(err, harness.ErrAWSPreviousClaimDeleted) && !errors.Is(err, harness.ErrAWSClaimOutcomeUnknown) {
+// --take-over of it can never work again), a take whose outcome is
+// unknown (so the claim may now be reap's), or a claim another holder
+// took first (so only its take-over can work, once that run has ended).
+func awsReapTakeFailure(runtime *CommandRuntime, err error) error {
+	var byOther *harness.AWSScopeClaimedError
+	if !errors.Is(err, harness.ErrAWSPreviousClaimDeleted) && !errors.Is(err, harness.ErrAWSClaimOutcomeUnknown) &&
+		!errors.As(err, &byOther) {
 		return err
 	}
-	runtime.awsClaim = awsClaimAfterTake(holder, err)
+	runtime.awsClaim = awsClaimAfterTake(err)
 	return fmt.Errorf("%w. %s", err, awsReapAdvice(runtime, runtime.awsClaim))
 }
 
@@ -246,7 +251,7 @@ func awsTakeOverCommand(runtime *CommandRuntime, holder string) string {
 // a kept claim names the command that takes it over.
 func reapClaimedAWSScope(ctx context.Context, runtime *CommandRuntime, env map[string]string) ([]StageSummary, []FailureSummary) {
 	cfg := runtime.Config.AWS
-	holder := runtime.awsClaim.holder
+	holder := runtime.awsHolder
 	stages := []StageSummary{{Layer: "sandbox_deploy", Stage: "aws_scope_claim", Status: StageStatusPass,
 		Detail: fmt.Sprintf("claimed account %s for %s", cfg.AccountID, holder)}}
 	var failures []FailureSummary

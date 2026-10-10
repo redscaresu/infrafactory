@@ -382,7 +382,7 @@ func TestInterruptGuardKeepsSignalsCaughtUntilFnReturns(t *testing.T) {
 	})
 	t.Run("aws", func(t *testing.T) {
 		rt := signalRuntime()
-		rt.awsClaim = awsClaim{holder: lifecycleOtherHolder, state: awsClaimHeld}
+		rt.awsHolder, rt.awsClaim = lifecycleOtherHolder, awsClaim{state: awsClaimHeld}
 		n := newSignalNotify()
 		stoppedDuringFn := true
 		out := &strings.Builder{}

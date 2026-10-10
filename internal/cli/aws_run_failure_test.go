@@ -180,6 +180,22 @@ func TestAWSRunFailureArmLeavesAReleasedClaimAlone(t *testing.T) {
 	assert.Contains(t, run.result.Stages[i].Detail, "not held by this run")
 }
 
+// Every release in one process uses its one holder: a release does not
+// clear it, so the next iteration's claim is released too.
+func TestAWSRunReleasesEachIterationsClaimWithTheProcessHolder(t *testing.T) {
+	lc := newAWSLifecycle(t)
+	applyFails(lc)
+
+	run := runAWSRun(t, lc, awsRunOptions{repairs: 2})
+
+	require.Error(t, run.err)
+	assert.Equal(t, 2, run.generates, "generate")
+	assert.Equal(t, 2, lc.count(deleteClaim), "each iteration released its claim")
+	assert.NotContains(t, run.output, "this run may hold the aws scope's claim", "no release was unknown")
+	_, held := lc.claim()
+	assert.False(t, held)
+}
+
 func TestAWSRunFailureArmLeavesAnotherHoldersClaimAlone(t *testing.T) {
 	lc := newAWSLifecycle(t)
 	dirtySweep(lc)

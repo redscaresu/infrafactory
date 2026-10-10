@@ -51,8 +51,7 @@ func runTestWithNotify(
 	// the zero scenario's cloud is Scaleway, the guard as it was.
 	sc, _ := runtime.LoadScenario(args[0])
 	cloud := layer3TeardownCloud(sc.Cloud)
-	holder, err := awsClaimHolderFor(runtime, cloud, time.Now().UTC().Format("20060102T150405Z0700"))
-	if err != nil {
+	if err := mintAWSClaimHolder(runtime, cloud, time.Now().UTC().Format("20060102T150405Z0700")); err != nil {
 		return err
 	}
 	// Outside the guard, which names reap on any interrupt: nothing is
@@ -80,7 +79,6 @@ func runTestWithNotify(
 			MockDeployMode:  harness.MockDeployModeClean,
 			SkipDestroy:     noDestroy,
 			ContinueOnDrift: continueOnDrift,
-			AWSClaimHolder:  holder,
 			// Progress on stderr, the same stream and the same bytes
 			// `deploy` produces. stdout carries the output contract.
 			Progress: cmd.ErrOrStderr(),
@@ -634,11 +632,6 @@ type testExecutionOptions struct {
 	// "nothing" is the silent-apply failure this slice exists to fix and
 	// a caller that forgets should not reintroduce it.
 	Progress io.Writer
-
-	// AWSClaimHolder claims the aws Layer 3 scope for this execution. It
-	// is minted once per process: by run for all its iterations, by test
-	// for its one.
-	AWSClaimHolder string
 }
 
 func executeTest(ctx context.Context, runtime *CommandRuntime, scenarioPath string, opts testExecutionOptions) (OutputResult, error) {
@@ -866,7 +859,7 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 			// longer be a Terraform resource.
 			// For aws the id is the account, and the claim on it is held
 			// whenever it is not empty, failures or not.
-			createdID, runProjectStages, runProjectFailures := ensureRunProject(ctx, runtime, cloud, sc.Name, outputDir, opts.AWSClaimHolder)
+			createdID, runProjectStages, runProjectFailures := ensureRunProject(ctx, runtime, cloud, sc.Name, outputDir)
 			runProjectID = createdID
 			stages = append(stages, runProjectStages...)
 			failures = append(failures, runProjectFailures...)

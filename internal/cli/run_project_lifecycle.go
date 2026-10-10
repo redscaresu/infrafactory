@@ -24,10 +24,10 @@ import (
 // to every other run's.
 //
 // For aws there is no project: the scope is the account, claimed for
-// awsClaimHolder (ensureAWSScopeClaim).
-func ensureRunProject(ctx context.Context, runtime *CommandRuntime, cloud layer3Cloud, scenario, workDir, awsClaimHolder string) (string, []StageSummary, []FailureSummary) {
+// runtime.awsHolder (ensureAWSScopeClaim).
+func ensureRunProject(ctx context.Context, runtime *CommandRuntime, cloud layer3Cloud, scenario, workDir string) (string, []StageSummary, []FailureSummary) {
 	if cloud == layer3AWS {
-		return ensureAWSScopeClaim(ctx, runtime, awsClaimHolder)
+		return ensureAWSScopeClaim(ctx, runtime)
 	}
 	if cloud != layer3Scaleway {
 		return "", []StageSummary{{Layer: "sandbox_deploy", Stage: "run_project", Status: StageStatusFail}},

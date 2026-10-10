@@ -404,21 +404,20 @@ func TestAWSReapAdviceHedgesWithoutAHolder(t *testing.T) {
 	}
 }
 
-// A release clears the holder with the state; a failed one is unknown,
-// unless it names the holder that has the claim.
+// A failed release is unknown, unless it found no claim or names the
+// holder that has it.
 func TestAWSClaimAfterRelease(t *testing.T) {
-	const holder = "run-9@this-host.example:1"
 	for name, tc := range map[string]struct {
 		err  error
 		want awsClaim
 	}{
 		"released":       {want: awsClaim{state: awsClaimNotHeld}},
 		"no claim":       {err: fmt.Errorf("refusing: %w", harness.ErrAWSNoClaimHeld), want: awsClaim{state: awsClaimNotHeld}},
-		"response lost":  {err: errors.New("ssm:DeleteParameter: connection reset"), want: awsClaim{holder: holder, state: awsClaimUnknown}},
-		"another holder": {err: fmt.Errorf("refusing: %w", &harness.AWSScopeClaimedError{Holder: lifecycleOtherHolder}), want: awsClaim{holder: holder, state: awsClaimHeldByOther, other: lifecycleOtherHolder}},
+		"response lost":  {err: errors.New("ssm:DeleteParameter: connection reset"), want: awsClaim{state: awsClaimUnknown}},
+		"another holder": {err: fmt.Errorf("refusing: %w", &harness.AWSScopeClaimedError{Holder: lifecycleOtherHolder}), want: awsClaim{state: awsClaimHeldByOther, other: lifecycleOtherHolder}},
 	} {
 		t.Run(name, func(t *testing.T) {
-			assert.Equal(t, tc.want, awsClaimAfterRelease(holder, tc.err))
+			assert.Equal(t, tc.want, awsClaimAfterRelease(tc.err))
 		})
 	}
 }
@@ -492,17 +491,18 @@ func TestEnsureAWSScopeClaimKeepsAClaimThisProcessHolds(t *testing.T) {
 		before awsClaim
 		want   awsClaimState
 	}{
-		"held by this process": {before: awsClaim{holder: holder, state: awsClaimHeld}, want: awsClaimHeld},
+		"held by this process": {before: awsClaim{state: awsClaimHeld}, want: awsClaimHeld},
 		"released":             {before: awsClaim{state: awsClaimNotHeld}, want: awsClaimNotHeld},
 		"never set":            {want: awsClaimNotHeld},
 	} {
 		t.Run(name, func(t *testing.T) {
-			rt := &CommandRuntime{awsClaim: tc.before} // no aws config: ensure returns before any request
+			// No aws config: ensure returns before any request.
+			rt := &CommandRuntime{awsClaim: tc.before, awsHolder: holder}
 
-			_, _, failures := ensureAWSScopeClaim(context.Background(), rt, holder)
+			_, _, failures := ensureAWSScopeClaim(context.Background(), rt)
 
 			require.NotEmpty(t, failures, "ensure returned early")
-			assert.Equal(t, awsClaim{holder: holder, state: tc.want}, rt.awsClaim)
+			assert.Equal(t, awsClaim{state: tc.want}, rt.awsClaim)
 		})
 	}
 }
@@ -520,8 +520,58 @@ func TestAWSTestNoDestroyHedgesAnUnknownClaim(t *testing.T) {
 	require.NotEqual(t, -1, i, "stages carry %s", StageAWSScopeClaimKept)
 	detail := run.result.Stages[i].Detail
 	assert.NotContains(t, detail, "on purpose")
-	assert.Contains(t, detail, "this run may hold the aws scope's claim for "+lc.runHolder)
+	assert.Contains(t, detail, "skipped the teardown (--no-destroy) though this run may hold the aws scope's claim for "+lc.runHolder)
 	assert.Contains(t, detail, "if no one holds it, `"+reapCommand(run.h.ConfigPath, run.h.ScenarioPath)+"` does")
+}
+
+// A skipped teardown with a claim this run does not hold, or that another
+// holds, is not a kept claim: one sentence each, on the claim's stage.
+func TestAWSTeardownSkippedSaysWhatTheClaimIs(t *testing.T) {
+	const holder = "run-9@this-host.example:1"
+	plain := reapCommand(config.DefaultPath, "scenarios/training/aws-web-live.yaml")
+	for name, tc := range map[string]struct {
+		claim awsClaim
+		want  string
+	}{
+		"not held": {claim: awsClaim{state: awsClaimNotHeld},
+			want: "skipped the teardown (--no-destroy); this run does not hold the aws scope's claim. `" + plain + "` sweeps the scope"},
+		"another holder": {claim: awsClaim{state: awsClaimHeldByOther, other: lifecycleOtherHolder},
+			want: "skipped the teardown (--no-destroy); the aws scope's claim is held by " + lifecycleOtherHolder +
+				", not this run. Once that run has ended, `" + plain + " --take-over " + shellQuote(lifecycleOtherHolder) + "`"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			rt := &CommandRuntime{ConfigPath: config.DefaultPath, scenarioPath: "scenarios/training/aws-web-live.yaml",
+				awsHolder: holder, awsClaim: tc.claim}
+
+			stages, failures := awsScopeTeardown(context.Background(), rt, t.TempDir(), testExecutionOptions{SkipDestroy: true})
+
+			assert.Empty(t, failures)
+			require.Len(t, stages, 1)
+			assert.Equal(t, "aws_scope_claim", stages[0].Stage, "not %s", StageAWSScopeClaimKept)
+			assert.Equal(t, StageStatusSkip, stages[0].Status)
+			assert.True(t, strings.HasPrefix(stages[0].Detail, tc.want), stages[0].Detail)
+			assert.NotContains(t, stages[0].Detail, "kept")
+		})
+	}
+}
+
+// Another holder that takes the claim between reap's read and its take
+// is named, with the take-over that works once that run has ended.
+func TestAWSReapNamesTheHolderThatTookTheClaimFirst(t *testing.T) {
+	lc := newAWSLifecycle(t)
+	lc.onPut = func() {
+		lc.mu.Lock()
+		defer lc.mu.Unlock()
+		lc.params[harness.AWSClaimParameter] = lifecycleOtherHolder
+	}
+
+	r := reapAWS(t, lc, nil, false)
+
+	require.Error(t, r.err)
+	assert.ErrorIs(t, r.err, harness.ErrAWSScopeClaimed)
+	assert.Contains(t, r.err.Error(), "Once that run has ended, `"+reapCommand(r.h.ConfigPath, r.h.ScenarioPath)+
+		" --take-over "+shellQuote(lifecycleOtherHolder)+"` sweeps the scope")
+	assert.Zero(t, lc.destroy.calls, "SandboxDestroy")
 }
 
 // reap's own take whose outcome is unknown may have left the claim
@@ -535,7 +585,8 @@ func TestAWSReapNamesBothReapsWhenItsOwnTakeIsUnknown(t *testing.T) {
 	require.Error(t, r.err)
 	assert.ErrorIs(t, r.err, harness.ErrAWSClaimOutcomeUnknown)
 	plain := reapCommand(r.h.ConfigPath, r.h.ScenarioPath)
-	assert.Contains(t, r.err.Error(), "If this run holds the claim, `"+plain+" --take-over "+awsReapHolderPrefix)
+	assert.Contains(t, r.err.Error(), "If this reap holds the claim, `"+plain+" --take-over "+awsReapHolderPrefix)
+	assert.NotContains(t, r.err.Error(), "this run")
 	assert.Contains(t, r.err.Error(), "if no one holds it, `"+plain+"` does")
 	assert.Zero(t, lc.destroy.calls, "SandboxDestroy")
 }
