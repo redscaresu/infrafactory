@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"slices"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -169,19 +170,15 @@ func TestExecRunnerHelperProcess(t *testing.T) {
 	switch role {
 	case "parent":
 		// A guard, as runUnderSignals is: the first signal cancels ctx.
-		caught := make(chan os.Signal, 4)
-		signal.Notify(caught, guardSignals...)
-		ctx, cancel := context.WithCancel(context.Background())
-		unguard := holdSignalGuard()
-		go func() {
-			<-caught
-			cancel()
-		}()
+		ctx, stop := notifyGuarded(context.Background(), signal.NotifyContext)
+		// Every signal this process gets: the terminal's, and any Run raised again.
+		seen := make(chan os.Signal, 4)
+		signal.Notify(seen, guardSignals...)
 		result, err := execCommandRunner{}.Run(ctx, helperCommand("count"))
-		unguard()
-		time.Sleep(500 * time.Millisecond) // for any signal Run raised again
+		stop()
+		time.Sleep(500 * time.Millisecond)
 		// Canceled only when the cancel signalled the child itself.
-		fmt.Printf("%s canceled=%t raised=%d", result.Stdout, errors.Is(err, context.Canceled), len(caught))
+		fmt.Printf("%s canceled=%t signals=%d", result.Stdout, errors.Is(err, context.Canceled), len(seen))
 		os.Exit(0)
 	case "unguarded":
 		// As live teardown is: nothing catches a signal.
@@ -262,7 +259,7 @@ func TestExecRunnerGroupInterruptReachesChildOnce(t *testing.T) {
 	require.NoError(t, syscall.Kill(-parent.Process.Pid, syscall.SIGINT))
 	require.NoError(t, parent.Wait())
 
-	assert.Equal(t, "interrupts=1 canceled=true raised=0", stdout.String())
+	assert.Equal(t, "interrupts=1 canceled=true signals=1", stdout.String())
 }
 
 // With no guard above it -- live teardown, Layer 2, the UI -- Run is the
@@ -374,4 +371,27 @@ func TestExecRunnerCancelSignalsTheChildsGroup(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, "interrupt\ninterrupt\n", string(result.Stdout), "child and grandchild each interrupted once")
 	assert.Less(t, time.Since(start), 5*time.Second, "the grandchild outlived the kill")
+}
+
+// Every guard registers with signalGuards while it catches signals, so
+// Run never raises a signal again into it. Not parallel: the count is
+// process-wide.
+func TestSignalGuardsAreCounted(t *testing.T) {
+	before := signalGuards.Load()
+	var during []int32
+	count := func() { during = append(during, signalGuards.Load()) }
+
+	_, err := runUnderSignals(guardCmd(&strings.Builder{}), signalRuntime(), layer3AWS, notifyFromParent, func(context.Context) error {
+		count()
+		return nil
+	})
+	require.NoError(t, err)
+	_, err = runDeployApply(guardCmd(&strings.Builder{}), context.Background(), notifyFromParent, func(context.Context) (*harness.SandboxDeployResult, error) {
+		count()
+		return nil, nil
+	})
+	require.NoError(t, err)
+
+	assert.Equal(t, []int32{before + 1, before + 1}, during, "runUnderSignals, runDeployApply")
+	assert.Equal(t, before, signalGuards.Load(), "released")
 }

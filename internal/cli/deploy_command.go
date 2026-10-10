@@ -297,8 +297,7 @@ func runDeployApply(
 	notify func(context.Context, ...os.Signal) (context.Context, context.CancelFunc),
 	apply func(context.Context) (*harness.SandboxDeployResult, error),
 ) (*harness.SandboxDeployResult, error) {
-	sigCtx, stop := notify(ctx, guardSignals...)
-	unguard := holdSignalGuard()
+	sigCtx, stop := notifyGuarded(ctx, notify)
 	result, err := apply(sigCtx)
 	// A signal, not merely a cancelled parent. sigCtx derives from ctx, so
 	// sigCtx.Err() is non-nil for a command timeout or an SDK cancel too --
@@ -310,7 +309,6 @@ func runDeployApply(
 	// rather than be swallowed. The message therefore does not invite one
 	// -- by the time it prints there is nothing left to abandon.
 	stop()
-	unguard()
 
 	if interrupted {
 		_, _ = fmt.Fprintf(cmd.ErrOrStderr(),

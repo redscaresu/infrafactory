@@ -128,11 +128,21 @@ var guardSignals = func() []os.Signal {
 // copy of a signal.
 var signalGuards atomic.Int32
 
-// holdSignalGuard records a guard catching guardSignals until the
-// returned func is called.
-func holdSignalGuard() func() {
+// notifyGuarded is the only way a guard catches guardSignals: through
+// notify, and counted in signalGuards until stop. A guard that caught
+// them uncounted would get Run's raised copy as a second signal, which
+// abandons a teardown.
+func notifyGuarded(
+	ctx context.Context,
+	notify func(context.Context, ...os.Signal) (context.Context, context.CancelFunc),
+) (context.Context, context.CancelFunc) {
+	sigCtx, stop := notify(ctx, guardSignals...)
 	signalGuards.Add(1)
-	return sync.OnceFunc(func() { signalGuards.Add(-1) })
+	release := sync.OnceFunc(func() { signalGuards.Add(-1) })
+	return sigCtx, func() {
+		stop()
+		release()
+	}
 }
 
 // raiseWait bounds how long release waits for a signal it raised again

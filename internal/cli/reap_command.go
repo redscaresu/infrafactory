@@ -348,8 +348,7 @@ func catchSignals(
 
 	abandoned, abandon := context.WithCancel(context.WithoutCancel(parent))
 	spanCtx, endSpan := context.WithCancel(context.WithValue(parent, abandonKey{}, abandoned))
-	sigCtx, stop := notify(parent, guardSignals...)
-	unguard := holdSignalGuard()
+	sigCtx, stop := notifyGuarded(parent, notify)
 	signal := func() bool { return sigCtx.Err() != nil && parent.Err() == nil }
 	// watched is buffered, so the watcher never blocks on a caller that
 	// a panic took away.
@@ -376,7 +375,7 @@ func catchSignals(
 		}
 		printNotice()
 		endSpan()
-		next, stopNext := notify(abandoned, guardSignals...)
+		next, stopNext := notifyGuarded(abandoned, notify)
 		select {
 		case <-next.Done():
 			abandon()
@@ -398,7 +397,6 @@ func catchSignals(
 			}
 			runtime.signalNoticed = runtime.signalNoticed || fired
 			stop()
-			unguard()
 			endSpan()
 			cmd.SetErr(out.w)
 		})
