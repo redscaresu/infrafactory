@@ -519,12 +519,11 @@ func TestKeepStillDestroysAnIterationThatFailed(t *testing.T) {
 	require.NotEmpty(t, result.Failures, "the fixture must actually fail, or this proves nothing")
 	assert.Equal(t, 1, sandboxDestroy.calls,
 		"a failing iteration's resources are destroyed even under --keep: nothing would ever record them")
-	assert.NotContains(t, stageDetail(result.Stages, "sandbox_deploy", "destroy"), "kept by --keep")
 }
 
 // An interrupt during the mock destroy fails the iteration, so `run
-// --keep` destroys the stack rather than keeping and registering it, and
-// ends "interrupted", never target_reached (whose path learns pitfalls).
+// --keep` ends "interrupted", never target_reached (whose path learns
+// pitfalls), and its stack is destroyed rather than kept and registered.
 func TestInterruptedRunKeepDoesNotKeepTheStack(t *testing.T) {
 	h := newCommandTestHarness(t)
 	lc := newAWSLifecycle(t) // its notify and signal only

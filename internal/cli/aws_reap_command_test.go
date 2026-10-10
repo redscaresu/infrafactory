@@ -695,3 +695,19 @@ func TestAWSClaimHeadNamesTheActorThatMintedTheHolder(t *testing.T) {
 	assert.True(t, strings.HasPrefix(head, "this run may hold the aws scope's claim for "+awsReapHolderPrefix), head)
 	assert.NotContains(t, awsReapAdvice(rt, rt.awsClaim), "this reap")
 }
+
+// A signal inside the claim's release, the teardown's last call: the
+// teardown has finished clean on the context the signal ended, so it
+// leaves no failure of its own, and the interrupt still fails the command.
+func TestAWSTestInterruptedDuringItsTeardownIsNotASuccess(t *testing.T) {
+	lc := newAWSLifecycle(t)
+	lc.onDelete = lc.signal
+
+	run := runAWSTest(t, lc, nil, nil)
+
+	_, held := lc.claim()
+	assert.False(t, held, "the teardown finished and released the claim")
+	require.Error(t, run.err)
+	assert.Equal(t, CommandStatusFailed, run.result.Status)
+	assert.True(t, slices.ContainsFunc(run.result.Failures, isInterruptFailure), "%+v", run.result.Failures)
+}

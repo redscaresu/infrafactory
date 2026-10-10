@@ -585,3 +585,15 @@ func TestInterruptedAWSRunPrintsTheReapCommand(t *testing.T) {
 		})
 	}
 }
+
+// The same interrupt in `run` ends it "interrupted", never target_reached.
+func TestAWSRunInterruptedDuringItsTeardownEndsInterrupted(t *testing.T) {
+	lc := newAWSLifecycle(t)
+	lc.onDelete = lc.signal
+
+	run := runAWSRun(t, lc, awsRunOptions{repairs: 2})
+
+	require.Error(t, run.err)
+	assert.Equal(t, "interrupted", run.terminalReason())
+	assert.Equal(t, 1, run.generates, "generate")
+}

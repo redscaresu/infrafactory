@@ -384,10 +384,9 @@ func mockDeployFailureDetail(err *harness.MockDeployError) string {
 
 // destroyMock runs the mock (Layer 2) destroy. A destroy an interrupt
 // stopped before tofu could run is reported skipped, not failed: the
-// interrupt is not a leftover. The interrupt itself is a failure, so an
-// interrupted command never succeeds, keeps its sandbox or reaches
-// target_reached. The destroy is not rerun on a fresh context, which
-// would hold up the real teardown below it.
+// interrupt is not a leftover, and executeTestWithScenario fails the
+// command for it. The destroy is not rerun on a fresh
+// context, which would hold up the real teardown below it.
 func destroyMock(ctx context.Context, runtime *CommandRuntime, outputDir string, env map[string]string) ([]StageSummary, []FailureSummary) {
 	result, err := runtime.Deps.Destroy.Run(ctx, outputDir, env)
 	if !destroyInterrupted(ctx, err) {
@@ -397,11 +396,7 @@ func destroyMock(ctx context.Context, runtime *CommandRuntime, outputDir string,
 		Layer: "destruction", Stage: "destroy", Status: StageStatusSkip,
 		Detail: "skipped: the run was interrupted before the mock destroy finished",
 	}
-	interrupt := FailureSummary{
-		Layer: "run", Stage: "interrupted", Check: "interrupted", Command: "destroy harness",
-		Detail: "the run was interrupted before the mock destroy ran, so the destruction layer is unproven",
-	}
-	return []StageSummary{skip}, []FailureSummary{interrupt}
+	return []StageSummary{skip}, nil
 }
 
 // destroyInterrupted: the destroy stage itself failed for the cancelled
@@ -1158,6 +1153,16 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 		}
 	}
 
+	// The one place an interrupt fails the command, so neither `test` nor a
+	// `run` iteration (as target_reached) ever reports one as a success: a
+	// teardown finished on a fresh context, or a skipped mock destroy,
+	// leaves no failure of its own.
+	if ctx.Err() != nil {
+		failures = append(failures, FailureSummary{
+			Layer: "run", Stage: "interrupted", Check: "interrupted",
+			Detail: "the run was interrupted, so it did not pass, whatever its teardown then finished",
+		})
+	}
 	status := CommandStatusSuccess
 	if len(failures) > 0 {
 		status = CommandStatusFailed

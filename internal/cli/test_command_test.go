@@ -1496,8 +1496,6 @@ func TestInterruptedTestDoesNotFailTheMockDestroy(t *testing.T) {
 	}
 }
 
-func isInterruptFailure(f FailureSummary) bool { return f.Layer == "run" && f.Check == "interrupted" }
-
 // Under an interrupt only the destroy stage's own context.Canceled is
 // skipped; a leftover or any other error is still a destruction failure.
 func TestDestroyMockReportsARealFailureUnderAnInterrupt(t *testing.T) {
@@ -1520,3 +1518,5 @@ func TestDestroyMockReportsARealFailureUnderAnInterrupt(t *testing.T) {
 		})
 	}
 }
+
+func isInterruptFailure(f FailureSummary) bool { return f.Layer == "run" && f.Check == "interrupted" }
