@@ -265,11 +265,6 @@ func editPitfalls(state *serverState, w http.ResponseWriter, r *http.Request, pr
 		}
 	}
 
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		state.writeInternalError(w, http.StatusInternalServerError, "create pitfalls directory", err)
-		return
-	}
-
 	pf := generator.PitfallsFile{Provider: provider}
 	for _, entry := range req.Pitfalls {
 		source := strings.TrimSpace(entry.Source)
@@ -287,59 +282,20 @@ func editPitfalls(state *serverState, w http.ResponseWriter, r *http.Request, pr
 		})
 	}
 
-	out, err := yaml.Marshal(&pf)
+	// Through the generator's writer, so an edit gets the same atomic
+	// write and account-id scrub as a learned entry.
+	scrubbed, err := generator.WritePitfalls(filepath.Join(dir, provider+".yaml"), &pf)
 	if err != nil {
-		state.writeInternalError(w, http.StatusInternalServerError, "marshal pitfalls", err)
+		state.writeInternalError(w, http.StatusInternalServerError, "write pitfalls", err)
 		return
 	}
 
-	target := filepath.Join(dir, provider+".yaml")
-	// os.CreateTemp gives us a unique tmp filename so two concurrent PUTs
-	// to the same provider can't clobber each other's tmp file before
-	// either rename completes; the loser's payload would otherwise
-	// silently overwrite the winner's.
-	tmp, err := os.CreateTemp(dir, provider+"-*.yaml.tmp")
-	if err != nil {
-		state.writeInternalError(w, http.StatusInternalServerError, "create temp pitfalls", err)
-		return
-	}
-	tmpPath := tmp.Name()
-	// Defer cleanup runs unconditionally; the success path nil-outs the
-	// path so cleanup becomes a no-op once the rename committed. This
-	// covers the panic-mid-flight case the previous straight-line
-	// chain could leak.
-	cleanupPath := tmpPath
-	defer func() {
-		if cleanupPath != "" {
-			_ = os.Remove(cleanupPath)
-		}
-	}()
-	if _, err := tmp.Write(out); err != nil {
-		_ = tmp.Close()
-		state.writeInternalError(w, http.StatusInternalServerError, "write temp pitfalls", err)
-		return
-	}
-	// CreateTemp lands at 0600 by default; pitfalls files in the repo are
-	// 0644, so make the in-place mode match what users expect.
-	if err := tmp.Chmod(0o644); err != nil {
-		_ = tmp.Close()
-		state.writeInternalError(w, http.StatusInternalServerError, "chmod temp pitfalls", err)
-		return
-	}
-	if err := tmp.Close(); err != nil {
-		state.writeInternalError(w, http.StatusInternalServerError, "close temp pitfalls", err)
-		return
-	}
-	if err := os.Rename(tmpPath, target); err != nil {
-		state.writeInternalError(w, http.StatusInternalServerError, "rename pitfalls", err)
-		return
-	}
-	// Rename succeeded — disarm the cleanup defer so it doesn't unlink
-	// the freshly-installed final file.
-	cleanupPath = ""
-
+	// The writer scrubs account ids, so the file can differ from what was
+	// submitted; say how many strings changed rather than leave the UI
+	// showing text that is not on disk.
 	writeJSON(w, http.StatusOK, map[string]any{
 		"provider": provider,
 		"count":    len(pf.Pitfalls),
+		"scrubbed": scrubbed,
 	})
 }

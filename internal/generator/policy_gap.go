@@ -205,12 +205,18 @@ func AppendPolicyGap(docsDir string, gap PolicyGap) error {
 	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("read policy-gaps: %w", err)
 	}
-	content := string(existing)
+	// Scrubbed before the dedup, so a raw legacy row and a scrubbed new
+	// one key the same and never both land.
+	content := ScrubAccountIDs(string(existing))
 
 	// Dedup-key combines policy + resource so the same conflict
 	// detected on multiple sweeps doesn't grow the file.
 	dedupKey := fmt.Sprintf("| `%s` | `%s` |", gap.Policy, gap.Resource)
-	if strings.Contains(content, dedupKey) {
+	if strings.Contains(content, ScrubAccountIDs(dedupKey)) {
+		// Already recorded; still rewrite a raw legacy file scrubbed.
+		if content != string(existing) {
+			return os.WriteFile(path, []byte(content), 0o644)
+		}
 		return nil
 	}
 
@@ -235,10 +241,7 @@ func AppendPolicyGap(docsDir string, gap PolicyGap) error {
 			"|---|---|---|---|---|\n"
 	}
 
-	detail := strings.TrimSpace(gap.Detail)
-	if len(detail) > 240 {
-		detail = detail[:237] + "..."
-	}
+	detail := ellipsize(strings.TrimSpace(gap.Detail), maxGapDetailBytes)
 	detail = strings.ReplaceAll(detail, "|", "\\|")
 	detail = strings.ReplaceAll(detail, "\n", " ")
 
@@ -255,5 +258,7 @@ func AppendPolicyGap(docsDir string, gap PolicyGap) error {
 		content = content[:insertAt] + row + "\n" + content[insertAt:]
 	}
 
-	return os.WriteFile(path, []byte(content), 0o644)
+	// The whole file is scrubbed at the write, so every column and every
+	// earlier row is covered, not a chosen few.
+	return os.WriteFile(path, []byte(ScrubAccountIDs(content)), 0o644)
 }

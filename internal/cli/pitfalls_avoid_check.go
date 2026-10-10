@@ -209,7 +209,8 @@ func failedReplay(applyExit, planExit int, detail, resource string, attrs []stri
 	outcome := generator.ClassifyAvoidFailure(detail, resource, attrs)
 	detail = strings.TrimSpace(detail)
 	if len(detail) > avoidCheckDetailLimit {
-		detail = strings.ToValidUTF8(detail[:avoidCheckDetailLimit], "") + "…"
+		// The ledger is published; CutText never leaves a partial id.
+		detail = generator.CutText(detail, avoidCheckDetailLimit) + "…"
 	}
 	return AvoidReplayResult{ApplyExit: applyExit, PlanExit: planExit, Outcome: outcome, Detail: detail}
 }

@@ -42,6 +42,8 @@ func newUICmd(assets fs.FS) *cobra.Command {
 			if err != nil {
 				return formatCommandError("ui", err)
 			}
+			// The API server's pitfalls PUT is a publish sink too.
+			generator.RegisterScrubbedAccounts(cfg.AWS.AccountID)
 
 			// Real-cloud apply is decided HERE, at start time, by the
 			// person typing the command in the shell that already holds

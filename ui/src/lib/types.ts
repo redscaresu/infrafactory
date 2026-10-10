@@ -121,6 +121,8 @@ export interface PitfallsResponse {
 export interface SavePitfallsResponse {
   provider: string;
   count: number;
+  // Strings the server's account-id scrub changed before writing.
+  scrubbed?: number;
 }
 
 export interface DeploymentHealth {

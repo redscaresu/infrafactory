@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 // TestDetectPolicyConflict_ScalewayVPCRequiredCountBased pins the
@@ -225,4 +227,13 @@ func TestAppendPolicyGap_CreatesFileAndDedups(t *testing.T) {
 	if !strings.Contains(string(body4), "## gcp") {
 		t.Errorf("gcp section missing")
 	}
+}
+
+func TestAppendPolicyGap_ScrubsAccountIDs(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, AppendPolicyGap(dir, PolicyGap{
+		Cloud: "aws", Policy: "aws.iam_scoped", Resource: "aws_iam_role",
+		Scenario: "aws-web", Detail: accountIDLeak, Timestamp: "20261009T120000Z",
+	}))
+	assertAccountIDsScrubbed(t, filepath.Join(dir, "policy-gaps.md"), 2)
 }

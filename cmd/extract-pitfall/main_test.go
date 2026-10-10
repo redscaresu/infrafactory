@@ -3,7 +3,13 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/redscaresu/infrafactory/internal/generator"
+	"github.com/redscaresu/infrafactory/internal/generator/scrubtest"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestAutodiscoverIterPairPicksLastTwoIters pins the run-dir
@@ -81,4 +87,31 @@ func TestAutodiscoverIterPairIgnoresNonNumericDirs(t *testing.T) {
 	if filepath.Base(filepath.Dir(passingDir)) != "2" {
 		t.Errorf("passingDir parent = %q, want 2", filepath.Base(filepath.Dir(passingDir)))
 	}
+}
+
+// The printed fragment is appended to a published pitfalls file by hand,
+// so the account id in the failure text never reaches it.
+func TestWriteEntryScrubsAccountIDs(t *testing.T) {
+	var out strings.Builder
+	require.NoError(t, writeEntry(&out, filepath.Join(t.TempDir(), "absent.yaml"), "aws", generator.LearnedPitfall{
+		Resource: "aws_iam_role",
+		Rule:     "User arn:aws:iam::123456789012:user/x is not authorized in account 123456789012",
+	}))
+	assert.NotContains(t, out.String(), "123456789012")
+	assert.Equal(t, 2, strings.Count(out.String(), "ACCOUNT_ID"), out.String())
+}
+
+// The configured account is registered before the scrub, so its console
+// form, which only the registered-id layer knows, is caught as well.
+func TestWriteEntryScrubsTheConfiguredAccountInConsoleForm(t *testing.T) {
+	scrubtest.Register(t) // writeEntry registers; undo it when the test ends
+	cfg := filepath.Join(t.TempDir(), "infrafactory.yaml")
+	require.NoError(t, os.WriteFile(cfg, []byte("unknown_key: 1\naws:\n  account_id: \"123456789012\"\n"), 0o644))
+
+	var out strings.Builder
+	require.NoError(t, writeEntry(&out, cfg, "aws", generator.LearnedPitfall{
+		Resource: "aws_iam_role", Rule: "denied for account 1234-5678-9012",
+	}))
+	assert.NotContains(t, out.String(), "1234-5678-9012")
+	assert.Contains(t, out.String(), "ACCOUNT_ID", out.String())
 }

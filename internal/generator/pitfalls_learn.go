@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
 	"time"
@@ -201,7 +202,9 @@ func AppendMockGap(docsDir string, gap MockGap) error {
 	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("read mock-gaps: %w", err)
 	}
-	content := string(existing)
+	// Scrubbed before the dedup, so a raw legacy row and a scrubbed new
+	// one key the same and never both land.
+	content := ScrubAccountIDs(string(existing))
 
 	// Dedup: same (cloud, signal, resource) triple already recorded?
 	// Markdown row format includes these three columns; substring
@@ -211,7 +214,11 @@ func AppendMockGap(docsDir string, gap MockGap) error {
 	if gap.Resource == "" {
 		dedupKey = fmt.Sprintf("| _(none)_ | `%s` |", gap.Signal)
 	}
-	if strings.Contains(content, dedupKey) {
+	if strings.Contains(content, ScrubAccountIDs(dedupKey)) {
+		// Already recorded; still rewrite a raw legacy file scrubbed.
+		if content != string(existing) {
+			return os.WriteFile(path, []byte(content), 0o644)
+		}
 		return nil
 	}
 
@@ -240,10 +247,7 @@ func AppendMockGap(docsDir string, gap MockGap) error {
 	if resourceCell == "" {
 		resourceCell = "_(none)_"
 	}
-	detail := strings.TrimSpace(gap.Detail)
-	if len(detail) > 240 {
-		detail = detail[:237] + "..."
-	}
+	detail := ellipsize(strings.TrimSpace(gap.Detail), maxGapDetailBytes)
 	// Escape pipe + newline so the markdown table doesn't break.
 	detail = strings.ReplaceAll(detail, "|", "\\|")
 	detail = strings.ReplaceAll(detail, "\n", " ")
@@ -266,7 +270,9 @@ func AppendMockGap(docsDir string, gap MockGap) error {
 		content = content[:insertAt] + row + "\n" + content[insertAt:]
 	}
 
-	return os.WriteFile(path, []byte(content), 0o644)
+	// The whole file is scrubbed at the write, so every column and every
+	// earlier row is covered, not a chosen few.
+	return os.WriteFile(path, []byte(ScrubAccountIDs(content)), 0o644)
 }
 
 // FirstMockSignal returns the first mock-actionable signal that
@@ -525,10 +531,7 @@ func ExtractDescriptivePitfall(failureDetail, scenarioName string) *LearnedPitfa
 	// prior ordering silently dropped every apply-time learning).
 	resource := extractResource(failureDetail)
 	if resource != "" && len(failureDetail) > 40 {
-		rule := failureDetail
-		if len(rule) > 300 {
-			rule = rule[:297] + "..."
-		}
+		rule := ellipsize(failureDetail, maxDescriptiveRuleBytes)
 		return &LearnedPitfall{
 			Resource:       resource,
 			Rule:           rule,
@@ -858,6 +861,7 @@ func AppendPitfall(pitfallsDir, cloud string, pitfall LearnedPitfall) error {
 	if pitfallsDir == "" || cloud == "" {
 		return nil
 	}
+	ScrubStrings(&pitfall)
 
 	ledger, ledgerErr := ReadAvoidLedger(pitfallsDir, cloud)
 	var hits []retiredHit
@@ -895,6 +899,9 @@ func appendPitfall(pitfallsDir, cloud string, pitfall LearnedPitfall, ledger *Av
 			return fmt.Errorf("parse pitfalls file: %w", err)
 		}
 	}
+	// Scrubbed before the dedup, so a raw legacy entry and its scrubbed
+	// candidate compare equal.
+	ScrubStrings(&pf)
 
 	// Deduplication: check if a similar pitfall already exists.
 	if isDuplicate(pf.Pitfalls, pitfall) {
@@ -931,12 +938,46 @@ func appendPitfall(pitfallsDir, cloud string, pitfall LearnedPitfall, ledger *Av
 	return writePitfallsFile(pitfallsDir, filePath, cloud, &pf)
 }
 
+// WritePitfalls writes pf to path through writePitfallsFile (atomic,
+// account ids scrubbed), for writers outside this package. It returns how
+// many strings the scrub changed, so a caller can say the file differs
+// from what it was handed. pf itself is left as it was.
+func WritePitfalls(path string, pf *PitfallsFile) (int, error) {
+	return writeScrubbedFile(filepath.Dir(path), path, strings.TrimSuffix(filepath.Base(path), ".yaml"), pf)
+}
+
 // writePitfallsFile marshals v (a pitfalls file or an avoid-check
 // ledger) and writes it atomically via a same-directory temp + rename.
 func writePitfallsFile(pitfallsDir, filePath, cloud string, v any) error {
-	out, err := yaml.Marshal(v)
+	_, err := writeScrubbedFile(pitfallsDir, filePath, cloud, v)
+	return err
+}
+
+// marshalScrubbed marshals a scrubbed deep copy of v, leaving v as the
+// caller had it: the copy is v round-tripped through YAML into a fresh
+// value of its type. It returns how many strings the scrub changed.
+func marshalScrubbed(v any) ([]byte, int, error) {
+	raw, err := yaml.Marshal(v)
 	if err != nil {
-		return fmt.Errorf("marshal pitfalls: %w", err)
+		return nil, 0, err
+	}
+	t := reflect.TypeOf(v)
+	if t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	fresh := reflect.New(t).Interface()
+	if err := yaml.Unmarshal(raw, fresh); err != nil {
+		return nil, 0, err
+	}
+	scrubbed := ScrubStrings(fresh)
+	out, err := yaml.Marshal(fresh)
+	return out, scrubbed, err
+}
+
+func writeScrubbedFile(pitfallsDir, filePath, cloud string, v any) (int, error) {
+	out, scrubbed, err := marshalScrubbed(v)
+	if err != nil {
+		return 0, fmt.Errorf("marshal pitfalls: %w", err)
 	}
 	// Here rather than in each caller. Every write needs the directory,
 	// the temp file below is created INSIDE it, and a reader is a missing
@@ -945,14 +986,14 @@ func writePitfallsFile(pitfallsDir, filePath, cloud string, v any) error {
 	// each caller had to remember, and AppendLivePitfall did not (S156c,
 	// pass 86).
 	if err := os.MkdirAll(pitfallsDir, 0o755); err != nil {
-		return fmt.Errorf("create pitfalls directory: %w", err)
+		return 0, fmt.Errorf("create pitfalls directory: %w", err)
 	}
 	// Use os.CreateTemp so two concurrent learn-paths racing on the
 	// same provider can't clobber each other's tmp file before either
 	// rename completes. Mirrors the editPitfalls API handler.
 	tmp, err := os.CreateTemp(pitfallsDir, cloud+"-*.yaml.tmp")
 	if err != nil {
-		return fmt.Errorf("create temp pitfalls file: %w", err)
+		return 0, fmt.Errorf("create temp pitfalls file: %w", err)
 	}
 	tmpPath := tmp.Name()
 	cleanupPath := tmpPath
@@ -963,20 +1004,35 @@ func writePitfallsFile(pitfallsDir, filePath, cloud string, v any) error {
 	}()
 	if _, err := tmp.Write(out); err != nil {
 		_ = tmp.Close()
-		return fmt.Errorf("write temp pitfalls file: %w", err)
+		return 0, fmt.Errorf("write temp pitfalls file: %w", err)
 	}
 	if err := tmp.Chmod(0o644); err != nil {
 		_ = tmp.Close()
-		return fmt.Errorf("chmod temp pitfalls file: %w", err)
+		return 0, fmt.Errorf("chmod temp pitfalls file: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("close temp pitfalls file: %w", err)
+		return 0, fmt.Errorf("close temp pitfalls file: %w", err)
 	}
 	if err := os.Rename(tmpPath, filePath); err != nil {
-		return fmt.Errorf("rename pitfalls file: %w", err)
+		return 0, fmt.Errorf("rename pitfalls file: %w", err)
 	}
 	cleanupPath = ""
-	return nil
+	return scrubbed, nil
+}
+
+const (
+	maxGapDetailBytes       = 240
+	maxDescriptiveRuleBytes = 300
+	ellipsis                = "..."
+)
+
+// ellipsize cuts s to at most max bytes, ending in "...". CutText picks
+// the cut: never inside a rune (terraform's '│') or an account id.
+func ellipsize(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return CutText(s, max-len(ellipsis)) + ellipsis
 }
 
 // isVerbatimFallback returns true if a rule is a raw terraform stderr

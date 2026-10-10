@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/redscaresu/infrafactory/internal/feedback"
+	"github.com/redscaresu/infrafactory/internal/generator"
 )
 
 const failureStderrMaxChars = 2000
@@ -39,7 +40,9 @@ func stageFailureDetail(commandErr error, stderr string) string {
 	}
 	// Keep the surfaced detail compact while preserving actionable stderr text.
 	if len(trimmedStderr) > failureStderrMaxChars {
-		trimmedStderr = trimmedStderr[:failureStderrMaxChars] + "..."
+		// CutText never splits an account id: a stub would escape the
+		// scrub at the pitfall writer, and pitfalls are learned from this.
+		trimmedStderr = generator.CutText(trimmedStderr, failureStderrMaxChars) + "..."
 	}
 	return fmt.Sprintf("%s | stderr: %s", base, trimmedStderr)
 }

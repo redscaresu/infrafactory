@@ -402,6 +402,9 @@ func buildRuntime(cmd *cobra.Command, opts runtimeOptions) (*CommandRuntime, err
 	if err != nil {
 		return nil, err
 	}
+	// Every command builds its runtime here, so this is where the publish
+	// sinks learn which account to scrub.
+	generator.RegisterScrubbedAccounts(cfg.AWS.AccountID)
 	transportContract, err := generator.ContractForAgentType(cfg.Agent.Type)
 	if err != nil {
 		return nil, fmt.Errorf("resolve generator transport contract: %w", err)

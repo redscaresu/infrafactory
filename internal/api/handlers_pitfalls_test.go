@@ -11,6 +11,8 @@ import (
 	"testing"
 
 	"github.com/redscaresu/infrafactory/internal/config"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestPitfallsHandlerReturnsEmptyWhenDirectoryUnset(t *testing.T) {
@@ -474,4 +476,30 @@ func TestPitfallsEditRejectsNonPut(t *testing.T) {
 			t.Fatalf("expected 405 for %s, got %d", method, rec.Code)
 		}
 	}
+}
+
+func TestPitfallsEditScrubsAccountIDs(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	cfg := config.Default()
+	cfg.Paths.Pitfalls = dir
+
+	body := strings.NewReader(`{"pitfalls": [{"resource": "aws_iam_role", "rule": "arn:aws:iam::123456789012:role/x in account 123456789012"}, {"resource": "aws_s3_bucket", "rule": "clean"}]}`)
+	req := httptest.NewRequest(http.MethodPut, "/api/pitfalls/aws", body)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	pitfallsHandler(&serverState{cfg: cfg}).ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	var resp struct {
+		Scrubbed int `json:"scrubbed"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Equal(t, 1, resp.Scrubbed, "the response must say the stored text differs")
+
+	written, err := os.ReadFile(filepath.Join(dir, "aws.yaml"))
+	require.NoError(t, err)
+	assert.NotContains(t, string(written), "123456789012")
+	assert.Equal(t, 2, strings.Count(string(written), "ACCOUNT_ID"), string(written))
 }

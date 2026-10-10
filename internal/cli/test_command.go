@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/redscaresu/infrafactory/internal/config"
+	"github.com/redscaresu/infrafactory/internal/generator"
 	"github.com/redscaresu/infrafactory/internal/harness"
 	"github.com/redscaresu/infrafactory/internal/scenario"
 	"github.com/spf13/cobra"
@@ -441,7 +442,9 @@ func stderrFailureDetail(baseErr error, stderr string) string {
 		return detail
 	}
 	if len(trimmedStderr) > failureStderrDetailMaxChars {
-		trimmedStderr = trimmedStderr[:failureStderrDetailMaxChars] + "..."
+		// CutText never splits an account id: a partial one would escape
+		// the scrub at the pitfall writer. The id itself stays visible here.
+		trimmedStderr = generator.CutText(trimmedStderr, failureStderrDetailMaxChars) + "..."
 	}
 	return fmt.Sprintf("%s | stderr: %s", detail, trimmedStderr)
 }
@@ -1905,5 +1908,6 @@ func truncatePlanOutput(out string) string {
 	if len(out) <= maxPlanDetail {
 		return out
 	}
-	return out[:maxPlanDetail] + fmt.Sprintf("\n... (%d more bytes)", len(out)-maxPlanDetail)
+	head := generator.CutText(out, maxPlanDetail) // see stderrFailureDetail
+	return head + fmt.Sprintf("\n... (%d more bytes)", len(out)-len(head))
 }

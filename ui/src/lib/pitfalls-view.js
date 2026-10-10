@@ -51,3 +51,16 @@ export function selectInitialProvider(providers) {
 export function emptyPitfall() {
   return { resource: "", rule: "", source: "static", discovered_from: "" };
 }
+
+// saveStatusMessage reports a save, and says when the server scrubbed
+// account ids from what was submitted: the reloaded editor then shows
+// different text, and it should not change silently.
+export function saveStatusMessage(resp) {
+  const count = resp?.count ?? 0;
+  let message = `Saved ${count} pitfall${count === 1 ? "" : "s"}.`;
+  const scrubbed = resp?.scrubbed ?? 0;
+  if (scrubbed > 0) {
+    message += ` Account ids were replaced with ACCOUNT_ID in ${scrubbed} field${scrubbed === 1 ? "" : "s"}.`;
+  }
+  return message;
+}

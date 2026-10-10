@@ -29,6 +29,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/redscaresu/infrafactory/internal/config"
 	"github.com/redscaresu/infrafactory/internal/generator"
 	"gopkg.in/yaml.v3"
 )
@@ -44,12 +45,14 @@ func main() {
 	// on the floor would make the corpus untrustworthy in exactly the way
 	// the reporting was meant to fix.
 	keepFlag := flag.String("keep", "avoid,live", "comma-separated source values to preserve from post")
+	configFile := flag.String("config", config.DefaultPath, "infrafactory config whose aws.account_id is scrubbed in every form (optional)")
 	flag.Parse()
 
 	if *preFile == "" || *postFile == "" || *outFile == "" {
-		fmt.Fprintln(os.Stderr, "usage: pitfall-merge --pre PRE --post POST --out OUT [--keep SOURCES]")
+		fmt.Fprintln(os.Stderr, "usage: pitfall-merge --pre PRE --post POST --out OUT [--keep SOURCES] [--config CONFIG]")
 		os.Exit(2)
 	}
+	generator.RegisterConfigAccount(*configFile, os.Stderr)
 
 	keepSet := map[string]bool{}
 	for _, s := range strings.Split(*keepFlag, ",") {
@@ -220,6 +223,8 @@ func mergeKey(p generator.PitfallEntry) string {
 	return p.Resource + "\x00" + identity + "\x00" + p.Source
 }
 
+// loadPitfalls scrubs on load, so mergeKey keys on the published form
+// and a raw legacy entry and its scrubbed copy collapse into one.
 func loadPitfalls(path string) (generator.PitfallsFile, error) {
 	var pf generator.PitfallsFile
 	body, err := os.ReadFile(path)
@@ -229,15 +234,13 @@ func loadPitfalls(path string) (generator.PitfallsFile, error) {
 	if err := yaml.Unmarshal(body, &pf); err != nil {
 		return pf, err
 	}
+	generator.ScrubStrings(&pf)
 	return pf, nil
 }
 
 func savePitfalls(path string, pf generator.PitfallsFile) error {
-	body, err := yaml.Marshal(pf)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(path, body, 0o644)
+	_, err := generator.WritePitfalls(path, &pf)
+	return err
 }
 
 func sortedKeys(m map[string]bool) []string {

@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/redscaresu/infrafactory/internal/generator"
 )
 
 // ServiceProbeResult is what one probe of a live service's health path
@@ -132,7 +134,8 @@ func (p *ServiceProbe) Probe(ctx context.Context, address string, port int, heal
 
 	complete := readErr == nil && len(head) <= maxProbeBodyBytes
 	if len(head) > maxProbeBodyBytes {
-		head = head[:maxProbeBodyBytes]
+		// Live lessons quote the body; never cut inside an account id.
+		head = []byte(generator.CutText(string(head), maxProbeBodyBytes))
 	}
 
 	result := ServiceProbeResult{
