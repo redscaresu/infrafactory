@@ -109,7 +109,19 @@ func envKeyMatches(key string, patterns []string) bool {
 // guardSignals are the signals a signal guard turns into a context
 // cancel, so tofu, in its own process group, hears of them only through
 // Run's Cancel. SIGQUIT is left out: it asks for a goroutine dump now.
-var guardSignals = []os.Signal{os.Interrupt, syscall.SIGTERM, syscall.SIGHUP}
+// A SIGINT or SIGHUP the process started ignoring -- under nohup, or as
+// a background job -- is left out too, since catching it would undo
+// that. SIGTERM is always in, and must be: no signals means all of them
+// to Notify.
+var guardSignals = func() []os.Signal {
+	sigs := []os.Signal{syscall.SIGTERM}
+	for _, sig := range []os.Signal{os.Interrupt, syscall.SIGHUP} {
+		if !signal.Ignored(sig) {
+			sigs = append(sigs, sig)
+		}
+	}
+	return sigs
+}()
 
 // signalGuards counts the guards catching guardSignals right now. Signal
 // handling is process-wide, so this is too: each guard receives its own

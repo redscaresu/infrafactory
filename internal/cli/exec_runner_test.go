@@ -297,6 +297,33 @@ func TestExecRunnerStopsTofuBeforeAnUnguardedProcessDies(t *testing.T) {
 	}
 }
 
+// A hangup the process started ignoring, as under nohup, stays ignored:
+// it neither interrupts tofu nor ends the process. The SIGTERM after it
+// does both.
+func TestExecRunnerLeavesAnIgnoredHangupIgnored(t *testing.T) {
+	t.Parallel()
+
+	ready := filepath.Join(t.TempDir(), "ready")
+	// trap '' sets SIG_IGN, which exec keeps.
+	parent := exec.Command("/bin/sh", "-c", `trap '' HUP; exec "$0" "$@"`, os.Args[0], "-test.run=^TestExecRunnerHelperProcess$")
+	parent.Env = append(os.Environ(), execHelperEnv+"=unguarded", execHelperReadyEnv+"="+ready)
+	parent.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	require.NoError(t, parent.Start())
+	waitForFile(t, ready)
+
+	require.NoError(t, syscall.Kill(-parent.Process.Pid, syscall.SIGHUP))
+	time.Sleep(300 * time.Millisecond)
+	require.NoError(t, syscall.Kill(-parent.Process.Pid, syscall.SIGTERM))
+
+	var exitErr *exec.ExitError
+	require.ErrorAs(t, parent.Wait(), &exitErr, "the parent ended normally")
+	status := exitErr.Sys().(syscall.WaitStatus)
+	assert.True(t, status.Signaled() && status.Signal() == syscall.SIGTERM, "parent ended by %v, not by SIGTERM", exitErr)
+	count, err := os.ReadFile(ready + ".count")
+	require.NoError(t, err)
+	assert.Equal(t, "interrupts=1", string(count))
+}
+
 // A cancelled context with no terminal involved -- CI, a timeout --
 // interrupts the child, then kills it once cancelKillFallback passes.
 func TestExecRunnerCancelInterruptsThenKills(t *testing.T) {
