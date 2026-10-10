@@ -170,6 +170,8 @@ type CommandRuntime struct {
 	// awsHolder is this process's claim holder, fixed once minted, for
 	// the notice the first signal prints while awsClaim may be changing.
 	awsHolder string
+	// awsActor is who awsHolder belongs to, awsActorRun or awsActorReap.
+	awsActor string
 	// signalNoticed is set once the first signal's notice has printed.
 	signalNoticed      bool
 	outputDir          string

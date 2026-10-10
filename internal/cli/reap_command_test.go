@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	goruntime "runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -464,7 +463,9 @@ func TestRunUnderSignalsIgnoresAnEndedParent(t *testing.T) {
 // A panicking fn leaves no watcher blocked behind it, and no notice: the
 // deferred stop is not a signal.
 func TestRunUnderSignalsLeavesNoWatcherWhenFnPanics(t *testing.T) {
-	before := goruntime.NumGoroutine()
+	exited := make(chan struct{})
+	testSignalWatcherExited = func() { close(exited) }
+	t.Cleanup(func() { testSignalWatcherExited = nil })
 	out := &strings.Builder{}
 
 	func() {
@@ -474,13 +475,11 @@ func TestRunUnderSignalsLeavesNoWatcherWhenFnPanics(t *testing.T) {
 		})
 	}()
 
-	// Polled by hand: assert.Eventually runs its condition on a goroutine
-	// of its own, which the count would include.
-	deadline := time.Now().Add(2 * time.Second)
-	for goruntime.NumGoroutine() > before && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
+	select {
+	case <-exited:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the signal watcher is still blocked after fn panicked")
 	}
-	assert.LessOrEqual(t, goruntime.NumGoroutine(), before, "the watcher goroutine is still blocked")
 	assert.Empty(t, out.String(), "no notice")
 }
 

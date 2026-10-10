@@ -1765,11 +1765,16 @@ func awsClaimTaken(s StageSummary) bool {
 	return (s.Stage == "aws_scope_claim" && s.Status == StageStatusPass) || s.Stage == StageAWSScopeClaimKept
 }
 
+// awsClaimReadTimeout bounds the failure arm's claim read, which no
+// signal can cut short; a variable so a test need not wait it out.
+var awsClaimReadTimeout = harness.AWSClaimTimeout
+
 // awsRunFailureTeardown is the failure path's aws arm. It acts only on a
 // claim this run holds, with the env from aws.account_id and never from
 // the run-project marker, which here may be a stale Scaleway one. It
 // compares the claim with runtime.awsHolder, the process's own. Its claim read ignores cancellation, as the sweep's requests do: a second
-// Ctrl-C must not turn a claim this run holds into an unknown one.
+// Ctrl-C must not turn a claim this run holds into an unknown one. It is
+// bounded instead, like the other uncancellable claim steps.
 func awsRunFailureTeardown(ctx context.Context, runtime *CommandRuntime, stages []StageSummary) ([]StageSummary, []FailureSummary) {
 	if !slices.ContainsFunc(stages, awsClaimTaken) {
 		return []StageSummary{{Layer: "sandbox_deploy", Stage: "auto_destroy", Status: StageStatusSkip,
@@ -1780,7 +1785,9 @@ func awsRunFailureTeardown(ctx context.Context, runtime *CommandRuntime, stages 
 		return awsScopeClaimKept(runtime, nil, nil, err.Error())
 	}
 	holder := runtime.awsHolder
-	current, held, err := harness.ReadAWSClaimHolder(context.WithoutCancel(ctx), env, runtime.Deps.AWSSSM, "")
+	readCtx, cancelRead := context.WithTimeout(context.WithoutCancel(ctx), awsClaimReadTimeout)
+	defer cancelRead()
+	current, held, err := harness.ReadAWSClaimHolder(readCtx, env, runtime.Deps.AWSSSM, "")
 	if err != nil {
 		runtime.awsClaim = awsClaim{state: awsClaimUnknown}
 		return awsScopeClaimKept(runtime, nil, nil, err.Error())

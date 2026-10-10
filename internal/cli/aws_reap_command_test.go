@@ -590,3 +590,29 @@ func TestAWSReapNamesBothReapsWhenItsOwnTakeIsUnknown(t *testing.T) {
 	assert.Contains(t, r.err.Error(), "if no one holds it, `"+plain+"` does")
 	assert.Zero(t, lc.destroy.calls, "SandboxDestroy")
 }
+
+// --take-over with no claim stored has nothing to take over: it names
+// plain reap.
+func TestAWSReapTakeOverWithNoClaimNamesPlainReap(t *testing.T) {
+	lc := newAWSLifecycle(t)
+
+	r := reapAWS(t, lc, nil, false, "--take-over", lifecycleOtherHolder)
+
+	require.Error(t, r.err)
+	assert.ErrorIs(t, r.err, harness.ErrAWSNoClaimHeld)
+	assert.Contains(t, r.err.Error(), "run plain `"+reapCommand(r.h.ConfigPath, r.h.ScenarioPath)+"`")
+	assert.Empty(t, writes(lc))
+}
+
+// Who holds the claim is said by whoever minted the holder, never read
+// from its shape: a run whose id starts like reap's is still this run.
+func TestAWSClaimHeadNamesTheActorThatMintedTheHolder(t *testing.T) {
+	rt := signalRuntime()
+	require.NoError(t, mintAWSClaimHolder(rt, layer3AWS, awsReapHolderPrefix+"20261010T000000Z"))
+	rt.awsClaim = awsClaim{state: awsClaimUnknown}
+
+	head := awsClaimHead(rt, rt.awsClaim)
+
+	assert.True(t, strings.HasPrefix(head, "this run may hold the aws scope's claim for "+awsReapHolderPrefix), head)
+	assert.NotContains(t, awsReapAdvice(rt, rt.awsClaim), "this reap")
+}

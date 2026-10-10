@@ -182,7 +182,7 @@ func runAWSReap(cmd *cobra.Command, runtime *CommandRuntime, scenarioName string
 	if err != nil {
 		return fail(err)
 	}
-	runtime.awsHolder = holder
+	runtime.awsHolder, runtime.awsActor = holder, awsActorReap
 	if err := claimAWSScopeForReap(ctx, runtime, env, takeOver); err != nil {
 		return fail(err)
 	}
@@ -223,12 +223,16 @@ func claimAWSScopeForReap(ctx context.Context, runtime *CommandRuntime, env map[
 	return awsReapTakeFailure(runtime, harness.TakeAWSClaim(ctx, env, runtime.Deps.AWSSSM, "", holder))
 }
 
-// awsReapTakeFailure names the next reap when reap's own take leaves the
-// claim not as it found it: a take-over that deleted the old claim (so
+// awsReapTakeFailure names the next reap when --take-over found no claim,
+// or when reap's own take leaves the claim not as it found it: a take-over that deleted the old claim (so
 // --take-over of it can never work again), a take whose outcome is
 // unknown (so the claim may now be reap's), or a claim another holder
 // took first (so only its take-over can work, once that run has ended).
 func awsReapTakeFailure(runtime *CommandRuntime, err error) error {
+	if errors.Is(err, harness.ErrAWSNoClaimHeld) {
+		// --take-over found nothing to take over.
+		return fmt.Errorf("%w: run plain `%s`", err, reapCommand(runtime.ConfigPath, runtime.scenarioPath))
+	}
 	var byOther *harness.AWSScopeClaimedError
 	if !errors.Is(err, harness.ErrAWSPreviousClaimDeleted) && !errors.Is(err, harness.ErrAWSClaimOutcomeUnknown) &&
 		!errors.As(err, &byOther) {
@@ -332,6 +336,9 @@ func runUnderSignals(
 		}
 	}()
 	go func() {
+		if testSignalWatcherExited != nil {
+			defer testSignalWatcherExited()
+		}
 		select {
 		case <-sigCtx.Done():
 			select {
@@ -361,6 +368,10 @@ func runUnderSignals(
 	runtime.signalNoticed = runtime.signalNoticed || fired
 	return fired, err
 }
+
+// testSignalWatcherExited, when a test sets it, is called as the signal
+// watcher goroutine exits.
+var testSignalWatcherExited func()
 
 // signalNoticeScenario is the scenario the first signal's reap names:
 // the loaded one, else the one the command was given.

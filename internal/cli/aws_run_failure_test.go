@@ -291,6 +291,59 @@ func TestAWSRunFailureArmKnowsTheRunsHolderAfterARelease(t *testing.T) {
 	assert.False(t, held)
 }
 
+// A stalled claim read in the arm, which no signal can end, is ended by
+// its bound: the arm returns and reports the claim unknown.
+func TestAWSRunFailureArmBoundsAStalledClaimRead(t *testing.T) {
+	lc := newAWSLifecycle(t)
+	dirtySweep(lc)
+	awsClaimReadTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { awsClaimReadTimeout = harness.AWSClaimTimeout })
+
+	run := runAWSRun(t, lc, awsRunOptions{repairs: 1, loopEnded: func() {
+		lc.mu.Lock()
+		defer lc.mu.Unlock()
+		lc.stallClaimRead = true
+	}})
+
+	require.Error(t, run.err)
+	lc.mu.Lock()
+	assert.True(t, lc.stalledToContext, "the read ended by its bound, not by the stall's own limit")
+	lc.mu.Unlock()
+	assert.Contains(t, run.output, "this run may hold the aws scope's claim for "+lc.runHolder+":")
+}
+
+// A release that settles the claim as not held, or held by another, is
+// not a kept claim: the claim stage's own failure, and the run ends for
+// its own reason.
+func TestAWSRunReleaseThatSettlesTheClaimElsewhereIsNotAKeptClaim(t *testing.T) {
+	for name, tc := range map[string]struct {
+		settle func(lc *awsLifecycle)
+		want   string
+	}{
+		"not held": {settle: func(lc *awsLifecycle) { delete(lc.params, harness.AWSClaimParameter) },
+			want: "this run does not hold the aws scope's claim:"},
+		"another holder": {settle: func(lc *awsLifecycle) { lc.params[harness.AWSClaimParameter] = lifecycleOtherHolder },
+			want: "this run does not hold the aws scope's claim: " + lifecycleOtherHolder + " does:"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			lc := newAWSLifecycle(t)
+			applyFails(lc)
+			lc.onEC2 = func(action string) {
+				if action == "DescribeInstances" {
+					tc.settle(lc)
+				}
+			}
+
+			run := runAWSRun(t, lc, awsRunOptions{repairs: 1})
+
+			require.Error(t, run.err)
+			assert.False(t, slices.ContainsFunc(run.result.Stages, isStage(StageAWSScopeClaimKept)), "no %s stage", StageAWSScopeClaimKept)
+			assert.NotEqual(t, terminalReasonAWSScopeClaimKept, run.terminalReason())
+			assert.Contains(t, run.output, tc.want)
+		})
+	}
+}
+
 // The arm cannot read the claim, so it cannot tell whether this run still
 // holds it: it names both reaps, each with the case it fits.
 func TestAWSRunFailureArmNamesBothReapsWhenTheClaimIsUnreadable(t *testing.T) {

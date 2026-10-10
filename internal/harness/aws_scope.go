@@ -27,8 +27,8 @@ const (
 	AWSStampParameter = AWSScopePrefix + "stamp"
 )
 
-// awsClaimTimeout bounds each uncancellable claim step.
-const awsClaimTimeout = 20 * time.Second
+// AWSClaimTimeout bounds each uncancellable claim step.
+const AWSClaimTimeout = 20 * time.Second
 
 var (
 	// ErrAWSScopeClaimed is a claim held by someone else. Errors wrapping
@@ -99,7 +99,7 @@ func TakeAWSClaim(ctx context.Context, env map[string]string, doer ssm.HTTPClien
 // could leave a claim taken that the run never learns it holds.
 func takeAWSClaim(ctx context.Context, client *ssm.Client, holder string) error {
 	ctx = context.WithoutCancel(ctx)
-	putCtx, cancelPut := context.WithTimeout(ctx, awsClaimTimeout)
+	putCtx, cancelPut := context.WithTimeout(ctx, AWSClaimTimeout)
 	defer cancelPut()
 	_, putErr := client.PutParameter(putCtx, &ssm.PutParameterInput{
 		Name:      aws.String(AWSClaimParameter),
@@ -111,7 +111,7 @@ func takeAWSClaim(ctx context.Context, client *ssm.Client, holder string) error 
 		return nil
 	}
 
-	getCtx, cancelGet := context.WithTimeout(ctx, awsClaimTimeout)
+	getCtx, cancelGet := context.WithTimeout(ctx, AWSClaimTimeout)
 	defer cancelGet()
 	value, found, err := getAWSParameter(getCtx, client, AWSClaimParameter)
 	switch {
@@ -177,7 +177,7 @@ func TakeOverAWSClaim(ctx context.Context, env map[string]string, doer ssm.HTTPC
 	}
 	// An interrupt must not fall between the delete and the take, so
 	// neither is cancellable.
-	deleteCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), awsClaimTimeout)
+	deleteCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), AWSClaimTimeout)
 	defer cancel()
 	if err := deleteAWSClaimHeldBy(deleteCtx, client, previous); err != nil {
 		return err

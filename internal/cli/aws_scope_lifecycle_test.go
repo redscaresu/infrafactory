@@ -70,7 +70,11 @@ type awsLifecycle struct {
 	// resolve's call, which the sweep's Owners=self listing never gets.
 	amiImage string
 	putFail  bool // PutParameter, and every claim read after it, is denied
-	putSent  bool
+	// stallClaimRead makes a claim GetParameter hang until its request
+	// context ends, or stallLimit passes; stalledToContext records which.
+	stallClaimRead   bool
+	stalledToContext bool
+	putSent          bool
 	// runHolder is the holder the run's claim PutParameter sent, taken or
 	// not; reap's own take is not it.
 	runHolder string
@@ -172,6 +176,9 @@ func (lc *awsLifecycle) claim() (string, bool) {
 	return holder, held
 }
 
+// stallLimit ends a stalled claim read that nothing else ends.
+const stallLimit = 5 * time.Second
+
 func (lc *awsLifecycle) Do(req *http.Request) (*http.Response, error) {
 	if err := req.Context().Err(); err != nil {
 		return nil, err
@@ -181,6 +188,20 @@ func (lc *awsLifecycle) Do(req *http.Request) (*http.Response, error) {
 		return nil, err
 	}
 	if target := req.Header.Get("X-Amz-Target"); target != "" {
+		lc.mu.Lock()
+		stall := lc.stallClaimRead && target == "AmazonSSM.GetParameter" && bytes.Contains(payload, []byte(harness.AWSClaimParameter))
+		lc.mu.Unlock()
+		if stall {
+			select {
+			case <-req.Context().Done():
+				lc.mu.Lock()
+				lc.stalledToContext = true
+				lc.mu.Unlock()
+				return nil, req.Context().Err()
+			case <-time.After(stallLimit):
+				return nil, errors.New("stalled claim read")
+			}
+		}
 		status, body := lc.ssm(strings.TrimPrefix(target, "AmazonSSM."), payload)
 		return lifecycleAnswer(req, status, "application/x-amz-json-1.1", body), nil
 	}
