@@ -74,6 +74,10 @@ type OutputResult struct {
 	// somebody else is already tracking.
 	Deployment string `json:"deployment,omitempty"`
 
+	// Cloud is the scenario's cloud, which picks the cloud's own advice
+	// for a failure the clouds share a check name for. Internal only.
+	Cloud string `json:"-"`
+
 	// PlanLiveText holds the Layer 3 tofu plan stdout when sandbox deploy
 	// is enabled. Internal only — not serialized to command output.
 	PlanLiveText []byte `json:"-"`
@@ -129,7 +133,7 @@ func NormalizeOutput(result OutputResult) OutputResult {
 		return left.Detail < right.Detail
 	})
 
-	normalized.Explainability = normalizeExplainability(normalized.Explainability, normalized.Failures)
+	normalized.Explainability = normalizeExplainability(normalized.Explainability, normalized.Failures, layer3TeardownCloud(result.Cloud))
 
 	return normalized
 }
@@ -213,10 +217,10 @@ func RenderMachineJSON(result OutputResult) ([]byte, error) {
 	return bytes, nil
 }
 
-func normalizeExplainability(input []ExplainabilitySummary, failures []FailureSummary) []ExplainabilitySummary {
+func normalizeExplainability(input []ExplainabilitySummary, failures []FailureSummary, cloud layer3Cloud) []ExplainabilitySummary {
 	combined := append(make([]ExplainabilitySummary, 0, len(input)+len(failures)), input...)
 	for _, failure := range failures {
-		explanation, ok := explainabilityFromFailure(failure)
+		explanation, ok := explainabilityFromFailure(failure, cloud)
 		if ok {
 			combined = append(combined, explanation)
 		}
@@ -261,7 +265,7 @@ func normalizeExplainability(input []ExplainabilitySummary, failures []FailureSu
 	return normalized
 }
 
-func explainabilityFromFailure(failure FailureSummary) (ExplainabilitySummary, bool) {
+func explainabilityFromFailure(failure FailureSummary, cloud layer3Cloud) (ExplainabilitySummary, bool) {
 	if failure.Policy == "" && failure.Check == "" {
 		return ExplainabilitySummary{}, false
 	}
@@ -288,6 +292,12 @@ func explainabilityFromFailure(failure FailureSummary) (ExplainabilitySummary, b
 	case failure.Check == "dns_resolution":
 		explanation.Summary = "real Layer 3 DNS probe failed"
 		explanation.Action = "inspect DNS records, propagation timing, and the generated domain/output wiring"
+	case failure.Check == "credentials" && cloud == layer3AWS:
+		// On aws this check also fails when the run could not confirm it
+		// holds the scope's claim; docs/operations.md § Running aws-web-live.
+		explanation.Summary = "Layer 3 real AWS deploy is enabled but its credentials or its claim on the aws scope could not be confirmed"
+		explanation.Action = "if an aws_scope_claim failure is listed, read it first: a preflight failure next to it is that refusal, not a key problem; " +
+			"otherwise check the aws config block (region, account_id, principal_arn) and the key file ~/" + awsCredentialFile + " (mode 0600)"
 	case failure.Check == "credentials":
 		explanation.Summary = "Layer 3 real Scaleway deploy is enabled but credentials are unavailable"
 		explanation.Action = "set SCW_ACCESS_KEY and SCW_SECRET_KEY before enabling sandbox_deploy"

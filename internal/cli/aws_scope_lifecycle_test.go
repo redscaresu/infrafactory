@@ -545,6 +545,14 @@ func TestAWSTestRefusesAHeldClaimNamingItsHolder(t *testing.T) {
 	assert.Contains(t, run.failureDetails(), lifecycleOtherHolder)
 	assert.Zero(t, lc.deploy.calls, "SandboxDeploy")
 	assert.Zero(t, lc.count(deleteClaim), "DeleteParameter")
+	// The preflight failure beside the claim refusal is explained in aws
+	// terms, pointing back at the claim, never with Scaleway's keys.
+	i := slices.IndexFunc(run.result.Explainability, func(e ExplainabilitySummary) bool {
+		return e.Stage == "preflight" && e.Check == "credentials"
+	})
+	require.NotEqual(t, -1, i, "%+v", run.result.Explainability)
+	assert.NotContains(t, run.result.Explainability[i].Action, "SCW_")
+	assert.Contains(t, run.result.Explainability[i].Action, "aws_scope_claim")
 	holder, _ := lc.claim()
 	assert.Equal(t, lifecycleOtherHolder, holder)
 }

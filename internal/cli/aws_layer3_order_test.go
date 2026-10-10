@@ -469,6 +469,9 @@ func TestAWSRunEndsAtTheLayer3StageThatFails(t *testing.T) {
 				assert.True(t, slices.ContainsFunc(run.result.Failures, func(f FailureSummary) bool {
 					return f.Stage == want.Stage && f.Check == want.Check && strings.Contains(f.Detail, want.Detail)
 				}), "the run fails on %s with %+v: %+v", stage.name, want, run.result.Failures)
+				for _, e := range run.result.Explainability {
+					assert.NotContains(t, e.Summary+e.Action, "SCW_", "an aws run is explained in aws terms")
+				}
 				if k < applyAt {
 					return
 				}
