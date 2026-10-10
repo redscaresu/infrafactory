@@ -27,7 +27,35 @@ const (
 var (
 	awsScopeClaimARN = "arn:aws:ssm:REGION:ACCOUNT_ID:parameter" + AWSClaimParameter
 	awsScopeStampARN = "arn:aws:ssm:REGION:ACCOUNT_ID:parameter" + AWSStampParameter
+	// A public parameter's ARN has no account field.
+	awsScopeAMIARN = "arn:aws:ssm:REGION::parameter" + AWSAL2023AMIParameter
 )
+
+// awsApplyEC2Actions is every non-Describe EC2 action the pinned
+// provider sends to apply and destroy aws-web-live, read with
+// TF_LOG=debug against fakeaws over the step-one fixture, a Layer 2
+// run's HCL, and that HCL with an aws_eip attached to the instance.
+// DisassociateAddress is the one added without measurement: destroying
+// an aws_eip with instance sends it, and fakeaws cannot associate an
+// address (story fakeaws-associate-address), so that destroy never ran.
+var awsApplyEC2Actions = []string{
+	"AllocateAddress", "AssociateAddress", "AssociateRouteTable", "AttachInternetGateway",
+	"AuthorizeSecurityGroupEgress", "AuthorizeSecurityGroupIngress", "CreateInternetGateway",
+	"CreateRoute", "CreateRouteTable", "CreateSecurityGroup", "CreateSubnet", "CreateVpc",
+	"DeleteInternetGateway", "DeleteRoute", "DeleteRouteTable", "DeleteSecurityGroup",
+	"DeleteSubnet", "DeleteVpc", "DetachInternetGateway", "DisassociateAddress", "DisassociateRouteTable",
+	"ModifyInstanceAttribute", "ModifySubnetAttribute", "ModifyVpcAttribute", "ReleaseAddress",
+	"RevokeSecurityGroupEgress", "RunInstances", "TerminateInstances",
+}
+
+// awsTagOnCreateActions are the creates that carry TagSpecifications,
+// since generation always writes default_tags. AWS also authorizes
+// ec2:CreateTags for each, so the policy grants it for these creates
+// alone (ec2:CreateAction) and never to tag an existing resource.
+var awsTagOnCreateActions = awsPolicyList{
+	"AllocateAddress", "CreateInternetGateway", "CreateRouteTable", "CreateSecurityGroup",
+	"CreateSubnet", "CreateVpc", "RunInstances",
+}
 
 // awsPolicyList is a policy element written as one string or a list.
 type awsPolicyList []string
@@ -73,15 +101,20 @@ func awsActionMatches(pattern, action string) bool {
 }
 
 // awsScopeGrants is every action the key sends and the resources it
-// sends it to: the claim, the sweep, and each swept collection's reap.
+// sends it to: the claim, the AMI resolve, the sweep, each swept
+// collection's reap, and the apply and destroy.
 func awsScopeGrants() map[string][]string {
 	grants := map[string][]string{
 		"sts:GetCallerIdentity":  {"*"},
-		"ssm:GetParameter":       {awsScopeClaimARN, awsScopeStampARN},
+		"ssm:GetParameter":       {awsScopeClaimARN, awsScopeStampARN, awsScopeAMIARN},
 		"ssm:PutParameter":       {awsScopeClaimARN},
 		"ssm:DeleteParameter":    {awsScopeClaimARN},
 		"ssm:DescribeParameters": {"*"},
 		"ec2:Describe*":          {"*"},
+		"ec2:CreateTags":         {"*"},
+	}
+	for _, action := range awsApplyEC2Actions {
+		grants["ec2:"+action] = []string{"*"}
 	}
 	for _, step := range AWSReapSteps {
 		if !slices.ContainsFunc(AWSSweepCollections, func(c AWSSweepCollection) bool { return c.Name == step.Collection }) {
@@ -95,8 +128,10 @@ func awsScopeGrants() map[string][]string {
 }
 
 // awsIAMPolicyViolations is every way policy differs from the grants:
-// an action or resource beyond them, a grant nothing allows, or a
-// statement on every resource not pinned to REGION.
+// an action or resource beyond them, a grant nothing allows, a
+// statement on every resource not pinned to REGION, or ec2:CreateTags
+// beyond the creates that tag or beside another action, which its
+// ec2:CreateAction condition would deny (a launch never carries it).
 func awsIAMPolicyViolations(policy awsPolicy) []string {
 	grants := awsScopeGrants()
 	var out []string
@@ -107,7 +142,7 @@ func awsIAMPolicyViolations(policy awsPolicy) []string {
 		for _, action := range s.Action {
 			reach, granted := grants[action]
 			if !granted {
-				out = append(out, fmt.Sprintf("%s allows %s: not the claim's, the sweep's or a swept collection's reap action, and ec2:Describe* is the one wildcard", s.Sid, action))
+				out = append(out, fmt.Sprintf("%s allows %s: not the claim's, the AMI resolve's, the sweep's, a swept collection's reap or the apply's action, and ec2:Describe* is the one wildcard", s.Sid, action))
 				continue
 			}
 			for _, resource := range s.Resource {
@@ -119,6 +154,14 @@ func awsIAMPolicyViolations(policy awsPolicy) []string {
 		if slices.Contains(s.Resource, "*") && !slices.Equal(s.Action, awsPolicyList{"sts:GetCallerIdentity"}) &&
 			!slices.Equal(s.Condition["StringEquals"]["aws:RequestedRegion"], awsPolicyList{"REGION"}) {
 			out = append(out, s.Sid+" allows every resource without StringEquals aws:RequestedRegion REGION")
+		}
+		if slices.ContainsFunc(s.Action, func(p string) bool { return awsActionMatches(p, "ec2:CreateTags") }) {
+			if !slices.Equal(s.Condition["StringEquals"]["ec2:CreateAction"], awsTagOnCreateActions) {
+				out = append(out, fmt.Sprintf("%s allows ec2:CreateTags without StringEquals ec2:CreateAction %v", s.Sid, awsTagOnCreateActions))
+			}
+			if !slices.Equal(s.Action, awsPolicyList{"ec2:CreateTags"}) {
+				out = append(out, fmt.Sprintf("%s allows ec2:CreateTags beside %v; that statement allows nothing else", s.Sid, s.Action))
+			}
 		}
 	}
 	for action, reach := range grants {
@@ -194,9 +237,24 @@ func awsStatement(t *testing.T, policy *awsPolicy, sid string) *awsPolicyStateme
 	return &policy.Statement[i]
 }
 
-func TestAWSScopeIAMPolicyGrantsOnlyClaimSweepAndReap(t *testing.T) {
+func TestAWSScopeIAMPolicyGrantsOnlyClaimSweepReapAndApply(t *testing.T) {
 	t.Parallel()
 	assert.Empty(t, awsIAMPolicyViolations(readAWSPolicy(t, awsScopeIAMPolicyFile)))
+}
+
+// awsManagedPolicyMaxSize is IAM's cap on a managed policy, counted
+// without whitespace once the runbook fills the placeholders in.
+const awsManagedPolicyMaxSize = 6144
+
+// The runbook attaches the policy as a managed policy: a user's inline
+// policies share a 2048-character cap, which it outgrew.
+func TestAWSScopeIAMPolicyFitsAManagedPolicy(t *testing.T) {
+	t.Parallel()
+	data, err := os.ReadFile(awsScopeIAMPolicyFile)
+	require.NoError(t, err)
+	filled := strings.NewReplacer("REGION", "ap-southeast-2", "ACCOUNT_ID", "123456789012").Replace(string(data))
+	size := len(strings.Join(strings.Fields(filled), ""))
+	assert.LessOrEqual(t, size, awsManagedPolicyMaxSize, "the filled-in policy is %d characters without whitespace", size)
 }
 
 func TestAWSScopeIAMPolicyViolationsCatchEachWidening(t *testing.T) {
@@ -204,7 +262,34 @@ func TestAWSScopeIAMPolicyViolationsCatchEachWidening(t *testing.T) {
 	for name, mutate := range map[string]func(*testing.T, *awsPolicy){
 		"a widened action": func(t *testing.T, p *awsPolicy) {
 			reap := awsStatement(t, p, "Reap")
-			reap.Action = append(reap.Action, "ec2:RunInstances")
+			reap.Action = append(reap.Action, "ec2:ImportKeyPair")
+		},
+		"GetParameter reaching every public parameter": func(t *testing.T, p *awsPolicy) {
+			awsStatement(t, p, "ResolveTheAMI").Resource = awsPolicyList{"arn:aws:ssm:REGION::parameter/aws/service/*"}
+		},
+		"a missing apply action": func(t *testing.T, p *awsPolicy) {
+			apply := awsStatement(t, p, "ApplyAndDestroy")
+			apply.Action = slices.DeleteFunc(apply.Action, func(a string) bool { return a == "ec2:RunInstances" })
+		},
+		"the apply unpinned from the region": func(t *testing.T, p *awsPolicy) {
+			awsStatement(t, p, "ApplyAndDestroy").Condition = nil
+		},
+		"CreateTags without ec2:CreateAction": func(t *testing.T, p *awsPolicy) {
+			delete(awsStatement(t, p, "TagOnCreate").Condition["StringEquals"], "ec2:CreateAction")
+		},
+		"CreateTags on another create": func(t *testing.T, p *awsPolicy) {
+			tag := awsStatement(t, p, "TagOnCreate").Condition["StringEquals"]
+			tag["ec2:CreateAction"] = append(tag["ec2:CreateAction"], "CreateKeyPair")
+		},
+		"an apply action moved into TagOnCreate": func(t *testing.T, p *awsPolicy) {
+			apply := awsStatement(t, p, "ApplyAndDestroy")
+			apply.Action = slices.DeleteFunc(apply.Action, func(a string) bool { return a == "ec2:RunInstances" })
+			tag := awsStatement(t, p, "TagOnCreate")
+			tag.Action = append(tag.Action, "ec2:RunInstances")
+		},
+		"CreateTags beside another action": func(t *testing.T, p *awsPolicy) {
+			apply := awsStatement(t, p, "ApplyAndDestroy")
+			apply.Action = append(apply.Action, "ec2:CreateTags")
 		},
 		"an ec2 wildcard": func(t *testing.T, p *awsPolicy) {
 			reap := awsStatement(t, p, "Reap")
@@ -235,6 +320,22 @@ func TestAWSScopeIAMPolicyViolationsCatchEachWidening(t *testing.T) {
 			mutate(t, &policy)
 			assert.NotEmpty(t, awsIAMPolicyViolations(policy))
 		})
+	}
+}
+
+// A key pair would open a login and PassRole an instance profile; the
+// apply needs neither, so no statement may grant them.
+func TestAWSScopeIAMPolicyRefusesKeyPairAndPassRoleInEveryStatement(t *testing.T) {
+	t.Parallel()
+	for i, s := range readAWSPolicy(t, awsScopeIAMPolicyFile).Statement {
+		for _, action := range []string{"ec2:CreateKeyPair", "iam:PassRole"} {
+			t.Run(s.Sid+" "+action, func(t *testing.T) {
+				t.Parallel()
+				policy := readAWSPolicy(t, awsScopeIAMPolicyFile)
+				policy.Statement[i].Action = append(policy.Statement[i].Action, action)
+				assert.NotEmpty(t, awsIAMPolicyViolations(policy))
+			})
+		}
 	}
 }
 

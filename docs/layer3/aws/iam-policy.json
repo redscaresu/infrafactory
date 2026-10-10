@@ -26,6 +26,17 @@
       ]
     },
     {
+      "Sid": "ResolveTheAMI",
+      "Effect": "Allow",
+      "Action": "ssm:GetParameter",
+      "Resource": "arn:aws:ssm:REGION::parameter/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "REGION"
+        }
+      }
+    },
+    {
       "Sid": "Sweep",
       "Effect": "Allow",
       "Action": [
@@ -68,6 +79,55 @@
       "Condition": {
         "StringEquals": {
           "aws:RequestedRegion": "REGION"
+        }
+      }
+    },
+    {
+      "Sid": "ApplyAndDestroy",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:AllocateAddress",
+        "ec2:AssociateAddress",
+        "ec2:AssociateRouteTable",
+        "ec2:AttachInternetGateway",
+        "ec2:AuthorizeSecurityGroupEgress",
+        "ec2:AuthorizeSecurityGroupIngress",
+        "ec2:CreateInternetGateway",
+        "ec2:CreateRoute",
+        "ec2:CreateRouteTable",
+        "ec2:CreateSecurityGroup",
+        "ec2:CreateSubnet",
+        "ec2:CreateVpc",
+        "ec2:DeleteRoute",
+        "ec2:ModifyInstanceAttribute",
+        "ec2:ModifySubnetAttribute",
+        "ec2:ModifyVpcAttribute",
+        "ec2:RunInstances"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "REGION"
+        }
+      }
+    },
+    {
+      "Sid": "TagOnCreate",
+      "Effect": "Allow",
+      "Action": "ec2:CreateTags",
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "REGION",
+          "ec2:CreateAction": [
+            "AllocateAddress",
+            "CreateInternetGateway",
+            "CreateRouteTable",
+            "CreateSecurityGroup",
+            "CreateSubnet",
+            "CreateVpc",
+            "RunInstances"
+          ]
         }
       }
     }

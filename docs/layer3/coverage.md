@@ -116,7 +116,7 @@ at Layer 1 or Layer 3, and `deploy` is the only route to a real NIC.
 | `lb-paris` | **runnable** | hourly | — (run 2026-08-23) |
 | `lb-serving-paris` | **runnable** | hourly | — (added 2026-08-24; the first `http_probe` against real Scaleway) |
 | `web-live-paris` | runnable, unrun | hourly | nothing known — see "web-live-paris, 2026-09-09" below |
-| `aws-web-live` | runnable, unrun | hourly | the real-cloud run: allowlisted 2026-09-28 and gated since #405; the key's policy cannot yet resolve the AMI (`ssm:GetParameter` on the AL2023 public parameter) and grants none of the apply's IAM actions; epic aws-web-live-on-real-aws grants both |
+| `aws-web-live` | runnable, unrun | hourly | the real-cloud run: allowlisted 2026-09-28 and gated since #405; the key's policy grants the AMI resolve (`ssm:GetParameter` on the AL2023 public parameter) and the apply and destroy actions read against fakeaws (2026-10-10), so the scope needs the policy applied again; epic aws-web-live-on-real-aws measures them on real AWS |
 | `incremental-project-paris` | key only | hourly | private networking (allowlist cleared 2026-08-24; see the retraction at the top) |
 | `registry-paris` | key only | instant | Registry |
 | `iam-policies-paris` | key only | instant | IAM |

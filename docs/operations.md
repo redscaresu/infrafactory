@@ -180,18 +180,48 @@ aws ec2 describe-instances --query 'length(Reservations)' --profile infrafactory
 ```
 
 **3. The IAM user**, before the SCP, since the SCP denies IAM. Its policy,
-`docs/layer3/aws/iam-policy.json`, covers claim, sweep and reap only; the apply's actions are epic
-[aws-web-live-on-real-aws](epics/aws-web-live-on-real-aws.md)'s. It grants
-`sts:GetCallerIdentity`; `ssm:PutParameter` and `ssm:DeleteParameter` on the claim alone;
-`ssm:GetParameter` on the claim and the stamp; and, pinned by `aws:RequestedRegion`,
-`ssm:DescribeParameters`, `ec2:Describe*` and exactly the EC2 actions `harness.AWSReapSteps`
-exports. `internal/harness/aws_scope_policy_test.go` holds it there.
+`docs/layer3/aws/iam-policy.json`, is the one list of what the key may do, and
+`internal/harness/aws_scope_policy_test.go` holds it to exactly that. Its statements, by Sid:
+`Identity` lets preflight confirm the key's account and principal; `WriteOnlyTheClaim` and
+`ReadTheClaimAndTheStamp` take, read and release the claim and read the stamp, on those two
+parameters alone; `ResolveTheAMI` reads the AL2023 public parameter; `Sweep` lists what the
+account holds; `Reap` deletes what the sweep finds; `ApplyAndDestroy` is what `tofu apply` and
+`tofu destroy` send beyond the reap's deletes; and `TagOnCreate` lets those creates carry the
+`default_tags` generation writes, and tags nothing that already exists. Every statement on every
+resource (`*`) except `Identity` is pinned to `REGION`.
+
+It is a managed policy attached to the user, because an IAM user's inline policies share a
+2,048-character cap that it outgrew.
 
 ```bash
 aws iam create-user --user-name infrafactory-layer3 --profile infrafactory-admin
 sed -e "s/REGION/$REGION/g" -e "s/ACCOUNT_ID/$ACCOUNT_ID/g" docs/layer3/aws/iam-policy.json > "$TMPDIR/p.json"
-aws iam put-user-policy --user-name infrafactory-layer3 --policy-name infrafactory-layer3-scope \
-  --policy-document "file://$TMPDIR/p.json" --profile infrafactory-admin
+aws iam create-policy --policy-name infrafactory-layer3-scope --policy-document "file://$TMPDIR/p.json" \
+  --profile infrafactory-admin
+aws iam attach-user-policy --user-name infrafactory-layer3 \
+  --policy-arn arn:aws:iam::${ACCOUNT_ID}:policy/infrafactory-layer3-scope --profile infrafactory-admin
+```
+
+After the JSON changes, write `$TMPDIR/p.json` again and make it the default version (IAM keeps five
+versions; delete the oldest with `aws iam delete-policy-version` when it holds five):
+
+```bash
+aws iam create-policy-version --policy-arn arn:aws:iam::${ACCOUNT_ID}:policy/infrafactory-layer3-scope \
+  --policy-document "file://$TMPDIR/p.json" --set-as-default --profile infrafactory-admin
+```
+
+A scope set up before 2026-10-10 already has the user, with the old policy inline under the same
+name. Move it to the managed policy. Each step runs only if the one before it succeeded, so the
+inline policy is deleted only once the managed one is attached:
+
+```bash
+sed -e "s/REGION/$REGION/g" -e "s/ACCOUNT_ID/$ACCOUNT_ID/g" docs/layer3/aws/iam-policy.json > "$TMPDIR/p.json" &&
+aws iam create-policy --policy-name infrafactory-layer3-scope --policy-document "file://$TMPDIR/p.json" \
+  --profile infrafactory-admin &&
+aws iam attach-user-policy --user-name infrafactory-layer3 \
+  --policy-arn arn:aws:iam::${ACCOUNT_ID}:policy/infrafactory-layer3-scope --profile infrafactory-admin &&
+aws iam delete-user-policy --user-name infrafactory-layer3 --policy-name infrafactory-layer3-scope \
+  --profile infrafactory-admin
 ```
 
 Verify with the policy simulator:
@@ -208,6 +238,16 @@ sim --action-names ec2:DescribeVpcs ec2:DeleteVpc \
 sim --action-names ec2:DescribeVpcs \
   --context-entries ContextKeyName=aws:RequestedRegion,ContextKeyValues=$OTHER,ContextKeyType=string    # implicitDeny
 sim --action-names ec2:RunInstances \
+  --context-entries ContextKeyName=aws:RequestedRegion,ContextKeyValues=$REGION,ContextKeyType=string   # allowed
+sim --action-names ec2:CreateKeyPair \
+  --context-entries ContextKeyName=aws:RequestedRegion,ContextKeyValues=$REGION,ContextKeyType=string   # implicitDeny
+sim --action-names ssm:GetParameter \
+  --resource-arns arn:aws:ssm:${REGION}::parameter/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64 \
+  --context-entries ContextKeyName=aws:RequestedRegion,ContextKeyValues=$REGION,ContextKeyType=string   # allowed
+sim --action-names ec2:CreateTags \
+  --context-entries ContextKeyName=aws:RequestedRegion,ContextKeyValues=$REGION,ContextKeyType=string \
+                    ContextKeyName=ec2:CreateAction,ContextKeyValues=RunInstances,ContextKeyType=string  # allowed
+sim --action-names ec2:CreateTags \
   --context-entries ContextKeyName=aws:RequestedRegion,ContextKeyValues=$REGION,ContextKeyType=string   # implicitDeny
 ```
 
@@ -376,9 +416,10 @@ plain reap once its sweep released it. A reap whose own claim attempt has an unk
 `reap --take-over` that deleted the old claim but could not take its own, names the reap to run
 next; a `--take-over` that finds no claim names plain reap.
 
-The first real AMI resolve is denied: the key's policy, `docs/layer3/aws/iam-policy.json`, does
-not yet grant ssm:GetParameter on the AL2023 public parameter, nor any action the apply needs.
-Granting them belongs to the epic aws-web-live-on-real-aws.
+The key's policy, `docs/layer3/aws/iam-policy.json`, grants ssm:GetParameter on the AL2023 public
+parameter for the AMI resolve, and what the apply and destroy send. A scope whose policy was applied
+before 2026-10-10 lacks both, and refuses the first real AMI resolve: apply the policy again as
+Scope setup step 3 says.
 
 ## Sibling mocks
 
