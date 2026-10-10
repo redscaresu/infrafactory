@@ -382,6 +382,21 @@ func mockDeployFailureDetail(err *harness.MockDeployError) string {
 	return stderrFailureDetail(err.Err, stderr)
 }
 
+// destroyMock runs the mock (Layer 2) destroy. One a signal cut short is
+// reported skipped, never failed: an interrupt is not a leftover. It is
+// not rerun on a fresh context, which would hold up the real teardown
+// below it, the one that holds billable resources.
+func destroyMock(ctx context.Context, runtime *CommandRuntime, outputDir string, env map[string]string) ([]StageSummary, []FailureSummary) {
+	result, err := runtime.Deps.Destroy.Run(ctx, outputDir, env)
+	if err == nil || ctx.Err() == nil {
+		return appendDestroyResult(nil, nil, result, err)
+	}
+	return []StageSummary{{
+		Layer: "destruction", Stage: "destroy", Status: StageStatusSkip,
+		Detail: "skipped: the run was interrupted before the mock destroy finished",
+	}}, nil
+}
+
 func appendDestroyResult(stages []StageSummary, failures []FailureSummary, result *harness.DestroyResult, runErr error) ([]StageSummary, []FailureSummary) {
 	if runErr == nil {
 		if result != nil && result.Destroy.Stage != "" {
@@ -821,8 +836,8 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 			// already in the failure detail and Layer 2 reproduces in
 			// seconds for nothing.
 			if runtime.Config.Validation.Layers.Destruction.Enabled && !opts.SkipDestroy {
-				destroyResult, destroyErr := runtime.Deps.Destroy.Run(ctx, outputDir, env)
-				stages, failures = appendDestroyResult(stages, failures, destroyResult, destroyErr)
+				destroyStages, destroyFailures := destroyMock(ctx, runtime, outputDir, env)
+				stages, failures = append(stages, destroyStages...), append(failures, destroyFailures...)
 			}
 			// Nothing else downstream can be trusted: every later check
 			// reads a state that does not describe the config.
@@ -966,8 +981,8 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 		stages = append(stages, holdoutStages...)
 		failures = append(failures, holdoutFailures...)
 
-		destroyResult, destroyErr := runtime.Deps.Destroy.Run(ctx, outputDir, env)
-		stages, failures = appendDestroyResult(stages, failures, destroyResult, destroyErr)
+		destroyStages, destroyFailures := destroyMock(ctx, runtime, outputDir, env)
+		stages, failures = append(stages, destroyStages...), append(failures, destroyFailures...)
 
 		// --keep keeps a SUCCESSFUL stack, and only the run's final
 		// iteration can be that.

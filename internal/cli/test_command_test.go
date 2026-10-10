@@ -1448,3 +1448,46 @@ func TestTestCommandFailsWhenOrphanSweepReportsLeak(t *testing.T) {
 		t.Fatalf("output must carry the sweep's detail so the operator can act, got:\n%s", out)
 	}
 }
+
+// ctxDestroyHarness is a mock destroy that fails as tofu does when its
+// context has ended; during, when set, runs first.
+type ctxDestroyHarness struct{ during func() }
+
+func (d ctxDestroyHarness) Run(ctx context.Context, _ string, _ map[string]string) (*harness.DestroyResult, error) {
+	if d.during != nil {
+		d.during()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, &harness.DestroyError{Stage: "destroy", Err: err}
+	}
+	return &harness.DestroyResult{Destroy: harness.StageResult{Stage: "destroy"}}, nil
+}
+
+// One Ctrl-C, before or during the mock destroy: it is skipped, naming
+// the interrupt, rather than failing for it.
+func TestInterruptedTestDoesNotFailTheMockDestroy(t *testing.T) {
+	for name, interrupt := range map[string]func(*awsLifecycle) ctxDestroyHarness{
+		"during the apply": func(lc *awsLifecycle) ctxDestroyHarness {
+			interruptAWSTestMidApply(t, lc)
+			return ctxDestroyHarness{}
+		},
+		"during the mock destroy": func(lc *awsLifecycle) ctxDestroyHarness {
+			return ctxDestroyHarness{during: lc.signal}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			lc := newAWSLifecycle(t)
+			mockDestroy := interrupt(lc)
+
+			run := runAWSTestWith(t, lc, awsTestSetup{deps: func(d *RuntimeDependencies) { d.Destroy = mockDestroy }})
+
+			assert.Contains(t, run.result.Stages, StageSummary{
+				Layer: "destruction", Stage: "destroy", Status: StageStatusSkip,
+				Detail: "skipped: the run was interrupted before the mock destroy finished",
+			})
+			for _, f := range run.result.Failures {
+				assert.NotEqual(t, "destruction", f.Layer, "the interrupt is not a destruction failure: %+v", f)
+			}
+		})
+	}
+}
