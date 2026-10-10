@@ -1009,8 +1009,10 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 		//
 		// Read as late as possible: `failures` here already carries the
 		// criteria checks and the mock destroy, so anything that will
-		// stop this run being a success has landed.
-		keepingSandbox = opts.KeepSandbox && len(failures) == 0
+		// stop this run being a success has landed -- except an
+		// interrupt, whose failure is added at the end, so ctx is read
+		// here too.
+		keepingSandbox = opts.KeepSandbox && len(failures) == 0 && ctx.Err() == nil
 		if sandboxEnabled && keepingSandbox {
 			stages = append(stages, StageSummary{
 				Layer: "sandbox_deploy", Stage: "destroy", Status: StageStatusSkip,
