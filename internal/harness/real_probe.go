@@ -44,6 +44,49 @@ type RealProbeHarness struct {
 
 type RealProbeResult struct {
 	Failures []feedback.Failure
+	// Records holds one entry per check, passing or failing: the
+	// evidence a passing run would otherwise throw away.
+	Records []ProbeRecord
+}
+
+// ProbeRecord is what one check asked and what came back. Address is
+// host:port for a dial, the URL for an HTTP probe and the domain for a
+// lookup. Status is the HTTP status, or the dial or lookup outcome.
+// Seconds is the time to first success, set only when Passed.
+type ProbeRecord struct {
+	Kind     string
+	Address  string
+	Expect   string
+	Status   string
+	Passed   bool
+	Attempts int
+	Seconds  float64
+}
+
+// String says how the check ended in words: a zero attempt count or
+// time would otherwise read as an instant result.
+func (r ProbeRecord) String() string {
+	head := fmt.Sprintf("%s %s expect %s: %s", r.Kind, r.Address, r.Expect, r.Status)
+	switch {
+	case r.Passed:
+		return fmt.Sprintf("%s, succeeded after %d attempt(s) in %.1fs", head, r.Attempts, r.Seconds)
+	case r.Attempts == 0:
+		return head + ", not attempted"
+	}
+	return fmt.Sprintf("%s, no success after %d attempt(s)", head, r.Attempts)
+}
+
+// ProbeRecordsDetail joins records into one stage detail line, and says
+// so when there are none rather than leave an empty list.
+func ProbeRecordsDetail(records []ProbeRecord) string {
+	if len(records) == 0 {
+		return "no per-check records"
+	}
+	parts := make([]string, len(records))
+	for i, r := range records {
+		parts[i] = r.String()
+	}
+	return strings.Join(parts, "; ")
 }
 
 type RealProbeError struct {
@@ -95,27 +138,36 @@ func (h *RealProbeHarness) Run(ctx context.Context, workDir string, scenarioName
 	}
 
 	failures := make([]feedback.Failure, 0)
+	records := make([]ProbeRecord, 0, len(checks))
 	for _, check := range checks {
 		var probeErr error
+		record := ProbeRecord{Kind: check.Type, Expect: check.Expect}
+		start := time.Now()
 		switch check.Type {
 		case "connectivity":
 			host, resolveErr := resolveProbeHost(state, check.To)
 			if resolveErr != nil {
-				probeErr = resolveErr
+				record.Address, probeErr = check.To, resolveErr
 			} else {
-				probeErr = h.runConnectivityProbe(ctx, host, check.Port, check.Expect)
+				record, probeErr = h.runConnectivityProbe(ctx, host, check.Port, check.Expect)
 			}
 		case "http_probe":
 			host, resolveErr := resolveProbeHost(state, check.Target)
 			if resolveErr != nil {
-				probeErr = resolveErr
+				record.Address, probeErr = check.Target, resolveErr
 			} else {
-				probeErr = h.runHTTPProbe(ctx, host, check.Port, check.Expect)
+				record, probeErr = h.runHTTPProbe(ctx, host, check.Port, check.Expect)
 			}
 		case "dns_resolution":
 			domain := strings.ReplaceAll(check.Domain, "{{scenario_name}}", scenarioName)
-			probeErr = h.runDNSProbe(ctx, domain, check.Expect)
+			record, probeErr = h.runDNSProbe(ctx, domain, check.Expect)
 		}
+		if probeErr == nil {
+			record.Passed, record.Seconds = true, time.Since(start).Seconds()
+		} else if record.Status == "" {
+			record.Status = probeErr.Error()
+		}
+		records = append(records, record)
 		if probeErr == nil {
 			continue
 		}
@@ -129,20 +181,25 @@ func (h *RealProbeHarness) Run(ctx context.Context, workDir string, scenarioName
 		})
 	}
 
-	return &RealProbeResult{Failures: failures}, nil
+	return &RealProbeResult{Failures: failures, Records: records}, nil
 }
 
-func (h *RealProbeHarness) runConnectivityProbe(ctx context.Context, host string, port int, expect string) error {
+func (h *RealProbeHarness) runConnectivityProbe(ctx context.Context, host string, port int, expect string) (ProbeRecord, error) {
+	record := ProbeRecord{Kind: "connectivity", Expect: expect}
 	if port < 1 || port > 65535 {
-		return fmt.Errorf("connectivity probe requires port between 1 and 65535")
+		return record, fmt.Errorf("connectivity probe requires port between 1 and 65535")
 	}
 	address := net.JoinHostPort(host, strconv.Itoa(port))
+	record.Address = address
 	expectedSuccess := expect == "success"
 
 	probe := func(ctx context.Context) error {
 		conn, err := h.dialFunc(ctx, "tcp", address)
 		if err == nil {
 			_ = conn.Close()
+			record.Status = "connected"
+		} else {
+			record.Status = "not connected: " + err.Error()
 		}
 		if expectedSuccess && err != nil {
 			return fmt.Errorf("tcp connect %s: %w", address, err)
@@ -166,22 +223,25 @@ func (h *RealProbeHarness) runConnectivityProbe(ctx context.Context, host string
 	// port nobody asked to be open.
 	var err error
 	if expectedSuccess {
-		err = h.retry(ctx, probe)
+		record.Attempts, err = h.retry(ctx, probe)
 	} else {
-		err = probe(ctx)
+		record.Attempts, err = 1, probe(ctx)
 	}
 	if err != nil {
-		return fmt.Errorf("connectivity probe %s: %w", address, err)
+		return record, fmt.Errorf("connectivity probe %s: %w", address, err)
 	}
-	return nil
+	return record, nil
 }
 
-func (h *RealProbeHarness) runHTTPProbe(ctx context.Context, host string, port int, expect string) error {
+func (h *RealProbeHarness) runHTTPProbe(ctx context.Context, host string, port int, expect string) (ProbeRecord, error) {
+	record := ProbeRecord{Kind: "http_probe", Expect: expect}
 	if port < 1 || port > 65535 {
-		return fmt.Errorf("http_probe requires port between 1 and 65535")
+		return record, fmt.Errorf("http_probe requires port between 1 and 65535")
 	}
 	url := fmt.Sprintf("http://%s", net.JoinHostPort(host, strconv.Itoa(port)))
-	err := h.retry(ctx, func(ctx context.Context) error {
+	record.Address = url
+	var err error
+	record.Attempts, err = h.retry(ctx, func(ctx context.Context) error {
 		req, reqErr := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 		if reqErr != nil {
 			return reqErr
@@ -189,6 +249,12 @@ func (h *RealProbeHarness) runHTTPProbe(ctx context.Context, host string, port i
 		resp, callErr := h.getHTTP(req)
 		if resp != nil && resp.Body != nil {
 			defer resp.Body.Close()
+		}
+		switch {
+		case callErr != nil:
+			record.Status = "no response: " + callErr.Error()
+		case resp != nil:
+			record.Status = strconv.Itoa(resp.StatusCode)
 		}
 		expectedReachable := expect == "reachable"
 		if expectedReachable {
@@ -206,14 +272,21 @@ func (h *RealProbeHarness) runHTTPProbe(ctx context.Context, host string, port i
 		return nil
 	})
 	if err != nil {
-		return fmt.Errorf("http probe %s: %w", url, err)
+		return record, fmt.Errorf("http probe %s: %w", url, err)
 	}
-	return nil
+	return record, nil
 }
 
-func (h *RealProbeHarness) runDNSProbe(ctx context.Context, domain, expect string) error {
-	err := h.retry(ctx, func(ctx context.Context) error {
+func (h *RealProbeHarness) runDNSProbe(ctx context.Context, domain, expect string) (ProbeRecord, error) {
+	record := ProbeRecord{Kind: "dns_resolution", Address: domain, Expect: expect}
+	var err error
+	record.Attempts, err = h.retry(ctx, func(ctx context.Context) error {
 		hosts, lookupErr := h.lookup(ctx, domain)
+		if lookupErr != nil {
+			record.Status = "not resolved: " + lookupErr.Error()
+		} else {
+			record.Status = fmt.Sprintf("resolved to %d address(es)", len(hosts))
+		}
 		expectedResolve := expect == "resolves"
 		if expectedResolve {
 			if lookupErr != nil {
@@ -233,12 +306,14 @@ func (h *RealProbeHarness) runDNSProbe(ctx context.Context, domain, expect strin
 		return nil
 	})
 	if err != nil {
-		return fmt.Errorf("dns probe %s: %w", domain, err)
+		return record, fmt.Errorf("dns probe %s: %w", domain, err)
 	}
-	return nil
+	return record, nil
 }
 
-func (h *RealProbeHarness) retry(ctx context.Context, fn func(context.Context) error) error {
+// retry runs fn until it succeeds or the retries run out, and returns
+// how many attempts it made.
+func (h *RealProbeHarness) retry(ctx context.Context, fn func(context.Context) error) (int, error) {
 	retries := h.cfg.Retries
 	if retries < 1 {
 		retries = 1
@@ -254,7 +329,7 @@ func (h *RealProbeHarness) retry(ctx context.Context, fn func(context.Context) e
 		lastErr = fn(attemptCtx)
 		cancel()
 		if lastErr == nil {
-			return nil
+			return attempt, nil
 		}
 		if attempt == retries {
 			break
@@ -264,12 +339,12 @@ func (h *RealProbeHarness) retry(ctx context.Context, fn func(context.Context) e
 			select {
 			case <-ctx.Done():
 				timer.Stop()
-				return ctx.Err()
+				return attempt, ctx.Err()
 			case <-timer.C:
 			}
 		}
 	}
-	return lastErr
+	return retries, lastErr
 }
 
 type terraformState struct {

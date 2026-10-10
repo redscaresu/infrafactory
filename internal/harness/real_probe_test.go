@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -112,25 +113,29 @@ func TestRealProbeHarnessRejectsInvalidPorts(t *testing.T) {
 		{
 			name: "connectivity zero",
 			run: func() error {
-				return h.runConnectivityProbe(context.Background(), "127.0.0.1", 0, "success")
+				_, err := h.runConnectivityProbe(context.Background(), "127.0.0.1", 0, "success")
+				return err
 			},
 		},
 		{
 			name: "connectivity too high",
 			run: func() error {
-				return h.runConnectivityProbe(context.Background(), "127.0.0.1", 65536, "success")
+				_, err := h.runConnectivityProbe(context.Background(), "127.0.0.1", 65536, "success")
+				return err
 			},
 		},
 		{
 			name: "http zero",
 			run: func() error {
-				return h.runHTTPProbe(context.Background(), "127.0.0.1", 0, "reachable")
+				_, err := h.runHTTPProbe(context.Background(), "127.0.0.1", 0, "reachable")
+				return err
 			},
 		},
 		{
 			name: "http too high",
 			run: func() error {
-				return h.runHTTPProbe(context.Background(), "127.0.0.1", 65536, "reachable")
+				_, err := h.runHTTPProbe(context.Background(), "127.0.0.1", 65536, "reachable")
+				return err
 			},
 		},
 	} {
@@ -155,10 +160,10 @@ func TestRealProbeHarnessTreatsEmptyDNSResponsesDefensively(t *testing.T) {
 		}
 	}
 
-	if err := h.runDNSProbe(context.Background(), "empty.example.com", "resolves"); err == nil {
+	if _, err := h.runDNSProbe(context.Background(), "empty.example.com", "resolves"); err == nil {
 		t.Fatal("expected resolves probe to fail on empty DNS response")
 	}
-	if err := h.runDNSProbe(context.Background(), "empty.example.com", "not_resolves"); err != nil {
+	if _, err := h.runDNSProbe(context.Background(), "empty.example.com", "not_resolves"); err != nil {
 		t.Fatalf("expected not_resolves probe to accept empty DNS response, got %v", err)
 	}
 }
@@ -199,7 +204,7 @@ func TestConnectivityProbeAsksBlockedOnce(t *testing.T) {
 		return &net.TCPConn{}, nil
 	}
 
-	err := h.runConnectivityProbe(context.Background(), "203.0.113.1", 22, "blocked")
+	_, err := h.runConnectivityProbe(context.Background(), "203.0.113.1", 22, "blocked")
 
 	require.Error(t, err, "an open port fails a blocked check")
 	assert.Equal(t, 1, dials, "a blocked check that fails must report immediately, not after the full retry window")
@@ -215,7 +220,7 @@ func TestConnectivityProbeStillRetriesSuccess(t *testing.T) {
 		return nil, errors.New("connection refused")
 	}
 
-	err := h.runConnectivityProbe(context.Background(), "203.0.113.1", 80, "success")
+	_, err := h.runConnectivityProbe(context.Background(), "203.0.113.1", 80, "success")
 
 	require.Error(t, err)
 	assert.Equal(t, 3, dials, "waiting for a stack to come up is what retries are for")
@@ -303,4 +308,85 @@ func TestRealProbeHarnessDialsAWSInstancePublicIPForHoldout(t *testing.T) {
 		net.JoinHostPort(publicIP, "443"),
 		net.JoinHostPort(publicIP, "80"),
 	}, dialed)
+}
+
+// A passing check keeps its evidence: the status that came back and how
+// many attempts it took to get there.
+func TestRealProbeHarnessRecordsHTTPStatusAndAttempts(t *testing.T) {
+	workDir := t.TempDir()
+	writeLiveState(t, workDir, `{"resources":[{"type":"aws_instance","instances":[{"attributes":{"public_ip":"203.0.113.7"}}]}]}`)
+	calls := 0
+	h := NewRealProbeHarness(ProbeConfig{Timeout: time.Second, Retries: 3})
+	h.getHTTP = func(*http.Request) (*http.Response, error) {
+		if calls++; calls == 1 {
+			return nil, errors.New("connection refused")
+		}
+		return &http.Response{StatusCode: http.StatusFound, Body: http.NoBody}, nil
+	}
+
+	result, err := h.Run(context.Background(), workDir, "demo", []ProbeCheck{
+		{Type: "http_probe", Target: "compute", Port: 80, Expect: "reachable"},
+	})
+
+	require.NoError(t, err)
+	assert.Empty(t, result.Failures)
+	require.Len(t, result.Records, 1)
+	record := result.Records[0]
+	assert.Equal(t, "http://203.0.113.7:80", record.Address)
+	assert.Equal(t, strconv.Itoa(http.StatusFound), record.Status)
+	assert.Equal(t, 2, record.Attempts)
+}
+
+// A blocked check that passes names the address it dialled.
+func TestRealProbeHarnessRecordsBlockedDialAddress(t *testing.T) {
+	workDir := t.TempDir()
+	writeLiveState(t, workDir, `{"resources":[{"type":"aws_instance","instances":[{"attributes":{"public_ip":"203.0.113.7"}}]}]}`)
+	h := NewRealProbeHarness(ProbeConfig{Timeout: time.Second, Retries: 3})
+	h.dialFunc = func(context.Context, string, string) (net.Conn, error) {
+		return nil, errors.New("connection refused")
+	}
+
+	result, err := h.Run(context.Background(), workDir, "demo", []ProbeCheck{
+		{Type: "connectivity", From: "public_internet", To: "compute", Port: 22, Expect: "blocked"},
+	})
+
+	require.NoError(t, err)
+	assert.Empty(t, result.Failures)
+	require.Len(t, result.Records, 1)
+	assert.Equal(t, "203.0.113.7:22", result.Records[0].Address)
+	assert.Equal(t, 1, result.Records[0].Attempts)
+	assert.Contains(t, result.Records[0].Status, "connection refused")
+}
+
+// A record says whether the check succeeded: seconds only for a success,
+// "no success" after the attempts a failure made, "not attempted" when it
+// never got as far as a dial.
+func TestProbeRecordSaysHowTheCheckEnded(t *testing.T) {
+	workDir := t.TempDir()
+	writeLiveState(t, workDir, `{"resources":[{"type":"aws_instance","instances":[{"attributes":{"public_ip":"203.0.113.7"}}]}]}`)
+	h := NewRealProbeHarness(ProbeConfig{Timeout: time.Second, Retries: 2})
+	h.getHTTP = func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusBadGateway, Body: http.NoBody}, nil
+	}
+	h.dialFunc = func(context.Context, string, string) (net.Conn, error) {
+		client, server := net.Pipe()
+		_ = server.Close()
+		return client, nil
+	}
+
+	result, err := h.Run(context.Background(), workDir, "demo", []ProbeCheck{
+		{Type: "http_probe", Target: "compute", Port: 80, Expect: "reachable"},
+		{Type: "connectivity", To: "database", Port: 5432, Expect: "success"},
+		{Type: "connectivity", To: "compute", Port: 80, Expect: "success"},
+	})
+
+	require.NoError(t, err)
+	require.Len(t, result.Records, 3)
+	exhausted, unresolved, passed := result.Records[0].String(), result.Records[1].String(), result.Records[2].String()
+	assert.Contains(t, exhausted, "no success after 2 attempt(s)")
+	assert.NotContains(t, exhausted, "0.0s")
+	assert.Contains(t, unresolved, "not attempted")
+	assert.NotContains(t, unresolved, "0.0s")
+	assert.Contains(t, passed, "succeeded after 1 attempt(s) in ")
+	assert.Equal(t, "no per-check records", ProbeRecordsDetail(nil))
 }

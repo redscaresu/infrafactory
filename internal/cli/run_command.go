@@ -225,7 +225,7 @@ func runRunWithNotify(
 				Iteration: iteration,
 			})
 			completed = iteration
-			stages, failures := runIteration(ctx, runID, iteration, sc.Name, scenarioPath, runtime, store, captureLLMRaw, repairFeedback, mode.Mode, controls)
+			stages, failures := runIteration(ctx, runID, iteration, sc.Name, scenarioPath, cloud, runtime, store, captureLLMRaw, repairFeedback, mode.Mode, controls)
 			allStages = append(allStages, stages...)
 
 			if err := persistRunIteration(store, sc.Name, runID, iteration, slices.Concat(resolved, stages), failures); err != nil {
@@ -1142,6 +1142,7 @@ func runIteration(
 	iteration int,
 	scenarioName string,
 	scenarioPath string,
+	cloud layer3Cloud,
 	runtime *CommandRuntime,
 	store *runstore.FilesystemStore,
 	captureLLMRaw bool,
@@ -1226,7 +1227,7 @@ func runIteration(
 		if err != nil {
 			stages = append(stages, StageSummary{Layer: "run", Stage: stageName, Status: StageStatusFail})
 			stages = append(stages, holdoutStages(testResult.Stages, iteration)...)
-			stages = append(stages, awsScopeStages(testResult.Stages)...)
+			stages = append(stages, awsRunStages(testResult.Stages, iteration, cloud)...)
 			if (step.name == "test" || step.name == "validate") && len(testResult.Failures) > 0 {
 				for _, failure := range testResult.Failures {
 					failures = append(failures, FailureSummary{
@@ -1271,7 +1272,7 @@ func runIteration(
 		// passed" is exactly the claim somebody needs to see to believe
 		// the run proved anything.
 		stages = append(stages, holdoutStages(testResult.Stages, iteration)...)
-		stages = append(stages, awsScopeStages(testResult.Stages)...)
+		stages = append(stages, awsRunStages(testResult.Stages, iteration, cloud)...)
 		runtime.Logger.Log(LogEntry{
 			Level:     logLevelInfo,
 			Command:   "run",
@@ -1747,12 +1748,24 @@ func isStage(name string) func(StageSummary) bool {
 	return func(s StageSummary) bool { return s.Stage == name }
 }
 
-// awsScopeStages carries an iteration's aws scope stages up to the run,
-// which ends on a kept claim and tears down only after a take.
-func awsScopeStages(stages []StageSummary) []StageSummary {
+// awsLayer3EvidenceStages are the aws stages a run carries up so its
+// iteration.json holds the Layer 3 evidence, a pass's included.
+var awsLayer3EvidenceStages = []string{"account_check", "user_data_check", "real_probe"}
+
+// awsRunStages carries an iteration's aws stages up to the run. The scope
+// stages keep their names: the run ends on a kept claim and tears down
+// only after a take, which it finds by name. For an aws scenario the
+// evidence stages come too, numbered `iteration_N_` as holdoutStages
+// does, since each iteration runs them again and an unnumbered failure
+// from an earlier one would contradict a later pass.
+func awsRunStages(stages []StageSummary, iteration int, cloud layer3Cloud) []StageSummary {
 	var out []StageSummary
 	for _, s := range stages {
-		if strings.HasPrefix(s.Stage, "aws_scope_") {
+		switch {
+		case strings.HasPrefix(s.Stage, "aws_scope_"):
+			out = append(out, s)
+		case cloud == layer3AWS && s.Layer == "sandbox_deploy" && slices.Contains(awsLayer3EvidenceStages, s.Stage):
+			s.Stage = fmt.Sprintf("iteration_%d_%s", iteration, s.Stage)
 			out = append(out, s)
 		}
 	}
