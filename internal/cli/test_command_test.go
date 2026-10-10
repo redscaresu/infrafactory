@@ -1448,3 +1448,75 @@ func TestTestCommandFailsWhenOrphanSweepReportsLeak(t *testing.T) {
 		t.Fatalf("output must carry the sweep's detail so the operator can act, got:\n%s", out)
 	}
 }
+
+// ctxDestroyHarness is a mock destroy that fails as tofu does when its
+// context has ended; during, when set, runs first.
+type ctxDestroyHarness struct{ during func() }
+
+func (d ctxDestroyHarness) Run(ctx context.Context, _ string, _ map[string]string) (*harness.DestroyResult, error) {
+	if d.during != nil {
+		d.during()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, &harness.DestroyError{Stage: "destroy", Err: err}
+	}
+	return &harness.DestroyResult{Destroy: harness.StageResult{Stage: "destroy"}}, nil
+}
+
+// One Ctrl-C, before or during the mock destroy: it is skipped, naming
+// the interrupt, rather than failing for it.
+func TestInterruptedTestDoesNotFailTheMockDestroy(t *testing.T) {
+	for name, interrupt := range map[string]func(*awsLifecycle) ctxDestroyHarness{
+		"during the apply": func(lc *awsLifecycle) ctxDestroyHarness {
+			interruptAWSTestMidApply(t, lc)
+			return ctxDestroyHarness{}
+		},
+		"during the mock destroy": func(lc *awsLifecycle) ctxDestroyHarness {
+			return ctxDestroyHarness{during: lc.signal}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			lc := newAWSLifecycle(t)
+			mockDestroy := interrupt(lc)
+
+			run := runAWSTestWith(t, lc, awsTestSetup{deps: func(d *RuntimeDependencies) { d.Destroy = mockDestroy }})
+
+			require.Error(t, run.err, "an interrupted test never succeeds")
+			assert.Equal(t, CommandStatusFailed, run.result.Status)
+			assert.Contains(t, run.result.Stages, StageSummary{
+				Layer: "destruction", Stage: "destroy", Status: StageStatusSkip,
+				Detail: "skipped: the run was interrupted before the mock destroy finished",
+			})
+			assert.True(t, slices.ContainsFunc(run.result.Failures, isInterruptFailure),
+				"the interrupt is a failure: %+v", run.result.Failures)
+			for _, f := range run.result.Failures {
+				assert.NotEqual(t, "destruction", f.Layer, "the interrupt is not a destruction failure: %+v", f)
+			}
+		})
+	}
+}
+
+// Under an interrupt only the destroy stage's own context.Canceled is
+// skipped; a leftover or any other error is still a destruction failure.
+func TestDestroyMockReportsARealFailureUnderAnInterrupt(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	for name, destroyErr := range map[string]*harness.DestroyError{
+		"orphan_check leftover":      {Stage: "orphan_check", Err: errors.New("detected 1 orphaned resources")},
+		"state for the interrupt":    {Stage: "state", Err: context.Canceled},
+		"destroy failing for itself": {Stage: "destroy", Err: errors.New("exit status 1")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			rt := &CommandRuntime{Deps: RuntimeDependencies{Destroy: &fakeDestroyHarness{err: destroyErr}}}
+
+			stages, failures := destroyMock(ctx, rt, t.TempDir(), nil)
+
+			assert.Contains(t, stages, StageSummary{Layer: "destruction", Stage: destroyErr.Stage, Status: StageStatusFail})
+			require.Len(t, failures, 1)
+			assert.Equal(t, "destruction", failures[0].Layer)
+			assert.Equal(t, destroyErr.Stage, failures[0].Stage)
+		})
+	}
+}
+
+func isInterruptFailure(f FailureSummary) bool { return f.Layer == "run" && f.Check == "interrupted" }

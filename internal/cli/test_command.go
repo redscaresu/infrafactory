@@ -382,6 +382,31 @@ func mockDeployFailureDetail(err *harness.MockDeployError) string {
 	return stderrFailureDetail(err.Err, stderr)
 }
 
+// destroyMock runs the mock (Layer 2) destroy. A destroy an interrupt
+// stopped before tofu could run is reported skipped, not failed: the
+// interrupt is not a leftover, and executeTestWithScenario fails the
+// command for it. The destroy is not rerun on a fresh
+// context, which would hold up the real teardown below it.
+func destroyMock(ctx context.Context, runtime *CommandRuntime, outputDir string, env map[string]string) ([]StageSummary, []FailureSummary) {
+	result, err := runtime.Deps.Destroy.Run(ctx, outputDir, env)
+	if !destroyInterrupted(ctx, err) {
+		return appendDestroyResult(nil, nil, result, err)
+	}
+	skip := StageSummary{
+		Layer: "destruction", Stage: "destroy", Status: StageStatusSkip,
+		Detail: "skipped: the run was interrupted before the mock destroy finished",
+	}
+	return []StageSummary{skip}, nil
+}
+
+// destroyInterrupted: the destroy stage itself failed for the cancelled
+// context. Any other destroy error under an interrupt is still real.
+func destroyInterrupted(ctx context.Context, err error) bool {
+	destroyErr := &harness.DestroyError{}
+	return ctx.Err() != nil && errors.As(err, &destroyErr) &&
+		destroyErr.Stage == "destroy" && errors.Is(err, context.Canceled)
+}
+
 func appendDestroyResult(stages []StageSummary, failures []FailureSummary, result *harness.DestroyResult, runErr error) ([]StageSummary, []FailureSummary) {
 	if runErr == nil {
 		if result != nil && result.Destroy.Stage != "" {
@@ -821,8 +846,8 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 			// already in the failure detail and Layer 2 reproduces in
 			// seconds for nothing.
 			if runtime.Config.Validation.Layers.Destruction.Enabled && !opts.SkipDestroy {
-				destroyResult, destroyErr := runtime.Deps.Destroy.Run(ctx, outputDir, env)
-				stages, failures = appendDestroyResult(stages, failures, destroyResult, destroyErr)
+				destroyStages, destroyFailures := destroyMock(ctx, runtime, outputDir, env)
+				stages, failures = append(stages, destroyStages...), append(failures, destroyFailures...)
 			}
 			// Nothing else downstream can be trusted: every later check
 			// reads a state that does not describe the config.
@@ -966,8 +991,8 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 		stages = append(stages, holdoutStages...)
 		failures = append(failures, holdoutFailures...)
 
-		destroyResult, destroyErr := runtime.Deps.Destroy.Run(ctx, outputDir, env)
-		stages, failures = appendDestroyResult(stages, failures, destroyResult, destroyErr)
+		destroyStages, destroyFailures := destroyMock(ctx, runtime, outputDir, env)
+		stages, failures = append(stages, destroyStages...), append(failures, destroyFailures...)
 
 		// --keep keeps a SUCCESSFUL stack, and only the run's final
 		// iteration can be that.
@@ -984,8 +1009,10 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 		//
 		// Read as late as possible: `failures` here already carries the
 		// criteria checks and the mock destroy, so anything that will
-		// stop this run being a success has landed.
-		keepingSandbox = opts.KeepSandbox && len(failures) == 0
+		// stop this run being a success has landed -- except an
+		// interrupt, whose failure is added at the end, so ctx is read
+		// here too.
+		keepingSandbox = opts.KeepSandbox && len(failures) == 0 && ctx.Err() == nil
 		if sandboxEnabled && keepingSandbox {
 			stages = append(stages, StageSummary{
 				Layer: "sandbox_deploy", Stage: "destroy", Status: StageStatusSkip,
@@ -1128,6 +1155,16 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 		}
 	}
 
+	// The one place an interrupt fails the command, so neither `test` nor a
+	// `run` iteration (as target_reached) ever reports one as a success: a
+	// teardown finished on a fresh context, or a skipped mock destroy,
+	// leaves no failure of its own.
+	if ctx.Err() != nil {
+		failures = append(failures, FailureSummary{
+			Layer: "run", Stage: "interrupted", Check: "interrupted",
+			Detail: "the run was interrupted, so it did not pass, whatever its teardown then finished",
+		})
+	}
 	status := CommandStatusSuccess
 	if len(failures) > 0 {
 		status = CommandStatusFailed

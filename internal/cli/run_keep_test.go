@@ -466,58 +466,138 @@ func TestRunKeepFailsTheRunWhenTheRecordCannotDestroyWhatItKept(t *testing.T) {
 // with it -- so what that iteration applied becomes untraceable before
 // anything registers it. Only the terminal success is ever registered.
 func TestKeepStillDestroysAnIterationThatFailed(t *testing.T) {
+	for name, tc := range map[string]struct {
+		probeErr error
+		// interrupt, when set, cancels the test's context inside the
+		// mock destroy.
+		interrupt bool
+	}{
+		// The apply succeeded and the PROBE failed: resources are real
+		// and running, and this iteration is not the one being kept.
+		"probe fails": {probeErr: errors.New("probe: connection refused")},
+		// Everything passed, but a signal landed during the mock destroy.
+		"interrupted": {interrupt: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newCommandTestHarness(t)
+			scenarioPath := writeUnsupportedCriteriaScenario(t, h.WorkspaceDir)
+			sandboxCredsForTest(t)
+
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			var mockDestroy DestroyHarnessRunner = &fakeDestroyHarness{result: &harness.DestroyResult{StateSnapshot: []byte(`{"instance":{"servers":[]}}`)}}
+			if tc.interrupt {
+				mockDestroy = ctxDestroyHarness{during: cancel}
+			}
+			sandboxDestroy := &fakeSandboxDestroyHarness{
+				result: &harness.SandboxDestroyResult{Destroy: harness.StageResult{Stage: "destroy"}},
+			}
+			opts := runtimeOptions{
+				configLoader: func(path string) (config.Config, error) {
+					cfg, err := config.Load(path)
+					if err != nil {
+						return config.Config{}, err
+					}
+					cfg.Validation.Layers.SandboxDeploy.Enabled = true
+					cfg.Paths.Output = h.OutputDir()
+					return cfg, nil
+				},
+				scenarioLoader: defaultScenarioLoader,
+				livestoreRoot:  h.LivestoreRoot(),
+				deps: RuntimeDependencies{
+					MockDeploy: &fakeMockDeployHarness{result: &harness.MockDeployResult{
+						Apply: harness.StageResult{Stage: "apply"}, StateSnapshot: []byte(`{}`),
+					}},
+					Destroy:    mockDestroy,
+					RunProject: &fakeRunProject{created: harness.RunProject{ID: "run-proj-fail", Name: "if-run-fail"}},
+					SandboxDeploy: &fakeSandboxDeployHarness{result: &harness.SandboxDeployResult{
+						Apply: harness.StageResult{Stage: "apply"},
+					}},
+					SandboxDestroy: sandboxDestroy,
+					OrphanSweep:    &fakeOrphanSweep{},
+					RealProbe:      &fakeRealProbeHarness{result: &harness.RealProbeResult{}, err: tc.probeErr},
+				},
+			}
+
+			cmd := &cobra.Command{Use: "test <scenario>"}
+			cmd.Flags().String("config", h.ConfigPath, "")
+			runtime, err := buildRuntime(cmd, opts)
+			require.NoError(t, err)
+			_, err = runtime.LoadScenario(scenarioPath)
+			require.NoError(t, err)
+
+			require.NoError(t, os.MkdirAll(runtime.OutputDir(), 0o755))
+			require.NoError(t, os.WriteFile(filepath.Join(runtime.OutputDir(), harness.LiveStateFilename),
+				[]byte(`{"resources":[{"type":"scaleway_instance_server"}]}`), 0o600))
+
+			result, _ := executeTest(ctx, runtime, scenarioPath, testExecutionOptions{KeepSandbox: true})
+
+			require.NotEmpty(t, result.Failures, "the fixture must actually fail, or this proves nothing")
+			assert.Equal(t, 1, sandboxDestroy.calls,
+				"a failing iteration's resources are destroyed even under --keep: nothing would ever record them")
+			assert.NotContains(t, stageDetail(result.Stages, "sandbox_deploy", "destroy"), "kept by --keep")
+		})
+	}
+}
+
+// An interrupt during the mock destroy fails the iteration, so `run
+// --keep` ends "interrupted", never target_reached (whose path learns
+// pitfalls), and its stack is destroyed rather than kept and registered.
+func TestInterruptedRunKeepDoesNotKeepTheStack(t *testing.T) {
 	h := newCommandTestHarness(t)
-	scenarioPath := writeUnsupportedCriteriaScenario(t, h.WorkspaceDir)
+	lc := newAWSLifecycle(t) // its notify and signal only
 	sandboxCredsForTest(t)
+
+	scenarioPath := filepath.Join(h.WorkspaceDir, "scenarios", "training", "web-live-paris.yaml")
+	require.NoError(t, os.MkdirAll(filepath.Dir(scenarioPath), 0o755))
+	require.NoError(t, os.WriteFile(scenarioPath, []byte(liveServiceScenarioYAML), 0o600))
 
 	sandboxDestroy := &fakeSandboxDestroyHarness{
 		result: &harness.SandboxDestroyResult{Destroy: harness.StageResult{Stage: "destroy"}},
 	}
-	opts := runtimeOptions{
-		configLoader: func(path string) (config.Config, error) {
-			cfg, err := config.Load(path)
-			if err != nil {
-				return config.Config{}, err
-			}
-			cfg.Validation.Layers.SandboxDeploy.Enabled = true
-			cfg.Paths.Output = h.OutputDir()
-			return cfg, nil
-		},
-		scenarioLoader: defaultScenarioLoader,
-		livestoreRoot:  h.LivestoreRoot(),
-		deps: RuntimeDependencies{
-			MockDeploy: &fakeMockDeployHarness{result: &harness.MockDeployResult{
-				Apply: harness.StageResult{Stage: "apply"}, StateSnapshot: []byte(`{}`),
-			}},
-			Destroy:    &fakeDestroyHarness{result: &harness.DestroyResult{StateSnapshot: []byte(`{"instance":{"servers":[]}}`)}},
-			RunProject: &fakeRunProject{created: harness.RunProject{ID: "run-proj-fail", Name: "if-run-fail"}},
-			SandboxDeploy: &fakeSandboxDeployHarness{result: &harness.SandboxDeployResult{
-				Apply: harness.StageResult{Stage: "apply"},
-			}},
-			SandboxDestroy: sandboxDestroy,
-			OrphanSweep:    &fakeOrphanSweep{},
-			// The apply succeeded and the PROBE failed: resources are
-			// real and running, and this iteration is not the one being
-			// kept.
-			RealProbe: &fakeRealProbeHarness{err: errors.New("probe: connection refused")},
-		},
+	opts := isolatedRunOpts(h, func(cfg config.Config) config.Config {
+		cfg.Validation.Layers.SandboxDeploy.Enabled = true
+		return cfg
+	})
+	opts.deps = RuntimeDependencies{
+		Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
+			return &generator.GeneratedCode{Files: map[string][]byte{
+				"main.tf":                 []byte("terraform {}\n"),
+				harness.LiveStateFilename: []byte(`{"resources":[{"type":"scaleway_instance_server"}]}`),
+			}}, nil
+		}),
+		Static: &fakeStaticHarness{result: &harness.StaticResult{
+			Stages:   []harness.StageResult{{Stage: "init"}, {Stage: "validate"}, {Stage: "plan"}, {Stage: "show"}},
+			PlanJSON: []byte(`{"planned_values":{"root_module":{}}}`),
+		}},
+		MockDeploy: &fakeMockDeployHarness{result: &harness.MockDeployResult{
+			Apply: harness.StageResult{Stage: "apply"}, StateSnapshot: []byte(`{}`),
+		}},
+		MockState:      &fakeRunMockStateClient{statePayload: []byte(`{"instance":{"servers":[]}}`)},
+		Destroy:        ctxDestroyHarness{during: lc.signal},
+		RunProject:     &fakeRunProject{created: harness.RunProject{ID: "run-proj-keep", Name: "if-run-keep"}},
+		SandboxDeploy:  &fakeSandboxDeployHarness{result: &harness.SandboxDeployResult{Apply: harness.StageResult{Stage: "apply"}}},
+		SandboxDestroy: sandboxDestroy,
+		OrphanSweep:    &fakeOrphanSweep{},
+		RealProbe:      &fakeRealProbeHarness{result: &harness.RealProbeResult{}},
 	}
 
-	cmd := &cobra.Command{Use: "test <scenario>"}
-	cmd.Flags().String("config", h.ConfigPath, "")
-	runtime, err := buildRuntime(cmd, opts)
+	cmd := newRunCommandForTest(opts)
+	cmd.RunE = withRuntimeWithOptions("run", opts, sealedHandler(&bytes.Buffer{},
+		func(cmd *cobra.Command, args []string, rt *CommandRuntime) error {
+			return runRunWithNotify(cmd, args, rt, lc.notify)
+		}))
+	stdout := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{scenarioPath, "--config", h.ConfigPath, "--keep", "--output", string(OutputModeJSON),
+		"--reset-mocks=false"})
+
+	assert.Error(t, cmd.Execute(), "an interrupted run never succeeds:\n%s", stdout.String())
+	result := decodeMachineOutput(t, bytes.NewBufferString(stdout.String()))
+	assert.Equal(t, "interrupted", stageDetail(result.Stages, "run", "terminal_reason"))
+	assert.NotZero(t, sandboxDestroy.calls, "an interrupted run is not kept")
+	deployments, _, err := livestore.NewFilesystemStore(h.LivestoreRoot()).List()
 	require.NoError(t, err)
-	_, err = runtime.LoadScenario(scenarioPath)
-	require.NoError(t, err)
-
-	require.NoError(t, os.MkdirAll(runtime.OutputDir(), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(runtime.OutputDir(), harness.LiveStateFilename),
-		[]byte(`{"resources":[{"type":"scaleway_instance_server"}]}`), 0o600))
-
-	result, _ := executeTest(t.Context(), runtime, scenarioPath, testExecutionOptions{KeepSandbox: true})
-
-	require.NotEmpty(t, result.Failures, "the fixture must actually fail, or this proves nothing")
-	assert.Equal(t, 1, sandboxDestroy.calls,
-		"a failing iteration's resources are destroyed even under --keep: nothing would ever record them")
-	assert.NotContains(t, stageDetail(result.Stages, "sandbox_deploy", "destroy"), "kept by --keep")
+	assert.Empty(t, deployments, "nothing registered")
 }

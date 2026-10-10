@@ -79,6 +79,8 @@ type awsLifecycle struct {
 	// not; reap's own take is not it.
 	runHolder string
 	onPut     func()
+	// onDelete runs inside a DeleteParameter, after its context was read.
+	onDelete func()
 	// onEC2 sees each EC2 action with mu held, so it may change ec2.
 	onEC2  func(action string)
 	sleeps int
@@ -257,6 +259,9 @@ func (lc *awsLifecycle) ssm(op string, payload []byte) (int, string) {
 	lc.record(call)
 	if op == "PutParameter" && lc.onPut != nil {
 		lc.onPut()
+	}
+	if op == "DeleteParameter" && lc.onDelete != nil {
+		lc.onDelete()
 	}
 
 	lc.mu.Lock()
