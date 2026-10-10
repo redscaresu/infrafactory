@@ -165,6 +165,10 @@ Layer 3 spends real money. Before any Layer 3 work, read `docs/operations.md` §
 ADR-0023; for AWS, § Layer 3 (AWS) holds the scope's hand setup. Always: it is never wired into
 scheduled CI; generated HCL never declares a project or sets `project_id` (ADR-0025); and
 `openclaw-prod` is protected only by software guards — do not weaken them.
+AWS Layer 3 runs against one dedicated member account with a scoped key in
+`~/.config/infrafactory/layer3-aws.env` (0600); `docs/operations.md` § Layer 3 (AWS) holds the
+credential file, the whole-account scope and its claim (ADR-0040), and the probe contract
+(ADR-0033, ADR-0039).
 
 ## Epics, stories and the board
 
