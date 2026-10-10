@@ -12,6 +12,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// iamActionPattern is any service:Action, so a new action of any service
+// is caught, not only of a listed few.
+var iamActionPattern = regexp.MustCompile(`\b[a-z0-9-]+:[A-Z][A-Za-z*]+\b`)
+
 // The AWS scope is built by hand from docs/operations.md § Layer 3 (AWS),
 // which the stamp's and default VPC's errors point at, so the runbook
 // must name what the code reads.
@@ -33,6 +37,15 @@ func TestAWSScopeSetupRunbookNamesWhatTheCodeReads(t *testing.T) {
 	} {
 		assert.Contains(t, section, want)
 	}
+
+	// Step 3 points at the policy and names no action before its
+	// simulator block: the policy file is the one list.
+	_, step3, found := strings.Cut(section, "\n**3. The IAM user**")
+	require.True(t, found, "Scope setup has no step 3")
+	step3, _, _ = strings.Cut(step3, "\n**4. ")
+	prose, _, found := strings.Cut(step3, "Verify with the policy simulator")
+	require.True(t, found, "step 3 has no simulator block")
+	assert.Empty(t, iamActionPattern.FindAllString(prose, -1), "step 3 names an action outside its simulator block")
 }
 
 // The run checklist is what an operator reads before spending money, so
@@ -61,8 +74,6 @@ func TestAWSRunChecklistNamesTheStagesAndTheReapCommand(t *testing.T) {
 	} {
 		assert.Contains(t, section, want)
 	}
-	// Any service:Action, so a new action of any service fails, not only
-	// of a listed few.
-	assert.Equal(t, []string{"ssm:GetParameter"}, regexp.MustCompile(`\b[a-z0-9-]+:[A-Z][A-Za-z*]+\b`).FindAllString(section, -1),
+	assert.Equal(t, []string{"ssm:GetParameter"}, iamActionPattern.FindAllString(section, -1),
 		"the checklist names one action, in the sentence about the public parameter")
 }
