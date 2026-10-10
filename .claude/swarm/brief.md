@@ -8,3 +8,4 @@ it in any merge commit's message. End commit messages with
 Never press GitHub's "Update branch": its merge commit has no `ADR:` trailer and fails doc
 hygiene. To catch up with the base, `git merge origin/main` locally and repeat the trailer (a
 reason of at least 10 characters) in the merge commit's message.
+Keep one source of truth for each fact (a holder, a list, a stage name): derive every other view from it rather than copying it, and when a review finds a fact held in two places, remove the copy instead of syncing it. <!-- lesson: state-duplication -->
