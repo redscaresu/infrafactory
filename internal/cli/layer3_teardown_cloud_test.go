@@ -8,7 +8,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
@@ -190,6 +192,53 @@ func TestReapOnAnotherCloudRefusesBeforeReadingTheMarker(t *testing.T) {
 	}
 }
 
+// midRunListenWait bounds midRunSignal's wait for the guard, so a guard
+// that never listens again fails its test rather than hanging it.
+const midRunListenWait = 5 * time.Second
+
+// midRunSignal is a stdout that sends one signal as the run writes its
+// result, and holds that write until the guard listens for the next
+// signal, which it does only once it has ended the run's span. So the
+// run is still in flight when it sees its interrupt, however the
+// watcher goroutine is scheduled; a signal already sent before the run
+// starts can lose that race to a run that never waits on its context.
+type midRunSignal struct {
+	bytes.Buffer
+	mu        sync.Mutex
+	signal    context.CancelFunc // the first registration's
+	listening chan struct{}      // closed at the second registration
+}
+
+func newMidRunSignal() *midRunSignal { return &midRunSignal{listening: make(chan struct{})} }
+
+func (s *midRunSignal) notify(parent context.Context, _ ...os.Signal) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(parent)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	switch {
+	case s.signal == nil:
+		s.signal = cancel
+	case s.listening != nil:
+		close(s.listening)
+		s.listening = nil
+	}
+	return ctx, cancel
+}
+
+func (s *midRunSignal) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	signal, listening := s.signal, s.listening
+	s.mu.Unlock()
+	if signal != nil && listening != nil {
+		signal()
+		select {
+		case <-listening:
+		case <-time.After(midRunListenWait):
+		}
+	}
+	return s.Buffer.Write(p)
+}
+
 // aws has an interrupt arm, which keeps the claim and names reap:
 // aws_reap_command_test.go.
 func TestInterruptedTestOnAnotherCloudTearsNothingDown(t *testing.T) {
@@ -216,12 +265,12 @@ func TestInterruptedTestOnAnotherCloudTearsNothingDown(t *testing.T) {
 				fakes.install(&opts.deps)
 
 				logs := &bytes.Buffer{}
+				stdout, stderr := newMidRunSignal(), &bytes.Buffer{}
 				cmd := newTestCommandForTest(opts)
 				cmd.RunE = withRuntimeWithOptions("test", opts, sealedHandler(logs,
 					func(cmd *cobra.Command, args []string, rt *CommandRuntime) error {
-						return runTestWithNotify(cmd, args, rt, cancelledNotify())
+						return runTestWithNotify(cmd, args, rt, stdout.notify)
 					}))
-				stdout, stderr := &bytes.Buffer{}, &bytes.Buffer{}
 				cmd.SetOut(stdout)
 				cmd.SetErr(stderr)
 				cmd.SetArgs([]string{h.ScenarioPath, "--config", h.ConfigPath, "--output", string(OutputModeJSON)})
