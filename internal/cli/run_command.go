@@ -377,6 +377,13 @@ func runRunWithNotify(
 				terminalReason = "interrupted"
 				break
 			}
+			// A failed mock reset says the environment is wrong, not the
+			// HCL. Repair cannot fix it, so stop before a wasted generation,
+			// under its own reason so the harvest learns nothing from it.
+			if slices.ContainsFunc(failures, isMockResetFailure) {
+				terminalReason = terminalReasonMockUnavailable
+				break
+			}
 			// A failed holdout ends the run here, without a repair.
 			//
 			// Feeding it back would make the holdout SEEN -- the generator
@@ -1743,6 +1750,13 @@ func hasConvergeFailure(failures []FailureSummary) bool {
 // aws scope's claim. Never repair_budget_exhausted or stuck, so the
 // pitfall harvest does not fire on it.
 const terminalReasonAWSScopeClaimKept = "aws_scope_claim_kept"
+
+// terminalReasonMockUnavailable ends a run whose mock reset failed.
+const terminalReasonMockUnavailable = "mock_unavailable"
+
+func isMockResetFailure(f FailureSummary) bool {
+	return f.Origin == "mock_deploy" && f.Check == "reset"
+}
 
 func isStage(name string) func(StageSummary) bool {
 	return func(s StageSummary) bool { return s.Stage == name }

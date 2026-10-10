@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,6 +18,7 @@ import (
 	"github.com/redscaresu/infrafactory/internal/generator"
 	"github.com/redscaresu/infrafactory/internal/harness"
 	"github.com/redscaresu/infrafactory/internal/runstore"
+	"github.com/redscaresu/infrafactory/internal/scenario"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1424,4 +1427,80 @@ func TestRunCommandRecordsTheLearnedLayerOnAnAvoidPitfall(t *testing.T) {
 			assert.Equal(t, layer, avoid[0].LearnedLayer)
 		})
 	}
+}
+
+// A mock whose reset fails says the environment is wrong, not the HCL:
+// the run stops on iteration 1, names the mock, and learns nothing.
+func TestRunCommandStopsWhenAMockResetFails(t *testing.T) {
+	fakeaws := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{}`)
+	}))
+	defer fakeaws.Close()
+	// Another service on the s3 backend's port answers HTML.
+	s3 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = io.WriteString(w, "<html><body>not s3</body></html>")
+	}))
+	defer s3.Close()
+
+	h := newCommandTestHarness(t)
+	scenarioPath := filepath.Join(h.WorkspaceDir, "scenarios", "training", "aws.yaml")
+	mustWriteFile(t, scenarioPath, `scenario: example-scenario
+version: "1.0"
+cloud: aws
+description: example
+resources:
+  compute:
+    purpose: web-server
+    size: small
+acceptance_criteria:
+  - type: connectivity
+    from: public_internet
+    to: compute
+    expect: blocked
+`)
+	docsDir := t.TempDir()
+	opts := isolatedRunOpts(h, func(cfg config.Config) config.Config {
+		cfg.Agent.RepairIterationsMax = 4
+		cfg.Paths.Docs = docsDir
+		return cfg
+	})
+	generations := 0
+	opts.deps = RuntimeDependencies{
+		// The real router and mock deploy, so the reset is the one a run makes.
+		MockState: &cloudMockStateRouter{
+			runtime:     &CommandRuntime{loadedScenario: &scenario.Scenario{Cloud: "aws"}},
+			scaleway:    newMockStateClient(closedMockURL),
+			aws:         newMockStateClient(fakeaws.URL),
+			s3:          newMockStateClient(s3.URL),
+			s3AutoReset: true,
+		},
+		Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
+			generations++
+			return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte("terraform {}\n")}}, nil
+		}),
+		Static: &fakeStaticHarness{result: &harness.StaticResult{
+			Stages:   []harness.StageResult{{Stage: "init"}, {Stage: "validate"}, {Stage: "plan"}, {Stage: "show"}},
+			PlanJSON: []byte(`{"planned_values":{"root_module":{}}}`),
+		}},
+		Destroy: &fakeDestroyHarness{},
+	}
+
+	cmd := newRunCommandForTest(opts)
+	cmd.RunE = withRuntimeWithOptions("run", opts, sealedHandler(io.Discard, runRunCommand))
+	stdout := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{scenarioPath, "--config", h.ConfigPath})
+
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `terminal reason "mock_unavailable" after 1 iteration(s)`)
+	assert.Equal(t, 1, generations, "a reset failure must not spend a repair generation")
+	assert.Contains(t, stdout.String(), "s3 mock at "+s3.URL)
+
+	entries, err := generator.LoadPitfallEntries(h.PitfallsDir(), "aws")
+	require.NoError(t, err)
+	assert.Empty(t, entries)
+	assert.NoFileExists(t, filepath.Join(docsDir, "mock-gaps.md"))
 }
