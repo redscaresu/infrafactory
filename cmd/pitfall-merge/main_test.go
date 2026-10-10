@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/redscaresu/infrafactory/internal/generator"
-	"github.com/redscaresu/infrafactory/internal/generator/scrubtest"
 )
 
 func mk(resource, rule, source string) generator.PitfallEntry {
@@ -352,24 +351,4 @@ func TestMergeCollapsesRawAndScrubbedCopies(t *testing.T) {
 	assert.Zero(t, added)
 	require.Len(t, merged.Pitfalls, 1)
 	assert.Equal(t, "arn:aws:iam::ACCOUNT_ID:role/x", merged.Pitfalls[0].Rule)
-}
-
-// The sweep may run without a config, or with one that fails to load:
-// neither stops the merge, and only aws.account_id is read.
-func TestRegisterScrubbedAccountsIsLenient(t *testing.T) {
-	scrubtest.Register(t) // registerScrubbedAccounts registers; undo it when the test ends
-	dir := t.TempDir()
-
-	registerScrubbedAccounts(filepath.Join(dir, "absent.yaml"))
-
-	broken := filepath.Join(dir, "broken.yaml")
-	require.NoError(t, os.WriteFile(broken, []byte("aws: [unclosed"), 0o644))
-	registerScrubbedAccounts(broken)
-
-	// Unknown keys would fail config.Load's strict decode; the account is
-	// still read.
-	cfg := filepath.Join(dir, "infrafactory.yaml")
-	require.NoError(t, os.WriteFile(cfg, []byte("unknown_key: 1\naws:\n  account_id: \"444455556666\"\n"), 0o644))
-	registerScrubbedAccounts(cfg)
-	assert.Equal(t, "abcdACCOUNT_ID", generator.ScrubAccountIDs("abcd444455556666"))
 }

@@ -201,3 +201,10 @@ func TestAvoidReplayDetailNeverSplitsAnAccountID(t *testing.T) {
 	got := failedReplay(1, 0, detail, "aws_iam_role", []string{"name"})
 	assert.NotContains(t, got.Detail, "987654")
 }
+
+// The ellipsis marks a cut: a rule of exactly the limit is printed whole.
+func TestTruncateRuleMarksOnlyARealCut(t *testing.T) {
+	exact := strings.Repeat("r", truncateRuleLimit)
+	assert.Equal(t, exact, truncateRule(exact))
+	assert.Equal(t, exact+"…", truncateRule(exact+"r"))
+}

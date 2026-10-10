@@ -1,6 +1,9 @@
 package generator
 
 import (
+	"fmt"
+	"io"
+	"os"
 	"reflect"
 	"regexp"
 	"slices"
@@ -9,6 +12,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"unicode/utf8"
+
+	"gopkg.in/yaml.v3"
 )
 
 var (
@@ -103,6 +108,28 @@ func RegisterScrubbedAccounts(ids ...string) (restore func()) {
 		knownAccountPattern.Store(knownAccountsPattern(knownAccountIDs))
 	}
 	return restore
+}
+
+// RegisterConfigAccount registers aws.account_id from the config at path
+// for a tool that does not load the full config (pitfall-merge,
+// extract-pitfall). It reads only that field, leniently, and never
+// fails: a missing or broken config is reported on warn, naming the
+// path, and the scrub falls back to its ARN and plain 12-digit layers.
+func RegisterConfigAccount(path string, warn io.Writer) {
+	var cfg struct {
+		AWS struct {
+			AccountID string `yaml:"account_id"`
+		} `yaml:"aws"`
+	}
+	body, err := os.ReadFile(path)
+	if err == nil {
+		err = yaml.Unmarshal(body, &cfg)
+	}
+	if err != nil {
+		fmt.Fprintf(warn, "WARN: config %s not read (%v); scrubbing ARN account fields and plain 12-digit ids only\n", path, err)
+		return
+	}
+	RegisterScrubbedAccounts(cfg.AWS.AccountID)
 }
 
 func isAccountID(id string) bool {

@@ -23,10 +23,8 @@
 package main
 
 import (
-	"errors"
 	"flag"
 	"fmt"
-	"io/fs"
 	"os"
 	"strings"
 	"time"
@@ -54,7 +52,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "usage: pitfall-merge --pre PRE --post POST --out OUT [--keep SOURCES] [--config CONFIG]")
 		os.Exit(2)
 	}
-	registerScrubbedAccounts(*configFile)
+	generator.RegisterConfigAccount(*configFile, os.Stderr)
 
 	keepSet := map[string]bool{}
 	for _, s := range strings.Split(*keepFlag, ",") {
@@ -243,32 +241,6 @@ func loadPitfalls(path string) (generator.PitfallsFile, error) {
 func savePitfalls(path string, pf generator.PitfallsFile) error {
 	_, err := generator.WritePitfalls(path, &pf)
 	return err
-}
-
-// registerScrubbedAccounts registers the config's aws.account_id for the
-// writer's scrub, reading only that field. Nothing here stops the merge:
-// a missing or unreadable config warns, naming the path (a run from
-// another directory is then visible), and falls back to the scrub's ARN
-// and plain 12-digit layers, which need no registration.
-func registerScrubbedAccounts(path string) {
-	body, err := os.ReadFile(path)
-	if errors.Is(err, fs.ErrNotExist) {
-		fmt.Fprintf(os.Stderr, "pitfall-merge: WARN: config %s not found; scrubbing ARN account fields and plain 12-digit ids only\n", path)
-		return
-	}
-	var cfg struct {
-		AWS struct {
-			AccountID string `yaml:"account_id"`
-		} `yaml:"aws"`
-	}
-	if err == nil {
-		err = yaml.Unmarshal(body, &cfg)
-	}
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "pitfall-merge: WARN: config %s not read (%v); scrubbing ARN account fields and plain 12-digit ids only\n", path, err)
-		return
-	}
-	generator.RegisterScrubbedAccounts(cfg.AWS.AccountID)
 }
 
 func sortedKeys(m map[string]bool) []string {

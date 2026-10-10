@@ -391,3 +391,25 @@ func TestPublicAMIOwnersSurviveOnlyThePlainRunLayer(t *testing.T) {
 	assert.Equal(t, "arn:aws:iam::ACCOUNT_ID:root", scrubWith("arn:aws:iam::"+canonical+":root", nil))
 	assert.Equal(t, "owner ACCOUNT_ID", scrubWith("owner "+canonical, knownAccountsPattern([]string{canonical})))
 }
+
+// Tools that do not load the full config read only aws.account_id, and a
+// missing, broken or strict-invalid config never stops them.
+func TestRegisterConfigAccountIsLenient(t *testing.T) {
+	t.Cleanup(RegisterScrubbedAccounts()) // scrubtest would be an import cycle from here
+	dir := t.TempDir()
+	var warn strings.Builder
+
+	RegisterConfigAccount(filepath.Join(dir, "absent.yaml"), &warn)
+	broken := filepath.Join(dir, "broken.yaml")
+	require.NoError(t, os.WriteFile(broken, []byte("aws: [unclosed"), 0o644))
+	RegisterConfigAccount(broken, &warn)
+	assert.Contains(t, warn.String(), "absent.yaml")
+	assert.Contains(t, warn.String(), "broken.yaml")
+
+	// Unknown keys would fail config.Load's strict decode; the account is
+	// still read.
+	cfg := filepath.Join(dir, "infrafactory.yaml")
+	require.NoError(t, os.WriteFile(cfg, []byte("unknown_key: 1\naws:\n  account_id: \"444455556666\"\n"), 0o644))
+	RegisterConfigAccount(cfg, &warn)
+	assert.Equal(t, "abcdACCOUNT_ID", ScrubAccountIDs("abcd444455556666"))
+}
