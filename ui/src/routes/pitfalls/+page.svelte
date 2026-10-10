@@ -3,6 +3,7 @@
   import { api } from "$lib/api";
   import {
     emptyPitfall,
+    saveStatusMessage,
     selectInitialProvider,
     sourceBadgeClass,
     sourceBadgeLabel
@@ -104,8 +105,9 @@
     }));
     try {
       const resp = await api.savePitfalls(provider, list);
-      saveStatus = { ...saveStatus, [provider]: `Saved ${resp.count} pitfall${resp.count === 1 ? "" : "s"}.` };
-      // Re-load to pick up any backend-side normalisation (e.g. default source).
+      saveStatus = { ...saveStatus, [provider]: saveStatusMessage(resp) };
+      // Re-load to pick up any backend-side normalisation (e.g. default
+      // source) and the account-id scrub, so the editor shows what is on disk.
       await load();
     } catch (err) {
       const message = err instanceof Error ? err.message : "Save failed";

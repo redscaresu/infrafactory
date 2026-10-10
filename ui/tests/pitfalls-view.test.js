@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   classifySource,
   emptyPitfall,
+  saveStatusMessage,
   selectInitialProvider,
   sourceBadgeClass,
   sourceBadgeLabel
@@ -60,4 +61,13 @@ test("emptyPitfall returns a fresh entry with the static default source", () => 
   assert.deepEqual(a, { resource: "", rule: "", source: "static", discovered_from: "" });
   // Distinct references so editing one entry doesn't mutate another.
   assert.notEqual(a, b);
+});
+
+test("saveStatusMessage names a scrub so edited text never changes silently", () => {
+  assert.equal(saveStatusMessage({ count: 2, scrubbed: 0 }), "Saved 2 pitfalls.");
+  assert.equal(saveStatusMessage({ count: 1 }), "Saved 1 pitfall.");
+  assert.equal(
+    saveStatusMessage({ count: 2, scrubbed: 1 }),
+    "Saved 2 pitfalls. Account ids were replaced with ACCOUNT_ID in 1 field."
+  );
 });

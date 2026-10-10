@@ -47,17 +47,14 @@ func main() {
 	// on the floor would make the corpus untrustworthy in exactly the way
 	// the reporting was meant to fix.
 	keepFlag := flag.String("keep", "avoid,live", "comma-separated source values to preserve from post")
-	configFile := flag.String("config", config.DefaultPath, "infrafactory config whose aws.account_id is scrubbed (a missing file scrubs ARN account fields only)")
+	configFile := flag.String("config", config.DefaultPath, "infrafactory config whose aws.account_id is scrubbed in every form (optional)")
 	flag.Parse()
 
-	if err := registerScrubbedAccounts(*configFile); err != nil {
-		die("read config: %v", err)
-	}
-
 	if *preFile == "" || *postFile == "" || *outFile == "" {
-		fmt.Fprintln(os.Stderr, "usage: pitfall-merge --pre PRE --post POST --out OUT [--keep SOURCES]")
+		fmt.Fprintln(os.Stderr, "usage: pitfall-merge --pre PRE --post POST --out OUT [--keep SOURCES] [--config CONFIG]")
 		os.Exit(2)
 	}
+	registerScrubbedAccounts(*configFile)
 
 	keepSet := map[string]bool{}
 	for _, s := range strings.Split(*keepFlag, ",") {
@@ -248,19 +245,29 @@ func savePitfalls(path string, pf generator.PitfallsFile) error {
 	return err
 }
 
-// registerScrubbedAccounts registers the config's account for the
-// writer's scrub. A missing config is not an error: the sweep may run
-// without one, and ARN account fields are scrubbed regardless.
-func registerScrubbedAccounts(path string) error {
-	cfg, err := config.Load(path)
+// registerScrubbedAccounts registers the config's aws.account_id for the
+// writer's scrub, reading only that field. Nothing here stops the merge:
+// a missing or unreadable config falls back to the scrub's ARN and plain
+// 12-digit layers, which need no registration (a broken config only
+// warns).
+func registerScrubbedAccounts(path string) {
+	body, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
-		return nil
+		return
+	}
+	var cfg struct {
+		AWS struct {
+			AccountID string `yaml:"account_id"`
+		} `yaml:"aws"`
+	}
+	if err == nil {
+		err = yaml.Unmarshal(body, &cfg)
 	}
 	if err != nil {
-		return err
+		fmt.Fprintf(os.Stderr, "pitfall-merge: WARN: config %s not read (%v); scrubbing ARN account fields and plain 12-digit ids only\n", path, err)
+		return
 	}
 	generator.RegisterScrubbedAccounts(cfg.AWS.AccountID)
-	return nil
 }
 
 func sortedKeys(m map[string]bool) []string {

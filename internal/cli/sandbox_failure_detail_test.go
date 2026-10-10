@@ -157,8 +157,6 @@ func TestStderrFailureDetailStripsAnsiAndTruncates(t *testing.T) {
 // is operator-facing and keeps a whole id as it is.
 func TestFailureTextCutsNeverSplitAnAccountID(t *testing.T) {
 	const id = "123456789012"
-	// As buildRuntime does from aws.account_id.
-	generator.RegisterScrubbedAccounts(id)
 	straddle := func(cut int) string {
 		return id + " " + strings.Repeat("x", cut-len(id)/2-len(id)-1) + id + strings.Repeat("y", cut)
 	}
@@ -176,6 +174,7 @@ func TestFailureTextCutsNeverSplitAnAccountID(t *testing.T) {
 // Every command builds its runtime through buildRuntime, which registers
 // the config's account with the publish sinks' scrub.
 func TestBuildRuntimeRegistersTheConfigAccount(t *testing.T) {
+	generator.ResetScrubbedAccountsForTest(t)
 	const account = "444455556666"
 	opts := defaultRuntimeOptions()
 	opts.configLoader = func(string) (config.Config, error) {
@@ -188,5 +187,7 @@ func TestBuildRuntimeRegistersTheConfigAccount(t *testing.T) {
 	cmd.Flags().String("config", "unused.yaml", "")
 	_, err := buildRuntime(cmd, opts)
 	require.NoError(t, err)
-	assert.Equal(t, "account ACCOUNT_ID", generator.ScrubAccountIDs("account "+account))
+	// The glued form is layer (a) only: the plain-run layer would let it
+	// through, so this passes only if the account was registered.
+	assert.Equal(t, "abcdACCOUNT_ID", generator.ScrubAccountIDs("abcd"+account))
 }

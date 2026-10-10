@@ -32,17 +32,12 @@ func TestRedactTransportDetail(t *testing.T) {
 	}
 }
 
-// testAccountID is the account TestMain registers, as a command
-// registers aws.account_id from its config.
+// testAccountID is the account a test registers, as a command registers
+// aws.account_id from its config.
 const testAccountID = "123456789012"
 
 // accountIDLeak is the shape a real AccessDenied gives a learned rule.
 const accountIDLeak = "User arn:aws:iam::123456789012:user/x is not authorized to perform iam:CreateRole in account 123456789012"
-
-func TestMain(m *testing.M) {
-	RegisterScrubbedAccounts(testAccountID)
-	os.Exit(m.Run())
-}
 
 func TestScrubAccountIDs(t *testing.T) {
 	t.Parallel()
@@ -69,8 +64,9 @@ func TestScrubAccountIDs(t *testing.T) {
 	}
 }
 
-// Nothing but a registered id or an ARN account field is touched: the
-// heuristic this replaced ate digests, resource ids and port lists.
+// With an unrelated account registered, or none, the fail-closed layer
+// still scrubs a plain 12-digit id, and leaves digests, resource ids,
+// UUIDs and port lists alone.
 func TestScrubAccountIDsLeavesOtherDigits(t *testing.T) {
 	t.Parallel()
 
@@ -80,14 +76,23 @@ func TestScrubAccountIDsLeavesOtherDigits(t *testing.T) {
 		"sha256 " + digest,
 		"snap-0a123456789012bcd",
 		"ports 8080 8443 9090",
-		"bytes 107374182400",
 		"id 550e8400-e29b-41d4-a716-446655440000",
-		"arn:aws:s3:::logs-987654321098",
 		"arn:aws:iam::9876543210987:root",
+		"thirteen 1234567890123",
+		"eleven 12345678901",
 	} {
 		assert.Equal(t, in, scrubWith(in, known), in)
+		assert.Equal(t, in, scrubWith(in, nil), in)
 	}
-	assert.Equal(t, "account 123456789012", scrubWith("account 123456789012", nil), "nothing registered scrubs nothing outside an ARN")
+	for in, want := range map[string]string{
+		"account 123456789012":             "account ACCOUNT_ID",
+		"denied in 987654321098, not mine": "denied in ACCOUNT_ID, not mine",
+		"cloudtrail123456789012":           "cloudtrailACCOUNT_ID",
+		// Fail closed: a bare 12-digit count is indistinguishable from an id.
+		"bytes 107374182400": "bytes ACCOUNT_ID",
+	} {
+		assert.Equal(t, want, scrubWith(in, nil), "nothing registered: "+in)
+	}
 }
 
 func assertAccountIDsScrubbed(t *testing.T, path string, wantPlaceholders int) {
@@ -246,14 +251,14 @@ func TestGapRowsScrubEveryColumn(t *testing.T) {
 	assertAccountIDsScrubbed(t, filepath.Join(dir, "mock-gaps.md"), 3)
 }
 
-// A digest or check id that holds a 12-digit run by chance is not an
-// account and survives a ledger write byte for byte.
+// A digest that holds a 12-digit run by chance, and a check id, are not
+// accounts and survive a ledger write byte for byte.
 func TestAvoidLedgerKeepsShapeDigest(t *testing.T) {
 	t.Parallel()
 
 	digest := "ab3f987654321098c" + strings.Repeat("e", 47)
 	require.Len(t, digest, 64)
-	const checkID = "20261009T120000Z-aws_iam_role-987654321098"
+	const checkID = "20261009T120000Z-aws_iam_role" // the form pitfalls avoid-check writes
 	dir := t.TempDir()
 	require.NoError(t, appendAvoidLedgerRecord(dir, "aws", &AvoidLedger{Provider: "aws"}, AvoidLedgerRecord{
 		Status: AvoidRecordRelearned, Resource: "aws_iam_role", Attributes: []string{"name"},
@@ -272,7 +277,9 @@ func TestAvoidLedgerKeepsShapeDigest(t *testing.T) {
 // No cut splits the registered id (any form) or an ARN account field: it
 // is whole or absent. Other digits are cut where the cut falls.
 func TestCutTextNeverSplitsAnAccountID(t *testing.T) {
-	t.Parallel()
+	// The grouped forms are layer (a) only, so this registers the id.
+	ResetScrubbedAccountsForTest(t)
+	RegisterScrubbedAccounts(testAccountID)
 
 	for _, id := range []string{testAccountID, "1234-5678-9012", "1234 5678 9012", "arn:aws:iam::987654321098"} {
 		s := "lead " + id + ":tail"
@@ -325,4 +332,33 @@ func TestRawLegacyEntriesDedupAgainstScrubbed(t *testing.T) {
 		assert.Equal(t, 1, strings.Count(string(body), "| `aws.iam_scoped` |"), string(body))
 		assert.NotContains(t, string(body), testAccountID, "the dedup hit still rewrites the legacy file scrubbed")
 	})
+}
+
+// The writer scrubs a copy: the caller's struct still holds what it
+// passed, and only the file is scrubbed.
+func TestWritePitfallsLeavesCallerValue(t *testing.T) {
+	t.Parallel()
+
+	pf := &PitfallsFile{Provider: "aws", Pitfalls: []PitfallEntry{{Resource: "aws_iam_role", Rule: accountIDLeak, Source: "static"}}}
+	path := filepath.Join(t.TempDir(), "aws.yaml")
+	scrubbed, err := WritePitfalls(path, pf)
+	require.NoError(t, err)
+	assert.Equal(t, 1, scrubbed)
+	assert.Equal(t, accountIDLeak, pf.Pitfalls[0].Rule)
+	assertAccountIDsScrubbed(t, path, 2)
+}
+
+func TestScrubStringsCoversMapKeysAndBytes(t *testing.T) {
+	t.Parallel()
+
+	v := struct {
+		ByKey map[string]string
+		Raw   []byte
+	}{
+		ByKey: map[string]string{"role_" + testAccountID: "account " + testAccountID},
+		Raw:   []byte("arn:aws:iam::" + testAccountID + ":root"),
+	}
+	assert.Equal(t, 3, ScrubStrings(&v))
+	assert.Equal(t, map[string]string{"role_ACCOUNT_ID": "account ACCOUNT_ID"}, v.ByKey)
+	assert.Equal(t, "arn:aws:iam::ACCOUNT_ID:root", string(v.Raw))
 }

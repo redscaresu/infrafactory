@@ -105,8 +105,19 @@ func knownAccountsPattern(ids []string) *regexp.Regexp {
 }
 
 // accountSpans returns the sorted, merged byte spans ScrubAccountIDs
-// replaces: every occurrence of a known id, and every ARN account field
-// (one followed by another digit is not an account and is left).
+// replaces, in three layers:
+//
+//	(a) every occurrence of a registered id, in any form;
+//	(b) every ARN account field (one followed by a digit is not one);
+//	(c) any other run of exactly 12 digits not touching another digit,
+//	    unless its whole alphanumeric token is lowercase hex of 16+
+//	    characters (a digest, a commit sha, snap-/vol-/eni- ids) or it
+//	    is a UUID's last group.
+//
+// (a) and (b) are precise; (c) keeps the scrub failing closed when no
+// account is registered or an error names another account in prose. A
+// bare 12-digit byte count is scrubbed by (c): that costs a number,
+// failing open would cost an account.
 func accountSpans(s string, known *regexp.Regexp) [][]int {
 	var spans [][]int
 	if known != nil {
@@ -115,6 +126,12 @@ func accountSpans(s string, known *regexp.Regexp) [][]int {
 	for _, m := range arnAccountPattern.FindAllStringSubmatchIndex(s, -1) {
 		if !digitAt(s, m[3]) {
 			spans = append(spans, m[2:4])
+		}
+	}
+	notIDs := append(hexTokenSpans(s), uuidPattern.FindAllStringIndex(s, -1)...)
+	for _, m := range digitRunPattern.FindAllStringIndex(s, -1) {
+		if m[1]-m[0] == accountIDDigits && !insideAny(m, notIDs) {
+			spans = append(spans, m)
 		}
 	}
 	sort.Slice(spans, func(i, j int) bool { return spans[i][0] < spans[j][0] })
@@ -129,8 +146,8 @@ func accountSpans(s string, known *regexp.Regexp) [][]int {
 	return merged
 }
 
-// ScrubAccountIDs replaces every registered account id (any form) and the
-// account field of every ARN with ACCOUNT_ID, the placeholder
+// ScrubAccountIDs replaces the spans accountSpans finds (registered ids,
+// ARN account fields, other standalone 12-digit runs) with ACCOUNT_ID, the placeholder
 // iam-policy.json uses. It runs at the publish sinks (pitfall and ledger
 // writers, gap writers, the pitfalls PUT); run diagnostics keep the real
 // id, and their cuts use CutText so no partial id reaches a sink.
@@ -152,6 +169,32 @@ func scrubWith(s string, known *regexp.Regexp) string {
 	}
 	b.WriteString(s[last:])
 	return b.String()
+}
+
+var (
+	digitRunPattern   = regexp.MustCompile(`[0-9]+`)
+	uuidPattern       = regexp.MustCompile(`[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}`)
+	alnumTokenPattern = regexp.MustCompile(`[0-9A-Za-z]+`)
+	hexTokenPattern   = regexp.MustCompile(`^[0-9a-f]{16,}$`)
+)
+
+func hexTokenSpans(s string) [][]int {
+	var spans [][]int
+	for _, m := range alnumTokenPattern.FindAllStringIndex(s, -1) {
+		if hexTokenPattern.MatchString(s[m[0]:m[1]]) {
+			spans = append(spans, m)
+		}
+	}
+	return spans
+}
+
+func insideAny(span []int, spans [][]int) bool {
+	for _, o := range spans {
+		if span[0] >= o[0] && span[1] <= o[1] {
+			return true
+		}
+	}
+	return false
 }
 
 func digitAt(s string, i int) bool {
@@ -178,8 +221,9 @@ func CutText(s string, n int) string {
 	return s[:cut]
 }
 
-// ScrubStrings scrubs every string reachable from v, which must be a
-// pointer, in place, and returns how many it changed. One walk covers
+// ScrubStrings scrubs, in place, every string reachable from v (a
+// pointer): string fields and elements, string map keys, and []byte
+// contents read as text. It returns how many it changed. One walk covers
 // every field, so no list of fields can fall behind the types.
 func ScrubStrings(v any) int {
 	return scrubValue(reflect.ValueOf(v))
@@ -204,6 +248,9 @@ func scrubValue(v reflect.Value) int {
 		}
 		return n
 	case reflect.Slice, reflect.Array:
+		if v.Kind() == reflect.Slice && v.Type().Elem().Kind() == reflect.Uint8 {
+			return scrubBytes(v)
+		}
 		n := 0
 		for i := 0; i < v.Len(); i++ {
 			n += scrubValue(v.Index(i))
@@ -212,7 +259,16 @@ func scrubValue(v reflect.Value) int {
 	case reflect.Map:
 		n := 0
 		for _, k := range v.MapKeys() {
-			n += scrubCopy(v.MapIndex(k), func(e reflect.Value) { v.SetMapIndex(k, e) })
+			e := v.MapIndex(k)
+			n += scrubCopy(e, func(c reflect.Value) { e = c; v.SetMapIndex(k, c) })
+			if k.Kind() != reflect.String {
+				continue
+			}
+			if key := ScrubAccountIDs(k.String()); key != k.String() {
+				v.SetMapIndex(k, reflect.Value{})
+				v.SetMapIndex(reflect.ValueOf(key).Convert(k.Type()), e)
+				n++
+			}
 		}
 		return n
 	case reflect.String:
@@ -223,6 +279,17 @@ func scrubValue(v reflect.Value) int {
 			v.SetString(scrubbed)
 			return 1
 		}
+	}
+	return 0
+}
+
+func scrubBytes(v reflect.Value) int {
+	if v.IsNil() || !v.CanSet() {
+		return 0
+	}
+	if scrubbed := ScrubAccountIDs(string(v.Bytes())); scrubbed != string(v.Bytes()) {
+		v.SetBytes([]byte(scrubbed))
+		return 1
 	}
 	return 0
 }

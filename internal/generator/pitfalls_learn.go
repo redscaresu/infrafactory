@@ -941,24 +941,43 @@ func appendPitfall(pitfallsDir, cloud string, pitfall LearnedPitfall, ledger *Av
 // WritePitfalls writes pf to path through writePitfallsFile (atomic,
 // account ids scrubbed), for writers outside this package. It returns how
 // many strings the scrub changed, so a caller can say the file differs
-// from what it was handed.
+// from what it was handed. pf itself is left as it was.
 func WritePitfalls(path string, pf *PitfallsFile) (int, error) {
-	scrubbed := ScrubStrings(pf)
-	return scrubbed, writePitfallsFile(filepath.Dir(path), path, strings.TrimSuffix(filepath.Base(path), ".yaml"), pf)
+	return writeScrubbedFile(filepath.Dir(path), path, strings.TrimSuffix(filepath.Base(path), ".yaml"), pf)
 }
 
 // writePitfallsFile marshals v (a pitfalls file or an avoid-check
 // ledger) and writes it atomically via a same-directory temp + rename.
 func writePitfallsFile(pitfallsDir, filePath, cloud string, v any) error {
-	// Scrubbed in place through the pointer; a value could not be, and
-	// writing it unscrubbed would publish the account.
-	if reflect.ValueOf(v).Kind() != reflect.Pointer {
-		return fmt.Errorf("write pitfalls: need a pointer to scrub, got %T", v)
-	}
-	ScrubStrings(v)
-	out, err := yaml.Marshal(v)
+	_, err := writeScrubbedFile(pitfallsDir, filePath, cloud, v)
+	return err
+}
+
+// marshalScrubbed marshals a scrubbed deep copy of v, leaving v as the
+// caller had it: the copy is v round-tripped through YAML into a fresh
+// value of its type. It returns how many strings the scrub changed.
+func marshalScrubbed(v any) ([]byte, int, error) {
+	raw, err := yaml.Marshal(v)
 	if err != nil {
-		return fmt.Errorf("marshal pitfalls: %w", err)
+		return nil, 0, err
+	}
+	t := reflect.TypeOf(v)
+	if t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	fresh := reflect.New(t).Interface()
+	if err := yaml.Unmarshal(raw, fresh); err != nil {
+		return nil, 0, err
+	}
+	scrubbed := ScrubStrings(fresh)
+	out, err := yaml.Marshal(fresh)
+	return out, scrubbed, err
+}
+
+func writeScrubbedFile(pitfallsDir, filePath, cloud string, v any) (int, error) {
+	out, scrubbed, err := marshalScrubbed(v)
+	if err != nil {
+		return 0, fmt.Errorf("marshal pitfalls: %w", err)
 	}
 	// Here rather than in each caller. Every write needs the directory,
 	// the temp file below is created INSIDE it, and a reader is a missing
@@ -967,14 +986,14 @@ func writePitfallsFile(pitfallsDir, filePath, cloud string, v any) error {
 	// each caller had to remember, and AppendLivePitfall did not (S156c,
 	// pass 86).
 	if err := os.MkdirAll(pitfallsDir, 0o755); err != nil {
-		return fmt.Errorf("create pitfalls directory: %w", err)
+		return 0, fmt.Errorf("create pitfalls directory: %w", err)
 	}
 	// Use os.CreateTemp so two concurrent learn-paths racing on the
 	// same provider can't clobber each other's tmp file before either
 	// rename completes. Mirrors the editPitfalls API handler.
 	tmp, err := os.CreateTemp(pitfallsDir, cloud+"-*.yaml.tmp")
 	if err != nil {
-		return fmt.Errorf("create temp pitfalls file: %w", err)
+		return 0, fmt.Errorf("create temp pitfalls file: %w", err)
 	}
 	tmpPath := tmp.Name()
 	cleanupPath := tmpPath
@@ -985,20 +1004,20 @@ func writePitfallsFile(pitfallsDir, filePath, cloud string, v any) error {
 	}()
 	if _, err := tmp.Write(out); err != nil {
 		_ = tmp.Close()
-		return fmt.Errorf("write temp pitfalls file: %w", err)
+		return 0, fmt.Errorf("write temp pitfalls file: %w", err)
 	}
 	if err := tmp.Chmod(0o644); err != nil {
 		_ = tmp.Close()
-		return fmt.Errorf("chmod temp pitfalls file: %w", err)
+		return 0, fmt.Errorf("chmod temp pitfalls file: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("close temp pitfalls file: %w", err)
+		return 0, fmt.Errorf("close temp pitfalls file: %w", err)
 	}
 	if err := os.Rename(tmpPath, filePath); err != nil {
-		return fmt.Errorf("rename pitfalls file: %w", err)
+		return 0, fmt.Errorf("rename pitfalls file: %w", err)
 	}
 	cleanupPath = ""
-	return nil
+	return scrubbed, nil
 }
 
 const (
@@ -1008,7 +1027,7 @@ const (
 )
 
 // ellipsize cuts s to at most max bytes, ending in "...". CutText picks
-// the cut: never inside a rune (terraform's '│') or a digit run.
+// the cut: never inside a rune (terraform's '│') or an account id.
 func ellipsize(s string, max int) string {
 	if len(s) <= max {
 		return s

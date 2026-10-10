@@ -11,7 +11,6 @@ import (
 	"testing"
 
 	"github.com/redscaresu/infrafactory/internal/config"
-	"github.com/redscaresu/infrafactory/internal/generator"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -481,8 +480,6 @@ func TestPitfallsEditRejectsNonPut(t *testing.T) {
 
 func TestPitfallsEditScrubsAccountIDs(t *testing.T) {
 	t.Parallel()
-	// As the ui command does from aws.account_id.
-	generator.RegisterScrubbedAccounts("123456789012")
 
 	dir := t.TempDir()
 	cfg := config.Default()
