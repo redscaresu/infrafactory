@@ -1072,6 +1072,7 @@ func runRunWithNotify(
 		Status:   status,
 		Stages:   allStages,
 		Failures: allFailures,
+		Cloud:    sc.Cloud,
 	}
 	if err := writeCommandOutput(cmd, result); err != nil {
 		return err
