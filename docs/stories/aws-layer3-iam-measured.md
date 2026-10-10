@@ -14,9 +14,10 @@ First real-AWS spend. No LLM: `infrafactory test` over a staged step-one fixture
 learned (`test` never calls AppendPitfall; only run_command.go does). The epic's **Checks before
 every stage** apply before each run.
 
-**You:** apply the policy (`aws iam put-user-policy ... --profile infrafactory-admin`,
-docs/operations.md Scope setup step 3) after aws-scope-iam-policy-grants-the-apply merges, and again
-if this story's PR widens it; tell the lead when it is applied. Then say go for each real run in the
+**You:** apply the policy as docs/operations.md Scope setup step 3 says, after
+aws-scope-iam-policy-grants-the-apply merges (for this scope, set up 2026-09-29: create-policy,
+attach-user-policy, then delete the inline policy), and again with create-policy-version if this
+story's PR widens it; tell the lead when it is applied. Then say go for each real run in the
 lead's session. The lead does not start a run without that go, and tells you the run id and the
 cost bound when it ends.
 

@@ -210,10 +210,16 @@ aws iam create-policy-version --policy-arn arn:aws:iam::${ACCOUNT_ID}:policy/inf
   --policy-document "file://$TMPDIR/p.json" --set-as-default --profile infrafactory-admin
 ```
 
-A scope set up before 2026-10-10 holds the old policy inline, under the same name. Create and
-attach the managed policy as above, then delete the inline one:
+A scope set up before 2026-10-10 already has the user, with the old policy inline under the same
+name. Move it to the managed policy. Each step runs only if the one before it succeeded, so the
+inline policy is deleted only once the managed one is attached:
 
 ```bash
+sed -e "s/REGION/$REGION/g" -e "s/ACCOUNT_ID/$ACCOUNT_ID/g" docs/layer3/aws/iam-policy.json > "$TMPDIR/p.json" &&
+aws iam create-policy --policy-name infrafactory-layer3-scope --policy-document "file://$TMPDIR/p.json" \
+  --profile infrafactory-admin &&
+aws iam attach-user-policy --user-name infrafactory-layer3 \
+  --policy-arn arn:aws:iam::${ACCOUNT_ID}:policy/infrafactory-layer3-scope --profile infrafactory-admin &&
 aws iam delete-user-policy --user-name infrafactory-layer3 --policy-name infrafactory-layer3-scope \
   --profile infrafactory-admin
 ```

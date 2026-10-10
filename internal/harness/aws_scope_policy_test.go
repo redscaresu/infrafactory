@@ -35,12 +35,15 @@ var (
 // provider sends to apply and destroy aws-web-live, read with
 // TF_LOG=debug against fakeaws over the step-one fixture, a Layer 2
 // run's HCL, and that HCL with an aws_eip attached to the instance.
+// DisassociateAddress is the one added without measurement: destroying
+// an aws_eip with instance sends it, and fakeaws cannot associate an
+// address (story fakeaws-associate-address), so that destroy never ran.
 var awsApplyEC2Actions = []string{
 	"AllocateAddress", "AssociateAddress", "AssociateRouteTable", "AttachInternetGateway",
 	"AuthorizeSecurityGroupEgress", "AuthorizeSecurityGroupIngress", "CreateInternetGateway",
 	"CreateRoute", "CreateRouteTable", "CreateSecurityGroup", "CreateSubnet", "CreateVpc",
 	"DeleteInternetGateway", "DeleteRoute", "DeleteRouteTable", "DeleteSecurityGroup",
-	"DeleteSubnet", "DeleteVpc", "DetachInternetGateway", "DisassociateRouteTable",
+	"DeleteSubnet", "DeleteVpc", "DetachInternetGateway", "DisassociateAddress", "DisassociateRouteTable",
 	"ModifyInstanceAttribute", "ModifySubnetAttribute", "ModifyVpcAttribute", "ReleaseAddress",
 	"RevokeSecurityGroupEgress", "RunInstances", "TerminateInstances",
 }
@@ -127,7 +130,8 @@ func awsScopeGrants() map[string][]string {
 // awsIAMPolicyViolations is every way policy differs from the grants:
 // an action or resource beyond them, a grant nothing allows, a
 // statement on every resource not pinned to REGION, or ec2:CreateTags
-// beyond the creates that tag.
+// beyond the creates that tag or beside another action, which its
+// ec2:CreateAction condition would deny (a launch never carries it).
 func awsIAMPolicyViolations(policy awsPolicy) []string {
 	grants := awsScopeGrants()
 	var out []string
@@ -151,9 +155,13 @@ func awsIAMPolicyViolations(policy awsPolicy) []string {
 			!slices.Equal(s.Condition["StringEquals"]["aws:RequestedRegion"], awsPolicyList{"REGION"}) {
 			out = append(out, s.Sid+" allows every resource without StringEquals aws:RequestedRegion REGION")
 		}
-		if slices.ContainsFunc(s.Action, func(p string) bool { return awsActionMatches(p, "ec2:CreateTags") }) &&
-			!slices.Equal(s.Condition["StringEquals"]["ec2:CreateAction"], awsTagOnCreateActions) {
-			out = append(out, fmt.Sprintf("%s allows ec2:CreateTags without StringEquals ec2:CreateAction %v", s.Sid, awsTagOnCreateActions))
+		if slices.ContainsFunc(s.Action, func(p string) bool { return awsActionMatches(p, "ec2:CreateTags") }) {
+			if !slices.Equal(s.Condition["StringEquals"]["ec2:CreateAction"], awsTagOnCreateActions) {
+				out = append(out, fmt.Sprintf("%s allows ec2:CreateTags without StringEquals ec2:CreateAction %v", s.Sid, awsTagOnCreateActions))
+			}
+			if !slices.Equal(s.Action, awsPolicyList{"ec2:CreateTags"}) {
+				out = append(out, fmt.Sprintf("%s allows ec2:CreateTags beside %v; that statement allows nothing else", s.Sid, s.Action))
+			}
 		}
 	}
 	for action, reach := range grants {
@@ -272,6 +280,12 @@ func TestAWSScopeIAMPolicyViolationsCatchEachWidening(t *testing.T) {
 		"CreateTags on another create": func(t *testing.T, p *awsPolicy) {
 			tag := awsStatement(t, p, "TagOnCreate").Condition["StringEquals"]
 			tag["ec2:CreateAction"] = append(tag["ec2:CreateAction"], "CreateKeyPair")
+		},
+		"an apply action moved into TagOnCreate": func(t *testing.T, p *awsPolicy) {
+			apply := awsStatement(t, p, "ApplyAndDestroy")
+			apply.Action = slices.DeleteFunc(apply.Action, func(a string) bool { return a == "ec2:RunInstances" })
+			tag := awsStatement(t, p, "TagOnCreate")
+			tag.Action = append(tag.Action, "ec2:RunInstances")
 		},
 		"CreateTags beside another action": func(t *testing.T, p *awsPolicy) {
 			apply := awsStatement(t, p, "ApplyAndDestroy")
