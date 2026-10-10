@@ -32,12 +32,14 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 
+	"github.com/redscaresu/infrafactory/internal/config"
 	"github.com/redscaresu/infrafactory/internal/generator"
 	"gopkg.in/yaml.v3"
 )
@@ -52,6 +54,7 @@ func main() {
 	scenario := flag.String("scenario", "", "scenario name (for DiscoveredFrom)")
 	mode := flag.String("mode", "fix", `extractor mode: "fix" (N10 addition-as-fix) or "avoid" (N13 deletion-as-fix)`)
 	timestamp := flag.String("timestamp", "", "optional run timestamp (defaults to empty; only used in extractor logging)")
+	configFile := flag.String("config", config.DefaultPath, "infrafactory config whose aws.account_id is scrubbed from the output in every form (optional)")
 	flag.Parse()
 
 	if *runDir != "" {
@@ -103,8 +106,21 @@ func main() {
 	// Emit a single-element pitfalls-file YAML so the operator can pipe
 	// straight into `yq` or append to pitfalls/<cloud>.yaml after
 	// review.
+	if err := writeEntry(os.Stdout, *configFile, *cloud, *entry); err != nil {
+		fail("encode: %v", err)
+	}
+}
+
+// writeEntry prints entry as a pitfalls YAML fragment. The operator
+// appends it to pitfalls/<cloud>.yaml by hand, outside the writer's
+// scrub, so it is scrubbed here: the rule quotes raw failure text. The
+// configured account is registered first, so its console and glued forms
+// are caught too; a missing or broken config only warns.
+func writeEntry(w io.Writer, configPath, cloud string, entry generator.LearnedPitfall) error {
+	generator.RegisterConfigAccount(configPath, os.Stderr)
+	generator.ScrubStrings(&entry)
 	out := map[string]any{
-		"provider": *cloud,
+		"provider": cloud,
 		"pitfalls": []map[string]any{
 			{
 				"resource":        entry.Resource,
@@ -114,12 +130,12 @@ func main() {
 			},
 		},
 	}
-	enc := yaml.NewEncoder(os.Stdout)
+	enc := yaml.NewEncoder(w)
 	enc.SetIndent(2)
 	if err := enc.Encode(out); err != nil {
-		fail("encode: %v", err)
+		return err
 	}
-	_ = enc.Close()
+	return enc.Close()
 }
 
 // autodiscoverIterPair walks `<runDir>/iterations/` and returns paths

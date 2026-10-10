@@ -5,6 +5,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestStaticFailureFromError(t *testing.T) {
@@ -93,4 +95,20 @@ func TestStageFailureDetailSanitizesANSIAndTruncates(t *testing.T) {
 	if !strings.HasSuffix(detail, "...") {
 		t.Fatalf("expected truncated stderr suffix, got %q", detail)
 	}
+}
+
+// An ARN whose account straddles the stderr cut is dropped whole: a stub
+// of its digits would escape the scrub at the pitfall writer, which
+// learns from this detail.
+func TestStageFailureDetailNeverSplitsAnARNAccount(t *testing.T) {
+	t.Parallel()
+
+	const arnPrefix = "arn:aws:iam::"
+	pad := strings.Repeat("x", failureStderrMaxChars-len(arnPrefix)-6)
+	stderr := pad + arnPrefix + "987654321098:role/x" + strings.Repeat("y", 100)
+
+	detail := stageFailureDetail(errors.New("exit status 1"), stderr)
+
+	assert.NotContains(t, detail, "987654")
+	assert.Contains(t, detail, pad+arnPrefix+"...")
 }

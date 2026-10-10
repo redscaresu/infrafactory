@@ -5,7 +5,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/redscaresu/infrafactory/internal/config"
+	"github.com/redscaresu/infrafactory/internal/generator"
+	"github.com/redscaresu/infrafactory/internal/generator/scrubtest"
 	"github.com/redscaresu/infrafactory/internal/harness"
+	"github.com/spf13/cobra"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // The S143 run 2 canary hit a transient block-volume create error against
@@ -144,4 +150,61 @@ func TestStderrFailureDetailStripsAnsiAndTruncates(t *testing.T) {
 	if len(detail) >= failureStderrDetailMaxChars+100 {
 		t.Errorf("detail not bounded by the budget: len=%d", len(detail))
 	}
+}
+
+// A cut inside an account id leaves a shorter run the pitfall writer's
+// scrub no longer recognises, so no cut on a failure string splits a
+// digit run: an id straddling the cut is dropped whole. The run detail
+// is operator-facing and keeps a whole id as it is.
+func TestFailureTextCutsNeverSplitAnAccountID(t *testing.T) {
+	const id = "123456789012"
+	straddle := func(cut int) string {
+		return id + " " + strings.Repeat("x", cut-len(id)/2-len(id)-1) + id + strings.Repeat("y", cut)
+	}
+	for name, got := range map[string]string{
+		"stderr":  stderrFailureDetail(errors.New("exit status 1"), straddle(failureStderrDetailMaxChars)),
+		"rule":    truncateRule(straddle(100)),
+		"plan":    truncatePlanOutput(straddle(4000)),
+		"mockway": truncateMockwayErrorPayload([]byte(straddle(maxMockwayErrorPayloadBytes))),
+	} {
+		assert.Equal(t, 1, strings.Count(got, "123456"), "%s: the leading id whole, the straddling one absent", name)
+		assert.True(t, strings.HasPrefix(got, id) || strings.Contains(got, "stderr: "+id), "%s keeps the real id", name)
+	}
+}
+
+// Every command builds its runtime through buildRuntime, which registers
+// the config's account with the publish sinks' scrub.
+func TestBuildRuntimeRegistersTheConfigAccount(t *testing.T) {
+	scrubtest.Register(t) // buildRuntime registers; undo it when the test ends
+	const account = "444455556666"
+	opts := defaultRuntimeOptions()
+	opts.configLoader = func(string) (config.Config, error) {
+		cfg := config.Default()
+		cfg.AWS.AccountID = account
+		cfg.Agent.Type = generator.AgentTypeClaudeCode
+		return cfg, nil
+	}
+	cmd := &cobra.Command{Use: "test"}
+	cmd.Flags().String("config", "unused.yaml", "")
+	_, err := buildRuntime(cmd, opts)
+	require.NoError(t, err)
+	// The glued form is layer (a) only: the plain-run layer would let it
+	// through, so this passes only if the account was registered.
+	assert.Equal(t, "abcdACCOUNT_ID", generator.ScrubAccountIDs("abcd"+account))
+}
+
+// The replay detail lands in the published avoid ledger, so its cut never
+// splits an account id either.
+func TestAvoidReplayDetailNeverSplitsAnAccountID(t *testing.T) {
+	const id = "987654321098"
+	detail := strings.Repeat("x", avoidCheckDetailLimit-len(id)/2) + id + strings.Repeat("y", 50)
+	got := failedReplay(1, 0, detail, "aws_iam_role", []string{"name"})
+	assert.NotContains(t, got.Detail, "987654")
+}
+
+// The ellipsis marks a cut: a rule of exactly the limit is printed whole.
+func TestTruncateRuleMarksOnlyARealCut(t *testing.T) {
+	exact := strings.Repeat("r", truncateRuleLimit)
+	assert.Equal(t, exact, truncateRule(exact))
+	assert.Equal(t, exact+"…", truncateRule(exact+"r"))
 }

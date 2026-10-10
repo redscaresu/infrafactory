@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -116,16 +117,12 @@ func retirementSummary(cloud string, retired []generator.RetiredPitfall, dryRun 
 // truncateRule keeps a summary line readable. Rules can be whole HCL
 // snippets, and a stage list that scrolls for a page is one nobody reads.
 func truncateRule(rule string) string {
-	const limit = 100
-	flat := ""
-	for _, r := range rule {
-		if r == '\n' || r == '\t' {
-			r = ' '
-		}
-		flat += string(r)
-		if len(flat) >= limit {
-			return flat + "…"
-		}
+	flat := strings.NewReplacer("\n", " ", "\t", " ").Replace(rule)
+	if len(flat) <= truncateRuleLimit {
+		return flat // nothing cut, so no ellipsis
 	}
-	return flat
+	// CutText never splits an account id; see stderrFailureDetail.
+	return generator.CutText(flat, truncateRuleLimit) + "…"
 }
+
+const truncateRuleLimit = 100

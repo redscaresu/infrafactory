@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 
 	"github.com/stretchr/testify/assert"
@@ -316,4 +317,38 @@ func TestMergeKeepsLearnedLayer(t *testing.T) {
 	assert.Equal(t, 1, added)
 	require.Len(t, got.Pitfalls, 1)
 	assert.Equal(t, "sandbox_deploy", got.Pitfalls[0].LearnedLayer)
+}
+
+// The merged file is published, so it goes through the scrubbed writer.
+func TestSavePitfallsScrubsAccountIDs(t *testing.T) {
+	outPath := filepath.Join(t.TempDir(), "aws.yaml")
+	require.NoError(t, savePitfalls(outPath, generator.PitfallsFile{Provider: "aws", Pitfalls: []generator.PitfallEntry{
+		mk("aws_iam_role", "arn:aws:iam::123456789012:role/x", "avoid"),
+	}}))
+	got, err := loadPitfalls(outPath)
+	require.NoError(t, err)
+	require.Len(t, got.Pitfalls, 1)
+	assert.Equal(t, "arn:aws:iam::ACCOUNT_ID:role/x", got.Pitfalls[0].Rule)
+}
+
+// A raw legacy entry in pre and its scrubbed copy in post key the same,
+// so the merge keeps one, not both.
+func TestMergeCollapsesRawAndScrubbedCopies(t *testing.T) {
+	dir := t.TempDir()
+	prePath := filepath.Join(dir, "pre.yaml")
+	raw := "provider: aws\npitfalls:\n  - resource: aws_iam_role\n    rule: \"arn:aws:iam::123456789012:role/x\"\n    source: avoid\n"
+	require.NoError(t, os.WriteFile(prePath, []byte(raw), 0o644))
+	postPath := filepath.Join(dir, "post.yaml")
+	require.NoError(t, savePitfalls(postPath, generator.PitfallsFile{Provider: "aws", Pitfalls: []generator.PitfallEntry{
+		mk("aws_iam_role", "arn:aws:iam::123456789012:role/x", "avoid"),
+	}}))
+
+	pre, err := loadPitfalls(prePath)
+	require.NoError(t, err)
+	post, err := loadPitfalls(postPath)
+	require.NoError(t, err)
+	merged, added, _, _ := merge(pre, post, map[string]bool{"avoid": true})
+	assert.Zero(t, added)
+	require.Len(t, merged.Pitfalls, 1)
+	assert.Equal(t, "arn:aws:iam::ACCOUNT_ID:role/x", merged.Pitfalls[0].Rule)
 }

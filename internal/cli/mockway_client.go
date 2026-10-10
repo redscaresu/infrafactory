@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/redscaresu/infrafactory/internal/config"
+	"github.com/redscaresu/infrafactory/internal/generator"
 )
 
 const maxMockwayStateResponseBytes = 8 * 1024 * 1024
@@ -98,7 +99,7 @@ func truncateMockwayErrorPayload(payload []byte) string {
 	if len(trimmed) <= maxMockwayErrorPayloadBytes {
 		return trimmed
 	}
-	return trimmed[:maxMockwayErrorPayloadBytes] + "..."
+	return generator.CutText(trimmed, maxMockwayErrorPayloadBytes) + "..." // see stderrFailureDetail
 }
 
 // cloudMockStateRouter dispatches MockStateClient calls between the

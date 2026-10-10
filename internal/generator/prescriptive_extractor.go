@@ -654,7 +654,7 @@ func trimSnippet(s string, max int) string {
 	}
 	cut := strings.LastIndex(s[:max], "\n")
 	if cut <= 0 {
-		cut = max
+		return CutText(s, max) + "\n# ... (truncated)"
 	}
 	return s[:cut] + "\n# ... (truncated)"
 }
@@ -779,10 +779,7 @@ func firstSentence(detail string) string {
 			ln = strings.TrimSpace(strings.TrimPrefix(ln, "Error:"))
 		}
 		if ln != "" {
-			if len(ln) > 240 {
-				ln = ln[:237] + "..."
-			}
-			return ln
+			return ellipsize(ln, maxGapDetailBytes)
 		}
 	}
 	return ""

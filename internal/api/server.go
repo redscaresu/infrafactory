@@ -15,6 +15,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/redscaresu/infrafactory/internal/config"
+	"github.com/redscaresu/infrafactory/internal/generator"
 	"github.com/redscaresu/infrafactory/internal/runstore"
 )
 
@@ -252,7 +253,7 @@ func (c *httpMockStateClient) State(ctx context.Context) ([]byte, error) {
 		body := strings.TrimSpace(string(payload))
 		const maxErrPayload = 1024
 		if len(body) > maxErrPayload {
-			body = body[:maxErrPayload] + "..."
+			body = generator.CutText(body, maxErrPayload) + "..."
 		}
 		return nil, fmt.Errorf("fetch mock state: unexpected status %d: %s", resp.StatusCode, body)
 	}
