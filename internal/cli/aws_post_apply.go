@@ -42,15 +42,17 @@ func layer3TestGateInputs(runtime *CommandRuntime, cloud layer3Cloud, sc scenari
 func appendAWSPostApplyChecks(ctx context.Context, runtime *CommandRuntime, sc scenario.Scenario, outputDir string, env map[string]string, stages []StageSummary, failures []FailureSummary) ([]StageSummary, []FailureSummary, bool) {
 	checks := []struct {
 		stage string
-		run   func() error
+		// run returns the pass stage's detail.
+		run func() (string, error)
 	}{
-		{"account_check", func() error { return awsAccountCheck(runtime, outputDir) }},
-		{"user_data_check", func() error { return awsUserDataCheck(ctx, runtime, sc, outputDir, env) }},
+		{"account_check", func() (string, error) { return "", awsAccountCheck(runtime, outputDir) }},
+		{"user_data_check", func() (string, error) { return awsUserDataCheck(ctx, runtime, sc, outputDir, env) }},
 	}
 	// The first failure ends the checks: a state that fails placement has
 	// no instance worth asking EC2 about.
 	for _, check := range checks {
-		if err := check.run(); err != nil {
+		detail, err := check.run()
+		if err != nil {
 			stages = append(stages, StageSummary{Layer: "sandbox_deploy", Stage: check.stage, Status: StageStatusFail})
 			failures = append(failures, FailureSummary{
 				Layer:   "sandbox_deploy",
@@ -61,7 +63,7 @@ func appendAWSPostApplyChecks(ctx context.Context, runtime *CommandRuntime, sc s
 			})
 			return stages, failures, false
 		}
-		stages = append(stages, StageSummary{Layer: "sandbox_deploy", Stage: check.stage, Status: StageStatusPass})
+		stages = append(stages, StageSummary{Layer: "sandbox_deploy", Stage: check.stage, Status: StageStatusPass, Detail: detail})
 	}
 	return stages, failures, true
 }
@@ -77,27 +79,28 @@ func awsAccountCheck(runtime *CommandRuntime, outputDir string) error {
 	return nil
 }
 
-func awsUserDataCheck(ctx context.Context, runtime *CommandRuntime, sc scenario.Scenario, outputDir string, env map[string]string) error {
+// awsUserDataCheck returns its pass detail, which names the instance.
+func awsUserDataCheck(ctx context.Context, runtime *CommandRuntime, sc scenario.Scenario, outputDir string, env map[string]string) (string, error) {
 	if runtime.Deps.AWSEC2 == nil {
-		return errors.New("no EC2 client to read the instance's user data with")
+		return "", errors.New("no EC2 client to read the instance's user data with")
 	}
 	if sc.Service == nil {
-		return errors.New("the scenario has no service: block to render the expected user data from")
+		return "", errors.New("the scenario has no service: block to render the expected user data from")
 	}
 	want, err := renderAWSUserData(*sc.Service)
 	if err != nil {
-		return err
+		return "", err
 	}
 	instanceID, err := harness.AWSStateInstanceID(outputDir)
 	if err != nil {
-		return err
+		return "", err
 	}
 	got, err := harness.AWSInstanceUserData(ctx, env, runtime.Deps.AWSEC2, "", instanceID)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if !bytes.Equal(got, want) {
-		return fmt.Errorf("instance %s does not run the rendered user data", instanceID)
+		return "", fmt.Errorf("instance %s does not run the rendered user data", instanceID)
 	}
-	return nil
+	return fmt.Sprintf("instance %s runs the rendered user data", instanceID), nil
 }

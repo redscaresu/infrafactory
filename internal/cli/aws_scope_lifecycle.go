@@ -216,7 +216,8 @@ func ensureAWSScopeClaim(ctx context.Context, runtime *CommandRuntime) (string, 
 	case err == nil:
 		return account, []StageSummary{{
 			Layer: "sandbox_deploy", Stage: "aws_scope_claim", Status: StageStatusPass,
-			Detail: fmt.Sprintf("claimed account %s for %s after checking its stamp and that it has no default VPC", account, holder),
+			// No account id: iteration.json keeps this detail.
+			Detail: fmt.Sprintf("claimed the configured account for %s after checking its stamp and that it has no default VPC", holder),
 		}}, nil
 	case errors.Is(err, harness.ErrAWSClaimOutcomeUnknown):
 		return awsScopeClaimFailed(account, "claim", err)

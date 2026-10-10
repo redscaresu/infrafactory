@@ -27,7 +27,7 @@ import (
 // in these fixtures is a stale Scaleway one from an earlier run of the
 // same scenario: acting on it would reap a project the AWS run never
 // touched.
-const awsLiveState = `{"resources":[{"type":"aws_instance","instances":[{"attributes":{"id":"i-0abc","owner_id":"123456789012"}}]}]}`
+const awsLiveState = `{"resources":[{"type":"aws_instance","instances":[{"attributes":{"id":"i-0abc","owner_id":"123456789012","public_ip":"203.0.113.10"}}]}]}`
 
 const (
 	staleMarkerProjectID = "11111111-1111-1111-1111-111111111111"

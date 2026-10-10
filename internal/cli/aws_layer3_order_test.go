@@ -4,11 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -26,10 +30,12 @@ const (
 	// stack that does not carry the resolved id fails the gate.
 	orderAMI = "ami-0123456789abcdef0"
 
-	probeHTTP    = "RealProbe http_probe"
-	probeHoldout = "RealProbe holdout"
-	describeVPCs = "ec2:DescribeVpcs"
-	userDataRead = "ec2:DescribeInstanceAttribute"
+	probeHTTP = "RealProbe http_probe"
+	// orderHTTPStatus is the status orderProbe's http_probe gets back.
+	orderHTTPStatus = http.StatusFound
+	probeHoldout    = "RealProbe holdout"
+	describeVPCs    = "ec2:DescribeVpcs"
+	userDataRead    = "ec2:DescribeInstanceAttribute"
 
 	orderHoldout = `scenario: example-scenario-unseen
 type: holdout
@@ -43,6 +49,16 @@ acceptance_criteria:
     to: compute
     port: 22
     expect: blocked
+  - type: connectivity
+    from: public_internet
+    to: compute
+    port: 443
+    expect: blocked
+  - type: connectivity
+    from: public_internet
+    to: compute
+    port: 80
+    expect: success
 `
 )
 
@@ -68,15 +84,17 @@ var orderForward = []orderStage{
 }
 
 // orderProbe is the real probe: it logs the scenario's http_probe and the
-// holdout's connectivity check apart, and fails the one named by fail. A
+// holdout's connectivity checks apart, and fails the one named by fail. A
 // call is the holdout's when it carries the holdout's own port 22 check,
-// so how many checks the scenario's probe gets cannot move it.
+// so how many checks the scenario's probe gets cannot move it. A passing
+// call records each check against the address the applied state gives
+// its target, with orderHTTPStatus for an http_probe.
 type orderProbe struct {
 	lc   *awsLifecycle
 	fail string
 }
 
-func (p orderProbe) Run(_ context.Context, _, _ string, checks []harness.ProbeCheck) (*harness.RealProbeResult, error) {
+func (p orderProbe) Run(_ context.Context, workDir, _ string, checks []harness.ProbeCheck) (*harness.RealProbeResult, error) {
 	call := probeHTTP
 	if slices.ContainsFunc(checks, func(c harness.ProbeCheck) bool { return c.Type == "connectivity" && c.Port == 22 }) {
 		call = probeHoldout
@@ -85,7 +103,22 @@ func (p orderProbe) Run(_ context.Context, _, _ string, checks []harness.ProbeCh
 	if call == p.fail {
 		return nil, errors.New(call + " failed")
 	}
-	return &harness.RealProbeResult{}, nil
+	result := &harness.RealProbeResult{}
+	for _, c := range checks {
+		host, err := harness.LiveEndpoint(workDir, c.Target+c.To)
+		if err != nil {
+			return nil, err
+		}
+		record := harness.ProbeRecord{Kind: c.Type, Address: net.JoinHostPort(host, strconv.Itoa(c.Port)), Expect: c.Expect, Status: "connected", Attempts: 1}
+		if c.Expect == "blocked" {
+			record.Status = "not connected: i/o timeout"
+		}
+		if c.Type == "http_probe" {
+			record.Address, record.Status = "http://"+record.Address, strconv.Itoa(orderHTTPStatus)
+		}
+		result.Records = append(result.Records, record)
+	}
+	return result, nil
 }
 
 // orderSTS is the doer with its nth sts:GetCallerIdentity, counted from
@@ -220,6 +253,64 @@ func TestAWSRunWalksTheLayer3StagesInOrder(t *testing.T) {
 	assert.Contains(t, sweep, "ec2:DescribeInstances")
 	assert.Contains(t, sweep, "ssm:DescribeParameters")
 	assert.Equal(t, []string{getClaim, deleteClaim}, release)
+}
+
+// A passing run keeps its Layer 3 evidence in iteration.json: the
+// resolve, both post-apply checks and the real probe beside the holdout,
+// each naming what it checked, and no account id anywhere.
+func TestAWSRunKeepsItsLayer3EvidenceInIterationJSON(t *testing.T) {
+	lc := newAWSLifecycle(t)
+
+	run := runAWSOrder(t, lc, orderSetup{})
+
+	require.NoError(t, run.err, run.output)
+	var state struct {
+		Resources []struct {
+			Type      string `json:"type"`
+			Instances []struct {
+				Attributes map[string]any `json:"attributes"`
+			} `json:"instances"`
+		} `json:"resources"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(awsLiveState), &state))
+	require.Equal(t, "aws_instance", state.Resources[0].Type)
+	attrs := state.Resources[0].Instances[0].Attributes
+	ip, _ := attrs["public_ip"].(string)
+	instanceID, _ := attrs["id"].(string)
+	require.NotEmpty(t, ip)
+	require.NotEmpty(t, instanceID)
+
+	paths, err := filepath.Glob(filepath.Join(run.h.RunstoreRoot(), "*", "*", "iterations", "1", "iteration.json"))
+	require.NoError(t, err)
+	require.Len(t, paths, 1)
+	raw, err := os.ReadFile(paths[0])
+	require.NoError(t, err)
+	var iteration struct {
+		Stages []StageSummary `json:"stages"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &iteration))
+	stage := func(name string) StageSummary {
+		t.Helper()
+		i := slices.IndexFunc(iteration.Stages, func(s StageSummary) bool { return holdoutStageName(s.Stage) == name })
+		require.NotEqual(t, -1, i, "%s in %+v", name, iteration.Stages)
+		assert.Equal(t, StageStatusPass, iteration.Stages[i].Status, name)
+		return iteration.Stages[i]
+	}
+
+	stage(StageAWSAMIResolve)
+	stage("account_check")
+	assert.Contains(t, stage("user_data_check").Detail, instanceID)
+	probe := stage("real_probe").Detail
+	assert.Contains(t, probe, "http://"+net.JoinHostPort(ip, "80"))
+	assert.Contains(t, probe, strconv.Itoa(orderHTTPStatus))
+	holdout := stage("example-scenario-unseen").Detail
+	for _, port := range []string{"22", "443", "80"} {
+		assert.Contains(t, holdout, net.JoinHostPort(ip, port))
+	}
+	accountID := regexp.MustCompile(`[0-9]{12}`)
+	for _, s := range iteration.Stages {
+		assert.False(t, accountID.MatchString(s.Detail), "%s detail carries an account id: %s", s.Stage, s.Detail)
+	}
 }
 
 // otherAccountState is awsLiveState with its instance in another account.

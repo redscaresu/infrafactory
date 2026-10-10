@@ -1151,6 +1151,9 @@ func runIteration(
 ) ([]StageSummary, []FailureSummary) {
 	stages := make([]StageSummary, 0, 3)
 	failures := make([]FailureSummary, 0)
+	// LoadScenario caches; a load failure is executeTest's to report.
+	sc, _ := runtime.LoadScenario(scenarioPath)
+	aws := layer3TeardownCloud(sc.Cloud) == layer3AWS
 
 	steps := []struct {
 		name    string
@@ -1226,7 +1229,7 @@ func runIteration(
 		if err != nil {
 			stages = append(stages, StageSummary{Layer: "run", Stage: stageName, Status: StageStatusFail})
 			stages = append(stages, holdoutStages(testResult.Stages, iteration)...)
-			stages = append(stages, awsScopeStages(testResult.Stages)...)
+			stages = append(stages, awsScopeStages(testResult.Stages, aws)...)
 			if (step.name == "test" || step.name == "validate") && len(testResult.Failures) > 0 {
 				for _, failure := range testResult.Failures {
 					failures = append(failures, FailureSummary{
@@ -1271,7 +1274,7 @@ func runIteration(
 		// passed" is exactly the claim somebody needs to see to believe
 		// the run proved anything.
 		stages = append(stages, holdoutStages(testResult.Stages, iteration)...)
-		stages = append(stages, awsScopeStages(testResult.Stages)...)
+		stages = append(stages, awsScopeStages(testResult.Stages, aws)...)
 		runtime.Logger.Log(LogEntry{
 			Level:     logLevelInfo,
 			Command:   "run",
@@ -1747,12 +1750,18 @@ func isStage(name string) func(StageSummary) bool {
 	return func(s StageSummary) bool { return s.Stage == name }
 }
 
+// awsLayer3EvidenceStages are the aws stages a run carries up so its
+// iteration.json holds the Layer 3 evidence, a pass's included.
+var awsLayer3EvidenceStages = []string{"account_check", "user_data_check", "real_probe"}
+
 // awsScopeStages carries an iteration's aws scope stages up to the run,
-// which ends on a kept claim and tears down only after a take.
-func awsScopeStages(stages []StageSummary) []StageSummary {
+// which ends on a kept claim and tears down only after a take. For an aws
+// scenario it carries the post-apply checks and the real probe too.
+func awsScopeStages(stages []StageSummary, aws bool) []StageSummary {
 	var out []StageSummary
 	for _, s := range stages {
-		if strings.HasPrefix(s.Stage, "aws_scope_") {
+		if strings.HasPrefix(s.Stage, "aws_scope_") ||
+			(aws && s.Layer == "sandbox_deploy" && slices.Contains(awsLayer3EvidenceStages, s.Stage)) {
 			out = append(out, s)
 		}
 	}

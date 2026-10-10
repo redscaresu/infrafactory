@@ -1515,13 +1515,16 @@ func evaluateSupportedCriteria(ctx context.Context, sc scenario.Scenario, runtim
 				Layer:  "sandbox_deploy",
 				Stage:  "real_probe",
 				Status: StageStatusFail,
-				Detail: fmt.Sprintf("%d probe failures", len(probeResult.Failures)),
+				Detail: fmt.Sprintf("%d probe failures: %s", len(probeResult.Failures), harness.ProbeRecordsDetail(probeResult.Records)),
 			})
 			for _, failure := range probeResult.Failures {
 				failures = append(failures, toFailureSummary(failure))
 			}
 		} else {
-			stages = append(stages, StageSummary{Layer: "sandbox_deploy", Stage: "real_probe", Status: StageStatusPass})
+			stages = append(stages, StageSummary{
+				Layer: "sandbox_deploy", Stage: "real_probe", Status: StageStatusPass,
+				Detail: harness.ProbeRecordsDetail(probeResult.Records),
+			})
 		}
 	} else if len(topologyChecks) > 0 {
 		topologyFailures, err := harness.EvaluateTopology(deployResult.StateSnapshot, topologyChecks)

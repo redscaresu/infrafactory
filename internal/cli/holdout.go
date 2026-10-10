@@ -137,7 +137,7 @@ func runHoldouts(
 		case len(result.Failures) > 0:
 			stages = append(stages, StageSummary{
 				Layer: "holdout", Stage: holdout.ScenarioName, Status: StageStatusFail,
-				Detail: fmt.Sprintf("%d of %d check(s) failed", len(result.Failures), len(checks)),
+				Detail: fmt.Sprintf("%d of %d check(s) failed: %s", len(result.Failures), len(checks), harness.ProbeRecordsDetail(result.Records)),
 			})
 			for _, f := range result.Failures {
 				failures = append(failures, FailureSummary{
@@ -152,7 +152,7 @@ func runHoldouts(
 		default:
 			stages = append(stages, StageSummary{
 				Layer: "holdout", Stage: holdout.ScenarioName, Status: StageStatusPass,
-				Detail: fmt.Sprintf("%d unseen check(s) passed", len(checks)),
+				Detail: fmt.Sprintf("%d unseen check(s) passed: %s", len(checks), harness.ProbeRecordsDetail(result.Records)),
 			})
 		}
 	}
