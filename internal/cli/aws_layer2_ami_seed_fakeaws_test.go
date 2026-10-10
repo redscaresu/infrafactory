@@ -48,7 +48,8 @@ func TestE2E_AWSLayer2SeedsTheResolvedAMI(t *testing.T) {
 			map[string][]byte{"main.tf": main}, resolved, root)
 	}
 
-	assert.ErrorContains(t, deploy(harness.AWSLayer2AMI), "aws gate:", "the gate admits only the resolved id")
+	assert.ErrorContains(t, deploy(harness.AWSLayer2AMI), `must set ami = "`+resolved+`", the AMI resolved for this run`,
+		"the gate refuses the fixture id for not being the resolved one")
 	require.NoError(t, deploy(resolved), "fakeaws log: %s", mock.LogPath())
 	ec2, _ := mock.FetchState(t)["ec2"].(map[string]any)
 	assert.Len(t, ec2["instances"], 1, "the mock launched the instance")
