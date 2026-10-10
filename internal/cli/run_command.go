@@ -456,9 +456,15 @@ func runRunWithNotify(
 	// release the claim, so it describes the claim as the run leaves it.
 	var loopErr error
 	awsInterrupted := false
+	// Every ending names the reap the claim needs: an interrupt says it
+	// as the run leaves the claim, and so does any other ending short of
+	// the target, an iterate error included, while the claim may be held.
 	defer func() {
-		if awsInterrupted {
+		switch {
+		case awsInterrupted:
 			_, _ = fmt.Fprint(cmd.ErrOrStderr(), awsInterruptNotice(runtime))
+		case cloud == layer3AWS && terminalReason != "target_reached":
+			_, _ = fmt.Fprint(cmd.ErrOrStderr(), awsRunEndNotice(runtime))
 		}
 	}()
 	if cloud == layer3AWS {
@@ -1667,6 +1673,10 @@ func reapCommand(configPath, scenarioPath string) string {
 	cmd := "infrafactory"
 	if trimmed := strings.TrimSpace(configPath); trimmed != "" && trimmed != config.DefaultPath {
 		cmd += " --config " + shellQuote(trimmed)
+	}
+	if scenarioPath == "" {
+		// Never `reap ''`: name what goes there.
+		return cmd + " reap <scenario file>"
 	}
 	return cmd + " reap " + shellQuote(scenarioPath)
 }

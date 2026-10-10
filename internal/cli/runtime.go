@@ -169,7 +169,9 @@ type CommandRuntime struct {
 	awsClaim awsClaim
 	// awsHolder is this process's claim holder, fixed once minted, for
 	// the notice the first signal prints while awsClaim may be changing.
-	awsHolder          string
+	awsHolder string
+	// signalNoticed is set once the first signal's notice has printed.
+	signalNoticed      bool
 	outputDir          string
 	runstoreRoot       string
 	livestoreRoot      string

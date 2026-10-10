@@ -4,6 +4,8 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -206,6 +208,10 @@ func TestInterruptGuardNoopsWithoutLiveState(t *testing.T) {
 	if !strings.Contains(out.String(), "nothing to clean up") {
 		t.Fatalf("operator should be told there is nothing live, got: %q", out.String())
 	}
+	// The first-signal notice, printed before the guard knew, is hedged
+	// and so never contradicts that.
+	assert.Contains(t, out.String(), "if this run applied anything, `"+reapCommand(rt.ConfigPath, rt.scenarioPath)+"` cleans it up")
+	assert.NotContains(t, out.String(), "may still exist")
 }
 
 // The case the guard exists for: interrupted AFTER real resources were
@@ -407,7 +413,7 @@ func TestFirstSignalPrintsTheRecoveryCommandAtOnce(t *testing.T) {
 			"`" + reapCommand(config.DefaultPath, "scenarios/training/aws-web-live.yaml") + " --take-over " + shellQuote(holder) + "`",
 			"if no one holds it, " + plain + " does",
 		}},
-		"scaleway": {cloud: layer3Scaleway, want: []string{"real resources this run applied may still exist", plain + " cleans them up"}},
+		"scaleway": {cloud: layer3Scaleway, want: []string{"if this run applied anything, " + plain + " cleans it up"}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			rt := signalRuntime()
@@ -453,4 +459,67 @@ func TestRunUnderSignalsIgnoresAnEndedParent(t *testing.T) {
 	assert.False(t, interrupted)
 	require.NoError(t, withSandboxInterruptGuard(cmd, signalRuntime(), layer3AWS, notifyFromParent, func(context.Context) error { return nil }))
 	assert.Empty(t, out.String(), "no interrupt notice")
+}
+
+// A panicking fn leaves no watcher blocked behind it, and no notice: the
+// deferred stop is not a signal.
+func TestRunUnderSignalsLeavesNoWatcherWhenFnPanics(t *testing.T) {
+	before := goruntime.NumGoroutine()
+	out := &strings.Builder{}
+
+	func() {
+		defer func() { _ = recover() }()
+		_, _ = runUnderSignals(guardCmd(out), signalRuntime(), layer3AWS, notifyFromParent, func(context.Context) error {
+			panic("fn failed")
+		})
+	}()
+
+	// Polled by hand: assert.Eventually runs its condition on a goroutine
+	// of its own, which the count would include.
+	deadline := time.Now().Add(2 * time.Second)
+	for goruntime.NumGoroutine() > before && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	assert.LessOrEqual(t, goruntime.NumGoroutine(), before, "the watcher goroutine is still blocked")
+	assert.Empty(t, out.String(), "no notice")
+}
+
+// The notice is built before fn runs: what fn writes to the runtime is
+// never read by the watcher. Without a loaded scenario it names the one
+// the command was given, and without that, what goes there.
+func TestFirstSignalNoticeNamesTheScenarioFixedBeforeFn(t *testing.T) {
+	for name, tc := range map[string]struct {
+		loaded, arg, want string
+	}{
+		"loaded":          {loaded: "scenarios/loaded.yaml", want: "reap scenarios/loaded.yaml`"},
+		"given, unloaded": {arg: "scenarios/given.yaml", want: "reap scenarios/given.yaml`"},
+		"neither":         {want: "reap <scenario file>`"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			rt := signalRuntime()
+			rt.scenarioPath = tc.loaded
+			n := newSignalNotify()
+			out := &syncWriter{w: &strings.Builder{}}
+			cmd := guardCmd(&strings.Builder{})
+			cmd.SetErr(out)
+			require.NoError(t, cmd.Flags().Parse(slices.DeleteFunc([]string{tc.arg}, func(s string) bool { return s == "" })))
+			printed := func() string {
+				out.mu.Lock()
+				defer out.mu.Unlock()
+				return out.w.(*strings.Builder).String()
+			}
+
+			_, err := runUnderSignals(cmd, rt, layer3Scaleway, n.notify, func(context.Context) error {
+				rt.scenarioPath = "scenarios/written-by-fn.yaml"
+				n.signal()
+				// The watcher prints while fn still runs.
+				require.Eventually(t, func() bool { return strings.Contains(printed(), "Interrupted —") }, 5*time.Second, 10*time.Millisecond)
+				return nil
+			})
+
+			require.NoError(t, err)
+			assert.Contains(t, printed(), tc.want)
+			assert.NotContains(t, printed(), "written-by-fn")
+		})
+	}
 }

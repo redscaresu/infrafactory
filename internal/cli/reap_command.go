@@ -236,13 +236,8 @@ func awsReapTakeFailure(runtime *CommandRuntime, holder string, err error) error
 // awsReapHolderPrefix starts every holder reap mints.
 const awsReapHolderPrefix = "reap-"
 
-// awsTakeOverCommand is plain reap for an empty holder: there is nothing
-// to take over.
 func awsTakeOverCommand(runtime *CommandRuntime, holder string) string {
-	if holder == "" {
-		return reapCommand(runtime.ConfigPath, runtime.scenarioPath)
-	}
-	return reapCommand(runtime.ConfigPath, runtime.scenarioPath) + " --take-over " + shellQuote(holder)
+	return awsTakeOverOf(reapCommand(runtime.ConfigPath, runtime.scenarioPath), holder)
 }
 
 // reapClaimedAWSScope runs with holder holding the claim. Neither a
@@ -312,17 +307,37 @@ func runUnderSignals(
 	out := &syncWriter{w: cmd.ErrOrStderr()}
 	cmd.SetErr(out)
 	defer cmd.SetErr(out.w)
+	// At most once per process: a run interrupted in its loop and again
+	// in its failure arm has already said it.
+	notice := ""
+	if !runtime.signalNoticed {
+		notice = firstSignalNotice(runtime, cloud, signalNoticeScenario(cmd, runtime))
+	}
 
 	sigCtx, stop := notify(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	signal := func() bool { return sigCtx.Err() != nil && ctx.Err() == nil }
-	fnDone, watched := make(chan struct{}), make(chan bool)
+	// watched is buffered, so the watcher never blocks on a caller that
+	// fn's panic took away.
+	fnDone, watched := make(chan struct{}), make(chan bool, 1)
+	returned := false
+	defer func() {
+		if !returned {
+			close(fnDone) // fn panicked: before stop() cancels sigCtx
+		}
+	}()
 	go func() {
 		select {
 		case <-sigCtx.Done():
+			select {
+			case <-fnDone: // the deferred stop(), not a signal
+				watched <- false
+				return
+			default:
+			}
 			fired := signal()
 			if fired {
-				_, _ = fmt.Fprint(out, firstSignalNotice(runtime, cloud))
+				_, _ = fmt.Fprint(out, notice)
 			}
 			watched <- fired
 		case <-fnDone:
@@ -330,17 +345,30 @@ func runUnderSignals(
 		}
 	}()
 	err := fn(sigCtx)
+	returned = true
 	close(fnDone)
-	printed := <-watched
-	if !printed && signal() {
+	fired := <-watched
+	if !fired && signal() {
 		// The signal and fn's return raced; the notice still goes first.
-		_, _ = fmt.Fprint(out, firstSignalNotice(runtime, cloud))
-		printed = true
+		_, _ = fmt.Fprint(out, notice)
+		fired = true
 	}
-	return printed, err
+	runtime.signalNoticed = runtime.signalNoticed || fired
+	return fired, err
 }
 
-// syncWriter serialises writes from fn and the signal watcher.
+// signalNoticeScenario is the scenario the first signal's reap names:
+// the loaded one, else the one the command was given.
+func signalNoticeScenario(cmd *cobra.Command, runtime *CommandRuntime) string {
+	if runtime.scenarioPath != "" {
+		return runtime.scenarioPath
+	}
+	return cmd.Flags().Arg(0)
+}
+
+// syncWriter serialises writes from fn and the signal watcher to cmd's
+// err writer, which in tests is a plain buffer. Writes straight to
+// os.Stderr need no lock: an *os.File is safe for concurrent use.
 type syncWriter struct {
 	mu sync.Mutex
 	w  io.Writer

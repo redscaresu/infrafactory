@@ -59,21 +59,35 @@ func (c awsClaim) known() awsClaimState {
 // the claim: plain reap refuses a held claim, and --take-over refuses a
 // claim its holder does not hold.
 func awsReapAdvice(runtime *CommandRuntime, claim awsClaim) string {
+	return awsReapAdviceFor(reapCommand(runtime.ConfigPath, runtime.scenarioPath), claim)
+}
+
+// awsReapAdviceFor is awsReapAdvice for plain, the reap command already
+// built.
+func awsReapAdviceFor(plain string, claim awsClaim) string {
 	const does = "sweeps the scope, destroys what is left and releases the claim"
-	plain := reapCommand(runtime.ConfigPath, runtime.scenarioPath)
 	switch claim.known() {
 	case awsClaimHeld:
-		return fmt.Sprintf("`%s` %s", awsTakeOverCommand(runtime, claim.holder), does)
+		return fmt.Sprintf("`%s` %s", awsTakeOverOf(plain, claim.holder), does)
 	case awsClaimUnknown:
 		return fmt.Sprintf("If this run holds the claim, `%s` %s; if no one holds it, `%s` does",
-			awsTakeOverCommand(runtime, claim.holder), does, plain)
+			awsTakeOverOf(plain, claim.holder), does, plain)
 	case awsClaimHeldByOther:
-		return fmt.Sprintf("Once that run has ended, `%s` %s", awsTakeOverCommand(runtime, claim.other), does)
+		return fmt.Sprintf("Once that run has ended, `%s` %s", awsTakeOverOf(plain, claim.other), does)
 	case awsClaimHolderUnknown:
 		return fmt.Sprintf("The claim's holder is unknown here: if no one holds it, `%s` %s; "+
 			"if someone does, it refuses, naming the holder and the --take-over that takes the claim over", plain, does)
 	}
 	return fmt.Sprintf("`%s` %s", plain, does)
+}
+
+// awsTakeOverOf is plain taking the claim over from holder, or plain
+// alone for an empty holder: there is nothing to take over.
+func awsTakeOverOf(plain, holder string) string {
+	if holder == "" {
+		return plain
+	}
+	return plain + " --take-over " + shellQuote(holder)
 }
 
 // awsClaimHead says what this process knows of the claim, for every
@@ -94,19 +108,31 @@ func awsClaimHead(claim awsClaim) string {
 
 // firstSignalNotice is what the first signal prints at once, before any
 // teardown: if the process is killed before it finishes, this is what
-// the operator has. It reads only what is fixed for the process, never
-// runtime.awsClaim, which the teardown is still changing.
-func firstSignalNotice(runtime *CommandRuntime, cloud layer3Cloud) string {
+// the operator has. It is built before fn starts, from what is fixed for
+// the process, so the watcher that prints it reads nothing fn writes.
+func firstSignalNotice(runtime *CommandRuntime, cloud layer3Cloud, scenarioPath string) string {
+	plain := reapCommand(runtime.ConfigPath, scenarioPath)
 	switch cloud {
 	case layer3AWS:
 		claim := awsClaim{holder: runtime.awsHolder, state: awsClaimUnknown}
 		return fmt.Sprintf("\nInterrupted — finishing teardown before exit. Should the process die first, %s. %s.\n",
-			awsClaimHead(claim), awsReapAdvice(runtime, claim))
+			awsClaimHead(claim), awsReapAdviceFor(plain, claim))
 	case layer3Scaleway:
-		return fmt.Sprintf("\nInterrupted — finishing cleanup before exit. Should the process die first, real resources "+
-			"this run applied may still exist: `%s` cleans them up.\n", reapCommand(runtime.ConfigPath, runtime.scenarioPath))
+		return fmt.Sprintf("\nInterrupted — finishing cleanup before exit. Should the process die first, "+
+			"if this run applied anything, `%s` cleans it up.\n", plain)
 	}
 	return ""
+}
+
+// awsRunEndNotice is what an aws run that did not reach its target
+// prints when the claim may still be its own; "" otherwise. A process
+// with no holder never claimed.
+func awsRunEndNotice(runtime *CommandRuntime) string {
+	claim := runtime.awsClaim
+	if runtime.awsHolder == "" || (claim.state != awsClaimHeld && claim.state != awsClaimUnknown) {
+		return ""
+	}
+	return fmt.Sprintf("\nRun ended: %s. %s.\n", awsClaimHead(claim), awsReapAdvice(runtime, claim))
 }
 
 // awsInterruptNotice is what an interrupted aws command prints once its

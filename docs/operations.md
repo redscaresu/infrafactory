@@ -365,7 +365,8 @@ and `--take-over` refuses a claim its holder does not hold, so the run names onl
 works. When it cannot tell whether it holds the claim (a claim put, read or release that failed
 without saying who holds it), it names both: `--take-over` if the run holds the claim, plain reap
 if no one does. When another run holds the claim, it names that holder and the `--take-over`
-naming it, to use once that run has ended. The first Ctrl-C prints both forms at once, with the
+naming it, to use once that run has ended. A run that ends short of its target while the claim
+may still be its own prints that advice on stderr too. The first Ctrl-C prints both forms at once, with the
 run's holder, in case the process dies before its teardown finishes; signals stay caught until
 that teardown ends, so a second Ctrl-C does not cut it short. Once it ends, the run prints the
 settled choice: `--take-over` while the run keeps the claim, plain reap once its sweep released
