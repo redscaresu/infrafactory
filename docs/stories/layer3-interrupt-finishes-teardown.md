@@ -17,6 +17,10 @@ Found by /code-review on #416 (2026-10-10). These gaps predate #416, and #416 de
   fresh context.
 - **aws `run`, failure arm:** a first Ctrl-C during the arm cancels its own context, so its destroy
   aborts as well, not only the settle waits.
+- **aws `run`, after the loop:** once `iterate` returns, default signal handling is back until the
+  failure arm starts, a window that includes auto-learn's LLM calls. A Ctrl-C there kills the process
+  with the claim held, and neither the first-signal notice nor the deferred end-of-run notice prints
+  (found by /code-review pass 6 on #416).
 - **Scaleway `run`:** it has no signal handling at all. `iterate` runs on `cmd.Context()`, so a first
   Ctrl-C kills the process with real resources live and prints no `infrafactory reap` line.
 
@@ -31,6 +35,8 @@ recovery command is printed either way (#416's first-signal notice). Commit trai
   test with the injected-fake harness sees `destroy` and `claim delete` after the interrupt, and the
   claim is released when the sweep is clean.
 - The same holds for the aws `run` failure arm interrupted during its destroy.
+- A Ctrl-C between the end of the aws `run` loop and its failure arm is caught: the teardown runs,
+  and the reap advice prints. A test covers it.
 - A Scaleway `run` interrupted mid-apply destroys, or prints `infrafactory reap <scenario>`, exactly
   as Scaleway `test` does. A test covers it.
 - A second signal during that teardown abandons it and prints the recovery command. A test covers it.
