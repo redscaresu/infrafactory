@@ -23,13 +23,16 @@ test.describe('Functional spot-checks', () => {
   });
 
   test('runs page renders a table or empty-state notice', async ({ page }) => {
+    // The table header and the empty-state notice both render before the
+    // fetch settles, so wait for /api/runs and require it to succeed, then
+    // require a run row or the empty state, and no error.
+    const runsResponse = page.waitForResponse((r) => new URL(r.url()).pathname === '/api/runs');
     await page.goto('/runs');
-    // Either a table is present (real runs) or the empty-state notice —
-    // both count as "rendered successfully". The retrying assertion waits
-    // for the page to load; first() because both can show at once.
-    const table = page.locator('main table');
+    expect((await runsResponse).ok()).toBeTruthy();
+    const rows = page.locator('main tbody tr');
     const emptyState = page.locator('main').getByText('No runs match the current filters.');
-    await expect(table.or(emptyState).first()).toBeVisible();
+    await expect(rows.first().or(emptyState).first()).toBeVisible();
+    await expect(page.locator('main p.text-red-700')).toHaveCount(0);
   });
 
   test('diagnostics page renders agent + backend fields', async ({ page }) => {
