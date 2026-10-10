@@ -449,30 +449,30 @@ func runRunWithNotify(
 		}
 		return nil
 	}
-	// aws only: an interrupt has to name reap, because the claim may be
-	// held and nothing else says so. Other clouds run unguarded, as before.
-	// The notice waits for the failure path's teardown, which may still
-	// release the claim, so it describes the claim as the run leaves it.
-	var loopErr error
-	awsInterrupted := false
-	// Every ending names the reap the claim needs: an interrupt says it
-	// as the run leaves the claim, and so does any other ending short of
-	// the target, an iterate error included, while the claim may be held.
+	// aws: an interrupt has to name reap, because the claim may be held
+	// and nothing else says so. The notice waits for the failure arm, which
+	// may still release the claim, so it describes the claim as the run
+	// leaves it. Every ending names the reap the claim needs: an interrupt
+	// says it as the run leaves the claim, and so does any other ending
+	// short of the target, an iterate error included, while the claim may
+	// be held. Deferred before signalsDone, so it runs after it.
 	defer func() {
 		switch {
-		case awsInterrupted:
+		case cloud != layer3AWS:
+		case runtime.signalNoticed:
 			_, _ = fmt.Fprint(cmd.ErrOrStderr(), awsInterruptNotice(runtime))
-		case cloud == layer3AWS && terminalReason != "target_reached":
+		case terminalReason != "target_reached":
 			_, _ = fmt.Fprint(cmd.ErrOrStderr(), awsRunEndNotice(runtime))
 		}
 	}()
-	if cloud == layer3AWS {
-		awsInterrupted, loopErr = runUnderSignals(cmd, runtime, cloud, notify, iterate)
-	} else {
-		loopErr = iterate(cmd.Context())
-	}
-	if loopErr != nil {
-		return loopErr
+	// One span of caught signals, from the loop to the end of the failure
+	// arm: between them default handling would be back, and a Ctrl-C while
+	// auto-learn runs would kill the process with real resources live. The
+	// arm finishes the teardown a signal cut short.
+	runCtx, signalsDone := catchSignals(cmd, runtime, cloud, notify)
+	defer signalsDone()
+	if err := iterate(runCtx); err != nil {
+		return err
 	}
 
 	if terminalReason == "" && !lastIterationFailed {
@@ -847,15 +847,13 @@ func runRunWithNotify(
 		// leaves behind.
 		mayHoldResources := liveStateMayHoldResources(runtime.OutputDir())
 		if cloud == layer3AWS {
-			// Under caught signals like the loop, even after its interrupt:
-			// a signal cuts the settle waits short and the arm finishes.
-			interrupted, _ := runUnderSignals(cmd, runtime, cloud, notify, func(ctx context.Context) error {
-				awsStages, awsFailures := awsRunFailureTeardown(ctx, runtime, allStages)
-				allStages = append(allStages, awsStages...)
-				allFailures = append(allFailures, awsFailures...)
-				return nil
+			// Finished on a fresh context when a signal ended runCtx, in
+			// the loop or in the arm itself; the next signal abandons it.
+			awsStages, awsFailures := finishTeardown(runCtx, notify, func(ctx context.Context) ([]StageSummary, []FailureSummary) {
+				return awsRunFailureTeardown(ctx, runtime, allStages)
 			})
-			awsInterrupted = awsInterrupted || interrupted
+			allStages = append(allStages, awsStages...)
+			allFailures = append(allFailures, awsFailures...)
 		} else if mayHoldResources && cloud != layer3Scaleway {
 			// Before the marker is read: one here may be a stale Scaleway
 			// one, and nothing below is written for any other cloud.
@@ -871,6 +869,13 @@ func runRunWithNotify(
 				Command: "auto-destroy preflight", Detail: detail,
 			})
 		} else if mayHoldResources {
+			// An interrupted loop leaves its teardown here: once a signal
+			// has ended runCtx, the arm runs on a fresh context the next
+			// signal cancels, and what that leaves names the reap.
+			armCtx, armDone, fresh := runCtx, func() {}, runCtx.Err() != nil
+			if fresh {
+				armCtx, armDone = teardownContext(runCtx, notify)
+			}
 			// The env must be scoped to the run's OWN project: the apply
 			// ran with it as the provider default, and a destroy against
 			// the shared fallback is not the inverse of that apply.
@@ -919,7 +924,13 @@ func runRunWithNotify(
 				// empties terraform-live.tfstate, and the strays it names
 				// go with it. Same ordering the success path learned the
 				// hard way in the first canary run.
-				destroyResult, purged, destroyErr := destroySandbox(cmd.Context(), runtime, cloud, runtime.OutputDir(), sandboxEnv, sweepTargetProjectID(sweepTarget))
+				destroyResult, purged, destroyErr := destroySandbox(armCtx, runtime, cloud, runtime.OutputDir(), sandboxEnv, sweepTargetProjectID(sweepTarget))
+				if destroyErr != nil && !fresh && runCtx.Err() != nil {
+					// A signal cut it short, and tofu with it: the terminal
+					// signals both. Once more, on a fresh context.
+					armCtx, armDone = teardownContext(runCtx, notify)
+					destroyResult, purged, destroyErr = destroySandbox(armCtx, runtime, cloud, runtime.OutputDir(), sandboxEnv, sweepTargetProjectID(sweepTarget))
+				}
 				destroyStages, destroyFailures := appendSandboxDestroyResult(nil, nil, destroyResult, destroyErr)
 				allStages = append(allStages, destroyStages...)
 				if len(purged) > 0 {
@@ -952,7 +963,7 @@ func runRunWithNotify(
 					// gives it one, so the gap closes here rather than
 					// staying a known leak.
 					projectStages, projectFailures := releaseRunProject(
-						cmd.Context(), runtime, cloud, runtime.OutputDir(),
+						armCtx, runtime, cloud, runtime.OutputDir(),
 						runProjectMarker.ProjectID, sandboxEnv)
 					allStages = append(allStages, projectStages...)
 					if len(projectFailures) > 0 {
@@ -968,7 +979,7 @@ func runRunWithNotify(
 					// and "nothing leaked" must never look alike.
 					failuresBeforeSweep := len(allFailures)
 					allStages, allFailures = appendOrphanSweepResult(
-						cmd.Context(), allStages, allFailures, runtime, cloud, sweepTarget, sweepTargetErr, sandboxEnv)
+						armCtx, allStages, allFailures, runtime, cloud, sweepTarget, sweepTargetErr, sandboxEnv)
 					if len(allFailures) > failuresBeforeSweep {
 						annotateWithRecoveryCommand(allFailures[failuresBeforeSweep:], runtime.ConfigPath, scenarioPath)
 						logLayer3RecoveryHint(runtime, runID, scenarioPath,
@@ -976,8 +987,10 @@ func runRunWithNotify(
 					}
 				}
 			}
+			armDone()
 		}
 	}
+	signalsDone()
 
 	// Every Layer 3 run checks the organization for run projects nothing
 	// explains -- its own and, more importantly, earlier runs'.

@@ -379,6 +379,55 @@ func TestInterruptedAWSTestNamesTheReapForAnUnknownOrForeignClaim(t *testing.T) 
 	}
 }
 
+// interruptAWSTestMidApply makes the apply write state and then take a
+// signal, with an instance running that only a completed destroy takes.
+func interruptAWSTestMidApply(t *testing.T, lc *awsLifecycle) {
+	t.Helper()
+	lc.ec2["DescribeInstances"] = runningInstance
+	lc.destroy.clears = true
+	lc.deploy.err = context.Canceled
+	lc.deploy.onRunDir = func(dir string) {
+		lc.record(deployRun)
+		require.NoError(t, os.WriteFile(filepath.Join(dir, harness.LiveStateFilename), []byte(awsLiveState), 0o600))
+		lc.cancel()
+	}
+}
+
+// The signal ended the context the teardown would have run on; it runs
+// on a fresh one instead, so its destroy completes, the sweep finds the
+// scope clean and the claim is released.
+func TestInterruptedAWSTestFinishesItsTeardown(t *testing.T) {
+	lc := newAWSLifecycle(t)
+	interruptAWSTestMidApply(t, lc)
+
+	run := runAWSTest(t, lc, nil, nil)
+
+	require.Error(t, run.err)
+	calls := lc.log()
+	afterInterrupt := calls[slices.Index(calls, deployRun):]
+	assert.Contains(t, afterInterrupt, destroyRun)
+	assert.Contains(t, afterInterrupt, deleteClaim)
+	_, held := lc.claim()
+	assert.False(t, held, "the clean sweep released the claim")
+	assert.False(t, run.hasStage(StageAWSScopeClaimKept), "the result is the finished teardown's")
+	assertInterruptNamesTheReap(t, lc, run.output, run.h.ConfigPath, run.h.ScenarioPath, awsClaimNotHeld)
+}
+
+// A second signal during that teardown abandons it: its destroy stops,
+// the claim is kept, and the notice names the take-over that finishes it.
+func TestSecondInterruptAbandonsTheAWSTestTeardown(t *testing.T) {
+	lc := newAWSLifecycle(t)
+	interruptAWSTestMidApply(t, lc)
+	lc.destroy.during = func() { lc.cancel() }
+
+	run := runAWSTest(t, lc, nil, nil)
+
+	require.Error(t, run.err)
+	assert.Equal(t, 1, lc.destroy.calls, "one destroy, on the fresh context, and abandoned")
+	assertClaimKept(t, lc, run)
+	assertInterruptNamesTheReap(t, lc, run.output, run.h.ConfigPath, run.h.ScenarioPath, awsClaimHeld)
+}
+
 // A held or unknown claim with no holder to name, and a runtime that
 // never set the claim, hedge: never "keeps the claim" beside plain reap,
 // and never one command twice.

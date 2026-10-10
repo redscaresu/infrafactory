@@ -407,12 +407,13 @@ without saying who holds it), it names both: `--take-over` if the run holds the 
 if no one does. When another run holds the claim, it names that holder and the `--take-over`
 naming it, to use once that run has ended. A run that ends short of its target while the claim
 may still be its own prints that advice on stderr too. The first Ctrl-C prints both forms at once, with the
-run's holder, in case the process dies before its teardown finishes. Signals stay caught while
-an iteration, and then the failure arm, runs, so a second Ctrl-C there does not cut the teardown
-short. The short window in `run` after the loop ends and before the failure arm starts is not yet
-covered: a Ctrl-C there ends the process (story `layer3-interrupt-finishes-teardown`). Once the
-teardown ends, the run prints the settled choice: `--take-over` while the run keeps the claim,
-plain reap once its sweep released it. A reap whose own claim attempt has an unknown outcome, or a
+run's holder, in case the process dies before its teardown finishes. The teardown then runs on a
+fresh, bounded context the Ctrl-C did not cancel: destroy, sweep and, when the scope is empty,
+release. A destroy the Ctrl-C cut short runs again, because the terminal sends Ctrl-C to tofu as
+well. Signals stay caught from the start of `run`'s loop to the end of its failure arm, auto-learn
+between them included, and a second Ctrl-C abandons the teardown. Scaleway `test` and `run` tear
+down the same way, naming plain reap. Once the teardown ends, the run prints the settled choice: `--take-over`
+while the run keeps the claim, plain reap once its sweep released it. A reap whose own claim attempt has an unknown outcome, or a
 `reap --take-over` that deleted the old claim but could not take its own, names the reap to run
 next; a `--take-over` that finds no claim names plain reap.
 

@@ -146,11 +146,24 @@ type fakeSandboxDestroyHarness struct {
 	calls              int
 	withoutConfigCalls int
 	lastCtx            context.Context
+	// lastCtxErr is lastCtx.Err() when Run was called: a teardown's
+	// context is released once it returns.
+	lastCtxErr error
+	// during runs inside each Run, so a signal it sends lands mid-destroy.
+	during func()
 }
 
 func (f *fakeSandboxDestroyHarness) Run(ctx context.Context, _ string, _ map[string]string) (*harness.SandboxDestroyResult, error) {
 	f.calls++
 	f.lastCtx = ctx
+	if f.during != nil {
+		f.during()
+	}
+	// A done context fails it, as it fails tofu.
+	f.lastCtxErr = ctx.Err()
+	if f.lastCtxErr != nil {
+		return nil, f.lastCtxErr
+	}
 	return f.result, f.err
 }
 
@@ -160,6 +173,9 @@ func (f *fakeSandboxDestroyHarness) Run(ctx context.Context, _ string, _ map[str
 func (f *fakeSandboxDestroyHarness) RunWithoutConfig(ctx context.Context, _, _ string, _ map[string]string) (*harness.SandboxDestroyResult, error) {
 	f.withoutConfigCalls++
 	f.lastCtx = ctx
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	return f.result, f.err
 }
 

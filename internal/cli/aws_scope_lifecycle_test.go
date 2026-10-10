@@ -307,17 +307,33 @@ func (lc *awsLifecycle) notify(parent context.Context, _ ...os.Signal) (context.
 	return ctx, cancel
 }
 
+// loggingSandboxDestroy fails on a done context, as tofu does.
 type loggingSandboxDestroy struct {
 	lc    *awsLifecycle
 	err   error
 	calls int
+	// during runs inside each destroy, so a signal it sends lands mid-destroy.
+	during func()
+	// clears: a destroy that completes takes the instance the sweep finds.
+	clears bool
 }
 
-func (d *loggingSandboxDestroy) Run(context.Context, string, map[string]string) (*harness.SandboxDestroyResult, error) {
+func (d *loggingSandboxDestroy) Run(ctx context.Context, _ string, _ map[string]string) (*harness.SandboxDestroyResult, error) {
 	d.calls++
 	d.lc.record(destroyRun)
+	if d.during != nil {
+		d.during()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if d.err != nil {
 		return nil, d.err
+	}
+	if d.clears {
+		d.lc.mu.Lock()
+		delete(d.lc.ec2, "DescribeInstances")
+		d.lc.mu.Unlock()
 	}
 	return &harness.SandboxDestroyResult{Destroy: harness.StageResult{Stage: "destroy"}}, nil
 }
