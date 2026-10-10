@@ -363,6 +363,8 @@ func Default() Config {
 			// HTTP 200, and one earlier probe never served inside the
 			// old 120s at all. Sized to that failure, not to the
 			// successes. See infrafactory.yaml for the full numbers.
+			// AWS, measured 2026-10-10: five real boots served their
+			// first HTTP 200 in 71.6-75.7s, inside the same 300s.
 			RealProbes: RealProbeConfig{
 				TimeoutSeconds:    5,
 				Retries:           60,

@@ -245,6 +245,14 @@ validation:
     #
     # Six boots is a small sample and the tail is characterised by exactly one
     # observation. If this fires again, measure rather than double it.
+    #
+    # AWS, MEASURED on 2026-10-10: five real boots (us-east-1, t3.micro, AL2023,
+    # user data installing nginx), seconds from the probe starting to the first
+    # HTTP 200 straight from the instance (no load balancer): 75.7, 71.6, 71.7,
+    # 71.9, 72.7 (runs 20261010T095643Z, 20261010T103505Z, 20261010T105637Z,
+    # 20261010T111209Z, 20261010T114213Z). The slowest, 75.7s, is a quarter of
+    # this window (60 x 5s = 300s), so the one shared value stays; no per-cloud
+    # field (YAGNI).
     retries: 60
     retry_delay_seconds: 5
 
