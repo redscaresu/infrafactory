@@ -140,6 +140,13 @@ copy of a story is another place for it to go stale.
 - Keep behavior deterministic and tests hermetic where possible.
 - **Assertion convention (Go tests, project-wide)**: default to `github.com/stretchr/testify` for assertions where possible. `assert.Equal` / `require.NoError` / `assert.Contains` over `if x != y { t.Fatalf(...) }`. Use `require` when a failure should stop the test (setup steps, anything whose failure would cause downstream nil-deref / panic). Use `assert` otherwise so multiple failures surface in one run. Don't bare-literal HTTP status codes — `http.StatusNoContent` not `204`. The qualifier "where possible" is real: if an if-fatalf block carries a fundamentally custom error message the assertion library can't express, leave it stdlib — don't force conversions that hurt readability. Same rule lives in every sibling fake's AGENTS.md.
 
+## Lessons
+Rules adopted from review findings that kept recurring (`swarm.sh lessons`); each line is tagged
+with its kind. Every swarm brief also carries these lines.
+- Every new or changed test must be shown to fail: back up the fixed file with cp, break the fix, watch the test fail, restore with cp, and record it in the PR. A reviewer sends back any test that passes with its fix removed. <!-- lesson: vacuous-test -->
+- Keep one source of truth for each fact (a holder, a list, a stage name): derive every other view from it rather than copying it, and when a review finds a fact held in two places, remove the copy instead of syncing it. <!-- lesson: state-duplication -->
+- When code changes behaviour a doc, runbook step, story **You:** line or PR body describes, change that text in the same PR, and re-read the PR body against the final diff before asking for review. <!-- lesson: docs-misstate-code -->
+
 ## Quality Bar
 - `go test ./...` passes for completed stories.
 - Stubs must return explicit "not implemented" errors.
