@@ -83,7 +83,6 @@ func runTestWithNotify(
 			// Progress on stderr, the same stream and the same bytes
 			// `deploy` produces. stdout carries the output contract.
 			Progress: cmd.ErrOrStderr(),
-			Notify:   notify,
 		})
 		result.Stages = append(resolved, result.Stages...)
 		if err != nil {
@@ -638,11 +637,6 @@ type testExecutionOptions struct {
 	// "nothing" is the silent-apply failure this slice exists to fix and
 	// a caller that forgets should not reintroduce it.
 	Progress io.Writer
-
-	// Notify, when set, finishes an aws teardown that a signal cut short
-	// (finishTeardown). Only `test` sets it: in `run` the failure arm
-	// finishes it, once, after the loop.
-	Notify func(ctx context.Context, sigs ...os.Signal) (context.Context, context.CancelFunc)
 }
 
 func executeTest(ctx context.Context, runtime *CommandRuntime, scenarioPath string, opts testExecutionOptions) (OutputResult, error) {
@@ -1086,7 +1080,8 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 	// clean destroy leaves nothing behind but would otherwise strand the
 	// empty project forever.
 	if cloud == layer3AWS && runProjectID != "" {
-		teardownStages, teardownFailures := finishTeardown(ctx, opts.Notify,
+		// Finished on a fresh context when a signal cut it short.
+		teardownStages, teardownFailures := finishTeardown(ctx,
 			func(ctx context.Context) ([]StageSummary, []FailureSummary) {
 				return awsScopeTeardown(ctx, runtime, outputDir, opts)
 			})

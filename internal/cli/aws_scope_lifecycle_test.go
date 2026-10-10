@@ -82,7 +82,11 @@ type awsLifecycle struct {
 	// onEC2 sees each EC2 action with mu held, so it may change ec2.
 	onEC2  func(action string)
 	sleeps int
-	cancel context.CancelFunc
+	// sigMu guards cancel and notifies, which the signal watcher writes.
+	sigMu    sync.Mutex
+	cancel   context.CancelFunc // the latest registration's
+	notifies int
+	t        testing.TB
 	// credFile is the credential file under the test's HOME.
 	credFile string
 
@@ -108,6 +112,7 @@ func newAWSLifecycle(t *testing.T) *awsLifecycle {
 		amiImage: awsAMIImage,
 		credFile: filepath.Join(credDir, "layer3-aws.env"),
 		scw:      newLayer3Fakes(),
+		t:        t,
 	}
 	require.NoError(t, os.WriteFile(lc.credFile,
 		[]byte("AWS_ACCESS_KEY_ID="+preflightAWSKeyID+"\nAWS_SECRET_ACCESS_KEY="+preflightAWSSecret+"\n"), 0o600))
@@ -303,8 +308,31 @@ func lifecycleAnswer(req *http.Request, status int, contentType, body string) *h
 
 func (lc *awsLifecycle) notify(parent context.Context, _ ...os.Signal) (context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(parent)
-	lc.cancel = cancel
+	lc.sigMu.Lock()
+	defer lc.sigMu.Unlock()
+	lc.cancel, lc.notifies = cancel, lc.notifies+1
 	return ctx, cancel
+}
+
+func (lc *awsLifecycle) notifyCount() int {
+	lc.sigMu.Lock()
+	defer lc.sigMu.Unlock()
+	return lc.notifies
+}
+
+// signal sends a signal. A real one reaches every registration, and the
+// latest is the one it is not spent on. The first returns once the span
+// has ended and listens for the next, as tofu returns once its context
+// has ended.
+func (lc *awsLifecycle) signal() {
+	lc.sigMu.Lock()
+	cancel, first := lc.cancel, lc.notifies == 1
+	lc.sigMu.Unlock()
+	cancel()
+	if first {
+		require.Eventually(lc.t, func() bool { return lc.notifyCount() > 1 }, 5*time.Second, time.Millisecond,
+			"the span handled the signal")
+	}
 }
 
 // loggingSandboxDestroy fails on a done context, as tofu does.
@@ -312,8 +340,9 @@ type loggingSandboxDestroy struct {
 	lc    *awsLifecycle
 	err   error
 	calls int
-	// during runs inside each destroy, so a signal it sends lands mid-destroy.
-	during func()
+	// during runs inside each destroy with its context, so a signal it
+	// sends lands mid-destroy.
+	during func(context.Context)
 	// clears: a destroy that completes takes the instance the sweep finds.
 	clears bool
 }
@@ -322,7 +351,7 @@ func (d *loggingSandboxDestroy) Run(ctx context.Context, _ string, _ map[string]
 	d.calls++
 	d.lc.record(destroyRun)
 	if d.during != nil {
-		d.during()
+		d.during(ctx)
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -597,7 +626,7 @@ func TestAWSTestEveryExitAfterTheTakeReleasesOnlyAfterACleanSweep(t *testing.T) 
 				lc.deploy.onRunDir = func(dir string) {
 					lc.record(deployRun)
 					require.NoError(t, os.WriteFile(filepath.Join(dir, harness.LiveStateFilename), []byte(awsLiveState), 0o600))
-					lc.cancel()
+					lc.signal()
 				}
 				return nil
 			},

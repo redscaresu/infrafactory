@@ -849,7 +849,7 @@ func runRunWithNotify(
 		if cloud == layer3AWS {
 			// Finished on a fresh context when a signal ended runCtx, in
 			// the loop or in the arm itself; the next signal abandons it.
-			awsStages, awsFailures := finishTeardown(runCtx, notify, func(ctx context.Context) ([]StageSummary, []FailureSummary) {
+			awsStages, awsFailures := finishTeardown(runCtx, func(ctx context.Context) ([]StageSummary, []FailureSummary) {
 				return awsRunFailureTeardown(ctx, runtime, allStages)
 			})
 			allStages = append(allStages, awsStages...)
@@ -869,13 +869,6 @@ func runRunWithNotify(
 				Command: "auto-destroy preflight", Detail: detail,
 			})
 		} else if mayHoldResources {
-			// An interrupted loop leaves its teardown here: once a signal
-			// has ended runCtx, the arm runs on a fresh context the next
-			// signal cancels, and what that leaves names the reap.
-			armCtx, armDone, fresh := runCtx, func() {}, runCtx.Err() != nil
-			if fresh {
-				armCtx, armDone = teardownContext(runCtx, notify)
-			}
 			// The env must be scoped to the run's OWN project: the apply
 			// ran with it as the provider default, and a destroy against
 			// the shared fallback is not the inverse of that apply.
@@ -924,31 +917,30 @@ func runRunWithNotify(
 				// empties terraform-live.tfstate, and the strays it names
 				// go with it. Same ordering the success path learned the
 				// hard way in the first canary run.
-				destroyResult, purged, destroyErr := destroySandbox(armCtx, runtime, cloud, runtime.OutputDir(), sandboxEnv, sweepTargetProjectID(sweepTarget))
-				if destroyErr != nil && !fresh && runCtx.Err() != nil {
-					// A signal cut it short, and tofu with it: the terminal
-					// signals both. Once more, on a fresh context.
-					armCtx, armDone = teardownContext(runCtx, notify)
-					destroyResult, purged, destroyErr = destroySandbox(armCtx, runtime, cloud, runtime.OutputDir(), sandboxEnv, sweepTargetProjectID(sweepTarget))
-				}
-				destroyStages, destroyFailures := appendSandboxDestroyResult(nil, nil, destroyResult, destroyErr)
-				allStages = append(allStages, destroyStages...)
-				if len(purged) > 0 {
-					allStages = append(allStages, autoCreatedPurgeStage(purged))
-				}
-				if destroyErr != nil {
-					runtime.Logger.Log(LogEntry{
-						Level:   logLevelError,
-						Command: "run",
-						Event:   "layer3_auto_destroy",
-						Status:  "failed",
-						RunID:   runID,
-						Detail:  destroyErr.Error(),
-					})
-					annotateWithRecoveryCommand(destroyFailures, runtime.ConfigPath, scenarioPath)
-					allFailures = append(allFailures, destroyFailures...)
-					logLayer3RecoveryHint(runtime, runID, scenarioPath, "auto-destroy failed")
-				} else {
+				//
+				// Destroy, project and sweep as one teardown, finished on a
+				// fresh context when a signal ended runCtx, before the arm
+				// or within it (finishTeardown); only its last run counts.
+				hint := ""
+				armStages, armFailures := finishTeardown(runCtx, func(ctx context.Context) ([]StageSummary, []FailureSummary) {
+					hint = ""
+					destroyResult, purged, destroyErr := destroySandbox(ctx, runtime, cloud, runtime.OutputDir(), sandboxEnv, sweepTargetProjectID(sweepTarget))
+					stages, failures := appendSandboxDestroyResult(nil, nil, destroyResult, destroyErr)
+					if len(purged) > 0 {
+						stages = append(stages, autoCreatedPurgeStage(purged))
+					}
+					if destroyErr != nil {
+						runtime.Logger.Log(LogEntry{
+							Level:   logLevelError,
+							Command: "run",
+							Event:   "layer3_auto_destroy",
+							Status:  "failed",
+							RunID:   runID,
+							Detail:  destroyErr.Error(),
+						})
+						hint = "auto-destroy failed"
+						return stages, failures
+					}
 					runtime.Logger.Log(LogEntry{
 						Level:   logLevelInfo,
 						Command: "run",
@@ -963,13 +955,10 @@ func runRunWithNotify(
 					// gives it one, so the gap closes here rather than
 					// staying a known leak.
 					projectStages, projectFailures := releaseRunProject(
-						armCtx, runtime, cloud, runtime.OutputDir(),
+						ctx, runtime, cloud, runtime.OutputDir(),
 						runProjectMarker.ProjectID, sandboxEnv)
-					allStages = append(allStages, projectStages...)
-					if len(projectFailures) > 0 {
-						annotateWithRecoveryCommand(projectFailures, runtime.ConfigPath, scenarioPath)
-						allFailures = append(allFailures, projectFailures...)
-					}
+					stages = append(stages, projectStages...)
+					failures = append(failures, projectFailures...)
 
 					// Destroy reporting success is not evidence the account
 					// is clean -- it is the claim the sweep exists to check.
@@ -977,17 +966,21 @@ func runRunWithNotify(
 					// exit code; what it changes is whether the operator is
 					// told the cleanup went unverified. "We could not check"
 					// and "nothing leaked" must never look alike.
-					failuresBeforeSweep := len(allFailures)
-					allStages, allFailures = appendOrphanSweepResult(
-						armCtx, allStages, allFailures, runtime, cloud, sweepTarget, sweepTargetErr, sandboxEnv)
-					if len(allFailures) > failuresBeforeSweep {
-						annotateWithRecoveryCommand(allFailures[failuresBeforeSweep:], runtime.ConfigPath, scenarioPath)
-						logLayer3RecoveryHint(runtime, runID, scenarioPath,
-							"orphan sweep did not confirm the account is clean")
+					failuresBeforeSweep := len(failures)
+					stages, failures = appendOrphanSweepResult(
+						ctx, stages, failures, runtime, cloud, sweepTarget, sweepTargetErr, sandboxEnv)
+					if len(failures) > failuresBeforeSweep {
+						hint = "orphan sweep did not confirm the account is clean"
 					}
+					return stages, failures
+				})
+				annotateWithRecoveryCommand(armFailures, runtime.ConfigPath, scenarioPath)
+				allStages = append(allStages, armStages...)
+				allFailures = append(allFailures, armFailures...)
+				if hint != "" {
+					logLayer3RecoveryHint(runtime, runID, scenarioPath, hint)
 				}
 			}
-			armDone()
 		}
 	}
 	signalsDone()

@@ -406,16 +406,17 @@ works. When it cannot tell whether it holds the claim (a claim put, read or rele
 without saying who holds it), it names both: `--take-over` if the run holds the claim, plain reap
 if no one does. When another run holds the claim, it names that holder and the `--take-over`
 naming it, to use once that run has ended. A run that ends short of its target while the claim
-may still be its own prints that advice on stderr too. The first Ctrl-C prints both forms at once, with the
-run's holder, in case the process dies before its teardown finishes. The teardown then runs on a
-fresh, bounded context the Ctrl-C did not cancel: destroy, sweep and, when the scope is empty,
+may still be its own prints that advice on stderr too. The first Ctrl-C prints both forms at once,
+with the run's holder, in case the process dies before its teardown finishes. The teardown then runs
+on a fresh, bounded context the Ctrl-C did not cancel: destroy, sweep and, when the scope is empty,
 release. A destroy the Ctrl-C cut short runs again, because the terminal sends Ctrl-C to tofu as
 well. Signals stay caught from the start of `run`'s loop to the end of its failure arm, auto-learn
-between them included, and a second Ctrl-C abandons the teardown. Scaleway `test` and `run` tear
-down the same way, naming plain reap. Once the teardown ends, the run prints the settled choice: `--take-over`
-while the run keeps the claim, plain reap once its sweep released it. A reap whose own claim attempt has an unknown outcome, or a
-`reap --take-over` that deleted the old claim but could not take its own, names the reap to run
-next; a `--take-over` that finds no claim names plain reap.
+between them included, and a second Ctrl-C abandons the teardown, even one pressed before the
+teardown has started. Scaleway `test` and `run` tear down the same way, naming plain reap. Once the
+teardown ends, the run prints the settled choice: `--take-over` while the run keeps the claim, plain
+reap once its sweep released it. A reap whose own claim attempt has an unknown outcome, or a `reap
+--take-over` that deleted the old claim but could not take its own, names the reap to run next; a
+`--take-over` that finds no claim names plain reap.
 
 The key's policy, `docs/layer3/aws/iam-policy.json`, grants ssm:GetParameter on the AL2023 public
 parameter for the AMI resolve, and what the apply and destroy send. A scope whose policy was applied

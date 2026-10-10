@@ -294,14 +294,13 @@ func reapClaimedAWSScope(ctx context.Context, runtime *CommandRuntime, env map[s
 	return stages, failures
 }
 
-// runUnderSignals runs fn with a context a SIGINT or SIGTERM cancels,
-// when Layer 3 is on, and reports whether one fired; a parent context
-// that ends on its own is not an interrupt. Signals stay caught until fn
-// returns, so a second Ctrl-C cannot kill the process mid-teardown; once
-// it returns, the caller's own cleanup runs on a teardownContext, which
-// the next signal abandons. The first signal prints firstSignalNotice at
-// once, so a process killed before it finishes still leaves the recovery
-// command.
+// runUnderSignals runs fn with a context the first SIGINT or SIGTERM
+// ends, when Layer 3 is on, and reports whether one fired; a parent
+// context that ends on its own is not an interrupt. Signals stay caught
+// until fn returns, so no Ctrl-C kills the process mid-teardown: every
+// one after the first abandons the teardown fn runs on a teardownContext.
+// The first signal prints firstSignalNotice at once, so a process killed
+// before it finishes still leaves the recovery command.
 func runUnderSignals(
 	cmd *cobra.Command,
 	runtime *CommandRuntime,
@@ -315,18 +314,27 @@ func runUnderSignals(
 	return done(), err
 }
 
+// abandonKey holds, in a span's context, the context every signal after
+// the span's first cancels; teardownContext builds on it.
+type abandonKey struct{}
+
 // catchSignals is runUnderSignals for a span that is not one function:
 // signals are caught from here until done, which reports whether one
-// fired and may be called more than once.
+// fired and may be called more than once. The span's context ends once
+// the first signal's notice has printed, so whoever sees it end has seen
+// the notice; then the next signal is listened for, so any later one,
+// however soon, abandons the teardown rather than filling the spent
+// first registration. Between the two lie microseconds, as between a
+// signal and NotifyContext's own hand-off.
 func catchSignals(
 	cmd *cobra.Command,
 	runtime *CommandRuntime,
 	cloud layer3Cloud,
 	notify func(ctx context.Context, sigs ...os.Signal) (context.Context, context.CancelFunc),
 ) (context.Context, func() bool) {
-	ctx := cmd.Context()
+	parent := cmd.Context()
 	if !runtime.Config.Validation.Layers.SandboxDeploy.Enabled {
-		return ctx, func() bool { return false }
+		return parent, func() bool { return false }
 	}
 	// The span writes progress to the same stream the watcher prints on.
 	out := &syncWriter{w: cmd.ErrOrStderr()}
@@ -337,9 +345,12 @@ func catchSignals(
 	if !runtime.signalNoticed {
 		notice = firstSignalNotice(runtime, cloud, signalNoticeScenario(cmd, runtime))
 	}
+	printNotice := sync.OnceFunc(func() { _, _ = fmt.Fprint(out, notice) })
 
-	sigCtx, stop := notify(ctx, os.Interrupt, syscall.SIGTERM)
-	signal := func() bool { return sigCtx.Err() != nil && ctx.Err() == nil }
+	abandoned, abandon := context.WithCancel(context.WithoutCancel(parent))
+	spanCtx, endSpan := context.WithCancel(context.WithValue(parent, abandonKey{}, abandoned))
+	sigCtx, stop := notify(parent, os.Interrupt, syscall.SIGTERM)
+	signal := func() bool { return sigCtx.Err() != nil && parent.Err() == nil }
 	// watched is buffered, so the watcher never blocks on a caller that
 	// a panic took away.
 	spanDone, watched := make(chan struct{}), make(chan bool, 1)
@@ -349,34 +360,45 @@ func catchSignals(
 		}
 		select {
 		case <-sigCtx.Done():
-			select {
-			case <-spanDone: // done's stop(), not a signal
-				watched <- false
-				return
-			default:
-			}
-			fired := signal()
-			if fired {
-				_, _ = fmt.Fprint(out, notice)
-			}
-			watched <- fired
 		case <-spanDone:
 			watched <- false
+			return
 		}
+		select {
+		case <-spanDone: // done's stop(), not a signal
+			watched <- false
+			return
+		default:
+		}
+		if !signal() { // the parent ended, and the span with it
+			watched <- false
+			return
+		}
+		printNotice()
+		endSpan()
+		next, stopNext := notify(abandoned, os.Interrupt, syscall.SIGTERM)
+		select {
+		case <-next.Done():
+			abandon()
+		case <-spanDone:
+		}
+		stopNext()
+		watched <- true
 	}()
 	var once sync.Once
 	fired := false
-	return sigCtx, func() bool {
+	return spanCtx, func() bool {
 		once.Do(func() {
 			close(spanDone) // before stop() cancels sigCtx
 			fired = <-watched
 			if !fired && signal() {
 				// The signal and the span's end raced; the notice still goes first.
-				_, _ = fmt.Fprint(out, notice)
+				printNotice()
 				fired = true
 			}
 			runtime.signalNoticed = runtime.signalNoticed || fired
 			stop()
+			endSpan()
 			cmd.SetErr(out.w)
 		})
 		return fired
@@ -386,40 +408,34 @@ func catchSignals(
 // layer3TeardownTimeout bounds a teardown that runs on a teardownContext.
 const layer3TeardownTimeout = 30 * time.Minute
 
-// teardownContext is what a teardown runs on once a signal has ended the
-// command's own context: fresh, so that signal does not end it too, and
-// bounded. The next signal cancels it, which abandons the teardown; what
-// it leaves is reported with the command that finishes the job.
-func teardownContext(
-	parent context.Context,
-	notify func(ctx context.Context, sigs ...os.Signal) (context.Context, context.CancelFunc),
-) (context.Context, func()) {
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), layer3TeardownTimeout)
-	sigCtx, stop := notify(ctx, os.Interrupt, syscall.SIGTERM)
-	return sigCtx, func() { stop(); cancel() }
+// teardownContext is what a teardown runs on once a signal has ended ctx:
+// fresh, so that signal does not end it too, and bounded. Under a
+// catchSignals span any later signal cancels it, whenever it lands, which
+// abandons the teardown; what it leaves is reported with the reap.
+func teardownContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	base, ok := ctx.Value(abandonKey{}).(context.Context)
+	if !ok {
+		base = context.WithoutCancel(ctx)
+	}
+	return context.WithTimeout(base, layer3TeardownTimeout)
 }
 
 // finishTeardown runs teardown on ctx and, when ctx ended before it could
 // finish, again on a teardownContext: the terminal sends Ctrl-C to tofu as
 // well as to this process, so the destroy it interrupted has to run again.
-// Only the last run's verdict is returned. A nil notify runs teardown once,
-// for a caller that finishes it itself.
+// Only the last run's verdict is returned.
 func finishTeardown(
 	ctx context.Context,
-	notify func(ctx context.Context, sigs ...os.Signal) (context.Context, context.CancelFunc),
 	teardown func(context.Context) ([]StageSummary, []FailureSummary),
 ) ([]StageSummary, []FailureSummary) {
-	if notify == nil {
-		return teardown(ctx)
-	}
 	if ctx.Err() == nil {
 		stages, failures := teardown(ctx)
 		if len(failures) == 0 || ctx.Err() == nil {
 			return stages, failures
 		}
 	}
-	freshCtx, done := teardownContext(ctx, notify)
-	defer done()
+	freshCtx, cancel := teardownContext(ctx)
+	defer cancel()
 	return teardown(freshCtx)
 }
 
@@ -459,12 +475,11 @@ func (s *syncWriter) Write(p []byte) (int, error) {
 // call unwinds, and the recovery command is printed at once. Signals
 // stay caught until fn returns, so fn's own teardown always finishes;
 // then destroy runs on a teardownContext, because the whole point is to
-// do work after cancellation.
-//
-// A signal during that cleanup abandons it, and the operator is told
-// what is left and the command that finishes the job by hand -- an
-// operator hammering Ctrl-C needs to understand why the process is not
-// exiting, and what state they are being left in.
+// do work after cancellation. That cleanup is still inside the span, so
+// any later signal abandons it, and the operator is told what is left
+// and the command that finishes the job by hand -- an operator hammering
+// Ctrl-C needs to understand why the process is not exiting, and what
+// state they are being left in.
 func withSandboxInterruptGuard(
 	cmd *cobra.Command,
 	runtime *CommandRuntime,
@@ -472,15 +487,21 @@ func withSandboxInterruptGuard(
 	notify func(ctx context.Context, sigs ...os.Signal) (context.Context, context.CancelFunc),
 	fn func(ctx context.Context) error,
 ) error {
-	interrupted, err := runUnderSignals(cmd, runtime, cloud, notify, fn)
-	if !interrupted {
+	_, err := runUnderSignals(cmd, runtime, cloud, notify, func(ctx context.Context) error {
+		err := fn(ctx)
+		if ctx.Err() != nil && cmd.Context().Err() == nil {
+			cleanUpAfterInterrupt(ctx, cmd.ErrOrStderr(), runtime, cloud)
+		}
 		return err
-	}
+	})
+	return err
+}
 
-	// Interrupted. Anything the apply created is live and unowned -- and
-	// since ADR-0025 that includes the project itself, which exists
-	// before the apply and outlives `tofu destroy`.
-	out := cmd.ErrOrStderr()
+// cleanUpAfterInterrupt is the guard's cleanup once a signal has ended
+// ctx. Anything the apply created is live and unowned -- and since
+// ADR-0025 that includes the project itself, which exists before the
+// apply and outlives `tofu destroy`.
+func cleanUpAfterInterrupt(ctx context.Context, out io.Writer, runtime *CommandRuntime, cloud layer3Cloud) {
 	workDir := runtime.OutputDir()
 	statePath := filepath.Join(workDir, harness.LiveStateFilename)
 
@@ -490,11 +511,11 @@ func withSandboxInterruptGuard(
 	// released the claim only if the scope was empty; what it kept is reap's.
 	if cloud == layer3AWS {
 		_, _ = fmt.Fprint(out, awsInterruptNotice(runtime))
-		return err
+		return
 	}
 	if cloud != layer3Scaleway {
 		_, _ = fmt.Fprintf(out, "\nInterrupted: %s.\n", layer3TeardownNotBuilt(cloud, statePath))
-		return err
+		return
 	}
 
 	_, stateErr := os.Stat(statePath)
@@ -504,7 +525,7 @@ func withSandboxInterruptGuard(
 	marker, markerErr := harness.ReadRunProjectMarker(workDir)
 	if !hasState && markerErr != nil {
 		_, _ = fmt.Fprintf(out, "\nInterrupted before any real resources were created — nothing to clean up.\n")
-		return err
+		return
 	}
 
 	if hasState {
@@ -517,7 +538,7 @@ func withSandboxInterruptGuard(
 
 	// A Ctrl-C now cancels teardownCtx: the destroy it cuts short reports
 	// what is left and the reap that finishes the job.
-	teardownCtx, teardownDone := teardownContext(cmd.Context(), notify)
+	teardownCtx, teardownDone := teardownContext(ctx)
 	defer teardownDone()
 
 	// An unreadable marker with state on disk is the one shape this
@@ -532,7 +553,7 @@ func withSandboxInterruptGuard(
 		reportAbandonedResources(out, statePath, fmt.Errorf(
 			"cannot tell which project this run owns (%v), and destroying against the shared "+
 				"fallback project would not be the inverse of the apply", markerErr))
-		return err
+		return
 	}
 
 	// Scoped to the run's project, so the destroy runs with the same
@@ -540,7 +561,7 @@ func withSandboxInterruptGuard(
 	sandboxEnv, envErr := sandboxCommandEnvForProject(runtime, cloud, marker.ProjectID)
 	if envErr != nil {
 		reportAbandonedResources(out, statePath, envErr)
-		return err
+		return
 	}
 
 	if hasState {
@@ -554,7 +575,7 @@ func withSandboxInterruptGuard(
 			teardownCtx, runtime, cloud, workDir, sandboxEnv, sweepTargetProjectID(cleanupTarget))
 		if destroyErr != nil {
 			reportAbandonedResources(out, statePath, destroyErr)
-			return err
+			return
 		}
 		if len(purged) > 0 {
 			_, _ = fmt.Fprintf(out, "%s\n", autoCreatedPurgeStage(purged).Detail)
@@ -572,10 +593,9 @@ func withSandboxInterruptGuard(
 		teardownCtx, runtime, cloud, workDir, marker.ProjectID, sandboxEnv)
 	if len(projectFailures) > 0 {
 		_, _ = fmt.Fprintf(out, "%s\n", projectFailures[0].Detail)
-		return err
+		return
 	}
 	_, _ = fmt.Fprintf(out, "Run project %s deleted.\n", marker.ProjectID)
-	return err
 }
 
 func reportAbandonedResources(out interface{ Write([]byte) (int, error) }, statePath string, cause error) {

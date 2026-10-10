@@ -149,15 +149,16 @@ type fakeSandboxDestroyHarness struct {
 	// lastCtxErr is lastCtx.Err() when Run was called: a teardown's
 	// context is released once it returns.
 	lastCtxErr error
-	// during runs inside each Run, so a signal it sends lands mid-destroy.
-	during func()
+	// during runs inside each Run with its context, so a signal it sends
+	// lands mid-destroy.
+	during func(context.Context)
 }
 
 func (f *fakeSandboxDestroyHarness) Run(ctx context.Context, _ string, _ map[string]string) (*harness.SandboxDestroyResult, error) {
 	f.calls++
 	f.lastCtx = ctx
 	if f.during != nil {
-		f.during()
+		f.during(ctx)
 	}
 	// A done context fails it, as it fails tofu.
 	f.lastCtxErr = ctx.Err()
@@ -192,10 +193,14 @@ type fakeOrphanSweep struct {
 	lastProjectID string
 }
 
-func (f *fakeOrphanSweep) Run(_ context.Context, target *harness.SweepTarget, _ string) (*harness.OrphanSweepResult, error) {
+func (f *fakeOrphanSweep) Run(ctx context.Context, target *harness.SweepTarget, _ string) (*harness.OrphanSweepResult, error) {
 	f.calls++
 	if target != nil {
 		f.lastProjectID = target.ProjectID
+	}
+	// A done context fails it, as it fails the real sweep's requests.
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	if f.result == nil && f.err == nil {
 		return &harness.OrphanSweepResult{ProjectID: "test-project"}, nil

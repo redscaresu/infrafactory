@@ -221,7 +221,7 @@ func TestInterruptedAWSRunNamesTheClaimTheFailureArmLeaves(t *testing.T) {
 	lc.deploy.onRunDir = func(dir string) {
 		lc.record(deployRun)
 		writeAWSStateAndStaleMarker(t, dir, false)
-		lc.cancel()
+		lc.signal()
 	}
 
 	notifies := 0
@@ -266,7 +266,7 @@ func TestAWSRunFailureArmReadsTheClaimThroughASecondInterrupt(t *testing.T) {
 
 	// The first Ctrl-C lands after the loop, so the arm is the teardown it
 	// leaves; the second, on that teardown's context.
-	run := runAWSRun(t, lc, awsRunOptions{repairs: 1, notify: notify, loopEnded: func() { lc.cancel() }})
+	run := runAWSRun(t, lc, awsRunOptions{repairs: 1, notify: notify, loopEnded: func() { lc.signal() }})
 
 	require.Error(t, run.err)
 	assert.Equal(t, getClaim, run.armCalls[0], "the arm reads the claim first")
@@ -495,7 +495,7 @@ func TestAWSRunInterruptedDuringTheFailureArmPrintsTheReapCommand(t *testing.T) 
 	run := runAWSRun(t, lc, awsRunOptions{repairs: 1, loopEnded: func() {
 		lc.mu.Lock()
 		defer lc.mu.Unlock()
-		lc.onEC2 = func(string) { lc.cancel() }
+		lc.onEC2 = func(string) { lc.signal() }
 	}})
 
 	require.Error(t, run.err)
@@ -516,9 +516,10 @@ func TestAWSRunFailureArmInterruptedDuringItsDestroyFinishes(t *testing.T) {
 
 	run := runAWSRun(t, lc, awsRunOptions{repairs: 1, loopEnded: func() {
 		lc.destroy.clears = true
-		lc.destroy.during = func() {
+		lc.destroy.during = func(ctx context.Context) {
 			lc.destroy.during = nil
-			lc.cancel()
+			lc.signal()
+			tofuReturns(ctx)
 		}
 	}})
 
@@ -540,7 +541,7 @@ func TestAWSRunInterruptedBetweenTheLoopAndTheArmStillTearsDown(t *testing.T) {
 
 	run := runAWSRun(t, lc, awsRunOptions{repairs: 1, loopEnded: func() {
 		lc.destroy.clears = true
-		lc.cancel()
+		lc.signal()
 	}})
 
 	require.Error(t, run.err)
@@ -570,7 +571,7 @@ func TestInterruptedAWSRunPrintsTheReapCommand(t *testing.T) {
 			lc.deploy.onRunDir = func(dir string) {
 				lc.record(deployRun)
 				writeAWSStateAndStaleMarker(t, dir, false)
-				lc.cancel()
+				lc.signal()
 			}
 
 			run := runAWSRun(t, lc, awsRunOptions{repairs: 2})
