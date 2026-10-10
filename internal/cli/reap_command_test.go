@@ -1,7 +1,10 @@
 package cli
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -12,6 +15,7 @@ import (
 
 	"github.com/redscaresu/infrafactory/internal/config"
 	"github.com/redscaresu/infrafactory/internal/feedback"
+	"github.com/redscaresu/infrafactory/internal/generator"
 	"github.com/redscaresu/infrafactory/internal/harness"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
@@ -177,11 +181,24 @@ func TestReapRefusesProjectTheRunDidNotCreate(t *testing.T) {
 	}
 }
 
+// untilInterrupted is an fn that returns once a signal has ended its
+// context, as an interrupted apply does.
+func untilInterrupted(ctx context.Context) error {
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+// cancelledNotify is one signal, already sent: the first context it
+// gives is cancelled, and the one listening for the next is not.
 func cancelledNotify() func(context.Context, ...os.Signal) (context.Context, context.CancelFunc) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	return func(context.Context, ...os.Signal) (context.Context, context.CancelFunc) {
-		return ctx, func() {}
+	signalled := false
+	return func(parent context.Context, _ ...os.Signal) (context.Context, context.CancelFunc) {
+		ctx, cancel := context.WithCancel(parent)
+		if !signalled {
+			signalled = true
+			cancel()
+		}
+		return ctx, cancel
 	}
 }
 
@@ -199,7 +216,7 @@ func TestInterruptGuardNoopsWithoutLiveState(t *testing.T) {
 	rt, _ := reapRuntime(t, destroy, &fakeOrphanSweep{})
 
 	out := &strings.Builder{}
-	_ = withSandboxInterruptGuard(guardCmd(out), rt, layer3Scaleway, cancelledNotify(), func(context.Context) error { return nil })
+	_ = withSandboxInterruptGuard(guardCmd(out), rt, layer3Scaleway, cancelledNotify(), untilInterrupted)
 
 	if destroy.calls != 0 {
 		t.Fatal("nothing was created, so nothing should be destroyed")
@@ -222,12 +239,12 @@ func TestInterruptGuardDestroysLiveResources(t *testing.T) {
 	writeReapLiveState(t, rt.OutputDir(), reapProjectID)
 
 	out := &strings.Builder{}
-	_ = withSandboxInterruptGuard(guardCmd(out), rt, layer3Scaleway, cancelledNotify(), func(context.Context) error { return nil })
+	_ = withSandboxInterruptGuard(guardCmd(out), rt, layer3Scaleway, cancelledNotify(), untilInterrupted)
 
 	if destroy.calls != 1 {
 		t.Fatalf("interrupt with live resources must trigger destroy, got %d", destroy.calls)
 	}
-	if destroy.lastCtx != nil && destroy.lastCtx.Err() != nil {
+	if destroy.lastCtxErr != nil {
 		t.Fatal("cleanup destroy must run on a fresh context — doing work after cancellation is the whole point")
 	}
 	// tofu cannot delete the project any more, and an interrupt is the
@@ -248,7 +265,7 @@ func TestInterruptGuardDeletesTheProjectWhenNothingWasApplied(t *testing.T) {
 		harness.RunProject{ID: reapProjectID, Name: harness.RunProjectNamePrefix + "interrupt"}))
 
 	out := &strings.Builder{}
-	_ = withSandboxInterruptGuard(guardCmd(out), rt, layer3Scaleway, cancelledNotify(), func(context.Context) error { return nil })
+	_ = withSandboxInterruptGuard(guardCmd(out), rt, layer3Scaleway, cancelledNotify(), untilInterrupted)
 
 	assert.Zero(t, destroy.calls, "no state means nothing for tofu to do")
 	assert.Equal(t, 1, rt.Deps.RunProject.(*fakeRunProject).deletes)
@@ -267,7 +284,7 @@ func TestInterruptGuardRefusesToDestroyWithoutAMarker(t *testing.T) {
 	require.NoError(t, os.Remove(filepath.Join(rt.OutputDir(), harness.RunProjectMarkerFilename)))
 
 	out := &strings.Builder{}
-	_ = withSandboxInterruptGuard(guardCmd(out), rt, layer3Scaleway, cancelledNotify(), func(context.Context) error { return nil })
+	_ = withSandboxInterruptGuard(guardCmd(out), rt, layer3Scaleway, cancelledNotify(), untilInterrupted)
 
 	assert.Zero(t, destroy.calls, "a destroy scoped to the wrong project is not the inverse of the apply")
 	assert.Zero(t, rt.Deps.RunProject.(*fakeRunProject).deletes)
@@ -284,13 +301,173 @@ func TestInterruptGuardReportsAbandonedResourcesOnCleanupFailure(t *testing.T) {
 	writeReapLiveState(t, rt.OutputDir(), reapProjectID)
 
 	out := &strings.Builder{}
-	_ = withSandboxInterruptGuard(guardCmd(out), rt, layer3Scaleway, cancelledNotify(), func(context.Context) error { return nil })
+	_ = withSandboxInterruptGuard(guardCmd(out), rt, layer3Scaleway, cancelledNotify(), untilInterrupted)
 
 	for _, want := range []string{"CLEANUP FAILED", "infrafactory reap", harness.LiveStateFilename} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("cleanup-failure message must contain %q, got:\n%s", want, out.String())
 		}
 	}
+}
+
+// interruptedScalewayRun is one Scaleway Layer 3 run whose apply fails
+// once it has written state.
+type interruptedScalewayRun struct {
+	stdout, stderr, reap string
+	destroy              *fakeSandboxDestroyHarness
+	projects             *fakeRunProject
+}
+
+// scalewaySignals is where signals land: as the apply returns, and inside
+// the destroy and project delete calls numbered in destroys and releases.
+type scalewaySignals struct {
+	apply              bool
+	destroys, releases []int
+}
+
+func runInterruptedScalewayRun(t *testing.T, at scalewaySignals) interruptedScalewayRun {
+	t.Helper()
+	h := newCommandTestHarness(t)
+	scenarioPath := writeUnsupportedCriteriaScenario(t, h.WorkspaceDir)
+	sandboxCredsForTest(t)
+	// A signal reaches every registration, and the latest is the one it is
+	// not spent on. The first returns once the span has ended and listens
+	// for the next.
+	var mu sync.Mutex
+	var latest context.CancelFunc
+	notifies := 0
+	notify := func(parent context.Context, _ ...os.Signal) (context.Context, context.CancelFunc) {
+		ctx, cancel := context.WithCancel(parent)
+		mu.Lock()
+		defer mu.Unlock()
+		latest, notifies = cancel, notifies+1
+		return ctx, cancel
+	}
+	count := func() int {
+		mu.Lock()
+		defer mu.Unlock()
+		return notifies
+	}
+	send := func() {
+		mu.Lock()
+		cancel, first := latest, notifies == 1
+		mu.Unlock()
+		if cancel == nil {
+			return
+		}
+		cancel()
+		if first {
+			require.Eventually(t, func() bool { return count() > 1 }, 5*time.Second, time.Millisecond, "the span handled the signal")
+		}
+	}
+	run := interruptedScalewayRun{
+		reap:     reapCommand(h.ConfigPath, scenarioPath),
+		destroy:  &fakeSandboxDestroyHarness{result: &harness.SandboxDestroyResult{Destroy: harness.StageResult{Stage: "destroy"}}},
+		projects: &fakeRunProject{created: harness.RunProject{ID: reapProjectID, Name: harness.RunProjectNamePrefix + "interrupt"}},
+	}
+	run.destroy.during = func(ctx context.Context) {
+		if slices.Contains(at.destroys, run.destroy.calls) {
+			send()
+			tofuReturns(ctx)
+		}
+	}
+	run.projects.onDelete = func() {
+		if slices.Contains(at.releases, run.projects.deletes) {
+			send() // the release ignores it; the sweep after it does not
+		}
+	}
+	applyErr := errors.New("tofu apply failed")
+	if at.apply {
+		applyErr = context.Canceled
+	}
+	opts := isolatedRunOpts(h, layer3On)
+	opts.deps = RuntimeDependencies{
+		Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
+			// The provider pin the Layer 3 shape gate asks for.
+			return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte(`terraform {
+  required_providers {
+    scaleway = {
+      source  = "scaleway/scaleway"
+      version = "` + layer3ScalewayProviderVersion + `"
+    }
+  }
+}
+`)}}, nil
+		}),
+		Static:     &fakeStaticHarness{result: &harness.StaticResult{PlanJSON: []byte(`{}`)}},
+		MockState:  &fakeRunMockStateClient{statePayload: []byte(`{"instance":{"servers":[]}}`)},
+		MockDeploy: &fakeMockDeployHarness{},
+		Destroy:    &fakeDestroyHarness{},
+		RunProject: run.projects,
+		SandboxDeploy: &fakeSandboxDeployHarness{err: applyErr, onRunDir: func(dir string) {
+			require.NoError(t, os.WriteFile(filepath.Join(dir, harness.LiveStateFilename), []byte(liveStateWithProject), 0o600))
+			if at.apply {
+				send()
+			}
+		}},
+		SandboxDestroy: run.destroy,
+		OrphanSweep:    &fakeOrphanSweep{},
+		RealProbe:      &fakeRealProbeHarness{result: &harness.RealProbeResult{}},
+	}
+	cmd := newRunCommandForTest(opts)
+	cmd.RunE = withRuntimeWithOptions("run", opts, sealedHandler(io.Discard,
+		func(cmd *cobra.Command, args []string, rt *CommandRuntime) error {
+			return runRunWithNotify(cmd, args, rt, notify)
+		}))
+	stdout, stderr := &bytes.Buffer{}, &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{scenarioPath, "--config", h.ConfigPath, "--reset-mocks=false"})
+	require.Error(t, cmd.Execute())
+	run.stdout, run.stderr = stdout.String(), stderr.String()
+	return run
+}
+
+// A Scaleway run interrupted mid-apply does what the test guard does: the
+// signal is caught and names reap at once, and the failure arm destroys
+// on a fresh context and deletes the run project.
+func TestInterruptedScalewayRunDestroysOnAFreshContext(t *testing.T) {
+	run := runInterruptedScalewayRun(t, scalewaySignals{apply: true})
+
+	assert.Contains(t, run.stderr, "Interrupted — finishing cleanup before exit")
+	assert.Contains(t, run.stderr, "`"+run.reap+"` cleans it up")
+	assert.Equal(t, 2, run.destroy.calls, "the iteration's destroy, then the failure arm's")
+	assert.NoError(t, run.destroy.lastCtxErr, "the failure arm destroys on a context the signal did not end")
+	assert.Equal(t, 1, run.projects.deletes, "the run project is deleted")
+}
+
+// A second signal during that teardown abandons it, and the run names
+// the reap that finishes the job.
+func TestSecondInterruptAbandonsTheScalewayRunTeardown(t *testing.T) {
+	run := runInterruptedScalewayRun(t, scalewaySignals{apply: true, destroys: []int{2}})
+
+	assert.Equal(t, 2, run.destroy.calls)
+	assert.ErrorIs(t, run.destroy.lastCtxErr, context.Canceled, "the second signal ended the arm's destroy")
+	assert.Zero(t, run.projects.deletes, "nothing past the abandoned destroy")
+	assert.Contains(t, run.stdout, "real Scaleway resources may still exist: run `"+run.reap+"`")
+}
+
+// A first signal during the failure arm's destroy stops it, and tofu with
+// it; the arm destroys again on a fresh context.
+func TestScalewayRunFailureArmInterruptedDuringItsDestroyFinishes(t *testing.T) {
+	run := runInterruptedScalewayRun(t, scalewaySignals{destroys: []int{2}})
+
+	assert.Contains(t, run.stderr, "Interrupted — finishing cleanup before exit")
+	assert.Equal(t, 3, run.destroy.calls, "the iteration's, the arm's cut short, the arm's again")
+	assert.NoError(t, run.destroy.lastCtxErr, "the last destroy ran on a context the signal did not end")
+	assert.NotContains(t, run.stdout, "real Scaleway resources may still exist")
+}
+
+// A first signal during the failure arm's project release, after its
+// destroy: the sweep that follows would run on the context the signal
+// ended, so the arm's whole teardown runs again on a fresh one.
+func TestScalewayRunFailureArmInterruptedDuringItsReleaseFinishes(t *testing.T) {
+	run := runInterruptedScalewayRun(t, scalewaySignals{releases: []int{2}})
+
+	assert.Contains(t, run.stderr, "Interrupted — finishing cleanup before exit")
+	assert.Equal(t, 3, run.destroy.calls, "the iteration's, the arm's, the arm's again")
+	assert.Contains(t, run.stdout, "sandbox_deploy/orphan_sweep: pass")
+	assert.NotContains(t, run.stdout, "real Scaleway resources may still exist")
 }
 
 // Layer 3 off: no signal handler at all. Interrupting a mock-only run
@@ -325,7 +502,8 @@ func notifyFromParent(parent context.Context, _ ...os.Signal) (context.Context, 
 // signalNotify is a notify whose signal the test fires, and whose stop
 // it can see: stopped is closed once signals are back to their default.
 type signalNotify struct {
-	signal  context.CancelFunc
+	mu      sync.Mutex
+	cancel  context.CancelFunc // the latest registration's: the one a signal is not spent on
 	stopped chan struct{}
 	once    sync.Once
 }
@@ -334,8 +512,17 @@ func newSignalNotify() *signalNotify { return &signalNotify{stopped: make(chan s
 
 func (n *signalNotify) notify(parent context.Context, _ ...os.Signal) (context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(parent)
-	n.signal = cancel
+	n.mu.Lock()
+	n.cancel = cancel
+	n.mu.Unlock()
 	return ctx, func() { cancel(); n.once.Do(func() { close(n.stopped) }) }
+}
+
+func (n *signalNotify) signal() {
+	n.mu.Lock()
+	cancel := n.cancel
+	n.mu.Unlock()
+	cancel()
 }
 
 // stoppedWithin reports whether signals went back to their default
@@ -357,6 +544,15 @@ func (n *signalNotify) stoppedWithin(d time.Duration) bool {
 
 const signalWait = 200 * time.Millisecond
 
+// tofuReturns waits, as tofu does, for its context to end; bounded, so a
+// teardown nothing abandons fails its test rather than hanging it.
+func tofuReturns(ctx context.Context) {
+	select {
+	case <-ctx.Done():
+	case <-time.After(signalWait):
+	}
+}
+
 // A second signal while fn unwinds is still caught, so fn's teardown
 // and the guard's cleanup after it run; only then does handling go back
 // to the default. Scaleway destroys, aws prints the settled reap.
@@ -369,10 +565,10 @@ func TestInterruptGuardKeepsSignalsCaughtUntilFnReturns(t *testing.T) {
 		n := newSignalNotify()
 		stoppedDuringFn := true
 
-		_ = withSandboxInterruptGuard(guardCmd(&strings.Builder{}), rt, layer3Scaleway, n.notify, func(context.Context) error {
+		_ = withSandboxInterruptGuard(guardCmd(&strings.Builder{}), rt, layer3Scaleway, n.notify, func(ctx context.Context) error {
 			n.signal()
 			stoppedDuringFn = n.stoppedWithin(signalWait)
-			return nil
+			return untilInterrupted(ctx)
 		})
 
 		assert.False(t, stoppedDuringFn, "signals went back to the default while fn ran")
@@ -386,10 +582,10 @@ func TestInterruptGuardKeepsSignalsCaughtUntilFnReturns(t *testing.T) {
 		stoppedDuringFn := true
 		out := &strings.Builder{}
 
-		_ = withSandboxInterruptGuard(guardCmd(out), rt, layer3AWS, n.notify, func(context.Context) error {
+		_ = withSandboxInterruptGuard(guardCmd(out), rt, layer3AWS, n.notify, func(ctx context.Context) error {
 			n.signal()
 			stoppedDuringFn = n.stoppedWithin(signalWait)
-			return nil
+			return untilInterrupted(ctx)
 		})
 
 		assert.False(t, stoppedDuringFn, "signals went back to the default while fn ran")

@@ -1080,7 +1080,11 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 	// clean destroy leaves nothing behind but would otherwise strand the
 	// empty project forever.
 	if cloud == layer3AWS && runProjectID != "" {
-		teardownStages, teardownFailures := awsScopeTeardown(ctx, runtime, outputDir, opts)
+		// Finished on a fresh context when a signal cut it short.
+		teardownStages, teardownFailures := finishTeardown(ctx,
+			func(ctx context.Context) ([]StageSummary, []FailureSummary) {
+				return awsScopeTeardown(ctx, runtime, outputDir, opts)
+			})
 		stages = append(stages, teardownStages...)
 		failures = append(failures, teardownFailures...)
 	} else if runProjectID != "" && !runProjectReleased(stages) {

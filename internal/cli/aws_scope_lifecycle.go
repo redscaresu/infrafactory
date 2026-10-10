@@ -136,10 +136,10 @@ func firstSignalNotice(runtime *CommandRuntime, cloud layer3Cloud, scenarioPath 
 	switch cloud {
 	case layer3AWS:
 		claim := awsClaim{state: awsClaimUnknown}
-		return fmt.Sprintf("\nInterrupted — finishing teardown before exit. Should the process die first, %s. %s.\n",
+		return fmt.Sprintf("\nInterrupted — finishing teardown before exit; Ctrl-C again abandons it. Should the process die first, %s. %s.\n",
 			awsClaimHead(runtime, claim), awsReapAdviceFor(runtime, plain, claim))
 	case layer3Scaleway:
-		return fmt.Sprintf("\nInterrupted — finishing cleanup before exit. Should the process die first, "+
+		return fmt.Sprintf("\nInterrupted — finishing cleanup before exit; Ctrl-C again abandons it. Should the process die first, "+
 			"if this run applied anything, `%s` cleans it up.\n", plain)
 	}
 	return ""

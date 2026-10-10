@@ -34,6 +34,8 @@ type fakeRunProject struct {
 	lists             int
 	listed            []harness.ListedProject
 	listErr           error
+	// onDelete runs inside each Delete, so a signal it sends lands mid-release.
+	onDelete func()
 }
 
 func (f *fakeRunProject) Create(_ context.Context, _, organizationID, scenario, _ string) (harness.RunProject, error) {
@@ -64,6 +66,9 @@ func (f *fakeRunProject) Delete(_ context.Context, _, projectID string) error {
 	i := f.deletes
 	f.deletes++
 	f.deletedID = projectID
+	if f.onDelete != nil {
+		f.onDelete()
+	}
 	if i < len(f.deleteErrs) {
 		return f.deleteErrs[i]
 	}

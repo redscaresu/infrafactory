@@ -221,7 +221,7 @@ func TestInterruptedAWSRunNamesTheClaimTheFailureArmLeaves(t *testing.T) {
 	lc.deploy.onRunDir = func(dir string) {
 		lc.record(deployRun)
 		writeAWSStateAndStaleMarker(t, dir, false)
-		lc.cancel()
+		lc.signal()
 	}
 
 	notifies := 0
@@ -255,16 +255,18 @@ func TestAWSRunFailureArmReadsTheClaimThroughASecondInterrupt(t *testing.T) {
 	lc := newAWSLifecycle(t)
 	dirtySweep(lc)
 	notifies := 0
-	notify := func(parent context.Context, _ ...os.Signal) (context.Context, context.CancelFunc) {
-		ctx, cancel := context.WithCancel(parent)
+	notify := func(parent context.Context, sigs ...os.Signal) (context.Context, context.CancelFunc) {
+		ctx, cancel := lc.notify(parent, sigs...)
 		notifies++
 		if notifies == 2 {
-			cancel() // the arm's: interrupted before it reads the claim
+			cancel() // the arm's teardown: interrupted before it reads the claim
 		}
 		return ctx, cancel
 	}
 
-	run := runAWSRun(t, lc, awsRunOptions{repairs: 1, notify: notify})
+	// The first Ctrl-C lands after the loop, so the arm is the teardown it
+	// leaves; the second, on that teardown's context.
+	run := runAWSRun(t, lc, awsRunOptions{repairs: 1, notify: notify, loopEnded: func() { lc.signal() }})
 
 	require.Error(t, run.err)
 	assert.Equal(t, getClaim, run.armCalls[0], "the arm reads the claim first")
@@ -493,7 +495,7 @@ func TestAWSRunInterruptedDuringTheFailureArmPrintsTheReapCommand(t *testing.T) 
 	run := runAWSRun(t, lc, awsRunOptions{repairs: 1, loopEnded: func() {
 		lc.mu.Lock()
 		defer lc.mu.Unlock()
-		lc.onEC2 = func(string) { lc.cancel() }
+		lc.onEC2 = func(string) { lc.signal() }
 	}})
 
 	require.Error(t, run.err)
@@ -503,6 +505,50 @@ func TestAWSRunInterruptedDuringTheFailureArmPrintsTheReapCommand(t *testing.T) 
 	assert.True(t, held, "the claim is kept")
 	assertInterruptNamesTheReap(t, lc, run.output, run.h.ConfigPath, run.h.ScenarioPath, awsClaimHeld)
 	assert.True(t, slices.ContainsFunc(run.result.Stages, isStage(StageAWSScopeClaimKept)))
+}
+
+// A first Ctrl-C during the failure arm's destroy stops that destroy, as
+// it stops tofu; the arm runs again on a fresh context, its destroy
+// completes and the clean sweep releases the claim.
+func TestAWSRunFailureArmInterruptedDuringItsDestroyFinishes(t *testing.T) {
+	lc := newAWSLifecycle(t)
+	dirtySweep(lc)
+
+	run := runAWSRun(t, lc, awsRunOptions{repairs: 1, loopEnded: func() {
+		lc.destroy.clears = true
+		lc.destroy.during = func(ctx context.Context) {
+			lc.destroy.during = nil
+			lc.signal()
+			tofuReturns(ctx)
+		}
+	}})
+
+	require.Error(t, run.err)
+	destroys := slices.DeleteFunc(slices.Clone(run.armCalls), func(c string) bool { return c != destroyRun })
+	assert.Len(t, destroys, 2, "the interrupted destroy, then the one that finished it")
+	assert.Contains(t, run.armCalls, deleteClaim)
+	_, held := lc.claim()
+	assert.False(t, held, "the clean sweep released the claim")
+	assertInterruptNamesTheReap(t, lc, run.output, run.h.ConfigPath, run.h.ScenarioPath, awsClaimNotHeld)
+}
+
+// A Ctrl-C after the loop and before the failure arm, while auto-learn
+// would run, is caught: its notice prints, the arm still tears down, and
+// the reap advice names the claim the arm leaves.
+func TestAWSRunInterruptedBetweenTheLoopAndTheArmStillTearsDown(t *testing.T) {
+	lc := newAWSLifecycle(t)
+	dirtySweep(lc)
+
+	run := runAWSRun(t, lc, awsRunOptions{repairs: 1, loopEnded: func() {
+		lc.destroy.clears = true
+		lc.signal()
+	}})
+
+	require.Error(t, run.err)
+	assert.Equal(t, 1, strings.Count(run.output, "Interrupted — finishing teardown before exit"), "the signal was caught")
+	assert.Contains(t, run.armCalls, destroyRun, "the arm tore down")
+	assert.Contains(t, run.armCalls, deleteClaim)
+	assertInterruptNamesTheReap(t, lc, run.output, run.h.ConfigPath, run.h.ScenarioPath, awsClaimNotHeld)
 }
 
 // Interrupted inside the apply. A dirty scope keeps the claim; a clean
@@ -525,7 +571,7 @@ func TestInterruptedAWSRunPrintsTheReapCommand(t *testing.T) {
 			lc.deploy.onRunDir = func(dir string) {
 				lc.record(deployRun)
 				writeAWSStateAndStaleMarker(t, dir, false)
-				lc.cancel()
+				lc.signal()
 			}
 
 			run := runAWSRun(t, lc, awsRunOptions{repairs: 2})
