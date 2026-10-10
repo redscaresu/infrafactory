@@ -8,3 +8,4 @@ it in any merge commit's message. End commit messages with
 Never press GitHub's "Update branch": its merge commit has no `ADR:` trailer and fails doc
 hygiene. To catch up with the base, `git merge origin/main` locally and repeat the trailer (a
 reason of at least 10 characters) in the merge commit's message.
+When code changes behaviour a doc, runbook step, story **You:** line or PR body describes, change that text in the same PR, and re-read the PR body against the final diff before asking for review. <!-- lesson: docs-misstate-code -->
