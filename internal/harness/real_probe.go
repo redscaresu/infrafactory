@@ -52,22 +52,36 @@ type RealProbeResult struct {
 // ProbeRecord is what one check asked and what came back. Address is
 // host:port for a dial, the URL for an HTTP probe and the domain for a
 // lookup. Status is the HTTP status, or the dial or lookup outcome.
-// Seconds is the time to first success, zero when the check failed.
+// Seconds is the time to first success, set only when Passed.
 type ProbeRecord struct {
 	Kind     string
 	Address  string
 	Expect   string
 	Status   string
+	Passed   bool
 	Attempts int
 	Seconds  float64
 }
 
+// String says how the check ended in words: a zero attempt count or
+// time would otherwise read as an instant result.
 func (r ProbeRecord) String() string {
-	return fmt.Sprintf("%s %s expect %s: %s after %d attempt(s), %.1fs", r.Kind, r.Address, r.Expect, r.Status, r.Attempts, r.Seconds)
+	head := fmt.Sprintf("%s %s expect %s: %s", r.Kind, r.Address, r.Expect, r.Status)
+	switch {
+	case r.Passed:
+		return fmt.Sprintf("%s, succeeded after %d attempt(s) in %.1fs", head, r.Attempts, r.Seconds)
+	case r.Attempts == 0:
+		return head + ", not attempted"
+	}
+	return fmt.Sprintf("%s, no success after %d attempt(s)", head, r.Attempts)
 }
 
-// ProbeRecordsDetail joins records into one stage detail line.
+// ProbeRecordsDetail joins records into one stage detail line, and says
+// so when there are none rather than leave an empty list.
 func ProbeRecordsDetail(records []ProbeRecord) string {
+	if len(records) == 0 {
+		return "no per-check records"
+	}
 	parts := make([]string, len(records))
 	for i, r := range records {
 		parts[i] = r.String()
@@ -149,7 +163,7 @@ func (h *RealProbeHarness) Run(ctx context.Context, workDir string, scenarioName
 			record, probeErr = h.runDNSProbe(ctx, domain, check.Expect)
 		}
 		if probeErr == nil {
-			record.Seconds = time.Since(start).Seconds()
+			record.Passed, record.Seconds = true, time.Since(start).Seconds()
 		} else if record.Status == "" {
 			record.Status = probeErr.Error()
 		}

@@ -357,3 +357,36 @@ func TestRealProbeHarnessRecordsBlockedDialAddress(t *testing.T) {
 	assert.Equal(t, 1, result.Records[0].Attempts)
 	assert.Contains(t, result.Records[0].Status, "connection refused")
 }
+
+// A record says whether the check succeeded: seconds only for a success,
+// "no success" after the attempts a failure made, "not attempted" when it
+// never got as far as a dial.
+func TestProbeRecordSaysHowTheCheckEnded(t *testing.T) {
+	workDir := t.TempDir()
+	writeLiveState(t, workDir, `{"resources":[{"type":"aws_instance","instances":[{"attributes":{"public_ip":"203.0.113.7"}}]}]}`)
+	h := NewRealProbeHarness(ProbeConfig{Timeout: time.Second, Retries: 2})
+	h.getHTTP = func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusBadGateway, Body: http.NoBody}, nil
+	}
+	h.dialFunc = func(context.Context, string, string) (net.Conn, error) {
+		client, server := net.Pipe()
+		_ = server.Close()
+		return client, nil
+	}
+
+	result, err := h.Run(context.Background(), workDir, "demo", []ProbeCheck{
+		{Type: "http_probe", Target: "compute", Port: 80, Expect: "reachable"},
+		{Type: "connectivity", To: "database", Port: 5432, Expect: "success"},
+		{Type: "connectivity", To: "compute", Port: 80, Expect: "success"},
+	})
+
+	require.NoError(t, err)
+	require.Len(t, result.Records, 3)
+	exhausted, unresolved, passed := result.Records[0].String(), result.Records[1].String(), result.Records[2].String()
+	assert.Contains(t, exhausted, "no success after 2 attempt(s)")
+	assert.NotContains(t, exhausted, "0.0s")
+	assert.Contains(t, unresolved, "not attempted")
+	assert.NotContains(t, unresolved, "0.0s")
+	assert.Contains(t, passed, "succeeded after 1 attempt(s) in ")
+	assert.Equal(t, "no per-check records", ProbeRecordsDetail(nil))
+}

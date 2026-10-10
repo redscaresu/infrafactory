@@ -67,6 +67,9 @@ func TestHoldoutReportsWhatItChecked(t *testing.T) {
 	assert.Equal(t, 1, probe.calls)
 	assert.Contains(t, stageDetail(stages, "holdout", "discovery"), "1 holdout(s)")
 	assert.Contains(t, stageDetail(stages, "holdout", "web-live-paris-unseen"), "1 unseen check(s) passed")
+	// The fake returns no records, and the detail must say so rather
+	// than end in an empty list that reads as captured evidence.
+	assert.Contains(t, stageDetail(stages, "holdout", "web-live-paris-unseen"), "no per-check records")
 }
 
 // The probe must receive the holdout's OWN criteria. A holdout that

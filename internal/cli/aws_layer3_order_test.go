@@ -88,10 +88,13 @@ var orderForward = []orderStage{
 // call is the holdout's when it carries the holdout's own port 22 check,
 // so how many checks the scenario's probe gets cannot move it. A passing
 // call records each check against the address the applied state gives
-// its target, with orderHTTPStatus for an http_probe.
+// its target, with orderHTTPStatus for an http_probe. With once set, only
+// the first call named by fail fails.
 type orderProbe struct {
-	lc   *awsLifecycle
-	fail string
+	lc     *awsLifecycle
+	fail   string
+	once   bool
+	failed *bool
 }
 
 func (p orderProbe) Run(_ context.Context, workDir, _ string, checks []harness.ProbeCheck) (*harness.RealProbeResult, error) {
@@ -100,7 +103,8 @@ func (p orderProbe) Run(_ context.Context, workDir, _ string, checks []harness.P
 		call = probeHoldout
 	}
 	p.lc.record(call)
-	if call == p.fail {
+	if call == p.fail && !(p.once && *p.failed) {
+		*p.failed = true
 		return nil, errors.New(call + " failed")
 	}
 	result := &harness.RealProbeResult{}
@@ -109,7 +113,7 @@ func (p orderProbe) Run(_ context.Context, workDir, _ string, checks []harness.P
 		if err != nil {
 			return nil, err
 		}
-		record := harness.ProbeRecord{Kind: c.Type, Address: net.JoinHostPort(host, strconv.Itoa(c.Port)), Expect: c.Expect, Status: "connected", Attempts: 1}
+		record := harness.ProbeRecord{Kind: c.Type, Address: net.JoinHostPort(host, strconv.Itoa(c.Port)), Expect: c.Expect, Status: "connected", Passed: true, Attempts: 1}
 		if c.Expect == "blocked" {
 			record.Status = "not connected: i/o timeout"
 		}
@@ -147,6 +151,10 @@ func (s orderSTS) Do(req *http.Request) (*http.Response, error) {
 type orderSetup struct {
 	gateFailsOn, stsFailsOn int
 	probeFails              string
+	// probeFailsOnce fails only the first probeFails call; iterations is
+	// the run's iteration budget, 1 when zero.
+	probeFailsOnce bool
+	iterations     int
 }
 
 // runAWSOrder is one `run --holdout` of the aws-web-step-one fixture
@@ -180,7 +188,7 @@ func runAWSOrder(t *testing.T, lc *awsLifecycle, setup orderSetup) awsRun {
 	gateCalls, stsCalls := 0, 0
 	var scenarios string
 	return runAWSRun(t, lc, awsRunOptions{
-		repairs: 1,
+		repairs: max(1, setup.iterations),
 		flags:   []string{"--holdout"},
 		scenario: func(h *CommandTestHarness) {
 			raw, err := os.ReadFile(h.ScenarioPath)
@@ -218,7 +226,7 @@ func runAWSOrder(t *testing.T, lc *awsLifecycle, setup orderSetup) awsRun {
 			// A result, as the real mock deploy returns: with none,
 			// executeTest evaluates no criterion at all.
 			d.MockDeploy = &fakeMockDeployHarness{result: &harness.MockDeployResult{}}
-			d.RealProbe = orderProbe{lc: lc, fail: setup.probeFails}
+			d.RealProbe = orderProbe{lc: lc, fail: setup.probeFails, once: setup.probeFailsOnce, failed: new(bool)}
 		},
 	})
 }
@@ -310,6 +318,31 @@ func TestAWSRunKeepsItsLayer3EvidenceInIterationJSON(t *testing.T) {
 	accountID := regexp.MustCompile(`[0-9]{12}`)
 	for _, s := range iteration.Stages {
 		assert.False(t, accountID.MatchString(s.Detail), "%s detail carries an account id: %s", s.Stage, s.Detail)
+	}
+}
+
+// Each iteration's evidence stages carry its number, as holdout stages
+// do: a run that fails real_probe once and then passes must not leave an
+// unplaceable failed real_probe beside the pass.
+func TestAWSRunNumbersItsLayer3EvidenceByIteration(t *testing.T) {
+	lc := newAWSLifecycle(t)
+
+	run := runAWSOrder(t, lc, orderSetup{probeFails: probeHTTP, probeFailsOnce: true, iterations: 2})
+
+	require.NoError(t, run.err, run.output)
+	assert.Equal(t, "target_reached", run.terminalReason())
+	status := map[string]StageStatus{}
+	for _, s := range run.result.Stages {
+		status[s.Stage] = s.Status
+	}
+	assert.Equal(t, StageStatusFail, status["iteration_1_real_probe"], "%+v", run.result.Stages)
+	assert.Equal(t, StageStatusPass, status["iteration_2_real_probe"], "%+v", run.result.Stages)
+	for _, name := range awsLayer3EvidenceStages {
+		assert.NotContains(t, status, name, "an unnumbered %s cannot be placed", name)
+	}
+	for _, name := range []string{"account_check", "user_data_check"} {
+		assert.Equal(t, StageStatusPass, status["iteration_1_"+name], name)
+		assert.Equal(t, StageStatusPass, status["iteration_2_"+name], name)
 	}
 }
 
