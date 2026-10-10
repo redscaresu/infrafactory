@@ -70,8 +70,15 @@ type awsLifecycle struct {
 	// resolve's call, which the sweep's Owners=self listing never gets.
 	amiImage string
 	putFail  bool // PutParameter, and every claim read after it, is denied
-	putSent  bool
-	onPut    func()
+	// stallClaimRead makes a claim GetParameter hang until its request
+	// context ends, or stallLimit passes; stalledToContext records which.
+	stallClaimRead   bool
+	stalledToContext bool
+	putSent          bool
+	// runHolder is the holder the run's claim PutParameter sent, taken or
+	// not; reap's own take is not it.
+	runHolder string
+	onPut     func()
 	// onEC2 sees each EC2 action with mu held, so it may change ec2.
 	onEC2  func(action string)
 	sleeps int
@@ -154,12 +161,23 @@ func (lc *awsLifecycle) count(call string) int {
 	return n
 }
 
+// takeOver is the command a kept claim names: reap, taking the claim
+// over from the run's holder.
+func (lc *awsLifecycle) takeOver(configPath, scenarioPath string) string {
+	lc.mu.Lock()
+	defer lc.mu.Unlock()
+	return reapCommand(configPath, scenarioPath) + " --take-over " + shellQuote(lc.runHolder)
+}
+
 func (lc *awsLifecycle) claim() (string, bool) {
 	lc.mu.Lock()
 	defer lc.mu.Unlock()
 	holder, held := lc.params[harness.AWSClaimParameter]
 	return holder, held
 }
+
+// stallLimit ends a stalled claim read that nothing else ends.
+const stallLimit = 5 * time.Second
 
 func (lc *awsLifecycle) Do(req *http.Request) (*http.Response, error) {
 	if err := req.Context().Err(); err != nil {
@@ -170,6 +188,20 @@ func (lc *awsLifecycle) Do(req *http.Request) (*http.Response, error) {
 		return nil, err
 	}
 	if target := req.Header.Get("X-Amz-Target"); target != "" {
+		lc.mu.Lock()
+		stall := lc.stallClaimRead && target == "AmazonSSM.GetParameter" && bytes.Contains(payload, []byte(harness.AWSClaimParameter))
+		lc.mu.Unlock()
+		if stall {
+			select {
+			case <-req.Context().Done():
+				lc.mu.Lock()
+				lc.stalledToContext = true
+				lc.mu.Unlock()
+				return nil, req.Context().Err()
+			case <-time.After(stallLimit):
+				return nil, errors.New("stalled claim read")
+			}
+		}
 		status, body := lc.ssm(strings.TrimPrefix(target, "AmazonSSM."), payload)
 		return lifecycleAnswer(req, status, "application/x-amz-json-1.1", body), nil
 	}
@@ -226,6 +258,9 @@ func (lc *awsLifecycle) ssm(op string, payload []byte) (int, string) {
 	defer lc.mu.Unlock()
 	value, exists := lc.params[in.Name]
 	claimUnreadable := lc.putFail && lc.putSent && in.Name == harness.AWSClaimParameter
+	if op == "PutParameter" && in.Name == harness.AWSClaimParameter && !strings.HasPrefix(in.Value, awsReapHolderPrefix) {
+		lc.runHolder = in.Value
+	}
 	switch {
 	case lc.denied[call]:
 		return lifecycleSSMError("AccessDeniedException")
@@ -418,7 +453,8 @@ func assertClaimKept(t *testing.T, lc *awsLifecycle, run awsTestRun) {
 	assert.Contains(t, holder, "@", "the claim is this run's holder")
 	assert.Zero(t, lc.count(deleteClaim), "DeleteParameter")
 	assert.True(t, run.hasStage(StageAWSScopeClaimKept), "stages carry %s", StageAWSScopeClaimKept)
-	assert.Contains(t, run.output, reapCommand(run.h.ConfigPath, run.h.ScenarioPath))
+	assert.Equal(t, holder, lc.runHolder)
+	assert.Contains(t, run.output, lc.takeOver(run.h.ConfigPath, run.h.ScenarioPath))
 	assertNoProjectAdvice(t, run.output)
 }
 
@@ -644,7 +680,10 @@ func TestAWSTestTreatsAnUnknownClaimOutcomeAsHeld(t *testing.T) {
 	assert.Zero(t, lc.deploy.calls, "SandboxDeploy")
 	assert.Zero(t, lc.count(deleteClaim), "DeleteParameter")
 	assert.True(t, run.hasStage(StageAWSScopeClaimKept))
-	assert.Contains(t, run.output, reapCommand(run.h.ConfigPath, run.h.ScenarioPath))
+	details := run.failureDetails()
+	assert.Contains(t, details, "this run may hold the aws scope's claim for "+lc.runHolder)
+	assert.Contains(t, details, "If this run holds the claim, `"+lc.takeOver(run.h.ConfigPath, run.h.ScenarioPath)+"` sweeps the scope")
+	assert.Contains(t, details, "if no one holds it, `"+reapCommand(run.h.ConfigPath, run.h.ScenarioPath)+"` does")
 	assertNoProjectAdvice(t, run.output)
 }
 

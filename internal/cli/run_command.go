@@ -99,8 +99,7 @@ func runRunWithNotify(
 		runID = startedAt.Format("20060102T150405Z0700")
 	}
 	cloud := layer3TeardownCloud(sc.Cloud)
-	controls.AWSClaimHolder, err = awsClaimHolderFor(runtime, cloud, runID)
-	if err != nil {
+	if err := mintAWSClaimHolder(runtime, cloud, runID); err != nil {
 		return err
 	}
 	// Once per run, outside the interrupt guard, which wraps only the
@@ -452,9 +451,23 @@ func runRunWithNotify(
 	}
 	// aws only: an interrupt has to name reap, because the claim may be
 	// held and nothing else says so. Other clouds run unguarded, as before.
+	// The notice waits for the failure path's teardown, which may still
+	// release the claim, so it describes the claim as the run leaves it.
 	var loopErr error
+	awsInterrupted := false
+	// Every ending names the reap the claim needs: an interrupt says it
+	// as the run leaves the claim, and so does any other ending short of
+	// the target, an iterate error included, while the claim may be held.
+	defer func() {
+		switch {
+		case awsInterrupted:
+			_, _ = fmt.Fprint(cmd.ErrOrStderr(), awsInterruptNotice(runtime))
+		case cloud == layer3AWS && terminalReason != "target_reached":
+			_, _ = fmt.Fprint(cmd.ErrOrStderr(), awsRunEndNotice(runtime))
+		}
+	}()
 	if cloud == layer3AWS {
-		loopErr = withSandboxInterruptGuard(cmd, runtime, cloud, notify, iterate)
+		awsInterrupted, loopErr = runUnderSignals(cmd, runtime, cloud, notify, iterate)
 	} else {
 		loopErr = iterate(cmd.Context())
 	}
@@ -834,14 +847,15 @@ func runRunWithNotify(
 		// leaves behind.
 		mayHoldResources := liveStateMayHoldResources(runtime.OutputDir())
 		if cloud == layer3AWS {
-			// Guarded like the loop: an interrupt during this destroy must
-			// still name reap, and still reach the result below.
-			_ = withSandboxInterruptGuard(cmd, runtime, cloud, notify, func(ctx context.Context) error {
-				awsStages, awsFailures := awsRunFailureTeardown(ctx, runtime, allStages, controls.AWSClaimHolder, scenarioPath)
+			// Under caught signals like the loop, even after its interrupt:
+			// a signal cuts the settle waits short and the arm finishes.
+			interrupted, _ := runUnderSignals(cmd, runtime, cloud, notify, func(ctx context.Context) error {
+				awsStages, awsFailures := awsRunFailureTeardown(ctx, runtime, allStages)
 				allStages = append(allStages, awsStages...)
 				allFailures = append(allFailures, awsFailures...)
 				return nil
 			})
+			awsInterrupted = awsInterrupted || interrupted
 		} else if mayHoldResources && cloud != layer3Scaleway {
 			// Before the marker is read: one here may be a stale Scaleway
 			// one, and nothing below is written for any other cloud.
@@ -1169,7 +1183,6 @@ func runIteration(
 				KeepSandbox:     controls.Keep,
 				ContinueOnDrift: controls.ContinueOnDrift,
 				Holdout:         controls.Holdout,
-				AWSClaimHolder:  controls.AWSClaimHolder,
 				// Stage progress carries the run's scope, like every
 				// other entry this iteration writes. Without it two
 				// iterations' `apply: running` lines are byte-identical
@@ -1281,9 +1294,6 @@ type runControls struct {
 	ContinueOnDrift     bool
 	Holdout             bool
 	ResetMocks          bool
-	// AWSClaimHolder is minted once per run and claims the aws scope for
-	// every iteration.
-	AWSClaimHolder string
 }
 
 const transportFailureRetryBudget = 2
@@ -1657,6 +1667,10 @@ func reapCommand(configPath, scenarioPath string) string {
 	if trimmed := strings.TrimSpace(configPath); trimmed != "" && trimmed != config.DefaultPath {
 		cmd += " --config " + shellQuote(trimmed)
 	}
+	if scenarioPath == "" {
+		// Never `reap ''`: name what goes there.
+		return cmd + " reap <scenario file>"
+	}
 	return cmd + " reap " + shellQuote(scenarioPath)
 }
 
@@ -1751,26 +1765,41 @@ func awsClaimTaken(s StageSummary) bool {
 	return (s.Stage == "aws_scope_claim" && s.Status == StageStatusPass) || s.Stage == StageAWSScopeClaimKept
 }
 
+// awsClaimReadTimeout bounds the failure arm's claim read, which no
+// signal can cut short; a variable so a test need not wait it out.
+var awsClaimReadTimeout = harness.AWSClaimTimeout
+
 // awsRunFailureTeardown is the failure path's aws arm. It acts only on a
 // claim this run holds, with the env from aws.account_id and never from
-// the run-project marker, which here may be a stale Scaleway one.
-func awsRunFailureTeardown(ctx context.Context, runtime *CommandRuntime, stages []StageSummary, holder, scenarioPath string) ([]StageSummary, []FailureSummary) {
+// the run-project marker, which here may be a stale Scaleway one. It
+// compares the claim with runtime.awsHolder, the process's own. Its claim read ignores cancellation, as the sweep's requests do: a second
+// Ctrl-C must not turn a claim this run holds into an unknown one. It is
+// bounded instead, like the other uncancellable claim steps.
+func awsRunFailureTeardown(ctx context.Context, runtime *CommandRuntime, stages []StageSummary) ([]StageSummary, []FailureSummary) {
 	if !slices.ContainsFunc(stages, awsClaimTaken) {
 		return []StageSummary{{Layer: "sandbox_deploy", Stage: "auto_destroy", Status: StageStatusSkip,
 			Detail: "no iteration took the aws scope's claim, so none applied to it"}}, nil
 	}
-	reap := reapCommand(runtime.ConfigPath, scenarioPath)
 	env, err := awsCommandEnvForAccount(runtime, runtime.Config.AWS.AccountID)
 	if err != nil {
-		return awsScopeClaimKept(nil, nil, holder, reap, err.Error())
+		return awsScopeClaimKept(runtime, nil, nil, err.Error())
 	}
-	current, held, err := harness.ReadAWSClaimHolder(ctx, env, runtime.Deps.AWSSSM, "")
+	holder := runtime.awsHolder
+	readCtx, cancelRead := context.WithTimeout(context.WithoutCancel(ctx), awsClaimReadTimeout)
+	defer cancelRead()
+	current, held, err := harness.ReadAWSClaimHolder(readCtx, env, runtime.Deps.AWSSSM, "")
 	if err != nil {
-		return awsScopeClaimKept(nil, nil, holder, reap, err.Error())
+		runtime.awsClaim = awsClaim{state: awsClaimUnknown}
+		return awsScopeClaimKept(runtime, nil, nil, err.Error())
 	}
 	if !held || current != holder {
+		runtime.awsClaim = awsClaim{state: awsClaimNotHeld}
+		if held {
+			runtime.awsClaim = awsClaim{state: awsClaimHeldByOther, other: current}
+		}
 		return []StageSummary{{Layer: "sandbox_deploy", Stage: "auto_destroy", Status: StageStatusSkip,
-			Detail: fmt.Sprintf("the aws scope's claim is not held by this run (%s), so it tears nothing down", holder)}}, nil
+			Detail: "the aws scope's claim is not held by this run, so it tears nothing down"}}, nil
 	}
-	return awsDestroyAndRelease(ctx, runtime, runtime.OutputDir(), env, holder, reap)
+	runtime.awsClaim = awsClaim{state: awsClaimHeld}
+	return awsDestroyAndRelease(ctx, runtime, runtime.OutputDir(), env)
 }

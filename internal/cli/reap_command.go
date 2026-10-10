@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -176,14 +178,16 @@ func runAWSReap(cmd *cobra.Command, runtime *CommandRuntime, scenarioName string
 		return nil
 	}
 
-	holder, err := harness.NewAWSClaimHolder("reap-" + time.Now().UTC().Format("20060102T150405Z0700"))
+	holder, err := harness.NewAWSClaimHolder(awsReapHolderPrefix + time.Now().UTC().Format("20060102T150405Z0700"))
 	if err != nil {
 		return fail(err)
 	}
-	if err := claimAWSScopeForReap(ctx, runtime, env, holder, takeOver); err != nil {
+	runtime.awsHolder, runtime.awsActor = holder, awsActorReap
+	if err := claimAWSScopeForReap(ctx, runtime, env, takeOver); err != nil {
 		return fail(err)
 	}
-	stages, failures := reapClaimedAWSScope(ctx, runtime, env, holder)
+	runtime.awsClaim = awsClaim{state: awsClaimHeld}
+	stages, failures := reapClaimedAWSScope(ctx, runtime, env)
 
 	status := CommandStatusSuccess
 	if len(failures) > 0 {
@@ -199,13 +203,14 @@ func runAWSReap(cmd *cobra.Command, runtime *CommandRuntime, scenarioName string
 	return nil
 }
 
-// claimAWSScopeForReap takes the claim for holder: over from takeOver
-// when it is set, otherwise only when no one holds it. A held claim is
-// refused naming its holder and the command that takes it over, with
-// nothing written.
-func claimAWSScopeForReap(ctx context.Context, runtime *CommandRuntime, env map[string]string, holder, takeOver string) error {
+// claimAWSScopeForReap takes the claim for runtime.awsHolder: over from
+// takeOver when it is set, otherwise only when no one holds it. A held
+// claim is refused naming its holder and the command that takes it over,
+// with nothing written.
+func claimAWSScopeForReap(ctx context.Context, runtime *CommandRuntime, env map[string]string, takeOver string) error {
+	holder := runtime.awsHolder
 	if takeOver != "" {
-		return harness.TakeOverAWSClaim(ctx, env, runtime.Deps.AWSSSM, "", takeOver, holder)
+		return awsReapTakeFailure(runtime, harness.TakeOverAWSClaim(ctx, env, runtime.Deps.AWSSSM, "", takeOver, holder))
 	}
 	current, held, err := harness.ReadAWSClaimHolder(ctx, env, runtime.Deps.AWSSSM, "")
 	switch {
@@ -215,19 +220,42 @@ func claimAWSScopeForReap(ctx context.Context, runtime *CommandRuntime, env map[
 		return fmt.Errorf("refusing to reap: %w by %s. Once that run has ended, `%s` takes the claim over from it",
 			harness.ErrAWSScopeClaimed, current, awsTakeOverCommand(runtime, current))
 	}
-	return harness.TakeAWSClaim(ctx, env, runtime.Deps.AWSSSM, "", holder)
+	return awsReapTakeFailure(runtime, harness.TakeAWSClaim(ctx, env, runtime.Deps.AWSSSM, "", holder))
 }
 
+// awsReapTakeFailure names the next reap when --take-over found no claim,
+// or when reap's own take leaves the claim not as it found it: a take-over that deleted the old claim (so
+// --take-over of it can never work again), a take whose outcome is
+// unknown (so the claim may now be reap's), or a claim another holder
+// took first (so only its take-over can work, once that run has ended).
+func awsReapTakeFailure(runtime *CommandRuntime, err error) error {
+	if errors.Is(err, harness.ErrAWSNoClaimHeld) {
+		// --take-over found nothing to take over.
+		return fmt.Errorf("%w: run plain `%s`", err, reapCommand(runtime.ConfigPath, runtime.scenarioPath))
+	}
+	var byOther *harness.AWSScopeClaimedError
+	if !errors.Is(err, harness.ErrAWSPreviousClaimDeleted) && !errors.Is(err, harness.ErrAWSClaimOutcomeUnknown) &&
+		!errors.As(err, &byOther) {
+		return err
+	}
+	runtime.awsClaim = awsClaimAfterTake(err)
+	return fmt.Errorf("%w. %s", err, awsReapAdvice(runtime, runtime.awsClaim))
+}
+
+// awsReapHolderPrefix starts every holder reap mints.
+const awsReapHolderPrefix = "reap-"
+
 func awsTakeOverCommand(runtime *CommandRuntime, holder string) string {
-	return reapCommand(runtime.ConfigPath, runtime.scenarioPath) + " --take-over " + shellQuote(holder)
+	return awsTakeOverOf(reapCommand(runtime.ConfigPath, runtime.scenarioPath), holder)
 }
 
 // reapClaimedAWSScope runs with holder holding the claim. Neither a
 // failed destroy nor a failed delete stops it: the verdict sweep in
 // awsReleaseAfterCleanSweep decides whether the claim is released, and
 // a kept claim names the command that takes it over.
-func reapClaimedAWSScope(ctx context.Context, runtime *CommandRuntime, env map[string]string, holder string) ([]StageSummary, []FailureSummary) {
+func reapClaimedAWSScope(ctx context.Context, runtime *CommandRuntime, env map[string]string) ([]StageSummary, []FailureSummary) {
 	cfg := runtime.Config.AWS
+	holder := runtime.awsHolder
 	stages := []StageSummary{{Layer: "sandbox_deploy", Stage: "aws_scope_claim", Status: StageStatusPass,
 		Detail: fmt.Sprintf("claimed account %s for %s", cfg.AccountID, holder)}}
 	var failures []FailureSummary
@@ -258,12 +286,114 @@ func reapClaimedAWSScope(ctx context.Context, runtime *CommandRuntime, env map[s
 		}
 	}
 
-	releaseStages, releaseFailures := awsReleaseAfterCleanSweep(ctx, runtime, env, holder)
+	releaseStages, releaseFailures := awsReleaseAfterCleanSweep(ctx, runtime, env)
 	stages, failures = append(stages, releaseStages...), append(failures, releaseFailures...)
 	if len(releaseFailures) > 0 {
-		return awsScopeClaimKept(stages, failures, holder, awsTakeOverCommand(runtime, holder), "the scope was not proven empty and released")
+		return awsScopeClaimKept(runtime, stages, failures, "the scope was not proven empty and released")
 	}
 	return stages, failures
+}
+
+// runUnderSignals runs fn with a context a SIGINT or SIGTERM cancels,
+// when Layer 3 is on, and reports whether one fired; a parent context
+// that ends on its own is not an interrupt. Signals stay caught until fn
+// returns, so a second Ctrl-C cannot kill the process mid-teardown; once
+// it returns, default handling is back and the caller's own cleanup can
+// be abandoned. The first signal prints firstSignalNotice at once, so a
+// process killed before it finishes still leaves the recovery command.
+func runUnderSignals(
+	cmd *cobra.Command,
+	runtime *CommandRuntime,
+	cloud layer3Cloud,
+	notify func(ctx context.Context, sigs ...os.Signal) (context.Context, context.CancelFunc),
+	fn func(ctx context.Context) error,
+) (bool, error) {
+	ctx := cmd.Context()
+	if !runtime.Config.Validation.Layers.SandboxDeploy.Enabled {
+		return false, fn(ctx)
+	}
+	// fn writes progress to the same stream the watcher prints on.
+	out := &syncWriter{w: cmd.ErrOrStderr()}
+	cmd.SetErr(out)
+	defer cmd.SetErr(out.w)
+	// At most once per process: a run interrupted in its loop and again
+	// in its failure arm has already said it.
+	notice := ""
+	if !runtime.signalNoticed {
+		notice = firstSignalNotice(runtime, cloud, signalNoticeScenario(cmd, runtime))
+	}
+
+	sigCtx, stop := notify(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	signal := func() bool { return sigCtx.Err() != nil && ctx.Err() == nil }
+	// watched is buffered, so the watcher never blocks on a caller that
+	// fn's panic took away.
+	fnDone, watched := make(chan struct{}), make(chan bool, 1)
+	returned := false
+	defer func() {
+		if !returned {
+			close(fnDone) // fn panicked: before stop() cancels sigCtx
+		}
+	}()
+	go func() {
+		if testSignalWatcherExited != nil {
+			defer testSignalWatcherExited()
+		}
+		select {
+		case <-sigCtx.Done():
+			select {
+			case <-fnDone: // the deferred stop(), not a signal
+				watched <- false
+				return
+			default:
+			}
+			fired := signal()
+			if fired {
+				_, _ = fmt.Fprint(out, notice)
+			}
+			watched <- fired
+		case <-fnDone:
+			watched <- false
+		}
+	}()
+	err := fn(sigCtx)
+	returned = true
+	close(fnDone)
+	fired := <-watched
+	if !fired && signal() {
+		// The signal and fn's return raced; the notice still goes first.
+		_, _ = fmt.Fprint(out, notice)
+		fired = true
+	}
+	runtime.signalNoticed = runtime.signalNoticed || fired
+	return fired, err
+}
+
+// testSignalWatcherExited, when a test sets it, is called as the signal
+// watcher goroutine exits.
+var testSignalWatcherExited func()
+
+// signalNoticeScenario is the scenario the first signal's reap names:
+// the loaded one, else the one the command was given.
+func signalNoticeScenario(cmd *cobra.Command, runtime *CommandRuntime) string {
+	if runtime.scenarioPath != "" {
+		return runtime.scenarioPath
+	}
+	return cmd.Flags().Arg(0)
+}
+
+// syncWriter serialises writes from fn and the signal watcher to cmd's
+// err writer, which in tests is a plain buffer. Writes straight to
+// os.Stderr need no lock: an *os.File is safe for concurrent use.
+type syncWriter struct {
+	mu sync.Mutex
+	w  io.Writer
+}
+
+func (s *syncWriter) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.w.Write(p)
 }
 
 // withSandboxInterruptGuard runs fn with a SIGINT/SIGTERM handler that
@@ -272,13 +402,15 @@ func reapClaimedAWSScope(ctx context.Context, runtime *CommandRuntime, env map[s
 // Without it, Ctrl-C between apply and destroy leaves billable resources
 // with nothing tracking them but a state file on disk. The context
 // passed to fn is cancelled on the first signal so the in-flight tofu
-// call unwinds; destroy then runs on a FRESH context, because the whole
-// point is to do work after cancellation.
+// call unwinds, and the recovery command is printed at once. Signals
+// stay caught until fn returns, so fn's own teardown always finishes;
+// then default handling is restored and destroy runs on a FRESH context,
+// because the whole point is to do work after cancellation.
 //
-// A second signal gives up immediately and tells the operator exactly
-// how to finish the job by hand -- an operator hammering Ctrl-C needs to
-// understand why the process is not exiting, and what state they are
-// being left in.
+// A signal during that cleanup gives up immediately, and the operator
+// already has the command that finishes the job by hand -- an operator
+// hammering Ctrl-C needs to understand why the process is not exiting,
+// and what state they are being left in.
 func withSandboxInterruptGuard(
 	cmd *cobra.Command,
 	runtime *CommandRuntime,
@@ -286,15 +418,8 @@ func withSandboxInterruptGuard(
 	notify func(ctx context.Context, sigs ...os.Signal) (context.Context, context.CancelFunc),
 	fn func(ctx context.Context) error,
 ) error {
-	if !runtime.Config.Validation.Layers.SandboxDeploy.Enabled {
-		return fn(cmd.Context())
-	}
-
-	sigCtx, stop := notify(cmd.Context(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	err := fn(sigCtx)
-	if sigCtx.Err() == nil {
+	interrupted, err := runUnderSignals(cmd, runtime, cloud, notify, fn)
+	if !interrupted {
 		return err
 	}
 
@@ -310,9 +435,7 @@ func withSandboxInterruptGuard(
 	// run's own teardown has already swept, and released the claim only
 	// if the scope was empty; whatever it kept is reap's.
 	if cloud == layer3AWS {
-		_, _ = fmt.Fprintf(out, "\nInterrupted: this run keeps the aws scope's claim unless its sweep proved the scope empty, "+
-			"and what it applied may still exist. `%s` sweeps the scope, destroys what is left and releases the claim.\n",
-			reapCommand(runtime.ConfigPath, runtime.scenarioPath))
+		_, _ = fmt.Fprint(out, awsInterruptNotice(runtime))
 		return err
 	}
 	if cloud != layer3Scaleway {
@@ -338,9 +461,9 @@ func withSandboxInterruptGuard(
 			marker.ProjectID)
 	}
 
-	// stop() restores default signal handling, so a second Ctrl-C kills
-	// the process outright rather than being swallowed here.
-	stop()
+	// runUnderSignals restored default signal handling when fn returned,
+	// so a Ctrl-C now kills the process outright rather than being
+	// swallowed here.
 
 	// An unreadable marker with state on disk is the one shape this
 	// cannot proceed on. marker is the zero value there, so building the

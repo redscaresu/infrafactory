@@ -27,8 +27,8 @@ const (
 	AWSStampParameter = AWSScopePrefix + "stamp"
 )
 
-// awsClaimTimeout bounds each uncancellable claim step.
-const awsClaimTimeout = 20 * time.Second
+// AWSClaimTimeout bounds each uncancellable claim step.
+const AWSClaimTimeout = 20 * time.Second
 
 var (
 	// ErrAWSScopeClaimed is a claim held by someone else. Errors wrapping
@@ -37,7 +37,22 @@ var (
 	// ErrAWSClaimOutcomeUnknown is a failed put whose read-back failed too:
 	// the claim may be ours, so the caller treats it as held.
 	ErrAWSClaimOutcomeUnknown = errors.New("the aws Layer 3 claim's outcome is unknown")
+	// ErrAWSNoClaimHeld is a release or take-over that found no claim.
+	ErrAWSNoClaimHeld = errors.New("no claim is held")
+	// ErrAWSPreviousClaimDeleted is a take-over whose own take failed
+	// after the previous holder's claim was deleted.
+	ErrAWSPreviousClaimDeleted = errors.New("the previous holder's aws Layer 3 claim was deleted")
 )
+
+// AWSScopeClaimedError is ErrAWSScopeClaimed naming the holder, for a
+// caller that names it in a command.
+type AWSScopeClaimedError struct{ Holder string }
+
+func (e *AWSScopeClaimedError) Error() string {
+	return fmt.Sprintf("%v by %q", ErrAWSScopeClaimed, e.Holder)
+}
+
+func (e *AWSScopeClaimedError) Unwrap() error { return ErrAWSScopeClaimed }
 
 // awsClaimHolderRe is <run id>@<host>:<pid>. A holder goes into a command
 // the operator pastes, so nothing else is accepted.
@@ -84,7 +99,7 @@ func TakeAWSClaim(ctx context.Context, env map[string]string, doer ssm.HTTPClien
 // could leave a claim taken that the run never learns it holds.
 func takeAWSClaim(ctx context.Context, client *ssm.Client, holder string) error {
 	ctx = context.WithoutCancel(ctx)
-	putCtx, cancelPut := context.WithTimeout(ctx, awsClaimTimeout)
+	putCtx, cancelPut := context.WithTimeout(ctx, AWSClaimTimeout)
 	defer cancelPut()
 	_, putErr := client.PutParameter(putCtx, &ssm.PutParameterInput{
 		Name:      aws.String(AWSClaimParameter),
@@ -96,7 +111,7 @@ func takeAWSClaim(ctx context.Context, client *ssm.Client, holder string) error 
 		return nil
 	}
 
-	getCtx, cancelGet := context.WithTimeout(ctx, awsClaimTimeout)
+	getCtx, cancelGet := context.WithTimeout(ctx, AWSClaimTimeout)
 	defer cancelGet()
 	value, found, err := getAWSParameter(getCtx, client, AWSClaimParameter)
 	switch {
@@ -105,7 +120,7 @@ func takeAWSClaim(ctx context.Context, client *ssm.Client, holder string) error 
 	case found && value == holder:
 		return nil
 	case found:
-		return fmt.Errorf("%w by %q", ErrAWSScopeClaimed, value)
+		return &AWSScopeClaimedError{Holder: value}
 	}
 	return fmt.Errorf("aws scope claim: ssm:PutParameter %s failed and no claim is stored: %w", AWSClaimParameter, putErr)
 }
@@ -162,12 +177,15 @@ func TakeOverAWSClaim(ctx context.Context, env map[string]string, doer ssm.HTTPC
 	}
 	// An interrupt must not fall between the delete and the take, so
 	// neither is cancellable.
-	deleteCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), awsClaimTimeout)
+	deleteCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), AWSClaimTimeout)
 	defer cancel()
 	if err := deleteAWSClaimHeldBy(deleteCtx, client, previous); err != nil {
 		return err
 	}
-	return takeAWSClaim(ctx, client, holder)
+	if err := takeAWSClaim(ctx, client, holder); err != nil {
+		return fmt.Errorf("%w: %w", ErrAWSPreviousClaimDeleted, err)
+	}
+	return nil
 }
 
 // deleteAWSClaimHeldBy deletes the claim when its value is want, and
@@ -178,9 +196,9 @@ func deleteAWSClaimHeldBy(ctx context.Context, client *ssm.Client, want string) 
 	case err != nil:
 		return fmt.Errorf("aws scope claim: %w", err)
 	case !found:
-		return fmt.Errorf("aws scope claim: refusing to delete %s: no claim is held, and %q expected to hold it", AWSClaimParameter, want)
+		return fmt.Errorf("aws scope claim: refusing to delete %s: %w, and %q expected to hold it", AWSClaimParameter, ErrAWSNoClaimHeld, want)
 	case value != want:
-		return fmt.Errorf("aws scope claim: refusing to delete %s: %w by %q, not %q", AWSClaimParameter, ErrAWSScopeClaimed, value, want)
+		return fmt.Errorf("aws scope claim: refusing to delete %s: %w, not %q", AWSClaimParameter, &AWSScopeClaimedError{Holder: value}, want)
 	}
 	// ponytail: DeleteParameter takes only a Name, so a claim retaken
 	// between the Get above and this Delete would be deleted. SSM has no

@@ -56,7 +56,7 @@ func TestAWSRunChecklistNamesTheStagesAndTheReapCommand(t *testing.T) {
 	for _, want := range []string{
 		StageAWSAMIResolve,
 		StageAWSScopeClaimKept,
-		reapCommand(config.DefaultPath, "scenarios/training/aws-web-live.yaml"),
+		reapCommand(config.DefaultPath, "scenarios/training/aws-web-live.yaml") + " --take-over <holder>",
 		"docs/layer3/aws/iam-policy.json",
 	} {
 		assert.Contains(t, section, want)

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -239,7 +240,7 @@ func TestAWSReapDirtyVerdictKeepsTheClaim(t *testing.T) {
 	assert.Zero(t, lc.count(deleteClaim), "DeleteParameter")
 	holder, held := lc.claim()
 	require.True(t, held, "the claim is kept")
-	assert.True(t, strings.HasPrefix(holder, "reap-"), "held by the reap: %s", holder)
+	assert.True(t, strings.HasPrefix(holder, awsReapHolderPrefix), "held by the reap: %s", holder)
 	assert.Contains(t, r.output, reapCommand(r.h.ConfigPath, r.h.ScenarioPath)+" --take-over "+holder)
 }
 
@@ -256,7 +257,7 @@ func TestAWSReapFailedDestroyStillReleasesAnEmptyScope(t *testing.T) {
 	assert.Equal(t, 1, lc.count(deleteClaim), "released")
 	_, held := lc.claim()
 	assert.False(t, held)
-	assert.NotContains(t, r.output, "kept the aws scope's claim")
+	assert.NotContains(t, r.output, "keeps the aws scope's claim")
 }
 
 func TestAWSReapDryRunWritesNothing(t *testing.T) {
@@ -287,26 +288,331 @@ func TestAWSReapDryRunWritesNothing(t *testing.T) {
 	})
 }
 
-// A partial apply that wrote no state: the case where the Scaleway guard
-// says there is nothing to clean up.
-func TestInterruptedAWSTestKeepsTheClaimAndPrintsTheReapCommand(t *testing.T) {
-	lc := newAWSLifecycle(t)
-	lc.ec2["DescribeInstances"] = runningInstance
-	lc.deploy.err = context.Canceled
-	lc.deploy.onRunDir = func(dir string) {
-		lc.record(deployRun)
-		writeAWSStateAndStaleMarker(t, dir, false)
-		lc.cancel()
+// The interrupt print for each thing a run may know of the claim. Each
+// reap form refuses the other's case, so only the one that works is
+// named, and both only when the run cannot tell.
+func assertInterruptNamesTheReap(t *testing.T, lc *awsLifecycle, output, configPath, scenarioPath string, state awsClaimState) {
+	t.Helper()
+	plain := "`" + reapCommand(configPath, scenarioPath) + "`"
+	takeOver := "`" + lc.takeOver(configPath, scenarioPath) + "`"
+	// The notice alone: a kept claim's stage detail elsewhere in the
+	// output names --take-over on its own account.
+	_, notice, found := strings.Cut(output, "\nInterrupted: ")
+	require.True(t, found, "no interrupt notice: %s", output)
+	notice, _, _ = strings.Cut(notice, "\n")
+	switch state {
+	case awsClaimHeld:
+		assert.True(t, strings.HasPrefix(notice, "this run keeps the aws scope's claim"), notice)
+		assert.Contains(t, notice, takeOver+" sweeps the scope")
+		assert.NotContains(t, notice, plain)
+	case awsClaimUnknown:
+		assert.True(t, strings.HasPrefix(notice, "this run may hold the aws scope's claim"), notice)
+		assert.Contains(t, notice, "If this run holds the claim, "+takeOver+" sweeps the scope")
+		assert.Contains(t, notice, "if no one holds it, "+plain+" does")
+	case awsClaimHeldByOther:
+		assert.True(t, strings.HasPrefix(notice, "this run does not hold the aws scope's claim: "+lifecycleOtherHolder+" does"), notice)
+		assert.Contains(t, notice, "`"+reapCommand(configPath, scenarioPath)+" --take-over "+shellQuote(lifecycleOtherHolder)+"` sweeps the scope")
+	default:
+		assert.True(t, strings.HasPrefix(notice, "this run does not hold the aws scope's claim: it never took it"), notice)
+		assert.Contains(t, notice, plain+" sweeps the scope")
+		assert.NotContains(t, notice, "--take-over")
 	}
+}
 
-	run := runAWSTest(t, lc, nil, nil)
+// A partial apply that wrote no state: the case where the Scaleway guard
+// says there is nothing to clean up. A dirty scope keeps the claim; a
+// clean one is released.
+func TestInterruptedAWSTestNamesTheReapForAKeptOrReleasedClaim(t *testing.T) {
+	for name, state := range map[string]awsClaimState{"dirty scope": awsClaimHeld, "clean scope": awsClaimNotHeld} {
+		t.Run(name, func(t *testing.T) {
+			lc := newAWSLifecycle(t)
+			if state == awsClaimHeld {
+				lc.ec2["DescribeInstances"] = runningInstance
+			}
+			lc.deploy.err = context.Canceled
+			lc.deploy.onRunDir = func(dir string) {
+				lc.record(deployRun)
+				writeAWSStateAndStaleMarker(t, dir, false)
+				lc.cancel()
+			}
+
+			run := runAWSTest(t, lc, nil, nil)
+
+			require.Error(t, run.err)
+			assertInterruptNamesTheReap(t, lc, run.output, run.h.ConfigPath, run.h.ScenarioPath, state)
+			assert.NotContains(t, run.output, "nothing to clean up")
+			_, held := lc.claim()
+			assert.Equal(t, state == awsClaimHeld, held, "the claim is kept only for a dirty scope")
+			if state == awsClaimHeld {
+				assert.Zero(t, lc.count(deleteClaim), "DeleteParameter")
+			}
+			lc.scw.assertUntouched(t)
+		})
+	}
+}
+
+// Interrupted during the claim's put: a put whose outcome is unknown
+// names both reaps, and a claim another run holds names that run.
+func TestInterruptedAWSTestNamesTheReapForAnUnknownOrForeignClaim(t *testing.T) {
+	for name, tc := range map[string]struct {
+		setup func(*awsLifecycle)
+		state awsClaimState
+	}{
+		"unknown outcome": {setup: func(lc *awsLifecycle) { lc.putFail = true }, state: awsClaimUnknown},
+		"another holder": {
+			setup: func(lc *awsLifecycle) { lc.params[harness.AWSClaimParameter] = lifecycleOtherHolder },
+			state: awsClaimHeldByOther,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			lc := newAWSLifecycle(t)
+			tc.setup(lc)
+			lc.onPut = func() { lc.cancel() }
+
+			run := runAWSTest(t, lc, nil, nil)
+
+			require.Error(t, run.err)
+			assert.Zero(t, lc.deploy.calls, "SandboxDeploy")
+			assertInterruptNamesTheReap(t, lc, run.output, run.h.ConfigPath, run.h.ScenarioPath, tc.state)
+			lc.scw.assertUntouched(t)
+		})
+	}
+}
+
+// A held or unknown claim with no holder to name, and a runtime that
+// never set the claim, hedge: never "keeps the claim" beside plain reap,
+// and never one command twice.
+func TestAWSReapAdviceHedgesWithoutAHolder(t *testing.T) {
+	for name, claim := range map[string]awsClaim{
+		"never set":          {},
+		"held, no holder":    {state: awsClaimHeld},
+		"unknown, no holder": {state: awsClaimUnknown},
+		"another, unnamed":   {state: awsClaimHeldByOther},
+	} {
+		t.Run(name, func(t *testing.T) {
+			rt := &CommandRuntime{ConfigPath: config.DefaultPath, scenarioPath: "scenarios/training/aws-web-live.yaml", awsClaim: claim}
+			plain := "`" + reapCommand(rt.ConfigPath, rt.scenarioPath) + "`"
+
+			notice := awsInterruptNotice(rt)
+
+			assert.Contains(t, notice, "Interrupted: this run may hold the aws scope's claim")
+			assert.Contains(t, notice, "The claim's holder is unknown here")
+			assert.NotContains(t, notice, "keeps the aws scope's claim")
+			assert.NotContains(t, notice, "--take-over '")
+			assert.Equal(t, 1, strings.Count(notice, plain), notice)
+		})
+	}
+}
+
+// A failed release is unknown, unless it found no claim or names the
+// holder that has it.
+func TestAWSClaimAfterRelease(t *testing.T) {
+	for name, tc := range map[string]struct {
+		err  error
+		want awsClaim
+	}{
+		"released":       {want: awsClaim{state: awsClaimNotHeld}},
+		"no claim":       {err: fmt.Errorf("refusing: %w", harness.ErrAWSNoClaimHeld), want: awsClaim{state: awsClaimNotHeld}},
+		"response lost":  {err: errors.New("ssm:DeleteParameter: connection reset"), want: awsClaim{state: awsClaimUnknown}},
+		"another holder": {err: fmt.Errorf("refusing: %w", &harness.AWSScopeClaimedError{Holder: lifecycleOtherHolder}), want: awsClaim{state: awsClaimHeldByOther, other: lifecycleOtherHolder}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			assert.Equal(t, tc.want, awsClaimAfterRelease(tc.err))
+		})
+	}
+}
+
+// A release that fails after a clean sweep cannot say the claim is still
+// this run's: the delete may have landed, or someone else may hold it.
+func TestAWSTestNamesTheReapAfterAFailedRelease(t *testing.T) {
+	t.Run("delete denied", func(t *testing.T) {
+		lc := newAWSLifecycle(t)
+		lc.denied[deleteClaim] = true
+
+		run := runAWSTest(t, lc, nil, nil)
+
+		require.Error(t, run.err)
+		details := run.failureDetails()
+		assert.Contains(t, details, "this run may hold the aws scope's claim for "+lc.runHolder)
+		assert.Contains(t, details, "If this run holds the claim, `"+lc.takeOver(run.h.ConfigPath, run.h.ScenarioPath)+"`")
+		assert.Contains(t, details, "if no one holds it, `"+reapCommand(run.h.ConfigPath, run.h.ScenarioPath)+"` does")
+	})
+	t.Run("the claim is gone", func(t *testing.T) {
+		lc := newAWSLifecycle(t)
+		lc.onEC2 = func(action string) {
+			if action == "DescribeInstances" {
+				delete(lc.params, harness.AWSClaimParameter)
+			}
+		}
+
+		run := runAWSTest(t, lc, nil, nil)
+
+		assert.NotContains(t, run.output, "--take-over", "no claim to take over")
+		assert.NotContains(t, run.output, "this run may hold the aws scope's claim")
+	})
+	t.Run("another holder took it", func(t *testing.T) {
+		lc := newAWSLifecycle(t)
+		lc.onEC2 = func(action string) {
+			if action == "DescribeInstances" {
+				lc.params[harness.AWSClaimParameter] = lifecycleOtherHolder
+			}
+		}
+
+		run := runAWSTest(t, lc, nil, nil)
+
+		require.Error(t, run.err)
+		details := run.failureDetails()
+		assert.Contains(t, details, "this run does not hold the aws scope's claim: "+lifecycleOtherHolder+" does")
+		assert.Contains(t, details, "`"+reapCommand(run.h.ConfigPath, run.h.ScenarioPath)+" --take-over "+shellQuote(lifecycleOtherHolder)+"`")
+		assert.NotContains(t, details, "--take-over "+shellQuote(lc.runHolder))
+	})
+}
+
+// A take-over that deleted the old claim and then failed its own take can
+// never be retried as typed: it names the reap that can work.
+func TestAWSReapTakeOverNamesTheNextReapWhenItsOwnTakeFails(t *testing.T) {
+	lc := newAWSLifecycle(t)
+	lc.params[harness.AWSClaimParameter] = lifecycleOtherHolder
+	lc.putFail = true
+
+	r := reapAWS(t, lc, nil, false, "--take-over", lifecycleOtherHolder)
+
+	require.Error(t, r.err)
+	assert.ErrorIs(t, r.err, harness.ErrAWSPreviousClaimDeleted)
+	assert.Contains(t, r.err.Error(), "if no one holds it, `"+reapCommand(r.h.ConfigPath, r.h.ScenarioPath)+"` does")
+	assert.Zero(t, lc.destroy.calls, "SandboxDestroy")
+}
+
+// A claim this process already holds, from an earlier iteration of run,
+// survives an ensure that returns before writing; any other is not held.
+func TestEnsureAWSScopeClaimKeepsAClaimThisProcessHolds(t *testing.T) {
+	const holder = "run-9@this-host.example:1"
+	for name, tc := range map[string]struct {
+		before awsClaim
+		want   awsClaimState
+	}{
+		"held by this process": {before: awsClaim{state: awsClaimHeld}, want: awsClaimHeld},
+		"released":             {before: awsClaim{state: awsClaimNotHeld}, want: awsClaimNotHeld},
+		"never set":            {want: awsClaimNotHeld},
+	} {
+		t.Run(name, func(t *testing.T) {
+			// No aws config: ensure returns before any request.
+			rt := &CommandRuntime{awsClaim: tc.before, awsHolder: holder}
+
+			_, _, failures := ensureAWSScopeClaim(context.Background(), rt)
+
+			require.NotEmpty(t, failures, "ensure returned early")
+			assert.Equal(t, awsClaim{state: tc.want}, rt.awsClaim)
+		})
+	}
+}
+
+// A deliberate keep says "on purpose" only of a claim the run is known to
+// hold; an unknown one is hedged like every other message.
+func TestAWSTestNoDestroyHedgesAnUnknownClaim(t *testing.T) {
+	lc := newAWSLifecycle(t)
+	lc.putFail = true
+
+	run := runAWSTest(t, lc, nil, nil, "--no-destroy")
 
 	require.Error(t, run.err)
-	assert.Contains(t, run.output, "Interrupted: this run keeps the aws scope's claim")
-	assert.Contains(t, run.output, reapCommand(run.h.ConfigPath, run.h.ScenarioPath))
-	assert.NotContains(t, run.output, "nothing to clean up")
-	assert.Zero(t, lc.count(deleteClaim), "DeleteParameter")
-	_, held := lc.claim()
-	assert.True(t, held, "the claim is kept")
-	lc.scw.assertUntouched(t)
+	i := slices.IndexFunc(run.result.Stages, isStage(StageAWSScopeClaimKept))
+	require.NotEqual(t, -1, i, "stages carry %s", StageAWSScopeClaimKept)
+	detail := run.result.Stages[i].Detail
+	assert.NotContains(t, detail, "on purpose")
+	assert.Contains(t, detail, "skipped the teardown (--no-destroy) though this run may hold the aws scope's claim for "+lc.runHolder)
+	assert.Contains(t, detail, "if no one holds it, `"+reapCommand(run.h.ConfigPath, run.h.ScenarioPath)+"` does")
+}
+
+// A skipped teardown with a claim this run does not hold, or that another
+// holds, is not a kept claim: one sentence each, on the claim's stage.
+func TestAWSTeardownSkippedSaysWhatTheClaimIs(t *testing.T) {
+	const holder = "run-9@this-host.example:1"
+	plain := reapCommand(config.DefaultPath, "scenarios/training/aws-web-live.yaml")
+	for name, tc := range map[string]struct {
+		claim awsClaim
+		want  string
+	}{
+		"not held": {claim: awsClaim{state: awsClaimNotHeld},
+			want: "skipped the teardown (--no-destroy); this run does not hold the aws scope's claim. `" + plain + "` sweeps the scope"},
+		"another holder": {claim: awsClaim{state: awsClaimHeldByOther, other: lifecycleOtherHolder},
+			want: "skipped the teardown (--no-destroy); the aws scope's claim is held by " + lifecycleOtherHolder +
+				", not this run. Once that run has ended, `" + plain + " --take-over " + shellQuote(lifecycleOtherHolder) + "`"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			rt := &CommandRuntime{ConfigPath: config.DefaultPath, scenarioPath: "scenarios/training/aws-web-live.yaml",
+				awsHolder: holder, awsClaim: tc.claim}
+
+			stages, failures := awsScopeTeardown(context.Background(), rt, t.TempDir(), testExecutionOptions{SkipDestroy: true})
+
+			assert.Empty(t, failures)
+			require.Len(t, stages, 1)
+			assert.Equal(t, "aws_scope_claim", stages[0].Stage, "not %s", StageAWSScopeClaimKept)
+			assert.Equal(t, StageStatusSkip, stages[0].Status)
+			assert.True(t, strings.HasPrefix(stages[0].Detail, tc.want), stages[0].Detail)
+			assert.NotContains(t, stages[0].Detail, "kept")
+		})
+	}
+}
+
+// Another holder that takes the claim between reap's read and its take
+// is named, with the take-over that works once that run has ended.
+func TestAWSReapNamesTheHolderThatTookTheClaimFirst(t *testing.T) {
+	lc := newAWSLifecycle(t)
+	lc.onPut = func() {
+		lc.mu.Lock()
+		defer lc.mu.Unlock()
+		lc.params[harness.AWSClaimParameter] = lifecycleOtherHolder
+	}
+
+	r := reapAWS(t, lc, nil, false)
+
+	require.Error(t, r.err)
+	assert.ErrorIs(t, r.err, harness.ErrAWSScopeClaimed)
+	assert.Contains(t, r.err.Error(), "Once that run has ended, `"+reapCommand(r.h.ConfigPath, r.h.ScenarioPath)+
+		" --take-over "+shellQuote(lifecycleOtherHolder)+"` sweeps the scope")
+	assert.Zero(t, lc.destroy.calls, "SandboxDestroy")
+}
+
+// reap's own take whose outcome is unknown may have left the claim
+// reap's: it names both reaps, each with the case it fits.
+func TestAWSReapNamesBothReapsWhenItsOwnTakeIsUnknown(t *testing.T) {
+	lc := newAWSLifecycle(t)
+	lc.putFail = true
+
+	r := reapAWS(t, lc, nil, false)
+
+	require.Error(t, r.err)
+	assert.ErrorIs(t, r.err, harness.ErrAWSClaimOutcomeUnknown)
+	plain := reapCommand(r.h.ConfigPath, r.h.ScenarioPath)
+	assert.Contains(t, r.err.Error(), "If this reap holds the claim, `"+plain+" --take-over "+awsReapHolderPrefix)
+	assert.NotContains(t, r.err.Error(), "this run")
+	assert.Contains(t, r.err.Error(), "if no one holds it, `"+plain+"` does")
+	assert.Zero(t, lc.destroy.calls, "SandboxDestroy")
+}
+
+// --take-over with no claim stored has nothing to take over: it names
+// plain reap.
+func TestAWSReapTakeOverWithNoClaimNamesPlainReap(t *testing.T) {
+	lc := newAWSLifecycle(t)
+
+	r := reapAWS(t, lc, nil, false, "--take-over", lifecycleOtherHolder)
+
+	require.Error(t, r.err)
+	assert.ErrorIs(t, r.err, harness.ErrAWSNoClaimHeld)
+	assert.Contains(t, r.err.Error(), "run plain `"+reapCommand(r.h.ConfigPath, r.h.ScenarioPath)+"`")
+	assert.Empty(t, writes(lc))
+}
+
+// Who holds the claim is said by whoever minted the holder, never read
+// from its shape: a run whose id starts like reap's is still this run.
+func TestAWSClaimHeadNamesTheActorThatMintedTheHolder(t *testing.T) {
+	rt := signalRuntime()
+	require.NoError(t, mintAWSClaimHolder(rt, layer3AWS, awsReapHolderPrefix+"20261010T000000Z"))
+	rt.awsClaim = awsClaim{state: awsClaimUnknown}
+
+	head := awsClaimHead(rt, rt.awsClaim)
+
+	assert.True(t, strings.HasPrefix(head, "this run may hold the aws scope's claim for "+awsReapHolderPrefix), head)
+	assert.NotContains(t, awsReapAdvice(rt, rt.awsClaim), "this reap")
 }

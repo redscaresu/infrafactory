@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -32,6 +34,9 @@ type awsRunOptions struct {
 	scenario  func(*CommandTestHarness)
 	customize func(*config.Config)
 	deps      func(*RuntimeDependencies)
+	// iterateFails: the loop ends in an error, so there is no result and
+	// no terminal reason.
+	iterateFails bool
 }
 
 // awsRun is one `infrafactory run` of an aws scenario, with the gate
@@ -120,6 +125,9 @@ func runAWSRun(t *testing.T, lc *awsLifecycle, o awsRunOptions) awsRun {
 	cmd.SetArgs(append([]string{h.ScenarioPath, "--config", h.ConfigPath, "--output", string(OutputModeJSON),
 		"--reset-mocks=false"}, o.flags...))
 	run.h, run.err, run.output = h, cmd.Execute(), stdout.String()+stderr.String()
+	if o.iterateFails {
+		return run
+	}
 	require.Truef(t, strings.HasPrefix(stdout.String(), "{"), "run wrote no JSON result: %v\n%s", run.err, run.output)
 	run.result = decodeMachineOutput(t, bytes.NewBufferString(stdout.String()))
 	require.NotEqual(t, -1, loopEnd, "the loop ended: %s", run.output)
@@ -172,6 +180,22 @@ func TestAWSRunFailureArmLeavesAReleasedClaimAlone(t *testing.T) {
 	assert.Contains(t, run.result.Stages[i].Detail, "not held by this run")
 }
 
+// Every release in one process uses its one holder: a release does not
+// clear it, so the next iteration's claim is released too.
+func TestAWSRunReleasesEachIterationsClaimWithTheProcessHolder(t *testing.T) {
+	lc := newAWSLifecycle(t)
+	applyFails(lc)
+
+	run := runAWSRun(t, lc, awsRunOptions{repairs: 2})
+
+	require.Error(t, run.err)
+	assert.Equal(t, 2, run.generates, "generate")
+	assert.Equal(t, 2, lc.count(deleteClaim), "each iteration released its claim")
+	assert.NotContains(t, run.output, "this run may hold the aws scope's claim", "no release was unknown")
+	_, held := lc.claim()
+	assert.False(t, held)
+}
+
 func TestAWSRunFailureArmLeavesAnotherHoldersClaimAlone(t *testing.T) {
 	lc := newAWSLifecycle(t)
 	dirtySweep(lc)
@@ -186,6 +210,158 @@ func TestAWSRunFailureArmLeavesAnotherHoldersClaimAlone(t *testing.T) {
 	assert.Equal(t, []string{getClaim}, run.armCalls, "zero writes and zero EC2 calls")
 	holder, _ := lc.claim()
 	assert.Equal(t, lifecycleOtherHolder, holder)
+}
+
+// Interrupted with a dirty scope that the failure arm then finds clean:
+// the notice waits for the arm, so it says the claim was released.
+func TestInterruptedAWSRunNamesTheClaimTheFailureArmLeaves(t *testing.T) {
+	lc := newAWSLifecycle(t)
+	dirtySweep(lc)
+	lc.deploy.err = context.Canceled
+	lc.deploy.onRunDir = func(dir string) {
+		lc.record(deployRun)
+		writeAWSStateAndStaleMarker(t, dir, false)
+		lc.cancel()
+	}
+
+	notifies := 0
+	notify := func(parent context.Context, sigs ...os.Signal) (context.Context, context.CancelFunc) {
+		notifies++
+		ctx, cancel := lc.notify(parent, sigs...)
+		if notifies == 2 {
+			cancel() // a second Ctrl-C, in the arm
+		}
+		return ctx, cancel
+	}
+
+	run := runAWSRun(t, lc, awsRunOptions{repairs: 2, notify: notify, loopEnded: func() {
+		lc.mu.Lock()
+		defer lc.mu.Unlock()
+		delete(lc.ec2, "DescribeInstances")
+	}})
+
+	require.Error(t, run.err)
+	assert.Equal(t, 2, notifies, "the arm runs under caught signals after the loop's interrupt")
+	assert.Contains(t, run.armCalls, deleteClaim, "the arm released the claim")
+	assertInterruptNamesTheReap(t, lc, run.output, run.h.ConfigPath, run.h.ScenarioPath, awsClaimNotHeld)
+	assert.Equal(t, 1, strings.Count(run.output, "Interrupted:"), "one settled notice")
+	assert.Equal(t, 1, strings.Count(run.output, "Interrupted —"), "one first-signal notice per process")
+}
+
+// A second Ctrl-C before the failure arm reads the claim does not make a
+// claim this run holds unknown: the read ignores cancellation, as the
+// sweep does, and the arm still destroys.
+func TestAWSRunFailureArmReadsTheClaimThroughASecondInterrupt(t *testing.T) {
+	lc := newAWSLifecycle(t)
+	dirtySweep(lc)
+	notifies := 0
+	notify := func(parent context.Context, _ ...os.Signal) (context.Context, context.CancelFunc) {
+		ctx, cancel := context.WithCancel(parent)
+		notifies++
+		if notifies == 2 {
+			cancel() // the arm's: interrupted before it reads the claim
+		}
+		return ctx, cancel
+	}
+
+	run := runAWSRun(t, lc, awsRunOptions{repairs: 1, notify: notify})
+
+	require.Error(t, run.err)
+	assert.Equal(t, getClaim, run.armCalls[0], "the arm reads the claim first")
+	assert.Contains(t, run.armCalls, destroyRun, "the arm destroys")
+	assert.NotContains(t, run.output, "this run may hold the aws scope's claim for "+lc.runHolder+":", "no hedged kept-claim detail")
+	assertInterruptNamesTheReap(t, lc, run.output, run.h.ConfigPath, run.h.ScenarioPath, awsClaimHeld)
+}
+
+// A clean release clears runtime.awsClaim's holder; the arm still knows
+// the run's own, so a claim stored under it is the run's to tear down.
+func TestAWSRunFailureArmKnowsTheRunsHolderAfterARelease(t *testing.T) {
+	lc := newAWSLifecycle(t)
+	applyFails(lc)
+
+	run := runAWSRun(t, lc, awsRunOptions{repairs: 1, loopEnded: func() {
+		lc.mu.Lock()
+		defer lc.mu.Unlock()
+		lc.params[harness.AWSClaimParameter] = lc.runHolder
+	}})
+
+	require.Error(t, run.err)
+	assert.Equal(t, []string{deleteClaim}, writesIn(run.armCalls), "the arm released the run's claim")
+	_, held := lc.claim()
+	assert.False(t, held)
+}
+
+// A stalled claim read in the arm, which no signal can end, is ended by
+// its bound: the arm returns and reports the claim unknown.
+func TestAWSRunFailureArmBoundsAStalledClaimRead(t *testing.T) {
+	lc := newAWSLifecycle(t)
+	dirtySweep(lc)
+	awsClaimReadTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { awsClaimReadTimeout = harness.AWSClaimTimeout })
+
+	run := runAWSRun(t, lc, awsRunOptions{repairs: 1, loopEnded: func() {
+		lc.mu.Lock()
+		defer lc.mu.Unlock()
+		lc.stallClaimRead = true
+	}})
+
+	require.Error(t, run.err)
+	lc.mu.Lock()
+	assert.True(t, lc.stalledToContext, "the read ended by its bound, not by the stall's own limit")
+	lc.mu.Unlock()
+	assert.Contains(t, run.output, "this run may hold the aws scope's claim for "+lc.runHolder+":")
+}
+
+// A release that settles the claim as not held, or held by another, is
+// not a kept claim: the claim stage's own failure, and the run ends for
+// its own reason.
+func TestAWSRunReleaseThatSettlesTheClaimElsewhereIsNotAKeptClaim(t *testing.T) {
+	for name, tc := range map[string]struct {
+		settle func(lc *awsLifecycle)
+		want   string
+	}{
+		"not held": {settle: func(lc *awsLifecycle) { delete(lc.params, harness.AWSClaimParameter) },
+			want: "this run does not hold the aws scope's claim:"},
+		"another holder": {settle: func(lc *awsLifecycle) { lc.params[harness.AWSClaimParameter] = lifecycleOtherHolder },
+			want: "this run does not hold the aws scope's claim: " + lifecycleOtherHolder + " does:"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			lc := newAWSLifecycle(t)
+			applyFails(lc)
+			lc.onEC2 = func(action string) {
+				if action == "DescribeInstances" {
+					tc.settle(lc)
+				}
+			}
+
+			run := runAWSRun(t, lc, awsRunOptions{repairs: 1})
+
+			require.Error(t, run.err)
+			assert.False(t, slices.ContainsFunc(run.result.Stages, isStage(StageAWSScopeClaimKept)), "no %s stage", StageAWSScopeClaimKept)
+			assert.NotEqual(t, terminalReasonAWSScopeClaimKept, run.terminalReason())
+			assert.Contains(t, run.output, tc.want)
+		})
+	}
+}
+
+// The arm cannot read the claim, so it cannot tell whether this run still
+// holds it: it names both reaps, each with the case it fits.
+func TestAWSRunFailureArmNamesBothReapsWhenTheClaimIsUnreadable(t *testing.T) {
+	lc := newAWSLifecycle(t)
+	dirtySweep(lc)
+
+	run := runAWSRun(t, lc, awsRunOptions{repairs: 1, loopEnded: func() {
+		lc.mu.Lock()
+		defer lc.mu.Unlock()
+		lc.denied[getClaim] = true
+	}})
+
+	require.Error(t, run.err)
+	assert.Equal(t, []string{getClaim}, run.armCalls, "the arm only tries to read the claim")
+	details := run.output
+	assert.Contains(t, details, "this run may hold the aws scope's claim for "+lc.runHolder)
+	assert.Contains(t, details, "If this run holds the claim, `"+lc.takeOver(run.h.ConfigPath, run.h.ScenarioPath)+"` sweeps the scope")
+	assert.Contains(t, details, "if no one holds it, `"+reapCommand(run.h.ConfigPath, run.h.ScenarioPath)+"` does")
 }
 
 func TestAWSRunEndsWhenAnIterationKeepsTheClaimForADirtySweep(t *testing.T) {
@@ -231,7 +407,7 @@ func TestAWSRunEndsWhenAnIterationKeepsTheClaimForADirtySweep(t *testing.T) {
 			}
 			assert.Empty(t, writesIn(run.armCalls), "nothing released")
 			assert.True(t, held, "the claim is kept")
-			assert.Contains(t, run.output, reapCommand(run.h.ConfigPath, run.h.ScenarioPath))
+			assert.Contains(t, run.output, lc.takeOver(run.h.ConfigPath, run.h.ScenarioPath))
 		})
 	}
 }
@@ -260,9 +436,52 @@ func TestAWSRunWithNoDestroyEndsAfterOneIteration(t *testing.T) {
 			assert.True(t, held, "the claim is kept")
 			i := slices.IndexFunc(run.result.Stages, isStage(StageAWSScopeClaimKept))
 			require.NotEqual(t, -1, i, "the run's stages carry %s", StageAWSScopeClaimKept)
-			assert.Contains(t, run.result.Stages[i].Detail, reapCommand(run.h.ConfigPath, run.h.ScenarioPath))
+			assert.Contains(t, run.result.Stages[i].Detail, lc.takeOver(run.h.ConfigPath, run.h.ScenarioPath))
+			if tc.want == "target_reached" {
+				assert.NotContains(t, run.output, "Run ended:", "a run that reached its target names no reap")
+				return
+			}
+			assert.Contains(t, run.output, "\nRun ended: this run keeps the aws scope's claim for "+lc.runHolder+". `"+
+				lc.takeOver(run.h.ConfigPath, run.h.ScenarioPath)+"` sweeps the scope")
 		})
 	}
+}
+
+// An iterate error ends the run before the failure arm, with the claim
+// an iteration kept: the run still names the take-over.
+func TestAWSRunIterateErrorNamesTheTakeOver(t *testing.T) {
+	lc := newAWSLifecycle(t)
+	dirtySweep(lc)
+	var runstore string
+	lc.deploy.onRunDir = func(string) {
+		lc.record(deployRun)
+		// persistRunIteration, after this iteration, cannot write.
+		require.NoError(t, filepath.WalkDir(runstore, func(path string, d fs.DirEntry, err error) error {
+			if err == nil && d.IsDir() {
+				err = os.Chmod(path, 0o555)
+			}
+			return err
+		}))
+	}
+
+	run := runAWSRun(t, lc, awsRunOptions{repairs: 2, iterateFails: true, scenario: func(h *CommandTestHarness) {
+		runstore = h.RunstoreRoot()
+		t.Cleanup(func() {
+			_ = filepath.WalkDir(runstore, func(path string, d fs.DirEntry, err error) error {
+				if err == nil && d.IsDir() {
+					_ = os.Chmod(path, 0o755)
+				}
+				return nil
+			})
+		})
+	}})
+
+	require.Error(t, run.err)
+	assert.Contains(t, run.err.Error(), "persist run iteration 1")
+	_, held := lc.claim()
+	require.True(t, held, "the iteration kept the claim")
+	assert.Contains(t, run.output, "\nRun ended: this run keeps the aws scope's claim for "+lc.runHolder+". `"+
+		lc.takeOver(run.h.ConfigPath, run.h.ScenarioPath)+"` sweeps the scope")
 }
 
 // Interrupted during the failure path's own sweep, after the loop: the
@@ -282,8 +501,7 @@ func TestAWSRunInterruptedDuringTheFailureArmPrintsTheReapCommand(t *testing.T) 
 	assert.Empty(t, writesIn(run.armCalls), "nothing released")
 	_, held := lc.claim()
 	assert.True(t, held, "the claim is kept")
-	assert.Contains(t, run.output, "Interrupted: this run keeps the aws scope's claim")
-	assert.Contains(t, run.output, reapCommand(run.h.ConfigPath, run.h.ScenarioPath))
+	assertInterruptNamesTheReap(t, lc, run.output, run.h.ConfigPath, run.h.ScenarioPath, awsClaimHeld)
 	assert.True(t, slices.ContainsFunc(run.result.Stages, isStage(StageAWSScopeClaimKept)))
 }
 
@@ -293,9 +511,10 @@ func TestInterruptedAWSRunPrintsTheReapCommand(t *testing.T) {
 	for name, tc := range map[string]struct {
 		dirty bool
 		want  string
+		state awsClaimState
 	}{
-		"dirty scope": {dirty: true, want: terminalReasonAWSScopeClaimKept},
-		"clean scope": {want: "interrupted"},
+		"dirty scope": {dirty: true, want: terminalReasonAWSScopeClaimKept, state: awsClaimHeld},
+		"clean scope": {want: "interrupted", state: awsClaimNotHeld},
 	} {
 		t.Run(name, func(t *testing.T) {
 			lc := newAWSLifecycle(t)
@@ -314,8 +533,7 @@ func TestInterruptedAWSRunPrintsTheReapCommand(t *testing.T) {
 			require.Error(t, run.err)
 			assert.Equal(t, 1, run.generates, "generate")
 			assert.Equal(t, tc.want, run.terminalReason())
-			assert.Contains(t, run.output, "Interrupted: this run keeps the aws scope's claim")
-			assert.Contains(t, run.output, reapCommand(run.h.ConfigPath, run.h.ScenarioPath))
+			assertInterruptNamesTheReap(t, lc, run.output, run.h.ConfigPath, run.h.ScenarioPath, tc.state)
 			assert.NotContains(t, run.output, "nothing to clean up")
 			lc.scw.assertUntouched(t)
 		})

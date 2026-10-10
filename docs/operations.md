@@ -357,9 +357,24 @@ What refuses, in order. Generation and the gate cost an LLM call, so the checks 
    first: a `preflight` failure next to it is that refusal, not a key problem.
 
 What a failure prints: once the claim is taken, any ending short of a clean sweep keeps the claim
-and adds stage `aws_scope_claim_kept`, whose detail names the reap command,
-`infrafactory reap scenarios/training/aws-web-live.yaml` (with your `--config` added when you
-passed one). That command destroys what is left and releases the claim; nothing else does.
+and adds stage `aws_scope_claim_kept`, whose detail names the reap command that takes the claim
+over, `infrafactory reap scenarios/training/aws-web-live.yaml --take-over <holder>` (with your
+`--config` added when you passed one, and the run's holder in place of `<holder>`). That command
+destroys what is left and releases the claim; nothing else does. Plain reap refuses a held claim,
+and `--take-over` refuses a claim its holder does not hold, so the run names only the form that
+works. When it cannot tell whether it holds the claim (a claim put, read or release that failed
+without saying who holds it), it names both: `--take-over` if the run holds the claim, plain reap
+if no one does. When another run holds the claim, it names that holder and the `--take-over`
+naming it, to use once that run has ended. A run that ends short of its target while the claim
+may still be its own prints that advice on stderr too. The first Ctrl-C prints both forms at once, with the
+run's holder, in case the process dies before its teardown finishes. Signals stay caught while
+an iteration, and then the failure arm, runs, so a second Ctrl-C there does not cut the teardown
+short. The short window in `run` after the loop ends and before the failure arm starts is not yet
+covered: a Ctrl-C there ends the process (story `layer3-interrupt-finishes-teardown`). Once the
+teardown ends, the run prints the settled choice: `--take-over` while the run keeps the claim,
+plain reap once its sweep released it. A reap whose own claim attempt has an unknown outcome, or a
+`reap --take-over` that deleted the old claim but could not take its own, names the reap to run
+next; a `--take-over` that finds no claim names plain reap.
 
 The first real AMI resolve is denied: the key's policy, `docs/layer3/aws/iam-policy.json`, does
 not yet grant ssm:GetParameter on the AL2023 public parameter, nor any action the apply needs.
