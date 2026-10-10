@@ -1140,6 +1140,7 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 		Stages:       stages,
 		Failures:     failures,
 		PlanLiveText: planLiveText,
+		Cloud:        sc.Cloud,
 	}
 	if status == CommandStatusFailed {
 		return result, &CLIError{

@@ -3,6 +3,9 @@ package cli
 import (
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNormalizeOutputOrdersStagesAndFailuresDeterministically(t *testing.T) {
@@ -150,5 +153,29 @@ func TestRenderMachineJSONIncludesExplainabilityForCriteriaAndPolicyFailures(t *
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected machine json to contain %q, got:\n%s", check, output)
 		}
+	}
+}
+
+func TestCredentialsExplanationFollowsTheScenarioCloud(t *testing.T) {
+	t.Parallel()
+
+	failure := FailureSummary{Layer: "sandbox_deploy", Stage: "preflight", Check: "credentials", Detail: "refused"}
+	explain := func(cloud string) ExplainabilitySummary {
+		result := NormalizeOutput(OutputResult{Command: "test", Cloud: cloud, Failures: []FailureSummary{failure}})
+		require.Len(t, result.Explainability, 1)
+		return result.Explainability[0]
+	}
+
+	aws := explain("aws")
+	assert.NotContains(t, aws.Summary+aws.Action, "SCW_")
+	assert.NotContains(t, aws.Summary+aws.Action, "Scaleway")
+	assert.Contains(t, aws.Action, "layer3-aws.env")
+	assert.Contains(t, aws.Action, "aws config block")
+	assert.Contains(t, aws.Action, "aws_scope_claim")
+
+	for _, cloud := range []string{"scaleway", ""} {
+		scw := explain(cloud)
+		assert.Equal(t, "Layer 3 real Scaleway deploy is enabled but credentials are unavailable", scw.Summary, "cloud %q", cloud)
+		assert.Equal(t, "set SCW_ACCESS_KEY and SCW_SECRET_KEY before enabling sandbox_deploy", scw.Action, "cloud %q", cloud)
 	}
 }
