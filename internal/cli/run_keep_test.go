@@ -521,3 +521,65 @@ func TestKeepStillDestroysAnIterationThatFailed(t *testing.T) {
 		"a failing iteration's resources are destroyed even under --keep: nothing would ever record them")
 	assert.NotContains(t, stageDetail(result.Stages, "sandbox_deploy", "destroy"), "kept by --keep")
 }
+
+// An interrupt during the mock destroy fails the iteration, so `run
+// --keep` destroys the stack rather than keeping and registering it, and
+// ends "interrupted", never target_reached (whose path learns pitfalls).
+func TestInterruptedRunKeepDoesNotKeepTheStack(t *testing.T) {
+	h := newCommandTestHarness(t)
+	lc := newAWSLifecycle(t) // its notify and signal only
+	sandboxCredsForTest(t)
+
+	scenarioPath := filepath.Join(h.WorkspaceDir, "scenarios", "training", "web-live-paris.yaml")
+	require.NoError(t, os.MkdirAll(filepath.Dir(scenarioPath), 0o755))
+	require.NoError(t, os.WriteFile(scenarioPath, []byte(liveServiceScenarioYAML), 0o600))
+
+	sandboxDestroy := &fakeSandboxDestroyHarness{
+		result: &harness.SandboxDestroyResult{Destroy: harness.StageResult{Stage: "destroy"}},
+	}
+	opts := isolatedRunOpts(h, func(cfg config.Config) config.Config {
+		cfg.Validation.Layers.SandboxDeploy.Enabled = true
+		return cfg
+	})
+	opts.deps = RuntimeDependencies{
+		Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
+			return &generator.GeneratedCode{Files: map[string][]byte{
+				"main.tf":                 []byte("terraform {}\n"),
+				harness.LiveStateFilename: []byte(`{"resources":[{"type":"scaleway_instance_server"}]}`),
+			}}, nil
+		}),
+		Static: &fakeStaticHarness{result: &harness.StaticResult{
+			Stages:   []harness.StageResult{{Stage: "init"}, {Stage: "validate"}, {Stage: "plan"}, {Stage: "show"}},
+			PlanJSON: []byte(`{"planned_values":{"root_module":{}}}`),
+		}},
+		MockDeploy: &fakeMockDeployHarness{result: &harness.MockDeployResult{
+			Apply: harness.StageResult{Stage: "apply"}, StateSnapshot: []byte(`{}`),
+		}},
+		MockState:      &fakeRunMockStateClient{statePayload: []byte(`{"instance":{"servers":[]}}`)},
+		Destroy:        ctxDestroyHarness{during: lc.signal},
+		RunProject:     &fakeRunProject{created: harness.RunProject{ID: "run-proj-keep", Name: "if-run-keep"}},
+		SandboxDeploy:  &fakeSandboxDeployHarness{result: &harness.SandboxDeployResult{Apply: harness.StageResult{Stage: "apply"}}},
+		SandboxDestroy: sandboxDestroy,
+		OrphanSweep:    &fakeOrphanSweep{},
+		RealProbe:      &fakeRealProbeHarness{result: &harness.RealProbeResult{}},
+	}
+
+	cmd := newRunCommandForTest(opts)
+	cmd.RunE = withRuntimeWithOptions("run", opts, sealedHandler(&bytes.Buffer{},
+		func(cmd *cobra.Command, args []string, rt *CommandRuntime) error {
+			return runRunWithNotify(cmd, args, rt, lc.notify)
+		}))
+	stdout := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{scenarioPath, "--config", h.ConfigPath, "--keep", "--output", string(OutputModeJSON),
+		"--reset-mocks=false"})
+
+	assert.Error(t, cmd.Execute(), "an interrupted run never succeeds:\n%s", stdout.String())
+	result := decodeMachineOutput(t, bytes.NewBufferString(stdout.String()))
+	assert.Equal(t, "interrupted", stageDetail(result.Stages, "run", "terminal_reason"))
+	assert.NotZero(t, sandboxDestroy.calls, "an interrupted run is not kept")
+	deployments, _, err := livestore.NewFilesystemStore(h.LivestoreRoot()).List()
+	require.NoError(t, err)
+	assert.Empty(t, deployments, "nothing registered")
+}

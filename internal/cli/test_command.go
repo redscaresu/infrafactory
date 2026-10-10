@@ -382,19 +382,34 @@ func mockDeployFailureDetail(err *harness.MockDeployError) string {
 	return stderrFailureDetail(err.Err, stderr)
 }
 
-// destroyMock runs the mock (Layer 2) destroy. One a signal cut short is
-// reported skipped, never failed: an interrupt is not a leftover. It is
-// not rerun on a fresh context, which would hold up the real teardown
-// below it, the one that holds billable resources.
+// destroyMock runs the mock (Layer 2) destroy. A destroy an interrupt
+// stopped before tofu could run is reported skipped, not failed: the
+// interrupt is not a leftover. The interrupt itself is a failure, so an
+// interrupted command never succeeds, keeps its sandbox or reaches
+// target_reached. The destroy is not rerun on a fresh context, which
+// would hold up the real teardown below it.
 func destroyMock(ctx context.Context, runtime *CommandRuntime, outputDir string, env map[string]string) ([]StageSummary, []FailureSummary) {
 	result, err := runtime.Deps.Destroy.Run(ctx, outputDir, env)
-	if err == nil || ctx.Err() == nil {
+	if !destroyInterrupted(ctx, err) {
 		return appendDestroyResult(nil, nil, result, err)
 	}
-	return []StageSummary{{
+	skip := StageSummary{
 		Layer: "destruction", Stage: "destroy", Status: StageStatusSkip,
 		Detail: "skipped: the run was interrupted before the mock destroy finished",
-	}}, nil
+	}
+	interrupt := FailureSummary{
+		Layer: "run", Stage: "interrupted", Check: "interrupted", Command: "destroy harness",
+		Detail: "the run was interrupted before the mock destroy ran, so the destruction layer is unproven",
+	}
+	return []StageSummary{skip}, []FailureSummary{interrupt}
+}
+
+// destroyInterrupted: the destroy stage itself failed for the cancelled
+// context. Any other destroy error under an interrupt is still real.
+func destroyInterrupted(ctx context.Context, err error) bool {
+	destroyErr := &harness.DestroyError{}
+	return ctx.Err() != nil && errors.As(err, &destroyErr) &&
+		destroyErr.Stage == "destroy" && errors.Is(err, context.Canceled)
 }
 
 func appendDestroyResult(stages []StageSummary, failures []FailureSummary, result *harness.DestroyResult, runErr error) ([]StageSummary, []FailureSummary) {
