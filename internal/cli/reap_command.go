@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/redscaresu/infrafactory/internal/harness"
@@ -294,7 +293,7 @@ func reapClaimedAWSScope(ctx context.Context, runtime *CommandRuntime, env map[s
 	return stages, failures
 }
 
-// runUnderSignals runs fn with a context the first SIGINT or SIGTERM
+// runUnderSignals runs fn with a context the first of guardSignals
 // ends, when Layer 3 is on, and reports whether one fired; a parent
 // context that ends on its own is not an interrupt. Signals stay caught
 // until fn returns, so no Ctrl-C kills the process mid-teardown: every
@@ -349,7 +348,7 @@ func catchSignals(
 
 	abandoned, abandon := context.WithCancel(context.WithoutCancel(parent))
 	spanCtx, endSpan := context.WithCancel(context.WithValue(parent, abandonKey{}, abandoned))
-	sigCtx, stop := notify(parent, os.Interrupt, syscall.SIGTERM)
+	sigCtx, stop := notifyGuarded(parent, notify)
 	signal := func() bool { return sigCtx.Err() != nil && parent.Err() == nil }
 	// watched is buffered, so the watcher never blocks on a caller that
 	// a panic took away.
@@ -376,7 +375,7 @@ func catchSignals(
 		}
 		printNotice()
 		endSpan()
-		next, stopNext := notify(abandoned, os.Interrupt, syscall.SIGTERM)
+		next, stopNext := notifyGuarded(abandoned, notify)
 		select {
 		case <-next.Done():
 			abandon()
@@ -421,8 +420,8 @@ func teardownContext(ctx context.Context) (context.Context, context.CancelFunc) 
 }
 
 // finishTeardown runs teardown on ctx and, when ctx ended before it could
-// finish, again on a teardownContext: the terminal sends Ctrl-C to tofu as
-// well as to this process, so the destroy it interrupted has to run again.
+// finish, again on a teardownContext: ctx's cancel interrupts tofu, so the
+// destroy it stopped has to run again.
 // Only the last run's verdict is returned.
 func finishTeardown(
 	ctx context.Context,
@@ -466,7 +465,7 @@ func (s *syncWriter) Write(p []byte) (int, error) {
 	return s.w.Write(p)
 }
 
-// withSandboxInterruptGuard runs fn with a SIGINT/SIGTERM handler that
+// withSandboxInterruptGuard runs fn with a guardSignals handler that
 // destroys real resources before the process exits.
 //
 // Without it, Ctrl-C between apply and destroy leaves billable resources
