@@ -24,16 +24,12 @@ test.describe('Functional spot-checks', () => {
 
   test('runs page renders a table or empty-state notice', async ({ page }) => {
     await page.goto('/runs');
-    // Either a table is present (real runs) or an empty-state message —
-    // both count as "rendered successfully".
-    const tableVisible = await page.locator('main table').isVisible().catch(() => false);
-    const emptyText = await page
-      .locator('main')
-      .getByText(/no runs|empty|0 runs/i)
-      .first()
-      .isVisible()
-      .catch(() => false);
-    expect(tableVisible || emptyText).toBeTruthy();
+    // Either a table is present (real runs) or the empty-state notice —
+    // both count as "rendered successfully". The retrying assertion waits
+    // for the page to load; first() because both can show at once.
+    const table = page.locator('main table');
+    const emptyState = page.locator('main').getByText('No runs match the current filters.');
+    await expect(table.or(emptyState).first()).toBeVisible();
   });
 
   test('diagnostics page renders agent + backend fields', async ({ page }) => {
