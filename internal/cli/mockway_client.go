@@ -159,20 +159,38 @@ func newCloudMockStateRouter(runtime *CommandRuntime, cfg config.Config) *cloudM
 	return router
 }
 
+// Reset names the mock and its url on failure: a reset that fails says
+// the environment is wrong, and the operator has to see which service.
 func (r *cloudMockStateRouter) Reset(ctx context.Context) error {
-	if err := r.pick("").Reset(ctx); err != nil {
-		return err
+	c := r.pick("")
+	if err := c.Reset(ctx); err != nil {
+		return fmt.Errorf("%s mock at %s: %w", r.name(c), c.baseURL, err)
 	}
 	if !r.s3AutoReset {
 		return nil
 	}
-	if extra := r.pick("s3"); extra != nil && extra != r.pick("") {
+	if extra := r.pick("s3"); extra != nil && extra != c {
 		// SeaweedFS / similar third-party S3 backends have no
 		// /mock/reset endpoint — go through the native S3 admin
 		// path (list+delete buckets).
-		return resetS3Backend(ctx, extra)
+		if err := resetS3Backend(ctx, extra); err != nil {
+			return fmt.Errorf("s3 mock at %s: %w", extra.baseURL, err)
+		}
 	}
 	return nil
+}
+
+// name is the mock c talks to, for an operator reading an error.
+func (r *cloudMockStateRouter) name(c *mockStateClient) string {
+	switch c {
+	case r.aws:
+		return "fakeaws"
+	case r.gcp:
+		return "fakegcp"
+	case r.genesys:
+		return "fakegenesys"
+	}
+	return "mockway"
 }
 
 func (r *cloudMockStateRouter) Snapshot(ctx context.Context) error {
