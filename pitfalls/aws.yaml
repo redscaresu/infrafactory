@@ -4,3 +4,17 @@ pitfalls:
       rule: "exit status 1 | stderr: ╷\n│ Error: creating S3 Bucket (infrafactory-assets-AKIA5D31D6F863AAB893): operation error S3: CreateBucket, https response error StatusCode: 400, RequestID: 18B48331628847E8530310EC, HostID: , api error InvalidBucketName: The specified bucket is not valid.\n│ \n│   w..."
       source: descriptive
       discovered_from: aws-full-stack
+    - resource: aws_subnet
+      rule: "exit status 1 | stderr: ╷\n│ Error: creating EC2 Subnet: operation error EC2: CreateSubnet, https response error StatusCode: 400, RequestID: 13b76db3-7dfc-4ab9-841d-ac95520c8d57, api error InvalidSubnet.Range: The CIDR '10.81.1.0/24' is invalid.\n│ \n│   with aws_subnet.public,\n│   on main..."
+      source: descriptive
+      discovered_from: aws-web-live
+      learned_layer: sandbox_deploy
+    - resource: aws_subnet
+      rule: |-
+        exit status 1 | stderr: ╷ Fix observed in scenario "aws-web-live": add the following HCL.
+        resource "aws_subnet" "public" {
+          cidr_block              = "10.80.1.0/24"
+        }
+      source: fix
+      discovered_from: aws-web-live
+      learned_layer: sandbox_deploy
