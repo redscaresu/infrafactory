@@ -476,7 +476,7 @@ fixed by running apply, destroy, sweep and `reap`; the probe window.
 - aws-layer3-gate — done (#358, #361, #363, #366; the lift: this PR)
 - avoid-pitfall-retirement — done (#364, #367, #371; this PR)
 - aws-layer3-wiring-proof — done (#408, #410, #412; Layer 2 LLM run 20261009T213746Z: this PR)
-- [aws-web-live-on-real-aws](../epics/aws-web-live-on-real-aws.md)
+- aws-web-live-on-real-aws — done (#416, #417, #423, #424, #425, #433, #437, #439, #440; real runs 2026-10-10: this PR)
 - [aws-web-stack-load-balancer](../epics/aws-web-stack-load-balancer.md)
 
 Order:

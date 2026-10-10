@@ -5,18 +5,14 @@ Current state, and the one place to start. It changes only when **Now** does, an
 
 ## Now
 
-**AWS web stack**: [HLD](docs/hld/2026-09-27-aws-web-stack.md); its `## Epics` shows what is done.
-The three stories the user's 2026-09-29 decisions made ready have merged (#394, #396, fakeaws #41),
-and policy-correctness is done. The user set up the AWS Layer 3 scope on 2026-09-29 (a member
-account in us-east-1, every step verified; runbook in `docs/operations.md` § Layer 3 (AWS) › Scope
-setup), and the planted-leak proof passed on it the same day: the sweep names every leak, a held
-claim refuses reap, reap empties the account. Whole-scope ownership is recorded (ADR-0040; the
-claim-sweep-reap epic is done). The gate lift (the aws-layer3-gate epic's last story) runs the AWS
-gate on the aws path and checks account and user data after apply. aws-layer3-wiring-proof is done:
-the AMI resolve is wired (#408), the whole Layer 3 order is proven against fakes (#412), the run
-checklist is in operations.md (#410), and the one Layer 2 LLM run reached its target
-(20261009T213746Z). Next is aws-web-live-on-real-aws: its wave-1 code stories are building, and
-each real-AWS run waits on the user's go.
+**AWS Layer 3 is real (2026-10-10).** Epic aws-web-live-on-real-aws is done: on the user's own
+AWS member account, the first real `test` measured the key's policy (nothing refused), the claim's
+contention and interrupt legs held, one LLM `run aws-web-live --holdout` reached target on
+iteration 1, the holdout failed a stack that opened 22, and a real apply failure
+(InvalidSubnet.Range) taught `pitfalls/aws.yaml` an entry that the next iteration used. Every run
+ended with the account swept empty; all real spend stayed under EUR 0.10 of the EUR 5 cap.
+[HLD](docs/hld/2026-09-27-aws-web-stack.md); its `## Epics` shows what is done. The HLD's next epic
+is aws-web-stack-load-balancer; the user plans to pivot to other work first, so it waits.
 
 What waits on the user is the board's **Waiting on you** view: `kind: lead` stories, which the
 lead runs once the user has done the story's **You:** line.

@@ -474,6 +474,16 @@ ADR-0003 permanently blocked Layer 3 due to cost, credentials, and safety concer
 - **Credentials**: user provides `SCW_ACCESS_KEY`/`SCW_SECRET_KEY` env vars with real permissions. Same mechanism as mock (dummy values), but with real keys.
 - **Safety**: Layer 2 (mockway) acts as a fast pre-check gate — structural errors caught in seconds before real API calls. Auto-destroy on failure prevents orphaned resources.
 
+### AWS
+
+On AWS, Layer 3 applies to one dedicated member account that the run owns whole (ADR-0040): a
+claim parameter in SSM serialises runs, a sweep after every run must find the account empty before
+the claim is released, and `reap --take-over <holder>` cleans up after a run that could not. The
+key's IAM policy (`docs/layer3/aws/iam-policy.json`) allows only the claim, the AMI lookup and what
+apply, destroy and reap send, pinned to one region. This is containment, not a cost estimate: the
+*Cost* bullet above still holds, and each real run's cost is a dated upper bound written by hand.
+First proven on real AWS on 2026-10-10 (epic aws-web-live-on-real-aws).
+
 ### How it works
 
 Layer 3 is an optional layer controlled by `validation.layers.sandbox_deploy.enabled: true` in `infrafactory.yaml`.
@@ -610,6 +620,12 @@ Do not return 200 with empty payload or structured null. 404 is standard REST an
 ### 11. Layer 3 credential contract
 
 Required env vars when Layer 3 is enabled: `SCW_ACCESS_KEY` and `SCW_SECRET_KEY`.
+
+AWS reads no environment variables. infrafactory reads `~/.config/infrafactory/layer3-aws.env`
+itself: mode 0600, holding exactly `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`. The config's
+`aws` block names `region`, `account_id` and `principal_arn`, and STS `GetCallerIdentity` must
+answer exactly that account and principal before any generation and again before the apply; any
+mismatch refuses the run before a model call or a claim.
 
 Validation: at run start, before any generation or apply. If either is missing:
 - CLI: exit with error `"Layer 3 requires SCW_ACCESS_KEY and SCW_SECRET_KEY environment variables"`.
