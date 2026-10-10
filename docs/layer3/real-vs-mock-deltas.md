@@ -226,3 +226,14 @@ answers `DescribeVolumes` and `DescribeNatGateways` with empty lists: an instanc
 volume and there are no NAT gateways. So a Layer 2 test cannot see a leaked root volume or a NAT
 gateway's interface; only the real sweep can. Not a defect in reap: it deletes owners before the
 things they hold, and the real account ended empty.
+
+## D8 — A subnet outside its VPC: fakeaws stores it, AWS refuses it
+
+Induced on purpose for the learning-loop proof (2026-10-10, aws-learned-pitfall-from-real-aws, run
+20261010T114213Z). `aws_subnet` with `cidr_block = "10.81.1.0/24"` in a VPC of `10.80.0.0/16`
+passed Layer 1 (no `policies/aws` rule checks CIDRs) and the fakeaws apply: `ec2CreateSubnet`
+(fakeaws `handlers/ec2.go`, at 5aeaf83) stores any `CidrBlock` without checking it lies inside the
+VPC. Real AWS refused it at the apply, deterministically (two attempts):
+`api error InvalidSubnet.Range: The CIDR '10.81.1.0/24' is invalid.` The pipeline learned an
+`aws_subnet` entry from it (`learned_layer: sandbox_deploy`), and the next iteration reached target.
+Filed against fakeaws as `fakeaws-subnet-cidr-within-vpc`, so Layer 2 catches it before a real apply.
