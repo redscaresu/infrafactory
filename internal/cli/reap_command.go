@@ -421,8 +421,8 @@ func teardownContext(ctx context.Context) (context.Context, context.CancelFunc) 
 }
 
 // finishTeardown runs teardown on ctx and, when ctx ended before it could
-// finish, again on a teardownContext: the terminal sends Ctrl-C to tofu as
-// well as to this process, so the destroy it interrupted has to run again.
+// finish, again on a teardownContext: ctx's cancel interrupts tofu, so the
+// destroy it stopped has to run again.
 // Only the last run's verdict is returned.
 func finishTeardown(
 	ctx context.Context,

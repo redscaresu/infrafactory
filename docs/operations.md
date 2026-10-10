@@ -409,8 +409,8 @@ naming it, to use once that run has ended. A run that ends short of its target w
 may still be its own prints that advice on stderr too. The first Ctrl-C prints both forms at once,
 with the run's holder, in case the process dies before its teardown finishes. The teardown then runs
 on a fresh, bounded context the Ctrl-C did not cancel: destroy, sweep and, when the scope is empty,
-release. A destroy the Ctrl-C cut short runs again, because the terminal sends Ctrl-C to tofu as
-well. Signals stay caught from the start of `run`'s loop to the end of its failure arm, auto-learn
+release. A destroy the Ctrl-C cut short runs again: tofu runs in its own process group, so the
+terminal's Ctrl-C reaches only infrafactory, whose cancel gives tofu one interrupt to stop on. Signals stay caught from the start of `run`'s loop to the end of its failure arm, auto-learn
 between them included, and a second Ctrl-C abandons the teardown, even one pressed before the
 teardown has started. Scaleway `test` and `run` tear down the same way, naming plain reap. Once the
 teardown ends, the run prints the settled choice: `--take-over` while the run keeps the claim, plain
