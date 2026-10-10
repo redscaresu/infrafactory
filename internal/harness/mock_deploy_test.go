@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestMockDeployHarnessRunSuccess(t *testing.T) {
@@ -258,4 +261,46 @@ func (f *fakeMockStateClient) State(_ context.Context) ([]byte, error) {
 		return nil, f.errState
 	}
 	return f.statePayload, nil
+}
+
+// A seed must land after the reset or restore that would drop it, and
+// before any tofu that needs it.
+func TestMockDeployHarnessSeedsAfterResetOrRestoreAndBeforeInit(t *testing.T) {
+	t.Parallel()
+	for _, mode := range []MockDeployMode{MockDeployModeClean, MockDeployModeIncremental} {
+		t.Run(string(mode), func(t *testing.T) {
+			t.Parallel()
+			runner := &fakeRunner{responses: []runnerResponse{{}, {}, {}}}
+			mockClient := &fakeMockStateClient{}
+			h := NewMockDeployHarness(runner, mockClient)
+			seeds := 0
+			h.Seed = func(context.Context) error {
+				seeds++
+				assert.True(t, mockClient.resetCalled || mockClient.restoreCalled, "seeded before the reset or restore")
+				assert.Empty(t, runner.calls, "seeded after tofu ran")
+				return nil
+			}
+
+			_, err := h.Run(context.Background(), "/tmp/workdir", nil, mode)
+
+			require.NoError(t, err)
+			assert.Equal(t, 1, seeds)
+			assert.Len(t, runner.calls, 3)
+		})
+	}
+}
+
+func TestMockDeployHarnessSeedFailureRunsNoTofu(t *testing.T) {
+	t.Parallel()
+	runner := &fakeRunner{}
+	h := NewMockDeployHarness(runner, &fakeMockStateClient{})
+	h.Seed = func(context.Context) error { return errors.New("seed refused") }
+
+	_, err := h.Run(context.Background(), "/tmp/workdir", nil, MockDeployModeClean)
+
+	var deployErr *MockDeployError
+	require.ErrorAs(t, err, &deployErr)
+	assert.Equal(t, "seed", deployErr.Stage)
+	assert.ErrorContains(t, err, "seed refused")
+	assert.Empty(t, runner.calls)
 }

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -33,15 +34,15 @@ func newMockStateClient(baseURL string) *mockStateClient {
 }
 
 func (c *mockStateClient) Reset(ctx context.Context) error {
-	return c.postNoBody(ctx, "/mock/reset", "reset mock state")
+	return c.post(ctx, "/mock/reset", "reset mock state", nil)
 }
 
 func (c *mockStateClient) Snapshot(ctx context.Context) error {
-	return c.postNoBody(ctx, "/mock/snapshot", "snapshot mock state")
+	return c.post(ctx, "/mock/snapshot", "snapshot mock state", nil)
 }
 
 func (c *mockStateClient) Restore(ctx context.Context) error {
-	return c.postNoBody(ctx, "/mock/restore", "restore mock state")
+	return c.post(ctx, "/mock/restore", "restore mock state", nil)
 }
 
 func (c *mockStateClient) State(ctx context.Context) ([]byte, error) {
@@ -74,10 +75,14 @@ func (c *mockStateClient) State(ctx context.Context) ([]byte, error) {
 	return payload, nil
 }
 
-func (c *mockStateClient) postNoBody(ctx context.Context, path string, action string) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, nil)
+// post sends body, a JSON document or nil, to path.
+func (c *mockStateClient) post(ctx context.Context, path, action string, body []byte) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("build %s request: %w", action, err)
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
 	}
 
 	resp, err := c.client.Do(req)

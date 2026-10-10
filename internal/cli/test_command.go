@@ -334,6 +334,8 @@ func appendMockDeployResult(stages []StageSummary, failures []FailureSummary, re
 	switch mockErr.Stage {
 	case "reset":
 		stages = append(stages, StageSummary{Layer: "mock_deploy", Stage: "reset", Status: StageStatusFail})
+	case "seed":
+		stages = append(stages, StageSummary{Layer: "mock_deploy", Stage: "seed", Status: StageStatusFail})
 	case "init":
 		stages = append(stages, StageSummary{Layer: "mock_deploy", Stage: "init", Status: StageStatusFail})
 	case "apply":

@@ -19,6 +19,7 @@ var awsInstanceIDRe = regexp.MustCompile(`^i-[0-9a-f]+$`)
 
 // AWSAMIRoot is an AMI's root EBS mapping as DescribeImages reports it.
 type AWSAMIRoot struct {
+	DeviceName          string
 	SizeGiB             int32
 	VolumeType          string
 	DeleteOnTermination bool
@@ -135,6 +136,7 @@ func DescribeAWSAMIRoot(ctx context.Context, env map[string]string, doer ec2.HTT
 			continue
 		}
 		return AWSAMIRoot{
+			DeviceName:          root,
 			SizeGiB:             aws.ToInt32(mapping.Ebs.VolumeSize),
 			VolumeType:          string(mapping.Ebs.VolumeType),
 			DeleteOnTermination: aws.ToBool(mapping.Ebs.DeleteOnTermination),

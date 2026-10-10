@@ -28,6 +28,10 @@ const (
 type MockDeployHarness struct {
 	runner CommandRunner
 	mock   MockStateClient
+	// Seed, when set, runs after the reset or restore and before init:
+	// it puts back what the apply needs and either one drops. A failure
+	// is stage "seed", and no tofu runs.
+	Seed func(context.Context) error
 }
 
 func NewMockDeployHarness(runner CommandRunner, mock MockStateClient) *MockDeployHarness {
@@ -107,6 +111,11 @@ func (h *MockDeployHarness) Run(ctx context.Context, workDir string, env map[str
 				Stage: "reset",
 				Err:   err,
 			}
+		}
+	}
+	if h.Seed != nil {
+		if err := h.Seed(ctx); err != nil {
+			return nil, &MockDeployError{Stage: "seed", Err: err}
 		}
 	}
 

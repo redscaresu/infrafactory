@@ -151,7 +151,7 @@ func TestDescribeAWSAMIRootDefaultEndpointIgnoresPlantedEnv(t *testing.T) {
 	got, err := DescribeAWSAMIRoot(context.Background(), env, doer, "", testEC2AMIID)
 
 	require.NoError(t, err)
-	assert.Equal(t, AWSAMIRoot{SizeGiB: 8, VolumeType: "gp3", DeleteOnTermination: true}, got)
+	assert.Equal(t, AWSAMIRoot{DeviceName: "/dev/xvda", SizeGiB: 8, VolumeType: "gp3", DeleteOnTermination: true}, got)
 	assertSealedEC2Request(t, doer, url.Values{"Action": {"DescribeImages"}, "ImageId.1": {testEC2AMIID}})
 	assert.Zero(t, trapHits(), "the planted endpoint was reached")
 }
@@ -217,7 +217,7 @@ func TestDescribeAWSAMIRootAgainstAFakeEC2(t *testing.T) {
 		got, err := DescribeAWSAMIRoot(context.Background(), env, NewLoopbackOnlyHTTPClient(), endpoint, testEC2AMIID)
 
 		require.NoError(t, err)
-		assert.Equal(t, AWSAMIRoot{SizeGiB: 8, VolumeType: "gp3", DeleteOnTermination: true}, got)
+		assert.Equal(t, AWSAMIRoot{DeviceName: "/dev/xvda", SizeGiB: 8, VolumeType: "gp3", DeleteOnTermination: true}, got)
 		require.Len(t, forms(), 1)
 		assert.Equal(t, []string{testEC2AMIID}, forms()[0]["ImageId.1"])
 	})

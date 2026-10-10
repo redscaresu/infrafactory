@@ -442,7 +442,7 @@ func buildRuntime(cmd *cobra.Command, opts runtimeOptions) (*CommandRuntime, err
 		deps.Static = harness.NewStaticHarness(execCommandRunner{})
 	}
 	if deps.MockDeploy == nil {
-		deps.MockDeploy = harness.NewMockDeployHarness(execCommandRunner{}, deps.MockState)
+		deps.MockDeploy = newMockDeployHarness(runtime, deps.MockState)
 	}
 	if deps.Destroy == nil {
 		deps.Destroy = harness.NewDestroyHarness(execCommandRunner{}, deps.MockState)

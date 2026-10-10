@@ -556,7 +556,7 @@ func SealNetwork(t *testing.T) {
 }
 
 // mirrorAWSProvider downloads hashicorp/aws into a new directory that
-// cleanupAWSMirror removes when the test binary exits.
+// CleanupAWSMirror removes when the test binary exits.
 func mirrorAWSProvider() (string, error) {
 	configDir, err := os.MkdirTemp("", "infrafactory-aws-mirror-config-")
 	if err != nil {
@@ -588,9 +588,11 @@ func mirrorAWSProvider() (string, error) {
 	return mirrorDir, nil
 }
 
-// cleanupAWSMirror removes SealNetwork's mirror. TestMain calls it: the
-// mirror outlives every single test that uses it.
-func cleanupAWSMirror() {
+// CleanupAWSMirror removes SealNetwork's mirror. TestMain calls it: the
+// mirror outlives every single test that uses it. A test binary with one
+// sealed test, and no TestMain of this package, calls it from that test's
+// cleanup.
+func CleanupAWSMirror() {
 	if awsMirrorDir != "" {
 		_ = os.RemoveAll(awsMirrorDir)
 	}
