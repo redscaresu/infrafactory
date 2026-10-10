@@ -214,6 +214,8 @@ jobs:
       # needing fakeaws STS. S3 needs Docker (TestE2E_AWSFullStack).
       # `pitfalls check-avoid` retires on fakeaws, and every retired
       # avoid record in pitfalls/avoid-checks/ must still replay clean.
+      # The Layer 2 seed of the resolved AMI runs from internal/cli,
+      # whose tests alone can set that AMI.
       # fakeaws is pinned to one commit, so bumping FAKEAWS_SHA is a
       # deliberate edit. -count=1: the test cache cannot see the sibling
       # checkout, so a cached PASS could replay after a bump. `go test`
@@ -221,7 +223,7 @@ jobs:
       # only on each test's own PASS line.
       - name: AWS against fakeaws
         env:
-          FAKEAWS_SHA: ee7656a00820db216d74b089dbef5c4ef54def10
+          FAKEAWS_SHA: f4d20e541446788bb0ceb947bd1ad63b1257c613
           INFRAFACTORY_ENABLE_E2E: "1"
         run: |
           set -o pipefail
@@ -230,7 +232,7 @@ jobs:
           git -C ../fakeaws checkout -q FETCH_HEAD
           tests=$(grep -v '^#' .github/fakeaws-e2e-tests)
           [ -n "$tests" ] || { echo "no tests listed in .github/fakeaws-e2e-tests"; exit 1; }
-          go test ./internal/e2e -run "^($(echo $tests | tr ' ' '|'))\$" -count=1 -v | tee "$RUNNER_TEMP/aws-fakeaws.log"
+          go test ./internal/e2e ./internal/cli -run "^($(echo $tests | tr ' ' '|'))\$" -count=1 -v | tee "$RUNNER_TEMP/aws-fakeaws.log"
           for test in $tests; do
             grep -q "^--- PASS: $test " "$RUNNER_TEMP/aws-fakeaws.log" || { echo "$test did not PASS"; exit 1; }
           done
