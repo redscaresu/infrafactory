@@ -6,8 +6,11 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"os/signal"
 	"sort"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -103,6 +106,70 @@ func envKeyMatches(key string, patterns []string) bool {
 	return false
 }
 
+// guardSignals are the signals a signal guard turns into a context
+// cancel, so tofu, in its own process group, hears of them only through
+// Run's Cancel. SIGQUIT is left out: it asks for a goroutine dump now.
+var guardSignals = []os.Signal{os.Interrupt, syscall.SIGTERM, syscall.SIGHUP}
+
+// signalGuards counts the guards catching guardSignals right now. Signal
+// handling is process-wide, so this is too: each guard receives its own
+// copy of a signal.
+var signalGuards atomic.Int32
+
+// holdSignalGuard records a guard catching guardSignals until the
+// returned func is called.
+func holdSignalGuard() func() {
+	signalGuards.Add(1)
+	return sync.OnceFunc(func() { signalGuards.Add(-1) })
+}
+
+// raiseWait bounds how long release waits for a signal it raised again
+// to end the process. Delivery to itself is asynchronous, and Run must
+// not return meanwhile: the caller would run on, and the next tofu's
+// Run would catch the signal.
+const raiseWait = time.Second
+
+// catchSignalsDuringRun turns a signal into a cancel of ctx while tofu
+// runs, so tofu gets its one SIGINT through Cancel whatever the caller
+// does about signals. Where no guard holds the signal (live teardown,
+// Layer 2, the UI), release raises it again once tofu has stopped,
+// ending the process as it would have ended without this. Otherwise the
+// process would die at once and leave tofu running with no parent, to
+// die mid-destroy on its next write to a broken pipe. Where a guard
+// holds it, raising it again would reach that guard as a second signal,
+// which abandons a teardown.
+func catchSignalsDuringRun(ctx context.Context) (context.Context, func()) {
+	caught := make(chan os.Signal, 1)
+	signal.Notify(caught, guardSignals...)
+	ctx, cancel := context.WithCancel(ctx)
+	var sig os.Signal
+	watched := make(chan struct{})
+	go func() {
+		defer close(watched)
+		select {
+		case sig = <-caught:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+	return ctx, func() {
+		signal.Stop(caught)
+		cancel()
+		<-watched
+		if sig == nil {
+			select {
+			case sig = <-caught:
+			default:
+			}
+		}
+		if sig == nil || signalGuards.Load() > 0 {
+			return
+		}
+		_ = syscall.Kill(os.Getpid(), sig.(syscall.Signal))
+		time.Sleep(raiseWait)
+	}
+}
+
 // cancelKillFallback is how long a cancelled command may ignore SIGINT
 // before it is killed. Long enough for tofu to flush state, short enough
 // that a hung provider cannot stall a teardown indefinitely.
@@ -110,6 +177,8 @@ func envKeyMatches(key string, patterns []string) bool {
 var cancelKillFallback = 20 * time.Second
 
 func (execCommandRunner) Run(ctx context.Context, cmd harness.Command) (harness.CommandResult, error) {
+	ctx, release := catchSignalsDuringRun(ctx)
+	defer release()
 	execCmd := exec.CommandContext(ctx, cmd.Name, cmd.Args...)
 	// Interrupt, not kill. The default CommandContext cancel sends
 	// SIGKILL, which stops `tofu apply` mid-flight: a resource whose
