@@ -223,7 +223,7 @@ jobs:
       # only on each test's own PASS line.
       - name: AWS against fakeaws
         env:
-          FAKEAWS_SHA: 5aeaf83a6898a1e87e14aa5ec4129bedf8754112
+          FAKEAWS_SHA: daa0379ec3641818ab8e8c1ac154f9da5b32dd1b
           INFRAFACTORY_ENABLE_E2E: "1"
         run: |
           set -o pipefail

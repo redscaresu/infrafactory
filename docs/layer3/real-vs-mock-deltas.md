@@ -236,4 +236,6 @@ passed Layer 1 (no `policies/aws` rule checks CIDRs) and the fakeaws apply: `ec2
 VPC. Real AWS refused it at the apply, deterministically (two attempts):
 `api error InvalidSubnet.Range: The CIDR '10.81.1.0/24' is invalid.` The pipeline learned an
 `aws_subnet` entry from it (`learned_layer: sandbox_deploy`), and the next iteration reached target.
-Filed against fakeaws as `fakeaws-subnet-cidr-within-vpc`, so Layer 2 catches it before a real apply.
+Fixed in fakeaws #45 (`fakeaws-subnet-cidr-within-vpc`, 2026-10-10): `CreateSubnet` answers 400
+`InvalidSubnet.Range` for a CIDR outside the VPC or not between /16 and /28, so Layer 2 catches it
+before a real apply. Overlap between sibling subnets is still not checked.
