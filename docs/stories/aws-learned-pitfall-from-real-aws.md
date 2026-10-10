@@ -42,8 +42,8 @@ docs/layer3/real-vs-mock-deltas.md in the same PR (or file a fakeaws story and l
   (AccessDenied, UnauthorizedOperation), transient or mock-gap failure, and says why it is a
   deterministic HCL lesson.
 - The PR's only pitfalls diff is one added entry in pitfalls/aws.yaml with resource aws_*,
-  learned_layer sandbox_deploy and source learned (or descriptive). It has no 12-digit run, and
+  learned_layer sandbox_deploy and source learned (or descriptive). It has no account id (the configured `aws.account_id` in any form, or an ARN's account field), and
   `git diff` of it equals the worktree's diff byte for byte.
 - The fakeaws/real gap is in docs/layer3/real-vs-mock-deltas.md or filed as a fakeaws story.
 - pitfalls_source_ratchet_test.go (1000-byte cap) and TestPitfallsSourceEnum pass. The PR body states
-  the run id and the dated cost bound, with no 12-digit run.
+  the run id and the dated cost bound, with no account id (the configured `aws.account_id` in any form, or an ARN's account field).

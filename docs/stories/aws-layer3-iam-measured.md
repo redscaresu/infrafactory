@@ -56,4 +56,4 @@ no PR, and the evidence (copied out of the worktree before it is removed) goes t
   TerminateInstances and ssm GetParameter on the AL2023 path; the action list is quoted in the
   evidence.
 - The evidence records the dated cost bound for this story's runs, computed from instance and
-  address hours (CloudTrail RunInstances to TerminateInstances) at list price, and no 12-digit run.
+  address hours (CloudTrail RunInstances to TerminateInstances) at list price, and no account id (the configured `aws.account_id` in any form, or an ARN's account field).
