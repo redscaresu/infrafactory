@@ -147,6 +147,7 @@ with its kind. Every swarm brief also carries these lines.
 - Before every push, list in the PR body each fact the diff adds (a stage name, a list, a status rule) and the one place it is defined; anything that copies it instead of deriving from it is removed before review. <!-- lesson: state-duplication -->
 - Before every push, grep docs, comments and the PR body for each function, field and value the diff changes, and rewrite every sentence that no longer matches. <!-- lesson: docs-misstate-code -->
 - Anything that hides secrets or private data (a scrub, a redaction, a filter on what is printed or published) is an allowlist: name what may pass and drop the rest. A denylist of patterns to remove fails open on the first one nobody thought of. Never print a credential file, even redacted; print only its key names. <!-- lesson: denylist -->
+- A check that guards safety (a preflight, a probe, a wall, a refusal) passes only on the exact outcome it expects, such as a refused connection or a named error, and treats every other error or empty result as a failure. <!-- lesson: fails-open -->
 
 ## Quality Bar
 - `go test ./...` passes for completed stories.
