@@ -30,7 +30,8 @@ func TestE2E_AWSLayer2SeedsTheResolvedAMI(t *testing.T) {
 	_, err := exec.LookPath("tofu")
 	require.NoError(t, err, "tofu binary required for e2e")
 	mock := e2e.StartFakeaws(t)
-	// The mirror outlives a test; internal/e2e's TestMain removes it there.
+	// This package has no TestMain that removes the mirror, so this test
+	// does, and the next SealNetwork mirrors again.
 	t.Cleanup(e2e.CleanupAWSMirror)
 	e2e.SealNetwork(t)
 

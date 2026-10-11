@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -41,9 +42,6 @@ const (
 	// fixture keeps a refused request fast; without it the SDK retries
 	// for more than ten minutes.
 	tofuDeadline = 2 * time.Minute
-	// tofuWaitDelay is how long a tofu call may wait, once tofu has
-	// exited or been killed, for the output pipe to close.
-	tofuWaitDelay = 10 * time.Second
 	// ourOverride is the name infrafactory's override takes: it sorts
 	// before a user's zz_override.tf.
 	ourOverride = "infrafactory_override.tf"
@@ -165,7 +163,7 @@ func newAssumptionDir(t *testing.T) assumptionDir {
 	if err == nil {
 		_ = conn.Close()
 	}
-	require.Error(t, err, "something listens on %s, which the tests rely on being closed", closedAddr)
+	require.ErrorIs(t, err, syscall.ECONNREFUSED, "%s must refuse a connection: the tests rely on it being closed", closedAddr)
 
 	w := assumptionDir{dir: t.TempDir()}
 	version, err := w.tofu(t, w.env(t, startRecorder(t)), "version")
@@ -214,18 +212,25 @@ func (w assumptionDir) env(t *testing.T, proxy *recorder, extra ...string) []str
 }
 
 // tofu runs tofu in the directory under tofuDeadline and returns its
-// combined output. On the deadline it kills tofu's whole process group, as
-// exec_runner.go does, and WaitDelay stops waiting on the output pipe: a
-// child of tofu that outlived a kill of tofu alone would hold the pipe and
-// block the call past the deadline.
+// combined output. On the deadline it SIGKILLs tofu's whole process group:
+// a child that outlived a kill of tofu alone would hold the output pipe
+// and block the call past the deadline. Killing the group closes every
+// holder of the pipe, so there is no WaitDelay, whose timer would also
+// start on a normal exit and turn a slow pipe close into exec.ErrWaitDelay
+// (exec_runner.go refuses it for the same reason).
 func (w assumptionDir) tofu(t *testing.T, env []string, args ...string) (string, error) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), tofuDeadline)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "tofu", args...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
-	cmd.WaitDelay = tofuWaitDelay
+	cmd.Cancel = func() error {
+		err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		if errors.Is(err, syscall.ESRCH) {
+			return os.ErrProcessDone
+		}
+		return err
+	}
 	cmd.Dir = w.dir
 	cmd.Env = env
 	out, err := cmd.CombinedOutput()
