@@ -20,7 +20,7 @@ depends_on: [rehearsal-passthrough, rehearsal-state-pull, fakeaws-loader, fakeaw
 
 **Out of scope:** new code with no state (rehearsal-without-state); a PR/CI mode (later, user 2026-10-11); new fakeaws types; the UI.
 
-**Constraints:** only a read step sees the credential file (goal 8; once per pass); the modelled-type list derives from one source with a test; interrupt rules from #436/#438; ADR-0032 exit codes stay distinct; never `git checkout` in the user's tree.
+**Constraints:** only a read step sees the credential file (goal 8; once per pass); the modelled-type list derives from one source with a test; interrupt rules from #436/#438; ADR-0032 exit codes stay distinct; never `git checkout` in the user's tree; tofu claims pinned by `TestAssumption_RefreshOnlyUnreadableDataSourceExitsOne`, `TestAssumption_DataSourcesAllSendBeforePlanFails` (ADR-0028).
 
 **Your part:** none for you. Lead: run the wedge against the real step-0 recording and the real pre-destroy state on this machine (no cloud) and record the result in the PR; neither enters git.
 

@@ -19,7 +19,7 @@ depends_on: [rehearsal-walls, prod-read-seam]
 
 **Out of scope:** the refresh-only check, drift, base and head plans (rehearsal-against-the-copy); backends other than S3 and local; a real S3 backend in the Layer 3 account; SSE-KMS state; the registry lock warning (rehearsal-prepare-gate's).
 
-**Constraints:** the backend credential file uses prod-read-seam's reader; the state copy lives outside the configuration copies; goal 6's modelled-type source for pruning is the one rehearsal-against-the-copy uses (a story here may build it first; the other reuses it).
+**Constraints:** the backend credential file uses prod-read-seam's reader; the state copy lives outside the configuration copies; goal 6's modelled-type source for pruning is the one rehearsal-against-the-copy uses (a story here may build it first; the other reuses it); tofu claims pinned by `TestAssumption_StatePullEmitsDecryptedState`, `TestAssumption_ExternalKeyProviderRunsAtBackendInit` (ADR-0028).
 
 **Your part:** none for you (a real S3-backend proof would need the SCP widened; default no).
 
