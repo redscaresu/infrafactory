@@ -2,16 +2,16 @@
 kind: code
 repo: fakeaws
 status: blocked
-blocked_by: [prod-read-seam]
+blocked_by: [prod-read-seam-adr-0041]
 epic: fakeaws-rehearsal-instance
-depends_on: [fakeaws-request-log-gap-markers, prod-read-seam]
+depends_on: [fakeaws-request-log-gap-markers, prod-read-seam-adr-0041]
 touches: [handlers/recorder.go, handlers/recorder_test.go, AGENTS.md, concepts.md, CHANGELOG.md]
 risk: high
 ---
 
 # Request-log entries carry the ADR-0041 read-set fields {service, protocol, action, params}
 
-The blocker is prod-read-seam's ADR-0041 story ("account-read contract, recorded-read and read-set formats"). Once that epic is planned, replace `prod-read-seam` in blocked_by and depends_on with that story's slug.
+The blocker is the `prod-read-seam-adr-0041` story ("account-read contract, recorded-read and read-set formats").
 
 - **Body.** The recorder reads the body only for Query-RPC and X-Amz-Target requests, and restores `r.Body` byte-identical: ParseQueryRPC and ParseXAmzTarget drain it (awsproto/queryrpc.go:30-51, json.go:29-48). Never use r.ParseForm/FormValue. REST bodies are not read, so S3 PutObject uploads are never buffered.
 - **Action.** Query-RPC (EC2, IAM, STS, RDS) takes Action from the form body. JSON (SSM, DynamoDB, Secrets Manager, KMS, SQS) takes X-Amz-Target. Params are as ADR-0041 defines them.
