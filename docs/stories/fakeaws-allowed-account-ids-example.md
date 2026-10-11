@@ -1,8 +1,7 @@
 ---
 kind: code
 repo: fakeaws
-status: blocked
-blocked_by: [fakeaws-identity-store-and-flag, fakeaws-identity-iam-sts]
+status: ready
 epic: fakeaws-loaded-identity
 depends_on: [fakeaws-identity-store-and-flag, fakeaws-identity-iam-sts]
 touches: [examples/identity/allowed_account_ids/main.tf, examples/identity_test.go]
