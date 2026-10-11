@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -12,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/hclsyntax"
@@ -157,7 +159,9 @@ type encryptionProbe struct {
 var encryptionProbeKey = base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x2a}, 32))
 
 // newEncryptionProbe skips without tofu 1.10 or later (the external key
-// provider's release), then writes the script and the root.
+// provider's release), then writes the script and the root. The root
+// declares a remote backend, as the user's does: the first init skips
+// it and the second's override replaces it.
 func newEncryptionProbe(t *testing.T) encryptionProbe {
 	t.Helper()
 	if _, err := exec.LookPath("tofu"); err != nil {
@@ -182,6 +186,12 @@ echo '{"keys":{"encryption_key":"`+encryptionProbeKey+`","decryption_key":"`+enc
 `), 0o700))
 
 	require.NoError(t, os.WriteFile(filepath.Join(p.dir, "main.tf"), []byte(`terraform {
+  backend "s3" {
+    bucket = "never-reached"
+    key    = "terraform.tfstate"
+    region = "eu-west-1"
+  }
+
   encryption {
     key_provider "external" "probe" {
       command = ["`+script+`"]
@@ -221,16 +231,27 @@ func (p encryptionProbe) tofuVersion(t *testing.T) string {
 	return "tofu " + v.Version
 }
 
-// tofu runs tofu in the copy and returns its stdout; a non-zero exit
-// returns an error carrying both streams.
+// encryptionProbeDeadline bounds each tofu command. The key provider
+// script waits for stdin to close, so a tofu that holds it open would
+// otherwise hang the test until go test's own timeout, naming nothing.
+const encryptionProbeDeadline = 2 * time.Minute
+
+// tofu runs tofu in the copy and returns its stdout; a non-zero exit or
+// the deadline returns an error carrying the tofu version and both streams.
 func (p encryptionProbe) tofu(args ...string) (string, error) {
-	cmd := exec.Command("tofu", args...)
+	ctx, cancel := context.WithTimeout(context.Background(), encryptionProbeDeadline)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "tofu", args...)
 	cmd.Dir, cmd.Env = p.dir, p.env
+	cmd.WaitDelay = time.Second
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
+	if ctx.Err() == context.DeadlineExceeded {
+		err = fmt.Errorf("killed after %s: %w", encryptionProbeDeadline, ctx.Err())
+	}
 	if err != nil {
-		return string(out), fmt.Errorf("tofu %s: %w\n%s%s", strings.Join(args, " "), err, out, stderr.String())
+		return string(out), fmt.Errorf("%s: tofu %s: %w\n%s%s", p.version, strings.Join(args, " "), err, out, stderr.String())
 	}
 	return string(out), nil
 }
