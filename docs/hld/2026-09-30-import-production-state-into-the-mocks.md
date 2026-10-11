@@ -299,9 +299,10 @@ The request-log classifier runs after every plan and apply, so a gap refuses whe
 hit. `reset` restores the checked copy and state, so the head can be edited and rehearsed again
 without a second read.
 
-Without a pulled state (new code that only adds alongside prod), the starting state is empty (new code that adds alongside, and takes resources over with `import`
-blocks whose real ids the mock holds), or the checked state (new code that continues an existing
-configuration, with `moved` blocks where it renames). The user's `--var-file` is copied in. Every
+Without a pulled state (new code that only adds alongside prod), the starting state is empty, and
+the code takes resources over with `import` blocks whose real ids the mock holds. Code that
+continues an existing configuration (with `moved` blocks where it renames) uses the pulled-state
+path above. The user's `--var-file` is copied in. Every
 tofu action runs in an **allowlisted environment** (review-1 S2): it starts empty and gains only the
 AWS endpoint variables pointed at this rehearsal's fakeaws, with the region from the read and S3 at
 the dead address while S3 is refused (review-2 M5), a catch-all `AWS_ENDPOINT_URL` and an
