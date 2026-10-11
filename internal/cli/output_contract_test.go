@@ -180,14 +180,25 @@ func TestCredentialsExplanationFollowsTheScenarioCloud(t *testing.T) {
 	}
 }
 
-// An aws Layer 3 failure is explained in aws terms: no Scaleway key,
-// project or wiring advice, whatever its check.
+// An aws Layer 3 failure is explained in aws terms, arm by arm: each
+// names something in the aws stack, and none carries Scaleway's advice.
 func TestAWSLayer3ExplainabilityHoldsNoScalewayTerms(t *testing.T) {
-	for _, check := range []string{"connectivity", "http_probe", "dns_resolution", "real_probe", "credentials", "apply", "account_check"} {
-		e, ok := explainabilityFromFailure(FailureSummary{Layer: "sandbox_deploy", Stage: "iteration_1_real_probe", Check: check}, layer3AWS)
+	for check, want := range map[string]struct{ summary, names string }{
+		"connectivity":   {"real Layer 3 network probe failed", "security group"},
+		"http_probe":     {"real Layer 3 network probe failed", "security group"},
+		"real_probe":     {"real Layer 3 network probe failed", "security group"},
+		"dns_resolution": {"real Layer 3 DNS probe failed", "Route 53"},
+		"credentials":    {"Layer 3 real AWS deploy is enabled but its credentials or its claim on the aws scope could not be confirmed", "aws config block"},
+		"apply":          {"real AWS Layer 3 stage failed", "Layer 3 (AWS)"},
+		"no_orphans":     {"real AWS Layer 3 stage failed", "Layer 3 (AWS)"},
+		"orphan_check":   {"real AWS Layer 3 stage failed", "Layer 3 (AWS)"},
+	} {
+		e, ok := explainabilityFromFailure(FailureSummary{Layer: "sandbox_deploy", Stage: "iteration_1_" + check, Check: check}, layer3AWS)
 		require.True(t, ok, check)
+		assert.Equal(t, want.summary, e.Summary, check)
+		assert.Contains(t, e.Action, want.names, check)
 		text := e.Summary + " " + e.Action
-		for _, term := range []string{"SCW_", "Scaleway", "project wiring"} {
+		for _, term := range []string{"SCW_", "Scaleway", "project wiring", "domain/output wiring", "terraform-live.tfstate"} {
 			assert.NotContains(t, text, term, "%s: %s", check, text)
 		}
 	}
