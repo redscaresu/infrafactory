@@ -1,8 +1,7 @@
 ---
 kind: code
 repo: fakeaws
-status: blocked
-blocked_by: [fakeaws-arn-builders-take-account, fakeaws-identity-store-and-flag]
+status: ready
 epic: fakeaws-loaded-identity
 depends_on: [fakeaws-arn-builders-take-account, fakeaws-identity-store-and-flag]
 touches: [handlers/iam.go, handlers/sts.go, handlers/iam_test.go, handlers/sts_test.go]

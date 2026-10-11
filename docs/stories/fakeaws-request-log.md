@@ -1,8 +1,7 @@
 ---
 kind: code
 repo: fakeaws
-status: blocked
-blocked_by: [fakeaws-identity-store-and-flag]
+status: ready
 epic: fakeaws-rehearsal-instance
 depends_on: [fakeaws-owner-only-files]
 touches: [handlers/recorder.go, handlers/recorder_test.go, handlers/handlers.go, handlers/admin.go, cmd/fakeaws/main.go, cmd/fakeaws/main_test.go, handlers/regression_audit_test.go, AGENTS.md, concepts.md, README.md, CHANGELOG.md]
