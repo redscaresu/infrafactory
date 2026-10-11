@@ -1,7 +1,8 @@
 ---
 kind: code
 repo: fakeaws
-status: ready
+status: review
+prs: https://github.com/redscaresu/fakeaws/pull/55
 epic: fakeaws-loaded-identity
 depends_on: [fakeaws-identity-store-and-flag, fakeaws-identity-iam-sts]
 touches: [examples/identity/allowed_account_ids/main.tf, examples/identity_test.go]
