@@ -354,11 +354,41 @@ output "id" {
 	out, err = w.tofu(t, env, "apply", "-refresh-only", "-auto-approve", "-input=false", "-no-color")
 	assert.Equal(t, 1, exitCode(err), "%s: apply with an unreadable data source\n%s", w.version, out)
 	assert.Contains(t, out, "data.aws_vpc.missing", w.version)
+	assert.NotContains(t, w.stateTags(t, env, "aws_vpc.v"), "drift", "%s: the failed apply wrote the drift", w.version)
 
 	require.NoError(t, os.Remove(filepath.Join(w.dir, "missing.tf")))
 	out, err = w.tofu(t, env, "apply", "-refresh-only", "-auto-approve", "-input=false", "-no-color")
 	assert.Equal(t, 0, exitCode(err), "%s: apply with drift alone\n%s", w.version, out)
+	assert.Equal(t, "yes", w.stateTags(t, env, "aws_vpc.v")["drift"], "%s: the drift is not in the state", w.version)
 	assert.Zero(t, proxy.count(), "%s: requests left loopback: %v", w.version, proxy.requests())
+}
+
+// stateTags is the tags of the resource at address in the state, from
+// `tofu show -json`'s stdout.
+func (w assumptionDir) stateTags(t *testing.T, env []string, address string) map[string]string {
+	t.Helper()
+	stdout, stderr, err := cli.RunTofu(w.dir, env, "show", "-json")
+	require.NoError(t, err, "%s\n%s%s", w.version, stdout, stderr)
+	var state struct {
+		Values struct {
+			RootModule struct {
+				Resources []struct {
+					Address string `json:"address"`
+					Values  struct {
+						Tags map[string]string `json:"tags"`
+					} `json:"values"`
+				} `json:"resources"`
+			} `json:"root_module"`
+		} `json:"values"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(stdout), &state), w.version)
+	for _, r := range state.Values.RootModule.Resources {
+		if r.Address == address {
+			return r.Values.Tags
+		}
+	}
+	require.Failf(t, "not in the state", "%s: %s\n%s", w.version, address, stdout)
+	return nil
 }
 
 // lookups is more independent data sources than tofu's default
