@@ -72,6 +72,19 @@ func TestEstablishLegacyLayer(t *testing.T) {
 		})
 	}
 
+	t.Run("a real-cloud apply failure is not the mock's", func(t *testing.T) {
+		from := legacyRun(t, "aws-eks", loopbackProviders, nil)
+		payload, err := json.Marshal(map[string]any{"failures": []map[string]string{
+			{"layer": "sandbox_deploy", "stage": "iteration_1_apply", "check": "apply", "detail": failure},
+		}})
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(filepath.Join(filepath.Dir(from), "iteration.json"), payload, 0o644))
+
+		_, err = EstablishLegacyLayer(from, "aws-eks", "aws_subnet", attrs)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no apply failure")
+	})
+
 	t.Run("every attribute must be named", func(t *testing.T) {
 		_, err := EstablishLegacyLayer(legacyRun(t, "aws-eks", loopbackProviders, &failure), "aws-eks", "aws_subnet",
 			[]string{"map_public_ip_on_launch", "assign_ipv6_address_on_creation"})

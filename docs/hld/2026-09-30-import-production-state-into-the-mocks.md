@@ -188,7 +188,7 @@ Each directory is initialised twice (review-1 B1, review-2 S2, verified E3): fir
 modules, plus `tofu providers lock -platform=<this machine>` when the lock file lacks it, review-2
 M2); then, with a `backend "local" {}` override with no `path`, `tofu init -reconfigure -get=false
 -lockfile=readonly -plugin-dir=<data dir>/providers -backend-config=path=<outside the copy>` under
-the dead proxy. That this second init opens no socket, and that both overrides hold for the user's
+the dead proxy. That this second init makes no proxied connection, and that both overrides hold for the user's
 tofu version, are tests (ADR-0028).
 
 ### Discover: let the code say what it reads
@@ -474,7 +474,7 @@ and its walls; the account-read contract and the recorded-read format; the fakea
 
 ## Epics
 
-- [rehearsal-assumption-tests](../epics/rehearsal-assumption-tests.md)
+- rehearsal-assumption-tests — done (#457)
 - [fakeaws-rehearsal-instance](../epics/fakeaws-rehearsal-instance.md)
 - [fakeaws-loaded-identity](../epics/fakeaws-loaded-identity.md)
 - [fakeaws-data-sources](../epics/fakeaws-data-sources.md)

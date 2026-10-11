@@ -337,8 +337,19 @@ func TestAWSRunNumbersItsLayer3EvidenceByIteration(t *testing.T) {
 	}
 	assert.Equal(t, StageStatusFail, status["iteration_1_real_probe"], "%+v", run.result.Stages)
 	assert.Equal(t, StageStatusPass, status["iteration_2_real_probe"], "%+v", run.result.Stages)
-	for _, name := range awsLayer3EvidenceStages {
-		assert.NotContains(t, status, name, "an unnumbered %s cannot be placed", name)
+	// Every carried sandbox_deploy stage is numbered, but the scope stages
+	// the run finds by name and the run's one AMI resolve.
+	numbered := 0
+	for _, s := range run.result.Stages {
+		if s.Layer != "sandbox_deploy" || strings.HasPrefix(s.Stage, "aws_scope_") || s.Stage == StageAWSAMIResolve {
+			continue
+		}
+		assert.NotEqual(t, s.Stage, holdoutStageName(s.Stage), "an unnumbered %s cannot be placed", s.Stage)
+		numbered++
+	}
+	assert.Positive(t, numbered, "the run carried no numbered sandbox_deploy line: %+v", run.result.Stages)
+	for _, name := range []string{"account_check", "user_data_check", "real_probe"} {
+		assert.NotContains(t, status, name, "an unnumbered %s cannot be placed, on any layer", name)
 	}
 	for _, name := range []string{"account_check", "user_data_check"} {
 		assert.Equal(t, StageStatusPass, status["iteration_1_"+name], name)
@@ -355,7 +366,9 @@ var otherAccountState = strings.Replace(awsLiveState, preflightAWSAccount, "9999
 // Each row names the failure its fake causes, so a run that ends at the
 // right stage for another reason fails the row.
 func TestAWSRunEndsAtTheLayer3StageThatFails(t *testing.T) {
-	const testStage = "iteration_1_test"
+	// A failure at a stage the run carries up keeps that stage's name;
+	// any other is rewritten to the iteration's test stage.
+	const testStage, claimStage = "iteration_1_test", "aws_scope_claim"
 	rows := map[string]struct {
 		lc    func(*testing.T, *awsLifecycle)
 		setup orderSetup
@@ -369,25 +382,25 @@ func TestAWSRunEndsAtTheLayer3StageThatFails(t *testing.T) {
 		},
 		"gate (test)": {
 			setup: orderSetup{gateFailsOn: 2},
-			fails: FailureSummary{Stage: testStage, Check: "allow_resource_types", Detail: "refused by the gate's fake"},
+			fails: FailureSummary{Stage: "iteration_1_allowlist", Check: "allow_resource_types", Detail: "refused by the gate's fake"},
 		},
 		"sts": {
 			setup: orderSetup{stsFailsOn: 2},
-			fails: FailureSummary{Stage: testStage, Check: "credentials", Detail: "AccessDenied"},
+			fails: FailureSummary{Stage: "iteration_1_preflight", Check: "credentials", Detail: "AccessDenied"},
 		},
 		"stamp": {
 			lc:    func(_ *testing.T, lc *awsLifecycle) { delete(lc.params, harness.AWSStampParameter) },
-			fails: FailureSummary{Stage: testStage, Check: "stamp", Detail: harness.AWSStampParameter + " does not exist"},
+			fails: FailureSummary{Stage: claimStage, Check: "stamp", Detail: harness.AWSStampParameter + " does not exist"},
 		},
 		"default vpc": {
 			lc: func(_ *testing.T, lc *awsLifecycle) {
 				lc.ec2["DescribeVpcs"] = `<vpcSet><item><vpcId>vpc-0default</vpcId><isDefault>true</isDefault></item></vpcSet>`
 			},
-			fails: FailureSummary{Stage: testStage, Check: "default_vpc", Detail: "vpc-0default is the region's default VPC"},
+			fails: FailureSummary{Stage: claimStage, Check: "default_vpc", Detail: "vpc-0default is the region's default VPC"},
 		},
 		"claim": {
 			lc:    func(_ *testing.T, lc *awsLifecycle) { lc.params[harness.AWSClaimParameter] = lifecycleOtherHolder },
-			fails: FailureSummary{Stage: testStage, Check: "claim", Detail: "claimed by \"" + lifecycleOtherHolder + "\""},
+			fails: FailureSummary{Stage: claimStage, Check: "claim", Detail: "claimed by \"" + lifecycleOtherHolder + "\""},
 		},
 		"apply": {
 			lc:    func(_ *testing.T, lc *awsLifecycle) { lc.deploy.err = errors.New("tofu apply failed") },
@@ -400,18 +413,18 @@ func TestAWSRunEndsAtTheLayer3StageThatFails(t *testing.T) {
 					require.NoError(t, os.WriteFile(filepath.Join(dir, harness.LiveStateFilename), []byte(otherAccountState), 0o600))
 				}
 			},
-			fails: FailureSummary{Stage: testStage, Check: "account_check", Detail: `in account "999999999999"`},
+			fails: FailureSummary{Stage: "iteration_1_account_check", Check: "account_check", Detail: `in account "999999999999"`},
 		},
 		"user_data_check": {
 			lc: func(_ *testing.T, lc *awsLifecycle) {
 				lc.ec2["DescribeInstanceAttribute"] = `<instanceId>i-0abc</instanceId><userData><value>` +
 					base64.StdEncoding.EncodeToString([]byte("#!/bin/bash\n")) + `</value></userData>`
 			},
-			fails: FailureSummary{Stage: testStage, Check: "user_data_check", Detail: "does not run the rendered user data"},
+			fails: FailureSummary{Stage: "iteration_1_user_data_check", Check: "user_data_check", Detail: "does not run the rendered user data"},
 		},
 		"http_probe": {
 			setup: orderSetup{probeFails: probeHTTP},
-			fails: FailureSummary{Stage: testStage, Check: "real_probe", Detail: probeHTTP + " failed"},
+			fails: FailureSummary{Stage: "iteration_1_real_probe", Check: "real_probe", Detail: probeHTTP + " failed"},
 		},
 		"holdout": {
 			setup: orderSetup{probeFails: probeHoldout},
@@ -469,6 +482,14 @@ func TestAWSRunEndsAtTheLayer3StageThatFails(t *testing.T) {
 				assert.True(t, slices.ContainsFunc(run.result.Failures, func(f FailureSummary) bool {
 					return f.Stage == want.Stage && f.Check == want.Check && strings.Contains(f.Detail, want.Detail)
 				}), "the run fails on %s with %+v: %+v", stage.name, want, run.result.Failures)
+				for _, f := range run.result.Failures {
+					if f.Layer == "run" {
+						continue
+					}
+					assert.True(t, slices.ContainsFunc(run.result.Stages, func(s StageSummary) bool {
+						return s.Layer == f.Layer && s.Stage == f.Stage
+					}), "failure %s/%s names a stage the run records: %+v", f.Layer, f.Stage, run.result.Stages)
+				}
 				for _, e := range run.result.Explainability {
 					assert.NotContains(t, e.Summary+e.Action, "SCW_", "an aws run is explained in aws terms")
 				}

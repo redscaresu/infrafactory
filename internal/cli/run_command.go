@@ -1177,7 +1177,7 @@ func runIteration(
 	}
 
 	for _, step := range steps {
-		stageName := fmt.Sprintf("iteration_%d_%s", iteration, step.name)
+		stageName := iterationStage(iteration, step.name)
 		runtime.Logger.Log(LogEntry{
 			Level:     logLevelInfo,
 			Command:   "run",
@@ -1241,12 +1241,20 @@ func runIteration(
 		if err != nil {
 			stages = append(stages, StageSummary{Layer: "run", Stage: stageName, Status: StageStatusFail})
 			stages = append(stages, holdoutStages(testResult.Stages, iteration)...)
-			stages = append(stages, awsRunStages(testResult.Stages, iteration, cloud)...)
+			carried, failLines := awsRunStages(testResult.Stages, iteration, cloud)
+			stages = append(stages, carried...)
 			if (step.name == "test" || step.name == "validate") && len(testResult.Failures) > 0 {
 				for _, failure := range testResult.Failures {
+					layer, stage := "run", stageName
+					// A failure at a stage the run carries up keeps its
+					// layer and that stage's name, so iteration.json tells
+					// a Layer 3 apply failure from a mock one.
+					if name, ok := runFailureStage(failure, failLines); ok {
+						layer, stage = failure.Layer, name
+					}
 					failures = append(failures, FailureSummary{
-						Layer:    "run",
-						Stage:    stageName,
+						Layer:    layer,
+						Stage:    stage,
 						Check:    failure.Check,
 						Policy:   failure.Policy,
 						Command:  step.command,
@@ -1286,7 +1294,8 @@ func runIteration(
 		// passed" is exactly the claim somebody needs to see to believe
 		// the run proved anything.
 		stages = append(stages, holdoutStages(testResult.Stages, iteration)...)
-		stages = append(stages, awsRunStages(testResult.Stages, iteration, cloud)...)
+		carried, _ := awsRunStages(testResult.Stages, iteration, cloud)
+		stages = append(stages, carried...)
 		runtime.Logger.Log(LogEntry{
 			Level:     logLevelInfo,
 			Command:   "run",
@@ -1739,9 +1748,9 @@ func runCommandStatus(terminalReason string, strayBlocked, keepBlocked bool) Com
 // not empty.
 //
 // Matched on Check, not Layer/Stage. runIteration REWRITES every
-// failure it passes up as `Layer: "run", Stage: "iteration_N_test"`,
-// so the layer a failure came from is not visible here; Check is the
-// field that survives. A first version of this matched
+// failure that runFailureStage finds no carried fail line for as
+// `Layer: "run", Stage: "iteration_N_test"`, a converge failure among
+// them; Check is the field that survives. A first version of this matched
 // `mock_deploy`/`converge` and therefore never fired, which the
 // run-level test caught by counting iterations.
 func hasConvergeFailure(failures []FailureSummary) bool {
@@ -1769,28 +1778,64 @@ func isStage(name string) func(StageSummary) bool {
 	return func(s StageSummary) bool { return s.Stage == name }
 }
 
-// awsLayer3EvidenceStages are the aws stages a run carries up so its
-// iteration.json holds the Layer 3 evidence, a pass's included.
-var awsLayer3EvidenceStages = []string{"account_check", "user_data_check", "real_probe"}
-
-// awsRunStages carries an iteration's aws stages up to the run. The scope
-// stages keep their names: the run ends on a kept claim and tears down
-// only after a take, which it finds by name. For an aws scenario the
-// evidence stages come too, numbered `iteration_N_` as holdoutStages
-// does, since each iteration runs them again and an unnumbered failure
-// from an earlier one would contradict a later pass.
-func awsRunStages(stages []StageSummary, iteration int, cloud layer3Cloud) []StageSummary {
-	var out []StageSummary
-	for _, s := range stages {
-		switch {
-		case strings.HasPrefix(s.Stage, "aws_scope_"):
-			out = append(out, s)
-		case cloud == layer3AWS && s.Layer == "sandbox_deploy" && slices.Contains(awsLayer3EvidenceStages, s.Stage):
-			s.Stage = fmt.Sprintf("iteration_%d_%s", iteration, s.Stage)
-			out = append(out, s)
-		}
+// runStageName is the name a run carries an executeTest stage up under,
+// and whether it carries it; a failure at that stage takes the same name.
+// The scope stages keep their names: the run ends on a kept claim and
+// tears down only after a take, which it finds by name. For an aws
+// scenario every other sandbox_deploy stage is Layer 3 evidence, a
+// pass's included, numbered as holdoutStages does, since each iteration
+// runs them again and an unnumbered failure from an earlier one would
+// contradict a later pass. "run" is not a stage: it wraps an error that
+// names none, so that failure stays run/iteration_N_test.
+func runStageName(layer, stage string, iteration int, cloud layer3Cloud) (string, bool) {
+	switch {
+	case strings.HasPrefix(stage, "aws_scope_"):
+		return stage, true
+	case cloud == layer3AWS && layer == "sandbox_deploy" && stage != "run":
+		return iterationStage(iteration, stage), true
 	}
-	return out
+	return "", false
+}
+
+// stageKey is an executeTest stage, by layer and name.
+type stageKey struct{ layer, stage string }
+
+// runFailureStage is the name a run files a test-step failure under, and
+// whether it keeps the failure's layer: only under a fail line
+// awsRunStages carried, so a failure never names a stage the record
+// lacks or one it records as passed.
+func runFailureStage(f FailureSummary, failLines map[stageKey]string) (string, bool) {
+	name, ok := failLines[stageKey{f.Layer, f.Stage}]
+	return name, ok
+}
+
+// awsDetailStages are the numbered stages whose stage-line detail a run
+// carries up; any other stage line's detail is dropped, since one can
+// name the account (preflight's pass line does). Failure details are
+// not touched here.
+var awsDetailStages = []string{"apply", "account_check", "user_data_check", "real_probe"}
+
+// awsRunStages carries an iteration's Layer 3 stages up to the run, as
+// runStageName names them, and returns the fail lines it carried under
+// their run names, for runFailureStage.
+func awsRunStages(stages []StageSummary, iteration int, cloud layer3Cloud) ([]StageSummary, map[stageKey]string) {
+	var out []StageSummary
+	failLines := map[stageKey]string{}
+	for _, s := range stages {
+		name, ok := runStageName(s.Layer, s.Stage, iteration, cloud)
+		if !ok {
+			continue
+		}
+		if name != s.Stage && !slices.Contains(awsDetailStages, s.Stage) {
+			s.Detail = ""
+		}
+		if s.Status == StageStatusFail {
+			failLines[stageKey{s.Layer, s.Stage}] = name
+		}
+		s.Stage = name
+		out = append(out, s)
+	}
+	return out, failLines
 }
 
 // awsClaimTaken: a take succeeded, or an iteration kept a claim it may

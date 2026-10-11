@@ -679,16 +679,16 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 	}
 	if len(unsupportedFailures) > 0 {
 		return OutputResult{
-				Command:  "test",
-				Scenario: sc.Name,
-				Status:   CommandStatusFailed,
-				Stages:   unsupportedStages,
-				Failures: unsupportedFailures,
-			}, &CLIError{
-				Op:   "test",
-				Code: errorCodeCommandFailed,
-				Err:  errors.New("unsupported acceptance criteria present"),
-			}
+			Command:  "test",
+			Scenario: sc.Name,
+			Status:   CommandStatusFailed,
+			Stages:   unsupportedStages,
+			Failures: unsupportedFailures,
+		}, &CLIError{
+			Op:   "test",
+			Code: errorCodeCommandFailed,
+			Err:  errors.New("unsupported acceptance criteria present"),
+		}
 	}
 
 	if runtime.Deps.MockDeploy == nil || runtime.Deps.Destroy == nil {
@@ -1447,16 +1447,16 @@ func evaluateSupportedCriteria(ctx context.Context, sc scenario.Scenario, runtim
 	specs, err := sc.ExecutableChecks()
 	if err != nil {
 		return []StageSummary{
-				{Layer: "criteria", Stage: "parse", Status: StageStatusFail},
-			}, []FailureSummary{
-				{
-					Layer:   "criteria",
-					Stage:   "parse",
-					Check:   "criteria_parse",
-					Command: "criteria mapper",
-					Detail:  err.Error(),
-				},
-			}
+			{Layer: "criteria", Stage: "parse", Status: StageStatusFail},
+		}, []FailureSummary{
+			{
+				Layer:   "criteria",
+				Stage:   "parse",
+				Check:   "criteria_parse",
+				Command: "criteria mapper",
+				Detail:  err.Error(),
+			},
+		}
 	}
 
 	policySpecs := make([]scenario.ExecutableCheckSpec, 0)
