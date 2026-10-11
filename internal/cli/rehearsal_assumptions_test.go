@@ -2,11 +2,17 @@ package cli_test
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -278,6 +284,238 @@ func (c initCopy) secondInit(t *testing.T, proxy *recorder, flags ...string) (st
 	args := append([]string{"init", "-input=false", "-no-color", "-reconfigure", "-get=false",
 		"-lockfile=readonly", "-backend-config=path=" + c.outside}, flags...)
 	return c.tofu(t, c.bareEnv(t, "HTTPS_PROXY="+proxy.url, "HTTP_PROXY="+proxy.url), args...)
+}
+
+// missingVPC is an id no fakeaws VPC has, looked up by id (VpcId.1).
+// A filter that matches nothing would not do: fakeaws ignores
+// DescribeVpcs filters and lists every VPC.
+const missingVPC = "vpc-0000000000000dead"
+
+// TestAssumption_RefreshOnlyUnreadableDataSourceExitsOne: against fakeaws,
+// `plan -refresh-only -detailed-exitcode` exits 0 on settled state and 2
+// on drift, and 1, naming it, on a data source the mock cannot read.
+// `apply -refresh-only` has no exit 2: it exits 0 on drift and 1 on that
+// data source.
+//
+// Relied on by: rehearsal-against-the-copy (HLD § Load and check:
+// fakeaws owns the mapping, the refresh-only check; E1). ADR-0028,
+// ADR-0032.
+func TestAssumption_RefreshOnlyUnreadableDataSourceExitsOne(t *testing.T) {
+	w, fakeaws, _ := newFakeawsDir(t)
+	proxy := startRecorder(t)
+	env := w.env(t, proxy)
+	w.write(t, "main.tf", providerBlock("")+`resource "aws_vpc" "v" {
+  cidr_block = "10.0.0.0/16"
+}
+
+output "id" {
+  value = aws_vpc.v.id
+}
+`)
+	out, err := w.tofu(t, env, "apply", "-auto-approve", "-input=false", "-no-color")
+	require.NoError(t, err, "%s\n%s", w.version, out)
+	out, err = w.tofu(t, env, "apply", "-refresh-only", "-auto-approve", "-input=false", "-no-color")
+	require.NoError(t, err, "%s: settling the state\n%s", w.version, out)
+	out, err = w.tofu(t, env, "plan", "-refresh-only", "-detailed-exitcode", "-input=false", "-no-color")
+	require.Equal(t, 0, exitCode(err), "%s: settled state\n%s", w.version, out)
+
+	id, err := w.tofu(t, env, "output", "-raw", "id")
+	require.NoError(t, err, "%s\n%s", w.version, id)
+	resp, err := http.PostForm(fakeaws.URL+fakeawsPath("EC2"), url.Values{
+		"Action": {"CreateTags"}, "ResourceId.1": {id}, "Tag.1.Key": {"drift"}, "Tag.1.Value": {"yes"},
+	})
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode, "CreateTags on %s", id)
+
+	out, err = w.tofu(t, env, "plan", "-refresh-only", "-detailed-exitcode", "-input=false", "-no-color", "-out", "p")
+	assert.Equal(t, 2, exitCode(err), "%s: drift\n%s", w.version, out)
+	out, err = w.tofu(t, env, "show", "-json", "p")
+	require.NoError(t, err, "%s\n%s", w.version, out)
+	var plan struct {
+		ResourceDrift []struct {
+			Address string `json:"address"`
+			Change  struct {
+				After struct {
+					Tags map[string]string `json:"tags"`
+				} `json:"after"`
+			} `json:"change"`
+		} `json:"resource_drift"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &plan), w.version)
+	require.Len(t, plan.ResourceDrift, 1, "%s\n%s", w.version, out)
+	assert.Equal(t, "aws_vpc.v", plan.ResourceDrift[0].Address, w.version)
+	assert.Equal(t, "yes", plan.ResourceDrift[0].Change.After.Tags["drift"], w.version)
+
+	w.write(t, "missing.tf", fmt.Sprintf("data \"aws_vpc\" \"missing\" {\n  id = %q\n}\n", missingVPC))
+	out, err = w.tofu(t, env, "plan", "-refresh-only", "-detailed-exitcode", "-input=false", "-no-color")
+	assert.Equal(t, 1, exitCode(err), "%s: an unreadable data source\n%s", w.version, out)
+	assert.Contains(t, out, "data.aws_vpc.missing", w.version)
+	out, err = w.tofu(t, env, "apply", "-refresh-only", "-auto-approve", "-input=false", "-no-color")
+	assert.Equal(t, 1, exitCode(err), "%s: apply with an unreadable data source\n%s", w.version, out)
+	assert.Contains(t, out, "data.aws_vpc.missing", w.version)
+	assert.NotContains(t, w.stateTags(t, env, "aws_vpc.v"), "drift", "%s: the failed apply wrote the drift", w.version)
+
+	require.NoError(t, os.Remove(filepath.Join(w.dir, "missing.tf")))
+	out, err = w.tofu(t, env, "apply", "-refresh-only", "-auto-approve", "-input=false", "-no-color")
+	assert.Equal(t, 0, exitCode(err), "%s: apply with drift alone\n%s", w.version, out)
+	assert.Equal(t, "yes", w.stateTags(t, env, "aws_vpc.v")["drift"], "%s: the drift is not in the state", w.version)
+	assert.Zero(t, proxy.count(), "%s: requests left loopback: %v", w.version, proxy.requests())
+}
+
+// stateTags is the tags of the resource at address in the state, from
+// `tofu show -json`'s stdout.
+func (w assumptionDir) stateTags(t *testing.T, env []string, address string) map[string]string {
+	t.Helper()
+	stdout, stderr, err := cli.RunTofu(w.dir, env, "show", "-json")
+	require.NoError(t, err, "%s\n%s%s", w.version, stdout, stderr)
+	var state struct {
+		Values struct {
+			RootModule struct {
+				Resources []struct {
+					Address string `json:"address"`
+					Values  struct {
+						Tags map[string]string `json:"tags"`
+					} `json:"values"`
+				} `json:"resources"`
+			} `json:"root_module"`
+		} `json:"values"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(stdout), &state), w.version)
+	for _, r := range state.Values.RootModule.Resources {
+		if r.Address == address {
+			return r.Values.Tags
+		}
+	}
+	require.Failf(t, "not in the state", "%s: %s\n%s", w.version, address, stdout)
+	return nil
+}
+
+// lookups is more independent data sources than tofu's default
+// -parallelism of 10; lookupID formats each one's id, in Go and in HCL.
+const (
+	lookups  = 16
+	lookupID = "vpc-%017d"
+)
+
+// TestAssumption_DataSourcesAllSendBeforePlanFails: against an empty
+// fakeaws, where every lookup fails, `plan` still sends the DescribeVpcs
+// of each of more independent data sources than tofu's -parallelism
+// before it exits 1.
+//
+// Relied on by: rehearsal-against-the-copy (HLD § Discover: let the code
+// say what it reads). ADR-0028, ADR-0032.
+func TestAssumption_DataSourcesAllSendBeforePlanFails(t *testing.T) {
+	w, _, calls := newFakeawsDir(t)
+	proxy := startRecorder(t)
+	w.write(t, "main.tf", providerBlock("")+fmt.Sprintf(`data "aws_vpc" "lookup" {
+  count = %d
+  id    = format(%q, count.index)
+}
+`, lookups, lookupID))
+
+	out, err := w.tofu(t, w.env(t, proxy), "plan", "-input=false", "-no-color")
+	assert.Equal(t, 1, exitCode(err), "%s\n%s", w.version, out)
+	want, got := map[string]int{}, map[string]int{}
+	for i := range lookups {
+		want[fmt.Sprintf(lookupID, i)] = 1
+	}
+	for _, c := range calls.all() {
+		if c.service == "ec2" && c.action == "DescribeVpcs" {
+			got[c.form.Get("VpcId.1")]++
+		}
+	}
+	assert.Equal(t, want, got, "%s: one DescribeVpcs per index\n%s", w.version, out)
+	assert.Zero(t, proxy.count(), "%s: requests left loopback: %v", w.version, proxy.requests())
+}
+
+// newFakeawsDir starts a fresh fakeaws before SealNetwork, and a
+// recording proxy in front of it, and returns an assumptionDir whose
+// override sends EC2 and STS through the proxy at fakeaws's paths.
+func newFakeawsDir(t *testing.T) (assumptionDir, *e2e.MockwayInstance, *awsRecorder) {
+	t.Helper()
+	e2e.SkipUnlessEnabled(t)
+	fakeaws := e2e.StartFakeaws(t)
+	calls := startAWSRecorder(t, fakeaws.URL)
+	w := newAssumptionDir(t)
+	var b strings.Builder
+	b.WriteString("provider \"aws\" {\n  endpoints {\n")
+	for _, svc := range []string{"EC2", "STS"} {
+		fmt.Fprintf(&b, "    %s = %q\n", strings.ToLower(svc), calls.url+fakeawsPath(svc))
+	}
+	b.WriteString("  }\n}\n")
+	w.write(t, cli.OurOverride, b.String())
+	return w, fakeaws, calls
+}
+
+// fakeawsPath is svc's fakeaws path in assumptionRegion.
+func fakeawsPath(svc string) string {
+	return strings.ReplaceAll(cli.AWSFakeawsPaths[svc], "{region}", assumptionRegion)
+}
+
+// exitCode is tofu's exit status: 0 for nil, -1 when it did not exit.
+func exitCode(err error) int {
+	var exit *exec.ExitError
+	switch {
+	case err == nil:
+		return 0
+	case errors.As(err, &exit):
+		return exit.ExitCode()
+	}
+	return -1
+}
+
+// awsCall is one request the recorder passed on: the service (the first
+// path segment), the Action (from the form body, or X-Amz-Target) and the
+// form.
+type awsCall struct {
+	service, action string
+	form            url.Values
+}
+
+// awsRecorder is a reverse proxy that keeps the path, records each
+// request and passes it on to fakeaws, whose audit table is empty at the
+// pin.
+type awsRecorder struct {
+	url string
+
+	mu    sync.Mutex
+	calls []awsCall
+}
+
+func startAWSRecorder(t *testing.T, target string) *awsRecorder {
+	t.Helper()
+	u, err := url.Parse(target)
+	require.NoError(t, err)
+	next := httputil.NewSingleHostReverseProxy(u)
+	r := &awsRecorder{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		req.Body = io.NopCloser(bytes.NewReader(body))
+		form, _ := url.ParseQuery(string(body))
+		c := awsCall{action: form.Get("Action"), form: form}
+		if target := req.Header.Get("X-Amz-Target"); target != "" {
+			c.action = target
+		}
+		c.service, _, _ = strings.Cut(strings.TrimPrefix(req.URL.Path, "/"), "/")
+		r.mu.Lock()
+		r.calls = append(r.calls, c)
+		r.mu.Unlock()
+		next.ServeHTTP(w, req)
+	}))
+	t.Cleanup(server.Close)
+	r.url = server.URL
+	return r
+}
+
+func (r *awsRecorder) all() []awsCall {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.calls)
 }
 
 // assumptionDir is a tofu work directory, initialised from SealNetwork's
