@@ -423,6 +423,19 @@ parameter for the AMI resolve, and what the apply and destroy send. A scope whos
 before 2026-10-10 lacks both, and refuses the first real AMI resolve: apply the policy again as
 Scope setup step 3 says.
 
+### The reader key file
+
+The account read (epic prod-read-seam) takes its read-only key from its own file, never from
+`layer3-aws.env`: the Layer 3 key holds reap's write actions, the reader's must not. infrafactory
+reads the file itself (`AWSReaderConfig`); nothing is sourced into the shell.
+- Mode `0600`, a regular file, not a symlink. Any group or other permission bit is refused.
+- KEY=VALUE lines: `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`, plus an optional
+  `AWS_SESSION_TOKEN` for a temporary key. Any other key, a repeated key and an empty value are
+  refused; an empty `AWS_SESSION_TOKEN=` is refused, not read as absent.
+- No refusal prints a value. An unknown key is named only when it is `AWS_` then capitals, digits
+  and underscores; any other line, such as a wrapped token or a reversed `<secret>=KEY` line, is
+  named by its line number.
+
 ## Sibling mocks
 
 Three first-party HTTP-level mocks + one third-party backend live alongside infrafactory:
