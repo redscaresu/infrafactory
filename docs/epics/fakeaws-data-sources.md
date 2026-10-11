@@ -15,7 +15,7 @@ depends_on: []
 
 **Out of scope:** loading rows; new resource types; filters for non-EC2 services unless a web-stack data source needs them.
 
-**Constraints:** filter work in the Describe handlers and a new `ec2_filters.go`; its ec2.go stories run one after another with fakeaws-loaded-identity's; fix forward at the source, never pitfalls/*.yaml.
+**Constraints:** filter work in the Describe handlers and a new `ec2_filters.go`; its ec2.go stories run one after another with fakeaws-loaded-identity's; whichever of this epic's filter story and fakeaws-request-log-gap-markers lands second updates TestContract_request_log_filter_refused; an AZ table answering a fixed set when unloaded reuses fakeaws-loaded-identity's loaded reader, never a second flag; fix forward at the source, never pitfalls/*.yaml.
 
 **Your part:** none.
 
