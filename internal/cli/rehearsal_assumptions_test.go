@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -31,14 +32,18 @@ import (
 
 const (
 	assumptionRegion = "us-east-1"
-	// closedEndpoint is a loopback port nothing listens on: binding it
-	// takes root, so no test process can.
-	closedEndpoint = "http://127.0.0.1:9"
-	closedDial     = "dial tcp 127.0.0.1:9:"
+	// closedAddr is the discard port, which nothing serves by default or
+	// on CI; newAssumptionDir checks that it refuses a connection.
+	closedAddr     = "127.0.0.1:9"
+	closedEndpoint = "http://" + closedAddr
+	closedDial     = "dial tcp " + closedAddr + ":"
 	// tofuDeadline bounds every tofu call. max_retries = 1 in each
 	// fixture keeps a refused request fast; without it the SDK retries
 	// for more than ten minutes.
 	tofuDeadline = 2 * time.Minute
+	// tofuWaitDelay is how long a tofu call may wait, once tofu has
+	// exited or been killed, for the output pipe to close.
+	tofuWaitDelay = 10 * time.Second
 	// ourOverride is the name infrafactory's override takes: it sorts
 	// before a user's zz_override.tf.
 	ourOverride = "infrafactory_override.tf"
@@ -69,7 +74,8 @@ func TestAssumption_EndpointsOverrideKeepsApplyOffProd(t *testing.T) {
 		w.write(t, "main.tf", providerBlock("")+`data "aws_caller_identity" "me" {}`+"\n")
 		w.write(t, ourOverride, override)
 
-		errs := w.applyJSON(t, proxy)
+		errs, aliasWarnings := w.applyJSON(t, proxy)
+		assert.Positive(t, aliasWarnings, "%s: no %q warning: reworded, or now an error?", w.version, aliasConflict)
 		assert.Contains(t, errs, "GetCallerIdentity", w.version)
 		assert.Contains(t, errs, closedDial, "%s: %s", w.version, errs)
 		assert.Zero(t, proxy.count(), "%s: requests left loopback: %v", w.version, proxy.requests())
@@ -81,7 +87,8 @@ func TestAssumption_EndpointsOverrideKeepsApplyOffProd(t *testing.T) {
 			`data "aws_vpcs" "all" {}`+"\n")
 		w.write(t, ourOverride, override)
 
-		errs := w.applyJSON(t, proxy)
+		errs, aliasWarnings := w.applyJSON(t, proxy)
+		assert.Positive(t, aliasWarnings, "%s: no %q warning: reworded, or now an error?", w.version, aliasConflict)
 		assert.Contains(t, errs, "DescribeVpcs", w.version)
 		assert.Contains(t, errs, closedDial, "%s: %s", w.version, errs)
 		assert.Zero(t, proxy.count(), "%s: requests left loopback: %v", w.version, proxy.requests())
@@ -92,7 +99,7 @@ func TestAssumption_EndpointsOverrideKeepsApplyOffProd(t *testing.T) {
 		w.write(t, "main.tf", providerBlock("")+`data "aws_caller_identity" "me" {}`+"\n")
 		w.write(t, ourOverride, endpointsOverride(without(keys, "sts"), closedEndpoint))
 
-		errs := w.applyJSON(t, proxy)
+		errs, _ := w.applyJSON(t, proxy)
 		assert.Positive(t, proxy.count(), "%s: an STS key the override leaves out goes to AWS: %s", w.version, errs)
 		t.Logf("%s: the proxy saw %v", w.version, proxy.requests())
 	})
@@ -154,6 +161,12 @@ func newAssumptionDir(t *testing.T) assumptionDir {
 	t.Cleanup(e2e.CleanupAWSMirror)
 	e2e.SealNetwork(t)
 
+	conn, err := net.DialTimeout("tcp", closedAddr, time.Second)
+	if err == nil {
+		_ = conn.Close()
+	}
+	require.Error(t, err, "something listens on %s, which the tests rely on being closed", closedAddr)
+
 	w := assumptionDir{dir: t.TempDir()}
 	version, err := w.tofu(t, w.env(t, startRecorder(t)), "version")
 	require.NoError(t, err, version)
@@ -201,12 +214,18 @@ func (w assumptionDir) env(t *testing.T, proxy *recorder, extra ...string) []str
 }
 
 // tofu runs tofu in the directory under tofuDeadline and returns its
-// combined output.
+// combined output. On the deadline it kills tofu's whole process group, as
+// exec_runner.go does, and WaitDelay stops waiting on the output pipe: a
+// child of tofu that outlived a kill of tofu alone would hold the pipe and
+// block the call past the deadline.
 func (w assumptionDir) tofu(t *testing.T, env []string, args ...string) (string, error) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), tofuDeadline)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "tofu", args...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
+	cmd.WaitDelay = tofuWaitDelay
 	cmd.Dir = w.dir
 	cmd.Env = env
 	out, err := cmd.CombinedOutput()
@@ -245,11 +264,11 @@ func (w assumptionDir) endpointKeys(t *testing.T) []string {
 }
 
 // applyJSON runs `tofu apply -json`, which must fail, and returns its
-// error diagnostics. Naming every key draws an "Only one of the following
-// attributes should be set" warning per pair of aliases of one service;
-// the human output folds them into one, so they are counted here, logged,
-// and fail the test if they become errors.
-func (w assumptionDir) applyJSON(t *testing.T, proxy *recorder) string {
+// error diagnostics and its alias warnings. Naming every key draws an
+// "Only one of the following attributes should be set" warning per pair of
+// aliases of one service; the human output folds them into one, so they
+// are counted here, logged, and fail the test if they become errors.
+func (w assumptionDir) applyJSON(t *testing.T, proxy *recorder) (string, int) {
 	t.Helper()
 	out, err := w.tofu(t, w.env(t, proxy), "apply", "-auto-approve", "-input=false", "-json")
 	require.Error(t, err, "%s: apply succeeded\n%s", w.version, out)
@@ -274,7 +293,7 @@ func (w assumptionDir) applyJSON(t *testing.T, proxy *recorder) string {
 		}
 	}
 	t.Logf("%s: %d %q warnings", w.version, aliasWarnings, aliasConflict)
-	return strings.Join(errs, "\n")
+	return strings.Join(errs, "\n"), aliasWarnings
 }
 
 // providerBlock is `provider "aws"` with max_retries = 1 and extra.
