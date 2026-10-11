@@ -2,8 +2,15 @@ package cli
 
 import (
 	"bytes"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/hashicorp/hcl/v2"
@@ -137,3 +144,151 @@ func (w countingWalker) Enter(hclsyntax.Node) hcl.Diagnostics {
 	return nil
 }
 func (w countingWalker) Exit(hclsyntax.Node) hcl.Diagnostics { return nil }
+
+// encryptionProbe is one copy of a root whose state is encrypted by an
+// `external` key provider: a script that touches marker when tofu runs
+// it. Its tofu children see only PATH and an empty HOME.
+type encryptionProbe struct {
+	dir, marker, outside, version string
+	env                           []string
+}
+
+// encryptionProbeKey is the 32-byte AES key the script hands tofu, base64.
+var encryptionProbeKey = base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x2a}, 32))
+
+// newEncryptionProbe skips without tofu 1.10 or later (the external key
+// provider's release), then writes the script and the root.
+func newEncryptionProbe(t *testing.T) encryptionProbe {
+	t.Helper()
+	if _, err := exec.LookPath("tofu"); err != nil {
+		t.Skip("tofu is not on PATH")
+	}
+	tmp := t.TempDir()
+	p := encryptionProbe{
+		dir:     filepath.Join(tmp, "copy"),
+		marker:  filepath.Join(tmp, "marker"),
+		outside: filepath.Join(tmp, "outside", "terraform.tfstate"),
+		env:     []string{"PATH=" + os.Getenv("PATH"), "HOME=" + t.TempDir()},
+	}
+	require.NoError(t, os.Mkdir(p.dir, 0o700))
+	p.version = p.tofuVersion(t)
+
+	script := filepath.Join(tmp, "key-provider.sh")
+	require.NoError(t, os.WriteFile(script, []byte(`#!/bin/sh
+touch '`+p.marker+`'
+echo '{"magic":"OpenTofu-External-Key-Provider","version":1}'
+cat >/dev/null
+echo '{"keys":{"encryption_key":"`+encryptionProbeKey+`","decryption_key":"`+encryptionProbeKey+`"}}'
+`), 0o700))
+
+	require.NoError(t, os.WriteFile(filepath.Join(p.dir, "main.tf"), []byte(`terraform {
+  encryption {
+    key_provider "external" "probe" {
+      command = ["`+script+`"]
+    }
+    method "aes_gcm" "probe" {
+      keys = key_provider.external.probe
+    }
+    state {
+      method = method.aes_gcm.probe
+    }
+  }
+}
+
+resource "terraform_data" "probe" {}
+
+output "id" {
+  value = terraform_data.probe.id
+}
+`), 0o600))
+	return p
+}
+
+func (p encryptionProbe) tofuVersion(t *testing.T) string {
+	t.Helper()
+	out, err := p.tofu("version", "-json")
+	require.NoError(t, err)
+	var v struct {
+		Version string `json:"terraform_version"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &v), out)
+	var major, minor int
+	_, err = fmt.Sscanf(v.Version, "%d.%d", &major, &minor)
+	require.NoError(t, err, "tofu version %q", v.Version)
+	if major < 1 || (major == 1 && minor < 10) {
+		t.Skipf("tofu %s is below 1.10, which added the external key provider", v.Version)
+	}
+	return "tofu " + v.Version
+}
+
+// tofu runs tofu in the copy and returns its stdout; a non-zero exit
+// returns an error carrying both streams.
+func (p encryptionProbe) tofu(args ...string) (string, error) {
+	cmd := exec.Command("tofu", args...)
+	cmd.Dir, cmd.Env = p.dir, p.env
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return string(out), fmt.Errorf("tofu %s: %w\n%s%s", strings.Join(args, " "), err, out, stderr.String())
+	}
+	return string(out), nil
+}
+
+// initWithOutsideBackend is the rehearsal's second init: a `backend
+// "local" {}` override with no path, given one outside the copy.
+func (p encryptionProbe) initWithOutsideBackend() error {
+	override := "terraform {\n  backend \"local\" {}\n}\n"
+	if err := os.WriteFile(filepath.Join(p.dir, "override.tf"), []byte(override), 0o600); err != nil {
+		return err
+	}
+	_, err := p.tofu("init", "-input=false", "-no-color", "-reconfigure", "-get=false",
+		"-lockfile=readonly", "-backend-config=path="+p.outside)
+	return err
+}
+
+// An `external` key provider that `terraform { encryption { state {} } }`
+// uses runs its command at the init that initialises the backend, and
+// not at `init -backend=false`.
+//
+// Relied on by: rehearsal-prepare-gate, which refuses `encryption` by
+// name before the first tofu command, because the second init would
+// otherwise run a command of the user's code (ADR-0028; the import HLD's
+// "Prepare" section, review-2 E2).
+func TestAssumption_ExternalKeyProviderRunsAtBackendInit(t *testing.T) {
+	p := newEncryptionProbe(t)
+
+	_, err := p.tofu("init", "-input=false", "-no-color", "-backend=false")
+	require.NoError(t, err, p.version)
+	assert.NoFileExists(t, p.marker, "%s: init -backend=false ran the key provider", p.version)
+
+	require.NoError(t, p.initWithOutsideBackend(), p.version)
+	assert.FileExists(t, p.marker,
+		"%s: the backend-initialising init did not run the key provider", p.version)
+}
+
+// `tofu state pull` emits the state decrypted, though the state at rest
+// is encrypted.
+//
+// Relied on by: rehearsal-state-pull, which pulls state through tofu and
+// so would hand the rehearsal plaintext secrets of an encrypted state;
+// the gate refuses `encryption` for that too (ADR-0028; the import HLD's
+// "Prepare" section, review-2 E2).
+func TestAssumption_StatePullEmitsDecryptedState(t *testing.T) {
+	p := newEncryptionProbe(t)
+	require.NoError(t, p.initWithOutsideBackend(), p.version)
+	_, err := p.tofu("apply", "-input=false", "-no-color", "-auto-approve")
+	require.NoError(t, err, p.version)
+
+	id, err := p.tofu("output", "-raw", "id")
+	require.NoError(t, err, p.version)
+	require.NotEmpty(t, id, p.version)
+
+	onDisk, err := os.ReadFile(p.outside)
+	require.NoError(t, err, p.version)
+	assert.NotContains(t, string(onDisk), id, "%s: the state at rest is plaintext", p.version)
+
+	pulled, err := p.tofu("state", "pull")
+	require.NoError(t, err, p.version)
+	assert.Contains(t, pulled, id, "%s: state pull did not emit the decrypted state", p.version)
+}
