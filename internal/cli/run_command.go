@@ -1244,9 +1244,16 @@ func runIteration(
 			stages = append(stages, awsRunStages(testResult.Stages, iteration, cloud)...)
 			if (step.name == "test" || step.name == "validate") && len(testResult.Failures) > 0 {
 				for _, failure := range testResult.Failures {
+					layer, stage := "run", stageName
+					// A real-cloud failure keeps its layer, its stage
+					// numbered like awsRunStages', so iteration.json tells
+					// a Layer 3 apply failure from a mock one.
+					if failure.Layer == "sandbox_deploy" {
+						layer, stage = failure.Layer, fmt.Sprintf("iteration_%d_%s", iteration, failure.Stage)
+					}
 					failures = append(failures, FailureSummary{
-						Layer:    "run",
-						Stage:    stageName,
+						Layer:    layer,
+						Stage:    stage,
 						Check:    failure.Check,
 						Policy:   failure.Policy,
 						Command:  step.command,
@@ -1739,9 +1746,9 @@ func runCommandStatus(terminalReason string, strayBlocked, keepBlocked bool) Com
 // not empty.
 //
 // Matched on Check, not Layer/Stage. runIteration REWRITES every
-// failure it passes up as `Layer: "run", Stage: "iteration_N_test"`,
-// so the layer a failure came from is not visible here; Check is the
-// field that survives. A first version of this matched
+// non-sandbox failure it passes up as `Layer: "run", Stage:
+// "iteration_N_test"`, so the layer a failure came from is not visible
+// here; Check is the field that survives. A first version of this matched
 // `mock_deploy`/`converge` and therefore never fired, which the
 // run-level test caught by counting iterations.
 func hasConvergeFailure(failures []FailureSummary) bool {

@@ -1504,3 +1504,40 @@ acceptance_criteria:
 	assert.Empty(t, entries)
 	assert.NoFileExists(t, filepath.Join(docsDir, "mock-gaps.md"))
 }
+
+// A failed real apply stays a sandbox_deploy failure in iteration.json,
+// numbered like the passing sandbox stages, so evidence readers can tell
+// it from a mock one. The stage line stays run/iteration_1_test.
+func TestRunRecordsAFailedLayer3ApplyAtItsLayerInIterationJSON(t *testing.T) {
+	lc := newAWSLifecycle(t)
+	lc.deploy.err = &harness.SandboxDeployError{
+		Stage: "apply",
+		Apply: harness.StageResult{Stage: "apply", Stderr: "InvalidSubnet.Range"},
+		Err:   errors.New("exit status 1"),
+	}
+
+	run := runAWSRun(t, lc, awsRunOptions{repairs: 1})
+
+	require.Error(t, run.err)
+	paths, err := filepath.Glob(filepath.Join(run.h.RunstoreRoot(), "*", "*", "iterations", "1", "iteration.json"))
+	require.NoError(t, err)
+	require.Len(t, paths, 1)
+	raw, err := os.ReadFile(paths[0])
+	require.NoError(t, err)
+	var iteration struct {
+		Stages   []StageSummary   `json:"stages"`
+		Failures []FailureSummary `json:"failures"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &iteration))
+	assert.Contains(t, iteration.Stages, StageSummary{Layer: "run", Stage: "iteration_1_test", Status: StageStatusFail})
+	var applies []FailureSummary
+	for _, f := range iteration.Failures {
+		if f.Check == "apply" {
+			applies = append(applies, f)
+		}
+	}
+	require.Len(t, applies, 1, "%+v", iteration.Failures)
+	assert.Equal(t, "sandbox_deploy", applies[0].Layer)
+	assert.Equal(t, "iteration_1_apply", applies[0].Stage)
+	assert.Contains(t, applies[0].Detail, "InvalidSubnet.Range")
+}
