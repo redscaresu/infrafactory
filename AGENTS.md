@@ -147,6 +147,7 @@ with its kind. Every swarm brief also carries these lines.
 - Keep one source of truth for each fact (a holder, a list, a stage name): derive every other view from it rather than copying it, and when a review finds a fact held in two places, remove the copy instead of syncing it. <!-- lesson: state-duplication -->
 - When code changes behaviour a doc, runbook step, story **You:** line or PR body describes, change that text in the same PR, and re-read the PR body against the final diff before asking for review. <!-- lesson: docs-misstate-code -->
 - Anything that hides secrets or private data (a scrub, a redaction, a filter on what is printed or published) is an allowlist: name what may pass and drop the rest. A denylist of patterns to remove fails open on the first one nobody thought of. Never print a credential file, even redacted; print only its key names. <!-- lesson: denylist -->
+- A check that guards safety (a preflight, a probe, a wall, a refusal) passes only on the exact outcome it expects, such as a refused connection or a named error, and treats every other error or empty result as a failure. <!-- lesson: fails-open -->
 
 ## Quality Bar
 - `go test ./...` passes for completed stories.
