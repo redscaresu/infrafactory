@@ -588,14 +588,16 @@ func mirrorAWSProvider() (string, error) {
 	return mirrorDir, nil
 }
 
-// CleanupAWSMirror removes SealNetwork's mirror. TestMain calls it: the
-// mirror outlives every single test that uses it. A test binary with one
-// sealed test, and no TestMain of this package, calls it from that test's
-// cleanup.
+// CleanupAWSMirror removes SealNetwork's mirror, and the next SealNetwork
+// mirrors again. TestMain calls it: the mirror outlives every single test
+// that uses it. A test binary with no TestMain of this package calls it
+// from each sealed test's cleanup.
 func CleanupAWSMirror() {
 	if awsMirrorDir != "" {
 		_ = os.RemoveAll(awsMirrorDir)
 	}
+	awsMirrorOnce = sync.Once{}
+	awsMirrorDir, awsMirrorErr = "", nil
 }
 
 // RepoRoot returns the absolute path to the infrafactory repository root,
