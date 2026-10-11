@@ -522,11 +522,11 @@ var (
 
 // SealNetwork cuts the tofu a test starts off from everything but
 // loopback, as fakeaws's smokeEnv does (examples/smoke_env_test.go):
-// init installs hashicorp/aws from a filesystem mirror, filled once per
-// test binary, with direct installation of it excluded, and any other
-// request dies at a dead proxy. RunInfrafactory runs in-process, so its
-// tofu inherits this. Call it after the mocks are up; `go run` needs the
-// network.
+// init installs hashicorp/aws from a filesystem mirror, filled on first
+// use and again after each CleanupAWSMirror, with direct installation of
+// it excluded, and any other request dies at a dead proxy.
+// RunInfrafactory runs in-process, so its tofu inherits this. Call it
+// after the mocks are up; `go run` needs the network.
 func SealNetwork(t *testing.T) {
 	t.Helper()
 	awsMirrorOnce.Do(func() { awsMirrorDir, awsMirrorErr = mirrorAWSProvider() })
@@ -556,7 +556,7 @@ func SealNetwork(t *testing.T) {
 }
 
 // mirrorAWSProvider downloads hashicorp/aws into a new directory that
-// CleanupAWSMirror removes when the test binary exits.
+// CleanupAWSMirror removes.
 func mirrorAWSProvider() (string, error) {
 	configDir, err := os.MkdirTemp("", "infrafactory-aws-mirror-config-")
 	if err != nil {
@@ -588,14 +588,16 @@ func mirrorAWSProvider() (string, error) {
 	return mirrorDir, nil
 }
 
-// CleanupAWSMirror removes SealNetwork's mirror. TestMain calls it: the
-// mirror outlives every single test that uses it. A test binary with one
-// sealed test, and no TestMain of this package, calls it from that test's
-// cleanup.
+// CleanupAWSMirror removes SealNetwork's mirror, and the next SealNetwork
+// mirrors again. This package's TestMain calls it once its tests are done,
+// so they share one mirror; a sealed test in another package (internal/cli)
+// calls it from its own cleanup, so that test mirrors for itself.
 func CleanupAWSMirror() {
 	if awsMirrorDir != "" {
 		_ = os.RemoveAll(awsMirrorDir)
 	}
+	awsMirrorOnce = sync.Once{}
+	awsMirrorDir, awsMirrorErr = "", nil
 }
 
 // RepoRoot returns the absolute path to the infrafactory repository root,
