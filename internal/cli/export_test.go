@@ -53,3 +53,13 @@ func AWSLayer3MockDeploy(ctx context.Context, cfg config.Config, scenarioPath st
 	}
 	return err
 }
+
+// The assumption tests' tofu runner, override name, backend override
+// (no path) and fakeaws paths, for the assumption tests in cli_test.
+var (
+	RunTofu              = runTofu
+	LocalBackendOverride = localBackendOverride("")
+	AWSFakeawsPaths      = awsFakeawsPaths
+)
+
+const OurOverride = ourOverride

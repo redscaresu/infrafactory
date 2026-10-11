@@ -1,7 +1,7 @@
 ---
 status: active
 hld: 2026-09-30-import-production-state-into-the-mocks
-depends_on: [rehearsal-assumption-tests]
+depends_on: []
 ---
 
 # New code is copied and gated before any tofu, every downloaded module is gated before the second init, and both inits run under a walled environment (Rollout 4, first clauses; goals 2, 9, 10, 11).
@@ -16,9 +16,13 @@ depends_on: [rehearsal-assumption-tests]
 - harness.Command gains a replace mode carrying PATH and only named variables; a test proves HOME, TF_CLI_CONFIG_FILE, TF_REATTACH_PROVIDERS, TF_LOG_PATH, TF_PLUGIN_CACHE_DIR, TF_CLI_ARGS*, TF_VAR_*, AWS_IGNORE_CONFIGURED_ENDPOINT_URLS and AWS_SESSION_TOKEN never pass.
 - Golden files; docs/operations.md runbook section.
 
+**Decide when scoping (found by rehearsal-assumption-tests, #450 and #455):**
+- Encryption reaches tofu by more than the HCL `encryption` block: the `TF_ENCRYPTION` variable, `.tofu` files and `.tf.json`. Refusing the block by name is a denylist; the gate closes all three (replace mode never passes `TF_ENCRYPTION`, with a test; the extension policy covers `.tofu` and `.tf.json`).
+- A public-registry module is fetched through `git::https://github.com/...`, so the first init needs `git` and reaches github.com. Decide whether "git sources" is judged by the source string (admits registry modules) or by what the fetch does (refuses them), and test the choice.
+
 **Out of scope:** the provider override, the rehearsal environment, the fakeaws process, `end` (rehearsal-walls); discovery onward; the tfstate pull; the UI; admitting assume_role.
 
-**Constraints:** ADR-0023 gate bar (parse not scan, deny by default, unparseable = refused, no tofu for a refused configuration); ADR-0002 CLI contract; ADR-0028 for any tofu claim not in rehearsal-assumption-tests; the runner's process group, SIGINT and single-interrupt rules reused; ADR edit or `ADR: none` on every internal/cli PR.
+**Constraints:** ADR-0023 gate bar (parse not scan, deny by default, unparseable = refused, no tofu for a refused configuration); ADR-0002 CLI contract; ADR-0028 for any tofu claim not in the 2026-10-11 amendment; the runner's process group, SIGINT and single-interrupt rules reused; ADR edit or `ADR: none` on every internal/cli PR; tofu claims pinned by `TestAssumption_UserOverrideMergesAfterOurs`, `TestAssumption_RootOverrideMissesChildModuleProvider`, `TestAssumption_SecondInitMakesNoProxiedConnection`, `TestAssumption_ExternalKeyProviderRunsAtBackendInit` (ADR-0028).
 
 **Your part:** none (ADR-0042 merges under standing authority).
 

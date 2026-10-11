@@ -142,3 +142,32 @@ hand-shaped input tests the author's belief about the shape, which is the claim 
 **conftest was not adopted.** It would replace an evaluator that was not the problem, and cost
 `deny_state`, params, per-cloud routing and repair-loop feedback to rebuild. What was missing was
 tests, and the OPA library infrafactory already uses runs them.
+
+## Amendment, 2026-10-11: the tofu and provider claims the import-production-state rehearsal rests on
+
+The rehearsal design (`docs/hld/2026-09-30-import-production-state-into-the-mocks.md`) rests on
+seven claims about tofu and the AWS provider. Each is a `TestAssumption_*` test, so a tofu or
+provider release that breaks one fails CI rather than a rehearsal.
+
+| Claim | Test(s) | HLD section | Relying epic | Verdict |
+|---|---|---|---|---|
+| (a) A provider override naming every `endpoints` key, STS included, makes `tofu apply` with real-looking keys die at a dead loopback address | `TestAssumption_EndpointsOverrideKeepsApplyOffProd` | Goals (goal 7); Risks and safety | rehearsal-walls | true |
+| (b) A `backend "local" {}` override with `-backend-config=path=<outside>` keeps state out of the copy | `TestAssumption_CLIBackendPathKeepsStateOutOfTheCopy` | Prepare | rehearsal-walls | true |
+| (c) `tofu init -backend=false` under a credential-free env with an empty HOME and no `TF_CLI_CONFIG_FILE`/`TF_PLUGIN_CACHE_DIR` fetches providers and modules; then the second `init -reconfigure -get=false -lockfile=readonly -plugin-dir=...` makes no proxied connection | `TestAssumption_SecondInitMakesNoProxiedConnection` | Prepare (E3) | rehearsal-prepare-gate | true |
+| (d) An `external` key provider runs its command at a backend-initialising init, and `tofu state pull` emits decrypted state | `TestAssumption_ExternalKeyProviderRunsAtBackendInit`, `TestAssumption_StatePullEmitsDecryptedState` | Prepare (E2) | rehearsal-prepare-gate, rehearsal-state-pull | true |
+| (e) A data source the mock cannot read makes `plan -refresh-only -detailed-exitcode` exit 1, distinct from 2; `apply -refresh-only` has no exit 2 | `TestAssumption_RefreshOnlyUnreadableDataSourceExitsOne` | Load and check (E1) | rehearsal-against-the-copy | true |
+| (f) The provider sends a data source's request before the plan fails, and independent data sources all send in one pass | `TestAssumption_DataSourcesAllSendBeforePlanFails` | Discover | rehearsal-against-the-copy | true |
+| (g) A user `zz_override.tf` merges after infrafactory's override, and a root override does not reach a `provider "aws"` inside a child module | `TestAssumption_UserOverrideMergesAfterOurs`, `TestAssumption_RootOverrideMissesChildModuleProvider` | Prepare | rehearsal-prepare-gate | true |
+
+Refinements the tests recorded:
+- (d) runs at an init that initialises the backend, not at `init -backend=false`.
+- (b) holds because the command-line path wins over any path in the block.
+- (c) means no *proxied* connection: a direct dial is beyond what the test can observe. It also
+  depends on a pinned third-party registry module.
+
+Where they live: the gated claims are in `internal/cli/rehearsal_assumptions_test.go` as package
+`cli_test`, because `internal/e2e` imports `internal/cli`. The three that fetch no provider, (b) and both
+halves of (d), are in `internal/cli/assumptions_test.go`.
+
+Bounds: the provider is `harness.AWSProviderVersion`, not a lock file. CI's tofu floats, so a tofu
+release can turn main red with no repo change; that is the test doing its job.

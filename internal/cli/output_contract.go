@@ -38,7 +38,9 @@ type FailureSummary struct {
 	Resource string `json:"resource,omitempty"`
 	Detail   string `json:"detail"`
 	// Origin is the layer that produced the failure (mock_deploy,
-	// sandbox_deploy, ...) before a run rewrites Layer to "run". It is
+	// sandbox_deploy, ...) before a run rewrites Layer to "run" (a
+	// failure runFailureStage files under a carried fail line keeps its
+	// layer). It is
 	// recorded on the pitfall learned from the failure, and kept out of
 	// the output contract.
 	Origin string `json:"-"`
@@ -281,11 +283,14 @@ func explainabilityFromFailure(failure FailureSummary, cloud layer3Cloud) (Expla
 	case failure.Policy != "":
 		explanation.Summary = "policy check failed for mapped constraint"
 		explanation.Action = "verify constraint policy mapping and inspect plan/state inputs for the named policy"
+	case failure.Layer == "sandbox_deploy" && cloud == layer3AWS && failure.Check != "credentials":
+		explanation.Summary, explanation.Action = awsLayer3Explanation(failure.Check)
 	case failure.Check == "connectivity" || failure.Check == "http_probe":
-		if failure.Layer == "sandbox_deploy" {
+		switch {
+		case failure.Layer == "sandbox_deploy":
 			explanation.Summary = "real Layer 3 network probe failed"
 			explanation.Action = "inspect live endpoints, bootstrap project wiring, and service readiness for the probe target"
-		} else {
+		default:
 			explanation.Summary = "criteria check failed for network reachability expectations"
 			explanation.Action = "validate topology targets/ports and inspect generated infrastructure connectivity"
 		}
@@ -313,4 +318,21 @@ func explainabilityFromFailure(failure FailureSummary, cloud layer3Cloud) (Expla
 	}
 
 	return explanation, true
+}
+
+// awsLayer3Explanation explains a failure an aws run keeps at layer
+// sandbox_deploy. The other arms' advice is Scaleway's (projects, SCW_
+// keys) or a mock's, so none of it reaches an aws stage.
+func awsLayer3Explanation(check string) (summary, action string) {
+	switch check {
+	case "connectivity", "http_probe", "real_probe":
+		return "real Layer 3 network probe failed",
+			"inspect the instance's public IP, its security group's ingress, and the service its user data starts, for the probe target"
+	case "dns_resolution":
+		return "real Layer 3 DNS probe failed",
+			"inspect the Route 53 records the stack creates, their propagation, and the output that names the domain"
+	default:
+		return "real AWS Layer 3 stage failed",
+			"read the failure detail beside its sandbox_deploy stage line; docs/operations.md § Layer 3 (AWS) describes each stage"
+	}
 }

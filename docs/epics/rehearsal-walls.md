@@ -16,7 +16,7 @@ depends_on: [rehearsal-prepare-gate, fakeaws-rehearsal-instance]
 
 **Out of scope:** the gate and inits (rehearsal-prepare-gate); passthrough; discovery onward.
 
-**Constraints:** ADR-0023 containment never weakened; existing runner process-group and interrupt rules (#436, #438); worktrees share a stale ../fakeaws, so never build from it.
+**Constraints:** ADR-0023 containment never weakened; existing runner process-group and interrupt rules (#436, #438); worktrees share a stale ../fakeaws, so never build from it; tofu claims pinned by `TestAssumption_EndpointsOverrideKeepsApplyOffProd`, `TestAssumption_CLIBackendPathKeepsStateOutOfTheCopy` (ADR-0028).
 
 **Your part:** none.
 

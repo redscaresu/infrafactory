@@ -16,9 +16,11 @@ import (
 const DefaultRoot = ".infrafactory/runs"
 
 const (
-	RunMetadataSchemaVersion  = "infrafactory.run.metadata.v1"
-	RunMetadataSchemaLegacy   = "infrafactory.run.metadata.legacy"
-	RunIterationSchemaVersion = "infrafactory.run.iteration.v1"
+	RunMetadataSchemaVersion = "infrafactory.run.metadata.v1"
+	RunMetadataSchemaLegacy  = "infrafactory.run.metadata.legacy"
+	// v2: an aws Layer 3 failure keeps layer sandbox_deploy, where v1
+	// filed every test-step failure under layer run.
+	RunIterationSchemaVersion = "infrafactory.run.iteration.v2"
 )
 
 type RunMetadata struct {

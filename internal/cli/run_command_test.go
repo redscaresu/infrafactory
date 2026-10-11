@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -1503,4 +1504,126 @@ acceptance_criteria:
 	require.NoError(t, err)
 	assert.Empty(t, entries)
 	assert.NoFileExists(t, filepath.Join(docsDir, "mock-gaps.md"))
+}
+
+// A failed real Layer 3 stage on aws stays a sandbox_deploy failure in
+// iteration.json, beside its numbered stage line, so evidence readers can
+// tell it from a mock one; every carried fail line names a failure, and
+// every carried failure a line. The run's stage line stays
+// run/iteration_1_test, and an error that names no stage of its own
+// stays there too.
+func TestRunRecordsAFailedLayer3StageAtItsLayerInIterationJSON(t *testing.T) {
+	const detail = "InvalidSubnet.Range"
+	deployFails := func(stage string) func(*awsLifecycle) {
+		return func(lc *awsLifecycle) {
+			lc.deploy.err = &harness.SandboxDeployError{Stage: stage, Err: errors.New(detail)}
+		}
+	}
+	rows := map[string]struct {
+		lc    func(*awsLifecycle)
+		setup orderSetup
+		// stage and detail name the failure; stage "" is the run's own
+		// iteration_1_test.
+		stage, detail string
+	}{
+		"preflight": {setup: orderSetup{stsFailsOn: 2}, stage: "iteration_1_preflight", detail: "AccessDenied"},
+		"allowlist": {setup: orderSetup{gateFailsOn: 2}, stage: "iteration_1_allowlist", detail: "refused by the gate's fake"},
+		"init":      {lc: deployFails("init"), stage: "iteration_1_init", detail: detail},
+		"plan":      {lc: deployFails("plan"), stage: "iteration_1_plan", detail: detail},
+		"apply":     {lc: deployFails("apply"), stage: "iteration_1_apply", detail: detail},
+		"destroy": {lc: func(lc *awsLifecycle) {
+			lc.destroy.err = &harness.SandboxDestroyError{Stage: "destroy", Err: errors.New(detail)}
+		}, stage: "iteration_1_destroy", detail: detail},
+		"destroy (no stage)": {lc: func(lc *awsLifecycle) { lc.destroy.err = errors.New(detail) }, detail: detail},
+		"deploy (no stage)":  {lc: func(lc *awsLifecycle) { lc.deploy.err = errors.New(detail) }, detail: detail},
+	}
+	for name, row := range rows {
+		t.Run(name, func(t *testing.T) {
+			lc := newAWSLifecycle(t)
+			if row.lc != nil {
+				row.lc(lc)
+			}
+
+			run := runAWSOrder(t, lc, row.setup)
+
+			require.Error(t, run.err)
+			paths, err := filepath.Glob(filepath.Join(run.h.RunstoreRoot(), "*", "*", "iterations", "1", "iteration.json"))
+			require.NoError(t, err)
+			require.Len(t, paths, 1)
+			raw, err := os.ReadFile(paths[0])
+			require.NoError(t, err)
+			var iteration struct {
+				Stages   []StageSummary   `json:"stages"`
+				Failures []FailureSummary `json:"failures"`
+			}
+			require.NoError(t, json.Unmarshal(raw, &iteration))
+			assert.Contains(t, iteration.Stages, StageSummary{Layer: "run", Stage: "iteration_1_test", Status: StageStatusFail})
+			i := slices.IndexFunc(iteration.Failures, func(f FailureSummary) bool { return strings.Contains(f.Detail, row.detail) })
+			require.NotEqual(t, -1, i, "%+v", iteration.Failures)
+			got := iteration.Failures[i]
+			if row.stage == "" {
+				assert.Equal(t, "run", got.Layer)
+				assert.Equal(t, "iteration_1_test", got.Stage)
+			} else {
+				assert.Equal(t, "sandbox_deploy", got.Layer)
+				assert.Equal(t, row.stage, got.Stage)
+				assert.Contains(t, iteration.Stages, StageSummary{Layer: "sandbox_deploy", Stage: row.stage, Status: StageStatusFail})
+			}
+			for _, s := range iteration.Stages {
+				if s.Layer == "sandbox_deploy" && s.Status == StageStatusFail {
+					assert.True(t, slices.ContainsFunc(iteration.Failures, func(f FailureSummary) bool { return f.Layer == s.Layer && f.Stage == s.Stage }),
+						"fail line %s/%s names no failure: %+v", s.Layer, s.Stage, iteration.Failures)
+				}
+			}
+			for _, f := range iteration.Failures {
+				if f.Layer == "sandbox_deploy" {
+					assert.True(t, slices.ContainsFunc(iteration.Stages, func(s StageSummary) bool { return s.Layer == f.Layer && s.Stage == f.Stage }),
+						"failure %s/%s names no stage line: %+v", f.Layer, f.Stage, iteration.Stages)
+				}
+			}
+		})
+	}
+}
+
+// Scaleway is outside the rule: its run carries no sandbox stage up and
+// keeps its Layer 3 failures at run/iteration_N_test. On aws every
+// sandbox_deploy stage but the "run" wrap is carried, numbered.
+func TestRunStageNameCarriesNoScalewaySandboxStage(t *testing.T) {
+	for _, stage := range []string{"preflight", "allowlist", "init", "plan", "apply", "real_probe", "destroy", "cleanup_blocked"} {
+		_, ok := runStageName("sandbox_deploy", stage, 1, layer3Scaleway)
+		assert.False(t, ok, stage)
+		name, ok := runStageName("sandbox_deploy", stage, 1, layer3AWS)
+		assert.True(t, ok, stage)
+		assert.Equal(t, "iteration_1_"+stage, name)
+	}
+	_, ok := runStageName("sandbox_deploy", "run", 1, layer3AWS)
+	assert.False(t, ok, "the run wrap names no stage")
+	for _, stage := range []string{"aws_scope_sweep", "aws_scope_release"} {
+		name, ok := runStageName("sandbox_deploy", stage, 1, layer3AWS)
+		assert.True(t, ok, stage)
+		assert.Equal(t, stage, name, "a scope stage keeps its name")
+	}
+}
+
+// A failure is filed beside its stage's carried fail line only: a
+// same-named pass line, or none, leaves it at run/iteration_N_test.
+func TestRunFailureStageNeedsTheStagesFailLine(t *testing.T) {
+	f := FailureSummary{Layer: "sandbox_deploy", Stage: "apply", Check: "apply"}
+	for name, tc := range map[string]struct {
+		stages []StageSummary
+		want   bool
+	}{
+		"fail line": {stages: []StageSummary{{Layer: "sandbox_deploy", Stage: "apply", Status: StageStatusFail}}, want: true},
+		"pass line": {stages: []StageSummary{{Layer: "sandbox_deploy", Stage: "apply", Status: StageStatusPass}}},
+		"no line":   {},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, failLines := awsRunStages(tc.stages, 1, layer3AWS)
+			got, ok := runFailureStage(f, failLines)
+			assert.Equal(t, tc.want, ok)
+			if tc.want {
+				assert.Equal(t, "iteration_1_apply", got)
+			}
+		})
+	}
 }
