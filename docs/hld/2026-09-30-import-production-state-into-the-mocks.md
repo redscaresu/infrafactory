@@ -158,7 +158,7 @@ a process with anything else.
 
 The base and the head are exported from git (`git archive <ref>` for a committed ref, never a
 checkout of the user's tree; the default head, the working tree, is copied from the files
-`git ls-files --cached --others --exclude-standard` lists, so uncommitted edits are rehearsed), and each, plus a throwaway copy of the configuration that
+`git ls-files --cached --others --exclude-standard` lists that exist on disk, so uncommitted edits and deletions are rehearsed), and each, plus a throwaway copy of the configuration that
 manages the pulled tfstate (the base's by default, deleted right after the pull), is copied to its
 own work directory under `.infrafactory/` (mode 0700), with the local module
 sources they reach: their nearest common ancestor is copied, and a source escaping the user's
