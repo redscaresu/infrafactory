@@ -1,7 +1,6 @@
 ---
 kind: code
-status: blocked
-blocked_by: [prod-read-seam-adr-0041]
+status: ready
 epic: prod-read-seam
 depends_on: [prod-read-seam-adr-0041]
 touches: [internal/harness/aws_reader_table.go, internal/harness/aws_reader_wall.go, internal/harness/aws_reader_wall_test.go, internal/harness/aws_reader_clients.go]

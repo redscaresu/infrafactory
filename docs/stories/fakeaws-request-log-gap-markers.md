@@ -2,7 +2,7 @@
 kind: code
 repo: fakeaws
 status: blocked
-blocked_by: [fakeaws-identity-ec2]
+blocked_by: [fakeaws-identity-other-services]
 epic: fakeaws-rehearsal-instance
 depends_on: [fakeaws-request-log, fakeaws-arn-builders-take-account]
 touches: [handlers/ec2.go, handlers/iam.go, handlers/rds.go, handlers/dynamodb.go, handlers/sqs.go, handlers/secretsmanager.go, handlers/kms.go, handlers/ssm.go, handlers/recorder.go, handlers/recorder_test.go, AGENTS.md, concepts.md, CHANGELOG.md]
