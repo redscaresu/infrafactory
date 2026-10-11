@@ -190,6 +190,9 @@ them. Against an empty mock a data source finds nothing and the plan fails, but 
 independent nodes concurrently, so every data source whose inputs are known sends its request
 before the plan ends; one that depends on another resolves on the next pass. Discovery repeats
 against the loaded copy until a pass adds no request and the plan succeeds, bounded at five passes;
+each pass that adds requests is its own read step, then the cumulative read is reloaded (user,
+2026-10-11, at epic planning). The empty mock already answers with the user's account and region,
+so code that pins `allowed_account_ids` configures;
 that the provider sends a data source's request before failing, and that independent ones all
 send, are assumption tests (ADR-0028).
 
@@ -202,8 +205,9 @@ of types, not code to refactor: the sweep returns ids, the readers record exchan
 
 1. **Identity.** `sts:GetCallerIdentity` must return the account id the user passed (and the
    principal ARN, when given); otherwise nothing else is sent (goal 5).
-2. **The read set**, replayed: each discovered request is sent to prod only if its action is in the
-   table; each id from the state is described by its type's reader.
+2. **The read set**, replayed: each discovered request is sent to prod; one whose action is not in
+   the table refuses the read, naming it (epic planning, 2026-10-11). Each id from the state is
+   described by its type's reader.
 3. **Surroundings.** For every VPC the read touched, every modelled resource in it (subnets,
    security groups and their rules, route tables, gateways, interfaces, instances), so overlaps and
    duplicate names inside it surface. For every name a planned create takes (IAM role, key pair,
@@ -215,7 +219,8 @@ of types, not code to refactor: the sweep returns ids, the readers record exchan
 The read throttles itself and backs off on `Throttling`, because API rate limits are per account
 and prod's own automation shares them; it reports call count and duration. The **recorded read**
 is a list of exchanges (protocol, action and parameters, raw response body), written under
-`.infrafactory/` (review-2 S11). The credential file is not read again.
+`.infrafactory/` (review-2 S11). Each read step reads the credential file
+itself and holds the key in that process only; no tofu process ever sees it (user, 2026-10-11).
 
 **The tfstate, when there is one**, is pulled in its gated directory: `tofu init -input=false`
 (with `--backend-config` when the block is partial, review-1 B6, and `--workspace` selected through
@@ -428,3 +433,17 @@ and its walls; the account-read contract and the recorded-read format; the fakea
 - **Where the UI stands**: nothing here; the rehearsal is CLI-only.
 
 ## Epics
+
+- [rehearsal-assumption-tests](../epics/rehearsal-assumption-tests.md)
+- [fakeaws-rehearsal-instance](../epics/fakeaws-rehearsal-instance.md)
+- [fakeaws-loaded-identity](../epics/fakeaws-loaded-identity.md)
+- [fakeaws-data-sources](../epics/fakeaws-data-sources.md)
+- [rehearsal-prepare-gate](../epics/rehearsal-prepare-gate.md)
+- [aws-hold-for-read](../epics/aws-hold-for-read.md)
+- [prod-read-seam](../epics/prod-read-seam.md)
+- [fakeaws-loader](../epics/fakeaws-loader.md)
+- [rehearsal-walls](../epics/rehearsal-walls.md)
+- [rehearsal-passthrough](../epics/rehearsal-passthrough.md)
+- [rehearsal-against-the-copy](../epics/rehearsal-against-the-copy.md)
+- [rehearsal-takeover](../epics/rehearsal-takeover.md)
+- [larger-estate](../epics/larger-estate.md)
