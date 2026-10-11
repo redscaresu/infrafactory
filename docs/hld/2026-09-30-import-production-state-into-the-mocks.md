@@ -156,8 +156,9 @@ a process with anything else.
 
 ### Prepare: two work directories, gated before any tofu
 
-The base and the head are exported from git (`git archive <ref>`, never a checkout of the user's
-tree; the head may be the working tree), and each, plus a throwaway copy of the configuration that
+The base and the head are exported from git (`git archive <ref>` for a committed ref, never a
+checkout of the user's tree; the default head, the working tree, is copied from the files
+`git ls-files --cached --others --exclude-standard` lists, so uncommitted edits are rehearsed), and each, plus a throwaway copy of the configuration that
 manages the pulled tfstate (the base's by default, deleted right after the pull), is copied to its
 own work directory under `.infrafactory/` (mode 0700), with the local module
 sources they reach: their nearest common ancestor is copied, and a source escaping the user's
