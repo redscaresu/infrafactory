@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -23,6 +22,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/redscaresu/infrafactory/internal/cli"
 	"github.com/redscaresu/infrafactory/internal/e2e"
 	"github.com/redscaresu/infrafactory/internal/harness"
 )
@@ -38,13 +38,6 @@ const (
 	closedAddr     = "127.0.0.1:9"
 	closedEndpoint = "http://" + closedAddr
 	closedDial     = "dial tcp " + closedAddr + ":"
-	// tofuDeadline bounds every tofu call. max_retries = 1 in each
-	// fixture keeps a refused request fast; without it the SDK retries
-	// for more than ten minutes.
-	tofuDeadline = 2 * time.Minute
-	// ourOverride is the name infrafactory's override takes: it sorts
-	// before a user's zz_override.tf.
-	ourOverride = "infrafactory_override.tf"
 	// AWS's documented example key pair: real-looking, never valid.
 	fakeAccessKeyID     = "AKIAIOSFODNN7EXAMPLE"
 	fakeSecretAccessKey = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
@@ -70,7 +63,7 @@ func TestAssumption_EndpointsOverrideKeepsApplyOffProd(t *testing.T) {
 	t.Run("sts", func(t *testing.T) {
 		proxy := startRecorder(t)
 		w.write(t, "main.tf", providerBlock("")+`data "aws_caller_identity" "me" {}`+"\n")
-		w.write(t, ourOverride, override)
+		w.write(t, cli.OurOverride, override)
 
 		errs, aliasWarnings := w.applyJSON(t, proxy)
 		assert.Positive(t, aliasWarnings, "%s: no %q warning: reworded, or now an error?", w.version, aliasConflict)
@@ -83,7 +76,7 @@ func TestAssumption_EndpointsOverrideKeepsApplyOffProd(t *testing.T) {
 		proxy := startRecorder(t)
 		w.write(t, "main.tf", providerBlock("  skip_credentials_validation = true\n  skip_requesting_account_id  = true\n")+
 			`data "aws_vpcs" "all" {}`+"\n")
-		w.write(t, ourOverride, override)
+		w.write(t, cli.OurOverride, override)
 
 		errs, aliasWarnings := w.applyJSON(t, proxy)
 		assert.Positive(t, aliasWarnings, "%s: no %q warning: reworded, or now an error?", w.version, aliasConflict)
@@ -95,7 +88,7 @@ func TestAssumption_EndpointsOverrideKeepsApplyOffProd(t *testing.T) {
 	t.Run("control without sts", func(t *testing.T) {
 		proxy := startRecorder(t)
 		w.write(t, "main.tf", providerBlock("")+`data "aws_caller_identity" "me" {}`+"\n")
-		w.write(t, ourOverride, endpointsOverride(without(keys, "sts"), closedEndpoint))
+		w.write(t, cli.OurOverride, endpointsOverride(without(keys, "sts"), closedEndpoint))
 
 		errs, _ := w.applyJSON(t, proxy)
 		assert.Positive(t, proxy.count(), "%s: an STS key the override leaves out goes to AWS: %s", w.version, errs)
@@ -113,7 +106,7 @@ func TestAssumption_UserOverrideMergesAfterOurs(t *testing.T) {
 	w := newAssumptionDir(t)
 	proxy, userEndpoint := startRecorder(t), startRecorder(t)
 	w.write(t, "main.tf", providerBlock("")+`data "aws_caller_identity" "me" {}`+"\n")
-	w.write(t, ourOverride, endpointsOverride([]string{"sts"}, closedEndpoint))
+	w.write(t, cli.OurOverride, endpointsOverride([]string{"sts"}, closedEndpoint))
 	w.write(t, "zz_override.tf", endpointsOverride([]string{"sts"}, userEndpoint.url))
 
 	out, _ := w.tofu(t, w.env(t, proxy), "apply", "-auto-approve", "-input=false", "-no-color")
@@ -133,7 +126,7 @@ func TestAssumption_RootOverrideMissesChildModuleProvider(t *testing.T) {
 	w := newAssumptionDir(t)
 	proxy, root, child := startRecorder(t), startRecorder(t), startRecorder(t)
 	w.write(t, "main.tf", providerBlock("")+`module "child" { source = "./child" }`+"\n")
-	w.write(t, ourOverride, endpointsOverride([]string{"sts"}, root.url))
+	w.write(t, cli.OurOverride, endpointsOverride([]string{"sts"}, root.url))
 	w.write(t, "child/main.tf", providerBlock("")+`data "aws_caller_identity" "me" {}`+"\n")
 	w.init(t)
 
@@ -142,6 +135,149 @@ func TestAssumption_RootOverrideMissesChildModuleProvider(t *testing.T) {
 	assert.Positive(t, child.count(), "%s: the child's STS request went elsewhere\n%s", w.version, out)
 	assert.Zero(t, root.count(), "%s: the root override reached the child: %v", w.version, root.requests())
 	assert.Zero(t, proxy.count(), "%s: requests left loopback: %v", w.version, proxy.requests())
+}
+
+// registryModule is the third-party dependency the init test fetches: a
+// public-registry module, pinned to an exact version, with no provider of
+// its own.
+const (
+	registryModule        = "cloudposse/label/null"
+	registryModuleVersion = "0.25.0"
+)
+
+// TestAssumption_SecondInitMakesNoProxiedConnection: `tofu init
+// -backend=false` under an environment of PATH and an empty HOME, with no
+// TF_CLI_CONFIG_FILE, TF_PLUGIN_CACHE_DIR or AWS_*, fetches the provider
+// and both modules into a TF_DATA_DIR outside the copy. The second init,
+// with the backend override, `-reconfigure -get=false -lockfile=readonly
+// -plugin-dir=<TF_DATA_DIR>/providers`, then makes no proxied connection;
+// without -plugin-dir it does. A direct dial is beyond what the recorder
+// can observe, so the claim is "no proxied connection".
+//
+// Relied on by: rehearsal-prepare-gate, which runs the second init under
+// the dead proxy (HLD § Prepare: two work directories, gated before any
+// tofu; E3). ADR-0028.
+func TestAssumption_SecondInitMakesNoProxiedConnection(t *testing.T) {
+	e2e.SkipUnlessEnabled(t)
+	_, err := exec.LookPath("tofu")
+	require.NoError(t, err, "tofu binary required for e2e")
+
+	c := newInitCopy(t)
+	var location string
+	for _, line := range strings.Split(c.firstInit, "\n") {
+		if strings.Contains(line, registryModule) && strings.Contains(line, " is available at ") {
+			location = line
+		}
+	}
+	if location == "" {
+		location = "no trace line gives the registry module's download location"
+	}
+	t.Logf("%s: %s", c.version, location)
+	assert.DirExists(t, filepath.Join(c.data, "providers", "registry.opentofu.org", "hashicorp", "aws", harness.AWSProviderVersion), c.version)
+	assert.Subset(t, c.moduleKeys(t), []string{"child", "registry"}, c.version)
+	assert.FileExists(t, filepath.Join(c.dir, ".terraform.lock.hcl"), c.version)
+
+	proxy := startRecorder(t)
+	out, err := c.secondInit(t, proxy, "-plugin-dir="+filepath.Join(c.data, "providers"))
+	assert.NoError(t, err, "%s\n%s", c.version, out)
+	assert.Zero(t, proxy.count(), "%s: the second init made a proxied connection: %v", c.version, proxy.requests())
+
+	t.Run("control without -plugin-dir", func(t *testing.T) {
+		sibling := newInitCopy(t)
+		proxy := startRecorder(t)
+		out, _ := sibling.secondInit(t, proxy)
+		assert.Positive(t, proxy.count(), "%s: no proxied connection without -plugin-dir\n%s", sibling.version, out)
+		t.Logf("%s: the proxy saw %v", sibling.version, proxy.requests())
+	})
+}
+
+// initCopy is a copy of a root using the aws provider, a local module and
+// registryModule, after the rehearsal's first init. Its TF_DATA_DIR and
+// its state are outside it.
+type initCopy struct {
+	assumptionDir
+	data, outside string
+	// firstInit is the first init's output, at TF_LOG=trace.
+	firstInit string
+}
+
+func newInitCopy(t *testing.T) initCopy {
+	t.Helper()
+	tmp := t.TempDir()
+	c := initCopy{
+		assumptionDir: assumptionDir{dir: filepath.Join(tmp, "copy")},
+		data:          filepath.Join(tmp, "data"),
+		outside:       filepath.Join(tmp, "outside", "terraform.tfstate"),
+	}
+	c.write(t, "main.tf", fmt.Sprintf(`terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = %q
+    }
+  }
+
+  backend "s3" {
+    bucket = "never-reached"
+    key    = "terraform.tfstate"
+    region = %q
+  }
+}
+
+module "child" {
+  source = "./child"
+}
+
+module "registry" {
+  source  = %q
+  version = %q
+}
+`, harness.AWSProviderVersion, assumptionRegion, registryModule, registryModuleVersion))
+	c.write(t, "child/main.tf", "output \"x\" {\n  value = 1\n}\n")
+	version, err := c.tofu(t, c.bareEnv(t), "version")
+	require.NoError(t, err, version)
+	c.version = strings.TrimSpace(version)
+
+	c.firstInit, err = c.tofu(t, c.bareEnv(t, "TF_LOG=trace"), "init", "-backend=false", "-input=false", "-no-color")
+	require.NoError(t, err, "%s: the first init failed\n%s", c.version, c.firstInit)
+	return c
+}
+
+// bareEnv is the whole of a tofu child's environment: PATH, an empty HOME
+// and the TF_DATA_DIR, plus extra.
+func (c initCopy) bareEnv(t *testing.T, extra ...string) []string {
+	t.Helper()
+	return append([]string{
+		"PATH=" + os.Getenv("PATH"),
+		"HOME=" + t.TempDir(),
+		"TF_DATA_DIR=" + c.data,
+	}, extra...)
+}
+
+// moduleKeys is the module keys modules.json names.
+func (c initCopy) moduleKeys(t *testing.T) []string {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(c.data, "modules", "modules.json"))
+	require.NoError(t, err, c.version)
+	var manifest struct {
+		Modules []struct{ Key string }
+	}
+	require.NoError(t, json.Unmarshal(raw, &manifest), c.version)
+	keys := make([]string, 0, len(manifest.Modules))
+	for _, m := range manifest.Modules {
+		keys = append(keys, m.Key)
+	}
+	return keys
+}
+
+// secondInit adds the backend override and runs the rehearsal's second
+// init, plus flags, with both proxies at proxy and no NO_PROXY.
+func (c initCopy) secondInit(t *testing.T, proxy *recorder, flags ...string) (string, error) {
+	t.Helper()
+	c.write(t, cli.OurOverride, cli.LocalBackendOverride)
+	args := append([]string{"init", "-input=false", "-no-color", "-reconfigure", "-get=false",
+		"-lockfile=readonly", "-backend-config=path=" + c.outside}, flags...)
+	return c.tofu(t, c.bareEnv(t, "HTTPS_PROXY="+proxy.url, "HTTP_PROXY="+proxy.url), args...)
 }
 
 // assumptionDir is a tofu work directory, initialised from SealNetwork's
@@ -211,31 +347,14 @@ func (w assumptionDir) env(t *testing.T, proxy *recorder, extra ...string) []str
 	}, extra...)
 }
 
-// tofu runs tofu in the directory under tofuDeadline and returns its
-// combined output. On the deadline it SIGKILLs tofu's whole process group:
-// a child that outlived a kill of tofu alone would hold the output pipe
-// and block the call past the deadline. Killing the group closes every
-// holder of the pipe, so there is no WaitDelay, whose timer would also
-// start on a normal exit and turn a slow pipe close into exec.ErrWaitDelay
-// (exec_runner.go refuses it for the same reason).
+// tofu runs tofu in the directory through cli.RunTofu and returns its
+// stdout and stderr together; running past the deadline fails the test.
 func (w assumptionDir) tofu(t *testing.T, env []string, args ...string) (string, error) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), tofuDeadline)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "tofu", args...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error {
-		err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		if errors.Is(err, syscall.ESRCH) {
-			return os.ErrProcessDone
-		}
-		return err
-	}
-	cmd.Dir = w.dir
-	cmd.Env = env
-	out, err := cmd.CombinedOutput()
-	require.NoError(t, ctx.Err(), "%s: tofu %s ran past %s\n%s", w.version, args, tofuDeadline, out)
-	return string(out), err
+	stdout, stderr, err := cli.RunTofu(w.dir, env, args...)
+	out := stdout + stderr
+	require.NotErrorIs(t, err, context.DeadlineExceeded, "%s\n%s", w.version, out)
+	return out, err
 }
 
 // endpointKeys is every key of the provider's `endpoints` block, from
@@ -320,7 +439,7 @@ func endpointsOverride(keys []string, url string) string {
 // countEndpoints is how many keys an override's endpoints block names.
 func countEndpoints(t *testing.T, override string) int {
 	t.Helper()
-	f, diags := hclsyntax.ParseConfig([]byte(override), ourOverride, hcl.Pos{Line: 1, Column: 1})
+	f, diags := hclsyntax.ParseConfig([]byte(override), cli.OurOverride, hcl.Pos{Line: 1, Column: 1})
 	require.False(t, diags.HasErrors(), diags.Error())
 	for _, provider := range f.Body.(*hclsyntax.Body).Blocks {
 		for _, block := range provider.Body.Blocks {
