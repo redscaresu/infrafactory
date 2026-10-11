@@ -5,7 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
@@ -105,6 +107,32 @@ func TestAWSReaderConfigRefuses(t *testing.T) {
 			assert.Contains(t, err.Error(), tc.reason)
 			assertNoPlantedFragment(t, strings.ReplaceAll(err.Error(), path, ""))
 		})
+	}
+}
+
+// A FIFO at the key file's path is refused, not waited on: the open must
+// not block for a writer before the regular-file check runs.
+func TestAWSReaderConfigRefusesAFIFOWithoutBlocking(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "reader.env")
+	require.NoError(t, syscall.Mkfifo(path, 0o600))
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := AWSReaderConfig(path, "eu-west-2")
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not a regular file")
+	case <-time.After(5 * time.Second):
+		// Opening the write end releases the blocked open.
+		if w, err := os.OpenFile(path, os.O_WRONLY|syscall.O_NONBLOCK, 0); err == nil {
+			_ = w.Close()
+		}
+		t.Fatal("opening a FIFO blocked: the reader must not wait for a writer")
 	}
 }
 

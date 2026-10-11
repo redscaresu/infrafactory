@@ -1,10 +1,13 @@
 package harness
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"regexp"
 	"strings"
+	"syscall"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials"
@@ -18,8 +21,10 @@ const (
 )
 
 // awsReaderNameableKey is the only shape of unknown key an error may
-// name. No AWS key id, secret or session token contains an underscore,
-// so no credential value can match it, even on a reversed or wrapped line.
+// name. A key id, secret or session token contains no underscore and
+// never starts AWS_, so a value on its own (a reversed or wrapped line)
+// never matches. A key name glued to a key id (AWS_AKIA...=x) would match
+// and be named.
 var awsReaderNameableKey = regexp.MustCompile(`^AWS_[A-Z0-9_]+$`)
 
 // AWSReaderConfig builds the aws.Config for a read-only account read
@@ -45,9 +50,9 @@ func AWSReaderConfig(credFile, region string) (aws.Config, error) {
 	}, nil
 }
 
-// readAWSReaderCredentials follows readAWSCredentialFile's rules and
-// never puts a value, or a key that is not shaped like a variable name,
-// in an error: either could be a secret.
+// readAWSReaderCredentials follows readAWSCredentialFile's rules. It
+// never puts a value in an error, nor a key awsReaderNameableKey does not
+// match: either could be a secret.
 func readAWSReaderCredentials(path string) (aws.Credentials, error) {
 	data, err := readOwnerOnlyFile(path)
 	if err != nil {
@@ -94,9 +99,21 @@ func readAWSReaderCredentials(path string) (aws.Credentials, error) {
 }
 
 // readOwnerOnlyFile reads path only when it is a regular file, not a
-// symlink, granting no group or other permission.
+// symlink, granting no group or other permission. It opens path once and
+// checks and reads that handle, so nothing swapped in after the check is
+// read. O_NOFOLLOW refuses a symlink (ELOOP); O_NONBLOCK keeps a FIFO
+// from blocking the open before the regular-file check refuses it.
 func readOwnerOnlyFile(path string) ([]byte, error) {
-	info, err := os.Lstat(path)
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	if errors.Is(err, syscall.ELOOP) {
+		return nil, fmt.Errorf("credential file %s is not a regular file (a symlink)", path)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("credential file %s: %w", path, err)
+	}
+	defer f.Close()
+
+	info, err := f.Stat()
 	if err != nil {
 		return nil, fmt.Errorf("credential file %s: %w", path, err)
 	}
@@ -106,7 +123,7 @@ func readOwnerOnlyFile(path string) ([]byte, error) {
 	if perm := info.Mode().Perm(); perm&0o077 != 0 {
 		return nil, fmt.Errorf("credential file %s has mode %04o; it must grant no group or other permission (chmod 600)", path, perm)
 	}
-	data, err := os.ReadFile(path)
+	data, err := io.ReadAll(f)
 	if err != nil {
 		return nil, fmt.Errorf("credential file %s: %w", path, err)
 	}

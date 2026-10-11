@@ -432,9 +432,9 @@ reads the file itself (`AWSReaderConfig`); nothing is sourced into the shell.
 - KEY=VALUE lines: `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`, plus an optional
   `AWS_SESSION_TOKEN` for a temporary key. Any other key, a repeated key and an empty value are
   refused; an empty `AWS_SESSION_TOKEN=` is refused, not read as absent.
-- No refusal prints a value. An unknown key is named only when it is `AWS_` then capitals, digits
-  and underscores; any other line, such as a wrapped token or a reversed `<secret>=KEY` line, is
-  named by its line number.
+- An unknown key is named only when it is `AWS_` then capitals, digits and underscores. A key id,
+  secret or token never has that shape, so a wrapped token or a reversed `<secret>=KEY` line is
+  named by its line number alone; a key name glued to a key id (`AWS_AKIA...=x`) would be named.
 
 ## Sibling mocks
 
