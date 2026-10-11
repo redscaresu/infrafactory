@@ -321,7 +321,7 @@ output "id" {
 
 	id, err := w.tofu(t, env, "output", "-raw", "id")
 	require.NoError(t, err, "%s\n%s", w.version, id)
-	resp, err := http.PostForm(fakeaws.URL+"/ec2/region/"+assumptionRegion, url.Values{
+	resp, err := http.PostForm(fakeaws.URL+fakeawsPath("EC2"), url.Values{
 		"Action": {"CreateTags"}, "ResourceId.1": {id}, "Tag.1.Key": {"drift"}, "Tag.1.Value": {"yes"},
 	})
 	require.NoError(t, err)
@@ -441,12 +441,16 @@ func newFakeawsDir(t *testing.T) (assumptionDir, *e2e.MockwayInstance, *awsRecor
 	var b strings.Builder
 	b.WriteString("provider \"aws\" {\n  endpoints {\n")
 	for _, svc := range []string{"EC2", "STS"} {
-		path := strings.ReplaceAll(cli.AWSFakeawsPaths[svc], "{region}", assumptionRegion)
-		fmt.Fprintf(&b, "    %s = %q\n", strings.ToLower(svc), calls.url+path)
+		fmt.Fprintf(&b, "    %s = %q\n", strings.ToLower(svc), calls.url+fakeawsPath(svc))
 	}
 	b.WriteString("  }\n}\n")
 	w.write(t, cli.OurOverride, b.String())
 	return w, fakeaws, calls
+}
+
+// fakeawsPath is svc's fakeaws path in assumptionRegion.
+func fakeawsPath(svc string) string {
+	return strings.ReplaceAll(cli.AWSFakeawsPaths[svc], "{region}", assumptionRegion)
 }
 
 // exitCode is tofu's exit status: 0 for nil, -1 when it did not exit.
