@@ -39,7 +39,8 @@ type FailureSummary struct {
 	Detail   string `json:"detail"`
 	// Origin is the layer that produced the failure (mock_deploy,
 	// sandbox_deploy, ...) before a run rewrites Layer to "run" (a
-	// failure at a stage the run carries up keeps its layer). It is
+	// failure runFailureStage files under a carried fail line keeps its
+	// layer). It is
 	// recorded on the pitfall learned from the failure, and kept out of
 	// the output contract.
 	Origin string `json:"-"`
@@ -283,10 +284,14 @@ func explainabilityFromFailure(failure FailureSummary, cloud layer3Cloud) (Expla
 		explanation.Summary = "policy check failed for mapped constraint"
 		explanation.Action = "verify constraint policy mapping and inspect plan/state inputs for the named policy"
 	case failure.Check == "connectivity" || failure.Check == "http_probe":
-		if failure.Layer == "sandbox_deploy" {
+		switch {
+		case failure.Layer == "sandbox_deploy" && cloud == layer3AWS:
+			explanation.Summary = "real Layer 3 network probe failed"
+			explanation.Action = "inspect the instance's public IP, its security group's ingress, and the service its user data starts, for the probe target"
+		case failure.Layer == "sandbox_deploy":
 			explanation.Summary = "real Layer 3 network probe failed"
 			explanation.Action = "inspect live endpoints, bootstrap project wiring, and service readiness for the probe target"
-		} else {
+		default:
 			explanation.Summary = "criteria check failed for network reachability expectations"
 			explanation.Action = "validate topology targets/ports and inspect generated infrastructure connectivity"
 		}

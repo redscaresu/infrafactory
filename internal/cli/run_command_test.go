@@ -1605,8 +1605,8 @@ func TestRunStageNameCarriesNoScalewaySandboxStage(t *testing.T) {
 	}
 }
 
-// A failure is filed beside its stage's fail line only: a same-named
-// pass line, or none, leaves it at run/iteration_N_test.
+// A failure is filed beside its stage's carried fail line only: a
+// same-named pass line, or none, leaves it at run/iteration_N_test.
 func TestRunFailureStageNeedsTheStagesFailLine(t *testing.T) {
 	f := FailureSummary{Layer: "sandbox_deploy", Stage: "apply", Check: "apply"}
 	for name, tc := range map[string]struct {
@@ -1618,7 +1618,8 @@ func TestRunFailureStageNeedsTheStagesFailLine(t *testing.T) {
 		"no line":   {},
 	} {
 		t.Run(name, func(t *testing.T) {
-			got, ok := runFailureStage(f, tc.stages, 1, layer3AWS)
+			_, failLines := awsRunStages(tc.stages, 1, layer3AWS)
+			got, ok := runFailureStage(f, failLines)
 			assert.Equal(t, tc.want, ok)
 			if tc.want {
 				assert.Equal(t, "iteration_1_apply", got)

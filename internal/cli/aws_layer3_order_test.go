@@ -337,8 +337,13 @@ func TestAWSRunNumbersItsLayer3EvidenceByIteration(t *testing.T) {
 	}
 	assert.Equal(t, StageStatusFail, status["iteration_1_real_probe"], "%+v", run.result.Stages)
 	assert.Equal(t, StageStatusPass, status["iteration_2_real_probe"], "%+v", run.result.Stages)
-	for _, name := range []string{"account_check", "user_data_check", "real_probe"} {
-		assert.NotContains(t, status, name, "an unnumbered %s cannot be placed", name)
+	// Every carried sandbox_deploy stage is numbered, but the scope stages
+	// the run finds by name and the run's one AMI resolve.
+	for _, s := range run.result.Stages {
+		if s.Layer != "sandbox_deploy" || strings.HasPrefix(s.Stage, "aws_scope_") || s.Stage == StageAWSAMIResolve {
+			continue
+		}
+		assert.NotEqual(t, s.Stage, holdoutStageName(s.Stage), "an unnumbered %s cannot be placed", s.Stage)
 	}
 	for _, name := range []string{"account_check", "user_data_check"} {
 		assert.Equal(t, StageStatusPass, status["iteration_1_"+name], name)

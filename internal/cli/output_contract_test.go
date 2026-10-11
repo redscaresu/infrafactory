@@ -179,3 +179,16 @@ func TestCredentialsExplanationFollowsTheScenarioCloud(t *testing.T) {
 		assert.Equal(t, "set SCW_ACCESS_KEY and SCW_SECRET_KEY before enabling sandbox_deploy", scw.Action, "cloud %q", cloud)
 	}
 }
+
+// An aws Layer 3 failure is explained in aws terms: no Scaleway key,
+// project or wiring advice, whatever its check.
+func TestAWSLayer3ExplainabilityHoldsNoScalewayTerms(t *testing.T) {
+	for _, check := range []string{"connectivity", "http_probe", "dns_resolution", "real_probe", "credentials", "apply", "account_check"} {
+		e, ok := explainabilityFromFailure(FailureSummary{Layer: "sandbox_deploy", Stage: "iteration_1_real_probe", Check: check}, layer3AWS)
+		require.True(t, ok, check)
+		text := e.Summary + " " + e.Action
+		for _, term := range []string{"SCW_", "Scaleway", "project wiring"} {
+			assert.NotContains(t, text, term, "%s: %s", check, text)
+		}
+	}
+}

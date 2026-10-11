@@ -128,20 +128,25 @@ fi
 # three to four minutes per commit -- and collided with any UI already on
 # :4173. Here: the Go packages with staged files, plus UI unit tests when
 # ui/src changed. PRECOMMIT_FULL=1 runs `make test` as before.
+# --no-renames lists a rename as delete + add, so a package that only
+# LOST a file is still tested; directories that no longer exist are dropped.
+PKGS=$(git diff --cached --name-only --no-renames | grep -E '\.go$' | xargs -n1 dirname 2>/dev/null | sort -u | while read -r d; do [ -d "$d" ] && echo "./$d"; done || true)
+UI_CHANGED=$(git diff --cached --name-only | grep '^ui/src/' || true)
+# git hands a hook GIT_INDEX_FILE and friends. A test that runs git in a
+# temp repo would inherit them and commit to THIS index, replacing the
+# commit being made, so none reach the tests.
+for v in $(env | sed -n 's/^\(GIT_[A-Za-z0-9_]*\)=.*/\1/p'); do unset "$v"; done
 if [ "${PRECOMMIT_FULL:-0}" = "1" ]; then
   echo "Running make test (PRECOMMIT_FULL=1)..."
   make test
 else
-  # --no-renames lists a rename as delete + add, so a package that only
-  # LOST a file is still tested; directories that no longer exist are dropped.
-  PKGS=$(git diff --cached --name-only --no-renames | grep -E '\.go$' | xargs -n1 dirname 2>/dev/null | sort -u | while read -r d; do [ -d "$d" ] && echo "./$d"; done || true)
   if [ -n "$PKGS" ]; then
     echo "Running go test for touched packages:"
     echo "$PKGS" | sed 's/^/  /'
     # shellcheck disable=SC2086
     go test -tags noui $PKGS
   fi
-  if git diff --cached --name-only | grep -q '^ui/src/'; then
+  if [ -n "$UI_CHANGED" ]; then
     echo "Running UI unit tests..."
     (cd ui && npm test --silent)
   fi
