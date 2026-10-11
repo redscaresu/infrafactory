@@ -53,3 +53,7 @@ func AWSLayer3MockDeploy(ctx context.Context, cfg config.Config, scenarioPath st
 	}
 	return err
 }
+
+// LocalBackendOverride is the rehearsal's backend override with no path,
+// for the init assumption in cli_test.
+var LocalBackendOverride = localBackendOverride("")

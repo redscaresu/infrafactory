@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -147,43 +148,36 @@ func (w countingWalker) Enter(hclsyntax.Node) hcl.Diagnostics {
 }
 func (w countingWalker) Exit(hclsyntax.Node) hcl.Diagnostics { return nil }
 
-// encryptionProbe is one copy of a root whose state is encrypted by an
-// `external` key provider: a script that touches marker when tofu runs
-// it. Its tofu children see only PATH and an empty HOME.
-type encryptionProbe struct {
-	dir, marker, outside, version string
-	env                           []string
+// backendProbe is one copy of a root that declares a remote backend, as
+// the user's does, and a terraform_data whose id is an output; outside is
+// a state path outside the copy. Its tofu children see only PATH and an
+// empty HOME.
+type backendProbe struct {
+	dir, outside, version string
+	env                   []string
 }
 
-// encryptionProbeKey is the 32-byte AES key the script hands tofu, base64.
-var encryptionProbeKey = base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x2a}, 32))
-
-// newEncryptionProbe skips without tofu 1.10 or later (the external key
-// provider's release), then writes the script and the root. The root
-// declares a remote backend, as the user's does: the first init skips
-// it and the second's override replaces it.
-func newEncryptionProbe(t *testing.T) encryptionProbe {
+// newBackendProbe skips without tofu, then writes the root, with
+// terraformExtra inside its `terraform {}` block.
+func newBackendProbe(t *testing.T, terraformExtra string) backendProbe {
 	t.Helper()
 	if _, err := exec.LookPath("tofu"); err != nil {
 		t.Skip("tofu is not on PATH")
 	}
 	tmp := t.TempDir()
-	p := encryptionProbe{
+	p := backendProbe{
 		dir:     filepath.Join(tmp, "copy"),
-		marker:  filepath.Join(tmp, "marker"),
 		outside: filepath.Join(tmp, "outside", "terraform.tfstate"),
 		env:     []string{"PATH=" + os.Getenv("PATH"), "HOME=" + t.TempDir()},
 	}
 	require.NoError(t, os.Mkdir(p.dir, 0o700))
-	p.version = p.tofuVersion(t)
-
-	script := filepath.Join(tmp, "key-provider.sh")
-	require.NoError(t, os.WriteFile(script, []byte(`#!/bin/sh
-touch '`+p.marker+`'
-echo '{"magic":"OpenTofu-External-Key-Provider","version":1}'
-cat >/dev/null
-echo '{"keys":{"encryption_key":"`+encryptionProbeKey+`","decryption_key":"`+encryptionProbeKey+`"}}'
-`), 0o700))
+	out, err := p.tofu("version", "-json")
+	require.NoError(t, err)
+	var v struct {
+		Version string `json:"terraform_version"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &v), out)
+	p.version = "tofu " + v.Version
 
 	require.NoError(t, os.WriteFile(filepath.Join(p.dir, "main.tf"), []byte(`terraform {
   backend "s3" {
@@ -191,7 +185,37 @@ echo '{"keys":{"encryption_key":"`+encryptionProbeKey+`","decryption_key":"`+enc
     key    = "terraform.tfstate"
     region = "eu-west-1"
   }
+`+terraformExtra+`}
 
+resource "terraform_data" "probe" {}
+
+output "id" {
+  value = terraform_data.probe.id
+}
+`), 0o600))
+	return p
+}
+
+// encryptionProbe is a backendProbe whose state is encrypted by an
+// `external` key provider: a script that touches marker when tofu runs it.
+type encryptionProbe struct {
+	backendProbe
+	marker string
+}
+
+// encryptionProbeKey is the 32-byte AES key the script hands tofu, base64.
+var encryptionProbeKey = base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x2a}, 32))
+
+// newEncryptionProbe skips without tofu 1.10 or later (the external key
+// provider's release), then writes the script and the root. The first
+// init skips the root's remote backend and the second's override
+// replaces it.
+func newEncryptionProbe(t *testing.T) encryptionProbe {
+	t.Helper()
+	tmp := t.TempDir()
+	script := filepath.Join(tmp, "key-provider.sh")
+	p := encryptionProbe{marker: filepath.Join(tmp, "marker")}
+	p.backendProbe = newBackendProbe(t, `
   encryption {
     key_provider "external" "probe" {
       command = ["`+script+`"]
@@ -203,32 +227,21 @@ echo '{"keys":{"encryption_key":"`+encryptionProbeKey+`","decryption_key":"`+enc
       method = method.aes_gcm.probe
     }
   }
-}
-
-resource "terraform_data" "probe" {}
-
-output "id" {
-  value = terraform_data.probe.id
-}
-`), 0o600))
-	return p
-}
-
-func (p encryptionProbe) tofuVersion(t *testing.T) string {
-	t.Helper()
-	out, err := p.tofu("version", "-json")
-	require.NoError(t, err)
-	var v struct {
-		Version string `json:"terraform_version"`
-	}
-	require.NoError(t, json.Unmarshal([]byte(out), &v), out)
+`)
 	var major, minor int
-	_, err = fmt.Sscanf(v.Version, "%d.%d", &major, &minor)
-	require.NoError(t, err, "tofu version %q", v.Version)
+	_, err := fmt.Sscanf(p.version, "tofu %d.%d", &major, &minor)
+	require.NoError(t, err, p.version)
 	if major < 1 || (major == 1 && minor < 10) {
-		t.Skipf("tofu %s is below 1.10, which added the external key provider", v.Version)
+		t.Skipf("%s is below 1.10, which added the external key provider", p.version)
 	}
-	return "tofu " + v.Version
+
+	require.NoError(t, os.WriteFile(script, []byte(`#!/bin/sh
+touch '`+p.marker+`'
+echo '{"magic":"OpenTofu-External-Key-Provider","version":1}'
+cat >/dev/null
+echo '{"keys":{"encryption_key":"`+encryptionProbeKey+`","decryption_key":"`+encryptionProbeKey+`"}}'
+`), 0o700))
+	return p
 }
 
 // encryptionProbeDeadline bounds each tofu command. The key provider
@@ -238,7 +251,7 @@ const encryptionProbeDeadline = 2 * time.Minute
 
 // tofu runs tofu in the copy and returns its stdout; a non-zero exit or
 // the deadline returns an error carrying the tofu version and both streams.
-func (p encryptionProbe) tofu(args ...string) (string, error) {
+func (p backendProbe) tofu(args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), encryptionProbeDeadline)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "tofu", args...)
@@ -256,10 +269,20 @@ func (p encryptionProbe) tofu(args ...string) (string, error) {
 	return string(out), nil
 }
 
-// initWithOutsideBackend is the rehearsal's second init: a `backend
-// "local" {}` override with no path, given one outside the copy.
-func (p encryptionProbe) initWithOutsideBackend() error {
-	override := "terraform {\n  backend \"local\" {}\n}\n"
+// localBackendOverride is the rehearsal's backend override: `backend
+// "local"`, with blockPath as its path when it is not empty.
+func localBackendOverride(blockPath string) string {
+	block := "{}"
+	if blockPath != "" {
+		block = fmt.Sprintf("{\n    path = %q\n  }", blockPath)
+	}
+	return "terraform {\n  backend \"local\" " + block + "\n}\n"
+}
+
+// initWithOutsideBackend is the rehearsal's second init: the backend
+// override, given a path outside the copy on the command line.
+func (p backendProbe) initWithOutsideBackend(blockPath string) error {
+	override := localBackendOverride(blockPath)
 	if err := os.WriteFile(filepath.Join(p.dir, "override.tf"), []byte(override), 0o600); err != nil {
 		return err
 	}
@@ -283,7 +306,7 @@ func TestAssumption_ExternalKeyProviderRunsAtBackendInit(t *testing.T) {
 	require.NoError(t, err, p.version)
 	assert.NoFileExists(t, p.marker, "%s: init -backend=false ran the key provider", p.version)
 
-	require.NoError(t, p.initWithOutsideBackend(), p.version)
+	require.NoError(t, p.initWithOutsideBackend(""), p.version)
 	assert.FileExists(t, p.marker,
 		"%s: the backend-initialising init did not run the key provider", p.version)
 }
@@ -297,7 +320,7 @@ func TestAssumption_ExternalKeyProviderRunsAtBackendInit(t *testing.T) {
 // "Prepare" section, review-2 E2).
 func TestAssumption_StatePullEmitsDecryptedState(t *testing.T) {
 	p := newEncryptionProbe(t)
-	require.NoError(t, p.initWithOutsideBackend(), p.version)
+	require.NoError(t, p.initWithOutsideBackend(""), p.version)
 	_, err := p.tofu("apply", "-input=false", "-no-color", "-auto-approve")
 	require.NoError(t, err, p.version)
 
@@ -312,4 +335,45 @@ func TestAssumption_StatePullEmitsDecryptedState(t *testing.T) {
 	pulled, err := p.tofu("state", "pull")
 	require.NoError(t, err, p.version)
 	assert.Contains(t, pulled, id, "%s: state pull did not emit the decrypted state", p.version)
+}
+
+// With the rehearsal's `backend "local"` override, `-backend-config=path=`
+// puts the state at a path outside the copy, and no file under the copy,
+// `.terraform` included, holds it. The command-line path wins over any
+// path in the block (verified on tofu 1.12.6): that is the fact the walls
+// rely on, so the test gives the block a path inside the copy too, and
+// "no path in the block" is incidental.
+//
+// Relied on by: rehearsal-walls, which keep the state a rehearsal writes
+// out of the copy tofu runs in (ADR-0028; the import HLD's "Prepare"
+// section).
+func TestAssumption_CLIBackendPathKeepsStateOutOfTheCopy(t *testing.T) {
+	for name, blockPath := range map[string]string{
+		"no path in the block": "",
+		"a path in the block":  "in-copy.tfstate",
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := newBackendProbe(t, "")
+			require.NoError(t, p.initWithOutsideBackend(blockPath), p.version)
+			_, err := p.tofu("apply", "-input=false", "-no-color", "-auto-approve")
+			require.NoError(t, err, p.version)
+			id, err := p.tofu("output", "-raw", "id")
+			require.NoError(t, err, p.version)
+			require.NotEmpty(t, id, p.version)
+
+			outside, err := os.ReadFile(p.outside)
+			assert.NoError(t, err, p.version)
+			assert.Contains(t, string(outside), id, "%s: the state is not at the command-line path", p.version)
+			require.NoError(t, filepath.WalkDir(p.dir, func(path string, d fs.DirEntry, err error) error {
+				if err != nil || !d.Type().IsRegular() {
+					return err
+				}
+				content, err := os.ReadFile(path)
+				if err == nil {
+					assert.NotContains(t, string(content), id, "%s: %s holds the state", p.version, path)
+				}
+				return err
+			}))
+		})
+	}
 }
