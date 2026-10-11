@@ -1247,8 +1247,11 @@ func runIteration(
 					layer, stage := "run", stageName
 					// A failure at a stage the run carries up keeps its
 					// layer and that stage's name, so iteration.json tells
-					// a Layer 3 apply failure from a mock one.
-					if name, ok := runStageName(failure.Layer, failure.Stage, iteration, cloud); ok {
+					// a Layer 3 apply failure from a mock one. One with no
+					// stage line of its own would name a stage the record
+					// does not hold, so it stays here.
+					if name, ok := runStageName(failure.Layer, failure.Stage, iteration, cloud); ok &&
+						slices.ContainsFunc(testResult.Stages, func(s StageSummary) bool { return s.Layer == failure.Layer && s.Stage == failure.Stage }) {
 						layer, stage = failure.Layer, name
 					}
 					failures = append(failures, FailureSummary{
@@ -1776,36 +1779,44 @@ func isStage(name string) func(StageSummary) bool {
 	return func(s StageSummary) bool { return s.Stage == name }
 }
 
-// awsLayer3EvidenceStages are the aws stages a run carries up so its
-// iteration.json holds the Layer 3 evidence, a pass's included, and a
-// real-cloud failure is not mistaken for a mock one.
-var awsLayer3EvidenceStages = []string{"init", "plan", "apply", "account_check", "user_data_check", "real_probe", "destroy"}
-
 // runStageName is the name a run carries an executeTest stage up under,
 // and whether it carries it; a failure at that stage takes the same name.
 // The scope stages keep their names: the run ends on a kept claim and
 // tears down only after a take, which it finds by name. For an aws
-// scenario the evidence stages are numbered as holdoutStages does, since each iteration runs them again and an
-// unnumbered failure from an earlier one would contradict a later pass.
+// scenario every other sandbox_deploy stage is Layer 3 evidence, a
+// pass's included, numbered as holdoutStages does, since each iteration
+// runs them again and an unnumbered failure from an earlier one would
+// contradict a later pass. "run" is not a stage: it wraps an error that
+// names none, so that failure stays run/iteration_N_test.
 func runStageName(layer, stage string, iteration int, cloud layer3Cloud) (string, bool) {
 	switch {
 	case strings.HasPrefix(stage, "aws_scope_"):
 		return stage, true
-	case cloud == layer3AWS && layer == "sandbox_deploy" && slices.Contains(awsLayer3EvidenceStages, stage):
+	case cloud == layer3AWS && layer == "sandbox_deploy" && stage != "run":
 		return iterationStage(iteration, stage), true
 	}
 	return "", false
 }
+
+// awsDetailStages are the numbered stages whose detail a run carries up.
+// Any other's is dropped: iteration.json is evidence that may be shared,
+// and a detail can name the account (preflight's does).
+var awsDetailStages = []string{"apply", "account_check", "user_data_check", "real_probe"}
 
 // awsRunStages carries an iteration's Layer 3 stages up to the run, as
 // runStageName names them.
 func awsRunStages(stages []StageSummary, iteration int, cloud layer3Cloud) []StageSummary {
 	var out []StageSummary
 	for _, s := range stages {
-		if name, ok := runStageName(s.Layer, s.Stage, iteration, cloud); ok {
-			s.Stage = name
-			out = append(out, s)
+		name, ok := runStageName(s.Layer, s.Stage, iteration, cloud)
+		if !ok {
+			continue
 		}
+		if name != s.Stage && !slices.Contains(awsDetailStages, s.Stage) {
+			s.Detail = ""
+		}
+		s.Stage = name
+		out = append(out, s)
 	}
 	return out
 }

@@ -337,7 +337,7 @@ func TestAWSRunNumbersItsLayer3EvidenceByIteration(t *testing.T) {
 	}
 	assert.Equal(t, StageStatusFail, status["iteration_1_real_probe"], "%+v", run.result.Stages)
 	assert.Equal(t, StageStatusPass, status["iteration_2_real_probe"], "%+v", run.result.Stages)
-	for _, name := range awsLayer3EvidenceStages {
+	for _, name := range []string{"account_check", "user_data_check", "real_probe"} {
 		assert.NotContains(t, status, name, "an unnumbered %s cannot be placed", name)
 	}
 	for _, name := range []string{"account_check", "user_data_check"} {
@@ -371,11 +371,11 @@ func TestAWSRunEndsAtTheLayer3StageThatFails(t *testing.T) {
 		},
 		"gate (test)": {
 			setup: orderSetup{gateFailsOn: 2},
-			fails: FailureSummary{Stage: testStage, Check: "allow_resource_types", Detail: "refused by the gate's fake"},
+			fails: FailureSummary{Stage: "iteration_1_allowlist", Check: "allow_resource_types", Detail: "refused by the gate's fake"},
 		},
 		"sts": {
 			setup: orderSetup{stsFailsOn: 2},
-			fails: FailureSummary{Stage: testStage, Check: "credentials", Detail: "AccessDenied"},
+			fails: FailureSummary{Stage: "iteration_1_preflight", Check: "credentials", Detail: "AccessDenied"},
 		},
 		"stamp": {
 			lc:    func(_ *testing.T, lc *awsLifecycle) { delete(lc.params, harness.AWSStampParameter) },

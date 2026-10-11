@@ -591,7 +591,6 @@ func appendSandboxDestroyResult(stages []StageSummary, failures []FailureSummary
 
 	destroyErr := &harness.SandboxDestroyError{}
 	if !errors.As(runErr, &destroyErr) {
-		stages = append(stages, StageSummary{Layer: "sandbox_deploy", Stage: "destroy", Status: StageStatusFail})
 		failures = append(failures, FailureSummary{Layer: "sandbox_deploy", Stage: "destroy", Detail: runErr.Error()})
 		return stages, failures
 	}
