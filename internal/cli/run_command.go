@@ -1747,8 +1747,8 @@ func runCommandStatus(terminalReason string, strayBlocked, keepBlocked bool) Com
 //
 // Matched on Check, not Layer/Stage. runIteration REWRITES every
 // failure at a stage it does not carry up (runStageName) as `Layer:
-// "run", Stage: "iteration_N_test"`, so the layer a failure came from is
-// not visible here; Check is the field that survives. A first version of this matched
+// "run", Stage: "iteration_N_test"`, and a converge failure is one of
+// those; Check is the field that survives. A first version of this matched
 // `mock_deploy`/`converge` and therefore never fired, which the
 // run-level test caught by counting iterations.
 func hasConvergeFailure(failures []FailureSummary) bool {
@@ -1777,21 +1777,21 @@ func isStage(name string) func(StageSummary) bool {
 }
 
 // awsLayer3EvidenceStages are the aws stages a run carries up so its
-// iteration.json holds the Layer 3 evidence, a pass's included.
-var awsLayer3EvidenceStages = []string{"account_check", "user_data_check", "real_probe"}
+// iteration.json holds the Layer 3 evidence, a pass's included, and a
+// real-cloud failure is not mistaken for a mock one.
+var awsLayer3EvidenceStages = []string{"init", "plan", "apply", "account_check", "user_data_check", "real_probe", "destroy"}
 
 // runStageName is the name a run carries an executeTest stage up under,
 // and whether it carries it; a failure at that stage takes the same name.
 // The scope stages keep their names: the run ends on a kept claim and
-// tears down only after a take, which it finds by name. The real apply
-// and, for an aws scenario, the evidence stages are numbered as
-// holdoutStages does, since each iteration runs them again and an
+// tears down only after a take, which it finds by name. For an aws
+// scenario the evidence stages are numbered as holdoutStages does, since each iteration runs them again and an
 // unnumbered failure from an earlier one would contradict a later pass.
 func runStageName(layer, stage string, iteration int, cloud layer3Cloud) (string, bool) {
 	switch {
 	case strings.HasPrefix(stage, "aws_scope_"):
 		return stage, true
-	case layer == "sandbox_deploy" && (stage == "apply" || cloud == layer3AWS && slices.Contains(awsLayer3EvidenceStages, stage)):
+	case cloud == layer3AWS && layer == "sandbox_deploy" && slices.Contains(awsLayer3EvidenceStages, stage):
 		return iterationStage(iteration, stage), true
 	}
 	return "", false

@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -1505,39 +1506,65 @@ acceptance_criteria:
 	assert.NoFileExists(t, filepath.Join(docsDir, "mock-gaps.md"))
 }
 
-// A failed real apply stays a sandbox_deploy failure in iteration.json,
-// numbered like the passing sandbox stages, so evidence readers can tell
-// it from a mock one. The stage line stays run/iteration_1_test.
-func TestRunRecordsAFailedLayer3ApplyAtItsLayerInIterationJSON(t *testing.T) {
-	lc := newAWSLifecycle(t)
-	lc.deploy.err = &harness.SandboxDeployError{
-		Stage: "apply",
-		Apply: harness.StageResult{Stage: "apply", Stderr: "InvalidSubnet.Range"},
-		Err:   errors.New("exit status 1"),
-	}
-
-	run := runAWSRun(t, lc, awsRunOptions{repairs: 1})
-
-	require.Error(t, run.err)
-	paths, err := filepath.Glob(filepath.Join(run.h.RunstoreRoot(), "*", "*", "iterations", "1", "iteration.json"))
-	require.NoError(t, err)
-	require.Len(t, paths, 1)
-	raw, err := os.ReadFile(paths[0])
-	require.NoError(t, err)
-	var iteration struct {
-		Stages   []StageSummary   `json:"stages"`
-		Failures []FailureSummary `json:"failures"`
-	}
-	require.NoError(t, json.Unmarshal(raw, &iteration))
-	assert.Contains(t, iteration.Stages, StageSummary{Layer: "run", Stage: "iteration_1_test", Status: StageStatusFail})
-	var applies []FailureSummary
-	for _, f := range iteration.Failures {
-		if f.Check == "apply" {
-			applies = append(applies, f)
+// A failed real init, plan, apply or destroy on aws stays a
+// sandbox_deploy failure in iteration.json, beside its numbered stage
+// line, so evidence readers can tell it from a mock one. The run's stage
+// line stays run/iteration_1_test.
+func TestRunRecordsAFailedLayer3StageAtItsLayerInIterationJSON(t *testing.T) {
+	deployFails := func(stage string) func(*awsLifecycle) {
+		return func(lc *awsLifecycle) {
+			lc.deploy.err = &harness.SandboxDeployError{Stage: stage, Err: errors.New("InvalidSubnet.Range")}
 		}
 	}
-	require.Len(t, applies, 1, "%+v", iteration.Failures)
-	assert.Equal(t, "sandbox_deploy", applies[0].Layer)
-	assert.Equal(t, "iteration_1_apply", applies[0].Stage)
-	assert.Contains(t, applies[0].Detail, "InvalidSubnet.Range")
+	rows := map[string]struct {
+		fail  func(*awsLifecycle)
+		stage string
+	}{
+		"init":              {fail: deployFails("init"), stage: "iteration_1_init"},
+		"plan":              {fail: deployFails("plan"), stage: "iteration_1_plan"},
+		"apply":             {fail: deployFails("apply"), stage: "iteration_1_apply"},
+		"destroy (generic)": {fail: func(lc *awsLifecycle) { lc.destroy.err = errors.New("InvalidSubnet.Range") }, stage: "iteration_1_destroy"},
+		"destroy": {fail: func(lc *awsLifecycle) {
+			lc.destroy.err = &harness.SandboxDestroyError{Stage: "destroy", Err: errors.New("InvalidSubnet.Range")}
+		}, stage: "iteration_1_destroy"},
+	}
+	for name, row := range rows {
+		t.Run(name, func(t *testing.T) {
+			lc := newAWSLifecycle(t)
+			row.fail(lc)
+
+			run := awsCommand{name: "run", layer3: true}.run(t, lc)
+
+			require.Error(t, run.err)
+			paths, err := filepath.Glob(filepath.Join(run.h.RunstoreRoot(), "*", "*", "iterations", "1", "iteration.json"))
+			require.NoError(t, err)
+			require.Len(t, paths, 1)
+			raw, err := os.ReadFile(paths[0])
+			require.NoError(t, err)
+			var iteration struct {
+				Stages   []StageSummary   `json:"stages"`
+				Failures []FailureSummary `json:"failures"`
+			}
+			require.NoError(t, json.Unmarshal(raw, &iteration))
+			assert.Contains(t, iteration.Stages, StageSummary{Layer: "run", Stage: "iteration_1_test", Status: StageStatusFail})
+			i := slices.IndexFunc(iteration.Failures, func(f FailureSummary) bool { return strings.Contains(f.Detail, "InvalidSubnet.Range") })
+			require.NotEqual(t, -1, i, "%+v", iteration.Failures)
+			got := iteration.Failures[i]
+			assert.Equal(t, "sandbox_deploy", got.Layer)
+			assert.Equal(t, row.stage, got.Stage)
+			assert.Contains(t, iteration.Stages, StageSummary{Layer: "sandbox_deploy", Stage: row.stage, Status: StageStatusFail})
+		})
+	}
+}
+
+// Scaleway is outside the evidence stages: its run carries no sandbox
+// stage up and keeps its Layer 3 failures at run/iteration_N_test.
+func TestRunStageNameCarriesNoScalewaySandboxStage(t *testing.T) {
+	for _, stage := range awsLayer3EvidenceStages {
+		_, ok := runStageName("sandbox_deploy", stage, 1, layer3Scaleway)
+		assert.False(t, ok, stage)
+		name, ok := runStageName("sandbox_deploy", stage, 1, layer3AWS)
+		assert.True(t, ok, stage)
+		assert.Equal(t, "iteration_1_"+stage, name)
+	}
 }

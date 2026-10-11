@@ -472,7 +472,7 @@ func TestAWSRunEndsAtTheLayer3StageThatFails(t *testing.T) {
 					return f.Stage == want.Stage && f.Check == want.Check && strings.Contains(f.Detail, want.Detail)
 				}), "the run fails on %s with %+v: %+v", stage.name, want, run.result.Failures)
 				for _, f := range run.result.Failures {
-					if f.Layer == "run" || f.Layer == "holdout" {
+					if f.Layer == "run" {
 						continue
 					}
 					assert.True(t, slices.ContainsFunc(run.result.Stages, func(s StageSummary) bool {
