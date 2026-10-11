@@ -1,8 +1,7 @@
 ---
 kind: code
 repo: fakeaws
-status: blocked
-blocked_by: [fakeaws-admin-token-and-bind]
+status: ready
 epic: fakeaws-loaded-identity
 depends_on: [fakeaws-admin-token-and-bind]
 touches: [repository/identity.go, repository/identity_test.go, handlers/handlers.go, handlers/admin.go, handlers/admin_test.go, cmd/fakeaws/main.go, cmd/fakeaws/main_test.go, testutil/testutil.go, AGENTS.md, README.md, CHANGELOG.md]

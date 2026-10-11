@@ -1,8 +1,7 @@
 ---
 kind: code
 repo: fakeaws
-status: blocked
-blocked_by: [fakeaws-admin-token-and-bind]
+status: ready
 epic: fakeaws-rehearsal-instance
 depends_on: [fakeaws-admin-token-and-bind]
 touches: [repository/repository.go, repository/repository_test.go, handlers/admin.go, handlers/admin_test.go, AGENTS.md, SECURITY.md, CHANGELOG.md]
