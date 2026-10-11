@@ -355,9 +355,9 @@ var otherAccountState = strings.Replace(awsLiveState, preflightAWSAccount, "9999
 // Each row names the failure its fake causes, so a run that ends at the
 // right stage for another reason fails the row.
 func TestAWSRunEndsAtTheLayer3StageThatFails(t *testing.T) {
-	// A sandbox_deploy failure keeps its stage, numbered; the holdout's
-	// is rewritten to the iteration's test stage.
-	const testStage, claimStage = "iteration_1_test", "iteration_1_aws_scope_claim"
+	// A failure at a stage the run carries up keeps that stage's name;
+	// any other is rewritten to the iteration's test stage.
+	const testStage, claimStage = "iteration_1_test", "aws_scope_claim"
 	rows := map[string]struct {
 		lc    func(*testing.T, *awsLifecycle)
 		setup orderSetup
@@ -371,11 +371,11 @@ func TestAWSRunEndsAtTheLayer3StageThatFails(t *testing.T) {
 		},
 		"gate (test)": {
 			setup: orderSetup{gateFailsOn: 2},
-			fails: FailureSummary{Stage: "iteration_1_allowlist", Check: "allow_resource_types", Detail: "refused by the gate's fake"},
+			fails: FailureSummary{Stage: testStage, Check: "allow_resource_types", Detail: "refused by the gate's fake"},
 		},
 		"sts": {
 			setup: orderSetup{stsFailsOn: 2},
-			fails: FailureSummary{Stage: "iteration_1_preflight", Check: "credentials", Detail: "AccessDenied"},
+			fails: FailureSummary{Stage: testStage, Check: "credentials", Detail: "AccessDenied"},
 		},
 		"stamp": {
 			lc:    func(_ *testing.T, lc *awsLifecycle) { delete(lc.params, harness.AWSStampParameter) },
@@ -393,7 +393,7 @@ func TestAWSRunEndsAtTheLayer3StageThatFails(t *testing.T) {
 		},
 		"apply": {
 			lc:    func(_ *testing.T, lc *awsLifecycle) { lc.deploy.err = errors.New("tofu apply failed") },
-			fails: FailureSummary{Stage: "iteration_1_run", Detail: "tofu apply failed"},
+			fails: FailureSummary{Stage: testStage, Detail: "tofu apply failed"},
 		},
 		"account_check": {
 			lc: func(t *testing.T, lc *awsLifecycle) {
@@ -471,6 +471,14 @@ func TestAWSRunEndsAtTheLayer3StageThatFails(t *testing.T) {
 				assert.True(t, slices.ContainsFunc(run.result.Failures, func(f FailureSummary) bool {
 					return f.Stage == want.Stage && f.Check == want.Check && strings.Contains(f.Detail, want.Detail)
 				}), "the run fails on %s with %+v: %+v", stage.name, want, run.result.Failures)
+				for _, f := range run.result.Failures {
+					if f.Layer == "run" || f.Layer == "holdout" {
+						continue
+					}
+					assert.True(t, slices.ContainsFunc(run.result.Stages, func(s StageSummary) bool {
+						return s.Layer == f.Layer && s.Stage == f.Stage
+					}), "failure %s/%s names a stage the run records: %+v", f.Layer, f.Stage, run.result.Stages)
+				}
 				for _, e := range run.result.Explainability {
 					assert.NotContains(t, e.Summary+e.Action, "SCW_", "an aws run is explained in aws terms")
 				}

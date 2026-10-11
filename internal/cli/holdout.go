@@ -214,8 +214,8 @@ func holdoutProbeChecks(sc scenario.Scenario) ([]harness.ProbeCheck, []string, e
 // hasHoldoutFailure reports whether a holdout check failed.
 //
 // Matched on Check rather than Layer/Stage because runIteration rewrites
-// every failure it passes up to the run loop as `Layer: "run"`; Check is
-// the field that survives.
+// a holdout failure it passes up to the run loop as `Layer: "run"`; Check
+// is the field that survives.
 func hasHoldoutFailure(failures []FailureSummary) bool {
 	for _, f := range failures {
 		if f.Check == holdoutCheckName {
@@ -241,11 +241,16 @@ func holdoutStages(stages []StageSummary, iteration int) []StageSummary {
 	var out []StageSummary
 	for _, s := range stages {
 		if s.Layer == "holdout" {
-			s.Stage = fmt.Sprintf("iteration_%d_%s", iteration, s.Stage)
+			s.Stage = iterationStage(iteration, s.Stage)
 			out = append(out, s)
 		}
 	}
 	return out
+}
+
+// iterationStage numbers a stage a run carries up from one iteration.
+func iterationStage(iteration int, stage string) string {
+	return fmt.Sprintf("iteration_%d_%s", iteration, stage)
 }
 
 // holdoutStageName undoes the `iteration_N_` prefix holdoutStages adds,

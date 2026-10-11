@@ -39,7 +39,7 @@ type FailureSummary struct {
 	Detail   string `json:"detail"`
 	// Origin is the layer that produced the failure (mock_deploy,
 	// sandbox_deploy, ...) before a run rewrites Layer to "run" (a
-	// sandbox_deploy failure keeps its layer). It is
+	// failure at a stage the run carries up keeps its layer). It is
 	// recorded on the pitfall learned from the failure, and kept out of
 	// the output contract.
 	Origin string `json:"-"`

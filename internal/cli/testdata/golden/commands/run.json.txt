@@ -57,21 +57,21 @@
     "failures": [
       {
         "layer": "run",
+        "stage": "iteration_1_test",
+        "check": "credentials",
+        "command": "test",
+        "detail": "sandbox deploy requires SCW_ACCESS_KEY in the environment"
+      },
+      {
+        "layer": "run",
         "stage": "iteration_2",
         "check": "stuck",
         "command": "run loop",
         "detail": "stopped due to stuck detection"
       },
       {
-        "layer": "sandbox_deploy",
-        "stage": "iteration_1_preflight",
-        "check": "credentials",
-        "command": "test",
-        "detail": "sandbox deploy requires SCW_ACCESS_KEY in the environment"
-      },
-      {
-        "layer": "sandbox_deploy",
-        "stage": "iteration_2_preflight",
+        "layer": "run",
+        "stage": "iteration_2_test",
         "check": "credentials",
         "command": "test",
         "detail": "sandbox deploy requires SCW_ACCESS_KEY in the environment"
@@ -80,21 +80,21 @@
     "explainability": [
       {
         "layer": "run",
+        "stage": "iteration_1_test",
+        "check": "credentials",
+        "summary": "Layer 3 real Scaleway deploy is enabled but credentials are unavailable",
+        "action": "set SCW_ACCESS_KEY and SCW_SECRET_KEY before enabling sandbox_deploy"
+      },
+      {
+        "layer": "run",
         "stage": "iteration_2",
         "check": "stuck",
         "summary": "criteria check failed and requires scenario/harness inspection",
         "action": "review failure detail and criteria definition for this check"
       },
       {
-        "layer": "sandbox_deploy",
-        "stage": "iteration_1_preflight",
-        "check": "credentials",
-        "summary": "Layer 3 real Scaleway deploy is enabled but credentials are unavailable",
-        "action": "set SCW_ACCESS_KEY and SCW_SECRET_KEY before enabling sandbox_deploy"
-      },
-      {
-        "layer": "sandbox_deploy",
-        "stage": "iteration_2_preflight",
+        "layer": "run",
+        "stage": "iteration_2_test",
         "check": "credentials",
         "summary": "Layer 3 real Scaleway deploy is enabled but credentials are unavailable",
         "action": "set SCW_ACCESS_KEY and SCW_SECRET_KEY before enabling sandbox_deploy"
