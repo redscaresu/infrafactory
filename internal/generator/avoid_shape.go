@@ -300,6 +300,7 @@ func applyFailureNames(path, resource string, attrs []string) error {
 	}
 	var iteration struct {
 		Failures []struct {
+			Layer  string `json:"layer"`
 			Check  string `json:"check"`
 			Detail string `json:"detail"`
 		} `json:"failures"`
@@ -307,8 +308,10 @@ func applyFailureNames(path, resource string, attrs []string) error {
 	if err := json.Unmarshal(payload, &iteration); err != nil {
 		return fmt.Errorf("parse %s: %w", path, err)
 	}
+	// A real-cloud apply failure is no proof the entry was learned on the
+	// mock.
 	for _, f := range iteration.Failures {
-		if f.Check == "apply" && strings.Contains(f.Detail, resource) && namesEveryAttribute(f.Detail, attrs) {
+		if f.Layer != "sandbox_deploy" && f.Check == "apply" && strings.Contains(f.Detail, resource) && namesEveryAttribute(f.Detail, attrs) {
 			return nil
 		}
 	}

@@ -1589,7 +1589,7 @@ func TestRunRecordsAFailedLayer3StageAtItsLayerInIterationJSON(t *testing.T) {
 // keeps its Layer 3 failures at run/iteration_N_test. On aws every
 // sandbox_deploy stage but the "run" wrap is carried, numbered.
 func TestRunStageNameCarriesNoScalewaySandboxStage(t *testing.T) {
-	for _, stage := range []string{"preflight", "allowlist", "init", "plan", "apply", "real_probe", "destroy", "destroy_without_config"} {
+	for _, stage := range []string{"preflight", "allowlist", "init", "plan", "apply", "real_probe", "destroy", "cleanup_blocked"} {
 		_, ok := runStageName("sandbox_deploy", stage, 1, layer3Scaleway)
 		assert.False(t, ok, stage)
 		name, ok := runStageName("sandbox_deploy", stage, 1, layer3AWS)
@@ -1598,4 +1598,31 @@ func TestRunStageNameCarriesNoScalewaySandboxStage(t *testing.T) {
 	}
 	_, ok := runStageName("sandbox_deploy", "run", 1, layer3AWS)
 	assert.False(t, ok, "the run wrap names no stage")
+	for _, stage := range []string{"aws_scope_sweep", "aws_scope_release"} {
+		name, ok := runStageName("sandbox_deploy", stage, 1, layer3AWS)
+		assert.True(t, ok, stage)
+		assert.Equal(t, stage, name, "a scope stage keeps its name")
+	}
+}
+
+// A failure is filed beside its stage's fail line only: a same-named
+// pass line, or none, leaves it at run/iteration_N_test.
+func TestRunFailureStageNeedsTheStagesFailLine(t *testing.T) {
+	f := FailureSummary{Layer: "sandbox_deploy", Stage: "apply", Check: "apply"}
+	for name, tc := range map[string]struct {
+		stages []StageSummary
+		want   bool
+	}{
+		"fail line": {stages: []StageSummary{{Layer: "sandbox_deploy", Stage: "apply", Status: StageStatusFail}}, want: true},
+		"pass line": {stages: []StageSummary{{Layer: "sandbox_deploy", Stage: "apply", Status: StageStatusPass}}},
+		"no line":   {},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, ok := runFailureStage(f, tc.stages, 1, layer3AWS)
+			assert.Equal(t, tc.want, ok)
+			if tc.want {
+				assert.Equal(t, "iteration_1_apply", got)
+			}
+		})
+	}
 }

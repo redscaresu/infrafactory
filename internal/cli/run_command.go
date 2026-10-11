@@ -1247,11 +1247,8 @@ func runIteration(
 					layer, stage := "run", stageName
 					// A failure at a stage the run carries up keeps its
 					// layer and that stage's name, so iteration.json tells
-					// a Layer 3 apply failure from a mock one. One with no
-					// stage line of its own would name a stage the record
-					// does not hold, so it stays here.
-					if name, ok := runStageName(failure.Layer, failure.Stage, iteration, cloud); ok &&
-						slices.ContainsFunc(testResult.Stages, func(s StageSummary) bool { return s.Layer == failure.Layer && s.Stage == failure.Stage }) {
+					// a Layer 3 apply failure from a mock one.
+					if name, ok := runFailureStage(failure, testResult.Stages, iteration, cloud); ok {
 						layer, stage = failure.Layer, name
 					}
 					failures = append(failures, FailureSummary{
@@ -1798,9 +1795,21 @@ func runStageName(layer, stage string, iteration int, cloud layer3Cloud) (string
 	return "", false
 }
 
-// awsDetailStages are the numbered stages whose detail a run carries up.
-// Any other's is dropped: iteration.json is evidence that may be shared,
-// and a detail can name the account (preflight's does).
+// runFailureStage is the name a run files a test-step failure under, and
+// whether it keeps the failure's layer: only at a stage runStageName
+// carries, and only beside that stage's fail line, so a failure never
+// names a stage the record lacks or one it records as passed.
+func runFailureStage(f FailureSummary, stages []StageSummary, iteration int, cloud layer3Cloud) (string, bool) {
+	name, ok := runStageName(f.Layer, f.Stage, iteration, cloud)
+	return name, ok && slices.ContainsFunc(stages, func(s StageSummary) bool {
+		return s.Layer == f.Layer && s.Stage == f.Stage && s.Status == StageStatusFail
+	})
+}
+
+// awsDetailStages are the numbered stages whose stage-line detail a run
+// carries up; any other stage line's detail is dropped, since one can
+// name the account (preflight's pass line does). Failure details are
+// not touched here.
 var awsDetailStages = []string{"apply", "account_check", "user_data_check", "real_probe"}
 
 // awsRunStages carries an iteration's Layer 3 stages up to the run, as
