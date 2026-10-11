@@ -149,6 +149,7 @@ with its kind. Every swarm brief also carries these lines.
 - Anything that hides secrets or private data (a scrub, a redaction, a filter on what is printed or published) is an allowlist: name what may pass and drop the rest. A denylist of patterns to remove fails open on the first one nobody thought of. Never print a credential file, even redacted; print only its key names. <!-- lesson: denylist -->
 - A check that guards safety (a preflight, a probe, a wall, a refusal) passes only on the exact outcome it expects, such as a refused connection or a named error, and treats every other error or empty result as a failure. <!-- lesson: fails-open -->
 - After fixing a review finding, re-read every caller of the code the fix touched and re-run its failing-path tests: a fix that changes shared behaviour (a timeout, a wait, an error type) can break a path the finding never named. <!-- lesson: regression-from-fix -->
+- Every subprocess, network call and wait in code or tests has a deadline, and the deadline kills the whole process group, so a child that outlives its parent (a provider plugin holding a pipe) cannot block past it. <!-- lesson: unbounded-call -->
 
 ## Quality Bar
 - `go test ./...` passes for completed stories.
