@@ -13,6 +13,7 @@ import (
 	"os"
 	pathpkg "path"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -62,9 +63,11 @@ func (d *recordingAWSDoer) Do(req *http.Request) (*http.Response, error) {
 	}, nil
 }
 
+// awsWallRequest builds a request as the SDK sends it to service:
+// contentType "" means the protocol's own media type.
 type awsWallRequest struct {
-	service, url, target, body string
-	mutate                     func(*http.Request)
+	service, url, target, contentType, body string
+	mutate                                  func(*http.Request)
 }
 
 func (r awsWallRequest) build(t *testing.T) *http.Request {
@@ -75,6 +78,13 @@ func (r awsWallRequest) build(t *testing.T) *http.Request {
 	}
 	req, err := http.NewRequest(http.MethodPost, url, strings.NewReader(r.body))
 	require.NoError(t, err)
+	contentType := r.contentType
+	if svc, _ := awsReaderService(r.service); contentType == "" && svc.Protocol == awsProtocolJSON {
+		contentType = awsJSONMediaType
+	} else if contentType == "" {
+		contentType = awsQueryMediaType
+	}
+	req.Header.Set("Content-Type", contentType)
 	if r.target != "" {
 		req.Header.Set("X-Amz-Target", r.target)
 	}
@@ -115,6 +125,14 @@ func TestAWSReadWallRefusesWithNothingSent(t *testing.T) {
 		{"json target with another service's prefix", awsWallRequest{service: "ssm", target: "AmazonEC2.GetParameter", body: `{"Name":"/app/db/host"}`}},
 		{"json body that is not an object", awsWallRequest{service: "ssm", target: "AmazonSSM.GetParameter", body: `["Name"]`}},
 		{"an encoded body", awsWallRequest{service: "ec2", body: "Action=DescribeVpcs&Version=2016-11-15", mutate: func(r *http.Request) { r.Header.Set("Content-Encoding", "gzip") }}},
+		{"a multipart query request", awsWallRequest{service: "ec2", contentType: "multipart/form-data; boundary=wall", body: "Action=DescribeVpcs&Version=2016-11-15"}},
+		{"a query request with no Content-Type", awsWallRequest{service: "ec2", body: "Action=DescribeVpcs&Version=2016-11-15", mutate: func(r *http.Request) { r.Header.Del("Content-Type") }}},
+		{"two Content-Type values", awsWallRequest{service: "ec2", body: "Action=DescribeVpcs&Version=2016-11-15", mutate: func(r *http.Request) { r.Header["content-type"] = []string{awsQueryMediaType} }}},
+		{"a Content-Type that does not parse", awsWallRequest{service: "ec2", contentType: "application/x-www-form-urlencoded; charset", body: "Action=DescribeVpcs&Version=2016-11-15"}},
+		{"a json Content-Type on a query service", awsWallRequest{service: "ec2", contentType: awsJSONMediaType, body: "Action=DescribeVpcs&Version=2016-11-15"}},
+		{"a query charset other than utf-8", awsWallRequest{service: "ec2", contentType: awsQueryMediaType + "; charset=utf-16", body: "Action=DescribeVpcs&Version=2016-11-15"}},
+		{"a form Content-Type on the json service", awsWallRequest{service: "ssm", target: "AmazonSSM.GetParameter", contentType: awsQueryMediaType, body: `{"Name":"/app/db/host"}`}},
+		{"a json Content-Type with a parameter", awsWallRequest{service: "ssm", target: "AmazonSSM.GetParameter", contentType: awsJSONMediaType + "; charset=utf-8", body: `{"Name":"/app/db/host"}`}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -145,7 +163,7 @@ func TestAWSReadWallPassesReadsByteIdentical(t *testing.T) {
 	}{
 		{"ec2 DescribeVpcs", awsWallRequest{service: "ec2", body: "Action=DescribeVpcs&Filter.1.Name=tag-key&Filter.1.Value.1=env&Version=2016-11-15"},
 			"DescribeVpcs", `{"Filter.1.Name":"tag-key","Filter.1.Value.1":"env"}`},
-		{"iam GetRole", awsWallRequest{service: "iam", body: "Action=GetRole&RoleName=web&Version=2010-05-08"},
+		{"iam GetRole with charset=UTF-8", awsWallRequest{service: "iam", contentType: awsQueryMediaType + "; charset=UTF-8", body: "Action=GetRole&RoleName=web&Version=2010-05-08"},
 			"GetRole", `{"RoleName":"web"}`},
 		{"sts GetCallerIdentity", awsWallRequest{service: "sts", body: "Action=GetCallerIdentity&Version=2011-06-15"},
 			"GetCallerIdentity", `{}`},
@@ -174,12 +192,11 @@ func TestAWSReadWallPassesReadsByteIdentical(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, tc.req.body, string(again), "GetBody would resend other bytes")
 
-			svc, _ := awsReaderService(tc.req.service)
-			entry, _, err := awsReadEntryOf(svc, tc.req.build(t))
+			entry, _, err := wall.entryOf(tc.req.build(t))
 			require.NoError(t, err)
 			assert.Equal(t, tc.wantAction, entry.Action)
 			assert.JSONEq(t, tc.wantParams, string(entry.Params))
-			if svc.Protocol == awsProtocolJSON {
+			if wall.protocol == awsProtocolJSON {
 				assert.Equal(t, tc.req.body, string(entry.Params), "json params are the body verbatim")
 			}
 		})
@@ -200,6 +217,37 @@ func TestAWSReadWallCountsOnlyWhatItPasses(t *testing.T) {
 	}
 	assert.Equal(t, 2, wall.Calls())
 	assert.Len(t, inner.bodies, 2)
+}
+
+// Not parallel: it edits the package's reader and DryRun tables, and no
+// parallel test runs until every sequential one has finished.
+func TestAWSReadWallIgnoresLaterEditsToTheTables(t *testing.T) {
+	savedTable := slices.Clone(AWSReaderTable)
+	for i := range savedTable {
+		savedTable[i].Actions = slices.Clone(savedTable[i].Actions)
+	}
+	savedDryRun := slices.Clone(AWSReaderDryRunActions)
+	t.Cleanup(func() { AWSReaderTable, AWSReaderDryRunActions = savedTable, savedDryRun })
+
+	inner := &recordingAWSDoer{}
+	wall, err := NewAWSReadWall("ec2", inner)
+	require.NoError(t, err)
+
+	row := slices.IndexFunc(AWSReaderTable, func(s AWSReaderService) bool { return s.Service == "ec2" })
+	require.GreaterOrEqual(t, row, 0)
+	// In place, in the backing array the wall was built from, then appended.
+	AWSReaderTable[row].Actions[0] = "CreateVpc"
+	AWSReaderTable[row].Actions = append(AWSReaderTable[row].Actions, "CreateSubnet")
+	AWSReaderDryRunActions = append(AWSReaderDryRunActions, "AuthorizeSecurityGroupIngress")
+
+	for _, body := range []string{"Action=CreateVpc", "Action=CreateSubnet", "Action=AuthorizeSecurityGroupIngress&DryRun=true"} {
+		resp, err := wall.Do(awsWallRequest{service: "ec2", body: body}.build(t))
+		if resp != nil {
+			resp.Body.Close()
+		}
+		assert.ErrorIs(t, err, ErrAWSReadWallRefused, body)
+	}
+	assert.Empty(t, inner.bodies)
 }
 
 func TestNewAWSReadWallRefusesAnUnknownServiceAndANilDoer(t *testing.T) {

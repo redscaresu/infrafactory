@@ -45,10 +45,10 @@ var AWSReaderTable = []AWSReaderService{
 			"DescribeVpcAttribute", "DescribeVpcs",
 		},
 		NotFound: []string{
-			"InvalidAllocationID.NotFound", "InvalidAMIID.NotFound", "InvalidGroup.NotFound",
-			"InvalidInstanceID.NotFound", "InvalidInternetGatewayID.NotFound", "InvalidKeyPair.NotFound",
-			"InvalidNetworkInterfaceID.NotFound", "InvalidRouteTableID.NotFound",
-			"InvalidSubnetID.NotFound", "InvalidVpcID.NotFound",
+			"InvalidAddress.NotFound", "InvalidAllocationID.NotFound", "InvalidAMIID.NotFound",
+			"InvalidGroup.NotFound", "InvalidInstanceID.NotFound", "InvalidInternetGatewayID.NotFound",
+			"InvalidKeyPair.NotFound", "InvalidNetworkInterfaceID.NotFound", "InvalidRouteTableID.NotFound",
+			"InvalidSecurityGroupRuleId.NotFound", "InvalidSubnetID.NotFound", "InvalidVpcID.NotFound",
 		},
 	},
 	{
@@ -65,7 +65,7 @@ var AWSReaderTable = []AWSReaderService{
 		Protocol:     awsProtocolJSON,
 		TargetPrefix: "AmazonSSM",
 		Actions:      []string{"GetParameter"},
-		NotFound:     []string{"ParameterNotFound"},
+		NotFound:     []string{"ParameterNotFound", "ParameterVersionNotFound"},
 	},
 	{
 		Service:  "sts",

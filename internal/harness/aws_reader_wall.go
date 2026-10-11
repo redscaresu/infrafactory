@@ -6,9 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"net/url"
-	"slices"
 	"strings"
 	"sync/atomic"
 
@@ -18,15 +18,26 @@ import (
 // ErrAWSReadWallRefused is wrapped by every request the wall refuses.
 var ErrAWSReadWallRefused = errors.New("aws read wall: refused")
 
+// The media types the SDK sends for each protocol; the wall passes no
+// other, so it never validates a body the server would read another way.
+// Every json service in the reader table (SSM) speaks json 1.1.
+const (
+	awsQueryMediaType = "application/x-www-form-urlencoded"
+	awsJSONMediaType  = "application/x-amz-json-1.1"
+)
+
 // AWSReadWall is the doer every account-read request leaves through,
 // bound to one reader-table service. Do passes a request on only when it
 // is exactly one of that service's reader-table actions or, on EC2, a
 // DryRun-table action carrying the single field DryRun=true; anything
 // else is refused before it leaves the process. It counts what it sends.
+// What it admits is copied from the tables when it is built, so a later
+// edit to them cannot widen it.
 type AWSReadWall struct {
-	service AWSReaderService
-	inner   aws.HTTPClient
-	calls   atomic.Int64
+	service, protocol, targetPrefix string
+	reads, dryRuns                  map[string]bool
+	inner                           aws.HTTPClient
+	calls                           atomic.Int64
 }
 
 // NewAWSReadWall binds a wall to service, a reader-table service, around
@@ -39,7 +50,22 @@ func NewAWSReadWall(service string, inner aws.HTTPClient) (*AWSReadWall, error) 
 	if inner == nil {
 		return nil, errors.New("aws read wall: needs an HTTP client, and none was given")
 	}
-	return &AWSReadWall{service: svc, inner: inner}, nil
+	w := &AWSReadWall{
+		service: svc.Service, protocol: svc.Protocol, targetPrefix: svc.TargetPrefix,
+		reads: awsActionSet(svc.Actions), inner: inner,
+	}
+	if service == awsDryRunService {
+		w.dryRuns = awsActionSet(AWSReaderDryRunActions)
+	}
+	return w, nil
+}
+
+func awsActionSet(actions []string) map[string]bool {
+	set := make(map[string]bool, len(actions))
+	for _, action := range actions {
+		set[action] = true
+	}
+	return set
 }
 
 // Calls is the number of requests the wall has passed on.
@@ -50,36 +76,36 @@ func (w *AWSReadWall) Calls() int {
 // Do refuses req, with nothing sent, unless the wall admits it; then it
 // counts it and sends it through the inner doer.
 func (w *AWSReadWall) Do(req *http.Request) (*http.Response, error) {
-	entry, dryRun, err := awsReadEntryOf(w.service, req)
+	entry, dryRun, err := w.entryOf(req)
 	if err == nil {
-		err = admitAWSRead(entry, dryRun)
+		err = w.admit(entry.Action, dryRun)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("%w: %s request: %w", ErrAWSReadWallRefused, w.service.Service, err)
+		return nil, fmt.Errorf("%w: %s request: %w", ErrAWSReadWallRefused, w.service, err)
 	}
 	w.calls.Add(1)
 	return w.inner.Do(req)
 }
 
-func admitAWSRead(entry AWSReadEntry, dryRun bool) error {
+func (w *AWSReadWall) admit(action string, dryRun bool) error {
 	switch {
-	case awsReaderTableHas(entry):
+	case w.reads[action]:
 		return nil
-	case entry.Service == awsDryRunService && slices.Contains(AWSReaderDryRunActions, entry.Action):
+	case w.dryRuns[action]:
 		if dryRun {
 			return nil
 		}
-		return fmt.Errorf("%s is sent only with the single field DryRun=true", entry.Action)
+		return fmt.Errorf("%s is sent only with the single field DryRun=true", action)
 	default:
-		return fmt.Errorf("%s %q is not in the reader table", entry.Service, entry.Action)
+		return fmt.Errorf("%s %q is not in the reader table", w.service, action)
 	}
 }
 
-// awsReadEntryOf reads req into its ADR-0041 entry for svc and puts the
-// body back byte-identical. dryRun reports the field DryRun=true. It
-// refuses any request whose wire form could carry an action or a DryRun
-// the entry does not show.
-func awsReadEntryOf(svc AWSReaderService, req *http.Request) (AWSReadEntry, bool, error) {
+// entryOf reads req into its ADR-0041 entry and puts the body back
+// byte-identical. dryRun reports the field DryRun=true. It refuses any
+// request whose wire form could carry an action or a DryRun the entry
+// does not show.
+func (w *AWSReadWall) entryOf(req *http.Request) (AWSReadEntry, bool, error) {
 	body, err := restoreAWSRequestBody(req)
 	if err != nil {
 		return AWSReadEntry{}, false, err
@@ -91,18 +117,47 @@ func awsReadEntryOf(svc AWSReaderService, req *http.Request) (AWSReadEntry, bool
 	if enc := awsHeaderValues(req.Header, "Content-Encoding"); len(enc) > 0 {
 		return AWSReadEntry{}, false, fmt.Errorf("the body is encoded (%q), so it is not the bytes read here", enc)
 	}
+	if err := w.checkContentType(req.Header); err != nil {
+		return AWSReadEntry{}, false, err
+	}
 	targets := awsHeaderValues(req.Header, "X-Amz-Target")
-	if svc.Protocol == awsProtocolJSON {
-		entry, err := awsJSONReadEntry(svc, targets, body)
+	if w.protocol == awsProtocolJSON {
+		entry, err := w.jsonEntry(targets, body)
 		return entry, false, err
 	}
 	if len(targets) > 0 {
 		return AWSReadEntry{}, false, errors.New("X-Amz-Target on a query service")
 	}
-	return awsQueryReadEntry(svc, body)
+	return w.queryEntry(body)
 }
 
-func awsQueryReadEntry(svc AWSReaderService, body []byte) (AWSReadEntry, bool, error) {
+// checkContentType passes exactly one Content-Type of the protocol's
+// media type, with no parameter but a query body's charset=utf-8.
+func (w *AWSReadWall) checkContentType(h http.Header) error {
+	types := awsHeaderValues(h, "Content-Type")
+	if len(types) != 1 {
+		return fmt.Errorf("the request carries %d Content-Type values, not one", len(types))
+	}
+	mediaType, params, err := mime.ParseMediaType(types[0])
+	if err != nil {
+		return fmt.Errorf("the Content-Type %q does not parse: %w", types[0], err)
+	}
+	want := awsQueryMediaType
+	if w.protocol == awsProtocolJSON {
+		want = awsJSONMediaType
+	}
+	if mediaType != want {
+		return fmt.Errorf("the Content-Type is %q, not %s", mediaType, want)
+	}
+	for key, value := range params {
+		if w.protocol != awsProtocolQuery || key != "charset" || !strings.EqualFold(value, "utf-8") {
+			return fmt.Errorf("the Content-Type carries %s=%q; only a query body's charset=utf-8 may pass", key, value)
+		}
+	}
+	return nil
+}
+
+func (w *AWSReadWall) queryEntry(body []byte) (AWSReadEntry, bool, error) {
 	form, err := url.ParseQuery(string(body))
 	if err != nil {
 		return AWSReadEntry{}, false, fmt.Errorf("the form body does not parse: %w", err)
@@ -132,16 +187,16 @@ func awsQueryReadEntry(svc AWSReaderService, body []byte) (AWSReadEntry, bool, e
 	if err != nil {
 		return AWSReadEntry{}, false, err
 	}
-	return AWSReadEntry{Service: svc.Service, Protocol: svc.Protocol, Action: form.Get("Action"), Params: raw}, hasDryRun, nil
+	return AWSReadEntry{Service: w.service, Protocol: w.protocol, Action: form.Get("Action"), Params: raw}, hasDryRun, nil
 }
 
-func awsJSONReadEntry(svc AWSReaderService, targets []string, body []byte) (AWSReadEntry, error) {
+func (w *AWSReadWall) jsonEntry(targets []string, body []byte) (AWSReadEntry, error) {
 	if len(targets) != 1 {
 		return AWSReadEntry{}, fmt.Errorf("the request carries %d X-Amz-Target values, not one", len(targets))
 	}
 	prefix, action, ok := strings.Cut(targets[0], ".")
-	if !ok || prefix != svc.TargetPrefix {
-		return AWSReadEntry{}, fmt.Errorf("X-Amz-Target %q is not %s.<action>", targets[0], svc.TargetPrefix)
+	if !ok || prefix != w.targetPrefix {
+		return AWSReadEntry{}, fmt.Errorf("X-Amz-Target %q is not %s.<action>", targets[0], w.targetPrefix)
 	}
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(body, &fields); err != nil || fields == nil {
@@ -152,7 +207,7 @@ func awsJSONReadEntry(svc AWSReaderService, targets []string, body []byte) (AWSR
 			return AWSReadEntry{}, fmt.Errorf("the json body carries %q, a query-protocol field", key)
 		}
 	}
-	return AWSReadEntry{Service: svc.Service, Protocol: svc.Protocol, Action: action, Params: body}, nil
+	return AWSReadEntry{Service: w.service, Protocol: w.protocol, Action: action, Params: body}, nil
 }
 
 // restoreAWSRequestBody reads req's body and puts the same bytes back,

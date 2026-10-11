@@ -38,8 +38,8 @@ func checkAWSReadWall(wall *AWSReadWall, service string) error {
 	if wall == nil {
 		return fmt.Errorf("aws read %s client: needs a read wall, and none was given", service)
 	}
-	if wall.service.Service != service {
-		return fmt.Errorf("aws read %s client: the wall is bound to %s", service, wall.service.Service)
+	if wall.service != service {
+		return fmt.Errorf("aws read %s client: the wall is bound to %s", service, wall.service)
 	}
 	return nil
 }
