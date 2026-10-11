@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -244,29 +245,55 @@ echo '{"keys":{"encryption_key":"`+encryptionProbeKey+`","decryption_key":"`+enc
 	return p
 }
 
-// encryptionProbeDeadline bounds each tofu command. The key provider
-// script waits for stdin to close, so a tofu that holds it open would
-// otherwise hang the test until go test's own timeout, naming nothing.
-const encryptionProbeDeadline = 2 * time.Minute
+// tofuDeadline bounds every tofu call in the assumption tests, so a hang
+// fails naming the call instead of running into go test's own timeout: an
+// external key provider's script waits for stdin to close, and a request
+// refused at a dead address retries for more than ten minutes unless the
+// fixture sets max_retries = 1, as each one does.
+const tofuDeadline = 2 * time.Minute
+
+// ourOverride is the name infrafactory's override takes: it sorts before a
+// user's zz_override.tf.
+const ourOverride = "infrafactory_override.tf"
+
+// runTofu runs tofu in dir with exactly env under tofuDeadline, and returns
+// its stdout and stderr. On the deadline it SIGKILLs tofu's whole process
+// group: a child that outlived a kill of tofu alone would hold an output
+// pipe and block the call past the deadline. Killing the group closes every
+// holder of the pipes, so there is no WaitDelay, whose timer would also
+// start on a normal exit and turn a slow pipe close into exec.ErrWaitDelay
+// (exec_runner.go refuses it for the same reason). Past the deadline the
+// error wraps context.DeadlineExceeded.
+func runTofu(dir string, env []string, args ...string) (stdout, stderr string, err error) {
+	ctx, cancel := context.WithTimeout(context.Background(), tofuDeadline)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "tofu", args...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		if errors.Is(err, syscall.ESRCH) {
+			return os.ErrProcessDone
+		}
+		return err
+	}
+	cmd.Dir, cmd.Env = dir, env
+	var out, errOut bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &errOut
+	err = cmd.Run()
+	if ctx.Err() != nil {
+		err = fmt.Errorf("tofu %s ran past %s: %w", strings.Join(args, " "), tofuDeadline, ctx.Err())
+	}
+	return out.String(), errOut.String(), err
+}
 
 // tofu runs tofu in the copy and returns its stdout; a non-zero exit or
 // the deadline returns an error carrying the tofu version and both streams.
 func (p backendProbe) tofu(args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), encryptionProbeDeadline)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "tofu", args...)
-	cmd.Dir, cmd.Env = p.dir, p.env
-	cmd.WaitDelay = time.Second
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
-	if ctx.Err() == context.DeadlineExceeded {
-		err = fmt.Errorf("killed after %s: %w", encryptionProbeDeadline, ctx.Err())
-	}
+	out, stderr, err := runTofu(p.dir, p.env, args...)
 	if err != nil {
-		return string(out), fmt.Errorf("%s: tofu %s: %w\n%s%s", p.version, strings.Join(args, " "), err, out, stderr.String())
+		return out, fmt.Errorf("%s: tofu %s: %w\n%s%s", p.version, strings.Join(args, " "), err, out, stderr)
 	}
-	return string(out), nil
+	return out, nil
 }
 
 // localBackendOverride is the rehearsal's backend override: `backend
@@ -283,7 +310,7 @@ func localBackendOverride(blockPath string) string {
 // override, given a path outside the copy on the command line.
 func (p backendProbe) initWithOutsideBackend(blockPath string) error {
 	override := localBackendOverride(blockPath)
-	if err := os.WriteFile(filepath.Join(p.dir, "override.tf"), []byte(override), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(p.dir, ourOverride), []byte(override), 0o600); err != nil {
 		return err
 	}
 	_, err := p.tofu("init", "-input=false", "-no-color", "-reconfigure", "-get=false",

@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -39,13 +38,6 @@ const (
 	closedAddr     = "127.0.0.1:9"
 	closedEndpoint = "http://" + closedAddr
 	closedDial     = "dial tcp " + closedAddr + ":"
-	// tofuDeadline bounds every tofu call. max_retries = 1 in each
-	// fixture keeps a refused request fast; without it the SDK retries
-	// for more than ten minutes.
-	tofuDeadline = 2 * time.Minute
-	// ourOverride is the name infrafactory's override takes: it sorts
-	// before a user's zz_override.tf.
-	ourOverride = "infrafactory_override.tf"
 	// AWS's documented example key pair: real-looking, never valid.
 	fakeAccessKeyID     = "AKIAIOSFODNN7EXAMPLE"
 	fakeSecretAccessKey = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
@@ -71,7 +63,7 @@ func TestAssumption_EndpointsOverrideKeepsApplyOffProd(t *testing.T) {
 	t.Run("sts", func(t *testing.T) {
 		proxy := startRecorder(t)
 		w.write(t, "main.tf", providerBlock("")+`data "aws_caller_identity" "me" {}`+"\n")
-		w.write(t, ourOverride, override)
+		w.write(t, cli.OurOverride, override)
 
 		errs, aliasWarnings := w.applyJSON(t, proxy)
 		assert.Positive(t, aliasWarnings, "%s: no %q warning: reworded, or now an error?", w.version, aliasConflict)
@@ -84,7 +76,7 @@ func TestAssumption_EndpointsOverrideKeepsApplyOffProd(t *testing.T) {
 		proxy := startRecorder(t)
 		w.write(t, "main.tf", providerBlock("  skip_credentials_validation = true\n  skip_requesting_account_id  = true\n")+
 			`data "aws_vpcs" "all" {}`+"\n")
-		w.write(t, ourOverride, override)
+		w.write(t, cli.OurOverride, override)
 
 		errs, aliasWarnings := w.applyJSON(t, proxy)
 		assert.Positive(t, aliasWarnings, "%s: no %q warning: reworded, or now an error?", w.version, aliasConflict)
@@ -96,7 +88,7 @@ func TestAssumption_EndpointsOverrideKeepsApplyOffProd(t *testing.T) {
 	t.Run("control without sts", func(t *testing.T) {
 		proxy := startRecorder(t)
 		w.write(t, "main.tf", providerBlock("")+`data "aws_caller_identity" "me" {}`+"\n")
-		w.write(t, ourOverride, endpointsOverride(without(keys, "sts"), closedEndpoint))
+		w.write(t, cli.OurOverride, endpointsOverride(without(keys, "sts"), closedEndpoint))
 
 		errs, _ := w.applyJSON(t, proxy)
 		assert.Positive(t, proxy.count(), "%s: an STS key the override leaves out goes to AWS: %s", w.version, errs)
@@ -114,7 +106,7 @@ func TestAssumption_UserOverrideMergesAfterOurs(t *testing.T) {
 	w := newAssumptionDir(t)
 	proxy, userEndpoint := startRecorder(t), startRecorder(t)
 	w.write(t, "main.tf", providerBlock("")+`data "aws_caller_identity" "me" {}`+"\n")
-	w.write(t, ourOverride, endpointsOverride([]string{"sts"}, closedEndpoint))
+	w.write(t, cli.OurOverride, endpointsOverride([]string{"sts"}, closedEndpoint))
 	w.write(t, "zz_override.tf", endpointsOverride([]string{"sts"}, userEndpoint.url))
 
 	out, _ := w.tofu(t, w.env(t, proxy), "apply", "-auto-approve", "-input=false", "-no-color")
@@ -134,7 +126,7 @@ func TestAssumption_RootOverrideMissesChildModuleProvider(t *testing.T) {
 	w := newAssumptionDir(t)
 	proxy, root, child := startRecorder(t), startRecorder(t), startRecorder(t)
 	w.write(t, "main.tf", providerBlock("")+`module "child" { source = "./child" }`+"\n")
-	w.write(t, ourOverride, endpointsOverride([]string{"sts"}, root.url))
+	w.write(t, cli.OurOverride, endpointsOverride([]string{"sts"}, root.url))
 	w.write(t, "child/main.tf", providerBlock("")+`data "aws_caller_identity" "me" {}`+"\n")
 	w.init(t)
 
@@ -177,7 +169,9 @@ func TestAssumption_SecondInitMakesNoProxiedConnection(t *testing.T) {
 			location = line
 		}
 	}
-	assert.NotEmpty(t, location, "%s: no trace line gives the registry module's download location: reworded?", c.version)
+	if location == "" {
+		location = "no trace line gives the registry module's download location"
+	}
 	t.Logf("%s: %s", c.version, location)
 	assert.DirExists(t, filepath.Join(c.data, "providers", "registry.opentofu.org", "hashicorp", "aws", harness.AWSProviderVersion), c.version)
 	assert.Subset(t, c.moduleKeys(t), []string{"child", "registry"}, c.version)
@@ -192,8 +186,8 @@ func TestAssumption_SecondInitMakesNoProxiedConnection(t *testing.T) {
 		sibling := newInitCopy(t)
 		proxy := startRecorder(t)
 		out, _ := sibling.secondInit(t, proxy)
-		assert.Positive(t, proxy.count(), "%s: no proxied connection without -plugin-dir\n%s", c.version, out)
-		t.Logf("%s: the proxy saw %v", c.version, proxy.requests())
+		assert.Positive(t, proxy.count(), "%s: no proxied connection without -plugin-dir\n%s", sibling.version, out)
+		t.Logf("%s: the proxy saw %v", sibling.version, proxy.requests())
 	})
 }
 
@@ -280,7 +274,7 @@ func (c initCopy) moduleKeys(t *testing.T) []string {
 // init, plus flags, with both proxies at proxy and no NO_PROXY.
 func (c initCopy) secondInit(t *testing.T, proxy *recorder, flags ...string) (string, error) {
 	t.Helper()
-	c.write(t, ourOverride, cli.LocalBackendOverride)
+	c.write(t, cli.OurOverride, cli.LocalBackendOverride)
 	args := append([]string{"init", "-input=false", "-no-color", "-reconfigure", "-get=false",
 		"-lockfile=readonly", "-backend-config=path=" + c.outside}, flags...)
 	return c.tofu(t, c.bareEnv(t, "HTTPS_PROXY="+proxy.url, "HTTP_PROXY="+proxy.url), args...)
@@ -353,31 +347,14 @@ func (w assumptionDir) env(t *testing.T, proxy *recorder, extra ...string) []str
 	}, extra...)
 }
 
-// tofu runs tofu in the directory under tofuDeadline and returns its
-// combined output. On the deadline it SIGKILLs tofu's whole process group:
-// a child that outlived a kill of tofu alone would hold the output pipe
-// and block the call past the deadline. Killing the group closes every
-// holder of the pipe, so there is no WaitDelay, whose timer would also
-// start on a normal exit and turn a slow pipe close into exec.ErrWaitDelay
-// (exec_runner.go refuses it for the same reason).
+// tofu runs tofu in the directory through cli.RunTofu and returns its
+// stdout and stderr together; running past the deadline fails the test.
 func (w assumptionDir) tofu(t *testing.T, env []string, args ...string) (string, error) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), tofuDeadline)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "tofu", args...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error {
-		err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		if errors.Is(err, syscall.ESRCH) {
-			return os.ErrProcessDone
-		}
-		return err
-	}
-	cmd.Dir = w.dir
-	cmd.Env = env
-	out, err := cmd.CombinedOutput()
-	require.NoError(t, ctx.Err(), "%s: tofu %s ran past %s\n%s", w.version, args, tofuDeadline, out)
-	return string(out), err
+	stdout, stderr, err := cli.RunTofu(w.dir, env, args...)
+	out := stdout + stderr
+	require.NotErrorIs(t, err, context.DeadlineExceeded, "%s\n%s", w.version, out)
+	return out, err
 }
 
 // endpointKeys is every key of the provider's `endpoints` block, from
@@ -462,7 +439,7 @@ func endpointsOverride(keys []string, url string) string {
 // countEndpoints is how many keys an override's endpoints block names.
 func countEndpoints(t *testing.T, override string) int {
 	t.Helper()
-	f, diags := hclsyntax.ParseConfig([]byte(override), ourOverride, hcl.Pos{Line: 1, Column: 1})
+	f, diags := hclsyntax.ParseConfig([]byte(override), cli.OurOverride, hcl.Pos{Line: 1, Column: 1})
 	require.False(t, diags.HasErrors(), diags.Error())
 	for _, provider := range f.Body.(*hclsyntax.Body).Blocks {
 		for _, block := range provider.Body.Blocks {

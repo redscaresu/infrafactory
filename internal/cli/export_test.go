@@ -54,6 +54,11 @@ func AWSLayer3MockDeploy(ctx context.Context, cfg config.Config, scenarioPath st
 	return err
 }
 
-// LocalBackendOverride is the rehearsal's backend override with no path,
-// for the init assumption in cli_test.
-var LocalBackendOverride = localBackendOverride("")
+// The assumption tests' tofu runner, override name and backend override
+// (no path), for the assumption tests in cli_test.
+var (
+	RunTofu              = runTofu
+	LocalBackendOverride = localBackendOverride("")
+)
+
+const OurOverride = ourOverride
