@@ -92,6 +92,15 @@ does not match, all surface only at the real apply.
     from the URL path (`../fakeaws/handlers/ec2.go:38,42`). New code whose provider names another
     region is refused. Several regions waits on fakeaws reading the region from the SigV4 credential
     scope, a later change.
+12. **The base is rehearsed first, then the change** (user, 2026-10-11, after epic planning). A
+    rehearsal names two git refs of the user's repository: the **base** (by default `main`, the
+    code that manages prod today) and the **head** (by default the working tree, the change). The
+    base plans against the checked copy with the pulled state first; then the head plans against
+    the same copy and state, and its plan is applied to the copy. The base's plan is not refused
+    when it is non-empty: the real cloud makes changes that are fine (user), so every change it
+    plans is listed as **drift between the base and prod**, and the head's result is shown against
+    it. Fakeaws mistakes are caught by the check (goal 4), never by the base's plan. Locally first;
+    a PR check comes later, once a CI runner can hold a prod read credential (user, 2026-10-11).
 
 ## Non-goals
 
@@ -142,13 +151,16 @@ and states, not responses, and never runs outside the Layer 3 scope (ADR-0040).
 The feature is a **rehearsal**: a copy of the relevant part of prod in a dedicated fakeaws, the
 user's new code, and OpenTofu actions against the copy that cannot reach prod. Five steps:
 **prepare** the code, **discover** what it touches, **read** that from prod, **load and check** the
-copy, **rehearse**. Only the read touches prod, and it never shares an environment, a credential or
+copy, **rehearse** the base and then the head (goal 12). Only the read touches prod, and it never shares an environment, a credential or
 a process with anything else.
 
 ### Prepare: two work directories, gated before any tofu
 
-The new code, and the configuration that manages a pulled tfstate when there is one, are each
-copied to their own work directory under `.infrafactory/` (mode 0700), with the local module
+The base and the head are exported from git (`git archive <ref>` for a committed ref, never a
+checkout of the user's tree; the default head, the working tree, is copied from the files
+`git ls-files --cached --others --exclude-standard` lists that exist on disk, so uncommitted edits and deletions are rehearsed), and each, plus a throwaway copy of the configuration that
+manages the pulled tfstate (the base's by default, deleted right after the pull), is copied to its
+own work directory under `.infrafactory/` (mode 0700), with the local module
 sources they reach: their nearest common ancestor is copied, and a source escaping the user's
 repository is refused by name (review-1 B3, review-2 M1). Both are gated **before the first tofu
 command** (review-2 S1; ADR-0023 sets the bar at "before any tofu"):
@@ -181,7 +193,8 @@ tofu version, are tests (ADR-0028).
 
 ### Discover: let the code say what it reads
 
-The new code is planned once against an **empty** walled fakeaws, and fakeaws's request log
+The base and the head are each planned against an **empty** walled fakeaws (the read set is the
+union of what both sent), and fakeaws's request log
 (the `audit` table, `../fakeaws/handlers/admin.go:35`) records every Describe, List and Get the
 provider sent: each data source's filters, each import's id lookup. Those requests, the ids a pulled
 tfstate names, and the names every planned create would take (from `tofu show -json` of that plan)
@@ -269,11 +282,27 @@ without a second read. The rehearsal learns nothing and `docs/mock-gaps.md` is w
 classifier inside `run` (`docs/auto-learning-loop.md:83`), so each gap is filed as a fakeaws story
 by hand (review-1 M3).
 
-### Rehearse: the new code, walled
+### Rehearse: the base, then the head, walled
 
-The starting state is empty (new code that adds alongside, and takes resources over with `import`
-blocks whose real ids the mock holds), or the checked state (new code that continues an existing
-configuration, with `moved` blocks where it renames). The user's `--var-file` is copied in. Every
+With a pulled state, the rehearsal runs in this order (goal 12):
+
+1. **Base.** `plan` of the base against the checked copy and the drift-absorbed state. Every change
+   it plans is listed, by address and attribute, as drift between the base and prod. It is never
+   applied and never refuses the rehearsal.
+2. **Head.** `plan` of the head against the same copy and state. The report splits it into the
+   head's own changes (not in the base's plan), base drift the head keeps, base drift the head
+   changes, and any head change on an address the base also changes (flagged).
+3. **Apply.** The head's saved plan is applied to the copy; then the head plans again and must be
+   empty (a change that never converges is named).
+
+The request-log classifier runs after every plan and apply, so a gap refuses wherever it is first
+hit. `reset` restores the checked copy and state, so the head can be edited and rehearsed again
+without a second read.
+
+Without a pulled state (new code that only adds alongside prod), the starting state is empty, and
+the code takes resources over with `import` blocks whose real ids the mock holds. Code that
+continues an existing configuration (with `moved` blocks where it renames) uses the pulled-state
+path above. The user's `--var-file` is copied in. Every
 tofu action runs in an **allowlisted environment** (review-1 S2): it starts empty and gains only the
 AWS endpoint variables pointed at this rehearsal's fakeaws, with the region from the read and S3 at
 the dead address while S3 is refused (review-2 M5), a catch-all `AWS_ENDPOINT_URL` and an
@@ -340,7 +369,16 @@ touches `run`, the scenario schema, the prompts or the pipeline.
 - **LocalStack Cloud Pods.** They persist LocalStack's own state; nothing reads a real account
   into them, and the user owns the mocks.
 
-The wedge test this HLD must pass and none of these can: new code that finds the real VPC by tag,
+- **Refuse when the base's plan is not empty.** Rejected (user, 2026-10-11): some drift is expected
+  because the real cloud makes changes that are fine. The base's plan is listed instead, and
+  fakeaws mistakes are left to the read-back and the request-log classifier, which do not depend
+  on the diff.
+
+The wedge test this HLD must pass and none of these can: with the web stack's real state pulled,
+the base (the stack as applied) plans against the copy and its plan is listed; the head renames a
+resource with `moved`, adds a subnet to the real VPC and changes a tag, and its plan shows exactly
+those changes against the base, applies to the copy with the real ids, converges, and fails where
+AWS would, with no route to any cloud. The same without a state: new code that finds the real VPC by tag,
 adds a subnet to it and imports a real security group plans and applies against a copy of the
 account, with the real ids, and fails where AWS would, with no route to any cloud.
 
@@ -414,11 +452,13 @@ and its walls; the account-read contract and the recorded-read format; the fakea
    the instance root volume (`docs/layer3/real-vs-mock-deltas.md` D7) from the step-0 recording.
 3. **Data sources and validation** (fakeaws): generic filters, `DescribeAvailabilityZones`,
    image owner and name filters, and the subnet-overlap check.
-4. **The rehearsal** (infrafactory): prepare and gate, discovery, the provider override, the
-   allowlisted environment, passthrough, check, snapshot, `reset`, `end`, and the fail-closed
-   tests. Proved on the step-0 recording with the wedge: new code that finds the real VPC by tag,
-   adds a subnet and imports a real security group. Then takeover: the tfstate pull, pruning,
-   the refresh-only check with drift absorbed, proved with the web stack's own pre-destroy state.
+4. **The rehearsal** (infrafactory), state path first (user, 2026-10-11): prepare and gate the
+   base and the head, the tfstate pull and pruning, discovery over both, the provider override,
+   the allowlisted environment, passthrough, check with the refresh-only drift absorbed, the base
+   plan listed, the head planned, applied and converged against it, snapshot, `reset`, `end`, and
+   the fail-closed tests. Proved on the step-0 recording and the web stack's own pre-destroy state
+   with the wedge. Then the path without a state: new code that finds the real VPC by tag, adds a
+   subnet and imports a real security group.
 5. **A larger estate**: one infrafactory never built. What the code touches and fakeaws does not
    model is refused by name, and that list orders the fakeaws epics (S3 on fakeaws's handler, ELBv2,
    autoscaling, NAT gateways, volumes, CloudWatch first).
@@ -444,6 +484,7 @@ and its walls; the account-read contract and the recorded-read format; the fakea
 - [fakeaws-loader](../epics/fakeaws-loader.md)
 - [rehearsal-walls](../epics/rehearsal-walls.md)
 - [rehearsal-passthrough](../epics/rehearsal-passthrough.md)
+- [rehearsal-state-pull](../epics/rehearsal-state-pull.md)
 - [rehearsal-against-the-copy](../epics/rehearsal-against-the-copy.md)
-- [rehearsal-takeover](../epics/rehearsal-takeover.md)
+- [rehearsal-without-state](../epics/rehearsal-without-state.md)
 - [larger-estate](../epics/larger-estate.md)

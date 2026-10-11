@@ -1,7 +1,7 @@
 ---
 status: later
 hld: 2026-09-30-import-production-state-into-the-mocks
-depends_on: [rehearsal-takeover]
+depends_on: [rehearsal-without-state]
 ---
 
 # A rehearsal against one estate infrafactory never built either rehearses or refuses by name, and the refusal list orders the work queue (Rollout 5).
