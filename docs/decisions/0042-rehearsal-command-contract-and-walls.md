@@ -108,6 +108,12 @@ included. A registry download runs git against github.com (**unverified**: seen 
 config can carry a credential helper; refusing every download holds whatever the download does.
 There is no `--allow-module` flag.
 
+A local source that crosses a symlink at any component is refused too, naming the module and the
+link. Tofu joins a source to the calling dir as written and cleans it lexically, so through
+`./link` a module's `path.module` spells the link, while the gate would check the dir the link
+resolves to: `"${path.module}/../.."` names a different dir on each side. Refusing the link keeps the
+two the same.
+
 Gate 2 reads the manifest the first init writes (its shape pinned by
 `TestAssumption_ModulesManifestShape`) and admits only the root entry and local entries that
 resolve inside the copy. Nothing fetched is ever admitted, so there is no nested-fetch bound to
@@ -162,14 +168,20 @@ Every path the code reads or writes must resolve inside the copy (`<id>/work`). 
 are the first argument of `file`, `fileexists`, `fileset`, `filebase64`, `filemd5`, `filesha1`,
 `filesha256`, `filesha512`, `filebase64sha256`, `filebase64sha512` and `templatefile`;
 `filename` and `source` of `local_file` and `local_sensitive_file`; `filename` of data
-`local_file` and data `local_sensitive_file`; and `output_path`, `source_file` and `source_dir` of
-`archive_file`, resource and data.
+`local_file` and data `local_sensitive_file`; `output_path`, `source_file` and `source_dir` of
+`archive_file`, resource and data; and every aws argument terraform-provider-aws 5.100.0 reads a
+local file from: `source` of `aws_s3_object` and `aws_s3_bucket_object`; `filename` of
+`aws_lambda_function`, `aws_lambda_layer_version`, `aws_connect_contact_flow`,
+`aws_connect_contact_flow_module` and `aws_rds_custom_db_engine_version`; `zip_file` of
+`aws_synthetics_canary` and `aws_gamelift_script`; `configurations` of `aws_emr_cluster`; and
+`asset.import_assets_from_signed_url.filename` of `aws_dataexchange_revision_assets`, a `dynamic`
+block's `content` included.
 
-A checked path is admitted only as `path.module` or `path.root` joined with a literal, resolved
-from that directory, and only if it stays inside the copy. A bare relative literal is refused:
-tofu resolves it from its working directory rather than the module directory (**unverified**;
-refusing it holds either way). Absolute, escaping, variable and otherwise computed paths are
-refused, and `abspath` and `pathexpand` are refused by name.
+A checked path is admitted only as `path.module` or `path.root`, alone or joined with a literal
+starting with `/`, resolved from that directory, and only if it stays inside the copy. A bare
+relative literal is refused: tofu resolves it from its working directory rather than the module
+directory (**unverified**; refusing it holds either way). Absolute, escaping, variable and
+otherwise computed paths are refused, and `abspath` and `pathexpand` are refused by name.
 
 A written path (`filename` of `local_file` and `local_sensitive_file`, `output_path` of
 `archive_file`) must also not name a file tofu could load, so an apply that would write
@@ -180,16 +192,27 @@ when it is `.terraform.lock.hcl`, or when any of its elements is `terraform.d` o
 Names are compared case-insensitively, since a case-insensitive filesystem (macOS's default) maps
 `ZZ_OVERRIDE.TF` and `.TERRAFORM.LOCK.HCL` onto the names they spell.
 
+A written path is also refused when it is the same file as a template any `templatefile` in the
+gate run reads, in any module: `templatefile` can run at apply, after the write, on a template the
+gate never saw, and the re-gate before the next step comes too late. The filesystem decides
+sameness (`os.SameFile`), so a spelling a case-insensitive filesystem maps onto the template is
+caught.
+
 `fileset`'s second argument, the glob, is checked too, since it is joined onto the path before
-globbing (**unverified**; the check holds either way). It must be a literal relative pattern with
-no `..` element; a non-literal, absolute or `..`-holding pattern is refused. Any `..` is refused,
-not only one that leaves the copy lexically, because `**` can match zero directories, so a lexical
-check of a `..` after a glob undercounts how far it climbs.
+globbing (**unverified**; the check holds either way). It must be a literal relative pattern of
+ASCII letters, digits and `/ . - _ * ?` with no `..` element; anything else is refused. The
+characters are an allowlist because glob syntax spells `..` without writing it: `{..,x}` and
+`[.][.]` both match it. Any `..` element is refused, not only one that leaves the copy lexically,
+because `**` can match zero directories, so a lexical check of a `..` after a glob undercounts how
+far it climbs.
 
 The template a `templatefile` names is gated too, because the gate admits other files unparsed
 and a template can call any function. It is parsed with `hclsyntax.ParseTemplate`, and every
-function call and path in it is held to the function and path rules above. A missing or
-unparseable template is refused.
+function call in it is held to the function rule above. No path in a template can be checked:
+every variable in it, `path` included, comes from the `templatefile` vars map, so
+`{ path = { module = "/Users/me/.aws" } }` makes `path.module` a host directory. So every path
+function call in a template, `templatefile` included, is refused. A missing or unparseable
+template is refused.
 
 ### provider "aws"
 
