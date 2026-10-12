@@ -97,11 +97,12 @@ func rehearsalGate(in rehearsalGateInput) error {
 func (in rehearsalGateInput) problems() []string {
 	var problems []string
 	start := append([]rehearsalModuleDir{{dir: in.root}}, in.modules...)
-	rehearsalWalk(start, func(m rehearsalModuleDir) []rehearsalModuleDir {
+	walkProblems := rehearsalWalk(start, func(m rehearsalModuleDir) []rehearsalModuleDir {
 		dirProblems, calls := in.dirProblems(m)
 		problems = append(problems, m.named(dirProblems)...)
 		return calls
 	})
+	problems = append(problems, walkProblems...)
 	if in.varFile != "" {
 		problems = append(problems, in.tfvarsProblems(in.varFile)...)
 	}

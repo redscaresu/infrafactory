@@ -104,11 +104,15 @@ func TestRehearsalGateModuleSources(t *testing.T) {
 		{name: "a providers map the gate cannot read", files: moduleBlock("  source    = \"./m\"\n  providers = var.p\n"),
 			want: []string{"main.tf:3: module.m.providers: not a providers map the gate can read"}},
 		{name: "a module calling its own dir", files: map[string]string{work + "main.tf": "module \"self\" {\n  source = \"./\"\n}\n"},
-			want: []string{`main.tf:2: module.self.source: source "./" is refused: it resolves to the calling module's own dir or one holding it`}},
+			want: []string{`main.tf:2: module.self.source: source "./" is refused: it resolves to a module dir already on its call path, a cycle`}},
 		{name: "a module calling the dir holding it", files: map[string]string{
 			work + "main.tf":   "module \"m\" {\n  source = \"./m\"\n}\n",
 			work + "m/main.tf": "module \"up\" {\n  source = \"../\"\n}\n",
-		}, want: []string{`module "m": m/main.tf:2: module.up.source: source "../" is refused: it resolves to the calling module's own dir or one holding it`}},
+		}, want: []string{`module "m": m/main.tf:2: module.up.source: source "../" is refused: it resolves to a module dir already on its call path, a cycle`}},
+		{name: "a backslash, which tofu reads as a separator", files: map[string]string{
+			work + "main.tf":           "module \"m\" {\n  source = \"./a\\\\..\\\\..\\\\x\"\n}\n",
+			work + `a\..\..\x/main.tf`: manifestOutput,
+		}, want: []string{`main.tf:2: module.m.source: source "./a\\..\\..\\x" is refused: tofu reads a \ as a path separator`}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, in := moduleCopy(t, tc.files, tc.symlinks)
@@ -126,18 +130,20 @@ const provisioner = "resource \"terraform_data\" \"t\" {\n  provisioner \"local-
 // TestRehearsalGateAdmitsLocalModules: ./m inside the copy, passed an
 // aliased aws provider, and m's ../shared pass gate 1, and
 // rehearsalLocalModuleSources returns each dir the root reaches, under
-// the copy, once. A module cycle ends.
+// the copy, once: the root calls ./m twice, and m and shared both call
+// ../leaf.
 func TestRehearsalGateAdmitsLocalModules(t *testing.T) {
 	_, in := moduleCopy(t, map[string]string{
 		work + "main.tf":        "provider \"aws\" {\n  alias = \"west\"\n}\nmodule \"m\" {\n  source    = \"./m\"\n  name      = \"x\"\n  providers = { aws = aws.west }\n}\nmodule \"again\" {\n  source = \"./m\"\n}\n",
-		work + "m/main.tf":      "module \"s\" {\n  source = \"../shared\"\n}\n",
-		work + "shared/main.tf": "module \"back\" {\n  source = \"../m\"\n}\n",
+		work + "m/main.tf":      "module \"s\" {\n  source = \"../shared\"\n}\nmodule \"l\" {\n  source = \"../leaf\"\n}\n",
+		work + "shared/main.tf": "module \"l\" {\n  source = \"../leaf\"\n}\n",
+		work + "leaf/main.tf":   manifestOutput,
 	}, nil)
 	assert.NoError(t, rehearsalGate(in))
 
 	sources, err := rehearsalLocalModuleSources(in.root, in.boundary)
 	require.NoError(t, err)
-	assert.Equal(t, []string{filepath.Join(in.root, "m"), filepath.Join(in.root, "shared")}, sources)
+	assert.Equal(t, []string{filepath.Join(in.root, "m"), filepath.Join(in.root, "shared"), filepath.Join(in.root, "leaf")}, sources)
 }
 
 func TestRehearsalLocalModuleSourcesRefuses(t *testing.T) {
@@ -152,16 +158,66 @@ func TestRehearsalLocalModuleSourcesRefuses(t *testing.T) {
 	assert.Contains(t, err.Error(), `main.tf:5: module.g.source: source "git::https://example.com/m.git" is refused`)
 	assert.Contains(t, err.Error(), "broken.tf: does not parse")
 
-	t.Run("never the root itself", func(t *testing.T) {
-		_, in := moduleCopy(t, map[string]string{
-			work + "main.tf":   "module \"m\" {\n  source = \"./m\"\n}\n",
-			work + "m/main.tf": "module \"up\" {\n  source = \"../\"\n}\n",
-		}, nil)
-		sources, err := rehearsalLocalModuleSources(in.root, in.boundary)
-		require.ErrorIs(t, err, errRehearsalRefuses)
-		assert.Nil(t, sources)
-		assert.Contains(t, err.Error(), `source "../" is refused: it resolves to the calling module's own dir or one holding it`)
-	})
+}
+
+const cycleWant = "is refused: it resolves to a module dir already on its call path, a cycle"
+
+// siblingCycle is a root calling ./a, where a calls ../b and b calls ../a.
+var siblingCycle = map[string]string{
+	work + "main.tf":   "module \"a\" {\n  source = \"./a\"\n}\n",
+	work + "a/main.tf": "module \"b\" {\n  source = \"../b\"\n}\n",
+	work + "b/main.tf": "module \"a\" {\n  source = \"../a\"\n}\n",
+}
+
+// TestRehearsalModuleCyclesAreRefused: a call back onto its own call path
+// is refused, directly or through other modules, by the gate and by
+// rehearsalLocalModuleSources, and the walk never lists the root.
+func TestRehearsalModuleCyclesAreRefused(t *testing.T) {
+	callsTheRoot := map[string]string{
+		work + "main.tf":   "module \"m\" {\n  source = \"./m\"\n}\n",
+		work + "m/main.tf": "module \"up\" {\n  source = \"../\"\n}\n",
+	}
+	for _, tc := range []struct {
+		name  string
+		files map[string]string
+		// root is the root under the copy; link spells it through a
+		// symlink instead.
+		root string
+		link bool
+		want string
+	}{
+		{name: "a module calling the root", files: callsTheRoot,
+			want: `module "m": m/main.tf:2: module.up.source: source "../" ` + cycleWant},
+		{name: "a module calling the root, spelled through a symlink", files: callsTheRoot, link: true,
+			want: `module "m": m/main.tf:2: module.up.source: source "../" ` + cycleWant},
+		{name: "a root below the copy, called back through a module", files: map[string]string{
+			work + "env/prod/main.tf":  "module \"m\" {\n  source = \"../../modules/m\"\n}\n",
+			work + "modules/m/main.tf": "module \"back\" {\n  source = \"../../env/prod\"\n}\n",
+		}, root: "env/prod", want: `module "m": modules/m/main.tf:2: module.back.source: source "../../env/prod" ` + cycleWant},
+		{name: "siblings", files: siblingCycle,
+			want: `module "a.b": b/main.tf:2: module.a.source: source "../a" ` + cycleWant},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tmp, in := moduleCopy(t, tc.files, nil)
+			in.root = filepath.Join(in.root, tc.root)
+			if tc.link {
+				in.root = filepath.Join(tmp, "link")
+				require.NoError(t, os.Symlink(in.boundary, in.root))
+			}
+			err := rehearsalGate(in)
+			require.ErrorIs(t, err, errRehearsalRefuses)
+			assert.Contains(t, err.Error(), tc.want)
+
+			sources, err := rehearsalLocalModuleSources(in.root, in.boundary)
+			require.ErrorIs(t, err, errRehearsalRefuses)
+			assert.Nil(t, sources)
+			assert.Contains(t, err.Error(), tc.want)
+			dirs, _ := rehearsalModuleDirs(in.root, in.boundary)
+			for _, dir := range dirs {
+				assert.NotEqual(t, rehearsalWalkKey(in.root), rehearsalWalkKey(dir), "the walk lists the root")
+			}
+		})
+	}
 }
 
 // localManifest is the manifest TestAssumption_ModulesManifestShape pinned

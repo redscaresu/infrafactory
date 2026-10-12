@@ -17,17 +17,19 @@ import (
 )
 
 // The module source rule (ADR-0042 Decision 2) judges a source by what
-// init does with it: only a literal ./ or ../ source that resolves to a
-// directory inside the copy is admitted, and every download is refused,
-// registry modules included. Gate 1 holds each module block to it and
-// gates every dir the blocks reach before any tofu; gate 2 holds the
-// manifest the first init writes to it.
+// init does with it: only a literal ./ or ../ source, with no backslash,
+// that resolves to a directory inside the copy is admitted, and every
+// download is refused, registry modules included. Gate 1 holds each
+// module block to it and gates every dir the blocks reach, refusing a
+// cycle, before any tofu; gate 2 holds the manifest the first init writes
+// to it.
 
 const rehearsalModulesAdmit = "only a literal ./ or ../ source inside the boundary is admitted: every module download is refused"
 
 // rehearsalModuleDir is a module dir and its key: the module path tofu's
-// manifest names it by (m.s), "" for the root.
-type rehearsalModuleDir struct{ key, dir string }
+// manifest names it by (m.s), "" for the root. call names the module
+// block's source that reached it, "" for a dir the walk starts from.
+type rehearsalModuleDir struct{ key, dir, call string }
 
 // named prefixes problems found in the module dir with its key.
 func (m rehearsalModuleDir) named(problems []string) []string {
@@ -41,16 +43,43 @@ func (m rehearsalModuleDir) named(problems []string) []string {
 	return out
 }
 
-// rehearsalWalk visits each start dir, then every dir a visited dir's
-// module blocks resolve to, each dir once. visit returns those calls.
-func rehearsalWalk(start []rehearsalModuleDir, visit func(rehearsalModuleDir) []rehearsalModuleDir) {
+// rehearsalWalk visits each start dir, then, depth first, every dir a
+// visited dir's module blocks resolve to, each dir once; visit returns
+// those calls. A call whose target is already on its own call path, the
+// start dir included, is a cycle: it is refused naming the call, and not
+// followed. Dirs compare resolved, so two spellings of one dir are one.
+func rehearsalWalk(start []rehearsalModuleDir, visit func(rehearsalModuleDir) []rehearsalModuleDir) []string {
 	visited := map[string]bool{}
-	for queue := start; len(queue) > 0; queue = queue[1:] {
-		if dir := filepath.Clean(queue[0].dir); !visited[dir] {
-			visited[dir] = true
-			queue = append(queue, visit(queue[0])...)
+	var problems []string
+	var walk func(m rehearsalModuleDir, path map[string]bool)
+	walk = func(m rehearsalModuleDir, path map[string]bool) {
+		dir := rehearsalWalkKey(m.dir)
+		visited[dir], path[dir] = true, true
+		defer delete(path, dir)
+		for _, call := range visit(m) {
+			switch target := rehearsalWalkKey(call.dir); {
+			case path[target]:
+				problems = append(problems, m.named([]string{call.call + " is refused: it resolves to a module dir already on its call path, a cycle"})...)
+			case !visited[target]:
+				walk(call, path)
+			}
 		}
 	}
+	for _, m := range start {
+		if !visited[rehearsalWalkKey(m.dir)] {
+			walk(m, map[string]bool{})
+		}
+	}
+	return problems
+}
+
+// rehearsalWalkKey is a dir resolved, or cleaned when it does not resolve:
+// reading it then fails, and that is reported where it is read.
+func rehearsalWalkKey(dir string) string {
+	if resolved, err := rehearsalResolve(dir); err == nil {
+		return resolved
+	}
+	return filepath.Clean(dir)
 }
 
 // rehearsalModuleCalls holds every module block in one module dir's files
@@ -67,7 +96,7 @@ func rehearsalModuleCalls(files map[string]*hclsyntax.Body, parent rehearsalModu
 				problems = append(problems, rehearsalAt(file, block.DefRange(), rehearsalAddress(block))+": a module block takes one label")
 				continue
 			}
-			target, blockProblems := rehearsalModuleSource(file, parent.dir, boundary, block)
+			target, call, blockProblems := rehearsalModuleSource(file, parent.dir, boundary, block)
 			problems = append(problems, blockProblems...)
 			if target == "" {
 				continue
@@ -76,15 +105,17 @@ func rehearsalModuleCalls(files map[string]*hclsyntax.Body, parent rehearsalModu
 			if parent.key != "" {
 				key = parent.key + "." + key
 			}
-			calls = append(calls, rehearsalModuleDir{key: key, dir: target})
+			calls = append(calls, rehearsalModuleDir{key: key, dir: target, call: call})
 		}
 	}
 	return calls, problems
 }
 
 // rehearsalModuleSource holds one module block in dir to the rule, and
-// returns the dir its source resolves to under boundary, and the problems.
-func rehearsalModuleSource(file, dir, boundary string, block *hclsyntax.Block) (string, []string) {
+// returns the dir its source resolves to under boundary, the call
+// (<file>:<line>: module.<name>.source: source "./m"), and the
+// problems.
+func rehearsalModuleSource(file, dir, boundary string, block *hclsyntax.Block) (string, string, []string) {
 	addr := rehearsalAddress(block)
 	var problems []string
 	if attr, ok := block.Body.Attributes["version"]; ok {
@@ -92,30 +123,29 @@ func rehearsalModuleSource(file, dir, boundary string, block *hclsyntax.Block) (
 	}
 	attr, ok := block.Body.Attributes["source"]
 	if !ok {
-		return "", append(problems, rehearsalAt(file, block.DefRange(), addr)+": refused: no source; "+rehearsalModulesAdmit)
+		return "", "", append(problems, rehearsalAt(file, block.DefRange(), addr)+": refused: no source; "+rehearsalModulesAdmit)
 	}
 	at := rehearsalAt(file, attr.SrcRange, addr+".source")
 	val, diags := attr.Expr.Value(nil)
 	if diags.HasErrors() || val.IsNull() || !val.IsKnown() || val.Type() != cty.String {
-		return "", append(problems, fmt.Sprintf("%s: refused: the source is not a literal string (it reads %s); %s", at, rehearsalReads(attr.Expr), rehearsalModulesAdmit))
+		return "", "", append(problems, fmt.Sprintf("%s: refused: the source is not a literal string (it reads %s); %s", at, rehearsalReads(attr.Expr), rehearsalModulesAdmit))
 	}
 	source := val.AsString()
-	if !rehearsalLocalSource(source) {
-		return "", append(problems, fmt.Sprintf("%s: source %q is refused: %s", at, source, rehearsalModulesAdmit))
+	call := fmt.Sprintf("%s: source %q", at, source)
+	switch {
+	case !rehearsalLocalSource(source):
+		return "", "", append(problems, call+" is refused: "+rehearsalModulesAdmit)
+	case strings.Contains(source, `\`):
+		return "", "", append(problems, call+` is refused: tofu reads a \ as a path separator, so a source holding one is refused by name`)
 	}
 	target, problem := rehearsalInside(filepath.Join(dir, source), boundary)
 	if problem != "" {
-		return "", append(problems, fmt.Sprintf("%s: source %q %s", at, source, problem))
+		return "", "", append(problems, call+" "+problem)
 	}
 	if info, err := os.Stat(target); err != nil || !info.IsDir() {
-		return "", append(problems, fmt.Sprintf("%s: source %q is refused: it is not a directory", at, source))
+		return "", "", append(problems, call+" is refused: it is not a directory")
 	}
-	resolvedDir, dirErr := rehearsalResolve(dir)
-	resolvedTarget, targetErr := rehearsalResolve(target)
-	if dirErr != nil || targetErr != nil || rehearsalUnder(resolvedDir, resolvedTarget) {
-		return "", append(problems, fmt.Sprintf("%s: source %q is refused: it resolves to the calling module's own dir or one holding it", at, source))
-	}
-	return target, problems
+	return target, call, problems
 }
 
 // moduleProvidersProblems holds both sides of every pair in a module
@@ -193,7 +223,8 @@ func rehearsalUnder(path, dir string) bool {
 }
 
 // rehearsalLocalModuleSources is every module dir that dir's module blocks
-// reach, transitively, each resolved inside boundary and listed once. It
+// reach, transitively, each resolved inside boundary and listed once, and
+// never dir itself: a call back onto its own call path is a cycle. It
 // reads each dir by the gate's walk, so anything that stops the gate
 // reading one (a module source the rule refuses, a .tf file that does not
 // parse, a file refused by name) refuses the lot. rehearsal-prepare-copy
@@ -207,25 +238,21 @@ func rehearsalLocalModuleSources(dir, boundary string) ([]string, error) {
 }
 
 // rehearsalModuleDirs walks root's module blocks as the gate does, without
-// the block rules, and returns every dir a block resolves to, once, and
-// the problems found reading them.
+// the block rules, and returns every module dir it visits, never the root,
+// and the problems found reading them.
 func rehearsalModuleDirs(root, boundary string) ([]string, []string) {
 	in := rehearsalGateInput{root: root, boundary: boundary}
 	var dirs, problems []string
-	seen := map[string]bool{}
-	rehearsalWalk([]rehearsalModuleDir{{dir: root}}, func(m rehearsalModuleDir) []rehearsalModuleDir {
+	walkProblems := rehearsalWalk([]rehearsalModuleDir{{dir: root}}, func(m rehearsalModuleDir) []rehearsalModuleDir {
+		if m.call != "" {
+			dirs = append(dirs, m.dir)
+		}
 		files, fileProblems := in.dirFiles(m.dir)
 		calls, callProblems := rehearsalModuleCalls(files, m, boundary)
 		problems = append(problems, m.named(append(fileProblems, callProblems...))...)
-		for _, call := range calls {
-			if !seen[call.dir] {
-				seen[call.dir] = true
-				dirs = append(dirs, call.dir)
-			}
-		}
 		return calls
 	})
-	return dirs, problems
+	return dirs, append(problems, walkProblems...)
 }
 
 // rehearsalManifestEntry is one entry of the manifest the first init
