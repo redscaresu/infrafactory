@@ -11,8 +11,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -34,12 +36,21 @@ type AWSReadInput struct {
 	Doer      aws.HTTPClient
 	Identity  func(ctx context.Context, cfg aws.Config, wall *AWSReadWall, account, principal string) error
 	Preflight func(ctx context.Context, cfg aws.Config, wall *AWSReadWall) error
-	// Endpoints replaces a service's endpoint URL, by service. Tests only.
+	// Endpoints replaces a service's endpoint URL, by service, for tests
+	// against a local mock: each must be http or https on a loopback IP.
 	Endpoints map[string]string
-	// Now is the clock for the timestamp, the duration and signing; nil
-	// means time.Now.
+	// Now times the read (its timestamp and duration); nil means
+	// time.Now. Requests are always signed at the real time, which AWS
+	// checks.
 	Now func() time.Time
 }
+
+// awsPartitionRegionPattern is the aws partition's regionRegex in the
+// SDK's partition metadata (internal/endpoints/awsrulesfn/partitions.go).
+// awsReadEndpoints hosts every service on amazonaws.com with IAM signed
+// for us-east-1, which holds for no other partition (cn-*, us-gov-*,
+// eusc-*, the iso partitions), so the read admits only this one.
+var awsPartitionRegionPattern = regexp.MustCompile(`^(us|eu|ap|sa|ca|me|af|il|mx)\-\w+\-\d+$`)
 
 // awsReadEndpoint is where a service's requests go, the region they are
 // signed for and, for query, the API version.
@@ -61,8 +72,8 @@ func awsReadEndpoints(region string) map[string]awsReadEndpoint {
 // ReadAWSAccount validates the read set, checks the key's identity, runs
 // the preflight, then replays each entry verbatim, signed, through its
 // service's wall, and returns the ADR-0041 recorded read. No request is
-// sent unless the read set is valid, and none after a failing identity
-// check or preflight. A NotFound-class answer named in the reader table
+// sent unless every entry is a reader-table row whose wire request its
+// wall admits, and none after a failing identity check or preflight. A NotFound-class answer named in the reader table
 // is recorded; any other non-2xx answer, and any answer carrying a
 // truncation marker, fails the read, naming the entry.
 func ReadAWSAccount(ctx context.Context, in AWSReadInput) (AWSRecordedRead, error) {
@@ -118,14 +129,11 @@ func newAWSReplay(ctx context.Context, in AWSReadInput) (*awsReplay, error) {
 		return nil, errors.New("the config carries no credentials")
 	case !ValidAWSRegion(in.Config.Region):
 		return nil, fmt.Errorf("region %q is not an AWS region name", in.Config.Region)
+	case !awsPartitionRegionPattern.MatchString(in.Config.Region):
+		return nil, fmt.Errorf("region %q is outside the aws partition, the only one the read's endpoints serve", in.Config.Region)
 	}
 	if err := ValidateAWSReadSet(in.ReadSet); err != nil {
 		return nil, err
-	}
-	for i, entry := range in.ReadSet {
-		if err := checkAWSReadParams(entry); err != nil {
-			return nil, fmt.Errorf("%s: %w", awsReadEntryName(i, entry), err)
-		}
 	}
 	r := &awsReplay{
 		walls: map[string]*AWSReadWall{}, endpoints: awsReadEndpoints(in.Config.Region),
@@ -139,6 +147,9 @@ func newAWSReplay(ctx context.Context, in AWSReadInput) (*awsReplay, error) {
 		if !ok {
 			return nil, fmt.Errorf("an endpoint is given for %q, which is not a reader-table service", service)
 		}
+		if err := checkAWSLoopbackEndpoint(u); err != nil {
+			return nil, fmt.Errorf("the %s endpoint: %w", service, err)
+		}
 		endpoint.url = u
 		r.endpoints[service] = endpoint
 	}
@@ -148,6 +159,13 @@ func newAWSReplay(ctx context.Context, in AWSReadInput) (*awsReplay, error) {
 			return nil, err
 		}
 		r.walls[svc.Service] = wall
+	}
+	// Each entry's wire request must pass its wall before anything is
+	// sent, identity and preflight included; the wall's check is the rule.
+	for i, entry := range in.ReadSet {
+		if _, _, err := r.request(ctx, entry); err != nil {
+			return nil, fmt.Errorf("%s: %w", awsReadEntryName(i, entry), err)
+		}
 	}
 	creds, err := in.Config.Credentials.Retrieve(ctx)
 	if err != nil {
@@ -164,18 +182,39 @@ func (e awsReadEndpoint) config(cfg aws.Config) aws.Config {
 	return cfg
 }
 
-// replay sends entry and returns its exchange.
+// checkAWSLoopbackEndpoint passes an http or https URL whose host is a
+// loopback IP, so an override cannot send the read key's signatures to
+// another host.
+func checkAWSLoopbackEndpoint(endpoint string) error {
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return fmt.Errorf("%q does not parse: %w", endpoint, err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("%q is not http or https", endpoint)
+	}
+	if ip := net.ParseIP(u.Hostname()); ip == nil || !ip.IsLoopback() {
+		return fmt.Errorf("%q is not on a loopback IP", endpoint)
+	}
+	return nil
+}
+
+// replay signs and sends entry and returns its exchange.
 func (r *awsReplay) replay(ctx context.Context, entry AWSReadEntry) (AWSReadExchange, error) {
 	svc, _ := awsReaderService(entry.Service)
-	endpoint, ok := r.endpoints[entry.Service]
-	if !ok {
-		return AWSReadExchange{}, errors.New("its service has no endpoint")
-	}
 	ctx, cancel := context.WithTimeout(ctx, awsReadCallTimeout)
 	defer cancel()
-	req, err := r.request(ctx, svc, endpoint, entry)
+	req, signingRegion, err := r.request(ctx, entry)
 	if err != nil {
 		return AWSReadExchange{}, err
+	}
+	payload, err := restoreAWSRequestBody(req)
+	if err != nil {
+		return AWSReadExchange{}, err
+	}
+	hash := sha256.Sum256(payload)
+	if err := r.signer.SignHTTP(ctx, r.creds, req, hex.EncodeToString(hash[:]), svc.Service, signingRegion, time.Now()); err != nil {
+		return AWSReadExchange{}, fmt.Errorf("signing: %w", err)
 	}
 	resp, err := r.walls[entry.Service].Do(req)
 	if err != nil {
@@ -192,16 +231,22 @@ func (r *awsReplay) replay(ctx context.Context, entry AWSReadEntry) (AWSReadExch
 	return AWSReadExchange{AWSReadEntry: entry, Status: resp.StatusCode, Body: string(body)}, nil
 }
 
-// request builds entry's signed wire request: query params are the form
+// request builds entry's unsigned wire request, which its wall has
+// admitted, and the region to sign it for. Query params are the form
 // fields beside Action and Version, json params are the body, verbatim.
-func (r *awsReplay) request(ctx context.Context, svc AWSReaderService, endpoint awsReadEndpoint, entry AWSReadEntry) (*http.Request, error) {
+func (r *awsReplay) request(ctx context.Context, entry AWSReadEntry) (*http.Request, string, error) {
+	svc, _ := awsReaderService(entry.Service)
+	endpoint, ok := r.endpoints[entry.Service]
+	if !ok {
+		return nil, "", errors.New("its service has no endpoint")
+	}
 	header := http.Header{}
 	var body []byte
 	switch svc.Protocol {
 	case awsProtocolQuery:
 		form, err := awsQueryForm(entry.Params)
 		if err != nil {
-			return nil, err
+			return nil, "", err
 		}
 		form.Add("Action", entry.Action)
 		form.Add("Version", endpoint.version)
@@ -212,45 +257,29 @@ func (r *awsReplay) request(ctx context.Context, svc AWSReaderService, endpoint 
 		header.Set("Content-Type", awsJSONMediaType)
 		header.Set("X-Amz-Target", svc.TargetPrefix+"."+entry.Action)
 	default:
-		return nil, fmt.Errorf("protocol %q cannot be replayed", svc.Protocol)
+		return nil, "", fmt.Errorf("protocol %q cannot be replayed", svc.Protocol)
 	}
 	target, err := url.Parse(endpoint.url)
 	if err != nil {
-		return nil, fmt.Errorf("endpoint %q: %w", endpoint.url, err)
+		return nil, "", fmt.Errorf("endpoint %q: %w", endpoint.url, err)
 	}
 	if target.Path == "" {
 		target.Path = "/"
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target.String(), bytes.NewReader(body))
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	req.Header = header
-	hash := sha256.Sum256(body)
-	if err := r.signer.SignHTTP(ctx, r.creds, req, hex.EncodeToString(hash[:]), svc.Service, endpoint.signingRegion, r.now()); err != nil {
-		return nil, fmt.Errorf("signing: %w", err)
+	if err := r.walls[entry.Service].check(req); err != nil {
+		return nil, "", err
 	}
-	return req, nil
+	return req, endpoint.signingRegion, nil
 }
 
-// checkAWSReadParams refuses params that are not the shape ADR-0041 gives
-// the entry's protocol: for query an object of strings with no repeated
-// key and no Action or Version, for json an object.
-func checkAWSReadParams(entry AWSReadEntry) error {
-	if entry.Protocol == awsProtocolQuery {
-		_, err := awsQueryForm(entry.Params)
-		return err
-	}
-	var fields map[string]json.RawMessage
-	if json.Unmarshal(entry.Params, &fields) != nil || fields == nil {
-		return errors.New("json params must be a JSON object")
-	}
-	return nil
-}
-
-// awsQueryForm is query params as form fields. It reads them key by key,
-// because a map would keep one of two repeated keys and drop the other.
-// Absent or null params are no fields.
+// awsQueryForm is query params, one JSON object of strings, as form
+// fields. It reads them key by key, because a map would keep one of two
+// repeated keys and drop the other. Absent or null params are no fields.
 func awsQueryForm(params json.RawMessage) (url.Values, error) {
 	form := url.Values{}
 	if len(params) == 0 || string(params) == "null" {
@@ -274,13 +303,13 @@ func awsQueryForm(params json.RawMessage) (url.Values, error) {
 		if form.Has(key) {
 			return nil, fmt.Errorf("query params repeat %q", key)
 		}
-		if strings.EqualFold(key, "Action") || strings.EqualFold(key, "Version") {
-			return nil, fmt.Errorf("query params carry %q; the replay sets Action and Version", key)
-		}
 		form.Set(key, value)
 	}
 	if _, err := dec.Token(); err != nil {
 		return nil, fmt.Errorf("query params: %w", err)
+	}
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		return nil, errors.New("query params carry data after the object")
 	}
 	return form, nil
 }

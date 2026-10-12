@@ -220,13 +220,39 @@ func TestReadAWSAccountRefusesWithNothingSent(t *testing.T) {
 		}, `entry 1 (service "ec2", protocol "query", action "DescribeVpcs"): query param "VpcId.1" must be a string`},
 		{"a query param naming another action", func(in *AWSReadInput) {
 			in.ReadSet = append(in.ReadSet, readEntry("ec2", "query", "DescribeVpcs", `{"action":"CreateVpc"}`))
-		}, `query params carry "action"; the replay sets Action and Version`},
+		}, `the form carries "action", a case variant of Action`},
+		{"a case variant of DryRun", func(in *AWSReadInput) {
+			in.ReadSet = append(in.ReadSet, readEntry("ec2", "query", "DescribeVpcs", `{"dryRun":"true"}`))
+		}, `entry 1 (service "ec2", protocol "query", action "DescribeVpcs"): aws read wall: refused: ec2 request: the form carries "dryRun", a case variant of DryRun`},
+		{"DryRun=false", func(in *AWSReadInput) {
+			in.ReadSet = append(in.ReadSet, readEntry("ec2", "query", "DescribeVpcs", `{"DryRun":"false"}`))
+		}, `DryRun is "false", not exactly true`},
+		{"a json Action field", func(in *AWSReadInput) {
+			in.ReadSet = append(in.ReadSet, readEntry("ssm", "json", "GetParameter", `{"Name":"/a","action":"x"}`))
+		}, `the json body carries "action", a query-protocol field`},
 		{"query params that are not an object", func(in *AWSReadInput) {
 			in.ReadSet = append(in.ReadSet, readEntry("ec2", "query", "DescribeVpcs", `["VpcId.1"]`))
 		}, "query params must be a JSON object of strings"},
+		{"query params with data after the object", func(in *AWSReadInput) {
+			in.ReadSet = append(in.ReadSet, readEntry("ec2", "query", "DescribeVpcs", `{"VpcId.1":"vpc-1"}{"Action":"CreateVpc"}`))
+		}, `entry 1 (service "ec2", protocol "query", action "DescribeVpcs"): query params carry data after the object`},
 		{"json params that are not an object", func(in *AWSReadInput) {
 			in.ReadSet = append(in.ReadSet, readEntry("ssm", "json", "GetParameter", `["/app/db/host"]`))
-		}, `entry 1 (service "ssm", protocol "json", action "GetParameter"): json params must be a JSON object`},
+		}, `entry 1 (service "ssm", protocol "json", action "GetParameter"): aws read wall: refused: ssm request: the body is not a JSON object`},
+		{"json params with data after the object", func(in *AWSReadInput) {
+			in.ReadSet = append(in.ReadSet, readEntry("ssm", "json", "GetParameter", `{"Name":"/a"}{"Name":"/b"}`))
+		}, "the body is not a JSON object"},
+		{"a GovCloud region", func(in *AWSReadInput) { in.Config.Region = "us-gov-west-1" }, `region "us-gov-west-1" is outside the aws partition`},
+		{"a China region", func(in *AWSReadInput) { in.Config.Region = "cn-north-1" }, `region "cn-north-1" is outside the aws partition`},
+		{"an endpoint on another host", func(in *AWSReadInput) {
+			in.Endpoints = map[string]string{"ec2": "https://ec2.example.com"}
+		}, `the ec2 endpoint: "https://ec2.example.com" is not on a loopback IP`},
+		{"an endpoint named localhost", func(in *AWSReadInput) {
+			in.Endpoints = map[string]string{"sts": "http://localhost:8082/sts"}
+		}, `"http://localhost:8082/sts" is not on a loopback IP`},
+		{"an endpoint over another scheme", func(in *AWSReadInput) {
+			in.Endpoints = map[string]string{"ssm": "ftp://127.0.0.1:1/ssm"}
+		}, `"ftp://127.0.0.1:1/ssm" is not http or https`},
 		{"no credentials", func(in *AWSReadInput) { in.Config.Credentials = nil }, "no credentials"},
 		{"no doer", func(in *AWSReadInput) { in.Doer = nil }, "needs an HTTP client"},
 	}
@@ -397,6 +423,25 @@ func TestReadAWSAccountTimesTheReadOnItsClock(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, start, read.Timestamp)
 	assert.Equal(t, advance.Milliseconds(), read.DurationMS)
+}
+
+// A fixed clock times the read; the requests are still signed now, or
+// AWS would refuse them as expired.
+func TestReadAWSAccountSignsAtTheRealTime(t *testing.T) {
+	t.Parallel()
+
+	doers := newAWSReadTestDoers()
+	doers.ssm.answer.body = `{"Parameter":{"Name":"/a"}}`
+	in := awsReadTestInput(doers.doer(), readEntry("ssm", "json", "GetParameter", `{"Name":"/a"}`))
+	in.Now = func() time.Time { return time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC) }
+
+	_, err := ReadAWSAccount(context.Background(), in)
+
+	require.NoError(t, err)
+	require.Len(t, doers.ssm.sent, 1)
+	signed, err := time.Parse("20060102T150405Z", doers.ssm.sent[0].header.Get("X-Amz-Date"))
+	require.NoError(t, err)
+	assert.WithinDuration(t, time.Now(), signed, time.Minute)
 }
 
 func TestAWSReadEndpointsCoverTheReaderTable(t *testing.T) {
