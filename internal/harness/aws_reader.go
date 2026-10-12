@@ -83,7 +83,9 @@ func awsReadEndpoints(region string) map[string]awsReadEndpoint {
 // recorded; any other non-2xx answer, and a list that cannot be read in
 // full, fails the read, naming the entry. Then it reads the EC2
 // surroundings and follow-ups of each VPC the replay touched
-// (awsReplay.readEC2), each the same way, after the replayed exchanges.
+// (awsReplay.readEC2), and the policies of each role a replayed GetRole
+// read (awsReplay.readIAM), each the same way, after the replayed
+// exchanges.
 func ReadAWSAccount(ctx context.Context, in AWSReadInput) (AWSRecordedRead, error) {
 	r, err := newAWSReplay(ctx, in)
 	if err != nil {
@@ -104,11 +106,14 @@ func ReadAWSAccount(ctx context.Context, in AWSReadInput) (AWSRecordedRead, erro
 		}
 		exchanges = append(exchanges, pages...)
 	}
-	followUps, err := r.readEC2(ctx, exchanges)
-	if err != nil {
-		return AWSRecordedRead{}, fmt.Errorf("aws read: %w", err)
+	replayed := exchanges
+	for _, readFollowUps := range []func(context.Context, []AWSReadExchange) ([]AWSReadExchange, error){r.readEC2, r.readIAM} {
+		followUps, err := readFollowUps(ctx, replayed)
+		if err != nil {
+			return AWSRecordedRead{}, fmt.Errorf("aws read: %w", err)
+		}
+		exchanges = append(exchanges, followUps...)
 	}
-	exchanges = append(exchanges, followUps...)
 	calls := 0
 	for _, wall := range r.walls {
 		calls += wall.Calls()
