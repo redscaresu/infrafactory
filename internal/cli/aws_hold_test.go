@@ -302,6 +302,38 @@ func TestReleaseHoldRestoresAMissingStateFromTheCopy(t *testing.T) {
 	assert.Contains(t, r.output, "restored to "+filepath.Join(outDir, harness.LiveStateFilename))
 }
 
+// A release whose destroy ran and whose sweep then failed leaves the
+// output state changed and the claim kept by the reap: its retry is
+// refused before any AWS request, naming the take-over from that reap.
+func TestReleaseHoldRetryAfterAFailedSweepIsRefused(t *testing.T) {
+	lc := heldBy(newAWSLifecycle(t))
+	// Every delete answers success, and the key pairs are still listed.
+	lc.ec2["DescribeKeyPairs"] = strayKeyPairs
+	var outDir string
+	lc.destroy.during = func(context.Context) {
+		require.NoError(t, os.WriteFile(filepath.Join(outDir, harness.LiveStateFilename), []byte(`{"resources":[]}`), 0o600))
+	}
+	first := reapAWSWith(t, lc, awsReapSetup{
+		name: awsHoldScenario, withState: true, flags: releaseHoldFlags,
+		prepare: func(dir string) { outDir = dir },
+	})
+	require.Error(t, first.err, "the sweep found strays")
+	reapHolder, held := lc.claim()
+	require.True(t, held)
+	require.True(t, strings.HasPrefix(reapHolder, awsReapHolderPrefix), reapHolder)
+	copied := describeCopy(t, holdCopyPath(awsHoldScenario))
+	requests := len(lc.log())
+
+	retry := first.again("--take-over", reapHolder, "--release-hold")
+
+	require.Error(t, retry.err)
+	assert.Contains(t, retry.err.Error(), "differs from the copy")
+	assert.Contains(t, retry.err.Error(),
+		"`"+reapCommand(retry.h.ConfigPath, retry.h.ScenarioPath)+" --take-over "+shellQuote(reapHolder)+"` destroys without the copy")
+	assert.Len(t, lc.log(), requests, "no AWS request and no destroy")
+	assert.Equal(t, copied, describeCopy(t, holdCopyPath(awsHoldScenario)), "the copy is left as it was")
+}
+
 // The copy's path is fixed: INFRAFACTORY_RUNSTORE_ROOT does not move it,
 // it is under neither store the UI serves, and git ignores it.
 func TestHoldCopyIsAtAFixedIgnoredPath(t *testing.T) {

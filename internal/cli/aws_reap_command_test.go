@@ -36,6 +36,8 @@ type awsReapRun struct {
 	h      *CommandTestHarness
 	output string
 	err    error
+	// again reaps once more in the same workspace, with a fresh runtime.
+	again func(flags ...string) awsReapRun
 }
 
 func (r awsReapRun) text() string {
@@ -93,18 +95,22 @@ func reapAWSWith(t *testing.T, lc *awsLifecycle, setup awsReapSetup) awsReapRun 
 		setup.customize(&cfg)
 	}
 	loader := func(path string) (scenario.Scenario, error) { return scenario.LoadWithSchema(path, schema) }
-	rt := &CommandRuntime{ConfigPath: h.ConfigPath, Config: cfg, scenarioLoader: loader, Logger: NewAppLogger(&bytes.Buffer{})}
-	lc.scw.install(&rt.Deps)
-	rt.Deps.SandboxDestroy = lc.destroy
-	rt.Deps.AWSSTS, rt.Deps.AWSSSM, rt.Deps.AWSEC2 = lc, lc, lc
-	rt.Deps.AWSSweepSleep = func(context.Context, time.Duration) error { return nil }
-	if setup.deps != nil {
-		setup.deps(&rt.Deps)
-	}
 
-	out := &strings.Builder{}
-	err = runReap(t, rt, h.ScenarioPath, out, setup.flags...)
-	return awsReapRun{h: h, output: out.String(), err: err}
+	var reap func(flags ...string) awsReapRun
+	reap = func(flags ...string) awsReapRun {
+		rt := &CommandRuntime{ConfigPath: h.ConfigPath, Config: cfg, scenarioLoader: loader, Logger: NewAppLogger(&bytes.Buffer{})}
+		lc.scw.install(&rt.Deps)
+		rt.Deps.SandboxDestroy = lc.destroy
+		rt.Deps.AWSSTS, rt.Deps.AWSSSM, rt.Deps.AWSEC2 = lc, lc, lc
+		rt.Deps.AWSSweepSleep = func(context.Context, time.Duration) error { return nil }
+		if setup.deps != nil {
+			setup.deps(&rt.Deps)
+		}
+		out := &strings.Builder{}
+		err := runReap(t, rt, h.ScenarioPath, out, flags...)
+		return awsReapRun{h: h, output: out.String(), err: err, again: reap}
+	}
+	return reap(setup.flags...)
 }
 
 // deleteKeyPairsOnDelete makes DeleteKeyPair empty the key pair listing.
