@@ -473,8 +473,10 @@ func assertRefusedWhileHeld(t *testing.T, err error) {
 	t.Helper()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), holdCopyPath(awsHoldScenario), "names the copy")
+	assert.Contains(t, err.Error(), "If the stack is still held, release it with", "names the release for a held stack")
 	assert.Contains(t, err.Error(), "--take-over <holder> --release-hold", "names the release")
-	assert.Contains(t, err.Error(), "deleted by hand once the read is done", "names what lifts it")
+	assert.Contains(t, err.Error(), "once the read is done, delete the copy by hand, which lifts this refusal",
+		"names what lifts it, which is all a released stack needs")
 }
 
 func TestGenerateRunAndTestRefuseWhileHeld(t *testing.T) {
