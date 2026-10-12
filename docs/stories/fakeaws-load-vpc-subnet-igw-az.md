@@ -1,8 +1,7 @@
 ---
 kind: code
 repo: fakeaws
-status: blocked
-blocked_by: [fakeaws-load-exchange-rules]
+status: ready
 epic: fakeaws-loader
 depends_on: [fakeaws-load-exchange-rules]
 touches: [handlers/load_ec2_network.go, handlers/load_ec2_network_test.go, repository/load_ec2.go, repository/load_ec2_test.go, handlers/ec2.go, handlers/ec2_test.go, repository/ec2.go, testdata/ec2/DescribeVpcs.xml, testdata/ec2/DescribeVpcAttribute-enableDnsSupport.xml, testdata/ec2/DescribeVpcAttribute-enableDnsHostnames.xml, testdata/ec2/DescribeSubnets.xml, testdata/ec2/DescribeInternetGateways.xml, testdata/ec2/DescribeAvailabilityZones.xml]
