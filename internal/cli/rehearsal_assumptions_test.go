@@ -192,6 +192,100 @@ func newLoaderRoot(t *testing.T, broken ...string) (assumptionDir, []string) {
 	return w, env
 }
 
+// TestAssumption_ModulesManifestShape: `tofu init -backend=false`, offline
+// with TF_DATA_DIR outside the root, writes the module manifest at
+// <TF_DATA_DIR>/modules/modules.json and nothing under the root. The root
+// entry is Key "", Source "", Dir "." A local entry's Key is its module
+// path joined by dots, its Source is as written, and its Dir is relative
+// to the root and cleaned: m's ../shared is "shared". A root with no
+// module blocks gets no manifest. A module fetched from an absolute path
+// gets an absolute Dir under <TF_DATA_DIR>/modules, and a local module it
+// calls an absolute Dir at the path it was fetched from.
+//
+// Relied on by: rehearsal-prepare-gate's gate 2, which reads the manifest
+// (ADR-0042 Decision 2). ADR-0028.
+func TestAssumption_ModulesManifestShape(t *testing.T) {
+	e2e.SkipUnlessEnabled(t)
+	_, err := exec.LookPath("tofu")
+	require.NoError(t, err, "tofu binary required for e2e")
+
+	t.Run("local modules", func(t *testing.T) {
+		tmp := realTempDir(t)
+		entries, version := manifestInit(t, tmp, map[string]string{
+			"root/main.tf":        "module \"m\" {\n  source = \"./m\"\n}\n",
+			"root/m/main.tf":      "module \"s\" {\n  source = \"../shared\"\n}\n",
+			"root/shared/main.tf": manifestOutput,
+		})
+		assert.ElementsMatch(t, []manifestEntry{{"", "", "."}, {"m", "./m", "m"}, {"m.s", "../shared", "shared"}}, entries, version)
+		assert.NoDirExists(t, filepath.Join(tmp, "root", ".terraform"), version)
+	})
+
+	t.Run("no module blocks", func(t *testing.T) {
+		entries, version := manifestInit(t, realTempDir(t), map[string]string{"root/main.tf": manifestOutput})
+		assert.Nil(t, entries, "%s: a root with no module blocks got a manifest", version)
+	})
+
+	t.Run("a module fetched from an absolute path", func(t *testing.T) {
+		tmp := realTempDir(t)
+		ext := filepath.Join(tmp, "ext")
+		entries, version := manifestInit(t, tmp, map[string]string{
+			"root/main.tf":    fmt.Sprintf("module \"e\" {\n  source = %q\n}\n", ext),
+			"ext/main.tf":     "module \"in\" {\n  source = \"./sub\"\n}\n",
+			"ext/sub/main.tf": manifestOutput,
+		})
+		dirs := map[string]string{}
+		for _, entry := range entries {
+			dirs[entry.Key] = entry.Dir
+		}
+		assert.Equal(t, filepath.Join(tmp, "data", "modules", "e"), dirs["e"], "%s: %v", version, entries)
+		assert.Contains(t, entries, manifestEntry{"e.in", "./sub", filepath.Join(ext, "sub")}, version)
+	})
+}
+
+const manifestOutput = "output \"x\" {\n  value = 1\n}\n"
+
+// manifestEntry is one modules.json entry.
+type manifestEntry struct{ Key, Source, Dir string }
+
+// realTempDir is a temp dir with its symlinks resolved, so it compares
+// equal to the absolute paths tofu writes (macOS's /var is a symlink).
+func realTempDir(t *testing.T) string {
+	t.Helper()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+	return dir
+}
+
+// manifestInit writes files under tmp, runs the first init in tmp/root
+// with TF_DATA_DIR at tmp/data and both proxies at the closed port, and
+// returns the manifest's entries (nil when tofu wrote none) and the tofu
+// version.
+func manifestInit(t *testing.T, tmp string, files map[string]string) ([]manifestEntry, string) {
+	t.Helper()
+	w := assumptionDir{dir: filepath.Join(tmp, "root")}
+	for name, content := range files {
+		e2e.WriteFile(t, filepath.Join(tmp, name), []byte(content))
+	}
+	data := filepath.Join(tmp, "data")
+	env := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + t.TempDir(), "TF_DATA_DIR=" + data,
+		"HTTPS_PROXY=" + closedEndpoint, "HTTP_PROXY=" + closedEndpoint}
+	version, err := w.tofu(t, env, "version")
+	require.NoError(t, err, version)
+	w.version = strings.TrimSpace(version)
+	out, err := w.tofu(t, env, "init", "-backend=false", "-input=false", "-no-color")
+	require.NoError(t, err, "%s\n%s", w.version, out)
+
+	raw, err := os.ReadFile(filepath.Join(data, "modules", "modules.json"))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, w.version
+	}
+	require.NoError(t, err, w.version)
+	var manifest struct{ Modules []manifestEntry }
+	require.NoError(t, json.Unmarshal(raw, &manifest), "%s: %s", w.version, raw)
+	require.NotNil(t, manifest.Modules, "%s: %s", w.version, raw)
+	return manifest.Modules, w.version
+}
+
 // registryModule is the third-party dependency the init test fetches: a
 // public-registry module, pinned to an exact version, with no provider of
 // its own.

@@ -20,9 +20,9 @@ import (
 // leaf helpers with the Layer 3 gate, never its drivers: Layer 3 gates code
 // infrafactory generated, this gate gates code the user wrote.
 //
-// Three rules start closed, each in its own file: provider "aws" arguments
-// (rehearse_gate_aws.go), paths (rehearse_gate_paths.go) and module blocks
-// (rehearse_gate_modules.go).
+// Two rules start closed, each in its own file: provider "aws" arguments
+// (rehearse_gate_aws.go) and paths (rehearse_gate_paths.go). Module
+// sources have their own file too (rehearse_gate_modules.go).
 
 var errRehearsalRefuses = errors.New("the rehearsal gate refuses this configuration")
 
@@ -86,6 +86,10 @@ var rehearsalRequiredProviderKeys = map[string]bool{"source": true, "version": t
 // rehearsalGate runs the gate over the root, every module dir and the var
 // file, and returns every problem in one error, sorted.
 func rehearsalGate(in rehearsalGateInput) error {
+	return rehearsalRefusal(in.problems())
+}
+
+func (in rehearsalGateInput) problems() []string {
 	var problems []string
 	for _, dir := range append([]string{in.root}, in.modules...) {
 		problems = append(problems, in.dirProblems(dir)...)
@@ -93,6 +97,11 @@ func rehearsalGate(in rehearsalGateInput) error {
 	if in.varFile != "" {
 		problems = append(problems, in.tfvarsProblems(in.varFile)...)
 	}
+	return problems
+}
+
+// rehearsalRefusal is every problem in one error, sorted, or nil for none.
+func rehearsalRefusal(problems []string) error {
 	if len(problems) == 0 {
 		return nil
 	}
@@ -108,11 +117,13 @@ func (in rehearsalGateInput) display(path string) string {
 	return path
 }
 
-// rehearsalModule is one gated module dir. providers maps each local name
-// its required_providers declare to the source, lowercased.
+// rehearsalModule is one gated module dir in the copy at boundary.
+// providers maps each local name its required_providers declare to the
+// source, lowercased.
 type rehearsalModule struct {
-	root      bool
-	providers map[string]string
+	root          bool
+	dir, boundary string
+	providers     map[string]string
 }
 
 // dirProblems applies the file policy to one module dir, then the block
@@ -148,7 +159,7 @@ func (in rehearsalGateInput) dirProblems(dir string) []string {
 			files[in.display(path)] = body
 		}
 	}
-	m := rehearsalModule{root: dir == in.root, providers: map[string]string{}}
+	m := rehearsalModule{root: dir == in.root, dir: dir, boundary: in.boundary, providers: map[string]string{}}
 	for file, body := range files {
 		problems = append(problems, m.requiredProviderProblems(file, body)...)
 	}
@@ -352,7 +363,8 @@ func (m rehearsalModule) blockProblems(file string, block *hclsyntax.Block) []st
 	case "import":
 		problems = append(problems, m.providerRefProblems(file, addr, block)...)
 	case "module":
-		problems = append(problems, rehearsalModuleProblems(at)...)
+		_, moduleProblems := rehearsalModuleSource(file, m.dir, m.boundary, block)
+		problems = append(problems, moduleProblems...)
 	}
 	return append(problems, rehearsalBodyProblems(file, addr, block, block.Type == "variable")...)
 }
