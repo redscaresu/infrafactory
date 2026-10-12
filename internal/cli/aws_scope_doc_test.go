@@ -93,13 +93,17 @@ func TestAWSHoldRunbookNamesTheHoldTheReleaseAndTheCostBound(t *testing.T) {
 		section = section[:i[0]]
 	}
 
+	reap := reapCommand(config.DefaultPath, "scenarios/training/aws-web-live.yaml")
 	for _, want := range []string{
-		"--hold",
-		"--release-hold",
-		".infrafactory/holds/",
+		// The test command itself: "--hold" alone is a substring of "--release-hold".
+		"infrafactory test scenarios/training/aws-web-live.yaml --config <cfg> --hold`",
+		reap + " --take-over <holder> --release-hold",
+		"plain `" + reap + " --take-over <holder>`",
+		holdCopyPath(awsHoldScenario),
 		"0700",
 		"0600",
-		"reap scenarios/training/aws-web-live.yaml --config <cfg> --take-over <holder>`\n",
+		StageAWSHold,
+		"public IPv4",
 		"per hour held",
 	} {
 		assert.Contains(t, section, want)
