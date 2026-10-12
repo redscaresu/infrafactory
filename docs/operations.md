@@ -633,6 +633,75 @@ exchange count) and exits 1: the read happened, and must be run again. The raw `
 the account id and the read's values: it is never committed; `cmd/aws-read-scrub` turns it into
 fixtures that may be.
 
+### Prepare
+
+```
+infrafactory rehearse prepare <dir> --account <id> --region <r> [--var-file <file>]
+```
+
+Copies the code in `<dir>` into a new rehearsal, gates the copy and initialises it. No tofu
+command runs on a configuration the gate refused. Run from inside the git repository that holds
+`<dir>`. Nothing is planned or applied; a success report names the rehearsal's id, its work dir,
+the `hashicorp/aws` version the lock pins and any warnings.
+
+- `-h`, `--help` prints the usage. `--config` and `--output` are global and unused: prepare reads no config.
+- `<dir>` must resolve, symlinks included, inside the current directory's repository.
+- `--account` (12 digits) and `--region` are required. The gate checks the code against `--region`:
+  every `provider "aws"` block must set `region`, as a string literal or a root `var.<name>` the
+  var files resolve, and it must equal `--region`. A module's region must be a literal. A root with
+  no `provider "aws"` block without an alias is refused, since tofu's implied empty one has no region.
+- `--var-file` is a `.tfvars` file, copied to `<rehearsal>/vars.tfvars` outside the work dir and
+  parsed by the gate. It overrides the code's `terraform.tfvars` and `*.auto.tfvars`. A `.json`
+  var file, or anything but a regular file, is refused.
+
+**Layout.** `<repo>/.infrafactory/rehearsals/<id>/` holds `work/` (the copy of `<dir>` and the
+local modules it calls, at their paths relative to the repository), `data/` (`TF_DATA_DIR`),
+`home/` (an empty HOME), `state/` and `vars.tfvars`. The `rehearsals` dir has a `.gitignore` of
+`*`. Directories are `0700` and files `0600`, except a file with an execute bit (a provider
+binary), which is `0700`. The copy leaves out `.terraform`, `.git`, `.infrafactory` and any name
+containing `.tfstate`; a symlink or other non-regular file in the copy is refused. A refusal removes
+the half-made rehearsal.
+
+**Order.** Gate over the copy, a network-only first init (`-backend=false`), the gate again over
+every module the init wrote to `modules.json`, then an offline second init (`-lockfile=readonly`,
+`-plugin-dir` at the providers the first one installed, both proxies at a dead address). Prepare
+checks that the dead address refuses a connection and refuses the second init on any other result.
+Both inits run with a replaced environment: PATH and only named variables, so `TF_ENCRYPTION`,
+`TF_CLI_CONFIG_FILE`, `TF_VAR_*`, `TF_CLI_ARGS*` and AWS credential variables never reach tofu.
+Each tofu command has a 10-minute deadline; SIGINT cancels, removes the rehearsal and exits 1.
+
+**What is refused, and why.** A refusal (`Refused:`, json `refusal`) exits 1; a missing or
+malformed flag exits 2.
+
+- **Encryption.** An `encryption` block, a `cloud {}` block and any other `terraform {}` content
+  than `required_providers`, `required_version` and the root's `backend`. `TF_ENCRYPTION` cannot be
+  refused in the code, so replace mode never passes it; the suffix rule below closes the files
+  that could carry the same settings.
+- **File suffixes tofu reads and the gate does not parse:** `.tf.json`, `.tofu`, `.tofu.json`,
+  `.tfvars.json`, `.tftest.hcl`, `.tftest.json`, `.tofutest.hcl`, `.tofutest.json`, `.tfmock.hcl`,
+  and a `tests` dir. They are refused by name, never skipped. Override files (`override.tf*`,
+  `*_override.tf*`) are refused: they merge after infrafactory's overrides and can undo them.
+- **Modules.** Only a literal `./` or `../` source inside the repository is admitted. Every other
+  source is refused, registry modules included: a registry module is fetched by running `git`
+  against github.com, and the system git config can carry a keychain credential helper, so the
+  download could use a credential the rehearsal must never touch. A local module takes no
+  `version`; a source holding a backslash, crossing a symlink or forming a cycle is refused. A
+  `provider "aws"` block inside a child module is refused, because the root override does not
+  reach it.
+- **`terraform.d`** is refused: tofu reads it as a local provider mirror.
+- **Blocks and providers.** Provisioners, connections, `http` and `external` data sources,
+  `terraform_remote_state` and providers other than `hashicorp/{aws, random, null, tls, time,
+  cloudinit, local, archive}` are refused, as are `provider "aws"` arguments outside the allowlist
+  and a file path that is absolute, computed or escapes the module.
+- **The lock.** The root's `.terraform.lock.hcl` is required: a missing or unparseable lock is
+  refused, because the rehearsal takes every provider version from it. It must pin `hashicorp/aws`,
+  one version per provider, from `registry.opentofu.org` or `registry.terraform.io`. The first init
+  may not change what it pins.
+- **Warnings** (the prepare still succeeds): a `registry.terraform.io` aws entry, which Terraform
+  wrote, where `moved`, `import`, `removed` and `ephemeral` semantics may differ under tofu; and a
+  lock pinning `hashicorp/aws` other than 5.100.0, the release fakeaws is proven against. The line
+  names the version, so a failure under it is filed as a fakeaws story.
+
 ## Sibling mocks
 
 Three first-party HTTP-level mocks + one third-party backend live alongside infrafactory:
