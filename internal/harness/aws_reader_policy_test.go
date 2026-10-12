@@ -172,7 +172,7 @@ func TestADR0023AmendmentNamesTheReaderPolicy(t *testing.T) {
 	t.Parallel()
 	data, err := os.ReadFile(adr0023File)
 	require.NoError(t, err)
-	for _, want := range []string{"reader-policy.json", "read-only", "key file", "delete-access-key"} {
+	for _, want := range []string{"reader-policy.json", "read-only", "key file", "Present only for its read step"} {
 		assert.Contains(t, string(data), want)
 	}
 }
