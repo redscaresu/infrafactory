@@ -302,6 +302,25 @@ func TestValidateAWSReadSetNamesEveryEntryOutsideTheTable(t *testing.T) {
 	assert.NotContains(t, err.Error(), "DescribeVpcs")
 }
 
+func TestDecodeAWSReadSetRefusesAnythingButOneArrayOfEntries(t *testing.T) {
+	t.Parallel()
+
+	const entry = `{"service":"ec2","protocol":"query","action":"DescribeVpcs","params":{}}`
+	entries, err := DecodeAWSReadSet([]byte("[" + entry + "]\n"))
+	require.NoError(t, err)
+	assert.Equal(t, []AWSReadEntry{{Service: "ec2", Protocol: "query", Action: "DescribeVpcs", Params: json.RawMessage(`{}`)}}, entries)
+
+	for name, data := range map[string]string{
+		"an unknown field":       `[{"service":"ec2","protocol":"query","action":"DescribeVpcs","params":{},"region":"x"}]`,
+		"an object, no array":    entry,
+		"data after the array":   "[" + entry + "][]",
+		"a second entry outside": "[" + entry + "]" + entry,
+	} {
+		_, err := DecodeAWSReadSet([]byte(data))
+		assert.Error(t, err, name)
+	}
+}
+
 func TestADR0041ExamplesParseIntoTheGoTypes(t *testing.T) {
 	t.Parallel()
 

@@ -1,9 +1,11 @@
 package harness
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"slices"
 	"strings"
 	"time"
@@ -167,4 +169,19 @@ func ValidateAWSReadSet(entries []AWSReadEntry) error {
 		return fmt.Errorf("aws read set: %w", errors.Join(errs...))
 	}
 	return nil
+}
+
+// DecodeAWSReadSet is a read-set file's entries: one JSON array, no
+// unknown field, nothing after it. ValidateAWSReadSet checks the entries.
+func DecodeAWSReadSet(data []byte) ([]AWSReadEntry, error) {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	var entries []AWSReadEntry
+	if err := dec.Decode(&entries); err != nil {
+		return nil, fmt.Errorf("not a JSON array of read-set entries: %w", err)
+	}
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		return nil, errors.New("it carries data after the array")
+	}
+	return entries, nil
 }
