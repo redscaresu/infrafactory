@@ -150,6 +150,7 @@ with its kind. Every swarm brief also carries these lines.
 - A check that guards safety (a preflight, a probe, a wall, a refusal) passes only on the exact outcome it expects, such as a refused connection or a named error, and treats every other error or empty result as a failure. <!-- lesson: fails-open -->
 - After fixing a review finding, re-read every caller of the code the fix touched and re-run its failing-path tests: a fix that changes shared behaviour (a timeout, a wait, an error type) can break a path the finding never named. <!-- lesson: regression-from-fix -->
 - Every subprocess, network call and wait in code or tests has a deadline, and the deadline kills the whole process group, so a child that outlives its parent (a provider plugin holding a pipe) cannot block past it. <!-- lesson: unbounded-call -->
+- Before writing a new path beside an existing one (a second reader, a new flag on a command, a new store), list the rules the existing path enforces and make the new path carry each one, with a test per rule. <!-- lesson: new-paths-inherit-rules -->
 
 ## Quality Bar
 - `go test ./...` passes for completed stories.
