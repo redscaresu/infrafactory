@@ -1,7 +1,6 @@
 ---
 kind: code
-status: blocked
-blocked_by: [layer3-mock-classifier-layer-gated]
+status: ready
 depends_on: [layer3-mock-classifier-layer-gated]
 touches: [internal/generator/pitfalls_learn.go, internal/generator/pitfalls_learn_test.go, internal/generator/pitfalls_source_ratchet_test.go, internal/cli/run_command.go, internal/cli/run_command_test.go, docs/auto-learning-loop.md]
 risk: high
