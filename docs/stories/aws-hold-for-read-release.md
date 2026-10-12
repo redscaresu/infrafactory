@@ -1,7 +1,6 @@
 ---
 kind: code
-status: blocked
-blocked_by: [aws-hold-for-read-adr-0040]
+status: ready
 epic: aws-hold-for-read
 depends_on: [aws-hold-for-read-adr-0040]
 touches: [internal/cli/root.go, internal/cli/reap_command.go, internal/cli/aws_hold.go, internal/cli/aws_hold_test.go, internal/cli/aws_reap_command_test.go]
@@ -51,6 +50,7 @@ account id in anything it adds.
 Tip commit: `ADR: none — implements ADR-0040's hold amendment (aws-hold-for-read-adr-0040)`.
 
 **Done when:**
+- Carried from #476's review: a `--release-hold` that destroys and then fails its sweep leaves an output state that differs from the copy, so a retry is refused. That refusal names the plain `reap --take-over <holder>` exit with the reap's own holder, and a test proves it.
 - Against fakes, the stubbed SandboxDestroy asserts on call that the copy exists, equals the
   output-dir state, and has dir 0700 and file 0600; the recorded order is copy, destroy, sweep,
   release, and the claim ends released.

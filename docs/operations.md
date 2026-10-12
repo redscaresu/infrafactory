@@ -69,8 +69,11 @@ empty (HLD 2026-09-27-aws-web-stack § Containment; ADR-0023). The SCP is the en
 and preflight cannot assert it, so it is recorded here.
 
 What the code reads from the setup:
-- The key file `~/.config/infrafactory/layer3-aws.env`, mode `0600`: exactly `AWS_ACCESS_KEY_ID`
-  and `AWS_SECRET_ACCESS_KEY`. Preflight refuses any group or other permission bit.
+- The key file `~/.config/infrafactory/layer3-aws.env`: exactly `AWS_ACCESS_KEY_ID` and
+  `AWS_SECRET_ACCESS_KEY`. Preflight opens it without following a final symlink and refuses it
+  unless it is a regular file owned by you, with no group or other permission bits, of at most
+  4096 bytes. A refusal never prints a key from the file; it gives the line number and names
+  only `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` or `AWS_SESSION_TOKEN`.
 - The config's `aws` block (`region`, `account_id`, `principal_arn`), which
   `sts:GetCallerIdentity` must answer exactly.
 - Two SSM parameters. The claim, `AWSClaimParameter` (`/infrafactory/layer3/claim`), holds the
@@ -428,13 +431,10 @@ Scope setup step 3 says.
 The account read (epic prod-read-seam) takes its read-only key from its own file, never from
 `layer3-aws.env`: the Layer 3 key holds reap's write actions, the reader's must not. infrafactory
 reads the file itself (`AWSReaderConfig`); nothing is sourced into the shell.
-- Mode `0600`, a regular file, not a symlink. Any group or other permission bit is refused.
+- The same file checks and refusal rule as `layer3-aws.env` (§ Layer 3 (AWS), what the code reads).
 - KEY=VALUE lines: `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`, plus an optional
   `AWS_SESSION_TOKEN` for a temporary key. Any other key, a repeated key and an empty value are
   refused; an empty `AWS_SESSION_TOKEN=` is refused, not read as absent.
-- An unknown key is named only when it is `AWS_` then capitals, digits and underscores. A key id,
-  secret or token never has that shape, so a wrapped token or a reversed `<secret>=KEY` line is
-  named by its line number alone; a key name glued to a key id (`AWS_AKIA...=x`) would be named.
 
 ### The reader policy
 
