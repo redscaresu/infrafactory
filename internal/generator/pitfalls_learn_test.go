@@ -1087,53 +1087,35 @@ const fakeawsFilterRefusal = `Error: reading EC2 VPCs: operation error EC2: Desc
   on main.tf line 15, in data "aws_vpcs" "x":
   15: data "aws_vpcs" "x" {`
 
-// learnAWSFailure routes one failure detail as run_command's learner
-// does: a mock-classed detail goes to docs/mock-gaps.md and nowhere
-// else, any other detail to the pitfall extractor.
-func learnAWSFailure(t *testing.T, docsDir, pitfallsDir, detail string) {
-	t.Helper()
-	if IsMockServerBug(detail) {
-		require.NoError(t, AppendMockGap(docsDir, MockGap{
-			Cloud:    "aws",
-			Signal:   FirstMockSignal(detail),
-			Resource: ExtractResourceFromDetail(detail),
-			Scenario: "aws-data-source",
-			Detail:   detail,
-		}))
-		return
-	}
-	if learned := ExtractDescriptivePitfall(detail, "aws-data-source"); learned != nil {
-		require.NoError(t, AppendPitfall(pitfallsDir, "aws", *learned))
-	}
-}
-
-func TestFakeawsFilterRefusalIsAMockGapNeverAPitfall(t *testing.T) {
-	docsDir, pitfallsDir := t.TempDir(), t.TempDir()
-
+// The refusal is classed mock-actionable on fakeaws's phrase and becomes
+// a docs/mock-gaps.md row. Routing it there instead of to the pitfall
+// extractors is run_command's, pinned by
+// TestRunCommandLearnsNoPitfallFromAClearedMockRefusal.
+func TestFakeawsFilterRefusalIsAMockGap(t *testing.T) {
 	assert.True(t, IsMockServerBug(fakeawsFilterRefusal))
 	assert.Equal(t, "not modelled by fakeaws", FirstMockSignal(fakeawsFilterRefusal))
 
-	learnAWSFailure(t, docsDir, pitfallsDir, fakeawsFilterRefusal)
-
+	docsDir := t.TempDir()
+	require.NoError(t, AppendMockGap(docsDir, MockGap{
+		Cloud:    "aws",
+		Signal:   FirstMockSignal(fakeawsFilterRefusal),
+		Resource: ExtractResourceFromDetail(fakeawsFilterRefusal),
+		Scenario: "aws-data-source",
+		Detail:   fakeawsFilterRefusal,
+	}))
 	gaps, err := os.ReadFile(filepath.Join(docsDir, "mock-gaps.md"))
 	require.NoError(t, err)
 	assert.Contains(t, string(gaps), "| `not modelled by fakeaws` | aws-data-source |")
-	assert.NoFileExists(t, filepath.Join(pitfallsDir, "aws.yaml"))
 }
 
 // A real AWS NotImplemented carries no fakeaws phrase: it is not a mock
 // gap, so it stays on the pitfall path.
-func TestAWSNotImplementedWithoutTheFakeawsPhraseStaysOnThePitfallPath(t *testing.T) {
+func TestAWSNotImplementedWithoutTheFakeawsPhraseIsNoMockGap(t *testing.T) {
 	detail := strings.Replace(fakeawsFilterRefusal,
 		"RequestID: fakeaws-synthetic, api error NotImplemented: DescribeVpcs: not modelled by fakeaws: foo",
 		"RequestID: 7a62c49f-347e-4fc4-9331-6e8eEXAMPLE, api error NotImplemented: The requested operation is not implemented.", 1)
 	require.NotEqual(t, fakeawsFilterRefusal, detail, "the replacement must apply")
-	docsDir, pitfallsDir := t.TempDir(), t.TempDir()
 
 	assert.False(t, IsMockServerBug(detail))
-
-	learnAWSFailure(t, docsDir, pitfallsDir, detail)
-
-	assert.NoFileExists(t, filepath.Join(docsDir, "mock-gaps.md"))
-	assert.FileExists(t, filepath.Join(pitfallsDir, "aws.yaml"))
+	assert.Empty(t, FirstMockSignal(detail))
 }

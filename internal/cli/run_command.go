@@ -776,6 +776,12 @@ func runRunWithNotify(
 				if _, stillFailing := currKeys[key]; stillFailing {
 					continue
 				}
+				// A mock gap is no HCL lesson, whatever the next iteration
+				// changed to clear it; the self-correction hook has already
+				// recorded it in docs/mock-gaps.md.
+				if generator.IsMockServerBug(cleared.Detail) {
+					continue
+				}
 				entry, err := generator.ExtractFixPitfall(
 					failedDir, passingDir,
 					cleared.Detail, cleared.Resource,
