@@ -1,0 +1,3 @@
+Command: rehearse prepare
+Status: failed
+Refused: the rehearsal gate refuses this configuration: envs/prod/main.tf:2: terraform.cloud: refused: terraform {} admits only required_providers, required_version and, in the root, backend

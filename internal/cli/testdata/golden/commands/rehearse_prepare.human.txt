@@ -1,0 +1,4 @@
+Command: rehearse prepare
+Status: success
+Rehearsal: rehearsal-id
+Work dir: <WORKSPACE>/.infrafactory/rehearsals/rehearsal-id/work/envs/prod
