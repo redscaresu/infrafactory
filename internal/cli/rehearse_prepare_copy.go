@@ -12,8 +12,9 @@ import (
 )
 
 // prepare copies dir and its local modules into a new rehearsal under the
-// current directory's repository, then reads the copy's lock, runs gate 1
-// over the copy and the first init (ADR-0042 § The layout). It returns the
+// current directory's repository, then reads the copy's lock and runs
+// gate 1 over the copy, the first init, gate 2 and the second init
+// (ADR-0042 § The layout). It returns the
 // rehearsal's id, the copied root and what the lock tells the report. On a
 // refusal the half-made rehearsal dir is removed.
 func (p rehearsePrepare) prepare(ctx context.Context, dir, region, varFile string) (result rehearsePrepareResult, err error) {

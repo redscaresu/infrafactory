@@ -19,21 +19,34 @@ import (
 	"github.com/redscaresu/infrafactory/internal/harness"
 )
 
-// TestRehearsePrepareFirstInit runs `rehearse prepare` with real tofu on
-// a repo whose root has a lock and calls one local module, no registry
-// module. After the first init the aws provider is under <id>/data at the
+// TestRehearsePrepare runs the whole `rehearse prepare` with real tofu, at
+// the default dead proxy, on a repo whose root has a lock and either calls
+// one local module or has no module blocks, so gate 2 runs on what tofu
+// wrote. After both inits the aws provider is under <id>/data at the
 // lock's version, modules.json names the local module, the user's lock is
-// unchanged, and every mode in the rehearsal is tightened. A lock whose
-// aws entry is registry.terraform.io's initialises too, with the warning.
-func TestRehearsePrepareFirstInit(t *testing.T) {
+// unchanged, the backend override is in the copy's root, tofu initialised
+// the local backend with its state under <id>/state, and every mode in
+// the rehearsal is tightened. A lock whose aws entry is
+// registry.terraform.io's prepares too, with the warning. The repo's path
+// holds a comma.
+func TestRehearsePrepare(t *testing.T) {
 	e2e.SkipUnlessEnabled(t)
 	_, err := exec.LookPath("tofu")
 	require.NoError(t, err, "tofu binary required for e2e")
 
-	for _, addr := range []string{"registry.opentofu.org/hashicorp/aws", "registry.terraform.io/hashicorp/aws"} {
-		t.Run(addr, func(t *testing.T) {
-			repo := realTempDir(t)
-			lock := fmt.Sprintf("provider %q {\n  version     = %q\n  constraints = %q\n}\n", addr, harness.AWSProviderVersion, harness.AWSProviderVersion)
+	const module = "\nmodule \"m\" {\n  source = \"../../modules/m\"\n}\n"
+	for _, tc := range []struct {
+		name, addr, module string
+	}{
+		{"a local module", "registry.opentofu.org/hashicorp/aws", module},
+		{"a local module, a registry.terraform.io lock", "registry.terraform.io/hashicorp/aws", module},
+		{"no module blocks", "registry.opentofu.org/hashicorp/aws", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// A comma in the path: tofu 1.13 splits -plugin-dir's value at
+			// one.
+			repo := filepath.Join(realTempDir(t), "a,repo")
+			lock := fmt.Sprintf("provider %q {\n  version     = %q\n  constraints = %q\n}\n", tc.addr, harness.AWSProviderVersion, harness.AWSProviderVersion)
 			for name, content := range map[string]string{
 				".git/HEAD":                     "ref: refs/heads/main\n",
 				"envs/prod/.terraform.lock.hcl": lock,
@@ -49,11 +62,7 @@ func TestRehearsePrepareFirstInit(t *testing.T) {
 provider "aws" {
   region = %q
 }
-
-module "m" {
-  source = "../../modules/m"
-}
-`, harness.AWSProviderVersion, assumptionRegion),
+`, harness.AWSProviderVersion, assumptionRegion) + tc.module,
 				"modules/m/main.tf": manifestOutput,
 			} {
 				e2e.WriteFile(t, filepath.Join(repo, name), []byte(content))
@@ -69,6 +78,7 @@ module "m" {
 
 			var result struct {
 				ID       string   `json:"id"`
+				WorkDir  string   `json:"work_dir"`
 				Version  string   `json:"aws_provider_version"`
 				Warnings []string `json:"warnings"`
 			}
@@ -77,17 +87,44 @@ module "m" {
 			data := filepath.Join(rehearsal, "data")
 			assert.Equal(t, harness.AWSProviderVersion, result.Version)
 			assert.DirExists(t, filepath.Join(data, "providers", "registry.opentofu.org", "hashicorp", "aws", harness.AWSProviderVersion))
-			assert.Contains(t, prepareManifest(t, data), manifestEntry{"m", "../../modules/m", "../../modules/m"})
+			if tc.module != "" {
+				assert.Contains(t, prepareManifest(t, data), manifestEntry{"m", "../../modules/m", "../../modules/m"})
+			}
+			override, err := os.ReadFile(filepath.Join(result.WorkDir, cli.OurOverride))
+			require.NoError(t, err)
+			assert.Equal(t, cli.LocalBackendOverride, string(override))
+			assertLocalBackendAt(t, data, filepath.Join(rehearsal, "state", "terraform.tfstate"), filepath.Join(rehearsal, "work"))
 			userLock, err := os.ReadFile(filepath.Join(repo, "envs", "prod", ".terraform.lock.hcl"))
 			require.NoError(t, err)
 			assert.Equal(t, lock, string(userLock), "prepare changed the user's lock")
-			if addr == "registry.terraform.io/hashicorp/aws" {
+			if tc.addr == "registry.terraform.io/hashicorp/aws" {
 				require.Len(t, result.Warnings, 1)
 				assert.Contains(t, result.Warnings[0], "registry.terraform.io's")
 			}
 			assertTightModes(t, rehearsal)
 		})
 	}
+}
+
+// assertLocalBackendAt reads the backend config the second init wrote at
+// <data>/terraform.tfstate: tofu initialised the local backend with its
+// state at state, which lies outside work.
+func assertLocalBackendAt(t *testing.T, data, state, work string) {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(data, "terraform.tfstate"))
+	require.NoError(t, err)
+	var config struct {
+		Backend struct {
+			Type   string
+			Config struct{ Path string }
+		}
+	}
+	require.NoError(t, json.Unmarshal(raw, &config), string(raw))
+	assert.Equal(t, "local", config.Backend.Type, string(raw))
+	assert.Equal(t, state, config.Backend.Config.Path, string(raw))
+	rel, err := filepath.Rel(work, config.Backend.Config.Path)
+	require.NoError(t, err)
+	assert.False(t, filepath.IsLocal(rel), "the state %s lies inside %s", config.Backend.Config.Path, work)
 }
 
 // prepareManifest is the module manifest the first init wrote under data.
