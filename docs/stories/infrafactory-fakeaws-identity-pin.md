@@ -1,7 +1,6 @@
 ---
 kind: chore
-status: blocked
-blocked_by: [fakeaws-identity-sweep-and-docs]
+status: ready
 epic: fakeaws-loaded-identity
 depends_on: [fakeaws-identity-sweep-and-docs]
 touches: [.github/workflows/ci.yml, docs/hld/2026-09-30-import-production-state-into-the-mocks.md, docs/epics/fakeaws-loaded-identity.md]
