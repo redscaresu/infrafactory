@@ -1,7 +1,6 @@
 ---
 kind: lead
-status: blocked
-blocked_by: [aws-hold-for-read-adr-0040, aws-hold-for-read-release, aws-hold-for-read-guard, aws-hold-for-read-hold, aws-hold-for-read-runbook]
+status: ready
 epic: aws-hold-for-read
 depends_on: [aws-hold-for-read-adr-0040, aws-hold-for-read-release, aws-hold-for-read-guard, aws-hold-for-read-hold, aws-hold-for-read-runbook]
 touches: [docs/operations.md, docs/epics/aws-hold-for-read.md, docs/hld/2026-09-30-import-production-state-into-the-mocks.md]

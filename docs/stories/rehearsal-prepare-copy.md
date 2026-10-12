@@ -1,7 +1,6 @@
 ---
 kind: code
-status: blocked
-blocked_by: [rehearsal-prepare-command-group, rehearsal-prepare-gate-core, rehearsal-prepare-gate-modules]
+status: ready
 epic: rehearsal-prepare-gate
 depends_on: [rehearsal-prepare-command-group, rehearsal-prepare-gate-core, rehearsal-prepare-gate-modules]
 touches: [internal/cli/rehearse.go, internal/cli/rehearse_prepare.go, internal/cli/rehearse_prepare_copy.go, internal/cli/rehearse_prepare_test.go, internal/cli/command_golden_test.go, internal/cli/testdata/golden/commands/]
