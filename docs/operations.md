@@ -438,10 +438,35 @@ reads the file itself (`AWSReaderConfig`); nothing is sourced into the shell.
 
 ### The reader policy
 
-The reader key belongs to a separate read-only IAM user, whose one policy is
-`docs/layer3/aws/reader-policy.json`; `internal/harness/aws_reader_policy_test.go` holds its
-actions to exactly the reader table's rows (ADR-0023, amendment of 2026-10-12). Fill `REGION` and
-`ACCOUNT_ID` as Scope setup step 3 does, with the account being read, and attach nothing else.
+The reader key belongs to a separate read-only IAM user, `infrafactory-reader`, whose one policy,
+`infrafactory-reader-read`, is `docs/layer3/aws/reader-policy.json`.
+`internal/harness/aws_reader_policy_test.go` holds its actions to exactly the reader table's rows
+and its resources to `ACCOUNT_ID` and `REGION` (ADR-0023, amendment of 2026-10-12). Never apply
+this file to `infrafactory-layer3` or `infrafactory-layer3-scope`: as a new version of that policy
+it strips the Layer 3 key's permissions, and a reader on that user would also hold reap's writes.
+
+`REGION`, `ACCOUNT_ID` and the admin profile are the account being read's; for the Layer 3
+account they are Scope setup step 0's. Create the user and attach the policy, and nothing else:
+
+```bash
+aws iam create-user --user-name infrafactory-reader --profile infrafactory-admin
+sed -e "s/REGION/$REGION/g" -e "s/ACCOUNT_ID/$ACCOUNT_ID/g" docs/layer3/aws/reader-policy.json > "$TMPDIR/reader.json"
+aws iam create-policy --policy-name infrafactory-reader-read --policy-document "file://$TMPDIR/reader.json" \
+  --profile infrafactory-admin
+aws iam attach-user-policy --user-name infrafactory-reader \
+  --policy-arn arn:aws:iam::${ACCOUNT_ID}:policy/infrafactory-reader-read --profile infrafactory-admin
+```
+
+Write the key file without printing the key, mode `0600` (if the file already exists, `chmod 600`
+it first), then check only its mode and key names:
+
+```bash
+mkdir -p ~/.config/infrafactory && (umask 077; aws iam create-access-key --user-name infrafactory-reader \
+  --profile infrafactory-admin --query 'AccessKey.[AccessKeyId,SecretAccessKey]' --output text \
+  | awk '{printf "AWS_ACCESS_KEY_ID=%s\nAWS_SECRET_ACCESS_KEY=%s\n",$1,$2}' > ~/.config/infrafactory/aws-reader.env)
+stat -f %Lp ~/.config/infrafactory/aws-reader.env   # 600 (on Linux: stat -c %a)
+cut -d= -f1 ~/.config/infrafactory/aws-reader.env   # AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
+```
 
 The key file is present only for its read step. The IAM user and its key stay between rehearsals;
 the user supplies the key file for each read; after each read, once the scrub has produced its
