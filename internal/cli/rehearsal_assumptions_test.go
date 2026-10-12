@@ -686,8 +686,8 @@ func lockVersions(t *testing.T, path string) map[string]string {
 }
 
 // missingVPC is an id no fakeaws VPC has, looked up by id (VpcId.1).
-// A filter that matches nothing would not do: fakeaws ignores
-// DescribeVpcs filters and lists every VPC.
+// fakeaws evaluates DescribeVpcs filters, so a filter that matches
+// nothing answers empty, not every VPC.
 const missingVPC = "vpc-0000000000000dead"
 
 // TestAssumption_RefreshOnlyUnreadableDataSourceExitsOne: against fakeaws,

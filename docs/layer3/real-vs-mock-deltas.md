@@ -227,7 +227,7 @@ volume and there are no NAT gateways. So a Layer 2 test cannot see a leaked root
 gateway's interface; only the real sweep can. Not a defect in reap: it deletes owners before the
 things they hold, and the real account ended empty.
 
-## D8 — A subnet outside its VPC: fakeaws stores it, AWS refuses it
+## D8 — A subnet outside its VPC or overlapping a sibling: fakeaws stored it, AWS refuses it (closed)
 
 Induced on purpose for the learning-loop proof (2026-10-10, aws-learned-pitfall-from-real-aws, run
 20261010T114213Z). `aws_subnet` with `cidr_block = "10.81.1.0/24"` in a VPC of `10.80.0.0/16`
@@ -238,4 +238,21 @@ VPC. Real AWS refused it at the apply, deterministically (two attempts):
 `aws_subnet` entry from it (`learned_layer: sandbox_deploy`), and the next iteration reached target.
 Fixed in fakeaws #45 (`fakeaws-subnet-cidr-within-vpc`, 2026-10-10): `CreateSubnet` answers 400
 `InvalidSubnet.Range` for a CIDR outside the VPC or not between /16 and /28, so Layer 2 catches it
-before a real apply. Overlap between sibling subnets is still not checked.
+before a real apply. Closed for overlap too: since fakeaws #71, `CreateSubnet` answers 400
+`InvalidSubnet.Conflict` for a CIDR that overlaps a sibling subnet of the same VPC, and stores
+nothing. That code and its message are unverified (D9).
+
+## D9 — EC2 codes fakeaws answers from the API reference, not a recording
+
+These answers come from the EC2 API reference's error list, not from AWS. Each is marked
+`UNVERIFIED(aws-code)` at its fakeaws site (`handlers/ec2.go`). The owner is the next real-AWS
+recording (`prod-read-seam-real-recording` or a Layer 3 run), which replaces each with what AWS
+answered:
+
+- `VPCIdNotSpecified`: a `GroupName.N` lookup on a database that is not loaded.
+- `InvalidSubnet.Conflict`, and its message: a CIDR overlapping a sibling subnet (D8).
+- `InvalidAddress.NotFound`: a `PublicIp.N` not in the region.
+- `InvalidKeyPair.NotFound`: a `KeyPairId.N` or `KeyName.N` that names no key pair.
+- `InvalidParameterValue`: a `ZoneName.N` or `ZoneId.N` that is none of the region's zones.
+- The fixed a-c availability zone set that `DescribeAvailabilityZones` answers on a database that
+  is not loaded.
