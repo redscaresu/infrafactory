@@ -28,6 +28,27 @@ func holdCopyPath(scenarioName string) string {
 	return filepath.Join(holdsRoot, scenarioName, harness.LiveStateFilename)
 }
 
+// refuseWhileHeld refuses op (generate, run or test) of sc while anything
+// is at sc's hold copy path, a broken symlink included, or that path
+// cannot be read: generation removes the output dir, which holds a held
+// stack's only live state, and an unreadable holds dir is not an empty
+// one. Only an absent copy passes. A local check, before any AWS request.
+func refuseWhileHeld(op string, runtime *CommandRuntime, sc scenario.Scenario) error {
+	copyPath := holdCopyPath(sc.Name)
+	_, err := os.Lstat(copyPath)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	found := "a hold's copy is at " + copyPath
+	if err != nil {
+		found = fmt.Sprintf("a hold's copy may be at %s, which cannot be read: %v", copyPath, err)
+	}
+	return &CLIError{Op: op, Code: errorCodeUsage, Err: fmt.Errorf(
+		"refusing %s of %s, with nothing asked of AWS: %s. Release the hold with `%s --take-over <holder> --release-hold`; "+
+			"the copy is deleted by hand once the read is done, which lifts this refusal",
+		op, sc.Name, found, reapCommand(runtime.ConfigPath, runtime.scenarioPath))}
+}
+
 // prepareHoldRelease is reap's --release-hold, all of it local work before
 // any AWS request: the usage refusals, then the copy settled with the
 // output dir's state. Every refusal of an aws scenario names the take-over

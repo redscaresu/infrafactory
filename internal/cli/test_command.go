@@ -46,11 +46,17 @@ func runTestWithNotify(
 		return &CLIError{Op: "test", Code: errorCodeUsage, Err: fmt.Errorf("read --continue-on-drift flag: %w", err)}
 	}
 
-	// Loaded before the guard, which is keyed on the scenario's cloud.
-	// LoadScenario caches, so executeTest reads the same scenario; a load
-	// failure is left for executeTest to report as it always has, and
-	// the zero scenario's cloud is Scaleway, the guard as it was.
-	sc, _ := runtime.LoadScenario(args[0])
+	// Loaded before the guards: the hold's, keyed on the scenario's name,
+	// and the interrupt guard, keyed on its cloud. LoadScenario caches, so
+	// executeTest reads the same scenario; a load failure is left for
+	// executeTest to report as it always has, and the zero scenario's
+	// cloud is Scaleway, the interrupt guard as it was.
+	sc, loadErr := runtime.LoadScenario(args[0])
+	if loadErr == nil {
+		if err := refuseWhileHeld("test", runtime, sc); err != nil {
+			return err
+		}
+	}
 	cloud := layer3TeardownCloud(sc.Cloud)
 	if err := mintAWSClaimHolder(runtime, cloud, time.Now().UTC().Format("20060102T150405Z0700")); err != nil {
 		return err
