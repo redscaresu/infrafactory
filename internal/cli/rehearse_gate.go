@@ -20,9 +20,9 @@ import (
 // leaf helpers with the Layer 3 gate, never its drivers: Layer 3 gates code
 // infrafactory generated, this gate gates code the user wrote.
 //
-// Three rules start closed, each in its own file: provider "aws" arguments
-// (rehearse_gate_aws.go), paths (rehearse_gate_paths.go) and module blocks
-// (rehearse_gate_modules.go).
+// Two rules start closed, each in its own file: provider "aws" arguments
+// (rehearse_gate_aws.go) and module blocks (rehearse_gate_modules.go). The
+// path rule is in rehearse_gate_paths.go.
 
 var errRehearsalRefuses = errors.New("the rehearsal gate refuses this configuration")
 
@@ -108,9 +108,12 @@ func (in rehearsalGateInput) display(path string) string {
 	return path
 }
 
-// rehearsalModule is one gated module dir. providers maps each local name
+// rehearsalModule is one gated module dir and the gate run that reads it:
+// path.module is dir, path.root is in.root. providers maps each local name
 // its required_providers declare to the source, lowercased.
 type rehearsalModule struct {
+	in        rehearsalGateInput
+	dir       string
 	root      bool
 	providers map[string]string
 }
@@ -148,7 +151,7 @@ func (in rehearsalGateInput) dirProblems(dir string) []string {
 			files[in.display(path)] = body
 		}
 	}
-	m := rehearsalModule{root: dir == in.root, providers: map[string]string{}}
+	m := rehearsalModule{in: in, dir: dir, root: dir == in.root, providers: map[string]string{}}
 	for file, body := range files {
 		problems = append(problems, m.requiredProviderProblems(file, body)...)
 	}
@@ -186,10 +189,10 @@ func rehearsalEntryProblem(lower string) string {
 	return ""
 }
 
-// rehearsalParse parses a file the gate must read. One that is not a
-// regular file, cannot be read or does not parse is refused: the gate
-// cannot vouch for what it cannot read.
-func rehearsalParse(path, name string) (*hclsyntax.Body, string) {
+// rehearsalRead reads a file the gate must vouch for. One that is not a
+// regular file or cannot be read is refused: the gate cannot vouch for
+// what it cannot read.
+func rehearsalRead(path, name string) ([]byte, string) {
 	info, err := os.Lstat(path)
 	if err != nil {
 		return nil, fmt.Sprintf("%s: cannot read it: %v", name, err)
@@ -200,6 +203,16 @@ func rehearsalParse(path, name string) (*hclsyntax.Body, string) {
 	src, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Sprintf("%s: cannot read it: %v", name, err)
+	}
+	return src, ""
+}
+
+// rehearsalParse parses a file the gate must read. One rehearsalRead
+// refuses, or that does not parse, is refused.
+func rehearsalParse(path, name string) (*hclsyntax.Body, string) {
+	src, problem := rehearsalRead(path, name)
+	if problem != "" {
+		return nil, problem
 	}
 	file, diags := hclsyntax.ParseConfig(src, name, hcl.Pos{Line: 1, Column: 1})
 	if diags.HasErrors() {
@@ -354,7 +367,7 @@ func (m rehearsalModule) blockProblems(file string, block *hclsyntax.Block) []st
 	case "module":
 		problems = append(problems, rehearsalModuleProblems(at)...)
 	}
-	return append(problems, rehearsalBodyProblems(file, addr, block, block.Type == "variable")...)
+	return append(problems, m.bodyProblems(file, addr, block, block.Type == "variable")...)
 }
 
 // terraformProblems admits required_providers and required_version, and
@@ -417,7 +430,7 @@ func (m rehearsalModule) typeProblems(file, at string, block *hclsyntax.Block) [
 		return []string{fmt.Sprintf("%s: %s type %q is not admitted", at, block.Type, typ)}
 	}
 	problems := m.providerRefProblems(file, rehearsalAddress(block), block)
-	return append(problems, rehearsalPathArgProblems(file, block)...)
+	return append(problems, m.pathArgProblems(file, block)...)
 }
 
 // providerRefProblems refuses a `provider = <name>[.<alias>]` that names
@@ -439,33 +452,33 @@ func (m rehearsalModule) providerRefProblems(file, addr string, block *hclsyntax
 	return nil
 }
 
-// rehearsalBodyProblems walks a block at every depth: provisioner and
+// bodyProblems walks a block at every depth: provisioner and
 // connection are refused wherever they are, and every attribute's calls
 // are checked. A top-level variable's `type` is skipped: list(string)
 // parses as a call and names a type.
-func rehearsalBodyProblems(file, addr string, block *hclsyntax.Block, skipType bool) []string {
+func (m rehearsalModule) bodyProblems(file, addr string, block *hclsyntax.Block, skipType bool) []string {
 	var problems []string
 	for name, attr := range block.Body.Attributes {
 		if skipType && name == "type" {
 			continue
 		}
-		problems = append(problems, rehearsalCallProblems(rehearsalAt(file, attr.SrcRange, addr+"."+name), attr.Expr)...)
+		problems = append(problems, m.callProblems(rehearsalAt(file, attr.SrcRange, addr+"."+name), attr.Expr)...)
 	}
 	for _, inner := range block.Body.Blocks {
 		innerAddr := addr + "." + rehearsalAddress(inner)
 		if inner.Type == "provisioner" || inner.Type == "connection" {
 			problems = append(problems, fmt.Sprintf("%s: %q blocks are refused at any depth: they run commands on this machine or another", rehearsalAt(file, inner.DefRange(), innerAddr), inner.Type))
 		}
-		problems = append(problems, rehearsalBodyProblems(file, innerAddr, inner, false)...)
+		problems = append(problems, m.bodyProblems(file, innerAddr, inner, false)...)
 	}
 	return problems
 }
 
-// rehearsalCallProblems admits a call only to a function on the Layer 3
+// callProblems admits a call only to a function on the Layer 3
 // pure-function allowlist. A namespaced name (core::file,
 // provider::local::direxists) is refused by name. The path functions are
 // judged by the path rule.
-func rehearsalCallProblems(at string, expr hclsyntax.Expression) []string {
+func (m rehearsalModule) callProblems(at string, expr hclsyntax.Expression) []string {
 	var problems []string
 	for _, fn := range layer3CallsIn(expr) {
 		switch {
@@ -476,5 +489,5 @@ func rehearsalCallProblems(at string, expr hclsyntax.Expression) []string {
 			problems = append(problems, fmt.Sprintf("%s: calls %s(), which is not on the pure-function allowlist", at, fn))
 		}
 	}
-	return append(problems, rehearsalPathCallProblems(at, expr)...)
+	return append(problems, m.pathCallProblems(at, expr)...)
 }

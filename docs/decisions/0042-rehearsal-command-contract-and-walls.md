@@ -162,13 +162,19 @@ Every path the code reads or writes must resolve inside the copy (`<id>/work`). 
 are the first argument of `file`, `fileexists`, `fileset`, `filebase64`, `filemd5`, `filesha1`,
 `filesha256`, `filesha512`, `filebase64sha256`, `filebase64sha512` and `templatefile`;
 `filename` and `source` of `local_file` and `local_sensitive_file`; `filename` of data
-`local_file` and data `local_sensitive_file`; and `output_path`, `source_file` and `source_dir` of
-`archive_file`, resource and data.
+`local_file` and data `local_sensitive_file`; `output_path`, `source_file` and `source_dir` of
+`archive_file`, resource and data; and every aws argument terraform-provider-aws 5.100.0 reads a
+local file from: `source` of `aws_s3_object` and `aws_s3_bucket_object`; `filename` of
+`aws_lambda_function`, `aws_lambda_layer_version`, `aws_connect_contact_flow`,
+`aws_connect_contact_flow_module` and `aws_rds_custom_db_engine_version`; `zip_file` of
+`aws_synthetics_canary` and `aws_gamelift_script`; `configurations` of `aws_emr_cluster`; and
+`asset.import_assets_from_signed_url.filename` of `aws_dataexchange_revision_assets`, a `dynamic`
+block's `content` included.
 
-A checked path is admitted only as `path.module` or `path.root` joined with a literal, resolved
-from that directory, and only if it stays inside the copy. A bare relative literal is refused:
-tofu resolves it from its working directory rather than the module directory (**unverified**;
-refusing it holds either way). Absolute, escaping, variable and otherwise computed paths are
+A checked path is admitted only as `path.module` or `path.root`, alone or joined with a literal
+starting with `/`, resolved from that directory, and only if it stays inside the copy. A bare
+relative literal is refused: tofu resolves it from its working directory rather than the module
+directory (**unverified**; refusing it holds either way). Absolute, escaping, variable and otherwise computed paths are
 refused, and `abspath` and `pathexpand` are refused by name.
 
 A written path (`filename` of `local_file` and `local_sensitive_file`, `output_path` of
@@ -189,7 +195,8 @@ check of a `..` after a glob undercounts how far it climbs.
 The template a `templatefile` names is gated too, because the gate admits other files unparsed
 and a template can call any function. It is parsed with `hclsyntax.ParseTemplate`, and every
 function call and path in it is held to the function and path rules above. A missing or
-unparseable template is refused.
+unparseable template is refused, and so is a template calling `templatefile`: the gate does not
+follow a template into another.
 
 ### provider "aws"
 

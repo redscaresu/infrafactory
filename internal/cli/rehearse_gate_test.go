@@ -155,12 +155,8 @@ func TestRehearsalGateRefuses(t *testing.T) {
 		// The closed rules.
 		{name: "provider aws region", files: map[string]string{"main.tf": "provider \"aws\" {\n  region = \"us-east-1\"\n}\n"},
 			want: []string{`main.tf:2: provider.aws.region: refused: a provider "aws" block admits only alias`}},
-		{name: "file()", files: map[string]string{"main.tf": "output \"o\" {\n  value = file(\"${path.module}/a.txt\")\n}\n"},
-			want: []string{"main.tf:2: output.o.value: calls file(), which reads a path: the gate admits no path"}},
 		{name: "a module block", files: map[string]string{"main.tf": "module \"m\" {\n  source = \"./m\"\n}\n"},
 			want: []string{"main.tf:1: module.m: refused: the gate admits no module block"}},
-		{name: "a local_file path", files: map[string]string{"main.tf": "resource \"local_file\" \"f\" {\n  content  = \"x\"\n  filename = \"/tmp/x\"\n}\n"},
-			want: []string{"main.tf:3: local_file.f.filename: refused: the gate admits no path"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := gateFixture(t, tc.files, tc.varFile)
@@ -185,8 +181,7 @@ provider "x" {
 `
 
 // TestRehearsalGateAdmits: every construct the gate admits, in one copy,
-// passes. The local and archive types carry no path argument: the path
-// rule is closed.
+// passes. Admitted paths are in TestRehearsalGatePathsAdmit.
 func TestRehearsalGateAdmits(t *testing.T) {
 	err := gateFixture(t, map[string]string{
 		"main.tf": `terraform {
