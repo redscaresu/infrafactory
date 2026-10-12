@@ -1,0 +1,193 @@
+{
+  "version": 4,
+  "terraform_version": "1.10.6",
+  "serial": 14,
+  "lineage": "6f0c8f7e-3b1a-4d2c-9e5f-a1b2c3d4e5f6",
+  "outputs": {
+    "db_password": {
+      "value": "planted-output-secret",
+      "type": "string",
+      "sensitive": true
+    },
+    "web_public_ip": {
+      "value": "203.0.113.25",
+      "type": "string"
+    },
+    "web_sg_arn": {
+      "value": "arn:aws:ec2:eu-west-1:246813579024:security-group/sg-0f1e2d3c4b5a69788",
+      "type": "string"
+    }
+  },
+  "resources": [
+    {
+      "mode": "data",
+      "type": "aws_ssm_parameter",
+      "name": "al2023",
+      "provider": "provider[\"registry.opentofu.org/hashicorp/aws\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "arn": "arn:aws:ssm:eu-west-1::parameter/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64",
+            "id": "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64",
+            "insecure_value": "ami-0c1d2e3f4a5b6c7d8",
+            "name": "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64",
+            "type": "String",
+            "value": "ami-0c1d2e3f4a5b6c7d8",
+            "version": 112,
+            "with_decryption": true
+          },
+          "sensitive_attributes": [
+            [
+              {
+                "type": "get_attr",
+                "value": "value"
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "aws_instance",
+      "name": "web",
+      "provider": "provider[\"registry.opentofu.org/hashicorp/aws\"]",
+      "instances": [
+        {
+          "schema_version": 1,
+          "attributes": {
+            "ami": "ami-0c1d2e3f4a5b6c7d8",
+            "arn": "arn:aws:ec2:eu-west-1:246813579024:instance/i-0123abcd4567ef890",
+            "associate_public_ip_address": true,
+            "availability_zone": "eu-west-1a",
+            "id": "i-0123abcd4567ef890",
+            "instance_state": "running",
+            "instance_type": "t3.micro",
+            "password_data": "planted-password-data",
+            "primary_network_interface_id": "eni-0a9b8c7d6e5f4a3b2",
+            "private_ip": "10.80.1.4",
+            "public_ip": "203.0.113.25",
+            "subnet_id": "subnet-0aa1bb2cc3dd4ee5f",
+            "tags": {
+              "Name": "web"
+            },
+            "tags_all": {
+              "Name": "web"
+            },
+            "timeouts": null,
+            "user_data": "e3cf5b39bc793e8151d1893fb3992ebdad89c0d2",
+            "user_data_base64": null,
+            "user_data_replace_on_change": false,
+            "vpc_security_group_ids": [
+              "sg-0f1e2d3c4b5a69788"
+            ]
+          },
+          "sensitive_attributes": [
+            [
+              {
+                "type": "get_attr",
+                "value": "password_data"
+              }
+            ]
+          ],
+          "private": "eyJlMmJmYjczMC1lY2FhLTExZTYtOGY4OC0zNDM2M2JjN2M0YzAiOnsiY3JlYXRlIjo2MDAwMDAwMDAwMDAsImRlbGV0ZSI6MTIwMDAwMDAwMDAwMCwidXBkYXRlIjo2MDAwMDAwMDAwMDB9LCJzY2hlbWFfdmVyc2lvbiI6IjEifQ==",
+          "dependencies": [
+            "aws_security_group.web",
+            "data.aws_ssm_parameter.al2023"
+          ]
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "aws_security_group",
+      "name": "web",
+      "provider": "provider[\"registry.opentofu.org/hashicorp/aws\"]",
+      "instances": [
+        {
+          "schema_version": 1,
+          "attributes": {
+            "arn": "arn:aws:ec2:eu-west-1:246813579024:security-group/sg-0f1e2d3c4b5a69788",
+            "description": "web ingress",
+            "egress": [],
+            "id": "sg-0f1e2d3c4b5a69788",
+            "ingress": [
+              {
+                "cidr_blocks": [
+                  "0.0.0.0/0"
+                ],
+                "description": "",
+                "from_port": 80,
+                "ipv6_cidr_blocks": [],
+                "prefix_list_ids": [],
+                "protocol": "tcp",
+                "security_groups": [],
+                "self": false,
+                "to_port": 80
+              }
+            ],
+            "name": "web",
+            "owner_id": "246813579024",
+            "revoke_rules_on_delete": false,
+            "tags": {
+              "Name": "web"
+            },
+            "tags_all": {
+              "Name": "web"
+            },
+            "timeouts": null,
+            "vpc_id": "vpc-0a1b2c3d4e5f60718"
+          },
+          "sensitive_attributes": [],
+          "private": "eyJlMmJmYjczMC1lY2FhLTExZTYtOGY4OC0zNDM2M2JjN2M0YzAiOnsiY3JlYXRlIjo2MDAwMDAwMDAwMDAsImRlbGV0ZSI6OTAwMDAwMDAwMDAwfSwic2NoZW1hX3ZlcnNpb24iOiIxIn0=",
+          "dependencies": [
+            "aws_vpc.main"
+          ]
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "aws_vpc",
+      "name": "main",
+      "provider": "provider[\"registry.opentofu.org/hashicorp/aws\"]",
+      "instances": [
+        {
+          "schema_version": 1,
+          "attributes": {
+            "arn": "arn:aws:ec2:eu-west-1:246813579024:vpc/vpc-0a1b2c3d4e5f60718",
+            "cidr_block": "10.80.0.0/16",
+            "enable_dns_hostnames": false,
+            "enable_dns_support": true,
+            "id": "vpc-0a1b2c3d4e5f60718",
+            "owner_id": "246813579024",
+            "tags": null,
+            "tags_all": {}
+          },
+          "sensitive_attributes": [],
+          "private": "eyJzY2hlbWFfdmVyc2lvbiI6IjEifQ=="
+        }
+      ]
+    },
+    {
+      "mode": "data",
+      "type": "aws_caller_identity",
+      "name": "current",
+      "provider": "provider[\"registry.opentofu.org/hashicorp/aws\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "account_id": "246813579024",
+            "arn": "arn:aws:iam::246813579024:user/infrafactory-layer3",
+            "id": "246813579024",
+            "user_id": "AIDATPLANTEDLAYER3001"
+          },
+          "sensitive_attributes": []
+        }
+      ]
+    }
+  ],
+  "check_results": null
+}

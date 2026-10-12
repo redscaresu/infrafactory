@@ -122,6 +122,15 @@ func TestRehearsalGatePathsRefuse(t *testing.T) {
 			"t.tpl":         "hello\n",
 			"child/main.tf": "data \"archive_file\" \"a\" {\n  type        = \"zip\"\n  output_path = \"${path.module}/../t.tpl\"\n}\n",
 		}, want: []string{"child/main.tf:3: data.archive_file.a.output_path: refused: the apply would overwrite template t.tpl"}},
+		{name: "a module block's dir writing the root's template", files: map[string]string{
+			"main.tf":     "module \"m\" {\n  source = \"./mod\"\n}\noutput \"o\" {\n  value = templatefile(\"${path.root}/t.tpl\", {})\n}\n",
+			"t.tpl":       "hello\n",
+			"mod/main.tf": "data \"archive_file\" \"a\" {\n  type        = \"zip\"\n  output_path = \"${path.module}/../t.tpl\"\n}\n",
+		}, want: []string{"mod/main.tf:3: data.archive_file.a.output_path: refused: the apply would overwrite template t.tpl"}},
+		{name: "an absolute path in a module block's dir", files: map[string]string{
+			"main.tf":     "module \"m\" {\n  source = \"./mod\"\n}\n",
+			"mod/main.tf": "data \"local_file\" \"l\" {\n  filename = \"/etc/passwd\"\n}\n",
+		}, want: []string{`module "m": mod/main.tf:2: data.local_file.l.filename: an absolute path is refused`}},
 		// aws path arguments: every argument terraform-provider-aws v5.100.0
 		// reads a local file from.
 		{name: "aws_s3_object source", files: map[string]string{"main.tf": "resource \"aws_s3_object\" \"o\" {\n  bucket = \"b\"\n  source = \"/etc/passwd\"\n}\n"},

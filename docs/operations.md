@@ -427,6 +427,33 @@ parameter for the AMI resolve, and what the apply and destroy send. A scope whos
 before 2026-10-10 lacks both, and refuses the first real AMI resolve: apply the policy again as
 Scope setup step 3 says.
 
+### Holding aws-web-live for a read
+
+To read the live stack's state, `test --hold` keeps the stack up after a passing run. Order:
+
+1. Generate aws-web-live's HCL first, without the Layer 3 config, and see it green against fakeaws.
+2. `infrafactory test scenarios/training/aws-web-live.yaml --config <cfg> --hold`. It holds only a
+   passing, uninterrupted run whose copy is written; anything else tears down as a plain `test`
+   does. If the copy was written before an interrupt, it is kept, and the stage `aws_hold` says so:
+   delete it by hand once the stack is gone, before the next generate, run or test.
+3. The copy is `.infrafactory/holds/aws-web-live/terraform-live.tfstate`, never committed, and it
+   carries the account id. Modes: directory `0700`, file `0600`.
+4. While the copy exists, `generate`, `run` and `test` of aws-web-live are refused.
+5. While the stack is held, do the read (epic prod-read-seam).
+6. Release: `infrafactory --config <cfg> reap scenarios/training/aws-web-live.yaml --take-over <holder> --release-hold`
+   keeps the copy the hold wrote (or writes it if none exists), restores the output dir's state
+   from the copy if that state is missing, then destroys, sweeps and releases. It refuses, changing
+   neither file, if the copy and the output dir's state differ. `<holder>` is in the hold's
+   `aws_scope_claim_kept` stage, which prints this command with the holder filled in: copy that command.
+7. If the release refuses, the same command without `--release-hold`:
+   `infrafactory --config <cfg> reap scenarios/training/aws-web-live.yaml --take-over <holder>`,
+   destroys without the copy.
+8. The read also uses the copy after the release (prod-read-seam scrubs it with the recording).
+   Delete it by hand once the read is done, which lifts step 4's refusal.
+
+Cost bound: one small instance, its root volume and its public IPv4 address, per hour held. There
+is no NAT gateway or load balancer. Nothing expires a hold, so release it the same day.
+
 ### The reader key file
 
 The account read (epic prod-read-seam) takes its read-only key from its own file, never from
@@ -520,10 +547,10 @@ The second command prints only a key name it recognises, and for any other line 
 so a malformed line never puts the secret in the lead's transcript. It must print exactly
 `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`.
 
-IAM is eventually consistent, and no code retries: the reader's clients do not retry, and the
-identity check stops at its first error. So on the first read after the key is created, if the
-identity check fails with `InvalidClientTokenId`, the lead waits a few seconds and runs the read
-once more; a second failure is a bad key.
+IAM is eventually consistent, and nothing retries a new key: the read retries only a throttled
+request, and the identity check stops at its first error. So on the first read after the key is
+created, if the identity check fails with `InvalidClientTokenId`, the lead waits a few seconds and
+runs the read once more; a second failure is a bad key.
 
 After each read, once the scrub has produced its fixtures, the lead deletes the local key file, the
 raw recording and the pre-destroy state, and checks the key file is absent

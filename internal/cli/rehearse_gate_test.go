@@ -22,7 +22,7 @@ func gateFixture(t *testing.T, files map[string]string, varFile string) error {
 		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
 	}
 	if _, err := os.Stat(filepath.Join(copyDir, "child")); err == nil {
-		in.modules = []string{filepath.Join(copyDir, "child")}
+		in.modules = []rehearsalModuleDir{{dir: filepath.Join(copyDir, "child")}}
 	}
 	if varFile != "" {
 		in.varFile = filepath.Join(t.TempDir(), "vars.tfvars")
@@ -156,7 +156,7 @@ func TestRehearsalGateRefuses(t *testing.T) {
 		{name: "provider aws region", files: map[string]string{"main.tf": "provider \"aws\" {\n  region = \"us-east-1\"\n}\n"},
 			want: []string{`main.tf:2: provider.aws.region: refused: a provider "aws" block admits only alias`}},
 		{name: "a module block", files: map[string]string{"main.tf": "module \"m\" {\n  source = \"./m\"\n}\n"},
-			want: []string{"main.tf:1: module.m: refused: the gate admits no module block"}},
+			want: []string{`main.tf:2: module.m.source: source "./m" does not resolve`}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := gateFixture(t, tc.files, tc.varFile)
