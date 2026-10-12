@@ -53,7 +53,7 @@ func (r *awsReplay) readEC2(ctx context.Context, replayed []AWSReadExchange) ([]
 	if slices.ContainsFunc(replayed, awsReadAllZones) {
 		return out, nil
 	}
-	zones, err := r.followUp(ctx, "DescribeAvailabilityZones", map[string]string{})
+	zones, err := r.followUp(ctx, "ec2", "DescribeAvailabilityZones", map[string]string{})
 	return append(out, zones...), err
 }
 
@@ -111,7 +111,7 @@ func awsOwnVPCIDPath(path []string) bool {
 func (r *awsReplay) readEC2VPC(ctx context.Context, vpc string) ([]AWSReadExchange, error) {
 	var out []AWSReadExchange
 	read := func(action string, params map[string]string) ([]AWSReadExchange, error) {
-		pages, err := r.followUp(ctx, action, params)
+		pages, err := r.followUp(ctx, "ec2", action, params)
 		out = append(out, pages...)
 		return pages, err
 	}
@@ -187,14 +187,14 @@ func (r *awsReplay) readEC2VPC(ctx context.Context, vpc string) ([]AWSReadExchan
 	return out, nil
 }
 
-// followUp reads one EC2 follow-up to its last page; an error names the
-// call and its params.
-func (r *awsReplay) followUp(ctx context.Context, action string, params map[string]string) ([]AWSReadExchange, error) {
+// followUp reads one follow-up, a query action of service, to its last
+// page; an error names the call and its params.
+func (r *awsReplay) followUp(ctx context.Context, service, action string, params map[string]string) ([]AWSReadExchange, error) {
 	raw, err := json.Marshal(params)
 	if err != nil {
 		return nil, err
 	}
-	pages, err := r.pages(ctx, AWSReadEntry{Service: "ec2", Protocol: awsProtocolQuery, Action: action, Params: raw})
+	pages, err := r.pages(ctx, AWSReadEntry{Service: service, Protocol: awsProtocolQuery, Action: action, Params: raw})
 	if err != nil {
 		return nil, fmt.Errorf("follow-up %s %s: %w", action, raw, err)
 	}
