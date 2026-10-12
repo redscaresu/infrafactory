@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -28,10 +29,34 @@ func TestRehearseIsRegisteredAndPrintsItsHelp(t *testing.T) {
 	root.SetErr(&bytes.Buffer{})
 	root.SetArgs([]string{"rehearse"})
 
-	err = root.Execute()
-	require.NoError(t, err)
-	assert.Equal(t, ExitCodeSuccess, ExitCodeForError(err))
+	require.NoError(t, root.Execute())
 	assert.Contains(t, stdout.String(), found.Short)
+}
+
+// The child case stands in for `prepare`: a subcommand's flag error must
+// reach the group's flag-error func and exit 2 too.
+func TestRehearseUsageErrorsExitTwo(t *testing.T) {
+	t.Parallel()
+
+	for _, args := range [][]string{
+		{"rehearse", "bogus"},
+		{"rehearse", "--nope"},
+		{"rehearse", "child", "--nope"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			t.Parallel()
+
+			root := NewRootCmd()
+			group, _, err := root.Find([]string{"rehearse"})
+			require.NoError(t, err)
+			group.AddCommand(&cobra.Command{Use: "child", RunE: func(*cobra.Command, []string) error { return nil }})
+			root.SetOut(&bytes.Buffer{})
+			root.SetErr(&bytes.Buffer{})
+			root.SetArgs(args)
+
+			assert.Equal(t, ExitCodeUsage, ExitCodeForError(root.Execute()))
+		})
+	}
 }
 
 func TestNewRootCmdHasExpectedCommands(t *testing.T) {

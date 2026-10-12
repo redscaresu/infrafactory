@@ -19,8 +19,9 @@ reason no decision rests on is marked **unverified**: the decision holds whether
 ### The family
 
 `infrafactory rehearse` is a command group. It has no action of its own: with no subcommand it
-prints its help and exits 0, and it reads no `infrafactory.yaml`, because a rehearsal takes its
-account and region from flags.
+prints its help and exits 0. An unknown subcommand, and a flag error anywhere in the family, is a
+usage error. It reads no `infrafactory.yaml`, because a rehearsal takes its account and region from
+flags.
 
 - `rehearse prepare <dir> --account <id> --region <r> [--var-file f]` is decided here.
 - `rehearse read` is defined by ADR-0041, not redefined here.
@@ -33,11 +34,12 @@ family adds no error code.
 
 ### The layout
 
-A rehearsal lives in `.infrafactory/rehearsals/<id>/` under the current directory, never under
-`.infrafactory/runs/` or `.infrafactory/live/`, which the UI serves. `rehearsals/` holds a
-`.gitignore` of `*`. Each `<id>/` has `work/` (the copied code), `data/` (`TF_DATA_DIR`), `home/`
-(an empty `HOME`) and `state/` (the state file, outside the copy). Directories are 0700 and files
-0600. Tofu writes files with its own modes, so after each tofu run the modes are tightened again:
+A rehearsal lives in `.infrafactory/rehearsals/<id>/` at the repository root (the nearest ancestor
+of `<dir>` holding `.git`), never under `.infrafactory/runs/` or `.infrafactory/live/`, which the
+UI serves. `rehearsals/` holds a `.gitignore` of `*`. Each `<id>/` has `work/` (the copied code),
+`data/` (`TF_DATA_DIR`), `home/` (an empty `HOME`), `state/` (the state file, outside the copy) and
+`vars.tfvars` (the `--var-file`, copied outside `work/` so tofu never auto-loads it). Directories
+are 0700 and files 0600. Tofu writes files with its own modes, so after each tofu run the modes are tightened again:
 directories 0700, executables 0700 (provider binaries must stay runnable), other files 0600.
 
 ### The walls
@@ -47,8 +49,9 @@ Three walls stand between the user's code and prod:
 1. **The gate** (this epic): the copy is parsed and refused before any tofu runs.
 2. **The two inits** (this epic): a network-only first init, the gate again over every module it
    resolved, then an offline second init under a dead proxy.
-3. **The provider override, the environment and the backend override** (rehearsal-walls), so a
-   bare `tofu` in the work directory reaches only this rehearsal's fakeaws.
+3. **The provider override, the environment and the backend override** (rehearsal-walls; the
+   second init already writes the backend override), so a bare `tofu` in the work directory
+   reaches only this rehearsal's fakeaws.
 
 Every tofu command runs in **replace mode** (story rehearsal-prepare-replace-env): the child's
 environment is `PATH` plus the variables the step names, and nothing else is inherited. So
@@ -119,8 +122,28 @@ admits a closed list of resource and data types, and only `alias` in its provide
 refused at any depth.
 
 Functions are the Layer 3 pure-function allowlist (`layer3PureFunctions`, read, never edited), plus
-the file functions whose path argument is checked to resolve inside the copy. Any function name
-containing `::` is refused by name.
+the file functions below, whose path argument is checked. Any function name containing `::` is
+refused by name.
+
+### Paths and templates
+
+Every path the code reads or writes must resolve inside the copy (`<id>/work`). The checked paths
+are the first argument of `file`, `fileexists`, `fileset`, `filebase64`, `filemd5`, `filesha1`,
+`filesha256`, `filesha512`, `filebase64sha256`, `filebase64sha512` and `templatefile`;
+`filename` and `source` of `local_file` and `local_sensitive_file`; `filename` of data
+`local_file` and data `local_sensitive_file`; and `output_path`, `source_file` and `source_dir` of
+`archive_file`, resource and data.
+
+A checked path is admitted only as `path.module` or `path.root` joined with a literal, resolved
+from that directory, and only if it stays inside the copy. A bare relative literal is refused:
+tofu resolves it from its working directory rather than the module directory (**unverified**;
+refusing it holds either way). Absolute, escaping, variable and otherwise computed paths are
+refused, and `abspath` and `pathexpand` are refused by name.
+
+The template a `templatefile` names is gated too, because the gate admits other files unparsed
+and a template can call any function. It is parsed with `hclsyntax.ParseTemplate`, and every
+function call and path in it is held to the function and path rules above. A missing or
+unparseable template is refused.
 
 ### provider "aws"
 
@@ -151,23 +174,36 @@ named in the report, so a failure under it is filed as a fakeaws story.
 
 ### Variables
 
-Beyond the `.tfvars` files in the code, which the gate parses, the `--var-file` given to `prepare`
-is the only variable source for every later rehearse step: `TF_VAR_*` never passes replace mode,
-and passthrough refuses `-var` and `-var-file` (rehearsal-passthrough).
+Beyond the `.tfvars` files in the code, the `--var-file` given to `prepare` is the only variable
+source for every later rehearse step: `TF_VAR_*` never passes replace mode, and passthrough refuses
+`-var` and `-var-file` (rehearsal-passthrough). The var file is copied to `<id>/vars.tfvars` at
+0600, outside `work/` so tofu never auto-loads it; a `.json` var file is refused; and the gate
+parses it like any `.tfvars` file, so it holds only attributes with literal values.
 
 ### The two inits
 
 The first init is `tofu init -backend=false` under replace mode with an empty `HOME` and no
-`TF_CLI_CONFIG_FILE` or `TF_PLUGIN_CACHE_DIR`. The second is `tofu init -reconfigure -get=false
--lockfile=readonly -plugin-dir=<data>/providers` under a dead proxy, and makes no proxied connection
+`TF_CLI_CONFIG_FILE` or `TF_PLUGIN_CACHE_DIR`, so no backend is initialised.
+
+Before the second init, prepare dials the dead proxy and refuses if the dial connects, then writes
+`<id>/work/infrafactory_override.tf` at 0600: a `backend "local" {}` override that names no
+`path`. The second init is `tofu init -input=false -no-color -reconfigure -get=false
+-lockfile=readonly -backend-config=path=<id>/state/terraform.tfstate
+-plugin-dir=<id>/data/providers`, under replace mode with only `HOME`, `TF_DATA_DIR` and
+`HTTP_PROXY`/`HTTPS_PROXY` at the dead proxy, and no `NO_PROXY`. It makes no proxied connection
 (`TestAssumption_SecondInitMakesNoProxiedConnection`).
+
+A user `backend` block is neutralised: the override replaces it, and the command-line path puts the
+state outside the copy (`TestAssumption_CLIBackendPathKeepsStateOutOfTheCopy`, whose root declares
+`backend "s3"`). So no user backend is ever initialised.
 
 ## Consequences
 
 - Every `rehearse` subcommand is reviewed against one contract and one set of walls; a later
   epic that changes either amends this ADR.
 - The gate refuses code a real `tofu apply` would accept: registry modules, `.tofu` files, JSON
-  configuration, encryption and any `provider "aws"` argument outside the table. Admitting any of
+  configuration, encryption, bare relative paths and any `provider "aws"` argument outside the
+  table. Admitting any of
   them is a new decision, not a flag.
 - A tofu or provider release that breaks a cited claim fails its `TestAssumption_*` test in CI,
   not a rehearsal.

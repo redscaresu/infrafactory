@@ -14,7 +14,7 @@ depends_on: [rehearsal-walls]
 
 **Out of scope:** discovery, read, load, check, reset (rehearsal-against-the-copy); the UI.
 
-**Constraints:** no new os/exec path; ADR-0032 exit codes passed through unchanged; passthrough refuses `-var` and `-var-file` by name, passes prepare's copied var file and no other, and reuses replace mode (ADR-0042).
+**Constraints:** no new os/exec path; exit codes follow ADR-0002 and ADR-0042, with tofu's own exit code passed through unchanged, and ADR-0042's passthrough amendment says how `plan -detailed-exitcode`'s 2 (changes present) is told apart from a usage error's 2; passthrough refuses `-var` and `-var-file` by name, passes prepare's copied var file and no other, and reuses replace mode (ADR-0042).
 
 **Your part:** none.
 

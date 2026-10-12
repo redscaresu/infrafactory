@@ -12,11 +12,15 @@ risk: high
 
 Widen rehearse_gate_paths.go, which gate-core opened closed. The boundary is the copy root (`<id>/work`); every admitted module is local and copied, so there is no other boundary.
 
-These path arguments must resolve inside the boundary: local_file/local_sensitive_file `filename`, data local_file/local_sensitive_file `filename`, archive_file `output_path`/`source_file`/`source_dir`, and the first argument of file, fileexists, fileset, filebase64, filemd5, filesha1, filesha256, filesha512, filebase64sha256, filebase64sha512 and templatefile. These names are admitted by exact match only, so a `::`-qualified spelling stays refused by gate-core's rule. A path is admitted only if it is a literal relative path, or path.module/path.root joined with a literal, and it resolves (lexically, from the module dir) inside the boundary. Absolute, escaping, variable or otherwise computed paths are refused naming the address. abspath and pathexpand stay refused by name.
+These path arguments must resolve inside the boundary: local_file/local_sensitive_file `filename` and `source`, data local_file/local_sensitive_file `filename`, archive_file (resource and data) `output_path`/`source_file`/`source_dir`, and the first argument of file, fileexists, fileset, filebase64, filemd5, filesha1, filesha256, filesha512, filebase64sha256, filebase64sha512 and templatefile. These names are admitted by exact match only, so a `::`-qualified spelling stays refused by gate-core's rule. A path is admitted only if it is path.module or path.root joined with a literal, and it resolves (lexically, from that directory) inside the boundary. A bare relative literal is refused naming the address: which directory tofu resolves it from is not pinned, and refusing it needs no claim (ADR-0042). Absolute, escaping, variable or otherwise computed paths are refused naming the address. abspath and pathexpand stay refused by name.
+
+**Templates.** The template a templatefile names is gated too, since other files are admitted unparsed and a template can call any function: read it from its checked path, parse it with hclsyntax.ParseTemplate, and hold every function call and path in it to the same function and path rules. A missing or unparseable template is refused naming the templatefile's address.
 
 Tip: `ADR: none — ADR-0042 records the path rule`.
 
 **Done when:**
 - Refused, each naming its address: `file("/etc/passwd")`, `file("../../x")` escaping the boundary, `templatefile(var.p, {})`, `pathexpand("~/.aws/credentials")`, `core::templatefile("${path.module}/t.tpl", {})`, local_file `filename = "/tmp/x"` and archive_file `source_dir = "../.."`.
+- Refused: a bare relative literal, `file("files/a.txt")`, naming its address; local_file `source = "/etc/passwd"`.
+- A template calling file on an absolute path is refused; a template that does not parse is refused.
 - Admitted: `file("${path.module}/files/a.txt")`, `templatefile("${path.root}/t.tpl", {})` and local_file `filename = "${path.module}/out.txt"`.
 - Each new test is shown failing by a cp-backup break recorded in the PR.
