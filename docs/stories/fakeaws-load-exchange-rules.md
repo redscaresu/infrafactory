@@ -1,8 +1,7 @@
 ---
 kind: code
 repo: fakeaws
-status: blocked
-blocked_by: [fakeaws-load-route]
+status: ready
 epic: fakeaws-loader
 depends_on: [fakeaws-load-route]
 touches: [handlers/load.go, handlers/load_test.go, handlers/export_test.go, repository/load.go, repository/load_test.go]
@@ -46,6 +45,7 @@ fakeaws would answer a field the body never held, which the epic calls minting. 
 apply through Diff only.
 
 **Done when:**
+- Render runs under the same recover as load (handlers/load.go run.exchange, fakeaws#78): a render that panics is a value-free *loadAbort and its panic value never reaches the log; a test render panics with a marker value and the captured log lacks it.
 - With test-only loaders: a NotFound exchange is counted absent; a 500 exchange is refused naming
   the action and 500.
 - A NextToken page with no next page is refused as truncated; an IAM page with IsTruncated true
