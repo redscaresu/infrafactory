@@ -130,8 +130,17 @@ In every gated module directory:
   provider and backend overrides.
 - A `terraform.d` entry is refused: tofu reads it as an implied local provider mirror
   (**unverified**; the refusal holds either way).
-- Any other file is data tofu does not load (`TestAssumption_LoaderIgnoresUnknownSuffixes`), and is
-  admitted unparsed.
+- A `tests` entry is refused: tofu reads it as the test directory, so broken HCL in
+  `tests/a.tftest.hcl` fails `init` and `validate` (`TestAssumption_LoaderIgnoresUnknownSuffixes`),
+  and a `run` block there is configuration the gate would never see.
+- A `.tf` file holds only blocks; a top-level attribute is refused.
+- Any other file, and any other subdirectory, is admitted unparsed, because tofu's configuration
+  loader skips them (`TestAssumption_LoaderIgnoresUnknownSuffixes`). Tofu still reads some of those
+  files by other routes, and another rule owns each: `.terraform.lock.hcl`, from which tofu takes
+  provider versions, is parsed before the first tofu command (§ The lock, story
+  rehearsal-prepare-first-init); `.terraform/`, tofu's default data dir, is left out of the copy
+  (story rehearsal-prepare-copy), and every step's `TF_DATA_DIR` lies outside it (§ The layout);
+  a file the configuration names by path is held to § Paths and templates.
 
 ### Providers
 

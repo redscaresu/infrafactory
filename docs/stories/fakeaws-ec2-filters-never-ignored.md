@@ -1,8 +1,7 @@
 ---
 kind: code
 repo: fakeaws
-status: blocked
-blocked_by: [fakeaws-ec2-filter-engine, fakeaws-request-log-gap-markers, fakeaws-ami-fixtures-suppressed-when-loaded, fakeaws-state-gathers-fail-closed, fakeaws-request-log-read-set, fakeaws-identity-sweep-and-docs]
+status: ready
 epic: fakeaws-data-sources
 depends_on: [fakeaws-ec2-filter-engine, fakeaws-request-log-gap-markers, fakeaws-ami-fixtures-suppressed-when-loaded, fakeaws-state-gathers-fail-closed, fakeaws-request-log-read-set, fakeaws-identity-sweep-and-docs]
 touches: [handlers/ec2.go, handlers/ec2_filters.go, handlers/ec2_filters_test.go, handlers/ec2_test.go, handlers/coverage_boost_test.go, handlers/recorder_test.go, coverage_matrix.yaml, AGENTS.md, concepts.md, CHANGELOG.md]
