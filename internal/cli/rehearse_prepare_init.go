@@ -155,20 +155,29 @@ func (p rehearsePrepare) secondInit(ctx context.Context, rehearsal, root string)
 		"HTTPS_PROXY": rehearsalDeadProxy,
 		"HTTP_PROXY":  rehearsalDeadProxy,
 	}
-	// -plugin-dir is relative to the root, tofu's working dir, so it holds
-	// only .. and data/providers: tofu 1.13 splits the flag at a comma,
-	// which the rehearsal's absolute path may hold (TestRehearsePrepare's
-	// repo path does).
-	plugins, err := filepath.Rel(root, filepath.Join(data, "providers"))
+	args, err := rehearsalSecondInitArgs(root, filepath.Join(state, "terraform.tfstate"), data)
 	if err != nil {
 		return err
 	}
-	args := []string{"init", "-input=false", "-no-color", "-reconfigure", "-get=false", "-lockfile=readonly",
-		"-backend-config=path=" + filepath.Join(state, "terraform.tfstate"), "-plugin-dir=" + plugins}
 	if err := p.tofu(ctx, harness.Command{Name: "tofu", Args: args, Dir: root, Env: env, ReplaceEnv: true}); err != nil {
 		return err
 	}
 	return rehearsalTightenModes(rehearsal)
+}
+
+// rehearsalSecondInitArgs is the second init's args, run in root, with the
+// state at statePath and the providers the first init installed under
+// data; TestAssumption_SecondInitMakesNoProxiedConnection runs them too.
+// -plugin-dir is relative to root, tofu's working dir, so it holds only ..
+// and data/providers: tofu 1.13 splits the flag at a comma, which the
+// rehearsal's absolute path may hold (TestRehearsePrepare's repo path does).
+func rehearsalSecondInitArgs(root, statePath, data string) ([]string, error) {
+	plugins, err := filepath.Rel(root, filepath.Join(data, "providers"))
+	if err != nil {
+		return nil, err
+	}
+	return []string{"init", "-input=false", "-no-color", "-reconfigure", "-get=false", "-lockfile=readonly",
+		"-backend-config=path=" + statePath, "-plugin-dir=" + plugins}, nil
 }
 
 // rehearsalProxyRefuses dials proxy and admits only a refused connection:

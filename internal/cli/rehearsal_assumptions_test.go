@@ -349,10 +349,11 @@ const (
 // -backend=false` under an environment of PATH and an empty HOME, with no
 // TF_CLI_CONFIG_FILE, TF_PLUGIN_CACHE_DIR or AWS_*, fetches the provider
 // and both modules into a TF_DATA_DIR outside the copy. The second init,
-// with the backend override, `-reconfigure -get=false -lockfile=readonly
-// -plugin-dir=<TF_DATA_DIR>/providers`, then makes no proxied connection;
-// without -plugin-dir it does. A direct dial is beyond what the recorder
-// can observe, so the claim is "no proxied connection".
+// with the backend override and the args prepare runs it with
+// (`-reconfigure -get=false -lockfile=readonly -plugin-dir`, the plugin dir
+// <TF_DATA_DIR>/providers relative to the copy), then makes no proxied
+// connection; without -plugin-dir it does. A direct dial is beyond what
+// the recorder can observe, so the claim is "no proxied connection".
 //
 // Relied on by: rehearsal-prepare-gate, which runs the second init under
 // the dead proxy (HLD § Prepare: two work directories, gated before any
@@ -378,14 +379,14 @@ func TestAssumption_SecondInitMakesNoProxiedConnection(t *testing.T) {
 	assert.FileExists(t, filepath.Join(c.dir, ".terraform.lock.hcl"), c.version)
 
 	proxy := startRecorder(t)
-	out, err := c.secondInit(t, proxy, "-plugin-dir="+filepath.Join(c.data, "providers"))
+	out, err := c.secondInit(t, proxy, true)
 	assert.NoError(t, err, "%s\n%s", c.version, out)
 	assert.Zero(t, proxy.count(), "%s: the second init made a proxied connection: %v", c.version, proxy.requests())
 
 	t.Run("control without -plugin-dir", func(t *testing.T) {
 		sibling := newInitCopy(t)
 		proxy := startRecorder(t)
-		out, _ := sibling.secondInit(t, proxy)
+		out, _ := sibling.secondInit(t, proxy, false)
 		assert.Positive(t, proxy.count(), "%s: no proxied connection without -plugin-dir\n%s", sibling.version, out)
 		t.Logf("%s: the proxy saw %v", sibling.version, proxy.requests())
 	})
@@ -471,12 +472,16 @@ func (c initCopy) moduleKeys(t *testing.T) []string {
 }
 
 // secondInit adds the backend override and runs the rehearsal's second
-// init, plus flags, with both proxies at proxy and no NO_PROXY.
-func (c initCopy) secondInit(t *testing.T, proxy *recorder, flags ...string) (string, error) {
+// init, its args as prepare builds them, with both proxies at proxy and no
+// NO_PROXY. Without plugins, the -plugin-dir arg is dropped.
+func (c initCopy) secondInit(t *testing.T, proxy *recorder, plugins bool) (string, error) {
 	t.Helper()
 	c.write(t, cli.OurOverride, cli.LocalBackendOverride)
-	args := append([]string{"init", "-input=false", "-no-color", "-reconfigure", "-get=false",
-		"-lockfile=readonly", "-backend-config=path=" + c.outside}, flags...)
+	args, err := cli.SecondInitArgs(c.dir, c.outside, c.data)
+	require.NoError(t, err)
+	if !plugins {
+		args = slices.DeleteFunc(args, func(arg string) bool { return strings.HasPrefix(arg, "-plugin-dir=") })
+	}
 	return c.tofu(t, c.bareEnv(t, "HTTPS_PROXY="+proxy.url, "HTTP_PROXY="+proxy.url), args...)
 }
 
