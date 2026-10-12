@@ -1,8 +1,7 @@
 ---
 kind: code
 repo: fakeaws
-status: blocked
-blocked_by: [fakeaws-instance-attributes-from-rows]
+status: ready
 depends_on: [fakeaws-instance-attributes-from-rows]
 touches: [handlers/kms.go, handlers/kms_test.go, handlers/handlers.go, handlers/admin.go, handlers/admin_test.go, repository/identity.go, repository/identity_test.go, AGENTS.md, CHANGELOG.md]
 risk: high
