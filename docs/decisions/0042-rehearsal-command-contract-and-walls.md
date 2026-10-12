@@ -311,8 +311,10 @@ Before the second init, prepare dials the dead proxy and refuses unless the conn
 in the copy's root (the work dir prepare reports, under `<id>/work/`): a `backend "local" {}`
 override that names no `path`. The second init is `tofu init -input=false -no-color -reconfigure -get=false
 -lockfile=readonly -backend-config=path=<id>/state/terraform.tfstate
--plugin-dir=<id>/data/providers`, under replace mode with only `HOME`, `TF_DATA_DIR` and
-`HTTP_PROXY`/`HTTPS_PROXY` at the dead proxy, and no `NO_PROXY`. It makes no proxied connection
+-plugin-dir=<id>/data/providers`, the plugin dir named relative to the copy's root, since tofu
+1.13 splits that flag at a comma (`TestRehearsePrepare` runs from a path holding one), under
+replace mode with only `HOME`, `TF_DATA_DIR` and `HTTP_PROXY`/`HTTPS_PROXY` at the dead proxy, and
+no `NO_PROXY`. It makes no proxied connection
 (`TestAssumption_SecondInitMakesNoProxiedConnection`).
 
 A user `backend` block is neutralised: the override replaces it, and the command-line path puts the

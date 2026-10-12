@@ -155,8 +155,16 @@ func (p rehearsePrepare) secondInit(ctx context.Context, rehearsal, root string)
 		"HTTPS_PROXY": rehearsalDeadProxy,
 		"HTTP_PROXY":  rehearsalDeadProxy,
 	}
+	// -plugin-dir is relative to the root, tofu's working dir, so it holds
+	// only .. and data/providers: tofu 1.13 splits the flag at a comma,
+	// which the rehearsal's absolute path may hold (TestRehearsePrepare's
+	// repo path does).
+	plugins, err := filepath.Rel(root, filepath.Join(data, "providers"))
+	if err != nil {
+		return err
+	}
 	args := []string{"init", "-input=false", "-no-color", "-reconfigure", "-get=false", "-lockfile=readonly",
-		"-backend-config=path=" + filepath.Join(state, "terraform.tfstate"), "-plugin-dir=" + filepath.Join(data, "providers")}
+		"-backend-config=path=" + filepath.Join(state, "terraform.tfstate"), "-plugin-dir=" + plugins}
 	if err := p.tofu(ctx, harness.Command{Name: "tofu", Args: args, Dir: root, Env: env, ReplaceEnv: true}); err != nil {
 		return err
 	}
@@ -164,7 +172,8 @@ func (p rehearsePrepare) secondInit(ctx context.Context, rehearsal, root string)
 }
 
 // rehearsalProxyRefuses dials proxy and admits only a refused connection:
-// a dial that connects, or fails any other way, refuses the second init.
+// a dial that connects, or fails any other way, refuses the second init. A
+// dial that fails because ctx is cancelled is refused as the cancel.
 func rehearsalProxyRefuses(ctx context.Context, proxy string) error {
 	refused := func(why string) error {
 		return fmt.Errorf("the second init is refused: the dead proxy %s %s, so it cannot be relied on to refuse the init's requests", proxy, why)
@@ -173,13 +182,15 @@ func rehearsalProxyRefuses(ctx context.Context, proxy string) error {
 	if err != nil {
 		return refused(fmt.Sprintf("does not parse (%v)", err))
 	}
-	ctx, cancel := context.WithTimeout(ctx, rehearsalDialTimeout)
+	dialCtx, cancel := context.WithTimeout(ctx, rehearsalDialTimeout)
 	defer cancel()
-	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", u.Host)
+	conn, err := (&net.Dialer{}).DialContext(dialCtx, "tcp", u.Host)
 	switch {
 	case err == nil:
 		conn.Close()
 		return refused("accepted a connection")
+	case ctx.Err() != nil:
+		return rehearsalCancelled(ctx)
 	case errors.Is(err, syscall.ECONNREFUSED):
 		return nil
 	}

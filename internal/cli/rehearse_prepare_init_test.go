@@ -321,7 +321,9 @@ func TestRehearsePrepareGate2RefusesBeforeTheSecondInit(t *testing.T) {
 
 // The second init runs offline: the backend override in the copy's root at
 // 0600, the state outside the copy, only the providers the first init
-// installed, and replace mode with both proxies at the dead proxy.
+// installed (named relative to the root, so no comma in the rehearsal's
+// path reaches the flag), and replace mode with both proxies at the dead
+// proxy.
 func TestRehearsePrepareSecondInitCommand(t *testing.T) {
 	t.Parallel()
 	var override string
@@ -346,8 +348,10 @@ func TestRehearsePrepareSecondInitCommand(t *testing.T) {
 	c := run.calls[3]
 	assert.Equal(t, "tofu", c.Name)
 	assert.Equal(t, filepath.Join(work, "envs", "prod"), c.Dir)
+	plugins := filepath.Join("..", "..", "..", "data", "providers")
 	assert.Equal(t, []string{"init", "-input=false", "-no-color", "-reconfigure", "-get=false", "-lockfile=readonly",
-		"-backend-config=path=" + state, "-plugin-dir=" + filepath.Join(rehearsal, "data", "providers")}, c.Args)
+		"-backend-config=path=" + state, "-plugin-dir=" + plugins}, c.Args)
+	assert.Equal(t, filepath.Join(rehearsal, "data", "providers"), filepath.Join(c.Dir, plugins), "-plugin-dir does not name <id>/data/providers from the root")
 	assert.True(t, c.ReplaceEnv, "the second init runs with an inherited environment")
 	assert.Empty(t, c.StripEnv)
 	assert.Equal(t, map[string]string{
@@ -412,4 +416,17 @@ func TestRehearsalProxyRefuses(t *testing.T) {
 			assert.Contains(t, err.Error(), "the second init is refused: the dead proxy "+tc.proxy+" "+tc.want)
 		})
 	}
+}
+
+// A dial cut short by a cancel is refused as the cancel, not as a broken
+// dead proxy.
+func TestRehearsalProxyRefusesACancelAsTheCancel(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := rehearsalProxyRefuses(ctx, "http://127.0.0.1:9")
+
+	require.ErrorIs(t, err, context.Canceled)
+	assert.EqualError(t, err, "prepare is cancelled: context canceled")
 }
