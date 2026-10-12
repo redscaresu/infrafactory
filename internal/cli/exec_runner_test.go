@@ -159,6 +159,7 @@ func helperCommand(role string) harness.Command {
 // tests below start. "parent" stands in for infrafactory under a signal
 // guard, which cancels the runner's context on a signal; "count" stands in for tofu, printing how
 // many SIGINTs it saw; "ignore" prints each SIGINT and ignores it;
+// "replace-parent" is "parent" with its child in replace mode;
 // "unguarded" is "parent" with no signal guard, as live teardown has;
 // "tree" is "ignore" with an "ignore" grandchild sharing its stdout, as a
 // provider plugin might.
@@ -168,13 +169,19 @@ func TestExecRunnerHelperProcess(t *testing.T) {
 		return
 	}
 	switch role {
-	case "parent":
+	case "parent", "replace-parent":
 		// A guard, as runUnderSignals is: the first signal cancels ctx.
 		ctx, stop := notifyGuarded(context.Background(), signal.NotifyContext)
 		// Every signal this process gets: the terminal's, and any Run raised again.
 		seen := make(chan os.Signal, 4)
 		signal.Notify(seen, guardSignals...)
-		result, err := execCommandRunner{}.Run(ctx, helperCommand("count"))
+		child := helperCommand("count")
+		if role == "replace-parent" {
+			// Replace mode inherits nothing, so the ready file is passed by name.
+			child.ReplaceEnv = true
+			child.Env[execHelperReadyEnv] = os.Getenv(execHelperReadyEnv)
+		}
+		result, err := execCommandRunner{}.Run(ctx, child)
 		stop()
 		time.Sleep(500 * time.Millisecond)
 		// Canceled only when the cancel signalled the child itself.
@@ -256,6 +263,18 @@ func TestExecRunnerGroupInterruptReachesChildOnce(t *testing.T) {
 	t.Parallel()
 
 	parent, stdout, _ := startHelperParent(t, "parent")
+	require.NoError(t, syscall.Kill(-parent.Process.Pid, syscall.SIGINT))
+	require.NoError(t, parent.Wait())
+
+	assert.Equal(t, "interrupts=1 canceled=true signals=1", stdout.String())
+}
+
+// A replace-mode command is in its own process group too, and hears the
+// terminal's Ctrl-C only as the runner's one SIGINT.
+func TestExecRunnerReplaceEnvGroupInterruptReachesChildOnce(t *testing.T) {
+	t.Parallel()
+
+	parent, stdout, _ := startHelperParent(t, "replace-parent")
 	require.NoError(t, syscall.Kill(-parent.Process.Pid, syscall.SIGINT))
 	require.NoError(t, parent.Wait())
 
@@ -394,4 +413,132 @@ func TestSignalGuardsAreCounted(t *testing.T) {
 
 	assert.Equal(t, []int32{before + 1, before + 1}, during, "runUnderSignals, runDeployApply")
 	assert.Equal(t, before, signalGuards.Load(), "released")
+}
+
+// envBin is exec'd directly to print the environment it was given, exactly:
+// `sh -c env` would add PWD, SHLVL and _.
+const envBin = "/usr/bin/env"
+
+// runEnv runs cmd, an envBin command, and returns what it printed.
+func runEnv(t *testing.T, cmd harness.Command) string {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	result, err := execCommandRunner{}.Run(ctx, cmd)
+	require.NoError(t, err, "%s", result.Stderr)
+	return string(result.Stdout)
+}
+
+// envOutput is what envBin prints for entries.
+func envOutput(entries ...string) string {
+	var b strings.Builder
+	for _, entry := range entries {
+		b.WriteString(entry + "\n")
+	}
+	return b.String()
+}
+
+// Replace mode passes PATH and the named variables, and nothing else of
+// this process's environment: each of these would change what tofu, the
+// provider, git or ssh does, or where it sends a request.
+func TestExecRunnerReplaceEnvPassesOnlyPathAndEnv(t *testing.T) {
+	for _, key := range []string{
+		"HOME", "TF_CLI_CONFIG_FILE", "TF_REATTACH_PROVIDERS", "TF_LOG_PATH",
+		"TF_PLUGIN_CACHE_DIR", "TF_CLI_ARGS", "TF_CLI_ARGS_init", "TF_VAR_region",
+		"TF_ENCRYPTION", "TF_TOKEN_app_terraform_io", "AWS_IGNORE_CONFIGURED_ENDPOINT_URLS",
+		"AWS_SESSION_TOKEN", "AWS_PROFILE", "SSH_AUTH_SOCK", "GIT_CONFIG_GLOBAL",
+		"HTTPS_PROXY", "NO_PROXY",
+	} {
+		t.Setenv(key, "planted")
+	}
+
+	got := runEnv(t, harness.Command{
+		Name:       envBin,
+		Env:        map[string]string{"AWS_REGION": "us-east-1", "TF_IN_AUTOMATION": "1"},
+		ReplaceEnv: true,
+	})
+
+	assert.Equal(t, envOutput("PATH="+os.Getenv("PATH"), "AWS_REGION=us-east-1", "TF_IN_AUTOMATION=1"), got)
+}
+
+// With no PATH to pass and nothing named, the child's environment is
+// empty, not this process's: os/exec reads a nil Env as "inherit".
+func TestExecRunnerReplaceEnvWithNothingIsEmpty(t *testing.T) {
+	t.Setenv("PATH", "") // restores PATH after the test
+	require.NoError(t, os.Unsetenv("PATH"))
+
+	assert.Empty(t, runEnv(t, harness.Command{Name: envBin, ReplaceEnv: true}))
+}
+
+func TestExecRunnerReplaceEnvPathFromEnvWins(t *testing.T) {
+	require.NotEqual(t, "/from-env", os.Getenv("PATH"))
+
+	got := runEnv(t, harness.Command{Name: envBin, Env: map[string]string{"PATH": "/from-env"}, ReplaceEnv: true})
+
+	assert.Equal(t, envOutput("PATH=/from-env"), got)
+}
+
+// Without ReplaceEnv the child inherits as it always has: this process's
+// environment in order, minus GCP auth and StripEnv, then Env sorted.
+func TestExecRunnerInheritedEnvIsUnchanged(t *testing.T) {
+	t.Setenv("GOOGLE_CREDENTIALS", "planted")
+	t.Setenv("CLOUDSDK_CORE_PROJECT", "planted")
+	t.Setenv("AWS_PROFILE", "planted")
+	t.Setenv("AWS_SESSION_TOKEN", "planted")
+	t.Setenv("INFRAFACTORY_KEPT", "kept")
+	t.Setenv("INFRAFACTORY_OVERRIDDEN", "parent")
+	env := map[string]string{"INFRAFACTORY_OVERRIDDEN": "env", "INFRAFACTORY_ADDED": "env"}
+
+	var want []string
+	for _, entry := range os.Environ() {
+		key, _, _ := strings.Cut(entry, "=")
+		gcpAuth := slices.ContainsFunc(gcpAuthEnvPrefixes, func(prefix string) bool { return strings.HasPrefix(key, prefix) })
+		if gcpAuth || strings.HasPrefix(key, "AWS_") || env[key] != "" {
+			continue
+		}
+		want = append(want, entry)
+	}
+	want = append(want, "INFRAFACTORY_ADDED=env", "INFRAFACTORY_OVERRIDDEN=env")
+	require.Contains(t, want, "INFRAFACTORY_KEPT=kept")
+
+	got := runEnv(t, harness.Command{Name: envBin, Env: env, StripEnv: []string{"AWS_*"}})
+
+	assert.Equal(t, envOutput(want...), got)
+}
+
+// Replace mode has nothing to strip, so a command asking for both is a
+// mistake, refused before anything runs.
+func TestExecRunnerRefusesReplaceEnvWithStripEnv(t *testing.T) {
+	t.Parallel()
+
+	started := filepath.Join(t.TempDir(), "started")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	result, err := execCommandRunner{}.Run(ctx, harness.Command{
+		Name:       "/usr/bin/touch",
+		Args:       []string{started},
+		ReplaceEnv: true,
+		StripEnv:   []string{"AWS_*"},
+	})
+
+	require.ErrorIs(t, err, errReplaceEnvWithStripEnv)
+	assert.Equal(t, -1, result.ExitCode)
+	assert.NoFileExists(t, started, "the command ran")
+}
+
+// runTofu hands tofu exactly the env it is given: the planted HOME and
+// TF_CLI_ARGS of this process never reach it.
+func TestRunTofuPassesExactlyItsEnv(t *testing.T) {
+	bin := t.TempDir()
+	require.NoError(t, os.Symlink(envBin, filepath.Join(bin, "tofu")))
+	t.Setenv("PATH", bin)
+	t.Setenv("HOME", "/planted-home")
+	t.Setenv("TF_CLI_ARGS", "-planted")
+	env := []string{"AWS_REGION=us-east-1", "PATH=" + bin, "TF_IN_AUTOMATION=1"}
+
+	stdout, stderr, err := runTofu(t.TempDir(), env)
+
+	require.NoError(t, err, stderr)
+	assert.Equal(t, envOutput(env...), stdout)
 }

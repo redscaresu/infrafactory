@@ -13,7 +13,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -22,6 +21,8 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/redscaresu/infrafactory/internal/harness"
 )
 
 // Assumptions this package's COMMENTS depend on.
@@ -256,34 +257,26 @@ const tofuDeadline = 2 * time.Minute
 // user's zz_override.tf.
 const ourOverride = "infrafactory_override.tf"
 
-// runTofu runs tofu in dir with exactly env under tofuDeadline, and returns
-// its stdout and stderr. On the deadline it SIGKILLs tofu's whole process
-// group: a child that outlived a kill of tofu alone would hold an output
-// pipe and block the call past the deadline. Killing the group closes every
-// holder of the pipes, so there is no WaitDelay, whose timer would also
-// start on a normal exit and turn a slow pipe close into exec.ErrWaitDelay
-// (exec_runner.go refuses it for the same reason). Past the deadline the
-// error wraps context.DeadlineExceeded.
+// runTofu runs tofu in dir through the production runner in replace mode
+// under tofuDeadline, and returns its stdout and stderr. The child's
+// environment is exactly env, plus this process's PATH when env names
+// none. The tofu that runs is the one on this process's PATH, whatever
+// PATH env names. At the deadline tofu's process group gets the runner's
+// SIGINT, then SIGKILL after cancelKillFallback, and the error wraps
+// context.DeadlineExceeded.
 func runTofu(dir string, env []string, args ...string) (stdout, stderr string, err error) {
 	ctx, cancel := context.WithTimeout(context.Background(), tofuDeadline)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "tofu", args...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error {
-		err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		if errors.Is(err, syscall.ESRCH) {
-			return os.ErrProcessDone
-		}
-		return err
+	vars := make(map[string]string, len(env))
+	for _, entry := range env {
+		key, value, _ := strings.Cut(entry, "=")
+		vars[key] = value
 	}
-	cmd.Dir, cmd.Env = dir, env
-	var out, errOut bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &out, &errOut
-	err = cmd.Run()
+	result, err := execCommandRunner{}.Run(ctx, harness.Command{Name: "tofu", Args: args, Dir: dir, Env: vars, ReplaceEnv: true})
 	if ctx.Err() != nil {
 		err = fmt.Errorf("tofu %s ran past %s: %w", strings.Join(args, " "), tofuDeadline, ctx.Err())
 	}
-	return out.String(), errOut.String(), err
+	return string(result.Stdout), string(result.Stderr), err
 }
 
 // tofu runs tofu in the copy and returns its stdout; a non-zero exit or
