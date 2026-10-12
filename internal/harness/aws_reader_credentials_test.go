@@ -26,10 +26,12 @@ const (
 	readerReversedID  = "AKIAREVERSEDKEYID777"
 	readerProfile     = "Pr0f1leV4lue+zz"
 	readerDuplicate   = "D2pl/icateSecret+99"
+	readerGluedID     = "AKIAGLUEDKEYID000888"
+	readerSpaced      = "Sp4ced/S3cret+Mm2Q"
 	fragmentLen       = 8
 )
 
-var readerPlanted = []string{readerKeyID, readerSecret, readerToken, readerWrappedTail, readerReversed, readerReversedID, readerProfile, readerDuplicate}
+var readerPlanted = []string{readerKeyID, readerSecret, readerToken, readerWrappedTail, readerReversed, readerReversedID, readerProfile, readerDuplicate, readerGluedID, readerSpaced}
 
 const validReaderCreds = "AWS_ACCESS_KEY_ID=" + readerKeyID + "\nAWS_SECRET_ACCESS_KEY=" + readerSecret + "\n"
 
@@ -68,7 +70,7 @@ func TestAWSReaderConfigRefuses(t *testing.T) {
 		{"mode 0604", func(t *testing.T) string { return writeAWSCredFile(t, withToken, 0o604) }, "mode 0604"},
 		{"unknown key", func(t *testing.T) string {
 			return readerCredFile(t, withToken+"AWS_PROFILE="+readerProfile+"\n")
-		}, `line 4 has unknown key "AWS_PROFILE"`},
+		}, "line 4 has an unrecognised key"},
 		{"lower-case unknown key", func(t *testing.T) string {
 			return readerCredFile(t, withToken+"aws_profile="+readerProfile+"\n")
 		}, "line 4 has an unrecognised key"},
@@ -188,4 +190,50 @@ func TestAWSReaderConfigSignsWithTheSessionTokenOnlyWhenTheFileHasOne(t *testing
 			assert.Equal(t, tc.token, header.Get("X-Amz-Security-Token"))
 		})
 	}
+}
+
+// foreignOwned is a real file's stat that says another user owns it.
+type foreignOwned struct{ os.FileInfo }
+
+func (f foreignOwned) Sys() any {
+	st := *f.FileInfo.Sys().(*syscall.Stat_t)
+	st.Uid++
+	return &st
+}
+
+// ownerUnknown is a real file's stat that does not say who owns it.
+type ownerUnknown struct{ os.FileInfo }
+
+func (ownerUnknown) Sys() any { return nil }
+
+// Another user's file cannot be made without root, so the owner check
+// is tested on a real 0600 file's stat with only its owner changed.
+func TestCheckOwnerOnlyFileRefusesAFileYouDoNotOwn(t *testing.T) {
+	t.Parallel()
+
+	path := readerCredFile(t, validReaderCreds)
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	require.NoError(t, checkOwnerOnlyFile(path, info), "your own 0600 file passes")
+
+	err = checkOwnerOnlyFile(path, foreignOwned{info})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "is owned by uid")
+
+	err = checkOwnerOnlyFile(path, ownerUnknown{info})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cannot tell who owns it")
+}
+
+func TestReadOwnerOnlyFileRefusesAFileOverTheCap(t *testing.T) {
+	t.Parallel()
+
+	data, err := readOwnerOnlyFile(readerCredFile(t, strings.Repeat("#", credentialFileMaxBytes)))
+	require.NoError(t, err)
+	assert.Len(t, data, credentialFileMaxBytes)
+
+	data, err = readOwnerOnlyFile(readerCredFile(t, strings.Repeat("#", credentialFileMaxBytes+1)))
+	require.Error(t, err)
+	assert.Nil(t, data)
+	assert.Contains(t, err.Error(), "is over 4096 bytes")
 }

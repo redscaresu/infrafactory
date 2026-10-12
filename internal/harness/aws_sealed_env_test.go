@@ -3,7 +3,10 @@ package harness
 import (
 	"os"
 	"path/filepath"
+	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -125,4 +128,81 @@ func TestAWSSealedEnvAcceptsOwnerOnlyFileAndRealRegions(t *testing.T) {
 		require.NoError(t, err, region)
 		assert.Equal(t, region, env["AWS_REGION"])
 	}
+}
+
+// A line the reader cannot parse is refused without any of it in the
+// error: its left side may be a piece of a secret or key id, or a key
+// name with the key id glued on.
+func TestAWSSealedEnvRefusesAnUnparsableLineWithoutEchoingIt(t *testing.T) {
+	t.Parallel()
+
+	valid := "AWS_ACCESS_KEY_ID=" + testAWSKeyID + "\nAWS_SECRET_ACCESS_KEY=" + testAWSSecret + "\n"
+	cases := []struct {
+		name, content, reason string
+	}{
+		{"wrapped secret line", valid + readerWrappedTail + "\n", "line 3 has an unrecognised key"},
+		{"reversed secret line", "AWS_ACCESS_KEY_ID=" + testAWSKeyID + "\n" + readerReversed + "=AWS_SECRET_ACCESS_KEY\n", "line 2 has an unrecognised key"},
+		{"reversed key id line", readerReversedID + "=AWS_ACCESS_KEY_ID\n", "line 1 has an unrecognised key"},
+		{"key glued to its value", "AWS_ACCESS_KEY_ID" + readerGluedID + "=x\n", "line 1 has an unrecognised key"},
+		{"spaces around =", "AWS_ACCESS_KEY_ID=" + testAWSKeyID + "\nAWS_SECRET_ACCESS_KEY = " + readerSpaced + "\n", "line 2: no spaces around '='"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			path := writeAWSCredFile(t, tc.content, 0o600)
+			env, err := AWSSealedEnv(path, "eu-west-2")
+			require.Error(t, err)
+			assert.Nil(t, env)
+			assert.Contains(t, err.Error(), tc.reason)
+			assertNoPlantedFragment(t, strings.ReplaceAll(err.Error(), path, ""))
+		})
+	}
+}
+
+// A FIFO at the credential file's path is refused, not waited on.
+func TestAWSSealedEnvRefusesAFIFOWithoutBlocking(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "layer3-aws.env")
+	require.NoError(t, syscall.Mkfifo(path, 0o600))
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := AWSSealedEnv(path, "eu-west-2")
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not a regular file")
+	case <-time.After(5 * time.Second):
+		// Opening the write end releases the blocked open.
+		if w, err := os.OpenFile(path, os.O_WRONLY|syscall.O_NONBLOCK, 0); err == nil {
+			_ = w.Close()
+		}
+		t.Fatal("opening a FIFO blocked: the reader must not wait for a writer")
+	}
+}
+
+// A file swapped in at the path after the checks passed is never read:
+// the read follows the handle that was checked, not the name. The
+// swapped-in file is 0644, so reading it would also skip the mode check.
+// Not parallel: it sets the package's check hook.
+func TestAWSSealedEnvReadsTheFileItChecked(t *testing.T) {
+	path := validAWSCredFile(t)
+	swapped := writeAWSCredFile(t, "AWS_ACCESS_KEY_ID=AKIASWAPPEDIN0000001\nAWS_SECRET_ACCESS_KEY=swapped-in-after-the-check\n", 0o644)
+
+	checked := false
+	prev := ownerOnlyFileCheckedForTest
+	t.Cleanup(func() { ownerOnlyFileCheckedForTest = prev })
+	ownerOnlyFileCheckedForTest = func() {
+		checked = true
+		require.NoError(t, os.Rename(swapped, path))
+	}
+
+	env, err := AWSSealedEnv(path, "eu-west-2")
+	require.NoError(t, err)
+	assert.True(t, checked, "the swap must run between the checks and the read")
+	assert.Equal(t, testAWSKeyID, env["AWS_ACCESS_KEY_ID"])
+	assert.Equal(t, testAWSSecret, env["AWS_SECRET_ACCESS_KEY"], "the reader read a file swapped in after its checks")
 }
