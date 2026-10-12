@@ -240,6 +240,14 @@ func TestCheckScrubbedRead(t *testing.T) {
 			wantErr: "$.region: repeats a key",
 		},
 		{
+			name: "a key repeated in another case", old: `"body": "<GetCallerIdentityResponse`, new: `"Body": "x", "body": "<GetCallerIdentityResponse`,
+			wantErr: "$.exchanges[0].body: repeats a key",
+		},
+		{
+			name: "a Value in another case", old: `\"Value\":\"` + AWSScrubParameterValue + `\"`, new: `\"value\":\"planted-db-password\"`,
+			wantErr: "$.exchanges[3].body: $.Parameter.value: is neither the placeholder", planted: "planted-db-password",
+		},
+		{
 			name: "a run split by CDATA", old: groupName, new: "<groupName>2468<![CDATA[13579024]]></groupName>",
 			wantErr: "$.exchanges[1].body: holds a 12-digit number", planted: "13579024",
 		},

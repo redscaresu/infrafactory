@@ -256,13 +256,15 @@ func scrubAWSStateUserData(v any) {
 // the scrubbed read and state, each whole: by the scrub before it writes
 // either, and by the committed fixtures' test. It refuses
 //   - a 12-digit number other than AWSScrubAccount, where a hit is a
-//     maximal run of exactly twelve digits;
+//     maximal run of exactly twelve digits that is not the fraction of
+//     a d.ddd…E9 number (awsExponentFraction);
 //   - an AWS unique or key id (A[A-Z]{3}[A-Z0-9]{12,});
 //   - a userData, an SSM Value or a state's private aws_ssm_parameter
 //     value that is not its placeholder (nor, for a Value, a public
 //     /aws/service/ parameter's);
 //   - a read whose account is not AWSScrubAccount, and an object that
-//     repeats a key, which a decode would hide.
+//     repeats a key (in the read, in any case), which a decode would
+//     hide.
 //
 // Text is read as written and percent-decoded, and a body as its XML or
 // JSON decodes. The error names the file and the JSON path, never the
@@ -278,7 +280,7 @@ func CheckScrubbedRead(readName string, read []byte, stateName string, state []b
 }
 
 func checkScrubbedAWSRead(data []byte) error {
-	if err := checkScrubbedJSON(data); err != nil {
+	if err := checkScrubbedJSON(data, true); err != nil {
 		return err
 	}
 	var read AWSRecordedRead
@@ -306,7 +308,7 @@ func checkScrubbedAWSRead(data []byte) error {
 }
 
 func checkScrubbedAWSState(data []byte) error {
-	if err := checkScrubbedJSON(data); err != nil {
+	if err := checkScrubbedJSON(data, false); err != nil {
 		return err
 	}
 	var state any
@@ -318,11 +320,14 @@ func checkScrubbedAWSState(data []byte) error {
 
 // checkScrubbedJSON checks every key, string and number of data, which
 // must hold exactly one JSON value, reading it token by token so that no
-// repeated key hides a value.
-func checkScrubbedJSON(data []byte) error {
+// repeated key hides a value. With foldKeys, keys repeat as encoding/json
+// matches them to struct fields, ignoring case: for the read and its
+// bodies, which Go code decodes into structs. A state's keys repeat only
+// when exact, since its tags may hold both Name and name.
+func checkScrubbedJSON(data []byte, foldKeys bool) error {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.UseNumber()
-	if err := checkScrubbedJSONValue(dec, "$"); err != nil {
+	if err := checkScrubbedJSONValue(dec, "$", foldKeys); err != nil {
 		return err
 	}
 	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
@@ -331,7 +336,7 @@ func checkScrubbedJSON(data []byte) error {
 	return nil
 }
 
-func checkScrubbedJSONValue(dec *json.Decoder, path string) error {
+func checkScrubbedJSONValue(dec *json.Decoder, path string, foldKeys bool) error {
 	tok, err := dec.Token()
 	if err != nil {
 		return fmt.Errorf("%s: does not parse as JSON", path)
@@ -357,12 +362,17 @@ func checkScrubbedJSONValue(dec *json.Decoder, path string) error {
 			if err := checkScrubbedTextAt(path+" (a key)", key); err != nil {
 				return err
 			}
-			if seen[key] {
+			id := key
+			if foldKeys {
+				// encoding/json's fold: each rune lowered, then raised.
+				id = strings.ToUpper(strings.ToLower(key))
+			}
+			if seen[id] {
 				return fmt.Errorf("%s.%s: repeats a key", path, key)
 			}
-			seen[key], member = true, path+"."+key
+			seen[id], member = true, path+"."+key
 		}
-		if err := checkScrubbedJSONValue(dec, member); err != nil {
+		if err := checkScrubbedJSONValue(dec, member, foldKeys); err != nil {
 			return err
 		}
 	}
@@ -478,10 +488,11 @@ func checkScrubbedXML(body string) error {
 }
 
 // checkScrubbedJSONBody checks a json body's every key, string and number,
-// and refuses a Value, in any object, that is neither
-// AWSScrubParameterValue nor a public parameter's.
+// and refuses a Value (in any case, as a struct decode reads it), in any
+// object, that is neither AWSScrubParameterValue nor a public
+// parameter's.
 func checkScrubbedJSONBody(body string) error {
-	if err := checkScrubbedJSON([]byte(body)); err != nil {
+	if err := checkScrubbedJSON([]byte(body), true); err != nil {
 		return err
 	}
 	var answer any
@@ -489,8 +500,10 @@ func checkScrubbedJSONBody(body string) error {
 		return errors.New("does not parse as JSON")
 	}
 	return walkJSONObjects("$", answer, func(path string, object map[string]any) error {
-		if value, ok := object["Value"]; ok && value != AWSScrubParameterValue && !awsPublicParameter(object["Name"]) {
-			return fmt.Errorf("%s.Value: is neither the placeholder nor a public parameter's value", path)
+		for key, value := range object {
+			if strings.EqualFold(key, "Value") && value != AWSScrubParameterValue && !awsPublicParameter(object["Name"]) {
+				return fmt.Errorf("%s.%s: is neither the placeholder nor a public parameter's value", path, key)
+			}
 		}
 		return nil
 	})
