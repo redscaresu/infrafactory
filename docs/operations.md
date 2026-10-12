@@ -697,10 +697,13 @@ malformed flag exits 2.
 - **The lock.** The root's `.terraform.lock.hcl` is required: a missing or unparseable lock is
   refused, because the rehearsal takes every provider version from it. It must pin `hashicorp/aws`,
   one version per provider, from `registry.opentofu.org` or `registry.terraform.io`. The first init
-  may not change what it pins.
+  may not change what it pins. A version must be an exact X.Y.Z release, and `hashicorp/aws` may be
+  no later than 5.100.0 and of major 5 (`hashicorp/local` 2.9.1, `hashicorp/archive` 2.8.1, same
+  rule): the gate's table of the arguments that read a local file is that release's, so a later or
+  other-major release could add one the gate cannot name. A prerelease is refused too.
 - **Warnings** (the prepare still succeeds): a `registry.terraform.io` aws entry, which Terraform
   wrote, where `moved`, `import`, `removed` and `ephemeral` semantics may differ under tofu; and a
-  lock pinning `hashicorp/aws` other than 5.100.0, the release fakeaws is proven against. The line
+  lock pinning an earlier 5.x release of `hashicorp/aws` than 5.100.0, the release fakeaws is proven against. The line
   names the version, so a failure under it is filed as a fakeaws story.
 
 ## Sibling mocks
