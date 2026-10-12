@@ -90,3 +90,31 @@ real account on 2026-09-29 (`aws-scope-planted-leak-proof`, PR #399; observation
 - Still unproven on real AWS, and carried into `aws-layer3-gate-lift`: `test` and `run` taking and
   releasing the claim; a second `test` refused naming the holder; the failed-apply sweep; the
   interrupt prints from `run` and `test`; `tofu destroy`'s IAM actions.
+
+## Amendment, 2026-10-12: a deliberate hold, released by a reap
+
+The hold keeps the claim past the end of a `test` so a read can run against the live stack, and its
+release is a reap. Rules 1-17 and the sweep rows and precedence pairs above are unchanged.
+
+1. **The hold** is `test scenarios/training/aws-web-live.yaml --hold`, aws-web-live only. The hold
+   holds only a passing, uninterrupted run with its copy written: an iteration with no failures, not
+   interrupted (read from the run's own context, never the fresh teardown context), whose state copy
+   is written and verified. A failed or interrupted hold destroys and releases: any other end
+   destroys, sweeps and releases as before. The hold is decided in the one teardown and the process
+   then exits, so it is within rule 6. What is new is that the release happens in another process.
+2. **The release** is `reap <scenario> --take-over <holder> --release-hold`, a reap under rule 4
+   (take-over only by name, a live local holder refused) and rule 5 (released only in
+   `awsReleaseAfterCleanSweep`, after a clean sweep). The order is: copy, destroy, sweep and reap,
+   release. The copy is written before the destroy and the release refuses without it, before any AWS
+   request, when the copy cannot be written or verified; the refusal names
+   `reap <scenario> --take-over <holder>`, the exit that destroys without the copy.
+3. **The copy** is `.infrafactory/holds/<scenario>/terraform-live.tfstate`, directory 0700, file
+   0600, at a fixed path read from no environment variable (`INFRAFACTORY_RUNSTORE_ROOT` does not
+   move it). It is never under `.infrafactory/runs/` or `.infrafactory/live/` (the UI serves both),
+   is gitignored and is never committed. The copy is the authority: when the output dir's state is
+   missing, the release restores it from the copy, never the other way round.
+4. **While the copy exists**, generate, run and test are refused for that scenario, because
+   generation removes the output dir that holds the only live state.
+5. **Nothing expires a hold**: `service.ttl` has no AWS consumer, so a hold lasts until a release.
+6. **What the hold's real proof adds** is a held stack released from another process with its copy
+   taken. The Consequences' unproven list is not restated here.
