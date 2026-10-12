@@ -35,6 +35,10 @@ import (
 // the mock can contradict.
 const MockDeployLayer = "mock_deploy"
 
+// SandboxDeployLayer is the Layer 3 layer name: its failures come from
+// the real cloud.
+const SandboxDeployLayer = "sandbox_deploy"
+
 // Ledger record statuses.
 const (
 	AvoidRecordRetired   = "retired"

@@ -7,6 +7,7 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"gopkg.in/yaml.v3"
 )
 
@@ -101,7 +102,8 @@ func TestPitfallsNoHumanSeeding(t *testing.T) {
 // not-respond / OAuth-escape / 404-from-Describe* failure should
 // never have made it into the file — it should have been routed to
 // docs/mock-gaps.md by the new IsMockServerBug classifier in
-// run_command.go.
+// run_command.go. ForbiddenPitfallSignal reads each entry at its
+// learned_layer, the layer its failure was routed by.
 //
 // Catching these in CI is the enforcement leg of T-12. Before the
 // classifier landed (this commit), the existing pitfalls files
@@ -118,20 +120,45 @@ func TestPitfallsNoMockServerBugSeeds(t *testing.T) {
 			}
 			var file struct {
 				Pitfalls []struct {
-					Resource string `yaml:"resource"`
-					Rule     string `yaml:"rule"`
+					Resource     string `yaml:"resource"`
+					Rule         string `yaml:"rule"`
+					LearnedLayer string `yaml:"learned_layer"`
 				} `yaml:"pitfalls"`
 			}
 			if err := yaml.Unmarshal(payload, &file); err != nil {
 				t.Fatalf("parse %s: %v", path, err)
 			}
 			for _, p := range file.Pitfalls {
-				if IsMockServerBug(p.Rule) {
-					sig := FirstMockSignal(p.Rule)
+				if sig := ForbiddenPitfallSignal(p.LearnedLayer, p.Rule); sig != "" {
 					t.Errorf("pitfalls/%s.yaml: entry for %q has rule matching mock-actionable signal %q — T-12 forbids this. Route the failure to docs/mock-gaps.md instead; the matching mock repo (fakeaws/fakegcp/mockway) should fix the gap at source. Rule was: %.200s",
 						cloud, p.Resource, sig, p.Rule)
 				}
 			}
+		})
+	}
+}
+
+func TestForbiddenPitfallSignal(t *testing.T) {
+	const (
+		realCloud = "ResourceNotFoundException: The specified log group does not exist."
+		mockOnly  = "Error: Plugin did not respond"
+	)
+	for name, tc := range map[string]struct {
+		layer, rule, want string
+	}{
+		"a real-cloud signal learned at sandbox_deploy":      {SandboxDeployLayer, realCloud, ""},
+		"a wait that never saw the resource at sandbox":      {SandboxDeployLayer, "waiting for RDS DB Subnet Group create: couldn't find resource (21 retries)", ""},
+		"a real-cloud signal learned with no Origin":         {"run", realCloud, ""},
+		"a real-cloud signal learned at mock_deploy":         {MockDeployLayer, realCloud, "resourcenotfoundexception"},
+		"a real-cloud signal with no recorded layer":         {"", realCloud, "resourcenotfoundexception"},
+		"a mock-only signal mislabelled sandbox_deploy":      {SandboxDeployLayer, mockOnly, "plugin did not respond"},
+		"not modelled by fakeaws mislabelled sandbox_deploy": {SandboxDeployLayer, "DescribeVpcs: not modelled by fakeaws: foo", "not modelled by fakeaws"},
+		"both kinds of signal mislabelled sandbox_deploy":    {SandboxDeployLayer, realCloud + " " + mockOnly, "plugin did not respond"},
+		"the GCP escape carve-out at mock_deploy":            {MockDeployLayer, `google_project_service.compute: Error 401: "reason": "ACCESS_TOKEN_TYPE_UNSUPPORTED"`, ""},
+		"no signal": {SandboxDeployLayer, "An argument named \"bogus\" is not expected here.", ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			assert.Equal(t, tc.want, ForbiddenPitfallSignal(tc.layer, tc.rule))
 		})
 	}
 }

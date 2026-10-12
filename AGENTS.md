@@ -158,8 +158,8 @@ with its kind. Every swarm brief also carries these lines.
 
 ## The auto-learning pipeline is load-bearing — never excuse its silence
 
-A run that ends `repair_budget_exhausted` or `stuck` on a failure that is not mock-classified
-means the pipeline failed to learn. Treat it as a bug, never as a cold start. Diagnostic protocol:
+A run that ends `repair_budget_exhausted` or `stuck` on a failure that is neither mock-classified
+nor skipped with a logged reason means the pipeline failed to learn. Treat it as a bug, never as a cold start. Diagnostic protocol:
 `docs/auto-learning-loop.md` § When a run learns nothing.
 
 ## Layer 3 (real Scaleway)

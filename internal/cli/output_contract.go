@@ -44,6 +44,9 @@ type FailureSummary struct {
 	// recorded on the pitfall learned from the failure, and kept out of
 	// the output contract.
 	Origin string `json:"-"`
+	// OriginStage is the stage that produced it, before a run renames
+	// it; routeFailure reads it. Kept out of the output contract.
+	OriginStage string `json:"-"`
 }
 
 type ExplainabilitySummary struct {
