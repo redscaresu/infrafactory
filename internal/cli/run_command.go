@@ -254,33 +254,9 @@ func runRunWithNotify(
 						// avoid valid resources because the mock is
 						// incomplete — the system narrows over time.
 						if generator.IsMockServerBug(failure.Detail) {
-							gap := generator.MockGap{
-								Cloud:     cloud,
-								Signal:    generator.FirstMockSignal(failure.Detail),
-								Resource:  generator.ExtractResourceFromDetail(failure.Detail),
-								Scenario:  sc.Name,
-								Detail:    failure.Detail,
-								Timestamp: runID,
-							}
-							if err := generator.AppendMockGap(runtime.Config.Paths.Docs, gap); err != nil {
-								runtime.Logger.Log(LogEntry{
-									Level:   logLevelError,
-									Command: "run",
-									Event:   "self_correction_mock_gap_append",
-									Status:  "failed",
-									RunID:   runID,
-									Detail:  err.Error(),
-								})
-							} else {
-								runtime.Logger.Log(LogEntry{
-									Level:   logLevelInfo,
-									Command: "run",
-									Event:   "self_correction_mock_gap_recorded",
-									Status:  "success",
-									RunID:   runID,
-									Detail:  fmt.Sprintf("cloud=%s signal=%s resource=%s", gap.Cloud, gap.Signal, gap.Resource),
-								})
-							}
+							recordMockGap(runtime, "self_correction", runID, generator.MockGap{
+								Cloud: cloud, Scenario: sc.Name, Detail: failure.Detail, Timestamp: runID,
+							})
 							continue
 						}
 						// Refusals first, exactly as in the terminal harvest.
@@ -537,33 +513,9 @@ func runRunWithNotify(
 			// gcp-gke-cluster, gcp-storage all re-learning the same
 			// OAuth-escape + plugin-crash rules N2 just pruned.
 			if generator.IsMockServerBug(f.Detail) {
-				gap := generator.MockGap{
-					Cloud:     sc.Cloud,
-					Signal:    generator.FirstMockSignal(f.Detail),
-					Resource:  generator.ExtractResourceFromDetail(f.Detail),
-					Scenario:  sc.Name,
-					Detail:    f.Detail,
-					Timestamp: runID,
-				}
-				if err := generator.AppendMockGap(runtime.Config.Paths.Docs, gap); err != nil {
-					runtime.Logger.Log(LogEntry{
-						Level:   logLevelError,
-						Command: "run",
-						Event:   "oscillation_mock_gap_append",
-						Status:  "failed",
-						RunID:   runID,
-						Detail:  err.Error(),
-					})
-				} else {
-					runtime.Logger.Log(LogEntry{
-						Level:   logLevelInfo,
-						Command: "run",
-						Event:   "oscillation_mock_gap_recorded",
-						Status:  "success",
-						RunID:   runID,
-						Detail:  fmt.Sprintf("cloud=%s signal=%s resource=%s", gap.Cloud, gap.Signal, gap.Resource),
-					})
-				}
+				recordMockGap(runtime, "oscillation", runID, generator.MockGap{
+					Cloud: sc.Cloud, Scenario: sc.Name, Detail: f.Detail, Timestamp: runID,
+				})
 				continue
 			}
 			// Refusals first. A gate or policy refusal is machine-generated,
@@ -774,6 +726,17 @@ func runRunWithNotify(
 			for _, cleared := range prev.Failures {
 				key := cleared.Resource + "|" + feedback.NormalizeDetail(cleared.Detail)
 				if _, stillFailing := currKeys[key]; stillFailing {
+					continue
+				}
+				// A mock gap is no HCL lesson, whatever the next iteration
+				// changed to clear it: it goes to docs/mock-gaps.md instead.
+				// The self-correction hook records only the last failing
+				// iteration, so a gap cleared in an earlier pair is written
+				// here (rows dedupe, so writing one twice is harmless).
+				if generator.IsMockServerBug(cleared.Detail) {
+					recordMockGap(runtime, "prescriptive", runID, generator.MockGap{
+						Cloud: sc.Cloud, Scenario: sc.Name, Detail: cleared.Detail, Timestamp: runID,
+					})
 					continue
 				}
 				entry, err := generator.ExtractFixPitfall(
@@ -1885,4 +1848,26 @@ func awsRunFailureTeardown(ctx context.Context, runtime *CommandRuntime, stages 
 	}
 	runtime.awsClaim = awsClaim{state: awsClaimHeld}
 	return awsDestroyAndRelease(ctx, runtime, runtime.OutputDir(), env)
+}
+
+// recordMockGap writes a mock-classed failure to docs/mock-gaps.md, its
+// signal and resource read from gap.Detail, and logs
+// <event>_mock_gap_recorded, or <event>_mock_gap_append on failure.
+func recordMockGap(runtime *CommandRuntime, event, runID string, gap generator.MockGap) {
+	gap.Signal = generator.FirstMockSignal(gap.Detail)
+	gap.Resource = generator.ExtractResourceFromDetail(gap.Detail)
+	if err := generator.AppendMockGap(runtime.Config.Paths.Docs, gap); err != nil {
+		runtime.Logger.Log(LogEntry{
+			Level: logLevelError, Command: "run",
+			Event: event + "_mock_gap_append", Status: "failed",
+			RunID: runID, Detail: err.Error(),
+		})
+		return
+	}
+	runtime.Logger.Log(LogEntry{
+		Level: logLevelInfo, Command: "run",
+		Event: event + "_mock_gap_recorded", Status: "success",
+		RunID:  runID,
+		Detail: fmt.Sprintf("cloud=%s signal=%s resource=%s", gap.Cloud, gap.Signal, gap.Resource),
+	})
 }
