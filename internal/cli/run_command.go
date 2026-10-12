@@ -596,13 +596,15 @@ func runRunWithNotify(
 		//
 		// Fires only when stuck-detection or budget-exhaustion caught
 		// us on an orphan_check failure — the live mock state at that
-		// point reflects what destroy left behind.
+		// point reflects what destroy left behind — and routeFailure lets
+		// it be learned: the mock state says nothing about a failure that
+		// did not come from the mock.
 		hasOrphanCheck := false
-		orphanOrigin := ""
+		var orphanFailure feedback.Failure
 		for _, f := range candidates {
 			if strings.Contains(strings.ToLower(f.Detail), "orphaned resources") {
-				hasOrphanCheck = true
-				orphanOrigin = f.Origin
+				hasOrphanCheck = learnsFrom("orphan", f)
+				orphanFailure = f
 				break
 			}
 		}
@@ -623,7 +625,7 @@ func runRunWithNotify(
 					if !pitfallResourceMatchesCloud(p.Resource, sc.Cloud) {
 						continue
 					}
-					p.LearnedLayer = orphanOrigin
+					p.LearnedLayer = failureLayer(orphanFailure)
 					if err := generator.AppendPitfall(runtime.Config.Paths.Pitfalls, sc.Cloud, p); err != nil {
 						runtime.Logger.Log(LogEntry{
 							Level:   logLevelError,
@@ -1900,9 +1902,12 @@ func learnKey(f feedback.Failure) string {
 // routeFailure routes a failure by failureLayer. A mock layer's failure,
 // or one with no Origin on a run with Layer 3 off, ran against the mock:
 // a mock bug's is a mock gap, anything else is learned. Any other
-// failure is never a mock gap. It is skipped when it comes from a Layer 3
-// stage outside learnableSandboxStages or carries a signal that teaches
-// nothing outside the mock (generator.SkipSignal), and learned otherwise.
+// failure is never a mock gap. A gate or allowlist refusal is learned,
+// whichever stage refused it. Otherwise it is skipped when it has no
+// Origin and carries a mock signal (the mock or the real cloud may have
+// sent it), comes from a Layer 3 stage outside learnableSandboxStages, or
+// carries a signal that teaches nothing outside the mock
+// (generator.SkipSignal); and learned when none of those holds.
 func routeFailure(f feedback.Failure, layer3 bool) (failureRoute, string) {
 	layer := failureLayer(f)
 	if generator.IsMockLayer(layer) || (f.Origin == "" && !layer3) {
@@ -1910,6 +1915,12 @@ func routeFailure(f feedback.Failure, layer3 bool) (failureRoute, string) {
 			return routeMockGap, ""
 		}
 		return routeLearn, ""
+	}
+	if generator.ExtractGatePitfall(f.Detail, "") != nil {
+		return routeLearn, ""
+	}
+	if sig := generator.FirstMockSignal(f.Detail); f.Origin == "" && sig != "" {
+		return routeSkip, fmt.Sprintf("layer %s: signal %q, and no origin to tell the mock from the real cloud", layer, sig)
 	}
 	if layer == generator.SandboxDeployLayer && !slices.Contains(learnableSandboxStages, f.OriginStage) {
 		return routeSkip, fmt.Sprintf("layer %s: stage %q is setup, not the HCL", layer, f.OriginStage)

@@ -107,15 +107,16 @@ var (
 	// pitfalls file. We bias toward false negatives.
 	//
 	// Signals come from real failures observed in the 2026-05-31 sweep
-	// + earlier sessions. Add more here as new mock-gap shapes surface.
-	mockActionableSignals = []string{
+	// + earlier sessions. Add more here as new mock-gap shapes surface,
+	// lowercase, since the detail is lowercased before matching.
+	mockActionableSignals = []mockSignal{
 		// 501 Not Implemented — fakeaws/fakegcp/mockway return this
 		// from their default-not-found handler when no route matches.
 		// Always a missing-mock-handler symptom, never an LLM bug.
-		"501 not implemented",
-		"501: not implemented",
-		"\"reason\":\"notimplemented\"",
-		"reason: \"notimplemented\"",
+		{text: "501 not implemented"},
+		{text: "501: not implemented"},
+		{text: "\"reason\":\"notimplemented\""},
+		{text: "reason: \"notimplemented\""},
 
 		// fakeaws's refusal of an EC2 Describe filter or param it does
 		// not read (fakeaws MUST[ec2-filter-refusal-names-every-name-sorted]).
@@ -123,71 +124,56 @@ var (
 		// NotImplemented: <Action>: not modelled by fakeaws: <names>",
 		// which no 501 signal above matches. Never "api error
 		// notimplemented" alone: a real AWS NotImplemented is no mock gap.
-		"not modelled by fakeaws",
+		{text: "not modelled by fakeaws"},
 
 		// "Plugin did not respond" — the provider crashed parsing the
 		// mock's response (usually missing/wrong field shape that the
 		// SDK nil-derefs on). Mock-side fidelity bug.
-		"plugin did not respond",
-		"the plugin encountered an error",
+		{text: "plugin did not respond"},
+		{text: "the plugin encountered an error"},
 
 		// OAuth / auth escape — the lib client used a code path that
 		// bypasses the per-service custom_endpoint override and
 		// escaped to the real cloud. Either a missing endpoint flag
 		// (T-D-2 v3 pattern) or a missing route. Either way mock-side.
-		"access_token_type_unsupported",
-		"request had invalid authentication credentials",
+		{text: "access_token_type_unsupported"},
+		{text: "request had invalid authentication credentials"},
 
 		// Wait-loop "couldn't find resource (N retries)" — provider's
 		// Read polled after a successful Create and the mock either
-		// 404s the Describe* path or returns null. Mock-side state
-		// divergence.
-		"couldn't find resource",
-		"resourcenotfoundexception",
+		// 404s the Describe* path or returns null: mock-side state
+		// divergence when the mock sent it. On a real cloud both usually
+		// come from a wrong reference in the HCL (realCloud).
+		{text: "couldn't find resource", realCloud: true},
+		{text: "resourcenotfoundexception", realCloud: true},
 
 		// Generic "unimplemented" envelope variants (each mock has its
 		// own wire shape).
-		"\"error\":\"unimplemented\"",
+		{text: "\"error\":\"unimplemented\""},
 
 		// S68 (S63 audit finding 2): provider polling on a mock-side
 		// state field that doesn't persist after Update. The provider
 		// kicks off an Update (e.g. AWS KMS rotation, EC2 Subnet
 		// MapPublicIpOnLaunch) and then polls until the field flips to
 		// the requested value; the mock acks the Update but never
-		// persists the change, so polling times out. Always mock-side
-		// state-divergence — the LLM's HCL is correct.
-		"waiting for state to become 'true'",
-		"waiting for state to become 'true' (last state: 'false', timeout:",
-		"waiting for state to become 'TRUE'",
-		"waiting for state to become 'TRUE' (last state: 'FALSE', timeout:",
+		// persists the change, so polling times out: mock-side
+		// state-divergence when the mock sent it. On a real cloud a wait
+		// that never ends usually comes from the HCL (realCloud).
+		{text: "waiting for state to become 'true'", realCloud: true},
+		{text: "waiting for state to become 'true' (last state: 'false', timeout:", realCloud: true},
 
 		// S68: provider Read returns empty (no row matched the key the
 		// mock should be tracking). Distinct from the ResourceNotFound
 		// case above — this is a "found the table, found 0 rows"
 		// shape, typical of mocks that auto-ack Create but never
 		// store the row. Real signal from aws_route53_record in S63.
-		"empty result",
+		{text: "empty result", realCloud: true},
 	}
 
-	// realCloudSignals are the mock signals a real cloud also returns for
-	// a reason in the HCL, so a failure from outside the mock that carries
-	// one is still learned: on real AWS a missing resource or a wait that
-	// never ends usually comes from a bad reference or subnet group.
-	realCloudSignals = []string{
-		"couldn't find resource",
-		"resourcenotfoundexception",
-		"waiting for state to become 'true'",
-		"waiting for state to become 'true' (last state: 'false', timeout:",
-		"waiting for state to become 'TRUE'",
-		"waiting for state to become 'TRUE' (last state: 'FALSE', timeout:",
-		"empty result",
-	}
-
-	// mockOnlySignals are the mock signals no real cloud sends for a
-	// reason in the HCL.
-	mockOnlySignals = slices.DeleteFunc(slices.Clone(mockActionableSignals), func(sig string) bool {
-		return slices.Contains(realCloudSignals, sig)
-	})
+	// mockSignalTexts is every mock signal's text, and mockOnlySignals the
+	// texts no real cloud sends for a reason in the HCL.
+	mockSignalTexts = signalTexts(func(mockSignal) bool { return true })
+	mockOnlySignals = signalTexts(func(sig mockSignal) bool { return !sig.realCloud })
 
 	// realCloudSkipSignals mark a failure from outside the mock as the real
 	// cloud's setup, weather or account, not the HCL: it is neither learned
@@ -206,16 +192,28 @@ var (
 		"plugin did not respond",
 		"the plugin encountered an error",
 		"plugin crashed",
-		// Throttling.
-		"requestlimitexceeded",
+		// Throttling, and the service failing or timing out the request.
 		"throttling",
 		"rate exceeded",
-		// Capacity and account limits.
+		"toomanyrequests",
+		"slowdown",
+		"serviceunavailable",
+		"internalerror",
+		"internalfailure",
+		"requestexpired",
+		// The network between here and the cloud.
+		"connection reset by peer",
+		"tls handshake timeout",
+		"i/o timeout",
+		// Capacity and account limits: any ...LimitExceeded (RequestLimit,
+		// AddressLimit, VpcLimit, VcpuLimit, LimitExceededException).
+		"limitexceeded",
 		"insufficientinstancecapacity",
-		"vcpulimitexceeded",
-		// Permissions and quotas: what the account allows, not the HCL.
+		// Permissions, opt-ins and quotas: what the account allows, not
+		// the HCL.
 		"accessdenied",
 		"unauthorizedoperation",
+		"optinrequired",
 		"insufficient permissions",
 		"quota exceeded",
 		"quotas exceeded",
@@ -346,7 +344,26 @@ func AppendMockGap(docsDir string, gap MockGap) error {
 // mockActionableSignals). Returns "" if no signal matches — callers
 // typically guard with IsMockServerBug first.
 func FirstMockSignal(detail string) string {
-	return firstSignal(detail, mockActionableSignals)
+	return firstSignal(detail, mockSignalTexts)
+}
+
+// mockSignal is one mock-actionable signal. realCloud marks one a real
+// cloud also returns for a reason in the HCL, so a failure from outside
+// the mock that carries it is still learned; the rest are mock-only.
+type mockSignal struct {
+	text      string
+	realCloud bool
+}
+
+// signalTexts is the text of each mock signal keep accepts.
+func signalTexts(keep func(mockSignal) bool) []string {
+	var out []string
+	for _, sig := range mockActionableSignals {
+		if keep(sig) {
+			out = append(out, sig.text)
+		}
+	}
+	return out
 }
 
 // SkipSignal returns the signal that makes a failure from outside the
@@ -417,7 +434,7 @@ func IsMockServerBug(detail string) bool {
 		return false
 	}
 	lower := strings.ToLower(detail)
-	for _, sig := range mockActionableSignals {
+	for _, sig := range mockSignalTexts {
 		if strings.Contains(lower, sig) {
 			// S78 carve-out: the access_token_type_unsupported signal
 			// also fires on LLM-actionable GCP resources that the v5

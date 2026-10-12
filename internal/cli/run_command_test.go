@@ -1535,11 +1535,15 @@ const (
 		"resource \"aws_cloudwatch_log_metric_filter\" \"errors\" {\n  name           = \"errors\"\n  pattern        = \"ERROR\"\n  log_group_name = aws_cloudwatch_log_group.web.name\n}\n"
 )
 
+// natGatewayRefusal is the Layer 3 allowlist's refusal of aws_nat_gateway,
+// as the test step reports it.
+const natGatewayRefusal = "layer 3 refuses to apply resource type(s) aws_nat_gateway: not in validation.layers.sandbox_deploy.allow_resource_types"
+
 // layer3LearningRun is one aws Layer 3 `run` for the learner paths, with
-// docs/ in a temp dir (returned) and aws_cloudwatch_log_* allowed. main.tf
-// is files[n] on generation n+1, the last repeating; deps then edits the
-// dependencies.
-func layer3LearningRun(t *testing.T, repairs int, files []string, deps func(*awsLifecycle, *RuntimeDependencies)) (awsRun, string) {
+// docs/ in a temp dir (returned) and aws_cloudwatch_log_* and allow added
+// to the allowlist. main.tf is files[n] on generation n+1, the last
+// repeating; deps then edits the dependencies.
+func layer3LearningRun(t *testing.T, repairs int, files []string, deps func(*awsLifecycle, *RuntimeDependencies), allow ...string) (awsRun, string) {
 	t.Helper()
 	lc := newAWSLifecycle(t)
 	docsDir := t.TempDir()
@@ -1549,7 +1553,7 @@ func layer3LearningRun(t *testing.T, repairs int, files []string, deps func(*aws
 		customize: func(cfg *config.Config) {
 			cfg.Paths.Docs = docsDir
 			sandbox := &cfg.Validation.Layers.SandboxDeploy
-			sandbox.AllowResourceTypes = append(sandbox.AllowResourceTypes, "aws_cloudwatch_log_*")
+			sandbox.AllowResourceTypes = append(sandbox.AllowResourceTypes, append([]string{"aws_cloudwatch_log_*"}, allow...)...)
 		},
 		deps: func(d *RuntimeDependencies) {
 			d.Generator = generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
@@ -1655,9 +1659,8 @@ func TestAWSRunLearnsALayer3FailureThatCarriesAMockSignal(t *testing.T) {
 // A failure the run builds itself has no Origin; a generate error stands
 // in for one here, carrying a resource and ResourceNotFoundException. With
 // Layer 3 off the run only ever met the mock, so it is a mock gap, as it
-// always was. With Layer 3 on it may have met the real cloud, so it is
-// never a mock gap: it is learned, stamped with the layer it was routed
-// by, which the pitfalls ratchet admits.
+// always was. With Layer 3 on either may have sent the signal, so it is
+// neither a mock gap nor a lesson: it is skipped, and the skip logged.
 func TestAWSRunRoutesAFailureWithNoOriginByLayer3(t *testing.T) {
 	for _, path := range []struct {
 		name     string
@@ -1699,12 +1702,8 @@ func TestAWSRunRoutesAFailureWithNoOriginByLayer3(t *testing.T) {
 					return
 				}
 				assert.NoFileExists(t, gaps)
-				assert.Equal(t, []string{"descriptive"}, learnedSources(t, run, logFilterResource, "run"))
-				entries, err := generator.LoadPitfallEntries(run.h.PitfallsDir(), "aws")
-				require.NoError(t, err)
-				for _, e := range entries {
-					assert.Empty(t, generator.ForbiddenPitfallSignal(e.LearnedLayer, e.Rule), "the ratchet refuses what the run wrote")
-				}
+				assert.Empty(t, learnedSources(t, run, logFilterResource, "run"))
+				assert.Contains(t, runAppLog(t, run), `and no origin to tell the mock from the real cloud`)
 			})
 		}
 	}
@@ -1753,10 +1752,11 @@ func TestAWSRunLearnsNothingFromALayer3AccountOrTransientError(t *testing.T) {
 	const vpc = "\n\n  with aws_vpc.main,\n  on main.tf line 1, in resource \"aws_vpc\" \"main\":\n   1: resource \"aws_vpc\" \"main\" {"
 	failing := "resource \"aws_vpc\" \"main\" {\n  cidr_block = \"10.0.0.0/16\"\n}\n"
 	passing := "resource \"aws_vpc\" \"main\" {\n  cidr_block           = \"10.0.0.0/16\"\n  enable_dns_hostnames = true\n}\n"
-	for signal, stderr := range map[string]string{
-		"authfailure":                  "Error: creating EC2 VPC: operation error EC2: CreateVpc, https response error StatusCode: 401, RequestID: 7a62c49f-347e-4fc4-9331-6e8eEXAMPLE, api error AuthFailure: AWS was not able to validate the provided access credentials" + vpc,
-		"requestlimitexceeded":         "Error: creating EC2 VPC: operation error EC2: CreateVpc, https response error StatusCode: 503, RequestID: 7a62c49f-347e-4fc4-9331-6e8eEXAMPLE, api error RequestLimitExceeded: Request limit exceeded." + vpc,
-		"insufficientinstancecapacity": "Error: creating EC2 VPC: operation error EC2: CreateVpc, https response error StatusCode: 500, RequestID: 7a62c49f-347e-4fc4-9331-6e8eEXAMPLE, api error InsufficientInstanceCapacity: We currently do not have sufficient capacity in the Availability Zone you requested." + vpc,
+	for _, tc := range []struct{ name, signal, stderr string }{
+		{"AuthFailure", "authfailure", "Error: creating EC2 VPC: operation error EC2: CreateVpc, https response error StatusCode: 401, RequestID: 7a62c49f-347e-4fc4-9331-6e8eEXAMPLE, api error AuthFailure: AWS was not able to validate the provided access credentials" + vpc},
+		{"RequestLimitExceeded", "limitexceeded", "Error: creating EC2 VPC: operation error EC2: CreateVpc, https response error StatusCode: 503, RequestID: 7a62c49f-347e-4fc4-9331-6e8eEXAMPLE, api error RequestLimitExceeded: Request limit exceeded." + vpc},
+		{"AddressLimitExceeded", "limitexceeded", "Error: creating EC2 VPC: operation error EC2: AllocateAddress, https response error StatusCode: 400, RequestID: 7a62c49f-347e-4fc4-9331-6e8eEXAMPLE, api error AddressLimitExceeded: The maximum number of addresses has been reached." + vpc},
+		{"InsufficientInstanceCapacity", "insufficientinstancecapacity", "Error: creating EC2 VPC: operation error EC2: CreateVpc, https response error StatusCode: 500, RequestID: 7a62c49f-347e-4fc4-9331-6e8eEXAMPLE, api error InsufficientInstanceCapacity: We currently do not have sufficient capacity in the Availability Zone you requested." + vpc},
 	} {
 		for _, path := range []struct {
 			name     string
@@ -1767,9 +1767,9 @@ func TestAWSRunLearnsNothingFromALayer3AccountOrTransientError(t *testing.T) {
 			{"self-correction and prescriptive", 2, "target_reached", []string{"self_correction_learning_skipped", "prescriptive_learning_skipped"}},
 			{"stuck or budget", 1, "repair_budget_exhausted", []string{"oscillation_learning_skipped"}},
 		} {
-			t.Run(signal+"/"+path.name, func(t *testing.T) {
+			t.Run(tc.name+"/"+path.name, func(t *testing.T) {
 				run, docsDir := layer3LearningRun(t, path.repairs, []string{failing, passing}, func(lc *awsLifecycle, d *RuntimeDependencies) {
-					d.SandboxDeploy = &seqSandboxDeployHarness{fakeSandboxDeployHarness: lc.deploy, errs: []error{layer3ApplyFails(stderr)}}
+					d.SandboxDeploy = &seqSandboxDeployHarness{fakeSandboxDeployHarness: lc.deploy, errs: []error{layer3ApplyFails(tc.stderr)}}
 				})
 				require.Equal(t, path.terminal, run.terminalReason(), run.output)
 
@@ -1779,9 +1779,105 @@ func TestAWSRunLearnsNothingFromALayer3AccountOrTransientError(t *testing.T) {
 				for _, event := range path.events {
 					assert.Contains(t, appLog, `"event":"`+event+`"`)
 				}
-				assert.Contains(t, appLog, fmt.Sprintf(`signal \"%s\" teaches nothing outside the mock`, signal))
+				assert.Contains(t, appLog, fmt.Sprintf(`signal \"%s\" teaches nothing outside the mock`, tc.signal))
 			})
 		}
+	}
+}
+
+// A Layer 3 allowlist refusal at the test step is the HCL's mistake,
+// refused before tofu runs: each learner path learns the refusal's own
+// gate rule from it, as it did before the stage skip existed, though the
+// stage is setup. Generation checks the allowlist and runs the gate
+// first, so here the allowlist is widened to let aws_nat_gateway through
+// and only the gate's test-step calls (the second of each iteration, as
+// in runAWSOrder) check the default allowlist, with the real check.
+func TestAWSRunLearnsTheGateRuleFromALayer3AllowlistRefusal(t *testing.T) {
+	refused := "resource \"aws_nat_gateway\" \"nat\" {\n  subnet_id = \"subnet-0abc\"\n}\n"
+	defaults := config.Default().Validation.Layers.SandboxDeploy.AllowResourceTypes
+	for _, path := range []struct {
+		name     string
+		repairs  int
+		terminal string
+		// events: the prescriptive path's avoid rule for the dropped
+		// gateway, which AppendPitfall then files as a duplicate of the
+		// gate rule.
+		events []string
+	}{
+		// Iteration 2 drops the gateway: self-correction and prescriptive.
+		{"self-correction and prescriptive", 2, "target_reached", []string{"prescriptive_avoid_learned"}},
+		{"stuck or budget", 1, "repair_budget_exhausted", nil},
+	} {
+		t.Run(path.name, func(t *testing.T) {
+			run, _ := layer3LearningRun(t, path.repairs, []string{refused, "terraform {}\n"}, func(_ *awsLifecycle, d *RuntimeDependencies) {
+				calls := 0
+				d.Layer3HCLGate = func(_ layer3Cloud, dir string, _ awsGateInputs) error {
+					if calls++; calls%2 == 1 {
+						return nil
+					}
+					return validateLayer3ResourceAllowlist(dir, defaults)
+				}
+			}, "aws_nat_gateway")
+			require.Equal(t, path.terminal, run.terminalReason(), run.output)
+
+			entries, err := generator.LoadPitfallEntries(run.h.PitfallsDir(), "aws")
+			require.NoError(t, err)
+			i := slices.IndexFunc(entries, func(e generator.PitfallEntry) bool { return strings.HasPrefix(e.Rule, natGatewayRefusal) })
+			require.NotEqual(t, -1, i, "no gate rule learned: %+v\n%s", entries, runAppLog(t, run))
+			assert.Equal(t, "aws_nat_gateway", entries[i].Resource)
+			assert.Equal(t, generator.FixSource, entries[i].Source)
+			assert.Equal(t, generator.SandboxDeployLayer, entries[i].LearnedLayer)
+			assert.Equal(t, []string{generator.FixSource}, learnedSources(t, run, "aws_nat_gateway", generator.SandboxDeployLayer))
+			appLog := runAppLog(t, run)
+			for _, event := range path.events {
+				assert.Contains(t, appLog, `"event":"`+event+`"`)
+			}
+		})
+	}
+}
+
+// The orphan_check extractor reads the mock's state, so it runs only for
+// a failure routeFailure lets be learned. The mock's own orphan check is
+// one, stamped with its layer; a failure with the same text that the
+// router skips (here an unstaged Layer 3 error) says nothing about the
+// mock state, so nothing is classified from it.
+func TestAWSRunRoutesTheOrphanCheckLikeAnyFailure(t *testing.T) {
+	const orphans = "detected 1 orphaned resources"
+	for _, tc := range []struct {
+		name    string
+		fail    func(*awsLifecycle, *RuntimeDependencies)
+		learned []string
+		event   string
+	}{
+		{"the mock's orphan check", func(_ *awsLifecycle, d *RuntimeDependencies) {
+			d.Destroy = &fakeDestroyHarness{err: &harness.DestroyError{
+				Stage: "orphan_check", Destroy: harness.StageResult{Stage: "destroy"}, Err: errors.New(orphans),
+			}}
+		}, []string{"destruction"}, "orphan_pitfall_learned"},
+		{"an orphan failure the router skips", func(lc *awsLifecycle, d *RuntimeDependencies) {
+			d.SandboxDeploy = &seqSandboxDeployHarness{fakeSandboxDeployHarness: lc.deploy, errs: []error{errors.New(orphans)}}
+		}, nil, "orphan_learning_skipped"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			run, _ := layer3LearningRun(t, 1, []string{"terraform {}\n"}, func(lc *awsLifecycle, d *RuntimeDependencies) {
+				// A soft-deleted secret left in the mock, which the
+				// extractor classifies as an LLM-side soft delete.
+				d.MockState = &fakeRunMockStateClient{statePayload: []byte(`{"secretsmanager":{"secrets":[{"name":"app"}]}}`)}
+				tc.fail(lc, d)
+			})
+			require.Equal(t, "repair_budget_exhausted", run.terminalReason(), run.output)
+
+			entries, err := generator.LoadPitfallEntries(run.h.PitfallsDir(), "aws")
+			require.NoError(t, err)
+			var layers []string
+			for _, e := range entries {
+				if e.Resource == "aws_secretsmanager_secret" {
+					layers = append(layers, e.LearnedLayer)
+				}
+			}
+			assert.Equal(t, tc.learned, layers, "%+v", entries)
+			assert.Contains(t, runAppLog(t, run), `"event":"`+tc.event+`"`)
+		})
 	}
 }
 
@@ -1804,9 +1900,11 @@ var routeFailureRows = map[string]struct {
 	"a mock signal with no Origin, Layer 3 off": {
 		f: feedback.Failure{Layer: "run", Detail: logFilterNotFound}, layer3Off: true, want: routeMockGap},
 	"a mock signal with no Origin, Layer 3 on": {
-		f: feedback.Failure{Layer: "run", Detail: logFilterNotFound}, want: routeLearn},
+		f: feedback.Failure{Layer: "run", Detail: logFilterNotFound}, want: routeSkip, reasonPart: `signal "resourcenotfoundexception", and no origin`},
 	"a mock-only signal with no Origin, Layer 3 on": {
-		f: feedback.Failure{Layer: "run", Detail: "Error: Plugin did not respond"}, want: routeSkip, reasonPart: `signal "plugin did not respond"`},
+		f: feedback.Failure{Layer: "run", Detail: "Error: Plugin did not respond"}, want: routeSkip, reasonPart: `signal "plugin did not respond", and no origin`},
+	"an HCL error with no Origin, Layer 3 on": {
+		f: feedback.Failure{Layer: "run", Detail: `Error: Unsupported argument on aws_vpc.main: An argument named "bogus" is not expected here.`}, want: routeLearn},
 	"a real-cloud signal from a Layer 3 apply": {
 		f: feedback.Failure{Layer: "run", Origin: "sandbox_deploy", OriginStage: "apply", Detail: logFilterNotFound}, want: routeLearn},
 	"a wait that never saw the resource at a Layer 3 apply": {
@@ -1821,8 +1919,10 @@ var routeFailureRows = map[string]struct {
 		f: feedback.Failure{Origin: "sandbox_deploy", OriginStage: "aws_ami_resolve", Check: "ami", Detail: "aws_instance AMI parameter unreadable"}, want: routeSkip, reasonPart: `stage "aws_ami_resolve" is setup`},
 	"a cleanup the allowlist blocked": {
 		f: feedback.Failure{Origin: "sandbox_deploy", OriginStage: "cleanup_blocked", Check: "no_orphans", Detail: "the configuration was refused, so no tofu was run"}, want: routeSkip, reasonPart: `stage "cleanup_blocked" is setup`},
-	"the allowlist": {
-		f: feedback.Failure{Origin: "sandbox_deploy", OriginStage: "allowlist", Check: "allow_resource_types", Detail: "layer 3 refuses to apply resource type(s) aws_nat_gateway"}, want: routeSkip, reasonPart: `stage "allowlist" is setup`},
+	"an allowlist refusal teaches its gate rule": {
+		f: feedback.Failure{Origin: "sandbox_deploy", OriginStage: "allowlist", Check: "allow_resource_types", Detail: natGatewayRefusal}, want: routeLearn},
+	"a gate refusal that names no resource type": {
+		f: feedback.Failure{Origin: "sandbox_deploy", OriginStage: "allowlist", Detail: "layer 3 refuses this configuration: main.tf: a provider block is not allowed"}, want: routeSkip, reasonPart: `stage "allowlist" is setup`},
 	"a credentials preflight": {
 		f: feedback.Failure{Origin: "sandbox_deploy", OriginStage: "preflight", Check: "credentials", Detail: "AccessDenied"}, want: routeSkip, reasonPart: `stage "preflight" is setup`},
 	"an aws scope stage": {
@@ -1832,11 +1932,23 @@ var routeFailureRows = map[string]struct {
 	"an authentication failure": {
 		f: feedback.Failure{Origin: "sandbox_deploy", OriginStage: "apply", Detail: "api error AuthFailure: AWS was not able to validate the provided access credentials"}, want: routeSkip, reasonPart: `signal "authfailure"`},
 	"throttling": {
-		f: feedback.Failure{Origin: "sandbox_deploy", OriginStage: "apply", Detail: "api error RequestLimitExceeded: Request limit exceeded."}, want: routeSkip, reasonPart: `signal "requestlimitexceeded"`},
+		f: feedback.Failure{Origin: "sandbox_deploy", OriginStage: "apply", Detail: "api error RequestLimitExceeded: Request limit exceeded."}, want: routeSkip, reasonPart: `signal "limitexceeded"`},
+	"an address limit at a Layer 3 apply": {
+		f: feedback.Failure{Origin: "sandbox_deploy", OriginStage: "apply", Detail: "api error AddressLimitExceeded: The maximum number of addresses has been reached."}, want: routeSkip, reasonPart: `signal "limitexceeded"`},
+	"a service limit": {
+		f: feedback.Failure{Origin: "sandbox_deploy", OriginStage: "apply", Detail: "operation error ECS: CreateCluster, LimitExceededException: Too many clusters"}, want: routeSkip, reasonPart: `signal "limitexceeded"`},
+	"the service unavailable": {
+		f: feedback.Failure{Origin: "sandbox_deploy", OriginStage: "apply", Detail: "StatusCode: 503, api error ServiceUnavailable: Service Unavailable"}, want: routeSkip, reasonPart: `signal "serviceunavailable"`},
+	"an internal error": {
+		f: feedback.Failure{Origin: "sandbox_deploy", OriginStage: "apply", Detail: "StatusCode: 500, api error InternalError: An internal error has occurred"}, want: routeSkip, reasonPart: `signal "internalerror"`},
+	"a region not opted in": {
+		f: feedback.Failure{Origin: "sandbox_deploy", OriginStage: "plan", Detail: "api error OptInRequired: You are not subscribed to this service."}, want: routeSkip, reasonPart: `signal "optinrequired"`},
+	"a network timeout": {
+		f: feedback.Failure{Origin: "sandbox_deploy", OriginStage: "apply", Detail: "dial tcp 52.94.4.10:443: i/o timeout"}, want: routeSkip, reasonPart: `signal "i/o timeout"`},
 	"no capacity": {
 		f: feedback.Failure{Origin: "sandbox_deploy", OriginStage: "apply", Detail: "api error InsufficientInstanceCapacity: We currently do not have sufficient capacity"}, want: routeSkip, reasonPart: `signal "insufficientinstancecapacity"`},
 	"a vCPU limit": {
-		f: feedback.Failure{Origin: "sandbox_deploy", OriginStage: "apply", Detail: "api error VcpuLimitExceeded: You have requested more vCPU capacity than your current vCPU limit"}, want: routeSkip, reasonPart: `signal "vcpulimitexceeded"`},
+		f: feedback.Failure{Origin: "sandbox_deploy", OriginStage: "apply", Detail: "api error VcpuLimitExceeded: You have requested more vCPU capacity than your current vCPU limit"}, want: routeSkip, reasonPart: `signal "limitexceeded"`},
 	"an unauthorized operation": {
 		f: feedback.Failure{Origin: "sandbox_deploy", OriginStage: "apply", Detail: "api error UnauthorizedOperation: You are not authorized to perform this operation."}, want: routeSkip, reasonPart: `signal "unauthorizedoperation"`},
 	"a Scaleway permission refusal": {

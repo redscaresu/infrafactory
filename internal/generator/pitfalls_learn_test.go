@@ -748,6 +748,17 @@ func TestIsMockServerBug_FivePositiveSignalClasses(t *testing.T) {
 	}
 }
 
+// The detail is lowercased before matching, so a signal with a capital
+// letter can never match.
+func TestMockSignalsAreLowercase(t *testing.T) {
+	for _, sig := range mockActionableSignals {
+		assert.Equal(t, strings.ToLower(sig.text), sig.text)
+	}
+	for _, sig := range realCloudSkipSignals {
+		assert.Equal(t, strings.ToLower(sig), sig)
+	}
+}
+
 // Negative cases — pure LLM mistakes must NOT be classified as
 // mock-actionable, otherwise the existing learning path silently
 // stops writing legitimate pitfalls.
