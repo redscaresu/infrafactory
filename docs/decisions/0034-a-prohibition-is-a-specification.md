@@ -208,7 +208,8 @@ and moves whole.
 refuses every retirement.
 
 **A recurrence is sorted by where it failed.** `AppendPitfall` refuses whole a candidate
-learned at `mock_deploy`, or at an unknown layer, that names a retired attribute on its
+learned at a mock layer (`generator.IsMockLayer`: `static`, `mock_deploy` or `destruction`, as
+the learning router reads it), or at an unknown layer, that names a retired attribute on its
 resource, whatever its source or wording, and names the retiring check and any other
 attribute it would have forbidden: the mock regressed. Learned at any other layer, it is
 appended after a `relearned` record, and it then carries a non-mock layer, so it is never

@@ -1,6 +1,7 @@
 package generator
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -8,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 )
 
@@ -101,64 +103,73 @@ func TestPitfallsNoHumanSeeding(t *testing.T) {
 // principle): a learned entry whose rule echoes a 501 / Plugin-did-
 // not-respond / OAuth-escape / 404-from-Describe* failure should
 // never have made it into the file — it should have been routed to
-// docs/mock-gaps.md by the new IsMockServerBug classifier in
-// run_command.go. ForbiddenPitfallSignal reads each entry at its
-// learned_layer, the layer its failure was routed by.
+// docs/mock-gaps.md by RouteFailure. It asks the router (RouteEntry):
+// an entry the router would not learn at its learned_layer is refused.
 //
 // Catching these in CI is the enforcement leg of T-12. Before the
 // classifier landed (this commit), the existing pitfalls files
 // accumulated ~9 such entries across aws + gcp during the 2026-05-31
 // sweep. Those are tracked separately under N2 for manual prune.
 func TestPitfallsNoMockServerBugSeeds(t *testing.T) {
-	root := repoRoot(t)
+	dir := filepath.Join(repoRoot(t), "pitfalls")
 	for _, cloud := range []string{"aws", "gcp", "scaleway"} {
 		t.Run(cloud, func(t *testing.T) {
-			path := filepath.Join(root, "pitfalls", cloud+".yaml")
-			payload, err := os.ReadFile(path)
-			if err != nil {
-				t.Fatalf("read %s: %v", path, err)
-			}
-			var file struct {
-				Pitfalls []struct {
-					Resource     string `yaml:"resource"`
-					Rule         string `yaml:"rule"`
-					LearnedLayer string `yaml:"learned_layer"`
-				} `yaml:"pitfalls"`
-			}
-			if err := yaml.Unmarshal(payload, &file); err != nil {
-				t.Fatalf("parse %s: %v", path, err)
-			}
-			for _, p := range file.Pitfalls {
-				if sig := ForbiddenPitfallSignal(p.LearnedLayer, p.Rule); sig != "" {
-					t.Errorf("pitfalls/%s.yaml: entry for %q has rule matching mock-actionable signal %q — T-12 forbids this. Route the failure to docs/mock-gaps.md instead; the matching mock repo (fakeaws/fakegcp/mockway) should fix the gap at source. Rule was: %.200s",
-						cloud, p.Resource, sig, p.Rule)
-				}
-			}
+			assert.Empty(t, routedOutEntries(t, dir, cloud))
 		})
 	}
 }
 
-func TestForbiddenPitfallSignal(t *testing.T) {
+// routedOutEntries describes each entry of the cloud's corpus that the
+// router would not learn.
+func routedOutEntries(t *testing.T, dir, cloud string) []string {
+	t.Helper()
+	entries, err := LoadPitfallEntries(dir, cloud)
+	require.NoError(t, err)
+	var out []string
+	for _, e := range entries {
+		if route := RouteEntry(e); route != RouteLearn {
+			out = append(out, fmt.Sprintf("pitfalls/%s.yaml: entry for %q learned at %q routes to %s, not learned — T-12 forbids this. Route the failure to docs/mock-gaps.md instead; the matching mock repo (fakeaws/fakegcp/mockway) should fix the gap at source. Rule was: %.200s",
+				cloud, e.Resource, e.LearnedLayer, map[Route]string{RouteMockGap: "a mock gap", RouteSkip: "a skip"}[route], e.Rule))
+		}
+	}
+	return out
+}
+
+func TestRoutedOutEntries(t *testing.T) {
 	const (
 		realCloud = "ResourceNotFoundException: The specified log group does not exist."
 		mockOnly  = "Error: Plugin did not respond"
 	)
-	for name, tc := range map[string]struct {
-		layer, rule, want string
-	}{
-		"a real-cloud signal learned at sandbox_deploy":      {SandboxDeployLayer, realCloud, ""},
-		"a wait that never saw the resource at sandbox":      {SandboxDeployLayer, "waiting for RDS DB Subnet Group create: couldn't find resource (21 retries)", ""},
-		"a real-cloud signal learned with no Origin":         {"run", realCloud, ""},
-		"a real-cloud signal learned at mock_deploy":         {MockDeployLayer, realCloud, "resourcenotfoundexception"},
-		"a real-cloud signal with no recorded layer":         {"", realCloud, "resourcenotfoundexception"},
-		"a mock-only signal mislabelled sandbox_deploy":      {SandboxDeployLayer, mockOnly, "plugin did not respond"},
-		"not modelled by fakeaws mislabelled sandbox_deploy": {SandboxDeployLayer, "DescribeVpcs: not modelled by fakeaws: foo", "not modelled by fakeaws"},
-		"both kinds of signal mislabelled sandbox_deploy":    {SandboxDeployLayer, realCloud + " " + mockOnly, "plugin did not respond"},
-		"the GCP escape carve-out at mock_deploy":            {MockDeployLayer, `google_project_service.compute: Error 401: "reason": "ACCESS_TOKEN_TYPE_UNSUPPORTED"`, ""},
-		"no signal": {SandboxDeployLayer, "An argument named \"bogus\" is not expected here.", ""},
-	} {
-		t.Run(name, func(t *testing.T) {
-			assert.Equal(t, tc.want, ForbiddenPitfallSignal(tc.layer, tc.rule))
+	entry := func(layer, rule string) PitfallEntry {
+		return PitfallEntry{Resource: "aws_cloudwatch_log_metric_filter", Rule: rule, Source: "descriptive", LearnedLayer: layer}
+	}
+	refused := map[string]PitfallEntry{
+		"a real-cloud signal learned at mock_deploy":         entry(MockDeployLayer, realCloud),
+		"a real-cloud signal with no recorded layer":         entry("", realCloud),
+		"a mock-only signal mislabelled sandbox_deploy":      entry(SandboxDeployLayer, mockOnly),
+		"not modelled by fakeaws mislabelled sandbox_deploy": entry(SandboxDeployLayer, "DescribeVpcs: not modelled by fakeaws: foo"),
+		"a weather signal learned at sandbox_deploy":         entry(SandboxDeployLayer, "api error RequestLimitExceeded: Request limit exceeded."),
+	}
+	for name, e := range refused {
+		t.Run("refused/"+name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeAWSCorpus(t, dir, unrelatedEntry(), e)
+			assert.Len(t, routedOutEntries(t, dir, "aws"), 1)
+		})
+	}
+	admitted := map[string]PitfallEntry{
+		"a real-cloud signal learned at sandbox_deploy": entry(SandboxDeployLayer, realCloud),
+		"a wait that never saw the resource at sandbox": entry(SandboxDeployLayer, "waiting for RDS DB Subnet Group create: couldn't find resource (21 retries)"),
+		"a real-cloud signal learned with no Origin":    entry("run", realCloud),
+		"the GCP escape carve-out at mock_deploy":       entry(MockDeployLayer, `google_project_service.compute: Error 401: "reason": "ACCESS_TOKEN_TYPE_UNSUPPORTED"`),
+		"an allowlist rule":                             entry(SandboxDeployLayer, "layer 3 refuses to apply resource type(s) aws_nat_gateway: not in validation.layers.sandbox_deploy.allow_resource_types"),
+		"no signal":                                     entry(SandboxDeployLayer, "An argument named \"bogus\" is not expected here."),
+	}
+	for name, e := range admitted {
+		t.Run("admitted/"+name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeAWSCorpus(t, dir, unrelatedEntry(), e)
+			assert.Empty(t, routedOutEntries(t, dir, "aws"))
 		})
 	}
 }

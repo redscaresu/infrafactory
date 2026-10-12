@@ -1660,8 +1660,8 @@ func TestAWSRunLearnsALayer3FailureThatCarriesAMockSignal(t *testing.T) {
 // in for one here, carrying a resource and ResourceNotFoundException. With
 // Layer 3 off the run only ever met the mock, so it is a mock gap, as it
 // always was. With Layer 3 on it may have met the real cloud, so it is
-// never a mock gap: it is learned, stamped with the layer it was routed
-// by, which the pitfalls ratchet admits.
+// never a mock gap: it is learned, stamped "run" (generator.LearnedLayer),
+// which the pitfalls ratchet admits.
 func TestAWSRunRoutesAFailureWithNoOriginByLayer3(t *testing.T) {
 	for _, path := range []struct {
 		name     string
@@ -1707,7 +1707,58 @@ func TestAWSRunRoutesAFailureWithNoOriginByLayer3(t *testing.T) {
 				entries, err := generator.LoadPitfallEntries(run.h.PitfallsDir(), "aws")
 				require.NoError(t, err)
 				for _, e := range entries {
-					assert.Empty(t, generator.ForbiddenPitfallSignal(e.LearnedLayer, e.Rule), "the ratchet refuses what the run wrote")
+					assert.Equal(t, generator.RouteLearn, generator.RouteEntry(e), "the ratchet admits what the run wrote: %+v", e)
+				}
+			})
+		}
+	}
+}
+
+// A weather signal with no Origin is learned on a run with Layer 3 off,
+// which only ever met the mock, and stamped "" so the pitfalls ratchet
+// reads it as the router did; with Layer 3 on it is skipped.
+func TestAWSRunStampsANoOriginLessonAsTheRouterReadIt(t *testing.T) {
+	detail := strings.Replace(logFilterNotFound, "ResourceNotFoundException: The specified log group does not exist.", noCredentials, 1)
+	for _, path := range []struct {
+		name     string
+		repairs  int
+		terminal string
+		event    string
+	}{
+		{"self-correction", 2, "target_reached", "self_correction_learning_skipped"},
+		{"stuck or budget", 1, "repair_budget_exhausted", "oscillation_learning_skipped"},
+	} {
+		for _, layer3 := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/layer3=%t", path.name, layer3), func(t *testing.T) {
+				lc := newAWSLifecycle(t)
+				generations := 0
+				run := runAWSRun(t, lc, awsRunOptions{
+					repairs: path.repairs,
+					customize: func(cfg *config.Config) {
+						cfg.Paths.Docs = t.TempDir()
+						cfg.Validation.Layers.SandboxDeploy.Enabled = layer3
+					},
+					deps: func(d *RuntimeDependencies) {
+						d.Generator = generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
+							if generations++; generations == 1 {
+								return nil, errors.New(detail)
+							}
+							return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte("terraform {}\n")}}, nil
+						})
+					},
+				})
+				require.Equal(t, path.terminal, run.terminalReason(), run.output)
+
+				if layer3 {
+					assert.Empty(t, learnedSources(t, run, logFilterResource, ""))
+					assert.Contains(t, runAppLog(t, run), `"event":"`+path.event+`"`)
+					return
+				}
+				assert.Equal(t, []string{"descriptive"}, learnedSources(t, run, logFilterResource, ""))
+				entries, err := generator.LoadPitfallEntries(run.h.PitfallsDir(), "aws")
+				require.NoError(t, err)
+				for _, e := range entries {
+					assert.Equal(t, generator.RouteLearn, generator.RouteEntry(e), "the ratchet admits what the run wrote: %+v", e)
 				}
 			})
 		}
@@ -1840,7 +1891,7 @@ func TestAWSRunLearnsTheGateRuleFromALayer3AllowlistRefusal(t *testing.T) {
 }
 
 // The orphan_check extractor reads the mock's state, so it runs only for
-// a failure routeFailure lets be learned. The mock's own orphan check is
+// a failure generator.RouteFailure lets be learned. The mock's own orphan check is
 // one, stamped with its layer; a failure with the same text that the
 // router skips (here an unstaged Layer 3 error) says nothing about the
 // mock state, so nothing is classified from it.
@@ -1884,93 +1935,42 @@ func TestAWSRunRoutesTheOrphanCheckLikeAnyFailure(t *testing.T) {
 	}
 }
 
-// routeFailureRows are failures and where routeFailure sends them, with
-// Layer 3 on unless a row says off.
-var routeFailureRows = map[string]struct {
-	f          feedback.Failure
-	layer3Off  bool
-	want       failureRoute
-	reasonPart string
-}{
-	"a mock signal from the mock": {
-		f: feedback.Failure{Layer: "run", Origin: "mock_deploy", Detail: logFilterNotFound}, want: routeMockGap},
-	"a mock signal from the static plan": {
-		f: feedback.Failure{Origin: "static", Detail: "DescribeVpcs: not modelled by fakeaws: foo"}, want: routeMockGap},
-	"a mock layer's wait timeout is its own lesson": {
-		f: feedback.Failure{Origin: "mock_deploy", Detail: "timeout while waiting for state to become 'running'"}, want: routeLearn},
-	"the GCP escape carve-out at the mock": {
-		f: feedback.Failure{Origin: "mock_deploy", Detail: `google_project_service.compute: Error 401: "reason": "ACCESS_TOKEN_TYPE_UNSUPPORTED"`}, want: routeLearn},
-	"a mock signal with no Origin, Layer 3 off": {
-		f: feedback.Failure{Layer: "run", Detail: logFilterNotFound}, layer3Off: true, want: routeMockGap},
-	"a mock signal with no Origin, Layer 3 on": {
-		f: feedback.Failure{Layer: "run", Detail: logFilterNotFound}, want: routeLearn},
-	"a mock-only signal with no Origin, Layer 3 on": {
-		f: feedback.Failure{Layer: "run", Detail: "Error: Plugin did not respond"}, want: routeSkip, reasonPart: `signal "plugin did not respond"`},
-	"an HCL error with no Origin, Layer 3 on": {
-		f: feedback.Failure{Layer: "run", Detail: `Error: Unsupported argument on aws_vpc.main: An argument named "bogus" is not expected here.`}, want: routeLearn},
-	"a real-cloud signal from a Layer 3 apply": {
-		f: feedback.Failure{Layer: "run", Origin: "sandbox_deploy", OriginStage: "apply", Detail: logFilterNotFound}, want: routeLearn},
-	"a wait that never saw the resource at a Layer 3 apply": {
-		f: feedback.Failure{Origin: "sandbox_deploy", OriginStage: "apply", Detail: "waiting for RDS DB Instance (db) create: couldn't find resource (21 retries)"}, want: routeLearn},
-	"a wait-for-state timeout at a Layer 3 apply": {
-		f: feedback.Failure{Origin: "sandbox_deploy", OriginStage: "apply", Detail: "waiting for EC2 NAT Gateway create: timeout while waiting for state to become 'available'"}, want: routeLearn},
-	"a real probe failure": {
-		f: feedback.Failure{Origin: "sandbox_deploy", OriginStage: "real_probe", Detail: "http_probe compute:80: connection refused"}, want: routeLearn},
-	"a mock-only signal at a Layer 3 apply": {
-		f: feedback.Failure{Origin: "sandbox_deploy", OriginStage: "apply", Detail: "DescribeVpcs: not modelled by fakeaws: foo"}, want: routeSkip, reasonPart: `signal "not modelled by fakeaws"`},
-	"the AMI resolve": {
-		f: feedback.Failure{Origin: "sandbox_deploy", OriginStage: "aws_ami_resolve", Check: "ami", Detail: "aws_instance AMI parameter unreadable"}, want: routeSkip, reasonPart: `stage "aws_ami_resolve" is setup`},
-	"a cleanup the allowlist blocked": {
-		f: feedback.Failure{Origin: "sandbox_deploy", OriginStage: "cleanup_blocked", Check: "no_orphans", Detail: "the configuration was refused, so no tofu was run"}, want: routeSkip, reasonPart: `stage "cleanup_blocked" is setup`},
-	"an allowlist refusal teaches its gate rule": {
-		f: feedback.Failure{Origin: "sandbox_deploy", OriginStage: "allowlist", Check: "allow_resource_types", Detail: natGatewayRefusal}, want: routeLearn},
-	"a gate refusal that names no resource type": {
-		f: feedback.Failure{Origin: "sandbox_deploy", OriginStage: "allowlist", Detail: "layer 3 refuses this configuration: main.tf: a provider block is not allowed"}, want: routeLearn},
-	"a credentials preflight": {
-		f: feedback.Failure{Origin: "sandbox_deploy", OriginStage: "preflight", Check: "credentials", Detail: "AccessDenied"}, want: routeSkip, reasonPart: `stage "preflight" is setup`},
-	"an aws scope stage": {
-		f: feedback.Failure{Origin: "sandbox_deploy", OriginStage: "aws_scope_sweep", Detail: "aws_instance i-0abc left"}, want: routeSkip, reasonPart: `stage "aws_scope_sweep" is setup`},
-	"a Layer 3 error that names no stage": {
-		f: feedback.Failure{Origin: "sandbox_deploy", OriginStage: "run", Detail: logFilterNotFound}, want: routeSkip, reasonPart: `stage "run" is setup`},
-	"an authentication failure": {
-		f: feedback.Failure{Origin: "sandbox_deploy", OriginStage: "apply", Detail: "api error AuthFailure: AWS was not able to validate the provided access credentials"}, want: routeSkip, reasonPart: `signal "authfailure"`},
-	"throttling": {
-		f: feedback.Failure{Origin: "sandbox_deploy", OriginStage: "apply", Detail: "api error RequestLimitExceeded: Request limit exceeded."}, want: routeSkip, reasonPart: `signal "requestlimitexceeded"`},
-	"no capacity": {
-		f: feedback.Failure{Origin: "sandbox_deploy", OriginStage: "apply", Detail: "api error InsufficientInstanceCapacity: We currently do not have sufficient capacity"}, want: routeSkip, reasonPart: `signal "insufficientinstancecapacity"`},
-	"a vCPU limit": {
-		f: feedback.Failure{Origin: "sandbox_deploy", OriginStage: "apply", Detail: "api error VcpuLimitExceeded: You have requested more vCPU capacity than your current vCPU limit"}, want: routeSkip, reasonPart: `signal "vcpulimitexceeded"`},
-	"an unauthorized operation": {
-		f: feedback.Failure{Origin: "sandbox_deploy", OriginStage: "apply", Detail: "api error UnauthorizedOperation: You are not authorized to perform this operation."}, want: routeSkip, reasonPart: `signal "unauthorizedoperation"`},
-	"a Scaleway permission refusal": {
-		f: feedback.Failure{Origin: "sandbox_deploy", OriginStage: "apply", Detail: "scaleway-sdk-go: insufficient permissions: write instance"}, want: routeSkip, reasonPart: `signal "insufficient permissions"`},
-	"a Scaleway quota": {
-		f: feedback.Failure{Origin: "sandbox_deploy", OriginStage: "apply", Detail: "scaleway-sdk-go: quota exceeded(s): instances_pro2_s_count"}, want: routeSkip, reasonPart: `signal "quota exceeded"`},
-	"a plugin crash from the holdout probe": {
-		f: feedback.Failure{Origin: "holdout", Detail: "The plugin encountered an error, and failed to respond"}, want: routeSkip, reasonPart: `signal "the plugin encountered an error"`},
-}
-
-func TestRouteFailure(t *testing.T) {
-	for name, tc := range routeFailureRows {
-		t.Run(name, func(t *testing.T) {
-			got, reason := routeFailure(tc.f, !tc.layer3Off)
-			assert.Equal(t, tc.want, got)
-			assert.Contains(t, reason, tc.reasonPart)
-		})
-	}
-}
+// noCredentials is a weather signal: the real cloud's setup, not the HCL.
+const noCredentials = "Error: No valid credential sources found"
 
 // What the router lets the extractors learn, under either Layer 3
-// setting, the pitfalls ratchet admits at the layer it is stamped with.
+// setting, is stamped with a layer the pitfalls ratchet reads the same
+// way: what a run writes, CI admits.
 func TestRoutedLessonsPassThePitfallsRatchet(t *testing.T) {
-	for name, tc := range routeFailureRows {
+	const escape = `google_project_service.compute: Error 401: "reason": "ACCESS_TOKEN_TYPE_UNSUPPORTED"`
+	for name, f := range map[string]feedback.Failure{
+		"an HCL error from the mock":               {Layer: "run", Origin: "mock_deploy", OriginStage: "apply", Detail: `An argument named "bogus" is not expected here.`},
+		"a weather signal from the mock":           {Layer: "run", Origin: "mock_deploy", Detail: noCredentials},
+		"the GCP escape carve-out at the mock":     {Layer: "run", Origin: "mock_deploy", Detail: escape},
+		"a mock signal with no Origin":             {Layer: "run", Detail: logFilterNotFound},
+		"a weather signal with no Origin":          {Layer: "run", Detail: noCredentials},
+		"the GCP escape carve-out with no Origin":  {Layer: "run", Detail: escape},
+		"an HCL error with no Origin":              {Layer: "run", Detail: `An argument named "bogus" is not expected here.`},
+		"a real-cloud signal from a Layer 3 apply": {Layer: "run", Origin: "sandbox_deploy", OriginStage: "apply", Detail: logFilterNotFound},
+		"an allowlist refusal":                     {Layer: "run", Origin: "sandbox_deploy", OriginStage: "allowlist", Detail: natGatewayRefusal},
+		"a gate refusal at a setup stage":          {Layer: "run", Origin: "sandbox_deploy", OriginStage: "run", Detail: natGatewayRefusal},
+		"a real-probe i/o timeout":                 {Layer: "run", Origin: "sandbox_deploy", OriginStage: "real_probe", Detail: "http_probe compute:80: dial tcp 203.0.113.10:80: i/o timeout"},
+		"an HCL error from the holdout":            {Layer: "run", Origin: "holdout", Detail: `An argument named "bogus" is not expected here.`},
+	} {
 		for _, layer3 := range []bool{false, true} {
-			if route, _ := routeFailure(tc.f, layer3); route != routeLearn {
+			route, _, layer := routeLesson(f, layer3)
+			if route != generator.RouteLearn {
 				continue
 			}
-			assert.Empty(t, generator.ForbiddenPitfallSignal(failureLayer(tc.f), tc.f.Detail), "%s, layer3=%t", name, layer3)
+			assert.Equal(t, generator.RouteLearn, generator.RouteEntry(generator.PitfallEntry{Rule: f.Detail, LearnedLayer: layer}), "%s, layer3=%t, stamped %q", name, layer3, layer)
 		}
 	}
+
+	// The case the stamp exists for: a weather signal with no Origin on a
+	// run with Layer 3 off ran against the mock, so it is learned.
+	route, _, layer := routeLesson(feedback.Failure{Layer: "run", Detail: noCredentials}, false)
+	require.Equal(t, generator.RouteLearn, route)
+	assert.Empty(t, layer)
 }
 
 // The repair prompt shows a detail once, whichever layer repeated it.

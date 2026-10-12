@@ -93,6 +93,9 @@ func TestRetiredAvoidViolations(t *testing.T) {
 			})
 			reentered(AvoidSource, awsSubnetAvoidRule)(t, dir)
 		},
+		"relearned at a mock layer": func(t *testing.T, dir string) {
+			writeRawLedger(t, dir, func(l *AvoidLedger) { l.Records = append(l.Records, relearned("destruction")) })
+		},
 		"retired record missing from": func(t *testing.T, dir string) {
 			writeRawLedger(t, dir, func(l *AvoidLedger) { l.Records[0].Check.From = "" })
 		},

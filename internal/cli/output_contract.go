@@ -45,7 +45,7 @@ type FailureSummary struct {
 	// the output contract.
 	Origin string `json:"-"`
 	// OriginStage is the stage that produced it, before a run renames
-	// it; routeFailure reads it. Kept out of the output contract.
+	// it; generator.RouteFailure reads it. Kept out of the output contract.
 	OriginStage string `json:"-"`
 }
 

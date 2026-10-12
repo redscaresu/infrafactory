@@ -153,8 +153,8 @@ func (r AvoidLedgerRecord) validate() error {
 	}
 	switch r.Status {
 	case AvoidRecordRelearned:
-		if r.LearnedLayer == MockDeployLayer {
-			return errors.New("a relearned record must come from a layer other than mock_deploy")
+		if IsMockLayer(r.LearnedLayer) {
+			return fmt.Errorf("a relearned record must come from a layer other than a mock's, not %s", r.LearnedLayer)
 		}
 		if r.Rule == "" {
 			return errors.New("a relearned record needs its rule")
