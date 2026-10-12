@@ -1,8 +1,7 @@
 ---
 kind: chore
 repo: infrafactory
-status: blocked
-blocked_by: [fakeaws-subnet-overlap-refused, fakeaws-data-source-example, infrafactory-filter-refusal-routes-to-mock-gaps, infrafactory-fakeaws-identity-pin, fakeaws-rehearsal-instance-pin-and-docs]
+status: ready
 epic: fakeaws-data-sources
 depends_on: [fakeaws-subnet-overlap-refused, fakeaws-data-source-example, infrafactory-filter-refusal-routes-to-mock-gaps, infrafactory-fakeaws-identity-pin, fakeaws-rehearsal-instance-pin-and-docs]
 touches: [.github/workflows/ci.yml, docs/layer3/real-vs-mock-deltas.md, docs/hld/2026-09-30-import-production-state-into-the-mocks.md, docs/epics/fakeaws-data-sources.md, docs/stories/prod-read-seam-fakeaws-filtered-e2e.md, internal/cli/rehearsal_assumptions_test.go, docs/operations.md, docs/stories/fakeaws-data-sources-pin.md]
