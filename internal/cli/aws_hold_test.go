@@ -18,11 +18,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/redscaresu/infrafactory/internal/api"
 	"github.com/redscaresu/infrafactory/internal/config"
+	"github.com/redscaresu/infrafactory/internal/feedback"
 	"github.com/redscaresu/infrafactory/internal/generator"
 	"github.com/redscaresu/infrafactory/internal/harness"
 	"github.com/redscaresu/infrafactory/internal/livestore"
@@ -589,4 +591,285 @@ func TestDeletingTheCopyLiftsTheRefusal(t *testing.T) {
 
 	require.NoError(t, run.err, run.output)
 	assert.Contains(t, lc.log(), "sts:GetCallerIdentity")
+}
+
+// runHoldTest is one `test aws-web-live` in the cwd, which the caller
+// made a fresh dir, with probe as the real probe, so the scenario's
+// criteria run.
+func runHoldTest(t *testing.T, lc *awsLifecycle, probe *fakeRealProbeHarness, flags ...string) awsTestRun {
+	t.Helper()
+	return runAWSTestWith(t, lc, awsTestSetup{name: awsHoldScenario, flags: flags, deps: func(deps *RuntimeDependencies) {
+		deps.RealProbe = probe
+		deps.MockDeploy = &fakeMockDeployHarness{result: &harness.MockDeployResult{}}
+	}})
+}
+
+func passingProbe() *fakeRealProbeHarness {
+	return &fakeRealProbeHarness{result: &harness.RealProbeResult{}}
+}
+
+// holdAWSWebLive runs a passing `test aws-web-live --hold` in a fresh
+// cwd, and returns it with the hold's holder.
+func holdAWSWebLive(t *testing.T, lc *awsLifecycle) (awsTestRun, string) {
+	t.Helper()
+	chdirBesideSchema(t)
+	run := runHoldTest(t, lc, passingProbe(), "--hold")
+	require.NoError(t, run.err, run.output)
+	holder, held := lc.claim()
+	require.True(t, held, "held")
+	return run, holder
+}
+
+func TestHoldKeepsAPassingStackUnderTheClaim(t *testing.T) {
+	lc := newAWSLifecycle(t)
+
+	run, holder := holdAWSWebLive(t, lc)
+
+	assert.Equal(t, lc.runHolder, holder, "the claim is the run's")
+	assert.Zero(t, lc.count(destroyRun), "no destroy")
+	assert.Zero(t, lc.count(deleteClaim), "no release")
+	assert.False(t, run.hasStage("aws_scope_sweep"))
+	assert.False(t, run.hasStage("aws_scope_release"))
+	i := slices.IndexFunc(run.result.Stages, isStage(StageAWSScopeClaimKept))
+	require.NotEqual(t, -1, i, "%+v", run.result.Stages)
+	kept := run.result.Stages[i]
+	assert.Equal(t, StageStatusSkip, kept.Status)
+	copyPath := holdCopyPath(awsHoldScenario)
+	assert.Contains(t, kept.Detail, "kept the aws scope's claim for "+holder+" on purpose (--hold)")
+	assert.Contains(t, kept.Detail, "its tfstate is copied to "+copyPath)
+	assert.Contains(t, kept.Detail, "nothing expires the hold")
+	assert.Contains(t, kept.Detail, "`"+reapCommand(run.h.ConfigPath, run.h.ScenarioPath)+" --take-over "+shellQuote(holder)+" --release-hold`")
+	assert.Contains(t, kept.Detail, "--config "+shellQuote(run.h.ConfigPath), "names the --config passed")
+	assert.NotContains(t, kept.Detail, preflightAWSAccount)
+
+	state, err := os.ReadFile(filepath.Join(run.h.OutputDir(), awsHoldScenario, harness.LiveStateFilename))
+	require.NoError(t, err)
+	assert.Equal(t, "-rw------- 1 links: "+string(state), describeCopy(t, copyPath), "the copy is the output dir's state")
+	for _, dir := range []string{holdsRoot, filepath.Dir(copyPath)} {
+		info, err := os.Lstat(dir)
+		require.NoError(t, err)
+		assert.Equal(t, fs.ModeDir|0o700, info.Mode(), dir)
+	}
+}
+
+// The hold's process has exited, as it has once a hold is kept: a run in
+// this process in the same second would otherwise mint the same holder.
+func TestWhileHeldTheClaimRefusesEveryOtherCommand(t *testing.T) {
+	mintHolderOfAReapedChild(t)
+	lc := newAWSLifecycle(t)
+	held, holder := holdAWSWebLive(t, lc)
+	newAWSClaimHolder = harness.NewAWSClaimHolder
+	deploys := lc.deploy.calls
+
+	requests := len(lc.log())
+	again := runHoldTest(t, lc, passingProbe())
+	assertRefusedWhileHeld(t, again.err)
+	assert.Len(t, lc.log(), requests, "the guard refuses test aws-web-live with no AWS request")
+
+	other := runAWSTest(t, lc, nil, nil)
+	require.Error(t, other.err)
+	assert.Contains(t, failureAt(t, other.result, "aws_scope_claim").Detail, holder)
+	assert.Equal(t, deploys, lc.deploy.calls, "no apply")
+
+	written := writes(lc)
+	plain := reapAWSWith(t, lc, awsReapSetup{h: held.h})
+	require.Error(t, plain.err)
+	assert.Contains(t, plain.text(), holder)
+	assert.Equal(t, written, writes(lc), "plain reap writes nothing")
+	assert.Zero(t, lc.count(destroyRun))
+
+	still, _ := lc.claim()
+	assert.Equal(t, holder, still)
+}
+
+// Each hold that is not kept ends as any other run does. The instance
+// runs until a destroy completes, so only that destroy lets the sweep
+// find the scope empty and release.
+func TestHoldNotKeptDestroysSweepsAndReleases(t *testing.T) {
+	for name, tc := range map[string]struct {
+		setup func(t *testing.T, lc *awsLifecycle, probe *fakeRealProbeHarness)
+		want  string
+	}{
+		"a failing real_probe": {
+			setup: func(_ *testing.T, _ *awsLifecycle, probe *fakeRealProbeHarness) {
+				probe.result = &harness.RealProbeResult{Failures: []feedback.Failure{{Layer: "sandbox_deploy", Stage: "real_probe", Check: "connectivity", Detail: "the probe was refused"}}}
+			},
+			want: "the probe was refused",
+		},
+		"a copy that cannot be written": {
+			setup: func(t *testing.T, _ *awsLifecycle, _ *fakeRealProbeHarness) {
+				require.NoError(t, os.MkdirAll(holdsRoot, 0o700))
+				require.NoError(t, os.Chmod(holdsRoot, 0o755))
+			},
+			want: "its tfstate copy " + holdCopyPath(awsHoldScenario) + " could not be written",
+		},
+		"an interrupt from the last check": {
+			setup: func(_ *testing.T, lc *awsLifecycle, probe *fakeRealProbeHarness) {
+				probe.failWhen = func([]harness.ProbeCheck) *harness.RealProbeResult {
+					lc.signal()
+					return nil
+				}
+			},
+			want: "not held, so the teardown runs as it does for any other run: the run was interrupted",
+		},
+		"an interrupt from inside the copy write": {
+			setup: func(t *testing.T, lc *awsLifecycle, _ *fakeRealProbeHarness) {
+				holdCopy = func(copyPath, statePath string) error {
+					err := writeNewHoldCopy(copyPath, statePath)
+					lc.signal()
+					return err
+				}
+				t.Cleanup(func() { holdCopy = writeNewHoldCopy })
+			},
+			want: "the run was interrupted. The copy " + holdCopyPath(awsHoldScenario) + " is kept",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			chdirBesideSchema(t)
+			lc := newAWSLifecycle(t)
+			probe := passingProbe()
+			tc.setup(t, lc, probe)
+			lc.mu.Lock()
+			lc.ec2["DescribeInstances"] = runningInstance
+			lc.mu.Unlock()
+			lc.destroy.clears = true
+
+			run := runHoldTest(t, lc, probe, "--hold")
+
+			require.Error(t, run.err)
+			assert.Contains(t, run.output, tc.want)
+			assert.Positive(t, lc.count(destroyRun), "destroyed")
+			assert.Equal(t, StageStatusPass, stageStatus(run.result.Stages, "sandbox_deploy", "aws_scope_sweep"))
+			assert.Equal(t, StageStatusPass, stageStatus(run.result.Stages, "sandbox_deploy", "aws_scope_release"))
+			_, held := lc.claim()
+			assert.False(t, held, "released")
+			assert.False(t, run.hasStage(StageAWSScopeClaimKept), "no held line")
+			assert.NotContains(t, run.output, "on purpose (--hold)")
+		})
+	}
+}
+
+func TestHoldRefusalsAreUsageErrorsBeforeAnyAWSRequest(t *testing.T) {
+	for name, tc := range map[string]struct {
+		scenario  string
+		customize func(*config.Config)
+		flags     []string
+		want      string
+	}{
+		"another scenario": {scenario: "example-scenario", want: "--hold holds the aws scenario aws-web-live only, not example-scenario on aws"},
+		"layer 3 off": {
+			customize: func(cfg *config.Config) { cfg.Validation.Layers.SandboxDeploy.Enabled = false },
+			want:      "--hold keeps a Layer 3 stack, which test applies only with",
+		},
+		// Layer 3 runs only after Layer 2, so without it nothing is held.
+		"layer 2 off": {
+			customize: func(cfg *config.Config) { cfg.Validation.Layers.MockDeploy.Enabled = false },
+			want:      "--hold keeps a Layer 3 stack, which test applies only with",
+		},
+		"destruction disabled": {
+			customize: func(cfg *config.Config) { cfg.Validation.Layers.Destruction.Enabled = false },
+			want:      "destruction (validation.layers.destruction) is disabled",
+		},
+		"with --no-destroy": {flags: []string{"--no-destroy"}, want: "hold and no-destroy are mutually exclusive"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			chdirBesideSchema(t)
+			lc := newAWSLifecycle(t)
+
+			run := runAWSTestWith(t, lc, awsTestSetup{
+				name: cmp.Or(tc.scenario, awsHoldScenario), customize: tc.customize, flags: append([]string{"--hold"}, tc.flags...),
+			})
+
+			var cliErr *CLIError
+			require.ErrorAs(t, run.err, &cliErr)
+			assert.Equal(t, errorCodeUsage, cliErr.Code)
+			assert.Contains(t, cliErr.Error(), tc.want)
+			assert.Empty(t, lc.log(), "no STS, SSM or EC2 request")
+			assert.NoDirExists(t, holdsRoot)
+		})
+	}
+}
+
+func TestWithoutHoldNothingIsCopied(t *testing.T) {
+	for name, flags := range map[string][]string{"no flag": nil, "--no-destroy": {"--no-destroy"}} {
+		t.Run(name, func(t *testing.T) {
+			chdirBesideSchema(t)
+			lc := newAWSLifecycle(t)
+
+			run := runHoldTest(t, lc, passingProbe(), flags...)
+
+			require.NoError(t, run.err, run.output)
+			assert.NoDirExists(t, holdsRoot)
+		})
+	}
+}
+
+// Run's flags are the UI's, so the UI cannot hold.
+func TestHoldIsATestFlagOnly(t *testing.T) {
+	run := &cobra.Command{}
+	registerRunFlags(run, true)
+	assert.Nil(t, run.Flags().Lookup("hold"))
+
+	test, _, err := NewRootCmd().Find([]string{"test"})
+	require.NoError(t, err)
+	assert.NotNil(t, test.Flags().Lookup("hold"))
+}
+
+// mintHolderOfAReapedChild makes this process mint the holder a held
+// test leaves once its process has exited: the pid of a child this test
+// started and waited for.
+func mintHolderOfAReapedChild(t *testing.T) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	child := exec.CommandContext(ctx, "true")
+	require.NoError(t, child.Run())
+	host, err := os.Hostname()
+	require.NoError(t, err)
+	minted := newAWSClaimHolder
+	newAWSClaimHolder = func(runID string) (string, error) {
+		return fmt.Sprintf("%s@%s:%d", runID, host, child.ProcessState.Pid()), nil
+	}
+	t.Cleanup(func() { newAWSClaimHolder = minted })
+}
+
+func TestHoldThenReleaseHoldDestroysTheRestoredState(t *testing.T) {
+	mintHolderOfAReapedChild(t)
+	lc := newAWSLifecycle(t)
+	held, holder := holdAWSWebLive(t, lc)
+	copied, err := os.ReadFile(holdCopyPath(awsHoldScenario))
+	require.NoError(t, err)
+	outDir := filepath.Join(held.h.OutputDir(), awsHoldScenario)
+	require.NoError(t, os.RemoveAll(outDir))
+	lc.mu.Lock()
+	lc.ec2["DescribeInstances"] = runningInstance
+	lc.mu.Unlock()
+	lc.destroy.clears = true
+	lc.destroy.during = func(context.Context) {
+		state, err := os.ReadFile(filepath.Join(outDir, harness.LiveStateFilename))
+		require.NoError(t, err, "the destroy runs on the restored state")
+		assert.Equal(t, copied, state)
+	}
+
+	r := reapAWSWith(t, lc, awsReapSetup{h: held.h, flags: []string{"--take-over", holder, "--release-hold"}})
+
+	require.NoError(t, r.err, r.output)
+	assert.Contains(t, r.output, "Hold copy "+holdCopyPath(awsHoldScenario)+": restored to")
+	assert.Equal(t, 1, lc.count(destroyRun))
+	assert.Contains(t, r.output, "every swept collection in the scope is empty")
+	_, stillHeld := lc.claim()
+	assert.False(t, stillHeld, "released")
+}
+
+func TestReleaseHoldRefusesWhileTheHoldersProcessRuns(t *testing.T) {
+	lc := newAWSLifecycle(t)
+	held, holder := holdAWSWebLive(t, lc)
+
+	r := reapAWSWith(t, lc, awsReapSetup{h: held.h, flags: []string{"--take-over", holder, "--release-hold"}})
+
+	require.Error(t, r.err)
+	assert.Contains(t, r.text(), fmt.Sprintf("process %d on this host is still running", os.Getpid()))
+	assert.Zero(t, lc.count(destroyRun))
+	still, _ := lc.claim()
+	assert.Equal(t, holder, still)
 }

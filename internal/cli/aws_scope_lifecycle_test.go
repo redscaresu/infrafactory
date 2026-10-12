@@ -409,6 +409,8 @@ type awsTestSetup struct {
 	// deps edits the dependencies after the defaults are set.
 	deps  func(*RuntimeDependencies)
 	flags []string
+	// name names the scenario; "" is example-scenario.
+	name string
 }
 
 func runAWSTest(t *testing.T, lc *awsLifecycle, customize func(*config.Config), mockDestroy mockDestroyHook, flags ...string) awsTestRun {
@@ -420,6 +422,9 @@ func runAWSTestWith(t *testing.T, lc *awsLifecycle, setup awsTestSetup) awsTestR
 	t.Helper()
 	h := newCommandTestHarness(t)
 	setAWSLifecycleScenario(t, h.ScenarioPath)
+	if setup.name != "" {
+		renameScenario(t, h.ScenarioPath, setup.name)
+	}
 
 	opts := isolatedRunOpts(h, func(cfg config.Config) config.Config {
 		cfg = layer3On(cfg)
@@ -467,12 +472,17 @@ func runAWSTestWith(t *testing.T, lc *awsLifecycle, setup awsTestSetup) awsTestR
 		func(cmd *cobra.Command, args []string, rt *CommandRuntime) error {
 			return runTestWithNotify(cmd, args, rt, lc.notify)
 		}))
+	// As the root command does: a usage error prints no usage.
+	cmd.SilenceUsage = true
 	stdout, stderr := &bytes.Buffer{}, &bytes.Buffer{}
 	cmd.SetOut(stdout)
 	cmd.SetErr(stderr)
 	cmd.SetArgs(append([]string{h.ScenarioPath, "--config", h.ConfigPath, "--output", string(OutputModeJSON)}, setup.flags...))
 	run := awsTestRun{h: h, err: cmd.Execute(), output: stdout.String() + stderr.String()}
-	run.result = decodeMachineOutput(t, bytes.NewBufferString(stdout.String()))
+	// A usage error writes no result.
+	if stdout.Len() > 0 {
+		run.result = decodeMachineOutput(t, bytes.NewBufferString(stdout.String()))
+	}
 	return run
 }
 

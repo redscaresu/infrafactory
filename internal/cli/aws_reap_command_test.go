@@ -64,24 +64,36 @@ type awsReapSetup struct {
 	// deps edits the dependencies after the defaults are set.
 	deps  func(*RuntimeDependencies)
 	flags []string
+	// h is a workspace an aws test already ran in, reaped as it is with
+	// the cwd left where it is; name, cloud, withState and prepare are
+	// then unused.
+	h *CommandTestHarness
 }
 
 // reapAWSWith runs the reap with the harness's workspace as the cwd, so
 // what reap writes under .infrafactory/ lands in the test's own dir.
 func reapAWSWith(t *testing.T, lc *awsLifecycle, setup awsReapSetup) awsReapRun {
 	t.Helper()
+	// A test that ran in its own cwd left the schema there
+	// (chdirBesideSchema).
 	schema, err := filepath.Abs(filepath.Join("..", "..", scenario.DefaultSchemaPath))
+	if setup.h != nil {
+		schema, err = filepath.Abs(scenario.DefaultSchemaPath)
+	}
 	require.NoError(t, err)
-	h := newCommandTestHarness(t)
-	t.Chdir(filepath.Dir(h.ConfigPath))
-	cloud, name := cmp.Or(setup.cloud, "aws"), cmp.Or(setup.name, "example-scenario")
-	setScenarioCloud(t, h.ScenarioPath, cloud)
-	renameScenario(t, h.ScenarioPath, name)
-	outDir := filepath.Join(h.OutputDir(), name)
-	require.NoError(t, os.MkdirAll(outDir, 0o755))
-	writeAWSStateAndStaleMarker(t, outDir, setup.withState)
-	if setup.prepare != nil {
-		setup.prepare(outDir)
+	h := setup.h
+	if h == nil {
+		h = newCommandTestHarness(t)
+		t.Chdir(filepath.Dir(h.ConfigPath))
+		cloud, name := cmp.Or(setup.cloud, "aws"), cmp.Or(setup.name, "example-scenario")
+		setScenarioCloud(t, h.ScenarioPath, cloud)
+		renameScenario(t, h.ScenarioPath, name)
+		outDir := filepath.Join(h.OutputDir(), name)
+		require.NoError(t, os.MkdirAll(outDir, 0o755))
+		writeAWSStateAndStaleMarker(t, outDir, setup.withState)
+		if setup.prepare != nil {
+			setup.prepare(outDir)
+		}
 	}
 
 	cfg, err := config.Load(h.ConfigPath)
@@ -663,7 +675,7 @@ func TestAWSTeardownSkippedSaysWhatTheClaimIs(t *testing.T) {
 			rt := &CommandRuntime{ConfigPath: config.DefaultPath, scenarioPath: "scenarios/training/aws-web-live.yaml",
 				awsHolder: holder, awsClaim: tc.claim}
 
-			stages, failures := awsScopeTeardown(context.Background(), rt, t.TempDir(), testExecutionOptions{SkipDestroy: true})
+			stages, failures := awsScopeTeardown(context.Background(), rt, t.TempDir(), testExecutionOptions{SkipDestroy: true}, awsHold{})
 
 			assert.Empty(t, failures)
 			require.Len(t, stages, 1)

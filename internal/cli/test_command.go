@@ -45,6 +45,10 @@ func runTestWithNotify(
 	if err != nil {
 		return &CLIError{Op: "test", Code: errorCodeUsage, Err: fmt.Errorf("read --continue-on-drift flag: %w", err)}
 	}
+	hold, err := cmd.Flags().GetBool("hold")
+	if err != nil {
+		return &CLIError{Op: "test", Code: errorCodeUsage, Err: fmt.Errorf("read --hold flag: %w", err)}
+	}
 
 	// Loaded before the guards: the hold's, keyed on the scenario's name,
 	// and the interrupt guard, keyed on its cloud. LoadScenario caches, so
@@ -55,6 +59,11 @@ func runTestWithNotify(
 	if loadErr == nil {
 		if err := refuseWhileHeld("test", runtime, sc); err != nil {
 			return err
+		}
+		if hold {
+			if err := holdRefusal(runtime, sc, noDestroy); err != nil {
+				return err
+			}
 		}
 	}
 	cloud := layer3TeardownCloud(sc.Cloud)
@@ -86,6 +95,7 @@ func runTestWithNotify(
 			MockDeployMode:  harness.MockDeployModeClean,
 			SkipDestroy:     noDestroy,
 			ContinueOnDrift: continueOnDrift,
+			Hold:            hold,
 			// Progress on stderr, the same stream and the same bytes
 			// `deploy` produces. stdout carries the output contract.
 			Progress: cmd.ErrOrStderr(),
@@ -628,6 +638,11 @@ type testExecutionOptions struct {
 	// that registration this would just be a leak with better manners.
 	KeepSandbox bool
 
+	// Hold is test's --hold: a passing, uninterrupted aws-web-live keeps
+	// its stack under the claim, decided in awsScopeTeardown. Never set by
+	// run, so the UI cannot reach it.
+	Hold bool
+
 	// ContinueOnDrift keeps the run going after the Layer 2 converge
 	// check finds a non-empty plan. Default (false) stops.
 	//
@@ -988,6 +1003,7 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 	// run-project switch, which must agree with it, sits outside that
 	// block on purpose.
 	keepingSandbox := opts.KeepSandbox
+	holdWanted := false
 	if deployErr == nil && runtime.Config.Validation.Layers.Destruction.Enabled && !opts.SkipDestroy {
 		criteriaStages, criteriaFailures := evaluateSupportedCriteria(ctx, sc, runtime, deployResult, sandboxApplied)
 		stages = append(stages, criteriaStages...)
@@ -1019,6 +1035,9 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 		// interrupt, whose failure is added at the end, so ctx is read
 		// here too.
 		keepingSandbox = opts.KeepSandbox && len(failures) == 0 && ctx.Err() == nil
+		// --hold by the same rule; the run's ctx is read in the teardown,
+		// after the copy.
+		holdWanted = opts.Hold && len(failures) == 0
 		if sandboxEnabled && keepingSandbox {
 			stages = append(stages, StageSummary{
 				Layer: "sandbox_deploy", Stage: "destroy", Status: StageStatusSkip,
@@ -1113,10 +1132,12 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 	// clean destroy leaves nothing behind but would otherwise strand the
 	// empty project forever.
 	if cloud == layer3AWS && runProjectID != "" {
-		// Finished on a fresh context when a signal cut it short.
+		// Finished on a fresh context when a signal cut it short. The hold
+		// carries the run's ctx, so a rerun destroys rather than holds.
+		hold := awsHold{wanted: holdWanted, run: ctx}
 		teardownStages, teardownFailures := finishTeardown(ctx,
 			func(ctx context.Context) ([]StageSummary, []FailureSummary) {
-				return awsScopeTeardown(ctx, runtime, outputDir, opts)
+				return awsScopeTeardown(ctx, runtime, outputDir, opts, hold)
 			})
 		stages = append(stages, teardownStages...)
 		failures = append(failures, teardownFailures...)
