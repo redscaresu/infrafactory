@@ -75,7 +75,7 @@ func (p rehearsePrepare) prepare(ctx context.Context, dir, region, varFile strin
 	if err != nil {
 		return result, err
 	}
-	return rehearsePrepareResult{ID: id, WorkDir: in.root, AWSVersion: lock.aws, Warnings: lock.warnings}, nil
+	return rehearsePrepareResult{ID: id, WorkDir: in.root, AWSVersion: lock.aws(), Warnings: lock.warnings}, nil
 }
 
 // rehearsalCopy copies ancestor into <rehearsal>/work at its path relative

@@ -19,19 +19,33 @@ const rehearsalTofuTimeout = 10 * time.Minute
 
 // gateAndInit reads the copy's lock, runs gate 1 over the copy, then the
 // first init (ADR-0042 § The lock, § The two inits). It returns the lock.
+// The copy, the lock and gate 1 do not read ctx, so a cancel during them
+// is refused before the first tofu, and one during the last steps after
+// them: a cancel never ends in a success report.
 func (p rehearsePrepare) gateAndInit(ctx context.Context, rehearsal string, in rehearsalGateInput) (rehearsalLock, error) {
 	lock, problems := in.lock()
 	if err := rehearsalRefusal(problems); err != nil {
 		return rehearsalLock{}, err
 	}
-	in.awsVersion = lock.aws
+	in.awsVersion = lock.aws()
 	if err := rehearsalGate(in); err != nil {
 		return rehearsalLock{}, err
 	}
-	if err := p.firstInit(ctx, rehearsal, in); err != nil {
+	if err := rehearsalCancelled(ctx); err != nil {
 		return rehearsalLock{}, err
 	}
-	return lock, nil
+	if err := p.firstInit(ctx, rehearsal, in, lock); err != nil {
+		return rehearsalLock{}, err
+	}
+	return lock, rehearsalCancelled(ctx)
+}
+
+// rehearsalCancelled refuses a cancelled prepare.
+func rehearsalCancelled(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("prepare is cancelled: %w", err)
+	}
+	return nil
 }
 
 // firstInit is the network-only first init in the copy's root: get, which
@@ -41,10 +55,11 @@ func (p rehearsePrepare) gateAndInit(ctx context.Context, rehearsal string, in r
 // with an empty HOME, TF_DATA_DIR at <rehearsal>/data, and git told to
 // read no system config, never prompt and fetch only from files. Gate 1
 // has refused every module download, so git has nothing to fetch; the git
-// variables are a second wall in case the gate is wrong. Then the copy's
-// lock must still pin in.awsVersion, and the rehearsal's modes are
+// variables are a second wall in case the gate is wrong, and allow no git
+// transport at all, file included. Then the copy's lock must pin every
+// provider at the version lock pins it, and the rehearsal's modes are
 // tightened again.
-func (p rehearsePrepare) firstInit(ctx context.Context, rehearsal string, in rehearsalGateInput) error {
+func (p rehearsePrepare) firstInit(ctx context.Context, rehearsal string, in rehearsalGateInput, lock rehearsalLock) error {
 	home, data := filepath.Join(rehearsal, "home"), filepath.Join(rehearsal, "data")
 	for _, dir := range []string{home, data} {
 		if err := os.Mkdir(dir, 0o700); err != nil {
@@ -56,7 +71,7 @@ func (p rehearsePrepare) firstInit(ctx context.Context, rehearsal string, in reh
 		"TF_DATA_DIR":         data,
 		"GIT_CONFIG_NOSYSTEM": "1", // TestAssumption_GitNoSystemDropsCredentialHelper
 		"GIT_TERMINAL_PROMPT": "0",
-		"GIT_ALLOW_PROTOCOL":  "file", // TestAssumption_GitAllowProtocolRefusesRemoteTransports
+		"GIT_ALLOW_PROTOCOL":  "none", // names no transport: TestAssumption_GitAllowProtocolNoneRefusesEveryTransport
 	}
 	for _, args := range [][]string{
 		{"get", "-no-color"},
@@ -68,13 +83,13 @@ func (p rehearsePrepare) firstInit(ctx context.Context, rehearsal string, in reh
 		}
 	}
 	// providers lock keeps the locked version (TestAssumption_ProvidersLockKeepsLockedVersion);
-	// this holds it whatever tofu does.
-	lock, problems := in.lock()
+	// this holds every provider's whatever tofu does.
+	after, problems := in.lock()
 	if err := rehearsalRefusal(problems); err != nil {
 		return fmt.Errorf("after the first init: %w", err)
 	}
-	if lock.aws != in.awsVersion {
-		return fmt.Errorf("the first init is refused: it changed the locked hashicorp/aws version from %s to %s", in.awsVersion, lock.aws)
+	if changes := rehearsalLockChanges(lock, after); len(changes) > 0 {
+		return fmt.Errorf("the first init is refused: it changed the locked provider versions: %s", strings.Join(changes, "; "))
 	}
 	return rehearsalTightenModes(rehearsal)
 }

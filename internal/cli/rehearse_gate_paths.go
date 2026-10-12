@@ -12,6 +12,8 @@ import (
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/hclsyntax"
 	"github.com/zclconf/go-cty/cty"
+
+	"github.com/redscaresu/infrafactory/internal/harness"
 )
 
 // rehearsalPathFunctions read the path their first argument names
@@ -49,6 +51,20 @@ var rehearsalPathArgs = map[string]map[string]map[string]bool{
 		"local_sensitive_file": {"filename": false},
 		"archive_file":         {"output_path": true, "source_file": false, "source_dir": false},
 	},
+}
+
+// rehearsalPathArgReleases are, by provider type, the release whose
+// file-reading arguments rehearsalPathArgs names: hashicorp/aws's are
+// harness.AWSProviderVersion's, and hashicorp/local's and
+// hashicorp/archive's were checked against these releases' `tofu providers
+// schema -json`. A later release, or another major, could read a file
+// through an argument the table does not name, so the lock admits each
+// provider only at an earlier release of the same major (ADR-0042 § The
+// lock).
+var rehearsalPathArgReleases = map[string]string{
+	"aws":     harness.AWSProviderVersion,
+	"local":   "2.9.1",
+	"archive": "2.8.1",
 }
 
 const rehearsalComputedPath = "a variable or computed path is refused: the gate admits only path.module or path.root, alone or followed by a literal starting with /"

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"cmp"
 	"fmt"
 	"maps"
 	"path/filepath"
@@ -24,17 +25,21 @@ const rehearsalLockFile = ".terraform.lock.hcl"
 // (TestAssumption_RegistryTerraformIoLockInitialises).
 var rehearsalLockHosts = map[string]bool{"registry.opentofu.org": true, "registry.terraform.io": true}
 
-// rehearsalLock is what the lock tells prepare: the hashicorp/aws version
-// it pins, and the warnings for the report.
+// rehearsalLock is what the lock tells prepare: the version it pins for
+// each provider type, and the warnings for the report.
 type rehearsalLock struct {
-	aws      string
+	versions map[string]string
 	warnings []string
 }
 
+// aws is the hashicorp/aws version the lock pins.
+func (l rehearsalLock) aws() string { return l.versions["aws"] }
+
 // lock parses the root's lock. One that is missing or does not parse, has
-// no hashicorp/aws entry, pins aws entries at different versions, pins an
-// aws version the gate's path table cannot speak for, or names any other
-// provider than the admitted ones, is refused by name.
+// no hashicorp/aws entry, pins one provider's entries at different
+// versions, pins a provider at a version the gate's path table cannot
+// speak for, or names any other provider than the admitted ones, is
+// refused by name.
 func (in rehearsalGateInput) lock() (rehearsalLock, []string) {
 	path := filepath.Join(in.root, rehearsalLockFile)
 	name := in.display(path)
@@ -42,87 +47,101 @@ func (in rehearsalGateInput) lock() (rehearsalLock, []string) {
 	if problem != "" {
 		return rehearsalLock{}, []string{problem + ": refused: a rehearsal takes every provider version from the root's lock"}
 	}
-	var lock rehearsalLock
 	var problems []string
-	versions := map[string]bool{}
+	lock, versions := rehearsalLock{versions: map[string]string{}}, map[string]map[string]bool{}
 	for attr := range body.Attributes {
 		problems = append(problems, fmt.Sprintf("%s: %s: refused: a lock holds only provider blocks", name, attr))
 	}
 	for _, block := range body.Blocks {
-		host, version, problem := rehearsalLockEntry(rehearsalAt(name, block.DefRange(), rehearsalAddress(block)), block)
-		switch {
-		case problem != "":
+		host, typ, version, problem := rehearsalLockEntry(rehearsalAt(name, block.DefRange(), rehearsalAddress(block)), block)
+		if problem != "" {
 			problems = append(problems, problem)
-		case version != "":
-			versions[version], lock.aws = true, version
-			if host == "registry.terraform.io" {
-				lock.warnings = append(lock.warnings, name+": the hashicorp/aws entry is registry.terraform.io's, which Terraform wrote: moved, import, removed and ephemeral semantics may differ under tofu")
-			}
+			continue
+		}
+		if versions[typ] == nil {
+			versions[typ] = map[string]bool{}
+		}
+		versions[typ][version], lock.versions[typ] = true, version
+		if typ == "aws" && host == "registry.terraform.io" {
+			lock.warnings = append(lock.warnings, name+": the hashicorp/aws entry is registry.terraform.io's, which Terraform wrote: moved, import, removed and ephemeral semantics may differ under tofu")
 		}
 	}
-	switch len(versions) {
-	case 0:
-		return lock, append(problems, name+": refused: it has no hashicorp/aws entry the gate can read, and a rehearsal is AWS-only")
-	case 1:
-		problem, warning := rehearsalAWSVersion(lock.aws)
-		if problem != "" {
+	for _, typ := range slices.Sorted(maps.Keys(versions)) {
+		if len(versions[typ]) > 1 {
+			problems = append(problems, fmt.Sprintf("%s: refused: its hashicorp/%s entries pin different versions (%s)", name, typ, strings.Join(slices.Sorted(maps.Keys(versions[typ])), ", ")))
+		} else if problem := rehearsalReleaseProblem(typ, lock.versions[typ]); problem != "" {
 			problems = append(problems, name+": refused: "+problem)
 		}
-		if warning != "" {
-			lock.warnings = append(lock.warnings, name+": "+warning)
-		}
-		return lock, problems
 	}
-	return lock, append(problems, fmt.Sprintf("%s: refused: its hashicorp/aws entries pin different versions (%s)", name, strings.Join(slices.Sorted(maps.Keys(versions)), ", ")))
+	switch aws := lock.aws(); {
+	case aws == "":
+		problems = append(problems, name+": refused: it has no hashicorp/aws entry the gate can read, and a rehearsal is AWS-only")
+	case aws != harness.AWSProviderVersion:
+		lock.warnings = append(lock.warnings, fmt.Sprintf("%s: the lock pins hashicorp/aws %s, not %s, the release fakeaws is proven against: a failure under it is a fakeaws gap, to file as a fakeaws story",
+			name, aws, harness.AWSProviderVersion))
+	}
+	return lock, problems
 }
 
-// rehearsalLockEntry reads one lock entry: its host and, for hashicorp/aws,
-// its version ("" for another admitted provider), or why it is refused.
-func rehearsalLockEntry(at string, block *hclsyntax.Block) (host, version, problem string) {
+// rehearsalLockEntry reads one lock entry: its host, provider type and
+// version, or why it is refused.
+func rehearsalLockEntry(at string, block *hclsyntax.Block) (host, typ, version, problem string) {
 	if block.Type != "provider" || len(block.Labels) != 1 {
-		return "", "", at + ": refused: a lock holds only provider blocks with one label"
+		return "", "", "", at + ": refused: a lock holds only provider blocks with one label"
 	}
 	host, source, _ := strings.Cut(strings.ToLower(block.Labels[0]), "/")
 	typ, admitted := rehearsalSource(source)
-	switch {
-	case !rehearsalLockHosts[host] || !admitted:
-		return "", "", fmt.Sprintf("%s: refused: the lock names provider %q, and a rehearsal admits only hashicorp/{%s} from %s", at, block.Labels[0],
+	if !rehearsalLockHosts[host] || !admitted {
+		return "", "", "", fmt.Sprintf("%s: refused: the lock names provider %q, and a rehearsal admits only hashicorp/{%s} from %s", at, block.Labels[0],
 			strings.Join(slices.Sorted(maps.Keys(rehearsalProviders)), ", "), strings.Join(slices.Sorted(maps.Keys(rehearsalLockHosts)), " or "))
-	case typ != "aws":
-		return host, "", ""
 	}
 	attr, ok := block.Body.Attributes["version"]
 	if ok {
 		version, ok = rehearsalLiteral(attr.Expr)
 	}
 	if !ok || version == "" {
-		return "", "", at + ": refused: its version is not a string literal the gate can read"
+		return "", "", "", at + ": refused: its version is not a string literal the gate can read"
 	}
-	return host, version, ""
+	return host, typ, version, ""
 }
 
-// rehearsalAWSVersion is why a locked hashicorp/aws version is refused,
-// or the report's warning for one that is not harness.AWSProviderVersion.
-// rehearsalPathArgs names the arguments that read a local file in
-// harness.AWSProviderVersion only, so a later release, or another major,
-// could read one through an argument the table does not name: it is
-// refused. An earlier release of the same major is admitted, because the
-// provider removes an argument only in a major release (unverified;
-// ADR-0042 § The lock).
-func rehearsalAWSVersion(version string) (problem, warning string) {
+// rehearsalReleaseProblem is why a locked version of a provider whose
+// arguments rehearsalPathArgs names is refused, or "". The table names
+// the file-reading arguments of rehearsalPathArgReleases[typ] only, so a
+// later release, or another major, could read a file through an argument
+// it does not name: it is refused. An earlier release of the same major is
+// admitted, because a provider removes an argument only in a major release
+// (unverified; ADR-0042 § The lock).
+func rehearsalReleaseProblem(typ, version string) string {
+	bound, ok := rehearsalPathArgReleases[typ]
+	if !ok {
+		return ""
+	}
 	locked, ok := rehearsalRelease(version)
-	pinned, _ := rehearsalRelease(harness.AWSProviderVersion)
+	table, _ := rehearsalRelease(bound)
 	switch {
 	case !ok:
-		return fmt.Sprintf("hashicorp/aws %q is not an exact X.Y.Z release the gate can compare", version), ""
-	case locked[0] != pinned[0] || slices.Compare(locked[:], pinned[:]) > 0:
-		return fmt.Sprintf("hashicorp/aws %s is later than %s or of another major, and the gate's table of the aws arguments that read a local file is %s's, so it cannot name an argument %s reads one through",
-			version, harness.AWSProviderVersion, harness.AWSProviderVersion, version), ""
-	case version != harness.AWSProviderVersion:
-		return "", fmt.Sprintf("the lock pins hashicorp/aws %s, not %s, the release fakeaws is proven against: a failure under it is a fakeaws gap, to file as a fakeaws story",
-			version, harness.AWSProviderVersion)
+		return fmt.Sprintf("hashicorp/%s %q is not an exact X.Y.Z release the gate can compare", typ, version)
+	case locked[0] != table[0] || slices.Compare(locked[:], table[:]) > 0:
+		return fmt.Sprintf("hashicorp/%s %s is later than %s or of another major, and the gate's table of the %s arguments that read a local file is %s's, so it cannot name an argument %s reads one through",
+			typ, version, bound, typ, bound, version)
 	}
-	return "", ""
+	return ""
+}
+
+// rehearsalLockChanges names every provider type whose locked version
+// differs between before and after, "none" where one has no entry.
+func rehearsalLockChanges(before, after rehearsalLock) []string {
+	var changes []string
+	types := maps.Clone(before.versions)
+	maps.Copy(types, after.versions)
+	for _, typ := range slices.Sorted(maps.Keys(types)) {
+		from, to := before.versions[typ], after.versions[typ]
+		if from != to {
+			changes = append(changes, fmt.Sprintf("hashicorp/%s from %s to %s", typ, cmp.Or(from, "none"), cmp.Or(to, "none")))
+		}
+	}
+	return changes
 }
 
 // rehearsalRelease is an exact X.Y.Z release version's numbers. A

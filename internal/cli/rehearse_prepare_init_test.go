@@ -12,6 +12,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -19,10 +20,11 @@ import (
 )
 
 // initRun runs prepare, built from p, on a repo whose envs/prod passes
-// gate 1, with a runner that records each call and then runs tofu.
-func initRun(t *testing.T, p rehearsePrepare, tofu func(context.Context, harness.Command) (harness.CommandResult, error)) (string, prepareRun) {
+// gate 1 and whose lock is lock, with a runner that records each call and
+// then runs tofu.
+func initRun(t *testing.T, p rehearsePrepare, lock string, tofu func(context.Context, harness.Command) (harness.CommandResult, error)) (string, prepareRun) {
 	t.Helper()
-	repo := lockRepo(t, prepareLock, "")
+	repo := lockRepo(t, lock, "")
 	var run prepareRun
 	p.runner = harness.CommandRunnerFunc(func(ctx context.Context, c harness.Command) (harness.CommandResult, error) {
 		run.calls = append(run.calls, c)
@@ -41,7 +43,7 @@ func initRun(t *testing.T, p rehearsePrepare, tofu func(context.Context, harness
 func TestRehearsePrepareFirstInitCommands(t *testing.T) {
 	t.Parallel()
 	var homes []string
-	repo, run := initRun(t, rehearsePrepare{}, func(_ context.Context, c harness.Command) (harness.CommandResult, error) {
+	repo, run := initRun(t, rehearsePrepare{}, prepareLock, func(_ context.Context, c harness.Command) (harness.CommandResult, error) {
 		entries, err := os.ReadDir(c.Env["HOME"])
 		require.NoError(t, err)
 		assert.Empty(t, entries, "HOME is not empty")
@@ -72,7 +74,7 @@ func TestRehearsePrepareFirstInitCommands(t *testing.T) {
 		assert.Equal(t, []string{"GIT_ALLOW_PROTOCOL", "GIT_CONFIG_NOSYSTEM", "GIT_TERMINAL_PROMPT", "HOME", "TF_DATA_DIR"}, slices.Sorted(maps.Keys(c.Env)))
 		assert.Equal(t, map[string]string{
 			"HOME": filepath.Join(rehearsal, "home"), "TF_DATA_DIR": filepath.Join(rehearsal, "data"),
-			"GIT_CONFIG_NOSYSTEM": "1", "GIT_TERMINAL_PROMPT": "0", "GIT_ALLOW_PROTOCOL": "file",
+			"GIT_CONFIG_NOSYSTEM": "1", "GIT_TERMINAL_PROMPT": "0", "GIT_ALLOW_PROTOCOL": "none",
 		}, c.Env)
 		rel, err := filepath.Rel(work, c.Env["TF_DATA_DIR"])
 		require.NoError(t, err)
@@ -97,20 +99,35 @@ func TestRehearsePrepareFirstInitCommands(t *testing.T) {
 	}))
 }
 
+// The first init's providers lock may not move any provider's locked
+// version, however its entries are spelled.
 func TestRehearsePrepareRefusesAChangedLockVersion(t *testing.T) {
 	t.Parallel()
-	repo, run := initRun(t, rehearsePrepare{}, func(_ context.Context, c harness.Command) (harness.CommandResult, error) {
-		if c.Args[0] == "providers" {
-			lock := lockEntry("registry.opentofu.org/hashicorp/aws", "5.99.0")
-			require.NoError(t, os.WriteFile(filepath.Join(c.Dir, rehearsalLockFile), []byte(lock), 0o644))
-		}
-		return harness.CommandResult{}, nil
-	})
+	random := func(host, version string) string { return lockEntry(host+"/hashicorp/random", version) }
 
-	require.Error(t, run.err)
-	assert.Equal(t, ExitCodeRuntime, ExitCodeForError(run.err))
-	assert.Contains(t, run.err.Error(), "changed the locked hashicorp/aws version from "+harness.AWSProviderVersion+" to 5.99.0")
-	assert.NoDirExists(t, preparedDir(repo))
+	for _, tc := range []struct {
+		name, before, after, want string
+	}{
+		{"aws", prepareLock, lockEntry("registry.opentofu.org/hashicorp/aws", "5.99.0"), "hashicorp/aws from " + harness.AWSProviderVersion + " to 5.99.0"},
+		{"random from a registry.terraform.io entry", prepareLock + random("registry.terraform.io", "3.6.0"),
+			prepareLock + random("registry.opentofu.org", "3.7.0"), "hashicorp/random from 3.6.0 to 3.7.0"},
+		{"a provider the user's lock did not pin", prepareLock, prepareLock + random("registry.opentofu.org", "3.7.0"), "hashicorp/random from none to 3.7.0"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			repo, run := initRun(t, rehearsePrepare{}, tc.before, func(_ context.Context, c harness.Command) (harness.CommandResult, error) {
+				if c.Args[0] == "providers" {
+					require.NoError(t, os.WriteFile(filepath.Join(c.Dir, rehearsalLockFile), []byte(tc.after), 0o644))
+				}
+				return harness.CommandResult{}, nil
+			})
+
+			require.Error(t, run.err)
+			assert.Equal(t, ExitCodeRuntime, ExitCodeForError(run.err))
+			assert.Contains(t, run.err.Error(), "the first init is refused: it changed the locked provider versions: "+tc.want)
+			assert.NoDirExists(t, preparedDir(repo))
+		})
+	}
 }
 
 func TestRehearsePrepareTofuFailureExitsOne(t *testing.T) {
@@ -130,7 +147,7 @@ func TestRehearsePrepareTofuFailureExitsOne(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			repo, run := initRun(t, rehearsePrepare{}, func(_ context.Context, c harness.Command) (harness.CommandResult, error) {
+			repo, run := initRun(t, rehearsePrepare{}, prepareLock, func(_ context.Context, c harness.Command) (harness.CommandResult, error) {
 				if c.Args[0] == tc.failAt {
 					return tc.result, tc.err
 				}
@@ -147,26 +164,71 @@ func TestRehearsePrepareTofuFailureExitsOne(t *testing.T) {
 	}
 }
 
-// A signal cancels the first init through prepare's guard, so the runner
-// would not raise it again: prepare exits 1 with the refusal and removes
-// the rehearsal. Not parallel: signalGuards is process-wide.
+// A signal cancels prepare through its guard, whenever it arrives: during
+// the copy and gate 1, which do not read ctx, prepare refuses before the
+// first tofu; during the last tofu, it refuses after the last step. Each
+// exits 1 with no success report and removes the rehearsal. Not parallel:
+// signalGuards is process-wide.
 func TestRehearsePrepareSignalCancelsUnderAGuard(t *testing.T) {
-	before := signalGuards.Load()
-	var guards []int32
-	caught := func(ctx context.Context, _ ...os.Signal) (context.Context, context.CancelFunc) {
-		ctx, cancel := context.WithCancel(ctx)
-		cancel()
-		return ctx, cancel
-	}
-	repo, run := initRun(t, rehearsePrepare{notify: caught}, func(ctx context.Context, _ harness.Command) (harness.CommandResult, error) {
-		guards = append(guards, signalGuards.Load())
-		return harness.CommandResult{ExitCode: -1}, ctx.Err()
-	})
+	for _, tc := range []struct {
+		name string
+		// at is the tofu subcommand whose run the signal arrives in, ""
+		// for before any tofu.
+		at    string
+		calls int
+	}{
+		{"during the copy and gate 1", "", 0},
+		{"during the last tofu", "init", 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			before := signalGuards.Load()
+			var guards []int32
+			var signal context.CancelFunc
+			notify := func(ctx context.Context, _ ...os.Signal) (context.Context, context.CancelFunc) {
+				ctx, signal = context.WithCancel(ctx)
+				if tc.at == "" {
+					signal()
+				}
+				return ctx, signal
+			}
+			repo, run := initRun(t, rehearsePrepare{notify: notify}, prepareLock, func(_ context.Context, c harness.Command) (harness.CommandResult, error) {
+				guards = append(guards, signalGuards.Load())
+				if c.Args[0] == tc.at {
+					signal()
+				}
+				return harness.CommandResult{}, nil
+			})
 
-	require.Error(t, run.err)
-	assert.Equal(t, ExitCodeRuntime, ExitCodeForError(run.err))
-	assert.Equal(t, []int32{before + 1}, guards, "the tofu call ran outside a guard")
-	assert.Contains(t, run.stdout, "Status: failed\nRefused: tofu get -no-color failed: context canceled")
-	assert.NoDirExists(t, preparedDir(repo))
-	assert.Equal(t, before, signalGuards.Load(), "the guard was not released")
+			require.Error(t, run.err)
+			assert.Equal(t, ExitCodeRuntime, ExitCodeForError(run.err))
+			assert.Len(t, run.calls, tc.calls)
+			for _, guard := range guards {
+				assert.Equal(t, before+1, guard, "a tofu call ran outside the guard")
+			}
+			assert.Contains(t, run.stdout, "Status: failed\nRefused: prepare is cancelled: context canceled")
+			assert.NotContains(t, run.stdout, "Rehearsal:")
+			assert.NoDirExists(t, preparedDir(repo))
+			assert.Equal(t, before, signalGuards.Load(), "the guard was not released")
+		})
+	}
 }
+
+// write returns the first error writing the human report, success and
+// refusal alike.
+func TestRehearsePrepareResultWriteReturnsTheWriteError(t *testing.T) {
+	t.Parallel()
+	for _, result := range []rehearsePrepareResult{
+		{Status: CommandStatusSuccess, ID: prepareID, WorkDir: "w", AWSVersion: harness.AWSProviderVersion, Warnings: []string{"w"}},
+		{Status: CommandStatusFailed, Refusal: "r"},
+	} {
+		cmd := &cobra.Command{}
+		cmd.SetOut(failingWriter{})
+		assert.ErrorIs(t, result.write(cmd, OutputModeHuman), errFailingWriter, result.Status)
+	}
+}
+
+var errFailingWriter = errors.New("the writer failed")
+
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) { return 0, errFailingWriter }

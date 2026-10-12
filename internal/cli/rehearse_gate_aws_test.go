@@ -169,3 +169,14 @@ func TestRehearsalGateAWSAdmits(t *testing.T) {
 		})
 	}
 }
+
+// A gate run with no lock version, such as one outside prepare, names none
+// in the refusal of an argument the table does not name.
+func TestRehearsalGateAWSUnknownArgumentWithoutALockVersion(t *testing.T) {
+	err := gateFixture(t, map[string]string{"main.tf": "provider \"aws\" {\n  region      = \"us-east-1\"\n  made_up_arg = 1\n}\n"}, "")
+
+	require.ErrorIs(t, err, errRehearsalRefuses)
+	assert.Contains(t, err.Error(), "provider.aws.made_up_arg: refused: the gate's table of hashicorp/aws "+harness.AWSProviderVersion+
+		" provider arguments does not name it, so it is refused under any lock version")
+	assert.NotContains(t, err.Error(), "the lock's")
+}

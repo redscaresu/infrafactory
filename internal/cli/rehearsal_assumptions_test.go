@@ -508,23 +508,36 @@ func TestAssumption_GitNoSystemDropsCredentialHelper(t *testing.T) {
 	t.Log("vacuous control: this machine has no system git config for GIT_CONFIG_NOSYSTEM to drop")
 }
 
-// TestAssumption_GitAllowProtocolRefusesRemoteTransports: under
-// GIT_ALLOW_PROTOCOL=file, `git ls-remote` of an https and an ssh URL each
-// fail with git's transport-not-allowed error before any connection: both
-// URLs point at closedAddr, where a connection would fail differently.
+// TestAssumption_GitAllowProtocolNoneRefusesEveryTransport: under
+// GIT_ALLOW_PROTOCOL=none, a value naming no transport, `git ls-remote` of
+// an https URL, an ssh URL and a file:// URL each fail with git's
+// transport-not-allowed error before any connection. The https and ssh URLs
+// point at closedAddr, where a connection would fail differently; the
+// file:// URL names a real repository, which a control under
+// GIT_ALLOW_PROTOCOL=file lists.
 //
 // Relied on by: rehearsal-prepare-gate's first init, which runs under
-// GIT_ALLOW_PROTOCOL=file as a second wall behind the gate (ADR-0042
+// GIT_ALLOW_PROTOCOL=none as a second wall behind the gate (ADR-0042
 // Decision 2). ADR-0028.
-func TestAssumption_GitAllowProtocolRefusesRemoteTransports(t *testing.T) {
+func TestAssumption_GitAllowProtocolNoneRefusesEveryTransport(t *testing.T) {
 	t.Parallel()
 	requireClosedAddr(t)
+	repo := t.TempDir()
+	out, err := runGit(t, nil, "init", "-q", repo)
+	require.NoError(t, err, out)
 
-	for _, scheme := range []string{"https", "ssh"} {
-		out, err := runGit(t, map[string]string{"GIT_ALLOW_PROTOCOL": "file"}, "ls-remote", scheme+"://"+closedAddr+"/x.git")
+	for scheme, url := range map[string]string{
+		"https": "https://" + closedAddr + "/x.git",
+		"ssh":   "ssh://" + closedAddr + "/x.git",
+		"file":  "file://" + repo,
+	} {
+		out, err := runGit(t, map[string]string{"GIT_ALLOW_PROTOCOL": "none"}, "ls-remote", url)
 		require.Error(t, err, out)
 		assert.Contains(t, out, fmt.Sprintf("transport '%s' not allowed", scheme))
 	}
+
+	control, err := runGit(t, map[string]string{"GIT_ALLOW_PROTOCOL": "file"}, "ls-remote", "file://"+repo)
+	assert.NoError(t, err, "GIT_ALLOW_PROTOCOL=file refused the file:// repository: %s", control)
 }
 
 // gitDeadline bounds every git command in the assumption tests.
@@ -628,7 +641,7 @@ func newLockedRoot(t *testing.T, addr string) lockedRoot {
 	tmp := t.TempDir()
 	r := lockedRoot{assumptionDir: assumptionDir{dir: filepath.Join(tmp, "root")}, data: filepath.Join(tmp, "data")}
 	r.env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + t.TempDir(), "TF_DATA_DIR=" + r.data,
-		"GIT_CONFIG_NOSYSTEM=1", "GIT_TERMINAL_PROMPT=0", "GIT_ALLOW_PROTOCOL=file"}
+		"GIT_CONFIG_NOSYSTEM=1", "GIT_TERMINAL_PROMPT=0", "GIT_ALLOW_PROTOCOL=none"}
 	r.write(t, "main.tf", "terraform {\n  required_providers {\n    aws = {\n      source  = \"hashicorp/aws\"\n      version = \"~> 5.0\"\n    }\n  }\n}\n")
 	r.write(t, ".terraform.lock.hcl", fmt.Sprintf("provider %q {\n  version     = %q\n  constraints = \"~> 5.0\"\n}\n", addr, olderAWSVersion))
 	version, err := r.assumptionDir.tofu(t, r.env, "version")

@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
+	"strings"
 	"time"
 
 	"github.com/redscaresu/infrafactory/internal/harness"
@@ -82,7 +84,8 @@ func (p rehearsePrepare) run(cmd *cobra.Command, args []string) error {
 
 	// A signal cancels prepare through a guard, so the runner does not
 	// raise it again once tofu stops: prepare removes the half-made
-	// rehearsal and reports the refusal, exit 1.
+	// rehearsal and reports the refusal, exit 1. A signal outside tofu is
+	// refused at prepare's next check (gateAndInit).
 	ctx, stop := notifyGuarded(cmd.Context(), p.notify)
 	result, err := p.prepare(ctx, args[0], region, varFile)
 	stop()
@@ -122,14 +125,16 @@ func (r rehearsePrepareResult) write(cmd *cobra.Command, mode OutputMode) error 
 		_, err = fmt.Fprintf(out, "%s\n", encoded)
 		return err
 	}
-	_, _ = fmt.Fprintf(out, "Command: rehearse prepare\nStatus: %s\n", r.Status)
+	var human strings.Builder
+	fmt.Fprintf(&human, "Command: rehearse prepare\nStatus: %s\n", r.Status)
 	if r.Refusal != "" {
-		_, err := fmt.Fprintf(out, "Refused: %s\n", r.Refusal)
-		return err
+		fmt.Fprintf(&human, "Refused: %s\n", r.Refusal)
+	} else {
+		fmt.Fprintf(&human, "Rehearsal: %s\nWork dir: %s\nAWS provider: hashicorp/aws %s\n", r.ID, r.WorkDir, r.AWSVersion)
+		for _, warning := range r.Warnings {
+			fmt.Fprintf(&human, "Warning: %s\n", warning)
+		}
 	}
-	_, _ = fmt.Fprintf(out, "Rehearsal: %s\nWork dir: %s\nAWS provider: hashicorp/aws %s\n", r.ID, r.WorkDir, r.AWSVersion)
-	for _, warning := range r.Warnings {
-		_, _ = fmt.Fprintf(out, "Warning: %s\n", warning)
-	}
-	return nil
+	_, err := io.WriteString(out, human.String())
+	return err
 }

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -24,6 +25,21 @@ func lockRepo(t *testing.T, lock, extra string) string {
 	return repo
 }
 
+// laterRelease is the release after the one rehearsalPathArgs was written
+// for, for typ: one minor later.
+func laterRelease(t *testing.T, typ string) string {
+	t.Helper()
+	release, ok := rehearsalRelease(rehearsalPathArgReleases[typ])
+	require.True(t, ok, typ)
+	return fmt.Sprintf("%d.%d.0", release[0], release[1]+1)
+}
+
+// laterLockEntry is a lock entry pinning hashicorp/<typ> at laterRelease.
+func laterLockEntry(t *testing.T, typ string) string {
+	t.Helper()
+	return lockEntry("registry.opentofu.org/hashicorp/"+typ, laterRelease(t, typ))
+}
+
 func TestRehearsePrepareRefusesTheLockByName(t *testing.T) {
 	t.Parallel()
 	aws := func(version string) string { return lockEntry("registry.opentofu.org/hashicorp/aws", version) }
@@ -36,7 +52,12 @@ func TestRehearsePrepareRefusesTheLockByName(t *testing.T) {
 		{"a lock without aws", lockEntry("registry.opentofu.org/hashicorp/random", "3.6.0"), lockName + ": refused: it has no hashicorp/aws entry"},
 		{"a lock naming hashicorp/http", prepareLock + lockEntry("registry.opentofu.org/hashicorp/http", "3.4.0"), `the lock names provider "registry.opentofu.org/hashicorp/http"`},
 		{"a lock from another registry", lockEntry("example.com/hashicorp/aws", harness.AWSProviderVersion), `the lock names provider "example.com/hashicorp/aws"`},
-		{"aws entries at different versions", aws(harness.AWSProviderVersion) + lockEntry("registry.terraform.io/hashicorp/aws", "5.99.0"), "pin different versions (5.100.0, 5.99.0)"},
+		{"aws entries at different versions", aws(harness.AWSProviderVersion) + lockEntry("registry.terraform.io/hashicorp/aws", "5.99.0"), "its hashicorp/aws entries pin different versions (5.100.0, 5.99.0)"},
+		{"random entries at different versions", prepareLock + lockEntry("registry.opentofu.org/hashicorp/random", "3.7.0") + lockEntry("registry.terraform.io/hashicorp/random", "3.6.0"),
+			"its hashicorp/random entries pin different versions (3.6.0, 3.7.0)"},
+		{"a later hashicorp/local", prepareLock + laterLockEntry(t, "local"), "hashicorp/local " + laterRelease(t, "local") + " is later than " + rehearsalPathArgReleases["local"] + " or of another major"},
+		{"a later hashicorp/archive", prepareLock + laterLockEntry(t, "archive"), "hashicorp/archive " + laterRelease(t, "archive") + " is later than " + rehearsalPathArgReleases["archive"] + " or of another major"},
+		{"a random entry with no version", prepareLock + "provider \"registry.opentofu.org/hashicorp/random\" {\n}\n", "its version is not a string literal the gate can read"},
 		{"a later aws release", aws("6.0.0"), "hashicorp/aws 6.0.0 is later than " + harness.AWSProviderVersion + " or of another major"},
 		{"an earlier major", aws("4.67.0"), "hashicorp/aws 4.67.0 is later than " + harness.AWSProviderVersion + " or of another major"},
 		{"a pre-release", aws("5.100.0-beta1"), `hashicorp/aws "5.100.0-beta1" is not an exact X.Y.Z release`},

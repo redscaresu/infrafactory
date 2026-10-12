@@ -120,11 +120,14 @@ resolve inside the copy. Nothing fetched is ever admitted, so there is no nested
 record.
 
 The first init also carries `GIT_CONFIG_NOSYSTEM=1`, `GIT_TERMINAL_PROMPT=0` and
-`GIT_ALLOW_PROTOCOL=file`, a second wall in case the gate is wrong. That git then reads no system
-config, so no system credential helper (`TestAssumption_GitNoSystemDropsCredentialHelper`), and
-refuses every remote transport before connecting
-(`TestAssumption_GitAllowProtocolRefusesRemoteTransports`) is pinned; `GIT_TERMINAL_PROMPT=0` is
-not. No decision here rests on any of them, because gate 1 has already refused every download.
+`GIT_ALLOW_PROTOCOL=none`, a second wall in case the gate is wrong. `none` names no transport, so
+git refuses every one, `file` included: a local module never uses git, and allowing `file` would
+let a `git::file:///...` source the gate missed clone a host repository into the rehearsal. That git
+then reads no system config, so no system credential helper
+(`TestAssumption_GitNoSystemDropsCredentialHelper`), and refuses https, ssh and file:// before
+connecting (`TestAssumption_GitAllowProtocolNoneRefusesEveryTransport`) is pinned;
+`GIT_TERMINAL_PROMPT=0` is not. No decision here rests on any of them, because gate 1 has already
+refused every download.
 
 ### The extension and file policy
 
@@ -241,34 +244,39 @@ load it (**unverified**; refusing it holds either way).
 ### The lock
 
 Before gate 1, prepare parses the copy's root `.terraform.lock.hcl` (hclsyntax, never a text scan).
-A missing or unparseable lock is refused, and so is one with no `hashicorp/aws` entry, one whose aws
-entries pin different versions, and one naming any provider outside the eight admitted, or from a
-registry other than registry.opentofu.org and registry.terraform.io, by name. No tofu runs for a
-refused lock. The provider version is always the lock's.
+A missing or unparseable lock is refused, and so is one with no `hashicorp/aws` entry, one with an
+entry whose version it cannot read, one whose entries for one provider pin different versions, and
+one naming any provider outside the eight admitted, or from a registry other than
+registry.opentofu.org and registry.terraform.io, by name. No tofu runs for a refused lock. Every
+provider version is the lock's.
 
 The first init runs `tofu providers lock -platform=<GOOS_GOARCH>` before `init`, so a lock that
-lacks this platform's hashes still initialises. providers lock keeps the locked aws version
-(`TestAssumption_ProvidersLockKeepsLockedVersion`), and prepare holds it whatever tofu does: after
-the first init it parses the copy's lock again under the same rules and refuses, naming both
-versions, if the aws version changed. The user's own lock is never written: only the copy's is.
+lacks this platform's hashes still initialises. providers lock keeps the locked version
+(`TestAssumption_ProvidersLockKeepsLockedVersion`), and prepare holds every provider's whatever tofu
+does: after the first init it parses the copy's lock again under the same rules and refuses, naming
+both versions, if any provider's version changed, or a provider gained or lost its entry. Versions
+compare by provider, so a registry.terraform.io entry that tofu replaces with a registry.opentofu.org
+one at the same version is no change. The user's own lock is never written: only the copy's is.
 
 A lock whose aws entry is registry.terraform.io's initialises: providers lock adds a
 registry.opentofu.org entry at the same version, and init installs it
 (`TestAssumption_RegistryTerraformIoLockInitialises`). Prepare admits it with a warning that
 `moved`, `import`, `removed` and ephemeral semantics may differ.
 
-**Another aws version.** A version other than 5.100.0 is named in the report, so a failure under it
-is filed as a fakeaws story, and so is the refusal of a `provider "aws"` argument the table does not
-name. The report alone would fail open, though: § Paths and templates lists the aws arguments that
-read a local file in 5.100.0 only, so an argument a later release adds that reads one would pass the
-gate unchecked. So the lock admits an aws version only when it is an exact `X.Y.Z` release of
-5.100.0's major, no later than 5.100.0. A later release, another major or a pre-release is refused,
-naming the version. An earlier 5.x is admitted because the provider removes an argument only in a
-major release, so every argument an earlier 5.x has, 5.100.0 has, and the path table speaks for it.
-That is the provider's versioning policy, **unverified**, and the admission rests on it: were it
-false, a file-reading argument that 5.x dropped before 5.100.0 would pass unchecked under an earlier
-lock. Refusing every version but 5.100.0 would not rest on it, and was not taken: the epic runs other
-versions, and their failures are how fakeaws learns them.
+**Another provider version.** An aws version other than 5.100.0 is named in the report, so a failure
+under it is filed as a fakeaws story, and so is the refusal of a `provider "aws"` argument the table
+does not name. The report alone would fail open, though: § Paths and templates names the arguments
+that read a local file in one release of each provider it covers (`rehearsalPathArgReleases`):
+hashicorp/aws 5.100.0, hashicorp/local 2.9.1 and hashicorp/archive 2.8.1, the last two checked
+against those releases' `tofu providers schema -json`. An argument a later release adds that reads a
+file would pass the gate unchecked. So the lock admits each of the three only at an exact `X.Y.Z`
+release of that release's major, no later than it. A later release, another major or a pre-release
+is refused, naming the version. An earlier release of the same major is admitted because a provider
+removes an argument only in a major release, so every argument it has, the table's release has, and
+the table speaks for it. That is the providers' versioning policy, **unverified**, and the admission
+rests on it: were it false, a file-reading argument dropped before the table's release would pass
+unchecked under an earlier lock. Admitting only the table's releases would not rest on it, and was not
+taken: the epic runs other aws versions, and their failures are how fakeaws learns them.
 
 ### Variables
 
@@ -286,11 +294,15 @@ is initialised. `get` comes first because providers lock fails on a root whose m
 installed (`TestAssumption_ProvidersLockKeepsLockedVersion`); gate 1 has refused every download, so
 it only records the local modules. Each runs under replace mode with exactly `HOME=<id>/home`
 (empty, 0700), `TF_DATA_DIR=<id>/data`, `GIT_CONFIG_NOSYSTEM=1`, `GIT_TERMINAL_PROMPT=0` and
-`GIT_ALLOW_PROTOCOL=file`, so no `TF_CLI_CONFIG_FILE` or `TF_PLUGIN_CACHE_DIR`, and under a deadline
-at which the runner interrupts tofu's process group, then kills it. A cancel or a tofu error refuses
-the prepare with tofu's stderr, never a success report. Prepare holds a signal guard, so a Ctrl-C is
-such a cancel: tofu gets its one interrupt, and prepare removes the half-made rehearsal and exits 1. Then prepare checks the lock again (§ The
-lock) and tightens the modes (§ The layout).
+`GIT_ALLOW_PROTOCOL=none`, so no `TF_CLI_CONFIG_FILE` or `TF_PLUGIN_CACHE_DIR`, and under a deadline
+at which the runner interrupts tofu's process group, then kills it. Then prepare checks the lock
+again (§ The lock) and tightens the modes (§ The layout).
+
+A cancel or a tofu error refuses the prepare with tofu's stderr, never a success report, and
+prepare removes the half-made rehearsal and exits 1. Prepare holds a signal guard from start to end,
+so a Ctrl-C is such a cancel: during a tofu command, tofu gets its one interrupt; during the copy,
+the lock or gate 1, which do not stop for it, prepare refuses before the first tofu; after the last
+tofu, it refuses once the modes are tightened.
 
 Before the second init, prepare dials the dead proxy and refuses if the dial connects, then writes
 `<id>/work/infrafactory_override.tf` at 0600: a `backend "local" {}` override that names no

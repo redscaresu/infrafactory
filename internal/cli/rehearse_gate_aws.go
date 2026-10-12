@@ -76,7 +76,7 @@ func (m rehearsalModule) awsProviderProblems(file, at string, block *hclsyntax.B
 
 // awsArgProblems refuses a provider "aws" argument or block the table
 // does not admit. One the table does not name is refused under the lock's
-// version too, and the refusal names it.
+// version too, and the refusal names it when the gate run has one.
 func (m rehearsalModule) awsArgProblems(at, name string) []string {
 	admitted, named := rehearsalAWSProviderTable[name]
 	switch {
@@ -85,7 +85,11 @@ func (m rehearsalModule) awsArgProblems(at, name string) []string {
 	case named:
 		return []string{fmt.Sprintf(`%s: refused: a provider "aws" block admits only %s`, at, rehearsalAWSAdmitted)}
 	}
-	return []string{fmt.Sprintf(`%s: refused: the gate's table of hashicorp/aws %s provider arguments does not name it, so it is refused under any lock version, the lock's %s included`, at, harness.AWSProviderVersion, m.in.awsVersion)}
+	problem := fmt.Sprintf(`%s: refused: the gate's table of hashicorp/aws %s provider arguments does not name it, so it is refused under any lock version`, at, harness.AWSProviderVersion)
+	if m.in.awsVersion != "" {
+		problem += fmt.Sprintf(", the lock's %s included", m.in.awsVersion)
+	}
+	return []string{problem}
 }
 
 // recordAWSRegion records an aws_* block's region argument, if any, for
