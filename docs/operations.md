@@ -267,7 +267,8 @@ Verify:
 
 ```bash
 stat -f %Lp ~/.config/infrafactory/layer3-aws.env   # 600 (on Linux: stat -c %a)
-cut -d= -f1 ~/.config/infrafactory/layer3-aws.env   # AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
+awk -F= '/^(AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY)=/ {print $1; next} {n++} END {print n+0 " other lines"}' ~/.config/infrafactory/layer3-aws.env
+# AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, 0 other lines (it never prints a line's text)
 (set -a; . ~/.config/infrafactory/layer3-aws.env; set +a
  env -u AWS_PROFILE AWS_CONFIG_FILE=/dev/null AWS_SHARED_CREDENTIALS_FILE=/dev/null \
    aws sts get-caller-identity --region $REGION --query '[Account,Arn]' --output text)
