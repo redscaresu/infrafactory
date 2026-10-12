@@ -244,10 +244,10 @@ nothing. That code and its message are unverified (D9).
 
 ## D9 — EC2 codes fakeaws answers from the API reference, not a recording
 
-These answers come from the EC2 API reference's error list, not from AWS. Each is marked
-`UNVERIFIED(aws-code)` at its fakeaws site (`handlers/ec2.go`). The owner is the next real-AWS
-recording (`prod-read-seam-real-recording` or a Layer 3 run), which replaces each with what AWS
-answered:
+These answers come from the EC2 API reference's error list, not from AWS. The codes below are each
+marked `UNVERIFIED(aws-code)` at their fakeaws site (`handlers/ec2.go`). The owner is the next
+real-AWS recording (`prod-read-seam-real-recording` or a Layer 3 run), which replaces each with what
+AWS answered. The AZ set is not a code; it is described at `ec2FixedZoneLetters` (`handlers/ec2.go`):
 
 - `VPCIdNotSpecified`: a `GroupName.N` lookup on a database that is not loaded.
 - `InvalidSubnet.Conflict`, and its message: a CIDR overlapping a sibling subnet (D8).
