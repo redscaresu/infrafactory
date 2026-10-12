@@ -1,7 +1,6 @@
 ---
 kind: docs
-status: blocked
-blocked_by: [prod-read-seam-reader-policy, aws-hold-for-read-adr-0040]
+status: ready
 epic: prod-read-seam
 depends_on: [prod-read-seam-reader-policy, aws-hold-for-read-adr-0040]
 touches: [docs/decisions/0040-aws-whole-scope-ownership.md]
