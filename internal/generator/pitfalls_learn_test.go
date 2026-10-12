@@ -1077,3 +1077,45 @@ func TestAppendPitfall_LedgerUnreadable(t *testing.T) {
 		assert.NoDirExists(t, avoidChecksDir(dir), "no ledger is created")
 	})
 }
+
+// fakeaws's EC2 filter refusal, verbatim from `tofu plan` (aws provider
+// 5.100.0) against fakeaws main at 9bc2238 with data "aws_vpcs" filtering
+// on name "foo".
+const fakeawsFilterRefusal = `Error: reading EC2 VPCs: operation error EC2: DescribeVpcs, https response error StatusCode: 501, RequestID: fakeaws-synthetic, api error NotImplemented: DescribeVpcs: not modelled by fakeaws: foo
+
+  with data.aws_vpcs.x,
+  on main.tf line 15, in data "aws_vpcs" "x":
+  15: data "aws_vpcs" "x" {`
+
+// The refusal is classed mock-actionable on fakeaws's phrase and becomes
+// a docs/mock-gaps.md row. Routing it there instead of to the pitfall
+// extractors is run_command's, pinned by
+// TestRunCommandLearnsNoPitfallFromAClearedMockRefusal.
+func TestFakeawsFilterRefusalIsAMockGap(t *testing.T) {
+	assert.True(t, IsMockServerBug(fakeawsFilterRefusal))
+	assert.Equal(t, "not modelled by fakeaws", FirstMockSignal(fakeawsFilterRefusal))
+
+	docsDir := t.TempDir()
+	require.NoError(t, AppendMockGap(docsDir, MockGap{
+		Cloud:    "aws",
+		Signal:   FirstMockSignal(fakeawsFilterRefusal),
+		Resource: ExtractResourceFromDetail(fakeawsFilterRefusal),
+		Scenario: "aws-data-source",
+		Detail:   fakeawsFilterRefusal,
+	}))
+	gaps, err := os.ReadFile(filepath.Join(docsDir, "mock-gaps.md"))
+	require.NoError(t, err)
+	assert.Contains(t, string(gaps), "| `not modelled by fakeaws` | aws-data-source |")
+}
+
+// A real AWS NotImplemented carries no fakeaws phrase: it is not a mock
+// gap, so it stays on the pitfall path.
+func TestAWSNotImplementedWithoutTheFakeawsPhraseIsNoMockGap(t *testing.T) {
+	detail := strings.Replace(fakeawsFilterRefusal,
+		"RequestID: fakeaws-synthetic, api error NotImplemented: DescribeVpcs: not modelled by fakeaws: foo",
+		"RequestID: 7a62c49f-347e-4fc4-9331-6e8eEXAMPLE, api error NotImplemented: The requested operation is not implemented.", 1)
+	require.NotEqual(t, fakeawsFilterRefusal, detail, "the replacement must apply")
+
+	assert.False(t, IsMockServerBug(detail))
+	assert.Empty(t, FirstMockSignal(detail))
+}

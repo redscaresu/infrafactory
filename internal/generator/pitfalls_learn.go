@@ -116,6 +116,14 @@ var (
 		"\"reason\":\"notimplemented\"",
 		"reason: \"notimplemented\"",
 
+		// fakeaws's refusal of an EC2 Describe filter or param it does
+		// not read (fakeaws MUST[ec2-filter-refusal-names-every-name-sorted]).
+		// The SDK prints it as "StatusCode: 501 ... api error
+		// NotImplemented: <Action>: not modelled by fakeaws: <names>",
+		// which no 501 signal above matches. Never "api error
+		// notimplemented" alone: a real AWS NotImplemented is no mock gap.
+		"not modelled by fakeaws",
+
 		// "Plugin did not respond" — the provider crashed parsing the
 		// mock's response (usually missing/wrong field shape that the
 		// SDK nil-derefs on). Mock-side fidelity bug.
