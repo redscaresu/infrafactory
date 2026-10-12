@@ -57,6 +57,9 @@ func iamForm(action string, params map[string]string) url.Values {
 	return form
 }
 
+// iamRoleFollowUps is the follow-ups a role with no inline policy gets.
+var iamRoleFollowUps = []string{"ListRolePolicies", "ListAttachedRolePolicies", "ListInstanceProfilesForRole"}
+
 func iamRoleBody(role string) string {
 	return `<GetRoleResponse xmlns="` + iamNamespace + `"><GetRoleResult><Role><Path>/</Path><RoleName>` + role +
 		`</RoleName><Arn>arn:aws:iam::123456789012:role/` + role + `</Arn></Role></GetRoleResult></GetRoleResponse>`
@@ -139,4 +142,16 @@ func TestReadAWSAccountFailsATruncatedRoleListWithoutAMarker(t *testing.T) {
 	assert.Contains(t, err.Error(), "IsTruncated is true with 0 Markers, not one")
 	assert.Empty(t, read.Exchanges)
 	assert.Len(t, fake.sent, 2, "nothing after the truncated page")
+}
+
+func TestReadAWSAccountFailsAGetRoleThatNamesNoRole(t *testing.T) {
+	t.Parallel()
+
+	fake := &iamRecordingFake{answer: func(url.Values) awsCannedAnswer { return awsOK("<GetRoleResponse/>") }}
+
+	read, err := readIAMFake(t, fake, readEntry("iam", "query", "GetRole", `{"RoleName":"web"}`))
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `GetRole {"RoleName":"web"} read: the answer names no role`)
+	assert.Empty(t, read.Exchanges)
 }

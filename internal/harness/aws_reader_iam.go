@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/xml"
 	"fmt"
+	"strings"
 )
 
 // readIAM reads, for each role a replayed GetRole answered with, in
@@ -11,7 +12,8 @@ import (
 // (readIAMRole). Each request is an ADR-0041 entry sent through r.pages,
 // so it is walled, signed for us-east-1 to iam.amazonaws.com, paged by
 // IsTruncated/Marker, throttled and recorded as a replayed entry is. A
-// replay that read no role adds nothing.
+// replay that read no role adds nothing; an OK GetRole whose answer names
+// no role fails the read.
 func (r *awsReplay) readIAM(ctx context.Context, replayed []AWSReadExchange) ([]AWSReadExchange, error) {
 	var roles []string
 	for _, exchange := range replayed {
@@ -21,6 +23,11 @@ func (r *awsReplay) readIAM(ctx context.Context, replayed []AWSReadExchange) ([]
 		var answer iamRoleAnswer
 		if err := xml.Unmarshal([]byte(exchange.Body), &answer); err != nil {
 			return nil, fmt.Errorf("finding the role GetRole %s read: the answer does not parse: %w", exchange.Params, err)
+		}
+		// An answer that names no role would leave its policies unread
+		// in a read that reports itself complete.
+		if strings.TrimSpace(answer.RoleName) == "" {
+			return nil, fmt.Errorf("finding the role GetRole %s read: the answer names no role", exchange.Params)
 		}
 		roles = awsAppendNew(roles, answer.RoleName)
 	}
@@ -36,8 +43,10 @@ func (r *awsReplay) readIAM(ctx context.Context, replayed []AWSReadExchange) ([]
 }
 
 // readIAMRole reads role's inline policy names and each policy by name,
-// then its attached policies and its instance profiles: the calls
-// terraform-provider-aws makes to read an aws_iam_role and its policies.
+// then its attached policies and its instance profiles: the import HLD's
+// per-role follow-ups (step 4, "an IAM role's policies, about eight calls
+// per role"). The instance profiles are read so a profile carrying the
+// role is imported with it.
 func (r *awsReplay) readIAMRole(ctx context.Context, role string) ([]AWSReadExchange, error) {
 	var out []AWSReadExchange
 	read := func(action string, params map[string]string) ([]AWSReadExchange, error) {

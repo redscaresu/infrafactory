@@ -20,10 +20,9 @@ import (
 
 // TestAWSReadIAMAgainstFakeaws reads one of two created roles through the
 // walls against fakeaws IAM, so the role's follow-ups (aws_reader_iam.go)
-// are checked against fakeaws's own answers. fakeaws at the pin keeps no
-// inline policy (PutRolePolicy is a no-op), so ListRolePolicies lists none
-// and no GetRolePolicy is sent; the unit tests cover that call. The
-// required CI job runs it by name and fails if it does not report PASS.
+// are checked against fakeaws's own answers, all but GetRolePolicy (see
+// its assertion). The required CI job runs it by name and fails if it
+// does not report PASS.
 func TestAWSReadIAMAgainstFakeaws(t *testing.T) {
 	SkipUnlessEnabled(t)
 	mock := StartFakeaws(t)
@@ -80,6 +79,10 @@ func TestAWSReadIAMAgainstFakeaws(t *testing.T) {
 		Names []string `xml:"ListRolePoliciesResult>PolicyNames>member"`
 	}
 	require.NoError(t, xml.Unmarshal([]byte(byAction["ListRolePolicies"][0].Body), &inline))
+	// Not coverage at this pin: PutRolePolicy is a no-op, so fakeaws lists
+	// no inline policy and this is 0 == 0. The inline-policy path
+	// (GetRolePolicy) is not exercised against fakeaws; only
+	// TestReadAWSAccountReadsARolesPolicies proves it.
 	assert.Len(t, byAction["GetRolePolicy"], len(inline.Names), "one GetRolePolicy per listed inline policy")
 
 	require.Len(t, byAction["ListAttachedRolePolicies"], 1)
