@@ -1,8 +1,7 @@
 ---
 kind: code
 repo: fakeaws
-status: blocked
-blocked_by: [fakeaws-identity-other-services, fakeaws-ami-fixtures-suppressed-when-loaded, fakeaws-allowed-account-ids-example]
+status: ready
 epic: fakeaws-loaded-identity
 depends_on: [fakeaws-identity-other-services, fakeaws-ami-fixtures-suppressed-when-loaded, fakeaws-allowed-account-ids-example]
 touches: [handlers/account_sweep_test.go, handlers/admin.go, AGENTS.md, README.md, concepts.md]

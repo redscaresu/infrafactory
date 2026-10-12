@@ -2,8 +2,8 @@
 kind: code
 repo: fakeaws
 status: blocked
-blocked_by: [fakeaws-ami-fixtures-suppressed-when-loaded]
-depends_on: [fakeaws-ami-fixtures-suppressed-when-loaded]
+blocked_by: [fakeaws-state-gathers-fail-closed]
+depends_on: [fakeaws-ami-fixtures-suppressed-when-loaded, fakeaws-state-gathers-fail-closed]
 touches: [handlers/ec2.go, handlers/ec2_test.go, repository/ec2_compute.go, AGENTS.md, CHANGELOG.md]
 risk: high
 ---
