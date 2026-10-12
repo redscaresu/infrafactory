@@ -210,7 +210,7 @@ func ensureAWSScopeClaim(ctx context.Context, runtime *CommandRuntime) (string, 
 	}
 	env, err := awsLayer3Env(runtime.Config.AWS)
 	if err != nil {
-		return awsScopeClaimFailed("", checkCredentials, err)
+		return awsScopeClaimFailed("", "credentials", err)
 	}
 	if err := harness.AssertAWSScopeStamp(ctx, env, runtime.Deps.AWSSSM, "", account); err != nil {
 		return awsScopeClaimFailed("", "stamp", err)

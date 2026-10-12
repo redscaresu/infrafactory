@@ -205,7 +205,7 @@ func runRunWithNotify(
 	// its extractors may learn from it: a mock gap is written to
 	// docs/mock-gaps.md, and a skip is logged as <event>_learning_skipped.
 	learnsFrom := func(event string, f feedback.Failure) bool {
-		route, reason := routeFailure(f)
+		route, reason := routeFailure(f, runtime.Config.Validation.Layers.SandboxDeploy.Enabled)
 		switch route {
 		case routeMockGap:
 			recordMockGap(runtime, event, runID, generator.MockGap{
@@ -304,7 +304,7 @@ func runRunWithNotify(
 							})
 							continue
 						}
-						learned.LearnedLayer = failure.Origin
+						learned.LearnedLayer = failureLayer(failure)
 						if err := generator.AppendPitfall(runtime.Config.Paths.Pitfalls, cloud, *learned); err != nil {
 							runtime.Logger.Log(LogEntry{
 								Level:   logLevelError,
@@ -565,7 +565,7 @@ func runRunWithNotify(
 				})
 				continue
 			}
-			learned.LearnedLayer = f.Origin
+			learned.LearnedLayer = failureLayer(f)
 			if err := generator.AppendPitfall(runtime.Config.Paths.Pitfalls, sc.Cloud, *learned); err != nil {
 				runtime.Logger.Log(LogEntry{
 					Level:   logLevelError,
@@ -764,7 +764,7 @@ func runRunWithNotify(
 						RunID: runID, Detail: err.Error(),
 					})
 				} else if entry != nil && pitfallResourceMatchesCloud(entry.Resource, sc.Cloud) {
-					entry.LearnedLayer = cleared.Origin
+					entry.LearnedLayer = failureLayer(cleared)
 					if err := generator.AppendPitfall(runtime.Config.Paths.Pitfalls, sc.Cloud, *entry); err != nil {
 						runtime.Logger.Log(LogEntry{
 							Level: logLevelError, Command: "run",
@@ -804,7 +804,7 @@ func runRunWithNotify(
 				if !pitfallResourceMatchesCloud(avoidEntry.Resource, sc.Cloud) {
 					continue
 				}
-				avoidEntry.LearnedLayer = cleared.Origin
+				avoidEntry.LearnedLayer = failureLayer(cleared)
 				if err := generator.AppendPitfall(runtime.Config.Paths.Pitfalls, sc.Cloud, *avoidEntry); err != nil {
 					runtime.Logger.Log(LogEntry{
 						Level: logLevelError, Command: "run",
@@ -1233,14 +1233,15 @@ func runIteration(
 						layer, stage = failure.Layer, name
 					}
 					failures = append(failures, FailureSummary{
-						Layer:    layer,
-						Stage:    stage,
-						Check:    failure.Check,
-						Policy:   failure.Policy,
-						Command:  step.command,
-						Resource: failure.Resource,
-						Detail:   failure.Detail,
-						Origin:   failure.Layer,
+						Layer:       layer,
+						Stage:       stage,
+						Check:       failure.Check,
+						Policy:      failure.Policy,
+						Command:     step.command,
+						Resource:    failure.Resource,
+						Detail:      failure.Detail,
+						Origin:      failure.Layer,
+						OriginStage: failure.Stage,
 					})
 				}
 			} else {
@@ -1480,12 +1481,13 @@ func pitfallResourceMatchesCloud(resource, cloud string) bool {
 }
 
 // appendDistinctFailures adds the failures history has not seen, keyed
-// like the terminal harvest (learnKey) so a cosmetic shift in detail is
-// not new, and the same detail from the mock and the real cloud is.
+// like the terminal harvest so a cosmetic shift in detail is not new.
+// The layer is not in the key: the generator sees one detail once,
+// whichever layer repeated it.
 func appendDistinctFailures(history, failures []FailureSummary) []FailureSummary {
 	seen := make(map[string]struct{}, len(history))
 	key := func(f FailureSummary) string {
-		return f.Check + "|" + learnKey(toFeedbackFailure(f))
+		return f.Check + "|" + f.Resource + "|" + feedback.NormalizeDetail(f.Detail)
 	}
 	for _, f := range history {
 		seen[key(f)] = struct{}{}
@@ -1503,22 +1505,19 @@ func appendDistinctFailures(history, failures []FailureSummary) []FailureSummary
 func toFeedbackFailures(failures []FailureSummary) []feedback.Failure {
 	out := make([]feedback.Failure, 0, len(failures))
 	for _, failure := range failures {
-		out = append(out, toFeedbackFailure(failure))
+		out = append(out, feedback.Failure{
+			Layer:       failure.Layer,
+			Stage:       failure.Stage,
+			Check:       failure.Check,
+			Policy:      failure.Policy,
+			Command:     failure.Command,
+			Resource:    failure.Resource,
+			Detail:      failure.Detail,
+			Origin:      failure.Origin,
+			OriginStage: failure.OriginStage,
+		})
 	}
 	return out
-}
-
-func toFeedbackFailure(failure FailureSummary) feedback.Failure {
-	return feedback.Failure{
-		Layer:    failure.Layer,
-		Stage:    failure.Stage,
-		Check:    failure.Check,
-		Policy:   failure.Policy,
-		Command:  failure.Command,
-		Resource: failure.Resource,
-		Detail:   failure.Detail,
-		Origin:   failure.Origin,
-	}
 }
 
 func failuresAreTransportDominated(failures []FailureSummary) bool {
@@ -1774,7 +1773,7 @@ func isStage(name string) func(StageSummary) bool {
 // names none, so that failure stays run/iteration_N_test.
 func runStageName(layer, stage string, iteration int, cloud layer3Cloud) (string, bool) {
 	switch {
-	case strings.HasPrefix(stage, awsScopeStagePrefix):
+	case strings.HasPrefix(stage, "aws_scope_"):
 		return stage, true
 	case cloud == layer3AWS && layer == "sandbox_deploy" && stage != "run":
 		return iterationStage(iteration, stage), true
@@ -1878,13 +1877,12 @@ const (
 	routeSkip                        // neither, with the reason logged
 )
 
-// checkCredentials is the check a Layer 3 failure names when the
-// credentials it was given could not be used.
-const checkCredentials = "credentials"
-
-// awsScopeStagePrefix names the aws scope's own stages (claim, sweep,
-// release, reap), which a run carries up under their own names.
-const awsScopeStagePrefix = "aws_scope_"
+// learnableSandboxStages are the Layer 3 stages whose failure can be the
+// HCL's fault: tofu's init, plan, apply and destroy, and the real probe
+// of what they built. Every other sandbox stage (a preflight, the aws
+// scope, the allowlist, the AMI resolve, the hold, the orphan sweep, and
+// any stage added later) is setup.
+var learnableSandboxStages = []string{"init", "plan", "apply", "destroy", "real_probe"}
 
 // failureLayer is the layer a failure came from: its Origin, else its
 // Layer (a failure the run built itself has no Origin).
@@ -1899,26 +1897,22 @@ func learnKey(f feedback.Failure) string {
 	return failureLayer(f) + "|" + f.Resource + "|" + feedback.NormalizeDetail(f.Detail)
 }
 
-// routeFailure routes a failure by failureLayer. Only a mock layer's
-// failure is ever a mock gap. Any other failure is skipped when it is
-// real-cloud setup (a credentials check, an aws scope stage, a
-// preflight) or carries a signal that teaches nothing outside the mock
-// (generator.SkipSignal), and learned otherwise.
-func routeFailure(f feedback.Failure) (failureRoute, string) {
+// routeFailure routes a failure by failureLayer. A mock layer's failure,
+// or one with no Origin on a run with Layer 3 off, ran against the mock:
+// a mock bug's is a mock gap, anything else is learned. Any other
+// failure is never a mock gap. It is skipped when it comes from a Layer 3
+// stage outside learnableSandboxStages or carries a signal that teaches
+// nothing outside the mock (generator.SkipSignal), and learned otherwise.
+func routeFailure(f feedback.Failure, layer3 bool) (failureRoute, string) {
 	layer := failureLayer(f)
-	if generator.IsMockServerBug(layer, f.Detail) {
-		return routeMockGap, ""
-	}
-	if generator.IsMockLayer(layer) {
+	if generator.IsMockLayer(layer) || (f.Origin == "" && !layer3) {
+		if generator.IsMockServerBug(f.Detail) {
+			return routeMockGap, ""
+		}
 		return routeLearn, ""
 	}
-	switch {
-	case f.Check == checkCredentials:
-		return routeSkip, fmt.Sprintf("layer %s: a credentials check failed", layer)
-	case strings.HasPrefix(f.Stage, awsScopeStagePrefix):
-		return routeSkip, fmt.Sprintf("layer %s: stage %s is the aws scope's setup", layer, f.Stage)
-	case strings.HasSuffix(f.Stage, "preflight"):
-		return routeSkip, fmt.Sprintf("layer %s: stage %s is a preflight", layer, f.Stage)
+	if layer == generator.SandboxDeployLayer && !slices.Contains(learnableSandboxStages, f.OriginStage) {
+		return routeSkip, fmt.Sprintf("layer %s: stage %q is setup, not the HCL", layer, f.OriginStage)
 	}
 	if sig := generator.SkipSignal(f.Detail); sig != "" {
 		return routeSkip, fmt.Sprintf("layer %s: signal %q teaches nothing outside the mock", layer, sig)

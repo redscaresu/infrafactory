@@ -738,18 +738,11 @@ func TestIsMockServerBug_FivePositiveSignalClasses(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if !IsMockServerBug(MockDeployLayer, tc.detail) {
+			if !IsMockServerBug(tc.detail) {
 				t.Errorf("expected IsMockServerBug=true for %s, got false", tc.name)
 			}
 			if FirstMockSignal(tc.detail) == "" {
 				t.Errorf("FirstMockSignal returned empty for %s", tc.name)
-			}
-			for _, layer := range []string{"static", MockDeployLayer, "destruction"} {
-				assert.True(t, IsMockServerBug(layer, tc.detail), "mock layer %q", layer)
-			}
-			// The real cloud, or a layer nobody named, is never a mock bug.
-			for _, layer := range []string{SandboxDeployLayer, "", "run", "holdout"} {
-				assert.False(t, IsMockServerBug(layer, tc.detail), "layer %q", layer)
 			}
 		})
 	}
@@ -782,7 +775,7 @@ func TestIsMockServerBug_NegativesStayOnPitfallPath(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if IsMockServerBug(MockDeployLayer, tc.detail) {
+			if IsMockServerBug(tc.detail) {
 				t.Errorf("expected IsMockServerBug=false for %s, got true", tc.name)
 			}
 		})
@@ -847,7 +840,7 @@ func TestIsMockServerBug_GCPEscapeCarveOut(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := IsMockServerBug(MockDeployLayer, tc.detail)
+			got := IsMockServerBug(tc.detail)
 			if got != tc.want {
 				t.Errorf("IsMockServerBug: got %v, want %v", got, tc.want)
 			}
@@ -1099,7 +1092,7 @@ const fakeawsFilterRefusal = `Error: reading EC2 VPCs: operation error EC2: Desc
 // extractors is run_command's, pinned by
 // TestRunCommandLearnsNoPitfallFromAClearedMockRefusal.
 func TestFakeawsFilterRefusalIsAMockGap(t *testing.T) {
-	assert.True(t, IsMockServerBug(MockDeployLayer, fakeawsFilterRefusal))
+	assert.True(t, IsMockServerBug(fakeawsFilterRefusal))
 	assert.Equal(t, "not modelled by fakeaws", FirstMockSignal(fakeawsFilterRefusal))
 
 	docsDir := t.TempDir()
@@ -1123,6 +1116,6 @@ func TestAWSNotImplementedWithoutTheFakeawsPhraseIsNoMockGap(t *testing.T) {
 		"RequestID: 7a62c49f-347e-4fc4-9331-6e8eEXAMPLE, api error NotImplemented: The requested operation is not implemented.", 1)
 	require.NotEqual(t, fakeawsFilterRefusal, detail, "the replacement must apply")
 
-	assert.False(t, IsMockServerBug(MockDeployLayer, detail))
+	assert.False(t, IsMockServerBug(detail))
 	assert.Empty(t, FirstMockSignal(detail))
 }

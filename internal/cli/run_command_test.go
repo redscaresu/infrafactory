@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -1375,7 +1376,10 @@ func TestRunCommandRecordsTheLearnedLayerOnAnAvoidPitfall(t *testing.T) {
 				Apply: harness.StageResult{Stage: "apply"},
 			}}}
 			if sandbox {
-				sandboxDeploy.errs = []error{errors.New(detail)}
+				// Staged, as the harness reports a failed apply: the run
+				// files a Scaleway one under run/iteration_1_test, so only
+				// its OriginStage says it was an apply.
+				sandboxDeploy.errs = []error{&harness.SandboxDeployError{Stage: "apply", Err: errors.New(detail)}}
 			} else {
 				mockDeploy.errs = []error{errors.New(detail)}
 			}
@@ -1585,6 +1589,15 @@ func learnedSources(t *testing.T, run awsRun, resource, layer string) []string {
 	return sources
 }
 
+// layer3ApplyFails is a Layer 3 apply that failed with stderr, as the
+// sandbox harness reports one; its failure detail is
+// "exit status 1 | stderr: " + stderr.
+func layer3ApplyFails(stderr string) error {
+	return &harness.SandboxDeployError{
+		Stage: "apply", Err: errors.New("exit status 1"), Apply: harness.StageResult{Stage: "apply", Stderr: stderr},
+	}
+}
+
 // The real cloud returns some mock signals too (ResourceNotFoundException),
 // so a Layer 3 failure carrying one is learned on every learner path and
 // never written to docs/mock-gaps.md; the same detail from the mock still
@@ -1611,11 +1624,11 @@ func TestAWSRunLearnsALayer3FailureThatCarriesAMockSignal(t *testing.T) {
 		for _, layer := range []string{generator.MockDeployLayer, generator.SandboxDeployLayer} {
 			t.Run(path.name+"/"+layer, func(t *testing.T) {
 				run, docsDir := layer3LearningRun(t, path.repairs, []string{logFilterFailing, logFilterPassing}, func(lc *awsLifecycle, d *RuntimeDependencies) {
-					errs := []error{errors.New(logFilterNotFound)}
 					if layer == generator.MockDeployLayer {
-						d.MockDeploy = &seqMockDeployHarness{fakeMockDeployHarness: &fakeMockDeployHarness{}, errs: errs}
+						d.MockDeploy = &seqMockDeployHarness{fakeMockDeployHarness: &fakeMockDeployHarness{},
+							errs: []error{errors.New("exit status 1 | stderr: " + logFilterNotFound)}}
 					} else {
-						d.SandboxDeploy = &seqSandboxDeployHarness{fakeSandboxDeployHarness: lc.deploy, errs: errs}
+						d.SandboxDeploy = &seqSandboxDeployHarness{fakeSandboxDeployHarness: lc.deploy, errs: []error{layer3ApplyFails(logFilterNotFound)}}
 					}
 				})
 				require.Equal(t, path.terminal, run.terminalReason(), run.output)
@@ -1639,21 +1652,62 @@ func TestAWSRunLearnsALayer3FailureThatCarriesAMockSignal(t *testing.T) {
 	}
 }
 
-// A failure the run built itself has no Origin: here, on a run with Layer
-// 3 on, a generate error carrying the LLM API's own
-// ResourceNotFoundException. Only a mock layer's failure is a mock gap, so
-// it is not one.
-func TestAWSRunFilesNoMockGapForAFailureWithNoOrigin(t *testing.T) {
-	const detail = "operation error Bedrock Runtime: InvokeModel, https response error StatusCode: 404, RequestID: 7a62c49f-347e-4fc4-9331-6e8eEXAMPLE, ResourceNotFoundException: Could not resolve the foundation model from the provided model identifier."
-	run, docsDir := layer3LearningRun(t, 1, []string{logFilterPassing}, func(_ *awsLifecycle, d *RuntimeDependencies) {
-		d.Generator = generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
-			return nil, errors.New(detail)
-		})
-	})
-	require.Equal(t, "repair_budget_exhausted", run.terminalReason(), run.output)
+// A failure the run builds itself has no Origin; a generate error stands
+// in for one here, carrying a resource and ResourceNotFoundException. With
+// Layer 3 off the run only ever met the mock, so it is a mock gap, as it
+// always was. With Layer 3 on it may have met the real cloud, so it is
+// never a mock gap: it is learned, stamped with the layer it was routed
+// by, which the pitfalls ratchet admits.
+func TestAWSRunRoutesAFailureWithNoOriginByLayer3(t *testing.T) {
+	for _, path := range []struct {
+		name     string
+		repairs  int
+		terminal string
+	}{
+		// Generation fails once and then passes: the self-correction path.
+		{"self-correction", 2, "target_reached"},
+		{"stuck or budget", 1, "repair_budget_exhausted"},
+	} {
+		for _, layer3 := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/layer3=%t", path.name, layer3), func(t *testing.T) {
+				lc := newAWSLifecycle(t)
+				docsDir := t.TempDir()
+				generations := 0
+				run := runAWSRun(t, lc, awsRunOptions{
+					repairs: path.repairs,
+					customize: func(cfg *config.Config) {
+						cfg.Paths.Docs = docsDir
+						cfg.Validation.Layers.SandboxDeploy.Enabled = layer3
+					},
+					deps: func(d *RuntimeDependencies) {
+						d.Generator = generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
+							if generations++; generations == 1 {
+								return nil, errors.New(logFilterNotFound)
+							}
+							return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte("terraform {}\n")}}, nil
+						})
+					},
+				})
+				require.Equal(t, path.terminal, run.terminalReason(), run.output)
 
-	assert.NoFileExists(t, filepath.Join(docsDir, "mock-gaps.md"))
-	assert.NotContains(t, runAppLog(t, run), "_mock_gap_recorded")
+				gaps := filepath.Join(docsDir, "mock-gaps.md")
+				if !layer3 {
+					raw, err := os.ReadFile(gaps)
+					require.NoError(t, err)
+					assert.Contains(t, string(raw), "| "+logFilterResource+" | `resourcenotfoundexception` |")
+					assert.Empty(t, learnedSources(t, run, logFilterResource, "run"))
+					return
+				}
+				assert.NoFileExists(t, gaps)
+				assert.Equal(t, []string{"descriptive"}, learnedSources(t, run, logFilterResource, "run"))
+				entries, err := generator.LoadPitfallEntries(run.h.PitfallsDir(), "aws")
+				require.NoError(t, err)
+				for _, e := range entries {
+					assert.Empty(t, generator.ForbiddenPitfallSignal(e.LearnedLayer, e.Rule), "the ratchet refuses what the run wrote")
+				}
+			})
+		}
+	}
 }
 
 // The same detail from the mock in iteration 1 and from the real cloud in
@@ -1679,9 +1733,7 @@ func TestAWSRunLearnsALayer3FailureAfterTheSameMockFailure(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			run, docsDir := layer3LearningRun(t, tc.repairs, []string{logFilterFailing, logFilterFailing, logFilterPassing}, func(lc *awsLifecycle, d *RuntimeDependencies) {
 				d.MockDeploy = &seqMockDeployHarness{fakeMockDeployHarness: &fakeMockDeployHarness{}, errs: []error{errors.New(detail)}}
-				d.SandboxDeploy = &seqSandboxDeployHarness{fakeSandboxDeployHarness: lc.deploy, errs: []error{&harness.SandboxDeployError{
-					Stage: "apply", Err: errors.New("exit status 1"), Apply: harness.StageResult{Stage: "apply", Stderr: logFilterNotFound},
-				}}}
+				d.SandboxDeploy = &seqSandboxDeployHarness{fakeSandboxDeployHarness: lc.deploy, errs: []error{layer3ApplyFails(logFilterNotFound)}}
 			})
 			require.Equal(t, tc.terminal, run.terminalReason(), run.output)
 
@@ -1694,95 +1746,136 @@ func TestAWSRunLearnsALayer3FailureAfterTheSameMockFailure(t *testing.T) {
 	}
 }
 
-// A Layer 3 credentials error is the real cloud's setup, not the HCL: no
+// A Layer 3 apply that the real cloud refused for its own reasons
+// (credentials, throttling, capacity) says nothing about the HCL: no
 // learner path writes a pitfall or a mock gap for it, and each logs why.
-func TestAWSRunLearnsNothingFromALayer3CredentialsError(t *testing.T) {
-	const detail = `Error: creating EC2 VPC: operation error EC2: CreateVpc, https response error StatusCode: 401, RequestID: 7a62c49f-347e-4fc4-9331-6e8eEXAMPLE, api error AuthFailure: AWS was not able to validate the provided access credentials
-
-  with aws_vpc.main,
-  on main.tf line 1, in resource "aws_vpc" "main":
-   1: resource "aws_vpc" "main" {`
+func TestAWSRunLearnsNothingFromALayer3AccountOrTransientError(t *testing.T) {
+	const vpc = "\n\n  with aws_vpc.main,\n  on main.tf line 1, in resource \"aws_vpc\" \"main\":\n   1: resource \"aws_vpc\" \"main\" {"
 	failing := "resource \"aws_vpc\" \"main\" {\n  cidr_block = \"10.0.0.0/16\"\n}\n"
 	passing := "resource \"aws_vpc\" \"main\" {\n  cidr_block           = \"10.0.0.0/16\"\n  enable_dns_hostnames = true\n}\n"
-	for _, tc := range []struct {
-		name     string
-		repairs  int
-		terminal string
-		events   []string
-	}{
-		{"self-correction and prescriptive", 2, "target_reached", []string{"self_correction_learning_skipped", "prescriptive_learning_skipped"}},
-		{"stuck or budget", 1, "repair_budget_exhausted", []string{"oscillation_learning_skipped"}},
+	for signal, stderr := range map[string]string{
+		"authfailure":                  "Error: creating EC2 VPC: operation error EC2: CreateVpc, https response error StatusCode: 401, RequestID: 7a62c49f-347e-4fc4-9331-6e8eEXAMPLE, api error AuthFailure: AWS was not able to validate the provided access credentials" + vpc,
+		"requestlimitexceeded":         "Error: creating EC2 VPC: operation error EC2: CreateVpc, https response error StatusCode: 503, RequestID: 7a62c49f-347e-4fc4-9331-6e8eEXAMPLE, api error RequestLimitExceeded: Request limit exceeded." + vpc,
+		"insufficientinstancecapacity": "Error: creating EC2 VPC: operation error EC2: CreateVpc, https response error StatusCode: 500, RequestID: 7a62c49f-347e-4fc4-9331-6e8eEXAMPLE, api error InsufficientInstanceCapacity: We currently do not have sufficient capacity in the Availability Zone you requested." + vpc,
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			run, docsDir := layer3LearningRun(t, tc.repairs, []string{failing, passing}, func(lc *awsLifecycle, d *RuntimeDependencies) {
-				d.SandboxDeploy = &seqSandboxDeployHarness{fakeSandboxDeployHarness: lc.deploy, errs: []error{errors.New(detail)}}
-			})
-			require.Equal(t, tc.terminal, run.terminalReason(), run.output)
+		for _, path := range []struct {
+			name     string
+			repairs  int
+			terminal string
+			events   []string
+		}{
+			{"self-correction and prescriptive", 2, "target_reached", []string{"self_correction_learning_skipped", "prescriptive_learning_skipped"}},
+			{"stuck or budget", 1, "repair_budget_exhausted", []string{"oscillation_learning_skipped"}},
+		} {
+			t.Run(signal+"/"+path.name, func(t *testing.T) {
+				run, docsDir := layer3LearningRun(t, path.repairs, []string{failing, passing}, func(lc *awsLifecycle, d *RuntimeDependencies) {
+					d.SandboxDeploy = &seqSandboxDeployHarness{fakeSandboxDeployHarness: lc.deploy, errs: []error{layer3ApplyFails(stderr)}}
+				})
+				require.Equal(t, path.terminal, run.terminalReason(), run.output)
 
-			assert.Empty(t, learnedSources(t, run, "aws_vpc", generator.SandboxDeployLayer))
-			assert.NoFileExists(t, filepath.Join(docsDir, "mock-gaps.md"))
-			appLog := runAppLog(t, run)
-			for _, event := range tc.events {
-				assert.Contains(t, appLog, `"event":"`+event+`"`)
-			}
-			assert.Contains(t, appLog, `teaches nothing outside the mock`)
-		})
+				assert.Empty(t, learnedSources(t, run, "aws_vpc", generator.SandboxDeployLayer))
+				assert.NoFileExists(t, filepath.Join(docsDir, "mock-gaps.md"))
+				appLog := runAppLog(t, run)
+				for _, event := range path.events {
+					assert.Contains(t, appLog, `"event":"`+event+`"`)
+				}
+				assert.Contains(t, appLog, fmt.Sprintf(`signal \"%s\" teaches nothing outside the mock`, signal))
+			})
+		}
 	}
+}
+
+// routeFailureRows are failures and where routeFailure sends them, with
+// Layer 3 on unless a row says off.
+var routeFailureRows = map[string]struct {
+	f          feedback.Failure
+	layer3Off  bool
+	want       failureRoute
+	reasonPart string
+}{
+	"a mock signal from the mock": {
+		f: feedback.Failure{Layer: "run", Origin: "mock_deploy", Detail: logFilterNotFound}, want: routeMockGap},
+	"a mock signal from the static plan": {
+		f: feedback.Failure{Origin: "static", Detail: "DescribeVpcs: not modelled by fakeaws: foo"}, want: routeMockGap},
+	"a mock layer's wait timeout is its own lesson": {
+		f: feedback.Failure{Origin: "mock_deploy", Detail: "timeout while waiting for state to become 'running'"}, want: routeLearn},
+	"the GCP escape carve-out at the mock": {
+		f: feedback.Failure{Origin: "mock_deploy", Detail: `google_project_service.compute: Error 401: "reason": "ACCESS_TOKEN_TYPE_UNSUPPORTED"`}, want: routeLearn},
+	"a mock signal with no Origin, Layer 3 off": {
+		f: feedback.Failure{Layer: "run", Detail: logFilterNotFound}, layer3Off: true, want: routeMockGap},
+	"a mock signal with no Origin, Layer 3 on": {
+		f: feedback.Failure{Layer: "run", Detail: logFilterNotFound}, want: routeLearn},
+	"a mock-only signal with no Origin, Layer 3 on": {
+		f: feedback.Failure{Layer: "run", Detail: "Error: Plugin did not respond"}, want: routeSkip, reasonPart: `signal "plugin did not respond"`},
+	"a real-cloud signal from a Layer 3 apply": {
+		f: feedback.Failure{Layer: "run", Origin: "sandbox_deploy", OriginStage: "apply", Detail: logFilterNotFound}, want: routeLearn},
+	"a wait that never saw the resource at a Layer 3 apply": {
+		f: feedback.Failure{Origin: "sandbox_deploy", OriginStage: "apply", Detail: "waiting for RDS DB Instance (db) create: couldn't find resource (21 retries)"}, want: routeLearn},
+	"a wait-for-state timeout at a Layer 3 apply": {
+		f: feedback.Failure{Origin: "sandbox_deploy", OriginStage: "apply", Detail: "waiting for EC2 NAT Gateway create: timeout while waiting for state to become 'available'"}, want: routeLearn},
+	"a real probe failure": {
+		f: feedback.Failure{Origin: "sandbox_deploy", OriginStage: "real_probe", Detail: "http_probe compute:80: connection refused"}, want: routeLearn},
+	"a mock-only signal at a Layer 3 apply": {
+		f: feedback.Failure{Origin: "sandbox_deploy", OriginStage: "apply", Detail: "DescribeVpcs: not modelled by fakeaws: foo"}, want: routeSkip, reasonPart: `signal "not modelled by fakeaws"`},
+	"the AMI resolve": {
+		f: feedback.Failure{Origin: "sandbox_deploy", OriginStage: "aws_ami_resolve", Check: "ami", Detail: "aws_instance AMI parameter unreadable"}, want: routeSkip, reasonPart: `stage "aws_ami_resolve" is setup`},
+	"a cleanup the allowlist blocked": {
+		f: feedback.Failure{Origin: "sandbox_deploy", OriginStage: "cleanup_blocked", Check: "no_orphans", Detail: "the configuration was refused, so no tofu was run"}, want: routeSkip, reasonPart: `stage "cleanup_blocked" is setup`},
+	"the allowlist": {
+		f: feedback.Failure{Origin: "sandbox_deploy", OriginStage: "allowlist", Check: "allow_resource_types", Detail: "layer 3 refuses to apply resource type(s) aws_nat_gateway"}, want: routeSkip, reasonPart: `stage "allowlist" is setup`},
+	"a credentials preflight": {
+		f: feedback.Failure{Origin: "sandbox_deploy", OriginStage: "preflight", Check: "credentials", Detail: "AccessDenied"}, want: routeSkip, reasonPart: `stage "preflight" is setup`},
+	"an aws scope stage": {
+		f: feedback.Failure{Origin: "sandbox_deploy", OriginStage: "aws_scope_sweep", Detail: "aws_instance i-0abc left"}, want: routeSkip, reasonPart: `stage "aws_scope_sweep" is setup`},
+	"a Layer 3 error that names no stage": {
+		f: feedback.Failure{Origin: "sandbox_deploy", OriginStage: "run", Detail: logFilterNotFound}, want: routeSkip, reasonPart: `stage "run" is setup`},
+	"an authentication failure": {
+		f: feedback.Failure{Origin: "sandbox_deploy", OriginStage: "apply", Detail: "api error AuthFailure: AWS was not able to validate the provided access credentials"}, want: routeSkip, reasonPart: `signal "authfailure"`},
+	"throttling": {
+		f: feedback.Failure{Origin: "sandbox_deploy", OriginStage: "apply", Detail: "api error RequestLimitExceeded: Request limit exceeded."}, want: routeSkip, reasonPart: `signal "requestlimitexceeded"`},
+	"no capacity": {
+		f: feedback.Failure{Origin: "sandbox_deploy", OriginStage: "apply", Detail: "api error InsufficientInstanceCapacity: We currently do not have sufficient capacity"}, want: routeSkip, reasonPart: `signal "insufficientinstancecapacity"`},
+	"a vCPU limit": {
+		f: feedback.Failure{Origin: "sandbox_deploy", OriginStage: "apply", Detail: "api error VcpuLimitExceeded: You have requested more vCPU capacity than your current vCPU limit"}, want: routeSkip, reasonPart: `signal "vcpulimitexceeded"`},
+	"an unauthorized operation": {
+		f: feedback.Failure{Origin: "sandbox_deploy", OriginStage: "apply", Detail: "api error UnauthorizedOperation: You are not authorized to perform this operation."}, want: routeSkip, reasonPart: `signal "unauthorizedoperation"`},
+	"a Scaleway permission refusal": {
+		f: feedback.Failure{Origin: "sandbox_deploy", OriginStage: "apply", Detail: "scaleway-sdk-go: insufficient permissions: write instance"}, want: routeSkip, reasonPart: `signal "insufficient permissions"`},
+	"a Scaleway quota": {
+		f: feedback.Failure{Origin: "sandbox_deploy", OriginStage: "apply", Detail: "scaleway-sdk-go: quota exceeded(s): instances_pro2_s_count"}, want: routeSkip, reasonPart: `signal "quota exceeded"`},
+	"a plugin crash from the holdout probe": {
+		f: feedback.Failure{Origin: "holdout", Detail: "The plugin encountered an error, and failed to respond"}, want: routeSkip, reasonPart: `signal "the plugin encountered an error"`},
 }
 
 func TestRouteFailure(t *testing.T) {
-	for name, tc := range map[string]struct {
-		f      feedback.Failure
-		want   failureRoute
-		reason string
-	}{
-		"a mock signal from the mock": {
-			f: feedback.Failure{Layer: "run", Origin: "mock_deploy", Detail: logFilterNotFound}, want: routeMockGap},
-		"a mock signal from the static plan": {
-			f: feedback.Failure{Origin: "static", Detail: "DescribeVpcs: not modelled by fakeaws: foo"}, want: routeMockGap},
-		"a mock layer's wait timeout is still its own lesson": {
-			f: feedback.Failure{Origin: "mock_deploy", Detail: "timeout while waiting for state to become 'running'"}, want: routeLearn},
-		"a mock signal with no Origin": {
-			f: feedback.Failure{Layer: "run", Detail: logFilterNotFound}, want: routeLearn},
-		"a mock-only signal with no Origin": {
-			f: feedback.Failure{Layer: "run", Detail: "Error: Plugin did not respond"}, want: routeSkip, reason: `layer run: signal "plugin did not respond"`},
-		"a real-cloud signal from Layer 3": {
-			f: feedback.Failure{Layer: "run", Origin: "sandbox_deploy", Detail: logFilterNotFound}, want: routeLearn},
-		"a mock-only signal from Layer 3": {
-			f: feedback.Failure{Origin: "sandbox_deploy", Detail: "DescribeVpcs: not modelled by fakeaws: foo"}, want: routeSkip, reason: `signal "not modelled by fakeaws"`},
-		"a credentials check": {
-			f: feedback.Failure{Origin: "sandbox_deploy", Check: "credentials", Detail: "no scoped key"}, want: routeSkip, reason: "a credentials check failed"},
-		"an aws scope stage": {
-			f: feedback.Failure{Origin: "sandbox_deploy", Stage: "aws_scope_sweep", Check: "no_orphans", Detail: "aws_instance i-0abc left"}, want: routeSkip, reason: "stage aws_scope_sweep"},
-		"a preflight stage": {
-			f: feedback.Failure{Layer: "sandbox_deploy", Origin: "sandbox_deploy", Stage: "iteration_1_preflight", Detail: "AccessDenied"}, want: routeSkip, reason: "is a preflight"},
-		"an authentication failure": {
-			f: feedback.Failure{Origin: "sandbox_deploy", Detail: "api error AuthFailure: AWS was not able to validate the provided access credentials"}, want: routeSkip, reason: `signal "authfailure"`},
-		"a plugin crash": {
-			f: feedback.Failure{Origin: "sandbox_deploy", Detail: "The plugin encountered an error, and failed to respond"}, want: routeSkip, reason: `signal "the plugin encountered an error"`},
-		"a wait-for-state timeout": {
-			f: feedback.Failure{Origin: "sandbox_deploy", Detail: "waiting for EC2 Instance create: timeout while waiting for state to become 'running'"}, want: routeSkip, reason: `signal "timeout while waiting for state"`},
-		"an HCL refusal from Layer 3": {
-			f: feedback.Failure{Origin: "sandbox_deploy", Stage: "iteration_1_allowlist", Check: "allow_resource_types", Detail: "layer 3 refuses to apply resource type(s) aws_nat_gateway"}, want: routeLearn},
-	} {
+	for name, tc := range routeFailureRows {
 		t.Run(name, func(t *testing.T) {
-			got, reason := routeFailure(tc.f)
+			got, reason := routeFailure(tc.f, !tc.layer3Off)
 			assert.Equal(t, tc.want, got)
-			assert.Contains(t, reason, tc.reason)
+			assert.Contains(t, reason, tc.reasonPart)
 		})
 	}
 }
 
-// The same detail from the mock and from the real cloud are two repair
-// signals; a repeat from the same layer is not.
-func TestAppendDistinctFailuresKeepsEachLayersFailure(t *testing.T) {
+// What the router lets the extractors learn, under either Layer 3
+// setting, the pitfalls ratchet admits at the layer it is stamped with.
+func TestRoutedLessonsPassThePitfallsRatchet(t *testing.T) {
+	for name, tc := range routeFailureRows {
+		for _, layer3 := range []bool{false, true} {
+			if route, _ := routeFailure(tc.f, layer3); route != routeLearn {
+				continue
+			}
+			assert.Empty(t, generator.ForbiddenPitfallSignal(failureLayer(tc.f), tc.f.Detail), "%s, layer3=%t", name, layer3)
+		}
+	}
+}
+
+// The repair prompt shows a detail once, whichever layer repeated it.
+func TestAppendDistinctFailuresIgnoresTheLayer(t *testing.T) {
 	mock := FailureSummary{Layer: "run", Origin: "mock_deploy", Detail: logFilterNotFound}
 	layer3 := FailureSummary{Layer: "run", Origin: "sandbox_deploy", Detail: logFilterNotFound}
 
-	history := appendDistinctFailures(nil, []FailureSummary{mock})
-	history = appendDistinctFailures(history, []FailureSummary{mock, layer3})
-
-	assert.Equal(t, []FailureSummary{mock, layer3}, history)
+	assert.Equal(t, []FailureSummary{mock}, appendDistinctFailures(nil, []FailureSummary{mock, layer3}))
 }
 
 // A mock whose reset fails says the environment is wrong, not the HCL:

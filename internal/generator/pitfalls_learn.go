@@ -171,15 +171,27 @@ var (
 
 	// realCloudSignals are the mock signals a real cloud also returns for
 	// a reason in the HCL, so a failure from outside the mock that carries
-	// one is still learned. Every other mock signal is mock-only.
+	// one is still learned: on real AWS a missing resource or a wait that
+	// never ends usually comes from a bad reference or subnet group.
 	realCloudSignals = []string{
+		"couldn't find resource",
 		"resourcenotfoundexception",
+		"waiting for state to become 'true'",
+		"waiting for state to become 'true' (last state: 'false', timeout:",
+		"waiting for state to become 'TRUE'",
+		"waiting for state to become 'TRUE' (last state: 'FALSE', timeout:",
 		"empty result",
 	}
 
+	// mockOnlySignals are the mock signals no real cloud sends for a
+	// reason in the HCL.
+	mockOnlySignals = slices.DeleteFunc(slices.Clone(mockActionableSignals), func(sig string) bool {
+		return slices.Contains(realCloudSignals, sig)
+	})
+
 	// realCloudSkipSignals mark a failure from outside the mock as the real
-	// cloud's setup or weather, not the HCL: it is neither learned nor a
-	// mock gap.
+	// cloud's setup, weather or account, not the HCL: it is neither learned
+	// nor a mock gap.
 	realCloudSkipSignals = []string{
 		// Credentials or authentication.
 		"no valid credential sources",
@@ -194,9 +206,19 @@ var (
 		"plugin did not respond",
 		"the plugin encountered an error",
 		"plugin crashed",
-		// A wait that timed out or never saw the resource.
-		"timeout while waiting for state",
-		"couldn't find resource",
+		// Throttling.
+		"requestlimitexceeded",
+		"throttling",
+		"rate exceeded",
+		// Capacity and account limits.
+		"insufficientinstancecapacity",
+		"vcpulimitexceeded",
+		// Permissions and quotas: what the account allows, not the HCL.
+		"accessdenied",
+		"unauthorizedoperation",
+		"insufficient permissions",
+		"quota exceeded",
+		"quotas exceeded",
 	}
 
 	// mockLayers are the layers whose failures come from a run against a
@@ -334,14 +356,22 @@ func SkipSignal(detail string) string {
 	if sig := firstSignal(detail, realCloudSkipSignals); sig != "" {
 		return sig
 	}
-	return firstMockOnlySignal(detail)
+	return firstSignal(detail, mockOnlySignals)
 }
 
-// firstMockOnlySignal is FirstMockSignal without realCloudSignals.
-func firstMockOnlySignal(detail string) string {
-	return firstSignal(detail, slices.DeleteFunc(slices.Clone(mockActionableSignals), func(sig string) bool {
-		return slices.Contains(realCloudSignals, sig)
-	}))
+// ForbiddenPitfallSignal returns the mock signal a pitfall rule learned at
+// layer may not carry, or "": any mock bug's signal (IsMockServerBug) at
+// a mock layer or an unrecorded one, and a mock-only signal anywhere
+// else. It is the pitfalls ratchet's rule, and admits every rule
+// run_command.go's routeFailure lets the extractors learn.
+func ForbiddenPitfallSignal(layer, rule string) string {
+	if !IsMockServerBug(rule) {
+		return ""
+	}
+	if layer == "" || IsMockLayer(layer) {
+		return FirstMockSignal(rule)
+	}
+	return firstSignal(rule, mockOnlySignals)
 }
 
 func firstSignal(detail string, signals []string) string {
@@ -374,17 +404,16 @@ func ExtractResourceFromDetail(detail string) string {
 // pitfalls/<cloud>.yaml — they belong in docs/mock-gaps.md so the
 // matching mock repo can fix the gap at source.
 //
-// layer is the layer the failure came from (FailureSummary.Origin). Only
-// a mock layer's failure can be a mock bug: the real cloud returns some
-// of the same signals (ResourceNotFoundException), and a failure whose
-// layer is unknown may have come from it.
+// It reads the detail alone. Whether the failure came from a mock at all
+// is the caller's to decide: the real cloud returns some of the same
+// signals (ResourceNotFoundException).
 //
 // Detection is substring-based against a small, hand-curated signal
 // set (see mockActionableSignals above). Conservative by design.
 //
 // Caller: run_command.go's routeFailure, ahead of every learner path.
-func IsMockServerBug(layer, detail string) bool {
-	if !IsMockLayer(layer) || detail == "" {
+func IsMockServerBug(detail string) bool {
+	if detail == "" {
 		return false
 	}
 	lower := strings.ToLower(detail)

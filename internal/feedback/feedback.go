@@ -11,6 +11,8 @@ type Failure struct {
 	Stdout   string
 	Stderr   string
 	Resource string
-	// Origin is the layer the failure came from; see cli.FailureSummary.
-	Origin string
+	// Origin is the layer the failure came from, and OriginStage the
+	// stage; see cli.FailureSummary.
+	Origin      string
+	OriginStage string
 }
