@@ -326,8 +326,8 @@ with its `-wal` and `-shm` files, idempotently (goal 10, review-1 M4).
 loopback through a new bind-address flag (it listens on every interface today, `main.go:30`).
 
 **What a rehearsal catches is what fakeaws validates.** A subnet outside its VPC fails now (fakeaws
-#45); an overlapping subnet does not yet (`docs/layer3/real-vs-mock-deltas.md` § D8), and is a
-Rollout 3 fakeaws story (review-2 M10). The deltas file is the rehearsal's known-limits list.
+#45), and so does a subnet overlapping a sibling (fakeaws #71, `InvalidSubnet.Conflict`; D8 in
+`docs/layer3/real-vs-mock-deltas.md`). The deltas file is the rehearsal's known-limits list.
 
 ### Where it lives
 
@@ -478,7 +478,7 @@ and its walls; the account-read contract and the recorded-read format; the fakea
 - rehearsal-assumption-tests — done (#457)
 - fakeaws-rehearsal-instance — done (#482)
 - fakeaws-loaded-identity — done (#489)
-- [fakeaws-data-sources](../epics/fakeaws-data-sources.md)
+- fakeaws-data-sources — done (#528)
 - rehearsal-prepare-gate — done (#479, #480, #491, #499, #500, #509, #514, #517, #522, #526)
 - aws-hold-for-read — done (#476, #483, #490, #498, #502; real proof 2026-10-12: this PR)
 - [prod-read-seam](../epics/prod-read-seam.md)

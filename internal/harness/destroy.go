@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+
+	"github.com/redscaresu/infrafactory/internal/generator"
 )
 
 var ErrDestroyFailed = errors.New("destroy failed")
@@ -204,7 +206,9 @@ func countOrphanItems(root, collection string, items []any) int {
 			return name == autoCreatedVPCName
 		})
 	default:
-		return len(items)
+		return countExcept(items, func(e map[string]any) bool {
+			return generator.OrphanEndState(root, collection, e)
+		})
 	}
 }
 

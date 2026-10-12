@@ -3,6 +3,8 @@ package generator
 import (
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 // TestClassifyOrphans_AWSSecretsManagerSoftDelete pins the
@@ -180,5 +182,29 @@ func TestClassifyOrphans_CrossCloudIsolation(t *testing.T) {
 	gcpRouting := ClassifyOrphans(state, "gcp", "s", "t")
 	if len(gcpRouting.Pitfalls) != 0 {
 		t.Errorf("gcp lookup for aws-shaped data should not match")
+	}
+}
+
+// A cleanly destroyed KMS key in PendingDeletion is an end state, not a
+// leak, so it must not teach the aws_kms_key pitfall even when the run also
+// leaked something else. The leaked subnet still routes.
+func TestClassifyOrphans_KMSEndStateDoesNotRouteAKeyPitfall(t *testing.T) {
+	state := []byte(`{
+		"kms": {"keys": [{"key_id": "k1", "state": "PendingDeletion"}]},
+		"ec2": {"subnets": [{"subnet_id": "subnet-1"}]}
+	}`)
+	routing := ClassifyOrphans(state, "aws", "aws-vpc", "ts")
+	for _, p := range routing.Pitfalls {
+		assert.NotEqual(t, "aws_kms_key", p.Resource, "a PendingDeletion key is not a leak")
+	}
+	assert.Len(t, routing.MockGaps, 1, "the leaked subnet still routes")
+}
+
+// An Enabled key is a leak and still teaches the aws_kms_key pitfall.
+func TestClassifyOrphans_EnabledKMSKeyStillRoutesAKeyPitfall(t *testing.T) {
+	state := []byte(`{"kms": {"keys": [{"key_id": "k1", "state": "Enabled"}]}}`)
+	routing := ClassifyOrphans(state, "aws", "aws-kms", "ts")
+	if assert.Len(t, routing.Pitfalls, 1) {
+		assert.Equal(t, "aws_kms_key", routing.Pitfalls[0].Resource)
 	}
 }

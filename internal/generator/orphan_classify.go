@@ -178,6 +178,37 @@ type OrphanRouting struct {
 	Unclassified []OrphanedResource
 }
 
+// kmsPendingDeletion is the state AWS leaves a destroyed KMS key in: it
+// cannot be deleted sooner than its waiting period, so a clean destroy
+// ends there.
+const kmsPendingDeletion = "PendingDeletion"
+
+// OrphanEndState reports whether item, a row of root.collection in a
+// /mock/state snapshot, is in the state a clean destroy leaves it in
+// rather than being an orphan. Only that exact state is an end state:
+// any other, or none, is a leak. countOrphans and ClassifyOrphans both
+// call it, so the gate and the classifier agree.
+func OrphanEndState(root, collection string, item map[string]any) bool {
+	if root == "kms" && collection == "keys" {
+		state, _ := item["state"].(string)
+		return state == kmsPendingDeletion
+	}
+	return false
+}
+
+// withoutEndStates drops the items OrphanEndState reports as end states.
+// An item that is not an object is kept, so an unreadable row still counts.
+func withoutEndStates(root, collection string, items []any) []any {
+	var live []any
+	for _, item := range items {
+		if m, ok := item.(map[string]any); ok && OrphanEndState(root, collection, m) {
+			continue
+		}
+		live = append(live, item)
+	}
+	return live
+}
+
 // ClassifyOrphans walks the /mock/state JSON and classifies each
 // non-empty resource collection per the orphan sub-shape table.
 //
@@ -209,9 +240,9 @@ func ClassifyOrphans(mockStateJSON []byte, cloud, scenario, timestamp string) Or
 		return routing
 	}
 
-	// Same exclusion set as internal/harness/destroy.go::countOrphans
-	// — universal bookkeeping / system collections that aren't
-	// tenant resources.
+	// Bookkeeping / system collections that aren't tenant resources,
+	// as in internal/harness/destroy.go::countOrphans. Its project and
+	// default-VPC exemptions are not repeated here.
 	ignoredRoots := map[string]bool{
 		"metadata":       true,
 		"operations":     true,
@@ -237,7 +268,11 @@ func ClassifyOrphans(mockStateJSON []byte, cloud, scenario, timestamp string) Or
 				continue
 			}
 			items, ok := value.([]any)
-			if !ok || len(items) == 0 {
+			if !ok {
+				continue
+			}
+			items = withoutEndStates(service, collection, items)
+			if len(items) == 0 {
 				continue
 			}
 			// Look up in the sub-shape table.

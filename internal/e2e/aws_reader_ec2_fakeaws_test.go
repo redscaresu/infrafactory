@@ -27,26 +27,18 @@ import (
 	"github.com/redscaresu/infrafactory/internal/harness"
 )
 
-// The EC2 surroundings and follow-up rows fakeaws at FAKEAWS_SHA does not
-// answer as EC2 does, each as "Action" or "Action filter-name":
-// fakeawsPinRefusedRows it refuses, fakeawsPinUnfilteredRows it answers
-// with every VPC's items, ignoring the filter. Each is
-// prod-read-seam-fakeaws-filtered-e2e's: it bumps the pin and empties
-// these lists. Three more rows are never sent at the pin, since their
-// filter values come from an answer that lacks them: DescribeSecurityGroupRules
-// (by the SGs' group-id) and DescribeAddresses (by the interfaces'
-// network-interface-id), both from a refused row, and DescribeKeyPairs (by
-// the instances' key-name), which fakeaws's DescribeInstances omits.
+// The EC2 follow-up rows fakeaws at FAKEAWS_SHA does not answer as EC2
+// does, each as "Action" or "Action filter-name": fakeawsPinRefusedRows
+// it refuses, fakeawsPinUnfilteredRows it answers with every VPC's items,
+// ignoring the filter. At the pin, the SGs, ENIs and instances are
+// answered from rows, so the rows they feed are sent: DescribeSecurityGroupRules
+// (by the SGs' group-id) is sent and refused (not modelled; fakeaws-loader
+// owns it), and DescribeAddresses (by the interfaces' network-interface-id)
+// is sent and answered. DescribeKeyPairs by the instances' key-name is never
+// sent, since fakeaws's DescribeInstances omits the key name.
 var (
-	fakeawsPinRefusedRows = []string{
-		"DescribeAvailabilityZones",
-		"DescribeNetworkInterfaces vpc-id",
-		"DescribeSecurityGroups vpc-id",
-	}
-	fakeawsPinUnfilteredRows = []string{
-		"DescribeInstances vpc-id",
-		"DescribeInternetGateways attachment.vpc-id",
-	}
+	fakeawsPinRefusedRows    = []string{"DescribeSecurityGroupRules group-id"}
+	fakeawsPinUnfilteredRows = []string(nil)
 )
 
 var answerVPCIDs = regexp.MustCompile(`<vpcId>([^<]*)</vpcId>`)

@@ -1,7 +1,6 @@
 ---
 kind: code
-status: blocked
-blocked_by: [prod-read-seam-ec2-readers, fakeaws-data-sources-pin]
+status: ready
 epic: prod-read-seam
 depends_on: [prod-read-seam-ec2-readers, fakeaws-data-sources-pin]
 touches: [internal/e2e/testdata/aws-step0/read-set.json, internal/e2e/aws_reader_step0_fakeaws_test.go]
@@ -9,7 +8,7 @@ touches: [internal/e2e/testdata/aws-step0/read-set.json, internal/e2e/aws_reader
 
 # The step-0 read set, committed and proved against fakeaws with filters and AZs
 
-This story waits for fakeaws-data-sources-pin, the FAKEAWS_SHA bump that brings fakeaws's filters and DescribeAvailabilityZones. DescribeSecurityGroupRules is not modelled at that pin (no case in fakeaws handlers/ec2.go); it is owned by fakeaws-loader, which stores the rule ids.
+This story runs at the FAKEAWS_SHA that brings fakeaws's filters and DescribeAvailabilityZones (ci.yml). DescribeSecurityGroupRules is not modelled at that pin (no case in fakeaws handlers/ec2.go); it is owned by fakeaws-loader, which stores the rule ids.
 
 Commit `internal/e2e/testdata/aws-step0/read-set.json` in the ADR-0041 format. It holds:
 - DescribeVpcs by `Filter` tag-key=infrafactory-run-id (aws_sweep.go:19). The claim leaves one stack in the account, so no run id is needed.
