@@ -3,6 +3,7 @@
 TestAWSAMIParityAgainstFakeaws
 TestAWSPreflightAgainstFakeaws
 TestAWSReadAgainstFakeaws
+TestAWSReadEC2AgainstFakeaws
 TestAWSReapAgainstFakeaws
 TestAWSScopeClaimAgainstFakeaws
 TestAWSSweepAgainstFakeaws

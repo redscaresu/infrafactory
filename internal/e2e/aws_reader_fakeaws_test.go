@@ -10,7 +10,6 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials"
-	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 	ssmtypes "github.com/aws/aws-sdk-go-v2/service/ssm/types"
 	"github.com/stretchr/testify/assert"
@@ -20,10 +19,11 @@ import (
 )
 
 // TestAWSReadAgainstFakeaws runs the account read through its walls over
-// the loopback-only client against fakeaws STS, SSM and EC2, with the
-// real identity check, so a change on either side of the wire fails here
+// the loopback-only client against fakeaws STS and SSM, with the real
+// identity check, so a change on either side of the wire fails here
 // rather than against real AWS. fakeaws does not model DryRun, so the
-// preflight is a stub. The required CI job runs it by name and fails if
+// preflight is a stub. EC2, whose answers bring the follow-ups, is
+// TestAWSReadEC2AgainstFakeaws. The required CI job runs it by name and fails if
 // it does not report PASS.
 func TestAWSReadAgainstFakeaws(t *testing.T) {
 	SkipUnlessEnabled(t)
@@ -40,12 +40,9 @@ func TestAWSReadAgainstFakeaws(t *testing.T) {
 	creds := credentials.NewStaticCredentialsProvider("fakeaws-key-id", "fakeaws-secret", "")
 	doer := harness.NewLoopbackOnlyHTTPClient()
 	ssmClient := ssm.New(ssm.Options{Region: region, Credentials: creds, BaseEndpoint: aws.String(mock.URL + "/ssm/region/" + region), HTTPClient: doer})
-	ec2Client := ec2.New(ec2.Options{Region: region, Credentials: creds, BaseEndpoint: aws.String(mock.URL + "/ec2/region/" + region), HTTPClient: doer})
 	_, err = ssmClient.PutParameter(ctx, &ssm.PutParameterInput{
 		Name: aws.String("/app/db/host"), Value: aws.String("db.internal"), Type: ssmtypes.ParameterTypeString,
 	})
-	require.NoError(t, err)
-	vpc, err := ec2Client.CreateVpc(ctx, &ec2.CreateVpcInput{CidrBlock: aws.String("10.0.0.0/16")})
 	require.NoError(t, err)
 
 	entry := func(service, protocol, action, params string) harness.AWSReadEntry {
@@ -55,7 +52,6 @@ func TestAWSReadAgainstFakeaws(t *testing.T) {
 		entry("sts", "query", "GetCallerIdentity", `{}`),
 		entry("ssm", "json", "GetParameter", `{"Name":"/app/db/host"}`),
 		entry("ssm", "json", "GetParameter", `{"Name":"/app/missing"}`),
-		entry("ec2", "query", "DescribeVpcs", `{}`),
 	}
 	read, err := harness.ReadAWSAccount(ctx, harness.AWSReadInput{
 		Config: cfg, Account: fakeawsAccount, Principal: fakeawsPrincipal,
@@ -79,7 +75,7 @@ func TestAWSReadAgainstFakeaws(t *testing.T) {
 		assert.Equal(t, readSet[i], exchange.AWSReadEntry, "exchange %d holds its entry verbatim", i)
 	}
 
-	identity, param, missing, vpcs := read.Exchanges[0], read.Exchanges[1], read.Exchanges[2], read.Exchanges[3]
+	identity, param, missing := read.Exchanges[0], read.Exchanges[1], read.Exchanges[2]
 	assert.Equal(t, http.StatusOK, identity.Status)
 	assert.Contains(t, identity.Body, "<Account>"+fakeawsAccount+"</Account>")
 
@@ -90,7 +86,4 @@ func TestAWSReadAgainstFakeaws(t *testing.T) {
 
 	assert.Equal(t, http.StatusBadRequest, missing.Status, "a lookup that finds nothing is an answer")
 	assert.Contains(t, missing.Body, "ParameterNotFound")
-
-	assert.Equal(t, http.StatusOK, vpcs.Status)
-	assert.Contains(t, vpcs.Body, "<vpcId>"+aws.ToString(vpc.Vpc.VpcId)+"</vpcId>")
 }

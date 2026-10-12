@@ -127,19 +127,34 @@ func TestReadAWSAccountRecordsEveryPageAsItsOwnExchange(t *testing.T) {
 			for page := 1; page <= len(tc.tokens)+1; page++ {
 				service.queue = append(service.queue, awsOK(awsPageFixture(t, tc.entry.Service, tc.entry.Action, page)))
 			}
+			followUps := tc.entry.Service == "ec2"
 			service.answer = awsCannedAnswer{status: http.StatusInternalServerError}
+			if followUps {
+				// The EC2 pages list an instance in a VPC, whose
+				// follow-ups (readEC2) come after them; none of those
+				// asks for a page.
+				service.answer = awsOK("<Response/>")
+			}
 
 			read, err := ReadAWSAccount(context.Background(), awsReadTestInput(doers.doer(), tc.entry))
 
 			require.NoError(t, err)
 			assert.Equal(t, doers.sent(), read.Calls)
-			assert.Equal(t, 1+len(service.queue), read.Calls, "identity and each page")
-			require.Len(t, service.sent, len(service.queue))
-			require.Len(t, read.Exchanges, len(service.queue))
+			if followUps {
+				require.GreaterOrEqual(t, len(service.sent), len(service.queue))
+				require.GreaterOrEqual(t, len(read.Exchanges), len(service.queue))
+				for _, req := range service.sent[len(service.queue):] {
+					assert.NotContains(t, req.form(t), tc.field, "a page past the last was asked for")
+				}
+			} else {
+				assert.Equal(t, 1+len(service.queue), read.Calls, "identity and each page")
+				require.Len(t, service.sent, len(service.queue))
+				require.Len(t, read.Exchanges, len(service.queue))
+			}
 			assert.Equal(t, tc.entry, read.Exchanges[0].AWSReadEntry, "the first page is the entry verbatim")
 			var base map[string]string
 			require.NoError(t, json.Unmarshal(tc.entry.Params, &base))
-			for i, exchange := range read.Exchanges {
+			for i, exchange := range read.Exchanges[:len(service.queue)] {
 				want := maps.Clone(base)
 				if i > 0 {
 					want[tc.field] = tc.tokens[i-1]
