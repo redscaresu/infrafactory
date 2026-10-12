@@ -131,3 +131,18 @@ release is a reap. Rules 1-17 and the sweep rows and precedence pairs above are 
 - **Nothing expires a hold**: `service.ttl` has no AWS consumer, so a hold lasts until a release.
 - **What the hold's real proof adds** is a held stack released from another process with its copy
   taken. The Consequences' unproven list is not restated here.
+
+## Amendment, 2026-10-12: the read seam reads beyond the scope, and only reads
+
+The read seam (ADR-0041: the reader table `AWSReaderTable` in `internal/harness/aws_reader_table.go`,
+the IAM policy `docs/layer3/aws/reader-policy.json` derived from it, and the wall) reads accounts
+beyond the Layer 3 scope. Rules 1-17, the sweep rows and precedence pairs, and the
+hold amendment above are unchanged.
+
+- **Reads only.** The seam takes no claim and issues no create, modify or delete; the whole-account
+  claim and every delete in this ADR stay inside the Layer 3 scope.
+- **Rule 10 applies to every reader list.** A reader collection that cannot be listed in full (a
+  token cycle, a 403) fails the read and returns nothing, so "could not read" never looks like
+  "nothing there".
+- **The rule 8 sweep table is untouched.** The reader table decides what is read; it adds no sweep
+  row and is not a list of what is owned.
