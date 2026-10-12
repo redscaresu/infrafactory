@@ -2,9 +2,7 @@ package harness
 
 import (
 	"fmt"
-	"os"
 	"regexp"
-	"strings"
 )
 
 // The shared credentials and config files both layers' env points the AWS
@@ -53,48 +51,25 @@ func AWSSealedEnv(credFile, region string) (map[string]string, error) {
 	}, nil
 }
 
-// readAWSCredentialFile never puts a line or value in an error: either
-// could be the secret key.
+// readAWSCredentialFile reads layer3-aws.env through readOwnerOnlyFile
+// and parseCredentialLines: exactly the key id and the secret, each with
+// a value.
 func readAWSCredentialFile(path string) (map[string]string, error) {
-	info, err := os.Lstat(path)
+	data, err := readOwnerOnlyFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("credential file %s: %w", path, err)
+		return nil, err
 	}
-	if !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("credential file %s is not a regular file (%s)", path, info.Mode().Type())
-	}
-	if perm := info.Mode().Perm(); perm&0o077 != 0 {
-		return nil, fmt.Errorf("credential file %s has mode %04o; it must grant no group or other permission (chmod 600)", path, perm)
-	}
-	data, err := os.ReadFile(path)
+	keys := []string{awsReaderKeyID, awsReaderSecret}
+	lines, err := parseCredentialLines(path, data, keys)
 	if err != nil {
-		return nil, fmt.Errorf("credential file %s: %w", path, err)
+		return nil, err
 	}
-
-	creds := map[string]string{"AWS_ACCESS_KEY_ID": "", "AWS_SECRET_ACCESS_KEY": ""}
-	seen := map[string]bool{}
-	for i, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		key, value, ok := strings.Cut(line, "=")
-		if !ok {
-			return nil, fmt.Errorf("credential file %s line %d is not KEY=VALUE", path, i+1)
-		}
-		if _, known := creds[key]; !known {
-			return nil, fmt.Errorf("credential file %s line %d has unknown key %q; only AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are allowed", path, i+1, key)
-		}
-		if seen[key] {
-			return nil, fmt.Errorf("credential file %s sets %s twice", path, key)
-		}
-		seen[key] = true
-		creds[key] = value
-	}
-	for _, key := range []string{"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"} {
-		if creds[key] == "" {
+	creds := map[string]string{}
+	for _, key := range keys {
+		if lines[key].value == "" {
 			return nil, fmt.Errorf("credential file %s has no value for %s", path, key)
 		}
+		creds[key] = lines[key].value
 	}
 	return creds, nil
 }
