@@ -1,8 +1,7 @@
 ---
 kind: code
 repo: fakeaws
-status: blocked
-blocked_by: [fakeaws-load-exchange-rules, fakeaws-ssm-public-parameter-predicate, fakeaws-schema-version-refuses-older]
+status: ready
 epic: fakeaws-loader
 depends_on: [fakeaws-load-exchange-rules, fakeaws-ssm-public-parameter-predicate, fakeaws-schema-version-refuses-older]
 touches: [handlers/load_ssm.go, handlers/load_ssm_test.go, handlers/ssm.go, handlers/ssm_test.go, repository/ssm.go, repository/ssm_test.go, repository/repository.go, repository/testdata/schema.golden, testdata/ssm/]

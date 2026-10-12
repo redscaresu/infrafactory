@@ -1,8 +1,7 @@
 ---
 kind: code
 repo: fakeaws
-status: blocked
-blocked_by: [fakeaws-load-exchange-rules, fakeaws-role-inline-policies]
+status: ready
 epic: fakeaws-loader
 depends_on: [fakeaws-load-exchange-rules, fakeaws-role-inline-policies]
 touches: [handlers/load_iam.go, handlers/load_iam_test.go, handlers/iam.go, handlers/iam_test.go, repository/load_iam.go, repository/iam.go, testdata/iam/]
