@@ -17,12 +17,12 @@ import (
 )
 
 // The module source rule (ADR-0042 Decision 2) judges a source by what
-// init does with it: only a literal ./ or ../ source, with no backslash,
-// that resolves to a directory inside the copy is admitted, and every
-// download is refused, registry modules included. Gate 1 holds each
-// module block to it and gates every dir the blocks reach, refusing a
-// cycle, before any tofu; gate 2 holds the manifest the first init writes
-// to it.
+// init does with it: only a literal ./ or ../ source, with no backslash
+// and crossing no symlink, that resolves to a directory inside the copy
+// is admitted, and every download is refused, registry modules included.
+// Gate 1 holds each module block to it and gates every dir the blocks
+// reach, refusing a cycle, before any tofu; gate 2 holds the manifest the
+// first init writes to it.
 
 const rehearsalModulesAdmit = "only a literal ./ or ../ source inside the boundary is admitted: every module download is refused"
 
@@ -139,6 +139,9 @@ func rehearsalModuleSource(file, dir, boundary string, block *hclsyntax.Block) (
 		return "", "", append(problems, call+` is refused: tofu reads a \ as a path separator, so a source holding one is refused by name`)
 	}
 	target, problem := rehearsalInside(filepath.Join(dir, source), boundary)
+	if problem == "" {
+		problem = rehearsalSourceLinkProblem(dir, source, boundary)
+	}
 	if problem != "" {
 		return "", "", append(problems, call+" "+problem)
 	}
@@ -146,6 +149,47 @@ func rehearsalModuleSource(file, dir, boundary string, block *hclsyntax.Block) (
 		return "", "", append(problems, call+" is refused: it is not a directory")
 	}
 	return target, call, problems
+}
+
+// rehearsalSourceLinkProblem refuses a module source that crosses a
+// symlink at any component. Tofu joins the source to the calling dir as
+// written and cleans it lexically, so path.module would spell the link
+// while the gate checks the dir it resolves to, and a
+// "${path.module}/../.." would reach somewhere else. dir resolves, and a
+// resolved dir's ancestors are real dirs, so a leading .. crosses none.
+func rehearsalSourceLinkProblem(dir, source, boundary string) string {
+	path, err := rehearsalResolve(dir)
+	if err != nil {
+		return fmt.Sprintf("is refused: cannot check it for a symlink: %v", err)
+	}
+	rel, err := filepath.Rel(path, filepath.Join(path, source))
+	if err != nil {
+		return fmt.Sprintf("is refused: cannot check it for a symlink: %v", err)
+	}
+	for _, part := range strings.Split(rel, string(filepath.Separator)) {
+		path = filepath.Join(path, part)
+		if part == ".." {
+			continue
+		}
+		info, err := os.Lstat(path)
+		if err != nil {
+			return fmt.Sprintf("is refused: cannot check it for a symlink: %v", err)
+		}
+		if info.Mode()&fs.ModeSymlink != 0 {
+			return fmt.Sprintf("is refused: it crosses the symlink %s, and tofu joins the source as written, so path.module there would not be the dir the gate checks", rehearsalBoundaryName(path, boundary))
+		}
+	}
+	return ""
+}
+
+// rehearsalBoundaryName names a resolved-parent path relative to the
+// boundary, resolved too, or whole when it is not under it.
+func rehearsalBoundaryName(path, boundary string) string {
+	if root, err := rehearsalResolve(boundary); err == nil && rehearsalUnder(path, root) {
+		rel, _ := filepath.Rel(root, path)
+		return filepath.ToSlash(rel)
+	}
+	return path
 }
 
 // moduleProvidersProblems holds both sides of every pair in a module
@@ -227,8 +271,8 @@ func rehearsalUnder(path, dir string) bool {
 // never dir itself: a call back onto its own call path is a cycle. It
 // reads each dir by the gate's walk, so anything that stops the gate
 // reading one (a module source the rule refuses, a .tf file that does not
-// parse, a file refused by name) refuses the lot. rehearsal-prepare-copy
-// uses it to find what to copy.
+// parse, a file refused by name) refuses the lot. Prepare uses it to find
+// what to copy.
 func rehearsalLocalModuleSources(dir, boundary string) ([]string, error) {
 	dirs, problems := rehearsalModuleDirs(dir, boundary)
 	if err := rehearsalRefusal(problems); err != nil {

@@ -1,0 +1,5 @@
+{
+  "schema": "infrafactory.rehearse.prepare.v1",
+  "status": "failed",
+  "refusal": "the rehearsal gate refuses this configuration: envs/prod/main.tf:2: terraform.cloud: refused: terraform {} admits only required_providers, required_version and, in the root, backend"
+}
