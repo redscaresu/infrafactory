@@ -192,28 +192,16 @@ var (
 		"plugin did not respond",
 		"the plugin encountered an error",
 		"plugin crashed",
-		// Throttling, and the service failing or timing out the request.
+		// Throttling.
+		"requestlimitexceeded",
 		"throttling",
 		"rate exceeded",
-		"toomanyrequests",
-		"slowdown",
-		"serviceunavailable",
-		"internalerror",
-		"internalfailure",
-		"requestexpired",
-		// The network between here and the cloud.
-		"connection reset by peer",
-		"tls handshake timeout",
-		"i/o timeout",
-		// Capacity and account limits: any ...LimitExceeded (RequestLimit,
-		// AddressLimit, VpcLimit, VcpuLimit, LimitExceededException).
-		"limitexceeded",
+		// Capacity and account limits.
 		"insufficientinstancecapacity",
-		// Permissions, opt-ins and quotas: what the account allows, not
-		// the HCL.
+		"vcpulimitexceeded",
+		// Permissions and quotas: what the account allows, not the HCL.
 		"accessdenied",
 		"unauthorizedoperation",
-		"optinrequired",
 		"insufficient permissions",
 		"quota exceeded",
 		"quotas exceeded",
