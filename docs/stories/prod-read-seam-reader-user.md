@@ -1,7 +1,6 @@
 ---
 kind: lead
-status: blocked
-blocked_by: [prod-read-seam-reader-describe-volumes]
+status: ready
 epic: prod-read-seam
 depends_on: [prod-read-seam-reader-policy, prod-read-seam-reader-describe-volumes]
 touches: []

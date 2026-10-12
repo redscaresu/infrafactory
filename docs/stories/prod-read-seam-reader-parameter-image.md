@@ -1,8 +1,7 @@
 ---
 kind: code
 repo: infrafactory
-status: blocked
-blocked_by: [prod-read-seam-reader-describe-volumes]
+status: ready
 epic: prod-read-seam
 depends_on: [prod-read-seam-reader-describe-volumes]
 touches: [internal/harness/aws_reader.go, internal/harness/aws_reader_ssm.go, internal/harness/aws_reader_ssm_test.go, internal/harness/aws_reader_scrub.go, internal/harness/aws_reader_scrub_test.go, internal/e2e/aws_reader_step0_fakeaws_test.go]
