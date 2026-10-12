@@ -8,9 +8,97 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/redscaresu/infrafactory/internal/config"
 	"github.com/redscaresu/infrafactory/internal/scenario"
 )
+
+func TestRehearseIsRegisteredAndPrintsItsHelp(t *testing.T) {
+	t.Parallel()
+
+	root := NewRootCmd()
+	found, _, err := root.Find([]string{"rehearse"})
+	require.NoError(t, err)
+	assert.Equal(t, "rehearse", found.Name())
+
+	stdout := &bytes.Buffer{}
+	root.SetOut(stdout)
+	root.SetErr(&bytes.Buffer{})
+	root.SetArgs([]string{"rehearse"})
+
+	require.NoError(t, root.Execute())
+	assert.Contains(t, stdout.String(), found.Short)
+}
+
+// The child stands in for `prepare`: a subcommand's flag parse error,
+// missing required flag and broken flag group must exit 2 too, and a valid
+// call must still run.
+func TestRehearseUsageErrorsExitTwo(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		args []string
+		want int
+	}{
+		{[]string{"rehearse", "bogus"}, ExitCodeUsage},
+		{[]string{"rehearse", "--nope"}, ExitCodeUsage},
+		{[]string{"--output", "yaml", "rehearse"}, ExitCodeUsage},
+		{[]string{"rehearse", "child", "--need", "v", "--nope"}, ExitCodeUsage},
+		{[]string{"rehearse", "child"}, ExitCodeUsage},
+		{[]string{"rehearse", "child", "--need", "v", "--x", "--y"}, ExitCodeUsage},
+		{[]string{"rehearse", "child", "--need", "v"}, ExitCodeSuccess},
+	} {
+		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
+			t.Parallel()
+
+			root := NewRootCmd()
+			group, _, err := root.Find([]string{"rehearse"})
+			require.NoError(t, err)
+			child := &cobra.Command{Use: "child", RunE: func(*cobra.Command, []string) error { return nil }}
+			child.Flags().String("need", "", "")
+			require.NoError(t, child.MarkFlagRequired("need"))
+			child.Flags().Bool("x", false, "")
+			child.Flags().Bool("y", false, "")
+			child.MarkFlagsMutuallyExclusive("x", "y")
+			group.AddCommand(child)
+			root.SetOut(&bytes.Buffer{})
+			root.SetErr(&bytes.Buffer{})
+			root.SetArgs(tc.args)
+
+			assert.Equal(t, tc.want, ExitCodeForError(root.Execute()))
+		})
+	}
+}
+
+// A subcommand's own persistent pre-run would shadow the group's, which
+// holds the family's exit-2 rule and the root's --output check (ADR-0042).
+func TestRehearseSubcommandsSetNoPersistentPreRun(t *testing.T) {
+	t.Parallel()
+
+	group, _, err := NewRootCmd().Find([]string{"rehearse"})
+	require.NoError(t, err)
+	assert.Empty(t, ownPersistentPreRuns(group))
+
+	// The walk must see a hook at any depth, or the check above is vacuous.
+	nested := &cobra.Command{Use: "nested"}
+	nested.AddCommand(&cobra.Command{Use: "deep", PersistentPreRunE: func(*cobra.Command, []string) error { return nil }})
+	group.AddCommand(&cobra.Command{Use: "planted", PersistentPreRun: func(*cobra.Command, []string) {}}, nested)
+	assert.ElementsMatch(t, []string{"infrafactory rehearse planted", "infrafactory rehearse nested deep"}, ownPersistentPreRuns(group))
+}
+
+func ownPersistentPreRuns(group *cobra.Command) []string {
+	var paths []string
+	for _, c := range group.Commands() {
+		if c.PersistentPreRunE != nil || c.PersistentPreRun != nil {
+			paths = append(paths, c.CommandPath())
+		}
+		paths = append(paths, ownPersistentPreRuns(c)...)
+	}
+	return paths
+}
 
 func TestNewRootCmdHasExpectedCommands(t *testing.T) {
 	t.Parallel()
