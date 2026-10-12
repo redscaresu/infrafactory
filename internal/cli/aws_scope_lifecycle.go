@@ -315,47 +315,60 @@ func awsScopeTeardown(ctx context.Context, runtime *CommandRuntime, outputDir st
 	return append(stages, destroyStages...), append(failures, destroyFailures...)
 }
 
-// awsKeepHold is a wanted hold's decision: the copy is written only while
-// the run's ctx is live, and that ctx is read again once it is, so an
+// awsKeepHold is a wanted hold's decision. It keeps only a claim this
+// process knows it holds, checked before the copy, so a hold that falls
+// through for the claim writes none. The copy is written only while the
+// run's ctx is live, and that ctx is read again once it is, so an
 // interrupt before the held stage destroys. It never reads the
 // teardown's ctx, which a rerun makes fresh. When the hold falls through
 // to the destroy, held is false and the stage says why.
 func awsKeepHold(runtime *CommandRuntime, outputDir string, run context.Context) (stages []StageSummary, failures []FailureSummary, held bool) {
 	copyPath := holdCopyPath(awsHoldScenario)
-	var copyErr error
+	holder, claim := runtime.awsHolder, runtime.awsClaim
+	if claim.known(holder) != awsClaimHeld {
+		return awsHoldFellThrough(copyPath, "claim", awsClaimHead(runtime, claim))
+	}
 	if run.Err() == nil {
-		copyErr = holdCopy(copyPath, filepath.Join(outputDir, harness.LiveStateFilename))
+		if err := holdCopy(copyPath, filepath.Join(outputDir, harness.LiveStateFilename)); err != nil {
+			return awsHoldFellThrough(copyPath, "hold_copy", fmt.Sprintf("its tfstate copy %s could not be written: %v", copyPath, err))
+		}
 	}
-	switch {
-	case copyErr != nil:
-		why := fmt.Sprintf("its tfstate copy %s could not be written: %v", copyPath, copyErr)
-		return awsHoldFellThrough(copyPath, why), []FailureSummary{{
-			Layer: "sandbox_deploy", Stage: StageAWSHold, Check: "hold_copy",
-			Command: "copy the held tfstate", Detail: why,
-		}}, false
-	case run.Err() != nil:
-		return awsHoldFellThrough(copyPath, "the run was interrupted"), nil, false
+	if run.Err() != nil {
+		// The interrupt's own failure is added once the run ends.
+		return awsHoldFellThrough(copyPath, "", "the run was interrupted")
 	}
-	holder := runtime.awsHolder
-	// awsTeardownSkipped's held branch, its advice the release.
-	return []StageSummary{{
-		Layer: "sandbox_deploy", Stage: StageAWSScopeClaimKept, Status: StageStatusSkip,
-		Detail: fmt.Sprintf("kept the aws scope's claim for %s on purpose (--hold): what this run applied is still there, "+
-			"its tfstate is copied to %s, and nothing expires the hold. Once the read is done, "+
+	return awsKeptOnPurpose(holder, "--hold", fmt.Sprintf(
+		"Its tfstate is copied to %s, and nothing expires the hold. Once the read is done, "+
 			"`%s --release-hold` destroys it, sweeps the scope and releases the claim",
-			holder, copyPath, awsTakeOverCommand(runtime, holder)),
-	}}, nil, true
+		copyPath, awsTakeOverCommand(runtime, holder))), nil, true
 }
 
-// awsHoldFellThrough is the stage of a hold that destroys instead. A copy
-// left at copyPath is kept, and the guard refuses until it is deleted.
-func awsHoldFellThrough(copyPath, why string) []StageSummary {
+// awsHoldFellThrough is the stage of a hold that destroys instead, and,
+// for a check, its failure. A copy left at copyPath is kept, and the
+// guard refuses until it is deleted.
+func awsHoldFellThrough(copyPath, check, why string) ([]StageSummary, []FailureSummary, bool) {
 	detail := "not held, so the teardown runs as it does for any other run: " + why
 	if _, err := os.Lstat(copyPath); !errors.Is(err, fs.ErrNotExist) {
 		detail += fmt.Sprintf(". The copy %s is kept: generate, run and test of %s are refused until it is deleted by hand",
 			copyPath, awsHoldScenario)
 	}
-	return []StageSummary{{Layer: "sandbox_deploy", Stage: StageAWSHold, Status: StageStatusFail, Detail: detail}}
+	stages := []StageSummary{{Layer: "sandbox_deploy", Stage: StageAWSHold, Status: StageStatusFail, Detail: detail}}
+	if check == "" {
+		return stages, nil, false
+	}
+	return stages, []FailureSummary{{
+		Layer: "sandbox_deploy", Stage: StageAWSHold, Check: check, Command: "hold the stack", Detail: detail,
+	}}, false
+}
+
+// awsKeptOnPurpose is the stage of a claim this run holds and keeps on
+// purpose, for reason; release says what releases it.
+func awsKeptOnPurpose(holder, reason, release string) []StageSummary {
+	return []StageSummary{{
+		Layer: "sandbox_deploy", Stage: StageAWSScopeClaimKept, Status: StageStatusSkip,
+		Detail: fmt.Sprintf("kept the aws scope's claim for %s on purpose (%s): what this run applied is still there. %s",
+			holder, reason, release),
+	}}
 }
 
 // awsTeardownSkipped is the stage a deliberately skipped teardown adds,
@@ -368,9 +381,7 @@ func awsTeardownSkipped(runtime *CommandRuntime, reason string) []StageSummary {
 	var detail string
 	switch claim.known(holder) {
 	case awsClaimHeld:
-		stage = StageAWSScopeClaimKept
-		detail = fmt.Sprintf("kept the aws scope's claim for %s on purpose (%s): what this run applied is still there. %s",
-			holder, reason, advice)
+		return awsKeptOnPurpose(holder, reason, advice)
 	case awsClaimHeldByOther:
 		detail = fmt.Sprintf("skipped the teardown (%s); the aws scope's claim is held by %s, not this run. %s",
 			reason, claim.other, advice)

@@ -479,8 +479,10 @@ func runAWSTestWith(t *testing.T, lc *awsLifecycle, setup awsTestSetup) awsTestR
 	cmd.SetErr(stderr)
 	cmd.SetArgs(append([]string{h.ScenarioPath, "--config", h.ConfigPath, "--output", string(OutputModeJSON)}, setup.flags...))
 	run := awsTestRun{h: h, err: cmd.Execute(), output: stdout.String() + stderr.String()}
-	// A usage error writes no result.
-	if stdout.Len() > 0 {
+	// Only a usage error may write no result; every other run decodes, so
+	// one that stops writing its result fails here.
+	var cliErr *CLIError
+	if !errors.As(run.err, &cliErr) || cliErr.Code != errorCodeUsage || stdout.Len() > 0 {
 		run.result = decodeMachineOutput(t, bytes.NewBufferString(stdout.String()))
 	}
 	return run

@@ -636,7 +636,7 @@ func TestHoldKeepsAPassingStackUnderTheClaim(t *testing.T) {
 	assert.Equal(t, StageStatusSkip, kept.Status)
 	copyPath := holdCopyPath(awsHoldScenario)
 	assert.Contains(t, kept.Detail, "kept the aws scope's claim for "+holder+" on purpose (--hold)")
-	assert.Contains(t, kept.Detail, "its tfstate is copied to "+copyPath)
+	assert.Contains(t, kept.Detail, "what this run applied is still there. Its tfstate is copied to "+copyPath)
 	assert.Contains(t, kept.Detail, "nothing expires the hold")
 	assert.Contains(t, kept.Detail, "`"+reapCommand(run.h.ConfigPath, run.h.ScenarioPath)+" --take-over "+shellQuote(holder)+" --release-hold`")
 	assert.Contains(t, kept.Detail, "--config "+shellQuote(run.h.ConfigPath), "names the --config passed")
@@ -872,4 +872,49 @@ func TestReleaseHoldRefusesWhileTheHoldersProcessRuns(t *testing.T) {
 	assert.Zero(t, lc.count(destroyRun))
 	still, _ := lc.claim()
 	assert.Equal(t, holder, still)
+}
+
+// A passing run's teardown, with the hold wanted, keeps only a claim this
+// process knows it holds: any other claim state destroys, sweeps and
+// writes no copy. A passing run through test always holds its claim, so
+// the claim state is set on the runtime, as a teardown would find it.
+func TestHoldKeepsOnlyAClaimThisRunHolds(t *testing.T) {
+	const holder = "run-9@this-host.example:1"
+	for name, claim := range map[string]awsClaim{
+		"not held":        {state: awsClaimNotHeld},
+		"held by another": {state: awsClaimHeldByOther, other: lifecycleOtherHolder},
+		"unknown":         {state: awsClaimUnknown},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Chdir(t.TempDir())
+			lc := newAWSLifecycle(t)
+			if claim.state == awsClaimHeldByOther {
+				lc.params[harness.AWSClaimParameter] = lifecycleOtherHolder
+			}
+			cfg := layer3On(config.Default())
+			cfg.AWS = config.AWSConfig{Region: "eu-west-2", AccountID: preflightAWSAccount, PrincipalARN: preflightAWSPrincipal}
+			rt := &CommandRuntime{ConfigPath: config.DefaultPath, Config: cfg, scenarioPath: "scenarios/training/aws-web-live.yaml",
+				awsHolder: holder, awsClaim: claim, Logger: NewAppLogger(&strings.Builder{})}
+			rt.Deps.SandboxDestroy = lc.destroy
+			rt.Deps.AWSSTS, rt.Deps.AWSSSM, rt.Deps.AWSEC2 = lc, lc, lc
+			rt.Deps.AWSSweepSleep = func(context.Context, time.Duration) error { return nil }
+			outDir := t.TempDir()
+			writeAWSStateAndStaleMarker(t, outDir, true)
+
+			stages, failures := awsScopeTeardown(context.Background(), rt, outDir, testExecutionOptions{},
+				awsHold{wanted: true, run: context.Background()})
+
+			assert.Equal(t, 1, lc.count(destroyRun), "destroyed")
+			assert.Equal(t, StageStatusPass, stageStatus(stages, "sandbox_deploy", "aws_scope_sweep"))
+			assert.NoDirExists(t, holdsRoot, "no copy")
+			assert.Equal(t, StageStatusFail, stageStatus(stages, "sandbox_deploy", StageAWSHold))
+			assert.False(t, slices.ContainsFunc(stages, func(s StageSummary) bool {
+				return s.Stage == StageAWSScopeClaimKept && s.Status == StageStatusSkip
+			}), "no held line: %+v", stages)
+			hold := slices.IndexFunc(failures, func(f FailureSummary) bool { return f.Stage == StageAWSHold })
+			require.NotEqual(t, -1, hold, "%+v", failures)
+			assert.Equal(t, "claim", failures[hold].Check)
+			assert.Contains(t, failures[hold].Detail, "not held, so the teardown runs as it does for any other run: "+awsClaimHead(rt, claim))
+		})
+	}
 }
