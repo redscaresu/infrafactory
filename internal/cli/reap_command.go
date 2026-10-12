@@ -42,6 +42,9 @@ func runReapCommand(cmd *cobra.Command, args []string, runtime *CommandRuntime) 
 	if err != nil {
 		return &CLIError{Op: "reap", Code: errorCodeUsage, Err: fmt.Errorf("read --dry-run flag: %w", err)}
 	}
+	if err := prepareHoldRelease(cmd, runtime, sc, dryRun); err != nil {
+		return err
+	}
 
 	workDir := runtime.OutputDir()
 	statePath := filepath.Join(workDir, harness.LiveStateFilename)
