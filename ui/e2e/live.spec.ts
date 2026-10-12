@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 
 type Run = { scenario: string; run_id: string; status?: string };
 

@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, RUN_MODE_ROUTE } from './fixtures';
 
 test.describe('Scenario navigation', () => {
   test('each scenario page loads correct data via direct navigation', async ({ page }) => {
@@ -46,6 +46,23 @@ test.describe('Scenario navigation', () => {
 
     // The run mode card heading
     await expect(page.getByText('Next Run Mode')).toBeVisible();
+  });
+
+  // The suite answers run-mode from a fixture (fixtures.ts), so this is
+  // the one test that drives the card's error state: the server's own
+  // answer when it cannot read the mock.
+  test('run-mode card reports a server error and marks every tile unavailable', async ({ page }) => {
+    const message = 'this server could not determine the run mode; see the server log';
+    await page.route(RUN_MODE_ROUTE, (route) =>
+      route.fulfill({ status: 500, json: { error: message } })
+    );
+    await page.goto('/scenarios/training/web-app-paris');
+
+    await expect(page.getByTestId('scenario-run-mode-error')).toHaveText(message);
+    await expect(page.getByText('Run mode unavailable')).toBeVisible();
+    await expect(page.getByTestId('scenario-mock-status')).toHaveText('mockway state: unavailable');
+    await expect(page.getByTestId('scenario-tfstate-status')).toHaveText('terraform.tfstate: unavailable');
+    await expect(page.getByTestId('scenario-previous-run-status')).toHaveText('Previous success: unavailable');
   });
 
   test('scenario page shows Layer 3 section', async ({ page }) => {

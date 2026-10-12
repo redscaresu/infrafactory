@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 
 // S40-T1 + S40-T2: visual-regression coverage. Playwright captures
 // baseline screenshots on first run and pixel-diffs subsequent runs
@@ -9,23 +9,13 @@ import { test, expect } from '@playwright/test';
 const VOLATILE_SELECTORS = [
   // Sidebar diagnostics block (session id + start time change every run).
   'aside .text-xs.text-slate-600',
-  // Mock-status pill on scenario pages — text depends on whether the
-  // mock (mockway/fakegcp/fakeaws) has resources at recording time, so
-  // it differs across runs (baseline captured with empty mocks may diff
-  // from a re-run with a populated mock or vice versa).
-  '[data-testid="scenario-mock-status"]',
   // Sidebar scenario lists — adding a scenarios/training/*.yaml file
   // changes sidebar height on every page, which would otherwise force
   // a re-baseline for unrelated scenario additions.
   'aside section[data-testid^="sidebar-cloud-"] ul',
-  // Run-mode tiles + error line: their TEXT depends on whether the mock
-  // is reachable and on local run artifacts. M99 made the card's LAYOUT
-  // stable (always three tiles, always one error line, all truncated);
-  // masking handles the remaining content variance so the baseline no
-  // longer depends on whether mockway happens to be running.
-  '[data-testid="scenario-tfstate-status"]',
-  '[data-testid="scenario-previous-run-status"]',
-  '[data-testid="scenario-run-mode-error"]',
+  // The scenario page's run-mode card is not masked: run-mode is answered
+  // by fixtures.ts as a clean run of each scenario, so the baseline shows the card
+  // loaded whatever mock or run artifacts the capturing machine has.
 ];
 
 test.describe('Visual regression baselines', () => {
@@ -131,6 +121,9 @@ test.describe('Visual regression baselines', () => {
   test('scenario page (scaleway)', async ({ page }) => {
     await page.goto('/scenarios/training/web-app-paris');
     await expect(page.locator('main h1')).toContainText('web-app-paris');
+    // The error card differs from the loaded one by less than the pixel
+    // tolerance, so the image alone cannot pin which one was captured.
+    await expect(page.getByTestId('scenario-tfstate-status')).toHaveText('terraform.tfstate: no');
     // Mask the YAML textarea — content is large and stable enough that
     // a single-character change would force a re-baseline. We assert
     // layout/chrome, not the YAML body.
@@ -143,6 +136,7 @@ test.describe('Visual regression baselines', () => {
   test('scenario page (gcp)', async ({ page }) => {
     await page.goto('/scenarios/training/gcp-gke-cluster');
     await expect(page.locator('main h1')).toContainText('gcp-gke-cluster');
+    await expect(page.getByTestId('scenario-mock-status')).toHaveText('fakegcp state: no');
     await expect(page).toHaveScreenshot('scenario-gcp.png', {
       mask: VOLATILE_SELECTORS.map((sel) => page.locator(sel)).concat([page.locator('main textarea')]),
       fullPage: true,

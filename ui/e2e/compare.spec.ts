@@ -1,4 +1,4 @@
-import { test, expect, type APIRequestContext } from '@playwright/test';
+import { test, expect, type APIRequestContext } from './fixtures';
 
 type RunSummary = { scenario: string; run_id: string; status?: string };
 

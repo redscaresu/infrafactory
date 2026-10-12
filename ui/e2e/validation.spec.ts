@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page } from './fixtures';
 
 // 500ms debounce + a comfortable margin so the validation request always settles.
 const DEBOUNCE_WAIT_MS = 800;

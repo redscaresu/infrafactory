@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 
 // S40-T3: functional spot-checks across pages — assert each page renders
 // its expected primary data structure (headings, lists, controls), not

@@ -145,7 +145,10 @@ jobs:
         # 127 FUNCTIONAL end-to-end tests run here. That is the trade:
         # the pixels are still only as good as whoever last ran `make
         # test`, but behaviour is now gated.
-        run: cd ui && npx playwright test --grep-invert "Visual regression"
+        #
+        # The wrapper also fails the step if the server logged a run-mode
+        # error: the specs answer run-mode themselves (ui/e2e/fixtures.ts).
+        run: bash scripts/ui_e2e.sh --grep-invert "Visual regression"
 
       - name: Upload Playwright report on failure
         if: failure()

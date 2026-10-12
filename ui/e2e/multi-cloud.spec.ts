@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, RUN_MODE_ROUTE } from './fixtures';
 
 // Covers S36-T12 (GCP scenarios visible in UI list) and S42-T5 (multi-cloud
 // UI: sidebar group + cloud badge + dynamic Layer 3 label + mock-provider
@@ -39,13 +39,22 @@ test.describe('Multi-cloud UI', () => {
   });
 
   test('mock-provider status pill reflects the scenario cloud', async ({ page }) => {
-    // Scaleway scenario surfaces mockway, GCP surfaces fakegcp (or falls back
-    // to mockway when fakegcp.url is unconfigured — accept either to keep the
-    // assertion robust to test-server config).
+    // Run-mode is answered per scenario by fixtures.ts: Scaleway reads
+    // mockway, GCP reads fakegcp.
     await page.goto('/scenarios/training/web-app-paris');
-    await expect(page.getByTestId('scenario-mock-status')).toContainText('mockway');
+    await expect(page.getByTestId('scenario-mock-status')).toHaveText('mockway state: no');
 
     await page.goto('/scenarios/training/gcp-gke-cluster');
-    await expect(page.getByTestId('scenario-mock-status')).toContainText(/fakegcp|mockway/);
+    await expect(page.getByTestId('scenario-mock-status')).toHaveText('fakegcp state: no');
+  });
+
+  // With no run-mode answer the pill names the mock from the scenario's
+  // own cloud, so a GCP page still says fakegcp.
+  test('a GCP page whose run-mode fails names fakegcp as unavailable', async ({ page }) => {
+    await page.route(RUN_MODE_ROUTE, (route) =>
+      route.fulfill({ status: 500, json: { error: 'this server could not determine the run mode; see the server log' } })
+    );
+    await page.goto('/scenarios/training/gcp-gke-cluster');
+    await expect(page.getByTestId('scenario-mock-status')).toHaveText('fakegcp state: unavailable');
   });
 });
