@@ -26,6 +26,14 @@ var prepareFlags = []string{"--account", "123456789012", "--region", "eu-west-1"
 // prepareFlags' region.
 const prepareProvider = "provider \"aws\" {\n  region = \"eu-west-1\"\n}\n"
 
+// prepareLock is a root lock pinning hashicorp/aws at the harness's version.
+var prepareLock = lockEntry("registry.opentofu.org/hashicorp/aws", harness.AWSProviderVersion)
+
+// lockEntry is a lock entry for the provider at addr, pinned to version.
+func lockEntry(addr, version string) string {
+	return fmt.Sprintf("provider %q {\n  version     = %q\n  constraints = %q\n}\n", addr, version, version)
+}
+
 // prepareRoot is the root command with prepare built from p.
 func prepareRoot(p rehearsePrepare) *cobra.Command {
 	root := NewRootCmd()
@@ -114,7 +122,7 @@ func TestRehearsePrepareCopiesTheRootAndItsModules(t *testing.T) {
 		".infrafactory/runs/x":                 "run\n",
 		"envs/prod/main.tf":                    "module \"x\" {\n  source = \"../../modules/x\"\n}\n",
 		"envs/prod/provider.tf":                prepareProvider,
-		"envs/prod/.terraform.lock.hcl":        "# lock\n",
+		"envs/prod/.terraform.lock.hcl":        prepareLock,
 		"envs/prod/.terraform/modules/m.json":  "{}\n",
 		"envs/prod/terraform.tfstate":          "{}\n",
 		"modules/x/main.tf":                    "resource \"terraform_data\" \"x\" {}\n",
@@ -134,11 +142,11 @@ func TestRehearsePrepareCopiesTheRootAndItsModules(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(run.stdout), &result))
 	resolvedWork, err := filepath.EvalSymlinks(work)
 	require.NoError(t, err)
-	assert.Equal(t, rehearsePrepareResult{Schema: rehearsePrepareSchema, Status: CommandStatusSuccess, ID: prepareID, WorkDir: filepath.Join(resolvedWork, "envs", "prod")}, result)
+	assert.Equal(t, rehearsePrepareResult{Schema: rehearsePrepareSchema, Status: CommandStatusSuccess, ID: prepareID, WorkDir: filepath.Join(resolvedWork, "envs", "prod"), AWSVersion: harness.AWSProviderVersion}, result)
 
 	for name, want := range map[string]string{
 		"envs/prod/main.tf":             "module \"x\" {\n  source = \"../../modules/x\"\n}\n",
-		"envs/prod/.terraform.lock.hcl": "# lock\n",
+		"envs/prod/.terraform.lock.hcl": prepareLock,
 		"modules/x/main.tf":             "resource \"terraform_data\" \"x\" {}\n",
 		"README.md":                     "readme\n",
 	} {
@@ -169,7 +177,7 @@ func TestRehearsePrepareCopiesTheRootAndItsModules(t *testing.T) {
 		assert.Equal(t, want, info.Mode(), path)
 		return nil
 	}))
-	assert.Empty(t, run.calls)
+	assert.Len(t, run.calls, 3, "the first init's tofu commands")
 }
 
 // treeDigest is every entry under dir but .infrafactory, which prepare
@@ -299,6 +307,7 @@ func TestRehearsePrepareGateRefusesBeforeAnyTofu(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			tc.files["envs/prod/main.tf"] = "resource \"terraform_data\" \"x\" {}\n"
+			tc.files["envs/prod/.terraform.lock.hcl"] = prepareLock
 			_, repo := prepareRepo(t, tc.files)
 
 			run := runPrepare(repo, append([]string{"envs/prod"}, prepareFlags...)...)

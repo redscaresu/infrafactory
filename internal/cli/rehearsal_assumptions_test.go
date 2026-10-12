@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -16,6 +17,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -478,6 +480,193 @@ func (c initCopy) secondInit(t *testing.T, proxy *recorder, flags ...string) (st
 	return c.tofu(t, c.bareEnv(t, "HTTPS_PROXY="+proxy.url, "HTTP_PROXY="+proxy.url), args...)
 }
 
+// TestAssumption_GitNoSystemDropsCredentialHelper: with an empty HOME and
+// GIT_CONFIG_NOSYSTEM=1, `git config --show-scope --list` lists no system
+// entry and no credential.helper. Where a system config exists (darwin's
+// git carries osxkeychain's helper there), a control run without the
+// variable shows its entries; on a machine with none, such as CI's
+// ubuntu, the control is vacuous and says so.
+//
+// Relied on by: rehearsal-prepare-gate's first init, which runs under
+// GIT_CONFIG_NOSYSTEM=1 as a second wall behind the gate (ADR-0042
+// Decision 2). ADR-0028.
+func TestAssumption_GitNoSystemDropsCredentialHelper(t *testing.T) {
+	t.Parallel()
+	list := []string{"config", "--show-scope", "--list"}
+
+	out, err := runGit(t, map[string]string{"GIT_CONFIG_NOSYSTEM": "1"}, list...)
+	require.NoError(t, err, out)
+	assert.Empty(t, systemEntries(out), out)
+	assert.NotContains(t, out, "credential.helper")
+
+	control, err := runGit(t, nil, list...)
+	require.NoError(t, err, control)
+	if system := systemEntries(control); len(system) > 0 {
+		t.Logf("without GIT_CONFIG_NOSYSTEM git reads system entries: %v", system)
+		return
+	}
+	t.Log("vacuous control: this machine has no system git config for GIT_CONFIG_NOSYSTEM to drop")
+}
+
+// TestAssumption_GitAllowProtocolRefusesRemoteTransports: under
+// GIT_ALLOW_PROTOCOL=file, `git ls-remote` of an https and an ssh URL each
+// fail with git's transport-not-allowed error before any connection: both
+// URLs point at closedAddr, where a connection would fail differently.
+//
+// Relied on by: rehearsal-prepare-gate's first init, which runs under
+// GIT_ALLOW_PROTOCOL=file as a second wall behind the gate (ADR-0042
+// Decision 2). ADR-0028.
+func TestAssumption_GitAllowProtocolRefusesRemoteTransports(t *testing.T) {
+	t.Parallel()
+	requireClosedAddr(t)
+
+	for _, scheme := range []string{"https", "ssh"} {
+		out, err := runGit(t, map[string]string{"GIT_ALLOW_PROTOCOL": "file"}, "ls-remote", scheme+"://"+closedAddr+"/x.git")
+		require.Error(t, err, out)
+		assert.Contains(t, out, fmt.Sprintf("transport '%s' not allowed", scheme))
+	}
+}
+
+// gitDeadline bounds every git command in the assumption tests.
+const gitDeadline = 30 * time.Second
+
+// runGit runs git in a fresh dir through the production runner in replace
+// mode, under gitDeadline, and returns its stdout and stderr together. Its
+// whole environment is PATH, an empty HOME and env. Git is required: a
+// machine without it fails, never skips.
+func runGit(t *testing.T, env map[string]string, args ...string) (string, error) {
+	t.Helper()
+	_, err := exec.LookPath("git")
+	require.NoError(t, err, "git is required: the first init's git walls are pinned against it")
+	ctx, cancel := context.WithTimeout(context.Background(), gitDeadline)
+	defer cancel()
+	vars := map[string]string{"HOME": t.TempDir()}
+	maps.Copy(vars, env)
+	result, err := cli.ExecRunner.Run(ctx, harness.Command{Name: "git", Args: args, Dir: t.TempDir(), Env: vars, ReplaceEnv: true})
+	require.NoError(t, ctx.Err(), "git %v ran past %s", args, gitDeadline)
+	return string(result.Stdout) + string(result.Stderr), err
+}
+
+// systemEntries are the lines of `git config --show-scope --list` output
+// from the system scope.
+func systemEntries(out string) []string {
+	var entries []string
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "system\t") {
+			entries = append(entries, line)
+		}
+	}
+	return entries
+}
+
+// olderAWSVersion is a hashicorp/aws release before harness.AWSProviderVersion
+// that lockedRoot's constraint admits beside it.
+const olderAWSVersion = "5.99.0"
+
+// TestAssumption_ProvidersLockKeepsLockedVersion: on a root calling a
+// local module, `tofu providers lock -platform=<this platform>` fails
+// until `tofu get` has installed the module. Then, on a lock pinning
+// hashicorp/aws at olderAWSVersion under a constraint that admits a later
+// release, it keeps the locked version.
+//
+// Relied on by: rehearsal-prepare-gate's first init, which runs get, then
+// providers lock, before init (ADR-0042 § The lock, § The two inits);
+// prepare also refuses a changed version, so the version claim keeps a
+// lock workable, not safe. ADR-0028.
+func TestAssumption_ProvidersLockKeepsLockedVersion(t *testing.T) {
+	root := newLockedRoot(t, "registry.opentofu.org/hashicorp/aws")
+	root.write(t, "calls.tf", "module \"m\" {\n  source = \"./m\"\n}\n")
+	root.write(t, "m/main.tf", manifestOutput)
+	lock := []string{"providers", "lock", "-platform=" + runtime.GOOS + "_" + runtime.GOARCH}
+
+	out, err := root.assumptionDir.tofu(t, root.env, lock...)
+	require.Error(t, err, "%s: providers lock passed with the module not installed\n%s", root.version, out)
+	assert.Contains(t, out, "Module not installed", root.version)
+
+	root.tofu(t, "get", "-no-color")
+	root.tofu(t, lock...)
+	assert.Equal(t, map[string]string{"registry.opentofu.org/hashicorp/aws": olderAWSVersion}, root.lockVersions(t), root.version)
+}
+
+// TestAssumption_RegistryTerraformIoLockInitialises: a lock whose only
+// hashicorp/aws entry is registry.terraform.io's, at olderAWSVersion,
+// passes the first init's providers lock and `init -backend=false`.
+// providers lock adds a registry.opentofu.org entry at the same version
+// beside it; init installs that version and drops the registry.terraform.io
+// entry.
+//
+// Relied on by: rehearsal-prepare-gate, which admits such a lock with a
+// warning (ADR-0042 § The lock). ADR-0028.
+func TestAssumption_RegistryTerraformIoLockInitialises(t *testing.T) {
+	root := newLockedRoot(t, "registry.terraform.io/hashicorp/aws")
+
+	root.tofu(t, "providers", "lock", "-platform="+runtime.GOOS+"_"+runtime.GOARCH)
+	assert.Equal(t, map[string]string{
+		"registry.opentofu.org/hashicorp/aws": olderAWSVersion,
+		"registry.terraform.io/hashicorp/aws": olderAWSVersion,
+	}, root.lockVersions(t), root.version)
+
+	root.tofu(t, "init", "-backend=false", "-input=false", "-no-color")
+	assert.Equal(t, map[string]string{"registry.opentofu.org/hashicorp/aws": olderAWSVersion}, root.lockVersions(t), root.version)
+	assert.DirExists(t, filepath.Join(root.data, "providers", "registry.opentofu.org", "hashicorp", "aws", olderAWSVersion), root.version)
+}
+
+// lockedRoot is a root requiring hashicorp/aws "~> 5.0", whose lock pins it
+// at olderAWSVersion, and the first init's environment for it.
+type lockedRoot struct {
+	assumptionDir
+	data string
+	env  []string
+}
+
+// newLockedRoot writes a lockedRoot whose one lock entry is addr's.
+func newLockedRoot(t *testing.T, addr string) lockedRoot {
+	t.Helper()
+	e2e.SkipUnlessEnabled(t)
+	_, err := exec.LookPath("tofu")
+	require.NoError(t, err, "tofu binary required for e2e")
+	tmp := t.TempDir()
+	r := lockedRoot{assumptionDir: assumptionDir{dir: filepath.Join(tmp, "root")}, data: filepath.Join(tmp, "data")}
+	r.env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + t.TempDir(), "TF_DATA_DIR=" + r.data,
+		"GIT_CONFIG_NOSYSTEM=1", "GIT_TERMINAL_PROMPT=0", "GIT_ALLOW_PROTOCOL=file"}
+	r.write(t, "main.tf", "terraform {\n  required_providers {\n    aws = {\n      source  = \"hashicorp/aws\"\n      version = \"~> 5.0\"\n    }\n  }\n}\n")
+	r.write(t, ".terraform.lock.hcl", fmt.Sprintf("provider %q {\n  version     = %q\n  constraints = \"~> 5.0\"\n}\n", addr, olderAWSVersion))
+	version, err := r.assumptionDir.tofu(t, r.env, "version")
+	require.NoError(t, err, version)
+	r.version = strings.TrimSpace(version)
+	return r
+}
+
+// tofu runs tofu in the root under the first init's environment and fails
+// the test on an error.
+func (r lockedRoot) tofu(t *testing.T, args ...string) {
+	t.Helper()
+	out, err := r.assumptionDir.tofu(t, r.env, args...)
+	require.NoError(t, err, "%s\n%s", r.version, out)
+}
+
+// lockVersions is every entry's version in the root's lock, by address.
+func (r lockedRoot) lockVersions(t *testing.T) map[string]string {
+	t.Helper()
+	return lockVersions(t, filepath.Join(r.dir, ".terraform.lock.hcl"))
+}
+
+// lockVersions is every entry's version in the lock at path, by address.
+func lockVersions(t *testing.T, path string) map[string]string {
+	t.Helper()
+	src, err := os.ReadFile(path)
+	require.NoError(t, err)
+	file, diags := hclsyntax.ParseConfig(src, path, hcl.Pos{Line: 1, Column: 1})
+	require.False(t, diags.HasErrors(), diags.Error())
+	versions := map[string]string{}
+	for _, block := range file.Body.(*hclsyntax.Body).Blocks {
+		value, diags := block.Body.Attributes["version"].Expr.Value(nil)
+		require.False(t, diags.HasErrors(), diags.Error())
+		versions[block.Labels[0]] = value.AsString()
+	}
+	return versions
+}
+
 // missingVPC is an id no fakeaws VPC has, looked up by id (VpcId.1).
 // A filter that matches nothing would not do: fakeaws ignores
 // DescribeVpcs filters and lists every VPC.
@@ -724,12 +913,7 @@ func newAssumptionDir(t *testing.T) assumptionDir {
 	require.NoError(t, err, "tofu binary required for e2e")
 	t.Cleanup(e2e.CleanupAWSMirror)
 	e2e.SealNetwork(t)
-
-	conn, err := net.DialTimeout("tcp", closedAddr, time.Second)
-	if err == nil {
-		_ = conn.Close()
-	}
-	require.ErrorIs(t, err, syscall.ECONNREFUSED, "%s must refuse a connection: the tests rely on it being closed", closedAddr)
+	requireClosedAddr(t)
 
 	w := assumptionDir{dir: t.TempDir()}
 	version, err := w.tofu(t, w.env(t, startRecorder(t)), "version")
@@ -746,6 +930,16 @@ func newAssumptionDir(t *testing.T) assumptionDir {
 `, harness.AWSProviderVersion))
 	w.init(t)
 	return w
+}
+
+// requireClosedAddr fails unless closedAddr refuses a connection.
+func requireClosedAddr(t *testing.T) {
+	t.Helper()
+	conn, err := net.DialTimeout("tcp", closedAddr, time.Second)
+	if err == nil {
+		_ = conn.Close()
+	}
+	require.ErrorIs(t, err, syscall.ECONNREFUSED, "%s must refuse a connection: the tests rely on it being closed", closedAddr)
 }
 
 func (w assumptionDir) write(t *testing.T, name, content string) {

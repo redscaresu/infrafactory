@@ -309,7 +309,7 @@ func rehearsalGlobRefuses(r rune) bool {
 func rehearsalWrittenPathProblem(rel string) string {
 	elems := strings.Split(strings.ToLower(filepath.ToSlash(rel)), "/")
 	base := elems[len(elems)-1]
-	if slices.Contains(elems, "terraform.d") || slices.Contains(elems, ".terraform") || base == ".terraform.lock.hcl" {
+	if slices.Contains(elems, "terraform.d") || slices.Contains(elems, ".terraform") || base == rehearsalLockFile {
 		return "a written path is refused: tofu reads it"
 	}
 	for _, suffix := range append([]string{".tf", ".tfvars"}, rehearsalRefusedSuffixes...) {

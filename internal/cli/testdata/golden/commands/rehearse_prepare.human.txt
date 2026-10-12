@@ -2,3 +2,4 @@ Command: rehearse prepare
 Status: success
 Rehearsal: rehearsal-id
 Work dir: <WORKSPACE>/.infrafactory/rehearsals/rehearsal-id/work/envs/prod
+AWS provider: hashicorp/aws 5.100.0

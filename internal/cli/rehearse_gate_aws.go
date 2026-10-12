@@ -58,10 +58,10 @@ func (m rehearsalModule) awsProviderProblems(file, at string, block *hclsyntax.B
 	addr := rehearsalAddress(block)
 	var problems []string
 	for name, attr := range block.Body.Attributes {
-		problems = append(problems, rehearsalAWSArgProblems(rehearsalAt(file, attr.SrcRange, addr+"."+name), name)...)
+		problems = append(problems, m.awsArgProblems(rehearsalAt(file, attr.SrcRange, addr+"."+name), name)...)
 	}
 	for _, inner := range block.Body.Blocks {
-		problems = append(problems, rehearsalAWSArgProblems(rehearsalAt(file, inner.DefRange(), addr+"."+inner.Type), inner.Type)...)
+		problems = append(problems, m.awsArgProblems(rehearsalAt(file, inner.DefRange(), addr+"."+inner.Type), inner.Type)...)
 	}
 	if _, aliased := block.Body.Attributes["alias"]; !aliased {
 		m.regions.defaultProvider = true
@@ -74,9 +74,10 @@ func (m rehearsalModule) awsProviderProblems(file, at string, block *hclsyntax.B
 	return problems
 }
 
-// rehearsalAWSArgProblems refuses a provider "aws" argument or block the
-// table does not admit.
-func rehearsalAWSArgProblems(at, name string) []string {
+// awsArgProblems refuses a provider "aws" argument or block the table
+// does not admit. One the table does not name is refused under the lock's
+// version too, and the refusal names it.
+func (m rehearsalModule) awsArgProblems(at, name string) []string {
 	admitted, named := rehearsalAWSProviderTable[name]
 	switch {
 	case name == "alias", admitted:
@@ -84,7 +85,7 @@ func rehearsalAWSArgProblems(at, name string) []string {
 	case named:
 		return []string{fmt.Sprintf(`%s: refused: a provider "aws" block admits only %s`, at, rehearsalAWSAdmitted)}
 	}
-	return []string{fmt.Sprintf(`%s: refused: the gate's table of hashicorp/aws %s provider arguments does not name it, so it is refused under any lock version`, at, harness.AWSProviderVersion)}
+	return []string{fmt.Sprintf(`%s: refused: the gate's table of hashicorp/aws %s provider arguments does not name it, so it is refused under any lock version, the lock's %s included`, at, harness.AWSProviderVersion, m.in.awsVersion)}
 }
 
 // recordAWSRegion records an aws_* block's region argument, if any, for

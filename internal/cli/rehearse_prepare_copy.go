@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -11,13 +12,14 @@ import (
 )
 
 // prepare copies dir and its local modules into a new rehearsal under the
-// current directory's repository and runs gate 1 over the copy (ADR-0042
-// § The layout). It returns the rehearsal's id and the copied root. On a
+// current directory's repository, then reads the copy's lock, runs gate 1
+// over the copy and the first init (ADR-0042 § The layout). It returns the
+// rehearsal's id, the copied root and what the lock tells the report. On a
 // refusal the half-made rehearsal dir is removed.
-func (p rehearsePrepare) prepare(dir, region, varFile string) (id, workDir string, err error) {
+func (p rehearsePrepare) prepare(ctx context.Context, dir, region, varFile string) (result rehearsePrepareResult, err error) {
 	repo, err := rehearsalRepo(p.wd)
 	if err != nil {
-		return "", "", err
+		return result, err
 	}
 	if !filepath.IsAbs(dir) {
 		dir = filepath.Join(p.wd, dir)
@@ -27,14 +29,14 @@ func (p rehearsePrepare) prepare(dir, region, varFile string) (id, workDir strin
 	}
 	root, problem := rehearsalInside(dir, repo)
 	if problem != "" {
-		return "", "", fmt.Errorf("%s is refused: it %s, and a rehearsal copies only code inside the current directory's repository", dir, problem)
+		return result, fmt.Errorf("%s is refused: it %s, and a rehearsal copies only code inside the current directory's repository", dir, problem)
 	}
 	if err := rehearsalVarFileProblem(varFile); err != nil {
-		return "", "", err
+		return result, err
 	}
 	modules, err := rehearsalLocalModuleSources(root, repo)
 	if err != nil {
-		return "", "", err
+		return result, err
 	}
 	ancestor := root
 	for _, module := range append([]string{root}, modules...) {
@@ -42,7 +44,7 @@ func (p rehearsePrepare) prepare(dir, region, varFile string) (id, workDir strin
 		rel, _ := filepath.Rel(repo, module)
 		for _, elem := range strings.Split(rel, string(filepath.Separator)) {
 			if rehearsalCopyExcluded(elem) {
-				return "", "", fmt.Errorf("%s is refused: it lies in %s, which the copy leaves out", module, elem)
+				return result, fmt.Errorf("%s is refused: it lies in %s, which the copy leaves out", module, elem)
 			}
 		}
 		for !rehearsalUnder(module, ancestor) {
@@ -51,13 +53,13 @@ func (p rehearsePrepare) prepare(dir, region, varFile string) (id, workDir strin
 	}
 	rehearsals, err := rehearsalsDir(repo)
 	if err != nil {
-		return "", "", err
+		return result, err
 	}
 
-	id = p.newID()
+	id := p.newID()
 	rehearsal := filepath.Join(rehearsals, id)
 	if err := os.Mkdir(rehearsal, 0o700); err != nil {
-		return "", "", fmt.Errorf("rehearsal %s is refused: it cannot be made new: %w", rehearsal, err)
+		return result, fmt.Errorf("rehearsal %s is refused: it cannot be made new: %w", rehearsal, err)
 	}
 	defer func() {
 		if err != nil {
@@ -66,13 +68,14 @@ func (p rehearsePrepare) prepare(dir, region, varFile string) (id, workDir strin
 	}()
 	in, err := rehearsalCopy(rehearsal, repo, ancestor, root, varFile)
 	if err != nil {
-		return "", "", err
+		return result, err
 	}
 	in.region = region
-	if err := rehearsalGate(in); err != nil {
-		return "", "", err
+	lock, err := p.gateAndInit(ctx, rehearsal, in)
+	if err != nil {
+		return result, err
 	}
-	return id, in.root, nil
+	return rehearsePrepareResult{ID: id, WorkDir: in.root, AWSVersion: lock.aws, Warnings: lock.warnings}, nil
 }
 
 // rehearsalCopy copies ancestor into <rehearsal>/work at its path relative

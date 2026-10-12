@@ -1,9 +1,11 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/signal"
 	"time"
 
 	"github.com/redscaresu/infrafactory/internal/harness"
@@ -22,6 +24,8 @@ type rehearsePrepare struct {
 	// newID names a new rehearsal: a UTC timestamp and a random suffix by
 	// default.
 	newID func() string
+	// notify catches a signal as a cancel: signal.NotifyContext by default.
+	notify func(context.Context, ...os.Signal) (context.Context, context.CancelFunc)
 }
 
 // newRehearsePrepareCmd is `rehearse prepare <dir>` (ADR-0042). It reads no
@@ -33,6 +37,9 @@ func newRehearsePrepareCmd(p rehearsePrepare) *cobra.Command {
 	}
 	if p.newID == nil {
 		p.newID = func() string { return time.Now().UTC().Format("20060102T150405Z") + "-" + randomIDSuffix() }
+	}
+	if p.notify == nil {
+		p.notify = signal.NotifyContext
 	}
 	cmd := &cobra.Command{
 		Use:   "prepare <dir>",
@@ -73,8 +80,13 @@ func (p rehearsePrepare) run(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	result := rehearsePrepareResult{Schema: rehearsePrepareSchema, Status: CommandStatusSuccess}
-	result.ID, result.WorkDir, err = p.prepare(args[0], region, varFile)
+	// A signal cancels prepare through a guard, so the runner does not
+	// raise it again once tofu stops: prepare removes the half-made
+	// rehearsal and reports the refusal, exit 1.
+	ctx, stop := notifyGuarded(cmd.Context(), p.notify)
+	result, err := p.prepare(ctx, args[0], region, varFile)
+	stop()
+	result.Schema, result.Status = rehearsePrepareSchema, CommandStatusSuccess
 	if err != nil {
 		result = rehearsePrepareResult{Schema: rehearsePrepareSchema, Status: CommandStatusFailed, Refusal: err.Error()}
 	}
@@ -87,14 +99,17 @@ func (p rehearsePrepare) run(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// rehearsePrepareResult is what prepare reports: the new rehearsal's id and
-// the copied root dir, or the refusal.
+// rehearsePrepareResult is what prepare reports: the new rehearsal's id,
+// the copied root dir, the hashicorp/aws version the lock pins and the
+// lock's warnings, or the refusal.
 type rehearsePrepareResult struct {
-	Schema  string        `json:"schema"`
-	Status  CommandStatus `json:"status"`
-	ID      string        `json:"id,omitempty"`
-	WorkDir string        `json:"work_dir,omitempty"`
-	Refusal string        `json:"refusal,omitempty"`
+	Schema     string        `json:"schema"`
+	Status     CommandStatus `json:"status"`
+	ID         string        `json:"id,omitempty"`
+	WorkDir    string        `json:"work_dir,omitempty"`
+	AWSVersion string        `json:"aws_provider_version,omitempty"`
+	Warnings   []string      `json:"warnings,omitempty"`
+	Refusal    string        `json:"refusal,omitempty"`
 }
 
 func (r rehearsePrepareResult) write(cmd *cobra.Command, mode OutputMode) error {
@@ -112,6 +127,9 @@ func (r rehearsePrepareResult) write(cmd *cobra.Command, mode OutputMode) error 
 		_, err := fmt.Fprintf(out, "Refused: %s\n", r.Refusal)
 		return err
 	}
-	_, err := fmt.Fprintf(out, "Rehearsal: %s\nWork dir: %s\n", r.ID, r.WorkDir)
-	return err
+	_, _ = fmt.Fprintf(out, "Rehearsal: %s\nWork dir: %s\nAWS provider: hashicorp/aws %s\n", r.ID, r.WorkDir, r.AWSVersion)
+	for _, warning := range r.Warnings {
+		_, _ = fmt.Fprintf(out, "Warning: %s\n", warning)
+	}
+	return nil
 }

@@ -30,14 +30,15 @@ var errRehearsalRefuses = errors.New("the rehearsal gate refuses this configurat
 // rehearsalGateInput is what one gate run reads: the root module dir,
 // module dirs to gate beside those the root's module blocks reach (gate 2
 // adds the manifest's to them), the copy they live in (problems name
-// files relative to it), the --region, and the --var-file copy ("" when
-// none was given).
+// files relative to it), the --region, the --var-file copy ("" when
+// none was given), and the hashicorp/aws version the lock pins.
 type rehearsalGateInput struct {
-	root     string
-	modules  []rehearsalModuleDir
-	boundary string
-	region   string
-	varFile  string
+	root       string
+	modules    []rehearsalModuleDir
+	boundary   string
+	region     string
+	varFile    string
+	awsVersion string
 }
 
 // rehearsalRefusedSuffixes are files tofu loads, or tofu test reads, that
