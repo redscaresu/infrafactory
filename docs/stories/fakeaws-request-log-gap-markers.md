@@ -17,7 +17,7 @@ Through fakeaws-request-log's marker helper, with every wire byte unchanged:
 
 **Non-goals (stay answered-from-rows, named in concepts.md and AGENTS.md as known ceilings):** GET /s3/{bucket} with an unknown subresource (s3.go:167, a 200 ListBucketResult), the always-empty ListObjects (s3.go:388-399), and the always-404 HeadObject/GetObject (s3.go:416-419).
 
-**Cross-epic.** fakeaws-data-sources rewrites the EC2 filter refusals: whichever of this story and its evaluator story lands second updates TestContract_request_log_filter_refused and keeps the marker. fakeaws-loaded-identity edits iam.go and ssm.go near these sites (ssm.go:199): rebase, different hunks.
+**Cross-epic.** fakeaws-data-sources rewrites the EC2 filter refusals. Its fakeaws-ec2-filters-never-ignored lands after this story and updates TestContract_request_log_filter_refused, keeping the marker; fakeaws-ec2-filter-engine adds an unwired ec2_filters.go that this story neither calls nor marks. fakeaws-loaded-identity edits iam.go and ssm.go near these sites (ssm.go:199): rebase, different hunks.
 
 **Done when:**
 - `TestContract_request_log_not_modelled_404`: one unknown action per default arm (EC2 CreateNatGateway, IAM, RDS, DynamoDB, SQS, Secrets Manager, KMS) records not-modelled-404, the wire still 404 ResourceNotFoundException. DynamoDB DescribeTable on a missing table, wire-identical to the DynamoDB default arm (dynamodb.go:201-204), records answered-from-rows.
