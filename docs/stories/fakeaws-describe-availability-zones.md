@@ -1,8 +1,7 @@
 ---
 kind: code
 repo: fakeaws
-status: blocked
-blocked_by: [fakeaws-images-owner-name-filters, fakeaws-ami-fixtures-suppressed-when-loaded]
+status: ready
 epic: fakeaws-data-sources
 depends_on: [fakeaws-images-owner-name-filters, fakeaws-ami-fixtures-suppressed-when-loaded]
 touches: [handlers/ec2.go, handlers/ec2_filters.go, handlers/ec2_test.go, handlers/regression_test.go, repository/ec2.go, repository/ec2_test.go, AGENTS.md, CHANGELOG.md]
