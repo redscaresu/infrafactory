@@ -1,0 +1,6 @@
+{
+  "schema": "infrafactory.rehearse.read.v1",
+  "status": "success",
+  "read": "<WORKSPACE>/.infrafactory/reads/step0/read.json",
+  "exchanges": 1
+}

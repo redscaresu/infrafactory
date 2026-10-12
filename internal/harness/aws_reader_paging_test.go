@@ -315,8 +315,8 @@ func TestReadAWSAccountRetriesAThrottledRequest(t *testing.T) {
 			awsCannedAnswer{status: http.StatusServiceUnavailable, body: ec2ErrorBody("RequestLimitExceeded")}, describeVpcsXMLBody},
 		{"SSM ThrottlingException", readEntry("ssm", "json", "GetParameter", `{"Name":"/a"}`),
 			awsCannedAnswer{status: http.StatusBadRequest, body: `{"__type":"ThrottlingException","message":"Rate exceeded"}`}, `{"Parameter":{"Name":"/a"}}`},
-		{"IAM Throttling", readEntry("iam", "query", "GetRole", `{"RoleName":"web"}`),
-			awsCannedAnswer{status: http.StatusBadRequest, body: awsQueryErrorBody("https://iam.amazonaws.com/doc/2010-05-08/", "Throttling")}, "<GetRoleResponse/>"},
+		{"IAM Throttling", readEntry("iam", "query", "ListRolePolicies", `{"RoleName":"web"}`),
+			awsCannedAnswer{status: http.StatusBadRequest, body: awsQueryErrorBody("https://iam.amazonaws.com/doc/2010-05-08/", "Throttling")}, awsPageFixture(t, "iam", "ListRolePolicies", 2)},
 		{"STS Throttling", readEntry("sts", "query", "GetCallerIdentity", `{}`),
 			awsCannedAnswer{status: http.StatusBadRequest, body: awsQueryErrorBody("https://sts.amazonaws.com/doc/2011-06-15/", "Throttling")}, getCallerIdentityXMLBody},
 	}

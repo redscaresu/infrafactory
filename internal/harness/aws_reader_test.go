@@ -142,7 +142,9 @@ func TestReadAWSAccountReplaysEachEntryVerbatimAndSigned(t *testing.T) {
 	doers.ec2.answers["DescribeSecurityGroups"] = awsCannedAnswer{status: http.StatusOK, body: "<DescribeSecurityGroupsResponse/>"}
 	doers.ec2.answers["DescribeImages"] = awsCannedAnswer{status: http.StatusOK, body: "<DescribeImagesResponse/>"}
 	doers.ssm.answer.body = `{"Parameter":{"Name":"/app/db/host"}}`
-	doers.iam.answer.body = "<GetRoleResponse/>"
+	// Each of the role's follow-ups gets this answer too, which lists
+	// nothing, so none asks for a policy by name.
+	doers.iam.answer.body = iamRoleBody("web")
 	readSet := []AWSReadEntry{
 		readEntry("ec2", "query", "DescribeSecurityGroups", `{"Filter.1.Name": "vpc-id", "Filter.1.Value.1": "vpc-0123456789abcdef0", "GroupName.1": "web sg+1"}`),
 		readEntry("ec2", "query", "DescribeImages", `{"Owner.1": "amazon", "Filter.1.Name": "name", "Filter.1.Value.1": "al2023-ami-*"}`),
@@ -168,7 +170,7 @@ func TestReadAWSAccountReplaysEachEntryVerbatimAndSigned(t *testing.T) {
 	assert.Equal(t, "AmazonSSM.GetParameter", doers.ssm.sent[0].header.Get("X-Amz-Target"))
 	assertSignedFor(t, doers.ssm.sent[0], "eu-west-1", "ssm")
 
-	require.Len(t, doers.iam.sent, 1)
+	require.NotEmpty(t, doers.iam.sent)
 	assert.Equal(t, awsReadIAMHost, doers.iam.sent[0].host)
 	assert.Equal(t, url.Values{"Action": {"GetRole"}, "Version": {"2010-05-08"}, "RoleName": {"web"}}, doers.iam.sent[0].form(t))
 	assertSignedFor(t, doers.iam.sent[0], "us-east-1", "iam")
@@ -176,8 +178,8 @@ func TestReadAWSAccountReplaysEachEntryVerbatimAndSigned(t *testing.T) {
 	require.Len(t, doers.sts.sent, 1)
 	assertSignedFor(t, doers.sts.sent[0], "eu-west-1", "sts")
 
-	require.Len(t, read.Exchanges, len(readSet))
-	for i, exchange := range read.Exchanges {
+	require.Len(t, read.Exchanges, len(readSet)+len(iamRoleFollowUps))
+	for i, exchange := range read.Exchanges[:len(readSet)] {
 		assert.Equal(t, readSet[i], exchange.AWSReadEntry, "exchange %d holds its entry verbatim", i)
 		assert.Equal(t, http.StatusOK, exchange.Status)
 	}
@@ -396,7 +398,7 @@ func TestReadAWSAccountCountsEveryCall(t *testing.T) {
 	doers.ec2.answers["DescribeVpcs"] = awsCannedAnswer{status: http.StatusOK, body: describeVpcsXMLBody}
 	doers.ec2.answers["DescribeSubnets"] = awsCannedAnswer{status: http.StatusOK, body: "<DescribeSubnetsResponse/>"}
 	doers.ssm.answer.body = `{"Parameter":{"Name":"/a"}}`
-	doers.iam.answer.body = "<GetRoleResponse/>"
+	doers.iam.answer.body = iamRoleBody("web")
 	in := awsReadTestInput(doers.doer(),
 		readEntry("ec2", "query", "DescribeVpcs", `{}`),
 		readEntry("ec2", "query", "DescribeSubnets", `{"Filter.1.Name":"vpc-id","Filter.1.Value.1":"vpc-0123456789abcdef0"}`),
@@ -410,7 +412,7 @@ func TestReadAWSAccountCountsEveryCall(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, doers.sent(), read.Calls)
-	assert.Equal(t, 1+len(AWSReaderDryRunActions)+len(in.ReadSet), read.Calls, "identity, preflight and read set")
+	assert.Equal(t, 1+len(AWSReaderDryRunActions)+len(in.ReadSet)+len(iamRoleFollowUps), read.Calls, "identity, preflight, read set and the role's follow-ups")
 }
 
 func TestReadAWSAccountTimesTheReadOnItsClock(t *testing.T) {
