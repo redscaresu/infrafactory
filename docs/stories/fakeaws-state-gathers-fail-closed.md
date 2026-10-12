@@ -2,8 +2,8 @@
 kind: code
 repo: fakeaws
 status: blocked
-blocked_by: [fakeaws-ami-fixtures-suppressed-when-loaded]
-depends_on: [fakeaws-ami-fixtures-suppressed-when-loaded]
+blocked_by: [fakeaws-identity-sweep-and-docs]
+depends_on: [fakeaws-ami-fixtures-suppressed-when-loaded, fakeaws-identity-sweep-and-docs]
 touches: [handlers/admin.go, handlers/ec2.go, handlers/iam.go, handlers/ssm.go, handlers/s3.go, handlers/eks.go, handlers/rds.go, handlers/dynamodb.go, handlers/sqs.go, handlers/secretsmanager.go, handlers/kms.go, handlers/route53.go, handlers/admin_test.go]
 risk: high
 ---
