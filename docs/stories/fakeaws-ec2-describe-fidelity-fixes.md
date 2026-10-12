@@ -2,7 +2,7 @@
 kind: code
 repo: fakeaws
 status: blocked
-blocked_by: [fakeaws-describe-availability-zones]
+blocked_by: [fakeaws-subnet-overlap-refused]
 depends_on: [fakeaws-filters-instances-enis-addresses-keys, fakeaws-images-owner-name-filters, fakeaws-describe-availability-zones]
 touches: [handlers/ec2.go, handlers/ec2_test.go, repository/ec2.go, AGENTS.md, CHANGELOG.md]
 risk: high
