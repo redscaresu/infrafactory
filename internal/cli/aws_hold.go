@@ -51,6 +51,48 @@ func refuseWhileHeld(op string, runtime *CommandRuntime, sc scenario.Scenario) e
 		op, sc.Name, found, reapCommand(runtime.ConfigPath, runtime.scenarioPath))}
 }
 
+// holdRefusal refuses test's --hold, as a usage error before the AMI
+// resolve or any AWS request, when it cannot run as asked: it holds
+// aws-web-live on Layer 3 only, and a failed hold must destroy.
+func holdRefusal(runtime *CommandRuntime, sc scenario.Scenario, noDestroy bool) error {
+	layers := runtime.Config.Validation.Layers
+	var refusal string
+	switch {
+	case layer3TeardownCloud(sc.Cloud) != layer3AWS || sc.Name != awsHoldScenario:
+		refusal = fmt.Sprintf("--hold holds the aws scenario %s only, not %s on %s", awsHoldScenario, sc.Name, sc.Cloud)
+	case !layers.MockDeploy.Enabled || !layers.SandboxDeploy.Enabled:
+		// test runs Layer 3 only after Layer 2: without it, nothing is held.
+		refusal = "--hold keeps a Layer 3 stack, which test applies only with validation.layers.mock_deploy and validation.layers.sandbox_deploy on"
+	case !layers.Destruction.Enabled:
+		refusal = "--hold destroys a stack it does not hold, and destruction (validation.layers.destruction) is disabled"
+	case noDestroy:
+		refusal = "hold and no-destroy are mutually exclusive: --hold destroys a stack it does not hold, --no-destroy destroys nothing"
+	default:
+		return nil
+	}
+	return &CLIError{Op: "test", Code: errorCodeUsage, Err: errors.New(refusal)}
+}
+
+// holdCopy writes a held test's copy. A var only so a test can interrupt
+// the run from inside the write.
+var holdCopy = writeNewHoldCopy
+
+// writeNewHoldCopy writes the copy from the state with release's helpers:
+// private dirs, a 0600 file read back. Anything already at the copy path
+// refuses and is left as it is: the guard refuses a test while one is
+// there, so one that appeared since is not this run's.
+func writeNewHoldCopy(copyPath, statePath string) error {
+	if err := privateHoldDirs(filepath.Dir(copyPath)); err != nil {
+		return err
+	}
+	if _, err := os.Lstat(copyPath); err == nil {
+		return fmt.Errorf("something is already at %s, not this run's; it is left as it is", copyPath)
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	return writeHoldCopy(copyPath, statePath)
+}
+
 // prepareHoldRelease is reap's --release-hold, all of it local work before
 // any AWS request: the usage refusals, then the copy settled with the
 // output dir's state. Every refusal of an aws scenario names the take-over

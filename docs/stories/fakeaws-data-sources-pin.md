@@ -38,6 +38,7 @@ One infrafactory PR, landing after both sibling pins, so the shared FAKEAWS_SHA 
 - If docs/operations.md names a status for filter-refused, make it 501.
 
 **Done when:**
+- Carried from fakeaws#63: docs/operations.md (around line 558) no longer says filter-refused answers "EC2 409 or 400"; after #63 every EC2 site answers 501.
 - `git -C ../fakeaws merge-base --is-ancestor <sha> <FAKEAWS_SHA>` exits 0 for each of the nine
   fakeaws story merges, and for the FAKEAWS_SHA that infrafactory-fakeaws-identity-pin and
   fakeaws-rehearsal-instance-pin-and-docs each set.

@@ -1,7 +1,6 @@
 ---
 kind: code
-status: blocked
-blocked_by: [prod-read-seam-read-core]
+status: ready
 epic: prod-read-seam
 depends_on: [prod-read-seam-read-core]
 touches: [internal/harness/aws_reader_scrub.go, internal/harness/aws_reader_scrub_test.go, internal/harness/testdata/aws_reader_scrub/, cmd/aws-read-scrub/main.go]

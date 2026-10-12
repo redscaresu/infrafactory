@@ -1,8 +1,7 @@
 ---
 kind: code
 repo: infrafactory
-status: blocked
-blocked_by: [fakeaws-ec2-filters-never-ignored]
+status: ready
 epic: fakeaws-data-sources
 depends_on: [fakeaws-ec2-filters-never-ignored]
 touches: [internal/generator/pitfalls_learn.go, internal/generator/pitfalls_learn_test.go]
@@ -33,6 +32,7 @@ and internal/cli/), and it applies the list's own rule ('Add more here as new mo
 surface'), so no ADR trailer.
 
 **Done when:**
+- Carried from fakeaws#63: one test uses a create-path refusal message verbatim (for example CreateVpc without CidrBlock, answering 501 `not modelled by fakeaws`), as well as a Describe one.
 - A test feeds the verbatim refusal detail through the learner: it is classed mock-actionable with
   signal `not modelled by fakeaws`, a docs/mock-gaps.md entry is produced, and no pitfall is written.
 - A verbatim 409 detail holding `not supported by fakeaws` (from the current pin) is routed the

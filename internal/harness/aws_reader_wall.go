@@ -76,15 +76,24 @@ func (w *AWSReadWall) Calls() int {
 // Do refuses req, with nothing sent, unless the wall admits it; then it
 // counts it and sends it through the inner doer.
 func (w *AWSReadWall) Do(req *http.Request) (*http.Response, error) {
+	if err := w.check(req); err != nil {
+		return nil, err
+	}
+	w.calls.Add(1)
+	return w.inner.Do(req)
+}
+
+// check is Do's admission, without sending or counting: nil when the wall
+// admits req. It puts req's body back byte-identical.
+func (w *AWSReadWall) check(req *http.Request) error {
 	entry, dryRun, err := w.entryOf(req)
 	if err == nil {
 		err = w.admit(entry.Action, dryRun)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("%w: %s request: %w", ErrAWSReadWallRefused, w.service, err)
+		return fmt.Errorf("%w: %s request: %w", ErrAWSReadWallRefused, w.service, err)
 	}
-	w.calls.Add(1)
-	return w.inner.Do(req)
+	return nil
 }
 
 func (w *AWSReadWall) admit(action string, dryRun bool) error {
