@@ -1,10 +1,13 @@
 package harness
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"encoding/xml"
+	"errors"
 	"fmt"
+	"io"
 	"slices"
 	"strings"
 )
@@ -18,10 +21,10 @@ var (
 	awsReadInstanceAttributes = []string{"instanceInitiatedShutdownBehavior", "disableApiStop", "disableApiTermination", "userData"}
 )
 
-// readEC2 reads what the replay touched on EC2: for each VPC id any
-// replayed EC2 answer names, in order of first mention, its surroundings
-// and follow-ups (readEC2VPC), then the AZs once, unless the replay read
-// them unfiltered. Each request is an ADR-0041 entry sent through
+// readEC2 reads what the replay touched on EC2: for each VPC a replayed
+// EC2 answer lists a resource in (awsListedVPCIDs), in order of first
+// mention, its surroundings and follow-ups (readEC2VPC), then the AZs
+// once, unless the replay read them unfiltered. Each request is an ADR-0041 entry sent through
 // r.pages, so it is walled, signed, paged, throttled and recorded as a
 // replayed entry is. A replay that touched no VPC adds nothing.
 func (r *awsReplay) readEC2(ctx context.Context, replayed []AWSReadExchange) ([]AWSReadExchange, error) {
@@ -30,11 +33,11 @@ func (r *awsReplay) readEC2(ctx context.Context, replayed []AWSReadExchange) ([]
 		if exchange.Service != "ec2" || !awsAnswerOK(exchange.Status) {
 			continue
 		}
-		fields, err := awsXMLFields([]byte(exchange.Body), "vpcId")
+		listed, err := awsListedVPCIDs([]byte(exchange.Body))
 		if err != nil {
 			return nil, fmt.Errorf("finding the VPCs %s %s touched: %w", exchange.Action, exchange.Params, err)
 		}
-		vpcs = awsAppendNew(vpcs, fields["vpcId"]...)
+		vpcs = awsAppendNew(vpcs, listed...)
 	}
 	if len(vpcs) == 0 {
 		return nil, nil
@@ -52,6 +55,52 @@ func (r *awsReplay) readEC2(ctx context.Context, replayed []AWSReadExchange) ([]
 	}
 	zones, err := r.followUp(ctx, "DescribeAvailabilityZones", map[string]string{})
 	return append(out, zones...), err
+}
+
+// awsListedVPCIDs is the VPC of each resource an EC2 answer lists, read
+// only from the resource's own field: root>list>item>vpcId, and an
+// instance's root>reservationSet>item>instancesSet>item>vpcId. Any other
+// vpcId (a rule's peered group, a gateway's attachment) names a VPC the
+// resource refers to, not one the read touched, and is dropped.
+func awsListedVPCIDs(body []byte) ([]string, error) {
+	dec := xml.NewDecoder(bytes.NewReader(body))
+	var path, out []string
+	for {
+		tok, err := dec.Token()
+		if errors.Is(err, io.EOF) {
+			return out, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			path = append(path, t.Name.Local)
+			if !awsOwnVPCIDPath(path) {
+				continue
+			}
+			var id string
+			if err := dec.DecodeElement(&id, &t); err != nil {
+				return nil, err
+			}
+			path = path[:len(path)-1]
+			out = awsAppendNew(out, id)
+		case xml.EndElement:
+			path = path[:len(path)-1]
+		}
+	}
+}
+
+// awsOwnVPCIDPath reports whether path, from the answer's root, is a
+// listed resource's own vpcId.
+func awsOwnVPCIDPath(path []string) bool {
+	switch {
+	case len(path) == 4:
+		return path[2] == "item" && path[3] == "vpcId"
+	case len(path) == 6:
+		return slices.Equal(path[1:], []string{"reservationSet", "item", "instancesSet", "item", "vpcId"})
+	}
+	return false
 }
 
 // readEC2VPC reads vpc's surroundings, each list filtered to vpc where

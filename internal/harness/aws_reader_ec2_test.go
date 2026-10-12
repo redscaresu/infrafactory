@@ -313,3 +313,55 @@ func TestReadAWSAccountLooksUpAnSGWithinAVPC(t *testing.T) {
 	assert.Contains(t, read.Exchanges[0].Body, "<groupId>sg-a</groupId>")
 	assert.NotContains(t, read.Exchanges[0].Body, "sg-b", "the same-named SG in another VPC")
 }
+
+// A replayed answer's own resource names vpc-a; its ingress and egress
+// rules name a peered group in vpc-c, which the read did not touch.
+func TestReadAWSAccountTakesOnlyAListedResourcesOwnVPC(t *testing.T) {
+	t.Parallel()
+
+	const peer = `<groups><item><userId>111122223333</userId><groupId>sg-peer</groupId><vpcId>vpc-c</vpcId>` +
+		`<vpcPeeringConnectionId>pcx-1</vpcPeeringConnectionId></item></groups>`
+	const replayed = `<DescribeSecurityGroupsResponse><securityGroupInfo><item><groupId>sg-a</groupId><groupName>web</groupName><vpcId>vpc-a</vpcId>` +
+		`<ipPermissions><item>` + peer + `</item></ipPermissions><ipPermissionsEgress><item>` + peer + `</item></ipPermissionsEgress>` +
+		`</item></securityGroupInfo></DescribeSecurityGroupsResponse>`
+	fake := &ec2RecordingFake{answer: func(form url.Values) (awsCannedAnswer, bool) {
+		if form.Get("Action") == "DescribeSecurityGroups" && form.Get("Filter.1.Name") == "group-name" {
+			return awsCannedAnswer{body: replayed}, true
+		}
+		return awsCannedAnswer{}, false
+	}}
+
+	_, err := readEC2Fake(t, fake, readEntry("ec2", "query", "DescribeSecurityGroups", `{"Filter.1.Name":"group-name","Filter.1.Value.1":"web"}`))
+	require.NoError(t, err)
+
+	assert.Contains(t, fake.forms, ec2Form("DescribeSubnets", vpcFilter("vpc-id", "vpc-a")), "the listed SG's own VPC is read")
+	for _, form := range fake.forms[1:] {
+		assert.NotContains(t, form.Encode(), "vpc-c", "the peered VPC was read: %s", form.Get("Action"))
+	}
+}
+
+func TestAWSListedVPCIDs(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name, body string
+		want       []string
+	}{
+		{"each listed VPC", `<DescribeVpcsResponse><vpcSet><item><vpcId>vpc-a</vpcId></item><item><vpcId>vpc-b</vpcId></item></vpcSet></DescribeVpcsResponse>`,
+			[]string{"vpc-a", "vpc-b"}},
+		{"an instance's own VPC, not its interface's", `<DescribeInstancesResponse><reservationSet><item><instancesSet><item><vpcId>vpc-a</vpcId>` +
+			`<networkInterfaceSet><item><vpcId>vpc-c</vpcId></item></networkInterfaceSet></item></instancesSet></item></reservationSet></DescribeInstancesResponse>`,
+			[]string{"vpc-a"}},
+		{"not a gateway's attachment", `<DescribeInternetGatewaysResponse><internetGatewaySet><item><attachmentSet><item><vpcId>vpc-c</vpcId></item></attachmentSet></item></internetGatewaySet></DescribeInternetGatewaysResponse>`,
+			nil},
+		{"not a VPC attribute answer's root field", `<DescribeVpcAttributeResponse><vpcId>vpc-c</vpcId></DescribeVpcAttributeResponse>`, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := awsListedVPCIDs([]byte(tc.body))
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
