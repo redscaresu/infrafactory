@@ -1,0 +1,65 @@
+{
+  "account": "246813579024",
+  "region": "eu-west-1",
+  "timestamp": "2026-10-11T09:30:00Z",
+  "duration_ms": 842,
+  "calls": 10,
+  "exchanges": [
+    {
+      "service": "sts",
+      "protocol": "query",
+      "action": "GetCallerIdentity",
+      "params": {},
+      "status": 200,
+      "body": "<GetCallerIdentityResponse xmlns=\"https://sts.amazonaws.com/doc/2011-06-15/\">\n  <GetCallerIdentityResult>\n    <Arn>arn:aws:iam::246813579024:user/infrafactory-reader</Arn>\n    <UserId>AIDATPLANTEDUSERID001</UserId>\n    <Account>246813579024</Account>\n  </GetCallerIdentityResult>\n  <ResponseMetadata>\n    <RequestId>c2d1f0a4-5b6e-4f7a-8b9c-0d1e2f3a4b5c</RequestId>\n  </ResponseMetadata>\n</GetCallerIdentityResponse>\n"
+    },
+    {
+      "service": "ec2",
+      "protocol": "query",
+      "action": "DescribeSecurityGroups",
+      "params": {"Filter.1.Name": "owner-id", "Filter.1.Value.1": "246813579024", "Filter.2.Name": "vpc-id", "Filter.2.Value.1": "vpc-0a1b2c3d4e5f60718"},
+      "status": 200,
+      "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<DescribeSecurityGroupsResponse xmlns=\"http://ec2.amazonaws.com/doc/2016-11-15/\">\n    <requestId>59dbff89-35bd-4eac-99ed-504863521975</requestId>\n    <securityGroupInfo>\n        <item>\n            <ownerId>246813579024</ownerId>\n            <groupId>sg-0f1e2d3c4b5a69788</groupId>\n            <groupName>web</groupName>\n            <groupDescription>web ingress</groupDescription>\n            <vpcId>vpc-0a1b2c3d4e5f60718</vpcId>\n            <securityGroupArn>arn:aws:ec2:eu-west-1:246813579024:security-group/sg-0f1e2d3c4b5a69788</securityGroupArn>\n            <ipPermissions>\n                <item>\n                    <ipProtocol>tcp</ipProtocol>\n                    <fromPort>80</fromPort>\n                    <toPort>80</toPort>\n                    <groups/>\n                    <ipRanges>\n                        <item>\n                            <cidrIp>0.0.0.0/0</cidrIp>\n                        </item>\n                    </ipRanges>\n                    <ipv6Ranges/>\n                    <prefixListIds/>\n                </item>\n            </ipPermissions>\n            <ipPermissionsEgress/>\n            <tagSet>\n                <item>\n                    <key>Name</key>\n                    <value>web</value>\n                </item>\n            </tagSet>\n        </item>\n    </securityGroupInfo>\n</DescribeSecurityGroupsResponse>"
+    },
+    {
+      "service": "ec2",
+      "protocol": "query",
+      "action": "DescribeInstanceAttribute",
+      "params": {"InstanceId": "i-0123abcd4567ef890", "Attribute": "userData"},
+      "status": 200,
+      "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<DescribeInstanceAttributeResponse xmlns=\"http://ec2.amazonaws.com/doc/2016-11-15/\">\n    <requestId>8d3b5c1e-2f4a-4b6c-9d8e-7f6a5b4c3d2e</requestId>\n    <instanceId>i-0123abcd4567ef890</instanceId>\n    <userData>\n        <value>IyEvYmluL2Jhc2gKZWNobyBwbGFudGVkLXNlY3JldAo=</value>\n    </userData>\n</DescribeInstanceAttributeResponse>"
+    },
+    {
+      "service": "ssm",
+      "protocol": "json",
+      "action": "GetParameter",
+      "params": {"Name": "/app/db/password", "WithDecryption": true},
+      "status": 200,
+      "body": "{\"Parameter\":{\"ARN\":\"arn:aws:ssm:eu-west-1:246813579024:parameter/app/db/password\",\"DataType\":\"text\",\"LastModifiedDate\":1.760175002193E9,\"Name\":\"/app/db/password\",\"Selector\":null,\"SourceResult\":null,\"Type\":\"SecureString\",\"Value\":\"planted-db-password\",\"Version\":3}}"
+    },
+    {
+      "service": "ssm",
+      "protocol": "json",
+      "action": "GetParameter",
+      "params": {"Name": "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64"},
+      "status": 200,
+      "body": "{\"Parameter\":{\"ARN\":\"arn:aws:ssm:eu-west-1::parameter/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64\",\"DataType\":\"aws:ec2:image\",\"LastModifiedDate\":1.759912345678E9,\"Name\":\"/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64\",\"Selector\":null,\"SourceResult\":null,\"Type\":\"String\",\"Value\":\"ami-0c1d2e3f4a5b6c7d8\",\"Version\":112}}"
+    },
+    {
+      "service": "iam",
+      "protocol": "query",
+      "action": "GetRolePolicy",
+      "params": {"RoleName": "web", "PolicyName": "read-config"},
+      "status": 200,
+      "body": "<GetRolePolicyResponse xmlns=\"https://iam.amazonaws.com/doc/2010-05-08/\">\n  <GetRolePolicyResult>\n    <PolicyName>read-config</PolicyName>\n    <RoleName>web</RoleName>\n    <PolicyDocument>%7B%22Version%22%3A%222012-10-17%22%2C%22Statement%22%3A%5B%7B%22Effect%22%3A%22Allow%22%2C%22Action%22%3A%22ssm%3AGetParameter%22%2C%22Resource%22%3A%22arn%3Aaws%3Assm%3Aeu-west-1%3A246813579024%3Aparameter%2Fapp%2F%2A%22%7D%5D%7D</PolicyDocument>\n  </GetRolePolicyResult>\n  <ResponseMetadata>\n    <RequestId>4f1c2b3a-6d5e-4a7b-8c9d-0e1f2a3b4c5d</RequestId>\n  </ResponseMetadata>\n</GetRolePolicyResponse>\n"
+    },
+    {
+      "service": "ec2",
+      "protocol": "query",
+      "action": "DescribeVpcs",
+      "params": {"VpcId.1": "vpc-0deadbeef00000001"},
+      "status": 400,
+      "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Response><Errors><Error><Code>InvalidVpcID.NotFound</Code><Message>The vpc ID 'vpc-0deadbeef00000001' does not exist</Message></Error></Errors><RequestID>b7e9d2c4-1a3f-4e5d-9c8b-7a6f5e4d3c2b</RequestID></Response>"
+    }
+  ]
+}
