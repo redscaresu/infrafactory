@@ -436,6 +436,22 @@ reads the file itself (`AWSReaderConfig`); nothing is sourced into the shell.
   secret or token never has that shape, so a wrapped token or a reversed `<secret>=KEY` line is
   named by its line number alone; a key name glued to a key id (`AWS_AKIA...=x`) would be named.
 
+### The reader policy
+
+The reader key belongs to a separate read-only IAM user, whose one policy is
+`docs/layer3/aws/reader-policy.json`; `internal/harness/aws_reader_policy_test.go` holds its
+actions to exactly the reader table's rows (ADR-0023, amendment of 2026-10-12). Fill `REGION` and
+`ACCOUNT_ID` as Scope setup step 3 does, with the account being read, and attach nothing else.
+
+The key file is present only for its read step. The IAM user and its key stay between rehearsals;
+the user supplies the key file for each read; after each read, once the scrub has produced its
+fixtures, the lead deletes the local key file, the raw recording and the pre-destroy state. Only the
+scrubbed fixtures are committed.
+
+In the Layer 3 account the SCP (`docs/layer3/aws/scp.json`, `DenyEveryServiceButEC2SSMSTS`) denies
+every `iam:*` action to everyone but the admin role, so the policy's `iam:` rows are unreachable
+there: the IAM readers are proved against fakeaws only.
+
 ## Sibling mocks
 
 Three first-party HTTP-level mocks + one third-party backend live alongside infrafactory:
