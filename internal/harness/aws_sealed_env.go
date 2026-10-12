@@ -3,7 +3,6 @@ package harness
 import (
 	"fmt"
 	"regexp"
-	"strings"
 )
 
 // The shared credentials and config files both layers' env points the AWS
@@ -52,43 +51,25 @@ func AWSSealedEnv(credFile, region string) (map[string]string, error) {
 	}, nil
 }
 
-// readAWSCredentialFile reads the file through readOwnerOnlyFile. It
-// never puts a line or value in an error, nor a key awsReaderNameableKey
-// does not match: any of them could be the secret key.
+// readAWSCredentialFile reads layer3-aws.env through readOwnerOnlyFile
+// and parseCredentialLines: exactly the key id and the secret, each with
+// a value.
 func readAWSCredentialFile(path string) (map[string]string, error) {
 	data, err := readOwnerOnlyFile(path)
 	if err != nil {
 		return nil, err
 	}
-
-	creds := map[string]string{"AWS_ACCESS_KEY_ID": "", "AWS_SECRET_ACCESS_KEY": ""}
-	seen := map[string]bool{}
-	for i, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		key, value, ok := strings.Cut(line, "=")
-		if !ok {
-			return nil, fmt.Errorf("credential file %s line %d is not KEY=VALUE", path, i+1)
-		}
-		if _, known := creds[key]; !known {
-			named := "an unrecognised key"
-			if awsReaderNameableKey.MatchString(key) {
-				named = fmt.Sprintf("unknown key %q", key)
-			}
-			return nil, fmt.Errorf("credential file %s line %d has %s; only AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are allowed", path, i+1, named)
-		}
-		if seen[key] {
-			return nil, fmt.Errorf("credential file %s sets %s twice", path, key)
-		}
-		seen[key] = true
-		creds[key] = value
+	keys := []string{awsReaderKeyID, awsReaderSecret}
+	lines, err := parseCredentialLines(path, data, keys)
+	if err != nil {
+		return nil, err
 	}
-	for _, key := range []string{"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"} {
-		if creds[key] == "" {
+	creds := map[string]string{}
+	for _, key := range keys {
+		if lines[key].value == "" {
 			return nil, fmt.Errorf("credential file %s has no value for %s", path, key)
 		}
+		creds[key] = lines[key].value
 	}
 	return creds, nil
 }

@@ -131,7 +131,8 @@ func TestAWSSealedEnvAcceptsOwnerOnlyFileAndRealRegions(t *testing.T) {
 }
 
 // A line the reader cannot parse is refused without any of it in the
-// error: its left side may be a piece of a secret or key id.
+// error: its left side may be a piece of a secret or key id, or a key
+// name with the key id glued on.
 func TestAWSSealedEnvRefusesAnUnparsableLineWithoutEchoingIt(t *testing.T) {
 	t.Parallel()
 
@@ -142,6 +143,8 @@ func TestAWSSealedEnvRefusesAnUnparsableLineWithoutEchoingIt(t *testing.T) {
 		{"wrapped secret line", valid + readerWrappedTail + "\n", "line 3 has an unrecognised key"},
 		{"reversed secret line", "AWS_ACCESS_KEY_ID=" + testAWSKeyID + "\n" + readerReversed + "=AWS_SECRET_ACCESS_KEY\n", "line 2 has an unrecognised key"},
 		{"reversed key id line", readerReversedID + "=AWS_ACCESS_KEY_ID\n", "line 1 has an unrecognised key"},
+		{"key glued to its value", "AWS_ACCESS_KEY_ID" + readerGluedID + "=x\n", "line 1 has an unrecognised key"},
+		{"spaces around =", "AWS_ACCESS_KEY_ID=" + testAWSKeyID + "\nAWS_SECRET_ACCESS_KEY = " + readerSpaced + "\n", "line 2: no spaces around '='"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -190,9 +193,9 @@ func TestAWSSealedEnvReadsTheFileItChecked(t *testing.T) {
 	swapped := writeAWSCredFile(t, "AWS_ACCESS_KEY_ID=AKIASWAPPEDIN0000001\nAWS_SECRET_ACCESS_KEY=swapped-in-after-the-check\n", 0o644)
 
 	checked := false
-	prev := ownerOnlyFileChecked
-	t.Cleanup(func() { ownerOnlyFileChecked = prev })
-	ownerOnlyFileChecked = func() {
+	prev := ownerOnlyFileCheckedForTest
+	t.Cleanup(func() { ownerOnlyFileCheckedForTest = prev })
+	ownerOnlyFileCheckedForTest = func() {
 		checked = true
 		require.NoError(t, os.Rename(swapped, path))
 	}
