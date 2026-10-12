@@ -35,11 +35,6 @@ const (
 	step0AMIParameter
 )
 
-// fakeawsStep0PinRefusedRows are the EC2 follow-up rows fakeaws at
-// FAKEAWS_SHA refuses in TestAWSReadStep0AgainstFakeaws (the rows are
-// explained at fakeawsEC2PinRefusedRows).
-var fakeawsStep0PinRefusedRows = []string{"DescribeSecurityGroupRules group-id"}
-
 // step0AbsentGroupName is the SG name step0AbsentGroup looks up in the
 // tagged VPC, where it does not exist.
 const step0AbsentGroupName = "infrafactory-absent"

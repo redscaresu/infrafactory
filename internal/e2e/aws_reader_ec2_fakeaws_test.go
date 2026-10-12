@@ -28,9 +28,9 @@ import (
 )
 
 // The EC2 follow-up rows fakeaws at FAKEAWS_SHA does not answer as EC2
-// does, each as "Action" or "Action filter-name": fakeawsEC2PinRefusedRows
-// it refuses in TestAWSReadEC2AgainstFakeaws (fakeawsStep0PinRefusedRows
-// in TestAWSReadStep0AgainstFakeaws, which runs no instance),
+// does, each as "Action" or "Action filter-name": fakeawsStep0PinRefusedRows
+// it refuses in TestAWSReadStep0AgainstFakeaws, fakeawsEC2PinRefusedRows
+// in TestAWSReadEC2AgainstFakeaws, which also runs instances, and
 // fakeawsPinUnfilteredRows it answers with every VPC's items, ignoring
 // the filter. At the pin, the SGs, ENIs and instances are answered from
 // rows, so the rows they feed are sent: DescribeSecurityGroupRules (by
@@ -41,8 +41,9 @@ import (
 // and answered. DescribeKeyPairs by the instances' key-name is never
 // sent, since fakeaws's DescribeInstances omits the key name.
 var (
-	fakeawsEC2PinRefusedRows = []string{"DescribeSecurityGroupRules group-id", "DescribeVolumes attachment.instance-id"}
-	fakeawsPinUnfilteredRows = []string(nil)
+	fakeawsStep0PinRefusedRows = []string{"DescribeSecurityGroupRules group-id"}
+	fakeawsEC2PinRefusedRows   = append(slices.Clone(fakeawsStep0PinRefusedRows), "DescribeVolumes attachment.instance-id")
+	fakeawsPinUnfilteredRows   = []string(nil)
 )
 
 var answerVPCIDs = regexp.MustCompile(`<vpcId>([^<]*)</vpcId>`)
