@@ -28,17 +28,22 @@ import (
 )
 
 // The EC2 follow-up rows fakeaws at FAKEAWS_SHA does not answer as EC2
-// does, each as "Action" or "Action filter-name": fakeawsPinRefusedRows
-// it refuses, fakeawsPinUnfilteredRows it answers with every VPC's items,
-// ignoring the filter. At the pin, the SGs, ENIs and instances are
-// answered from rows, so the rows they feed are sent: DescribeSecurityGroupRules
-// (by the SGs' group-id) is sent and refused (not modelled; fakeaws-loader
-// owns it), and DescribeAddresses (by the interfaces' network-interface-id)
-// is sent and answered. DescribeKeyPairs by the instances' key-name is never
+// does, each as "Action" or "Action filter-name": fakeawsStep0PinRefusedRows
+// it refuses in TestAWSReadStep0AgainstFakeaws, fakeawsEC2PinRefusedRows
+// in TestAWSReadEC2AgainstFakeaws, which also runs instances, and
+// fakeawsPinUnfilteredRows it answers with every VPC's items, ignoring
+// the filter. At the pin, the SGs, ENIs and instances are answered from
+// rows, so the rows they feed are sent: DescribeSecurityGroupRules (by
+// the SGs' group-id) is sent and refused (not modelled; fakeaws-loader
+// owns it), DescribeVolumes (by the instances' attachment.instance-id) is
+// sent and refused (fakeaws answers only an unfiltered DescribeVolumes),
+// and DescribeAddresses (by the interfaces' network-interface-id) is sent
+// and answered. DescribeKeyPairs by the instances' key-name is never
 // sent, since fakeaws's DescribeInstances omits the key name.
 var (
-	fakeawsPinRefusedRows    = []string{"DescribeSecurityGroupRules group-id"}
-	fakeawsPinUnfilteredRows = []string(nil)
+	fakeawsStep0PinRefusedRows = []string{"DescribeSecurityGroupRules group-id"}
+	fakeawsEC2PinRefusedRows   = append(slices.Clone(fakeawsStep0PinRefusedRows), "DescribeVolumes attachment.instance-id")
+	fakeawsPinUnfilteredRows   = []string(nil)
 )
 
 var answerVPCIDs = regexp.MustCompile(`<vpcId>([^<]*)</vpcId>`)
@@ -97,7 +102,7 @@ func (d *pinGapDoer) Do(req *http.Request) (*http.Response, error) {
 // TestAWSReadEC2AgainstFakeaws reads two of three seeded VPCs through
 // the walls against fakeaws EC2, so the surroundings and follow-ups
 // (aws_reader_ec2.go) are checked against fakeaws's own answers. The
-// rows fakeaws refuses at the pin are exactly fakeawsPinRefusedRows. The
+// rows fakeaws refuses at the pin are exactly fakeawsEC2PinRefusedRows. The
 // required CI job runs it by name and fails if it does not report PASS.
 func TestAWSReadEC2AgainstFakeaws(t *testing.T) {
 	SkipUnlessEnabled(t)
@@ -139,7 +144,7 @@ func TestAWSReadEC2AgainstFakeaws(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	assert.ElementsMatch(t, fakeawsPinRefusedRows, slices.Collect(maps.Keys(doer.refused)), "the rows fakeaws refuses at the pin")
+	assert.ElementsMatch(t, fakeawsEC2PinRefusedRows, slices.Collect(maps.Keys(doer.refused)), "the rows fakeaws refuses at the pin")
 	assert.ElementsMatch(t, fakeawsPinUnfilteredRows, slices.Collect(maps.Keys(doer.unfiltered)), "the rows whose filter fakeaws ignores at the pin")
 
 	byRow := map[string][]harness.AWSReadExchange{}

@@ -106,8 +106,10 @@ func awsOwnVPCIDPath(path []string) bool {
 // readEC2VPC reads vpc's surroundings, each list filtered to vpc where
 // the API takes a vpc-id filter, else to the ids the VPC's own lists
 // name: SG rules by its SGs' group-id, addresses by its interfaces'
-// network-interface-id, key pairs by its instances' key-name. Then both
-// VPC attributes, and each instance's attributes.
+// network-interface-id, key pairs by its instances' key-name, volumes by
+// its instances' attachment.instance-id (aws_instance's read reads its
+// block devices' volumes). Then both VPC attributes, and each instance's
+// attributes.
 func (r *awsReplay) readEC2VPC(ctx context.Context, vpc string) ([]AWSReadExchange, error) {
 	var out []AWSReadExchange
 	read := func(action string, params map[string]string) ([]AWSReadExchange, error) {
@@ -170,6 +172,9 @@ func (r *awsReplay) readEC2VPC(ctx context.Context, vpc string) ([]AWSReadExchan
 		return out, err
 	}
 	if err := readBy("DescribeKeyPairs", "key-name", keyNames); err != nil {
+		return out, err
+	}
+	if err := readBy("DescribeVolumes", "attachment.instance-id", instanceIDs); err != nil {
 		return out, err
 	}
 	for _, attribute := range awsReadVPCAttributes {
