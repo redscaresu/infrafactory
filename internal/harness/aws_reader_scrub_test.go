@@ -122,6 +122,29 @@ func TestWriteScrubbedAWSReadMapsTheAccountAndPlacesThePlaceholders(t *testing.T
 	}
 }
 
+// A volume's KMS key ARN names the read's account; the scrub maps it,
+// as it maps the account everywhere.
+func TestWriteScrubbedAWSReadMapsTheAccountInAVolumesKMSKeyARN(t *testing.T) {
+	const kmsKey = "arn:aws:kms:eu-west-1:" + scrubTestAccount + ":key/1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
+	const volumes = `{
+      "service": "ec2",
+      "protocol": "query",
+      "action": "DescribeVolumes",
+      "params": {"Filter.1.Name": "attachment.instance-id", "Filter.1.Value.1": "i-0123abcd4567ef890"},
+      "status": 200,
+      "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<DescribeVolumesResponse xmlns=\"http://ec2.amazonaws.com/doc/2016-11-15/\"><volumeSet><item><volumeId>vol-0123abcd4567ef890</volumeId><size>8</size><availabilityZone>eu-west-1a</availabilityZone><status>in-use</status><attachmentSet><item><volumeId>vol-0123abcd4567ef890</volumeId><instanceId>i-0123abcd4567ef890</instanceId><device>/dev/xvda</device><status>attached</status><deleteOnTermination>true</deleteOnTermination></item></attachmentSet><encrypted>true</encrypted><kmsKeyId>` + kmsKey + `</kmsKeyId><volumeType>gp3</volumeType></item></volumeSet></DescribeVolumesResponse>"
+    },`
+	readPath, statePath, outDir := scrubFixtures(t, func(s string) string {
+		return strings.Replace(s, `"exchanges": [`, `"exchanges": [`+volumes, 1)
+	}, nil)
+	require.NoError(t, WriteScrubbedAWSRead(readPath, statePath, outDir))
+	read, err := os.ReadFile(filepath.Join(outDir, AWSScrubbedReadFile))
+	require.NoError(t, err)
+
+	assert.NotContains(t, string(read), scrubTestAccount)
+	assert.Contains(t, string(read), "<kmsKeyId>arn:aws:kms:eu-west-1:"+AWSScrubAccount+":key/1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d</kmsKeyId>")
+}
+
 // Every key of the input state survives, and only the account, the
 // principal's name and user id, the lineage, the user data, the sensitive
 // attributes and the sensitive output differ.

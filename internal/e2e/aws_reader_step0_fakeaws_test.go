@@ -35,6 +35,11 @@ const (
 	step0AMIParameter
 )
 
+// fakeawsStep0PinRefusedRows are the EC2 follow-up rows fakeaws at
+// FAKEAWS_SHA refuses in TestAWSReadStep0AgainstFakeaws (the rows are
+// explained at fakeawsEC2PinRefusedRows).
+var fakeawsStep0PinRefusedRows = []string{"DescribeSecurityGroupRules group-id"}
+
 // step0AbsentGroupName is the SG name step0AbsentGroup looks up in the
 // tagged VPC, where it does not exist.
 const step0AbsentGroupName = "infrafactory-absent"
@@ -100,7 +105,7 @@ func TestAWSStep0ReadSetHoldsNoIDs(t *testing.T) {
 // AWSRunIDTagKey (with its subnet and SG) and one untagged VPC beside it,
 // whose SGs include an untagged one named step0AbsentGroupName.
 // Each entry is answered at the pin, filters and zones included, and so
-// is each follow-up but DescribeSecurityGroupRules (fakeawsPinRefusedRows).
+// is each follow-up but DescribeSecurityGroupRules (fakeawsStep0PinRefusedRows).
 // The required CI job runs it by name and fails if it does not report PASS.
 func TestAWSReadStep0AgainstFakeaws(t *testing.T) {
 	SkipUnlessEnabled(t)
@@ -142,7 +147,7 @@ func TestAWSReadStep0AgainstFakeaws(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	assert.ElementsMatch(t, fakeawsPinRefusedRows, slices.Collect(maps.Keys(doer.refused)), "the rows fakeaws refuses at the pin")
+	assert.ElementsMatch(t, fakeawsStep0PinRefusedRows, slices.Collect(maps.Keys(doer.refused)), "the rows fakeaws refuses at the pin")
 	assert.ElementsMatch(t, fakeawsPinUnfilteredRows, slices.Collect(maps.Keys(doer.unfiltered)), "the rows whose filter fakeaws ignores at the pin")
 
 	// Each entry is one page, so the replay's exchanges come first, in order.

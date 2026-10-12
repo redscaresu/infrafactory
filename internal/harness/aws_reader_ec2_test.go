@@ -77,6 +77,7 @@ func ec2SurroundingsForms(vpc string) []url.Values {
 		ec2Form("DescribeAddresses", vpcFilter("network-interface-id", "eni-"+vpc)),
 		ec2Form("DescribeInstances", vpcFilter("vpc-id", vpc)),
 		ec2Form("DescribeKeyPairs", vpcFilter("key-name", "key-"+vpc)),
+		ec2Form("DescribeVolumes", vpcFilter("attachment.instance-id", "i-"+vpc)),
 		ec2Form("DescribeVpcAttribute", map[string]string{"VpcId": vpc, "Attribute": "enableDnsSupport"}),
 		ec2Form("DescribeVpcAttribute", map[string]string{"VpcId": vpc, "Attribute": "enableDnsHostnames"}),
 	}
@@ -158,6 +159,52 @@ func TestReadAWSAccountReadsEachTouchedVPCsSurroundings(t *testing.T) {
 		assert.Equal(t, readUserDataBody(instance), read.Exchanges[i].Body, "userData is recorded raw")
 	}
 	assert.Equal(t, 1+len(want), read.Calls, "identity and each EC2 request, once")
+}
+
+// A VPC's instances' volumes are read in one request, filtered to every
+// instance; a VPC with no instance reads none, since an empty filter
+// would read the whole region.
+func TestReadAWSAccountReadsAVPCsVolumesByItsInstances(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]struct {
+		instances string
+		want      []url.Values
+	}{
+		"two instances": {
+			instances: "<item><instanceId>i-1</instanceId></item><item><instanceId>i-2</instanceId></item>",
+			want: []url.Values{ec2Form("DescribeVolumes", map[string]string{
+				"Filter.1.Name": "attachment.instance-id", "Filter.1.Value.1": "i-1", "Filter.1.Value.2": "i-2",
+			})},
+		},
+		"no instance": {},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			fake := &ec2RecordingFake{answer: func(form url.Values) (awsCannedAnswer, bool) {
+				switch form.Get("Action") {
+				case "DescribeVpcs":
+					return awsCannedAnswer{body: `<DescribeVpcsResponse><vpcSet><item><vpcId>vpc-a</vpcId></item></vpcSet></DescribeVpcsResponse>`}, true
+				case "DescribeInstances":
+					return awsCannedAnswer{body: `<DescribeInstancesResponse><reservationSet><item><instancesSet>` + tc.instances +
+						`</instancesSet></item></reservationSet></DescribeInstancesResponse>`}, true
+				}
+				return awsCannedAnswer{}, false
+			}}
+
+			_, err := readEC2Fake(t, fake, readEntry("ec2", "query", "DescribeVpcs", `{}`))
+			require.NoError(t, err)
+
+			var volumes []url.Values
+			for _, form := range fake.forms {
+				if form.Get("Action") == "DescribeVolumes" {
+					volumes = append(volumes, form)
+				}
+			}
+			assert.Equal(t, tc.want, volumes)
+		})
+	}
 }
 
 func TestReadAWSAccountReadsTheAZsOnlyOnceWhenTheReplayReadThem(t *testing.T) {

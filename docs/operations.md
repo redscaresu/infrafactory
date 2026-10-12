@@ -507,6 +507,9 @@ halfway, run the block again without the commands that succeeded.
 After `reader-policy.json` changes (a story that adds a reader-table row), the attached policy
 still holds the old actions. Write the policy again and make it the default version. IAM keeps at most
 five versions: at five, first delete the oldest non-default one with `aws iam delete-policy-version`.
+A policy attached before 2026-10-12 lacks `ec2:DescribeVolumes`, which the read sends for each
+instance's volumes (aws_instance's read reads them), and refuses it: write it again with the block
+below.
 
 ```bash
 (set -eu; : "${REGION:?}" "${ACCOUNT_ID:?}" "${PROFILE:?}"
