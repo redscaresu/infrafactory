@@ -5,6 +5,7 @@ TestAWSPreflightAgainstFakeaws
 TestAWSReadAgainstFakeaws
 TestAWSReadEC2AgainstFakeaws
 TestAWSReadIAMAgainstFakeaws
+TestAWSReadStep0AgainstFakeaws
 TestAWSReapAgainstFakeaws
 TestAWSScopeClaimAgainstFakeaws
 TestAWSSweepAgainstFakeaws

@@ -1,0 +1,32 @@
+[
+  {
+    "service": "ec2",
+    "protocol": "query",
+    "action": "DescribeVpcs",
+    "params": {"Filter.1.Name": "tag-key", "Filter.1.Value.1": "infrafactory-run-id"}
+  },
+  {
+    "service": "ec2",
+    "protocol": "query",
+    "action": "DescribeAvailabilityZones",
+    "params": {}
+  },
+  {
+    "service": "ec2",
+    "protocol": "query",
+    "action": "DescribeSecurityGroups",
+    "params": {"Filter.1.Name": "tag-key", "Filter.1.Value.1": "infrafactory-run-id"}
+  },
+  {
+    "service": "ec2",
+    "protocol": "query",
+    "action": "DescribeSecurityGroups",
+    "params": {"Filter.1.Name": "group-name", "Filter.1.Value.1": "infrafactory-absent", "Filter.2.Name": "tag-key", "Filter.2.Value.1": "infrafactory-run-id"}
+  },
+  {
+    "service": "ssm",
+    "protocol": "json",
+    "action": "GetParameter",
+    "params": {"Name": "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64"}
+  }
+]
