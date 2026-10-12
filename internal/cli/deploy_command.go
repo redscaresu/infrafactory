@@ -524,14 +524,15 @@ func newDeploymentID(scenarioName string, now time.Time) string {
 	return fmt.Sprintf("%s-%s-%s", scenarioName, now.UTC().Format("20060102T150405Z"), randomIDSuffix())
 }
 
-// randomIDSuffix returns six hex characters. crypto/rand cannot fail in
-// practice, but a fallback keeps a deploy from dying on entropy: the
+// randomIDSuffix returns eight hex characters. At 32 bits, 200 ids in one
+// second collide about once in 200,000 runs; 24 bits flaked CI about once
+// in 800. crypto/rand cannot fail in practice, but a fallback keeps a deploy from dying on entropy: the
 // timestamp still separates ids in every realistic case, and
 // copyDeploySource is the guard that actually prevents state adoption.
 func randomIDSuffix() string {
-	buf := make([]byte, 3)
+	buf := make([]byte, 4)
 	if _, err := rand.Read(buf); err != nil {
-		return "000000"
+		return "00000000"
 	}
 	return hex.EncodeToString(buf)
 }
