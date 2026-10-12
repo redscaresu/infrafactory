@@ -67,6 +67,19 @@ func TestRehearsalGateModuleSources(t *testing.T) {
 			"elsewhere/main.tf": manifestOutput,
 		}, symlinks: map[string]string{work + "m": "elsewhere"},
 			want: []string{`main.tf:2: module.m.source: source "./m" resolves to `, ", outside the boundary "}},
+		// Tofu joins a source as written, so through ./link path.module/../..
+		// is <copy>/.., while the resolved deep/mod/../.. is <copy>.
+		{name: "a source that is a symlink", files: map[string]string{
+			work + "main.tf":          "module \"m\" {\n  source = \"./link\"\n}\n",
+			work + "deep/mod/main.tf": "output \"o\" {\n  value = file(\"${path.module}/../../x\")\n}\n",
+			work + "x":                "x\n",
+		}, symlinks: map[string]string{work + "link": work + "deep/mod"},
+			want: []string{`main.tf:2: module.m.source: source "./link" is refused: it crosses the symlink link,`}},
+		{name: "a source through a symlinked component, writing", files: map[string]string{
+			work + "main.tf":          "module \"m\" {\n  source = \"./link/mod\"\n}\n",
+			work + "deep/mod/main.tf": "resource \"local_file\" \"f\" {\n  content  = \"x\"\n  filename = \"${path.module}/../../evil\"\n}\n",
+		}, symlinks: map[string]string{work + "link": work + "deep"},
+			want: []string{`main.tf:2: module.m.source: source "./link/mod" is refused: it crosses the symlink link,`}},
 		{name: "a source that does not exist", files: map[string]string{work + "main.tf": "module \"m\" {\n  source = \"./gone\"\n}\n"},
 			want: []string{`main.tf:2: module.m.source: source "./gone" does not resolve`}},
 		{name: "a source from a variable", files: map[string]string{

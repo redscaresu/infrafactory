@@ -130,12 +130,13 @@ func (in rehearsalGateInput) display(path string) string {
 }
 
 // rehearsalModule is one gated module dir and the gate run that reads it:
-// path.module is dir, path.root is in.root, and uses collects the run's
-// templates and written paths. providers maps each local name its
+// path.module is dir, path.root is in.root, key is dir's module key, and
+// uses collects the run's templates and written paths. providers maps each local name its
 // required_providers declare to the source, lowercased.
 type rehearsalModule struct {
 	in        rehearsalGateInput
 	dir       string
+	key       string
 	uses      *rehearsalPathUses
 	root      bool
 	providers map[string]string
@@ -148,7 +149,7 @@ func (in rehearsalGateInput) dirProblems(dir rehearsalModuleDir, uses *rehearsal
 	files, problems := in.dirFiles(dir.dir)
 	calls, callProblems := rehearsalModuleCalls(files, dir, in.boundary)
 	problems = append(problems, callProblems...)
-	m := rehearsalModule{in: in, dir: dir.dir, uses: uses, root: dir.dir == in.root, providers: map[string]string{}}
+	m := rehearsalModule{in: in, dir: dir.dir, key: dir.key, uses: uses, root: dir.dir == in.root, providers: map[string]string{}}
 	for file, body := range files {
 		problems = append(problems, m.requiredProviderProblems(file, body)...)
 	}

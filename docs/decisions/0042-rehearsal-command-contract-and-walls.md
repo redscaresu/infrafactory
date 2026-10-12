@@ -108,6 +108,12 @@ included. A registry download runs git against github.com (**unverified**: seen 
 config can carry a credential helper; refusing every download holds whatever the download does.
 There is no `--allow-module` flag.
 
+A local source that crosses a symlink at any component is refused too, naming the module and the
+link. Tofu joins a source to the calling dir as written and cleans it lexically, so through
+`./link` a module's `path.module` spells the link, while the gate would check the dir the link
+resolves to: `"${path.module}/../.."` names a different dir on each side. Refusing the link keeps the
+two the same.
+
 Gate 2 reads the manifest the first init writes (its shape pinned by
 `TestAssumption_ModulesManifestShape`) and admits only the root entry and local entries that
 resolve inside the copy. Nothing fetched is ever admitted, so there is no nested-fetch bound to

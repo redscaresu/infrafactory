@@ -116,8 +116,9 @@ type rehearsalPathUses struct {
 	written   []rehearsalPathUse
 }
 
-// rehearsalPathUse is one resolved path and what names it.
-type rehearsalPathUse struct{ at, path string }
+// rehearsalPathUse is one resolved path, what names it, and the key of
+// the module dir that names it ("" for a dir the walk starts from).
+type rehearsalPathUse struct{ at, path, key string }
 
 // problems refuses a written path that is the same file as a template: the
 // apply would write it, then run templatefile on it ungated. The
@@ -126,22 +127,29 @@ type rehearsalPathUse struct{ at, path string }
 func (u *rehearsalPathUses) problems() []string {
 	var problems []string
 	for _, w := range u.written {
-		written, err := os.Stat(w.path)
-		if errors.Is(err, fs.ErrNotExist) {
-			continue // every template exists, so a missing path is none of them
-		}
-		if err != nil {
-			problems = append(problems, fmt.Sprintf("%s: cannot compare it with the templates: %v", w.at, err))
-			continue
-		}
-		for _, t := range u.templates {
-			template, err := os.Stat(t.path)
-			switch {
-			case err != nil:
-				problems = append(problems, fmt.Sprintf("%s: cannot compare it with template %s: %v", w.at, t.at, err))
-			case os.SameFile(written, template):
-				problems = append(problems, fmt.Sprintf("%s: refused: the apply would overwrite template %s, which a templatefile reads in the same apply", w.at, t.at))
-			}
+		problems = append(problems, rehearsalModuleDir{key: w.key}.named(u.writtenProblems(w))...)
+	}
+	return problems
+}
+
+// writtenProblems refuses one written path that is the same file as a
+// template.
+func (u *rehearsalPathUses) writtenProblems(w rehearsalPathUse) []string {
+	written, err := os.Stat(w.path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil // every template exists, so a missing path is none of them
+	}
+	if err != nil {
+		return []string{fmt.Sprintf("%s: cannot compare it with the templates: %v", w.at, err)}
+	}
+	var problems []string
+	for _, t := range u.templates {
+		template, err := os.Stat(t.path)
+		switch {
+		case err != nil:
+			problems = append(problems, fmt.Sprintf("%s: cannot compare it with template %s: %v", w.at, t.at, err))
+		case os.SameFile(written, template):
+			problems = append(problems, fmt.Sprintf("%s: refused: the apply would overwrite template %s, which a templatefile reads in the same apply", w.at, t.at))
 		}
 	}
 	return problems
@@ -157,7 +165,7 @@ func (m rehearsalModule) pathArgProblems(file string, block *hclsyntax.Block) []
 			path, problem := m.resolvePath(attr.Expr)
 			if problem == "" && written {
 				problem = rehearsalWrittenPathProblem(m.in.display(path))
-				m.uses.written = append(m.uses.written, rehearsalPathUse{at: at, path: path})
+				m.uses.written = append(m.uses.written, rehearsalPathUse{at: at, path: path, key: m.key})
 			}
 			if problem != "" {
 				problems = append(problems, at+": "+problem)

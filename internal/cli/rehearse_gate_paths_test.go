@@ -126,7 +126,7 @@ func TestRehearsalGatePathsRefuse(t *testing.T) {
 			"main.tf":     "module \"m\" {\n  source = \"./mod\"\n}\noutput \"o\" {\n  value = templatefile(\"${path.root}/t.tpl\", {})\n}\n",
 			"t.tpl":       "hello\n",
 			"mod/main.tf": "data \"archive_file\" \"a\" {\n  type        = \"zip\"\n  output_path = \"${path.module}/../t.tpl\"\n}\n",
-		}, want: []string{"mod/main.tf:3: data.archive_file.a.output_path: refused: the apply would overwrite template t.tpl"}},
+		}, want: []string{`module "m": mod/main.tf:3: data.archive_file.a.output_path: refused: the apply would overwrite template t.tpl`}},
 		{name: "an absolute path in a module block's dir", files: map[string]string{
 			"main.tf":     "module \"m\" {\n  source = \"./mod\"\n}\n",
 			"mod/main.tf": "data \"local_file\" \"l\" {\n  filename = \"/etc/passwd\"\n}\n",
