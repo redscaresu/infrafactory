@@ -1,8 +1,7 @@
 ---
 kind: code
 repo: fakeaws
-status: blocked
-blocked_by: [fakeaws-filters-instances-enis-addresses-keys]
+status: ready
 epic: fakeaws-data-sources
 depends_on: [fakeaws-filters-instances-enis-addresses-keys]
 touches: [handlers/ec2_filters.go, handlers/ec2.go, handlers/ec2_test.go, handlers/regression_test.go, CHANGELOG.md]

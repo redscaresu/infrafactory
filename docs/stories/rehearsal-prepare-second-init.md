@@ -1,7 +1,6 @@
 ---
 kind: code
-status: blocked
-blocked_by: [rehearsal-prepare-first-init, rehearsal-prepare-gate-modules]
+status: ready
 epic: rehearsal-prepare-gate
 depends_on: [rehearsal-prepare-first-init, rehearsal-prepare-gate-modules]
 touches: [internal/cli/rehearse_prepare.go, internal/cli/rehearse_prepare_init.go, internal/cli/rehearse_prepare_init_test.go, internal/cli/rehearse_prepare_e2e_test.go, internal/cli/assumptions_test.go, internal/cli/export_test.go, internal/cli/testdata/golden/commands/, .github/fakeaws-e2e-tests]
