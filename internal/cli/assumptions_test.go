@@ -261,8 +261,8 @@ const ourOverride = "infrafactory_override.tf"
 // under tofuDeadline, and returns its stdout and stderr. The child's
 // environment is exactly env, plus this process's PATH when env names
 // none. The tofu that runs is the one on this process's PATH, whatever
-// PATH env names. At the deadline tofu's process group gets the runner's SIGINT,
-// then SIGKILL after cancelKillFallback, and the error wraps
+// PATH env names. At the deadline tofu's process group gets the runner's
+// SIGINT, then SIGKILL after cancelKillFallback, and the error wraps
 // context.DeadlineExceeded.
 func runTofu(dir string, env []string, args ...string) (stdout, stderr string, err error) {
 	ctx, cancel := context.WithTimeout(context.Background(), tofuDeadline)
