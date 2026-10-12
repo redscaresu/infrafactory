@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"context"
+	"encoding/json"
 	"maps"
 	"net/http"
 	"os"
@@ -62,8 +63,8 @@ func loadAWSStep0ReadSet(t *testing.T) []harness.AWSReadEntry {
 
 // TestAWSStep0ReadSetHoldsNoIDs fails when the committed read set holds
 // anything awsStep0Leaks names, an entry outside the reader table, or
-// params other than each entry's own, with the harness's tag key and
-// parameter name.
+// any entry (service, protocol, action, params) other than its own, with
+// the harness's tag key and parameter name.
 func TestAWSStep0ReadSetHoldsNoIDs(t *testing.T) {
 	data, err := os.ReadFile(awsStep0ReadSet)
 	require.NoError(t, err)
@@ -73,16 +74,24 @@ func TestAWSStep0ReadSetHoldsNoIDs(t *testing.T) {
 
 	entries := loadAWSStep0ReadSet(t)
 	require.NoError(t, harness.ValidateAWSReadSet(entries))
-	require.Len(t, entries, step0AMIParameter+1)
 	byTag := `{"Filter.1.Name":"tag-key","Filter.1.Value.1":"` + harness.AWSRunIDTagKey + `"}`
-	for i, want := range map[int]string{
-		step0VPCsByTag:    byTag,
-		step0Zones:        `{}`,
-		step0GroupsByTag:  byTag,
-		step0AbsentGroup:  `{"Filter.1.Name":"group-name","Filter.1.Value.1":"` + step0AbsentGroupName + `","Filter.2.Name":"tag-key","Filter.2.Value.1":"` + harness.AWSRunIDTagKey + `"}`,
-		step0AMIParameter: `{"Name":"` + harness.AWSAL2023AMIParameter + `"}`,
-	} {
-		assert.JSONEq(t, want, string(entries[i].Params), "entry %d", i)
+	ec2Query := func(action, params string) harness.AWSReadEntry {
+		return harness.AWSReadEntry{Service: "ec2", Protocol: "query", Action: action, Params: json.RawMessage(params)}
+	}
+	want := map[int]harness.AWSReadEntry{
+		step0VPCsByTag:    ec2Query("DescribeVpcs", byTag),
+		step0Zones:        ec2Query("DescribeAvailabilityZones", `{}`),
+		step0GroupsByTag:  ec2Query("DescribeSecurityGroups", byTag),
+		step0AbsentGroup:  ec2Query("DescribeSecurityGroups", `{"Filter.1.Name":"group-name","Filter.1.Value.1":"`+step0AbsentGroupName+`","Filter.2.Name":"tag-key","Filter.2.Value.1":"`+harness.AWSRunIDTagKey+`"}`),
+		step0AMIParameter: {Service: "ssm", Protocol: "json", Action: "GetParameter", Params: json.RawMessage(`{"Name":"` + harness.AWSAL2023AMIParameter + `"}`)},
+	}
+	require.Len(t, entries, len(want))
+	for i, entry := range want {
+		wantJSON, err := json.Marshal(entry)
+		require.NoError(t, err)
+		gotJSON, err := json.Marshal(entries[i])
+		require.NoError(t, err)
+		assert.JSONEq(t, string(wantJSON), string(gotJSON), "entry %d", i)
 	}
 }
 
