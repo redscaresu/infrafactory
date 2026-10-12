@@ -17,15 +17,21 @@ const (
 
 // AWSReaderService is one service the account read may call: its wire
 // protocol and the actions it may send. NotFound holds the error codes
-// that mean the thing asked for does not exist: an answer, not a
-// failure. TargetPrefix is a json service's X-Amz-Target prefix: the
-// target is TargetPrefix + "." + action.
+// that mean the thing asked for does not exist: to an entry's first
+// request an answer, not a failure (a later page's fails). TargetPrefix is a json service's X-Amz-Target prefix: the
+// target is TargetPrefix + "." + action. Paging is the request field a
+// list's next page is asked for by (awsPagingNextToken,
+// awsPagingMarker), "" for a service that pages nothing. Throttling holds
+// the error codes that mean the request was throttled: it is sent again
+// after a backoff.
 type AWSReaderService struct {
 	Service      string
 	Protocol     string
 	TargetPrefix string
 	Actions      []string
 	NotFound     []string
+	Paging       string
+	Throttling   []string
 }
 
 // AWSReaderTable is the reader table: every action the account read
@@ -50,6 +56,8 @@ var AWSReaderTable = []AWSReaderService{
 			"InvalidKeyPair.NotFound", "InvalidNetworkInterfaceID.NotFound", "InvalidRouteTableID.NotFound",
 			"InvalidSecurityGroupRuleId.NotFound", "InvalidSubnetID.NotFound", "InvalidVpcID.NotFound",
 		},
+		Paging:     awsPagingNextToken,
+		Throttling: []string{"RequestLimitExceeded"},
 	},
 	{
 		Service:  "iam",
@@ -58,7 +66,9 @@ var AWSReaderTable = []AWSReaderService{
 			"GetRole", "GetRolePolicy", "ListAttachedRolePolicies",
 			"ListInstanceProfilesForRole", "ListRolePolicies",
 		},
-		NotFound: []string{"NoSuchEntity"},
+		NotFound:   []string{"NoSuchEntity"},
+		Paging:     awsPagingMarker,
+		Throttling: []string{"Throttling"},
 	},
 	{
 		Service:      "ssm",
@@ -66,11 +76,13 @@ var AWSReaderTable = []AWSReaderService{
 		TargetPrefix: "AmazonSSM",
 		Actions:      []string{"GetParameter"},
 		NotFound:     []string{"ParameterNotFound", "ParameterVersionNotFound"},
+		Throttling:   []string{"ThrottlingException"},
 	},
 	{
-		Service:  "sts",
-		Protocol: awsProtocolQuery,
-		Actions:  []string{"GetCallerIdentity"},
+		Service:    "sts",
+		Protocol:   awsProtocolQuery,
+		Actions:    []string{"GetCallerIdentity"},
+		Throttling: []string{"Throttling"},
 	},
 }
 
@@ -123,7 +135,8 @@ type AWSReadEntry struct {
 }
 
 // AWSReadExchange is an ADR-0041 exchange: an entry and its answer.
-// Body is the raw response bytes.
+// Body is the raw response bytes. Each page of a list is its own
+// exchange, its params carrying that page's token.
 type AWSReadExchange struct {
 	AWSReadEntry
 	Status int    `json:"status"`

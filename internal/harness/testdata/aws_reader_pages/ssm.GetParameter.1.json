@@ -1,0 +1,12 @@
+{
+    "NextToken": "AAEAAWJoUGFyYW1ldGVyUGFnZTI=",
+    "Parameter": {
+        "ARN": "arn:aws:ssm:eu-west-1:123456789012:parameter/app/db/host",
+        "DataType": "text",
+        "LastModifiedDate": 1582657288.8,
+        "Name": "/app/db/host",
+        "Type": "String",
+        "Value": "db.internal",
+        "Version": 3
+    }
+}
