@@ -1,7 +1,6 @@
 ---
 kind: code
-status: blocked
-blocked_by: [prod-read-seam-wall, prod-read-seam-credentials]
+status: ready
 epic: prod-read-seam
 depends_on: [prod-read-seam-wall, prod-read-seam-credentials]
 touches: [docs/layer3/aws/reader-policy.json, internal/harness/aws_reader_policy_test.go, docs/decisions/0023-layer3-sealed-environment-and-orphan-verification.md, docs/operations.md]
