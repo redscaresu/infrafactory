@@ -19,7 +19,9 @@ type PitfallEntry struct {
 	DiscoveredFrom string `yaml:"discovered_from,omitempty"`
 	// LearnedLayer is the layer whose failure taught the rule
 	// (mock_deploy, sandbox_deploy, ...); empty for entries that predate
-	// it or were not learned from a layer failure.
+	// it, were not learned from a layer failure, or were learned with no
+	// Origin on a run with Layer 3 off, which ran against the mock
+	// (generator.LearnedLayer).
 	LearnedLayer string `yaml:"learned_layer,omitempty"`
 
 	// ObservedKey is the stable identity of a `source: live` entry: the

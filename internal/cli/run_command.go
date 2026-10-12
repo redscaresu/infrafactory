@@ -201,27 +201,28 @@ func runRunWithNotify(
 		{Layer: "run", Stage: "mode", Status: StageStatusPass, Detail: fmt.Sprintf("%s (%s)", mode.Mode, mode.Reason)},
 	}, resolved...)
 	allFailures := make([]FailureSummary, 0)
-	// learnsFrom routes f for a learner path (event) through
-	// generator.RouteFailure and reports whether its extractors may learn
-	// from it: a mock gap is written to docs/mock-gaps.md, and a skip is
-	// logged as <event>_learning_skipped. Every pitfall writer asks it.
-	learnsFrom := func(event string, f feedback.Failure) bool {
-		route, reason := generator.RouteFailure(f.Origin, f.OriginStage, f.Detail, runtime.Config.Validation.Layers.SandboxDeploy.Enabled)
+	// learnsFrom routes f for a learner path (event) through routeLesson
+	// and reports whether its extractors may learn from it, and the
+	// learned_layer to stamp on what they learn: a mock gap is written to
+	// docs/mock-gaps.md, and a skip is logged as <event>_learning_skipped.
+	// Every pitfall writer asks it, and stamps the layer it returns.
+	learnsFrom := func(event string, f feedback.Failure) (string, bool) {
+		route, reason, layer := routeLesson(f, runtime.Config.Validation.Layers.SandboxDeploy.Enabled)
 		switch route {
 		case generator.RouteMockGap:
 			recordMockGap(runtime, event, runID, generator.MockGap{
 				Cloud: sc.Cloud, Scenario: sc.Name, Detail: f.Detail, Timestamp: runID,
 			})
-			return false
+			return "", false
 		case generator.RouteSkip:
 			runtime.Logger.Log(LogEntry{
 				Level: logLevelInfo, Command: "run",
 				Event: event + "_learning_skipped", Status: "skipped",
 				RunID: runID, Detail: "layer " + failureLayer(f) + ": " + reason,
 			})
-			return false
+			return "", false
 		}
-		return true
+		return layer, true
 	}
 	// Every failure signature the run has produced, in any iteration.
 	// A per-iteration "previous" cannot see oscillation, which is the
@@ -277,7 +278,8 @@ func runRunWithNotify(
 						// avoid valid resources because the mock is
 						// incomplete — the system narrows over time.
 						// Real-cloud setup and weather teach nothing.
-						if !learnsFrom("self_correction", failure) {
+						layer, ok := learnsFrom("self_correction", failure)
+						if !ok {
 							continue
 						}
 						// Refusals first, exactly as in the terminal harvest.
@@ -305,7 +307,7 @@ func runRunWithNotify(
 							})
 							continue
 						}
-						learned.LearnedLayer = failureLayer(failure)
+						learned.LearnedLayer = layer
 						if err := generator.AppendPitfall(runtime.Config.Paths.Pitfalls, cloud, *learned); err != nil {
 							runtime.Logger.Log(LogEntry{
 								Level:   logLevelError,
@@ -533,7 +535,8 @@ func runRunWithNotify(
 			// 2026-06-01 sweep showed gcp-cloud-run, gcp-cloud-sql,
 			// gcp-gke-cluster, gcp-storage all re-learning the same
 			// OAuth-escape + plugin-crash rules N2 just pruned.
-			if !learnsFrom("oscillation", f) {
+			layer, ok := learnsFrom("oscillation", f)
+			if !ok {
 				continue
 			}
 			// Refusals first. A gate or policy refusal is machine-generated,
@@ -566,7 +569,7 @@ func runRunWithNotify(
 				})
 				continue
 			}
-			learned.LearnedLayer = failureLayer(f)
+			learned.LearnedLayer = layer
 			if err := generator.AppendPitfall(runtime.Config.Paths.Pitfalls, sc.Cloud, *learned); err != nil {
 				runtime.Logger.Log(LogEntry{
 					Level:   logLevelError,
@@ -601,11 +604,10 @@ func runRunWithNotify(
 		// it be learned: the mock state says nothing about a failure that
 		// did not come from the mock.
 		hasOrphanCheck := false
-		var orphanFailure feedback.Failure
+		orphanLayer := ""
 		for _, f := range candidates {
 			if strings.Contains(strings.ToLower(f.Detail), "orphaned resources") {
-				hasOrphanCheck = learnsFrom("orphan", f)
-				orphanFailure = f
+				orphanLayer, hasOrphanCheck = learnsFrom("orphan", f)
 				break
 			}
 		}
@@ -626,7 +628,7 @@ func runRunWithNotify(
 					if !pitfallResourceMatchesCloud(p.Resource, sc.Cloud) {
 						continue
 					}
-					p.LearnedLayer = failureLayer(orphanFailure)
+					p.LearnedLayer = orphanLayer
 					if err := generator.AppendPitfall(runtime.Config.Paths.Pitfalls, sc.Cloud, p); err != nil {
 						runtime.Logger.Log(LogEntry{
 							Level:   logLevelError,
@@ -752,7 +754,8 @@ func runRunWithNotify(
 				// The self-correction hook records only the last failing
 				// iteration, so a gap cleared in an earlier pair is written
 				// here (rows dedupe, so writing one twice is harmless).
-				if !learnsFrom("prescriptive", cleared) {
+				layer, ok := learnsFrom("prescriptive", cleared)
+				if !ok {
 					continue
 				}
 				entry, err := generator.ExtractFixPitfall(
@@ -767,7 +770,7 @@ func runRunWithNotify(
 						RunID: runID, Detail: err.Error(),
 					})
 				} else if entry != nil && pitfallResourceMatchesCloud(entry.Resource, sc.Cloud) {
-					entry.LearnedLayer = failureLayer(cleared)
+					entry.LearnedLayer = layer
 					if err := generator.AppendPitfall(runtime.Config.Paths.Pitfalls, sc.Cloud, *entry); err != nil {
 						runtime.Logger.Log(LogEntry{
 							Level: logLevelError, Command: "run",
@@ -807,7 +810,7 @@ func runRunWithNotify(
 				if !pitfallResourceMatchesCloud(avoidEntry.Resource, sc.Cloud) {
 					continue
 				}
-				avoidEntry.LearnedLayer = failureLayer(cleared)
+				avoidEntry.LearnedLayer = layer
 				if err := generator.AppendPitfall(runtime.Config.Paths.Pitfalls, sc.Cloud, *avoidEntry); err != nil {
 					runtime.Logger.Log(LogEntry{
 						Level: logLevelError, Command: "run",
@@ -1874,6 +1877,14 @@ func awsRunFailureTeardown(ctx context.Context, runtime *CommandRuntime, stages 
 // Layer (a failure the run built itself has no Origin).
 func failureLayer(f feedback.Failure) string {
 	return cmp.Or(f.Origin, f.Layer)
+}
+
+// routeLesson routes f through generator.RouteFailure, and returns the
+// learned_layer a lesson from it is stamped with (generator.LearnedLayer),
+// so the ratchet and the avoid ledger read the entry as the router did.
+func routeLesson(f feedback.Failure, layer3 bool) (generator.Route, string, string) {
+	route, reason := generator.RouteFailure(f.Origin, f.OriginStage, f.Detail, layer3)
+	return route, reason, generator.LearnedLayer(f.Origin, f.Layer, layer3)
 }
 
 // learnKey keys a failure for the learner paths' dedupes: a cosmetic

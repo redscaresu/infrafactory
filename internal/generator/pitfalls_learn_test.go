@@ -1,6 +1,7 @@
 package generator
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1195,24 +1196,28 @@ func TestRouteFailure(t *testing.T) {
 	}
 }
 
-// The avoid ledger refuses a retired attribute's recurrence whole at
-// exactly the layers the router reads as a mock's, an entry with no layer
-// read as the pitfalls ratchet reads it (RouteEntry), and elsewhere
-// writes a relearned record the ledger then reads back.
+// The avoid ledger refuses a retired attribute's recurrence whole for
+// exactly the failures the router reads as a mock's, given the
+// learned_layer the run stamps (LearnedLayer), and otherwise writes a
+// relearned record. A failure with no Origin on a run with Layer 3 off is
+// a mock regression, refused; with Layer 3 on, it is relearned.
 func TestAvoidLedgerAgreesWithTheRouterOnEveryLayer(t *testing.T) {
 	const detail = "waiting for EC2 Subnet MapPublicIpOnLaunch update: 501 Not Implemented"
-	for _, layer := range []string{"", "static", MockDeployLayer, "destruction", SandboxDeployLayer, "holdout", "criteria", "run"} {
-		t.Run("layer="+layer, func(t *testing.T) {
-			dir := retiredLedgerFixture(t)
-			err := AppendPitfall(dir, "aws", LearnedPitfall{Resource: "aws_subnet", Rule: detail, LearnedLayer: layer})
-			if route, _ := RouteFailure(layer, "apply", detail, layer != ""); route == RouteMockGap {
-				require.Error(t, err)
-				assert.Contains(t, err.Error(), "a mock recurrence of a retired rule is a mock regression")
-				return
-			}
-			require.NoError(t, err)
-			records := readLedger(t, dir).Records
-			assert.Equal(t, AvoidRecordRelearned, records[len(records)-1].Status)
-		})
+	for _, origin := range []string{"", "static", MockDeployLayer, "destruction", SandboxDeployLayer, "holdout", "criteria"} {
+		for _, layer3 := range []bool{false, true} {
+			t.Run(fmt.Sprintf("origin=%s/layer3=%t", origin, layer3), func(t *testing.T) {
+				dir := retiredLedgerFixture(t)
+				err := AppendPitfall(dir, "aws", LearnedPitfall{Resource: "aws_subnet", Rule: detail, LearnedLayer: LearnedLayer(origin, "run", layer3)})
+				if route, _ := RouteFailure(origin, "apply", detail, layer3); route == RouteMockGap {
+					require.Error(t, err)
+					assert.Contains(t, err.Error(), "a mock recurrence of a retired rule is a mock regression")
+					assert.Len(t, readLedger(t, dir).Records, 1, "no relearned record")
+					return
+				}
+				require.NoError(t, err)
+				records := readLedger(t, dir).Records
+				assert.Equal(t, AvoidRecordRelearned, records[len(records)-1].Status)
+			})
+		}
 	}
 }

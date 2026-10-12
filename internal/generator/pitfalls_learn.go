@@ -26,7 +26,7 @@ type LearnedPitfall struct {
 	Rule           string
 	Source         string // optional: empty defaults to "descriptive"
 	DiscoveredFrom string // scenario name
-	LearnedLayer   string // layer whose failure taught it: mock_deploy, sandbox_deploy, ...
+	LearnedLayer   string // layer whose failure taught it (LearnedLayer): mock_deploy, sandbox_deploy, ...
 }
 
 var (
@@ -412,10 +412,24 @@ func RouteFailure(layer, stage, detail string, layer3 bool) (Route, string) {
 	return RouteLearn, ""
 }
 
+// LearnedLayer is the learned_layer a lesson from a failure is stamped
+// with, so RouteEntry and the avoid ledger read it as RouteFailure did:
+// its origin; with no origin, "" on a run with Layer 3 off (it ran
+// against the mock, and "" reads as Layer 3 off) and layer otherwise.
+func LearnedLayer(origin, layer string, layer3 bool) string {
+	if origin != "" {
+		return origin
+	}
+	if !layer3 {
+		return ""
+	}
+	return layer
+}
+
 // RouteEntry is how the pitfalls ratchet reads a committed entry: the
 // route of its rule as an apply failure at its learned_layer, an entry
-// with no layer read as from a run with Layer 3 off. The ratchet refuses
-// an entry the router would not learn.
+// with no layer read as from a run with Layer 3 off (LearnedLayer). The
+// ratchet refuses an entry the router would not learn.
 func RouteEntry(e PitfallEntry) Route {
 	route, _ := RouteFailure(e.LearnedLayer, "apply", e.Rule, e.LearnedLayer != "")
 	return route
