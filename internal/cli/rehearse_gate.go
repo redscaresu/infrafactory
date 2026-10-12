@@ -116,8 +116,11 @@ type rehearsalModule struct {
 }
 
 // dirProblems applies the file policy to one module dir, then the block
-// rules to every .tf file in it. Other files are data tofu does not load
-// (TestAssumption_LoaderIgnoresUnknownSuffixes), admitted unparsed.
+// rules to every .tf file in it. A .tf file holds only blocks. Any other
+// file is admitted unparsed: tofu's configuration loader skips it
+// (TestAssumption_LoaderIgnoresUnknownSuffixes). Tofu reads some of those
+// files by other routes, and ADR-0042 § The extension and file policy
+// names the rule that owns each.
 func (in rehearsalGateInput) dirProblems(dir string) []string {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -149,6 +152,9 @@ func (in rehearsalGateInput) dirProblems(dir string) []string {
 		problems = append(problems, m.requiredProviderProblems(file, body)...)
 	}
 	for file, body := range files {
+		for name, attr := range body.Attributes {
+			problems = append(problems, rehearsalAt(file, attr.SrcRange, name)+": refused: a .tf file holds only blocks")
+		}
 		for _, block := range body.Blocks {
 			problems = append(problems, m.blockProblems(file, block)...)
 		}

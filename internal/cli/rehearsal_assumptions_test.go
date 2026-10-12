@@ -143,8 +143,9 @@ func TestAssumption_RootOverrideMissesChildModuleProvider(t *testing.T) {
 	assert.Zero(t, proxy.count(), "%s: requests left loopback: %v", w.version, proxy.requests())
 }
 
-// TestAssumption_LoaderIgnoresUnknownSuffixes: tofu loads only its own
-// configuration suffixes from a module directory, and no subdirectory, so
+// TestAssumption_LoaderIgnoresUnknownSuffixes: tofu's configuration
+// loader reads only its own configuration suffixes from a module
+// directory, and no subdirectory, so
 // a root with one valid output beside broken HCL in a.hcl, a.tf.bak,
 // notes.txt, x.tfvars.example and sub/b.tf passes `tofu init
 // -backend=false` and `tofu validate`, offline.

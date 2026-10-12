@@ -74,6 +74,8 @@ func TestRehearsalGateRefuses(t *testing.T) {
 			want: []string{"x.tfvars:2: b: a .tfvars value must be a literal", "x.tfvars:3: c: a .tfvars file holds only attributes"}},
 		{name: "a var file reference", varFile: "region = local.r\n",
 			want: []string{"vars.tfvars:1: region: a .tfvars value must be a literal"}},
+		{name: "top-level attributes", files: map[string]string{"main.tf": "x = core::file(\"/etc/passwd\")\ny = timestamp()\n"},
+			want: []string{"main.tf:1: x: refused: a .tf file holds only blocks", "main.tf:2: y: refused: a .tf file holds only blocks"}},
 		// Rule 2: override files.
 		{name: "zz_override.tf", files: map[string]string{"zz_override.tf": "locals {}\n"},
 			want: []string{"zz_override.tf: an override file is refused"}},
