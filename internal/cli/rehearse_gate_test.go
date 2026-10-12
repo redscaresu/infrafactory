@@ -66,6 +66,10 @@ func TestRehearsalGateRefuses(t *testing.T) {
 		}},
 		{name: "a terraform.d dir", files: map[string]string{"terraform.d/plugins/x": ""},
 			want: []string{"terraform.d: a terraform.d entry is refused"}},
+		{name: "a tests dir, in the root and a child", files: map[string]string{
+			"tests/evil.tftest.hcl":    "run \"r\" {\n  module {\n    source = \"git::https://example.com/m.git\"\n  }\n}\n",
+			"child/Tests/a.tftest.hcl": "",
+		}, want: []string{"tests: a tests entry is refused", "child/Tests: a tests entry is refused"}},
 		{name: "an unparseable .tf", files: map[string]string{"broken.tf": "resource \"aws_vpc\" \"v\" {\n"},
 			want: []string{"broken.tf: does not parse"}},
 		{name: "a .tfvars reference", files: map[string]string{"terraform.tfvars": "region = var.x\n"},

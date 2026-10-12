@@ -145,34 +145,51 @@ func TestAssumption_RootOverrideMissesChildModuleProvider(t *testing.T) {
 
 // TestAssumption_LoaderIgnoresUnknownSuffixes: tofu's configuration
 // loader reads only its own configuration suffixes from a module
-// directory, and no subdirectory, so
-// a root with one valid output beside broken HCL in a.hcl, a.tf.bak,
-// notes.txt, x.tfvars.example and sub/b.tf passes `tofu init
-// -backend=false` and `tofu validate`, offline.
+// directory, and no subdirectory but the test directory. A root with one
+// valid output beside broken HCL in a.hcl, a.tf.bak, notes.txt,
+// x.tfvars.example and sub/b.tf passes `tofu init -backend=false` and
+// `tofu validate`, offline; broken HCL in tests/a.tftest.hcl fails both.
 //
 // Relied on by: rehearsal-prepare-gate, which admits any other file
-// unparsed (ADR-0042 § The extension and file policy). ADR-0028.
+// unparsed and refuses a tests entry (ADR-0042 § The extension and file
+// policy). ADR-0028.
 func TestAssumption_LoaderIgnoresUnknownSuffixes(t *testing.T) {
 	e2e.SkipUnlessEnabled(t)
 	_, err := exec.LookPath("tofu")
 	require.NoError(t, err, "tofu binary required for e2e")
 
+	w, env := newLoaderRoot(t, "a.hcl", "a.tf.bak", "notes.txt", "x.tfvars.example", "sub/b.tf")
+	out, err := w.tofu(t, env, "init", "-backend=false", "-input=false", "-no-color")
+	require.NoError(t, err, "%s: init loaded a file it should ignore\n%s", w.version, out)
+	out, err = w.tofu(t, env, "validate", "-no-color")
+	assert.NoError(t, err, "%s: validate loaded a file it should ignore\n%s", w.version, out)
+
+	t.Run("the test directory is read", func(t *testing.T) {
+		w, env := newLoaderRoot(t, "tests/a.tftest.hcl")
+		for _, args := range [][]string{{"init", "-backend=false", "-input=false", "-no-color"}, {"validate", "-no-color"}} {
+			out, err := w.tofu(t, env, args...)
+			assert.Error(t, err, "%s: tofu %s ignored the test directory\n%s", w.version, args[0], out)
+			assert.Contains(t, out, "tests/a.tftest.hcl", "%s: tofu %s", w.version, args[0])
+		}
+	})
+}
+
+// newLoaderRoot is a root with one valid output plus broken HCL in each
+// of broken, and the offline environment to run tofu in: both proxies at
+// the closed port, so any download fails.
+func newLoaderRoot(t *testing.T, broken ...string) (assumptionDir, []string) {
+	t.Helper()
 	w := assumptionDir{dir: t.TempDir()}
 	w.write(t, "main.tf", "output \"x\" {\n  value = 1\n}\n")
-	for _, name := range []string{"a.hcl", "a.tf.bak", "notes.txt", "x.tfvars.example", "sub/b.tf"} {
+	for _, name := range broken {
 		w.write(t, name, "resource \"broken\" {\n")
 	}
-	// Offline: both proxies at the closed port, so any download fails.
 	env := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + t.TempDir(), "TF_DATA_DIR=" + t.TempDir(),
 		"HTTPS_PROXY=" + closedEndpoint, "HTTP_PROXY=" + closedEndpoint}
 	version, err := w.tofu(t, env, "version")
 	require.NoError(t, err, version)
 	w.version = strings.TrimSpace(version)
-
-	out, err := w.tofu(t, env, "init", "-backend=false", "-input=false", "-no-color")
-	require.NoError(t, err, "%s: init loaded a file it should ignore\n%s", w.version, out)
-	out, err = w.tofu(t, env, "validate", "-no-color")
-	assert.NoError(t, err, "%s: validate loaded a file it should ignore\n%s", w.version, out)
+	return w, env
 }
 
 // registryModule is the third-party dependency the init test fetches: a

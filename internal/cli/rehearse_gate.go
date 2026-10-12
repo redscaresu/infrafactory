@@ -117,7 +117,8 @@ type rehearsalModule struct {
 
 // dirProblems applies the file policy to one module dir, then the block
 // rules to every .tf file in it. A .tf file holds only blocks. Any other
-// file is admitted unparsed: tofu's configuration loader skips it
+// file, and any subdirectory but the test directory, is admitted unparsed:
+// tofu's configuration loader skips them
 // (TestAssumption_LoaderIgnoresUnknownSuffixes). Tofu reads some of those
 // files by other routes, and ADR-0042 § The extension and file policy
 // names the rule that owns each.
@@ -168,6 +169,9 @@ func (in rehearsalGateInput) dirProblems(dir string) []string {
 func rehearsalEntryProblem(lower string) string {
 	if lower == "terraform.d" {
 		return "a terraform.d entry is refused: tofu reads it as a local provider mirror"
+	}
+	if lower == "tests" {
+		return "a tests entry is refused: tofu reads it as the test directory (TestAssumption_LoaderIgnoresUnknownSuffixes)"
 	}
 	for _, suffix := range rehearsalRefusedSuffixes {
 		if strings.HasSuffix(lower, suffix) {
