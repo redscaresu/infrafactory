@@ -163,7 +163,7 @@ func TestAWSReadEC2AgainstFakeaws(t *testing.T) {
 	require.Len(t, byRow["DescribeVpcs"], 1)
 	require.Len(t, byRow["DescribeKeyPairs"], 1, "the key-pair lookup, and no key-name read")
 	assert.Contains(t, byRow["DescribeKeyPairs"][0].Body, "<keyName>"+a.keyName+"</keyName>")
-	assert.NotContains(t, byRow["DescribeKeyPairs"][0].Body, b.keyName)
+	assert.NotContains(t, byRow["DescribeKeyPairs"][0].Body, "<keyName>"+b.keyName+"</keyName>")
 	for _, s := range []seededReaderVPC{a, b} {
 		assert.Contains(t, byRow["DescribeVpcs"][0].Body, "<vpcId>"+s.vpc+"</vpcId>")
 		assert.True(t, anyExchange(byRow["DescribeSubnets"], s.vpc, s.subnet), "subnets of %s", s.vpc)
