@@ -1,8 +1,7 @@
 ---
 kind: code
 repo: fakeaws
-status: blocked
-blocked_by: [fakeaws-describe-availability-zones]
+status: ready
 epic: fakeaws-data-sources
 depends_on: [fakeaws-describe-availability-zones]
 touches: [handlers/ec2.go, repository/ec2.go, repository/ec2_test.go, handlers/ec2_test.go, handlers/regression_test.go, examples/misconfigured/subnet_cidr_overlap/main.tf, examples/misconfigured/subnet_cidr_overlap/expected.txt, examples/README.md, AGENTS.md, CHANGELOG.md]
