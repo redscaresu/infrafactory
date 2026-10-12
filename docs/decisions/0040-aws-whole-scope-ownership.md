@@ -134,8 +134,9 @@ release is a reap. Rules 1-17 and the sweep rows and precedence pairs above are 
 
 ## Amendment, 2026-10-12: the read seam reads beyond the scope, and only reads
 
-The read seam (ADR-0041: the reader table in `docs/layer3/aws/reader-policy.json` and its wall)
-reads accounts beyond the Layer 3 scope. Rules 1-17, the sweep rows and precedence pairs, and the
+The read seam (ADR-0041: the reader table `AWSReaderTable` in `internal/harness/aws_reader_table.go`,
+the IAM policy `docs/layer3/aws/reader-policy.json` derived from it, and the wall) reads accounts
+beyond the Layer 3 scope. Rules 1-17, the sweep rows and precedence pairs, and the
 hold amendment above are unchanged.
 
 - **Reads only.** The seam takes no claim and issues no create, modify or delete; the whole-account
