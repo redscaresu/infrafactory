@@ -35,20 +35,22 @@ func TestClassifyOrphans_AWSSecretsManagerSoftDelete(t *testing.T) {
 	}
 }
 
-// A KMS key that is not PendingDeletion after destroy is a leak, but no
-// aws_kms_key argument explains it: destroy schedules every key it knows
-// about, so the key was never in state. It is left for triage rather than
-// taught as a pitfall, and no rule may name an argument (force_destroy)
-// the provider rejects.
-func TestClassifyOrphans_LeakedKMSKeyIsUnclassified(t *testing.T) {
+// A KMS key that is not PendingDeletion after destroy was never in tofu's
+// state, since destroy schedules every key it knows about. No aws_kms_key
+// argument explains that (force_destroy is not one), so it routes to the
+// mock-provider divergence gap rather than teaching a pitfall.
+func TestClassifyOrphans_LeakedKMSKeyIsAMockGap(t *testing.T) {
 	for name, key := range map[string]string{
 		"enabled":  `{"key_id": "k1", "state": "Enabled"}`,
 		"no state": `{"key_id": "k1"}`,
 	} {
 		routing := ClassifyOrphans([]byte(`{"kms": {"keys": [`+key+`]}}`), "aws", "aws-kms", "ts")
 		assert.Empty(t, routing.Pitfalls, name)
-		assert.Empty(t, routing.MockGaps, name)
-		assert.Equal(t, []OrphanedResource{{Service: "kms", Collection: "keys"}}, routing.Unclassified, name)
+		assert.Empty(t, routing.Unclassified, name)
+		if assert.Len(t, routing.MockGaps, 1, name) {
+			assert.Equal(t, "aws_kms_key", routing.MockGaps[0].Resource, name)
+			assert.Equal(t, "aws", routing.MockGaps[0].Cloud, name)
+		}
 	}
 }
 
@@ -190,6 +192,19 @@ func TestClassifyOrphans_KMSEndStateRoutesNothing(t *testing.T) {
 	}`)
 	routing := ClassifyOrphans(state, "aws", "aws-vpc", "ts")
 	assert.Empty(t, routing.Pitfalls)
-	assert.Empty(t, routing.Unclassified, "a PendingDeletion key is not a leak")
-	assert.Len(t, routing.MockGaps, 1, "the leaked subnet still routes")
+	assert.Empty(t, routing.Unclassified)
+	if assert.Len(t, routing.MockGaps, 1, "a PendingDeletion key is not a leak; the leaked subnet still routes") {
+		assert.Equal(t, "aws_subnet", routing.MockGaps[0].Resource)
+	}
+}
+
+// An unclassified orphan's Index is its row in the /mock/state array, so
+// diagnostics point at the leaked row and not at an exempt one before it.
+func TestClassifyOrphans_UnclassifiedIndexIsTheSnapshotRow(t *testing.T) {
+	state := []byte(`{"account": {"projects": [
+		{"id": "00000000-0000-0000-0000-000000000000"},
+		{"id": "p-leaked"}
+	]}}`)
+	routing := ClassifyOrphans(state, "scaleway", "s", "ts")
+	assert.Equal(t, []OrphanedResource{{Service: "account", Collection: "projects", Index: 1}}, routing.Unclassified)
 }

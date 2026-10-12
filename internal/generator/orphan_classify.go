@@ -123,6 +123,19 @@ var orphanSubshapeTable = []orphanSubshapeEntry{
 		Resource:      "aws_subnet",
 		MockGapSignal: "fakeaws subnet MapPublicIpOnLaunch attribute doesn't persist (T8); provider wait-loop times out and the row lingers after destroy",
 	},
+	// AWS KMS keys — destroy schedules deletion of every key in tofu's
+	// state, leaving it PendingDeletion (an end state, not an orphan). A
+	// key in any other state was never in state at destroy: the provider
+	// lost it after fakeaws created it. No aws_kms_key argument fixes
+	// that, so it is a mock gap, not a pitfall.
+	{
+		Cloud:         "aws",
+		Service:       "kms",
+		Collection:    "keys",
+		Subshape:      SubshapeMockProviderDivergence,
+		Resource:      "aws_kms_key",
+		MockGapSignal: "fakeaws KMS key not PendingDeletion after destroy: destroy never scheduled its deletion, so tofu state had lost the key fakeaws created — a read the provider makes after CreateKey disagrees with fakeaws",
+	},
 	// GCP Secret Manager — same soft-delete pattern as AWS but with a
 	// different argument. google_secret_manager_secret destroy
 	// doesn't actually delete; the row stays in PendingDeletion or
@@ -172,13 +185,18 @@ type OrphanRouting struct {
 }
 
 // ignoredOrphanRoots and ignoredOrphanCollections are mock bookkeeping, not
-// tenant resources: fakegcp's long-running operations, fakeaws's request
-// audit log and schema marker, and per-service event, metric and message
-// tables.
+// tenant resources, so they never count as orphans on a clean teardown.
 var (
 	ignoredOrphanRoots = map[string]bool{
-		"metadata":       true,
-		"operations":     true,
+		"metadata": true,
+		// fakegcp persists every long-running operation (insert, delete,
+		// setLabels, ...) and surfaces them under state.operations. They
+		// are the audit trail of the API calls that made the resources,
+		// not resources.
+		"operations": true,
+		// fakeaws's universal bookkeeping tables (fakeaws concepts.md
+		// "Required surface" item 7): `audit` is the per-request log and
+		// `schema_version` the integer schema marker /mock/state emits.
 		"audit":          true,
 		"schema_version": true,
 	}
@@ -189,17 +207,26 @@ var (
 	}
 )
 
-// mockwayDefaultProjectID is the project mockway seeds at boot so a
-// scenario that declares none still has a project_id to send. It mirrors
-// models.DefaultProjectID in mockway; infrafactory does not import the
-// sibling mocks.
+// mockwayDefaultProjectID is the project mockway seeds at boot (S140) so a
+// scenario that never declares one still has a valid project_id to send.
+// That row is present on every clean teardown, so counting it would fail
+// the orphan check for every scenario in the suite. Only the seeded
+// default is exempt: a project a scenario created and failed to destroy
+// still counts, which matters now that Layer 3 stacks create their own
+// projects. It mirrors models.DefaultProjectID in mockway; infrafactory
+// does not import the sibling mocks.
 const mockwayDefaultProjectID = "00000000-0000-0000-0000-000000000000"
 
-// autoCreatedVPCName is the name Scaleway (and mockway) gives the default
-// VPC it creates for a private network that names no vpc_id. Terraform
-// never creates or destroys it. A stack that names its own VPC "default"
-// is exempted wrongly: the known edge of matching on name rather than
-// trusting state to be complete.
+// autoCreatedVPCName is the name of the default VPC Scaleway gives a
+// project, where it puts a private network whose request names no vpc_id;
+// mockway models that (mockway#26). Like the "Default security group"
+// ADR-0023's purge exists for, Terraform never creates or destroys it, so
+// counting it would fail the orphan check for every scenario with private
+// networking: every scenario with compute, because vpc_required demands
+// it. Matched on the name the API assigns, not on absence from state, so a
+// VPC a scenario declared and failed to destroy still counts. A stack that
+// names its own VPC "default" is exempted wrongly, the known edge of this
+// rule and cheaper than trusting state to be complete.
 const autoCreatedVPCName = "default"
 
 // kmsPendingDeletion is the state AWS leaves a destroyed KMS key in: it
@@ -232,7 +259,9 @@ func leftByCleanDestroy(root, collection string, item map[string]any) bool {
 type OrphanCollection struct {
 	Service    string
 	Collection string
-	Items      []any
+	// Indexes are the orphans' positions in the collection's /mock/state
+	// array, exempt rows included in the numbering.
+	Indexes []int
 }
 
 // Orphans decodes a /mock/state snapshot ({ service: { collection: [...] } })
@@ -260,15 +289,15 @@ func Orphans(stateJSON []byte) ([]OrphanCollection, error) {
 			if !ok || ignoredOrphanCollections[collection] {
 				continue
 			}
-			var left []any
-			for _, item := range items {
+			var indexes []int
+			for i, item := range items {
 				if m, ok := item.(map[string]any); ok && leftByCleanDestroy(service, collection, m) {
 					continue
 				}
-				left = append(left, item)
+				indexes = append(indexes, i)
 			}
-			if len(left) > 0 {
-				orphans = append(orphans, OrphanCollection{Service: service, Collection: collection, Items: left})
+			if len(indexes) > 0 {
+				orphans = append(orphans, OrphanCollection{Service: service, Collection: collection, Indexes: indexes})
 			}
 		}
 	}
@@ -307,11 +336,11 @@ func ClassifyOrphans(mockStateJSON []byte, cloud, scenario, timestamp string) Or
 		return routing
 	}
 	for _, orphan := range orphans {
-		service, collection, items := orphan.Service, orphan.Collection, orphan.Items
+		service, collection := orphan.Service, orphan.Collection
 		// Look up in the sub-shape table.
 		entry := lookupOrphanSubshape(cloud, service, collection)
 		if entry == nil {
-			for i := range items {
+			for _, i := range orphan.Indexes {
 				routing.Unclassified = append(routing.Unclassified, OrphanedResource{
 					Service:    service,
 					Collection: collection,
@@ -341,7 +370,7 @@ func ClassifyOrphans(mockStateJSON []byte, cloud, scenario, timestamp string) Or
 				Resource: entry.Resource,
 				Scenario: scenario,
 				Detail: fmt.Sprintf("orphan_check: %s.%s had %d non-empty entries after destroy",
-					service, collection, len(items)),
+					service, collection, len(orphan.Indexes)),
 				Timestamp: timestamp,
 			})
 		}

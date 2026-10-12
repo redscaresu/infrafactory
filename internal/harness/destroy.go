@@ -116,7 +116,7 @@ func countOrphans(stateJSON []byte) (int, error) {
 	}
 	count := 0
 	for _, orphan := range orphans {
-		count += len(orphan.Items)
+		count += len(orphan.Indexes)
 	}
 	return count, nil
 }
