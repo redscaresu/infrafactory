@@ -612,15 +612,20 @@ directory.
   refuses the read, naming every such entry, with nothing sent.
 - `--out` must resolve, symlinks included, under `<repo>/.infrafactory/`, and not into
   `.infrafactory/runs` or `.infrafactory/live`, which the UI serves. Anything else is refused
-  before any request. The recorded read is `<out>/read.json`: the directory `0700` (an existing one
-  open to group or other is refused, never chmodded), the file `0600`, overwritten by the next read
-  into the same `--out`.
+  before any request. Every directory from `.infrafactory` down to `--out` is made `0700` where
+  missing; an existing one below `.infrafactory` that is open to group or other, or a symlink, is
+  refused, never chmodded. `--out` gets a `.gitignore` of `*` before the read, so git ignores it in
+  any repository. The recorded read is `<out>/read.json`, `0600`, overwritten by the next read into
+  the same `--out`.
 
 In order: `sts:GetCallerIdentity` (a wrong account or principal stops the read after that one
 request), the EC2 DryRun preflight (any answer but `UnauthorizedOperation` stops it, naming the
-action), then each entry and its EC2 follow-ups. A refusal exits 1 and writes no recorded read; a
-missing or malformed flag exits 2. The raw `read.json` carries the account id and the read's
-values: it is never committed; `cmd/aws-read-scrub` turns it into fixtures that may be.
+action), then each entry and its EC2 follow-ups. A refusal (`Refused:`, json `refusal`) exits 1
+and writes no recorded read; a missing or malformed flag exits 2. If the account was read but
+`read.json` could not be written, it says so (`Not written:`, json `write_failure`, with the
+exchange count) and exits 1: the read happened, and must be run again. The raw `read.json` carries
+the account id and the read's values: it is never committed; `cmd/aws-read-scrub` turns it into
+fixtures that may be.
 
 ## Sibling mocks
 

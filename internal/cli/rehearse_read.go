@@ -94,13 +94,7 @@ func (r rehearseRead) run(cmd *cobra.Command, _ []string) error {
 		r.doer = newAWSHTTPClient()
 	}
 
-	result := rehearseReadResult{Schema: rehearseReadSchema, Status: CommandStatusSuccess}
-	read, path, err := r.read(cmd.Context(), f)
-	if err != nil {
-		result = rehearseReadResult{Schema: rehearseReadSchema, Status: CommandStatusFailed, Refusal: err.Error()}
-	} else {
-		result.Read, result.Exchanges = path, len(read.Exchanges)
-	}
+	result, err := r.result(cmd.Context(), f)
 	if writeErr := result.write(cmd, mode); writeErr != nil {
 		return writeErr
 	}
@@ -110,9 +104,30 @@ func (r rehearseRead) run(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
+// result reads the account, writes the recorded read and reports which
+// of them failed: a refusal means the read did not finish, a write
+// failure that it did and its recording is lost.
+func (r rehearseRead) result(ctx context.Context, f rehearseReadFlags) (rehearseReadResult, error) {
+	result := rehearseReadResult{Schema: rehearseReadSchema, Status: CommandStatusFailed}
+	read, out, err := r.read(ctx, f)
+	if err != nil {
+		result.Refusal = err.Error()
+		return result, err
+	}
+	result.Exchanges = len(read.Exchanges)
+	path, err := writeRecordedRead(out, read)
+	if err != nil {
+		err = fmt.Errorf("the account was read into %d exchanges, and the recorded read was not written: %w", result.Exchanges, err)
+		result.WriteFailure = err.Error()
+		return result, err
+	}
+	result.Status, result.Read = CommandStatusSuccess, path
+	return result, nil
+}
+
 // read makes --out before anything is read, then reads the read set, the
-// key (held in this process only) and the account, and writes the
-// recorded read into --out. It returns the read and its path.
+// key (held in this process only) and the account. It returns the read
+// and --out, resolved.
 func (r rehearseRead) read(ctx context.Context, f rehearseReadFlags) (harness.AWSRecordedRead, string, error) {
 	repo, err := rehearsalRepo(r.wd)
 	if err != nil {
@@ -137,16 +152,22 @@ func (r rehearseRead) read(ctx context.Context, f rehearseReadFlags) (harness.AW
 	if err != nil {
 		return harness.AWSRecordedRead{}, "", err
 	}
+	return read, out, nil
+}
+
+// writeRecordedRead writes read into the dir out as rehearseReadFile, 0600,
+// and returns its path.
+func writeRecordedRead(out string, read harness.AWSRecordedRead) (string, error) {
 	// Bodies are XML: unescaped, the recording stays legible to check.
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
 	enc.SetEscapeHTML(false)
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(read); err != nil {
-		return harness.AWSRecordedRead{}, "", fmt.Errorf("encode the recorded read: %w", err)
+		return "", fmt.Errorf("encode the recorded read: %w", err)
 	}
 	path := filepath.Join(out, rehearseReadFile)
-	return read, path, writeSynced(path, buf.Bytes())
+	return path, writeSynced(path, buf.Bytes())
 }
 
 func (r rehearseRead) abs(path string) string {
@@ -156,12 +177,12 @@ func (r rehearseRead) abs(path string) string {
 	return filepath.Join(r.wd, path)
 }
 
-// rehearseReadOutDir makes out, resolved, a 0700 dir and returns it. It
-// refuses, making nothing, an out that does not resolve under
-// <repo>/.infrafactory, or that lies in the run or live store, which the
-// UI serves. Those are compared case-folded: on a case-insensitive file
-// system .infrafactory/RUNS is the run store. An existing dir open to
-// group or other is refused and never chmodded.
+// rehearseReadOutDir makes out, resolved, a 0700 dir holding a .gitignore
+// of *, and returns it. It refuses, making nothing, an out that does not
+// resolve under <repo>/.infrafactory, or that lies in the run or live
+// store, which the UI serves. Those are compared case-folded: on a
+// case-insensitive file system .infrafactory/RUNS is the run store. Each
+// level below .infrafactory is made and checked by privateDirs.
 func rehearseReadOutDir(repo, out string) (string, error) {
 	resolved, err := rehearsalResolveExisting(out)
 	if err != nil {
@@ -176,15 +197,20 @@ func rehearseReadOutDir(repo, out string) (string, error) {
 			return "", fmt.Errorf("--out %s is refused: it lies in %s, which the UI serves", out, served)
 		}
 	}
-	if err := os.MkdirAll(resolved, 0o700); err != nil {
-		return "", fmt.Errorf("--out %s: %w", out, err)
+	// Every level from .infrafactory down, so none is left open.
+	var below []string
+	dir := root
+	rel, _ := filepath.Rel(root, resolved)
+	for _, name := range strings.Split(rel, string(filepath.Separator)) {
+		dir = filepath.Join(dir, name)
+		below = append(below, dir)
 	}
-	info, err := os.Lstat(resolved)
-	if err != nil {
-		return "", fmt.Errorf("--out %s: %w", out, err)
+	if err := privateDirs(root, below...); err != nil {
+		return "", fmt.Errorf("--out %s is refused: %w", out, err)
 	}
-	if !info.IsDir() || info.Mode().Perm()&0o077 != 0 {
-		return "", fmt.Errorf("--out %s is refused: %s is %v, not a directory of mode 0700, and is never chmodded", out, resolved, info.Mode())
+	// The raw read is never committed, whichever repository holds it.
+	if err := gitignoreAll(resolved); err != nil {
+		return "", fmt.Errorf("--out %s: %w", out, err)
 	}
 	return resolved, nil
 }
@@ -239,13 +265,16 @@ func readRehearseReadSet(path string) ([]harness.AWSReadEntry, error) {
 }
 
 // rehearseReadResult is what read reports: where the recorded read went
-// and how many exchanges it holds, or the refusal.
+// and how many exchanges it holds; or the refusal, when the read did not
+// finish; or, when it did, the exchanges read and why the recorded read
+// was not written.
 type rehearseReadResult struct {
-	Schema    string        `json:"schema"`
-	Status    CommandStatus `json:"status"`
-	Read      string        `json:"read,omitempty"`
-	Exchanges int           `json:"exchanges,omitempty"`
-	Refusal   string        `json:"refusal,omitempty"`
+	Schema       string        `json:"schema"`
+	Status       CommandStatus `json:"status"`
+	Read         string        `json:"read,omitempty"`
+	Exchanges    int           `json:"exchanges,omitempty"`
+	Refusal      string        `json:"refusal,omitempty"`
+	WriteFailure string        `json:"write_failure,omitempty"`
 }
 
 func (r rehearseReadResult) write(cmd *cobra.Command, mode OutputMode) error {
@@ -259,8 +288,12 @@ func (r rehearseReadResult) write(cmd *cobra.Command, mode OutputMode) error {
 		return err
 	}
 	_, _ = fmt.Fprintf(out, "Command: rehearse read\nStatus: %s\n", r.Status)
-	if r.Refusal != "" {
+	switch {
+	case r.Refusal != "":
 		_, err := fmt.Fprintf(out, "Refused: %s\n", r.Refusal)
+		return err
+	case r.WriteFailure != "":
+		_, err := fmt.Fprintf(out, "Exchanges: %d\nNot written: %s\n", r.Exchanges, r.WriteFailure)
 		return err
 	}
 	_, err := fmt.Fprintf(out, "Recorded read: %s\nExchanges: %d\n", r.Read, r.Exchanges)

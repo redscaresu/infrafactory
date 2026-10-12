@@ -40,10 +40,11 @@ const (
 
 // readDoer answers the read as AWS would a key of account: STS who it
 // is, EC2 the preflight's DryRun requests with dryRunCode
-// (UnauthorizedOperation when empty), and DescribeVpcs with no VPCs. It
-// records each request's action.
+// (UnauthorizedOperation when empty), and DescribeVpcs with no VPCs,
+// calling onDescribe first when set. It records each request's action.
 type readDoer struct {
 	account, dryRunCode string
+	onDescribe          func()
 	actions             []string
 }
 
@@ -68,6 +69,9 @@ func (d *readDoer) Do(req *http.Request) (*http.Response, error) {
 	case form.Get("DryRun") == "true":
 		status, answer = http.StatusPreconditionFailed, ec2ErrorAnswer(d.dryRunCode)
 	case action == "DescribeVpcs":
+		if d.onDescribe != nil {
+			d.onDescribe()
+		}
 		answer = "<DescribeVpcsResponse><vpcSet/></DescribeVpcsResponse>"
 	default:
 		status, answer = http.StatusBadRequest, ec2ErrorAnswer("InvalidAction")
@@ -209,6 +213,12 @@ func TestRehearseReadWritesTheRecordedReadPrivately(t *testing.T) {
 	file, err := os.Stat(filepath.Join(out, rehearseReadFile))
 	require.NoError(t, err)
 	assert.Equal(t, os.FileMode(0o600), file.Mode().Perm())
+	reads, err := os.Stat(filepath.Dir(out))
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o700), reads.Mode().Perm(), "the level between .infrafactory and --out")
+	gitignore, err := os.ReadFile(filepath.Join(out, ".gitignore"))
+	require.NoError(t, err)
+	assert.Equal(t, "*\n", string(gitignore), "git ignores the raw read in any repository")
 
 	data, err := os.ReadFile(filepath.Join(out, rehearseReadFile))
 	require.NoError(t, err)
@@ -300,21 +310,64 @@ func TestRehearseReadRefusesBeforeTheReadSet(t *testing.T) {
 	}
 }
 
-// An existing --out open to group or other is refused, never chmodded.
-func TestRehearseReadRefusesAnOutOpenToOthers(t *testing.T) {
+// An existing dir below .infrafactory on the way to --out, --out itself
+// included, that is open to group or other is refused, never chmodded.
+func TestRehearseReadRefusesADirOpenToOthers(t *testing.T) {
 	t.Parallel()
-	_, repo := readRepo(t, readVPCEntry)
-	out := filepath.Join(repo, readOutDir)
-	require.NoError(t, os.MkdirAll(out, 0o700))
-	require.NoError(t, os.Chmod(out, 0o750))
-	doer := &readDoer{account: readAccount}
 
-	run := runRead(t, repo, doer, append(readFlags(), "--out", readOutDir)...)
+	for _, open := range []string{readOutDir, filepath.Dir(readOutDir)} {
+		t.Run(open, func(t *testing.T) {
+			t.Parallel()
+			_, repo := readRepo(t, readVPCEntry)
+			require.NoError(t, os.MkdirAll(filepath.Join(repo, readOutDir), 0o700))
+			require.NoError(t, os.Chmod(filepath.Join(repo, open), 0o750))
+			doer := &readDoer{account: readAccount}
 
-	require.Error(t, run.err)
-	assert.Contains(t, run.err.Error(), "not a directory of mode 0700")
-	assert.Empty(t, doer.actions, "no request")
-	info, err := os.Stat(out)
-	require.NoError(t, err)
-	assert.Equal(t, os.FileMode(0o750), info.Mode().Perm())
+			run := runRead(t, repo, doer, append(readFlags(), "--out", readOutDir)...)
+
+			require.Error(t, run.err)
+			assert.Contains(t, run.err.Error(), "not a directory of mode 0700")
+			assert.Empty(t, doer.actions, "no request")
+			info, err := os.Stat(filepath.Join(repo, open))
+			require.NoError(t, err)
+			assert.Equal(t, os.FileMode(0o750), info.Mode().Perm())
+		})
+	}
+}
+
+// A recorded read that cannot be written after the account was read is
+// reported as that, never as a refusal: the read happened.
+func TestRehearseReadReportsAWriteFailureAfterTheRead(t *testing.T) {
+	t.Parallel()
+
+	const want = "the account was read into 1 exchanges, and the recorded read was not written: "
+	for _, mode := range []OutputMode{OutputModeHuman, OutputModeJSON} {
+		t.Run(string(mode), func(t *testing.T) {
+			t.Parallel()
+			_, repo := readRepo(t, readVPCEntry)
+			// A dir where the file goes: the rename onto it fails, root or not.
+			doer := &readDoer{account: readAccount, onDescribe: func() {
+				require.NoError(t, os.Mkdir(filepath.Join(repo, readOutDir, rehearseReadFile), 0o700))
+			}}
+
+			run := runRead(t, repo, doer, append(readFlags(), "--out", readOutDir, "--output", string(mode))...)
+
+			require.Error(t, run.err)
+			assert.Equal(t, ExitCodeRuntime, ExitCodeForError(run.err))
+			assert.Contains(t, run.err.Error(), want)
+			assert.Contains(t, doer.actions, "DescribeVpcs")
+			if mode == OutputModeHuman {
+				assert.Contains(t, run.stdout, "Status: failed\nExchanges: 1\nNot written: "+want)
+				assert.NotContains(t, run.stdout, "Refused")
+				return
+			}
+			var result rehearseReadResult
+			require.NoError(t, json.Unmarshal([]byte(run.stdout), &result))
+			assert.Equal(t, CommandStatusFailed, result.Status)
+			assert.Equal(t, 1, result.Exchanges)
+			assert.Contains(t, result.WriteFailure, want)
+			assert.Empty(t, result.Refusal)
+			assert.Empty(t, result.Read)
+		})
+	}
 }
