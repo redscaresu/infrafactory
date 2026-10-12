@@ -429,9 +429,15 @@ Scope setup step 3 says.
 
 ### Holding aws-web-live for a read
 
+Last run 2026-10-12: held about 7 minutes (one t3.micro, public IPv4), released clean, under €0.01.
+
 To read the live stack's state, `test --hold` keeps the stack up after a passing run. Order:
 
-1. Generate aws-web-live's HCL first, without the Layer 3 config, and see it green against fakeaws.
+1. Generate aws-web-live's HCL with `--config <cfg>`. That only reads from AWS (STS, then the public
+   AL2023 SSM parameter), and the HCL must carry the AMI resolved for the run as a literal or the
+   Layer 3 gate refuses it. `test --hold` then runs the mock layers before any real apply. The
+   out-of-git `<cfg>` must be the current `infrafactory.yaml` with Layer 3 on and your `aws` block:
+   a stale copy lacks the aws_* `allow_resource_types` and the gate refuses every type.
 2. `infrafactory test scenarios/training/aws-web-live.yaml --config <cfg> --hold`. It holds only a
    passing, uninterrupted run whose copy is written; anything else tears down as a plain `test`
    does. If the copy was written before an interrupt, it is kept, and the stage `aws_hold` says so:
