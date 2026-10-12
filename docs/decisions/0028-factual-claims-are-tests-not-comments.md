@@ -161,6 +161,10 @@ provider release that breaks one fails CI rather than a rehearsal.
 | (h) Tofu's configuration loader reads only its configuration suffixes from a module directory, and no subdirectory but the test directory: broken HCL in `a.hcl`, `a.tf.bak`, `notes.txt`, `x.tfvars.example` and `sub/b.tf` leaves `init -backend=false` and `validate` passing, and broken HCL in `tests/a.tftest.hcl` fails both. Tofu reads `.terraform.lock.hcl` and `.terraform/` by other routes; ADR-0042 § The extension and file policy names the rule that owns each | `TestAssumption_LoaderIgnoresUnknownSuffixes` | Prepare | rehearsal-prepare-gate | true |
 | (i) `tofu init -backend=false`, offline with `TF_DATA_DIR` outside the root, writes the module manifest at `<TF_DATA_DIR>/modules/modules.json`: the root entry is Key `""`, Source `""`, Dir `.`; a local entry's Source is as written and its Dir is relative to the root, cleaned. A root with no module blocks gets no manifest. A module fetched from an absolute path gets an absolute Dir under `<TF_DATA_DIR>/modules`, a symlink to the path it was fetched from, and a local module it calls keeps an absolute Dir at that path | `TestAssumption_ModulesManifestShape` | Prepare | rehearsal-prepare-gate | true |
 | (j) A root variable takes the value of the last of its sources in this order: its default, `terraform.tfvars`, each `*.auto.tfvars` in lexical order (not the order written), then `-var-file` | `TestAssumption_VariablePrecedenceMatchesGate` | Prepare | rehearsal-prepare-gate | true |
+| (k) With an empty HOME and `GIT_CONFIG_NOSYSTEM=1`, `git config --show-scope --list` lists no system entry and no `credential.helper`. A control without the variable shows the system entries where a system config exists (darwin's git sets osxkeychain's helper there); CI's ubuntu has none, so CI exercises only the linux case and the control logs that it was vacuous | `TestAssumption_GitNoSystemDropsCredentialHelper` | Prepare | rehearsal-prepare-gate | true |
+| (l) Under `GIT_ALLOW_PROTOCOL=none`, a value naming no transport, `git ls-remote` of an https, an ssh and a file:// URL each fail with git's `transport '<scheme>' not allowed` before any connection: the https and ssh URLs point at a closed loopback port, and the file:// URL at a real repository that a control under `GIT_ALLOW_PROTOCOL=file` lists | `TestAssumption_GitAllowProtocolNoneRefusesEveryTransport` | Prepare | rehearsal-prepare-gate | true |
+| (m) `tofu providers lock -platform=<this platform>` fails on a root whose local module call is not installed, until `tofu get` installs it; then, on a lock pinning hashicorp/aws at an earlier version than its constraint admits, it keeps the locked version | `TestAssumption_ProvidersLockKeepsLockedVersion` | Prepare | rehearsal-prepare-gate | true |
+| (n) A lock whose only hashicorp/aws entry is registry.terraform.io's initialises under tofu: `providers lock` adds a registry.opentofu.org entry at the same version, and `init -backend=false` installs that version and drops the registry.terraform.io entry | `TestAssumption_RegistryTerraformIoLockInitialises` | Prepare | rehearsal-prepare-gate | true |
 
 Refinements the tests recorded:
 - (d) runs at an init that initialises the backend, not at `init -backend=false`.
@@ -170,7 +174,9 @@ Refinements the tests recorded:
 
 Where they live: the gated claims are in `internal/cli/rehearsal_assumptions_test.go` as package
 `cli_test`, because `internal/e2e` imports `internal/cli`. (b) and both halves of (d), which fetch
-no provider, are in `internal/cli/assumptions_test.go`.
+no provider, are in `internal/cli/assumptions_test.go`. (k) and (l), which need only git, sit with
+the gated claims but run ungated, so a machine without git fails them.
 
-Bounds: the provider is `harness.AWSProviderVersion`, not a lock file. CI's tofu floats, so a tofu
+Bounds: the provider is `harness.AWSProviderVersion`, not a lock file, except in (m) and (n), whose
+lock pins 5.99.0. CI's tofu floats, so a tofu
 release can turn main red with no repo change; that is the test doing its job.

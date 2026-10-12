@@ -1,0 +1,126 @@
+package cli_test
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io/fs"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/redscaresu/infrafactory/internal/cli"
+	"github.com/redscaresu/infrafactory/internal/e2e"
+	"github.com/redscaresu/infrafactory/internal/harness"
+)
+
+// TestRehearsePrepareFirstInit runs `rehearse prepare` with real tofu on
+// a repo whose root has a lock and calls one local module, no registry
+// module. After the first init the aws provider is under <id>/data at the
+// lock's version, modules.json names the local module, the user's lock is
+// unchanged, and every mode in the rehearsal is tightened. A lock whose
+// aws entry is registry.terraform.io's initialises too, with the warning.
+func TestRehearsePrepareFirstInit(t *testing.T) {
+	e2e.SkipUnlessEnabled(t)
+	_, err := exec.LookPath("tofu")
+	require.NoError(t, err, "tofu binary required for e2e")
+
+	for _, addr := range []string{"registry.opentofu.org/hashicorp/aws", "registry.terraform.io/hashicorp/aws"} {
+		t.Run(addr, func(t *testing.T) {
+			repo := realTempDir(t)
+			lock := fmt.Sprintf("provider %q {\n  version     = %q\n  constraints = %q\n}\n", addr, harness.AWSProviderVersion, harness.AWSProviderVersion)
+			for name, content := range map[string]string{
+				".git/HEAD":                     "ref: refs/heads/main\n",
+				"envs/prod/.terraform.lock.hcl": lock,
+				"envs/prod/main.tf": fmt.Sprintf(`terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = %q
+    }
+  }
+}
+
+provider "aws" {
+  region = %q
+}
+
+module "m" {
+  source = "../../modules/m"
+}
+`, harness.AWSProviderVersion, assumptionRegion),
+				"modules/m/main.tf": manifestOutput,
+			} {
+				e2e.WriteFile(t, filepath.Join(repo, name), []byte(content))
+			}
+			t.Chdir(repo)
+
+			root := cli.NewRootCmd()
+			stdout := &bytes.Buffer{}
+			root.SetOut(stdout)
+			root.SetErr(&bytes.Buffer{})
+			root.SetArgs([]string{"rehearse", "prepare", "envs/prod", "--account", "123456789012", "--region", assumptionRegion, "--output", "json"})
+			require.NoError(t, root.Execute(), stdout.String())
+
+			var result struct {
+				ID       string   `json:"id"`
+				Version  string   `json:"aws_provider_version"`
+				Warnings []string `json:"warnings"`
+			}
+			require.NoError(t, json.Unmarshal(stdout.Bytes(), &result), stdout.String())
+			rehearsal := filepath.Join(repo, ".infrafactory", "rehearsals", result.ID)
+			data := filepath.Join(rehearsal, "data")
+			assert.Equal(t, harness.AWSProviderVersion, result.Version)
+			assert.DirExists(t, filepath.Join(data, "providers", "registry.opentofu.org", "hashicorp", "aws", harness.AWSProviderVersion))
+			assert.Contains(t, prepareManifest(t, data), manifestEntry{"m", "../../modules/m", "../../modules/m"})
+			userLock, err := os.ReadFile(filepath.Join(repo, "envs", "prod", ".terraform.lock.hcl"))
+			require.NoError(t, err)
+			assert.Equal(t, lock, string(userLock), "prepare changed the user's lock")
+			if addr == "registry.terraform.io/hashicorp/aws" {
+				require.Len(t, result.Warnings, 1)
+				assert.Contains(t, result.Warnings[0], "registry.terraform.io's")
+			}
+			assertTightModes(t, rehearsal)
+		})
+	}
+}
+
+// prepareManifest is the module manifest the first init wrote under data.
+func prepareManifest(t *testing.T, data string) []manifestEntry {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(data, "modules", "modules.json"))
+	require.NoError(t, err)
+	var manifest struct{ Modules []manifestEntry }
+	require.NoError(t, json.Unmarshal(raw, &manifest), string(raw))
+	return manifest.Modules
+}
+
+// assertTightModes walks dir: every dir is 0700, every provider binary
+// 0700, every other file 0600, and nothing else is there.
+func assertTightModes(t *testing.T, dir string) {
+	t.Helper()
+	binaries := 0
+	require.NoError(t, filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		require.NoError(t, err)
+		info, err := d.Info()
+		require.NoError(t, err)
+		switch {
+		case d.IsDir():
+			assert.Equal(t, fs.ModeDir|0o700, info.Mode(), path)
+		case !info.Mode().IsRegular():
+			t.Errorf("%s is %v, not a dir or a regular file", path, info.Mode())
+		case strings.HasPrefix(d.Name(), "terraform-provider-"):
+			binaries++
+			assert.Equal(t, fs.FileMode(0o700), info.Mode(), path)
+		default:
+			assert.Equal(t, fs.FileMode(0o600), info.Mode(), path)
+		}
+		return nil
+	}))
+	assert.Positive(t, binaries, "no provider binary under %s", dir)
+}
