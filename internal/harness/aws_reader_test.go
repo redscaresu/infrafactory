@@ -204,6 +204,7 @@ func TestReadAWSAccountRefusesWithNothingSent(t *testing.T) {
 		edit    func(*AWSReadInput)
 		wantErr string
 	}{
+		{"an empty read set", func(in *AWSReadInput) { in.ReadSet = nil }, "the read set is empty"},
 		{"no identity check", func(in *AWSReadInput) { in.Identity = nil }, "no identity check was given"},
 		{"no preflight", func(in *AWSReadInput) { in.Preflight = nil }, "no preflight was given"},
 		{"an entry outside the reader table", func(in *AWSReadInput) {

@@ -132,6 +132,11 @@ func newAWSReplay(ctx context.Context, in AWSReadInput) (*awsReplay, error) {
 	case !awsPartitionRegionPattern.MatchString(in.Config.Region):
 		return nil, fmt.Errorf("region %q is outside the aws partition, the only one the read's endpoints serve", in.Config.Region)
 	}
+	if len(in.ReadSet) == 0 {
+		// A read of nothing would record no exchanges, which a load could
+		// take for an empty account.
+		return nil, errors.New("the read set is empty")
+	}
 	if err := ValidateAWSReadSet(in.ReadSet); err != nil {
 		return nil, err
 	}
@@ -317,9 +322,9 @@ func awsQueryForm(params json.RawMessage) (url.Values, error) {
 // checkAWSReadAnswer passes a 2xx answer with no truncation marker, and a
 // 4xx answer whose error code is one of svc's NotFound codes.
 func checkAWSReadAnswer(svc AWSReaderService, status int, body []byte) error {
-	if status < 200 || status > 299 {
+	if status < http.StatusOK || status >= http.StatusMultipleChoices {
 		code := awsAnswerErrorCode(svc.Protocol, body)
-		if status >= 400 && status < 500 && slices.Contains(svc.NotFound, code) {
+		if status >= http.StatusBadRequest && status < http.StatusInternalServerError && slices.Contains(svc.NotFound, code) {
 			return nil
 		}
 		return fmt.Errorf("answered %d %q", status, code)
@@ -336,8 +341,10 @@ func checkAWSReadAnswer(svc AWSReaderService, status int, body []byte) error {
 }
 
 // awsAnswerErrorCode is an error answer's code, "" when it has none: the
-// XML Code element (EC2's Errors/Error/Code, IAM's and STS's Error/Code),
-// or a json body's __type or code, as smithy reads it.
+// first XML Code element (EC2's Errors/Error/Code, IAM's and STS's
+// Error/Code), or a json body's __type, else its code, without any prefix
+// up to a '#' or suffix from a ':'. It reads no header; a code it cannot
+// read fails the read.
 func awsAnswerErrorCode(protocol string, body []byte) string {
 	if protocol == awsProtocolQuery {
 		fields, err := awsXMLFields(body, "Code")
