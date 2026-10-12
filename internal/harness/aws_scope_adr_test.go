@@ -42,24 +42,31 @@ func TestADR0023AmendmentRecordsTheAWSImplementation(t *testing.T) {
 }
 
 // The hold amendment names its flags, paths, modes and rules; deleting
-// the section or softening a rule fails here.
+// the section or softening a rule fails here. The search is scoped to
+// that section so another part of the ADR cannot satisfy it.
 func TestADR0040RecordsTheHold(t *testing.T) {
 	t.Parallel()
 	data, err := os.ReadFile(awsScopeADRFile)
 	require.NoError(t, err)
+	_, section, found := strings.Cut(string(data), "## Amendment, 2026-10-12")
+	require.True(t, found, "ADR-0040 must carry the 2026-10-12 hold amendment")
+	section, _, _ = strings.Cut(section, "\n## ")
 	// Fields folds the ADR's line wraps so a phrase can span them.
-	adr := strings.ToLower(strings.Join(strings.Fields(string(data)), " "))
+	amendment := strings.ToLower(strings.Join(strings.Fields(section), " "))
 
 	for _, want := range []string{
-		"--hold", "--release-hold", ".infrafactory/holds/", "0700", "0600", "awsReleaseAfterCleanSweep",
+		"`test scenarios/training/aws-web-live.yaml --hold`", "--release-hold", ".infrafactory/holds/",
+		"0700", "0600", "awsReleaseAfterCleanSweep", "aws-web-live only", "within rule 6",
 		"the hold holds only a passing, uninterrupted run with its copy written",
 		"a failed or interrupted hold destroys and releases",
 		"the copy is written before the destroy and the release refuses without it",
 		"`reap <scenario> --take-over <holder>`",
 		"generate, run and test are refused for that scenario",
 		"nothing expires a hold",
+		"the operator deletes it by hand",
+		"the output state is present and different, refuse",
 	} {
-		assert.Contains(t, adr, strings.ToLower(want))
+		assert.Contains(t, amendment, strings.ToLower(want))
 	}
-	assert.NotContains(t, adr, "exception to rule 6")
+	assert.NotContains(t, amendment, "exception to rule 6")
 }
