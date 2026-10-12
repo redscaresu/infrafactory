@@ -306,9 +306,10 @@ so a Ctrl-C is such a cancel: during a tofu command, tofu gets its one interrupt
 the lock or gate 1, which do not stop for it, prepare refuses before the first tofu; after the last
 tofu, it refuses once the modes are tightened.
 
-Before the second init, prepare dials the dead proxy and refuses if the dial connects, then writes
-`<id>/work/infrafactory_override.tf` at 0600: a `backend "local" {}` override that names no
-`path`. The second init is `tofu init -input=false -no-color -reconfigure -get=false
+Before the second init, prepare dials the dead proxy and refuses unless the connection is refused
+(one that connects, or fails any other way, refuses), then writes `infrafactory_override.tf` at 0600
+in the copy's root (the work dir prepare reports, under `<id>/work/`): a `backend "local" {}`
+override that names no `path`. The second init is `tofu init -input=false -no-color -reconfigure -get=false
 -lockfile=readonly -backend-config=path=<id>/state/terraform.tfstate
 -plugin-dir=<id>/data/providers`, under replace mode with only `HOME`, `TF_DATA_DIR` and
 `HTTP_PROXY`/`HTTPS_PROXY` at the dead proxy, and no `NO_PROXY`. It makes no proxied connection

@@ -2,12 +2,16 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/redscaresu/infrafactory/internal/harness"
@@ -17,11 +21,34 @@ import (
 // runner interrupts tofu's process group, then kills it.
 const rehearsalTofuTimeout = 10 * time.Minute
 
-// gateAndInit reads the copy's lock, runs gate 1 over the copy, then the
-// first init (ADR-0042 § The lock, § The two inits). It returns the lock.
-// The copy, the lock and gate 1 do not read ctx, so a cancel during them
-// is refused before the first tofu, and one during the last steps after
-// them: a cancel never ends in a success report.
+// rehearsalDeadProxy is the proxy the second init runs under. Nothing
+// listens there, which prepare checks before the second init. A var so a
+// test can move it.
+var rehearsalDeadProxy = "http://127.0.0.1:9"
+
+// rehearsalDialTimeout bounds prepare's dial of the dead proxy.
+const rehearsalDialTimeout = 5 * time.Second
+
+// ourOverride is the name infrafactory's override takes: it sorts before a
+// user's zz_override.tf.
+const ourOverride = "infrafactory_override.tf"
+
+// localBackendOverride is the rehearsal's backend override: `backend
+// "local"`, with blockPath as its path when it is not empty.
+func localBackendOverride(blockPath string) string {
+	block := "{}"
+	if blockPath != "" {
+		block = fmt.Sprintf("{\n    path = %q\n  }", blockPath)
+	}
+	return "terraform {\n  backend \"local\" " + block + "\n}\n"
+}
+
+// gateAndInit reads the copy's lock, runs gate 1 over the copy, the first
+// init, gate 2 over what it wrote, then the second init (ADR-0042 § The
+// lock, § The two inits). It returns the lock. The copy, the lock and the
+// gates do not read ctx, so a cancel during them is refused before the
+// next tofu, and one during the last steps after them: a cancel never
+// ends in a success report.
 func (p rehearsePrepare) gateAndInit(ctx context.Context, rehearsal string, in rehearsalGateInput) (rehearsalLock, error) {
 	lock, problems := in.lock()
 	if err := rehearsalRefusal(problems); err != nil {
@@ -35,6 +62,15 @@ func (p rehearsePrepare) gateAndInit(ctx context.Context, rehearsal string, in r
 		return rehearsalLock{}, err
 	}
 	if err := p.firstInit(ctx, rehearsal, in, lock); err != nil {
+		return rehearsalLock{}, err
+	}
+	if err := rehearsalModulesGate(in, filepath.Join(rehearsal, "data")); err != nil {
+		return rehearsalLock{}, fmt.Errorf("gate 2, after the first init: %w", err)
+	}
+	if err := rehearsalCancelled(ctx); err != nil {
+		return rehearsalLock{}, err
+	}
+	if err := p.secondInit(ctx, rehearsal, in.root); err != nil {
 		return rehearsalLock{}, err
 	}
 	return lock, rehearsalCancelled(ctx)
@@ -92,6 +128,62 @@ func (p rehearsePrepare) firstInit(ctx context.Context, rehearsal string, in reh
 		return fmt.Errorf("the first init is refused: it changed the locked provider versions: %s", strings.Join(changes, "; "))
 	}
 	return rehearsalTightenModes(rehearsal)
+}
+
+// secondInit is the offline second init in the copy's root. The dead
+// proxy must refuse a dial; then the backend override goes into the root,
+// and init reads only the providers the first init installed, with the
+// state under <rehearsal>/state, outside the copy. It runs under replace
+// mode with an empty HOME, TF_DATA_DIR at <rehearsal>/data, both proxies at
+// the dead proxy and no NO_PROXY, so it makes no proxied connection
+// (TestAssumption_SecondInitMakesNoProxiedConnection). Then the
+// rehearsal's modes are tightened again.
+func (p rehearsePrepare) secondInit(ctx context.Context, rehearsal, root string) error {
+	if err := rehearsalProxyRefuses(ctx, rehearsalDeadProxy); err != nil {
+		return err
+	}
+	state, data := filepath.Join(rehearsal, "state"), filepath.Join(rehearsal, "data")
+	if err := os.Mkdir(state, 0o700); err != nil {
+		return err
+	}
+	if err := writeSynced(filepath.Join(root, ourOverride), []byte(localBackendOverride(""))); err != nil {
+		return err
+	}
+	env := map[string]string{
+		"HOME":        filepath.Join(rehearsal, "home"),
+		"TF_DATA_DIR": data,
+		"HTTPS_PROXY": rehearsalDeadProxy,
+		"HTTP_PROXY":  rehearsalDeadProxy,
+	}
+	args := []string{"init", "-input=false", "-no-color", "-reconfigure", "-get=false", "-lockfile=readonly",
+		"-backend-config=path=" + filepath.Join(state, "terraform.tfstate"), "-plugin-dir=" + filepath.Join(data, "providers")}
+	if err := p.tofu(ctx, harness.Command{Name: "tofu", Args: args, Dir: root, Env: env, ReplaceEnv: true}); err != nil {
+		return err
+	}
+	return rehearsalTightenModes(rehearsal)
+}
+
+// rehearsalProxyRefuses dials proxy and admits only a refused connection:
+// a dial that connects, or fails any other way, refuses the second init.
+func rehearsalProxyRefuses(ctx context.Context, proxy string) error {
+	refused := func(why string) error {
+		return fmt.Errorf("the second init is refused: the dead proxy %s %s, so it cannot be relied on to refuse the init's requests", proxy, why)
+	}
+	u, err := url.Parse(proxy)
+	if err != nil {
+		return refused(fmt.Sprintf("does not parse (%v)", err))
+	}
+	ctx, cancel := context.WithTimeout(ctx, rehearsalDialTimeout)
+	defer cancel()
+	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", u.Host)
+	switch {
+	case err == nil:
+		conn.Close()
+		return refused("accepted a connection")
+	case errors.Is(err, syscall.ECONNREFUSED):
+		return nil
+	}
+	return refused(fmt.Sprintf("did not refuse a dial (%v)", err))
 }
 
 // tofu runs one tofu command under rehearsalTofuTimeout. A failure, a

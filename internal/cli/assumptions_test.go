@@ -253,10 +253,6 @@ echo '{"keys":{"encryption_key":"`+encryptionProbeKey+`","decryption_key":"`+enc
 // fixture sets max_retries = 1, as each one does.
 const tofuDeadline = 2 * time.Minute
 
-// ourOverride is the name infrafactory's override takes: it sorts before a
-// user's zz_override.tf.
-const ourOverride = "infrafactory_override.tf"
-
 // runTofu runs tofu in dir through the production runner in replace mode
 // under tofuDeadline, and returns its stdout and stderr. The child's
 // environment is exactly env, plus this process's PATH when env names
@@ -287,16 +283,6 @@ func (p backendProbe) tofu(args ...string) (string, error) {
 		return out, fmt.Errorf("%s: tofu %s: %w\n%s%s", p.version, strings.Join(args, " "), err, out, stderr)
 	}
 	return out, nil
-}
-
-// localBackendOverride is the rehearsal's backend override: `backend
-// "local"`, with blockPath as its path when it is not empty.
-func localBackendOverride(blockPath string) string {
-	block := "{}"
-	if blockPath != "" {
-		block = fmt.Sprintf("{\n    path = %q\n  }", blockPath)
-	}
-	return "terraform {\n  backend \"local\" " + block + "\n}\n"
 }
 
 // initWithOutsideBackend is the rehearsal's second init: the backend

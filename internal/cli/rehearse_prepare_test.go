@@ -52,11 +52,15 @@ type prepareRun struct {
 }
 
 // runPrepare runs `rehearse prepare args` from wd with a recording runner
-// and the id prepareID.
+// and the id prepareID. The first init's init writes a manifest naming
+// only the root: gate 2 still walks every module block from the root.
 func runPrepare(wd string, args ...string) prepareRun {
 	var run prepareRun
 	runner := harness.CommandRunnerFunc(func(_ context.Context, c harness.Command) (harness.CommandResult, error) {
 		run.calls = append(run.calls, c)
+		if isFirstInit(c) {
+			return harness.CommandResult{}, writeRootManifest(c.Env["TF_DATA_DIR"])
+		}
 		return harness.CommandResult{}, nil
 	})
 	root := prepareRoot(rehearsePrepare{runner: runner, wd: wd, newID: func() string { return prepareID }})
@@ -79,6 +83,15 @@ func prepareRepo(t *testing.T, files map[string]string) (string, string) {
 		mustWriteFile(t, filepath.Join(repo, name), content)
 	}
 	return tmp, repo
+}
+
+// writeRootManifest writes <data>/modules/modules.json naming only the
+// root, as the first init writes it.
+func writeRootManifest(data string) error {
+	if err := os.MkdirAll(filepath.Join(data, "modules"), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(data, "modules", "modules.json"), []byte(`{"Modules":[{"Key":"","Source":"","Dir":"."}]}`), 0o644)
 }
 
 func preparedDir(repo string) string {
@@ -177,7 +190,7 @@ func TestRehearsePrepareCopiesTheRootAndItsModules(t *testing.T) {
 		assert.Equal(t, want, info.Mode(), path)
 		return nil
 	}))
-	assert.Len(t, run.calls, 3, "the first init's tofu commands")
+	assert.Len(t, run.calls, 4, "the first init's three tofu commands and the second init")
 }
 
 // treeDigest is every entry under dir but .infrafactory, which prepare
