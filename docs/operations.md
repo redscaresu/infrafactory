@@ -427,6 +427,25 @@ parameter for the AMI resolve, and what the apply and destroy send. A scope whos
 before 2026-10-10 lacks both, and refuses the first real AMI resolve: apply the policy again as
 Scope setup step 3 says.
 
+### Holding aws-web-live for a read
+
+To read the live stack's state, `test --hold` keeps the stack up after a passing run. Order:
+
+1. Generate aws-web-live's HCL first, without the Layer 3 config, and see it green against fakeaws.
+2. `infrafactory test scenarios/training/aws-web-live.yaml --config <cfg> --hold`. It holds only a
+   passing, uninterrupted run whose copy is written; anything else destroys, sweeps and releases.
+3. The copy is `.infrafactory/holds/aws-web-live/terraform-live.tfstate`: directory `0700`, file
+   `0600`, never committed, and it carries the account id.
+4. While the copy exists, `generate`, `run` and `test` of aws-web-live are refused.
+5. Release: `infrafactory reap scenarios/training/aws-web-live.yaml --config <cfg> --take-over <holder> --release-hold`
+   copies the state, destroys, sweeps, reaps and releases.
+6. If the release refuses, plain `infrafactory reap scenarios/training/aws-web-live.yaml --config <cfg> --take-over <holder>`
+   destroys without the copy.
+7. Delete the copy after the read.
+
+Cost bound: one small instance and its root volume, per hour held. There is no NAT gateway or load
+balancer. Nothing expires a hold, so release it the same day.
+
 ### The reader key file
 
 The account read (epic prod-read-seam) takes its read-only key from its own file, never from

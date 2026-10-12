@@ -77,3 +77,32 @@ func TestAWSRunChecklistNamesTheStagesAndTheReapCommand(t *testing.T) {
 	assert.Equal(t, []string{"ssm:GetParameter"}, iamActionPattern.FindAllString(section, -1),
 		"the checklist names one action, in the sentence about the public parameter")
 }
+
+// The hold runbook is what an operator reads before leaving real
+// resources up, so it must name the flags, the copy's location and
+// modes, the exit that works without the copy, and the cost bound.
+func TestAWSHoldRunbookNamesTheHoldTheReleaseAndTheCostBound(t *testing.T) {
+	t.Parallel()
+	data, err := os.ReadFile("../../docs/operations.md")
+	require.NoError(t, err)
+	_, inLayer3AWS, _ := strings.Cut(string(data), "\n## Layer 3 (AWS)\n")
+	inLayer3AWS, _, _ = strings.Cut(inLayer3AWS, "\n## ")
+	_, section, found := strings.Cut(inLayer3AWS, "\n### Holding aws-web-live for a read\n")
+	require.True(t, found, "docs/operations.md has no ### Holding aws-web-live for a read under ## Layer 3 (AWS)")
+	if i := regexp.MustCompile(`\n#{2,3} `).FindStringIndex(section); i != nil {
+		section = section[:i[0]]
+	}
+
+	for _, want := range []string{
+		"--hold",
+		"--release-hold",
+		".infrafactory/holds/",
+		"0700",
+		"0600",
+		"reap scenarios/training/aws-web-live.yaml --config <cfg> --take-over <holder>`\n",
+		"per hour held",
+	} {
+		assert.Contains(t, section, want)
+	}
+	assert.Empty(t, iamActionPattern.FindAllString(section, -1), "the hold runbook names no IAM action")
+}
