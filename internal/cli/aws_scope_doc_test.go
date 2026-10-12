@@ -93,15 +93,15 @@ func TestAWSHoldRunbookNamesTheHoldTheReleaseAndTheCostBound(t *testing.T) {
 		section = section[:i[0]]
 	}
 
-	reap := reapCommand(config.DefaultPath, "scenarios/training/aws-web-live.yaml")
+	// reapCommand prints the operator's config path; the doc says <cfg>.
+	reap := strings.Replace(reapCommand("cfg.yaml", "scenarios/training/aws-web-live.yaml"), "cfg.yaml", "<cfg>", 1)
 	for _, want := range []string{
 		// The test command itself: "--hold" alone is a substring of "--release-hold".
 		"infrafactory test scenarios/training/aws-web-live.yaml --config <cfg> --hold`",
 		reap + " --take-over <holder> --release-hold",
-		"plain `" + reap + " --take-over <holder>`",
+		"without `--release-hold`:\n   `" + reap + " --take-over <holder>`",
 		holdCopyPath(awsHoldScenario),
-		"0700",
-		"0600",
+		"directory `0700`, file `0600`",
 		StageAWSHold,
 		"public IPv4",
 		"per hour held",

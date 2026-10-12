@@ -429,25 +429,26 @@ Scope setup step 3 says.
 
 ### Holding aws-web-live for a read
 
-To read the live stack's state, `test --hold` keeps the stack up after a passing run. Add your
-`--config <cfg>` to each command, as in Running aws-web-live. Order:
+To read the live stack's state, `test --hold` keeps the stack up after a passing run. Order:
 
 1. Generate aws-web-live's HCL first, without the Layer 3 config, and see it green against fakeaws.
 2. `infrafactory test scenarios/training/aws-web-live.yaml --config <cfg> --hold`. It holds only a
    passing, uninterrupted run whose copy is written; anything else tears down as a plain `test`
    does. If the copy was written before an interrupt, it is kept, and the stage `aws_hold` says so:
    delete it by hand once the stack is gone, before the next generate, run or test.
-3. The copy is `.infrafactory/holds/aws-web-live/terraform-live.tfstate`: directory `0700`, file
-   `0600`, never committed, and it carries the account id.
+3. The copy is `.infrafactory/holds/aws-web-live/terraform-live.tfstate`, never committed, and it
+   carries the account id. Modes: directory `0700`, file `0600`.
 4. While the copy exists, `generate`, `run` and `test` of aws-web-live are refused.
-5. Release: `infrafactory reap scenarios/training/aws-web-live.yaml --take-over <holder> --release-hold`
-   keeps the copy the hold wrote (or writes it if none exists), then destroys, sweeps and
-   releases. It refuses, changing neither file, if the copy and the output dir's state differ.
-   `<holder>` is in the hold's `aws_scope_claim_kept` stage, which prints this command with the
-   holder filled in: copy that command.
-6. If the release refuses, plain `infrafactory reap scenarios/training/aws-web-live.yaml --take-over <holder>`
+5. While the stack is held, do the read (epic prod-read-seam).
+6. Release: `infrafactory --config <cfg> reap scenarios/training/aws-web-live.yaml --take-over <holder> --release-hold`
+   keeps the copy the hold wrote (or writes it if none exists), restores the output dir's state
+   from the copy if that state is missing, then destroys, sweeps and releases. It refuses, changing
+   neither file, if the copy and the output dir's state differ. `<holder>` is in the hold's
+   `aws_scope_claim_kept` stage, which prints this command with the holder filled in: copy that command.
+7. If the release refuses, the same command without `--release-hold`:
+   `infrafactory --config <cfg> reap scenarios/training/aws-web-live.yaml --take-over <holder>`,
    destroys without the copy.
-7. Delete the copy after the read.
+8. Delete the copy after the release.
 
 Cost bound: one small instance, its root volume and its public IPv4 address, per hour held. There
 is no NAT gateway or load balancer. Nothing expires a hold, so release it the same day.
