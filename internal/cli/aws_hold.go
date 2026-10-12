@@ -30,8 +30,8 @@ func holdCopyPath(scenarioName string) string {
 
 // prepareHoldRelease is reap's --release-hold, all of it local work before
 // any AWS request: the usage refusals, then the copy settled with the
-// output dir's state. Every refusal names the take-over that destroys
-// without the copy.
+// output dir's state. Every refusal of an aws scenario names the take-over
+// that destroys without the copy; another cloud's reap takes no take-over.
 func prepareHoldRelease(cmd *cobra.Command, runtime *CommandRuntime, sc scenario.Scenario, dryRun bool) error {
 	releaseHold, err := cmd.Flags().GetBool("release-hold")
 	if err != nil {
@@ -46,7 +46,10 @@ func prepareHoldRelease(cmd *cobra.Command, runtime *CommandRuntime, sc scenario
 	}
 	withoutCopy := destroyWithoutCopy(runtime, takeOver)
 	if refusal := releaseHoldRefusal(sc, takeOver, dryRun); refusal != "" {
-		return &CLIError{Op: "reap", Code: errorCodeUsage, Err: fmt.Errorf("%s. %s", refusal, withoutCopy)}
+		if layer3TeardownCloud(sc.Cloud) == layer3AWS {
+			refusal += ". " + withoutCopy
+		}
+		return &CLIError{Op: "reap", Code: errorCodeUsage, Err: errors.New(refusal)}
 	}
 	copyPath := holdCopyPath(sc.Name)
 	settled, err := settleHoldCopy(copyPath, filepath.Join(runtime.OutputDir(), harness.LiveStateFilename))
@@ -115,15 +118,14 @@ func settleHoldCopy(copyPath, statePath string) (string, error) {
 	return "kept, identical to " + statePath, nil
 }
 
-// privateHoldDirs makes holdsRoot and dir 0700 where they are missing,
-// then refuses either one that is a symlink, not a directory, or open to
-// group or other. It never chmods: a dir made by someone else is refused
-// as found.
+// privateHoldDirs makes .infrafactory, holdsRoot and dir, each 0700 where
+// it is missing, and refuses any of them that is a symlink or not a
+// directory, and a holds dir open to group or other. It never chmods: a
+// dir made by someone else is refused as found. .infrafactory may be 0755,
+// as the run and live stores make it.
 func privateHoldDirs(dir string) error {
-	if err := os.MkdirAll(filepath.Dir(holdsRoot), 0o700); err != nil {
-		return err
-	}
-	for _, d := range []string{holdsRoot, dir} {
+	infrafactory := filepath.Dir(holdsRoot)
+	for _, d := range []string{infrafactory, holdsRoot, dir} {
 		// Mkdir, not MkdirAll: it never creates through a symlink.
 		if err := os.Mkdir(d, 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
 			return err
@@ -132,7 +134,10 @@ func privateHoldDirs(dir string) error {
 		if err != nil {
 			return err
 		}
-		if !info.IsDir() || info.Mode().Perm()&0o077 != 0 {
+		if !info.IsDir() {
+			return fmt.Errorf("%s is %v, not a directory", d, info.Mode())
+		}
+		if d != infrafactory && info.Mode().Perm()&0o077 != 0 {
 			return fmt.Errorf("%s is %v, not a directory of mode 0700, and is never chmodded", d, info.Mode())
 		}
 	}

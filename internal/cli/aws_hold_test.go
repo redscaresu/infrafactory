@@ -142,17 +142,23 @@ func TestReleaseHoldRefusesBeforeAnyAWSRequest(t *testing.T) {
 	identical := func(name string) func(*testing.T, string) {
 		return func(t *testing.T, _ string) { plantCopy(t, name, []byte(awsLiveState)) }
 	}
+	elsewhere := t.TempDir()
 	for name, tc := range map[string]struct {
 		setup awsReapSetup
 		// prepare plants what the refusal must leave as it was.
 		prepare  func(t *testing.T, outDir string)
 		takeOver string
 		want     string
+		// noTakeOver: the scenario's reap takes no --take-over, so the
+		// refusal names none.
+		noTakeOver bool
+		// after checks what else the refusal must leave as it was.
+		after func(t *testing.T)
 	}{
 		"non-aws scenario": {
 			setup:    awsReapSetup{name: awsHoldScenario, cloud: "scaleway", withState: true, flags: releaseHoldFlags},
 			prepare:  identical(awsHoldScenario),
-			takeOver: lifecycleOtherHolder, want: "not aws-web-live on scaleway",
+			takeOver: lifecycleOtherHolder, want: "not aws-web-live on scaleway", noTakeOver: true,
 		},
 		"another aws scenario": {
 			setup:    awsReapSetup{withState: true, flags: releaseHoldFlags},
@@ -187,6 +193,18 @@ func TestReleaseHoldRefusesBeforeAnyAWSRequest(t *testing.T) {
 				require.NoError(t, os.Chmod(holdsRoot, 0o755))
 			},
 			takeOver: lifecycleOtherHolder, want: holdsRoot + " is drwxr-xr-x",
+		},
+		".infrafactory a symlink": {
+			setup: awsReapSetup{name: awsHoldScenario, withState: true, flags: releaseHoldFlags},
+			prepare: func(t *testing.T, _ string) {
+				require.NoError(t, os.Symlink(elsewhere, filepath.Dir(holdsRoot)))
+			},
+			takeOver: lifecycleOtherHolder, want: filepath.Dir(holdsRoot) + " is L",
+			after: func(t *testing.T) {
+				written, err := os.ReadDir(elsewhere)
+				require.NoError(t, err)
+				assert.Empty(t, written, "nothing written under the symlink's target")
+			},
 		},
 		"holds dir a symlink": {
 			setup: awsReapSetup{name: awsHoldScenario, withState: true, flags: releaseHoldFlags},
@@ -246,12 +264,20 @@ func TestReleaseHoldRefusesBeforeAnyAWSRequest(t *testing.T) {
 			if tc.takeOver != "" {
 				holder = shellQuote(tc.takeOver)
 			}
-			assert.Contains(t, r.err.Error(),
-				"`"+reapCommand(r.h.ConfigPath, r.h.ScenarioPath)+" --take-over "+holder+"` destroys without the copy")
+			if tc.noTakeOver {
+				assert.NotContains(t, r.err.Error(), "--take-over")
+				assert.NotContains(t, r.err.Error(), "destroys without the copy")
+			} else {
+				assert.Contains(t, r.err.Error(),
+					"`"+reapCommand(r.h.ConfigPath, r.h.ScenarioPath)+" --take-over "+holder+"` destroys without the copy")
+			}
 			assert.Empty(t, lc.log(), "no SSM, EC2 or STS request and no destroy")
 			assert.Zero(t, lc.destroy.calls, "SandboxDestroy")
 			lc.scw.assertUntouched(t)
 			assert.Equal(t, before, describeCopy(t, copyPath), "the copy is left as it was")
+			if tc.after != nil {
+				tc.after(t)
+			}
 		})
 	}
 }
