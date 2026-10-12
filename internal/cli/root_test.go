@@ -73,6 +73,33 @@ func TestRehearseUsageErrorsExitTwo(t *testing.T) {
 	}
 }
 
+// A subcommand's own persistent pre-run would shadow the group's, which
+// holds the family's exit-2 rule and the root's --output check (ADR-0042).
+func TestRehearseSubcommandsSetNoPersistentPreRun(t *testing.T) {
+	t.Parallel()
+
+	group, _, err := NewRootCmd().Find([]string{"rehearse"})
+	require.NoError(t, err)
+	assert.Empty(t, ownPersistentPreRuns(group))
+
+	// The walk must see a hook at any depth, or the check above is vacuous.
+	nested := &cobra.Command{Use: "nested"}
+	nested.AddCommand(&cobra.Command{Use: "deep", PersistentPreRunE: func(*cobra.Command, []string) error { return nil }})
+	group.AddCommand(&cobra.Command{Use: "planted", PersistentPreRun: func(*cobra.Command, []string) {}}, nested)
+	assert.ElementsMatch(t, []string{"infrafactory rehearse planted", "infrafactory rehearse nested deep"}, ownPersistentPreRuns(group))
+}
+
+func ownPersistentPreRuns(group *cobra.Command) []string {
+	var paths []string
+	for _, c := range group.Commands() {
+		if c.PersistentPreRunE != nil || c.PersistentPreRun != nil {
+			paths = append(paths, c.CommandPath())
+		}
+		paths = append(paths, ownPersistentPreRuns(c)...)
+	}
+	return paths
+}
+
 func TestNewRootCmdHasExpectedCommands(t *testing.T) {
 	t.Parallel()
 

@@ -20,8 +20,18 @@ reason no decision rests on is marked **unverified**: the decision holds whether
 
 `infrafactory rehearse` is a command group. It has no action of its own: with no subcommand it
 prints its help and exits 0. An unknown subcommand is a usage error, and so, anywhere in the
-family, is a flag parse error, a missing required flag or a broken flag group. It reads no `infrafactory.yaml`, because a rehearsal takes its account and region from
-flags.
+family, is a flag parse error, a missing required flag or a broken flag group. It reads no
+`infrafactory.yaml`, because a rehearsal takes its account and region from flags.
+
+The group's flag-error func and persistent pre-run make those usage errors for every subcommand.
+Two rules keep that true:
+
+- Cobra checks a command's args before any pre-run, so the group cannot catch them: every rehearse
+  subcommand's `Args` validator returns a usage `CLIError`, and cobra's stock validators (such as
+  `cobra.ExactArgs`) are wrapped.
+- Cobra runs only the nearest persistent pre-run, so no rehearse subcommand sets its own
+  `PersistentPreRunE` or `PersistentPreRun`: one would shadow the group's, and with it the root's
+  `--output` check. A test walks the family and holds this.
 
 - `rehearse prepare <dir> --account <id> --region <r> [--var-file f]` is decided here.
 - `rehearse read` is defined by ADR-0041, not redefined here.
@@ -37,12 +47,13 @@ family adds no error code.
 A rehearsal lives in `.infrafactory/rehearsals/<id>/` at the root of the repository that contains
 the current directory (its nearest ancestor holding `.git`), never under `.infrafactory/runs/` or
 `.infrafactory/live/`, which the UI serves. `prepare` refuses a `<dir>` that is not inside that
-same repository, and every later step, which names only `<id>`, finds it under that same root. `rehearsals/` holds a `.gitignore` of `*`. Each `<id>/` has `work/` (the copied code),
-`data/` (`TF_DATA_DIR`), `home/` (an empty `HOME`), `state/` (the state file, outside the copy) and
+same repository, and every later step, which names only `<id>`, finds it under that same root.
+`rehearsals/` holds a `.gitignore` of `*`. Each `<id>/` has `work/` (the copied code), `data/`
+(`TF_DATA_DIR`), `home/` (an empty `HOME`), `state/` (the state file, outside the copy) and
 `vars.tfvars` (the `--var-file`, copied outside `work/` so tofu never auto-loads it). Directories
-are 0700 and files 0600. Tofu writes files with its own modes, so after each tofu run the modes
-are tightened again: directories 0700, executables 0700 (provider binaries must stay runnable),
-other files 0600.
+are 0700 and files 0600. Tofu writes files with its own modes, so after each tofu run the modes are
+tightened again: directories 0700, executables 0700 (provider binaries must stay runnable), other
+files 0600.
 
 ### The walls
 
@@ -65,6 +76,14 @@ credential and profile variables, and anything else in the user's shell never re
 ADR-0023's bar, applied to user code: the gate is an allowlist, so what it does not name is
 refused; it parses, never scans text; an unparseable file is refused; nothing is skipped; and no
 tofu command runs for a refused configuration.
+
+The gate runs before every tofu step, not once. Every rehearse step that runs tofu first re-runs
+the full gate over the whole copy (the root, every module gate 2 admits, and every template a
+`templatefile` names) and refuses on any problem. So a file an apply wrote is gated like any other,
+whatever its name: an apply that overwrote a template or wrote configuration is refused at the next
+step. Infrafactory's own override files (the backend override the second init writes, the provider
+override rehearsal-walls writes) are the one exception to the override refusal: a re-gate admits
+each only when its bytes equal what infrafactory writes.
 
 ### Decision 1: encryption is closed whatever its source
 
@@ -105,7 +124,8 @@ In every gated module directory:
 
 - `.tf` and `.tfvars` files are parsed. A `.tfvars` file holds only attributes with literal values.
 - The suffixes Decision 1 names are refused by name.
-- A user override file (`override.tf*`, `*_override.tf*`) is refused: a user override merges after
+- A user override file (`override.tf*`, `*_override.tf*`) is refused (infrafactory's own, on a
+  re-gate, as § The gate bar says): a user override merges after
   infrafactory's (`TestAssumption_UserOverrideMergesAfterOurs`), so it would undo the walls'
   provider and backend overrides.
 - A `terraform.d` entry is refused: tofu reads it as an implied local provider mirror
@@ -143,12 +163,12 @@ refusing it holds either way). Absolute, escaping, variable and otherwise comput
 refused, and `abspath` and `pathexpand` are refused by name.
 
 A written path (`filename` of `local_file` and `local_sensitive_file`, `output_path` of
-`archive_file`) must also not name a file tofu could load, because an apply could otherwise write
-configuration that every later rehearse step loads ungated: a user override merges after
-infrafactory's (`TestAssumption_UserOverrideMergesAfterOurs`). A written path is refused when its
-base name has a `.tf` or `.tfvars` suffix or any suffix Decision 1 refuses, when it is
-`.terraform.lock.hcl`, or when any of its elements is `terraform.d` or `.terraform`. Names are
-compared case-insensitively, since a case-insensitive filesystem (macOS's default) maps
+`archive_file`) must also not name a file tofu could load, so an apply that would write
+configuration is refused before it runs. This is the early refusal; the re-gate before every tofu
+step (§ The gate bar) is what gates every file an apply writes, whatever its name. A written path
+is refused when its base name has a `.tf` or `.tfvars` suffix or any suffix Decision 1 refuses,
+when it is `.terraform.lock.hcl`, or when any of its elements is `terraform.d` or `.terraform`.
+Names are compared case-insensitively, since a case-insensitive filesystem (macOS's default) maps
 `ZZ_OVERRIDE.TF` and `.TERRAFORM.LOCK.HCL` onto the names they spell.
 
 `fileset`'s second argument, the glob, is checked too, since it is joined onto the path before
@@ -219,6 +239,7 @@ state outside the copy (`TestAssumption_CLIBackendPathKeepsStateOutOfTheCopy`, w
 
 - Every `rehearse` subcommand is reviewed against one contract and one set of walls; a later
   epic that changes either amends this ADR.
+- Every tofu step pays for a full gate over the copy first.
 - The gate refuses code a real `tofu apply` would accept: registry modules, `.tofu` files, JSON
   configuration, encryption, bare relative paths and any `provider "aws"` argument outside the
   table. Admitting any of
