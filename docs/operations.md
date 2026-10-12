@@ -457,21 +457,36 @@ aws iam attach-user-policy --user-name infrafactory-reader \
   --policy-arn arn:aws:iam::${ACCOUNT_ID}:policy/infrafactory-reader-read --profile infrafactory-admin
 ```
 
-Write the key file without printing the key, mode `0600` (if the file already exists, `chmod 600`
-it first), then check only its mode and key names:
+The user and its policy stay between rehearsals; the access key is present only for its read
+step (ADR-0023, amendment of 2026-10-12). Before each read, create a fresh key and write it to the
+key file without printing it. This refuses an existing key file (the last read's cleanup did not
+run) and writes nothing unless the key was created:
 
 ```bash
-mkdir -p ~/.config/infrafactory && (umask 077; aws iam create-access-key --user-name infrafactory-reader \
-  --profile infrafactory-admin --query 'AccessKey.[AccessKeyId,SecretAccessKey]' --output text \
-  | awk '{printf "AWS_ACCESS_KEY_ID=%s\nAWS_SECRET_ACCESS_KEY=%s\n",$1,$2}' > ~/.config/infrafactory/aws-reader.env)
+mkdir -p ~/.config/infrafactory && (set -eu; umask 077; F=~/.config/infrafactory/aws-reader.env
+  [ ! -e "$F" ]
+  KEY=$(aws iam create-access-key --user-name infrafactory-reader --profile infrafactory-admin \
+    --query 'AccessKey.[AccessKeyId,SecretAccessKey]' --output text)
+  [ -n "$KEY" ]
+  printf '%s\n' "$KEY" | awk '{printf "AWS_ACCESS_KEY_ID=%s\nAWS_SECRET_ACCESS_KEY=%s\n",$1,$2}' > "$F")
 stat -f %Lp ~/.config/infrafactory/aws-reader.env   # 600 (on Linux: stat -c %a)
 cut -d= -f1 ~/.config/infrafactory/aws-reader.env   # AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
 ```
 
-The key file is present only for its read step. The IAM user and its key stay between rehearsals;
-the user supplies the key file for each read; after each read, once the scrub has produced its
-fixtures, the lead deletes the local key file, the raw recording and the pre-destroy state. Only the
-scrubbed fixtures are committed.
+When the read ends, the lead deletes that access key, taking its id from the key file without
+printing the secret, then the key file, and checks that the user holds no key:
+
+```bash
+F=~/.config/infrafactory/aws-reader.env
+KEY_ID=$(sed -n 's/^AWS_ACCESS_KEY_ID=//p' "$F")
+[ -n "$KEY_ID" ] && aws iam delete-access-key --user-name infrafactory-reader --access-key-id "$KEY_ID" \
+  --profile infrafactory-admin && rm "$F"
+aws iam list-access-keys --user-name infrafactory-reader --profile infrafactory-admin \
+  --query 'length(AccessKeyMetadata)'   # 0
+```
+
+Once the scrub has produced its fixtures, the lead deletes the raw recording and the pre-destroy
+state. Only the scrubbed fixtures are committed.
 
 In the Layer 3 account the SCP (`docs/layer3/aws/scp.json`, `DenyEveryServiceButEC2SSMSTS`) denies
 every `iam:*` action to everyone but the admin role, so the policy's `iam:` rows are unreachable

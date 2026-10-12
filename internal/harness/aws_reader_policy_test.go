@@ -42,9 +42,9 @@ func awsReaderTableActions() []string {
 // statement other than Allow on named actions, an action that is not a
 // row (a wildcard never is), a row nothing allows, a DryRun-table
 // action, which the preflight proves the key cannot send, a statement on
-// every resource not pinned to REGION (sts:GetCallerIdentity alone
-// excepted), or any other resource outside ACCOUNT_ID but the public
-// parameters.
+// every resource holding anything but ec2 actions or not pinned to REGION
+// (sts:GetCallerIdentity alone excepted), or any other resource outside
+// ACCOUNT_ID but the public parameters.
 func awsReaderPolicyViolations(policy awsPolicy, rows []string) []string {
 	var out []string
 	granted := map[string]bool{}
@@ -63,9 +63,13 @@ func awsReaderPolicyViolations(policy awsPolicy, rows []string) []string {
 				}
 			}
 		}
-		if slices.Contains(s.Resource, "*") && !slices.Equal(s.Action, awsPolicyList{"sts:GetCallerIdentity"}) &&
-			!slices.Equal(s.Condition["StringEquals"]["aws:RequestedRegion"], awsPolicyList{"REGION"}) {
-			out = append(out, s.Sid+" allows every resource without StringEquals aws:RequestedRegion REGION")
+		if slices.Contains(s.Resource, "*") && !slices.Equal(s.Action, awsPolicyList{"sts:GetCallerIdentity"}) {
+			if slices.ContainsFunc(s.Action, func(a string) bool { return !strings.HasPrefix(a, "ec2:") }) {
+				out = append(out, fmt.Sprintf("%s allows every resource for %v; only ec2 actions take *", s.Sid, s.Action))
+			}
+			if !slices.Equal(s.Condition["StringEquals"]["aws:RequestedRegion"], awsPolicyList{"REGION"}) {
+				out = append(out, s.Sid+" allows every resource without StringEquals aws:RequestedRegion REGION")
+			}
 		}
 		for _, resource := range s.Resource {
 			if resource != "*" && resource != awsReaderPublicParameters && !awsARNInTheAccount(resource) {
@@ -124,6 +128,14 @@ func TestAWSReaderPolicyViolationsCatchEachWidening(t *testing.T) {
 		"the parameters on every resource": func(t *testing.T, p *awsPolicy) {
 			awsStatement(t, p, "ReadTheParameters").Resource = awsPolicyList{"*"}
 		},
+		"the roles on every resource, pinned to REGION": func(t *testing.T, p *awsPolicy) {
+			awsStatement(t, p, "ReadTheRoles").Resource = awsPolicyList{"*"}
+			awsStatement(t, p, "ReadTheRoles").Condition = awsStatement(t, p, "ReadTheNetwork").Condition
+		},
+		"the parameters on every resource, pinned to REGION": func(t *testing.T, p *awsPolicy) {
+			awsStatement(t, p, "ReadTheParameters").Resource = awsPolicyList{"*"}
+			awsStatement(t, p, "ReadTheParameters").Condition = awsStatement(t, p, "ReadTheNetwork").Condition
+		},
 		"a role in another account": func(t *testing.T, p *awsPolicy) {
 			awsStatement(t, p, "ReadTheRoles").Resource = awsPolicyList{"arn:aws:iam::123456789012:role/*"}
 		},
@@ -160,7 +172,7 @@ func TestADR0023AmendmentNamesTheReaderPolicy(t *testing.T) {
 	t.Parallel()
 	data, err := os.ReadFile(adr0023File)
 	require.NoError(t, err)
-	for _, want := range []string{"reader-policy.json", "read-only", "key file"} {
+	for _, want := range []string{"reader-policy.json", "read-only", "key file", "delete-access-key"} {
 		assert.Contains(t, string(data), want)
 	}
 }
