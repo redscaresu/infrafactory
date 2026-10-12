@@ -26,6 +26,7 @@ func moduleCopy(t *testing.T, files, symlinks map[string]string) (string, rehear
 		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
 	}
 	for link, target := range symlinks {
+		require.NoError(t, os.MkdirAll(filepath.Dir(filepath.Join(tmp, link)), 0o700))
 		require.NoError(t, os.Symlink(filepath.Join(tmp, target), filepath.Join(tmp, link)))
 	}
 	copyDir := filepath.Join(tmp, work)
@@ -79,13 +80,24 @@ func TestRehearsalGateModuleSources(t *testing.T) {
 		{name: "a child's source", files: map[string]string{
 			work + "main.tf":   "module \"m\" {\n  source = \"./m\"\n}\n",
 			work + "m/main.tf": "module \"r\" {\n  source = \"cloudposse/label/null\"\n}\n",
-		}, want: []string{`m/main.tf:2: module.r.source: source "cloudposse/label/null" is refused`}},
+		}, want: []string{`module "m": m/main.tf:2: module.r.source: source "cloudposse/label/null" is refused`}},
+		{name: "a source naming a file", files: moduleBlock("  source = \"./main.tf\"\n"),
+			want: []string{`main.tf:2: module.m.source: source "./main.tf" is refused: it is not a directory`}},
+		{name: "a module block with no label", files: map[string]string{work + "main.tf": "module {\n  source = \"./m\"\n}\n"},
+			want: []string{"main.tf:1: module: a module block takes one label"}},
+		// The gate follows each module block itself: in.modules is empty.
+		{name: "a provisioner in a module the root calls", files: map[string]string{
+			work + "main.tf":   "module \"m\" {\n  source = \"./m\"\n}\n",
+			work + "m/main.tf": provisioner,
+		}, want: []string{`module "m": m/main.tf:2: terraform_data.t.provisioner.local-exec: "provisioner" blocks are refused`}},
+		{name: "a provider aws in a module a module calls", files: map[string]string{
+			work + "main.tf":        "module \"m\" {\n  source = \"./m\"\n}\n",
+			work + "m/main.tf":      "module \"s\" {\n  source = \"../shared\"\n}\n",
+			work + "shared/main.tf": "provider \"aws\" {}\n",
+		}, want: []string{`module "m.s": shared/main.tf:1: provider.aws: a provider "aws" block in a child module is refused`}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, in := moduleCopy(t, tc.files, tc.symlinks)
-			if _, err := os.Stat(filepath.Join(in.root, "m")); err == nil {
-				in.modules = []string{filepath.Join(in.root, "m")}
-			}
 			err := rehearsalGate(in)
 			require.ErrorIs(t, err, errRehearsalRefuses)
 			for _, want := range tc.want {
@@ -95,21 +107,22 @@ func TestRehearsalGateModuleSources(t *testing.T) {
 	}
 }
 
+const provisioner = "resource \"terraform_data\" \"t\" {\n  provisioner \"local-exec\" {\n    command = \"id\"\n  }\n}\n"
+
 // TestRehearsalGateAdmitsLocalModules: ./m inside the copy, and m's
 // ../shared, pass gate 1, and rehearsalLocalModuleSources returns each
-// dir under the copy.
+// dir the root reaches, under the copy, once. A module cycle ends.
 func TestRehearsalGateAdmitsLocalModules(t *testing.T) {
 	_, in := moduleCopy(t, map[string]string{
-		work + "main.tf":        "module \"m\" {\n  source = \"./m\"\n  name   = \"x\"\n}\n",
+		work + "main.tf":        "module \"m\" {\n  source = \"./m\"\n  name   = \"x\"\n}\nmodule \"again\" {\n  source = \"./m\"\n}\n",
 		work + "m/main.tf":      "module \"s\" {\n  source = \"../shared\"\n}\n",
-		work + "shared/main.tf": manifestOutput,
+		work + "shared/main.tf": "module \"back\" {\n  source = \"../m\"\n}\n",
 	}, nil)
-	in.modules = []string{filepath.Join(in.root, "m"), filepath.Join(in.root, "shared")}
 	assert.NoError(t, rehearsalGate(in))
 
-	sources, err := rehearsalLocalModuleSources(filepath.Join(in.root, "m"), in.boundary)
+	sources, err := rehearsalLocalModuleSources(in.root, in.boundary)
 	require.NoError(t, err)
-	assert.Equal(t, []string{filepath.Join(in.root, "shared")}, sources)
+	assert.Equal(t, []string{filepath.Join(in.root, "m"), filepath.Join(in.root, "shared")}, sources)
 }
 
 func TestRehearsalLocalModuleSourcesRefuses(t *testing.T) {
@@ -173,6 +186,10 @@ func TestRehearsalModulesGate(t *testing.T) {
 		{name: "a local entry at an absolute dir outside the copy", files: localModules(map[string]string{"ext/sub/main.tf": manifestOutput}),
 			manifest: `{"Modules":[{"Key":"","Source":"","Dir":"."},{"Key":"e.in","Source":"./sub","Dir":"$TMP/ext/sub"}]}`,
 			want:     []string{`modules.json: module "e.in": refused: dir "$TMP/ext/sub" resolves to `}},
+		{name: "a fetched module symlinked into the copy", files: localModules(nil),
+			symlinks: map[string]string{"data/modules/e": work + "m"},
+			manifest: `{"Modules":[{"Key":"","Source":"","Dir":"."},{"Key":"e","Source":"./m","Dir":"$TMP/data/modules/e"}]}`,
+			want:     []string{`modules.json: module "e": refused: dir "$TMP/data/modules/e" lies under $TMP/data/modules`}},
 		{name: "a local entry whose dir is a symlink out of the copy", files: map[string]string{
 			work + "main.tf":    "module \"m\" {\n  source = \"./n\"\n}\n",
 			work + "n/main.tf":  manifestOutput,
@@ -180,10 +197,9 @@ func TestRehearsalModulesGate(t *testing.T) {
 		}, symlinks: map[string]string{work + "m": "elsewhere"},
 			manifest: `{"Modules":[{"Key":"","Source":"","Dir":"."},{"Key":"m","Source":"./m","Dir":"m"}]}`,
 			want:     []string{`modules.json: module "m": refused: dir "m" resolves to $TMP/elsewhere, outside the boundary`}},
-		{name: "a provisioner in a local module", files: localModules(map[string]string{
-			work + "shared/main.tf": "resource \"terraform_data\" \"t\" {\n  provisioner \"local-exec\" {\n    command = \"id\"\n  }\n}\n",
-		}), manifest: localManifest,
-			want: []string{`module "m.s": shared/main.tf:2: terraform_data.t.provisioner.local-exec: "provisioner" blocks are refused`}},
+		{name: "a provisioner in a local module", files: localModules(map[string]string{work + "shared/main.tf": provisioner}),
+			manifest: localManifest,
+			want:     []string{`module "m.s": shared/main.tf:2: terraform_data.t.provisioner.local-exec: "provisioner" blocks are refused`}},
 		{name: "an unparseable manifest", files: localModules(nil), manifest: `{"Modules":[`,
 			want: []string{"modules.json: does not parse"}},
 		{name: "a missing manifest with module blocks", files: localModules(nil),
@@ -230,4 +246,12 @@ func writeManifest(t *testing.T, tmp, manifest string) string {
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
 	require.NoError(t, os.WriteFile(path, []byte(strings.ReplaceAll(manifest, "$TMP", tmp)), 0o600))
 	return data
+}
+
+// TestRehearsalMissingManifestNamesTheCause: with no manifest, a root .tf
+// that does not parse is named, not taken for module blocks.
+func TestRehearsalMissingManifestNamesTheCause(t *testing.T) {
+	tmp, in := moduleCopy(t, map[string]string{work + "main.tf": manifestOutput, work + "broken.tf": "output \"o\" {\n"}, nil)
+	_, problems := in.manifestModules(writeManifest(t, tmp, ""))
+	assert.Contains(t, strings.Join(problems, "; "), "broken.tf: does not parse")
 }

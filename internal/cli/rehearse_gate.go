@@ -22,16 +22,18 @@ import (
 //
 // Two rules start closed, each in its own file: provider "aws" arguments
 // (rehearse_gate_aws.go) and paths (rehearse_gate_paths.go). Module
-// sources have their own file too (rehearse_gate_modules.go).
+// sources, and the walk from the root through every module dir they
+// reach, have their own file too (rehearse_gate_modules.go).
 
 var errRehearsalRefuses = errors.New("the rehearsal gate refuses this configuration")
 
-// rehearsalGateInput is what one gate run reads: the root module dir, the
-// child module dirs, the copy they live in (problems name files relative
-// to it), the --region, and the --var-file copy ("" when none was given).
+// rehearsalGateInput is what one gate run reads: the root module dir,
+// module dirs to gate beside those the root's module blocks reach, the
+// copy they live in (problems name files relative to it), the --region,
+// and the --var-file copy ("" when none was given).
 type rehearsalGateInput struct {
 	root     string
-	modules  []string
+	modules  []rehearsalModuleDir
 	boundary string
 	region   string
 	varFile  string
@@ -89,24 +91,30 @@ func rehearsalGate(in rehearsalGateInput) error {
 	return rehearsalRefusal(in.problems())
 }
 
+// problems walks the root and in.modules, then every dir their module
+// blocks resolve to, each dir once, and then the var file.
 func (in rehearsalGateInput) problems() []string {
 	var problems []string
-	for _, dir := range append([]string{in.root}, in.modules...) {
-		problems = append(problems, in.dirProblems(dir)...)
-	}
+	start := append([]rehearsalModuleDir{{dir: in.root}}, in.modules...)
+	rehearsalWalk(start, func(m rehearsalModuleDir) []rehearsalModuleDir {
+		dirProblems, calls := in.dirProblems(m)
+		problems = append(problems, m.named(dirProblems)...)
+		return calls
+	})
 	if in.varFile != "" {
 		problems = append(problems, in.tfvarsProblems(in.varFile)...)
 	}
 	return problems
 }
 
-// rehearsalRefusal is every problem in one error, sorted, or nil for none.
+// rehearsalRefusal is every problem in one error, sorted and each once,
+// or nil for none.
 func rehearsalRefusal(problems []string) error {
 	if len(problems) == 0 {
 		return nil
 	}
 	sort.Strings(problems)
-	return fmt.Errorf("%w: %s", errRehearsalRefuses, strings.Join(problems, "; "))
+	return fmt.Errorf("%w: %s", errRehearsalRefuses, strings.Join(slices.Compact(problems), "; "))
 }
 
 // display names a path relative to the copy.
@@ -117,26 +125,45 @@ func (in rehearsalGateInput) display(path string) string {
 	return path
 }
 
-// rehearsalModule is one gated module dir in the copy at boundary.
-// providers maps each local name its required_providers declare to the
-// source, lowercased.
+// rehearsalModule is one gated module dir. providers maps each local name
+// its required_providers declare to the source, lowercased.
 type rehearsalModule struct {
-	root          bool
-	dir, boundary string
-	providers     map[string]string
+	root      bool
+	providers map[string]string
 }
 
-// dirProblems applies the file policy to one module dir, then the block
-// rules to every .tf file in it. A .tf file holds only blocks. Any other
+// dirProblems applies every rule to one module dir, and returns the dirs
+// its module blocks resolve to.
+func (in rehearsalGateInput) dirProblems(dir rehearsalModuleDir) ([]string, []rehearsalModuleDir) {
+	files, problems := in.dirFiles(dir.dir)
+	calls, callProblems := rehearsalModuleCalls(files, dir, in.boundary)
+	problems = append(problems, callProblems...)
+	m := rehearsalModule{root: dir.dir == in.root, providers: map[string]string{}}
+	for file, body := range files {
+		problems = append(problems, m.requiredProviderProblems(file, body)...)
+	}
+	for file, body := range files {
+		for name, attr := range body.Attributes {
+			problems = append(problems, rehearsalAt(file, attr.SrcRange, name)+": refused: a .tf file holds only blocks")
+		}
+		for _, block := range body.Blocks {
+			problems = append(problems, m.blockProblems(file, block)...)
+		}
+	}
+	return problems, calls
+}
+
+// dirFiles applies the file policy to one module dir and returns its .tf
+// files parsed, by display name. A .tf file holds only blocks. Any other
 // file, and any subdirectory but the test directory, is admitted unparsed:
 // tofu's configuration loader skips them
 // (TestAssumption_LoaderIgnoresUnknownSuffixes). Tofu reads some of those
 // files by other routes, and ADR-0042 § The extension and file policy
 // names the rule that owns each.
-func (in rehearsalGateInput) dirProblems(dir string) []string {
+func (in rehearsalGateInput) dirFiles(dir string) (map[string]*hclsyntax.Body, []string) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return []string{fmt.Sprintf("%s: cannot read the module directory: %v", in.display(dir), err)}
+		return nil, []string{fmt.Sprintf("%s: cannot read the module directory: %v", in.display(dir), err)}
 	}
 	var problems []string
 	files := map[string]*hclsyntax.Body{}
@@ -159,19 +186,7 @@ func (in rehearsalGateInput) dirProblems(dir string) []string {
 			files[in.display(path)] = body
 		}
 	}
-	m := rehearsalModule{root: dir == in.root, dir: dir, boundary: in.boundary, providers: map[string]string{}}
-	for file, body := range files {
-		problems = append(problems, m.requiredProviderProblems(file, body)...)
-	}
-	for file, body := range files {
-		for name, attr := range body.Attributes {
-			problems = append(problems, rehearsalAt(file, attr.SrcRange, name)+": refused: a .tf file holds only blocks")
-		}
-		for _, block := range body.Blocks {
-			problems = append(problems, m.blockProblems(file, block)...)
-		}
-	}
-	return problems
+	return files, problems
 }
 
 // rehearsalEntryProblem is why a dir entry, by its lowercased name, is
@@ -362,9 +377,6 @@ func (m rehearsalModule) blockProblems(file string, block *hclsyntax.Block) []st
 		problems = append(problems, m.typeProblems(file, at, block)...)
 	case "import":
 		problems = append(problems, m.providerRefProblems(file, addr, block)...)
-	case "module":
-		_, moduleProblems := rehearsalModuleSource(file, m.dir, m.boundary, block)
-		problems = append(problems, moduleProblems...)
 	}
 	return append(problems, rehearsalBodyProblems(file, addr, block, block.Type == "variable")...)
 }

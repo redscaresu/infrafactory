@@ -199,8 +199,9 @@ func newLoaderRoot(t *testing.T, broken ...string) (assumptionDir, []string) {
 // path joined by dots, its Source is as written, and its Dir is relative
 // to the root and cleaned: m's ../shared is "shared". A root with no
 // module blocks gets no manifest. A module fetched from an absolute path
-// gets an absolute Dir under <TF_DATA_DIR>/modules, and a local module it
-// calls an absolute Dir at the path it was fetched from.
+// gets an absolute Dir under <TF_DATA_DIR>/modules, which is a symlink to
+// the path it was fetched from, and a local module it calls an absolute
+// Dir at that path.
 //
 // Relied on by: rehearsal-prepare-gate's gate 2, which reads the manifest
 // (ADR-0042 Decision 2). ADR-0028.
@@ -238,6 +239,9 @@ func TestAssumption_ModulesManifestShape(t *testing.T) {
 			dirs[entry.Key] = entry.Dir
 		}
 		assert.Equal(t, filepath.Join(tmp, "data", "modules", "e"), dirs["e"], "%s: %v", version, entries)
+		link, err := os.Readlink(dirs["e"])
+		assert.NoError(t, err, "%s: the fetched module is not a symlink", version)
+		assert.Equal(t, ext, link, version)
 		assert.Contains(t, entries, manifestEntry{"e.in", "./sub", filepath.Join(ext, "sub")}, version)
 	})
 }

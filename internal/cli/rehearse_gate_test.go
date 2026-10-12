@@ -22,7 +22,7 @@ func gateFixture(t *testing.T, files map[string]string, varFile string) error {
 		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
 	}
 	if _, err := os.Stat(filepath.Join(copyDir, "child")); err == nil {
-		in.modules = []string{filepath.Join(copyDir, "child")}
+		in.modules = []rehearsalModuleDir{{dir: filepath.Join(copyDir, "child")}}
 	}
 	if varFile != "" {
 		in.varFile = filepath.Join(t.TempDir(), "vars.tfvars")
