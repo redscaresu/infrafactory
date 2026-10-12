@@ -176,9 +176,11 @@ func TestAssumption_LoaderIgnoresUnknownSuffixes(t *testing.T) {
 
 // TestAssumption_VariablePrecedenceMatchesGate: a root variable takes the
 // value of the last of its sources in this order: its default,
-// terraform.tfvars, each *.auto.tfvars in lexical order (not the order
-// they were written), then -var-file. An outputs-only root, offline,
-// applies after each source is added and reads the variable back.
+// terraform.tfvars, each *.auto.tfvars in lexical order, then -var-file.
+// An outputs-only root, offline, applies after each source is added and
+// reads the variable back. The auto files are written b, c, a, so lexical
+// order (c), write order (a) and reverse write order (b) each name a
+// different winner.
 //
 // Relied on by: rehearsal-prepare-gate's goal 11, which resolves var.x in
 // that order (ADR-0042 § Goal 11, statically). ADR-0028.
@@ -204,7 +206,8 @@ func TestAssumption_VariablePrecedenceMatchesGate(t *testing.T) {
 		{"", "default"},
 		{"terraform.tfvars", "terraform.tfvars"},
 		{"b.auto.tfvars", "b.auto.tfvars"},
-		{"a.auto.tfvars", "b.auto.tfvars"},
+		{"c.auto.tfvars", "c.auto.tfvars"},
+		{"a.auto.tfvars", "c.auto.tfvars"},
 	} {
 		if source.file != "" {
 			w.write(t, source.file, fmt.Sprintf("region = %q\n", source.file))

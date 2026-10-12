@@ -116,6 +116,9 @@ type rehearsalRegions struct {
 	tfvars          map[string]*hclsyntax.Body
 	varFile         *hclsyntax.Body
 	defaultProvider bool
+	// rootWhole is whether the gate read the root dir and every .tf file
+	// in it, so a missing default provider block is really missing.
+	rootWhole bool
 }
 
 func newRehearsalRegions() *rehearsalRegions {
@@ -142,10 +145,11 @@ type rehearsalVarSource struct {
 // without an alias. A rehearsal is AWS-only, and anything tofu plans
 // through the default provider (a resource, a removed or import block,
 // an address only the state holds) would otherwise get tofu's implied
-// empty one, which has no region.
+// empty one, which has no region. A root the gate could not read whole is
+// refused already, and may hold the block, so it is not named missing.
 func (r *rehearsalRegions) problems(region string) []string {
 	var problems []string
-	if !r.defaultProvider {
+	if !r.defaultProvider && r.rootWhole {
 		problems = append(problems, `the root module: refused: it has no provider "aws" block without an alias, so tofu's implied empty one, which has no region, would be the default`)
 	}
 	sources, sourceProblems := r.sources()

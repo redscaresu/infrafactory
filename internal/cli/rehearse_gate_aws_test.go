@@ -115,6 +115,16 @@ func TestRehearsalGateAWSNoRegionIsTheOnlyRefusal(t *testing.T) {
 	assert.EqualError(t, err, errRehearsalRefuses.Error()+`: main.tf:1: provider.aws: refused: a provider "aws" block must set region, so goal 11 can check it`)
 }
 
+// TestRehearsalGateAWSUnparsedRootIsNotNamedProviderless: a root .tf the
+// gate cannot parse is refused, and since it may hold the default provider
+// block, the gate does not also call the root providerless.
+func TestRehearsalGateAWSUnparsedRootIsNotNamedProviderless(t *testing.T) {
+	err := gateFixture(t, map[string]string{"provider.tf": "provider \"aws\" {\n  region = \"us-east-1\"\n"}, "")
+	require.ErrorIs(t, err, errRehearsalRefuses)
+	assert.Contains(t, err.Error(), "provider.tf: does not parse")
+	assert.NotContains(t, err.Error(), noDefaultProvider)
+}
+
 func TestRehearsalGateAWSAdmits(t *testing.T) {
 	for _, tc := range []struct {
 		name    string

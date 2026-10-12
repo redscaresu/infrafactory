@@ -150,12 +150,12 @@ type rehearsalModule struct {
 // templates and written paths in uses and what goal 11 reads in regions,
 // and returns the dirs its module blocks resolve to.
 func (in rehearsalGateInput) dirProblems(dir rehearsalModuleDir, uses *rehearsalPathUses, regions *rehearsalRegions) ([]string, []rehearsalModuleDir) {
-	files, tfvars, problems := in.dirFiles(dir.dir)
+	files, tfvars, whole, problems := in.dirFiles(dir.dir)
 	calls, callProblems := rehearsalModuleCalls(files, dir, in.boundary)
 	problems = append(problems, callProblems...)
 	m := rehearsalModule{in: in, dir: dir.dir, key: dir.key, uses: uses, regions: regions, root: dir.dir == in.root, providers: map[string]string{}}
 	if m.root {
-		regions.tfvars = tfvars
+		regions.tfvars, regions.rootWhole = tfvars, whole
 	}
 	for file, body := range files {
 		problems = append(problems, m.requiredProviderProblems(file, body)...)
@@ -172,18 +172,20 @@ func (in rehearsalGateInput) dirProblems(dir rehearsalModuleDir, uses *rehearsal
 }
 
 // dirFiles applies the file policy to one module dir and returns its .tf
-// and .tfvars files parsed, by display name. A .tf file holds only blocks. Any other
+// and .tfvars files parsed, by display name, and whether it read the dir
+// and every .tf file in it. A .tf file holds only blocks. Any other
 // file, and any subdirectory but the test directory, is admitted unparsed:
 // tofu's configuration loader skips them
 // (TestAssumption_LoaderIgnoresUnknownSuffixes). Tofu reads some of those
 // files by other routes, and ADR-0042 § The extension and file policy
 // names the rule that owns each.
-func (in rehearsalGateInput) dirFiles(dir string) (map[string]*hclsyntax.Body, map[string]*hclsyntax.Body, []string) {
+func (in rehearsalGateInput) dirFiles(dir string) (map[string]*hclsyntax.Body, map[string]*hclsyntax.Body, bool, []string) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return nil, nil, []string{fmt.Sprintf("%s: cannot read the module directory: %v", in.display(dir), err)}
+		return nil, nil, false, []string{fmt.Sprintf("%s: cannot read the module directory: %v", in.display(dir), err)}
 	}
 	var problems []string
+	whole := true
 	files, tfvars := map[string]*hclsyntax.Body{}, map[string]*hclsyntax.Body{}
 	for _, entry := range entries {
 		path := filepath.Join(dir, entry.Name())
@@ -202,13 +204,13 @@ func (in rehearsalGateInput) dirFiles(dir string) (map[string]*hclsyntax.Body, m
 		case strings.HasSuffix(lower, ".tf"):
 			body, problem := rehearsalParse(path, in.display(path))
 			if problem != "" {
-				problems = append(problems, problem)
+				problems, whole = append(problems, problem), false
 				continue
 			}
 			files[in.display(path)] = body
 		}
 	}
-	return files, tfvars, problems
+	return files, tfvars, whole, problems
 }
 
 // rehearsalEntryProblem is why a dir entry, by its lowercased name, is
