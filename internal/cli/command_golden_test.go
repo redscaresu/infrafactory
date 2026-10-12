@@ -283,6 +283,26 @@ func TestCommandOutputGoldenSnapshots(t *testing.T) {
 			expectErr: true,
 			normalize: normalizeGoldenWorkspace,
 		},
+		{
+			name: "rehearse_read",
+			build: func(h *CommandTestHarness) *cobra.Command {
+				return goldenReadRoot(h, readAccount)
+			},
+			args: func(h *CommandTestHarness, mode OutputMode) []string {
+				return append([]string{"rehearse", "read", "--out", readOutDir, "--output", string(mode)}, readFlags()...)
+			},
+			normalize: normalizeGoldenWorkspace,
+		},
+		{
+			name: "rehearse_read_refused",
+			build: func(h *CommandTestHarness) *cobra.Command {
+				return goldenReadRoot(h, "210987654321")
+			},
+			args: func(h *CommandTestHarness, mode OutputMode) []string {
+				return append([]string{"rehearse", "read", "--out", readOutDir, "--output", string(mode)}, readFlags()...)
+			},
+			expectErr: true,
+		},
 	}
 
 	for _, tc := range cases {
@@ -322,6 +342,17 @@ func goldenPrepareRoot(h *CommandTestHarness, mainTF string) *cobra.Command {
 	mustWriteFile(h.T, filepath.Join(h.WorkspaceDir, ".git", "HEAD"), "ref: refs/heads/main\n")
 	mustWriteFile(h.T, filepath.Join(h.WorkspaceDir, "envs", "prod", "main.tf"), mainTF)
 	return prepareRoot(rehearsePrepare{wd: h.WorkspaceDir, newID: func() string { return prepareID }})
+}
+
+// goldenReadRoot makes the workspace a repo holding the read's key file
+// and read set, and returns a root that reads from it through a doer
+// answering as a key of account.
+func goldenReadRoot(h *CommandTestHarness, account string) *cobra.Command {
+	mustWriteFile(h.T, filepath.Join(h.WorkspaceDir, ".git", "HEAD"), "ref: refs/heads/main\n")
+	writeReadInputs(h.T, h.WorkspaceDir, readVPCEntry)
+	root := readRoot(rehearseRead{doer: &readDoer{account: account}, wd: h.WorkspaceDir})
+	root.SetErr(&bytes.Buffer{})
+	return root
 }
 
 // normalizeGoldenWorkspace replaces the workspace, resolved, as prepare

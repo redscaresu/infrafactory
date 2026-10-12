@@ -165,21 +165,15 @@ func rehearsalsDir(repo string) (string, error) {
 	if err := os.Chmod(dir, 0o700); err != nil {
 		return "", err
 	}
-	// Written beside and renamed over, so an existing .gitignore that is a
-	// symlink is replaced, never written through.
-	tmp, err := os.CreateTemp(dir, ".gitignore-*")
-	if err != nil {
-		return "", err
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.WriteString("*\n"); err != nil {
-		tmp.Close()
-		return "", err
-	}
-	if err := tmp.Close(); err != nil {
-		return "", err
-	}
-	return dir, os.Rename(tmp.Name(), filepath.Join(dir, ".gitignore"))
+	return dir, gitignoreAll(dir)
+}
+
+// gitignoreAll writes a .gitignore of * into dir, so git ignores
+// everything in it whichever repository holds it. It is written beside
+// and renamed over, so an existing .gitignore that is a symlink is
+// replaced, never written through.
+func gitignoreAll(dir string) error {
+	return writeSynced(filepath.Join(dir, ".gitignore"), []byte("*\n"))
 }
 
 // rehearsalCopyExcluded is a name left out of the copy: tofu's data dir,

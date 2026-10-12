@@ -183,14 +183,19 @@ func settleHoldCopy(copyPath, statePath string) (string, error) {
 	return "kept, identical to " + statePath, nil
 }
 
-// privateHoldDirs makes .infrafactory, holdsRoot and dir, each 0700 where
-// it is missing, and refuses any of them that is a symlink or not a
-// directory, and a holds dir open to group or other. It never chmods: a
-// dir made by someone else is refused as found. .infrafactory may be 0755,
-// as the run and live stores make it.
+// privateHoldDirs makes .infrafactory, holdsRoot and dir as privateDirs
+// does.
 func privateHoldDirs(dir string) error {
-	infrafactory := filepath.Dir(holdsRoot)
-	for _, d := range []string{infrafactory, holdsRoot, dir} {
+	return privateDirs(filepath.Dir(holdsRoot), holdsRoot, dir)
+}
+
+// privateDirs makes top and then each of below, in order, one level at a
+// time, each 0700 where it is missing, and refuses any of them that is a
+// symlink or not a directory, and any of below open to group or other. It
+// never chmods: a dir made by someone else is refused as found. top is
+// .infrafactory, which may be 0755, as the run and live stores make it.
+func privateDirs(top string, below ...string) error {
+	for _, d := range append([]string{top}, below...) {
 		// Mkdir, not MkdirAll: it never creates through a symlink.
 		if err := os.Mkdir(d, 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
 			return err
@@ -202,7 +207,7 @@ func privateHoldDirs(dir string) error {
 		if !info.IsDir() {
 			return fmt.Errorf("%s is %v, not a directory", d, info.Mode())
 		}
-		if d != infrafactory && info.Mode().Perm()&0o077 != 0 {
+		if d != top && info.Mode().Perm()&0o077 != 0 {
 			return fmt.Errorf("%s is %v, not a directory of mode 0700, and is never chmodded", d, info.Mode())
 		}
 	}

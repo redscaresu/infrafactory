@@ -1,0 +1,3 @@
+Command: rehearse read
+Status: failed
+Refused: aws read: aws read identity: the key belongs to account "210987654321", not --account "123456789012"
