@@ -20,7 +20,7 @@ depends_on: []
 - ADR-0023 amended (a credential that reaches prod is read-only, named to its account, policy in the runbook, present only for its read step); ADR-0040 amended (the seam reads beyond the Layer 3 scope, reading only); runbook names the policy.
 - Proved against fakeaws in internal/e2e (the filtered and SG-name rows after fakeaws-data-sources' pin bump), then once against the Layer 3 account. The real proof covers EC2, SSM and STS only; IAM readers are proved against fakeaws and recorded as unproved against AWS (user, 2026-10-11: the SCP stays as is).
 - The step-0 read set is a committed file of the wedge's expected requests (VPC by tag, AZs, that VPC's surroundings, the SG to import); before release, the lead checks the recording holds an exchange for each.
-- The scrub is code: allowlist output (account id and ARNs mapped to one synthetic 12-digit id, user data and parameter values replaced), the same id map applied to the kept pre-destroy state, and a leak test (no 12-digit number but the synthetic id, no non-placeholder UserData or Value) run before commit.
+- The scrub is code: allowlist output (account id and ARNs mapped to one synthetic 12-digit id, user data and parameter values replaced), the same id map applied to the kept pre-destroy state, and a leak test (no 12-digit number but the synthetic id and a public image's owner, no non-placeholder UserData or Value) run before commit.
 
 **Out of scope:** discovery (what goes in the read set), loading, the tfstate pull, any tofu; types beyond the web stack's; ELBv2/ASG/CloudWatch readers.
 

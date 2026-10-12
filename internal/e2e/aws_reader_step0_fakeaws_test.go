@@ -100,7 +100,8 @@ func TestAWSStep0ReadSetHoldsNoIDs(t *testing.T) {
 // AWSRunIDTagKey (with its subnet and SG) and one untagged VPC beside it,
 // whose SGs include an untagged one named step0AbsentGroupName.
 // Each entry is answered at the pin, filters and zones included, and so
-// is each follow-up but DescribeSecurityGroupRules (fakeawsStep0PinRefusedRows).
+// is each follow-up but DescribeSecurityGroupRules (fakeawsStep0PinRefusedRows),
+// the AMI parameter's image among them.
 // The required CI job runs it by name and fails if it does not report PASS.
 func TestAWSReadStep0AgainstFakeaws(t *testing.T) {
 	SkipUnlessEnabled(t)
@@ -169,6 +170,11 @@ func TestAWSReadStep0AgainstFakeaws(t *testing.T) {
 	assert.True(t, anyExchange(byRow["DescribeSecurityGroups"], tagged.vpc, "<groupId>"+tagged.sg+"</groupId>"), "SGs of %s", tagged.vpc)
 	assert.True(t, anyExchange(byRow["DescribeNetworkInterfaces"], tagged.vpc, "<networkInterfaceSet"), "interfaces of %s, answered", tagged.vpc)
 	assert.True(t, anyExchange(byRow["DescribeSubnets"], tagged.vpc, "<subnetId>"+tagged.subnet+"</subnetId>"), "subnets of %s", tagged.vpc)
+	// The image the AMI parameter names, which a loaded copy launches from.
+	require.Len(t, byRow["DescribeImages"], 1, "one DescribeImages, for the parameter's image")
+	image := byRow["DescribeImages"][0]
+	assert.JSONEq(t, `{"ImageId.1":"`+harness.AWSLayer2AMI+`"}`, string(image.Params))
+	assert.Contains(t, image.Body, "<imageId>"+harness.AWSLayer2AMI+"</imageId>")
 	for _, exchange := range read.Exchanges {
 		assert.NotContains(t, string(exchange.Params)+exchange.Body, untagged.vpc, "the untagged VPC was read: %s", exchange.Action)
 	}
