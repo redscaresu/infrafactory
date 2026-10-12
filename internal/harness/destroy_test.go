@@ -3,9 +3,12 @@ package harness
 import (
 	"context"
 	"errors"
+	"testing"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"testing"
+
+	"github.com/redscaresu/infrafactory/internal/generator"
 )
 
 func TestDestroyHarnessRunSuccess(t *testing.T) {
@@ -222,4 +225,41 @@ func TestCountOrphansExemptsAPendingDeletionKMSKey(t *testing.T) {
 		require.NoError(t, err, name)
 		assert.Equal(t, c.want, count, name)
 	}
+}
+
+// The gate and ClassifyOrphans share generator.Orphans: fed one snapshot
+// holding mockway's seeded project, the auto-created default VPC, a
+// PendingDeletion KMS key and one leaked server, both report exactly the
+// server.
+func TestGateAndClassifierReportOnlyTheRealLeak(t *testing.T) {
+	t.Parallel()
+
+	state := []byte(`{
+      "account": {"projects": [{"id": "00000000-0000-0000-0000-000000000000", "name": "default"}]},
+      "vpc": {"vpcs": [{"id": "v-1", "name": "default"}]},
+      "kms": {"keys": [{"key_id": "k-1", "state": "PendingDeletion"}]},
+      "instance": {"servers": [{"id": "srv-1"}]}
+    }`)
+
+	runner := &fakeRunner{responses: []runnerResponse{{result: CommandResult{Stdout: []byte("destroy complete")}}}}
+	_, err := NewDestroyHarness(runner, &fakeMockStateClient{statePayload: state}).Run(context.Background(), "/tmp/workdir", nil)
+	var destroyErr *DestroyError
+	require.ErrorAs(t, err, &destroyErr)
+	assert.Equal(t, "orphan_check", destroyErr.Stage)
+	assert.EqualError(t, destroyErr.Err, "detected 1 orphaned resources", "the gate counts only the server")
+
+	routing := generator.ClassifyOrphans(state, "scaleway", "scenario", "ts")
+	assert.Equal(t, []generator.OrphanedResource{{Service: "instance", Collection: "servers"}}, routing.Unclassified,
+		"the classifier routes only the server")
+	assert.Empty(t, routing.Pitfalls)
+	assert.Empty(t, routing.MockGaps)
+}
+
+// A null snapshot is not evidence of a clean destroy, so the gate fails
+// rather than counting nothing.
+func TestCountOrphansRefusesANullSnapshot(t *testing.T) {
+	t.Parallel()
+
+	_, err := countOrphans([]byte(`null`))
+	assert.Error(t, err)
 }

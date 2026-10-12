@@ -35,21 +35,20 @@ func TestClassifyOrphans_AWSSecretsManagerSoftDelete(t *testing.T) {
 	}
 }
 
-// TestClassifyOrphans_AWSKMSKeySoftDelete — same shape, different
-// resource. force_destroy guidance should appear.
-func TestClassifyOrphans_AWSKMSKeySoftDelete(t *testing.T) {
-	state := []byte(`{
-		"kms": {"keys": [{"key_id": "k1"}]}
-	}`)
-	routing := ClassifyOrphans(state, "aws", "aws-kms", "ts")
-	if len(routing.Pitfalls) != 1 {
-		t.Fatalf("expected 1 pitfall, got %d", len(routing.Pitfalls))
-	}
-	if routing.Pitfalls[0].Resource != "aws_kms_key" {
-		t.Errorf("resource = %q, want aws_kms_key", routing.Pitfalls[0].Resource)
-	}
-	if !strings.Contains(routing.Pitfalls[0].Rule, "force_destroy") {
-		t.Errorf("rule missing force_destroy guidance: %q", routing.Pitfalls[0].Rule)
+// A KMS key that is not PendingDeletion after destroy is a leak, but no
+// aws_kms_key argument explains it: destroy schedules every key it knows
+// about, so the key was never in state. It is left for triage rather than
+// taught as a pitfall, and no rule may name an argument (force_destroy)
+// the provider rejects.
+func TestClassifyOrphans_LeakedKMSKeyIsUnclassified(t *testing.T) {
+	for name, key := range map[string]string{
+		"enabled":  `{"key_id": "k1", "state": "Enabled"}`,
+		"no state": `{"key_id": "k1"}`,
+	} {
+		routing := ClassifyOrphans([]byte(`{"kms": {"keys": [`+key+`]}}`), "aws", "aws-kms", "ts")
+		assert.Empty(t, routing.Pitfalls, name)
+		assert.Empty(t, routing.MockGaps, name)
+		assert.Equal(t, []OrphanedResource{{Service: "kms", Collection: "keys"}}, routing.Unclassified, name)
 	}
 }
 
@@ -133,8 +132,8 @@ func TestClassifyOrphans_UnclassifiedRecorded(t *testing.T) {
 }
 
 // TestClassifyOrphans_IgnoresSystemRoots — bookkeeping/audit tables
-// must never be classified as orphans (same exclusion set as
-// countOrphans in the destroy harness).
+// must never be classified as orphans (Orphans' exclusion set, which
+// the destroy gate shares).
 func TestClassifyOrphans_IgnoresSystemRoots(t *testing.T) {
 	state := []byte(`{
 		"audit": {"entries": [{"op": "x"}]},
@@ -168,43 +167,29 @@ func TestClassifyOrphans_EmptyOrMalformedInputIsSafe(t *testing.T) {
 	}
 }
 
-// TestClassifyOrphans_CrossCloudIsolation — same service name "kms"
-// exists under aws and gcp with distinct sub-shapes (#1 vs #5).
-// Lookup must scope by cloud or the wrong branch fires.
+// TestClassifyOrphans_CrossCloudIsolation — the same (service,
+// collection) routes by the scenario's cloud: kms.crypto_keys is a gcp
+// mock gap and unknown to aws. Lookup must scope by cloud or the wrong
+// branch fires.
 func TestClassifyOrphans_CrossCloudIsolation(t *testing.T) {
-	state := []byte(`{"kms": {"keys": [{"k": 1}]}}`)
+	state := []byte(`{"kms": {"crypto_keys": [{"name": "k"}]}}`)
 	awsRouting := ClassifyOrphans(state, "aws", "s", "t")
-	if len(awsRouting.Pitfalls) != 1 {
-		t.Errorf("aws.kms.keys should be sub-shape #1 (LLM soft-delete)")
-	}
-	// GCP uses "crypto_keys" not "keys" so this state with cloud=gcp
-	// is unclassified (correct — different shape).
+	assert.Empty(t, awsRouting.MockGaps, "gcp's crypto_keys entry must not fire for aws")
+	assert.Len(t, awsRouting.Unclassified, 1)
 	gcpRouting := ClassifyOrphans(state, "gcp", "s", "t")
-	if len(gcpRouting.Pitfalls) != 0 {
-		t.Errorf("gcp lookup for aws-shaped data should not match")
-	}
+	assert.Len(t, gcpRouting.MockGaps, 1)
 }
 
 // A cleanly destroyed KMS key in PendingDeletion is an end state, not a
-// leak, so it must not teach the aws_kms_key pitfall even when the run also
-// leaked something else. The leaked subnet still routes.
-func TestClassifyOrphans_KMSEndStateDoesNotRouteAKeyPitfall(t *testing.T) {
+// leak, so it routes nowhere even when the run also leaked something else.
+// The leaked subnet still routes.
+func TestClassifyOrphans_KMSEndStateRoutesNothing(t *testing.T) {
 	state := []byte(`{
 		"kms": {"keys": [{"key_id": "k1", "state": "PendingDeletion"}]},
 		"ec2": {"subnets": [{"subnet_id": "subnet-1"}]}
 	}`)
 	routing := ClassifyOrphans(state, "aws", "aws-vpc", "ts")
-	for _, p := range routing.Pitfalls {
-		assert.NotEqual(t, "aws_kms_key", p.Resource, "a PendingDeletion key is not a leak")
-	}
+	assert.Empty(t, routing.Pitfalls)
+	assert.Empty(t, routing.Unclassified, "a PendingDeletion key is not a leak")
 	assert.Len(t, routing.MockGaps, 1, "the leaked subnet still routes")
-}
-
-// An Enabled key is a leak and still teaches the aws_kms_key pitfall.
-func TestClassifyOrphans_EnabledKMSKeyStillRoutesAKeyPitfall(t *testing.T) {
-	state := []byte(`{"kms": {"keys": [{"key_id": "k1", "state": "Enabled"}]}}`)
-	routing := ClassifyOrphans(state, "aws", "aws-kms", "ts")
-	if assert.Len(t, routing.Pitfalls, 1) {
-		assert.Equal(t, "aws_kms_key", routing.Pitfalls[0].Resource)
-	}
 }

@@ -2,7 +2,6 @@ package harness
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -108,120 +107,16 @@ func (h *DestroyHarness) Run(ctx context.Context, workDir string, env map[string
 	}, nil
 }
 
+// countOrphans counts the rows generator.Orphans reports, the one
+// definition of an orphan that ClassifyOrphans routes too.
 func countOrphans(stateJSON []byte) (int, error) {
-	var state map[string]any
-	if err := json.Unmarshal(stateJSON, &state); err != nil {
-		return 0, fmt.Errorf("decode state snapshot: %w", err)
+	orphans, err := generator.Orphans(stateJSON)
+	if err != nil {
+		return 0, err
 	}
-
-	ignoredRoots := map[string]struct{}{
-		"metadata": {},
-		// fakegcp persists every long-running operation (insert/delete/
-		// setLabels/...) to its operations table and surfaces them under
-		// state.operations. They aren't resources — they are the audit
-		// trail of API calls that produced the resources — so they
-		// shouldn't count as orphans on a clean teardown.
-		"operations": {},
-		// fakeaws (S43-T9) ships two universal bookkeeping tables
-		// alongside its service-specific state: `audit` (per-request
-		// log) and `schema_version` (the integer schema marker
-		// /mock/state emits). Per fakeaws/concepts.md "Required
-		// surface" item 7. Service-specific bookkeeping tables append
-		// to ignoredCollections in their landing tickets (S46-T4 SQS
-		// will add `sqs_messages`).
-		"audit":          {},
-		"schema_version": {},
-	}
-	ignoredCollections := map[string]struct{}{
-		"events":   {},
-		"metrics":  {},
-		"messages": {},
-	}
-
 	count := 0
-	for root, rootNode := range state {
-		if _, ignored := ignoredRoots[root]; ignored {
-			continue
-		}
-		rootMap, ok := rootNode.(map[string]any)
-		if !ok {
-			continue
-		}
-		for collection, value := range rootMap {
-			if _, ignored := ignoredCollections[collection]; ignored {
-				continue
-			}
-			if items, ok := value.([]any); ok {
-				count += countOrphanItems(root, collection, items)
-			}
-		}
+	for _, orphan := range orphans {
+		count += len(orphan.Items)
 	}
-
 	return count, nil
-}
-
-// mockwayDefaultProjectID is the project mockway seeds at boot (S140).
-// It mirrors models.DefaultProjectID in the mockway repo; duplicated as
-// a literal because infrafactory does not import the sibling fakes.
-const mockwayDefaultProjectID = "00000000-0000-0000-0000-000000000000"
-
-// countOrphanItems counts a collection's entries, skipping ones that are
-// boot-time fixtures rather than anything a scenario created.
-//
-// mockway seeds a default project so scenarios that never declare one
-// still have a valid project_id to send (S140). That row is present on
-// every clean teardown, so counting it would fail the orphan check
-// for every scenario in the suite.
-//
-// Only the seeded default is exempt. A project a scenario actually
-// created and failed to destroy is a real orphan and still counts --
-// which matters more now that Layer 3 has stacks creating their own
-// projects.
-// The default VPC is auto-created, not declared.
-//
-// Scaleway gives a project a default VPC and puts a private network there
-// when the request names no vpc_id; mockway models that (mockway#26). Like
-// the "Default security group" that ADR-0023's purge exists for, Terraform
-// never creates it and never destroys it -- so counting it fails the
-// orphan check for every scenario with private networking,
-// which is every scenario with compute, because vpc_required demands it.
-//
-// Matched on the name the API assigns, not on absence-from-state: a VPC a
-// scenario actually declared and failed to destroy is a real orphan and
-// must still count. A stack that names its own VPC "default" would be
-// exempted wrongly, which is the known edge of this rule and cheaper than
-// the alternative of trusting state to be complete.
-const autoCreatedVPCName = "default"
-
-func countOrphanItems(root, collection string, items []any) int {
-	switch {
-	case root == "account" && collection == "projects":
-		return countExcept(items, func(e map[string]any) bool {
-			id, _ := e["id"].(string)
-			return id == mockwayDefaultProjectID
-		})
-	case root == "vpc" && collection == "vpcs":
-		return countExcept(items, func(e map[string]any) bool {
-			name, _ := e["name"].(string)
-			return name == autoCreatedVPCName
-		})
-	default:
-		return countExcept(items, func(e map[string]any) bool {
-			return generator.OrphanEndState(root, collection, e)
-		})
-	}
-}
-
-// countExcept counts items, skipping the ones exempt says are fixtures
-// rather than anything a scenario created. An entry that will not parse
-// counts, because an unreadable row is not evidence of a clean teardown.
-func countExcept(items []any, exempt func(map[string]any) bool) int {
-	count := 0
-	for _, item := range items {
-		entry, ok := item.(map[string]any)
-		if !ok || !exempt(entry) {
-			count++
-		}
-	}
-	return count
 }

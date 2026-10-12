@@ -34,7 +34,10 @@ package generator
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"maps"
+	"slices"
 )
 
 // OrphanSubshape classifies the root cause of a lingering resource.
@@ -98,16 +101,6 @@ var orphanSubshapeTable = []orphanSubshapeEntry{
 		Subshape:    SubshapeLLMSoftDelete,
 		Resource:    "aws_secretsmanager_secret",
 		PitfallRule: "`aws_secretsmanager_secret` has soft-delete semantics — AWS schedules deletion with a recovery window (default 30 days). For hermetic test scenarios, set `recovery_window_in_days = 0` on every `aws_secretsmanager_secret` so destroy fully removes the row from mock state (otherwise the orphan_check post-destroy gate fails). Real-cloud scenarios may choose a longer window per their recovery policy.",
-	},
-	// AWS KMS keys — also scheduled deletion (deletion_window_in_days
-	// 7-30). force_destroy is the test-friendly flag.
-	{
-		Cloud:       "aws",
-		Service:     "kms",
-		Collection:  "keys",
-		Subshape:    SubshapeLLMSoftDelete,
-		Resource:    "aws_kms_key",
-		PitfallRule: "`aws_kms_key` has scheduled-deletion semantics — AWS requires a 7-30 day deletion_window_in_days. For hermetic test scenarios, also set `force_destroy = true` so destroy actually removes the row (the mock honours this faster than real KMS would; tests don't have to wait the window).",
 	},
 	// AWS IAM managed-policy auto-seed (T-B closeout). With the filter
 	// in place these don't show up in /mock/state, but if the filter
@@ -178,35 +171,108 @@ type OrphanRouting struct {
 	Unclassified []OrphanedResource
 }
 
+// ignoredOrphanRoots and ignoredOrphanCollections are mock bookkeeping, not
+// tenant resources: fakegcp's long-running operations, fakeaws's request
+// audit log and schema marker, and per-service event, metric and message
+// tables.
+var (
+	ignoredOrphanRoots = map[string]bool{
+		"metadata":       true,
+		"operations":     true,
+		"audit":          true,
+		"schema_version": true,
+	}
+	ignoredOrphanCollections = map[string]bool{
+		"events":   true,
+		"metrics":  true,
+		"messages": true,
+	}
+)
+
+// mockwayDefaultProjectID is the project mockway seeds at boot so a
+// scenario that declares none still has a project_id to send. It mirrors
+// models.DefaultProjectID in mockway; infrafactory does not import the
+// sibling mocks.
+const mockwayDefaultProjectID = "00000000-0000-0000-0000-000000000000"
+
+// autoCreatedVPCName is the name Scaleway (and mockway) gives the default
+// VPC it creates for a private network that names no vpc_id. Terraform
+// never creates or destroys it. A stack that names its own VPC "default"
+// is exempted wrongly: the known edge of matching on name rather than
+// trusting state to be complete.
+const autoCreatedVPCName = "default"
+
 // kmsPendingDeletion is the state AWS leaves a destroyed KMS key in: it
 // cannot be deleted sooner than its waiting period, so a clean destroy
 // ends there.
 const kmsPendingDeletion = "PendingDeletion"
 
-// OrphanEndState reports whether item, a row of root.collection in a
-// /mock/state snapshot, is in the state a clean destroy leaves it in
-// rather than being an orphan. Only that exact state is an end state:
-// any other, or none, is a leak. countOrphans and ClassifyOrphans both
-// call it, so the gate and the classifier agree.
-func OrphanEndState(root, collection string, item map[string]any) bool {
-	if root == "kms" && collection == "keys" {
+// leftByCleanDestroy reports whether item, a row of root.collection in a
+// /mock/state snapshot, is one a clean destroy leaves behind: a fixture
+// the mock creates itself, or a resource's end state. Only these exact
+// rows are exempt; a project, VPC or key the stack made and failed to
+// destroy is an orphan.
+func leftByCleanDestroy(root, collection string, item map[string]any) bool {
+	switch {
+	case root == "account" && collection == "projects":
+		id, _ := item["id"].(string)
+		return id == mockwayDefaultProjectID
+	case root == "vpc" && collection == "vpcs":
+		name, _ := item["name"].(string)
+		return name == autoCreatedVPCName
+	case root == "kms" && collection == "keys":
 		state, _ := item["state"].(string)
 		return state == kmsPendingDeletion
 	}
 	return false
 }
 
-// withoutEndStates drops the items OrphanEndState reports as end states.
-// An item that is not an object is kept, so an unreadable row still counts.
-func withoutEndStates(root, collection string, items []any) []any {
-	var live []any
-	for _, item := range items {
-		if m, ok := item.(map[string]any); ok && OrphanEndState(root, collection, m) {
+// OrphanCollection is a collection in a /mock/state snapshot and the rows
+// in it a clean destroy should have removed.
+type OrphanCollection struct {
+	Service    string
+	Collection string
+	Items      []any
+}
+
+// Orphans decodes a /mock/state snapshot ({ service: { collection: [...] } })
+// and returns each collection still holding an orphan, sorted by service
+// then collection. It is the one definition of an orphan: the post-destroy
+// gate counts what it returns and ClassifyOrphans routes it. A row that is
+// not an object counts, since an unreadable row is no evidence of a clean
+// destroy, and a snapshot that is not an object is an error.
+func Orphans(stateJSON []byte) ([]OrphanCollection, error) {
+	var state map[string]any
+	if err := json.Unmarshal(stateJSON, &state); err != nil {
+		return nil, fmt.Errorf("decode state snapshot: %w", err)
+	}
+	if state == nil {
+		return nil, errors.New("decode state snapshot: not an object")
+	}
+	var orphans []OrphanCollection
+	for _, service := range slices.Sorted(maps.Keys(state)) {
+		collections, ok := state[service].(map[string]any)
+		if !ok || ignoredOrphanRoots[service] {
 			continue
 		}
-		live = append(live, item)
+		for _, collection := range slices.Sorted(maps.Keys(collections)) {
+			items, ok := collections[collection].([]any)
+			if !ok || ignoredOrphanCollections[collection] {
+				continue
+			}
+			var left []any
+			for _, item := range items {
+				if m, ok := item.(map[string]any); ok && leftByCleanDestroy(service, collection, m) {
+					continue
+				}
+				left = append(left, item)
+			}
+			if len(left) > 0 {
+				orphans = append(orphans, OrphanCollection{Service: service, Collection: collection, Items: left})
+			}
+		}
 	}
-	return live
+	return orphans, nil
 }
 
 // ClassifyOrphans walks the /mock/state JSON and classifies each
@@ -225,93 +291,59 @@ func withoutEndStates(root, collection string, items []any) []any {
 // timestamp is propagated into the emitted MockGap.Timestamp field.
 // Caller typically passes the run ID.
 //
-// Best-effort: malformed JSON or missing fields return an empty
-// routing rather than an error (the orphan_check gate already
-// failed; classification is sugar). Unknown collections are
-// recorded in routing.Unclassified for human triage.
+// What counts as an orphan is Orphans', so the classifier routes exactly
+// what the post-destroy gate counted. Best-effort: a snapshot Orphans
+// cannot decode returns an empty routing rather than an error (the
+// orphan_check gate already failed; classification is sugar). Unknown
+// collections are recorded in routing.Unclassified for human triage.
 func ClassifyOrphans(mockStateJSON []byte, cloud, scenario, timestamp string) OrphanRouting {
 	var routing OrphanRouting
 	if len(mockStateJSON) == 0 || cloud == "" {
 		return routing
 	}
 
-	var state map[string]any
-	if err := json.Unmarshal(mockStateJSON, &state); err != nil {
+	orphans, err := Orphans(mockStateJSON)
+	if err != nil {
 		return routing
 	}
-
-	// Bookkeeping / system collections that aren't tenant resources,
-	// as in internal/harness/destroy.go::countOrphans. Its project and
-	// default-VPC exemptions are not repeated here.
-	ignoredRoots := map[string]bool{
-		"metadata":       true,
-		"operations":     true,
-		"audit":          true,
-		"schema_version": true,
-	}
-	ignoredCollections := map[string]bool{
-		"events":   true,
-		"metrics":  true,
-		"messages": true,
-	}
-
-	for service, rootNode := range state {
-		if ignoredRoots[service] {
-			continue
-		}
-		rootMap, ok := rootNode.(map[string]any)
-		if !ok {
-			continue
-		}
-		for collection, value := range rootMap {
-			if ignoredCollections[collection] {
-				continue
-			}
-			items, ok := value.([]any)
-			if !ok {
-				continue
-			}
-			items = withoutEndStates(service, collection, items)
-			if len(items) == 0 {
-				continue
-			}
-			// Look up in the sub-shape table.
-			entry := lookupOrphanSubshape(cloud, service, collection)
-			if entry == nil {
-				for i := range items {
-					routing.Unclassified = append(routing.Unclassified, OrphanedResource{
-						Service:    service,
-						Collection: collection,
-						Index:      i,
-					})
-				}
-				continue
-			}
-			// Emit one entry per orphan (some scenarios leave multiple
-			// instances of the same resource type — count > 1).
-			switch entry.Subshape {
-			case SubshapeLLMSoftDelete:
-				// Single pitfall per resource type; AppendPitfall
-				// dedups across multiple invocations.
-				routing.Pitfalls = append(routing.Pitfalls, LearnedPitfall{
-					Resource:       entry.Resource,
-					Rule:           entry.PitfallRule,
-					DiscoveredFrom: scenario,
-				})
-			case SubshapeMockAutoSeed,
-				SubshapeMockCascade,
-				SubshapeMockProviderDivergence,
-				SubshapeProviderSoftDelete:
-				routing.MockGaps = append(routing.MockGaps, MockGap{
-					Cloud:    cloud,
-					Signal:   entry.MockGapSignal,
-					Resource: entry.Resource,
-					Scenario: scenario,
-					Detail: fmt.Sprintf("orphan_check: %s.%s had %d non-empty entries after destroy",
-						service, collection, len(items)),
-					Timestamp: timestamp,
+	for _, orphan := range orphans {
+		service, collection, items := orphan.Service, orphan.Collection, orphan.Items
+		// Look up in the sub-shape table.
+		entry := lookupOrphanSubshape(cloud, service, collection)
+		if entry == nil {
+			for i := range items {
+				routing.Unclassified = append(routing.Unclassified, OrphanedResource{
+					Service:    service,
+					Collection: collection,
+					Index:      i,
 				})
 			}
+			continue
+		}
+		// Emit one entry per orphan (some scenarios leave multiple
+		// instances of the same resource type — count > 1).
+		switch entry.Subshape {
+		case SubshapeLLMSoftDelete:
+			// Single pitfall per resource type; AppendPitfall
+			// dedups across multiple invocations.
+			routing.Pitfalls = append(routing.Pitfalls, LearnedPitfall{
+				Resource:       entry.Resource,
+				Rule:           entry.PitfallRule,
+				DiscoveredFrom: scenario,
+			})
+		case SubshapeMockAutoSeed,
+			SubshapeMockCascade,
+			SubshapeMockProviderDivergence,
+			SubshapeProviderSoftDelete:
+			routing.MockGaps = append(routing.MockGaps, MockGap{
+				Cloud:    cloud,
+				Signal:   entry.MockGapSignal,
+				Resource: entry.Resource,
+				Scenario: scenario,
+				Detail: fmt.Sprintf("orphan_check: %s.%s had %d non-empty entries after destroy",
+					service, collection, len(items)),
+				Timestamp: timestamp,
+			})
 		}
 	}
 	return routing
