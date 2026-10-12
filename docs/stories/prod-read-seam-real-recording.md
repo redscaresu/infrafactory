@@ -14,7 +14,7 @@ Waits on aws-hold-for-read-real-proof, so the recording never runs on a hold not
 
 **You:** say go before the paid run; the lead waits for it in the conversation.
 
-**You:** give the lead the reader key file's path. After each read the lead deletes that file, so for every later read write it again (mode 0600, the same two KEY=VALUE lines) from where you keep the key.
+**You:** give the lead the reader key file's path. After each read the lead deletes that file, so for every later read write it again (mode 0600, the same two KEY=VALUE lines) from where you keep the key. The lead checks only the file's mode and key names.
 
 **Values.** `--account` is the Layer 3 member account's 12-digit id and `--region` is its region, the same values filled into reader-policy.json. The lead passes them as flags on the command line, and never writes them to a committed file.
 
@@ -24,7 +24,7 @@ Waits on aws-hold-for-read-real-proof, so the recording never runs on a hold not
 3. Check the recording.
 4. Release: `infrafactory reap scenarios/training/aws-web-live.yaml --config <cfg> --take-over <holder> --release-hold`, which keeps the pre-destroy tfstate at `.infrafactory/holds/aws-web-live/terraform-live.tfstate`, then destroys, sweeps empty, reaps and releases the claim.
 5. Run cmd/aws-read-scrub over the recording and that state copy, writing into internal/e2e/testdata/aws-step0/.
-6. End the read step: delete the local key file, the raw recording and the pre-destroy state copy (which also lifts the guard on generate, run and test of aws-web-live). The IAM user and its key stay.
+6. End the read step: delete the local key file, the raw recording and the pre-destroy state copy (which also lifts the guard on generate, run and test of aws-web-live), and check the key file is absent. The IAM user and its key stay.
 7. Commit only the scrubbed files, with an ungated test that runs harness.CheckScrubbedRead over them.
 
 This is the epic's last PR: it deletes docs/epics/prod-read-seam.md, marks the epic done in the HLD's ## Epics and updates STATUS.md.

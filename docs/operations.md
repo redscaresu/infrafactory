@@ -436,6 +436,102 @@ reads the file itself (`AWSReaderConfig`); nothing is sourced into the shell.
   `AWS_SESSION_TOKEN` for a temporary key. Any other key, a repeated key and an empty value are
   refused; an empty `AWS_SESSION_TOKEN=` is refused, not read as absent.
 
+### The reader policy
+
+The reader key belongs to a separate read-only IAM user, `infrafactory-reader`, whose one policy,
+`infrafactory-reader-read`, is `docs/layer3/aws/reader-policy.json`.
+`internal/harness/aws_reader_policy_test.go` holds its actions to exactly the reader table's rows,
+and its resources to ARNs in `ACCOUNT_ID` (in `REGION` or regionless), `*` only on a statement of
+ec2 actions pinned to `REGION` or on `sts:GetCallerIdentity` alone, and the public
+`/aws/service/*` parameters ARN (ADR-0023, amendment of 2026-10-12). Never apply this file to
+`infrafactory-layer3` or `infrafactory-layer3-scope`: as a new version of that policy it strips
+the Layer 3 key's permissions, and a reader on that user would also hold reap's writes.
+
+The user runs every IAM command in this section, as an admin of the account being read, which can
+be prod; the lead never holds those credentials. `REGION`, `ACCOUNT_ID` and `PROFILE` (the admin
+profile) are the account being read's; for the Layer 3 account they are Scope setup step 0's
+`REGION` and `ACCOUNT_ID`, and `PROFILE=infrafactory-admin`. Each block below stops at its first
+failure, and on an empty variable, which would otherwise write `arn:aws:iam:::role/*` into the
+policy.
+
+Once, create the user and attach the policy, and nothing else:
+
+```bash
+(set -eu; : "${REGION:?}" "${ACCOUNT_ID:?}" "${PROFILE:?}"
+  T=$(mktemp); trap 'rm -f "$T"' EXIT
+  sed -e "s/REGION/$REGION/g" -e "s/ACCOUNT_ID/$ACCOUNT_ID/g" docs/layer3/aws/reader-policy.json > "$T"
+  aws iam create-user --user-name infrafactory-reader --profile "$PROFILE"
+  aws iam create-policy --policy-name infrafactory-reader-read --policy-document "file://$T" \
+    --profile "$PROFILE"
+  aws iam attach-user-policy --user-name infrafactory-reader \
+    --policy-arn "arn:aws:iam::${ACCOUNT_ID}:policy/infrafactory-reader-read" --profile "$PROFILE")
+```
+
+A rerun of this block fails first at `create-user`, with `EntityAlreadyExists`. If a run stopped
+halfway, run the block again without the commands that succeeded.
+
+After `reader-policy.json` changes (a story that adds a reader-table row), the attached policy
+still holds the old actions. Write the policy again and make it the default version. IAM keeps at most
+five versions: at five, first delete the oldest non-default one with `aws iam delete-policy-version`.
+
+```bash
+(set -eu; : "${REGION:?}" "${ACCOUNT_ID:?}" "${PROFILE:?}"
+  T=$(mktemp); trap 'rm -f "$T"' EXIT
+  sed -e "s/REGION/$REGION/g" -e "s/ACCOUNT_ID/$ACCOUNT_ID/g" docs/layer3/aws/reader-policy.json > "$T"
+  aws iam create-policy-version --policy-arn "arn:aws:iam::${ACCOUNT_ID}:policy/infrafactory-reader-read" \
+    --policy-document "file://$T" --set-as-default --profile "$PROFILE")
+```
+
+Once, create the user's access key and write it to the key file without printing it. The block
+refuses an existing key file and writes nothing unless the key was created:
+
+```bash
+mkdir -p ~/.config/infrafactory && (set -eu; : "${PROFILE:?}"; umask 077; F=~/.config/infrafactory/aws-reader.env
+  [ ! -e "$F" ]
+  KEY=$(aws iam create-access-key --user-name infrafactory-reader --profile "$PROFILE" \
+    --query 'AccessKey.[AccessKeyId,SecretAccessKey]' --output text)
+  [ -n "$KEY" ]
+  printf '%s\n' "$KEY" | awk '{printf "AWS_ACCESS_KEY_ID=%s\nAWS_SECRET_ACCESS_KEY=%s\n",$1,$2}' > "$F")
+```
+
+The lead deletes this file after each read, so before handing over its path the user copies the
+key into their secret store by importing the file into their password manager directly, never
+through the clipboard (it can sync to other devices and is kept by clipboard-history tools). The
+key is never echoed in a terminal or transcript anyone else can see.
+
+The IAM user and its key stay between rehearsals; only the local key file comes and goes
+(ADR-0023, amendment of 2026-10-12). For each later read, the user writes the key file again from
+the secret store: mode 0600, the same two lines, `AWS_ACCESS_KEY_ID=…` and
+`AWS_SECRET_ACCESS_KEY=…`. If the key is lost, the user deletes it by id and runs the create block
+again: `aws iam list-access-keys --user-name infrafactory-reader --profile "$PROFILE"` shows its id
+and never its secret, then
+`aws iam delete-access-key --user-name infrafactory-reader --access-key-id <id> --profile "$PROFILE"`.
+
+For each read, the user gives the lead the key file's path, and the lead checks only this:
+
+```bash
+KEY_FILE=<the path the user gave>
+stat -f %Lp "$KEY_FILE"   # 600 (on Linux: stat -c %a)
+awk -F= '{ if ($1 ~ /^AWS_(ACCESS_KEY_ID|SECRET_ACCESS_KEY|SESSION_TOKEN)$/) print $1; else print "line " NR ": not a key name" }' "$KEY_FILE"
+```
+
+The second command prints only a key name it recognises, and for any other line only its number,
+so a malformed line never puts the secret in the lead's transcript. It must print exactly
+`AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`.
+
+IAM is eventually consistent, and no code retries: the reader's clients do not retry, and the
+identity check stops at its first error. So on the first read after the key is created, if the
+identity check fails with `InvalidClientTokenId`, the lead waits a few seconds and runs the read
+once more; a second failure is a bad key.
+
+After each read, once the scrub has produced its fixtures, the lead deletes the local key file, the
+raw recording and the pre-destroy state, and checks the key file is absent
+(`test ! -e "$KEY_FILE"`). The IAM user and its key stay. Only the scrubbed fixtures are committed.
+
+In the Layer 3 account the SCP (`docs/layer3/aws/scp.json`, `DenyEveryServiceButEC2SSMSTS`) denies
+every `iam:*` action to everyone but the admin role, so the policy's `iam:` rows are unreachable
+there: the IAM readers are proved against fakeaws only.
+
 ### The fakeaws instance
 
 The rehearsal runs its own fakeaws, started with these flags (`fakeaws/cmd/fakeaws/main.go`):
