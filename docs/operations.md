@@ -656,7 +656,7 @@ the `hashicorp/aws` version the lock pins and any warnings.
 
 **Layout.** `<repo>/.infrafactory/rehearsals/<id>/` holds `work/` (the copy of the lowest directory holding `<dir>` and every local module it
 calls, at its path relative to the repository: with `../../modules/x` that can be the repository
-root, unrelated files included, which are gated like the rest), `data/` (`TF_DATA_DIR`),
+root, unrelated files included, which the gate does not read), `data/` (`TF_DATA_DIR`),
 `home/` (an empty HOME), `state/` and `vars.tfvars`. The `rehearsals` dir has a `.gitignore` of
 `*`. Directories are `0700` and files `0600`, except a file with an execute bit (a provider
 binary), which is `0700`. The copy leaves out `.terraform`, `.git`, `.infrafactory` and any name
