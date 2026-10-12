@@ -1,8 +1,7 @@
 ---
 kind: code
 repo: fakeaws
-status: blocked
-blocked_by: [fakeaws-subnet-overlap-refused, fakeaws-filters-vpc-network, fakeaws-filters-security-groups, fakeaws-images-owner-name-filters, fakeaws-describe-availability-zones]
+status: ready
 epic: fakeaws-data-sources
 depends_on: [fakeaws-subnet-overlap-refused, fakeaws-filters-vpc-network, fakeaws-filters-security-groups, fakeaws-images-owner-name-filters, fakeaws-describe-availability-zones]
 touches: [examples/working/ec2_data_sources/main.tf, examples/filter_refused_test.go, examples/README.md, README.md, coverage_matrix.yaml, internal/audit/audit_test.go]
