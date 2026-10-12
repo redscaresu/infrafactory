@@ -448,7 +448,8 @@ To read the live stack's state, `test --hold` keeps the stack up after a passing
 7. If the release refuses, the same command without `--release-hold`:
    `infrafactory --config <cfg> reap scenarios/training/aws-web-live.yaml --take-over <holder>`,
    destroys without the copy.
-8. Delete the copy after the release.
+8. The read also uses the copy after the release (prod-read-seam scrubs it with the recording).
+   Delete it by hand once the read is done, which lifts step 4's refusal.
 
 Cost bound: one small instance, its root volume and its public IPv4 address, per hour held. There
 is no NAT gateway or load balancer. Nothing expires a hold, so release it the same day.
