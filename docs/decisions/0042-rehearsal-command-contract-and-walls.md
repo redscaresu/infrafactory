@@ -174,8 +174,8 @@ block's `content` included.
 A checked path is admitted only as `path.module` or `path.root`, alone or joined with a literal
 starting with `/`, resolved from that directory, and only if it stays inside the copy. A bare
 relative literal is refused: tofu resolves it from its working directory rather than the module
-directory (**unverified**; refusing it holds either way). Absolute, escaping, variable and otherwise computed paths are
-refused, and `abspath` and `pathexpand` are refused by name.
+directory (**unverified**; refusing it holds either way). Absolute, escaping, variable and
+otherwise computed paths are refused, and `abspath` and `pathexpand` are refused by name.
 
 A written path (`filename` of `local_file` and `local_sensitive_file`, `output_path` of
 `archive_file`) must also not name a file tofu could load, so an apply that would write
@@ -186,17 +186,27 @@ when it is `.terraform.lock.hcl`, or when any of its elements is `terraform.d` o
 Names are compared case-insensitively, since a case-insensitive filesystem (macOS's default) maps
 `ZZ_OVERRIDE.TF` and `.TERRAFORM.LOCK.HCL` onto the names they spell.
 
+A written path is also refused when it is the same file as a template any `templatefile` in the
+gate run reads, in any module: `templatefile` can run at apply, after the write, on a template the
+gate never saw, and the re-gate before the next step comes too late. The filesystem decides
+sameness (`os.SameFile`), so a spelling a case-insensitive filesystem maps onto the template is
+caught.
+
 `fileset`'s second argument, the glob, is checked too, since it is joined onto the path before
-globbing (**unverified**; the check holds either way). It must be a literal relative pattern with
-no `..` element; a non-literal, absolute or `..`-holding pattern is refused. Any `..` is refused,
-not only one that leaves the copy lexically, because `**` can match zero directories, so a lexical
-check of a `..` after a glob undercounts how far it climbs.
+globbing (**unverified**; the check holds either way). It must be a literal relative pattern of
+ASCII letters, digits and `/ . - _ * ?` with no `..` element; anything else is refused. The
+characters are an allowlist because glob syntax spells `..` without writing it: `{..,x}` and
+`[.][.]` both match it. Any `..` element is refused, not only one that leaves the copy lexically,
+because `**` can match zero directories, so a lexical check of a `..` after a glob undercounts how
+far it climbs.
 
 The template a `templatefile` names is gated too, because the gate admits other files unparsed
 and a template can call any function. It is parsed with `hclsyntax.ParseTemplate`, and every
-function call and path in it is held to the function and path rules above. A missing or
-unparseable template is refused, and so is a template calling `templatefile`: the gate does not
-follow a template into another.
+function call in it is held to the function rule above. No path in a template can be checked:
+every variable in it, `path` included, comes from the `templatefile` vars map, so
+`{ path = { module = "/Users/me/.aws" } }` makes `path.module` a host directory. So every path
+function call in a template, `templatefile` included, is refused. A missing or unparseable
+template is refused.
 
 ### provider "aws"
 

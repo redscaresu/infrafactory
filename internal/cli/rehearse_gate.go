@@ -87,9 +87,11 @@ var rehearsalRequiredProviderKeys = map[string]bool{"source": true, "version": t
 // file, and returns every problem in one error, sorted.
 func rehearsalGate(in rehearsalGateInput) error {
 	var problems []string
+	uses := &rehearsalPathUses{}
 	for _, dir := range append([]string{in.root}, in.modules...) {
-		problems = append(problems, in.dirProblems(dir)...)
+		problems = append(problems, in.dirProblems(dir, uses)...)
 	}
+	problems = append(problems, uses.problems()...)
 	if in.varFile != "" {
 		problems = append(problems, in.tfvarsProblems(in.varFile)...)
 	}
@@ -109,11 +111,13 @@ func (in rehearsalGateInput) display(path string) string {
 }
 
 // rehearsalModule is one gated module dir and the gate run that reads it:
-// path.module is dir, path.root is in.root. providers maps each local name
-// its required_providers declare to the source, lowercased.
+// path.module is dir, path.root is in.root, and uses collects the run's
+// templates and written paths. providers maps each local name its
+// required_providers declare to the source, lowercased.
 type rehearsalModule struct {
 	in        rehearsalGateInput
 	dir       string
+	uses      *rehearsalPathUses
 	root      bool
 	providers map[string]string
 }
@@ -125,7 +129,7 @@ type rehearsalModule struct {
 // (TestAssumption_LoaderIgnoresUnknownSuffixes). Tofu reads some of those
 // files by other routes, and ADR-0042 § The extension and file policy
 // names the rule that owns each.
-func (in rehearsalGateInput) dirProblems(dir string) []string {
+func (in rehearsalGateInput) dirProblems(dir string, uses *rehearsalPathUses) []string {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return []string{fmt.Sprintf("%s: cannot read the module directory: %v", in.display(dir), err)}
@@ -151,7 +155,7 @@ func (in rehearsalGateInput) dirProblems(dir string) []string {
 			files[in.display(path)] = body
 		}
 	}
-	m := rehearsalModule{in: in, dir: dir, root: dir == in.root, providers: map[string]string{}}
+	m := rehearsalModule{in: in, dir: dir, uses: uses, root: dir == in.root, providers: map[string]string{}}
 	for file, body := range files {
 		problems = append(problems, m.requiredProviderProblems(file, body)...)
 	}
@@ -474,11 +478,16 @@ func (m rehearsalModule) bodyProblems(file, addr string, block *hclsyntax.Block,
 	return problems
 }
 
-// callProblems admits a call only to a function on the Layer 3
-// pure-function allowlist. A namespaced name (core::file,
-// provider::local::direxists) is refused by name. The path functions are
-// judged by the path rule.
+// callProblems holds every call in expr to the function rule and the path
+// functions' arguments to the path rule.
 func (m rehearsalModule) callProblems(at string, expr hclsyntax.Expression) []string {
+	return append(rehearsalFunctionProblems(at, expr), m.pathCallProblems(at, expr)...)
+}
+
+// rehearsalFunctionProblems admits a call only to a function on the Layer 3
+// pure-function allowlist or a path function. A namespaced name
+// (core::file, provider::local::direxists) is refused by name.
+func rehearsalFunctionProblems(at string, expr hclsyntax.Expression) []string {
 	var problems []string
 	for _, fn := range layer3CallsIn(expr) {
 		switch {
@@ -489,5 +498,5 @@ func (m rehearsalModule) callProblems(at string, expr hclsyntax.Expression) []st
 			problems = append(problems, fmt.Sprintf("%s: calls %s(), which is not on the pure-function allowlist", at, fn))
 		}
 	}
-	return append(problems, m.pathCallProblems(at, expr)...)
+	return problems
 }

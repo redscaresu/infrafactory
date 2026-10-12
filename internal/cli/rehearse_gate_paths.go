@@ -1,7 +1,10 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -82,23 +85,66 @@ func (m rehearsalModule) pathCallProblem(at string, call *hclsyntax.FunctionCall
 }
 
 // templateProblems parses the template a templatefile names and holds
-// every call and path in it to the function and path rules. A template
-// calling templatefile is refused rather than followed.
+// every call in it to the function rule. No path in a template can be
+// checked: its variables, path among them, come from the vars map. So
+// every path function call in it, templatefile included, is refused.
 func (m rehearsalModule) templateProblems(at, path string) []string {
 	name := m.in.display(path)
 	src, problem := rehearsalRead(path, name)
 	if problem != "" {
 		return []string{at + ": template " + problem}
 	}
+	m.uses.templates = append(m.uses.templates, rehearsalPathUse{at: name, path: path})
 	expr, diags := hclsyntax.ParseTemplate(src, name, hcl.Pos{Line: 1, Column: 1})
 	if diags.HasErrors() {
 		return []string{fmt.Sprintf("%s: template %s does not parse, so the gate cannot vouch for it: %s", at, name, diags.Error())}
 	}
 	at += ": template " + name
-	if slices.Contains(layer3CallsIn(expr), "templatefile") {
-		return []string{at + ": calls templatefile(): the gate does not follow a template into another"}
+	problems := rehearsalFunctionProblems(at, expr)
+	for _, fn := range layer3CallsIn(expr) {
+		if rehearsalPathFunctions[fn] {
+			problems = append(problems, fmt.Sprintf("%s: calls %s(): a path in a template is refused, since the vars map sets what path.module means there", at, fn))
+		}
 	}
-	return m.callProblems(at, expr)
+	return problems
+}
+
+// rehearsalPathUses collects, across one gate run, every template a
+// templatefile reads and every path an apply writes.
+type rehearsalPathUses struct {
+	templates []rehearsalPathUse
+	written   []rehearsalPathUse
+}
+
+// rehearsalPathUse is one resolved path and what names it.
+type rehearsalPathUse struct{ at, path string }
+
+// problems refuses a written path that is the same file as a template: the
+// apply would write it, then run templatefile on it ungated. The
+// filesystem decides sameness, so a spelling a case-insensitive
+// filesystem maps onto the template is caught too.
+func (u *rehearsalPathUses) problems() []string {
+	var problems []string
+	for _, w := range u.written {
+		written, err := os.Stat(w.path)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue // every template exists, so a missing path is none of them
+		}
+		if err != nil {
+			problems = append(problems, fmt.Sprintf("%s: cannot compare it with the templates: %v", w.at, err))
+			continue
+		}
+		for _, t := range u.templates {
+			template, err := os.Stat(t.path)
+			switch {
+			case err != nil:
+				problems = append(problems, fmt.Sprintf("%s: cannot compare it with template %s: %v", w.at, t.at, err))
+			case os.SameFile(written, template):
+				problems = append(problems, fmt.Sprintf("%s: refused: the apply would overwrite template %s, which a templatefile reads in the same apply", w.at, t.at))
+			}
+		}
+	}
+	return problems
 }
 
 // pathArgProblems holds a block's path arguments to the path rule, and a
@@ -107,12 +153,14 @@ func (m rehearsalModule) pathArgProblems(file string, block *hclsyntax.Block) []
 	var problems []string
 	for name, written := range rehearsalPathArgs[block.Type][block.Labels[0]] {
 		for _, attr := range rehearsalNestedAttrs(block.Body, name) {
+			at := rehearsalAt(file, attr.SrcRange, rehearsalAddress(block)+"."+name)
 			path, problem := m.resolvePath(attr.Expr)
 			if problem == "" && written {
 				problem = rehearsalWrittenPathProblem(m.in.display(path))
+				m.uses.written = append(m.uses.written, rehearsalPathUse{at: at, path: path})
 			}
 			if problem != "" {
-				problems = append(problems, rehearsalAt(file, attr.SrcRange, rehearsalAddress(block)+"."+name)+": "+problem)
+				problems = append(problems, at+": "+problem)
 			}
 		}
 	}
@@ -223,20 +271,28 @@ func rehearsalLiteral(expr hclsyntax.Expression) (string, bool) {
 }
 
 // rehearsalGlobProblem is why a fileset glob is refused, or "". It must be
-// a relative literal with no .. element: any .., not only an escaping one,
-// because ** can match zero directories. Backslashes are dropped before
-// the check, since a glob reads one as an escape.
+// a relative literal with no .. element and no rune rehearsalGlobRefuses: any .., not
+// only an escaping one, because ** can match zero directories. Braces,
+// classes and escapes are refused, since {..,x} or [.][.] spells .. too.
 func rehearsalGlobProblem(expr hclsyntax.Expression) string {
 	glob, ok := rehearsalLiteral(expr)
 	switch {
 	case !ok:
 		return "the glob must be a literal"
+	case strings.IndexFunc(glob, rehearsalGlobRefuses) >= 0:
+		return "a glob may hold only letters, digits and / . - _ * ?"
 	case filepath.IsAbs(glob):
 		return "an absolute glob is refused"
-	case slices.Contains(strings.Split(strings.ReplaceAll(glob, `\`, ""), "/"), ".."):
+	case slices.Contains(strings.Split(glob, "/"), ".."):
 		return "a glob holding a .. element is refused"
 	}
 	return ""
+}
+
+// rehearsalGlobRefuses reports a rune a glob may not hold: anything but an
+// ASCII letter or digit and / . - _ * ?.
+func rehearsalGlobRefuses(r rune) bool {
+	return !('a' <= r && r <= 'z' || 'A' <= r && r <= 'Z' || '0' <= r && r <= '9' || strings.ContainsRune("/.-_*?", r))
 }
 
 // rehearsalWrittenPathProblem is why a written path, relative to the copy,

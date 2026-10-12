@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -65,18 +67,26 @@ func TestRehearsalGatePathsRefuse(t *testing.T) {
 		{name: "a glob with .. after **", files: gateOutput(`fileset(path.module, "**/../x")`),
 			want: []string{"main.tf:2: output.o.value: fileset(): a glob holding a .. element is refused"}},
 		{name: "a glob with an escaped ..", files: gateOutput(`fileset(path.module, "a/.\\./b")`),
-			want: []string{"main.tf:2: output.o.value: fileset(): a glob holding a .. element is refused"}},
+			want: []string{"main.tf:2: output.o.value: fileset(): a glob may hold only letters, digits and / . - _ * ?"}},
+		{name: "a glob spelling .. with braces", files: gateOutput(`fileset(path.module, "{..,.}/{..,.}/home/*/.aws/*")`),
+			want: []string{"main.tf:2: output.o.value: fileset(): a glob may hold only letters, digits and / . - _ * ?"}},
+		{name: "a glob spelling .. with classes", files: gateOutput(`fileset(path.module, "[.][.]/x")`),
+			want: []string{"main.tf:2: output.o.value: fileset(): a glob may hold only letters, digits and / . - _ * ?"}},
 		{name: "a variable glob", files: gateOutput(`fileset(path.module, var.p)`),
 			want: []string{"main.tf:2: output.o.value: fileset(): the glob must be a literal"}},
 		{name: "an absolute glob", files: gateOutput(`fileset(path.module, "/etc/*")`),
 			want: []string{"main.tf:2: output.o.value: fileset(): an absolute glob is refused"}},
 		// Templates.
 		{name: "a template reading an absolute path", files: withTemplate(`${file("/etc/passwd")}`),
-			want: []string{"main.tf:2: output.o.value: templatefile(): template t.tpl: file(): an absolute path is refused"}},
+			want: []string{"main.tf:2: output.o.value: templatefile(): template t.tpl: calls file(): a path in a template is refused"}},
+		{name: "a template whose path.module the vars map sets", files: map[string]string{
+			"main.tf": "output \"o\" {\n  value = templatefile(\"${path.module}/t.tpl\", { path = { module = \"/Users/me/.aws\" } })\n}\n",
+			"t.tpl":   `${file("${path.module}/credentials")}`,
+		}, want: []string{"main.tf:2: output.o.value: templatefile(): template t.tpl: calls file(): a path in a template is refused"}},
 		{name: "a template calling an impure function", files: withTemplate("at ${timestamp()}\n"),
 			want: []string{"main.tf:2: output.o.value: templatefile(): template t.tpl: calls timestamp(), which is not on the pure-function allowlist"}},
 		{name: "a template calling templatefile", files: withTemplate(`${templatefile("${path.module}/t.tpl", {})}`),
-			want: []string{"main.tf:2: output.o.value: templatefile(): template t.tpl: calls templatefile(): the gate does not follow a template into another"}},
+			want: []string{"main.tf:2: output.o.value: templatefile(): template t.tpl: calls templatefile(): a path in a template is refused"}},
 		{name: "a template that does not parse", files: withTemplate("${"),
 			want: []string{"main.tf:2: output.o.value: templatefile(): template t.tpl does not parse"}},
 		{name: "a missing template", files: gateOutput(`templatefile("${path.root}/t.tpl", {})`),
@@ -103,6 +113,15 @@ func TestRehearsalGatePathsRefuse(t *testing.T) {
 			want: []string{"main.tf:3: local_file.f.filename: a written path is refused: tofu reads it"}},
 		{name: "writing under terraform.d", files: map[string]string{"main.tf": "resource \"archive_file\" \"a\" {\n  type        = \"zip\"\n  output_path = \"${path.root}/terraform.d/x.zip\"\n}\n"},
 			want: []string{"main.tf:3: archive_file.a.output_path: a written path is refused: tofu reads it"}},
+		{name: "writing a template a templatefile reads", files: map[string]string{
+			"main.tf": "resource \"local_file\" \"t\" {\n  content  = \"x\"\n  filename = \"${path.module}/t.tpl\"\n}\noutput \"o\" {\n  value = templatefile(\"${path.module}/t.tpl\", { v = local_file.t.id })\n}\n",
+			"t.tpl":   "hello\n",
+		}, want: []string{"main.tf:3: local_file.t.filename: refused: the apply would overwrite template t.tpl, which a templatefile reads in the same apply"}},
+		{name: "a child writing the root's template", files: map[string]string{
+			"main.tf":       "output \"o\" {\n  value = templatefile(\"${path.root}/t.tpl\", {})\n}\n",
+			"t.tpl":         "hello\n",
+			"child/main.tf": "data \"archive_file\" \"a\" {\n  type        = \"zip\"\n  output_path = \"${path.module}/../t.tpl\"\n}\n",
+		}, want: []string{"child/main.tf:3: data.archive_file.a.output_path: refused: the apply would overwrite template t.tpl"}},
 		// aws path arguments: every argument terraform-provider-aws v5.100.0
 		// reads a local file from.
 		{name: "aws_s3_object source", files: map[string]string{"main.tf": "resource \"aws_s3_object\" \"o\" {\n  bucket = \"b\"\n  source = \"/etc/passwd\"\n}\n"},
@@ -176,6 +195,23 @@ resource "aws_dataexchange_revision_assets" "a" {
 	}
 }
 
+// TestRehearsalGateWritingATemplateCaseInsensitively: on a case-insensitive
+// filesystem (macOS's default), T.TPL is the template t.tpl, so writing it
+// is refused. A case-sensitive filesystem has no such alias.
+func TestRehearsalGateWritingATemplateCaseInsensitively(t *testing.T) {
+	probe := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(probe, "t.tpl"), nil, 0o600))
+	if _, err := os.Stat(filepath.Join(probe, "T.TPL")); err != nil {
+		t.Skip("case-sensitive filesystem: T.TPL is another file")
+	}
+	err := gateFixture(t, map[string]string{
+		"main.tf": "resource \"local_file\" \"t\" {\n  content  = \"x\"\n  filename = \"${path.module}/T.TPL\"\n}\noutput \"o\" {\n  value = templatefile(\"${path.module}/t.tpl\", {})\n}\n",
+		"t.tpl":   "hello\n",
+	}, "")
+	require.ErrorIs(t, err, errRehearsalRefuses)
+	assert.Contains(t, err.Error(), "main.tf:3: local_file.t.filename: refused: the apply would overwrite template t.tpl")
+}
+
 // TestRehearsalGatePathsAdmit: every path form the gate admits, in one
 // copy, passes.
 func TestRehearsalGatePathsAdmit(t *testing.T) {
@@ -183,6 +219,11 @@ func TestRehearsalGatePathsAdmit(t *testing.T) {
 		"main.tf": `resource "local_file" "out" {
   content  = file("${path.module}/files/a.txt")
   filename = "${path.module}/out.txt"
+}
+
+resource "local_file" "existing" {
+  content  = "b"
+  filename = "${path.module}/files/b.txt"
 }
 
 data "local_file" "in" {
@@ -215,6 +256,7 @@ output "e" {
 }
 `,
 		"files/a.txt": "a\n",
+		"files/b.txt": "b\n",
 		"t.tpl":       "hello ${upper(name)}\n",
 		"child/main.tf": `output "c" {
   value = file("${path.module}/../files/a.txt")
