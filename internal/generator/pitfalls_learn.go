@@ -93,8 +93,9 @@ var (
 		"timeout",
 	}
 
-	// mockActionableSignals are substrings that — when present in a
-	// failure detail — indicate the failure is a mock-server bug, NOT
+	// signals are the substrings RouteFailure reads in a failure detail,
+	// each with its class. A mock signal (mockOnly or mockOrCloud)
+	// indicates, from a mock, a mock-server bug, NOT
 	// an LLM-side HCL mistake. Writing such failures to
 	// pitfalls/<cloud>.yaml teaches the LLM to avoid valid resources
 	// just because the mock is incomplete; that makes the system
@@ -109,14 +110,14 @@ var (
 	// Signals come from real failures observed in the 2026-05-31 sweep
 	// + earlier sessions. Add more here as new mock-gap shapes surface,
 	// lowercase, since the detail is lowercased before matching.
-	mockActionableSignals = []mockSignal{
+	signals = []signal{
 		// 501 Not Implemented — fakeaws/fakegcp/mockway return this
 		// from their default-not-found handler when no route matches.
 		// Always a missing-mock-handler symptom, never an LLM bug.
-		{text: "501 not implemented"},
-		{text: "501: not implemented"},
-		{text: "\"reason\":\"notimplemented\""},
-		{text: "reason: \"notimplemented\""},
+		{"501 not implemented", mockOnly},
+		{"501: not implemented", mockOnly},
+		{"\"reason\":\"notimplemented\"", mockOnly},
+		{"reason: \"notimplemented\"", mockOnly},
 
 		// fakeaws's refusal of an EC2 Describe filter or param it does
 		// not read (fakeaws MUST[ec2-filter-refusal-names-every-name-sorted]).
@@ -124,32 +125,32 @@ var (
 		// NotImplemented: <Action>: not modelled by fakeaws: <names>",
 		// which no 501 signal above matches. Never "api error
 		// notimplemented" alone: a real AWS NotImplemented is no mock gap.
-		{text: "not modelled by fakeaws"},
+		{"not modelled by fakeaws", mockOnly},
 
 		// "Plugin did not respond" — the provider crashed parsing the
 		// mock's response (usually missing/wrong field shape that the
 		// SDK nil-derefs on). Mock-side fidelity bug.
-		{text: "plugin did not respond"},
-		{text: "the plugin encountered an error"},
+		{"plugin did not respond", mockOnly},
+		{"the plugin encountered an error", mockOnly},
 
 		// OAuth / auth escape — the lib client used a code path that
 		// bypasses the per-service custom_endpoint override and
 		// escaped to the real cloud. Either a missing endpoint flag
 		// (T-D-2 v3 pattern) or a missing route. Either way mock-side.
-		{text: "access_token_type_unsupported"},
-		{text: "request had invalid authentication credentials"},
+		{"access_token_type_unsupported", mockOnly},
+		{"request had invalid authentication credentials", mockOnly},
 
 		// Wait-loop "couldn't find resource (N retries)" — provider's
 		// Read polled after a successful Create and the mock either
 		// 404s the Describe* path or returns null: mock-side state
 		// divergence when the mock sent it. On a real cloud both usually
-		// come from a wrong reference in the HCL (realCloud).
-		{text: "couldn't find resource", realCloud: true},
-		{text: "resourcenotfoundexception", realCloud: true},
+		// come from a wrong reference in the HCL (mockOrCloud).
+		{"couldn't find resource", mockOrCloud},
+		{"resourcenotfoundexception", mockOrCloud},
 
 		// Generic "unimplemented" envelope variants (each mock has its
 		// own wire shape).
-		{text: "\"error\":\"unimplemented\""},
+		{"\"error\":\"unimplemented\"", mockOnly},
 
 		// S68 (S63 audit finding 2): provider polling on a mock-side
 		// state field that doesn't persist after Update. The provider
@@ -158,53 +159,40 @@ var (
 		// the requested value; the mock acks the Update but never
 		// persists the change, so polling times out: mock-side
 		// state-divergence when the mock sent it. On a real cloud a wait
-		// that never ends usually comes from the HCL (realCloud).
-		{text: "waiting for state to become 'true'", realCloud: true},
-		{text: "waiting for state to become 'true' (last state: 'false', timeout:", realCloud: true},
+		// that never ends usually comes from the HCL (mockOrCloud).
+		{"waiting for state to become 'true'", mockOrCloud},
+		{"waiting for state to become 'true' (last state: 'false', timeout:", mockOrCloud},
 
 		// S68: provider Read returns empty (no row matched the key the
 		// mock should be tracking). Distinct from the ResourceNotFound
 		// case above — this is a "found the table, found 0 rows"
 		// shape, typical of mocks that auto-ack Create but never
 		// store the row. Real signal from aws_route53_record in S63.
-		{text: "empty result", realCloud: true},
-	}
+		{"empty result", mockOrCloud},
 
-	// mockSignalTexts is every mock signal's text, and mockOnlySignals the
-	// texts no real cloud sends for a reason in the HCL.
-	mockSignalTexts = signalTexts(func(mockSignal) bool { return true })
-	mockOnlySignals = signalTexts(func(sig mockSignal) bool { return !sig.realCloud })
-
-	// realCloudSkipSignals mark a failure from outside the mock as the real
-	// cloud's setup, weather or account, not the HCL: it is neither learned
-	// nor a mock gap.
-	realCloudSkipSignals = []string{
+		// The real cloud's setup, weather or account, not the HCL.
 		// Credentials or authentication.
-		"no valid credential sources",
-		"invalidclienttokenid",
-		"signaturedoesnotmatch",
-		"expiredtoken",
-		"unrecognizedclientexception",
-		"authfailure",
-		"request had invalid authentication credentials",
-		"access_token_type_unsupported",
+		{"no valid credential sources", weather},
+		{"invalidclienttokenid", weather},
+		{"signaturedoesnotmatch", weather},
+		{"expiredtoken", weather},
+		{"unrecognizedclientexception", weather},
+		{"authfailure", weather},
 		// The provider plugin crashed.
-		"plugin did not respond",
-		"the plugin encountered an error",
-		"plugin crashed",
+		{"plugin crashed", weather},
 		// Throttling.
-		"requestlimitexceeded",
-		"throttling",
-		"rate exceeded",
+		{"requestlimitexceeded", weather},
+		{"throttling", weather},
+		{"rate exceeded", weather},
 		// Capacity and account limits.
-		"insufficientinstancecapacity",
-		"vcpulimitexceeded",
+		{"insufficientinstancecapacity", weather},
+		{"vcpulimitexceeded", weather},
 		// Permissions and quotas: what the account allows, not the HCL.
-		"accessdenied",
-		"unauthorizedoperation",
-		"insufficient permissions",
-		"quota exceeded",
-		"quotas exceeded",
+		{"accessdenied", weather},
+		{"unauthorizedoperation", weather},
+		{"insufficient permissions", weather},
+		{"quota exceeded", weather},
+		{"quotas exceeded", weather},
 	}
 
 	// mockLayers are the layers whose failures come from a run against a
@@ -327,72 +315,110 @@ func AppendMockGap(docsDir string, gap MockGap) error {
 	return os.WriteFile(path, []byte(ScrubAccountIDs(content)), 0o644)
 }
 
-// FirstMockSignal returns the first mock-actionable signal that
-// matched the given detail (lowercased, exactly as in
-// mockActionableSignals). Returns "" if no signal matches — callers
+// FirstMockSignal returns the first mock signal (mockOnly or
+// mockOrCloud) in detail, as it appears in signals, or "". Callers
 // typically guard with IsMockServerBug first.
 func FirstMockSignal(detail string) string {
-	return firstSignal(detail, mockSignalTexts)
+	return firstSignal(detail, mockOnly, mockOrCloud)
 }
 
-// mockSignal is one mock-actionable signal. realCloud marks one a real
-// cloud also returns for a reason in the HCL, so a failure from outside
-// the mock that carries it is still learned; the rest are mock-only.
-type mockSignal struct {
-	text      string
-	realCloud bool
+// signalClass says what a failure carrying a signal teaches.
+type signalClass int
+
+const (
+	// mockOnly: only a mock sends it. A mock gap from a mock; nothing
+	// anywhere else.
+	mockOnly signalClass = iota
+	// mockOrCloud: a mock gap from a mock; a real cloud also sends it
+	// for a reason in the HCL, so anywhere else it is learned.
+	mockOrCloud
+	// weather: the real cloud's setup, account or weather, not the HCL;
+	// nothing outside a mock. Add one only from a detail an observed run
+	// logged (its <path>_learning_skipped or learned entry), never from
+	// a review's list of what a cloud might send.
+	weather
+)
+
+// signal is one substring RouteFailure reads, lowercase.
+type signal struct {
+	text  string
+	class signalClass
 }
 
-// signalTexts is the text of each mock signal keep accepts.
-func signalTexts(keep func(mockSignal) bool) []string {
-	var out []string
-	for _, sig := range mockActionableSignals {
-		if keep(sig) {
-			out = append(out, sig.text)
-		}
-	}
-	return out
-}
-
-// SkipSignal returns the signal that makes a failure from outside the
-// mock teach nothing, or "": a real-cloud setup or transient signal, or a
-// mock-only one, which no real cloud sends for a reason in the HCL.
-func SkipSignal(detail string) string {
-	if sig := firstSignal(detail, realCloudSkipSignals); sig != "" {
-		return sig
-	}
-	return firstSignal(detail, mockOnlySignals)
-}
-
-// ForbiddenPitfallSignal returns the mock signal a pitfall rule learned at
-// layer may not carry, or "": any mock bug's signal (IsMockServerBug) at
-// a mock layer or an unrecorded one, and a mock-only signal anywhere
-// else. It is the pitfalls ratchet's rule, and admits every rule
-// run_command.go's routeFailure lets the extractors learn.
-func ForbiddenPitfallSignal(layer, rule string) string {
-	if !IsMockServerBug(rule) {
-		return ""
-	}
-	if layer == "" || IsMockLayer(layer) {
-		return FirstMockSignal(rule)
-	}
-	return firstSignal(rule, mockOnlySignals)
-}
-
-func firstSignal(detail string, signals []string) string {
+// firstSignal returns the first signal of one of classes in detail, or "".
+func firstSignal(detail string, classes ...signalClass) string {
 	lower := strings.ToLower(detail)
 	for _, sig := range signals {
-		if strings.Contains(lower, sig) {
-			return sig
+		if slices.Contains(classes, sig.class) && strings.Contains(lower, sig.text) {
+			return sig.text
 		}
 	}
 	return ""
 }
 
 // IsMockLayer reports whether a failure from layer came from a run
-// against a mock.
+// against a mock. The router and the avoid-rule ledger both read it.
 func IsMockLayer(layer string) bool {
 	return slices.Contains(mockLayers, layer)
+}
+
+// Route is where a run sends a failure ahead of the pitfall extractors.
+type Route int
+
+const (
+	RouteLearn   Route = iota // the pitfall extractors
+	RouteMockGap              // docs/mock-gaps.md
+	RouteSkip                 // neither, with the reason logged
+)
+
+// learnableSandboxStages are the Layer 3 stages whose failure can be the
+// HCL's fault: the gate's refusal of it (allowlist), tofu's init, plan,
+// apply and destroy, and the real probe of what they built. Every other
+// sandbox stage (a preflight, the aws scope, the AMI resolve, the hold,
+// the orphan sweep, cleanup_blocked, and any stage added later) is setup.
+var learnableSandboxStages = []string{"allowlist", "init", "plan", "apply", "destroy", "real_probe"}
+
+// RouteFailure is the one place a failure's route is decided. layer is
+// the layer the failure came from, "" when the run built it itself, and
+// stage the stage within it. The first row that matches decides:
+//
+//  1. a Layer 3 gate or allowlist refusal is learned: it is the HCL's
+//     mistake, in the gate's own words;
+//  2. a failure that ran against a mock (IsMockLayer, or no layer on a
+//     run with Layer 3 off) is a mock gap when IsMockServerBug, else
+//     learned;
+//  3. a Layer 3 stage outside learnableSandboxStages is skipped: setup;
+//  4. a mockOnly or weather signal is skipped: it teaches nothing
+//     outside a mock;
+//  5. anything else is learned.
+//
+// The reason says why a failure is skipped.
+func RouteFailure(layer, stage, detail string, layer3 bool) (Route, string) {
+	if gateRefusalMessage(detail) != "" {
+		return RouteLearn, ""
+	}
+	if IsMockLayer(layer) || (layer == "" && !layer3) {
+		if IsMockServerBug(detail) {
+			return RouteMockGap, ""
+		}
+		return RouteLearn, ""
+	}
+	if layer == SandboxDeployLayer && !slices.Contains(learnableSandboxStages, stage) {
+		return RouteSkip, fmt.Sprintf("stage %q is setup, not the HCL", stage)
+	}
+	if sig := firstSignal(detail, mockOnly, weather); sig != "" {
+		return RouteSkip, fmt.Sprintf("signal %q teaches nothing outside the mock", sig)
+	}
+	return RouteLearn, ""
+}
+
+// RouteEntry is how the pitfalls ratchet reads a committed entry: the
+// route of its rule as an apply failure at its learned_layer, an entry
+// with no layer read as from a run with Layer 3 off. The ratchet refuses
+// an entry the router would not learn.
+func RouteEntry(e PitfallEntry) Route {
+	route, _ := RouteFailure(e.LearnedLayer, "apply", e.Rule, e.LearnedLayer != "")
+	return route
 }
 
 // ExtractResourceFromDetail is a public wrapper around the package-
@@ -414,39 +440,31 @@ func ExtractResourceFromDetail(detail string) string {
 // signals (ResourceNotFoundException).
 //
 // Detection is substring-based against a small, hand-curated signal
-// set (see mockActionableSignals above). Conservative by design.
+// set (the mock classes in signals above). Conservative by design.
 //
-// Caller: run_command.go's routeFailure, ahead of every learner path.
+// Caller: RouteFailure, ahead of every learner path.
 func IsMockServerBug(detail string) bool {
-	if detail == "" {
+	sig := FirstMockSignal(detail)
+	if sig == "" {
 		return false
 	}
-	lower := strings.ToLower(detail)
-	for _, sig := range mockSignalTexts {
-		if strings.Contains(lower, sig) {
-			// S78 carve-out: the access_token_type_unsupported signal
-			// also fires on LLM-actionable GCP resources that the v5
-			// provider escapes to real cloud (google_project_service /
-			// google_service_networking_connection /
-			// google_project_iam_member / _binding / _policy). The
-			// LLM-side fix is to drop the resource; the mock-side fix
-			// is impossible (these resources can't be modeled in
-			// fakegcp). Routing to mock-gaps.md hides the lesson; the
-			// auto-correction loop + N13 deletion-as-fix extractor
-			// should learn the avoid pattern instead.
-			//
-			// Without this carve-out, S73's retirement of prompt
-			// rules 9 + 12 leaves no mechanism for the system to
-			// re-learn the rule if a future scenario triggers the
-			// escape (the failure would route to mock-gaps and N13
-			// would never see it on stuck termination).
-			if sig == "access_token_type_unsupported" && containsLLMActionableEscapeResource(detail) {
-				return false
-			}
-			return true
-		}
-	}
-	return false
+	// S78 carve-out: the access_token_type_unsupported signal
+	// also fires on LLM-actionable GCP resources that the v5
+	// provider escapes to real cloud (google_project_service /
+	// google_service_networking_connection /
+	// google_project_iam_member / _binding / _policy). The
+	// LLM-side fix is to drop the resource; the mock-side fix
+	// is impossible (these resources can't be modeled in
+	// fakegcp). Routing to mock-gaps.md hides the lesson; the
+	// auto-correction loop + N13 deletion-as-fix extractor
+	// should learn the avoid pattern instead.
+	//
+	// Without this carve-out, S73's retirement of prompt
+	// rules 9 + 12 leaves no mechanism for the system to
+	// re-learn the rule if a future scenario triggers the
+	// escape (the failure would route to mock-gaps and N13
+	// would never see it on stuck termination).
+	return sig != "access_token_type_unsupported" || !containsLLMActionableEscapeResource(detail)
 }
 
 // llmActionableEscapeResources lists the GCP resource types whose
@@ -953,8 +971,9 @@ func pitfallSource(p LearnedPitfall) string {
 // overwrite. A better form arrives beside the older one instead.
 //
 // A candidate naming an attribute the avoid-check ledger retired on its
-// resource is refused whole when learned at mock_deploy or an unknown
-// layer, and appended after a relearned record when learned elsewhere.
+// resource is refused whole when learned at a mock layer (IsMockLayer)
+// or an unknown one, and appended after a relearned record when learned
+// elsewhere.
 // An unreadable ledger does not stop learning: the candidate is appended
 // and the error says the ledger was not checked.
 func AppendPitfall(pitfallsDir, cloud string, pitfall LearnedPitfall) error {
@@ -968,7 +987,7 @@ func AppendPitfall(pitfallsDir, cloud string, pitfall LearnedPitfall) error {
 	if ledgerErr == nil && pitfall.Source != LiveSource {
 		hits = ledger.retiredAttributesNamed(pitfall.Resource, pitfall.Rule)
 	}
-	if len(hits) > 0 && (pitfall.LearnedLayer == "" || pitfall.LearnedLayer == MockDeployLayer) {
+	if len(hits) > 0 && (pitfall.LearnedLayer == "" || IsMockLayer(pitfall.LearnedLayer)) {
 		return recurrenceError(pitfall, hits)
 	}
 	if err := appendPitfall(pitfallsDir, cloud, pitfall, ledger, hits); err != nil {

@@ -750,12 +750,9 @@ func TestIsMockServerBug_FivePositiveSignalClasses(t *testing.T) {
 
 // The detail is lowercased before matching, so a signal with a capital
 // letter can never match.
-func TestMockSignalsAreLowercase(t *testing.T) {
-	for _, sig := range mockActionableSignals {
+func TestSignalsAreLowercase(t *testing.T) {
+	for _, sig := range signals {
 		assert.Equal(t, strings.ToLower(sig.text), sig.text)
-	}
-	for _, sig := range realCloudSkipSignals {
-		assert.Equal(t, strings.ToLower(sig), sig)
 	}
 }
 
@@ -1129,4 +1126,93 @@ func TestAWSNotImplementedWithoutTheFakeawsPhraseIsNoMockGap(t *testing.T) {
 
 	assert.False(t, IsMockServerBug(detail))
 	assert.Empty(t, FirstMockSignal(detail))
+}
+
+// TestRouteFailure covers RouteFailure's rows in order, each group
+// showing its row wins over every later one. Layer 3 is on unless a case
+// says off.
+func TestRouteFailure(t *testing.T) {
+	const (
+		notFound   = "ResourceNotFoundException: The specified log group does not exist."
+		refusal    = "layer 3 refuses to apply resource type(s) aws_nat_gateway: not in validation.layers.sandbox_deploy.allow_resource_types"
+		gateNoType = "layer 3 refuses this configuration: main.tf: a provider block is not allowed"
+	)
+	for _, tc := range []struct {
+		name, layer, stage, detail string
+		layer3Off                  bool
+		want                       Route
+		reasonPart                 string
+	}{
+		// 1. A gate refusal is learned, at any stage of any layer.
+		{name: "a Layer 3 allowlist refusal", layer: SandboxDeployLayer, stage: "allowlist", detail: refusal, want: RouteLearn},
+		{name: "a gate refusal that names no resource type", layer: SandboxDeployLayer, stage: "allowlist", detail: gateNoType, want: RouteLearn},
+		{name: "a Layer 3 gate refusal at a setup stage", layer: SandboxDeployLayer, stage: "run", detail: gateNoType, want: RouteLearn},
+		{name: "a gate refusal carrying a mock-only signal", layer: SandboxDeployLayer, stage: "allowlist", detail: refusal + " | stderr: Error: Plugin did not respond", want: RouteLearn},
+
+		// 2. A failure that ran against a mock.
+		{name: "a mock-layer mock signal", layer: MockDeployLayer, stage: "apply", detail: notFound, want: RouteMockGap},
+		{name: "a mock signal from the static plan", layer: "static", detail: "DescribeVpcs: not modelled by fakeaws: foo", want: RouteMockGap},
+		{name: "a mock signal from the mock destroy", layer: "destruction", detail: "Error: Plugin did not respond", want: RouteMockGap},
+		{name: "a no-Origin mock signal with Layer 3 off", detail: notFound, layer3Off: true, want: RouteMockGap},
+		{name: "a mock layer's wait timeout is its own lesson", layer: MockDeployLayer, detail: "timeout while waiting for state to become 'running'", want: RouteLearn},
+		{name: "the GCP escape carve-out at the mock", layer: MockDeployLayer, detail: `google_project_service.compute: Error 401: "reason": "ACCESS_TOKEN_TYPE_UNSUPPORTED"`, want: RouteLearn},
+		{name: "a weather signal from the mock", layer: MockDeployLayer, detail: "api error AccessDenied: not authorized", want: RouteLearn},
+		{name: "a mock layer's setup-named stage", layer: MockDeployLayer, stage: "aws_ami_resolve", detail: "aws_instance AMI parameter unreadable", want: RouteLearn},
+
+		// 3. A Layer 3 stage that is setup.
+		{name: "an aws_ami_resolve stage", layer: SandboxDeployLayer, stage: "aws_ami_resolve", detail: "aws_instance AMI parameter unreadable", want: RouteSkip, reasonPart: `stage "aws_ami_resolve" is setup`},
+		{name: "a cleanup the allowlist blocked", layer: SandboxDeployLayer, stage: "cleanup_blocked", detail: "the configuration was refused, so no tofu was run", want: RouteSkip, reasonPart: `stage "cleanup_blocked" is setup`},
+		{name: "a credentials preflight with a weather signal", layer: SandboxDeployLayer, stage: "preflight", detail: "AccessDenied", want: RouteSkip, reasonPart: `stage "preflight" is setup`},
+		{name: "an aws scope stage", layer: SandboxDeployLayer, stage: "aws_scope_sweep", detail: "aws_instance i-0abc left", want: RouteSkip, reasonPart: `stage "aws_scope_sweep" is setup`},
+		{name: "a Layer 3 error that names no stage", layer: SandboxDeployLayer, stage: "run", detail: notFound, want: RouteSkip, reasonPart: `stage "run" is setup`},
+
+		// 4. A mock-only or weather signal outside a mock.
+		{name: "a mock-only signal with no Origin, Layer 3 on", detail: "Error: Plugin did not respond", want: RouteSkip, reasonPart: `signal "plugin did not respond"`},
+		{name: "a mock-only signal at a Layer 3 apply", layer: SandboxDeployLayer, stage: "apply", detail: "DescribeVpcs: not modelled by fakeaws: foo", want: RouteSkip, reasonPart: `signal "not modelled by fakeaws"`},
+		{name: "an authentication failure", layer: SandboxDeployLayer, stage: "apply", detail: "api error AuthFailure: AWS was not able to validate the provided access credentials", want: RouteSkip, reasonPart: `signal "authfailure"`},
+		{name: "throttling", layer: SandboxDeployLayer, stage: "apply", detail: "api error RequestLimitExceeded: Request limit exceeded.", want: RouteSkip, reasonPart: `signal "requestlimitexceeded"`},
+		{name: "no capacity", layer: SandboxDeployLayer, stage: "apply", detail: "api error InsufficientInstanceCapacity: We currently do not have sufficient capacity", want: RouteSkip, reasonPart: `signal "insufficientinstancecapacity"`},
+		{name: "a vCPU limit", layer: SandboxDeployLayer, stage: "apply", detail: "api error VcpuLimitExceeded: You have requested more vCPU capacity than your current vCPU limit", want: RouteSkip, reasonPart: `signal "vcpulimitexceeded"`},
+		{name: "an unauthorized operation", layer: SandboxDeployLayer, stage: "apply", detail: "api error UnauthorizedOperation: You are not authorized to perform this operation.", want: RouteSkip, reasonPart: `signal "unauthorizedoperation"`},
+		{name: "a Scaleway permission refusal", layer: SandboxDeployLayer, stage: "apply", detail: "scaleway-sdk-go: insufficient permissions: write instance", want: RouteSkip, reasonPart: `signal "insufficient permissions"`},
+		{name: "a Scaleway quota", layer: SandboxDeployLayer, stage: "apply", detail: "scaleway-sdk-go: quota exceeded(s): instances_pro2_s_count", want: RouteSkip, reasonPart: `signal "quota exceeded"`},
+		{name: "a plugin crash from the holdout probe", layer: "holdout", detail: "The plugin encountered an error, and failed to respond", want: RouteSkip, reasonPart: `signal "the plugin encountered an error"`},
+
+		// 5. Anything else is learned.
+		{name: "a real-cloud signal from a Layer 3 apply", layer: SandboxDeployLayer, stage: "apply", detail: notFound, want: RouteLearn},
+		{name: "a mock signal with no Origin, Layer 3 on", detail: notFound, want: RouteLearn},
+		{name: "a wait that never saw the resource at a Layer 3 apply", layer: SandboxDeployLayer, stage: "apply", detail: "waiting for RDS DB Instance (db) create: couldn't find resource (21 retries)", want: RouteLearn},
+		{name: "a wait-for-state timeout at a Layer 3 apply", layer: SandboxDeployLayer, stage: "apply", detail: "waiting for EC2 NAT Gateway create: timeout while waiting for state to become 'available'", want: RouteLearn},
+		{name: "a real probe refused", layer: SandboxDeployLayer, stage: "real_probe", detail: "http_probe compute:80: connection refused", want: RouteLearn},
+		{name: "a real-probe i/o timeout", layer: SandboxDeployLayer, stage: "real_probe", detail: "http_probe compute:80: dial tcp 203.0.113.10:80: i/o timeout", want: RouteLearn},
+		{name: "an HCL error with no Origin, Layer 3 on", detail: `Error: Unsupported argument on aws_vpc.main: An argument named "bogus" is not expected here.`, want: RouteLearn},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, reason := RouteFailure(tc.layer, tc.stage, tc.detail, !tc.layer3Off)
+			assert.Equal(t, tc.want, got)
+			assert.Contains(t, reason, tc.reasonPart)
+		})
+	}
+}
+
+// The avoid ledger refuses a retired attribute's recurrence whole at
+// exactly the layers the router reads as a mock's, an entry with no layer
+// read as the pitfalls ratchet reads it (RouteEntry), and elsewhere
+// writes a relearned record the ledger then reads back.
+func TestAvoidLedgerAgreesWithTheRouterOnEveryLayer(t *testing.T) {
+	const detail = "waiting for EC2 Subnet MapPublicIpOnLaunch update: 501 Not Implemented"
+	for _, layer := range []string{"", "static", MockDeployLayer, "destruction", SandboxDeployLayer, "holdout", "criteria", "run"} {
+		t.Run("layer="+layer, func(t *testing.T) {
+			dir := retiredLedgerFixture(t)
+			err := AppendPitfall(dir, "aws", LearnedPitfall{Resource: "aws_subnet", Rule: detail, LearnedLayer: layer})
+			if route, _ := RouteFailure(layer, "apply", detail, layer != ""); route == RouteMockGap {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "a mock recurrence of a retired rule is a mock regression")
+				return
+			}
+			require.NoError(t, err)
+			records := readLedger(t, dir).Records
+			assert.Equal(t, AvoidRecordRelearned, records[len(records)-1].Status)
+		})
+	}
 }

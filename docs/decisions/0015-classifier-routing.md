@@ -68,7 +68,7 @@ mock-actionable substrings from re-entering committed pitfalls.
 - Three additional classification calls per stuck-detection cycle.
   Negligible cost (regex + substring scans on the failure detail).
 - Keyword-based heuristics (`backtickedIdentRe` for pitfall rules,
-  `mockActionableSignals` substring list for mock gaps) are
+  the mock classes of the `signals` substring table for mock gaps) are
   approximate. Tuned against observed sweep data; revisited when a
   new sub-shape recurs across 3+ scenarios (see
   `feedback_orphan_check_extractor.md` rule of three).
