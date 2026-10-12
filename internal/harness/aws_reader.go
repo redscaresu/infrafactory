@@ -284,12 +284,10 @@ func (r *awsReplay) request(ctx context.Context, entry AWSReadEntry) (*http.Requ
 
 // awsQueryForm is query params, one JSON object of strings, as form
 // fields. It reads them key by key, because a map would keep one of two
-// repeated keys and drop the other. Absent or null params are no fields.
+// repeated keys and drop the other. Absent or null params are refused, as
+// for json: an entry with no params carries {}.
 func awsQueryForm(params json.RawMessage) (url.Values, error) {
 	form := url.Values{}
-	if len(params) == 0 || string(params) == "null" {
-		return form, nil
-	}
 	dec := json.NewDecoder(bytes.NewReader(params))
 	if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
 		return nil, errors.New("query params must be a JSON object of strings")

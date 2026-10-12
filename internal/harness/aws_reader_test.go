@@ -231,6 +231,12 @@ func TestReadAWSAccountRefusesWithNothingSent(t *testing.T) {
 		{"a json Action field", func(in *AWSReadInput) {
 			in.ReadSet = append(in.ReadSet, readEntry("ssm", "json", "GetParameter", `{"Name":"/a","action":"x"}`))
 		}, `the json body carries "action", a query-protocol field`},
+		{"absent query params", func(in *AWSReadInput) {
+			in.ReadSet = append(in.ReadSet, AWSReadEntry{Service: "ec2", Protocol: "query", Action: "DescribeVpcs"})
+		}, `entry 1 (service "ec2", protocol "query", action "DescribeVpcs"): query params must be a JSON object of strings`},
+		{"null query params", func(in *AWSReadInput) {
+			in.ReadSet = append(in.ReadSet, readEntry("ec2", "query", "DescribeVpcs", `null`))
+		}, `entry 1 (service "ec2", protocol "query", action "DescribeVpcs"): query params must be a JSON object of strings`},
 		{"query params that are not an object", func(in *AWSReadInput) {
 			in.ReadSet = append(in.ReadSet, readEntry("ec2", "query", "DescribeVpcs", `["VpcId.1"]`))
 		}, "query params must be a JSON object of strings"},
