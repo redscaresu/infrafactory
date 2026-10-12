@@ -146,7 +146,7 @@ tests, and the OPA library infrafactory already uses runs them.
 ## Amendment, 2026-10-11: the tofu and provider claims the import-production-state rehearsal rests on
 
 The rehearsal design (`docs/hld/2026-09-30-import-production-state-into-the-mocks.md`) rests on
-seven claims about tofu and the AWS provider. Each is a `TestAssumption_*` test, so a tofu or
+claims about tofu and the AWS provider. Each is a `TestAssumption_*` test, so a tofu or
 provider release that breaks one fails CI rather than a rehearsal.
 
 | Claim | Test(s) | HLD section | Relying epic | Verdict |
@@ -158,6 +158,7 @@ provider release that breaks one fails CI rather than a rehearsal.
 | (e) A data source the mock cannot read makes `plan -refresh-only -detailed-exitcode` exit 1, distinct from 2; `apply -refresh-only` has no exit 2 | `TestAssumption_RefreshOnlyUnreadableDataSourceExitsOne` | Load and check (E1) | rehearsal-against-the-copy | true |
 | (f) The provider sends a data source's request before the plan fails, and independent data sources all send in one pass | `TestAssumption_DataSourcesAllSendBeforePlanFails` | Discover | rehearsal-against-the-copy | true |
 | (g) A user `zz_override.tf` merges after infrafactory's override, and a root override does not reach a `provider "aws"` inside a child module | `TestAssumption_UserOverrideMergesAfterOurs`, `TestAssumption_RootOverrideMissesChildModuleProvider` | Prepare | rehearsal-prepare-gate | true |
+| (h) Tofu's configuration loader reads only its configuration suffixes from a module directory, and no subdirectory but the test directory: broken HCL in `a.hcl`, `a.tf.bak`, `notes.txt`, `x.tfvars.example` and `sub/b.tf` leaves `init -backend=false` and `validate` passing, and broken HCL in `tests/a.tftest.hcl` fails both. Tofu reads `.terraform.lock.hcl` and `.terraform/` by other routes; ADR-0042 § The extension and file policy names the rule that owns each | `TestAssumption_LoaderIgnoresUnknownSuffixes` | Prepare | rehearsal-prepare-gate | true |
 
 Refinements the tests recorded:
 - (d) runs at an init that initialises the backend, not at `init -backend=false`.
@@ -166,8 +167,8 @@ Refinements the tests recorded:
   depends on a pinned third-party registry module.
 
 Where they live: the gated claims are in `internal/cli/rehearsal_assumptions_test.go` as package
-`cli_test`, because `internal/e2e` imports `internal/cli`. The three that fetch no provider, (b) and both
-halves of (d), are in `internal/cli/assumptions_test.go`.
+`cli_test`, because `internal/e2e` imports `internal/cli`. (b) and both halves of (d), which fetch
+no provider, are in `internal/cli/assumptions_test.go`.
 
 Bounds: the provider is `harness.AWSProviderVersion`, not a lock file. CI's tofu floats, so a tofu
 release can turn main red with no repo change; that is the test doing its job.
