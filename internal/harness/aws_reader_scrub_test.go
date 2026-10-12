@@ -76,7 +76,7 @@ func TestWriteScrubbedAWSReadMapsTheAccountAndPlacesThePlaceholders(t *testing.T
 		for _, planted := range []string{
 			scrubTestAccount, "AIDATPLANTEDUSERID001", "IyEvYmluL2Jhc2gKZWNobyBwbGFudGVkLXNlY3JldAo=",
 			"planted-db-password", "504863521975", "6f0c8f7e-3b1a-4d2c-9e5f-a1b2c3d4e5f6",
-			"e3cf5b39bc793e8151d1893fb3992ebdad89c0d2",
+			"e3cf5b39bc793e8151d1893fb3992ebdad89c0d2", "infrafactory-reader", "planted-password-data",
 		} {
 			assert.NotContains(t, string(file), planted, "the scrubbed %s", name)
 		}
@@ -84,7 +84,7 @@ func TestWriteScrubbedAWSReadMapsTheAccountAndPlacesThePlaceholders(t *testing.T
 	assert.Equal(t, AWSScrubAccount, decoded.Account)
 	assert.Contains(t, string(read), `"Filter.1.Value.1": "`+AWSScrubAccount+`"`)
 	for _, want := range []string{
-		"<Arn>arn:aws:iam::" + AWSScrubAccount + ":user/infrafactory-reader</Arn>",
+		"<Arn>arn:aws:iam::" + AWSScrubAccount + ":user/" + AWSScrubPrincipal + "</Arn>",
 		"<Account>" + AWSScrubAccount + "</Account>",
 		"<UserId>" + AWSScrubUserID + "</UserId>",
 		"<ownerId>" + AWSScrubAccount + "</ownerId>",
@@ -111,13 +111,16 @@ func TestWriteScrubbedAWSReadMapsTheAccountAndPlacesThePlaceholders(t *testing.T
 		`"value": "arn:aws:ec2:eu-west-1:` + AWSScrubAccount + `:security-group/sg-0f1e2d3c4b5a69788"`,
 		`"lineage": "` + AWSScrubLineage + `"`,
 		`"user_data": "` + AWSScrubUserData + `"`,
+		`"password_data": "` + AWSScrubSensitiveValue + `"`,
+		// The provider marks a public parameter's value sensitive; it stays.
+		`"value": "ami-0c1d2e3f4a5b6c7d8"`,
 	} {
 		assert.Contains(t, string(state), want)
 	}
 }
 
 // Every key of the input state survives, and only the account, the
-// lineage and the user data differ.
+// lineage, the user data and the sensitive attributes differ.
 func TestWriteScrubbedAWSReadKeepsEveryKeyOfTheState(t *testing.T) {
 	_, state := scrubbedFixtures(t)
 	fixture, err := os.ReadFile(scrubTestState)
@@ -129,6 +132,7 @@ func TestWriteScrubbedAWSReadKeepsEveryKeyOfTheState(t *testing.T) {
 	want["lineage"] = AWSScrubLineage
 	instance := want["resources"].([]any)[1].(map[string]any)["instances"].([]any)[0].(map[string]any)
 	instance["attributes"].(map[string]any)["user_data"] = AWSScrubUserData
+	instance["attributes"].(map[string]any)["password_data"] = AWSScrubSensitiveValue
 	assert.Equal(t, want, got)
 	for _, key := range []string{"schema_version", "private", "dependencies", "sensitive_attributes"} {
 		assert.Contains(t, instance, key)
@@ -195,7 +199,22 @@ func TestWriteScrubbedAWSReadRefusesALeakAndWritesNothing(t *testing.T) {
 		{
 			name:      "a private SSM parameter in the state",
 			editState: replace(`"name": "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64"`, `"name": "/app/ami"`),
-			planted:   "ami-0c1d2e3f4a5b6c7d8", wantPath: "$.resources[0].instances[0].attributes.value: is a private SSM parameter's value",
+			// The scrub hides value, which the provider marks sensitive;
+			// insecure_value is not marked, so the check refuses it.
+			planted: "ami-0c1d2e3f4a5b6c7d8", wantPath: "$.resources[0].instances[0].attributes.insecure_value: is a private SSM parameter's value",
+		},
+		{
+			// A principal with no name the scrub knows how to replace.
+			name:     "a root principal",
+			editRead: replace(":user/infrafactory-reader</Arn>", ":root</Arn>"),
+			wantPath: "$.exchanges[0].body: holds a GetCallerIdentity Arn whose name is not the placeholder",
+		},
+		{
+			name: "a sensitive path the scrub cannot follow",
+			editState: replace(`"type": "get_attr",
+                "value": "password_data"`, `"type": "index",
+                "value": "password_data"`),
+			planted: "planted-password-data", wantPath: "$.resources[1].instances[0].sensitive_attributes: holds a path that does not start at an attribute",
 		},
 	}
 	for _, tc := range cases {
@@ -204,7 +223,9 @@ func TestWriteScrubbedAWSReadRefusesALeakAndWritesNothing(t *testing.T) {
 			err := WriteScrubbedAWSRead(readPath, statePath, outDir)
 			require.Error(t, err)
 			assert.ErrorContains(t, err, tc.wantPath)
-			assert.NotContains(t, err.Error(), tc.planted)
+			if tc.planted != "" {
+				assert.NotContains(t, err.Error(), tc.planted)
+			}
 			assert.NotContains(t, err.Error(), scrubTestAccount)
 			assert.NoDirExists(t, outDir, "the tool writes nothing")
 		})
@@ -268,6 +289,29 @@ func TestCheckScrubbedRead(t *testing.T) {
 			wantErr: "$.exchanges[1].body: holds a 12-digit number", planted: "123456789012",
 		},
 		{
+			// Base64 user data passes the text rules; a comment is refused
+			// whole.
+			name: "user data in a comment", old: "<value>" + AWSScrubUserData + "</value>", new: "<!-- IyEvYmluL2Jhc2gK -->",
+			wantErr: "$.exchanges[2].body: holds an XML comment or directive", planted: "IyEvYmluL2Jhc2gK",
+		},
+		{
+			name: "a DOCTYPE", old: "<DescribeSecurityGroupsResponse ", new: "<!DOCTYPE x><DescribeSecurityGroupsResponse ",
+			wantErr: "$.exchanges[1].body: holds an XML comment or directive",
+		},
+		{
+			name: "a processing instruction", old: "<DescribeSecurityGroupsResponse ", new: "<?app c2VjcmV0?><DescribeSecurityGroupsResponse ",
+			wantErr: "$.exchanges[1].body: holds a processing instruction other than the XML declaration", planted: "c2VjcmV0",
+		},
+		{
+			name: "a principal name in GetCallerIdentity's Arn", old: ":user/" + AWSScrubPrincipal, new: ":user/alice",
+			wantErr: "$.exchanges[0].body: holds a GetCallerIdentity Arn whose name is not the placeholder", planted: "alice",
+		},
+		{
+			name: "a sensitive attribute in the state", inState: true,
+			old: `"password_data": "` + AWSScrubSensitiveValue + `"`, new: `"password_data": "planted-password-data"`,
+			wantErr: "$.resources[1].instances[0].attributes.password_data: is listed in sensitive_attributes", planted: "planted-password-data",
+		},
+		{
 			name: "an unreplaced user_data in the state", inState: true,
 			old: `"user_data": "` + AWSScrubUserData + `"`, new: `"user_data": "e3cf5b39bc793e8151d1893fb3992ebdad89c0d2"`,
 			wantErr: "$.resources[1].instances[0].attributes.user_data: is neither null nor the placeholder", planted: "e3cf5b39",
@@ -293,10 +337,24 @@ func TestCheckScrubbedRead(t *testing.T) {
 	}
 }
 
+func TestWriteScrubbedAWSReadNamesNoAssumedRole(t *testing.T) {
+	readPath, statePath, outDir := scrubFixtures(t, func(s string) string {
+		return strings.Replace(s, "arn:aws:iam::"+scrubTestAccount+":user/infrafactory-reader",
+			"arn:aws:sts::"+scrubTestAccount+":assumed-role/AWSReservedSSO_Admin_x/alice@corp.com", 1)
+	}, nil)
+	require.NoError(t, WriteScrubbedAWSRead(readPath, statePath, outDir))
+	read, err := os.ReadFile(filepath.Join(outDir, AWSScrubbedReadFile))
+	require.NoError(t, err)
+	assert.Contains(t, string(read), "<Arn>arn:aws:sts::"+AWSScrubAccount+":assumed-role/"+AWSScrubPrincipal+"</Arn>")
+	assert.NotContains(t, string(read), "AWSReservedSSO")
+	assert.NotContains(t, string(read), "alice")
+}
+
 // Every placeholder and the synthetic id pass the check that refuses ids.
 func TestScrubPlaceholdersPassTheCheck(t *testing.T) {
 	for _, placeholder := range []string{
 		AWSScrubAccount, AWSScrubUserData, AWSScrubParameterValue, AWSScrubUserID, AWSScrubRequestID, AWSScrubLineage,
+		AWSScrubPrincipal, AWSScrubSensitiveValue,
 	} {
 		assert.NoError(t, checkScrubbedText(placeholder), placeholder)
 	}

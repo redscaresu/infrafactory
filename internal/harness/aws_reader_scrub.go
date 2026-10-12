@@ -37,6 +37,12 @@ const (
 	AWSScrubRequestID = "SCRUBBED-REQUEST-ID"
 	// AWSScrubLineage replaces the state's lineage.
 	AWSScrubLineage = "SCRUBBED-LINEAGE"
+	// AWSScrubPrincipal replaces the user name, or the role and session
+	// names, after user/ or assumed-role/ in GetCallerIdentity's Arn.
+	AWSScrubPrincipal = "SCRUBBED-PRINCIPAL"
+	// AWSScrubSensitiveValue replaces every state attribute that a resource
+	// instance lists in sensitive_attributes, but a public SSM parameter's.
+	AWSScrubSensitiveValue = "SCRUBBED-SENSITIVE-VALUE"
 )
 
 // The files WriteScrubbedAWSRead writes. The state is named .json, not
@@ -65,7 +71,16 @@ var (
 	// (AKIA…, ASIA…).
 	awsUniqueIDPattern      = regexp.MustCompile(`A[A-Z]{3}[A-Z0-9]{12,}`)
 	awsPercentEscapePattern = regexp.MustCompile(`%[0-9A-Fa-f]{2}`)
+	// awsPrincipalARNPattern is an IAM user's or an assumed role's ARN,
+	// whose group 1 runs up to the name; the scrubbed form is
+	// awsScrubbedPrincipalARNPattern.
+	awsPrincipalARNPattern         = regexp.MustCompile(fmt.Sprintf(`^(%s)\S+$`, fmt.Sprintf(awsPrincipalARNPrefix, `[0-9]{12}`)))
+	awsScrubbedPrincipalARNPattern = regexp.MustCompile(fmt.Sprintf(`^%s%s$`, fmt.Sprintf(awsPrincipalARNPrefix, AWSScrubAccount), AWSScrubPrincipal))
 )
+
+// awsPrincipalARNPrefix is a principal's ARN up to its name, around an
+// account pattern.
+const awsPrincipalARNPrefix = `arn:aws:(?:iam|sts)::%s:(?:user|assumed-role)/`
 
 // WriteScrubbedAWSRead scrubs the recorded read at readPath and the
 // tfstate at statePath, runs CheckScrubbedRead over the exact bytes it
@@ -138,21 +153,27 @@ func scrubAWSRecordedRead(data []byte) ([]byte, error) {
 }
 
 // scrubAWSReadBody is ex's body with its placeholders in: in XML every
-// RequestId, DescribeInstanceAttribute's userData value and
-// GetCallerIdentity's UserId; in SSM GetParameter's JSON the
+// RequestId, DescribeInstanceAttribute's userData value, and
+// GetCallerIdentity's UserId and the name in its Arn (an Arn of another
+// shape is left for the check to refuse); in SSM GetParameter's JSON the
 // Parameter.Value, unless the parameter is public. Tag values stay.
 func scrubAWSReadBody(ex AWSReadExchange) (string, error) {
 	switch ex.Protocol {
 	case awsProtocolQuery:
-		return awsXMLReplaceText(ex.Body, func(names []string) (string, bool) {
-			name := names[len(names)-1]
+		return awsXMLReplaceText(ex.Body, func(names []string, inner string) (string, bool) {
 			switch {
-			case strings.EqualFold(name, "RequestId"):
+			case strings.EqualFold(names[len(names)-1], "RequestId"):
 				return AWSScrubRequestID, true
-			case ex.Action == "DescribeInstanceAttribute" && name == "value" && len(names) > 1 && names[len(names)-2] == "userData":
+			case ex.Action == "DescribeInstanceAttribute" && awsXMLPathEnds(names, "userData", "value"):
 				return AWSScrubUserData, true
-			case ex.Action == "GetCallerIdentity" && name == "UserId":
+			case awsXMLPathEnds(names, "GetCallerIdentityResult", "UserId"):
 				return AWSScrubUserID, true
+			case awsXMLPathEnds(names, "GetCallerIdentityResult", "Arn"):
+				m := awsPrincipalARNPattern.FindStringSubmatch(strings.TrimSpace(inner))
+				if m == nil {
+					return "", false
+				}
+				return m[1] + AWSScrubPrincipal, true
 			}
 			return "", false
 		})
@@ -180,18 +201,18 @@ func scrubAWSParameterValue(body string) (string, error) {
 }
 
 // awsXMLReplaceText is body with the content of every element that
-// placeholder names, given the names of the elements open down to it,
-// replaced by the placeholder, and every other byte as it was. A
-// self-closing element holds nothing and is left as it is.
-func awsXMLReplaceText(body string, placeholder func(names []string) (string, bool)) (string, error) {
+// placeholder names, given the names of the elements open down to it and
+// the element's raw content, replaced by the placeholder, and every other
+// byte as it was. Elements are decided as they close, so an element
+// holding one already replaced is left; a self-closing one holds nothing
+// and is left too.
+func awsXMLReplaceText(body string, placeholder func(names []string, inner string) (string, bool)) (string, error) {
 	dec := xml.NewDecoder(strings.NewReader(body))
 	var (
-		out         strings.Builder
-		names       []string
-		copied      int64 // body[:copied] is in out
-		open        int   // depth of the element being replaced, 0 for none
-		from        int64 // where its content starts
-		replacement string
+		out    strings.Builder
+		names  []string
+		starts []int64 // where each open element's content starts
+		copied int64   // body[:copied] is in out
 	)
 	for {
 		at := dec.InputOffset()
@@ -204,25 +225,29 @@ func awsXMLReplaceText(body string, placeholder func(names []string) (string, bo
 		}
 		switch tok := tok.(type) {
 		case xml.StartElement:
-			names = append(names, tok.Name.Local)
-			if v, ok := placeholder(names); ok && open == 0 {
-				open, from, replacement = len(names), dec.InputOffset(), v
-			}
+			names, starts = append(names, tok.Name.Local), append(starts, dec.InputOffset())
 		case xml.EndElement:
-			if open == len(names) {
-				if !strings.HasSuffix(body[:from], "/>") {
-					out.WriteString(body[copied:from] + replacement)
+			from := starts[len(starts)-1]
+			if from >= copied && !strings.HasSuffix(body[:from], "/>") {
+				if v, ok := placeholder(names, body[from:at]); ok {
+					out.WriteString(body[copied:from] + v)
 					copied = at
 				}
-				open = 0
 			}
-			names = names[:len(names)-1]
+			names, starts = names[:len(names)-1], starts[:len(starts)-1]
 		}
 	}
 }
 
-// scrubAWSState replaces the state's lineage and every user_data and
-// user_data_base64 string, keeping every key and every other value.
+// awsXMLPathEnds reports whether the open elements names end in suffix.
+func awsXMLPathEnds(names []string, suffix ...string) bool {
+	return len(names) >= len(suffix) && slices.Equal(names[len(names)-len(suffix):], suffix)
+}
+
+// scrubAWSState replaces the state's lineage, every user_data and
+// user_data_base64 string, and every attribute a resource instance lists
+// in sensitive_attributes (but a public SSM parameter's), keeping every
+// key and every other value.
 func scrubAWSState(data []byte) ([]byte, error) {
 	var state map[string]any
 	if decodeOneJSON(data, &state) != nil || state == nil {
@@ -232,7 +257,78 @@ func scrubAWSState(data []byte) ([]byte, error) {
 		state["lineage"] = AWSScrubLineage
 	}
 	scrubAWSStateUserData(state)
+	err := walkAWSStateInstances(state, func(_, resourceType string, attributes map[string]any, sensitive []string) error {
+		for _, name := range sensitive {
+			if attributes[name] != nil && !awsPublicStateParameter(resourceType, attributes) {
+				attributes[name] = AWSScrubSensitiveValue
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
 	return encodeScrubbedJSON(state, "  ")
+}
+
+// walkAWSStateInstances calls visit with every resource instance in state:
+// its path, its resource's type, its attributes, and the top-level
+// attributes its sensitive_attributes paths start at.
+func walkAWSStateInstances(state any, visit func(path, resourceType string, attributes map[string]any, sensitive []string) error) error {
+	return walkJSONObjects("$", state, func(path string, object map[string]any) error {
+		instances, ok := object["instances"].([]any)
+		if !ok {
+			return nil
+		}
+		resourceType, _ := object["type"].(string)
+		for i, item := range instances {
+			path := fmt.Sprintf("%s.instances[%d]", path, i)
+			instance, _ := item.(map[string]any)
+			attributes, _ := instance["attributes"].(map[string]any)
+			sensitive, err := awsSensitiveAttributes(instance["sensitive_attributes"])
+			if err != nil {
+				return fmt.Errorf("%s.sensitive_attributes: %w", path, err)
+			}
+			if err := visit(path, resourceType, attributes, sensitive); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// awsSensitiveAttributes is the top-level attribute each path in listed
+// (an instance's sensitive_attributes, [[{"type":"get_attr","value":name},
+// ...], ...]) starts at. The scrub hides the whole top-level attribute: a
+// path into a nested block can index a set, which it does not follow.
+func awsSensitiveAttributes(listed any) ([]string, error) {
+	if listed == nil {
+		return nil, nil
+	}
+	paths, ok := listed.([]any)
+	if !ok {
+		return nil, errors.New("is not a list of paths")
+	}
+	names := make([]string, 0, len(paths))
+	for _, path := range paths {
+		var step map[string]any
+		if steps, _ := path.([]any); len(steps) > 0 {
+			step, _ = steps[0].(map[string]any)
+		}
+		name, ok := step["value"].(string)
+		if !ok || step["type"] != "get_attr" {
+			return nil, errors.New("holds a path that does not start at an attribute")
+		}
+		names = append(names, name)
+	}
+	return names, nil
+}
+
+// awsPublicStateParameter reports whether a state resource is an SSM
+// parameter under /aws/service/, whose value the provider marks sensitive
+// but which carries no account.
+func awsPublicStateParameter(resourceType string, attributes map[string]any) bool {
+	return resourceType == "aws_ssm_parameter" && awsPublicParameter(attributes["name"])
 }
 
 func scrubAWSStateUserData(v any) {
@@ -259,9 +355,13 @@ func scrubAWSStateUserData(v any) {
 //     maximal run of exactly twelve digits that is not the fraction of
 //     a d.ddd…E9 number (awsExponentFraction);
 //   - an AWS unique or key id (A[A-Z]{3}[A-Z0-9]{12,});
-//   - a userData, an SSM Value or a state's private aws_ssm_parameter
-//     value that is not its placeholder (nor, for a Value, a public
-//     /aws/service/ parameter's);
+//   - a userData, an SSM Value, a GetCallerIdentity Arn's name, a
+//     state's user_data, or a state attribute listed in
+//     sensitive_attributes or holding a private aws_ssm_parameter's
+//     value, that is not its placeholder (nor, for a Value or a state
+//     SSM parameter, a public /aws/service/ parameter's);
+//   - an XML comment, directive, or processing instruction other than
+//     the declaration: a body answers with elements only;
 //   - a read whose account is not AWSScrubAccount, and an object that
 //     repeats a key (in the read, in any case), which a decode would
 //     hide.
@@ -315,7 +415,7 @@ func checkScrubbedAWSState(data []byte) error {
 	if decodeOneJSON(data, &state) != nil {
 		return errors.New("$: does not parse as JSON")
 	}
-	return checkScrubbedStateValues("$", state)
+	return checkScrubbedStateValues(state)
 }
 
 // checkScrubbedJSON checks every key, string and number of data, which
@@ -436,12 +536,14 @@ func awsExponentFraction(s string, start, end int) bool {
 }
 
 // checkScrubbedXML checks an XML body's text and attribute values as they
-// decode (entities and CDATA read as what they spell, text joined across
-// comments), and refuses a userData whose text is neither empty nor
-// AWSScrubUserData.
+// decode (entities and CDATA read as what they spell), refuses a comment,
+// a directive or a processing instruction but the XML declaration, a
+// userData whose text is neither empty nor AWSScrubUserData, and a
+// GetCallerIdentity Arn whose name is not AWSScrubPrincipal.
 func checkScrubbedXML(body string) error {
 	dec := xml.NewDecoder(strings.NewReader(body))
 	var text, userData strings.Builder
+	var names []string
 	inUserData := 0
 	for {
 		tok, err := dec.Token()
@@ -458,7 +560,18 @@ func checkScrubbedXML(body string) error {
 				userData.Write(tok)
 			}
 			continue
+		case xml.Comment, xml.Directive:
+			return errors.New("holds an XML comment or directive")
+		case xml.ProcInst:
+			if tok.Target != "xml" {
+				return errors.New("holds a processing instruction other than the XML declaration")
+			}
+			if err := checkScrubbedText(string(tok.Inst)); err != nil {
+				return err
+			}
+			continue
 		case xml.StartElement:
+			names = append(names, tok.Name.Local)
 			for _, attr := range tok.Attr {
 				if err := checkScrubbedText(attr.Value); err != nil {
 					return err
@@ -468,6 +581,10 @@ func checkScrubbedXML(body string) error {
 				inUserData++
 			}
 		case xml.EndElement:
+			if awsXMLPathEnds(names, "GetCallerIdentityResult", "Arn") && !awsScrubbedPrincipalARNPattern.MatchString(strings.TrimSpace(text.String())) {
+				return errors.New("holds a GetCallerIdentity Arn whose name is not the placeholder")
+			}
+			names = names[:len(names)-1]
 			if strings.EqualFold(tok.Name.Local, "userData") {
 				inUserData--
 				if v := strings.TrimSpace(userData.String()); inUserData == 0 && v != "" && v != AWSScrubUserData {
@@ -477,8 +594,6 @@ func checkScrubbedXML(body string) error {
 			if inUserData == 0 {
 				userData.Reset()
 			}
-		default:
-			continue
 		}
 		if err := checkScrubbedText(text.String()); err != nil {
 			return err
@@ -509,29 +624,37 @@ func checkScrubbedJSONBody(body string) error {
 	})
 }
 
-// checkScrubbedStateValues refuses a user_data or user_data_base64 that is
-// neither null nor AWSScrubUserData, and an aws_ssm_parameter outside
-// /aws/service/ whose value or insecure_value is neither null nor
-// AWSScrubParameterValue: the scrub replaces no such value, so a state
-// holding one is refused.
-func checkScrubbedStateValues(path string, state any) error {
-	return walkJSONObjects(path, state, func(path string, object map[string]any) error {
+// checkScrubbedStateValues refuses, anywhere in the state, a user_data or
+// user_data_base64 that is not null or a placeholder; and in a resource
+// instance, an attribute its sensitive_attributes lists, or a private
+// aws_ssm_parameter's value or insecure_value (the provider marks only
+// value sensitive), that is neither null nor AWSScrubSensitiveValue. A public
+// SSM parameter's value passes.
+func checkScrubbedStateValues(state any) error {
+	err := walkJSONObjects("$", state, func(path string, object map[string]any) error {
 		for _, key := range awsStateUserDataKeys {
-			if value := object[key]; value != nil && value != AWSScrubUserData {
+			if value := object[key]; value != nil && value != AWSScrubUserData && value != AWSScrubSensitiveValue {
 				return fmt.Errorf("%s.%s: is neither null nor the placeholder", path, key)
 			}
 		}
-		if object["type"] != "aws_ssm_parameter" {
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	return walkAWSStateInstances(state, func(path, resourceType string, attributes map[string]any, sensitive []string) error {
+		if awsPublicStateParameter(resourceType, attributes) {
 			return nil
 		}
-		instances, _ := object["instances"].([]any)
-		for i, instance := range instances {
-			fields, _ := instance.(map[string]any)
-			attributes, _ := fields["attributes"].(map[string]any)
-			for _, key := range []string{"value", "insecure_value"} {
-				if value := attributes[key]; value != nil && value != AWSScrubParameterValue && !awsPublicParameter(attributes["name"]) {
-					return fmt.Errorf("%s.instances[%d].attributes.%s: is a private SSM parameter's value", path, i, key)
-				}
+		hidden := func(v any) bool { return v == nil || v == AWSScrubSensitiveValue }
+		for _, name := range sensitive {
+			if !hidden(attributes[name]) {
+				return fmt.Errorf("%s.attributes.%s: is listed in sensitive_attributes and is not the placeholder", path, name)
+			}
+		}
+		for _, key := range []string{"value", "insecure_value"} {
+			if resourceType == "aws_ssm_parameter" && !hidden(attributes[key]) {
+				return fmt.Errorf("%s.attributes.%s: is a private SSM parameter's value", path, key)
 			}
 		}
 		return nil
