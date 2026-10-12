@@ -477,7 +477,7 @@ and its walls; the account-read contract and the recorded-read format; the fakea
 
 - rehearsal-assumption-tests — done (#457)
 - fakeaws-rehearsal-instance — done (#482)
-- fakeaws-loaded-identity — done (#PR)
+- fakeaws-loaded-identity — done (#489)
 - [fakeaws-data-sources](../epics/fakeaws-data-sources.md)
 - [rehearsal-prepare-gate](../epics/rehearsal-prepare-gate.md)
 - [aws-hold-for-read](../epics/aws-hold-for-read.md)
