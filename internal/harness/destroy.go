@@ -191,6 +191,9 @@ const mockwayDefaultProjectID = "00000000-0000-0000-0000-000000000000"
 // the alternative of trusting state to be complete.
 const autoCreatedVPCName = "default"
 
+// kmsPendingDeletion is the state AWS leaves a destroyed KMS key in.
+const kmsPendingDeletion = "PendingDeletion"
+
 func countOrphanItems(root, collection string, items []any) int {
 	switch {
 	case root == "account" && collection == "projects":
@@ -202,6 +205,14 @@ func countOrphanItems(root, collection string, items []any) int {
 		return countExcept(items, func(e map[string]any) bool {
 			name, _ := e["name"].(string)
 			return name == autoCreatedVPCName
+		})
+	// AWS will not delete a KMS key sooner than its waiting period, so a
+	// destroyed key ends in PendingDeletion; that is the end state of a
+	// clean destroy. Any other state, or none, still counts.
+	case root == "kms" && collection == "keys":
+		return countExcept(items, func(e map[string]any) bool {
+			state, _ := e["state"].(string)
+			return state == kmsPendingDeletion
 		})
 	default:
 		return len(items)

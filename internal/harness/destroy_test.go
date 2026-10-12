@@ -202,3 +202,23 @@ func TestCountOrphansStillCountsADeclaredVPC(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, count, "a VPC the stack named is the stack's to destroy")
 }
+
+// A destroyed KMS key stays in state as PendingDeletion, which is a clean
+// destroy's end state. An Enabled key, or one with no state, is a leak.
+func TestCountOrphansExemptsAPendingDeletionKMSKey(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]struct {
+		state string
+		want  int
+	}{
+		"pending deletion is a clean destroy": {`{"kms": {"keys": [{"key_id": "k-1", "state": "PendingDeletion"}]}}`, 0},
+		"enabled is a leak":                   {`{"kms": {"keys": [{"key_id": "k-1", "state": "Enabled"}]}}`, 1},
+		"no state is a leak":                  {`{"kms": {"keys": [{"key_id": "k-1"}]}}`, 1},
+	}
+	for name, c := range cases {
+		count, err := countOrphans([]byte(c.state))
+		require.NoError(t, err, name)
+		assert.Equal(t, c.want, count, name)
+	}
+}
