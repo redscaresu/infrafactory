@@ -1,7 +1,6 @@
 ---
 kind: code
-status: blocked
-blocked_by: [prod-read-seam-wall, prod-read-seam-credentials]
+status: ready
 epic: prod-read-seam
 depends_on: [prod-read-seam-wall, prod-read-seam-credentials]
 touches: [internal/harness/aws_reader_identity.go, internal/harness/aws_reader_identity_test.go, internal/harness/aws_reader_preflight.go, internal/harness/aws_reader_preflight_test.go]

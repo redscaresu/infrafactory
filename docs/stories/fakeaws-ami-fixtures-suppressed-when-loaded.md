@@ -2,7 +2,7 @@
 kind: code
 repo: fakeaws
 status: blocked
-blocked_by: [fakeaws-identity-store-and-flag, fakeaws-identity-ec2, fakeaws-identity-other-services]
+blocked_by: [fakeaws-request-log-gap-markers]
 epic: fakeaws-loaded-identity
 depends_on: [fakeaws-identity-store-and-flag, fakeaws-identity-ec2, fakeaws-identity-other-services]
 touches: [repository/identity.go, repository/identity_test.go, handlers/handlers.go, handlers/ec2.go, handlers/admin.go, handlers/ssm.go, handlers/ec2_test.go, handlers/admin_test.go, handlers/ssm_test.go, AGENTS.md]
