@@ -440,9 +440,9 @@ and its walls; the account-read contract and the recorded-read format; the fakea
 
 0. **Assumption tests and a real recording, now.** Against tofu alone: the overrides, the two
    inits, refresh-only behaviour (review-2 E1-E3 are the first three). Against AWS: under the Layer
-   3 claim, `aws-web-live` is applied to the dedicated account with `--keep`, its pre-destroy state
+   3 claim, `aws-web-live` is applied to the dedicated account with `test --hold`, its pre-destroy state
    kept (review-1 S9), the account read through a first cut of the seam into `.infrafactory/` (it
-   carries the account id, so never git), and `reap` clears it. That recording is the loader's
+   carries the account id, so never git), and `reap --release-hold` clears it. That recording is the loader's
    real fixture from step 2.
 1. **The read** (infrafactory): the seam with its action wall, the reader table and the shipped
    policy tied to it, the account proof, session-token credentials, throttling, the
@@ -480,7 +480,7 @@ and its walls; the account-read contract and the recorded-read format; the fakea
 - fakeaws-loaded-identity — done (#489)
 - [fakeaws-data-sources](../epics/fakeaws-data-sources.md)
 - [rehearsal-prepare-gate](../epics/rehearsal-prepare-gate.md)
-- [aws-hold-for-read](../epics/aws-hold-for-read.md)
+- aws-hold-for-read — done (#476, #483, #490, #498, #502; real proof 2026-10-12: this PR)
 - [prod-read-seam](../epics/prod-read-seam.md)
 - [fakeaws-loader](../epics/fakeaws-loader.md)
 - [rehearsal-walls](../epics/rehearsal-walls.md)
