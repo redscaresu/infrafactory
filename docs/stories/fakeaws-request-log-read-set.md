@@ -1,8 +1,7 @@
 ---
 kind: code
 repo: fakeaws
-status: blocked
-blocked_by: [fakeaws-request-log-gap-markers]
+status: ready
 epic: fakeaws-rehearsal-instance
 depends_on: [fakeaws-request-log-gap-markers, prod-read-seam-adr-0041]
 touches: [handlers/recorder.go, handlers/recorder_test.go, AGENTS.md, concepts.md, CHANGELOG.md]
