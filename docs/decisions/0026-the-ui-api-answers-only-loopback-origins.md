@@ -234,3 +234,16 @@ Each was withheld on a premise that turned out to be false — that a yaml error
 names its file, that cobra had already printed the cause, that a 400 must be the
 server's fault. The rule is not "hide errors"; it is **compose what you send**, and
 a message this package wrote is already composed.
+
+## Amendment, 2026-10-12 (fakeaws-rehearsal-instance): the same rule on fakeaws's /mock
+
+fakeaws's admin surface (`/mock/*`) takes the same stance, with the same guard re-implemented in
+fakeaws rather than imported from this repository. A fakeaws started with an admin token refuses a
+request whose `Origin` is present and not loopback, a `null` origin, or a lookalike name, with 403,
+before the token is read. An absent `Origin` is allowed, as above, and the token still applies.
+
+A fakeaws started without an admin token keeps its `/mock/*` surface unchanged.
+
+The behaviour is pinned by fakeaws's `TestContract_mock_admin_origin_loopback_only`,
+`TestContract_mock_admin_token_required` and `TestContract_listen_addr_default_all_interfaces`
+(`handlers/admin_test.go`, at the fakeaws commit pinned in `.github/workflows/ci.yml`).
