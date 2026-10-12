@@ -291,7 +291,7 @@ func rehearsalModuleDirs(root, boundary string) ([]string, []string) {
 		if m.call != "" {
 			dirs = append(dirs, m.dir)
 		}
-		files, fileProblems := in.dirFiles(m.dir)
+		files, _, fileProblems := in.dirFiles(m.dir)
 		calls, callProblems := rehearsalModuleCalls(files, m, boundary)
 		problems = append(problems, m.named(append(fileProblems, callProblems...))...)
 		return calls

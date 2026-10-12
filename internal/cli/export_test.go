@@ -63,3 +63,7 @@ var (
 )
 
 const OurOverride = ourOverride
+
+// RehearsalAWSProviderTable is the gate's provider "aws" table, for the
+// drift test against the provider schema in cli_test.
+var RehearsalAWSProviderTable = rehearsalAWSProviderTable

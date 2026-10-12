@@ -20,8 +20,8 @@ import (
 // leaf helpers with the Layer 3 gate, never its drivers: Layer 3 gates code
 // infrafactory generated, this gate gates code the user wrote.
 //
-// Two rules start closed, each in its own file: provider "aws" arguments
-// (rehearse_gate_aws.go) and paths (rehearse_gate_paths.go). Module
+// Two rules have their own file: provider "aws" arguments and goal 11
+// (rehearse_gate_aws.go), and paths (rehearse_gate_paths.go). Module
 // sources, and the walk from the root through every module dir they
 // reach, have their own file too (rehearse_gate_modules.go).
 
@@ -93,22 +93,24 @@ func rehearsalGate(in rehearsalGateInput) error {
 }
 
 // problems walks the root and in.modules, then every dir their module
-// blocks resolve to, each dir once, and then the var file.
+// blocks resolve to, each dir once, then the var file, then goal 11.
 func (in rehearsalGateInput) problems() []string {
 	var problems []string
-	uses := &rehearsalPathUses{}
+	uses, regions := &rehearsalPathUses{}, newRehearsalRegions()
 	start := append([]rehearsalModuleDir{{dir: in.root}}, in.modules...)
 	walkProblems := rehearsalWalk(start, func(m rehearsalModuleDir) []rehearsalModuleDir {
-		dirProblems, calls := in.dirProblems(m, uses)
+		dirProblems, calls := in.dirProblems(m, uses, regions)
 		problems = append(problems, m.named(dirProblems)...)
 		return calls
 	})
 	problems = append(problems, walkProblems...)
 	problems = append(problems, uses.problems()...)
 	if in.varFile != "" {
-		problems = append(problems, in.tfvarsProblems(in.varFile)...)
+		var varProblems []string
+		regions.varFile, varProblems = in.tfvars(in.varFile)
+		problems = append(problems, varProblems...)
 	}
-	return problems
+	return append(problems, regions.problems(in.region)...)
 }
 
 // rehearsalRefusal is every problem in one error, sorted and each once,
@@ -131,25 +133,30 @@ func (in rehearsalGateInput) display(path string) string {
 
 // rehearsalModule is one gated module dir and the gate run that reads it:
 // path.module is dir, path.root is in.root, key is dir's module key, and
-// uses collects the run's templates and written paths. providers maps each local name its
+// uses collects the run's templates and written paths, and regions what
+// goal 11 reads. providers maps each local name its
 // required_providers declare to the source, lowercased.
 type rehearsalModule struct {
 	in        rehearsalGateInput
 	dir       string
 	key       string
 	uses      *rehearsalPathUses
+	regions   *rehearsalRegions
 	root      bool
 	providers map[string]string
 }
 
 // dirProblems applies every rule to one module dir, recording its
-// templates and written paths in uses, and returns the dirs its module
-// blocks resolve to.
-func (in rehearsalGateInput) dirProblems(dir rehearsalModuleDir, uses *rehearsalPathUses) ([]string, []rehearsalModuleDir) {
-	files, problems := in.dirFiles(dir.dir)
+// templates and written paths in uses and what goal 11 reads in regions,
+// and returns the dirs its module blocks resolve to.
+func (in rehearsalGateInput) dirProblems(dir rehearsalModuleDir, uses *rehearsalPathUses, regions *rehearsalRegions) ([]string, []rehearsalModuleDir) {
+	files, tfvars, problems := in.dirFiles(dir.dir)
 	calls, callProblems := rehearsalModuleCalls(files, dir, in.boundary)
 	problems = append(problems, callProblems...)
-	m := rehearsalModule{in: in, dir: dir.dir, key: dir.key, uses: uses, root: dir.dir == in.root, providers: map[string]string{}}
+	m := rehearsalModule{in: in, dir: dir.dir, key: dir.key, uses: uses, regions: regions, root: dir.dir == in.root, providers: map[string]string{}}
+	if m.root {
+		regions.tfvars = tfvars
+	}
 	for file, body := range files {
 		problems = append(problems, m.requiredProviderProblems(file, body)...)
 	}
@@ -165,19 +172,19 @@ func (in rehearsalGateInput) dirProblems(dir rehearsalModuleDir, uses *rehearsal
 }
 
 // dirFiles applies the file policy to one module dir and returns its .tf
-// files parsed, by display name. A .tf file holds only blocks. Any other
+// and .tfvars files parsed, by display name. A .tf file holds only blocks. Any other
 // file, and any subdirectory but the test directory, is admitted unparsed:
 // tofu's configuration loader skips them
 // (TestAssumption_LoaderIgnoresUnknownSuffixes). Tofu reads some of those
 // files by other routes, and ADR-0042 § The extension and file policy
 // names the rule that owns each.
-func (in rehearsalGateInput) dirFiles(dir string) (map[string]*hclsyntax.Body, []string) {
+func (in rehearsalGateInput) dirFiles(dir string) (map[string]*hclsyntax.Body, map[string]*hclsyntax.Body, []string) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return nil, []string{fmt.Sprintf("%s: cannot read the module directory: %v", in.display(dir), err)}
+		return nil, nil, []string{fmt.Sprintf("%s: cannot read the module directory: %v", in.display(dir), err)}
 	}
 	var problems []string
-	files := map[string]*hclsyntax.Body{}
+	files, tfvars := map[string]*hclsyntax.Body{}, map[string]*hclsyntax.Body{}
 	for _, entry := range entries {
 		path := filepath.Join(dir, entry.Name())
 		lower := strings.ToLower(entry.Name())
@@ -187,7 +194,11 @@ func (in rehearsalGateInput) dirFiles(dir string) (map[string]*hclsyntax.Body, [
 		}
 		switch {
 		case strings.HasSuffix(lower, ".tfvars"):
-			problems = append(problems, in.tfvarsProblems(path)...)
+			body, varProblems := in.tfvars(path)
+			problems = append(problems, varProblems...)
+			if body != nil {
+				tfvars[in.display(path)] = body
+			}
 		case strings.HasSuffix(lower, ".tf"):
 			body, problem := rehearsalParse(path, in.display(path))
 			if problem != "" {
@@ -197,7 +208,7 @@ func (in rehearsalGateInput) dirFiles(dir string) (map[string]*hclsyntax.Body, [
 			files[in.display(path)] = body
 		}
 	}
-	return files, problems
+	return files, tfvars, problems
 }
 
 // rehearsalEntryProblem is why a dir entry, by its lowercased name, is
@@ -259,14 +270,15 @@ func rehearsalParse(path, name string) (*hclsyntax.Body, string) {
 	return body, ""
 }
 
-// tfvarsProblems refuses a .tfvars file holding anything but attributes
-// with literal values. A reference or a function call does not evaluate
-// without a context, so it is refused here.
-func (in rehearsalGateInput) tfvarsProblems(path string) []string {
+// tfvars parses a .tfvars file, nil when it does not parse, and refuses
+// one holding anything but attributes with literal values. A reference or
+// a function call does not evaluate without a context, so it is refused
+// here.
+func (in rehearsalGateInput) tfvars(path string) (*hclsyntax.Body, []string) {
 	name := in.display(path)
 	body, problem := rehearsalParse(path, name)
 	if problem != "" {
-		return []string{problem}
+		return nil, []string{problem}
 	}
 	var problems []string
 	for _, block := range body.Blocks {
@@ -279,7 +291,7 @@ func (in rehearsalGateInput) tfvarsProblems(path string) []string {
 				": a .tfvars value must be a literal, so a reference or function call is refused")
 		}
 	}
-	return problems
+	return body, problems
 }
 
 // rehearsalAt is the "file:line: address" every problem starts with.
@@ -400,6 +412,8 @@ func (m rehearsalModule) blockProblems(file string, block *hclsyntax.Block) []st
 		problems = append(problems, m.providerRefProblems(file, addr, block)...)
 	case "module":
 		problems = append(problems, m.moduleProvidersProblems(file, addr, block)...)
+	case "variable":
+		m.recordDefault(block)
 	}
 	return append(problems, m.bodyProblems(file, addr, block, block.Type == "variable")...)
 }
@@ -440,7 +454,7 @@ func (m rehearsalModule) providerProblems(file, at string, block *hclsyntax.Bloc
 	case typ == "aws" && !m.root:
 		return []string{at + `: a provider "aws" block in a child module is refused: infrafactory's root override does not reach it`}
 	case typ == "aws":
-		return rehearsalAWSProviderProblems(file, block)
+		return m.awsProviderProblems(file, at, block)
 	}
 	var problems []string
 	for name, attr := range block.Body.Attributes {
@@ -460,7 +474,9 @@ func (m rehearsalModule) typeProblems(file, at string, block *hclsyntax.Block) [
 		return []string{fmt.Sprintf("%s: a %s block takes two labels", at, block.Type)}
 	}
 	typ := block.Labels[0]
-	if !strings.HasPrefix(typ, "aws_") && !rehearsalTypes[block.Type][typ] {
+	if strings.HasPrefix(typ, "aws_") {
+		m.recordAWSType(file, at, block)
+	} else if !rehearsalTypes[block.Type][typ] {
 		return []string{fmt.Sprintf("%s: %s type %q is not admitted", at, block.Type, typ)}
 	}
 	problems := m.providerRefProblems(file, rehearsalAddress(block), block)

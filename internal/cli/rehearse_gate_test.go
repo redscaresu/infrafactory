@@ -152,9 +152,7 @@ func TestRehearsalGateRefuses(t *testing.T) {
 			want: []string{"main.tf:2: locals.d: calls provider::local::direxists(): a namespaced function is refused by name"}},
 		{name: "a nested impure call", files: map[string]string{"main.tf": "resource \"aws_vpc\" \"v\" {\n  tags = {\n    at = timestamp()\n  }\n  lifecycle {\n    precondition {\n      condition     = uuid() != \"\"\n      error_message = \"x\"\n    }\n  }\n}\n"},
 			want: []string{"main.tf:2: aws_vpc.v.tags: calls timestamp(), which is not on the pure-function allowlist", "main.tf:7: aws_vpc.v.lifecycle.precondition.condition: calls uuid()"}},
-		// The closed rules.
-		{name: "provider aws region", files: map[string]string{"main.tf": "provider \"aws\" {\n  region = \"us-east-1\"\n}\n"},
-			want: []string{`main.tf:2: provider.aws.region: refused: a provider "aws" block admits only alias`}},
+		// Module sources; rehearse_gate_modules_test.go has the rest.
 		{name: "a module block", files: map[string]string{"main.tf": "module \"m\" {\n  source = \"./m\"\n}\n"},
 			want: []string{`main.tf:2: module.m.source: source "./m" does not resolve`}},
 	} {
@@ -203,10 +201,13 @@ func TestRehearsalGateAdmits(t *testing.T) {
   }
 }
 
-provider "aws" {}
+provider "aws" {
+  region = "us-east-1"
+}
 
 provider "aws" {
-  alias = "west"
+  alias  = "west"
+  region = "us-east-1"
 }
 
 provider "random" {

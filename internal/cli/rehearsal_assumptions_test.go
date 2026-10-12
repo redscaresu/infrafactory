@@ -174,6 +174,48 @@ func TestAssumption_LoaderIgnoresUnknownSuffixes(t *testing.T) {
 	})
 }
 
+// TestAssumption_VariablePrecedenceMatchesGate: a root variable takes the
+// value of the last of its sources in this order: its default,
+// terraform.tfvars, each *.auto.tfvars in lexical order (not the order
+// they were written), then -var-file. An outputs-only root, offline,
+// applies after each source is added and reads the variable back.
+//
+// Relied on by: rehearsal-prepare-gate's goal 11, which resolves var.x in
+// that order (ADR-0042 § Goal 11, statically). ADR-0028.
+func TestAssumption_VariablePrecedenceMatchesGate(t *testing.T) {
+	e2e.SkipUnlessEnabled(t)
+	_, err := exec.LookPath("tofu")
+	require.NoError(t, err, "tofu binary required for e2e")
+
+	w, env := newLoaderRoot(t)
+	w.write(t, "main.tf", "variable \"region\" {\n  default = \"default\"\n}\noutput \"region\" {\n  value = var.region\n}\n")
+	out, err := w.tofu(t, env, "init", "-input=false", "-no-color")
+	require.NoError(t, err, "%s\n%s", w.version, out)
+	applied := func(args ...string) string {
+		t.Helper()
+		out, err := w.tofu(t, env, append([]string{"apply", "-auto-approve", "-input=false", "-no-color"}, args...)...)
+		require.NoError(t, err, "%s\n%s", w.version, out)
+		value, stderr, err := cli.RunTofu(w.dir, env, "output", "-raw", "region")
+		require.NoError(t, err, "%s\n%s", w.version, stderr)
+		return value
+	}
+
+	for _, source := range []struct{ file, want string }{
+		{"", "default"},
+		{"terraform.tfvars", "terraform.tfvars"},
+		{"b.auto.tfvars", "b.auto.tfvars"},
+		{"a.auto.tfvars", "b.auto.tfvars"},
+	} {
+		if source.file != "" {
+			w.write(t, source.file, fmt.Sprintf("region = %q\n", source.file))
+		}
+		assert.Equal(t, source.want, applied(), "%s: with %q added", w.version, source.file)
+	}
+	varFile := filepath.Join(t.TempDir(), "vars.tfvars")
+	e2e.WriteFile(t, varFile, []byte("region = \"var-file\"\n"))
+	assert.Equal(t, "var-file", applied("-var-file="+varFile), w.version)
+}
+
 // newLoaderRoot is a root with one valid output plus broken HCL in each
 // of broken, and the offline environment to run tofu in: both proxies at
 // the closed port, so any download fails.

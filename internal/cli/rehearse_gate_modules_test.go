@@ -147,7 +147,7 @@ const provisioner = "resource \"terraform_data\" \"t\" {\n  provisioner \"local-
 // ../leaf.
 func TestRehearsalGateAdmitsLocalModules(t *testing.T) {
 	_, in := moduleCopy(t, map[string]string{
-		work + "main.tf":        "provider \"aws\" {\n  alias = \"west\"\n}\nmodule \"m\" {\n  source    = \"./m\"\n  name      = \"x\"\n  providers = { aws = aws.west }\n}\nmodule \"again\" {\n  source = \"./m\"\n}\n",
+		work + "main.tf":        "provider \"aws\" {\n  alias  = \"west\"\n  region = \"us-east-1\"\n}\nmodule \"m\" {\n  source    = \"./m\"\n  name      = \"x\"\n  providers = { aws = aws.west }\n}\nmodule \"again\" {\n  source = \"./m\"\n}\n",
 		work + "m/main.tf":      "module \"s\" {\n  source = \"../shared\"\n}\nmodule \"l\" {\n  source = \"../leaf\"\n}\n",
 		work + "shared/main.tf": "module \"l\" {\n  source = \"../leaf\"\n}\n",
 		work + "leaf/main.tf":   manifestOutput,

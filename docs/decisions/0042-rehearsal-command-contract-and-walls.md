@@ -227,9 +227,13 @@ decides what is admitted.
 Every root `provider "aws"` block, aliased ones included, carries a `region` that is a literal, or
 `var.x` resolved by tofu's precedence (variable default, `terraform.tfvars`, `*.auto.tfvars` in
 lexical order, then the `--var-file`; pinned by `TestAssumption_VariablePrecedenceMatchesGate`).
-The resolved value must equal `--region`. An absent region is refused, and so is a root that uses
-`aws_*` types with no `provider "aws"` block. A `region` argument on an `aws_*` resource or data
-block gets the same rule.
+The resolved value must equal `--region`. An absent region is refused, and so is a configuration
+that uses `aws_*` types, in any module, with no unaliased `provider "aws"` block in the root: tofu's
+implied empty block, which has no region, would be the default. A `region` argument on an `aws_*`
+resource or data block gets the same rule, except that in a child module it must be a literal: the
+gate resolves variables only in the root. A root var file spelled in another case
+(`Terraform.tfvars`, `x.AUTO.tfvars`) is refused: on a case-insensitive filesystem tofu may load it
+(**unverified**; refusing it holds either way).
 
 ### The lock
 
