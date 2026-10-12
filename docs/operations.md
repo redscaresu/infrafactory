@@ -629,7 +629,8 @@ directory.
 
 In order: `sts:GetCallerIdentity` (a wrong account or principal stops the read after that one
 request), the EC2 DryRun preflight (any answer but `UnauthorizedOperation` stops it, naming the
-action), then each entry and its EC2 follow-ups. A refusal (`Refused:`, json `refusal`) exits 1
+action), then each entry, then the follow-ups: a touched VPC's EC2 surroundings, a role's policies,
+and the image a public AMI parameter names. A refusal (`Refused:`, json `refusal`) exits 1
 and writes no recorded read; a missing or malformed flag exits 2. If the account was read but
 `read.json` could not be written, it says so (`Not written:`, json `write_failure`, with the
 exchange count) and exits 1: the read happened, and must be run again. The raw `read.json` carries

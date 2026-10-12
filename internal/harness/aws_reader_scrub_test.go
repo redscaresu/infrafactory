@@ -22,6 +22,10 @@ const (
 	// scrubTestStray is a 12-digit number that is not the read's account,
 	// so the byte map leaves it.
 	scrubTestStray = "999988887777"
+	// scrubPublicImageOwner is the fixture's DescribeImages owner, Amazon,
+	// and scrubImageOwner the element naming it.
+	scrubPublicImageOwner = "137112412989"
+	scrubImageOwner       = "<imageOwnerId>" + scrubPublicImageOwner + "</imageOwnerId>"
 )
 
 // scrubFixtures writes the fixtures, each through its edit, into a temp
@@ -94,8 +98,9 @@ func TestWriteScrubbedAWSReadMapsTheAccountAndPlacesThePlaceholders(t *testing.T
 		"<userData>\n        <value>" + AWSScrubUserData + "</value>\n    </userData>",
 		`"Value":"` + AWSScrubParameterValue + `"`,
 		`"ARN":"arn:aws:ssm:eu-west-1:` + AWSScrubAccount + `:parameter/app/db/password"`,
-		// Kept: a tag's value, a public parameter's value and SSM's
-		// LastModifiedDate, whose fraction is twelve digits.
+		// Kept: a tag's value, a public parameter's value and its image's
+		// owner, and SSM's LastModifiedDate, whose fraction is twelve digits.
+		scrubImageOwner,
 		"<key>Name</key>\n                    <value>web</value>",
 		`"Value":"ami-0c1d2e3f4a5b6c7d8"`,
 		`"LastModifiedDate":1.760175002193E9`,
@@ -105,7 +110,7 @@ func TestWriteScrubbedAWSReadMapsTheAccountAndPlacesThePlaceholders(t *testing.T
 	} {
 		assert.Contains(t, bodies, want)
 	}
-	assert.Equal(t, 5, strings.Count(bodies, AWSScrubRequestID), "every RequestId")
+	assert.Equal(t, 6, strings.Count(bodies, AWSScrubRequestID), "every RequestId")
 	for _, want := range []string{
 		`"arn": "arn:aws:ec2:eu-west-1:` + AWSScrubAccount + `:instance/i-0123abcd4567ef890"`,
 		`"owner_id": "` + AWSScrubAccount + `"`,
@@ -369,6 +374,38 @@ func TestCheckScrubbedRead(t *testing.T) {
 			wantErr: "$.exchanges[1].body: holds a 12-digit number", planted: "999988887777",
 		},
 		{
+			// A public image owner passes only as a DescribeImages item's
+			// imageOwnerId.
+			name: "a public image owner in a DescribeVpcs body", old: "does not exist</Message>", new: "does not exist in " + scrubPublicImageOwner + "</Message>",
+			wantErr: "$.exchanges[6].body: holds a 12-digit number",
+		},
+		{
+			name: "a public image owner in another element of the image", old: "<imageLocation>amazon/", new: "<imageLocation>" + scrubPublicImageOwner + "/",
+			wantErr: "$.exchanges[7].body: holds a 12-digit number",
+		},
+		{
+			name: "an image owner that is not public", old: scrubImageOwner, new: "<imageOwnerId>" + scrubTestStray + "</imageOwnerId>",
+			wantErr: "$.exchanges[7].body: holds a 12-digit number", planted: scrubTestStray,
+		},
+		{
+			// Seen decoded only: raw, the runs are 2 and 11 digits.
+			name: "an image owner that is not public, spelled with a character reference", old: scrubImageOwner, new: "<imageOwnerId>&#57;99988887777</imageOwnerId>",
+			wantErr: "$.exchanges[7].body: holds a 12-digit number", planted: "99988887777",
+		},
+		{
+			name: "a public image owner at another path", old: "<deviceName>/dev/xvda</deviceName>", new: "<deviceName>/dev/xvda</deviceName>" + scrubImageOwner,
+			wantErr: "$.exchanges[7].body: holds a 12-digit number",
+		},
+		{
+			// Seen raw only, as the name is.
+			name: "an element inside a public image owner", old: scrubImageOwner, new: "<imageOwnerId><x999988887777/>" + scrubPublicImageOwner + "</imageOwnerId>",
+			wantErr: "$.exchanges[7].body: holds a 12-digit number", planted: "999988887777",
+		},
+		{
+			name: "a public image owner as another action's imageOwnerId", old: `"action": "DescribeImages"`, new: `"action": "DescribeVpcs"`,
+			wantErr: "$.exchanges[7].body: holds a 12-digit number",
+		},
+		{
 			// A public parameter's value passes; its other sensitive
 			// attributes do not.
 			name: "another sensitive attribute of a public parameter", inState: true,
@@ -402,6 +439,36 @@ func TestCheckScrubbedRead(t *testing.T) {
 			if tc.planted != "" {
 				assert.NotContains(t, err.Error(), tc.planted)
 			}
+		})
+	}
+}
+
+// A public image owner spelled with a character reference passes the raw
+// pass (runs of 2 and 11 digits), so only the exchange decides whether the
+// decoded pass exempts it: an EC2 DescribeImages, and nothing else.
+func TestCheckScrubbedReadRefusesAPublicImageOwnerOutsideAnEC2DescribeImages(t *testing.T) {
+	read, state := scrubbedFixtures(t)
+	const image = 7
+	for name, edit := range map[string]func(*AWSReadExchange){
+		"under action DescribeVpcs":                func(ex *AWSReadExchange) { ex.Action = "DescribeVpcs" },
+		"under service ssm, action DescribeImages": func(ex *AWSReadExchange) { ex.Service = "ssm" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			var decoded AWSRecordedRead
+			require.NoError(t, decodeOneJSON(read, &decoded))
+			ex := &decoded.Exchanges[image]
+			require.Equal(t, "DescribeImages", ex.Action)
+			body := strings.Replace(ex.Body, scrubImageOwner, "<imageOwnerId>&#49;37112412989</imageOwnerId>", 1)
+			require.NotEqual(t, ex.Body, body)
+			ex.Body = body
+			edited, err := encodeScrubbedJSON(decoded, "  ")
+			require.NoError(t, err)
+			require.NoError(t, CheckScrubbedRead("read", edited, "state", state), "an EC2 DescribeImages passes it")
+
+			edit(ex)
+			edited, err = encodeScrubbedJSON(decoded, "  ")
+			require.NoError(t, err)
+			assert.ErrorContains(t, CheckScrubbedRead("read", edited, "state", state), "scrub check: read: $.exchanges[7].body: holds a 12-digit number")
 		})
 	}
 }

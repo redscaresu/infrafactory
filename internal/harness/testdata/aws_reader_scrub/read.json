@@ -3,7 +3,7 @@
   "region": "eu-west-1",
   "timestamp": "2026-10-11T09:30:00Z",
   "duration_ms": 842,
-  "calls": 10,
+  "calls": 11,
   "exchanges": [
     {
       "service": "sts",
@@ -60,6 +60,14 @@
       "params": {"VpcId.1": "vpc-0deadbeef00000001"},
       "status": 400,
       "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Response><Errors><Error><Code>InvalidVpcID.NotFound</Code><Message>The vpc ID 'vpc-0deadbeef00000001' does not exist</Message></Error></Errors><RequestID>b7e9d2c4-1a3f-4e5d-9c8b-7a6f5e4d3c2b</RequestID></Response>"
+    },
+    {
+      "service": "ec2",
+      "protocol": "query",
+      "action": "DescribeImages",
+      "params": {"ImageId.1": "ami-0c1d2e3f4a5b6c7d8"},
+      "status": 200,
+      "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<DescribeImagesResponse xmlns=\"http://ec2.amazonaws.com/doc/2016-11-15/\">\n    <requestId>5c2e8a1f-3b4d-4c6e-9f0a-1b2c3d4e5f6a</requestId>\n    <imagesSet>\n        <item>\n            <imageId>ami-0c1d2e3f4a5b6c7d8</imageId>\n            <imageLocation>amazon/al2023-ami-2023.6.20241010.0-kernel-6.1-x86_64</imageLocation>\n            <imageState>available</imageState>\n            <imageOwnerId>137112412989</imageOwnerId>\n            <creationDate>2024-10-10T19:52:04.000Z</creationDate>\n            <isPublic>true</isPublic>\n            <architecture>x86_64</architecture>\n            <imageType>machine</imageType>\n            <imageOwnerAlias>amazon</imageOwnerAlias>\n            <name>al2023-ami-2023.6.20241010.0-kernel-6.1-x86_64</name>\n            <description>Amazon Linux 2023 AMI 2023.6.20241010.0 x86_64 HVM kernel-6.1</description>\n            <rootDeviceType>ebs</rootDeviceType>\n            <rootDeviceName>/dev/xvda</rootDeviceName>\n            <blockDeviceMapping>\n                <item>\n                    <deviceName>/dev/xvda</deviceName>\n                    <ebs><snapshotId>snap-0f1e2d3c4b5a69788</snapshotId><volumeSize>8</volumeSize><deleteOnTermination>true</deleteOnTermination><volumeType>gp3</volumeType><iops>3000</iops><encrypted>false</encrypted><throughput>125</throughput></ebs>\n                </item>\n            </blockDeviceMapping>\n            <virtualizationType>hvm</virtualizationType>\n            <hypervisor>xen</hypervisor>\n            <enaSupport>true</enaSupport>\n            <sriovNetSupport>simple</sriovNetSupport>\n            <bootMode>uefi-preferred</bootMode>\n            <platformDetails>Linux/UNIX</platformDetails>\n            <usageOperation>RunInstances</usageOperation>\n            <imdsSupport>v2.0</imdsSupport>\n        </item>\n    </imagesSet>\n</DescribeImagesResponse>"
     }
   ]
 }
