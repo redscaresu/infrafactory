@@ -87,13 +87,9 @@ func rehearsalAWSArgProblems(at, name string) []string {
 	return []string{fmt.Sprintf(`%s: refused: the gate's table of hashicorp/aws %s provider arguments does not name it, so it is refused under any lock version`, at, harness.AWSProviderVersion)}
 }
 
-// recordAWSType records an aws_* block for goal 11: that it needs the
-// root's unaliased provider "aws" block, and its region argument, if any.
-func (m rehearsalModule) recordAWSType(file, at string, block *hclsyntax.Block) {
-	named := rehearsalModuleDir{key: m.key}.named([]string{at})[0]
-	if m.regions.awsUse == "" || named < m.regions.awsUse {
-		m.regions.awsUse = named
-	}
+// recordAWSRegion records an aws_* block's region argument, if any, for
+// goal 11.
+func (m rehearsalModule) recordAWSRegion(file string, block *hclsyntax.Block) {
 	if region, ok := block.Body.Attributes["region"]; ok {
 		m.regions.uses = append(m.regions.uses, rehearsalRegionUse{
 			at: rehearsalAt(file, region.SrcRange, rehearsalAddress(block)+".region"), expr: region.Expr, root: m.root, key: m.key,
@@ -110,17 +106,15 @@ func (m rehearsalModule) recordDefault(block *hclsyntax.Block) {
 }
 
 // rehearsalRegions collects what goal 11 reads across one gate run: every
-// region to resolve, the root's variable sources, and the first aws_*
-// block, which needs an unaliased root provider "aws" block.
+// region to resolve, the root's variable sources, and whether the root has
+// an unaliased provider "aws" block.
 type rehearsalRegions struct {
 	uses []rehearsalRegionUse
 	// defaults are the root's variable defaults, by variable name.
 	defaults hclsyntax.Attributes
 	// tfvars are the root's .tfvars files, by display name.
-	tfvars  map[string]*hclsyntax.Body
-	varFile *hclsyntax.Body
-	// awsUse is the first aws_* block's "file:line: address", in sort order.
-	awsUse          string
+	tfvars          map[string]*hclsyntax.Body
+	varFile         *hclsyntax.Body
 	defaultProvider bool
 }
 
@@ -144,12 +138,15 @@ type rehearsalVarSource struct {
 }
 
 // problems is goal 11 (ADR-0042 § Goal 11, statically): every region
-// resolves to --region, and aws_* types have a root provider "aws" block
-// without an alias, since tofu's implied empty one has no region.
+// resolves to --region, and the root always has a provider "aws" block
+// without an alias. A rehearsal is AWS-only, and anything tofu plans
+// through the default provider (a resource, a removed or import block,
+// an address only the state holds) would otherwise get tofu's implied
+// empty one, which has no region.
 func (r *rehearsalRegions) problems(region string) []string {
 	var problems []string
-	if r.awsUse != "" && !r.defaultProvider {
-		problems = append(problems, r.awsUse+`: refused: the root has no provider "aws" block without an alias, so tofu's implied empty one, which has no region, is the default`)
+	if !r.defaultProvider {
+		problems = append(problems, `the root module: refused: it has no provider "aws" block without an alias, so tofu's implied empty one, which has no region, would be the default`)
 	}
 	sources, sourceProblems := r.sources()
 	problems = append(problems, sourceProblems...)

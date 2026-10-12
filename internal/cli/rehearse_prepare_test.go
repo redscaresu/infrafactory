@@ -22,6 +22,10 @@ const prepareID = "rehearsal-id"
 
 var prepareFlags = []string{"--account", "123456789012", "--region", "eu-west-1"}
 
+// prepareProvider is the root provider "aws" block goal 11 requires, at
+// prepareFlags' region.
+const prepareProvider = "provider \"aws\" {\n  region = \"eu-west-1\"\n}\n"
+
 // prepareRoot is the root command with prepare built from p.
 func prepareRoot(p rehearsePrepare) *cobra.Command {
 	root := NewRootCmd()
@@ -109,6 +113,7 @@ func TestRehearsePrepareCopiesTheRootAndItsModules(t *testing.T) {
 		".git/HEAD":                            "ref: refs/heads/main\n",
 		".infrafactory/runs/x":                 "run\n",
 		"envs/prod/main.tf":                    "module \"x\" {\n  source = \"../../modules/x\"\n}\n",
+		"envs/prod/provider.tf":                prepareProvider,
 		"envs/prod/.terraform.lock.hcl":        "# lock\n",
 		"envs/prod/.terraform/modules/m.json":  "{}\n",
 		"envs/prod/terraform.tfstate":          "{}\n",

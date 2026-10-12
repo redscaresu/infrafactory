@@ -39,6 +39,10 @@ func moduleBlock(body string) map[string]string {
 
 const manifestOutput = "output \"x\" {\n  value = 1\n}\n"
 
+// gateProvider is the root provider "aws" block goal 11 requires, at the
+// fixtures' region.
+const gateProvider = "provider \"aws\" {\n  region = \"us-east-1\"\n}\n"
+
 func TestRehearsalGateModuleSources(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
@@ -151,6 +155,7 @@ func TestRehearsalGateAdmitsLocalModules(t *testing.T) {
 		work + "m/main.tf":      "module \"s\" {\n  source = \"../shared\"\n}\nmodule \"l\" {\n  source = \"../leaf\"\n}\n",
 		work + "shared/main.tf": "module \"l\" {\n  source = \"../leaf\"\n}\n",
 		work + "leaf/main.tf":   manifestOutput,
+		work + "provider.tf":    gateProvider,
 	}, nil)
 	assert.NoError(t, rehearsalGate(in))
 
@@ -241,6 +246,7 @@ const localManifest = `{"Modules":[{"Key":"","Source":"","Dir":"."},{"Key":"m","
 func localModules(extra map[string]string) map[string]string {
 	files := map[string]string{
 		work + "main.tf":        "module \"m\" {\n  source = \"./m\"\n}\n",
+		work + "provider.tf":    gateProvider,
 		work + "m/main.tf":      "module \"s\" {\n  source = \"../shared\"\n}\n",
 		work + "shared/main.tf": manifestOutput,
 	}
@@ -335,7 +341,7 @@ func TestRehearsalModulesGateAdmits(t *testing.T) {
 		assert.NoError(t, rehearsalModulesGate(in, writeManifest(t, tmp, localManifest)))
 	})
 	t.Run("no manifest for a root with no module blocks", func(t *testing.T) {
-		tmp, in := moduleCopy(t, map[string]string{work + "main.tf": manifestOutput}, nil)
+		tmp, in := moduleCopy(t, map[string]string{work + "main.tf": manifestOutput, work + "provider.tf": gateProvider}, nil)
 		assert.NoError(t, rehearsalModulesGate(in, writeManifest(t, tmp, "")))
 	})
 }

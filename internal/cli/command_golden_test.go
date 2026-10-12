@@ -321,6 +321,7 @@ func TestCommandOutputGoldenSnapshots(t *testing.T) {
 func goldenPrepareRoot(h *CommandTestHarness, mainTF string) *cobra.Command {
 	mustWriteFile(h.T, filepath.Join(h.WorkspaceDir, ".git", "HEAD"), "ref: refs/heads/main\n")
 	mustWriteFile(h.T, filepath.Join(h.WorkspaceDir, "envs", "prod", "main.tf"), mainTF)
+	mustWriteFile(h.T, filepath.Join(h.WorkspaceDir, "envs", "prod", "provider.tf"), prepareProvider)
 	return prepareRoot(rehearsePrepare{wd: h.WorkspaceDir, newID: func() string { return prepareID }})
 }
 

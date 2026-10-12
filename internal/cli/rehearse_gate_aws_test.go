@@ -15,6 +15,8 @@ func awsRoot(region, def string) string {
 	return "variable \"region\" {\n  default = " + def + "\n}\nprovider \"aws\" {\n  region = " + region + "\n}\nresource \"aws_vpc\" \"v\" {}\n"
 }
 
+const noDefaultProvider = `the root module: refused: it has no provider "aws" block without an alias`
+
 func TestRehearsalGateAWSRefuses(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -73,14 +75,18 @@ func TestRehearsalGateAWSRefuses(t *testing.T) {
 			"Terraform.tfvars: refused: tofu loads terraform.tfvars and *.auto.tfvars by name, and the gate cannot say whether it loads this spelling",
 			"B.AUTO.tfvars: refused: tofu loads terraform.tfvars",
 		}},
-		// Goal 11: aws_* types with no unaliased provider "aws" block.
+		// Goal 11: a root with no unaliased provider "aws" block, whatever it holds.
 		{name: "aws_* types with no provider", files: map[string]string{"main.tf": "resource \"aws_vpc\" \"v\" {}\ndata \"aws_caller_identity\" \"me\" {}\n"},
-			want: []string{`main.tf:1: aws_vpc.v: refused: the root has no provider "aws" block without an alias`}},
+			want: []string{noDefaultProvider}},
 		{name: "aws_* types with only an aliased provider", files: map[string]string{"main.tf": "provider \"aws\" {\n  alias  = \"west\"\n  region = \"us-east-1\"\n}\nresource \"aws_vpc\" \"v\" {\n  provider = aws.west\n}\n"},
-			want: []string{`main.tf:5: aws_vpc.v: refused: the root has no provider "aws" block without an alias`}},
+			want: []string{noDefaultProvider}},
 		{name: "aws_* types in a child with no provider", files: map[string]string{
 			"main.tf": "module \"c\" {\n  source = \"./child\"\n}\n", "child/main.tf": "data \"aws_caller_identity\" \"me\" {}\n",
-		}, want: []string{`module "c": child/main.tf:1: data.aws_caller_identity.me: refused: the root has no provider "aws" block without an alias`}},
+		}, want: []string{noDefaultProvider}},
+		{name: "only a removed block naming an aws_* address", files: map[string]string{"main.tf": "removed {\n  from = aws_s3_bucket.old\n  lifecycle {\n    destroy = true\n  }\n}\n"},
+			want: []string{noDefaultProvider}},
+		{name: "no aws_* address at all", files: map[string]string{"main.tf": manifestOutput},
+			want: []string{noDefaultProvider}},
 		// Goal 11: a region argument on an aws_* block.
 		{name: "a resource's region", files: map[string]string{"main.tf": awsRoot(`"us-east-1"`, "null") + "resource \"aws_s3_bucket\" \"b\" {\n  region = \"eu-west-1\"\n}\n"},
 			want: []string{`main.tf:9: aws_s3_bucket.b.region: refused: region "eu-west-1" is not --region "us-east-1"`}},

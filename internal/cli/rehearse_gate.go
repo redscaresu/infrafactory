@@ -475,7 +475,7 @@ func (m rehearsalModule) typeProblems(file, at string, block *hclsyntax.Block) [
 	}
 	typ := block.Labels[0]
 	if strings.HasPrefix(typ, "aws_") {
-		m.recordAWSType(file, at, block)
+		m.recordAWSRegion(file, block)
 	} else if !rehearsalTypes[block.Type][typ] {
 		return []string{fmt.Sprintf("%s: %s type %q is not admitted", at, block.Type, typ)}
 	}
