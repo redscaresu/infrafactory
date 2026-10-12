@@ -43,6 +43,9 @@ type AWSReadInput struct {
 	// time.Now. Requests are always signed at the real time, which AWS
 	// checks.
 	Now func() time.Time
+	// Sleep waits out a throttled request's backoff; nil means a real
+	// sleep.
+	Sleep func(context.Context, time.Duration) error
 }
 
 // awsPartitionRegionPattern is the aws partition's regionRegex in the
@@ -73,9 +76,11 @@ func awsReadEndpoints(region string) map[string]awsReadEndpoint {
 // the preflight, then replays each entry verbatim, signed, through its
 // service's wall, and returns the ADR-0041 recorded read. No request is
 // sent unless every entry is a reader-table row whose wire request its
-// wall admits, and none after a failing identity check or preflight. A NotFound-class answer named in the reader table
-// is recorded; any other non-2xx answer, and any answer carrying a
-// truncation marker, fails the read, naming the entry.
+// wall admits, and none after a failing identity check or preflight. A
+// list is read to its last page, each page an exchange, and a throttled
+// request is sent again after a backoff (awsReplay.pages). A NotFound-class
+// answer named in the reader table is recorded; any other non-2xx answer,
+// and a list that cannot be read in full, fails the read, naming the entry.
 func ReadAWSAccount(ctx context.Context, in AWSReadInput) (AWSRecordedRead, error) {
 	r, err := newAWSReplay(ctx, in)
 	if err != nil {
@@ -90,11 +95,11 @@ func ReadAWSAccount(ctx context.Context, in AWSReadInput) (AWSRecordedRead, erro
 	}
 	exchanges := make([]AWSReadExchange, 0, len(in.ReadSet))
 	for i, entry := range in.ReadSet {
-		exchange, err := r.replay(ctx, entry)
+		pages, err := r.pages(ctx, entry)
 		if err != nil {
 			return AWSRecordedRead{}, fmt.Errorf("aws read: %s: %w", awsReadEntryName(i, entry), err)
 		}
-		exchanges = append(exchanges, exchange)
+		exchanges = append(exchanges, pages...)
 	}
 	calls := 0
 	for _, wall := range r.walls {
@@ -115,6 +120,7 @@ type awsReplay struct {
 	creds     aws.Credentials
 	signer    *v4.Signer
 	now       func() time.Time
+	sleep     func(context.Context, time.Duration) error
 }
 
 // newAWSReplay checks every input a read needs and builds its walls,
@@ -142,10 +148,13 @@ func newAWSReplay(ctx context.Context, in AWSReadInput) (*awsReplay, error) {
 	}
 	r := &awsReplay{
 		walls: map[string]*AWSReadWall{}, endpoints: awsReadEndpoints(in.Config.Region),
-		signer: v4.NewSigner(), now: in.Now,
+		signer: v4.NewSigner(), now: in.Now, sleep: in.Sleep,
 	}
 	if r.now == nil {
 		r.now = time.Now
+	}
+	if r.sleep == nil {
+		r.sleep = sleepContext
 	}
 	for service, u := range in.Endpoints {
 		endpoint, ok := r.endpoints[service]
@@ -204,9 +213,8 @@ func checkAWSLoopbackEndpoint(endpoint string) error {
 	return nil
 }
 
-// replay signs and sends entry and returns its exchange.
+// replay signs and sends entry once and returns its answer, unchecked.
 func (r *awsReplay) replay(ctx context.Context, entry AWSReadEntry) (AWSReadExchange, error) {
-	svc, _ := awsReaderService(entry.Service)
 	ctx, cancel := context.WithTimeout(ctx, awsReadCallTimeout)
 	defer cancel()
 	req, signingRegion, err := r.request(ctx, entry)
@@ -218,7 +226,7 @@ func (r *awsReplay) replay(ctx context.Context, entry AWSReadEntry) (AWSReadExch
 		return AWSReadExchange{}, err
 	}
 	hash := sha256.Sum256(payload)
-	if err := r.signer.SignHTTP(ctx, r.creds, req, hex.EncodeToString(hash[:]), svc.Service, signingRegion, time.Now()); err != nil {
+	if err := r.signer.SignHTTP(ctx, r.creds, req, hex.EncodeToString(hash[:]), entry.Service, signingRegion, time.Now()); err != nil {
 		return AWSReadExchange{}, fmt.Errorf("signing: %w", err)
 	}
 	resp, err := r.walls[entry.Service].Do(req)
@@ -229,9 +237,6 @@ func (r *awsReplay) replay(ctx context.Context, entry AWSReadEntry) (AWSReadExch
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return AWSReadExchange{}, fmt.Errorf("reading the answer: %w", err)
-	}
-	if err := checkAWSReadAnswer(svc, resp.StatusCode, body); err != nil {
-		return AWSReadExchange{}, err
 	}
 	return AWSReadExchange{AWSReadEntry: entry, Status: resp.StatusCode, Body: string(body)}, nil
 }
@@ -317,25 +322,21 @@ func awsQueryForm(params json.RawMessage) (url.Values, error) {
 	return form, nil
 }
 
-// checkAWSReadAnswer passes a 2xx answer with no truncation marker, and a
-// 4xx answer whose error code is one of svc's NotFound codes.
+// checkAWSReadAnswer passes a 2xx answer, and a 4xx answer whose error
+// code is one of svc's NotFound codes.
 func checkAWSReadAnswer(svc AWSReaderService, status int, body []byte) error {
-	if status < http.StatusOK || status >= http.StatusMultipleChoices {
-		code := awsAnswerErrorCode(svc.Protocol, body)
-		if status >= http.StatusBadRequest && status < http.StatusInternalServerError && slices.Contains(svc.NotFound, code) {
-			return nil
-		}
-		return fmt.Errorf("answered %d %q", status, code)
+	if awsAnswerOK(status) {
+		return nil
 	}
-	truncated, err := awsAnswerTruncated(svc.Protocol, body)
-	if err != nil {
-		return fmt.Errorf("answered %d with a body that does not parse: %w", status, err)
+	code := awsAnswerErrorCode(svc.Protocol, body)
+	if status >= http.StatusBadRequest && status < http.StatusInternalServerError && slices.Contains(svc.NotFound, code) {
+		return nil
 	}
-	// ponytail: a next page fails the read until read-paging pages instead.
-	if truncated {
-		return errors.New("the answer is truncated (it carries a next-page marker), and paging is not built yet")
-	}
-	return nil
+	return fmt.Errorf("answered %d %q", status, code)
+}
+
+func awsAnswerOK(status int) bool {
+	return status >= http.StatusOK && status < http.StatusMultipleChoices
 }
 
 // awsAnswerErrorCode is an error answer's code, "" when it has none: the
@@ -364,31 +365,6 @@ func awsAnswerErrorCode(protocol string, body []byte) string {
 	}
 	code, _, _ = strings.Cut(code, ":")
 	return code
-}
-
-// awsAnswerTruncated reports a next-page marker: a non-empty nextToken or
-// IsTruncated=true in XML, a non-empty NextToken in json.
-func awsAnswerTruncated(protocol string, body []byte) (bool, error) {
-	if protocol == awsProtocolQuery {
-		fields, err := awsXMLFields(body, "nextToken", "IsTruncated")
-		if err != nil {
-			return false, err
-		}
-		for _, token := range fields["nextToken"] {
-			if strings.TrimSpace(token) != "" {
-				return true, nil
-			}
-		}
-		return slices.ContainsFunc(fields["IsTruncated"], func(v string) bool {
-			return strings.EqualFold(strings.TrimSpace(v), "true")
-		}), nil
-	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(body, &fields); err != nil {
-		return false, err
-	}
-	token, ok := fields["NextToken"]
-	return ok && string(token) != "null" && string(token) != `""`, nil
 }
 
 // awsXMLFields is the text of every element in body named one of names,

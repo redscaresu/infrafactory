@@ -39,10 +39,12 @@ func (r awsWireRequest) form(t *testing.T) url.Values {
 	return form
 }
 
-// awsWireDoer answers every request with answer, calling onSend first,
-// and records each request that reached it.
+// awsWireDoer answers each request with the next of queue, then every
+// request with answer, calling onSend first, and records each request
+// that reached it.
 type awsWireDoer struct {
 	answer awsCannedAnswer
+	queue  []awsCannedAnswer
 	onSend func()
 	sent   []awsWireRequest
 }
@@ -56,10 +58,14 @@ func (d *awsWireDoer) Do(req *http.Request) (*http.Response, error) {
 	if d.onSend != nil {
 		d.onSend()
 	}
+	answer := d.answer
+	if n := len(d.sent) - 1; n < len(d.queue) {
+		answer = d.queue[n]
+	}
 	return &http.Response{
-		StatusCode: cmp.Or(d.answer.status, http.StatusOK),
+		StatusCode: cmp.Or(answer.status, http.StatusOK),
 		Header:     http.Header{"Content-Type": {"text/xml"}},
-		Body:       io.NopCloser(strings.NewReader(d.answer.body)),
+		Body:       io.NopCloser(strings.NewReader(answer.body)),
 		Request:    req,
 	}, nil
 }
@@ -350,15 +356,6 @@ func TestReadAWSAccountAnswers(t *testing.T) {
 		{"a NotFound code on a 5xx fails", readEntry("ec2", "query", "DescribeVpcs", `{}`), awsReadEC2Host,
 			awsCannedAnswer{status: http.StatusInternalServerError, body: ec2ErrorBody("InvalidVpcID.NotFound")},
 			[]string{`entry 0 (service "ec2"`, `500 "InvalidVpcID.NotFound"`}},
-		{"EC2 nextToken fails", readEntry("ec2", "query", "DescribeInstances", `{}`), awsReadEC2Host,
-			awsCannedAnswer{status: http.StatusOK, body: `<DescribeInstancesResponse><reservationSet/><nextToken>page-2</nextToken></DescribeInstancesResponse>`},
-			[]string{`entry 0 (service "ec2", protocol "query", action "DescribeInstances")`, "truncated"}},
-		{"IAM IsTruncated=true fails", readEntry("iam", "query", "ListRolePolicies", `{"RoleName":"web"}`), awsReadIAMHost,
-			awsCannedAnswer{status: http.StatusOK, body: `<ListRolePoliciesResponse><ListRolePoliciesResult><PolicyNames/><IsTruncated>true</IsTruncated><Marker>m</Marker></ListRolePoliciesResult></ListRolePoliciesResponse>`},
-			[]string{`entry 0 (service "iam", protocol "query", action "ListRolePolicies")`, "truncated"}},
-		{"SSM NextToken fails", readEntry("ssm", "json", "GetParameter", `{"Name":"/a"}`), awsReadSSMHost,
-			awsCannedAnswer{status: http.StatusOK, body: `{"Parameter":{"Name":"/a"},"NextToken":"page-2"}`},
-			[]string{`entry 0 (service "ssm", protocol "json", action "GetParameter")`, "truncated"}},
 		{"an empty EC2 nextToken is the last page", readEntry("ec2", "query", "DescribeInstances", `{}`), awsReadEC2Host,
 			awsCannedAnswer{status: http.StatusOK, body: `<DescribeInstancesResponse><reservationSet/><nextToken/></DescribeInstancesResponse>`}, nil},
 		{"IAM IsTruncated=false is the last page", readEntry("iam", "query", "ListRolePolicies", `{"RoleName":"web"}`), awsReadIAMHost,

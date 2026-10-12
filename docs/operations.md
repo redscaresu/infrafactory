@@ -520,10 +520,10 @@ The second command prints only a key name it recognises, and for any other line 
 so a malformed line never puts the secret in the lead's transcript. It must print exactly
 `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`.
 
-IAM is eventually consistent, and no code retries: the reader's clients do not retry, and the
-identity check stops at its first error. So on the first read after the key is created, if the
-identity check fails with `InvalidClientTokenId`, the lead waits a few seconds and runs the read
-once more; a second failure is a bad key.
+IAM is eventually consistent, and nothing retries a new key: the read retries only a throttled
+request, and the identity check stops at its first error. So on the first read after the key is
+created, if the identity check fails with `InvalidClientTokenId`, the lead waits a few seconds and
+runs the read once more; a second failure is a bad key.
 
 After each read, once the scrub has produced its fixtures, the lead deletes the local key file, the
 raw recording and the pre-destroy state, and checks the key file is absent
