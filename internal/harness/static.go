@@ -24,6 +24,11 @@ type Command struct {
 	// Scaleway, and an inherited SCW_API_URL would silently retarget it
 	// at mockway while still reporting success. See ADR-0023.
 	StripEnv []string
+	// ReplaceEnv makes the child's environment this process's PATH plus
+	// Env, and nothing else: an allowlist, where StripEnv is a denylist
+	// that misses any variable nobody named. A PATH in Env wins over
+	// this process's. Setting both ReplaceEnv and StripEnv is an error.
+	ReplaceEnv bool
 }
 
 // Layer2StripEnv is the StripEnv of every Layer 2 tofu command (static,

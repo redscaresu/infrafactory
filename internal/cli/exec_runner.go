@@ -198,7 +198,32 @@ func catchSignalsDuringRun(ctx context.Context) (context.Context, func()) {
 // A var only so a test can shorten it.
 var cancelKillFallback = 20 * time.Second
 
+// errReplaceEnvWithStripEnv refuses a command that sets both: a replaced
+// environment inherits nothing to strip, so the pair says the caller
+// expected an inheritance that is not there.
+var errReplaceEnvWithStripEnv = errors.New("command sets both ReplaceEnv and StripEnv")
+
+// commandEnv is the child's whole environment. It is never nil: os/exec
+// reads a nil Env as "inherit everything", the opposite of ReplaceEnv.
+func commandEnv(cmd harness.Command) ([]string, error) {
+	if !cmd.ReplaceEnv {
+		return withEnvOverrides(stripEnvKeys(stripGCPAuthEnv(os.Environ()), cmd.StripEnv), cmd.Env), nil
+	}
+	if len(cmd.StripEnv) > 0 {
+		return nil, errReplaceEnvWithStripEnv
+	}
+	base := []string{}
+	if path, ok := os.LookupEnv("PATH"); ok {
+		base = append(base, "PATH="+path)
+	}
+	return withEnvOverrides(base, cmd.Env), nil
+}
+
 func (execCommandRunner) Run(ctx context.Context, cmd harness.Command) (harness.CommandResult, error) {
+	env, err := commandEnv(cmd)
+	if err != nil {
+		return harness.CommandResult{ExitCode: -1}, err
+	}
 	ctx, release := catchSignalsDuringRun(ctx)
 	defer release()
 	execCmd := exec.CommandContext(ctx, cmd.Name, cmd.Args...)
@@ -242,14 +267,14 @@ func (execCommandRunner) Run(ctx context.Context, cmd harness.Command) (harness.
 	}
 	execCmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	execCmd.Dir = cmd.Dir
-	execCmd.Env = withEnvOverrides(stripEnvKeys(stripGCPAuthEnv(os.Environ()), cmd.StripEnv), cmd.Env)
+	execCmd.Env = env
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	execCmd.Stdout = &stdout
 	execCmd.Stderr = &stderr
 
-	err := execCmd.Run()
+	err = execCmd.Run()
 	// Run has waited for Cancel, so killFallback is safe to read here.
 	if killFallback != nil {
 		killFallback.Stop()
