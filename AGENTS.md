@@ -150,6 +150,7 @@ with its kind. Every swarm brief also carries these lines.
 - A check that guards safety (a preflight, a probe, a wall, a refusal) passes only on the exact outcome it expects, such as a refused connection or a named error, and treats every other error or empty result as a failure. <!-- lesson: fails-open -->
 - After fixing a review finding, re-read every caller of the code the fix touched and re-run its failing-path tests: a fix that changes shared behaviour (a timeout, a wait, an error type) can break a path the finding never named. <!-- lesson: regression-from-fix -->
 - Every subprocess, network call and wait in code or tests has a deadline, and the deadline kills the whole process group, so a child that outlives its parent (a provider plugin holding a pipe) cannot block past it. <!-- lesson: unbounded-call -->
+- Input the code does not understand (an unknown field, an empty key, a malformed index, a stderr notice) is refused or reported, never silently ignored or matched to nothing. <!-- lesson: dropped-signal -->
 
 ## Quality Bar
 - `go test ./...` passes for completed stories.
