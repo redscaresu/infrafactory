@@ -654,8 +654,9 @@ the `hashicorp/aws` version the lock pins and any warnings.
   parsed by the gate. It overrides the code's `terraform.tfvars` and `*.auto.tfvars`. A `.json`
   var file, or anything but a regular file, is refused.
 
-**Layout.** `<repo>/.infrafactory/rehearsals/<id>/` holds `work/` (the copy of `<dir>` and the
-local modules it calls, at their paths relative to the repository), `data/` (`TF_DATA_DIR`),
+**Layout.** `<repo>/.infrafactory/rehearsals/<id>/` holds `work/` (the copy of the lowest directory holding `<dir>` and every local module it
+calls, at its path relative to the repository: with `../../modules/x` that can be the repository
+root, unrelated files included, which are gated like the rest), `data/` (`TF_DATA_DIR`),
 `home/` (an empty HOME), `state/` and `vars.tfvars`. The `rehearsals` dir has a `.gitignore` of
 `*`. Directories are `0700` and files `0600`, except a file with an execute bit (a provider
 binary), which is `0700`. The copy leaves out `.terraform`, `.git`, `.infrafactory` and any name
