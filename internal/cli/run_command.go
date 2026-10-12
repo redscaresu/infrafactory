@@ -62,6 +62,10 @@ func runRunWithNotify(
 	if err != nil {
 		return fmt.Errorf("load scenario %q: %w", scenarioPath, err)
 	}
+	// Before detectRunMode reads the output dir and generation removes it.
+	if err := refuseWhileHeld("run", runtime, sc); err != nil {
+		return err
+	}
 
 	// Refused HERE, before generation, rather than at the end where the
 	// keep happens. By then the run has spent several minutes of LLM

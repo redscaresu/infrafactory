@@ -56,6 +56,10 @@ type awsCommand struct {
 	// this service ("sts", "ssm" or "ec2") arrives.
 	cancelDuring string
 	customize    func(*config.Config)
+	// scenario names the scenario; "" is example-scenario.
+	scenario string
+	// prepare runs once the harness exists, before the command.
+	prepare func(*CommandTestHarness)
 }
 
 type awsCommandRun struct {
@@ -96,6 +100,12 @@ func (c awsCommand) run(t *testing.T, lc *awsLifecycle) awsCommandRun {
 		setAWSLifecycleScenario(t, h.ScenarioPath)
 	} else {
 		setScenarioCloud(t, h.ScenarioPath, c.cloud)
+	}
+	if c.scenario != "" {
+		renameScenario(t, h.ScenarioPath, c.scenario)
+	}
+	if c.prepare != nil {
+		c.prepare(h)
 	}
 	opts := isolatedRunOpts(h, func(cfg config.Config) config.Config {
 		cfg.Validation.Layers.SandboxDeploy.Enabled = c.layer3

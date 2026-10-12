@@ -32,6 +32,9 @@ func runGenerateCommand(cmd *cobra.Command, args []string, runtime *CommandRunti
 	if err != nil {
 		return fmt.Errorf("load scenario %q: %w", scenarioPath, err)
 	}
+	if err := refuseWhileHeld("generate", runtime, sc); err != nil {
+		return err
+	}
 
 	resolved, err := resolveAWSLayer3AMI(cmd.Context(), runtime, layer3TeardownCloud(sc.Cloud))
 	if err != nil {

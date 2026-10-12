@@ -3,6 +3,7 @@ package cli
 import (
 	"cmp"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -20,9 +21,13 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/redscaresu/infrafactory/internal/api"
+	"github.com/redscaresu/infrafactory/internal/config"
+	"github.com/redscaresu/infrafactory/internal/generator"
 	"github.com/redscaresu/infrafactory/internal/harness"
 	"github.com/redscaresu/infrafactory/internal/livestore"
 	"github.com/redscaresu/infrafactory/internal/runstore"
+	"github.com/redscaresu/infrafactory/internal/scenario"
 )
 
 // holdCopied is logged before the first AWS request when the hold's copy
@@ -401,4 +406,187 @@ func TestReapWithoutReleaseHoldMakesNoHoldsDir(t *testing.T) {
 	assert.Equal(t, 1, lc.destroy.calls)
 	_, err := os.Lstat(holdsRoot)
 	assert.ErrorIs(t, err, fs.ErrNotExist)
+}
+
+// chdirBesideSchema makes a fresh temp dir the cwd, so holdsRoot resolves
+// in it, with the schema the default scenario loader looks for there.
+func chdirBesideSchema(t *testing.T) {
+	t.Helper()
+	schema, err := os.ReadFile(filepath.Join("..", "..", scenario.DefaultSchemaPath))
+	require.NoError(t, err)
+	t.Chdir(t.TempDir())
+	require.NoError(t, os.WriteFile(scenario.DefaultSchemaPath, schema, 0o600))
+}
+
+// renameScenario names the harness scenario at path.
+func renameScenario(t *testing.T, path, name string) {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(path, []byte(strings.Replace(string(raw), "scenario: example-scenario", "scenario: "+name, 1)), 0o600))
+}
+
+// writeHeldOutput is a held stack's output dir: its state and its HCL.
+func writeHeldOutput(t *testing.T, dir string) {
+	t.Helper()
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, harness.LiveStateFilename), []byte(`{"serial":7}`), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "main.tf"), []byte("terraform {}\n"), 0o600))
+}
+
+// hashTree is every entry under root: each file by its sha256, each dir
+// as a dir.
+func hashTree(t *testing.T, root string) map[string]string {
+	t.Helper()
+	sums := map[string]string{}
+	require.NoError(t, filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			sums[path] = "dir"
+			return err
+		}
+		data, err := os.ReadFile(path)
+		sums[path] = fmt.Sprintf("%x", sha256.Sum256(data))
+		return err
+	}))
+	return sums
+}
+
+// heldCopies plants, in the cwd, each thing at aws-web-live's copy path
+// that refuses generate, run and test.
+var heldCopies = map[string]func(t *testing.T){
+	"a copy": func(t *testing.T) { plantCopy(t, awsHoldScenario, []byte("held state")) },
+	"a broken symlink": func(t *testing.T) {
+		path := holdCopyPath(awsHoldScenario)
+		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
+		require.NoError(t, os.Symlink("nowhere", path))
+	},
+	"a holds dir of mode 0000": func(t *testing.T) {
+		holds, err := filepath.Abs(holdsRoot)
+		require.NoError(t, err)
+		require.NoError(t, os.MkdirAll(holds, 0o700))
+		require.NoError(t, os.Chmod(holds, 0))
+		t.Cleanup(func() { _ = os.Chmod(holds, 0o700) })
+	},
+}
+
+func assertRefusedWhileHeld(t *testing.T, err error) {
+	t.Helper()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), holdCopyPath(awsHoldScenario), "names the copy")
+	assert.Contains(t, err.Error(), "If the stack is still held, release it with", "names the release for a held stack")
+	assert.Contains(t, err.Error(), "--take-over <holder> --release-hold", "names the release")
+	assert.Contains(t, err.Error(), "once the read is done, delete the copy by hand, which lifts this refusal",
+		"names what lifts it, which is all a released stack needs")
+}
+
+func TestGenerateRunAndTestRefuseWhileHeld(t *testing.T) {
+	for held, plant := range heldCopies {
+		for _, name := range []string{"generate", "run", "test"} {
+			t.Run(held+"/"+name, func(t *testing.T) {
+				chdirBesideSchema(t)
+				plant(t)
+				lc := newAWSLifecycle(t)
+				var outDir string
+				var before map[string]string
+				run := awsCommand{name: name, layer3: true, scenario: awsHoldScenario, prepare: func(h *CommandTestHarness) {
+					outDir = h.OutputDir()
+					writeHeldOutput(t, filepath.Join(outDir, awsHoldScenario))
+					before = hashTree(t, outDir)
+				}}.run(t, lc)
+
+				assert.Empty(t, lc.log(), "no STS, SSM or EC2 request, and no generation")
+				assert.Zero(t, run.mock.calls, "no Layer 2 deploy")
+				assert.Equal(t, before, hashTree(t, outDir), "the output dir is as it was")
+				assertRefusedWhileHeld(t, run.err)
+			})
+		}
+	}
+}
+
+// awsRequests counts, and refuses, every request a runtime built with
+// its default AWS clients makes.
+type awsRequests struct {
+	mu    sync.Mutex
+	hosts []string
+}
+
+func (r *awsRequests) RoundTrip(req *http.Request) (*http.Response, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.hosts = append(r.hosts, req.URL.Host)
+	return nil, errors.New("refused by the test")
+}
+
+// The UI starts a run through the run command's own code, so the hold
+// refuses it there too. Without the refusal, this run reaches STS.
+func TestUIRunRefusesWhileHeld(t *testing.T) {
+	for held, plant := range heldCopies {
+		t.Run(held, func(t *testing.T) {
+			chdirBesideSchema(t)
+			plant(t)
+			newAWSLifecycle(t) // for its HOME and credential file
+			requests := &awsRequests{}
+			defaultClient := newAWSHTTPClient
+			newAWSHTTPClient = func() *http.Client { return &http.Client{Transport: requests} }
+			t.Cleanup(func() { newAWSHTTPClient = defaultClient })
+			h := newCommandTestHarness(t)
+			t.Setenv("INFRAFACTORY_RUNSTORE_ROOT", h.RunstoreRoot())
+			t.Setenv("INFRAFACTORY_LIVESTORE_ROOT", h.LivestoreRoot())
+			setAWSLifecycleScenario(t, h.ScenarioPath)
+			renameScenario(t, h.ScenarioPath, awsHoldScenario)
+			cfgFile, err := os.OpenFile(h.ConfigPath, os.O_APPEND|os.O_WRONLY, 0)
+			require.NoError(t, err)
+			_, err = fmt.Fprintf(cfgFile, "paths:\n  output: %s\naws:\n  region: eu-west-2\n  account_id: %q\n  principal_arn: %s\n",
+				h.OutputDir(), preflightAWSAccount, preflightAWSPrincipal)
+			require.NoError(t, err)
+			require.NoError(t, cfgFile.Close())
+			outDir := filepath.Join(h.OutputDir(), awsHoldScenario)
+			writeHeldOutput(t, outDir)
+			before := hashTree(t, h.OutputDir())
+			llm := filepath.Join(t.TempDir(), "claude")
+			require.NoError(t, os.WriteFile(llm, []byte("#!/bin/sh\ntouch \"$0.called\"\nexit 1\n"), 0o700))
+
+			serverCfg := config.Default()
+			serverCfg.Agent.Type = generator.AgentTypeClaudeCode
+			serverCfg.Paths.Scenarios = filepath.Join(h.WorkspaceDir, "scenarios")
+			serverCfg.Validation.Layers.SandboxDeploy.Enabled = true
+			starter := &uiRunStarter{configPath: h.ConfigPath, cfg: serverCfg, hub: api.NewHub(), resolvedClaude: llm}
+			err = starter.executeRun(context.Background(),
+				api.StartRunRequest{ScenarioName: awsHoldScenario, ScenarioPath: "training/example"}, "20261012T000000Z")
+
+			assert.Empty(t, requests.hosts, "no STS, SSM or EC2 request")
+			assert.NoFileExists(t, llm+".called", "no LLM call")
+			assert.Equal(t, before, hashTree(t, h.OutputDir()), "the output dir is as it was")
+			assertRefusedWhileHeld(t, err)
+		})
+	}
+}
+
+func TestAnotherScenariosCopyRefusesNothing(t *testing.T) {
+	for _, name := range []string{"generate", "run", "test"} {
+		t.Run(name, func(t *testing.T) {
+			chdirBesideSchema(t)
+			plantCopy(t, "another-scenario", []byte("held state"))
+			lc := newAWSLifecycle(t)
+
+			run := awsCommand{name: name, layer3: true, scenario: awsHoldScenario}.run(t, lc)
+
+			require.NoError(t, run.err, run.output)
+			assert.Contains(t, lc.log(), "sts:GetCallerIdentity")
+		})
+	}
+}
+
+func TestDeletingTheCopyLiftsTheRefusal(t *testing.T) {
+	chdirBesideSchema(t)
+	path := plantCopy(t, awsHoldScenario, []byte("held state"))
+	test := awsCommand{name: "test", layer3: true, scenario: awsHoldScenario}
+	assertRefusedWhileHeld(t, test.run(t, newAWSLifecycle(t)).err)
+
+	require.NoError(t, os.Remove(path))
+	lc := newAWSLifecycle(t)
+	run := test.run(t, lc)
+
+	require.NoError(t, run.err, run.output)
+	assert.Contains(t, lc.log(), "sts:GetCallerIdentity")
 }
