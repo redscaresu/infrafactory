@@ -932,7 +932,7 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 			failures = append(failures, FailureSummary{
 				Layer:   "sandbox_deploy",
 				Stage:   "preflight",
-				Check:   "credentials",
+				Check:   checkCredentials,
 				Command: "sandbox deploy preflight",
 				Detail:  sandboxEnvErr.Error(),
 			})
@@ -1058,7 +1058,7 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 				failures = append(failures, FailureSummary{
 					Layer:   "sandbox_deploy",
 					Stage:   "destroy_preflight",
-					Check:   "credentials",
+					Check:   checkCredentials,
 					Command: "sandbox destroy preflight",
 					Detail:  sandboxEnvErr.Error(),
 				})
@@ -1153,7 +1153,7 @@ func executeTestWithScenario(ctx context.Context, runtime *CommandRuntime, sc sc
 					Layer: "sandbox_deploy", Stage: "run_project_delete", Status: StageStatusFail,
 				})
 				failures = append(failures, FailureSummary{
-					Layer: "sandbox_deploy", Stage: "run_project_delete", Check: "credentials",
+					Layer: "sandbox_deploy", Stage: "run_project_delete", Check: checkCredentials,
 					Command: "delete run project",
 					Detail: fmt.Sprintf("project %s holds nothing but could not be deleted: %v",
 						runProjectID, cleanupEnvErr),

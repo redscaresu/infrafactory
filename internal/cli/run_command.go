@@ -1878,6 +1878,10 @@ const (
 	routeSkip                        // neither, with the reason logged
 )
 
+// checkCredentials is the check a Layer 3 failure names when the
+// credentials it was given could not be used.
+const checkCredentials = "credentials"
+
 // awsScopeStagePrefix names the aws scope's own stages (claim, sweep,
 // release, reap), which a run carries up under their own names.
 const awsScopeStagePrefix = "aws_scope_"
@@ -1909,7 +1913,7 @@ func routeFailure(f feedback.Failure) (failureRoute, string) {
 		return routeLearn, ""
 	}
 	switch {
-	case f.Check == "credentials":
+	case f.Check == checkCredentials:
 		return routeSkip, fmt.Sprintf("layer %s: a credentials check failed", layer)
 	case strings.HasPrefix(f.Stage, awsScopeStagePrefix):
 		return routeSkip, fmt.Sprintf("layer %s: stage %s is the aws scope's setup", layer, f.Stage)

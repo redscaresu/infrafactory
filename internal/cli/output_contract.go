@@ -283,7 +283,7 @@ func explainabilityFromFailure(failure FailureSummary, cloud layer3Cloud) (Expla
 	case failure.Policy != "":
 		explanation.Summary = "policy check failed for mapped constraint"
 		explanation.Action = "verify constraint policy mapping and inspect plan/state inputs for the named policy"
-	case failure.Layer == "sandbox_deploy" && cloud == layer3AWS && failure.Check != "credentials":
+	case failure.Layer == "sandbox_deploy" && cloud == layer3AWS && failure.Check != checkCredentials:
 		explanation.Summary, explanation.Action = awsLayer3Explanation(failure.Check)
 	case failure.Check == "connectivity" || failure.Check == "http_probe":
 		switch {
@@ -297,13 +297,13 @@ func explainabilityFromFailure(failure FailureSummary, cloud layer3Cloud) (Expla
 	case failure.Check == "dns_resolution":
 		explanation.Summary = "real Layer 3 DNS probe failed"
 		explanation.Action = "inspect DNS records, propagation timing, and the generated domain/output wiring"
-	case failure.Check == "credentials" && cloud == layer3AWS:
+	case failure.Check == checkCredentials && cloud == layer3AWS:
 		// On aws this check also fails when the run could not confirm it
 		// holds the scope's claim; docs/operations.md § Running aws-web-live.
 		explanation.Summary = "Layer 3 real AWS deploy is enabled but its credentials or its claim on the aws scope could not be confirmed"
 		explanation.Action = "if an aws_scope_claim failure is listed, read it first: a preflight failure next to it is that refusal, not a key problem; " +
 			"otherwise check the aws config block (region, account_id, principal_arn) and the key file ~/" + awsCredentialFile + " (mode 0600)"
-	case failure.Check == "credentials":
+	case failure.Check == checkCredentials:
 		explanation.Summary = "Layer 3 real Scaleway deploy is enabled but credentials are unavailable"
 		explanation.Action = "set SCW_ACCESS_KEY and SCW_SECRET_KEY before enabling sandbox_deploy"
 	case failure.Check == "real_probe":
