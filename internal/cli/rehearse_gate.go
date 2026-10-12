@@ -28,9 +28,10 @@ import (
 var errRehearsalRefuses = errors.New("the rehearsal gate refuses this configuration")
 
 // rehearsalGateInput is what one gate run reads: the root module dir,
-// module dirs to gate beside those the root's module blocks reach, the
-// copy they live in (problems name files relative to it), the --region,
-// and the --var-file copy ("" when none was given).
+// module dirs to gate beside those the root's module blocks reach (gate 2
+// adds the manifest's to them), the copy they live in (problems name
+// files relative to it), the --region, and the --var-file copy ("" when
+// none was given).
 type rehearsalGateInput struct {
 	root     string
 	modules  []rehearsalModuleDir
@@ -377,6 +378,8 @@ func (m rehearsalModule) blockProblems(file string, block *hclsyntax.Block) []st
 		problems = append(problems, m.typeProblems(file, at, block)...)
 	case "import":
 		problems = append(problems, m.providerRefProblems(file, addr, block)...)
+	case "module":
+		problems = append(problems, m.moduleProvidersProblems(file, addr, block)...)
 	}
 	return append(problems, rehearsalBodyProblems(file, addr, block, block.Type == "variable")...)
 }
@@ -451,8 +454,13 @@ func (m rehearsalModule) providerRefProblems(file, addr string, block *hclsyntax
 	if !ok {
 		return nil
 	}
-	at := rehearsalAt(file, attr.SrcRange, addr+".provider")
-	traversal, diags := hcl.AbsTraversalForExpr(attr.Expr)
+	return m.providerRefProblem(rehearsalAt(file, attr.SrcRange, addr+".provider"), attr.Expr)
+}
+
+// providerRefProblem refuses one provider reference, <name>[.<alias>],
+// that names a provider outside the admitted ones.
+func (m rehearsalModule) providerRefProblem(at string, expr hcl.Expression) []string {
+	traversal, diags := hcl.AbsTraversalForExpr(expr)
 	if diags.HasErrors() {
 		return []string{at + ": not a provider reference the gate can read"}
 	}

@@ -110,7 +110,34 @@ func rehearsalModuleSource(file, dir, boundary string, block *hclsyntax.Block) (
 	if info, err := os.Stat(target); err != nil || !info.IsDir() {
 		return "", append(problems, fmt.Sprintf("%s: source %q is refused: it is not a directory", at, source))
 	}
+	resolvedDir, dirErr := rehearsalResolve(dir)
+	resolvedTarget, targetErr := rehearsalResolve(target)
+	if dirErr != nil || targetErr != nil || rehearsalUnder(resolvedDir, resolvedTarget) {
+		return "", append(problems, fmt.Sprintf("%s: source %q is refused: it resolves to the calling module's own dir or one holding it", at, source))
+	}
 	return target, problems
+}
+
+// moduleProvidersProblems holds both sides of every pair in a module
+// block's providers map to the provider reference rule: a name with no
+// required_providers entry implies hashicorp/<name>, which init would
+// install.
+func (m rehearsalModule) moduleProvidersProblems(file, addr string, block *hclsyntax.Block) []string {
+	attr, ok := block.Body.Attributes["providers"]
+	if !ok {
+		return nil
+	}
+	at := rehearsalAt(file, attr.SrcRange, addr+".providers")
+	providers, ok := attr.Expr.(*hclsyntax.ObjectConsExpr)
+	if !ok {
+		return []string{at + ": not a providers map the gate can read"}
+	}
+	var problems []string
+	for _, item := range providers.Items {
+		problems = append(problems, m.providerRefProblem(at, item.KeyExpr)...)
+		problems = append(problems, m.providerRefProblem(at, item.ValueExpr)...)
+	}
+	return problems
 }
 
 func rehearsalLocalSource(source string) bool {
@@ -207,11 +234,12 @@ type rehearsalManifestEntry struct{ Key, Source, Dir string }
 
 // rehearsalModulesGate is gate 2: after the first init, it holds every
 // entry of the manifest under data to the rule, then runs the full gate
-// over the root, every admitted module dir and every dir their module
-// blocks reach, naming each module's key, and the var file.
+// over the root, the caller's module dirs, every admitted module dir and
+// every dir their module blocks reach, naming each module's key, and the
+// var file.
 func rehearsalModulesGate(in rehearsalGateInput, data string) error {
 	modules, problems := in.manifestModules(data)
-	in.modules = modules
+	in.modules = slices.Concat(in.modules, modules)
 	return rehearsalRefusal(append(problems, in.problems()...))
 }
 

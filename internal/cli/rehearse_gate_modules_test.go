@@ -95,6 +95,20 @@ func TestRehearsalGateModuleSources(t *testing.T) {
 			work + "m/main.tf":      "module \"s\" {\n  source = \"../shared\"\n}\n",
 			work + "shared/main.tf": "provider \"aws\" {}\n",
 		}, want: []string{`module "m.s": shared/main.tf:1: provider.aws: a provider "aws" block in a child module is refused`}},
+		{name: "a providers map naming an implied provider", files: moduleBlock("  source    = \"./m\"\n  providers = { external = external }\n"),
+			want: []string{`main.tf:3: module.m.providers: provider source "hashicorp/external" is not admitted`}},
+		{name: "a providers map's key", files: moduleBlock("  source    = \"./m\"\n  providers = { external = aws }\n"),
+			want: []string{`main.tf:3: module.m.providers: provider source "hashicorp/external" is not admitted`}},
+		{name: "a providers map's value", files: moduleBlock("  source    = \"./m\"\n  providers = { aws = external.x }\n"),
+			want: []string{`main.tf:3: module.m.providers: provider source "hashicorp/external" is not admitted`}},
+		{name: "a providers map the gate cannot read", files: moduleBlock("  source    = \"./m\"\n  providers = var.p\n"),
+			want: []string{"main.tf:3: module.m.providers: not a providers map the gate can read"}},
+		{name: "a module calling its own dir", files: map[string]string{work + "main.tf": "module \"self\" {\n  source = \"./\"\n}\n"},
+			want: []string{`main.tf:2: module.self.source: source "./" is refused: it resolves to the calling module's own dir or one holding it`}},
+		{name: "a module calling the dir holding it", files: map[string]string{
+			work + "main.tf":   "module \"m\" {\n  source = \"./m\"\n}\n",
+			work + "m/main.tf": "module \"up\" {\n  source = \"../\"\n}\n",
+		}, want: []string{`module "m": m/main.tf:2: module.up.source: source "../" is refused: it resolves to the calling module's own dir or one holding it`}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, in := moduleCopy(t, tc.files, tc.symlinks)
@@ -109,12 +123,13 @@ func TestRehearsalGateModuleSources(t *testing.T) {
 
 const provisioner = "resource \"terraform_data\" \"t\" {\n  provisioner \"local-exec\" {\n    command = \"id\"\n  }\n}\n"
 
-// TestRehearsalGateAdmitsLocalModules: ./m inside the copy, and m's
-// ../shared, pass gate 1, and rehearsalLocalModuleSources returns each
-// dir the root reaches, under the copy, once. A module cycle ends.
+// TestRehearsalGateAdmitsLocalModules: ./m inside the copy, passed an
+// aliased aws provider, and m's ../shared pass gate 1, and
+// rehearsalLocalModuleSources returns each dir the root reaches, under
+// the copy, once. A module cycle ends.
 func TestRehearsalGateAdmitsLocalModules(t *testing.T) {
 	_, in := moduleCopy(t, map[string]string{
-		work + "main.tf":        "module \"m\" {\n  source = \"./m\"\n  name   = \"x\"\n}\nmodule \"again\" {\n  source = \"./m\"\n}\n",
+		work + "main.tf":        "provider \"aws\" {\n  alias = \"west\"\n}\nmodule \"m\" {\n  source    = \"./m\"\n  name      = \"x\"\n  providers = { aws = aws.west }\n}\nmodule \"again\" {\n  source = \"./m\"\n}\n",
 		work + "m/main.tf":      "module \"s\" {\n  source = \"../shared\"\n}\n",
 		work + "shared/main.tf": "module \"back\" {\n  source = \"../m\"\n}\n",
 	}, nil)
@@ -136,6 +151,17 @@ func TestRehearsalLocalModuleSourcesRefuses(t *testing.T) {
 	assert.Nil(t, sources)
 	assert.Contains(t, err.Error(), `main.tf:5: module.g.source: source "git::https://example.com/m.git" is refused`)
 	assert.Contains(t, err.Error(), "broken.tf: does not parse")
+
+	t.Run("never the root itself", func(t *testing.T) {
+		_, in := moduleCopy(t, map[string]string{
+			work + "main.tf":   "module \"m\" {\n  source = \"./m\"\n}\n",
+			work + "m/main.tf": "module \"up\" {\n  source = \"../\"\n}\n",
+		}, nil)
+		sources, err := rehearsalLocalModuleSources(in.root, in.boundary)
+		require.ErrorIs(t, err, errRehearsalRefuses)
+		assert.Nil(t, sources)
+		assert.Contains(t, err.Error(), `source "../" is refused: it resolves to the calling module's own dir or one holding it`)
+	})
 }
 
 // localManifest is the manifest TestAssumption_ModulesManifestShape pinned
@@ -221,6 +247,17 @@ func TestRehearsalModulesGate(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestRehearsalModulesGateKeepsTheCallersModules: gate 2 adds the
+// manifest's dirs to the caller's, so a dir the caller listed is still
+// gated.
+func TestRehearsalModulesGateKeepsTheCallersModules(t *testing.T) {
+	tmp, in := moduleCopy(t, localModules(map[string]string{work + "extra/main.tf": provisioner}), nil)
+	in.modules = []rehearsalModuleDir{{dir: filepath.Join(in.root, "extra")}}
+	err := rehearsalModulesGate(in, writeManifest(t, tmp, localManifest))
+	require.ErrorIs(t, err, errRehearsalRefuses)
+	assert.Contains(t, err.Error(), `extra/main.tf:2: terraform_data.t.provisioner.local-exec: "provisioner" blocks are refused`)
 }
 
 func TestRehearsalModulesGateAdmits(t *testing.T) {
