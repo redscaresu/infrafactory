@@ -447,7 +447,7 @@ PLAYWRIGHT_PORT ?= 4173
 
 ui-test-e2e: ui-build
 	@if lsof -tnP -iTCP:$(PLAYWRIGHT_PORT) -sTCP:LISTEN >/dev/null 2>&1; then 		echo "ERROR: something is already listening on :$(PLAYWRIGHT_PORT)."; 		echo "  Playwright will adopt it, and a credential-bearing UI fails the"; 		echo "  Layer 3 scenario test. Stop it, or re-run with"; 		echo "  PLAYWRIGHT_PORT=<free port>."; 		exit 1; 	fi
-	cd ui && PLAYWRIGHT_PORT=$(PLAYWRIGHT_PORT) npx playwright test
+	PLAYWRIGHT_PORT=$(PLAYWRIGHT_PORT) bash scripts/ui_e2e.sh
 
 # demo-ui records a fresh docs/demo/ui-walkthrough.webm by driving the
 # embedded UI through the full-stack-paris scenario via Playwright. No

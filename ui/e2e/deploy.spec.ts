@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 
 // The deploy button (S162c). Every test is about the confirmation
 // telling the truth before somebody creates infrastructure that
@@ -295,7 +295,7 @@ test.describe('Deploy from the scenario page', () => {
     const held = new Promise<void>((resolve) => (release = resolve));
     await page.route('**/api/scenarios/training/lb-serving-paris**', async (route) => {
       await held;
-      return route.continue();
+      return route.fallback();
     });
 
     await page.goto('/scenarios/training/web-app-paris');
@@ -325,7 +325,7 @@ test.describe('Deploy from the scenario page', () => {
     const held = new Promise<void>((resolve) => (release = resolve));
     await page.route('**/api/scenarios/training/web-app-paris**', async (route) => {
       await held;
-      return route.continue();
+      return route.fallback();
     });
 
     // Settle on one scenario with a full load, then move CLIENT-SIDE.

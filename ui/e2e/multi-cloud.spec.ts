@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 
 // Covers S36-T12 (GCP scenarios visible in UI list) and S42-T5 (multi-cloud
 // UI: sidebar group + cloud badge + dynamic Layer 3 label + mock-provider

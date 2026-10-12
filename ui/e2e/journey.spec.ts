@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 
 // S164: the journey, end to end — deploy from the scenario page, find it
 // on the estate page, tear it down there, and see the scenario page stop

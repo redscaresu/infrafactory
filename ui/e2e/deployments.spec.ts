@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 
 // The estate page (S161). Every test here is about one property: SILENCE
 // MUST NOT LOOK LIKE HEALTH. A blank cell is the most natural way in the
