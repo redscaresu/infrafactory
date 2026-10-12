@@ -205,12 +205,10 @@ func countOrphanItems(root, collection string, items []any) int {
 			name, _ := e["name"].(string)
 			return name == autoCreatedVPCName
 		})
-	case root == "kms" && collection == "keys":
+	default:
 		return countExcept(items, func(e map[string]any) bool {
 			return generator.OrphanEndState(root, collection, e)
 		})
-	default:
-		return len(items)
 	}
 }
 

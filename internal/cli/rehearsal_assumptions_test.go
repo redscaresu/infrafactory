@@ -685,9 +685,10 @@ func lockVersions(t *testing.T, path string) map[string]string {
 	return versions
 }
 
-// missingVPC is an id no fakeaws VPC has, looked up by id (VpcId.1).
-// fakeaws evaluates DescribeVpcs filters, so a filter that matches
-// nothing answers empty, not every VPC.
+// missingVPC is an id no fakeaws VPC has. Looked up by VpcId.1, fakeaws
+// answers 400 InvalidVpcID.NotFound, which is the unreadable data source
+// this test needs. A filter that matches nothing answers an empty set
+// instead (ec2DescribeVpcs), not an error.
 const missingVPC = "vpc-0000000000000dead"
 
 // TestAssumption_RefreshOnlyUnreadableDataSourceExitsOne: against fakeaws,

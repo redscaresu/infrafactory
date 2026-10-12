@@ -247,7 +247,7 @@ nothing. That code and its message are unverified (D9).
 These answers come from the EC2 API reference's error list, not from AWS. The codes below are each
 marked `UNVERIFIED(aws-code)` at their fakeaws site (`handlers/ec2.go`). The owner is the next
 real-AWS recording (`prod-read-seam-real-recording` or a Layer 3 run), which replaces each with what
-AWS answered. The AZ set is not a code; it is described at `ec2FixedZoneLetters` (`handlers/ec2.go`):
+AWS answered:
 
 - `VPCIdNotSpecified`: a `GroupName.N` lookup on a database that is not loaded.
 - `InvalidSubnet.Conflict`, and its message: a CIDR overlapping a sibling subnet (D8).
@@ -260,5 +260,7 @@ AWS answered. The AZ set is not a code; it is described at `ec2FixedZoneLetters`
   `DescribeInstanceAttribute` with no `Attribute`.
 - `IncorrectInstanceState`: a `ModifyInstanceAttribute` on a terminated instance.
 - `OperationNotPermitted`: a `TerminateInstances` on an instance with termination protection set.
-- The fixed a-c availability zone set that `DescribeAvailabilityZones` answers on a database that
-  is not loaded.
+
+The fixed a-c availability zone set that `DescribeAvailabilityZones` answers on a database that is
+not loaded is not a code. It is described at `ec2FixedZoneLetters` (`handlers/ec2.go`), with the
+same owner.
