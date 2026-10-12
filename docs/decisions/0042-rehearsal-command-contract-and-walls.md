@@ -34,13 +34,15 @@ family adds no error code.
 
 ### The layout
 
-A rehearsal lives in `.infrafactory/rehearsals/<id>/` at the repository root (the nearest ancestor
-of `<dir>` holding `.git`), never under `.infrafactory/runs/` or `.infrafactory/live/`, which the
-UI serves. `rehearsals/` holds a `.gitignore` of `*`. Each `<id>/` has `work/` (the copied code),
+A rehearsal lives in `.infrafactory/rehearsals/<id>/` at the root of the repository that contains
+the current directory (its nearest ancestor holding `.git`), never under `.infrafactory/runs/` or
+`.infrafactory/live/`, which the UI serves. `prepare` refuses a `<dir>` that is not inside that
+same repository, and every later step, which names only `<id>`, finds it under that same root. `rehearsals/` holds a `.gitignore` of `*`. Each `<id>/` has `work/` (the copied code),
 `data/` (`TF_DATA_DIR`), `home/` (an empty `HOME`), `state/` (the state file, outside the copy) and
 `vars.tfvars` (the `--var-file`, copied outside `work/` so tofu never auto-loads it). Directories
-are 0700 and files 0600. Tofu writes files with its own modes, so after each tofu run the modes are tightened again:
-directories 0700, executables 0700 (provider binaries must stay runnable), other files 0600.
+are 0700 and files 0600. Tofu writes files with its own modes, so after each tofu run the modes
+are tightened again: directories 0700, executables 0700 (provider binaries must stay runnable),
+other files 0600.
 
 ### The walls
 
@@ -140,6 +142,12 @@ tofu resolves it from its working directory rather than the module directory (**
 refusing it holds either way). Absolute, escaping, variable and otherwise computed paths are
 refused, and `abspath` and `pathexpand` are refused by name.
 
+`fileset`'s second argument, the glob, is checked too, since it is joined onto the path before
+globbing (**unverified**; the check holds either way). It must be a literal relative pattern with
+no `..` element; a non-literal, absolute or `..`-holding pattern is refused. Any `..` is refused,
+not only one that leaves the copy lexically, because `**` can match zero directories, so a lexical
+check of a `..` after a glob undercounts how far it climbs.
+
 The template a `templatefile` names is gated too, because the gate admits other files unparsed
 and a template can call any function. It is parsed with `hclsyntax.ParseTemplate`, and every
 function call and path in it is held to the function and path rules above. A missing or
@@ -164,7 +172,8 @@ block gets the same rule.
 
 ### The lock
 
-A missing, unparseable or aws-less `.terraform.lock.hcl` is refused. The provider version is always
+A missing, unparseable or aws-less `.terraform.lock.hcl` is refused, and so is a lock naming a
+provider outside the eight admitted, by name. The provider version is always
 the lock's. `tofu providers lock -platform=<this machine>` always runs, and the locked aws version
 must be unchanged after it (`TestAssumption_ProvidersLockKeepsLockedVersion`; prepare also checks it
 and refuses on a change). A lock whose aws entry is registry.terraform.io initialises
