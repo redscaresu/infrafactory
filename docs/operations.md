@@ -588,7 +588,7 @@ Each logged request carries one class:
 | `answered-from-rows` | Answered from stored rows, including an empty answer read from rows. |
 | `not-modelled-404` | The default arm for an action fakeaws does not model. Its 404 looks like a missing row's, so only this mark tells them apart. |
 | `unimplemented-501` | The router's 501 for an operation fakeaws does not implement. |
-| `filter-refused` | A site refuses what real AWS would accept but fakeaws does not model: a filter, a parameter, a tag resource type, or a required-parameter check stricter than AWS's. The answer is the site's refusal (EC2 501, RDS and Route53 400, SSM 501). A refusal AWS makes too, or a filter or parameter fakeaws ignores, stays `answered-from-rows`. |
+| `filter-refused` | A site refuses what real AWS would accept but fakeaws does not model: a filter, a parameter, a tag resource type, or a required-parameter check stricter than AWS's. The answer is the site's refusal (EC2 501, KMS 501 for DescribeKey by alias, RDS and Route53 400, SSM 501). A refusal AWS makes too, or a filter or parameter fakeaws ignores, stays `answered-from-rows`. |
 | `empty-collection` | A Describe of a resource type fakeaws never creates (EC2). Other always-empty answers stay `answered-from-rows`. |
 
 A file-backed database (`-db <path>`), its `-wal` and `-shm`, a snapshot and a restored copy are created

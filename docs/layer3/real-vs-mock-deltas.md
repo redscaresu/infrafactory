@@ -254,5 +254,11 @@ AWS answered. The AZ set is not a code; it is described at `ec2FixedZoneLetters`
 - `InvalidAddress.NotFound`: a `PublicIp.N` not in the region.
 - `InvalidKeyPair.NotFound`: a `KeyPairId.N` or `KeyName.N` that names no key pair.
 - `InvalidParameterValue`: a `ZoneName.N` or `ZoneId.N` that is none of the region's zones.
+- `InvalidParameterValue`: an enumerated param given a value it does not list, such as
+  `AllAvailabilityZones` or an instance shutdown behaviour (`refuseInvalidValues`).
+- `MissingParameter`: a `ModifyInstanceAttribute` with no attribute to modify, and a
+  `DescribeInstanceAttribute` with no `Attribute`.
+- `IncorrectInstanceState`: a `ModifyInstanceAttribute` on a terminated instance.
+- `OperationNotPermitted`: a `TerminateInstances` on an instance with termination protection set.
 - The fixed a-c availability zone set that `DescribeAvailabilityZones` answers on a database that
   is not loaded.

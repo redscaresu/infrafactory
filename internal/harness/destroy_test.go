@@ -209,15 +209,16 @@ func TestCountOrphansExemptsAPendingDeletionKMSKey(t *testing.T) {
 	t.Parallel()
 
 	cases := map[string]struct {
-		state string
-		want  int
+		doc  string
+		want int
 	}{
 		"pending deletion is a clean destroy": {`{"kms": {"keys": [{"key_id": "k-1", "state": "PendingDeletion"}]}}`, 0},
 		"enabled is a leak":                   {`{"kms": {"keys": [{"key_id": "k-1", "state": "Enabled"}]}}`, 1},
 		"no state is a leak":                  {`{"kms": {"keys": [{"key_id": "k-1"}]}}`, 1},
+		"the exemption is for kms keys only":  {`{"secretsmanager": {"secrets": [{"arn": "s-1", "state": "PendingDeletion"}]}}`, 1},
 	}
 	for name, c := range cases {
-		count, err := countOrphans([]byte(c.state))
+		count, err := countOrphans([]byte(c.doc))
 		require.NoError(t, err, name)
 		assert.Equal(t, c.want, count, name)
 	}
