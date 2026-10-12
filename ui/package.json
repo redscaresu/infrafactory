@@ -7,7 +7,8 @@
     "dev": "vite dev",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node --test tests/*.test.js",
+    "test": "node --test tests/*.test.js && npm run check:e2e",
+    "check:e2e": "tsc --ignoreConfig --noEmit --strict --module esnext --moduleResolution bundler --target es2022 --skipLibCheck e2e/fixtures.ts",
     "test:e2e": "npx playwright test"
   },
   "devDependencies": {

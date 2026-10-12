@@ -14,7 +14,7 @@ const VOLATILE_SELECTORS = [
   // a re-baseline for unrelated scenario additions.
   'aside section[data-testid^="sidebar-cloud-"] ul',
   // The scenario page's run-mode card is not masked: run-mode is answered
-  // by the fixed payload in fixtures.ts, so the baseline shows the card
+  // by fixtures.ts as a clean run of each scenario, so the baseline shows the card
   // loaded whatever mock or run artifacts the capturing machine has.
 ];
 
@@ -136,7 +136,7 @@ test.describe('Visual regression baselines', () => {
   test('scenario page (gcp)', async ({ page }) => {
     await page.goto('/scenarios/training/gcp-gke-cluster');
     await expect(page.locator('main h1')).toContainText('gcp-gke-cluster');
-    await expect(page.getByTestId('scenario-tfstate-status')).toHaveText('terraform.tfstate: no');
+    await expect(page.getByTestId('scenario-mock-status')).toHaveText('fakegcp state: no');
     await expect(page).toHaveScreenshot('scenario-gcp.png', {
       mask: VOLATILE_SELECTORS.map((sel) => page.locator(sel)).concat([page.locator('main textarea')]),
       fullPage: true,
