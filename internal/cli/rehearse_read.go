@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -239,8 +238,8 @@ func rehearsalResolveExisting(path string) (string, error) {
 	return filepath.Join(resolved, rest), nil
 }
 
-// readRehearseReadSet is the file's read-set entries: one JSON array,
-// decoded strictly. The reader validates each entry.
+// readRehearseReadSet is the file's read-set entries
+// (harness.DecodeAWSReadSet). The reader validates each entry.
 func readRehearseReadSet(path string) ([]harness.AWSReadEntry, error) {
 	// Only a regular file: opening a FIFO would wait for a writer.
 	if info, err := os.Stat(path); err != nil {
@@ -252,14 +251,9 @@ func readRehearseReadSet(path string) ([]harness.AWSReadEntry, error) {
 	if err != nil {
 		return nil, fmt.Errorf("--read-set %s: %w", path, err)
 	}
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.DisallowUnknownFields()
-	var entries []harness.AWSReadEntry
-	if err := dec.Decode(&entries); err != nil {
-		return nil, fmt.Errorf("--read-set %s is not a JSON array of read-set entries: %w", path, err)
-	}
-	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
-		return nil, fmt.Errorf("--read-set %s carries data after the array", path)
+	entries, err := harness.DecodeAWSReadSet(data)
+	if err != nil {
+		return nil, fmt.Errorf("--read-set %s: %w", path, err)
 	}
 	return entries, nil
 }
