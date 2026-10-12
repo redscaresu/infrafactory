@@ -20,7 +20,7 @@ The existing Layer 3 user cannot serve, because it holds reap's write actions (i
 
 **You:** give the lead the path; that is how the lead learns this step is done.
 
-**Lead:** checks only the file's mode and its key names (stat, and each line cut before `=`), never a value.
+**Lead:** checks only the file's mode and its key names with the runbook's check (docs/operations.md § The reader policy), which prints a recognised key name or, for any other line, only its number; never a value.
 
 **Done when:**
 - The user confirms the reader user exists with only reader-policy.json, at the merged SHA, attached, and gives the file's path.

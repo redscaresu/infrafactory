@@ -458,24 +458,28 @@ Once, create the user and attach the policy, and nothing else:
 
 ```bash
 (set -eu; : "${REGION:?}" "${ACCOUNT_ID:?}" "${PROFILE:?}"
-  sed -e "s/REGION/$REGION/g" -e "s/ACCOUNT_ID/$ACCOUNT_ID/g" docs/layer3/aws/reader-policy.json > "$TMPDIR/reader.json"
+  T=$(mktemp); trap 'rm -f "$T"' EXIT
+  sed -e "s/REGION/$REGION/g" -e "s/ACCOUNT_ID/$ACCOUNT_ID/g" docs/layer3/aws/reader-policy.json > "$T"
   aws iam create-user --user-name infrafactory-reader --profile "$PROFILE"
-  aws iam create-policy --policy-name infrafactory-reader-read --policy-document "file://$TMPDIR/reader.json" \
+  aws iam create-policy --policy-name infrafactory-reader-read --policy-document "file://$T" \
     --profile "$PROFILE"
   aws iam attach-user-policy --user-name infrafactory-reader \
     --policy-arn "arn:aws:iam::${ACCOUNT_ID}:policy/infrafactory-reader-read" --profile "$PROFILE")
 ```
 
+A rerun of this block fails first at `create-user`, with `EntityAlreadyExists`. If a run stopped
+halfway, run the block again without the commands that succeeded.
+
 After `reader-policy.json` changes (a story that adds a reader-table row), the attached policy
-still holds the old actions, and the block above fails at `create-policy` with
-`EntityAlreadyExists`. Write the policy again and make it the default version. IAM keeps at most
+still holds the old actions. Write the policy again and make it the default version. IAM keeps at most
 five versions: at five, first delete the oldest non-default one with `aws iam delete-policy-version`.
 
 ```bash
 (set -eu; : "${REGION:?}" "${ACCOUNT_ID:?}" "${PROFILE:?}"
-  sed -e "s/REGION/$REGION/g" -e "s/ACCOUNT_ID/$ACCOUNT_ID/g" docs/layer3/aws/reader-policy.json > "$TMPDIR/reader.json"
+  T=$(mktemp); trap 'rm -f "$T"' EXIT
+  sed -e "s/REGION/$REGION/g" -e "s/ACCOUNT_ID/$ACCOUNT_ID/g" docs/layer3/aws/reader-policy.json > "$T"
   aws iam create-policy-version --policy-arn "arn:aws:iam::${ACCOUNT_ID}:policy/infrafactory-reader-read" \
-    --policy-document "file://$TMPDIR/reader.json" --set-as-default --profile "$PROFILE")
+    --policy-document "file://$T" --set-as-default --profile "$PROFILE")
 ```
 
 Once, create the user's access key and write it to the key file without printing it. The block
@@ -491,9 +495,9 @@ mkdir -p ~/.config/infrafactory && (set -eu; : "${PROFILE:?}"; umask 077; F=~/.c
 ```
 
 The lead deletes this file after each read, so before handing over its path the user copies the
-key into their secret store: import the file into their password manager, or
-`pbcopy < ~/.config/infrafactory/aws-reader.env` and paste it there. The key is never echoed in a
-terminal or transcript anyone else can see.
+key into their secret store by importing the file into their password manager directly, never
+through the clipboard (it can sync to other devices and is kept by clipboard-history tools). The
+key is never echoed in a terminal or transcript anyone else can see.
 
 The IAM user and its key stay between rehearsals; only the local key file comes and goes
 (ADR-0023, amendment of 2026-10-12). For each later read, the user writes the key file again from
@@ -508,8 +512,12 @@ For each read, the user gives the lead the key file's path, and the lead checks 
 ```bash
 KEY_FILE=<the path the user gave>
 stat -f %Lp "$KEY_FILE"   # 600 (on Linux: stat -c %a)
-cut -d= -f1 "$KEY_FILE"   # AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
+awk -F= '{ if ($1 ~ /^AWS_(ACCESS_KEY_ID|SECRET_ACCESS_KEY|SESSION_TOKEN)$/) print $1; else print "line " NR ": not a key name" }' "$KEY_FILE"
 ```
+
+The second command prints only a key name it recognises, and for any other line only its number,
+so a malformed line never puts the secret in the lead's transcript. It must print exactly
+`AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`.
 
 IAM is eventually consistent, and no code retries: the reader's clients do not retry, and the
 identity check stops at its first error. So on the first read after the key is created, if the
