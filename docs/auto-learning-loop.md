@@ -20,7 +20,7 @@ Failures don't all deserve the same response. The pipeline routes each one based
 | **Fix-pitfall extractor** (`ExtractFixPitfall`) | Run reaches `target_reached` AFTER ≥1 failing iteration AND the classifier does not claim the cleared failure AND the fix was an *addition* to the HCL | A pitfall body that shows the HCL snippet the LLM added to clear the failure. | `fix` |
 | **Avoid-pitfall extractor** (`ExtractAvoidPitfall`) | Same trigger, but the fix was a *deletion* (a mock gap cleared by deleting what the mock refused teaches nothing, so the classifier gates both) | A pitfall saying "do NOT use attribute X on resource Y — it caused failure Z that was resolved by removing it." | `avoid` |
 | **Diff-pattern templates** | Failure detail matches a pattern from a small handcoded set (subnetwork attachment, 501 Not Implemented, AWS destroy blockers, etc.) | A prescriptive rule from the template's body. Fires when the fix/avoid extractors wouldn't (run terminated stuck, not converged). | `fix` |
-| **Descriptive fallback** (`ExtractDescriptivePitfall`) | Run terminates `stuck` or `repair_budget_exhausted` AND the classifier doesn't claim it AND no template matches | Captures the failure detail verbatim as a "this happened, don't trip on it" entry. Symptom-only — useful but less actionable than the diff-derived forms. | `descriptive` |
+| **Descriptive fallback** (`ExtractDescriptivePitfall`) | Run terminates `stuck` or `repair_budget_exhausted`, or self-corrects (over the last failing iteration's failures), AND the classifier doesn't claim it AND no template matches | Captures the failure detail verbatim as a "this happened, don't trip on it" entry. Symptom-only — useful but less actionable than the diff-derived forms. | `descriptive` |
 
 Code: `internal/generator/pitfalls_learn.go` (classifier, descriptive, IsMockServerBug), `internal/generator/prescriptive_extractor.go` (fix, avoid, diff-pattern templates).
 
@@ -32,7 +32,7 @@ Code: `internal/generator/pitfalls_learn.go` (classifier, descriptive, IsMockSer
 
 `avoid` sees a *real successful deletion*: what attribute or block disappeared. The pitfall body says "don't use this." Same evidentiary basis as `fix` but the inverse shape.
 
-The fix + avoid extractors only fire on successful runs (the diff requires a passing iteration to compare against). The classifier gates the fix, avoid, template and descriptive extractors, on success and on stuck/budget terminations; the descriptive fallback fires on stuck/budget terminations. Diff-pattern templates fire on either.
+The fix + avoid extractors only fire on successful runs (the diff requires a passing iteration to compare against). The classifier gates the fix, avoid, template and descriptive extractors, on success and on stuck/budget terminations; the descriptive fallback fires both on stuck/budget terminations and on a run that self-corrects, over the last failing iteration's failures. Diff-pattern templates fire on either.
 
 ## Storage
 

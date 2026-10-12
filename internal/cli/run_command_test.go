@@ -1432,17 +1432,26 @@ func TestRunCommandRecordsTheLearnedLayerOnAnAvoidPitfall(t *testing.T) {
 
 // A failure the run cleared by deleting a resource the mock refused is
 // the mock's gap: target_reached's N10/N13 extractors must not learn an
-// avoid rule from it. The detail is verbatim `tofu apply` (aws provider
-// 5.100.0) against fakeaws main at 9bc2238.
+// avoid rule from it, and it lands in docs/mock-gaps.md even when it was
+// cleared before the last failing iteration. The detail is verbatim
+// `tofu apply` (aws provider 5.100.0) against fakeaws main at 9bc2238.
 func TestRunCommandLearnsNoPitfallFromAClearedMockRefusal(t *testing.T) {
 	const detail = `Error: creating Security Group (web): operation error EC2: CreateSecurityGroup, https response error StatusCode: 501, RequestID: fakeaws-synthetic, api error NotImplemented: CreateSecurityGroup: not modelled by fakeaws: no GroupName, GroupDescription or VpcId
 
   with aws_security_group.web,
   on main.tf line 15, in resource "aws_security_group" "web":
   15: resource "aws_security_group" "web" {`
-	h := newCommandTestHarness(t)
-	scenarioPath := filepath.Join(h.WorkspaceDir, "scenarios", "training", "aws.yaml")
-	mustWriteFile(t, scenarioPath, `scenario: example-scenario
+	for _, tc := range []struct {
+		name string
+		errs []error
+	}{
+		{"cleared by the passing iteration", []error{errors.New(detail)}},
+		{"cleared before an unrelated failure", []error{errors.New(detail), errors.New("Error: the apply was interrupted")}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newCommandTestHarness(t)
+			scenarioPath := filepath.Join(h.WorkspaceDir, "scenarios", "training", "aws.yaml")
+			mustWriteFile(t, scenarioPath, `scenario: example-scenario
 version: "1.0"
 cloud: aws
 description: example
@@ -1456,52 +1465,54 @@ acceptance_criteria:
     to: compute
     expect: blocked
 `)
-	docsDir := t.TempDir()
-	opts := isolatedRunOpts(h, func(cfg config.Config) config.Config {
-		cfg.Paths.Docs = docsDir
-		return cfg
-	})
-	generations := 0
-	opts.deps = RuntimeDependencies{
-		Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
-			generations++
-			files := map[string][]byte{"main.tf": []byte("terraform {}\n")}
-			if generations == 1 {
-				files["sg.tf"] = []byte("resource \"aws_security_group\" \"web\" {\n  name        = \"web\"\n  description = \"web\"\n}\n")
+			docsDir := t.TempDir()
+			opts := isolatedRunOpts(h, func(cfg config.Config) config.Config {
+				cfg.Paths.Docs = docsDir
+				return cfg
+			})
+			generations := 0
+			opts.deps = RuntimeDependencies{
+				Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
+					generations++
+					files := map[string][]byte{"main.tf": []byte("terraform {}\n")}
+					if generations == 1 {
+						files["sg.tf"] = []byte("resource \"aws_security_group\" \"web\" {\n  name        = \"web\"\n  description = \"web\"\n}\n")
+					}
+					return &generator.GeneratedCode{Files: files}, nil
+				}),
+				Static: &fakeStaticHarness{result: &harness.StaticResult{
+					Stages:   []harness.StageResult{{Stage: "init"}, {Stage: "validate"}, {Stage: "plan"}, {Stage: "show"}},
+					PlanJSON: []byte(`{"planned_values":{"root_module":{}}}`),
+				}},
+				MockDeploy: &seqMockDeployHarness{
+					fakeMockDeployHarness: &fakeMockDeployHarness{result: &harness.MockDeployResult{
+						Apply:         harness.StageResult{Stage: "apply"},
+						StateSnapshot: []byte(`{}`),
+					}},
+					errs: tc.errs,
+				},
+				Destroy: &fakeDestroyHarness{result: &harness.DestroyResult{
+					Destroy:       harness.StageResult{Stage: "destroy"},
+					StateSnapshot: []byte(`{}`),
+				}},
 			}
-			return &generator.GeneratedCode{Files: files}, nil
-		}),
-		Static: &fakeStaticHarness{result: &harness.StaticResult{
-			Stages:   []harness.StageResult{{Stage: "init"}, {Stage: "validate"}, {Stage: "plan"}, {Stage: "show"}},
-			PlanJSON: []byte(`{"planned_values":{"root_module":{}}}`),
-		}},
-		MockDeploy: &seqMockDeployHarness{
-			fakeMockDeployHarness: &fakeMockDeployHarness{result: &harness.MockDeployResult{
-				Apply:         harness.StageResult{Stage: "apply"},
-				StateSnapshot: []byte(`{}`),
-			}},
-			errs: []error{errors.New(detail)},
-		},
-		Destroy: &fakeDestroyHarness{result: &harness.DestroyResult{
-			Destroy:       harness.StageResult{Stage: "destroy"},
-			StateSnapshot: []byte(`{}`),
-		}},
+
+			cmd := newRunCommandForTest(opts)
+			stdout := &bytes.Buffer{}
+			cmd.SetOut(stdout)
+			cmd.SetErr(&bytes.Buffer{})
+			cmd.SetArgs([]string{scenarioPath, "--config", h.ConfigPath})
+			require.NoError(t, cmd.Execute(), stdout.String())
+			require.Equal(t, len(tc.errs)+1, generations, "the run repairs each failure and passes")
+
+			entries, err := generator.LoadPitfallEntries(h.PitfallsDir(), "aws")
+			require.NoError(t, err)
+			assert.Empty(t, entries)
+			gaps, err := os.ReadFile(filepath.Join(docsDir, "mock-gaps.md"))
+			require.NoError(t, err)
+			assert.Contains(t, string(gaps), "| aws_security_group | `not modelled by fakeaws` |")
+		})
 	}
-
-	cmd := newRunCommandForTest(opts)
-	stdout := &bytes.Buffer{}
-	cmd.SetOut(stdout)
-	cmd.SetErr(&bytes.Buffer{})
-	cmd.SetArgs([]string{scenarioPath, "--config", h.ConfigPath})
-	require.NoError(t, cmd.Execute(), stdout.String())
-	require.Equal(t, 2, generations, "the run repairs once and passes")
-
-	entries, err := generator.LoadPitfallEntries(h.PitfallsDir(), "aws")
-	require.NoError(t, err)
-	assert.Empty(t, entries)
-	gaps, err := os.ReadFile(filepath.Join(docsDir, "mock-gaps.md"))
-	require.NoError(t, err)
-	assert.Contains(t, string(gaps), "`not modelled by fakeaws`")
 }
 
 // A mock whose reset fails says the environment is wrong, not the HCL:
