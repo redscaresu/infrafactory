@@ -8,9 +8,31 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/redscaresu/infrafactory/internal/config"
 	"github.com/redscaresu/infrafactory/internal/scenario"
 )
+
+func TestRehearseIsRegisteredAndPrintsItsHelp(t *testing.T) {
+	t.Parallel()
+
+	root := NewRootCmd()
+	found, _, err := root.Find([]string{"rehearse"})
+	require.NoError(t, err)
+	assert.Equal(t, "rehearse", found.Name())
+
+	stdout := &bytes.Buffer{}
+	root.SetOut(stdout)
+	root.SetErr(&bytes.Buffer{})
+	root.SetArgs([]string{"rehearse"})
+
+	err = root.Execute()
+	require.NoError(t, err)
+	assert.Equal(t, ExitCodeSuccess, ExitCodeForError(err))
+	assert.Contains(t, stdout.String(), found.Short)
+}
 
 func TestNewRootCmdHasExpectedCommands(t *testing.T) {
 	t.Parallel()

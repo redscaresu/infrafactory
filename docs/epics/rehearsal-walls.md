@@ -16,7 +16,7 @@ depends_on: [rehearsal-prepare-gate, fakeaws-rehearsal-instance]
 
 **Out of scope:** the gate and inits (rehearsal-prepare-gate); passthrough; discovery onward.
 
-**Constraints:** ADR-0023 containment never weakened; existing runner process-group and interrupt rules (#436, #438); worktrees share a stale ../fakeaws, so never build from it; tofu claims pinned by `TestAssumption_EndpointsOverrideKeepsApplyOffProd`, `TestAssumption_CLIBackendPathKeepsStateOutOfTheCopy` (ADR-0028).
+**Constraints:** ADR-0023 containment never weakened; existing runner process-group and interrupt rules (#436, #438); worktrees share a stale ../fakeaws, so never build from it; tofu claims pinned by `TestAssumption_EndpointsOverrideKeepsApplyOffProd`, `TestAssumption_CLIBackendPathKeepsStateOutOfTheCopy` (ADR-0028); the environment sets AWS_REGION from `--region` and sets no other region variable, with a test; the "every file is 0600" test admits 0700 for executables tofu writes (ADR-0042); walls reuses rehearsal-prepare-replace-env's ReplaceEnv and rehearsal-prepare-second-init's rehearsalDeadProxy.
 
 **Your part:** none.
 

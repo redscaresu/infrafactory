@@ -1,16 +1,16 @@
 ---
 kind: code
 status: blocked
-blocked_by: [prod-read-seam-ec2-readers, rehearsal-prepare-gate]
+blocked_by: [prod-read-seam-ec2-readers, rehearsal-prepare-command-group]
 epic: prod-read-seam
-depends_on: [prod-read-seam-ec2-readers, rehearsal-prepare-gate]
+depends_on: [prod-read-seam-ec2-readers, rehearsal-prepare-command-group]
 touches: [internal/cli/rehearse_read.go, internal/cli/rehearse_read_test.go, internal/cli/rehearse.go, internal/cli/contract.go, internal/cli/testdata/golden/, docs/operations.md]
 risk: high
 ---
 
 # `infrafactory rehearse read`: one read step, the key held in this process only, output only under .infrafactory/
 
-`rehearsal-prepare-gate` is that epic's slug, because it is not yet planned. This story waits for its `rehearse` command-group story; once that epic is planned, re-point blocked_by and depends_on to that story's slug.
+Merge main in before building: the `rehearse` group (rehearsal-prepare-command-group, ADR-0042) is there. This story's rehearse.go edit is one AddCommand entry registering `read` (the group's first AddCommand call if `prepare` has not landed), and nothing else.
 
 A `read` subcommand under the `rehearse` group. --account, --region, --credentials, --read-set and --out are required; --principal is optional. The account and region never come from infrafactory.yaml's `aws:` block or from the environment.
 
@@ -18,7 +18,7 @@ The command is off by default: it runs only when invoked, and no run, validate, 
 
 **--out** must resolve (Abs, plus EvalSymlinks on the deepest existing ancestor) under `<repo>/.infrafactory/`, and not under `.infrafactory/runs` or `.infrafactory/live`, which the UI serves (livestore.go:31-40). The directory is 0700 and the file 0600.
 
-Tip commit: `ADR: none — ADR-0041 records the rehearse read contract`. docs/operations.md gets the command's runbook lines, after prod-read-seam-reader-policy's edit.
+Tip commit: `ADR: none — ADR-0041 records the rehearse read contract`. docs/operations.md gets the command's runbook lines, after prod-read-seam-reader-policy's edit. If docs/operations.md has no `## Rehearsal` section yet, this story creates one and puts its lines there.
 
 **Done when:**
 - Refusal tests for --out: a repo path, a path outside the repo, `.infrafactory/../x`, a symlink inside .infrafactory that points out, `.infrafactory/runs/x` and `.infrafactory/live/x`. Each exits non-zero before any request.
