@@ -143,6 +143,37 @@ func TestAssumption_RootOverrideMissesChildModuleProvider(t *testing.T) {
 	assert.Zero(t, proxy.count(), "%s: requests left loopback: %v", w.version, proxy.requests())
 }
 
+// TestAssumption_LoaderIgnoresUnknownSuffixes: tofu loads only its own
+// configuration suffixes from a module directory, and no subdirectory, so
+// a root with one valid output beside broken HCL in a.hcl, a.tf.bak,
+// notes.txt, x.tfvars.example and sub/b.tf passes `tofu init
+// -backend=false` and `tofu validate`, offline.
+//
+// Relied on by: rehearsal-prepare-gate, which admits any other file
+// unparsed (ADR-0042 § The extension and file policy). ADR-0028.
+func TestAssumption_LoaderIgnoresUnknownSuffixes(t *testing.T) {
+	e2e.SkipUnlessEnabled(t)
+	_, err := exec.LookPath("tofu")
+	require.NoError(t, err, "tofu binary required for e2e")
+
+	w := assumptionDir{dir: t.TempDir()}
+	w.write(t, "main.tf", "output \"x\" {\n  value = 1\n}\n")
+	for _, name := range []string{"a.hcl", "a.tf.bak", "notes.txt", "x.tfvars.example", "sub/b.tf"} {
+		w.write(t, name, "resource \"broken\" {\n")
+	}
+	// Offline: both proxies at the closed port, so any download fails.
+	env := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + t.TempDir(), "TF_DATA_DIR=" + t.TempDir(),
+		"HTTPS_PROXY=" + closedEndpoint, "HTTP_PROXY=" + closedEndpoint}
+	version, err := w.tofu(t, env, "version")
+	require.NoError(t, err, version)
+	w.version = strings.TrimSpace(version)
+
+	out, err := w.tofu(t, env, "init", "-backend=false", "-input=false", "-no-color")
+	require.NoError(t, err, "%s: init loaded a file it should ignore\n%s", w.version, out)
+	out, err = w.tofu(t, env, "validate", "-no-color")
+	assert.NoError(t, err, "%s: validate loaded a file it should ignore\n%s", w.version, out)
+}
+
 // registryModule is the third-party dependency the init test fetches: a
 // public-registry module, pinned to an exact version, with no provider of
 // its own.
