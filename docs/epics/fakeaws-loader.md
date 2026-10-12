@@ -20,7 +20,7 @@ depends_on: [fakeaws-loaded-identity]
 
 **Out of scope:** filters and overlap (fakeaws-data-sources); token, bind, request log; S3, ELBv2, ASG, CloudWatch, NAT gateways, launch templates, snapshots (larger-estate's queue); any infrafactory command.
 
-**Constraints:** starts once prod-read-seam's ADR-0041 story merges; the real-fixture story is last. `/mock/reset` still deletes the snapshot, so the rehearsal's reset is restore. No handler-path inserts. Existing admin tests keep passing. docs/mockway-contract.md is not the fakeaws contract. Carried from fakeaws-data-sources planning (2026-10-12): image owner widening (the numeric Amazon owner id, architecture filters) and DescribeSecurityGroupRules are loader-owned; prod-read-seam-fakeaws-filtered-e2e leaves DescribeSecurityGroupRules out until this epic models it.
+**Constraints:** starts once prod-read-seam's ADR-0041 story merges; the real-fixture story is last. `/mock/reset` still deletes the snapshot, so the rehearsal's reset is restore. No handler-path inserts. Existing admin tests keep passing. docs/mockway-contract.md is not the fakeaws contract. Carried from fakeaws-data-sources planning (2026-10-12): image owner widening (the numeric Amazon owner id, architecture filters) and DescribeSecurityGroupRules are loader-owned; prod-read-seam-fakeaws-filtered-e2e leaves DescribeSecurityGroupRules out until this epic models it. From fakeaws#60 (2026-10-12): public SSM parameters (/aws/service/...) need one isPublicSSMParameter predicate used at every SSM site (tag ops, GetParameter by ARN, listing, state) before the loader writes them.
 
 **Your part:** none for you. Lead: load the real step-0 recording into a private fakeaws on this machine and run read-back (no cloud).
 
