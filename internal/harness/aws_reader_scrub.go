@@ -30,7 +30,8 @@ const (
 	// AWSScrubParameterValue replaces an SSM Parameter.Value outside
 	// /aws/service/.
 	AWSScrubParameterValue = "SCRUBBED-PARAMETER-VALUE"
-	// AWSScrubUserID replaces GetCallerIdentity's UserId.
+	// AWSScrubUserID replaces GetCallerIdentity's UserId and
+	// aws_caller_identity's user_id in the state.
 	AWSScrubUserID = "SCRUBBED-USER-ID"
 	// AWSScrubRequestID replaces every RequestId: one whose last group is
 	// twelve decimal digits would read as an account id.
@@ -38,10 +39,12 @@ const (
 	// AWSScrubLineage replaces the state's lineage.
 	AWSScrubLineage = "SCRUBBED-LINEAGE"
 	// AWSScrubPrincipal replaces the user name, or the role and session
-	// names, after user/ or assumed-role/ in GetCallerIdentity's Arn.
+	// names, after user/ or assumed-role/ in every IAM user's or assumed
+	// role's ARN in either file.
 	AWSScrubPrincipal = "SCRUBBED-PRINCIPAL"
 	// AWSScrubSensitiveValue replaces every state attribute that a resource
-	// instance lists in sensitive_attributes, but a public SSM parameter's.
+	// instance lists in sensitive_attributes (but a public SSM parameter's
+	// value) and every sensitive output's value.
 	AWSScrubSensitiveValue = "SCRUBBED-SENSITIVE-VALUE"
 )
 
@@ -61,6 +64,10 @@ const awsPublicParameterPrefix = "/aws/service/"
 // awsStateUserDataKeys are the state attributes holding user data.
 var awsStateUserDataKeys = []string{"user_data", "user_data_base64"}
 
+// awsSSMValueKeys are an aws_ssm_parameter's attributes holding its value
+// in the state.
+var awsSSMValueKeys = []string{"value", "insecure_value"}
+
 // awsAccountIDDigits is the length of an AWS account id.
 const awsAccountIDDigits = 12
 
@@ -71,16 +78,29 @@ var (
 	// (AKIA…, ASIA…).
 	awsUniqueIDPattern      = regexp.MustCompile(`A[A-Z]{3}[A-Z0-9]{12,}`)
 	awsPercentEscapePattern = regexp.MustCompile(`%[0-9A-Fa-f]{2}`)
-	// awsPrincipalARNPattern is an IAM user's or an assumed role's ARN,
-	// whose group 1 runs up to the name; the scrubbed form is
-	// awsScrubbedPrincipalARNPattern.
-	awsPrincipalARNPattern         = regexp.MustCompile(fmt.Sprintf(`^(%s)\S+$`, fmt.Sprintf(awsPrincipalARNPrefix, `[0-9]{12}`)))
+	// awsPrincipalARNPattern is an IAM user's or an assumed role's ARN:
+	// group 1 runs up to the name, group 2 is the name (a user's path and
+	// name, or a role and session).
+	awsPrincipalARNPattern = regexp.MustCompile(fmt.Sprintf(`(%s)(%s)`, fmt.Sprintf(awsPrincipalARNPrefix, `[0-9]{12}`), awsPrincipalNameChars))
+	// awsScrubbedPrincipalARNPattern is the only ARN GetCallerIdentity may
+	// answer with once scrubbed.
 	awsScrubbedPrincipalARNPattern = regexp.MustCompile(fmt.Sprintf(`^%s%s$`, fmt.Sprintf(awsPrincipalARNPrefix, AWSScrubAccount), AWSScrubPrincipal))
+	// awsScientificNumberPattern is a JSON number in exponent notation with
+	// a one-digit integer part, as SSM writes LastModifiedDate: epoch
+	// seconds to the millisecond, twelve digits after the point.
+	awsScientificNumberPattern = regexp.MustCompile(`^-?[0-9]\.[0-9]+[eE][+-]?[0-9]+$`)
+	// awsRecordedBodyPathPattern is the path of an exchange's body in a
+	// recorded read.
+	awsRecordedBodyPathPattern = regexp.MustCompile(`^\$\.exchanges\[[0-9]+\]\.body$`)
 )
 
 // awsPrincipalARNPrefix is a principal's ARN up to its name, around an
-// account pattern.
-const awsPrincipalARNPrefix = `arn:aws:(?:iam|sts)::%s:(?:user|assumed-role)/`
+// account pattern; awsPrincipalNameChars is what IAM allows in a name
+// ([\w+=,.@-]), plus / for a user's path and between role and session.
+const (
+	awsPrincipalARNPrefix = `arn:aws:(?:iam|sts)::%s:(?:user|assumed-role)/`
+	awsPrincipalNameChars = `[\w+=,.@/-]+`
+)
 
 // WriteScrubbedAWSRead scrubs the recorded read at readPath and the
 // tfstate at statePath, runs CheckScrubbedRead over the exact bytes it
@@ -112,9 +132,11 @@ func WriteScrubbedAWSRead(readPath, statePath, outDir string) error {
 	return writePrivateFile(stateOut, scrubbedState)
 }
 
-// scrubAWSRead maps the read's account id to AWSScrubAccount in the raw
-// bytes of both files, which reaches every form JSON writes a digit in
-// (strings, keys, numbers, plain and URL-encoded ARNs), then puts the
+// scrubAWSRead maps, in the raw bytes of both files, the read's account id
+// to AWSScrubAccount, which reaches every form JSON writes a digit in
+// (strings, keys, numbers, plain and URL-encoded ARNs), and the name in
+// every IAM user's or assumed role's ARN to AWSScrubPrincipal (a
+// URL-encoded one is left for the check to refuse). It then puts the
 // placeholders in. Its errors never quote either file.
 func scrubAWSRead(read, state []byte) ([]byte, []byte, error) {
 	var header struct {
@@ -123,14 +145,15 @@ func scrubAWSRead(read, state []byte) ([]byte, []byte, error) {
 	if json.Unmarshal(read, &header) != nil || !awsAccountIDPattern.MatchString(header.Account) {
 		return nil, nil, errors.New("the recorded read does not parse, or its account is not a 12-digit id")
 	}
-	mapAccount := func(data []byte) []byte {
-		return bytes.ReplaceAll(data, []byte(header.Account), []byte(AWSScrubAccount))
+	mapIdentity := func(data []byte) []byte {
+		data = bytes.ReplaceAll(data, []byte(header.Account), []byte(AWSScrubAccount))
+		return awsPrincipalARNPattern.ReplaceAll(data, []byte("${1}"+AWSScrubPrincipal))
 	}
-	scrubbedRead, err := scrubAWSRecordedRead(mapAccount(read))
+	scrubbedRead, err := scrubAWSRecordedRead(mapIdentity(read))
 	if err != nil {
 		return nil, nil, fmt.Errorf("the recorded read: %w", err)
 	}
-	scrubbedState, err := scrubAWSState(mapAccount(state))
+	scrubbedState, err := scrubAWSState(mapIdentity(state))
 	if err != nil {
 		return nil, nil, fmt.Errorf("the state: %w", err)
 	}
@@ -153,14 +176,13 @@ func scrubAWSRecordedRead(data []byte) ([]byte, error) {
 }
 
 // scrubAWSReadBody is ex's body with its placeholders in: in XML every
-// RequestId, DescribeInstanceAttribute's userData value, and
-// GetCallerIdentity's UserId and the name in its Arn (an Arn of another
-// shape is left for the check to refuse); in SSM GetParameter's JSON the
+// RequestId, DescribeInstanceAttribute's userData value and
+// GetCallerIdentity's UserId; in SSM GetParameter's JSON the
 // Parameter.Value, unless the parameter is public. Tag values stay.
 func scrubAWSReadBody(ex AWSReadExchange) (string, error) {
 	switch ex.Protocol {
 	case awsProtocolQuery:
-		return awsXMLReplaceText(ex.Body, func(names []string, inner string) (string, bool) {
+		return awsXMLReplaceText(ex.Body, func(names []string) (string, bool) {
 			switch {
 			case strings.EqualFold(names[len(names)-1], "RequestId"):
 				return AWSScrubRequestID, true
@@ -168,12 +190,6 @@ func scrubAWSReadBody(ex AWSReadExchange) (string, error) {
 				return AWSScrubUserData, true
 			case awsXMLPathEnds(names, "GetCallerIdentityResult", "UserId"):
 				return AWSScrubUserID, true
-			case awsXMLPathEnds(names, "GetCallerIdentityResult", "Arn"):
-				m := awsPrincipalARNPattern.FindStringSubmatch(strings.TrimSpace(inner))
-				if m == nil {
-					return "", false
-				}
-				return m[1] + AWSScrubPrincipal, true
 			}
 			return "", false
 		})
@@ -201,12 +217,11 @@ func scrubAWSParameterValue(body string) (string, error) {
 }
 
 // awsXMLReplaceText is body with the content of every element that
-// placeholder names, given the names of the elements open down to it and
-// the element's raw content, replaced by the placeholder, and every other
-// byte as it was. Elements are decided as they close, so an element
-// holding one already replaced is left; a self-closing one holds nothing
-// and is left too.
-func awsXMLReplaceText(body string, placeholder func(names []string, inner string) (string, bool)) (string, error) {
+// placeholder names, given the names of the elements open down to it,
+// replaced by the placeholder, and every other byte as it was. Elements
+// are decided as they close, so an element holding one already replaced
+// is left; a self-closing one holds nothing and is left too.
+func awsXMLReplaceText(body string, placeholder func(names []string) (string, bool)) (string, error) {
 	dec := xml.NewDecoder(strings.NewReader(body))
 	var (
 		out    strings.Builder
@@ -229,7 +244,7 @@ func awsXMLReplaceText(body string, placeholder func(names []string, inner strin
 		case xml.EndElement:
 			from := starts[len(starts)-1]
 			if from >= copied && !strings.HasSuffix(body[:from], "/>") {
-				if v, ok := placeholder(names, body[from:at]); ok {
+				if v, ok := placeholder(names); ok {
 					out.WriteString(body[copied:from] + v)
 					copied = at
 				}
@@ -245,9 +260,10 @@ func awsXMLPathEnds(names []string, suffix ...string) bool {
 }
 
 // scrubAWSState replaces the state's lineage, every user_data and
-// user_data_base64 string, and every attribute a resource instance lists
-// in sensitive_attributes (but a public SSM parameter's), keeping every
-// key and every other value.
+// user_data_base64 string, every attribute a resource instance lists in
+// sensitive_attributes (but a public SSM parameter's value), every
+// sensitive output's value and aws_caller_identity's user_id, keeping
+// every key and every other value.
 func scrubAWSState(data []byte) ([]byte, error) {
 	var state map[string]any
 	if decodeOneJSON(data, &state) != nil || state == nil {
@@ -257,11 +273,20 @@ func scrubAWSState(data []byte) ([]byte, error) {
 		state["lineage"] = AWSScrubLineage
 	}
 	scrubAWSStateUserData(state)
+	outputs, _ := state["outputs"].(map[string]any)
+	for _, item := range outputs {
+		if output, _ := item.(map[string]any); awsSensitiveOutput(output) && output["value"] != nil {
+			output["value"] = AWSScrubSensitiveValue
+		}
+	}
 	err := walkAWSStateInstances(state, func(_, resourceType string, attributes map[string]any, sensitive []string) error {
 		for _, name := range sensitive {
-			if attributes[name] != nil && !awsPublicStateParameter(resourceType, attributes) {
+			if attributes[name] != nil && !awsPublicStateValue(resourceType, attributes, name) {
 				attributes[name] = AWSScrubSensitiveValue
 			}
+		}
+		if resourceType == "aws_caller_identity" && attributes["user_id"] != nil {
+			attributes["user_id"] = AWSScrubUserID
 		}
 		return nil
 	})
@@ -269,6 +294,12 @@ func scrubAWSState(data []byte) ([]byte, error) {
 		return nil, err
 	}
 	return encodeScrubbedJSON(state, "  ")
+}
+
+// awsSensitiveOutput reports whether a state output is marked sensitive:
+// anything but an absent, null or false "sensitive" counts.
+func awsSensitiveOutput(output map[string]any) bool {
+	return output["sensitive"] != nil && output["sensitive"] != false
 }
 
 // walkAWSStateInstances calls visit with every resource instance in state:
@@ -324,11 +355,17 @@ func awsSensitiveAttributes(listed any) ([]string, error) {
 	return names, nil
 }
 
-// awsPublicStateParameter reports whether a state resource is an SSM
-// parameter under /aws/service/, whose value the provider marks sensitive
-// but which carries no account.
-func awsPublicStateParameter(resourceType string, attributes map[string]any) bool {
-	return resourceType == "aws_ssm_parameter" && awsPublicParameter(attributes["name"])
+// awsPublicStateValue reports whether the attribute name holds an SSM
+// parameter's value under /aws/service/, which the provider marks
+// sensitive but which carries no account. Every other attribute of that
+// parameter follows the general rule.
+func awsPublicStateValue(resourceType string, attributes map[string]any, name string) bool {
+	return resourceType == "aws_ssm_parameter" && slices.Contains(awsSSMValueKeys, name) && awsPublicParameter(attributes["name"])
+}
+
+// awsHiddenStateValue reports whether a state value hides nothing.
+func awsHiddenStateValue(v any) bool {
+	return v == nil || v == AWSScrubSensitiveValue
 }
 
 func scrubAWSStateUserData(v any) {
@@ -352,14 +389,16 @@ func scrubAWSStateUserData(v any) {
 // the scrubbed read and state, each whole: by the scrub before it writes
 // either, and by the committed fixtures' test. It refuses
 //   - a 12-digit number other than AWSScrubAccount, where a hit is a
-//     maximal run of exactly twelve digits that is not the fraction of
-//     a d.ddd…E9 number (awsExponentFraction);
+//     maximal run of exactly twelve digits in a key, a string, or a JSON
+//     number not in d.ddd…E9 form (awsScientificNumberPattern);
 //   - an AWS unique or key id (A[A-Z]{3}[A-Z0-9]{12,});
-//   - a userData, an SSM Value, a GetCallerIdentity Arn's name, a
-//     state's user_data, or a state attribute listed in
+//   - an IAM user's or assumed role's ARN, anywhere, whose name is not
+//     AWSScrubPrincipal, and a GetCallerIdentity Arn of any other shape;
+//   - a userData, an SSM Value, a state's user_data, a sensitive
+//     output's value, or a state attribute listed in
 //     sensitive_attributes or holding a private aws_ssm_parameter's
-//     value, that is not its placeholder (nor, for a Value or a state
-//     SSM parameter, a public /aws/service/ parameter's);
+//     value, that is not its placeholder (nor, for an SSM value, a
+//     public /aws/service/ parameter's);
 //   - an XML comment, directive, or processing instruction other than
 //     the declaration: a body answers with elements only;
 //   - a read whose account is not AWSScrubAccount, and an object that
@@ -380,7 +419,11 @@ func CheckScrubbedRead(readName string, read []byte, stateName string, state []b
 }
 
 func checkScrubbedAWSRead(data []byte) error {
-	if err := checkScrubbedJSON(data, true); err != nil {
+	// Bodies are checked below, each by its protocol: a raw SSM body holds
+	// LastModifiedDate's twelve-digit fraction, which only its own JSON
+	// reads as a number. The decode refuses an unknown field, so the
+	// only strings at a body's path are the exchanges' bodies.
+	if err := (awsJSONCheck{foldKeys: true, skip: awsRecordedBodyPathPattern.MatchString}).check(data); err != nil {
 		return err
 	}
 	var read AWSRecordedRead
@@ -394,7 +437,10 @@ func checkScrubbedAWSRead(data []byte) error {
 		var err error
 		switch ex.Protocol {
 		case awsProtocolQuery:
-			err = checkScrubbedXML(ex.Body)
+			// Raw, for element and attribute names; decoded, for text.
+			if err = checkScrubbedText(ex.Body); err == nil {
+				err = checkScrubbedXML(ex.Body)
+			}
 		case awsProtocolJSON:
 			err = checkScrubbedJSONBody(ex.Body)
 		default:
@@ -408,26 +454,35 @@ func checkScrubbedAWSRead(data []byte) error {
 }
 
 func checkScrubbedAWSState(data []byte) error {
-	if err := checkScrubbedJSON(data, false); err != nil {
+	if err := (awsJSONCheck{}).check(data); err != nil {
 		return err
 	}
 	var state any
 	if decodeOneJSON(data, &state) != nil {
 		return errors.New("$: does not parse as JSON")
 	}
+	if err := checkScrubbedStateOutputs(state); err != nil {
+		return err
+	}
 	return checkScrubbedStateValues(state)
 }
 
-// checkScrubbedJSON checks every key, string and number of data, which
-// must hold exactly one JSON value, reading it token by token so that no
-// repeated key hides a value. With foldKeys, keys repeat as encoding/json
-// matches them to struct fields, ignoring case: for the read and its
-// bodies, which Go code decodes into structs. A state's keys repeat only
-// when exact, since its tags may hold both Name and name.
-func checkScrubbedJSON(data []byte, foldKeys bool) error {
+// awsJSONCheck runs checkScrubbedText over every key, string and number
+// of one JSON value, token by token so that no repeated key hides a
+// value. With foldKeys, keys repeat as encoding/json matches them to
+// struct fields, ignoring case: for the read and its bodies, which Go
+// decodes into structs. A state's keys repeat only when exact, since its
+// tags may hold both Name and name. skip passes over a string at a path
+// that another rule checks.
+type awsJSONCheck struct {
+	foldKeys bool
+	skip     func(path string) bool
+}
+
+func (c awsJSONCheck) check(data []byte) error {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.UseNumber()
-	if err := checkScrubbedJSONValue(dec, "$", foldKeys); err != nil {
+	if err := c.value(dec, "$"); err != nil {
 		return err
 	}
 	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
@@ -436,7 +491,7 @@ func checkScrubbedJSON(data []byte, foldKeys bool) error {
 	return nil
 }
 
-func checkScrubbedJSONValue(dec *json.Decoder, path string, foldKeys bool) error {
+func (c awsJSONCheck) value(dec *json.Decoder, path string) error {
 	tok, err := dec.Token()
 	if err != nil {
 		return fmt.Errorf("%s: does not parse as JSON", path)
@@ -444,7 +499,13 @@ func checkScrubbedJSONValue(dec *json.Decoder, path string, foldKeys bool) error
 	delim, ok := tok.(json.Delim)
 	if !ok {
 		text, _ := tok.(string)
+		if c.skip != nil && c.skip(path) {
+			return nil
+		}
 		if number, ok := tok.(json.Number); ok {
+			if awsScientificNumberPattern.MatchString(number.String()) {
+				return nil
+			}
 			text = number.String()
 		}
 		return checkScrubbedTextAt(path, text)
@@ -463,7 +524,7 @@ func checkScrubbedJSONValue(dec *json.Decoder, path string, foldKeys bool) error
 				return err
 			}
 			id := key
-			if foldKeys {
+			if c.foldKeys {
 				// encoding/json's fold: each rune lowered, then raised.
 				id = strings.ToUpper(strings.ToLower(key))
 			}
@@ -472,7 +533,7 @@ func checkScrubbedJSONValue(dec *json.Decoder, path string, foldKeys bool) error
 			}
 			seen[id], member = true, path+"."+key
 		}
-		if err := checkScrubbedJSONValue(dec, member, foldKeys); err != nil {
+		if err := c.value(dec, member); err != nil {
 			return err
 		}
 	}
@@ -490,19 +551,24 @@ func checkScrubbedTextAt(path, text string) error {
 }
 
 // checkScrubbedText refuses text holding a 12-digit number other than
-// AWSScrubAccount or an AWS unique or key id, as written or
+// AWSScrubAccount, an AWS unique or key id, or an IAM user's or assumed
+// role's ARN whose name is not AWSScrubPrincipal, as written or
 // percent-decoded: IAM writes policy documents URL-encoded, where %22
 // glues digits onto an account id.
 func checkScrubbedText(text string) error {
 	for _, view := range awsPercentDecodings(text) {
-		for _, loc := range awsDigitRunPattern.FindAllStringIndex(view, -1) {
-			run := view[loc[0]:loc[1]]
-			if len(run) == awsAccountIDDigits && run != AWSScrubAccount && !awsExponentFraction(view, loc[0], loc[1]) {
+		for _, run := range awsDigitRunPattern.FindAllString(view, -1) {
+			if len(run) == awsAccountIDDigits && run != AWSScrubAccount {
 				return errors.New("holds a 12-digit number other than the synthetic account id")
 			}
 		}
 		if awsUniqueIDPattern.MatchString(view) {
 			return errors.New("holds an AWS unique or key id")
+		}
+		for _, m := range awsPrincipalARNPattern.FindAllStringSubmatch(view, -1) {
+			if m[2] != AWSScrubPrincipal {
+				return errors.New("names an IAM user or assumed role other than the placeholder")
+			}
 		}
 	}
 	return nil
@@ -523,16 +589,6 @@ func awsPercentDecodings(text string) []string {
 		}
 		views = append(views, next)
 	}
-}
-
-// awsExponentFraction reports whether the digits s[start:end] are the
-// fraction of a number in exponent notation with a one-digit integer
-// part (d.dddE9): SSM writes LastModifiedDate so, epoch seconds to the
-// millisecond, twelve digits after the point.
-func awsExponentFraction(s string, start, end int) bool {
-	digit := func(i int) bool { return i >= 0 && i < len(s) && s[i] >= '0' && s[i] <= '9' }
-	return start >= 2 && s[start-1] == '.' && digit(start-2) && !digit(start-3) &&
-		end < len(s) && (s[end] == 'e' || s[end] == 'E')
 }
 
 // checkScrubbedXML checks an XML body's text and attribute values as they
@@ -607,7 +663,7 @@ func checkScrubbedXML(body string) error {
 // object, that is neither AWSScrubParameterValue nor a public
 // parameter's.
 func checkScrubbedJSONBody(body string) error {
-	if err := checkScrubbedJSON([]byte(body), true); err != nil {
+	if err := (awsJSONCheck{foldKeys: true}).check([]byte(body)); err != nil {
 		return err
 	}
 	var answer any
@@ -624,12 +680,29 @@ func checkScrubbedJSONBody(body string) error {
 	})
 }
 
+// checkScrubbedStateOutputs refuses a sensitive output whose value is
+// neither null nor AWSScrubSensitiveValue.
+func checkScrubbedStateOutputs(state any) error {
+	root, _ := state.(map[string]any)
+	outputs, ok := root["outputs"].(map[string]any)
+	if !ok && root["outputs"] != nil {
+		return errors.New("$.outputs: is not an object")
+	}
+	for _, name := range slices.Sorted(maps.Keys(outputs)) {
+		output, _ := outputs[name].(map[string]any)
+		if awsSensitiveOutput(output) && !awsHiddenStateValue(output["value"]) {
+			return fmt.Errorf("$.outputs.%s.value: is a sensitive output's value, not the placeholder", name)
+		}
+	}
+	return nil
+}
+
 // checkScrubbedStateValues refuses, anywhere in the state, a user_data or
 // user_data_base64 that is not null or a placeholder; and in a resource
 // instance, an attribute its sensitive_attributes lists, or a private
 // aws_ssm_parameter's value or insecure_value (the provider marks only
-// value sensitive), that is neither null nor AWSScrubSensitiveValue. A public
-// SSM parameter's value passes.
+// value sensitive), that is neither null nor AWSScrubSensitiveValue. A
+// public SSM parameter's value passes; its other attributes do not.
 func checkScrubbedStateValues(state any) error {
 	err := walkJSONObjects("$", state, func(path string, object map[string]any) error {
 		for _, key := range awsStateUserDataKeys {
@@ -643,17 +716,13 @@ func checkScrubbedStateValues(state any) error {
 		return err
 	}
 	return walkAWSStateInstances(state, func(path, resourceType string, attributes map[string]any, sensitive []string) error {
-		if awsPublicStateParameter(resourceType, attributes) {
-			return nil
-		}
-		hidden := func(v any) bool { return v == nil || v == AWSScrubSensitiveValue }
 		for _, name := range sensitive {
-			if !hidden(attributes[name]) {
+			if !awsHiddenStateValue(attributes[name]) && !awsPublicStateValue(resourceType, attributes, name) {
 				return fmt.Errorf("%s.attributes.%s: is listed in sensitive_attributes and is not the placeholder", path, name)
 			}
 		}
-		for _, key := range []string{"value", "insecure_value"} {
-			if resourceType == "aws_ssm_parameter" && !hidden(attributes[key]) {
+		for _, key := range awsSSMValueKeys {
+			if resourceType == "aws_ssm_parameter" && !awsHiddenStateValue(attributes[key]) && !awsPublicStateValue(resourceType, attributes, key) {
 				return fmt.Errorf("%s.attributes.%s: is a private SSM parameter's value", path, key)
 			}
 		}

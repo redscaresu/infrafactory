@@ -4,6 +4,11 @@
   "serial": 14,
   "lineage": "6f0c8f7e-3b1a-4d2c-9e5f-a1b2c3d4e5f6",
   "outputs": {
+    "db_password": {
+      "value": "planted-output-secret",
+      "type": "string",
+      "sensitive": true
+    },
     "web_public_ip": {
       "value": "203.0.113.25",
       "type": "string"
@@ -162,6 +167,24 @@
           },
           "sensitive_attributes": [],
           "private": "eyJzY2hlbWFfdmVyc2lvbiI6IjEifQ=="
+        }
+      ]
+    },
+    {
+      "mode": "data",
+      "type": "aws_caller_identity",
+      "name": "current",
+      "provider": "provider[\"registry.opentofu.org/hashicorp/aws\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "account_id": "246813579024",
+            "arn": "arn:aws:iam::246813579024:user/infrafactory-layer3",
+            "id": "246813579024",
+            "user_id": "AIDATPLANTEDLAYER3001"
+          },
+          "sensitive_attributes": []
         }
       ]
     }

@@ -77,6 +77,7 @@ func TestWriteScrubbedAWSReadMapsTheAccountAndPlacesThePlaceholders(t *testing.T
 			scrubTestAccount, "AIDATPLANTEDUSERID001", "IyEvYmluL2Jhc2gKZWNobyBwbGFudGVkLXNlY3JldAo=",
 			"planted-db-password", "504863521975", "6f0c8f7e-3b1a-4d2c-9e5f-a1b2c3d4e5f6",
 			"e3cf5b39bc793e8151d1893fb3992ebdad89c0d2", "infrafactory-reader", "planted-password-data",
+			"planted-output-secret", "infrafactory-layer3", "AIDATPLANTEDLAYER3001",
 		} {
 			assert.NotContains(t, string(file), planted, "the scrubbed %s", name)
 		}
@@ -112,6 +113,8 @@ func TestWriteScrubbedAWSReadMapsTheAccountAndPlacesThePlaceholders(t *testing.T
 		`"lineage": "` + AWSScrubLineage + `"`,
 		`"user_data": "` + AWSScrubUserData + `"`,
 		`"password_data": "` + AWSScrubSensitiveValue + `"`,
+		`"arn": "arn:aws:iam::` + AWSScrubAccount + `:user/` + AWSScrubPrincipal + `"`,
+		`"user_id": "` + AWSScrubUserID + `"`,
 		// The provider marks a public parameter's value sensitive; it stays.
 		`"value": "ami-0c1d2e3f4a5b6c7d8"`,
 	} {
@@ -120,7 +123,8 @@ func TestWriteScrubbedAWSReadMapsTheAccountAndPlacesThePlaceholders(t *testing.T
 }
 
 // Every key of the input state survives, and only the account, the
-// lineage, the user data and the sensitive attributes differ.
+// principal's name and user id, the lineage, the user data, the sensitive
+// attributes and the sensitive output differ.
 func TestWriteScrubbedAWSReadKeepsEveryKeyOfTheState(t *testing.T) {
 	_, state := scrubbedFixtures(t)
 	fixture, err := os.ReadFile(scrubTestState)
@@ -133,6 +137,10 @@ func TestWriteScrubbedAWSReadKeepsEveryKeyOfTheState(t *testing.T) {
 	instance := want["resources"].([]any)[1].(map[string]any)["instances"].([]any)[0].(map[string]any)
 	instance["attributes"].(map[string]any)["user_data"] = AWSScrubUserData
 	instance["attributes"].(map[string]any)["password_data"] = AWSScrubSensitiveValue
+	want["outputs"].(map[string]any)["db_password"].(map[string]any)["value"] = AWSScrubSensitiveValue
+	caller := want["resources"].([]any)[4].(map[string]any)["instances"].([]any)[0].(map[string]any)["attributes"].(map[string]any)
+	caller["arn"] = "arn:aws:iam::" + AWSScrubAccount + ":user/" + AWSScrubPrincipal
+	caller["user_id"] = AWSScrubUserID
 	assert.Equal(t, want, got)
 	for _, key := range []string{"schema_version", "private", "dependencies", "sensitive_attributes"} {
 		assert.Contains(t, instance, key)
@@ -215,6 +223,13 @@ func TestWriteScrubbedAWSReadRefusesALeakAndWritesNothing(t *testing.T) {
                 "value": "password_data"`, `"type": "index",
                 "value": "password_data"`),
 			planted: "planted-password-data", wantPath: "$.resources[1].instances[0].sensitive_attributes: holds a path that does not start at an attribute",
+		},
+		{
+			// URL-encoded, so the scrub cannot see the name; the check
+			// decodes it.
+			name:      "a URL-encoded principal in the state",
+			editState: replace(`"description": "web ingress"`, `"description": "arn%3Aaws%3Aiam%3A%3A`+scrubTestAccount+`%3Auser%2Falice"`),
+			planted:   "alice", wantPath: "$.resources[2].instances[0].attributes.description: names an IAM user or assumed role",
 		},
 	}
 	for _, tc := range cases {
@@ -304,7 +319,38 @@ func TestCheckScrubbedRead(t *testing.T) {
 		},
 		{
 			name: "a principal name in GetCallerIdentity's Arn", old: ":user/" + AWSScrubPrincipal, new: ":user/alice",
-			wantErr: "$.exchanges[0].body: holds a GetCallerIdentity Arn whose name is not the placeholder", planted: "alice",
+			wantErr: "$.exchanges[0].body: names an IAM user or assumed role other than the placeholder", planted: "alice",
+		},
+		{
+			name: "a principal name in the state", inState: true, old: ":user/" + AWSScrubPrincipal, new: ":user/infrafactory-layer3",
+			wantErr: "$.resources[4].instances[0].attributes.arn: names an IAM user or assumed role", planted: "infrafactory-layer3",
+		},
+		{
+			name: "a sensitive output in the state", inState: true,
+			old: `"value": "` + AWSScrubSensitiveValue + `"`, new: `"value": "hunter2-secret"`,
+			wantErr: "$.outputs.db_password.value: is a sensitive output's value", planted: "hunter2-secret",
+		},
+		{
+			// The exponent exemption is for JSON numbers only.
+			name: "a 12-digit fraction in a string", old: "<groupDescription>web ingress</groupDescription>",
+			new:     "<groupDescription>v1.987654321098e</groupDescription>",
+			wantErr: "$.exchanges[1].body: holds a 12-digit number", planted: "987654321098",
+		},
+		{
+			name: "a 12-digit JSON number", old: `\"Version\":3`, new: `\"Version\":999988887777`,
+			wantErr: "$.exchanges[3].body: $.Parameter.Version: holds a 12-digit number", planted: "999988887777",
+		},
+		{
+			// Seen raw only: the decoded XML check reads text, not names.
+			name: "a 12-digit element name", old: "<groupName>web</groupName>", new: "<groupName>web</groupName><x999988887777/>",
+			wantErr: "$.exchanges[1].body: holds a 12-digit number", planted: "999988887777",
+		},
+		{
+			// A public parameter's value passes; its other sensitive
+			// attributes do not.
+			name: "another sensitive attribute of a public parameter", inState: true,
+			old: `"value": "value"`, new: `"value": "name"`,
+			wantErr: "$.resources[0].instances[0].attributes.name: is listed in sensitive_attributes", planted: "al2023",
 		},
 		{
 			name: "a sensitive attribute in the state", inState: true,
@@ -335,6 +381,20 @@ func TestCheckScrubbedRead(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestWriteScrubbedAWSReadHidesAPublicParametersOtherSensitiveAttributes(t *testing.T) {
+	readPath, statePath, outDir := scrubFixtures(t, nil, func(s string) string {
+		return strings.Replace(s, `"value": "value"`, `"value": "id"`, 1)
+	})
+	require.NoError(t, WriteScrubbedAWSRead(readPath, statePath, outDir))
+	data, err := os.ReadFile(filepath.Join(outDir, AWSScrubbedStateFile))
+	require.NoError(t, err)
+	var state map[string]any
+	require.NoError(t, decodeOneJSON(data, &state))
+	attributes := state["resources"].([]any)[0].(map[string]any)["instances"].([]any)[0].(map[string]any)["attributes"].(map[string]any)
+	assert.Equal(t, AWSScrubSensitiveValue, attributes["id"])
+	assert.Equal(t, "ami-0c1d2e3f4a5b6c7d8", attributes["value"])
 }
 
 func TestWriteScrubbedAWSReadNamesNoAssumedRole(t *testing.T) {
