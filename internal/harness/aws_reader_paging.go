@@ -31,7 +31,9 @@ const (
 // pages reads entry to its last page, each page its own exchange, whose
 // params carry the token that asked for it. awsPages' rule holds: a token
 // seen before fails, so does a list past awsReadMaxPages, and so does any
-// answer awsNextPageToken cannot read a next page from.
+// answer awsNextPageToken cannot read a next page from. Only the first page
+// may be a NotFound answer: on a later one it would end a list that is not
+// complete, so any non-2xx answer there fails.
 func (r *awsReplay) pages(ctx context.Context, entry AWSReadEntry) ([]AWSReadExchange, error) {
 	svc, _ := awsReaderService(entry.Service)
 	var exchanges []AWSReadExchange
@@ -47,6 +49,9 @@ func (r *awsReplay) pages(ctx context.Context, entry AWSReadEntry) ([]AWSReadExc
 			}
 		}
 		exchange, err := r.answer(ctx, svc, page)
+		if err == nil && token != nil && !awsAnswerOK(exchange.Status) {
+			err = fmt.Errorf("answered %d %q, so the list is incomplete", exchange.Status, awsAnswerErrorCode(svc.Protocol, []byte(exchange.Body)))
+		}
 		if err != nil {
 			return nil, fmt.Errorf("page %d: %w", len(exchanges)+1, err)
 		}

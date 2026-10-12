@@ -79,8 +79,9 @@ func awsReadEndpoints(region string) map[string]awsReadEndpoint {
 // wall admits, and none after a failing identity check or preflight. A
 // list is read to its last page, each page an exchange, and a throttled
 // request is sent again after a backoff (awsReplay.pages). A NotFound-class
-// answer named in the reader table is recorded; any other non-2xx answer,
-// and a list that cannot be read in full, fails the read, naming the entry.
+// answer named in the reader table, to an entry's first request, is
+// recorded; any other non-2xx answer, and a list that cannot be read in
+// full, fails the read, naming the entry.
 func ReadAWSAccount(ctx context.Context, in AWSReadInput) (AWSRecordedRead, error) {
 	r, err := newAWSReplay(ctx, in)
 	if err != nil {

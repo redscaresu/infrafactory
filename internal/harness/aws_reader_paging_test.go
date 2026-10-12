@@ -203,45 +203,56 @@ func TestReadAWSAccountFailsAListItCannotReadInFull(t *testing.T) {
 		require.Contains(t, body, old)
 		return strings.Replace(body, old, new, 1)
 	}
-	var endless []string
-	for page := range awsReadMaxPages + 1 {
-		endless = append(endless, replace(ec2Page(1), ec2PageToken2, fmt.Sprintf("page-%d", page+2)))
+	oks := func(bodies ...string) []awsCannedAnswer {
+		var answers []awsCannedAnswer
+		for _, body := range bodies {
+			answers = append(answers, awsOK(body))
+		}
+		return answers
 	}
+	var endless []awsCannedAnswer
+	for page := range awsReadMaxPages + 1 {
+		endless = append(endless, awsOK(replace(ec2Page(1), ec2PageToken2, fmt.Sprintf("page-%d", page+2))))
+	}
+	iamNoSuchEntity := awsCannedAnswer{status: http.StatusNotFound, body: awsQueryErrorBody("https://iam.amazonaws.com/doc/2010-05-08/", "NoSuchEntity")}
+	ec2NotFound := awsCannedAnswer{status: http.StatusBadRequest, body: ec2ErrorBody("InvalidInstanceID.NotFound")}
 	cases := []struct {
 		name    string
 		entry   AWSReadEntry
-		pages   []string
-		sends   int // 0: every page
+		answers []awsCannedAnswer
+		sends   int // 0: every answer
 		wantErr string
 	}{
-		{"a repeated nextToken", describeInstances, []string{ec2Page(1), ec2Page(2), ec2Page(1)}, 0,
+		{"a repeated nextToken", describeInstances, oks(ec2Page(1), ec2Page(2), ec2Page(1)), 0,
 			fmt.Sprintf("NextToken %q came back a second time", ec2PageToken2)},
 		{"IsTruncated=true without a Marker", listRolePolicies,
-			[]string{replace(iamPage(1), "<Marker>"+iamPageMarker2+"</Marker>", "")}, 0,
+			oks(replace(iamPage(1), "<Marker>"+iamPageMarker2+"</Marker>", "")), 0,
 			"IsTruncated is true with 0 Markers, not one"},
 		{"an SSM NextToken", readEntry("ssm", "json", "GetParameter", `{"Name":"/app/db/host"}`),
-			[]string{awsPageFixture(t, "ssm", "GetParameter", 1)}, 0,
+			oks(awsPageFixture(t, "ssm", "GetParameter", 1)), 0,
 			"the answer is truncated: it carries a NextToken, and ssm pages no list"},
 		{"a nextToken on IAM", listRolePolicies,
-			[]string{replace(iamPage(2), "</ListRolePoliciesResult>", "<nextToken>t</nextToken></ListRolePoliciesResult>")}, 0,
+			oks(replace(iamPage(2), "</ListRolePoliciesResult>", "<nextToken>t</nextToken></ListRolePoliciesResult>")), 0,
 			"it carries a nextToken, and iam does not page by one"},
 		{"IsTruncated=true on EC2", describeInstances,
-			[]string{replace(ec2Page(3), "</DescribeInstancesResponse>", "<IsTruncated>true</IsTruncated></DescribeInstancesResponse>")}, 0,
+			oks(replace(ec2Page(3), "</DescribeInstancesResponse>", "<IsTruncated>true</IsTruncated></DescribeInstancesResponse>")), 0,
 			"IsTruncated is true, and ec2 does not page by a Marker"},
 		{"an IsTruncated neither true nor false", listRolePolicies,
-			[]string{replace(iamPage(2), "<IsTruncated>false</IsTruncated>", "<IsTruncated>yes</IsTruncated>")}, 0,
+			oks(replace(iamPage(2), "<IsTruncated>false</IsTruncated>", "<IsTruncated>yes</IsTruncated>")), 0,
 			`IsTruncated is "yes", not true or false`},
 		{"a list past the page bound", describeInstances, endless, awsReadMaxPages,
 			fmt.Sprintf("the list runs past %d pages", awsReadMaxPages)},
+		{"IAM NoSuchEntity on page 2", listRolePolicies, append(oks(iamPage(1)), iamNoSuchEntity), 0,
+			`page 2: answered 404 "NoSuchEntity", so the list is incomplete`},
+		{"EC2 NotFound on page 2", describeInstances, append(oks(ec2Page(1)), ec2NotFound), 0,
+			`page 2: answered 400 "InvalidInstanceID.NotFound", so the list is incomplete`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			doers := newAWSPagingDoers()
 			service := doers[tc.entry.Service]
-			for _, body := range tc.pages {
-				service.queue = append(service.queue, awsOK(body))
-			}
+			service.queue = tc.answers
 			service.answer = awsCannedAnswer{status: http.StatusInternalServerError}
 
 			read, err := ReadAWSAccount(context.Background(), awsReadTestInput(doers.doer(), tc.entry))
@@ -249,9 +260,9 @@ func TestReadAWSAccountFailsAListItCannotReadInFull(t *testing.T) {
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), awsReadEntryName(0, tc.entry))
 			assert.Contains(t, err.Error(), tc.wantErr)
-			sends := cmp.Or(tc.sends, len(tc.pages))
+			sends := cmp.Or(tc.sends, len(tc.answers))
 			assert.Len(t, service.sent, sends)
-			assert.Equal(t, 1+sends, doers.sent(), "identity and each page sent")
+			assert.Equal(t, 1+sends, doers.sent(), "identity and each request sent")
 			assert.Empty(t, read.Exchanges)
 		})
 	}

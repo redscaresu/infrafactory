@@ -17,8 +17,8 @@ const (
 
 // AWSReaderService is one service the account read may call: its wire
 // protocol and the actions it may send. NotFound holds the error codes
-// that mean the thing asked for does not exist: an answer, not a
-// failure. TargetPrefix is a json service's X-Amz-Target prefix: the
+// that mean the thing asked for does not exist: to an entry's first
+// request an answer, not a failure (a later page's fails). TargetPrefix is a json service's X-Amz-Target prefix: the
 // target is TargetPrefix + "." + action. Paging is the request field a
 // list's next page is asked for by (awsPagingNextToken,
 // awsPagingMarker), "" for a service that pages nothing. Throttling holds
