@@ -2,7 +2,6 @@ package harness
 
 import (
 	"fmt"
-	"os"
 	"regexp"
 	"strings"
 )
@@ -53,22 +52,13 @@ func AWSSealedEnv(credFile, region string) (map[string]string, error) {
 	}, nil
 }
 
-// readAWSCredentialFile never puts a line or value in an error: either
-// could be the secret key.
+// readAWSCredentialFile reads the file through readOwnerOnlyFile. It
+// never puts a line or value in an error, nor a key awsReaderNameableKey
+// does not match: any of them could be the secret key.
 func readAWSCredentialFile(path string) (map[string]string, error) {
-	info, err := os.Lstat(path)
+	data, err := readOwnerOnlyFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("credential file %s: %w", path, err)
-	}
-	if !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("credential file %s is not a regular file (%s)", path, info.Mode().Type())
-	}
-	if perm := info.Mode().Perm(); perm&0o077 != 0 {
-		return nil, fmt.Errorf("credential file %s has mode %04o; it must grant no group or other permission (chmod 600)", path, perm)
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("credential file %s: %w", path, err)
+		return nil, err
 	}
 
 	creds := map[string]string{"AWS_ACCESS_KEY_ID": "", "AWS_SECRET_ACCESS_KEY": ""}
@@ -83,7 +73,11 @@ func readAWSCredentialFile(path string) (map[string]string, error) {
 			return nil, fmt.Errorf("credential file %s line %d is not KEY=VALUE", path, i+1)
 		}
 		if _, known := creds[key]; !known {
-			return nil, fmt.Errorf("credential file %s line %d has unknown key %q; only AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are allowed", path, i+1, key)
+			named := "an unrecognised key"
+			if awsReaderNameableKey.MatchString(key) {
+				named = fmt.Sprintf("unknown key %q", key)
+			}
+			return nil, fmt.Errorf("credential file %s line %d has %s; only AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are allowed", path, i+1, named)
 		}
 		if seen[key] {
 			return nil, fmt.Errorf("credential file %s sets %s twice", path, key)

@@ -69,8 +69,9 @@ empty (HLD 2026-09-27-aws-web-stack § Containment; ADR-0023). The SCP is the en
 and preflight cannot assert it, so it is recorded here.
 
 What the code reads from the setup:
-- The key file `~/.config/infrafactory/layer3-aws.env`, mode `0600`: exactly `AWS_ACCESS_KEY_ID`
-  and `AWS_SECRET_ACCESS_KEY`. Preflight refuses any group or other permission bit.
+- The key file `~/.config/infrafactory/layer3-aws.env`, mode `0600`, a regular file, not a
+  symlink: exactly `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`. Preflight refuses any group or
+  other permission bit, and names an unknown key only as § The reader key file says.
 - The config's `aws` block (`region`, `account_id`, `principal_arn`), which
   `sts:GetCallerIdentity` must answer exactly.
 - Two SSM parameters. The claim, `AWSClaimParameter` (`/infrafactory/layer3/claim`), holds the

@@ -98,6 +98,10 @@ func readAWSReaderCredentials(path string) (aws.Credentials, error) {
 	}, nil
 }
 
+// ownerOnlyFileChecked runs between readOwnerOnlyFile's checks and its
+// read. It does nothing; a test swaps the file there.
+var ownerOnlyFileChecked = func() {}
+
 // readOwnerOnlyFile reads path only when it is a regular file, not a
 // symlink, granting no group or other permission. It opens path once and
 // checks and reads that handle, so nothing swapped in after the check is
@@ -123,6 +127,7 @@ func readOwnerOnlyFile(path string) ([]byte, error) {
 	if perm := info.Mode().Perm(); perm&0o077 != 0 {
 		return nil, fmt.Errorf("credential file %s has mode %04o; it must grant no group or other permission (chmod 600)", path, perm)
 	}
+	ownerOnlyFileChecked()
 	data, err := io.ReadAll(f)
 	if err != nil {
 		return nil, fmt.Errorf("credential file %s: %w", path, err)
