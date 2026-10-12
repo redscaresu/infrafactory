@@ -396,7 +396,7 @@ func scrubAWSStateUserData(v any) {
 //   - a 12-digit number other than AWSScrubAccount, where a hit is a
 //     maximal run of exactly twelve digits in a key, a string, or a JSON
 //     number not in d.ddd…E9 form (awsScientificNumberPattern), but one of
-//     awsPublicImageOwners as a DescribeImages item's imageOwnerId;
+//     awsPublicImageOwners as an EC2 DescribeImages item's imageOwnerId;
 //   - an AWS unique or key id (A[A-Z]{3}[A-Z0-9]{12,});
 //   - an IAM user's or assumed role's ARN, anywhere, whose name is not
 //     AWSScrubPrincipal, and a GetCallerIdentity Arn of any other shape;
@@ -445,7 +445,7 @@ func checkScrubbedAWSRead(data []byte) error {
 		case awsProtocolQuery:
 			// Raw, for element and attribute names; decoded, for text.
 			if err = checkScrubbedText(awsMaskPublicImageOwners(ex)); err == nil {
-				err = checkScrubbedXML(ex.Body)
+				err = checkScrubbedXML(ex.Body, awsImageOwnerExchange(ex))
 			}
 		case awsProtocolJSON:
 			err = checkScrubbedJSONBody(ex.Body)
@@ -596,12 +596,18 @@ var awsPublicImageOwners = []string{
 // owner, from the body's root.
 var awsImageOwnerPath = []string{"DescribeImagesResponse", "imagesSet", "item", "imageOwnerId"}
 
-// awsMaskPublicImageOwners is ex's body for the raw check: in a
-// DescribeImages answer, each imageOwnerId element holding exactly a
+// awsImageOwnerExchange reports whether ex is the one exchange that may
+// name a public image owner: an EC2 DescribeImages.
+func awsImageOwnerExchange(ex AWSReadExchange) bool {
+	return ex.Service == "ec2" && ex.Action == "DescribeImages"
+}
+
+// awsMaskPublicImageOwners is ex's body for the raw check: in an
+// awsImageOwnerExchange, each imageOwnerId element holding exactly a
 // public owner id, and nothing else, is emptied. checkScrubbedXML checks
 // the decoded text in its place, by its path.
 func awsMaskPublicImageOwners(ex AWSReadExchange) string {
-	if ex.Action != "DescribeImages" {
+	if !awsImageOwnerExchange(ex) {
 		return ex.Body
 	}
 	name := awsImageOwnerPath[len(awsImageOwnerPath)-1]
@@ -634,11 +640,10 @@ func awsPercentDecodings(text string) []string {
 // decode (entities and CDATA read as what they spell), refuses a comment,
 // a directive or a processing instruction but the XML declaration, a
 // userData whose text is neither empty nor AWSScrubUserData, and a
-// GetCallerIdentity Arn whose name is not AWSScrubPrincipal. It passes the
-// text of an imageOwnerId at awsImageOwnerPath that is one of
-// awsPublicImageOwners; the raw check holds it to a DescribeImages answer
-// (awsMaskPublicImageOwners).
-func checkScrubbedXML(body string) error {
+// GetCallerIdentity Arn whose name is not AWSScrubPrincipal. With
+// imageOwners (awsImageOwnerExchange), it passes the text of an
+// imageOwnerId at awsImageOwnerPath that is one of awsPublicImageOwners.
+func checkScrubbedXML(body string, imageOwners bool) error {
 	dec := xml.NewDecoder(strings.NewReader(body))
 	var text, userData strings.Builder
 	var names []string
@@ -682,7 +687,7 @@ func checkScrubbedXML(body string) error {
 			if awsXMLPathEnds(names, "GetCallerIdentityResult", "Arn") && !awsScrubbedPrincipalARNPattern.MatchString(strings.TrimSpace(text.String())) {
 				return errors.New("holds a GetCallerIdentity Arn whose name is not the placeholder")
 			}
-			if slices.Equal(names, awsImageOwnerPath) && slices.Contains(awsPublicImageOwners, text.String()) {
+			if imageOwners && slices.Equal(names, awsImageOwnerPath) && slices.Contains(awsPublicImageOwners, text.String()) {
 				text.Reset()
 			}
 			names = names[:len(names)-1]

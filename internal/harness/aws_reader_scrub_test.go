@@ -443,6 +443,36 @@ func TestCheckScrubbedRead(t *testing.T) {
 	}
 }
 
+// A public image owner spelled with a character reference passes the raw
+// pass (runs of 2 and 11 digits), so only the exchange decides whether the
+// decoded pass exempts it: an EC2 DescribeImages, and nothing else.
+func TestCheckScrubbedReadRefusesAPublicImageOwnerOutsideAnEC2DescribeImages(t *testing.T) {
+	read, state := scrubbedFixtures(t)
+	const image = 7
+	for name, edit := range map[string]func(*AWSReadExchange){
+		"under action DescribeVpcs":                func(ex *AWSReadExchange) { ex.Action = "DescribeVpcs" },
+		"under service ssm, action DescribeImages": func(ex *AWSReadExchange) { ex.Service = "ssm" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			var decoded AWSRecordedRead
+			require.NoError(t, decodeOneJSON(read, &decoded))
+			ex := &decoded.Exchanges[image]
+			require.Equal(t, "DescribeImages", ex.Action)
+			body := strings.Replace(ex.Body, scrubImageOwner, "<imageOwnerId>&#49;37112412989</imageOwnerId>", 1)
+			require.NotEqual(t, ex.Body, body)
+			ex.Body = body
+			edited, err := encodeScrubbedJSON(decoded, "  ")
+			require.NoError(t, err)
+			require.NoError(t, CheckScrubbedRead("read", edited, "state", state), "an EC2 DescribeImages passes it")
+
+			edit(ex)
+			edited, err = encodeScrubbedJSON(decoded, "  ")
+			require.NoError(t, err)
+			assert.ErrorContains(t, CheckScrubbedRead("read", edited, "state", state), "scrub check: read: $.exchanges[7].body: holds a 12-digit number")
+		})
+	}
+}
+
 func TestWriteScrubbedAWSReadHidesAPublicParametersOtherSensitiveAttributes(t *testing.T) {
 	readPath, statePath, outDir := scrubFixtures(t, nil, func(s string) string {
 		return strings.Replace(s, `"value": "value"`, `"value": "id"`, 1)
