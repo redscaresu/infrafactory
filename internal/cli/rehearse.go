@@ -9,11 +9,13 @@ import (
 // newRehearseCmd is the parent of the rehearsal family (ADR-0042). It reads
 // no infrafactory.yaml: a rehearsal takes its account and region from flags.
 //
-// Cobra checks neither args nor flag errors as usage on a group: an unknown
-// subcommand would print help and exit 0, and an unknown flag would exit 1.
-// So with no args it prints help, any arg is an unknown subcommand, and a
-// flag error anywhere in the family (subcommands inherit the func) is a
-// usage error, exit 2.
+// Cobra treats none of these as usage on a group: an unknown subcommand
+// prints help and exits 0, and a flag parse error, a missing required flag
+// or a broken flag group exits 1. So with no args it prints help, any arg is
+// an unknown subcommand, and the flag errors are wrapped as usage, exit 2,
+// for the whole family: subcommands inherit the flag-error func and the
+// persistent pre-run, which validates required flags and flag groups before
+// cobra does.
 func newRehearseCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "rehearse",
@@ -22,11 +24,29 @@ func newRehearseCmd() *cobra.Command {
 			if len(args) == 0 {
 				return cmd.Help()
 			}
-			return &CLIError{Op: cmd.CommandPath(), Code: errorCodeUsage, Err: fmt.Errorf("unknown command %q", args[0])}
+			return rehearseUsage(cmd, fmt.Errorf("unknown command %q", args[0]))
 		},
 	}
-	cmd.SetFlagErrorFunc(func(c *cobra.Command, err error) error {
-		return &CLIError{Op: c.CommandPath(), Code: errorCodeUsage, Err: err}
-	})
+	cmd.PersistentPreRunE = func(c *cobra.Command, args []string) error {
+		// Cobra runs only the nearest persistent pre-run, so run the root's
+		// (the --output check) first.
+		if parent := cmd.Parent(); parent != nil && parent.PersistentPreRunE != nil {
+			if err := parent.PersistentPreRunE(c, args); err != nil {
+				return err
+			}
+		}
+		if err := c.ValidateRequiredFlags(); err != nil {
+			return rehearseUsage(c, err)
+		}
+		if err := c.ValidateFlagGroups(); err != nil {
+			return rehearseUsage(c, err)
+		}
+		return nil
+	}
+	cmd.SetFlagErrorFunc(rehearseUsage)
 	return cmd
+}
+
+func rehearseUsage(cmd *cobra.Command, err error) error {
+	return &CLIError{Op: cmd.CommandPath(), Code: errorCodeUsage, Err: err}
 }

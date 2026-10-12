@@ -12,7 +12,7 @@ risk: high
 
 Merge main in before building: the `rehearse` group (rehearsal-prepare-command-group, ADR-0042) is there. This story's rehearse.go edit is one AddCommand entry registering `read` (the group's first AddCommand call if `prepare` has not landed), and nothing else.
 
-A `read` subcommand under the `rehearse` group. --account, --region, --credentials, --read-set and --out are required; --principal is optional. The account and region never come from infrafactory.yaml's `aws:` block or from the environment.
+A `read` subcommand under the `rehearse` group. --account, --region, --credentials, --read-set and --out are required; --principal is optional. Missing required flags come back as usage through the `rehearse` group's persistent pre-run, so read sets no PersistentPreRunE of its own (cobra runs only the nearest, so one would shadow the group's). The account and region never come from infrafactory.yaml's `aws:` block or from the environment.
 
 The command is off by default: it runs only when invoked, and no run, validate, UI or CI path calls it. It reads the key with prod-read-seam-credentials' reader, holds it in this process only, calls ReadAWSAccount with the real identity check and preflight, then writes the recorded read.
 

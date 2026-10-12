@@ -19,8 +19,8 @@ reason no decision rests on is marked **unverified**: the decision holds whether
 ### The family
 
 `infrafactory rehearse` is a command group. It has no action of its own: with no subcommand it
-prints its help and exits 0. An unknown subcommand, and a flag error anywhere in the family, is a
-usage error. It reads no `infrafactory.yaml`, because a rehearsal takes its account and region from
+prints its help and exits 0. An unknown subcommand is a usage error, and so, anywhere in the
+family, is a flag parse error, a missing required flag or a broken flag group. It reads no `infrafactory.yaml`, because a rehearsal takes its account and region from
 flags.
 
 - `rehearse prepare <dir> --account <id> --region <r> [--var-file f]` is decided here.
@@ -141,6 +141,15 @@ from that directory, and only if it stays inside the copy. A bare relative liter
 tofu resolves it from its working directory rather than the module directory (**unverified**;
 refusing it holds either way). Absolute, escaping, variable and otherwise computed paths are
 refused, and `abspath` and `pathexpand` are refused by name.
+
+A written path (`filename` of `local_file` and `local_sensitive_file`, `output_path` of
+`archive_file`) must also not name a file tofu could load, because an apply could otherwise write
+configuration that every later rehearse step loads ungated: a user override merges after
+infrafactory's (`TestAssumption_UserOverrideMergesAfterOurs`). A written path is refused when its
+base name has a `.tf` or `.tfvars` suffix or any suffix Decision 1 refuses, when it is
+`.terraform.lock.hcl`, or when any of its elements is `terraform.d` or `.terraform`. Names are
+compared case-insensitively, since a case-insensitive filesystem (macOS's default) maps
+`ZZ_OVERRIDE.TF` and `.TERRAFORM.LOCK.HCL` onto the names they spell.
 
 `fileset`'s second argument, the glob, is checked too, since it is joined onto the path before
 globbing (**unverified**; the check holds either way). It must be a literal relative pattern with

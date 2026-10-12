@@ -33,28 +33,42 @@ func TestRehearseIsRegisteredAndPrintsItsHelp(t *testing.T) {
 	assert.Contains(t, stdout.String(), found.Short)
 }
 
-// The child case stands in for `prepare`: a subcommand's flag error must
-// reach the group's flag-error func and exit 2 too.
+// The child stands in for `prepare`: a subcommand's flag parse error,
+// missing required flag and broken flag group must exit 2 too, and a valid
+// call must still run.
 func TestRehearseUsageErrorsExitTwo(t *testing.T) {
 	t.Parallel()
 
-	for _, args := range [][]string{
-		{"rehearse", "bogus"},
-		{"rehearse", "--nope"},
-		{"rehearse", "child", "--nope"},
+	for _, tc := range []struct {
+		args []string
+		want int
+	}{
+		{[]string{"rehearse", "bogus"}, ExitCodeUsage},
+		{[]string{"rehearse", "--nope"}, ExitCodeUsage},
+		{[]string{"--output", "yaml", "rehearse"}, ExitCodeUsage},
+		{[]string{"rehearse", "child", "--need", "v", "--nope"}, ExitCodeUsage},
+		{[]string{"rehearse", "child"}, ExitCodeUsage},
+		{[]string{"rehearse", "child", "--need", "v", "--x", "--y"}, ExitCodeUsage},
+		{[]string{"rehearse", "child", "--need", "v"}, ExitCodeSuccess},
 	} {
-		t.Run(strings.Join(args, " "), func(t *testing.T) {
+		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
 			t.Parallel()
 
 			root := NewRootCmd()
 			group, _, err := root.Find([]string{"rehearse"})
 			require.NoError(t, err)
-			group.AddCommand(&cobra.Command{Use: "child", RunE: func(*cobra.Command, []string) error { return nil }})
+			child := &cobra.Command{Use: "child", RunE: func(*cobra.Command, []string) error { return nil }}
+			child.Flags().String("need", "", "")
+			require.NoError(t, child.MarkFlagRequired("need"))
+			child.Flags().Bool("x", false, "")
+			child.Flags().Bool("y", false, "")
+			child.MarkFlagsMutuallyExclusive("x", "y")
+			group.AddCommand(child)
 			root.SetOut(&bytes.Buffer{})
 			root.SetErr(&bytes.Buffer{})
-			root.SetArgs(args)
+			root.SetArgs(tc.args)
 
-			assert.Equal(t, ExitCodeUsage, ExitCodeForError(root.Execute()))
+			assert.Equal(t, tc.want, ExitCodeForError(root.Execute()))
 		})
 	}
 }
