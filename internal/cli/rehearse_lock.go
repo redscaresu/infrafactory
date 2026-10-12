@@ -129,16 +129,15 @@ func rehearsalReleaseProblem(typ, version string) string {
 	return ""
 }
 
-// rehearsalLockChanges names every provider type whose locked version
-// differs between before and after, "none" where one has no entry.
+// rehearsalLockChanges names every provider type that after pins at
+// another version than before: a changed version, or an entry after adds
+// ("none" before). An entry after lacks passes: dropping one brings in no
+// version the user did not lock.
 func rehearsalLockChanges(before, after rehearsalLock) []string {
 	var changes []string
-	types := maps.Clone(before.versions)
-	maps.Copy(types, after.versions)
-	for _, typ := range slices.Sorted(maps.Keys(types)) {
-		from, to := before.versions[typ], after.versions[typ]
-		if from != to {
-			changes = append(changes, fmt.Sprintf("hashicorp/%s from %s to %s", typ, cmp.Or(from, "none"), cmp.Or(to, "none")))
+	for _, typ := range slices.Sorted(maps.Keys(after.versions)) {
+		if from, to := before.versions[typ], after.versions[typ]; from != to {
+			changes = append(changes, fmt.Sprintf("hashicorp/%s from %s to %s", typ, cmp.Or(from, "none"), to))
 		}
 	}
 	return changes

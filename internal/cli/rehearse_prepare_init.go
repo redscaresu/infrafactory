@@ -56,8 +56,8 @@ func rehearsalCancelled(ctx context.Context) error {
 // read no system config, never prompt and fetch only from files. Gate 1
 // has refused every module download, so git has nothing to fetch; the git
 // variables are a second wall in case the gate is wrong, and allow no git
-// transport at all, file included. Then the copy's lock must pin every
-// provider at the version lock pins it, and the rehearsal's modes are
+// transport at all, file included. Then the copy's lock may pin no
+// provider at a version lock does not, and the rehearsal's modes are
 // tightened again.
 func (p rehearsePrepare) firstInit(ctx context.Context, rehearsal string, in rehearsalGateInput, lock rehearsalLock) error {
 	home, data := filepath.Join(rehearsal, "home"), filepath.Join(rehearsal, "data")

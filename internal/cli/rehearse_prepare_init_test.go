@@ -130,6 +130,23 @@ func TestRehearsePrepareRefusesAChangedLockVersion(t *testing.T) {
 	}
 }
 
+// An entry the first init drops is admitted: it brings in no version the
+// user did not lock.
+func TestRehearsePrepareAdmitsAnEntryTheFirstInitDrops(t *testing.T) {
+	t.Parallel()
+	before := prepareLock + lockEntry("registry.opentofu.org/hashicorp/random", "3.6.0")
+	repo, run := initRun(t, rehearsePrepare{}, before, func(_ context.Context, c harness.Command) (harness.CommandResult, error) {
+		if c.Args[0] == "init" {
+			require.NoError(t, os.WriteFile(filepath.Join(c.Dir, rehearsalLockFile), []byte(prepareLock), 0o644))
+		}
+		return harness.CommandResult{}, nil
+	})
+
+	require.NoError(t, run.err)
+	assert.Contains(t, run.stdout, "Status: success\n")
+	assert.DirExists(t, preparedDir(repo))
+}
+
 func TestRehearsePrepareTofuFailureExitsOne(t *testing.T) {
 	t.Parallel()
 

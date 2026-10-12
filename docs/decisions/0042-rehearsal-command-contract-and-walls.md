@@ -254,9 +254,11 @@ The first init runs `tofu providers lock -platform=<GOOS_GOARCH>` before `init`,
 lacks this platform's hashes still initialises. providers lock keeps the locked version
 (`TestAssumption_ProvidersLockKeepsLockedVersion`), and prepare holds every provider's whatever tofu
 does: after the first init it parses the copy's lock again under the same rules and refuses, naming
-both versions, if any provider's version changed, or a provider gained or lost its entry. Versions
-compare by provider, so a registry.terraform.io entry that tofu replaces with a registry.opentofu.org
-one at the same version is no change. The user's own lock is never written: only the copy's is.
+both versions, if the init changed any provider's version or added an entry the user's lock did not
+have. An entry the init drops passes: tofu rewrites the lock with only the providers the
+configuration needs (**unverified**), and whether or not it does, dropping an entry brings in no
+version the user did not lock. Versions compare by provider, so a registry.terraform.io entry that
+tofu replaces with a registry.opentofu.org one at the same version is no change. The user's own lock is never written: only the copy's is.
 
 A lock whose aws entry is registry.terraform.io's initialises: providers lock adds a
 registry.opentofu.org entry at the same version, and init installs it
