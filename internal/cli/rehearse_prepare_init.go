@@ -53,10 +53,10 @@ func rehearsalCancelled(ctx context.Context) error {
 // (TestAssumption_ProvidersLockKeepsLockedVersion), providers lock for
 // this platform, then init with no backend. Each runs under replace mode
 // with an empty HOME, TF_DATA_DIR at <rehearsal>/data, and git told to
-// read no system config, never prompt and fetch only from files. Gate 1
-// has refused every module download, so git has nothing to fetch; the git
-// variables are a second wall in case the gate is wrong, and allow no git
-// transport at all, file included. Then the copy's lock may pin no
+// read no system config, never prompt and fetch through no transport,
+// file included. Gate 1 has refused every module download, so git has
+// nothing to fetch; the git variables are a second wall in case the gate
+// is wrong. Then the copy's lock may pin no
 // provider at a version lock does not, and the rehearsal's modes are
 // tightened again.
 func (p rehearsePrepare) firstInit(ctx context.Context, rehearsal string, in rehearsalGateInput, lock rehearsalLock) error {
