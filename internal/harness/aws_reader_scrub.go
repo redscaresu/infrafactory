@@ -582,7 +582,7 @@ func checkScrubbedText(text string) error {
 
 // awsPublicImageOwners are the accounts that own public images a read
 // may hold, each with the AWS documentation naming it. Only these may
-// stand, and only as a DescribeImages item's imageOwnerId: a public
+// stand, and only as an EC2 DescribeImages item's imageOwnerId: a public
 // parameter's AMI is read (awsReplay.readSSM), and its owner is not the
 // read's account, so the scrub leaves it.
 var awsPublicImageOwners = []string{
