@@ -1,8 +1,7 @@
 ---
 kind: code
 repo: fakeaws
-status: blocked
-blocked_by: [fakeaws-schema-version-refuses-older]
+status: ready
 epic: fakeaws-loader
 depends_on: [fakeaws-schema-version-refuses-older]
 touches: [handlers/iam.go, handlers/iam_test.go, repository/iam.go, repository/iam_test.go, repository/testdata/schema.golden, coverage_matrix.yaml, examples/working/iam_role_inline_policy/main.tf, examples/README.md]

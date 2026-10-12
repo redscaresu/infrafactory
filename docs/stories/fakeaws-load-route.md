@@ -1,8 +1,7 @@
 ---
 kind: code
 repo: fakeaws
-status: blocked
-blocked_by: [fakeaws-load-tree-diff]
+status: ready
 epic: fakeaws-loader
 depends_on: [fakeaws-load-tree-diff]
 touches: [handlers/load.go, handlers/load_test.go, handlers/export_test.go, handlers/admin.go, handlers/handlers.go, handlers/regression_audit_test.go, repository/load.go, repository/load_test.go, cmd/fakeaws/main.go, cmd/fakeaws/main_test.go, README.md, SECURITY.md]
