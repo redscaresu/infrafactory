@@ -644,7 +644,7 @@ command runs on a configuration the gate refused. Run from inside the git reposi
 `<dir>`. Nothing is planned or applied; a success report names the rehearsal's id, its work dir,
 the `hashicorp/aws` version the lock pins and any warnings.
 
-- `-h`, `--help` prints the usage. `--config` and `--output` are global and unused: prepare reads no config.
+- `-h`, `--help` prints the usage. `--output human|json` is global and picks the report's format; `--config` is global and ignored, since prepare reads no config.
 - `<dir>` must resolve, symlinks included, inside the current directory's repository.
 - `--account` (12 digits) and `--region` are required. The gate checks the code against `--region`:
   every `provider "aws"` block must set `region`, as a string literal or a root `var.<name>` the
