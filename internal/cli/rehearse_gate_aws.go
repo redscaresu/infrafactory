@@ -39,6 +39,19 @@ var rehearsalAWSProviderTable = map[string]bool{
 	"assume_role": false, "assume_role_with_web_identity": false,
 }
 
+// rehearsalAWSAdmitted lists what a provider "aws" block admits, from the
+// table, for its refusals.
+var rehearsalAWSAdmitted = func() string {
+	names := []string{"alias"}
+	for name, admitted := range rehearsalAWSProviderTable {
+		if admitted {
+			names = append(names, name)
+		}
+	}
+	slices.Sort(names)
+	return strings.Join(names, ", ")
+}()
+
 // awsProviderProblems holds a root provider "aws" block to the table and
 // records its region for goal 11. A block with no region is refused.
 func (m rehearsalModule) awsProviderProblems(file, at string, block *hclsyntax.Block) []string {
@@ -50,12 +63,12 @@ func (m rehearsalModule) awsProviderProblems(file, at string, block *hclsyntax.B
 	for _, inner := range block.Body.Blocks {
 		problems = append(problems, rehearsalAWSArgProblems(rehearsalAt(file, inner.DefRange(), addr+"."+inner.Type), inner.Type)...)
 	}
+	if _, aliased := block.Body.Attributes["alias"]; !aliased {
+		m.regions.defaultProvider = true
+	}
 	region, ok := block.Body.Attributes["region"]
 	if !ok {
 		return append(problems, at+`: refused: a provider "aws" block must set region, so goal 11 can check it`)
-	}
-	if _, aliased := block.Body.Attributes["alias"]; !aliased {
-		m.regions.defaultProvider = true
 	}
 	m.regions.uses = append(m.regions.uses, rehearsalRegionUse{at: rehearsalAt(file, region.SrcRange, addr+".region"), expr: region.Expr, root: true})
 	return problems
@@ -69,14 +82,7 @@ func rehearsalAWSArgProblems(at, name string) []string {
 	case name == "alias", admitted:
 		return nil
 	case named:
-		var names []string
-		for name, admitted := range rehearsalAWSProviderTable {
-			if admitted {
-				names = append(names, name)
-			}
-		}
-		slices.Sort(names)
-		return []string{fmt.Sprintf(`%s: refused: a provider "aws" block admits only alias, %s`, at, strings.Join(names, ", "))}
+		return []string{fmt.Sprintf(`%s: refused: a provider "aws" block admits only %s`, at, rehearsalAWSAdmitted)}
 	}
 	return []string{fmt.Sprintf(`%s: refused: the gate's table of hashicorp/aws %s provider arguments does not name it, so it is refused under any lock version`, at, harness.AWSProviderVersion)}
 }
@@ -210,7 +216,7 @@ func (u rehearsalRegionUse) resolve(sources []rehearsalVarSource) (string, strin
 	name, ok := rehearsalVarName(expr)
 	switch {
 	case !ok:
-		return "", "", "region must be a string literal or var.<name>, so " + rehearsalRefNames(expr) + " is refused"
+		return "", "", "region must be a string literal or var.<name> (it reads " + rehearsalReads(expr) + ")"
 	case !u.root:
 		return "", "", fmt.Sprintf("var.%s is in a module, and the gate resolves variables only in the root, so a module's region must be a string literal", name)
 	}
@@ -236,25 +242,4 @@ func rehearsalVarName(expr hclsyntax.Expression) (string, bool) {
 	}
 	attr, ok := ref.Traversal[1].(hcl.TraverseAttr)
 	return attr.Name, ok
-}
-
-// rehearsalRefNames names what an expression refers to, such as
-// local.region, or calls it computed when it refers to nothing.
-func rehearsalRefNames(expr hclsyntax.Expression) string {
-	var names []string
-	for _, traversal := range expr.Variables() {
-		name := traversal.RootName()
-		for _, step := range traversal[1:] {
-			attr, ok := step.(hcl.TraverseAttr)
-			if !ok {
-				break
-			}
-			name += "." + attr.Name
-		}
-		names = append(names, name)
-	}
-	if len(names) == 0 {
-		return "a computed value"
-	}
-	return strings.Join(names, ", ")
 }

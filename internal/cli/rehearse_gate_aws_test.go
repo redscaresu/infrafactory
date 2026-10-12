@@ -48,9 +48,9 @@ func TestRehearsalGateAWSRefuses(t *testing.T) {
 		{name: "another literal", files: map[string]string{"main.tf": awsRoot(`"eu-west-1"`, "null")},
 			want: []string{`main.tf:5: provider.aws.region: refused: region "eu-west-1" is not --region "us-east-1"`}},
 		{name: "a local", files: map[string]string{"main.tf": awsRoot("local.region", "null") + "locals {\n  region = \"us-east-1\"\n}\n"},
-			want: []string{"main.tf:5: provider.aws.region: refused: region must be a string literal or var.<name>, so local.region is refused"}},
+			want: []string{"main.tf:5: provider.aws.region: refused: region must be a string literal or var.<name> (it reads local.region)"}},
 		{name: "a function call", files: map[string]string{"main.tf": awsRoot(`lower("US-EAST-1")`, "null")},
-			want: []string{"main.tf:5: provider.aws.region: refused: region must be a string literal or var.<name>, so a computed value is refused"}},
+			want: []string{"main.tf:5: provider.aws.region: refused: region must be a string literal or var.<name> (it reads no reference, but does not evaluate as a literal)"}},
 		{name: "an aliased provider with another region", files: map[string]string{"main.tf": awsRoot(`"us-east-1"`, "null") + "provider \"aws\" {\n  alias  = \"west\"\n  region = \"eu-west-1\"\n}\n"},
 			want: []string{`main.tf:10: provider.aws.region: refused: region "eu-west-1" is not --region "us-east-1"`}},
 		{name: "a provider with no region", files: map[string]string{"main.tf": "provider \"aws\" {\n  alias = \"west\"\n}\n"},
@@ -99,6 +99,14 @@ func TestRehearsalGateAWSRefuses(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestRehearsalGateAWSNoRegionIsTheOnlyRefusal: an unaliased provider
+// "aws" block with no region is still the default, so aws_* types beside
+// it draw only the missing-region refusal.
+func TestRehearsalGateAWSNoRegionIsTheOnlyRefusal(t *testing.T) {
+	err := gateFixture(t, map[string]string{"main.tf": "provider \"aws\" {}\nresource \"aws_vpc\" \"v\" {}\n"}, "")
+	assert.EqualError(t, err, errRehearsalRefuses.Error()+`: main.tf:1: provider.aws: refused: a provider "aws" block must set region, so goal 11 can check it`)
 }
 
 func TestRehearsalGateAWSAdmits(t *testing.T) {
