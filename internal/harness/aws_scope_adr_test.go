@@ -48,7 +48,7 @@ func TestADR0040RecordsTheHold(t *testing.T) {
 	t.Parallel()
 	data, err := os.ReadFile(awsScopeADRFile)
 	require.NoError(t, err)
-	_, section, found := strings.Cut(string(data), "## Amendment, 2026-10-12")
+	_, section, found := strings.Cut(string(data), "## Amendment, 2026-10-12: a deliberate hold, released by a reap")
 	require.True(t, found, "ADR-0040 must carry the 2026-10-12 hold amendment")
 	section, _, _ = strings.Cut(section, "\n## ")
 	// Fields folds the ADR's line wraps so a phrase can span them.
@@ -63,7 +63,9 @@ func TestADR0040RecordsTheHold(t *testing.T) {
 		"`reap <scenario> --take-over <holder>`",
 		"generate, run and test are refused for that scenario",
 		"nothing expires a hold",
-		"the operator deletes it by hand",
+		"deleted by hand only after the release",
+		"never under `.infrafactory/runs/` or `.infrafactory/live/`",
+		"`INFRAFACTORY_RUNSTORE_ROOT` does not move it",
 		"the output state is present and different, refuse",
 	} {
 		assert.Contains(t, amendment, strings.ToLower(want))

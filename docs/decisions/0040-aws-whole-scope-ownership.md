@@ -120,10 +120,12 @@ release is a reap. Rules 1-17 and the sweep rows and precedence pairs above are 
   output state and verify it; a copy exists and the output state is byte-identical, keep it; the
   output state is missing, restore it from the copy; the output state is present and different,
   refuse, both files left as they were.
-- **Who deletes the copy:** nothing in code deletes it. The operator deletes it by hand after the
-  read, and that is what lifts the refusal below. A copy written before a fall-through (a failed or
-  interrupted hold that then destroys and releases) is kept and its path printed, and the refusal
-  holds until it is deleted. A successful `--release-hold` also leaves the copy for the read.
+- **Who deletes the copy:** nothing in code deletes it. It is deleted by hand only after the
+  release (or after a fall-through's destroy and release); until then it is the guard, so a read
+  against the held stack cannot lift it. Deleting it is what lifts the refusal below. A copy written
+  before a fall-through (a failed or interrupted hold that then destroys and releases) is kept and
+  its path printed, and the refusal holds until it is deleted. A successful `--release-hold` also
+  leaves the copy, as the recording's pre-destroy state.
 - **While the copy exists**, generate, run and test are refused for that scenario, because
   generation removes the output dir that holds the only live state.
 - **Nothing expires a hold**: `service.ttl` has no AWS consumer, so a hold lasts until a release.
