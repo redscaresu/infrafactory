@@ -147,8 +147,7 @@ func ValidateAWSReadSet(entries []AWSReadEntry) error {
 	var errs []error
 	for i, entry := range entries {
 		if !awsReaderTableHas(entry) {
-			errs = append(errs, fmt.Errorf("entry %d (service %q, protocol %q, action %q) is not in the reader table",
-				i, entry.Service, entry.Protocol, entry.Action))
+			errs = append(errs, fmt.Errorf("%s is not in the reader table", awsReadEntryName(i, entry)))
 		}
 	}
 	if len(errs) > 0 {

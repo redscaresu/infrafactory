@@ -9,9 +9,9 @@ import (
 )
 
 // The only SDK clients the account read builds: EC2 for the preflight and
-// STS for the identity check. Every other read is read-core's raw replay
-// through a wall. Each sends only through its wall, and the SDK never
-// retries, because read-core owns retry. TestAWSReadSeamUsesOnlyTheWalledClients
+// STS for the identity check. Every other read is ReadAWSAccount's raw
+// replay through a wall. Each sends only through its wall, and the SDK
+// never retries, because the account read owns retry. TestAWSReadSeamUsesOnlyTheWalledClients
 // holds every options func here to setting o.HTTPClient to its wall.
 
 func newAWSReadEC2Client(cfg aws.Config, wall *AWSReadWall) (*ec2.Client, error) {
