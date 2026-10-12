@@ -195,7 +195,8 @@ tofu version, are tests (ADR-0028).
 
 The base and the head are each planned against an **empty** walled fakeaws (the read set is the
 union of what both sent), and fakeaws's request log
-(the `audit` table, `../fakeaws/handlers/admin.go:35`) records every Describe, List and Get the
+(in process, on only with `-record-requests`, read at `GET /mock/requests`; it is not the `audit`
+table, and `/mock/state`'s audit carries no params) records every Describe, List and Get the
 provider sent: each data source's filters, each import's id lookup. Those requests, the ids a pulled
 tfstate names, and the names every planned create would take (from `tofu show -json` of that plan)
 are the **read set**. The planned values need no HCL evaluation in infrafactory; tofu evaluated
@@ -475,7 +476,7 @@ and its walls; the account-read contract and the recorded-read format; the fakea
 ## Epics
 
 - rehearsal-assumption-tests — done (#457)
-- [fakeaws-rehearsal-instance](../epics/fakeaws-rehearsal-instance.md)
+- fakeaws-rehearsal-instance — done (#482)
 - [fakeaws-loaded-identity](../epics/fakeaws-loaded-identity.md)
 - [fakeaws-data-sources](../epics/fakeaws-data-sources.md)
 - [rehearsal-prepare-gate](../epics/rehearsal-prepare-gate.md)

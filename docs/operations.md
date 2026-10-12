@@ -498,13 +498,41 @@ In the Layer 3 account the SCP (`docs/layer3/aws/scp.json`, `DenyEveryServiceBut
 every `iam:*` action to everyone but the admin role, so the policy's `iam:` rows are unreachable
 there: the IAM readers are proved against fakeaws only.
 
+### The fakeaws instance
+
+The rehearsal runs its own fakeaws, started with these flags (`fakeaws/cmd/fakeaws/main.go`):
+
+- `-bind <host>` sets the listen host. `-bind 127.0.0.1` refuses every other host. Empty, the
+  default, listens on all interfaces, as the Makefile and CI runs always have.
+- `-admin-token <t>`, or `FAKEAWS_ADMIN_TOKEN` (the flag wins), makes every `/mock/*` request need
+  `Authorization: Bearer <t>`. A `/mock/*` request whose `Origin` is present and not loopback is 403
+  before the token is read; an absent `Origin` is allowed. Without a token, `/mock` is unchanged. Prefer
+  the env var: a flag value shows in `ps`.
+- `-record-requests` keeps an in-memory log of every AWS request. It is refused without a token,
+  because the log holds request values. `GET /mock/requests` returns it and `POST /mock/requests/clear`
+  empties it; `POST /mock/reset` empties it too. `/mock/state`'s `audit` lists the same requests with
+  service, protocol, action, status and class only, no params.
+
+Each logged request carries one class:
+
+| Class | Meaning |
+|---|---|
+| `answered-from-rows` | Answered from stored rows, including an empty answer read from rows. |
+| `not-modelled-404` | The default arm for an action fakeaws does not model. Its 404 looks like a missing row's, so only this mark tells them apart. |
+| `unimplemented-501` | The router's 501 for an operation fakeaws does not implement. |
+| `filter-refused` | A site refuses what real AWS would accept but fakeaws does not model: a filter, a parameter, a tag resource type, or a required-parameter check stricter than AWS's. The answer is the site's refusal (EC2 409 or 400, RDS and Route53 400, SSM 501). A refusal AWS makes too, or a filter or parameter fakeaws ignores, stays `answered-from-rows`. |
+| `empty-collection` | A Describe of a resource type fakeaws never creates (EC2). Other always-empty answers stay `answered-from-rows`. |
+
+A file-backed database (`-db <path>`), its `-wal` and `-shm`, a snapshot and a restored copy are created
+0600, owner-only. An existing database keeps its mode.
+
 ## Sibling mocks
 
 Three first-party HTTP-level mocks + one third-party backend live alongside infrafactory:
 
 - **mockway** (`../mockway`, github.com/redscaresu/mockway) — Scaleway mock; runs on `:8080`. Apache-2.0, public.
 - **fakegcp** (`../fakegcp`, github.com/redscaresu/fakegcp) — GCP mock; runs on `:8081`. Memorystore + Cloud SQL + GKE + IAM + Storage + DNS + Pub/Sub + Secret Manager + Cloud Run + Cloud KMS (added 2026-05-31 in fakegcp@c7999b5).
-- **fakeaws** (`../fakeaws`, github.com/redscaresu/fakeaws) — AWS mock; runs on `:8082`. Ships 10 services across 5 wire formats (IAM, S3, EC2, RDS, DynamoDB, EKS, SQS, Route53, Secrets Manager, KMS).
+- **fakeaws** (`../fakeaws`, github.com/redscaresu/fakeaws) — AWS mock; runs on `:8082`. Ships 12 services across 5 wire formats (IAM, S3, EC2, RDS, DynamoDB, EKS, SQS, Route53, Secrets Manager, KMS, SSM, STS).
 - **fakegenesys** (`../fakegenesys`, github.com/redscaresu/fakegenesys) — Genesys Cloud CCaaS mock; runs on `:8083`. Ships 15 resources across identity (user, group, location, auth_role, oauth_client), routing (queue + members + skill + wrapupcode + language + utilization singleton), and architect (datatable + rows + user_prompt + flow with multipart + lock/publish state machine + responsemanagement_response + idp_generic singleton). Spec-driven fidelity via `specs/genesys-openapi.json`. Added 2026-06-06 (arc S108-S115); hardened in arc S123-S127 + sibling rollout S128-S130 (v0.2.0).
 - **SeaweedFS** (`chrislusf/seaweedfs` container) — third-party S3 backend for `aws_s3_bucket` reads (`terraform-provider-aws` needs the full management surface; fakeaws's stripped S3 handler isn't enough). Runs on `:9090` via `docker-compose.mocks.yml`. Anonymous-mode `ListAllMyBuckets` returns empty even when buckets exist — use HEAD-by-name as the assertion path. Empirical evaluation log in `CONCEPT.md` § "Third-Party Mock Integration" (rejects Adobe S3Mock + Garage + LocalStack + MinIO).
 - **s3router** (`cmd/s3router/`, S80) — in-repo reverse-proxy shim that listens on `:9091` and fans S3 traffic across SeaweedFS and fakeaws. `?publicAccessBlock` → fakeaws (SeaweedFS uniquely 501s on that subresource); everything else → SeaweedFS; `PUT/DELETE /<bucket>` fans out to both. `infrafactory.yaml` `s3.url` points at the shim, not SeaweedFS directly. Add a subresource to `fakeawsSubresources` in `main.go` only when a new SeaweedFS 501 surfaces. ADR-0015 § "S80 — S3 backend router" carries the rationale.
