@@ -1,8 +1,7 @@
 ---
 kind: code
 repo: fakeaws
-status: blocked
-blocked_by: [fakeaws-ec2-filters-never-ignored]
+status: ready
 epic: fakeaws-data-sources
 depends_on: [fakeaws-ec2-filters-never-ignored]
 touches: [handlers/ec2_filters.go, handlers/ec2.go, handlers/ec2_test.go, handlers/regression_test.go, CHANGELOG.md]
