@@ -479,7 +479,7 @@ and its walls; the account-read contract and the recorded-read format; the fakea
 - fakeaws-rehearsal-instance — done (#482)
 - fakeaws-loaded-identity — done (#489)
 - [fakeaws-data-sources](../epics/fakeaws-data-sources.md)
-- rehearsal-prepare-gate — done (#PRs)
+- rehearsal-prepare-gate — done (#479, #480, #491, #499, #500, #509, #514, #517, #522, #526)
 - aws-hold-for-read — done (#476, #483, #490, #498, #502; real proof 2026-10-12: this PR)
 - [prod-read-seam](../epics/prod-read-seam.md)
 - [fakeaws-loader](../epics/fakeaws-loader.md)
