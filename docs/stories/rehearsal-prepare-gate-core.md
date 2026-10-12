@@ -1,7 +1,6 @@
 ---
 kind: code
-status: blocked
-blocked_by: [rehearsal-prepare-command-group]
+status: ready
 epic: rehearsal-prepare-gate
 depends_on: [rehearsal-prepare-command-group]
 touches: [internal/cli/rehearse_gate.go, internal/cli/rehearse_gate_aws.go, internal/cli/rehearse_gate_paths.go, internal/cli/rehearse_gate_modules.go, internal/cli/rehearse_gate_test.go, internal/cli/rehearsal_assumptions_test.go, docs/decisions/0028-factual-claims-are-tests-not-comments.md, .github/fakeaws-e2e-tests]

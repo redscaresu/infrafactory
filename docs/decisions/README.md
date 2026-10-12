@@ -48,6 +48,7 @@ Use ADRs for decisions that affect long-term behavior, interfaces, or contributo
 - [0039](0039-layer-neutral-aws-generated-hcl.md) Layer-Neutral AWS Generated HCL — Accepted
 - [0040](0040-aws-whole-scope-ownership.md) Whole-Scope Ownership for AWS Layer 3 — Accepted
 - [0041](0041-account-read-contract-and-recorded-read-format.md) The Account-Read Contract, the Read-Set and Recorded-Read Formats — Accepted
+- [0042](0042-rehearsal-command-contract-and-walls.md) The Rehearsal Command Contract and Its Walls — Accepted
 <!-- adr-index:end -->
 
 Generated from the ADR files by `make adr-index`; CI fails if it is stale. Do not edit between the markers.

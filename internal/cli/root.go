@@ -109,6 +109,7 @@ func NewRootCmd(opts ...RootOption) *cobra.Command {
 		newLiveCmd(cfg),
 		newPitfallsCmd(cfg),
 		newMockCmd(cfg),
+		newRehearseCmd(),
 		newUICmd(cfg.uiAssets),
 	)
 
