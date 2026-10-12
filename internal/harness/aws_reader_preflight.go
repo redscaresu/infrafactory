@@ -12,17 +12,24 @@ import (
 	"github.com/aws/smithy-go"
 )
 
-// awsDryRunRefusedCode is the one answer that proves the key may not send
-// an action. With DryRun=true, EC2 answers DryRunOperation when the key
-// holds the permission.
+// awsDryRunRefusedCode is the one answer the preflight accepts: EC2
+// refused the action for the placeholder resource. With DryRun=true, EC2
+// answers DryRunOperation when the key's grant reaches that resource.
 const awsDryRunRefusedCode = "UnauthorizedOperation"
 
-// PreflightAWSReadKey proves the read key cannot send any DryRun-table
-// action. It sends each once with DryRun=true through the walled EC2
-// client and passes only when every answer is the API error
+// PreflightAWSReadKey probes the reap's EC2 actions, the DryRun table. It
+// sends each once with DryRun=true and a placeholder id through the
+// walled EC2 client, and passes only when every answer is the API error
 // UnauthorizedOperation; a success, any other code (DryRunOperation
-// among them) or no API answer at all refuses, naming the action. DryRun
-// is EC2-only: IAM and SSM writes are stopped by the wall.
+// among them) or no API answer at all refuses, naming the action.
+//
+// A pass proves only that the key holds no grant for those actions that
+// reaches a resource it has never seen. It proves nothing about actions
+// outside the table: a key that can RunInstances, CreateVpc or
+// AuthorizeSecurityGroupIngress passes. Nor about a grant scoped to real
+// ARNs or tags, which the placeholder resource matches neither of. What
+// stops every non-reader request, on every service, is the wall, in
+// process at runtime; DryRun is EC2-only.
 func PreflightAWSReadKey(ctx context.Context, cfg aws.Config, wall *AWSReadWall) error {
 	return preflightAWSRead(ctx, cfg, wall, AWSReaderDryRunActions)
 }

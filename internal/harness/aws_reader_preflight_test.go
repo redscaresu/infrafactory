@@ -117,6 +117,14 @@ func TestAWSDryRunWireParamsCoverTheDryRunTable(t *testing.T) {
 	assert.ElementsMatch(t, AWSReaderDryRunActions, slices.Collect(maps.Keys(awsDryRunWireParams)))
 }
 
+// A builder left behind for a renamed reap action, or a typo key beside
+// the right one, would never be sent and never be noticed.
+func TestAWSDryRunPlaceholdersAreExactlyTheDryRunTable(t *testing.T) {
+	t.Parallel()
+
+	assert.ElementsMatch(t, AWSReaderDryRunActions, slices.Collect(maps.Keys(awsDryRunPlaceholders)))
+}
+
 func TestPreflightAWSReadKeyPassesWhenEveryActionIsUnauthorized(t *testing.T) {
 	t.Parallel()
 

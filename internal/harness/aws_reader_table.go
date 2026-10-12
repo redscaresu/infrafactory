@@ -75,8 +75,8 @@ var AWSReaderTable = []AWSReaderService{
 }
 
 // AWSReaderDryRunActions are the EC2 actions the preflight sends with
-// DryRun=true, to prove the read key cannot send them: every action the
-// reap sends that is not a Describe. They are derived from AWSReapSteps,
+// DryRun=true against placeholder ids (PreflightAWSReadKey says what a
+// pass proves): every action the reap sends that is not a Describe. They are derived from AWSReapSteps,
 // never listed by hand, and are never reader-table rows, so the reader
 // policy never grants them.
 var AWSReaderDryRunActions = awsReapWriteActions()
