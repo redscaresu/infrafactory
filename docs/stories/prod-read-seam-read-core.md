@@ -1,7 +1,6 @@
 ---
 kind: code
-status: blocked
-blocked_by: [prod-read-seam-identity-preflight, prod-read-seam-reader-policy]
+status: ready
 epic: prod-read-seam
 depends_on: [prod-read-seam-identity-preflight, prod-read-seam-reader-policy]
 touches: [internal/harness/aws_reader.go, internal/harness/aws_reader_test.go, internal/harness/aws_reader_table.go, internal/e2e/aws_reader_fakeaws_test.go]
