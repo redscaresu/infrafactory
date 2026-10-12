@@ -1,0 +1,6 @@
+{
+  "schema": "infrafactory.rehearse.prepare.v1",
+  "status": "success",
+  "id": "rehearsal-id",
+  "work_dir": "<WORKSPACE>/.infrafactory/rehearsals/rehearsal-id/work/envs/prod"
+}

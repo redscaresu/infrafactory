@@ -262,6 +262,27 @@ func TestCommandOutputGoldenSnapshots(t *testing.T) {
 				return []string{"--config", h.ConfigPath, "--output", string(mode)}
 			},
 		},
+		{
+			name: "rehearse_prepare",
+			build: func(h *CommandTestHarness) *cobra.Command {
+				return goldenPrepareRoot(h, "resource \"terraform_data\" \"x\" {}\n")
+			},
+			args: func(h *CommandTestHarness, mode OutputMode) []string {
+				return append([]string{"rehearse", "prepare", "envs/prod", "--output", string(mode)}, prepareFlags...)
+			},
+			normalize: normalizeGoldenWorkspace,
+		},
+		{
+			name: "rehearse_prepare_refused",
+			build: func(h *CommandTestHarness) *cobra.Command {
+				return goldenPrepareRoot(h, "terraform {\n  cloud {}\n}\n")
+			},
+			args: func(h *CommandTestHarness, mode OutputMode) []string {
+				return append([]string{"rehearse", "prepare", "envs/prod", "--output", string(mode)}, prepareFlags...)
+			},
+			expectErr: true,
+			normalize: normalizeGoldenWorkspace,
+		},
 	}
 
 	for _, tc := range cases {
@@ -293,6 +314,24 @@ func TestCommandOutputGoldenSnapshots(t *testing.T) {
 			})
 		}
 	}
+}
+
+// goldenPrepareRoot makes the workspace a repo whose envs/prod/main.tf
+// holds mainTF, and returns a root that runs prepare from it.
+func goldenPrepareRoot(h *CommandTestHarness, mainTF string) *cobra.Command {
+	mustWriteFile(h.T, filepath.Join(h.WorkspaceDir, ".git", "HEAD"), "ref: refs/heads/main\n")
+	mustWriteFile(h.T, filepath.Join(h.WorkspaceDir, "envs", "prod", "main.tf"), mainTF)
+	return prepareRoot(rehearsePrepare{wd: h.WorkspaceDir, newID: func() string { return prepareID }})
+}
+
+// normalizeGoldenWorkspace replaces the workspace, resolved, as prepare
+// names it.
+func normalizeGoldenWorkspace(h *CommandTestHarness, out string) string {
+	resolved, err := filepath.EvalSymlinks(h.WorkspaceDir)
+	if err != nil {
+		h.T.Fatalf("resolve workspace: %v", err)
+	}
+	return strings.ReplaceAll(out, resolved, "<WORKSPACE>")
 }
 
 func assertCommandGolden(t *testing.T, name string, actual []byte) {

@@ -271,8 +271,8 @@ func rehearsalUnder(path, dir string) bool {
 // never dir itself: a call back onto its own call path is a cycle. It
 // reads each dir by the gate's walk, so anything that stops the gate
 // reading one (a module source the rule refuses, a .tf file that does not
-// parse, a file refused by name) refuses the lot. rehearsal-prepare-copy
-// uses it to find what to copy.
+// parse, a file refused by name) refuses the lot. Prepare uses it to find
+// what to copy.
 func rehearsalLocalModuleSources(dir, boundary string) ([]string, error) {
 	dirs, problems := rehearsalModuleDirs(dir, boundary)
 	if err := rehearsalRefusal(problems); err != nil {

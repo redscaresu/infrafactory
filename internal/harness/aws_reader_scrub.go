@@ -94,6 +94,11 @@ var (
 	awsRecordedBodyPathPattern = regexp.MustCompile(`^\$\.exchanges\[[0-9]+\]\.body$`)
 )
 
+// ValidAWSAccountID reports whether id is an AWS account id: twelve digits.
+func ValidAWSAccountID(id string) bool {
+	return awsAccountIDPattern.MatchString(id)
+}
+
 // awsPrincipalARNPrefix is a principal's ARN up to its name, around an
 // account pattern; awsPrincipalNameChars is what IAM allows in a name
 // ([\w+=,.@-]), plus / for a user's path and between role and session.
