@@ -2,9 +2,9 @@
 kind: code
 repo: fakeaws
 status: blocked
-blocked_by: [fakeaws-filters-security-groups]
+blocked_by: [fakeaws-instance-attributes-from-rows]
 epic: fakeaws-data-sources
-depends_on: [fakeaws-filters-security-groups]
+depends_on: [fakeaws-filters-security-groups, fakeaws-instance-attributes-from-rows]
 touches: [handlers/ec2_filters.go, handlers/ec2.go, handlers/ec2_test.go, handlers/regression_test.go, CHANGELOG.md]
 ---
 
