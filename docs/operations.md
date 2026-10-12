@@ -445,46 +445,73 @@ and its resources to `ACCOUNT_ID` and `REGION` (ADR-0023, amendment of 2026-10-1
 this file to `infrafactory-layer3` or `infrafactory-layer3-scope`: as a new version of that policy
 it strips the Layer 3 key's permissions, and a reader on that user would also hold reap's writes.
 
-`REGION`, `ACCOUNT_ID` and the admin profile are the account being read's; for the Layer 3
-account they are Scope setup step 0's. Create the user and attach the policy, and nothing else:
+The user runs every command in this section, as an admin of the account being read, which can be
+prod; the lead never holds those credentials. The lead checks only the key file's mode and key
+names, and after cleanup that it is absent. `REGION`, `ACCOUNT_ID` and `PROFILE` (the admin
+profile) are the account being read's; for the Layer 3 account they are Scope setup step 0's
+`REGION` and `ACCOUNT_ID`, and `PROFILE=infrafactory-admin`.
+
+Once, create the user and attach the policy, and nothing else:
 
 ```bash
-aws iam create-user --user-name infrafactory-reader --profile infrafactory-admin
+aws iam create-user --user-name infrafactory-reader --profile "$PROFILE"
 sed -e "s/REGION/$REGION/g" -e "s/ACCOUNT_ID/$ACCOUNT_ID/g" docs/layer3/aws/reader-policy.json > "$TMPDIR/reader.json"
 aws iam create-policy --policy-name infrafactory-reader-read --policy-document "file://$TMPDIR/reader.json" \
-  --profile infrafactory-admin
+  --profile "$PROFILE"
 aws iam attach-user-policy --user-name infrafactory-reader \
-  --policy-arn arn:aws:iam::${ACCOUNT_ID}:policy/infrafactory-reader-read --profile infrafactory-admin
+  --policy-arn arn:aws:iam::${ACCOUNT_ID}:policy/infrafactory-reader-read --profile "$PROFILE"
 ```
 
 The user and its policy stay between rehearsals; the access key is present only for its read
-step (ADR-0023, amendment of 2026-10-12). Before each read, create a fresh key and write it to the
-key file without printing it. This refuses an existing key file (the last read's cleanup did not
-run) and writes nothing unless the key was created:
+step. Before each read, the user creates a fresh key and writes it to the key file without printing
+it. The block refuses an existing key file (the last read's cleanup did not run) and writes nothing
+unless the key was created:
 
 ```bash
 mkdir -p ~/.config/infrafactory && (set -eu; umask 077; F=~/.config/infrafactory/aws-reader.env
   [ ! -e "$F" ]
-  KEY=$(aws iam create-access-key --user-name infrafactory-reader --profile infrafactory-admin \
+  KEY=$(aws iam create-access-key --user-name infrafactory-reader --profile "$PROFILE" \
     --query 'AccessKey.[AccessKeyId,SecretAccessKey]' --output text)
   [ -n "$KEY" ]
   printf '%s\n' "$KEY" | awk '{printf "AWS_ACCESS_KEY_ID=%s\nAWS_SECRET_ACCESS_KEY=%s\n",$1,$2}' > "$F")
+```
+
+The user gives the lead the path, and the lead checks only this:
+
+```bash
 stat -f %Lp ~/.config/infrafactory/aws-reader.env   # 600 (on Linux: stat -c %a)
 cut -d= -f1 ~/.config/infrafactory/aws-reader.env   # AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
 ```
 
-When the read ends, the lead deletes that access key, taking its id from the key file without
-printing the secret, then the key file, and checks that the user holds no key:
+IAM is eventually consistent, so a new key can take a few seconds to work: an identity check that
+fails with `InvalidClientTokenId` straight after creation is retried after a short wait, not
+diagnosed as a bad key.
+
+When the read ends, the user deletes that access key, taking its id from the key file without
+printing the secret, then the key file, and reports the user's key count, which must be 0:
 
 ```bash
 F=~/.config/infrafactory/aws-reader.env
 KEY_ID=$(sed -n 's/^AWS_ACCESS_KEY_ID=//p' "$F")
 [ -n "$KEY_ID" ] && aws iam delete-access-key --user-name infrafactory-reader --access-key-id "$KEY_ID" \
-  --profile infrafactory-admin && rm "$F"
-aws iam list-access-keys --user-name infrafactory-reader --profile infrafactory-admin \
+  --profile "$PROFILE" && rm "$F"
+aws iam list-access-keys --user-name infrafactory-reader --profile "$PROFILE" \
   --query 'length(AccessKeyMetadata)'   # 0
 ```
 
+If `delete-access-key` fails (`NoSuchEntity`, or an expired session: sign in again first), the
+user lists the user's keys, deletes each by id, and removes the key file by hand, since the create
+block refuses while it exists:
+
+```bash
+for id in $(aws iam list-access-keys --user-name infrafactory-reader --profile "$PROFILE" \
+    --query 'AccessKeyMetadata[].AccessKeyId' --output text); do
+  aws iam delete-access-key --user-name infrafactory-reader --access-key-id "$id" --profile "$PROFILE"
+done
+rm -f ~/.config/infrafactory/aws-reader.env
+```
+
+The lead then checks the key file is absent (`test ! -e ~/.config/infrafactory/aws-reader.env`).
 Once the scrub has produced its fixtures, the lead deletes the raw recording and the pre-destroy
 state. Only the scrubbed fixtures are committed.
 

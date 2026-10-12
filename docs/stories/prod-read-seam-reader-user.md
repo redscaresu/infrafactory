@@ -10,13 +10,13 @@ risk: high
 
 # Create the read-only reader user and its key file
 
-The existing Layer 3 user cannot serve, because it holds reap's write actions (iam-policy.json). The reader user and its key stay between rehearsals; only the local key file comes and goes (ADR-0023 amendment, prod-read-seam-reader-policy). No assumable role: the session-token path is tested against fakes only.
+The existing Layer 3 user cannot serve, because it holds reap's write actions (iam-policy.json). The reader user and its policy stay between rehearsals; each read gets a fresh access key, deleted when the read ends (ADR-0023 amendment, docs/operations.md § The reader policy). The user runs every key command; the lead never holds admin credentials for the account being read. No assumable role: the session-token path is tested against fakes only.
 
 **You:** in the Layer 3 member account, from OrganizationAccountAccessRole, create a separate IAM user for reading.
 
 **You:** attach docs/layer3/aws/reader-policy.json, from the merged SHA, with REGION replaced by the Layer 3 member account's region and ACCOUNT_ID by its 12-digit id, and attach nothing else.
 
-**You:** create an access key and write it to a file outside the repo (for example `~/.config/infrafactory/aws-reader.env`) as two KEY=VALUE lines, `AWS_ACCESS_KEY_ID=…` and `AWS_SECRET_ACCESS_KEY=…`, then `chmod 600` it.
+**You:** create the first read's access key with the runbook's create block (docs/operations.md § The reader policy), which writes `~/.config/infrafactory/aws-reader.env`, mode 0600, as the two KEY=VALUE lines without printing the key.
 
 **You:** give the lead the path; that is how the lead learns this step is done.
 
