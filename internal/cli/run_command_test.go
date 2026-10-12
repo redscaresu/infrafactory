@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/redscaresu/infrafactory/internal/config"
+	"github.com/redscaresu/infrafactory/internal/feedback"
 	"github.com/redscaresu/infrafactory/internal/generator"
 	"github.com/redscaresu/infrafactory/internal/harness"
 	"github.com/redscaresu/infrafactory/internal/runstore"
@@ -1515,23 +1516,82 @@ acceptance_criteria:
 	}
 }
 
+// The Layer 3 learning tests' failure: a ResourceNotFoundException in the
+// aws provider's error shape, which the real cloud returns as well as the
+// mock, on a metric filter whose log group the passing HCL adds.
+const (
+	logFilterResource = "aws_cloudwatch_log_metric_filter"
+	logFilterNotFound = `Error: creating CloudWatch Logs Metric Filter (errors): operation error CloudWatch Logs: PutMetricFilter, https response error StatusCode: 400, RequestID: 7a62c49f-347e-4fc4-9331-6e8eEXAMPLE, ResourceNotFoundException: The specified log group does not exist.
+
+  with aws_cloudwatch_log_metric_filter.errors,
+  on main.tf line 1, in resource "aws_cloudwatch_log_metric_filter" "errors":
+   1: resource "aws_cloudwatch_log_metric_filter" "errors" {`
+	logFilterFailing = "resource \"aws_cloudwatch_log_metric_filter\" \"errors\" {\n  name           = \"errors\"\n  pattern        = \"ERROR\"\n  log_group_name = \"/app/web\"\n}\n"
+	logFilterPassing = "resource \"aws_cloudwatch_log_group\" \"web\" {\n  name = \"/app/web\"\n}\n\n" +
+		"resource \"aws_cloudwatch_log_metric_filter\" \"errors\" {\n  name           = \"errors\"\n  pattern        = \"ERROR\"\n  log_group_name = aws_cloudwatch_log_group.web.name\n}\n"
+)
+
+// layer3LearningRun is one aws Layer 3 `run` for the learner paths, with
+// docs/ in a temp dir (returned) and aws_cloudwatch_log_* allowed. main.tf
+// is files[n] on generation n+1, the last repeating; deps then edits the
+// dependencies.
+func layer3LearningRun(t *testing.T, repairs int, files []string, deps func(*awsLifecycle, *RuntimeDependencies)) (awsRun, string) {
+	t.Helper()
+	lc := newAWSLifecycle(t)
+	docsDir := t.TempDir()
+	generations := 0
+	run := runAWSRun(t, lc, awsRunOptions{
+		repairs: repairs,
+		customize: func(cfg *config.Config) {
+			cfg.Paths.Docs = docsDir
+			sandbox := &cfg.Validation.Layers.SandboxDeploy
+			sandbox.AllowResourceTypes = append(sandbox.AllowResourceTypes, "aws_cloudwatch_log_*")
+		},
+		deps: func(d *RuntimeDependencies) {
+			d.Generator = generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
+				main := files[min(generations, len(files)-1)]
+				generations++
+				return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte(main)}}, nil
+			})
+			deps(lc, d)
+		},
+	})
+	return run, docsDir
+}
+
+// runAppLog is the run's app.log.
+func runAppLog(t *testing.T, run awsRun) string {
+	t.Helper()
+	logs, err := filepath.Glob(filepath.Join(run.h.RunstoreRoot(), "*", "*", "app.log"))
+	require.NoError(t, err)
+	require.Len(t, logs, 1)
+	raw, err := os.ReadFile(logs[0])
+	require.NoError(t, err)
+	return string(raw)
+}
+
+// learnedSources is each aws pitfall's source, after asserting every one
+// names resource and was learned at layer.
+func learnedSources(t *testing.T, run awsRun, resource, layer string) []string {
+	t.Helper()
+	entries, err := generator.LoadPitfallEntries(run.h.PitfallsDir(), "aws")
+	require.NoError(t, err)
+	var sources []string
+	for _, e := range entries {
+		assert.Equal(t, resource, e.Resource)
+		assert.Equal(t, layer, e.LearnedLayer)
+		sources = append(sources, e.Source)
+	}
+	return sources
+}
+
 // The real cloud returns some mock signals too (ResourceNotFoundException),
 // so a Layer 3 failure carrying one is learned on every learner path and
 // never written to docs/mock-gaps.md; the same detail from the mock still
 // is. target_reached runs the self-correction path (a descriptive rule)
 // and the prescriptive one (a fix rule); repair_budget_exhausted runs the
-// stuck/budget path alone. The detail has the aws provider's error shape.
+// stuck/budget path alone.
 func TestAWSRunLearnsALayer3FailureThatCarriesAMockSignal(t *testing.T) {
-	const detail = `Error: creating CloudWatch Logs Metric Filter (errors): operation error CloudWatch Logs: PutMetricFilter, https response error StatusCode: 400, RequestID: 7a62c49f-347e-4fc4-9331-6e8eEXAMPLE, ResourceNotFoundException: The specified log group does not exist.
-
-  with aws_cloudwatch_log_metric_filter.errors,
-  on main.tf line 1, in resource "aws_cloudwatch_log_metric_filter" "errors":
-   1: resource "aws_cloudwatch_log_metric_filter" "errors" {`
-	const resource = "aws_cloudwatch_log_metric_filter"
-	failing := "resource \"aws_cloudwatch_log_metric_filter\" \"errors\" {\n  name           = \"errors\"\n  pattern        = \"ERROR\"\n  log_group_name = \"/app/web\"\n}\n"
-	passing := "resource \"aws_cloudwatch_log_group\" \"web\" {\n  name = \"/app/web\"\n}\n\n" +
-		"resource \"aws_cloudwatch_log_metric_filter\" \"errors\" {\n  name           = \"errors\"\n  pattern        = \"ERROR\"\n  log_group_name = aws_cloudwatch_log_group.web.name\n}\n"
-
 	for _, path := range []struct {
 		name     string
 		repairs  int
@@ -1550,64 +1610,179 @@ func TestAWSRunLearnsALayer3FailureThatCarriesAMockSignal(t *testing.T) {
 	} {
 		for _, layer := range []string{generator.MockDeployLayer, generator.SandboxDeployLayer} {
 			t.Run(path.name+"/"+layer, func(t *testing.T) {
-				lc := newAWSLifecycle(t)
-				docsDir := t.TempDir()
-				generations := 0
-				run := runAWSRun(t, lc, awsRunOptions{
-					repairs: path.repairs,
-					customize: func(cfg *config.Config) {
-						cfg.Paths.Docs = docsDir
-						sandbox := &cfg.Validation.Layers.SandboxDeploy
-						sandbox.AllowResourceTypes = append(sandbox.AllowResourceTypes, "aws_cloudwatch_log_*")
-					},
-					deps: func(d *RuntimeDependencies) {
-						d.Generator = generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
-							generations++
-							main := passing
-							if generations == 1 {
-								main = failing
-							}
-							return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte(main)}}, nil
-						})
-						errs := []error{errors.New(detail)}
-						if layer == generator.MockDeployLayer {
-							d.MockDeploy = &seqMockDeployHarness{fakeMockDeployHarness: &fakeMockDeployHarness{}, errs: errs}
-						} else {
-							d.SandboxDeploy = &seqSandboxDeployHarness{fakeSandboxDeployHarness: lc.deploy, errs: errs}
-						}
-					},
+				run, docsDir := layer3LearningRun(t, path.repairs, []string{logFilterFailing, logFilterPassing}, func(lc *awsLifecycle, d *RuntimeDependencies) {
+					errs := []error{errors.New(logFilterNotFound)}
+					if layer == generator.MockDeployLayer {
+						d.MockDeploy = &seqMockDeployHarness{fakeMockDeployHarness: &fakeMockDeployHarness{}, errs: errs}
+					} else {
+						d.SandboxDeploy = &seqSandboxDeployHarness{fakeSandboxDeployHarness: lc.deploy, errs: errs}
+					}
 				})
 				require.Equal(t, path.terminal, run.terminalReason(), run.output)
 
-				entries, err := generator.LoadPitfallEntries(run.h.PitfallsDir(), "aws")
-				require.NoError(t, err)
 				gaps := filepath.Join(docsDir, "mock-gaps.md")
 				if layer == generator.MockDeployLayer {
-					assert.Empty(t, entries)
+					assert.Empty(t, learnedSources(t, run, logFilterResource, layer))
 					raw, err := os.ReadFile(gaps)
 					require.NoError(t, err)
-					assert.Contains(t, string(raw), "| "+resource+" | `resourcenotfoundexception` |")
-					logs, err := filepath.Glob(filepath.Join(run.h.RunstoreRoot(), "*", "*", "app.log"))
-					require.NoError(t, err)
-					require.Len(t, logs, 1)
-					appLog, err := os.ReadFile(logs[0])
-					require.NoError(t, err)
+					assert.Contains(t, string(raw), "| "+logFilterResource+" | `resourcenotfoundexception` |")
+					appLog := runAppLog(t, run)
 					for _, event := range path.events {
-						assert.Contains(t, string(appLog), `"event":"`+event+`"`)
+						assert.Contains(t, appLog, `"event":"`+event+`"`)
 					}
 					return
 				}
 				assert.NoFileExists(t, gaps)
-				var sources []string
-				for _, e := range entries {
-					assert.Equal(t, resource, e.Resource)
-					assert.Equal(t, generator.SandboxDeployLayer, e.LearnedLayer)
-					sources = append(sources, e.Source)
-				}
-				assert.ElementsMatch(t, path.sources, sources, "entries: %+v", entries)
+				assert.ElementsMatch(t, path.sources, learnedSources(t, run, logFilterResource, layer))
 			})
 		}
 	}
+}
+
+// A failure the run built itself has no Origin: here, on a run with Layer
+// 3 on, a generate error carrying the LLM API's own
+// ResourceNotFoundException. Only a mock layer's failure is a mock gap, so
+// it is not one.
+func TestAWSRunFilesNoMockGapForAFailureWithNoOrigin(t *testing.T) {
+	const detail = "operation error Bedrock Runtime: InvokeModel, https response error StatusCode: 404, RequestID: 7a62c49f-347e-4fc4-9331-6e8eEXAMPLE, ResourceNotFoundException: Could not resolve the foundation model from the provided model identifier."
+	run, docsDir := layer3LearningRun(t, 1, []string{logFilterPassing}, func(_ *awsLifecycle, d *RuntimeDependencies) {
+		d.Generator = generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
+			return nil, errors.New(detail)
+		})
+	})
+	require.Equal(t, "repair_budget_exhausted", run.terminalReason(), run.output)
+
+	assert.NoFileExists(t, filepath.Join(docsDir, "mock-gaps.md"))
+	assert.NotContains(t, runAppLog(t, run), "_mock_gap_recorded")
+}
+
+// The same detail from the mock in iteration 1 and from the real cloud in
+// iteration 2 is two failures: the mock's is a gap, the real cloud's a
+// lesson, so neither dedupe drops the second as a repeat of the first.
+// Their checks differ (the mock's error names no stage), so the run does
+// not stop as stuck at iteration 2.
+func TestAWSRunLearnsALayer3FailureAfterTheSameMockFailure(t *testing.T) {
+	const detail = "exit status 1 | stderr: " + logFilterNotFound
+	for _, tc := range []struct {
+		name     string
+		repairs  int
+		terminal string
+		sources  []string
+		event    string
+	}{
+		// Iterations 1 and 2 fail; the stuck/budget path sees both.
+		{"stuck or budget", 2, "repair_budget_exhausted", []string{"descriptive"}, "oscillation_mock_gap_recorded"},
+		// Iteration 3 passes: the pair 1->2 cleared the mock's failure,
+		// and 2->3 the real cloud's.
+		{"prescriptive", 3, "target_reached", []string{"descriptive", generator.FixSource}, "prescriptive_mock_gap_recorded"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			run, docsDir := layer3LearningRun(t, tc.repairs, []string{logFilterFailing, logFilterFailing, logFilterPassing}, func(lc *awsLifecycle, d *RuntimeDependencies) {
+				d.MockDeploy = &seqMockDeployHarness{fakeMockDeployHarness: &fakeMockDeployHarness{}, errs: []error{errors.New(detail)}}
+				d.SandboxDeploy = &seqSandboxDeployHarness{fakeSandboxDeployHarness: lc.deploy, errs: []error{&harness.SandboxDeployError{
+					Stage: "apply", Err: errors.New("exit status 1"), Apply: harness.StageResult{Stage: "apply", Stderr: logFilterNotFound},
+				}}}
+			})
+			require.Equal(t, tc.terminal, run.terminalReason(), run.output)
+
+			assert.ElementsMatch(t, tc.sources, learnedSources(t, run, logFilterResource, generator.SandboxDeployLayer))
+			raw, err := os.ReadFile(filepath.Join(docsDir, "mock-gaps.md"))
+			require.NoError(t, err)
+			assert.Contains(t, string(raw), "| "+logFilterResource+" | `resourcenotfoundexception` |")
+			assert.Contains(t, runAppLog(t, run), `"event":"`+tc.event+`"`)
+		})
+	}
+}
+
+// A Layer 3 credentials error is the real cloud's setup, not the HCL: no
+// learner path writes a pitfall or a mock gap for it, and each logs why.
+func TestAWSRunLearnsNothingFromALayer3CredentialsError(t *testing.T) {
+	const detail = `Error: creating EC2 VPC: operation error EC2: CreateVpc, https response error StatusCode: 401, RequestID: 7a62c49f-347e-4fc4-9331-6e8eEXAMPLE, api error AuthFailure: AWS was not able to validate the provided access credentials
+
+  with aws_vpc.main,
+  on main.tf line 1, in resource "aws_vpc" "main":
+   1: resource "aws_vpc" "main" {`
+	failing := "resource \"aws_vpc\" \"main\" {\n  cidr_block = \"10.0.0.0/16\"\n}\n"
+	passing := "resource \"aws_vpc\" \"main\" {\n  cidr_block           = \"10.0.0.0/16\"\n  enable_dns_hostnames = true\n}\n"
+	for _, tc := range []struct {
+		name     string
+		repairs  int
+		terminal string
+		events   []string
+	}{
+		{"self-correction and prescriptive", 2, "target_reached", []string{"self_correction_learning_skipped", "prescriptive_learning_skipped"}},
+		{"stuck or budget", 1, "repair_budget_exhausted", []string{"oscillation_learning_skipped"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			run, docsDir := layer3LearningRun(t, tc.repairs, []string{failing, passing}, func(lc *awsLifecycle, d *RuntimeDependencies) {
+				d.SandboxDeploy = &seqSandboxDeployHarness{fakeSandboxDeployHarness: lc.deploy, errs: []error{errors.New(detail)}}
+			})
+			require.Equal(t, tc.terminal, run.terminalReason(), run.output)
+
+			assert.Empty(t, learnedSources(t, run, "aws_vpc", generator.SandboxDeployLayer))
+			assert.NoFileExists(t, filepath.Join(docsDir, "mock-gaps.md"))
+			appLog := runAppLog(t, run)
+			for _, event := range tc.events {
+				assert.Contains(t, appLog, `"event":"`+event+`"`)
+			}
+			assert.Contains(t, appLog, `teaches nothing outside the mock`)
+		})
+	}
+}
+
+func TestRouteFailure(t *testing.T) {
+	for name, tc := range map[string]struct {
+		f      feedback.Failure
+		want   failureRoute
+		reason string
+	}{
+		"a mock signal from the mock": {
+			f: feedback.Failure{Layer: "run", Origin: "mock_deploy", Detail: logFilterNotFound}, want: routeMockGap},
+		"a mock signal from the static plan": {
+			f: feedback.Failure{Origin: "static", Detail: "DescribeVpcs: not modelled by fakeaws: foo"}, want: routeMockGap},
+		"a mock layer's wait timeout is still its own lesson": {
+			f: feedback.Failure{Origin: "mock_deploy", Detail: "timeout while waiting for state to become 'running'"}, want: routeLearn},
+		"a mock signal with no Origin": {
+			f: feedback.Failure{Layer: "run", Detail: logFilterNotFound}, want: routeLearn},
+		"a mock-only signal with no Origin": {
+			f: feedback.Failure{Layer: "run", Detail: "Error: Plugin did not respond"}, want: routeSkip, reason: `layer run: signal "plugin did not respond"`},
+		"a real-cloud signal from Layer 3": {
+			f: feedback.Failure{Layer: "run", Origin: "sandbox_deploy", Detail: logFilterNotFound}, want: routeLearn},
+		"a mock-only signal from Layer 3": {
+			f: feedback.Failure{Origin: "sandbox_deploy", Detail: "DescribeVpcs: not modelled by fakeaws: foo"}, want: routeSkip, reason: `signal "not modelled by fakeaws"`},
+		"a credentials check": {
+			f: feedback.Failure{Origin: "sandbox_deploy", Check: "credentials", Detail: "no scoped key"}, want: routeSkip, reason: "a credentials check failed"},
+		"an aws scope stage": {
+			f: feedback.Failure{Origin: "sandbox_deploy", Stage: "aws_scope_sweep", Check: "no_orphans", Detail: "aws_instance i-0abc left"}, want: routeSkip, reason: "stage aws_scope_sweep"},
+		"a preflight stage": {
+			f: feedback.Failure{Layer: "sandbox_deploy", Origin: "sandbox_deploy", Stage: "iteration_1_preflight", Detail: "AccessDenied"}, want: routeSkip, reason: "is a preflight"},
+		"an authentication failure": {
+			f: feedback.Failure{Origin: "sandbox_deploy", Detail: "api error AuthFailure: AWS was not able to validate the provided access credentials"}, want: routeSkip, reason: `signal "authfailure"`},
+		"a plugin crash": {
+			f: feedback.Failure{Origin: "sandbox_deploy", Detail: "The plugin encountered an error, and failed to respond"}, want: routeSkip, reason: `signal "the plugin encountered an error"`},
+		"a wait-for-state timeout": {
+			f: feedback.Failure{Origin: "sandbox_deploy", Detail: "waiting for EC2 Instance create: timeout while waiting for state to become 'running'"}, want: routeSkip, reason: `signal "timeout while waiting for state"`},
+		"an HCL refusal from Layer 3": {
+			f: feedback.Failure{Origin: "sandbox_deploy", Stage: "iteration_1_allowlist", Check: "allow_resource_types", Detail: "layer 3 refuses to apply resource type(s) aws_nat_gateway"}, want: routeLearn},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, reason := routeFailure(tc.f)
+			assert.Equal(t, tc.want, got)
+			assert.Contains(t, reason, tc.reason)
+		})
+	}
+}
+
+// The same detail from the mock and from the real cloud are two repair
+// signals; a repeat from the same layer is not.
+func TestAppendDistinctFailuresKeepsEachLayersFailure(t *testing.T) {
+	mock := FailureSummary{Layer: "run", Origin: "mock_deploy", Detail: logFilterNotFound}
+	layer3 := FailureSummary{Layer: "run", Origin: "sandbox_deploy", Detail: logFilterNotFound}
+
+	history := appendDistinctFailures(nil, []FailureSummary{mock})
+	history = appendDistinctFailures(history, []FailureSummary{mock, layer3})
+
+	assert.Equal(t, []FailureSummary{mock, layer3}, history)
 }
 
 // A mock whose reset fails says the environment is wrong, not the HCL:

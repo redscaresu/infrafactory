@@ -7,6 +7,7 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"gopkg.in/yaml.v3"
 )
 
@@ -101,8 +102,8 @@ func TestPitfallsNoHumanSeeding(t *testing.T) {
 // not-respond / OAuth-escape / 404-from-Describe* failure should
 // never have made it into the file — it should have been routed to
 // docs/mock-gaps.md by the new IsMockServerBug classifier in
-// run_command.go. An entry learned at sandbox_deploy is exempt, as the
-// classifier exempts its failure: the real cloud sent that signal.
+// run_command.go. An entry learned at sandbox_deploy may carry only a
+// signal a real cloud also sends (forbiddenMockSignal).
 //
 // Catching these in CI is the enforcement leg of T-12. Before the
 // classifier landed (this commit), the existing pitfalls files
@@ -128,12 +129,48 @@ func TestPitfallsNoMockServerBugSeeds(t *testing.T) {
 				t.Fatalf("parse %s: %v", path, err)
 			}
 			for _, p := range file.Pitfalls {
-				if IsMockServerBug(p.LearnedLayer, p.Rule) {
-					sig := FirstMockSignal(p.Rule)
+				if sig := forbiddenMockSignal(p.LearnedLayer, p.Rule); sig != "" {
 					t.Errorf("pitfalls/%s.yaml: entry for %q has rule matching mock-actionable signal %q — T-12 forbids this. Route the failure to docs/mock-gaps.md instead; the matching mock repo (fakeaws/fakegcp/mockway) should fix the gap at source. Rule was: %.200s",
 						cloud, p.Resource, sig, p.Rule)
 				}
 			}
+		})
+	}
+}
+
+// forbiddenMockSignal returns the mock signal a pitfall rule learned at
+// layer may not carry, or "". Every rule is read as if the mock taught
+// it, so an entry with no layer is checked in full; one learned at
+// sandbox_deploy may carry realCloudSignals only, since a mock-only signal
+// there means the entry is mislabelled.
+func forbiddenMockSignal(layer, rule string) string {
+	if !IsMockServerBug(MockDeployLayer, rule) {
+		return ""
+	}
+	if layer == SandboxDeployLayer {
+		return firstMockOnlySignal(rule)
+	}
+	return FirstMockSignal(rule)
+}
+
+func TestForbiddenMockSignal(t *testing.T) {
+	const (
+		realCloud = "ResourceNotFoundException: The specified log group does not exist."
+		mockOnly  = "Error: Plugin did not respond"
+	)
+	for name, tc := range map[string]struct {
+		layer, rule, want string
+	}{
+		"a real-cloud signal learned at sandbox_deploy":      {SandboxDeployLayer, realCloud, ""},
+		"a real-cloud signal learned at mock_deploy":         {MockDeployLayer, realCloud, "resourcenotfoundexception"},
+		"a real-cloud signal with no layer":                  {"", realCloud, "resourcenotfoundexception"},
+		"a mock-only signal mislabelled sandbox_deploy":      {SandboxDeployLayer, mockOnly, "plugin did not respond"},
+		"not modelled by fakeaws mislabelled sandbox_deploy": {SandboxDeployLayer, "DescribeVpcs: not modelled by fakeaws: foo", "not modelled by fakeaws"},
+		"both kinds of signal mislabelled sandbox_deploy":    {SandboxDeployLayer, realCloud + " " + mockOnly, "plugin did not respond"},
+		"no signal": {SandboxDeployLayer, "An argument named \"bogus\" is not expected here.", ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			assert.Equal(t, tc.want, forbiddenMockSignal(tc.layer, tc.rule))
 		})
 	}
 }

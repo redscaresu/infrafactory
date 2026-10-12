@@ -16,13 +16,13 @@ Failures don't all deserve the same response. The pipeline routes each one based
 
 | Stage | When it fires | What it produces | `source:` value |
 |---|---|---|---|
-| **Mock-server-bug classifier** (`IsMockServerBug`) | Failure detail contains a mock-bug substring (e.g. `plugin did not respond`, `access_token_type_unsupported`, `couldn't find resource`). Never for a Layer 3 (`sandbox_deploy`) failure: the real cloud returns some of the same signals (`ResourceNotFoundException`), so that failure is learned. | Routes the failure AWAY from pitfalls — it lands in `docs/mock-gaps.md` for the matching sibling repo (fakeaws/fakegcp/mockway). | n/a — not a pitfall |
+| **Mock-server-bug classifier** (`IsMockServerBug`) | A failure from a mock layer (`static`, `mock_deploy`, `destruction`) whose detail contains a mock-bug substring (e.g. `plugin did not respond`, `access_token_type_unsupported`, `couldn't find resource`). Never for any other layer, Layer 3 (`sandbox_deploy`) or unknown: the real cloud returns some of the same signals (`ResourceNotFoundException`). A failure from outside the mock is instead skipped, with `<path>_learning_skipped` logged, when it is real-cloud setup (a credentials check, an `aws_scope_*` or preflight stage) or carries a setup, transient or mock-only signal (`generator.SkipSignal`); otherwise it is learned. | Routes the failure AWAY from pitfalls — it lands in `docs/mock-gaps.md` for the matching sibling repo (fakeaws/fakegcp/mockway). | n/a — not a pitfall |
 | **Fix-pitfall extractor** (`ExtractFixPitfall`) | Run reaches `target_reached` AFTER ≥1 failing iteration AND the classifier does not claim the cleared failure AND the fix was an *addition* to the HCL | A pitfall body that shows the HCL snippet the LLM added to clear the failure. | `fix` |
 | **Avoid-pitfall extractor** (`ExtractAvoidPitfall`) | Same trigger, but the fix was a *deletion* (a mock gap cleared by deleting what the mock refused teaches nothing, so the classifier gates both) | A pitfall saying "do NOT use attribute X on resource Y — it caused failure Z that was resolved by removing it." | `avoid` |
 | **Diff-pattern templates** | Failure detail matches a pattern from a small handcoded set (subnetwork attachment, 501 Not Implemented, AWS destroy blockers, etc.) | A prescriptive rule from the template's body. Fires when the fix/avoid extractors wouldn't (run terminated stuck, not converged). | `fix` |
 | **Descriptive fallback** (`ExtractDescriptivePitfall`) | Run terminates `stuck` or `repair_budget_exhausted`, or self-corrects (over the last failing iteration's failures), AND the classifier doesn't claim it AND no template matches | Captures the failure detail verbatim as a "this happened, don't trip on it" entry. Symptom-only — useful but less actionable than the diff-derived forms. | `descriptive` |
 
-Code: `internal/generator/pitfalls_learn.go` (classifier, descriptive, IsMockServerBug), `internal/generator/prescriptive_extractor.go` (fix, avoid, diff-pattern templates).
+Code: `internal/generator/pitfalls_learn.go` (classifier, signal lists, descriptive, IsMockServerBug), `internal/cli/run_command.go` (`routeFailure`: mock gap, skip or learn), `internal/generator/prescriptive_extractor.go` (fix, avoid, diff-pattern templates).
 
 ### Why three flavors, not one
 
@@ -60,7 +60,7 @@ Four CI tests guard the contract.
 | Ratchet | Where | What it rejects |
 |---|---|---|
 | `TestPitfallsNoHumanSeeding` | `internal/generator/pitfalls_source_ratchet_test.go` | Entries with `source: seed` or `source: static`. The system seeds itself from real runs; hand-authored entries are forbidden. |
-| `TestPitfallsNoMockServerBugSeeds` | `internal/generator/pitfalls_source_ratchet_test.go` | Entries whose rule body contains a mock-actionable substring (e.g. `plugin did not respond`), unless learned at `sandbox_deploy`. Those belong in `docs/mock-gaps.md`, not pitfalls. |
+| `TestPitfallsNoMockServerBugSeeds` | `internal/generator/pitfalls_source_ratchet_test.go` | Entries whose rule body contains a mock-actionable substring (e.g. `plugin did not respond`), unless learned at `sandbox_deploy` and the substring is one a real cloud also sends (e.g. `ResourceNotFoundException`); a mock-only substring is refused at every layer. Those belong in `docs/mock-gaps.md`, not pitfalls. |
 | `TestPitfallsNoOPADuplication` | `internal/generator/pitfalls_opa_dedup_test.go` | Entries whose rule body verbatim-copies an OPA policy's `msg := sprintf(...)` literal. OPA is the canonical carrier; the pitfall would waste prompt tokens. |
 | `TestPitfallsSourceEnum` | `internal/generator/pitfalls_source_enum_test.go` | Entries with a `source` value outside the closed enum. Catches typos like `avold`. |
 
@@ -97,13 +97,13 @@ The 2026-06-04 `mock-gaps-and-rename` arc drained 13 stale entries that had accu
 
 ## When a run learns nothing
 
-`repair_budget_exhausted` or `stuck` on a failure that is not `IsMockServerBug`-classified means
-the pipeline failed to extract a pitfall. That is a bug, not a cold start. It once hid the fact
+`repair_budget_exhausted` or `stuck` on a failure that is neither `IsMockServerBug`-classified nor
+skipped with a logged reason (`<path>_learning_skipped`) means the pipeline failed to extract a pitfall. That is a bug, not a cold start. It once hid the fact
 that no pitfall had ever been learned from a Genesys run, because a resource-name regex did not
 know the prefix.
 
 Diagnostic protocol when a run exits without learning:
-1. Grep the run's `app.log` for `pitfall_emitted`, `oscillation_pitfall_*`, `self_correction_pitfall_*`, `mock_gap_recorded`. None firing + failure not mock-classified ⇒ pipeline silently no-op'd.
+1. Grep the run's `app.log` for `pitfall_emitted`, `oscillation_pitfall_*`, `self_correction_pitfall_*`, `mock_gap_recorded`, `learning_skipped`. None firing + failure not mock-classified ⇒ pipeline silently no-op'd.
 2. Drop a scratch `_test.go` next to `internal/generator/pitfalls_learn.go`, call `IsMockServerBug`, `ExtractResourceFromDetail`, `ExtractDescriptivePitfall` against the failure detail. Empty Resource + nil pitfall ⇒ the regex or classifier doesn't recognise this resource family.
 3. When adding a new cloud (or any new resource-name prefix), there are three sites to update: `resourceNameRe`, `addressRe`, `pitfallResourceMatchesCloud`. Miss one and the learner breaks silently. **Enforced**: `internal/cli/cloud_prefix_lockstep_test.go::TestCloudPrefixLockstep` parses all three sites and fails CI if they disagree on the cloud-prefix set (per ADR-0021).
 

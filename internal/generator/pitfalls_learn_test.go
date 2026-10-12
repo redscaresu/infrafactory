@@ -744,8 +744,13 @@ func TestIsMockServerBug_FivePositiveSignalClasses(t *testing.T) {
 			if FirstMockSignal(tc.detail) == "" {
 				t.Errorf("FirstMockSignal returned empty for %s", tc.name)
 			}
-			assert.False(t, IsMockServerBug(SandboxDeployLayer, tc.detail),
-				"a Layer 3 failure came from the real cloud, so it is never a mock bug")
+			for _, layer := range []string{"static", MockDeployLayer, "destruction"} {
+				assert.True(t, IsMockServerBug(layer, tc.detail), "mock layer %q", layer)
+			}
+			// The real cloud, or a layer nobody named, is never a mock bug.
+			for _, layer := range []string{SandboxDeployLayer, "", "run", "holdout"} {
+				assert.False(t, IsMockServerBug(layer, tc.detail), "layer %q", layer)
+			}
 		})
 	}
 }

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -200,6 +201,27 @@ func runRunWithNotify(
 		{Layer: "run", Stage: "mode", Status: StageStatusPass, Detail: fmt.Sprintf("%s (%s)", mode.Mode, mode.Reason)},
 	}, resolved...)
 	allFailures := make([]FailureSummary, 0)
+	// learnsFrom routes f for a learner path (event) and reports whether
+	// its extractors may learn from it: a mock gap is written to
+	// docs/mock-gaps.md, and a skip is logged as <event>_learning_skipped.
+	learnsFrom := func(event string, f feedback.Failure) bool {
+		route, reason := routeFailure(f)
+		switch route {
+		case routeMockGap:
+			recordMockGap(runtime, event, runID, generator.MockGap{
+				Cloud: sc.Cloud, Scenario: sc.Name, Detail: f.Detail, Timestamp: runID,
+			})
+			return false
+		case routeSkip:
+			runtime.Logger.Log(LogEntry{
+				Level: logLevelInfo, Command: "run",
+				Event: event + "_learning_skipped", Status: "skipped",
+				RunID: runID, Detail: reason,
+			})
+			return false
+		}
+		return true
+	}
 	// Every failure signature the run has produced, in any iteration.
 	// A per-iteration "previous" cannot see oscillation, which is the
 	// shape a repair loop actually gets stuck in.
@@ -245,7 +267,7 @@ func runRunWithNotify(
 				// from ExtractDescriptivePitfall and pollute pitfalls/gcp.yaml.
 				if iteration > 1 && len(previousIterationFailures) > 0 {
 					cloud := sc.Cloud
-					for _, failure := range previousIterationFailures {
+					for _, failure := range toFeedbackFailures(previousIterationFailures) {
 						// N3 / T12 classifier: mock-actionable failures
 						// (501, plugin-did-not-respond, auth escape,
 						// resource-not-found wait loops) belong in
@@ -253,10 +275,8 @@ func runRunWithNotify(
 						// Writing them as pitfalls teaches the LLM to
 						// avoid valid resources because the mock is
 						// incomplete — the system narrows over time.
-						if generator.IsMockServerBug(failure.Origin, failure.Detail) {
-							recordMockGap(runtime, "self_correction", runID, generator.MockGap{
-								Cloud: cloud, Scenario: sc.Name, Detail: failure.Detail, Timestamp: runID,
-							})
+						// Real-cloud setup and weather teach nothing.
+						if !learnsFrom("self_correction", failure) {
 							continue
 						}
 						// Refusals first, exactly as in the terminal harvest.
@@ -496,7 +516,7 @@ func runRunWithNotify(
 		var candidates []feedback.Failure
 		for _, ir := range iterationHistory {
 			for _, f := range ir.Failures {
-				key := f.Resource + "|" + feedback.NormalizeDetail(f.Detail)
+				key := learnKey(f)
 				if _, ok := seen[key]; ok {
 					continue
 				}
@@ -512,10 +532,7 @@ func runRunWithNotify(
 			// 2026-06-01 sweep showed gcp-cloud-run, gcp-cloud-sql,
 			// gcp-gke-cluster, gcp-storage all re-learning the same
 			// OAuth-escape + plugin-crash rules N2 just pruned.
-			if generator.IsMockServerBug(f.Origin, f.Detail) {
-				recordMockGap(runtime, "oscillation", runID, generator.MockGap{
-					Cloud: sc.Cloud, Scenario: sc.Name, Detail: f.Detail, Timestamp: runID,
-				})
+			if !learnsFrom("oscillation", f) {
 				continue
 			}
 			// Refusals first. A gate or policy refusal is machine-generated,
@@ -715,17 +732,16 @@ func runRunWithNotify(
 			if len(prev.Failures) == 0 {
 				continue
 			}
-			// Cleared = failures in prev whose (resource, normalized)
-			// signature does NOT appear in curr.
+			// Cleared = failures in prev whose learnKey does NOT
+			// appear in curr.
 			currKeys := make(map[string]struct{}, len(curr.Failures))
 			for _, f := range curr.Failures {
-				currKeys[f.Resource+"|"+feedback.NormalizeDetail(f.Detail)] = struct{}{}
+				currKeys[learnKey(f)] = struct{}{}
 			}
 			failedDir := iterationGeneratedDir(runtime, sc.Name, runID, prev.Iteration)
 			passingDir := iterationGeneratedDir(runtime, sc.Name, runID, curr.Iteration)
 			for _, cleared := range prev.Failures {
-				key := cleared.Resource + "|" + feedback.NormalizeDetail(cleared.Detail)
-				if _, stillFailing := currKeys[key]; stillFailing {
+				if _, stillFailing := currKeys[learnKey(cleared)]; stillFailing {
 					continue
 				}
 				// A mock gap is no HCL lesson, whatever the next iteration
@@ -733,10 +749,7 @@ func runRunWithNotify(
 				// The self-correction hook records only the last failing
 				// iteration, so a gap cleared in an earlier pair is written
 				// here (rows dedupe, so writing one twice is harmless).
-				if generator.IsMockServerBug(cleared.Origin, cleared.Detail) {
-					recordMockGap(runtime, "prescriptive", runID, generator.MockGap{
-						Cloud: sc.Cloud, Scenario: sc.Name, Detail: cleared.Detail, Timestamp: runID,
-					})
+				if !learnsFrom("prescriptive", cleared) {
 					continue
 				}
 				entry, err := generator.ExtractFixPitfall(
@@ -1467,11 +1480,12 @@ func pitfallResourceMatchesCloud(resource, cloud string) bool {
 }
 
 // appendDistinctFailures adds the failures history has not seen, keyed
-// like the terminal harvest so a cosmetic shift in detail is not new.
+// like the terminal harvest (learnKey) so a cosmetic shift in detail is
+// not new, and the same detail from the mock and the real cloud is.
 func appendDistinctFailures(history, failures []FailureSummary) []FailureSummary {
 	seen := make(map[string]struct{}, len(history))
 	key := func(f FailureSummary) string {
-		return f.Check + "|" + f.Resource + "|" + feedback.NormalizeDetail(f.Detail)
+		return f.Check + "|" + learnKey(toFeedbackFailure(f))
 	}
 	for _, f := range history {
 		seen[key(f)] = struct{}{}
@@ -1489,18 +1503,22 @@ func appendDistinctFailures(history, failures []FailureSummary) []FailureSummary
 func toFeedbackFailures(failures []FailureSummary) []feedback.Failure {
 	out := make([]feedback.Failure, 0, len(failures))
 	for _, failure := range failures {
-		out = append(out, feedback.Failure{
-			Layer:    failure.Layer,
-			Stage:    failure.Stage,
-			Check:    failure.Check,
-			Policy:   failure.Policy,
-			Command:  failure.Command,
-			Resource: failure.Resource,
-			Detail:   failure.Detail,
-			Origin:   failure.Origin,
-		})
+		out = append(out, toFeedbackFailure(failure))
 	}
 	return out
+}
+
+func toFeedbackFailure(failure FailureSummary) feedback.Failure {
+	return feedback.Failure{
+		Layer:    failure.Layer,
+		Stage:    failure.Stage,
+		Check:    failure.Check,
+		Policy:   failure.Policy,
+		Command:  failure.Command,
+		Resource: failure.Resource,
+		Detail:   failure.Detail,
+		Origin:   failure.Origin,
+	}
 }
 
 func failuresAreTransportDominated(failures []FailureSummary) bool {
@@ -1756,7 +1774,7 @@ func isStage(name string) func(StageSummary) bool {
 // names none, so that failure stays run/iteration_N_test.
 func runStageName(layer, stage string, iteration int, cloud layer3Cloud) (string, bool) {
 	switch {
-	case strings.HasPrefix(stage, "aws_scope_"):
+	case strings.HasPrefix(stage, awsScopeStagePrefix):
 		return stage, true
 	case cloud == layer3AWS && layer == "sandbox_deploy" && stage != "run":
 		return iterationStage(iteration, stage), true
@@ -1848,6 +1866,60 @@ func awsRunFailureTeardown(ctx context.Context, runtime *CommandRuntime, stages 
 	}
 	runtime.awsClaim = awsClaim{state: awsClaimHeld}
 	return awsDestroyAndRelease(ctx, runtime, runtime.OutputDir(), env)
+}
+
+// failureRoute is where a run sends a failure ahead of the pitfall
+// extractors.
+type failureRoute int
+
+const (
+	routeLearn   failureRoute = iota // the pitfall extractors
+	routeMockGap                     // docs/mock-gaps.md
+	routeSkip                        // neither, with the reason logged
+)
+
+// awsScopeStagePrefix names the aws scope's own stages (claim, sweep,
+// release, reap), which a run carries up under their own names.
+const awsScopeStagePrefix = "aws_scope_"
+
+// failureLayer is the layer a failure came from: its Origin, else its
+// Layer (a failure the run built itself has no Origin).
+func failureLayer(f feedback.Failure) string {
+	return cmp.Or(f.Origin, f.Layer)
+}
+
+// learnKey keys a failure for the learner paths' dedupes: a cosmetic
+// shift in detail is the same failure, and the same detail from the mock
+// and from the real cloud are two, each routed on its own.
+func learnKey(f feedback.Failure) string {
+	return failureLayer(f) + "|" + f.Resource + "|" + feedback.NormalizeDetail(f.Detail)
+}
+
+// routeFailure routes a failure by failureLayer. Only a mock layer's
+// failure is ever a mock gap. Any other failure is skipped when it is
+// real-cloud setup (a credentials check, an aws scope stage, a
+// preflight) or carries a signal that teaches nothing outside the mock
+// (generator.SkipSignal), and learned otherwise.
+func routeFailure(f feedback.Failure) (failureRoute, string) {
+	layer := failureLayer(f)
+	if generator.IsMockServerBug(layer, f.Detail) {
+		return routeMockGap, ""
+	}
+	if generator.IsMockLayer(layer) {
+		return routeLearn, ""
+	}
+	switch {
+	case f.Check == "credentials":
+		return routeSkip, fmt.Sprintf("layer %s: a credentials check failed", layer)
+	case strings.HasPrefix(f.Stage, awsScopeStagePrefix):
+		return routeSkip, fmt.Sprintf("layer %s: stage %s is the aws scope's setup", layer, f.Stage)
+	case strings.HasSuffix(f.Stage, "preflight"):
+		return routeSkip, fmt.Sprintf("layer %s: stage %s is a preflight", layer, f.Stage)
+	}
+	if sig := generator.SkipSignal(f.Detail); sig != "" {
+		return routeSkip, fmt.Sprintf("layer %s: signal %q teaches nothing outside the mock", layer, sig)
+	}
+	return routeLearn, ""
 }
 
 // recordMockGap writes a mock-classed failure to docs/mock-gaps.md, its

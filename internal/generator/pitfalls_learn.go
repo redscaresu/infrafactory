@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -167,6 +168,41 @@ var (
 		// store the row. Real signal from aws_route53_record in S63.
 		"empty result",
 	}
+
+	// realCloudSignals are the mock signals a real cloud also returns for
+	// a reason in the HCL, so a failure from outside the mock that carries
+	// one is still learned. Every other mock signal is mock-only.
+	realCloudSignals = []string{
+		"resourcenotfoundexception",
+		"empty result",
+	}
+
+	// realCloudSkipSignals mark a failure from outside the mock as the real
+	// cloud's setup or weather, not the HCL: it is neither learned nor a
+	// mock gap.
+	realCloudSkipSignals = []string{
+		// Credentials or authentication.
+		"no valid credential sources",
+		"invalidclienttokenid",
+		"signaturedoesnotmatch",
+		"expiredtoken",
+		"unrecognizedclientexception",
+		"authfailure",
+		"request had invalid authentication credentials",
+		"access_token_type_unsupported",
+		// The provider plugin crashed.
+		"plugin did not respond",
+		"the plugin encountered an error",
+		"plugin crashed",
+		// A wait that timed out or never saw the resource.
+		"timeout while waiting for state",
+		"couldn't find resource",
+	}
+
+	// mockLayers are the layers whose failures come from a run against a
+	// mock: static (init, validate and plan against the mock's endpoints),
+	// mock_deploy, and destruction (the mock destroy and its orphan check).
+	mockLayers = []string{"static", MockDeployLayer, "destruction"}
 )
 
 // MockGap is a structured entry written to docs/mock-gaps.md when
@@ -288,16 +324,40 @@ func AppendMockGap(docsDir string, gap MockGap) error {
 // mockActionableSignals). Returns "" if no signal matches — callers
 // typically guard with IsMockServerBug first.
 func FirstMockSignal(detail string) string {
-	if detail == "" {
-		return ""
+	return firstSignal(detail, mockActionableSignals)
+}
+
+// SkipSignal returns the signal that makes a failure from outside the
+// mock teach nothing, or "": a real-cloud setup or transient signal, or a
+// mock-only one, which no real cloud sends for a reason in the HCL.
+func SkipSignal(detail string) string {
+	if sig := firstSignal(detail, realCloudSkipSignals); sig != "" {
+		return sig
 	}
+	return firstMockOnlySignal(detail)
+}
+
+// firstMockOnlySignal is FirstMockSignal without realCloudSignals.
+func firstMockOnlySignal(detail string) string {
+	return firstSignal(detail, slices.DeleteFunc(slices.Clone(mockActionableSignals), func(sig string) bool {
+		return slices.Contains(realCloudSignals, sig)
+	}))
+}
+
+func firstSignal(detail string, signals []string) string {
 	lower := strings.ToLower(detail)
-	for _, sig := range mockActionableSignals {
+	for _, sig := range signals {
 		if strings.Contains(lower, sig) {
 			return sig
 		}
 	}
 	return ""
+}
+
+// IsMockLayer reports whether a failure from layer came from a run
+// against a mock.
+func IsMockLayer(layer string) bool {
+	return slices.Contains(mockLayers, layer)
 }
 
 // ExtractResourceFromDetail is a public wrapper around the package-
@@ -314,24 +374,17 @@ func ExtractResourceFromDetail(detail string) string {
 // pitfalls/<cloud>.yaml — they belong in docs/mock-gaps.md so the
 // matching mock repo can fix the gap at source.
 //
-// layer is the layer the failure came from (FailureSummary.Origin). A
-// SandboxDeployLayer failure came from the real cloud, which returns
-// some of the same signals (ResourceNotFoundException), so it is never
-// a mock bug, whatever its text.
+// layer is the layer the failure came from (FailureSummary.Origin). Only
+// a mock layer's failure can be a mock bug: the real cloud returns some
+// of the same signals (ResourceNotFoundException), and a failure whose
+// layer is unknown may have come from it.
 //
 // Detection is substring-based against a small, hand-curated signal
 // set (see mockActionableSignals above). Conservative by design.
 //
-// Caller pattern (run_command.go):
-//
-//	if generator.IsMockServerBug(failure.Origin, failure.Detail) {
-//	    generator.AppendMockGap(docsDir, cloud, gap)  // routes here
-//	    continue
-//	}
-//	learned := generator.ExtractDescriptivePitfall(failure.Detail, scenario)
-//	// ... existing path
+// Caller: run_command.go's routeFailure, ahead of every learner path.
 func IsMockServerBug(layer, detail string) bool {
-	if layer == SandboxDeployLayer || detail == "" {
+	if !IsMockLayer(layer) || detail == "" {
 		return false
 	}
 	lower := strings.ToLower(detail)
