@@ -1,7 +1,6 @@
 ---
 kind: docs
-status: blocked
-blocked_by: [aws-hold-for-read-hold]
+status: ready
 epic: aws-hold-for-read
 depends_on: [aws-hold-for-read-hold]
 touches: [docs/operations.md, internal/cli/aws_scope_doc_test.go]
