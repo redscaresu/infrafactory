@@ -1,7 +1,6 @@
 ---
 kind: code
-status: blocked
-blocked_by: [aws-hold-for-read-adr-0040, aws-hold-for-read-release]
+status: ready
 epic: aws-hold-for-read
 depends_on: [aws-hold-for-read-adr-0040, aws-hold-for-read-release]
 touches: [internal/cli/aws_hold.go, internal/cli/aws_hold_test.go, internal/cli/generate_command.go, internal/cli/run_command.go, internal/cli/test_command.go]
