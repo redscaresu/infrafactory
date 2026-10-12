@@ -245,6 +245,10 @@ data "archive_file" "zip" {
   output_path = "${path.root}/build/files.zip"
 }
 
+provider "aws" {
+  region = "us-east-1"
+}
+
 resource "aws_s3_object" "o" {
   bucket = "b"
   key    = "k"

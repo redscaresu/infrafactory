@@ -47,7 +47,7 @@ func newRehearsePrepareCmd(p rehearsePrepare) *cobra.Command {
 	}
 	cmd.Flags().String("account", "", "the AWS account id the rehearsal copies (12 digits)")
 	cmd.Flags().String("region", "", "the AWS region the code must target")
-	cmd.Flags().String("var-file", "", "a .tfvars file, copied into the rehearsal as its only variable source")
+	cmd.Flags().String("var-file", "", "a .tfvars file, copied into the rehearsal; it overrides the code's terraform.tfvars and *.auto.tfvars")
 	_ = cmd.MarkFlagRequired("account")
 	_ = cmd.MarkFlagRequired("region")
 	return cmd
