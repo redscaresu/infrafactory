@@ -16,7 +16,7 @@ Failures don't all deserve the same response. The pipeline routes each one based
 
 | Stage | When it fires | What it produces | `source:` value |
 |---|---|---|---|
-| **Mock-server-bug classifier** (`IsMockServerBug`) | Failure detail contains a mock-bug substring (e.g. `plugin did not respond`, `access_token_type_unsupported`, `couldn't find resource`) | Routes the failure AWAY from pitfalls — it lands in `docs/mock-gaps.md` for the matching sibling repo (fakeaws/fakegcp/mockway). | n/a — not a pitfall |
+| **Mock-server-bug classifier** (`IsMockServerBug`) | Failure detail contains a mock-bug substring (e.g. `plugin did not respond`, `access_token_type_unsupported`, `couldn't find resource`). Never for a Layer 3 (`sandbox_deploy`) failure: the real cloud returns some of the same signals (`ResourceNotFoundException`), so that failure is learned. | Routes the failure AWAY from pitfalls — it lands in `docs/mock-gaps.md` for the matching sibling repo (fakeaws/fakegcp/mockway). | n/a — not a pitfall |
 | **Fix-pitfall extractor** (`ExtractFixPitfall`) | Run reaches `target_reached` AFTER ≥1 failing iteration AND the classifier does not claim the cleared failure AND the fix was an *addition* to the HCL | A pitfall body that shows the HCL snippet the LLM added to clear the failure. | `fix` |
 | **Avoid-pitfall extractor** (`ExtractAvoidPitfall`) | Same trigger, but the fix was a *deletion* (a mock gap cleared by deleting what the mock refused teaches nothing, so the classifier gates both) | A pitfall saying "do NOT use attribute X on resource Y — it caused failure Z that was resolved by removing it." | `avoid` |
 | **Diff-pattern templates** | Failure detail matches a pattern from a small handcoded set (subnetwork attachment, 501 Not Implemented, AWS destroy blockers, etc.) | A prescriptive rule from the template's body. Fires when the fix/avoid extractors wouldn't (run terminated stuck, not converged). | `fix` |
@@ -60,7 +60,7 @@ Four CI tests guard the contract.
 | Ratchet | Where | What it rejects |
 |---|---|---|
 | `TestPitfallsNoHumanSeeding` | `internal/generator/pitfalls_source_ratchet_test.go` | Entries with `source: seed` or `source: static`. The system seeds itself from real runs; hand-authored entries are forbidden. |
-| `TestPitfallsNoMockServerBugSeeds` | `internal/generator/pitfalls_learn_test.go` | Entries whose rule body contains a mock-actionable substring (e.g. `plugin did not respond`). Those belong in `docs/mock-gaps.md`, not pitfalls. |
+| `TestPitfallsNoMockServerBugSeeds` | `internal/generator/pitfalls_source_ratchet_test.go` | Entries whose rule body contains a mock-actionable substring (e.g. `plugin did not respond`), unless learned at `sandbox_deploy`. Those belong in `docs/mock-gaps.md`, not pitfalls. |
 | `TestPitfallsNoOPADuplication` | `internal/generator/pitfalls_opa_dedup_test.go` | Entries whose rule body verbatim-copies an OPA policy's `msg := sprintf(...)` literal. OPA is the canonical carrier; the pitfall would waste prompt tokens. |
 | `TestPitfallsSourceEnum` | `internal/generator/pitfalls_source_enum_test.go` | Entries with a `source` value outside the closed enum. Catches typos like `avold`. |
 

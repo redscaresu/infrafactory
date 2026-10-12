@@ -1515,6 +1515,101 @@ acceptance_criteria:
 	}
 }
 
+// The real cloud returns some mock signals too (ResourceNotFoundException),
+// so a Layer 3 failure carrying one is learned on every learner path and
+// never written to docs/mock-gaps.md; the same detail from the mock still
+// is. target_reached runs the self-correction path (a descriptive rule)
+// and the prescriptive one (a fix rule); repair_budget_exhausted runs the
+// stuck/budget path alone. The detail has the aws provider's error shape.
+func TestAWSRunLearnsALayer3FailureThatCarriesAMockSignal(t *testing.T) {
+	const detail = `Error: creating CloudWatch Logs Metric Filter (errors): operation error CloudWatch Logs: PutMetricFilter, https response error StatusCode: 400, RequestID: 7a62c49f-347e-4fc4-9331-6e8eEXAMPLE, ResourceNotFoundException: The specified log group does not exist.
+
+  with aws_cloudwatch_log_metric_filter.errors,
+  on main.tf line 1, in resource "aws_cloudwatch_log_metric_filter" "errors":
+   1: resource "aws_cloudwatch_log_metric_filter" "errors" {`
+	const resource = "aws_cloudwatch_log_metric_filter"
+	failing := "resource \"aws_cloudwatch_log_metric_filter\" \"errors\" {\n  name           = \"errors\"\n  pattern        = \"ERROR\"\n  log_group_name = \"/app/web\"\n}\n"
+	passing := "resource \"aws_cloudwatch_log_group\" \"web\" {\n  name = \"/app/web\"\n}\n\n" +
+		"resource \"aws_cloudwatch_log_metric_filter\" \"errors\" {\n  name           = \"errors\"\n  pattern        = \"ERROR\"\n  log_group_name = aws_cloudwatch_log_group.web.name\n}\n"
+
+	for _, path := range []struct {
+		name     string
+		repairs  int
+		terminal string
+		// sources are the rules a Layer 3 failure teaches; events the
+		// mock-gap log lines a mock failure writes instead.
+		sources []string
+		events  []string
+	}{
+		{"self-correction and prescriptive", 2, "target_reached",
+			[]string{"descriptive", generator.FixSource},
+			[]string{"self_correction_mock_gap_recorded", "prescriptive_mock_gap_recorded"}},
+		{"stuck or budget", 1, "repair_budget_exhausted",
+			[]string{"descriptive"},
+			[]string{"oscillation_mock_gap_recorded"}},
+	} {
+		for _, layer := range []string{generator.MockDeployLayer, generator.SandboxDeployLayer} {
+			t.Run(path.name+"/"+layer, func(t *testing.T) {
+				lc := newAWSLifecycle(t)
+				docsDir := t.TempDir()
+				generations := 0
+				run := runAWSRun(t, lc, awsRunOptions{
+					repairs: path.repairs,
+					customize: func(cfg *config.Config) {
+						cfg.Paths.Docs = docsDir
+						sandbox := &cfg.Validation.Layers.SandboxDeploy
+						sandbox.AllowResourceTypes = append(sandbox.AllowResourceTypes, "aws_cloudwatch_log_*")
+					},
+					deps: func(d *RuntimeDependencies) {
+						d.Generator = generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
+							generations++
+							main := passing
+							if generations == 1 {
+								main = failing
+							}
+							return &generator.GeneratedCode{Files: map[string][]byte{"main.tf": []byte(main)}}, nil
+						})
+						errs := []error{errors.New(detail)}
+						if layer == generator.MockDeployLayer {
+							d.MockDeploy = &seqMockDeployHarness{fakeMockDeployHarness: &fakeMockDeployHarness{}, errs: errs}
+						} else {
+							d.SandboxDeploy = &seqSandboxDeployHarness{fakeSandboxDeployHarness: lc.deploy, errs: errs}
+						}
+					},
+				})
+				require.Equal(t, path.terminal, run.terminalReason(), run.output)
+
+				entries, err := generator.LoadPitfallEntries(run.h.PitfallsDir(), "aws")
+				require.NoError(t, err)
+				gaps := filepath.Join(docsDir, "mock-gaps.md")
+				if layer == generator.MockDeployLayer {
+					assert.Empty(t, entries)
+					raw, err := os.ReadFile(gaps)
+					require.NoError(t, err)
+					assert.Contains(t, string(raw), "| "+resource+" | `resourcenotfoundexception` |")
+					logs, err := filepath.Glob(filepath.Join(run.h.RunstoreRoot(), "*", "*", "app.log"))
+					require.NoError(t, err)
+					require.Len(t, logs, 1)
+					appLog, err := os.ReadFile(logs[0])
+					require.NoError(t, err)
+					for _, event := range path.events {
+						assert.Contains(t, string(appLog), `"event":"`+event+`"`)
+					}
+					return
+				}
+				assert.NoFileExists(t, gaps)
+				var sources []string
+				for _, e := range entries {
+					assert.Equal(t, resource, e.Resource)
+					assert.Equal(t, generator.SandboxDeployLayer, e.LearnedLayer)
+					sources = append(sources, e.Source)
+				}
+				assert.ElementsMatch(t, path.sources, sources, "entries: %+v", entries)
+			})
+		}
+	}
+}
+
 // A mock whose reset fails says the environment is wrong, not the HCL:
 // the run stops on iteration 1, names the mock, and learns nothing.
 func TestRunCommandStopsWhenAMockResetFails(t *testing.T) {

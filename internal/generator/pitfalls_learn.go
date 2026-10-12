@@ -307,26 +307,31 @@ func ExtractResourceFromDetail(detail string) string {
 	return extractResource(detail)
 }
 
-// IsMockServerBug reports whether a failure detail is rooted in a
+// IsMockServerBug reports whether a failure is rooted in a
 // mock-server gap (missing route, wrong response shape, auth escape,
 // stale state) rather than an LLM-generated HCL mistake. Mock-
 // actionable failures should NOT be auto-learned into
 // pitfalls/<cloud>.yaml — they belong in docs/mock-gaps.md so the
 // matching mock repo can fix the gap at source.
 //
+// layer is the layer the failure came from (FailureSummary.Origin). A
+// SandboxDeployLayer failure came from the real cloud, which returns
+// some of the same signals (ResourceNotFoundException), so it is never
+// a mock bug, whatever its text.
+//
 // Detection is substring-based against a small, hand-curated signal
 // set (see mockActionableSignals above). Conservative by design.
 //
 // Caller pattern (run_command.go):
 //
-//	if generator.IsMockServerBug(failure.Detail) {
+//	if generator.IsMockServerBug(failure.Origin, failure.Detail) {
 //	    generator.AppendMockGap(docsDir, cloud, gap)  // routes here
 //	    continue
 //	}
 //	learned := generator.ExtractDescriptivePitfall(failure.Detail, scenario)
 //	// ... existing path
-func IsMockServerBug(detail string) bool {
-	if detail == "" {
+func IsMockServerBug(layer, detail string) bool {
+	if layer == SandboxDeployLayer || detail == "" {
 		return false
 	}
 	lower := strings.ToLower(detail)

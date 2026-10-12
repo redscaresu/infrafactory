@@ -101,7 +101,8 @@ func TestPitfallsNoHumanSeeding(t *testing.T) {
 // not-respond / OAuth-escape / 404-from-Describe* failure should
 // never have made it into the file — it should have been routed to
 // docs/mock-gaps.md by the new IsMockServerBug classifier in
-// run_command.go.
+// run_command.go. An entry learned at sandbox_deploy is exempt, as the
+// classifier exempts its failure: the real cloud sent that signal.
 //
 // Catching these in CI is the enforcement leg of T-12. Before the
 // classifier landed (this commit), the existing pitfalls files
@@ -118,15 +119,16 @@ func TestPitfallsNoMockServerBugSeeds(t *testing.T) {
 			}
 			var file struct {
 				Pitfalls []struct {
-					Resource string `yaml:"resource"`
-					Rule     string `yaml:"rule"`
+					Resource     string `yaml:"resource"`
+					Rule         string `yaml:"rule"`
+					LearnedLayer string `yaml:"learned_layer"`
 				} `yaml:"pitfalls"`
 			}
 			if err := yaml.Unmarshal(payload, &file); err != nil {
 				t.Fatalf("parse %s: %v", path, err)
 			}
 			for _, p := range file.Pitfalls {
-				if IsMockServerBug(p.Rule) {
+				if IsMockServerBug(p.LearnedLayer, p.Rule) {
 					sig := FirstMockSignal(p.Rule)
 					t.Errorf("pitfalls/%s.yaml: entry for %q has rule matching mock-actionable signal %q — T-12 forbids this. Route the failure to docs/mock-gaps.md instead; the matching mock repo (fakeaws/fakegcp/mockway) should fix the gap at source. Rule was: %.200s",
 						cloud, p.Resource, sig, p.Rule)

@@ -253,7 +253,7 @@ func runRunWithNotify(
 						// Writing them as pitfalls teaches the LLM to
 						// avoid valid resources because the mock is
 						// incomplete — the system narrows over time.
-						if generator.IsMockServerBug(failure.Detail) {
+						if generator.IsMockServerBug(failure.Origin, failure.Detail) {
 							recordMockGap(runtime, "self_correction", runID, generator.MockGap{
 								Cloud: cloud, Scenario: sc.Name, Detail: failure.Detail, Timestamp: runID,
 							})
@@ -512,7 +512,7 @@ func runRunWithNotify(
 			// 2026-06-01 sweep showed gcp-cloud-run, gcp-cloud-sql,
 			// gcp-gke-cluster, gcp-storage all re-learning the same
 			// OAuth-escape + plugin-crash rules N2 just pruned.
-			if generator.IsMockServerBug(f.Detail) {
+			if generator.IsMockServerBug(f.Origin, f.Detail) {
 				recordMockGap(runtime, "oscillation", runID, generator.MockGap{
 					Cloud: sc.Cloud, Scenario: sc.Name, Detail: f.Detail, Timestamp: runID,
 				})
@@ -733,7 +733,7 @@ func runRunWithNotify(
 				// The self-correction hook records only the last failing
 				// iteration, so a gap cleared in an earlier pair is written
 				// here (rows dedupe, so writing one twice is harmless).
-				if generator.IsMockServerBug(cleared.Detail) {
+				if generator.IsMockServerBug(cleared.Origin, cleared.Detail) {
 					recordMockGap(runtime, "prescriptive", runID, generator.MockGap{
 						Cloud: sc.Cloud, Scenario: sc.Name, Detail: cleared.Detail, Timestamp: runID,
 					})
