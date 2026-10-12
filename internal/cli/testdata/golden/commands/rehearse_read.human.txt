@@ -1,0 +1,4 @@
+Command: rehearse read
+Status: success
+Recorded read: <WORKSPACE>/.infrafactory/reads/step0/read.json
+Exchanges: 1

@@ -588,6 +588,40 @@ Each logged request carries one class:
 A file-backed database (`-db <path>`), its `-wal` and `-shm`, a snapshot and a restored copy are created
 0600, owner-only. An existing database keeps its mode.
 
+## Rehearsal
+
+The `infrafactory rehearse` family (ADR-0042) reads no `infrafactory.yaml`: the account and region
+come from flags only, never from the config's `aws:` block or the environment.
+
+### Read
+
+```
+infrafactory rehearse read --account <id> [--principal <arn>] --region <r> \
+  --credentials <file> --read-set <file> --out <dir>
+```
+
+One read step (ADR-0041). Nothing else calls it: no run, validate, UI or CI path. It runs from
+inside a git repository, which `<repo>` below names, and takes relative paths from the current
+directory.
+
+- `--account` (12 digits) and `--region` name the account read; `--principal` is optional, and when
+  given the key's ARN must match it exactly.
+- `--credentials` is the reader key file (§ The reader key file). The command reads it itself and
+  holds the key in its own process only; nothing is sourced or exported.
+- `--read-set` is a JSON array of ADR-0041 read-set entries. An entry outside the reader table
+  refuses the read, naming every such entry, with nothing sent.
+- `--out` must resolve, symlinks included, under `<repo>/.infrafactory/`, and not into
+  `.infrafactory/runs` or `.infrafactory/live`, which the UI serves. Anything else is refused
+  before any request. The recorded read is `<out>/read.json`: the directory `0700` (an existing one
+  open to group or other is refused, never chmodded), the file `0600`, overwritten by the next read
+  into the same `--out`.
+
+In order: `sts:GetCallerIdentity` (a wrong account or principal stops the read after that one
+request), the EC2 DryRun preflight (any answer but `UnauthorizedOperation` stops it, naming the
+action), then each entry and its EC2 follow-ups. A refusal exits 1 and writes no recorded read; a
+missing or malformed flag exits 2. The raw `read.json` carries the account id and the read's
+values: it is never committed; `cmd/aws-read-scrub` turns it into fixtures that may be.
+
 ## Sibling mocks
 
 Three first-party HTTP-level mocks + one third-party backend live alongside infrafactory:
