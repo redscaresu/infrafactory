@@ -1,7 +1,6 @@
 ---
 kind: docs
-status: blocked
-blocked_by: [rehearsal-prepare-second-init]
+status: ready
 epic: rehearsal-prepare-gate
 depends_on: [rehearsal-prepare-second-init]
 touches: [docs/operations.md, docs/epics/rehearsal-prepare-gate.md, docs/hld/2026-09-30-import-production-state-into-the-mocks.md]
