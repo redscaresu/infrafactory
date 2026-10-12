@@ -1,7 +1,6 @@
 ---
 kind: code
-status: blocked
-blocked_by: [rehearsal-prepare-gate-core]
+status: ready
 epic: rehearsal-prepare-gate
 depends_on: [rehearsal-prepare-gate-core]
 touches: [internal/cli/rehearse_gate_paths.go, internal/cli/rehearse_gate_paths_test.go, docs/decisions/0042-rehearsal-command-contract-and-walls.md]
