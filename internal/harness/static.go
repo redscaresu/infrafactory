@@ -27,7 +27,10 @@ type Command struct {
 	// ReplaceEnv makes the child's environment this process's PATH plus
 	// Env, and nothing else: an allowlist, where StripEnv is a denylist
 	// that misses any variable nobody named. A PATH in Env wins over
-	// this process's. Setting both ReplaceEnv and StripEnv is an error.
+	// this process's, in the child's environment only: a bare Name is
+	// still looked up on this process's PATH, so a caller that needs a
+	// specific binary passes an absolute Name. Setting both ReplaceEnv
+	// and StripEnv is an error.
 	ReplaceEnv bool
 }
 
