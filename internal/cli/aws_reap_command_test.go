@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/redscaresu/infrafactory/internal/config"
 	"github.com/redscaresu/infrafactory/internal/harness"
+	"github.com/redscaresu/infrafactory/internal/scenario"
 )
 
 const (
@@ -34,6 +36,8 @@ type awsReapRun struct {
 	h      *CommandTestHarness
 	output string
 	err    error
+	// again reaps once more in the same workspace, with a fresh runtime.
+	again func(flags ...string) awsReapRun
 }
 
 func (r awsReapRun) text() string {
@@ -45,29 +49,68 @@ func (r awsReapRun) text() string {
 
 func reapAWS(t *testing.T, lc *awsLifecycle, customize func(*config.Config), withState bool, flags ...string) awsReapRun {
 	t.Helper()
+	return reapAWSWith(t, lc, awsReapSetup{customize: customize, withState: withState, flags: flags})
+}
+
+// awsReapSetup is what an aws reap varies.
+type awsReapSetup struct {
+	name      string // the scenario's name; the harness's when empty
+	cloud     string // the scenario's cloud; aws when empty
+	customize func(*config.Config)
+	withState bool
+	// prepare runs after the output dir is written, with the workspace
+	// the cwd.
+	prepare func(outDir string)
+	// deps edits the dependencies after the defaults are set.
+	deps  func(*RuntimeDependencies)
+	flags []string
+}
+
+// reapAWSWith runs the reap with the harness's workspace as the cwd, so
+// what reap writes under .infrafactory/ lands in the test's own dir.
+func reapAWSWith(t *testing.T, lc *awsLifecycle, setup awsReapSetup) awsReapRun {
+	t.Helper()
+	schema, err := filepath.Abs(filepath.Join("..", "..", scenario.DefaultSchemaPath))
+	require.NoError(t, err)
 	h := newCommandTestHarness(t)
-	setScenarioCloud(t, h.ScenarioPath, "aws")
-	outDir := filepath.Join(h.OutputDir(), "example-scenario")
+	t.Chdir(filepath.Dir(h.ConfigPath))
+	cloud, name := cmp.Or(setup.cloud, "aws"), cmp.Or(setup.name, "example-scenario")
+	setScenarioCloud(t, h.ScenarioPath, cloud)
+	raw, err := os.ReadFile(h.ScenarioPath)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(h.ScenarioPath, []byte(strings.Replace(string(raw), "scenario: example-scenario", "scenario: "+name, 1)), 0o600))
+	outDir := filepath.Join(h.OutputDir(), name)
 	require.NoError(t, os.MkdirAll(outDir, 0o755))
-	writeAWSStateAndStaleMarker(t, outDir, withState)
+	writeAWSStateAndStaleMarker(t, outDir, setup.withState)
+	if setup.prepare != nil {
+		setup.prepare(outDir)
+	}
 
 	cfg, err := config.Load(h.ConfigPath)
 	require.NoError(t, err)
 	cfg.Paths.Output = h.OutputDir()
 	cfg = layer3On(cfg)
 	cfg.AWS = config.AWSConfig{Region: "eu-west-2", AccountID: preflightAWSAccount, PrincipalARN: preflightAWSPrincipal}
-	if customize != nil {
-		customize(&cfg)
+	if setup.customize != nil {
+		setup.customize(&cfg)
 	}
-	rt := &CommandRuntime{ConfigPath: h.ConfigPath, Config: cfg, scenarioLoader: defaultScenarioLoader, Logger: NewAppLogger(&bytes.Buffer{})}
-	lc.scw.install(&rt.Deps)
-	rt.Deps.SandboxDestroy = lc.destroy
-	rt.Deps.AWSSTS, rt.Deps.AWSSSM, rt.Deps.AWSEC2 = lc, lc, lc
-	rt.Deps.AWSSweepSleep = func(context.Context, time.Duration) error { return nil }
+	loader := func(path string) (scenario.Scenario, error) { return scenario.LoadWithSchema(path, schema) }
 
-	out := &strings.Builder{}
-	err = runReap(t, rt, h.ScenarioPath, out, flags...)
-	return awsReapRun{h: h, output: out.String(), err: err}
+	var reap func(flags ...string) awsReapRun
+	reap = func(flags ...string) awsReapRun {
+		rt := &CommandRuntime{ConfigPath: h.ConfigPath, Config: cfg, scenarioLoader: loader, Logger: NewAppLogger(&bytes.Buffer{})}
+		lc.scw.install(&rt.Deps)
+		rt.Deps.SandboxDestroy = lc.destroy
+		rt.Deps.AWSSTS, rt.Deps.AWSSSM, rt.Deps.AWSEC2 = lc, lc, lc
+		rt.Deps.AWSSweepSleep = func(context.Context, time.Duration) error { return nil }
+		if setup.deps != nil {
+			setup.deps(&rt.Deps)
+		}
+		out := &strings.Builder{}
+		err := runReap(t, rt, h.ScenarioPath, out, flags...)
+		return awsReapRun{h: h, output: out.String(), err: err, again: reap}
+	}
+	return reap(setup.flags...)
 }
 
 // deleteKeyPairsOnDelete makes DeleteKeyPair empty the key pair listing.

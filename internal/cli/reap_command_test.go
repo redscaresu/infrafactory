@@ -77,9 +77,7 @@ func writeReapLiveState(t *testing.T, dir, projectID string) {
 
 func runReap(t *testing.T, rt *CommandRuntime, scenarioPath string, out *strings.Builder, args ...string) error {
 	t.Helper()
-	cmd := &cobra.Command{Use: "reap"}
-	cmd.Flags().Bool("dry-run", false, "")
-	cmd.Flags().String("take-over", "", "")
+	cmd := newReapCmd(&rootConfig{})
 	cmd.Flags().String("output", string(OutputModeHuman), "")
 	if err := cmd.ParseFlags(args); err != nil {
 		t.Fatalf("parse flags: %v", err)

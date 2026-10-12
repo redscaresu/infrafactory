@@ -237,6 +237,7 @@ func newReapCmd(cfg *rootConfig) *cobra.Command {
 
 	cmd.Flags().Bool("dry-run", false, "Report what would be destroyed without destroying it")
 	cmd.Flags().String("take-over", "", "aws: take the scope's claim over from this holder, once its run has ended")
+	cmd.Flags().Bool("release-hold", false, awsHoldScenario+", with --take-over: copy the held stack's tfstate under "+holdsRoot+"/ before the reap destroys it")
 
 	return cmd
 }
