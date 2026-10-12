@@ -221,6 +221,8 @@ func newTestCmd(cfg *rootConfig) *cobra.Command {
 	// tells the operator to pass it, and advice naming a flag the
 	// command does not have is worse than no advice.
 	cmd.Flags().Bool("continue-on-drift", false, "Keep going after the Layer 2 converge check finds a non-empty plan, instead of stopping. The result still fails")
+	// test only: run's flags are the UI's, and the UI must not hold.
+	cmd.Flags().Bool("hold", false, awsHoldScenario+" on Layer 3: keep a passing stack under the claim, its tfstate copied under "+holdsRoot+"/, until reap --take-over <holder> --release-hold")
 
 	return cmd
 }
