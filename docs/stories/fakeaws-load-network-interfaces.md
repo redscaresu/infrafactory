@@ -1,8 +1,7 @@
 ---
 kind: code
 repo: fakeaws
-status: blocked
-blocked_by: [fakeaws-load-security-groups]
+status: ready
 epic: fakeaws-loader
 depends_on: [fakeaws-load-security-groups]
 touches: [handlers/load_ec2_compute.go, handlers/load_ec2_compute_test.go, repository/load_ec2.go, handlers/ec2.go, handlers/ec2_test.go, repository/ec2_compute.go, repository/ec2.go, repository/repository.go, repository/testdata/schema.golden, testdata/ec2/DescribeNetworkInterfaces.xml, testdata/ec2/DescribeAddresses.xml, testdata/ec2/DescribeKeyPairs.xml]
