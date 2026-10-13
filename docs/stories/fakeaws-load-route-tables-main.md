@@ -1,8 +1,7 @@
 ---
 kind: code
 repo: fakeaws
-status: blocked
-blocked_by: [fakeaws-load-vpc-subnet-igw-az, fakeaws-load-ssm-parameters]
+status: ready
 epic: fakeaws-loader
 depends_on: [fakeaws-load-vpc-subnet-igw-az, fakeaws-load-ssm-parameters]
 touches: [handlers/load_ec2_routes.go, handlers/load_ec2_routes_test.go, repository/load_ec2.go, handlers/ec2.go, handlers/ec2_test.go, repository/ec2.go, repository/ec2_test.go, repository/repository.go, repository/testdata/schema.golden, testdata/ec2/DescribeRouteTables.xml]

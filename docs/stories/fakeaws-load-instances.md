@@ -37,6 +37,8 @@ never reads go on the ignore list, each with a cite. iamInstanceProfile answers 
 - DescribeInstanceAttribute answers each of the four as recorded; a userData with a trailing
   newline and a CR reads back byte-exact.
 - iamInstanceProfile's id answers the recorded `AIPA…` id.
+- RunInstances with a loaded instance profile whose recorded ARN has a path answers that stored
+  ARN, not one built from the name (handlers/ec2.go builds it today; found reviewing fakeaws#82).
 - Mutate once: after ModifyInstanceAttribute DisableApiTermination=true on the loaded instance,
   DescribeInstances equals the recording exactly, and DescribeInstanceAttribute changes only
   disableApiTermination; userData is still byte-exact.
