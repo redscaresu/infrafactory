@@ -26,6 +26,7 @@ from a real account.
 
 **Done when:**
 - Current-EC2 Image members the model lacks (freeTierEligible, deregistrationProtection, sourceInstanceId, imageAllowed, an ebs kmsKeyId) are each modelled or ignore-listed with a v5.100.0 provider cite before the real recording loads; today any of them refuses the load by name (from fakeaws#90 review).
+- Current-EC2 Volume and attachment members the model lacks (volume: availabilityZoneId, volumeArn, ownerId, sseType, fastRestored, sourceVolumeId, operator, volumeInitializationRate; attachment: ebsCardIndex, associatedResource, instanceOwningService) are each modelled or ignore-listed with a v5.100.0 provider cite before the real recording loads; today any of them refuses the load by name (from fakeaws#91 review).
 - TestLoadReadBack passes on step0-scrubbed.json with zero refusals; the PR lists the per-type
   counts.
 - The file's sha256 equals that of infrafactory's committed file at the commit the `.source` file
