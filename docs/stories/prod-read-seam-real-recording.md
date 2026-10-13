@@ -1,7 +1,7 @@
 ---
 kind: lead
 status: blocked
-blocked_by: [prod-read-seam-reader-user, prod-read-seam-rehearse-read-cli, prod-read-seam-scrub, prod-read-seam-fakeaws-filtered-e2e, prod-read-seam-iam-readers, prod-read-seam-adr-0040-amendment, aws-hold-for-read-real-proof, prod-read-seam-reader-describe-volumes, prod-read-seam-reader-parameter-image, fakeaws-load-read-back]
+blocked_by: [prod-read-seam-reader-user, prod-read-seam-rehearse-read-cli, prod-read-seam-scrub, prod-read-seam-fakeaws-filtered-e2e, prod-read-seam-iam-readers, prod-read-seam-adr-0040-amendment, aws-hold-for-read-real-proof, prod-read-seam-reader-describe-volumes, prod-read-seam-reader-parameter-image]
 epic: prod-read-seam
 depends_on: [prod-read-seam-reader-user, prod-read-seam-rehearse-read-cli, prod-read-seam-scrub, prod-read-seam-fakeaws-filtered-e2e, prod-read-seam-iam-readers, prod-read-seam-adr-0040-amendment, aws-hold-for-read-real-proof, prod-read-seam-reader-describe-volumes, prod-read-seam-reader-parameter-image, fakeaws-load-read-back]
 touches: [internal/e2e/testdata/aws-step0/, internal/e2e/aws_step0_fixture_test.go, docs/epics/prod-read-seam.md, docs/hld/2026-09-30-import-production-state-into-the-mocks.md, STATUS.md, docs/stories/fakeaws-loader-real-read-back.md]

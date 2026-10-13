@@ -1,7 +1,7 @@
 ---
 kind: lead
 status: blocked
-blocked_by: [fakeaws-load-read-back, prod-read-seam-reader-describe-volumes, prod-read-seam-real-recording]
+blocked_by: [prod-read-seam-reader-describe-volumes, prod-read-seam-real-recording]
 epic: fakeaws-loader
 depends_on: [fakeaws-load-read-back, prod-read-seam-reader-describe-volumes, prod-read-seam-real-recording]
 touches: []
