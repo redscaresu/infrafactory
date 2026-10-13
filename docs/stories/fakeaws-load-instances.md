@@ -1,8 +1,7 @@
 ---
 kind: code
 repo: fakeaws
-status: blocked
-blocked_by: [fakeaws-load-network-interfaces]
+status: ready
 epic: fakeaws-loader
 depends_on: [fakeaws-load-network-interfaces]
 touches: [handlers/load_ec2_compute.go, handlers/load_ec2_compute_test.go, repository/load_ec2.go, handlers/ec2.go, handlers/ec2_test.go, repository/ec2_compute.go, testdata/ec2/DescribeInstances.xml, testdata/ec2/DescribeInstanceAttribute-userData.xml, testdata/ec2/DescribeInstanceAttribute-disableApiTermination.xml, testdata/ec2/DescribeInstanceAttribute-disableApiStop.xml, testdata/ec2/DescribeInstanceAttribute-instanceInitiatedShutdownBehavior.xml]
