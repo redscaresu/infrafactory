@@ -1,7 +1,7 @@
 ---
 kind: code
 repo: fakeaws
-status: blocked
+status: ready
 blocked_by: [fakeaws-load-volumes-d7]
 epic: fakeaws-loader
 depends_on: [fakeaws-load-volumes-d7]
