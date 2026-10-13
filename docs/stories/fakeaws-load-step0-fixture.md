@@ -2,7 +2,7 @@
 kind: code
 repo: fakeaws
 status: blocked
-blocked_by: [fakeaws-loader-docs, fakeaws-loader-real-read-back, prod-read-seam-real-recording]
+blocked_by: [fakeaws-loader-real-read-back, prod-read-seam-real-recording]
 epic: fakeaws-loader
 depends_on: [fakeaws-loader-docs, fakeaws-loader-real-read-back, prod-read-seam-real-recording]
 touches: [testdata/load/step0-scrubbed.json, testdata/load/step0-scrubbed.json.source, handlers/load_fixture_leak_test.go]
