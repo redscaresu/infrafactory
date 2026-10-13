@@ -1,8 +1,7 @@
 ---
 kind: code
 repo: fakeaws
-status: blocked
-blocked_by: [fakeaws-sg-rule-model]
+status: ready
 epic: fakeaws-loader
 depends_on: [fakeaws-sg-rule-model]
 touches: [handlers/ec2.go, handlers/ec2_test.go, handlers/ec2_filters.go, repository/ec2.go, repository/ec2_test.go, examples/known_red_test.go, coverage_matrix.yaml, testdata/ec2/DescribeSecurityGroupRules.xml]
