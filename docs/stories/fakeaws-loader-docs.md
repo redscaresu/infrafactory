@@ -30,6 +30,7 @@ parallel IAM, SSM and schema lanes.
 - CHANGELOG [Unreleased] gets one section for the epic, one entry per merged story naming its PR.
 
 **Done when:**
+- CHANGELOG.md lines that fakeaws#90 made stale (about lines 86 and 122 at #90) are corrected.
 - TestAllContractsHaveTests and TestAgentsMDListsEveryContract pass, and `git grep -c` finds each
   of the twelve ids in handlers/*.go.
 - `grep -n PutRolePolicy concepts.md` shows no no-op claim, and AGENTS.md and concepts.md name
