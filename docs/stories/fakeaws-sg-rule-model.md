@@ -1,8 +1,7 @@
 ---
 kind: code
 repo: fakeaws
-status: blocked
-blocked_by: [fakeaws-load-route-tables-main]
+status: ready
 epic: fakeaws-loader
 depends_on: [fakeaws-load-route-tables-main]
 touches: [handlers/ec2.go, handlers/ec2_test.go, handlers/admin_test.go, repository/ec2.go, repository/ec2_test.go, repository/ec2_tags.go, repository/repository.go, repository/testdata/schema.golden, testdata/ec2/AuthorizeSecurityGroupIngress.xml]
