@@ -1,11 +1,10 @@
 ---
 kind: docs
 repo: fakeaws
-status: blocked
-blocked_by: [fakeaws-load-read-back, fakeaws-load-round-trip]
+status: ready
 epic: fakeaws-loader
 depends_on: [fakeaws-load-read-back, fakeaws-load-round-trip]
-touches: [handlers/load.go, handlers/ec2.go, handlers/iam.go, handlers/ssm.go, handlers/admin.go, handlers/recorder.go, handlers/load_test.go, handlers/ec2_test.go, handlers/iam_test.go, handlers/ssm_test.go, handlers/admin_test.go, AGENTS.md, concepts.md, CHANGELOG.md]
+touches: [CONTRIBUTING.md, handlers/load.go, handlers/ec2.go, handlers/iam.go, handlers/ssm.go, handlers/admin.go, handlers/recorder.go, handlers/load_test.go, handlers/ec2_test.go, handlers/iam_test.go, handlers/ssm_test.go, handlers/admin_test.go, AGENTS.md, concepts.md, CHANGELOG.md]
 ---
 
 # Contracts, AGENTS.md, concepts.md and CHANGELOG for the loader
@@ -28,6 +27,8 @@ parallel IAM, SSM and schema lanes.
   PutRolePolicy no-op and with DescribeVolumes' two classes; and, beside "No partial CRUD"
   (:479-486), the exemption for read-and-terminate-only volumes.
 - CHANGELOG [Unreleased] gets one section for the epic, one entry per merged story naming its PR.
+- CONTRIBUTING.md's coverage_matrix checklist (:33, :39 at fakeaws#92) adds the `loadable: true` /
+  `loadable_exempt_reason` column that TestFullCoverageAudit requires on every row (fakeaws#92).
 
 **Done when:**
 - CHANGELOG.md lines that fakeaws#90 made stale (about lines 86 and 122 at #90) are corrected.
