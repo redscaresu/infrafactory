@@ -29,10 +29,11 @@ type openRehearsal struct {
 
 // rehearsalOpen finds rehearsal id in repo, reads its record and dials
 // rehearsalDeadProxy again: prepare dials it only before the second init,
-// and something may listen there since. Each refusal is errors.Is-able:
-// errRehearsalBadID, errRehearsalMissing, errRehearsalRecord (the dir is
-// still returned) and errRehearsalProxyLive (the dir and record are still
-// returned), so end can act on each. It creates nothing.
+// and something may listen there since. Four refusals are errors.Is-able,
+// so end can act on each: errRehearsalBadID, errRehearsalMissing,
+// errRehearsalRecord (the dir is still returned) and errRehearsalProxyLive
+// (the dir and record are still returned). Any other error is a failure
+// to find the rehearsal. It creates nothing.
 func rehearsalOpen(repo, id string) (openRehearsal, error) {
 	dir, err := rehearsalFind(repo, id)
 	if err != nil {
@@ -56,7 +57,8 @@ func rehearsalFind(repo, id string) (string, error) {
 		return "", fmt.Errorf("%w: %q is not one path element", errRehearsalBadID, id)
 	}
 	dir := repo
-	for _, name := range []string{".infrafactory", "rehearsals", id} {
+	levels := []string{".infrafactory", "rehearsals", id}
+	for i, name := range levels {
 		dir = filepath.Join(dir, name)
 		info, err := os.Lstat(dir)
 		switch {
@@ -65,7 +67,7 @@ func rehearsalFind(repo, id string) (string, error) {
 		case err != nil:
 			return "", fmt.Errorf("cannot look for rehearsal %s: %w", id, err)
 		case info.IsDir():
-		case name == id:
+		case i == len(levels)-1:
 			return "", fmt.Errorf("%w: %s is not a directory", errRehearsalBadID, dir)
 		default:
 			return "", fmt.Errorf("%s is refused: it is not a directory, and a symlink would put the rehearsals outside this repository", dir)
@@ -76,8 +78,8 @@ func rehearsalFind(repo, id string) (string, error) {
 
 // root is the record's entry for the prepared root named name, as the
 // record names it (work/envs/prod). A name the record does not hold, or
-// an entry whose root does not resolve inside its copy, inside the
-// rehearsal, is refused.
+// an entry whose root does not resolve inside its copy, a dir under the
+// rehearsal and never the rehearsal itself, is refused.
 func (r openRehearsal) root(name string) (rehearsalRoot, error) {
 	i := slices.IndexFunc(r.record.Roots, func(root rehearsalRoot) bool { return root.Root == name })
 	if i < 0 {
@@ -87,7 +89,7 @@ func (r openRehearsal) root(name string) (rehearsalRoot, error) {
 	copied := filepath.Join(r.dir, root.Copy)
 	_, copyProblem := rehearsalInside(copied, r.dir)
 	_, rootProblem := rehearsalInside(filepath.Join(r.dir, root.Root), copied)
-	if !filepath.IsLocal(root.Copy) || copyProblem != "" || rootProblem != "" {
+	if !filepath.IsLocal(root.Copy) || filepath.Clean(root.Copy) == "." || copyProblem != "" || rootProblem != "" {
 		return rehearsalRoot{}, fmt.Errorf("root %s is refused: the record must name it inside its copy %q, inside the rehearsal", name, root.Copy)
 	}
 	return root, nil
@@ -99,8 +101,14 @@ func (r openRehearsal) root(name string) (rehearsalRoot, error) {
 func (r rehearsalRecord) ours(root rehearsalRoot) map[string][]byte {
 	return map[string][]byte{
 		ourOverride:          rehearsalBackendOverride,
-		rehearsalAWSOverride: rehearsalProviderOverride(rehearsalFakeawsURL(r.Port), r.Region, root.EndpointKeys, root.AWSAliases),
+		rehearsalAWSOverride: r.providerOverride(root),
 	}
+}
+
+// providerOverride is the provider override's bytes for root, at this
+// record's fakeaws port and region: what walls writes and ours admits.
+func (r rehearsalRecord) providerOverride(root rehearsalRoot) []byte {
+	return rehearsalProviderOverride(rehearsalFakeawsURL(r.Port), r.Region, root.EndpointKeys, root.AWSAliases)
 }
 
 // rehearsalOurOverrides is ours for the named root, rebuilt from the

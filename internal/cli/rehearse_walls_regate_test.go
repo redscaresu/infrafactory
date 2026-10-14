@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"syscall"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -163,7 +164,10 @@ func TestRehearsalRegateIsPerRoot(t *testing.T) {
 	second.Root = filepath.Join("work", "envs", "stage")
 	outside := record.Roots[0]
 	outside.Root = "data"
-	record.Roots = append(record.Roots, second, outside)
+	dot := record.Roots[0]
+	dot.Copy, dot.Root = ".", filepath.Join("work", "envs", "dot")
+	require.NoError(t, rehearsalCopyTree(prod, filepath.Join(r.dir, dot.Root)))
+	record.Roots = append(record.Roots, second, outside, dot)
 	r = rewriteRecord(t, repo, r, record)
 	require.NoError(t, rehearsalRegate(r, second.Root), "a clean second root")
 	mustWriteFile(t, filepath.Join(stage, "zz_override.tf"), "provider \"aws\" {}\n")
@@ -178,6 +182,8 @@ func TestRehearsalRegateIsPerRoot(t *testing.T) {
 	_, err = rehearsalOurOverrides(r, filepath.Join("work", "envs", "qa"))
 	assert.EqualError(t, err, "root work/envs/qa is refused: the rehearsal's record names no such root")
 	assert.EqualError(t, rehearsalRegate(r, "data"), `root data is refused: the record must name it inside its copy "work", inside the rehearsal`)
+	assert.EqualError(t, rehearsalRegate(r, dot.Root), `root work/envs/dot is refused: the record must name it inside its copy ".", inside the rehearsal`,
+		"a copy of . makes the whole rehearsal the boundary")
 }
 
 // rehearsalOpen refuses a bad id, a symlinked <id> included, reports a
@@ -209,9 +215,41 @@ func TestRehearsalOpenRefuses(t *testing.T) {
 		assert.ErrorIs(t, err, errRehearsalRecord, name)
 		assert.Equal(t, r.dir, opened.dir, name)
 	}
-	require.NoError(t, os.Remove(filepath.Join(r.dir, rehearsalRecordFile)))
+	record := filepath.Join(r.dir, rehearsalRecordFile)
+	require.NoError(t, os.Remove(record))
 	_, err = rehearsalOpen(repo, prepareID)
 	assert.ErrorIs(t, err, errRehearsalRecord, "a missing record")
+
+	// A record that is not a regular file is refused unread: a symlink to
+	// a good record, and a FIFO, which a read would block on.
+	good := filepath.Join(t.TempDir(), rehearsalRecordFile)
+	require.NoError(t, r.record.write(filepath.Dir(good)))
+	require.NoError(t, os.Symlink(good, record))
+	_, err = rehearsalOpen(repo, prepareID)
+	assert.ErrorIs(t, err, errRehearsalRecord, "a symlinked record")
+	require.NoError(t, os.Remove(record))
+	require.NoError(t, syscall.Mkfifo(record, 0o600))
+	_, err = rehearsalOpen(repo, prepareID)
+	assert.ErrorIs(t, err, errRehearsalRecord, "a FIFO record")
+}
+
+// A symlink above <id> is refused as a failure, never as a bad id or a
+// missing rehearsal, whatever the id is named.
+func TestRehearsalOpenRefusesASymlinkedRehearsalsDir(t *testing.T) {
+	t.Parallel()
+	_, repo := prepareRepo(t, nil)
+	elsewhere := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(elsewhere, "rehearsals"), 0o700))
+	require.NoError(t, os.Mkdir(filepath.Join(repo, ".infrafactory"), 0o700))
+	require.NoError(t, os.Symlink(elsewhere, filepath.Join(repo, ".infrafactory", "rehearsals")))
+
+	for _, id := range []string{"rehearsals", "x"} {
+		_, err := rehearsalOpen(repo, id)
+		require.Error(t, err, id)
+		assert.NotErrorIs(t, err, errRehearsalBadID, id)
+		assert.NotErrorIs(t, err, errRehearsalMissing, id)
+		assert.Contains(t, err.Error(), "a symlink would put the rehearsals outside this repository", id)
+	}
 }
 
 // rehearsalOpen dials the dead proxy again and refuses, naming its
