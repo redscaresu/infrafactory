@@ -73,9 +73,8 @@ type rehearsalFakeaws struct {
 	Token string
 	// exited closes once the process has exited and been reaped.
 	exited <-chan struct{}
-	// gone is set once stop has seen the group gone. A later stop, on this
-	// value or a copy, then sends nothing: an empty group's id is free for
-	// the system to reuse.
+	// gone is set once a stop of a value without exited has seen the group
+	// gone (groupGone).
 	gone *atomic.Bool
 }
 
@@ -89,11 +88,12 @@ func rehearsalStartFakeaws(ctx context.Context, opts rehearsalFakeawsOpts) (rehe
 	if err := os.Mkdir(opts.dir, 0o700); err != nil {
 		return rehearsalFakeaws{}, fmt.Errorf("fakeaws cannot have its dir: %w", err)
 	}
-	token := rehearsalToken()
 	var err error
 	for range rehearsalFakeawsTries {
 		var f rehearsalFakeaws
-		if f, err = startRehearsalFakeawsOnce(ctx, opts, token); !errors.Is(err, errRehearsalFakeawsBind) {
+		// A fresh token each try: a try that failed to bind may have sent its
+		// token to another server on its port.
+		if f, err = startRehearsalFakeawsOnce(ctx, opts, rehearsalToken()); !errors.Is(err, errRehearsalFakeawsBind) {
 			return f, err
 		}
 	}
@@ -173,11 +173,10 @@ func startRehearsalFakeawsOnce(ctx context.Context, opts rehearsalFakeawsOpts, t
 // stop ends fakeaws's process group: SIGTERM, then SIGKILL if any process
 // is left in it once the fallback passes. It fails, naming pid and port,
 // if the group is still there a fallback after the SIGKILL. It sends
-// nothing to a group already gone, and nothing at all once a stop has
-// seen it gone. A zero rehearsalFakeaws stops nothing: kill(-0) would
-// signal the caller's own process group.
+// nothing to a group already gone (groupGone). A zero rehearsalFakeaws
+// stops nothing: kill(-0) would signal the caller's own process group.
 func (f rehearsalFakeaws) stop() error {
-	if f.PID <= 0 || f.gone != nil && f.gone.Load() || f.groupGoneWithin(0) {
+	if f.PID <= 0 || f.groupGone() {
 		return nil
 	}
 	_ = rehearsalKillGroup(f.PID, syscall.SIGTERM)
@@ -191,23 +190,44 @@ func (f rehearsalFakeaws) stop() error {
 	return fmt.Errorf("stop failed: pid %d port %d", f.PID, f.Port)
 }
 
-// groupGoneWithin probes the group until no process is left in it, at
-// most d (once, when d is 0), and records it gone. The group id cannot be
-// reused while any process is left, so a probe that finds one reaches
-// only this group. The leader counts until the goroutine waiting on it
-// has reaped it.
+// groupGoneWithin waits, at most d, for groupGone.
 func (f rehearsalFakeaws) groupGoneWithin(d time.Duration) bool {
 	for deadline := time.Now().Add(d); ; time.Sleep(rehearsalFakeawsPoll) {
-		if errors.Is(rehearsalKillGroup(f.PID, 0), syscall.ESRCH) {
-			if f.gone != nil {
-				f.gone.Store(true)
-			}
+		if f.groupGone() {
 			return true
 		}
 		if !time.Now().Before(deadline) {
 			return false
 		}
 	}
+}
+
+// groupGone says whether nothing of fakeaws is left in its group, without
+// ever probing an id that may be another group's. With exited (every value
+// start returns), it is gone once exited is closed: fakeaws starts no
+// children, and once its leader is reaped the id is free for the system
+// to reuse, so it is never probed. Without exited (a zero or hand-made
+// value), the group is probed, and a group once seen gone is remembered
+// in gone, for the same reason.
+func (f rehearsalFakeaws) groupGone() bool {
+	if f.exited != nil {
+		select {
+		case <-f.exited:
+			return true
+		default:
+			return false
+		}
+	}
+	if f.gone != nil && f.gone.Load() {
+		return true
+	}
+	if !errors.Is(rehearsalKillGroup(f.PID, 0), syscall.ESRCH) {
+		return false
+	}
+	if f.gone != nil {
+		f.gone.Store(true)
+	}
+	return true
 }
 
 // waitReady waits, until rehearsalFakeawsReady or a cancel of ctx, for

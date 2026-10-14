@@ -388,10 +388,11 @@ child has `Setpgid` and is started with `exec.Command`, not `CommandContext`, so
 prepare's ctx. fakeaws cannot report an ephemeral port, so prepare picks a free loopback port,
 releases it and starts: it retries on a new port only when the child failed to bind (address in
 use), 3 tries in all, whatever answered on that port, since another server there can answer the
-checks. Any other early exit refuses at once with its exit code and log tail. The live checks:
-`/healthz` answers 200; `GET /mock/requests` answers 200 with the token and 401 without it or
-with another token, so a server that takes any token is refused; nothing answers on a
-non-loopback address; and the child is still running after them.
+checks. Each try has a fresh token, because a failed try may have sent its token to that server.
+Any other early exit refuses at once with its exit code and log tail. The live checks: `/healthz`
+answers 200; `GET /mock/requests` answers 200 with the token and 401 without it or with another
+token, so a server that takes any token is refused; nothing answers on a non-loopback address;
+and the child is still running after them.
 
 ### The gate bar for walls
 

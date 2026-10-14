@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -36,7 +37,8 @@ var fakeawsShellEnv = []string{"PWD", "SHLVL", "_"}
 
 // TestRehearsalFakeawsStub is not a test: it is the fakeaws a stub script
 // execs into. It takes fakeaws's flags after "--" and serves /healthz and
-// /mock/requests on -bind:-port as its role says. "fakeaws" behaves as
+// /mock/requests on -bind:-port as its role says, and /exit, after which
+// it exits 1 on its own. "fakeaws" behaves as
 // fakeaws does; "unknown-flag" knows no -record-requests; "no-auth"
 // answers /mock/requests without the token; "no-record" answers it 501,
 // as fakeaws does with recording off; "never-healthy" answers /healthz
@@ -91,6 +93,12 @@ func TestRehearsalFakeawsStub(t *testing.T) {
 		os.Exit(1)
 	}
 	mux := http.NewServeMux()
+	mux.HandleFunc("/exit", func(http.ResponseWriter, *http.Request) {
+		go func() {
+			time.Sleep(50 * time.Millisecond)
+			os.Exit(1)
+		}()
+	})
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		if role == "never-healthy" {
 			w.WriteHeader(http.StatusServiceUnavailable)
@@ -377,7 +385,15 @@ func retriesPastASquatter(t *testing.T, mockRequests http.HandlerFunc) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(http.ResponseWriter, *http.Request) {})
 	mux.Handle("/mock/requests", mockRequests)
-	squatter := httptest.NewServer(mux)
+	// Every Authorization the squatter is sent.
+	var mu sync.Mutex
+	var seen []string
+	squatter := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		seen = append(seen, r.Header.Get("Authorization"))
+		mu.Unlock()
+		mux.ServeHTTP(w, r)
+	}))
 	t.Cleanup(squatter.Close)
 	squatPort := squatter.Listener.Addr().(*net.TCPAddr).Port
 	freePort, picks := rehearsalFreePort, 0
@@ -397,53 +413,87 @@ func retriesPastASquatter(t *testing.T, mockRequests http.HandlerFunc) {
 	assert.Len(t, fakeawsStubPIDs(stubDir), 2, "admitted on the second try")
 	assert.NotEqual(t, squatPort, f.Port)
 	assert.Equal(t, http.StatusOK, fakeawsGet(t, f.Port, f.Token))
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Contains(t, strings.Join(seen, "\n"), "Bearer ", "the squatter was never sent a token")
+	assert.NotContains(t, seen, "Bearer "+f.Token, "the squatter was sent the admitted fakeaws's token")
 }
 
-// sentSignals swaps rehearsalKillGroup, for the rest of the test, for one
-// that answers each probe (signal 0) with probe and records every other
-// signal without sending it.
-func sentSignals(t *testing.T, probe func(pgid int) error) *[]syscall.Signal {
-	var sent []syscall.Signal
+// killCalls swaps rehearsalKillGroup, for the rest of the test, for one
+// that records the signal of every call, a probe (signal 0) included, and
+// sends none: a probe is answered by probe, any other signal by nil.
+func killCalls(t *testing.T, probe func(pgid int) error) *[]syscall.Signal {
+	var calls []syscall.Signal
 	setForTest(t, &rehearsalKillGroup, func(pgid int, sig syscall.Signal) error {
+		calls = append(calls, sig)
 		if sig == 0 {
 			return probe(pgid)
 		}
-		sent = append(sent, sig)
 		return nil
 	})
-	return &sent
+	return &calls
 }
 
-// realProbe probes the group for real.
+// realProbe probes the group for real; groupFound answers every probe as
+// a group would whose id the system has reused.
 func realProbe(pgid int) error { return syscall.Kill(-pgid, 0) }
+func groupFound(int) error     { return nil }
+
+// waitExited waits until f's process has exited and been reaped.
+func waitExited(t *testing.T, f rehearsalFakeaws) {
+	t.Helper()
+	select {
+	case <-f.exited:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the stub was never reaped")
+	}
+}
+
+// startedStub starts the plain stub and stops it when the test ends.
+func startedStub(t *testing.T) rehearsalFakeaws {
+	t.Helper()
+	bin, _ := fakeawsStub(t, "fakeaws")
+	f, err := rehearsalStartFakeaws(context.Background(), fakeawsStubOpts(t, bin))
+	require.NoError(t, err)
+	stopOnCleanup(t, f)
+	return f
+}
 
 func TestRehearsalFakeawsStopSendsNothingToAGoneGroup(t *testing.T) {
-	t.Run("a second stop", func(t *testing.T) {
+	t.Run("fakeaws exited on its own", func(t *testing.T) {
 		setForTest(t, &rehearsalFakeawsKillFallback, 500*time.Millisecond)
-		bin, _ := fakeawsStub(t, "fakeaws")
-		f, err := rehearsalStartFakeaws(context.Background(), fakeawsStubOpts(t, bin))
+		f := startedStub(t)
+		code, err := rehearsalFakeawsStatus(context.Background(), &http.Client{Timeout: 5 * time.Second},
+			fmt.Sprintf("http://127.0.0.1:%d/exit", f.Port), "")
 		require.NoError(t, err)
-		require.NoError(t, f.stop())
+		require.Equal(t, http.StatusOK, code)
+		waitExited(t, f)
 
-		// Every probe now finds a group, as one would once the id is reused.
-		sent := sentSignals(t, func(int) error { return nil })
+		calls := killCalls(t, groupFound)
 		assert.NoError(t, f.stop())
-		assert.Empty(t, *sent)
+		assert.Empty(t, *calls, "stop probed or signalled a reaped fakeaws's group id")
 	})
-	t.Run("a group that ended without stop", func(t *testing.T) {
-		bin, _ := fakeawsStub(t, "fakeaws")
-		f, err := rehearsalStartFakeaws(context.Background(), fakeawsStubOpts(t, bin))
-		require.NoError(t, err)
-		require.NoError(t, syscall.Kill(-f.PID, syscall.SIGKILL))
-		select {
-		case <-f.exited:
-		case <-time.After(10 * time.Second):
-			t.Fatal("the killed stub was never reaped")
-		}
+	// A value without exited, as a hand-made one is, keeps the probe.
+	t.Run("a second stop, without exited", func(t *testing.T) {
+		setForTest(t, &rehearsalFakeawsKillFallback, 500*time.Millisecond)
+		h := startedStub(t)
+		h.exited = nil
+		require.NoError(t, h.stop())
 
-		sent := sentSignals(t, realProbe)
-		assert.NoError(t, f.stop())
-		assert.Empty(t, *sent)
+		calls := killCalls(t, groupFound)
+		assert.NoError(t, h.stop())
+		assert.Empty(t, *calls)
+	})
+	t.Run("a group already gone, without exited", func(t *testing.T) {
+		f := startedStub(t)
+		require.NoError(t, syscall.Kill(-f.PID, syscall.SIGKILL))
+		waitExited(t, f)
+		h := f
+		h.exited = nil
+
+		calls := killCalls(t, realProbe)
+		assert.NoError(t, h.stop())
+		assert.Equal(t, []syscall.Signal{0}, *calls, "one probe and no signal")
 	})
 }
 
@@ -455,9 +505,9 @@ func TestRehearsalFakeawsStopFailsWhenTheGroupSurvives(t *testing.T) {
 		bin, _ := fakeawsStub(t, "fakeaws")
 		f, err := rehearsalStartFakeaws(context.Background(), fakeawsStubOpts(t, bin))
 		require.NoError(t, err)
-		stopOnCleanup(t, f) // the real stop, once sentSignals is undone
+		stopOnCleanup(t, f) // the real stop, once killCalls is undone
 
-		sent := sentSignals(t, realProbe)
+		sent := killCalls(t, realProbe)
 		err = f.stop()
 		require.Error(t, err)
 		assert.Equal(t, fmt.Sprintf("stop failed: pid %d port %d", f.PID, f.Port), err.Error())
@@ -471,7 +521,7 @@ func TestRehearsalFakeawsStopFailsWhenTheGroupSurvives(t *testing.T) {
 				_ = syscall.Kill(-pid, syscall.SIGKILL)
 			}
 		})
-		sentSignals(t, realProbe)
+		killCalls(t, realProbe)
 
 		_, err := rehearsalStartFakeaws(context.Background(), fakeawsStubOpts(t, bin))
 		require.Error(t, err)
