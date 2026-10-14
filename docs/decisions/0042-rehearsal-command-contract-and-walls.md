@@ -379,7 +379,7 @@ binary, so the pin check plus the live checks at start stand in for it.
 
 ### Start
 
-Exact args: `-bind 127.0.0.1 -db <0700 dir> -record-requests -account <id> -region <r>`. The token
+Exact args: `-bind 127.0.0.1 -port <P> -db <fakeaws dir>/fakeaws.db -record-requests -account <id> -region <r>`. The token
 goes to the child only in its env (`FAKEAWS_ADMIN_TOKEN`), never argv, and is never printed. The
 child has `Setpgid` and is started with `exec.Command`, not `CommandContext`, so it outlives
 prepare's ctx. fakeaws cannot report an ephemeral port, so prepare picks a free loopback port,
