@@ -77,33 +77,34 @@ func readRehearsalRecord(rehearsal string) (rehearsalRecord, error) {
 // walls stands the rehearsal's walls up once the second init is done
 // (ADR-0042 § Provider override, § Start): each root's endpoints keys from
 // its locked provider's schema, then the fakeaws binary, this rehearsal's
-// fakeaws, the record, and each root's provider override. The record
-// holds pid, port and token as soon as fakeaws is up, so a prepare killed
-// there leaves what `end` needs, and names the roots once every override
-// is written. Any error or cancel after the start stops fakeaws before
-// prepare removes the rehearsal; a stop that fails once the record is
-// written is errRehearsalKept.
-func (p rehearsePrepare) walls(ctx context.Context, rehearsal string, record rehearsalRecord) (err error) {
+// fakeaws, the record, and each root's provider override. It returns the
+// fakeaws URL the overrides name. The record holds pid, port and token as
+// soon as fakeaws is up, so a prepare killed there leaves what `end`
+// needs, and names the roots once every override is written. Any error or
+// cancel after the start stops fakeaws before prepare removes the
+// rehearsal; a stop that fails once the record is written is
+// errRehearsalKept.
+func (p rehearsePrepare) walls(ctx context.Context, rehearsal string, record rehearsalRecord) (fakeawsURL string, err error) {
 	for i, root := range record.Roots {
 		schema, err := p.tofu(ctx, harness.Command{Name: "tofu", Args: []string{"providers", "schema", "-json"},
 			Dir: filepath.Join(rehearsal, root.Root), Env: rehearsalSecondInitEnv(rehearsal), ReplaceEnv: true})
 		if err != nil {
-			return err
+			return "", err
 		}
 		if record.Roots[i].EndpointKeys, err = rehearsalEndpointKeys(schema); err != nil {
-			return fmt.Errorf("%s: %w", root.Root, err)
+			return "", fmt.Errorf("%s: %w", root.Root, err)
 		}
 	}
 	bin, err := p.fakeawsBin(ctx, p.runner, p.fakeawsBinPath)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if err := rehearsalCancelled(ctx); err != nil {
-		return err
+		return "", err
 	}
 	fakeaws, stop, err := p.startFakeaws(ctx, rehearsalFakeawsOpts{bin: bin, dir: filepath.Join(rehearsal, "fakeaws"), account: record.Account, region: record.Region})
 	if err != nil {
-		return err
+		return "", err
 	}
 	recorded := false
 	defer func() {
@@ -120,23 +121,24 @@ func (p rehearsePrepare) walls(ctx context.Context, rehearsal string, record reh
 	}()
 	record.Schema, record.Pin = rehearsalRecordSchema, rehearsalFakeawsPin
 	record.PID, record.Port, record.Token = fakeaws.PID, fakeaws.Port, fakeaws.Token
+	fakeawsURL = rehearsalFakeawsURL(record.Port)
 	started := record
 	started.Roots = nil
 	if err := started.write(rehearsal); err != nil {
-		return err
+		return "", err
 	}
 	recorded = true
 	for _, root := range record.Roots {
-		override := rehearsalProviderOverride(rehearsalFakeawsURL(record.Port), record.Region, root.EndpointKeys, root.AWSAliases)
+		override := rehearsalProviderOverride(fakeawsURL, record.Region, root.EndpointKeys, root.AWSAliases)
 		if err := writeSynced(filepath.Join(rehearsal, root.Root, rehearsalAWSOverride), override); err != nil {
-			return err
+			return "", err
 		}
 	}
 	if err := record.write(rehearsal); err != nil {
-		return err
+		return "", err
 	}
 	if err := rehearsalTightenModes(rehearsal); err != nil {
-		return err
+		return "", err
 	}
-	return rehearsalCancelled(ctx)
+	return fakeawsURL, rehearsalCancelled(ctx)
 }

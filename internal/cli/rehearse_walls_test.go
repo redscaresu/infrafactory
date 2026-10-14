@@ -75,6 +75,8 @@ func TestRehearsePrepareStandsTheWallsUp(t *testing.T) {
 	override, err := os.ReadFile(filepath.Join(root, rehearsalAWSOverride))
 	require.NoError(t, err)
 	assert.Equal(t, string(rehearsalProviderOverride("http://127.0.0.1:4566", "eu-west-1", prepareKeys, []string{""})), string(override))
+	assert.Contains(t, run.stdout, "Fakeaws URL: http://127.0.0.1:4566\n")
+	assert.NotContains(t, run.stdout, prepareStubFakeaws.Token)
 }
 
 // A failure or a cancel after the start stops fakeaws once, before the
@@ -254,23 +256,23 @@ func TestRehearsePrepareRefusesASchemaWithoutSTS(t *testing.T) {
 }
 
 // With no resolver set, prepare resolves through rehearsalFakeawsBinary,
-// passed fakeawsBinPath: "" installs the pin through the runner, and a set
-// path is checked instead. Not parallel: it moves the user cache.
+// passed --fakeaws-bin: unset installs the pin through the runner, and a
+// set path is checked instead. Not parallel: it moves the user cache.
 func TestRehearsePrepareResolvesThroughRehearsalFakeawsBinary(t *testing.T) {
 	rehearsalEmptyUserCache(t)
 
 	for _, tc := range []struct {
-		name, binPath, want string
+		name, want string
+		args       []string
 		// after is each runner call after the schema call, by name and args.
 		after []string
 	}{
-		{"the pinned install", "", "installed no fakeaws binary", []string{"go install " + rehearsalFakeawsCmd + "@" + rehearsalFakeawsPin}},
-		{"a set path", "relative/fakeaws", "the fakeaws binary relative/fakeaws is refused: it is not an absolute path", nil},
+		{"the pinned install", "installed no fakeaws binary", nil, []string{"go install " + rehearsalFakeawsCmd + "@" + rehearsalFakeawsPin}},
+		{"a set path", "the fakeaws binary /nonexistent/fakeaws is refused", []string{"--fakeaws-bin", "/nonexistent/fakeaws"}, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			started := 0
 			p := rehearsePrepare{
-				fakeawsBinPath: tc.binPath,
 				startFakeaws: func(context.Context, rehearsalFakeawsOpts) (rehearsalFakeaws, func() error, error) {
 					started++
 					return prepareStubFakeaws, func() error { return nil }, nil
@@ -279,7 +281,7 @@ func TestRehearsePrepareResolvesThroughRehearsalFakeawsBinary(t *testing.T) {
 			repo := lockRepo(t, prepareLock, "")
 			run := runPrepareWith(t, p, repo, func(context.Context, harness.Command) (harness.CommandResult, error) {
 				return harness.CommandResult{}, nil
-			})
+			}, tc.args...)
 
 			require.Error(t, run.err)
 			assert.Contains(t, run.stdout, tc.want)

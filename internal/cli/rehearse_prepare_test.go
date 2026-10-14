@@ -146,6 +146,8 @@ func TestRehearsePrepareUsageErrorsExitTwo(t *testing.T) {
 		{"a bad region", []string{"envs/prod", "--account", "123456789012", "--region", "eu-west"}},
 		{"two dirs", append([]string{"envs/prod", "envs/stage"}, prepareFlags...)},
 		{"an --allow-module flag", append([]string{"envs/prod", "--allow-module", "x"}, prepareFlags...)},
+		{"an empty --fakeaws-bin", append([]string{"envs/prod", "--fakeaws-bin", ""}, prepareFlags...)},
+		{"a relative --fakeaws-bin", append([]string{"envs/prod", "--fakeaws-bin", "bin/fakeaws"}, prepareFlags...)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -160,6 +162,17 @@ func TestRehearsePrepareUsageErrorsExitTwo(t *testing.T) {
 			assert.NoDirExists(t, filepath.Join(repo, ".infrafactory"))
 		})
 	}
+}
+
+// The real command's help lists --fakeaws-bin.
+func TestRehearsePrepareHelpListsFakeawsBin(t *testing.T) {
+	t.Parallel()
+	root := NewRootCmd()
+	stdout := &bytes.Buffer{}
+	root.SetOut(stdout)
+	root.SetArgs([]string{"rehearse", "prepare", "--help"})
+	require.NoError(t, root.Execute())
+	assert.Contains(t, stdout.String(), "--fakeaws-bin string")
 }
 
 func TestRehearsePrepareCopiesTheRootAndItsModules(t *testing.T) {
@@ -190,7 +203,7 @@ func TestRehearsePrepareCopiesTheRootAndItsModules(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(run.stdout), &result))
 	resolvedWork, err := filepath.EvalSymlinks(work)
 	require.NoError(t, err)
-	assert.Equal(t, rehearsePrepareResult{Schema: rehearsePrepareSchema, Status: CommandStatusSuccess, ID: prepareID, WorkDir: filepath.Join(resolvedWork, "envs", "prod"), AWSVersion: harness.AWSProviderVersion}, result)
+	assert.Equal(t, rehearsePrepareResult{Schema: rehearsePrepareSchema, Status: CommandStatusSuccess, ID: prepareID, WorkDir: filepath.Join(resolvedWork, "envs", "prod"), FakeawsURL: "http://127.0.0.1:4566", AWSVersion: harness.AWSProviderVersion}, result)
 
 	for name, want := range map[string]string{
 		"envs/prod/main.tf":             "module \"x\" {\n  source = \"../../modules/x\"\n}\n",

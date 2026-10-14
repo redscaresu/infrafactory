@@ -84,10 +84,11 @@ func (p rehearsePrepare) prepare(ctx context.Context, dir, account, region, varF
 	copyRel, _ := filepath.Rel(rehearsal, in.boundary)
 	rootRel, _ := filepath.Rel(rehearsal, in.root)
 	record := rehearsalRecord{Account: account, Region: region, Roots: []rehearsalRoot{{Copy: copyRel, Root: rootRel, AWSAliases: aliases}}}
-	if err := p.walls(ctx, rehearsal, record); err != nil {
+	fakeawsURL, err := p.walls(ctx, rehearsal, record)
+	if err != nil {
 		return result, err
 	}
-	return rehearsePrepareResult{ID: id, WorkDir: in.root, AWSVersion: lock.aws(), Warnings: lock.warnings}, nil
+	return rehearsePrepareResult{ID: id, WorkDir: in.root, FakeawsURL: fakeawsURL, AWSVersion: lock.aws(), Warnings: lock.warnings}, nil
 }
 
 // rehearsalCopy copies ancestor into <rehearsal>/work at its path relative
