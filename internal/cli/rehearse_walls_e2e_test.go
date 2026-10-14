@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -30,12 +31,13 @@ const wallsFailDeadline = 60 * time.Second
 // holds AWS's example keys, AWS_PROFILE naming a profile with real-looking
 // keys in a planted HOME/.aws, and both proxies at a recorder.
 //
-// With every wall, the vpc lands on fakeaws and the lb dies at the dead
-// proxy. Remove the provider override, the environment wall or the backend
-// override, and tofu still dies, within wallsFailDeadline: at the dead
-// proxy through the walls env's AWS_ENDPOINT_URL catch-all, at it through
-// the override's elbv2 key, and at the backend. No case reaches the
-// recorder.
+// With every wall, the vpc lands on fakeaws and the lb's ELBv2 call is
+// dialled straight at the dead proxy and refused. Remove the provider
+// override, the environment wall or the backend override, and tofu still
+// dies, within wallsFailDeadline: the ELBv2 call at the dead proxy through
+// the walls env's AWS_ENDPOINT_URL catch-all, then through the override's
+// elbv2 key, and the backend's S3 call there too. No case dials a proxy or
+// reaches the recorder.
 func TestRehearsalWallsFailClosed(t *testing.T) {
 	e2e.SkipUnlessEnabled(t)
 	_, err := exec.LookPath("tofu")
@@ -91,9 +93,7 @@ func TestRehearsalWallsFailClosed(t *testing.T) {
 	rehearsal := filepath.Join(repo, ".infrafactory", "rehearsals", result.ID)
 	record := readPrepareRecord(t, rehearsal)
 	walls := cli.RehearsalWallsEnv(rehearsal, result.FakeawsURL, record.Region)
-	dead, err := url.Parse(cli.RehearsalDeadProxy)
-	require.NoError(t, err)
-	deadDial := "dial tcp " + dead.Host + ":"
+	elbv2Dead := deadCall(t, "Elastic Load Balancing v2", "Post")
 
 	w := wallsDir{t: t, dir: result.WorkDir, proxy: proxy}
 	t.Run("every wall", func(t *testing.T) {
@@ -101,12 +101,12 @@ func TestRehearsalWallsFailClosed(t *testing.T) {
 		out, err := w.tofu(walls, "apply", "-auto-approve", "-input=false", "-no-color", "-target=aws_vpc.main")
 		require.NoError(t, err, out)
 		assert.Contains(t, fakeawsActions(t, record.Port, record.Token), "CreateVpc")
-		w.dies(walls, deadDial, wallsApplyLB...)
+		w.dies(walls, elbv2Dead, wallsApplyLB...)
 	})
 	t.Run("no provider override", func(t *testing.T) {
 		w := w.in(t)
 		w.remove(cli.AWSOverride)
-		w.dies(walls, deadDial, wallsApplyLB...)
+		w.dies(walls, elbv2Dead, wallsApplyLB...)
 	})
 	t.Run("no environment wall", func(t *testing.T) {
 		w := w.in(t)
@@ -126,13 +126,13 @@ func TestRehearsalWallsFailClosed(t *testing.T) {
 		require.Equal(t, fakeAccessKeyID, env["AWS_ACCESS_KEY_ID"])
 		require.Equal(t, "prod", env["AWS_PROFILE"])
 		require.Equal(t, proxy.url, env["HTTPS_PROXY"])
-		w.dies(env, deadDial, wallsApplyLB...)
+		w.dies(env, elbv2Dead, wallsApplyLB...)
 	})
 	t.Run("no backend override", func(t *testing.T) {
 		w := w.in(t)
 		w.remove(cli.OurOverride)
-		w.dies(walls, `Backend type changed from "local" to "s3"`, "apply", "-auto-approve", "-input=false", "-no-color")
-		w.dies(walls, deadDial, "init", "-input=false", "-no-color", "-reconfigure", "-plugin-dir="+filepath.Join(walls["TF_DATA_DIR"], "providers"))
+		w.dies(walls, regexp.MustCompile(regexp.QuoteMeta(`Backend type changed from "local" to "s3"`)), "apply", "-auto-approve", "-input=false", "-no-color")
+		w.dies(walls, deadCall(t, "S3", "Get"), "init", "-input=false", "-no-color", "-reconfigure", "-plugin-dir="+filepath.Join(walls["TF_DATA_DIR"], "providers"))
 	})
 }
 
@@ -200,8 +200,10 @@ func (w wallsDir) tofu(env map[string]string, args ...string) (string, error) {
 	return stdout + stderr, err
 }
 
-// dies runs tofu, which must fail within wallsFailDeadline naming want.
-func (w wallsDir) dies(env map[string]string, want string, args ...string) {
+// dies runs tofu, which must fail within wallsFailDeadline with an error
+// want matches, and with no proxied dial: every proxy a case sets is the
+// dead proxy or the recorder.
+func (w wallsDir) dies(env map[string]string, want *regexp.Regexp, args ...string) {
 	w.t.Helper()
 	start := time.Now()
 	out, err := w.tofu(env, args...)
@@ -215,7 +217,21 @@ func (w wallsDir) dies(env map[string]string, want string, args ...string) {
 	w.t.Logf("tofu %s died in %s:\n%s", strings.Join(args, " "), elapsed.Round(time.Millisecond), strings.Join(errs, "\n"))
 	require.Error(w.t, err, "tofu %s succeeded\n%s", strings.Join(args, " "), out)
 	assert.Less(w.t, elapsed, wallsFailDeadline, "tofu %s took %s to die", strings.Join(args, " "), elapsed)
-	assert.Contains(w.t, out, want, "tofu %s", strings.Join(args, " "))
+	assert.Regexp(w.t, want, out, "tofu %s", strings.Join(args, " "))
+	assert.NotContains(w.t, out, "proxyconnect", "tofu %s dialled a proxy", strings.Join(args, " "))
+}
+
+// deadCall matches an error line on which a call to svc, as the AWS SDK
+// names the service, was sent to the dead proxy itself and refused there.
+// op is the request's method as net/http's url.Error spells it (Post).
+// Through a proxy, the line names the service's own URL and proxyconnect
+// instead; a call to another service names that service.
+func deadCall(t *testing.T, svc, op string) *regexp.Regexp {
+	t.Helper()
+	dead, err := url.Parse(cli.RehearsalDeadProxy)
+	require.NoError(t, err)
+	return regexp.MustCompile(regexp.QuoteMeta("operation error "+svc+": ") + `\w+, .*` +
+		regexp.QuoteMeta(op+` "`+cli.RehearsalDeadProxy+"/") + `[^"]*": ` + regexp.QuoteMeta("dial tcp "+dead.Host+":"))
 }
 
 // remove takes name out of the work dir for the case, and puts it back
