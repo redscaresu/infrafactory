@@ -397,18 +397,21 @@ element; `<repo>/.infrafactory/rehearsals/<id>` is checked with `Lstat` and must
 directory (a symlink is refused and nothing is ever created); the record is read; and
 `rehearsalDeadProxy` is dialled again and must refuse. `rehearsalRegate(rehearsal, root)` admits
 each of infrafactory's two overrides in that root only when byte-identical to the bytes rebuilt
-from the record; passthrough calls it, and both it and `rehearse end` call `rehearsalOpen`.
+from the record; passthrough calls it, and both it and `rehearse end` call `rehearsalOpen`. For
+`rehearse end` only the id, `Lstat` and record checks refuse: it runs no tofu, so a dead proxy that
+accepts the dial is named in its report and does not stop it.
 
 ### The walls family: `rehearse end`
 
 `rehearse end <id>` exits 2 for a bad id (a symlinked `<id>` included) and exits 0, creating
 nothing, for a missing one. It signals the recorded pid only after `/healthz` and the
-token-guarded `/mock/requests` answer on the recorded port, otherwise it only deletes files. The
-signal is SIGTERM, then SIGKILL to the process group after a fallback. If the port still answers
-after SIGKILL, it prints `stop failed: pid P port N`, exits 1 and keeps `rehearsal.json`. Then it
-deletes the work dirs, `state-config/`, the db with -wal/-shm, the snapshot, the recorded reads and
-the state copies, idempotently, and reports what it deleted. Nothing is written under
-`.infrafactory/runs` or `live`.
+token-guarded `/mock/requests` answer on the recorded port; otherwise it signals nothing and
+reports why. The signal is SIGTERM, then SIGKILL to the process group after a fallback. If the port
+still answers after SIGKILL, it prints `stop failed: pid P port N`, exits 1 and deletes nothing, so
+`rehearsal.json` stays for a later `end` to retry. Otherwise it lists every file under `<id>`
+(relative), removes `<id>` whole, and reports the list. It is idempotent. A cancel before the stop
+refuses with nothing signalled or deleted (exit 1); once the stop has begun, `end` finishes.
+Nothing is written under `.infrafactory/runs` or `live`.
 
 Bounds: a port freed after fakeaws dies can be taken by another local process, and only the
 override's fake keys reach it.
