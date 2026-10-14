@@ -66,7 +66,12 @@ var (
 	RehearsalProviderOverride = rehearsalProviderOverride
 )
 
-const OurOverride = ourOverride
+// OurOverride holds the backend override and AWSOverride the provider
+// override, each in its own file as ADR-0042 lays them out.
+const (
+	OurOverride = ourOverride
+	AWSOverride = rehearsalAWSOverride
+)
 
 // ExecRunner is the production runner, for the assumption tests' git.
 var ExecRunner harness.CommandRunner = execCommandRunner{}

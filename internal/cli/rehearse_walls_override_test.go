@@ -74,7 +74,7 @@ func TestRehearsalProviderOverrideBlocks(t *testing.T) {
 	override := rehearsalProviderOverride(overrideTestFakeaws, overrideTestRegion, overrideTestKeys, append([]string{""}, overrideTestAliases...))
 	env := rehearsalWallsEnv("/rehearsal", overrideTestFakeaws, overrideTestRegion)
 
-	f, diags := hclsyntax.ParseConfig(override, ourOverride, hcl.InitialPos)
+	f, diags := hclsyntax.ParseConfig(override, rehearsalAWSOverride, hcl.InitialPos)
 	require.False(t, diags.HasErrors(), diags.Error())
 	var aliases []string
 	for _, block := range f.Body.(*hclsyntax.Body).Blocks {
@@ -96,18 +96,37 @@ func TestRehearsalProviderOverrideBlocks(t *testing.T) {
 	assert.Equal(t, []string{"", "east", "west"}, aliases)
 }
 
-// With no fakeaws URL no endpoint is relative: every one is dead, as
-// rehearsalWallsEnv sends every service.
+// With no fakeaws URL no endpoint is relative: every key of every block is
+// dead, as rehearsalWallsEnv sends every service.
 func TestRehearsalProviderOverrideWithoutFakeawsIsDead(t *testing.T) {
 	t.Parallel()
 
-	override := rehearsalProviderOverride(" ", overrideTestRegion, overrideTestKeys, nil)
+	blocks := overrideEndpoints(t, rehearsalProviderOverride(" ", overrideTestRegion, overrideTestKeys, overrideTestAliases))
 
-	for _, line := range strings.Split(string(override), "\n") {
-		key, value, _ := strings.Cut(line, "=")
-		if key = strings.TrimSpace(key); slices.Contains(overrideTestKeys, key) {
-			assert.Equal(t, fmt.Sprintf("%q", rehearsalDeadProxy), strings.TrimSpace(value), key)
+	require.Len(t, blocks, 1+len(overrideTestAliases))
+	for _, endpoints := range blocks {
+		assert.Len(t, endpoints, len(overrideTestKeys))
+		for key, endpoint := range endpoints {
+			assert.Equal(t, rehearsalDeadProxy, endpoint, key)
 		}
+	}
+}
+
+// The two walls agree: for every modelled key and for s3, each block's
+// endpoint equals the one rehearsalWallsEnv sets for that service.
+func TestRehearsalProviderOverrideMatchesWallsEnv(t *testing.T) {
+	t.Parallel()
+
+	keys := append(slices.Collect(maps.Keys(rehearsalModelledEndpoints)), "s3")
+	env := rehearsalWallsEnv("/rehearsal", overrideTestFakeaws, overrideTestRegion)
+	blocks := overrideEndpoints(t, rehearsalProviderOverride(overrideTestFakeaws, overrideTestRegion, keys, overrideTestAliases))
+
+	require.Len(t, blocks, 1+len(overrideTestAliases))
+	for _, endpoints := range blocks {
+		for key, svc := range rehearsalModelledEndpoints {
+			assert.Equal(t, env["AWS_ENDPOINT_URL_"+svc], endpoints[key], key)
+		}
+		assert.Equal(t, env["AWS_ENDPOINT_URL_S3"], endpoints["s3"])
 	}
 }
 
@@ -190,6 +209,25 @@ func TestRehearsalEndpointKeysRefuses(t *testing.T) {
 			assert.Contains(t, err.Error(), tc.want, name)
 		}
 	}
+}
+
+// overrideEndpoints is each provider block's endpoints, key to URL, one
+// map per block in the override's order.
+func overrideEndpoints(t *testing.T, override []byte) []map[string]string {
+	t.Helper()
+	f, diags := hclsyntax.ParseConfig(override, rehearsalAWSOverride, hcl.InitialPos)
+	require.False(t, diags.HasErrors(), diags.Error())
+	var blocks []map[string]string
+	for _, provider := range f.Body.(*hclsyntax.Body).Blocks {
+		endpoints := map[string]string{}
+		for _, block := range provider.Body.Blocks {
+			for key, attr := range block.Body.Attributes {
+				endpoints[key] = overrideValue(t, attr).AsString()
+			}
+		}
+		blocks = append(blocks, endpoints)
+	}
+	return blocks
 }
 
 func overrideValue(t *testing.T, attr *hclsyntax.Attribute) cty.Value {

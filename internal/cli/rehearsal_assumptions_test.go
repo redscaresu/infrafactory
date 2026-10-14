@@ -104,13 +104,14 @@ func TestAssumption_EndpointsOverrideKeepsApplyOffProd(t *testing.T) {
 	})
 }
 
-// TestAssumption_AliasedOverrideMerges: an override file's `provider
-// "aws"` block with an alias merges into the root's block of that alias:
-// with infrafactory's provider override naming the alias, every endpoint at
-// the closed port, an apply of a resource on `provider = aws.west`, with
-// real-looking keys in the environment, dies at the closed address and
-// nothing reaches the proxy. Without the aliased block, the alias's
-// requests follow the environment to the proxy.
+// TestAssumption_AliasedOverrideMerges: in the layout ADR-0042 gives a
+// root, the backend override in infrafactory_override.tf and the provider
+// override in infrafactory_aws_override.tf, an override `provider "aws"`
+// block with an alias merges into the root's block of that alias: with
+// every endpoint at the closed port, an apply of a resource on `provider =
+// aws.west`, with real-looking keys in the environment, dies at the closed
+// address and nothing reaches the proxy. Without the aliased block, the
+// alias's requests follow the environment to the proxy.
 //
 // Relied on by: rehearsal-walls, whose provider override holds one block
 // per alias the gate found (ADR-0042 § Provider override). ADR-0028.
@@ -119,19 +120,21 @@ func TestAssumption_AliasedOverrideMerges(t *testing.T) {
 	keys := w.endpointKeys(t)
 	w.write(t, "main.tf", providerBlock("")+providerBlock("  alias = \"west\"\n")+
 		"resource \"aws_sqs_queue\" \"west\" {\n  provider = aws.west\n  name     = \"west\"\n}\n")
+	w.write(t, cli.OurOverride, cli.LocalBackendOverride)
+	w.init(t)
 	override := func(aliases ...string) string {
 		return string(cli.RehearsalProviderOverride(closedEndpoint, assumptionRegion, keys, aliases))
 	}
 
 	proxy := startRecorder(t)
-	w.write(t, cli.OurOverride, override("west"))
+	w.write(t, cli.AWSOverride, override("west"))
 	errs, _ := w.applyJSON(t, proxy)
 	assert.Contains(t, errs, closedDial, "%s: %s", w.version, errs)
 	assert.Zero(t, proxy.count(), "%s: requests left loopback: %v", w.version, proxy.requests())
 
 	t.Run("control without the aliased block", func(t *testing.T) {
 		proxy := startRecorder(t)
-		w.write(t, cli.OurOverride, override())
+		w.write(t, cli.AWSOverride, override())
 		errs, _ := w.applyJSON(t, proxy)
 		assert.NotContains(t, errs, closedDial, w.version)
 		assert.Positive(t, proxy.count(), "%s: aws.west did not follow the environment: %s", w.version, errs)
@@ -445,7 +448,7 @@ func TestAssumption_ProvidersSchemaOffline(t *testing.T) {
 	c := newInitCopy(t)
 	proxy := startRecorder(t)
 	out, err := c.secondInit(t, proxy, true)
-	assert.NoError(t, err, "%s\n%s", c.version, out)
+	require.NoError(t, err, "%s: the second init failed\n%s", c.version, out)
 
 	stdout, stderr, err := cli.RunTofu(c.dir, c.bareEnv(t, "HTTPS_PROXY="+proxy.url, "HTTP_PROXY="+proxy.url), "providers", "schema", "-json")
 	require.NoError(t, err, "%s\n%s", c.version, stderr)

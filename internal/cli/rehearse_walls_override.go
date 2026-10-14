@@ -11,6 +11,11 @@ import (
 	"github.com/zclconf/go-cty/cty"
 )
 
+// rehearsalAWSOverride is the file the provider override is written to in
+// each root, beside ourOverride's backend override (ADR-0042 § Provider
+// override).
+const rehearsalAWSOverride = "infrafactory_aws_override.tf"
+
 // rehearsalModelledEndpoints maps each provider endpoints key the
 // rehearsal's fakeaws serves to its awsFakeawsPaths service id: the
 // services rehearsalWallsEnv sends to fakeaws. Every other key, s3
