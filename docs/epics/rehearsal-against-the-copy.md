@@ -17,6 +17,7 @@ depends_on: [rehearsal-passthrough, rehearsal-state-pull, fakeaws-loader, fakeaw
 - Nothing writes pitfalls/, docs/mock-gaps.md or the run store; each gap is filed by hand as a fakeaws story.
 - The e2e wedge runs with a second fakeaws standing in as prod, loaded with the scrubbed fixture plus an unrelated planted VPC, the scrubbed pre-destroy state, and a provider with `allowed_account_ids`. The real discover → read → load path runs through the doer seam. Asserts: the recorded read holds the tagged VPC, its surroundings and the state's ids, and not the unrelated VPC; an unchanged fixture gives an empty base plan; a planted tag edit in "prod" is listed as drift and the base plan lists it; the head (rename with `moved`, add a subnet, change a tag) shows exactly those as its own changes, applies, converges; an overlapping second subnet fails as AWS would; a planted real-looking credential in the shell never reaches any host.
 - ADR-0009 amended (snapshot/restore for a baseline never applied by a run); ADR-0032 amended (refresh and check classified by what the mock answered); ADR-0042 amended; golden files; docs/operations.md.
+- Every file under the rehearsal directory is 0600 after load too (story rehearsal-against-the-copy-load-modes, moved from rehearsal-walls).
 
 **Out of scope:** new code with no state (rehearsal-without-state); a PR/CI mode (later, user 2026-10-11); new fakeaws types; the UI.
 
