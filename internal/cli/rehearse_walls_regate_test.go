@@ -24,7 +24,14 @@ var regateRoot = filepath.Join("work", "envs", "prod")
 // returns the repo and the rehearsal rehearsalOpen finds.
 func regatePrepared(t *testing.T, args ...string) (string, openRehearsal) {
 	t.Helper()
-	repo := lockRepo(t, prepareLock, "")
+	return regatePreparedWith(t, "", args...)
+}
+
+// regatePreparedWith is regatePrepared with extra appended to envs/prod's
+// main.tf.
+func regatePreparedWith(t *testing.T, extra string, args ...string) (string, openRehearsal) {
+	t.Helper()
+	repo := lockRepo(t, prepareLock, extra)
 	mustWriteFile(t, filepath.Join(repo, "prod.tfvars"), "instance_type = \"t3.micro\"\n")
 	run := runPrepareWith(t, stubWalls(rehearsePrepare{}), repo, func(context.Context, harness.Command) (harness.CommandResult, error) {
 		return harness.CommandResult{}, nil
@@ -156,6 +163,36 @@ func TestRehearsalRegateRefusesAManifestThatIsNotARegularFile(t *testing.T) {
 
 			require.ErrorIs(t, err, errRehearsalRefuses)
 			assert.Contains(t, err.Error(), "modules.json: cannot read it: not a regular file")
+		})
+	}
+}
+
+// regateAlias is a root provider "aws" block aliased x, and a resource
+// that uses it.
+const regateAlias = "\nprovider \"aws\" {\n  alias  = \"x\"\n  region = \"eu-west-1\"\n}\n\nresource \"aws_sqs_queue\" \"q\" {\n  provider = aws.x\n}\n"
+
+// The provider override has one block per alias the record names, so a
+// root whose provider "aws" aliases changed since prepare is refused: an
+// added alias would reach AWS with no endpoints override, and a removed
+// one leaves an override block with nothing to override.
+func TestRehearsalRegateRefusesChangedAliases(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, prepared, now, want string
+	}{
+		{"an added alias", "", prepareProvider + regateAlias, `its provider "aws" aliases are ["" "x"], not the [""] its override names`},
+		{"a removed alias", regateAlias, prepareProvider, `its provider "aws" aliases are [""], not the ["" "x"] its override names`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, r := regatePreparedWith(t, tc.prepared)
+			require.NoError(t, rehearsalRegate(r, regateRoot), "the prepared root")
+			mustWriteFile(t, filepath.Join(r.dir, regateRoot, "main.tf"), tc.now)
+
+			err := rehearsalRegate(r, regateRoot)
+
+			require.ErrorIs(t, err, errRehearsalRefuses)
+			assert.Contains(t, err.Error(), "root "+regateRoot+": "+errRehearsalRefuses.Error()+": "+tc.want)
 		})
 	}
 }

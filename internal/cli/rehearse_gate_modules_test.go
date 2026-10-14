@@ -313,7 +313,7 @@ func TestRehearsalModulesGate(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			tmp, in := moduleCopy(t, tc.files, tc.symlinks)
-			err := rehearsalModulesGate(in, writeManifest(t, tmp, tc.manifest))
+			_, err := rehearsalModulesGate(in, writeManifest(t, tmp, tc.manifest))
 			require.ErrorIs(t, err, errRehearsalRefuses)
 			resolved, evalErr := filepath.EvalSymlinks(tmp)
 			require.NoError(t, evalErr)
@@ -331,7 +331,7 @@ func TestRehearsalModulesGate(t *testing.T) {
 func TestRehearsalModulesGateKeepsTheCallersModules(t *testing.T) {
 	tmp, in := moduleCopy(t, localModules(map[string]string{work + "extra/main.tf": provisioner}), nil)
 	in.modules = []rehearsalModuleDir{{dir: filepath.Join(in.root, "extra")}}
-	err := rehearsalModulesGate(in, writeManifest(t, tmp, localManifest))
+	_, err := rehearsalModulesGate(in, writeManifest(t, tmp, localManifest))
 	require.ErrorIs(t, err, errRehearsalRefuses)
 	assert.Contains(t, err.Error(), `extra/main.tf:2: terraform_data.t.provisioner.local-exec: "provisioner" blocks are refused`)
 }
@@ -339,16 +339,20 @@ func TestRehearsalModulesGateKeepsTheCallersModules(t *testing.T) {
 func TestRehearsalModulesGateAdmits(t *testing.T) {
 	t.Run("the local modules the assumption test pinned", func(t *testing.T) {
 		tmp, in := moduleCopy(t, localModules(nil), nil)
-		assert.NoError(t, rehearsalModulesGate(in, writeManifest(t, tmp, localManifest)))
+		_, err := rehearsalModulesGate(in, writeManifest(t, tmp, localManifest))
+		assert.NoError(t, err)
 	})
 	t.Run("no manifest for a root with no module blocks", func(t *testing.T) {
 		tmp, in := moduleCopy(t, map[string]string{work + "main.tf": manifestOutput, work + "provider.tf": gateProvider}, nil)
-		assert.NoError(t, rehearsalModulesGate(in, writeManifest(t, tmp, "")))
+		aliases, err := rehearsalModulesGate(in, writeManifest(t, tmp, ""))
+		require.NoError(t, err)
+		assert.Equal(t, []string{""}, aliases, "it passes with the root's provider \"aws\" aliases")
 	})
 	t.Run("infrafactory's own override, with no manifest", func(t *testing.T) {
 		tmp, in := moduleCopy(t, map[string]string{work + "provider.tf": gateProvider, work + ourOverride: ourBytes}, nil)
 		in.ours = map[string][]byte{ourOverride: []byte(ourBytes)}
-		assert.NoError(t, rehearsalModulesGate(in, writeManifest(t, tmp, "")))
+		_, err := rehearsalModulesGate(in, writeManifest(t, tmp, ""))
+		assert.NoError(t, err)
 	})
 }
 
@@ -358,7 +362,7 @@ func TestRehearsalModulesGateAdmits(t *testing.T) {
 func TestRehearsalModulesGateNamesOursOnce(t *testing.T) {
 	tmp, in := moduleCopy(t, map[string]string{work + "provider.tf": gateProvider, work + ourOverride: ourBytes + "\n"}, nil)
 	in.ours = map[string][]byte{ourOverride: []byte(ourBytes)}
-	err := rehearsalModulesGate(in, writeManifest(t, tmp, ""))
+	_, err := rehearsalModulesGate(in, writeManifest(t, tmp, ""))
 	require.ErrorIs(t, err, errRehearsalRefuses)
 	assert.Equal(t, errRehearsalRefuses.Error()+": "+ourOverride+": refused: it is not byte-identical to the override infrafactory writes", err.Error())
 }

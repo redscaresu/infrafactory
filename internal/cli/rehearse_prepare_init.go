@@ -72,7 +72,7 @@ func (p rehearsePrepare) gateAndInit(ctx context.Context, rehearsal string, in r
 	if err := p.firstInit(ctx, rehearsal, in, lock); err != nil {
 		return rehearsalLock{}, nil, err
 	}
-	if err := rehearsalModulesGate(in, filepath.Join(rehearsal, "data")); err != nil {
+	if _, err := rehearsalModulesGate(in, filepath.Join(rehearsal, "data")); err != nil {
 		return rehearsalLock{}, nil, fmt.Errorf("gate 2, after the first init: %w", err)
 	}
 	if err := rehearsalCancelled(ctx); err != nil {

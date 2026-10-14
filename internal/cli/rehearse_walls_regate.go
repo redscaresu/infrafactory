@@ -146,8 +146,8 @@ func rehearsalOurOverrides(r openRehearsal, name string) (map[string][]byte, err
 // from the record, its region, vars.tfvars when present, the aws version
 // from the copy's lock, the modules from the manifest under <id>/data,
 // and ours, so each of infrafactory's overrides passes only when
-// byte-identical to what prepare wrote. Every refusal is
-// errRehearsalRefuses.
+// byte-identical to what prepare wrote. The root's provider "aws" aliases
+// must still be the record's. Every refusal is errRehearsalRefuses.
 func rehearsalRegate(r openRehearsal, name string) error {
 	root, err := r.entry(name)
 	if err != nil {
@@ -173,8 +173,14 @@ func rehearsalRegate(r openRehearsal, name string) error {
 		return fmt.Errorf("root %s: %w", name, err)
 	}
 	in.awsVersion = lock.aws()
-	if err := rehearsalModulesGate(in, filepath.Join(r.dir, "data")); err != nil {
+	aliases, err := rehearsalModulesGate(in, filepath.Join(r.dir, "data"))
+	if err != nil {
 		return fmt.Errorf("root %s: %w", name, err)
+	}
+	// The provider override has one block per recorded alias, so an alias
+	// added since prepare would reach AWS with no endpoints override.
+	if !slices.Equal(aliases, root.AWSAliases) {
+		return fmt.Errorf("root %s: %w: its provider \"aws\" aliases are %q, not the %q its override names", name, errRehearsalRefuses, aliases, root.AWSAliases)
 	}
 	return nil
 }

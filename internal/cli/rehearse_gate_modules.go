@@ -306,12 +306,16 @@ type rehearsalManifestEntry struct{ Key, Source, Dir string }
 // entry of the manifest under data to the rule, then runs the full gate
 // over the root, the caller's module dirs, every admitted module dir and
 // every dir their module blocks reach, naming each module's key, and the
-// var file.
-func rehearsalModulesGate(in rehearsalGateInput, data string) error {
+// var file. Like rehearsalGate, it passes with the root's provider "aws"
+// aliases, sorted, "" naming the unaliased block.
+func rehearsalModulesGate(in rehearsalGateInput, data string) ([]string, error) {
 	modules, problems := in.manifestModules(data)
 	in.modules = slices.Concat(in.modules, modules)
-	gateProblems, _ := in.problems()
-	return rehearsalRefusal(append(problems, gateProblems...))
+	gateProblems, aliases := in.problems()
+	if err := rehearsalRefusal(append(problems, gateProblems...)); err != nil {
+		return nil, err
+	}
+	return aliases, nil
 }
 
 // manifestModules reads <data>/modules/modules.json and returns its
