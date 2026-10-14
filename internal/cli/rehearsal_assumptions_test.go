@@ -104,6 +104,41 @@ func TestAssumption_EndpointsOverrideKeepsApplyOffProd(t *testing.T) {
 	})
 }
 
+// TestAssumption_AliasedOverrideMerges: an override file's `provider
+// "aws"` block with an alias merges into the root's block of that alias:
+// with infrafactory's provider override naming the alias, every endpoint at
+// the closed port, an apply of a resource on `provider = aws.west`, with
+// real-looking keys in the environment, dies at the closed address and
+// nothing reaches the proxy. Without the aliased block, the alias's
+// requests follow the environment to the proxy.
+//
+// Relied on by: rehearsal-walls, whose provider override holds one block
+// per alias the gate found (ADR-0042 § Provider override). ADR-0028.
+func TestAssumption_AliasedOverrideMerges(t *testing.T) {
+	w := newAssumptionDir(t)
+	keys := w.endpointKeys(t)
+	w.write(t, "main.tf", providerBlock("")+providerBlock("  alias = \"west\"\n")+
+		"resource \"aws_sqs_queue\" \"west\" {\n  provider = aws.west\n  name     = \"west\"\n}\n")
+	override := func(aliases ...string) string {
+		return string(cli.RehearsalProviderOverride(closedEndpoint, assumptionRegion, keys, aliases))
+	}
+
+	proxy := startRecorder(t)
+	w.write(t, cli.OurOverride, override("west"))
+	errs, _ := w.applyJSON(t, proxy)
+	assert.Contains(t, errs, closedDial, "%s: %s", w.version, errs)
+	assert.Zero(t, proxy.count(), "%s: requests left loopback: %v", w.version, proxy.requests())
+
+	t.Run("control without the aliased block", func(t *testing.T) {
+		proxy := startRecorder(t)
+		w.write(t, cli.OurOverride, override())
+		errs, _ := w.applyJSON(t, proxy)
+		assert.NotContains(t, errs, closedDial, w.version)
+		assert.Positive(t, proxy.count(), "%s: aws.west did not follow the environment: %s", w.version, errs)
+		t.Logf("%s: the proxy saw %v", w.version, proxy.requests())
+	})
+}
+
 // TestAssumption_UserOverrideMergesAfterOurs: tofu merges override files
 // in name order, so a user's zz_override.tf merges after infrafactory's
 // and its `endpoints` wins.
@@ -390,6 +425,34 @@ func TestAssumption_SecondInitMakesNoProxiedConnection(t *testing.T) {
 		assert.Positive(t, proxy.count(), "%s: no proxied connection without -plugin-dir\n%s", sibling.version, out)
 		t.Logf("%s: the proxy saw %v", sibling.version, proxy.requests())
 	})
+}
+
+// TestAssumption_ProvidersSchemaOffline: after the rehearsal's first init
+// and its second init with -plugin-dir, `tofu providers schema -json`
+// under the second init's environment (replace mode, both proxies at the
+// recorder the second init used, no NO_PROXY) succeeds and prints the aws
+// provider's endpoints block, sts among its keys, and neither command
+// makes a proxied connection.
+//
+// Relied on by: rehearsal-walls, whose prepare derives the provider
+// override's endpoints keys from that call after the second init (ADR-0042
+// § Provider override). ADR-0028.
+func TestAssumption_ProvidersSchemaOffline(t *testing.T) {
+	e2e.SkipUnlessEnabled(t)
+	_, err := exec.LookPath("tofu")
+	require.NoError(t, err, "tofu binary required for e2e")
+
+	c := newInitCopy(t)
+	proxy := startRecorder(t)
+	out, err := c.secondInit(t, proxy, true)
+	assert.NoError(t, err, "%s\n%s", c.version, out)
+
+	stdout, stderr, err := cli.RunTofu(c.dir, c.bareEnv(t, "HTTPS_PROXY="+proxy.url, "HTTP_PROXY="+proxy.url), "providers", "schema", "-json")
+	require.NoError(t, err, "%s\n%s", c.version, stderr)
+	keys, err := cli.RehearsalEndpointKeys([]byte(stdout))
+	assert.NoError(t, err, c.version)
+	t.Logf("%s: the schema names %d endpoints keys", c.version, len(keys))
+	assert.Zero(t, proxy.count(), "%s: the second init or the schema call made a proxied connection: %v", c.version, proxy.requests())
 }
 
 // initCopy is a copy of a root using the aws provider, a local module and
@@ -1000,33 +1063,14 @@ func (w assumptionDir) tofu(t *testing.T, env []string, args ...string) (string,
 	return out, err
 }
 
-// endpointKeys is every key of the provider's `endpoints` block, from
-// `tofu providers schema -json`.
+// endpointKeys is every key of the provider's `endpoints` block, as
+// prepare reads it from `tofu providers schema -json`.
 func (w assumptionDir) endpointKeys(t *testing.T) []string {
 	t.Helper()
-	out, err := w.tofu(t, w.env(t, startRecorder(t)), "providers", "schema", "-json")
-	require.NoError(t, err, "%s\n%s", w.version, out)
-	var schema struct {
-		ProviderSchemas map[string]struct {
-			Provider struct {
-				Block struct {
-					BlockTypes map[string]struct {
-						Block struct {
-							Attributes map[string]json.RawMessage `json:"attributes"`
-						} `json:"block"`
-					} `json:"block_types"`
-				} `json:"block"`
-			} `json:"provider"`
-		} `json:"provider_schemas"`
-	}
-	require.NoError(t, json.Unmarshal([]byte(out), &schema), w.version)
-	attributes := schema.ProviderSchemas["registry.opentofu.org/hashicorp/aws"].Provider.Block.BlockTypes["endpoints"].Block.Attributes
-	require.NotEmpty(t, attributes, "%s: no endpoints block in the aws provider schema", w.version)
-	keys := make([]string, 0, len(attributes))
-	for key := range attributes {
-		keys = append(keys, key)
-	}
-	slices.Sort(keys)
+	stdout, stderr, err := cli.RunTofu(w.dir, w.env(t, startRecorder(t)), "providers", "schema", "-json")
+	require.NoError(t, err, "%s\n%s", w.version, stderr)
+	keys, err := cli.RehearsalEndpointKeys([]byte(stdout))
+	require.NoError(t, err, w.version)
 	return keys
 }
 

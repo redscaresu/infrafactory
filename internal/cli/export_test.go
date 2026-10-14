@@ -55,13 +55,15 @@ func AWSLayer3MockDeploy(ctx context.Context, cfg config.Config, scenarioPath st
 }
 
 // The assumption tests' tofu runner, override name, backend override
-// (no path), second init args and fakeaws paths, for the assumption tests
-// in cli_test.
+// (no path), second init args, fakeaws paths, endpoints key reader and
+// provider override, for the assumption tests in cli_test.
 var (
-	RunTofu              = runTofu
-	LocalBackendOverride = localBackendOverride("")
-	SecondInitArgs       = rehearsalSecondInitArgs
-	AWSFakeawsPaths      = awsFakeawsPaths
+	RunTofu                   = runTofu
+	LocalBackendOverride      = localBackendOverride("")
+	SecondInitArgs            = rehearsalSecondInitArgs
+	AWSFakeawsPaths           = awsFakeawsPaths
+	RehearsalEndpointKeys     = rehearsalEndpointKeys
+	RehearsalProviderOverride = rehearsalProviderOverride
 )
 
 const OurOverride = ourOverride
