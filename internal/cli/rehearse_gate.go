@@ -282,8 +282,9 @@ var errRehearsalNotRegular = errors.New("not a regular file")
 
 // rehearsalReadRegular reads path only when it is a regular file. It opens
 // with O_NOFOLLOW and O_NONBLOCK and checks the open file, so a symlink or
-// a FIFO is errRehearsalNotRegular, never followed or blocked on, even one
-// swapped in after a check. Any other error is returned as it is,
+// a FIFO at path is errRehearsalNotRegular, never followed or blocked on,
+// even one swapped in after a check. A symlinked dir above path is
+// followed, as tofu follows it. Any other error is returned as it is,
 // fs.ErrNotExist included.
 func rehearsalReadRegular(path string) ([]byte, error) {
 	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
