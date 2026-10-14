@@ -579,6 +579,7 @@ The rehearsal runs its own fakeaws, started with these flags (`fakeaws/cmd/fakea
   `Authorization: Bearer <t>`. A `/mock/*` request whose `Origin` is present and not loopback is 403
   before the token is read; an absent `Origin` is allowed. Without a token, `/mock` is unchanged. Prefer
   the env var: a flag value shows in `ps`.
+  The rehearsal passes the token by env (`FAKEAWS_ADMIN_TOKEN`), never on argv.
 - `-record-requests` keeps an in-memory log of every AWS request. It is refused without a token,
   because the log holds request values. `GET /mock/requests` returns it and `POST /mock/requests/clear`
   empties it; `POST /mock/reset` empties it too. `/mock/state`'s `audit` lists the same requests with
@@ -662,6 +663,21 @@ pins and any warnings.
   relative one is a usage error. Unset, prepare installs the pin into the user cache. Any other
   binary is refused.
 
+**The fakeaws binary.** Unset `--fakeaws-bin`, prepare runs `go install github.com/redscaresu/fakeaws/cmd/fakeaws@<pin>`
+into `<UserCacheDir>/infrafactory/fakeaws/<pin>`, once per pin. It needs Go and the module proxy
+the first time; later prepares reuse the install. Whichever binary is used, its build info must
+name the pin, or prepare refuses it.
+
+**The overrides and the record.** Prepare writes two files into each root of the copy:
+`infrafactory_override.tf` (a `backend "local" {}` naming no `path`) and `infrafactory_aws_override.tf`
+(one `provider "aws"` block per root block, with fake keys and an `endpoints` block naming every
+key of the locked provider: the rehearsal's fakeaws for modelled services, a dead loopback address
+for the rest, S3 included). It records pid, port, token and roots in `<id>/rehearsal.json`, `0600`;
+the token reaches fakeaws only as `FAKEAWS_ADMIN_TOKEN` in its environment, never on argv, and is never printed. The report's `fakeaws_url` is where the rehearsal's fakeaws listens.
+A dead fakeaws leaves the override pointing at a closed port, so tofu fails there: run prepare again,
+since there is no `rehearse start`. Naming every endpoints key makes every plan print
+alias-conflict warnings (`Only one of the following attributes should be set`); they are expected.
+
 **Layout.** `<repo>/.infrafactory/rehearsals/<id>/` holds `work/` (the copy of the lowest directory holding `<dir>` and every local module it
 calls, at its path relative to the repository: with `../../modules/x` that can be the repository
 root, unrelated files included, which the gate does not read), `data/` (`TF_DATA_DIR`),
@@ -713,6 +729,31 @@ malformed flag exits 2.
   wrote, where `moved`, `import`, `removed` and `ephemeral` semantics may differ under tofu; and a
   lock pinning an earlier 5.x release of `hashicorp/aws` than 5.100.0, the release fakeaws is proven against. The line
   names the version, so a failure under it is filed as a fakeaws story.
+
+### End
+
+```
+infrafactory rehearse end <id>
+```
+
+Stops the rehearsal's fakeaws and deletes the rehearsal. `-h`, `--help` prints the usage; it takes
+no other flag. Run from inside the repository that holds the rehearsal.
+
+- **The token check comes before any signal.** `end` reads `rehearsal.json`, and signals the
+  recorded pid only after `/healthz` answers 200 and the token-guarded `GET /mock/requests`
+  answers on the recorded port. Any other answer, or a record that is missing or unreadable,
+  signals nothing, says why under `Fakeaws:` and still deletes. The signal is SIGTERM, then
+  SIGKILL to the process group.
+- **What it deletes:** `<repo>/.infrafactory/rehearsals/<id>/` whole: work dirs, the state-config
+  copy, the fakeaws db with `-wal` and `-shm`, the snapshot, recorded reads and state copies. It
+  lists each path it removed. Nothing under `.infrafactory/runs` or `live` is touched.
+- **It is idempotent.** A missing rehearsal exits 0 and creates nothing; a bad id, or an `<id>`
+  that is a symlink, exits 2.
+- **`stop failed: pid P port N`** means the port still answered after SIGKILL. `end` exits 1 and
+  deletes nothing, so `rehearsal.json` stays; run `end` again once the process is gone.
+- **A cancel** before the stop refuses with nothing signalled or deleted; once the stop has
+  begun, `end` finishes.
+- A `rehearse read --out` outside `<id>/reads` is not the rehearsal's and is not deleted.
 
 ## Sibling mocks
 

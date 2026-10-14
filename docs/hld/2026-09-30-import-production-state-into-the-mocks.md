@@ -483,7 +483,7 @@ and its walls; the account-read contract and the recorded-read format; the fakea
 - aws-hold-for-read — done (#476, #483, #490, #498, #502; real proof 2026-10-12: this PR)
 - [prod-read-seam](../epics/prod-read-seam.md)
 - [fakeaws-loader](../epics/fakeaws-loader.md)
-- [rehearsal-walls](../epics/rehearsal-walls.md)
+- rehearsal-walls — done (#555, #556, #557, #558, #559, #560, #561, #562, #563, #564, #565, #566, #567)
 - [rehearsal-passthrough](../epics/rehearsal-passthrough.md)
 - [rehearsal-state-pull](../epics/rehearsal-state-pull.md)
 - [rehearsal-against-the-copy](../epics/rehearsal-against-the-copy.md)
