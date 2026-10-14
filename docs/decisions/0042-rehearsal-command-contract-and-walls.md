@@ -362,9 +362,11 @@ Naming every key draws alias-conflict warnings on every plan; accepted and docum
 ### The environment
 
 `rehearsalWallsEnv` is replace mode's key set for a walls step, and its exact keys are pinned by a
-test: `AWS_ENDPOINT_URL_<svc>` at the private fakeaws for the modelled services; the catch-all
-`AWS_ENDPOINT_URL` and S3 at `rehearsalDeadProxy`; `HTTP_PROXY` and `HTTPS_PROXY` dead; the fake
-keys; and `AWS_REGION` from `--region`. No other region variable is set, and no Scaleway, GCP or
+test: `HOME=<id>/home` and `TF_DATA_DIR=<id>/data`; the fake keys; `AWS_REGION` from `--region`;
+`AWS_EC2_METADATA_DISABLED=true`; `AWS_CONFIG_FILE` and `AWS_SHARED_CREDENTIALS_FILE` at the
+harness sealed paths; `AWS_ENDPOINT_URL_<svc>` at the private fakeaws for the modelled services;
+the catch-all `AWS_ENDPOINT_URL` and S3 at `rehearsalDeadProxy`; and `HTTP_PROXY` and `HTTPS_PROXY`
+at `rehearsalDeadProxy`, with no `NO_PROXY`. No other region variable is set, and no Scaleway, GCP or
 Genesys variable.
 
 ### The fakeaws binary
