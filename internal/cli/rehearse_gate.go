@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"os"
 	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
+	"syscall"
 
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/hclsyntax"
@@ -275,19 +277,43 @@ func rehearsalEntryProblem(lower string) string {
 	return ""
 }
 
+// errRehearsalNotRegular is a file rehearsalReadRegular refuses unread.
+var errRehearsalNotRegular = errors.New("not a regular file")
+
+// rehearsalReadRegular reads path only when it is a regular file. It opens
+// with O_NOFOLLOW and O_NONBLOCK and checks the open file, so a symlink or
+// a FIFO at path is errRehearsalNotRegular, never followed or blocked on,
+// even one swapped in after a check. A symlinked dir above path is
+// followed, as tofu follows it. Any other error is returned as it is,
+// fs.ErrNotExist included.
+func rehearsalReadRegular(path string) ([]byte, error) {
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	if errors.Is(err, syscall.ELOOP) {
+		return nil, errRehearsalNotRegular
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	switch {
+	case err != nil:
+		return nil, err
+	case !info.Mode().IsRegular():
+		return nil, errRehearsalNotRegular
+	}
+	return io.ReadAll(f)
+}
+
 // rehearsalRead reads a file the gate must vouch for. One that is not a
 // regular file or cannot be read is refused: the gate cannot vouch for
 // what it cannot read.
 func rehearsalRead(path, name string) ([]byte, string) {
-	info, err := os.Lstat(path)
-	if err != nil {
-		return nil, fmt.Sprintf("%s: cannot read it: %v", name, err)
-	}
-	if !info.Mode().IsRegular() {
+	src, err := rehearsalReadRegular(path)
+	switch {
+	case errors.Is(err, errRehearsalNotRegular):
 		return nil, name + ": not a regular file, so the gate cannot read it"
-	}
-	src, err := os.ReadFile(path)
-	if err != nil {
+	case err != nil:
 		return nil, fmt.Sprintf("%s: cannot read it: %v", name, err)
 	}
 	return src, ""

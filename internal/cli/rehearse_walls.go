@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 
 	"github.com/redscaresu/infrafactory/internal/harness"
@@ -56,13 +55,15 @@ func (r rehearsalRecord) write(rehearsal string) error {
 	return writeSynced(filepath.Join(rehearsal, rehearsalRecordFile), append(encoded, '\n'))
 }
 
-// readRehearsalRecord reads <rehearsal>/rehearsal.json. A file that does
-// not parse, or holds another schema, is refused.
+// readRehearsalRecord reads <rehearsal>/rehearsal.json through
+// rehearsalReadRegular, so a symlink, a FIFO or anything but a regular
+// file is refused unread, and a missing one is fs.ErrNotExist. A file
+// that does not parse, or holds another schema, is refused.
 func readRehearsalRecord(rehearsal string) (rehearsalRecord, error) {
 	path := filepath.Join(rehearsal, rehearsalRecordFile)
-	raw, err := os.ReadFile(path)
+	raw, err := rehearsalReadRegular(path)
 	if err != nil {
-		return rehearsalRecord{}, err
+		return rehearsalRecord{}, fmt.Errorf("the rehearsal record %s cannot be read: %w", path, err)
 	}
 	var r rehearsalRecord
 	if err := json.Unmarshal(raw, &r); err != nil {
@@ -129,8 +130,7 @@ func (p rehearsePrepare) walls(ctx context.Context, rehearsal string, record reh
 	}
 	recorded = true
 	for _, root := range record.Roots {
-		override := rehearsalProviderOverride(fakeawsURL, record.Region, root.EndpointKeys, root.AWSAliases)
-		if err := writeSynced(filepath.Join(rehearsal, root.Root, rehearsalAWSOverride), override); err != nil {
+		if err := writeSynced(filepath.Join(rehearsal, root.Root, rehearsalAWSOverride), record.providerOverride(root)); err != nil {
 			return "", err
 		}
 	}
