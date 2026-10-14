@@ -38,10 +38,11 @@ func initRunIn(t *testing.T, p rehearsePrepare, repo string, tofu func(context.C
 	return runPrepareWith(t, stubWalls(p), repo, tofu)
 }
 
-// runPrepareWith runs prepare, built from p, on envs/prod in repo, with a
-// runner that records each call and then runs tofu. A schema call tofu
-// answers with no stdout and no error gets prepareSchema.
-func runPrepareWith(t *testing.T, p rehearsePrepare, repo string, tofu func(context.Context, harness.Command) (harness.CommandResult, error)) prepareRun {
+// runPrepareWith runs prepare, built from p, on envs/prod in repo with
+// prepareFlags and args, with a runner that records each call and then runs
+// tofu. A schema call tofu answers with no stdout and no error gets
+// prepareSchema.
+func runPrepareWith(t *testing.T, p rehearsePrepare, repo string, tofu func(context.Context, harness.Command) (harness.CommandResult, error), args ...string) prepareRun {
 	t.Helper()
 	var run prepareRun
 	p.runner = harness.CommandRunnerFunc(func(ctx context.Context, c harness.Command) (harness.CommandResult, error) {
@@ -56,7 +57,7 @@ func runPrepareWith(t *testing.T, p rehearsePrepare, repo string, tofu func(cont
 	root := prepareRoot(p)
 	stdout := &bytes.Buffer{}
 	root.SetOut(stdout)
-	root.SetArgs(append([]string{"rehearse", "prepare", "envs/prod"}, prepareFlags...))
+	root.SetArgs(append(append([]string{"rehearse", "prepare", "envs/prod"}, prepareFlags...), args...))
 	run.err = root.Execute()
 	run.stdout = stdout.String()
 	return run

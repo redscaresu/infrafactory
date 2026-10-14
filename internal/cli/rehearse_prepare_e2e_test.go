@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -73,7 +72,7 @@ provider "aws" {
 				e2e.WriteFile(t, filepath.Join(repo, name), []byte(content))
 			}
 			t.Chdir(repo)
-			t.Cleanup(func() { stopRecordedFakeaws(repo) })
+			t.Cleanup(func() { stopRecordedFakeaws(t, repo) })
 
 			root := cli.NewRootCmd()
 			stdout := &bytes.Buffer{}
@@ -112,20 +111,22 @@ provider "aws" {
 	}
 }
 
-// stopRecordedFakeaws kills the process group of each fakeaws recorded
-// under repo's rehearsals.
-func stopRecordedFakeaws(repo string) {
+// stopRecordedFakeaws stops each fakeaws recorded under repo's rehearsals
+// and waits until its process group is gone, so t.TempDir's removal never
+// races a fakeaws still holding its db files.
+func stopRecordedFakeaws(t *testing.T, repo string) {
 	records, _ := filepath.Glob(filepath.Join(repo, ".infrafactory", "rehearsals", "*", "rehearsal.json"))
 	for _, path := range records {
 		raw, err := os.ReadFile(path)
-		if err != nil {
+		if !assert.NoError(t, err) {
 			continue
 		}
 		var record struct {
-			PID int `json:"pid"`
+			PID  int `json:"pid"`
+			Port int `json:"port"`
 		}
-		if json.Unmarshal(raw, &record) == nil && record.PID > 0 {
-			_ = syscall.Kill(-record.PID, syscall.SIGKILL)
+		if assert.NoError(t, json.Unmarshal(raw, &record), path) && assert.Positive(t, record.PID, path) {
+			assert.NoError(t, cli.StopRehearsalFakeaws(record.PID, record.Port), path)
 		}
 	}
 }

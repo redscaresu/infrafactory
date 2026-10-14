@@ -17,7 +17,7 @@ import (
 // (ADR-0042 § The layout), then stands the walls up. It returns the
 // rehearsal's id, the copied root and what the lock tells the report. On a
 // refusal the half-made rehearsal dir is removed, unless it is
-// errRehearsalKept.
+// errRehearsalKept, which then names the rehearsal and its record.
 func (p rehearsePrepare) prepare(ctx context.Context, dir, account, region, varFile string) (result rehearsePrepareResult, err error) {
 	repo, err := rehearsalRepo(p.wd)
 	if err != nil {
@@ -64,7 +64,11 @@ func (p rehearsePrepare) prepare(ctx context.Context, dir, account, region, varF
 		return result, fmt.Errorf("rehearsal %s is refused: it cannot be made new: %w", rehearsal, err)
 	}
 	defer func() {
-		if err != nil && !errors.Is(err, errRehearsalKept) {
+		switch {
+		case err == nil:
+		case errors.Is(err, errRehearsalKept):
+			err = fmt.Errorf("%w: rehearsal %s, record %s", err, id, filepath.Join(rehearsal, rehearsalRecordFile))
+		default:
 			_ = os.RemoveAll(rehearsal)
 		}
 	}()

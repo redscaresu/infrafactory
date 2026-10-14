@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io/fs"
 	"os"
@@ -149,7 +150,8 @@ func TestRehearsePrepareStopsFakeawsAfterTheStart(t *testing.T) {
 
 // A fakeaws that cannot be stopped keeps the rehearsal, so `end` can stop
 // it, but only once the record is written: a rehearsal with no record is
-// removed as any other. The refusal names the stop failure.
+// removed as any other. The refusal names the stop failure and, in both
+// outputs, the kept rehearsal's id and record.
 func TestRehearsePrepareKeepsTheRehearsalWhenFakeawsWillNotStop(t *testing.T) {
 	t.Parallel()
 
@@ -165,44 +167,59 @@ func TestRehearsePrepareKeepsTheRehearsalWhenFakeawsWillNotStop(t *testing.T) {
 		{"the record write fails", func(t *testing.T, rehearsal string, _ context.CancelFunc) {
 			require.NoError(t, os.Chmod(rehearsal, 0o500))
 			t.Cleanup(func() { _ = os.Chmod(rehearsal, 0o700) })
-		}, "permission denied; and fakeaws's stop failed: pid 4242 port 4566\n", false},
+		}, "permission denied; and fakeaws's stop failed: pid 4242 port 4566", false},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			var cancel context.CancelFunc
-			p := rehearsePrepare{
-				notify: func(ctx context.Context, _ ...os.Signal) (context.Context, context.CancelFunc) {
-					ctx, cancel = context.WithCancel(ctx)
-					return ctx, cancel
-				},
-				startFakeaws: func(_ context.Context, o rehearsalFakeawsOpts) (rehearsalFakeaws, func() error, error) {
-					rehearsal := filepath.Dir(o.dir)
-					tc.started(t, rehearsal, cancel)
-					return prepareStubFakeaws, func() error {
-						// So a removal can remove it.
-						require.NoError(t, os.Chmod(rehearsal, 0o700))
-						return errors.New("stop failed: pid 4242 port 4566")
-					}, nil
-				},
-			}
-			repo, run := initRun(t, p, prepareLock, func(context.Context, harness.Command) (harness.CommandResult, error) {
-				return harness.CommandResult{}, nil
-			})
+		for _, mode := range []OutputMode{OutputModeHuman, OutputModeJSON} {
+			t.Run(tc.name+" "+string(mode), func(t *testing.T) {
+				t.Parallel()
+				var cancel context.CancelFunc
+				p := rehearsePrepare{
+					notify: func(ctx context.Context, _ ...os.Signal) (context.Context, context.CancelFunc) {
+						ctx, cancel = context.WithCancel(ctx)
+						return ctx, cancel
+					},
+					startFakeaws: func(_ context.Context, o rehearsalFakeawsOpts) (rehearsalFakeaws, func() error, error) {
+						rehearsal := filepath.Dir(o.dir)
+						tc.started(t, rehearsal, cancel)
+						return prepareStubFakeaws, func() error {
+							// So a removal can remove it.
+							require.NoError(t, os.Chmod(rehearsal, 0o700))
+							return errors.New("stop failed: pid 4242 port 4566")
+						}, nil
+					},
+				}
+				repo := lockRepo(t, prepareLock, "")
+				run := runPrepareWith(t, stubWalls(p), repo, func(context.Context, harness.Command) (harness.CommandResult, error) {
+					return harness.CommandResult{}, nil
+				}, "--output", string(mode))
 
-			require.Error(t, run.err)
-			assert.Equal(t, ExitCodeRuntime, ExitCodeForError(run.err))
-			assert.Contains(t, run.stdout, tc.want)
-			assert.NotContains(t, run.stdout, "Rehearsal:")
-			if !tc.kept {
-				assert.NoDirExists(t, preparedDir(repo))
-				return
-			}
-			record, err := readRehearsalRecord(preparedDir(repo))
-			require.NoError(t, err, "the record is gone")
-			assert.Equal(t, prepareStubFakeaws.PID, record.PID)
-			assert.Equal(t, prepareStubFakeaws.Port, record.Port)
-			assert.Equal(t, prepareStubFakeaws.Token, record.Token)
-		})
+				require.Error(t, run.err)
+				assert.Equal(t, ExitCodeRuntime, ExitCodeForError(run.err))
+				refusal := strings.TrimPrefix(run.stdout, "Command: rehearse prepare\nStatus: failed\nRefused: ")
+				if mode == OutputModeJSON {
+					var result rehearsePrepareResult
+					require.NoError(t, json.Unmarshal([]byte(run.stdout), &result), run.stdout)
+					assert.Equal(t, CommandStatusFailed, result.Status)
+					assert.Empty(t, result.ID)
+					refusal = result.Refusal
+				}
+				assert.NotContains(t, run.stdout, "Rehearsal:")
+				if !tc.kept {
+					assert.Contains(t, refusal, tc.want)
+					assert.NotContains(t, refusal, errRehearsalKept.Error())
+					assert.NoDirExists(t, preparedDir(repo))
+					return
+				}
+				rehearsal, err := filepath.EvalSymlinks(preparedDir(repo))
+				require.NoError(t, err, "the rehearsal is gone")
+				assert.Contains(t, refusal, tc.want+": rehearsal "+prepareID+", record "+filepath.Join(rehearsal, rehearsalRecordFile))
+				record, err := readRehearsalRecord(rehearsal)
+				require.NoError(t, err, "the record is gone")
+				assert.Equal(t, prepareStubFakeaws.PID, record.PID)
+				assert.Equal(t, prepareStubFakeaws.Port, record.Port)
+				assert.Equal(t, prepareStubFakeaws.Token, record.Token)
+			})
+		}
 	}
 }
 
