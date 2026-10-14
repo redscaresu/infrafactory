@@ -23,12 +23,7 @@ import (
 
 	"github.com/redscaresu/infrafactory/internal/cli"
 	"github.com/redscaresu/infrafactory/internal/e2e"
-	"github.com/redscaresu/infrafactory/internal/harness"
 )
-
-// teardownAccount is the account the rehearsal and the stand-in prod
-// share.
-const teardownAccount = "123456789012"
 
 // TestRehearsalTeardown runs a real prepare of wallsRoot under prodShell,
 // then `rehearse read --out <id>/reads` of a stand-in prod fakeaws built
@@ -51,17 +46,7 @@ func TestRehearsalTeardown(t *testing.T) {
 	// Before HOME moves, so the build uses this machine's Go caches.
 	bin := fakeawsAtPin(t)
 
-	repo := realTempDir(t)
-	lock := fmt.Sprintf("provider %q {\n  version     = %q\n  constraints = %q\n}\n", "registry.opentofu.org/hashicorp/aws", harness.AWSProviderVersion, harness.AWSProviderVersion)
-	for name, content := range map[string]string{
-		".git/HEAD":                     "ref: refs/heads/main\n",
-		"envs/prod/.terraform.lock.hcl": lock,
-		"envs/prod/main.tf":             wallsRoot,
-	} {
-		e2e.WriteFile(t, filepath.Join(repo, name), []byte(content))
-	}
-	t.Chdir(repo)
-	t.Cleanup(func() { stopRecordedFakeaws(t, repo) })
+	repo := wallsRepo(t)
 	proxy, shell := prodShell(t)
 	noStores := func(stage string) {
 		t.Helper()
@@ -73,7 +58,7 @@ func TestRehearsalTeardown(t *testing.T) {
 	var prepared struct {
 		ID string `json:"id"`
 	}
-	out := rehearse(t, cli.NewRootCmd(), "prepare", "envs/prod", "--account", teardownAccount, "--region", assumptionRegion, "--fakeaws-bin", bin)
+	out := rehearse(t, cli.NewRootCmd(), "prepare", wallsRootDir, "--account", wallsAccount, "--region", assumptionRegion, "--fakeaws-bin", bin)
 	require.NoError(t, json.Unmarshal(out, &prepared), string(out))
 	rehearsal := filepath.Join(repo, ".infrafactory", "rehearsals", prepared.ID)
 	record := readPrepareRecord(t, rehearsal)
@@ -163,7 +148,7 @@ func teardownReadArgs(t *testing.T, out string) []string {
 	credentials, readSet := filepath.Join(dir, "reader.env"), filepath.Join(dir, "read-set.json")
 	require.NoError(t, os.WriteFile(credentials, []byte("AWS_ACCESS_KEY_ID="+fakeAccessKeyID+"\nAWS_SECRET_ACCESS_KEY="+fakeSecretAccessKey+"\n"), 0o600))
 	require.NoError(t, os.WriteFile(readSet, []byte(`[{"service": "sts", "protocol": "query", "action": "GetCallerIdentity", "params": {}}]`), 0o600))
-	return []string{"read", "--account", teardownAccount, "--region", assumptionRegion, "--credentials", credentials, "--read-set", readSet, "--out", out}
+	return []string{"read", "--account", wallsAccount, "--region", assumptionRegion, "--credentials", credentials, "--read-set", readSet, "--out", out}
 }
 
 // snapshotFakeaws has the fakeaws on the loopback port snapshot its db,
@@ -195,7 +180,7 @@ type standInProd struct{ url string }
 // stops it when the test ends.
 func startStandInProd(t *testing.T, bin string) standInProd {
 	t.Helper()
-	pid, port, err := cli.StartRehearsalFakeaws(bin, filepath.Join(t.TempDir(), "prod"), teardownAccount, assumptionRegion)
+	pid, port, err := cli.StartRehearsalFakeaws(bin, filepath.Join(t.TempDir(), "prod"), wallsAccount, assumptionRegion)
 	require.NoError(t, err)
 	t.Cleanup(func() { assert.NoError(t, cli.StopRehearsalFakeaws(pid, port)) })
 	return standInProd{url: fmt.Sprintf("http://127.0.0.1:%d", port)}
@@ -210,15 +195,15 @@ func (p standInProd) Do(req *http.Request) (*http.Response, error) {
 	if form, err := url.ParseQuery(string(body)); err == nil && form.Get("DryRun") == "true" {
 		return &http.Response{
 			StatusCode: http.StatusForbidden, Header: http.Header{"Content-Type": {"text/xml"}}, Request: req,
-			Body: io.NopCloser(strings.NewReader("<Response><Errors><Error><Code>UnauthorizedOperation</Code><Message>stand-in</Message></Error></Errors></Response>")),
+			Body: io.NopCloser(strings.NewReader(cli.EC2ErrorAnswer("UnauthorizedOperation"))),
 		}, nil
 	}
 	svc, _, _ := strings.Cut(req.URL.Host, ".")
-	path, ok := cli.AWSFakeawsPaths[strings.ToUpper(svc)]
-	if !ok {
+	svc = strings.ToUpper(svc)
+	if _, ok := cli.AWSFakeawsPaths[svc]; !ok {
 		return nil, fmt.Errorf("the stand-in prod serves no %s", req.URL.Host)
 	}
-	target, err := url.Parse(p.url + strings.TrimSuffix(strings.ReplaceAll(path, "{region}", assumptionRegion)+req.URL.Path, "/"))
+	target, err := url.Parse(p.url + strings.TrimSuffix(fakeawsPath(svc)+req.URL.Path, "/"))
 	if err != nil {
 		return nil, err
 	}

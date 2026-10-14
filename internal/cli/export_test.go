@@ -100,6 +100,10 @@ func StartRehearsalFakeaws(bin, dir, account, region string) (pid, port int, err
 // request through doer, for the teardown e2e's read of a stand-in prod.
 func RehearseReadRoot(doer aws.HTTPClient) *cobra.Command { return readRoot(rehearseRead{doer: doer}) }
 
+// EC2ErrorAnswer is EC2's error answer carrying code, for the teardown
+// e2e's stand-in prod.
+func EC2ErrorAnswer(code string) string { return ec2ErrorAnswer(code) }
+
 // ExecRunner is the production runner, for the assumption tests' git.
 var ExecRunner harness.CommandRunner = execCommandRunner{}
 

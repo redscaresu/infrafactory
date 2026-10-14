@@ -45,25 +45,14 @@ func TestRehearsalWallsFailClosed(t *testing.T) {
 	// Before HOME moves, so the build uses this machine's Go caches.
 	bin := fakeawsAtPin(t)
 
-	repo := realTempDir(t)
-	lock := fmt.Sprintf("provider %q {\n  version     = %q\n  constraints = %q\n}\n", "registry.opentofu.org/hashicorp/aws", harness.AWSProviderVersion, harness.AWSProviderVersion)
-	for name, content := range map[string]string{
-		".git/HEAD":                     "ref: refs/heads/main\n",
-		"envs/prod/.terraform.lock.hcl": lock,
-		"envs/prod/main.tf":             wallsRoot,
-	} {
-		e2e.WriteFile(t, filepath.Join(repo, name), []byte(content))
-	}
-	t.Chdir(repo)
-	t.Cleanup(func() { stopRecordedFakeaws(t, repo) })
-
+	repo := wallsRepo(t)
 	proxy, _ := prodShell(t)
 
 	root := cli.NewRootCmd()
 	stdout, stderr := &bytes.Buffer{}, &bytes.Buffer{}
 	root.SetOut(stdout)
 	root.SetErr(stderr)
-	root.SetArgs([]string{"rehearse", "prepare", "envs/prod", "--account", "123456789012", "--region", assumptionRegion, "--fakeaws-bin", bin, "--output", "json"})
+	root.SetArgs([]string{"rehearse", "prepare", wallsRootDir, "--account", wallsAccount, "--region", assumptionRegion, "--fakeaws-bin", bin, "--output", "json"})
 	require.NoError(t, root.Execute(), "%s\n%s", stdout, stderr)
 	require.Zero(t, proxy.count(), "prepare went through the shell's proxy: %v", proxy.requests())
 	var result struct {
@@ -116,6 +105,33 @@ func TestRehearsalWallsFailClosed(t *testing.T) {
 		w.dies(walls, regexp.MustCompile(regexp.QuoteMeta(`Backend type changed from "local" to "s3"`)), "apply", "-auto-approve", "-input=false", "-no-color")
 		w.dies(walls, deadCall(t, "S3", "Get"), "init", "-input=false", "-no-color", "-reconfigure", "-plugin-dir="+filepath.Join(walls["TF_DATA_DIR"], "providers"))
 	})
+}
+
+// wallsAccount is the account the walls tests prepare for, and the
+// teardown test's stand-in prod is.
+const wallsAccount = "123456789012"
+
+// wallsRootDir is wallsRoot's dir in the repo wallsRepo makes.
+const wallsRootDir = "envs/prod"
+
+// wallsRepo makes a repo holding wallsRoot at wallsRootDir, with a lock
+// at the harness's aws provider version, makes it the working dir, and
+// stops any fakeaws a rehearsal of it leaves running when the test ends.
+// It returns the repo.
+func wallsRepo(t *testing.T) string {
+	t.Helper()
+	repo := realTempDir(t)
+	lock := fmt.Sprintf("provider %q {\n  version     = %q\n  constraints = %q\n}\n", "registry.opentofu.org/hashicorp/aws", harness.AWSProviderVersion, harness.AWSProviderVersion)
+	for name, content := range map[string]string{
+		".git/HEAD": "ref: refs/heads/main\n",
+		filepath.Join(wallsRootDir, ".terraform.lock.hcl"): lock,
+		filepath.Join(wallsRootDir, "main.tf"):             wallsRoot,
+	} {
+		e2e.WriteFile(t, filepath.Join(repo, name), []byte(content))
+	}
+	t.Chdir(repo)
+	t.Cleanup(func() { stopRecordedFakeaws(t, repo) })
+	return repo
 }
 
 // prodShell sets the shell of a user who can reach prod: AWS's example
