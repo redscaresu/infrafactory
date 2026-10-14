@@ -275,19 +275,32 @@ func rehearsalEntryProblem(lower string) string {
 	return ""
 }
 
+// errRehearsalNotRegular is a file rehearsalReadRegular refuses unread.
+var errRehearsalNotRegular = errors.New("not a regular file")
+
+// rehearsalReadRegular reads path only when Lstat finds a regular file, so
+// a symlink or a FIFO is errRehearsalNotRegular, never followed or blocked
+// on. An Lstat error is returned as it is, fs.ErrNotExist included.
+func rehearsalReadRegular(path string) ([]byte, error) {
+	info, err := os.Lstat(path)
+	switch {
+	case err != nil:
+		return nil, err
+	case !info.Mode().IsRegular():
+		return nil, errRehearsalNotRegular
+	}
+	return os.ReadFile(path)
+}
+
 // rehearsalRead reads a file the gate must vouch for. One that is not a
 // regular file or cannot be read is refused: the gate cannot vouch for
 // what it cannot read.
 func rehearsalRead(path, name string) ([]byte, string) {
-	info, err := os.Lstat(path)
-	if err != nil {
-		return nil, fmt.Sprintf("%s: cannot read it: %v", name, err)
-	}
-	if !info.Mode().IsRegular() {
+	src, err := rehearsalReadRegular(path)
+	switch {
+	case errors.Is(err, errRehearsalNotRegular):
 		return nil, name + ": not a regular file, so the gate cannot read it"
-	}
-	src, err := os.ReadFile(path)
-	if err != nil {
+	case err != nil:
 		return nil, fmt.Sprintf("%s: cannot read it: %v", name, err)
 	}
 	return src, ""

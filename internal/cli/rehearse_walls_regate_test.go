@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"io/fs"
 	"net"
 	"os"
 	"path/filepath"
@@ -132,6 +133,33 @@ func flipFirstByte(t *testing.T, path string) {
 	require.NoError(t, os.WriteFile(path, src, 0o600))
 }
 
+// A manifest that is not a regular file is refused unread: a FIFO, which
+// a read would block on, and a symlink to a good manifest.
+func TestRehearsalRegateRefusesAManifestThatIsNotARegularFile(t *testing.T) {
+	t.Parallel()
+	for name, plant := range map[string]func(t *testing.T, manifest string){
+		"a FIFO": func(t *testing.T, manifest string) { require.NoError(t, syscall.Mkfifo(manifest, 0o600)) },
+		"a symlink": func(t *testing.T, manifest string) {
+			good := t.TempDir()
+			require.NoError(t, writeRootManifest(good))
+			require.NoError(t, os.Symlink(filepath.Join(good, "modules", "modules.json"), manifest))
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			_, r := regatePrepared(t)
+			modules := filepath.Join(r.dir, "data", "modules")
+			require.NoError(t, os.MkdirAll(modules, 0o700))
+			plant(t, filepath.Join(modules, "modules.json"))
+
+			err := rehearsalRegate(r, regateRoot)
+
+			require.ErrorIs(t, err, errRehearsalRefuses)
+			assert.Contains(t, err.Error(), "modules.json: cannot read it: not a regular file")
+		})
+	}
+}
+
 // The override bytes come from the record, not the file: a record whose
 // port moved, over an override file left as prepare wrote it, is refused.
 func TestRehearsalRegateRebuildsTheOverridesFromTheRecord(t *testing.T) {
@@ -181,9 +209,16 @@ func TestRehearsalRegateIsPerRoot(t *testing.T) {
 	assert.EqualError(t, rehearsalRegate(r, filepath.Join("work", "envs", "qa")), "root work/envs/qa is refused: the rehearsal's record names no such root")
 	_, err = rehearsalOurOverrides(r, filepath.Join("work", "envs", "qa"))
 	assert.EqualError(t, err, "root work/envs/qa is refused: the rehearsal's record names no such root")
-	assert.EqualError(t, rehearsalRegate(r, "data"), `root data is refused: the record must name it inside its copy "work", inside the rehearsal`)
-	assert.EqualError(t, rehearsalRegate(r, dot.Root), `root work/envs/dot is refused: the record must name it inside its copy ".", inside the rehearsal`,
+	err = rehearsalRegate(r, "data")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "root data is refused: it resolves to ")
+	assert.Contains(t, err.Error(), ", outside the boundary ")
+	assert.EqualError(t, rehearsalRegate(r, dot.Root), `root work/envs/dot is refused: the record names its copy ".", which is not a dir under the rehearsal`,
 		"a copy of . makes the whole rehearsal the boundary")
+	require.NoError(t, os.RemoveAll(stage))
+	err = rehearsalRegate(r, second.Root)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "root work/envs/stage is refused: it does not resolve: ", "a root that no longer resolves names why")
 }
 
 // rehearsalOpen refuses a bad id, a symlinked <id> included, reports a
@@ -219,6 +254,7 @@ func TestRehearsalOpenRefuses(t *testing.T) {
 	require.NoError(t, os.Remove(record))
 	_, err = rehearsalOpen(repo, prepareID)
 	assert.ErrorIs(t, err, errRehearsalRecord, "a missing record")
+	assert.ErrorIs(t, err, fs.ErrNotExist, "a missing record")
 
 	// A record that is not a regular file is refused unread: a symlink to
 	// a good record, and a FIFO, which a read would block on.

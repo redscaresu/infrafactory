@@ -324,7 +324,7 @@ func rehearsalModulesGate(in rehearsalGateInput, data string) error {
 func (in rehearsalGateInput) manifestModules(data string) ([]rehearsalModuleDir, []string) {
 	const name = "modules.json"
 	fetched := filepath.Join(data, "modules")
-	raw, err := os.ReadFile(filepath.Join(fetched, name))
+	raw, err := rehearsalReadRegular(filepath.Join(fetched, name))
 	if errors.Is(err, fs.ErrNotExist) {
 		dirs, problems := in.moduleDirs()
 		if len(dirs) == 0 && len(problems) == 0 {

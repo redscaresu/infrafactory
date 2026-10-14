@@ -56,14 +56,14 @@ func (r rehearsalRecord) write(rehearsal string) error {
 }
 
 // readRehearsalRecord reads <rehearsal>/rehearsal.json through
-// rehearsalRead, so a symlink, a FIFO or anything but a regular file is
-// refused unread. A file that does not parse, or holds another schema, is
-// refused.
+// rehearsalReadRegular, so a symlink, a FIFO or anything but a regular
+// file is refused unread, and a missing one is fs.ErrNotExist. A file
+// that does not parse, or holds another schema, is refused.
 func readRehearsalRecord(rehearsal string) (rehearsalRecord, error) {
 	path := filepath.Join(rehearsal, rehearsalRecordFile)
-	raw, problem := rehearsalRead(path, path)
-	if problem != "" {
-		return rehearsalRecord{}, fmt.Errorf("the rehearsal record is refused: %s", problem)
+	raw, err := rehearsalReadRegular(path)
+	if err != nil {
+		return rehearsalRecord{}, fmt.Errorf("the rehearsal record %s cannot be read: %w", path, err)
 	}
 	var r rehearsalRecord
 	if err := json.Unmarshal(raw, &r); err != nil {

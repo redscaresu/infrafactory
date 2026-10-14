@@ -89,8 +89,13 @@ func (r openRehearsal) root(name string) (rehearsalRoot, error) {
 	copied := filepath.Join(r.dir, root.Copy)
 	_, copyProblem := rehearsalInside(copied, r.dir)
 	_, rootProblem := rehearsalInside(filepath.Join(r.dir, root.Root), copied)
-	if !filepath.IsLocal(root.Copy) || filepath.Clean(root.Copy) == "." || copyProblem != "" || rootProblem != "" {
-		return rehearsalRoot{}, fmt.Errorf("root %s is refused: the record must name it inside its copy %q, inside the rehearsal", name, root.Copy)
+	switch {
+	case !filepath.IsLocal(root.Copy) || filepath.Clean(root.Copy) == ".":
+		return rehearsalRoot{}, fmt.Errorf("root %s is refused: the record names its copy %q, which is not a dir under the rehearsal", name, root.Copy)
+	case copyProblem != "":
+		return rehearsalRoot{}, fmt.Errorf("root %s is refused: its copy %s %s", name, root.Copy, copyProblem)
+	case rootProblem != "":
+		return rehearsalRoot{}, fmt.Errorf("root %s is refused: it %s", name, rootProblem)
 	}
 	return root, nil
 }
