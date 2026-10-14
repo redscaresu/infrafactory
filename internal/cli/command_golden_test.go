@@ -15,6 +15,7 @@ import (
 	"github.com/redscaresu/infrafactory/internal/generator"
 	"github.com/redscaresu/infrafactory/internal/harness"
 	"github.com/spf13/cobra"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCommandOutputGoldenSnapshots(t *testing.T) {
@@ -401,9 +402,7 @@ func goldenEndRoot(h *CommandTestHarness, planted bool) *cobra.Command {
 		for _, rel := range endPlanted {
 			mustWriteFile(h.T, filepath.Join(dir, rel), rel)
 		}
-		if err := endStub(h.T, "fakeaws").write(dir); err != nil {
-			h.T.Fatalf("write record: %v", err)
-		}
+		require.NoError(h.T, endStub(h.T, "fakeaws").write(dir), "write record")
 	}
 	return endRoot(rehearseEnd{wd: h.WorkspaceDir})
 }

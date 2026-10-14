@@ -285,11 +285,29 @@ func (f rehearsalFakeaws) healthy(ctx context.Context, client *http.Client, base
 }
 
 // ours proves the server on the port is this fakeaws and reachable only
-// from this host: GET /mock/requests answers 200 with the token and 401
-// without it or with another, and nothing answers on any of the host's
-// non-loopback addresses. Only this fakeaws knows the token, so a server
-// that takes any token is refused.
+// from this host: it is tokenGuarded, and nothing answers on any of the
+// host's non-loopback addresses.
 func (f rehearsalFakeaws) ours(ctx context.Context, client *http.Client, base string) error {
+	if err := f.tokenGuarded(ctx, client, base); err != nil {
+		return err
+	}
+	ips, err := rehearsalNonLoopbackIPs()
+	if err != nil {
+		return fmt.Errorf("fakeaws is refused: this host's addresses cannot be listed: %w", err)
+	}
+	for _, ip := range ips {
+		if err := rehearsalUnanswered(ctx, net.JoinHostPort(ip.String(), strconv.Itoa(f.Port))); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// tokenGuarded proves the server at base holds f's token: GET
+// /mock/requests answers 200 with the token and 401 without it or with
+// another. Only this fakeaws knows the token, so a server that takes any
+// token, or none, is refused.
+func (f rehearsalFakeaws) tokenGuarded(ctx context.Context, client *http.Client, base string) error {
 	for _, check := range []struct {
 		token, with string
 		want        int
@@ -304,15 +322,6 @@ func (f rehearsalFakeaws) ours(ctx context.Context, client *http.Client, base st
 		}
 		if code != check.want {
 			return fmt.Errorf("fakeaws is refused: GET /mock/requests %s answered %d, not %d", check.with, code, check.want)
-		}
-	}
-	ips, err := rehearsalNonLoopbackIPs()
-	if err != nil {
-		return fmt.Errorf("fakeaws is refused: this host's addresses cannot be listed: %w", err)
-	}
-	for _, ip := range ips {
-		if err := rehearsalUnanswered(ctx, net.JoinHostPort(ip.String(), strconv.Itoa(f.Port))); err != nil {
-			return err
 		}
 	}
 	return nil

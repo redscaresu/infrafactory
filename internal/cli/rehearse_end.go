@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math"
 	"net/http"
 	"os"
 	"os/signal"
@@ -123,28 +124,28 @@ func (e rehearseEnd) end(ctx context.Context, id string) (rehearseEndResult, err
 }
 
 // rehearsalEndProof is why end must not signal the recorded fakeaws, or
-// "" when it proves itself: the record names a pid other than 0 and 1
-// (kill(-1) reaches every process the user owns), a port and a token,
-// /healthz on the port answers 200, and GET /mock/requests answers 200
-// with the token. Any other answer or error signals nothing.
+// "" when it proves itself: the record names a pid above 1 that fits a
+// 32-bit pid_t (kill(-1) reaches every process the user owns, and the
+// kernel truncates a larger -pid, 1<<32+1 to -1), a port and a token,
+// /healthz on the port answers 200, and the server there is tokenGuarded
+// with the record's token, as start requires. Any other answer or error
+// signals nothing.
 func rehearsalEndProof(ctx context.Context, r rehearsalRecord) string {
-	if r.PID <= 1 || r.Port <= 0 || r.Port > 65535 || r.Token == "" {
+	if r.PID <= 1 || r.PID > math.MaxInt32 || r.Port <= 0 || r.Port > 65535 || r.Token == "" {
 		return fmt.Sprintf("the record names no fakeaws to signal: pid %d port %d, token set: %t", r.PID, r.Port, r.Token != "")
 	}
 	ctx, cancel := context.WithTimeout(ctx, rehearsalDialTimeout)
 	defer cancel()
 	client, base := rehearsalFakeawsClient(), rehearsalFakeawsURL(r.Port)
-	for _, check := range []struct{ path, token, name string }{
-		{"/healthz", "", "/healthz"},
-		{"/mock/requests", r.Token, "GET /mock/requests with the record's token"},
-	} {
-		code, err := rehearsalFakeawsStatus(ctx, client, base+check.path, check.token)
-		switch {
-		case err != nil:
-			return fmt.Sprintf("pid %d port %d: %s failed: %v", r.PID, r.Port, check.name, err)
-		case code != http.StatusOK:
-			return fmt.Sprintf("pid %d port %d: %s answered %d", r.PID, r.Port, check.name, code)
-		}
+	code, err := rehearsalFakeawsStatus(ctx, client, base+"/healthz", "")
+	switch {
+	case err != nil:
+		return fmt.Sprintf("pid %d port %d: /healthz failed: %v", r.PID, r.Port, err)
+	case code != http.StatusOK:
+		return fmt.Sprintf("pid %d port %d: /healthz answered %d", r.PID, r.Port, code)
+	}
+	if err := (rehearsalFakeaws{Token: r.Token}).tokenGuarded(ctx, client, base); err != nil {
+		return fmt.Sprintf("pid %d port %d: %v", r.PID, r.Port, err)
 	}
 	return ""
 }

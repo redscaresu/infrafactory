@@ -86,6 +86,32 @@ func endStub(t *testing.T, role string) rehearsalRecord {
 	return rehearsalRecord{Schema: rehearsalRecordSchema, PID: pid, Port: port, Token: token}
 }
 
+// endListener serves on a loopback port the test process holds, outside
+// any stub's group: /healthz answers 200, and GET /mock/requests 200 when
+// accept takes its Authorization header, 401 otherwise. It returns the
+// port.
+func endListener(t *testing.T, accept func(auth string) bool) int {
+	t.Helper()
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/mock/requests" && !accept(r.Header.Get("Authorization")) {
+			w.WriteHeader(http.StatusUnauthorized)
+		}
+	}))
+	t.Cleanup(s.Close)
+	return s.Listener.Addr().(*net.TCPAddr).Port
+}
+
+// endListenerRecord writes a record naming the sleeper's pid and token
+// and the port of an endListener whose accept also sees that token, as a
+// server that took the dead fakeaws's port would answer.
+func endListenerRecord(accept func(auth, token string) bool) func(*testing.T, string, rehearsalRecord) bool {
+	return func(t *testing.T, dir string, sleeper rehearsalRecord) bool {
+		sleeper.Port = endListener(t, func(auth string) bool { return accept(auth, sleeper.Token) })
+		require.NoError(t, sleeper.write(dir))
+		return true
+	}
+}
+
 // endRepo makes a repo holding rehearsal prepareID with endPlanted in it,
 // and returns the repo and the rehearsal's dir.
 func endRepo(t *testing.T) (string, string) {
@@ -201,13 +227,7 @@ func TestRehearseEndStopFailedDeletesNothing(t *testing.T) {
 	repo, dir := endRepo(t)
 	sleeper := endStub(t, "fakeaws")
 	token := rehearsalToken()
-	held := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/mock/requests" && r.Header.Get("Authorization") != "Bearer "+token {
-			w.WriteHeader(http.StatusUnauthorized)
-		}
-	}))
-	t.Cleanup(held.Close)
-	port := held.Listener.Addr().(*net.TCPAddr).Port
+	port := endListener(t, func(auth string) bool { return auth == "Bearer "+token })
 	record := rehearsalRecord{Schema: rehearsalRecordSchema, PID: sleeper.PID, Port: port, Token: token}
 	require.NoError(t, record.write(dir))
 
@@ -225,7 +245,8 @@ func TestRehearseEndStopFailedDeletesNothing(t *testing.T) {
 
 // Unless the recorded fakeaws proves itself, end signals nothing, names
 // why (and the pid when the record has one) and still deletes the
-// rehearsal. Each case's sleeper is alive afterwards.
+// rehearsal. Each case's sleeper is alive afterwards. A listener that
+// takes the token but also no token, or any token, is not fakeaws.
 func TestRehearseEndSignalsNothingUnlessFakeawsProvesItself(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -274,7 +295,22 @@ func TestRehearseEndSignalsNothingUnlessFakeawsProvesItself(t *testing.T) {
 				require.NoError(t, sleeper.write(dir))
 				return true
 			},
-			want: "GET /mock/requests with the record's token answered 401",
+			want: "GET /mock/requests with its token answered 401, not 200",
+		},
+		{
+			name: "a listener that answers 200 to everything", role: "fakeaws",
+			record: endListenerRecord(func(string, string) bool { return true }),
+			want:   "GET /mock/requests without its token answered 200, not 401",
+		},
+		{
+			name: "a listener that takes no token as well as the record's", role: "fakeaws",
+			record: endListenerRecord(func(auth, token string) bool { return auth == "" || auth == "Bearer "+token }),
+			want:   "GET /mock/requests without its token answered 200, not 401",
+		},
+		{
+			name: "a listener that takes any token", role: "fakeaws",
+			record: endListenerRecord(func(auth, _ string) bool { return auth != "" }),
+			want:   "GET /mock/requests with another token answered 200, not 401",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -296,14 +332,15 @@ func TestRehearseEndSignalsNothingUnlessFakeawsProvesItself(t *testing.T) {
 	}
 }
 
-// A record whose pid is 0 or 1 signals nothing, though a fakeaws answers
-// on its port with its token: kill(-0) reaches end's own group, kill(-1)
-// every process the user owns. No signal is sent, a probe included.
-func TestRehearseEndNeverSignalsPIDZeroOrOne(t *testing.T) {
+// A record whose pid is 0, 1 or past a 32-bit pid_t signals nothing,
+// though a fakeaws answers on its port with its token: kill(-0) reaches
+// end's own group, kill(-1) every process the user owns, and the kernel
+// truncates -(1<<32+1) to -1. No signal is sent, a probe included.
+func TestRehearseEndNeverSignalsAnOutOfRangePID(t *testing.T) {
 	calls := killCalls(t, groupFound)
 	setForTest(t, &rehearsalFakeawsKillFallback, 100*time.Millisecond)
 	stub := endStub(t, "fakeaws")
-	for _, pid := range []int{0, 1} {
+	for _, pid := range []int{0, 1, 1<<32 + 1} {
 		repo, dir := endRepo(t)
 		record := stub
 		record.PID = pid
