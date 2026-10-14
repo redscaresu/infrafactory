@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -32,7 +33,7 @@ type rehearsePrepare struct {
 	// rehearsalFakeawsBinary by default.
 	fakeawsBin func(ctx context.Context, runner harness.CommandRunner, flagPath string) (string, error)
 	// fakeawsBinPath is the binary fakeawsBin is passed, "" for the pinned
-	// install.
+	// install. --fakeaws-bin, when given, replaces it.
 	fakeawsBinPath string
 	// startFakeaws starts the rehearsal's fakeaws and returns its stop:
 	// rehearsalStartFakeaws by default.
@@ -75,6 +76,7 @@ func newRehearsePrepareCmd(p rehearsePrepare) *cobra.Command {
 	cmd.Flags().String("account", "", "the AWS account id the rehearsal copies (12 digits)")
 	cmd.Flags().String("region", "", "the AWS region the code must target")
 	cmd.Flags().String("var-file", "", "a .tfvars file, copied into the rehearsal; it overrides the code's terraform.tfvars and *.auto.tfvars")
+	cmd.Flags().String("fakeaws-bin", "", "an absolute path to a fakeaws binary built at infrafactory's pin; unset, prepare installs the pin into the user cache")
 	_ = cmd.MarkFlagRequired("account")
 	_ = cmd.MarkFlagRequired("region")
 	return cmd
@@ -89,6 +91,14 @@ func (p rehearsePrepare) run(cmd *cobra.Command, args []string) error {
 	}
 	if !harness.ValidAWSRegion(region) {
 		return rehearseUsage(cmd, fmt.Errorf("--region %q is not an AWS region name", region))
+	}
+	// A --fakeaws-bin that is not absolute is refused before any work; an
+	// empty one is never read as unset, which would install the pin where
+	// a binary was asked for.
+	if cmd.Flags().Changed("fakeaws-bin") {
+		if p.fakeawsBinPath, _ = cmd.Flags().GetString("fakeaws-bin"); !filepath.IsAbs(p.fakeawsBinPath) {
+			return rehearseUsage(cmd, fmt.Errorf("--fakeaws-bin %q is not an absolute path; leave the flag out for the pinned install", p.fakeawsBinPath))
+		}
 	}
 	mode, err := outputModeFromCommand(cmd)
 	if err != nil {
@@ -121,13 +131,15 @@ func (p rehearsePrepare) run(cmd *cobra.Command, args []string) error {
 }
 
 // rehearsePrepareResult is what prepare reports: the new rehearsal's id,
-// the copied root dir, the hashicorp/aws version the lock pins and the
-// lock's warnings, or the refusal.
+// the copied root dir, the URL of its fakeaws, the hashicorp/aws version
+// the lock pins and the lock's warnings, or the refusal. Never the admin
+// token.
 type rehearsePrepareResult struct {
 	Schema     string        `json:"schema"`
 	Status     CommandStatus `json:"status"`
 	ID         string        `json:"id,omitempty"`
 	WorkDir    string        `json:"work_dir,omitempty"`
+	FakeawsURL string        `json:"fakeaws_url,omitempty"`
 	AWSVersion string        `json:"aws_provider_version,omitempty"`
 	Warnings   []string      `json:"warnings,omitempty"`
 	Refusal    string        `json:"refusal,omitempty"`
@@ -148,7 +160,7 @@ func (r rehearsePrepareResult) write(cmd *cobra.Command, mode OutputMode) error 
 	if r.Refusal != "" {
 		fmt.Fprintf(&human, "Refused: %s\n", r.Refusal)
 	} else {
-		fmt.Fprintf(&human, "Rehearsal: %s\nWork dir: %s\nAWS provider: hashicorp/aws %s\n", r.ID, r.WorkDir, r.AWSVersion)
+		fmt.Fprintf(&human, "Rehearsal: %s\nWork dir: %s\nFakeaws URL: %s\nAWS provider: hashicorp/aws %s\n", r.ID, r.WorkDir, r.FakeawsURL, r.AWSVersion)
 		for _, warning := range r.Warnings {
 			fmt.Fprintf(&human, "Warning: %s\n", warning)
 		}

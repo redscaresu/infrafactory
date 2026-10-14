@@ -2,4 +2,5 @@ Command: rehearse prepare
 Status: success
 Rehearsal: rehearsal-id
 Work dir: <WORKSPACE>/.infrafactory/rehearsals/rehearsal-id/work/envs/prod
+Fakeaws URL: http://127.0.0.1:4566
 AWS provider: hashicorp/aws 5.100.0

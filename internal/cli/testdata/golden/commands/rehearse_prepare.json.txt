@@ -3,5 +3,6 @@
   "status": "success",
   "id": "rehearsal-id",
   "work_dir": "<WORKSPACE>/.infrafactory/rehearsals/rehearsal-id/work/envs/prod",
+  "fakeaws_url": "http://127.0.0.1:4566",
   "aws_provider_version": "5.100.0"
 }

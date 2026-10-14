@@ -1070,10 +1070,18 @@ func (w assumptionDir) tofu(t *testing.T, env []string, args ...string) (string,
 // prepare reads it from `tofu providers schema -json`.
 func (w assumptionDir) endpointKeys(t *testing.T) []string {
 	t.Helper()
-	stdout, stderr, err := cli.RunTofu(w.dir, w.env(t, startRecorder(t)), "providers", "schema", "-json")
-	require.NoError(t, err, "%s\n%s", w.version, stderr)
+	return schemaEndpointKeys(t, w.dir, w.env(t, startRecorder(t)), w.version)
+}
+
+// schemaEndpointKeys runs `tofu providers schema -json` in dir under env
+// and reads its endpoints keys as prepare does; label names the run in a
+// failure.
+func schemaEndpointKeys(t *testing.T, dir string, env []string, label string) []string {
+	t.Helper()
+	stdout, stderr, err := cli.RunTofu(dir, env, "providers", "schema", "-json")
+	require.NoError(t, err, "%s\n%s", label, stderr)
 	keys, err := cli.RehearsalEndpointKeys([]byte(stdout))
-	require.NoError(t, err, w.version)
+	require.NoError(t, err, label)
 	return keys
 }
 

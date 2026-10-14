@@ -233,6 +233,8 @@ jobs:
           git init -q ../fakeaws
           git -C ../fakeaws fetch -q --depth 1 https://github.com/redscaresu/fakeaws.git "$FAKEAWS_SHA"
           git -C ../fakeaws checkout -q FETCH_HEAD
+          # TestRehearsePrepare builds its fakeaws from this clone, at the pin.
+          export FAKEAWS_DIR="$(cd ../fakeaws && pwd)"
           tests=$(grep -v '^#' .github/fakeaws-e2e-tests)
           [ -n "$tests" ] || { echo "no tests listed in .github/fakeaws-e2e-tests"; exit 1; }
           go test ./internal/e2e ./internal/cli -run "^($(echo $tests | tr ' ' '|'))\$" -count=1 -v | tee "$RUNNER_TEMP/aws-fakeaws.log"
