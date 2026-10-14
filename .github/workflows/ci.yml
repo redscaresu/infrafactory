@@ -235,6 +235,10 @@ jobs:
           git -C ../fakeaws checkout -q FETCH_HEAD
           # TestRehearsePrepare builds its fakeaws from this clone, at the pin.
           export FAKEAWS_DIR="$(cd ../fakeaws && pwd)"
+          # One build into the shared Go cache first, so the e2e's `go run`s
+          # and TestRehearsePrepare's build do not compile fakeaws cold at
+          # once and run StartFakeaws past its readiness wait.
+          go build -C ../fakeaws -o /dev/null ./cmd/fakeaws
           tests=$(grep -v '^#' .github/fakeaws-e2e-tests)
           [ -n "$tests" ] || { echo "no tests listed in .github/fakeaws-e2e-tests"; exit 1; }
           go test ./internal/e2e ./internal/cli -run "^($(echo $tests | tr ' ' '|'))\$" -count=1 -v | tee "$RUNNER_TEMP/aws-fakeaws.log"
