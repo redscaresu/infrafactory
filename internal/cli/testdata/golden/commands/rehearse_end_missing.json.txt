@@ -1,0 +1,7 @@
+{
+  "schema": "infrafactory.rehearse.end.v1",
+  "status": "success",
+  "id": "missing-id",
+  "fakeaws": "not signalled: no such rehearsal: missing-id",
+  "deleted": []
+}

@@ -1,0 +1,23 @@
+Command: rehearse end
+Status: success
+Rehearsal: rehearsal-id
+Fakeaws: stopped
+Deleted: data
+Deleted: data/modules
+Deleted: data/modules/modules.json
+Deleted: fakeaws
+Deleted: fakeaws/fakeaws.db
+Deleted: fakeaws/fakeaws.db-shm
+Deleted: fakeaws/fakeaws.db-wal
+Deleted: fakeaws/snapshot.db
+Deleted: reads
+Deleted: reads/recorded-read.json
+Deleted: rehearsal.json
+Deleted: state
+Deleted: state/terraform.tfstate
+Deleted: state-config
+Deleted: state-config/terraform.tfstate
+Deleted: work
+Deleted: work/envs
+Deleted: work/envs/prod
+Deleted: work/envs/prod/main.tf

@@ -1,0 +1,7 @@
+{
+  "schema": "infrafactory.rehearse.end.v1",
+  "status": "failed",
+  "id": "../x",
+  "deleted": [],
+  "refusal": "not a rehearsal id: \"../x\" is not one path element"
+}
