@@ -49,7 +49,7 @@ A rehearsal lives in `.infrafactory/rehearsals/<id>/` at the root of the reposit
 the current directory (its nearest ancestor holding `.git`), never under `.infrafactory/runs/` or
 `.infrafactory/live/`, which the UI serves. `prepare` refuses a `<dir>` that is not inside that
 same repository, and every later step, which names only `<id>`, finds it under that same root.
-`rehearsals/` holds a `.gitignore` of `*`. Each `<id>/` has `work/` (the copied code), `data/`
+`rehearsals/` holds a `.gitignore` of `*`. Each `<id>/` has `work/` (the container for the copied code, and the gate boundary), `data/`
 (`TF_DATA_DIR`), `home/` (an empty `HOME`), `state/` (the state file, outside the copy) and
 `vars.tfvars` (the `--var-file`, copied outside `work/` so tofu never auto-loads it). Epic
 rehearsal-walls adds:
@@ -59,9 +59,10 @@ rehearsal-walls adds:
   Each root holds its work dir, its root path, its endpoint keys and its aws aliases.
 - `reads/`: the rehearsal's recorded reads.
 - `state-config/`: reserved for rehearsal-state-pull.
-- A work directory is `<id>/work/<name>`. Prepare makes one, by its existing copy convention, and
-  the record lists it as the only root; rehearsal-against-the-copy adds base and head as further
-  entries.
+- A work directory is `<id>/work/<name>`, where `<name>` is the copied directory's path relative
+  to the repository (the copy convention of `rehearsalCopy`). Today prepare makes one copy there,
+  and the record lists its root path as the only root; rehearsal-against-the-copy adds base and head
+  as further entries.
 
 The fakeaws binary lives outside `<id>` (§ The fakeaws binary), so the mode rule below is unchanged.
 Directories are 0700 and files 0600. Tofu writes files with its own modes, so after each tofu run the modes are
