@@ -30,7 +30,7 @@ type openRehearsal struct {
 // rehearsalOpen finds rehearsal id in repo, reads its record and dials
 // rehearsalDeadProxy again: prepare dials it only before the second init,
 // and something may listen there since. Four refusals are errors.Is-able,
-// so end can act on each: errRehearsalBadID, errRehearsalMissing,
+// so a caller can act on each: errRehearsalBadID, errRehearsalMissing,
 // errRehearsalRecord (the dir is still returned) and errRehearsalProxyLive
 // (the dir and record are still returned). Any other error is a failure
 // to find the rehearsal. It creates nothing.
@@ -76,28 +76,43 @@ func rehearsalFind(repo, id string) (string, error) {
 	return dir, nil
 }
 
-// root is the record's entry for the prepared root named name, as the
-// record names it (work/envs/prod). A name the record does not hold, or
-// an entry whose root does not resolve inside its copy, a dir under the
-// rehearsal and never the rehearsal itself, is refused.
-func (r openRehearsal) root(name string) (rehearsalRoot, error) {
+// entry is the record's entry for the prepared root named name, as the
+// record names it (work/envs/prod). A name the record does not hold is
+// refused.
+func (r openRehearsal) entry(name string) (rehearsalRoot, error) {
 	i := slices.IndexFunc(r.record.Roots, func(root rehearsalRoot) bool { return root.Root == name })
 	if i < 0 {
-		return rehearsalRoot{}, fmt.Errorf("root %s is refused: the rehearsal's record names no such root", name)
+		return rehearsalRoot{}, fmt.Errorf("root %s: %w: the rehearsal's record names no such root", name, errRehearsalRefuses)
 	}
-	root := r.record.Roots[i]
+	return r.record.Roots[i], nil
+}
+
+// pathsProblem is why root's paths cannot be gated, or "": its copy must
+// be a dir under the rehearsal, never the rehearsal itself, and its root
+// a dir in the copy, each resolving to itself, so no symlink moves the
+// gate's boundary.
+func (r openRehearsal) pathsProblem(root rehearsalRoot) string {
 	copied := filepath.Join(r.dir, root.Copy)
-	_, copyProblem := rehearsalInside(copied, r.dir)
-	_, rootProblem := rehearsalInside(filepath.Join(r.dir, root.Root), copied)
-	switch {
-	case !filepath.IsLocal(root.Copy) || filepath.Clean(root.Copy) == ".":
-		return rehearsalRoot{}, fmt.Errorf("root %s is refused: the record names its copy %q, which is not a dir under the rehearsal", name, root.Copy)
-	case copyProblem != "":
-		return rehearsalRoot{}, fmt.Errorf("root %s is refused: its copy %s %s", name, root.Copy, copyProblem)
-	case rootProblem != "":
-		return rehearsalRoot{}, fmt.Errorf("root %s is refused: it %s", name, rootProblem)
+	if !filepath.IsLocal(root.Copy) || copied == r.dir {
+		return fmt.Sprintf("the record names its copy %q, which is not a dir under the rehearsal", root.Copy)
 	}
-	return root, nil
+	if problem := rehearsalResolvesInside(copied, r.dir); problem != "" {
+		return fmt.Sprintf("its copy %s %s", root.Copy, problem)
+	}
+	if problem := rehearsalResolvesInside(filepath.Join(r.dir, root.Root), copied); problem != "" {
+		return "it " + problem
+	}
+	return ""
+}
+
+// rehearsalResolvesInside is why path is refused, or "": it must lie
+// inside boundary and resolve to itself there, through no symlink.
+func rehearsalResolvesInside(path, boundary string) string {
+	got, problem := rehearsalInside(path, boundary)
+	if problem == "" && got != path {
+		problem = "resolves through a symlink to " + got
+	}
+	return problem
 }
 
 // ours is infrafactory's own override files for root, by name, with the
@@ -119,7 +134,7 @@ func (r rehearsalRecord) providerOverride(root rehearsalRoot) []byte {
 // rehearsalOurOverrides is ours for the named root, rebuilt from the
 // record, never read back from the files.
 func rehearsalOurOverrides(r openRehearsal, name string) (map[string][]byte, error) {
-	root, err := r.root(name)
+	root, err := r.entry(name)
 	if err != nil {
 		return nil, err
 	}
@@ -131,11 +146,15 @@ func rehearsalOurOverrides(r openRehearsal, name string) (map[string][]byte, err
 // from the record, its region, vars.tfvars when present, the aws version
 // from the copy's lock, the modules from the manifest under <id>/data,
 // and ours, so each of infrafactory's overrides passes only when
-// byte-identical to what prepare wrote.
+// byte-identical to what prepare wrote. Every refusal is
+// errRehearsalRefuses.
 func rehearsalRegate(r openRehearsal, name string) error {
-	root, err := r.root(name)
+	root, err := r.entry(name)
 	if err != nil {
 		return err
+	}
+	if problem := r.pathsProblem(root); problem != "" {
+		return fmt.Errorf("root %s: %w: %s", name, errRehearsalRefuses, problem)
 	}
 	ours, err := rehearsalOurOverrides(r, name)
 	if err != nil {
@@ -147,7 +166,7 @@ func rehearsalRegate(r openRehearsal, name string) error {
 	case err == nil:
 		in.varFile = varFile
 	case !errors.Is(err, fs.ErrNotExist):
-		return fmt.Errorf("root %s is refused: cannot look for %s: %w", name, varFile, err)
+		return fmt.Errorf("root %s: %w: cannot look for %s: %v", name, errRehearsalRefuses, varFile, err)
 	}
 	lock, problems := in.lock()
 	if err := rehearsalRefusal(problems); err != nil {

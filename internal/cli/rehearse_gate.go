@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"os"
 	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
+	"syscall"
 
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/hclsyntax"
@@ -278,18 +280,28 @@ func rehearsalEntryProblem(lower string) string {
 // errRehearsalNotRegular is a file rehearsalReadRegular refuses unread.
 var errRehearsalNotRegular = errors.New("not a regular file")
 
-// rehearsalReadRegular reads path only when Lstat finds a regular file, so
-// a symlink or a FIFO is errRehearsalNotRegular, never followed or blocked
-// on. An Lstat error is returned as it is, fs.ErrNotExist included.
+// rehearsalReadRegular reads path only when it is a regular file. It opens
+// with O_NOFOLLOW and O_NONBLOCK and checks the open file, so a symlink or
+// a FIFO is errRehearsalNotRegular, never followed or blocked on, even one
+// swapped in after a check. Any other error is returned as it is,
+// fs.ErrNotExist included.
 func rehearsalReadRegular(path string) ([]byte, error) {
-	info, err := os.Lstat(path)
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	if errors.Is(err, syscall.ELOOP) {
+		return nil, errRehearsalNotRegular
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	info, err := f.Stat()
 	switch {
 	case err != nil:
 		return nil, err
 	case !info.Mode().IsRegular():
 		return nil, errRehearsalNotRegular
 	}
-	return os.ReadFile(path)
+	return io.ReadAll(f)
 }
 
 // rehearsalRead reads a file the gate must vouch for. One that is not a

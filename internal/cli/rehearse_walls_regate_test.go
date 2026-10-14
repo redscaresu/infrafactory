@@ -206,19 +206,43 @@ func TestRehearsalRegateIsPerRoot(t *testing.T) {
 	assert.Contains(t, err.Error(), "root work/envs/stage: ")
 	assert.Contains(t, err.Error(), "envs/stage/zz_override.tf: an override file is refused")
 	assert.NotContains(t, err.Error(), "envs/prod/")
-	assert.EqualError(t, rehearsalRegate(r, filepath.Join("work", "envs", "qa")), "root work/envs/qa is refused: the rehearsal's record names no such root")
+	refused := func(name, want string) {
+		t.Helper()
+		err := rehearsalRegate(r, name)
+		require.ErrorIs(t, err, errRehearsalRefuses, name)
+		assert.Contains(t, err.Error(), "root "+name+": "+errRehearsalRefuses.Error()+": "+want, name)
+	}
+	refused(filepath.Join("work", "envs", "qa"), "the rehearsal's record names no such root")
 	_, err = rehearsalOurOverrides(r, filepath.Join("work", "envs", "qa"))
-	assert.EqualError(t, err, "root work/envs/qa is refused: the rehearsal's record names no such root")
-	err = rehearsalRegate(r, "data")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "root data is refused: it resolves to ")
-	assert.Contains(t, err.Error(), ", outside the boundary ")
-	assert.EqualError(t, rehearsalRegate(r, dot.Root), `root work/envs/dot is refused: the record names its copy ".", which is not a dir under the rehearsal`,
-		"a copy of . makes the whole rehearsal the boundary")
+	assert.ErrorIs(t, err, errRehearsalRefuses)
+	refused("data", "it resolves to ")
+	refused(dot.Root, `the record names its copy ".", which is not a dir under the rehearsal`)
 	require.NoError(t, os.RemoveAll(stage))
-	err = rehearsalRegate(r, second.Root)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "root work/envs/stage is refused: it does not resolve: ", "a root that no longer resolves names why")
+	refused(second.Root, "it does not resolve: ")
+}
+
+// A copy that is a symlink to another dir in the rehearsal, the
+// rehearsal itself included, is refused: it would move the gate's
+// boundary off the copied tree.
+func TestRehearsalRegateRefusesASymlinkedCopy(t *testing.T) {
+	t.Parallel()
+	for name, target := range map[string]string{"the rehearsal": ".", "its data dir": "data"} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			_, r := regatePrepared(t)
+			work := filepath.Join(r.dir, "work")
+			moved := filepath.Join(r.dir, target)
+			require.NoError(t, os.MkdirAll(moved, 0o700))
+			require.NoError(t, os.Rename(filepath.Join(work, "envs"), filepath.Join(moved, "envs")))
+			require.NoError(t, os.Remove(work))
+			require.NoError(t, os.Symlink(target, work))
+
+			err := rehearsalRegate(r, regateRoot)
+
+			require.ErrorIs(t, err, errRehearsalRefuses)
+			assert.Contains(t, err.Error(), "its copy work resolves through a symlink to ")
+		})
+	}
 }
 
 // rehearsalOpen refuses a bad id, a symlinked <id> included, reports a
