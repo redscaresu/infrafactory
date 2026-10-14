@@ -45,43 +45,14 @@ func TestRehearsalWallsFailClosed(t *testing.T) {
 	// Before HOME moves, so the build uses this machine's Go caches.
 	bin := fakeawsAtPin(t)
 
-	repo := realTempDir(t)
-	lock := fmt.Sprintf("provider %q {\n  version     = %q\n  constraints = %q\n}\n", "registry.opentofu.org/hashicorp/aws", harness.AWSProviderVersion, harness.AWSProviderVersion)
-	for name, content := range map[string]string{
-		".git/HEAD":                     "ref: refs/heads/main\n",
-		"envs/prod/.terraform.lock.hcl": lock,
-		"envs/prod/main.tf":             wallsRoot,
-	} {
-		e2e.WriteFile(t, filepath.Join(repo, name), []byte(content))
-	}
-	t.Chdir(repo)
-	t.Cleanup(func() { stopRecordedFakeaws(t, repo) })
-
-	home := realTempDir(t)
-	e2e.WriteFile(t, filepath.Join(home, ".aws", "credentials"), []byte(
-		"[prod]\naws_access_key_id = "+fakeAccessKeyID+"\naws_secret_access_key = "+fakeSecretAccessKey+"\n"))
-	e2e.WriteFile(t, filepath.Join(home, ".aws", "config"), []byte("[profile prod]\nregion = "+assumptionRegion+"\n"))
-	t.Setenv("HOME", home)
-	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, "cache"))
-	t.Setenv("AWS_ACCESS_KEY_ID", fakeAccessKeyID)
-	t.Setenv("AWS_SECRET_ACCESS_KEY", fakeSecretAccessKey)
-	t.Setenv("AWS_PROFILE", "prod")
-	// Named too, so the profile still resolves where HOME is the
-	// rehearsal's.
-	t.Setenv("AWS_CONFIG_FILE", filepath.Join(home, ".aws", "config"))
-	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", filepath.Join(home, ".aws", "credentials"))
-	proxy := startRecorder(t)
-	for _, name := range []string{"HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy"} {
-		t.Setenv(name, proxy.url)
-	}
-	t.Setenv("NO_PROXY", "")
-	t.Setenv("no_proxy", "")
+	repo := wallsRepo(t)
+	proxy, _ := prodShell(t)
 
 	root := cli.NewRootCmd()
 	stdout, stderr := &bytes.Buffer{}, &bytes.Buffer{}
 	root.SetOut(stdout)
 	root.SetErr(stderr)
-	root.SetArgs([]string{"rehearse", "prepare", "envs/prod", "--account", "123456789012", "--region", assumptionRegion, "--fakeaws-bin", bin, "--output", "json"})
+	root.SetArgs([]string{"rehearse", "prepare", wallsRootDir, "--account", wallsAccount, "--region", assumptionRegion, "--fakeaws-bin", bin, "--output", "json"})
 	require.NoError(t, root.Execute(), "%s\n%s", stdout, stderr)
 	require.Zero(t, proxy.count(), "prepare went through the shell's proxy: %v", proxy.requests())
 	var result struct {
@@ -134,6 +105,67 @@ func TestRehearsalWallsFailClosed(t *testing.T) {
 		w.dies(walls, regexp.MustCompile(regexp.QuoteMeta(`Backend type changed from "local" to "s3"`)), "apply", "-auto-approve", "-input=false", "-no-color")
 		w.dies(walls, deadCall(t, "S3", "Get"), "init", "-input=false", "-no-color", "-reconfigure", "-plugin-dir="+filepath.Join(walls["TF_DATA_DIR"], "providers"))
 	})
+}
+
+// wallsAccount is the account the walls tests prepare for, and the
+// teardown test's stand-in prod is.
+const wallsAccount = "123456789012"
+
+// wallsRootDir is wallsRoot's dir in the repo wallsRepo makes.
+const wallsRootDir = "envs/prod"
+
+// wallsRepo makes a repo holding wallsRoot at wallsRootDir, with a lock
+// at the harness's aws provider version, makes it the working dir, and
+// stops any fakeaws a rehearsal of it leaves running when the test ends.
+// It returns the repo.
+func wallsRepo(t *testing.T) string {
+	t.Helper()
+	repo := realTempDir(t)
+	lock := fmt.Sprintf("provider %q {\n  version     = %q\n  constraints = %q\n}\n", "registry.opentofu.org/hashicorp/aws", harness.AWSProviderVersion, harness.AWSProviderVersion)
+	for name, content := range map[string]string{
+		".git/HEAD": "ref: refs/heads/main\n",
+		filepath.Join(wallsRootDir, ".terraform.lock.hcl"): lock,
+		filepath.Join(wallsRootDir, "main.tf"):             wallsRoot,
+	} {
+		e2e.WriteFile(t, filepath.Join(repo, name), []byte(content))
+	}
+	t.Chdir(repo)
+	t.Cleanup(func() { stopRecordedFakeaws(t, repo) })
+	return repo
+}
+
+// prodShell sets the shell of a user who can reach prod: AWS's example
+// keys, AWS_PROFILE naming a profile with real-looking keys in a planted
+// HOME/.aws, and both proxies, in both spellings, at the recorder it
+// returns, with no NO_PROXY to let a child past it. It returns the
+// variables it set too.
+func prodShell(t *testing.T) (*recorder, map[string]string) {
+	t.Helper()
+	home := realTempDir(t)
+	e2e.WriteFile(t, filepath.Join(home, ".aws", "credentials"), []byte(
+		"[prod]\naws_access_key_id = "+fakeAccessKeyID+"\naws_secret_access_key = "+fakeSecretAccessKey+"\n"))
+	e2e.WriteFile(t, filepath.Join(home, ".aws", "config"), []byte("[profile prod]\nregion = "+assumptionRegion+"\n"))
+	proxy := startRecorder(t)
+	shell := map[string]string{
+		"HOME":                  home,
+		"XDG_CACHE_HOME":        filepath.Join(home, "cache"),
+		"AWS_ACCESS_KEY_ID":     fakeAccessKeyID,
+		"AWS_SECRET_ACCESS_KEY": fakeSecretAccessKey,
+		"AWS_PROFILE":           "prod",
+		// Named too, so the profile still resolves where HOME is the
+		// rehearsal's.
+		"AWS_CONFIG_FILE":             filepath.Join(home, ".aws", "config"),
+		"AWS_SHARED_CREDENTIALS_FILE": filepath.Join(home, ".aws", "credentials"),
+		"NO_PROXY":                    "",
+		"no_proxy":                    "",
+	}
+	for _, name := range []string{"HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy"} {
+		shell[name] = proxy.url
+	}
+	for name, value := range shell {
+		t.Setenv(name, value)
+	}
+	return proxy, shell
 }
 
 // wallsRoot is the user's root: a backend "s3", a provider with

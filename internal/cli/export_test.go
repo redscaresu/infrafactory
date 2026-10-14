@@ -7,6 +7,9 @@ import (
 	"maps"
 	"os"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/spf13/cobra"
+
 	"github.com/redscaresu/infrafactory/internal/config"
 	"github.com/redscaresu/infrafactory/internal/harness"
 )
@@ -84,6 +87,22 @@ const (
 // failed prepare does, for stopRecordedFakeaws's cleanup: it returns once
 // the group is gone, or fails naming pid and port after the kill fallback.
 func StopRehearsalFakeaws(pid, port int) error { return rehearsalFakeaws{PID: pid, Port: port}.stop() }
+
+// StartRehearsalFakeaws starts bin as prepare starts the rehearsal's
+// fakeaws, in dir, which it makes, for the teardown e2e's stand-in prod.
+// It returns once fakeaws is ready; StopRehearsalFakeaws stops it.
+func StartRehearsalFakeaws(bin, dir, account, region string) (pid, port int, err error) {
+	f, err := rehearsalStartFakeaws(context.Background(), rehearsalFakeawsOpts{bin: bin, dir: dir, account: account, region: region})
+	return f.PID, f.Port, err
+}
+
+// RehearseReadRoot is the root command with `rehearse read` sending every
+// request through doer, for the teardown e2e's read of a stand-in prod.
+func RehearseReadRoot(doer aws.HTTPClient) *cobra.Command { return readRoot(rehearseRead{doer: doer}) }
+
+// EC2ErrorAnswer is EC2's error answer carrying code, for the teardown
+// e2e's stand-in prod.
+func EC2ErrorAnswer(code string) string { return ec2ErrorAnswer(code) }
 
 // ExecRunner is the production runner, for the assumption tests' git.
 var ExecRunner harness.CommandRunner = execCommandRunner{}
