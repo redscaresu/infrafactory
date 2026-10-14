@@ -22,12 +22,15 @@ import (
 const rehearsalTofuTimeout = 10 * time.Minute
 
 // rehearsalDeadProxy is the proxy the second init runs under. Nothing
-// listens there, which prepare checks before the second init. A var so a
-// test can move it.
+// listens there, which prepare checks before the second init and
+// rehearsalOpen checks again. A var so a test can move it.
 var rehearsalDeadProxy = "http://127.0.0.1:9"
 
-// rehearsalDialTimeout bounds prepare's dial of the dead proxy.
+// rehearsalDialTimeout bounds each dial of the dead proxy.
 const rehearsalDialTimeout = 5 * time.Second
+
+// errRehearsalProxyLive is a dead proxy that does not refuse a dial.
+var errRehearsalProxyLive = errors.New("the dead proxy does not refuse a dial, so it cannot be relied on to refuse tofu's requests")
 
 // ourOverride is the name infrafactory's override takes: it sorts before a
 // user's zz_override.tf.
@@ -42,6 +45,10 @@ func localBackendOverride(blockPath string) string {
 	}
 	return "terraform {\n  backend \"local\" " + block + "\n}\n"
 }
+
+// rehearsalBackendOverride is the bytes of ourOverride in every prepared
+// root: no path, since the second init's -backend-config sets it.
+var rehearsalBackendOverride = []byte(localBackendOverride(""))
 
 // gateAndInit reads the copy's lock, runs gate 1 over the copy, the first
 // init, gate 2 over what it wrote, then the second init (ADR-0042 § The
@@ -139,14 +146,14 @@ func (p rehearsePrepare) firstInit(ctx context.Context, rehearsal string, in reh
 // (TestAssumption_SecondInitMakesNoProxiedConnection). Then the
 // rehearsal's modes are tightened again.
 func (p rehearsePrepare) secondInit(ctx context.Context, rehearsal, root string) error {
-	if err := rehearsalProxyRefuses(ctx, rehearsalDeadProxy); err != nil {
+	if err := rehearsalProxyRefuses(ctx, "the second init", rehearsalDeadProxy); err != nil {
 		return err
 	}
 	state, data := filepath.Join(rehearsal, "state"), filepath.Join(rehearsal, "data")
 	if err := os.Mkdir(state, 0o700); err != nil {
 		return err
 	}
-	if err := writeSynced(filepath.Join(root, ourOverride), []byte(localBackendOverride(""))); err != nil {
+	if err := writeSynced(filepath.Join(root, ourOverride), rehearsalBackendOverride); err != nil {
 		return err
 	}
 	args, err := rehearsalSecondInitArgs(root, filepath.Join(state, "terraform.tfstate"), data)
@@ -187,11 +194,12 @@ func rehearsalSecondInitArgs(root, statePath, data string) ([]string, error) {
 }
 
 // rehearsalProxyRefuses dials proxy and admits only a refused connection:
-// a dial that connects, or fails any other way, refuses the second init. A
-// dial that fails because ctx is cancelled is refused as the cancel.
-func rehearsalProxyRefuses(ctx context.Context, proxy string) error {
+// a dial that connects, or fails any other way, refuses step with
+// errRehearsalProxyLive. A dial that fails because ctx is cancelled is
+// refused as the cancel.
+func rehearsalProxyRefuses(ctx context.Context, step, proxy string) error {
 	refused := func(why string) error {
-		return fmt.Errorf("the second init is refused: the dead proxy %s %s, so it cannot be relied on to refuse the init's requests", proxy, why)
+		return fmt.Errorf("%s is refused: %w: %s %s", step, errRehearsalProxyLive, proxy, why)
 	}
 	u, err := url.Parse(proxy)
 	if err != nil {

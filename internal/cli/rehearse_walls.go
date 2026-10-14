@@ -127,8 +127,7 @@ func (p rehearsePrepare) walls(ctx context.Context, rehearsal string, record reh
 	}
 	recorded = true
 	for _, root := range record.Roots {
-		override := rehearsalProviderOverride(rehearsalFakeawsURL(record.Port), record.Region, root.EndpointKeys, root.AWSAliases)
-		if err := writeSynced(filepath.Join(rehearsal, root.Root, rehearsalAWSOverride), override); err != nil {
+		if err := writeSynced(filepath.Join(rehearsal, root.Root, rehearsalAWSOverride), record.ours(root)[rehearsalAWSOverride]); err != nil {
 			return err
 		}
 	}

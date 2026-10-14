@@ -397,7 +397,7 @@ func TestRehearsePrepareRefusesALiveDeadProxy(t *testing.T) {
 
 	require.Error(t, run.err)
 	assert.Equal(t, ExitCodeRuntime, ExitCodeForError(run.err))
-	assert.Contains(t, run.stdout, "Refused: the second init is refused: the dead proxy "+rehearsalDeadProxy+" accepted a connection")
+	assert.Contains(t, run.stdout, "Refused: the second init is refused: "+errRehearsalProxyLive.Error()+": "+rehearsalDeadProxy+" accepted a connection")
 	assert.Len(t, run.calls, 3)
 	assert.False(t, slices.ContainsFunc(run.calls, isSecondInit), "the second init ran")
 	assert.NoDirExists(t, preparedDir(repo))
@@ -420,13 +420,13 @@ func TestRehearsalProxyRefuses(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			err := rehearsalProxyRefuses(context.Background(), tc.proxy)
+			err := rehearsalProxyRefuses(context.Background(), "the second init", tc.proxy)
 			if tc.want == "" {
 				assert.NoError(t, err)
 				return
 			}
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), "the second init is refused: the dead proxy "+tc.proxy+" "+tc.want)
+			require.ErrorIs(t, err, errRehearsalProxyLive)
+			assert.Contains(t, err.Error(), "the second init is refused: "+errRehearsalProxyLive.Error()+": "+tc.proxy+" "+tc.want)
 		})
 	}
 }
@@ -438,7 +438,7 @@ func TestRehearsalProxyRefusesACancelAsTheCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	err := rehearsalProxyRefuses(ctx, "http://127.0.0.1:9")
+	err := rehearsalProxyRefuses(ctx, "the second init", "http://127.0.0.1:9")
 
 	require.ErrorIs(t, err, context.Canceled)
 	assert.EqualError(t, err, "prepare is cancelled: context canceled")

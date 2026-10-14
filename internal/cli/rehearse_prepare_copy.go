@@ -90,6 +90,9 @@ func (p rehearsePrepare) prepare(ctx context.Context, dir, account, region, varF
 	return rehearsePrepareResult{ID: id, WorkDir: in.root, AWSVersion: lock.aws(), Warnings: lock.warnings}, nil
 }
 
+// rehearsalVarFile is the --var-file copy's name in <id>.
+const rehearsalVarFile = "vars.tfvars"
+
 // rehearsalCopy copies ancestor into <rehearsal>/work at its path relative
 // to repo, so a module source that climbs above ancestor and back down
 // resolves in the copy as it does in the repo, and the var file to
@@ -110,7 +113,7 @@ func rehearsalCopy(rehearsal, repo, ancestor, root, varFile string) (rehearsalGa
 	if varFile == "" {
 		return in, nil
 	}
-	in.varFile = filepath.Join(rehearsal, "vars.tfvars")
+	in.varFile = filepath.Join(rehearsal, rehearsalVarFile)
 	return in, rehearsalCopyFile(varFile, in.varFile)
 }
 
