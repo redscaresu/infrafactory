@@ -392,14 +392,18 @@ without; and nothing answers on a non-loopback address.
 
 ### The gate bar for walls
 
-`rehearsalOpen(repo, id)` is the one way a later step finds a rehearsal. The id is a single path
-element; `<repo>/.infrafactory/rehearsals/<id>` is checked with `Lstat` and must be a real
-directory (a symlink is refused and nothing is ever created); the record is read; and
-`rehearsalDeadProxy` is dialled again and must refuse. `rehearsalRegate(rehearsal, root)` admits
-each of infrafactory's two overrides in that root only when byte-identical to the bytes rebuilt
-from the record; passthrough calls it, and both it and `rehearse end` call `rehearsalOpen`. For
-`rehearse end` only the id, `Lstat` and record checks refuse: it runs no tofu, so a dead proxy that
-accepts the dial is named in its report and does not stop it.
+`rehearsalOpen(repo, id)` is the one way a later step finds a rehearsal, in two layers. The shared
+layer: the id is a single path element, and `<repo>/.infrafactory/rehearsals/<id>` is checked with
+`Lstat` and must be a real directory (a symlink is refused and nothing is ever created). The full
+layer adds reading the record and dialling `rehearsalDeadProxy` again, which must refuse.
+`rehearsalRegate(rehearsal, root)` uses the full layer, and admits each of infrafactory's two
+overrides in that root only when byte-identical to the bytes rebuilt from the record; passthrough
+calls it.
+
+`rehearse end` uses only the shared layer: a bad id or a symlink is exit 2, and a missing directory
+is exit 0. It then reads the record itself. A missing or unparseable record refuses nothing: `end`
+signals nothing, says why, and still deletes `<id>`. It runs no tofu, so a dead proxy that accepts
+the dial is named in its report and does not stop it.
 
 ### The walls family: `rehearse end`
 
