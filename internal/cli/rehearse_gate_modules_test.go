@@ -133,7 +133,7 @@ func TestRehearsalGateModuleSources(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, in := moduleCopy(t, tc.files, tc.symlinks)
-			err := rehearsalGate(in)
+			_, err := rehearsalGate(in)
 			require.ErrorIs(t, err, errRehearsalRefuses)
 			for _, want := range tc.want {
 				assert.Contains(t, err.Error(), want)
@@ -157,7 +157,8 @@ func TestRehearsalGateAdmitsLocalModules(t *testing.T) {
 		work + "leaf/main.tf":   manifestOutput,
 		work + "provider.tf":    gateProvider,
 	}, nil)
-	assert.NoError(t, rehearsalGate(in))
+	_, err := rehearsalGate(in)
+	assert.NoError(t, err)
 
 	sources, err := rehearsalLocalModuleSources(in.root, in.boundary)
 	require.NoError(t, err)
@@ -222,7 +223,7 @@ func TestRehearsalModuleCyclesAreRefused(t *testing.T) {
 				in.root = filepath.Join(tmp, "link")
 				require.NoError(t, os.Symlink(in.boundary, in.root))
 			}
-			err := rehearsalGate(in)
+			_, err := rehearsalGate(in)
 			require.ErrorIs(t, err, errRehearsalRefuses)
 			assert.Contains(t, err.Error(), tc.want)
 
@@ -230,7 +231,7 @@ func TestRehearsalModuleCyclesAreRefused(t *testing.T) {
 			require.ErrorIs(t, err, errRehearsalRefuses)
 			assert.Nil(t, sources)
 			assert.Contains(t, err.Error(), tc.want)
-			dirs, _ := rehearsalModuleDirs(in.root, in.boundary)
+			dirs, _ := in.moduleDirs()
 			for _, dir := range dirs {
 				assert.NotEqual(t, rehearsalWalkKey(in.root), rehearsalWalkKey(dir), "the walk lists the root")
 			}
@@ -342,6 +343,11 @@ func TestRehearsalModulesGateAdmits(t *testing.T) {
 	})
 	t.Run("no manifest for a root with no module blocks", func(t *testing.T) {
 		tmp, in := moduleCopy(t, map[string]string{work + "main.tf": manifestOutput, work + "provider.tf": gateProvider}, nil)
+		assert.NoError(t, rehearsalModulesGate(in, writeManifest(t, tmp, "")))
+	})
+	t.Run("infrafactory's own override, with no manifest", func(t *testing.T) {
+		tmp, in := moduleCopy(t, map[string]string{work + "provider.tf": gateProvider, work + ourOverride: ourBytes}, nil)
+		in.ours = map[string][]byte{ourOverride: []byte(ourBytes)}
 		assert.NoError(t, rehearsalModulesGate(in, writeManifest(t, tmp, "")))
 	})
 }
