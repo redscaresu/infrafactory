@@ -352,6 +352,17 @@ func TestRehearsalModulesGateAdmits(t *testing.T) {
 	})
 }
 
+// TestRehearsalModulesGateNamesOursOnce: with no manifest, an override of
+// infrafactory's one byte off is the one refusal, not taken for module
+// blocks the manifest should have listed.
+func TestRehearsalModulesGateNamesOursOnce(t *testing.T) {
+	tmp, in := moduleCopy(t, map[string]string{work + "provider.tf": gateProvider, work + ourOverride: ourBytes + "\n"}, nil)
+	in.ours = map[string][]byte{ourOverride: []byte(ourBytes)}
+	err := rehearsalModulesGate(in, writeManifest(t, tmp, ""))
+	require.ErrorIs(t, err, errRehearsalRefuses)
+	assert.Equal(t, errRehearsalRefuses.Error()+": "+ourOverride+": refused: it is not byte-identical to the override infrafactory writes", err.Error())
+}
+
 // writeManifest writes manifest, with $TMP replaced by tmp, as
 // <tmp>/data/modules/modules.json, unless it is "", and returns the data dir.
 func writeManifest(t *testing.T, tmp, manifest string) string {

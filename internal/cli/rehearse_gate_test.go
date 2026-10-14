@@ -319,28 +319,27 @@ const ourBytes = "provider \"aws\" {\n  alias = \"walls\"\n  endpoints {\n    st
 // infrafactory's own override only in the root, only byte-identical, and
 // refuses it missing.
 func TestRehearsalGateAdmitsOursByteIdentical(t *testing.T) {
-	const name = "infrafactory_override.tf"
 	for _, tc := range []struct {
 		name  string
 		files map[string]string
 		want  string
 	}{
-		{name: "byte-identical in the root", files: map[string]string{name: ourBytes}},
-		{name: "one trailing byte more", files: map[string]string{name: ourBytes + "\n"},
-			want: name + ": refused: it is not byte-identical to the override infrafactory writes"},
-		{name: "in a child module dir", files: map[string]string{name: ourBytes, "child/" + name: ourBytes},
-			want: "child/" + name + ": an override file is refused"},
+		{name: "byte-identical in the root", files: map[string]string{ourOverride: ourBytes}},
+		{name: "one trailing byte more", files: map[string]string{ourOverride: ourBytes + "\n"},
+			want: ourOverride + ": refused: it is not byte-identical to the override infrafactory writes"},
+		{name: "in a child module dir", files: map[string]string{ourOverride: ourBytes, "child/" + ourOverride: ourBytes},
+			want: "child/" + ourOverride + ": an override file is refused"},
 		{name: "missing", files: map[string]string{},
-			want: name + ": cannot read it"},
+			want: ourOverride + ": cannot read it"},
 		{name: "another spelling of its name", files: map[string]string{"Infrafactory_Override.tf": ourBytes},
 			want: "Infrafactory_Override.tf: an override file is refused"},
-		{name: "a user override beside it", files: map[string]string{name: ourBytes, "zz_override.tf": "locals {}\n"},
+		{name: "a user override beside it", files: map[string]string{ourOverride: ourBytes, "zz_override.tf": "locals {}\n"},
 			want: "zz_override.tf: an override file is refused"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			tc.files["main.tf"] = gateProvider
 			in := gateCopy(t, tc.files, "")
-			in.ours = map[string][]byte{name: []byte(ourBytes)}
+			in.ours = map[string][]byte{ourOverride: []byte(ourBytes)}
 			aliases, err := rehearsalGate(in)
 			if tc.want == "" {
 				require.NoError(t, err)
@@ -371,5 +370,5 @@ func TestRehearsalGateRefusesAnAliasItCannotName(t *testing.T) {
 		"variable \"a\" {\n  default = \"x\"\n}\n" +
 		"provider \"aws\" {\n  alias  = var.a\n  region = \"us-east-1\"\n}\n"}, "")
 	require.ErrorIs(t, err, errRehearsalRefuses)
-	assert.Contains(t, err.Error(), `main.tf:7: provider.aws.alias: refused: a provider "aws" alias must be a literal name`)
+	assert.Contains(t, err.Error(), `main.tf:8: provider.aws.alias: refused: a provider "aws" alias must be a literal name`)
 }

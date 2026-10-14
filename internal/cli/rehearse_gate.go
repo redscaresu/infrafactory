@@ -104,11 +104,12 @@ func rehearsalGate(in rehearsalGateInput) ([]string, error) {
 	return aliases, nil
 }
 
-// problems walks the root and in.modules, then every dir their module
-// blocks resolve to, each dir once, then the var file, then goal 11. It
-// returns the problems and the root's provider "aws" aliases.
+// problems checks infrafactory's own overrides, walks the root and
+// in.modules, then every dir their module blocks resolve to, each dir
+// once, then the var file, then goal 11. It returns the problems and the
+// root's provider "aws" aliases.
 func (in rehearsalGateInput) problems() ([]string, []string) {
-	var problems []string
+	problems := in.oursProblems()
 	uses, regions := &rehearsalPathUses{}, newRehearsalRegions()
 	start := append([]rehearsalModuleDir{{dir: in.root}}, in.modules...)
 	walkProblems := rehearsalWalk(start, func(m rehearsalModuleDir) []rehearsalModuleDir {
@@ -198,9 +199,6 @@ func (in rehearsalGateInput) dirFiles(dir string) (map[string]*hclsyntax.Body, m
 		return nil, nil, false, []string{fmt.Sprintf("%s: cannot read the module directory: %v", in.display(dir), err)}
 	}
 	var problems []string
-	if dir == in.root {
-		problems = in.oursProblems()
-	}
 	whole := true
 	files, tfvars := map[string]*hclsyntax.Body{}, map[string]*hclsyntax.Body{}
 	for _, entry := range entries {
@@ -233,7 +231,8 @@ func (in rehearsalGateInput) dirFiles(dir string) (map[string]*hclsyntax.Body, m
 }
 
 // oursProblems admits each of infrafactory's own override files in the
-// root only when its bytes are exactly ours, and never parses it. A
+// root only when its bytes are exactly ours, and never parses it; dirFiles
+// skips them in the root. A
 // missing one is refused: an override that is not there is a wall that is
 // down. Another spelling of its name, or the file in a module dir, is a
 // user override, which rehearsalEntryProblem refuses: a case-sensitive

@@ -66,7 +66,7 @@ func (m rehearsalModule) awsProviderProblems(file, at string, block *hclsyntax.B
 	if alias, ok := rehearsalAWSAlias(block); ok {
 		m.regions.aliases = append(m.regions.aliases, alias)
 	} else {
-		problems = append(problems, at+`.alias: refused: a provider "aws" alias must be a literal name, so infrafactory's override can name it`)
+		problems = append(problems, rehearsalAt(file, block.Body.Attributes["alias"].SrcRange, addr+".alias")+`: refused: a provider "aws" alias must be a literal name, so infrafactory's override can name it`)
 	}
 	region, ok := block.Body.Attributes["region"]
 	if !ok {
