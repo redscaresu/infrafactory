@@ -42,7 +42,8 @@ var fakeawsShellEnv = []string{"PWD", "SHLVL", "_"}
 // as fakeaws does with recording off; "never-healthy" answers /healthz
 // 503; "all-interfaces" listens on 0.0.0.0; "bind-fail-once" and
 // "bind-fail" fail to bind on their first or on every try; "ignore-term"
-// ignores SIGTERM; "prints-token" logs its token and exits 1; "zero-stop"
+// ignores SIGTERM; "prints-token" logs its token and exits 1;
+// "exits-after-checks" exits 3 once start's last request is answered; "zero-stop"
 // only stops a zero rehearsalFakeaws.
 func TestRehearsalFakeawsStub(t *testing.T) {
 	role := os.Getenv(fakeawsStubEnv)
@@ -101,6 +102,13 @@ func TestRehearsalFakeawsStub(t *testing.T) {
 			w.WriteHeader(http.StatusNotImplemented)
 		case role != "no-auth" && r.Header.Get("Authorization") != "Bearer "+os.Getenv(fakeawsAdminTokenEnv):
 			w.WriteHeader(http.StatusUnauthorized)
+			// Another token is start's last request.
+			if role == "exits-after-checks" && r.Header.Get("Authorization") != "" {
+				go func() {
+					time.Sleep(50 * time.Millisecond)
+					os.Exit(3)
+				}()
+			}
 		}
 	})
 	_ = http.Serve(ln, mux)
@@ -347,14 +355,29 @@ func TestRehearsalStartFakeawsCancelledWhileWaiting(t *testing.T) {
 }
 
 // The first port start picks is held by another server, which answers
-// /healthz 200 and /mock/requests 401. The stub fails to bind there and
-// exits, and is retried on a free port whatever that server answered.
+// /healthz 200 and /mock/requests 401 to every token or 200 to any bearer
+// token. The stub fails to bind there and exits, and is retried on a free
+// port whatever that server answered.
 func TestRehearsalStartFakeawsRetriesPastAPortSquatter(t *testing.T) {
-	squatter := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/mock/requests" {
+	for name, mockRequests := range map[string]http.HandlerFunc{
+		"refusing every token": func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusUnauthorized)
-		}
-	}))
+		},
+		"taking any bearer token": func(w http.ResponseWriter, r *http.Request) {
+			if !strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") {
+				w.WriteHeader(http.StatusUnauthorized)
+			}
+		},
+	} {
+		t.Run(name, func(t *testing.T) { retriesPastASquatter(t, mockRequests) })
+	}
+}
+
+func retriesPastASquatter(t *testing.T, mockRequests http.HandlerFunc) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/healthz", func(http.ResponseWriter, *http.Request) {})
+	mux.Handle("/mock/requests", mockRequests)
+	squatter := httptest.NewServer(mux)
 	t.Cleanup(squatter.Close)
 	squatPort := squatter.Listener.Addr().(*net.TCPAddr).Port
 	freePort, picks := rehearsalFreePort, 0
@@ -457,4 +480,28 @@ func TestRehearsalFakeawsStopFailsWhenTheGroupSurvives(t *testing.T) {
 		assert.Contains(t, err.Error(), "answered 200, not 401")
 		assert.Contains(t, err.Error(), fmt.Sprintf("stop failed: pid %d port ", pids[0]))
 	})
+}
+
+// The stub exits once its HTTP checks are answered, and the last check, the
+// address listing, returns only after it is reaped: a start that passed
+// its checks is refused when its child is gone.
+func TestRehearsalStartFakeawsRefusesAChildGoneAfterItsChecks(t *testing.T) {
+	shortenFakeawsWaits(t, 10*time.Second)
+	bin, stubDir := fakeawsStub(t, "exits-after-checks")
+	setForTest(t, &rehearsalNonLoopbackIPs, func() ([]net.IP, error) {
+		for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+			if pids := fakeawsStubPIDs(stubDir); len(pids) > 0 && errors.Is(syscall.Kill(pids[0], 0), syscall.ESRCH) {
+				// Reaped; exited closes just after.
+				time.Sleep(100 * time.Millisecond)
+				break
+			}
+		}
+		return nil, nil
+	})
+
+	f, err := rehearsalStartFakeaws(context.Background(), fakeawsStubOpts(t, bin))
+	stopOnCleanup(t, f)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "fakeaws exited before it was ready (exit status 3)")
+	assert.Len(t, fakeawsStubPIDs(stubDir), 1, "tries")
 }

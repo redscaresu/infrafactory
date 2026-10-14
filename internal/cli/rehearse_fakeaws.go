@@ -89,9 +89,7 @@ func rehearsalStartFakeaws(ctx context.Context, opts rehearsalFakeawsOpts) (rehe
 	if err := os.Mkdir(opts.dir, 0o700); err != nil {
 		return rehearsalFakeaws{}, fmt.Errorf("fakeaws cannot have its dir: %w", err)
 	}
-	raw := make([]byte, 32)
-	_, _ = rand.Read(raw) // crypto/rand.Read never returns an error: it crashes instead
-	token := hex.EncodeToString(raw)
+	token := rehearsalToken()
 	var err error
 	for range rehearsalFakeawsTries {
 		var f rehearsalFakeaws
@@ -137,7 +135,14 @@ func startRehearsalFakeawsOnce(ctx context.Context, opts rehearsalFakeawsOpts, t
 
 	err = f.waitReady(ctx)
 	if err == nil {
-		return f, nil
+		// Alive after its checks too, or they may have reached another
+		// server on its port.
+		select {
+		case <-f.exited:
+			err = errRehearsalFakeawsExited
+		default:
+			return f, nil
+		}
 	}
 	// A child failing on its own is judged by its exit and its log, whatever
 	// the HTTP checks saw: while it fails to bind its port, another server
@@ -260,8 +265,9 @@ func (f rehearsalFakeaws) healthy(ctx context.Context, client *http.Client, base
 
 // ours proves the server on the port is this fakeaws and reachable only
 // from this host: GET /mock/requests answers 200 with the token and 401
-// without, and nothing answers on any of the host's non-loopback
-// addresses.
+// without it or with another, and nothing answers on any of the host's
+// non-loopback addresses. Only this fakeaws knows the token, so a server
+// that takes any token is refused.
 func (f rehearsalFakeaws) ours(ctx context.Context, client *http.Client, base string) error {
 	for _, check := range []struct {
 		token, with string
@@ -269,6 +275,7 @@ func (f rehearsalFakeaws) ours(ctx context.Context, client *http.Client, base st
 	}{
 		{f.Token, "with its token", http.StatusOK},
 		{"", "without its token", http.StatusUnauthorized},
+		{rehearsalToken(), "with another token", http.StatusUnauthorized},
 	} {
 		code, err := rehearsalFakeawsStatus(ctx, client, base+"/mock/requests", check.token)
 		if err != nil {
@@ -309,8 +316,9 @@ func rehearsalFakeawsStatus(ctx context.Context, client *http.Client, url, token
 }
 
 // rehearsalNonLoopbackIPs is every address of this host that another host
-// could dial: its global unicast addresses, private ones included.
-func rehearsalNonLoopbackIPs() ([]net.IP, error) {
+// could dial: its global unicast addresses, private ones included. A var
+// only so a test can hold the last check until the child has exited.
+var rehearsalNonLoopbackIPs = func() ([]net.IP, error) {
 	addrs, err := net.InterfaceAddrs()
 	if err != nil {
 		return nil, err
@@ -340,6 +348,13 @@ func rehearsalUnanswered(ctx context.Context, addr string) error {
 		return nil
 	}
 	return fmt.Errorf("fakeaws is refused: a dial of %s neither connected nor was refused: %w", addr, err)
+}
+
+// rehearsalToken is a fresh admin token: 32 random bytes, hex.
+func rehearsalToken() string {
+	raw := make([]byte, 32)
+	_, _ = rand.Read(raw) // crypto/rand.Read never returns an error: it crashes instead
+	return hex.EncodeToString(raw)
 }
 
 // rehearsalFreePort is a loopback port free a moment ago. A var only so a
