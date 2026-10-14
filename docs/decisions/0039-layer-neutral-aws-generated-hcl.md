@@ -19,8 +19,8 @@ surface identical whether the target is fakeaws or a real AWS account.
 
 ## Decision
 
-1. **cloudEnv is Layer 2's complete AWS environment.** `internal/cli/test_command.go`'s cloudEnv
-   sets `AWS_ENDPOINT_URL_<SERVICE>` for all 12 services the AWS provider reads endpoints for
+1. **awsLayer2Env is Layer 2's complete AWS environment.** `internal/cli/test_command.go`'s
+   awsLayer2Env (which cloudEnv copies in) sets `AWS_ENDPOINT_URL_<SERVICE>` for all 12 services the AWS provider reads endpoints for
    (EC2, IAM, EKS, RDS, SQS, DYNAMODB, SECRETS_MANAGER, KMS, ROUTE_53, S3, STS, SSM), plus a
    catch-all `AWS_ENDPOINT_URL` pointed at a dead loopback address, plus `AWS_CONFIG_FILE` and
    `AWS_SHARED_CREDENTIALS_FILE` pointed at paths that do not exist. When `fakeaws.url` is empty,
@@ -30,7 +30,7 @@ surface identical whether the target is fakeaws or a real AWS account.
 
 2. **Every Layer 2 tofu command strips inherited `AWS_*`.** `harness.Layer2StripEnv` removes the
    `AWS_*` family from the parent process's environment on every Command the static, mock-deploy
-   and destroy harnesses build. cloudEnv is additive on top of that strip, so a shell-exported
+   and destroy harnesses build. awsLayer2Env is additive on top of that strip, so a shell-exported
    `AWS_PROFILE` or `AWS_ACCESS_KEY_ID` in the invoking session can never reach tofu.
 
 3. **The provider block is exactly `region` and `s3_use_path_style`.** No `access_key`,
@@ -38,7 +38,9 @@ surface identical whether the target is fakeaws or a real AWS account.
    attribute with no environment form — the AWS SDK has no `AWS_S3_USE_PATH_STYLE` equivalent — so
    it is the sole exception to "route by environment, not by HCL". `region` comes from one
    `awsRegion(cfg)` helper called identically at both layers, so a region typo cannot diverge
-   between them.
+   between them. The one exception is a rehearsal (ADR-0042): its override writes an `endpoints`
+   block and fake keys into the user's own provider block, outside generated HCL, which is
+   unchanged.
 
 4. **`required_providers` pins exactly `5.100.0` at both layers**, overriding whatever version the
    model wrote. Layer-neutral means byte-identical generated files with Layer 3 enabled and
@@ -94,7 +96,7 @@ the same way ADR-0014 enumerated it for the GCP v5 provider — environment (`AW
 **Benefits**:
 - A model output's generated files are byte-identical whether Layer 3 is enabled or not; only the
   region literal changes, and only because `aws.region` changed.
-- Every AWS service the provider can route to is enumerated once, in cloudEnv, instead of
+- Every AWS service the provider can route to is enumerated once, in awsLayer2Env, instead of
   discovered piecemeal per scenario when one falls through to a dead endpoint.
 - The sealed-SDK-construction pattern from Layer 3's STS client generalizes directly to the AMI
   resolver's SSM client, so Layer 3 gains no second way of reaching AWS.
