@@ -35,7 +35,8 @@ Two rules keep that true:
 
 - `rehearse prepare <dir> --account <id> --region <r> [--var-file f]` is decided here.
 - `rehearse read` is defined by ADR-0041, not redefined here.
-- `rehearse end` is reserved to epic rehearsal-walls; `plan|apply|destroy|import|state mv|console`
+- `rehearse end <id>` is decided in § The walls: the family's last command.
+- `plan|apply|destroy|import|state mv|console`
   passthrough to rehearsal-passthrough; discover, load, check and the base-then-head loop to
   rehearsal-against-the-copy. Each amends this ADR when it lands.
 
@@ -48,10 +49,23 @@ A rehearsal lives in `.infrafactory/rehearsals/<id>/` at the root of the reposit
 the current directory (its nearest ancestor holding `.git`), never under `.infrafactory/runs/` or
 `.infrafactory/live/`, which the UI serves. `prepare` refuses a `<dir>` that is not inside that
 same repository, and every later step, which names only `<id>`, finds it under that same root.
-`rehearsals/` holds a `.gitignore` of `*`. Each `<id>/` has `work/` (the copied code), `data/`
+`rehearsals/` holds a `.gitignore` of `*`. Each `<id>/` has `work/` (the container for the copied code, and the gate boundary), `data/`
 (`TF_DATA_DIR`), `home/` (an empty `HOME`), `state/` (the state file, outside the copy) and
-`vars.tfvars` (the `--var-file`, copied outside `work/` so tofu never auto-loads it). Directories
-are 0700 and files 0600. Tofu writes files with its own modes, so after each tofu run the modes are
+`vars.tfvars` (the `--var-file`, copied outside `work/` so tofu never auto-loads it). Epic
+rehearsal-walls adds:
+
+- `fakeaws/` (0700): the rehearsal's fakeaws db with its -wal and -shm, the snapshot and the log.
+- `rehearsal.json` (0600): account, region, the fakeaws pin, pid, port, token, and a list of roots.
+  Each root holds its work dir, its root path, its endpoint keys and its aws aliases.
+- `reads/`: the rehearsal's recorded reads.
+- `state-config/`: reserved for rehearsal-state-pull.
+- A work directory is `<id>/work/<name>`, where `<name>` is the copied directory's path relative
+  to the repository (the copy convention of `rehearsalCopy`). Today prepare makes one copy there,
+  and the record lists its root path as the only root; rehearsal-against-the-copy adds base and head
+  as further entries.
+
+The fakeaws binary lives outside `<id>` (§ The fakeaws binary), so the mode rule below is unchanged.
+Directories are 0700 and files 0600. Tofu writes files with its own modes, so after each tofu run the modes are
 tightened again: directories 0700, executables 0700 (provider binaries must stay runnable), other
 files 0600.
 
@@ -64,7 +78,8 @@ Three walls stand between the user's code and prod:
    resolved, then an offline second init under a dead proxy.
 3. **The provider override, the environment and the backend override** (rehearsal-walls; the
    second init already writes the backend override), so a bare `tofu` in the work directory
-   reaches only this rehearsal's fakeaws.
+   reaches only this rehearsal's fakeaws. Walls decisions are recorded from § Provider override
+   to § The walls family: `rehearse end`.
 
 Every tofu command runs in **replace mode** (story rehearsal-prepare-replace-env): the child's
 environment is `PATH` plus the variables the step names, and nothing else is inherited. So
@@ -224,8 +239,8 @@ The arguments of `provider "aws"` are checked against a static table, tied to th
 schema by a drift test (`TestRehearsalAWSProviderTableMatchesSchema`) that fails when the schema
 and the table disagree. An argument the table does not name is refused under any lock version, and
 the refusal names the lock's.
-Prepare makes no `tofu providers schema -json` call: the table, not the user's provider binary,
-decides what is admitted.
+The gate table makes no `tofu providers schema -json` call: the table, not the user's provider
+binary, decides what is admitted. The walls do call it, after the second init (§ The two inits).
 
 ### Goal 11, statically
 
@@ -317,9 +332,94 @@ replace mode with only `HOME`, `TF_DATA_DIR` and `HTTP_PROXY`/`HTTPS_PROXY` at t
 no `NO_PROXY`. It makes no proxied connection
 (`TestAssumption_SecondInitMakesNoProxiedConnection`).
 
+Prepare then starts the rehearsal's fakeaws, as its last step. The order is:
+
+1. `tofu providers schema -json`, offline, under the second init's env.
+2. Resolve the fakeaws binary (§ The fakeaws binary).
+3. Start it (§ Start).
+4. Write `rehearsal.json` with pid, port and token at once, so a prepare killed after the start
+   leaves something `rehearse end` can stop.
+5. Write the provider override and complete the record.
+
+A failure or cancel after the start stops fakeaws before the half-made rehearsal is removed. There
+is no `rehearse start`: if fakeaws dies, the override points at a closed port, and a new prepare is
+the restart.
+
 A user `backend` block is neutralised: the override replaces it, and the command-line path puts the
 state outside the copy (`TestAssumption_CLIBackendPathKeepsStateOutOfTheCopy`, whose root declares
 `backend "s3"`). So no user backend is ever initialised.
+
+### Provider override
+
+`infrafactory_aws_override.tf` sits beside `infrafactory_override.tf` in each root. It holds one
+`provider "aws"` block per root aws block the gate found, aliases included. Each block has the
+static fake keys (`rehearsalFakeAccessKeyID`, `rehearsalFakeSecretAccessKey`),
+`skip_metadata_api_check = true`, and an `endpoints` block naming every key of the locked
+provider's schema. The keys come from the single `provider_schemas` entry `<host>/hashicorp/aws`
+for a host in `rehearsalLockHosts`; zero or two such entries refuse. Modelled services go to the
+fakeaws URL with `{region}` filled, and every other key, s3 included, goes to `rehearsalDeadProxy`.
+Naming every key draws alias-conflict warnings on every plan; accepted and documented.
+
+### The environment
+
+`rehearsalWallsEnv` is replace mode's key set for a walls step, and its exact keys are pinned by a
+test: `HOME=<id>/home` and `TF_DATA_DIR=<id>/data`; the fake keys; `AWS_REGION` from `--region`;
+`AWS_EC2_METADATA_DISABLED=true`; `AWS_CONFIG_FILE` and `AWS_SHARED_CREDENTIALS_FILE` at the
+harness sealed paths; `AWS_ENDPOINT_URL_<svc>` at the private fakeaws for the modelled services;
+the catch-all `AWS_ENDPOINT_URL` and S3 at `rehearsalDeadProxy`; and `HTTP_PROXY` and `HTTPS_PROXY`
+at `rehearsalDeadProxy`, with no `NO_PROXY`. No other region variable is set, and no Scaleway, GCP or
+Genesys variable.
+
+### The fakeaws binary
+
+The pin is compiled into infrafactory (`rehearsalFakeawsPin`) and kept equal to ci.yml's
+`FAKEAWS_SHA` by a lockstep test. The binary is `go install …@pin` into
+`<UserCacheDir>/infrafactory/fakeaws/<pin>/`, under replace mode with
+`GOPROXY=https://proxy.golang.org` (no `direct`) and `GOTOOLCHAIN=local`, or it is
+`--fakeaws-bin`. Either way, `debug/buildinfo` must name the module at the pin, with `vcs.modified`
+false when vcs settings are present; any other binary is refused. Flag support cannot be read off a
+binary, so the pin check plus the live checks at start stand in for it.
+
+### Start
+
+Exact args: `-bind 127.0.0.1 -port <P> -db <fakeaws dir>/fakeaws.db -record-requests -account <id> -region <r>`. The token
+goes to the child only in its env (`FAKEAWS_ADMIN_TOKEN`), never argv, and is never printed. The
+child has `Setpgid` and is started with `exec.Command`, not `CommandContext`, so it outlives
+prepare's ctx. fakeaws cannot report an ephemeral port, so prepare picks a free loopback port,
+releases it and starts: it retries on a new port only when the child failed to bind (address in
+use), 3 tries in all. Any other early exit refuses at once with its exit code and log tail. The
+live checks: `/healthz` answers 200; `GET /mock/requests` answers 200 with the token and 401
+without; and nothing answers on a non-loopback address.
+
+### The gate bar for walls
+
+`rehearsalOpen(repo, id)` is the one way a later step finds a rehearsal, in two layers. The shared
+layer: the id is a single path element, and `<repo>/.infrafactory/rehearsals/<id>` is checked with
+`Lstat` and must be a real directory (a symlink is refused and nothing is ever created). The full
+layer adds reading the record and dialling `rehearsalDeadProxy` again, which must refuse.
+`rehearsalRegate(rehearsal, root)` uses the full layer, and admits each of infrafactory's two
+overrides in that root only when byte-identical to the bytes rebuilt from the record; passthrough
+calls it.
+
+`rehearse end` uses only the shared layer: a bad id or a symlink is exit 2, and a missing directory
+is exit 0. It then reads the record itself. A missing or unparseable record refuses nothing: `end`
+signals nothing, says why, and still deletes `<id>`. It runs no tofu, so a dead proxy that accepts
+the dial is named in its report and does not stop it.
+
+### The walls family: `rehearse end`
+
+`rehearse end <id>` exits 2 for a bad id (a symlinked `<id>` included) and exits 0, creating
+nothing, for a missing one. It signals the recorded pid only after `/healthz` and the
+token-guarded `/mock/requests` answer on the recorded port; otherwise it signals nothing and
+reports why. The signal is SIGTERM, then SIGKILL to the process group after a fallback. If the port
+still answers after SIGKILL, it prints `stop failed: pid P port N`, exits 1 and deletes nothing, so
+`rehearsal.json` stays for a later `end` to retry. Otherwise it lists every file under `<id>`
+(relative), removes `<id>` whole, and reports the list. It is idempotent. A cancel before the stop
+refuses with nothing signalled or deleted (exit 1); once the stop has begun, `end` finishes.
+Nothing is written under `.infrafactory/runs` or `live`.
+
+Bounds: a port freed after fakeaws dies can be taken by another local process, and only the
+override's fake keys reach it.
 
 ## Consequences
 
