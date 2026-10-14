@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -49,7 +50,9 @@ func TestRehearsalFakeawsStub(t *testing.T) {
 		return
 	}
 	if role == "zero-stop" {
-		rehearsalFakeaws{}.stop()
+		if (rehearsalFakeaws{}).stop() != nil {
+			os.Exit(1)
+		}
 		os.Exit(0)
 	}
 	fs := flag.NewFlagSet("fakeaws", flag.ContinueOnError)
@@ -160,12 +163,24 @@ func requireNoStubLeft(t *testing.T, dir string) {
 	}
 }
 
-// shortenFakeawsWaits shortens the readiness deadline and the kill fallback
-// for one test.
+// setForTest sets *p to v until the test ends.
+func setForTest[T any](t *testing.T, p *T, v T) {
+	old := *p
+	*p = v
+	t.Cleanup(func() { *p = old })
+}
+
+// shortenFakeawsWaits sets the readiness deadline, and shortens the kill
+// fallback and the exit grace, for one test.
 func shortenFakeawsWaits(t *testing.T, ready time.Duration) {
-	oldReady, oldKill := rehearsalFakeawsReady, rehearsalFakeawsKillFallback
-	rehearsalFakeawsReady, rehearsalFakeawsKillFallback = ready, 500*time.Millisecond
-	t.Cleanup(func() { rehearsalFakeawsReady, rehearsalFakeawsKillFallback = oldReady, oldKill })
+	setForTest(t, &rehearsalFakeawsReady, ready)
+	setForTest(t, &rehearsalFakeawsKillFallback, 500*time.Millisecond)
+	setForTest(t, &rehearsalFakeawsExitGrace, 200*time.Millisecond)
+}
+
+// stopOnCleanup stops f when the test ends; a stop that fails fails it.
+func stopOnCleanup(t *testing.T, f rehearsalFakeaws) {
+	t.Cleanup(func() { assert.NoError(t, f.stop()) })
 }
 
 // fakeawsGet is the status of GET /mock/requests on port, with token.
@@ -185,7 +200,7 @@ func TestRehearsalStartFakeawsStartsItAsOurs(t *testing.T) {
 
 	f, err := rehearsalStartFakeaws(context.Background(), opts)
 	require.NoError(t, err)
-	t.Cleanup(f.stop)
+	stopOnCleanup(t, f)
 
 	args, err := os.ReadFile(filepath.Join(stubDir, "args"))
 	require.NoError(t, err)
@@ -219,12 +234,12 @@ func TestRehearsalStartFakeawsOutlivesCtx(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	f, err := rehearsalStartFakeaws(ctx, fakeawsStubOpts(t, bin))
 	require.NoError(t, err)
-	t.Cleanup(f.stop)
+	stopOnCleanup(t, f)
 
 	cancel()
 	assert.Never(t, func() bool { return !groupAlive(f.PID) }, time.Second, 20*time.Millisecond,
 		"fakeaws died with the ctx that started it")
-	f.stop()
+	require.NoError(t, f.stop())
 	assert.False(t, groupAlive(f.PID), "fakeaws outlived stop")
 }
 
@@ -233,9 +248,9 @@ func TestRehearsalFakeawsStopKillsAGroupIgnoringSIGTERM(t *testing.T) {
 	bin, _ := fakeawsStub(t, "ignore-term")
 	f, err := rehearsalStartFakeaws(context.Background(), fakeawsStubOpts(t, bin))
 	require.NoError(t, err)
-	t.Cleanup(f.stop)
+	stopOnCleanup(t, f)
 
-	f.stop()
+	require.NoError(t, f.stop())
 	assert.False(t, groupAlive(f.PID), "fakeaws outlived stop")
 }
 
@@ -270,7 +285,7 @@ func TestRehearsalStartFakeawsRefuses(t *testing.T) {
 			bin, stubDir := fakeawsStub(t, tc.role)
 
 			f, err := rehearsalStartFakeaws(context.Background(), fakeawsStubOpts(t, bin))
-			t.Cleanup(f.stop)
+			stopOnCleanup(t, f)
 			require.Error(t, err)
 			for _, want := range tc.want {
 				assert.Contains(t, err.Error(), want)
@@ -295,7 +310,7 @@ func TestRehearsalStartFakeawsRefusesAllInterfaces(t *testing.T) {
 	bin, stubDir := fakeawsStub(t, "all-interfaces")
 
 	f, err := rehearsalStartFakeaws(context.Background(), fakeawsStubOpts(t, bin))
-	t.Cleanup(f.stop)
+	stopOnCleanup(t, f)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not only on loopback")
 	requireNoStubLeft(t, stubDir)
@@ -306,7 +321,7 @@ func TestRehearsalStartFakeawsRetriesABindFailure(t *testing.T) {
 
 	f, err := rehearsalStartFakeaws(context.Background(), fakeawsStubOpts(t, bin))
 	require.NoError(t, err)
-	t.Cleanup(f.stop)
+	stopOnCleanup(t, f)
 	assert.Len(t, fakeawsStubPIDs(stubDir), 2, "admitted on the second try")
 	assert.Equal(t, http.StatusOK, fakeawsGet(t, f.Port, f.Token))
 }
@@ -325,8 +340,121 @@ func TestRehearsalStartFakeawsCancelledWhileWaiting(t *testing.T) {
 	}()
 
 	f, err := rehearsalStartFakeaws(ctx, fakeawsStubOpts(t, bin))
-	t.Cleanup(f.stop)
+	stopOnCleanup(t, f)
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, context.Canceled), "%v", err)
 	requireNoStubLeft(t, stubDir)
+}
+
+// The first port start picks is held by another server, which answers
+// /healthz 200 and /mock/requests 401. The stub fails to bind there and
+// exits, and is retried on a free port whatever that server answered.
+func TestRehearsalStartFakeawsRetriesPastAPortSquatter(t *testing.T) {
+	squatter := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/mock/requests" {
+			w.WriteHeader(http.StatusUnauthorized)
+		}
+	}))
+	t.Cleanup(squatter.Close)
+	squatPort := squatter.Listener.Addr().(*net.TCPAddr).Port
+	freePort, picks := rehearsalFreePort, 0
+	setForTest(t, &rehearsalFreePort, func() (int, error) {
+		if picks++; picks == 1 {
+			return squatPort, nil
+		}
+		return freePort()
+	})
+	// Long enough for the stub to reach its bind on a loaded host.
+	setForTest(t, &rehearsalFakeawsExitGrace, 30*time.Second)
+	bin, stubDir := fakeawsStub(t, "fakeaws")
+
+	f, err := rehearsalStartFakeaws(context.Background(), fakeawsStubOpts(t, bin))
+	require.NoError(t, err)
+	stopOnCleanup(t, f)
+	assert.Len(t, fakeawsStubPIDs(stubDir), 2, "admitted on the second try")
+	assert.NotEqual(t, squatPort, f.Port)
+	assert.Equal(t, http.StatusOK, fakeawsGet(t, f.Port, f.Token))
+}
+
+// sentSignals swaps rehearsalKillGroup, for the rest of the test, for one
+// that answers each probe (signal 0) with probe and records every other
+// signal without sending it.
+func sentSignals(t *testing.T, probe func(pgid int) error) *[]syscall.Signal {
+	var sent []syscall.Signal
+	setForTest(t, &rehearsalKillGroup, func(pgid int, sig syscall.Signal) error {
+		if sig == 0 {
+			return probe(pgid)
+		}
+		sent = append(sent, sig)
+		return nil
+	})
+	return &sent
+}
+
+// realProbe probes the group for real.
+func realProbe(pgid int) error { return syscall.Kill(-pgid, 0) }
+
+func TestRehearsalFakeawsStopSendsNothingToAGoneGroup(t *testing.T) {
+	t.Run("a second stop", func(t *testing.T) {
+		setForTest(t, &rehearsalFakeawsKillFallback, 500*time.Millisecond)
+		bin, _ := fakeawsStub(t, "fakeaws")
+		f, err := rehearsalStartFakeaws(context.Background(), fakeawsStubOpts(t, bin))
+		require.NoError(t, err)
+		require.NoError(t, f.stop())
+
+		// Every probe now finds a group, as one would once the id is reused.
+		sent := sentSignals(t, func(int) error { return nil })
+		assert.NoError(t, f.stop())
+		assert.Empty(t, *sent)
+	})
+	t.Run("a group that ended without stop", func(t *testing.T) {
+		bin, _ := fakeawsStub(t, "fakeaws")
+		f, err := rehearsalStartFakeaws(context.Background(), fakeawsStubOpts(t, bin))
+		require.NoError(t, err)
+		require.NoError(t, syscall.Kill(-f.PID, syscall.SIGKILL))
+		select {
+		case <-f.exited:
+		case <-time.After(10 * time.Second):
+			t.Fatal("the killed stub was never reaped")
+		}
+
+		sent := sentSignals(t, realProbe)
+		assert.NoError(t, f.stop())
+		assert.Empty(t, *sent)
+	})
+}
+
+// With every signal dropped, the group outlives SIGKILL as one in
+// uninterruptible sleep would.
+func TestRehearsalFakeawsStopFailsWhenTheGroupSurvives(t *testing.T) {
+	t.Run("stop", func(t *testing.T) {
+		setForTest(t, &rehearsalFakeawsKillFallback, 300*time.Millisecond)
+		bin, _ := fakeawsStub(t, "fakeaws")
+		f, err := rehearsalStartFakeaws(context.Background(), fakeawsStubOpts(t, bin))
+		require.NoError(t, err)
+		stopOnCleanup(t, f) // the real stop, once sentSignals is undone
+
+		sent := sentSignals(t, realProbe)
+		err = f.stop()
+		require.Error(t, err)
+		assert.Equal(t, fmt.Sprintf("stop failed: pid %d port %d", f.PID, f.Port), err.Error())
+		assert.Equal(t, []syscall.Signal{syscall.SIGTERM, syscall.SIGKILL}, *sent)
+	})
+	t.Run("a refusal names it", func(t *testing.T) {
+		shortenFakeawsWaits(t, 10*time.Second)
+		bin, stubDir := fakeawsStub(t, "no-auth")
+		t.Cleanup(func() {
+			for _, pid := range fakeawsStubPIDs(stubDir) {
+				_ = syscall.Kill(-pid, syscall.SIGKILL)
+			}
+		})
+		sentSignals(t, realProbe)
+
+		_, err := rehearsalStartFakeaws(context.Background(), fakeawsStubOpts(t, bin))
+		require.Error(t, err)
+		pids := fakeawsStubPIDs(stubDir)
+		require.Len(t, pids, 1)
+		assert.Contains(t, err.Error(), "answered 200, not 401")
+		assert.Contains(t, err.Error(), fmt.Sprintf("stop failed: pid %d port ", pids[0]))
+	})
 }

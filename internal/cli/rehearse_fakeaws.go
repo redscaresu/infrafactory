@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -25,6 +26,16 @@ var rehearsalFakeawsReady = 30 * time.Second
 // process group to go before it sends SIGKILL, and then how long it waits
 // again. A var only so a test can shorten it.
 var rehearsalFakeawsKillFallback = 5 * time.Second
+
+// rehearsalFakeawsExitGrace is how long a refusal waits for a child that
+// is failing on its own to exit before it is stopped, so its exit and log,
+// not what answered on its port, decide the refusal. A var only so a test
+// can change it.
+var rehearsalFakeawsExitGrace = 2 * time.Second
+
+// rehearsalKillGroup sends sig to process group pgid; sig 0 only probes
+// it. A var only so a test can see, fake or drop what stop sends.
+var rehearsalKillGroup = func(pgid int, sig syscall.Signal) error { return syscall.Kill(-pgid, sig) }
 
 // rehearsalFakeawsTries is how many ports start tries. fakeaws cannot
 // report an ephemeral port, so start picks a free one, releases it and
@@ -62,6 +73,10 @@ type rehearsalFakeaws struct {
 	Token string
 	// exited closes once the process has exited and been reaped.
 	exited <-chan struct{}
+	// gone is set once stop has seen the group gone. A later stop, on this
+	// value or a copy, then sends nothing: an empty group's id is free for
+	// the system to reuse.
+	gone *atomic.Bool
 }
 
 // rehearsalStartFakeaws starts the rehearsal's fakeaws in its own process
@@ -118,50 +133,76 @@ func startRehearsalFakeawsOnce(ctx context.Context, opts rehearsalFakeawsOpts, t
 		_ = cmd.Wait()
 		close(exited)
 	}()
-	f := rehearsalFakeaws{PID: cmd.Process.Pid, Port: port, Token: token, exited: exited}
+	f := rehearsalFakeaws{PID: cmd.Process.Pid, Port: port, Token: token, exited: exited, gone: new(atomic.Bool)}
 
 	err = f.waitReady(ctx)
 	if err == nil {
 		return f, nil
 	}
-	f.stop()
+	// A child failing on its own is judged by its exit and its log, whatever
+	// the HTTP checks saw: while it fails to bind its port, another server
+	// there can answer them. A cancel is not waited on.
+	selfExited := false
+	if ctx.Err() == nil {
+		select {
+		case <-f.exited:
+			selfExited = true
+		case <-time.After(rehearsalFakeawsExitGrace):
+		}
+	}
+	stopErr := f.stop()
 	tail := rehearsalFakeawsLogTail(logPath, token)
-	if !errors.Is(err, errRehearsalFakeawsExited) {
-		return rehearsalFakeaws{}, fmt.Errorf("%w; fakeaws.log ends:\n%s", err, tail)
-	}
-	if strings.Contains(tail, fakeawsBindFailure) {
+	switch {
+	case stopErr != nil:
+		return rehearsalFakeaws{}, fmt.Errorf("%w; %w; fakeaws.log ends:\n%s", err, stopErr, tail)
+	case ctx.Err() != nil:
+		return rehearsalFakeaws{}, fmt.Errorf("%w; fakeaws.log ends:\n%s", rehearsalCancelled(ctx), tail)
+	case strings.Contains(tail, fakeawsBindFailure):
 		return rehearsalFakeaws{}, fmt.Errorf("%w %d; fakeaws.log ends:\n%s", errRehearsalFakeawsBind, port, tail)
+	case selfExited:
+		return rehearsalFakeaws{}, fmt.Errorf("%w (%s); fakeaws.log ends:\n%s", errRehearsalFakeawsExited, cmd.ProcessState, tail)
 	}
-	return rehearsalFakeaws{}, fmt.Errorf("%w (%s); fakeaws.log ends:\n%s", errRehearsalFakeawsExited, cmd.ProcessState, tail)
+	return rehearsalFakeaws{}, fmt.Errorf("%w; fakeaws.log ends:\n%s", err, tail)
 }
 
 // stop ends fakeaws's process group: SIGTERM, then SIGKILL if any process
-// is left in it once the fallback passes, then a wait of one more fallback
-// for it to go. A zero rehearsalFakeaws stops nothing: kill(-0) would
+// is left in it once the fallback passes. It fails, naming pid and port,
+// if the group is still there a fallback after the SIGKILL. It sends
+// nothing to a group already gone, and nothing at all once a stop has
+// seen it gone. A zero rehearsalFakeaws stops nothing: kill(-0) would
 // signal the caller's own process group.
-func (f rehearsalFakeaws) stop() {
-	if f.PID <= 0 {
-		return
+func (f rehearsalFakeaws) stop() error {
+	if f.PID <= 0 || f.gone != nil && f.gone.Load() || f.groupGoneWithin(0) {
+		return nil
 	}
-	_ = syscall.Kill(-f.PID, syscall.SIGTERM)
-	if f.groupGone() {
-		return
+	_ = rehearsalKillGroup(f.PID, syscall.SIGTERM)
+	if f.groupGoneWithin(rehearsalFakeawsKillFallback) {
+		return nil
 	}
-	_ = syscall.Kill(-f.PID, syscall.SIGKILL)
-	f.groupGone()
+	_ = rehearsalKillGroup(f.PID, syscall.SIGKILL)
+	if f.groupGoneWithin(rehearsalFakeawsKillFallback) {
+		return nil
+	}
+	return fmt.Errorf("stop failed: pid %d port %d", f.PID, f.Port)
 }
 
-// groupGone waits, at most rehearsalFakeawsKillFallback, for no process to
-// be left in the group. The group id cannot be reused while any is, so
-// the polls never reach another group. The leader counts until the
-// goroutine waiting on it has reaped it.
-func (f rehearsalFakeaws) groupGone() bool {
-	for deadline := time.Now().Add(rehearsalFakeawsKillFallback); time.Now().Before(deadline); time.Sleep(rehearsalFakeawsPoll) {
-		if errors.Is(syscall.Kill(-f.PID, 0), syscall.ESRCH) {
+// groupGoneWithin probes the group until no process is left in it, at
+// most d (once, when d is 0), and records it gone. The group id cannot be
+// reused while any process is left, so a probe that finds one reaches
+// only this group. The leader counts until the goroutine waiting on it
+// has reaped it.
+func (f rehearsalFakeaws) groupGoneWithin(d time.Duration) bool {
+	for deadline := time.Now().Add(d); ; time.Sleep(rehearsalFakeawsPoll) {
+		if errors.Is(rehearsalKillGroup(f.PID, 0), syscall.ESRCH) {
+			if f.gone != nil {
+				f.gone.Store(true)
+			}
 			return true
 		}
+		if !time.Now().Before(deadline) {
+			return false
+		}
 	}
-	return false
 }
 
 // waitReady waits, until rehearsalFakeawsReady or a cancel of ctx, for
@@ -301,8 +342,9 @@ func rehearsalUnanswered(ctx context.Context, addr string) error {
 	return fmt.Errorf("fakeaws is refused: a dial of %s neither connected nor was refused: %w", addr, err)
 }
 
-// rehearsalFreePort is a loopback port free a moment ago.
-func rehearsalFreePort() (int, error) {
+// rehearsalFreePort is a loopback port free a moment ago. A var only so a
+// test can hand out a port another server holds.
+var rehearsalFreePort = func() (int, error) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return 0, err
