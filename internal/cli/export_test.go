@@ -56,7 +56,8 @@ func AWSLayer3MockDeploy(ctx context.Context, cfg config.Config, scenarioPath st
 
 // The assumption tests' tofu runner, override name, backend override
 // (no path), second init args, fakeaws paths, endpoints key reader and
-// provider override, for the assumption tests in cli_test.
+// provider override, for the assumption tests in cli_test; the walls
+// environment and the dead proxy it names, for the fail-closed e2e.
 var (
 	RunTofu                   = runTofu
 	LocalBackendOverride      = localBackendOverride("")
@@ -64,12 +65,14 @@ var (
 	AWSFakeawsPaths           = awsFakeawsPaths
 	RehearsalEndpointKeys     = rehearsalEndpointKeys
 	RehearsalProviderOverride = rehearsalProviderOverride
+	RehearsalWallsEnv         = rehearsalWallsEnv
+	RehearsalDeadProxy        = rehearsalDeadProxy
 )
 
 // OurOverride holds the backend override and AWSOverride the provider
 // override, each in its own file as ADR-0042 lays them out.
 // RehearsalFakeawsModule and RehearsalFakeawsPin are the fakeaws module
-// and commit TestRehearsePrepare clones and builds.
+// and commit fakeawsAtPin clones and builds.
 const (
 	OurOverride            = ourOverride
 	AWSOverride            = rehearsalAWSOverride
@@ -78,7 +81,7 @@ const (
 )
 
 // StopRehearsalFakeaws stops the fakeaws whose process group is pid, as a
-// failed prepare does, for TestRehearsePrepare's cleanup: it returns once
+// failed prepare does, for stopRecordedFakeaws's cleanup: it returns once
 // the group is gone, or fails naming pid and port after the kill fallback.
 func StopRehearsalFakeaws(pid, port int) error { return rehearsalFakeaws{PID: pid, Port: port}.stop() }
 
