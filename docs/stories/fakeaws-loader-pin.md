@@ -5,13 +5,14 @@ status: blocked
 blocked_by: [fakeaws-load-step0-fixture, prod-read-seam-reader-describe-volumes]
 epic: fakeaws-loader
 depends_on: [fakeaws-load-step0-fixture, prod-read-seam-reader-describe-volumes]
-touches: [.github/workflows/ci.yml, internal/e2e/aws_reader_ec2_fakeaws_test.go, internal/e2e/aws_reader_step0_fakeaws_test.go, docs/operations.md, docs/layer3/real-vs-mock-deltas.md, docs/stories/fakeaws-known-red-examples.md]
+touches: [.github/workflows/ci.yml, internal/cli/rehearse_fakeaws_bin.go, internal/e2e/aws_reader_ec2_fakeaws_test.go, internal/e2e/aws_reader_step0_fakeaws_test.go, docs/operations.md, docs/layer3/real-vs-mock-deltas.md, docs/stories/fakeaws-known-red-examples.md]
 ---
 
 # Pin FAKEAWS_SHA to the fakeaws main holding the loader, change only the e2e expectations the bump breaks, and record what stays open in deltas.md
 
 Bump FAKEAWS_SHA (.github/workflows/ci.yml:229) to a fakeaws main holding every fakeaws story of
 this epic.
+If rehearsalFakeawsPin exists, move it with FAKEAWS_SHA.
 
 **E2e: only what the bump breaks.** CI runs internal/e2e at the PR's FAKEAWS_SHA, so an
 expectation the bump breaks cannot land apart from the bump without a red merge; the epic's Areas
