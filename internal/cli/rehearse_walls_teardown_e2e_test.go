@@ -80,23 +80,23 @@ func TestRehearsalTeardown(t *testing.T) {
 	require.Len(t, record.Roots, 1)
 	noStores("after prepare")
 
-	read := filepath.Join(rehearsal, "reads", "read.json")
+	// The recorded read and the fakeaws files, relative to <id>.
+	read := "reads/read.json"
+	held := []string{read, "fakeaws/fakeaws.db", "fakeaws/fakeaws.db-wal", "fakeaws/fakeaws.db-shm", "fakeaws/fakeaws.db.snapshot"}
 	var readResult struct {
 		Read      string `json:"read"`
 		Exchanges int    `json:"exchanges"`
 	}
 	out = rehearse(t, cli.RehearseReadRoot(startStandInProd(t, bin)), teardownReadArgs(t, filepath.Join(rehearsal, "reads"))...)
 	require.NoError(t, json.Unmarshal(out, &readResult), string(out))
-	assert.Equal(t, read, readResult.Read)
+	assert.Equal(t, filepath.Join(rehearsal, read), readResult.Read)
 	assert.Equal(t, 1, readResult.Exchanges)
 	snapshotFakeaws(t, record.Port, record.Token)
 	noStores("after read and snapshot")
 
-	fakeawsDir := filepath.Join(rehearsal, "fakeaws")
-	for _, name := range []string{"fakeaws.db", "fakeaws.db-wal", "fakeaws.db-shm", "fakeaws.db.snapshot"} {
-		require.FileExists(t, filepath.Join(fakeawsDir, name), "the walk must meet every fakeaws file")
+	for _, rel := range held {
+		require.FileExists(t, filepath.Join(rehearsal, rel), "the walk must meet it")
 	}
-	require.FileExists(t, read)
 	assertTightModes(t, rehearsal)
 
 	kept := realTempDir(t)
@@ -105,10 +105,7 @@ func TestRehearsalTeardown(t *testing.T) {
 
 	ended := endRehearsal(t, prepared.ID)
 	assert.Equal(t, "stopped", ended.Fakeaws)
-	assert.Subset(t, ended.Deleted, []string{
-		"fakeaws/fakeaws.db", "fakeaws/fakeaws.db-wal", "fakeaws/fakeaws.db-shm", "fakeaws/fakeaws.db.snapshot",
-		"reads/read.json", "state", "work", record.Roots[0].Root,
-	})
+	assert.Subset(t, ended.Deleted, append(held, "state", "work", record.Roots[0].Root))
 	assert.NoDirExists(t, rehearsal)
 	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", record.Port), time.Second)
 	if err == nil {
