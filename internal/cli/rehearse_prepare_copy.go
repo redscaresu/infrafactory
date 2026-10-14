@@ -14,10 +14,11 @@ import (
 // prepare copies dir and its local modules into a new rehearsal under the
 // current directory's repository, then reads the copy's lock and runs
 // gate 1 over the copy, the first init, gate 2 and the second init
-// (ADR-0042 § The layout). It returns the
+// (ADR-0042 § The layout), then stands the walls up. It returns the
 // rehearsal's id, the copied root and what the lock tells the report. On a
-// refusal the half-made rehearsal dir is removed.
-func (p rehearsePrepare) prepare(ctx context.Context, dir, region, varFile string) (result rehearsePrepareResult, err error) {
+// refusal the half-made rehearsal dir is removed, unless it is
+// errRehearsalKept.
+func (p rehearsePrepare) prepare(ctx context.Context, dir, account, region, varFile string) (result rehearsePrepareResult, err error) {
 	repo, err := rehearsalRepo(p.wd)
 	if err != nil {
 		return result, err
@@ -63,7 +64,7 @@ func (p rehearsePrepare) prepare(ctx context.Context, dir, region, varFile strin
 		return result, fmt.Errorf("rehearsal %s is refused: it cannot be made new: %w", rehearsal, err)
 	}
 	defer func() {
-		if err != nil {
+		if err != nil && !errors.Is(err, errRehearsalKept) {
 			_ = os.RemoveAll(rehearsal)
 		}
 	}()
@@ -72,8 +73,14 @@ func (p rehearsePrepare) prepare(ctx context.Context, dir, region, varFile strin
 		return result, err
 	}
 	in.region = region
-	lock, err := p.gateAndInit(ctx, rehearsal, in)
+	lock, aliases, err := p.gateAndInit(ctx, rehearsal, in)
 	if err != nil {
+		return result, err
+	}
+	workRel, _ := filepath.Rel(rehearsal, in.boundary)
+	rootRel, _ := filepath.Rel(rehearsal, in.root)
+	record := rehearsalRecord{Account: account, Region: region, Roots: []rehearsalRoot{{WorkDir: workRel, Root: rootRel, AWSAliases: aliases}}}
+	if err := p.walls(ctx, rehearsal, record); err != nil {
 		return result, err
 	}
 	return rehearsePrepareResult{ID: id, WorkDir: in.root, AWSVersion: lock.aws(), Warnings: lock.warnings}, nil

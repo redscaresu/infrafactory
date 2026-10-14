@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -28,11 +29,15 @@ import (
 // the local backend with its state under <id>/state, and every mode in
 // the rehearsal is tightened. A lock whose aws entry is
 // registry.terraform.io's prepares too, with the warning. The repo's path
-// holds a comma.
+// holds a comma. prepare installs fakeaws at the pin into a scratch user
+// cache, shared by the cases, and leaves it running; each case stops it.
 func TestRehearsePrepare(t *testing.T) {
 	e2e.SkipUnlessEnabled(t)
 	_, err := exec.LookPath("tofu")
 	require.NoError(t, err, "tofu binary required for e2e")
+	cache := realTempDir(t)
+	t.Setenv("HOME", cache)
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(cache, "cache"))
 
 	const module = "\nmodule \"m\" {\n  source = \"../../modules/m\"\n}\n"
 	for _, tc := range []struct {
@@ -68,6 +73,7 @@ provider "aws" {
 				e2e.WriteFile(t, filepath.Join(repo, name), []byte(content))
 			}
 			t.Chdir(repo)
+			t.Cleanup(func() { stopRecordedFakeaws(repo) })
 
 			root := cli.NewRootCmd()
 			stdout := &bytes.Buffer{}
@@ -103,6 +109,24 @@ provider "aws" {
 			}
 			assertTightModes(t, rehearsal)
 		})
+	}
+}
+
+// stopRecordedFakeaws kills the process group of each fakeaws recorded
+// under repo's rehearsals.
+func stopRecordedFakeaws(repo string) {
+	records, _ := filepath.Glob(filepath.Join(repo, ".infrafactory", "rehearsals", "*", "rehearsal.json"))
+	for _, path := range records {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var record struct {
+			PID int `json:"pid"`
+		}
+		if json.Unmarshal(raw, &record) == nil && record.PID > 0 {
+			_ = syscall.Kill(-record.PID, syscall.SIGKILL)
+		}
 	}
 }
 

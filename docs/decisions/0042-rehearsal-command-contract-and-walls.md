@@ -341,9 +341,10 @@ Prepare then starts the rehearsal's fakeaws, as its last step. The order is:
    leaves something `rehearse end` can stop.
 5. Write the provider override and complete the record.
 
-A failure or cancel after the start stops fakeaws before the half-made rehearsal is removed. There
-is no `rehearse start`: if fakeaws dies, the override points at a closed port, and a new prepare is
-the restart.
+A failure or cancel after the start stops fakeaws before the half-made rehearsal is removed; if
+that stop fails once `rehearsal.json` is written, the rehearsal is kept so `rehearse end` can stop
+it. There is no `rehearse start`: if fakeaws dies, the override points at a closed port, and a new
+prepare is the restart.
 
 A user `backend` block is neutralised: the override replaces it, and the command-line path puts the
 state outside the copy (`TestAssumption_CLIBackendPathKeepsStateOutOfTheCopy`, whose root declares
