@@ -81,9 +81,9 @@ func (p rehearsePrepare) prepare(ctx context.Context, dir, account, region, varF
 	if err != nil {
 		return result, err
 	}
-	workRel, _ := filepath.Rel(rehearsal, in.boundary)
+	copyRel, _ := filepath.Rel(rehearsal, in.boundary)
 	rootRel, _ := filepath.Rel(rehearsal, in.root)
-	record := rehearsalRecord{Account: account, Region: region, Roots: []rehearsalRoot{{WorkDir: workRel, Root: rootRel, AWSAliases: aliases}}}
+	record := rehearsalRecord{Account: account, Region: region, Roots: []rehearsalRoot{{Copy: copyRel, Root: rootRel, AWSAliases: aliases}}}
 	if err := p.walls(ctx, rehearsal, record); err != nil {
 		return result, err
 	}

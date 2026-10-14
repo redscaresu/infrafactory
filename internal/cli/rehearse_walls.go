@@ -35,11 +35,13 @@ type rehearsalRecord struct {
 	Roots   []rehearsalRoot `json:"roots,omitempty"`
 }
 
-// rehearsalRoot is one prepared root: its work dir and root, each relative
-// to <id>, the endpoints keys of its locked aws provider, and its provider
-// "aws" aliases as the gate returns them.
+// rehearsalRoot is one prepared root, its paths relative to <id>: Copy is
+// the copied tree, which is the gate's boundary (work today); Root is the
+// copied root dir, the work dir prepare reports; EndpointKeys are the
+// endpoints keys of its locked aws provider; AWSAliases are its provider
+// "aws" aliases as the gate returns them, "" for the unaliased block.
 type rehearsalRoot struct {
-	WorkDir      string   `json:"work_dir"`
+	Copy         string   `json:"copy"`
 	Root         string   `json:"root"`
 	EndpointKeys []string `json:"endpoint_keys"`
 	AWSAliases   []string `json:"aws_aliases"`

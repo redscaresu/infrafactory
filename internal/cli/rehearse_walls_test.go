@@ -70,7 +70,7 @@ func TestRehearsePrepareStandsTheWallsUp(t *testing.T) {
 	assert.Equal(t, rehearsalRecord{
 		Schema: rehearsalRecordSchema, Account: "123456789012", Region: "eu-west-1", Pin: rehearsalFakeawsPin,
 		PID: prepareStubFakeaws.PID, Port: prepareStubFakeaws.Port, Token: prepareStubFakeaws.Token,
-		Roots: []rehearsalRoot{{WorkDir: "work", Root: filepath.Join("work", "envs", "prod"), EndpointKeys: prepareKeys, AWSAliases: []string{""}}},
+		Roots: []rehearsalRoot{{Copy: "work", Root: filepath.Join("work", "envs", "prod"), EndpointKeys: prepareKeys, AWSAliases: []string{""}}},
 	}, record)
 	override, err := os.ReadFile(filepath.Join(root, rehearsalAWSOverride))
 	require.NoError(t, err)
@@ -304,8 +304,8 @@ func TestRehearsalRecordRoundTrips(t *testing.T) {
 		Schema: rehearsalRecordSchema, Account: "123456789012", Region: "eu-west-1", Pin: rehearsalFakeawsPin,
 		PID: 4242, Port: 4566, Token: "token",
 		Roots: []rehearsalRoot{
-			{WorkDir: "work", Root: "work/envs/prod", EndpointKeys: prepareKeys, AWSAliases: []string{"", "west"}},
-			{WorkDir: "head", Root: "head/envs/prod", EndpointKeys: []string{"sts"}, AWSAliases: []string{""}},
+			{Copy: "work", Root: "work/envs/prod", EndpointKeys: prepareKeys, AWSAliases: []string{"", "west"}},
+			{Copy: "head", Root: "head/envs/prod", EndpointKeys: []string{"sts"}, AWSAliases: []string{""}},
 		},
 	}
 

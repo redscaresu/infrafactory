@@ -56,7 +56,10 @@ rehearsal-walls adds:
 
 - `fakeaws/` (0700): the rehearsal's fakeaws db with its -wal and -shm, the snapshot and the log.
 - `rehearsal.json` (0600): account, region, the fakeaws pin, pid, port, token, and a list of roots.
-  Each root holds its work dir, its root path, its endpoint keys and its aws aliases.
+  Each root holds, relative to `<id>`, `copy` (the copied tree and the gate's boundary, `work`
+  today) and `root` (the copied root dir, which is the work dir prepare reports), then
+  `endpoint_keys` (the endpoints keys of its locked aws provider) and `aws_aliases` (its provider
+  "aws" aliases as the gate returns them, `""` for the unaliased block).
 - `reads/`: the rehearsal's recorded reads.
 - `state-config/`: reserved for rehearsal-state-pull.
 - A work directory is `<id>/work/<name>`, where `<name>` is the copied directory's path relative
