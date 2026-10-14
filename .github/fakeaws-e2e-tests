@@ -34,4 +34,5 @@ TestE2E_CheckAvoidAgainstFakeaws
 TestE2E_RetiredAvoidPitfallsStayContradicted
 TestRehearsalAWSProviderTableMatchesSchema
 TestRehearsalFakeawsInstallAtPin
+TestRehearsalWallsFailClosed
 TestRehearsePrepare
