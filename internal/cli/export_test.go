@@ -68,9 +68,13 @@ var (
 
 // OurOverride holds the backend override and AWSOverride the provider
 // override, each in its own file as ADR-0042 lays them out.
+// RehearsalFakeawsModule and RehearsalFakeawsPin are the fakeaws module
+// and commit TestRehearsePrepare clones and builds.
 const (
-	OurOverride = ourOverride
-	AWSOverride = rehearsalAWSOverride
+	OurOverride            = ourOverride
+	AWSOverride            = rehearsalAWSOverride
+	RehearsalFakeawsModule = rehearsalFakeawsModule
+	RehearsalFakeawsPin    = rehearsalFakeawsPin
 )
 
 // StopRehearsalFakeaws stops the fakeaws whose process group is pid, as a

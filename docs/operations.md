@@ -640,13 +640,14 @@ fixtures that may be.
 ### Prepare
 
 ```
-infrafactory rehearse prepare <dir> --account <id> --region <r> [--var-file <file>]
+infrafactory rehearse prepare <dir> --account <id> --region <r> [--var-file <file>] [--fakeaws-bin <path>]
 ```
 
 Copies the code in `<dir>` into a new rehearsal, gates the copy and initialises it. No tofu
 command runs on a configuration the gate refused. Run from inside the git repository that holds
 `<dir>`. Nothing is planned or applied; a success report names the rehearsal's id, its work dir,
-the `hashicorp/aws` version the lock pins and any warnings.
+the URL of its fakeaws (`fakeaws_url`, never the admin token), the `hashicorp/aws` version the lock
+pins and any warnings.
 
 - `-h`, `--help` prints the usage. `--output human|json` is global and picks the report's format; `--config` is global and ignored, since prepare reads no config.
 - `<dir>` must resolve, symlinks included, inside the current directory's repository.
@@ -657,6 +658,9 @@ the `hashicorp/aws` version the lock pins and any warnings.
 - `--var-file` is a `.tfvars` file, copied to `<rehearsal>/vars.tfvars` outside the work dir and
   parsed by the gate. It overrides the code's `terraform.tfvars` and `*.auto.tfvars`. A `.json`
   var file, or anything but a regular file, is refused.
+- `--fakeaws-bin` is an absolute path to a fakeaws binary built at infrafactory's pin; an empty or
+  relative one is a usage error. Unset, prepare installs the pin into the user cache. Any other
+  binary is refused.
 
 **Layout.** `<repo>/.infrafactory/rehearsals/<id>/` holds `work/` (the copy of the lowest directory holding `<dir>` and every local module it
 calls, at its path relative to the repository: with `../../modules/x` that can be the repository
