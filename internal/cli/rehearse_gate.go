@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"maps"
@@ -31,7 +32,10 @@ var errRehearsalRefuses = errors.New("the rehearsal gate refuses this configurat
 // module dirs to gate beside those the root's module blocks reach (gate 2
 // adds the manifest's to them), the copy they live in (problems name
 // files relative to it), the --region, the --var-file copy ("" when
-// none was given), and the hashicorp/aws version the lock pins.
+// none was given), the hashicorp/aws version the lock pins, and ours:
+// infrafactory's own override files, by the exact name it writes, each
+// with the exact bytes it writes. A re-gate passes ours; prepare does not,
+// since it writes them after its gates.
 type rehearsalGateInput struct {
 	root       string
 	modules    []rehearsalModuleDir
@@ -39,6 +43,7 @@ type rehearsalGateInput struct {
 	region     string
 	varFile    string
 	awsVersion string
+	ours       map[string][]byte
 }
 
 // rehearsalRefusedSuffixes are files tofu loads, or tofu test reads, that
@@ -88,15 +93,23 @@ var rehearsalTypes = map[string]map[string]bool{
 var rehearsalRequiredProviderKeys = map[string]bool{"source": true, "version": true, "configuration_aliases": true}
 
 // rehearsalGate runs the gate over the root, every module dir and the var
-// file, and returns every problem in one error, sorted.
-func rehearsalGate(in rehearsalGateInput) error {
-	return rehearsalRefusal(in.problems())
+// file, and returns every problem in one error, sorted. It passes with the
+// root's provider "aws" aliases, sorted, "" naming the unaliased block, so
+// prepare can write one override block per alias.
+func rehearsalGate(in rehearsalGateInput) ([]string, error) {
+	problems, aliases := in.problems()
+	if err := rehearsalRefusal(problems); err != nil {
+		return nil, err
+	}
+	return aliases, nil
 }
 
-// problems walks the root and in.modules, then every dir their module
-// blocks resolve to, each dir once, then the var file, then goal 11.
-func (in rehearsalGateInput) problems() []string {
-	var problems []string
+// problems checks infrafactory's own overrides, walks the root and
+// in.modules, then every dir their module blocks resolve to, each dir
+// once, then the var file, then goal 11. It returns the problems and the
+// root's provider "aws" aliases.
+func (in rehearsalGateInput) problems() ([]string, []string) {
+	problems := in.oursProblems()
 	uses, regions := &rehearsalPathUses{}, newRehearsalRegions()
 	start := append([]rehearsalModuleDir{{dir: in.root}}, in.modules...)
 	walkProblems := rehearsalWalk(start, func(m rehearsalModuleDir) []rehearsalModuleDir {
@@ -111,7 +124,7 @@ func (in rehearsalGateInput) problems() []string {
 		regions.varFile, varProblems = in.tfvars(in.varFile)
 		problems = append(problems, varProblems...)
 	}
-	return append(problems, regions.problems(in.region)...)
+	return append(problems, regions.problems(in.region)...), slices.Compact(slices.Sorted(slices.Values(regions.aliases)))
 }
 
 // rehearsalRefusal is every problem in one error, sorted and each once,
@@ -189,6 +202,9 @@ func (in rehearsalGateInput) dirFiles(dir string) (map[string]*hclsyntax.Body, m
 	whole := true
 	files, tfvars := map[string]*hclsyntax.Body{}, map[string]*hclsyntax.Body{}
 	for _, entry := range entries {
+		if _, ours := in.ours[entry.Name()]; ours && dir == in.root {
+			continue
+		}
 		path := filepath.Join(dir, entry.Name())
 		lower := strings.ToLower(entry.Name())
 		if problem := rehearsalEntryProblem(lower); problem != "" {
@@ -212,6 +228,28 @@ func (in rehearsalGateInput) dirFiles(dir string) (map[string]*hclsyntax.Body, m
 		}
 	}
 	return files, tfvars, whole, problems
+}
+
+// oursProblems admits each of infrafactory's own override files in the
+// root only when its bytes are exactly ours, and never parses it; dirFiles
+// skips them in the root. A
+// missing one is refused: an override that is not there is a wall that is
+// down. Another spelling of its name, or the file in a module dir, is a
+// user override, which rehearsalEntryProblem refuses: a case-sensitive
+// filesystem holds it beside ours, and tofu loads it as an ordinary file.
+func (in rehearsalGateInput) oursProblems() []string {
+	var problems []string
+	for name, want := range in.ours {
+		path := filepath.Join(in.root, name)
+		got, problem := rehearsalRead(path, in.display(path))
+		switch {
+		case problem != "":
+			problems = append(problems, problem+": infrafactory's own override must be there")
+		case !bytes.Equal(got, want):
+			problems = append(problems, in.display(path)+": refused: it is not byte-identical to the override infrafactory writes")
+		}
+	}
+	return problems
 }
 
 // rehearsalEntryProblem is why a dir entry, by its lowercased name, is

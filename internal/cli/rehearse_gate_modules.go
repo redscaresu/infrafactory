@@ -274,25 +274,24 @@ func rehearsalUnder(path, dir string) bool {
 // parse, a file refused by name) refuses the lot. Prepare uses it to find
 // what to copy.
 func rehearsalLocalModuleSources(dir, boundary string) ([]string, error) {
-	dirs, problems := rehearsalModuleDirs(dir, boundary)
+	dirs, problems := rehearsalGateInput{root: dir, boundary: boundary}.moduleDirs()
 	if err := rehearsalRefusal(problems); err != nil {
 		return nil, err
 	}
 	return dirs, nil
 }
 
-// rehearsalModuleDirs walks root's module blocks as the gate does, without
+// moduleDirs walks the root's module blocks as the gate does, without
 // the block rules, and returns every module dir it visits, never the root,
 // and the problems found reading them.
-func rehearsalModuleDirs(root, boundary string) ([]string, []string) {
-	in := rehearsalGateInput{root: root, boundary: boundary}
+func (in rehearsalGateInput) moduleDirs() ([]string, []string) {
 	var dirs, problems []string
-	walkProblems := rehearsalWalk([]rehearsalModuleDir{{dir: root}}, func(m rehearsalModuleDir) []rehearsalModuleDir {
+	walkProblems := rehearsalWalk([]rehearsalModuleDir{{dir: in.root}}, func(m rehearsalModuleDir) []rehearsalModuleDir {
 		if m.call != "" {
 			dirs = append(dirs, m.dir)
 		}
 		files, _, _, fileProblems := in.dirFiles(m.dir)
-		calls, callProblems := rehearsalModuleCalls(files, m, boundary)
+		calls, callProblems := rehearsalModuleCalls(files, m, in.boundary)
 		problems = append(problems, m.named(append(fileProblems, callProblems...))...)
 		return calls
 	})
@@ -311,7 +310,8 @@ type rehearsalManifestEntry struct{ Key, Source, Dir string }
 func rehearsalModulesGate(in rehearsalGateInput, data string) error {
 	modules, problems := in.manifestModules(data)
 	in.modules = slices.Concat(in.modules, modules)
-	return rehearsalRefusal(append(problems, in.problems()...))
+	gateProblems, _ := in.problems()
+	return rehearsalRefusal(append(problems, gateProblems...))
 }
 
 // manifestModules reads <data>/modules/modules.json and returns its
@@ -326,7 +326,7 @@ func (in rehearsalGateInput) manifestModules(data string) ([]rehearsalModuleDir,
 	fetched := filepath.Join(data, "modules")
 	raw, err := os.ReadFile(filepath.Join(fetched, name))
 	if errors.Is(err, fs.ErrNotExist) {
-		dirs, problems := rehearsalModuleDirs(in.root, in.boundary)
+		dirs, problems := in.moduleDirs()
 		if len(dirs) == 0 && len(problems) == 0 {
 			return nil, nil
 		}

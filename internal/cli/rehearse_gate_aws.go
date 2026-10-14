@@ -63,8 +63,10 @@ func (m rehearsalModule) awsProviderProblems(file, at string, block *hclsyntax.B
 	for _, inner := range block.Body.Blocks {
 		problems = append(problems, m.awsArgProblems(rehearsalAt(file, inner.DefRange(), addr+"."+inner.Type), inner.Type)...)
 	}
-	if _, aliased := block.Body.Attributes["alias"]; !aliased {
-		m.regions.defaultProvider = true
+	if alias, ok := rehearsalAWSAlias(block); ok {
+		m.regions.aliases = append(m.regions.aliases, alias)
+	} else {
+		problems = append(problems, rehearsalAt(file, block.Body.Attributes["alias"].SrcRange, addr+".alias")+`: refused: a provider "aws" alias must be a literal name, so infrafactory's override can name it`)
 	}
 	region, ok := block.Body.Attributes["region"]
 	if !ok {
@@ -72,6 +74,17 @@ func (m rehearsalModule) awsProviderProblems(file, at string, block *hclsyntax.B
 	}
 	m.regions.uses = append(m.regions.uses, rehearsalRegionUse{at: rehearsalAt(file, region.SrcRange, addr+".region"), expr: region.Expr, root: true})
 	return problems
+}
+
+// rehearsalAWSAlias is a provider "aws" block's alias, "" when it sets
+// none, and false when it is not a literal name.
+func rehearsalAWSAlias(block *hclsyntax.Block) (string, bool) {
+	attr, ok := block.Body.Attributes["alias"]
+	if !ok {
+		return "", true
+	}
+	alias, ok := rehearsalLiteral(attr.Expr)
+	return alias, ok && hclsyntax.ValidIdentifier(alias)
 }
 
 // awsArgProblems refuses a provider "aws" argument or block the table
@@ -111,16 +124,16 @@ func (m rehearsalModule) recordDefault(block *hclsyntax.Block) {
 }
 
 // rehearsalRegions collects what goal 11 reads across one gate run: every
-// region to resolve, the root's variable sources, and whether the root has
-// an unaliased provider "aws" block.
+// region to resolve, the root's variable sources, and the root's
+// provider "aws" aliases, "" for an unaliased block.
 type rehearsalRegions struct {
 	uses []rehearsalRegionUse
 	// defaults are the root's variable defaults, by variable name.
 	defaults hclsyntax.Attributes
 	// tfvars are the root's .tfvars files, by display name.
-	tfvars          map[string]*hclsyntax.Body
-	varFile         *hclsyntax.Body
-	defaultProvider bool
+	tfvars  map[string]*hclsyntax.Body
+	varFile *hclsyntax.Body
+	aliases []string
 	// rootWhole is whether the gate read the root dir and every .tf file
 	// in it, so a missing default provider block is really missing.
 	rootWhole bool
@@ -154,7 +167,7 @@ type rehearsalVarSource struct {
 // refused already, and may hold the block, so it is not named missing.
 func (r *rehearsalRegions) problems(region string) []string {
 	var problems []string
-	if !r.defaultProvider && r.rootWhole {
+	if !slices.Contains(r.aliases, "") && r.rootWhole {
 		problems = append(problems, `the root module: refused: it has no provider "aws" block without an alias, so tofu's implied empty one, which has no region, would be the default`)
 	}
 	sources, sourceProblems := r.sources()

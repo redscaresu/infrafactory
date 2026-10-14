@@ -14,6 +14,13 @@ import (
 // file is under it.
 func gateFixture(t *testing.T, files map[string]string, varFile string) error {
 	t.Helper()
+	_, err := rehearsalGate(gateCopy(t, files, varFile))
+	return err
+}
+
+// gateCopy writes gateFixture's copy and returns its gate input.
+func gateCopy(t *testing.T, files map[string]string, varFile string) rehearsalGateInput {
+	t.Helper()
 	copyDir := t.TempDir()
 	in := rehearsalGateInput{root: copyDir, boundary: copyDir, region: "us-east-1"}
 	for name, content := range files {
@@ -28,7 +35,7 @@ func gateFixture(t *testing.T, files map[string]string, varFile string) error {
 		in.varFile = filepath.Join(t.TempDir(), "vars.tfvars")
 		require.NoError(t, os.WriteFile(in.varFile, []byte(varFile), 0o600))
 	}
-	return rehearsalGate(in)
+	return in
 }
 
 const encryption = `terraform {
@@ -301,4 +308,67 @@ resource "random_pet" "p" {}
 `,
 	}, "names = [\"c\"]\n")
 	assert.NoError(t, err)
+}
+
+// ourBytes stands in for an override infrafactory writes. The gate would
+// refuse it if it parsed it (endpoints, no region), and its alias would
+// show among the aliases, so a pass proves it was admitted unparsed.
+const ourBytes = "provider \"aws\" {\n  alias = \"walls\"\n  endpoints {\n    sts = \"http://127.0.0.1:1\"\n  }\n}\n"
+
+// TestRehearsalGateAdmitsOursByteIdentical: a re-gate admits
+// infrafactory's own override only in the root, only byte-identical, and
+// refuses it missing.
+func TestRehearsalGateAdmitsOursByteIdentical(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		files map[string]string
+		want  string
+	}{
+		{name: "byte-identical in the root", files: map[string]string{ourOverride: ourBytes}},
+		{name: "one trailing byte more", files: map[string]string{ourOverride: ourBytes + "\n"},
+			want: ourOverride + ": refused: it is not byte-identical to the override infrafactory writes"},
+		{name: "in a child module dir", files: map[string]string{ourOverride: ourBytes, "child/" + ourOverride: ourBytes},
+			want: "child/" + ourOverride + ": an override file is refused"},
+		{name: "missing", files: map[string]string{},
+			want: ourOverride + ": cannot read it"},
+		{name: "another spelling of its name", files: map[string]string{"Infrafactory_Override.tf": ourBytes},
+			want: "Infrafactory_Override.tf: an override file is refused"},
+		{name: "a user override beside it", files: map[string]string{ourOverride: ourBytes, "zz_override.tf": "locals {}\n"},
+			want: "zz_override.tf: an override file is refused"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.files["main.tf"] = gateProvider
+			in := gateCopy(t, tc.files, "")
+			in.ours = map[string][]byte{ourOverride: []byte(ourBytes)}
+			aliases, err := rehearsalGate(in)
+			if tc.want == "" {
+				require.NoError(t, err)
+				assert.Equal(t, []string{""}, aliases)
+				return
+			}
+			require.ErrorIs(t, err, errRehearsalRefuses)
+			assert.Contains(t, err.Error(), tc.want)
+		})
+	}
+}
+
+// TestRehearsalGateReturnsAWSAliases: the gate passes with the root's
+// provider "aws" aliases, sorted, "" for the unaliased block.
+func TestRehearsalGateReturnsAWSAliases(t *testing.T) {
+	in := gateCopy(t, map[string]string{"main.tf": gateProvider +
+		"provider \"aws\" {\n  alias  = \"west\"\n  region = \"us-east-1\"\n}\n" +
+		"provider \"aws\" {\n  alias  = \"dr\"\n  region = \"us-east-1\"\n}\n"}, "")
+	aliases, err := rehearsalGate(in)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"", "dr", "west"}, aliases)
+}
+
+// TestRehearsalGateRefusesAnAliasItCannotName: an alias the override
+// could not name is refused.
+func TestRehearsalGateRefusesAnAliasItCannotName(t *testing.T) {
+	err := gateFixture(t, map[string]string{"main.tf": gateProvider +
+		"variable \"a\" {\n  default = \"x\"\n}\n" +
+		"provider \"aws\" {\n  alias  = var.a\n  region = \"us-east-1\"\n}\n"}, "")
+	require.ErrorIs(t, err, errRehearsalRefuses)
+	assert.Contains(t, err.Error(), `main.tf:8: provider.aws.alias: refused: a provider "aws" alias must be a literal name`)
 }

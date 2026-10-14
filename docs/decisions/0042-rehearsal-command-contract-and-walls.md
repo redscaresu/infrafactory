@@ -352,7 +352,8 @@ state outside the copy (`TestAssumption_CLIBackendPathKeepsStateOutOfTheCopy`, w
 ### Provider override
 
 `infrafactory_aws_override.tf` sits beside `infrafactory_override.tf` in each root. It holds one
-`provider "aws"` block per root aws block the gate found, aliases included. Each block has the
+`provider "aws"` block per root aws block the gate found, aliases included; the gate refuses an
+alias that is not a literal name, which the override could not name. Each block has the
 static fake keys (`rehearsalFakeAccessKeyID`, `rehearsalFakeSecretAccessKey`),
 `skip_metadata_api_check = true`, and an `endpoints` block naming every key of the locked
 provider's schema. The keys come from the single `provider_schemas` entry `<host>/hashicorp/aws`

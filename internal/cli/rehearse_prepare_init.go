@@ -55,7 +55,7 @@ func (p rehearsePrepare) gateAndInit(ctx context.Context, rehearsal string, in r
 		return rehearsalLock{}, err
 	}
 	in.awsVersion = lock.aws()
-	if err := rehearsalGate(in); err != nil {
+	if _, err := rehearsalGate(in); err != nil {
 		return rehearsalLock{}, err
 	}
 	if err := rehearsalCancelled(ctx); err != nil {
