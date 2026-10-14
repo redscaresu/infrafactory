@@ -240,7 +240,7 @@ func (f rehearsalFakeaws) waitReady(ctx context.Context) error {
 		Transport:     &http.Transport{DisableKeepAlives: true},
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
-	base := "http://" + net.JoinHostPort("127.0.0.1", strconv.Itoa(f.Port))
+	base := rehearsalFakeawsURL(f.Port)
 	err := f.healthy(waitCtx, client, base)
 	if err == nil {
 		err = f.ours(waitCtx, client, base)
@@ -315,6 +315,11 @@ func (f rehearsalFakeaws) ours(ctx context.Context, client *http.Client, base st
 		}
 	}
 	return nil
+}
+
+// rehearsalFakeawsURL is the URL of the rehearsal's fakeaws on port.
+func rehearsalFakeawsURL(port int) string {
+	return "http://" + net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
 }
 
 // rehearsalFakeawsStatus is the status of a GET of url, with the token as

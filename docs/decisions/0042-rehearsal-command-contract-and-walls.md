@@ -56,7 +56,10 @@ rehearsal-walls adds:
 
 - `fakeaws/` (0700): the rehearsal's fakeaws db with its -wal and -shm, the snapshot and the log.
 - `rehearsal.json` (0600): account, region, the fakeaws pin, pid, port, token, and a list of roots.
-  Each root holds its work dir, its root path, its endpoint keys and its aws aliases.
+  Each root holds, relative to `<id>`, `copy` (the copied tree and the gate's boundary, `work`
+  today) and `root` (the copied root dir, which is the work dir prepare reports), then
+  `endpoint_keys` (the endpoints keys of its locked aws provider) and `aws_aliases` (its provider
+  "aws" aliases as the gate returns them, `""` for the unaliased block).
 - `reads/`: the rehearsal's recorded reads.
 - `state-config/`: reserved for rehearsal-state-pull.
 - A work directory is `<id>/work/<name>`, where `<name>` is the copied directory's path relative
@@ -341,9 +344,10 @@ Prepare then starts the rehearsal's fakeaws, as its last step. The order is:
    leaves something `rehearse end` can stop.
 5. Write the provider override and complete the record.
 
-A failure or cancel after the start stops fakeaws before the half-made rehearsal is removed. There
-is no `rehearse start`: if fakeaws dies, the override points at a closed port, and a new prepare is
-the restart.
+A failure or cancel after the start stops fakeaws before the half-made rehearsal is removed; if
+that stop fails once `rehearsal.json` is written, the rehearsal is kept so `rehearse end` can stop
+it. There is no `rehearse start`: if fakeaws dies, the override points at a closed port, and a new
+prepare is the restart.
 
 A user `backend` block is neutralised: the override replaces it, and the command-line path puts the
 state outside the copy (`TestAssumption_CLIBackendPathKeepsStateOutOfTheCopy`, whose root declares

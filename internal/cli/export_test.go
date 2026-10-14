@@ -73,6 +73,11 @@ const (
 	AWSOverride = rehearsalAWSOverride
 )
 
+// StopRehearsalFakeaws stops the fakeaws whose process group is pid, as a
+// failed prepare does, for TestRehearsePrepare's cleanup: it returns once
+// the group is gone, or fails naming pid and port after the kill fallback.
+func StopRehearsalFakeaws(pid, port int) error { return rehearsalFakeaws{PID: pid, Port: port}.stop() }
+
 // ExecRunner is the production runner, for the assumption tests' git.
 var ExecRunner harness.CommandRunner = execCommandRunner{}
 

@@ -28,6 +28,15 @@ type rehearsePrepare struct {
 	newID func() string
 	// notify catches a signal as a cancel: signal.NotifyContext by default.
 	notify func(context.Context, ...os.Signal) (context.Context, context.CancelFunc)
+	// fakeawsBin resolves the fakeaws binary from fakeawsBinPath:
+	// rehearsalFakeawsBinary by default.
+	fakeawsBin func(ctx context.Context, runner harness.CommandRunner, flagPath string) (string, error)
+	// fakeawsBinPath is the binary fakeawsBin is passed, "" for the pinned
+	// install.
+	fakeawsBinPath string
+	// startFakeaws starts the rehearsal's fakeaws and returns its stop:
+	// rehearsalStartFakeaws by default.
+	startFakeaws func(context.Context, rehearsalFakeawsOpts) (rehearsalFakeaws, func() error, error)
 }
 
 // newRehearsePrepareCmd is `rehearse prepare <dir>` (ADR-0042). It reads no
@@ -42,6 +51,15 @@ func newRehearsePrepareCmd(p rehearsePrepare) *cobra.Command {
 	}
 	if p.notify == nil {
 		p.notify = signal.NotifyContext
+	}
+	if p.fakeawsBin == nil {
+		p.fakeawsBin = rehearsalFakeawsBinary
+	}
+	if p.startFakeaws == nil {
+		p.startFakeaws = func(ctx context.Context, opts rehearsalFakeawsOpts) (rehearsalFakeaws, func() error, error) {
+			f, err := rehearsalStartFakeaws(ctx, opts)
+			return f, f.stop, err
+		}
 	}
 	cmd := &cobra.Command{
 		Use:   "prepare <dir>",
@@ -87,7 +105,7 @@ func (p rehearsePrepare) run(cmd *cobra.Command, args []string) error {
 	// rehearsal and reports the refusal, exit 1. A signal outside tofu is
 	// refused at prepare's next check (gateAndInit).
 	ctx, stop := notifyGuarded(cmd.Context(), p.notify)
-	result, err := p.prepare(ctx, args[0], region, varFile)
+	result, err := p.prepare(ctx, args[0], account, region, varFile)
 	stop()
 	result.Schema, result.Status = rehearsePrepareSchema, CommandStatusSuccess
 	if err != nil {

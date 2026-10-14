@@ -45,35 +45,36 @@ func localBackendOverride(blockPath string) string {
 
 // gateAndInit reads the copy's lock, runs gate 1 over the copy, the first
 // init, gate 2 over what it wrote, then the second init (ADR-0042 § The
-// lock, § The two inits). It returns the lock. The copy, the lock and the
-// gates do not read ctx, so a cancel during them is refused before the
-// next tofu, and one during the last steps after them: a cancel never
-// ends in a success report.
-func (p rehearsePrepare) gateAndInit(ctx context.Context, rehearsal string, in rehearsalGateInput) (rehearsalLock, error) {
+// lock, § The two inits). It returns the lock and gate 1's provider "aws"
+// aliases. The copy, the lock and the gates do not read ctx, so a cancel
+// during them is refused before the next tofu, and one during the last
+// steps after them: a cancel never ends in a success report.
+func (p rehearsePrepare) gateAndInit(ctx context.Context, rehearsal string, in rehearsalGateInput) (rehearsalLock, []string, error) {
 	lock, problems := in.lock()
 	if err := rehearsalRefusal(problems); err != nil {
-		return rehearsalLock{}, err
+		return rehearsalLock{}, nil, err
 	}
 	in.awsVersion = lock.aws()
-	if _, err := rehearsalGate(in); err != nil {
-		return rehearsalLock{}, err
+	aliases, err := rehearsalGate(in)
+	if err != nil {
+		return rehearsalLock{}, nil, err
 	}
 	if err := rehearsalCancelled(ctx); err != nil {
-		return rehearsalLock{}, err
+		return rehearsalLock{}, nil, err
 	}
 	if err := p.firstInit(ctx, rehearsal, in, lock); err != nil {
-		return rehearsalLock{}, err
+		return rehearsalLock{}, nil, err
 	}
 	if err := rehearsalModulesGate(in, filepath.Join(rehearsal, "data")); err != nil {
-		return rehearsalLock{}, fmt.Errorf("gate 2, after the first init: %w", err)
+		return rehearsalLock{}, nil, fmt.Errorf("gate 2, after the first init: %w", err)
 	}
 	if err := rehearsalCancelled(ctx); err != nil {
-		return rehearsalLock{}, err
+		return rehearsalLock{}, nil, err
 	}
 	if err := p.secondInit(ctx, rehearsal, in.root); err != nil {
-		return rehearsalLock{}, err
+		return rehearsalLock{}, nil, err
 	}
-	return lock, rehearsalCancelled(ctx)
+	return lock, aliases, rehearsalCancelled(ctx)
 }
 
 // rehearsalCancelled refuses a cancelled prepare.
@@ -114,7 +115,7 @@ func (p rehearsePrepare) firstInit(ctx context.Context, rehearsal string, in reh
 		{"providers", "lock", "-platform=" + runtime.GOOS + "_" + runtime.GOARCH},
 		{"init", "-backend=false", "-input=false", "-no-color"},
 	} {
-		if err := p.tofu(ctx, harness.Command{Name: "tofu", Args: args, Dir: in.root, Env: env, ReplaceEnv: true}); err != nil {
+		if _, err := p.tofu(ctx, harness.Command{Name: "tofu", Args: args, Dir: in.root, Env: env, ReplaceEnv: true}); err != nil {
 			return err
 		}
 	}
@@ -134,8 +135,7 @@ func (p rehearsePrepare) firstInit(ctx context.Context, rehearsal string, in reh
 // proxy must refuse a dial; then the backend override goes into the root,
 // and init reads only the providers the first init installed, with the
 // state under <rehearsal>/state, outside the copy. It runs under replace
-// mode with an empty HOME, TF_DATA_DIR at <rehearsal>/data, both proxies at
-// the dead proxy and no NO_PROXY, so it makes no proxied connection
+// mode with rehearsalSecondInitEnv, so it makes no proxied connection
 // (TestAssumption_SecondInitMakesNoProxiedConnection). Then the
 // rehearsal's modes are tightened again.
 func (p rehearsePrepare) secondInit(ctx context.Context, rehearsal, root string) error {
@@ -149,20 +149,26 @@ func (p rehearsePrepare) secondInit(ctx context.Context, rehearsal, root string)
 	if err := writeSynced(filepath.Join(root, ourOverride), []byte(localBackendOverride(""))); err != nil {
 		return err
 	}
-	env := map[string]string{
-		"HOME":        filepath.Join(rehearsal, "home"),
-		"TF_DATA_DIR": data,
-		"HTTPS_PROXY": rehearsalDeadProxy,
-		"HTTP_PROXY":  rehearsalDeadProxy,
-	}
 	args, err := rehearsalSecondInitArgs(root, filepath.Join(state, "terraform.tfstate"), data)
 	if err != nil {
 		return err
 	}
-	if err := p.tofu(ctx, harness.Command{Name: "tofu", Args: args, Dir: root, Env: env, ReplaceEnv: true}); err != nil {
+	if _, err := p.tofu(ctx, harness.Command{Name: "tofu", Args: args, Dir: root, Env: rehearsalSecondInitEnv(rehearsal), ReplaceEnv: true}); err != nil {
 		return err
 	}
 	return rehearsalTightenModes(rehearsal)
+}
+
+// rehearsalSecondInitEnv is replace mode's whole environment for the
+// second init and the schema call after it: an empty HOME, TF_DATA_DIR at
+// <rehearsal>/data, both proxies at the dead proxy and no NO_PROXY.
+func rehearsalSecondInitEnv(rehearsal string) map[string]string {
+	return map[string]string{
+		"HOME":        filepath.Join(rehearsal, "home"),
+		"TF_DATA_DIR": filepath.Join(rehearsal, "data"),
+		"HTTPS_PROXY": rehearsalDeadProxy,
+		"HTTP_PROXY":  rehearsalDeadProxy,
+	}
 }
 
 // rehearsalSecondInitArgs is the second init's args, run in root, with the
@@ -206,19 +212,20 @@ func rehearsalProxyRefuses(ctx context.Context, proxy string) error {
 	return refused(fmt.Sprintf("did not refuse a dial (%v)", err))
 }
 
-// tofu runs one tofu command under rehearsalTofuTimeout. A failure, a
-// cancel included, is an error carrying tofu's stderr.
-func (p rehearsePrepare) tofu(ctx context.Context, cmd harness.Command) error {
+// tofu runs one tofu command under rehearsalTofuTimeout and returns its
+// stdout. A failure, a cancel included, is an error carrying tofu's
+// stderr.
+func (p rehearsePrepare) tofu(ctx context.Context, cmd harness.Command) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, rehearsalTofuTimeout)
 	defer cancel()
 	result, err := p.runner.Run(ctx, cmd)
 	if err == nil {
-		return nil
+		return result.Stdout, nil
 	}
 	if ctx.Err() != nil {
 		err = fmt.Errorf("%w (%v)", ctx.Err(), err)
 	}
-	return fmt.Errorf("tofu %s failed: %w\n%s", strings.Join(cmd.Args, " "), err, strings.TrimSpace(string(result.Stderr)))
+	return nil, fmt.Errorf("tofu %s failed: %w\n%s", strings.Join(cmd.Args, " "), err, strings.TrimSpace(string(result.Stderr)))
 }
 
 // rehearsalTightenModes sets every dir under dir to 0700, every regular

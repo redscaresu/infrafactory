@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -51,19 +52,53 @@ type prepareRun struct {
 	err    error
 }
 
-// runPrepare runs `rehearse prepare args` from wd with a recording runner
-// and the id prepareID. The first init's init writes a manifest naming
-// only the root: gate 2 still walks every module block from the root.
+// prepareSchema is the `tofu providers schema -json` the fake runners
+// answer with.
+var prepareSchema = fmt.Sprintf(overrideTestSchema, "registry.opentofu.org")
+
+// isSchemaCall names the schema call after the second init.
+func isSchemaCall(c harness.Command) bool {
+	return slices.Equal(c.Args, []string{"providers", "schema", "-json"})
+}
+
+// prepareStubBin and prepareStubFakeaws are what stubWalls' resolver and
+// starter answer.
+const prepareStubBin = "/stub/fakeaws"
+
+var prepareStubFakeaws = rehearsalFakeaws{PID: 4242, Port: 4566, Token: "stub-token"}
+
+// stubWalls is p with a resolver answering prepareStubBin and a starter
+// answering prepareStubFakeaws where p sets none, so no test depends on
+// the machine's fakeaws cache or starts a process.
+func stubWalls(p rehearsePrepare) rehearsePrepare {
+	if p.fakeawsBin == nil {
+		p.fakeawsBin = func(context.Context, harness.CommandRunner, string) (string, error) { return prepareStubBin, nil }
+	}
+	if p.startFakeaws == nil {
+		p.startFakeaws = func(context.Context, rehearsalFakeawsOpts) (rehearsalFakeaws, func() error, error) {
+			return prepareStubFakeaws, func() error { return nil }, nil
+		}
+	}
+	return p
+}
+
+// runPrepare runs `rehearse prepare args` from wd with a recording runner,
+// stubWalls and the id prepareID. The first init's init writes a manifest
+// naming only the root: gate 2 still walks every module block from the
+// root.
 func runPrepare(wd string, args ...string) prepareRun {
 	var run prepareRun
 	runner := harness.CommandRunnerFunc(func(_ context.Context, c harness.Command) (harness.CommandResult, error) {
 		run.calls = append(run.calls, c)
-		if isFirstInit(c) {
+		switch {
+		case isFirstInit(c):
 			return harness.CommandResult{}, writeRootManifest(c.Env["TF_DATA_DIR"])
+		case isSchemaCall(c):
+			return harness.CommandResult{Stdout: []byte(prepareSchema)}, nil
 		}
 		return harness.CommandResult{}, nil
 	})
-	root := prepareRoot(rehearsePrepare{runner: runner, wd: wd, newID: func() string { return prepareID }})
+	root := prepareRoot(stubWalls(rehearsePrepare{runner: runner, wd: wd, newID: func() string { return prepareID }}))
 	stdout := &bytes.Buffer{}
 	root.SetOut(stdout)
 	root.SetArgs(append([]string{"rehearse", "prepare"}, args...))
@@ -190,7 +225,7 @@ func TestRehearsePrepareCopiesTheRootAndItsModules(t *testing.T) {
 		assert.Equal(t, want, info.Mode(), path)
 		return nil
 	}))
-	assert.Len(t, run.calls, 4, "the first init's three tofu commands and the second init")
+	assert.Len(t, run.calls, 5, "the first init's three tofu commands, the second init and the schema call")
 }
 
 // treeDigest is every entry under dir but .infrafactory, which prepare

@@ -343,10 +343,13 @@ func goldenPrepareRoot(h *CommandTestHarness, mainTF string) *cobra.Command {
 	mustWriteFile(h.T, filepath.Join(h.WorkspaceDir, "envs", "prod", "main.tf"), mainTF)
 	mustWriteFile(h.T, filepath.Join(h.WorkspaceDir, "envs", "prod", "provider.tf"), prepareProvider)
 	mustWriteFile(h.T, filepath.Join(h.WorkspaceDir, "envs", "prod", rehearsalLockFile), prepareLock)
-	tofu := harness.CommandRunnerFunc(func(context.Context, harness.Command) (harness.CommandResult, error) {
+	tofu := harness.CommandRunnerFunc(func(_ context.Context, c harness.Command) (harness.CommandResult, error) {
+		if isSchemaCall(c) {
+			return harness.CommandResult{Stdout: []byte(prepareSchema)}, nil
+		}
 		return harness.CommandResult{}, nil
 	})
-	return prepareRoot(rehearsePrepare{runner: tofu, wd: h.WorkspaceDir, newID: func() string { return prepareID }})
+	return prepareRoot(stubWalls(rehearsePrepare{runner: tofu, wd: h.WorkspaceDir, newID: func() string { return prepareID }}))
 }
 
 // goldenReadRoot makes the workspace a repo holding the read's key file

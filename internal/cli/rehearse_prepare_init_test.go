@@ -31,20 +31,33 @@ func initRun(t *testing.T, p rehearsePrepare, lock string, tofu func(context.Con
 	return repo, initRunIn(t, p, repo, tofu)
 }
 
-// initRunIn runs prepare, built from p, on envs/prod in repo, with a
-// runner that records each call and then runs tofu.
+// initRunIn runs prepare, built from stubWalls(p), on envs/prod in repo,
+// with a runner that records each call and then runs tofu.
 func initRunIn(t *testing.T, p rehearsePrepare, repo string, tofu func(context.Context, harness.Command) (harness.CommandResult, error)) prepareRun {
+	t.Helper()
+	return runPrepareWith(t, stubWalls(p), repo, tofu)
+}
+
+// runPrepareWith runs prepare, built from p, on envs/prod in repo with
+// prepareFlags and args, with a runner that records each call and then runs
+// tofu. A schema call tofu answers with no stdout and no error gets
+// prepareSchema.
+func runPrepareWith(t *testing.T, p rehearsePrepare, repo string, tofu func(context.Context, harness.Command) (harness.CommandResult, error), args ...string) prepareRun {
 	t.Helper()
 	var run prepareRun
 	p.runner = harness.CommandRunnerFunc(func(ctx context.Context, c harness.Command) (harness.CommandResult, error) {
 		run.calls = append(run.calls, c)
-		return tofu(ctx, c)
+		result, err := tofu(ctx, c)
+		if isSchemaCall(c) && err == nil && len(result.Stdout) == 0 {
+			result.Stdout = []byte(prepareSchema)
+		}
+		return result, err
 	})
 	p.wd, p.newID = repo, func() string { return prepareID }
 	root := prepareRoot(p)
 	stdout := &bytes.Buffer{}
 	root.SetOut(stdout)
-	root.SetArgs(append([]string{"rehearse", "prepare", "envs/prod"}, prepareFlags...))
+	root.SetArgs(append(append([]string{"rehearse", "prepare", "envs/prod"}, prepareFlags...), args...))
 	run.err = root.Execute()
 	run.stdout = stdout.String()
 	return run
@@ -79,7 +92,7 @@ func TestRehearsePrepareFirstInitCommands(t *testing.T) {
 	rehearsal, err := filepath.EvalSymlinks(preparedDir(repo))
 	require.NoError(t, err)
 	work := filepath.Join(rehearsal, "work")
-	require.Len(t, run.calls, 4, "the first init's three tofu commands and the second init")
+	require.Len(t, run.calls, 5, "the first init's three tofu commands, the second init and the schema call")
 	assert.Equal(t, []string{"get", "-no-color"}, run.calls[0].Args)
 	assert.Equal(t, []string{"providers", "lock", "-platform=" + runtime.GOOS + "_" + runtime.GOARCH}, run.calls[1].Args)
 	assert.Equal(t, []string{"init", "-backend=false", "-input=false", "-no-color"}, run.calls[2].Args)
@@ -97,7 +110,7 @@ func TestRehearsePrepareFirstInitCommands(t *testing.T) {
 		require.NoError(t, err)
 		assert.False(t, filepath.IsLocal(rel), "TF_DATA_DIR %s lies inside %s", c.Env["TF_DATA_DIR"], work)
 	}
-	assert.Len(t, homes, 4)
+	assert.Len(t, homes, 5)
 	assert.Contains(t, run.stdout, "Status: success\n")
 
 	require.NoError(t, filepath.WalkDir(rehearsal, func(path string, d fs.DirEntry, err error) error {
@@ -344,7 +357,7 @@ func TestRehearsePrepareSecondInitCommand(t *testing.T) {
 	require.NoError(t, err)
 	work := filepath.Join(rehearsal, "work")
 	state := filepath.Join(rehearsal, "state", "terraform.tfstate")
-	require.Len(t, run.calls, 4)
+	require.Len(t, run.calls, 5)
 	c := run.calls[3]
 	assert.Equal(t, "tofu", c.Name)
 	assert.Equal(t, filepath.Join(work, "envs", "prod"), c.Dir)
