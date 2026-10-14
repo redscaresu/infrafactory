@@ -1,0 +1,5 @@
+Command: rehearse end
+Status: success
+Rehearsal: missing-id
+Fakeaws: not signalled: no such rehearsal: missing-id
+Deleted: nothing

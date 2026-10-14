@@ -1,0 +1,27 @@
+{
+  "schema": "infrafactory.rehearse.end.v1",
+  "status": "success",
+  "id": "rehearsal-id",
+  "fakeaws": "stopped",
+  "deleted": [
+    "data",
+    "data/modules",
+    "data/modules/modules.json",
+    "fakeaws",
+    "fakeaws/fakeaws.db",
+    "fakeaws/fakeaws.db-shm",
+    "fakeaws/fakeaws.db-wal",
+    "fakeaws/snapshot.db",
+    "reads",
+    "reads/recorded-read.json",
+    "rehearsal.json",
+    "state",
+    "state/terraform.tfstate",
+    "state-config",
+    "state-config/terraform.tfstate",
+    "work",
+    "work/envs",
+    "work/envs/prod",
+    "work/envs/prod/main.tf"
+  ]
+}

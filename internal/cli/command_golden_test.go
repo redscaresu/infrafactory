@@ -15,6 +15,7 @@ import (
 	"github.com/redscaresu/infrafactory/internal/generator"
 	"github.com/redscaresu/infrafactory/internal/harness"
 	"github.com/spf13/cobra"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCommandOutputGoldenSnapshots(t *testing.T) {
@@ -303,6 +304,34 @@ func TestCommandOutputGoldenSnapshots(t *testing.T) {
 			},
 			expectErr: true,
 		},
+		{
+			name: "rehearse_end",
+			build: func(h *CommandTestHarness) *cobra.Command {
+				return goldenEndRoot(h, true)
+			},
+			args: func(h *CommandTestHarness, mode OutputMode) []string {
+				return []string{"rehearse", "end", prepareID, "--output", string(mode)}
+			},
+		},
+		{
+			name: "rehearse_end_missing",
+			build: func(h *CommandTestHarness) *cobra.Command {
+				return goldenEndRoot(h, false)
+			},
+			args: func(h *CommandTestHarness, mode OutputMode) []string {
+				return []string{"rehearse", "end", "missing-id", "--output", string(mode)}
+			},
+		},
+		{
+			name: "rehearse_end_bad_id",
+			build: func(h *CommandTestHarness) *cobra.Command {
+				return goldenEndRoot(h, false)
+			},
+			args: func(h *CommandTestHarness, mode OutputMode) []string {
+				return []string{"rehearse", "end", "../x", "--output", string(mode)}
+			},
+			expectErr: true,
+		},
 	}
 
 	for _, tc := range cases {
@@ -361,6 +390,21 @@ func goldenReadRoot(h *CommandTestHarness, account string) *cobra.Command {
 	root := readRoot(rehearseRead{doer: &readDoer{account: account}, wd: h.WorkspaceDir})
 	root.SetErr(&bytes.Buffer{})
 	return root
+}
+
+// goldenEndRoot makes the workspace a repo and returns a root that ends
+// from it. With planted, it holds rehearsal prepareID with endPlanted and
+// a record of a live fakeaws stub.
+func goldenEndRoot(h *CommandTestHarness, planted bool) *cobra.Command {
+	mustWriteFile(h.T, filepath.Join(h.WorkspaceDir, ".git", "HEAD"), "ref: refs/heads/main\n")
+	if planted {
+		dir := filepath.Join(h.WorkspaceDir, ".infrafactory", "rehearsals", prepareID)
+		for _, rel := range endPlanted {
+			mustWriteFile(h.T, filepath.Join(dir, rel), rel)
+		}
+		require.NoError(h.T, endStub(h.T, "fakeaws").write(dir), "write record")
+	}
+	return endRoot(rehearseEnd{wd: h.WorkspaceDir})
 }
 
 // normalizeGoldenWorkspace replaces the workspace, resolved, as prepare

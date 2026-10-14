@@ -1,0 +1,5 @@
+Command: rehearse end
+Status: failed
+Rehearsal: ../x
+Refused: not a rehearsal id: "../x" is not one path element
+Deleted: nothing

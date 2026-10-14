@@ -44,7 +44,7 @@ func newRehearseCmd() *cobra.Command {
 		return nil
 	}
 	cmd.SetFlagErrorFunc(rehearseUsage)
-	cmd.AddCommand(newRehearsePrepareCmd(rehearsePrepare{}), newRehearseReadCmd(rehearseRead{}))
+	cmd.AddCommand(newRehearsePrepareCmd(rehearsePrepare{}), newRehearseReadCmd(rehearseRead{}), newRehearseEndCmd(rehearseEnd{}))
 	return cmd
 }
 

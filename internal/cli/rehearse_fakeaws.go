@@ -175,25 +175,30 @@ func startRehearsalFakeawsOnce(ctx context.Context, opts rehearsalFakeawsOpts, t
 // if the group is still there a fallback after the SIGKILL. It sends
 // nothing to a group already gone (groupGone). A zero rehearsalFakeaws
 // stops nothing: kill(-0) would signal the caller's own process group.
-func (f rehearsalFakeaws) stop() error {
-	if f.PID <= 0 || f.groupGone() {
+func (f rehearsalFakeaws) stop() error { return f.stopUntil(f.groupGone) }
+
+// stopUntil is stop, with stopped in place of groupGone. A group once
+// seen gone is never signalled again, though stopped may still wait on
+// something else: its id may be another group's by then.
+func (f rehearsalFakeaws) stopUntil(stopped func() bool) error {
+	if f.PID <= 0 || stopped() {
 		return nil
 	}
-	_ = rehearsalKillGroup(f.PID, syscall.SIGTERM)
-	if f.groupGoneWithin(rehearsalFakeawsKillFallback) {
-		return nil
-	}
-	_ = rehearsalKillGroup(f.PID, syscall.SIGKILL)
-	if f.groupGoneWithin(rehearsalFakeawsKillFallback) {
-		return nil
+	for _, sig := range []syscall.Signal{syscall.SIGTERM, syscall.SIGKILL} {
+		if !f.groupGone() {
+			_ = rehearsalKillGroup(f.PID, sig)
+		}
+		if rehearsalWithin(rehearsalFakeawsKillFallback, stopped) {
+			return nil
+		}
 	}
 	return fmt.Errorf("stop failed: pid %d port %d", f.PID, f.Port)
 }
 
-// groupGoneWithin waits, at most d, for groupGone.
-func (f rehearsalFakeaws) groupGoneWithin(d time.Duration) bool {
+// rehearsalWithin waits, at most d, for done.
+func rehearsalWithin(d time.Duration, done func() bool) bool {
 	for deadline := time.Now().Add(d); ; time.Sleep(rehearsalFakeawsPoll) {
-		if f.groupGone() {
+		if done() {
 			return true
 		}
 		if !time.Now().Before(deadline) {
@@ -235,11 +240,7 @@ func (f rehearsalFakeaws) groupGone() bool {
 func (f rehearsalFakeaws) waitReady(ctx context.Context) error {
 	waitCtx, cancel := context.WithTimeout(ctx, rehearsalFakeawsReady)
 	defer cancel()
-	// No proxy, and a redirect is an answer, never followed.
-	client := &http.Client{
-		Transport:     &http.Transport{DisableKeepAlives: true},
-		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-	}
+	client := rehearsalFakeawsClient()
 	base := rehearsalFakeawsURL(f.Port)
 	err := f.healthy(waitCtx, client, base)
 	if err == nil {
@@ -284,11 +285,29 @@ func (f rehearsalFakeaws) healthy(ctx context.Context, client *http.Client, base
 }
 
 // ours proves the server on the port is this fakeaws and reachable only
-// from this host: GET /mock/requests answers 200 with the token and 401
-// without it or with another, and nothing answers on any of the host's
-// non-loopback addresses. Only this fakeaws knows the token, so a server
-// that takes any token is refused.
+// from this host: it is tokenGuarded, and nothing answers on any of the
+// host's non-loopback addresses.
 func (f rehearsalFakeaws) ours(ctx context.Context, client *http.Client, base string) error {
+	if err := f.tokenGuarded(ctx, client, base); err != nil {
+		return err
+	}
+	ips, err := rehearsalNonLoopbackIPs()
+	if err != nil {
+		return fmt.Errorf("fakeaws is refused: this host's addresses cannot be listed: %w", err)
+	}
+	for _, ip := range ips {
+		if err := rehearsalUnanswered(ctx, net.JoinHostPort(ip.String(), strconv.Itoa(f.Port))); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// tokenGuarded proves the server at base holds f's token: GET
+// /mock/requests answers 200 with the token and 401 without it or with
+// another. Only this fakeaws knows the token, so a server that takes any
+// token, or none, is refused.
+func (f rehearsalFakeaws) tokenGuarded(ctx context.Context, client *http.Client, base string) error {
 	for _, check := range []struct {
 		token, with string
 		want        int
@@ -305,16 +324,16 @@ func (f rehearsalFakeaws) ours(ctx context.Context, client *http.Client, base st
 			return fmt.Errorf("fakeaws is refused: GET /mock/requests %s answered %d, not %d", check.with, code, check.want)
 		}
 	}
-	ips, err := rehearsalNonLoopbackIPs()
-	if err != nil {
-		return fmt.Errorf("fakeaws is refused: this host's addresses cannot be listed: %w", err)
-	}
-	for _, ip := range ips {
-		if err := rehearsalUnanswered(ctx, net.JoinHostPort(ip.String(), strconv.Itoa(f.Port))); err != nil {
-			return err
-		}
-	}
 	return nil
+}
+
+// rehearsalFakeawsClient is the client that checks a rehearsal's fakeaws:
+// no proxy, and a redirect is an answer, never followed.
+func rehearsalFakeawsClient() *http.Client {
+	return &http.Client{
+		Transport:     &http.Transport{DisableKeepAlives: true},
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
 }
 
 // rehearsalFakeawsURL is the URL of the rehearsal's fakeaws on port.
