@@ -237,12 +237,12 @@ func newEncryptionProbe(t *testing.T) encryptionProbe {
 		t.Skipf("%s is below 1.10, which added the external key provider", p.version)
 	}
 
-	require.NoError(t, os.WriteFile(script, []byte(`#!/bin/sh
+	writeScript(t, script, `#!/bin/sh
 touch '`+p.marker+`'
 echo '{"magic":"OpenTofu-External-Key-Provider","version":1}'
 cat >/dev/null
 echo '{"keys":{"encryption_key":"`+encryptionProbeKey+`","decryption_key":"`+encryptionProbeKey+`"}}'
-`), 0o700))
+`)
 	return p
 }
 
