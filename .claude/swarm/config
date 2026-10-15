@@ -1,2 +1,4 @@
 # Lesson rules land in AGENTS.md, which every agent (and you) already reads.
 lessons_file = AGENTS.md
+# The lead is a Claude session: dash puts what it can do in its own queue, apart from the user's.
+lead = session
