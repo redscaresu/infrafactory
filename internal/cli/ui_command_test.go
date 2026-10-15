@@ -130,9 +130,7 @@ func TestUIRunStarterRunContextFallsBackToRequestContext(t *testing.T) {
 func TestUIRunStarterPreflightResolvesClaudeToAbsolutePath(t *testing.T) {
 	binDir := t.TempDir()
 	claudePath := filepath.Join(binDir, "claude")
-	if err := os.WriteFile(claudePath, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatalf("write fake claude binary: %v", err)
-	}
+	writeScript(t, claudePath, "#!/bin/sh\nexit 0\n")
 
 	t.Setenv("PATH", binDir)
 
