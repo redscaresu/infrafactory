@@ -546,7 +546,7 @@ func TestUIRunRefusesWhileHeld(t *testing.T) {
 			writeHeldOutput(t, outDir)
 			before := hashTree(t, h.OutputDir())
 			llm := filepath.Join(t.TempDir(), "claude")
-			require.NoError(t, os.WriteFile(llm, []byte("#!/bin/sh\ntouch \"$0.called\"\nexit 1\n"), 0o700))
+			writeScript(t, llm, "#!/bin/sh\ntouch \"$0.called\"\nexit 1\n")
 
 			serverCfg := config.Default()
 			serverCfg.Agent.Type = generator.AgentTypeClaudeCode

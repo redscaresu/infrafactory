@@ -51,7 +51,7 @@ func fakeInstall(t *testing.T, calls *[]harness.Command, err error) harness.Comm
 	return harness.CommandRunnerFunc(func(_ context.Context, c harness.Command) (harness.CommandResult, error) {
 		*calls = append(*calls, c)
 		require.NoError(t, os.MkdirAll(c.Env["GOBIN"], 0o700))
-		require.NoError(t, os.WriteFile(filepath.Join(c.Env["GOBIN"], "fakeaws"), []byte("#!/bin/sh\n"), 0o700))
+		writeScript(t, filepath.Join(c.Env["GOBIN"], "fakeaws"), "#!/bin/sh\n")
 		return harness.CommandResult{}, err
 	})
 }
@@ -128,7 +128,7 @@ func TestRehearsalFakeawsBinaryFailedInstallLeavesNoBinary(t *testing.T) {
 func TestRehearsalFakeawsBinaryChecksTheCachedBinary(t *testing.T) {
 	dir := filepath.Join(rehearsalEmptyUserCache(t), "infrafactory", "fakeaws", rehearsalFakeawsPin)
 	require.NoError(t, os.MkdirAll(dir, 0o700))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "fakeaws"), []byte("#!/bin/sh\n"), 0o700))
+	writeScript(t, filepath.Join(dir, "fakeaws"), "#!/bin/sh\n")
 	runner := &recordingRunner{}
 
 	_, err := rehearsalFakeawsBinary(context.Background(), runner, "")
@@ -233,7 +233,7 @@ func TestRehearsalVerifyFakeawsBuildinfo(t *testing.T) {
 	assert.ErrorContains(t, err, "example.com/notfakeaws", "another module is named")
 
 	script := filepath.Join(t.TempDir(), "fakeaws")
-	require.NoError(t, os.WriteFile(script, []byte("#!/bin/sh\n"), 0o700))
+	writeScript(t, script, "#!/bin/sh\n")
 	err = rehearsalVerifyFakeawsBuildinfo(script, sha)
 	assert.ErrorContains(t, err, "it has no Go build info", "a shell script")
 }
@@ -253,7 +253,7 @@ func TestRehearsalFakeawsResolveFollowsSymlinks(t *testing.T) {
 	assert.Equal(t, want, got, "the target is returned, not the link")
 
 	script := filepath.Join(t.TempDir(), "script")
-	require.NoError(t, os.WriteFile(script, []byte("#!/bin/sh\n"), 0o700))
+	writeScript(t, script, "#!/bin/sh\n")
 	bad := filepath.Join(links, "bad")
 	require.NoError(t, os.Symlink(script, bad))
 	_, err = rehearsalFakeawsResolve(bad, sha)

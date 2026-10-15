@@ -123,6 +123,18 @@ func TestRehearsalFakeawsStub(t *testing.T) {
 	os.Exit(1)
 }
 
+// writeScript writes an executable script at path from a child process, so
+// this process never holds a write fd on it: a parallel test's fork would
+// inherit that fd, and exec of the script then fails with "text file busy"
+// (golang/go#22315).
+func writeScript(t *testing.T, path, body string) {
+	t.Helper()
+	cmd := exec.Command("/bin/sh", "-c", `cat > "$1" && chmod 0700 "$1"`, "sh", path)
+	cmd.Stdin = strings.NewReader(body)
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, "write %s: %s", path, out)
+}
+
 // fakeawsStub writes a 0700 /bin/sh script that records its pid, argv and
 // env into a dir of its own, then execs the test binary as
 // TestRehearsalFakeawsStub in role, exporting the role only after env is
@@ -142,7 +154,7 @@ export %s=%s %s="$d"
 exec %s '-test.run=^TestRehearsalFakeawsStub$' -- "$@"
 `, shellQuote(dir), fakeawsStubEnv, role, fakeawsStubDirEnv, shellQuote(testBin))
 	path := filepath.Join(dir, "fakeaws")
-	require.NoError(t, os.WriteFile(path, []byte(script), 0o700))
+	writeScript(t, path, script)
 	return path, dir
 }
 

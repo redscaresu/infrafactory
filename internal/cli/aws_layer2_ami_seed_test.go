@@ -39,7 +39,7 @@ func startLayer2Ends(t *testing.T, seedStatus int) *layer2Ends {
 	ends := &layer2Ends{seedStatus: seedStatus, path: filepath.Join(t.TempDir(), "layer2.log")}
 	bin := t.TempDir()
 	tofu := "#!/bin/sh\ncase \"$1\" in apply) echo apply >> '" + ends.path + "';; esac\nexit 0\n"
-	require.NoError(t, os.WriteFile(filepath.Join(bin, "tofu"), []byte(tofu), 0o755))
+	writeScript(t, filepath.Join(bin, "tofu"), tofu)
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	srv := httptest.NewServer(http.HandlerFunc(ends.serve))
