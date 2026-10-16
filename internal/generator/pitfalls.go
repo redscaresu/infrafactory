@@ -54,7 +54,14 @@ type PitfallEntry struct {
 	// being true because nobody hit it lately; a rule learned from a
 	// service that was running does, once that service is fixed.
 	LastSeen string `yaml:"last_seen,omitempty"`
+
+	// File is the pitfalls file the entry was loaded from (aws.yaml,
+	// common.yaml); only LoadRenderedPitfalls sets it, and it is never
+	// written back.
+	File string `yaml:"-" json:"-"`
 }
+
+const commonPitfallsFile = "common.yaml"
 
 // PitfallsFile represents the YAML structure of a pitfalls file.
 type PitfallsFile struct {
@@ -67,33 +74,34 @@ type PitfallsFile struct {
 // Returns a rendered markdown string suitable for prompt injection.
 // Returns empty string if no pitfalls file is found (not an error).
 func LoadPitfalls(dir, cloud string) (string, error) {
+	entries, err := LoadRenderedPitfalls(dir, cloud)
+	if err != nil || len(entries) == 0 {
+		return "", err
+	}
+	return renderPitfalls(entries), nil
+}
+
+// LoadRenderedPitfalls returns the entries LoadPitfalls renders into a
+// generation prompt: pitfalls/{cloud}.yaml, then pitfalls/common.yaml.
+// Each entry's File names the file it came from.
+func LoadRenderedPitfalls(dir, cloud string) ([]PitfallEntry, error) {
 	if dir == "" || cloud == "" {
-		return "", nil
+		return nil, nil
 	}
 
 	var entries []PitfallEntry
-
-	// Load provider-specific pitfalls.
-	providerPath := filepath.Join(dir, cloud+".yaml")
-	providerEntries, err := loadPitfallsFile(providerPath)
-	if err != nil {
-		return "", fmt.Errorf("load pitfalls %q: %w", providerPath, err)
+	for _, name := range []string{cloud + ".yaml", commonPitfallsFile} {
+		path := filepath.Join(dir, name)
+		loaded, err := loadPitfallsFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("load pitfalls %q: %w", path, err)
+		}
+		for _, e := range loaded {
+			e.File = name
+			entries = append(entries, e)
+		}
 	}
-	entries = append(entries, providerEntries...)
-
-	// Load common pitfalls if the file exists.
-	commonPath := filepath.Join(dir, "common.yaml")
-	commonEntries, err := loadPitfallsFile(commonPath)
-	if err != nil {
-		return "", fmt.Errorf("load pitfalls %q: %w", commonPath, err)
-	}
-	entries = append(entries, commonEntries...)
-
-	if len(entries) == 0 {
-		return "", nil
-	}
-
-	return renderPitfalls(entries), nil
+	return entries, nil
 }
 
 // LoadPitfallEntries reads pitfalls/<cloud>.yaml and returns the

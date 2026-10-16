@@ -57,12 +57,17 @@ type GeneratedCode struct {
 type GenerationMetadata struct {
 	Generator string
 	Phases    []PhaseResult
+	// PitfallsErr is why the pitfalls could not be loaded; the prompts
+	// then carried none.
+	PitfallsErr error
 }
 
 type PhaseResult struct {
 	Name   string
 	Prompt []byte
 	Output []byte
+	// Pitfalls are the entries rendered into Prompt.
+	Pitfalls []PitfallEntry
 }
 
 func (c *GeneratedCode) Validate() error {

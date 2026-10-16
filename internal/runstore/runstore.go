@@ -47,8 +47,19 @@ type RunMetadata struct {
 	// Empty when the revision cannot be read. A run outside a git
 	// checkout is legitimate; a silent wrong answer is not, so this
 	// records what it knows and says nothing when it knows nothing.
-	Commit    string    `json:"commit,omitempty"`
-	StartedAt time.Time `json:"started_at"`
+	Commit string `json:"commit,omitempty"`
+	// PitfallsRendered lists every pitfall entry a generation prompt of
+	// the run carried, as the adapter reported it, in the order first
+	// rendered. Runs recorded before it read as empty.
+	PitfallsRendered []RenderedPitfall `json:"pitfalls_rendered,omitempty"`
+	StartedAt        time.Time         `json:"started_at"`
+}
+
+// RenderedPitfall is one pitfall entry a run's prompt carried: its
+// generator.PitfallID and the pitfalls file it came from.
+type RenderedPitfall struct {
+	ID   string `json:"id"`
+	File string `json:"file"`
 }
 
 type FilesystemStore struct {

@@ -85,11 +85,14 @@ func (g *ClaudeSeedGenerator) Generate(ctx context.Context, req Request) (*Gener
 	phaseOutput := map[string]string{}
 	lastFiles := map[string][]byte{}
 	var filteredSchema string
+	// Read once per generation; on an error the prompts carry none and
+	// the metadata says why.
+	pitfalls, pitfallsErr := LoadRenderedPitfalls(g.cfg.PitfallsDir, req.Cloud)
 
 	for i, phase := range g.cfg.Phases {
 		g.logProgress("phase %q start\n", phase)
 
-		prompt, err := g.renderPhasePrompt(phase, req, phaseOutput, lastFiles, filteredSchema)
+		prompt, carried, err := g.renderPhasePrompt(phase, req, phaseOutput, lastFiles, filteredSchema, pitfalls)
 		if err != nil {
 			return nil, err
 		}
@@ -116,9 +119,10 @@ func (g *ClaudeSeedGenerator) Generate(ctx context.Context, req Request) (*Gener
 		phaseText := string(out)
 		phaseOutput[phase] = phaseText
 		phaseResults = append(phaseResults, PhaseResult{
-			Name:   phase,
-			Prompt: []byte(prompt),
-			Output: out,
+			Name:     phase,
+			Prompt:   []byte(prompt),
+			Output:   out,
+			Pitfalls: carried,
 		})
 		g.logProgress("phase %q complete\n", phase)
 
@@ -173,8 +177,9 @@ func (g *ClaudeSeedGenerator) Generate(ctx context.Context, req Request) (*Gener
 	result := &GeneratedCode{
 		Files: lastFiles,
 		Metadata: GenerationMetadata{
-			Generator: AgentTypeClaudeCode,
-			Phases:    phaseResults,
+			Generator:   AgentTypeClaudeCode,
+			Phases:      phaseResults,
+			PitfallsErr: pitfallsErr,
 		},
 	}
 	if err := result.Validate(); err != nil {
@@ -191,13 +196,12 @@ func (g *ClaudeSeedGenerator) logProgress(format string, args ...any) {
 	_, _ = fmt.Fprintf(g.cfg.ProgressWriter, "generator/claude: "+format, args...)
 }
 
-func (g *ClaudeSeedGenerator) renderPhasePrompt(phase string, req Request, outputs map[string]string, files map[string][]byte, filteredSchema string) (string, error) {
+func (g *ClaudeSeedGenerator) renderPhasePrompt(phase string, req Request, outputs map[string]string, files map[string][]byte, filteredSchema string, pitfalls []PitfallEntry) (string, []PitfallEntry, error) {
 	fileName, err := phaseTemplateFile(phase)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	templatePath := resolvePromptTemplatePath(g.cfg.PromptsDir, req.Cloud, fileName)
-	pitfalls, _ := LoadPitfalls(g.cfg.PitfallsDir, req.Cloud)
 
 	ctx := PromptContext{
 		ScenarioYAML:       string(req.ScenarioYAML),
@@ -209,12 +213,11 @@ func (g *ClaudeSeedGenerator) renderPhasePrompt(phase string, req Request, outpu
 		FeedbackJSON:       string(req.FeedbackJSON),
 		ProviderSchema:     filteredSchema,
 		Layer3Guidance:     layer3Guidance(req.Layer3Enabled),
-		Pitfalls:           pitfalls,
 		UserDataLine:       req.UserDataLine,
 		AMIID:              req.AMIID,
 	}
 
-	return RenderPromptFile(phase, templatePath, ctx)
+	return renderPhaseWithPitfalls(phase, templatePath, ctx, pitfalls)
 }
 
 // layer3Guidance is the prompt's project rule, and it says exactly one
