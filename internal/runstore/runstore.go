@@ -47,8 +47,13 @@ type RunMetadata struct {
 	// Empty when the revision cannot be read. A run outside a git
 	// checkout is legitimate; a silent wrong answer is not, so this
 	// records what it knows and says nothing when it knows nothing.
-	Commit    string    `json:"commit,omitempty"`
-	StartedAt time.Time `json:"started_at"`
+	Commit string `json:"commit,omitempty"`
+	// PitfallsRendered lists the generator.PitfallID of every pitfall
+	// entry rendered into a generation prompt of the run
+	// (generator.PitfallsInPrompts), in the order first seen. Runs
+	// recorded before it read as empty.
+	PitfallsRendered []string  `json:"pitfalls_rendered,omitempty"`
+	StartedAt        time.Time `json:"started_at"`
 }
 
 type FilesystemStore struct {

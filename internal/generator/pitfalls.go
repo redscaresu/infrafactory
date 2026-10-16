@@ -1,13 +1,19 @@
 package generator
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
+	"github.com/hashicorp/hcl/v2"
+	"github.com/hashicorp/hcl/v2/hclsyntax"
 	"gopkg.in/yaml.v3"
 )
 
@@ -67,33 +73,109 @@ type PitfallsFile struct {
 // Returns a rendered markdown string suitable for prompt injection.
 // Returns empty string if no pitfalls file is found (not an error).
 func LoadPitfalls(dir, cloud string) (string, error) {
+	entries, err := LoadRenderedPitfalls(dir, cloud)
+	if err != nil || len(entries) == 0 {
+		return "", err
+	}
+	return renderPitfalls(entries), nil
+}
+
+// LoadRenderedPitfalls returns the entries LoadPitfalls renders into a
+// generation prompt: pitfalls/{cloud}.yaml, then pitfalls/common.yaml.
+func LoadRenderedPitfalls(dir, cloud string) ([]PitfallEntry, error) {
 	if dir == "" || cloud == "" {
-		return "", nil
+		return nil, nil
 	}
 
 	var entries []PitfallEntry
-
-	// Load provider-specific pitfalls.
-	providerPath := filepath.Join(dir, cloud+".yaml")
-	providerEntries, err := loadPitfallsFile(providerPath)
-	if err != nil {
-		return "", fmt.Errorf("load pitfalls %q: %w", providerPath, err)
+	for _, name := range []string{cloud + ".yaml", "common.yaml"} {
+		path := filepath.Join(dir, name)
+		loaded, err := loadPitfallsFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("load pitfalls %q: %w", path, err)
+		}
+		entries = append(entries, loaded...)
 	}
-	entries = append(entries, providerEntries...)
+	return entries, nil
+}
 
-	// Load common pitfalls if the file exists.
-	commonPath := filepath.Join(dir, "common.yaml")
-	commonEntries, err := loadPitfallsFile(commonPath)
-	if err != nil {
-		return "", fmt.Errorf("load pitfalls %q: %w", commonPath, err)
+// PitfallID is an entry's stable id across runs: a hash of the cloud,
+// the resource and the rule text as rendered. Any edit to the rule is a
+// new id, so a run record names the exact rule its prompt carried.
+func PitfallID(cloud string, e PitfallEntry) string {
+	sum := sha256.Sum256([]byte(cloud + "\x00" + e.Resource + "\x00" + strings.TrimSpace(e.Rule)))
+	return hex.EncodeToString(sum[:8])
+}
+
+// MatchBrokenPitfall returns the id of the first rendered entry for the
+// failure's resource type whose rule the HCL under dir breaks, or "".
+// The failure's type comes from its resource address, else the first
+// address in its detail.
+//
+// Only an avoid rule (ParseAvoidRule) can be judged against HCL: it is
+// broken when a block of its type sets every attribute it names to
+// something other than a literal off value. Any other rule never matches.
+func MatchBrokenPitfall(dir, cloud, failureResource, failureDetail string, rendered []PitfallEntry) (string, error) {
+	address := failureResource
+	if address == "" {
+		address = firstResourceAddress(failureDetail)
 	}
-	entries = append(entries, commonEntries...)
-
-	if len(entries) == 0 {
+	resourceType, _, ok := splitAddress(address)
+	if !ok {
 		return "", nil
 	}
+	bodies, err := resourceBodies(dir, resourceType)
+	if err != nil {
+		return "", fmt.Errorf("read generated HCL %s: %w", dir, err)
+	}
+	for _, e := range rendered {
+		resource, attrs, ok := ParseAvoidRule(e.Rule)
+		if !ok || e.Resource != resourceType || resource != resourceType {
+			continue
+		}
+		if slices.ContainsFunc(bodies, func(b *hclsyntax.Body) bool { return setsAttributesOn(b, attrs) }) {
+			return PitfallID(cloud, e), nil
+		}
+	}
+	return "", nil
+}
 
-	return renderPitfalls(entries), nil
+// resourceBodies parses every *.tf file under dir and returns the body of
+// each resource block of resourceType. A file with syntax errors yields
+// the blocks HCL could still parse.
+func resourceBodies(dir, resourceType string) ([]*hclsyntax.Body, error) {
+	paths, err := filepath.Glob(filepath.Join(dir, "*.tf"))
+	if err != nil {
+		return nil, err
+	}
+	var bodies []*hclsyntax.Body
+	for _, path := range paths {
+		src, err := os.ReadFile(path)
+		if err != nil {
+			return nil, err
+		}
+		file, _ := hclsyntax.ParseConfig(src, path, hcl.InitialPos)
+		if file == nil {
+			continue
+		}
+		body, ok := file.Body.(*hclsyntax.Body)
+		if !ok {
+			continue
+		}
+		for _, b := range body.Blocks {
+			if b.Type == "resource" && len(b.Labels) == 2 && b.Labels[0] == resourceType {
+				bodies = append(bodies, b.Body)
+			}
+		}
+	}
+	return bodies, nil
+}
+
+// setsAttributesOn reports whether body sets every attribute, none of
+// them to a literal off value.
+func setsAttributesOn(body *hclsyntax.Body, attrs []string) bool {
+	return setsEveryAttribute(body, attrs) &&
+		!slices.ContainsFunc(attrs, func(a string) bool { return literalOff(body.Attributes[a].Expr) })
 }
 
 // LoadPitfallEntries reads pitfalls/<cloud>.yaml and returns the
@@ -157,9 +239,27 @@ func renderPitfalls(entries []PitfallEntry) string {
 	var sb strings.Builder
 	for _, resource := range resourceOrder {
 		for _, rule := range groups[resource] {
-			fmt.Fprintf(&sb, "- `%s`: %s\n", resource, strings.TrimSpace(rule))
+			sb.WriteString(pitfallLine(resource, rule) + "\n")
 		}
 	}
 
 	return strings.TrimRight(sb.String(), "\n")
+}
+
+// pitfallLine is how one entry reads in a prompt.
+func pitfallLine(resource, rule string) string {
+	return fmt.Sprintf("- `%s`: %s", resource, strings.TrimSpace(rule))
+}
+
+// PitfallsInPrompts returns the entries whose rendered line appears in
+// any of the phases' prompts: what the generator was actually shown.
+func PitfallsInPrompts(entries []PitfallEntry, phases []PhaseResult) []PitfallEntry {
+	var shown []PitfallEntry
+	for _, e := range entries {
+		line := []byte(pitfallLine(e.Resource, e.Rule))
+		if slices.ContainsFunc(phases, func(p PhaseResult) bool { return bytes.Contains(p.Prompt, line) }) {
+			shown = append(shown, e)
+		}
+	}
+	return shown
 }

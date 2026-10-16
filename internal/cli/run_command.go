@@ -241,6 +241,7 @@ func runRunWithNotify(
 	failedIterations := 0
 	consecutiveTransportFailures := 0
 	captureLLMRaw := llmRawCaptureEnabled()
+	var pitfallsRendered []string
 
 	iterate := func(ctx context.Context) error {
 		for iteration := 1; ; iteration++ {
@@ -253,8 +254,14 @@ func runRunWithNotify(
 				Iteration: iteration,
 			})
 			completed = iteration
-			stages, failures := runIteration(ctx, runID, iteration, sc.Name, scenarioPath, cloud, runtime, store, captureLLMRaw, repairFeedback, mode.Mode, controls)
+			// Read before generation, as the adapters read it; only the
+			// entries a returned prompt shows count as rendered.
+			loaded, _ := generator.LoadRenderedPitfalls(runtime.Config.Paths.Pitfalls, sc.Cloud)
+			stages, failures, phases := runIteration(ctx, runID, iteration, sc.Name, scenarioPath, cloud, runtime, store, captureLLMRaw, repairFeedback, mode.Mode, controls)
 			allStages = append(allStages, stages...)
+			rendered := generator.PitfallsInPrompts(loaded, phases)
+			pitfallsRendered = appendPitfallIDs(pitfallsRendered, sc.Cloud, rendered)
+			markPitfallMatches(runtime, runID, iterationGeneratedDir(runtime, sc.Name, runID, iteration), sc.Cloud, rendered, failures)
 
 			if err := persistRunIteration(store, sc.Name, runID, iteration, slices.Concat(resolved, stages), failures); err != nil {
 				return fmt.Errorf("persist run iteration %d: %w", iteration, err)
@@ -1028,6 +1035,7 @@ func runRunWithNotify(
 		Status:              string(status),
 		TerminalReason:      terminalReason,
 		Commit:              runCommit,
+		PitfallsRendered:    pitfallsRendered,
 		Incremental:         mode.Mode == runModeIncremental,
 		Layer3Enabled:       runtime.Config.Validation.Layers.SandboxDeploy.Enabled,
 		PreviousRunID:       mode.PreviousRunID,
@@ -1149,9 +1157,10 @@ func runIteration(
 	feedbackFailures []FailureSummary,
 	mode runMode,
 	controls runControls,
-) ([]StageSummary, []FailureSummary) {
+) ([]StageSummary, []FailureSummary, []generator.PhaseResult) {
 	stages := make([]StageSummary, 0, 3)
 	failures := make([]FailureSummary, 0)
+	var phases []generator.PhaseResult
 
 	steps := []struct {
 		name    string
@@ -1202,6 +1211,9 @@ func runIteration(
 			case "generate":
 				var generated *generator.GeneratedCode
 				_, generated, err = generateAndWriteFilesWithResult(ctx, runtime, scenarioPath, runID, iteration, feedbackFailures, generatedFileWriteModeForRunMode(mode))
+				if generated != nil {
+					phases = generated.Metadata.Phases
+				}
 				if err == nil {
 					err = store.WriteGeneratedFiles(scenarioName, runID, generated.Files)
 				}
@@ -1294,7 +1306,7 @@ func runIteration(
 		})
 	}
 
-	return stages, failures
+	return stages, failures, phases
 }
 
 type runControls struct {
@@ -1556,6 +1568,33 @@ func failuresAreTransportDominated(failures []FailureSummary) bool {
 // iterationGeneratedDir returns the path to a specific iteration's
 // generated/ directory. Used by N10's prescriptive extractor to diff
 // adjacent iterations' HCL.
+// appendPitfallIDs adds the id of each rendered entry not yet listed.
+func appendPitfallIDs(ids []string, cloud string, rendered []generator.PitfallEntry) []string {
+	for _, e := range rendered {
+		if id := generator.PitfallID(cloud, e); !slices.Contains(ids, id) {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+// markPitfallMatches sets MatchesPitfall on each failure whose HCL under
+// generatedDir breaks an entry rendered into that iteration's prompt.
+func markPitfallMatches(runtime *CommandRuntime, runID, generatedDir, cloud string, rendered []generator.PitfallEntry, failures []FailureSummary) {
+	for i, f := range failures {
+		id, err := generator.MatchBrokenPitfall(generatedDir, cloud, f.Resource, f.Detail, rendered)
+		if err != nil {
+			runtime.Logger.Log(LogEntry{
+				Level: logLevelInfo, Command: "run",
+				Event: "pitfall_match_error", Status: "warn",
+				RunID: runID, Detail: err.Error(),
+			})
+			continue
+		}
+		failures[i].MatchesPitfall = id
+	}
+}
+
 func iterationGeneratedDir(runtime *CommandRuntime, scenarioName, runID string, iter int) string {
 	if iter < 1 {
 		return ""

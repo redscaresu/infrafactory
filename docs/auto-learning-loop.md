@@ -107,6 +107,24 @@ Diagnostic protocol when a run exits without learning:
 2. Drop a scratch `_test.go` next to `internal/generator/pitfalls_learn.go`, call `IsMockServerBug`, `ExtractResourceFromDetail`, `ExtractDescriptivePitfall` against the failure detail. Empty Resource + nil pitfall ⇒ the regex or classifier doesn't recognise this resource family.
 3. When adding a new cloud (or any new resource-name prefix), there are three sites to update: `resourceNameRe`, `addressRe`, `pitfallResourceMatchesCloud`. Miss one and the learner breaks silently. **Enforced**: `internal/cli/cloud_prefix_lockstep_test.go::TestCloudPrefixLockstep` parses all three sites and fails CI if they disagree on the cloud-prefix set (per ADR-0021).
 
+## Did a pitfall prevent the repeat?
+
+Each run records which pitfalls its prompts carried and whether a failure happened in spite of one.
+An entry's id is `generator.PitfallID`: a hash of cloud, resource and rule text, so the same rule
+keeps its id across runs and any edit to it is a new id.
+
+- `run.json` → `pitfalls_rendered`: the id of every entry whose line appears in a prompt the
+  generator returned (`generator.PitfallsInPrompts`), in the order first seen. A generation that
+  fails before returning records none; pitfalls learned mid-run join from the next iteration.
+- `iterations/<n>/iteration.json` → each failure's `matches_pitfall`: the id of an entry rendered
+  into that iteration's prompt, for the failure's resource type, whose rule the failing HCL breaks
+  (`generator.MatchBrokenPitfall`). The rule was in the prompt and the failure happened anyway.
+
+Only an avoid rule can be judged against HCL, so only avoid rules ever match: it is broken when a
+block of its type sets every attribute it names to something other than a literal off value. Both
+fields are omitted when empty, so a run recorded before them reads the same. Neither changes what
+is learned, kept or discarded.
+
 ## Worked example: aws-subnet `map_public_ip_on_launch`
 
 The first organic `avoid` entry, captured 2026-06-04 during sustain re-validation sweep 1/3.

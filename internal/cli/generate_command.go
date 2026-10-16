@@ -730,7 +730,8 @@ func awsAMIForGeneration(runtime *CommandRuntime, cloud string) (string, error) 
 }
 
 // runID is the run's id, or "" outside a run; it reaches the generated
-// HCL only through the AWS provider block's default_tags.
+// HCL only through the AWS provider block's default_tags. An error after
+// the generator returned still comes with its code, whose prompts were sent.
 func generateAndWriteFilesWithResult(ctx context.Context, runtime *CommandRuntime, scenarioPath, runID string, iteration int, feedbackFailures []FailureSummary, writeMode generatedFileWriteMode) (int, *generator.GeneratedCode, error) {
 	scenarioPayload, err := os.ReadFile(scenarioPath)
 	if err != nil {
@@ -798,21 +799,21 @@ func generateAndWriteFilesWithResult(ctx context.Context, runtime *CommandRuntim
 		return 0, nil, fmt.Errorf("generate code: %w", err)
 	}
 	if err := generated.Validate(); err != nil {
-		return 0, nil, fmt.Errorf("validate generated files: %w", err)
+		return 0, generated, fmt.Errorf("validate generated files: %w", err)
 	}
 	ensureScalewayProviderWiring(generated.Files)
 	if err := validateScalewayProviderWiring(generated.Files); err != nil {
-		return 0, nil, fmt.Errorf("validate generated files: %w", err)
+		return 0, generated, fmt.Errorf("validate generated files: %w", err)
 	}
 	ensureGoogleProviderWiring(generated.Files, runtime.Config)
 	if err := validateGoogleProviderWiring(generated.Files); err != nil {
-		return 0, nil, fmt.Errorf("validate generated files: %w", err)
+		return 0, generated, fmt.Errorf("validate generated files: %w", err)
 	}
 	if err := ensureAwsProviderWiring(generated.Files, runtime.Config, runID); err != nil {
-		return 0, nil, fmt.Errorf("validate generated files: %w", err)
+		return 0, generated, fmt.Errorf("validate generated files: %w", err)
 	}
 	if err := validateAwsProviderWiring(generated.Files); err != nil {
-		return 0, nil, fmt.Errorf("validate generated files: %w", err)
+		return 0, generated, fmt.Errorf("validate generated files: %w", err)
 	}
 	// S122: pre-place a default flow YAML when the LLM emits a
 	// genesyscloud_flow resource. The provider reads filepath at PLAN
@@ -822,24 +823,24 @@ func generateAndWriteFilesWithResult(ctx context.Context, runtime *CommandRuntim
 	// bare `filepath = "${path.module}/flow.yaml"` resolves at plan.
 	ensureGenesysFlowAsset(generated.Files)
 	if err := placeAWSUserData(generated.Files, scenarioMeta.Cloud, userData); err != nil {
-		return 0, nil, fmt.Errorf("validate generated files: %w", err)
+		return 0, generated, fmt.Errorf("validate generated files: %w", err)
 	}
 	written, err := writeGeneratedFiles(runtime.OutputDir(), generated.Files, writeMode)
 	if err != nil {
-		return 0, nil, err
+		return 0, generated, err
 	}
 	if runtime.Config.Validation.Layers.SandboxDeploy.Enabled {
 		// Keyed on the scenario's cloud, so a payload whose cloud cannot
 		// be read is refused rather than gated as Scaleway by default.
 		if scenarioMetaErr != nil {
-			return 0, nil, fmt.Errorf("read cloud of scenario %q for the layer 3 gate: %w", scenarioPath, scenarioMetaErr)
+			return 0, generated, fmt.Errorf("read cloud of scenario %q for the layer 3 gate: %w", scenarioPath, scenarioMetaErr)
 		}
 		cloud, err := parseLayer3Cloud(scenarioMeta.Cloud)
 		if err != nil {
-			return 0, nil, err
+			return 0, generated, err
 		}
 		if err := validateLayer3ProjectResource(runtime.OutputDir()); err != nil {
-			return 0, nil, err
+			return 0, generated, err
 		}
 		gateInputs := awsGateInputs{
 			AllowedResourceTypes: runtime.Config.Validation.Layers.SandboxDeploy.AllowResourceTypes,
@@ -848,10 +849,10 @@ func generateAndWriteFilesWithResult(ctx context.Context, runtime *CommandRuntim
 			UserData:             userData,
 		}
 		if err := runtime.layer3HCLGate(cloud, runtime.OutputDir(), gateInputs); err != nil {
-			return 0, nil, err
+			return 0, generated, err
 		}
 		if err := validateLayer3ResourceAllowlist(runtime.OutputDir(), runtime.Config.Validation.Layers.SandboxDeploy.AllowResourceTypes); err != nil {
-			return 0, nil, err
+			return 0, generated, err
 		}
 	}
 	return written, generated, nil

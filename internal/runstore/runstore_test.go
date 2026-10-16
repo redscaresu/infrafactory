@@ -7,6 +7,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestFilesystemStoreWriteReadList(t *testing.T) {
@@ -404,4 +407,31 @@ func TestFilesystemStoreIterationGeneratedFilesAndIterations(t *testing.T) {
 	if !strings.Contains(string(payload), `"iter1"`) {
 		t.Fatalf("unexpected iteration payload: %s", string(payload))
 	}
+}
+
+func TestReadRunMetadataWithoutPitfallUsageFields(t *testing.T) {
+	t.Parallel()
+
+	store := NewFilesystemStore(t.TempDir())
+	fixture, err := os.ReadFile(filepath.Join("testdata", "run-before-pitfall-usage.json"))
+	require.NoError(t, err)
+	runDir := filepath.Join(store.Root, "aws-web", "20261001T120000Z")
+	require.NoError(t, os.MkdirAll(runDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(runDir, "run.json"), fixture, 0o644))
+
+	meta, err := store.ReadRunMetadata("aws-web", "20261001T120000Z")
+	require.NoError(t, err)
+	assert.Equal(t, "repair_budget_exhausted", meta.TerminalReason)
+	assert.Empty(t, meta.PitfallsRendered)
+
+	require.NoError(t, store.WriteRunMetadata(meta))
+	rewritten, err := os.ReadFile(filepath.Join(runDir, "run.json"))
+	require.NoError(t, err)
+	assert.NotContains(t, string(rewritten), "pitfalls_rendered", "an empty list is omitted")
+
+	meta.PitfallsRendered = []string{"a1b2c3d4e5f60718"}
+	require.NoError(t, store.WriteRunMetadata(meta))
+	reread, err := store.ReadRunMetadata("aws-web", "20261001T120000Z")
+	require.NoError(t, err)
+	assert.Equal(t, meta.PitfallsRendered, reread.PitfallsRendered)
 }
