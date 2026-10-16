@@ -601,7 +601,9 @@ A file-backed database (`-db <path>`), its `-wal` and `-shm`, a snapshot and a r
 ## Rehearsal
 
 The `infrafactory rehearse` family (ADR-0042) reads no `infrafactory.yaml`: the account and region
-come from flags only, never from the config's `aws:` block or the environment.
+come from flags only, never from the config's `aws:` block or the environment. Its commands are
+`read`, `prepare`, the tofu passthrough actions (`plan`, `apply`, `destroy`, `import`, `state mv`)
+and `end`.
 
 ### Read
 
@@ -658,7 +660,8 @@ pins and any warnings.
   no `provider "aws"` block without an alias is refused, since tofu's implied empty one has no region.
 - `--var-file` is a `.tfvars` file, copied to `<rehearsal>/vars.tfvars` outside the work dir and
   parsed by the gate. It overrides the code's `terraform.tfvars` and `*.auto.tfvars`. A `.json`
-  var file, or anything but a regular file, is refused.
+  var file, or anything but a regular file, is refused. Passthrough passes this copy to tofu
+  itself (§ Passthrough).
 - `--fakeaws-bin` is an absolute path to a fakeaws binary built at infrafactory's pin; an empty or
   relative one is a usage error. Unset, prepare installs the pin into the user cache. Any other
   binary is refused.
@@ -730,6 +733,57 @@ malformed flag exits 2.
   lock pinning an earlier 5.x release of `hashicorp/aws` than 5.100.0, the release fakeaws is proven against. The line
   names the version, so a failure under it is filed as a fakeaws story.
 
+### Passthrough
+
+```
+infrafactory rehearse plan|apply|destroy|import|state mv <id> [-- tofu args]
+```
+
+Runs one tofu action in rehearsal `<id>`, against its private fakeaws, with tofu's output live on
+your terminal. Run from inside the repository that holds the rehearsal. Tofu's own arguments go
+after `--` (`rehearse plan <id> -- -out=p`); infrafactory's flags go before it. Exactly one `<id>`
+goes before `--`, and a second `--` among tofu's args is refused.
+
+- **The actions** are `plan`, `apply`, `destroy`, `import` and `state mv`. Any other is a usage
+  error, exit 2, naming it and listing the allowed ones (`rehearse state rm`, `rehearse refresh`).
+  `console` is refused with them: `console -input=false` still reads an unset variable from stdin.
+  `rehearse state` alone prints help and exits 0.
+- **Each action allows only its own tofu flags.** Any other is refused by name, exit 1, before tofu
+  starts. That covers `-var` and `-var-file` (the rehearsal passes prepare's copied var file and no
+  other), `-input`, and every flag that names a state, backup, config, chdir, plugin or output path.
+  `import` and `state mv` take two positional arguments; the rest take none.
+- **Injected arguments.** `plan`, `apply`, `destroy` and `import` get `-input=false`, then
+  `-var-file=<id>/vars.tfvars` when `prepare --var-file` made one, before your args. Tofu never
+  prompts for a variable.
+- **apply and destroy need `-- -auto-approve`.** Nothing injects it, and tofu gets no stdin, so
+  without it tofu fails at its approval prompt with EOF, exit 1. apply takes no saved plan file,
+  and one is refused: the re-gate checks the source, not the configuration inside a plan, so apply
+  runs from source. `plan -out` is allowed, to inspect with tofu yourself.
+- **`-out` stays inside the work dir.** A relative path is joined onto the root, tofu's cwd. No `..`
+  element is allowed; the dir must resolve inside the copy; the file must be absent or a regular
+  file with one link, with a name and path the copy's checks admit.
+- **One root.** Tofu runs in the record's only root. A record with another number of roots is
+  refused and the roots named; there is no `--root` flag.
+- **The gate runs first.** Before every command the rehearsal's fakeaws must pass `end`'s proof
+  (`/healthz` and the token-guarded `/mock/requests`), and the re-gate runs over the copy,
+  admitting infrafactory's override files only when byte-identical to what it writes. A refusal
+  stops the command before tofu starts, exit 1. Tofu runs under the walls' replace-mode
+  environment, so `TF_VAR_*`, `TF_CLI_ARGS*` and AWS credential variables never reach it.
+- **Output is live.** Tofu's stdout and stderr stream to the terminal. In human mode nothing is
+  printed after tofu exits. `--output json` is a usage error, exit 2, before tofu runs.
+- **Exit codes.** Tofu's own code passes through when tofu ran to completion, so `plan
+  -detailed-exitcode` gives 0, 1 or 2 as tofu does. An interrupt, the deadline, tofu not running
+  (exit code -1) or a failure to tighten the rehearsal's modes afterwards give exit 1, whatever tofu
+  returned. **The two 2s:** infrafactory's 2 is a usage error decided from your command line alone,
+  before tofu starts, with a usage message and no tofu output. A 2 after tofu printed anything is
+  tofu's.
+- **One Ctrl-C** (or SIGTERM or SIGHUP) stops tofu: its process group gets one SIGINT, then SIGKILL
+  after a short fallback. Nothing reports success after an interrupt.
+- **Deadline.** One run has 2 hours, set against Prepare's 10 minutes per tofu command: an apply
+  can legitimately run long, an init cannot. The same stop as Ctrl-C applies when it passes.
+- **After a failure the rehearsal stays.** A failed or interrupted run removes nothing, so you can
+  read the work dir and run again. The modes are tightened after every run. Only `end` deletes it.
+
 ### End
 
 ```
@@ -737,7 +791,8 @@ infrafactory rehearse end <id>
 ```
 
 Stops the rehearsal's fakeaws and deletes the rehearsal. `-h`, `--help` prints the usage; it takes
-no other flag. Run from inside the repository that holds the rehearsal.
+no other flag. Run from inside the repository that holds the rehearsal. Run it after the last
+passthrough command: passthrough never deletes the rehearsal, and its state goes with it.
 
 - **The token check comes before any signal.** `end` reads `rehearsal.json`, and signals the
   recorded pid only after `/healthz` answers 200 and the token-guarded `GET /mock/requests`
