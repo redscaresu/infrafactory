@@ -104,9 +104,8 @@ func ReportError(err error, w io.Writer) int {
 
 // exitCodeFor returns the exit code for err and whether it is tofu's own. A
 // usage error anywhere in err gives 2. Tofu's code passes through only when
-// the carrier is err's one cause: errors.Unwrap stops at an error with more
-// than one (errors.Join, several %w), so a carrier beside another failure,
-// such as an interrupt, gives 1 and that failure is printed.
+// the carrier is reached through soleCause, so a carrier beside another
+// failure, such as an interrupt, gives 1 and that failure is printed.
 func exitCodeFor(err error) (code int, tofuReported bool) {
 	if err == nil {
 		return ExitCodeSuccess, false
@@ -117,11 +116,23 @@ func exitCodeFor(err error) (code int, tofuReported bool) {
 		return ExitCodeUsage, false
 	}
 
-	for e := err; e != nil; e = errors.Unwrap(e) {
+	for e := err; e != nil; e = soleCause(e) {
 		if tofuErr, ok := e.(*TofuExitError); ok && tofuErr.passesThrough() {
 			return tofuErr.ExitCode, true
 		}
 	}
 
 	return ExitCodeRuntime, false
+}
+
+// soleCause returns the one error err wraps, or nil when it wraps none or
+// several. errors.Join(err, nil) wraps one, the same as a single %w.
+func soleCause(err error) error {
+	if multi, ok := err.(interface{ Unwrap() []error }); ok {
+		if errs := multi.Unwrap(); len(errs) == 1 {
+			return errs[0]
+		}
+		return nil
+	}
+	return errors.Unwrap(err)
 }
