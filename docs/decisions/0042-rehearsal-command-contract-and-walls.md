@@ -36,16 +36,17 @@ Two rules keep that true:
 - `rehearse prepare <dir> --account <id> --region <r> [--var-file f]` is decided here.
 - `rehearse read` is defined by ADR-0041, not redefined here.
 - `rehearse end <id>` is decided in § The walls: the family's last command.
-- `plan|apply|destroy|import|state mv`
-  passthrough to rehearsal-passthrough; discover, load, check and the base-then-head loop to
-  rehearsal-against-the-copy. Each amends this ADR when it lands.
+- `rehearse plan|apply|destroy|import|state mv <id> [-- tofu args]` is decided in § Passthrough.
+  Discover, load, check and the base-then-head loop go to rehearsal-against-the-copy, which
+  amends this ADR when it lands.
 - `console` is left out, so `rehearse console` is an unknown subcommand. It would have stayed
   only if `console -input=false` errored on an unset required variable without reading stdin,
   but it reads `var.x` from a pipe and answers `(known after apply)`
   (TestAssumption_ConsoleUnsetVariableReadsStdin). The runner streams output and takes no stdin.
 
-Exit codes are ADR-0002's: a usage error is 2, and every refusal is `command_failed`, exit 1. The
-family adds no error code.
+Exit codes are ADR-0002's (a usage error is 2, a refusal is `command_failed`, exit 1) plus
+tofu's own code from a passthrough command that ran tofu to completion. § Passthrough's exit
+codes say which is which.
 
 ### The layout
 
@@ -432,6 +433,55 @@ Nothing is written under `.infrafactory/runs` or `live`.
 
 Bounds: a port freed after fakeaws dies can be taken by another local process, and only the
 override's fake keys reach it.
+
+### Passthrough
+
+`rehearse plan|apply|destroy|import <id> [-- tofu args]` and `rehearse state mv <id> [-- tofu
+args]` run that tofu action in rehearsal `<id>`. `console` is refused (§ The family). The list is
+`rehearsalPassthroughActions`.
+
+Exactly one `<id>` goes before `--` and tofu's args go after it, so cobra keeps parsing
+infrafactory's own flags and the family's usage rules hold. A second `--` among tofu's args is
+refused. Any action outside the list, such as `refresh` or `state rm`, is a usage error, exit 2,
+that names it and lists the allowed ones. `rehearse state` with nothing after it prints help and
+exits 0, as the group does.
+
+Each action allows only its own tofu flags, and any other is refused by name, exit 1. That covers
+`-var` and `-var-file` (the rehearsal passes prepare's var file and no other), `-input`, and every
+flag that names a state, backup, config, chdir, plugin or output path. `import` and `state mv`
+take two positional arguments; the others take none. Plan, apply, destroy and import get
+`-input=false`, then `-var-file=<id>/vars.tfvars` when that file exists, before the user's args.
+
+apply takes no saved plan file: the re-gate checks the source, not the configuration inside a
+saved plan, so apply runs from source. The runner gives tofu no stdin and a prompt reads EOF, so
+apply and destroy run with `-auto-approve`.
+
+Only plan's `-out` takes a path. A relative one is joined onto the root, and no `..` element is
+allowed. Its dir must resolve inside the copy. The file must be absent or a regular file with one
+link, since tofu writes through a symlink or a hard link, and its path must pass the copy's
+written-path and entry-name checks.
+
+Tofu runs with the record's only root as its cwd, under `rehearsalWallsEnv` in replace mode. A
+record with any other number of roots is refused and its roots named; there is no `--root` flag
+until rehearsal-against-the-copy needs one. Before every command the fakeaws must pass `rehearse
+end`'s proof (`/healthz`, and the token-guarded `/mock/requests` on the recorded port), and the
+re-gate runs over the copy, admitting infrafactory's overrides only when byte-identical (§ The gate
+bar for walls). Either refusal, or a cancel, stops the command before tofu starts, exit 1.
+
+One tofu run has `rehearsalPassthroughTimeout`, 2 hours. One Ctrl-C (or SIGTERM or SIGHUP)
+cancels it: tofu's process group gets one SIGINT, then SIGKILL after `cancelKillFallback`, and the
+deadline stops it the same way. The rehearsal's modes are tightened after every run, however it
+ended.
+
+Tofu's stdout and stderr stream to the terminal, and in human mode nothing is printed after tofu
+exits. `--output json` is a usage error, exit 2, raised before tofu runs.
+
+Exit codes: tofu's own code passes through when tofu ran to completion. An interrupt, the
+deadline, an exit code of -1 (tofu never ran) or a failure to tighten the modes gives exit 1,
+whatever tofu returned. Infrafactory's 2 is a usage error decided from argv alone, before tofu
+starts, with a usage message and no tofu output, so a command line that ran tofu once can never
+get infrafactory's 2. A 2 after tofu ran is tofu's, such as `plan -detailed-exitcode` finding
+changes.
 
 ## Consequences
 

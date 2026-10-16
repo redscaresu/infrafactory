@@ -55,3 +55,7 @@ path) is the right path.
 
 No change to the existing command contract or exit codes — `mock
 reset` slots in alongside the other `mock` subcommands.
+
+## Amendment (2026-10-16 — rehearse passthrough exit codes)
+
+A `rehearse` passthrough command exits with tofu's own code when tofu ran to completion; ADR-0042 § Passthrough holds the rule and how tofu's 2 is told apart from a usage error's 2.

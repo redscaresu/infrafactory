@@ -24,7 +24,7 @@ func newRehearseCmd() *cobra.Command {
 			if len(args) == 0 {
 				return cmd.Help()
 			}
-			return rehearseUsage(cmd, fmt.Errorf("unknown command %q", args[0]))
+			return rehearseUsage(cmd, fmt.Errorf("unknown command %q: %s", args[0], rehearsalPassthroughAllowed()))
 		},
 	}
 	cmd.PersistentPreRunE = func(c *cobra.Command, args []string) error {
@@ -45,6 +45,7 @@ func newRehearseCmd() *cobra.Command {
 	}
 	cmd.SetFlagErrorFunc(rehearseUsage)
 	cmd.AddCommand(newRehearsePrepareCmd(rehearsePrepare{}), newRehearseReadCmd(rehearseRead{}), newRehearseEndCmd(rehearseEnd{}))
+	cmd.AddCommand(newRehearsePassthroughCmds(rehearsePassthrough{})...)
 	return cmd
 }
 
