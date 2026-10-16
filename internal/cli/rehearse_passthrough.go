@@ -27,7 +27,9 @@ type rehearsePassthrough struct {
 	wd string
 	// notify catches a signal as a cancel: signal.NotifyContext by default.
 	notify func(context.Context, ...os.Signal) (context.Context, context.CancelFunc)
-	// stdout and stderr get tofu's output as it is written.
+	// stdout and stderr get tofu's output as it is written: os.Stdout and
+	// os.Stderr by default. A nil writer would buffer tofu's output and
+	// drop it, and ReportError prints nothing for tofu's own exit code.
 	stdout, stderr io.Writer
 	// timeout bounds the tofu run: rehearsalPassthroughTimeout by default.
 	timeout time.Duration
@@ -40,7 +42,8 @@ type rehearsePassthrough struct {
 // a refused argv, a cancel and a refused re-gate, each before tofu runs.
 // Tofu runs in the root under the walls' environment, and the rehearsal's
 // modes are tightened after it, however it ended. The error is
-// rehearsalPassthroughExit's.
+// rehearsalPassthroughExit's, joined with a failed tighten's, which makes
+// it exit 1 whatever tofu returned.
 func (p rehearsePassthrough) run(ctx context.Context, id, action string, args []string) error {
 	p = p.withDefaults()
 	ctx, stop := notifyGuarded(ctx, p.notify)
@@ -88,7 +91,11 @@ func (p rehearsePassthrough) run(ctx context.Context, id, action string, args []
 		Env:        rehearsalWallsEnv(r.dir, rehearsalFakeawsURL(r.record.Port), r.record.Region),
 		ReplaceEnv: true, Stdout: p.stdout, Stderr: p.stderr,
 	})
-	return rehearsalPassthroughExit(action, runCtx.Err(), result, runErr, rehearsalTightenModes(r.dir))
+	err = rehearsalPassthroughExit(action, runCtx.Err(), result, runErr)
+	if tightenErr := rehearsalTightenModes(r.dir); tightenErr != nil {
+		err = errors.Join(err, fmt.Errorf("the rehearsal's modes are not tightened after tofu %s: %w", action, tightenErr))
+	}
+	return err
 }
 
 func (p rehearsePassthrough) withDefaults() rehearsePassthrough {
@@ -97,6 +104,12 @@ func (p rehearsePassthrough) withDefaults() rehearsePassthrough {
 	}
 	if p.notify == nil {
 		p.notify = signal.NotifyContext
+	}
+	if p.stdout == nil {
+		p.stdout = os.Stdout
+	}
+	if p.stderr == nil {
+		p.stderr = os.Stderr
 	}
 	if p.timeout == 0 {
 		p.timeout = rehearsalPassthroughTimeout
@@ -107,9 +120,9 @@ func (p rehearsePassthrough) withDefaults() rehearsePassthrough {
 // rehearsalPassthroughExit is the error a passthrough run ends with
 // (ADR-0042): nil when tofu exited 0, and tofu's own code through
 // TofuExitError when it ran to completion. An interrupt or the deadline
-// (stopped), an exit code of -1, and a failed tighten each give exit 1,
-// whatever tofu returned: none is the carrier's sole cause.
-func rehearsalPassthroughExit(action string, stopped error, result harness.CommandResult, runErr, tightenErr error) error {
+// (stopped) and an exit code of -1 each give exit 1, whatever tofu
+// returned: neither is the carrier.
+func rehearsalPassthroughExit(action string, stopped error, result harness.CommandResult, runErr error) error {
 	var err error
 	switch {
 	case stopped != nil:
@@ -118,9 +131,6 @@ func rehearsalPassthroughExit(action string, stopped error, result harness.Comma
 		err = &TofuExitError{ExitCode: result.ExitCode}
 	case result.ExitCode < 0 || runErr != nil:
 		err = errors.Join(fmt.Errorf("tofu %s did not run to completion: exit code %d", action, result.ExitCode), runErr)
-	}
-	if tightenErr != nil {
-		err = errors.Join(err, fmt.Errorf("the rehearsal's modes are not tightened after tofu %s: %w", action, tightenErr))
 	}
 	return err
 }

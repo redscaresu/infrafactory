@@ -68,6 +68,21 @@ func TestRehearsePassthroughRunCommand(t *testing.T) {
 	assert.WithinDuration(t, time.Now().Add(rehearsalPassthroughTimeout), deadline, time.Minute)
 }
 
+// A zero rehearsePassthrough hands tofu this process's stdout and
+// stderr: a nil writer would drop tofu's output, and its exit code is
+// then reported with nothing printed.
+func TestRehearsePassthroughRunDefaultsItsWriters(t *testing.T) {
+	t.Parallel()
+	repo, _ := regatePreparedLive(t, passthroughToken)
+	stub := &passthroughStub{}
+
+	require.NoError(t, rehearsePassthrough{runner: stub, wd: repo}.run(context.Background(), prepareID, "plan", nil))
+
+	require.Len(t, stub.calls, 1)
+	assert.Same(t, os.Stdout, stub.calls[0].Stdout)
+	assert.Same(t, os.Stderr, stub.calls[0].Stderr)
+}
+
 // Each of infrafactory's overrides, one byte off what prepare wrote, is
 // refused before tofu runs.
 func TestRehearsePassthroughRunRefusesANonIdenticalOverride(t *testing.T) {
