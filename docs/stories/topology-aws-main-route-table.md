@@ -1,6 +1,6 @@
 ---
 kind: code
-status: later
+status: ready
 touches: [internal/harness/topology_derive_aws.go, internal/harness/topology_derive_aws_test.go]
 ---
 
