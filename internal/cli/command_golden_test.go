@@ -27,6 +27,8 @@ func TestCommandOutputGoldenSnapshots(t *testing.T) {
 		args      func(*CommandTestHarness, OutputMode) []string
 		expectErr bool
 		normalize func(*CommandTestHarness, string) string
+		// modes is the output modes the case runs in: both when nil.
+		modes []OutputMode
 	}{
 		{
 			name: "init",
@@ -332,11 +334,25 @@ func TestCommandOutputGoldenSnapshots(t *testing.T) {
 			},
 			expectErr: true,
 		},
+		{
+			// Passthrough refuses --output json, so the case runs in
+			// human mode only: tofu's output, and nothing after it.
+			name:  "rehearse_plan",
+			build: goldenPassthroughRoot,
+			args: func(h *CommandTestHarness, mode OutputMode) []string {
+				return []string{"rehearse", "plan", prepareID, "--output", string(mode), "--", "-out=p"}
+			},
+			modes: []OutputMode{OutputModeHuman},
+		},
 	}
 
 	for _, tc := range cases {
 		tc := tc
-		for _, mode := range []OutputMode{OutputModeHuman, OutputModeJSON} {
+		modes := tc.modes
+		if modes == nil {
+			modes = []OutputMode{OutputModeHuman, OutputModeJSON}
+		}
+		for _, mode := range modes {
 			mode := mode
 			t.Run(fmt.Sprintf("%s_%s", tc.name, mode), func(t *testing.T) {
 				t.Parallel()
@@ -405,6 +421,18 @@ func goldenEndRoot(h *CommandTestHarness, planted bool) *cobra.Command {
 		require.NoError(h.T, endStub(h.T, "fakeaws").write(dir), "write record")
 	}
 	return endRoot(rehearseEnd{wd: h.WorkspaceDir})
+}
+
+// goldenPassthroughRoot prepares a rehearsal with a live fakeaws stub
+// and returns a root whose passthrough runs from that repo through a
+// tofu stub that streams a plan's last line.
+func goldenPassthroughRoot(h *CommandTestHarness) *cobra.Command {
+	repo, _ := regatePreparedLive(h.T, passthroughToken)
+	tofu := harness.CommandRunnerFunc(func(_ context.Context, c harness.Command) (harness.CommandResult, error) {
+		_, err := fmt.Fprintln(c.Stdout, "Plan: 1 to add, 0 to change, 0 to destroy.")
+		return harness.CommandResult{}, err
+	})
+	return passthroughRoot(h.T, rehearsePassthrough{runner: tofu, wd: repo})
 }
 
 // normalizeGoldenWorkspace replaces the workspace, resolved, as prepare

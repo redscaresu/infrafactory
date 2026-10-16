@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -24,7 +25,7 @@ func newRehearseCmd() *cobra.Command {
 			if len(args) == 0 {
 				return cmd.Help()
 			}
-			return rehearseUsage(cmd, fmt.Errorf("unknown command %q", args[0]))
+			return rehearseUsage(cmd, fmt.Errorf("unknown command %q: rehearse has only %s", args[0], rehearseSubcommands(cmd)))
 		},
 	}
 	cmd.PersistentPreRunE = func(c *cobra.Command, args []string) error {
@@ -45,7 +46,24 @@ func newRehearseCmd() *cobra.Command {
 	}
 	cmd.SetFlagErrorFunc(rehearseUsage)
 	cmd.AddCommand(newRehearsePrepareCmd(rehearsePrepare{}), newRehearseReadCmd(rehearseRead{}), newRehearseEndCmd(rehearseEnd{}))
+	cmd.AddCommand(newRehearsePassthroughCmds(rehearsePassthrough{})...)
 	return cmd
+}
+
+// rehearseSubcommands names every rehearse subcommand, from the group's
+// own commands, sorted: a group's as "<group> <sub>" (state mv).
+func rehearseSubcommands(group *cobra.Command) string {
+	var names []string
+	for _, c := range group.Commands() {
+		if !c.HasSubCommands() {
+			names = append(names, c.Name())
+			continue
+		}
+		for _, sub := range c.Commands() {
+			names = append(names, c.Name()+" "+sub.Name())
+		}
+	}
+	return strings.Join(names, ", ")
 }
 
 func rehearseUsage(cmd *cobra.Command, err error) error {

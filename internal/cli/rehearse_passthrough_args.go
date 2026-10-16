@@ -63,6 +63,12 @@ var rehearsalPassthroughActions = map[string]rehearsalPassthroughAction{
 	},
 }
 
+// rehearsalPassthroughAllowed names every passthrough action, for a
+// refusal of any other.
+func rehearsalPassthroughAllowed() string {
+	return "the rehearsal passes only " + strings.Join(slices.Sorted(maps.Keys(rehearsalPassthroughActions)), ", ")
+}
+
 // rehearsalPassthroughDirs is where a passthrough action runs: root is
 // tofu's cwd, boundary the copy a path must stay inside, and rehearsal
 // the <id> dir that holds the var file.
@@ -78,7 +84,7 @@ type rehearsalPassthroughDirs struct {
 func rehearsalPassthroughArgs(action string, args []string, dirs rehearsalPassthroughDirs) ([]string, error) {
 	a, ok := rehearsalPassthroughActions[action]
 	if !ok {
-		return nil, fmt.Errorf("tofu %s is refused: the rehearsal passes only %s", action, strings.Join(slices.Sorted(maps.Keys(rehearsalPassthroughActions)), ", "))
+		return nil, fmt.Errorf("tofu %s is refused: %s", action, rehearsalPassthroughAllowed())
 	}
 	if slices.Contains(args, "--") {
 		return nil, fmt.Errorf("tofu %s: a -- inside the tofu args is refused: only the first -- separates them from infrafactory's", action)
