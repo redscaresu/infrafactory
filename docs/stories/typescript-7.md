@@ -1,6 +1,6 @@
 ---
 kind: chore
-status: ready
+status: later
 touches: [ui/package.json, ui/package-lock.json]
 ---
 
@@ -16,3 +16,5 @@ needed and `typescript` to ^7 in ui/package.json. Never use `--force` or `--lega
 - `npm install` in ui/ succeeds with no ERESOLVE and no override flags, and ui/package.json holds typescript ^7.
 - `npm run check`, `npm run build` and `npm test` pass in ui/ (and the Playwright suite in CI).
 - Or, if no released `@sveltejs/kit` admits TypeScript 7: reply `IMPOSSIBLE:` quoting the current peer range, and open no PR.
+
+**2026-10-16:** a builder checked every published `@sveltejs/kit` version: the latest, 3.1.0, still declares `typescript: ^6.0.0`, so TypeScript 7 is impossible without forcing peers. Parked until a kit release admits ^7.
