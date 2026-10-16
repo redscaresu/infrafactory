@@ -17,6 +17,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// execPackages build an exec.Cmd. execabs is a drop-in for os/exec.
+var execPackages = map[string]bool{
+	"os/exec":                  true,
+	"golang.org/x/sys/execabs": true,
+}
+
 // forbiddenStarters start a process without os/exec. None of them is used,
 // so any reference to one fails.
 var forbiddenStarters = map[string][]string{
@@ -25,11 +31,14 @@ var forbiddenStarters = map[string][]string{
 	"golang.org/x/sys/unix": {"Exec"},
 }
 
-// TestNoNewExecPath pins every file in the module that imports os/exec,
-// with its count of exec.Command/exec.CommandContext references. Tofu must
-// only run through execCommandRunner (exec_runner.go), whose Setpgid and
-// single-SIGINT handling a new exec path would bypass, so adding one means
-// editing this map on purpose.
+// TestNoNewExecPath pins every file in the module that imports an
+// execPackages package, with its count of exec call sites: each
+// Command/CommandContext reference, and each Cmd not behind a pointer (a
+// literal, new(exec.Cmd), a var of type exec.Cmd), since a Cmd value can
+// be filled in and started directly. Tofu must only run through
+// execCommandRunner (exec_runner.go), whose Setpgid and single-SIGINT
+// handling a new exec path would bypass, so adding one means editing this
+// map on purpose.
 func TestNoNewExecPath(t *testing.T) {
 	want := map[string]int{
 		"internal/api/formatter.go":            1,
@@ -44,13 +53,13 @@ func TestNoNewExecPath(t *testing.T) {
 	}
 	got, forbidden := scanExecPaths(t, repoRoot(t))
 	assert.Empty(t, forbidden, "process starts outside os/exec")
-	assert.Equal(t, want, got, "files importing os/exec, with their exec.Command/CommandContext count")
+	assert.Equal(t, want, got, "files importing os/exec or execabs, with their exec call-site count")
 }
 
-// scanExecPaths parses every non-test .go file the go tool would build in
-// the module at root. It returns each file that imports os/exec with its
-// exec.Command/CommandContext count, and every reference to a
-// forbiddenStarters function or dot import of a watched package.
+// scanExecPaths parses every non-test .go file in the module at root,
+// whatever its build constraints. It returns each file that imports an
+// execPackages package with its exec call-site count, and every reference
+// to a forbiddenStarters function or dot import of a watched package.
 func scanExecPaths(t *testing.T, root string) (map[string]int, []string) {
 	t.Helper()
 	counts := map[string]int{}
@@ -104,33 +113,19 @@ func goToolIgnores(root, p string, d fs.DirEntry) (bool, error) {
 	return ignored, nil
 }
 
-// scanFile returns f's exec.Command/CommandContext reference count (-1 when
-// f does not import os/exec) and each forbidden reference as "file:line: msg".
+// scanFile returns f's exec call-site count (-1 when f imports no
+// execPackages package) and each forbidden reference as "file:line: msg".
 func scanFile(fset *token.FileSet, f *ast.File) (int, []string) {
+	names, importsExec, bad := watchedImports(fset, f)
 	count := -1
-	execName := ""
-	watched := map[string]string{} // local name -> import path
-	var bad []string
-	for _, imp := range f.Imports {
-		ip, _ := strconv.Unquote(imp.Path.Value)
-		if ip != "os/exec" && forbiddenStarters[ip] == nil {
-			continue
-		}
-		name := path.Base(ip)
-		if imp.Name != nil {
-			name = imp.Name.Name
-		}
-		if name == "." {
-			bad = append(bad, fmt.Sprintf("%s: dot import of %s cannot be checked", fset.Position(imp.Pos()), ip))
-			continue
-		}
-		if ip == "os/exec" {
-			count, execName = 0, name
-			continue
-		}
-		watched[name] = ip
+	if importsExec {
+		count = 0
 	}
+	pointee := map[ast.Expr]bool{} // X of each *X; a *exec.Cmd builds nothing
 	ast.Inspect(f, func(n ast.Node) bool {
+		if star, ok := n.(*ast.StarExpr); ok {
+			pointee[star.X] = true
+		}
 		sel, ok := n.(*ast.SelectorExpr)
 		if !ok {
 			return true
@@ -139,15 +134,43 @@ func scanFile(fset *token.FileSet, f *ast.File) (int, []string) {
 		if !ok {
 			return true
 		}
-		if x.Name == execName && (sel.Sel.Name == "Command" || sel.Sel.Name == "CommandContext") {
+		name, ip := sel.Sel.Name, names[x.Name]
+		if execPackages[ip] && (name == "Command" || name == "CommandContext" || (name == "Cmd" && !pointee[sel])) {
 			count++
 		}
-		for _, fn := range forbiddenStarters[watched[x.Name]] {
-			if sel.Sel.Name == fn {
-				bad = append(bad, fmt.Sprintf("%s: %s.%s starts a process outside os/exec", fset.Position(sel.Pos()), watched[x.Name], fn))
+		for _, fn := range forbiddenStarters[ip] {
+			if name == fn {
+				bad = append(bad, fmt.Sprintf("%s: %s.%s starts a process outside os/exec", fset.Position(sel.Pos()), ip, fn))
 			}
 		}
 		return true
 	})
 	return count, bad
+}
+
+// watchedImports maps each local name f gives an execPackages or
+// forbiddenStarters package to its import path, and reports whether f
+// imports an execPackages package. A dot import cannot be checked, so it is
+// returned in bad.
+func watchedImports(fset *token.FileSet, f *ast.File) (map[string]string, bool, []string) {
+	names := map[string]string{}
+	importsExec := false
+	var bad []string
+	for _, imp := range f.Imports {
+		ip, _ := strconv.Unquote(imp.Path.Value)
+		if !execPackages[ip] && forbiddenStarters[ip] == nil {
+			continue
+		}
+		importsExec = importsExec || execPackages[ip]
+		name := path.Base(ip)
+		if imp.Name != nil {
+			name = imp.Name.Name
+		}
+		if name == "." {
+			bad = append(bad, fmt.Sprintf("%s: dot import of %s cannot be checked", fset.Position(imp.Pos()), ip))
+			continue
+		}
+		names[name] = ip
+	}
+	return names, importsExec, bad
 }
