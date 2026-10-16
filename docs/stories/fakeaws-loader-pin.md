@@ -5,7 +5,7 @@ status: blocked
 blocked_by: [fakeaws-load-step0-fixture, prod-read-seam-reader-describe-volumes]
 epic: fakeaws-loader
 depends_on: [fakeaws-load-step0-fixture, prod-read-seam-reader-describe-volumes]
-touches: [.github/workflows/ci.yml, internal/cli/rehearse_fakeaws_bin.go, internal/e2e/aws_reader_ec2_fakeaws_test.go, internal/e2e/aws_reader_step0_fakeaws_test.go, docs/operations.md, docs/layer3/real-vs-mock-deltas.md, docs/stories/fakeaws-known-red-examples.md]
+touches: [.github/workflows/ci.yml, internal/cli/rehearse_fakeaws_bin.go, internal/e2e/aws_reader_ec2_fakeaws_test.go, internal/e2e/aws_reader_step0_fakeaws_test.go, docs/operations.md, docs/layer3/real-vs-mock-deltas.md]
 ---
 
 # Pin FAKEAWS_SHA to the fakeaws main holding the loader, change only the e2e expectations the bump breaks, and record what stays open in deltas.md
@@ -37,7 +37,6 @@ assertion: those are fakeaws-loader-e2e's.
   - DescribeInstanceCreditSpecifications (aws_instance's read, burstable types, v5.100.0
     ec2_instance.go:1459-1462) is not read. Owner: larger-estate.
   - A volume's snapshotId and KMS key load as unresolved. Owner: larger-estate (snapshots).
-- docs/stories/fakeaws-known-red-examples.md drops update_security_group_rules.
 
 **Done when:**
 - `git -C ../fakeaws merge-base --is-ancestor <sha> <FAKEAWS_SHA>` exits 0 for every fakeaws merge
@@ -49,5 +48,4 @@ assertion: those are fakeaws-loader-e2e's.
 - D7 says fakeaws answers DescribeVolumes empty only for an applied instance, and names the missing
   main route table; the AMI, credit-specification and volume-reference gaps are each recorded with
   an owner. The operations.md empty-collection row names an unloaded db.
-- `grep -n update_security_group_rules docs/stories/fakeaws-known-red-examples.md` prints nothing,
-  and `make doc-hygiene` passes.
+- `make doc-hygiene` passes.
