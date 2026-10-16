@@ -35,10 +35,9 @@ var forbiddenStarters = map[string][]string{
 // execPackages package, with its count of exec call sites: each
 // Command/CommandContext reference, and each Cmd not behind a pointer (a
 // literal, new(exec.Cmd), a var of type exec.Cmd), since a Cmd value can
-// be filled in and started directly. Tofu must only run through
-// execCommandRunner (exec_runner.go), whose Setpgid and single-SIGINT
-// handling a new exec path would bypass, so adding one means editing this
-// map on purpose.
+// be filled in and started directly. No exec path is added without editing
+// this map, so a new tofu runner cannot bypass execCommandRunner's
+// (exec_runner.go) Setpgid and single-SIGINT handling unnoticed.
 func TestNoNewExecPath(t *testing.T) {
 	want := map[string]int{
 		"internal/api/formatter.go":            1,
@@ -54,6 +53,69 @@ func TestNoNewExecPath(t *testing.T) {
 	got, forbidden := scanExecPaths(t, repoRoot(t))
 	assert.Empty(t, forbidden, "process starts outside os/exec")
 	assert.Equal(t, want, got, "files importing os/exec or execabs, with their exec call-site count")
+}
+
+// TestScanFileFixtures covers each scanFile rule, since today's tree uses
+// only Command and CommandContext.
+func TestScanFileFixtures(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		src     string
+		want    int
+		wantBad []string
+	}{
+		{"Command", `package p
+import "os/exec"
+var _ = exec.Command("true")`, 1, nil},
+		{"CommandContext", `package p
+import "os/exec"
+var _ = exec.CommandContext(nil, "true")`, 1, nil},
+		{"Cmd literal", `package p
+import "os/exec"
+var _ = &exec.Cmd{Path: "true"}`, 1, nil},
+		{"new Cmd", `package p
+import "os/exec"
+var _ = new(exec.Cmd)`, 1, nil},
+		{"var Cmd", `package p
+import "os/exec"
+func f() error { var c exec.Cmd; return c.Start() }`, 1, nil},
+		{"pointer Cmd parameter", `package p
+import "os/exec"
+func f(c *exec.Cmd) error { return c.Start() }`, 0, nil},
+		{"LookPath only", `package p
+import "os/exec"
+var _, _ = exec.LookPath("tofu")`, 0, nil},
+		{"renamed import", `package p
+import osexec "os/exec"
+var _ = osexec.Command`, 1, nil},
+		{"execabs", `package p
+import "golang.org/x/sys/execabs"
+var _ = execabs.CommandContext`, 1, nil},
+		{"dot import", `package p
+import . "os/exec"
+var _ = Command`, 0, []string{"fixture.go:2:8: dot import of os/exec cannot be checked"}},
+		{"os.StartProcess", `package p
+import "os"
+var _ = os.StartProcess`, -1, []string{"fixture.go:3:9: os.StartProcess starts a process outside os/exec"}},
+		{"syscall.Exec", `package p
+import "syscall"
+var _ = syscall.Exec`, -1, []string{"fixture.go:3:9: syscall.Exec starts a process outside os/exec"}},
+		{"no os/exec", `package p
+func f() {}`, -1, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			fset := token.NewFileSet()
+			f, err := parser.ParseFile(fset, "fixture.go", tc.src, parser.SkipObjectResolution)
+			require.NoError(t, err)
+			got, bad := scanFile(fset, f)
+			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.wantBad, bad)
+		})
+	}
 }
 
 // scanExecPaths parses every non-test .go file in the module at root,
